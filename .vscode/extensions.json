@@ -1,0 +1,15 @@
+{
+  "recommendations": [
+    "rust-lang.rust-analyzer",
+    "tamasfe.even-better-toml",
+    "vadimcn.vscode-lldb"
+  ],
+  "unwantedRecommendations": [
+    "ms-python.python",
+    "ms-dotnettools.csharp",
+    "golang.go",
+    "redhat.java",
+    "ms-vscode.cpptools",
+    "dbaeumer.vscode-eslint"
+  ]
+}

@@ -1,0 +1,8 @@
+/target/
+
+# Editor settings
+.vscode/*.log
+
+# OS files
+Thumbs.db
+Desktop.ini
