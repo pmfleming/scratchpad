@@ -1,93 +1,68 @@
-# Implementation Plan: Rust Simple Text Editor (Tabbed & Native)
+# Implementation Plan: Scratchpad (egui)
 
-This plan outlines the creation of a simple, isolated text editor in Rust that uses **native OS components** and supports a **tabbed interface**, similar to a modern take on the classic Windows Notepad.
+This plan outlines the architecture and progress of our custom, tabbed text editor written in Rust using the **egui** framework.
 
-## 1. Goals
+## 1. Project Goals
 
 ### Primary Goals
-- Build a desktop text editor using **native Windows (Win32) controls** for an authentic OS feel.
-- Support a **tabbed interface** allowing multiple files to be open simultaneously.
-- Match classic Notepad workflows: New, Open, Edit, Save, Save As, but extended for tabs.
-- Maintain project isolation at the IDE and toolchain level.
-- Produce a native Windows executable.
+- **Modern Tabbed Interface**: Support multiple open files with an intuitive tab strip.
+- **Custom Aesthetic**: A polished dark theme with custom-drawn caption buttons and unique UI elements.
+- **Functional Parity**: Match standard Notepad features (New, Open, Save, Save As) with extended tab management.
+- **High Performance**: Leverage immediate-mode GUI for a lag-free typing experience.
+- **Cross-Platform Potential**: While developed on Windows, the use of `egui` and `rfd` allows for easy porting to other OSs.
 
-### Non-Goals for v1
-- Rich text formatting or syntax highlighting.
-- Split views or complex docking.
-- Printing support.
-- Multi-encoding support beyond UTF-8 (initially).
+## 2. Tech Stack
 
-## 2. Environment & Isolation Strategy
+- **GUI Framework**: [**egui** / **eframe**](https://github.com/emilk/egui).
+- **File Dialogs**: [**rfd**](https://github.com/PolyMeilex/rfd) for native system dialogs.
+- **Assets**: Custom PNG assets for buttons and menus, loaded via the `image` crate.
+- **Architecture**: Modular Rust structure for maintainability.
 
-### IDE Isolation (VS Code)
-- **Extensions**: Use `.vscode/extensions.json` to recommend project-specific extensions (Rust-analyzer, etc.).
-- **Settings**: Use `.vscode/settings.json` for project-specific editor behavior.
-- **Isolation**: Extensions will be configured to load/activate specifically for this workspace.
+## 3. Modular Architecture (`src/app/`)
 
-### OS/Toolchain Isolation
-- **Rust Toolchain**: Pin the version using `rust-toolchain.toml`.
-- **Dependencies**: Managed via `Cargo.toml`, kept local to the project `target` folder.
-- **Development**: Since we are using native Win32 components (`native-windows-gui`), development will happen directly on the Windows host to ensure full access to OS APIs and GUI debugging.
+The application is split into specialized modules:
+- **`mod.rs`**: Core application state (`ScratchpadApp`) and the main `eframe::App` implementation.
+- **`tabs.rs`**: `TabState` struct and logic for individual buffers.
+- **`chrome.rs`**: Reusable UI components, icon loading, and custom-drawn buttons.
+- **`theme.rs`**: Centralized color palette and layout constants.
 
-## 3. Tech Stack Selection
+## 4. Completed Features
 
-For a "simple text editor" that uses **OS components as much as possible**:
-- **GUI Framework**: [**native-windows-gui** (NWG)](https://github.com/gabdube/native-windows-gui).
-    - **Why**: Wraps the actual Windows Win32 API. It uses real OS controls (Tabs, Menus, RichEdit/Edit boxes) rather than rendering its own. This ensures a 100% native look, feel, and performance.
-- **Tab Management**: NWG's `TabContainer` and `TabPage` controls.
-- **File I/O**: Standard library `std::fs`.
-- **Dialogs**: NWG's built-in `FileDialog` (standard Windows Open/Save dialogs).
+### Phase 1: Core UI & Layout
+- [x] Frameless window with custom title bar.
+- [x] Custom caption buttons (Minimize, Maximize/Restore, Close).
+- [x] Integrated File Menu with popup.
+- [x] High-contrast dark theme consistent across all components.
 
-## 4. Architecture
+### Phase 2: Tab Management
+- [x] Dynamic tab strip with horizontal scrolling.
+- [x] **Integrated Close Buttons**: Using custom assets inside each tab.
+- [x] **ID Safety**: Using `ui.push_id` to prevent clashes between multiple "Untitled" tabs.
+- [x] Tab switching and "New Tab" functionality.
 
-### Core Types
-- **TabState**
-  - Text buffer (associated with a native `RichTextBox` or `TextBox`).
-  - File path (Optional).
-  - Dirty flag (modified state).
-- **EditorApp**
-  - Collection of `TabState`.
-  - Active tab index.
-  - Native window and menu handles.
+### Phase 3: File Operations & Logic
+- [x] **Native Dialogs**: Open, Save, and Save As using `rfd`.
+- [x] **Dirty State Tracking**: Visual `*` indicator and unsaved changes confirmation modal.
+- [x] **Safe Exit Flow**: Unsaved changes confirmation now also guards app exit and OS-level close requests.
+- [x] Status bar showing current file path and line count.
 
-### State Rules
-- Each tab maintains its own undo/redo history (handled by the native control).
-- Closing a dirty tab prompts for confirmation.
-- The window title reflects the active tab's filename.
+### Phase 4: UX & Polish
+- [x] **Keyboard Shortcuts**: Ctrl+N (New), Ctrl+O (Open), Ctrl+S (Save), Ctrl+W (Close).
+- [x] **Dynamic Font Sizing**: Ctrl + Scroll wheel to resize text in the editor.
+- [x] Refactored codebase into a clean, modular structure.
 
-## 5. Implementation Phases
+## 5. Future Roadmap
 
-### Phase 1: Native Window & Tabs
-- Initialize Rust project: `cargo init`.
-- Set up a basic NWG window with a `TabContainer` filling the client area.
-- Implement "New Tab" logic: Programmatically add a `TabPage` with a native multiline text control.
-- Verify basic input and tab switching.
+### Phase 5: Advanced Editing (Planned)
+- [ ] **Search & Replace**: A custom modal for finding and replacing text across the active tab.
+- [x] **Word Wrap Toggle**: Option to toggle text wrapping in the editor.
+- [ ] **Line Numbers**: Adding a gutter with line numbers to the left of the text area.
 
-### Phase 2: Native Menus & File Operations
-- Add a top Menu Bar (Native Windows Menu):
-    - **File**: New Tab, Open, Save, Save As, Close Tab, Exit.
-- Implement File Open/Save using the native `FileDialog`.
-- Map file contents to the active tab's text control.
+### Phase 6: Persistence & Settings
+- [ ] **Session Persistence**: Save and restore open tabs on restart.
+- [ ] **Configuration**: Allow users to customize default font size and theme colors via a config file.
 
-### Phase 3: Tab Management UX
-- Add "Close" buttons or a context menu for tabs.
-- Handle "unsaved changes" warnings per tab.
-- Update the application title bar when switching tabs or modifying text.
-- Implement keyboard shortcuts: `Ctrl+T` (New Tab), `Ctrl+W` (Close Tab), `Ctrl+Tab` (Next Tab).
-
-### Phase 4: Notepad-Style Features
-- **Status Bar**: Native Windows status bar showing Line/Column and "UTF-8".
-- **Word Wrap**: Toggle word wrap on the native text controls via the "Format" menu.
-- **Search/Replace**: (Optional for v1) Use native find/replace dialogs.
-
-## 6. Verification & Testing
-
-- **Native Look**: Confirm all buttons, menus, and scrollbars match the Windows OS theme.
-- **Tab Stress Test**: Open 10+ tabs and verify stability and performance.
-- **File Integrity**: Verify UTF-8 files are read and written correctly without data loss.
-- **Isolation**: Verify that opening a different VS Code window does not load this project's specific extensions/settings.
-
-## 7. GitHub Integration
-- Initialize Git: `git init`.
-- Configure `.gitignore` for Rust and VS Code.
-- Create GitHub repo and push the initial native scaffold.
+## 6. Verification & Standards
+- **Performance**: Ensure the UI remains responsive even with large files (>1MB).
+- **Safety**: Robust error handling for file I/O operations.
+- **Consistency**: Maintain the established architectural pattern of separating UI logic from state management.
