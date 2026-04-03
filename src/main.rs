@@ -19,8 +19,7 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|cc| {
             cc.egui_ctx.set_visuals(egui::Visuals::dark());
-            let app = Box::new(ScratchpadApp::default());
-            app
+            Box::new(ScratchpadApp::default())
         }),
     )
 }

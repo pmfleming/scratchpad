@@ -1,22 +1,25 @@
 use crate::app::theme::*;
-use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, TextureHandle, TextureOptions, Vec2};
+use eframe::egui::{
+    self, Color32, CursorIcon, Pos2, Rect, Sense, Stroke, TextureHandle, TextureOptions, Vec2,
+    viewport::ResizeDirection,
+};
+
+const RESIZE_BORDER: f32 = 6.0;
+const RESIZE_CORNER: f32 = 18.0;
 
 pub struct AppIcons {
-    pub menu: TextureHandle,
     pub close: TextureHandle,
     pub minimize: TextureHandle,
     pub maximize: TextureHandle,
+    pub open_file: TextureHandle,
+    pub save: TextureHandle,
+    pub search: TextureHandle,
     pub new_tab: TextureHandle,
 }
 
 impl AppIcons {
     pub fn load(ctx: &egui::Context) -> Self {
         Self {
-            menu: load_texture(
-                ctx,
-                "menu-icon",
-                include_bytes!("../assets/menu_button.png"),
-            ),
             close: load_texture(
                 ctx,
                 "close-icon",
@@ -32,6 +35,21 @@ impl AppIcons {
                 "max-icon",
                 include_bytes!("../assets/maximize_button.png"),
             ),
+            open_file: load_texture(
+                ctx,
+                "open-file-icon",
+                include_bytes!("../assets/open_file_button.png"),
+            ),
+            save: load_texture(
+                ctx,
+                "save-icon",
+                include_bytes!("../assets/save_button.png"),
+            ),
+            search: load_texture(
+                ctx,
+                "search-icon",
+                include_bytes!("../assets/search_button.png"),
+            ),
             new_tab: load_texture(
                 ctx,
                 "new-icon",
@@ -39,6 +57,36 @@ impl AppIcons {
             ),
         }
     }
+}
+
+pub fn handle_window_resize(ctx: &egui::Context) {
+    let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
+    if maximized {
+        return;
+    }
+
+    let screen_rect = ctx.input(|input| input.screen_rect());
+    egui::Area::new(egui::Id::new("window_resize_handles"))
+        .fixed_pos(screen_rect.min)
+        .order(egui::Order::Foreground)
+        .interactable(false)
+        .show(ctx, |ui| {
+            // We don't set ui.set_min_size(screen_rect.size()) here anymore,
+            // because that would make the whole area interactable if it was set to true.
+            // Instead, we just interact with the specific grip rects.
+
+            for grip in resize_grips(screen_rect.size()) {
+                // We use ui.interact which is clip-rect aware.
+                // Since the Area is not interactable, we are just placing "floating" interaction zones.
+                let response = ui
+                    .interact(grip.rect, ui.id().with(grip.id), Sense::click_and_drag())
+                    .on_hover_cursor(grip.cursor);
+
+                if response.drag_started() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(grip.direction));
+                }
+            }
+        });
 }
 
 pub fn load_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> TextureHandle {
@@ -170,4 +218,88 @@ fn paint_texture(ui: &egui::Ui, rect: Rect, texture: &TextureHandle) {
         Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
         Color32::WHITE,
     );
+}
+
+struct ResizeGrip {
+    id: &'static str,
+    rect: Rect,
+    direction: ResizeDirection,
+    cursor: CursorIcon,
+}
+
+fn resize_grips(size: Vec2) -> [ResizeGrip; 8] {
+    let width = size.x.max(RESIZE_CORNER * 2.0);
+    let height = size.y.max(RESIZE_CORNER * 2.0);
+
+    [
+        ResizeGrip {
+            id: "north-west",
+            rect: Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(RESIZE_CORNER, RESIZE_CORNER)),
+            direction: ResizeDirection::NorthWest,
+            cursor: CursorIcon::ResizeNwSe,
+        },
+        ResizeGrip {
+            id: "north",
+            rect: Rect::from_min_max(
+                Pos2::new(RESIZE_CORNER, 0.0),
+                Pos2::new(width - RESIZE_CORNER, RESIZE_BORDER),
+            ),
+            direction: ResizeDirection::North,
+            cursor: CursorIcon::ResizeVertical,
+        },
+        ResizeGrip {
+            id: "north-east",
+            rect: Rect::from_min_max(
+                Pos2::new(width - RESIZE_CORNER, 0.0),
+                Pos2::new(width, RESIZE_CORNER),
+            ),
+            direction: ResizeDirection::NorthEast,
+            cursor: CursorIcon::ResizeNeSw,
+        },
+        ResizeGrip {
+            id: "east",
+            rect: Rect::from_min_max(
+                Pos2::new(width - RESIZE_BORDER, RESIZE_CORNER),
+                Pos2::new(width, height - RESIZE_CORNER),
+            ),
+            direction: ResizeDirection::East,
+            cursor: CursorIcon::ResizeHorizontal,
+        },
+        ResizeGrip {
+            id: "south-east",
+            rect: Rect::from_min_max(
+                Pos2::new(width - RESIZE_CORNER, height - RESIZE_CORNER),
+                Pos2::new(width, height),
+            ),
+            direction: ResizeDirection::SouthEast,
+            cursor: CursorIcon::ResizeNwSe,
+        },
+        ResizeGrip {
+            id: "south",
+            rect: Rect::from_min_max(
+                Pos2::new(RESIZE_CORNER, height - RESIZE_BORDER),
+                Pos2::new(width - RESIZE_CORNER, height),
+            ),
+            direction: ResizeDirection::South,
+            cursor: CursorIcon::ResizeVertical,
+        },
+        ResizeGrip {
+            id: "south-west",
+            rect: Rect::from_min_max(
+                Pos2::new(0.0, height - RESIZE_CORNER),
+                Pos2::new(RESIZE_CORNER, height),
+            ),
+            direction: ResizeDirection::SouthWest,
+            cursor: CursorIcon::ResizeNeSw,
+        },
+        ResizeGrip {
+            id: "west",
+            rect: Rect::from_min_max(
+                Pos2::new(0.0, RESIZE_CORNER),
+                Pos2::new(RESIZE_BORDER, height - RESIZE_CORNER),
+            ),
+            direction: ResizeDirection::West,
+            cursor: CursorIcon::ResizeHorizontal,
+        },
+    ]
 }

@@ -39,12 +39,14 @@ The application is split into specialized modules:
 - [x] **Integrated Close Buttons**: Using custom assets inside each tab.
 - [x] **ID Safety**: Using `ui.push_id` to prevent clashes between multiple "Untitled" tabs.
 - [x] Tab switching and "New Tab" functionality.
+- [ ] **Tab Drag and Drop**: Allow users to reorder tabs by dragging them along the tab strip.
 
 ### Phase 3: File Operations & Logic
 - [x] **Native Dialogs**: Open, Save, and Save As using `rfd`.
 - [x] **Dirty State Tracking**: Visual `*` indicator and unsaved changes confirmation modal.
 - [x] **Safe Exit Flow**: Unsaved changes confirmation now also guards app exit and OS-level close requests.
 - [x] Status bar showing current file path and line count.
+- [x] **Window Resizing Fix**: Custom resize handles that don't block window interactions.
 
 ### Phase 4: UX & Polish
 - [x] **Keyboard Shortcuts**: Ctrl+N (New), Ctrl+O (Open), Ctrl+S (Save), Ctrl+W (Close).
@@ -59,7 +61,7 @@ The application is split into specialized modules:
 - [ ] **Line Numbers**: Adding a gutter with line numbers to the left of the text area.
 
 ### Phase 6: Persistence & Settings
-- [ ] **Session Persistence**: Save and restore open tabs on restart.
+- [x] **Session Persistence**: Save and restore open tabs, font size, and word wrap settings on restart.
 - [ ] **Configuration**: Allow users to customize default font size and theme colors via a config file.
 
 ## 6. Verification & Standards

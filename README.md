@@ -9,8 +9,9 @@
 -   🗂️ **Dynamic Tabbed Interface**: Effortlessly manage multiple files simultaneously.
 -   🎨 **Custom Frameless UI**: A bespoke dark-themed interface with custom-drawn caption buttons (Minimize, Maximize, Close).
 -   📂 **Native System Integration**: Uses native file dialogs via `rfd` for a seamless OS experience.
--   💾 **Smart Dirty Tracking**: Visual indicators (`*`) for unsaved changes and protective confirmation modals when closing tabs or the app.
--   🧾 **Safer Exit Handling**: Unsaved edits are also protected when the window is closed through the OS.
+-   💾 **Smart Dirty Tracking**: Visual indicators (`*`) for unsaved changes and protective confirmation when closing an individual tab.
+-   🔄 **Session Restore**: Open tabs, active tab, wrap setting, zoom level, and unsaved edits are snapshotted to temp files and restored on the next launch.
+-   🧾 **Safer Exit Handling**: Closing the window writes the latest session snapshot first, so the app reopens to the same state without an app-exit unsaved warning.
 -   ↩️ **Word Wrap Toggle**: Switch wrapping on or off from the File menu.
 -   🔍 **Interactive Zoom**: Quickly adjust your view with `Ctrl` + `Mouse Wheel` to resize font on the fly.
 -   ⚡ **Productivity Shortcuts**:
@@ -32,7 +33,7 @@
 ### Prerequisites
 
 -   [Rust Toolchain](https://rustup.rs/) installed on your machine.
--   A Windows environment (optimized for Win32, but portable to Linux/macOS with minor tweaks).
+-   A Windows environment. This project and its CI pipeline intentionally target Windows only.
 
 ### Building and Running
 
@@ -45,6 +46,20 @@
     ```bash
     cargo run --release
     ```
+
+### Quality Checks
+
+Run the same checks used by CI:
+
+```powershell
+.\scripts\ci.ps1
+```
+
+If you only want to apply formatting first:
+
+```powershell
+.\scripts\ci.ps1 -FixFormatting
+```
 
 ## 📂 Project Structure
 

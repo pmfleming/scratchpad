@@ -1,13 +1,17 @@
 use crate::app::chrome::*;
+use crate::app::session::SessionStore;
 use crate::app::tabs::TabState;
 use crate::app::theme::*;
 use eframe::egui::{self, Sense, Stroke};
 use std::fs;
+use std::path::Path;
+use std::time::{Duration, Instant};
+
+const SESSION_SNAPSHOT_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy)]
 enum PendingAction {
     CloseTab(usize),
-    ExitApp,
 }
 
 pub struct ScratchpadApp {
@@ -18,11 +22,16 @@ pub struct ScratchpadApp {
     pub font_size: f32,
     pub word_wrap: bool,
     pub status_message: Option<String>,
+    session_store: SessionStore,
+    session_dirty: bool,
+    last_session_persist: Instant,
+    close_in_progress: bool,
 }
 
 impl Default for ScratchpadApp {
     fn default() -> Self {
-        Self {
+        let session_store = SessionStore::default();
+        let mut app = Self {
             tabs: vec![TabState::new("Untitled".to_owned(), String::new(), None)],
             active_tab_index: 0,
             pending_action: None,
@@ -30,18 +39,39 @@ impl Default for ScratchpadApp {
             font_size: 14.0,
             word_wrap: true,
             status_message: None,
+            session_store,
+            session_dirty: false,
+            last_session_persist: Instant::now(),
+            close_in_progress: false,
+        };
+
+        match app.session_store.load() {
+            Ok(Some(restored)) => {
+                app.tabs = restored.tabs;
+                app.active_tab_index = restored.active_tab_index;
+                app.font_size = restored.font_size;
+                app.word_wrap = restored.word_wrap;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                app.status_message = Some(format!("Session restore failed: {error}"));
+            }
         }
+
+        app
     }
 }
 
 impl eframe::App for ScratchpadApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if ctx.input(|input| input.viewport().close_requested()) && self.has_dirty_tabs() {
+        if ctx.input(|input| input.viewport().close_requested()) && !self.close_in_progress {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            if self.pending_action.is_none() {
-                self.pending_action = Some(PendingAction::ExitApp);
-            }
+            self.request_exit(ctx);
+            return;
         }
+
+        handle_window_resize(ctx);
+        self.maybe_persist_session(ctx);
 
         // Ensure icons are loaded. We do this in a way that doesn't keep a mutable borrow of self alive.
         if self.icons.is_none() {
@@ -50,10 +80,12 @@ impl eframe::App for ScratchpadApp {
 
         // Clone handles to avoid borrowing self.icons later
         let icons = self.icons.as_ref().unwrap();
-        let menu_icon = icons.menu.clone();
         let close_icon = icons.close.clone();
         let min_icon = icons.minimize.clone();
         let max_icon = icons.maximize.clone();
+        let open_file_icon = icons.open_file.clone();
+        let save_icon = icons.save.clone();
+        let search_icon = icons.search.clone();
         let new_tab_icon = icons.new_tab.clone();
 
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
@@ -69,51 +101,44 @@ impl eframe::App for ScratchpadApp {
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    // 1. File Menu (Left)
-                    let menu_response = icon_button(
+                    if icon_button(
                         ui,
-                        &menu_icon,
+                        &open_file_icon,
                         BUTTON_SIZE,
                         ACTION_BG,
                         ACTION_HOVER_BG,
-                        "File",
-                    );
-                    if menu_response.clicked() {
-                        ui.memory_mut(|mem| mem.toggle_popup(ui.id().with("file_menu_popup")));
+                        "Open File",
+                    )
+                    .clicked()
+                    {
+                        self.open_file();
+                    }
+                    if icon_button(
+                        ui,
+                        &save_icon,
+                        BUTTON_SIZE,
+                        ACTION_BG,
+                        ACTION_HOVER_BG,
+                        "Save As",
+                    )
+                    .clicked()
+                    {
+                        self.save_file_as();
+                    }
+                    if icon_button(
+                        ui,
+                        &search_icon,
+                        BUTTON_SIZE,
+                        ACTION_BG,
+                        ACTION_HOVER_BG,
+                        "Search",
+                    )
+                    .clicked()
+                    {
+                        self.status_message = Some("Search is not implemented yet.".to_owned());
                     }
 
-                    egui::popup_below_widget(
-                        ui,
-                        ui.id().with("file_menu_popup"),
-                        &menu_response,
-                        |ui| {
-                            ui.set_min_width(180.0);
-                            if ui.button("New Tab (Ctrl+N)").clicked() {
-                                self.new_tab();
-                                ui.close_menu();
-                            }
-                            if ui.button("Open (Ctrl+O)").clicked() {
-                                self.open_file();
-                                ui.close_menu();
-                            }
-                            if ui.button("Save (Ctrl+S)").clicked() {
-                                self.save_file();
-                                ui.close_menu();
-                            }
-                            if ui.button("Save As...").clicked() {
-                                self.save_file_as();
-                                ui.close_menu();
-                            }
-                            ui.checkbox(&mut self.word_wrap, "Word Wrap");
-                            ui.separator();
-                            if ui.button("Exit").clicked() {
-                                self.request_exit(ctx);
-                                ui.close_menu();
-                            }
-                        },
-                    );
-
-                    ui.add_space(4.0);
+                    ui.add_space(8.0);
 
                     // 2. Right-side Buttons (Right-to-Left)
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -204,6 +229,7 @@ impl eframe::App for ScratchpadApp {
                                 .auto_shrink([true, false])
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
+                                        let mut activated_tab = None;
                                         for (i, tab) in self.tabs.iter().enumerate() {
                                             let is_active = self.active_tab_index == i;
                                             let mut closed = false;
@@ -227,7 +253,7 @@ impl eframe::App for ScratchpadApp {
                                             });
 
                                             if clicked {
-                                                self.active_tab_index = i;
+                                                activated_tab = Some(i);
                                             }
                                             if closed {
                                                 self.pending_action =
@@ -235,7 +261,11 @@ impl eframe::App for ScratchpadApp {
                                             }
                                         }
 
-                                        // New Tab Button right after the last tab
+                                        if let Some(index) = activated_tab {
+                                            self.active_tab_index = index;
+                                            self.mark_session_dirty();
+                                        }
+
                                         ui.add_space(4.0);
                                         if icon_button(
                                             ui,
@@ -298,6 +328,7 @@ impl eframe::App for ScratchpadApp {
                 });
                 if zoom_delta != 0.0 {
                     self.font_size = (self.font_size + zoom_delta * 0.05).clamp(8.0, 72.0);
+                    self.mark_session_dirty();
                 }
 
                 self.active_tab_index = self.active_tab_index.min(self.tabs.len() - 1);
@@ -322,6 +353,7 @@ impl eframe::App for ScratchpadApp {
                     ui.fonts(|fonts| fonts.layout_job(job))
                 };
 
+                let mut editor_changed = false;
                 egui::ScrollArea::both()
                     .id_source(("editor_scroll", self.active_tab_index))
                     .auto_shrink([false, false])
@@ -340,8 +372,13 @@ impl eframe::App for ScratchpadApp {
                         if ui.add(editor).changed() {
                             tab.is_dirty = true;
                             self.status_message = None;
+                            editor_changed = true;
                         }
                     });
+
+                if editor_changed {
+                    self.mark_session_dirty();
+                }
             }
         });
 
@@ -357,11 +394,17 @@ impl eframe::App for ScratchpadApp {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
             self.save_file();
         }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::W)) {
-            if !self.tabs.is_empty() {
-                self.pending_action = Some(PendingAction::CloseTab(self.active_tab_index));
-            }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::W))
+            && !self.tabs.is_empty()
+        {
+            self.pending_action = Some(PendingAction::CloseTab(self.active_tab_index));
         }
+    }
+}
+
+impl Drop for ScratchpadApp {
+    fn drop(&mut self) {
+        let _ = self.persist_session_now();
     }
 }
 
@@ -380,16 +423,30 @@ impl ScratchpadApp {
         self.tabs
             .push(TabState::new("Untitled".to_owned(), String::new(), None));
         self.active_tab_index = self.tabs.len() - 1;
+        let _ = self.persist_session_now();
     }
 
     pub fn open_file(&mut self) {
         if let Some(path) = rfd::FileDialog::new().pick_file() {
+            if let Some(index) = self.find_tab_by_path(&path) {
+                self.active_tab_index = index;
+                self.status_message = Some(format!(
+                    "{} is already open.",
+                    path.file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| path.display().to_string())
+                ));
+                self.mark_session_dirty();
+                return;
+            }
+
             match fs::read_to_string(&path) {
                 Ok(content) => {
                     let name = path.file_name().unwrap().to_string_lossy().into_owned();
                     self.tabs.push(TabState::new(name, content, Some(path)));
                     self.active_tab_index = self.tabs.len() - 1;
                     self.status_message = None;
+                    let _ = self.persist_session_now();
                 }
                 Err(error) => {
                     self.status_message = Some(format!("Open failed: {error}"));
@@ -413,6 +470,8 @@ impl ScratchpadApp {
                 Ok(()) => {
                     tab.is_dirty = false;
                     self.status_message = None;
+                    self.mark_session_dirty();
+                    let _ = self.persist_session_now();
                     true
                 }
                 Err(error) => {
@@ -442,6 +501,8 @@ impl ScratchpadApp {
                     tab.name = path.file_name().unwrap().to_string_lossy().into_owned();
                     tab.is_dirty = false;
                     self.status_message = None;
+                    self.mark_session_dirty();
+                    let _ = self.persist_session_now();
                     true
                 }
                 Err(error) => {
@@ -461,6 +522,7 @@ impl ScratchpadApp {
             self.tabs
                 .push(TabState::new("Untitled".to_owned(), String::new(), None));
             self.active_tab_index = 0;
+            let _ = self.persist_session_now();
             return;
         }
 
@@ -468,27 +530,23 @@ impl ScratchpadApp {
             self.active_tab_index -= 1;
         }
         self.active_tab_index = self.active_tab_index.min(self.tabs.len() - 1);
+        let _ = self.persist_session_now();
     }
 
     fn request_exit(&mut self, ctx: &egui::Context) {
-        if self.has_dirty_tabs() {
-            self.pending_action = Some(PendingAction::ExitApp);
-        } else {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        if self.close_in_progress {
+            return;
         }
-    }
 
-    fn has_dirty_tabs(&self) -> bool {
-        self.tabs.iter().any(|tab| tab.is_dirty)
-    }
-
-    fn save_all_dirty_tabs(&mut self) -> bool {
-        for index in 0..self.tabs.len() {
-            if self.tabs[index].is_dirty && !self.save_file_at(index) {
-                return false;
+        match self.persist_session_now() {
+            Ok(()) => {
+                self.close_in_progress = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            Err(error) => {
+                self.status_message = Some(format!("Session save failed: {error}"));
             }
         }
-        true
     }
 
     fn show_pending_action_modal(&mut self, ctx: &egui::Context) {
@@ -533,41 +591,83 @@ impl ScratchpadApp {
                         });
                     });
             }
-            PendingAction::ExitApp => {
-                if !self.has_dirty_tabs() {
-                    self.pending_action = None;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                    return;
-                }
-
-                let dirty_count = self.tabs.iter().filter(|tab| tab.is_dirty).count();
-                egui::Window::new("Unsaved Changes")
-                    .collapsible(false)
-                    .resizable(false)
-                    .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                    .show(ctx, |ui| {
-                        ui.label(format!(
-                            "You have {dirty_count} unsaved tab(s). Save changes before exiting?"
-                        ));
-                        ui.horizontal(|ui| {
-                            if ui.button("Save All").clicked() && self.save_all_dirty_tabs() {
-                                self.pending_action = None;
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                            }
-                            if ui.button("Don't Save").clicked() {
-                                self.pending_action = None;
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                            }
-                            if ui.button("Cancel").clicked() {
-                                self.pending_action = None;
-                            }
-                        });
-                    });
-            }
         }
+    }
+
+    fn mark_session_dirty(&mut self) {
+        self.session_dirty = true;
+    }
+
+    fn find_tab_by_path(&self, candidate: &Path) -> Option<usize> {
+        self.tabs.iter().position(|tab| {
+            tab.path
+                .as_deref()
+                .is_some_and(|path| paths_match(path, candidate))
+        })
+    }
+
+    fn maybe_persist_session(&mut self, ctx: &egui::Context) {
+        if !self.session_dirty {
+            return;
+        }
+
+        ctx.request_repaint_after(SESSION_SNAPSHOT_INTERVAL);
+        if self.last_session_persist.elapsed() < SESSION_SNAPSHOT_INTERVAL {
+            return;
+        }
+
+        if let Err(error) = self.persist_session_now() {
+            self.status_message = Some(format!("Session save failed: {error}"));
+        }
+    }
+
+    fn persist_session_now(&mut self) -> std::io::Result<()> {
+        self.session_store.persist(
+            &self.tabs,
+            self.active_tab_index,
+            self.font_size,
+            self.word_wrap,
+        )?;
+        self.session_dirty = false;
+        self.last_session_persist = Instant::now();
+        Ok(())
+    }
+}
+
+fn paths_match(left: &Path, right: &Path) -> bool {
+    normalize_path(left) == normalize_path(right)
+}
+
+fn normalize_path(path: &Path) -> String {
+    fs::canonicalize(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .to_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::paths_match;
+    use std::path::Path;
+
+    #[test]
+    fn path_match_is_case_insensitive_on_windows_paths() {
+        assert!(paths_match(
+            Path::new(r"C:\Temp\notes.txt"),
+            Path::new(r"c:\temp\NOTES.txt")
+        ));
+    }
+
+    #[test]
+    fn path_match_rejects_different_files() {
+        assert!(!paths_match(
+            Path::new(r"C:\Temp\notes.txt"),
+            Path::new(r"C:\Temp\other.txt")
+        ));
     }
 }
 
 pub mod chrome;
+pub mod session;
 pub mod tabs;
 pub mod theme;
