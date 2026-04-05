@@ -37,6 +37,13 @@ impl TabState {
         let marker = if self.is_dirty { "*" } else { "" };
         format!("{}{}", marker, self.name)
     }
+
+    pub fn overflow_context_label(&self) -> String {
+        self.path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "Unsaved tab".to_owned())
+    }
 }
 
 fn next_temp_id() -> String {
@@ -91,5 +98,16 @@ mod tests {
 
         assert!(tab.is_dirty);
         assert_eq!(tab.temp_id, "tab-restore-1");
+    }
+
+    #[test]
+    fn overflow_context_uses_path_when_available() {
+        let tab = TabState::new(
+            "notes.txt".to_owned(),
+            String::new(),
+            Some(PathBuf::from("docs\\notes.txt")),
+        );
+
+        assert!(tab.overflow_context_label().contains("notes.txt"));
     }
 }

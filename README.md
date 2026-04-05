@@ -6,34 +6,34 @@
 
 ## ✨ Key Features
 
--   🗂️ **Dynamic Tabbed Interface**: Effortlessly manage multiple files simultaneously.
--   🎨 **Custom Frameless UI**: A bespoke dark-themed interface with custom-drawn caption buttons (Minimize, Maximize, Close).
--   📂 **Native System Integration**: Uses native file dialogs via `rfd` for a seamless OS experience.
--   💾 **Smart Dirty Tracking**: Visual indicators (`*`) for unsaved changes and protective confirmation when closing an individual tab.
--   🔄 **Session Restore**: Open tabs, active tab, wrap setting, zoom level, and unsaved edits are snapshotted to temp files and restored on the next launch.
--   🧾 **Safer Exit Handling**: Closing the window writes the latest session snapshot first, so the app reopens to the same state without an app-exit unsaved warning.
--   ↩️ **Word Wrap Toggle**: Switch wrapping on or off from the File menu.
--   🔍 **Interactive Zoom**: Quickly adjust your view with `Ctrl` + `Mouse Wheel` to resize font on the fly.
+-   🗂️ **Dynamic Tabbed Interface**: Effortlessly manage multiple files with a smart tab strip that includes horizontal scrolling and an overflow dropdown for easy navigation.
+-   🎨 **Custom Frameless UI**: A bespoke high-contrast dark theme with pure white text for maximum readability and custom-drawn caption buttons.
+-   📂 **Native System Integration**: Seamlessly open and save files using native OS dialogs via `rfd`.
+-   💾 **Smart Dirty Tracking**: Visual indicators (`*`) for unsaved changes and protective confirmation modals to prevent data loss.
+-   🔄 **Session Restore**: Your entire workspace—open tabs, active tab, wrap settings, and zoom level—is automatically saved and restored on the next launch.
+-   🔍 **Precision Zoom**: Fine-tune your view with `Ctrl` + `Mouse Wheel` or dedicated keyboard shortcuts to resize the editor font independently of the UI.
 -   ⚡ **Productivity Shortcuts**:
     -   `Ctrl + N`: New Tab
     -   `Ctrl + O`: Open File
     -   `Ctrl + S`: Save File
     -   `Ctrl + W`: Close Tab
--   🏗️ **Modular Architecture**: Cleanly separated logic for UI components, theme constants, and state management.
+    -   `Ctrl + +` / `Ctrl + -`: Zoom In/Out
+    -   `Ctrl + 0`: Reset Zoom
+-   🏗️ **Modular Architecture**: Built with a clean separation between UI components, theme constants, and application state.
 
 ## 🛠️ Tech Stack
 
 -   **Language**: [Rust](https://www.rust-lang.org/) (2024 Edition)
--   **GUI Framework**: [egui](https://github.com/emilk/egui) & [eframe](https://github.com/emilk/egui/tree/master/crates/eframe) (Immediate mode GUI)
--   **File Dialogs**: [rfd](https://github.com/PolyMeilex/rfd) (Rust File Dialogs)
+-   **GUI Framework**: [egui](https://github.com/emilk/egui) & [eframe](https://github.com/emilk/egui/tree/master/crates/eframe)
+-   **File Dialogs**: [rfd](https://github.com/PolyMeilex/rfd)
 -   **Image Handling**: [image](https://github.com/image-rs/image) crate for custom icon rendering.
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 
--   [Rust Toolchain](https://rustup.rs/) installed on your machine.
--   A Windows environment. This project and its CI pipeline intentionally target Windows only.
+-   [Rust Toolchain](https://rustup.rs/) installed.
+-   A Windows environment (the project and CI pipeline target Windows specifically).
 
 ### Building and Running
 
@@ -47,32 +47,25 @@
     cargo run --release
     ```
 
-### Quality Checks
-
-Run the same checks used by CI:
-
-```powershell
-.\scripts\ci.ps1
-```
-
-If you only want to apply formatting first:
-
-```powershell
-.\scripts\ci.ps1 -FixFormatting
-```
-
 ## 📂 Project Structure
 
 ```text
 src/
-├── main.rs          # Application entry point & window setup
+├── main.rs          # Application entry point, visuals, and window setup
 ├── assets/          # Custom PNG icons and UI assets
 └── app/             # Core application logic
-    ├── mod.rs       # Main App state & UI loop
-    ├── chrome.rs    # Reusable UI components & icon loading
-    ├── tabs.rs      # Tab state & buffer management
-    └── theme.rs     # Centralized color palette & layout constants
+    ├── mod.rs       # Main App state, UI loop, and keyboard handling
+    ├── chrome.rs    # Reusable UI components (tabs, buttons) and icon loading
+    ├── tabs.rs      # Tab state management and buffer logic
+    └── theme.rs     # Centralized color palette and layout constants
 ```
+
+## 🗺️ Roadmap
+
+- [ ] **Search & Replace**: Integrated find and replace overlay (see [Search & Replace Plan](docs/search-replace-plan.md)).
+- [ ] **Line Numbers**: Gutter with line counts for better navigation.
+- [ ] **Tab Drag & Drop**: Reorder tabs via dragging.
+- [ ] **Config File**: Persistent user settings for default themes and font choices.
 
 ## 📝 License
 

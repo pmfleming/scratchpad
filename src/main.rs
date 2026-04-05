@@ -18,7 +18,14 @@ fn main() -> eframe::Result<()> {
         "Scratchpad",
         options,
         Box::new(|cc| {
-            cc.egui_ctx.set_visuals(egui::Visuals::dark());
+            let mut visuals = egui::Visuals::dark();
+            visuals.widgets.noninteractive.fg_stroke.color = app::theme::TEXT_PRIMARY;
+            visuals.widgets.inactive.fg_stroke.color = app::theme::TEXT_PRIMARY;
+            visuals.widgets.hovered.fg_stroke.color = app::theme::TEXT_PRIMARY;
+            visuals.widgets.active.fg_stroke.color = app::theme::TEXT_PRIMARY;
+            visuals.widgets.open.fg_stroke.color = app::theme::TEXT_PRIMARY;
+            cc.egui_ctx.set_visuals(visuals);
+            cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
             Box::new(ScratchpadApp::default())
         }),
     )

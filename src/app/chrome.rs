@@ -124,8 +124,18 @@ pub fn tab_button(
     label: &str,
     active: bool,
     close_icon: &TextureHandle,
-) -> (egui::Response, egui::Response) {
-    let size = Vec2::new(140.0, TAB_HEIGHT);
+) -> (egui::Response, egui::Response, bool) {
+    tab_button_sized(ui, label, active, close_icon, TAB_BUTTON_WIDTH)
+}
+
+pub fn tab_button_sized(
+    ui: &mut egui::Ui,
+    label: &str,
+    active: bool,
+    close_icon: &TextureHandle,
+    width: f32,
+) -> (egui::Response, egui::Response, bool) {
+    let size = Vec2::new(width, TAB_HEIGHT);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
 
     let mut fill = if active {
@@ -146,10 +156,12 @@ pub fn tab_button(
         rect.min + Vec2::new(8.0, 0.0),
         rect.max - Vec2::new(28.0, 0.0),
     );
+    let available_label_width = text_rect.width().max(0.0);
+    let (visible_label, truncated) = truncate_label(ui, label, available_label_width);
     ui.painter().text(
         text_rect.left_center(),
         egui::Align2::LEFT_CENTER,
-        label,
+        &visible_label,
         egui::TextStyle::Button.resolve(ui.style()),
         if active { TEXT_PRIMARY } else { TEXT_MUTED },
     );
@@ -181,7 +193,7 @@ pub fn tab_button(
         Color32::WHITE,
     );
 
-    (response, close_response)
+    (response, close_response, truncated)
 }
 
 pub fn restore_button(
@@ -218,6 +230,47 @@ fn paint_texture(ui: &egui::Ui, rect: Rect, texture: &TextureHandle) {
         Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
         Color32::WHITE,
     );
+}
+
+fn truncate_label(ui: &egui::Ui, label: &str, available_width: f32) -> (String, bool) {
+    if text_width(ui, label) <= available_width {
+        return (label.to_owned(), false);
+    }
+
+    let ellipsis = "...";
+    if text_width(ui, ellipsis) > available_width {
+        return (String::new(), true);
+    }
+
+    let mut end = label.len();
+    while end > 0 {
+        while !label.is_char_boundary(end) {
+            end -= 1;
+        }
+
+        let candidate = &label[..end];
+        let combined = format!("{candidate}{ellipsis}");
+        if text_width(ui, &combined) <= available_width {
+            return (combined, true);
+        }
+
+        end -= 1;
+    }
+
+    (String::new(), true)
+}
+
+fn text_width(ui: &egui::Ui, text: &str) -> f32 {
+    ui.fonts(|fonts| {
+        fonts
+            .layout_no_wrap(
+                text.to_owned(),
+                egui::TextStyle::Button.resolve(ui.style()),
+                TEXT_PRIMARY,
+            )
+            .size()
+            .x
+    })
 }
 
 struct ResizeGrip {

@@ -3,11 +3,13 @@ use crate::app::session::SessionStore;
 use crate::app::tabs::TabState;
 use crate::app::theme::*;
 use eframe::egui::{self, Sense, Stroke};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 const SESSION_SNAPSHOT_INTERVAL: Duration = Duration::from_secs(1);
+const OVERFLOW_CLOSE_BUTTON_WIDTH: f32 = 22.0;
 
 #[derive(Clone, Copy)]
 enum PendingAction {
@@ -26,6 +28,8 @@ pub struct ScratchpadApp {
     session_dirty: bool,
     last_session_persist: Instant,
     close_in_progress: bool,
+    pending_scroll_to_active: bool,
+    overflow_popup_open: bool,
 }
 
 impl Default for ScratchpadApp {
@@ -43,6 +47,8 @@ impl Default for ScratchpadApp {
             session_dirty: false,
             last_session_persist: Instant::now(),
             close_in_progress: false,
+            pending_scroll_to_active: true,
+            overflow_popup_open: false,
         };
 
         match app.session_store.load() {
@@ -139,150 +145,327 @@ impl eframe::App for ScratchpadApp {
                     }
 
                     ui.add_space(8.0);
-
-                    // 2. Right-side Buttons (Right-to-Left)
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // Close Window
-                        if icon_button(
-                            ui,
-                            &close_icon,
-                            CAPTION_BUTTON_SIZE,
-                            CLOSE_BG,
-                            CLOSE_HOVER_BG,
-                            "Close",
-                        )
-                        .clicked()
-                        {
-                            self.request_exit(ctx);
-                        }
-
-                        // Maximize / Restore
-                        let maximized =
-                            ctx.input(|input| input.viewport().maximized.unwrap_or(false));
-                        if maximized {
-                            if restore_button(
-                                ui,
-                                CAPTION_BUTTON_SIZE,
-                                ACTION_BG,
-                                ACTION_HOVER_BG,
-                                "Restore",
-                            )
-                            .clicked()
-                            {
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
-                            }
+                    let spacing = ui.spacing().item_spacing.x;
+                    let caption_controls_width = CAPTION_BUTTON_SIZE.x * 3.0 + spacing * 2.0;
+                    let tab_action_width = BUTTON_SIZE.x;
+                    let overflow_button_width = BUTTON_SIZE.x;
+                    let spacer_before_captions = 8.0;
+                    let remaining_width = ui.available_width();
+                    let viewport_width_with_overflow = (remaining_width
+                        - caption_controls_width
+                        - spacer_before_captions
+                        - tab_action_width
+                        - spacing
+                        - overflow_button_width
+                        - spacing)
+                        .max(0.0);
+                    let total_tab_width = self.estimated_tab_strip_width(spacing);
+                    let has_overflow = total_tab_width > viewport_width_with_overflow;
+                    let viewport_width = (remaining_width
+                        - caption_controls_width
+                        - spacer_before_captions
+                        - tab_action_width
+                        - spacing
+                        - if has_overflow {
+                            overflow_button_width + spacing
                         } else {
+                            0.0
+                        })
+                    .max(0.0);
+                    let visible_strip_width = total_tab_width.min(viewport_width);
+                    let drag_width = (viewport_width - visible_strip_width).max(0.0);
+                    let duplicate_name_counts = duplicate_name_counts(&self.tabs);
+                    let mut activated_tab = None;
+                    let mut overflow_activated_tab = None;
+                    let mut overflow_closed_tab = None;
+                    let mut consumed_scroll_request = false;
+
+                    let tab_area_width = (remaining_width - caption_controls_width - spacer_before_captions).max(0.0);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(tab_area_width, TAB_HEIGHT),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            if visible_strip_width > 0.0 {
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(visible_strip_width, TAB_HEIGHT),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| {
+                                        ui.set_width(visible_strip_width);
+                                        ui.set_min_width(visible_strip_width);
+                                        ui.set_max_width(visible_strip_width);
+
+                                        egui::ScrollArea::horizontal()
+                                            .id_source("tab_strip")
+                                            .auto_shrink([false, false])
+                                            .show(ui, |ui| {
+                                                ui.horizontal(|ui| {
+                                                    for (i, tab) in self.tabs.iter().enumerate() {
+                                                        let is_active = self.active_tab_index == i;
+                                                        let mut closed = false;
+                                                        let mut clicked = false;
+
+                                                        ui.push_id(i, |ui| {
+                                                            let (
+                                                                tab_response,
+                                                                close_response,
+                                                                truncated,
+                                                            ) = tab_button(
+                                                                ui,
+                                                                &tab.display_name(),
+                                                                is_active,
+                                                                &close_icon,
+                                                            );
+
+                                                            let tab_response = if truncated {
+                                                                tab_response.on_hover_text(
+                                                                    tab.display_name(),
+                                                                )
+                                                            } else {
+                                                                tab_response
+                                                            };
+
+                                                            if is_active
+                                                                && self.pending_scroll_to_active
+                                                            {
+                                                                tab_response.scroll_to_me(Some(
+                                                                    egui::Align::Center,
+                                                                ));
+                                                                consumed_scroll_request = true;
+                                                            }
+
+                                                            if tab_response.clicked() {
+                                                                clicked = true;
+                                                            }
+
+                                                            if close_response.clicked() {
+                                                                closed = true;
+                                                            }
+                                                        });
+
+                                                        if clicked {
+                                                            activated_tab = Some(i);
+                                                        }
+                                                        if closed {
+                                                            self.pending_action =
+                                                                Some(PendingAction::CloseTab(i));
+                                                        }
+                                                    }
+                                                });
+                                            });
+                                    },
+                                );
+                            }
+
+                            if has_overflow || self.overflow_popup_open {
+                                ui.add_space(spacing);
+                                let overflow_popup_id = ui.id().with("tab_overflow_popup");
+                                let overflow_button_response = ui.add_sized(
+                                    [BUTTON_SIZE.x, BUTTON_SIZE.y],
+                                    egui::Button::new(egui::RichText::new("v").color(TEXT_PRIMARY))
+                                        .fill(ACTION_BG)
+                                        .stroke(Stroke::new(1.0, BORDER)),
+                                );
+
+                                if overflow_button_response.clicked() {
+                                    self.overflow_popup_open = !self.overflow_popup_open;
+                                }
+
+                                if self.overflow_popup_open {
+                                    let popup_width = TAB_BUTTON_WIDTH + OVERFLOW_CLOSE_BUTTON_WIDTH;
+                                    let area_response = egui::Area::new(overflow_popup_id)
+                                        .order(egui::Order::Foreground)
+                                        .constrain(true)
+                                        .fixed_pos(overflow_button_response.rect.right_bottom())
+                                        .pivot(egui::Align2::RIGHT_TOP)
+                                        .show(ctx, |ui| {
+                                            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                                ui.set_width(popup_width);
+                                                ui.set_min_width(popup_width);
+
+                                                for (i, tab) in self.tabs.iter().enumerate() {
+                                                    let label = tab.display_name();
+                                                    let selected = self.active_tab_index == i;
+
+                                                    ui.allocate_ui_with_layout(
+                                                        egui::vec2(popup_width, TAB_HEIGHT),
+                                                        egui::Layout::left_to_right(egui::Align::Center),
+                                                        |ui| {
+                                                            ui.allocate_ui_with_layout(
+                                                                egui::vec2(
+                                                                    popup_width
+                                                                        - OVERFLOW_CLOSE_BUTTON_WIDTH,
+                                                                    TAB_HEIGHT,
+                                                                ),
+                                                                egui::Layout::left_to_right(
+                                                                    egui::Align::Center,
+                                                                ),
+                                                                |ui| {
+                                                                    ui.set_width(
+                                                                        popup_width
+                                                                            - OVERFLOW_CLOSE_BUTTON_WIDTH,
+                                                                    );
+                                                                    ui.vertical(|ui| {
+                                                                        let response = ui.selectable_label(
+                                                                            selected,
+                                                                            &label,
+                                                                        );
+                                                                        if response.clicked() {
+                                                                            overflow_activated_tab =
+                                                                                Some(i);
+                                                                            self.overflow_popup_open =
+                                                                                false;
+                                                                        }
+
+                                                                        if duplicate_name_counts
+                                                                            .get(&tab.name)
+                                                                            .copied()
+                                                                            .unwrap_or(0)
+                                                                            > 1
+                                                                        {
+                                                                            ui.label(
+                                                                                egui::RichText::new(
+                                                                                    tab.overflow_context_label(),
+                                                                                )
+                                                                                .small()
+                                                                                .color(TEXT_MUTED),
+                                                                            );
+                                                                        }
+                                                                    });
+                                                                },
+                                                            );
+
+                                                            let close_response = ui
+                                                                .add_sized(
+                                                                    [OVERFLOW_CLOSE_BUTTON_WIDTH, 22.0],
+                                                                    egui::Button::new(
+                                                                        egui::RichText::new("×")
+                                                                            .color(TEXT_MUTED),
+                                                                    )
+                                                                    .fill(ACTION_BG)
+                                                                    .stroke(Stroke::new(1.0, BORDER)),
+                                                                )
+                                                                .on_hover_text("Close Tab");
+
+                                                            if close_response.clicked() {
+                                                                overflow_closed_tab = Some(i);
+                                                            }
+                                                        },
+                                                    );
+                                                }
+                                            });
+                                        });
+
+                                    if ctx.input(|i| i.key_pressed(egui::Key::Escape))
+                                        || (overflow_button_response.clicked_elsewhere()
+                                            && !area_response.response.hovered()
+                                            && overflow_closed_tab.is_none())
+                                    {
+                                        self.overflow_popup_open = false;
+                                    }
+                                }
+                            }
+
+                            ui.add_space(spacing);
                             if icon_button(
                                 ui,
-                                &max_icon,
-                                CAPTION_BUTTON_SIZE,
+                                &new_tab_icon,
+                                BUTTON_SIZE,
                                 ACTION_BG,
                                 ACTION_HOVER_BG,
-                                "Maximize",
+                                "New Tab",
                             )
                             .clicked()
                             {
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                                self.new_tab();
                             }
-                        }
 
-                        // Minimize
-                        if icon_button(
+                            if drag_width > 0.0 {
+                                let (rect, drag_response) = ui.allocate_exact_size(
+                                    egui::vec2(drag_width, TAB_HEIGHT),
+                                    Sense::click_and_drag(),
+                                );
+                                if drag_response.drag_started() {
+                                    ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                                }
+                                if drag_response.double_clicked() {
+                                    let maximized = ctx
+                                        .input(|input| input.viewport().maximized.unwrap_or(false));
+                                    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(
+                                        !maximized,
+                                    ));
+                                }
+                                ui.painter().rect_filled(rect, 0.0, HEADER_BG);
+                            }
+                        },
+                    );
+
+                    ui.add_space(8.0);
+
+                    if icon_button(
+                        ui,
+                        &min_icon,
+                        CAPTION_BUTTON_SIZE,
+                        ACTION_BG,
+                        ACTION_HOVER_BG,
+                        "Minimize",
+                    )
+                    .clicked()
+                    {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                    }
+
+                    let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
+                    if maximized {
+                        if restore_button(
                             ui,
-                            &min_icon,
                             CAPTION_BUTTON_SIZE,
                             ACTION_BG,
                             ACTION_HOVER_BG,
-                            "Minimize",
+                            "Restore",
                         )
                         .clicked()
                         {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
                         }
+                    } else if icon_button(
+                        ui,
+                        &max_icon,
+                        CAPTION_BUTTON_SIZE,
+                        ACTION_BG,
+                        ACTION_HOVER_BG,
+                        "Maximize",
+                    )
+                    .clicked()
+                    {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                    }
 
-                        ui.add_space(8.0);
+                    if icon_button(
+                        ui,
+                        &close_icon,
+                        CAPTION_BUTTON_SIZE,
+                        CLOSE_BG,
+                        CLOSE_HOVER_BG,
+                        "Close",
+                    )
+                    .clicked()
+                    {
+                        self.request_exit(ctx);
+                    }
 
-                        // 3. Middle Area (Tab Strip & Drag Area)
-                        let remaining_width = ui.available_width();
+                    if let Some(index) = activated_tab.or(overflow_activated_tab) {
+                        self.active_tab_index = index;
+                        self.pending_scroll_to_active = true;
+                        self.mark_session_dirty();
+                    }
 
-                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                            ui.set_max_width(remaining_width);
+                    if let Some(index) = overflow_closed_tab {
+                        self.pending_action = Some(PendingAction::CloseTab(index));
+                    }
 
-                            // Drag handle (flexible space)
-                            let drag_response = ui.interact(
-                                ui.available_rect_before_wrap(),
-                                ui.id().with("drag_area"),
-                                Sense::click_and_drag(),
-                            );
-                            if drag_response.drag_started() {
-                                ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-                            }
-                            if drag_response.double_clicked() {
-                                let maximized =
-                                    ctx.input(|input| input.viewport().maximized.unwrap_or(false));
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
-                            }
-
-                            // Tab strip
-                            egui::ScrollArea::horizontal()
-                                .id_source("tab_strip")
-                                .auto_shrink([true, false])
-                                .show(ui, |ui| {
-                                    ui.horizontal(|ui| {
-                                        let mut activated_tab = None;
-                                        for (i, tab) in self.tabs.iter().enumerate() {
-                                            let is_active = self.active_tab_index == i;
-                                            let mut closed = false;
-                                            let mut clicked = false;
-
-                                            ui.push_id(i, |ui| {
-                                                let (tab_response, close_response) = tab_button(
-                                                    ui,
-                                                    &tab.display_name(),
-                                                    is_active,
-                                                    &close_icon,
-                                                );
-
-                                                if tab_response.clicked() {
-                                                    clicked = true;
-                                                }
-
-                                                if close_response.clicked() {
-                                                    closed = true;
-                                                }
-                                            });
-
-                                            if clicked {
-                                                activated_tab = Some(i);
-                                            }
-                                            if closed {
-                                                self.pending_action =
-                                                    Some(PendingAction::CloseTab(i));
-                                            }
-                                        }
-
-                                        if let Some(index) = activated_tab {
-                                            self.active_tab_index = index;
-                                            self.mark_session_dirty();
-                                        }
-
-                                        ui.add_space(4.0);
-                                        if icon_button(
-                                            ui,
-                                            &new_tab_icon,
-                                            BUTTON_SIZE,
-                                            ACTION_BG,
-                                            ACTION_HOVER_BG,
-                                            "New Tab",
-                                        )
-                                        .clicked()
-                                        {
-                                            self.new_tab();
-                                        }
-                                    });
-                                });
-                        });
-                    });
+                    if consumed_scroll_request {
+                        self.pending_scroll_to_active = false;
+                    }
                 });
             });
 
@@ -314,20 +497,9 @@ impl eframe::App for ScratchpadApp {
             if !self.tabs.is_empty() {
                 let panel_rect = ui.max_rect();
                 let pointer_over_editor = ui.rect_contains_pointer(panel_rect);
-                let zoom_delta = ctx.input_mut(|input| {
-                    if pointer_over_editor && input.modifiers.ctrl {
-                        let delta = input.raw_scroll_delta.y;
-                        if delta != 0.0 {
-                            input.raw_scroll_delta = egui::Vec2::ZERO;
-                            input.smooth_scroll_delta = egui::Vec2::ZERO;
-                        }
-                        delta
-                    } else {
-                        0.0
-                    }
-                });
-                if zoom_delta != 0.0 {
-                    self.font_size = (self.font_size + zoom_delta * 0.05).clamp(8.0, 72.0);
+                let zoom_factor = ctx.input(|i| i.zoom_delta());
+                if pointer_over_editor && zoom_factor != 1.0 {
+                    self.font_size = (self.font_size * zoom_factor).clamp(8.0, 72.0);
                     self.mark_session_dirty();
                 }
 
@@ -335,7 +507,7 @@ impl eframe::App for ScratchpadApp {
                 let tab = &mut self.tabs[self.active_tab_index];
                 let font_id = egui::FontId::monospace(self.font_size);
                 let editor_font_id = font_id.clone();
-                let text_color = ui.visuals().text_color();
+                let text_color = TEXT_PRIMARY;
                 let word_wrap = self.word_wrap;
                 let line_count = tab.content.lines().count().max(1);
                 let mut layouter = move |ui: &egui::Ui, text: &str, wrap_width: f32| {
@@ -394,6 +566,21 @@ impl eframe::App for ScratchpadApp {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
             self.save_file();
         }
+        if ctx.input_mut(|i| {
+            i.consume_key(egui::Modifiers::CTRL, egui::Key::Equals)
+                || i.consume_key(egui::Modifiers::CTRL, egui::Key::Plus)
+        }) {
+            self.font_size = (self.font_size + 1.0).min(72.0);
+            self.mark_session_dirty();
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Minus)) {
+            self.font_size = (self.font_size - 1.0).max(8.0);
+            self.mark_session_dirty();
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Num0)) {
+            self.font_size = 14.0;
+            self.mark_session_dirty();
+        }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::W))
             && !self.tabs.is_empty()
         {
@@ -423,6 +610,7 @@ impl ScratchpadApp {
         self.tabs
             .push(TabState::new("Untitled".to_owned(), String::new(), None));
         self.active_tab_index = self.tabs.len() - 1;
+        self.pending_scroll_to_active = true;
         let _ = self.persist_session_now();
     }
 
@@ -430,6 +618,7 @@ impl ScratchpadApp {
         if let Some(path) = rfd::FileDialog::new().pick_file() {
             if let Some(index) = self.find_tab_by_path(&path) {
                 self.active_tab_index = index;
+                self.pending_scroll_to_active = true;
                 self.status_message = Some(format!(
                     "{} is already open.",
                     path.file_name()
@@ -445,6 +634,7 @@ impl ScratchpadApp {
                     let name = path.file_name().unwrap().to_string_lossy().into_owned();
                     self.tabs.push(TabState::new(name, content, Some(path)));
                     self.active_tab_index = self.tabs.len() - 1;
+                    self.pending_scroll_to_active = true;
                     self.status_message = None;
                     let _ = self.persist_session_now();
                 }
@@ -530,6 +720,7 @@ impl ScratchpadApp {
             self.active_tab_index -= 1;
         }
         self.active_tab_index = self.active_tab_index.min(self.tabs.len() - 1);
+        self.pending_scroll_to_active = true;
         let _ = self.persist_session_now();
     }
 
@@ -598,6 +789,15 @@ impl ScratchpadApp {
         self.session_dirty = true;
     }
 
+    fn estimated_tab_strip_width(&self, spacing: f32) -> f32 {
+        if self.tabs.is_empty() {
+            return 0.0;
+        }
+
+        (self.tabs.len() as f32 * TAB_BUTTON_WIDTH)
+            + ((self.tabs.len().saturating_sub(1)) as f32 * spacing)
+    }
+
     fn find_tab_by_path(&self, candidate: &Path) -> Option<usize> {
         self.tabs.iter().position(|tab| {
             tab.path
@@ -632,6 +832,14 @@ impl ScratchpadApp {
         self.last_session_persist = Instant::now();
         Ok(())
     }
+}
+
+fn duplicate_name_counts(tabs: &[TabState]) -> HashMap<String, usize> {
+    let mut counts = HashMap::with_capacity(tabs.len());
+    for tab in tabs {
+        *counts.entry(tab.name.clone()).or_insert(0) += 1;
+    }
+    counts
 }
 
 fn paths_match(left: &Path, right: &Path) -> bool {

@@ -40,7 +40,11 @@ Today, overflow is handled implicitly by horizontal scrolling. That keeps every 
 
 Use a hybrid overflow model:
 
-1. The trailing `Open File` and `New Tab` buttons remain fixed and never scroll away.
+1. The non-caption action buttons remain fixed and never scroll away:
+   - `Open File`
+   - `Save As`
+   - `Search`
+   - `New Tab`
 2. The tab strip remains horizontally scrollable for direct manipulation.
 3. When tabs exceed the visible width, show overflow affordances on the tab strip itself.
 4. Add a tab list dropdown as a secondary access path for all open tabs.
@@ -53,6 +57,8 @@ Split the current middle header area into two subregions:
 
 1. A flexible tab viewport
 2. A fixed action area containing:
+   - `Save As`
+   - `Search`
    - `Open File`
    - `New Tab`
    - optional overflow dropdown button
@@ -63,13 +69,17 @@ Implementation direction:
 
 - Move the action buttons outside the scrolling `ScrollArea`
 - Render tabs inside a bounded-width container
-- Reserve a small amount of width for an overflow button when overflow is present
+- Measure the fixed action area before laying out the tab viewport
+- Use a stable overflow measurement rule so the layout does not oscillate at the fit boundary:
+  - either always reserve overflow-button width during the overflow check
+  - or perform a second measurement pass that includes the button width before finalizing layout
 
 ## Overflow Threshold
 
 Overflow should be considered active when:
 
-- The total width of all rendered tab buttons plus spacing exceeds the width of the tab viewport
+- The total width of all rendered tab buttons plus spacing exceeds the effective tab viewport width after fixed controls are measured
+- The effective width used for that check must include any reserved overflow-button width per the layout rule above
 
 The check should be based on measured or estimated tab widths, not just tab count.
 
@@ -131,6 +141,7 @@ Recommended behavior:
 - Each row shows:
   - dirty indicator if present
   - file name or untitled label
+  - path context or another secondary label when names collide
   - active-state highlight
 - Selecting a row activates that tab and scrolls it into view
 
@@ -162,10 +173,13 @@ That should remain true, but with clearer ownership:
 
 - Tab buttons are interactive
 - Overflow button is interactive
-- `Open File` and `New Tab` are interactive
+- `Open File`, `Save As`, `Search`, and `New Tab` are interactive
 - Only truly unused header space starts window drag
 
-Avoid expanding the drag hitbox across the scrollable tab viewport in a way that steals input from tab interaction.
+Implementation note:
+
+- The drag region should be allocated only after interactive widgets claim their space
+- Do not use a single pre-allocated hitbox that spans the future tab viewport and action area, because that can steal pointer input from the `ScrollArea`, tab buttons, and overflow button
 
 ## Session and Restore Expectations
 
@@ -178,6 +192,7 @@ After session restore:
 - The tab strip scroll position should be recalculated from the active tab rather than persisted
 
 Persisting raw scroll offset is not recommended in the first implementation because it is fragile across window-size changes.
+The implementation should carry only transient UI state needed to reveal the active tab during the current frame sequence; it should not be added to session persistence.
 
 ## Accessibility and Usability Notes
 
@@ -214,7 +229,7 @@ Based on the initial design, several enhancements can further improve the tab ma
 ### Phase 1
 
 - Keep horizontal scrolling
-- Move `Open File` and `New Tab` out of the scroll area
+- Move `Open File`, `Save As`, `Search`, and `New Tab` out of the scroll area
 - Add auto-scroll-to-active behavior
 - Add tooltips for truncated tab labels if needed
 
@@ -251,12 +266,13 @@ Recommended extraction targets:
 - `mod.rs`
   - state orchestration
   - selection and scrolling decisions
+  - transient UI state such as pending scroll-to-active requests or overflow-anchor state
 
 ## Acceptance Criteria
 
 The overflow work is complete when:
 
-- `Open File` and `New Tab` remain visible regardless of tab count
+- `Open File`, `Save As`, `Search`, and `New Tab` remain visible regardless of tab count
 - Active tab selection always leaves the active tab visible
 - Overflowed tabs are still reachable without excessive manual scrolling
 - Close buttons remain usable on visible tabs
