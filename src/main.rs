@@ -18,6 +18,10 @@ fn main() -> eframe::Result<()> {
         "Scratchpad",
         options,
         Box::new(|cc| {
+            let mut fonts = egui::FontDefinitions::default();
+            egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+            cc.egui_ctx.set_fonts(fonts);
+
             let mut visuals = egui::Visuals::dark();
             visuals.widgets.noninteractive.fg_stroke.color = app::theme::TEXT_PRIMARY;
             visuals.widgets.inactive.fg_stroke.color = app::theme::TEXT_PRIMARY;

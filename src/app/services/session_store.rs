@@ -1,4 +1,4 @@
-use crate::app::tabs::TabState;
+use crate::app::domain::{BufferState, WorkspaceTab};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 const SESSION_DIR_NAME: &str = "scratchpad";
 const SESSION_MANIFEST_NAME: &str = "session.json";
-const TAB_FILE_EXTENSION: &str = "tmp";
+const BUFFER_FILE_EXTENSION: &str = "tmp";
 const SESSION_VERSION: u32 = 1;
 
 pub struct SessionStore {
@@ -16,7 +16,7 @@ pub struct SessionStore {
 }
 
 pub struct RestoredSession {
-    pub tabs: Vec<TabState>,
+    pub tabs: Vec<WorkspaceTab>,
     pub active_tab_index: usize,
     pub font_size: f32,
     pub word_wrap: bool,
@@ -68,7 +68,7 @@ impl SessionStore {
 
         let mut tabs = Vec::with_capacity(manifest.tabs.len());
         for tab in manifest.tabs {
-            let content = match fs::read_to_string(self.tab_path(&tab.temp_id)) {
+            let content = match fs::read_to_string(self.buffer_path(&tab.temp_id)) {
                 Ok(content) => content,
                 Err(_) => match &tab.path {
                     Some(path) => fs::read_to_string(path).unwrap_or_default(),
@@ -76,13 +76,8 @@ impl SessionStore {
                 },
             };
 
-            tabs.push(TabState::restored(
-                tab.name,
-                content,
-                tab.path,
-                tab.is_dirty,
-                tab.temp_id,
-            ));
+            let buffer = BufferState::restored(tab.name, content, tab.path, tab.is_dirty, tab.temp_id);
+            tabs.push(WorkspaceTab::new(buffer));
         }
 
         if tabs.is_empty() {
@@ -101,7 +96,7 @@ impl SessionStore {
 
     pub fn persist(
         &self,
-        tabs: &[TabState],
+        tabs: &[WorkspaceTab],
         active_tab_index: usize,
         font_size: f32,
         word_wrap: bool,
@@ -112,20 +107,21 @@ impl SessionStore {
         let session_tabs = tabs
             .iter()
             .map(|tab| {
-                let temp_path = self.tab_path(&tab.temp_id);
-                write_atomic(&temp_path, tab.content.as_bytes())?;
+                let buffer = &tab.buffer;
+                let temp_path = self.buffer_path(&buffer.temp_id);
+                write_atomic(&temp_path, buffer.content.as_bytes())?;
                 active_temp_paths.insert(temp_path);
 
                 Ok(SessionTab {
-                    name: tab.name.clone(),
-                    path: tab.path.clone(),
-                    is_dirty: tab.is_dirty,
-                    temp_id: tab.temp_id.clone(),
+                    name: buffer.name.clone(),
+                    path: buffer.path.clone(),
+                    is_dirty: buffer.is_dirty,
+                    temp_id: buffer.temp_id.clone(),
                 })
             })
             .collect::<io::Result<Vec<_>>>()?;
 
-        self.remove_stale_tab_files(&active_temp_paths)?;
+        self.remove_stale_buffer_files(&active_temp_paths)?;
 
         let manifest = SessionManifest {
             version: SESSION_VERSION,
@@ -138,7 +134,7 @@ impl SessionStore {
         write_atomic(&self.manifest_path, &json)
     }
 
-    fn remove_stale_tab_files(&self, active_temp_paths: &HashSet<PathBuf>) -> io::Result<()> {
+    fn remove_stale_buffer_files(&self, active_temp_paths: &HashSet<PathBuf>) -> io::Result<()> {
         if !self.root.exists() {
             return Ok(());
         }
@@ -150,7 +146,7 @@ impl SessionStore {
                 continue;
             }
 
-            if path.extension().and_then(|ext| ext.to_str()) == Some(TAB_FILE_EXTENSION) {
+            if path.extension().and_then(|ext| ext.to_str()) == Some(BUFFER_FILE_EXTENSION) {
                 match fs::remove_file(&path) {
                     Ok(()) => {}
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -162,8 +158,8 @@ impl SessionStore {
         Ok(())
     }
 
-    fn tab_path(&self, temp_id: &str) -> PathBuf {
-        self.root.join(format!("{temp_id}.{TAB_FILE_EXTENSION}"))
+    fn buffer_path(&self, temp_id: &str) -> PathBuf {
+        self.root.join(format!("{temp_id}.{BUFFER_FILE_EXTENSION}"))
     }
 }
 
@@ -194,7 +190,7 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::SessionStore;
-    use crate::app::tabs::TabState;
+    use crate::app::domain::{BufferState, WorkspaceTab};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -210,20 +206,20 @@ mod tests {
         ));
         let store = SessionStore::new(root.clone());
         let tabs = vec![
-            TabState::restored(
+            WorkspaceTab::new(BufferState::restored(
                 "notes.txt".to_owned(),
                 "alpha".to_owned(),
                 Some(PathBuf::from("notes.txt")),
                 true,
-                "tab-a".to_owned(),
-            ),
-            TabState::restored(
+                "buffer-a".to_owned(),
+            )),
+            WorkspaceTab::new(BufferState::restored(
                 "Untitled".to_owned(),
                 "beta".to_owned(),
                 None,
                 false,
-                "tab-b".to_owned(),
-            ),
+                "buffer-b".to_owned(),
+            )),
         ];
 
         store.persist(&tabs, 1, 18.0, false).unwrap();
@@ -233,9 +229,9 @@ mod tests {
         assert_eq!(restored.active_tab_index, 1);
         assert_eq!(restored.font_size, 18.0);
         assert!(!restored.word_wrap);
-        assert_eq!(restored.tabs[0].content, "alpha");
-        assert!(restored.tabs[0].is_dirty);
-        assert_eq!(restored.tabs[1].content, "beta");
+        assert_eq!(restored.tabs[0].buffer.content, "alpha");
+        assert!(restored.tabs[0].buffer.is_dirty);
+        assert_eq!(restored.tabs[1].buffer.content, "beta");
 
         fs::remove_dir_all(root).unwrap();
     }

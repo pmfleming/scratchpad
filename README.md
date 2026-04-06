@@ -7,7 +7,8 @@
 ## ✨ Key Features
 
 -   🗂️ **Dynamic Tabbed Interface**: Effortlessly manage multiple files with a smart tab strip that includes horizontal scrolling and an overflow dropdown for easy navigation.
--   🎨 **Custom Frameless UI**: A bespoke high-contrast dark theme with pure white text for maximum readability and custom-drawn caption buttons.
+-   🎨 **Custom Frameless UI**: A bespoke high-contrast dark theme with pure white text for maximum readability and perfectly aligned controls.
+-   💎 **Modern Iconography**: Fully integrated with [Phosphor Icons](https://phosphoricons.com/) via `egui-phosphor` for a crisp, professional look.
 -   📂 **Native System Integration**: Seamlessly open and save files using native OS dialogs via `rfd`.
 -   💾 **Smart Dirty Tracking**: Visual indicators (`*`) for unsaved changes and protective confirmation modals to prevent data loss.
 -   🔄 **Session Restore**: Your entire workspace—open tabs, active tab, wrap settings, and zoom level—is automatically saved and restored on the next launch.
@@ -19,14 +20,15 @@
     -   `Ctrl + W`: Close Tab
     -   `Ctrl + +` / `Ctrl + -`: Zoom In/Out
     -   `Ctrl + 0`: Reset Zoom
--   🏗️ **Modular Architecture**: Built with a clean separation between UI components, theme constants, and application state.
+-   🏗️ **Modular Architecture**: Built with a clean separation between UI components, domain logic, and services.
 
 ## 🛠️ Tech Stack
 
 -   **Language**: [Rust](https://www.rust-lang.org/) (2024 Edition)
 -   **GUI Framework**: [egui](https://github.com/emilk/egui) & [eframe](https://github.com/emilk/egui/tree/master/crates/eframe)
+-   **Icons**: [egui-phosphor](https://crates.io/crates/egui-phosphor)
 -   **File Dialogs**: [rfd](https://github.com/PolyMeilex/rfd)
--   **Image Handling**: [image](https://github.com/image-rs/image) crate for custom icon rendering.
+-   **Serialization**: [serde](https://serde.rs/) & [serde_json](https://github.com/serde-rs/json)
 
 ## 🚀 Getting Started
 
@@ -51,18 +53,21 @@
 
 ```text
 src/
-├── main.rs          # Application entry point, visuals, and window setup
-├── assets/          # Custom PNG icons and UI assets
-└── app/             # Core application logic
-    ├── mod.rs       # Main App state, UI loop, and keyboard handling
-    ├── chrome.rs    # Reusable UI components (tabs, buttons) and icon loading
-    ├── tabs.rs      # Tab state management and buffer logic
-    └── theme.rs     # Centralized color palette and layout constants
+├── main.rs          # Application entry point and font initialization
+└── app/             # Modular application logic
+    ├── mod.rs       # Composition root and shortcuts
+    ├── app_state.rs # Main application state and command handling
+    ├── chrome.rs    # Reusable UI components and window chrome
+    ├── theme.rs     # Centralized color palette and layout constants
+    ├── domain/      # Business logic (Buffer, Tab)
+    ├── services/    # Infrastructure (Session Store)
+    └── ui/          # egui rendering (Tab Strip, Editor Area, Dialogs)
 ```
 
 ## 🗺️ Roadmap
 
-- [ ] **Search & Replace**: Integrated find and replace overlay (see [Search & Replace Plan](docs/search-replace-plan.md)).
+- [ ] **Multi-Pane Layout**: Support splitting the editor into multiple vertical/horizontal panes.
+- [ ] **Search & Replace**: Integrated find and replace overlay.
 - [ ] **Line Numbers**: Gutter with line counts for better navigation.
 - [ ] **Tab Drag & Drop**: Reorder tabs via dragging.
 - [ ] **Config File**: Persistent user settings for default themes and font choices.
