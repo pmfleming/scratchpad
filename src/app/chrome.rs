@@ -12,7 +12,7 @@ pub fn handle_window_resize(ctx: &egui::Context) {
         return;
     }
 
-    let screen_rect = ctx.input(|input| input.screen_rect());
+    let screen_rect = ctx.input(|input| input.content_rect());
     egui::Area::new(egui::Id::new("window_resize_handles"))
         .fixed_pos(screen_rect.min)
         .order(egui::Order::Foreground)
@@ -78,8 +78,12 @@ pub fn tab_button_sized(
 
     if active {
         ui.painter().rect_filled(rect, 4.0, TAB_ACTIVE_BG);
-        ui.painter()
-            .rect_stroke(rect, 4.0, Stroke::new(1.0, BORDER));
+        ui.painter().rect_stroke(
+            rect,
+            4.0,
+            Stroke::new(1.0, BORDER),
+            egui::StrokeKind::Outside,
+        );
     } else if response.hovered() {
         ui.painter().rect_filled(rect, 4.0, TAB_HOVER_BG);
     }
@@ -258,7 +262,7 @@ fn find_max_prefix(
 }
 
 fn text_width(ui: &egui::Ui, text: &str) -> f32 {
-    ui.fonts(|fonts| {
+    ui.fonts_mut(|fonts| {
         fonts
             .layout_no_wrap(
                 text.to_owned(),

@@ -1,4 +1,4 @@
-use crate::app::domain::{BufferState, WorkspaceTab};
+use crate::app::domain::{BufferState, EditorViewState, PaneNode, SplitAxis, WorkspaceTab};
 use crate::app::services::file_service::FileService;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 const SESSION_DIR_NAME: &str = "scratchpad";
 const SESSION_MANIFEST_NAME: &str = "session.json";
 const BUFFER_FILE_EXTENSION: &str = "tmp";
-const SESSION_VERSION: u32 = 2;
+const SESSION_VERSION: u32 = 4;
 
 pub struct SessionStore {
     root: PathBuf,
@@ -40,6 +40,101 @@ struct SessionTab {
     temp_id: String,
     encoding: String,
     has_bom: bool,
+    active_view_id: u64,
+    views: Vec<SessionView>,
+    root_pane: SessionPaneNode,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SessionView {
+    id: u64,
+    show_line_numbers: bool,
+    show_control_chars: bool,
+}
+
+impl From<&EditorViewState> for SessionView {
+    fn from(view: &EditorViewState) -> Self {
+        Self {
+            id: view.id,
+            show_line_numbers: view.show_line_numbers,
+            show_control_chars: view.show_control_chars,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+enum SessionPaneNode {
+    Leaf {
+        view_id: u64,
+    },
+    Split {
+        axis: SessionSplitAxis,
+        ratio: f32,
+        first: Box<SessionPaneNode>,
+        second: Box<SessionPaneNode>,
+    },
+}
+
+impl From<&PaneNode> for SessionPaneNode {
+    fn from(node: &PaneNode) -> Self {
+        match node {
+            PaneNode::Leaf { view_id } => SessionPaneNode::Leaf { view_id: *view_id },
+            PaneNode::Split {
+                axis,
+                ratio,
+                first,
+                second,
+            } => SessionPaneNode::Split {
+                axis: (*axis).into(),
+                ratio: *ratio,
+                first: Box::new(first.as_ref().into()),
+                second: Box::new(second.as_ref().into()),
+            },
+        }
+    }
+}
+
+impl From<SessionPaneNode> for PaneNode {
+    fn from(node: SessionPaneNode) -> Self {
+        match node {
+            SessionPaneNode::Leaf { view_id } => PaneNode::Leaf { view_id },
+            SessionPaneNode::Split {
+                axis,
+                ratio,
+                first,
+                second,
+            } => PaneNode::Split {
+                axis: axis.into(),
+                ratio,
+                first: Box::new((*first).into()),
+                second: Box::new((*second).into()),
+            },
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy)]
+enum SessionSplitAxis {
+    Horizontal,
+    Vertical,
+}
+
+impl From<SplitAxis> for SessionSplitAxis {
+    fn from(axis: SplitAxis) -> Self {
+        match axis {
+            SplitAxis::Horizontal => SessionSplitAxis::Horizontal,
+            SplitAxis::Vertical => SessionSplitAxis::Vertical,
+        }
+    }
+}
+
+impl From<SessionSplitAxis> for SplitAxis {
+    fn from(axis: SessionSplitAxis) -> Self {
+        match axis {
+            SessionSplitAxis::Horizontal => SplitAxis::Horizontal,
+            SessionSplitAxis::Vertical => SplitAxis::Vertical,
+        }
+    }
 }
 
 impl Default for SessionStore {
@@ -106,6 +201,9 @@ impl SessionStore {
                     temp_id: buffer.temp_id.clone(),
                     encoding: buffer.encoding.clone(),
                     has_bom: buffer.has_bom,
+                    active_view_id: tab.active_view_id,
+                    views: tab.views.iter().map(SessionView::from).collect(),
+                    root_pane: (&tab.root_pane).into(),
                 })
             })
             .collect::<io::Result<Vec<_>>>()?;
@@ -197,7 +295,25 @@ impl SessionStore {
             encoding,
             has_bom,
         );
-        WorkspaceTab::new(buffer)
+        let control_chars_allowed = buffer.artifact_summary.has_control_chars();
+        let views = tab
+            .views
+            .into_iter()
+            .map(|view| {
+                EditorViewState::restored(
+                    view.id,
+                    view.show_line_numbers,
+                    view.show_control_chars && control_chars_allowed,
+                )
+            })
+            .collect::<Vec<_>>();
+        let root_pane = PaneNode::from(tab.root_pane);
+        let active_view_id = if root_pane.contains_view(tab.active_view_id) {
+            tab.active_view_id
+        } else {
+            root_pane.first_view_id()
+        };
+        WorkspaceTab::restored(buffer, views, root_pane, active_view_id)
     }
 
     fn restore_tab_content(&self, tab: &SessionTab) -> (String, String, bool) {

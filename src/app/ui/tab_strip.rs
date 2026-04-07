@@ -7,31 +7,32 @@ use crate::app::ui::tab_overflow;
 use eframe::egui::{self, Sense, Stroke};
 use std::collections::HashMap;
 
-pub(crate) fn show_header(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    egui::TopBottomPanel::top("header")
-        .exact_height(HEADER_HEIGHT)
+pub(crate) fn show_header(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    let ctx = ui.ctx().clone();
+    egui::Panel::top("header")
+        .exact_size(HEADER_HEIGHT)
         .frame(
-            egui::Frame::none()
+            egui::Frame::NONE
                 .fill(HEADER_BG)
                 .stroke(Stroke::new(1.0, BORDER))
                 .inner_margin(egui::Margin {
-                    left: HEADER_LEFT_PADDING,
-                    right: HEADER_RIGHT_PADDING,
-                    top: HEADER_VERTICAL_PADDING,
-                    bottom: HEADER_VERTICAL_PADDING,
+                    left: HEADER_LEFT_PADDING as i8,
+                    right: HEADER_RIGHT_PADDING as i8,
+                    top: HEADER_VERTICAL_PADDING as i8,
+                    bottom: HEADER_VERTICAL_PADDING as i8,
                 }),
         )
-        .show(ctx, |ui| {
+        .show_inside(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 show_primary_actions(ui, app);
 
                 ui.add_space(8.0);
                 let layout = HeaderLayout::measure(app, ui.available_width(), 4.0);
-                let outcome = show_tab_region(ctx, ui, app, &layout);
+                let outcome = show_tab_region(&ctx, ui, app, &layout);
 
                 ui.add_space(8.0);
-                show_caption_controls(ctx, ui, app, &layout);
+                show_caption_controls(&ctx, ui, app, &layout);
                 apply_tab_outcome(app, outcome);
             });
         });
@@ -230,7 +231,7 @@ fn render_tab_strip_viewport(
     outcome: &mut TabStripOutcome,
 ) {
     egui::ScrollArea::horizontal()
-        .id_source("tab_strip")
+        .id_salt("tab_strip")
         .auto_shrink([false, false])
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
         .show(ui, |ui| {

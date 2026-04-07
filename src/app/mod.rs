@@ -3,6 +3,7 @@ pub mod chrome;
 pub mod commands;
 pub mod domain;
 pub mod services;
+pub mod shortcuts;
 pub mod theme;
 pub mod ui;
 

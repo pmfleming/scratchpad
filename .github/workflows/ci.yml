@@ -26,6 +26,10 @@ jobs:
         with:
           cache: true
 
+      - name: Install rust-code-analysis-cli
+        shell: pwsh
+        run: cargo install --locked rust-code-analysis-cli
+
       - name: Run CI script
         shell: pwsh
         run: .\scripts\ci.ps1

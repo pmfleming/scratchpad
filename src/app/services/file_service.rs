@@ -1,3 +1,4 @@
+use crate::app::domain::TextArtifactSummary;
 use chardetng::EncodingDetector;
 use encoding_rs::Encoding;
 use encoding_rs_io::DecodeReaderBytesBuilder;
@@ -12,6 +13,7 @@ pub struct FileContent {
     pub content: String,
     pub encoding: String,
     pub has_bom: bool,
+    pub artifact_summary: TextArtifactSummary,
 }
 
 impl FileService {
@@ -51,6 +53,7 @@ impl FileService {
         }
 
         Ok(FileContent {
+            artifact_summary: TextArtifactSummary::from_text(&content),
             content,
             encoding: encoding.name().to_string(),
             has_bom,

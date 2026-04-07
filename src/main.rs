@@ -28,7 +28,7 @@ fn main() -> eframe::Result<()> {
             visuals.widgets.open.fg_stroke.color = scratchpad::app::theme::TEXT_PRIMARY;
             cc.egui_ctx.set_visuals(visuals);
             cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
-            Box::new(ScratchpadApp::default())
+            Ok(Box::new(ScratchpadApp::default()))
         }),
     )
 }

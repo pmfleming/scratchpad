@@ -1,7 +1,10 @@
 use rand::RngExt;
+use rand::prelude::IndexedRandom;
 use rand::seq::SliceRandom;
 use scratchpad::ScratchpadApp;
+use scratchpad::app::domain::{PaneBranch, PaneNode, SplitAxis, WorkspaceTab};
 use scratchpad::app::{paths_match, services::session_store::SessionStore};
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -60,6 +63,46 @@ fn opens_configurable_number_of_tabs_defaulting_to_1000() {
         app.tabs_mut()[index].buffer.is_dirty = true;
     }
 
+    for _ in 0..20 {
+        let tab_index = rng.random_range(0..app.tabs().len());
+        let axis = if rng.random_range(0..2) == 0 {
+            SplitAxis::Vertical
+        } else {
+            SplitAxis::Horizontal
+        };
+        let new_view_first = rng.random_range(0..2) == 0;
+        let split_ratio = rng.random_range(25..=75) as f32 / 100.0;
+
+        let tab = &mut app.tabs_mut()[tab_index];
+        tab.split_active_view_with_placement(axis, new_view_first, split_ratio)
+            .expect("split should succeed during tab stress test");
+
+        let split_paths = collect_split_paths(&tab.root_pane);
+        assert!(
+            !split_paths.is_empty(),
+            "a split operation should create at least one resizable split path"
+        );
+
+        let resize_path = split_paths
+            .choose(&mut rng)
+            .expect("split paths should be available after splitting")
+            .clone();
+        let resize_ratio = rng.random_range(20..=80) as f32 / 100.0;
+        assert!(tab.resize_split(resize_path, resize_ratio));
+
+        if tab.views.len() > 1 && rng.random_range(0..2) == 0 {
+            let close_index = rng.random_range(0..tab.views.len());
+            let view_id = tab.views[close_index].id;
+            assert!(tab.close_view(view_id));
+        }
+
+        assert_tab_layout_integrity(tab);
+    }
+
+    for tab in app.tabs() {
+        assert_tab_layout_integrity(tab);
+    }
+
     app.session_store()
         .persist(
             app.tabs(),
@@ -79,6 +122,10 @@ fn opens_configurable_number_of_tabs_defaulting_to_1000() {
         assert!(!restored.tabs[index].buffer.content.is_empty());
     }
 
+    for tab in &restored.tabs {
+        assert_tab_layout_integrity(tab);
+    }
+
     let mut close_indices: Vec<usize> = (0..tab_count).collect();
     close_indices.shuffle(&mut rng);
 
@@ -92,4 +139,41 @@ fn opens_configurable_number_of_tabs_defaulting_to_1000() {
 
     drop(app);
     fs::remove_dir_all(session_root).unwrap();
+}
+
+fn assert_tab_layout_integrity(tab: &WorkspaceTab) {
+    let listed_view_ids = tab.views.iter().map(|view| view.id).collect::<HashSet<_>>();
+    let mut pane_view_ids = HashSet::new();
+    tab.root_pane.collect_view_ids(&mut pane_view_ids);
+
+    assert_eq!(tab.root_pane.leaf_count(), tab.views.len());
+    assert_eq!(pane_view_ids, listed_view_ids);
+    assert!(listed_view_ids.contains(&tab.active_view_id));
+}
+
+fn collect_split_paths(root: &PaneNode) -> Vec<Vec<PaneBranch>> {
+    let mut result = Vec::new();
+    let mut current_path = Vec::new();
+    collect_split_paths_recursive(root, &mut current_path, &mut result);
+    result
+}
+
+fn collect_split_paths_recursive(
+    node: &PaneNode,
+    current_path: &mut Vec<PaneBranch>,
+    result: &mut Vec<Vec<PaneBranch>>,
+) {
+    let PaneNode::Split { first, second, .. } = node else {
+        return;
+    };
+
+    result.push(current_path.clone());
+
+    current_path.push(PaneBranch::First);
+    collect_split_paths_recursive(first, current_path, result);
+    current_path.pop();
+
+    current_path.push(PaneBranch::Second);
+    collect_split_paths_recursive(second, current_path, result);
+    current_path.pop();
 }

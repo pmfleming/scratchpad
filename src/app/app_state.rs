@@ -1,15 +1,19 @@
 use crate::app::chrome::handle_window_resize;
 use crate::app::commands::AppCommand;
-use crate::app::domain::{BufferState, WorkspaceTab};
+use crate::app::domain::{
+    BufferState, EditorViewState, SplitAxis, SplitPath, ViewId, WorkspaceTab,
+};
 use crate::app::services::file_service::FileService;
+use crate::app::services::session_manager;
 use crate::app::services::session_store::SessionStore;
-use crate::app::ui::{dialogs, editor_area, tab_strip};
+use crate::app::shortcuts;
+use crate::app::ui::{dialogs, editor_area, status_bar, tab_strip};
 use crate::app::{paths_match, theme};
 use eframe::egui;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-const SESSION_SNAPSHOT_INTERVAL: Duration = Duration::from_secs(1);
+pub(crate) const SESSION_SNAPSHOT_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy)]
 pub(crate) enum PendingAction {
@@ -31,6 +35,12 @@ pub struct ScratchpadApp {
     pub(crate) overflow_popup_open: bool,
 }
 
+enum OpenPathOutcome {
+    Opened { artifact_warning: Option<String> },
+    AlreadyOpen,
+    Failed,
+}
+
 impl Default for ScratchpadApp {
     fn default() -> Self {
         Self::with_session_store(SessionStore::default())
@@ -38,22 +48,24 @@ impl Default for ScratchpadApp {
 }
 
 impl eframe::App for ScratchpadApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         if ctx.input(|input| input.viewport().close_requested()) && !self.close_in_progress {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.request_exit(ctx);
+            self.request_exit(&ctx);
             return;
         }
 
-        handle_window_resize(ctx);
-        self.maybe_persist_session(ctx);
+        handle_window_resize(&ctx);
+        session_manager::maybe_persist_session(self, &ctx);
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
 
-        tab_strip::show_header(ctx, self);
-        editor_area::show_status_bar(ctx, self);
-        editor_area::show_editor(ctx, self);
-        dialogs::show_pending_action_modal(ctx, self);
-        self.handle_shortcuts(ctx);
+        tab_strip::show_header(ui, self);
+        status_bar::show_status_bar(ui, self);
+        editor_area::show_editor(ui, self);
+        dialogs::show_pending_action_modal(&ctx, self);
+        shortcuts::handle_shortcuts(self, &ctx);
+        let _ = frame;
     }
 }
 
@@ -80,7 +92,7 @@ impl ScratchpadApp {
             overflow_popup_open: false,
         };
 
-        app.restore_session_state();
+        session_manager::restore_session_state(&mut app);
 
         app
     }
@@ -89,8 +101,18 @@ impl ScratchpadApp {
         self.tabs.get(self.active_tab_index)
     }
 
+    pub(crate) fn active_view_mut(&mut self) -> Option<&mut EditorViewState> {
+        self.tabs
+            .get_mut(self.active_tab_index)
+            .and_then(WorkspaceTab::active_view_mut)
+    }
+
     pub(crate) fn mark_session_dirty(&mut self) {
         self.session_dirty = true;
+    }
+
+    pub(crate) fn persist_session_now(&mut self) -> std::io::Result<()> {
+        session_manager::persist_session_now(self)
     }
 
     pub(crate) fn estimated_tab_strip_width(&self, spacing: f32) -> f32 {
@@ -124,8 +146,8 @@ impl ScratchpadApp {
     }
 
     pub fn open_file(&mut self) {
-        if let Some(path) = rfd::FileDialog::new().pick_file() {
-            self.open_selected_path(path);
+        if let Some(paths) = rfd::FileDialog::new().pick_files() {
+            self.open_selected_paths(paths);
         }
     }
 
@@ -196,6 +218,31 @@ impl ScratchpadApp {
         format!("{}{} - Scratchpad", marker, tab.buffer.name)
     }
 
+    pub(crate) fn split_active_view_with_placement(
+        &mut self,
+        axis: SplitAxis,
+        new_view_first: bool,
+        ratio: f32,
+    ) {
+        self.handle_command(AppCommand::SplitActiveView {
+            axis,
+            new_view_first,
+            ratio,
+        });
+    }
+
+    pub(crate) fn close_view(&mut self, view_id: ViewId) {
+        self.handle_command(AppCommand::CloseView { view_id });
+    }
+
+    pub(crate) fn activate_view(&mut self, view_id: ViewId) {
+        self.handle_command(AppCommand::ActivateView { view_id });
+    }
+
+    pub(crate) fn resize_split(&mut self, path: SplitPath, ratio: f32) {
+        self.handle_command(AppCommand::ResizeSplit { path, ratio });
+    }
+
     fn append_tab(&mut self, tab: WorkspaceTab) {
         self.tabs.push(tab);
         self.active_tab_index = self.tabs.len() - 1;
@@ -239,112 +286,63 @@ impl ScratchpadApp {
         })
     }
 
-    fn handle_shortcuts(&mut self, ctx: &egui::Context) {
-        self.handle_file_shortcuts(ctx);
-        self.handle_view_shortcuts(ctx);
-        self.handle_tab_shortcuts(ctx);
-    }
+    fn open_selected_paths(&mut self, paths: Vec<std::path::PathBuf>) {
+        let mut opened_count = 0usize;
+        let mut duplicate_count = 0usize;
+        let mut failure_count = 0usize;
+        let mut artifact_count = 0usize;
+        let mut last_artifact_warning = None;
 
-    fn handle_file_shortcuts(&mut self, ctx: &egui::Context) {
-        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::N)) {
-            self.handle_command(AppCommand::NewTab);
-        }
-        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::O)) {
-            self.handle_command(AppCommand::OpenFile);
-        }
-        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
-            self.handle_command(AppCommand::SaveFile);
-        }
-    }
-
-    fn handle_view_shortcuts(&mut self, ctx: &egui::Context) {
-        if ctx.input_mut(|input| {
-            input.consume_key(egui::Modifiers::CTRL, egui::Key::Equals)
-                || input.consume_key(egui::Modifiers::CTRL, egui::Key::Plus)
-        }) {
-            self.font_size = (self.font_size + 1.0).min(72.0);
-            self.mark_session_dirty();
-        }
-        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Minus)) {
-            self.font_size = (self.font_size - 1.0).max(8.0);
-            self.mark_session_dirty();
-        }
-        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Num0)) {
-            self.font_size = 14.0;
-            self.mark_session_dirty();
-        }
-    }
-
-    fn handle_tab_shortcuts(&mut self, ctx: &egui::Context) {
-        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::W))
-            && !self.tabs.is_empty()
-        {
-            self.handle_command(AppCommand::RequestCloseTab {
-                index: self.active_tab_index,
-            });
-        }
-    }
-
-    fn maybe_persist_session(&mut self, ctx: &egui::Context) {
-        if !self.session_dirty {
-            return;
-        }
-
-        ctx.request_repaint_after(SESSION_SNAPSHOT_INTERVAL);
-        if self.last_session_persist.elapsed() < SESSION_SNAPSHOT_INTERVAL {
-            return;
-        }
-
-        if let Err(error) = self.persist_session_now() {
-            self.status_message = Some(format!("Session save failed: {error}"));
-        }
-    }
-
-    fn restore_session_state(&mut self) {
-        match self.session_store.load() {
-            Ok(Some(restored)) => self.apply_restored_session(restored),
-            Ok(None) => {}
-            Err(error) => {
-                self.status_message = Some(format!("Session restore failed: {error}"));
+        for path in paths {
+            match self.open_path(path) {
+                OpenPathOutcome::Opened { artifact_warning } => {
+                    opened_count += 1;
+                    if let Some(warning) = artifact_warning {
+                        artifact_count += 1;
+                        last_artifact_warning = Some(warning);
+                    }
+                }
+                OpenPathOutcome::AlreadyOpen => {
+                    duplicate_count += 1;
+                }
+                OpenPathOutcome::Failed => {
+                    failure_count += 1;
+                }
             }
         }
+
+        self.status_message = summarize_open_results(
+            opened_count,
+            duplicate_count,
+            failure_count,
+            artifact_count,
+            last_artifact_warning,
+        );
     }
 
-    fn apply_restored_session(
-        &mut self,
-        restored: crate::app::services::session_store::RestoredSession,
-    ) {
-        self.tabs = restored.tabs;
-        self.active_tab_index = restored.active_tab_index;
-        self.font_size = restored.font_size;
-        self.word_wrap = restored.word_wrap;
-    }
-
-    fn open_selected_path(&mut self, path: std::path::PathBuf) {
-        if self.activate_existing_path(&path) {
-            return;
+    fn open_path(&mut self, path: std::path::PathBuf) -> OpenPathOutcome {
+        if self.activate_existing_path(&path).is_some() {
+            return OpenPathOutcome::AlreadyOpen;
         }
 
         match FileService::read_file(&path) {
-            Ok(file_content) => self.open_loaded_file(path, file_content),
-            Err(error) => {
-                self.status_message = Some(format!("Open failed: {error}"));
-            }
+            Ok(file_content) => OpenPathOutcome::Opened {
+                artifact_warning: self.open_loaded_file(path, file_content),
+            },
+            Err(_) => OpenPathOutcome::Failed,
         }
     }
 
-    fn activate_existing_path(&mut self, path: &Path) -> bool {
+    fn activate_existing_path(&mut self, path: &Path) -> Option<String> {
         if let Some(index) = self.find_tab_by_path(path) {
             self.handle_command(AppCommand::ActivateTab { index });
-            self.status_message = Some(format!(
-                "{} is already open.",
+            Some(
                 path.file_name()
                     .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.display().to_string())
-            ));
-            true
+                    .unwrap_or_else(|| path.display().to_string()),
+            )
         } else {
-            false
+            None
         }
     }
 
@@ -352,17 +350,23 @@ impl ScratchpadApp {
         &mut self,
         path: std::path::PathBuf,
         file_content: crate::app::services::file_service::FileContent,
-    ) {
+    ) -> Option<String> {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        self.append_tab(WorkspaceTab::new(BufferState::with_encoding(
+        let mut buffer = BufferState::with_encoding(
             name,
             file_content.content,
             Some(path),
             file_content.encoding,
             file_content.has_bom,
-        )));
-        self.status_message = None;
+        );
+        buffer.artifact_summary = file_content.artifact_summary;
+        let artifact_warning = buffer
+            .artifact_summary
+            .status_text()
+            .map(|message| format!("Opened with formatting artifacts: {message}"));
+        self.append_tab(WorkspaceTab::new(buffer));
         let _ = self.persist_session_now();
+        artifact_warning
     }
 
     fn save_existing_path(&mut self, index: usize) -> bool {
@@ -409,16 +413,89 @@ impl ScratchpadApp {
         self.mark_session_dirty();
         let _ = self.persist_session_now();
     }
+}
 
-    fn persist_session_now(&mut self) -> std::io::Result<()> {
-        self.session_store.persist(
-            &self.tabs,
-            self.active_tab_index,
-            self.font_size,
-            self.word_wrap,
-        )?;
-        self.session_dirty = false;
-        self.last_session_persist = Instant::now();
-        Ok(())
+fn summarize_open_results(
+    opened_count: usize,
+    duplicate_count: usize,
+    failure_count: usize,
+    artifact_count: usize,
+    last_artifact_warning: Option<String>,
+) -> Option<String> {
+    if opened_count == 1 && duplicate_count == 0 && failure_count == 0 {
+        return last_artifact_warning;
+    }
+
+    let mut parts = Vec::new();
+
+    if opened_count > 0 {
+        if artifact_count > 0 {
+            parts.push(format!(
+                "Opened {} ({} with formatting artifacts)",
+                file_count_label(opened_count),
+                file_count_label(artifact_count)
+            ));
+        } else {
+            parts.push(format!("Opened {}", file_count_label(opened_count)));
+        }
+    }
+
+    if duplicate_count > 0 {
+        parts.push(format!(
+            "{} already open",
+            file_count_label(duplicate_count)
+        ));
+    }
+
+    if failure_count > 0 {
+        parts.push(format!(
+            "{} failed to open",
+            file_count_label(failure_count)
+        ));
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("; "))
+    }
+}
+
+fn file_count_label(count: usize) -> String {
+    if count == 1 {
+        "1 file".to_owned()
+    } else {
+        format!("{count} files")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::summarize_open_results;
+
+    #[test]
+    fn summarize_open_results_preserves_single_artifact_warning() {
+        let summary = summarize_open_results(
+            1,
+            0,
+            0,
+            1,
+            Some("Opened with formatting artifacts: Control characters present: ANSI".to_owned()),
+        );
+
+        assert_eq!(
+            summary,
+            Some("Opened with formatting artifacts: Control characters present: ANSI".to_owned())
+        );
+    }
+
+    #[test]
+    fn summarize_open_results_aggregates_batch_outcomes() {
+        let summary = summarize_open_results(3, 1, 2, 1, None);
+
+        assert_eq!(
+            summary,
+            Some("Opened 3 files (1 file with formatting artifacts); 1 file already open; 2 files failed to open".to_owned())
+        );
     }
 }

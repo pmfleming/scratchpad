@@ -103,3 +103,17 @@ fn detect_binary_file() {
         "Binary files are not supported"
     );
 }
+
+#[test]
+fn detects_artifacts_without_treating_crlf_as_control_chars() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("artifacts.txt");
+    let content = "plain\r\ntext\r\n\u{1b}[31mcolor\u{1b}[0m\rprogress\u{0008}";
+
+    FileService::write_file_with_bom(&path, content, "UTF-8", false).unwrap();
+    let read = FileService::read_file(&path).unwrap();
+
+    assert!(read.artifact_summary.has_ansi_sequences);
+    assert!(read.artifact_summary.has_carriage_returns);
+    assert!(read.artifact_summary.has_backspaces);
+}

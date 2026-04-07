@@ -5,10 +5,12 @@ pub const TAB_ACTIVE_BG: Color32 = Color32::from_rgb(48, 54, 64);
 pub const TAB_HOVER_BG: Color32 = Color32::from_rgb(43, 49, 58);
 pub const ACTION_BG: Color32 = Color32::from_rgb(38, 43, 50);
 pub const ACTION_HOVER_BG: Color32 = Color32::from_rgb(52, 58, 68);
+pub const EDITOR_BG: Color32 = Color32::from_rgb(21, 24, 29);
 pub const CLOSE_BG: Color32 = Color32::from_rgb(124, 49, 49);
 pub const CLOSE_HOVER_BG: Color32 = Color32::from_rgb(164, 58, 58);
 pub const BORDER: Color32 = Color32::from_rgb(59, 66, 76);
 pub const TEXT_PRIMARY: Color32 = Color32::WHITE;
+pub const TEXT_MUTED: Color32 = Color32::from_rgba_premultiplied(255, 255, 255, 160);
 
 pub const HEADER_CONTROL_HEIGHT: f32 = 30.0;
 pub const HEADER_VERTICAL_PADDING: f32 = 2.0;
