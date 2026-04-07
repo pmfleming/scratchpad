@@ -4,7 +4,7 @@ use crate::app::commands::AppCommand;
 use crate::app::domain::WorkspaceTab;
 use crate::app::theme::*;
 use crate::app::ui::tab_overflow;
-use eframe::egui::{self, Sense, Stroke, TextureHandle};
+use eframe::egui::{self, Sense, Stroke};
 use std::collections::HashMap;
 
 pub(crate) fn show_header(ctx: &egui::Context, app: &mut ScratchpadApp) {
@@ -27,8 +27,7 @@ pub(crate) fn show_header(ctx: &egui::Context, app: &mut ScratchpadApp) {
                 show_primary_actions(ui, app);
 
                 ui.add_space(8.0);
-                let layout =
-                    HeaderLayout::measure(app, ui.available_width(), 4.0);
+                let layout = HeaderLayout::measure(app, ui.available_width(), 4.0);
                 let outcome = show_tab_region(ctx, ui, app, &layout);
 
                 ui.add_space(8.0);
@@ -99,48 +98,62 @@ struct TabStripOutcome {
     consumed_scroll_request: bool,
 }
 
+enum TabInteraction {
+    None,
+    Activate(usize),
+    RequestClose(usize),
+}
+
 fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let button_spacing = 4.0;
-    if phosphor_button(
-        ui,
-        egui_phosphor::regular::FOLDER_OPEN,
-        BUTTON_SIZE,
-        ACTION_BG,
-        ACTION_HOVER_BG,
-        "Open File",
-    )
-    .clicked()
-    {
-        app.handle_command(AppCommand::OpenFile);
-    }
+    let width = BUTTON_SIZE.x * 3.0 + button_spacing * 2.0;
 
-    ui.add_space(button_spacing);
-    if phosphor_button(
-        ui,
-        egui_phosphor::regular::FLOPPY_DISK,
-        BUTTON_SIZE,
-        ACTION_BG,
-        ACTION_HOVER_BG,
-        "Save As",
-    )
-    .clicked()
-    {
-        app.handle_command(AppCommand::SaveFileAs);
-    }
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, TAB_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            if phosphor_button(
+                ui,
+                egui_phosphor::regular::FOLDER_OPEN,
+                BUTTON_SIZE,
+                ACTION_BG,
+                ACTION_HOVER_BG,
+                "Open File",
+            )
+            .clicked()
+            {
+                app.handle_command(AppCommand::OpenFile);
+            }
 
-    ui.add_space(button_spacing);
-    if phosphor_button(
-        ui,
-        egui_phosphor::regular::MAGNIFYING_GLASS,
-        BUTTON_SIZE,
-        ACTION_BG,
-        ACTION_HOVER_BG,
-        "Search",
-    )
-    .clicked()
-    {
-        app.status_message = Some("Search is not implemented yet.".to_owned());
-    }
+            ui.add_space(button_spacing);
+            if phosphor_button(
+                ui,
+                egui_phosphor::regular::FLOPPY_DISK,
+                BUTTON_SIZE,
+                ACTION_BG,
+                ACTION_HOVER_BG,
+                "Save As",
+            )
+            .clicked()
+            {
+                app.handle_command(AppCommand::SaveFileAs);
+            }
+
+            ui.add_space(button_spacing);
+            if phosphor_button(
+                ui,
+                egui_phosphor::regular::MAGNIFYING_GLASS,
+                BUTTON_SIZE,
+                ACTION_BG,
+                ACTION_HOVER_BG,
+                "Search",
+            )
+            .clicked()
+            {
+                app.status_message = Some("Search is not implemented yet.".to_owned());
+            }
+        },
+    );
 }
 
 fn show_tab_region(
@@ -197,65 +210,112 @@ fn show_scrolling_tab_strip(
         egui::vec2(layout.visible_strip_width, TAB_HEIGHT),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
-            ui.set_width(layout.visible_strip_width);
-            ui.set_min_width(layout.visible_strip_width);
-            ui.set_max_width(layout.visible_strip_width);
-
-            egui::ScrollArea::horizontal()
-                .id_source("tab_strip")
-                .auto_shrink([false, false])
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.x = layout.spacing;
-                    ui.horizontal(|ui| {
-                        for (index, tab) in app.tabs.iter().enumerate() {
-                            let is_active = app.active_tab_index == index;
-                            let mut clicked = false;
-                            let mut closed = false;
-
-                            ui.push_id(index, |ui| {
-                                let has_duplicate = duplicate_name_counts
-                                    .get(&tab.buffer.name)
-                                    .copied()
-                                    .unwrap_or(0)
-                                    > 1;
-                                let display_name = tab.full_display_name(has_duplicate);
-
-                                let (tab_response, close_response, truncated) =
-                                    tab_button(ui, &display_name, is_active);
-
-                                let tab_response = if truncated {
-                                    tab_response.on_hover_text(tab.display_name())
-                                } else {
-                                    tab_response
-                                };
-
-                                if is_active && app.pending_scroll_to_active {
-                                    tab_response.scroll_to_me(Some(egui::Align::Center));
-                                    outcome.consumed_scroll_request = true;
-                                }
-
-                                if tab_response.clicked() {
-                                    clicked = true;
-                                }
-
-                                if close_response.clicked() {
-                                    closed = true;
-                                }
-                            });
-
-                            if clicked {
-                                outcome.activated_tab = Some(index);
-                            }
-
-                            if closed {
-                                outcome.close_requested_tab = Some(index);
-                            }
-                        }
-                    });
-                });
+            configure_tab_strip_viewport(ui, layout.visible_strip_width);
+            render_tab_strip_viewport(ui, app, layout, duplicate_name_counts, outcome);
         },
     );
+}
+
+fn configure_tab_strip_viewport(ui: &mut egui::Ui, visible_strip_width: f32) {
+    ui.set_width(visible_strip_width);
+    ui.set_min_width(visible_strip_width);
+    ui.set_max_width(visible_strip_width);
+}
+
+fn render_tab_strip_viewport(
+    ui: &mut egui::Ui,
+    app: &ScratchpadApp,
+    layout: &HeaderLayout,
+    duplicate_name_counts: &HashMap<String, usize>,
+    outcome: &mut TabStripOutcome,
+) {
+    egui::ScrollArea::horizontal()
+        .id_source("tab_strip")
+        .auto_shrink([false, false])
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+        .show(ui, |ui| {
+            render_tab_row(ui, app, layout, duplicate_name_counts, outcome);
+        });
+}
+
+fn render_tab_row(
+    ui: &mut egui::Ui,
+    app: &ScratchpadApp,
+    layout: &HeaderLayout,
+    duplicate_name_counts: &HashMap<String, usize>,
+    outcome: &mut TabStripOutcome,
+) {
+    ui.spacing_mut().item_spacing.x = layout.spacing;
+    ui.horizontal(|ui| {
+        for (index, tab) in app.tabs.iter().enumerate() {
+            let interaction = render_tab_cell(
+                ui,
+                index,
+                tab,
+                app.active_tab_index == index,
+                app.pending_scroll_to_active,
+                duplicate_name_counts,
+                outcome,
+            );
+            apply_tab_interaction(outcome, interaction);
+        }
+    });
+}
+
+fn render_tab_cell(
+    ui: &mut egui::Ui,
+    index: usize,
+    tab: &WorkspaceTab,
+    is_active: bool,
+    pending_scroll_to_active: bool,
+    duplicate_name_counts: &HashMap<String, usize>,
+    outcome: &mut TabStripOutcome,
+) -> TabInteraction {
+    ui.push_id(index, |ui| {
+        let has_duplicate = duplicate_name_counts
+            .get(&tab.buffer.name)
+            .copied()
+            .unwrap_or(0)
+            > 1;
+        let display_name = tab.full_display_name(has_duplicate);
+
+        let (tab_response, close_response, truncated) = tab_button(ui, &display_name, is_active);
+        let tab_response = maybe_attach_tab_tooltip(tab_response, tab, truncated);
+
+        if is_active && pending_scroll_to_active {
+            tab_response.scroll_to_me(Some(egui::Align::Center));
+            outcome.consumed_scroll_request = true;
+        }
+
+        if close_response.clicked() {
+            TabInteraction::RequestClose(index)
+        } else if tab_response.clicked() {
+            TabInteraction::Activate(index)
+        } else {
+            TabInteraction::None
+        }
+    })
+    .inner
+}
+
+fn maybe_attach_tab_tooltip(
+    tab_response: egui::Response,
+    tab: &WorkspaceTab,
+    truncated: bool,
+) -> egui::Response {
+    if truncated {
+        tab_response.on_hover_text(tab.display_name())
+    } else {
+        tab_response
+    }
+}
+
+fn apply_tab_interaction(outcome: &mut TabStripOutcome, interaction: TabInteraction) {
+    match interaction {
+        TabInteraction::None => {}
+        TabInteraction::Activate(index) => outcome.activated_tab = Some(index),
+        TabInteraction::RequestClose(index) => outcome.close_requested_tab = Some(index),
+    }
 }
 
 fn show_overflow_controls(
@@ -305,11 +365,7 @@ fn show_caption_controls(
     app: &mut ScratchpadApp,
     layout: &HeaderLayout,
 ) {
-    if caption_controls(
-        ui,
-        ctx,
-        layout.caption_controls_width,
-    ) {
+    if caption_controls(ui, ctx, layout.caption_controls_width) {
         app.request_exit(ctx);
     }
 }

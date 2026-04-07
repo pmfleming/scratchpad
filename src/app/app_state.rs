@@ -1,11 +1,11 @@
 use crate::app::chrome::handle_window_resize;
 use crate::app::commands::AppCommand;
 use crate::app::domain::{BufferState, WorkspaceTab};
+use crate::app::services::file_service::FileService;
 use crate::app::services::session_store::SessionStore;
 use crate::app::ui::{dialogs, editor_area, tab_strip};
 use crate::app::{paths_match, theme};
 use eframe::egui;
-use std::fs;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -64,7 +64,7 @@ impl Drop for ScratchpadApp {
 }
 
 impl ScratchpadApp {
-    pub(crate) fn with_session_store(session_store: SessionStore) -> Self {
+    pub fn with_session_store(session_store: SessionStore) -> Self {
         let mut app = Self {
             tabs: vec![WorkspaceTab::untitled()],
             active_tab_index: 0,
@@ -80,18 +80,7 @@ impl ScratchpadApp {
             overflow_popup_open: false,
         };
 
-        match app.session_store.load() {
-            Ok(Some(restored)) => {
-                app.tabs = restored.tabs;
-                app.active_tab_index = restored.active_tab_index;
-                app.font_size = restored.font_size;
-                app.word_wrap = restored.word_wrap;
-            }
-            Ok(None) => {}
-            Err(error) => {
-                app.status_message = Some(format!("Session restore failed: {error}"));
-            }
-        }
+        app.restore_session_state();
 
         app
     }
@@ -136,32 +125,7 @@ impl ScratchpadApp {
 
     pub fn open_file(&mut self) {
         if let Some(path) = rfd::FileDialog::new().pick_file() {
-            if let Some(index) = self.find_tab_by_path(&path) {
-                self.handle_command(AppCommand::ActivateTab { index });
-                self.status_message = Some(format!(
-                    "{} is already open.",
-                    path.file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| path.display().to_string())
-                ));
-                return;
-            }
-
-            match fs::read_to_string(&path) {
-                Ok(content) => {
-                    let name = path.file_name().unwrap().to_string_lossy().into_owned();
-                    self.append_tab(WorkspaceTab::new(BufferState::new(
-                        name,
-                        content,
-                        Some(path),
-                    )));
-                    self.status_message = None;
-                    let _ = self.persist_session_now();
-                }
-                Err(error) => {
-                    self.status_message = Some(format!("Open failed: {error}"));
-                }
-            }
+            self.open_selected_path(path);
         }
     }
 
@@ -175,21 +139,7 @@ impl ScratchpadApp {
         }
 
         if self.tabs[index].buffer.path.is_some() {
-            let buffer = &mut self.tabs[index].buffer;
-            let path = buffer.path.clone().unwrap();
-            match fs::write(&path, &buffer.content) {
-                Ok(()) => {
-                    buffer.is_dirty = false;
-                    self.status_message = None;
-                    self.mark_session_dirty();
-                    let _ = self.persist_session_now();
-                    true
-                }
-                Err(error) => {
-                    self.status_message = Some(format!("Save failed: {error}"));
-                    false
-                }
-            }
+            self.save_existing_path(index)
         } else {
             self.save_file_as_at(index);
             !self.tabs[index].buffer.is_dirty
@@ -205,22 +155,7 @@ impl ScratchpadApp {
             .set_file_name(&self.tabs[index].buffer.name)
             .save_file()
         {
-            let buffer = &mut self.tabs[index].buffer;
-            match fs::write(&path, &buffer.content) {
-                Ok(()) => {
-                    buffer.path = Some(path.clone());
-                    buffer.name = path.file_name().unwrap().to_string_lossy().into_owned();
-                    buffer.is_dirty = false;
-                    self.status_message = None;
-                    self.mark_session_dirty();
-                    let _ = self.persist_session_now();
-                    true
-                }
-                Err(error) => {
-                    self.status_message = Some(format!("Save failed: {error}"));
-                    false
-                }
-            }
+            self.save_buffer_to_path(index, path, true)
         } else {
             self.status_message = Some("Save cancelled.".to_owned());
             false
@@ -232,7 +167,7 @@ impl ScratchpadApp {
         let _ = self.persist_session_now();
     }
 
-    pub(crate) fn perform_close_tab_no_persist(&mut self, index: usize) {
+    pub fn perform_close_tab_no_persist(&mut self, index: usize) {
         self.close_tab_internal(index);
     }
 
@@ -267,8 +202,32 @@ impl ScratchpadApp {
         self.pending_scroll_to_active = true;
     }
 
-    pub(crate) fn create_untitled_tab(&mut self) {
+    pub fn create_untitled_tab(&mut self) {
         self.append_tab(WorkspaceTab::untitled());
+    }
+
+    pub fn tabs(&self) -> &[WorkspaceTab] {
+        &self.tabs
+    }
+
+    pub fn tabs_mut(&mut self) -> &mut [WorkspaceTab] {
+        &mut self.tabs
+    }
+
+    pub fn active_tab_index(&self) -> usize {
+        self.active_tab_index
+    }
+
+    pub fn font_size(&self) -> f32 {
+        self.font_size
+    }
+
+    pub fn word_wrap(&self) -> bool {
+        self.word_wrap
+    }
+
+    pub fn session_store(&self) -> &SessionStore {
+        &self.session_store
     }
 
     fn find_tab_by_path(&self, candidate: &Path) -> Option<usize> {
@@ -281,6 +240,12 @@ impl ScratchpadApp {
     }
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        self.handle_file_shortcuts(ctx);
+        self.handle_view_shortcuts(ctx);
+        self.handle_tab_shortcuts(ctx);
+    }
+
+    fn handle_file_shortcuts(&mut self, ctx: &egui::Context) {
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::N)) {
             self.handle_command(AppCommand::NewTab);
         }
@@ -290,6 +255,9 @@ impl ScratchpadApp {
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
             self.handle_command(AppCommand::SaveFile);
         }
+    }
+
+    fn handle_view_shortcuts(&mut self, ctx: &egui::Context) {
         if ctx.input_mut(|input| {
             input.consume_key(egui::Modifiers::CTRL, egui::Key::Equals)
                 || input.consume_key(egui::Modifiers::CTRL, egui::Key::Plus)
@@ -305,6 +273,9 @@ impl ScratchpadApp {
             self.font_size = 14.0;
             self.mark_session_dirty();
         }
+    }
+
+    fn handle_tab_shortcuts(&mut self, ctx: &egui::Context) {
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::W))
             && !self.tabs.is_empty()
         {
@@ -327,6 +298,116 @@ impl ScratchpadApp {
         if let Err(error) = self.persist_session_now() {
             self.status_message = Some(format!("Session save failed: {error}"));
         }
+    }
+
+    fn restore_session_state(&mut self) {
+        match self.session_store.load() {
+            Ok(Some(restored)) => self.apply_restored_session(restored),
+            Ok(None) => {}
+            Err(error) => {
+                self.status_message = Some(format!("Session restore failed: {error}"));
+            }
+        }
+    }
+
+    fn apply_restored_session(
+        &mut self,
+        restored: crate::app::services::session_store::RestoredSession,
+    ) {
+        self.tabs = restored.tabs;
+        self.active_tab_index = restored.active_tab_index;
+        self.font_size = restored.font_size;
+        self.word_wrap = restored.word_wrap;
+    }
+
+    fn open_selected_path(&mut self, path: std::path::PathBuf) {
+        if self.activate_existing_path(&path) {
+            return;
+        }
+
+        match FileService::read_file(&path) {
+            Ok(file_content) => self.open_loaded_file(path, file_content),
+            Err(error) => {
+                self.status_message = Some(format!("Open failed: {error}"));
+            }
+        }
+    }
+
+    fn activate_existing_path(&mut self, path: &Path) -> bool {
+        if let Some(index) = self.find_tab_by_path(path) {
+            self.handle_command(AppCommand::ActivateTab { index });
+            self.status_message = Some(format!(
+                "{} is already open.",
+                path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.display().to_string())
+            ));
+            true
+        } else {
+            false
+        }
+    }
+
+    fn open_loaded_file(
+        &mut self,
+        path: std::path::PathBuf,
+        file_content: crate::app::services::file_service::FileContent,
+    ) {
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        self.append_tab(WorkspaceTab::new(BufferState::with_encoding(
+            name,
+            file_content.content,
+            Some(path),
+            file_content.encoding,
+            file_content.has_bom,
+        )));
+        self.status_message = None;
+        let _ = self.persist_session_now();
+    }
+
+    fn save_existing_path(&mut self, index: usize) -> bool {
+        let path = self.tabs[index].buffer.path.clone().unwrap();
+        self.save_buffer_to_path(index, path, false)
+    }
+
+    fn save_buffer_to_path(
+        &mut self,
+        index: usize,
+        path: std::path::PathBuf,
+        update_buffer_path: bool,
+    ) -> bool {
+        let save_result = {
+            let buffer = &self.tabs[index].buffer;
+            FileService::write_file_with_bom(
+                &path,
+                &buffer.content,
+                &buffer.encoding,
+                buffer.has_bom,
+            )
+        };
+
+        match save_result {
+            Ok(()) => {
+                self.finalize_save(index, path, update_buffer_path);
+                true
+            }
+            Err(error) => {
+                self.status_message = Some(format!("Save failed: {error}"));
+                false
+            }
+        }
+    }
+
+    fn finalize_save(&mut self, index: usize, path: std::path::PathBuf, update_buffer_path: bool) {
+        let buffer = &mut self.tabs[index].buffer;
+        if update_buffer_path {
+            buffer.path = Some(path.clone());
+            buffer.name = path.file_name().unwrap().to_string_lossy().into_owned();
+        }
+        buffer.is_dirty = false;
+        self.status_message = None;
+        self.mark_session_dirty();
+        let _ = self.persist_session_now();
     }
 
     fn persist_session_now(&mut self) -> std::io::Result<()> {

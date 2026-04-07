@@ -1,4 +1,5 @@
 use crate::app::domain::{BufferState, WorkspaceTab};
+use crate::app::services::file_service::FileService;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
@@ -8,7 +9,7 @@ use std::path::{Path, PathBuf};
 const SESSION_DIR_NAME: &str = "scratchpad";
 const SESSION_MANIFEST_NAME: &str = "session.json";
 const BUFFER_FILE_EXTENSION: &str = "tmp";
-const SESSION_VERSION: u32 = 1;
+const SESSION_VERSION: u32 = 2;
 
 pub struct SessionStore {
     root: PathBuf,
@@ -37,6 +38,8 @@ struct SessionTab {
     path: Option<PathBuf>,
     is_dirty: bool,
     temp_id: String,
+    encoding: String,
+    has_bom: bool,
 }
 
 impl Default for SessionStore {
@@ -55,29 +58,13 @@ impl SessionStore {
     }
 
     pub fn load(&self) -> io::Result<Option<RestoredSession>> {
-        if !self.manifest_path.exists() {
+        let Some(manifest) = self.load_manifest()? else {
             return Ok(None);
-        }
-
-        let raw = fs::read_to_string(&self.manifest_path)?;
-        let manifest: SessionManifest = serde_json::from_str(&raw).map_err(invalid_data)?;
-
-        if manifest.version != SESSION_VERSION {
-            return Ok(None);
-        }
+        };
 
         let mut tabs = Vec::with_capacity(manifest.tabs.len());
         for tab in manifest.tabs {
-            let content = match fs::read_to_string(self.buffer_path(&tab.temp_id)) {
-                Ok(content) => content,
-                Err(_) => match &tab.path {
-                    Some(path) => fs::read_to_string(path).unwrap_or_default(),
-                    None => String::new(),
-                },
-            };
-
-            let buffer = BufferState::restored(tab.name, content, tab.path, tab.is_dirty, tab.temp_id);
-            tabs.push(WorkspaceTab::new(buffer));
+            tabs.push(self.restore_tab(tab));
         }
 
         if tabs.is_empty() {
@@ -117,6 +104,8 @@ impl SessionStore {
                     path: buffer.path.clone(),
                     is_dirty: buffer.is_dirty,
                     temp_id: buffer.temp_id.clone(),
+                    encoding: buffer.encoding.clone(),
+                    has_bom: buffer.has_bom,
                 })
             })
             .collect::<io::Result<Vec<_>>>()?;
@@ -135,31 +124,102 @@ impl SessionStore {
     }
 
     fn remove_stale_buffer_files(&self, active_temp_paths: &HashSet<PathBuf>) -> io::Result<()> {
-        if !self.root.exists() {
-            return Ok(());
-        }
+        let stale_paths = self.collect_stale_buffer_files(active_temp_paths)?;
 
-        for entry in fs::read_dir(&self.root)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path == self.manifest_path || active_temp_paths.contains(&path) {
-                continue;
-            }
-
-            if path.extension().and_then(|ext| ext.to_str()) == Some(BUFFER_FILE_EXTENSION) {
-                match fs::remove_file(&path) {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error),
-                }
+        for path in stale_paths {
+            match fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
             }
         }
 
         Ok(())
     }
 
+    fn collect_stale_buffer_files(
+        &self,
+        active_temp_paths: &HashSet<PathBuf>,
+    ) -> io::Result<Vec<PathBuf>> {
+        let mut stale_paths = Vec::new();
+
+        if !self.root.exists() {
+            return Ok(stale_paths);
+        }
+
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if self.is_stale_buffer_file(&path, active_temp_paths) {
+                stale_paths.push(path);
+            }
+        }
+
+        Ok(stale_paths)
+    }
+
+    fn is_stale_buffer_file(&self, path: &Path, active_temp_paths: &HashSet<PathBuf>) -> bool {
+        if path == self.manifest_path || active_temp_paths.contains(path) {
+            return false;
+        }
+
+        path.extension().and_then(|ext| ext.to_str()) == Some(BUFFER_FILE_EXTENSION)
+    }
+
     fn buffer_path(&self, temp_id: &str) -> PathBuf {
         self.root.join(format!("{temp_id}.{BUFFER_FILE_EXTENSION}"))
+    }
+
+    fn load_manifest(&self) -> io::Result<Option<SessionManifest>> {
+        if !self.manifest_path.exists() {
+            return Ok(None);
+        }
+
+        let raw = fs::read_to_string(&self.manifest_path)?;
+        let manifest: SessionManifest = serde_json::from_str(&raw).map_err(invalid_data)?;
+
+        if manifest.version != SESSION_VERSION {
+            return Ok(None);
+        }
+
+        Ok(Some(manifest))
+    }
+
+    fn restore_tab(&self, tab: SessionTab) -> WorkspaceTab {
+        let (content, encoding, has_bom) = self.restore_tab_content(&tab);
+        let buffer = BufferState::restored(
+            tab.name,
+            content,
+            tab.path,
+            tab.is_dirty,
+            tab.temp_id,
+            encoding,
+            has_bom,
+        );
+        WorkspaceTab::new(buffer)
+    }
+
+    fn restore_tab_content(&self, tab: &SessionTab) -> (String, String, bool) {
+        if let Ok(content) = fs::read_to_string(self.buffer_path(&tab.temp_id)) {
+            return (content, tab.encoding.clone(), tab.has_bom);
+        }
+
+        self.restore_from_original_path(tab)
+    }
+
+    fn restore_from_original_path(&self, tab: &SessionTab) -> (String, String, bool) {
+        match &tab.path {
+            Some(path) => match FileService::read_file(path) {
+                Ok(file_content) => (
+                    file_content.content,
+                    file_content.encoding,
+                    file_content.has_bom,
+                ),
+                Err(_) => (String::new(), tab.encoding.clone(), tab.has_bom),
+            },
+            None => (String::new(), tab.encoding.clone(), tab.has_bom),
+        }
     }
 }
 
@@ -185,54 +245,4 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     }
 
     fs::rename(temp_path, path)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::SessionStore;
-    use crate::app::domain::{BufferState, WorkspaceTab};
-    use std::fs;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn persists_and_restores_open_tabs() {
-        let root = std::env::temp_dir().join(format!(
-            "scratchpad-session-test-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let store = SessionStore::new(root.clone());
-        let tabs = vec![
-            WorkspaceTab::new(BufferState::restored(
-                "notes.txt".to_owned(),
-                "alpha".to_owned(),
-                Some(PathBuf::from("notes.txt")),
-                true,
-                "buffer-a".to_owned(),
-            )),
-            WorkspaceTab::new(BufferState::restored(
-                "Untitled".to_owned(),
-                "beta".to_owned(),
-                None,
-                false,
-                "buffer-b".to_owned(),
-            )),
-        ];
-
-        store.persist(&tabs, 1, 18.0, false).unwrap();
-        let restored = store.load().unwrap().unwrap();
-
-        assert_eq!(restored.tabs.len(), 2);
-        assert_eq!(restored.active_tab_index, 1);
-        assert_eq!(restored.font_size, 18.0);
-        assert!(!restored.word_wrap);
-        assert_eq!(restored.tabs[0].buffer.content, "alpha");
-        assert!(restored.tabs[0].buffer.is_dirty);
-        assert_eq!(restored.tabs[1].buffer.content, "beta");
-
-        fs::remove_dir_all(root).unwrap();
-    }
 }

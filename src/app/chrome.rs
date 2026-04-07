@@ -1,17 +1,10 @@
 use crate::app::theme::*;
 use eframe::egui::{
-    self, Color32, CursorIcon, Rect, Sense, Stroke, Vec2,
-    viewport::ResizeDirection,
+    self, Color32, CursorIcon, Rect, Sense, Stroke, Vec2, viewport::ResizeDirection,
 };
 
 const RESIZE_BORDER: f32 = 6.0;
 const RESIZE_CORNER: f32 = 18.0;
-
-pub struct IconButtonStyle {
-    pub background: Color32,
-    pub hover_background: Color32,
-    pub corner_radius: f32,
-}
 
 pub fn handle_window_resize(ctx: &egui::Context) {
     let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
@@ -24,17 +17,19 @@ pub fn handle_window_resize(ctx: &egui::Context) {
         .fixed_pos(screen_rect.min)
         .order(egui::Order::Foreground)
         .interactable(false)
-        .show(ctx, |ui| {
-            for grip in resize_grips(screen_rect.size()) {
-                let response = ui
-                    .interact(grip.rect, ui.id().with(grip.id), Sense::click_and_drag())
-                    .on_hover_cursor(grip.cursor);
+        .show(ctx, |ui| render_resize_handles(ui, ctx, screen_rect.size()));
+}
 
-                if response.drag_started() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(grip.direction));
-                }
-            }
-        });
+fn render_resize_handles(ui: &mut egui::Ui, ctx: &egui::Context, size: Vec2) {
+    for grip in resize_grips(size) {
+        let response = ui
+            .interact(grip.rect, ui.id().with(grip.id), Sense::click_and_drag())
+            .on_hover_cursor(grip.cursor);
+
+        if response.drag_started() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(grip.direction));
+        }
+    }
 }
 
 pub fn phosphor_button(
@@ -105,21 +100,7 @@ pub fn tab_button_sized(
     );
 
     // Close button area (inside the tab)
-    let close_rect = Rect::from_center_size(
-        rect.right_center() - Vec2::new(14.0, 0.0),
-        Vec2::new(18.0, 18.0),
-    );
-
-    // We use a sub-interaction for the close button
-    let close_response = ui.interact(
-        close_rect,
-        ui.id().with("close"),
-        Sense::click(),
-    );
-
-    if close_response.hovered() {
-        ui.painter().rect_filled(close_rect, 2.0, CLOSE_HOVER_BG);
-    }
+    let (close_rect, close_response) = render_tab_close_button(ui, rect);
 
     // Paint the close icon
     ui.painter().text(
@@ -133,79 +114,96 @@ pub fn tab_button_sized(
     (response, close_response, truncated)
 }
 
-pub fn caption_controls(
-    ui: &mut egui::Ui,
-    ctx: &egui::Context,
-    width: f32,
-) -> bool {
+fn render_tab_close_button(ui: &mut egui::Ui, tab_rect: Rect) -> (Rect, egui::Response) {
+    let close_rect = Rect::from_center_size(
+        tab_rect.right_center() - Vec2::new(14.0, 0.0),
+        Vec2::new(18.0, 18.0),
+    );
+
+    let close_response = ui.interact(close_rect, ui.id().with("close"), Sense::click());
+
+    if close_response.hovered() {
+        ui.painter().rect_filled(close_rect, 2.0, CLOSE_HOVER_BG);
+    }
+
+    (close_rect, close_response)
+}
+
+pub fn caption_controls(ui: &mut egui::Ui, ctx: &egui::Context, width: f32) -> bool {
     let mut close_requested = false;
 
     ui.allocate_ui_with_layout(
         egui::vec2(width, TAB_HEIGHT),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
-            ui.spacing_mut().item_spacing.x = CAPTION_BUTTON_SPACING;
-
-            if phosphor_button(
-                ui,
-                egui_phosphor::regular::MINUS,
-                CAPTION_BUTTON_SIZE,
-                ACTION_BG,
-                ACTION_HOVER_BG,
-                "Minimize",
-            )
-            .clicked()
-            {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-            }
-
-            let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
-            if maximized {
-                if phosphor_button(
-                    ui,
-                    egui_phosphor::regular::COPY,
-                    CAPTION_BUTTON_SIZE,
-                    ACTION_BG,
-                    ACTION_HOVER_BG,
-                    "Restore",
-                )
-                .clicked()
-                {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
-                }
-            } else if phosphor_button(
-                ui,
-                egui_phosphor::regular::SQUARE,
-                CAPTION_BUTTON_SIZE,
-                ACTION_BG,
-                ACTION_HOVER_BG,
-                "Maximize",
-            )
-            .clicked()
-            {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
-            }
-
-            if phosphor_button(
-                ui,
-                egui_phosphor::regular::X,
-                CAPTION_BUTTON_SIZE,
-                CLOSE_BG,
-                CLOSE_HOVER_BG,
-                "Close",
-            )
-            .clicked()
-            {
-                close_requested = true;
-            }
-
-            if CAPTION_TRAILING_PADDING > 0.0 {
-                ui.add_space(CAPTION_TRAILING_PADDING);
-            }
+            close_requested = render_caption_buttons(ui, ctx);
         },
     );
 
     close_requested
+}
+
+fn render_caption_buttons(ui: &mut egui::Ui, ctx: &egui::Context) -> bool {
+    ui.spacing_mut().item_spacing.x = CAPTION_BUTTON_SPACING;
+
+    render_minimize_button(ui, ctx);
+    render_maximize_restore_button(ui, ctx);
+    let close_requested = render_close_button(ui);
+
+    if CAPTION_TRAILING_PADDING > 0.0 {
+        ui.add_space(CAPTION_TRAILING_PADDING);
+    }
+
+    close_requested
+}
+
+fn render_minimize_button(ui: &mut egui::Ui, ctx: &egui::Context) {
+    if phosphor_button(
+        ui,
+        egui_phosphor::regular::MINUS,
+        CAPTION_BUTTON_SIZE,
+        ACTION_BG,
+        ACTION_HOVER_BG,
+        "Minimize",
+    )
+    .clicked()
+    {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+    }
+}
+
+fn render_maximize_restore_button(ui: &mut egui::Ui, ctx: &egui::Context) {
+    let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
+    let (icon, tooltip, next_maximized) = if maximized {
+        (egui_phosphor::regular::COPY, "Restore", false)
+    } else {
+        (egui_phosphor::regular::SQUARE, "Maximize", true)
+    };
+
+    if phosphor_button(
+        ui,
+        icon,
+        CAPTION_BUTTON_SIZE,
+        ACTION_BG,
+        ACTION_HOVER_BG,
+        tooltip,
+    )
+    .clicked()
+    {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(next_maximized));
+    }
+}
+
+fn render_close_button(ui: &mut egui::Ui) -> bool {
+    phosphor_button(
+        ui,
+        egui_phosphor::regular::X,
+        CAPTION_BUTTON_SIZE,
+        CLOSE_BG,
+        CLOSE_HOVER_BG,
+        "Close",
+    )
+    .clicked()
 }
 
 fn truncate_label(ui: &egui::Ui, label: &str, available_width: f32) -> (String, bool) {
@@ -218,22 +216,45 @@ fn truncate_label(ui: &egui::Ui, label: &str, available_width: f32) -> (String, 
         return (String::new(), true);
     }
 
-    let mut end = label.len();
-    while end > 0 {
-        while !label.is_char_boundary(end) {
-            end -= 1;
+    match find_max_prefix(ui, label, ellipsis, available_width) {
+        Some(truncated) => (truncated, true),
+        None => (String::new(), true),
+    }
+}
+
+fn find_max_prefix(
+    ui: &egui::Ui,
+    label: &str,
+    suffix: &str,
+    available_width: f32,
+) -> Option<String> {
+    let mut low = 0;
+    let mut high = label.len();
+    let mut best = None;
+
+    while low <= high {
+        let mid = (low + high) / 2;
+        let mut mid = mid;
+        while mid > 0 && !label.is_char_boundary(mid) {
+            mid -= 1;
         }
 
-        let candidate = &label[..end];
-        let combined = format!("{candidate}{ellipsis}");
-        if text_width(ui, &combined) <= available_width {
-            return (combined, true);
+        let candidate = format!("{}{}", &label[..mid], suffix);
+        if text_width(ui, &candidate) <= available_width {
+            best = Some(candidate);
+            low = mid + 1;
+            while low <= high && !label.is_char_boundary(low) {
+                low += 1;
+            }
+        } else {
+            if mid == 0 {
+                break;
+            }
+            high = mid - 1;
         }
-
-        end -= 1;
     }
 
-    (String::new(), true)
+    best
 }
 
 fn text_width(ui: &egui::Ui, text: &str) -> f32 {
@@ -263,7 +284,10 @@ fn resize_grips(size: Vec2) -> [ResizeGrip; 8] {
     [
         ResizeGrip {
             id: "north-west",
-            rect: Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(RESIZE_CORNER, RESIZE_CORNER)),
+            rect: Rect::from_min_max(
+                egui::pos2(0.0, 0.0),
+                egui::pos2(RESIZE_CORNER, RESIZE_CORNER),
+            ),
             direction: ResizeDirection::NorthWest,
             cursor: CursorIcon::ResizeNwSe,
         },

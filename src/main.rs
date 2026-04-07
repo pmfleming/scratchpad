@@ -1,9 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod app;
-
-use app::ScratchpadApp;
 use eframe::egui;
+use scratchpad::ScratchpadApp;
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
@@ -23,11 +21,11 @@ fn main() -> eframe::Result<()> {
             cc.egui_ctx.set_fonts(fonts);
 
             let mut visuals = egui::Visuals::dark();
-            visuals.widgets.noninteractive.fg_stroke.color = app::theme::TEXT_PRIMARY;
-            visuals.widgets.inactive.fg_stroke.color = app::theme::TEXT_PRIMARY;
-            visuals.widgets.hovered.fg_stroke.color = app::theme::TEXT_PRIMARY;
-            visuals.widgets.active.fg_stroke.color = app::theme::TEXT_PRIMARY;
-            visuals.widgets.open.fg_stroke.color = app::theme::TEXT_PRIMARY;
+            visuals.widgets.noninteractive.fg_stroke.color = scratchpad::app::theme::TEXT_PRIMARY;
+            visuals.widgets.inactive.fg_stroke.color = scratchpad::app::theme::TEXT_PRIMARY;
+            visuals.widgets.hovered.fg_stroke.color = scratchpad::app::theme::TEXT_PRIMARY;
+            visuals.widgets.active.fg_stroke.color = scratchpad::app::theme::TEXT_PRIMARY;
+            visuals.widgets.open.fg_stroke.color = scratchpad::app::theme::TEXT_PRIMARY;
             cc.egui_ctx.set_visuals(visuals);
             cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
             Box::new(ScratchpadApp::default())

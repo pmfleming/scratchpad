@@ -10,6 +10,10 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 rfd = "0.14"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+encoding_rs = "0.8"
+encoding_rs_io = "0.1"
+chardetng = "0.1"
 
 [dev-dependencies]
 rand = "0.10.0"
+tempfile = "3.8"

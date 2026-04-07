@@ -1,7 +1,7 @@
+use crate::app::chrome::tab_button_sized;
 use crate::app::domain::WorkspaceTab;
 use crate::app::theme::*;
-use crate::app::chrome::tab_button_sized;
-use eframe::egui::{self, Stroke, TextureHandle};
+use eframe::egui::{self, Stroke};
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -60,13 +60,7 @@ pub(crate) fn show_overflow_button(
                     };
 
                     for (index, tab) in tabs.iter().enumerate() {
-                        show_overflow_row(
-                            ui,
-                            index,
-                            tab,
-                            active_tab_index == index,
-                            &mut menu,
-                        );
+                        show_overflow_row(ui, index, tab, active_tab_index == index, &mut menu);
                     }
                 });
             });
