@@ -2,6 +2,12 @@
 /target-tests/
 /log/
 
+# Python virtual environment and caches
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
 # Editor settings
 .vscode/*.log
 

@@ -62,62 +62,130 @@ pub(super) fn paint_tab_reorder_marker(ctx: &egui::Context, zone: &TabDropZone, 
     ));
 
     match zone.axis {
-        TabDropAxis::Horizontal => {
-            let marker_x = if drop_slot == 0 {
-                first_rect.rect.left()
-            } else if drop_slot > last_rect.index {
-                last_rect.rect.right()
-            } else {
-                let mut previous_rect = first_rect.rect;
-                let mut target_rect = first_rect.rect;
-                for entry in &zone.entries {
-                    if entry.index >= drop_slot {
-                        target_rect = entry.rect;
-                        break;
-                    }
-                    previous_rect = entry.rect;
-                }
-                (previous_rect.right() + target_rect.left()) * 0.5
-            };
-
-            let marker_rect = egui::Rect::from_center_size(
-                egui::pos2(
-                    marker_x,
-                    (first_rect.rect.top() + last_rect.rect.bottom()) * 0.5,
-                ),
-                egui::vec2(3.0, TAB_HEIGHT - 6.0),
-            );
-            painter.rect_filled(marker_rect, 2.0, TAB_REORDER_MARKER_COLOR);
-        }
-        TabDropAxis::Vertical => {
-            let marker_y = if drop_slot == 0 {
-                first_rect.rect.top()
-            } else if drop_slot > last_rect.index {
-                last_rect.rect.bottom()
-            } else {
-                let mut previous_rect = first_rect.rect;
-                let mut target_rect = first_rect.rect;
-                for entry in &zone.entries {
-                    if entry.index >= drop_slot {
-                        target_rect = entry.rect;
-                        break;
-                    }
-                    previous_rect = entry.rect;
-                }
-                (previous_rect.bottom() + target_rect.top()) * 0.5
-            };
-
-            let marker_width = first_rect.rect.width().max(24.0) - 8.0;
-            let marker_rect = egui::Rect::from_center_size(
-                egui::pos2(
-                    (first_rect.rect.left() + last_rect.rect.right()) * 0.5,
-                    marker_y,
-                ),
-                egui::vec2(marker_width, 3.0),
-            );
-            painter.rect_filled(marker_rect, 2.0, TAB_REORDER_MARKER_COLOR);
-        }
+        TabDropAxis::Horizontal => paint_horizontal_reorder_marker(
+            &painter,
+            zone,
+            drop_slot,
+            first_rect.rect,
+            last_rect.rect,
+            last_rect.index,
+        ),
+        TabDropAxis::Vertical => paint_vertical_reorder_marker(
+            &painter,
+            zone,
+            drop_slot,
+            first_rect.rect,
+            last_rect.rect,
+            last_rect.index,
+        ),
     }
+}
+
+fn paint_horizontal_reorder_marker(
+    painter: &egui::Painter,
+    zone: &TabDropZone,
+    drop_slot: usize,
+    first_rect: egui::Rect,
+    last_rect: egui::Rect,
+    last_index: usize,
+) {
+    let marker_x = horizontal_marker_position(zone, drop_slot, first_rect, last_rect, last_index);
+    let marker_rect = egui::Rect::from_center_size(
+        egui::pos2(marker_x, (first_rect.top() + last_rect.bottom()) * 0.5),
+        egui::vec2(3.0, TAB_HEIGHT - 6.0),
+    );
+    painter.rect_filled(marker_rect, 2.0, TAB_REORDER_MARKER_COLOR);
+}
+
+fn paint_vertical_reorder_marker(
+    painter: &egui::Painter,
+    zone: &TabDropZone,
+    drop_slot: usize,
+    first_rect: egui::Rect,
+    last_rect: egui::Rect,
+    last_index: usize,
+) {
+    let marker_y = vertical_marker_position(zone, drop_slot, first_rect, last_rect, last_index);
+    let marker_width = first_rect.width().max(24.0) - 8.0;
+    let marker_rect = egui::Rect::from_center_size(
+        egui::pos2((first_rect.left() + last_rect.right()) * 0.5, marker_y),
+        egui::vec2(marker_width, 3.0),
+    );
+    painter.rect_filled(marker_rect, 2.0, TAB_REORDER_MARKER_COLOR);
+}
+
+fn horizontal_marker_position(
+    zone: &TabDropZone,
+    drop_slot: usize,
+    first_rect: egui::Rect,
+    last_rect: egui::Rect,
+    last_index: usize,
+) -> f32 {
+    marker_position(
+        zone,
+        drop_slot,
+        first_rect.left(),
+        last_rect.right(),
+        last_index,
+        |previous, target| (previous.right() + target.left()) * 0.5,
+    )
+}
+
+fn vertical_marker_position(
+    zone: &TabDropZone,
+    drop_slot: usize,
+    first_rect: egui::Rect,
+    last_rect: egui::Rect,
+    last_index: usize,
+) -> f32 {
+    marker_position(
+        zone,
+        drop_slot,
+        first_rect.top(),
+        last_rect.bottom(),
+        last_index,
+        |previous, target| (previous.bottom() + target.top()) * 0.5,
+    )
+}
+
+fn marker_position(
+    zone: &TabDropZone,
+    drop_slot: usize,
+    first_edge: f32,
+    last_edge: f32,
+    last_index: usize,
+    between: impl Fn(egui::Rect, egui::Rect) -> f32,
+) -> f32 {
+    if drop_slot == 0 {
+        return first_edge;
+    }
+    if drop_slot > last_index {
+        return last_edge;
+    }
+
+    let (previous_rect, target_rect) = surrounding_entry_rects(zone, drop_slot);
+    between(previous_rect, target_rect)
+}
+
+fn surrounding_entry_rects(zone: &TabDropZone, drop_slot: usize) -> (egui::Rect, egui::Rect) {
+    let Some(first_rect) = zone.entries.first().map(|entry| entry.rect) else {
+        return (
+            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::ZERO),
+            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::ZERO),
+        );
+    };
+    let mut previous_rect = first_rect;
+    let mut target_rect = first_rect;
+
+    for entry in &zone.entries {
+        if entry.index >= drop_slot {
+            target_rect = entry.rect;
+            break;
+        }
+        previous_rect = entry.rect;
+    }
+
+    (previous_rect, target_rect)
 }
 
 fn duplicate_name_counts(tabs: &[WorkspaceTab]) -> HashMap<String, usize> {

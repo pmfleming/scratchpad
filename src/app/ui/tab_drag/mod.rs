@@ -6,8 +6,12 @@ mod state;
 
 pub(crate) use state::{
     TabDropAxis, TabDropZone, TabRectEntry, active_drag_source_for_context,
-    begin_tab_drag_if_needed, is_drag_active_for_context,
+    begin_tab_drag_if_needed, has_tab_drag_for_context, is_drag_active_for_context,
 };
+
+pub(crate) fn sync_drag_state(ui: &egui::Ui) {
+    let _ = state::update_current_tab_drag(ui);
+}
 
 pub(crate) fn update_tab_drag(
     ui: &egui::Ui,

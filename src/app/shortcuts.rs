@@ -32,8 +32,10 @@ fn handle_view_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         app.font_size = (app.font_size - 1.0).max(8.0);
         app.mark_session_dirty();
     }
-    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Num0)) {
-        app.font_size = 14.0;
+    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Num0))
+        && let Some(view) = app.active_view_mut()
+    {
+        view.show_line_numbers = !view.show_line_numbers;
         app.mark_session_dirty();
     }
 }

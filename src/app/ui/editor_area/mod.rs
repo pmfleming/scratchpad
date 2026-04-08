@@ -18,51 +18,92 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 
         let ctx = ui.ctx().clone();
         handle_editor_zoom(&ctx, ui, app);
-        let active_tab_index = app.active_tab_index().min(app.tabs().len() - 1);
-        app.tab_manager_mut().active_tab_index = active_tab_index;
-
-        let pane_tree = app.tabs()[active_tab_index].root_pane.clone();
-        let active_view_id = app.tabs()[active_tab_index].active_view_id;
-        let leaf_count = pane_tree.leaf_count();
-        let mut actions = Vec::new();
-        let mut any_editor_changed = false;
-        let mut preview_overlay = None;
-
-        render_pane_node(
-            ui,
-            app,
-            active_tab_index,
-            &pane_tree,
-            Vec::new(),
-            ui.max_rect(),
-            active_view_id,
-            leaf_count,
-            &mut actions,
-            &mut any_editor_changed,
-            &mut preview_overlay,
-        );
-
-        if let Some(preview_overlay) = preview_overlay {
-            tile_header::paint_split_preview(ui, &preview_overlay);
-        }
-
-        for action in actions {
-            match action {
-                TileAction::Activate(view_id) => app.activate_view(view_id),
-                TileAction::Close(view_id) => app.close_view(view_id),
-                TileAction::ResizeSplit { path, ratio } => app.resize_split(path, ratio),
-                TileAction::Split {
-                    axis,
-                    new_view_first,
-                    ratio,
-                } => app.split_active_view_with_placement(axis, new_view_first, ratio),
-            }
-        }
-
-        if any_editor_changed {
-            apply_editor_change(app, active_tab_index);
+        let editor_state = prepare_editor_state(app);
+        let render_outcome = render_editor_workspace(ui, app, &editor_state);
+        paint_preview_overlay(ui, render_outcome.preview_overlay);
+        apply_tile_actions(app, render_outcome.actions);
+        if render_outcome.any_editor_changed {
+            apply_editor_change(app, editor_state.active_tab_index);
         }
     });
+}
+
+struct EditorRenderState {
+    active_tab_index: usize,
+    pane_tree: PaneNode,
+    active_view_id: ViewId,
+    leaf_count: usize,
+}
+
+struct EditorRenderOutcome {
+    actions: Vec<TileAction>,
+    any_editor_changed: bool,
+    preview_overlay: Option<SplitPreviewOverlay>,
+}
+
+fn prepare_editor_state(app: &mut ScratchpadApp) -> EditorRenderState {
+    let active_tab_index = app.active_tab_index().min(app.tabs().len() - 1);
+    app.tab_manager_mut().active_tab_index = active_tab_index;
+
+    let pane_tree = app.tabs()[active_tab_index].root_pane.clone();
+    let active_view_id = app.tabs()[active_tab_index].active_view_id;
+    let leaf_count = pane_tree.leaf_count();
+
+    EditorRenderState {
+        active_tab_index,
+        pane_tree,
+        active_view_id,
+        leaf_count,
+    }
+}
+
+fn render_editor_workspace(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    state: &EditorRenderState,
+) -> EditorRenderOutcome {
+    let mut outcome = EditorRenderOutcome {
+        actions: Vec::new(),
+        any_editor_changed: false,
+        preview_overlay: None,
+    };
+
+    render_pane_node(
+        ui,
+        app,
+        state.active_tab_index,
+        &state.pane_tree,
+        Vec::new(),
+        ui.max_rect(),
+        state.active_view_id,
+        state.leaf_count,
+        &mut outcome.actions,
+        &mut outcome.any_editor_changed,
+        &mut outcome.preview_overlay,
+    );
+
+    outcome
+}
+
+fn paint_preview_overlay(ui: &egui::Ui, preview_overlay: Option<SplitPreviewOverlay>) {
+    if let Some(preview_overlay) = preview_overlay {
+        tile_header::paint_split_preview(ui, &preview_overlay);
+    }
+}
+
+fn apply_tile_actions(app: &mut ScratchpadApp, actions: Vec<TileAction>) {
+    for action in actions {
+        match action {
+            TileAction::Activate(view_id) => app.activate_view(view_id),
+            TileAction::Close(view_id) => app.close_view(view_id),
+            TileAction::ResizeSplit { path, ratio } => app.resize_split(path, ratio),
+            TileAction::Split {
+                axis,
+                new_view_first,
+                ratio,
+            } => app.split_active_view_with_placement(axis, new_view_first, ratio),
+        }
+    }
 }
 
 fn handle_editor_zoom(ctx: &egui::Context, ui: &egui::Ui, app: &mut ScratchpadApp) {

@@ -92,59 +92,82 @@ fn render_active_status(
 ) {
     ui.label(format!("Path: {}", details.path_label));
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        let line_count_response = ui
-            .label(&details.count_label)
-            .on_hover_text("Double-click to toggle line numbers");
-        if line_count_response.double_clicked() {
-            actions.toggle_line_numbers = true;
-        }
-
-        ui.separator();
-        ui.label(&details.encoding);
-        ui.separator();
-
-        let logging_token = ui
-            .selectable_label(logging_enabled, "LOG")
-            .on_hover_text("Toggle runtime file logging");
-        if logging_token.clicked() {
-            actions.toggle_logging = true;
-        }
-
-        ui.separator();
-
-        let button_response = ui.add(
-            egui::Button::new("")
-                .min_size(egui::vec2(22.0, 22.0))
-                .fill(egui::Color32::TRANSPARENT)
-                .stroke(egui::Stroke::NONE),
-        );
-        ui.painter().text(
-            button_response.rect.center(),
-            egui::Align2::CENTER_CENTER,
-            details.icon,
-            egui::FontId::proportional(16.0),
-            details.icon_color,
-        );
-        if button_response.hovered() {
-            button_response.clone().on_hover_text(details.icon_tooltip);
-        }
-        if details.has_control_chars && button_response.clicked() {
-            actions.toggle_control_chars = true;
-        }
-
-        if let Some(warning_label) = &details.warning_label {
-            ui.separator();
-            ui.label(egui::RichText::new(warning_label).color(egui::Color32::YELLOW));
-        }
-
-        if details.is_large_file {
-            ui.separator();
-            ui.label(
-                egui::RichText::new("Large file: performance may be degraded")
-                    .color(egui::Color32::YELLOW),
-            );
-        }
+        show_status_warnings(ui, details);
+        show_control_char_toggle(ui, details, actions);
+        show_logging_toggle(ui, logging_enabled, actions);
+        show_encoding(ui, &details.encoding);
+        show_line_count(ui, &details.count_label, actions);
     });
+}
+
+fn show_line_count(ui: &mut egui::Ui, count_label: &str, actions: &mut StatusBarActions) {
+    let line_count_response = ui
+        .label(count_label)
+        .on_hover_text("Double-click to toggle line numbers");
+    if line_count_response.double_clicked() {
+        actions.toggle_line_numbers = true;
+    }
+}
+
+fn show_encoding(ui: &mut egui::Ui, encoding: &str) {
+    ui.separator();
+    ui.label(encoding);
+}
+
+fn show_logging_toggle(
+    ui: &mut egui::Ui,
+    logging_enabled: bool,
+    actions: &mut StatusBarActions,
+) {
+    ui.separator();
+    let logging_token = ui
+        .selectable_label(logging_enabled, "LOG")
+        .on_hover_text("Toggle runtime file logging");
+    if logging_token.clicked() {
+        actions.toggle_logging = true;
+    }
+}
+
+fn show_control_char_toggle(
+    ui: &mut egui::Ui,
+    details: &ActiveStatusDetails,
+    actions: &mut StatusBarActions,
+) {
+    ui.separator();
+    let button_response = ui.add(
+        egui::Button::new("")
+            .min_size(egui::vec2(22.0, 22.0))
+            .fill(egui::Color32::TRANSPARENT)
+            .stroke(egui::Stroke::NONE),
+    );
+    ui.painter().text(
+        button_response.rect.center(),
+        egui::Align2::CENTER_CENTER,
+        details.icon,
+        egui::FontId::proportional(16.0),
+        details.icon_color,
+    );
+    if button_response.hovered() {
+        button_response.clone().on_hover_text(details.icon_tooltip);
+    }
+    if details.has_control_chars && button_response.clicked() {
+        actions.toggle_control_chars = true;
+    }
+}
+
+fn show_status_warnings(ui: &mut egui::Ui, details: &ActiveStatusDetails) {
+    if details.is_large_file {
+        ui.separator();
+        ui.label(
+            egui::RichText::new("Large file: performance may be degraded")
+                .color(egui::Color32::YELLOW),
+        );
+    }
+
+    if let Some(warning_label) = &details.warning_label {
+        ui.separator();
+        ui.label(egui::RichText::new(warning_label).color(egui::Color32::YELLOW));
+    }
 }
 
 fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {

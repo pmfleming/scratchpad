@@ -19,7 +19,16 @@ try {
     cargo test
 
     if (-not $SkipComplexity) {
-        & (Join-Path $PSScriptRoot "hotspots.ps1") -Paths src -Top 20 -Scope all
+        $venvDir = Join-Path $repoRoot ".venv"
+        $python = Join-Path $venvDir "Scripts\python.exe"
+
+        if (-not (Test-Path $python)) {
+            Write-Host "Creating Python virtual environment..." -ForegroundColor Cyan
+            & python -m venv $venvDir
+            & $python -m pip install --quiet matplotlib jinja2 pandas
+        }
+
+        & $python (Join-Path $PSScriptRoot "hotspots.py") --paths src --top 20 --scope all
     }
 }
 finally {

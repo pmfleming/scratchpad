@@ -16,18 +16,38 @@ pub fn render_split_divider(
     path: SplitPath,
     actions: &mut Vec<TileAction>,
 ) {
-    let hover_cursor = match axis {
-        SplitAxis::Vertical => egui::CursorIcon::ResizeHorizontal,
-        SplitAxis::Horizontal => egui::CursorIcon::ResizeVertical,
-    };
-    let response = ui
-        .interact(
-            divider_hit_rect(rect, axis, ratio),
-            ui.make_persistent_id(("split_divider", &path)),
-            egui::Sense::click_and_drag(),
-        )
-        .on_hover_cursor(hover_cursor);
+    let divider_center = divider_center(rect, axis, ratio);
+    let response = divider_response(ui, rect, axis, ratio, &path);
+    maybe_queue_resize_action(rect, axis, path, actions, &response);
 
+    let style = divider_style(&response);
+    let handle_rect = divider_handle_rect(divider_center, axis);
+    paint_divider_line(ui.painter(), rect, divider_center, axis, style.line_fill);
+    paint_divider_handle(ui.painter(), handle_rect, axis, &style);
+}
+
+fn divider_response(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    axis: SplitAxis,
+    ratio: f32,
+    path: &SplitPath,
+) -> egui::Response {
+    ui.interact(
+        divider_hit_rect(rect, axis, ratio),
+        ui.make_persistent_id(("split_divider", path)),
+        egui::Sense::click_and_drag(),
+    )
+    .on_hover_cursor(divider_cursor(axis))
+}
+
+fn maybe_queue_resize_action(
+    rect: egui::Rect,
+    axis: SplitAxis,
+    path: SplitPath,
+    actions: &mut Vec<TileAction>,
+    response: &egui::Response,
+) {
     if response.dragged()
         && let Some(pointer_pos) = response.interact_pointer_pos()
     {
@@ -36,57 +56,83 @@ pub fn render_split_divider(
             ratio: split_ratio_from_pointer(rect, axis, pointer_pos),
         });
     }
+}
 
-    let painter = ui.painter();
-    let divider_center = divider_center(rect, axis, ratio);
-    let divider_hovered = response.hovered() || response.dragged();
-    let line_fill = if divider_hovered {
-        egui::Color32::from_rgb(104, 154, 232)
-    } else {
-        BORDER
-    };
-    let handle_fill = if divider_hovered {
-        egui::Color32::from_rgb(56, 72, 98)
-    } else {
-        HEADER_BG.gamma_multiply(0.92)
-    };
-    let handle_rect = divider_handle_rect(divider_center, axis);
-    let icon = match axis {
-        SplitAxis::Vertical => egui_phosphor::regular::DOTS_SIX_VERTICAL,
-        SplitAxis::Horizontal => egui_phosphor::regular::DOTS_SIX,
-    };
-
+fn divider_cursor(axis: SplitAxis) -> egui::CursorIcon {
     match axis {
-        SplitAxis::Vertical => {
-            let line_rect = egui::Rect::from_center_size(
-                divider_center,
-                egui::vec2(DIVIDER_VISUAL_THICKNESS, rect.height()),
-            );
-            painter.rect_filled(line_rect, 0.0, line_fill);
-        }
-        SplitAxis::Horizontal => {
-            let line_rect = egui::Rect::from_center_size(
-                divider_center,
-                egui::vec2(rect.width(), DIVIDER_VISUAL_THICKNESS),
-            );
-            painter.rect_filled(line_rect, 0.0, line_fill);
-        }
+        SplitAxis::Vertical => egui::CursorIcon::ResizeHorizontal,
+        SplitAxis::Horizontal => egui::CursorIcon::ResizeVertical,
     }
+}
 
-    painter.rect_filled(handle_rect, 6.0, handle_fill);
+struct DividerStyle {
+    line_fill: egui::Color32,
+    handle_fill: egui::Color32,
+}
+
+fn divider_style(response: &egui::Response) -> DividerStyle {
+    let divider_hovered = response.hovered() || response.dragged();
+    DividerStyle {
+        line_fill: if divider_hovered {
+            egui::Color32::from_rgb(104, 154, 232)
+        } else {
+            BORDER
+        },
+        handle_fill: if divider_hovered {
+            egui::Color32::from_rgb(56, 72, 98)
+        } else {
+            HEADER_BG.gamma_multiply(0.92)
+        },
+    }
+}
+
+fn paint_divider_line(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    divider_center: egui::Pos2,
+    axis: SplitAxis,
+    line_fill: egui::Color32,
+) {
+    let line_rect = match axis {
+        SplitAxis::Vertical => egui::Rect::from_center_size(
+            divider_center,
+            egui::vec2(DIVIDER_VISUAL_THICKNESS, rect.height()),
+        ),
+        SplitAxis::Horizontal => egui::Rect::from_center_size(
+            divider_center,
+            egui::vec2(rect.width(), DIVIDER_VISUAL_THICKNESS),
+        ),
+    };
+    painter.rect_filled(line_rect, 0.0, line_fill);
+}
+
+fn paint_divider_handle(
+    painter: &egui::Painter,
+    handle_rect: egui::Rect,
+    axis: SplitAxis,
+    style: &DividerStyle,
+) {
+    painter.rect_filled(handle_rect, 6.0, style.handle_fill);
     painter.rect_stroke(
         handle_rect,
         6.0,
-        egui::Stroke::new(1.0, line_fill.gamma_multiply(0.9)),
+        egui::Stroke::new(1.0, style.line_fill.gamma_multiply(0.9)),
         egui::StrokeKind::Outside,
     );
     painter.text(
         handle_rect.center(),
         egui::Align2::CENTER_CENTER,
-        icon,
+        divider_icon(axis),
         egui::FontId::proportional(14.0),
         TEXT_PRIMARY,
     );
+}
+
+fn divider_icon(axis: SplitAxis) -> &'static str {
+    match axis {
+        SplitAxis::Vertical => egui_phosphor::regular::DOTS_SIX_VERTICAL,
+        SplitAxis::Horizontal => egui_phosphor::regular::DOTS_SIX,
+    }
 }
 
 pub fn split_rect(rect: egui::Rect, axis: SplitAxis, ratio: f32) -> (egui::Rect, egui::Rect) {

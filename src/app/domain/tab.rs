@@ -129,6 +129,23 @@ impl WorkspaceTab {
         true
     }
 
+    pub fn describe(&self) -> String {
+        let path = self
+            .buffer
+            .path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<unsaved>".to_owned());
+        format!(
+            "{} [path={}, dirty={}, views={}, active_view={}]",
+            self.buffer.name,
+            path,
+            self.buffer.is_dirty,
+            self.views.len(),
+            self.active_view_id
+        )
+    }
+
     fn repair_restored_state(&mut self) {
         let valid_view_ids = self
             .views

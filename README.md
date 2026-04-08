@@ -35,7 +35,7 @@ It currently focuses on a custom desktop editing experience with a frameless win
 - `Ctrl + W`: close active tab
 - `Ctrl + +` / `Ctrl + =`: increase editor font size
 - `Ctrl + -`: decrease editor font size
-- `Ctrl + 0`: reset editor font size
+- `Ctrl + 0`: toggle line numbers in the active view
 - `Ctrl + Mouse Wheel`: zoom editor font size
 
 ## Build and Run

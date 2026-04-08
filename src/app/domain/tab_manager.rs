@@ -109,6 +109,17 @@ impl TabManager {
                 .is_some_and(|p| crate::app::paths_match(p, candidate))
         })
     }
+
+    pub fn describe_tab_at(&self, index: usize) -> String {
+        self.tabs
+            .get(index)
+            .map(|t| t.describe())
+            .unwrap_or_else(|| format!("tab#{index}<missing>"))
+    }
+
+    pub fn describe_active_tab(&self) -> String {
+        self.describe_tab_at(self.active_tab_index)
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
 use crate::app::theme::*;
+use crate::app::ui::tab_drag;
 use eframe::egui;
 
 pub enum TileControlStyle {
@@ -45,15 +46,22 @@ impl<'a> TileControl<'a> {
         self
     }
 
-    pub fn show(self, ui: &mut egui::Ui, rect: egui::Rect, id: egui::Id, sense: egui::Sense) -> egui::Response {
+    pub fn show(
+        self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        id: egui::Id,
+        sense: egui::Sense,
+    ) -> egui::Response {
         let response = ui.interact(rect, id, sense);
-        
+        let drag_in_progress = tab_drag::has_tab_drag_for_context(ui.ctx());
+
         if self.visibility > 0.0 {
             paint_tile_control(
                 ui,
                 rect,
                 self.label,
-                response.hovered() || response.dragged(),
+                !drag_in_progress && (response.hovered() || response.dragged()),
                 self.style,
                 self.visibility,
                 self.font_size,
@@ -81,44 +89,12 @@ pub(crate) fn paint_tile_control(
         return;
     }
 
-    let (fill, stroke) = match style {
-        TileControlStyle::Default => {
-            let fill = if hovered {
-                egui::Color32::from_rgb(56, 72, 98)
-            } else {
-                egui::Color32::from_white_alpha(12)
-            };
-            let stroke = if hovered {
-                egui::Color32::from_rgb(104, 154, 232)
-            } else {
-                egui::Color32::from_white_alpha(20)
-            };
-            (fill, stroke)
-        }
-        TileControlStyle::Danger => {
-            let fill = if hovered {
-                CLOSE_HOVER_BG
-            } else {
-                CLOSE_BG.gamma_multiply(0.6)
-            };
-            let stroke = if hovered {
-                egui::Color32::from_rgb(255, 196, 196)
-            } else {
-                egui::Color32::from_rgba_unmultiplied(255, 150, 150, 90)
-            };
-            (fill, stroke)
-        }
-    };
-
-    let fill = fill.gamma_multiply(visibility);
-    let stroke = stroke.gamma_multiply(visibility);
-    let text_color = TEXT_PRIMARY.gamma_multiply(visibility);
-
-    ui.painter().rect_filled(rect, 3.0, fill);
+    let style_colors = tile_control_colors(style, hovered, visibility);
+    ui.painter().rect_filled(rect, 3.0, style_colors.fill);
     ui.painter().rect_stroke(
         rect,
         3.0,
-        egui::Stroke::new(1.0, stroke),
+        egui::Stroke::new(1.0, style_colors.stroke),
         egui::StrokeKind::Outside,
     );
     ui.painter().text(
@@ -126,6 +102,63 @@ pub(crate) fn paint_tile_control(
         egui::Align2::CENTER_CENTER,
         label,
         egui::FontId::proportional(font_size),
-        text_color,
+        style_colors.text_color,
     );
+}
+
+struct TileControlColors {
+    fill: egui::Color32,
+    stroke: egui::Color32,
+    text_color: egui::Color32,
+}
+
+fn tile_control_colors(
+    style: TileControlStyle,
+    hovered: bool,
+    visibility: f32,
+) -> TileControlColors {
+    let (fill, stroke) = base_tile_control_colors(style, hovered);
+    TileControlColors {
+        fill: fill.gamma_multiply(visibility),
+        stroke: stroke.gamma_multiply(visibility),
+        text_color: TEXT_PRIMARY.gamma_multiply(visibility),
+    }
+}
+
+fn base_tile_control_colors(
+    style: TileControlStyle,
+    hovered: bool,
+) -> (egui::Color32, egui::Color32) {
+    match style {
+        TileControlStyle::Default => default_tile_control_colors(hovered),
+        TileControlStyle::Danger => danger_tile_control_colors(hovered),
+    }
+}
+
+fn default_tile_control_colors(hovered: bool) -> (egui::Color32, egui::Color32) {
+    let fill = if hovered {
+        egui::Color32::from_rgb(56, 72, 98)
+    } else {
+        egui::Color32::from_white_alpha(12)
+    };
+    let stroke = if hovered {
+        egui::Color32::from_rgb(104, 154, 232)
+    } else {
+        egui::Color32::from_white_alpha(20)
+    };
+    (fill, stroke)
+}
+
+fn danger_tile_control_colors(hovered: bool) -> (egui::Color32, egui::Color32) {
+    let fill = if hovered {
+        CLOSE_HOVER_BG
+    } else {
+        CLOSE_BG.gamma_multiply(0.6)
+    };
+    let stroke = if hovered {
+        egui::Color32::from_rgb(255, 196, 196)
+    } else {
+        egui::Color32::from_rgba_unmultiplied(255, 150, 150, 90)
+    };
+    (fill, stroke)
 }

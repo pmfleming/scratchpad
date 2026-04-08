@@ -91,31 +91,11 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn describe_tab_at(&self, index: usize) -> String {
-        self.tabs()
-            .get(index)
-            .map(Self::describe_tab)
-            .unwrap_or_else(|| format!("tab#{index}<missing>"))
+        self.tab_manager.describe_tab_at(index)
     }
 
     pub(crate) fn describe_active_tab(&self) -> String {
-        self.describe_tab_at(self.active_tab_index())
-    }
-
-    pub(crate) fn describe_tab(tab: &WorkspaceTab) -> String {
-        let path = tab
-            .buffer
-            .path
-            .as_ref()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "<unsaved>".to_owned());
-        format!(
-            "{} [path={}, dirty={}, views={}, active_view={}]",
-            tab.buffer.name,
-            path,
-            tab.buffer.is_dirty,
-            tab.views.len(),
-            tab.active_view_id
-        )
+        self.tab_manager.describe_active_tab()
     }
 
     pub(crate) fn active_view_mut(&mut self) -> Option<&mut EditorViewState> {
@@ -162,13 +142,14 @@ impl ScratchpadApp {
 
     pub fn new_tab(&mut self) {
         self.tab_manager.create_untitled_tab();
-        let index = self.active_tab_index();
+        let description = self.tab_manager.describe_active_tab();
         self.log_event(
             LogLevel::Info,
             format!(
-                "Created new tab at index {index}: {} (total tabs={})",
-                self.describe_active_tab(),
-                self.tabs().len()
+                "Created new tab at index {}: {} (total tabs={})",
+                self.tab_manager.active_tab_index,
+                description,
+                self.tab_manager.tabs.len()
             ),
         );
         let _ = self.persist_session_now();
@@ -195,20 +176,20 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn perform_close_tab(&mut self, index: usize) {
-        let tab_description = self.describe_tab_at(index);
+        let tab_description = self.tab_manager.describe_tab_at(index);
         self.tab_manager.close_tab_internal(index);
         self.log_event(
             LogLevel::Info,
             format!(
                 "Closed tab at index {index}: {tab_description} (remaining tabs={})",
-                self.tabs().len()
+                self.tab_manager.tabs.len()
             ),
         );
         let _ = self.persist_session_now();
     }
 
     pub fn perform_close_tab_no_persist(&mut self, index: usize) {
-        let tab_description = self.describe_tab_at(index);
+        let tab_description = self.tab_manager.describe_tab_at(index);
         self.tab_manager.close_tab_internal(index);
         self.log_event(
             LogLevel::Info,
@@ -217,11 +198,15 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn window_title(&self) -> String {
-        if self.tabs().is_empty() {
+        if self.tab_manager.tabs.is_empty() {
             return "Scratchpad".to_owned();
         }
 
-        let tab = &self.tabs()[self.active_tab_index().min(self.tabs().len() - 1)];
+        let index = self
+            .tab_manager
+            .active_tab_index
+            .min(self.tab_manager.tabs.len() - 1);
+        let tab = &self.tab_manager.tabs[index];
         let marker = if tab.buffer.is_dirty { "*" } else { "" };
         format!("{}{} - Scratchpad", marker, tab.buffer.name)
     }
@@ -321,26 +306,22 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn set_info_status(&mut self, message: impl Into<String>) {
-        let message = message.into();
-        self.status_message = Some(message.clone());
-        if self.logging_enabled {
-            logging::log(LogLevel::Info, &message);
-        }
+        self.set_status(LogLevel::Info, message);
     }
 
     pub(crate) fn set_warning_status(&mut self, message: impl Into<String>) {
-        let message = message.into();
-        self.status_message = Some(message.clone());
-        if self.logging_enabled {
-            logging::log(LogLevel::Warn, &message);
-        }
+        self.set_status(LogLevel::Warn, message);
     }
 
     pub(crate) fn set_error_status(&mut self, message: impl Into<String>) {
+        self.set_status(LogLevel::Error, message);
+    }
+
+    fn set_status(&mut self, level: LogLevel, message: impl Into<String>) {
         let message = message.into();
         self.status_message = Some(message.clone());
         if self.logging_enabled {
-            logging::log(LogLevel::Error, &message);
+            logging::log(level, &message);
         }
     }
 
