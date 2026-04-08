@@ -1,4 +1,4 @@
-use crate::app::domain::WorkspaceTab;
+use crate::app::domain::{ViewId, WorkspaceTab};
 use crate::app::theme;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -101,12 +101,14 @@ impl TabManager {
         true
     }
 
-    pub fn find_tab_by_path(&self, candidate: &std::path::Path) -> Option<usize> {
-        self.tabs.iter().position(|tab| {
-            tab.buffer
-                .path
-                .as_ref()
-                .is_some_and(|p| crate::app::paths_match(p, candidate))
+    pub fn find_tab_by_path(&self, candidate: &std::path::Path) -> Option<(usize, ViewId)> {
+        self.tabs.iter().enumerate().find_map(|(tab_index, tab)| {
+            tab.views.iter().find_map(|view| {
+                tab.buffer_by_id(view.buffer_id)
+                    .and_then(|buffer| buffer.path.as_ref())
+                    .is_some_and(|path| crate::app::paths_match(path, candidate))
+                    .then_some((tab_index, view.id))
+            })
         })
     }
 

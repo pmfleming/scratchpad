@@ -6,9 +6,14 @@ use crate::app::domain::{BufferState, EditorViewState, RenderedLayout};
 use crate::app::theme::*;
 use eframe::egui;
 
-pub use artifact::{render_artifact_view, make_control_chars_visible, make_control_chars_clean};
+pub use artifact::{make_control_chars_clean, make_control_chars_visible, render_artifact_view};
 pub use gutter::render_line_number_gutter;
-pub use text_edit::{render_editor_text_edit, render_read_only_text_edit, build_layouter};
+pub use text_edit::{build_layouter, render_editor_text_edit, render_read_only_text_edit};
+
+pub(crate) struct EditorContentOutcome {
+    pub(crate) changed: bool,
+    pub(crate) focused: bool,
+}
 
 pub(crate) fn render_editor_content(
     ui: &mut egui::Ui,
@@ -17,7 +22,7 @@ pub(crate) fn render_editor_content(
     previous_layout: Option<&RenderedLayout>,
     word_wrap: bool,
     editor_font_id: &egui::FontId,
-) -> bool {
+) -> EditorContentOutcome {
     egui::Frame::NONE
         .fill(EDITOR_BG)
         .show(ui, |ui| {
@@ -38,4 +43,11 @@ pub(crate) fn render_editor_content(
             .inner
         })
         .inner
+        .into()
+}
+
+impl From<(bool, bool)> for EditorContentOutcome {
+    fn from((changed, focused): (bool, bool)) -> Self {
+        Self { changed, focused }
+    }
 }

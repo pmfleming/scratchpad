@@ -114,11 +114,7 @@ fn show_encoding(ui: &mut egui::Ui, encoding: &str) {
     ui.label(encoding);
 }
 
-fn show_logging_toggle(
-    ui: &mut egui::Ui,
-    logging_enabled: bool,
-    actions: &mut StatusBarActions,
-) {
+fn show_logging_toggle(ui: &mut egui::Ui, logging_enabled: bool, actions: &mut StatusBarActions) {
     ui.separator();
     let logging_token = ui
         .selectable_label(logging_enabled, "LOG")
@@ -172,9 +168,10 @@ fn show_status_warnings(ui: &mut egui::Ui, details: &ActiveStatusDetails) {
 
 fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {
     if actions.toggle_line_numbers
-        && let Some(view) = app.active_view_mut()
+        && let Some(tab) = app.active_tab_mut()
     {
-        view.show_line_numbers = !view.show_line_numbers;
+        let next_visible = !tab.line_numbers_visible();
+        tab.set_line_numbers_visible(next_visible);
         app.mark_session_dirty();
     }
 

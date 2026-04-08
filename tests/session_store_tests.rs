@@ -208,3 +208,52 @@ fn restored_tabs_allocate_new_unique_view_ids() {
 
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn persists_and_restores_combined_workspace_tabs() {
+    let root = std::env::temp_dir().join(format!(
+        "scratchpad-session-combine-test-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let store = SessionStore::new(root.clone());
+    let mut target = WorkspaceTab::new(BufferState::restored(RestoredBufferState {
+        id: 61,
+        name: "left.txt".to_owned(),
+        content: "left".to_owned(),
+        path: Some(PathBuf::from("left.txt")),
+        is_dirty: false,
+        temp_id: "buffer-left".to_owned(),
+        encoding: "UTF-8".to_owned(),
+        has_bom: false,
+    }));
+    let source = WorkspaceTab::new(BufferState::restored(RestoredBufferState {
+        id: 62,
+        name: "right.txt".to_owned(),
+        content: "right".to_owned(),
+        path: Some(PathBuf::from("right.txt")),
+        is_dirty: true,
+        temp_id: "buffer-right".to_owned(),
+        encoding: "UTF-8".to_owned(),
+        has_bom: false,
+    }));
+    let source_view_id = source.active_view_id;
+    target
+        .combine_with_tab(source, SplitAxis::Vertical, false, 0.5)
+        .expect("combine should succeed");
+
+    store.persist(&[target], 0, 14.0, true, true).unwrap();
+    let restored = store.load().unwrap().unwrap();
+    let restored_tab = &restored.tabs[0];
+
+    assert_eq!(restored_tab.views.len(), 2);
+    assert_eq!(restored_tab.active_view_id, source_view_id);
+    assert!(restored_tab.buffer_for_view(source_view_id).is_some());
+    assert_eq!(restored_tab.buffers().count(), 2);
+    assert_eq!(restored_tab.active_buffer().name, "right.txt");
+    assert!(restored_tab.active_buffer().is_dirty);
+
+    fs::remove_dir_all(root).unwrap();
+}

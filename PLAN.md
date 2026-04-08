@@ -11,7 +11,11 @@ The current application already includes:
 - custom frameless window chrome
 - tabbed editing with a visible strip plus overflow list
 - drag-and-drop tab reordering across both views
-- multi-pane editing inside a workspace tab
+- multi-pane, multi-buffer workspace tabs
+- drag-to-combine across top-level tabs
+- per-file tile promotion into new top-level tabs
+- per-workspace promote-all for splitting one workspace into one tab per file
+- Open Here for loading files into the current workspace tab with equal-share rebalancing
 - encoding-aware file open and save flows
 - formatting-artifact inspection for control-character-heavy content
 - session persistence for tabs, pane layout, view settings, zoom, wrap, and logging preference
@@ -24,7 +28,7 @@ The current application already includes:
 - `src/main.rs`: app startup, egui font setup, and logging initialization
 - `src/app/app_state.rs`: top-level state container and app-facing helpers
 - `src/app/commands.rs`: command handling for tab, view, and split operations
-- `src/app/chrome.rs`: reusable chrome widgets and tab button rendering
+- `src/app/chrome/`: reusable chrome widgets and tab button rendering
 - `src/app/logging.rs`: file logger plus panic hook
 
 ### Domain Layer
@@ -68,17 +72,21 @@ The current application already includes:
 - [x] Horizontal tab strip with overflow popup
 - [x] Full overflow list by default
 - [x] Shared tab order across strip and overflow
+- [x] Promote-all workspace action in both the visible strip and overflow list for tabs with 3 or more files
 - [x] Drag-and-drop reorder:
   - [x] within the strip
   - [x] within the overflow list
   - [x] between strip and overflow
+- [x] Drag-to-combine across top-level tabs
 
 ### Editing and Views
 
 - [x] Multi-pane layout within a workspace tab
+- [x] Multi-buffer workspace tabs
 - [x] Split creation and split resizing
 - [x] Close individual views
-- [x] Per-view line-number visibility
+- [x] Promote one file's tile group into a new top-level tab
+- [x] Workspace-tab-wide line-number visibility
 - [x] Per-view control-character visibility
 - [x] Zoom via keyboard shortcuts and Ctrl + mouse wheel
 - [x] Word-wrap state stored in the app model
@@ -86,6 +94,7 @@ The current application already includes:
 ### File Handling
 
 - [x] Open file via native dialogs
+- [x] Open Here into the current workspace tab
 - [x] Save and Save As via native dialogs
 - [x] Duplicate-path detection when reopening files
 - [x] Encoding detection and round-trip save support
@@ -115,7 +124,7 @@ The current application already includes:
 ## Current Limitations
 
 - Search UI is still a placeholder and not implemented.
-- Multi-pane layout currently gives multiple views into the same buffer within a workspace tab; true multi-buffer workspaces are not finished.
+- There is no context-menu or command-palette layer yet for tile/tab actions such as promote, combine, or workspace explode.
 - README-level packaging, releases, and installer work are not set up.
 - Logging is intentionally event-oriented; it does not capture every transient render-state change.
 
@@ -125,12 +134,14 @@ The current application already includes:
 
 - [ ] Implement search and replace
 - [ ] Add explicit wrap controls in the UI if wrap should become user-facing
-- [ ] Support true multi-buffer workspaces, not just multi-view same-buffer panes
+- [ ] Add keyboard shortcuts or command-palette entries for tile promotion and workspace promote-all
+- [ ] Extend Open Here and workspace rebalance rules so the initial split axis can respond to available viewport shape instead of always starting vertical
 
 ### UX and Discoverability
 
 - [ ] Add clearer split commands and discoverable pane controls
 - [ ] Improve overflow list configurability if hidden-only mode should become runtime-selectable
+- [ ] Add a context menu or actions menu for tab and tile operations
 - [ ] Document supported interactions directly in the app UI
 
 ### Persistence and Reliability
@@ -147,7 +158,7 @@ Top checker hotspots at the start of the pass:
 - `src/app/ui/tile_header/split.rs` with score `454.83`
 - `src/app/app_state.rs` with score `385.87`
 - `src/app/ui/tab_strip/mod.rs` with score `382.99`
-- `src/app/chrome.rs` with score `380.25`
+- `src/app/chrome/tabs.rs` with score `380.25`
 - `src/app/ui/tab_drag/state.rs` with score `373.51`
 - `src/app/services/file_controller.rs` with score `324.11`
 - `src/app/ui/tab_overflow.rs` with score `308.28`
@@ -160,7 +171,7 @@ Refactor priorities:
 - [x] Reduce tile-header control branching by separating visibility, split-preview, and close-button helpers.
 - [ ] Break up `src/app/ui/tile_header/split.rs` into smaller geometry, preview-paint, and drag-state modules.
 - [ ] Split `src/app/app_state.rs` into narrower state, status, and command-forwarding surfaces.
-- [ ] Revisit `src/app/chrome.rs` and `src/app/ui/tab_drag/state.rs` with the same extraction strategy used here.
+- [ ] Revisit `src/app/chrome/tabs.rs` and `src/app/ui/tab_drag/state.rs` with the same extraction strategy used here.
 
 Validation during this pass:
 
@@ -168,6 +179,8 @@ Validation during this pass:
 - [x] `cargo check` after tab strip / overflow refactor
 - [x] `cargo check` after file-controller / status / text-edit refactor
 - [x] `cargo check` after tile-header refactor
+- [x] `cargo test`
+- [x] `cargo clippy --all-targets --all-features -- -D warnings`
 
 ## Working Definition of Done
 

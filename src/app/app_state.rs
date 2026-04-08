@@ -84,6 +84,10 @@ impl ScratchpadApp {
         self.tab_manager.active_tab()
     }
 
+    pub(crate) fn active_tab_mut(&mut self) -> Option<&mut WorkspaceTab> {
+        self.tab_manager.active_tab_mut()
+    }
+
     pub(crate) fn log_event(&self, level: LogLevel, message: impl Into<String>) {
         if self.logging_enabled {
             logging::log(level, &message.into());
@@ -159,6 +163,10 @@ impl ScratchpadApp {
         FileController::open_file(self);
     }
 
+    pub fn open_file_here(&mut self) {
+        FileController::open_file_here(self);
+    }
+
     pub fn save_file(&mut self) {
         FileController::save_file(self);
     }
@@ -207,8 +215,12 @@ impl ScratchpadApp {
             .active_tab_index
             .min(self.tab_manager.tabs.len() - 1);
         let tab = &self.tab_manager.tabs[index];
-        let marker = if tab.buffer.is_dirty { "*" } else { "" };
-        format!("{}{} - Scratchpad", marker, tab.buffer.name)
+        let marker = if tab.active_buffer().is_dirty {
+            "*"
+        } else {
+            ""
+        };
+        format!("{}{} - Scratchpad", marker, tab.active_buffer().name)
     }
 
     pub(crate) fn split_active_view_with_placement(
@@ -226,6 +238,10 @@ impl ScratchpadApp {
 
     pub(crate) fn close_view(&mut self, view_id: ViewId) {
         self.handle_command(AppCommand::CloseView { view_id });
+    }
+
+    pub(crate) fn promote_view_to_tab(&mut self, view_id: ViewId) {
+        self.handle_command(AppCommand::PromoteViewToTab { view_id });
     }
 
     pub(crate) fn activate_view(&mut self, view_id: ViewId) {
@@ -256,7 +272,7 @@ impl ScratchpadApp {
         self.tab_manager.active_tab_index
     }
 
-    pub(crate) fn find_tab_by_path(&self, candidate: &Path) -> Option<usize> {
+    pub(crate) fn find_tab_by_path(&self, candidate: &Path) -> Option<(usize, ViewId)> {
         self.tab_manager.find_tab_by_path(candidate)
     }
 

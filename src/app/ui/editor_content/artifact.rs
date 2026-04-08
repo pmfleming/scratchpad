@@ -1,6 +1,6 @@
+use super::text_edit::render_read_only_text_edit;
 use crate::app::domain::{BufferState, EditorViewState, display_line_count};
 use eframe::egui;
-use super::text_edit::render_read_only_text_edit;
 
 pub fn render_artifact_view(
     ui: &mut egui::Ui,
@@ -8,8 +8,8 @@ pub fn render_artifact_view(
     view: &mut EditorViewState,
     word_wrap: bool,
     editor_font_id: &egui::FontId,
-) -> bool {
-    if view.show_control_chars {
+) -> (bool, bool) {
+    let focused = if view.show_control_chars {
         render_read_only_text_edit(
             ui,
             view,
@@ -17,7 +17,7 @@ pub fn render_artifact_view(
             buffer.line_count,
             word_wrap,
             editor_font_id,
-        );
+        )
     } else {
         let clean_text = make_control_chars_clean(&buffer.content);
         let desired_rows = display_line_count(&clean_text);
@@ -28,9 +28,10 @@ pub fn render_artifact_view(
             desired_rows,
             word_wrap,
             editor_font_id,
-        );
-    }
-    false
+        )
+    };
+
+    (false, focused)
 }
 
 pub fn make_control_chars_visible(text: &str) -> String {

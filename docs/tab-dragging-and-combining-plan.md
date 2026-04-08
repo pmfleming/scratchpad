@@ -1,229 +1,265 @@
 # Tab Dragging and Combining Plan
 
-This document defines the intended behavior for direct tab manipulation in Scratchpad.
+This document tracks the intended behavior and remaining work for direct tab manipulation in Scratchpad.
 
-The scope is broader than simple tab reordering. It covers:
+It originally described a future plan. The project has since implemented a substantial part of the tab-dragging work, so this document now serves two purposes:
 
-- dragging tabs to reorder them in the strip
-- dragging tabs across overflowed tab lists
-- combining one tab into another workspace tab
-- the model changes required to make tab combining real instead of cosmetic
+- record what is already shipped
+- define the remaining work for true tab combining
 
-It is a planning document, not an implementation spec.
+## Scope
 
-## Problem
+This area covers:
 
-The current tab strip supports activation, closing, horizontal scrolling, and an overflow menu, but tabs are still static objects.
+- dragging tabs to reorder them in the visible strip
+- dragging tabs across the overflow list surface
+- auto-scrolling the tab strip while dragging
+- eventual combining of one workspace tab into another workspace tab
+- the model changes required to make combine real instead of cosmetic
 
-That leaves several missing workflows:
+It does not cover general docking, window detaching, or arbitrary freeform layout.
 
-- users cannot reorder tabs by drag
-- overflowed tabs are harder to organize than they should be
-- one workspace tab cannot absorb another tab by direct manipulation
-- the current data model still treats one `WorkspaceTab` as owning exactly one `BufferState`, which blocks true multi-buffer tab combining
+## Summary
 
-The result is that the app supports more pane behavior inside a tab than it supports between tabs.
+### Implemented
 
-## Current State
+- visible tab strip drag-reorder
+- overflow-list drag-reorder participation
+- shared drop-zone resolution across strip and overflow popup
+- drag ghost rendering
+- reorder marker rendering
+- drag threshold and close-button protection
+- tab-strip auto-scroll while dragging near the strip edges
 
-### Tab Strip
+### Not Implemented
 
-`src/app/ui/tab_strip.rs` currently provides:
+- dropping one top-level tab onto another to combine workspaces
+- any persistent multi-buffer workspace model
+- combine-specific hover targets or combine preview visuals
+- app command(s) for combine
 
-- tab activation
-- close requests
-- horizontal scrolling
-- overflow access
-- `New Tab`
+## Current Product State
 
-It does not provide:
+### Tab Dragging
 
-- drag state for tabs
-- reorder previews
-- drop targets
-- combine behavior
+Tab reordering is now implemented in the current `src/app/ui/tab_drag/` module and integrated into:
+
+- `src/app/ui/tab_strip/mod.rs`
+- `src/app/ui/tab_strip/tab_cell.rs`
+- `src/app/ui/tab_overflow.rs`
+
+The current behavior includes:
+
+- pointer-down starts a pending drag state
+- a movement threshold prevents accidental drag on click
+- close-button hit areas still win input and suppress drag start
+- dragging shows a ghosted tab under the pointer
+- dragging shows a reorder marker in the active drop zone
+- releasing commits reorder if the resolved target changes index
+- dragging near the tab-strip edges auto-scrolls the strip
+- overflow rows participate as vertical drop zones when the overflow popup is open
+
+This is no longer a planned feature. It is shipped behavior.
+
+### Overflow Integration
+
+The earlier plan assumed overflow drag support would come later. That is no longer accurate.
+
+The current implementation already supports:
+
+- drag initiation from overflow rows
+- drag placeholders for the active drag source inside the overflow popup
+- vertical drop-zone resolution in the overflow popup
+- reordering between the strip and the overflow surface using one shared drag model
+
+What is still missing is not overflow-aware reorder. What is missing is combine-aware behavior.
 
 ### Workspace Model
 
-`src/app/domain/tab.rs` currently defines `WorkspaceTab` like this in practice:
+The current workspace model is still the architectural blocker for combine.
 
-- one `BufferState`
-- one or more `EditorViewState`
-- one pane tree (`root_pane`)
-- one `active_view_id`
-
-That means current split panes are multiple views into the same buffer, not multiple buffers inside one workspace tab.
-
-This matters because a real “combine tabs” feature means one source tab must be absorbed into another target workspace. That cannot be implemented cleanly while `WorkspaceTab` still owns only one buffer.
-
-## Design Goals
-
-1. Make tab order directly manipulable by drag.
-2. Keep drag behavior predictable in crowded and overflowed tab strips.
-3. Support combining one tab into another workspace through a visible drop gesture.
-4. Avoid fake combining behavior that only rearranges labels without merging workspace state.
-5. Keep transient drag UI state out of session persistence.
-6. Sequence implementation so reorder can land before full combine support.
-
-## Terminology
-
-### Reorder
-
-Move a tab to a different position in the top-level tab strip.
-
-### Combine
-
-Drop one source tab onto a target tab so the source workspace is absorbed into the target workspace instead of remaining a separate top-level tab.
-
-### Workspace Tab
-
-The top-level tab visible in the tab strip.
-
-### Drag Preview
-
-The temporary visual state shown while a tab is being dragged, including insertion markers and combine targets.
-
-## User Interaction Model
-
-## 1. Reordering Tabs
-
-Expected behavior:
-
-- pointer down on a tab starts a pending drag gesture
-- a small movement threshold prevents accidental reorders from clicks
-- once the threshold is crossed, the tab enters drag mode
-- dragging left or right across the strip shows a clear insertion marker
-- releasing commits the new order
-
-Important details:
-
-- clicking without crossing the threshold still activates the tab normally
-- close buttons must keep their current behavior and should not start tab drag
-- dragging the active tab should keep it active after reorder
-- the reorder marker should snap between tabs, not float ambiguously over them
-
-## 2. Auto-Scroll While Dragging
-
-When the tab strip is horizontally overflowed, drag should not dead-end at the visible edge.
-
-Expected behavior:
-
-- dragging near the left edge auto-scrolls left
-- dragging near the right edge auto-scrolls right
-- scroll speed ramps gently based on proximity to the edge
-- the dragged tab remains visually anchored to the pointer while the strip moves under it
-
-This is required for practical reordering when many tabs are open.
-
-## 3. Overflow Menu Integration
-
-The overflow menu is already a second access path for tabs. Dragging should eventually work across both the strip and overflow presentation, but the first implementation should be intentionally scoped.
-
-Recommended sequencing:
-
-- first implementation: drag only within the visible strip
-- second implementation: allow the overflow list to activate tabs during drag hover so hidden tabs can be brought into view
-- third implementation: optional direct drag from overflow list rows
-
-Do not block core reorder on overflow-list drag support.
-
-## 4. Combining Tabs
-
-Combining should be a distinct gesture from simple reorder.
-
-Recommended model:
-
-- dragging across tab gaps means reorder
-- dragging onto the body of a target tab means combine intent
-- the target tab should visually change to indicate combine mode
-- releasing over the target commits the combine
-
-This split between “between tabs” and “onto a tab” gives a clear mental model and avoids mode switches.
-
-## Combine Result
-
-The combined result should be real workspace merging, not a temporary tab group.
-
-Recommended behavior for the first combine implementation:
-
-- source tab is removed from the top-level tab strip
-- source buffer becomes part of the target workspace
-- target workspace gains a new view or pane for the source content
-- the source content becomes focused after combine
-
-Recommended first layout rule:
-
-- combine creates a two-way split in the target workspace
-- if the target currently has a single leaf, split that leaf
-- if the target already has a pane tree, insert the source into a predictable default location rather than trying to infer an arbitrary best leaf
-
-Good default:
-
-- combine onto a tab produces a vertical split with the source inserted as the new second pane
-
-This should stay deterministic. Users can resize or restructure after the combine.
-
-## 5. Future Combine Targets
-
-After the basic drop-onto-tab combine works, richer drop zones can be added.
-
-Possible later behaviors:
-
-- drop on tab center: merge into target workspace using default split placement
-- drop on left half of tab: combine and place source first
-- drop on right half of tab: combine and place source second
-- drop onto editor surface: combine into a specific pane target instead of the workspace tab shell
-
-These are follow-up features, not phase-one requirements.
-
-## Required Model Changes
-
-## Current Blocker
-
-Today `WorkspaceTab` owns exactly one `BufferState`.
-
-That blocks true tab combining because after a combine, one workspace would need to contain:
-
-- multiple buffers
-- multiple views bound to potentially different buffers
-- one pane tree referencing those views
-
-## Target Runtime Model
-
-To support combine properly, the model needs to move toward:
-
-- `WorkspaceTab` owns layout and views
-- each `EditorViewState` points to a buffer identity
-- buffers live in a workspace-level or app-level registry
-
-Conceptually:
+Today `WorkspaceTab` still owns exactly one `BufferState`:
 
 ```rust
 pub struct WorkspaceTab {
-    pub root_pane: PaneNode,
+    pub buffer: BufferState,
     pub views: Vec<EditorViewState>,
+    pub root_pane: PaneNode,
+    pub active_view_id: ViewId,
+}
+```
+
+`EditorViewState` already contains a `buffer_id`, which is useful groundwork, but in practice all views in a workspace tab still refer to the same `WorkspaceTab::buffer`.
+
+That means the current multi-pane model is still:
+
+- one buffer per workspace tab
+- many views over that one buffer
+- one pane tree over those views
+
+This is enough for splits of the same file, but not enough for true tab combining.
+
+## What Has Changed Since The Original Plan
+
+The original plan is outdated in four important ways:
+
+1. Reorder is no longer hypothetical.
+2. Overflow drag is already partially implemented, not deferred.
+3. The code is now modularized under `src/app/ui/tab_strip/` and `src/app/ui/tab_drag/`, not a single `src/app/ui/tab_strip.rs` file.
+4. `EditorViewState` already has `buffer_id`, so the model foundation has moved partway toward multi-buffer support, but not far enough to support combine.
+
+## Remaining Problem
+
+The missing workflow is still real:
+
+- users can reorder workspace tabs, but cannot merge one workspace tab into another by drag
+
+That creates a mismatch in capability:
+
+- intra-workspace layout is fairly capable
+- inter-workspace manipulation stops at reorder
+
+The remaining work should focus on combine, not on re-planning reorder.
+
+## Design Goals
+
+1. Preserve the current reorder behavior and keep it predictable.
+2. Add combine only when the runtime model can represent it honestly.
+3. Keep transient drag state out of session persistence.
+4. Reuse the existing drag infrastructure where practical.
+5. Make combine visually distinct from reorder.
+6. Keep implementation sequencing realistic for the current codebase.
+
+## Current Drag Architecture
+
+The current drag stack is centered on transient state in `src/app/ui/tab_drag/state/`.
+
+### Existing State Model
+
+The drag state currently tracks:
+
+- source tab index
+- drag start pointer position
+- current pointer position
+
+Resolved drop behavior is currently reorder-only:
+
+- shared `TabDropZone` values represent horizontal strip zones and vertical overflow zones
+- drop resolution yields a zone index and drop slot
+- release commits a reorder from source index to resolved destination index
+
+### Existing Visual Feedback
+
+Already implemented:
+
+- dragged tab ghost
+- reorder marker
+- overflow drag placeholder
+
+Not yet implemented:
+
+- combine hover state
+- combine target highlight
+- combine-specific drop intent
+
+## Combine Requirements
+
+Combine must not be implemented as a fake grouping shell.
+
+The intended result remains:
+
+- source top-level tab is removed
+- target top-level tab remains
+- source content becomes part of the target workspace
+- target workspace pane tree expands deterministically
+- the newly inserted content becomes focused
+- the target workspace tab becomes the active top-level tab
+
+## Current Architectural Blocker
+
+True combine requires one workspace tab to own multiple buffers.
+
+The current model cannot represent that cleanly because:
+
+- `WorkspaceTab` owns one concrete `BufferState`
+- there is no workspace-level buffer registry
+- view-to-buffer binding exists only as an identifier, not as a fully independent storage layer
+- session persistence still serializes one buffer payload per workspace tab
+
+So the blocker is no longer “views need a `buffer_id`."
+
+The blocker is now:
+
+- buffer storage still lives on `WorkspaceTab`
+- session persistence assumes one buffer per workspace tab
+- combine would require multiple buffers per workspace tab plus view bindings into them
+
+## Recommended Target Runtime Model
+
+The codebase should move toward this shape:
+
+```rust
+pub struct WorkspaceTab {
+    pub buffers: Vec<WorkspaceBuffer>,
+    pub views: Vec<EditorViewState>,
+    pub root_pane: PaneNode,
     pub active_view_id: ViewId,
 }
 
 pub struct EditorViewState {
     pub id: ViewId,
     pub buffer_id: BufferId,
-    // view-local fields...
+    // view-local UI state
 }
 ```
 
-The exact final shape can vary, but the key rule should hold:
+The exact concrete types can vary, but these rules should hold:
 
-- views point at buffers
-- tabs own layouts, not document storage directly
+- workspace tabs own layout plus a buffer collection
+- views bind to buffers by identity
+- closing a view is separate from deleting a buffer
+- session restore can rebuild a workspace containing multiple buffers
 
-Without that change, combine would require awkward special cases or buffer copying that fights the architecture.
+Without that model shift, combine would either duplicate buffers awkwardly or violate the current architecture.
 
-## Command Model
+## Combine Interaction Model
 
-Drag and combine should be expressed through explicit commands, not hidden deep inside egui closures.
+The current reorder interaction should stay intact.
 
-Recommended commands:
+Recommended combine model:
+
+- dragging between tabs means reorder intent
+- dragging onto the interior body of a tab means combine intent
+- the target tab visually highlights differently from reorder
+- releasing over the tab body commits combine
+
+That preserves a clear distinction:
+
+- gap = reorder
+- tab body = combine
+
+## First Combine Layout Rule
+
+The first combine implementation should be deterministic.
+
+Recommended rule:
+
+- combine into the target workspace by splitting the active leaf of the target workspace
+- insert the dragged workspace content as the new second pane by default
+
+This aligns with how the current split model already works and avoids arbitrary heuristics.
+
+Future richer placement can come later.
+
+## Commands
+
+The public command layer should be expanded only when combine work actually starts.
+
+The existing reorder path already routes through:
+
+- `AppCommand::ReorderTab`
+
+Recommended additional command when combine work begins:
 
 ```rust
 pub enum AppCommand {
@@ -238,207 +274,145 @@ pub enum AppCommand {
 }
 ```
 
-Possible internal helpers later:
+Internal drag helpers can stay UI-local. The public command surface should remain small.
 
-- `StartTabDrag`
-- `UpdateTabDragHover`
-- `CancelTabDrag`
-- `CommitTabDrag`
+## Session Persistence Impact
 
-The public app command layer should stay small. The UI can keep temporary drag state locally or in ephemeral app UI state.
+Reorder is already compatible with current persistence.
 
-## Drag State
+Combine is not.
 
-Drag state should be transient and never persisted.
-
-Recommended fields:
-
-- dragged tab index
-- drag start position
-- current pointer position
-- current drop intent:
-  - none
-  - reorder before index
-  - reorder after index
-  - combine into target index
-- whether auto-scroll is currently active
-
-This can live in temporary egui memory or a dedicated non-persisted UI state field on the app.
-
-## Visual Design Rules
-
-## Reorder Feedback
-
-Use a strong, narrow insertion marker between tabs.
-
-Recommended visuals:
-
-- a vertical accent line between tab buttons
-- slight spacing expansion where the tab will land
-- dragged tab rendered with reduced opacity or as a lifted ghost
-
-## Combine Feedback
-
-Use a different visual from reorder so the user can tell the action changed.
-
-Recommended visuals:
-
-- target tab body highlights
-- target tab border or fill changes
-- optional overlay text such as `Combine into workspace`
-
-Do not reuse the reorder insertion marker for combine hover. They need to read as different outcomes.
-
-## Accessibility and Usability Rules
-
-- tab drag threshold should prevent accidental reorder on normal clicks
-- close buttons should continue to win pointer input inside their hit area
-- the active tab should remain obvious during drag
-- if a dragged tab cannot be combined because the model is not yet capable, the UI should not suggest that it can
-- keyboard-driven tab movement can come later, but drag should not preclude it
-
-## Edge Cases
-
-## Dirty Tabs
-
-Combining or reordering dirty tabs must preserve dirty state exactly as-is.
-
-No save prompt should appear during reorder or combine. These are layout operations, not close operations.
-
-## Duplicate Names
-
-If multiple tabs share the same file name, drag previews and overflow surfaces should use the existing duplication context labels where needed.
-
-## Combining Into Self
-
-Dropping a tab onto itself must do nothing.
-
-## Combining Active and Inactive Tabs
-
-After combine:
-
-- the source content should become active inside the target workspace
-- the target workspace tab should become the active top-level tab
-
-This gives the user a predictable “the thing I just dragged is what I now see” outcome.
-
-## Combining a Workspace That Already Has Splits
-
-The first implementation should use a deterministic insertion rule, not a context-sensitive heuristic.
-
-Examples of acceptable first rules:
-
-- always split the active leaf
-- always split the root and insert second
-
-Pick one rule and keep it stable.
-
-## Session Persistence
-
-Reorder and combine change persistent workspace structure, so their results must survive restart.
-
-Persist after reorder:
+Reorder persistence requirements are already satisfied:
 
 - top-level tab order
 - active tab index
 
-Persist after combine:
+Combine will additionally require persisted support for:
 
-- new workspace tab count
-- target workspace pane tree
-- target workspace views
-- buffer bindings for those views
-- active view and active tab
+- multiple buffers inside one workspace tab
+- view-to-buffer bindings within one workspace tab
+- pane tree references across those views
+- active view within the merged workspace
 
-Do not persist:
+Transient drag state should continue to remain non-persistent.
 
-- drag hover state
-- insertion marker state
-- pointer position
-- transient auto-scroll state
+## Revised Implementation Phases
 
-## Implementation Phases
+### Phase 1: Strip Reorder
 
-## Phase 1: Reorder Only
+Status: completed
 
-- add transient tab drag state
-- support dragging within the visible strip
-- commit reorder with a clear insertion marker
-- keep overflow behavior unchanged
-- add tests for index movement and active-tab preservation
+Delivered:
 
-This phase should land first because it is useful immediately and does not require the multi-buffer workspace model.
+- thresholded drag start
+- reorder marker
+- ghost tab
+- release-to-commit reorder
+- active-tab preservation through reorder
 
-## Phase 2: Overflow-Aware Dragging
+### Phase 2: Overflow-Aware Reorder
 
-- auto-scroll the strip while dragging near edges
-- keep dragged tabs reorderable even when many tabs are hidden
-- optionally allow hover activation of overflowed tabs during drag
+Status: substantially completed
 
-## Phase 3: Multi-Buffer Workspace Foundation
+Delivered:
 
-- move buffer ownership out of `WorkspaceTab`
-- bind each view to a buffer identity
-- update session persistence for multi-buffer workspaces
-- add migration and restore tests
+- strip auto-scroll near edges
+- overflow popup drag participation
+- vertical overflow drop zones
+- shared drop resolution across strip and overflow
 
-This is the architectural gate for real tab combining.
+Still optional here:
 
-## Phase 4: Basic Combine
+- hover-driven overflow activation behavior
+- additional polish around popup behavior during extended drag scenarios
 
-- allow dropping one tab onto another tab
-- merge source workspace into target workspace
-- remove source tab from the strip
-- create a deterministic split in the target workspace
-- focus the dragged content after the merge
+### Phase 3: Multi-Buffer Workspace Foundation
 
-## Phase 5: Richer Drop Targets
+Status: not started in the required sense
 
-- optional left/right combine placement
-- optional drop-on-editor-surface targeting
-- optional drag from overflow list
-- optional context menu alternatives to combine
+Partial groundwork exists:
 
-## Testing Plan
+- `EditorViewState` already has `buffer_id`
 
-Add tests for:
+But the real phase is still pending because:
 
-- moving a tab left and right in the strip
-- preserving active tab identity across reorder
-- preserving dirty state across reorder
-- combining one workspace into another
-- combining when the target already has a split tree
-- restoring combined workspaces from session state
-- large-tab-count drag behavior near overflow edges
+- `WorkspaceTab` still owns a single buffer
+- persistence still assumes a single buffer per workspace tab
 
-Manual checks should cover:
+This remains the actual gate for combine.
 
-- no accidental reorder on click
-- close button still works during crowded layouts
-- insertion marker is unambiguous
-- combine hover looks visually different from reorder
-- active content after combine matches user expectation
+### Phase 4: Basic Combine
 
-## Non-Goals for the First Pass
+Status: not started
+
+Target outcome:
+
+- drag onto tab body commits merge
+- source top-level tab disappears
+- target workspace absorbs source buffer/view state
+- target workspace grows by a deterministic split
+- source content becomes focused in target workspace
+
+### Phase 5: Richer Combine Targets
+
+Status: not started
+
+Possible follow-ups:
+
+- left/right combine placement on tab body
+- editor-surface drop targets
+- overflow-origin combine polish
+- optional non-drag entry points for combine
+
+## Testing Status And Gaps
+
+### Existing Coverage
+
+The current drag state layer already includes unit coverage for:
+
+- drop-slot resolution
+- shared strip/overflow zone selection
+- auto-scroll behavior near strip edges
+
+### Remaining Needed Coverage
+
+The next meaningful tests should focus on:
+
+- reorder behavior at the app-command / tab-manager level if gaps remain
+- persistence of reordered top-level tab order after restart
+- future multi-buffer workspace restore behavior
+- future combine command semantics
+- future combine behavior when target already has splits
+
+Manual checks should continue to cover:
+
+- click does not accidentally reorder
+- close buttons still win hit testing
+- reorder markers remain unambiguous
+- overflow popup behavior remains stable during drag
+
+## Non-Goals
 
 - multi-window tab detaching
 - browser-style tab grouping UI
-- arbitrary freeform docking
-- persisting raw drag positions
-- drag support inside every overflow presentation from day one
+- arbitrary docking
+- persisting drag hover state or pointer position
+- implementing fake combine before the model can support it
 
 ## Success Criteria
 
-The feature is successful when:
+This work is successful when:
 
-- tabs can be reordered reliably by drag
+- current reorder behavior remains reliable
 - overflow does not break drag usability
-- tab combining produces a real merged workspace, not a fake grouping shell
-- the data model stays coherent and persistable
-- the implementation reduces friction instead of creating ambiguous drag modes
+- combine, when added, produces a real merged workspace
+- the runtime model remains coherent and persistable
+- the user can understand reorder vs combine from the visuals alone
 
-## Recommended Immediate Next Steps
+## Recommended Next Steps
 
-1. Implement tab-strip reorder drag without changing the workspace data model.
-2. Refactor `WorkspaceTab` toward view-to-buffer binding so combine has a sound foundation.
-3. Add combine only after the multi-buffer workspace model exists.
+1. Treat reorder as shipped and stop planning it as a future feature.
+2. Decide the target multi-buffer workspace shape before any combine UI work.
+3. Refactor `WorkspaceTab` and session persistence to support multiple buffers per workspace tab.
+4. Add `CombineTabIntoTab` only after the runtime model can represent merged workspaces honestly.
+5. Reuse the existing tab-drag infrastructure for combine intent rather than introducing a second drag system.

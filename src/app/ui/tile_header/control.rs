@@ -95,7 +95,7 @@ pub(crate) fn paint_tile_control(
         rect,
         3.0,
         egui::Stroke::new(1.0, style_colors.stroke),
-        egui::StrokeKind::Outside,
+        egui::StrokeKind::Inside,
     );
     ui.painter().text(
         rect.center(),
@@ -153,12 +153,12 @@ fn danger_tile_control_colors(hovered: bool) -> (egui::Color32, egui::Color32) {
     let fill = if hovered {
         CLOSE_HOVER_BG
     } else {
-        CLOSE_BG.gamma_multiply(0.6)
+        egui::Color32::from_white_alpha(12)
     };
     let stroke = if hovered {
         egui::Color32::from_rgb(255, 196, 196)
     } else {
-        egui::Color32::from_rgba_unmultiplied(255, 150, 150, 90)
+        egui::Color32::from_white_alpha(20)
     };
     (fill, stroke)
 }

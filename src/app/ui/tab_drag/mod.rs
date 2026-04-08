@@ -9,6 +9,11 @@ pub(crate) use state::{
     begin_tab_drag_if_needed, has_tab_drag_for_context, is_drag_active_for_context,
 };
 
+pub(crate) enum TabDragCommit {
+    Reorder { from_index: usize, to_index: usize },
+    Combine { source_index: usize, target_index: usize },
+}
+
 pub(crate) fn sync_drag_state(ui: &egui::Ui) {
     let _ = state::update_current_tab_drag(ui);
 }
@@ -17,15 +22,25 @@ pub(crate) fn update_tab_drag(
     ui: &egui::Ui,
     zones: &[TabDropZone],
     total_tab_count: usize,
-) -> Option<(usize, usize)> {
+) -> Option<TabDragCommit> {
     let drag_state = state::update_current_tab_drag(ui)?;
     let drag_active = state::drag_is_active(drag_state);
-    let drop_target = drag_active
-        .then(|| state::locate_drop_slot(zones, drag_state.current_pos))
+    let drop_intent = drag_active
+        .then(|| state::locate_drop_intent(zones, drag_state.current_pos))
         .flatten();
 
-    if let Some((zone_index, drop_slot)) = drop_target {
-        paint::paint_tab_reorder_marker(ui.ctx(), &zones[zone_index], drop_slot);
+    if let Some(drop_intent) = &drop_intent {
+        match drop_intent {
+            state::TabDropIntent::Reorder { zone_index, drop_slot } => {
+                paint::paint_tab_reorder_marker(ui.ctx(), &zones[*zone_index], *drop_slot);
+            }
+            state::TabDropIntent::Combine {
+                zone_index,
+                target_index,
+            } => {
+                paint::paint_tab_combine_target(ui.ctx(), &zones[*zone_index], *target_index);
+            }
+        }
     }
 
     if ui.input(|input| input.pointer.primary_down()) {
@@ -34,9 +49,21 @@ pub(crate) fn update_tab_drag(
 
     state::clear_tab_drag_state(ui);
 
-    let (_, drop_slot) = drop_target?;
-    let to_index = state::resolve_drop_slot(drag_state.source_index, drop_slot, total_tab_count);
-    (to_index != drag_state.source_index).then_some((drag_state.source_index, to_index))
+    match drop_intent? {
+        state::TabDropIntent::Reorder { drop_slot, .. } => {
+            let to_index = state::resolve_drop_slot(drag_state.source_index, drop_slot, total_tab_count);
+            (to_index != drag_state.source_index).then_some(TabDragCommit::Reorder {
+                from_index: drag_state.source_index,
+                to_index,
+            })
+        }
+        state::TabDropIntent::Combine { target_index, .. } => {
+            (target_index != drag_state.source_index).then_some(TabDragCommit::Combine {
+                source_index: drag_state.source_index,
+                target_index,
+            })
+        }
+    }
 }
 
 pub(crate) fn paint_dragged_tab_ghost(ctx: &egui::Context, tabs: &[WorkspaceTab]) {

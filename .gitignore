@@ -1,6 +1,8 @@
 /target/
 /target-tests/
 /log/
+/hotspots.html/
+/hotspots.html
 
 # Python virtual environment and caches
 .venv/

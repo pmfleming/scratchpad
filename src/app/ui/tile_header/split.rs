@@ -28,6 +28,7 @@ pub struct SplitPreviewOverlay {
 pub enum TileAction {
     Activate(ViewId),
     Close(ViewId),
+    Promote(ViewId),
     #[allow(dead_code)]
     ResizeSplit {
         path: crate::app::domain::SplitPath,
@@ -78,7 +79,8 @@ impl TileSplitHandler {
         content: &str,
         handle_rect: egui::Rect,
     ) -> SplitPreviewOverlay {
-        let spec = geometry::split_preview_spec(self.tile_rect, state.current_pos - state.start_pos);
+        let spec =
+            geometry::split_preview_spec(self.tile_rect, state.current_pos - state.start_pos);
         SplitPreviewOverlay {
             axis: spec.map(|(axis, _, _)| axis),
             new_view_first: spec

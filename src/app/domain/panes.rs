@@ -76,6 +76,40 @@ impl PaneNode {
         }
     }
 
+    pub fn split_view_with_node(
+        &mut self,
+        target: ViewId,
+        axis: SplitAxis,
+        new_node: PaneNode,
+        new_view_first: bool,
+        ratio: f32,
+    ) -> bool {
+        match self {
+            Self::Leaf { view_id } if *view_id == target => {
+                let clamped_ratio = ratio.clamp(0.2, 0.8);
+                let existing_leaf = Box::new(Self::Leaf { view_id: *view_id });
+                let new_node = Box::new(new_node);
+                let (first, second) = if new_view_first {
+                    (new_node, existing_leaf)
+                } else {
+                    (existing_leaf, new_node)
+                };
+                *self = Self::Split {
+                    axis,
+                    ratio: clamped_ratio,
+                    first,
+                    second,
+                };
+                true
+            }
+            Self::Leaf { .. } => false,
+            Self::Split { first, second, .. } => {
+                first.split_view_with_node(target, axis, new_node.clone(), new_view_first, ratio)
+                    || second.split_view_with_node(target, axis, new_node, new_view_first, ratio)
+            }
+        }
+    }
+
     pub fn resize_split(&mut self, path: &[PaneBranch], ratio: f32) -> bool {
         let clamped_ratio = ratio.clamp(0.2, 0.8);
         match path.split_first() {
@@ -149,6 +183,16 @@ impl PaneNode {
         }
     }
 
+    pub fn collect_view_ids_in_order(&self, output: &mut Vec<ViewId>) {
+        match self {
+            Self::Leaf { view_id } => output.push(*view_id),
+            Self::Split { first, second, .. } => {
+                first.collect_view_ids_in_order(output);
+                second.collect_view_ids_in_order(output);
+            }
+        }
+    }
+
     pub fn contains_view(&self, target: ViewId) -> bool {
         match self {
             Self::Leaf { view_id } => *view_id == target,
@@ -162,6 +206,55 @@ impl PaneNode {
         match self {
             Self::Leaf { view_id } => *view_id,
             Self::Split { first, .. } => first.first_view_id(),
+        }
+    }
+
+    pub fn balanced_from_view_ids(view_ids: &[ViewId], axis: SplitAxis) -> Option<Self> {
+        match view_ids {
+            [] => None,
+            [view_id] => Some(Self::leaf(*view_id)),
+            _ => {
+                let first_count = view_ids.len().div_ceil(2);
+                let second_count = view_ids.len() - first_count;
+                let next_axis = match axis {
+                    SplitAxis::Horizontal => SplitAxis::Vertical,
+                    SplitAxis::Vertical => SplitAxis::Horizontal,
+                };
+                let first = Box::new(Self::balanced_from_view_ids(
+                    &view_ids[..first_count],
+                    next_axis,
+                )?);
+                let second = Box::new(Self::balanced_from_view_ids(
+                    &view_ids[first_count..],
+                    next_axis,
+                )?);
+
+                Some(Self::Split {
+                    axis,
+                    ratio: first_count as f32 / (first_count + second_count) as f32,
+                    first,
+                    second,
+                })
+            }
+        }
+    }
+
+    pub fn shallowest_leaf(&self) -> (ViewId, usize) {
+        self.shallowest_leaf_at_depth(0)
+    }
+
+    fn shallowest_leaf_at_depth(&self, depth: usize) -> (ViewId, usize) {
+        match self {
+            Self::Leaf { view_id } => (*view_id, depth),
+            Self::Split { first, second, .. } => {
+                let first_leaf = first.shallowest_leaf_at_depth(depth + 1);
+                let second_leaf = second.shallowest_leaf_at_depth(depth + 1);
+                if first_leaf.1 <= second_leaf.1 {
+                    first_leaf
+                } else {
+                    second_leaf
+                }
+            }
         }
     }
 }

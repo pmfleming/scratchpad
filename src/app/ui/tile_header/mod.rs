@@ -3,10 +3,11 @@ pub mod split;
 
 use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::ViewId;
+use crate::app::ui::tab_drag;
 use eframe::egui;
 
 pub use control::{TileControl, TileControlStyle};
-pub use split::{SplitPreviewOverlay, TileAction, TileSplitHandler, paint_split_preview, TILE_GAP};
+pub use split::{SplitPreviewOverlay, TILE_GAP, TileAction, TileSplitHandler, paint_split_preview};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_tile_header(
@@ -19,16 +20,33 @@ pub(crate) fn render_tile_header(
     actions: &mut Vec<TileAction>,
     preview_overlay: &mut Option<SplitPreviewOverlay>,
 ) {
-    let title = app.tabs()[tab_index].buffer.display_name();
-    let content_preview = app.tabs()[tab_index].buffer.content.clone();
+    let title = app.tabs()[tab_index]
+        .buffer_for_view(view_id)
+        .map(|buffer| buffer.display_name())
+        .unwrap_or_else(|| app.tabs()[tab_index].display_name());
+    let content_preview = app.tabs()[tab_index]
+        .buffer_for_view(view_id)
+        .map(|buffer| buffer.content.clone())
+        .unwrap_or_default();
     let split_handler = TileSplitHandler::new(ui, tab_index, view_id, tile_rect);
     let controls_visible = control_visibility(ui, &split_handler, tile_rect);
     if controls_visible <= 0.0 {
         return;
     }
 
+    let can_promote = app.tabs()[tab_index].can_promote_view(view_id);
     let metrics = tile_control_metrics(tile_rect, can_close);
-    let rects = tile_header_rects(tile_rect, can_close, &metrics);
+    let rects = tile_header_rects(tile_rect, can_promote, can_close, &metrics);
+    maybe_show_promote_control(
+        ui,
+        can_promote,
+        tab_index,
+        view_id,
+        rects.promote_hit,
+        metrics.font_size,
+        controls_visible,
+        actions,
+    );
     let split_response = show_split_control(
         ui,
         tab_index,
@@ -61,6 +79,7 @@ pub(crate) fn render_tile_header(
 }
 
 struct TileHeaderRects {
+    promote_hit: egui::Rect,
     split_hit: egui::Rect,
     close_hit: egui::Rect,
 }
@@ -75,12 +94,17 @@ struct TileControlMetrics {
 const TILE_CONTROL_PADDING: f32 = 6.0;
 const TILE_CONTROL_MIN_SIZE: f32 = 18.0;
 const TILE_CONTROL_MAX_SIZE: f32 = crate::app::theme::BUTTON_SIZE.x;
+const TILE_CONTROL_RIGHT_INSET: f32 = 14.0;
 
 fn control_visibility(
     ui: &egui::Ui,
     split_handler: &TileSplitHandler,
     tile_rect: egui::Rect,
 ) -> f32 {
+    if !split_handler.is_dragging(ui) && tab_drag::has_tab_drag_for_context(ui.ctx()) {
+        return 0.0;
+    }
+
     if split_handler.is_dragging(ui) || tile_rect.contains(pointer_hover_pos(ui)) {
         1.0
     } else {
@@ -113,6 +137,36 @@ fn show_split_control(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn maybe_show_promote_control(
+    ui: &mut egui::Ui,
+    can_promote: bool,
+    tab_index: usize,
+    view_id: ViewId,
+    promote_hit: egui::Rect,
+    font_size: f32,
+    controls_visible: f32,
+    actions: &mut Vec<TileAction>,
+) {
+    if !can_promote {
+        return;
+    }
+
+    let promote_response = TileControl::new(egui_phosphor::regular::ARROW_LINE_UP)
+        .visibility(controls_visible)
+        .font_size(font_size)
+        .tooltip("Promote this file's tiles into a new top-level tab")
+        .show(
+            ui,
+            promote_hit,
+            ui.make_persistent_id(("promote_view", tab_index, view_id)),
+            egui::Sense::click(),
+        );
+    if promote_response.clicked() {
+        actions.push(TileAction::Promote(view_id));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn update_split_preview(
     ui: &mut egui::Ui,
     split_handler: &TileSplitHandler,
@@ -124,12 +178,8 @@ fn update_split_preview(
     split_hit: egui::Rect,
 ) {
     if let Some(state) = split_handler.handle_interaction(ui, split_response, actions) {
-        *preview_overlay = Some(split_handler.make_preview(
-            state,
-            title.to_owned(),
-            content_preview,
-            split_hit,
-        ));
+        *preview_overlay =
+            Some(split_handler.make_preview(state, title.to_owned(), content_preview, split_hit));
     }
 }
 
@@ -165,28 +215,38 @@ fn maybe_show_close_control(
 
 fn tile_header_rects(
     tile_rect: egui::Rect,
+    can_promote: bool,
     can_close: bool,
     metrics: &TileControlMetrics,
 ) -> TileHeaderRects {
     let control_y = tile_rect.top() + metrics.padding;
+    let right_edge = tile_rect.right() - TILE_CONTROL_RIGHT_INSET;
+    let close_hit_x = right_edge - metrics.button_size - metrics.padding;
     let split_hit_x = if can_close {
-        tile_rect.right() - (metrics.button_size * 2.0) - metrics.padding - metrics.spacing
+        close_hit_x - metrics.spacing - metrics.button_size
     } else {
-        tile_rect.right() - metrics.button_size - metrics.padding
+        close_hit_x
     };
+    let promote_hit_x = if can_promote {
+        split_hit_x - metrics.spacing - metrics.button_size
+    } else {
+        split_hit_x
+    };
+    let promote_hit = egui::Rect::from_min_size(
+        egui::pos2(promote_hit_x, control_y),
+        egui::vec2(metrics.button_size, metrics.button_size),
+    );
     let split_hit = egui::Rect::from_min_size(
         egui::pos2(split_hit_x, control_y),
         egui::vec2(metrics.button_size, metrics.button_size),
     );
     let close_hit = egui::Rect::from_min_size(
-        egui::pos2(
-            tile_rect.right() - metrics.button_size - metrics.padding,
-            control_y,
-        ),
+        egui::pos2(close_hit_x, control_y),
         egui::vec2(metrics.button_size, metrics.button_size),
     );
 
     TileHeaderRects {
+        promote_hit,
         split_hit,
         close_hit,
     }

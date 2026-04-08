@@ -5,6 +5,7 @@ static NEXT_VIEW_ID: AtomicU64 = AtomicU64::new(1);
 
 pub type ViewId = u64;
 
+#[derive(Clone)]
 pub struct EditorViewState {
     pub id: ViewId,
     pub buffer_id: BufferId,

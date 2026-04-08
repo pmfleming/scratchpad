@@ -1,10 +1,12 @@
 mod model;
 mod ops;
 
-use crate::app::domain::{BufferState, EditorViewState, PaneNode, RestoredBufferState, WorkspaceTab};
+use crate::app::domain::{
+    BufferState, EditorViewState, PaneNode, RestoredBufferState, WorkspaceTab,
+};
 use crate::app::services::file_service::FileService;
-use model::{SessionManifest, SessionPaneNode, SessionTab, SessionView};
-use ops::{collect_stale_buffer_files, write_atomic, BUFFER_FILE_EXTENSION};
+use model::{SessionBuffer, SessionManifest, SessionPaneNode, SessionTab, SessionView};
+use ops::{BUFFER_FILE_EXTENSION, collect_stale_buffer_files, write_atomic};
 use std::collections::HashSet;
 use std::fs;
 use std::io;
@@ -80,19 +82,21 @@ impl SessionStore {
         let session_tabs = tabs
             .iter()
             .map(|tab| {
-                let buffer = &tab.buffer;
-                let temp_path = self.buffer_path(&buffer.temp_id);
-                write_atomic(&temp_path, buffer.content.as_bytes())?;
-                active_temp_paths.insert(temp_path);
+                for buffer in tab.buffers() {
+                    let temp_path = self.buffer_path(&buffer.temp_id);
+                    write_atomic(&temp_path, buffer.content.as_bytes())?;
+                    active_temp_paths.insert(temp_path);
+                }
 
                 Ok(SessionTab {
-                    buffer_id: buffer.id,
-                    name: buffer.name.clone(),
-                    path: buffer.path.clone(),
-                    is_dirty: buffer.is_dirty,
-                    temp_id: buffer.temp_id.clone(),
-                    encoding: buffer.encoding.clone(),
-                    has_bom: buffer.has_bom,
+                    buffers: tab.buffers().map(SessionBuffer::from).collect(),
+                    buffer_id: None,
+                    name: None,
+                    path: None,
+                    is_dirty: None,
+                    temp_id: None,
+                    encoding: None,
+                    has_bom: None,
                     active_view_id: tab.active_view_id,
                     views: tab.views.iter().map(SessionView::from).collect(),
                     root_pane: SessionPaneNode::from(&tab.root_pane),
@@ -149,18 +153,10 @@ impl SessionStore {
     }
 
     fn restore_tab(&self, tab: SessionTab) -> WorkspaceTab {
-        let (content, encoding, has_bom) = self.restore_tab_content(&tab);
-        let buffer = BufferState::restored(RestoredBufferState {
-            id: tab.buffer_id,
-            name: tab.name,
-            content,
-            path: tab.path,
-            is_dirty: tab.is_dirty,
-            temp_id: tab.temp_id,
-            encoding,
-            has_bom,
-        });
-        let control_chars_allowed = buffer.artifact_summary.has_control_chars();
+        let mut buffers = self.restore_buffers(&tab);
+        let control_chars_allowed = buffers
+            .iter()
+            .any(|buffer| buffer.artifact_summary.has_control_chars());
         let views = tab
             .views
             .into_iter()
@@ -179,28 +175,85 @@ impl SessionStore {
         } else {
             root_pane.first_view_id()
         };
-        WorkspaceTab::restored(buffer, views, root_pane, active_view_id)
+        let active_buffer_id = views
+            .iter()
+            .find(|view| view.id == active_view_id)
+            .map(|view| view.buffer_id)
+            .or_else(|| buffers.first().map(|buffer| buffer.id))
+            .expect("restored workspace should contain at least one buffer");
+        let active_buffer_index = buffers
+            .iter()
+            .position(|buffer| buffer.id == active_buffer_id)
+            .unwrap_or(0);
+        let active_buffer = buffers.remove(active_buffer_index);
+        WorkspaceTab::restored_with_buffers(
+            active_buffer,
+            buffers,
+            views,
+            root_pane,
+            active_view_id,
+        )
     }
 
-    fn restore_tab_content(&self, tab: &SessionTab) -> (String, String, bool) {
-        if let Ok(content) = fs::read_to_string(self.buffer_path(&tab.temp_id)) {
-            return (content, tab.encoding.clone(), tab.has_bom);
+    fn restore_buffers(&self, tab: &SessionTab) -> Vec<BufferState> {
+        let session_buffers = if tab.buffers.is_empty() {
+            tab.buffer_id
+                .zip(tab.name.clone())
+                .zip(tab.is_dirty)
+                .zip(tab.temp_id.clone())
+                .zip(tab.encoding.clone())
+                .zip(tab.has_bom)
+                .map(
+                    |(((((buffer_id, name), is_dirty), temp_id), encoding), has_bom)| {
+                        vec![SessionBuffer {
+                            id: buffer_id,
+                            name,
+                            path: tab.path.clone(),
+                            is_dirty,
+                            temp_id,
+                            encoding,
+                            has_bom,
+                        }]
+                    },
+                )
+                .unwrap_or_default()
+        } else {
+            tab.buffers.clone()
+        };
+
+        session_buffers
+            .into_iter()
+            .map(|buffer| {
+                let (content, encoding, has_bom) = self.restore_buffer_content(&buffer);
+                BufferState::restored(RestoredBufferState {
+                    id: buffer.id,
+                    name: buffer.name,
+                    content,
+                    path: buffer.path,
+                    is_dirty: buffer.is_dirty,
+                    temp_id: buffer.temp_id,
+                    encoding,
+                    has_bom,
+                })
+            })
+            .collect()
+    }
+
+    fn restore_buffer_content(&self, buffer: &SessionBuffer) -> (String, String, bool) {
+        if let Ok(content) = fs::read_to_string(self.buffer_path(&buffer.temp_id)) {
+            return (content, buffer.encoding.clone(), buffer.has_bom);
         }
 
-        self.restore_from_original_path(tab)
-    }
-
-    fn restore_from_original_path(&self, tab: &SessionTab) -> (String, String, bool) {
-        match &tab.path {
+        match &buffer.path {
             Some(path) => match FileService::read_file(path) {
                 Ok(file_content) => (
                     file_content.content,
                     file_content.encoding,
                     file_content.has_bom,
                 ),
-                Err(_) => (String::new(), tab.encoding.clone(), tab.has_bom),
+                Err(_) => (String::new(), buffer.encoding.clone(), buffer.has_bom),
             },
-            None => (String::new(), tab.encoding.clone(), tab.has_bom),
+            None => (String::new(), buffer.encoding.clone(), buffer.has_bom),
         }
     }
 }

@@ -1,6 +1,17 @@
 use super::{TabDropAxis, TabDropZone, TabRectEntry};
 use eframe::egui;
 
+pub(crate) enum TabDropIntent {
+    Reorder {
+        zone_index: usize,
+        drop_slot: usize,
+    },
+    Combine {
+        zone_index: usize,
+        target_index: usize,
+    },
+}
+
 pub(crate) fn tab_drop_slot(
     tab_rects: &[TabRectEntry],
     pointer_pos: egui::Pos2,
@@ -19,12 +30,27 @@ pub(crate) fn tab_drop_slot(
     Some(find_drop_slot(tab_rects, primary_pointer, axis).unwrap_or(last_rect.index + 1))
 }
 
-pub(crate) fn locate_drop_slot(
+pub(crate) fn locate_drop_intent(
     zones: &[TabDropZone],
     pointer_pos: egui::Pos2,
-) -> Option<(usize, usize)> {
+) -> Option<TabDropIntent> {
     zones.iter().enumerate().find_map(|(zone_index, zone)| {
-        tab_drop_slot(&zone.entries, pointer_pos, zone.axis).map(|drop_slot| (zone_index, drop_slot))
+        combine_target(&zone.entries, pointer_pos).map_or_else(
+            || {
+                tab_drop_slot(&zone.entries, pointer_pos, zone.axis).map(|drop_slot| {
+                    TabDropIntent::Reorder {
+                        zone_index,
+                        drop_slot,
+                    }
+                })
+            },
+            |target_index| {
+                Some(TabDropIntent::Combine {
+                    zone_index,
+                    target_index,
+                })
+            },
+        )
     })
 }
 
@@ -84,4 +110,18 @@ fn entry_center(rect: egui::Rect, axis: TabDropAxis) -> f32 {
         TabDropAxis::Horizontal => rect.center().x,
         TabDropAxis::Vertical => rect.center().y,
     }
+}
+
+fn combine_target(tab_rects: &[TabRectEntry], pointer_pos: egui::Pos2) -> Option<usize> {
+    tab_rects.iter().find_map(|entry| {
+        combine_rect(entry.rect)
+            .contains(pointer_pos)
+            .then_some(entry.index)
+    })
+}
+
+fn combine_rect(rect: egui::Rect) -> egui::Rect {
+    let shrink_x = (rect.width() * 0.22).clamp(10.0, 24.0);
+    let shrink_y = (rect.height() * 0.18).clamp(3.0, 8.0);
+    rect.shrink2(egui::vec2(shrink_x, shrink_y))
 }

@@ -81,6 +81,37 @@ pub(super) fn paint_tab_reorder_marker(ctx: &egui::Context, zone: &TabDropZone, 
     }
 }
 
+pub(super) fn paint_tab_combine_target(
+    ctx: &egui::Context,
+    zone: &TabDropZone,
+    target_index: usize,
+) {
+    let Some(target_rect) = zone
+        .entries
+        .iter()
+        .find(|entry| entry.index == target_index)
+        .map(|entry| entry.rect)
+    else {
+        return;
+    };
+
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("tab_combine_target"),
+    ));
+    painter.rect_filled(target_rect.shrink(2.0), 4.0, tab_combine_highlight_color());
+    painter.rect_stroke(
+        target_rect.shrink(2.0),
+        4.0,
+        egui::Stroke::new(1.0, TAB_REORDER_MARKER_COLOR),
+        egui::StrokeKind::Inside,
+    );
+}
+
+fn tab_combine_highlight_color() -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(104, 154, 232, 64)
+}
+
 fn paint_horizontal_reorder_marker(
     painter: &egui::Painter,
     zone: &TabDropZone,

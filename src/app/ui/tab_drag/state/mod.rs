@@ -1,6 +1,6 @@
 mod autoscroll;
-mod drop_target;
 mod drag;
+mod drop_target;
 
 use eframe::egui;
 
@@ -32,23 +32,23 @@ pub(crate) struct TabRectEntry {
 
 pub(crate) use autoscroll::auto_scroll_delta;
 pub(crate) use drag::{
-    clear_tab_drag_state, current_tab_drag_state_for_context, drag_is_active,
-    update_current_tab_drag,
-};
-pub(crate) use drag::{
     active_drag_source_for_context, begin_tab_drag_if_needed, has_tab_drag_for_context,
     is_drag_active_for_context,
 };
-pub(crate) use drop_target::{locate_drop_slot, resolve_drop_slot};
+pub(crate) use drag::{
+    clear_tab_drag_state, current_tab_drag_state_for_context, drag_is_active,
+    update_current_tab_drag,
+};
+pub(crate) use drop_target::{TabDropIntent, locate_drop_intent, resolve_drop_slot};
 
 #[cfg(test)]
 mod tests {
     use super::{
-        TabDropAxis, TabDropZone, TabRectEntry, auto_scroll_delta, locate_drop_slot,
-        resolve_drop_slot,
+        TabDropAxis, TabDropIntent, TabDropZone, TabRectEntry, auto_scroll_delta,
+        locate_drop_intent, resolve_drop_slot,
     };
-    use crate::app::ui::tab_drag::state::drop_target::tab_drop_slot;
     use crate::app::ui::tab_drag::state::autoscroll::TAB_DRAG_AUTOSCROLL_MAX_STEP;
+    use crate::app::ui::tab_drag::state::drop_target::tab_drop_slot;
     use eframe::egui::{Rect, pos2, vec2};
 
     #[test]
@@ -112,7 +112,13 @@ mod tests {
             },
         ];
 
-        assert_eq!(locate_drop_slot(&zones, pos2(220.0, 70.0)), Some((1, 1)));
+        assert!(matches!(
+            locate_drop_intent(&zones, pos2(240.0, 70.0)),
+            Some(TabDropIntent::Combine {
+                zone_index: 1,
+                target_index: 0,
+            })
+        ));
     }
 
     #[test]
@@ -150,7 +156,13 @@ mod tests {
             },
         ];
 
-        assert_eq!(locate_drop_slot(&zones, pos2(360.0, 130.0)), Some((1, 2)));
+        assert!(matches!(
+            locate_drop_intent(&zones, pos2(360.0, 130.0)),
+            Some(TabDropIntent::Combine {
+                zone_index: 1,
+                target_index: 2,
+            })
+        ));
     }
 
     #[test]

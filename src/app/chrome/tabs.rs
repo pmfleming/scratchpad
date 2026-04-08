@@ -6,8 +6,31 @@ pub fn tab_button(
     ui: &mut egui::Ui,
     label: &str,
     active: bool,
-) -> (egui::Response, egui::Response, bool) {
-    tab_button_sized(ui, label, active, TAB_BUTTON_WIDTH)
+    show_promote_all: bool,
+) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
+    tab_button_with_actions(ui, label, active, show_promote_all, TAB_BUTTON_WIDTH)
+}
+
+pub fn tab_button_with_actions(
+    ui: &mut egui::Ui,
+    label: &str,
+    active: bool,
+    show_promote_all: bool,
+    width: f32,
+) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
+    let size = Vec2::new(width, TAB_HEIGHT);
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let response = ui.interact(rect, ui.id().with("tab_button"), Sense::click_and_drag());
+    let drag_in_progress = tab_drag::has_tab_drag_for_context(ui.ctx());
+
+    paint_tab_background(ui, rect, &response, active, drag_in_progress);
+    let promote_rect = show_promote_all.then(|| tab_promote_rect(rect));
+    let truncated = paint_tab_label(ui, rect, label, show_promote_all);
+    let promote_response = promote_rect
+        .map(|promote_rect| render_tab_promote_button(ui, promote_rect, drag_in_progress));
+    let (_, close_response) = render_tab_close_button(ui, rect, drag_in_progress);
+
+    (response, promote_response, close_response, truncated)
 }
 
 pub fn tab_button_sized(
@@ -22,10 +45,20 @@ pub fn tab_button_sized(
     let drag_in_progress = tab_drag::has_tab_drag_for_context(ui.ctx());
 
     paint_tab_background(ui, rect, &response, active, drag_in_progress);
-    let truncated = paint_tab_label(ui, rect, label);
+    let truncated = paint_tab_label(ui, rect, label, false);
     let (_, close_response) = render_tab_close_button(ui, rect, drag_in_progress);
 
     (response, close_response, truncated)
+}
+
+pub fn tab_button_sized_with_actions(
+    ui: &mut egui::Ui,
+    label: &str,
+    active: bool,
+    show_promote_all: bool,
+    width: f32,
+) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
+    tab_button_with_actions(ui, label, active, show_promote_all, width)
 }
 
 fn paint_tab_background(
@@ -48,10 +81,11 @@ fn paint_tab_background(
     }
 }
 
-fn paint_tab_label(ui: &egui::Ui, rect: Rect, label: &str) -> bool {
+fn paint_tab_label(ui: &egui::Ui, rect: Rect, label: &str, show_promote_all: bool) -> bool {
+    let right_padding = if show_promote_all { 50.0 } else { 28.0 };
     let text_rect = Rect::from_min_max(
         rect.min + Vec2::new(8.0, 0.0),
-        rect.max - Vec2::new(28.0, 0.0),
+        rect.max - Vec2::new(right_padding, 0.0),
     );
     let (visible_label, truncated) = truncate_label(ui, label, text_rect.width().max(0.0));
     ui.painter().text(
@@ -62,6 +96,32 @@ fn paint_tab_label(ui: &egui::Ui, rect: Rect, label: &str) -> bool {
         TEXT_PRIMARY,
     );
     truncated
+}
+
+fn tab_promote_rect(tab_rect: Rect) -> Rect {
+    Rect::from_center_size(
+        tab_rect.right_center() - Vec2::new(34.0, 0.0),
+        Vec2::new(18.0, 18.0),
+    )
+}
+
+fn render_tab_promote_button(
+    ui: &mut egui::Ui,
+    promote_rect: Rect,
+    drag_in_progress: bool,
+) -> egui::Response {
+    let promote_response = ui.interact(promote_rect, ui.id().with("promote_all"), Sense::click());
+    if promote_response.hovered() && !drag_in_progress {
+        ui.painter().rect_filled(promote_rect, 2.0, ACTION_HOVER_BG);
+    }
+    ui.painter().text(
+        promote_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        egui_phosphor::regular::ARROW_SQUARE_UP,
+        egui::FontId::proportional(14.0),
+        TEXT_PRIMARY,
+    );
+    promote_response.on_hover_text("Promote each file in this workspace to its own tab")
 }
 
 fn render_tab_close_button(
@@ -80,12 +140,7 @@ fn render_tab_close_button(
     (close_rect, close_response)
 }
 
-fn paint_tab_close_button(
-    ui: &egui::Ui,
-    close_rect: Rect,
-    hovered: bool,
-    drag_in_progress: bool,
-) {
+fn paint_tab_close_button(ui: &egui::Ui, close_rect: Rect, hovered: bool, drag_in_progress: bool) {
     if hovered && !drag_in_progress {
         ui.painter().rect_filled(close_rect, 2.0, CLOSE_HOVER_BG);
     }

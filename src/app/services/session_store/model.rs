@@ -1,6 +1,4 @@
-use crate::app::domain::{
-    EditorViewState, PaneNode, SplitAxis,
-};
+use crate::app::domain::{EditorViewState, PaneNode, SplitAxis};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -18,16 +16,50 @@ pub(crate) struct SessionManifest {
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct SessionTab {
-    pub buffer_id: u64,
+    #[serde(default)]
+    pub buffers: Vec<SessionBuffer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub buffer_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_dirty: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temp_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encoding: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_bom: Option<bool>,
+    pub active_view_id: u64,
+    pub views: Vec<SessionView>,
+    pub root_pane: SessionPaneNode,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct SessionBuffer {
+    pub id: u64,
     pub name: String,
     pub path: Option<PathBuf>,
     pub is_dirty: bool,
     pub temp_id: String,
     pub encoding: String,
     pub has_bom: bool,
-    pub active_view_id: u64,
-    pub views: Vec<SessionView>,
-    pub root_pane: SessionPaneNode,
+}
+
+impl From<&crate::app::domain::BufferState> for SessionBuffer {
+    fn from(buffer: &crate::app::domain::BufferState) -> Self {
+        Self {
+            id: buffer.id,
+            name: buffer.name.clone(),
+            path: buffer.path.clone(),
+            is_dirty: buffer.is_dirty,
+            temp_id: buffer.temp_id.clone(),
+            encoding: buffer.encoding.clone(),
+            has_bom: buffer.has_bom,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]

@@ -1,4 +1,4 @@
-use crate::app::chrome::tab_button_sized;
+use crate::app::chrome::tab_button_sized_with_actions;
 use crate::app::domain::WorkspaceTab;
 use crate::app::theme::*;
 use crate::app::ui::tab_drag;
@@ -16,6 +16,7 @@ pub(crate) const OVERFLOW_LIST_MODE_TOKEN: &str = "all-tabs";
 #[derive(Default)]
 pub(crate) struct OverflowMenuOutcome {
     pub(crate) activated_tab: Option<usize>,
+    pub(crate) promote_all_files_tab: Option<usize>,
     pub(crate) close_requested_tab: Option<usize>,
     pub(crate) drop_zone: Option<tab_drag::TabDropZone>,
 }
@@ -25,6 +26,15 @@ struct OverflowMenuContext<'a> {
     duplicate_name_counts: &'a HashMap<String, usize>,
     outcome: &'a mut OverflowMenuOutcome,
     overflow_popup_open: &'a mut bool,
+}
+
+struct OverflowPopupRequest<'a> {
+    tabs: &'a [WorkspaceTab],
+    active_tab_index: usize,
+    visible_tab_indices: &'a HashSet<usize>,
+    duplicate_name_counts: &'a HashMap<String, usize>,
+    overflow_popup_id: egui::Id,
+    anchor: egui::Pos2,
 }
 
 pub(crate) fn show_overflow_button(
@@ -41,25 +51,25 @@ pub(crate) fn show_overflow_button(
     let overflow_button_response = overflow_button(ui);
     toggle_overflow_popup(overflow_popup_open, &overflow_button_response);
 
-    if let Some(area_response) = show_overflow_popup(
-        ctx,
+    let popup_request = OverflowPopupRequest {
         tabs,
         active_tab_index,
-        overflow_popup_open,
         visible_tab_indices,
         duplicate_name_counts,
         overflow_popup_id,
-        overflow_button_response.rect.right_bottom(),
-        &mut outcome,
-    ) {
-        if should_close_overflow_popup(
+        anchor: overflow_button_response.rect.right_bottom(),
+    };
+
+    if let Some(area_response) =
+        show_overflow_popup(ctx, popup_request, overflow_popup_open, &mut outcome)
+        && should_close_overflow_popup(
             ctx,
             &overflow_button_response,
             &area_response.response,
             outcome.close_requested_tab,
-        ) {
-            *overflow_popup_open = false;
-        }
+        )
+    {
+        *overflow_popup_open = false;
     }
 
     outcome
@@ -84,13 +94,8 @@ fn toggle_overflow_popup(overflow_popup_open: &mut bool, response: &egui::Respon
 
 fn show_overflow_popup(
     ctx: &egui::Context,
-    tabs: &[WorkspaceTab],
-    active_tab_index: usize,
+    request: OverflowPopupRequest<'_>,
     overflow_popup_open: &mut bool,
-    visible_tab_indices: &HashSet<usize>,
-    duplicate_name_counts: &HashMap<String, usize>,
-    overflow_popup_id: egui::Id,
-    anchor: egui::Pos2,
     outcome: &mut OverflowMenuOutcome,
 ) -> Option<egui::InnerResponse<egui::InnerResponse<Vec<tab_drag::TabRectEntry>>>> {
     if !*overflow_popup_open {
@@ -99,10 +104,10 @@ fn show_overflow_popup(
 
     let active_drag_source = tab_drag::active_drag_source_for_context(ctx);
     let popup_width = TAB_BUTTON_WIDTH;
-    let area_response = egui::Area::new(overflow_popup_id)
+    let area_response = egui::Area::new(request.overflow_popup_id)
         .order(egui::Order::Foreground)
         .constrain(true)
-        .fixed_pos(anchor)
+        .fixed_pos(request.anchor)
         .pivot(egui::Align2::RIGHT_TOP)
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
@@ -111,17 +116,17 @@ fn show_overflow_popup(
 
                 let mut menu = OverflowMenuContext {
                     popup_width,
-                    duplicate_name_counts,
+                    duplicate_name_counts: request.duplicate_name_counts,
                     outcome,
                     overflow_popup_open,
                 };
 
                 collect_overflow_row_rects(
                     ui,
-                    tabs,
-                    active_tab_index,
+                    request.tabs,
+                    request.active_tab_index,
                     active_drag_source,
-                    visible_tab_indices,
+                    request.visible_tab_indices,
                     &mut menu,
                 )
             })
@@ -163,9 +168,7 @@ fn collect_overflow_row_rects(
     row_rects
 }
 
-fn build_overflow_drop_zone(
-    row_rects: &[tab_drag::TabRectEntry],
-) -> Option<tab_drag::TabDropZone> {
+fn build_overflow_drop_zone(row_rects: &[tab_drag::TabRectEntry]) -> Option<tab_drag::TabDropZone> {
     if row_rects.is_empty() {
         None
     } else {
@@ -232,12 +235,22 @@ fn show_overflow_row(
             > 1;
 
         let display_name = tab.full_display_name(has_duplicate);
+        let can_promote_all_files = tab.can_promote_all_files();
 
-        let (response, close_response, _truncated) =
-            tab_button_sized(ui, &display_name, selected, menu.popup_width);
+        let (response, promote_response, close_response, _truncated) =
+            tab_button_sized_with_actions(
+                ui,
+                &display_name,
+                selected,
+                can_promote_all_files,
+                menu.popup_width,
+            );
         tab_drag::begin_tab_drag_if_needed(ui, index, &response, &close_response);
 
-        if response.clicked() {
+        if promote_response.is_some_and(|promote| promote.clicked()) {
+            menu.outcome.promote_all_files_tab = Some(index);
+            *menu.overflow_popup_open = false;
+        } else if response.clicked() {
             menu.outcome.activated_tab = Some(index);
             *menu.overflow_popup_open = false;
         }

@@ -96,6 +96,7 @@ fn apply_tile_actions(app: &mut ScratchpadApp, actions: Vec<TileAction>) {
         match action {
             TileAction::Activate(view_id) => app.activate_view(view_id),
             TileAction::Close(view_id) => app.close_view(view_id),
+            TileAction::Promote(view_id) => app.promote_view_to_tab(view_id),
             TileAction::ResizeSplit { path, ratio } => app.resize_split(path, ratio),
             TileAction::Split {
                 axis,

@@ -12,6 +12,7 @@ pub(crate) struct TabCellOutcome {
 pub(crate) enum TabInteraction {
     None,
     Activate(usize),
+    PromoteAllFiles(usize),
     RequestClose(usize),
 }
 
@@ -30,8 +31,10 @@ pub(crate) fn render_tab_cell(
             .unwrap_or(0)
             > 1;
         let display_name = tab.full_display_name(has_duplicate);
+        let can_promote_all_files = tab.can_promote_all_files();
 
-        let (tab_response, close_response, truncated) = tab_button(ui, &display_name, is_active);
+        let (tab_response, promote_response, close_response, truncated) =
+            tab_button(ui, &display_name, is_active, can_promote_all_files);
         let tab_response = maybe_attach_tab_tooltip(tab_response, tab, truncated);
         tab_drag::begin_tab_drag_if_needed(ui, index, &tab_response, &close_response);
 
@@ -39,7 +42,9 @@ pub(crate) fn render_tab_cell(
             tab_response.scroll_to_me(Some(egui::Align::Center));
         }
 
-        let interaction = if close_response.clicked() {
+        let interaction = if promote_response.is_some_and(|response| response.clicked()) {
+            TabInteraction::PromoteAllFiles(index)
+        } else if close_response.clicked() {
             TabInteraction::RequestClose(index)
         } else if tab_response.clicked() {
             TabInteraction::Activate(index)
