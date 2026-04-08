@@ -138,6 +138,37 @@ The current application already includes:
 - [ ] Expand tests around session migration / incompatible manifests as the format evolves
 - [ ] Add more targeted logging around drag state and other hard-to-debug interactions when needed
 
+## Maintainability Plan
+
+This pass is driven by the hotspot checker output from `scripts/hotspots.py` / `hotspots.html`.
+
+Top checker hotspots at the start of the pass:
+
+- `src/app/ui/tile_header/split.rs` with score `454.83`
+- `src/app/app_state.rs` with score `385.87`
+- `src/app/ui/tab_strip/mod.rs` with score `382.99`
+- `src/app/chrome.rs` with score `380.25`
+- `src/app/ui/tab_drag/state.rs` with score `373.51`
+- `src/app/services/file_controller.rs` with score `324.11`
+- `src/app/ui/tab_overflow.rs` with score `308.28`
+
+Refactor priorities:
+
+- [x] Reduce UI orchestration complexity in the tab strip and overflow popup by extracting row collection, popup lifecycle, and drag/drop helper paths.
+- [x] Remove repeated editor layouter plumbing and repeated status-setting logic so common behavior has a single implementation point.
+- [x] Simplify file open/save orchestration by introducing a batch-open summary and small save/open helpers instead of mixing aggregation, status, and logging inline.
+- [x] Reduce tile-header control branching by separating visibility, split-preview, and close-button helpers.
+- [ ] Break up `src/app/ui/tile_header/split.rs` into smaller geometry, preview-paint, and drag-state modules.
+- [ ] Split `src/app/app_state.rs` into narrower state, status, and command-forwarding surfaces.
+- [ ] Revisit `src/app/chrome.rs` and `src/app/ui/tab_drag/state.rs` with the same extraction strategy used here.
+
+Validation during this pass:
+
+- [x] `cargo check` before changes
+- [x] `cargo check` after tab strip / overflow refactor
+- [x] `cargo check` after file-controller / status / text-edit refactor
+- [x] `cargo check` after tile-header refactor
+
 ## Working Definition of Done
 
 Scratchpad should remain a responsive, encoding-aware, session-persistent editor with a single shared tab-order model and predictable pane behavior. New work should preserve that structure instead of reintroducing duplicated tab state in the strip and overflow UI.

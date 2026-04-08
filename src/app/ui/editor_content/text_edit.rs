@@ -12,15 +12,8 @@ pub fn render_editor_text_edit(
     word_wrap: bool,
     editor_font_id: &egui::FontId,
 ) -> bool {
-    let mut layouter = build_layouter(editor_font_id.clone(), word_wrap);
-    let layout_capture = Rc::new(RefCell::new(None));
-    let capture_for_layouter = Rc::clone(&layout_capture);
-    let mut tracking_layouter =
-        move |ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32| {
-            let galley = layouter(ui, buf, wrap_width);
-            *capture_for_layouter.borrow_mut() = Some(galley.clone());
-            galley
-        };
+    let (mut tracking_layouter, layout_capture) =
+        tracked_layouter(editor_font_id.clone(), word_wrap);
     let editor = egui::TextEdit::multiline(&mut buffer.content)
         .font(editor_font_id.clone())
         .desired_width(if word_wrap {
@@ -49,15 +42,8 @@ pub fn render_read_only_text_edit(
     word_wrap: bool,
     editor_font_id: &egui::FontId,
 ) {
-    let mut layouter = build_layouter(editor_font_id.clone(), word_wrap);
-    let layout_capture = Rc::new(RefCell::new(None));
-    let capture_for_layouter = Rc::clone(&layout_capture);
-    let mut tracking_layouter =
-        move |ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32| {
-            let galley = layouter(ui, buf, wrap_width);
-            *capture_for_layouter.borrow_mut() = Some(galley.clone());
-            galley
-        };
+    let (mut tracking_layouter, layout_capture) =
+        tracked_layouter(editor_font_id.clone(), word_wrap);
     let viewer = egui::TextEdit::multiline(&mut text)
         .font(editor_font_id.clone())
         .desired_width(if word_wrap {
@@ -96,4 +82,23 @@ pub fn build_layouter(
         );
         ui.fonts_mut(|fonts| fonts.layout_job(job))
     }
+}
+
+fn tracked_layouter(
+    font_id: egui::FontId,
+    word_wrap: bool,
+) -> (
+    impl FnMut(&egui::Ui, &dyn egui::TextBuffer, f32) -> Arc<egui::Galley>,
+    Rc<RefCell<Option<Arc<egui::Galley>>>>,
+) {
+    let mut layouter = build_layouter(font_id, word_wrap);
+    let layout_capture = Rc::new(RefCell::new(None));
+    let capture_for_layouter = Rc::clone(&layout_capture);
+    let tracking_layouter = move |ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32| {
+        let galley = layouter(ui, buf, wrap_width);
+        *capture_for_layouter.borrow_mut() = Some(galley.clone());
+        galley
+    };
+
+    (tracking_layouter, layout_capture)
 }

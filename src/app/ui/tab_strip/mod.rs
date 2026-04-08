@@ -69,39 +69,32 @@ fn show_tab_region(
         egui::vec2(layout.tab_area_width, TAB_HEIGHT),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
+            tab_drag::sync_drag_state(ui);
             ui.spacing_mut().item_spacing.x = 0.0;
-            if layout.visible_strip_width > 0.0
-                && let Some(tab_bar_zone) = show_scrolling_tab_strip(
-                    ui,
-                    app,
-                    layout,
-                    &duplicate_name_counts,
-                    &mut visible_tab_indices,
-                    &mut outcome,
-                )
-            {
+            if let Some(tab_bar_zone) = maybe_show_scrolling_tab_strip(
+                ui,
+                app,
+                layout,
+                &duplicate_name_counts,
+                &mut visible_tab_indices,
+                &mut outcome,
+            ) {
                 drop_zones.push(tab_bar_zone);
             }
 
-            if (layout.has_overflow || app.overflow_popup_open)
-                && let Some(overflow_zone) = show_overflow_controls(
-                    ctx,
-                    ui,
-                    app,
-                    layout,
-                    &visible_tab_indices,
-                    &duplicate_name_counts,
-                    &mut outcome,
-                )
-            {
+            if let Some(overflow_zone) = maybe_show_overflow_controls(
+                ctx,
+                ui,
+                app,
+                layout,
+                &visible_tab_indices,
+                &duplicate_name_counts,
+                &mut outcome,
+            ) {
                 drop_zones.push(overflow_zone);
             }
 
-            if let Some((from_index, to_index)) =
-                tab_drag::update_tab_drag(ui, &drop_zones, app.tabs().len())
-            {
-                outcome.reordered_tabs = Some((from_index, to_index));
-            }
+            update_reordered_tabs(ui, app.tabs().len(), &drop_zones, &mut outcome);
             tab_drag::paint_dragged_tab_ghost(ui.ctx(), app.tabs());
 
             ui.add_space(layout.spacing);
@@ -123,6 +116,63 @@ fn show_tab_region(
     );
 
     outcome
+}
+
+fn maybe_show_scrolling_tab_strip(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    layout: &HeaderLayout,
+    duplicate_name_counts: &HashMap<String, usize>,
+    visible_tab_indices: &mut HashSet<usize>,
+    outcome: &mut TabStripOutcome,
+) -> Option<TabDropZone> {
+    if layout.visible_strip_width <= 0.0 {
+        None
+    } else {
+        show_scrolling_tab_strip(
+            ui,
+            app,
+            layout,
+            duplicate_name_counts,
+            visible_tab_indices,
+            outcome,
+        )
+    }
+}
+
+fn maybe_show_overflow_controls(
+    ctx: &egui::Context,
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    layout: &HeaderLayout,
+    visible_tab_indices: &HashSet<usize>,
+    duplicate_name_counts: &HashMap<String, usize>,
+    outcome: &mut TabStripOutcome,
+) -> Option<TabDropZone> {
+    if layout.has_overflow || app.overflow_popup_open {
+        show_overflow_controls(
+            ctx,
+            ui,
+            app,
+            layout,
+            visible_tab_indices,
+            duplicate_name_counts,
+            outcome,
+        )
+    } else {
+        None
+    }
+}
+
+fn update_reordered_tabs(
+    ui: &mut egui::Ui,
+    tab_count: usize,
+    drop_zones: &[TabDropZone],
+    outcome: &mut TabStripOutcome,
+) {
+    if let Some((from_index, to_index)) = tab_drag::update_tab_drag(ui, drop_zones, tab_count) {
+        outcome.reordered_tabs = Some((from_index, to_index));
+    }
 }
 
 fn show_scrolling_tab_strip(
@@ -162,32 +212,14 @@ fn show_scrolling_tab_strip(
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.x = layout.spacing;
                         ui.horizontal(|ui| {
-                            let mut row_rects = Vec::with_capacity(app.tabs().len());
-                            for (index, tab) in app.tabs().iter().enumerate() {
-                                let cell_outcome = render_tab_cell(
-                                    ui,
-                                    index,
-                                    tab,
-                                    app.active_tab_index() == index,
-                                    app.tab_manager().pending_scroll_to_active,
-                                    duplicate_name_counts,
-                                );
-                                apply_tab_interaction(outcome, cell_outcome.interaction);
-                                if app.active_tab_index() == index
-                                    && app.tab_manager().pending_scroll_to_active
-                                {
-                                    ui.scroll_to_rect(cell_outcome.rect, Some(egui::Align::Center));
-                                    outcome.consumed_scroll_request = true;
-                                }
-                                if viewport_rect.intersects(cell_outcome.rect) {
-                                    visible_tab_indices.insert(index);
-                                }
-                                row_rects.push(crate::app::ui::tab_drag::TabRectEntry {
-                                    index,
-                                    rect: cell_outcome.rect,
-                                });
-                            }
-                            row_rects
+                            collect_tab_strip_entries(
+                                ui,
+                                app,
+                                duplicate_name_counts,
+                                viewport_rect,
+                                visible_tab_indices,
+                                outcome,
+                            )
                         })
                         .inner
                     })
@@ -203,6 +235,71 @@ fn show_scrolling_tab_strip(
             axis: tab_drag::TabDropAxis::Horizontal,
             entries,
         })
+    }
+}
+
+fn collect_tab_strip_entries(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    duplicate_name_counts: &HashMap<String, usize>,
+    viewport_rect: egui::Rect,
+    visible_tab_indices: &mut HashSet<usize>,
+    outcome: &mut TabStripOutcome,
+) -> Vec<crate::app::ui::tab_drag::TabRectEntry> {
+    let active_tab_index = app.active_tab_index();
+    let pending_scroll_to_active = app.tab_manager().pending_scroll_to_active;
+    let mut row_rects = Vec::with_capacity(app.tabs().len());
+
+    for (index, tab) in app.tabs().iter().enumerate() {
+        let cell_outcome = render_tab_cell(
+            ui,
+            index,
+            tab,
+            active_tab_index == index,
+            pending_scroll_to_active,
+            duplicate_name_counts,
+        );
+        apply_tab_interaction(outcome, cell_outcome.interaction);
+        maybe_scroll_to_active_tab(
+            ui,
+            index,
+            active_tab_index,
+            pending_scroll_to_active,
+            cell_outcome.rect,
+            outcome,
+        );
+        record_visible_tab(index, cell_outcome.rect, viewport_rect, visible_tab_indices);
+        row_rects.push(crate::app::ui::tab_drag::TabRectEntry {
+            index,
+            rect: cell_outcome.rect,
+        });
+    }
+
+    row_rects
+}
+
+fn maybe_scroll_to_active_tab(
+    ui: &mut egui::Ui,
+    index: usize,
+    active_tab_index: usize,
+    pending_scroll_to_active: bool,
+    rect: egui::Rect,
+    outcome: &mut TabStripOutcome,
+) {
+    if index == active_tab_index && pending_scroll_to_active {
+        ui.scroll_to_rect(rect, Some(egui::Align::Center));
+        outcome.consumed_scroll_request = true;
+    }
+}
+
+fn record_visible_tab(
+    index: usize,
+    rect: egui::Rect,
+    viewport_rect: egui::Rect,
+    visible_tab_indices: &mut HashSet<usize>,
+) {
+    if viewport_rect.intersects(rect) {
+        visible_tab_indices.insert(index);
     }
 }
 

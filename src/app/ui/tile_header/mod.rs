@@ -22,49 +22,42 @@ pub(crate) fn render_tile_header(
     let title = app.tabs()[tab_index].buffer.display_name();
     let content_preview = app.tabs()[tab_index].buffer.content.clone();
     let split_handler = TileSplitHandler::new(ui, tab_index, view_id, tile_rect);
-    let controls_visible = if split_handler.is_dragging(ui)
-        || tile_rect.contains(ui.input(|input| input.pointer.hover_pos().unwrap_or_default()))
-    {
-        1.0
-    } else {
-        0.0
-    };
+    let controls_visible = control_visibility(ui, &split_handler, tile_rect);
     if controls_visible <= 0.0 {
         return;
     }
 
     let metrics = tile_control_metrics(tile_rect, can_close);
     let rects = tile_header_rects(tile_rect, can_close, &metrics);
-    let split_response = TileControl::new(egui_phosphor::regular::ARROWS_SPLIT)
-        .visibility(controls_visible)
-        .font_size(metrics.font_size)
-        .tooltip("Drag to split: left/right creates a vertical split, up/down creates a horizontal split")
-        .show(
-            ui,
-            rects.split_hit,
-            ui.make_persistent_id(("split_handle", tab_index, view_id)),
-            egui::Sense::click_and_drag(),
-        );
+    let split_response = show_split_control(
+        ui,
+        tab_index,
+        view_id,
+        rects.split_hit,
+        metrics.font_size,
+        controls_visible,
+    );
 
-    if let Some(state) = split_handler.handle_interaction(ui, &split_response, actions) {
-        *preview_overlay = Some(split_handler.make_preview(state, title, &content_preview, rects.split_hit));
-    }
-
-    if can_close {
-        let close_response = TileControl::new("×")
-            .style(TileControlStyle::Danger)
-            .visibility(controls_visible)
-            .font_size(metrics.font_size)
-            .show(
-                ui,
-                rects.close_hit,
-                ui.make_persistent_id(("close_view", tab_index, view_id)),
-                egui::Sense::click(),
-            );
-        if close_response.clicked() {
-            actions.push(TileAction::Close(view_id));
-        }
-    }
+    update_split_preview(
+        ui,
+        &split_handler,
+        &split_response,
+        actions,
+        preview_overlay,
+        &title,
+        &content_preview,
+        rects.split_hit,
+    );
+    maybe_show_close_control(
+        ui,
+        can_close,
+        tab_index,
+        view_id,
+        rects.close_hit,
+        metrics.font_size,
+        controls_visible,
+        actions,
+    );
 }
 
 struct TileHeaderRects {
@@ -82,6 +75,93 @@ struct TileControlMetrics {
 const TILE_CONTROL_PADDING: f32 = 6.0;
 const TILE_CONTROL_MIN_SIZE: f32 = 18.0;
 const TILE_CONTROL_MAX_SIZE: f32 = crate::app::theme::BUTTON_SIZE.x;
+
+fn control_visibility(
+    ui: &egui::Ui,
+    split_handler: &TileSplitHandler,
+    tile_rect: egui::Rect,
+) -> f32 {
+    if split_handler.is_dragging(ui) || tile_rect.contains(pointer_hover_pos(ui)) {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+fn pointer_hover_pos(ui: &egui::Ui) -> egui::Pos2 {
+    ui.input(|input| input.pointer.hover_pos().unwrap_or_default())
+}
+
+fn show_split_control(
+    ui: &mut egui::Ui,
+    tab_index: usize,
+    view_id: ViewId,
+    split_hit: egui::Rect,
+    font_size: f32,
+    controls_visible: f32,
+) -> egui::Response {
+    TileControl::new(egui_phosphor::regular::ARROWS_SPLIT)
+        .visibility(controls_visible)
+        .font_size(font_size)
+        .tooltip("Drag to split: left/right creates a vertical split, up/down creates a horizontal split")
+        .show(
+            ui,
+            split_hit,
+            ui.make_persistent_id(("split_handle", tab_index, view_id)),
+            egui::Sense::click_and_drag(),
+        )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_split_preview(
+    ui: &mut egui::Ui,
+    split_handler: &TileSplitHandler,
+    split_response: &egui::Response,
+    actions: &mut Vec<TileAction>,
+    preview_overlay: &mut Option<SplitPreviewOverlay>,
+    title: &str,
+    content_preview: &str,
+    split_hit: egui::Rect,
+) {
+    if let Some(state) = split_handler.handle_interaction(ui, split_response, actions) {
+        *preview_overlay = Some(split_handler.make_preview(
+            state,
+            title.to_owned(),
+            content_preview,
+            split_hit,
+        ));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn maybe_show_close_control(
+    ui: &mut egui::Ui,
+    can_close: bool,
+    tab_index: usize,
+    view_id: ViewId,
+    close_hit: egui::Rect,
+    font_size: f32,
+    controls_visible: f32,
+    actions: &mut Vec<TileAction>,
+) {
+    if !can_close {
+        return;
+    }
+
+    let close_response = TileControl::new("×")
+        .style(TileControlStyle::Danger)
+        .visibility(controls_visible)
+        .font_size(font_size)
+        .show(
+            ui,
+            close_hit,
+            ui.make_persistent_id(("close_view", tab_index, view_id)),
+            egui::Sense::click(),
+        );
+    if close_response.clicked() {
+        actions.push(TileAction::Close(view_id));
+    }
+}
 
 fn tile_header_rects(
     tile_rect: egui::Rect,

@@ -69,52 +69,11 @@ impl FileController {
     }
 
     fn open_selected_paths(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
-        let mut opened_count = 0usize;
-        let mut duplicate_count = 0usize;
-        let mut failure_count = 0usize;
-        let mut artifact_count = 0usize;
-        let mut last_artifact_warning = None;
+        let summary = paths.into_iter().fold(OpenBatchSummary::default(), |summary, path| {
+            summary.record(Self::open_path(app, path))
+        });
 
-        for path in paths {
-            match Self::open_path(app, path) {
-                OpenPathOutcome::Opened { artifact_warning } => {
-                    opened_count += 1;
-                    if let Some(warning) = artifact_warning {
-                        artifact_count += 1;
-                        last_artifact_warning = Some(warning);
-                    }
-                }
-                OpenPathOutcome::AlreadyOpen => {
-                    duplicate_count += 1;
-                }
-                OpenPathOutcome::Failed => {
-                    failure_count += 1;
-                }
-            }
-        }
-
-        if let Some(message) = summarize_open_results(
-            opened_count,
-            duplicate_count,
-            failure_count,
-            artifact_count,
-            last_artifact_warning,
-        ) {
-            if failure_count > 0 || artifact_count > 0 {
-                app.set_warning_status(message);
-            } else {
-                app.set_info_status(message);
-            }
-        } else {
-            app.clear_status_message();
-        }
-
-        app.log_event(
-            LogLevel::Info,
-            format!(
-                "Open file batch completed: opened={opened_count}, duplicates={duplicate_count}, failed={failure_count}, artifacts={artifact_count}"
-            ),
-        );
+        Self::apply_open_summary(app, summary);
     }
 
     fn open_path(app: &mut ScratchpadApp, path: PathBuf) -> OpenPathOutcome {
@@ -161,19 +120,11 @@ impl FileController {
         path: PathBuf,
         file_content: crate::app::services::file_service::FileContent,
     ) -> Option<String> {
-        let artifact_summary = file_content.artifact_summary.status_text();
         let opened_path = path.display().to_string();
         let encoding = file_content.encoding.clone();
         let has_bom = file_content.has_bom;
-        let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        let mut buffer = BufferState::with_encoding(
-            name,
-            file_content.content,
-            Some(path),
-            file_content.encoding,
-            file_content.has_bom,
-        );
-        buffer.artifact_summary = file_content.artifact_summary;
+        let buffer = Self::buffer_from_file_content(path, file_content);
+        let artifact_summary = buffer.artifact_summary.status_text();
         let artifact_warning = buffer
             .artifact_summary
             .status_text()
@@ -221,10 +172,7 @@ impl FileController {
         match save_result {
             Ok(()) => {
                 Self::finalize_save(app, index, path, update_buffer_path);
-                app.log_event(
-                    LogLevel::Info,
-                    format!("Saved tab index {index}: {existing_tab_description} -> {target_path}"),
-                );
+                Self::log_save_success(app, index, &existing_tab_description, &target_path);
                 true
             }
             Err(error) => {
@@ -255,5 +203,91 @@ impl FileController {
         app.clear_status_message();
         app.mark_session_dirty();
         let _ = app.persist_session_now();
+    }
+
+    fn apply_open_summary(app: &mut ScratchpadApp, summary: OpenBatchSummary) {
+        if let Some(message) = summarize_open_results(
+            summary.opened_count,
+            summary.duplicate_count,
+            summary.failure_count,
+            summary.artifact_count,
+            summary.last_artifact_warning.clone(),
+        ) {
+            if summary.failure_count > 0 || summary.artifact_count > 0 {
+                app.set_warning_status(message);
+            } else {
+                app.set_info_status(message);
+            }
+        } else {
+            app.clear_status_message();
+        }
+
+        app.log_event(LogLevel::Info, summary.log_message());
+    }
+
+    fn buffer_from_file_content(
+        path: PathBuf,
+        file_content: crate::app::services::file_service::FileContent,
+    ) -> BufferState {
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let mut buffer = BufferState::with_encoding(
+            name,
+            file_content.content,
+            Some(path),
+            file_content.encoding,
+            file_content.has_bom,
+        );
+        buffer.artifact_summary = file_content.artifact_summary;
+        buffer
+    }
+
+    fn log_save_success(
+        app: &ScratchpadApp,
+        index: usize,
+        existing_tab_description: &str,
+        target_path: &str,
+    ) {
+        app.log_event(
+            LogLevel::Info,
+            format!("Saved tab index {index}: {existing_tab_description} -> {target_path}"),
+        );
+    }
+}
+
+#[derive(Default)]
+struct OpenBatchSummary {
+    opened_count: usize,
+    duplicate_count: usize,
+    failure_count: usize,
+    artifact_count: usize,
+    last_artifact_warning: Option<String>,
+}
+
+impl OpenBatchSummary {
+    fn record(mut self, outcome: OpenPathOutcome) -> Self {
+        match outcome {
+            OpenPathOutcome::Opened { artifact_warning } => {
+                self.opened_count += 1;
+                if let Some(warning) = artifact_warning {
+                    self.artifact_count += 1;
+                    self.last_artifact_warning = Some(warning);
+                }
+            }
+            OpenPathOutcome::AlreadyOpen => {
+                self.duplicate_count += 1;
+            }
+            OpenPathOutcome::Failed => {
+                self.failure_count += 1;
+            }
+        }
+
+        self
+    }
+
+    fn log_message(&self) -> String {
+        format!(
+            "Open file batch completed: opened={}, duplicates={}, failed={}, artifacts={}",
+            self.opened_count, self.duplicate_count, self.failure_count, self.artifact_count
+        )
     }
 }

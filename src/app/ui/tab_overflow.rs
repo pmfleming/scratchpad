@@ -38,74 +38,26 @@ pub(crate) fn show_overflow_button(
 ) -> OverflowMenuOutcome {
     let mut outcome = OverflowMenuOutcome::default();
     let overflow_popup_id = ui.id().with("tab_overflow_popup");
-    let overflow_button_response = ui.add_sized(
-        [BUTTON_SIZE.x, BUTTON_SIZE.y],
-        egui::Button::new(
-            egui::RichText::new(egui_phosphor::regular::CARET_DOWN).color(TEXT_PRIMARY),
-        )
-        .fill(ACTION_BG)
-        .stroke(Stroke::new(1.0, BORDER)),
-    );
+    let overflow_button_response = overflow_button(ui);
+    toggle_overflow_popup(overflow_popup_open, &overflow_button_response);
 
-    if overflow_button_response.clicked() {
-        *overflow_popup_open = !*overflow_popup_open;
-    }
-
-    if *overflow_popup_open {
-        let active_drag_source = tab_drag::active_drag_source_for_context(ctx);
-        let popup_width = TAB_BUTTON_WIDTH;
-        let area_response = egui::Area::new(overflow_popup_id)
-            .order(egui::Order::Foreground)
-            .constrain(true)
-            .fixed_pos(overflow_button_response.rect.right_bottom())
-            .pivot(egui::Align2::RIGHT_TOP)
-            .show(ctx, |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_width(popup_width);
-                    ui.set_min_width(popup_width);
-
-                    let mut menu = OverflowMenuContext {
-                        popup_width,
-                        duplicate_name_counts,
-                        outcome: &mut outcome,
-                        overflow_popup_open,
-                    };
-
-                    let mut row_rects = Vec::with_capacity(tabs.len());
-
-                    for (index, tab) in tabs.iter().enumerate() {
-                        if !should_show_overflow_row(index, active_drag_source, visible_tab_indices)
-                        {
-                            continue;
-                        }
-
-                        let row_rect =
-                            show_overflow_row(ui, index, tab, active_tab_index == index, &mut menu);
-                        row_rects.push(tab_drag::TabRectEntry {
-                            index,
-                            rect: row_rect,
-                        });
-                    }
-
-                    row_rects
-                })
-            });
-
-        let row_rects = area_response.inner.inner;
-        if !row_rects.is_empty() {
-            outcome.drop_zone = Some(tab_drag::TabDropZone {
-                axis: tab_drag::TabDropAxis::Vertical,
-                entries: row_rects,
-            });
-        }
-
-        if (!tab_drag::is_drag_active_for_context(ctx)
-            && ctx.input(|input| input.key_pressed(egui::Key::Escape)))
-            || (overflow_button_response.clicked_elsewhere()
-                && !tab_drag::is_drag_active_for_context(ctx)
-                && !area_response.response.hovered()
-                && outcome.close_requested_tab.is_none())
-        {
+    if let Some(area_response) = show_overflow_popup(
+        ctx,
+        tabs,
+        active_tab_index,
+        overflow_popup_open,
+        visible_tab_indices,
+        duplicate_name_counts,
+        overflow_popup_id,
+        overflow_button_response.rect.right_bottom(),
+        &mut outcome,
+    ) {
+        if should_close_overflow_popup(
+            ctx,
+            &overflow_button_response,
+            &area_response.response,
+            outcome.close_requested_tab,
+        ) {
             *overflow_popup_open = false;
         }
     }
@@ -113,15 +65,138 @@ pub(crate) fn show_overflow_button(
     outcome
 }
 
-fn should_show_overflow_row(
-    index: usize,
+fn overflow_button(ui: &mut egui::Ui) -> egui::Response {
+    ui.add_sized(
+        [BUTTON_SIZE.x, BUTTON_SIZE.y],
+        egui::Button::new(
+            egui::RichText::new(egui_phosphor::regular::CARET_DOWN).color(TEXT_PRIMARY),
+        )
+        .fill(ACTION_BG)
+        .stroke(Stroke::new(1.0, BORDER)),
+    )
+}
+
+fn toggle_overflow_popup(overflow_popup_open: &mut bool, response: &egui::Response) {
+    if response.clicked() {
+        *overflow_popup_open = !*overflow_popup_open;
+    }
+}
+
+fn show_overflow_popup(
+    ctx: &egui::Context,
+    tabs: &[WorkspaceTab],
+    active_tab_index: usize,
+    overflow_popup_open: &mut bool,
+    visible_tab_indices: &HashSet<usize>,
+    duplicate_name_counts: &HashMap<String, usize>,
+    overflow_popup_id: egui::Id,
+    anchor: egui::Pos2,
+    outcome: &mut OverflowMenuOutcome,
+) -> Option<egui::InnerResponse<egui::InnerResponse<Vec<tab_drag::TabRectEntry>>>> {
+    if !*overflow_popup_open {
+        return None;
+    }
+
+    let active_drag_source = tab_drag::active_drag_source_for_context(ctx);
+    let popup_width = TAB_BUTTON_WIDTH;
+    let area_response = egui::Area::new(overflow_popup_id)
+        .order(egui::Order::Foreground)
+        .constrain(true)
+        .fixed_pos(anchor)
+        .pivot(egui::Align2::RIGHT_TOP)
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_width(popup_width);
+                ui.set_min_width(popup_width);
+
+                let mut menu = OverflowMenuContext {
+                    popup_width,
+                    duplicate_name_counts,
+                    outcome,
+                    overflow_popup_open,
+                };
+
+                collect_overflow_row_rects(
+                    ui,
+                    tabs,
+                    active_tab_index,
+                    active_drag_source,
+                    visible_tab_indices,
+                    &mut menu,
+                )
+            })
+        });
+
+    outcome.drop_zone = build_overflow_drop_zone(&area_response.inner.inner);
+    Some(area_response)
+}
+
+fn collect_overflow_row_rects(
+    ui: &mut egui::Ui,
+    tabs: &[WorkspaceTab],
+    active_tab_index: usize,
     active_drag_source: Option<usize>,
     visible_tab_indices: &HashSet<usize>,
+    menu: &mut OverflowMenuContext<'_>,
+) -> Vec<tab_drag::TabRectEntry> {
+    let mut row_rects = Vec::with_capacity(tabs.len());
+
+    for (index, tab) in tabs.iter().enumerate() {
+        if !should_show_overflow_row(index, active_drag_source, visible_tab_indices) {
+            continue;
+        }
+
+        let row_rect = show_overflow_row(
+            ui,
+            index,
+            tab,
+            active_tab_index == index,
+            active_drag_source == Some(index),
+            menu,
+        );
+        row_rects.push(tab_drag::TabRectEntry {
+            index,
+            rect: row_rect,
+        });
+    }
+
+    row_rects
+}
+
+fn build_overflow_drop_zone(
+    row_rects: &[tab_drag::TabRectEntry],
+) -> Option<tab_drag::TabDropZone> {
+    if row_rects.is_empty() {
+        None
+    } else {
+        Some(tab_drag::TabDropZone {
+            axis: tab_drag::TabDropAxis::Vertical,
+            entries: row_rects.to_vec(),
+        })
+    }
+}
+
+fn should_close_overflow_popup(
+    ctx: &egui::Context,
+    button_response: &egui::Response,
+    popup_response: &egui::Response,
+    close_requested_tab: Option<usize>,
 ) -> bool {
-    if active_drag_source == Some(index) {
+    if tab_drag::is_drag_active_for_context(ctx) {
         return false;
     }
 
+    ctx.input(|input| input.key_pressed(egui::Key::Escape))
+        || (button_response.clicked_elsewhere()
+            && !popup_response.hovered()
+            && close_requested_tab.is_none())
+}
+
+fn should_show_overflow_row(
+    index: usize,
+    _active_drag_source: Option<usize>,
+    visible_tab_indices: &HashSet<usize>,
+) -> bool {
     match overflow_list_mode() {
         OverflowListMode::AllTabs => true,
         OverflowListMode::HiddenTabsOnly => !visible_tab_indices.contains(&index),
@@ -141,9 +216,14 @@ fn show_overflow_row(
     index: usize,
     tab: &WorkspaceTab,
     selected: bool,
+    is_drag_source: bool,
     menu: &mut OverflowMenuContext<'_>,
 ) -> egui::Rect {
     ui.push_id(("tab_overflow", index), |ui| {
+        if is_drag_source {
+            return render_drag_source_placeholder(ui, menu.popup_width);
+        }
+
         let has_duplicate = menu
             .duplicate_name_counts
             .get(&tab.buffer.name)
@@ -169,4 +249,17 @@ fn show_overflow_row(
         response.rect
     })
     .inner
+}
+
+fn render_drag_source_placeholder(ui: &mut egui::Ui, width: f32) -> egui::Rect {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, TAB_HEIGHT), egui::Sense::hover());
+    ui.painter()
+        .rect_filled(rect, 4.0, TAB_ACTIVE_BG.gamma_multiply(0.25));
+    ui.painter().rect_stroke(
+        rect,
+        4.0,
+        Stroke::new(1.0, BORDER.gamma_multiply(0.75)),
+        egui::StrokeKind::Outside,
+    );
+    rect
 }
