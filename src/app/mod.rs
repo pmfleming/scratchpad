@@ -1,11 +1,13 @@
-mod app_state;
+pub mod app_state;
 pub mod chrome;
 pub mod commands;
 pub mod domain;
+pub mod logging;
 pub mod services;
 pub mod shortcuts;
 pub mod theme;
 pub mod ui;
+pub mod utils;
 
 pub use app_state::ScratchpadApp;
 

@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use scratchpad::app::domain::BufferState;
 use scratchpad::app::domain::{EditorViewState, PaneBranch, PaneNode, SplitAxis, WorkspaceTab};
 
@@ -88,7 +90,7 @@ fn split_preview_placement_can_create_new_first_child() {
 #[test]
 fn restored_tab_repairs_missing_pane_views() {
     let buffer = BufferState::new("Untitled".to_owned(), String::new(), None);
-    let existing_view = EditorViewState::new(false);
+    let existing_view = EditorViewState::new(buffer.id, false);
     let existing_view_id = existing_view.id;
     let missing_view_id = existing_view_id + 10_000;
 

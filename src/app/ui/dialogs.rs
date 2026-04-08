@@ -1,9 +1,10 @@
-use crate::app::app_state::{PendingAction, ScratchpadApp};
+use crate::app::app_state::ScratchpadApp;
+use crate::app::domain::PendingAction;
 use crate::app::commands::AppCommand;
 use eframe::egui;
 
 pub(crate) fn show_pending_action_modal(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    let Some(PendingAction::CloseTab(index)) = app.pending_action else {
+    let Some(PendingAction::CloseTab(index)) = app.pending_action() else {
         return;
     };
 
@@ -12,7 +13,7 @@ pub(crate) fn show_pending_action_modal(ctx: &egui::Context, app: &mut Scratchpa
         return;
     }
 
-    if !app.tabs[index].buffer.is_dirty {
+    if !app.tabs()[index].buffer.is_dirty {
         close_pending_tab(app, index);
         return;
     }
@@ -21,11 +22,11 @@ pub(crate) fn show_pending_action_modal(ctx: &egui::Context, app: &mut Scratchpa
 }
 
 fn pending_close_tab_is_valid(app: &ScratchpadApp, index: usize) -> bool {
-    index < app.tabs.len()
+    index < app.tabs().len()
 }
 
 fn show_close_tab_confirmation(ctx: &egui::Context, app: &mut ScratchpadApp, index: usize) {
-    let tab_name = app.tabs[index].buffer.name.clone();
+    let tab_name = app.tabs()[index].buffer.name.clone();
 
     egui::Window::new("Unsaved Changes")
         .collapsible(false)
@@ -63,5 +64,5 @@ fn close_pending_tab(app: &mut ScratchpadApp, index: usize) {
 }
 
 fn clear_pending_action(app: &mut ScratchpadApp) {
-    app.pending_action = None;
+    app.set_pending_action(None);
 }

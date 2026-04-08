@@ -1,9 +1,14 @@
+#![forbid(unsafe_code)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use eframe::egui;
 use scratchpad::ScratchpadApp;
 
 fn main() -> eframe::Result<()> {
+    if let Err(error) = scratchpad::app::logging::init() {
+        eprintln!("failed to initialize logging: {error}");
+    }
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_decorations(false)

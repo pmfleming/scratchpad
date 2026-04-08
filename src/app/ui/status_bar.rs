@@ -7,6 +7,7 @@ use eframe::egui;
 struct StatusBarActions {
     toggle_line_numbers: bool,
     toggle_control_chars: bool,
+    toggle_logging: bool,
 }
 
 struct ActiveStatusDetails {
@@ -27,7 +28,7 @@ pub(crate) fn show_status_bar(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             let mut actions = StatusBarActions::default();
 
             if let Some(details) = collect_active_status_details(app) {
-                render_active_status(ui, &details, &mut actions);
+                render_active_status(ui, &details, app.logging_enabled(), &mut actions);
             }
 
             if let Some(message) = &app.status_message {
@@ -86,6 +87,7 @@ fn collect_active_status_details(app: &ScratchpadApp) -> Option<ActiveStatusDeta
 fn render_active_status(
     ui: &mut egui::Ui,
     details: &ActiveStatusDetails,
+    logging_enabled: bool,
     actions: &mut StatusBarActions,
 ) {
     ui.label(format!("Path: {}", details.path_label));
@@ -99,6 +101,15 @@ fn render_active_status(
 
         ui.separator();
         ui.label(&details.encoding);
+        ui.separator();
+
+        let logging_token = ui
+            .selectable_label(logging_enabled, "LOG")
+            .on_hover_text("Toggle runtime file logging");
+        if logging_token.clicked() {
+            actions.toggle_logging = true;
+        }
+
         ui.separator();
 
         let button_response = ui.add(
@@ -153,6 +164,11 @@ fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {
             view.show_control_chars = !view.show_control_chars;
             app.mark_session_dirty();
         }
+    }
+
+    if actions.toggle_logging {
+        let next = !app.logging_enabled();
+        app.set_logging_enabled(next);
     }
 }
 

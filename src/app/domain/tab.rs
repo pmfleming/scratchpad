@@ -10,7 +10,8 @@ pub struct WorkspaceTab {
 
 impl WorkspaceTab {
     pub fn new(buffer: BufferState) -> Self {
-        let initial_view = EditorViewState::new(buffer.artifact_summary.has_control_chars());
+        let initial_view =
+            EditorViewState::new(buffer.id, buffer.artifact_summary.has_control_chars());
         let active_view_id = initial_view.id;
         Self {
             buffer,
@@ -84,6 +85,7 @@ impl WorkspaceTab {
     ) -> Option<ViewId> {
         let source_view = self.active_view()?;
         let mut new_view = EditorViewState::new(
+            source_view.buffer_id,
             source_view.show_control_chars && self.buffer.artifact_summary.has_control_chars(),
         );
         new_view.show_line_numbers = source_view.show_line_numbers;
@@ -154,7 +156,10 @@ impl WorkspaceTab {
     }
 
     fn reset_to_single_view(&mut self) {
-        let initial_view = EditorViewState::new(self.buffer.artifact_summary.has_control_chars());
+        let initial_view = EditorViewState::new(
+            self.buffer.id,
+            self.buffer.artifact_summary.has_control_chars(),
+        );
         self.active_view_id = initial_view.id;
         self.root_pane = PaneNode::leaf(initial_view.id);
         self.views = vec![initial_view];

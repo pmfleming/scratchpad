@@ -1,10 +1,12 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use std::sync::Arc;
-
+static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_TEMP_BUFFER_ID: AtomicU64 = AtomicU64::new(1);
+
+pub type BufferId = u64;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TextArtifactSummary {
@@ -136,6 +138,7 @@ fn row_line_numbers_for_galley(galley: &eframe::egui::Galley) -> Vec<Option<usiz
 }
 
 pub struct BufferState {
+    pub id: BufferId,
     pub name: String,
     pub content: String,
     pub path: Option<PathBuf>,
@@ -143,6 +146,17 @@ pub struct BufferState {
     pub temp_id: String,
     pub line_count: usize,
     pub artifact_summary: TextArtifactSummary,
+    pub encoding: String,
+    pub has_bom: bool,
+}
+
+pub struct RestoredBufferState {
+    pub id: BufferId,
+    pub name: String,
+    pub content: String,
+    pub path: Option<PathBuf>,
+    pub is_dirty: bool,
+    pub temp_id: String,
     pub encoding: String,
     pub has_bom: bool,
 }
@@ -162,6 +176,7 @@ impl BufferState {
         let line_count = display_line_count(&content);
         let artifact_summary = TextArtifactSummary::from_text(&content);
         Self {
+            id: next_buffer_id(),
             name,
             content,
             path,
@@ -174,27 +189,21 @@ impl BufferState {
         }
     }
 
-    pub fn restored(
-        name: String,
-        content: String,
-        path: Option<PathBuf>,
-        is_dirty: bool,
-        temp_id: String,
-        encoding: String,
-        has_bom: bool,
-    ) -> Self {
-        let line_count = display_line_count(&content);
-        let artifact_summary = TextArtifactSummary::from_text(&content);
+    pub fn restored(restored: RestoredBufferState) -> Self {
+        register_existing_buffer_id(restored.id);
+        let line_count = display_line_count(&restored.content);
+        let artifact_summary = TextArtifactSummary::from_text(&restored.content);
         Self {
-            name,
-            content,
-            path,
-            is_dirty,
-            temp_id,
+            id: restored.id,
+            name: restored.name,
+            content: restored.content,
+            path: restored.path,
+            is_dirty: restored.is_dirty,
+            temp_id: restored.temp_id,
             line_count,
             artifact_summary,
-            encoding,
-            has_bom,
+            encoding: restored.encoding,
+            has_bom: restored.has_bom,
         }
     }
 
@@ -210,6 +219,27 @@ impl BufferState {
 
     pub fn overflow_context_label(&self) -> Option<String> {
         self.path.as_ref().map(|path| path.display().to_string())
+    }
+}
+
+fn next_buffer_id() -> BufferId {
+    NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn register_existing_buffer_id(id: BufferId) {
+    let next_id = id.saturating_add(1);
+    let mut current = NEXT_BUFFER_ID.load(Ordering::Relaxed);
+
+    while current < next_id {
+        match NEXT_BUFFER_ID.compare_exchange(
+            current,
+            next_id,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => break,
+            Err(observed) => current = observed,
+        }
     }
 }
 

@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use rand::RngExt;
 use rand::prelude::IndexedRandom;
 use rand::seq::SliceRandom;
@@ -23,6 +25,62 @@ fn path_match_rejects_different_files() {
         Path::new(r"C:\Temp\notes.txt"),
         Path::new(r"C:\Temp\other.txt")
     ));
+}
+
+#[test]
+fn reordering_tabs_preserves_active_tab_and_restore_order() {
+    let session_root = std::env::temp_dir().join(format!(
+        "scratchpad-tab-reorder-test-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let session_store = SessionStore::new(session_root.clone());
+    let mut app = ScratchpadApp::with_session_store(session_store);
+
+    app.tabs_mut()[0].buffer.name = "one.txt".to_owned();
+    app.create_untitled_tab();
+    app.tabs_mut()[1].buffer.name = "two.txt".to_owned();
+    app.create_untitled_tab();
+    app.tabs_mut()[2].buffer.name = "three.txt".to_owned();
+
+    app.reorder_tab(0, 2);
+
+    let ordered_names = app
+        .tabs()
+        .iter()
+        .map(|tab| tab.buffer.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(ordered_names, vec!["two.txt", "three.txt", "one.txt"]);
+    assert_eq!(app.active_tab_index(), 1);
+    assert_eq!(app.tabs()[app.active_tab_index()].buffer.name, "three.txt");
+
+    app.session_store()
+        .persist(
+            app.tabs(),
+            app.active_tab_index(),
+            app.font_size(),
+            app.word_wrap(),
+            app.logging_enabled(),
+        )
+        .unwrap();
+
+    let restored = app.session_store().load().unwrap().unwrap();
+    let restored_names = restored
+        .tabs
+        .iter()
+        .map(|tab| tab.buffer.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(restored_names, vec!["two.txt", "three.txt", "one.txt"]);
+    assert_eq!(restored.active_tab_index, 1);
+    assert_eq!(
+        restored.tabs[restored.active_tab_index].buffer.name,
+        "three.txt"
+    );
+
+    drop(app);
+    fs::remove_dir_all(session_root).unwrap();
 }
 
 #[test]
@@ -109,6 +167,7 @@ fn opens_configurable_number_of_tabs_defaulting_to_1000() {
             app.active_tab_index(),
             app.font_size(),
             app.word_wrap(),
+            app.logging_enabled(),
         )
         .unwrap();
 

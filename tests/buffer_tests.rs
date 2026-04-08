@@ -1,4 +1,6 @@
-use scratchpad::app::domain::BufferState;
+#![forbid(unsafe_code)]
+
+use scratchpad::app::domain::{BufferState, RestoredBufferState};
 use std::path::PathBuf;
 
 #[test]
@@ -29,15 +31,16 @@ fn display_name_prefixes_dirty_marker() {
 
 #[test]
 fn restored_buffer_preserves_session_metadata() {
-    let buffer = BufferState::restored(
-        "draft.md".to_owned(),
-        "content".to_owned(),
-        Some(PathBuf::from("draft.md")),
-        true,
-        "buffer-restore-1".to_owned(),
-        "UTF-8".to_owned(),
-        false,
-    );
+    let buffer = BufferState::restored(RestoredBufferState {
+        id: 7,
+        name: "draft.md".to_owned(),
+        content: "content".to_owned(),
+        path: Some(PathBuf::from("draft.md")),
+        is_dirty: true,
+        temp_id: "buffer-restore-1".to_owned(),
+        encoding: "UTF-8".to_owned(),
+        has_bom: false,
+    });
 
     assert!(buffer.is_dirty);
     assert_eq!(buffer.temp_id, "buffer-restore-1");

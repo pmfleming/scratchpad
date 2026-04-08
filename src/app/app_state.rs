@@ -1,44 +1,30 @@
 use crate::app::chrome::handle_window_resize;
 use crate::app::commands::AppCommand;
 use crate::app::domain::{
-    BufferState, EditorViewState, SplitAxis, SplitPath, ViewId, WorkspaceTab,
+    EditorViewState, PendingAction, SplitAxis, SplitPath, TabManager, ViewId, WorkspaceTab,
 };
-use crate::app::services::file_service::FileService;
+use crate::app::logging::{self, LogLevel};
+use crate::app::services::file_controller::FileController;
 use crate::app::services::session_manager;
 use crate::app::services::session_store::SessionStore;
 use crate::app::shortcuts;
 use crate::app::ui::{dialogs, editor_area, status_bar, tab_strip};
-use crate::app::{paths_match, theme};
 use eframe::egui;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 pub(crate) const SESSION_SNAPSHOT_INTERVAL: Duration = Duration::from_secs(1);
 
-#[derive(Clone, Copy)]
-pub(crate) enum PendingAction {
-    CloseTab(usize),
-}
-
 pub struct ScratchpadApp {
-    pub(crate) tabs: Vec<WorkspaceTab>,
-    pub(crate) active_tab_index: usize,
-    pub(crate) pending_action: Option<PendingAction>,
+    pub(crate) tab_manager: TabManager,
     pub(crate) font_size: f32,
     pub(crate) word_wrap: bool,
+    pub(crate) logging_enabled: bool,
     pub(crate) status_message: Option<String>,
     pub(crate) session_store: SessionStore,
-    pub(crate) session_dirty: bool,
     pub(crate) last_session_persist: Instant,
     pub(crate) close_in_progress: bool,
-    pub(crate) pending_scroll_to_active: bool,
     pub(crate) overflow_popup_open: bool,
-}
-
-enum OpenPathOutcome {
-    Opened { artifact_warning: Option<String> },
-    AlreadyOpen,
-    Failed,
 }
 
 impl Default for ScratchpadApp {
@@ -78,17 +64,14 @@ impl Drop for ScratchpadApp {
 impl ScratchpadApp {
     pub fn with_session_store(session_store: SessionStore) -> Self {
         let mut app = Self {
-            tabs: vec![WorkspaceTab::untitled()],
-            active_tab_index: 0,
-            pending_action: None,
+            tab_manager: TabManager::default(),
             font_size: 14.0,
             word_wrap: true,
+            logging_enabled: true,
             status_message: None,
             session_store,
-            session_dirty: false,
             last_session_persist: Instant::now(),
             close_in_progress: false,
-            pending_scroll_to_active: true,
             overflow_popup_open: false,
         };
 
@@ -98,17 +81,59 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn active_tab(&self) -> Option<&WorkspaceTab> {
-        self.tabs.get(self.active_tab_index)
+        self.tab_manager.active_tab()
+    }
+
+    pub(crate) fn log_event(&self, level: LogLevel, message: impl Into<String>) {
+        if self.logging_enabled {
+            logging::log(level, &message.into());
+        }
+    }
+
+    pub(crate) fn describe_tab_at(&self, index: usize) -> String {
+        self.tabs()
+            .get(index)
+            .map(Self::describe_tab)
+            .unwrap_or_else(|| format!("tab#{index}<missing>"))
+    }
+
+    pub(crate) fn describe_active_tab(&self) -> String {
+        self.describe_tab_at(self.active_tab_index())
+    }
+
+    pub(crate) fn describe_tab(tab: &WorkspaceTab) -> String {
+        let path = tab
+            .buffer
+            .path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<unsaved>".to_owned());
+        format!(
+            "{} [path={}, dirty={}, views={}, active_view={}]",
+            tab.buffer.name,
+            path,
+            tab.buffer.is_dirty,
+            tab.views.len(),
+            tab.active_view_id
+        )
     }
 
     pub(crate) fn active_view_mut(&mut self) -> Option<&mut EditorViewState> {
-        self.tabs
-            .get_mut(self.active_tab_index)
+        self.tab_manager
+            .active_tab_mut()
             .and_then(WorkspaceTab::active_view_mut)
     }
 
     pub(crate) fn mark_session_dirty(&mut self) {
-        self.session_dirty = true;
+        self.tab_manager.mark_session_dirty();
+    }
+
+    pub(crate) fn session_dirty(&self) -> bool {
+        self.tab_manager.session_dirty
+    }
+
+    pub(crate) fn clear_session_dirty(&mut self) {
+        self.tab_manager.session_dirty = false;
     }
 
     pub(crate) fn persist_session_now(&mut self) -> std::io::Result<()> {
@@ -116,12 +141,7 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn estimated_tab_strip_width(&self, spacing: f32) -> f32 {
-        if self.tabs.is_empty() {
-            return 0.0;
-        }
-
-        (self.tabs.len() as f32 * theme::TAB_BUTTON_WIDTH)
-            + ((self.tabs.len().saturating_sub(1)) as f32 * spacing)
+        self.tab_manager.estimated_tab_strip_width(spacing)
     }
 
     pub(crate) fn request_exit(&mut self, ctx: &egui::Context) {
@@ -135,85 +155,73 @@ impl ScratchpadApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             Err(error) => {
-                self.status_message = Some(format!("Session save failed: {error}"));
+                self.set_error_status(format!("Session save failed: {error}"));
             }
         }
     }
 
     pub fn new_tab(&mut self) {
-        self.create_untitled_tab();
+        self.tab_manager.create_untitled_tab();
+        let index = self.active_tab_index();
+        self.log_event(
+            LogLevel::Info,
+            format!(
+                "Created new tab at index {index}: {} (total tabs={})",
+                self.describe_active_tab(),
+                self.tabs().len()
+            ),
+        );
         let _ = self.persist_session_now();
     }
 
     pub fn open_file(&mut self) {
-        if let Some(paths) = rfd::FileDialog::new().pick_files() {
-            self.open_selected_paths(paths);
-        }
+        FileController::open_file(self);
     }
 
     pub fn save_file(&mut self) {
-        let _ = self.save_file_at(self.active_tab_index);
+        FileController::save_file(self);
     }
 
     pub fn save_file_at(&mut self, index: usize) -> bool {
-        if self.tabs.is_empty() {
-            return false;
-        }
-
-        if self.tabs[index].buffer.path.is_some() {
-            self.save_existing_path(index)
-        } else {
-            self.save_file_as_at(index);
-            !self.tabs[index].buffer.is_dirty
-        }
+        FileController::save_file_at(self, index)
     }
 
     pub fn save_file_as(&mut self) {
-        let _ = self.save_file_as_at(self.active_tab_index);
+        FileController::save_file_as(self);
     }
 
     pub fn save_file_as_at(&mut self, index: usize) -> bool {
-        if let Some(path) = rfd::FileDialog::new()
-            .set_file_name(&self.tabs[index].buffer.name)
-            .save_file()
-        {
-            self.save_buffer_to_path(index, path, true)
-        } else {
-            self.status_message = Some("Save cancelled.".to_owned());
-            false
-        }
+        FileController::save_file_as_at(self, index)
     }
 
     pub(crate) fn perform_close_tab(&mut self, index: usize) {
-        self.close_tab_internal(index);
+        let tab_description = self.describe_tab_at(index);
+        self.tab_manager.close_tab_internal(index);
+        self.log_event(
+            LogLevel::Info,
+            format!(
+                "Closed tab at index {index}: {tab_description} (remaining tabs={})",
+                self.tabs().len()
+            ),
+        );
         let _ = self.persist_session_now();
     }
 
     pub fn perform_close_tab_no_persist(&mut self, index: usize) {
-        self.close_tab_internal(index);
-    }
-
-    fn close_tab_internal(&mut self, index: usize) {
-        self.tabs.remove(index);
-        if self.tabs.is_empty() {
-            self.tabs.push(WorkspaceTab::untitled());
-            self.active_tab_index = 0;
-            return;
-        }
-
-        if self.active_tab_index > index {
-            self.active_tab_index -= 1;
-        }
-        self.active_tab_index = self.active_tab_index.min(self.tabs.len() - 1);
-        self.pending_scroll_to_active = true;
+        let tab_description = self.describe_tab_at(index);
+        self.tab_manager.close_tab_internal(index);
+        self.log_event(
+            LogLevel::Info,
+            format!("Closed tab without immediate persist at index {index}: {tab_description}"),
+        );
     }
 
     pub(crate) fn window_title(&self) -> String {
-        if self.tabs.is_empty() {
+        if self.tabs().is_empty() {
             return "Scratchpad".to_owned();
         }
 
-        let tab = &self.tabs[self.active_tab_index.min(self.tabs.len() - 1)];
+        let tab = &self.tabs()[self.active_tab_index().min(self.tabs().len() - 1)];
         let marker = if tab.buffer.is_dirty { "*" } else { "" };
         format!("{}{} - Scratchpad", marker, tab.buffer.name)
     }
@@ -243,26 +251,35 @@ impl ScratchpadApp {
         self.handle_command(AppCommand::ResizeSplit { path, ratio });
     }
 
-    fn append_tab(&mut self, tab: WorkspaceTab) {
-        self.tabs.push(tab);
-        self.active_tab_index = self.tabs.len() - 1;
-        self.pending_scroll_to_active = true;
+    pub(crate) fn append_tab(&mut self, tab: WorkspaceTab) {
+        self.tab_manager.append_tab(tab);
     }
 
     pub fn create_untitled_tab(&mut self) {
-        self.append_tab(WorkspaceTab::untitled());
+        self.tab_manager.create_untitled_tab();
     }
 
     pub fn tabs(&self) -> &[WorkspaceTab] {
-        &self.tabs
+        &self.tab_manager.tabs
     }
 
     pub fn tabs_mut(&mut self) -> &mut [WorkspaceTab] {
-        &mut self.tabs
+        &mut self.tab_manager.tabs
     }
 
     pub fn active_tab_index(&self) -> usize {
-        self.active_tab_index
+        self.tab_manager.active_tab_index
+    }
+
+    pub(crate) fn find_tab_by_path(&self, candidate: &Path) -> Option<usize> {
+        self.tab_manager.find_tab_by_path(candidate)
+    }
+
+    pub fn reorder_tab(&mut self, from_index: usize, to_index: usize) {
+        self.handle_command(AppCommand::ReorderTab {
+            from_index,
+            to_index,
+        });
     }
 
     pub fn font_size(&self) -> f32 {
@@ -273,229 +290,73 @@ impl ScratchpadApp {
         self.word_wrap
     }
 
+    pub fn logging_enabled(&self) -> bool {
+        self.logging_enabled
+    }
+
     pub fn session_store(&self) -> &SessionStore {
         &self.session_store
     }
 
-    fn find_tab_by_path(&self, candidate: &Path) -> Option<usize> {
-        self.tabs.iter().position(|tab| {
-            tab.buffer
-                .path
-                .as_deref()
-                .is_some_and(|path| paths_match(path, candidate))
-        })
+    pub fn tab_manager(&self) -> &TabManager {
+        &self.tab_manager
     }
 
-    fn open_selected_paths(&mut self, paths: Vec<std::path::PathBuf>) {
-        let mut opened_count = 0usize;
-        let mut duplicate_count = 0usize;
-        let mut failure_count = 0usize;
-        let mut artifact_count = 0usize;
-        let mut last_artifact_warning = None;
-
-        for path in paths {
-            match self.open_path(path) {
-                OpenPathOutcome::Opened { artifact_warning } => {
-                    opened_count += 1;
-                    if let Some(warning) = artifact_warning {
-                        artifact_count += 1;
-                        last_artifact_warning = Some(warning);
-                    }
-                }
-                OpenPathOutcome::AlreadyOpen => {
-                    duplicate_count += 1;
-                }
-                OpenPathOutcome::Failed => {
-                    failure_count += 1;
-                }
-            }
-        }
-
-        self.status_message = summarize_open_results(
-            opened_count,
-            duplicate_count,
-            failure_count,
-            artifact_count,
-            last_artifact_warning,
-        );
+    pub fn tab_manager_mut(&mut self) -> &mut TabManager {
+        &mut self.tab_manager
     }
 
-    fn open_path(&mut self, path: std::path::PathBuf) -> OpenPathOutcome {
-        if self.activate_existing_path(&path).is_some() {
-            return OpenPathOutcome::AlreadyOpen;
-        }
-
-        match FileService::read_file(&path) {
-            Ok(file_content) => OpenPathOutcome::Opened {
-                artifact_warning: self.open_loaded_file(path, file_content),
-            },
-            Err(_) => OpenPathOutcome::Failed,
-        }
+    pub fn pending_action(&self) -> Option<PendingAction> {
+        self.tab_manager.pending_action
     }
 
-    fn activate_existing_path(&mut self, path: &Path) -> Option<String> {
-        if let Some(index) = self.find_tab_by_path(path) {
-            self.handle_command(AppCommand::ActivateTab { index });
-            Some(
-                path.file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.display().to_string()),
-            )
-        } else {
-            None
-        }
+    pub fn set_pending_action(&mut self, action: Option<PendingAction>) -> Option<PendingAction> {
+        let old = self.tab_manager.pending_action;
+        self.tab_manager.pending_action = action;
+        old
     }
 
-    fn open_loaded_file(
-        &mut self,
-        path: std::path::PathBuf,
-        file_content: crate::app::services::file_service::FileContent,
-    ) -> Option<String> {
-        let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        let mut buffer = BufferState::with_encoding(
-            name,
-            file_content.content,
-            Some(path),
-            file_content.encoding,
-            file_content.has_bom,
-        );
-        buffer.artifact_summary = file_content.artifact_summary;
-        let artifact_warning = buffer
-            .artifact_summary
-            .status_text()
-            .map(|message| format!("Opened with formatting artifacts: {message}"));
-        self.append_tab(WorkspaceTab::new(buffer));
-        let _ = self.persist_session_now();
-        artifact_warning
-    }
-
-    fn save_existing_path(&mut self, index: usize) -> bool {
-        let path = self.tabs[index].buffer.path.clone().unwrap();
-        self.save_buffer_to_path(index, path, false)
-    }
-
-    fn save_buffer_to_path(
-        &mut self,
-        index: usize,
-        path: std::path::PathBuf,
-        update_buffer_path: bool,
-    ) -> bool {
-        let save_result = {
-            let buffer = &self.tabs[index].buffer;
-            FileService::write_file_with_bom(
-                &path,
-                &buffer.content,
-                &buffer.encoding,
-                buffer.has_bom,
-            )
-        };
-
-        match save_result {
-            Ok(()) => {
-                self.finalize_save(index, path, update_buffer_path);
-                true
-            }
-            Err(error) => {
-                self.status_message = Some(format!("Save failed: {error}"));
-                false
-            }
-        }
-    }
-
-    fn finalize_save(&mut self, index: usize, path: std::path::PathBuf, update_buffer_path: bool) {
-        let buffer = &mut self.tabs[index].buffer;
-        if update_buffer_path {
-            buffer.path = Some(path.clone());
-            buffer.name = path.file_name().unwrap().to_string_lossy().into_owned();
-        }
-        buffer.is_dirty = false;
+    pub(crate) fn clear_status_message(&mut self) {
         self.status_message = None;
-        self.mark_session_dirty();
-        let _ = self.persist_session_now();
-    }
-}
-
-fn summarize_open_results(
-    opened_count: usize,
-    duplicate_count: usize,
-    failure_count: usize,
-    artifact_count: usize,
-    last_artifact_warning: Option<String>,
-) -> Option<String> {
-    if opened_count == 1 && duplicate_count == 0 && failure_count == 0 {
-        return last_artifact_warning;
     }
 
-    let mut parts = Vec::new();
-
-    if opened_count > 0 {
-        if artifact_count > 0 {
-            parts.push(format!(
-                "Opened {} ({} with formatting artifacts)",
-                file_count_label(opened_count),
-                file_count_label(artifact_count)
-            ));
-        } else {
-            parts.push(format!("Opened {}", file_count_label(opened_count)));
+    pub(crate) fn set_info_status(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        self.status_message = Some(message.clone());
+        if self.logging_enabled {
+            logging::log(LogLevel::Info, &message);
         }
     }
 
-    if duplicate_count > 0 {
-        parts.push(format!(
-            "{} already open",
-            file_count_label(duplicate_count)
-        ));
+    pub(crate) fn set_warning_status(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        self.status_message = Some(message.clone());
+        if self.logging_enabled {
+            logging::log(LogLevel::Warn, &message);
+        }
     }
 
-    if failure_count > 0 {
-        parts.push(format!(
-            "{} failed to open",
-            file_count_label(failure_count)
-        ));
+    pub(crate) fn set_error_status(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        self.status_message = Some(message.clone());
+        if self.logging_enabled {
+            logging::log(LogLevel::Error, &message);
+        }
     }
 
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join("; "))
-    }
-}
+    pub(crate) fn set_logging_enabled(&mut self, enabled: bool) {
+        if self.logging_enabled == enabled {
+            return;
+        }
 
-fn file_count_label(count: usize) -> String {
-    if count == 1 {
-        "1 file".to_owned()
-    } else {
-        format!("{count} files")
-    }
-}
+        self.logging_enabled = enabled;
+        self.mark_session_dirty();
 
-#[cfg(test)]
-mod tests {
-    use super::summarize_open_results;
-
-    #[test]
-    fn summarize_open_results_preserves_single_artifact_warning() {
-        let summary = summarize_open_results(
-            1,
-            0,
-            0,
-            1,
-            Some("Opened with formatting artifacts: Control characters present: ANSI".to_owned()),
-        );
-
-        assert_eq!(
-            summary,
-            Some("Opened with formatting artifacts: Control characters present: ANSI".to_owned())
-        );
-    }
-
-    #[test]
-    fn summarize_open_results_aggregates_batch_outcomes() {
-        let summary = summarize_open_results(3, 1, 2, 1, None);
-
-        assert_eq!(
-            summary,
-            Some("Opened 3 files (1 file with formatting artifacts); 1 file already open; 2 files failed to open".to_owned())
-        );
+        let state = if enabled { "enabled" } else { "disabled" };
+        if enabled {
+            logging::log(LogLevel::Info, &format!("Runtime logging {state}"));
+        } else {
+            self.status_message = Some(format!("Runtime logging {state}."));
+        }
     }
 }

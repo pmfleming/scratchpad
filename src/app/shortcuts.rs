@@ -40,10 +40,10 @@ fn handle_view_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
 
 fn handle_tab_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::W))
-        && !app.tabs.is_empty()
+        && !app.tabs().is_empty()
     {
         app.handle_command(AppCommand::RequestCloseTab {
-            index: app.active_tab_index,
+            index: app.active_tab_index(),
         });
     }
 }

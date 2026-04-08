@@ -1,5 +1,6 @@
 /target/
 /target-tests/
+/log/
 
 # Editor settings
 .vscode/*.log

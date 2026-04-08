@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use scratchpad::app::services::file_service::FileService;
 use std::fs;
 use tempfile::tempdir;

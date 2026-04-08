@@ -1,4 +1,4 @@
-use crate::app::domain::RenderedLayout;
+use crate::app::domain::{BufferId, RenderedLayout};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_VIEW_ID: AtomicU64 = AtomicU64::new(1);
@@ -7,25 +7,33 @@ pub type ViewId = u64;
 
 pub struct EditorViewState {
     pub id: ViewId,
+    pub buffer_id: BufferId,
     pub show_line_numbers: bool,
     pub show_control_chars: bool,
     pub latest_layout: Option<RenderedLayout>,
 }
 
 impl EditorViewState {
-    pub fn new(show_control_chars: bool) -> Self {
+    pub fn new(buffer_id: BufferId, show_control_chars: bool) -> Self {
         Self {
             id: next_view_id(),
+            buffer_id,
             show_line_numbers: false,
             show_control_chars,
             latest_layout: None,
         }
     }
 
-    pub fn restored(id: ViewId, show_line_numbers: bool, show_control_chars: bool) -> Self {
+    pub fn restored(
+        id: ViewId,
+        buffer_id: BufferId,
+        show_line_numbers: bool,
+        show_control_chars: bool,
+    ) -> Self {
         register_existing_view_id(id);
         Self {
             id,
+            buffer_id,
             show_line_numbers,
             show_control_chars,
             latest_layout: None,

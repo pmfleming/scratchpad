@@ -1,4 +1,5 @@
 use crate::app::theme::*;
+use crate::app::ui::tab_drag;
 use eframe::egui::{
     self, Color32, CursorIcon, Rect, Sense, Stroke, Vec2, viewport::ResizeDirection,
 };
@@ -74,7 +75,9 @@ pub fn tab_button_sized(
     width: f32,
 ) -> (egui::Response, egui::Response, bool) {
     let size = Vec2::new(width, TAB_HEIGHT);
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let response = ui.interact(rect, ui.id().with("tab_button"), Sense::click_and_drag());
+    let drag_active = tab_drag::is_drag_active_for_context(ui.ctx());
 
     if active {
         ui.painter().rect_filled(rect, 4.0, TAB_ACTIVE_BG);
@@ -84,7 +87,7 @@ pub fn tab_button_sized(
             Stroke::new(1.0, BORDER),
             egui::StrokeKind::Outside,
         );
-    } else if response.hovered() {
+    } else if response.hovered() && !drag_active {
         ui.painter().rect_filled(rect, 4.0, TAB_HOVER_BG);
     }
 
@@ -104,7 +107,7 @@ pub fn tab_button_sized(
     );
 
     // Close button area (inside the tab)
-    let (close_rect, close_response) = render_tab_close_button(ui, rect);
+    let (close_rect, close_response) = render_tab_close_button(ui, rect, drag_active);
 
     // Paint the close icon
     ui.painter().text(
@@ -118,7 +121,11 @@ pub fn tab_button_sized(
     (response, close_response, truncated)
 }
 
-fn render_tab_close_button(ui: &mut egui::Ui, tab_rect: Rect) -> (Rect, egui::Response) {
+fn render_tab_close_button(
+    ui: &mut egui::Ui,
+    tab_rect: Rect,
+    drag_active: bool,
+) -> (Rect, egui::Response) {
     let close_rect = Rect::from_center_size(
         tab_rect.right_center() - Vec2::new(14.0, 0.0),
         Vec2::new(18.0, 18.0),
@@ -126,7 +133,7 @@ fn render_tab_close_button(ui: &mut egui::Ui, tab_rect: Rect) -> (Rect, egui::Re
 
     let close_response = ui.interact(close_rect, ui.id().with("close"), Sense::click());
 
-    if close_response.hovered() {
+    if close_response.hovered() && !drag_active {
         ui.painter().rect_filled(close_rect, 2.0, CLOSE_HOVER_BG);
     }
 
