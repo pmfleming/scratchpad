@@ -16,9 +16,11 @@ The current application already includes:
 - per-file tile promotion into new top-level tabs
 - per-workspace promote-all for splitting one workspace into one tab per file
 - Open Here for loading files into the current workspace tab with equal-share rebalancing
+- a dedicated Settings surface that behaves like a real tab in the shared tab model
 - encoding-aware file open and save flows
 - formatting-artifact inspection for control-character-heavy content
-- session persistence for tabs, pane layout, view settings, zoom, wrap, and logging preference
+- YAML-backed settings persistence for font, wrap, logging, and editor font selection
+- session persistence for tabs, pane layout, and session/view metadata
 - runtime file logging for major user actions
 
 ## Implemented Architecture
@@ -45,6 +47,7 @@ The current application already includes:
 - `src/app/services/file_controller.rs`: open/save orchestration and status/log integration
 - `src/app/services/session_manager.rs`: session save / restore orchestration
 - `src/app/services/session_store/`: persisted session model and filesystem operations
+- `src/app/services/settings_store.rs`: YAML-backed settings load/save and default handling
 
 ### UI Layer
 
@@ -53,6 +56,7 @@ The current application already includes:
 - `src/app/ui/tab_drag/`: drag state, drop resolution, marker painting, auto-scroll support
 - `src/app/ui/editor_area/`: pane tree rendering and split/divider behavior
 - `src/app/ui/editor_content/`: text editing, read-only artifact views, gutter rendering
+- `src/app/ui/settings.rs`: settings page with font, diagnostics, and settings sections
 - `src/app/ui/status_bar.rs`: status summary, encoding display, line counts, control-char toggle, runtime logging toggle
 - `src/app/ui/dialogs.rs`: destructive-action confirmation flows
 
@@ -72,6 +76,7 @@ The current application already includes:
 - [x] Horizontal tab strip with overflow popup
 - [x] Full overflow list by default
 - [x] Shared tab order across strip and overflow
+- [x] Settings page as a shared-order tab with strip + overflow presence
 - [x] Promote-all workspace action in both the visible strip and overflow list for tabs with 3 or more files
 - [x] Drag-and-drop reorder:
   - [x] within the strip
@@ -90,6 +95,7 @@ The current application already includes:
 - [x] Per-view control-character visibility
 - [x] Zoom via keyboard shortcuts and Ctrl + mouse wheel
 - [x] Word-wrap state stored in the app model
+- [x] YAML-backed settings independent of session restore
 
 ### File Handling
 
@@ -112,7 +118,7 @@ The current application already includes:
 
 - [x] Session persistence for open tabs
 - [x] Session persistence for pane layouts and views
-- [x] Session persistence for font size, wrap, and logging toggle
+- [x] YAML persistence for font size, wrap, logging, and editor font
 - [x] Runtime file logging for major commands and file operations
 - [x] Panic hook integration
 
@@ -120,6 +126,9 @@ The current application already includes:
 
 - [x] Unit and integration tests for tabs, session storage, buffers, file IO, and drag helpers
 - [x] Stress coverage for high tab counts
+- [x] Standardized complexity measurement via `scripts/hotspots.py`
+- [x] Standardized performance measurement via `scripts/slowspots.py`
+- [x] Standardized architecture/interrelatedness mapping via `scripts/map.py`
 
 ## Current Limitations
 
@@ -149,9 +158,25 @@ The current application already includes:
 - [ ] Expand tests around session migration / incompatible manifests as the format evolves
 - [ ] Add more targeted logging around drag state and other hard-to-debug interactions when needed
 
+## Standard Measurement Methods
+
+The project uses three standardized measurement tools:
+
+- `scripts/hotspots.py`: complexity and maintainability review
+- `scripts/slowspots.py`: benchmark-driven speed and degradation review
+- `scripts/map.py`: dependency/interrelatedness mapping enriched with hotspot and slowspot data
+
+These should be treated as the default ways to measure:
+
+- complexity
+- speed
+- interrelatedness
+
+`scripts/ci.ps1` is the standard local and CI entry point and runs the supported checks together.
+
 ## Maintainability Plan
 
-This pass is driven by the hotspot checker output from `scripts/hotspots.py` / `hotspots.html`.
+This pass is driven primarily by the hotspot checker output from `scripts/hotspots.py`.
 
 Top checker hotspots at the start of the pass:
 
@@ -181,7 +206,9 @@ Validation during this pass:
 - [x] `cargo check` after tile-header refactor
 - [x] `cargo test`
 - [x] `cargo clippy --all-targets --all-features -- -D warnings`
+- [x] `scripts/hotspots.py`
+- [x] `scripts/slowspots.py`
 
 ## Working Definition of Done
 
-Scratchpad should remain a responsive, encoding-aware, session-persistent editor with a single shared tab-order model and predictable pane behavior. New work should preserve that structure instead of reintroducing duplicated tab state in the strip and overflow UI.
+Scratchpad should remain a responsive, encoding-aware editor with YAML-backed settings, session persistence for workspace state, a single shared tab-order model, and predictable pane behavior. New work should preserve that structure instead of reintroducing duplicated tab state in the strip and overflow UI.

@@ -1,3 +1,4 @@
+use crate::app::app_state::ScratchpadApp;
 use crate::app::chrome::tab_button_sized_with_actions;
 use crate::app::domain::WorkspaceTab;
 use crate::app::theme::*;
@@ -16,23 +17,22 @@ pub(crate) const OVERFLOW_LIST_MODE_TOKEN: &str = "all-tabs";
 #[derive(Default)]
 pub(crate) struct OverflowMenuOutcome {
     pub(crate) activated_tab: Option<usize>,
+    pub(crate) activate_settings: bool,
     pub(crate) promote_all_files_tab: Option<usize>,
     pub(crate) close_requested_tab: Option<usize>,
+    pub(crate) close_settings: bool,
     pub(crate) drop_zone: Option<tab_drag::TabDropZone>,
 }
 
 struct OverflowMenuContext<'a> {
     popup_width: f32,
-    duplicate_name_counts: &'a HashMap<String, usize>,
     outcome: &'a mut OverflowMenuOutcome,
     overflow_popup_open: &'a mut bool,
 }
 
 struct OverflowPopupRequest<'a> {
-    tabs: &'a [WorkspaceTab],
-    active_tab_index: usize,
+    app: &'a ScratchpadApp,
     visible_tab_indices: &'a HashSet<usize>,
-    duplicate_name_counts: &'a HashMap<String, usize>,
     overflow_popup_id: egui::Id,
     anchor: egui::Pos2,
 }
@@ -40,11 +40,10 @@ struct OverflowPopupRequest<'a> {
 pub(crate) fn show_overflow_button(
     ctx: &egui::Context,
     ui: &mut egui::Ui,
-    tabs: &[WorkspaceTab],
-    active_tab_index: usize,
+    app: &ScratchpadApp,
     overflow_popup_open: &mut bool,
     visible_tab_indices: &HashSet<usize>,
-    duplicate_name_counts: &HashMap<String, usize>,
+    _duplicate_name_counts: &HashMap<String, usize>,
 ) -> OverflowMenuOutcome {
     let mut outcome = OverflowMenuOutcome::default();
     let overflow_popup_id = ui.id().with("tab_overflow_popup");
@@ -52,10 +51,8 @@ pub(crate) fn show_overflow_button(
     toggle_overflow_popup(overflow_popup_open, &overflow_button_response);
 
     let popup_request = OverflowPopupRequest {
-        tabs,
-        active_tab_index,
+        app,
         visible_tab_indices,
-        duplicate_name_counts,
         overflow_popup_id,
         anchor: overflow_button_response.rect.right_bottom(),
     };
@@ -116,15 +113,13 @@ fn show_overflow_popup(
 
                 let mut menu = OverflowMenuContext {
                     popup_width,
-                    duplicate_name_counts: request.duplicate_name_counts,
                     outcome,
                     overflow_popup_open,
                 };
 
                 collect_overflow_row_rects(
                     ui,
-                    request.tabs,
-                    request.active_tab_index,
+                    request.app,
                     active_drag_source,
                     request.visible_tab_indices,
                     &mut menu,
@@ -138,30 +133,29 @@ fn show_overflow_popup(
 
 fn collect_overflow_row_rects(
     ui: &mut egui::Ui,
-    tabs: &[WorkspaceTab],
-    active_tab_index: usize,
+    app: &ScratchpadApp,
     active_drag_source: Option<usize>,
     visible_tab_indices: &HashSet<usize>,
     menu: &mut OverflowMenuContext<'_>,
 ) -> Vec<tab_drag::TabRectEntry> {
-    let mut row_rects = Vec::with_capacity(tabs.len());
+    let mut row_rects = Vec::with_capacity(app.total_tab_slots());
 
-    for (index, tab) in tabs.iter().enumerate() {
-        if !should_show_overflow_row(index, active_drag_source, visible_tab_indices) {
+    for slot_index in 0..app.total_tab_slots() {
+        if !should_show_overflow_row(slot_index, active_drag_source, visible_tab_indices) {
             continue;
         }
 
         let row_rect = show_overflow_row(
             ui,
-            index,
-            tab,
-            active_tab_index == index,
-            active_drag_source == Some(index),
+            app,
+            slot_index,
+            active_drag_source == Some(slot_index),
             menu,
         );
         row_rects.push(tab_drag::TabRectEntry {
-            index,
+            index: slot_index,
             rect: row_rect,
+            combine_enabled: !app.tab_slot_is_settings(slot_index),
         });
     }
 
@@ -196,13 +190,13 @@ fn should_close_overflow_popup(
 }
 
 fn should_show_overflow_row(
-    index: usize,
+    slot_index: usize,
     _active_drag_source: Option<usize>,
     visible_tab_indices: &HashSet<usize>,
 ) -> bool {
     match overflow_list_mode() {
         OverflowListMode::AllTabs => true,
-        OverflowListMode::HiddenTabsOnly => !visible_tab_indices.contains(&index),
+        OverflowListMode::HiddenTabsOnly => !visible_tab_indices.contains(&slot_index),
     }
 }
 
@@ -216,26 +210,24 @@ fn overflow_list_mode() -> OverflowListMode {
 
 fn show_overflow_row(
     ui: &mut egui::Ui,
-    index: usize,
-    tab: &WorkspaceTab,
-    selected: bool,
+    app: &ScratchpadApp,
+    slot_index: usize,
     is_drag_source: bool,
     menu: &mut OverflowMenuContext<'_>,
 ) -> egui::Rect {
-    ui.push_id(("tab_overflow", index), |ui| {
+    ui.push_id(("tab_overflow", slot_index), |ui| {
         if is_drag_source {
             return render_drag_source_placeholder(ui, menu.popup_width);
         }
 
-        let has_duplicate = menu
-            .duplicate_name_counts
-            .get(&tab.buffer.name)
-            .copied()
-            .unwrap_or(0)
-            > 1;
-
-        let display_name = tab.full_display_name(has_duplicate);
-        let can_promote_all_files = tab.can_promote_all_files();
+        let selected = app.active_tab_slot_index() == slot_index;
+        let Some(display_name) = app.display_tab_name_at_slot(slot_index) else {
+            return render_drag_source_placeholder(ui, menu.popup_width);
+        };
+        let workspace_index = app.workspace_index_for_slot(slot_index);
+        let can_promote_all_files = workspace_index
+            .and_then(|index| app.tabs().get(index))
+            .is_some_and(WorkspaceTab::can_promote_all_files);
 
         let (response, promote_response, close_response, _truncated) =
             tab_button_sized_with_actions(
@@ -245,18 +237,28 @@ fn show_overflow_row(
                 can_promote_all_files,
                 menu.popup_width,
             );
-        tab_drag::begin_tab_drag_if_needed(ui, index, &response, &close_response);
+        tab_drag::begin_tab_drag_if_needed(ui, slot_index, &response, &close_response);
 
-        if promote_response.is_some_and(|promote| promote.clicked()) {
-            menu.outcome.promote_all_files_tab = Some(index);
+        if promote_response.is_some_and(|promote| promote.clicked())
+            && let Some(workspace_index) = workspace_index
+        {
+            menu.outcome.promote_all_files_tab = Some(workspace_index);
+            *menu.overflow_popup_open = false;
+        } else if response.clicked() && app.tab_slot_is_settings(slot_index) {
+            menu.outcome.activate_settings = true;
             *menu.overflow_popup_open = false;
         } else if response.clicked() {
-            menu.outcome.activated_tab = Some(index);
+            menu.outcome.activated_tab = workspace_index;
             *menu.overflow_popup_open = false;
         }
 
         if close_response.clicked() {
-            menu.outcome.close_requested_tab = Some(index);
+            if app.tab_slot_is_settings(slot_index) {
+                menu.outcome.close_settings = true;
+            } else {
+                menu.outcome.close_requested_tab = workspace_index;
+            }
+            *menu.overflow_popup_open = false;
         }
 
         response.rect

@@ -1,4 +1,4 @@
-use crate::app::domain::WorkspaceTab;
+use crate::app::app_state::ScratchpadApp;
 use eframe::egui;
 
 mod paint;
@@ -10,8 +10,14 @@ pub(crate) use state::{
 };
 
 pub(crate) enum TabDragCommit {
-    Reorder { from_index: usize, to_index: usize },
-    Combine { source_index: usize, target_index: usize },
+    Reorder {
+        from_index: usize,
+        to_index: usize,
+    },
+    Combine {
+        source_index: usize,
+        target_index: usize,
+    },
 }
 
 pub(crate) fn sync_drag_state(ui: &egui::Ui) {
@@ -25,13 +31,21 @@ pub(crate) fn update_tab_drag(
 ) -> Option<TabDragCommit> {
     let drag_state = state::update_current_tab_drag(ui)?;
     let drag_active = state::drag_is_active(drag_state);
+    let allow_combine = zones
+        .iter()
+        .flat_map(|zone| zone.entries.iter())
+        .find(|entry| entry.index == drag_state.source_index)
+        .is_some_and(|entry| entry.combine_enabled);
     let drop_intent = drag_active
-        .then(|| state::locate_drop_intent(zones, drag_state.current_pos))
+        .then(|| state::locate_drop_intent(zones, drag_state.current_pos, allow_combine))
         .flatten();
 
     if let Some(drop_intent) = &drop_intent {
         match drop_intent {
-            state::TabDropIntent::Reorder { zone_index, drop_slot } => {
+            state::TabDropIntent::Reorder {
+                zone_index,
+                drop_slot,
+            } => {
                 paint::paint_tab_reorder_marker(ui.ctx(), &zones[*zone_index], *drop_slot);
             }
             state::TabDropIntent::Combine {
@@ -51,7 +65,8 @@ pub(crate) fn update_tab_drag(
 
     match drop_intent? {
         state::TabDropIntent::Reorder { drop_slot, .. } => {
-            let to_index = state::resolve_drop_slot(drag_state.source_index, drop_slot, total_tab_count);
+            let to_index =
+                state::resolve_drop_slot(drag_state.source_index, drop_slot, total_tab_count);
             (to_index != drag_state.source_index).then_some(TabDragCommit::Reorder {
                 from_index: drag_state.source_index,
                 to_index,
@@ -66,15 +81,14 @@ pub(crate) fn update_tab_drag(
     }
 }
 
-pub(crate) fn paint_dragged_tab_ghost(ctx: &egui::Context, tabs: &[WorkspaceTab]) {
+pub(crate) fn paint_dragged_tab_ghost(ctx: &egui::Context, app: &ScratchpadApp) {
     let Some(drag_state) = state::current_tab_drag_state_for_context(ctx) else {
         return;
     };
     if !state::drag_is_active(drag_state) {
         return;
     }
-
-    paint::paint_dragged_tab_ghost(ctx, tabs, drag_state);
+    paint::paint_dragged_tab_ghost(ctx, app, drag_state);
 }
 
 pub(crate) fn auto_scroll_tab_strip(

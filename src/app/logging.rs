@@ -45,7 +45,10 @@ pub fn init() -> std::io::Result<PathBuf> {
 
     if LOGGER.set(logger).is_ok() {
         install_panic_hook();
-        log(LogLevel::Info, &format!("Logging initialized at {}", path.display()));
+        log(
+            LogLevel::Info,
+            &format!("Logging initialized at {}", path.display()),
+        );
     }
 
     Ok(path)

@@ -1,7 +1,7 @@
+use super::artifact::make_control_chars_clean;
 use crate::app::domain::{BufferState, EditorViewState, RenderedLayout, display_line_count};
 use crate::app::theme::*;
 use eframe::egui;
-use super::artifact::make_control_chars_clean;
 
 pub fn render_line_number_gutter(
     ui: &mut egui::Ui,

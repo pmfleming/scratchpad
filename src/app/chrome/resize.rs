@@ -1,6 +1,4 @@
-use eframe::egui::{
-    self, CursorIcon, Rect, Sense, Vec2, pos2, viewport::ResizeDirection,
-};
+use eframe::egui::{self, CursorIcon, Rect, Sense, Vec2, pos2, viewport::ResizeDirection};
 
 const RESIZE_BORDER: f32 = 6.0;
 const RESIZE_CORNER: f32 = 18.0;
@@ -68,10 +66,7 @@ fn resize_corners(width: f32, height: f32) -> [ResizeGrip; 4] {
         },
         ResizeGrip {
             id: "north-east",
-            rect: Rect::from_min_max(
-                pos2(width - RESIZE_CORNER, 0.0),
-                pos2(width, RESIZE_CORNER),
-            ),
+            rect: Rect::from_min_max(pos2(width - RESIZE_CORNER, 0.0), pos2(width, RESIZE_CORNER)),
             direction: ResizeDirection::NorthEast,
             cursor: CursorIcon::ResizeNeSw,
         },

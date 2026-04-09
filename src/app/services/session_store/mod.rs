@@ -5,6 +5,7 @@ use crate::app::domain::{
     BufferState, EditorViewState, PaneNode, RestoredBufferState, WorkspaceTab,
 };
 use crate::app::services::file_service::FileService;
+use crate::app::services::settings_store::AppSettings;
 use model::{SessionBuffer, SessionManifest, SessionPaneNode, SessionTab, SessionView};
 use ops::{BUFFER_FILE_EXTENSION, collect_stale_buffer_files, write_atomic};
 use std::collections::HashSet;
@@ -25,9 +26,7 @@ pub struct SessionStore {
 pub struct RestoredSession {
     pub tabs: Vec<WorkspaceTab>,
     pub active_tab_index: usize,
-    pub font_size: f32,
-    pub word_wrap: bool,
-    pub logging_enabled: bool,
+    pub legacy_settings: AppSettings,
 }
 
 impl Default for SessionStore {
@@ -45,10 +44,15 @@ impl SessionStore {
         }
     }
 
+    pub fn root(&self) -> &std::path::Path {
+        &self.root
+    }
+
     pub fn load(&self) -> io::Result<Option<RestoredSession>> {
         let Some(manifest) = self.load_manifest()? else {
             return Ok(None);
         };
+        let legacy_settings = manifest.legacy_settings();
 
         let mut tabs = Vec::with_capacity(manifest.tabs.len());
         for tab in manifest.tabs {
@@ -62,9 +66,7 @@ impl SessionStore {
         Ok(Some(RestoredSession {
             active_tab_index: manifest.active_tab_index.min(tabs.len() - 1),
             tabs,
-            font_size: manifest.font_size,
-            word_wrap: manifest.word_wrap,
-            logging_enabled: manifest.logging_enabled,
+            legacy_settings,
         }))
     }
 

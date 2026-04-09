@@ -20,6 +20,7 @@ pub(crate) fn render_editor_content(
     buffer: &mut BufferState,
     view: &mut EditorViewState,
     previous_layout: Option<&RenderedLayout>,
+    request_focus: bool,
     word_wrap: bool,
     editor_font_id: &egui::FontId,
 ) -> EditorContentOutcome {
@@ -35,9 +36,16 @@ pub(crate) fn render_editor_content(
                 }
 
                 if buffer.artifact_summary.has_control_chars() {
-                    render_artifact_view(ui, buffer, view, word_wrap, editor_font_id)
+                    render_artifact_view(ui, buffer, view, request_focus, word_wrap, editor_font_id)
                 } else {
-                    render_editor_text_edit(ui, buffer, view, word_wrap, editor_font_id)
+                    render_editor_text_edit(
+                        ui,
+                        buffer,
+                        view,
+                        request_focus,
+                        word_wrap,
+                        editor_font_id,
+                    )
                 }
             })
             .inner

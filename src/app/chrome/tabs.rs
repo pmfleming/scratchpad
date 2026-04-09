@@ -2,6 +2,12 @@ use crate::app::theme::*;
 use crate::app::ui::tab_drag;
 use eframe::egui::{self, Rect, Sense, Stroke, Vec2};
 
+struct TabButtonFrame {
+    rect: Rect,
+    response: egui::Response,
+    drag_in_progress: bool,
+}
+
 pub fn tab_button(
     ui: &mut egui::Ui,
     label: &str,
@@ -18,19 +24,21 @@ pub fn tab_button_with_actions(
     show_promote_all: bool,
     width: f32,
 ) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
-    let size = Vec2::new(width, TAB_HEIGHT);
-    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
-    let response = ui.interact(rect, ui.id().with("tab_button"), Sense::click_and_drag());
-    let drag_in_progress = tab_drag::has_tab_drag_for_context(ui.ctx());
-
-    paint_tab_background(ui, rect, &response, active, drag_in_progress);
-    let promote_rect = show_promote_all.then(|| tab_promote_rect(rect));
-    let truncated = paint_tab_label(ui, rect, label, show_promote_all);
+    let frame = allocate_tab_button_frame(ui, width);
+    paint_tab_background(
+        ui,
+        frame.rect,
+        &frame.response,
+        active,
+        frame.drag_in_progress,
+    );
+    let promote_rect = show_promote_all.then(|| tab_promote_rect(frame.rect));
+    let truncated = paint_tab_label(ui, frame.rect, label, show_promote_all);
     let promote_response = promote_rect
-        .map(|promote_rect| render_tab_promote_button(ui, promote_rect, drag_in_progress));
-    let (_, close_response) = render_tab_close_button(ui, rect, drag_in_progress);
+        .map(|promote_rect| render_tab_promote_button(ui, promote_rect, frame.drag_in_progress));
+    let (_, close_response) = render_tab_close_button(ui, frame.rect, frame.drag_in_progress);
 
-    (response, promote_response, close_response, truncated)
+    (frame.response, promote_response, close_response, truncated)
 }
 
 pub fn tab_button_sized(
@@ -39,16 +47,18 @@ pub fn tab_button_sized(
     active: bool,
     width: f32,
 ) -> (egui::Response, egui::Response, bool) {
-    let size = Vec2::new(width, TAB_HEIGHT);
-    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
-    let response = ui.interact(rect, ui.id().with("tab_button"), Sense::click_and_drag());
-    let drag_in_progress = tab_drag::has_tab_drag_for_context(ui.ctx());
+    let frame = allocate_tab_button_frame(ui, width);
+    paint_tab_background(
+        ui,
+        frame.rect,
+        &frame.response,
+        active,
+        frame.drag_in_progress,
+    );
+    let truncated = paint_tab_label(ui, frame.rect, label, false);
+    let (_, close_response) = render_tab_close_button(ui, frame.rect, frame.drag_in_progress);
 
-    paint_tab_background(ui, rect, &response, active, drag_in_progress);
-    let truncated = paint_tab_label(ui, rect, label, false);
-    let (_, close_response) = render_tab_close_button(ui, rect, drag_in_progress);
-
-    (response, close_response, truncated)
+    (frame.response, close_response, truncated)
 }
 
 pub fn tab_button_sized_with_actions(
@@ -81,8 +91,20 @@ fn paint_tab_background(
     }
 }
 
+fn allocate_tab_button_frame(ui: &mut egui::Ui, width: f32) -> TabButtonFrame {
+    let size = Vec2::new(width, TAB_HEIGHT);
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let response = ui.interact(rect, ui.id().with("tab_button"), Sense::click_and_drag());
+
+    TabButtonFrame {
+        rect,
+        response,
+        drag_in_progress: tab_drag::has_tab_drag_for_context(ui.ctx()),
+    }
+}
+
 fn paint_tab_label(ui: &egui::Ui, rect: Rect, label: &str, show_promote_all: bool) -> bool {
-    let right_padding = if show_promote_all { 50.0 } else { 28.0 };
+    let right_padding = label_right_padding(show_promote_all);
     let text_rect = Rect::from_min_max(
         rect.min + Vec2::new(8.0, 0.0),
         rect.max - Vec2::new(right_padding, 0.0),
@@ -96,6 +118,10 @@ fn paint_tab_label(ui: &egui::Ui, rect: Rect, label: &str, show_promote_all: boo
         TEXT_PRIMARY,
     );
     truncated
+}
+
+fn label_right_padding(show_promote_all: bool) -> f32 {
+    if show_promote_all { 50.0 } else { 28.0 }
 }
 
 fn tab_promote_rect(tab_rect: Rect) -> Rect {
@@ -155,53 +181,84 @@ fn paint_tab_close_button(ui: &egui::Ui, close_rect: Rect, hovered: bool, drag_i
 }
 
 fn truncate_label(ui: &egui::Ui, label: &str, available_width: f32) -> (String, bool) {
-    if text_width(ui, label) <= available_width {
+    let ellipsis = "...";
+    if label_fits(ui, label, available_width) {
         return (label.to_owned(), false);
     }
-
-    let ellipsis = "...";
-    if text_width(ui, ellipsis) > available_width {
+    if !ellipsis_fits(ui, ellipsis, available_width) {
         return (String::new(), true);
     }
 
-    match find_max_prefix(ui, label, ellipsis, available_width) {
-        Some(truncated) => (truncated, true),
-        None => (String::new(), true),
-    }
+    (
+        best_truncated_label(ui, label, ellipsis, available_width).unwrap_or_default(),
+        true,
+    )
 }
 
-fn find_max_prefix(
+fn label_fits(ui: &egui::Ui, label: &str, available_width: f32) -> bool {
+    text_width(ui, label) <= available_width
+}
+
+fn ellipsis_fits(ui: &egui::Ui, ellipsis: &str, available_width: f32) -> bool {
+    text_width(ui, ellipsis) <= available_width
+}
+
+fn best_truncated_label(
     ui: &egui::Ui,
     label: &str,
     suffix: &str,
     available_width: f32,
 ) -> Option<String> {
-    let boundaries: Vec<usize> = label.char_indices().map(|(i, _)| i).collect();
+    let boundaries = char_boundaries(label);
     let mut low = 0;
     let mut high = boundaries.len();
     let mut best = None;
 
     while low < high {
-        let mid = low + (high - low) / 2;
-        let mid_pos = boundaries[mid];
-        let candidate = format!("{}{}", &label[..mid_pos], suffix);
-
-        if text_width(ui, &candidate) <= available_width {
-            best = Some(candidate);
-            low = mid + 1;
+        let candidate = truncation_candidate(label, suffix, &boundaries, low, high);
+        if candidate_fits(ui, &candidate.1, available_width) {
+            best = Some(candidate.1);
+            low = candidate.0 + 1;
         } else {
-            high = mid;
+            high = candidate.0;
         }
     }
 
-    if best.is_none() || low == boundaries.len() {
-        let candidate = format!("{label}{suffix}");
-        if text_width(ui, &candidate) <= available_width {
-            return Some(candidate);
-        }
-    }
+    best.or_else(|| full_label_with_suffix_if_fits(ui, label, suffix, available_width))
+}
 
-    best
+fn char_boundaries(label: &str) -> Vec<usize> {
+    label.char_indices().map(|(index, _)| index).collect()
+}
+
+fn truncation_candidate(
+    label: &str,
+    suffix: &str,
+    boundaries: &[usize],
+    low: usize,
+    high: usize,
+) -> (usize, String) {
+    let mid = low + (high - low) / 2;
+    let mid_pos = boundaries[mid];
+    (mid, format!("{}{}", &label[..mid_pos], suffix))
+}
+
+fn candidate_fits(ui: &egui::Ui, candidate: &str, available_width: f32) -> bool {
+    text_width(ui, candidate) <= available_width
+}
+
+fn full_label_with_suffix_if_fits(
+    ui: &egui::Ui,
+    label: &str,
+    suffix: &str,
+    available_width: f32,
+) -> Option<String> {
+    let candidate = format!("{label}{suffix}");
+    if candidate_fits(ui, &candidate, available_width) {
+        Some(candidate)
+    } else {
+        None
+    }
 }
 
 fn text_width(ui: &egui::Ui, text: &str) -> f32 {

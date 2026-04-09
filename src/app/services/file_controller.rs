@@ -69,6 +69,64 @@ impl FileController {
         }
     }
 
+    pub fn open_external_paths(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+        if paths.is_empty() {
+            return;
+        }
+
+        app.log_event(
+            LogLevel::Info,
+            format!("Startup open requested for {} path(s)", paths.len()),
+        );
+        Self::open_selected_paths(app, paths);
+    }
+
+    pub fn open_external_paths_here(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+        if paths.is_empty() {
+            return;
+        }
+
+        app.log_event(
+            LogLevel::Info,
+            format!(
+                "Startup workspace-open requested for {} path(s)",
+                paths.len()
+            ),
+        );
+        Self::open_selected_paths_here(app, paths);
+    }
+
+    pub fn open_external_paths_into_tab(
+        app: &mut ScratchpadApp,
+        target_index: usize,
+        paths: Vec<PathBuf>,
+    ) {
+        if paths.is_empty() {
+            return;
+        }
+
+        if target_index >= app.tabs().len() {
+            app.log_event(
+                LogLevel::Error,
+                format!(
+                    "Startup add-to target index {} is out of range (tab count={}).",
+                    target_index + 1,
+                    app.tabs().len()
+                ),
+            );
+            app.set_error_status(format!(
+                "Startup /addto:index:{} target does not exist.",
+                target_index + 1
+            ));
+            return;
+        }
+
+        app.handle_command(AppCommand::ActivateTab {
+            index: target_index,
+        });
+        Self::open_external_paths_here(app, paths);
+    }
+
     pub fn save_file(app: &mut ScratchpadApp) {
         let index = app.active_tab_index();
         let _ = Self::save_file_at(app, index);
@@ -531,7 +589,9 @@ impl FileController {
     }
 
     fn failed_open_here_outcomes(file_count: usize) -> Vec<OpenHerePathOutcome> {
-        (0..file_count).map(|_| OpenHerePathOutcome::Failed).collect()
+        (0..file_count)
+            .map(|_| OpenHerePathOutcome::Failed)
+            .collect()
     }
 
     fn save_existing_path(app: &mut ScratchpadApp, index: usize) -> bool {
@@ -816,6 +876,7 @@ mod tests {
     use crate::app::app_state::ScratchpadApp;
     use crate::app::domain::PaneNode;
     use crate::app::services::session_store::SessionStore;
+    use crate::app::startup::{StartupOpenTarget, StartupOptions};
     use std::fs;
 
     fn collect_leaf_area_fractions(node: &PaneNode, area_fraction: f32, output: &mut Vec<f32>) {
@@ -895,5 +956,48 @@ mod tests {
         let mut areas = Vec::new();
         collect_leaf_area_fractions(&tab.root_pane, 1.0, &mut areas);
         assert!(areas.iter().all(|area| (area - 0.25).abs() < f32::EPSILON));
+    }
+
+    #[test]
+    fn startup_clean_launch_skips_restored_session() {
+        let session_root = tempfile::tempdir().expect("create session dir");
+        let session_store = SessionStore::new(session_root.path().to_path_buf());
+
+        let mut original = ScratchpadApp::with_session_store(session_store);
+        original.tabs_mut()[0].buffer.name = "restored.txt".to_owned();
+        original.create_untitled_tab();
+        original.tabs_mut()[1].buffer.name = "second.txt".to_owned();
+        original.persist_session_now().expect("persist session");
+
+        let clean_store = SessionStore::new(session_root.path().to_path_buf());
+        let clean_options = StartupOptions {
+            restore_session: false,
+            ..Default::default()
+        };
+        let clean = ScratchpadApp::with_session_store_and_startup(clean_store, clean_options);
+
+        assert_eq!(clean.tabs().len(), 1);
+        assert_eq!(clean.tabs()[0].buffer.name, "Untitled");
+    }
+
+    #[test]
+    fn startup_active_target_adds_files_into_current_workspace() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let path = temp_dir.path().join("startup-here.txt");
+        fs::write(&path, "hello\nworld\n").expect("write temp file");
+
+        let session_root = tempfile::tempdir().expect("create session dir");
+        let session_store = SessionStore::new(session_root.path().to_path_buf());
+        let options = StartupOptions {
+            open_target: StartupOpenTarget::ActiveTab,
+            files: vec![path.clone()],
+            ..Default::default()
+        };
+        let app = ScratchpadApp::with_session_store_and_startup(session_store, options);
+
+        assert_eq!(app.tabs().len(), 1);
+        let tab = &app.tabs()[app.active_tab_index()];
+        assert_eq!(tab.views.len(), 2);
+        assert_eq!(tab.active_buffer().path.as_deref(), Some(path.as_path()));
     }
 }

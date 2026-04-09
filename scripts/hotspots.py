@@ -377,14 +377,18 @@ def main():
     parser.add_argument("--top", type=int, default=15, help="Number of top hotspots to show")
     parser.add_argument("--scope", choices=["all", "files", "functions"], default="all", help="Scope of analysis")
     parser.add_argument("--include-anonymous", action="store_true", help="Include anonymous functions")
-    parser.add_argument("--mode", choices=["hotspot", "review", "visual"], default="hotspot", help="Output mode")
+    parser.add_argument("--mode", choices=["hotspot", "review", "visual", "json"], default="hotspot", help="Output mode")
     
     args = parser.parse_args()
     
     analyzer = HotspotAnalyzer(top=args.top, scope=args.scope, include_anonymous=args.include_anonymous)
-    # In visual mode, we want the whole dataset for accurate treemaps/histograms.
+    # In visual mode or json mode, we want the whole dataset.
     all_ranked = analyzer.run(args.paths)
     
+    if args.mode == "json":
+        print(json.dumps([asdict(m) for m in all_ranked]))
+        return
+
     if args.mode == "hotspot":
         print(f"Hotspots Summary\nPaths: {', '.join(args.paths)}\nScope: {args.scope}\n")
         for i, m in enumerate(all_ranked[:args.top]):

@@ -1,6 +1,6 @@
 use crate::app::app_state::ScratchpadApp;
-use crate::app::domain::PendingAction;
 use crate::app::commands::AppCommand;
+use crate::app::domain::PendingAction;
 use eframe::egui;
 
 pub(crate) fn show_pending_action_modal(ctx: &egui::Context, app: &mut ScratchpadApp) {

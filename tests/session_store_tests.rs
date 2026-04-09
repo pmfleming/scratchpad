@@ -45,9 +45,9 @@ fn persists_and_restores_open_tabs() {
 
     assert_eq!(restored.tabs.len(), 2);
     assert_eq!(restored.active_tab_index, 1);
-    assert_eq!(restored.font_size, 18.0);
-    assert!(!restored.word_wrap);
-    assert!(restored.logging_enabled);
+    assert_eq!(restored.legacy_settings.font_size, 18.0);
+    assert!(!restored.legacy_settings.word_wrap);
+    assert!(restored.legacy_settings.logging_enabled);
     assert_eq!(restored.tabs[0].buffer.content, "alpha");
     assert!(restored.tabs[0].buffer.is_dirty);
     assert_eq!(restored.tabs[0].buffer.encoding, "UTF-8");

@@ -28,6 +28,7 @@ pub(crate) struct TabDropZone {
 pub(crate) struct TabRectEntry {
     pub(crate) index: usize,
     pub(crate) rect: egui::Rect,
+    pub(crate) combine_enabled: bool,
 }
 
 pub(crate) use autoscroll::auto_scroll_delta;
@@ -72,10 +73,12 @@ mod tests {
             TabRectEntry {
                 index: 0,
                 rect: Rect::from_min_size(pos2(10.0, 10.0), vec2(140.0, 30.0)),
+                combine_enabled: true,
             },
             TabRectEntry {
                 index: 1,
                 rect: Rect::from_min_size(pos2(10.0, 44.0), vec2(140.0, 30.0)),
+                combine_enabled: true,
             },
         ];
 
@@ -101,6 +104,7 @@ mod tests {
                 entries: vec![TabRectEntry {
                     index: 0,
                     rect: Rect::from_min_size(pos2(10.0, 10.0), vec2(140.0, 30.0)),
+                    combine_enabled: true,
                 }],
             },
             TabDropZone {
@@ -108,12 +112,13 @@ mod tests {
                 entries: vec![TabRectEntry {
                     index: 0,
                     rect: Rect::from_min_size(pos2(200.0, 50.0), vec2(140.0, 30.0)),
+                    combine_enabled: true,
                 }],
             },
         ];
 
         assert!(matches!(
-            locate_drop_intent(&zones, pos2(240.0, 70.0)),
+            locate_drop_intent(&zones, pos2(240.0, 70.0), true),
             Some(TabDropIntent::Combine {
                 zone_index: 1,
                 target_index: 0,
@@ -130,10 +135,12 @@ mod tests {
                     TabRectEntry {
                         index: 0,
                         rect: Rect::from_min_size(pos2(10.0, 10.0), vec2(140.0, 30.0)),
+                        combine_enabled: true,
                     },
                     TabRectEntry {
                         index: 1,
                         rect: Rect::from_min_size(pos2(154.0, 10.0), vec2(140.0, 30.0)),
+                        combine_enabled: true,
                     },
                 ],
             },
@@ -143,21 +150,24 @@ mod tests {
                     TabRectEntry {
                         index: 0,
                         rect: Rect::from_min_size(pos2(320.0, 50.0), vec2(140.0, 30.0)),
+                        combine_enabled: true,
                     },
                     TabRectEntry {
                         index: 1,
                         rect: Rect::from_min_size(pos2(320.0, 84.0), vec2(140.0, 30.0)),
+                        combine_enabled: true,
                     },
                     TabRectEntry {
                         index: 2,
                         rect: Rect::from_min_size(pos2(320.0, 118.0), vec2(140.0, 30.0)),
+                        combine_enabled: true,
                     },
                 ],
             },
         ];
 
         assert!(matches!(
-            locate_drop_intent(&zones, pos2(360.0, 130.0)),
+            locate_drop_intent(&zones, pos2(360.0, 130.0), true),
             Some(TabDropIntent::Combine {
                 zone_index: 1,
                 target_index: 2,

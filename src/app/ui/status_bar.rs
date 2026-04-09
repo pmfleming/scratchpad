@@ -25,6 +25,17 @@ struct ActiveStatusDetails {
 pub(crate) fn show_status_bar(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     egui::Panel::bottom("status").show_inside(ui, |ui| {
         ui.horizontal(|ui| {
+            if app.showing_settings() {
+                ui.label("Settings");
+                ui.separator();
+                ui.label(app.settings_path().display().to_string());
+                if let Some(message) = &app.status_message {
+                    ui.separator();
+                    ui.label(message);
+                }
+                return;
+            }
+
             let mut actions = StatusBarActions::default();
 
             if let Some(details) = collect_active_status_details(app) {

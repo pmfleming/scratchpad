@@ -21,6 +21,7 @@ pub enum AppCommand {
     CloseView {
         view_id: ViewId,
     },
+    CloseSettings,
     CombineTabIntoTab {
         source_index: usize,
         target_index: usize,
@@ -34,7 +35,12 @@ pub enum AppCommand {
     NewTab,
     OpenFile,
     OpenFileHere,
+    OpenSettings,
     ReorderTab {
+        from_index: usize,
+        to_index: usize,
+    },
+    ReorderDisplayTab {
         from_index: usize,
         to_index: usize,
     },
@@ -61,6 +67,7 @@ impl ScratchpadApp {
             AppCommand::ActivateView { view_id } => self.activate_view_command(view_id),
             AppCommand::CloseTab { index } => self.perform_close_tab(index),
             AppCommand::CloseView { view_id } => self.close_view_command(view_id),
+            AppCommand::CloseSettings => self.close_settings(),
             AppCommand::CombineTabIntoTab {
                 source_index,
                 target_index,
@@ -72,10 +79,15 @@ impl ScratchpadApp {
             AppCommand::NewTab => self.new_tab(),
             AppCommand::OpenFile => self.open_file(),
             AppCommand::OpenFileHere => self.open_file_here(),
+            AppCommand::OpenSettings => self.open_settings(),
             AppCommand::ReorderTab {
                 from_index,
                 to_index,
             } => self.reorder_tab_command(from_index, to_index),
+            AppCommand::ReorderDisplayTab {
+                from_index,
+                to_index,
+            } => self.reorder_display_tab_command(from_index, to_index),
             AppCommand::RequestCloseTab { index } => self.request_close_tab(index),
             AppCommand::ResizeSplit { path, ratio } => self.resize_split_command(path, ratio),
             AppCommand::SaveFile => self.save_file(),
@@ -96,6 +108,7 @@ impl ScratchpadApp {
         let tab_description = self.describe_tab_at(index);
         self.tab_manager_mut().active_tab_index = index;
         self.tab_manager_mut().pending_scroll_to_active = true;
+        self.request_focus_for_active_view();
         self.mark_session_dirty();
         self.log_event(
             LogLevel::Info,
@@ -114,6 +127,7 @@ impl ScratchpadApp {
             && tab.activate_view(view_id)
         {
             let previous_view_id = tab.active_view_id;
+            self.request_focus_for_view(view_id);
             self.mark_session_dirty();
             self.log_event(
                 LogLevel::Info,
@@ -136,6 +150,7 @@ impl ScratchpadApp {
         {
             let next_active_view = tab.active_view_id;
             let remaining_views = tab.views.len();
+            self.request_focus_for_view(next_active_view);
             self.mark_session_dirty();
             self.log_event(
                 LogLevel::Info,
@@ -167,6 +182,22 @@ impl ScratchpadApp {
             format!(
                 "Reordered tab from index {from_index} to {to_index}: {moved_tab_description} (active tab index={})",
                 self.active_tab_index()
+            ),
+        );
+    }
+
+    fn reorder_display_tab_command(&mut self, from_index: usize, to_index: usize) {
+        let moved_tab_description = self
+            .display_tab_name_at_slot(from_index)
+            .unwrap_or_else(|| format!("tab#{from_index}<missing>"));
+        if !self.reorder_display_tab(from_index, to_index) {
+            return;
+        }
+
+        self.log_event(
+            LogLevel::Info,
+            format!(
+                "Reordered displayed tab from slot {from_index} to {to_index}: {moved_tab_description}"
             ),
         );
     }
@@ -207,6 +238,7 @@ impl ScratchpadApp {
         {
             let new_active_view = tab.active_view_id;
             let total_views = tab.views.len();
+            self.request_focus_for_view(new_active_view);
             self.mark_session_dirty();
             self.log_event(
                 LogLevel::Info,
@@ -296,6 +328,7 @@ impl ScratchpadApp {
         }
         self.tab_manager_mut().active_tab_index = index + active_tab_offset;
         self.tab_manager_mut().pending_scroll_to_active = true;
+        self.request_focus_for_active_view();
         self.mark_session_dirty();
         self.log_event(
             LogLevel::Info,
@@ -363,7 +396,9 @@ impl ScratchpadApp {
 
     fn rollback_combined_tab(&mut self, source_index: usize, source_tab: WorkspaceTab) {
         let reinsertion_index = source_index.min(self.tabs().len());
-        self.tab_manager_mut().tabs.insert(reinsertion_index, source_tab);
+        self.tab_manager_mut()
+            .tabs
+            .insert(reinsertion_index, source_tab);
     }
 
     fn finish_combined_tab(
@@ -374,6 +409,7 @@ impl ScratchpadApp {
     ) {
         self.tab_manager_mut().active_tab_index = context.adjusted_target_index;
         self.tab_manager_mut().pending_scroll_to_active = true;
+        self.request_focus_for_active_view();
         self.mark_session_dirty();
         self.log_event(
             LogLevel::Info,
@@ -389,7 +425,7 @@ impl ScratchpadApp {
 mod tests {
     use super::AppCommand;
     use crate::app::app_state::ScratchpadApp;
-    use crate::app::domain::{BufferState, SplitAxis};
+    use crate::app::domain::{BufferState, SplitAxis, WorkspaceTab};
     use crate::app::services::session_store::SessionStore;
 
     fn test_app() -> ScratchpadApp {
@@ -428,6 +464,7 @@ mod tests {
         assert_eq!(app.tabs()[1].active_buffer().name, "alpha.txt");
         assert_eq!(app.tabs()[0].views.len(), 1);
         assert_eq!(app.tabs()[0].active_buffer().name, "beta.txt");
+        assert_eq!(app.pending_editor_focus, Some(promoted_view_id));
     }
 
     #[test]
@@ -458,5 +495,81 @@ mod tests {
             app.tabs()[app.active_tab_index()].active_buffer().name,
             active_name
         );
+        assert_eq!(
+            app.pending_editor_focus,
+            Some(app.tabs()[app.active_tab_index()].active_view_id)
+        );
+    }
+
+    #[test]
+    fn activating_a_tab_queues_focus_for_its_active_view() {
+        let mut app = test_app();
+        app.append_tab(WorkspaceTab::untitled());
+        app.pending_editor_focus = None;
+
+        let first_tab_view_id = app.tabs()[0].active_view_id;
+        app.handle_command(AppCommand::ActivateTab { index: 0 });
+
+        assert_eq!(app.active_tab_index(), 0);
+        assert_eq!(app.pending_editor_focus, Some(first_tab_view_id));
+    }
+
+    #[test]
+    fn activating_a_view_queues_focus_for_that_view() {
+        let mut app = test_app();
+        let second_view_id = app.tabs_mut()[0]
+            .split_active_view(SplitAxis::Vertical)
+            .expect("split should succeed");
+        app.pending_editor_focus = None;
+
+        app.handle_command(AppCommand::ActivateView {
+            view_id: second_view_id,
+        });
+
+        assert_eq!(app.tabs()[0].active_view_id, second_view_id);
+        assert_eq!(app.pending_editor_focus, Some(second_view_id));
+    }
+
+    #[test]
+    fn settings_commands_switch_between_workspace_and_settings_surface() {
+        let mut app = test_app();
+
+        app.handle_command(AppCommand::OpenSettings);
+        assert!(app.showing_settings());
+        assert_eq!(app.settings_slot_index(), Some(app.tabs().len()));
+
+        app.handle_command(AppCommand::CloseSettings);
+        assert!(!app.showing_settings());
+        assert_eq!(
+            app.pending_editor_focus,
+            Some(app.tabs()[app.active_tab_index()].active_view_id)
+        );
+    }
+
+    #[test]
+    fn reorder_display_tab_moves_settings_slot_between_workspace_tabs() {
+        let mut app = test_app();
+        app.tabs_mut()[0].buffer.name = "one.txt".to_owned();
+        app.append_tab(WorkspaceTab::untitled());
+        app.tabs_mut()[1].buffer.name = "two.txt".to_owned();
+        app.append_tab(WorkspaceTab::untitled());
+        app.tabs_mut()[2].buffer.name = "three.txt".to_owned();
+
+        app.handle_command(AppCommand::OpenSettings);
+        let settings_slot = app
+            .settings_slot_index()
+            .expect("settings slot should exist");
+        assert_eq!(settings_slot, 3);
+
+        app.handle_command(AppCommand::ReorderDisplayTab {
+            from_index: settings_slot,
+            to_index: 1,
+        });
+
+        assert_eq!(app.settings_slot_index(), Some(1));
+        assert_eq!(app.workspace_index_for_slot(0), Some(0));
+        assert_eq!(app.workspace_index_for_slot(2), Some(1));
+        assert_eq!(app.workspace_index_for_slot(3), Some(2));
+        assert_eq!(app.display_tab_name_at_slot(1).as_deref(), Some("Settings"));
     }
 }

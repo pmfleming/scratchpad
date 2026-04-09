@@ -1,4 +1,5 @@
 use crate::app::app_state::ScratchpadApp;
+use crate::app::services::settings_store::AppSettings;
 use eframe::egui;
 use std::time::Instant;
 
@@ -30,12 +31,13 @@ pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> std::io::Result<()
     Ok(())
 }
 
-pub(crate) fn restore_session_state(app: &mut ScratchpadApp) {
+pub(crate) fn restore_session_state(app: &mut ScratchpadApp) -> Option<AppSettings> {
     match app.session_store.load() {
-        Ok(Some(restored)) => apply_restored_session(app, restored),
-        Ok(None) => {}
+        Ok(Some(restored)) => Some(apply_restored_session(app, restored)),
+        Ok(None) => None,
         Err(error) => {
             app.set_error_status(format!("Session restore failed: {error}"));
+            None
         }
     }
 }
@@ -43,10 +45,8 @@ pub(crate) fn restore_session_state(app: &mut ScratchpadApp) {
 fn apply_restored_session(
     app: &mut ScratchpadApp,
     restored: crate::app::services::session_store::RestoredSession,
-) {
+) -> AppSettings {
     app.tab_manager_mut().tabs = restored.tabs;
     app.tab_manager_mut().active_tab_index = restored.active_tab_index;
-    app.font_size = restored.font_size;
-    app.word_wrap = restored.word_wrap;
-    app.logging_enabled = restored.logging_enabled;
+    restored.legacy_settings
 }

@@ -1,10 +1,15 @@
 #![forbid(unsafe_code)]
 
 use rand::RngExt;
+use rand::SeedableRng;
 use rand::prelude::IndexedRandom;
+use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use scratchpad::ScratchpadApp;
 use scratchpad::app::domain::{PaneBranch, PaneNode, SplitAxis, WorkspaceTab};
+use scratchpad::app::fonts::EditorFontPreset;
+use scratchpad::app::services::settings_store::{AppSettings, SettingsStore};
+use scratchpad::app::startup::StartupOptions;
 use scratchpad::app::{paths_match, services::session_store::SessionStore};
 use std::collections::HashSet;
 use std::fs;
@@ -106,19 +111,16 @@ fn opens_configurable_number_of_tabs_defaulting_to_1000() {
 
     assert_eq!(app.tabs().len(), tab_count);
 
-    let mut rng = rand::rng();
+    let mut rng = StdRng::seed_from_u64(0x5CA7_DA70);
     let tabs_to_populate = (tab_count / 10).max(1);
     let mut indices: Vec<usize> = (0..tab_count).collect();
     indices.shuffle(&mut rng);
 
     for &index in &indices[..tabs_to_populate] {
-        let line_count = rng.random_range(1..=1000);
-        let mut content = String::new();
-        for i in 0..line_count {
-            content.push_str(&format!("This is random line {} in tab {}\n", i, index));
-        }
+        let content = fixture_document_for_tab(index, rng.random_range(16..=96));
         app.tabs_mut()[index].buffer.content = content;
         app.tabs_mut()[index].buffer.is_dirty = true;
+        app.tabs_mut()[index].buffer.refresh_text_metadata();
     }
 
     for _ in 0..20 {
@@ -155,6 +157,43 @@ fn opens_configurable_number_of_tabs_defaulting_to_1000() {
         }
 
         assert_tab_layout_integrity(tab);
+
+        if rng.random_range(0..5) == 0 && app.tabs().len() > 1 {
+            let source_idx = rng.random_range(0..app.tabs().len());
+            let mut target_idx = rng.random_range(0..app.tabs().len());
+            while target_idx == source_idx {
+                target_idx = rng.random_range(0..app.tabs().len());
+            }
+
+            let source_tab = app.tab_manager_mut().tabs.remove(source_idx);
+            let adjusted_target_idx = if source_idx < target_idx {
+                target_idx - 1
+            } else {
+                target_idx
+            };
+
+            let target_tab = &mut app.tab_manager_mut().tabs[adjusted_target_idx];
+            target_tab
+                .combine_with_tab(source_tab, axis, new_view_first, split_ratio)
+                .expect("combine should succeed during tab stress test");
+
+            if app.tab_manager().active_tab_index > source_idx {
+                app.tab_manager_mut().active_tab_index -= 1;
+            }
+            app.tab_manager_mut().active_tab_index =
+                app.tab_manager().active_tab_index.min(app.tabs().len() - 1);
+        }
+
+        if rng.random_range(0..5) == 0 {
+            let tab_index = rng.random_range(0..app.tabs().len());
+            let tab = &mut app.tabs_mut()[tab_index];
+            if tab.views.len() > 1 {
+                let view_id = tab.views[rng.random_range(0..tab.views.len())].id;
+                if let Some(promoted_tab) = tab.promote_view_to_new_tab(view_id) {
+                    app.tab_manager_mut().append_tab(promoted_tab);
+                }
+            }
+        }
     }
 
     for tab in app.tabs() {
@@ -171,21 +210,25 @@ fn opens_configurable_number_of_tabs_defaulting_to_1000() {
         )
         .unwrap();
 
-    assert_eq!(app.active_tab_index(), tab_count - 1);
+    let final_tab_count = app.tabs().len();
+    let final_active_index = app.active_tab_index();
 
     let restored = app.session_store().load().unwrap().unwrap();
-    assert_eq!(restored.tabs.len(), tab_count);
-    assert_eq!(restored.active_tab_index, tab_count - 1);
+    assert_eq!(restored.tabs.len(), final_tab_count);
+    assert_eq!(restored.active_tab_index, final_active_index);
 
-    for &index in &indices[..tabs_to_populate] {
-        assert!(!restored.tabs[index].buffer.content.is_empty());
-    }
+    let populated_count = restored
+        .tabs
+        .iter()
+        .filter(|t| !t.buffer.content.is_empty())
+        .count();
+    assert!(populated_count >= 1);
 
     for tab in &restored.tabs {
         assert_tab_layout_integrity(tab);
     }
 
-    let mut close_indices: Vec<usize> = (0..tab_count).collect();
+    let mut close_indices: Vec<usize> = (0..final_tab_count).collect();
     close_indices.shuffle(&mut rng);
 
     for _ in close_indices {
@@ -198,6 +241,117 @@ fn opens_configurable_number_of_tabs_defaulting_to_1000() {
 
     drop(app);
     fs::remove_dir_all(session_root).unwrap();
+}
+
+fn fixture_document_for_tab(index: usize, sections: usize) -> String {
+    let title = match index % 3 {
+        0 => "Settings Roadmap",
+        1 => "Command Palette Plan",
+        _ => "Open With Integration Notes",
+    };
+    let intro = match index % 3 {
+        0 => "This document outlines goals, architecture, migration strategy, and rollout phases.",
+        1 => {
+            "This document records interaction goals, command discovery flows, and keyboard-first usage."
+        }
+        _ => {
+            "This document captures shell integration, file association behavior, and recovery paths."
+        }
+    };
+
+    let mut content = String::new();
+    content.push_str(&format!("# {title}\n\n"));
+    content.push_str(&format!("{intro}\n\n"));
+
+    for section in 0..sections {
+        content.push_str(&format!("## Section {}\n\n", section + 1));
+        content.push_str(
+            "The implementation should remain predictable, easy to migrate, and safe to evolve.\n",
+        );
+        content.push_str(
+            "User-facing behavior should be explicit, reversible where possible, and covered by tests.\n\n",
+        );
+        content.push_str(&format!(
+            "- Scenario: tab {}\n- Concern: layout stability\n- Outcome: preserve correctness\n\n",
+            index
+        ));
+    }
+
+    content
+}
+
+#[test]
+fn startup_loads_yaml_settings_before_session_restore() {
+    let session_root = tempfile::tempdir().expect("create session dir");
+    let settings_root = tempfile::tempdir().expect("create settings dir");
+    let session_store = SessionStore::new(session_root.path().to_path_buf());
+    let settings_store = SettingsStore::new(settings_root.path().to_path_buf());
+    settings_store
+        .save(&AppSettings {
+            font_size: 19.0,
+            word_wrap: false,
+            logging_enabled: false,
+            editor_font: EditorFontPreset::Roboto,
+        })
+        .expect("save yaml settings");
+
+    let app = ScratchpadApp::with_stores_and_startup(
+        session_store,
+        settings_store,
+        StartupOptions {
+            restore_session: false,
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(app.font_size(), 19.0);
+    assert!(!app.word_wrap());
+    assert!(!app.logging_enabled());
+    assert_eq!(app.editor_font(), EditorFontPreset::Roboto);
+}
+
+#[test]
+fn startup_migrates_legacy_session_settings_when_yaml_is_missing() {
+    let session_root = tempfile::tempdir().expect("create session dir");
+    let settings_root = tempfile::tempdir().expect("create settings dir");
+    let session_store = SessionStore::new(session_root.path().to_path_buf());
+
+    let original =
+        ScratchpadApp::with_session_store(SessionStore::new(session_root.path().to_path_buf()));
+    original
+        .session_store()
+        .persist(
+            original.tabs(),
+            original.active_tab_index(),
+            21.0,
+            false,
+            false,
+        )
+        .expect("persist legacy session settings");
+
+    let settings_store = SettingsStore::new(settings_root.path().to_path_buf());
+    let app = ScratchpadApp::with_stores_and_startup(
+        session_store,
+        settings_store,
+        StartupOptions::default(),
+    );
+
+    assert_eq!(app.font_size(), 21.0);
+    assert!(!app.word_wrap());
+    assert!(!app.logging_enabled());
+
+    let migrated = SettingsStore::new(settings_root.path().to_path_buf())
+        .load()
+        .expect("load migrated settings");
+    assert_eq!(
+        migrated,
+        Some(AppSettings {
+            font_size: 21.0,
+            word_wrap: false,
+            logging_enabled: false,
+            editor_font: EditorFontPreset::SystemDefault,
+        })
+    );
 }
 
 fn assert_tab_layout_integrity(tab: &WorkspaceTab) {

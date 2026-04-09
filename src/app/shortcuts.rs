@@ -6,10 +6,24 @@ use eframe::egui;
 const DEFAULT_SPLIT_RATIO: f32 = 0.5;
 
 pub(crate) fn handle_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
+    handle_global_shortcuts(app, ctx);
     handle_file_shortcuts(app, ctx);
     handle_view_shortcuts(app, ctx);
     handle_tile_shortcuts(app, ctx);
     handle_tab_shortcuts(app, ctx);
+}
+
+fn handle_global_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
+    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Comma)) {
+        app.handle_command(AppCommand::OpenSettings);
+        return;
+    }
+
+    if app.showing_settings()
+        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        app.handle_command(AppCommand::CloseSettings);
+    }
 }
 
 fn handle_file_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
@@ -39,12 +53,10 @@ fn handle_view_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         input.consume_key(egui::Modifiers::CTRL, egui::Key::Equals)
             || input.consume_key(egui::Modifiers::CTRL, egui::Key::Plus)
     }) {
-        app.font_size = (app.font_size + 1.0).min(72.0);
-        app.mark_session_dirty();
+        app.set_font_size(app.font_size() + 1.0);
     }
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Minus)) {
-        app.font_size = (app.font_size - 1.0).max(8.0);
-        app.mark_session_dirty();
+        app.set_font_size(app.font_size() - 1.0);
     }
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Num0))
         && let Some(tab) = app.active_tab_mut()
@@ -56,12 +68,14 @@ fn handle_view_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
 }
 
 fn handle_tab_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::W))
-        && !app.tabs().is_empty()
-    {
-        app.handle_command(AppCommand::RequestCloseTab {
-            index: app.active_tab_index(),
-        });
+    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::W)) {
+        if app.showing_settings() {
+            app.handle_command(AppCommand::CloseSettings);
+        } else if !app.tabs().is_empty() {
+            app.handle_command(AppCommand::RequestCloseTab {
+                index: app.active_tab_index(),
+            });
+        }
     }
 }
 

@@ -33,9 +33,13 @@ pub(crate) fn tab_drop_slot(
 pub(crate) fn locate_drop_intent(
     zones: &[TabDropZone],
     pointer_pos: egui::Pos2,
+    allow_combine: bool,
 ) -> Option<TabDropIntent> {
     zones.iter().enumerate().find_map(|(zone_index, zone)| {
-        combine_target(&zone.entries, pointer_pos).map_or_else(
+        (allow_combine
+            .then(|| combine_target(&zone.entries, pointer_pos))
+            .flatten())
+        .map_or_else(
             || {
                 tab_drop_slot(&zone.entries, pointer_pos, zone.axis).map(|drop_slot| {
                     TabDropIntent::Reorder {
@@ -114,8 +118,7 @@ fn entry_center(rect: egui::Rect, axis: TabDropAxis) -> f32 {
 
 fn combine_target(tab_rects: &[TabRectEntry], pointer_pos: egui::Pos2) -> Option<usize> {
     tab_rects.iter().find_map(|entry| {
-        combine_rect(entry.rect)
-            .contains(pointer_pos)
+        (entry.combine_enabled && combine_rect(entry.rect).contains(pointer_pos))
             .then_some(entry.index)
     })
 }

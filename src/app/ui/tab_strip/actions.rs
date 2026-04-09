@@ -1,9 +1,9 @@
+use super::layout::HeaderLayout;
 use crate::app::app_state::ScratchpadApp;
 use crate::app::chrome::*;
 use crate::app::commands::AppCommand;
 use crate::app::theme::*;
 use eframe::egui;
-use super::layout::HeaderLayout;
 
 pub(crate) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let button_spacing = 4.0;

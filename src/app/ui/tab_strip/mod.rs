@@ -1,5 +1,7 @@
 pub mod actions;
+mod entries;
 pub mod layout;
+mod outcome;
 pub mod tab_cell;
 
 use crate::app::app_state::ScratchpadApp;
@@ -12,17 +14,21 @@ use eframe::egui::{self, Sense, Stroke};
 use std::collections::{HashMap, HashSet};
 
 pub(crate) use actions::{show_caption_controls, show_primary_actions};
+use entries::allocate_tab_strip_entries;
 pub(crate) use layout::HeaderLayout;
+use outcome::apply_tab_outcome;
 pub(crate) use tab_cell::{TabInteraction, render_tab_cell};
 
 #[derive(Default)]
-struct TabStripOutcome {
-    activated_tab: Option<usize>,
-    close_requested_tab: Option<usize>,
-    promote_all_files_tab: Option<usize>,
-    reordered_tabs: Option<(usize, usize)>,
-    combined_tabs: Option<(usize, usize)>,
-    consumed_scroll_request: bool,
+pub(crate) struct TabStripOutcome {
+    pub(crate) activated_tab: Option<usize>,
+    pub(crate) activate_settings: bool,
+    pub(crate) close_requested_tab: Option<usize>,
+    pub(crate) close_settings: bool,
+    pub(crate) promote_all_files_tab: Option<usize>,
+    pub(crate) reordered_tabs: Option<(usize, usize)>,
+    pub(crate) combined_tabs: Option<(usize, usize)>,
+    pub(crate) consumed_scroll_request: bool,
 }
 
 pub(crate) fn show_header(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
@@ -133,8 +139,8 @@ fn apply_tab_drag_feedback(
     drop_zones: &[TabDropZone],
     outcome: &mut TabStripOutcome,
 ) {
-    update_reordered_tabs(ui, app.tabs().len(), drop_zones, outcome);
-    tab_drag::paint_dragged_tab_ghost(ui.ctx(), app.tabs());
+    update_reordered_tabs(ui, app.total_tab_slots(), drop_zones, outcome);
+    tab_drag::paint_dragged_tab_ghost(ui.ctx(), app);
 }
 
 fn render_new_tab_action(ui: &mut egui::Ui, app: &mut ScratchpadApp, spacing: f32) {
@@ -241,44 +247,7 @@ fn show_scrolling_tab_strip(
     drop_zone_from_entries(entries)
 }
 
-fn allocate_tab_strip_entries(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    layout: &HeaderLayout,
-    scroll_area_id: egui::Id,
-    duplicate_name_counts: &HashMap<String, usize>,
-    visible_tab_indices: &mut HashSet<usize>,
-    outcome: &mut TabStripOutcome,
-) -> Vec<crate::app::ui::tab_drag::TabRectEntry> {
-    ui.allocate_ui_with_layout(
-        egui::vec2(layout.visible_strip_width, TAB_HEIGHT),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            configure_tab_strip_viewport(ui, layout.visible_strip_width);
-            let viewport_rect = ui.max_rect();
-            maybe_auto_scroll_tab_strip(ui, app, layout, scroll_area_id, viewport_rect);
-            render_tab_strip_entries(
-                ui,
-                app,
-                layout,
-                scroll_area_id,
-                viewport_rect,
-                duplicate_name_counts,
-                visible_tab_indices,
-                outcome,
-            )
-        },
-    )
-    .inner
-}
-
-fn configure_tab_strip_viewport(ui: &mut egui::Ui, visible_strip_width: f32) {
-    ui.set_width(visible_strip_width);
-    ui.set_min_width(visible_strip_width);
-    ui.set_max_width(visible_strip_width);
-}
-
-fn maybe_auto_scroll_tab_strip(
+pub(crate) fn maybe_auto_scroll_tab_strip(
     ui: &mut egui::Ui,
     app: &ScratchpadApp,
     layout: &HeaderLayout,
@@ -296,37 +265,6 @@ fn maybe_auto_scroll_tab_strip(
     }
 }
 
-fn render_tab_strip_entries(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    layout: &HeaderLayout,
-    scroll_area_id: egui::Id,
-    viewport_rect: egui::Rect,
-    duplicate_name_counts: &HashMap<String, usize>,
-    visible_tab_indices: &mut HashSet<usize>,
-    outcome: &mut TabStripOutcome,
-) -> Vec<crate::app::ui::tab_drag::TabRectEntry> {
-    egui::ScrollArea::horizontal()
-        .id_salt(scroll_area_id)
-        .auto_shrink([false, false])
-        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = layout.spacing;
-            ui.horizontal(|ui| {
-                collect_tab_strip_entries(
-                    ui,
-                    app,
-                    duplicate_name_counts,
-                    viewport_rect,
-                    visible_tab_indices,
-                    outcome,
-                )
-            })
-            .inner
-        })
-        .inner
-}
-
 fn drop_zone_from_entries(
     entries: Vec<crate::app::ui::tab_drag::TabRectEntry>,
 ) -> Option<TabDropZone> {
@@ -336,47 +274,7 @@ fn drop_zone_from_entries(
     })
 }
 
-fn collect_tab_strip_entries(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    duplicate_name_counts: &HashMap<String, usize>,
-    viewport_rect: egui::Rect,
-    visible_tab_indices: &mut HashSet<usize>,
-    outcome: &mut TabStripOutcome,
-) -> Vec<crate::app::ui::tab_drag::TabRectEntry> {
-    let active_tab_index = app.active_tab_index();
-    let pending_scroll_to_active = app.tab_manager().pending_scroll_to_active;
-    let mut row_rects = Vec::with_capacity(app.tabs().len());
-
-    for (index, tab) in app.tabs().iter().enumerate() {
-        let cell_outcome = render_tab_cell(
-            ui,
-            index,
-            tab,
-            active_tab_index == index,
-            pending_scroll_to_active,
-            duplicate_name_counts,
-        );
-        apply_tab_interaction(outcome, cell_outcome.interaction);
-        maybe_scroll_to_active_tab(
-            ui,
-            index,
-            active_tab_index,
-            pending_scroll_to_active,
-            cell_outcome.rect,
-            outcome,
-        );
-        record_visible_tab(index, cell_outcome.rect, viewport_rect, visible_tab_indices);
-        row_rects.push(crate::app::ui::tab_drag::TabRectEntry {
-            index,
-            rect: cell_outcome.rect,
-        });
-    }
-
-    row_rects
-}
-
-fn maybe_scroll_to_active_tab(
+pub(crate) fn maybe_scroll_to_active_tab(
     ui: &mut egui::Ui,
     index: usize,
     active_tab_index: usize,
@@ -390,7 +288,7 @@ fn maybe_scroll_to_active_tab(
     }
 }
 
-fn record_visible_tab(
+pub(crate) fn record_visible_tab(
     index: usize,
     rect: egui::Rect,
     viewport_rect: egui::Rect,
@@ -401,7 +299,7 @@ fn record_visible_tab(
     }
 }
 
-fn apply_tab_interaction(outcome: &mut TabStripOutcome, interaction: TabInteraction) {
+pub(crate) fn apply_tab_interaction(outcome: &mut TabStripOutcome, interaction: TabInteraction) {
     match interaction {
         TabInteraction::None => {}
         TabInteraction::Activate(index) => outcome.activated_tab = Some(index),
@@ -420,25 +318,26 @@ fn show_overflow_controls(
     outcome: &mut TabStripOutcome,
 ) -> Option<TabDropZone> {
     ui.add_space(layout.spacing);
-    let tab_manager = &app.tab_manager;
-    let overflow_popup_open = &mut app.overflow_popup_open;
+    let mut overflow_popup_open = app.overflow_popup_open;
     let overflow_outcome = tab_overflow::show_overflow_button(
         ctx,
         ui,
-        &tab_manager.tabs,
-        tab_manager.active_tab_index,
-        overflow_popup_open,
+        app,
+        &mut overflow_popup_open,
         visible_tab_indices,
         duplicate_name_counts,
     );
+    app.overflow_popup_open = overflow_popup_open;
 
     outcome.activated_tab = outcome.activated_tab.or(overflow_outcome.activated_tab);
+    outcome.activate_settings = outcome.activate_settings || overflow_outcome.activate_settings;
     outcome.promote_all_files_tab = outcome
         .promote_all_files_tab
         .or(overflow_outcome.promote_all_files_tab);
     outcome.close_requested_tab = outcome
         .close_requested_tab
         .or(overflow_outcome.close_requested_tab);
+    outcome.close_settings = outcome.close_settings || overflow_outcome.close_settings;
     overflow_outcome.drop_zone
 }
 
@@ -459,42 +358,37 @@ fn show_drag_region(ctx: &egui::Context, ui: &mut egui::Ui, drag_width: f32) {
     ui.painter().rect_filled(rect, 0.0, HEADER_BG);
 }
 
-fn apply_tab_outcome(app: &mut ScratchpadApp, outcome: TabStripOutcome) {
-    if let Some(index) = outcome.activated_tab {
-        app.handle_command(AppCommand::ActivateTab { index });
-    }
-
-    if let Some(index) = outcome.close_requested_tab {
-        app.handle_command(AppCommand::RequestCloseTab { index });
-    }
-
-    if let Some(index) = outcome.promote_all_files_tab {
-        app.handle_command(AppCommand::PromoteTabFilesToTabs { index });
-    }
-
-    if let Some((from_index, to_index)) = outcome.reordered_tabs {
-        app.handle_command(AppCommand::ReorderTab {
-            from_index,
-            to_index,
-        });
-    }
-
-    if let Some((source_index, target_index)) = outcome.combined_tabs {
-        app.handle_command(AppCommand::CombineTabIntoTab {
-            source_index,
-            target_index,
-        });
-    }
-
-    if outcome.consumed_scroll_request {
-        app.tab_manager_mut().pending_scroll_to_active = false;
-    }
-}
-
 fn duplicate_name_counts(tabs: &[WorkspaceTab]) -> HashMap<String, usize> {
     let mut counts = HashMap::with_capacity(tabs.len());
     for tab in tabs {
         *counts.entry(tab.buffer.name.clone()).or_insert(0) += 1;
     }
     counts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TabStripOutcome;
+    use crate::app::ui::tab_strip::entries::apply_settings_tab_interaction;
+
+    #[test]
+    fn settings_tab_close_gesture_closes_settings_surface() {
+        let mut outcome = TabStripOutcome::default();
+
+        apply_settings_tab_interaction(&mut outcome, true, true, false);
+
+        assert!(outcome.close_settings);
+        assert!(!outcome.activate_settings);
+        assert!(outcome.close_requested_tab.is_none());
+    }
+
+    #[test]
+    fn clicking_settings_tab_activates_settings_surface() {
+        let mut outcome = TabStripOutcome::default();
+
+        apply_settings_tab_interaction(&mut outcome, false, false, true);
+
+        assert!(outcome.activate_settings);
+        assert!(!outcome.close_settings);
+    }
 }

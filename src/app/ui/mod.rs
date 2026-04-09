@@ -1,6 +1,7 @@
 pub mod dialogs;
 pub mod editor_area;
 pub mod editor_content;
+pub mod settings;
 pub mod status_bar;
 pub mod tab_drag;
 pub mod tab_overflow;

@@ -1,22 +1,11 @@
 use crate::app::domain::{
-    BufferId, BufferState, EditorViewState, PaneNode, SplitAxis, SplitPath, ViewId,
+    BufferId, BufferState, EditorViewState, PaneNode, SplitAxis, SplitPath, ViewId, tab_support,
 };
 use std::collections::{HashMap, HashSet};
 
-struct ViewPromotionPlan {
-    promoted_buffer_id: BufferId,
-    promoted_view_ids: HashSet<ViewId>,
-    promoted_root: PaneNode,
-    promoted_active_view_id: ViewId,
-    remaining_active_view_id: ViewId,
-    replacement_buffer_id: BufferId,
-}
-
-struct FileTabParts {
-    buffer: BufferState,
-    views: Vec<EditorViewState>,
-    root_pane: PaneNode,
-    active_view_id: ViewId,
+struct ViewPresentationState {
+    show_line_numbers: bool,
+    show_control_chars: bool,
 }
 
 pub struct WorkspaceTab {
@@ -259,32 +248,15 @@ impl WorkspaceTab {
         new_view_first: bool,
         ratio: f32,
     ) -> Option<ViewId> {
-        let (show_line_numbers, show_control_chars) = {
-            let source_view = self.view(target_view_id)?;
-            (
-                source_view.show_line_numbers,
-                source_view.show_control_chars,
-            )
-        };
-        let mut new_view =
-            EditorViewState::new(buffer.id, buffer.artifact_summary.has_control_chars());
-        new_view.show_line_numbers = show_line_numbers;
-        new_view.show_control_chars =
-            show_control_chars && buffer.artifact_summary.has_control_chars();
+        let presentation = self.view_presentation_state(target_view_id)?;
+        let new_view = Self::build_split_view(&buffer, presentation);
         let new_view_id = new_view.id;
 
-        if !self
-            .root_pane
-            .split_view(target_view_id, axis, new_view_id, new_view_first, ratio)
-        {
+        if !self.try_split_view(target_view_id, axis, new_view_id, new_view_first, ratio) {
             return None;
         }
 
-        self.extra_buffers.push(buffer);
-        self.views.push(new_view);
-        self.active_view_id = new_view_id;
-        self.sync_active_buffer_to_active_view();
-        Some(new_view_id)
+        Some(self.finish_open_buffer_split(buffer, new_view))
     }
 
     pub fn combine_with_tab(
@@ -332,21 +304,8 @@ impl WorkspaceTab {
             return false;
         }
 
-        let mut ordered_view_ids = Vec::with_capacity(self.views.len());
-        self.root_pane
-            .collect_view_ids_in_order(&mut ordered_view_ids);
-
-        if ordered_view_ids.len() < self.views.len() {
-            for view in &self.views {
-                if !ordered_view_ids.contains(&view.id) {
-                    ordered_view_ids.push(view.id);
-                }
-            }
-        }
-
-        let Some(root_pane) =
-            PaneNode::balanced_from_view_ids(&ordered_view_ids, SplitAxis::Vertical)
-        else {
+        let ordered_view_ids = self.rebalanced_view_order();
+        let Some(root_pane) = Self::balanced_root_from_view_ids(&ordered_view_ids) else {
             return false;
         };
 
@@ -360,7 +319,8 @@ impl WorkspaceTab {
         }
 
         let plan = self.build_view_promotion_plan(view_id)?;
-        let (remaining_views, promoted_views) = self.take_partitioned_views(&plan.promoted_view_ids);
+        let (remaining_views, promoted_views) =
+            self.take_partitioned_views(&plan.promoted_view_ids);
         let promoted_buffer =
             self.take_buffer_by_id(plan.promoted_buffer_id, plan.replacement_buffer_id)?;
 
@@ -388,21 +348,21 @@ impl WorkspaceTab {
 
         let ordered_view_ids = Self::ordered_view_ids(&root_pane);
         let active_buffer_id = Self::active_buffer_id_for_view(&views, active_view_id);
-        let mut ordered_buffer_ids = Self::ordered_buffer_ids(&views, &ordered_view_ids);
+        let mut ordered_buffer_ids = tab_support::ordered_buffer_ids(&views, &ordered_view_ids);
 
         let mut buffers = std::iter::once(buffer)
             .chain(extra_buffers)
             .map(|buffer| (buffer.id, buffer))
             .collect::<HashMap<_, _>>();
-        Self::append_missing_buffer_ids(&mut ordered_buffer_ids, &views);
+        tab_support::append_missing_buffer_ids(&mut ordered_buffer_ids, &views);
 
-        let mut views_by_buffer = Self::group_views_by_buffer(views);
-        let view_order = Self::view_order_lookup(&ordered_view_ids);
+        let mut views_by_buffer = tab_support::group_views_by_buffer(views);
+        let view_order = tab_support::view_order_lookup(&ordered_view_ids);
 
         ordered_buffer_ids
             .into_iter()
             .filter_map(|buffer_id| {
-                Self::take_file_tab_parts(
+                tab_support::take_file_tab_parts(
                     buffer_id,
                     &root_pane,
                     active_view_id,
@@ -463,37 +423,17 @@ impl WorkspaceTab {
     }
 
     fn repair_restored_state(&mut self) {
-        let valid_buffer_ids = self
-            .buffers()
-            .map(|buffer| buffer.id)
-            .collect::<HashSet<_>>();
-        self.views
-            .retain(|view| valid_buffer_ids.contains(&view.buffer_id));
-
-        let valid_view_ids = self
-            .views
-            .iter()
-            .map(|view| view.id)
-            .collect::<HashSet<_>>();
-
-        if valid_view_ids.is_empty() || !self.root_pane.retain_views(&valid_view_ids) {
+        if !self.retain_views_for_known_buffers() {
             self.reset_to_single_view();
             return;
         }
 
-        let mut pane_view_ids = HashSet::new();
-        self.root_pane.collect_view_ids(&mut pane_view_ids);
-        self.views.retain(|view| pane_view_ids.contains(&view.id));
-
-        if self.views.is_empty() {
+        if !self.repair_root_pane() {
             self.reset_to_single_view();
             return;
         }
 
-        if !pane_view_ids.contains(&self.active_view_id) {
-            self.active_view_id = self.root_pane.first_view_id();
-        }
-
+        self.ensure_active_view_is_present();
         self.sync_active_buffer_to_active_view();
         self.prune_unused_buffers();
         self.set_line_numbers_visible(self.line_numbers_visible());
@@ -508,6 +448,43 @@ impl WorkspaceTab {
         self.root_pane = PaneNode::leaf(initial_view.id);
         self.extra_buffers.clear();
         self.views = vec![initial_view];
+    }
+
+    fn retain_views_for_known_buffers(&mut self) -> bool {
+        let valid_buffer_ids = self
+            .buffers()
+            .map(|buffer| buffer.id)
+            .collect::<HashSet<_>>();
+        self.views
+            .retain(|view| valid_buffer_ids.contains(&view.buffer_id));
+        !self.views.is_empty()
+    }
+
+    fn repair_root_pane(&mut self) -> bool {
+        let valid_view_ids = self
+            .views
+            .iter()
+            .map(|view| view.id)
+            .collect::<HashSet<_>>();
+        if !self.root_pane.retain_views(&valid_view_ids) {
+            return false;
+        }
+
+        let pane_view_ids = self.pane_view_ids();
+        self.views.retain(|view| pane_view_ids.contains(&view.id));
+        !self.views.is_empty()
+    }
+
+    fn pane_view_ids(&self) -> HashSet<ViewId> {
+        let mut pane_view_ids = HashSet::new();
+        self.root_pane.collect_view_ids(&mut pane_view_ids);
+        pane_view_ids
+    }
+
+    fn ensure_active_view_is_present(&mut self) {
+        if !self.root_pane.contains_view(self.active_view_id) {
+            self.active_view_id = self.root_pane.first_view_id();
+        }
     }
 
     fn push_buffer_if_missing(&mut self, buffer: BufferState) {
@@ -527,33 +504,22 @@ impl WorkspaceTab {
             .len()
     }
 
-    fn build_view_promotion_plan(&mut self, view_id: ViewId) -> Option<ViewPromotionPlan> {
+    fn build_view_promotion_plan(
+        &mut self,
+        view_id: ViewId,
+    ) -> Option<tab_support::ViewPromotionPlan> {
         let promoted_buffer_id = self.view(view_id)?.buffer_id;
         let promoted_view_ids = self.view_ids_for_buffer(promoted_buffer_id);
         let remaining_view_ids = self.view_ids_excluding_buffer(promoted_buffer_id);
 
-        if promoted_view_ids.is_empty() || remaining_view_ids.is_empty() {
-            return None;
-        }
-
-        let promoted_root = self.retained_root_for_views(&promoted_view_ids)?;
-        if !self.root_pane.retain_views(&remaining_view_ids) {
-            return None;
-        }
-
-        let promoted_active_view_id = Self::resolved_active_view_id(
-            &promoted_view_ids,
-            view_id,
-            &promoted_root,
-        );
-        let remaining_active_view_id = Self::resolved_active_view_id(
-            &remaining_view_ids,
-            self.active_view_id,
-            &self.root_pane,
-        );
+        let promoted_root = self.prepare_view_partition(&promoted_view_ids, &remaining_view_ids)?;
+        let promoted_active_view_id =
+            Self::resolve_promoted_active_view_id(&promoted_view_ids, view_id, &promoted_root);
+        let remaining_active_view_id =
+            self.resolve_remaining_active_view_id(&remaining_view_ids)?;
         let replacement_buffer_id = self.view(remaining_active_view_id)?.buffer_id;
 
-        Some(ViewPromotionPlan {
+        Some(tab_support::ViewPromotionPlan {
             promoted_buffer_id,
             promoted_view_ids,
             promoted_root,
@@ -561,6 +527,21 @@ impl WorkspaceTab {
             remaining_active_view_id,
             replacement_buffer_id,
         })
+    }
+
+    fn prepare_view_partition(
+        &mut self,
+        promoted_view_ids: &HashSet<ViewId>,
+        remaining_view_ids: &HashSet<ViewId>,
+    ) -> Option<PaneNode> {
+        if promoted_view_ids.is_empty() || remaining_view_ids.is_empty() {
+            return None;
+        }
+
+        let promoted_root = self.retained_root_for_views(promoted_view_ids)?;
+        self.root_pane
+            .retain_views(remaining_view_ids)
+            .then_some(promoted_root)
     }
 
     fn view_ids_for_buffer(&self, buffer_id: BufferId) -> HashSet<ViewId> {
@@ -581,7 +562,28 @@ impl WorkspaceTab {
 
     fn retained_root_for_views(&self, view_ids: &HashSet<ViewId>) -> Option<PaneNode> {
         let mut retained_root = self.root_pane.clone();
-        retained_root.retain_views(view_ids).then_some(retained_root)
+        retained_root
+            .retain_views(view_ids)
+            .then_some(retained_root)
+    }
+
+    fn resolve_promoted_active_view_id(
+        promoted_view_ids: &HashSet<ViewId>,
+        requested_view_id: ViewId,
+        promoted_root: &PaneNode,
+    ) -> ViewId {
+        Self::resolved_active_view_id(promoted_view_ids, requested_view_id, promoted_root)
+    }
+
+    fn resolve_remaining_active_view_id(
+        &self,
+        remaining_view_ids: &HashSet<ViewId>,
+    ) -> Option<ViewId> {
+        Some(Self::resolved_active_view_id(
+            remaining_view_ids,
+            self.active_view_id,
+            &self.root_pane,
+        ))
     }
 
     fn resolved_active_view_id(
@@ -654,6 +656,81 @@ impl WorkspaceTab {
         true
     }
 
+    fn view_presentation_state(&self, view_id: ViewId) -> Option<ViewPresentationState> {
+        let source_view = self.view(view_id)?;
+        Some(ViewPresentationState {
+            show_line_numbers: source_view.show_line_numbers,
+            show_control_chars: source_view.show_control_chars,
+        })
+    }
+
+    fn build_split_view(
+        buffer: &BufferState,
+        presentation: ViewPresentationState,
+    ) -> EditorViewState {
+        let mut new_view =
+            EditorViewState::new(buffer.id, buffer.artifact_summary.has_control_chars());
+        new_view.show_line_numbers = presentation.show_line_numbers;
+        new_view.show_control_chars =
+            presentation.show_control_chars && buffer.artifact_summary.has_control_chars();
+        new_view
+    }
+
+    fn try_split_view(
+        &mut self,
+        target_view_id: ViewId,
+        axis: SplitAxis,
+        new_view_id: ViewId,
+        new_view_first: bool,
+        ratio: f32,
+    ) -> bool {
+        self.root_pane
+            .split_view(target_view_id, axis, new_view_id, new_view_first, ratio)
+    }
+
+    fn finish_open_buffer_split(
+        &mut self,
+        buffer: BufferState,
+        new_view: EditorViewState,
+    ) -> ViewId {
+        let new_view_id = new_view.id;
+        self.extra_buffers.push(buffer);
+        self.views.push(new_view);
+        self.active_view_id = new_view_id;
+        self.sync_active_buffer_to_active_view();
+        new_view_id
+    }
+
+    fn rebalanced_view_order(&self) -> Vec<ViewId> {
+        let mut ordered_view_ids = self.ordered_view_ids_from_layout();
+        self.append_missing_view_ids(&mut ordered_view_ids);
+        ordered_view_ids
+    }
+
+    fn ordered_view_ids_from_layout(&self) -> Vec<ViewId> {
+        let mut ordered_view_ids = Vec::with_capacity(self.views.len());
+        self.root_pane
+            .collect_view_ids_in_order(&mut ordered_view_ids);
+        ordered_view_ids
+    }
+
+    fn append_missing_view_ids(&self, ordered_view_ids: &mut Vec<ViewId>) {
+        if ordered_view_ids.len() >= self.views.len() {
+            return;
+        }
+
+        let mut seen_view_ids = ordered_view_ids.iter().copied().collect::<HashSet<_>>();
+        for view in &self.views {
+            if seen_view_ids.insert(view.id) {
+                ordered_view_ids.push(view.id);
+            }
+        }
+    }
+
+    fn balanced_root_from_view_ids(ordered_view_ids: &[ViewId]) -> Option<PaneNode> {
+        PaneNode::balanced_from_view_ids(ordered_view_ids, SplitAxis::Vertical)
+    }
+
     fn prune_unused_buffers(&mut self) {
         let referenced_buffer_ids = self
             .views
@@ -679,108 +756,9 @@ impl WorkspaceTab {
         views: &[EditorViewState],
         active_view_id: ViewId,
     ) -> Option<BufferId> {
-        views.iter()
+        views
+            .iter()
             .find(|view| view.id == active_view_id)
             .map(|view| view.buffer_id)
-    }
-
-    fn ordered_buffer_ids(views: &[EditorViewState], ordered_view_ids: &[ViewId]) -> Vec<BufferId> {
-        let buffer_by_view_id = views
-            .iter()
-            .map(|view| (view.id, view.buffer_id))
-            .collect::<HashMap<_, _>>();
-        let mut ordered_buffer_ids = Vec::new();
-
-        for view_id in ordered_view_ids {
-            if let Some(buffer_id) = buffer_by_view_id.get(view_id)
-                && !ordered_buffer_ids.contains(buffer_id)
-            {
-                ordered_buffer_ids.push(*buffer_id);
-            }
-        }
-
-        ordered_buffer_ids
-    }
-
-    fn append_missing_buffer_ids(
-        ordered_buffer_ids: &mut Vec<BufferId>,
-        views: &[EditorViewState],
-    ) {
-        for buffer_id in views.iter().map(|view| view.buffer_id) {
-            if !ordered_buffer_ids.contains(&buffer_id) {
-                ordered_buffer_ids.push(buffer_id);
-            }
-        }
-    }
-
-    fn group_views_by_buffer(views: Vec<EditorViewState>) -> HashMap<BufferId, Vec<EditorViewState>> {
-        views.into_iter().fold(HashMap::new(), |mut groups, view| {
-            groups.entry(view.buffer_id).or_default().push(view);
-            groups
-        })
-    }
-
-    fn view_order_lookup(ordered_view_ids: &[ViewId]) -> HashMap<ViewId, usize> {
-        ordered_view_ids
-            .iter()
-            .enumerate()
-            .map(|(index, view_id)| (*view_id, index))
-            .collect()
-    }
-
-    fn take_file_tab_parts(
-        buffer_id: BufferId,
-        root_pane: &PaneNode,
-        active_view_id: ViewId,
-        active_buffer_id: Option<BufferId>,
-        buffers: &mut HashMap<BufferId, BufferState>,
-        views_by_buffer: &mut HashMap<BufferId, Vec<EditorViewState>>,
-        view_order: &HashMap<ViewId, usize>,
-    ) -> Option<FileTabParts> {
-        let buffer = buffers.remove(&buffer_id)?;
-        let mut views = views_by_buffer.remove(&buffer_id)?;
-        Self::sort_views_by_layout_order(&mut views, view_order);
-        let root_pane = Self::file_root_pane(root_pane, &views);
-        let active_view_id =
-            Self::file_active_view_id(buffer_id, active_buffer_id, active_view_id, &views, &root_pane);
-
-        Some(FileTabParts {
-            buffer,
-            views,
-            root_pane,
-            active_view_id,
-        })
-    }
-
-    fn sort_views_by_layout_order(
-        views: &mut [EditorViewState],
-        view_order: &HashMap<ViewId, usize>,
-    ) {
-        views.sort_by_key(|view| view_order.get(&view.id).copied().unwrap_or(usize::MAX));
-    }
-
-    fn file_root_pane(root_pane: &PaneNode, views: &[EditorViewState]) -> PaneNode {
-        let file_view_ids = views.iter().map(|view| view.id).collect::<HashSet<_>>();
-        let mut file_root = root_pane.clone();
-        if !file_root.retain_views(&file_view_ids) {
-            PaneNode::leaf(views[0].id)
-        } else {
-            file_root
-        }
-    }
-
-    fn file_active_view_id(
-        buffer_id: BufferId,
-        active_buffer_id: Option<BufferId>,
-        active_view_id: ViewId,
-        views: &[EditorViewState],
-        root_pane: &PaneNode,
-    ) -> ViewId {
-        let file_view_ids = views.iter().map(|view| view.id).collect::<HashSet<_>>();
-        if active_buffer_id == Some(buffer_id) && file_view_ids.contains(&active_view_id) {
-            active_view_id
-        } else {
-            root_pane.first_view_id()
-        }
     }
 }

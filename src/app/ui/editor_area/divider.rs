@@ -1,6 +1,6 @@
 use crate::app::domain::{SplitAxis, SplitPath};
 use crate::app::theme::*;
-use crate::app::ui::tile_header::{TileAction, TILE_GAP};
+use crate::app::ui::tile_header::{TILE_GAP, TileAction};
 use eframe::egui;
 
 pub const DIVIDER_HIT_THICKNESS: f32 = 18.0;

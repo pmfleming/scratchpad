@@ -112,14 +112,15 @@ fn handle_editor_zoom(ctx: &egui::Context, ui: &egui::Ui, app: &mut ScratchpadAp
     let pointer_over_editor = ui.rect_contains_pointer(panel_rect);
     let zoom_factor = ctx.input(|input| input.zoom_delta());
     if pointer_over_editor && zoom_factor != 1.0 {
-        let previous_font_size = app.font_size;
-        app.font_size = (app.font_size * zoom_factor).clamp(8.0, 72.0);
-        app.mark_session_dirty();
+        let previous_font_size = app.font_size();
+        app.set_font_size(app.font_size() * zoom_factor);
         app.log_event(
             LogLevel::Info,
             format!(
                 "Adjusted editor zoom from {:.2} to {:.2} (zoom factor {:.3})",
-                previous_font_size, app.font_size, zoom_factor
+                previous_font_size,
+                app.font_size(),
+                zoom_factor
             ),
         );
     }

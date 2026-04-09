@@ -1,4 +1,7 @@
 use crate::app::domain::{EditorViewState, PaneNode, SplitAxis};
+use crate::app::services::settings_store::{
+    AppSettings, DEFAULT_FONT_SIZE, DEFAULT_LOGGING_ENABLED, DEFAULT_WORD_WRAP,
+};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -8,10 +11,24 @@ pub const SESSION_VERSION: u32 = 6;
 pub(crate) struct SessionManifest {
     pub version: u32,
     pub active_tab_index: usize,
+    #[serde(default = "default_font_size")]
     pub font_size: f32,
+    #[serde(default = "default_word_wrap")]
     pub word_wrap: bool,
+    #[serde(default = "default_logging_enabled")]
     pub logging_enabled: bool,
     pub tabs: Vec<SessionTab>,
+}
+
+impl SessionManifest {
+    pub fn legacy_settings(&self) -> AppSettings {
+        AppSettings {
+            font_size: self.font_size,
+            word_wrap: self.word_wrap,
+            logging_enabled: self.logging_enabled,
+            editor_font: Default::default(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -154,4 +171,16 @@ impl From<SessionSplitAxis> for SplitAxis {
             SessionSplitAxis::Vertical => SplitAxis::Vertical,
         }
     }
+}
+
+const fn default_font_size() -> f32 {
+    DEFAULT_FONT_SIZE
+}
+
+const fn default_word_wrap() -> bool {
+    DEFAULT_WORD_WRAP
+}
+
+const fn default_logging_enabled() -> bool {
+    DEFAULT_LOGGING_ENABLED
 }

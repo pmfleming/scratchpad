@@ -1,5 +1,6 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::{RenderedLayout, ViewId, WorkspaceTab};
+use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::theme::*;
 use crate::app::ui::editor_content::{self, EditorContentOutcome};
 use crate::app::ui::tab_drag;
@@ -24,27 +25,24 @@ pub fn render_tile(
     any_editor_changed: &mut bool,
     preview_overlay: &mut Option<SplitPreviewOverlay>,
 ) {
-    ui.scope_builder(
-        tile_ui_builder(rect),
-        |ui| {
-            handle_tile_click(ui, rect, tab_index, view_id, actions);
-            paint_tile_frame(ui, rect, is_active);
+    ui.scope_builder(tile_ui_builder(rect), |ui| {
+        handle_tile_click(ui, rect, tab_index, view_id, actions);
+        paint_tile_frame(ui, rect, is_active);
 
-            let body_outcome = render_tile_body(ui, app, tab_index, view_id, rect);
-            *any_editor_changed |= body_outcome.changed;
-            apply_tile_body_focus(body_outcome.focused, is_active, view_id, actions);
-            tile_header::render_tile_header(
-                ui,
-                app,
-                tab_index,
-                view_id,
-                rect,
-                can_close,
-                actions,
-                preview_overlay,
-            );
-        },
-    );
+        let body_outcome = render_tile_body(ui, app, tab_index, view_id, rect);
+        *any_editor_changed |= body_outcome.changed;
+        apply_tile_body_focus(body_outcome.focused, is_active, view_id, actions);
+        tile_header::render_tile_header(
+            ui,
+            app,
+            tab_index,
+            view_id,
+            rect,
+            can_close,
+            actions,
+            preview_overlay,
+        );
+    });
 }
 
 fn render_tile_body(
@@ -54,32 +52,34 @@ fn render_tile_body(
     view_id: ViewId,
     rect: egui::Rect,
 ) -> TileBodyOutcome {
-    ui.scope_builder(
-        tile_ui_builder(rect),
-        |ui| {
-            let editor_font_id = editor_font_id(app.font_size);
-            let scroll_bar_visibility = editor_scroll_bar_visibility(ui.ctx());
-            let word_wrap = app.word_wrap;
-            let tab = &mut app.tabs_mut()[tab_index];
-            let previous_layout = take_previous_layout(tab, view_id);
-            let outcome = show_editor_scroll_area(
-                ui,
-                tab,
-                tab_index,
-                view_id,
-                word_wrap,
-                &editor_font_id,
-                previous_layout.as_ref(),
-                scroll_bar_visibility,
-            );
-            restore_previous_layout_if_needed(tab, view_id, previous_layout);
+    ui.scope_builder(tile_ui_builder(rect), |ui| {
+        let editor_font_id = editor_font_id(app.font_size);
+        let scroll_bar_visibility = editor_scroll_bar_visibility(ui.ctx());
+        let request_focus = app.should_focus_view(view_id);
+        let word_wrap = app.word_wrap;
+        let tab = &mut app.tabs_mut()[tab_index];
+        let previous_layout = take_previous_layout(tab, view_id);
+        let outcome = show_editor_scroll_area(
+            ui,
+            tab,
+            tab_index,
+            view_id,
+            word_wrap,
+            &editor_font_id,
+            previous_layout.as_ref(),
+            request_focus,
+            scroll_bar_visibility,
+        );
+        restore_previous_layout_if_needed(tab, view_id, previous_layout);
+        if request_focus {
+            app.consume_focus_request(view_id);
+        }
 
-            TileBodyOutcome {
-                changed: outcome.changed,
-                focused: outcome.focused,
-            }
-        },
-    )
+        TileBodyOutcome {
+            changed: outcome.changed,
+            focused: outcome.focused,
+        }
+    })
     .inner
 }
 
@@ -135,7 +135,7 @@ fn apply_tile_body_focus(
 }
 
 fn editor_font_id(font_size: f32) -> egui::FontId {
-    egui::FontId::monospace(font_size)
+    egui::FontId::new(font_size, egui::FontFamily::Name(EDITOR_FONT_FAMILY.into()))
 }
 
 fn editor_scroll_bar_visibility(ctx: &egui::Context) -> egui::scroll_area::ScrollBarVisibility {
@@ -146,14 +146,12 @@ fn editor_scroll_bar_visibility(ctx: &egui::Context) -> egui::scroll_area::Scrol
     }
 }
 
-fn take_previous_layout(
-    tab: &mut WorkspaceTab,
-    view_id: ViewId,
-) -> Option<RenderedLayout> {
+fn take_previous_layout(tab: &mut WorkspaceTab, view_id: ViewId) -> Option<RenderedLayout> {
     tab.view_mut(view_id)
         .and_then(|view| view.latest_layout.take())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn show_editor_scroll_area(
     ui: &mut egui::Ui,
     tab: &mut WorkspaceTab,
@@ -162,6 +160,7 @@ fn show_editor_scroll_area(
     word_wrap: bool,
     editor_font_id: &egui::FontId,
     previous_layout: Option<&RenderedLayout>,
+    request_focus: bool,
     scroll_bar_visibility: egui::scroll_area::ScrollBarVisibility,
 ) -> EditorContentOutcome {
     egui::ScrollArea::both()
@@ -174,6 +173,7 @@ fn show_editor_scroll_area(
                 tab,
                 view_id,
                 previous_layout,
+                request_focus,
                 word_wrap,
                 editor_font_id,
             )
@@ -186,6 +186,7 @@ fn render_editor_body_content(
     tab: &mut WorkspaceTab,
     view_id: ViewId,
     previous_layout: Option<&RenderedLayout>,
+    request_focus: bool,
     word_wrap: bool,
     editor_font_id: &egui::FontId,
 ) -> EditorContentOutcome {
@@ -195,6 +196,7 @@ fn render_editor_body_content(
             buffer,
             view,
             previous_layout,
+            request_focus,
             word_wrap,
             editor_font_id,
         )

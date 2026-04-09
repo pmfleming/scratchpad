@@ -6,6 +6,7 @@ pub fn render_artifact_view(
     ui: &mut egui::Ui,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
+    request_focus: bool,
     word_wrap: bool,
     editor_font_id: &egui::FontId,
 ) -> (bool, bool) {
@@ -15,6 +16,7 @@ pub fn render_artifact_view(
             view,
             make_control_chars_visible(&buffer.content),
             buffer.line_count,
+            request_focus,
             word_wrap,
             editor_font_id,
         )
@@ -26,6 +28,7 @@ pub fn render_artifact_view(
             view,
             clean_text,
             desired_rows,
+            request_focus,
             word_wrap,
             editor_font_id,
         )

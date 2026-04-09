@@ -1,5 +1,5 @@
-use crate::app::domain::WorkspaceTab;
 use crate::app::chrome::tab_button;
+use crate::app::domain::WorkspaceTab;
 use crate::app::ui::tab_drag;
 use eframe::egui;
 use std::collections::HashMap;
@@ -9,6 +9,7 @@ pub(crate) struct TabCellOutcome {
     pub rect: egui::Rect,
 }
 
+#[derive(Clone, Copy)]
 pub(crate) enum TabInteraction {
     None,
     Activate(usize),

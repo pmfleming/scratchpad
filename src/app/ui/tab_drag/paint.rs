@@ -1,27 +1,18 @@
 use super::state::{TabDragState, TabDropAxis, TabDropZone};
-use crate::app::domain::WorkspaceTab;
+use crate::app::app_state::ScratchpadApp;
 use crate::app::theme::*;
 use eframe::egui;
-use std::collections::HashMap;
 
 const TAB_REORDER_MARKER_COLOR: egui::Color32 = egui::Color32::from_rgb(104, 154, 232);
 
 pub(super) fn paint_dragged_tab_ghost(
     ctx: &egui::Context,
-    tabs: &[WorkspaceTab],
+    app: &ScratchpadApp,
     drag_state: TabDragState,
 ) {
-    let Some(tab) = tabs.get(drag_state.source_index) else {
+    let Some(display_name) = app.display_tab_name_at_slot(drag_state.source_index) else {
         return;
     };
-
-    let duplicate_name_counts = duplicate_name_counts(tabs);
-    let has_duplicate = duplicate_name_counts
-        .get(&tab.buffer.name)
-        .copied()
-        .unwrap_or(0)
-        > 1;
-    let display_name = tab.full_display_name(has_duplicate);
     let rect = egui::Rect::from_center_size(
         drag_state.current_pos,
         egui::vec2(TAB_BUTTON_WIDTH, TAB_HEIGHT),
@@ -217,12 +208,4 @@ fn surrounding_entry_rects(zone: &TabDropZone, drop_slot: usize) -> (egui::Rect,
     }
 
     (previous_rect, target_rect)
-}
-
-fn duplicate_name_counts(tabs: &[WorkspaceTab]) -> HashMap<String, usize> {
-    let mut counts = HashMap::with_capacity(tabs.len());
-    for tab in tabs {
-        *counts.entry(tab.buffer.name.clone()).or_insert(0) += 1;
-    }
-    counts
 }

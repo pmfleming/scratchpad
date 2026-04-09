@@ -2,12 +2,16 @@
 
 Scratchpad is a Rust text editor built with `egui` / `eframe`.
 
-It currently focuses on a custom desktop editing experience with a frameless window, shared tab management across a visible strip and overflow list, multi-pane editing, encoding-aware file IO, session restore, and runtime logging.
+It currently focuses on a custom desktop editing experience with a frameless window, shared tab management across a visible strip and overflow list, multi-pane editing, encoding-aware file IO, YAML-backed user settings, session restore, and runtime logging.
 
 ## Current Feature Set
 
 - Custom frameless window chrome with caption controls
 - Tab strip plus overflow list backed by one shared tab-order model
+- Settings page available as a real tab:
+  - open via `Ctrl + ,`
+  - reorderable in the strip and overflow list
+  - closeable like any other tab
 - Drag-and-drop tab reordering:
   - within the visible tab strip
   - within the overflow list
@@ -24,7 +28,8 @@ It currently focuses on a custom desktop editing experience with a frameless win
 - Encoding-aware file loading and saving
 - Control-character / ANSI artifact detection with cleaned and visible inspection modes
 - Status bar with file path, line count, encoding, artifact status, and runtime logging toggle
-- Session persistence for tabs, pane layout, active tab, zoom, wrap, and logging preference
+- YAML-backed settings persistence for font, wrap, logging, and editor font selection
+- Session persistence for tabs, pane layout, active tab, and view/session metadata
 - Runtime file logging for major editor actions
 
 ## Current Limitations
@@ -38,6 +43,7 @@ It currently focuses on a custom desktop editing experience with a frameless win
 - `Ctrl + N`: new tab
 - `Ctrl + O`: open file
 - `Ctrl + Shift + O`: open file here in the current tab as new tile(s)
+- `Ctrl + ,`: open settings
 - `Ctrl + S`: save active file
 - `Ctrl + W`: close active tab
 - `Ctrl + +` / `Ctrl + =`: increase editor font size
@@ -76,6 +82,18 @@ Run tests:
 cargo test
 ```
 
+Run the standardized code health checks:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts\ci.ps1
+```
+
+Direct measurement tools:
+
+- `scripts/hotspots.py`: standardized complexity and maintainability measurement
+- `scripts/slowspots.py`: standardized benchmark/performance measurement
+- `scripts/map.py`: standardized architecture/interrelatedness mapping using dependencies plus hotspot/slowspot data
+
 ## Project Structure
 
 ```text
@@ -113,5 +131,6 @@ Key areas:
 ## Notes
 
 - Runtime logs are written under `log/` during local runs.
-- Session state is stored under the OS temp directory.
+- Session state and `settings.yaml` are currently stored under the OS temp directory.
+- `scripts/ci.ps1` is the standard local/CI entry point and runs formatting, linting, tests, hotspot review, and slowspot review.
 - The current plan and project status are tracked in [PLAN.md](PLAN.md).

@@ -2,6 +2,7 @@ pub mod buffer;
 pub mod panes;
 pub mod tab;
 pub mod tab_manager;
+pub(crate) mod tab_support;
 pub mod view;
 
 pub use buffer::{
