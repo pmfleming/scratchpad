@@ -96,7 +96,7 @@ powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1
 
 Release flow:
 
-- Push a tag like `v0.1.0`, or run the `Release` workflow manually with version `0.1.0`.
+- Push a tag like `v0.2.0`, or run the `Release` workflow manually with version `0.2.0`.
 - GitHub Actions builds `scratchpad.exe`, runs format, clippy, and tests, packages a Windows x64 `.zip`, writes a `.sha256` checksum, and attaches both to a GitHub Release.
 - The archive includes `scratchpad.exe`, `README.md`, and `register-open-with.ps1`.
 
