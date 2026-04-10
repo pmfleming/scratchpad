@@ -1,17 +1,36 @@
 use crate::app::app_state::ScratchpadApp;
+use crate::app::chrome::phosphor_button;
 use crate::app::fonts::{EDITOR_FONT_FAMILY, EditorFontPreset};
-use crate::app::services::file_controller::FileController;
-use crate::app::services::settings_store::AppSettings;
-use crate::app::theme::{ACTION_BG, BORDER, EDITOR_BG, TAB_ACTIVE_BG, TEXT_MUTED, TEXT_PRIMARY};
+use crate::app::theme::{ACTION_BG, ACTION_HOVER_BG, BORDER, TEXT_MUTED, TEXT_PRIMARY};
 use eframe::egui;
 
+mod widgets;
+
+use widgets::*;
+
 const SETTINGS_PAGE_MAX_WIDTH: f32 = 980.0;
+const SETTINGS_BODY_FONT_SIZE: f32 = 15.0;
+const SETTINGS_TITLE_FONT_SIZE: f32 = 28.0;
+const SETTINGS_CATEGORY_FONT_SIZE: f32 = 20.0;
+const SETTINGS_DESCRIPTION_FONT_SIZE: f32 = 12.5;
 const SETTINGS_CARD_RADIUS: u8 = 10;
-const SETTINGS_FONT_SIZE: f32 = 15.0;
-const SETTINGS_ROW_HEIGHT: f32 = 50.0;
-const SETTINGS_CONTROL_WIDTH: f32 = 220.0;
-const SETTINGS_PREVIEW_TEXT: &str = "The sound of ocean waves calms my soul.";
+const SETTINGS_CARD_MIN_HEIGHT: f32 = 72.0;
+const SETTINGS_INNER_ROW_HEIGHT: f32 = 56.0;
+const SETTINGS_CONTROL_WIDTH: f32 = 190.0;
+const SETTINGS_CONTROL_GAP: f32 = 8.0;
+const SETTINGS_ICON_BUTTON_SIZE: f32 = 34.0;
+const SETTINGS_PILL_WIDTH: f32 =
+    SETTINGS_CONTROL_WIDTH - SETTINGS_ICON_BUTTON_SIZE - SETTINGS_CONTROL_GAP;
+const EDITOR_GUTTER_RANGE: core::ops::RangeInclusive<u8> = 0..=32;
+const SETTINGS_PREVIEW_TEXT: &str = "I hear the ruin of all space, shattered glass and toppling masonry, and time one livid final flame.";
 const FONT_SIZE_OPTIONS: [u32; 9] = [11, 12, 14, 16, 18, 20, 24, 28, 32];
+
+const SETTINGS_CARD_BG: egui::Color32 = egui::Color32::from_rgb(42, 47, 57);
+const SETTINGS_CARD_BORDER: egui::Color32 = egui::Color32::from_rgb(61, 67, 77);
+const SETTINGS_CONTROL_BG: egui::Color32 = egui::Color32::from_rgb(58, 63, 71);
+const SETTINGS_PREVIEW_BG: egui::Color32 = egui::Color32::from_rgb(37, 42, 51);
+const SETTINGS_ACCENT: egui::Color32 = egui::Color32::from_rgb(42, 168, 242);
+const SETTINGS_ICON: egui::Color32 = egui::Color32::from_rgba_premultiplied(242, 244, 247, 170);
 
 pub(crate) fn show_page(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     egui::CentralPanel::default().show_inside(ui, |ui| {
@@ -25,33 +44,30 @@ pub(crate) fn show_page(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                     let content_width = available_width.min(SETTINGS_PAGE_MAX_WIDTH);
                     let horizontal_margin = ((available_width - content_width) * 0.5).max(24.0);
 
-                    ui.add_space(18.0);
+                    ui.add_space(24.0);
                     ui.horizontal(|ui| {
                         ui.add_space(horizontal_margin);
                         ui.vertical(|ui| {
                             ui.set_width(content_width);
-                            render_page_heading(ui, app);
-                            ui.add_space(16.0);
-                            render_font_section(ui, app);
-                            ui.add_space(12.0);
-                            render_diagnostics_section(ui, app);
-                            ui.add_space(12.0);
-                            render_settings_section(ui, app);
+                            render_page_heading(ui);
+                            ui.add_space(24.0);
+                            render_text_formatting_category(ui, app);
+                            ui.add_space(24.0);
+                            render_diagnostics_category(ui, app);
+                            ui.add_space(24.0);
+                            render_advanced_category(ui, app);
                         });
                     });
-                    ui.add_space(24.0);
+                    ui.add_space(28.0);
                 });
         });
     });
 }
 
 fn apply_settings_typography(ui: &mut egui::Ui) {
-    let font_id = egui::FontId::proportional(SETTINGS_FONT_SIZE);
+    let font_id = egui::FontId::proportional(SETTINGS_BODY_FONT_SIZE);
     let style = ui.style_mut();
     style.override_font_id = Some(font_id.clone());
-    style
-        .text_styles
-        .insert(egui::TextStyle::Heading, font_id.clone());
     style
         .text_styles
         .insert(egui::TextStyle::Body, font_id.clone());
@@ -61,362 +77,135 @@ fn apply_settings_typography(ui: &mut egui::Ui) {
     style.text_styles.insert(egui::TextStyle::Small, font_id);
 }
 
-fn render_page_heading(ui: &mut egui::Ui, app: &ScratchpadApp) {
-    ui.label(egui::RichText::new("Settings").strong());
-    ui.add_space(8.0);
-    info_chip(
-        ui,
-        &format!("Settings file: {}", app.settings_path().display()),
+fn render_page_heading(ui: &mut egui::Ui) {
+    ui.label(
+        egui::RichText::new("Settings")
+            .size(SETTINGS_TITLE_FONT_SIZE)
+            .strong()
+            .color(TEXT_PRIMARY),
+    );
+    ui.add_space(4.0);
+    ui.label(
+        egui::RichText::new("Editor appearance, runtime behavior, and stored configuration.")
+            .size(SETTINGS_DESCRIPTION_FONT_SIZE)
+            .color(TEXT_MUTED),
     );
 }
 
-fn render_font_section(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    settings_section(
+fn render_text_formatting_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    category_heading(ui, "Text Formatting");
+    expandable_card(
         ui,
+        "settings_font_card",
+        egui_phosphor::regular::TEXT_ALIGN_JUSTIFY,
         "Font",
-        "Choose the text appearance for the editor.",
+        "Choose the text appearance for editor content.",
         true,
         |ui| {
-            render_font_family_row(ui, app);
-            render_divider(ui);
-            render_font_size_row(ui, app);
-            render_divider(ui);
-            render_word_wrap_row(ui, app);
+            inner_select_row(ui, "Family", Some("Pick the bundled editor font."), |ui| {
+                let mut selected_font = app.editor_font();
+                egui::ComboBox::from_id_salt("settings_editor_font")
+                    .selected_text(selected_font.label())
+                    .width(SETTINGS_CONTROL_WIDTH)
+                    .show_ui(ui, |ui| {
+                        for preset in EditorFontPreset::ALL {
+                            ui.selectable_value(&mut selected_font, preset, preset.label());
+                        }
+                    });
+                if selected_font != app.editor_font() {
+                    app.set_editor_font(selected_font);
+                }
+            });
+            inner_divider(ui);
+            inner_select_row(ui, "Size", Some("Adjust the editor text size."), |ui| {
+                let mut selected_size = app.font_size().round() as u32;
+                egui::ComboBox::from_id_salt("settings_font_size")
+                    .selected_text(selected_size.to_string())
+                    .width(SETTINGS_CONTROL_WIDTH)
+                    .show_ui(ui, |ui| {
+                        for option in FONT_SIZE_OPTIONS {
+                            ui.selectable_value(&mut selected_size, option, option.to_string());
+                        }
+                    });
+
+                let selected_size = selected_size as f32;
+                if (selected_size - app.font_size()).abs() > f32::EPSILON {
+                    app.set_font_size(selected_size);
+                }
+            });
+            inner_divider(ui);
+            inner_select_row(
+                ui,
+                "Gutter",
+                Some("Add space around the editor text area."),
+                |ui| {
+                    let mut selected_gutter = app.editor_gutter();
+                    ui.add(
+                        egui::DragValue::new(&mut selected_gutter)
+                            .range(EDITOR_GUTTER_RANGE)
+                            .speed(0.25)
+                            .suffix(" px"),
+                    );
+
+                    if selected_gutter != app.editor_gutter() {
+                        app.set_editor_gutter(selected_gutter);
+                    }
+                },
+            );
+            ui.add_space(14.0);
             render_preview_panel(ui, app);
         },
     );
-}
-
-fn render_diagnostics_section(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    settings_section(
+    ui.add_space(8.0);
+    toggle_card(
         ui,
-        "Diagnostics",
-        "Control runtime behavior while the app is open.",
-        true,
-        |ui| {
-            render_logging_row(ui, app);
-        },
-    );
-}
-
-fn render_settings_section(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    settings_section(
-        ui,
-        "Settings",
-        "Manage the stored settings for this workspace.",
-        true,
-        |ui| {
-            render_settings_path_row(ui, app);
-            render_divider(ui);
-            render_settings_path_actions(ui, app);
-            render_divider(ui);
-            render_reset_row(ui, app);
-        },
-    );
-}
-
-fn settings_section(
-    ui: &mut egui::Ui,
-    title: &str,
-    description: &str,
-    default_open: bool,
-    add_contents: impl FnOnce(&mut egui::Ui),
-) {
-    egui::Frame::new()
-        .fill(TAB_ACTIVE_BG.gamma_multiply(0.72))
-        .stroke(egui::Stroke::new(1.0, BORDER.gamma_multiply(0.85)))
-        .corner_radius(egui::CornerRadius::same(SETTINGS_CARD_RADIUS))
-        .inner_margin(egui::Margin::same(0))
-        .show(ui, |ui| {
-            egui::CollapsingHeader::new(
-                egui::RichText::new(format!("{title}\n{description}")).strong(),
-            )
-            .default_open(default_open)
-            .show(ui, |ui| {
-                ui.add_space(8.0);
-                add_contents(ui);
-                ui.add_space(10.0);
-            });
-        });
-}
-
-fn render_font_family_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    settings_row(
-        ui,
-        "Family",
-        Some("Pick the bundled font used for editor content."),
-        |ui| {
-            let mut selected_font = app.editor_font();
-            egui::ComboBox::from_id_salt("settings_editor_font")
-                .selected_text(selected_font.label())
-                .width(SETTINGS_CONTROL_WIDTH)
-                .show_ui(ui, |ui| {
-                    for preset in EditorFontPreset::ALL {
-                        ui.selectable_value(&mut selected_font, preset, preset.label());
-                    }
-                });
-            if selected_font != app.editor_font() {
-                app.set_editor_font(selected_font);
-            }
-        },
-    );
-}
-
-fn render_font_size_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    settings_row(ui, "Size", Some("Adjust the editor text size."), |ui| {
-        let mut selected_size = app.font_size().round() as u32;
-        egui::ComboBox::from_id_salt("settings_font_size")
-            .selected_text(selected_size.to_string())
-            .width(SETTINGS_CONTROL_WIDTH)
-            .show_ui(ui, |ui| {
-                for option in FONT_SIZE_OPTIONS {
-                    ui.selectable_value(&mut selected_size, option, option.to_string());
-                }
-            });
-        let selected_size = selected_size as f32;
-        if (selected_size - app.font_size()).abs() > f32::EPSILON {
-            app.set_font_size(selected_size);
-        }
-    });
-}
-
-fn render_word_wrap_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    settings_row(
-        ui,
+        egui_phosphor::regular::TEXT_OUTDENT,
         "Word wrap",
-        Some("Choose how long lines behave in the editor."),
-        |ui| {
-            let mut word_wrap = app.word_wrap();
-            segmented_toggle(ui, &mut word_wrap, [("Off", false), ("On", true)]);
-            if word_wrap != app.word_wrap() {
-                app.set_word_wrap(word_wrap);
-            }
-        },
+        "Fit text within the editor width by default.",
+        app.word_wrap(),
+        |enabled| app.set_word_wrap(enabled),
     );
 }
 
-fn render_preview_panel(ui: &mut egui::Ui, app: &ScratchpadApp) {
-    ui.add_space(12.0);
-    ui.horizontal(|ui| {
-        ui.add_space(18.0);
-        info_chip(ui, app.editor_font().label());
-        ui.add_space(8.0);
-        info_chip(ui, &format!("{:.0} pt", app.font_size()));
-        ui.add_space(8.0);
-        info_chip(
-            ui,
-            if app.word_wrap() {
-                "Wrap on"
-            } else {
-                "Wrap off"
-            },
-        );
-    });
-    ui.add_space(10.0);
-    egui::Frame::new()
-        .fill(EDITOR_BG.gamma_multiply(0.95))
-        .stroke(egui::Stroke::new(1.0, BORDER.gamma_multiply(0.9)))
-        .corner_radius(egui::CornerRadius::same(SETTINGS_CARD_RADIUS))
-        .show(ui, |ui| {
-            ui.add_space(20.0);
-            ui.vertical_centered(|ui| {
-                let preview_family = egui::FontFamily::Name(EDITOR_FONT_FAMILY.into());
-                ui.label(
-                    egui::RichText::new(SETTINGS_PREVIEW_TEXT)
-                        .family(preview_family)
-                        .size(app.font_size())
-                        .color(TEXT_PRIMARY),
-                );
-            });
-            ui.add_space(20.0);
-        });
-}
-
-fn render_logging_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    settings_row(
+fn render_diagnostics_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    category_heading(ui, "Diagnostics");
+    toggle_card(
         ui,
+        egui_phosphor::regular::MAGNIFYING_GLASS,
         "File logging",
-        Some("Write runtime diagnostics while the app is running."),
-        |ui| {
-            let mut logging_enabled = app.logging_enabled();
-            segmented_toggle(ui, &mut logging_enabled, [("On", true), ("Off", false)]);
-            if logging_enabled != app.logging_enabled() {
-                app.set_logging_enabled(logging_enabled);
-            }
-        },
+        "Write runtime diagnostics while Scratchpad is running.",
+        app.logging_enabled(),
+        |enabled| app.set_logging_enabled(enabled),
     );
 }
 
-fn render_settings_path_row(ui: &mut egui::Ui, app: &ScratchpadApp) {
-    settings_row(
+fn render_advanced_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    category_heading(ui, "Advanced");
+    settings_file_card(
         ui,
-        "Location",
-        Some("Stored as YAML and loaded before session restore."),
-        |ui| {
-            value_pill(
-                ui,
-                &app.settings_path().display().to_string(),
-                SETTINGS_CONTROL_WIDTH,
-            );
-        },
-    );
-}
-
-fn render_reset_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    settings_row(
-        ui,
-        "Reset",
-        Some("Restore the current settings file to app defaults."),
-        |ui| {
-            let button = egui::Button::new("Reset to defaults")
-                .min_size(egui::vec2(SETTINGS_CONTROL_WIDTH, 28.0))
-                .fill(ACTION_BG)
-                .stroke(egui::Stroke::new(1.0, BORDER));
-            if ui.add(button).clicked() {
-                app.reset_settings_to_defaults();
-            }
-        },
+        egui_phosphor::regular::FLOPPY_DISK,
+        "Settings file",
+        "Stored as TOML and loaded on startup.",
+        app,
     );
     ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        ui.add_space(18.0);
-        info_chip(ui, AppSettings::default().editor_font.label());
-        ui.add_space(8.0);
-        info_chip(ui, &format!("{:.0} pt", AppSettings::default().font_size));
-        ui.add_space(8.0);
-        info_chip(
-            ui,
-            if AppSettings::default().word_wrap {
-                "Wrap on"
-            } else {
-                "Wrap off"
-            },
-        );
-    });
-}
-
-fn render_settings_path_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    ui.add_space(8.0);
-    settings_row(
+    action_card(
         ui,
-        "Open",
-        Some("Open the YAML settings file in a new editor tab."),
-        |ui| {
-            let button = egui::Button::new("Open in new tab")
-                .min_size(egui::vec2(SETTINGS_CONTROL_WIDTH, 28.0))
-                .fill(ACTION_BG)
-                .stroke(egui::Stroke::new(1.0, BORDER));
-            if ui.add(button).clicked() {
-                let path = app.settings_path();
-                app.close_settings();
-                FileController::open_external_paths(app, vec![path]);
-            }
-        },
+        egui_phosphor::regular::ARROW_SQUARE_UP,
+        "Reset to defaults",
+        "Restore the current settings file to app defaults.",
+        "Reset to defaults",
+        ScratchpadApp::reset_settings_to_defaults,
+        app,
     );
 }
 
-fn settings_row(
-    ui: &mut egui::Ui,
-    label: &str,
-    description: Option<&str>,
-    add_control: impl FnOnce(&mut egui::Ui),
-) {
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        ui.set_min_height(SETTINGS_ROW_HEIGHT);
-        ui.add_space(18.0);
-        ui.vertical(|ui| {
-            ui.set_width((ui.available_width() - 280.0).max(220.0));
-            ui.label(egui::RichText::new(label).strong());
-            if let Some(description) = description {
-                ui.label(egui::RichText::new(description).color(TEXT_MUTED));
-            }
-        });
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_space(18.0);
-            add_control(ui);
-        });
-        ui.add_space(18.0);
-    });
-    ui.add_space(4.0);
-}
-
-fn render_divider(ui: &mut egui::Ui) {
-    let divider_width = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(divider_width, 1.0), egui::Sense::hover());
-    ui.painter()
-        .rect_filled(rect, 0.0, BORDER.gamma_multiply(0.45));
-}
-
-fn segmented_toggle<T: Copy + PartialEq, const N: usize>(
-    ui: &mut egui::Ui,
-    value: &mut T,
-    options: [(&str, T); N],
-) {
-    egui::Frame::new()
-        .fill(ACTION_BG.gamma_multiply(0.7))
-        .stroke(egui::Stroke::new(1.0, BORDER.gamma_multiply(0.8)))
-        .corner_radius(egui::CornerRadius::same(9))
-        .inner_margin(egui::Margin::same(4))
-        .show(ui, |ui| {
-            ui.set_min_width(SETTINGS_CONTROL_WIDTH);
-            ui.set_max_width(SETTINGS_CONTROL_WIDTH);
-            let button_width = ((SETTINGS_CONTROL_WIDTH - 8.0) / N as f32).max(54.0);
-            ui.horizontal(|ui| {
-                for (label, option_value) in options {
-                    let selected = *value == option_value;
-                    let button = egui::Button::new(label)
-                        .min_size(egui::vec2(button_width, 28.0))
-                        .fill(if selected {
-                            TAB_ACTIVE_BG
-                        } else {
-                            egui::Color32::TRANSPARENT
-                        })
-                        .stroke(egui::Stroke::new(
-                            1.0,
-                            if selected {
-                                BORDER
-                            } else {
-                                egui::Color32::TRANSPARENT
-                            },
-                        ));
-                    if ui.add(button).clicked() {
-                        *value = option_value;
-                    }
-                }
-            });
-        });
-}
-
-fn info_chip(ui: &mut egui::Ui, text: &str) {
-    egui::Frame::new()
-        .fill(ACTION_BG.gamma_multiply(0.72))
-        .stroke(egui::Stroke::new(1.0, BORDER.gamma_multiply(0.7)))
-        .corner_radius(egui::CornerRadius::same(127))
-        .inner_margin(egui::Margin {
-            left: 10,
-            right: 10,
-            top: 5,
-            bottom: 5,
-        })
-        .show(ui, |ui| {
-            ui.label(egui::RichText::new(text).color(TEXT_MUTED));
-        });
-}
-
-fn value_pill(ui: &mut egui::Ui, text: &str, width: f32) {
-    egui::Frame::new()
-        .fill(ACTION_BG.gamma_multiply(0.72))
-        .stroke(egui::Stroke::new(1.0, BORDER.gamma_multiply(0.75)))
-        .corner_radius(egui::CornerRadius::same(8))
-        .inner_margin(egui::Margin {
-            left: 12,
-            right: 12,
-            top: 8,
-            bottom: 8,
-        })
-        .show(ui, |ui| {
-            ui.set_max_width(width);
-            ui.label(egui::RichText::new(text).color(TEXT_MUTED));
-        });
+fn category_heading(ui: &mut egui::Ui, heading: &str) {
+    ui.label(
+        egui::RichText::new(heading)
+            .size(SETTINGS_CATEGORY_FONT_SIZE)
+            .strong()
+            .color(TEXT_PRIMARY),
+    );
+    ui.add_space(12.0);
 }

@@ -222,6 +222,7 @@ fn apply_editor_change(app: &mut ScratchpadApp, active_tab_index: usize) {
         app.clear_status_message();
     }
     app.mark_session_dirty();
+    app.note_settings_toml_edit(active_tab_index);
 
     if !previous_dirty {
         app.log_event(

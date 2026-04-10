@@ -10,11 +10,25 @@ pub fn handle_window_resize(ctx: &egui::Context) {
     }
 
     let screen_rect = ctx.input(|input| input.content_rect());
+    request_repaint_after_content_rect_change(ctx, screen_rect);
     egui::Area::new(egui::Id::new("window_resize_handles"))
         .fixed_pos(screen_rect.min)
         .order(egui::Order::Foreground)
         .interactable(false)
         .show(ctx, |ui| render_resize_handles(ui, ctx, screen_rect.size()));
+}
+
+fn request_repaint_after_content_rect_change(ctx: &egui::Context, screen_rect: Rect) {
+    let rect_id = egui::Id::new("window_content_rect");
+    let changed = ctx.data_mut(|data| {
+        let previous = data.get_persisted::<Rect>(rect_id);
+        data.insert_persisted(rect_id, screen_rect);
+        previous.is_some_and(|previous| previous != screen_rect)
+    });
+
+    if changed {
+        ctx.request_repaint();
+    }
 }
 
 fn render_resize_handles(ui: &mut egui::Ui, ctx: &egui::Context, size: Vec2) {
@@ -25,6 +39,9 @@ fn render_resize_handles(ui: &mut egui::Ui, ctx: &egui::Context, size: Vec2) {
 
         if response.drag_started() {
             ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(grip.direction));
+        }
+        if response.dragged() {
+            ctx.request_repaint();
         }
     }
 }

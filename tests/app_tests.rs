@@ -281,7 +281,7 @@ fn fixture_document_for_tab(index: usize, sections: usize) -> String {
 }
 
 #[test]
-fn startup_loads_yaml_settings_before_session_restore() {
+fn startup_loads_toml_settings_before_session_restore() {
     let session_root = tempfile::tempdir().expect("create session dir");
     let settings_root = tempfile::tempdir().expect("create settings dir");
     let session_store = SessionStore::new(session_root.path().to_path_buf());
@@ -291,9 +291,12 @@ fn startup_loads_yaml_settings_before_session_restore() {
             font_size: 19.0,
             word_wrap: false,
             logging_enabled: false,
+            editor_gutter: 0,
             editor_font: EditorFontPreset::Roboto,
+            settings_tab_open: false,
+            settings_tab_index: None,
         })
-        .expect("save yaml settings");
+        .expect("save toml settings");
 
     let app = ScratchpadApp::with_stores_and_startup(
         session_store,
@@ -311,7 +314,7 @@ fn startup_loads_yaml_settings_before_session_restore() {
 }
 
 #[test]
-fn startup_migrates_legacy_session_settings_when_yaml_is_missing() {
+fn startup_migrates_legacy_session_settings_when_toml_is_missing() {
     let session_root = tempfile::tempdir().expect("create session dir");
     let settings_root = tempfile::tempdir().expect("create settings dir");
     let session_store = SessionStore::new(session_root.path().to_path_buf());
@@ -349,7 +352,10 @@ fn startup_migrates_legacy_session_settings_when_yaml_is_missing() {
             font_size: 21.0,
             word_wrap: false,
             logging_enabled: false,
+            editor_gutter: 0,
             editor_font: EditorFontPreset::SystemDefault,
+            settings_tab_open: false,
+            settings_tab_index: None,
         })
     );
 }

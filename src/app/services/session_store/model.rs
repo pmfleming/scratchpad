@@ -1,6 +1,7 @@
 use crate::app::domain::{EditorViewState, PaneNode, SplitAxis};
 use crate::app::services::settings_store::{
-    AppSettings, DEFAULT_FONT_SIZE, DEFAULT_LOGGING_ENABLED, DEFAULT_WORD_WRAP,
+    AppSettings, DEFAULT_EDITOR_GUTTER, DEFAULT_FONT_SIZE, DEFAULT_LOGGING_ENABLED,
+    DEFAULT_WORD_WRAP,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -26,7 +27,10 @@ impl SessionManifest {
             font_size: self.font_size,
             word_wrap: self.word_wrap,
             logging_enabled: self.logging_enabled,
+            editor_gutter: DEFAULT_EDITOR_GUTTER,
             editor_font: Default::default(),
+            settings_tab_open: false,
+            settings_tab_index: None,
         }
     }
 }
@@ -60,6 +64,8 @@ pub(crate) struct SessionBuffer {
     pub name: String,
     pub path: Option<PathBuf>,
     pub is_dirty: bool,
+    #[serde(default)]
+    pub is_settings_file: bool,
     pub temp_id: String,
     pub encoding: String,
     pub has_bom: bool,
@@ -72,6 +78,7 @@ impl From<&crate::app::domain::BufferState> for SessionBuffer {
             name: buffer.name.clone(),
             path: buffer.path.clone(),
             is_dirty: buffer.is_dirty,
+            is_settings_file: buffer.is_settings_file,
             temp_id: buffer.temp_id.clone(),
             encoding: buffer.encoding.clone(),
             has_bom: buffer.has_bom,

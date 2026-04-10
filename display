@@ -1,0 +1,2204 @@
+{
+  "meta": {
+    "title": "Scratchpad Architecture Map",
+    "generated_from": "scripts/map.py",
+    "source_root": "src",
+    "viewer": "architecture_map_viewer.html",
+    "node_count": 73,
+    "edge_count": 173
+  },
+  "graph": {
+    "nodes": [
+      {
+        "data": {
+          "id": "app",
+          "label": "app",
+          "parent": null,
+          "is_group": true,
+          "bg_color": "#808080",
+          "bg_opacity": 0.32
+        }
+      },
+      {
+        "data": {
+          "id": "app::chrome",
+          "label": "chrome",
+          "parent": "app",
+          "is_group": true,
+          "bg_color": "#569cd6",
+          "bg_opacity": 0.24000000000000002
+        }
+      },
+      {
+        "data": {
+          "id": "app::domain",
+          "label": "domain",
+          "parent": "app",
+          "is_group": true,
+          "bg_color": "#4ec9b0",
+          "bg_opacity": 0.24000000000000002
+        }
+      },
+      {
+        "data": {
+          "id": "app::services",
+          "label": "services",
+          "parent": "app",
+          "is_group": true,
+          "bg_color": "#d7ba7d",
+          "bg_opacity": 0.24000000000000002
+        }
+      },
+      {
+        "data": {
+          "id": "app::services::session_store",
+          "label": "session_store",
+          "parent": "app::services",
+          "is_group": true,
+          "bg_color": "#d7ba7d",
+          "bg_opacity": 0.16000000000000003
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui",
+          "label": "ui",
+          "parent": "app",
+          "is_group": true,
+          "bg_color": "#c586c0",
+          "bg_opacity": 0.24000000000000002
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::editor_area",
+          "label": "editor_area",
+          "parent": "app::ui",
+          "is_group": true,
+          "bg_color": "#c586c0",
+          "bg_opacity": 0.16000000000000003
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::editor_content",
+          "label": "editor_content",
+          "parent": "app::ui",
+          "is_group": true,
+          "bg_color": "#c586c0",
+          "bg_opacity": 0.16000000000000003
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tab_drag",
+          "label": "tab_drag",
+          "parent": "app::ui",
+          "is_group": true,
+          "bg_color": "#c586c0",
+          "bg_opacity": 0.16000000000000003
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tab_drag::state",
+          "label": "state",
+          "parent": "app::ui::tab_drag",
+          "is_group": true,
+          "bg_color": "#c586c0",
+          "bg_opacity": 0.1
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tab_strip",
+          "label": "tab_strip",
+          "parent": "app::ui",
+          "is_group": true,
+          "bg_color": "#c586c0",
+          "bg_opacity": 0.16000000000000003
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tile_header",
+          "label": "tile_header",
+          "parent": "app::ui",
+          "is_group": true,
+          "bg_color": "#c586c0",
+          "bg_opacity": 0.16000000000000003
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tile_header::split",
+          "label": "split",
+          "parent": "app::ui::tile_header",
+          "is_group": true,
+          "bg_color": "#c586c0",
+          "bg_opacity": 0.1
+        }
+      },
+      {
+        "data": {
+          "id": "app",
+          "label": "app",
+          "parent": null,
+          "comp_score": 46.08,
+          "perf_score": 0.0,
+          "total_score": 46.08,
+          "sloc": 28,
+          "signals": "stable",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::app_state",
+          "label": "app_state",
+          "parent": "app",
+          "comp_score": 784.0,
+          "perf_score": 0.0,
+          "total_score": 784.0,
+          "sloc": 743,
+          "signals": "high cognitive=56.0, high cyclomatic=162.0, low MI=0.0, high effort=1,514,303, large sloc=743.0",
+          "comp_risk_color": "#f44747",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::chrome",
+          "label": "chrome",
+          "parent": "app",
+          "comp_score": 6.35,
+          "perf_score": 0.0,
+          "total_score": 6.35,
+          "sloc": 7,
+          "signals": "stable",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::chrome::buttons",
+          "label": "buttons",
+          "parent": "app::chrome",
+          "comp_score": 182.52,
+          "perf_score": 0.0,
+          "total_score": 182.52,
+          "sloc": 135,
+          "signals": "high cognitive=8.0, high cyclomatic=17.0, low MI=27.0, high effort=68,501",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::chrome::resize",
+          "label": "resize",
+          "parent": "app::chrome",
+          "comp_score": 153.4,
+          "perf_score": 0.0,
+          "total_score": 153.4,
+          "sloc": 133,
+          "signals": "high cyclomatic=12.0, low MI=27.3, high effort=102,975",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::chrome::tabs",
+          "label": "tabs",
+          "parent": "app::chrome",
+          "comp_score": 302.47,
+          "perf_score": 0.0,
+          "total_score": 302.47,
+          "sloc": 275,
+          "signals": "high cognitive=17.0, high cyclomatic=40.0, low MI=13.7, high effort=499,786, large sloc=275.0",
+          "comp_risk_color": "#d7ba7d",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::commands",
+          "label": "commands",
+          "parent": "app",
+          "comp_score": 443.0,
+          "perf_score": 0.0,
+          "total_score": 443.0,
+          "sloc": 575,
+          "signals": "high cognitive=22.0, high cyclomatic=80.0, low MI=0.0, high effort=1,181,806, large sloc=575.0",
+          "comp_risk_color": "#d7ba7d",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::domain",
+          "label": "domain",
+          "parent": "app",
+          "comp_score": 23.41,
+          "perf_score": 0.0,
+          "total_score": 23.41,
+          "sloc": 15,
+          "signals": "stable",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::domain::buffer",
+          "label": "buffer",
+          "parent": "app::domain",
+          "comp_score": 368.82,
+          "perf_score": 21.152346086956513,
+          "total_score": 389.9723460869565,
+          "sloc": 253,
+          "signals": "high cognitive=27.0, high cyclomatic=51.0, low MI=14.5, high effort=217,631, large sloc=253.0",
+          "comp_risk_color": "#d7ba7d",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": true,
+          "perf_info": "large_file_load/1048576: 2.12ms | p95: 0.04ms<br/>control_char_load/262144: 0.60ms | p95: 0.02ms<br/>large_file_load/262144: 0.52ms | p95: 0.01ms<br/>control_char_load/65536: 0.14ms | p95: 0.01ms<br/>large_file_load/65536: 0.13ms | p95: 0.01ms",
+          "perf_kind": "workflow"
+        }
+      },
+      {
+        "data": {
+          "id": "app::domain::panes",
+          "label": "panes",
+          "parent": "app::domain",
+          "comp_score": 472.28,
+          "perf_score": 1.0419433333333334,
+          "total_score": 473.3219433333333,
+          "sloc": 260,
+          "signals": "high cognitive=39.0, high cyclomatic=71.0, low MI=10.8, high effort=499,093, large sloc=260.0",
+          "comp_risk_color": "#d7ba7d",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": true,
+          "perf_info": "tile_count_scale/64: 0.10ms | p95: 0.02ms<br/>tile_count_scale/16: 0.01ms | p95: 0.00ms<br/>tile_count_scale/4: 0.00ms | p95: 0.00ms",
+          "perf_kind": "workflow"
+        }
+      },
+      {
+        "data": {
+          "id": "app::domain::tab",
+          "label": "tab",
+          "parent": "app::domain",
+          "comp_score": 735.0,
+          "perf_score": 5.516275991528675,
+          "total_score": 740.5162759915287,
+          "sloc": 764,
+          "signals": "high cognitive=50.0, high cyclomatic=152.0, low MI=0.0, high effort=1,633,118, large sloc=764.0",
+          "comp_risk_color": "#f44747",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": true,
+          "perf_info": "tab_count_scale/500: 0.55ms | p95: 0.01ms<br/>tile_count_scale/64: 0.10ms | p95: 0.02ms<br/>tab_count_scale/100: 0.11ms | p95: 0.00ms<br/>tile_count_scale/16: 0.01ms | p95: 0.00ms<br/>tab_count_scale/10: 0.01ms | p95: 0.00ms<br/>tab_stress_operations: 0.01ms | p95: 0.00ms<br/>tile_count_scale/4: 0.00ms | p95: 0.00ms",
+          "perf_kind": "micro, workflow"
+        }
+      },
+      {
+        "data": {
+          "id": "app::domain::tab_manager",
+          "label": "tab_manager",
+          "parent": "app::domain",
+          "comp_score": 242.65,
+          "perf_score": 5.516275991528675,
+          "total_score": 248.1662759915287,
+          "sloc": 151,
+          "signals": "high cognitive=9.0, high cyclomatic=36.0, low MI=22.3, high effort=186,387, large sloc=151.0",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": true,
+          "perf_info": "tab_count_scale/500: 0.55ms | p95: 0.01ms<br/>tab_count_scale/100: 0.11ms | p95: 0.00ms<br/>tab_count_scale/10: 0.01ms | p95: 0.00ms",
+          "perf_kind": "workflow"
+        }
+      },
+      {
+        "data": {
+          "id": "app::domain::tab_support",
+          "label": "tab_support",
+          "parent": "app::domain",
+          "comp_score": 217.55,
+          "perf_score": 0.0,
+          "total_score": 217.55,
+          "sloc": 127,
+          "signals": "high cognitive=11.0, high cyclomatic=26.0, low MI=26.1, high effort=117,520",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::domain::view",
+          "label": "view",
+          "parent": "app::domain",
+          "comp_score": 102.33,
+          "perf_score": 0.0,
+          "total_score": 102.33,
+          "sloc": 60,
+          "signals": "low MI=39.4, high effort=15,914",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::fonts",
+          "label": "fonts",
+          "parent": "app",
+          "comp_score": 161.83,
+          "perf_score": 0.0,
+          "total_score": 161.83,
+          "sloc": 86,
+          "signals": "high cyclomatic=17.0, low MI=32.2, high effort=49,114",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::logging",
+          "label": "logging",
+          "parent": "app",
+          "comp_score": 161.12,
+          "perf_score": 0.0,
+          "total_score": 161.12,
+          "sloc": 88,
+          "signals": "high cyclomatic=18.0, low MI=31.8, high effort=51,696",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::services",
+          "label": "services",
+          "parent": "app",
+          "comp_score": 3.01,
+          "perf_score": 0.0,
+          "total_score": 3.01,
+          "sloc": 5,
+          "signals": "stable",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::services::file_controller",
+          "label": "file_controller",
+          "parent": "app::services",
+          "comp_score": 757.0,
+          "perf_score": 0.0,
+          "total_score": 757.0,
+          "sloc": 1003,
+          "signals": "high cognitive=68.0, high cyclomatic=132.0, low MI=0.0, high effort=2,321,292, large sloc=1003.0",
+          "comp_risk_color": "#f44747",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::services::file_service",
+          "label": "file_service",
+          "parent": "app::services",
+          "comp_score": 261.06,
+          "perf_score": 21.152346086956513,
+          "total_score": 282.21234608695653,
+          "sloc": 138,
+          "signals": "high cognitive=19.0, high cyclomatic=29.0, low MI=24.2, high effort=157,937",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": true,
+          "perf_info": "large_file_load/1048576: 2.12ms | p95: 0.04ms<br/>control_char_load/262144: 0.60ms | p95: 0.02ms<br/>large_file_load/262144: 0.52ms | p95: 0.01ms<br/>control_char_load/65536: 0.14ms | p95: 0.01ms<br/>large_file_load/65536: 0.13ms | p95: 0.01ms",
+          "perf_kind": "workflow"
+        }
+      },
+      {
+        "data": {
+          "id": "app::services::session_manager",
+          "label": "session_manager",
+          "parent": "app::services",
+          "comp_score": 126.1,
+          "perf_score": 0.0,
+          "total_score": 126.1,
+          "sloc": 52,
+          "signals": "high cyclomatic=12.0, low MI=39.5, high effort=29,161",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::services::session_store",
+          "label": "session_store",
+          "parent": "app::services",
+          "comp_score": 344.15,
+          "perf_score": 0.0,
+          "total_score": 344.15,
+          "sloc": 265,
+          "signals": "high cognitive=19.0, high cyclomatic=53.0, low MI=12.9, high effort=313,669, large sloc=265.0",
+          "comp_risk_color": "#d7ba7d",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::services::session_store::model",
+          "label": "model",
+          "parent": "app::services::session_store",
+          "comp_score": 217.11,
+          "perf_score": 0.0,
+          "total_score": 217.11,
+          "sloc": 186,
+          "signals": "high cyclomatic=32.0, low MI=21.7, high effort=84,369, large sloc=186.0",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::services::session_store::ops",
+          "label": "ops",
+          "parent": "app::services::session_store",
+          "comp_score": 167.49,
+          "perf_score": 0.0,
+          "total_score": 167.49,
+          "sloc": 61,
+          "signals": "high cognitive=9.0, high cyclomatic=18.0, low MI=36.4, high effort=43,406",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::services::settings_store",
+          "label": "settings_store",
+          "parent": "app::services",
+          "comp_score": 205.45,
+          "perf_score": 0.0,
+          "total_score": 205.45,
+          "sloc": 159,
+          "signals": "high cyclomatic=29.0, low MI=22.6, high effort=126,040, large sloc=159.0",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::shortcuts",
+          "label": "shortcuts",
+          "parent": "app",
+          "comp_score": 308.1,
+          "perf_score": 0.0,
+          "total_score": 308.1,
+          "sloc": 120,
+          "signals": "high cognitive=23.0, high cyclomatic=42.0, low MI=23.9, high effort=175,448",
+          "comp_risk_color": "#d7ba7d",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::startup",
+          "label": "startup",
+          "parent": "app",
+          "comp_score": 557.77,
+          "perf_score": 0.0,
+          "total_score": 557.77,
+          "sloc": 437,
+          "signals": "high cognitive=39.0, high cyclomatic=99.0, low MI=0.5, high effort=629,559, large sloc=437.0",
+          "comp_risk_color": "#d7ba7d",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::theme",
+          "label": "theme",
+          "parent": "app",
+          "comp_score": 45.91,
+          "perf_score": 0.0,
+          "total_score": 45.91,
+          "sloc": 25,
+          "signals": "stable",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui",
+          "label": "ui",
+          "parent": "app",
+          "comp_score": 8.52,
+          "perf_score": 0.0,
+          "total_score": 8.52,
+          "sloc": 9,
+          "signals": "stable",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::dialogs",
+          "label": "dialogs",
+          "parent": "app::ui",
+          "comp_score": 156.86,
+          "perf_score": 0.0,
+          "total_score": 156.86,
+          "sloc": 68,
+          "signals": "high cyclomatic=16.0, low MI=35.3, high effort=47,040",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::editor_area",
+          "label": "editor_area",
+          "parent": "app::ui",
+          "comp_score": 284.42,
+          "perf_score": 0.0,
+          "total_score": 284.42,
+          "sloc": 248,
+          "signals": "high cognitive=18.0, high cyclomatic=33.0, low MI=16.7, high effort=269,757, large sloc=248.0",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::editor_area::divider",
+          "label": "divider",
+          "parent": "app::ui::editor_area",
+          "comp_score": 270.81,
+          "perf_score": 0.0,
+          "total_score": 270.81,
+          "sloc": 202,
+          "signals": "high cognitive=14.0, high cyclomatic=35.0, low MI=18.5, high effort=298,238, large sloc=202.0",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::editor_area::tile",
+          "label": "tile",
+          "parent": "app::ui::editor_area",
+          "comp_score": 255.6,
+          "perf_score": 0.0,
+          "total_score": 255.6,
+          "sloc": 227,
+          "signals": "high cognitive=14.0, high cyclomatic=29.0, low MI=18.6, high effort=193,739, large sloc=227.0",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::editor_content",
+          "label": "editor_content",
+          "parent": "app::ui",
+          "comp_score": 123.62,
+          "perf_score": 0.0,
+          "total_score": 123.62,
+          "sloc": 61,
+          "signals": "low MI=38.5, high effort=19,843",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::editor_content::artifact",
+          "label": "artifact",
+          "parent": "app::ui::editor_content",
+          "comp_score": 291.09,
+          "perf_score": 17.81142752894013,
+          "total_score": 308.9014275289401,
+          "sloc": 106,
+          "signals": "high cognitive=24.0, high cyclomatic=36.0, low MI=27.0, high effort=95,584",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": true,
+          "perf_info": "control_char_visible/262144: 1.78ms | p95: 0.06ms<br/>control_char_visible/65536: 0.46ms | p95: 0.02ms<br/>control_char_clean/262144: 0.44ms | p95: 0.01ms<br/>control_char_clean/65536: 0.11ms | p95: 0.00ms",
+          "perf_kind": "micro"
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::editor_content::gutter",
+          "label": "gutter",
+          "parent": "app::ui::editor_content",
+          "comp_score": 174.21,
+          "perf_score": 0.0,
+          "total_score": 174.21,
+          "sloc": 103,
+          "signals": "high cognitive=9.0, high cyclomatic=15.0, low MI=29.7, high effort=109,392",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::editor_content::text_edit",
+          "label": "text_edit",
+          "parent": "app::ui::editor_content",
+          "comp_score": 190.24,
+          "perf_score": 0.0,
+          "total_score": 190.24,
+          "sloc": 123,
+          "signals": "high cognitive=11.0, high cyclomatic=16.0, low MI=27.4, high effort=107,468",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::settings",
+          "label": "settings",
+          "parent": "app::ui",
+          "comp_score": 489.08,
+          "perf_score": 0.0,
+          "total_score": 489.08,
+          "sloc": 422,
+          "signals": "high cognitive=44.0, high cyclomatic=66.0, low MI=4.6, high effort=693,479, large sloc=422.0",
+          "comp_risk_color": "#d7ba7d",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::status_bar",
+          "label": "status_bar",
+          "parent": "app::ui",
+          "comp_score": 378.85,
+          "perf_score": 0.0,
+          "total_score": 378.85,
+          "sloc": 239,
+          "signals": "high cognitive=35.0, high cyclomatic=43.0, low MI=15.8, high effort=214,286, large sloc=239.0",
+          "comp_risk_color": "#d7ba7d",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tab_drag",
+          "label": "tab_drag",
+          "parent": "app::ui",
+          "comp_score": 205.64,
+          "perf_score": 0.0,
+          "total_score": 205.64,
+          "sloc": 123,
+          "signals": "high cognitive=11.0, high cyclomatic=22.0, low MI=27.1, high effort=118,347",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tab_drag::paint",
+          "label": "paint",
+          "parent": "app::ui::tab_drag",
+          "comp_score": 223.95,
+          "perf_score": 0.0,
+          "total_score": 223.95,
+          "sloc": 211,
+          "signals": "high cognitive=11.0, high cyclomatic=22.0, low MI=20.0, high effort=259,202, large sloc=211.0",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tab_drag::state",
+          "label": "state",
+          "parent": "app::ui::tab_drag",
+          "comp_score": 150.24,
+          "perf_score": 0.0,
+          "total_score": 150.24,
+          "sloc": 212,
+          "signals": "low MI=21.5, high effort=167,833, large sloc=212.0",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tab_drag::state::autoscroll",
+          "label": "autoscroll",
+          "parent": "app::ui::tab_drag::state",
+          "comp_score": 115.51,
+          "perf_score": 0.0,
+          "total_score": 115.51,
+          "sloc": 41,
+          "signals": "high effort=36,758",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tab_drag::state::drag",
+          "label": "drag",
+          "parent": "app::ui::tab_drag::state",
+          "comp_score": 184.06,
+          "perf_score": 0.0,
+          "total_score": 184.06,
+          "sloc": 81,
+          "signals": "high cyclomatic=26.0, low MI=32.0, high effort=73,376",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tab_drag::state::drop_target",
+          "label": "drop_target",
+          "parent": "app::ui::tab_drag::state",
+          "comp_score": 222.41,
+          "perf_score": 0.0,
+          "total_score": 222.41,
+          "sloc": 130,
+          "signals": "high cognitive=8.0, high cyclomatic=32.0, low MI=25.1, high effort=148,332",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tab_overflow",
+          "label": "tab_overflow",
+          "parent": "app::ui",
+          "comp_score": 351.29,
+          "perf_score": 0.0,
+          "total_score": 351.29,
+          "sloc": 280,
+          "signals": "high cognitive=28.0, high cyclomatic=42.0, low MI=13.8, high effort=324,953, large sloc=280.0",
+          "comp_risk_color": "#d7ba7d",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tab_strip",
+          "label": "tab_strip",
+          "parent": "app::ui",
+          "comp_score": 343.38,
+          "perf_score": 0.0,
+          "total_score": 343.38,
+          "sloc": 394,
+          "signals": "high cognitive=21.0, high cyclomatic=47.0, low MI=8.7, high effort=546,589, large sloc=394.0",
+          "comp_risk_color": "#d7ba7d",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tab_strip::actions",
+          "label": "actions",
+          "parent": "app::ui::tab_strip",
+          "comp_score": 120.99,
+          "perf_score": 0.0,
+          "total_score": 120.99,
+          "sloc": 69,
+          "signals": "low MI=37.4, high effort=17,142",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tab_strip::entries",
+          "label": "entries",
+          "parent": "app::ui::tab_strip",
+          "comp_score": 201.97,
+          "perf_score": 0.0,
+          "total_score": 201.97,
+          "sloc": 230,
+          "signals": "high cognitive=8.0, high cyclomatic=18.0, low MI=20.0, high effort=201,282, large sloc=230.0",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tab_strip::layout",
+          "label": "layout",
+          "parent": "app::ui::tab_strip",
+          "comp_score": 86.59,
+          "perf_score": 0.0,
+          "total_score": 86.59,
+          "sloc": 56,
+          "signals": "high effort=18,765",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tab_strip::outcome",
+          "label": "outcome",
+          "parent": "app::ui::tab_strip",
+          "comp_score": 169.05,
+          "perf_score": 0.0,
+          "total_score": 169.05,
+          "sloc": 65,
+          "signals": "high cognitive=10.0, high cyclomatic=17.0, low MI=36.4, high effort=29,587",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tab_strip::tab_cell",
+          "label": "tab_cell",
+          "parent": "app::ui::tab_strip",
+          "comp_score": 156.64,
+          "perf_score": 0.0,
+          "total_score": 156.64,
+          "sloc": 74,
+          "signals": "high cognitive=10.0, low MI=35.5, high effort=31,405",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tile_header",
+          "label": "tile_header",
+          "parent": "app::ui",
+          "comp_score": 265.7,
+          "perf_score": 0.0,
+          "total_score": 265.7,
+          "sloc": 269,
+          "signals": "high cognitive=17.0, high cyclomatic=27.0, low MI=16.5, high effort=326,700, large sloc=269.0",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tile_header::control",
+          "label": "control",
+          "parent": "app::ui::tile_header",
+          "comp_score": 235.72,
+          "perf_score": 0.0,
+          "total_score": 235.72,
+          "sloc": 164,
+          "signals": "high cognitive=15.0, high cyclomatic=24.0, low MI=23.8, high effort=136,508, large sloc=164.0",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tile_header::split",
+          "label": "split",
+          "parent": "app::ui::tile_header",
+          "comp_score": 131.66,
+          "perf_score": 0.0,
+          "total_score": 131.66,
+          "sloc": 116,
+          "signals": "high cyclomatic=12.0, low MI=30.0, high effort=46,714",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tile_header::split::drag",
+          "label": "drag",
+          "parent": "app::ui::tile_header::split",
+          "comp_score": 180.15,
+          "perf_score": 0.0,
+          "total_score": 180.15,
+          "sloc": 103,
+          "signals": "high cyclomatic=25.0, low MI=29.1, high effort=108,090",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tile_header::split::geometry",
+          "label": "geometry",
+          "parent": "app::ui::tile_header::split",
+          "comp_score": 156.97,
+          "perf_score": 0.0,
+          "total_score": 156.97,
+          "sloc": 66,
+          "signals": "high cognitive=9.0, high cyclomatic=13.0, low MI=35.4, high effort=94,804",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::ui::tile_header::split::preview",
+          "label": "preview",
+          "parent": "app::ui::tile_header::split",
+          "comp_score": 272.63,
+          "perf_score": 0.0,
+          "total_score": 272.63,
+          "sloc": 226,
+          "signals": "high cognitive=20.0, high cyclomatic=26.0, low MI=18.2, high effort=306,311, large sloc=226.0",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "app::utils",
+          "label": "utils",
+          "parent": "app",
+          "comp_score": 146.35,
+          "perf_score": 0.0,
+          "total_score": 146.35,
+          "sloc": 53,
+          "signals": "high cognitive=12.0, high cyclomatic=12.0, high effort=18,604",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "lib",
+          "label": "lib",
+          "parent": null,
+          "comp_score": 3.08,
+          "perf_score": 0.0,
+          "total_score": 3.08,
+          "sloc": 5,
+          "signals": "stable",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      },
+      {
+        "data": {
+          "id": "main",
+          "label": "main",
+          "parent": null,
+          "comp_score": 134.05,
+          "perf_score": 0.0,
+          "total_score": 134.05,
+          "sloc": 64,
+          "signals": "high cyclomatic=12.0, low MI=35.6, high effort=58,922",
+          "comp_risk_color": "#b5cea8",
+          "perf_risk_color": "#b5cea8",
+          "is_slow": false,
+          "perf_info": "",
+          "perf_kind": ""
+        }
+      }
+    ],
+    "edges": [
+      {
+        "data": {
+          "source": "app",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app",
+          "target": "app::chrome"
+        }
+      },
+      {
+        "data": {
+          "source": "app",
+          "target": "app::commands"
+        }
+      },
+      {
+        "data": {
+          "source": "app",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app",
+          "target": "app::fonts"
+        }
+      },
+      {
+        "data": {
+          "source": "app",
+          "target": "app::logging"
+        }
+      },
+      {
+        "data": {
+          "source": "app",
+          "target": "app::services"
+        }
+      },
+      {
+        "data": {
+          "source": "app",
+          "target": "app::shortcuts"
+        }
+      },
+      {
+        "data": {
+          "source": "app",
+          "target": "app::startup"
+        }
+      },
+      {
+        "data": {
+          "source": "app",
+          "target": "app::theme"
+        }
+      },
+      {
+        "data": {
+          "source": "app",
+          "target": "app::ui"
+        }
+      },
+      {
+        "data": {
+          "source": "app",
+          "target": "app::utils"
+        }
+      },
+      {
+        "data": {
+          "source": "app::app_state",
+          "target": "app::chrome"
+        }
+      },
+      {
+        "data": {
+          "source": "app::app_state",
+          "target": "app::commands"
+        }
+      },
+      {
+        "data": {
+          "source": "app::app_state",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::app_state",
+          "target": "app::fonts"
+        }
+      },
+      {
+        "data": {
+          "source": "app::app_state",
+          "target": "app::logging"
+        }
+      },
+      {
+        "data": {
+          "source": "app::app_state",
+          "target": "app::services::file_controller"
+        }
+      },
+      {
+        "data": {
+          "source": "app::app_state",
+          "target": "app::services::session_manager"
+        }
+      },
+      {
+        "data": {
+          "source": "app::app_state",
+          "target": "app::services::session_store"
+        }
+      },
+      {
+        "data": {
+          "source": "app::app_state",
+          "target": "app::services::settings_store"
+        }
+      },
+      {
+        "data": {
+          "source": "app::app_state",
+          "target": "app::shortcuts"
+        }
+      },
+      {
+        "data": {
+          "source": "app::app_state",
+          "target": "app::startup"
+        }
+      },
+      {
+        "data": {
+          "source": "app::app_state",
+          "target": "app::ui"
+        }
+      },
+      {
+        "data": {
+          "source": "app::chrome",
+          "target": "app::chrome::buttons"
+        }
+      },
+      {
+        "data": {
+          "source": "app::chrome",
+          "target": "app::chrome::resize"
+        }
+      },
+      {
+        "data": {
+          "source": "app::chrome",
+          "target": "app::chrome::tabs"
+        }
+      },
+      {
+        "data": {
+          "source": "app::chrome::buttons",
+          "target": "app::theme"
+        }
+      },
+      {
+        "data": {
+          "source": "app::chrome::buttons",
+          "target": "app::ui::tab_drag"
+        }
+      },
+      {
+        "data": {
+          "source": "app::chrome::tabs",
+          "target": "app::theme"
+        }
+      },
+      {
+        "data": {
+          "source": "app::chrome::tabs",
+          "target": "app::ui::tab_drag"
+        }
+      },
+      {
+        "data": {
+          "source": "app::commands",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::commands",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::commands",
+          "target": "app::logging"
+        }
+      },
+      {
+        "data": {
+          "source": "app::commands",
+          "target": "app::services::session_store"
+        }
+      },
+      {
+        "data": {
+          "source": "app::domain",
+          "target": "app::domain::buffer"
+        }
+      },
+      {
+        "data": {
+          "source": "app::domain",
+          "target": "app::domain::panes"
+        }
+      },
+      {
+        "data": {
+          "source": "app::domain",
+          "target": "app::domain::tab"
+        }
+      },
+      {
+        "data": {
+          "source": "app::domain",
+          "target": "app::domain::tab_manager"
+        }
+      },
+      {
+        "data": {
+          "source": "app::domain",
+          "target": "app::domain::tab_support"
+        }
+      },
+      {
+        "data": {
+          "source": "app::domain",
+          "target": "app::domain::view"
+        }
+      },
+      {
+        "data": {
+          "source": "app::domain::panes",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::domain::tab",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::domain::tab_manager",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::domain::tab_manager",
+          "target": "app::theme"
+        }
+      },
+      {
+        "data": {
+          "source": "app::domain::tab_support",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::domain::view",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services",
+          "target": "app::services::file_controller"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services",
+          "target": "app::services::file_service"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services",
+          "target": "app::services::session_manager"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services",
+          "target": "app::services::session_store"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services",
+          "target": "app::services::settings_store"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::file_controller",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::file_controller",
+          "target": "app::commands"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::file_controller",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::file_controller",
+          "target": "app::logging"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::file_controller",
+          "target": "app::services::file_service"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::file_controller",
+          "target": "app::services::session_store"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::file_controller",
+          "target": "app::startup"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::file_controller",
+          "target": "app::utils"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::file_service",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::session_manager",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::session_manager",
+          "target": "app::services::settings_store"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::session_store",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::session_store",
+          "target": "app::services::file_service"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::session_store",
+          "target": "app::services::session_store::model"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::session_store",
+          "target": "app::services::session_store::ops"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::session_store",
+          "target": "app::services::settings_store"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::session_store::model",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::session_store::model",
+          "target": "app::services::settings_store"
+        }
+      },
+      {
+        "data": {
+          "source": "app::services::settings_store",
+          "target": "app::fonts"
+        }
+      },
+      {
+        "data": {
+          "source": "app::shortcuts",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::shortcuts",
+          "target": "app::commands"
+        }
+      },
+      {
+        "data": {
+          "source": "app::shortcuts",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui",
+          "target": "app::ui::dialogs"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui",
+          "target": "app::ui::editor_area"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui",
+          "target": "app::ui::editor_content"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui",
+          "target": "app::ui::settings"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui",
+          "target": "app::ui::status_bar"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui",
+          "target": "app::ui::tab_drag"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui",
+          "target": "app::ui::tab_overflow"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui",
+          "target": "app::ui::tab_strip"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui",
+          "target": "app::ui::tile_header"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::dialogs",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::dialogs",
+          "target": "app::commands"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::dialogs",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_area",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_area",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_area",
+          "target": "app::logging"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_area",
+          "target": "app::ui::editor_area::divider"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_area",
+          "target": "app::ui::editor_area::tile"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_area",
+          "target": "app::ui::tile_header"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_area::divider",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_area::divider",
+          "target": "app::theme"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_area::divider",
+          "target": "app::ui::tile_header"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_area::tile",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_area::tile",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_area::tile",
+          "target": "app::fonts"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_area::tile",
+          "target": "app::theme"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_area::tile",
+          "target": "app::ui::editor_content"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_area::tile",
+          "target": "app::ui::tab_drag"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_area::tile",
+          "target": "app::ui::tile_header"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_content",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_content",
+          "target": "app::theme"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_content",
+          "target": "app::ui::editor_content::artifact"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_content",
+          "target": "app::ui::editor_content::gutter"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_content",
+          "target": "app::ui::editor_content::text_edit"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_content::artifact",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_content::gutter",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_content::gutter",
+          "target": "app::theme"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_content::text_edit",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::editor_content::text_edit",
+          "target": "app::theme"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::settings",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::settings",
+          "target": "app::fonts"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::settings",
+          "target": "app::services::file_controller"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::settings",
+          "target": "app::services::settings_store"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::settings",
+          "target": "app::theme"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::status_bar",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::status_bar",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::status_bar",
+          "target": "app::theme"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_drag",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_drag",
+          "target": "app::ui::tab_drag::paint"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_drag",
+          "target": "app::ui::tab_drag::state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_drag::paint",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_drag::paint",
+          "target": "app::theme"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_drag::state",
+          "target": "app::ui::tab_drag::state::autoscroll"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_drag::state",
+          "target": "app::ui::tab_drag::state::drag"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_drag::state",
+          "target": "app::ui::tab_drag::state::drop_target"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_overflow",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_overflow",
+          "target": "app::chrome"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_overflow",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_overflow",
+          "target": "app::theme"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_overflow",
+          "target": "app::ui::tab_drag"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip",
+          "target": "app::commands"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip",
+          "target": "app::theme"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip",
+          "target": "app::ui::tab_drag"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip",
+          "target": "app::ui::tab_overflow"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip",
+          "target": "app::ui::tab_strip::actions"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip",
+          "target": "app::ui::tab_strip::entries"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip",
+          "target": "app::ui::tab_strip::layout"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip",
+          "target": "app::ui::tab_strip::outcome"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip",
+          "target": "app::ui::tab_strip::tab_cell"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip::actions",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip::actions",
+          "target": "app::chrome"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip::actions",
+          "target": "app::commands"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip::actions",
+          "target": "app::theme"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip::entries",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip::entries",
+          "target": "app::chrome"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip::entries",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip::entries",
+          "target": "app::theme"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip::entries",
+          "target": "app::ui::tab_drag"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip::entries",
+          "target": "app::ui::tab_strip"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip::layout",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip::layout",
+          "target": "app::theme"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip::outcome",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip::outcome",
+          "target": "app::commands"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip::tab_cell",
+          "target": "app::chrome"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip::tab_cell",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tab_strip::tab_cell",
+          "target": "app::ui::tab_drag"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tile_header",
+          "target": "app::app_state"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tile_header",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tile_header",
+          "target": "app::ui::tab_drag"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tile_header",
+          "target": "app::ui::tile_header::control"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tile_header",
+          "target": "app::ui::tile_header::split"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tile_header::control",
+          "target": "app::theme"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tile_header::control",
+          "target": "app::ui::tab_drag"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tile_header::split",
+          "target": "app::domain"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tile_header::split",
+          "target": "app::ui::tile_header::split::drag"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tile_header::split",
+          "target": "app::ui::tile_header::split::geometry"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tile_header::split",
+          "target": "app::ui::tile_header::split::preview"
+        }
+      },
+      {
+        "data": {
+          "source": "app::ui::tile_header::split::preview",
+          "target": "app::theme"
+        }
+      }
+    ]
+  }
+}

@@ -212,6 +212,7 @@ impl SessionStore {
                             name,
                             path: tab.path.clone(),
                             is_dirty,
+                            is_settings_file: false,
                             temp_id,
                             encoding,
                             has_bom,
@@ -227,7 +228,7 @@ impl SessionStore {
             .into_iter()
             .map(|buffer| {
                 let (content, encoding, has_bom) = self.restore_buffer_content(&buffer);
-                BufferState::restored(RestoredBufferState {
+                let mut restored_buffer = BufferState::restored(RestoredBufferState {
                     id: buffer.id,
                     name: buffer.name,
                     content,
@@ -236,7 +237,9 @@ impl SessionStore {
                     temp_id: buffer.temp_id,
                     encoding,
                     has_bom,
-                })
+                });
+                restored_buffer.is_settings_file = buffer.is_settings_file;
+                restored_buffer
             })
             .collect()
     }

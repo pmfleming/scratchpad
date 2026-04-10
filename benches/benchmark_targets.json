@@ -1,0 +1,55 @@
+{
+  "tab_stress_operations": {
+    "targets": [
+      "app::domain::tab"
+    ],
+    "kind": "micro",
+    "threshold_ms": 50.0
+  },
+  "tab_count_scale": {
+    "targets": [
+      "app::domain::tab",
+      "app::domain::tab_manager"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 50.0
+  },
+  "tile_count_scale": {
+    "targets": [
+      "app::domain::tab",
+      "app::domain::panes"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 50.0
+  },
+  "large_file_load": {
+    "targets": [
+      "app::domain::buffer",
+      "app::services::file_service"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 50.0
+  },
+  "control_char_load": {
+    "targets": [
+      "app::domain::buffer",
+      "app::services::file_service"
+    ],
+    "kind": "workflow",
+    "threshold_ms": 50.0
+  },
+  "control_char_visible": {
+    "targets": [
+      "app::ui::editor_content::artifact"
+    ],
+    "kind": "micro",
+    "threshold_ms": 50.0
+  },
+  "control_char_clean": {
+    "targets": [
+      "app::ui::editor_content::artifact"
+    ],
+    "kind": "micro",
+    "threshold_ms": 50.0
+  }
+}

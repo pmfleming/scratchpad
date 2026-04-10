@@ -2,6 +2,8 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::{PendingAction, SplitAxis, SplitPath, ViewId, WorkspaceTab};
 use crate::app::logging::LogLevel;
 
+mod dispatch;
+
 struct TabCombineContext {
     source_description: String,
     target_description: String,
@@ -61,51 +63,14 @@ pub enum AppCommand {
 }
 
 impl ScratchpadApp {
-    pub(crate) fn handle_command(&mut self, command: AppCommand) {
-        match command {
-            AppCommand::ActivateTab { index } => self.activate_tab(index),
-            AppCommand::ActivateView { view_id } => self.activate_view_command(view_id),
-            AppCommand::CloseTab { index } => self.perform_close_tab(index),
-            AppCommand::CloseView { view_id } => self.close_view_command(view_id),
-            AppCommand::CloseSettings => self.close_settings(),
-            AppCommand::CombineTabIntoTab {
-                source_index,
-                target_index,
-            } => self.combine_tab_into_tab_command(source_index, target_index),
-            AppCommand::PromoteViewToTab { view_id } => self.promote_view_to_tab_command(view_id),
-            AppCommand::PromoteTabFilesToTabs { index } => {
-                self.promote_tab_files_to_tabs_command(index)
-            }
-            AppCommand::NewTab => self.new_tab(),
-            AppCommand::OpenFile => self.open_file(),
-            AppCommand::OpenFileHere => self.open_file_here(),
-            AppCommand::OpenSettings => self.open_settings(),
-            AppCommand::ReorderTab {
-                from_index,
-                to_index,
-            } => self.reorder_tab_command(from_index, to_index),
-            AppCommand::ReorderDisplayTab {
-                from_index,
-                to_index,
-            } => self.reorder_display_tab_command(from_index, to_index),
-            AppCommand::RequestCloseTab { index } => self.request_close_tab(index),
-            AppCommand::ResizeSplit { path, ratio } => self.resize_split_command(path, ratio),
-            AppCommand::SaveFile => self.save_file(),
-            AppCommand::SaveFileAs => self.save_file_as(),
-            AppCommand::SplitActiveView {
-                axis,
-                new_view_first,
-                ratio,
-            } => self.split_active_view_command(axis, new_view_first, ratio),
-        }
-    }
-
     fn activate_tab(&mut self, index: usize) {
         if index >= self.tabs().len() {
             return;
         }
 
+        self.reload_settings_from_active_settings_tab();
         let tab_description = self.describe_tab_at(index);
+        self.activate_workspace_surface();
         self.tab_manager_mut().active_tab_index = index;
         self.tab_manager_mut().pending_scroll_to_active = true;
         self.request_focus_for_active_view();
@@ -117,6 +82,13 @@ impl ScratchpadApp {
     }
 
     fn activate_view_command(&mut self, view_id: ViewId) {
+        if self
+            .active_tab()
+            .is_some_and(|tab| tab.active_view_id != view_id)
+        {
+            self.reload_settings_from_active_settings_tab();
+        }
+
         let index = self.active_tab_index();
         let tab_name = self
             .tabs()
@@ -139,6 +111,13 @@ impl ScratchpadApp {
     }
 
     fn close_view_command(&mut self, view_id: ViewId) {
+        if self
+            .active_tab()
+            .is_some_and(|tab| tab.active_view_id == view_id)
+        {
+            self.reload_settings_from_active_settings_tab();
+        }
+
         let index = self.active_tab_index();
         let tab_name = self
             .tabs()
@@ -255,6 +234,10 @@ impl ScratchpadApp {
             return;
         }
 
+        if source_index == self.active_tab_index() || target_index == self.active_tab_index() {
+            self.reload_settings_from_active_settings_tab();
+        }
+
         let (context, source_tab) = self.remove_source_tab_for_combine(source_index, target_index);
         let mut source_tab = Some(source_tab);
         if !self.try_combine_tabs(context.adjusted_target_index, &mut source_tab) {
@@ -269,6 +252,8 @@ impl ScratchpadApp {
     }
 
     fn promote_view_to_tab_command(&mut self, view_id: ViewId) {
+        self.reload_settings_from_active_settings_tab();
+
         let source_index = self.active_tab_index();
         let source_description = self.describe_tab_at(source_index);
         let promoted_tab = if let Some(tab) = self.tabs_mut().get_mut(source_index) {
@@ -296,6 +281,10 @@ impl ScratchpadApp {
     fn promote_tab_files_to_tabs_command(&mut self, index: usize) {
         if index >= self.tabs().len() {
             return;
+        }
+
+        if index == self.active_tab_index() {
+            self.reload_settings_from_active_settings_tab();
         }
 
         let source_description = self.describe_tab_at(index);
@@ -540,6 +529,7 @@ mod tests {
 
         app.handle_command(AppCommand::CloseSettings);
         assert!(!app.showing_settings());
+        assert_eq!(app.settings_slot_index(), None);
         assert_eq!(
             app.pending_editor_focus,
             Some(app.tabs()[app.active_tab_index()].active_view_id)
@@ -571,5 +561,350 @@ mod tests {
         assert_eq!(app.workspace_index_for_slot(2), Some(1));
         assert_eq!(app.workspace_index_for_slot(3), Some(2));
         assert_eq!(app.display_tab_name_at_slot(1).as_deref(), Some("Settings"));
+    }
+
+    #[test]
+    fn settings_surface_state_persists_across_restart() {
+        let session_root = tempfile::tempdir().expect("create session dir");
+        let session_path = session_root.path().to_path_buf();
+
+        let mut original =
+            ScratchpadApp::with_session_store(SessionStore::new(session_path.clone()));
+        original.tabs_mut()[0].buffer.name = "one.txt".to_owned();
+        original.append_tab(WorkspaceTab::untitled());
+        original.tabs_mut()[1].buffer.name = "two.txt".to_owned();
+        original.append_tab(WorkspaceTab::untitled());
+        original.tabs_mut()[2].buffer.name = "three.txt".to_owned();
+
+        original.handle_command(AppCommand::OpenSettings);
+        original.handle_command(AppCommand::ReorderDisplayTab {
+            from_index: 3,
+            to_index: 1,
+        });
+
+        let persisted = original
+            .settings_store
+            .load()
+            .expect("load persisted settings")
+            .expect("settings should exist");
+        assert!(persisted.settings_tab_open);
+        assert_eq!(persisted.settings_tab_index, Some(1));
+
+        drop(original);
+
+        let restored = ScratchpadApp::with_session_store(SessionStore::new(session_path));
+        assert!(restored.showing_settings());
+        assert_eq!(restored.settings_slot_index(), Some(1));
+        assert_eq!(
+            restored.display_tab_name_at_slot(1).as_deref(),
+            Some("Settings")
+        );
+    }
+
+    #[test]
+    fn activating_a_workspace_tab_keeps_the_settings_tab_open() {
+        let mut app = test_app();
+        app.tabs_mut()[0].buffer.name = "one.txt".to_owned();
+        app.append_tab(WorkspaceTab::untitled());
+        app.tabs_mut()[1].buffer.name = "two.txt".to_owned();
+
+        app.handle_command(AppCommand::OpenSettings);
+        let settings_slot = app
+            .settings_slot_index()
+            .expect("settings slot should exist after open");
+
+        app.handle_command(AppCommand::ActivateTab { index: 1 });
+
+        assert!(!app.showing_settings());
+        assert_eq!(app.settings_slot_index(), Some(settings_slot));
+        assert_eq!(app.active_tab_index(), 1);
+        assert_eq!(
+            app.display_tab_name_at_slot(settings_slot).as_deref(),
+            Some("Settings")
+        );
+    }
+
+    #[test]
+    fn opening_settings_file_keeps_settings_tab_open() {
+        let mut app = test_app();
+        app.handle_command(AppCommand::OpenSettings);
+        let settings_slot = app
+            .settings_slot_index()
+            .expect("settings slot should exist after open");
+        let settings_path = app.settings_path();
+
+        app.open_settings_file_tab();
+
+        assert!(!app.showing_settings());
+        assert_eq!(app.settings_slot_index(), Some(settings_slot));
+        assert_eq!(
+            app.tabs()[app.active_tab_index()]
+                .active_buffer()
+                .path
+                .as_deref(),
+            Some(settings_path.as_path())
+        );
+        assert!(
+            app.tabs()[app.active_tab_index()]
+                .active_buffer()
+                .is_settings_file
+        );
+    }
+
+    #[test]
+    fn creating_a_new_tab_from_dirty_settings_file_applies_toml_edits() {
+        let mut app = test_app();
+        app.handle_command(AppCommand::OpenSettings);
+        app.open_settings_file_tab();
+        let settings_tab_index = app.active_tab_index();
+
+        app.tabs_mut()[settings_tab_index]
+            .active_buffer_mut()
+            .content = [
+            "font_size = 19.0",
+            "word_wrap = false",
+            "logging_enabled = false",
+            "editor_font = \"roboto\"",
+            "settings_tab_open = true",
+            "settings_tab_index = 1",
+            "",
+        ]
+        .join("\n");
+        app.tabs_mut()[settings_tab_index]
+            .active_buffer_mut()
+            .is_dirty = true;
+        app.note_settings_toml_edit(settings_tab_index);
+
+        app.new_tab();
+
+        assert_eq!(app.font_size(), 19.0);
+        assert!(!app.word_wrap());
+        assert!(!app.logging_enabled());
+        assert_eq!(
+            app.editor_font(),
+            crate::app::fonts::EditorFontPreset::Roboto
+        );
+        assert_eq!(
+            app.tabs()[app.active_tab_index()].active_buffer().name,
+            "Untitled"
+        );
+    }
+
+    #[test]
+    fn activating_away_from_settings_file_applies_toml_edits() {
+        let mut app = test_app();
+        app.handle_command(AppCommand::OpenSettings);
+        app.open_settings_file_tab();
+        let settings_tab_index = app.active_tab_index();
+        app.tabs_mut()[settings_tab_index]
+            .active_buffer_mut()
+            .content = [
+            "font_size = 22.0",
+            "word_wrap = false",
+            "logging_enabled = false",
+            "editor_font = \"roboto\"",
+            "settings_tab_open = true",
+            "settings_tab_index = 1",
+            "",
+        ]
+        .join("\n");
+        app.tabs_mut()[settings_tab_index]
+            .active_buffer_mut()
+            .is_dirty = true;
+
+        app.handle_command(AppCommand::ActivateTab { index: 0 });
+
+        assert_eq!(app.font_size(), 22.0);
+        assert!(!app.word_wrap());
+        assert!(!app.logging_enabled());
+        assert_eq!(
+            app.editor_font(),
+            crate::app::fonts::EditorFontPreset::Roboto
+        );
+        assert_eq!(app.settings_slot_index(), Some(1));
+        assert_eq!(app.active_tab_index(), 0);
+        assert!(!app.showing_settings());
+    }
+
+    #[test]
+    fn activating_view_away_from_settings_file_applies_toml_edits() {
+        let mut app = test_app();
+        app.handle_command(AppCommand::OpenSettings);
+        app.open_settings_file_tab();
+        let settings_tab_index = app.active_tab_index();
+        let settings_view_id = app.tabs()[settings_tab_index].active_view_id;
+        let normal_view_id = app.tabs_mut()[settings_tab_index]
+            .open_buffer_as_split(
+                BufferState::new("notes.txt".to_owned(), "notes".to_owned(), None),
+                SplitAxis::Vertical,
+                false,
+                0.5,
+            )
+            .expect("open normal split");
+
+        app.handle_command(AppCommand::ActivateView {
+            view_id: settings_view_id,
+        });
+        let settings_tab_index = app.active_tab_index();
+        app.tabs_mut()[settings_tab_index]
+            .active_buffer_mut()
+            .content = [
+            "font_size = 23.0",
+            "word_wrap = false",
+            "logging_enabled = false",
+            "editor_font = \"roboto\"",
+            "settings_tab_open = false",
+            "",
+        ]
+        .join("\n");
+        app.tabs_mut()[settings_tab_index]
+            .active_buffer_mut()
+            .is_dirty = true;
+        app.note_settings_toml_edit(settings_tab_index);
+
+        app.handle_command(AppCommand::ActivateView {
+            view_id: normal_view_id,
+        });
+
+        assert_eq!(app.font_size(), 23.0);
+        assert!(!app.word_wrap());
+        assert_eq!(
+            app.tabs()[app.active_tab_index()].active_view_id,
+            normal_view_id
+        );
+    }
+
+    #[test]
+    fn editing_other_buffer_in_settings_workspace_does_not_mark_settings_toml_pending() {
+        let mut app = test_app();
+        app.handle_command(AppCommand::OpenSettings);
+        app.open_settings_file_tab();
+        let settings_path = app.settings_path();
+        let settings_tab_index = app.active_tab_index();
+        app.tabs_mut()[settings_tab_index]
+            .open_buffer_as_split(
+                BufferState::new("notes.txt".to_owned(), "notes".to_owned(), None),
+                SplitAxis::Vertical,
+                false,
+                0.5,
+            )
+            .expect("open normal split");
+        let settings_tab_index = app.active_tab_index();
+
+        let settings_buffer = app.tabs_mut()[settings_tab_index]
+            .extra_buffers
+            .iter_mut()
+            .find(|buffer| {
+                buffer
+                    .path
+                    .as_ref()
+                    .is_some_and(|path| crate::app::paths_match(path, &settings_path))
+            })
+            .expect("settings buffer should remain in the workspace");
+        settings_buffer.content = [
+            "font_size = 31.0",
+            "word_wrap = false",
+            "logging_enabled = false",
+            "editor_font = \"roboto\"",
+            "",
+        ]
+        .join("\n");
+
+        app.tabs_mut()[settings_tab_index]
+            .active_buffer_mut()
+            .content = "changed notes".to_owned();
+        app.tabs_mut()[settings_tab_index]
+            .active_buffer_mut()
+            .is_dirty = true;
+        app.note_settings_toml_edit(settings_tab_index);
+        app.append_tab(WorkspaceTab::untitled());
+        let other_tab_index = app.active_tab_index();
+
+        app.handle_command(AppCommand::ActivateTab {
+            index: other_tab_index,
+        });
+
+        assert_eq!(app.font_size(), 14.0);
+        assert!(app.word_wrap());
+        assert!(app.logging_enabled());
+    }
+
+    #[test]
+    fn closing_saved_settings_file_applies_pending_toml_edits() {
+        let mut app = test_app();
+        app.handle_command(AppCommand::OpenSettings);
+        app.open_settings_file_tab();
+        let settings_tab_index = app.active_tab_index();
+        app.tabs_mut()[settings_tab_index]
+            .active_buffer_mut()
+            .content = [
+            "font_size = 20.0",
+            "word_wrap = false",
+            "logging_enabled = false",
+            "editor_font = \"roboto\"",
+            "settings_tab_open = true",
+            "settings_tab_index = 0",
+            "",
+        ]
+        .join("\n");
+        app.tabs_mut()[settings_tab_index]
+            .active_buffer_mut()
+            .is_dirty = true;
+        app.note_settings_toml_edit(settings_tab_index);
+
+        assert!(app.save_file_at(settings_tab_index));
+
+        app.handle_command(AppCommand::CloseTab {
+            index: settings_tab_index,
+        });
+
+        assert_eq!(app.font_size(), 20.0);
+        assert!(!app.word_wrap());
+        assert!(!app.logging_enabled());
+        assert_eq!(
+            app.editor_font(),
+            crate::app::fonts::EditorFontPreset::Roboto
+        );
+        assert!(app.showing_settings());
+        assert_eq!(app.settings_slot_index(), Some(0));
+    }
+
+    #[test]
+    fn closing_dirty_settings_file_applies_buffered_toml_edits() {
+        let mut app = test_app();
+        app.handle_command(AppCommand::OpenSettings);
+        app.open_settings_file_tab();
+        let settings_tab_index = app.active_tab_index();
+
+        app.tabs_mut()[settings_tab_index]
+            .active_buffer_mut()
+            .content = [
+            "font_size = 26.0",
+            "word_wrap = false",
+            "logging_enabled = false",
+            "editor_font = \"roboto\"",
+            "settings_tab_open = true",
+            "settings_tab_index = 0",
+            "",
+        ]
+        .join("\n");
+        app.tabs_mut()[settings_tab_index]
+            .active_buffer_mut()
+            .is_dirty = true;
+        app.note_settings_toml_edit(settings_tab_index);
+
+        app.handle_command(AppCommand::CloseTab {
+            index: settings_tab_index,
+        });
+
+        assert_eq!(app.font_size(), 26.0);
+        assert!(!app.word_wrap());
+        assert!(!app.logging_enabled());
+        assert_eq!(
+            app.editor_font(),
+            crate::app::fonts::EditorFontPreset::Roboto
+        );
+        assert!(app.showing_settings());
+        assert_eq!(app.settings_slot_index(), Some(0));
     }
 }

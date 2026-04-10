@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without the leading v, for example 0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: Build Windows Release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+
+      - name: Check formatting
+        shell: pwsh
+        run: cargo fmt --check
+
+      - name: Run clippy
+        shell: pwsh
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        shell: pwsh
+        run: cargo test --locked
+
+      - name: Resolve release version
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = "${{ inputs.version }}"
+            $tag = "v$version"
+          } else {
+            $tag = "${{ github.ref_name }}"
+            $version = $tag.TrimStart("v")
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Check Cargo package version
+        shell: pwsh
+        run: |
+          $cargoVersion = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          if ($cargoVersion -ne "${{ steps.version.outputs.version }}") {
+            throw "Release version ${{ steps.version.outputs.version }} does not match Cargo.toml version $cargoVersion."
+          }
+
+      - name: Package Windows archive
+        shell: pwsh
+        run: .\scripts\package-windows.ps1 -Profile release -Version "${{ steps.version.outputs.version }}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scratchpad-windows-x64
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Scratchpad ${{ steps.version.outputs.tag }}
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+          generate_release_notes: true
+          files: |
+            dist/*.zip
+            dist/*.sha256

@@ -19,7 +19,7 @@ The current application already includes:
 - a dedicated Settings surface that behaves like a real tab in the shared tab model
 - encoding-aware file open and save flows
 - formatting-artifact inspection for control-character-heavy content
-- YAML-backed settings persistence for font, wrap, logging, and editor font selection
+- TOML-backed settings persistence for font, wrap, logging, and editor font selection
 - session persistence for tabs, pane layout, and session/view metadata
 - runtime file logging for major user actions
 
@@ -47,7 +47,7 @@ The current application already includes:
 - `src/app/services/file_controller.rs`: open/save orchestration and status/log integration
 - `src/app/services/session_manager.rs`: session save / restore orchestration
 - `src/app/services/session_store/`: persisted session model and filesystem operations
-- `src/app/services/settings_store.rs`: YAML-backed settings load/save and default handling
+- `src/app/services/settings_store.rs`: TOML-backed settings load/save, legacy YAML migration, and default handling
 
 ### UI Layer
 
@@ -95,7 +95,7 @@ The current application already includes:
 - [x] Per-view control-character visibility
 - [x] Zoom via keyboard shortcuts and Ctrl + mouse wheel
 - [x] Word-wrap state stored in the app model
-- [x] YAML-backed settings independent of session restore
+- [x] TOML-backed settings independent of session restore
 
 ### File Handling
 
@@ -118,7 +118,7 @@ The current application already includes:
 
 - [x] Session persistence for open tabs
 - [x] Session persistence for pane layouts and views
-- [x] YAML persistence for font size, wrap, logging, and editor font
+- [x] TOML persistence for font size, wrap, logging, and editor font
 - [x] Runtime file logging for major commands and file operations
 - [x] Panic hook integration
 
@@ -162,9 +162,9 @@ The current application already includes:
 
 The project uses three standardized measurement tools:
 
-- `scripts/hotspots.py`: complexity and maintainability review
-- `scripts/slowspots.py`: benchmark-driven speed and degradation review
-- `scripts/map.py`: dependency/interrelatedness mapping enriched with hotspot and slowspot data
+- `scripts/hotspots.py`: complexity and maintainability data emitted as JSON
+- `scripts/slowspots.py`: benchmark-driven speed and degradation data emitted as JSON
+- `scripts/map.py`: dependency/interrelatedness data emitted as JSON, enriched with hotspot and slowspot data
 
 These should be treated as the default ways to measure:
 
@@ -173,6 +173,10 @@ These should be treated as the default ways to measure:
 - interrelatedness
 
 `scripts/ci.ps1` is the standard local and CI entry point and runs the supported checks together.
+
+The Python tools intentionally do not generate HTML. Viewer work should consume the three JSON files and render the presentation layer separately, for example with a Java/React tabbed interface for hotspots, slowspots, and the map.
+
+The repo includes a lightweight static viewer in `viewer/` as the first presentation layer over those JSON contracts. It is intentionally separate from the Python scripts so it can later be replaced by, or migrated into, a Java/React UI without changing the measurement tools.
 
 ## Maintainability Plan
 
@@ -211,4 +215,4 @@ Validation during this pass:
 
 ## Working Definition of Done
 
-Scratchpad should remain a responsive, encoding-aware editor with YAML-backed settings, session persistence for workspace state, a single shared tab-order model, and predictable pane behavior. New work should preserve that structure instead of reintroducing duplicated tab state in the strip and overflow UI.
+Scratchpad should remain a responsive, encoding-aware editor with TOML-backed settings, session persistence for workspace state, a single shared tab-order model, and predictable pane behavior. New work should preserve that structure instead of reintroducing duplicated tab state in the strip and overflow UI.

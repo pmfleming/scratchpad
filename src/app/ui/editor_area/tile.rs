@@ -53,14 +53,16 @@ fn render_tile_body(
     rect: egui::Rect,
 ) -> TileBodyOutcome {
     ui.scope_builder(tile_ui_builder(rect), |ui| {
-        let editor_font_id = editor_font_id(app.font_size);
+        let editor_font_id = editor_font_id(app.font_size());
         let scroll_bar_visibility = editor_scroll_bar_visibility(ui.ctx());
         let request_focus = app.should_focus_view(view_id);
-        let word_wrap = app.word_wrap;
+        let word_wrap = app.word_wrap();
+        let editor_gutter = app.editor_gutter();
         let tab = &mut app.tabs_mut()[tab_index];
         let previous_layout = take_previous_layout(tab, view_id);
         let outcome = show_editor_scroll_area(
             ui,
+            editor_gutter,
             tab,
             tab_index,
             view_id,
@@ -154,6 +156,7 @@ fn take_previous_layout(tab: &mut WorkspaceTab, view_id: ViewId) -> Option<Rende
 #[allow(clippy::too_many_arguments)]
 fn show_editor_scroll_area(
     ui: &mut egui::Ui,
+    editor_gutter: u8,
     tab: &mut WorkspaceTab,
     tab_index: usize,
     view_id: ViewId,
@@ -170,6 +173,7 @@ fn show_editor_scroll_area(
         .show(ui, |ui| {
             render_editor_body_content(
                 ui,
+                editor_gutter,
                 tab,
                 view_id,
                 previous_layout,
@@ -181,8 +185,10 @@ fn show_editor_scroll_area(
         .inner
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_editor_body_content(
     ui: &mut egui::Ui,
+    editor_gutter: u8,
     tab: &mut WorkspaceTab,
     view_id: ViewId,
     previous_layout: Option<&RenderedLayout>,
@@ -193,6 +199,7 @@ fn render_editor_body_content(
     if let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) {
         editor_content::render_editor_content(
             ui,
+            editor_gutter,
             buffer,
             view,
             previous_layout,

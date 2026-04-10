@@ -2,7 +2,7 @@
 
 ## Goal
 
-Expose user-configurable settings in the app, provide a dedicated settings UI, and persist those settings in a YAML file that is independent from workspace/session restore data.
+Expose user-configurable settings in the app, provide a dedicated settings UI, and persist those settings in a TOML file that is independent from workspace/session restore data.
 
 ## Why This Change
 
@@ -59,11 +59,11 @@ Likely future fields:
 
 ### Storage Model
 
-Store settings in a YAML file, separate from session data.
+Store settings in a TOML file, separate from session data.
 
 Suggested file:
 
-- `settings.yaml`
+- `settings.toml`
 
 Suggested ownership:
 
@@ -71,9 +71,9 @@ Suggested ownership:
 
 Suggested responsibilities:
 
-- load settings from YAML
+- load settings from TOML
 - return defaults when the file is missing
-- handle malformed YAML gracefully
+- handle malformed TOML gracefully
 - save updated settings atomically
 - expose the resolved settings file path for diagnostics/UI
 
@@ -156,15 +156,15 @@ Design goals:
 - unknown fields are ignored safely if desired
 - future additions remain backward-compatible
 
-### YAML Serialization
+### TOML Serialization
 
-Add YAML support with `serde_yaml`.
+Add TOML support with `toml`.
 
 Settings store behavior:
 
 1. Resolve settings file path.
 2. If the file does not exist, return defaults.
-3. If the file exists, deserialize YAML into `AppSettings`.
+3. If the file exists, deserialize TOML into `AppSettings`.
 4. If deserialization fails, return defaults and surface a warning status/log entry.
 5. Save settings atomically on change.
 
@@ -189,7 +189,7 @@ Potential later enhancement:
 Desired startup order:
 
 1. Construct app with defaults.
-2. Load YAML settings.
+2. Load TOML settings.
 3. Apply settings to runtime app state.
 4. Restore session if startup options allow it.
 5. Apply startup file-open behavior.
@@ -206,10 +206,10 @@ We should not break existing users who already have session manifests containing
 
 Recommended migration approach:
 
-1. Introduce YAML settings loading.
-2. If `settings.yaml` exists, it becomes the source of truth.
-3. If `settings.yaml` does not exist, optionally fall back to legacy values from the session manifest.
-4. After the first successful settings save, YAML becomes canonical.
+1. Introduce TOML settings loading.
+2. If `settings.toml` exists, it becomes the source of truth.
+3. If `settings.toml` does not exist, optionally migrate legacy `settings.yaml` or fall back to legacy values from the session manifest.
+4. After the first successful settings save, TOML becomes canonical.
 5. Stop writing migrated settings into new session manifests once the settings system is fully adopted.
 
 This gives a gentle transition with minimal surprise.
@@ -254,11 +254,11 @@ Avoid scattering direct writes to `font_size`, `word_wrap`, and `logging_enabled
 
 ### 2. Session restore precedence confusion
 
-Be explicit about whether session restore is allowed to override settings-derived runtime values. In the target design, stable preferences should come from YAML, not the session manifest.
+Be explicit about whether session restore is allowed to override settings-derived runtime values. In the target design, stable preferences should come from TOML, not the session manifest.
 
 ### 3. Partial migration bugs
 
-If both YAML and session persistence write the same fields during transition, behavior may become confusing. Define one source of truth per release step.
+If both TOML and session persistence write the same fields during transition, behavior may become confusing. Define one source of truth per release step.
 
 ### 4. Settings page scope creep
 
@@ -268,10 +268,10 @@ Ship the persistence and first three settings before expanding into a large pref
 
 ### Phase 1: Foundation
 
-- Add `serde_yaml`
+- Add `toml`
 - Add `AppSettings`
 - Add `SettingsStore`
-- Load defaults or YAML on startup
+- Load defaults or TOML on startup
 
 ### Phase 2: Runtime Integration
 
@@ -299,11 +299,11 @@ Ship the persistence and first three settings before expanding into a large pref
 
 ### Foundation
 
-- Add `serde_yaml` to `Cargo.toml`.
+- Add `toml` to `Cargo.toml`.
 - Create `src/app/services/settings_store.rs`.
 - Define `AppSettings` with `Default`, `Serialize`, and `Deserialize`.
 - Define a stable settings file path and filename.
-- Implement `load()` for YAML settings with default fallback.
+- Implement `load()` for TOML settings with default fallback.
 - Implement `save()` with atomic write behavior.
 - Add unit tests for missing-file, malformed-file, and valid-file cases.
 
@@ -324,7 +324,7 @@ Ship the persistence and first three settings before expanding into a large pref
 
 - Remove ownership of stable preferences from the session store design.
 - Decide whether to keep legacy fields readable during migration.
-- Add fallback migration logic from session manifest to YAML if no settings file exists.
+- Add fallback migration logic from session manifest to TOML if no settings file exists.
 - Stop writing migrated preferences into new session manifests when ready.
 - Add regression tests covering clean startup vs restore-session startup.
 
@@ -348,13 +348,13 @@ Ship the persistence and first three settings before expanding into a large pref
 - Verify settings still load on `/clean`.
 - Verify session restore no longer overrides canonical settings unexpectedly.
 - Verify existing session restore tests still pass.
-- Verify malformed YAML falls back cleanly without crashing the app.
+- Verify malformed TOML falls back cleanly without crashing the app.
 
 ## Suggested First Milestone
 
 The smallest useful shippable milestone is:
 
-- YAML-backed `AppSettings`
+- TOML-backed `AppSettings`
 - startup load
 - immediate save on change
 - one simple settings UI surface

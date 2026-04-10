@@ -239,16 +239,14 @@ fn show_overflow_row(
             );
         tab_drag::begin_tab_drag_if_needed(ui, slot_index, &response, &close_response);
 
-        if promote_response.is_some_and(|promote| promote.clicked())
-            && let Some(workspace_index) = workspace_index
-        {
-            menu.outcome.promote_all_files_tab = Some(workspace_index);
+        if promote_response.is_some_and(|promote| promote.clicked()) && workspace_index.is_some() {
+            menu.outcome.promote_all_files_tab = Some(slot_index);
             *menu.overflow_popup_open = false;
         } else if response.clicked() && app.tab_slot_is_settings(slot_index) {
             menu.outcome.activate_settings = true;
             *menu.overflow_popup_open = false;
         } else if response.clicked() {
-            menu.outcome.activated_tab = workspace_index;
+            menu.outcome.activated_tab = Some(slot_index);
             *menu.overflow_popup_open = false;
         }
 
@@ -256,7 +254,7 @@ fn show_overflow_row(
             if app.tab_slot_is_settings(slot_index) {
                 menu.outcome.close_settings = true;
             } else {
-                menu.outcome.close_requested_tab = workspace_index;
+                menu.outcome.close_requested_tab = Some(slot_index);
             }
             *menu.overflow_popup_open = false;
         }

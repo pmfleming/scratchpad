@@ -23,13 +23,6 @@ function Ensure-PythonTooling {
         & python -m venv $venvDir
     }
 
-    $imports = "import jinja2, matplotlib, numpy, pandas, squarify"
-    & $python -c $imports *> $null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Installing Python analysis dependencies..." -ForegroundColor Cyan
-        & $python -m pip install --quiet jinja2 matplotlib numpy pandas squarify
-    }
-
     return $python
 }
 
@@ -46,14 +39,16 @@ try {
     $needsPythonTooling = (-not $SkipComplexity) -or (-not $SkipSlowspots)
     if ($needsPythonTooling) {
         $python = Ensure-PythonTooling -RepoRoot $repoRoot -ScriptRoot $PSScriptRoot
+        $analysisDir = Join-Path $repoRoot "target\analysis"
+        New-Item -ItemType Directory -Force -Path $analysisDir | Out-Null
     }
 
     if (-not $SkipComplexity) {
-        & $python (Join-Path $PSScriptRoot "hotspots.py") --paths src --top 20 --scope all
+        & $python (Join-Path $PSScriptRoot "hotspots.py") --paths src --scope all --output (Join-Path $analysisDir "hotspots.json")
     }
 
     if (-not $SkipSlowspots) {
-        & $python (Join-Path $PSScriptRoot "slowspots.py") --mode slowspots
+        & $python (Join-Path $PSScriptRoot "slowspots.py") --output (Join-Path $analysisDir "slowspots.json") --fail-on-slow
     }
 }
 finally {

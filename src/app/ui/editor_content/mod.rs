@@ -15,8 +15,10 @@ pub(crate) struct EditorContentOutcome {
     pub(crate) focused: bool,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_editor_content(
     ui: &mut egui::Ui,
+    editor_gutter: u8,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
     previous_layout: Option<&RenderedLayout>,
@@ -24,8 +26,10 @@ pub(crate) fn render_editor_content(
     word_wrap: bool,
     editor_font_id: &egui::FontId,
 ) -> EditorContentOutcome {
+    let gutter = i8::try_from(editor_gutter).unwrap_or(i8::MAX);
     egui::Frame::NONE
         .fill(EDITOR_BG)
+        .inner_margin(egui::Margin::same(gutter))
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
 

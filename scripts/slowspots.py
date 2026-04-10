@@ -1,25 +1,17 @@
 import argparse
 import json
+import os
 import subprocess
 import sys
-import os
-import base64
-import io
-import shutil
 import threading
 import time
-from datetime import datetime
-from dataclasses import dataclass, asdict
-from typing import List, Dict, Optional
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-import pandas as pd
-import numpy as np
-import matplotlib
-import matplotlib.pyplot as plt
-from jinja2 import Template
 
-# Ensure plots can be generated without a GUI
-matplotlib.use('Agg')
+DEFAULT_OUTPUT = Path("slowspots.json")
+
 
 @dataclass
 class PerfMetrics:
@@ -32,31 +24,63 @@ class PerfMetrics:
     p95_ns: Optional[float] = None
     score: float = 0.0
     signals: str = ""
+    benchmark_key: str = ""
+    targets: Optional[List[str]] = None
+    benchmark_kind: str = "unmapped"
+    threshold_ms: float = 50.0
 
     @property
     def mean_ms(self) -> float:
         return self.mean_ns / 1_000_000.0
 
+    @property
+    def p95_ms(self) -> Optional[float]:
+        if self.p95_ns is None:
+            return None
+        return self.p95_ns / 1_000_000.0
+
+
 class SlowspotAnalyzer:
-    def __init__(self, threshold_ms=50.0):
+    def __init__(self, threshold_ms: float = 50.0):
         self.threshold_ms = threshold_ms
+        self.benchmark_metadata = self.load_benchmark_metadata()
+
+    def load_benchmark_metadata(self) -> Dict[str, Dict[str, Any]]:
+        metadata_path = os.path.join("benches", "benchmark_targets.json")
+        if not os.path.exists(metadata_path):
+            return {}
+
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        return {
+            key: {
+                "targets": value.get("targets", []),
+                "kind": value.get("kind", "unmapped"),
+                "threshold_ms": float(value.get("threshold_ms", self.threshold_ms)),
+            }
+            for key, value in data.items()
+        }
 
     def run_benchmarks(self, skip_bench: bool = False) -> List[PerfMetrics]:
         if not skip_bench:
-            print("Running benchmarks via cargo bench...")
+            print("Running benchmarks via cargo bench...", file=sys.stderr)
             try:
                 self.run_bench_command(["cargo", "bench"])
-            except Exception as e:
-                print(f"Benchmarking failed: {e}")
+            except Exception as exc:
+                print(f"Benchmarking failed: {exc}", file=sys.stderr)
                 return self.get_mock_data()
 
         results = self.load_criterion_results(os.path.join("target", "criterion"))
         if not results:
             if not skip_bench:
-                print("Error: No Criterion benchmark results were discovered.")
+                print(
+                    "Error: No Criterion benchmark results were discovered.",
+                    file=sys.stderr,
+                )
             return self.get_mock_data()
 
-        return sorted(results, key=lambda x: -x.score)
+        return sorted(results, key=lambda item: -item.score)
 
     def run_bench_command(self, cmd: List[str]) -> None:
         process = subprocess.Popen(
@@ -67,19 +91,14 @@ class SlowspotAnalyzer:
             bufsize=1,
         )
 
-        status = {
-            "current": "starting cargo bench",
-            "last_update": time.time(),
-            "done": False,
-        }
+        status = {"current": "starting cargo bench", "done": False}
 
-        def progress_reporter():
+        def progress_reporter() -> None:
             start = time.time()
             while not status["done"]:
                 elapsed = time.time() - start
-                current = status["current"]
                 print(
-                    f"[progress {elapsed:5.1f}s] {current}",
+                    f"[progress {elapsed:5.1f}s] {status['current']}",
                     file=sys.stderr,
                     flush=True,
                 )
@@ -97,7 +116,6 @@ class SlowspotAnalyzer:
                 benchmark_name = self.parse_benchmark_progress(line)
                 if benchmark_name is not None:
                     status["current"] = benchmark_name
-                    status["last_update"] = time.time()
 
             return_code = process.wait()
         finally:
@@ -112,12 +130,7 @@ class SlowspotAnalyzer:
             )
 
     def parse_benchmark_progress(self, line: str) -> Optional[str]:
-        prefixes = [
-            "Benchmarking ",
-            "Running ",
-            "Compiling ",
-            "Finished ",
-        ]
+        prefixes = ["Benchmarking ", "Running ", "Compiling ", "Finished "]
         for prefix in prefixes:
             if line.startswith(prefix):
                 return line
@@ -125,7 +138,10 @@ class SlowspotAnalyzer:
 
     def load_criterion_results(self, criterion_dir: str) -> List[PerfMetrics]:
         if not os.path.exists(criterion_dir):
-            print(f"Error: Criterion results directory not found at {criterion_dir}")
+            print(
+                f"Error: Criterion results directory not found at {criterion_dir}",
+                file=sys.stderr,
+            )
             return []
 
         results = []
@@ -136,16 +152,19 @@ class SlowspotAnalyzer:
             if os.path.basename(os.path.dirname(estimates_path)) != "new":
                 continue
 
-            with open(estimates_path, 'r') as f:
+            with open(estimates_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            benchmark_name = self.benchmark_name_from_estimate_path(criterion_dir, estimates_path)
+            benchmark_name = self.benchmark_name_from_estimate_path(
+                criterion_dir, estimates_path
+            )
+            metadata = self.metadata_for_benchmark(benchmark_name)
             mean = data.get("mean", {}).get("point_estimate", 0.0)
             std_dev = data.get("std_dev", {}).get("point_estimate", 0.0)
             median = data.get("median", {}).get("point_estimate", 0.0)
             p95 = data.get("median_abs_dev", {}).get("point_estimate")
 
-            m = PerfMetrics(
+            metric = PerfMetrics(
                 name=benchmark_name,
                 mean_ns=mean,
                 std_dev_ns=std_dev,
@@ -153,197 +172,141 @@ class SlowspotAnalyzer:
                 max_ns=mean + (2 * std_dev),
                 min_ns=max(0, mean - (2 * std_dev)),
                 p95_ns=p95,
+                benchmark_key=self.benchmark_key(benchmark_name),
+                targets=metadata["targets"],
+                benchmark_kind=metadata["kind"],
+                threshold_ms=metadata["threshold_ms"],
             )
-            m.score = self.calculate_score(m)
-            m.signals = self.generate_signals(m)
-            results.append(m)
+            metric.score = self.calculate_score(metric)
+            metric.signals = self.generate_signals(metric)
+            results.append(metric)
 
         return results
 
-    def benchmark_name_from_estimate_path(self, criterion_dir: str, estimates_path: str) -> str:
+    def benchmark_name_from_estimate_path(
+        self, criterion_dir: str, estimates_path: str
+    ) -> str:
         relative = os.path.relpath(estimates_path, criterion_dir)
         parts = relative.split(os.sep)
         return "/".join(parts[:-2])
 
+    def benchmark_key(self, benchmark_name: str) -> str:
+        return benchmark_name.split("/", 1)[0]
+
+    def metadata_for_benchmark(self, benchmark_name: str) -> Dict[str, Any]:
+        benchmark_key = self.benchmark_key(benchmark_name)
+        return self.benchmark_metadata.get(
+            benchmark_key,
+            {
+                "targets": [],
+                "kind": "unmapped",
+                "threshold_ms": self.threshold_ms,
+            },
+        )
+
     def get_mock_data(self) -> List[PerfMetrics]:
         mock = [
-            PerfMetrics("tab_stress_operations", 45000000.0, 5000000.0, 44000000.0, 55000000.0, 35000000.0),
-            PerfMetrics("file_open_latency", 120000000.0, 20000000.0, 115000000.0, 160000000.0, 80000000.0),
-            PerfMetrics("buffer_search_regex", 8000000.0, 1000000.0, 7500000.0, 10000000.0, 6000000.0),
-            PerfMetrics("ui_render_frame", 12000000.0, 2000000.0, 11000000.0, 16000000.0, 8000000.0),
+            PerfMetrics(
+                "tab_stress_operations",
+                45_000_000.0,
+                5_000_000.0,
+                44_000_000.0,
+                55_000_000.0,
+                35_000_000.0,
+            ),
+            PerfMetrics(
+                "file_open_latency",
+                120_000_000.0,
+                20_000_000.0,
+                115_000_000.0,
+                160_000_000.0,
+                80_000_000.0,
+            ),
+            PerfMetrics(
+                "buffer_search_regex",
+                8_000_000.0,
+                1_000_000.0,
+                7_500_000.0,
+                10_000_000.0,
+                6_000_000.0,
+            ),
+            PerfMetrics(
+                "ui_render_frame",
+                12_000_000.0,
+                2_000_000.0,
+                11_000_000.0,
+                16_000_000.0,
+                8_000_000.0,
+            ),
         ]
-        for m in mock:
-            m.score = self.calculate_score(m)
-            m.signals = self.generate_signals(m)
-        return sorted(mock, key=lambda x: -x.score)
+        for metric in mock:
+            metadata = self.metadata_for_benchmark(metric.name)
+            metric.benchmark_key = self.benchmark_key(metric.name)
+            metric.targets = metadata["targets"]
+            metric.benchmark_kind = metadata["kind"]
+            metric.threshold_ms = metadata["threshold_ms"]
+            metric.score = self.calculate_score(metric)
+            metric.signals = self.generate_signals(metric)
+        return sorted(mock, key=lambda item: -item.score)
 
-    def calculate_score(self, m: PerfMetrics) -> float:
-        # Score is primarily mean latency in ms
-        score = m.mean_ms
-        # Add penalty for high variability (instability)
-        if m.mean_ns > 0:
-            rel_std_dev = m.std_dev_ns / m.mean_ns
-            score *= (1.0 + rel_std_dev)
+    def calculate_score(self, metric: PerfMetrics) -> float:
+        score = metric.mean_ms
+        if metric.mean_ns > 0:
+            relative_std_dev = metric.std_dev_ns / metric.mean_ns
+            score *= 1.0 + relative_std_dev
         return round(score, 2)
 
-    def generate_signals(self, m: PerfMetrics) -> str:
-        sigs = []
-        if m.mean_ms > self.threshold_ms: sigs.append(f"slow > {self.threshold_ms}ms")
-        if m.mean_ns > 1_000_000 and (m.std_dev_ns / m.mean_ns) > 0.2:
-            sigs.append("high variance")
-        return ", ".join(sigs) if sigs else "nominal"
+    def generate_signals(self, metric: PerfMetrics) -> str:
+        signals = []
+        if metric.mean_ms > metric.threshold_ms:
+            signals.append(f"slow > {metric.threshold_ms}ms")
+        if metric.mean_ns > 1_000_000 and (metric.std_dev_ns / metric.mean_ns) > 0.2:
+            signals.append("high variance")
+        if not metric.targets:
+            signals.append("unmapped benchmark")
+        return ", ".join(signals) if signals else "nominal"
 
-def get_plot_base64():
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', dpi=120, transparent=True)
-    plt.close()
-    return base64.b64encode(buf.getvalue()).decode('utf-8')
 
-def generate_visual_report(results: List[PerfMetrics]):
-    df = pd.DataFrame([asdict(m) for m in results])
-    df['mean_ms'] = df['mean_ns'] / 1_000_000.0
-    
-    plt.style.use('dark_background')
-    
-    # 1. Bar: Latency Comparison
-    plt.figure(figsize=(10, 6))
-    colors = ['#f44747' if m > 50 else '#569cd6' for m in df['mean_ms']]
-    plt.barh(df['name'], df['mean_ms'], color=colors)
-    plt.axvline(x=50, color='#f44747', linestyle='--', alpha=0.5, label='Threshold (50ms)')
-    plt.gca().invert_yaxis()
-    plt.title('Performance Latency by Operation', color='#ce9178')
-    plt.xlabel('Mean Latency (ms)')
-    plt.legend()
-    plt.grid(axis='x', linestyle='--', alpha=0.3)
-    chart_bar = get_plot_base64()
-
-    # 2. Distribution Plot (Simulated from mean/stddev)
-    plt.figure(figsize=(10, 6))
-    for _, row in df.iterrows():
-        x = np.linspace(row['mean_ms'] - 3*row['std_dev_ns']/1e6, row['mean_ms'] + 3*row['std_dev_ns']/1e6, 100)
-        y = (1 / (np.sqrt(2 * np.pi) * row['std_dev_ns']/1e6)) * np.exp(-0.5 * ((x - row['mean_ms']) / (row['std_dev_ns']/1e6))**2)
-        plt.plot(x, y, label=row['name'])
-        plt.fill_between(x, y, alpha=0.2)
-    
-    plt.title('Latency Probability Distribution', color='#ce9178')
-    plt.xlabel('Latency (ms)')
-    plt.ylabel('Probability Density')
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.3)
-    chart_dist = get_plot_base64()
-
-    template_str = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Performance Slowspots Report</title>
-    <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1e1e1e; color: #d4d4d4; margin: 20px; }
-        .container { max-width: 1200px; margin: auto; }
-        h1 { color: #569cd6; border-bottom: 1px solid #3e3e3e; padding-bottom: 10px; }
-        .charts { display: flex; flex-direction: column; gap: 40px; margin-bottom: 40px; }
-        .chart-box { background: #252526; border: 1px solid #3e3e3e; padding: 20px; border-radius: 4px; }
-        img { max-width: 100%; height: auto; display: block; margin: auto; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #252526; }
-        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #3e3e3e; }
-        th { background: #333; color: #ce9178; }
-        .slow { color: #f44747; font-weight: bold; }
-        .nominal { color: #b5cea8; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Performance Slowspots Analysis</h1>
-        <div class="charts">
-            <div class="chart-box">
-                <img src="data:image/png;base64,{{ chart_bar }}" alt="Latency Bar Chart">
-            </div>
-            <div class="chart-box">
-                <img src="data:image/png;base64,{{ chart_dist }}" alt="Latency Distribution">
-            </div>
-        </div>
-        <table>
-            <thead>
-                <tr>
-                    <th>Operation</th>
-                    <th>Mean (ms)</th>
-                    <th>Std Dev (ms)</th>
-                    <th>Median (ms)</th>
-                    <th>Status</th>
-                    <th>Signals</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for m in results %}
-                <tr>
-                    <td>{{ m.name }}</td>
-                    <td class="{{ 'slow' if m.mean_ms > 50 else 'nominal' }}">{{ "%.2f"|format(m.mean_ms) }}</td>
-                    <td>{{ "%.2f"|format(m.std_dev_ns / 1000000) }}</td>
-                    <td>{{ "%.2f"|format(m.median_ns / 1000000) }}</td>
-                    <td>{{ 'SLOW' if m.mean_ms > 50 else 'OK' }}</td>
-                    <td>{{ m.signals }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</body>
-</html>
-    """
-    template = Template(template_str)
-    html = template.render(results=results, chart_bar=chart_bar, chart_dist=chart_dist)
-    
-    with open("slowspots.html", "w", encoding="utf-8") as f:
-        f.write(html)
-    print(f"Visual report saved to: {os.path.abspath('slowspots.html')}")
-
-def main():
-    parser = argparse.ArgumentParser(description="Rust Performance Slowspot Analyzer")
-    parser.add_argument("--mode", choices=["slowspots", "review", "display", "json"], default="slowspots", help="Output mode")
-    parser.add_argument("--threshold", type=float, default=50.0, help="Latency threshold in ms")
-    parser.add_argument("--skip-bench", action="store_true", help="Skip running benchmarks and load existing results")
-    
-    args = parser.parse_args()
-    
-    # Suppress output in JSON mode
-    if args.mode == "json":
-        # Redirect stdout to devnull temporarily if we want to be absolutely sure, 
-        # but let's just use a flag in run_benchmarks
-        pass
-
-    analyzer = SlowspotAnalyzer(threshold_ms=args.threshold)
-    results = analyzer.run_benchmarks(skip_bench=args.skip_bench or args.mode == "json")
-    
-    if args.mode == "json":
-        print(json.dumps([asdict(m) for m in results]))
+def write_json(payload: object, output_path: Optional[Path]) -> None:
+    json_text = json.dumps(payload, indent=2)
+    if output_path is None:
+        print(json_text)
         return
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json_text + "\n", encoding="utf-8")
 
-    if args.mode == "slowspots":
-        print(f"CI SLOWSPOTS (Threshold: {args.threshold}ms)")
-        print("-" * 30)
-        found_slow = False
-        for m in results:
-            if m.mean_ms > args.threshold:
-                print(f"FAILURE: {m.name} is slow: {m.mean_ms:.2f}ms")
-                found_slow = True
-        if not found_slow:
-            print("SUCCESS: All operations within performance limits.")
-        else:
-            sys.exit(1)
 
-    elif args.mode == "review":
-        print("FULL PERFORMANCE REVIEW")
-        print("=" * 40)
-        for m in results:
-            print(f"Operation: {m.name}")
-            print(f"  Mean:   {m.mean_ms:>8.2f} ms")
-            print(f"  Median: {m.median_ns/1e6:>8.2f} ms")
-            print(f"  StdDev: {m.std_dev_ns/1e6:>8.2f} ms")
-            print(f"  Range:  [{m.min_ns/1e6:.2f} - {m.max_ns/1e6:.2f}] ms")
-            print(f"  Signals: {m.signals}\n")
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Emit Criterion performance slowspot metrics as JSON"
+    )
+    parser.add_argument(
+        "--threshold", type=float, default=50.0, help="Default latency threshold in ms"
+    )
+    parser.add_argument(
+        "--skip-bench",
+        action="store_true",
+        help="Skip running benchmarks and load existing Criterion results",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help=f"Optional output JSON path. Example: {DEFAULT_OUTPUT}",
+    )
+    parser.add_argument(
+        "--fail-on-slow",
+        action="store_true",
+        help="Exit with a non-zero status when any benchmark exceeds its threshold",
+    )
 
-    elif args.mode == "display":
-        generate_visual_report(results)
+    args = parser.parse_args()
+    analyzer = SlowspotAnalyzer(threshold_ms=args.threshold)
+    results = analyzer.run_benchmarks(skip_bench=args.skip_bench)
+    write_json([asdict(metric) for metric in results], args.output)
+    if args.fail_on_slow and any(metric.mean_ms > metric.threshold_ms for metric in results):
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

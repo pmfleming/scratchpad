@@ -1,8 +1,14 @@
 /target/
+/target-tests/
+/dist/
 /log/
 /hotspots.html
 /slowspots.html
 /architecture_map.html
+/architecture_map_data.json
+/hotspots.json
+/slowspots.json
+/map.json
 
 # Python virtual environment and caches
 .venv/

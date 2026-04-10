@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Scratchpad Metrics Viewer</title>
+    <script>
+        window.SCRATCHPAD_VIEWER_VERSION = "20260410-map-zoom-1";
+        document.write(`<link rel="stylesheet" href="styles.css?v=${window.SCRATCHPAD_VIEWER_VERSION}" />`);
+    </script>
+</head>
+
+<body>
+    <main class="app-shell">
+        <header class="hero">
+            <div>
+                <p class="eyebrow">Scratchpad data viewer</p>
+                <h1>Hotspots, slowspots, and architecture map</h1>
+                <p class="lede">
+                    A static viewer for the JSON artifacts produced by the Python measurement tools.
+                </p>
+            </div>
+            <div class="data-card">
+                <div class="data-card__label">Expected inputs</div>
+                <code>target/analysis/hotspots.json</code>
+                <code>target/analysis/slowspots.json</code>
+                <code>target/analysis/map.json</code>
+            </div>
+        </header>
+
+        <section class="loader-panel" aria-label="Data loading controls">
+            <div>
+                <strong id="load-status">Loading default JSON artifacts...</strong>
+                <p id="load-detail">
+                    If the browser blocks local file fetches, use the file inputs below.
+                </p>
+                <p class="viewer-version">
+                    Viewer version: <code id="viewer-version">loading</code>
+                </p>
+            </div>
+            <div class="file-grid">
+                <label>
+                    Hotspots JSON
+                    <input id="hotspots-file" type="file" accept="application/json,.json" />
+                </label>
+                <label>
+                    Slowspots JSON
+                    <input id="slowspots-file" type="file" accept="application/json,.json" />
+                </label>
+                <label>
+                    Map JSON
+                    <input id="map-file" type="file" accept="application/json,.json" />
+                </label>
+            </div>
+        </section>
+
+        <nav class="tabs" aria-label="Metric views">
+            <button class="tab is-active" data-tab="hotspots">Hotspots</button>
+            <button class="tab" data-tab="slowspots">Slowspots</button>
+            <button class="tab" data-tab="map">Map</button>
+        </nav>
+
+        <section id="hotspots" class="tab-panel is-active">
+            <div id="hotspots-summary" class="summary-grid"></div>
+            <div class="panel-card">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Complexity hotspots</h2>
+                        <p>Ranked by the hotspot score emitted by <code>scripts/hotspots.py</code>.</p>
+                    </div>
+                    <input id="hotspots-filter" class="filter-input" type="search" placeholder="Filter hotspots..." />
+                </div>
+                <div id="hotspots-table" class="table-wrap"></div>
+            </div>
+        </section>
+
+        <section id="slowspots" class="tab-panel">
+            <div id="slowspots-summary" class="summary-grid"></div>
+            <div class="panel-card">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Performance slowspots</h2>
+                        <p>Criterion benchmark results enriched with explicit module ownership.</p>
+                    </div>
+                    <input id="slowspots-filter" class="filter-input" type="search" placeholder="Filter slowspots..." />
+                </div>
+                <div id="slowspots-table" class="table-wrap"></div>
+            </div>
+        </section>
+
+        <section id="map" class="tab-panel">
+            <div id="map-summary" class="summary-grid"></div>
+            <div class="map-layout">
+                <div class="panel-card graph-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Architecture map</h2>
+                            <p>Click a module to bring its inbound and outbound links forward.</p>
+                        </div>
+                        <div class="map-controls">
+                            <input id="map-filter" class="filter-input" type="search" placeholder="Filter modules..." />
+                            <label class="zoom-control">
+                                <span>Zoom <strong id="map-zoom-value">65%</strong></span>
+                                <input id="map-zoom" type="range" min="0.45" max="1.4" step="0.05" value="0.65" />
+                            </label>
+                        </div>
+                    </div>
+                    <div id="map-graph" class="map-graph"></div>
+                </div>
+                <aside id="map-detail" class="panel-card detail-card">
+                    <h2>Module detail</h2>
+                    <p class="muted">Select a module in the map.</p>
+                </aside>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        document.write(`<script src="data-viewer.js?v=${window.SCRATCHPAD_VIEWER_VERSION}"><\/script>`);
+    </script>
+</body>
+
+</html>
