@@ -11,12 +11,29 @@ pub(crate) struct HeaderLayout {
 }
 
 impl HeaderLayout {
-    pub fn measure(app: &ScratchpadApp, remaining_width: f32, spacing: f32) -> Self {
+    pub fn measure(
+        app: &ScratchpadApp,
+        remaining_width: f32,
+        spacing: f32,
+        include_tabs: bool,
+    ) -> Self {
         let caption_controls_width =
             CAPTION_BUTTON_SIZE.x * 3.0 + CAPTION_BUTTON_SPACING * 2.0 + CAPTION_TRAILING_PADDING;
         let tab_action_width = BUTTON_SIZE.x;
         let overflow_button_width = BUTTON_SIZE.x;
         let spacer_before_captions = 8.0;
+        if !include_tabs {
+            let tab_area_width =
+                (remaining_width - caption_controls_width - spacer_before_captions).max(0.0);
+            return Self {
+                spacing,
+                caption_controls_width,
+                has_overflow: false,
+                visible_strip_width: 0.0,
+                drag_width: tab_area_width,
+                tab_area_width,
+            };
+        }
 
         let viewport_width_with_overflow = (remaining_width
             - caption_controls_width

@@ -29,8 +29,7 @@ impl SessionManifest {
             logging_enabled: self.logging_enabled,
             editor_gutter: DEFAULT_EDITOR_GUTTER,
             editor_font: Default::default(),
-            settings_tab_open: false,
-            settings_tab_index: None,
+            ..AppSettings::default()
         }
     }
 }

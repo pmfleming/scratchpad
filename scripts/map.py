@@ -6,9 +6,12 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
+from report_modes import add_mode_argument, emit_report
+
 HOTSPOT_CMD = [".venv/Scripts/python.exe", "scripts/hotspots.py"]
 SLOWSPOT_CMD = [".venv/Scripts/python.exe", "scripts/slowspots.py", "--skip-bench"]
 DEFAULT_OUTPUT = Path("map.json")
+VISIBILITY_OUTPUT = Path("target/analysis/map.json")
 
 AREA_COLORS = {
     "chrome": "#569cd6",
@@ -264,6 +267,15 @@ class ArchitectureMapper:
         }
 
 
+def refresh_analysis_inputs() -> None:
+    commands = [
+        HOTSPOT_CMD + ["--mode", "analysis", "--paths", "src"],
+        SLOWSPOT_CMD + ["--mode", "analysis"],
+    ]
+    for command in commands:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Emit architecture dependency map data as JSON"
@@ -274,19 +286,50 @@ def main() -> None:
         default=None,
         help=f"Optional output JSON path. Example: {DEFAULT_OUTPUT}",
     )
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Regenerate hotspot and slowspot inputs before building the map.",
+    )
+    add_mode_argument(parser)
     args = parser.parse_args()
+
+    if args.refresh:
+        refresh_analysis_inputs()
 
     mapper = ArchitectureMapper()
     mapper.extract_dependencies("src")
     mapper.gather_metrics()
     mapper.gather_performance()
 
-    json_text = json.dumps(mapper.viewer_payload(), indent=2)
-    if args.output is None:
-        print(json_text)
-    else:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json_text + "\n", encoding="utf-8")
+    payload = mapper.viewer_payload()
+    emit_report(
+        payload,
+        mode=args.mode,
+        output_path=args.output,
+        visibility_path=VISIBILITY_OUTPUT,
+        cli_renderer=render_cli,
+        label="map",
+    )
+
+
+def render_cli(payload: object) -> str:
+    data = payload if isinstance(payload, dict) else {}
+    nodes = data.get("graph", {}).get("nodes", [])
+    modules = [
+        node.get("data", {})
+        for node in nodes
+        if not node.get("data", {}).get("is_group")
+    ]
+    top = sorted(modules, key=lambda item: -float(item.get("total_score", 0.0)))[:10]
+    lines = ["Architecture Map"]
+    for index, item in enumerate(top, start=1):
+        lines.append(
+            f"{index:>2}. {item.get('id', '<unknown>')} | total={float(item.get('total_score', 0.0)):.2f} | comp={float(item.get('comp_score', 0.0)):.2f} | perf={float(item.get('perf_score', 0.0)):.2f}"
+        )
+    if not top:
+        lines.append("No modules found.")
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

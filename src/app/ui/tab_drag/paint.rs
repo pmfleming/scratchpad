@@ -22,12 +22,17 @@ pub(super) fn paint_dragged_tab_ghost(
         egui::Order::Foreground,
         egui::Id::new("dragged_tab_ghost"),
     ));
+    let visuals = &ctx.global_style().visuals;
 
-    painter.rect_filled(rect, 4.0, TAB_ACTIVE_BG.gamma_multiply(0.92));
+    painter.rect_filled(
+        rect,
+        4.0,
+        tab_active_bg_for_visuals(visuals).gamma_multiply(0.92),
+    );
     painter.rect_stroke(
         rect,
         4.0,
-        egui::Stroke::new(1.0, BORDER),
+        egui::Stroke::new(1.0, border_for_visuals(visuals)),
         egui::StrokeKind::Outside,
     );
     painter.text(
@@ -35,7 +40,7 @@ pub(super) fn paint_dragged_tab_ghost(
         egui::Align2::LEFT_CENTER,
         display_name,
         egui::FontId::proportional(14.0),
-        TEXT_PRIMARY,
+        text_primary_for_visuals(visuals),
     );
 }
 

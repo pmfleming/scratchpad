@@ -9,8 +9,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from report_modes import add_mode_argument, emit_report
 
 DEFAULT_OUTPUT = Path("slowspots.json")
+VISIBILITY_OUTPUT = Path("target/analysis/slowspots.json")
 
 
 @dataclass
@@ -267,13 +269,16 @@ class SlowspotAnalyzer:
         return ", ".join(signals) if signals else "nominal"
 
 
-def write_json(payload: object, output_path: Optional[Path]) -> None:
-    json_text = json.dumps(payload, indent=2)
-    if output_path is None:
-        print(json_text)
-        return
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json_text + "\n", encoding="utf-8")
+def render_cli(payload: object) -> str:
+    rows = payload if isinstance(payload, list) else []
+    lines = ["Slowspots"]
+    for index, item in enumerate(rows[:10], start=1):
+        lines.append(
+            f"{index:>2}. {item['name']} | mean={item['mean_ns'] / 1_000_000.0:.2f}ms | score={item['score']:.2f} | {item['signals']}"
+        )
+    if not rows:
+        lines.append("No slowspots found.")
+    return "\n".join(lines)
 
 
 def main() -> None:
@@ -299,11 +304,20 @@ def main() -> None:
         action="store_true",
         help="Exit with a non-zero status when any benchmark exceeds its threshold",
     )
+    add_mode_argument(parser)
 
     args = parser.parse_args()
     analyzer = SlowspotAnalyzer(threshold_ms=args.threshold)
     results = analyzer.run_benchmarks(skip_bench=args.skip_bench)
-    write_json([asdict(metric) for metric in results], args.output)
+    payload = [asdict(metric) for metric in results]
+    emit_report(
+        payload,
+        mode=args.mode,
+        output_path=args.output,
+        visibility_path=VISIBILITY_OUTPUT,
+        cli_renderer=render_cli,
+        label="slowspot",
+    )
     if args.fail_on_slow and any(metric.mean_ms > metric.threshold_ms for metric in results):
         sys.exit(1)
 

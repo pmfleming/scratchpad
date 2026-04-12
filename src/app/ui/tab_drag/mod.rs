@@ -121,3 +121,34 @@ pub(crate) fn auto_scroll_tab_strip(
     next_state.store(ctx, scroll_area_id);
     ctx.request_repaint();
 }
+
+pub(crate) fn auto_scroll_vertical_tab_list(
+    ctx: &egui::Context,
+    scroll_area_id: egui::Id,
+    viewport_rect: egui::Rect,
+    content_height: f32,
+    scroll_state: &egui::scroll_area::State,
+) {
+    let Some(drag_state) = state::current_tab_drag_state_for_context(ctx) else {
+        return;
+    };
+    if !state::drag_is_active(drag_state) {
+        return;
+    }
+
+    let delta_y = state::vertical_auto_scroll_delta(viewport_rect, drag_state.current_pos);
+    if delta_y.abs() <= f32::EPSILON {
+        return;
+    }
+
+    let max_offset_y = (content_height - viewport_rect.height()).max(0.0);
+    let next_offset_y = (scroll_state.offset.y + delta_y).clamp(0.0, max_offset_y);
+    if (next_offset_y - scroll_state.offset.y).abs() <= f32::EPSILON {
+        return;
+    }
+
+    let mut next_state = *scroll_state;
+    next_state.offset.y = next_offset_y;
+    next_state.store(ctx, scroll_area_id);
+    ctx.request_repaint();
+}

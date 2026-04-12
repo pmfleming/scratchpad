@@ -3,53 +3,57 @@ pub mod gutter;
 pub mod text_edit;
 
 use crate::app::domain::{BufferState, EditorViewState, RenderedLayout};
-use crate::app::theme::*;
 use eframe::egui;
 
 pub use artifact::{make_control_chars_clean, make_control_chars_visible, render_artifact_view};
 pub use gutter::render_line_number_gutter;
-pub use text_edit::{build_layouter, render_editor_text_edit, render_read_only_text_edit};
+pub use text_edit::{
+    TextEditOptions, build_layouter, render_editor_text_edit, render_read_only_text_edit,
+};
 
 pub(crate) struct EditorContentOutcome {
     pub(crate) changed: bool,
     pub(crate) focused: bool,
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(crate) struct EditorContentStyle<'a> {
+    pub(crate) editor_gutter: u8,
+    pub(crate) previous_layout: Option<&'a RenderedLayout>,
+    pub(crate) text_edit: TextEditOptions<'a>,
+    pub(crate) background_color: egui::Color32,
+}
+
 pub(crate) fn render_editor_content(
     ui: &mut egui::Ui,
-    editor_gutter: u8,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
-    previous_layout: Option<&RenderedLayout>,
-    request_focus: bool,
-    word_wrap: bool,
-    editor_font_id: &egui::FontId,
+    style: EditorContentStyle<'_>,
 ) -> EditorContentOutcome {
-    let gutter = i8::try_from(editor_gutter).unwrap_or(i8::MAX);
+    let gutter = i8::try_from(style.editor_gutter).unwrap_or(i8::MAX);
     egui::Frame::NONE
-        .fill(EDITOR_BG)
+        .fill(style.background_color)
         .inner_margin(egui::Margin::same(gutter))
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
 
             ui.horizontal_top(|ui| {
                 if view.show_line_numbers {
-                    render_line_number_gutter(ui, buffer, view, previous_layout, editor_font_id);
+                    render_line_number_gutter(
+                        ui,
+                        buffer,
+                        view,
+                        style.previous_layout,
+                        style.text_edit.editor_font_id,
+                        style.text_edit.text_color,
+                        style.background_color,
+                    );
                     ui.separator();
                 }
 
                 if buffer.artifact_summary.has_control_chars() {
-                    render_artifact_view(ui, buffer, view, request_focus, word_wrap, editor_font_id)
+                    render_artifact_view(ui, buffer, view, style.text_edit)
                 } else {
-                    render_editor_text_edit(
-                        ui,
-                        buffer,
-                        view,
-                        request_focus,
-                        word_wrap,
-                        editor_font_id,
-                    )
+                    render_editor_text_edit(ui, buffer, view, style.text_edit)
                 }
             })
             .inner

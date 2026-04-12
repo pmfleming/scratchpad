@@ -18,6 +18,16 @@ struct WorkspaceTabCellContext<'a> {
     pending_scroll_to_active: bool,
 }
 
+struct TabStripEntriesContext<'a> {
+    app: &'a mut ScratchpadApp,
+    duplicate_name_counts: &'a HashMap<String, usize>,
+    viewport_rect: egui::Rect,
+    visible_tab_indices: &'a mut HashSet<usize>,
+    outcome: &'a mut TabStripOutcome,
+    active_slot_index: usize,
+    pending_scroll_to_active: bool,
+}
+
 pub(crate) fn allocate_tab_strip_entries(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
@@ -34,16 +44,16 @@ pub(crate) fn allocate_tab_strip_entries(
             configure_tab_strip_viewport(ui, layout.visible_strip_width);
             let viewport_rect = ui.max_rect();
             super::maybe_auto_scroll_tab_strip(ui, app, layout, scroll_area_id, viewport_rect);
-            render_tab_strip_entries(
-                ui,
+            let mut context = TabStripEntriesContext {
+                active_slot_index: app.active_tab_slot_index(),
+                pending_scroll_to_active: app.tab_manager().pending_scroll_to_active,
                 app,
-                layout,
-                scroll_area_id,
-                viewport_rect,
                 duplicate_name_counts,
+                viewport_rect,
                 visible_tab_indices,
                 outcome,
-            )
+            };
+            render_tab_strip_entries(ui, layout, scroll_area_id, &mut context)
         },
     )
     .inner
@@ -55,16 +65,11 @@ fn configure_tab_strip_viewport(ui: &mut egui::Ui, visible_strip_width: f32) {
     ui.set_max_width(visible_strip_width);
 }
 
-#[allow(clippy::too_many_arguments)]
 fn render_tab_strip_entries(
     ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
     layout: &HeaderLayout,
     scroll_area_id: egui::Id,
-    viewport_rect: egui::Rect,
-    duplicate_name_counts: &HashMap<String, usize>,
-    visible_tab_indices: &mut HashSet<usize>,
-    outcome: &mut TabStripOutcome,
+    context: &mut TabStripEntriesContext<'_>,
 ) -> Vec<TabRectEntry> {
     egui::ScrollArea::horizontal()
         .id_salt(scroll_area_id)
@@ -72,91 +77,57 @@ fn render_tab_strip_entries(
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.x = layout.spacing;
-            ui.horizontal(|ui| {
-                collect_tab_strip_entries(
-                    ui,
-                    app,
-                    duplicate_name_counts,
-                    viewport_rect,
-                    visible_tab_indices,
-                    outcome,
-                )
-            })
-            .inner
+            ui.horizontal(|ui| collect_tab_entries(ui, context)).inner
         })
         .inner
 }
 
-fn collect_tab_strip_entries(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    duplicate_name_counts: &HashMap<String, usize>,
-    viewport_rect: egui::Rect,
-    visible_tab_indices: &mut HashSet<usize>,
-    outcome: &mut TabStripOutcome,
-) -> Vec<TabRectEntry> {
-    let active_slot_index = app.active_tab_slot_index();
-    let pending_scroll_to_active = app.tab_manager().pending_scroll_to_active;
-    let total_slots = app.total_tab_slots();
-    let mut row_rects = Vec::with_capacity(total_slots);
-
-    collect_tab_entries(
-        ui,
-        app,
-        duplicate_name_counts,
-        viewport_rect,
-        visible_tab_indices,
-        outcome,
-        active_slot_index,
-        pending_scroll_to_active,
-        &mut row_rects,
-    );
-
-    row_rects
-}
-
-#[allow(clippy::too_many_arguments)]
 fn collect_tab_entries(
     ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    duplicate_name_counts: &HashMap<String, usize>,
-    viewport_rect: egui::Rect,
-    visible_tab_indices: &mut HashSet<usize>,
-    outcome: &mut TabStripOutcome,
-    active_slot_index: usize,
-    pending_scroll_to_active: bool,
-    row_rects: &mut Vec<TabRectEntry>,
-) {
+    context: &mut TabStripEntriesContext<'_>,
+) -> Vec<TabRectEntry> {
     let cell_context = WorkspaceTabCellContext {
-        showing_settings: app.showing_settings(),
-        duplicate_name_counts,
-        active_tab_index: active_slot_index,
-        pending_scroll_to_active,
+        showing_settings: context.app.showing_settings(),
+        duplicate_name_counts: context.duplicate_name_counts,
+        active_tab_index: context.active_slot_index,
+        pending_scroll_to_active: context.pending_scroll_to_active,
     };
 
-    for slot_index in 0..app.total_tab_slots() {
-        let cell_outcome = if app.tab_slot_is_settings(slot_index) {
-            render_settings_tab_cell(ui, app, slot_index, active_slot_index, outcome)
+    let total_slots = context.app.total_tab_slots();
+    let mut row_rects = Vec::with_capacity(total_slots);
+
+    for slot_index in 0..total_slots {
+        let cell_outcome = if context.app.tab_slot_is_settings(slot_index) {
+            render_settings_tab_cell(
+                ui,
+                context.app,
+                slot_index,
+                context.active_slot_index,
+                context.outcome,
+            )
         } else {
-            let workspace_index = app
+            let workspace_index = context
+                .app
                 .workspace_index_for_slot(slot_index)
                 .unwrap_or(slot_index);
-            let tab = &app.tabs()[workspace_index];
-            render_workspace_tab_cell(ui, slot_index, tab, &cell_context, outcome)
+            let tab = &context.app.tabs()[workspace_index];
+            render_workspace_tab_cell(ui, slot_index, tab, &cell_context, context.outcome)
         };
 
         record_visible_tab(
             slot_index,
             cell_outcome.rect,
-            viewport_rect,
-            visible_tab_indices,
+            context.viewport_rect,
+            context.visible_tab_indices,
         );
         row_rects.push(TabRectEntry {
             index: slot_index,
             rect: cell_outcome.rect,
-            combine_enabled: !app.tab_slot_is_settings(slot_index),
+            combine_enabled: !context.app.tab_slot_is_settings(slot_index),
         });
     }
+
+    row_rects
 }
 
 fn render_workspace_tab_cell(

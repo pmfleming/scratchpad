@@ -3,7 +3,12 @@ use crate::app::fonts::EditorFontPreset;
 use crate::app::logging::{self, LogLevel};
 use crate::app::paths_match;
 use crate::app::services::file_controller::FileController;
-use crate::app::services::settings_store::AppSettings;
+use crate::app::services::settings_store::{
+    AppSettings, AppThemeMode, DEFAULT_EDITOR_BACKGROUND_COLOR, DEFAULT_EDITOR_TEXT_COLOR,
+    LIGHT_EDITOR_BACKGROUND_COLOR, LIGHT_EDITOR_TEXT_COLOR, TabListPosition, color_from_hex,
+    color_to_hex,
+};
+use eframe::egui;
 use std::path::{Path, PathBuf};
 
 mod display_tabs;
@@ -22,6 +27,28 @@ impl ScratchpadApp {
         self.app_settings.editor_gutter
     }
 
+    pub fn theme_mode(&self) -> AppThemeMode {
+        self.app_settings.theme_mode
+    }
+
+    pub(crate) fn has_custom_editor_palette(&self) -> bool {
+        !uses_stock_editor_palette(&self.app_settings)
+    }
+
+    pub fn editor_text_color(&self) -> egui::Color32 {
+        color_from_hex(
+            &self.app_settings.editor_text_color,
+            color_from_hex(DEFAULT_EDITOR_TEXT_COLOR, egui::Color32::WHITE),
+        )
+    }
+
+    pub fn editor_background_color(&self) -> egui::Color32 {
+        color_from_hex(
+            &self.app_settings.editor_background_color,
+            color_from_hex(DEFAULT_EDITOR_BACKGROUND_COLOR, egui::Color32::BLACK),
+        )
+    }
+
     pub fn showing_settings(&self) -> bool {
         self.active_surface == AppSurface::Settings
     }
@@ -36,6 +63,18 @@ impl ScratchpadApp {
 
     pub fn logging_enabled(&self) -> bool {
         self.app_settings.logging_enabled
+    }
+
+    pub fn tab_list_position(&self) -> TabListPosition {
+        self.app_settings.tab_list_position
+    }
+
+    pub fn tab_list_width(&self) -> f32 {
+        self.app_settings.tab_list_width
+    }
+
+    pub fn auto_hide_tab_list(&self) -> bool {
+        self.app_settings.auto_hide_tab_list
     }
 
     pub fn settings_path(&self) -> PathBuf {
@@ -86,6 +125,8 @@ impl ScratchpadApp {
     }
 
     pub(super) fn apply_settings(&mut self, settings: AppSettings) {
+        let mut settings = settings;
+        sync_stock_editor_palette_with_theme_mode(&mut settings);
         self.active_surface = if settings.settings_tab_open {
             AppSurface::Settings
         } else {
@@ -104,6 +145,12 @@ impl ScratchpadApp {
     pub(crate) fn persist_settings_now(&mut self) -> std::io::Result<()> {
         self.refresh_settings_snapshot();
         self.settings_store.save(&self.app_settings)
+    }
+
+    pub fn apply_theme_to_context(&self, ctx: &egui::Context) {
+        ctx.set_theme(self.app_settings.theme_mode.theme_preference());
+        ctx.set_visuals_of(egui::Theme::Dark, egui::Visuals::dark());
+        ctx.set_visuals_of(egui::Theme::Light, egui::Visuals::light());
     }
 
     pub(crate) fn set_font_size(&mut self, font_size: f32) {
@@ -148,6 +195,103 @@ impl ScratchpadApp {
         }
 
         self.app_settings.editor_gutter = next;
+        if let Err(error) = self.persist_settings_now() {
+            self.set_error_status(format!("Settings save failed: {error}"));
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_theme_mode(&mut self, theme_mode: AppThemeMode) {
+        if self.app_settings.theme_mode == theme_mode {
+            return;
+        }
+
+        self.app_settings.theme_mode = theme_mode;
+        sync_stock_editor_palette_with_theme_mode(&mut self.app_settings);
+        if let Err(error) = self.persist_settings_now() {
+            self.set_error_status(format!("Settings save failed: {error}"));
+        }
+    }
+
+    pub(crate) fn apply_theme_mode_preset(
+        &mut self,
+        theme_mode: AppThemeMode,
+        system_theme: Option<egui::Theme>,
+    ) {
+        let (text_color, background_color) =
+            stock_editor_palette_for_selection(theme_mode, system_theme);
+        if self.app_settings.theme_mode == theme_mode
+            && self.app_settings.editor_text_color == text_color
+            && self.app_settings.editor_background_color == background_color
+        {
+            return;
+        }
+
+        self.app_settings.theme_mode = theme_mode;
+        self.app_settings.editor_text_color = text_color.to_owned();
+        self.app_settings.editor_background_color = background_color.to_owned();
+        if let Err(error) = self.persist_settings_now() {
+            self.set_error_status(format!("Settings save failed: {error}"));
+        }
+    }
+
+    pub(crate) fn set_editor_text_color(&mut self, color: egui::Color32) {
+        let next = color_to_hex(color);
+        if self.app_settings.editor_text_color == next {
+            return;
+        }
+
+        self.app_settings.editor_text_color = next;
+        if let Err(error) = self.persist_settings_now() {
+            self.set_error_status(format!("Settings save failed: {error}"));
+        }
+    }
+
+    pub(crate) fn set_editor_background_color(&mut self, color: egui::Color32) {
+        let next = color_to_hex(color);
+        if self.app_settings.editor_background_color == next {
+            return;
+        }
+
+        self.app_settings.editor_background_color = next;
+        if let Err(error) = self.persist_settings_now() {
+            self.set_error_status(format!("Settings save failed: {error}"));
+        }
+    }
+
+    pub(crate) fn set_tab_list_position(&mut self, position: TabListPosition) {
+        if self.app_settings.tab_list_position == position {
+            return;
+        }
+
+        self.app_settings.tab_list_position = position;
+        if position.is_vertical() {
+            self.overflow_popup_open = false;
+        }
+        self.tab_manager.pending_scroll_to_active = true;
+        if let Err(error) = self.persist_settings_now() {
+            self.set_error_status(format!("Settings save failed: {error}"));
+        }
+    }
+
+    pub(crate) fn set_auto_hide_tab_list(&mut self, enabled: bool) {
+        if self.app_settings.auto_hide_tab_list == enabled {
+            return;
+        }
+
+        self.app_settings.auto_hide_tab_list = enabled;
+        if let Err(error) = self.persist_settings_now() {
+            self.set_error_status(format!("Settings save failed: {error}"));
+        }
+    }
+
+    pub(crate) fn set_tab_list_width_from_layout(&mut self, width: f32) {
+        let next = width.clamp(96.0, 360.0);
+        if (self.app_settings.tab_list_width - next).abs() < 1.0 {
+            return;
+        }
+
+        self.app_settings.tab_list_width = next;
         if let Err(error) = self.persist_settings_now() {
             self.set_error_status(format!("Settings save failed: {error}"));
         }
@@ -246,5 +390,159 @@ impl ScratchpadApp {
 
     pub(crate) fn activate_workspace_surface(&mut self) {
         self.active_surface = AppSurface::Workspace;
+    }
+}
+
+fn sync_stock_editor_palette_with_theme_mode(settings: &mut AppSettings) {
+    let Some((text_color, background_color)) = stock_editor_palette(settings.theme_mode) else {
+        return;
+    };
+
+    if !uses_stock_editor_palette(settings) {
+        return;
+    }
+
+    if settings.editor_text_color == text_color
+        && settings.editor_background_color == background_color
+    {
+        return;
+    }
+
+    settings.editor_text_color = text_color.to_owned();
+    settings.editor_background_color = background_color.to_owned();
+}
+
+fn uses_stock_editor_palette(settings: &AppSettings) -> bool {
+    matches!(
+        (
+            settings.editor_text_color.as_str(),
+            settings.editor_background_color.as_str(),
+        ),
+        (DEFAULT_EDITOR_TEXT_COLOR, DEFAULT_EDITOR_BACKGROUND_COLOR)
+            | (LIGHT_EDITOR_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR)
+    )
+}
+
+fn stock_editor_palette(theme_mode: AppThemeMode) -> Option<(&'static str, &'static str)> {
+    match theme_mode {
+        AppThemeMode::System => None,
+        AppThemeMode::Light => Some((LIGHT_EDITOR_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR)),
+        AppThemeMode::Dark => Some((DEFAULT_EDITOR_TEXT_COLOR, DEFAULT_EDITOR_BACKGROUND_COLOR)),
+    }
+}
+
+fn stock_editor_palette_for_selection(
+    theme_mode: AppThemeMode,
+    system_theme: Option<egui::Theme>,
+) -> (&'static str, &'static str) {
+    match theme_mode {
+        AppThemeMode::System => match system_theme.unwrap_or(egui::Theme::Dark) {
+            egui::Theme::Light => (LIGHT_EDITOR_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR),
+            egui::Theme::Dark => (DEFAULT_EDITOR_TEXT_COLOR, DEFAULT_EDITOR_BACKGROUND_COLOR),
+        },
+        AppThemeMode::Light => (LIGHT_EDITOR_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR),
+        AppThemeMode::Dark => (DEFAULT_EDITOR_TEXT_COLOR, DEFAULT_EDITOR_BACKGROUND_COLOR),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::services::session_store::SessionStore;
+
+    #[test]
+    fn applying_light_mode_settings_migrates_stock_editor_palette() {
+        let session_root = tempfile::tempdir().expect("create session dir");
+        let session_store = SessionStore::new(session_root.path().to_path_buf());
+        let mut app = ScratchpadApp::with_session_store(session_store);
+
+        app.apply_settings(AppSettings {
+            theme_mode: AppThemeMode::Light,
+            editor_text_color: DEFAULT_EDITOR_TEXT_COLOR.to_owned(),
+            editor_background_color: DEFAULT_EDITOR_BACKGROUND_COLOR.to_owned(),
+            ..AppSettings::default()
+        });
+
+        assert_eq!(app.editor_text_color(), egui::Color32::BLACK);
+        assert_eq!(app.editor_background_color(), egui::Color32::WHITE);
+    }
+
+    #[test]
+    fn switching_to_light_mode_updates_stock_editor_palette() {
+        let session_root = tempfile::tempdir().expect("create session dir");
+        let session_store = SessionStore::new(session_root.path().to_path_buf());
+        let mut app = ScratchpadApp::with_session_store(session_store);
+
+        app.set_theme_mode(AppThemeMode::Light);
+
+        assert_eq!(app.editor_text_color(), egui::Color32::BLACK);
+        assert_eq!(app.editor_background_color(), egui::Color32::WHITE);
+    }
+
+    #[test]
+    fn switching_theme_preserves_custom_editor_palette() {
+        let session_root = tempfile::tempdir().expect("create session dir");
+        let session_store = SessionStore::new(session_root.path().to_path_buf());
+        let mut app = ScratchpadApp::with_session_store(session_store);
+
+        let custom_text = egui::Color32::from_rgb(12, 34, 56);
+        let custom_background = egui::Color32::from_rgb(210, 220, 230);
+        app.set_editor_text_color(custom_text);
+        app.set_editor_background_color(custom_background);
+
+        app.set_theme_mode(AppThemeMode::Light);
+
+        assert_eq!(app.editor_text_color(), custom_text);
+        assert_eq!(app.editor_background_color(), custom_background);
+    }
+
+    #[test]
+    fn custom_palette_is_detected_after_editor_color_change() {
+        let session_root = tempfile::tempdir().expect("create session dir");
+        let session_store = SessionStore::new(session_root.path().to_path_buf());
+        let mut app = ScratchpadApp::with_session_store(session_store);
+
+        assert!(!app.has_custom_editor_palette());
+
+        app.set_editor_text_color(egui::Color32::from_rgb(12, 34, 56));
+
+        assert!(app.has_custom_editor_palette());
+    }
+
+    #[test]
+    fn applying_light_theme_preset_clears_custom_palette() {
+        let session_root = tempfile::tempdir().expect("create session dir");
+        let session_store = SessionStore::new(session_root.path().to_path_buf());
+        let mut app = ScratchpadApp::with_session_store(session_store);
+
+        app.set_editor_text_color(egui::Color32::from_rgb(12, 34, 56));
+        app.set_editor_background_color(egui::Color32::from_rgb(210, 220, 230));
+
+        app.apply_theme_mode_preset(AppThemeMode::Light, Some(egui::Theme::Light));
+
+        assert_eq!(app.theme_mode(), AppThemeMode::Light);
+        assert!(!app.has_custom_editor_palette());
+        assert_eq!(app.editor_text_color(), egui::Color32::BLACK);
+        assert_eq!(app.editor_background_color(), egui::Color32::WHITE);
+    }
+
+    #[test]
+    fn applying_system_theme_preset_clears_custom_palette() {
+        let session_root = tempfile::tempdir().expect("create session dir");
+        let session_store = SessionStore::new(session_root.path().to_path_buf());
+        let mut app = ScratchpadApp::with_session_store(session_store);
+
+        app.set_editor_text_color(egui::Color32::from_rgb(12, 34, 56));
+        app.set_editor_background_color(egui::Color32::from_rgb(210, 220, 230));
+
+        app.apply_theme_mode_preset(AppThemeMode::System, Some(egui::Theme::Dark));
+
+        assert_eq!(app.theme_mode(), AppThemeMode::System);
+        assert!(!app.has_custom_editor_palette());
+        assert_eq!(app.editor_text_color(), egui::Color32::WHITE);
+        assert_eq!(
+            app.editor_background_color(),
+            egui::Color32::from_rgb(21, 24, 29)
+        );
     }
 }

@@ -1,5 +1,5 @@
 use super::{SplitAxis, SplitPreviewOverlay, split_rect};
-use crate::app::theme::HEADER_BG;
+use crate::app::theme::header_bg;
 use eframe::egui;
 
 pub fn paint_split_preview(ui: &egui::Ui, overlay: &SplitPreviewOverlay) {
@@ -151,7 +151,7 @@ fn paint_preview_frame(ui: &egui::Ui, rect: egui::Rect, is_new_tile: bool) {
     let frame_fill = if is_new_tile {
         egui::Color32::from_rgba_unmultiplied(46, 63, 88, 220)
     } else {
-        HEADER_BG.gamma_multiply(0.94)
+        header_bg(ui).gamma_multiply(0.94)
     };
     let border = if is_new_tile {
         egui::Color32::from_rgba_unmultiplied(120, 180, 255, 220)

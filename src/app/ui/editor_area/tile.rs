@@ -2,9 +2,13 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::{RenderedLayout, ViewId, WorkspaceTab};
 use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::theme::*;
-use crate::app::ui::editor_content::{self, EditorContentOutcome};
+use crate::app::ui::editor_content::{
+    self, EditorContentOutcome, EditorContentStyle, TextEditOptions,
+};
 use crate::app::ui::tab_drag;
-use crate::app::ui::tile_header::{self, SplitPreviewOverlay, TileAction};
+use crate::app::ui::tile_header::{
+    self, SplitPreviewOverlay, TileAction, TileHeaderRequest, TileHeaderState,
+};
 use eframe::egui;
 
 struct TileBodyOutcome {
@@ -12,35 +16,64 @@ struct TileBodyOutcome {
     focused: bool,
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn render_tile(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
+#[derive(Clone, Copy)]
+pub(super) struct TileRenderRequest {
+    pub(super) tab_index: usize,
+    pub(super) view_id: ViewId,
+    pub(super) rect: egui::Rect,
+    pub(super) is_active: bool,
+    pub(super) can_close: bool,
+}
+
+pub(super) struct TileRenderState<'a> {
+    pub(super) actions: &'a mut Vec<TileAction>,
+    pub(super) any_editor_changed: &'a mut bool,
+    pub(super) preview_overlay: &'a mut Option<SplitPreviewOverlay>,
+}
+
+struct TileScrollRequest<'a> {
     tab_index: usize,
     view_id: ViewId,
-    rect: egui::Rect,
-    is_active: bool,
-    can_close: bool,
-    actions: &mut Vec<TileAction>,
-    any_editor_changed: &mut bool,
-    preview_overlay: &mut Option<SplitPreviewOverlay>,
-) {
-    ui.scope_builder(tile_ui_builder(rect), |ui| {
-        handle_tile_click(ui, rect, tab_index, view_id, actions);
-        paint_tile_frame(ui, rect, is_active);
+    scroll_bar_visibility: egui::scroll_area::ScrollBarVisibility,
+    content_style: EditorContentStyle<'a>,
+}
 
-        let body_outcome = render_tile_body(ui, app, tab_index, view_id, rect);
-        *any_editor_changed |= body_outcome.changed;
-        apply_tile_body_focus(body_outcome.focused, is_active, view_id, actions);
+pub(super) fn render_tile(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    request: TileRenderRequest,
+    state: &mut TileRenderState<'_>,
+) {
+    ui.scope_builder(tile_ui_builder(request.rect), |ui| {
+        handle_tile_click(ui, request, state.actions);
+        paint_tile_frame(
+            ui,
+            request.rect,
+            request.is_active,
+            app.editor_background_color(),
+        );
+
+        let body_outcome = render_tile_body(ui, app, request);
+        *state.any_editor_changed |= body_outcome.changed;
+        apply_tile_body_focus(
+            body_outcome.focused,
+            request.is_active,
+            request.view_id,
+            state.actions,
+        );
         tile_header::render_tile_header(
             ui,
             app,
-            tab_index,
-            view_id,
-            rect,
-            can_close,
-            actions,
-            preview_overlay,
+            TileHeaderRequest {
+                tab_index: request.tab_index,
+                view_id: request.view_id,
+                tile_rect: request.rect,
+                can_close: request.can_close,
+            },
+            &mut TileHeaderState {
+                actions: state.actions,
+                preview_overlay: state.preview_overlay,
+            },
         );
     });
 }
@@ -48,33 +81,40 @@ pub fn render_tile(
 fn render_tile_body(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
-    tab_index: usize,
-    view_id: ViewId,
-    rect: egui::Rect,
+    request: TileRenderRequest,
 ) -> TileBodyOutcome {
-    ui.scope_builder(tile_ui_builder(rect), |ui| {
+    ui.scope_builder(tile_ui_builder(request.rect), |ui| {
         let editor_font_id = editor_font_id(app.font_size());
-        let scroll_bar_visibility = editor_scroll_bar_visibility(ui.ctx());
-        let request_focus = app.should_focus_view(view_id);
-        let word_wrap = app.word_wrap();
+        let request_focus = app.should_focus_view(request.view_id);
         let editor_gutter = app.editor_gutter();
-        let tab = &mut app.tabs_mut()[tab_index];
-        let previous_layout = take_previous_layout(tab, view_id);
+        let word_wrap = app.word_wrap();
+        let text_color = app.editor_text_color();
+        let background_color = app.editor_background_color();
+        let tab = &mut app.tabs_mut()[request.tab_index];
+        let previous_layout = take_previous_layout(tab, request.view_id);
         let outcome = show_editor_scroll_area(
             ui,
-            editor_gutter,
             tab,
-            tab_index,
-            view_id,
-            word_wrap,
-            &editor_font_id,
-            previous_layout.as_ref(),
-            request_focus,
-            scroll_bar_visibility,
+            TileScrollRequest {
+                tab_index: request.tab_index,
+                view_id: request.view_id,
+                scroll_bar_visibility: editor_scroll_bar_visibility(ui.ctx()),
+                content_style: EditorContentStyle {
+                    editor_gutter,
+                    previous_layout: previous_layout.as_ref(),
+                    text_edit: TextEditOptions::new(
+                        request_focus,
+                        word_wrap,
+                        &editor_font_id,
+                        text_color,
+                    ),
+                    background_color,
+                },
+            },
         );
-        restore_previous_layout_if_needed(tab, view_id, previous_layout);
+        restore_previous_layout_if_needed(tab, request.view_id, previous_layout);
         if request_focus {
-            app.consume_focus_request(view_id);
+            app.consume_focus_request(request.view_id);
         }
 
         TileBodyOutcome {
@@ -91,29 +131,32 @@ fn tile_ui_builder(rect: egui::Rect) -> egui::UiBuilder {
         .layout(egui::Layout::top_down(egui::Align::Min))
 }
 
-fn handle_tile_click(
-    ui: &mut egui::Ui,
-    rect: egui::Rect,
-    tab_index: usize,
-    view_id: ViewId,
-    actions: &mut Vec<TileAction>,
-) {
+fn handle_tile_click(ui: &mut egui::Ui, request: TileRenderRequest, actions: &mut Vec<TileAction>) {
     let tile_response = ui.interact(
-        rect,
-        ui.make_persistent_id(("tile", tab_index, view_id)),
+        request.rect,
+        ui.make_persistent_id(("tile", request.tab_index, request.view_id)),
         egui::Sense::click(),
     );
     if tile_response.clicked() {
-        actions.push(TileAction::Activate(view_id));
+        actions.push(TileAction::Activate(request.view_id));
     }
 }
 
-fn paint_tile_frame(ui: &egui::Ui, rect: egui::Rect, is_active: bool) {
-    let bg = if is_active { HEADER_BG } else { EDITOR_BG };
+fn paint_tile_frame(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    is_active: bool,
+    background_color: egui::Color32,
+) {
+    let bg = if is_active {
+        header_bg(ui)
+    } else {
+        background_color
+    };
     let border_color = if is_active {
         egui::Color32::LIGHT_BLUE
     } else {
-        BORDER
+        border(ui)
     };
 
     ui.painter().rect_filled(rect, 4.0, bg);
@@ -153,63 +196,23 @@ fn take_previous_layout(tab: &mut WorkspaceTab, view_id: ViewId) -> Option<Rende
         .and_then(|view| view.latest_layout.take())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn show_editor_scroll_area(
     ui: &mut egui::Ui,
-    editor_gutter: u8,
     tab: &mut WorkspaceTab,
-    tab_index: usize,
-    view_id: ViewId,
-    word_wrap: bool,
-    editor_font_id: &egui::FontId,
-    previous_layout: Option<&RenderedLayout>,
-    request_focus: bool,
-    scroll_bar_visibility: egui::scroll_area::ScrollBarVisibility,
+    request: TileScrollRequest<'_>,
 ) -> EditorContentOutcome {
     egui::ScrollArea::both()
-        .id_salt(("editor_scroll", tab_index, view_id))
+        .id_salt(("editor_scroll", request.tab_index, request.view_id))
         .auto_shrink([false, false])
-        .scroll_bar_visibility(scroll_bar_visibility)
+        .scroll_bar_visibility(request.scroll_bar_visibility)
         .show(ui, |ui| {
-            render_editor_body_content(
-                ui,
-                editor_gutter,
-                tab,
-                view_id,
-                previous_layout,
-                request_focus,
-                word_wrap,
-                editor_font_id,
-            )
+            tab.buffer_and_view_mut(request.view_id)
+                .map(|(buffer, view)| {
+                    editor_content::render_editor_content(ui, buffer, view, request.content_style)
+                })
+                .unwrap_or_else(missing_editor_content_outcome)
         })
         .inner
-}
-
-#[allow(clippy::too_many_arguments)]
-fn render_editor_body_content(
-    ui: &mut egui::Ui,
-    editor_gutter: u8,
-    tab: &mut WorkspaceTab,
-    view_id: ViewId,
-    previous_layout: Option<&RenderedLayout>,
-    request_focus: bool,
-    word_wrap: bool,
-    editor_font_id: &egui::FontId,
-) -> EditorContentOutcome {
-    if let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) {
-        editor_content::render_editor_content(
-            ui,
-            editor_gutter,
-            buffer,
-            view,
-            previous_layout,
-            request_focus,
-            word_wrap,
-            editor_font_id,
-        )
-    } else {
-        missing_editor_content_outcome()
-    }
 }
 
 fn restore_previous_layout_if_needed(

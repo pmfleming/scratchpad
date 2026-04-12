@@ -9,73 +9,100 @@ use eframe::egui;
 pub use control::{TileControl, TileControlStyle};
 pub use split::{SplitPreviewOverlay, TILE_GAP, TileAction, TileSplitHandler, paint_split_preview};
 
-#[allow(clippy::too_many_arguments)]
+pub(crate) struct TileHeaderRequest {
+    pub(crate) tab_index: usize,
+    pub(crate) view_id: ViewId,
+    pub(crate) tile_rect: egui::Rect,
+    pub(crate) can_close: bool,
+}
+
+pub(crate) struct TileHeaderState<'a> {
+    pub(crate) actions: &'a mut Vec<TileAction>,
+    pub(crate) preview_overlay: &'a mut Option<SplitPreviewOverlay>,
+}
+
 pub(crate) fn render_tile_header(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
-    tab_index: usize,
-    view_id: ViewId,
-    tile_rect: egui::Rect,
-    can_close: bool,
-    actions: &mut Vec<TileAction>,
-    preview_overlay: &mut Option<SplitPreviewOverlay>,
+    request: TileHeaderRequest,
+    state: &mut TileHeaderState<'_>,
 ) {
-    let title = app.tabs()[tab_index]
-        .buffer_for_view(view_id)
+    let title = app.tabs()[request.tab_index]
+        .buffer_for_view(request.view_id)
         .map(|buffer| buffer.display_name())
-        .unwrap_or_else(|| app.tabs()[tab_index].display_name());
-    let content_preview = app.tabs()[tab_index]
-        .buffer_for_view(view_id)
+        .unwrap_or_else(|| app.tabs()[request.tab_index].display_name());
+    let content_preview = app.tabs()[request.tab_index]
+        .buffer_for_view(request.view_id)
         .map(|buffer| buffer.content.clone())
         .unwrap_or_default();
-    let split_handler = TileSplitHandler::new(ui, tab_index, view_id, tile_rect);
-    let controls_visible = control_visibility(ui, &split_handler, tile_rect);
+    let split_handler =
+        TileSplitHandler::new(ui, request.tab_index, request.view_id, request.tile_rect);
+    let controls_visible = control_visibility(ui, &split_handler, request.tile_rect);
     if controls_visible <= 0.0 {
         return;
     }
 
-    let can_promote = app.tabs()[tab_index].can_promote_view(view_id);
-    let metrics = tile_control_metrics(tile_rect, can_close);
-    let rects = tile_header_rects(tile_rect, can_promote, can_close, &metrics);
-    maybe_show_promote_control(
-        ui,
-        can_promote,
-        tab_index,
-        view_id,
-        rects.promote_hit,
-        metrics.font_size,
-        controls_visible,
-        actions,
-    );
+    let can_promote = app.tabs()[request.tab_index].can_promote_view(request.view_id);
+    let metrics = tile_control_metrics(request.tile_rect, request.can_close);
+    let rects = tile_header_rects(request.tile_rect, can_promote, request.can_close, &metrics);
+    let control = TileControlContext {
+        tab_index: request.tab_index,
+        view_id: request.view_id,
+        font_size: metrics.font_size,
+        visibility: controls_visible,
+    };
+    if can_promote
+        && show_control(
+            ui,
+            control,
+            rects.promote_hit,
+            TileControlSpec {
+                label: egui_phosphor::regular::ARROW_LINE_UP,
+                tooltip: Some("Promote this file's tiles into a new top-level tab"),
+                style: TileControlStyle::Default,
+                sense: egui::Sense::click(),
+                id_prefix: "promote_view",
+            },
+        )
+        .clicked()
+    {
+        state.actions.push(TileAction::Promote(request.view_id));
+    }
     let split_response = show_split_control(
         ui,
-        tab_index,
-        view_id,
+        request.tab_index,
+        request.view_id,
         rects.split_hit,
         metrics.font_size,
         controls_visible,
     );
-
-    update_split_preview(
-        ui,
-        &split_handler,
-        &split_response,
-        actions,
-        preview_overlay,
-        &title,
-        &content_preview,
-        rects.split_hit,
-    );
-    maybe_show_close_control(
-        ui,
-        can_close,
-        tab_index,
-        view_id,
-        rects.close_hit,
-        metrics.font_size,
-        controls_visible,
-        actions,
-    );
+    if let Some(preview_state) =
+        split_handler.handle_interaction(ui, &split_response, state.actions)
+    {
+        *state.preview_overlay = Some(split_handler.make_preview(
+            preview_state,
+            title.to_owned(),
+            &content_preview,
+            rects.split_hit,
+        ));
+    }
+    if request.can_close
+        && show_control(
+            ui,
+            control,
+            rects.close_hit,
+            TileControlSpec {
+                label: "×",
+                tooltip: None,
+                style: TileControlStyle::Danger,
+                sense: egui::Sense::click(),
+                id_prefix: "close_view",
+            },
+        )
+        .clicked()
+    {
+        state.actions.push(TileAction::Close(request.view_id));
+    }
 }
 
 struct TileHeaderRects {
@@ -89,6 +116,22 @@ struct TileControlMetrics {
     padding: f32,
     spacing: f32,
     font_size: f32,
+}
+
+#[derive(Clone, Copy)]
+struct TileControlContext {
+    tab_index: usize,
+    view_id: ViewId,
+    font_size: f32,
+    visibility: f32,
+}
+
+struct TileControlSpec {
+    label: &'static str,
+    tooltip: Option<&'static str>,
+    style: TileControlStyle,
+    sense: egui::Sense,
+    id_prefix: &'static str,
 }
 
 const TILE_CONTROL_PADDING: f32 = 6.0;
@@ -136,81 +179,25 @@ fn show_split_control(
         )
 }
 
-#[allow(clippy::too_many_arguments)]
-fn maybe_show_promote_control(
+fn show_control(
     ui: &mut egui::Ui,
-    can_promote: bool,
-    tab_index: usize,
-    view_id: ViewId,
-    promote_hit: egui::Rect,
-    font_size: f32,
-    controls_visible: f32,
-    actions: &mut Vec<TileAction>,
-) {
-    if !can_promote {
-        return;
+    control: TileControlContext,
+    hit_rect: egui::Rect,
+    spec: TileControlSpec,
+) -> egui::Response {
+    let mut tile_control = TileControl::new(spec.label)
+        .style(spec.style)
+        .visibility(control.visibility)
+        .font_size(control.font_size);
+    if let Some(tooltip) = spec.tooltip {
+        tile_control = tile_control.tooltip(tooltip);
     }
-
-    let promote_response = TileControl::new(egui_phosphor::regular::ARROW_LINE_UP)
-        .visibility(controls_visible)
-        .font_size(font_size)
-        .tooltip("Promote this file's tiles into a new top-level tab")
-        .show(
-            ui,
-            promote_hit,
-            ui.make_persistent_id(("promote_view", tab_index, view_id)),
-            egui::Sense::click(),
-        );
-    if promote_response.clicked() {
-        actions.push(TileAction::Promote(view_id));
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn update_split_preview(
-    ui: &mut egui::Ui,
-    split_handler: &TileSplitHandler,
-    split_response: &egui::Response,
-    actions: &mut Vec<TileAction>,
-    preview_overlay: &mut Option<SplitPreviewOverlay>,
-    title: &str,
-    content_preview: &str,
-    split_hit: egui::Rect,
-) {
-    if let Some(state) = split_handler.handle_interaction(ui, split_response, actions) {
-        *preview_overlay =
-            Some(split_handler.make_preview(state, title.to_owned(), content_preview, split_hit));
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn maybe_show_close_control(
-    ui: &mut egui::Ui,
-    can_close: bool,
-    tab_index: usize,
-    view_id: ViewId,
-    close_hit: egui::Rect,
-    font_size: f32,
-    controls_visible: f32,
-    actions: &mut Vec<TileAction>,
-) {
-    if !can_close {
-        return;
-    }
-
-    let close_response = TileControl::new("×")
-        .style(TileControlStyle::Danger)
-        .visibility(controls_visible)
-        .font_size(font_size)
-        .show(
-            ui,
-            close_hit,
-            ui.make_persistent_id(("close_view", tab_index, view_id)),
-            egui::Sense::click(),
-        );
-    if close_response.clicked() {
-        actions.push(TileAction::Close(view_id));
-    }
+    tile_control.show(
+        ui,
+        hit_rect,
+        ui.make_persistent_id((spec.id_prefix, control.tab_index, control.view_id)),
+        spec.sense,
+    )
 }
 
 fn tile_header_rects(

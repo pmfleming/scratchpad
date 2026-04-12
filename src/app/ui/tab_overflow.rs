@@ -1,6 +1,7 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::chrome::tab_button_sized_with_actions;
 use crate::app::domain::WorkspaceTab;
+use crate::app::services::settings_store::TabListPosition;
 use crate::app::theme::*;
 use crate::app::ui::tab_drag;
 use eframe::egui::{self, Stroke};
@@ -35,7 +36,10 @@ struct OverflowPopupRequest<'a> {
     visible_tab_indices: &'a HashSet<usize>,
     overflow_popup_id: egui::Id,
     anchor: egui::Pos2,
+    pivot: egui::Align2,
 }
+
+const BOTTOM_OVERFLOW_GAP: f32 = 6.0;
 
 pub(crate) fn show_overflow_button(
     ctx: &egui::Context,
@@ -50,11 +54,13 @@ pub(crate) fn show_overflow_button(
     let overflow_button_response = overflow_button(ui);
     toggle_overflow_popup(overflow_popup_open, &overflow_button_response);
 
+    let (anchor, pivot) = overflow_popup_anchor(app, overflow_button_response.rect);
     let popup_request = OverflowPopupRequest {
         app,
         visible_tab_indices,
         overflow_popup_id,
-        anchor: overflow_button_response.rect.right_bottom(),
+        anchor,
+        pivot,
     };
 
     if let Some(area_response) =
@@ -76,10 +82,10 @@ fn overflow_button(ui: &mut egui::Ui) -> egui::Response {
     ui.add_sized(
         [BUTTON_SIZE.x, BUTTON_SIZE.y],
         egui::Button::new(
-            egui::RichText::new(egui_phosphor::regular::CARET_DOWN).color(TEXT_PRIMARY),
+            egui::RichText::new(egui_phosphor::regular::CARET_DOWN).color(text_primary(ui)),
         )
-        .fill(ACTION_BG)
-        .stroke(Stroke::new(1.0, BORDER)),
+        .fill(action_bg(ui))
+        .stroke(Stroke::new(1.0, border(ui))),
     )
 }
 
@@ -105,7 +111,7 @@ fn show_overflow_popup(
         .order(egui::Order::Foreground)
         .constrain(true)
         .fixed_pos(request.anchor)
-        .pivot(egui::Align2::RIGHT_TOP)
+        .pivot(request.pivot)
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 ui.set_width(popup_width);
@@ -129,6 +135,21 @@ fn show_overflow_popup(
 
     outcome.drop_zone = build_overflow_drop_zone(&area_response.inner.inner);
     Some(area_response)
+}
+
+fn overflow_popup_anchor(
+    app: &ScratchpadApp,
+    button_rect: egui::Rect,
+) -> (egui::Pos2, egui::Align2) {
+    match app.tab_list_position() {
+        TabListPosition::Bottom => (
+            egui::pos2(button_rect.right(), button_rect.top() - BOTTOM_OVERFLOW_GAP),
+            egui::Align2::RIGHT_BOTTOM,
+        ),
+        TabListPosition::Top | TabListPosition::Left | TabListPosition::Right => {
+            (button_rect.right_bottom(), egui::Align2::RIGHT_TOP)
+        }
+    }
 }
 
 fn collect_overflow_row_rects(
@@ -267,11 +288,11 @@ fn show_overflow_row(
 fn render_drag_source_placeholder(ui: &mut egui::Ui, width: f32) -> egui::Rect {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, TAB_HEIGHT), egui::Sense::hover());
     ui.painter()
-        .rect_filled(rect, 4.0, TAB_ACTIVE_BG.gamma_multiply(0.25));
+        .rect_filled(rect, 4.0, tab_active_bg(ui).gamma_multiply(0.25));
     ui.painter().rect_stroke(
         rect,
         4.0,
-        Stroke::new(1.0, BORDER.gamma_multiply(0.75)),
+        Stroke::new(1.0, border(ui).gamma_multiply(0.75)),
         egui::StrokeKind::Outside,
     );
     rect

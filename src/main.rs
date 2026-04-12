@@ -49,14 +49,7 @@ fn main() -> eframe::Result<()> {
             };
             let app = ScratchpadApp::with_startup_options(startup_options);
             let _ = fonts::apply_editor_fonts(&cc.egui_ctx, app.editor_font());
-
-            let mut visuals = egui::Visuals::dark();
-            visuals.widgets.noninteractive.fg_stroke.color = scratchpad::app::theme::TEXT_PRIMARY;
-            visuals.widgets.inactive.fg_stroke.color = scratchpad::app::theme::TEXT_PRIMARY;
-            visuals.widgets.hovered.fg_stroke.color = scratchpad::app::theme::TEXT_PRIMARY;
-            visuals.widgets.active.fg_stroke.color = scratchpad::app::theme::TEXT_PRIMARY;
-            visuals.widgets.open.fg_stroke.color = scratchpad::app::theme::TEXT_PRIMARY;
-            cc.egui_ctx.set_visuals(visuals);
+            app.apply_theme_to_context(&cc.egui_ctx);
             cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
             Ok(Box::new(app))
         }),

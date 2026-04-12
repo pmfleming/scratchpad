@@ -8,7 +8,7 @@ use crate::app::ui::tile_header::{self, SplitPreviewOverlay, TileAction};
 use eframe::egui;
 
 pub use divider::{render_split_divider, split_rect};
-pub use tile::render_tile;
+use tile::{TileRenderRequest, TileRenderState};
 
 pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     egui::CentralPanel::default().show_inside(ui, |ui| {
@@ -68,21 +68,30 @@ fn render_editor_workspace(
         preview_overlay: None,
     };
 
+    let mut context = PaneRenderContext {
+        app,
+        tab_index: state.active_tab_index,
+        active_view_id: state.active_view_id,
+        leaf_count: state.leaf_count,
+        outcome: &mut outcome,
+    };
+
     render_pane_node(
         ui,
-        app,
-        state.active_tab_index,
+        &mut context,
         &state.pane_tree,
         Vec::new(),
         ui.max_rect(),
-        state.active_view_id,
-        state.leaf_count,
-        &mut outcome.actions,
-        &mut outcome.any_editor_changed,
-        &mut outcome.preview_overlay,
     );
-
     outcome
+}
+
+struct PaneRenderContext<'a> {
+    app: &'a mut ScratchpadApp,
+    tab_index: usize,
+    active_view_id: ViewId,
+    leaf_count: usize,
+    outcome: &'a mut EditorRenderOutcome,
 }
 
 fn paint_preview_overlay(ui: &egui::Ui, preview_overlay: Option<SplitPreviewOverlay>) {
@@ -126,33 +135,31 @@ fn handle_editor_zoom(ctx: &egui::Context, ui: &egui::Ui, app: &mut ScratchpadAp
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn render_pane_node(
     ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    tab_index: usize,
+    context: &mut PaneRenderContext<'_>,
     node: &PaneNode,
     path: Vec<PaneBranch>,
     rect: egui::Rect,
-    active_view_id: ViewId,
-    leaf_count: usize,
-    actions: &mut Vec<TileAction>,
-    any_editor_changed: &mut bool,
-    preview_overlay: &mut Option<SplitPreviewOverlay>,
 ) {
     match node {
-        PaneNode::Leaf { view_id } => render_tile(
-            ui,
-            app,
-            tab_index,
-            *view_id,
-            rect,
-            *view_id == active_view_id,
-            leaf_count > 1,
-            actions,
-            any_editor_changed,
-            preview_overlay,
-        ),
+        PaneNode::Leaf { view_id } => {
+            let request = TileRenderRequest {
+                tab_index: context.tab_index,
+                view_id: *view_id,
+                rect,
+                is_active: *view_id == context.active_view_id,
+                can_close: context.leaf_count > 1,
+            };
+            let app = &mut *context.app;
+            let outcome = &mut *context.outcome;
+            let mut tile_state = TileRenderState {
+                actions: &mut outcome.actions,
+                any_editor_changed: &mut outcome.any_editor_changed,
+                preview_overlay: &mut outcome.preview_overlay,
+            };
+            tile::render_tile(ui, app, request, &mut tile_state)
+        }
         PaneNode::Split {
             axis,
             ratio,
@@ -163,35 +170,18 @@ fn render_pane_node(
             let (first_rect, second_rect) = split_rect(rect, *axis, *ratio);
             let mut first_path = current_path.clone();
             first_path.push(PaneBranch::First);
-            render_pane_node(
-                ui,
-                app,
-                tab_index,
-                first,
-                first_path,
-                first_rect,
-                active_view_id,
-                leaf_count,
-                actions,
-                any_editor_changed,
-                preview_overlay,
-            );
+            render_pane_node(ui, context, first, first_path, first_rect);
             let mut second_path = current_path.clone();
             second_path.push(PaneBranch::Second);
-            render_pane_node(
+            render_pane_node(ui, context, second, second_path, second_rect);
+            render_split_divider(
                 ui,
-                app,
-                tab_index,
-                second,
-                second_path,
-                second_rect,
-                active_view_id,
-                leaf_count,
-                actions,
-                any_editor_changed,
-                preview_overlay,
+                rect,
+                *axis,
+                *ratio,
+                current_path,
+                &mut context.outcome.actions,
             );
-            render_split_divider(ui, rect, *axis, *ratio, current_path, actions);
         }
     }
 }

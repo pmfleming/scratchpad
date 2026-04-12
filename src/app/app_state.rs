@@ -60,12 +60,17 @@ impl eframe::App for ScratchpadApp {
         }
 
         handle_window_resize(&ctx);
+        self.apply_theme_to_context(&ctx);
         self.sync_editor_fonts(&ctx);
         session_manager::maybe_persist_session(self, &ctx);
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
 
-        tab_strip::show_header(ui, self);
+        if self.tab_list_position() == crate::app::services::settings_store::TabListPosition::Top {
+            tab_strip::show_header(ui, self);
+        }
         status_bar::show_status_bar(ui, self);
+        tab_strip::show_bottom_tab_list(ui, self);
+        tab_strip::show_vertical_tab_list(ui, self);
         match self.active_surface {
             AppSurface::Workspace => editor_area::show_editor(ui, self),
             AppSurface::Settings => settings::show_page(ui, self),

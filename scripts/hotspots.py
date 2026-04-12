@@ -8,8 +8,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from report_modes import add_mode_argument, emit_report
 
 DEFAULT_OUTPUT = Path("hotspots.json")
+VISIBILITY_OUTPUT = Path("target/analysis/hotspots.json")
 
 
 @dataclass
@@ -113,34 +115,9 @@ class HotspotAnalyzer:
             print("Error: 'rust-code-analysis-cli' not found in PATH.", file=sys.stderr)
             sys.exit(1)
 
-        cmd = [
-            "rust-code-analysis-cli",
-            "--metrics",
-            "--paths",
-            *paths,
-            "--output-format",
-            "json",
-        ]
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        except Exception as exc:
-            print(f"Analysis failed: {exc}", file=sys.stderr)
-            sys.exit(1)
-
         all_data = []
-        for line in result.stdout.splitlines():
-            if not line.strip():
-                continue
-            clean_line = line.replace('"N1":', '"halstead_N1":').replace(
-                '"N2":', '"halstead_N2":'
-            )
-            try:
-                self.flatten(json.loads(clean_line), all_data)
-            except json.JSONDecodeError:
-                print(
-                    f"Warning: Skipping malformed CLI output line: {clean_line[:50]}...",
-                    file=sys.stderr,
-                )
+        for path in paths:
+            all_data.extend(self._run_single_path(path))
 
         scope_map = {"files": ["unit"], "functions": ["function"]}
         target_kinds = scope_map.get(self.scope, ["unit", "function"])
@@ -153,14 +130,48 @@ class HotspotAnalyzer:
             return ranked[: self.top]
         return ranked
 
+    def _run_single_path(self, path: str) -> List[CodeMetrics]:
+        cmd = [
+            "rust-code-analysis-cli",
+            "--metrics",
+            "--paths",
+            path,
+            "--output-format",
+            "json",
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        except Exception as exc:
+            print(f"Analysis failed for {path}: {exc}", file=sys.stderr)
+            sys.exit(1)
 
-def write_json(payload: object, output_path: Optional[Path]) -> None:
-    json_text = json.dumps(payload, indent=2)
-    if output_path is None:
-        print(json_text)
-        return
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json_text + "\n", encoding="utf-8")
+        results: List[CodeMetrics] = []
+        for line in result.stdout.splitlines():
+            if not line.strip():
+                continue
+            clean_line = line.replace('"N1":', '"halstead_N1":').replace(
+                '"N2":', '"halstead_N2":'
+            )
+            try:
+                self.flatten(json.loads(clean_line), results)
+            except json.JSONDecodeError:
+                print(
+                    f"Warning: Skipping malformed CLI output line: {clean_line[:50]}...",
+                    file=sys.stderr,
+                )
+        return results
+
+
+def render_cli(payload: object) -> str:
+    rows = payload if isinstance(payload, list) else []
+    lines = ["Hotspots"]
+    for index, item in enumerate(rows[:10], start=1):
+        lines.append(
+            f"{index:>2}. {item['name']} | score={item['score']:.2f} | cognitive={item['cognitive']:.1f} | cyclomatic={item['cyclomatic']:.1f}"
+        )
+    if not rows:
+        lines.append("No hotspots found.")
+    return "\n".join(lines)
 
 
 def main() -> None:
@@ -189,13 +200,21 @@ def main() -> None:
         default=None,
         help=f"Optional output JSON path. Example: {DEFAULT_OUTPUT}",
     )
+    add_mode_argument(parser)
 
     args = parser.parse_args()
     analyzer = HotspotAnalyzer(
         top=args.top, scope=args.scope, include_anonymous=args.include_anonymous
     )
     payload = [asdict(metric) for metric in analyzer.run(args.paths)]
-    write_json(payload, args.output)
+    emit_report(
+        payload,
+        mode=args.mode,
+        output_path=args.output,
+        visibility_path=VISIBILITY_OUTPUT,
+        cli_renderer=render_cli,
+        label="hotspot",
+    )
 
 
 if __name__ == "__main__":

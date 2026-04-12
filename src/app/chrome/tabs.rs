@@ -79,15 +79,15 @@ fn paint_tab_background(
     drag_in_progress: bool,
 ) {
     if active {
-        ui.painter().rect_filled(rect, 4.0, TAB_ACTIVE_BG);
+        ui.painter().rect_filled(rect, 4.0, tab_active_bg(ui));
         ui.painter().rect_stroke(
             rect,
             4.0,
-            Stroke::new(1.0, BORDER),
+            Stroke::new(1.0, border(ui)),
             egui::StrokeKind::Outside,
         );
     } else if response.hovered() && !drag_in_progress {
-        ui.painter().rect_filled(rect, 4.0, TAB_HOVER_BG);
+        ui.painter().rect_filled(rect, 4.0, tab_hover_bg(ui));
     }
 }
 
@@ -115,7 +115,7 @@ fn paint_tab_label(ui: &egui::Ui, rect: Rect, label: &str, show_promote_all: boo
         egui::Align2::LEFT_CENTER,
         &visible_label,
         egui::TextStyle::Button.resolve(ui.style()),
-        TEXT_PRIMARY,
+        text_primary(ui),
     );
     truncated
 }
@@ -138,14 +138,15 @@ fn render_tab_promote_button(
 ) -> egui::Response {
     let promote_response = ui.interact(promote_rect, ui.id().with("promote_all"), Sense::click());
     if promote_response.hovered() && !drag_in_progress {
-        ui.painter().rect_filled(promote_rect, 2.0, ACTION_HOVER_BG);
+        ui.painter()
+            .rect_filled(promote_rect, 2.0, action_hover_bg(ui));
     }
     ui.painter().text(
         promote_rect.center(),
         egui::Align2::CENTER_CENTER,
         egui_phosphor::regular::ARROW_SQUARE_UP,
         egui::FontId::proportional(14.0),
-        TEXT_PRIMARY,
+        text_primary(ui),
     );
     promote_response.on_hover_text("Promote each file in this workspace to its own tab")
 }
@@ -176,7 +177,7 @@ fn paint_tab_close_button(ui: &egui::Ui, close_rect: Rect, hovered: bool, drag_i
         egui::Align2::CENTER_CENTER,
         egui_phosphor::regular::X,
         egui::FontId::proportional(14.0),
-        TEXT_PRIMARY,
+        text_primary(ui),
     );
 }
 
@@ -267,7 +268,7 @@ fn text_width(ui: &egui::Ui, text: &str) -> f32 {
             .layout_no_wrap(
                 text.to_owned(),
                 egui::TextStyle::Button.resolve(ui.style()),
-                TEXT_PRIMARY,
+                text_primary(ui),
             )
             .size()
             .x

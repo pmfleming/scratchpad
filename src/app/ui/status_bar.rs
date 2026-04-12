@@ -38,7 +38,7 @@ pub(crate) fn show_status_bar(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 
             let mut actions = StatusBarActions::default();
 
-            if let Some(details) = collect_active_status_details(app) {
+            if let Some(details) = collect_active_status_details(app, ui.visuals().dark_mode) {
                 render_active_status(ui, &details, app.logging_enabled(), &mut actions);
             }
 
@@ -52,7 +52,10 @@ pub(crate) fn show_status_bar(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     });
 }
 
-fn collect_active_status_details(app: &ScratchpadApp) -> Option<ActiveStatusDetails> {
+fn collect_active_status_details(
+    app: &ScratchpadApp,
+    dark_mode: bool,
+) -> Option<ActiveStatusDetails> {
     let tab = app.active_tab()?;
     let line_count = tab.buffer.line_count;
     let visual_row_count = tab
@@ -65,7 +68,8 @@ fn collect_active_status_details(app: &ScratchpadApp) -> Option<ActiveStatusDeta
         .map(|view| view.show_control_chars)
         .unwrap_or(false);
     let has_control_chars = tab.buffer.artifact_summary.has_control_chars();
-    let (icon, icon_tooltip, icon_color) = artifact_icon(has_control_chars, show_control_chars);
+    let (icon, icon_tooltip, icon_color) =
+        artifact_icon(has_control_chars, show_control_chars, dark_mode);
 
     Some(ActiveStatusDetails {
         path_label: tab
@@ -214,6 +218,7 @@ fn line_count_label(line_count: usize, visual_row_count: usize) -> String {
 fn artifact_icon(
     has_control_chars: bool,
     show_control_chars: bool,
+    dark_mode: bool,
 ) -> (&'static str, &'static str, egui::Color32) {
     if has_control_chars {
         if show_control_chars {
@@ -233,7 +238,15 @@ fn artifact_icon(
         (
             egui_phosphor::regular::TEXT_ALIGN_JUSTIFY,
             "Plain text",
-            TEXT_PRIMARY.gamma_multiply(0.8),
+            plain_text_icon_color(dark_mode),
         )
+    }
+}
+
+fn plain_text_icon_color(dark_mode: bool) -> egui::Color32 {
+    if dark_mode {
+        TEXT_PRIMARY.gamma_multiply(0.8)
+    } else {
+        egui::Color32::from_rgb(28, 35, 45).gamma_multiply(0.8)
     }
 }

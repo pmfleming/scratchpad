@@ -1,6 +1,5 @@
 use super::artifact::make_control_chars_clean;
 use crate::app::domain::{BufferState, EditorViewState, RenderedLayout, display_line_count};
-use crate::app::theme::*;
 use eframe::egui;
 
 pub fn render_line_number_gutter(
@@ -9,6 +8,8 @@ pub fn render_line_number_gutter(
     view: &EditorViewState,
     previous_layout: Option<&RenderedLayout>,
     font_id: &egui::FontId,
+    text_color: egui::Color32,
+    background_color: egui::Color32,
 ) {
     let fallback_line_count = displayed_line_count(buffer, view);
     let max_number = previous_layout
@@ -25,7 +26,11 @@ pub fn render_line_number_gutter(
     let digits = max_number.max(1).to_string().len().max(3);
     let gutter_width = ui.fonts_mut(|fonts| {
         fonts
-            .layout_no_wrap("0".repeat(digits), font_id.clone(), TEXT_MUTED)
+            .layout_no_wrap(
+                "0".repeat(digits),
+                font_id.clone(),
+                text_color.gamma_multiply(0.62),
+            )
             .size()
             .x
     }) + 16.0;
@@ -34,19 +39,25 @@ pub fn render_line_number_gutter(
         egui::vec2(gutter_width, ui.available_height()),
         egui::Layout::top_down(egui::Align::Min),
         |ui| {
-            ui.painter().rect_filled(ui.max_rect(), 0.0, HEADER_BG);
+            ui.painter()
+                .rect_filled(ui.max_rect(), 0.0, background_color);
             ui.set_width(gutter_width);
 
             if let Some(layout) = previous_layout {
-                render_layout_gutter_rows(ui, layout, font_id);
+                render_layout_gutter_rows(ui, layout, font_id, text_color);
             } else {
-                render_fallback_gutter_rows(ui, fallback_line_count, font_id);
+                render_fallback_gutter_rows(ui, fallback_line_count, font_id, text_color);
             }
         },
     );
 }
 
-fn render_layout_gutter_rows(ui: &mut egui::Ui, layout: &RenderedLayout, font_id: &egui::FontId) {
+fn render_layout_gutter_rows(
+    ui: &mut egui::Ui,
+    layout: &RenderedLayout,
+    font_id: &egui::FontId,
+    text_color: egui::Color32,
+) {
     let desired_size = egui::vec2(
         ui.available_width(),
         layout.galley.rect.height().max(ui.available_height()),
@@ -68,12 +79,17 @@ fn render_layout_gutter_rows(ui: &mut egui::Ui, layout: &RenderedLayout, font_id
             egui::Align2::RIGHT_TOP,
             line_number.to_string(),
             font_id.clone(),
-            TEXT_MUTED,
+            text_color.gamma_multiply(0.62),
         );
     }
 }
 
-fn render_fallback_gutter_rows(ui: &mut egui::Ui, line_count: usize, font_id: &egui::FontId) {
+fn render_fallback_gutter_rows(
+    ui: &mut egui::Ui,
+    line_count: usize,
+    font_id: &egui::FontId,
+    text_color: egui::Color32,
+) {
     let row_height = ui.fonts_mut(|fonts| fonts.row_height(font_id));
     let row_count = line_count.max(1);
     let desired_size = egui::vec2(ui.available_width(), row_height * row_count as f32);
@@ -89,7 +105,7 @@ fn render_fallback_gutter_rows(ui: &mut egui::Ui, line_count: usize, font_id: &e
             egui::Align2::RIGHT_TOP,
             (row_index + 1).to_string(),
             font_id.clone(),
-            TEXT_MUTED,
+            text_color.gamma_multiply(0.62),
         );
     }
 }

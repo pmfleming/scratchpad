@@ -20,7 +20,7 @@ pub fn render_split_divider(
     let response = divider_response(ui, rect, axis, ratio, &path);
     maybe_queue_resize_action(rect, axis, path, actions, &response);
 
-    let style = divider_style(&response);
+    let style = divider_style(ui, &response);
     let handle_rect = divider_handle_rect(divider_center, axis);
     paint_divider_line(ui.painter(), rect, divider_center, axis, style.line_fill);
     paint_divider_handle(ui.painter(), handle_rect, axis, &style);
@@ -68,21 +68,23 @@ fn divider_cursor(axis: SplitAxis) -> egui::CursorIcon {
 struct DividerStyle {
     line_fill: egui::Color32,
     handle_fill: egui::Color32,
+    text_fill: egui::Color32,
 }
 
-fn divider_style(response: &egui::Response) -> DividerStyle {
+fn divider_style(ui: &egui::Ui, response: &egui::Response) -> DividerStyle {
     let divider_hovered = response.hovered() || response.dragged();
     DividerStyle {
         line_fill: if divider_hovered {
             egui::Color32::from_rgb(104, 154, 232)
         } else {
-            BORDER
+            border(ui)
         },
         handle_fill: if divider_hovered {
             egui::Color32::from_rgb(56, 72, 98)
         } else {
-            HEADER_BG.gamma_multiply(0.92)
+            header_bg(ui).gamma_multiply(0.92)
         },
+        text_fill: text_primary(ui),
     }
 }
 
@@ -124,7 +126,7 @@ fn paint_divider_handle(
         egui::Align2::CENTER_CENTER,
         divider_icon(axis),
         egui::FontId::proportional(14.0),
-        TEXT_PRIMARY,
+        style.text_fill,
     );
 }
 

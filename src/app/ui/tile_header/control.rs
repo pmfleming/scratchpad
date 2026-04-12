@@ -89,7 +89,7 @@ pub(crate) fn paint_tile_control(
         return;
     }
 
-    let style_colors = tile_control_colors(style, hovered, visibility);
+    let style_colors = tile_control_colors(ui, style, hovered, visibility);
     ui.painter().rect_filled(rect, 3.0, style_colors.fill);
     ui.painter().rect_stroke(
         rect,
@@ -113,52 +113,58 @@ struct TileControlColors {
 }
 
 fn tile_control_colors(
+    ui: &egui::Ui,
     style: TileControlStyle,
     hovered: bool,
     visibility: f32,
 ) -> TileControlColors {
-    let (fill, stroke) = base_tile_control_colors(style, hovered);
+    let (fill, stroke) = base_tile_control_colors(ui, style, hovered);
     TileControlColors {
         fill: fill.gamma_multiply(visibility),
         stroke: stroke.gamma_multiply(visibility),
-        text_color: TEXT_PRIMARY.gamma_multiply(visibility),
+        text_color: text_primary(ui).gamma_multiply(visibility),
     }
 }
 
 fn base_tile_control_colors(
+    ui: &egui::Ui,
     style: TileControlStyle,
     hovered: bool,
 ) -> (egui::Color32, egui::Color32) {
     match style {
-        TileControlStyle::Default => default_tile_control_colors(hovered),
-        TileControlStyle::Danger => danger_tile_control_colors(hovered),
+        TileControlStyle::Default => default_tile_control_colors(ui, hovered),
+        TileControlStyle::Danger => danger_tile_control_colors(ui, hovered),
     }
 }
 
-fn default_tile_control_colors(hovered: bool) -> (egui::Color32, egui::Color32) {
+fn default_tile_control_colors(ui: &egui::Ui, hovered: bool) -> (egui::Color32, egui::Color32) {
     let fill = if hovered {
         egui::Color32::from_rgb(56, 72, 98)
     } else {
-        egui::Color32::from_white_alpha(12)
+        action_bg(ui).gamma_multiply(0.8)
     };
     let stroke = if hovered {
         egui::Color32::from_rgb(104, 154, 232)
     } else {
-        egui::Color32::from_white_alpha(20)
+        border(ui).gamma_multiply(0.8)
     };
     (fill, stroke)
 }
 
-fn danger_tile_control_colors(hovered: bool) -> (egui::Color32, egui::Color32) {
+fn danger_tile_control_colors(ui: &egui::Ui, hovered: bool) -> (egui::Color32, egui::Color32) {
     let fill = if hovered {
         CLOSE_HOVER_BG
-    } else {
+    } else if ui.visuals().dark_mode {
         egui::Color32::from_white_alpha(12)
+    } else {
+        egui::Color32::from_rgb(252, 232, 232)
     };
     let stroke = if hovered {
         egui::Color32::from_rgb(255, 196, 196)
-    } else {
+    } else if ui.visuals().dark_mode {
         egui::Color32::from_white_alpha(20)
+    } else {
+        egui::Color32::from_rgb(220, 150, 150)
     };
     (fill, stroke)
 }

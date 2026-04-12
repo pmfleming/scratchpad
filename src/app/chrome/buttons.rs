@@ -57,8 +57,8 @@ fn render_minimize_button(ui: &mut egui::Ui, ctx: &egui::Context) {
         ui,
         egui_phosphor::regular::MINUS,
         CAPTION_BUTTON_SIZE,
-        ACTION_BG,
-        ACTION_HOVER_BG,
+        action_bg(ui),
+        action_hover_bg(ui),
         "Minimize",
     )
     .clicked()
@@ -79,8 +79,8 @@ fn render_maximize_restore_button(ui: &mut egui::Ui, ctx: &egui::Context) {
         ui,
         icon,
         CAPTION_BUTTON_SIZE,
-        ACTION_BG,
-        ACTION_HOVER_BG,
+        action_bg(ui),
+        action_hover_bg(ui),
         tooltip,
     )
     .clicked()
@@ -117,7 +117,7 @@ fn paint_phosphor_button(
         egui::Align2::CENTER_CENTER,
         icon,
         egui::FontId::proportional(16.0),
-        TEXT_PRIMARY,
+        text_primary(ui),
     );
 }
 

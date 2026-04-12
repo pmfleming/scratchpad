@@ -295,6 +295,7 @@ fn startup_loads_toml_settings_before_session_restore() {
             editor_font: EditorFontPreset::Roboto,
             settings_tab_open: false,
             settings_tab_index: None,
+            ..AppSettings::default()
         })
         .expect("save toml settings");
 
@@ -356,6 +357,7 @@ fn startup_migrates_legacy_session_settings_when_toml_is_missing() {
             editor_font: EditorFontPreset::SystemDefault,
             settings_tab_open: false,
             settings_tab_index: None,
+            ..AppSettings::default()
         })
     );
 }
