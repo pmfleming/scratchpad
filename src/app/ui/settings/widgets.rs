@@ -86,13 +86,16 @@ pub(super) fn settings_file_card(
     settings_card_frame(ui, |ui| {
         card_header(ui, icon, title, Some(description), |ui| {
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.set_width(SettingsUi::CONTROL_WIDTH);
+                ui.set_width(SettingsUi::CONTROLS.width);
                 value_pill(ui, &settings_path);
-                ui.add_space(SettingsUi::CONTROL_GAP);
+                ui.add_space(SettingsUi::CONTROLS.gap);
                 clicked = phosphor_button(
                     ui,
                     egui_phosphor::regular::FOLDER_OPEN,
-                    egui::vec2(SettingsUi::ICON_BUTTON_SIZE, SettingsUi::ICON_BUTTON_SIZE),
+                    egui::vec2(
+                        SettingsUi::CONTROLS.icon_button_size,
+                        SettingsUi::CONTROLS.icon_button_size,
+                    ),
                     action_bg(ui),
                     action_hover_bg(ui),
                     "Open settings file",
@@ -122,7 +125,10 @@ pub(super) fn action_card(
             clicked = phosphor_button(
                 ui,
                 icon,
-                egui::vec2(SettingsUi::ICON_BUTTON_SIZE, SettingsUi::ICON_BUTTON_SIZE),
+                egui::vec2(
+                    SettingsUi::CONTROLS.icon_button_size,
+                    SettingsUi::CONTROLS.icon_button_size,
+                ),
                 action_bg(ui),
                 action_hover_bg(ui),
                 action_tooltip,
@@ -143,7 +149,7 @@ pub(super) fn inner_select_row(
     add_control: impl FnOnce(&mut egui::Ui),
 ) {
     ui.horizontal(|ui| {
-        ui.set_min_height(SettingsUi::INNER_ROW_HEIGHT);
+        ui.set_min_height(SettingsUi::LAYOUT.inner_row_height);
         ui.add_space(40.0);
         ui.vertical(|ui| {
             ui.set_width(SettingsUi::row_label_width(ui));
@@ -152,7 +158,7 @@ pub(super) fn inner_select_row(
                 ui.add_space(2.0);
                 ui.label(
                     egui::RichText::new(description)
-                        .size(SettingsUi::DESCRIPTION_FONT_SIZE)
+                        .size(SettingsUi::TYPOGRAPHY.description)
                         .color(text_muted(ui)),
                 );
             }
@@ -221,7 +227,7 @@ fn card_header(
     add_trailing: impl FnOnce(&mut egui::Ui),
 ) -> egui::InnerResponse<()> {
     ui.horizontal(|ui| {
-        ui.set_min_height(SettingsUi::CARD_MIN_HEIGHT);
+        ui.set_min_height(SettingsUi::LAYOUT.card_min_height);
         icon_slot(ui, icon);
         ui.add_space(12.0);
         ui.vertical(|ui| {
@@ -231,7 +237,7 @@ fn card_header(
                 ui.add_space(2.0);
                 ui.label(
                     egui::RichText::new(description)
-                        .size(SettingsUi::DESCRIPTION_FONT_SIZE)
+                        .size(SettingsUi::TYPOGRAPHY.description)
                         .color(text_muted(ui)),
                 );
             }
@@ -296,11 +302,11 @@ fn info_chip(ui: &mut egui::Ui, text: &str) {
         .fill(action_hover_bg(ui).gamma_multiply(0.72))
         .stroke(egui::Stroke::new(1.0, border(ui).gamma_multiply(0.7)))
         .corner_radius(egui::CornerRadius::same(127))
-        .inner_margin(SettingsUi::INFO_CHIP_INNER_MARGIN)
+        .inner_margin(SettingsUi::MARGINS.info_chip_inner)
         .show(ui, |ui| {
             ui.label(
                 egui::RichText::new(text)
-                    .size(SettingsUi::DESCRIPTION_FONT_SIZE)
+                    .size(SettingsUi::TYPOGRAPHY.description)
                     .color(text_muted(ui)),
             );
         });
@@ -311,7 +317,7 @@ fn value_pill(ui: &mut egui::Ui, text: &str) {
         .fill(SettingsUi::control_bg(ui))
         .stroke(egui::Stroke::new(1.0, border(ui).gamma_multiply(0.75)))
         .corner_radius(egui::CornerRadius::same(8))
-        .inner_margin(SettingsUi::VALUE_PILL_INNER_MARGIN)
+        .inner_margin(SettingsUi::MARGINS.value_pill_inner)
         .show(ui, |ui| {
             let width = SettingsUi::pill_width();
             ui.set_width(width);
@@ -320,7 +326,7 @@ fn value_pill(ui: &mut egui::Ui, text: &str) {
                 egui::vec2(width, 0.0),
                 egui::Label::new(
                     egui::RichText::new(text)
-                        .size(SettingsUi::DESCRIPTION_FONT_SIZE)
+                        .size(SettingsUi::TYPOGRAPHY.description)
                         .color(text_muted(ui)),
                 )
                 .truncate(),

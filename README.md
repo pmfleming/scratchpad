@@ -44,14 +44,18 @@ Release flow: push a tag like `v0.2.0` or run the `Release` workflow manually. G
 
 - `scripts/hotspots.py`: complexity / maintainability JSON
 - `scripts/slowspots.py`: benchmark / performance JSON
+- `scripts/clone_alert.py`: token-based clone / duplication JSON
 - `scripts/map.py`: architecture JSON with hotspot and slowspot data
 
-All three scripts support `--mode cli`, `--mode analysis`, and `--mode visibility`.
+All four scripts support `--mode cli`, `--mode analysis`, and `--mode visibility`.
 
 Example:
 
 ```bash
 .venv\Scripts\python.exe scripts\hotspots.py --mode cli --paths src --scope all
+.venv\Scripts\python.exe scripts\clone_alert.py --mode cli --paths src
+.venv\Scripts\python.exe scripts\clone_alert.py --mode analysis --paths src --output target/analysis/clones.json
+.venv\Scripts\python.exe scripts\clone_alert.py --mode analysis --paths src --engine all --output target/analysis/clones.json
 .venv\Scripts\python.exe scripts\hotspots.py --mode visibility --paths src
 .venv\Scripts\python.exe scripts\slowspots.py --mode analysis --skip-bench --output target/analysis/slowspots.json
 .venv\Scripts\python.exe scripts\map.py --mode visibility
@@ -65,6 +69,23 @@ Open the static viewer:
 ```
 
 Browse to `http://localhost:8000/viewer/`. It reads `target/analysis/` and supports file inputs.
+
+The overview launcher supports three modes:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1
+```
+Fast mode: opens the viewer using the existing JSON files in `target/analysis/`.
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -Refresh
+```
+Refresh mode: rebuilds the standard analysis JSON files, then opens the viewer.
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -CloneCheck
+```
+CloneCheck mode: rebuilds the JSON files and runs the extended clone check (`--engine all`) before opening the viewer.
 
 ## Project Structure
 

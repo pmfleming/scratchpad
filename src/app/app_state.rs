@@ -42,6 +42,8 @@ pub struct ScratchpadApp {
     pub(crate) active_surface: AppSurface,
     pub(crate) settings_tab_index: usize,
     pub(crate) pending_settings_toml_refresh: Option<BufferId>,
+    pub(crate) vertical_tab_list_open: bool,
+    pub(crate) vertical_tab_list_hide_deadline: Option<Instant>,
 }
 
 impl Default for ScratchpadApp {

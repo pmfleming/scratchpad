@@ -107,10 +107,4 @@ pub fn split_preview_spec(
     geometry::split_preview_spec(tile_rect, drag_delta)
 }
 
-pub(crate) fn split_rect(
-    rect: egui::Rect,
-    axis: SplitAxis,
-    ratio: f32,
-) -> (egui::Rect, egui::Rect) {
-    geometry::split_rect(rect, axis, ratio)
-}
+pub(crate) use geometry::split_rect;

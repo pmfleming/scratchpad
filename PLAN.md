@@ -54,8 +54,9 @@ Standard tools:
 
 - `scripts/hotspots.py`: complexity and maintainability JSON
 - `scripts/slowspots.py`: benchmark-driven speed and degradation JSON
+- `scripts/clone_alert.py`: token-based clone groups for duplication drift review
 - `scripts/map.py`: dependency/interrelatedness JSON enriched with hotspot and slowspot data
-- `scripts/ci.ps1`: standard local and CI entry point for formatting, linting, tests, hotspot review, and slowspot review
+- `scripts/ci.ps1`: standard local and CI entry point for formatting, linting, tests, hotspot review, slowspot review, and clone review
 
 The Python tools intentionally do not generate HTML. The static viewer in `viewer/` consumes their JSON contracts from `target/analysis/` and can later be replaced by a Java/React UI without changing the measurement layer.
 

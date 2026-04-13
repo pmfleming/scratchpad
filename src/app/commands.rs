@@ -415,12 +415,66 @@ mod tests {
     use super::AppCommand;
     use crate::app::app_state::ScratchpadApp;
     use crate::app::domain::{BufferState, SplitAxis, WorkspaceTab};
+    use crate::app::fonts::EditorFontPreset;
     use crate::app::services::session_store::SessionStore;
 
     fn test_app() -> ScratchpadApp {
         let session_root = tempfile::tempdir().expect("create session dir");
         let session_store = SessionStore::new(session_root.path().to_path_buf());
         ScratchpadApp::with_session_store(session_store)
+    }
+
+    fn app_with_named_tabs(names: &[&str]) -> ScratchpadApp {
+        let mut app = test_app();
+        for (index, name) in names.iter().enumerate() {
+            if index > 0 {
+                app.append_tab(WorkspaceTab::untitled());
+            }
+            app.tabs_mut()[index].buffer.name = (*name).to_owned();
+        }
+        app
+    }
+
+    fn settings_file_content(font_size: f32, settings_slot_index: Option<usize>) -> String {
+        let mut lines = vec![
+            format!("font_size = {font_size:.1}"),
+            "word_wrap = false".to_owned(),
+            "logging_enabled = false".to_owned(),
+            "editor_font = \"roboto\"".to_owned(),
+        ];
+        if let Some(index) = settings_slot_index {
+            lines.push("settings_tab_open = true".to_owned());
+            lines.push(format!("settings_tab_index = {index}"));
+        } else {
+            lines.push("settings_tab_open = false".to_owned());
+        }
+        lines.push(String::new());
+        lines.join("\n")
+    }
+
+    fn open_dirty_settings_file(
+        app: &mut ScratchpadApp,
+        font_size: f32,
+        settings_slot_index: Option<usize>,
+    ) -> usize {
+        app.handle_command(AppCommand::OpenSettings);
+        app.open_settings_file_tab();
+        let settings_tab_index = app.active_tab_index();
+        app.tabs_mut()[settings_tab_index]
+            .active_buffer_mut()
+            .content = settings_file_content(font_size, settings_slot_index);
+        app.tabs_mut()[settings_tab_index]
+            .active_buffer_mut()
+            .is_dirty = true;
+        app.note_settings_toml_edit(settings_tab_index);
+        settings_tab_index
+    }
+
+    fn assert_settings_applied(app: &ScratchpadApp, font_size: f32) {
+        assert_eq!(app.font_size(), font_size);
+        assert!(!app.word_wrap());
+        assert!(!app.logging_enabled());
+        assert_eq!(app.editor_font(), EditorFontPreset::Roboto);
     }
 
     #[test]
@@ -538,12 +592,7 @@ mod tests {
 
     #[test]
     fn reorder_display_tab_moves_settings_slot_between_workspace_tabs() {
-        let mut app = test_app();
-        app.tabs_mut()[0].buffer.name = "one.txt".to_owned();
-        app.append_tab(WorkspaceTab::untitled());
-        app.tabs_mut()[1].buffer.name = "two.txt".to_owned();
-        app.append_tab(WorkspaceTab::untitled());
-        app.tabs_mut()[2].buffer.name = "three.txt".to_owned();
+        let mut app = app_with_named_tabs(&["one.txt", "two.txt", "three.txt"]);
 
         app.handle_command(AppCommand::OpenSettings);
         let settings_slot = app
@@ -570,11 +619,12 @@ mod tests {
 
         let mut original =
             ScratchpadApp::with_session_store(SessionStore::new(session_path.clone()));
-        original.tabs_mut()[0].buffer.name = "one.txt".to_owned();
-        original.append_tab(WorkspaceTab::untitled());
-        original.tabs_mut()[1].buffer.name = "two.txt".to_owned();
-        original.append_tab(WorkspaceTab::untitled());
-        original.tabs_mut()[2].buffer.name = "three.txt".to_owned();
+        for (index, name) in ["one.txt", "two.txt", "three.txt"].iter().enumerate() {
+            if index > 0 {
+                original.append_tab(WorkspaceTab::untitled());
+            }
+            original.tabs_mut()[index].buffer.name = (*name).to_owned();
+        }
 
         original.handle_command(AppCommand::OpenSettings);
         original.handle_command(AppCommand::ReorderDisplayTab {
@@ -603,10 +653,7 @@ mod tests {
 
     #[test]
     fn activating_a_workspace_tab_keeps_the_settings_tab_open() {
-        let mut app = test_app();
-        app.tabs_mut()[0].buffer.name = "one.txt".to_owned();
-        app.append_tab(WorkspaceTab::untitled());
-        app.tabs_mut()[1].buffer.name = "two.txt".to_owned();
+        let mut app = app_with_named_tabs(&["one.txt", "two.txt"]);
 
         app.handle_command(AppCommand::OpenSettings);
         let settings_slot = app
@@ -654,36 +701,11 @@ mod tests {
     #[test]
     fn creating_a_new_tab_from_dirty_settings_file_applies_toml_edits() {
         let mut app = test_app();
-        app.handle_command(AppCommand::OpenSettings);
-        app.open_settings_file_tab();
-        let settings_tab_index = app.active_tab_index();
-
-        app.tabs_mut()[settings_tab_index]
-            .active_buffer_mut()
-            .content = [
-            "font_size = 19.0",
-            "word_wrap = false",
-            "logging_enabled = false",
-            "editor_font = \"roboto\"",
-            "settings_tab_open = true",
-            "settings_tab_index = 1",
-            "",
-        ]
-        .join("\n");
-        app.tabs_mut()[settings_tab_index]
-            .active_buffer_mut()
-            .is_dirty = true;
-        app.note_settings_toml_edit(settings_tab_index);
+        let settings_tab_index = open_dirty_settings_file(&mut app, 19.0, Some(1));
 
         app.new_tab();
 
-        assert_eq!(app.font_size(), 19.0);
-        assert!(!app.word_wrap());
-        assert!(!app.logging_enabled());
-        assert_eq!(
-            app.editor_font(),
-            crate::app::fonts::EditorFontPreset::Roboto
-        );
+        assert_settings_applied(&app, 19.0);
         assert_eq!(
             app.tabs()[app.active_tab_index()].active_buffer().name,
             "Untitled"
@@ -693,34 +715,11 @@ mod tests {
     #[test]
     fn activating_away_from_settings_file_applies_toml_edits() {
         let mut app = test_app();
-        app.handle_command(AppCommand::OpenSettings);
-        app.open_settings_file_tab();
-        let settings_tab_index = app.active_tab_index();
-        app.tabs_mut()[settings_tab_index]
-            .active_buffer_mut()
-            .content = [
-            "font_size = 22.0",
-            "word_wrap = false",
-            "logging_enabled = false",
-            "editor_font = \"roboto\"",
-            "settings_tab_open = true",
-            "settings_tab_index = 1",
-            "",
-        ]
-        .join("\n");
-        app.tabs_mut()[settings_tab_index]
-            .active_buffer_mut()
-            .is_dirty = true;
+        let _settings_tab_index = open_dirty_settings_file(&mut app, 22.0, Some(1));
 
         app.handle_command(AppCommand::ActivateTab { index: 0 });
 
-        assert_eq!(app.font_size(), 22.0);
-        assert!(!app.word_wrap());
-        assert!(!app.logging_enabled());
-        assert_eq!(
-            app.editor_font(),
-            crate::app::fonts::EditorFontPreset::Roboto
-        );
+        assert_settings_applied(&app, 22.0);
         assert_eq!(app.settings_slot_index(), Some(1));
         assert_eq!(app.active_tab_index(), 0);
         assert!(!app.showing_settings());
@@ -748,15 +747,7 @@ mod tests {
         let settings_tab_index = app.active_tab_index();
         app.tabs_mut()[settings_tab_index]
             .active_buffer_mut()
-            .content = [
-            "font_size = 23.0",
-            "word_wrap = false",
-            "logging_enabled = false",
-            "editor_font = \"roboto\"",
-            "settings_tab_open = false",
-            "",
-        ]
-        .join("\n");
+            .content = settings_file_content(23.0, None);
         app.tabs_mut()[settings_tab_index]
             .active_buffer_mut()
             .is_dirty = true;
@@ -766,8 +757,7 @@ mod tests {
             view_id: normal_view_id,
         });
 
-        assert_eq!(app.font_size(), 23.0);
-        assert!(!app.word_wrap());
+        assert_settings_applied(&app, 23.0);
         assert_eq!(
             app.tabs()[app.active_tab_index()].active_view_id,
             normal_view_id
@@ -832,25 +822,7 @@ mod tests {
     #[test]
     fn closing_saved_settings_file_applies_pending_toml_edits() {
         let mut app = test_app();
-        app.handle_command(AppCommand::OpenSettings);
-        app.open_settings_file_tab();
-        let settings_tab_index = app.active_tab_index();
-        app.tabs_mut()[settings_tab_index]
-            .active_buffer_mut()
-            .content = [
-            "font_size = 20.0",
-            "word_wrap = false",
-            "logging_enabled = false",
-            "editor_font = \"roboto\"",
-            "settings_tab_open = true",
-            "settings_tab_index = 0",
-            "",
-        ]
-        .join("\n");
-        app.tabs_mut()[settings_tab_index]
-            .active_buffer_mut()
-            .is_dirty = true;
-        app.note_settings_toml_edit(settings_tab_index);
+        let settings_tab_index = open_dirty_settings_file(&mut app, 20.0, Some(0));
 
         assert!(app.save_file_at(settings_tab_index));
 
@@ -858,13 +830,7 @@ mod tests {
             index: settings_tab_index,
         });
 
-        assert_eq!(app.font_size(), 20.0);
-        assert!(!app.word_wrap());
-        assert!(!app.logging_enabled());
-        assert_eq!(
-            app.editor_font(),
-            crate::app::fonts::EditorFontPreset::Roboto
-        );
+        assert_settings_applied(&app, 20.0);
         assert!(app.showing_settings());
         assert_eq!(app.settings_slot_index(), Some(0));
     }
@@ -872,38 +838,13 @@ mod tests {
     #[test]
     fn closing_dirty_settings_file_applies_buffered_toml_edits() {
         let mut app = test_app();
-        app.handle_command(AppCommand::OpenSettings);
-        app.open_settings_file_tab();
-        let settings_tab_index = app.active_tab_index();
-
-        app.tabs_mut()[settings_tab_index]
-            .active_buffer_mut()
-            .content = [
-            "font_size = 26.0",
-            "word_wrap = false",
-            "logging_enabled = false",
-            "editor_font = \"roboto\"",
-            "settings_tab_open = true",
-            "settings_tab_index = 0",
-            "",
-        ]
-        .join("\n");
-        app.tabs_mut()[settings_tab_index]
-            .active_buffer_mut()
-            .is_dirty = true;
-        app.note_settings_toml_edit(settings_tab_index);
+        let settings_tab_index = open_dirty_settings_file(&mut app, 26.0, Some(0));
 
         app.handle_command(AppCommand::CloseTab {
             index: settings_tab_index,
         });
 
-        assert_eq!(app.font_size(), 26.0);
-        assert!(!app.word_wrap());
-        assert!(!app.logging_enabled());
-        assert_eq!(
-            app.editor_font(),
-            crate::app::fonts::EditorFontPreset::Roboto
-        );
+        assert_settings_applied(&app, 26.0);
         assert!(app.showing_settings());
         assert_eq!(app.settings_slot_index(), Some(0));
     }

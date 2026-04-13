@@ -11,94 +11,59 @@ pub const CLOSE_HOVER_BG: Color32 = Color32::from_rgb(164, 58, 58);
 pub const BORDER: Color32 = Color32::from_rgb(59, 66, 76);
 pub const TEXT_PRIMARY: Color32 = Color32::WHITE;
 pub const TEXT_MUTED: Color32 = Color32::from_rgba_premultiplied(255, 255, 255, 160);
+const HEADER_BG_LIGHT: Color32 = Color32::from_rgb(240, 243, 248);
+const TAB_ACTIVE_BG_LIGHT: Color32 = Color32::from_rgb(255, 255, 255);
+const TAB_HOVER_BG_LIGHT: Color32 = Color32::from_rgb(226, 232, 240);
+const ACTION_BG_LIGHT: Color32 = Color32::from_rgb(230, 236, 244);
+const ACTION_HOVER_BG_LIGHT: Color32 = Color32::from_rgb(213, 222, 234);
+const BORDER_LIGHT: Color32 = Color32::from_rgb(184, 194, 208);
+const TEXT_PRIMARY_LIGHT: Color32 = Color32::from_rgb(28, 35, 45);
+const TEXT_MUTED_LIGHT: Color32 = Color32::from_rgba_premultiplied(28, 35, 45, 178);
 
-pub fn header_bg(ui: &egui::Ui) -> Color32 {
-    if ui.visuals().dark_mode {
-        HEADER_BG
+fn theme_color(dark_mode: bool, dark: Color32, light: Color32) -> Color32 {
+    if dark_mode {
+        dark
     } else {
-        Color32::from_rgb(240, 243, 248)
+        light
     }
 }
 
-pub fn tab_active_bg(ui: &egui::Ui) -> Color32 {
-    if ui.visuals().dark_mode {
-        TAB_ACTIVE_BG
-    } else {
-        Color32::from_rgb(255, 255, 255)
-    }
+fn ui_theme_color(ui: &egui::Ui, dark: Color32, light: Color32) -> Color32 {
+    theme_color(ui.visuals().dark_mode, dark, light)
 }
 
-pub fn tab_hover_bg(ui: &egui::Ui) -> Color32 {
-    if ui.visuals().dark_mode {
-        TAB_HOVER_BG
-    } else {
-        Color32::from_rgb(226, 232, 240)
-    }
+macro_rules! ui_theme_fn {
+    ($name:ident, $dark:ident, $light:ident) => {
+        pub fn $name(ui: &egui::Ui) -> Color32 {
+            ui_theme_color(ui, $dark, $light)
+        }
+    };
 }
 
-pub fn action_bg(ui: &egui::Ui) -> Color32 {
-    if ui.visuals().dark_mode {
-        ACTION_BG
-    } else {
-        Color32::from_rgb(230, 236, 244)
-    }
+macro_rules! visuals_theme_fn {
+    ($name:ident, $dark:ident, $light:ident) => {
+        pub fn $name(visuals: &egui::Visuals) -> Color32 {
+            theme_color(visuals.dark_mode, $dark, $light)
+        }
+    };
 }
 
-pub fn action_hover_bg(ui: &egui::Ui) -> Color32 {
-    if ui.visuals().dark_mode {
-        ACTION_HOVER_BG
-    } else {
-        Color32::from_rgb(213, 222, 234)
-    }
-}
+ui_theme_fn!(header_bg, HEADER_BG, HEADER_BG_LIGHT);
+ui_theme_fn!(tab_active_bg, TAB_ACTIVE_BG, TAB_ACTIVE_BG_LIGHT);
+ui_theme_fn!(tab_hover_bg, TAB_HOVER_BG, TAB_HOVER_BG_LIGHT);
+ui_theme_fn!(action_bg, ACTION_BG, ACTION_BG_LIGHT);
+ui_theme_fn!(action_hover_bg, ACTION_HOVER_BG, ACTION_HOVER_BG_LIGHT);
+ui_theme_fn!(border, BORDER, BORDER_LIGHT);
+ui_theme_fn!(text_primary, TEXT_PRIMARY, TEXT_PRIMARY_LIGHT);
+ui_theme_fn!(text_muted, TEXT_MUTED, TEXT_MUTED_LIGHT);
 
-pub fn border(ui: &egui::Ui) -> Color32 {
-    if ui.visuals().dark_mode {
-        BORDER
-    } else {
-        Color32::from_rgb(184, 194, 208)
-    }
-}
-
-pub fn text_primary(ui: &egui::Ui) -> Color32 {
-    if ui.visuals().dark_mode {
-        TEXT_PRIMARY
-    } else {
-        Color32::from_rgb(28, 35, 45)
-    }
-}
-
-pub fn text_muted(ui: &egui::Ui) -> Color32 {
-    if ui.visuals().dark_mode {
-        TEXT_MUTED
-    } else {
-        Color32::from_rgba_premultiplied(28, 35, 45, 178)
-    }
-}
-
-pub fn tab_active_bg_for_visuals(visuals: &egui::Visuals) -> Color32 {
-    if visuals.dark_mode {
-        TAB_ACTIVE_BG
-    } else {
-        Color32::from_rgb(255, 255, 255)
-    }
-}
-
-pub fn border_for_visuals(visuals: &egui::Visuals) -> Color32 {
-    if visuals.dark_mode {
-        BORDER
-    } else {
-        Color32::from_rgb(184, 194, 208)
-    }
-}
-
-pub fn text_primary_for_visuals(visuals: &egui::Visuals) -> Color32 {
-    if visuals.dark_mode {
-        TEXT_PRIMARY
-    } else {
-        Color32::from_rgb(28, 35, 45)
-    }
-}
+visuals_theme_fn!(
+    tab_active_bg_for_visuals,
+    TAB_ACTIVE_BG,
+    TAB_ACTIVE_BG_LIGHT
+);
+visuals_theme_fn!(border_for_visuals, BORDER, BORDER_LIGHT);
+visuals_theme_fn!(text_primary_for_visuals, TEXT_PRIMARY, TEXT_PRIMARY_LIGHT);
 
 pub const HEADER_CONTROL_HEIGHT: f32 = 30.0;
 pub const HEADER_VERTICAL_PADDING: f32 = 2.0;

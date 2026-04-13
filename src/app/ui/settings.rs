@@ -29,7 +29,7 @@ pub(crate) fn show_page(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                     let content_width = SettingsUi::page_content_width(ui);
                     let horizontal_margin = SettingsUi::page_horizontal_margin(ui, content_width);
 
-                    ui.add_space(SettingsUi::BODY_TOP_SPACE);
+                    ui.add_space(SettingsUi::LAYOUT.body_top_space);
                     ui.horizontal(|ui| {
                         ui.add_space(horizontal_margin);
                         ui.vertical(|ui| {
@@ -38,7 +38,7 @@ pub(crate) fn show_page(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                             render_settings_categories(ui, app);
                         });
                     });
-                    ui.add_space(SettingsUi::BODY_BOTTOM_SPACE);
+                    ui.add_space(SettingsUi::LAYOUT.body_bottom_space);
                 });
         });
     });
@@ -47,14 +47,14 @@ pub(crate) fn show_page(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 fn render_page_heading(ui: &mut egui::Ui) {
     ui.label(
         egui::RichText::new("Settings")
-            .size(SettingsUi::TITLE_FONT_SIZE)
+            .size(SettingsUi::TYPOGRAPHY.title)
             .strong()
             .color(text_primary(ui)),
     );
     ui.add_space(4.0);
     ui.label(
         egui::RichText::new("Editor appearance, runtime behavior, and stored configuration.")
-            .size(SettingsUi::DESCRIPTION_FONT_SIZE)
+            .size(SettingsUi::TYPOGRAPHY.description)
             .color(text_muted(ui)),
     );
 }
@@ -62,7 +62,7 @@ fn render_page_heading(ui: &mut egui::Ui) {
 fn category_heading(ui: &mut egui::Ui, heading: &str) {
     ui.label(
         egui::RichText::new(heading)
-            .size(SettingsUi::CATEGORY_FONT_SIZE)
+            .size(SettingsUi::TYPOGRAPHY.category)
             .strong()
             .color(text_primary(ui)),
     );

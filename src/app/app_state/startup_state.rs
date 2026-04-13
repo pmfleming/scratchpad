@@ -59,6 +59,8 @@ impl ScratchpadApp {
             active_surface: AppSurface::Workspace,
             settings_tab_index: usize::MAX,
             pending_settings_toml_refresh: None,
+            vertical_tab_list_open: false,
+            vertical_tab_list_hide_deadline: None,
         };
 
         let loaded_from_settings = app.load_settings_from_store();

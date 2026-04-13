@@ -91,12 +91,18 @@ pub(crate) fn paint_dragged_tab_ghost(ctx: &egui::Context, app: &ScratchpadApp) 
     paint::paint_dragged_tab_ghost(ctx, app, drag_state);
 }
 
-pub(crate) fn auto_scroll_tab_strip(
+enum ScrollAxis {
+    Horizontal,
+    Vertical,
+}
+
+fn auto_scroll_dragged_tab_list(
     ctx: &egui::Context,
     scroll_area_id: egui::Id,
     viewport_rect: egui::Rect,
-    content_width: f32,
+    content_extent: f32,
     scroll_state: &egui::scroll_area::State,
+    axis: ScrollAxis,
 ) {
     let Some(drag_state) = state::current_tab_drag_state_for_context(ctx) else {
         return;
@@ -105,21 +111,52 @@ pub(crate) fn auto_scroll_tab_strip(
         return;
     }
 
-    let delta_x = state::auto_scroll_delta(viewport_rect, drag_state.current_pos);
-    if delta_x.abs() <= f32::EPSILON {
+    let (delta, current_offset, viewport_extent) = match axis {
+        ScrollAxis::Horizontal => (
+            state::auto_scroll_delta(viewport_rect, drag_state.current_pos),
+            scroll_state.offset.x,
+            viewport_rect.width(),
+        ),
+        ScrollAxis::Vertical => (
+            state::vertical_auto_scroll_delta(viewport_rect, drag_state.current_pos),
+            scroll_state.offset.y,
+            viewport_rect.height(),
+        ),
+    };
+    if delta.abs() <= f32::EPSILON {
         return;
     }
 
-    let max_offset_x = (content_width - viewport_rect.width()).max(0.0);
-    let next_offset_x = (scroll_state.offset.x + delta_x).clamp(0.0, max_offset_x);
-    if (next_offset_x - scroll_state.offset.x).abs() <= f32::EPSILON {
+    let max_offset = (content_extent - viewport_extent).max(0.0);
+    let next_offset = (current_offset + delta).clamp(0.0, max_offset);
+    if (next_offset - current_offset).abs() <= f32::EPSILON {
         return;
     }
 
     let mut next_state = *scroll_state;
-    next_state.offset.x = next_offset_x;
+    match axis {
+        ScrollAxis::Horizontal => next_state.offset.x = next_offset,
+        ScrollAxis::Vertical => next_state.offset.y = next_offset,
+    }
     next_state.store(ctx, scroll_area_id);
     ctx.request_repaint();
+}
+
+pub(crate) fn auto_scroll_tab_strip(
+    ctx: &egui::Context,
+    scroll_area_id: egui::Id,
+    viewport_rect: egui::Rect,
+    content_width: f32,
+    scroll_state: &egui::scroll_area::State,
+) {
+    auto_scroll_dragged_tab_list(
+        ctx,
+        scroll_area_id,
+        viewport_rect,
+        content_width,
+        scroll_state,
+        ScrollAxis::Horizontal,
+    );
 }
 
 pub(crate) fn auto_scroll_vertical_tab_list(
@@ -129,26 +166,12 @@ pub(crate) fn auto_scroll_vertical_tab_list(
     content_height: f32,
     scroll_state: &egui::scroll_area::State,
 ) {
-    let Some(drag_state) = state::current_tab_drag_state_for_context(ctx) else {
-        return;
-    };
-    if !state::drag_is_active(drag_state) {
-        return;
-    }
-
-    let delta_y = state::vertical_auto_scroll_delta(viewport_rect, drag_state.current_pos);
-    if delta_y.abs() <= f32::EPSILON {
-        return;
-    }
-
-    let max_offset_y = (content_height - viewport_rect.height()).max(0.0);
-    let next_offset_y = (scroll_state.offset.y + delta_y).clamp(0.0, max_offset_y);
-    if (next_offset_y - scroll_state.offset.y).abs() <= f32::EPSILON {
-        return;
-    }
-
-    let mut next_state = *scroll_state;
-    next_state.offset.y = next_offset_y;
-    next_state.store(ctx, scroll_area_id);
-    ctx.request_repaint();
+    auto_scroll_dragged_tab_list(
+        ctx,
+        scroll_area_id,
+        viewport_rect,
+        content_height,
+        scroll_state,
+        ScrollAxis::Vertical,
+    );
 }

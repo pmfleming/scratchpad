@@ -26,6 +26,11 @@ jobs:
         with:
           cache: true
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Install rust-code-analysis-cli
         shell: pwsh
         run: cargo install --locked rust-code-analysis-cli
@@ -33,3 +38,38 @@ jobs:
       - name: Run CI script
         shell: pwsh
         run: .\scripts\ci.ps1
+
+  analysis:
+    name: Complexity & Clone Analysis
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install rust-code-analysis-cli
+        shell: pwsh
+        run: cargo install --locked rust-code-analysis-cli
+
+      - name: Run Hotspot Analysis
+        shell: pwsh
+        run: python scripts/hotspots.py --mode analysis --output target/analysis/hotspots.json
+
+      - name: Run Clone Alert
+        shell: pwsh
+        run: python scripts/clone_alert.py --paths src --mode analysis --output target/analysis/clones.json
+
+      - name: Upload Analysis Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: analysis-results
+          path: target/analysis/*.json

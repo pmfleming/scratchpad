@@ -3,14 +3,15 @@ use super::text_formatting::render_text_formatting_category;
 use super::*;
 
 pub(super) fn render_settings_categories(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    ui.add_space(SettingsUi::SECTION_GAP);
-    render_appearance_category(ui, app);
-    ui.add_space(SettingsUi::SECTION_GAP);
-    render_text_formatting_category(ui, app);
-    ui.add_space(SettingsUi::SECTION_GAP);
-    render_diagnostics_category(ui, app);
-    ui.add_space(SettingsUi::SECTION_GAP);
-    render_advanced_category(ui, app);
+    for render_category in [
+        render_appearance_category as fn(&mut egui::Ui, &mut ScratchpadApp),
+        render_text_formatting_category,
+        render_diagnostics_category,
+        render_advanced_category,
+    ] {
+        ui.add_space(SettingsUi::LAYOUT.section_gap);
+        render_category(ui, app);
+    }
 }
 
 fn render_diagnostics_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
@@ -34,7 +35,7 @@ fn render_advanced_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         "Stored as TOML and loaded on startup.",
         app,
     );
-    ui.add_space(SettingsUi::CARD_GAP);
+    ui.add_space(SettingsUi::LAYOUT.card_gap);
     action_card(
         ui,
         egui_phosphor::regular::ARROW_SQUARE_UP,

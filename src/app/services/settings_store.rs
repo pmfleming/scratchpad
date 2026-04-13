@@ -193,9 +193,16 @@ pub(crate) fn parse_toml_settings(raw: &str) -> io::Result<AppSettings> {
         let auto_hide = table
             .get("auto_hide_side_bars")
             .and_then(toml::Value::as_bool)
-            .or_else(|| table.get("auto_hide_top_bars").and_then(toml::Value::as_bool))
+            .or_else(|| {
+                table
+                    .get("auto_hide_top_bars")
+                    .and_then(toml::Value::as_bool)
+            })
             .unwrap_or(DEFAULT_AUTO_HIDE_TAB_LIST);
-        table.insert("auto_hide_tab_list".to_owned(), toml::Value::Boolean(auto_hide));
+        table.insert(
+            "auto_hide_tab_list".to_owned(),
+            toml::Value::Boolean(auto_hide),
+        );
     }
 
     table.remove("auto_hide_side_bars");

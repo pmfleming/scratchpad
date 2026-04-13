@@ -49,7 +49,7 @@ pub(super) fn render_appearance_category(ui: &mut egui::Ui, app: &mut Scratchpad
             render_tab_list_row(ui, app);
             inner_divider(ui);
             render_auto_hide_row(ui, app);
-            ui.add_space(SettingsUi::PREVIEW_TOP_MARGIN);
+            ui.add_space(SettingsUi::LAYOUT.preview_top_margin);
             render_preview_panel(ui, app);
         },
     );
@@ -89,7 +89,7 @@ fn render_theme_mode_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             ui.add_space(8.0);
             ui.label(
                 egui::RichText::new(format!("Detected: {}", detected_system_theme_label(ui)))
-                    .size(SettingsUi::DESCRIPTION_FONT_SIZE)
+                    .size(SettingsUi::TYPOGRAPHY.description)
                     .color(text_muted(ui)),
             );
         },
@@ -123,7 +123,7 @@ fn render_tab_list_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             let mut selected_position = app.tab_list_position();
             egui::ComboBox::from_id_salt("settings_tab_list_position")
                 .selected_text(selected_position.label())
-                .width(SettingsUi::CONTROL_WIDTH)
+                .width(SettingsUi::CONTROLS.width)
                 .show_ui(ui, |ui| {
                     for position in TabListPosition::ALL {
                         ui.selectable_value(&mut selected_position, position, position.label());
@@ -142,11 +142,11 @@ fn render_auto_hide_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         "Auto-hide tab list",
         Some("Collapse the active tab list until the pointer nears it."),
         |ui| {
-        let mut enabled = app.auto_hide_tab_list();
-        toggle_control(ui, &mut enabled);
-        if enabled != app.auto_hide_tab_list() {
-            app.set_auto_hide_tab_list(enabled);
-        }
+            let mut enabled = app.auto_hide_tab_list();
+            toggle_control(ui, &mut enabled);
+            if enabled != app.auto_hide_tab_list() {
+                app.set_auto_hide_tab_list(enabled);
+            }
         },
     );
 }

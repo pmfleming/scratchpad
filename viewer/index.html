@@ -9,7 +9,7 @@
     <meta http-equiv="Expires" content="0" />
     <title>Scratchpad Metrics Viewer</title>
     <script>
-        window.SCRATCHPAD_VIEWER_VERSION = "20260410-map-zoom-1";
+        window.SCRATCHPAD_VIEWER_VERSION = "20260413-clone-alert-1";
         document.write(`<link rel="stylesheet" href="styles.css?v=${window.SCRATCHPAD_VIEWER_VERSION}" />`);
     </script>
 </head>
@@ -19,7 +19,7 @@
         <header class="hero">
             <div>
                 <p class="eyebrow">Scratchpad data viewer</p>
-                <h1>Hotspots, slowspots, and architecture map</h1>
+                <h1>Hotspots, slowspots, clones, and architecture map</h1>
                 <p class="lede">
                     A static viewer for the JSON artifacts produced by the Python measurement tools.
                 </p>
@@ -28,6 +28,7 @@
                 <div class="data-card__label">Expected inputs</div>
                 <code>target/analysis/hotspots.json</code>
                 <code>target/analysis/slowspots.json</code>
+                <code>target/analysis/clones.json</code>
                 <code>target/analysis/map.json</code>
             </div>
         </header>
@@ -52,6 +53,10 @@
                     <input id="slowspots-file" type="file" accept="application/json,.json" />
                 </label>
                 <label>
+                    Clones JSON
+                    <input id="clones-file" type="file" accept="application/json,.json" />
+                </label>
+                <label>
                     Map JSON
                     <input id="map-file" type="file" accept="application/json,.json" />
                 </label>
@@ -61,6 +66,7 @@
         <nav class="tabs" aria-label="Metric views">
             <button class="tab is-active" data-tab="hotspots">Hotspots</button>
             <button class="tab" data-tab="slowspots">Slowspots</button>
+            <button class="tab" data-tab="clones">Clones</button>
             <button class="tab" data-tab="map">Map</button>
         </nav>
 
@@ -89,6 +95,20 @@
                     <input id="slowspots-filter" class="filter-input" type="search" placeholder="Filter slowspots..." />
                 </div>
                 <div id="slowspots-table" class="table-wrap"></div>
+            </div>
+        </section>
+
+        <section id="clones" class="tab-panel">
+            <div id="clones-summary" class="summary-grid"></div>
+            <div class="panel-card">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Code clones</h2>
+                        <p>Structural and Type-2 clones detected by <code>scripts/clone_alert.py</code>.</p>
+                    </div>
+                    <input id="clones-filter" class="filter-input" type="search" placeholder="Filter clones..." />
+                </div>
+                <div id="clones-table" class="table-wrap"></div>
             </div>
         </section>
 

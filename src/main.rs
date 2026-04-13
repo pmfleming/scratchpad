@@ -14,7 +14,7 @@ fn main() -> eframe::Result<()> {
     let startup_action = scratchpad::app::startup::parse_startup_action_from_env();
     match &startup_action {
         scratchpad::app::startup::StartupAction::Help => {
-            println!("{}", scratchpad::app::startup::usage_text());
+            println!("{}", scratchpad::app::startup::USAGE_TEXT);
             return Ok(());
         }
         scratchpad::app::startup::StartupAction::Version => {

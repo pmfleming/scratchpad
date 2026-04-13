@@ -3,12 +3,14 @@
     const sources = {
         hotspots: `../target/analysis/hotspots.json?v=${viewerVersion}`,
         slowspots: `../target/analysis/slowspots.json?v=${viewerVersion}`,
+        clones: `../target/analysis/clones.json?v=${viewerVersion}`,
         map: `../target/analysis/map.json?v=${viewerVersion}`,
     };
 
     const state = {
         hotspots: [],
         slowspots: [],
+        clones: [],
         map: null,
         selectedModule: null,
         mapZoom: 0.65,
@@ -92,6 +94,46 @@
                     <td>${formatNumber.format(item.mi)}</td>
                     <td>${formatNumber.format(item.sloc)}</td>
                     <td>${renderPills(item.signals)}</td>
+                </tr>`;
+            })
+        );
+    }
+
+    function renderClones() {
+        const query = byId("clones-filter").value;
+        const filtered = state.clones.filter((item) => matchesFilter(item, query));
+        const totalInstances = state.clones.reduce((sum, item) => sum + item.instances.length, 0);
+        const crossFileCount = state.clones.filter((item) => (item.file_count || 0) >= 2).length;
+        const widest = state.clones.reduce((max, item) => Math.max(max, item.max_line_span || 0), 0);
+        const astCount = state.clones.filter((item) => item.engine === "ast").length;
+
+        renderSummary("clones-summary", [
+            metricCard("Clone Groups", state.clones.length),
+            metricCard("Total Instances", totalInstances),
+            metricCard("Avg Instances", state.clones.length ? (totalInstances / state.clones.length).toFixed(1) : "-"),
+            metricCard("Cross-file Groups", crossFileCount),
+            metricCard("AST Groups", astCount),
+            metricCard("Widest Span", widest ? `${widest} lines` : "-"),
+        ]);
+
+        renderTable(
+            "clones-table",
+            ["Engine", "Group Hash", "Instances", "Files", "Score", "Token Count", "Signals", "Locations"],
+            filtered.map((item) => {
+                const locations = item.instances.map((inst) =>
+                    `<div><code>${escapeHtml(inst.file_path)}:${inst.start_line}-${inst.end_line}</code></div>`
+                ).join("");
+                const scoreClass = riskClass(item.score || 0, 20, 40);
+
+                return `<tr>
+                    <td><span class="pill">${escapeHtml(item.engine || "token")}</span></td>
+                    <td><code>${escapeHtml(item.hash.substring(0, 8))}</code></td>
+                    <td>${item.instances.length}</td>
+                    <td>${item.file_count ?? "-"}</td>
+                    <td class="${scoreClass}">${formatNumber.format(item.score)}</td>
+                    <td>${item.token_count}</td>
+                    <td>${renderPills(item.signals)}</td>
+                    <td class="small-text">${locations}</td>
                 </tr>`;
             })
         );
@@ -445,13 +487,15 @@
         const status = byId("load-status");
         const detail = byId("load-detail");
         try {
-            const [hotspots, slowspots, map] = await Promise.all([
+            const [hotspots, slowspots, clones, map] = await Promise.all([
                 loadJson(sources.hotspots),
                 loadJson(sources.slowspots),
+                loadJson(sources.clones),
                 loadJson(sources.map),
             ]);
             state.hotspots = hotspots;
             state.slowspots = slowspots;
+            state.clones = clones;
             state.map = map;
             status.textContent = "Loaded default JSON artifacts.";
             detail.textContent = "Data came from target/analysis.";
@@ -490,6 +534,7 @@
     function renderAll() {
         renderHotspots();
         renderSlowspots();
+        renderClones();
         renderMap();
     }
 
@@ -497,6 +542,7 @@
     setupTabs();
     byId("hotspots-filter").addEventListener("input", renderHotspots);
     byId("slowspots-filter").addEventListener("input", renderSlowspots);
+    byId("clones-filter").addEventListener("input", renderClones);
     byId("map-filter").addEventListener("input", renderMap);
     byId("map-zoom").addEventListener("input", (event) => {
         state.mapZoom = Number(event.target.value);
@@ -505,6 +551,7 @@
     });
     readJsonFile("hotspots-file", "hotspots", renderHotspots);
     readJsonFile("slowspots-file", "slowspots", renderSlowspots);
+    readJsonFile("clones-file", "clones", renderClones);
     readJsonFile("map-file", "map", renderMap);
     loadDefaults();
 })();

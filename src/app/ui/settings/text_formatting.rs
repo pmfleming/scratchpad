@@ -15,11 +15,11 @@ pub(super) fn render_text_formatting_category(ui: &mut egui::Ui, app: &mut Scrat
             render_font_size_row(ui, app);
             inner_divider(ui);
             render_gutter_row(ui, app);
-            ui.add_space(SettingsUi::PREVIEW_TOP_MARGIN);
+            ui.add_space(SettingsUi::LAYOUT.preview_top_margin);
             render_preview_panel(ui, app);
         },
     );
-    ui.add_space(SettingsUi::CARD_GAP);
+    ui.add_space(SettingsUi::LAYOUT.card_gap);
     toggle_card(
         ui,
         egui_phosphor::regular::TEXT_OUTDENT,
@@ -35,7 +35,7 @@ fn render_font_family_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         let mut selected_font = app.editor_font();
         egui::ComboBox::from_id_salt("settings_editor_font")
             .selected_text(selected_font.label())
-            .width(SettingsUi::CONTROL_WIDTH)
+            .width(SettingsUi::CONTROLS.width)
             .show_ui(ui, |ui| {
                 for preset in EditorFontPreset::ALL {
                     ui.selectable_value(&mut selected_font, preset, preset.label());
@@ -52,7 +52,7 @@ fn render_font_size_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         let mut selected_size = app.font_size().round() as u32;
         egui::ComboBox::from_id_salt("settings_font_size")
             .selected_text(selected_size.to_string())
-            .width(SettingsUi::CONTROL_WIDTH)
+            .width(SettingsUi::CONTROLS.width)
             .show_ui(ui, |ui| {
                 for option in FONT_SIZE_OPTIONS {
                     ui.selectable_value(&mut selected_size, option, option.to_string());

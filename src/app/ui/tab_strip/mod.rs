@@ -7,12 +7,13 @@ pub mod tab_cell;
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
 use crate::app::domain::WorkspaceTab;
-use crate::app::services::settings_store::{DEFAULT_TAB_LIST_WIDTH, TabListPosition};
+use crate::app::services::settings_store::TabListPosition;
 use crate::app::theme::*;
 use crate::app::ui::tab_drag::{self, TabDragCommit, TabDropZone};
 use crate::app::ui::tab_overflow;
 use eframe::egui::{self, Sense, Stroke};
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 pub(crate) use actions::{show_caption_controls, show_primary_actions};
 use entries::allocate_tab_strip_entries;
@@ -21,10 +22,16 @@ use outcome::apply_tab_outcome;
 pub(crate) use tab_cell::{TabInteraction, render_tab_cell, render_tab_cell_sized};
 
 const VERTICAL_TAB_LIST_PADDING: f32 = 8.0;
-const VERTICAL_TAB_LIST_MIN_WIDTH: f32 = 96.0;
-const VERTICAL_TAB_LIST_MAX_WIDTH: f32 = 360.0;
 const AUTO_HIDE_PEEK_SIZE: f32 = 6.0;
 const AUTO_HIDE_REVEAL_MARGIN: f32 = 12.0;
+
+struct VerticalTabCellContext<'a> {
+    active_slot_index: usize,
+    duplicate_name_counts: &'a HashMap<String, usize>,
+    pending_scroll_to_active: bool,
+    showing_settings: bool,
+    width: f32,
+}
 
 #[derive(Default)]
 pub(crate) struct TabStripOutcome {
@@ -45,35 +52,16 @@ pub(crate) fn show_header(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 
     let ctx = ui.ctx().clone();
     let header_visible = !app.auto_hide_tab_list() || top_bar_visible(ui);
-    let header_height = if header_visible {
-        HEADER_HEIGHT
-    } else {
-        AUTO_HIDE_PEEK_SIZE
-    };
     egui::Panel::top("header")
-        .exact_size(header_height)
-        .frame(
-            egui::Frame::NONE
-                .fill(header_bg(ui))
-                .stroke(Stroke::new(1.0, border(ui)))
-                .inner_margin(egui::Margin {
-                    left: HEADER_LEFT_PADDING as i8,
-                    right: HEADER_RIGHT_PADDING as i8,
-                    top: HEADER_VERTICAL_PADDING as i8,
-                    bottom: HEADER_VERTICAL_PADDING as i8,
-                }),
-        )
+        .exact_size(auto_hide_panel_extent(header_visible, HEADER_HEIGHT))
+        .frame(horizontal_tab_list_frame(ui))
         .show_inside(ui, |ui| {
             if !header_visible {
                 return;
             }
-            let outcome = show_horizontal_tab_bar(&ctx, ui, app, show_tabs_in_header(app));
+            let outcome = show_horizontal_tab_bar(&ctx, ui, app, true);
             apply_tab_outcome(app, outcome);
         });
-}
-
-fn show_tabs_in_header(app: &ScratchpadApp) -> bool {
-    app.tab_list_position() == TabListPosition::Top
 }
 
 fn show_header_drag_region(
@@ -99,37 +87,19 @@ pub(crate) fn show_vertical_tab_list(ui: &mut egui::Ui, app: &mut ScratchpadApp)
 
 fn show_vertical_tab_panel(ui: &mut egui::Ui, app: &mut ScratchpadApp, side: TabListPosition) {
     app.overflow_popup_open = false;
-    let panel_visible = !app.auto_hide_tab_list() || vertical_bar_visible(ui, app, side);
-    let panel_width = if panel_visible {
-        app.tab_list_width().max(DEFAULT_TAB_LIST_WIDTH)
-    } else {
-        AUTO_HIDE_PEEK_SIZE
-    };
-    let panel = match side {
-        TabListPosition::Left => egui::Panel::left("vertical_tab_list_left"),
-        TabListPosition::Right => egui::Panel::right("vertical_tab_list_right"),
-        TabListPosition::Top | TabListPosition::Bottom => return,
-    };
+    let now = Instant::now();
+    let panel_visible = vertical_panel_visible(ui, app, side, now);
+    let panel_width = auto_hide_panel_extent(panel_visible, app.vertical_tab_list_width());
 
-    let panel_response = panel
+    let panel_response = vertical_tab_panel(side, panel_visible)
         .default_size(panel_width)
         .size_range(if panel_visible {
-            VERTICAL_TAB_LIST_MIN_WIDTH..=VERTICAL_TAB_LIST_MAX_WIDTH
+            ScratchpadApp::VERTICAL_TAB_LIST_MIN_WIDTH..=ScratchpadApp::VERTICAL_TAB_LIST_MAX_WIDTH
         } else {
             AUTO_HIDE_PEEK_SIZE..=AUTO_HIDE_PEEK_SIZE
         })
         .resizable(panel_visible)
-        .frame(
-            egui::Frame::NONE
-                .fill(header_bg(ui))
-                .stroke(Stroke::new(1.0, border(ui)))
-                .inner_margin(egui::Margin {
-                    left: VERTICAL_TAB_LIST_PADDING as i8,
-                    right: VERTICAL_TAB_LIST_PADDING as i8,
-                    top: VERTICAL_TAB_LIST_PADDING as i8,
-                    bottom: VERTICAL_TAB_LIST_PADDING as i8,
-                }),
-        )
+        .frame(vertical_tab_list_frame(ui))
         .show_inside(ui, |ui| {
             if !panel_visible {
                 return;
@@ -138,7 +108,10 @@ fn show_vertical_tab_panel(ui: &mut egui::Ui, app: &mut ScratchpadApp, side: Tab
             apply_tab_outcome(app, outcome);
         });
     if panel_visible {
+        update_vertical_tab_panel_auto_hide(app, ui.ctx(), side, &panel_response.response, now);
         app.set_tab_list_width_from_layout(panel_response.response.rect.width());
+    } else {
+        app.close_vertical_tab_list();
     }
 }
 
@@ -223,69 +196,75 @@ fn collect_vertical_tab_entries(
     duplicate_name_counts: &HashMap<String, usize>,
     outcome: &mut TabStripOutcome,
 ) -> Vec<tab_drag::TabRectEntry> {
-    let active_slot_index = app.active_tab_slot_index();
-    let pending_scroll_to_active = app.tab_manager().pending_scroll_to_active;
-    let showing_settings = app.showing_settings();
-    let width = ui.available_width().max(TAB_BUTTON_WIDTH);
+    let context = VerticalTabCellContext {
+        active_slot_index: app.active_tab_slot_index(),
+        duplicate_name_counts,
+        pending_scroll_to_active: app.tab_manager().pending_scroll_to_active,
+        showing_settings: app.showing_settings(),
+        width: ui.available_width().max(TAB_BUTTON_WIDTH),
+    };
     let total_slots = app.total_tab_slots();
     let mut entries = Vec::with_capacity(total_slots);
 
     for slot_index in 0..total_slots {
-        let cell_outcome = if app.tab_slot_is_settings(slot_index) {
-            render_vertical_settings_tab_cell(
-                ui,
-                app,
-                slot_index,
-                active_slot_index,
-                width,
-                outcome,
-            )
-        } else {
-            let workspace_index = app
-                .workspace_index_for_slot(slot_index)
-                .unwrap_or(slot_index);
-            let tab = &app.tabs()[workspace_index];
-            let cell_outcome = render_tab_cell_sized(
-                ui,
-                slot_index,
-                tab,
-                !showing_settings && active_slot_index == slot_index,
-                pending_scroll_to_active,
-                duplicate_name_counts,
-                width,
-            );
-            apply_tab_interaction(outcome, cell_outcome.interaction);
-            maybe_scroll_to_active_tab(
-                ui,
-                slot_index,
-                active_slot_index,
-                pending_scroll_to_active,
-                cell_outcome.rect,
-                outcome,
-            );
-            cell_outcome
-        };
+        let is_settings = app.tab_slot_is_settings(slot_index);
+        let cell_outcome = render_vertical_tab_slot(ui, app, slot_index, &context, outcome);
 
         entries.push(tab_drag::TabRectEntry {
             index: slot_index,
             rect: cell_outcome.rect,
-            combine_enabled: !app.tab_slot_is_settings(slot_index),
+            combine_enabled: !is_settings,
         });
     }
 
     entries
 }
 
+fn render_vertical_tab_slot(
+    ui: &mut egui::Ui,
+    app: &ScratchpadApp,
+    slot_index: usize,
+    context: &VerticalTabCellContext<'_>,
+    outcome: &mut TabStripOutcome,
+) -> tab_cell::TabCellOutcome {
+    if app.tab_slot_is_settings(slot_index) {
+        return render_vertical_settings_tab_cell(ui, app, slot_index, context, outcome);
+    }
+
+    let workspace_index = app
+        .workspace_index_for_slot(slot_index)
+        .unwrap_or(slot_index);
+    let tab = &app.tabs()[workspace_index];
+    let cell_outcome = render_tab_cell_sized(
+        ui,
+        slot_index,
+        tab,
+        !context.showing_settings && context.active_slot_index == slot_index,
+        context.pending_scroll_to_active,
+        context.duplicate_name_counts,
+        context.width,
+    );
+    apply_tab_interaction(outcome, cell_outcome.interaction);
+    maybe_scroll_to_active_tab(
+        ui,
+        slot_index,
+        context.active_slot_index,
+        context.pending_scroll_to_active,
+        cell_outcome.rect,
+        outcome,
+    );
+    cell_outcome
+}
+
 fn render_vertical_settings_tab_cell(
     ui: &mut egui::Ui,
     app: &ScratchpadApp,
     slot_index: usize,
-    active_slot_index: usize,
-    width: f32,
+    context: &VerticalTabCellContext<'_>,
     outcome: &mut TabStripOutcome,
 ) -> tab_cell::TabCellOutcome {
     let (tab_response, close_response, _) =
-        crate::app::chrome::tab_button_sized(ui, "Settings", app.showing_settings(), width);
+        crate::app::chrome::tab_button_sized(ui, "Settings", app.showing_settings(), context.width);
     tab_drag::begin_tab_drag_if_needed(ui, slot_index, &tab_response, &close_response);
     entries::apply_settings_tab_interaction(
         outcome,
@@ -296,8 +275,8 @@ fn render_vertical_settings_tab_cell(
     maybe_scroll_to_active_tab(
         ui,
         slot_index,
-        active_slot_index,
-        app.tab_manager().pending_scroll_to_active,
+        context.active_slot_index,
+        context.pending_scroll_to_active,
         tab_response.rect,
         outcome,
     );
@@ -341,24 +320,9 @@ pub(crate) fn show_bottom_tab_list(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 
     let ctx = ui.ctx().clone();
     let bottom_bar_visible = !app.auto_hide_tab_list() || bottom_bar_visible(ui);
-    let bottom_bar_height = if bottom_bar_visible {
-        HEADER_HEIGHT
-    } else {
-        AUTO_HIDE_PEEK_SIZE
-    };
     egui::Panel::bottom("bottom_tab_list")
-        .exact_size(bottom_bar_height)
-        .frame(
-            egui::Frame::NONE
-                .fill(header_bg(ui))
-                .stroke(Stroke::new(1.0, border(ui)))
-                .inner_margin(egui::Margin {
-                    left: HEADER_LEFT_PADDING as i8,
-                    right: HEADER_RIGHT_PADDING as i8,
-                    top: HEADER_VERTICAL_PADDING as i8,
-                    bottom: HEADER_VERTICAL_PADDING as i8,
-                }),
-        )
+        .exact_size(auto_hide_panel_extent(bottom_bar_visible, HEADER_HEIGHT))
+        .frame(horizontal_tab_list_frame(ui))
         .show_inside(ui, |ui| {
             if !bottom_bar_visible {
                 return;
@@ -409,8 +373,34 @@ fn bottom_bar_visible(ui: &egui::Ui) -> bool {
     })
 }
 
-fn vertical_bar_visible(ui: &egui::Ui, app: &ScratchpadApp, side: TabListPosition) -> bool {
-    let expanded_width = app.tab_list_width().max(DEFAULT_TAB_LIST_WIDTH);
+fn auto_hide_panel_extent(visible: bool, expanded_size: f32) -> f32 {
+    if visible {
+        expanded_size
+    } else {
+        AUTO_HIDE_PEEK_SIZE
+    }
+}
+
+fn horizontal_tab_list_frame(ui: &egui::Ui) -> egui::Frame {
+    egui::Frame::NONE
+        .fill(header_bg(ui))
+        .stroke(Stroke::new(1.0, border(ui)))
+        .inner_margin(egui::Margin {
+            left: HEADER_LEFT_PADDING as i8,
+            right: HEADER_RIGHT_PADDING as i8,
+            top: HEADER_VERTICAL_PADDING as i8,
+            bottom: HEADER_VERTICAL_PADDING as i8,
+        })
+}
+
+fn vertical_tab_list_frame(ui: &egui::Ui) -> egui::Frame {
+    egui::Frame::NONE
+        .fill(header_bg(ui))
+        .stroke(Stroke::new(1.0, border(ui)))
+        .inner_margin(egui::Margin::same(VERTICAL_TAB_LIST_PADDING as i8))
+}
+
+fn pointer_near_vertical_bar(ui: &egui::Ui, expanded_width: f32, side: TabListPosition) -> bool {
     ui.input(|input| {
         input.pointer.hover_pos().is_some_and(|pos| match side {
             TabListPosition::Left => {
@@ -422,6 +412,78 @@ fn vertical_bar_visible(ui: &egui::Ui, app: &ScratchpadApp, side: TabListPositio
             TabListPosition::Top | TabListPosition::Bottom => false,
         })
     })
+}
+
+fn vertical_panel_visible(
+    ui: &egui::Ui,
+    app: &mut ScratchpadApp,
+    side: TabListPosition,
+    now: Instant,
+) -> bool {
+    if !app.auto_hide_tab_list() {
+        return true;
+    }
+
+    if pointer_near_vertical_bar(ui, app.vertical_tab_list_width(), side) {
+        app.keep_vertical_tab_list_open();
+        return true;
+    }
+
+    if app.vertical_tab_list_hide_deadline_active(now) {
+        return true;
+    }
+
+    if app.vertical_tab_list_open {
+        app.close_vertical_tab_list();
+    }
+
+    false
+}
+
+fn vertical_tab_panel(side: TabListPosition, visible: bool) -> egui::SidePanel {
+    match (side, visible) {
+        (TabListPosition::Left, true) => egui::Panel::left("vertical_tab_list_left"),
+        (TabListPosition::Left, false) => egui::Panel::left("vertical_tab_list_left_peek"),
+        (TabListPosition::Right, true) => egui::Panel::right("vertical_tab_list_right"),
+        (TabListPosition::Right, false) => egui::Panel::right("vertical_tab_list_right_peek"),
+        (TabListPosition::Top, _) | (TabListPosition::Bottom, _) => {
+            unreachable!("vertical tab panel only supports left/right")
+        }
+    }
+}
+
+fn update_vertical_tab_panel_auto_hide(
+    app: &mut ScratchpadApp,
+    ctx: &egui::Context,
+    side: TabListPosition,
+    response: &egui::Response,
+    now: Instant,
+) {
+    let pointer_pos = ctx.input(|input| input.pointer.hover_pos());
+    let still_has_context = pointer_pos.is_some_and(|pos| match side {
+        TabListPosition::Left => pos.x <= response.rect.right() + AUTO_HIDE_REVEAL_MARGIN,
+        TabListPosition::Right => pos.x >= response.rect.left() - AUTO_HIDE_REVEAL_MARGIN,
+        TabListPosition::Top | TabListPosition::Bottom => false,
+    });
+
+    let has_panel_interaction = pointer_pos.is_some_and(|pos| response.rect.contains(pos))
+        || response.hovered()
+        || response.contains_pointer()
+        || response.dragged();
+
+    if still_has_context || has_panel_interaction {
+        app.keep_vertical_tab_list_open();
+        ctx.request_repaint();
+        return;
+    }
+
+    if !app.vertical_tab_list_hide_deadline_active(now) {
+        app.delay_vertical_tab_list_hide(now);
+    }
+
+    if let Some(deadline) = app.vertical_tab_list_hide_deadline {
+        ctx.request_repaint_after(deadline.saturating_duration_since(now));
+    }
 }
 
 fn show_tab_region(
@@ -469,26 +531,30 @@ fn collect_tab_drop_zones(
 ) -> Vec<TabDropZone> {
     let mut drop_zones = Vec::new();
 
-    if let Some(tab_bar_zone) = maybe_show_scrolling_tab_strip(
-        ui,
-        app,
-        layout,
-        duplicate_name_counts,
-        visible_tab_indices,
-        outcome,
-    ) {
+    if layout.visible_strip_width > 0.0
+        && let Some(tab_bar_zone) = show_scrolling_tab_strip(
+            ui,
+            app,
+            layout,
+            duplicate_name_counts,
+            visible_tab_indices,
+            outcome,
+        )
+    {
         drop_zones.push(tab_bar_zone);
     }
 
-    if let Some(overflow_zone) = maybe_show_overflow_controls(
-        ctx,
-        ui,
-        app,
-        layout,
-        visible_tab_indices,
-        duplicate_name_counts,
-        outcome,
-    ) {
+    if (layout.has_overflow || app.overflow_popup_open)
+        && let Some(overflow_zone) = show_overflow_controls(
+            ctx,
+            ui,
+            app,
+            layout,
+            visible_tab_indices,
+            duplicate_name_counts,
+            outcome,
+        )
+    {
         drop_zones.push(overflow_zone);
     }
 
@@ -518,52 +584,6 @@ fn render_new_tab_action(ui: &mut egui::Ui, app: &mut ScratchpadApp, spacing: f3
     .clicked()
     {
         app.handle_command(AppCommand::NewTab);
-    }
-}
-
-fn maybe_show_scrolling_tab_strip(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    layout: &HeaderLayout,
-    duplicate_name_counts: &HashMap<String, usize>,
-    visible_tab_indices: &mut HashSet<usize>,
-    outcome: &mut TabStripOutcome,
-) -> Option<TabDropZone> {
-    if layout.visible_strip_width <= 0.0 {
-        None
-    } else {
-        show_scrolling_tab_strip(
-            ui,
-            app,
-            layout,
-            duplicate_name_counts,
-            visible_tab_indices,
-            outcome,
-        )
-    }
-}
-
-fn maybe_show_overflow_controls(
-    ctx: &egui::Context,
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    layout: &HeaderLayout,
-    visible_tab_indices: &HashSet<usize>,
-    duplicate_name_counts: &HashMap<String, usize>,
-    outcome: &mut TabStripOutcome,
-) -> Option<TabDropZone> {
-    if layout.has_overflow || app.overflow_popup_open {
-        show_overflow_controls(
-            ctx,
-            ui,
-            app,
-            layout,
-            visible_tab_indices,
-            duplicate_name_counts,
-            outcome,
-        )
-    } else {
-        None
     }
 }
 

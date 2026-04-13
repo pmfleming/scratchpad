@@ -79,33 +79,31 @@ where
     parser::parse_startup_action(args)
 }
 
-pub fn usage_text() -> &'static str {
-    concat!(
-        "Scratchpad command line usage\n",
-        "\n",
-        "  scratchpad.exe [switches] [files...]\n",
-        "\n",
-        "Switches:\n",
-        "  /clean                Start with one fresh untitled tab and skip session restore\n",
-        "  /here                 Add incoming files into the active workspace tab\n",
-        "  /addto                Alias for /addto:active\n",
-        "  /addto:active         Add incoming files into the active workspace tab\n",
-        "  /addto:index:N        Add incoming files into the Nth tab (1-based)\n",
-        "  /files:\"a\",\"b\"      Comma-delimited quoted file list in one argument\n",
-        "  /log-cli              Log parsed startup options to the runtime log\n",
-        "  /help or /?           Show this help text\n",
-        "  /version              Print the application version and exit\n",
-        "\n",
-        "Examples:\n",
-        "  scratchpad.exe \"C:\\notes\\a.txt\" \"C:\\notes\\b.txt\"\n",
-        "  scratchpad.exe /clean \"C:\\notes\\a.txt\"\n",
-        "  scratchpad.exe /addto:active /files:\"C:\\a.txt\",\"C:\\b.txt\"\n"
-    )
-}
+pub const USAGE_TEXT: &str = concat!(
+    "Scratchpad command line usage\n",
+    "\n",
+    "  scratchpad.exe [switches] [files...]\n",
+    "\n",
+    "Switches:\n",
+    "  /clean                Start with one fresh untitled tab and skip session restore\n",
+    "  /here                 Add incoming files into the active workspace tab\n",
+    "  /addto                Alias for /addto:active\n",
+    "  /addto:active         Add incoming files into the active workspace tab\n",
+    "  /addto:index:N        Add incoming files into the Nth tab (1-based)\n",
+    "  /files:\"a\",\"b\"      Comma-delimited quoted file list in one argument\n",
+    "  /log-cli              Log parsed startup options to the runtime log\n",
+    "  /help or /?           Show this help text\n",
+    "  /version              Print the application version and exit\n",
+    "\n",
+    "Examples:\n",
+    "  scratchpad.exe \"C:\\notes\\a.txt\" \"C:\\notes\\b.txt\"\n",
+    "  scratchpad.exe /clean \"C:\\notes\\a.txt\"\n",
+    "  scratchpad.exe /addto:active /files:\"C:\\a.txt\",\"C:\\b.txt\"\n"
+);
 
 #[cfg(test)]
 mod tests {
-    use super::{StartupAction, StartupOpenTarget, parse_startup_action};
+    use super::{parse_startup_action, StartupAction, StartupOpenTarget};
     use std::path::PathBuf;
 
     fn args(values: &[&str]) -> Vec<String> {

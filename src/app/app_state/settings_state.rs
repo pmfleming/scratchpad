@@ -10,11 +10,16 @@ use crate::app::services::settings_store::{
 };
 use eframe::egui;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 mod display_tabs;
 mod toml_refresh;
 
 impl ScratchpadApp {
+    pub(crate) const VERTICAL_TAB_LIST_MIN_WIDTH: f32 = 96.0;
+    pub(crate) const VERTICAL_TAB_LIST_MAX_WIDTH: f32 = 360.0;
+    pub(crate) const VERTICAL_TAB_LIST_AUTO_HIDE_DELAY: Duration = Duration::from_secs(3);
+
     pub fn font_size(&self) -> f32 {
         self.app_settings.font_size
     }
@@ -71,6 +76,13 @@ impl ScratchpadApp {
 
     pub fn tab_list_width(&self) -> f32 {
         self.app_settings.tab_list_width
+    }
+
+    pub(crate) fn vertical_tab_list_width(&self) -> f32 {
+        self.app_settings.tab_list_width.clamp(
+            Self::VERTICAL_TAB_LIST_MIN_WIDTH,
+            Self::VERTICAL_TAB_LIST_MAX_WIDTH,
+        )
     }
 
     pub fn auto_hide_tab_list(&self) -> bool {
@@ -265,6 +277,8 @@ impl ScratchpadApp {
         }
 
         self.app_settings.tab_list_position = position;
+        self.vertical_tab_list_open = false;
+        self.vertical_tab_list_hide_deadline = None;
         if position.is_vertical() {
             self.overflow_popup_open = false;
         }
@@ -280,13 +294,20 @@ impl ScratchpadApp {
         }
 
         self.app_settings.auto_hide_tab_list = enabled;
+        if !enabled {
+            self.vertical_tab_list_open = false;
+        }
+        self.vertical_tab_list_hide_deadline = None;
         if let Err(error) = self.persist_settings_now() {
             self.set_error_status(format!("Settings save failed: {error}"));
         }
     }
 
     pub(crate) fn set_tab_list_width_from_layout(&mut self, width: f32) {
-        let next = width.clamp(96.0, 360.0);
+        let next = width.clamp(
+            Self::VERTICAL_TAB_LIST_MIN_WIDTH,
+            Self::VERTICAL_TAB_LIST_MAX_WIDTH,
+        );
         if (self.app_settings.tab_list_width - next).abs() < 1.0 {
             return;
         }
@@ -391,6 +412,26 @@ impl ScratchpadApp {
     pub(crate) fn activate_workspace_surface(&mut self) {
         self.active_surface = AppSurface::Workspace;
     }
+
+    pub(crate) fn vertical_tab_list_hide_deadline_active(&self, now: Instant) -> bool {
+        self.vertical_tab_list_hide_deadline
+            .is_some_and(|deadline| deadline > now)
+    }
+
+    pub(crate) fn keep_vertical_tab_list_open(&mut self) {
+        self.vertical_tab_list_open = true;
+        self.vertical_tab_list_hide_deadline = None;
+    }
+
+    pub(crate) fn delay_vertical_tab_list_hide(&mut self, now: Instant) {
+        self.vertical_tab_list_open = true;
+        self.vertical_tab_list_hide_deadline = Some(now + Self::VERTICAL_TAB_LIST_AUTO_HIDE_DELAY);
+    }
+
+    pub(crate) fn close_vertical_tab_list(&mut self) {
+        self.vertical_tab_list_open = false;
+        self.vertical_tab_list_hide_deadline = None;
+    }
 }
 
 fn sync_stock_editor_palette_with_theme_mode(settings: &mut AppSettings) {
@@ -450,11 +491,20 @@ mod tests {
     use super::*;
     use crate::app::services::session_store::SessionStore;
 
-    #[test]
-    fn applying_light_mode_settings_migrates_stock_editor_palette() {
+    fn test_app() -> ScratchpadApp {
         let session_root = tempfile::tempdir().expect("create session dir");
         let session_store = SessionStore::new(session_root.path().to_path_buf());
-        let mut app = ScratchpadApp::with_session_store(session_store);
+        ScratchpadApp::with_session_store(session_store)
+    }
+
+    fn set_custom_palette(app: &mut ScratchpadApp) {
+        app.set_editor_text_color(egui::Color32::from_rgb(12, 34, 56));
+        app.set_editor_background_color(egui::Color32::from_rgb(210, 220, 230));
+    }
+
+    #[test]
+    fn applying_light_mode_settings_migrates_stock_editor_palette() {
+        let mut app = test_app();
 
         app.apply_settings(AppSettings {
             theme_mode: AppThemeMode::Light,
@@ -469,9 +519,7 @@ mod tests {
 
     #[test]
     fn switching_to_light_mode_updates_stock_editor_palette() {
-        let session_root = tempfile::tempdir().expect("create session dir");
-        let session_store = SessionStore::new(session_root.path().to_path_buf());
-        let mut app = ScratchpadApp::with_session_store(session_store);
+        let mut app = test_app();
 
         app.set_theme_mode(AppThemeMode::Light);
 
@@ -481,9 +529,7 @@ mod tests {
 
     #[test]
     fn switching_theme_preserves_custom_editor_palette() {
-        let session_root = tempfile::tempdir().expect("create session dir");
-        let session_store = SessionStore::new(session_root.path().to_path_buf());
-        let mut app = ScratchpadApp::with_session_store(session_store);
+        let mut app = test_app();
 
         let custom_text = egui::Color32::from_rgb(12, 34, 56);
         let custom_background = egui::Color32::from_rgb(210, 220, 230);
@@ -498,9 +544,7 @@ mod tests {
 
     #[test]
     fn custom_palette_is_detected_after_editor_color_change() {
-        let session_root = tempfile::tempdir().expect("create session dir");
-        let session_store = SessionStore::new(session_root.path().to_path_buf());
-        let mut app = ScratchpadApp::with_session_store(session_store);
+        let mut app = test_app();
 
         assert!(!app.has_custom_editor_palette());
 
@@ -511,12 +555,8 @@ mod tests {
 
     #[test]
     fn applying_light_theme_preset_clears_custom_palette() {
-        let session_root = tempfile::tempdir().expect("create session dir");
-        let session_store = SessionStore::new(session_root.path().to_path_buf());
-        let mut app = ScratchpadApp::with_session_store(session_store);
-
-        app.set_editor_text_color(egui::Color32::from_rgb(12, 34, 56));
-        app.set_editor_background_color(egui::Color32::from_rgb(210, 220, 230));
+        let mut app = test_app();
+        set_custom_palette(&mut app);
 
         app.apply_theme_mode_preset(AppThemeMode::Light, Some(egui::Theme::Light));
 
@@ -528,12 +568,8 @@ mod tests {
 
     #[test]
     fn applying_system_theme_preset_clears_custom_palette() {
-        let session_root = tempfile::tempdir().expect("create session dir");
-        let session_store = SessionStore::new(session_root.path().to_path_buf());
-        let mut app = ScratchpadApp::with_session_store(session_store);
-
-        app.set_editor_text_color(egui::Color32::from_rgb(12, 34, 56));
-        app.set_editor_background_color(egui::Color32::from_rgb(210, 220, 230));
+        let mut app = test_app();
+        set_custom_palette(&mut app);
 
         app.apply_theme_mode_preset(AppThemeMode::System, Some(egui::Theme::Dark));
 

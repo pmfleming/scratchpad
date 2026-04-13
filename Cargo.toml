@@ -2,6 +2,7 @@
 name = "scratchpad"
 version = "0.2.0"
 edition = "2024"
+default-run = "scratchpad"
 
 [dependencies]
 eframe = "0.34.1"
@@ -15,6 +16,9 @@ serde_yaml = "0.9"
 encoding_rs = "0.8"
 encoding_rs_io = "0.1"
 chardetng = "0.1"
+syn = { version = "2.0", features = ["full", "extra-traits", "visit"] }
+quote = "1.0"
+proc-macro2 = { version = "1.0", features = ["span-locations"] }
 
 [dev-dependencies]
 rand = "0.10.0"
@@ -24,3 +28,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "tab_stress"
 harness = false
+
+[[bin]]
+name = "ast_hasher"
+path = "scripts/ast_hasher.rs"

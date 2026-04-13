@@ -93,13 +93,19 @@ mod tests {
         ScratchpadApp::with_session_store(session_store)
     }
 
-    fn app_with_settings_between_tabs() -> ScratchpadApp {
+    fn app_with_named_tabs(names: &[&str]) -> ScratchpadApp {
         let mut app = test_app();
-        app.tabs_mut()[0].buffer.name = "one.txt".to_owned();
-        app.append_tab(WorkspaceTab::untitled());
-        app.tabs_mut()[1].buffer.name = "two.txt".to_owned();
-        app.append_tab(WorkspaceTab::untitled());
-        app.tabs_mut()[2].buffer.name = "three.txt".to_owned();
+        for (index, name) in names.iter().enumerate() {
+            if index > 0 {
+                app.append_tab(WorkspaceTab::untitled());
+            }
+            app.tabs_mut()[index].buffer.name = (*name).to_owned();
+        }
+        app
+    }
+
+    fn app_with_settings_between_tabs() -> ScratchpadApp {
+        let mut app = app_with_named_tabs(&["one.txt", "two.txt", "three.txt"]);
 
         app.handle_command(AppCommand::OpenSettings);
         app.handle_command(AppCommand::ReorderDisplayTab {
