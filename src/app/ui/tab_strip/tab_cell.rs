@@ -17,25 +17,6 @@ pub(crate) enum TabInteraction {
     RequestClose(usize),
 }
 
-pub(crate) fn render_tab_cell(
-    ui: &mut egui::Ui,
-    index: usize,
-    tab: &WorkspaceTab,
-    is_active: bool,
-    pending_scroll_to_active: bool,
-    duplicate_name_counts: &HashMap<String, usize>,
-) -> TabCellOutcome {
-    render_tab_cell_sized(
-        ui,
-        index,
-        tab,
-        is_active,
-        pending_scroll_to_active,
-        duplicate_name_counts,
-        crate::app::theme::TAB_BUTTON_WIDTH,
-    )
-}
-
 pub(crate) fn render_tab_cell_sized(
     ui: &mut egui::Ui,
     index: usize,

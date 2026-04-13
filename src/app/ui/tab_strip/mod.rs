@@ -6,13 +6,12 @@ pub mod tab_cell;
 
 use crate::app::app_state::ScratchpadApp;
 use crate::app::services::settings_store::TabListPosition;
-use crate::app::theme::*;
 use eframe::egui;
 use std::collections::HashSet;
 use std::time::Instant;
 
 pub(crate) use actions::{show_caption_controls, show_primary_actions};
-use entries::{show_drag_region, show_tab_region, show_vertical_tab_region};
+use entries::{show_tab_region, show_vertical_tab_region};
 pub(crate) use layout::HeaderLayout;
 use layout::{
     AUTO_HIDE_PEEK_SIZE, auto_hide_panel_extent, horizontal_bar_visible,
@@ -20,7 +19,7 @@ use layout::{
     vertical_tab_panel,
 };
 use outcome::apply_tab_outcome;
-pub(crate) use tab_cell::{TabInteraction, render_tab_cell, render_tab_cell_sized};
+pub(crate) use tab_cell::{TabInteraction, render_tab_cell_sized};
 
 #[derive(Default)]
 pub(crate) struct TabStripOutcome {
@@ -38,24 +37,9 @@ pub(crate) fn show_header(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     show_horizontal_tab_list(ui, app, TabListPosition::Top, "header");
 }
 
-fn show_header_drag_region(
-    ctx: &egui::Context,
-    ui: &mut egui::Ui,
-    layout: &HeaderLayout,
-) -> TabStripOutcome {
-    ui.allocate_ui_with_layout(
-        egui::vec2(layout.tab_area_width, TAB_HEIGHT),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| show_drag_region(ctx, ui, layout.tab_area_width),
-    );
-    TabStripOutcome::default()
-}
-
 pub(crate) fn show_vertical_tab_list(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    match app.tab_list_position() {
-        TabListPosition::Left => show_vertical_tab_panel(ui, app, TabListPosition::Left),
-        TabListPosition::Right => show_vertical_tab_panel(ui, app, TabListPosition::Right),
-        TabListPosition::Top | TabListPosition::Bottom => {}
+    if let Some(side) = vertical_tab_side(app.tab_list_position()) {
+        show_vertical_tab_panel(ui, app, side);
     }
 }
 
@@ -78,7 +62,7 @@ fn show_vertical_tab_panel(ui: &mut egui::Ui, app: &mut ScratchpadApp, side: Tab
             apply_tab_outcome(app, outcome);
         });
 
-    finalize_vertical_tab_panel(ui, app, side, now, panel_visible, &panel_response.response);
+    finalize_vertical_tab_panel(app, panel_visible, &panel_response.response);
 }
 
 fn vertical_tab_panel_size_range(panel_visible: bool) -> std::ops::RangeInclusive<f32> {
@@ -89,20 +73,12 @@ fn vertical_tab_panel_size_range(panel_visible: bool) -> std::ops::RangeInclusiv
     }
 }
 
-fn finalize_vertical_tab_panel(
-    ui: &egui::Ui,
-    app: &mut ScratchpadApp,
-    side: TabListPosition,
-    now: Instant,
-    panel_visible: bool,
-    response: &egui::Response,
-) {
+fn finalize_vertical_tab_panel(app: &mut ScratchpadApp, panel_visible: bool, response: &egui::Response) {
     if !panel_visible {
         app.close_tab_list();
         return;
     }
 
-    let _ = (ui, side, now);
     app.set_tab_list_width_from_layout(response.rect.width());
 }
 
@@ -129,29 +105,20 @@ fn show_horizontal_tab_list(
         true,
         bar_visible,
         |ui| {
-            let outcome = show_horizontal_tab_bar(&ctx, ui, app, true);
+            let outcome = show_horizontal_tab_bar(&ctx, ui, app);
             apply_tab_outcome(app, outcome);
         },
     );
 }
 
-fn show_horizontal_tab_bar(
-    ctx: &egui::Context,
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    include_tabs: bool,
-) -> TabStripOutcome {
+fn show_horizontal_tab_bar(ctx: &egui::Context, ui: &mut egui::Ui, app: &mut ScratchpadApp) -> TabStripOutcome {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         show_primary_actions(ui, app);
 
         ui.add_space(8.0);
-        let layout = HeaderLayout::measure(app, ui.available_width(), 4.0, include_tabs);
-        let outcome = if include_tabs {
-            show_tab_region(ctx, ui, app, &layout)
-        } else {
-            show_header_drag_region(ctx, ui, &layout)
-        };
+        let layout = HeaderLayout::measure(app, ui.available_width(), 4.0, true);
+        let outcome = show_tab_region(ctx, ui, app, &layout);
 
         ui.add_space(8.0);
         show_caption_controls(ctx, ui, app, &layout);
@@ -200,6 +167,13 @@ pub(crate) fn record_visible_tab(
 ) {
     if viewport_rect.intersects(rect) {
         visible_tab_indices.insert(index);
+    }
+}
+
+fn vertical_tab_side(position: TabListPosition) -> Option<TabListPosition> {
+    match position {
+        TabListPosition::Left | TabListPosition::Right => Some(position),
+        TabListPosition::Top | TabListPosition::Bottom => None,
     }
 }
 

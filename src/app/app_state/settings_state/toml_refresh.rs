@@ -1,5 +1,5 @@
 use crate::app::app_state::ScratchpadApp;
-use crate::app::domain::BufferId;
+use crate::app::domain::{BufferId, BufferState, ViewId};
 use crate::app::services::settings_store::parse_toml_settings;
 
 pub(in crate::app::app_state) enum SettingsTomlRefreshAction {
@@ -13,6 +13,28 @@ impl ScratchpadApp {
     pub(crate) fn reload_settings_from_active_settings_tab(&mut self) {
         let refresh = self.active_settings_toml_refresh_action();
         self.apply_settings_toml_refresh(refresh);
+    }
+
+    pub(crate) fn reload_settings_before_workspace_change(&mut self) {
+        self.reload_settings_from_active_settings_tab();
+    }
+
+    pub(crate) fn reload_settings_if_switching_views(&mut self, next_view_id: ViewId) {
+        if self
+            .active_tab()
+            .is_some_and(|tab| tab.active_view_id != next_view_id)
+        {
+            self.reload_settings_from_active_settings_tab();
+        }
+    }
+
+    pub(crate) fn reload_settings_if_closing_view(&mut self, view_id: ViewId) {
+        if self
+            .active_tab()
+            .is_some_and(|tab| tab.active_view_id == view_id)
+        {
+            self.reload_settings_from_active_settings_tab();
+        }
     }
 
     pub(crate) fn note_settings_toml_edit(&mut self, tab_index: usize) {
@@ -80,20 +102,19 @@ impl ScratchpadApp {
         Some((buffer_id, SettingsTomlRefreshAction::ApplyBuffer(raw)))
     }
 
-    fn active_settings_file_buffer_snapshot(
-        &self,
-        index: usize,
-    ) -> Option<(BufferId, String, bool)> {
+    fn active_settings_file_buffer_snapshot(&self, index: usize) -> Option<(BufferId, String, bool)> {
         let buffer = self.tabs().get(index)?.active_buffer();
-        buffer
-            .is_settings_file
-            .then(|| (buffer.id, buffer.content.clone(), buffer.is_dirty))
+        buffer.is_settings_file.then(|| settings_buffer_snapshot(buffer))
     }
 
     fn settings_file_buffer_snapshot(&self, index: usize) -> Option<(BufferId, String, bool)> {
         let tab = self.tabs().get(index)?;
         let buffer = tab.buffers().find(|buffer| buffer.is_settings_file)?;
 
-        Some((buffer.id, buffer.content.clone(), buffer.is_dirty))
+        Some(settings_buffer_snapshot(buffer))
     }
+}
+
+fn settings_buffer_snapshot(buffer: &BufferState) -> (BufferId, String, bool) {
+    (buffer.id, buffer.content.clone(), buffer.is_dirty)
 }

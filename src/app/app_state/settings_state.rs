@@ -5,11 +5,12 @@ use crate::app::paths_match;
 use crate::app::services::file_controller::FileController;
 use crate::app::services::settings_store::{
     AppSettings, AppThemeMode, DEFAULT_EDITOR_BACKGROUND_COLOR, DEFAULT_EDITOR_TEXT_COLOR,
-    DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, LIGHT_EDITOR_BACKGROUND_COLOR,
-    LIGHT_EDITOR_TEXT_COLOR, TabListPosition, color_from_hex, color_to_hex,
+    DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, FileOpenDisposition,
+    LIGHT_EDITOR_BACKGROUND_COLOR, LIGHT_EDITOR_TEXT_COLOR, StartupSessionBehavior,
+    TabListPosition, color_from_hex, color_to_hex,
 };
 use eframe::egui;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 mod display_tabs;
@@ -78,6 +79,14 @@ impl ScratchpadApp {
         self.app_settings.tab_list_position
     }
 
+    pub fn file_open_disposition(&self) -> FileOpenDisposition {
+        self.app_settings.file_open_disposition
+    }
+
+    pub fn startup_session_behavior(&self) -> StartupSessionBehavior {
+        self.app_settings.startup_session_behavior
+    }
+
     pub fn tab_list_width(&self) -> f32 {
         self.app_settings.tab_list_width
     }
@@ -97,22 +106,26 @@ impl ScratchpadApp {
         self.app_settings.tab_list_auto_hide_delay_seconds
     }
 
+    pub fn recent_files_enabled(&self) -> bool {
+        self.app_settings.recent_files_enabled
+    }
+
     pub(crate) fn tab_list_auto_hide_delay(&self) -> Duration {
         Duration::from_secs_f32(sanitize_tab_list_auto_hide_delay_seconds(
             self.app_settings.tab_list_auto_hide_delay_seconds,
         ))
     }
 
-    pub fn settings_path(&self) -> PathBuf {
-        self.settings_store.path().to_path_buf()
+    pub fn settings_path(&self) -> &Path {
+        self.settings_store.path()
     }
 
     pub(crate) fn is_settings_file_path(&self, path: &Path) -> bool {
-        paths_match(path, &self.settings_path())
+        paths_match(path, self.settings_path())
     }
 
     pub(crate) fn mark_active_buffer_as_settings_file(&mut self) {
-        let settings_path = self.settings_path();
+        let settings_path = self.settings_path().to_path_buf();
         let Some(tab) = self.active_tab_mut() else {
             return;
         };

@@ -556,6 +556,8 @@ class ArchitectureMapper:
                 {
                     "data": {
                         "id": mod_name,
+                        "layer": self.layer_name(mod_name),
+                        "churn": int(evidence.get("churn", 0)),
                         "label": mod_name.split("::")[-1],
                         "parent": group_id("::".join(mod_name.split("::")[:-1]) or None),
                         "comp_score": float(metric.get("score", 0.0)),

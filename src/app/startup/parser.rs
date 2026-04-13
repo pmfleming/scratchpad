@@ -128,6 +128,7 @@ impl StartupActionParser {
 
         self.saw_here = true;
         self.options.open_target = StartupOpenTarget::ActiveTab;
+        self.options.open_target_explicit = true;
         Ok(())
     }
 
@@ -141,12 +142,14 @@ impl StartupActionParser {
 
         self.saw_addto = true;
         self.options.open_target = target;
+        self.options.open_target_explicit = true;
         Ok(())
     }
 
     fn finish(mut self) -> StartupAction {
         if self.requested_clean {
             self.options.restore_session = false;
+            self.options.restore_session_explicit = true;
         }
 
         if let Err(error) = self.validate_final_state() {

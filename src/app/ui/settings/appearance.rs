@@ -3,6 +3,12 @@ use super::*;
 const AUTO_HIDE_DELAY_OPTIONS: [f32; 13] = [
     0.1, 0.3, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,
 ];
+const TAB_LIST_POSITIONS: [TabListPosition; 4] = [
+    TabListPosition::Top,
+    TabListPosition::Bottom,
+    TabListPosition::Left,
+    TabListPosition::Right,
+];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ThemeModeSelection {
@@ -16,6 +22,15 @@ impl ThemeModeSelection {
     fn label(self) -> &'static str {
         match self {
             Self::System => "Use system setting",
+            Self::Light => "Light",
+            Self::Dark => "Dark",
+            Self::Custom => "Custom",
+        }
+    }
+
+    fn pill_label(self) -> &'static str {
+        match self {
+            Self::System => "System",
             Self::Light => "Light",
             Self::Dark => "Dark",
             Self::Custom => "Custom",
@@ -84,25 +99,27 @@ fn render_theme_mode_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             let has_custom_palette = app.has_custom_editor_palette();
             let initial_selection = selected_theme_mode(app);
             let mut selected_mode = initial_selection;
-            egui::ComboBox::from_id_salt("settings_theme_mode")
-                .selected_text(selected_mode.label())
-                .width(SettingsUi::control_width(has_custom_palette))
-                .show_ui(ui, |ui| {
-                    for mode in [
-                        ThemeModeSelection::System,
-                        ThemeModeSelection::Light,
-                        ThemeModeSelection::Dark,
-                    ] {
-                        ui.selectable_value(&mut selected_mode, mode, mode.label());
-                    }
-                    if has_custom_palette {
-                        ui.selectable_value(
-                            &mut selected_mode,
-                            ThemeModeSelection::Custom,
-                            ThemeModeSelection::Custom.label(),
-                        );
-                    }
-                });
+            fixed_width_control(ui, |ui| {
+                egui::ComboBox::from_id_salt("settings_theme_mode")
+                    .selected_text(selected_mode.pill_label())
+                    .width(SettingsUi::CONTROLS.width)
+                    .show_ui(ui, |ui| {
+                        for mode in [
+                            ThemeModeSelection::System,
+                            ThemeModeSelection::Light,
+                            ThemeModeSelection::Dark,
+                        ] {
+                            ui.selectable_value(&mut selected_mode, mode, mode.label());
+                        }
+                        if has_custom_palette {
+                            ui.selectable_value(
+                                &mut selected_mode,
+                                ThemeModeSelection::Custom,
+                                ThemeModeSelection::Custom.label(),
+                            );
+                        }
+                    });
+            });
             if selected_mode != initial_selection {
                 apply_theme_mode_selection(app, selected_mode, ui.ctx().system_theme());
             }
@@ -141,19 +158,34 @@ fn render_tab_list_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         Some("Use a horizontal strip or a vertical list on either side."),
         |ui| {
             let mut selected_position = app.tab_list_position();
-            egui::ComboBox::from_id_salt("settings_tab_list_position")
-                .selected_text(selected_position.label())
-                .width(SettingsUi::CONTROLS.width)
-                .show_ui(ui, |ui| {
-                    for position in TabListPosition::ALL {
-                        ui.selectable_value(&mut selected_position, position, position.label());
-                    }
-                });
+            fixed_width_control(ui, |ui| {
+                egui::ComboBox::from_id_salt("settings_tab_list_position")
+                    .selected_text(tab_list_position_label(selected_position))
+                    .width(SettingsUi::CONTROLS.width)
+                    .show_ui(ui, |ui| {
+                        for position in TAB_LIST_POSITIONS {
+                            ui.selectable_value(
+                                &mut selected_position,
+                                position,
+                                tab_list_position_label(position),
+                            );
+                        }
+                    });
+            });
             if selected_position != app.tab_list_position() {
                 app.set_tab_list_position(selected_position);
             }
         },
     );
+}
+
+fn tab_list_position_label(position: TabListPosition) -> &'static str {
+    match position {
+        TabListPosition::Top => "Top",
+        TabListPosition::Bottom => "Bottom",
+        TabListPosition::Left => "Left",
+        TabListPosition::Right => "Right",
+    }
 }
 
 fn render_auto_hide_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {

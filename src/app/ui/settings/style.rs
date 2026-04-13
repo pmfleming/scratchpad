@@ -22,7 +22,6 @@ pub(super) struct SettingsLayout {
 
 pub(super) struct ControlMetrics {
     pub width: f32,
-    pub width_with_custom: f32,
     pub gap: f32,
     pub icon_button_size: f32,
 }
@@ -57,7 +56,6 @@ impl SettingsUi {
     };
     pub(super) const CONTROLS: ControlMetrics = ControlMetrics {
         width: 190.0,
-        width_with_custom: 228.0,
         gap: 8.0,
         icon_button_size: 34.0,
     };
@@ -95,16 +93,17 @@ impl SettingsUi {
     const ICON_LIGHT: egui::Color32 = egui::Color32::from_rgba_premultiplied(28, 35, 45, 170);
 
     pub(super) fn apply_typography(ui: &mut egui::Ui) {
-        let font_id = egui::FontId::proportional(Self::TYPOGRAPHY.body);
         let style = ui.style_mut();
-        style.override_font_id = Some(font_id.clone());
+        style.override_font_id = Some(egui::FontId::proportional(Self::TYPOGRAPHY.body));
         style
             .text_styles
-            .insert(egui::TextStyle::Body, font_id.clone());
+            .insert(egui::TextStyle::Body, egui::FontId::proportional(Self::TYPOGRAPHY.body));
         style
             .text_styles
-            .insert(egui::TextStyle::Button, font_id.clone());
-        style.text_styles.insert(egui::TextStyle::Small, font_id);
+            .insert(egui::TextStyle::Button, egui::FontId::proportional(Self::TYPOGRAPHY.body));
+        style
+            .text_styles
+            .insert(egui::TextStyle::Small, egui::FontId::proportional(Self::TYPOGRAPHY.body));
     }
 
     pub(super) fn page_content_width(ui: &egui::Ui) -> f32 {
@@ -181,14 +180,6 @@ impl SettingsUi {
 
     fn theme_color(ui: &egui::Ui, dark: egui::Color32, light: egui::Color32) -> egui::Color32 {
         if ui.visuals().dark_mode { dark } else { light }
-    }
-
-    pub(super) fn control_width(has_custom_palette: bool) -> f32 {
-        if has_custom_palette {
-            Self::CONTROLS.width_with_custom
-        } else {
-            Self::CONTROLS.width
-        }
     }
 
     pub(super) fn pill_width() -> f32 {

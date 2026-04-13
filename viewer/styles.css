@@ -258,7 +258,7 @@ h2 {
 
 .zoom-control {
     display: grid;
-    min-width: 230px;
+    min-width: 120px;
     gap: 8px;
     color: var(--muted);
     font-size: 13px;

@@ -146,13 +146,13 @@ pub(super) fn inner_select_row(
     description: Option<&str>,
     add_control: impl FnOnce(&mut egui::Ui),
 ) {
-    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
         ui.set_min_height(SettingsUi::LAYOUT.inner_row_height);
         ui.add_space(40.0);
         let label_width = SettingsUi::row_label_width(ui);
         ui.allocate_ui_with_layout(
             egui::vec2(label_width, SettingsUi::LAYOUT.inner_row_height),
-            egui::Layout::top_down(egui::Align::LEFT).with_main_align(egui::Align::Center),
+            egui::Layout::top_down(egui::Align::LEFT),
             |ui| {
                 ui.set_width(label_width);
                 ui.label(egui::RichText::new(label).color(text_primary(ui)));
@@ -166,10 +166,21 @@ pub(super) fn inner_select_row(
                 }
             },
         );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
             ui.set_min_height(SettingsUi::LAYOUT.inner_row_height);
             add_control(ui);
         });
+    });
+}
+
+pub(super) fn fixed_width_control(
+    ui: &mut egui::Ui,
+    add_control: impl FnOnce(&mut egui::Ui),
+) {
+    ui.allocate_ui(egui::vec2(SettingsUi::CONTROLS.width, 0.0), |ui| {
+        ui.set_width(SettingsUi::CONTROLS.width);
+        ui.set_max_width(SettingsUi::CONTROLS.width);
+        add_control(ui);
     });
 }
 
@@ -183,42 +194,53 @@ pub(super) fn inner_divider(ui: &mut egui::Ui) {
     });
 }
 
-pub(super) fn render_preview_panel(ui: &mut egui::Ui, app: &ScratchpadApp) {
-    let preview_width = SettingsUi::preview_width(ui);
-    ui.allocate_ui_with_layout(
-        egui::vec2(preview_width, 0.0),
-        egui::Layout::top_down(egui::Align::LEFT),
-        |ui| {
-            ui.set_width(preview_width);
-            ui.set_max_width(preview_width);
-            SettingsUi::preview_frame(ui, app.editor_background_color()).show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.add_space(4.0);
-                let preview_family = egui::FontFamily::Name(EDITOR_FONT_FAMILY.into());
-                ui.add_sized(
-                    egui::vec2(ui.available_width(), 0.0),
-                    egui::Label::new(
-                        egui::RichText::new(SettingsUi::PREVIEW_TEXT)
-                            .family(preview_family)
-                            .size(app.font_size())
-                            .color(app.editor_text_color()),
-                    )
-                    .wrap(),
-                );
-                ui.add_space(16.0);
-                ui.horizontal_wrapped(|ui| {
-                    info_chip(ui, app.editor_font().label());
-                    ui.add_space(8.0);
-                    info_chip(ui, &format!("{:.0} pt", app.font_size()));
-                    ui.add_space(8.0);
-                    info_chip(ui, &format!("{} px gutter", app.editor_gutter()));
-                });
-            });
-        },
-    );
+pub(super) fn radio_option_row(
+    ui: &mut egui::Ui,
+    value: &mut bool,
+    label: &str,
+) -> egui::Response {
+    ui.add_space(2.0);
+    ui.add(egui::RadioButton::new(*value, label))
 }
 
-fn settings_card_frame(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
+pub(super) fn render_preview_panel(ui: &mut egui::Ui, app: &ScratchpadApp) {
+    let preview_width = SettingsUi::preview_width(ui);
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(preview_width, 0.0),
+            egui::Layout::top_down(egui::Align::LEFT),
+            |ui| {
+                ui.set_width(preview_width);
+                ui.set_max_width(preview_width);
+                SettingsUi::preview_frame(ui, app.editor_background_color()).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.add_space(4.0);
+                    let preview_family = egui::FontFamily::Name(EDITOR_FONT_FAMILY.into());
+                    ui.add_sized(
+                        egui::vec2(ui.available_width(), 0.0),
+                        egui::Label::new(
+                            egui::RichText::new(SettingsUi::PREVIEW_TEXT)
+                                .family(preview_family)
+                                .size(app.font_size())
+                                .color(app.editor_text_color()),
+                        )
+                        .wrap(),
+                    );
+                    ui.add_space(16.0);
+                    ui.horizontal_wrapped(|ui| {
+                        info_chip(ui, app.editor_font().label());
+                        ui.add_space(8.0);
+                        info_chip(ui, &format!("{:.0} pt", app.font_size()));
+                        ui.add_space(8.0);
+                        info_chip(ui, &format!("{} px gutter", app.editor_gutter()));
+                    });
+                });
+            },
+        );
+    });
+}
+
+pub(super) fn settings_card_frame(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
     let card_width = SettingsUi::card_width(ui);
     ui.set_width(card_width);
     ui.set_max_width(card_width);
@@ -229,7 +251,7 @@ fn settings_card_frame(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::U
     });
 }
 
-fn clickable_card_header(
+pub(super) fn clickable_card_header(
     ui: &mut egui::Ui,
     id: egui::Id,
     icon: &str,
@@ -241,7 +263,7 @@ fn clickable_card_header(
     ui.interact(inner.response.rect, id, egui::Sense::click())
 }
 
-fn card_header(
+pub(super) fn card_header(
     ui: &mut egui::Ui,
     icon: &str,
     title: &str,
@@ -269,10 +291,15 @@ fn card_header(
                 }
             },
         );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.set_min_height(SettingsUi::LAYOUT.card_min_height);
-            add_trailing(ui);
-        });
+        let trailing_width = ui.available_width().max(0.0);
+        ui.allocate_ui_with_layout(
+            egui::vec2(trailing_width, SettingsUi::LAYOUT.card_min_height),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                ui.set_min_height(SettingsUi::LAYOUT.card_min_height);
+                add_trailing(ui);
+            },
+        );
     })
 }
 

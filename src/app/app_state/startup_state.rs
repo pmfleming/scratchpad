@@ -4,7 +4,9 @@ use crate::app::logging::{self, LogLevel};
 use crate::app::services::file_controller::FileController;
 use crate::app::services::session_manager;
 use crate::app::services::session_store::SessionStore;
-use crate::app::services::settings_store::{AppSettings, SettingsStore};
+use crate::app::services::settings_store::{
+    AppSettings, FileOpenDisposition, SettingsStore, StartupSessionBehavior,
+};
 use crate::app::startup::{StartupOpenTarget, StartupOptions};
 use std::time::Instant;
 
@@ -64,7 +66,7 @@ impl ScratchpadApp {
         };
 
         let loaded_from_settings = app.load_settings_from_store();
-        if startup_options.restore_session {
+        if app.should_restore_session(&startup_options) {
             let legacy_settings = session_manager::restore_session_state(&mut app);
             if !loaded_from_settings && let Some(legacy_settings) = legacy_settings {
                 app.apply_settings(legacy_settings);
@@ -92,7 +94,9 @@ impl ScratchpadApp {
             return;
         }
 
-        match startup_options.open_target {
+        let open_target = self.resolved_startup_open_target(&startup_options);
+
+        match open_target {
             StartupOpenTarget::SeparateTabs => {
                 FileController::open_external_paths(self, startup_options.files)
             }
@@ -106,6 +110,28 @@ impl ScratchpadApp {
 
         if let Some(message) = startup_options.startup_notice {
             self.set_warning_status(message);
+        }
+    }
+
+    fn should_restore_session(&self, startup_options: &StartupOptions) -> bool {
+        if startup_options.restore_session_explicit {
+            startup_options.restore_session
+        } else {
+            matches!(
+                self.app_settings.startup_session_behavior,
+                StartupSessionBehavior::ContinuePreviousSession
+            )
+        }
+    }
+
+    fn resolved_startup_open_target(&self, startup_options: &StartupOptions) -> StartupOpenTarget {
+        if startup_options.open_target_explicit {
+            startup_options.open_target
+        } else {
+            match self.app_settings.file_open_disposition {
+                FileOpenDisposition::NewTab => StartupOpenTarget::SeparateTabs,
+                FileOpenDisposition::CurrentTab => StartupOpenTarget::ActiveTab,
+            }
         }
     }
 }

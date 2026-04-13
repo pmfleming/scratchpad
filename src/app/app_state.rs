@@ -53,7 +53,7 @@ impl Default for ScratchpadApp {
 }
 
 impl eframe::App for ScratchpadApp {
-    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         if ctx.input(|input| input.viewport().close_requested()) && !self.close_in_progress {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -79,7 +79,6 @@ impl eframe::App for ScratchpadApp {
         }
         dialogs::show_pending_action_modal(&ctx, self);
         shortcuts::handle_shortcuts(self, &ctx);
-        let _ = frame;
     }
 }
 
@@ -90,13 +89,9 @@ impl Drop for ScratchpadApp {
 }
 
 impl ScratchpadApp {
-    pub(crate) fn active_tab(&self) -> Option<&WorkspaceTab> {
-        self.tab_manager.active_tab()
-    }
+    pub(crate) fn active_tab(&self) -> Option<&WorkspaceTab> { self.tab_manager.active_tab() }
 
-    pub(crate) fn active_tab_mut(&mut self) -> Option<&mut WorkspaceTab> {
-        self.tab_manager.active_tab_mut()
-    }
+    pub(crate) fn active_tab_mut(&mut self) -> Option<&mut WorkspaceTab> { self.tab_manager.active_tab_mut() }
 
     pub(crate) fn log_event(&self, level: LogLevel, message: impl Into<String>) {
         if self.app_settings.logging_enabled {
@@ -104,44 +99,30 @@ impl ScratchpadApp {
         }
     }
 
-    pub(crate) fn describe_tab_at(&self, index: usize) -> String {
-        self.tab_manager.describe_tab_at(index)
-    }
+    pub(crate) fn describe_tab_at(&self, index: usize) -> String { self.tab_manager.describe_tab_at(index) }
 
-    pub(crate) fn describe_active_tab(&self) -> String {
-        self.tab_manager.describe_active_tab()
-    }
+    pub(crate) fn describe_active_tab(&self) -> String { self.tab_manager.describe_active_tab() }
 
     pub(crate) fn active_view_mut(&mut self) -> Option<&mut EditorViewState> {
-        self.tab_manager
-            .active_tab_mut()
-            .and_then(WorkspaceTab::active_view_mut)
+        self.active_tab_mut().and_then(WorkspaceTab::active_view_mut)
     }
 
-    pub(crate) fn mark_session_dirty(&mut self) {
-        self.tab_manager.mark_session_dirty();
-    }
+    pub(crate) fn mark_session_dirty(&mut self) { self.tab_manager.mark_session_dirty(); }
 
-    pub(crate) fn session_dirty(&self) -> bool {
-        self.tab_manager.session_dirty
-    }
+    pub(crate) fn session_dirty(&self) -> bool { self.tab_manager.session_dirty }
 
-    pub(crate) fn clear_session_dirty(&mut self) {
-        self.tab_manager.session_dirty = false;
-    }
+    pub(crate) fn clear_session_dirty(&mut self) { self.tab_manager.session_dirty = false; }
 
-    pub(crate) fn persist_session_now(&mut self) -> std::io::Result<()> {
-        session_manager::persist_session_now(self)
-    }
+    pub(crate) fn persist_session_now(&mut self) -> std::io::Result<()> { session_manager::persist_session_now(self) }
 
     pub(crate) fn estimated_tab_strip_width(&self, spacing: f32) -> f32 {
         let tab_count = self.total_tab_slots();
-        if tab_count == 0 {
-            return 0.0;
-        }
-
-        (tab_count as f32 * crate::app::theme::TAB_BUTTON_WIDTH)
-            + ((tab_count.saturating_sub(1)) as f32 * spacing)
+        (tab_count > 0)
+            .then_some(
+                (tab_count as f32 * crate::app::theme::TAB_BUTTON_WIDTH)
+                    + ((tab_count.saturating_sub(1)) as f32 * spacing),
+            )
+            .unwrap_or(0.0)
     }
 
     pub(crate) fn request_exit(&mut self, ctx: &egui::Context) {
@@ -161,9 +142,7 @@ impl ScratchpadApp {
     }
 
     pub fn new_tab(&mut self) {
-        self.reload_settings_from_active_settings_tab();
-        self.tab_manager.create_untitled_tab();
-        self.request_focus_for_active_view();
+        self.create_workspace_tab(WorkspaceTab::untitled());
         let description = self.tab_manager.describe_active_tab();
         self.log_event(
             LogLevel::Info,
@@ -178,7 +157,14 @@ impl ScratchpadApp {
     }
 
     pub fn open_file(&mut self) {
-        FileController::open_file(self);
+        match self.file_open_disposition() {
+            crate::app::services::settings_store::FileOpenDisposition::NewTab => {
+                FileController::open_file(self)
+            }
+            crate::app::services::settings_store::FileOpenDisposition::CurrentTab => {
+                FileController::open_file_here(self)
+            }
+        }
     }
 
     pub fn open_file_here(&mut self) {
@@ -202,31 +188,19 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn perform_close_tab(&mut self, index: usize) {
-        let tab_description = self.tab_manager.describe_tab_at(index);
-        let settings_refresh = self.settings_toml_refresh_on_tab_close(index);
-        self.tab_manager.close_tab_internal(index);
-        self.request_focus_for_active_view();
-        self.apply_settings_toml_refresh(settings_refresh);
-        self.log_event(
-            LogLevel::Info,
-            format!(
-                "Closed tab at index {index}: {tab_description} (remaining tabs={})",
-                self.tab_manager.tabs.len()
-            ),
-        );
+        let tab_description = self.close_tab_internal(index);
+        self.log_event(LogLevel::Info, format!(
+            "Closed tab at index {index}: {tab_description} (remaining tabs={})",
+            self.tab_manager.tabs.len()
+        ));
         let _ = self.persist_session_now();
     }
 
     pub fn perform_close_tab_no_persist(&mut self, index: usize) {
-        let tab_description = self.tab_manager.describe_tab_at(index);
-        let settings_refresh = self.settings_toml_refresh_on_tab_close(index);
-        self.tab_manager.close_tab_internal(index);
-        self.request_focus_for_active_view();
-        self.apply_settings_toml_refresh(settings_refresh);
-        self.log_event(
-            LogLevel::Info,
-            format!("Closed tab without immediate persist at index {index}: {tab_description}"),
-        );
+        let tab_description = self.close_tab_internal(index);
+        self.log_event(LogLevel::Info, format!(
+            "Closed tab without immediate persist at index {index}: {tab_description}"
+        ));
     }
 
     pub(crate) fn window_title(&self) -> String {
@@ -264,49 +238,29 @@ impl ScratchpadApp {
         });
     }
 
-    pub(crate) fn close_view(&mut self, view_id: ViewId) {
-        self.handle_command(AppCommand::CloseView { view_id });
-    }
+    pub(crate) fn close_view(&mut self, view_id: ViewId) { self.handle_command(AppCommand::CloseView { view_id }); }
 
-    pub(crate) fn promote_view_to_tab(&mut self, view_id: ViewId) {
-        self.handle_command(AppCommand::PromoteViewToTab { view_id });
-    }
+    pub(crate) fn promote_view_to_tab(&mut self, view_id: ViewId) { self.handle_command(AppCommand::PromoteViewToTab { view_id }); }
 
-    pub(crate) fn activate_view(&mut self, view_id: ViewId) {
-        self.handle_command(AppCommand::ActivateView { view_id });
-    }
+    pub(crate) fn activate_view(&mut self, view_id: ViewId) { self.handle_command(AppCommand::ActivateView { view_id }); }
 
-    pub(crate) fn resize_split(&mut self, path: SplitPath, ratio: f32) {
-        self.handle_command(AppCommand::ResizeSplit { path, ratio });
-    }
+    pub(crate) fn resize_split(&mut self, path: SplitPath, ratio: f32) { self.handle_command(AppCommand::ResizeSplit { path, ratio }); }
 
     pub fn append_tab(&mut self, tab: WorkspaceTab) {
-        self.reload_settings_from_active_settings_tab();
-        self.tab_manager.append_tab(tab);
-        self.request_focus_for_active_view();
+        self.create_workspace_tab(tab);
     }
 
     pub fn create_untitled_tab(&mut self) {
-        self.reload_settings_from_active_settings_tab();
-        self.tab_manager.create_untitled_tab();
-        self.request_focus_for_active_view();
+        self.create_workspace_tab(WorkspaceTab::untitled());
     }
 
-    pub fn tabs(&self) -> &[WorkspaceTab] {
-        &self.tab_manager.tabs
-    }
+    pub fn tabs(&self) -> &[WorkspaceTab] { &self.tab_manager.tabs }
 
-    pub fn tabs_mut(&mut self) -> &mut [WorkspaceTab] {
-        &mut self.tab_manager.tabs
-    }
+    pub fn tabs_mut(&mut self) -> &mut [WorkspaceTab] { &mut self.tab_manager.tabs }
 
-    pub fn active_tab_index(&self) -> usize {
-        self.tab_manager.active_tab_index
-    }
+    pub fn active_tab_index(&self) -> usize { self.tab_manager.active_tab_index }
 
-    pub(crate) fn find_tab_by_path(&self, candidate: &Path) -> Option<(usize, ViewId)> {
-        self.tab_manager.find_tab_by_path(candidate)
-    }
+    pub(crate) fn find_tab_by_path(&self, candidate: &Path) -> Option<(usize, ViewId)> { self.tab_manager.find_tab_by_path(candidate) }
 
     pub fn reorder_tab(&mut self, from_index: usize, to_index: usize) {
         self.handle_command(AppCommand::ReorderTab {
@@ -315,21 +269,13 @@ impl ScratchpadApp {
         });
     }
 
-    pub fn session_store(&self) -> &SessionStore {
-        &self.session_store
-    }
+    pub fn session_store(&self) -> &SessionStore { &self.session_store }
 
-    pub fn tab_manager(&self) -> &TabManager {
-        &self.tab_manager
-    }
+    pub fn tab_manager(&self) -> &TabManager { &self.tab_manager }
 
-    pub fn tab_manager_mut(&mut self) -> &mut TabManager {
-        &mut self.tab_manager
-    }
+    pub fn tab_manager_mut(&mut self) -> &mut TabManager { &mut self.tab_manager }
 
-    pub fn pending_action(&self) -> Option<PendingAction> {
-        self.tab_manager.pending_action
-    }
+    pub fn pending_action(&self) -> Option<PendingAction> { self.tab_manager.pending_action }
 
     pub fn set_pending_action(&mut self, action: Option<PendingAction>) -> Option<PendingAction> {
         let old = self.tab_manager.pending_action;
@@ -337,13 +283,9 @@ impl ScratchpadApp {
         old
     }
 
-    pub(crate) fn clear_status_message(&mut self) {
-        self.status_message = None;
-    }
+    pub(crate) fn clear_status_message(&mut self) { self.status_message = None; }
 
-    pub(crate) fn request_focus_for_view(&mut self, view_id: ViewId) {
-        self.pending_editor_focus = Some(view_id);
-    }
+    pub(crate) fn request_focus_for_view(&mut self, view_id: ViewId) { self.pending_editor_focus = Some(view_id); }
 
     pub(crate) fn request_focus_for_active_view(&mut self) {
         if let Some(view_id) = self.active_tab().map(|tab| tab.active_view_id) {
@@ -351,14 +293,27 @@ impl ScratchpadApp {
         }
     }
 
-    pub(crate) fn should_focus_view(&self, view_id: ViewId) -> bool {
-        self.pending_editor_focus == Some(view_id)
-    }
+    pub(crate) fn should_focus_view(&self, view_id: ViewId) -> bool { self.pending_editor_focus == Some(view_id) }
 
     pub(crate) fn consume_focus_request(&mut self, view_id: ViewId) {
         if self.pending_editor_focus == Some(view_id) {
             self.pending_editor_focus = None;
         }
+    }
+
+    fn create_workspace_tab(&mut self, tab: WorkspaceTab) {
+        self.reload_settings_before_workspace_change();
+        self.tab_manager.append_tab(tab);
+        self.request_focus_for_active_view();
+    }
+
+    fn close_tab_internal(&mut self, index: usize) -> String {
+        let tab_description = self.tab_manager.describe_tab_at(index);
+        let settings_refresh = self.settings_toml_refresh_on_tab_close(index);
+        self.tab_manager.close_tab_internal(index);
+        self.request_focus_for_active_view();
+        self.apply_settings_toml_refresh(settings_refresh);
+        tab_description
     }
 
     fn sync_editor_fonts(&mut self, ctx: &egui::Context) {
@@ -375,17 +330,11 @@ impl ScratchpadApp {
         self.applied_editor_font = Some(self.app_settings.editor_font);
     }
 
-    pub(crate) fn set_info_status(&mut self, message: impl Into<String>) {
-        self.set_status(LogLevel::Info, message);
-    }
+    pub(crate) fn set_info_status(&mut self, message: impl Into<String>) { self.set_status(LogLevel::Info, message); }
 
-    pub(crate) fn set_warning_status(&mut self, message: impl Into<String>) {
-        self.set_status(LogLevel::Warn, message);
-    }
+    pub(crate) fn set_warning_status(&mut self, message: impl Into<String>) { self.set_status(LogLevel::Warn, message); }
 
-    pub(crate) fn set_error_status(&mut self, message: impl Into<String>) {
-        self.set_status(LogLevel::Error, message);
-    }
+    pub(crate) fn set_error_status(&mut self, message: impl Into<String>) { self.set_status(LogLevel::Error, message); }
 
     fn set_status(&mut self, level: LogLevel, message: impl Into<String>) {
         let message = message.into();

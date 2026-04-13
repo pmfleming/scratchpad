@@ -68,6 +68,10 @@ struct PendingOpenLogEntry {
 pub struct FileController;
 
 impl FileController {
+    fn prepare_to_open_paths(app: &mut ScratchpadApp) {
+        app.reload_settings_before_workspace_change();
+    }
+
     fn handle_open_dialog<F>(app: &mut ScratchpadApp, action_name: &str, open_action: F)
     where
         F: FnOnce(&mut ScratchpadApp, Vec<PathBuf>),
@@ -209,6 +213,7 @@ impl FileController {
     }
 
     fn open_selected_paths(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+        Self::prepare_to_open_paths(app);
         let summary = paths
             .into_iter()
             .fold(OpenBatchSummary::default(), |summary, path| {
@@ -275,7 +280,8 @@ impl FileController {
             mut buffer,
         } = LoadedFile::from_file_content(path, file_content);
         Self::mark_settings_buffer(app, &mut buffer);
-        app.append_tab(WorkspaceTab::new(buffer));
+        app.tab_manager_mut().append_tab(WorkspaceTab::new(buffer));
+        app.request_focus_for_active_view();
         let tab_index = app.active_tab_index();
         let tab_description = app.describe_active_tab();
         app.log_event(
@@ -340,7 +346,7 @@ impl FileController {
         path: PathBuf,
         update_buffer_path: bool,
     ) {
-        let settings_path = app.settings_path();
+        let settings_path = app.settings_path().to_path_buf();
         let buffer = app.tabs_mut()[index].active_buffer_mut();
         if update_buffer_path {
             buffer.path = Some(path.clone());
@@ -462,6 +468,9 @@ mod tests {
     use crate::app::app_state::ScratchpadApp;
     use crate::app::domain::PaneNode;
     use crate::app::services::session_store::SessionStore;
+    use crate::app::services::settings_store::{
+        FileOpenDisposition, SettingsStore, StartupSessionBehavior,
+    };
     use crate::app::startup::{StartupOpenTarget, StartupOptions};
     use std::fs;
 
@@ -506,7 +515,7 @@ mod tests {
     fn open_file_flags_settings_toml_buffer() {
         let mut app = test_app();
         app.persist_settings_now().expect("write settings file");
-        let settings_path = app.settings_path();
+        let settings_path = app.settings_path().to_path_buf();
 
         FileController::open_selected_paths(&mut app, vec![settings_path.clone()]);
 
@@ -528,7 +537,7 @@ mod tests {
     fn open_here_flags_settings_toml_buffer() {
         let mut app = test_app();
         app.persist_settings_now().expect("write settings file");
-        let settings_path = app.settings_path();
+        let settings_path = app.settings_path().to_path_buf();
 
         FileController::open_selected_paths_here(&mut app, vec![settings_path.clone()]);
 
@@ -721,5 +730,57 @@ mod tests {
         let tab = &app.tabs()[app.active_tab_index()];
         assert_eq!(tab.views.len(), 2);
         assert_eq!(tab.active_buffer().path.as_deref(), Some(path.as_path()));
+    }
+
+    #[test]
+    fn startup_uses_saved_file_open_preference_when_cli_target_is_not_explicit() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let path = temp_dir.path().join("startup-prefers-current-tab.txt");
+        fs::write(&path, "hello\nworld\n").expect("write temp file");
+
+        let session_root = tempfile::tempdir().expect("create session dir");
+        let root = session_root.path().to_path_buf();
+        let session_store = SessionStore::new(root.clone());
+        let mut seed = ScratchpadApp::with_session_store(session_store);
+        seed.set_file_open_disposition(FileOpenDisposition::CurrentTab);
+
+        let app = ScratchpadApp::with_stores_and_startup(
+            SessionStore::new(root.clone()),
+            SettingsStore::new(root),
+            StartupOptions {
+                files: vec![path.clone()],
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(app.tabs().len(), 1);
+        let tab = &app.tabs()[app.active_tab_index()];
+        assert_eq!(tab.views.len(), 2);
+        assert_eq!(tab.active_buffer().path.as_deref(), Some(path.as_path()));
+    }
+
+    #[test]
+    fn saved_startup_behavior_can_skip_session_restore_without_clean_switch() {
+        let session_root = tempfile::tempdir().expect("create session dir");
+        let root = session_root.path().to_path_buf();
+
+        let mut original = ScratchpadApp::with_stores_and_startup(
+            SessionStore::new(root.clone()),
+            SettingsStore::new(root.clone()),
+            StartupOptions::default(),
+        );
+        original.tabs_mut()[0].buffer.name = "restored.txt".to_owned();
+        original.create_untitled_tab();
+        original.set_startup_session_behavior(StartupSessionBehavior::StartFreshSession);
+        original.persist_session_now().expect("persist session");
+
+        let restored = ScratchpadApp::with_stores_and_startup(
+            SessionStore::new(root.clone()),
+            SettingsStore::new(root),
+            StartupOptions::default(),
+        );
+
+        assert_eq!(restored.tabs().len(), 1);
+        assert_eq!(restored.tabs()[0].buffer.name, "Untitled");
     }
 }

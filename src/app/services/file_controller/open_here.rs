@@ -25,6 +25,7 @@ enum ExistingOpenHerePath {
 
 impl FileController {
     pub(super) fn open_selected_paths_here(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+        Self::prepare_to_open_paths(app);
         let anchor_view_id = app
             .tabs()
             .get(app.active_tab_index())
@@ -265,7 +266,6 @@ impl FileController {
         anchor_view_id: Option<ViewId>,
         pending_workspace: WorkspaceTab,
     ) -> bool {
-        app.reload_settings_from_active_settings_tab();
         let opened = if let Some(tab) = app.active_tab_mut() {
             if let Some(anchor_view_id) = anchor_view_id {
                 let _ = tab.activate_view(anchor_view_id);

@@ -1,6 +1,7 @@
 use super::{
     AppSettings, AppThemeMode, DEFAULT_EDITOR_GUTTER, DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS,
-    DEFAULT_TAB_LIST_WIDTH, SettingsStore, TabListPosition,
+    DEFAULT_TAB_LIST_WIDTH, FileOpenDisposition, SettingsStore, StartupSessionBehavior,
+    TabListPosition,
 };
 use crate::app::fonts::EditorFontPreset;
 use std::fs;
@@ -47,9 +48,12 @@ fn save_and_load_round_trip_toml_settings() {
         editor_text_color: "#111111".to_owned(),
         editor_background_color: "#eeeeee".to_owned(),
         tab_list_position: TabListPosition::Right,
+        file_open_disposition: FileOpenDisposition::CurrentTab,
+        startup_session_behavior: StartupSessionBehavior::StartFreshSession,
         tab_list_width: 220.0,
         auto_hide_tab_list: true,
         tab_list_auto_hide_delay_seconds: 4.5,
+        recent_files_enabled: false,
         settings_tab_open: true,
         settings_tab_index: Some(2),
     };
@@ -96,11 +100,17 @@ fn missing_tab_list_position_defaults_for_older_toml() {
     let loaded = store.load().expect("load settings").expect("settings");
 
     assert_eq!(loaded.tab_list_position, TabListPosition::Top);
+    assert_eq!(loaded.file_open_disposition, FileOpenDisposition::NewTab);
+    assert_eq!(
+        loaded.startup_session_behavior,
+        StartupSessionBehavior::ContinuePreviousSession
+    );
     assert_eq!(loaded.tab_list_width, DEFAULT_TAB_LIST_WIDTH);
     assert_eq!(
         loaded.tab_list_auto_hide_delay_seconds,
         DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS
     );
+    assert!(loaded.recent_files_enabled);
 }
 
 #[test]

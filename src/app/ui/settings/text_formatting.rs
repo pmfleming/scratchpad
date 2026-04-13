@@ -46,14 +46,16 @@ pub(super) fn render_text_formatting_category(ui: &mut egui::Ui, app: &mut Scrat
 fn render_font_family_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     inner_select_row(ui, "Family", Some("Pick the bundled editor font."), |ui| {
         let mut selected_font = app.editor_font();
-        egui::ComboBox::from_id_salt("settings_editor_font")
-            .selected_text(selected_font.label())
-            .width(SettingsUi::CONTROLS.width)
-            .show_ui(ui, |ui| {
-                for preset in EditorFontPreset::ALL {
-                    ui.selectable_value(&mut selected_font, preset, preset.label());
-                }
-            });
+        fixed_width_control(ui, |ui| {
+            egui::ComboBox::from_id_salt("settings_editor_font")
+                .selected_text(selected_font.label())
+                .width(SettingsUi::CONTROLS.width)
+                .show_ui(ui, |ui| {
+                    for preset in EditorFontPreset::ALL {
+                        ui.selectable_value(&mut selected_font, preset, preset.label());
+                    }
+                });
+        });
         if selected_font != app.editor_font() {
             app.set_editor_font(selected_font);
         }
@@ -92,7 +94,7 @@ fn render_gutter_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             let mut selected_gutter = app.editor_gutter();
             ui.add_sized(
                 egui::vec2(SettingsUi::CONTROLS.width, 0.0),
-                egui::Slider::new(&mut selected_gutter, EDITOR_GUTTER_RANGE.clone())
+                egui::Slider::new(&mut selected_gutter, 0..=32)
                     .step_by(1.0)
                     .show_value(false),
             );

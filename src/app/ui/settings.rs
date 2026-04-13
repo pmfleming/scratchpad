@@ -6,6 +6,7 @@ use crate::app::theme::*;
 use eframe::egui;
 
 mod appearance;
+mod opening;
 mod sections;
 mod style;
 mod text_formatting;
@@ -15,7 +16,6 @@ use sections::render_settings_categories;
 use style::SettingsUi;
 use widgets::*;
 
-const EDITOR_GUTTER_RANGE: core::ops::RangeInclusive<u8> = 0..=32;
 const FONT_SIZE_OPTIONS: [u32; 9] = [11, 12, 14, 16, 18, 20, 24, 28, 32];
 
 pub(crate) fn show_page(ui: &mut egui::Ui, app: &mut ScratchpadApp) {

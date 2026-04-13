@@ -14,6 +14,9 @@
         map: null,
         selectedModule: null,
         mapZoom: 0.65,
+        mapLayout: 'folder',
+        mapMetric: 'total_score',
+        focusMode: false,
     };
 
     const formatNumber = new Intl.NumberFormat(undefined, {
@@ -203,10 +206,20 @@
 
         const query = byId("map-filter").value.toLowerCase();
         const graph = payload.graph;
-        const modules = graph.nodes
+        let modules = graph.nodes
             .map((node) => node.data)
             .filter((node) => !node.is_group)
             .filter((node) => !query || node.id.toLowerCase().includes(query));
+
+        if (state.focusMode && state.selectedModule) {
+            const focusIds = new Set([state.selectedModule]);
+            graph.edges.forEach((edge) => {
+                if (edge.data.source === state.selectedModule) focusIds.add(edge.data.target);
+                if (edge.data.target === state.selectedModule) focusIds.add(edge.data.source);
+            });
+            modules = modules.filter((node) => focusIds.has(node.id));
+        }
+
         const moduleIds = new Set(modules.map((node) => node.id));
         const summary = payload.meta?.summary || {};
         const highMaintainability = modules.filter((node) => (node.maintainability_risk || 0) >= 350).length;
@@ -263,53 +276,159 @@
     }
 
     function buildMapLayout(nodes) {
-        const folders = new Map();
-        const folderNames = new Set(["src"]);
-        nodes.forEach((node) => {
-            folderAncestors(node.id).forEach((folder) => folderNames.add(folder));
-            const folder = folderPathForModule(node.id);
-            if (!folders.has(folder)) {
-                folders.set(folder, []);
-            }
-            folders.get(folder).push(node);
-        });
+        const groups = new Map();
+        const groupNames = new Set();
+        
+        if (state.mapLayout === 'layer') {
+            nodes.forEach((node) => {
+                const layer = node.layer || 'default';
+                groupNames.add(layer);
+                if (!groups.has(layer)) groups.set(layer, []);
+                groups.get(layer).push(node);
+            });
+            const layerOrder = ["chrome", "ui", "services", "domain", "app_state", "default"];
+            const orderedNames = Array.from(groupNames).sort((a, b) => {
+                const idxA = layerOrder.indexOf(a);
+                const idxB = layerOrder.indexOf(b);
+                if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+                if (idxA !== -1) return -1;
+                if (idxB !== -1) return 1;
+                return a.localeCompare(b);
+            });
+            groupNames.clear();
+            orderedNames.forEach(n => groupNames.add(n));
+        } else {
+            groupNames.add("src");
+            nodes.forEach((node) => {
+                folderAncestors(node.id).forEach((folder) => groupNames.add(folder));
+                const folder = folderPathForModule(node.id);
+                if (!groups.has(folder)) {
+                    groups.set(folder, []);
+                }
+                groups.get(folder).push(node);
+            });
+            const orderedFoldersArr = orderedFolders(groupNames);
+            groupNames.clear();
+            orderedFoldersArr.forEach(n => groupNames.add(n));
+        }
 
-        const rowHeight = 134;
         const nodeWidth = 260;
         const nodeHeight = 88;
-        const xGap = 34;
-        const topOffset = 76;
-        const leftOffset = 300;
         const positions = new Map();
-        const rows = orderedFolders(folderNames).map((folder, rowIndex) => ({
-            folder,
-            y: topOffset + rowIndex * rowHeight,
-            height: rowHeight - 18,
-            label: folderLabel(folder),
-            modules: folders.get(folder) || [],
-        }));
-        let maxColumns = 1;
+        const rows = [];
+        let mapWidth = 0;
+        let mapHeight = 0;
 
-        rows.forEach((row) => {
-            row.modules
-                .sort((left, right) => (right.total_score || 0) - (left.total_score || 0))
-                .forEach((node, columnIndex) => {
-                    positions.set(node.id, {
-                        x: leftOffset + columnIndex * (nodeWidth + xGap),
-                        y: row.y + 14,
-                        folder: row.folder,
-                        width: nodeWidth,
-                        height: nodeHeight,
-                    });
+        if (state.mapLayout === 'layer') {
+            const colWidth = nodeWidth + 60;
+            const yGap = 20;
+            const topOffset = 76;
+            const leftOffset = 40;
+            
+            let maxModulesInCol = 0;
+            const orderedGroups = Array.from(groupNames);
+            orderedGroups.forEach((group) => {
+                maxModulesInCol = Math.max(maxModulesInCol, (groups.get(group) || []).length);
+            });
+
+            const colHeight = topOffset + maxModulesInCol * (nodeHeight + yGap) + 40;
+            mapWidth = leftOffset + orderedGroups.length * colWidth + 40;
+            mapHeight = colHeight + 60;
+
+            orderedGroups.forEach((group, colIndex) => {
+                const modules = groups.get(group) || [];
+                const colX = leftOffset + colIndex * colWidth;
+                
+                rows.push({
+                    isColumn: true,
+                    folder: group,
+                    x: colX,
+                    y: 30,
+                    width: colWidth - 20,
+                    height: colHeight,
+                    label: group,
+                    modules: modules,
                 });
-            maxColumns = Math.max(maxColumns, row.modules.length);
-        });
+
+                modules
+                    .sort((left, right) => {
+                        const metricRight = state.mapMetric === 'maintainability' ? right.maintainability_risk :
+                                            state.mapMetric === 'change' ? right.change_risk :
+                                            state.mapMetric === 'performance' ? right.performance_risk :
+                                            state.mapMetric === 'architectural' ? right.architectural_risk :
+                                            state.mapMetric === 'churn' ? right.churn : right.total_score;
+                        const metricLeft = state.mapMetric === 'maintainability' ? left.maintainability_risk :
+                                           state.mapMetric === 'change' ? left.change_risk :
+                                           state.mapMetric === 'performance' ? left.performance_risk :
+                                           state.mapMetric === 'architectural' ? left.architectural_risk :
+                                           state.mapMetric === 'churn' ? left.churn : left.total_score;
+                        return (metricRight || 0) - (metricLeft || 0);
+                    })
+                    .forEach((node, moduleIndex) => {
+                        positions.set(node.id, {
+                            x: colX + 10,
+                            y: topOffset + moduleIndex * (nodeHeight + yGap),
+                            folder: group,
+                            width: nodeWidth,
+                            height: nodeHeight,
+                        });
+                    });
+            });
+        } else {
+            const rowHeight = 134;
+            const xGap = 34;
+            const topOffset = 76;
+            const leftOffset = 300;
+            let maxColumns = 1;
+
+            Array.from(groupNames).forEach((group, rowIndex) => {
+                const modules = groups.get(group) || [];
+                maxColumns = Math.max(maxColumns, modules.length);
+                const rowY = topOffset + rowIndex * rowHeight;
+                
+                rows.push({
+                    isColumn: false,
+                    folder: group,
+                    y: rowY,
+                    height: rowHeight - 18,
+                    label: folderLabel(group),
+                    modules: modules,
+                });
+
+                modules
+                    .sort((left, right) => {
+                        const metricRight = state.mapMetric === 'maintainability' ? right.maintainability_risk :
+                                            state.mapMetric === 'change' ? right.change_risk :
+                                            state.mapMetric === 'performance' ? right.performance_risk :
+                                            state.mapMetric === 'architectural' ? right.architectural_risk :
+                                            state.mapMetric === 'churn' ? right.churn : right.total_score;
+                        const metricLeft = state.mapMetric === 'maintainability' ? left.maintainability_risk :
+                                           state.mapMetric === 'change' ? left.change_risk :
+                                           state.mapMetric === 'performance' ? left.performance_risk :
+                                           state.mapMetric === 'architectural' ? left.architectural_risk :
+                                           state.mapMetric === 'churn' ? left.churn : left.total_score;
+                        return (metricRight || 0) - (metricLeft || 0);
+                    })
+                    .forEach((node, columnIndex) => {
+                        positions.set(node.id, {
+                            x: leftOffset + columnIndex * (nodeWidth + xGap),
+                            y: rowY + 14,
+                            folder: group,
+                            width: nodeWidth,
+                            height: nodeHeight,
+                        });
+                    });
+            });
+
+            mapWidth = leftOffset + Math.max(maxColumns, 2) * (nodeWidth + xGap) + 80;
+            mapHeight = topOffset + rows.length * rowHeight + 70;
+        }
 
         return {
             positions,
             rows,
-            width: leftOffset + Math.max(maxColumns, 2) * (nodeWidth + xGap) + 80,
-            height: topOffset + rows.length * rowHeight + 70,
+            width: mapWidth,
+            height: mapHeight,
         };
     }
 
@@ -357,20 +476,32 @@
     }
 
     function renderFolderRows(layout) {
-        const width = Math.max(900, layout.width - 60);
         return layout.rows
             .map((row, index) => {
                 const tone = index % 2 === 0 ? "rgba(255,255,255,0.035)" : "rgba(255,255,255,0.015)";
-                return `<g class="folder-row" transform="translate(30 ${row.y - 10})">
-                    <rect width="${width}" height="${row.height}" rx="18" fill="${tone}"></rect>
-                    <foreignObject x="18" y="20" width="218" height="76">
-                        <div xmlns="http://www.w3.org/1999/xhtml" class="folder-label">
-                            <strong>${escapeHtml(row.label)}</strong>
-                            <span>${row.modules.length} modules</span>
-                        </div>
-                    </foreignObject>
-                </g>`;
-            });
+                if (row.isColumn) {
+                    return `<g class="folder-row" transform="translate(${row.x - 10} ${row.y})">
+                        <rect width="${row.width}" height="${row.height}" rx="18" fill="${tone}"></rect>
+                        <foreignObject x="18" y="20" width="${row.width - 36}" height="76">
+                            <div xmlns="http://www.w3.org/1999/xhtml" class="folder-label">
+                                <strong>${escapeHtml(row.label)}</strong>
+                                <span>${row.modules.length} modules</span>
+                            </div>
+                        </foreignObject>
+                    </g>`;
+                } else {
+                    const width = Math.max(900, layout.width - 60);
+                    return `<g class="folder-row" transform="translate(30 ${row.y - 10})">
+                        <rect width="${width}" height="${row.height}" rx="18" fill="${tone}"></rect>
+                        <foreignObject x="18" y="20" width="218" height="76">
+                            <div xmlns="http://www.w3.org/1999/xhtml" class="folder-label">
+                                <strong>${escapeHtml(row.label)}</strong>
+                                <span>${row.modules.length} modules</span>
+                            </div>
+                        </foreignObject>
+                    </g>`;
+                }
+            }).join("");
     }
 
     function renderEdge(edge, layout) {
@@ -405,9 +536,15 @@
             outboundIds.has(node.id) ? "is-outbound" : "",
             inboundIds.has(node.id) ? "is-inbound" : "",
         ].filter(Boolean).join(" ");
-        const fill = scoreFill(node.total_score || 0);
+        
+        const metricValue = state.mapMetric === 'maintainability' ? node.maintainability_risk :
+                            state.mapMetric === 'change' ? node.change_risk :
+                            state.mapMetric === 'performance' ? node.performance_risk :
+                            state.mapMetric === 'architectural' ? node.architectural_risk :
+                            state.mapMetric === 'churn' ? node.churn : node.total_score;
+        const fill = scoreFill(metricValue || 0, state.mapMetric);
         const label = shortenLabel(node.id);
-        const score = formatNumber.format(node.total_score || 0);
+        const score = formatNumber.format(metricValue || 0);
         const chips = [
             `M ${Math.round(node.maintainability_risk || 0)}`,
             `C ${Math.round(node.change_risk || 0)}`,
@@ -421,7 +558,7 @@
             <foreignObject x="14" y="12" width="${position.width - 28}" height="${position.height - 24}">
                 <div xmlns="http://www.w3.org/1999/xhtml" class="node-label">
                     <strong>${escapeHtml(label)}</strong>
-                    <span>risk ${escapeHtml(score)}</span>
+                    <span>${escapeHtml(state.mapMetric)} ${escapeHtml(score)}</span>
                     <span>${escapeHtml(chips)}</span>
                 </div>
             </foreignObject>
@@ -439,13 +576,16 @@
         return new Set(ids);
     }
 
-    function scoreFill(score) {
-        if (score >= 600) {
-            return "#6b2a35";
-        }
-        if (score >= 300) {
-            return "#5e4b25";
-        }
+    function scoreFill(score, metric) {
+        let bad = 600;
+        let warn = 300;
+        if (metric === 'maintainability' || metric === 'architectural') { bad = 350; warn = 150; }
+        else if (metric === 'change') { bad = 200; warn = 80; }
+        else if (metric === 'performance') { bad = 100; warn = 30; }
+        else if (metric === 'churn') { bad = 500; warn = 150; }
+        
+        if (score >= bad) return "#6b2a35";
+        if (score >= warn) return "#5e4b25";
         return "#244638";
     }
 
@@ -460,7 +600,21 @@
     function renderMapDetail(modules, edges) {
         const selected = modules.find((node) => node.id === state.selectedModule);
         if (!selected) {
-            byId("map-detail").innerHTML = '<h2>Module detail</h2><p class="muted">Select a module in the map.</p>';
+            const getMetric = (node) => {
+                return state.mapMetric === 'maintainability' ? node.maintainability_risk :
+                       state.mapMetric === 'change' ? node.change_risk :
+                       state.mapMetric === 'performance' ? node.performance_risk :
+                       state.mapMetric === 'architectural' ? node.architectural_risk :
+                       state.mapMetric === 'churn' ? node.churn : node.total_score;
+            };
+            const top5 = [...modules].sort((a, b) => (getMetric(b) || 0) - (getMetric(a) || 0)).slice(0, 5);
+            const top5Html = top5.map((n, i) => {
+                return `<div class="detail-row"><strong>${i + 1}. ${escapeHtml(shortenLabel(n.id))}</strong>${formatNumber.format(getMetric(n) || 0)}</div>`;
+            }).join('');
+
+            byId("map-detail").innerHTML = `<h2>Insights</h2>
+                <p class="muted" style="margin-bottom: 1rem;">Top 5 modules by <strong>${state.mapMetric}</strong>. Click a module on the map to see details.</p>
+                <div class="detail-list">${top5Html}</div>`;
             return;
         }
 
@@ -568,6 +722,18 @@
     byId("slowspots-filter").addEventListener("input", renderSlowspots);
     byId("clones-filter").addEventListener("input", renderClones);
     byId("map-filter").addEventListener("input", renderMap);
+    byId("map-layout").addEventListener("change", (event) => {
+        state.mapLayout = event.target.value;
+        renderMap();
+    });
+    byId("map-metric").addEventListener("change", (event) => {
+        state.mapMetric = event.target.value;
+        renderMap();
+    });
+    byId("map-focus").addEventListener("change", (event) => {
+        state.focusMode = event.target.checked;
+        renderMap();
+    });
     byId("map-zoom").addEventListener("input", (event) => {
         state.mapZoom = Number(event.target.value);
         byId("map-zoom-value").textContent = `${Math.round(state.mapZoom * 100)}%`;

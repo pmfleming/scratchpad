@@ -122,6 +122,28 @@
                             <p>Click a module to inspect maintainability, change, performance, and architectural risk.</p>
                         </div>
                         <div class="map-controls">
+                            <label class="zoom-control">
+                                <span>Focus Mode</span>
+                                <input id="map-focus" type="checkbox" />
+                            </label>
+                            <label class="zoom-control">
+                                <span>Layout</span>
+                                <select id="map-layout" class="filter-input" style="padding: 4px 8px; font-size: 13px;">
+                                    <option value="folder">Folder Structure</option>
+                                    <option value="layer">Architectural Layers</option>
+                                </select>
+                            </label>
+                            <label class="zoom-control">
+                                <span>Metric Color</span>
+                                <select id="map-metric" class="filter-input" style="padding: 4px 8px; font-size: 13px;">
+                                    <option value="total_score">Total Risk</option>
+                                    <option value="maintainability">Maintainability Risk</option>
+                                    <option value="change">Change Risk</option>
+                                    <option value="performance">Performance Risk</option>
+                                    <option value="architectural">Architectural Risk</option>
+                                    <option value="churn">Churn</option>
+                                </select>
+                            </label>
                             <input id="map-filter" class="filter-input" type="search" placeholder="Filter modules..." />
                             <label class="zoom-control">
                                 <span>Zoom <strong id="map-zoom-value">65%</strong></span>

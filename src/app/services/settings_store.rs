@@ -18,6 +18,23 @@ pub const LIGHT_EDITOR_BACKGROUND_COLOR: &str = "#ffffff";
 pub const DEFAULT_TAB_LIST_WIDTH: f32 = 184.0;
 pub const DEFAULT_AUTO_HIDE_TAB_LIST: bool = false;
 pub const DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS: f32 = 3.0;
+pub const DEFAULT_RECENT_FILES_ENABLED: bool = true;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileOpenDisposition {
+    #[default]
+    NewTab,
+    CurrentTab,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StartupSessionBehavior {
+    #[default]
+    ContinuePreviousSession,
+    StartFreshSession,
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -29,16 +46,6 @@ pub enum AppThemeMode {
 }
 
 impl AppThemeMode {
-    pub const ALL: [Self; 3] = [Self::System, Self::Light, Self::Dark];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::System => "Use system setting",
-            Self::Light => "Light",
-            Self::Dark => "Dark",
-        }
-    }
-
     pub fn theme_preference(self) -> egui::ThemePreference {
         match self {
             Self::System => egui::ThemePreference::System,
@@ -59,17 +66,6 @@ pub enum TabListPosition {
 }
 
 impl TabListPosition {
-    pub const ALL: [Self; 4] = [Self::Top, Self::Bottom, Self::Left, Self::Right];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Top => "Top",
-            Self::Bottom => "Bottom",
-            Self::Left => "Left",
-            Self::Right => "Right",
-        }
-    }
-
     pub fn is_vertical(self) -> bool {
         matches!(self, Self::Left | Self::Right)
     }
@@ -92,12 +88,18 @@ pub struct AppSettings {
     pub editor_background_color: String,
     #[serde(default)]
     pub tab_list_position: TabListPosition,
+    #[serde(default)]
+    pub file_open_disposition: FileOpenDisposition,
+    #[serde(default)]
+    pub startup_session_behavior: StartupSessionBehavior,
     #[serde(default = "default_tab_list_width")]
     pub tab_list_width: f32,
     #[serde(default = "default_auto_hide_tab_list")]
     pub auto_hide_tab_list: bool,
     #[serde(default = "default_tab_list_auto_hide_delay_seconds")]
     pub tab_list_auto_hide_delay_seconds: f32,
+    #[serde(default = "default_recent_files_enabled")]
+    pub recent_files_enabled: bool,
     #[serde(default)]
     pub settings_tab_open: bool,
     #[serde(default)]
@@ -116,9 +118,12 @@ impl Default for AppSettings {
             editor_text_color: DEFAULT_EDITOR_TEXT_COLOR.to_owned(),
             editor_background_color: DEFAULT_EDITOR_BACKGROUND_COLOR.to_owned(),
             tab_list_position: TabListPosition::default(),
+            file_open_disposition: FileOpenDisposition::default(),
+            startup_session_behavior: StartupSessionBehavior::default(),
             tab_list_width: DEFAULT_TAB_LIST_WIDTH,
             auto_hide_tab_list: DEFAULT_AUTO_HIDE_TAB_LIST,
             tab_list_auto_hide_delay_seconds: DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS,
+            recent_files_enabled: DEFAULT_RECENT_FILES_ENABLED,
             settings_tab_open: false,
             settings_tab_index: None,
         }
@@ -256,6 +261,10 @@ fn default_auto_hide_tab_list() -> bool {
 
 fn default_tab_list_auto_hide_delay_seconds() -> f32 {
     DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS
+}
+
+fn default_recent_files_enabled() -> bool {
+    DEFAULT_RECENT_FILES_ENABLED
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {

@@ -1,9 +1,9 @@
 #[cfg(test)]
 use super::sync_stock_editor_palette_with_theme_mode;
 use super::{
-    AppSettings, AppSurface, AppThemeMode, FileController, LogLevel, ScratchpadApp,
-    TabListPosition, color_to_hex, logging, sanitize_tab_list_auto_hide_delay_seconds,
-    stock_editor_palette_for_selection,
+    AppSettings, AppSurface, AppThemeMode, FileController, FileOpenDisposition, LogLevel,
+    ScratchpadApp, StartupSessionBehavior, TabListPosition, color_to_hex, logging,
+    sanitize_tab_list_auto_hide_delay_seconds, stock_editor_palette_for_selection,
 };
 use crate::app::fonts::EditorFontPreset;
 use eframe::egui;
@@ -51,16 +51,12 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn set_word_wrap(&mut self, enabled: bool) {
-        self.persist_settings_if_changed(self.app_settings.word_wrap, enabled, |app, next| {
-            app.app_settings.word_wrap = next;
-        });
+        self.persist_settings_if_changed(self.app_settings.word_wrap, enabled, |app, next| app.app_settings.word_wrap = next);
     }
 
     pub(crate) fn set_editor_gutter(&mut self, gutter: u8) {
         let next = gutter.min(32);
-        self.persist_settings_if_changed(self.app_settings.editor_gutter, next, |app, value| {
-            app.app_settings.editor_gutter = value;
-        });
+        self.persist_settings_if_changed(self.app_settings.editor_gutter, next, |app, value| app.app_settings.editor_gutter = value);
     }
 
     #[cfg(test)]
@@ -100,18 +96,23 @@ impl ScratchpadApp {
     }
 
     fn set_editor_palette_color(&mut self, next: String, is_text_color: bool) {
-        let current = if is_text_color {
-            self.app_settings.editor_text_color.clone()
-        } else {
-            self.app_settings.editor_background_color.clone()
-        };
-        self.persist_settings_if_changed(current, next, |app, value| {
-            if is_text_color {
-                app.app_settings.editor_text_color = value;
+        let changed = {
+            let current = if is_text_color {
+                &mut self.app_settings.editor_text_color
             } else {
-                app.app_settings.editor_background_color = value;
+                &mut self.app_settings.editor_background_color
+            };
+            if *current == next {
+                false
+            } else {
+                *current = next;
+                true
             }
-        });
+        };
+
+        if changed {
+            self.persist_settings_or_error();
+        }
     }
 
     pub(crate) fn set_tab_list_position(&mut self, position: TabListPosition) {
@@ -127,6 +128,14 @@ impl ScratchpadApp {
         }
         self.tab_manager.pending_scroll_to_active = true;
         self.persist_settings_or_error();
+    }
+
+    pub(crate) fn set_file_open_disposition(&mut self, disposition: FileOpenDisposition) {
+        self.persist_settings_if_changed(self.app_settings.file_open_disposition, disposition, |app, next| app.app_settings.file_open_disposition = next);
+    }
+
+    pub(crate) fn set_startup_session_behavior(&mut self, behavior: StartupSessionBehavior) {
+        self.persist_settings_if_changed(self.app_settings.startup_session_behavior, behavior, |app, next| app.app_settings.startup_session_behavior = next);
     }
 
     pub(crate) fn set_auto_hide_tab_list(&mut self, enabled: bool) {
@@ -153,6 +162,10 @@ impl ScratchpadApp {
         self.persist_settings_or_error();
     }
 
+    pub(crate) fn set_recent_files_enabled(&mut self, enabled: bool) {
+        self.persist_settings_if_changed(self.app_settings.recent_files_enabled, enabled, |app, next| app.app_settings.recent_files_enabled = next);
+    }
+
     pub(crate) fn set_tab_list_width_from_layout(&mut self, width: f32) {
         let next = width.clamp(
             Self::VERTICAL_TAB_LIST_MIN_WIDTH,
@@ -167,30 +180,20 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn open_settings(&mut self) {
-        self.reload_settings_from_active_settings_tab();
-        let was_open = self.settings_tab_open();
-        self.settings_tab_index = self.settings_tab_index.min(self.tabs().len());
-        self.app_settings.settings_tab_open = true;
-        self.active_surface = AppSurface::Settings;
-        self.tab_manager.pending_scroll_to_active = true;
-        if !was_open {
+        self.reload_settings_before_workspace_change();
+        if self.set_settings_surface_open(true) {
             self.persist_settings_or_error();
         }
     }
 
     pub(crate) fn open_settings_file_tab(&mut self) {
-        let path = self.settings_path();
+        let path = self.settings_path().to_path_buf();
         self.activate_workspace_surface();
         FileController::open_paths(self, vec![path]);
     }
 
     pub(crate) fn close_settings(&mut self) {
-        let was_open = self.settings_tab_open();
-        self.app_settings.settings_tab_open = false;
-        self.active_surface = AppSurface::Workspace;
-        self.settings_tab_index = self.settings_tab_index.min(self.tabs().len());
-        self.tab_manager.pending_scroll_to_active = true;
-        if was_open {
+        if self.set_settings_surface_open(false) {
             self.persist_settings_or_error();
         }
         self.request_focus_for_active_view();
@@ -254,6 +257,19 @@ impl ScratchpadApp {
 
     pub(crate) fn activate_workspace_surface(&mut self) {
         self.active_surface = AppSurface::Workspace;
+    }
+
+    fn set_settings_surface_open(&mut self, open: bool) -> bool {
+        let changed = self.settings_tab_open() != open;
+        self.settings_tab_index = self.settings_tab_index.min(self.tabs().len());
+        self.app_settings.settings_tab_open = open;
+        self.active_surface = if open {
+            AppSurface::Settings
+        } else {
+            AppSurface::Workspace
+        };
+        self.tab_manager.pending_scroll_to_active = true;
+        changed
     }
 
     pub(crate) fn keep_tab_list_open(&mut self) {

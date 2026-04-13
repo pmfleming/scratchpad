@@ -3,47 +3,28 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
 
 pub(crate) fn apply_tab_outcome(app: &mut ScratchpadApp, outcome: TabStripOutcome) {
-    apply_tab_activation(app, &outcome);
-    apply_tab_closing(app, &outcome);
-    apply_tab_promotions(app, &outcome);
-    apply_tab_reordering(app, &outcome);
-    apply_tab_combining(app, &outcome);
-    clear_consumed_scroll_request(app, &outcome);
-}
-
-fn apply_tab_activation(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
-    if let Some(index) = outcome
-        .activated_tab
-        .and_then(|slot_index| workspace_index_for_display_slot(app, slot_index))
-    {
-        app.handle_command(AppCommand::ActivateTab { index });
-    }
-
+    apply_workspace_slot_command(app, outcome.activated_tab, |index| AppCommand::ActivateTab {
+        index,
+    });
     if outcome.activate_settings {
         app.handle_command(AppCommand::OpenSettings);
     }
-}
 
-fn apply_tab_closing(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
-    if let Some(index) = outcome
-        .close_requested_tab
-        .and_then(|slot_index| workspace_index_for_display_slot(app, slot_index))
-    {
-        app.handle_command(AppCommand::RequestCloseTab { index });
-    }
-
+    apply_workspace_slot_command(app, outcome.close_requested_tab, |index| {
+        AppCommand::RequestCloseTab { index }
+    });
     if outcome.close_settings {
         app.handle_command(AppCommand::CloseSettings);
     }
-}
 
-fn apply_tab_promotions(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
-    if let Some(index) = outcome
-        .promote_all_files_tab
-        .and_then(|slot_index| workspace_index_for_display_slot(app, slot_index))
-    {
-        app.handle_command(AppCommand::PromoteTabFilesToTabs { index });
-    }
+    apply_workspace_slot_command(
+        app,
+        outcome.promote_all_files_tab,
+        |index| AppCommand::PromoteTabFilesToTabs { index },
+    );
+    apply_tab_reordering(app, &outcome);
+    apply_tab_combining(app, &outcome);
+    clear_consumed_scroll_request(app, &outcome);
 }
 
 fn apply_tab_reordering(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
@@ -58,8 +39,8 @@ fn apply_tab_reordering(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
 fn apply_tab_combining(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
     if let Some((source_index, target_index)) = outcome.combined_tabs
         && let (Some(source_index), Some(target_index)) = (
-            workspace_index_for_display_slot(app, source_index),
-            workspace_index_for_display_slot(app, target_index),
+            app.workspace_index_for_slot(source_index),
+            app.workspace_index_for_slot(target_index),
         )
     {
         app.handle_command(AppCommand::CombineTabIntoTab {
@@ -69,8 +50,15 @@ fn apply_tab_combining(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
     }
 }
 
-fn workspace_index_for_display_slot(app: &ScratchpadApp, slot_index: usize) -> Option<usize> {
-    app.workspace_index_for_slot(slot_index)
+fn apply_workspace_slot_command(
+    app: &mut ScratchpadApp,
+    slot_index: Option<usize>,
+    command: impl FnOnce(usize) -> AppCommand,
+) {
+    if let Some(index) = slot_index.and_then(|slot_index| app.workspace_index_for_slot(slot_index))
+    {
+        app.handle_command(command(index));
+    }
 }
 
 fn clear_consumed_scroll_request(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
