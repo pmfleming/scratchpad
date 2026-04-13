@@ -9,6 +9,7 @@ pub(super) struct SettingsTypography {
 
 pub(super) struct SettingsLayout {
     pub page_max_width: f32,
+    pub preview_max_width: f32,
     pub card_radius: u8,
     pub card_min_height: f32,
     pub inner_row_height: f32,
@@ -44,6 +45,7 @@ impl SettingsUi {
     };
     pub(super) const LAYOUT: SettingsLayout = SettingsLayout {
         page_max_width: 980.0,
+        preview_max_width: 420.0,
         card_radius: 10,
         card_min_height: 72.0,
         inner_row_height: 56.0,
@@ -80,8 +82,7 @@ impl SettingsUi {
             bottom: 5,
         },
     };
-    pub(super) const PREVIEW_TEXT: &str =
-        "I hear the ruin of all space, shattered glass and toppling masonry, and time one livid final flame.";
+    pub(super) const PREVIEW_TEXT: &str = "I hear the ruin of all space, shattered glass and toppling masonry, and time one livid final flame.";
 
     const CARD_BG_DARK: egui::Color32 = egui::Color32::from_rgb(42, 47, 57);
     const CARD_BORDER_DARK: egui::Color32 = egui::Color32::from_rgb(61, 67, 77);
@@ -108,6 +109,14 @@ impl SettingsUi {
 
     pub(super) fn page_content_width(ui: &egui::Ui) -> f32 {
         ui.available_width().min(Self::LAYOUT.page_max_width)
+    }
+
+    pub(super) fn card_width(ui: &egui::Ui) -> f32 {
+        ui.available_width()
+    }
+
+    pub(super) fn preview_width(ui: &egui::Ui) -> f32 {
+        ui.available_width().min(Self::LAYOUT.preview_max_width)
     }
 
     pub(super) fn page_horizontal_margin(ui: &egui::Ui, content_width: f32) -> f32 {
@@ -171,11 +180,7 @@ impl SettingsUi {
     }
 
     fn theme_color(ui: &egui::Ui, dark: egui::Color32, light: egui::Color32) -> egui::Color32 {
-        if ui.visuals().dark_mode {
-            dark
-        } else {
-            light
-        }
+        if ui.visuals().dark_mode { dark } else { light }
     }
 
     pub(super) fn control_width(has_custom_palette: bool) -> f32 {

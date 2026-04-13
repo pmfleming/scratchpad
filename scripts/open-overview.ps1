@@ -131,9 +131,10 @@ try {
     $totalSteps = if ($rebuildMode -eq "fast") { 2 } else { 7 }
     $stepNumber = 1
 
+    Ensure-Python
+
     if ($rebuildMode -ne "fast") {
         Write-Step -Number $stepNumber -Total $totalSteps -Title "Checking Python environment"
-        Ensure-Python
         Write-Host "Using Python: $python" -ForegroundColor Green
         $stepNumber++
 

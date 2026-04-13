@@ -61,12 +61,10 @@ pub(super) fn toggle_card(
 }
 
 pub(super) fn toggle_control(ui: &mut egui::Ui, value: &mut bool) {
-    ui.horizontal(|ui| {
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
         let response = toggle_switch(ui, value);
         ui.add_space(12.0);
-        ui.label(
-            egui::RichText::new(if *value { "On" } else { "Off" }).color(text_primary(ui)),
-        );
+        ui.label(egui::RichText::new(if *value { "On" } else { "Off" }).color(text_primary(ui)));
         if response.changed() {
             ui.ctx().request_repaint();
         }
@@ -148,22 +146,28 @@ pub(super) fn inner_select_row(
     description: Option<&str>,
     add_control: impl FnOnce(&mut egui::Ui),
 ) {
-    ui.horizontal(|ui| {
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
         ui.set_min_height(SettingsUi::LAYOUT.inner_row_height);
         ui.add_space(40.0);
-        ui.vertical(|ui| {
-            ui.set_width(SettingsUi::row_label_width(ui));
-            ui.label(egui::RichText::new(label).color(text_primary(ui)));
-            if let Some(description) = description {
-                ui.add_space(2.0);
-                ui.label(
-                    egui::RichText::new(description)
-                        .size(SettingsUi::TYPOGRAPHY.description)
-                        .color(text_muted(ui)),
-                );
-            }
-        });
+        let label_width = SettingsUi::row_label_width(ui);
+        ui.allocate_ui_with_layout(
+            egui::vec2(label_width, SettingsUi::LAYOUT.inner_row_height),
+            egui::Layout::top_down(egui::Align::LEFT).with_main_align(egui::Align::Center),
+            |ui| {
+                ui.set_width(label_width);
+                ui.label(egui::RichText::new(label).color(text_primary(ui)));
+                if let Some(description) = description {
+                    ui.add_space(2.0);
+                    ui.label(
+                        egui::RichText::new(description)
+                            .size(SettingsUi::TYPOGRAPHY.description)
+                            .color(text_muted(ui)),
+                    );
+                }
+            },
+        );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.set_min_height(SettingsUi::LAYOUT.inner_row_height);
             add_control(ui);
         });
     });
@@ -180,19 +184,29 @@ pub(super) fn inner_divider(ui: &mut egui::Ui) {
 }
 
 pub(super) fn render_preview_panel(ui: &mut egui::Ui, app: &ScratchpadApp) {
-    SettingsUi::preview_frame(ui, app.editor_background_color())
-        .show(ui, |ui| {
-            ui.vertical_centered(|ui| {
+    let preview_width = SettingsUi::preview_width(ui);
+    ui.allocate_ui_with_layout(
+        egui::vec2(preview_width, 0.0),
+        egui::Layout::top_down(egui::Align::LEFT),
+        |ui| {
+            ui.set_width(preview_width);
+            ui.set_max_width(preview_width);
+            SettingsUi::preview_frame(ui, app.editor_background_color()).show(ui, |ui| {
+                ui.set_width(ui.available_width());
                 ui.add_space(4.0);
                 let preview_family = egui::FontFamily::Name(EDITOR_FONT_FAMILY.into());
-                ui.label(
-                    egui::RichText::new(SettingsUi::PREVIEW_TEXT)
-                        .family(preview_family)
-                        .size(app.font_size())
-                        .color(app.editor_text_color()),
+                ui.add_sized(
+                    egui::vec2(ui.available_width(), 0.0),
+                    egui::Label::new(
+                        egui::RichText::new(SettingsUi::PREVIEW_TEXT)
+                            .family(preview_family)
+                            .size(app.font_size())
+                            .color(app.editor_text_color()),
+                    )
+                    .wrap(),
                 );
                 ui.add_space(16.0);
-                ui.horizontal_centered(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     info_chip(ui, app.editor_font().label());
                     ui.add_space(8.0);
                     info_chip(ui, &format!("{:.0} pt", app.font_size()));
@@ -200,11 +214,19 @@ pub(super) fn render_preview_panel(ui: &mut egui::Ui, app: &ScratchpadApp) {
                     info_chip(ui, &format!("{} px gutter", app.editor_gutter()));
                 });
             });
-        });
+        },
+    );
 }
 
 fn settings_card_frame(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
-    SettingsUi::card_frame(ui).show(ui, add_contents);
+    let card_width = SettingsUi::card_width(ui);
+    ui.set_width(card_width);
+    ui.set_max_width(card_width);
+    SettingsUi::card_frame(ui).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.set_max_width(ui.available_width());
+        add_contents(ui);
+    });
 }
 
 fn clickable_card_header(
@@ -226,23 +248,29 @@ fn card_header(
     description: Option<&str>,
     add_trailing: impl FnOnce(&mut egui::Ui),
 ) -> egui::InnerResponse<()> {
-    ui.horizontal(|ui| {
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
         ui.set_min_height(SettingsUi::LAYOUT.card_min_height);
         icon_slot(ui, icon);
         ui.add_space(12.0);
-        ui.vertical(|ui| {
-            ui.set_width(SettingsUi::header_text_width(ui));
-            ui.label(egui::RichText::new(title).strong().color(text_primary(ui)));
-            if let Some(description) = description {
-                ui.add_space(2.0);
-                ui.label(
-                    egui::RichText::new(description)
-                        .size(SettingsUi::TYPOGRAPHY.description)
-                        .color(text_muted(ui)),
-                );
-            }
-        });
+        let header_width = SettingsUi::header_text_width(ui);
+        ui.allocate_ui_with_layout(
+            egui::vec2(header_width, SettingsUi::LAYOUT.card_min_height),
+            egui::Layout::top_down(egui::Align::LEFT).with_main_align(egui::Align::Center),
+            |ui| {
+                ui.set_width(header_width);
+                ui.label(egui::RichText::new(title).strong().color(text_primary(ui)));
+                if let Some(description) = description {
+                    ui.add_space(2.0);
+                    ui.label(
+                        egui::RichText::new(description)
+                            .size(SettingsUi::TYPOGRAPHY.description)
+                            .color(text_muted(ui)),
+                    );
+                }
+            },
+        );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.set_min_height(SettingsUi::LAYOUT.card_min_height);
             add_trailing(ui);
         });
     })
@@ -304,10 +332,15 @@ fn info_chip(ui: &mut egui::Ui, text: &str) {
         .corner_radius(egui::CornerRadius::same(127))
         .inner_margin(SettingsUi::MARGINS.info_chip_inner)
         .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(text)
-                    .size(SettingsUi::TYPOGRAPHY.description)
-                    .color(text_muted(ui)),
+            ui.with_layout(
+                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                |ui| {
+                    ui.label(
+                        egui::RichText::new(text)
+                            .size(SettingsUi::TYPOGRAPHY.description)
+                            .color(text_muted(ui)),
+                    );
+                },
             );
         });
 }
@@ -322,14 +355,17 @@ fn value_pill(ui: &mut egui::Ui, text: &str) {
             let width = SettingsUi::pill_width();
             ui.set_width(width);
             ui.set_max_width(width);
-            ui.add_sized(
-                egui::vec2(width, 0.0),
-                egui::Label::new(
-                    egui::RichText::new(text)
-                        .size(SettingsUi::TYPOGRAPHY.description)
-                        .color(text_muted(ui)),
-                )
-                .truncate(),
-            );
+            ui.set_min_height(ui.spacing().interact_size.y);
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add_sized(
+                    egui::vec2(width, 0.0),
+                    egui::Label::new(
+                        egui::RichText::new(text)
+                            .size(SettingsUi::TYPOGRAPHY.description)
+                            .color(text_muted(ui)),
+                    )
+                    .truncate(),
+                );
+            });
         });
 }

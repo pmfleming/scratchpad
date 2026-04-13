@@ -5,20 +5,24 @@ use crate::app::paths_match;
 use crate::app::services::file_controller::FileController;
 use crate::app::services::settings_store::{
     AppSettings, AppThemeMode, DEFAULT_EDITOR_BACKGROUND_COLOR, DEFAULT_EDITOR_TEXT_COLOR,
-    LIGHT_EDITOR_BACKGROUND_COLOR, LIGHT_EDITOR_TEXT_COLOR, TabListPosition, color_from_hex,
-    color_to_hex,
+    DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, LIGHT_EDITOR_BACKGROUND_COLOR,
+    LIGHT_EDITOR_TEXT_COLOR, TabListPosition, color_from_hex, color_to_hex,
 };
 use eframe::egui;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 mod display_tabs;
+mod mutators;
+#[cfg(test)]
+mod tests;
 mod toml_refresh;
 
 impl ScratchpadApp {
     pub(crate) const VERTICAL_TAB_LIST_MIN_WIDTH: f32 = 96.0;
     pub(crate) const VERTICAL_TAB_LIST_MAX_WIDTH: f32 = 360.0;
-    pub(crate) const VERTICAL_TAB_LIST_AUTO_HIDE_DELAY: Duration = Duration::from_secs(3);
+    pub(crate) const TAB_LIST_AUTO_HIDE_DELAY_MIN_SECONDS: f32 = 0.0;
+    pub(crate) const TAB_LIST_AUTO_HIDE_DELAY_MAX_SECONDS: f32 = 10.0;
 
     pub fn font_size(&self) -> f32 {
         self.app_settings.font_size
@@ -89,6 +93,16 @@ impl ScratchpadApp {
         self.app_settings.auto_hide_tab_list
     }
 
+    pub fn tab_list_auto_hide_delay_seconds(&self) -> f32 {
+        self.app_settings.tab_list_auto_hide_delay_seconds
+    }
+
+    pub(crate) fn tab_list_auto_hide_delay(&self) -> Duration {
+        Duration::from_secs_f32(sanitize_tab_list_auto_hide_delay_seconds(
+            self.app_settings.tab_list_auto_hide_delay_seconds,
+        ))
+    }
+
     pub fn settings_path(&self) -> PathBuf {
         self.settings_store.path().to_path_buf()
     }
@@ -139,6 +153,8 @@ impl ScratchpadApp {
     pub(super) fn apply_settings(&mut self, settings: AppSettings) {
         let mut settings = settings;
         sync_stock_editor_palette_with_theme_mode(&mut settings);
+        settings.tab_list_auto_hide_delay_seconds =
+            sanitize_tab_list_auto_hide_delay_seconds(settings.tab_list_auto_hide_delay_seconds);
         self.active_surface = if settings.settings_tab_open {
             AppSurface::Settings
         } else {
@@ -164,277 +180,9 @@ impl ScratchpadApp {
         ctx.set_visuals_of(egui::Theme::Dark, egui::Visuals::dark());
         ctx.set_visuals_of(egui::Theme::Light, egui::Visuals::light());
     }
-
-    pub(crate) fn set_font_size(&mut self, font_size: f32) {
-        let next = font_size.clamp(8.0, 72.0);
-        if (self.app_settings.font_size - next).abs() < f32::EPSILON {
-            return;
-        }
-
-        self.app_settings.font_size = next;
-        if let Err(error) = self.persist_settings_now() {
-            self.set_error_status(format!("Settings save failed: {error}"));
-        }
-    }
-
-    pub(crate) fn set_editor_font(&mut self, editor_font: EditorFontPreset) {
-        if self.app_settings.editor_font == editor_font {
-            return;
-        }
-
-        self.app_settings.editor_font = editor_font;
-        self.applied_editor_font = None;
-        if let Err(error) = self.persist_settings_now() {
-            self.set_error_status(format!("Settings save failed: {error}"));
-        }
-    }
-
-    pub(crate) fn set_word_wrap(&mut self, enabled: bool) {
-        if self.app_settings.word_wrap == enabled {
-            return;
-        }
-
-        self.app_settings.word_wrap = enabled;
-        if let Err(error) = self.persist_settings_now() {
-            self.set_error_status(format!("Settings save failed: {error}"));
-        }
-    }
-
-    pub(crate) fn set_editor_gutter(&mut self, gutter: u8) {
-        let next = gutter.min(32);
-        if self.app_settings.editor_gutter == next {
-            return;
-        }
-
-        self.app_settings.editor_gutter = next;
-        if let Err(error) = self.persist_settings_now() {
-            self.set_error_status(format!("Settings save failed: {error}"));
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn set_theme_mode(&mut self, theme_mode: AppThemeMode) {
-        if self.app_settings.theme_mode == theme_mode {
-            return;
-        }
-
-        self.app_settings.theme_mode = theme_mode;
-        sync_stock_editor_palette_with_theme_mode(&mut self.app_settings);
-        if let Err(error) = self.persist_settings_now() {
-            self.set_error_status(format!("Settings save failed: {error}"));
-        }
-    }
-
-    pub(crate) fn apply_theme_mode_preset(
-        &mut self,
-        theme_mode: AppThemeMode,
-        system_theme: Option<egui::Theme>,
-    ) {
-        let (text_color, background_color) =
-            stock_editor_palette_for_selection(theme_mode, system_theme);
-        if self.app_settings.theme_mode == theme_mode
-            && self.app_settings.editor_text_color == text_color
-            && self.app_settings.editor_background_color == background_color
-        {
-            return;
-        }
-
-        self.app_settings.theme_mode = theme_mode;
-        self.app_settings.editor_text_color = text_color.to_owned();
-        self.app_settings.editor_background_color = background_color.to_owned();
-        if let Err(error) = self.persist_settings_now() {
-            self.set_error_status(format!("Settings save failed: {error}"));
-        }
-    }
-
-    pub(crate) fn set_editor_text_color(&mut self, color: egui::Color32) {
-        let next = color_to_hex(color);
-        if self.app_settings.editor_text_color == next {
-            return;
-        }
-
-        self.app_settings.editor_text_color = next;
-        if let Err(error) = self.persist_settings_now() {
-            self.set_error_status(format!("Settings save failed: {error}"));
-        }
-    }
-
-    pub(crate) fn set_editor_background_color(&mut self, color: egui::Color32) {
-        let next = color_to_hex(color);
-        if self.app_settings.editor_background_color == next {
-            return;
-        }
-
-        self.app_settings.editor_background_color = next;
-        if let Err(error) = self.persist_settings_now() {
-            self.set_error_status(format!("Settings save failed: {error}"));
-        }
-    }
-
-    pub(crate) fn set_tab_list_position(&mut self, position: TabListPosition) {
-        if self.app_settings.tab_list_position == position {
-            return;
-        }
-
-        self.app_settings.tab_list_position = position;
-        self.vertical_tab_list_open = false;
-        self.vertical_tab_list_hide_deadline = None;
-        if position.is_vertical() {
-            self.overflow_popup_open = false;
-        }
-        self.tab_manager.pending_scroll_to_active = true;
-        if let Err(error) = self.persist_settings_now() {
-            self.set_error_status(format!("Settings save failed: {error}"));
-        }
-    }
-
-    pub(crate) fn set_auto_hide_tab_list(&mut self, enabled: bool) {
-        if self.app_settings.auto_hide_tab_list == enabled {
-            return;
-        }
-
-        self.app_settings.auto_hide_tab_list = enabled;
-        if !enabled {
-            self.vertical_tab_list_open = false;
-        }
-        self.vertical_tab_list_hide_deadline = None;
-        if let Err(error) = self.persist_settings_now() {
-            self.set_error_status(format!("Settings save failed: {error}"));
-        }
-    }
-
-    pub(crate) fn set_tab_list_width_from_layout(&mut self, width: f32) {
-        let next = width.clamp(
-            Self::VERTICAL_TAB_LIST_MIN_WIDTH,
-            Self::VERTICAL_TAB_LIST_MAX_WIDTH,
-        );
-        if (self.app_settings.tab_list_width - next).abs() < 1.0 {
-            return;
-        }
-
-        self.app_settings.tab_list_width = next;
-        if let Err(error) = self.persist_settings_now() {
-            self.set_error_status(format!("Settings save failed: {error}"));
-        }
-    }
-
-    pub(crate) fn open_settings(&mut self) {
-        self.reload_settings_from_active_settings_tab();
-        let was_open = self.settings_tab_open();
-        self.settings_tab_index = self.settings_tab_index.min(self.tabs().len());
-        self.app_settings.settings_tab_open = true;
-        self.active_surface = AppSurface::Settings;
-        self.tab_manager.pending_scroll_to_active = true;
-        if !was_open && let Err(error) = self.persist_settings_now() {
-            self.set_error_status(format!("Settings save failed: {error}"));
-        }
-    }
-
-    pub(crate) fn open_settings_file_tab(&mut self) {
-        let path = self.settings_path();
-        self.activate_workspace_surface();
-        FileController::open_paths(self, vec![path]);
-    }
-
-    pub(crate) fn close_settings(&mut self) {
-        let was_open = self.settings_tab_open();
-        self.app_settings.settings_tab_open = false;
-        self.active_surface = AppSurface::Workspace;
-        self.settings_tab_index = self.settings_tab_index.min(self.tabs().len());
-        self.tab_manager.pending_scroll_to_active = true;
-        if was_open && let Err(error) = self.persist_settings_now() {
-            self.set_error_status(format!("Settings save failed: {error}"));
-        }
-        self.request_focus_for_active_view();
-    }
-
-    pub(crate) fn reset_settings_to_defaults(&mut self) {
-        let defaults = AppSettings {
-            settings_tab_open: self.settings_tab_open(),
-            settings_tab_index: Some(self.settings_tab_index.min(self.tabs().len())),
-            ..AppSettings::default()
-        };
-        self.apply_settings(defaults);
-        self.applied_editor_font = None;
-        if let Err(error) = self.persist_settings_now() {
-            self.set_error_status(format!("Settings save failed: {error}"));
-            return;
-        }
-
-        self.set_info_status("Settings reset to defaults.");
-    }
-
-    pub(crate) fn set_logging_enabled(&mut self, enabled: bool) {
-        if self.app_settings.logging_enabled == enabled {
-            return;
-        }
-
-        self.app_settings.logging_enabled = enabled;
-        if let Err(error) = self.persist_settings_now() {
-            self.set_error_status(format!("Settings save failed: {error}"));
-            return;
-        }
-
-        let state = if enabled { "enabled" } else { "disabled" };
-        if enabled {
-            logging::log(LogLevel::Info, &format!("Runtime logging {state}"));
-        } else {
-            self.status_message = Some(format!("Runtime logging {state}."));
-        }
-    }
-
-    fn apply_workspace_tab_order(&mut self, workspace_order: Vec<usize>) {
-        if workspace_order.len() != self.tab_manager.tabs.len() {
-            return;
-        }
-
-        let active_workspace_index = self.tab_manager.active_tab_index;
-        let mut tabs = std::mem::take(&mut self.tab_manager.tabs)
-            .into_iter()
-            .map(Some)
-            .collect::<Vec<_>>();
-        self.tab_manager.tabs = workspace_order
-            .iter()
-            .filter_map(|&index| tabs.get_mut(index).and_then(Option::take))
-            .collect();
-        self.tab_manager.active_tab_index = workspace_order
-            .iter()
-            .position(|&index| index == active_workspace_index)
-            .unwrap_or(0);
-        self.tab_manager.pending_scroll_to_active = true;
-        self.mark_session_dirty();
-
-        if let Err(error) = self.persist_settings_now() {
-            self.set_error_status(format!("Settings save failed: {error}"));
-        }
-    }
-
-    pub(crate) fn activate_workspace_surface(&mut self) {
-        self.active_surface = AppSurface::Workspace;
-    }
-
-    pub(crate) fn vertical_tab_list_hide_deadline_active(&self, now: Instant) -> bool {
-        self.vertical_tab_list_hide_deadline
-            .is_some_and(|deadline| deadline > now)
-    }
-
-    pub(crate) fn keep_vertical_tab_list_open(&mut self) {
-        self.vertical_tab_list_open = true;
-        self.vertical_tab_list_hide_deadline = None;
-    }
-
-    pub(crate) fn delay_vertical_tab_list_hide(&mut self, now: Instant) {
-        self.vertical_tab_list_open = true;
-        self.vertical_tab_list_hide_deadline = Some(now + Self::VERTICAL_TAB_LIST_AUTO_HIDE_DELAY);
-    }
-
-    pub(crate) fn close_vertical_tab_list(&mut self) {
-        self.vertical_tab_list_open = false;
-        self.vertical_tab_list_hide_deadline = None;
-    }
 }
 
-fn sync_stock_editor_palette_with_theme_mode(settings: &mut AppSettings) {
+pub(super) fn sync_stock_editor_palette_with_theme_mode(settings: &mut AppSettings) {
     let Some((text_color, background_color)) = stock_editor_palette(settings.theme_mode) else {
         return;
     };
@@ -453,7 +201,7 @@ fn sync_stock_editor_palette_with_theme_mode(settings: &mut AppSettings) {
     settings.editor_background_color = background_color.to_owned();
 }
 
-fn uses_stock_editor_palette(settings: &AppSettings) -> bool {
+pub(super) fn uses_stock_editor_palette(settings: &AppSettings) -> bool {
     matches!(
         (
             settings.editor_text_color.as_str(),
@@ -464,7 +212,9 @@ fn uses_stock_editor_palette(settings: &AppSettings) -> bool {
     )
 }
 
-fn stock_editor_palette(theme_mode: AppThemeMode) -> Option<(&'static str, &'static str)> {
+pub(super) fn stock_editor_palette(
+    theme_mode: AppThemeMode,
+) -> Option<(&'static str, &'static str)> {
     match theme_mode {
         AppThemeMode::System => None,
         AppThemeMode::Light => Some((LIGHT_EDITOR_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR)),
@@ -472,7 +222,7 @@ fn stock_editor_palette(theme_mode: AppThemeMode) -> Option<(&'static str, &'sta
     }
 }
 
-fn stock_editor_palette_for_selection(
+pub(super) fn stock_editor_palette_for_selection(
     theme_mode: AppThemeMode,
     system_theme: Option<egui::Theme>,
 ) -> (&'static str, &'static str) {
@@ -486,99 +236,13 @@ fn stock_editor_palette_for_selection(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::app::services::session_store::SessionStore;
-
-    fn test_app() -> ScratchpadApp {
-        let session_root = tempfile::tempdir().expect("create session dir");
-        let session_store = SessionStore::new(session_root.path().to_path_buf());
-        ScratchpadApp::with_session_store(session_store)
+fn sanitize_tab_list_auto_hide_delay_seconds(seconds: f32) -> f32 {
+    if !seconds.is_finite() {
+        return DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS;
     }
 
-    fn set_custom_palette(app: &mut ScratchpadApp) {
-        app.set_editor_text_color(egui::Color32::from_rgb(12, 34, 56));
-        app.set_editor_background_color(egui::Color32::from_rgb(210, 220, 230));
-    }
-
-    #[test]
-    fn applying_light_mode_settings_migrates_stock_editor_palette() {
-        let mut app = test_app();
-
-        app.apply_settings(AppSettings {
-            theme_mode: AppThemeMode::Light,
-            editor_text_color: DEFAULT_EDITOR_TEXT_COLOR.to_owned(),
-            editor_background_color: DEFAULT_EDITOR_BACKGROUND_COLOR.to_owned(),
-            ..AppSettings::default()
-        });
-
-        assert_eq!(app.editor_text_color(), egui::Color32::BLACK);
-        assert_eq!(app.editor_background_color(), egui::Color32::WHITE);
-    }
-
-    #[test]
-    fn switching_to_light_mode_updates_stock_editor_palette() {
-        let mut app = test_app();
-
-        app.set_theme_mode(AppThemeMode::Light);
-
-        assert_eq!(app.editor_text_color(), egui::Color32::BLACK);
-        assert_eq!(app.editor_background_color(), egui::Color32::WHITE);
-    }
-
-    #[test]
-    fn switching_theme_preserves_custom_editor_palette() {
-        let mut app = test_app();
-
-        let custom_text = egui::Color32::from_rgb(12, 34, 56);
-        let custom_background = egui::Color32::from_rgb(210, 220, 230);
-        app.set_editor_text_color(custom_text);
-        app.set_editor_background_color(custom_background);
-
-        app.set_theme_mode(AppThemeMode::Light);
-
-        assert_eq!(app.editor_text_color(), custom_text);
-        assert_eq!(app.editor_background_color(), custom_background);
-    }
-
-    #[test]
-    fn custom_palette_is_detected_after_editor_color_change() {
-        let mut app = test_app();
-
-        assert!(!app.has_custom_editor_palette());
-
-        app.set_editor_text_color(egui::Color32::from_rgb(12, 34, 56));
-
-        assert!(app.has_custom_editor_palette());
-    }
-
-    #[test]
-    fn applying_light_theme_preset_clears_custom_palette() {
-        let mut app = test_app();
-        set_custom_palette(&mut app);
-
-        app.apply_theme_mode_preset(AppThemeMode::Light, Some(egui::Theme::Light));
-
-        assert_eq!(app.theme_mode(), AppThemeMode::Light);
-        assert!(!app.has_custom_editor_palette());
-        assert_eq!(app.editor_text_color(), egui::Color32::BLACK);
-        assert_eq!(app.editor_background_color(), egui::Color32::WHITE);
-    }
-
-    #[test]
-    fn applying_system_theme_preset_clears_custom_palette() {
-        let mut app = test_app();
-        set_custom_palette(&mut app);
-
-        app.apply_theme_mode_preset(AppThemeMode::System, Some(egui::Theme::Dark));
-
-        assert_eq!(app.theme_mode(), AppThemeMode::System);
-        assert!(!app.has_custom_editor_palette());
-        assert_eq!(app.editor_text_color(), egui::Color32::WHITE);
-        assert_eq!(
-            app.editor_background_color(),
-            egui::Color32::from_rgb(21, 24, 29)
-        );
-    }
+    seconds.clamp(
+        ScratchpadApp::TAB_LIST_AUTO_HIDE_DELAY_MIN_SECONDS,
+        ScratchpadApp::TAB_LIST_AUTO_HIDE_DELAY_MAX_SECONDS,
+    )
 }

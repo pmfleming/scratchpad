@@ -221,10 +221,14 @@ class CloneAnalyzer:
             for file_path, start_idx in accepted_matches:
                 globally_used[file_path].append(range(start_idx, start_idx + self.min_tokens))
 
-            instance_count = len(instances)
-            file_count = len({instance.file_path for instance in instances})
+            merged_instances = self._merge_instances(instances)
+            if len(merged_instances) < 2:
+                continue
+
+            instance_count = len(merged_instances)
+            file_count = len({instance.file_path for instance in merged_instances})
             max_line_span = max(
-                instance.end_line - instance.start_line + 1 for instance in instances
+                instance.end_line - instance.start_line + 1 for instance in merged_instances
             )
             score = self.calculate_score(instance_count, self.min_tokens)
             groups.append(
@@ -239,7 +243,7 @@ class CloneAnalyzer:
                     signals=self.generate_signals(
                         instance_count, file_count, self.min_tokens, max_line_span
                     ),
-                    instances=instances,
+                    instances=merged_instances,
                 )
             )
 
@@ -340,6 +344,40 @@ class CloneAnalyzer:
         if max_line_span >= 12:
             signals.append(f"wide span {max_line_span} lines")
         return ", ".join(signals) if signals else "watch"
+
+    @staticmethod
+    def _merge_instances(instances: Sequence[CloneInstance]) -> List[CloneInstance]:
+        grouped: DefaultDict[str, List[CloneInstance]] = defaultdict(list)
+        for instance in instances:
+            grouped[instance.file_path].append(instance)
+
+        merged_instances: List[CloneInstance] = []
+        for file_path, file_instances in grouped.items():
+            sorted_instances = sorted(
+                file_instances,
+                key=lambda instance: (instance.start_line, instance.end_line),
+            )
+            current = sorted_instances[0]
+
+            for candidate in sorted_instances[1:]:
+                if candidate.start_line <= current.end_line:
+                    current = CloneInstance(
+                        file_path=file_path,
+                        start_line=current.start_line,
+                        end_line=max(current.end_line, candidate.end_line),
+                        snippet=current.snippet,
+                    )
+                    continue
+
+                merged_instances.append(current)
+                current = candidate
+
+            merged_instances.append(current)
+
+        return sorted(
+            merged_instances,
+            key=lambda instance: (instance.file_path, instance.start_line, instance.end_line),
+        )
 
     @staticmethod
     def _overlaps_existing(ranges: Sequence[range], candidate: range) -> bool:

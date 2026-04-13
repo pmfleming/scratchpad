@@ -9,7 +9,7 @@
     <meta http-equiv="Expires" content="0" />
     <title>Scratchpad Metrics Viewer</title>
     <script>
-        window.SCRATCHPAD_VIEWER_VERSION = "20260413-clone-alert-1";
+        window.SCRATCHPAD_VIEWER_VERSION = "20260413-risk-model-1";
         document.write(`<link rel="stylesheet" href="styles.css?v=${window.SCRATCHPAD_VIEWER_VERSION}" />`);
     </script>
 </head>
@@ -19,7 +19,7 @@
         <header class="hero">
             <div>
                 <p class="eyebrow">Scratchpad data viewer</p>
-                <h1>Hotspots, slowspots, clones, and architecture map</h1>
+                <h1>Hotspots, slowspots, clones, and architecture risk map</h1>
                 <p class="lede">
                     A static viewer for the JSON artifacts produced by the Python measurement tools.
                 </p>
@@ -118,8 +118,8 @@
                 <div class="panel-card graph-card">
                     <div class="panel-card__header">
                         <div>
-                            <h2>Architecture map</h2>
-                            <p>Click a module to bring its inbound and outbound links forward.</p>
+                            <h2>Architecture risk map</h2>
+                            <p>Click a module to inspect maintainability, change, performance, and architectural risk.</p>
                         </div>
                         <div class="map-controls">
                             <input id="map-filter" class="filter-input" type="search" placeholder="Filter modules..." />

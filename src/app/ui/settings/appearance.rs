@@ -1,5 +1,9 @@
 use super::*;
 
+const AUTO_HIDE_DELAY_OPTIONS: [f32; 13] = [
+    0.1, 0.3, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,
+];
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ThemeModeSelection {
     System,
@@ -46,11 +50,27 @@ pub(super) fn render_appearance_category(ui: &mut egui::Ui, app: &mut Scratchpad
                 |app, color| app.set_editor_background_color(color),
                 app,
             );
+            ui.add_space(SettingsUi::LAYOUT.preview_top_margin);
+            render_preview_panel(ui, app);
+        },
+    );
+}
+
+pub(super) fn render_tab_position_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    category_heading(ui, "Tab Position");
+    expandable_card(
+        ui,
+        "settings_tab_position_card",
+        egui_phosphor::regular::TEXT_OUTDENT,
+        "Tab list",
+        "Choose where tabs live and how long auto-hidden lists stay visible.",
+        true,
+        |ui| {
             render_tab_list_row(ui, app);
             inner_divider(ui);
             render_auto_hide_row(ui, app);
-            ui.add_space(SettingsUi::LAYOUT.preview_top_margin);
-            render_preview_panel(ui, app);
+            inner_divider(ui);
+            render_auto_hide_delay_row(ui, app);
         },
     );
 }
@@ -149,6 +169,59 @@ fn render_auto_hide_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             }
         },
     );
+}
+
+fn render_auto_hide_delay_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    inner_select_row(
+        ui,
+        "Auto-hide delay",
+        Some("Keep the active tab list open for a short grace period after it loses context."),
+        |ui| {
+            let current_index =
+                nearest_auto_hide_delay_index(app.tab_list_auto_hide_delay_seconds());
+            let mut selected_index = current_index as u32;
+            ui.add_sized(
+                egui::vec2(SettingsUi::CONTROLS.width, 0.0),
+                egui::Slider::new(
+                    &mut selected_index,
+                    0..=(AUTO_HIDE_DELAY_OPTIONS.len() - 1) as u32,
+                )
+                .step_by(1.0)
+                .show_value(false),
+            );
+            ui.add_space(8.0);
+            ui.label(auto_hide_delay_label(
+                AUTO_HIDE_DELAY_OPTIONS[selected_index as usize],
+            ));
+
+            if selected_index as usize != current_index {
+                app.set_tab_list_auto_hide_delay_seconds(
+                    AUTO_HIDE_DELAY_OPTIONS[selected_index as usize],
+                );
+            }
+        },
+    );
+}
+
+fn nearest_auto_hide_delay_index(seconds: f32) -> usize {
+    AUTO_HIDE_DELAY_OPTIONS
+        .iter()
+        .enumerate()
+        .min_by(|(_, left), (_, right)| {
+            let left_distance = (seconds - **left).abs();
+            let right_distance = (seconds - **right).abs();
+            left_distance.total_cmp(&right_distance)
+        })
+        .map(|(index, _)| index)
+        .unwrap_or(0)
+}
+
+fn auto_hide_delay_label(seconds: f32) -> String {
+    if seconds.fract().abs() < f32::EPSILON {
+        format!("{seconds:.0} s")
+    } else {
+        format!("{seconds:.1} s")
+    }
 }
 
 fn detected_system_theme_label(ui: &egui::Ui) -> &'static str {

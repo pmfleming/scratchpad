@@ -194,8 +194,8 @@
             renderSummary("map-summary", [
                 metricCard("Nodes", "-"),
                 metricCard("Edges", "-"),
-                metricCard("Measured modules", "-"),
-                metricCard("Selected", "-"),
+                metricCard("High maintainability", "-"),
+                metricCard("Untested risk", "-"),
             ]);
             byId("map-graph").innerHTML = '<p class="muted" style="padding: 20px;">No map data loaded.</p>';
             return;
@@ -208,7 +208,9 @@
             .filter((node) => !node.is_group)
             .filter((node) => !query || node.id.toLowerCase().includes(query));
         const moduleIds = new Set(modules.map((node) => node.id));
-        const measured = modules.filter((node) => (node.comp_score || 0) > 0 || (node.perf_score || 0) > 0);
+        const summary = payload.meta?.summary || {};
+        const highMaintainability = modules.filter((node) => (node.maintainability_risk || 0) >= 350).length;
+        const lowTestEvidence = modules.filter((node) => !node.evidence?.has_tests).length;
         const visibleEdges = graph.edges
             .map((edge) => edge.data)
             .filter((edge) => moduleIds.has(edge.source) && moduleIds.has(edge.target));
@@ -216,7 +218,9 @@
         renderSummary("map-summary", [
             metricCard("Nodes", modules.length),
             metricCard("Edges", visibleEdges.length),
-            metricCard("Measured modules", measured.length),
+            metricCard("High maintainability", highMaintainability),
+            metricCard("Untested risk", lowTestEvidence),
+            metricCard("Cycle members", summary.cycle_members ?? "-"),
             metricCard("Selected", state.selectedModule || "-"),
         ]);
 
@@ -404,6 +408,12 @@
         const fill = scoreFill(node.total_score || 0);
         const label = shortenLabel(node.id);
         const score = formatNumber.format(node.total_score || 0);
+        const chips = [
+            `M ${Math.round(node.maintainability_risk || 0)}`,
+            `C ${Math.round(node.change_risk || 0)}`,
+            `P ${Math.round(node.performance_risk || 0)}`,
+            `A ${Math.round(node.architectural_risk || 0)}`,
+        ].join(" · ");
 
         return `<g class="${className}" data-id="${escapeHtml(node.id)}" transform="translate(${position.x} ${position.y})">
             <title>${escapeHtml(node.id)}</title>
@@ -411,7 +421,8 @@
             <foreignObject x="14" y="12" width="${position.width - 28}" height="${position.height - 24}">
                 <div xmlns="http://www.w3.org/1999/xhtml" class="node-label">
                     <strong>${escapeHtml(label)}</strong>
-                    <span>impact ${escapeHtml(score)}</span>
+                    <span>risk ${escapeHtml(score)}</span>
+                    <span>${escapeHtml(chips)}</span>
                 </div>
             </foreignObject>
         </g>`;
@@ -456,14 +467,27 @@
         const outbound = edges.filter((edge) => edge.source === selected.id).map((edge) => edge.target);
         const inbound = edges.filter((edge) => edge.target === selected.id).map((edge) => edge.source);
         const perf = selected.perf_benchmarks || [];
+        const evidence = selected.evidence || {};
+        const categorySignals = selected.category_signals || {};
 
         byId("map-detail").innerHTML = `<h2>${escapeHtml(selected.id)}</h2>
             <div class="detail-list">
-                <div class="detail-row"><strong>Total impact</strong>${formatNumber.format(selected.total_score || 0)}</div>
-                <div class="detail-row"><strong>Complexity</strong>${formatNumber.format(selected.comp_score || 0)}</div>
-                <div class="detail-row"><strong>Performance</strong>${formatNumber.format(selected.perf_score || 0)}</div>
+                <div class="detail-row"><strong>Total risk</strong>${formatNumber.format(selected.total_score || 0)}</div>
+                <div class="detail-row"><strong>Maintainability risk</strong>${formatNumber.format(selected.maintainability_risk || 0)}</div>
+                <div class="detail-row"><strong>Change risk</strong>${formatNumber.format(selected.change_risk || 0)}</div>
+                <div class="detail-row"><strong>Performance risk</strong>${formatNumber.format(selected.performance_risk || 0)}</div>
+                <div class="detail-row"><strong>Architectural risk</strong>${formatNumber.format(selected.architectural_risk || 0)}</div>
                 <div class="detail-row"><strong>Lines of code</strong>${formatNumber.format(selected.sloc || 0)}</div>
-                <div class="detail-row"><strong>Signals</strong>${renderPills(selected.signals)}</div>
+                <div class="detail-row"><strong>Maintainability signals</strong>${renderPills(categorySignals.maintainability || [])}</div>
+                <div class="detail-row"><strong>Change signals</strong>${renderPills(categorySignals.change || [])}</div>
+                <div class="detail-row"><strong>Performance signals</strong>${renderPills(categorySignals.performance || [])}</div>
+                <div class="detail-row"><strong>Architectural signals</strong>${renderPills(categorySignals.architectural || [])}</div>
+                <div class="detail-row"><strong>Public API</strong>${formatNumber.format(evidence.public_api_count || 0)}</div>
+                <div class="detail-row"><strong>Commits / churn</strong>${formatNumber.format(evidence.commit_count || 0)} / ${formatNumber.format(evidence.churn || 0)}</div>
+                <div class="detail-row"><strong>Contributors / defects</strong>${formatNumber.format(evidence.contributor_count || 0)} / ${formatNumber.format(evidence.defect_commits || 0)}</div>
+                <div class="detail-row"><strong>Tests</strong>${evidence.has_tests ? "evidence found" : "no direct evidence"}</div>
+                <div class="detail-row"><strong>Layer violations</strong>${formatNumber.format(evidence.layer_violations || 0)}</div>
+                <div class="detail-row"><strong>Cycle member</strong>${evidence.cycle_member ? "yes" : "no"}</div>
                 <div class="detail-row"><strong>Outbound dependencies</strong>${renderPills(outbound)}</div>
                 <div class="detail-row"><strong>Inbound dependencies</strong>${renderPills(inbound)}</div>
                 <div class="detail-row"><strong>Benchmarks</strong>${perf.length ? perf.map(renderBenchmark).join("") : '<span class="muted">-</span>'}</div>

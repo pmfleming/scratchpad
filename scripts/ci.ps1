@@ -10,6 +10,18 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
+function Invoke-NativeCommand {
+    param(
+        [string]$Label,
+        [scriptblock]$Command
+    )
+
+    & $Command
+    if ($LASTEXITCODE -ne 0) {
+        throw "'$Label' failed with exit code $LASTEXITCODE."
+    }
+}
+
 function Ensure-PythonTooling {
     param(
         [string]$RepoRoot,
@@ -21,7 +33,7 @@ function Ensure-PythonTooling {
 
     if (-not (Test-Path $python)) {
         Write-Host "Creating Python virtual environment..." -ForegroundColor Cyan
-        & python -m venv $venvDir
+        Invoke-NativeCommand -Label "python -m venv" -Command { & python -m venv $venvDir }
     }
 
     $pythonHealthy = $false
@@ -40,11 +52,8 @@ function Ensure-PythonTooling {
         if (Test-Path $venvDir) {
             Remove-Item -Recurse -Force -LiteralPath $venvDir
         }
-        & python -m venv $venvDir
-        & $python --version *> $null
-        if ($LASTEXITCODE -ne 0) {
-            throw "Python virtual environment at '$python' could not be created successfully."
-        }
+        Invoke-NativeCommand -Label "python -m venv" -Command { & python -m venv $venvDir }
+        Invoke-NativeCommand -Label "python --version" -Command { & $python --version *> $null }
     }
 
     return $python
@@ -53,12 +62,12 @@ function Ensure-PythonTooling {
 Push-Location $repoRoot
 try {
     if ($FixFormatting) {
-        cargo fmt
+        Invoke-NativeCommand -Label "cargo fmt" -Command { cargo fmt }
     }
 
-    cargo fmt --check
-    cargo clippy --all-targets --all-features -- -D warnings
-    cargo test
+    Invoke-NativeCommand -Label "cargo fmt --check" -Command { cargo fmt --check }
+    Invoke-NativeCommand -Label "cargo clippy" -Command { cargo clippy --all-targets --all-features -- -D warnings }
+    Invoke-NativeCommand -Label "cargo test" -Command { cargo test }
 
     $needsPythonTooling = (-not $SkipComplexity) -or (-not $SkipSlowspots) -or (-not $SkipClones)
     if ($needsPythonTooling) {
@@ -68,15 +77,21 @@ try {
     }
 
     if (-not $SkipComplexity) {
-        & $python (Join-Path $PSScriptRoot "hotspots.py") --paths src --scope all --output (Join-Path $analysisDir "hotspots.json")
+        Invoke-NativeCommand -Label "hotspots.py" -Command {
+            & $python (Join-Path $PSScriptRoot "hotspots.py") --paths src --scope all --output (Join-Path $analysisDir "hotspots.json")
+        }
     }
 
     if (-not $SkipSlowspots) {
-        & $python (Join-Path $PSScriptRoot "slowspots.py") --output (Join-Path $analysisDir "slowspots.json") --fail-on-slow
+        Invoke-NativeCommand -Label "slowspots.py" -Command {
+            & $python (Join-Path $PSScriptRoot "slowspots.py") --output (Join-Path $analysisDir "slowspots.json") --fail-on-slow
+        }
     }
 
     if (-not $SkipClones) {
-        & $python (Join-Path $PSScriptRoot "clone_alert.py") --paths src --output (Join-Path $analysisDir "clones.json")
+        Invoke-NativeCommand -Label "clone_alert.py" -Command {
+            & $python (Join-Path $PSScriptRoot "clone_alert.py") --paths src --output (Join-Path $analysisDir "clones.json")
+        }
     }
 }
 finally {

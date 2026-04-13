@@ -17,6 +17,7 @@ pub const LIGHT_EDITOR_TEXT_COLOR: &str = "#000000";
 pub const LIGHT_EDITOR_BACKGROUND_COLOR: &str = "#ffffff";
 pub const DEFAULT_TAB_LIST_WIDTH: f32 = 184.0;
 pub const DEFAULT_AUTO_HIDE_TAB_LIST: bool = false;
+pub const DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS: f32 = 3.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -95,6 +96,8 @@ pub struct AppSettings {
     pub tab_list_width: f32,
     #[serde(default = "default_auto_hide_tab_list")]
     pub auto_hide_tab_list: bool,
+    #[serde(default = "default_tab_list_auto_hide_delay_seconds")]
+    pub tab_list_auto_hide_delay_seconds: f32,
     #[serde(default)]
     pub settings_tab_open: bool,
     #[serde(default)]
@@ -115,6 +118,7 @@ impl Default for AppSettings {
             tab_list_position: TabListPosition::default(),
             tab_list_width: DEFAULT_TAB_LIST_WIDTH,
             auto_hide_tab_list: DEFAULT_AUTO_HIDE_TAB_LIST,
+            tab_list_auto_hide_delay_seconds: DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS,
             settings_tab_open: false,
             settings_tab_index: None,
         }
@@ -189,15 +193,16 @@ pub(crate) fn parse_toml_settings(raw: &str) -> io::Result<AppSettings> {
         ));
     };
 
+    migrate_auto_hide_fields(table);
+
+    value.try_into().map_err(invalid_data)
+}
+
+fn migrate_auto_hide_fields(table: &mut toml::map::Map<String, toml::Value>) {
     if !table.contains_key("auto_hide_tab_list") {
-        let auto_hide = table
-            .get("auto_hide_side_bars")
-            .and_then(toml::Value::as_bool)
-            .or_else(|| {
-                table
-                    .get("auto_hide_top_bars")
-                    .and_then(toml::Value::as_bool)
-            })
+        let auto_hide = ["auto_hide_side_bars", "auto_hide_top_bars"]
+            .into_iter()
+            .find_map(|key| table.get(key).and_then(toml::Value::as_bool))
             .unwrap_or(DEFAULT_AUTO_HIDE_TAB_LIST);
         table.insert(
             "auto_hide_tab_list".to_owned(),
@@ -207,8 +212,6 @@ pub(crate) fn parse_toml_settings(raw: &str) -> io::Result<AppSettings> {
 
     table.remove("auto_hide_side_bars");
     table.remove("auto_hide_top_bars");
-
-    value.try_into().map_err(invalid_data)
 }
 
 pub(crate) fn color_from_hex(hex: &str, fallback: egui::Color32) -> egui::Color32 {
@@ -251,6 +254,10 @@ fn default_auto_hide_tab_list() -> bool {
     DEFAULT_AUTO_HIDE_TAB_LIST
 }
 
+fn default_tab_list_auto_hide_delay_seconds() -> f32 {
+    DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS
+}
+
 fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let temp_path = path.with_extension(format!(
         "{}.write",
@@ -276,146 +283,4 @@ fn invalid_data(error: impl std::error::Error + Send + Sync + 'static) -> io::Er
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        AppSettings, AppThemeMode, DEFAULT_EDITOR_GUTTER, DEFAULT_TAB_LIST_WIDTH, SettingsStore,
-        TabListPosition,
-    };
-    use crate::app::fonts::EditorFontPreset;
-    use std::fs;
-
-    #[test]
-    fn missing_settings_file_returns_none() {
-        let root = tempfile::tempdir().expect("create settings dir");
-        let store = SettingsStore::new(root.path().to_path_buf());
-
-        assert_eq!(store.load().expect("load settings"), None);
-    }
-
-    #[test]
-    fn save_and_load_round_trip_toml_settings() {
-        let root = tempfile::tempdir().expect("create settings dir");
-        let store = SettingsStore::new(root.path().to_path_buf());
-        let settings = AppSettings {
-            font_size: 18.0,
-            word_wrap: false,
-            logging_enabled: false,
-            editor_gutter: 6,
-            editor_font: EditorFontPreset::Roboto,
-            theme_mode: AppThemeMode::Light,
-            editor_text_color: "#111111".to_owned(),
-            editor_background_color: "#eeeeee".to_owned(),
-            tab_list_position: TabListPosition::Right,
-            tab_list_width: 220.0,
-            auto_hide_tab_list: true,
-            settings_tab_open: true,
-            settings_tab_index: Some(2),
-        };
-
-        store.save(&settings).expect("save settings");
-        let loaded = store.load().expect("load settings");
-
-        assert_eq!(loaded, Some(settings));
-        assert_eq!(
-            store.path().file_name().and_then(|name| name.to_str()),
-            Some("settings.toml")
-        );
-    }
-
-    #[test]
-    fn malformed_toml_returns_invalid_data_error() {
-        let root = tempfile::tempdir().expect("create settings dir");
-        let store = SettingsStore::new(root.path().to_path_buf());
-        fs::write(store.path(), "font_size = [oops").expect("write invalid toml");
-
-        let error = store.load().expect_err("load should fail");
-        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
-    }
-
-    #[test]
-    fn missing_editor_font_field_defaults_for_older_toml() {
-        let root = tempfile::tempdir().expect("create settings dir");
-        let store = SettingsStore::new(root.path().to_path_buf());
-        fs::write(
-            store.path(),
-            "font_size = 16.0\nword_wrap = false\nlogging_enabled = true\n",
-        )
-        .expect("write legacy toml");
-
-        let loaded = store.load().expect("load settings");
-        assert_eq!(
-            loaded,
-            Some(AppSettings {
-                font_size: 16.0,
-                word_wrap: false,
-                logging_enabled: true,
-                editor_gutter: DEFAULT_EDITOR_GUTTER,
-                editor_font: EditorFontPreset::SystemDefault,
-                settings_tab_open: false,
-                settings_tab_index: None,
-                ..AppSettings::default()
-            })
-        );
-    }
-
-    #[test]
-    fn missing_tab_list_position_defaults_for_older_toml() {
-        let root = tempfile::tempdir().expect("create settings dir");
-        let store = SettingsStore::new(root.path().to_path_buf());
-        fs::write(
-            store.path(),
-            "font_size = 16.0\nword_wrap = false\nlogging_enabled = true\n",
-        )
-        .expect("write legacy toml");
-
-        let loaded = store.load().expect("load settings").expect("settings");
-
-        assert_eq!(loaded.tab_list_position, TabListPosition::Top);
-        assert_eq!(loaded.tab_list_width, DEFAULT_TAB_LIST_WIDTH);
-    }
-
-    #[test]
-    fn legacy_auto_hide_fields_migrate_to_single_tab_list_setting() {
-        let root = tempfile::tempdir().expect("create settings dir");
-        let store = SettingsStore::new(root.path().to_path_buf());
-        fs::write(
-            store.path(),
-            "font_size = 16.0\nword_wrap = false\nlogging_enabled = true\nauto_hide_top_bars = true\n",
-        )
-        .expect("write legacy toml");
-
-        let loaded = store.load().expect("load settings").expect("settings");
-
-        assert!(loaded.auto_hide_tab_list);
-    }
-
-    #[test]
-    fn legacy_yaml_migrates_to_toml_when_toml_is_missing() {
-        let root = tempfile::tempdir().expect("create settings dir");
-        let store = SettingsStore::new(root.path().to_path_buf());
-        let legacy_path = root.path().join("settings.yaml");
-        fs::write(
-            &legacy_path,
-            "font_size: 16.0\nword_wrap: false\nlogging_enabled: true\n",
-        )
-        .expect("write legacy yaml");
-
-        let loaded = store.load().expect("load settings");
-
-        assert_eq!(
-            loaded,
-            Some(AppSettings {
-                font_size: 16.0,
-                word_wrap: false,
-                logging_enabled: true,
-                editor_gutter: DEFAULT_EDITOR_GUTTER,
-                editor_font: EditorFontPreset::SystemDefault,
-                settings_tab_open: false,
-                settings_tab_index: None,
-                ..AppSettings::default()
-            })
-        );
-        assert!(store.path().exists());
-        assert!(legacy_path.exists());
-    }
-}
+mod tests;

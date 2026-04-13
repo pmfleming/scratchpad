@@ -1,5 +1,46 @@
 use crate::app::app_state::ScratchpadApp;
+use crate::app::services::settings_store::TabListPosition;
 use crate::app::theme::*;
+use eframe::egui::{self, Stroke};
+use std::time::Instant;
+
+const VERTICAL_TAB_LIST_PADDING: f32 = 8.0;
+pub(crate) const AUTO_HIDE_PEEK_SIZE: f32 = 6.0;
+const AUTO_HIDE_REVEAL_MARGIN: f32 = 12.0;
+
+fn auto_hide_visible(
+    app: &mut ScratchpadApp,
+    ctx: &egui::Context,
+    has_context: bool,
+    now: Instant,
+) -> bool {
+    if !app.auto_hide_tab_list() {
+        return true;
+    }
+
+    if has_context {
+        app.keep_tab_list_open();
+        return true;
+    }
+
+    if let Some(deadline) = app.vertical_tab_list_hide_deadline {
+        if deadline > now {
+            ctx.request_repaint_after(deadline.saturating_duration_since(now));
+            return true;
+        }
+
+        app.close_tab_list();
+        return false;
+    }
+
+    if app.vertical_tab_list_open {
+        app.delay_tab_list_hide(now);
+        ctx.request_repaint_after(app.tab_list_auto_hide_delay());
+        return true;
+    }
+
+    false
+}
 
 pub(crate) struct HeaderLayout {
     pub spacing: f32,
@@ -71,3 +112,139 @@ impl HeaderLayout {
         }
     }
 }
+
+fn pointer_near_horizontal_bar(ui: &egui::Ui, position: TabListPosition) -> bool {
+    ui.input(|input| {
+        input.pointer.hover_pos().is_some_and(|pos| match position {
+            TabListPosition::Top => {
+                pos.y <= ui.max_rect().top() + HEADER_HEIGHT + AUTO_HIDE_REVEAL_MARGIN
+            }
+            TabListPosition::Bottom => {
+                pos.y >= ui.max_rect().bottom() - HEADER_HEIGHT - AUTO_HIDE_REVEAL_MARGIN
+            }
+            TabListPosition::Left | TabListPosition::Right => false,
+        })
+    })
+}
+
+pub(crate) fn horizontal_bar_visible(
+    ui: &egui::Ui,
+    app: &mut ScratchpadApp,
+    position: TabListPosition,
+    now: Instant,
+) -> bool {
+    auto_hide_visible(app, ui.ctx(), pointer_near_horizontal_bar(ui, position), now)
+}
+
+pub(crate) fn auto_hide_panel_extent(visible: bool, expanded_size: f32) -> f32 {
+    if visible {
+        expanded_size
+    } else {
+        AUTO_HIDE_PEEK_SIZE
+    }
+}
+
+pub(crate) fn horizontal_tab_list_frame(ui: &egui::Ui) -> egui::Frame {
+    egui::Frame::NONE
+        .fill(header_bg(ui))
+        .stroke(Stroke::new(1.0, border(ui)))
+        .inner_margin(egui::Margin {
+            left: HEADER_LEFT_PADDING as i8,
+            right: HEADER_RIGHT_PADDING as i8,
+            top: HEADER_VERTICAL_PADDING as i8,
+            bottom: HEADER_VERTICAL_PADDING as i8,
+        })
+}
+
+pub(crate) fn show_horizontal_tab_panel(
+    ui: &mut egui::Ui,
+    position: TabListPosition,
+    panel_id: &'static str,
+    bar_visible: bool,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    let panel = match position {
+        TabListPosition::Top => egui::Panel::top(panel_id),
+        TabListPosition::Bottom => egui::Panel::bottom(panel_id),
+        TabListPosition::Left | TabListPosition::Right => {
+            unreachable!("horizontal tab panel only supports top/bottom")
+        }
+    };
+
+    panel
+        .exact_size(auto_hide_panel_extent(bar_visible, HEADER_HEIGHT))
+        .frame(horizontal_tab_list_frame(ui))
+        .show_inside(ui, |ui| {
+            if !bar_visible {
+                return;
+            }
+            add_contents(ui);
+        });
+}
+
+pub(crate) fn show_horizontal_edge_tab_list(
+    ui: &mut egui::Ui,
+    position: TabListPosition,
+    panel_id: &'static str,
+    selected: bool,
+    bar_visible: bool,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    if !selected {
+        return;
+    }
+
+    show_horizontal_tab_panel(ui, position, panel_id, bar_visible, add_contents);
+}
+
+pub(crate) fn vertical_tab_list_frame(ui: &egui::Ui) -> egui::Frame {
+    egui::Frame::NONE
+        .fill(header_bg(ui))
+        .stroke(Stroke::new(1.0, border(ui)))
+        .inner_margin(egui::Margin::same(VERTICAL_TAB_LIST_PADDING as i8))
+}
+
+fn pointer_near_vertical_bar(
+    ui: &egui::Ui,
+    expanded_width: f32,
+    side: TabListPosition,
+) -> bool {
+    ui.input(|input| {
+        input.pointer.hover_pos().is_some_and(|pos| match side {
+            TabListPosition::Left => {
+                pos.x <= ui.max_rect().left() + expanded_width + AUTO_HIDE_REVEAL_MARGIN
+            }
+            TabListPosition::Right => {
+                pos.x >= ui.max_rect().right() - expanded_width - AUTO_HIDE_REVEAL_MARGIN
+            }
+            TabListPosition::Top | TabListPosition::Bottom => false,
+        })
+    })
+}
+
+pub(crate) fn vertical_panel_visible(
+    ui: &egui::Ui,
+    app: &mut ScratchpadApp,
+    side: TabListPosition,
+    now: Instant,
+) -> bool {
+    auto_hide_visible(
+        app,
+        ui.ctx(),
+        pointer_near_vertical_bar(ui, app.vertical_tab_list_width(), side),
+        now,
+    )
+}
+
+pub(crate) fn vertical_tab_panel(side: TabListPosition, visible: bool) -> egui::Panel {
+    match (side, visible) {
+        (TabListPosition::Left, true) => egui::Panel::left("vertical_tab_list_left"),
+        (TabListPosition::Left, false) => egui::Panel::left("vertical_tab_list_left_peek"),
+        (TabListPosition::Right, true) => egui::Panel::right("vertical_tab_list_right"),
+        (TabListPosition::Right, false) => egui::Panel::right("vertical_tab_list_right_peek"),
+        (TabListPosition::Top, _) | (TabListPosition::Bottom, _) => {
+            unreachable!("vertical tab panel only supports left/right")
+        }
+    }
+}
+
