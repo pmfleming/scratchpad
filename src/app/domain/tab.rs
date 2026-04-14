@@ -5,6 +5,7 @@ mod layout;
 mod promotion;
 mod repair;
 
+#[derive(Clone)]
 pub struct WorkspaceTab {
     pub buffer: BufferState,
     pub extra_buffers: Vec<BufferState>,
@@ -99,17 +100,17 @@ impl WorkspaceTab {
     }
 
     pub fn buffer_by_id(&self, buffer_id: BufferId) -> Option<&BufferState> {
-        if self.buffer.id == buffer_id {
-            Some(&self.buffer)
-        } else {
-            self.extra_buffers
-                .iter()
-                .find(|buffer| buffer.id == buffer_id)
-        }
+        self.buffer_matches_id(buffer_id)
+            .then_some(&self.buffer)
+            .or_else(|| {
+                self.extra_buffers
+                    .iter()
+                    .find(|buffer| buffer.id == buffer_id)
+            })
     }
 
     pub fn buffer_by_id_mut(&mut self, buffer_id: BufferId) -> Option<&mut BufferState> {
-        if self.buffer.id == buffer_id {
+        if self.buffer_matches_id(buffer_id) {
             Some(&mut self.buffer)
         } else {
             self.extra_buffers
@@ -140,9 +141,7 @@ impl WorkspaceTab {
         if buffer.id == buffer_id {
             Some((buffer, view))
         } else {
-            let buffer_index = extra_buffers
-                .iter()
-                .position(|candidate| candidate.id == buffer_id)?;
+            let buffer_index = Self::extra_buffer_index(extra_buffers, buffer_id)?;
             Some((&mut extra_buffers[buffer_index], view))
         }
     }
@@ -160,7 +159,7 @@ impl WorkspaceTab {
     }
 
     pub fn activate_view(&mut self, view_id: ViewId) -> bool {
-        if self.view(view_id).is_none() {
+        if !self.root_pane.contains_view(view_id) {
             return false;
         }
 
@@ -228,8 +227,7 @@ impl WorkspaceTab {
     }
 
     fn push_buffer_if_missing(&mut self, buffer: BufferState) {
-        if self.buffer.id == buffer.id || self.extra_buffers.iter().any(|item| item.id == buffer.id)
-        {
+        if self.buffer_by_id(buffer.id).is_some() {
             return;
         }
 
@@ -253,10 +251,7 @@ impl WorkspaceTab {
             return true;
         }
 
-        let Some(buffer_index) = self
-            .extra_buffers
-            .iter()
-            .position(|buffer| buffer.id == active_buffer_id)
+        let Some(buffer_index) = Self::extra_buffer_index(&self.extra_buffers, active_buffer_id)
         else {
             return false;
         };
@@ -294,5 +289,15 @@ impl WorkspaceTab {
             .iter()
             .find(|view| view.id == active_view_id)
             .map(|view| view.buffer_id)
+    }
+
+    fn buffer_matches_id(&self, buffer_id: BufferId) -> bool {
+        self.buffer.id == buffer_id
+    }
+
+    fn extra_buffer_index(extra_buffers: &[BufferState], buffer_id: BufferId) -> Option<usize> {
+        extra_buffers
+            .iter()
+            .position(|buffer| buffer.id == buffer_id)
     }
 }

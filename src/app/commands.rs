@@ -61,9 +61,10 @@ pub enum AppCommand {
 
 impl ScratchpadApp {
     fn active_buffer_name_or_missing(&self, index: usize) -> String {
-        self.tabs()
-            .get(index)
-            .map_or_else(|| "<missing>".to_owned(), |tab| tab.active_buffer().name.to_owned())
+        self.tabs().get(index).map_or_else(
+            || "<missing>".to_owned(),
+            |tab| tab.active_buffer().name.to_owned(),
+        )
     }
 
     fn activate_tab(&mut self, index: usize) {
@@ -109,12 +110,14 @@ impl ScratchpadApp {
 
         let index = self.active_tab_index();
         let tab_name = self.active_buffer_name_or_missing(index);
+        let snapshot = self.capture_transaction_snapshot();
         if let Some(tab) = self.tabs_mut().get_mut(index)
             && tab.close_view(view_id)
         {
             let next_active_view = tab.active_view_id;
             let remaining_views = tab.views.len();
             self.request_focus_for_view(next_active_view);
+            self.record_transaction("Close view", vec![tab_name.clone()], None, snapshot);
             self.mark_session_dirty();
             self.log_event(
                 LogLevel::Info,
@@ -138,9 +141,16 @@ impl ScratchpadApp {
 
     fn reorder_tab_command(&mut self, from_index: usize, to_index: usize) {
         let moved_tab_description = self.describe_tab_at(from_index);
+        let snapshot = self.capture_transaction_snapshot();
         if !self.tab_manager_mut().reorder_tab(from_index, to_index) {
             return;
         }
+        self.record_transaction(
+            "Reorder tab",
+            vec![moved_tab_description.clone()],
+            None,
+            snapshot,
+        );
         self.log_event(
             LogLevel::Info,
             format!(
@@ -170,9 +180,11 @@ impl ScratchpadApp {
         let index = self.active_tab_index();
         let tab_name = self.active_buffer_name_or_missing(index);
         let path_description = format!("{:?}", path);
+        let snapshot = self.capture_transaction_snapshot();
         if let Some(tab) = self.tabs_mut().get_mut(index)
             && tab.resize_split(path, ratio)
         {
+            self.record_transaction("Resize split", vec![tab_name.clone()], None, snapshot);
             self.mark_session_dirty();
             self.log_event(
                 LogLevel::Info,
@@ -187,6 +199,7 @@ impl ScratchpadApp {
     fn split_active_view_command(&mut self, axis: SplitAxis, new_view_first: bool, ratio: f32) {
         let index = self.active_tab_index();
         let tab_name = self.active_buffer_name_or_missing(index);
+        let snapshot = self.capture_transaction_snapshot();
         if let Some(tab) = self.tabs_mut().get_mut(index)
             && tab
                 .split_active_view_with_placement(axis, new_view_first, ratio)
@@ -195,6 +208,7 @@ impl ScratchpadApp {
             let new_active_view = tab.active_view_id;
             let total_views = tab.views.len();
             self.request_focus_for_view(new_active_view);
+            self.record_transaction("Split view", vec![tab_name.clone()], None, snapshot);
             self.mark_session_dirty();
             self.log_event(
                 LogLevel::Info,

@@ -102,9 +102,14 @@ impl ScratchpadApp {
         Some((buffer_id, SettingsTomlRefreshAction::ApplyBuffer(raw)))
     }
 
-    fn active_settings_file_buffer_snapshot(&self, index: usize) -> Option<(BufferId, String, bool)> {
+    fn active_settings_file_buffer_snapshot(
+        &self,
+        index: usize,
+    ) -> Option<(BufferId, String, bool)> {
         let buffer = self.tabs().get(index)?.active_buffer();
-        buffer.is_settings_file.then(|| settings_buffer_snapshot(buffer))
+        buffer
+            .is_settings_file
+            .then(|| settings_buffer_snapshot(buffer))
     }
 
     fn settings_file_buffer_snapshot(&self, index: usize) -> Option<(BufferId, String, bool)> {
@@ -116,5 +121,5 @@ impl ScratchpadApp {
 }
 
 fn settings_buffer_snapshot(buffer: &BufferState) -> (BufferId, String, bool) {
-    (buffer.id, buffer.content.clone(), buffer.is_dirty)
+    (buffer.id, buffer.text().to_owned(), buffer.is_dirty)
 }

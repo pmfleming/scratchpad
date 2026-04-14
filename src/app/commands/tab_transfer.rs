@@ -9,10 +9,16 @@ struct TabCombineContext {
 }
 
 impl ScratchpadApp {
-    pub(super) fn combine_tab_into_tab_command(&mut self, source_index: usize, target_index: usize) {
+    pub(super) fn combine_tab_into_tab_command(
+        &mut self,
+        source_index: usize,
+        target_index: usize,
+    ) {
         if !Self::can_combine_tabs(self.tabs().len(), source_index, target_index) {
             return;
         }
+
+        let snapshot = self.capture_transaction_snapshot();
 
         if source_index == self.active_tab_index() || target_index == self.active_tab_index() {
             self.reload_settings_before_workspace_change();
@@ -29,10 +35,20 @@ impl ScratchpadApp {
         }
 
         self.finish_combined_tab(source_index, target_index, context);
+        self.record_transaction(
+            "Combine tab",
+            vec![
+                format!("source {}", source_index + 1),
+                format!("target {}", target_index + 1),
+            ],
+            None,
+            snapshot,
+        );
     }
 
     pub(super) fn promote_view_to_tab_command(&mut self, view_id: ViewId) {
         self.reload_settings_before_workspace_change();
+        let snapshot = self.capture_transaction_snapshot();
 
         let source_index = self.active_tab_index();
         let source_description = self.describe_tab_at(source_index);
@@ -46,6 +62,12 @@ impl ScratchpadApp {
 
         let promoted_description = promoted_tab.describe();
         self.append_tab(promoted_tab);
+        self.record_transaction(
+            "Promote view to tab",
+            vec![promoted_description.clone()],
+            None,
+            snapshot,
+        );
         let promoted_index = self.active_tab_index();
         self.log_event(
             LogLevel::Info,
@@ -60,6 +82,8 @@ impl ScratchpadApp {
         if index >= self.tabs().len() {
             return;
         }
+
+        let snapshot = self.capture_transaction_snapshot();
 
         if index == self.active_tab_index() {
             self.reload_settings_before_workspace_change();
@@ -97,6 +121,12 @@ impl ScratchpadApp {
         self.tab_manager_mut().pending_scroll_to_active = true;
         self.request_focus_for_active_view();
         self.mark_session_dirty();
+        self.record_transaction(
+            "Promote files to tabs",
+            vec![source_description.clone()],
+            None,
+            snapshot,
+        );
         self.log_event(
             LogLevel::Info,
             format!(
@@ -148,7 +178,9 @@ impl ScratchpadApp {
             .is_some_and(|target_tab| {
                 target_tab
                     .combine_with_tab(
-                        source_tab.take().expect("source tab removed before combine"),
+                        source_tab
+                            .take()
+                            .expect("source tab removed before combine"),
                         SplitAxis::Vertical,
                         false,
                         0.5,
@@ -159,7 +191,9 @@ impl ScratchpadApp {
 
     fn rollback_combined_tab(&mut self, source_index: usize, source_tab: WorkspaceTab) {
         let reinsertion_index = source_index.min(self.tabs().len());
-        self.tab_manager_mut().tabs.insert(reinsertion_index, source_tab);
+        self.tab_manager_mut()
+            .tabs
+            .insert(reinsertion_index, source_tab);
     }
 
     fn finish_combined_tab(

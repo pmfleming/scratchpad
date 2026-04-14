@@ -118,9 +118,8 @@ fn opens_configurable_number_of_tabs_defaulting_to_1000() {
 
     for &index in &indices[..tabs_to_populate] {
         let content = fixture_document_for_tab(index, rng.random_range(16..=96));
-        app.tabs_mut()[index].buffer.content = content;
+        app.tabs_mut()[index].buffer.replace_text(content);
         app.tabs_mut()[index].buffer.is_dirty = true;
-        app.tabs_mut()[index].buffer.refresh_text_metadata();
     }
 
     for _ in 0..20 {
@@ -220,7 +219,7 @@ fn opens_configurable_number_of_tabs_defaulting_to_1000() {
     let populated_count = restored
         .tabs
         .iter()
-        .filter(|t| !t.buffer.content.is_empty())
+        .filter(|t| !t.buffer.text().is_empty())
         .count();
     assert!(populated_count >= 1);
 
@@ -292,7 +291,7 @@ fn startup_loads_toml_settings_before_session_restore() {
             word_wrap: false,
             logging_enabled: false,
             editor_gutter: 0,
-            editor_font: EditorFontPreset::Roboto,
+            editor_font: EditorFontPreset::Standard,
             settings_tab_open: false,
             settings_tab_index: None,
             ..AppSettings::default()
@@ -311,7 +310,7 @@ fn startup_loads_toml_settings_before_session_restore() {
     assert_eq!(app.font_size(), 19.0);
     assert!(!app.word_wrap());
     assert!(!app.logging_enabled());
-    assert_eq!(app.editor_font(), EditorFontPreset::Roboto);
+    assert_eq!(app.editor_font(), EditorFontPreset::Standard);
 }
 
 #[test]
@@ -354,7 +353,7 @@ fn startup_migrates_legacy_session_settings_when_toml_is_missing() {
             word_wrap: false,
             logging_enabled: false,
             editor_gutter: 0,
-            editor_font: EditorFontPreset::SystemDefault,
+            editor_font: EditorFontPreset::Standard,
             settings_tab_open: false,
             settings_tab_index: None,
             ..AppSettings::default()

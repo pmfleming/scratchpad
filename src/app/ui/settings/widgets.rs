@@ -61,13 +61,17 @@ pub(super) fn toggle_card(
 }
 
 pub(super) fn toggle_control(ui: &mut egui::Ui, value: &mut bool) {
-    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-        let response = toggle_switch(ui, value);
-        ui.add_space(12.0);
-        ui.label(egui::RichText::new(if *value { "On" } else { "Off" }).color(text_primary(ui)));
-        if response.changed() {
-            ui.ctx().request_repaint();
-        }
+    fixed_width_control(ui, |ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                egui::RichText::new(if *value { "On" } else { "Off" }).color(text_primary(ui)),
+            );
+            ui.add_space(12.0);
+            let response = toggle_switch(ui, value);
+            if response.changed() {
+                ui.ctx().request_repaint();
+            }
+        });
     });
 }
 
@@ -173,10 +177,7 @@ pub(super) fn inner_select_row(
     });
 }
 
-pub(super) fn fixed_width_control(
-    ui: &mut egui::Ui,
-    add_control: impl FnOnce(&mut egui::Ui),
-) {
+pub(super) fn fixed_width_control(ui: &mut egui::Ui, add_control: impl FnOnce(&mut egui::Ui)) {
     ui.allocate_ui(egui::vec2(SettingsUi::CONTROLS.width, 0.0), |ui| {
         ui.set_width(SettingsUi::CONTROLS.width);
         ui.set_max_width(SettingsUi::CONTROLS.width);
@@ -194,11 +195,7 @@ pub(super) fn inner_divider(ui: &mut egui::Ui) {
     });
 }
 
-pub(super) fn radio_option_row(
-    ui: &mut egui::Ui,
-    value: &mut bool,
-    label: &str,
-) -> egui::Response {
+pub(super) fn radio_option_row(ui: &mut egui::Ui, value: &mut bool, label: &str) -> egui::Response {
     ui.add_space(2.0);
     ui.add(egui::RadioButton::new(*value, label))
 }
@@ -359,16 +356,13 @@ fn info_chip(ui: &mut egui::Ui, text: &str) {
         .corner_radius(egui::CornerRadius::same(127))
         .inner_margin(SettingsUi::MARGINS.info_chip_inner)
         .show(ui, |ui| {
-            ui.with_layout(
-                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                |ui| {
-                    ui.label(
-                        egui::RichText::new(text)
-                            .size(SettingsUi::TYPOGRAPHY.description)
-                            .color(text_muted(ui)),
-                    );
-                },
-            );
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.label(
+                    egui::RichText::new(text)
+                        .size(SettingsUi::TYPOGRAPHY.description)
+                        .color(text_muted(ui)),
+                );
+            });
         });
 }
 

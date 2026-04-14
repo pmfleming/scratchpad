@@ -9,6 +9,7 @@ pub(super) struct SettingsTypography {
 
 pub(super) struct SettingsLayout {
     pub page_max_width: f32,
+    pub card_max_width: f32,
     pub preview_max_width: f32,
     pub card_radius: u8,
     pub card_min_height: f32,
@@ -44,6 +45,7 @@ impl SettingsUi {
     };
     pub(super) const LAYOUT: SettingsLayout = SettingsLayout {
         page_max_width: 980.0,
+        card_max_width: 760.0,
         preview_max_width: 420.0,
         card_radius: 10,
         card_min_height: 72.0,
@@ -95,15 +97,18 @@ impl SettingsUi {
     pub(super) fn apply_typography(ui: &mut egui::Ui) {
         let style = ui.style_mut();
         style.override_font_id = Some(egui::FontId::proportional(Self::TYPOGRAPHY.body));
-        style
-            .text_styles
-            .insert(egui::TextStyle::Body, egui::FontId::proportional(Self::TYPOGRAPHY.body));
-        style
-            .text_styles
-            .insert(egui::TextStyle::Button, egui::FontId::proportional(Self::TYPOGRAPHY.body));
-        style
-            .text_styles
-            .insert(egui::TextStyle::Small, egui::FontId::proportional(Self::TYPOGRAPHY.body));
+        style.text_styles.insert(
+            egui::TextStyle::Body,
+            egui::FontId::proportional(Self::TYPOGRAPHY.body),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Button,
+            egui::FontId::proportional(Self::TYPOGRAPHY.body),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Small,
+            egui::FontId::proportional(Self::TYPOGRAPHY.body),
+        );
     }
 
     pub(super) fn page_content_width(ui: &egui::Ui) -> f32 {
@@ -111,7 +116,7 @@ impl SettingsUi {
     }
 
     pub(super) fn card_width(ui: &egui::Ui) -> f32 {
-        ui.available_width()
+        ui.available_width().min(Self::LAYOUT.card_max_width)
     }
 
     pub(super) fn preview_width(ui: &egui::Ui) -> f32 {

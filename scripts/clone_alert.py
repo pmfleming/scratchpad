@@ -250,6 +250,9 @@ class CloneAnalyzer:
         return self._rank(groups)
 
     def find_ast_clones(self, paths: Sequence[str]) -> List[CloneGroup]:
+        import tempfile
+        import os
+
         all_files = [str(path) for path in self._iter_rust_files(paths)]
         if not all_files:
             return []
@@ -257,7 +260,12 @@ class CloneAnalyzer:
             print("Warning: cargo not found; skipping AST clone analysis.", file=sys.stderr)
             return []
 
-        cmd = ["cargo", "run", "--quiet", "--bin", "ast_hasher", "--", *all_files]
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8') as f:
+            for file_path in all_files:
+                f.write(f"{file_path}\n")
+            temp_path = f.name
+
+        cmd = ["cargo", "run", "--quiet", "--bin", "ast_hasher", "--", temp_path]
         try:
             result = subprocess.run(
                 cmd,
@@ -268,6 +276,11 @@ class CloneAnalyzer:
         except Exception as exc:
             print(f"Warning: AST clone analysis failed: {exc}", file=sys.stderr)
             return []
+        finally:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
         try:
             records = json.loads(result.stdout)

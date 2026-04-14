@@ -2,7 +2,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$python = Join-Path $repoRoot ".venv\Scripts\python.exe"
+if ($IsWindows) {
+    $python = Join-Path $repoRoot ".venv\Scripts\python.exe"
+} else {
+    $python = Join-Path $repoRoot ".venv/bin/python"
+}
 
 function Ensure-Python {
     $venvDir = Join-Path $repoRoot ".venv"

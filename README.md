@@ -1,35 +1,28 @@
 # Scratchpad
 
-Scratchpad is a Windows-focused Rust text editor built with `egui` / `eframe`, with custom chrome, shared tabs, multi-pane workspaces, encoding-aware IO, TOML settings, and session restore.
+Scratchpad is a Windows-focused Rust text editor built with `egui` / `eframe`, with custom chrome, shared tab/workspace state, tiled editor layouts, encoding-aware file handling, TOML settings, transaction history, and session restore.
 
 ## Features
 
-- Shared tab order across strip, overflow, Settings, and drag/drop
-- Multi-pane, multi-buffer workspace tabs with Open Here, tile promotion, workspace promotion, and drag-to-combine
-- Native open/save/save-as dialogs, dirty confirmation, duplicate-path checks, encoding detection, BOM preservation
-- Artifact-heavy file detection with cleaned and visible inspection modes
-- Status bar with path, line count, encoding, artifact state, and logging
-- Session persistence for tabs, pane layout, and view metadata
-- TOML settings for font size, wrap, logging, and editor font
+- Shared tab order across the tab strip, overflow list, Settings surface, and drag/drop flows
+- Multi-pane workspace tabs with split creation, split resizing, Open Here, tile promotion, and tab combining
+- Native open/save/save-as flows with dirty confirmation, duplicate-path checks, encoding detection, and BOM preservation
+- Artifact-heavy text detection with cleaned and raw inspection modes
+- Document-local undo/redo plus a separate transaction log for text edits and workspace operations
+- Status bar with path, line count, encoding, artifact state, runtime logging, and transaction-log access
+- TOML-backed settings plus session persistence for tabs, views, pane layout, and metadata
 
 Gaps: search, context menus / command palette actions, and installer packaging.
 
-## Shortcuts
+## Docs
 
-- `Ctrl + N`: new tab
-- `Ctrl + O`: open file
-- `Ctrl + Shift + O`: open file here as tile(s)
-- `Ctrl + ,`: open settings
-- `Ctrl + S`: save active file
-- `Ctrl + W`: close active tab
-- `Ctrl + Shift + W`: close active tile
-- `Ctrl + Shift + Arrow`: split active tile
-- `Ctrl + +` / `Ctrl + =`, `Ctrl + -`, `Ctrl + Mouse Wheel`: zoom editor font
-- `Ctrl + 0`: toggle line numbers for the current workspace tab
+- [User manual](docs/user-manual.md)
+- [Measurement tools](docs/measurement-tools.md)
+- [Project plan](PLAN.md)
 
-## Build and Run
+## Build and Test
 
-Prerequisites: Rust via `rustup` on Windows.
+Prerequisites: Rust via `rustup` on Windows. Some optional analysis scripts also expect the local `.venv` Python environment.
 
 ```bash
 cargo run --release
@@ -40,53 +33,6 @@ powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1
 
 Release flow: push a tag like `v0.2.0` or run the `Release` workflow manually. GitHub Actions builds, checks, packages, and attaches the Windows `.zip` and checksum.
 
-## Measurement Tools
-
-- `scripts/hotspots.py`: complexity / maintainability JSON
-- `scripts/slowspots.py`: benchmark / performance JSON
-- `scripts/clone_alert.py`: token-based clone / duplication JSON
-- `scripts/map.py`: architecture JSON with hotspot and slowspot data
-
-All four scripts support `--mode cli`, `--mode analysis`, and `--mode visibility`.
-
-Example:
-
-```bash
-.venv\Scripts\python.exe scripts\hotspots.py --mode cli --paths src --scope all
-.venv\Scripts\python.exe scripts\clone_alert.py --mode cli --paths src
-.venv\Scripts\python.exe scripts\clone_alert.py --mode analysis --paths src --output target/analysis/clones.json
-.venv\Scripts\python.exe scripts\clone_alert.py --mode analysis --paths src --engine all --output target/analysis/clones.json
-.venv\Scripts\python.exe scripts\hotspots.py --mode visibility --paths src
-.venv\Scripts\python.exe scripts\slowspots.py --mode analysis --skip-bench --output target/analysis/slowspots.json
-.venv\Scripts\python.exe scripts\map.py --mode visibility
-.venv\Scripts\python.exe scripts\map.py --refresh --mode visibility
-```
-
-Open the static viewer:
-
-```bash
-.venv\Scripts\python.exe -m http.server 8000
-```
-
-Browse to `http://localhost:8000/viewer/`. It reads `target/analysis/` and supports file inputs.
-
-The overview launcher supports three modes:
-
-```bash
-powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1
-```
-Fast mode: opens the viewer using the existing JSON files in `target/analysis/`.
-
-```bash
-powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -Refresh
-```
-Refresh mode: rebuilds the standard analysis JSON files, then opens the viewer.
-
-```bash
-powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -CloneCheck
-```
-CloneCheck mode: rebuilds the JSON files and runs the extended clone check (`--engine all`) before opening the viewer.
-
 ## Project Structure
 
 ```text
@@ -95,7 +41,9 @@ src/
 ├── lib.rs
 └── app/
     ├── app_state.rs
+    ├── transactions.rs
     ├── chrome/
+    ├── startup/
     ├── commands.rs
     ├── domain/
     ├── services/
@@ -104,13 +52,20 @@ src/
 
 Key areas:
 
-- `src/app/domain/`: buffers, views, panes, tabs, tab manager
-- `src/app/services/`: file IO, session persistence, settings store
-- `src/app/ui/`: tab strip, overflow, drag helpers, editor area, dialogs, status bar
+- `src/app/app_state/`: settings state, display-tab ordering, startup state, and settings TOML refresh logic
+- `src/app/chrome/`: custom caption buttons, resize logic, and top-level chrome behavior
+- `src/app/commands/`: command dispatch and tab/view transfer operations
+- `src/app/domain/`: buffers, views, panes, tabs, layout/promotion helpers, and shared tab manager
+- `src/app/services/`: file IO, file controller flows, session persistence, settings persistence, and store helpers
+- `src/app/startup/`: CLI/startup parsing
+- `src/app/ui/`: dialogs, editor area/content, settings pages, status bar, tab strip, overflow, tile header, and tab drag state
+- `viewer/`: static analysis viewer
+- `tests/`: integration tests for app, buffers, files, session storage, startup, tab manager, and tab behavior
 
 ## Notes
 
 - Stack: Rust 2024, `eframe` / `egui`, `egui-phosphor`, `rfd`, `serde`, `encoding_rs`
 - Runtime logs go under `log/`.
 - Session state and `settings.toml` use the OS temp directory.
-- The current plan and project status are tracked in [PLAN.md](PLAN.md).
+- End-user usage details live in the [user manual](docs/user-manual.md).
+- Analysis workflow details live in [measurement-tools.md](docs/measurement-tools.md).

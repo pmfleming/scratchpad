@@ -3,8 +3,8 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
 
 pub(crate) fn apply_tab_outcome(app: &mut ScratchpadApp, outcome: TabStripOutcome) {
-    apply_workspace_slot_command(app, outcome.activated_tab, |index| AppCommand::ActivateTab {
-        index,
+    apply_workspace_slot_command(app, outcome.activated_tab, |index| {
+        AppCommand::ActivateTab { index }
     });
     if outcome.activate_settings {
         app.handle_command(AppCommand::OpenSettings);
@@ -17,11 +17,9 @@ pub(crate) fn apply_tab_outcome(app: &mut ScratchpadApp, outcome: TabStripOutcom
         app.handle_command(AppCommand::CloseSettings);
     }
 
-    apply_workspace_slot_command(
-        app,
-        outcome.promote_all_files_tab,
-        |index| AppCommand::PromoteTabFilesToTabs { index },
-    );
+    apply_workspace_slot_command(app, outcome.promote_all_files_tab, |index| {
+        AppCommand::PromoteTabFilesToTabs { index }
+    });
     apply_tab_reordering(app, &outcome);
     apply_tab_combining(app, &outcome);
     clear_consumed_scroll_request(app, &outcome);

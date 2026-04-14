@@ -8,6 +8,7 @@ pub mod services;
 pub mod shortcuts;
 pub mod startup;
 pub mod theme;
+pub mod transactions;
 pub mod ui;
 pub mod utils;
 

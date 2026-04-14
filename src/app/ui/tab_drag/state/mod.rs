@@ -31,7 +31,7 @@ pub(crate) struct TabRectEntry {
     pub(crate) combine_enabled: bool,
 }
 
-pub(crate) use autoscroll::{auto_scroll_delta, vertical_auto_scroll_delta};
+pub(crate) use autoscroll::auto_scroll_delta;
 pub(crate) use drag::{
     active_drag_source_for_context, begin_tab_drag_if_needed, has_tab_drag_for_context,
     is_drag_active_for_context,
@@ -46,7 +46,7 @@ pub(crate) use drop_target::{TabDropIntent, locate_drop_intent, resolve_drop_slo
 mod tests {
     use super::{
         TabDropAxis, TabDropIntent, TabDropZone, TabRectEntry, auto_scroll_delta,
-        locate_drop_intent, resolve_drop_slot, vertical_auto_scroll_delta,
+        locate_drop_intent, resolve_drop_slot,
     };
     use crate::app::ui::tab_drag::state::autoscroll::TAB_DRAG_AUTOSCROLL_MAX_STEP;
     use crate::app::ui::tab_drag::state::drop_target::tab_drop_slot;
@@ -179,21 +179,24 @@ mod tests {
     fn auto_scroll_delta_pushes_left_near_left_edge() {
         let viewport = Rect::from_min_size(pos2(40.0, 10.0), vec2(240.0, 30.0));
 
-        assert!(auto_scroll_delta(viewport, pos2(42.0, 24.0)) < 0.0);
+        assert!(auto_scroll_delta(viewport, pos2(42.0, 24.0), TabDropAxis::Horizontal) < 0.0);
     }
 
     #[test]
     fn auto_scroll_delta_pushes_right_near_right_edge() {
         let viewport = Rect::from_min_size(pos2(40.0, 10.0), vec2(240.0, 30.0));
 
-        assert!(auto_scroll_delta(viewport, pos2(278.0, 24.0)) > 0.0);
+        assert!(auto_scroll_delta(viewport, pos2(278.0, 24.0), TabDropAxis::Horizontal) > 0.0);
     }
 
     #[test]
     fn auto_scroll_delta_is_zero_outside_hot_zone() {
         let viewport = Rect::from_min_size(pos2(40.0, 10.0), vec2(240.0, 30.0));
 
-        assert_eq!(auto_scroll_delta(viewport, pos2(160.0, 24.0)), 0.0);
+        assert_eq!(
+            auto_scroll_delta(viewport, pos2(160.0, 24.0), TabDropAxis::Horizontal),
+            0.0
+        );
     }
 
     #[test]
@@ -201,11 +204,19 @@ mod tests {
         let viewport = Rect::from_min_size(pos2(40.0, 10.0), vec2(240.0, 30.0));
 
         assert_eq!(
-            auto_scroll_delta(viewport, pos2(viewport.left(), 24.0)),
+            auto_scroll_delta(
+                viewport,
+                pos2(viewport.left(), 24.0),
+                TabDropAxis::Horizontal
+            ),
             -TAB_DRAG_AUTOSCROLL_MAX_STEP
         );
         assert_eq!(
-            auto_scroll_delta(viewport, pos2(viewport.right(), 24.0)),
+            auto_scroll_delta(
+                viewport,
+                pos2(viewport.right(), 24.0),
+                TabDropAxis::Horizontal
+            ),
             TAB_DRAG_AUTOSCROLL_MAX_STEP
         );
     }
@@ -214,13 +225,13 @@ mod tests {
     fn vertical_auto_scroll_delta_pushes_up_near_top_edge() {
         let viewport = Rect::from_min_size(pos2(40.0, 10.0), vec2(140.0, 240.0));
 
-        assert!(vertical_auto_scroll_delta(viewport, pos2(70.0, 12.0)) < 0.0);
+        assert!(auto_scroll_delta(viewport, pos2(70.0, 12.0), TabDropAxis::Vertical) < 0.0);
     }
 
     #[test]
     fn vertical_auto_scroll_delta_pushes_down_near_bottom_edge() {
         let viewport = Rect::from_min_size(pos2(40.0, 10.0), vec2(140.0, 240.0));
 
-        assert!(vertical_auto_scroll_delta(viewport, pos2(70.0, 248.0)) > 0.0);
+        assert!(auto_scroll_delta(viewport, pos2(70.0, 248.0), TabDropAxis::Vertical) > 0.0);
     }
 }

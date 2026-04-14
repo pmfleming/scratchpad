@@ -1,4 +1,4 @@
-use crate::app::domain::{BufferState, EditorViewState, RenderedLayout};
+use crate::app::domain::{BufferState, EditorViewState, RenderedLayout, TextDocumentUndoer};
 use eframe::egui;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -35,6 +35,8 @@ struct TextEditOutcome {
     changed: bool,
     focused: bool,
     latest_layout: Option<RenderedLayout>,
+    cursor_range: Option<egui::text::CCursorRange>,
+    undoer: Option<TextDocumentUndoer>,
 }
 
 pub fn render_editor_text_edit(
@@ -43,15 +45,22 @@ pub fn render_editor_text_edit(
     view: &mut EditorViewState,
     options: TextEditOptions<'_>,
 ) -> (bool, bool) {
+    let line_count = buffer.line_count;
+    let undoer = buffer.document().undoer();
     let outcome = render_text_edit_widget(
         ui,
-        &mut buffer.content,
-        view.id,
-        buffer.line_count,
+        buffer.document_mut(),
+        view,
+        line_count,
         options,
         true,
+        Some(undoer),
     );
     view.latest_layout = outcome.latest_layout;
+    view.cursor_range = outcome.cursor_range;
+    if let Some(undoer) = outcome.undoer {
+        buffer.document_mut().set_undoer(undoer);
+    }
     (outcome.changed, outcome.focused)
 }
 
@@ -62,8 +71,9 @@ pub fn render_read_only_text_edit(
     desired_rows: usize,
     options: TextEditOptions<'_>,
 ) -> bool {
-    let outcome = render_text_edit_widget(ui, &mut text, view.id, desired_rows, options, false);
+    let outcome = render_text_edit_widget(ui, &mut text, view, desired_rows, options, false, None);
     view.latest_layout = outcome.latest_layout;
+    view.cursor_range = outcome.cursor_range;
     outcome.focused
 }
 
@@ -73,12 +83,16 @@ fn editor_widget_id(view_id: u64) -> egui::Id {
 
 fn render_text_edit_widget(
     ui: &mut egui::Ui,
-    text: &mut String,
-    view_id: u64,
+    text: &mut dyn egui::TextBuffer,
+    view: &mut EditorViewState,
     desired_rows: usize,
     options: TextEditOptions<'_>,
     interactive: bool,
+    undoer: Option<TextDocumentUndoer>,
 ) -> TextEditOutcome {
+    let view_id = view.id;
+    let widget_id = editor_widget_id(view_id);
+    sync_text_edit_state_before_render(ui.ctx(), widget_id, view, undoer);
     let (mut tracking_layouter, layout_capture) = tracked_layouter(
         options.editor_font_id.clone(),
         options.word_wrap,
@@ -109,7 +123,32 @@ fn render_text_edit_widget(
             .borrow_mut()
             .take()
             .map(RenderedLayout::from_galley),
+        cursor_range: output.cursor_range,
+        undoer: interactive.then(|| output.state.undoer()),
     }
+}
+
+fn sync_text_edit_state_before_render(
+    ctx: &egui::Context,
+    widget_id: egui::Id,
+    view: &mut EditorViewState,
+    undoer: Option<TextDocumentUndoer>,
+) {
+    let mut state = egui::TextEdit::load_state(ctx, widget_id).unwrap_or_default();
+    if let Some(undoer) = undoer {
+        state.set_undoer(undoer);
+    }
+    let should_restore_view_cursor = state.cursor.char_range().is_none();
+    if let Some(cursor_range) = view
+        .pending_cursor_range
+        .take()
+        .or(should_restore_view_cursor
+            .then_some(view.cursor_range)
+            .flatten())
+    {
+        state.cursor.set_char_range(Some(cursor_range));
+    }
+    egui::TextEdit::store_state(ctx, widget_id, state);
 }
 
 fn desired_text_width(ui: &egui::Ui, word_wrap: bool) -> f32 {
@@ -160,4 +199,59 @@ fn tracked_layouter(
     );
 
     (tracking_layouter, layout_capture)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sync_text_edit_state_before_render;
+    use crate::app::domain::EditorViewState;
+    use eframe::egui;
+
+    fn range(start: usize, end: usize) -> egui::text::CCursorRange {
+        egui::text::CCursorRange::two(
+            egui::text::CCursor::new(start),
+            egui::text::CCursor::new(end),
+        )
+    }
+
+    #[test]
+    fn existing_text_edit_state_is_not_overwritten_by_stored_view_cursor() {
+        let ctx = egui::Context::default();
+        let widget_id = egui::Id::new("selection-sync");
+        let live_selection = range(2, 6);
+        let stale_view_selection = range(2, 3);
+
+        let mut state = egui::widgets::text_edit::TextEditState::default();
+        state.cursor.set_char_range(Some(live_selection));
+        egui::TextEdit::store_state(&ctx, widget_id, state);
+
+        let mut view = EditorViewState::new(1, false);
+        view.cursor_range = Some(stale_view_selection);
+
+        sync_text_edit_state_before_render(&ctx, widget_id, &mut view, None);
+
+        let stored = egui::TextEdit::load_state(&ctx, widget_id).expect("text edit state");
+        assert_eq!(stored.cursor.char_range(), Some(live_selection));
+    }
+
+    #[test]
+    fn pending_cursor_range_overrides_existing_text_edit_state() {
+        let ctx = egui::Context::default();
+        let widget_id = egui::Id::new("pending-selection-sync");
+        let existing_selection = range(4, 8);
+        let requested_selection = range(10, 14);
+
+        let mut state = egui::widgets::text_edit::TextEditState::default();
+        state.cursor.set_char_range(Some(existing_selection));
+        egui::TextEdit::store_state(&ctx, widget_id, state);
+
+        let mut view = EditorViewState::new(2, false);
+        view.pending_cursor_range = Some(requested_selection);
+
+        sync_text_edit_state_before_render(&ctx, widget_id, &mut view, None);
+
+        let stored = egui::TextEdit::load_state(&ctx, widget_id).expect("text edit state");
+        assert_eq!(stored.cursor.char_range(), Some(requested_selection));
+        assert_eq!(view.pending_cursor_range, None);
+    }
 }

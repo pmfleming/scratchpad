@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
-use scratchpad::app::domain::{BufferState, RestoredBufferState};
+use eframe::egui::{TextBuffer, text::CCursorRange};
+use eframe::epaint::text::cursor::CCursor;
+use scratchpad::app::domain::{BufferState, RestoredBufferState, TextDocument};
 use std::path::PathBuf;
 
 #[test]
@@ -8,7 +10,7 @@ fn new_buffer_starts_clean() {
     let buffer = BufferState::new("Untitled".to_owned(), "hello".to_owned(), None);
 
     assert_eq!(buffer.name, "Untitled");
-    assert_eq!(buffer.content, "hello");
+    assert_eq!(buffer.text(), "hello");
     assert_eq!(buffer.path, None);
     assert!(!buffer.is_dirty);
     assert!(buffer.temp_id.starts_with("buffer-"));
@@ -91,4 +93,29 @@ fn overflow_context_uses_path_when_available() {
             .unwrap()
             .contains("notes.txt")
     );
+}
+
+#[test]
+fn text_document_supports_selection_cut_and_paste_operations() {
+    let mut document = TextDocument::new("hello world".to_owned());
+    let selection = CCursorRange::two(CCursor::new(6), CCursor::new(11));
+
+    assert_eq!(selection.slice_str(document.as_str()), "world");
+
+    let mut cursor = document.delete_selected(&selection);
+    assert_eq!(document.as_str(), "hello ");
+    assert_eq!(cursor.index, 6);
+
+    document.insert_text_at(&mut cursor, "there", usize::MAX);
+    assert_eq!(document.as_str(), "hello there");
+    assert_eq!(cursor.index, 11);
+}
+
+#[test]
+fn text_document_replace_with_handles_unicode_content() {
+    let mut document = TextDocument::new("a🙂b".to_owned());
+
+    TextBuffer::replace_with(&mut document, "x🌍y");
+
+    assert_eq!(document.as_str(), "x🌍y");
 }

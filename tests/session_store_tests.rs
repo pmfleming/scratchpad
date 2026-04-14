@@ -48,10 +48,10 @@ fn persists_and_restores_open_tabs() {
     assert_eq!(restored.legacy_settings.font_size, 18.0);
     assert!(!restored.legacy_settings.word_wrap);
     assert!(restored.legacy_settings.logging_enabled);
-    assert_eq!(restored.tabs[0].buffer.content, "alpha");
+    assert_eq!(restored.tabs[0].buffer.text(), "alpha");
     assert!(restored.tabs[0].buffer.is_dirty);
     assert_eq!(restored.tabs[0].buffer.encoding, "UTF-8");
-    assert_eq!(restored.tabs[1].buffer.content, "beta");
+    assert_eq!(restored.tabs[1].buffer.text(), "beta");
     assert_eq!(restored.tabs[0].views.len(), 1);
     assert!(matches!(restored.tabs[0].root_pane, PaneNode::Leaf { .. }));
 

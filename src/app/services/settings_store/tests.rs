@@ -21,11 +21,26 @@ fn legacy_defaults(font_size: f32, word_wrap: bool, logging_enabled: bool) -> Ap
         word_wrap,
         logging_enabled,
         editor_gutter: DEFAULT_EDITOR_GUTTER,
-        editor_font: EditorFontPreset::SystemDefault,
+        editor_font: EditorFontPreset::Standard,
         settings_tab_open: false,
         settings_tab_index: None,
         ..AppSettings::default()
     }
+}
+
+fn assert_current_defaults(settings: &AppSettings) {
+    assert_eq!(settings.tab_list_position, TabListPosition::Top);
+    assert_eq!(settings.file_open_disposition, FileOpenDisposition::NewTab);
+    assert_eq!(
+        settings.startup_session_behavior,
+        StartupSessionBehavior::ContinuePreviousSession
+    );
+    assert_eq!(settings.tab_list_width, DEFAULT_TAB_LIST_WIDTH);
+    assert_eq!(
+        settings.tab_list_auto_hide_delay_seconds,
+        DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS
+    );
+    assert!(settings.recent_files_enabled);
 }
 
 #[test]
@@ -43,7 +58,7 @@ fn save_and_load_round_trip_toml_settings() {
         word_wrap: false,
         logging_enabled: false,
         editor_gutter: 6,
-        editor_font: EditorFontPreset::Roboto,
+        editor_font: EditorFontPreset::Standard,
         theme_mode: AppThemeMode::Light,
         editor_text_color: "#111111".to_owned(),
         editor_background_color: "#eeeeee".to_owned(),
@@ -98,19 +113,7 @@ fn missing_tab_list_position_defaults_for_older_toml() {
     );
 
     let loaded = store.load().expect("load settings").expect("settings");
-
-    assert_eq!(loaded.tab_list_position, TabListPosition::Top);
-    assert_eq!(loaded.file_open_disposition, FileOpenDisposition::NewTab);
-    assert_eq!(
-        loaded.startup_session_behavior,
-        StartupSessionBehavior::ContinuePreviousSession
-    );
-    assert_eq!(loaded.tab_list_width, DEFAULT_TAB_LIST_WIDTH);
-    assert_eq!(
-        loaded.tab_list_auto_hide_delay_seconds,
-        DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS
-    );
-    assert!(loaded.recent_files_enabled);
+    assert_current_defaults(&loaded);
 }
 
 #[test]

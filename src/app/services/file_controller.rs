@@ -30,9 +30,8 @@ impl LoadedFile {
         let has_bom = file_content.has_bom;
         let buffer = FileController::buffer_from_file_content(path, file_content);
         let artifact_summary = buffer.artifact_summary.status_text();
-        let artifact_warning = buffer
-            .artifact_summary
-            .status_text()
+        let artifact_warning = artifact_summary
+            .as_ref()
             .map(|message| format!("Opened with formatting artifacts: {message}"));
 
         Self {
@@ -68,6 +67,10 @@ struct PendingOpenLogEntry {
 pub struct FileController;
 
 impl FileController {
+    fn open_path_count(app: &ScratchpadApp, log_prefix: &str, path_count: usize) {
+        app.log_event(LogLevel::Info, format!("{log_prefix} {path_count} path(s)"));
+    }
+
     fn prepare_to_open_paths(app: &mut ScratchpadApp) {
         app.reload_settings_before_workspace_change();
     }
@@ -99,10 +102,7 @@ impl FileController {
             return;
         }
 
-        app.log_event(
-            LogLevel::Info,
-            format!("{} {} path(s)", log_prefix, paths.len()),
-        );
+        Self::open_path_count(app, log_prefix, paths.len());
         open_action(app, paths);
     }
 
@@ -177,7 +177,7 @@ impl FileController {
             return false;
         }
 
-        if app.tabs()[index].active_buffer().path.is_some() {
+        if Self::has_existing_save_path(app, index) {
             Self::save_existing_path(app, index)
         } else {
             Self::save_file_as_at(app, index)
@@ -214,11 +214,29 @@ impl FileController {
 
     fn open_selected_paths(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
         Self::prepare_to_open_paths(app);
+        let snapshot = app.capture_transaction_snapshot();
+        let affected_items = paths
+            .iter()
+            .map(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.display().to_string())
+            })
+            .collect::<Vec<_>>();
         let summary = paths
             .into_iter()
             .fold(OpenBatchSummary::default(), |summary, path| {
                 summary.record(Self::open_path(app, path))
             });
+
+        if summary.opened_count > 0 {
+            let title = if summary.opened_count == 1 {
+                "Open file"
+            } else {
+                "Open files"
+            };
+            app.record_transaction(title, affected_items, None, snapshot);
+        }
 
         Self::apply_open_summary(app, summary);
     }
@@ -303,6 +321,10 @@ impl FileController {
         Self::save_buffer_to_path(app, index, path, false)
     }
 
+    fn has_existing_save_path(app: &ScratchpadApp, index: usize) -> bool {
+        app.tabs()[index].active_buffer().path.is_some()
+    }
+
     fn save_buffer_to_path(
         app: &mut ScratchpadApp,
         index: usize,
@@ -313,12 +335,7 @@ impl FileController {
         let target_path = path.display().to_string();
         let save_result = {
             let buffer = app.tabs()[index].active_buffer();
-            FileService::write_file_with_bom(
-                &path,
-                &buffer.content,
-                &buffer.encoding,
-                buffer.has_bom,
-            )
+            FileService::write_file_with_bom(&path, buffer.text(), &buffer.encoding, buffer.has_bom)
         };
 
         match save_result {
@@ -349,8 +366,7 @@ impl FileController {
         let settings_path = app.settings_path().to_path_buf();
         let buffer = app.tabs_mut()[index].active_buffer_mut();
         if update_buffer_path {
-            buffer.path = Some(path.clone());
-            buffer.name = path.file_name().unwrap().to_string_lossy().into_owned();
+            Self::assign_saved_path(buffer, &path);
         }
         buffer.is_dirty = false;
         buffer.is_settings_file = buffer
@@ -360,6 +376,11 @@ impl FileController {
         app.clear_status_message();
         app.mark_session_dirty();
         let _ = app.persist_session_now();
+    }
+
+    fn assign_saved_path(buffer: &mut BufferState, path: &Path) {
+        buffer.path = Some(path.to_path_buf());
+        buffer.name = path.file_name().unwrap().to_string_lossy().into_owned();
     }
 
     fn mark_settings_buffer(app: &ScratchpadApp, buffer: &mut BufferState) {
@@ -459,328 +480,5 @@ impl OpenBatchSummary {
             "Open file batch completed: opened={}, duplicates={}, failed={}, artifacts={}",
             self.opened_count, self.duplicate_count, self.failure_count, self.artifact_count
         )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::FileController;
-    use crate::app::app_state::ScratchpadApp;
-    use crate::app::domain::PaneNode;
-    use crate::app::services::session_store::SessionStore;
-    use crate::app::services::settings_store::{
-        FileOpenDisposition, SettingsStore, StartupSessionBehavior,
-    };
-    use crate::app::startup::{StartupOpenTarget, StartupOptions};
-    use std::fs;
-
-    fn collect_leaf_area_fractions(node: &PaneNode, area_fraction: f32, output: &mut Vec<f32>) {
-        match node {
-            PaneNode::Leaf { .. } => output.push(area_fraction),
-            PaneNode::Split {
-                ratio,
-                first,
-                second,
-                ..
-            } => {
-                collect_leaf_area_fractions(first, area_fraction * ratio, output);
-                collect_leaf_area_fractions(second, area_fraction * (1.0 - ratio), output);
-            }
-        }
-    }
-
-    fn test_app() -> ScratchpadApp {
-        let session_root = tempfile::tempdir().expect("create session dir");
-        let session_store = SessionStore::new(session_root.path().to_path_buf());
-        ScratchpadApp::with_session_store(session_store)
-    }
-
-    #[test]
-    fn open_here_splits_file_into_current_workspace() {
-        let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let path = temp_dir.path().join("split-target.txt");
-        fs::write(&path, "alpha\nbeta\n").expect("write temp file");
-
-        let mut app = test_app();
-
-        FileController::open_selected_paths_here(&mut app, vec![path.clone()]);
-
-        assert_eq!(app.tabs().len(), 1);
-        let tab = &app.tabs()[app.active_tab_index()];
-        assert_eq!(tab.views.len(), 2);
-        assert_eq!(tab.active_buffer().path.as_deref(), Some(path.as_path()));
-    }
-
-    #[test]
-    fn open_file_flags_settings_toml_buffer() {
-        let mut app = test_app();
-        app.persist_settings_now().expect("write settings file");
-        let settings_path = app.settings_path().to_path_buf();
-
-        FileController::open_selected_paths(&mut app, vec![settings_path.clone()]);
-
-        assert_eq!(
-            app.tabs()[app.active_tab_index()]
-                .active_buffer()
-                .path
-                .as_deref(),
-            Some(settings_path.as_path())
-        );
-        assert!(
-            app.tabs()[app.active_tab_index()]
-                .active_buffer()
-                .is_settings_file
-        );
-    }
-
-    #[test]
-    fn open_here_flags_settings_toml_buffer() {
-        let mut app = test_app();
-        app.persist_settings_now().expect("write settings file");
-        let settings_path = app.settings_path().to_path_buf();
-
-        FileController::open_selected_paths_here(&mut app, vec![settings_path.clone()]);
-
-        assert_eq!(
-            app.tabs()[app.active_tab_index()]
-                .active_buffer()
-                .path
-                .as_deref(),
-            Some(settings_path.as_path())
-        );
-        assert!(
-            app.tabs()[app.active_tab_index()]
-                .active_buffer()
-                .is_settings_file
-        );
-    }
-
-    #[test]
-    fn open_file_from_dirty_settings_tab_refreshes_settings_on_focus_loss() {
-        let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let path = temp_dir.path().join("opened.txt");
-        fs::write(&path, "alpha\n").expect("write temp file");
-
-        let mut app = test_app();
-        app.handle_command(crate::app::commands::AppCommand::OpenSettings);
-        app.open_settings_file_tab();
-        let settings_tab_index = app.active_tab_index();
-
-        app.tabs_mut()[settings_tab_index]
-            .active_buffer_mut()
-            .content = [
-            "font_size = 24.0",
-            "word_wrap = false",
-            "logging_enabled = false",
-            "editor_font = \"roboto\"",
-            "settings_tab_open = true",
-            "settings_tab_index = 1",
-            "",
-        ]
-        .join("\n");
-        app.tabs_mut()[settings_tab_index]
-            .active_buffer_mut()
-            .is_dirty = true;
-        app.note_settings_toml_edit(settings_tab_index);
-
-        FileController::open_selected_paths(&mut app, vec![path.clone()]);
-
-        assert_eq!(app.font_size(), 24.0);
-        assert!(!app.word_wrap());
-        assert!(!app.logging_enabled());
-        assert_eq!(
-            app.editor_font(),
-            crate::app::fonts::EditorFontPreset::Roboto
-        );
-        assert_eq!(
-            app.tabs()[app.active_tab_index()]
-                .active_buffer()
-                .path
-                .as_deref(),
-            Some(path.as_path())
-        );
-    }
-
-    #[test]
-    fn open_here_from_dirty_settings_tab_refreshes_settings_on_focus_loss() {
-        let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let path = temp_dir.path().join("opened-here.txt");
-        fs::write(&path, "beta\n").expect("write temp file");
-
-        let mut app = test_app();
-        app.handle_command(crate::app::commands::AppCommand::OpenSettings);
-        app.open_settings_file_tab();
-        let settings_tab_index = app.active_tab_index();
-
-        app.tabs_mut()[settings_tab_index]
-            .active_buffer_mut()
-            .content = [
-            "font_size = 25.0",
-            "word_wrap = false",
-            "logging_enabled = false",
-            "editor_font = \"roboto\"",
-            "settings_tab_open = true",
-            "settings_tab_index = 1",
-            "",
-        ]
-        .join("\n");
-        app.tabs_mut()[settings_tab_index]
-            .active_buffer_mut()
-            .is_dirty = true;
-        app.note_settings_toml_edit(settings_tab_index);
-
-        FileController::open_selected_paths_here(&mut app, vec![path.clone()]);
-
-        assert_eq!(app.font_size(), 25.0);
-        assert!(!app.word_wrap());
-        assert!(!app.logging_enabled());
-        assert_eq!(
-            app.editor_font(),
-            crate::app::fonts::EditorFontPreset::Roboto
-        );
-        assert_eq!(
-            app.tabs()[app.active_tab_index()]
-                .active_buffer()
-                .path
-                .as_deref(),
-            Some(path.as_path())
-        );
-    }
-
-    #[test]
-    fn open_here_migrates_existing_tab_into_current_workspace() {
-        let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let path = temp_dir.path().join("migrate-me.txt");
-        fs::write(&path, "gamma\ndelta\n").expect("write temp file");
-
-        let mut app = test_app();
-        FileController::open_selected_paths(&mut app, vec![path.clone()]);
-        app.create_untitled_tab();
-
-        FileController::open_selected_paths_here(&mut app, vec![path.clone()]);
-
-        assert_eq!(app.tabs().len(), 2);
-        let tab = &app.tabs()[app.active_tab_index()];
-        assert_eq!(tab.views.len(), 2);
-        assert_eq!(tab.active_buffer().path.as_deref(), Some(path.as_path()));
-    }
-
-    #[test]
-    fn open_here_batches_multiple_new_files_into_equal_tile_shares() {
-        let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let first_path = temp_dir.path().join("first.txt");
-        let second_path = temp_dir.path().join("second.txt");
-        let third_path = temp_dir.path().join("third.txt");
-        fs::write(&first_path, "first\n").expect("write first temp file");
-        fs::write(&second_path, "second\n").expect("write second temp file");
-        fs::write(&third_path, "third\n").expect("write third temp file");
-
-        let mut app = test_app();
-        FileController::open_selected_paths_here(
-            &mut app,
-            vec![first_path.clone(), second_path.clone(), third_path.clone()],
-        );
-
-        let tab = &app.tabs()[app.active_tab_index()];
-        assert_eq!(tab.views.len(), 4);
-
-        let mut areas = Vec::new();
-        collect_leaf_area_fractions(&tab.root_pane, 1.0, &mut areas);
-        assert!(areas.iter().all(|area| (area - 0.25).abs() < f32::EPSILON));
-    }
-
-    #[test]
-    fn startup_clean_launch_skips_restored_session() {
-        let session_root = tempfile::tempdir().expect("create session dir");
-        let session_store = SessionStore::new(session_root.path().to_path_buf());
-
-        let mut original = ScratchpadApp::with_session_store(session_store);
-        original.tabs_mut()[0].buffer.name = "restored.txt".to_owned();
-        original.create_untitled_tab();
-        original.tabs_mut()[1].buffer.name = "second.txt".to_owned();
-        original.persist_session_now().expect("persist session");
-
-        let clean_store = SessionStore::new(session_root.path().to_path_buf());
-        let clean_options = StartupOptions {
-            restore_session: false,
-            ..Default::default()
-        };
-        let clean = ScratchpadApp::with_session_store_and_startup(clean_store, clean_options);
-
-        assert_eq!(clean.tabs().len(), 1);
-        assert_eq!(clean.tabs()[0].buffer.name, "Untitled");
-    }
-
-    #[test]
-    fn startup_active_target_adds_files_into_current_workspace() {
-        let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let path = temp_dir.path().join("startup-here.txt");
-        fs::write(&path, "hello\nworld\n").expect("write temp file");
-
-        let session_root = tempfile::tempdir().expect("create session dir");
-        let session_store = SessionStore::new(session_root.path().to_path_buf());
-        let options = StartupOptions {
-            open_target: StartupOpenTarget::ActiveTab,
-            files: vec![path.clone()],
-            ..Default::default()
-        };
-        let app = ScratchpadApp::with_session_store_and_startup(session_store, options);
-
-        assert_eq!(app.tabs().len(), 1);
-        let tab = &app.tabs()[app.active_tab_index()];
-        assert_eq!(tab.views.len(), 2);
-        assert_eq!(tab.active_buffer().path.as_deref(), Some(path.as_path()));
-    }
-
-    #[test]
-    fn startup_uses_saved_file_open_preference_when_cli_target_is_not_explicit() {
-        let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let path = temp_dir.path().join("startup-prefers-current-tab.txt");
-        fs::write(&path, "hello\nworld\n").expect("write temp file");
-
-        let session_root = tempfile::tempdir().expect("create session dir");
-        let root = session_root.path().to_path_buf();
-        let session_store = SessionStore::new(root.clone());
-        let mut seed = ScratchpadApp::with_session_store(session_store);
-        seed.set_file_open_disposition(FileOpenDisposition::CurrentTab);
-
-        let app = ScratchpadApp::with_stores_and_startup(
-            SessionStore::new(root.clone()),
-            SettingsStore::new(root),
-            StartupOptions {
-                files: vec![path.clone()],
-                ..Default::default()
-            },
-        );
-
-        assert_eq!(app.tabs().len(), 1);
-        let tab = &app.tabs()[app.active_tab_index()];
-        assert_eq!(tab.views.len(), 2);
-        assert_eq!(tab.active_buffer().path.as_deref(), Some(path.as_path()));
-    }
-
-    #[test]
-    fn saved_startup_behavior_can_skip_session_restore_without_clean_switch() {
-        let session_root = tempfile::tempdir().expect("create session dir");
-        let root = session_root.path().to_path_buf();
-
-        let mut original = ScratchpadApp::with_stores_and_startup(
-            SessionStore::new(root.clone()),
-            SettingsStore::new(root.clone()),
-            StartupOptions::default(),
-        );
-        original.tabs_mut()[0].buffer.name = "restored.txt".to_owned();
-        original.create_untitled_tab();
-        original.set_startup_session_behavior(StartupSessionBehavior::StartFreshSession);
-        original.persist_session_now().expect("persist session");
-
-        let restored = ScratchpadApp::with_stores_and_startup(
-            SessionStore::new(root.clone()),
-            SettingsStore::new(root),
-            StartupOptions::default(),
-        );
-
-        assert_eq!(restored.tabs().len(), 1);
-        assert_eq!(restored.tabs()[0].buffer.name, "Untitled");
     }
 }

@@ -21,11 +21,7 @@ const TEXT_PRIMARY_LIGHT: Color32 = Color32::from_rgb(28, 35, 45);
 const TEXT_MUTED_LIGHT: Color32 = Color32::from_rgba_premultiplied(28, 35, 45, 178);
 
 fn theme_color(dark_mode: bool, dark: Color32, light: Color32) -> Color32 {
-    if dark_mode {
-        dark
-    } else {
-        light
-    }
+    if dark_mode { dark } else { light }
 }
 
 fn ui_theme_color(ui: &egui::Ui, dark: Color32, light: Color32) -> Color32 {

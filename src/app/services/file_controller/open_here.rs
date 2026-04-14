@@ -26,6 +26,15 @@ enum ExistingOpenHerePath {
 impl FileController {
     pub(super) fn open_selected_paths_here(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
         Self::prepare_to_open_paths(app);
+        let snapshot = app.capture_transaction_snapshot();
+        let affected_items = paths
+            .iter()
+            .map(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.display().to_string())
+            })
+            .collect::<Vec<_>>();
         let anchor_view_id = app
             .tabs()
             .get(app.active_tab_index())
@@ -43,6 +52,13 @@ impl FileController {
 
         if summary.opened_count > 0 || summary.migrated_count > 0 {
             Self::rebalance_open_here_layout(app);
+            let action_count = summary.opened_count + summary.migrated_count;
+            let title = if action_count == 1 {
+                "Open file here"
+            } else {
+                "Open files here"
+            };
+            app.record_transaction(title, affected_items, None, snapshot);
         }
 
         Self::apply_open_here_summary(app, summary);

@@ -11,12 +11,12 @@ pub fn render_artifact_view(
         render_read_only_text_edit(
             ui,
             view,
-            make_control_chars_visible(&buffer.content),
+            make_control_chars_visible(buffer.text()),
             buffer.line_count,
             options,
         )
     } else {
-        let clean_text = make_control_chars_clean(&buffer.content);
+        let clean_text = make_control_chars_clean(buffer.text());
         let desired_rows = display_line_count(&clean_text);
         render_read_only_text_edit(ui, view, clean_text, desired_rows, options)
     };

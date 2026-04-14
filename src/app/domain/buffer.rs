@@ -1,3 +1,4 @@
+use eframe::egui::{self, TextBuffer};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -7,6 +8,83 @@ static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_TEMP_BUFFER_ID: AtomicU64 = AtomicU64::new(1);
 
 pub type BufferId = u64;
+pub type TextDocumentUndoState = (egui::text::CCursorRange, String);
+pub type TextDocumentUndoer = egui::util::undoer::Undoer<TextDocumentUndoState>;
+pub const TEXT_DOCUMENT_MAX_UNDOS: usize = 100;
+
+#[derive(Clone)]
+pub struct TextDocument {
+    text: String,
+    undoer: TextDocumentUndoer,
+}
+
+impl TextDocument {
+    pub fn new(text: String) -> Self {
+        Self {
+            text,
+            undoer: new_text_document_undoer(),
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.text
+    }
+
+    pub fn undoer(&self) -> TextDocumentUndoer {
+        self.undoer.clone()
+    }
+
+    pub fn set_undoer(&mut self, undoer: TextDocumentUndoer) {
+        self.undoer = undoer;
+    }
+
+    pub fn clear_undoer(&mut self) {
+        self.undoer = new_text_document_undoer();
+    }
+
+    pub fn replace_text(&mut self, text: String) {
+        self.text = text;
+        self.clear_undoer();
+    }
+}
+
+fn new_text_document_undoer() -> TextDocumentUndoer {
+    TextDocumentUndoer::with_settings(egui::util::undoer::Settings {
+        max_undos: TEXT_DOCUMENT_MAX_UNDOS,
+        ..Default::default()
+    })
+}
+
+impl TextBuffer for TextDocument {
+    fn is_mutable(&self) -> bool {
+        true
+    }
+
+    fn as_str(&self) -> &str {
+        self.as_str()
+    }
+
+    fn insert_text(&mut self, text: &str, char_index: usize) -> usize {
+        let byte_idx = self.byte_index_from_char_index(char_index);
+        self.text.insert_str(byte_idx, text);
+        text.chars().count()
+    }
+
+    fn delete_char_range(&mut self, char_range: std::ops::Range<usize>) {
+        assert!(
+            char_range.start <= char_range.end,
+            "start must be <= end, but got {char_range:?}"
+        );
+
+        let byte_start = self.byte_index_from_char_index(char_range.start);
+        let byte_end = self.byte_index_from_char_index(char_range.end);
+        self.text.drain(byte_start..byte_end);
+    }
+
+    fn type_id(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<Self>()
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TextArtifactSummary {
@@ -137,10 +215,11 @@ fn row_line_numbers_for_galley(galley: &eframe::egui::Galley) -> Vec<Option<usiz
     row_line_numbers
 }
 
+#[derive(Clone)]
 pub struct BufferState {
     pub id: BufferId,
     pub name: String,
-    pub content: String,
+    document: TextDocument,
     pub path: Option<PathBuf>,
     pub is_dirty: bool,
     pub is_settings_file: bool,
@@ -179,7 +258,7 @@ impl BufferState {
         Self {
             id: next_buffer_id(),
             name,
-            content,
+            document: TextDocument::new(content),
             path,
             is_dirty: false,
             is_settings_file: false,
@@ -198,7 +277,7 @@ impl BufferState {
         Self {
             id: restored.id,
             name: restored.name,
-            content: restored.content,
+            document: TextDocument::new(restored.content),
             path: restored.path,
             is_dirty: restored.is_dirty,
             is_settings_file: false,
@@ -210,9 +289,26 @@ impl BufferState {
         }
     }
 
+    pub fn document(&self) -> &TextDocument {
+        &self.document
+    }
+
+    pub fn document_mut(&mut self) -> &mut TextDocument {
+        &mut self.document
+    }
+
+    pub fn text(&self) -> &str {
+        self.document.as_str()
+    }
+
+    pub fn replace_text(&mut self, text: String) {
+        self.document.replace_text(text);
+        self.refresh_text_metadata();
+    }
+
     pub fn refresh_text_metadata(&mut self) {
-        self.line_count = display_line_count(&self.content);
-        self.artifact_summary = TextArtifactSummary::from_text(&self.content);
+        self.line_count = display_line_count(self.text());
+        self.artifact_summary = TextArtifactSummary::from_text(self.text());
     }
 
     pub fn display_name(&self) -> String {

@@ -9,7 +9,11 @@ $ErrorActionPreference = "Stop"
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptRoot
-$python = Join-Path $repoRoot ".venv\Scripts\python.exe"
+if ($IsWindows) {
+    $python = Join-Path $repoRoot ".venv\Scripts\python.exe"
+} else {
+    $python = Join-Path $repoRoot ".venv/bin/python"
+}
 $activePort = $Port
 
 function Write-Step {

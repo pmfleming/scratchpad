@@ -60,9 +60,7 @@ pub(crate) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 pub(crate) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let button_spacing = 4.0;
     let button_size = CAPTION_BUTTON_SIZE;
-    let available_width = ui
-        .available_width()
-        .max(button_size.x * 2.0 + button_spacing);
+    let available_width = ui.available_width().max(button_size.x);
     let maximized = ui.input(|input| input.viewport().maximized.unwrap_or(false));
     let left_buttons = [
         VerticalActionButton::new(
@@ -103,40 +101,64 @@ pub(crate) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut Scratch
         ),
     ];
 
-    let six_button_width = button_size.x * 6.0 + button_spacing * 5.0;
-    let three_button_width = button_size.x * 3.0 + button_spacing * 2.0;
-
-    if available_width >= six_button_width {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = button_spacing;
-            render_button_group(ui, app, &left_buttons, button_size);
-            ui.add_space((ui.available_width() - three_button_width).max(button_spacing));
-            render_button_group(ui, app, &right_buttons, button_size);
-        });
-    } else if available_width >= three_button_width {
-        render_button_row(ui, app, &left_buttons, button_size, button_spacing);
-        ui.add_space(button_spacing);
-        render_button_row(ui, app, &right_buttons, button_size, button_spacing);
-    } else {
-        let buttons = [
-            left_buttons[0],
-            left_buttons[1],
-            left_buttons[2],
-            right_buttons[0],
-            right_buttons[1],
-            right_buttons[2],
-        ];
-        for row in buttons.chunks(2) {
+    match vertical_primary_actions_layout(available_width, button_size.x, button_spacing) {
+        VerticalPrimaryActionsLayout::SingleRow => {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = button_spacing;
-                render_button(ui, app, row[0], button_size);
-                if let Some(button) = row.get(1) {
-                    ui.add_space((ui.available_width() - button_size.x).max(button_spacing));
-                    render_button(ui, app, *button, button_size);
-                }
+                render_button_group(ui, app, &left_buttons, button_size);
+                let caption_width = button_size.x * right_buttons.len() as f32
+                    + button_spacing * right_buttons.len().saturating_sub(1) as f32;
+                ui.add_space((ui.available_width() - caption_width).max(button_spacing));
+                render_button_group(ui, app, &right_buttons, button_size);
             });
-            ui.add_space(button_spacing);
         }
+        VerticalPrimaryActionsLayout::CaptionFirstRows { buttons_per_row } => {
+            render_wrapped_button_section(
+                ui,
+                app,
+                &right_buttons,
+                button_size,
+                button_spacing,
+                buttons_per_row,
+                true,
+            );
+            ui.add_space(button_spacing);
+            render_wrapped_button_section(
+                ui,
+                app,
+                &left_buttons,
+                button_size,
+                button_spacing,
+                buttons_per_row,
+                false,
+            );
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VerticalPrimaryActionsLayout {
+    SingleRow,
+    CaptionFirstRows { buttons_per_row: usize },
+}
+
+fn vertical_primary_actions_layout(
+    available_width: f32,
+    button_width: f32,
+    button_spacing: f32,
+) -> VerticalPrimaryActionsLayout {
+    let six_button_width = button_width * 6.0 + button_spacing * 5.0;
+    let three_button_width = button_width * 3.0 + button_spacing * 2.0;
+    let two_button_width = button_width * 2.0 + button_spacing;
+
+    if available_width >= six_button_width {
+        VerticalPrimaryActionsLayout::SingleRow
+    } else if available_width >= three_button_width {
+        VerticalPrimaryActionsLayout::CaptionFirstRows { buttons_per_row: 3 }
+    } else if available_width >= two_button_width {
+        VerticalPrimaryActionsLayout::CaptionFirstRows { buttons_per_row: 2 }
+    } else {
+        VerticalPrimaryActionsLayout::CaptionFirstRows { buttons_per_row: 1 }
     }
 }
 
@@ -183,17 +205,57 @@ fn handle_vertical_action(ctx: &egui::Context, app: &mut ScratchpadApp, action: 
     }
 }
 
-fn render_button_row(
+fn render_wrapped_button_section(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
     buttons: &[VerticalActionButton],
     button_size: egui::Vec2,
     button_spacing: f32,
+    buttons_per_row: usize,
+    right_justified: bool,
+) {
+    let row_count = buttons.len().div_ceil(buttons_per_row);
+    for (row_index, row) in buttons.chunks(buttons_per_row).enumerate() {
+        render_aligned_button_row(ui, app, row, button_size, button_spacing, right_justified);
+        if row_index + 1 < row_count {
+            ui.add_space(button_spacing);
+        }
+    }
+}
+
+fn render_aligned_button_row(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    buttons: &[VerticalActionButton],
+    button_size: egui::Vec2,
+    button_spacing: f32,
+    right_justified: bool,
 ) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = button_spacing;
+        if right_justified {
+            ui.add_space(right_justified_row_leading_space(
+                ui.available_width(),
+                buttons.len(),
+                button_size.x,
+                button_spacing,
+            ));
+        }
         render_button_group(ui, app, buttons, button_size);
     });
+}
+
+fn right_justified_row_leading_space(
+    available_width: f32,
+    button_count: usize,
+    button_width: f32,
+    button_spacing: f32,
+) -> f32 {
+    (available_width - row_width(button_count, button_width, button_spacing)).max(0.0)
+}
+
+fn row_width(button_count: usize, button_width: f32, button_spacing: f32) -> f32 {
+    button_width * button_count as f32 + button_spacing * button_count.saturating_sub(1) as f32
 }
 
 fn render_button_group(
@@ -240,5 +302,43 @@ pub(crate) fn show_caption_controls(
 ) {
     if caption_controls(ui, ctx, layout.caption_controls_width) {
         app.request_exit(ctx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        VerticalPrimaryActionsLayout, right_justified_row_leading_space,
+        vertical_primary_actions_layout,
+    };
+
+    #[test]
+    fn wide_vertical_actions_stay_on_one_row() {
+        assert_eq!(
+            vertical_primary_actions_layout(236.0, 36.0, 4.0),
+            VerticalPrimaryActionsLayout::SingleRow
+        );
+    }
+
+    #[test]
+    fn medium_vertical_actions_stack_with_caption_controls_first() {
+        assert_eq!(
+            vertical_primary_actions_layout(116.0, 36.0, 4.0),
+            VerticalPrimaryActionsLayout::CaptionFirstRows { buttons_per_row: 3 }
+        );
+    }
+
+    #[test]
+    fn narrow_vertical_actions_keep_caption_controls_above_primary_actions() {
+        assert_eq!(
+            vertical_primary_actions_layout(96.0, 36.0, 4.0),
+            VerticalPrimaryActionsLayout::CaptionFirstRows { buttons_per_row: 2 }
+        );
+    }
+
+    #[test]
+    fn caption_rows_use_remaining_width_as_leading_space() {
+        assert_eq!(right_justified_row_leading_space(96.0, 2, 36.0, 4.0), 20.0);
+        assert_eq!(right_justified_row_leading_space(96.0, 1, 36.0, 4.0), 60.0);
     }
 }

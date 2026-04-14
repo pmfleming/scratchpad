@@ -4,36 +4,38 @@ const TAB_DRAG_AUTOSCROLL_EDGE: f32 = 36.0;
 pub(super) const TAB_DRAG_AUTOSCROLL_MAX_STEP: f32 = 18.0;
 const TAB_DRAG_VERTICAL_MARGIN: f32 = 12.0;
 
-pub(crate) fn auto_scroll_delta(viewport_rect: egui::Rect, pointer_pos: egui::Pos2) -> f32 {
-    if !auto_scroll_vertical_bounds(viewport_rect).contains(&pointer_pos.y) {
-        return 0.0;
-    }
-
-    if let Some(delta) = left_auto_scroll_delta(viewport_rect, pointer_pos) {
-        return delta;
-    }
-
-    if let Some(delta) = right_auto_scroll_delta(viewport_rect, pointer_pos) {
-        return delta;
-    }
-
-    0.0
-}
-
-pub(crate) fn vertical_auto_scroll_delta(
+pub(crate) fn auto_scroll_delta(
     viewport_rect: egui::Rect,
     pointer_pos: egui::Pos2,
+    axis: super::TabDropAxis,
 ) -> f32 {
-    if !auto_scroll_horizontal_bounds(viewport_rect).contains(&pointer_pos.x) {
-        return 0.0;
-    }
+    match axis {
+        super::TabDropAxis::Horizontal => {
+            if !auto_scroll_vertical_bounds(viewport_rect).contains(&pointer_pos.y) {
+                return 0.0;
+            }
 
-    if let Some(delta) = top_auto_scroll_delta(viewport_rect, pointer_pos) {
-        return delta;
-    }
+            if let Some(delta) = left_auto_scroll_delta(viewport_rect, pointer_pos) {
+                return delta;
+            }
 
-    if let Some(delta) = bottom_auto_scroll_delta(viewport_rect, pointer_pos) {
-        return delta;
+            if let Some(delta) = right_auto_scroll_delta(viewport_rect, pointer_pos) {
+                return delta;
+            }
+        }
+        super::TabDropAxis::Vertical => {
+            if !auto_scroll_horizontal_bounds(viewport_rect).contains(&pointer_pos.x) {
+                return 0.0;
+            }
+
+            if let Some(delta) = top_auto_scroll_delta(viewport_rect, pointer_pos) {
+                return delta;
+            }
+
+            if let Some(delta) = bottom_auto_scroll_delta(viewport_rect, pointer_pos) {
+                return delta;
+            }
+        }
     }
 
     0.0

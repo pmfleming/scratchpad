@@ -73,7 +73,11 @@ fn vertical_tab_panel_size_range(panel_visible: bool) -> std::ops::RangeInclusiv
     }
 }
 
-fn finalize_vertical_tab_panel(app: &mut ScratchpadApp, panel_visible: bool, response: &egui::Response) {
+fn finalize_vertical_tab_panel(
+    app: &mut ScratchpadApp,
+    panel_visible: bool,
+    response: &egui::Response,
+) {
     if !panel_visible {
         app.close_tab_list();
         return;
@@ -98,20 +102,17 @@ fn show_horizontal_tab_list(
 
     let ctx = ui.ctx().clone();
     let bar_visible = horizontal_bar_visible(ui, app, position, Instant::now());
-    show_horizontal_edge_tab_list(
-        ui,
-        position,
-        panel_id,
-        true,
-        bar_visible,
-        |ui| {
-            let outcome = show_horizontal_tab_bar(&ctx, ui, app);
-            apply_tab_outcome(app, outcome);
-        },
-    );
+    show_horizontal_edge_tab_list(ui, position, panel_id, true, bar_visible, |ui| {
+        let outcome = show_horizontal_tab_bar(&ctx, ui, app);
+        apply_tab_outcome(app, outcome);
+    });
 }
 
-fn show_horizontal_tab_bar(ctx: &egui::Context, ui: &mut egui::Ui, app: &mut ScratchpadApp) -> TabStripOutcome {
+fn show_horizontal_tab_bar(
+    ctx: &egui::Context,
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+) -> TabStripOutcome {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         show_primary_actions(ui, app);
@@ -135,12 +136,13 @@ pub(crate) fn maybe_auto_scroll_tab_strip(
     viewport_rect: egui::Rect,
 ) {
     if let Some(scroll_state) = egui::scroll_area::State::load(ui.ctx(), scroll_area_id) {
-        crate::app::ui::tab_drag::auto_scroll_tab_strip(
+        crate::app::ui::tab_drag::auto_scroll_tab_list(
             ui.ctx(),
             scroll_area_id,
             viewport_rect,
             app.estimated_tab_strip_width(layout.spacing),
             &scroll_state,
+            crate::app::ui::tab_drag::TabDropAxis::Horizontal,
         );
     }
 }
@@ -185,7 +187,6 @@ pub(crate) fn apply_tab_interaction(outcome: &mut TabStripOutcome, interaction: 
         TabInteraction::PromoteAllFiles(index) => outcome.promote_all_files_tab = Some(index),
     }
 }
-
 
 #[cfg(test)]
 mod tests {

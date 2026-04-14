@@ -144,11 +144,13 @@ class ArchitectureMapper:
         )
 
     def gather_metrics(self) -> None:
+        from hotspots import HotspotAnalyzer
+        from dataclasses import asdict
         try:
-            result = subprocess.run(
-                HOTSPOT_CMD, capture_output=True, text=True, check=True
-            )
-            for item in json.loads(result.stdout):
+            analyzer = HotspotAnalyzer(top=None, scope="all", include_anonymous=False)
+            results = analyzer.run(["src"])
+            for metric in results:
+                item = asdict(metric)
                 mod_name = self._metric_module_name(item["name"])
                 if mod_name:
                     self.metrics[mod_name] = item

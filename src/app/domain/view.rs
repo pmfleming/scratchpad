@@ -1,9 +1,17 @@
 use crate::app::domain::{BufferId, RenderedLayout};
+use eframe::egui::text::CCursorRange;
+use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_VIEW_ID: AtomicU64 = AtomicU64::new(1);
 
 pub type ViewId = u64;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SearchHighlightState {
+    pub ranges: Vec<Range<usize>>,
+    pub active_range_index: Option<usize>,
+}
 
 #[derive(Clone)]
 pub struct EditorViewState {
@@ -12,6 +20,9 @@ pub struct EditorViewState {
     pub show_line_numbers: bool,
     pub show_control_chars: bool,
     pub latest_layout: Option<RenderedLayout>,
+    pub cursor_range: Option<CCursorRange>,
+    pub pending_cursor_range: Option<CCursorRange>,
+    pub search_highlights: SearchHighlightState,
 }
 
 impl EditorViewState {
@@ -22,6 +33,9 @@ impl EditorViewState {
             show_line_numbers: false,
             show_control_chars,
             latest_layout: None,
+            cursor_range: None,
+            pending_cursor_range: None,
+            search_highlights: SearchHighlightState::default(),
         }
     }
 
@@ -38,6 +52,9 @@ impl EditorViewState {
             show_line_numbers,
             show_control_chars,
             latest_layout: None,
+            cursor_range: None,
+            pending_cursor_range: None,
+            search_highlights: SearchHighlightState::default(),
         }
     }
 }

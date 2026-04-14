@@ -33,7 +33,7 @@ pub(crate) fn render_tile_header(
         .unwrap_or_else(|| app.tabs()[request.tab_index].display_name());
     let content_preview = app.tabs()[request.tab_index]
         .buffer_for_view(request.view_id)
-        .map(|buffer| buffer.content.clone())
+        .map(|buffer| buffer.text().to_owned())
         .unwrap_or_default();
     let split_handler =
         TileSplitHandler::new(ui, request.tab_index, request.view_id, request.tile_rect);

@@ -6,10 +6,12 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::chrome::tab_button_sized;
 use crate::app::commands::AppCommand;
 use crate::app::domain::WorkspaceTab;
-use crate::app::theme::{BUTTON_SIZE, TAB_BUTTON_WIDTH, TAB_HEIGHT, action_bg, action_hover_bg, border};
-use crate::app::ui::tab_strip::render_tab_cell_sized;
+use crate::app::theme::{
+    BUTTON_SIZE, TAB_BUTTON_WIDTH, TAB_HEIGHT, action_bg, action_hover_bg, border,
+};
 use crate::app::ui::tab_drag::{self, TabDropAxis, TabDropZone, TabRectEntry};
 use crate::app::ui::tab_overflow;
+use crate::app::ui::tab_strip::render_tab_cell_sized;
 use eframe::egui::{self, Sense, Stroke};
 use std::collections::{HashMap, HashSet};
 
@@ -19,10 +21,7 @@ struct TabStripEntriesContext<'a> {
     viewport_rect: egui::Rect,
     visible_tab_indices: &'a mut HashSet<usize>,
     outcome: &'a mut TabStripOutcome,
-    active_slot_index: usize,
-    pending_scroll_to_active: bool,
 }
-
 
 struct SlotCellContext<'a> {
     duplicate_name_counts: &'a HashMap<String, usize>,
@@ -49,8 +48,6 @@ pub(crate) fn allocate_tab_strip_entries(
             let viewport_rect = ui.max_rect();
             super::maybe_auto_scroll_tab_strip(ui, app, layout, scroll_area_id, viewport_rect);
             let mut context = TabStripEntriesContext {
-                active_slot_index: app.active_tab_slot_index(),
-                pending_scroll_to_active: app.tab_manager().pending_scroll_to_active,
                 app,
                 duplicate_name_counts,
                 viewport_rect,
@@ -148,40 +145,22 @@ fn collect_tab_entries(
     ui: &mut egui::Ui,
     context: &mut TabStripEntriesContext<'_>,
 ) -> Vec<TabRectEntry> {
-    let cell_context = SlotCellContext {
-        duplicate_name_counts: context.duplicate_name_counts,
-        active_slot_index: context.active_slot_index,
-        pending_scroll_to_active: context.pending_scroll_to_active,
-        showing_settings: context.app.showing_settings(),
-        width: TAB_BUTTON_WIDTH,
-    };
-
-    let total_slots = context.app.total_tab_slots();
-    let mut row_rects = Vec::with_capacity(total_slots);
-
-    for slot_index in 0..total_slots {
-        let cell_outcome = render_tab_slot_cell(
-            ui,
-            context.app,
-            slot_index,
-            &cell_context,
-            context.outcome,
-        );
-
-        record_visible_tab(
-            slot_index,
-            cell_outcome.rect,
-            context.viewport_rect,
-            context.visible_tab_indices,
-        );
-        row_rects.push(tab_rect_entry(
-            slot_index,
-            cell_outcome.rect,
-            !context.app.tab_slot_is_settings(slot_index),
-        ));
-    }
-
-    row_rects
+    let cell_context =
+        slot_cell_context(context.app, context.duplicate_name_counts, TAB_BUTTON_WIDTH);
+    collect_slot_entries(
+        ui,
+        context.app,
+        &cell_context,
+        context.outcome,
+        |slot_index, rect| {
+            record_visible_tab(
+                slot_index,
+                rect,
+                context.viewport_rect,
+                context.visible_tab_indices,
+            );
+        },
+    )
 }
 
 fn collect_tab_drop_zones(
@@ -380,18 +359,41 @@ fn collect_vertical_tab_entries(
     duplicate_name_counts: &HashMap<String, usize>,
     outcome: &mut TabStripOutcome,
 ) -> Vec<TabRectEntry> {
-    let context = SlotCellContext {
+    let context = slot_cell_context(
+        app,
+        duplicate_name_counts,
+        ui.available_width().max(TAB_BUTTON_WIDTH),
+    );
+    collect_slot_entries(ui, app, &context, outcome, |_, _| {})
+}
+
+fn slot_cell_context<'a>(
+    app: &ScratchpadApp,
+    duplicate_name_counts: &'a HashMap<String, usize>,
+    width: f32,
+) -> SlotCellContext<'a> {
+    SlotCellContext {
         active_slot_index: app.active_tab_slot_index(),
         duplicate_name_counts,
         pending_scroll_to_active: app.tab_manager().pending_scroll_to_active,
         showing_settings: app.showing_settings(),
-        width: ui.available_width().max(TAB_BUTTON_WIDTH),
-    };
+        width,
+    }
+}
+
+fn collect_slot_entries(
+    ui: &mut egui::Ui,
+    app: &ScratchpadApp,
+    context: &SlotCellContext<'_>,
+    outcome: &mut TabStripOutcome,
+    mut on_rect: impl FnMut(usize, egui::Rect),
+) -> Vec<TabRectEntry> {
     let total_slots = app.total_tab_slots();
     let mut entries = Vec::with_capacity(total_slots);
 
     for slot_index in 0..total_slots {
-        let cell_outcome = render_tab_slot_cell(ui, app, slot_index, &context, outcome);
+        let cell_outcome = render_tab_slot_cell(ui, app, slot_index, context, outcome);
+        on_rect(slot_index, cell_outcome.rect);
         entries.push(tab_rect_entry(
             slot_index,
             cell_outcome.rect,
@@ -409,21 +411,24 @@ fn maybe_auto_scroll_vertical_tab_list(
     viewport_rect: egui::Rect,
 ) {
     if let Some(scroll_state) = egui::scroll_area::State::load(ui.ctx(), scroll_area_id) {
-        crate::app::ui::tab_drag::auto_scroll_vertical_tab_list(
+        crate::app::ui::tab_drag::auto_scroll_tab_list(
             ui.ctx(),
             scroll_area_id,
             viewport_rect,
             estimated_vertical_tab_list_height(app, 4.0),
             &scroll_state,
+            crate::app::ui::tab_drag::TabDropAxis::Vertical,
         );
     }
 }
 
 fn estimated_vertical_tab_list_height(app: &ScratchpadApp, spacing: f32) -> f32 {
     let tab_count = app.total_tab_slots();
-    (tab_count > 0)
-        .then_some((tab_count as f32 * TAB_HEIGHT) + ((tab_count.saturating_sub(1)) as f32 * spacing))
-        .unwrap_or(0.0)
+    if tab_count > 0 {
+        (tab_count as f32 * TAB_HEIGHT) + ((tab_count.saturating_sub(1)) as f32 * spacing)
+    } else {
+        0.0
+    }
 }
 
 fn apply_tab_drag_feedback(
@@ -532,7 +537,8 @@ pub(crate) fn show_drag_region(ctx: &egui::Context, ui: &mut egui::Ui, drag_widt
         let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
     }
-    ui.painter().rect_filled(rect, 0.0, crate::app::theme::header_bg(ui));
+    ui.painter()
+        .rect_filled(rect, 0.0, crate::app::theme::header_bg(ui));
 }
 
 pub(crate) fn apply_settings_tab_interaction(

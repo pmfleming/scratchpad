@@ -29,7 +29,11 @@ function Ensure-PythonTooling {
     )
 
     $venvDir = Join-Path $RepoRoot ".venv"
-    $python = Join-Path $venvDir "Scripts\python.exe"
+    if ($IsWindows) {
+        $python = Join-Path $venvDir "Scripts\python.exe"
+    } else {
+        $python = Join-Path $venvDir "bin/python"
+    }
 
     if (-not (Test-Path $python)) {
         Write-Host "Creating Python virtual environment..." -ForegroundColor Cyan

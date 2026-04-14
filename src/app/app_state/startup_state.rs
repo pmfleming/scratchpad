@@ -8,6 +8,7 @@ use crate::app::services::settings_store::{
     AppSettings, FileOpenDisposition, SettingsStore, StartupSessionBehavior,
 };
 use crate::app::startup::{StartupOpenTarget, StartupOptions};
+use crate::app::transactions::TransactionLog;
 use std::time::Instant;
 
 impl ScratchpadApp {
@@ -63,6 +64,9 @@ impl ScratchpadApp {
             pending_settings_toml_refresh: None,
             vertical_tab_list_open: false,
             vertical_tab_list_hide_deadline: None,
+            transaction_log: TransactionLog::default(),
+            transaction_log_open: false,
+            pending_text_transaction: None,
         };
 
         let loaded_from_settings = app.load_settings_from_store();

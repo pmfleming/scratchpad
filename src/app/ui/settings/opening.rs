@@ -1,10 +1,8 @@
 use super::*;
 use crate::app::services::settings_store::{FileOpenDisposition, StartupSessionBehavior};
 
-const FILE_OPEN_OPTIONS: [FileOpenDisposition; 2] = [
-    FileOpenDisposition::NewTab,
-    FileOpenDisposition::CurrentTab,
-];
+const FILE_OPEN_OPTIONS: [FileOpenDisposition; 2] =
+    [FileOpenDisposition::NewTab, FileOpenDisposition::CurrentTab];
 const STARTUP_SESSION_OPTIONS: [StartupSessionBehavior; 2] = [
     StartupSessionBehavior::ContinuePreviousSession,
     StartupSessionBehavior::StartFreshSession,

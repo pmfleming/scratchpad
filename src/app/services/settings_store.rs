@@ -1,4 +1,5 @@
 use crate::app::fonts::EditorFontPreset;
+use crate::app::services::store_io::write_atomic;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -109,21 +110,21 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            font_size: DEFAULT_FONT_SIZE,
-            word_wrap: DEFAULT_WORD_WRAP,
-            logging_enabled: DEFAULT_LOGGING_ENABLED,
-            editor_gutter: DEFAULT_EDITOR_GUTTER,
+            font_size: default_font_size(),
+            word_wrap: default_word_wrap(),
+            logging_enabled: default_logging_enabled(),
+            editor_gutter: default_editor_gutter(),
             editor_font: EditorFontPreset::default(),
             theme_mode: AppThemeMode::default(),
-            editor_text_color: DEFAULT_EDITOR_TEXT_COLOR.to_owned(),
-            editor_background_color: DEFAULT_EDITOR_BACKGROUND_COLOR.to_owned(),
+            editor_text_color: default_editor_text_color(),
+            editor_background_color: default_editor_background_color(),
             tab_list_position: TabListPosition::default(),
             file_open_disposition: FileOpenDisposition::default(),
             startup_session_behavior: StartupSessionBehavior::default(),
-            tab_list_width: DEFAULT_TAB_LIST_WIDTH,
-            auto_hide_tab_list: DEFAULT_AUTO_HIDE_TAB_LIST,
-            tab_list_auto_hide_delay_seconds: DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS,
-            recent_files_enabled: DEFAULT_RECENT_FILES_ENABLED,
+            tab_list_width: default_tab_list_width(),
+            auto_hide_tab_list: default_auto_hide_tab_list(),
+            tab_list_auto_hide_delay_seconds: default_tab_list_auto_hide_delay_seconds(),
+            recent_files_enabled: default_recent_files_enabled(),
             settings_tab_open: false,
             settings_tab_index: None,
         }
@@ -239,53 +240,39 @@ fn parse_hex_color(hex: &str) -> Option<egui::Color32> {
     Some(egui::Color32::from_rgb(r, g, b))
 }
 
-fn default_editor_gutter() -> u8 {
-    DEFAULT_EDITOR_GUTTER
+macro_rules! default_fn {
+    ($name:ident, $type:ty, $val:expr) => {
+        pub(crate) const fn $name() -> $type {
+            $val
+        }
+    };
 }
 
-fn default_editor_text_color() -> String {
+default_fn!(default_font_size, f32, DEFAULT_FONT_SIZE);
+default_fn!(default_word_wrap, bool, DEFAULT_WORD_WRAP);
+default_fn!(default_logging_enabled, bool, DEFAULT_LOGGING_ENABLED);
+default_fn!(default_editor_gutter, u8, DEFAULT_EDITOR_GUTTER);
+
+pub(crate) fn default_editor_text_color() -> String {
     DEFAULT_EDITOR_TEXT_COLOR.to_owned()
 }
 
-fn default_editor_background_color() -> String {
+pub(crate) fn default_editor_background_color() -> String {
     DEFAULT_EDITOR_BACKGROUND_COLOR.to_owned()
 }
 
-fn default_tab_list_width() -> f32 {
-    DEFAULT_TAB_LIST_WIDTH
-}
-
-fn default_auto_hide_tab_list() -> bool {
-    DEFAULT_AUTO_HIDE_TAB_LIST
-}
-
-fn default_tab_list_auto_hide_delay_seconds() -> f32 {
+default_fn!(default_tab_list_width, f32, DEFAULT_TAB_LIST_WIDTH);
+default_fn!(default_auto_hide_tab_list, bool, DEFAULT_AUTO_HIDE_TAB_LIST);
+default_fn!(
+    default_tab_list_auto_hide_delay_seconds,
+    f32,
     DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS
-}
-
-fn default_recent_files_enabled() -> bool {
+);
+default_fn!(
+    default_recent_files_enabled,
+    bool,
     DEFAULT_RECENT_FILES_ENABLED
-}
-
-fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let temp_path = path.with_extension(format!(
-        "{}.write",
-        path.extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("tmp")
-    ));
-    fs::write(&temp_path, bytes)?;
-
-    if path.exists() {
-        match fs::remove_file(path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
-    }
-
-    fs::rename(temp_path, path)
-}
+);
 
 fn invalid_data(error: impl std::error::Error + Send + Sync + 'static) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error)

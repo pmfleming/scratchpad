@@ -29,6 +29,29 @@ impl ScratchpadApp {
         self.persist_settings_or_error();
     }
 
+    fn reset_tab_list_visibility_state(&mut self, keep_open: bool) {
+        self.vertical_tab_list_open = keep_open;
+        self.vertical_tab_list_hide_deadline = None;
+    }
+
+    fn clear_tab_list_hide_deadline(&mut self) {
+        self.vertical_tab_list_hide_deadline = None;
+    }
+
+    fn set_tab_list_width(&mut self, width: f32) {
+        self.app_settings.tab_list_width = width;
+        self.persist_settings_or_error();
+    }
+
+    fn set_settings_surface(&mut self, surface: AppSurface, open: bool) -> bool {
+        let changed = self.settings_tab_open() != open;
+        self.settings_tab_index = self.settings_tab_index.min(self.tabs().len());
+        self.app_settings.settings_tab_open = open;
+        self.active_surface = surface;
+        self.tab_manager.pending_scroll_to_active = true;
+        changed
+    }
+
     pub(crate) fn set_font_size(&mut self, font_size: f32) {
         let next = font_size.clamp(8.0, 72.0);
         if (self.app_settings.font_size - next).abs() < f32::EPSILON {
@@ -51,12 +74,16 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn set_word_wrap(&mut self, enabled: bool) {
-        self.persist_settings_if_changed(self.app_settings.word_wrap, enabled, |app, next| app.app_settings.word_wrap = next);
+        self.persist_settings_if_changed(self.app_settings.word_wrap, enabled, |app, next| {
+            app.app_settings.word_wrap = next
+        });
     }
 
     pub(crate) fn set_editor_gutter(&mut self, gutter: u8) {
         let next = gutter.min(32);
-        self.persist_settings_if_changed(self.app_settings.editor_gutter, next, |app, value| app.app_settings.editor_gutter = value);
+        self.persist_settings_if_changed(self.app_settings.editor_gutter, next, |app, value| {
+            app.app_settings.editor_gutter = value
+        });
     }
 
     #[cfg(test)]
@@ -121,8 +148,7 @@ impl ScratchpadApp {
         }
 
         self.app_settings.tab_list_position = position;
-        self.vertical_tab_list_open = false;
-        self.vertical_tab_list_hide_deadline = None;
+        self.reset_tab_list_visibility_state(false);
         if position.is_vertical() {
             self.overflow_popup_open = false;
         }
@@ -131,11 +157,19 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn set_file_open_disposition(&mut self, disposition: FileOpenDisposition) {
-        self.persist_settings_if_changed(self.app_settings.file_open_disposition, disposition, |app, next| app.app_settings.file_open_disposition = next);
+        self.persist_settings_if_changed(
+            self.app_settings.file_open_disposition,
+            disposition,
+            |app, next| app.app_settings.file_open_disposition = next,
+        );
     }
 
     pub(crate) fn set_startup_session_behavior(&mut self, behavior: StartupSessionBehavior) {
-        self.persist_settings_if_changed(self.app_settings.startup_session_behavior, behavior, |app, next| app.app_settings.startup_session_behavior = next);
+        self.persist_settings_if_changed(
+            self.app_settings.startup_session_behavior,
+            behavior,
+            |app, next| app.app_settings.startup_session_behavior = next,
+        );
     }
 
     pub(crate) fn set_auto_hide_tab_list(&mut self, enabled: bool) {
@@ -144,10 +178,7 @@ impl ScratchpadApp {
         }
 
         self.app_settings.auto_hide_tab_list = enabled;
-        if !enabled {
-            self.vertical_tab_list_open = false;
-        }
-        self.vertical_tab_list_hide_deadline = None;
+        self.reset_tab_list_visibility_state(enabled && self.vertical_tab_list_open);
         self.persist_settings_or_error();
     }
 
@@ -158,12 +189,16 @@ impl ScratchpadApp {
         }
 
         self.app_settings.tab_list_auto_hide_delay_seconds = next;
-        self.vertical_tab_list_hide_deadline = None;
+        self.clear_tab_list_hide_deadline();
         self.persist_settings_or_error();
     }
 
     pub(crate) fn set_recent_files_enabled(&mut self, enabled: bool) {
-        self.persist_settings_if_changed(self.app_settings.recent_files_enabled, enabled, |app, next| app.app_settings.recent_files_enabled = next);
+        self.persist_settings_if_changed(
+            self.app_settings.recent_files_enabled,
+            enabled,
+            |app, next| app.app_settings.recent_files_enabled = next,
+        );
     }
 
     pub(crate) fn set_tab_list_width_from_layout(&mut self, width: f32) {
@@ -175,13 +210,12 @@ impl ScratchpadApp {
             return;
         }
 
-        self.app_settings.tab_list_width = next;
-        self.persist_settings_or_error();
+        self.set_tab_list_width(next);
     }
 
     pub(crate) fn open_settings(&mut self) {
         self.reload_settings_before_workspace_change();
-        if self.set_settings_surface_open(true) {
+        if self.set_settings_surface(AppSurface::Settings, true) {
             self.persist_settings_or_error();
         }
     }
@@ -193,7 +227,7 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn close_settings(&mut self) {
-        if self.set_settings_surface_open(false) {
+        if self.set_settings_surface(AppSurface::Workspace, false) {
             self.persist_settings_or_error();
         }
         self.request_focus_for_active_view();
@@ -259,22 +293,8 @@ impl ScratchpadApp {
         self.active_surface = AppSurface::Workspace;
     }
 
-    fn set_settings_surface_open(&mut self, open: bool) -> bool {
-        let changed = self.settings_tab_open() != open;
-        self.settings_tab_index = self.settings_tab_index.min(self.tabs().len());
-        self.app_settings.settings_tab_open = open;
-        self.active_surface = if open {
-            AppSurface::Settings
-        } else {
-            AppSurface::Workspace
-        };
-        self.tab_manager.pending_scroll_to_active = true;
-        changed
-    }
-
     pub(crate) fn keep_tab_list_open(&mut self) {
-        self.vertical_tab_list_open = true;
-        self.vertical_tab_list_hide_deadline = None;
+        self.reset_tab_list_visibility_state(true);
     }
 
     pub(crate) fn delay_tab_list_hide(&mut self, now: Instant) {
@@ -283,7 +303,6 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn close_tab_list(&mut self) {
-        self.vertical_tab_list_open = false;
-        self.vertical_tab_list_hide_deadline = None;
+        self.reset_tab_list_visibility_state(false);
     }
 }

@@ -20,28 +20,33 @@ const FONT_SIZE_OPTIONS: [u32; 9] = [11, 12, 14, 16, 18, 20, 24, 28, 32];
 
 pub(crate) fn show_page(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     egui::CentralPanel::default().show_inside(ui, |ui| {
-        ui.scope(|ui| {
-            SettingsUi::apply_typography(ui);
+        with_settings_page(ui, |ui| render_page_body(ui, app))
+    });
+}
 
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    let content_width = SettingsUi::page_content_width(ui);
-                    let horizontal_margin = SettingsUi::page_horizontal_margin(ui, content_width);
+fn with_settings_page(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
+    ui.scope(|ui| {
+        SettingsUi::apply_typography(ui);
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| add_contents(ui));
+    });
+}
 
-                    ui.add_space(SettingsUi::LAYOUT.body_top_space);
-                    ui.horizontal(|ui| {
-                        ui.add_space(horizontal_margin);
-                        ui.vertical(|ui| {
-                            ui.set_width(content_width);
-                            render_page_heading(ui);
-                            render_settings_categories(ui, app);
-                        });
-                    });
-                    ui.add_space(SettingsUi::LAYOUT.body_bottom_space);
-                });
+fn render_page_body(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    let content_width = SettingsUi::page_content_width(ui);
+    let horizontal_margin = SettingsUi::page_horizontal_margin(ui, content_width);
+
+    ui.add_space(SettingsUi::LAYOUT.body_top_space);
+    ui.horizontal(|ui| {
+        ui.add_space(horizontal_margin);
+        ui.vertical(|ui| {
+            ui.set_width(content_width);
+            render_page_heading(ui);
+            render_settings_categories(ui, app);
         });
     });
+    ui.add_space(SettingsUi::LAYOUT.body_bottom_space);
 }
 
 fn render_page_heading(ui: &mut egui::Ui) {

@@ -8,44 +8,54 @@ pub const EDITOR_FONT_FAMILY: &str = "scratchpad-editor";
 #[serde(rename_all = "snake_case")]
 pub enum EditorFontPreset {
     #[default]
-    SystemDefault,
-    Roboto,
-    SpaceMono,
-    IBMPlexMono,
+    Standard,
+    Flex,
+    Mono,
+    Slab,
+    Serif,
 }
 
 impl EditorFontPreset {
-    pub const ALL: [Self; 4] = [
-        Self::SystemDefault,
-        Self::Roboto,
-        Self::SpaceMono,
-        Self::IBMPlexMono,
+    pub const ALL: [Self; 5] = [
+        Self::Standard,
+        Self::Flex,
+        Self::Mono,
+        Self::Slab,
+        Self::Serif,
     ];
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::SystemDefault => "System Default",
-            Self::Roboto => "Roboto",
-            Self::SpaceMono => "Space Mono",
-            Self::IBMPlexMono => "IBM Plex Mono",
+            Self::Standard => "Standard",
+            Self::Flex => "Flex",
+            Self::Mono => "Mono",
+            Self::Slab => "Slab",
+            Self::Serif => "Serif",
         }
     }
 
-    fn font_asset(self) -> Option<(&'static str, &'static [u8])> {
+    fn font_asset(self) -> (&'static str, &'static [u8]) {
         match self {
-            Self::SystemDefault => None,
-            Self::Roboto => Some((
+            Self::Standard => (
                 "editor-roboto",
                 include_bytes!("../../fonts/Roboto-Regular.ttf"),
-            )),
-            Self::SpaceMono => Some((
-                "editor-space-mono",
-                include_bytes!("../../fonts/SpaceMono-Regular.ttf"),
-            )),
-            Self::IBMPlexMono => Some((
-                "editor-ibm-plex-mono",
-                include_bytes!("../../fonts/IBMPlexMono-Regular.ttf"),
-            )),
+            ),
+            Self::Flex => (
+                "editor-roboto-flex",
+                include_bytes!("../../fonts/RobotoFlex-Regular.ttf"),
+            ),
+            Self::Mono => (
+                "editor-roboto-mono",
+                include_bytes!("../../fonts/RobotoMono-Regular.ttf"),
+            ),
+            Self::Slab => (
+                "editor-roboto-slab",
+                include_bytes!("../../fonts/RobotoSlab-Regular.ttf"),
+            ),
+            Self::Serif => (
+                "editor-roboto-serif",
+                include_bytes!("../../fonts/RobotoSerif-Regular.ttf"),
+            ),
         }
     }
 }
@@ -54,33 +64,24 @@ pub fn apply_editor_fonts(ctx: &egui::Context, preset: EditorFontPreset) -> Resu
     let mut fonts = egui::FontDefinitions::default();
     egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
 
+    let (font_name, font_bytes) = preset.font_asset();
+    fonts.font_data.insert(
+        font_name.to_owned(),
+        egui::FontData::from_static(font_bytes).into(),
+    );
+
     let editor_family = egui::FontFamily::Name(EDITOR_FONT_FAMILY.into());
-    let mut editor_candidates = fonts
-        .families
-        .get(&egui::FontFamily::Proportional)
-        .cloned()
-        .unwrap_or_default();
-    let monospace_candidates = fonts
-        .families
-        .get(&egui::FontFamily::Monospace)
-        .cloned()
-        .unwrap_or_default();
-    for candidate in monospace_candidates {
-        if !editor_candidates.contains(&candidate) {
-            editor_candidates.push(candidate);
-        }
-    }
+    let proportional_candidates = vec![font_name.to_owned(), "phosphor".to_owned()];
+    let monospace_candidates = vec![font_name.to_owned()];
 
-    if let Some((font_name, font_bytes)) = preset.font_asset() {
-        fonts.font_data.insert(
-            font_name.to_owned(),
-            egui::FontData::from_static(font_bytes).into(),
-        );
-        editor_candidates.retain(|candidate| candidate != font_name);
-        editor_candidates.insert(0, font_name.to_owned());
-    }
-
-    fonts.families.insert(editor_family, editor_candidates);
+    fonts.families.insert(
+        egui::FontFamily::Proportional,
+        proportional_candidates.clone(),
+    );
+    fonts
+        .families
+        .insert(egui::FontFamily::Monospace, monospace_candidates.clone());
+    fonts.families.insert(editor_family, monospace_candidates);
     ctx.set_fonts(fonts);
     Ok(())
 }

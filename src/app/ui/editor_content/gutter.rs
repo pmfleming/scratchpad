@@ -112,7 +112,7 @@ fn render_fallback_gutter_rows(
 
 fn displayed_line_count(buffer: &BufferState, view: &EditorViewState) -> usize {
     if buffer.artifact_summary.has_control_chars() && !view.show_control_chars {
-        display_line_count(&make_control_chars_clean(&buffer.content))
+        display_line_count(&make_control_chars_clean(buffer.text()))
     } else {
         buffer.line_count
     }

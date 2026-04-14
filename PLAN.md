@@ -7,21 +7,24 @@ This document summarizes the current state and next steps for Scratchpad, a Wind
 Implemented:
 
 - Custom frameless chrome with caption controls, window drag/resize regions, dark theme, and phosphor icons
-- Shared tab order across the visible strip, overflow popup, and Settings tab
+- Shared tab order across the visible strip, overflow popup, Settings surface, and drag/drop flows
 - Drag/drop tab reordering within and between the strip and overflow list
-- Multi-pane, multi-buffer workspace tabs with split creation, split resizing, tile close, line-number toggles, and zoom
-- Drag-to-combine across top-level tabs
-- Open Here, per-file tile promotion, and workspace promote-all for tabs with 3 or more files
+- Multi-pane workspace tabs with split creation, split resizing, tile close, line-number toggles, and zoom
+- Drag-to-combine across top-level tabs plus Open Here composition into the active workspace
+- Per-file tile promotion and workspace promote-all for tabs with 3 or more files
 - Native open/save/save-as flows with dirty confirmation, duplicate-path checks, encoding detection, BOM preservation, and large-file status warnings
-- Artifact-heavy content detection with read-only cleaned view and explicit control-character reveal
-- TOML-backed settings for font, wrap, logging, and editor font
-- Session persistence for tabs, pane layouts, views, and session metadata
+- Artifact-heavy content detection with cleaned/raw inspection modes and explicit control-character reveal
+- Document-level undo/redo per `TextDocument`
+- A separate transaction log for text-edit history and workspace-level operations
+- TOML-backed settings for font, wrap, logging, editor font, startup/session behavior, file-open disposition, and tab-list preferences
+- Session persistence for tabs, pane layouts, views, encodings, and session metadata
 - Runtime logging and panic hook integration
-- Tests for tabs, session storage, buffers, file IO, drag helpers, and high tab counts
+- Tests for tabs, session storage, buffers, file IO, drag helpers, transaction history, startup behavior, and high tab counts
 
 Current limitations:
 
 - Search UI is still a placeholder.
+- Replace is not implemented yet.
 - Context menus and command palette actions are not implemented.
 - Installer packaging is not set up; release distribution is a Windows `.zip`.
 - Logging is event-oriented and does not capture every transient render-state change.
@@ -30,22 +33,29 @@ Current limitations:
 
 - `src/main.rs`: startup, egui font setup, logging initialization
 - `src/app/app_state.rs`: top-level state and app-facing helpers
+- `src/app/app_state/`: startup state, settings state, display-tab ordering, and settings refresh handling
 - `src/app/commands.rs`: tab, view, and split command handling
+- `src/app/commands/`: dispatch and tab/view transfer helpers
 - `src/app/chrome/`: window chrome and tab button rendering
 - `src/app/logging.rs`: file logger and panic hook
-- `src/app/domain/`: buffers, workspace tabs, pane trees, views, and shared tab manager
-- `src/app/services/`: file IO/controller, session persistence, settings persistence
-- `src/app/ui/`: tab strip, overflow popup, drag state, editor area/content, settings, dialogs, status bar
+- `src/app/domain/`: buffers, workspace tabs, pane trees, views, shared tab manager, and layout/promotion helpers
+- `src/app/services/`: file IO/controller, session persistence, settings persistence, and store helpers
+- `src/app/startup/`: startup argument parsing
+- `src/app/transactions.rs`: transaction log model and grouping logic for text-edit history
+- `src/app/ui/`: tab strip, overflow popup, drag state, editor area/content, settings, dialogs, status bar, and tile header controls
+- `viewer/`: static viewer for analysis artifacts
+- `tests/`: integration coverage for app, files, session restore, startup, and tab behavior
 
 ## Near-Term Roadmap
 
 - Implement search and replace.
-- Add user-facing wrap controls if wrapping should become configurable in the UI.
+- Add user-facing wrap controls if wrapping should become configurable beyond settings-driven defaults.
 - Add shortcuts or command-palette entries for tile promotion and workspace promote-all.
 - Let Open Here / workspace rebalancing choose the initial split axis from viewport shape.
 - Add clearer split commands, pane controls, and tab/tile action menus.
 - Make overflow list behavior configurable if hidden-only mode should become selectable.
 - Expand session migration and incompatible-manifest tests as the format evolves.
+- Refine transaction-log grouping and presentation for non-typing edits, replacements, and mixed insert/delete sequences.
 - Add targeted drag-state logging when debugging needs it.
 
 ## Measurement
@@ -57,6 +67,7 @@ Standard tools:
 - `scripts/clone_alert.py`: token-based clone groups for duplication drift review
 - `scripts/map.py`: dependency/interrelatedness JSON enriched with hotspot and slowspot data
 - `scripts/ci.ps1`: standard local and CI entry point for formatting, linting, tests, hotspot review, slowspot review, and clone review
+- `scripts/open-overview.ps1`: local launcher for the static viewer
 
 The Python tools intentionally do not generate HTML. The static viewer in `viewer/` consumes their JSON contracts from `target/analysis/` and can later be replaced by a Java/React UI without changing the measurement layer.
 
@@ -80,12 +91,14 @@ Completed refactors:
 - Removed repeated editor layouter plumbing and status-setting logic
 - Simplified file open/save orchestration with batch-open summary and small save/open helpers
 - Reduced tile-header control branching by separating visibility, split-preview, and close-button helpers
+- Split tile-header split behavior into geometry, preview, and drag modules
+- Broke app/settings/session behavior into narrower helper modules under `app_state/` and `services/session_store/`
 
 Remaining priorities:
 
-- Split `src/app/ui/tile_header/split.rs` into geometry, preview-paint, and drag-state modules.
 - Split `src/app/app_state.rs` into narrower state, status, and command-forwarding surfaces.
 - Revisit `src/app/chrome/tabs.rs` and `src/app/ui/tab_drag/state.rs` with the same extraction strategy.
+- Keep transaction-log logic tidy as history presentation evolves.
 
 Validation already completed during this pass:
 
@@ -97,4 +110,4 @@ Validation already completed during this pass:
 
 ## Definition of Done
 
-Scratchpad should remain a responsive, encoding-aware editor with TOML-backed settings, session persistence for workspace state, one shared tab-order model, and predictable pane behavior. New work should preserve that structure instead of reintroducing duplicated tab state in the strip and overflow UI.
+Scratchpad should remain a responsive, encoding-aware editor with TOML-backed settings, document-local undo/redo, transaction-history visibility, session persistence for workspace state, one shared tab-order model, and predictable pane behavior. New work should preserve that structure instead of reintroducing duplicated tab state in the strip and overflow UI.

@@ -153,7 +153,7 @@ fn combining_tabs_merges_buffers_and_focuses_source_workspace() {
     assert_eq!(target.views.len(), 2);
     assert_eq!(target.active_view_id, source_active_view_id);
     assert_eq!(target.active_buffer().id, source_buffer_id);
-    assert_eq!(target.active_buffer().content, "right");
+    assert_eq!(target.active_buffer().text(), "right");
     assert!(matches!(target.root_pane, PaneNode::Split { .. }));
 }
 

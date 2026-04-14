@@ -6,8 +6,9 @@ use crate::app::domain::{
 };
 use crate::app::services::file_service::FileService;
 use crate::app::services::settings_store::AppSettings;
+use crate::app::services::store_io::{remove_file_if_exists, write_atomic};
 use model::{SessionBuffer, SessionManifest, SessionPaneNode, SessionTab, SessionView};
-use ops::{BUFFER_FILE_EXTENSION, collect_stale_buffer_files, write_atomic};
+use ops::{BUFFER_FILE_EXTENSION, collect_stale_buffer_files};
 use std::collections::HashSet;
 use std::fs;
 use std::io;
@@ -86,7 +87,7 @@ impl SessionStore {
             .map(|tab| {
                 for buffer in tab.buffers() {
                     let temp_path = self.buffer_path(&buffer.temp_id);
-                    write_atomic(&temp_path, buffer.content.as_bytes())?;
+                    write_atomic(&temp_path, buffer.text().as_bytes())?;
                     active_temp_paths.insert(temp_path);
                 }
 
@@ -125,11 +126,7 @@ impl SessionStore {
             collect_stale_buffer_files(&self.root, &self.manifest_path, active_temp_paths)?;
 
         for path in stale_paths {
-            match fs::remove_file(&path) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error),
-            }
+            remove_file_if_exists(&path)?;
         }
 
         Ok(())

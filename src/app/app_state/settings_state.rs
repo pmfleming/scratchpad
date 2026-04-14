@@ -5,9 +5,8 @@ use crate::app::paths_match;
 use crate::app::services::file_controller::FileController;
 use crate::app::services::settings_store::{
     AppSettings, AppThemeMode, DEFAULT_EDITOR_BACKGROUND_COLOR, DEFAULT_EDITOR_TEXT_COLOR,
-    DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, FileOpenDisposition,
-    LIGHT_EDITOR_BACKGROUND_COLOR, LIGHT_EDITOR_TEXT_COLOR, StartupSessionBehavior,
-    TabListPosition, color_from_hex, color_to_hex,
+    DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, FileOpenDisposition, LIGHT_EDITOR_BACKGROUND_COLOR,
+    LIGHT_EDITOR_TEXT_COLOR, StartupSessionBehavior, TabListPosition, color_from_hex, color_to_hex,
 };
 use eframe::egui;
 use std::path::Path;

@@ -6,10 +6,10 @@ pub(crate) mod tab_support;
 pub mod view;
 
 pub use buffer::{
-    BufferId, BufferState, RenderedLayout, RestoredBufferState, TextArtifactSummary,
-    display_line_count,
+    BufferId, BufferState, RenderedLayout, RestoredBufferState, TextArtifactSummary, TextDocument,
+    TextDocumentUndoState, TextDocumentUndoer, display_line_count,
 };
 pub use panes::{PaneBranch, PaneNode, SplitAxis, SplitPath};
 pub use tab::WorkspaceTab;
 pub use tab_manager::{PendingAction, TabManager};
-pub use view::{EditorViewState, ViewId};
+pub use view::{EditorViewState, SearchHighlightState, ViewId};

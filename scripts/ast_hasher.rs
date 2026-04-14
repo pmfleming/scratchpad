@@ -8,8 +8,8 @@ use std::env;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use syn::{
-    visit::{self, Visit},
     Expr, ItemFn, Lit,
+    visit::{self, Visit},
 };
 
 #[derive(Serialize)]
@@ -42,6 +42,18 @@ impl<'ast> Visit<'ast> for AstNormalizer {
         visit::visit_expr(self, i);
     }
 
+    fn visit_stmt(&mut self, i: &'ast syn::Stmt) {
+        std::mem::discriminant(i).hash(&mut self.hasher);
+        visit::visit_stmt(self, i);
+    }
+
+    fn visit_macro(&mut self, i: &'ast syn::Macro) {
+        if let Some(segment) = i.path.segments.last() {
+            segment.ident.to_string().hash(&mut self.hasher);
+        }
+        visit::visit_macro(self, i);
+    }
+
     fn visit_lit(&mut self, _i: &'ast Lit) {
         // Normalize literals: "LIT".hash
         "LIT".hash(&mut self.hasher);
@@ -51,20 +63,41 @@ impl<'ast> Visit<'ast> for AstNormalizer {
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
+        eprintln!("Usage: ast_hasher <paths_file>");
         return;
     }
 
+    let paths_file = &args[1];
+    let paths_content = match fs::read_to_string(paths_file) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error reading paths file '{}': {}", paths_file, e);
+            return;
+        }
+    };
+
     let mut results = Vec::new();
 
-    for path in &args[1..] {
+    for line in paths_content.lines() {
+        let path = line.trim();
+        if path.is_empty() {
+            continue;
+        }
+
         let content = match fs::read_to_string(path) {
             Ok(c) => c,
-            Err(_) => continue,
+            Err(e) => {
+                eprintln!("Error reading file '{}': {}", path, e);
+                continue;
+            }
         };
 
         let file = match syn::parse_file(&content) {
             Ok(f) => f,
-            Err(_) => continue,
+            Err(e) => {
+                eprintln!("Error parsing file '{}': {}", path, e);
+                continue;
+            }
         };
 
         for item in file.items {

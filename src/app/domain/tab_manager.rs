@@ -6,6 +6,7 @@ pub enum PendingAction {
     CloseTab(usize),
 }
 
+#[derive(Clone)]
 pub struct TabManager {
     pub tabs: Vec<WorkspaceTab>,
     pub active_tab_index: usize,

@@ -2,8 +2,9 @@ pub mod divider;
 pub mod tile;
 
 use crate::app::app_state::ScratchpadApp;
-use crate::app::domain::{PaneBranch, PaneNode, ViewId};
+use crate::app::domain::{BufferId, PaneBranch, PaneNode, ViewId};
 use crate::app::logging::LogLevel;
+use crate::app::transactions::TransactionSnapshot;
 use crate::app::ui::tile_header::{self, SplitPreviewOverlay, TileAction};
 use eframe::egui;
 
@@ -23,7 +24,7 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         paint_preview_overlay(ui, render_outcome.preview_overlay);
         apply_tile_actions(app, render_outcome.actions);
         if render_outcome.any_editor_changed {
-            apply_editor_change(app, editor_state.active_tab_index);
+            apply_editor_change(app, &editor_state);
         }
     });
 }
@@ -33,6 +34,9 @@ struct EditorRenderState {
     pane_tree: PaneNode,
     active_view_id: ViewId,
     leaf_count: usize,
+    transaction_snapshot: TransactionSnapshot,
+    active_buffer_label: String,
+    active_buffer_id: BufferId,
 }
 
 struct EditorRenderOutcome {
@@ -48,12 +52,20 @@ fn prepare_editor_state(app: &mut ScratchpadApp) -> EditorRenderState {
     let pane_tree = app.tabs()[active_tab_index].root_pane.clone();
     let active_view_id = app.tabs()[active_tab_index].active_view_id;
     let leaf_count = pane_tree.leaf_count();
+    let transaction_snapshot = app.capture_transaction_snapshot();
+    let active_buffer_id = app.tabs()[active_tab_index].active_buffer().id;
+    let active_buffer_label = app
+        .active_buffer_transaction_label()
+        .unwrap_or_else(|| "Untitled".to_owned());
 
     EditorRenderState {
         active_tab_index,
         pane_tree,
         active_view_id,
         leaf_count,
+        transaction_snapshot,
+        active_buffer_label,
+        active_buffer_id,
     }
 }
 
@@ -186,8 +198,8 @@ fn render_pane_node(
     }
 }
 
-fn apply_editor_change(app: &mut ScratchpadApp, active_tab_index: usize) {
-    let tab = &mut app.tabs_mut()[active_tab_index];
+fn apply_editor_change(app: &mut ScratchpadApp, state: &EditorRenderState) {
+    let tab = &mut app.tabs_mut()[state.active_tab_index];
     let previous_dirty = tab.buffer.is_dirty;
     let previous_artifact_status = tab.buffer.artifact_summary.status_text();
     tab.buffer.refresh_text_metadata();
@@ -201,38 +213,51 @@ fn apply_editor_change(app: &mut ScratchpadApp, active_tab_index: usize) {
     let tab_name = tab.buffer.name.clone();
     let current_artifact_status = tab.buffer.artifact_summary.status_text();
     let line_count = tab.buffer.line_count;
+    let current_text = tab.buffer.text().to_owned();
     let warning_message = tab
         .buffer
         .artifact_summary
         .status_text()
         .map(|message| format!("Formatting artifacts remain: {message}"));
+    let became_dirty = !previous_dirty;
+    let artifact_status_changed = previous_artifact_status != current_artifact_status;
+    let previous_artifact_status_for_log = previous_artifact_status.clone();
+    let current_artifact_status_for_log = current_artifact_status.clone();
+    let _ = tab;
+
     if let Some(message) = warning_message {
         app.set_warning_status(message);
     } else {
         app.clear_status_message();
     }
+    app.record_text_edit_transaction(
+        state.active_buffer_id,
+        state.active_buffer_label.clone(),
+        state.transaction_snapshot.clone(),
+        current_text,
+    );
     app.mark_session_dirty();
-    app.note_settings_toml_edit(active_tab_index);
+    app.note_settings_toml_edit(state.active_tab_index);
 
-    if !previous_dirty {
+    if became_dirty {
         app.log_event(
             LogLevel::Info,
             format!(
                 "Buffer '{tab_name}' became dirty after edit (line_count={line_count}, artifact_status={})",
-                current_artifact_status
+                current_artifact_status_for_log
                     .clone()
                     .unwrap_or_else(|| "none".to_owned())
             ),
         );
     }
 
-    if previous_artifact_status != current_artifact_status {
+    if artifact_status_changed {
         app.log_event(
             LogLevel::Info,
             format!(
                 "Artifact status changed for '{tab_name}' from {} to {}",
-                previous_artifact_status.unwrap_or_else(|| "none".to_owned()),
-                current_artifact_status.unwrap_or_else(|| "none".to_owned())
+                previous_artifact_status_for_log.unwrap_or_else(|| "none".to_owned()),
+                current_artifact_status_for_log.unwrap_or_else(|| "none".to_owned())
             ),
         );
     }

@@ -116,7 +116,7 @@ fn paint_horizontal_reorder_marker(
     last_rect: egui::Rect,
     last_index: usize,
 ) {
-    let marker_x = horizontal_marker_position(zone, drop_slot, first_rect, last_rect, last_index);
+    let marker_x = reorder_marker_position(zone, drop_slot, first_rect, last_rect, last_index);
     let marker_rect = egui::Rect::from_center_size(
         egui::pos2(marker_x, (first_rect.top() + last_rect.bottom()) * 0.5),
         egui::vec2(3.0, TAB_HEIGHT - 6.0),
@@ -132,7 +132,7 @@ fn paint_vertical_reorder_marker(
     last_rect: egui::Rect,
     last_index: usize,
 ) {
-    let marker_y = vertical_marker_position(zone, drop_slot, first_rect, last_rect, last_index);
+    let marker_y = reorder_marker_position(zone, drop_slot, first_rect, last_rect, last_index);
     let marker_width = first_rect.width().max(24.0) - 8.0;
     let marker_rect = egui::Rect::from_center_size(
         egui::pos2((first_rect.left() + last_rect.right()) * 0.5, marker_y),
@@ -141,38 +141,31 @@ fn paint_vertical_reorder_marker(
     painter.rect_filled(marker_rect, 2.0, TAB_REORDER_MARKER_COLOR);
 }
 
-fn horizontal_marker_position(
+fn reorder_marker_position(
     zone: &TabDropZone,
     drop_slot: usize,
     first_rect: egui::Rect,
     last_rect: egui::Rect,
     last_index: usize,
 ) -> f32 {
-    marker_position(
-        zone,
-        drop_slot,
-        first_rect.left(),
-        last_rect.right(),
-        last_index,
-        |previous, target| (previous.right() + target.left()) * 0.5,
-    )
-}
-
-fn vertical_marker_position(
-    zone: &TabDropZone,
-    drop_slot: usize,
-    first_rect: egui::Rect,
-    last_rect: egui::Rect,
-    last_index: usize,
-) -> f32 {
-    marker_position(
-        zone,
-        drop_slot,
-        first_rect.top(),
-        last_rect.bottom(),
-        last_index,
-        |previous, target| (previous.bottom() + target.top()) * 0.5,
-    )
+    match zone.axis {
+        TabDropAxis::Horizontal => marker_position(
+            zone,
+            drop_slot,
+            first_rect.left(),
+            last_rect.right(),
+            last_index,
+            |previous, target| (previous.right() + target.left()) * 0.5,
+        ),
+        TabDropAxis::Vertical => marker_position(
+            zone,
+            drop_slot,
+            first_rect.top(),
+            last_rect.bottom(),
+            last_index,
+            |previous, target| (previous.bottom() + target.top()) * 0.5,
+        ),
+    }
 }
 
 fn marker_position(

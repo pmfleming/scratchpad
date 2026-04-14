@@ -31,6 +31,12 @@ struct OverflowMenuContext<'a> {
     overflow_popup_open: &'a mut bool,
 }
 
+struct OverflowRowState {
+    selected: bool,
+    display_name: String,
+    can_promote_all_files: bool,
+}
+
 struct OverflowPopupRequest<'a> {
     app: &'a ScratchpadApp,
     visible_tab_indices: &'a HashSet<usize>,
@@ -241,48 +247,87 @@ fn show_overflow_row(
             return render_drag_source_placeholder(ui, menu.popup_width);
         }
 
-        let selected = app.active_tab_slot_index() == slot_index;
-        let Some(display_name) = app.display_tab_name_at_slot(slot_index) else {
+        let Some(row_state) = overflow_row_state(app, slot_index) else {
             return render_drag_source_placeholder(ui, menu.popup_width);
         };
-        let workspace_index = app.workspace_index_for_slot(slot_index);
-        let can_promote_all_files = workspace_index
-            .and_then(|index| app.tabs().get(index))
-            .is_some_and(WorkspaceTab::can_promote_all_files);
 
         let (response, promote_response, close_response, _truncated) =
             tab_button_sized_with_actions(
                 ui,
-                &display_name,
-                selected,
-                can_promote_all_files,
+                &row_state.display_name,
+                row_state.selected,
+                row_state.can_promote_all_files,
                 menu.popup_width,
             );
         tab_drag::begin_tab_drag_if_needed(ui, slot_index, &response, &close_response);
-
-        if promote_response.is_some_and(|promote| promote.clicked()) && workspace_index.is_some() {
-            menu.outcome.promote_all_files_tab = Some(slot_index);
-            *menu.overflow_popup_open = false;
-        } else if response.clicked() && app.tab_slot_is_settings(slot_index) {
-            menu.outcome.activate_settings = true;
-            *menu.overflow_popup_open = false;
-        } else if response.clicked() {
-            menu.outcome.activated_tab = Some(slot_index);
-            *menu.overflow_popup_open = false;
-        }
-
-        if close_response.clicked() {
-            if app.tab_slot_is_settings(slot_index) {
-                menu.outcome.close_settings = true;
-            } else {
-                menu.outcome.close_requested_tab = Some(slot_index);
-            }
-            *menu.overflow_popup_open = false;
-        }
+        apply_overflow_row_actions(
+            app,
+            slot_index,
+            &response,
+            promote_response.as_ref(),
+            &close_response,
+            menu,
+        );
 
         response.rect
     })
     .inner
+}
+
+fn overflow_row_state(app: &ScratchpadApp, slot_index: usize) -> Option<OverflowRowState> {
+    Some(OverflowRowState {
+        selected: app.active_tab_slot_index() == slot_index,
+        display_name: app.display_tab_name_at_slot(slot_index)?,
+        can_promote_all_files: app
+            .workspace_index_for_slot(slot_index)
+            .and_then(|index| app.tabs().get(index))
+            .is_some_and(WorkspaceTab::can_promote_all_files),
+    })
+}
+
+fn apply_overflow_row_actions(
+    app: &ScratchpadApp,
+    slot_index: usize,
+    response: &egui::Response,
+    promote_response: Option<&egui::Response>,
+    close_response: &egui::Response,
+    menu: &mut OverflowMenuContext<'_>,
+) {
+    if promote_response.is_some_and(|promote| promote.clicked())
+        && app.workspace_index_for_slot(slot_index).is_some()
+    {
+        menu.outcome.promote_all_files_tab = Some(slot_index);
+        *menu.overflow_popup_open = false;
+        return;
+    }
+
+    if response.clicked() {
+        handle_overflow_slot_action(app, slot_index, menu, false);
+    }
+
+    if close_response.clicked() {
+        handle_overflow_slot_action(app, slot_index, menu, true);
+    }
+}
+
+fn handle_overflow_slot_action(
+    app: &ScratchpadApp,
+    slot_index: usize,
+    menu: &mut OverflowMenuContext<'_>,
+    is_close: bool,
+) {
+    if app.tab_slot_is_settings(slot_index) {
+        if is_close {
+            menu.outcome.close_settings = true;
+        } else {
+            menu.outcome.activate_settings = true;
+        }
+    } else if is_close {
+        menu.outcome.close_requested_tab = Some(slot_index);
+    } else {
+        menu.outcome.activated_tab = Some(slot_index);
+    }
+    *menu.overflow_popup_open = false;
 }
 
 fn render_drag_source_placeholder(ui: &mut egui::Ui, width: f32) -> egui::Rect {

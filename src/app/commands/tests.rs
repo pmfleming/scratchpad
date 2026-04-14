@@ -26,7 +26,7 @@ fn settings_file_content(font_size: f32, settings_slot_index: Option<usize>) -> 
         format!("font_size = {font_size:.1}"),
         "word_wrap = false".to_owned(),
         "logging_enabled = false".to_owned(),
-        "editor_font = \"roboto\"".to_owned(),
+        "editor_font = \"standard\"".to_owned(),
     ];
     if let Some(index) = settings_slot_index {
         lines.push("settings_tab_open = true".to_owned());
@@ -46,9 +46,12 @@ fn open_dirty_settings_file(
     app.handle_command(AppCommand::OpenSettings);
     app.open_settings_file_tab();
     let settings_tab_index = app.active_tab_index();
-    app.tabs_mut()[settings_tab_index].active_buffer_mut().content =
-        settings_file_content(font_size, settings_slot_index);
-    app.tabs_mut()[settings_tab_index].active_buffer_mut().is_dirty = true;
+    app.tabs_mut()[settings_tab_index]
+        .active_buffer_mut()
+        .replace_text(settings_file_content(font_size, settings_slot_index));
+    app.tabs_mut()[settings_tab_index]
+        .active_buffer_mut()
+        .is_dirty = true;
     app.note_settings_toml_edit(settings_tab_index);
     settings_tab_index
 }
@@ -57,14 +60,14 @@ fn assert_settings_applied(app: &ScratchpadApp, font_size: f32) {
     assert_eq!(app.font_size(), font_size);
     assert!(!app.word_wrap());
     assert!(!app.logging_enabled());
-    assert_eq!(app.editor_font(), EditorFontPreset::Roboto);
+    assert_eq!(app.editor_font(), EditorFontPreset::Standard);
 }
 
 #[test]
 fn promote_view_to_tab_creates_a_new_active_tab() {
     let mut app = test_app();
     app.tabs_mut()[0].buffer.name = "alpha.txt".to_owned();
-    app.tabs_mut()[0].buffer.content = "alpha".to_owned();
+    app.tabs_mut()[0].buffer.replace_text("alpha".to_owned());
     let promoted_view_id = app.tabs_mut()[0]
         .split_active_view(SplitAxis::Vertical)
         .expect("split should succeed");
@@ -97,7 +100,7 @@ fn promote_view_to_tab_creates_a_new_active_tab() {
 fn promote_tab_files_to_tabs_splits_workspace_into_individual_tabs() {
     let mut app = test_app();
     app.tabs_mut()[0].buffer.name = "one.txt".to_owned();
-    app.tabs_mut()[0].buffer.content = "one".to_owned();
+    app.tabs_mut()[0].buffer.replace_text("one".to_owned());
 
     for (name, content) in [("two.txt", "two"), ("three.txt", "three")] {
         app.tabs_mut()[0]
@@ -117,7 +120,10 @@ fn promote_tab_files_to_tabs_splits_workspace_into_individual_tabs() {
 
     assert_eq!(app.tabs().len(), 3);
     assert!(app.tabs().iter().all(|tab| tab.file_group_count() == 1));
-    assert_eq!(app.tabs()[app.active_tab_index()].active_buffer().name, active_name);
+    assert_eq!(
+        app.tabs()[app.active_tab_index()].active_buffer().name,
+        active_name
+    );
     assert_eq!(
         app.pending_editor_focus,
         Some(app.tabs()[app.active_tab_index()].active_view_id)
@@ -225,7 +231,10 @@ fn settings_surface_state_persists_across_restart() {
     let restored = ScratchpadApp::with_session_store(SessionStore::new(restored_path));
     assert!(restored.showing_settings());
     assert_eq!(restored.settings_slot_index(), Some(1));
-    assert_eq!(restored.display_tab_name_at_slot(1).as_deref(), Some("Settings"));
+    assert_eq!(
+        restored.display_tab_name_at_slot(1).as_deref(),
+        Some("Settings")
+    );
 }
 
 #[test]
@@ -262,10 +271,17 @@ fn opening_settings_file_keeps_settings_tab_open() {
     assert!(!app.showing_settings());
     assert_eq!(app.settings_slot_index(), Some(settings_slot));
     assert_eq!(
-        app.tabs()[app.active_tab_index()].active_buffer().path.as_deref(),
+        app.tabs()[app.active_tab_index()]
+            .active_buffer()
+            .path
+            .as_deref(),
         Some(settings_path.as_path())
     );
-    assert!(app.tabs()[app.active_tab_index()].active_buffer().is_settings_file);
+    assert!(
+        app.tabs()[app.active_tab_index()]
+            .active_buffer()
+            .is_settings_file
+    );
 }
 
 #[test]
@@ -276,7 +292,10 @@ fn creating_a_new_tab_from_dirty_settings_file_applies_toml_edits() {
     app.new_tab();
 
     assert_settings_applied(&app, 19.0);
-    assert_eq!(app.tabs()[app.active_tab_index()].active_buffer().name, "Untitled");
+    assert_eq!(
+        app.tabs()[app.active_tab_index()].active_buffer().name,
+        "Untitled"
+    );
 }
 
 #[test]
@@ -312,9 +331,12 @@ fn activating_view_away_from_settings_file_applies_toml_edits() {
         view_id: settings_view_id,
     });
     let settings_tab_index = app.active_tab_index();
-    app.tabs_mut()[settings_tab_index].active_buffer_mut().content =
-        settings_file_content(23.0, None);
-    app.tabs_mut()[settings_tab_index].active_buffer_mut().is_dirty = true;
+    app.tabs_mut()[settings_tab_index]
+        .active_buffer_mut()
+        .replace_text(settings_file_content(23.0, None));
+    app.tabs_mut()[settings_tab_index]
+        .active_buffer_mut()
+        .is_dirty = true;
     app.note_settings_toml_edit(settings_tab_index);
 
     app.handle_command(AppCommand::ActivateView {
@@ -322,7 +344,10 @@ fn activating_view_away_from_settings_file_applies_toml_edits() {
     });
 
     assert_settings_applied(&app, 23.0);
-    assert_eq!(app.tabs()[app.active_tab_index()].active_view_id, normal_view_id);
+    assert_eq!(
+        app.tabs()[app.active_tab_index()].active_view_id,
+        normal_view_id
+    );
 }
 
 #[test]
@@ -352,17 +377,23 @@ fn editing_other_buffer_in_settings_workspace_does_not_mark_settings_toml_pendin
                 .is_some_and(|path| crate::app::paths_match(path, &settings_path))
         })
         .expect("settings buffer should remain in the workspace");
-    settings_buffer.content = [
-        "font_size = 31.0",
-        "word_wrap = false",
-        "logging_enabled = false",
-        "editor_font = \"roboto\"",
-        "",
-    ]
-    .join("\n");
+    settings_buffer.replace_text(
+        [
+            "font_size = 31.0",
+            "word_wrap = false",
+            "logging_enabled = false",
+            "editor_font = \"standard\"",
+            "",
+        ]
+        .join("\n"),
+    );
 
-    app.tabs_mut()[settings_tab_index].active_buffer_mut().content = "changed notes".to_owned();
-    app.tabs_mut()[settings_tab_index].active_buffer_mut().is_dirty = true;
+    app.tabs_mut()[settings_tab_index]
+        .active_buffer_mut()
+        .replace_text("changed notes".to_owned());
+    app.tabs_mut()[settings_tab_index]
+        .active_buffer_mut()
+        .is_dirty = true;
     app.note_settings_toml_edit(settings_tab_index);
     app.append_tab(WorkspaceTab::untitled());
     let other_tab_index = app.active_tab_index();

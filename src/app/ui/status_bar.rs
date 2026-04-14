@@ -8,6 +8,7 @@ struct StatusBarActions {
     toggle_line_numbers: bool,
     toggle_control_chars: bool,
     toggle_logging: bool,
+    open_transaction_log: bool,
 }
 
 struct ActiveStatusDetails {
@@ -94,7 +95,7 @@ fn collect_active_status_details(
                     format!("{warning_text}; cleaned view")
                 }
             }),
-        is_large_file: tab.buffer.content.len() > 5 * 1024 * 1024,
+        is_large_file: tab.buffer.text().len() > 5 * 1024 * 1024,
         has_control_chars,
     })
 }
@@ -108,6 +109,7 @@ fn render_active_status(
     ui.label(format!("Path: {}", details.path_label));
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         show_status_warnings(ui, details);
+        show_transaction_log_button(ui, actions);
         show_control_char_toggle(ui, details, actions);
         show_logging_toggle(ui, logging_enabled, actions);
         show_encoding(ui, &details.encoding);
@@ -136,6 +138,16 @@ fn show_logging_toggle(ui: &mut egui::Ui, logging_enabled: bool, actions: &mut S
         .on_hover_text("Toggle runtime file logging");
     if logging_token.clicked() {
         actions.toggle_logging = true;
+    }
+}
+
+fn show_transaction_log_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
+    ui.separator();
+    let response = ui
+        .button("TXN")
+        .on_hover_text("Open the workspace transaction log");
+    if response.clicked() {
+        actions.open_transaction_log = true;
     }
 }
 
@@ -204,6 +216,10 @@ fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {
     if actions.toggle_logging {
         let next = !app.logging_enabled();
         app.set_logging_enabled(next);
+    }
+
+    if actions.open_transaction_log {
+        app.open_transaction_log();
     }
 }
 
