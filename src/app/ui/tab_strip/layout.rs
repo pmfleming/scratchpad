@@ -7,6 +7,8 @@ use std::time::Instant;
 const VERTICAL_TAB_LIST_PADDING: f32 = 8.0;
 pub(crate) const AUTO_HIDE_PEEK_SIZE: f32 = 6.0;
 const AUTO_HIDE_REVEAL_MARGIN: f32 = 12.0;
+const AUTO_HIDE_EDITOR_CORRIDOR_WIDTH: f32 = 84.0;
+const AUTO_HIDE_EDITOR_CONTROL_BAND_HEIGHT: f32 = 56.0;
 
 fn auto_hide_visible(
     app: &mut ScratchpadApp,
@@ -132,6 +134,48 @@ fn pointer_near_bar(ui: &egui::Ui, expanded_size: f32, position: TabListPosition
     })
 }
 
+fn pointer_in_vertical_protected_corridor(
+    ui: &egui::Ui,
+    expanded_size: f32,
+    position: TabListPosition,
+) -> bool {
+    ui.input(|input| {
+        input.pointer.hover_pos().is_some_and(|pos| {
+            pointer_in_vertical_protected_corridor_at(ui.max_rect(), pos, expanded_size, position)
+        })
+    })
+}
+
+fn pointer_in_vertical_protected_corridor_at(
+    viewport: egui::Rect,
+    pos: egui::Pos2,
+    expanded_size: f32,
+    position: TabListPosition,
+) -> bool {
+    let top_band_bottom = viewport.top() + AUTO_HIDE_EDITOR_CONTROL_BAND_HEIGHT;
+    if pos.y > top_band_bottom {
+        return false;
+    }
+
+    match position {
+        TabListPosition::Left => {
+            pos.x
+                <= viewport.left()
+                    + expanded_size
+                    + AUTO_HIDE_REVEAL_MARGIN
+                    + AUTO_HIDE_EDITOR_CORRIDOR_WIDTH
+        }
+        TabListPosition::Right => {
+            pos.x
+                >= viewport.right()
+                    - expanded_size
+                    - AUTO_HIDE_REVEAL_MARGIN
+                    - AUTO_HIDE_EDITOR_CORRIDOR_WIDTH
+        }
+        TabListPosition::Top | TabListPosition::Bottom => false,
+    }
+}
+
 pub(crate) fn horizontal_bar_visible(
     ui: &egui::Ui,
     app: &mut ScratchpadApp,
@@ -220,10 +264,12 @@ pub(crate) fn vertical_panel_visible(
     side: TabListPosition,
     now: Instant,
 ) -> bool {
+    let has_context = pointer_near_bar(ui, app.vertical_tab_list_width(), side)
+        || pointer_in_vertical_protected_corridor(ui, app.vertical_tab_list_width(), side);
     auto_hide_visible(
         app,
         ui.ctx(),
-        pointer_near_bar(ui, app.vertical_tab_list_width(), side),
+        has_context,
         now,
     )
 }
@@ -237,5 +283,51 @@ pub(crate) fn vertical_tab_panel(side: TabListPosition, visible: bool) -> egui::
         (TabListPosition::Top, _) | (TabListPosition::Bottom, _) => {
             unreachable!("vertical tab panel only supports left/right")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pointer_in_vertical_protected_corridor_at;
+    use crate::app::services::settings_store::TabListPosition;
+    use eframe::egui;
+
+    #[test]
+    fn left_corridor_keeps_tab_list_open_near_top_controls() {
+        let viewport =
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1200.0, 800.0));
+
+        assert!(pointer_in_vertical_protected_corridor_at(
+            viewport,
+            egui::pos2(170.0, 28.0),
+            96.0,
+            TabListPosition::Left,
+        ));
+    }
+
+    #[test]
+    fn corridor_does_not_extend_deep_into_editor() {
+        let viewport =
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1200.0, 800.0));
+
+        assert!(!pointer_in_vertical_protected_corridor_at(
+            viewport,
+            egui::pos2(170.0, 140.0),
+            96.0,
+            TabListPosition::Left,
+        ));
+    }
+
+    #[test]
+    fn right_corridor_keeps_tab_list_open_near_top_controls() {
+        let viewport =
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1200.0, 800.0));
+
+        assert!(pointer_in_vertical_protected_corridor_at(
+            viewport,
+            egui::pos2(1030.0, 24.0),
+            96.0,
+            TabListPosition::Right,
+        ));
     }
 }

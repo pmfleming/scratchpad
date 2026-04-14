@@ -1,6 +1,7 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::{PendingAction, SplitAxis, SplitPath, ViewId};
 use crate::app::logging::LogLevel;
+use crate::app::services::file_controller::FileController;
 
 mod dispatch;
 mod tab_transfer;
@@ -23,6 +24,10 @@ pub enum AppCommand {
     CloseSettings,
     CombineTabIntoTab {
         source_index: usize,
+        target_index: usize,
+    },
+    CombineTabsIntoTab {
+        source_indices: Vec<usize>,
         target_index: usize,
     },
     PromoteViewToTab {
@@ -78,6 +83,7 @@ impl ScratchpadApp {
         self.tab_manager_mut().active_tab_index = index;
         self.tab_manager_mut().pending_scroll_to_active = true;
         self.request_focus_for_active_view();
+        FileController::refresh_active_buffer_disk_state(self);
         self.mark_session_dirty();
         self.log_event(
             LogLevel::Info,
@@ -95,6 +101,7 @@ impl ScratchpadApp {
         {
             let previous_view_id = tab.active_view_id;
             self.request_focus_for_view(view_id);
+            FileController::refresh_active_buffer_disk_state(self);
             self.mark_session_dirty();
             self.log_event(
                 LogLevel::Info,

@@ -95,8 +95,9 @@ impl FileController {
     }
 
     fn rebalance_open_here_layout(app: &mut ScratchpadApp) {
+        let reflow_axis = app.workspace_reflow_axis;
         let rebalanced = if let Some(tab) = app.active_tab_mut() {
-            tab.rebalance_views_equally()
+            tab.rebalance_views_equally_for_axis(reflow_axis)
         } else {
             false
         };

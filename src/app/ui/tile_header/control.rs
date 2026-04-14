@@ -1,5 +1,5 @@
 use crate::app::theme::*;
-use crate::app::ui::tab_drag;
+use crate::app::ui::transition;
 use eframe::egui;
 
 pub enum TileControlStyle {
@@ -54,7 +54,7 @@ impl<'a> TileControl<'a> {
         sense: egui::Sense,
     ) -> egui::Response {
         let response = ui.interact(rect, id, sense);
-        let drag_in_progress = tab_drag::has_tab_drag_for_context(ui.ctx());
+        let drag_in_progress = transition::suppress_interactive_chrome(ui.ctx());
 
         if self.visibility > 0.0 {
             paint_tile_control(

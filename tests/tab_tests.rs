@@ -155,6 +155,7 @@ fn combining_tabs_merges_buffers_and_focuses_source_workspace() {
     assert_eq!(target.active_buffer().id, source_buffer_id);
     assert_eq!(target.active_buffer().text(), "right");
     assert!(matches!(target.root_pane, PaneNode::Split { .. }));
+    assert_eq!(target.display_name(), "[2] left.txt & right.txt");
 }
 
 #[test]
@@ -185,6 +186,40 @@ fn rebalancing_views_shares_space_equally() {
 
     assert_eq!(tab.views.len(), 4);
     assert!(areas.iter().all(|area| (area - 0.25).abs() < f32::EPSILON));
+}
+
+#[test]
+fn rebalancing_views_can_start_horizontally() {
+    let mut tab = WorkspaceTab::new(BufferState::new(
+        "one.txt".to_owned(),
+        "one".to_owned(),
+        None,
+    ));
+
+    for (name, content) in [("two.txt", "two"), ("three.txt", "three")] {
+        tab.open_buffer_with_balanced_layout(BufferState::new(
+            name.to_owned(),
+            content.to_owned(),
+            None,
+        ))
+        .expect("balanced open should succeed");
+    }
+
+    assert!(tab.rebalance_views_equally_for_axis(SplitAxis::Horizontal));
+
+    assert!(matches!(
+        tab.root_pane,
+        PaneNode::Split {
+            axis: SplitAxis::Horizontal,
+            ..
+        }
+    ));
+
+    let mut areas = Vec::new();
+    collect_leaf_area_fractions(&tab.root_pane, 1.0, &mut areas);
+
+    assert_eq!(areas.len(), 3);
+    assert!((areas.iter().sum::<f32>() - 1.0).abs() < f32::EPSILON);
 }
 
 #[test]

@@ -7,6 +7,67 @@ enum DisplayTabSlot {
 }
 
 impl ScratchpadApp {
+    pub(crate) fn tab_slot_selected(&self, slot_index: usize) -> bool {
+        self.selected_tab_slots.contains(&slot_index)
+    }
+
+    pub(crate) fn clear_tab_selection(&mut self) {
+        self.selected_tab_slots.clear();
+        self.tab_selection_anchor = None;
+    }
+
+    pub(crate) fn select_only_tab_slot(&mut self, slot_index: usize) {
+        self.clear_tab_selection();
+        if self.workspace_index_for_slot(slot_index).is_some() {
+            self.selected_tab_slots.insert(slot_index);
+            self.tab_selection_anchor = Some(slot_index);
+        }
+    }
+
+    pub(crate) fn toggle_tab_slot_selection(&mut self, slot_index: usize) {
+        if self.workspace_index_for_slot(slot_index).is_none() {
+            self.clear_tab_selection();
+            return;
+        }
+
+        if !self.selected_tab_slots.remove(&slot_index) {
+            self.selected_tab_slots.insert(slot_index);
+        }
+        self.tab_selection_anchor = Some(slot_index);
+    }
+
+    pub(crate) fn select_tab_slot_range(&mut self, slot_index: usize) {
+        if self.workspace_index_for_slot(slot_index).is_none() {
+            self.clear_tab_selection();
+            return;
+        }
+
+        let anchor = self
+            .tab_selection_anchor
+            .or_else(|| self.workspace_index_for_slot(self.active_tab_slot_index()).map(|_| self.active_tab_slot_index()))
+            .unwrap_or(slot_index);
+        let (start, end) = if anchor <= slot_index {
+            (anchor, slot_index)
+        } else {
+            (slot_index, anchor)
+        };
+        self.clear_tab_selection();
+        for candidate in start..=end {
+            if self.workspace_index_for_slot(candidate).is_some() {
+                self.selected_tab_slots.insert(candidate);
+            }
+        }
+        self.tab_selection_anchor = Some(anchor);
+    }
+
+    pub(crate) fn dragged_tab_slots(&self, source_slot: usize) -> Vec<usize> {
+        if self.selected_tab_slots.contains(&source_slot) && self.selected_tab_slots.len() > 1 {
+            self.selected_tab_slots.iter().copied().collect()
+        } else {
+            vec![source_slot]
+        }
+    }
+
     pub(crate) fn total_tab_slots(&self) -> usize {
         self.tabs().len() + usize::from(self.settings_tab_open())
     }
@@ -88,6 +149,46 @@ impl ScratchpadApp {
         let moved_slot = display_slots.remove(from_slot);
         display_slots.insert(to_slot, moved_slot);
         self.apply_display_tab_order(display_slots);
+        true
+    }
+
+    pub(crate) fn reorder_display_tab_group(
+        &mut self,
+        mut from_slots: Vec<usize>,
+        to_slot: usize,
+    ) -> bool {
+        let total_slots = self.total_tab_slots();
+        if from_slots.is_empty() || to_slot > total_slots {
+            return false;
+        }
+
+        from_slots.sort_unstable();
+        from_slots.dedup();
+        if from_slots.iter().any(|slot| *slot >= total_slots) {
+            return false;
+        }
+
+        let display_slots = self.display_tab_slots();
+        let moved_slots = from_slots
+            .iter()
+            .map(|slot| display_slots[*slot])
+            .collect::<Vec<_>>();
+        let adjusted_to_slot = to_slot.saturating_sub(from_slots.iter().filter(|slot| **slot < to_slot).count());
+        let remaining_slots = display_slots
+            .into_iter()
+            .enumerate()
+            .filter_map(|(slot_index, slot)| (!from_slots.contains(&slot_index)).then_some(slot))
+            .collect::<Vec<_>>();
+
+        let mut next_slots = remaining_slots;
+        let insert_index = adjusted_to_slot.min(next_slots.len());
+        next_slots.splice(insert_index..insert_index, moved_slots);
+
+        if next_slots == self.display_tab_slots() {
+            return false;
+        }
+
+        self.apply_display_tab_order(next_slots);
         true
     }
 

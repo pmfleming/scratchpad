@@ -13,8 +13,9 @@ use crate::app::services::settings_store::{AppSettings, SettingsStore};
 use crate::app::shortcuts;
 use crate::app::startup::StartupOptions;
 use crate::app::transactions::{PendingTextTransaction, TransactionLog};
-use crate::app::ui::{dialogs, editor_area, settings, status_bar, tab_strip};
+use crate::app::ui::{dialogs, editor_area, settings, status_bar, tab_strip, transition};
 use eframe::egui;
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -22,6 +23,7 @@ mod settings_state;
 mod startup_state;
 
 pub(crate) const SESSION_SNAPSHOT_INTERVAL: Duration = Duration::from_secs(1);
+const CHROME_TRANSITION_FRAMES: u8 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppSurface {
@@ -48,6 +50,10 @@ pub struct ScratchpadApp {
     pub(crate) transaction_log: TransactionLog,
     pub(crate) transaction_log_open: bool,
     pub(crate) pending_text_transaction: Option<PendingTextTransaction>,
+    pub(crate) chrome_transition_frames_remaining: u8,
+    pub(crate) selected_tab_slots: BTreeSet<usize>,
+    pub(crate) tab_selection_anchor: Option<usize>,
+    pub(crate) workspace_reflow_axis: SplitAxis,
 }
 
 impl Default for ScratchpadApp {
@@ -90,6 +96,7 @@ impl ScratchpadApp {
         self.apply_theme_to_context(ctx);
         self.sync_editor_fonts(ctx);
         session_manager::maybe_persist_session(self, ctx);
+        transition::set_chrome_transition_active(ctx, self.chrome_transition_active());
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
     }
 
@@ -99,11 +106,14 @@ impl ScratchpadApp {
         dialogs::show_pending_action_modal(ctx, self);
         dialogs::show_transaction_log_window(ctx, self);
         shortcuts::handle_shortcuts(self, ctx);
+        self.finish_frame_transitions(ctx);
     }
 
     fn render_tab_chrome(&mut self, ui: &mut egui::Ui) {
         if self.tab_list_position() == crate::app::services::settings_store::TabListPosition::Top {
             tab_strip::show_header(ui, self);
+        } else {
+            tab_strip::show_top_drag_bar(ui, self);
         }
         status_bar::show_status_bar(ui, self);
         tab_strip::show_bottom_tab_list(ui, self);
@@ -174,6 +184,24 @@ impl ScratchpadApp {
 
     pub(crate) fn clear_session_dirty(&mut self) {
         self.tab_manager.session_dirty = false;
+    }
+
+    pub(crate) fn begin_chrome_transition(&mut self) {
+        self.chrome_transition_frames_remaining = CHROME_TRANSITION_FRAMES;
+    }
+
+    pub(crate) fn chrome_transition_active(&self) -> bool {
+        self.chrome_transition_frames_remaining > 0
+    }
+
+    fn finish_frame_transitions(&mut self, ctx: &egui::Context) {
+        if self.chrome_transition_frames_remaining > 0 {
+            self.chrome_transition_frames_remaining -= 1;
+        }
+        transition::set_chrome_transition_active(ctx, self.chrome_transition_active());
+        if self.chrome_transition_active() {
+            ctx.request_repaint();
+        }
     }
 
     pub(crate) fn persist_session_now(&mut self) -> std::io::Result<()> {

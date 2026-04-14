@@ -1,10 +1,16 @@
 use super::{SPLIT_DRAG_THRESHOLD, SplitAxis};
 use eframe::egui;
 
+const SPLIT_RATIO_MIN: f32 = 0.2;
+const SPLIT_RATIO_MAX: f32 = 0.8;
+const SPLIT_RATIO_CENTER_SNAP_BAND: f32 = 0.05;
+
 pub fn split_preview_spec(
     tile_rect: egui::Rect,
-    drag_delta: egui::Vec2,
+    start_pos: egui::Pos2,
+    current_pos: egui::Pos2,
 ) -> Option<(SplitAxis, bool, f32)> {
+    let drag_delta = current_pos - start_pos;
     if drag_delta.length() < SPLIT_DRAG_THRESHOLD {
         return None;
     }
@@ -22,7 +28,7 @@ pub fn split_preview_spec(
         SplitAxis::Horizontal
     };
 
-    let (new_view_first, ratio) = calculate_split_ratio(tile_rect, drag_delta, axis);
+    let (new_view_first, ratio) = calculate_split_ratio(tile_rect, current_pos, drag_delta, axis);
     Some((axis, new_view_first, ratio))
 }
 
@@ -47,20 +53,67 @@ pub fn split_rect(rect: egui::Rect, axis: SplitAxis, ratio: f32) -> (egui::Rect,
 
 fn calculate_split_ratio(
     tile_rect: egui::Rect,
+    current_pos: egui::Pos2,
     drag_delta: egui::Vec2,
     axis: SplitAxis,
 ) -> (bool, f32) {
-    let (dominant_delta, extent, new_view_first) = match axis {
-        SplitAxis::Vertical => (drag_delta.x.abs(), tile_rect.width(), drag_delta.x < 0.0),
-        SplitAxis::Horizontal => (drag_delta.y.abs(), tile_rect.height(), drag_delta.y < 0.0),
+    let (fraction, new_view_first) = match axis {
+        SplitAxis::Vertical => (
+            (current_pos.x - tile_rect.left()) / tile_rect.width().max(1.0),
+            drag_delta.x < 0.0,
+        ),
+        SplitAxis::Horizontal => (
+            (current_pos.y - tile_rect.top()) / tile_rect.height().max(1.0),
+            drag_delta.y < 0.0,
+        ),
     };
+    let ratio = snap_and_clamp_ratio(fraction);
+    (new_view_first, ratio)
+}
 
-    let new_tile_fraction = (dominant_delta / extent.max(1.0)).clamp(0.3, 0.7);
-    let ratio = if new_view_first {
-        new_tile_fraction
+fn snap_and_clamp_ratio(fraction: f32) -> f32 {
+    let clamped = fraction.clamp(SPLIT_RATIO_MIN, SPLIT_RATIO_MAX);
+    if (clamped - 0.5).abs() <= SPLIT_RATIO_CENTER_SNAP_BAND {
+        0.5
     } else {
-        1.0 - new_tile_fraction
-    };
+        clamped
+    }
+}
 
-    (new_view_first, ratio.clamp(0.2, 0.8))
+#[cfg(test)]
+mod tests {
+    use super::split_preview_spec;
+    use crate::app::domain::SplitAxis;
+    use eframe::egui;
+
+    #[test]
+    fn vertical_split_uses_pointer_x_for_ratio() {
+        let tile_rect =
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 400.0));
+
+        let split = split_preview_spec(tile_rect, egui::pos2(500.0, 20.0), egui::pos2(820.0, 30.0));
+
+        assert_eq!(split, Some((SplitAxis::Vertical, false, 0.8)));
+    }
+
+    #[test]
+    fn horizontal_split_uses_pointer_y_for_ratio() {
+        let tile_rect =
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(800.0, 1000.0));
+
+        let split = split_preview_spec(tile_rect, egui::pos2(20.0, 500.0), egui::pos2(40.0, 220.0));
+
+        assert_eq!(split, Some((SplitAxis::Horizontal, true, 0.22)));
+    }
+
+    #[test]
+    fn split_preview_snaps_near_center() {
+        let tile_rect =
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 400.0));
+
+        let split =
+            split_preview_spec(tile_rect, egui::pos2(500.0, 20.0), egui::pos2(540.0, 24.0));
+
+        assert_eq!(split, Some((SplitAxis::Vertical, false, 0.5)));
+    }
 }

@@ -60,7 +60,21 @@ impl WorkspaceTab {
     }
 
     pub fn display_name(&self) -> String {
-        self.buffer.display_name()
+        if self.distinct_buffer_count() < 2 {
+            return self.buffer.display_name();
+        }
+
+        let names = self.distinct_buffer_names_in_view_order();
+        let marker = if self.workspace_dirty() { "*" } else { "" };
+        let first = names
+            .first()
+            .cloned()
+            .unwrap_or_else(|| self.buffer.name.clone());
+        let second = names
+            .get(1)
+            .cloned()
+            .unwrap_or_else(|| self.buffer.name.clone());
+        format!("{marker}[{}] {} & {}", names.len(), first, second)
     }
 
     pub fn full_display_name(&self, has_duplicate: bool) -> String {
@@ -240,6 +254,34 @@ impl WorkspaceTab {
             .map(|view| view.buffer_id)
             .collect::<HashSet<_>>()
             .len()
+    }
+
+    fn distinct_buffer_names_in_view_order(&self) -> Vec<String> {
+        let ordered_view_ids = Self::ordered_view_ids(&self.root_pane);
+        let mut seen_buffer_ids = HashSet::new();
+        let mut names = Vec::new();
+
+        for view_id in ordered_view_ids {
+            let Some(view) = self.view(view_id) else {
+                continue;
+            };
+            if !seen_buffer_ids.insert(view.buffer_id) {
+                continue;
+            }
+            if let Some(buffer) = self.buffer_by_id(view.buffer_id) {
+                names.push(buffer.name.clone());
+            }
+        }
+
+        if names.is_empty() {
+            names.push(self.buffer.name.clone());
+        }
+
+        names
+    }
+
+    fn workspace_dirty(&self) -> bool {
+        self.buffers().any(|buffer| buffer.is_dirty)
     }
 
     fn sync_active_buffer_to_active_view(&mut self) -> bool {

@@ -10,8 +10,14 @@ pub(super) fn paint_dragged_tab_ghost(
     app: &ScratchpadApp,
     drag_state: TabDragState,
 ) {
-    let Some(display_name) = app.display_tab_name_at_slot(drag_state.source_index) else {
+    let dragged_slots = drag_state.dragged_indices.as_slice();
+    let Some(first_label) = app.display_tab_name_at_slot(drag_state.source_index) else {
         return;
+    };
+    let display_name = if dragged_slots.len() > 1 {
+        format!("[{} tabs] {}", dragged_slots.len(), first_label)
+    } else {
+        first_label
     };
     let rect = egui::Rect::from_center_size(
         drag_state.current_pos,
@@ -23,6 +29,23 @@ pub(super) fn paint_dragged_tab_ghost(
         egui::Id::new("dragged_tab_ghost"),
     ));
     let visuals = &ctx.global_style().visuals;
+
+    if dragged_slots.len() > 1 {
+        for layer in [2.0_f32, 1.0_f32] {
+            let shadow_rect = rect.translate(egui::vec2(layer * 6.0, layer * 4.0));
+            painter.rect_filled(
+                shadow_rect,
+                4.0,
+                tab_active_bg_for_visuals(visuals).gamma_multiply(0.35),
+            );
+            painter.rect_stroke(
+                shadow_rect,
+                4.0,
+                egui::Stroke::new(1.0, border_for_visuals(visuals).gamma_multiply(0.4)),
+                egui::StrokeKind::Outside,
+            );
+        }
+    }
 
     painter.rect_filled(
         rect,
@@ -42,6 +65,21 @@ pub(super) fn paint_dragged_tab_ghost(
         egui::FontId::proportional(14.0),
         text_primary_for_visuals(visuals),
     );
+
+    if dragged_slots.len() > 1 {
+        let badge_rect = egui::Rect::from_center_size(
+            rect.right_top() + egui::vec2(-18.0, 12.0),
+            egui::vec2(28.0, 18.0),
+        );
+        painter.rect_filled(badge_rect, 9.0, TAB_REORDER_MARKER_COLOR);
+        painter.text(
+            badge_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            dragged_slots.len().to_string(),
+            egui::FontId::proportional(12.0),
+            egui::Color32::WHITE,
+        );
+    }
 }
 
 pub(super) fn paint_tab_reorder_marker(ctx: &egui::Context, zone: &TabDropZone, drop_slot: usize) {

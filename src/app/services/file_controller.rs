@@ -1,6 +1,6 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
-use crate::app::domain::{BufferState, WorkspaceTab};
+use crate::app::domain::{BufferFreshness, BufferState, WorkspaceTab};
 use crate::app::logging::LogLevel;
 use crate::app::services::file_service::{FileContent, FileService};
 use crate::app::utils::summarize_open_results;
@@ -177,6 +177,8 @@ impl FileController {
             return false;
         }
 
+        let _ = Self::refresh_buffer_disk_state(app, index);
+
         if Self::has_existing_save_path(app, index) {
             Self::save_existing_path(app, index)
         } else {
@@ -210,6 +212,52 @@ impl FileController {
             app.set_info_status("Save cancelled.");
             false
         }
+    }
+
+    pub(crate) fn refresh_active_buffer_disk_state(app: &mut ScratchpadApp) -> bool {
+        let index = app.active_tab_index();
+        Self::refresh_buffer_disk_state(app, index)
+    }
+
+    pub(crate) fn reload_buffer_from_disk(app: &mut ScratchpadApp, index: usize) -> bool {
+        if index >= app.tabs().len() {
+            return false;
+        }
+
+        let Some(path) = app.tabs()[index].active_buffer().path.clone() else {
+            return false;
+        };
+
+        match FileService::read_file(&path) {
+            Ok(file_content) => {
+                let disk_state = FileService::read_disk_state(&path).ok();
+                let buffer_name = {
+                    let buffer = app.tabs_mut()[index].active_buffer_mut();
+                    buffer.replace_text(file_content.content);
+                    buffer.encoding = file_content.encoding;
+                    buffer.has_bom = file_content.has_bom;
+                    buffer.is_dirty = false;
+                    buffer.sync_to_disk_state(disk_state);
+                    buffer.name.clone()
+                };
+                app.mark_session_dirty();
+                app.set_info_status(format!("Reloaded {buffer_name} because it changed on disk."));
+                true
+            }
+            Err(error) => {
+                app.set_error_status(format!("Reload failed: {error}"));
+                false
+            }
+        }
+    }
+
+    pub(crate) fn save_conflict_overwrite(app: &mut ScratchpadApp, index: usize) -> bool {
+        if index >= app.tabs().len() || !Self::has_existing_save_path(app, index) {
+            return false;
+        }
+
+        let path = app.tabs()[index].active_buffer().path.clone().unwrap();
+        Self::save_buffer_to_path(app, index, path, false)
     }
 
     fn open_selected_paths(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
@@ -316,7 +364,102 @@ impl FileController {
         artifact_warning
     }
 
+    fn refresh_buffer_disk_state(app: &mut ScratchpadApp, index: usize) -> bool {
+        if index >= app.tabs().len() {
+            return false;
+        }
+
+        let Some(path) = app.tabs()[index].active_buffer().path.clone() else {
+            return false;
+        };
+
+        match FileService::read_disk_state(&path) {
+            Ok(disk_state) => {
+                let (is_dirty, known_disk_state, buffer_name) = {
+                    let buffer = app.tabs()[index].active_buffer();
+                    (
+                        buffer.is_dirty,
+                        buffer.disk_state.clone(),
+                        buffer.name.clone(),
+                    )
+                };
+
+                if known_disk_state.as_ref() == Some(&disk_state) {
+                    let buffer = app.tabs_mut()[index].active_buffer_mut();
+                    buffer.sync_to_disk_state(Some(disk_state));
+                    return false;
+                }
+
+                if known_disk_state.is_none() {
+                    let buffer = app.tabs_mut()[index].active_buffer_mut();
+                    buffer.sync_to_disk_state(Some(disk_state));
+                    return false;
+                }
+
+                if is_dirty {
+                    let buffer = app.tabs_mut()[index].active_buffer_mut();
+                    buffer.mark_conflict_on_disk(Some(disk_state));
+                    app.set_warning_status(format!(
+                        "{} changed on disk. Your tab has unsaved edits.",
+                        buffer_name
+                    ));
+                    app.mark_session_dirty();
+                    return true;
+                }
+
+                match FileService::read_file(&path) {
+                    Ok(file_content) => {
+                        let buffer = app.tabs_mut()[index].active_buffer_mut();
+                        buffer.replace_text(file_content.content);
+                        buffer.encoding = file_content.encoding;
+                        buffer.has_bom = file_content.has_bom;
+                        buffer.is_dirty = false;
+                        buffer.sync_to_disk_state(Some(disk_state));
+                        app.set_info_status(format!(
+                            "Reloaded {} because it changed on disk.",
+                            buffer_name
+                        ));
+                        app.mark_session_dirty();
+                        true
+                    }
+                    Err(error) => {
+                        let buffer = app.tabs_mut()[index].active_buffer_mut();
+                        buffer.mark_stale_on_disk(Some(disk_state));
+                        app.set_warning_status(format!(
+                            "Detected a newer on-disk version of {} but could not reload it: {error}",
+                            buffer_name
+                        ));
+                        app.mark_session_dirty();
+                        true
+                    }
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let buffer_name = app.tabs()[index].active_buffer().name.clone();
+                let buffer = app.tabs_mut()[index].active_buffer_mut();
+                buffer.disk_state = None;
+                buffer.mark_missing_on_disk();
+                app.set_warning_status(format!("{buffer_name} is missing on disk."));
+                app.mark_session_dirty();
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
     fn save_existing_path(app: &mut ScratchpadApp, index: usize) -> bool {
+        let freshness = app.tabs()[index].active_buffer().freshness;
+        if matches!(
+            freshness,
+            BufferFreshness::ConflictOnDisk | BufferFreshness::MissingOnDisk | BufferFreshness::StaleOnDisk
+        ) {
+            app.set_pending_action(Some(crate::app::domain::PendingAction::SaveConflict(index)));
+            if let Some(message) = app.tabs()[index].active_buffer().disk_status_message() {
+                app.set_warning_status(message);
+            }
+            return false;
+        }
+
         let path = app.tabs()[index].active_buffer().path.clone().unwrap();
         Self::save_buffer_to_path(app, index, path, false)
     }
@@ -369,6 +512,7 @@ impl FileController {
             Self::assign_saved_path(buffer, &path);
         }
         buffer.is_dirty = false;
+        buffer.sync_to_disk_state(FileService::read_disk_state(&path).ok());
         buffer.is_settings_file = buffer
             .path
             .as_ref()
@@ -421,6 +565,7 @@ impl FileController {
 
     fn buffer_from_file_content(path: PathBuf, file_content: FileContent) -> BufferState {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let disk_state = FileService::read_disk_state(&path).ok();
         let mut buffer = BufferState::with_encoding(
             name,
             file_content.content,
@@ -429,6 +574,7 @@ impl FileController {
             file_content.has_bom,
         );
         buffer.artifact_summary = file_content.artifact_summary;
+        buffer.sync_to_disk_state(disk_state);
         buffer
     }
 

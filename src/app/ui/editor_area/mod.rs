@@ -17,6 +17,8 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             return;
         }
 
+        app.workspace_reflow_axis = preferred_workspace_reflow_axis(ui.max_rect());
+
         let ctx = ui.ctx().clone();
         handle_editor_zoom(&ctx, ui, app);
         let editor_state = prepare_editor_state(app);
@@ -27,6 +29,14 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             apply_editor_change(app, &editor_state);
         }
     });
+}
+
+fn preferred_workspace_reflow_axis(rect: egui::Rect) -> crate::app::domain::SplitAxis {
+    if rect.width() >= rect.height() {
+        crate::app::domain::SplitAxis::Vertical
+    } else {
+        crate::app::domain::SplitAxis::Horizontal
+    }
 }
 
 struct EditorRenderState {

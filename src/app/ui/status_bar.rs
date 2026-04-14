@@ -19,6 +19,7 @@ struct ActiveStatusDetails {
     icon_tooltip: &'static str,
     icon_color: egui::Color32,
     warning_label: Option<String>,
+    freshness_label: Option<String>,
     is_large_file: bool,
     has_control_chars: bool,
 }
@@ -95,6 +96,7 @@ fn collect_active_status_details(
                     format!("{warning_text}; cleaned view")
                 }
             }),
+        freshness_label: tab.buffer.disk_status_label().map(str::to_owned),
         is_large_file: tab.buffer.text().len() > 5 * 1024 * 1024,
         has_control_chars,
     })
@@ -179,6 +181,11 @@ fn show_control_char_toggle(
 }
 
 fn show_status_warnings(ui: &mut egui::Ui, details: &ActiveStatusDetails) {
+    if let Some(freshness_label) = &details.freshness_label {
+        ui.separator();
+        ui.label(egui::RichText::new(freshness_label).color(egui::Color32::YELLOW));
+    }
+
     if details.is_large_file {
         ui.separator();
         ui.label(

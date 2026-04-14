@@ -2,7 +2,7 @@
 
 use eframe::egui::{TextBuffer, text::CCursorRange};
 use eframe::epaint::text::cursor::CCursor;
-use scratchpad::app::domain::{BufferState, RestoredBufferState, TextDocument};
+use scratchpad::app::domain::{BufferFreshness, BufferState, RestoredBufferState, TextDocument};
 use std::path::PathBuf;
 
 #[test]
@@ -42,6 +42,8 @@ fn restored_buffer_preserves_session_metadata() {
         temp_id: "buffer-restore-1".to_owned(),
         encoding: "UTF-8".to_owned(),
         has_bom: false,
+        disk_state: None,
+        freshness: BufferFreshness::InSync,
     });
 
     assert!(buffer.is_dirty);

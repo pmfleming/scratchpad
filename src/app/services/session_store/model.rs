@@ -5,7 +5,7 @@ use crate::app::services::settings_store::{
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub const SESSION_VERSION: u32 = 6;
+pub const SESSION_VERSION: u32 = 7;
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct SessionManifest {
@@ -65,6 +65,10 @@ pub(crate) struct SessionBuffer {
     pub temp_id: String,
     pub encoding: String,
     pub has_bom: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_modified_millis: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_len: Option<u64>,
 }
 
 impl From<&crate::app::domain::BufferState> for SessionBuffer {
@@ -78,6 +82,8 @@ impl From<&crate::app::domain::BufferState> for SessionBuffer {
             temp_id: buffer.temp_id.clone(),
             encoding: buffer.encoding.clone(),
             has_bom: buffer.has_bom,
+            disk_modified_millis: buffer.disk_state.as_ref().and_then(|state| state.modified_millis),
+            disk_len: buffer.disk_state.as_ref().map(|state| state.len),
         }
     }
 }

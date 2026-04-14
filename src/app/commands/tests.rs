@@ -1,8 +1,25 @@
 use super::AppCommand;
 use crate::app::app_state::ScratchpadApp;
-use crate::app::domain::{BufferState, SplitAxis, WorkspaceTab};
+use crate::app::domain::{BufferFreshness, BufferState, PaneNode, SplitAxis, WorkspaceTab};
 use crate::app::fonts::EditorFontPreset;
+use crate::app::services::file_controller::FileController;
 use crate::app::services::session_store::SessionStore;
+use std::fs;
+
+fn collect_leaf_area_fractions(node: &PaneNode, area_fraction: f32, output: &mut Vec<f32>) {
+    match node {
+        PaneNode::Leaf { .. } => output.push(area_fraction),
+        PaneNode::Split {
+            ratio,
+            first,
+            second,
+            ..
+        } => {
+            collect_leaf_area_fractions(first, area_fraction * ratio, output);
+            collect_leaf_area_fractions(second, area_fraction * (1.0 - ratio), output);
+        }
+    }
+}
 
 fn test_app() -> ScratchpadApp {
     let session_root = tempfile::tempdir().expect("create session dir");
@@ -435,4 +452,64 @@ fn closing_dirty_settings_file_applies_buffered_toml_edits() {
     assert_settings_applied(&app, 26.0);
     assert!(app.showing_settings());
     assert_eq!(app.settings_slot_index(), Some(0));
+}
+
+#[test]
+fn activating_clean_tab_reloads_newer_disk_content() {
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let first_path = temp_dir.path().join("first.txt");
+    let second_path = temp_dir.path().join("second.txt");
+    fs::write(&first_path, "alpha\n").expect("write first temp file");
+    fs::write(&second_path, "beta\n").expect("write second temp file");
+
+    let mut app = test_app();
+    FileController::open_external_paths(&mut app, vec![first_path.clone(), second_path]);
+    let (first_tab_index, _) = app
+        .find_tab_by_path(&first_path)
+        .expect("first file should be open");
+
+    fs::write(&first_path, "alpha changed on disk\n").expect("overwrite first temp file");
+    app.handle_command(AppCommand::ActivateTab {
+        index: first_tab_index,
+    });
+
+    let buffer = app.tabs()[app.active_tab_index()].active_buffer();
+    assert_eq!(buffer.text(), "alpha changed on disk\n");
+    assert_eq!(buffer.freshness, BufferFreshness::InSync);
+}
+
+#[test]
+fn combining_multiple_tabs_rebalances_workspace_equally() {
+    let mut app = app_with_named_tabs(&["one.txt", "two.txt", "three.txt", "four.txt"]);
+
+    app.handle_command(AppCommand::CombineTabsIntoTab {
+        source_indices: vec![1, 2, 3],
+        target_index: 0,
+    });
+
+    assert_eq!(app.tabs().len(), 1);
+
+    let mut areas = Vec::new();
+    collect_leaf_area_fractions(&app.tabs()[0].root_pane, 1.0, &mut areas);
+
+    assert_eq!(areas.len(), 4);
+    assert!(areas.iter().all(|area| (area - 0.25).abs() < f32::EPSILON));
+}
+
+#[test]
+fn combining_single_tab_rebalances_workspace_equally() {
+    let mut app = app_with_named_tabs(&["one.txt", "two.txt"]);
+
+    app.handle_command(AppCommand::CombineTabIntoTab {
+        source_index: 1,
+        target_index: 0,
+    });
+
+    assert_eq!(app.tabs().len(), 1);
+
+    let mut areas = Vec::new();
+    collect_leaf_area_fractions(&app.tabs()[0].root_pane, 1.0, &mut areas);
+
+    assert_eq!(areas.len(), 2);
+    assert!(areas.iter().all(|area| (area - 0.5).abs() < f32::EPSILON));
 }

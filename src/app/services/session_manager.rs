@@ -1,4 +1,5 @@
 use crate::app::app_state::ScratchpadApp;
+use crate::app::services::session_store::{RestoreStatusLevel, RestoredSession};
 use crate::app::services::settings_store::AppSettings;
 use eframe::egui;
 use std::time::Instant;
@@ -44,8 +45,14 @@ pub(crate) fn restore_session_state(app: &mut ScratchpadApp) -> Option<AppSettin
 
 fn apply_restored_session(
     app: &mut ScratchpadApp,
-    restored: crate::app::services::session_store::RestoredSession,
+    restored: RestoredSession,
 ) -> AppSettings {
+    if let Some(status) = restored.restore_status.as_ref() {
+        match status.level {
+            RestoreStatusLevel::Info => app.set_info_status(status.message.clone()),
+            RestoreStatusLevel::Warning => app.set_warning_status(status.message.clone()),
+        }
+    }
     app.tab_manager_mut().tabs = restored.tabs;
     app.tab_manager_mut().active_tab_index = restored.active_tab_index;
     restored.legacy_settings

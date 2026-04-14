@@ -2,7 +2,8 @@ mod model;
 mod ops;
 
 use crate::app::domain::{
-    BufferState, EditorViewState, PaneNode, RestoredBufferState, WorkspaceTab,
+    BufferFreshness, BufferState, DiskFileState, EditorViewState, PaneNode, RestoredBufferState,
+    WorkspaceTab,
 };
 use crate::app::services::file_service::FileService;
 use crate::app::services::settings_store::AppSettings;
@@ -28,6 +29,19 @@ pub struct RestoredSession {
     pub tabs: Vec<WorkspaceTab>,
     pub active_tab_index: usize,
     pub legacy_settings: AppSettings,
+    pub restore_status: Option<RestoreStatus>,
+}
+
+#[derive(Clone)]
+pub struct RestoreStatus {
+    pub level: RestoreStatusLevel,
+    pub message: String,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum RestoreStatusLevel {
+    Info,
+    Warning,
 }
 
 impl Default for SessionStore {
@@ -56,8 +70,9 @@ impl SessionStore {
         let legacy_settings = manifest.legacy_settings();
 
         let mut tabs = Vec::with_capacity(manifest.tabs.len());
+        let mut restore_summary = RestoreSummary::default();
         for tab in manifest.tabs {
-            tabs.push(self.restore_tab(tab));
+            tabs.push(self.restore_tab(tab, &mut restore_summary));
         }
 
         if tabs.is_empty() {
@@ -68,6 +83,7 @@ impl SessionStore {
             active_tab_index: manifest.active_tab_index.min(tabs.len() - 1),
             tabs,
             legacy_settings,
+            restore_status: restore_summary.into_status(),
         }))
     }
 
@@ -151,8 +167,8 @@ impl SessionStore {
         Ok(Some(manifest))
     }
 
-    fn restore_tab(&self, tab: SessionTab) -> WorkspaceTab {
-        let mut buffers = self.restore_buffers(&tab);
+    fn restore_tab(&self, tab: SessionTab, summary: &mut RestoreSummary) -> WorkspaceTab {
+        let mut buffers = self.restore_buffers(&tab, summary);
         let control_chars_allowed = buffers
             .iter()
             .any(|buffer| buffer.artifact_summary.has_control_chars());
@@ -194,7 +210,7 @@ impl SessionStore {
         )
     }
 
-    fn restore_buffers(&self, tab: &SessionTab) -> Vec<BufferState> {
+    fn restore_buffers(&self, tab: &SessionTab, summary: &mut RestoreSummary) -> Vec<BufferState> {
         let session_buffers = if tab.buffers.is_empty() {
             tab.buffer_id
                 .zip(tab.name.clone())
@@ -213,6 +229,8 @@ impl SessionStore {
                             temp_id,
                             encoding,
                             has_bom,
+                            disk_modified_millis: None,
+                            disk_len: None,
                         }]
                     },
                 )
@@ -224,16 +242,26 @@ impl SessionStore {
         session_buffers
             .into_iter()
             .map(|buffer| {
-                let (content, encoding, has_bom) = self.restore_buffer_content(&buffer);
+                let restored = self.restore_buffer_content(&buffer);
+                if !buffer.is_dirty
+                    && restored.freshness == BufferFreshness::InSync
+                    && restored.disk_state.is_some()
+                    && restored.disk_state != session_disk_state(&buffer)
+                {
+                    summary.reloaded_clean_buffers += 1;
+                }
+                summary.record(restored.freshness);
                 let mut restored_buffer = BufferState::restored(RestoredBufferState {
                     id: buffer.id,
                     name: buffer.name,
-                    content,
+                    content: restored.content,
                     path: buffer.path,
                     is_dirty: buffer.is_dirty,
                     temp_id: buffer.temp_id,
-                    encoding,
-                    has_bom,
+                    encoding: restored.encoding,
+                    has_bom: restored.has_bom,
+                    disk_state: restored.disk_state,
+                    freshness: restored.freshness,
                 });
                 restored_buffer.is_settings_file = buffer.is_settings_file;
                 restored_buffer
@@ -241,23 +269,146 @@ impl SessionStore {
             .collect()
     }
 
-    fn restore_buffer_content(&self, buffer: &SessionBuffer) -> (String, String, bool) {
-        if let Ok(content) = fs::read_to_string(self.buffer_path(&buffer.temp_id)) {
-            return (content, buffer.encoding.clone(), buffer.has_bom);
-        }
+    fn restore_buffer_content(&self, buffer: &SessionBuffer) -> RestoredBufferContent {
+        let session_disk_state = session_disk_state(buffer);
+        let session_text = fs::read_to_string(self.buffer_path(&buffer.temp_id)).ok();
 
-        match &buffer.path {
-            Some(path) => match FileService::read_file(path) {
-                Ok(file_content) => (
-                    file_content.content,
-                    file_content.encoding,
-                    file_content.has_bom,
-                ),
-                Err(_) => (String::new(), buffer.encoding.clone(), buffer.has_bom),
+        match (&buffer.path, session_text) {
+            (Some(path), Some(content)) => {
+                let current_disk_state = FileService::read_disk_state(path).ok();
+                match current_disk_state {
+                    Some(disk_state) if Some(disk_state.clone()) != session_disk_state => {
+                        if buffer.is_dirty {
+                            RestoredBufferContent {
+                                content,
+                                encoding: buffer.encoding.clone(),
+                                has_bom: buffer.has_bom,
+                                disk_state: Some(disk_state),
+                                freshness: BufferFreshness::ConflictOnDisk,
+                            }
+                        } else {
+                            match FileService::read_file(path) {
+                                Ok(file_content) => RestoredBufferContent {
+                                    content: file_content.content,
+                                    encoding: file_content.encoding,
+                                    has_bom: file_content.has_bom,
+                                    disk_state: Some(disk_state),
+                                    freshness: BufferFreshness::InSync,
+                                },
+                                Err(_) => RestoredBufferContent {
+                                    content,
+                                    encoding: buffer.encoding.clone(),
+                                    has_bom: buffer.has_bom,
+                                    disk_state: Some(disk_state),
+                                    freshness: BufferFreshness::StaleOnDisk,
+                                },
+                            }
+                        }
+                    }
+                    Some(disk_state) => RestoredBufferContent {
+                        content,
+                        encoding: buffer.encoding.clone(),
+                        has_bom: buffer.has_bom,
+                        disk_state: Some(disk_state),
+                        freshness: BufferFreshness::InSync,
+                    },
+                    None => RestoredBufferContent {
+                        content,
+                        encoding: buffer.encoding.clone(),
+                        has_bom: buffer.has_bom,
+                        disk_state: None,
+                        freshness: BufferFreshness::MissingOnDisk,
+                    },
+                }
+            }
+            (Some(path), None) => match FileService::read_file(path) {
+                Ok(file_content) => RestoredBufferContent {
+                    content: file_content.content,
+                    encoding: file_content.encoding,
+                    has_bom: file_content.has_bom,
+                    disk_state: FileService::read_disk_state(path).ok(),
+                    freshness: BufferFreshness::InSync,
+                },
+                Err(_) => RestoredBufferContent {
+                    content: String::new(),
+                    encoding: buffer.encoding.clone(),
+                    has_bom: buffer.has_bom,
+                    disk_state: None,
+                    freshness: BufferFreshness::MissingOnDisk,
+                },
             },
-            None => (String::new(), buffer.encoding.clone(), buffer.has_bom),
+            (None, Some(content)) => RestoredBufferContent {
+                content,
+                encoding: buffer.encoding.clone(),
+                has_bom: buffer.has_bom,
+                disk_state: None,
+                freshness: BufferFreshness::InSync,
+            },
+            (None, None) => RestoredBufferContent {
+                content: String::new(),
+                encoding: buffer.encoding.clone(),
+                has_bom: buffer.has_bom,
+                disk_state: None,
+                freshness: BufferFreshness::InSync,
+            },
         }
     }
+}
+
+#[derive(Default)]
+struct RestoreSummary {
+    reloaded_clean_buffers: usize,
+    conflicted_buffers: usize,
+    missing_buffers: usize,
+}
+
+impl RestoreSummary {
+    fn record(&mut self, freshness: BufferFreshness) {
+        match freshness {
+            BufferFreshness::InSync | BufferFreshness::StaleOnDisk => {}
+            BufferFreshness::ConflictOnDisk => self.conflicted_buffers += 1,
+            BufferFreshness::MissingOnDisk => self.missing_buffers += 1,
+        }
+    }
+
+    fn into_status(self) -> Option<RestoreStatus> {
+        if self.conflicted_buffers > 0 || self.missing_buffers > 0 {
+            return Some(RestoreStatus {
+                level: RestoreStatusLevel::Warning,
+                message: format!(
+                    "Session restored with {} disk conflict(s) and {} missing file(s).",
+                    self.conflicted_buffers, self.missing_buffers
+                ),
+            });
+        }
+
+        if self.reloaded_clean_buffers > 0 {
+            return Some(RestoreStatus {
+                level: RestoreStatusLevel::Info,
+                message: format!(
+                    "Reloaded {} clean file(s) from disk during session restore.",
+                    self.reloaded_clean_buffers
+                ),
+            });
+        }
+
+        None
+    }
+}
+
+struct RestoredBufferContent {
+    content: String,
+    encoding: String,
+    has_bom: bool,
+    disk_state: Option<DiskFileState>,
+    freshness: BufferFreshness,
+}
+
+fn session_disk_state(buffer: &SessionBuffer) -> Option<DiskFileState> {
+    Some(DiskFileState {
+        modified_millis: buffer.disk_modified_millis,
+        len: buffer.disk_len?,
+    })
 }
 
 fn invalid_data(error: impl ToString) -> io::Error {

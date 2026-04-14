@@ -1,10 +1,11 @@
-use crate::app::domain::TextArtifactSummary;
+use crate::app::domain::{DiskFileState, TextArtifactSummary};
 use chardetng::EncodingDetector;
 use encoding_rs::Encoding;
 use encoding_rs_io::DecodeReaderBytesBuilder;
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
+use std::time::UNIX_EPOCH;
 
 pub struct FileService;
 
@@ -17,6 +18,20 @@ pub struct FileContent {
 }
 
 impl FileService {
+    pub fn read_disk_state(path: &Path) -> io::Result<DiskFileState> {
+        let metadata = std::fs::metadata(path)?;
+        let modified_millis = metadata
+            .modified()
+            .ok()
+            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis() as u64);
+
+        Ok(DiskFileState {
+            modified_millis,
+            len: metadata.len(),
+        })
+    }
+
     pub fn read_file(path: &Path) -> io::Result<FileContent> {
         let mut file = File::open(path)?;
         let mut prefix = [0_u8; 4096];

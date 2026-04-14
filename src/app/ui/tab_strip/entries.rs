@@ -12,6 +12,7 @@ use crate::app::theme::{
 use crate::app::ui::tab_drag::{self, TabDropAxis, TabDropZone, TabRectEntry};
 use crate::app::ui::tab_overflow;
 use crate::app::ui::tab_strip::render_tab_cell_sized;
+use crate::app::ui::tab_strip::tab_cell::TabCellProps;
 use eframe::egui::{self, Sense, Stroke};
 use std::collections::{HashMap, HashSet};
 
@@ -206,28 +207,44 @@ fn collect_tab_drop_zones(
 
 fn render_tab_slot_cell(
     ui: &mut egui::Ui,
-    app: &ScratchpadApp,
+    app: &mut ScratchpadApp,
     slot_index: usize,
     context: &SlotCellContext<'_>,
     outcome: &mut TabStripOutcome,
 ) -> super::tab_cell::TabCellOutcome {
     if let Some(tab) = workspace_tab_for_slot(app, slot_index) {
+        let has_duplicate = context
+            .duplicate_name_counts
+            .get(&tab.buffer.name)
+            .copied()
+            .unwrap_or(0)
+            > 1;
+        let display_name = tab.full_display_name(has_duplicate);
+        let tooltip = display_name.clone();
+        let can_promote_all_files = tab.can_promote_all_files();
+        let is_active = !context.showing_settings && context.active_slot_index == slot_index;
+        let is_selected = app.tab_slot_selected(slot_index);
         let cell_outcome = render_tab_cell_sized(
             ui,
+            app,
             slot_index,
-            tab,
-            !context.showing_settings && context.active_slot_index == slot_index,
-            context.pending_scroll_to_active,
-            context.duplicate_name_counts,
-            context.width,
+            TabCellProps {
+                display_name: &display_name,
+                tooltip: Some(tooltip),
+                can_promote_all_files,
+                is_active,
+                is_selected,
+                pending_scroll_to_active: context.pending_scroll_to_active,
+                width: context.width,
+            },
         );
         apply_tab_interaction(outcome, cell_outcome.interaction);
         return finish_tab_slot_cell(ui, slot_index, context, cell_outcome, outcome);
     }
 
     let (tab_response, close_response, _) =
-        tab_button_sized(ui, "Settings", app.showing_settings(), context.width);
-    tab_drag::begin_tab_drag_if_needed(ui, slot_index, &tab_response, &close_response);
+        tab_button_sized(ui, "Settings", app.showing_settings(), false, context.width);
+    tab_drag::begin_tab_drag_if_needed(ui, slot_index, &[slot_index], &tab_response, &close_response);
     apply_settings_tab_interaction(
         outcome,
         app.showing_settings(),
@@ -383,7 +400,7 @@ fn slot_cell_context<'a>(
 
 fn collect_slot_entries(
     ui: &mut egui::Ui,
-    app: &ScratchpadApp,
+    app: &mut ScratchpadApp,
     context: &SlotCellContext<'_>,
     outcome: &mut TabStripOutcome,
     mut on_rect: impl FnMut(usize, egui::Rect),
@@ -482,10 +499,18 @@ fn update_reordered_tabs(
                 from_index,
                 to_index,
             } => outcome.reordered_tabs = Some((from_index, to_index)),
+            tab_drag::TabDragCommit::ReorderGroup {
+                from_indices,
+                to_index,
+            } => outcome.reordered_tab_group = Some((from_indices, to_index)),
             tab_drag::TabDragCommit::Combine {
                 source_index,
                 target_index,
             } => outcome.combined_tabs = Some((source_index, target_index)),
+            tab_drag::TabDragCommit::CombineGroup {
+                source_indices,
+                target_index,
+            } => outcome.combined_tab_group = Some((source_indices, target_index)),
         }
     }
 }

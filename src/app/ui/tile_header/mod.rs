@@ -3,7 +3,7 @@ pub mod split;
 
 use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::ViewId;
-use crate::app::ui::tab_drag;
+use crate::app::ui::transition;
 use eframe::egui;
 
 pub use control::{TileControl, TileControlStyle};
@@ -144,7 +144,7 @@ fn control_visibility(
     split_handler: &TileSplitHandler,
     tile_rect: egui::Rect,
 ) -> f32 {
-    if !split_handler.is_dragging(ui) && tab_drag::has_tab_drag_for_context(ui.ctx()) {
+    if !split_handler.is_dragging(ui) && transition::suppress_interactive_chrome(ui.ctx()) {
         return 0.0;
     }
 

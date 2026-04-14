@@ -1,139 +1,96 @@
 # Search / Replace Implementation Plan For Scratchpad
 
-This document translates `docs/search-replace-plan.md` into a concrete implementation plan for the current Scratchpad codebase.
+This plan replaces the earlier draft and is written against the project as it exists today.
 
-It now also reflects the editor-state foundation work that has already landed since the earlier draft of this implementation plan.
+It is intentionally implementation-oriented. The goal is to give us a realistic path to shipping search and replace in the current codebase without promising behavior the editor cannot honestly support yet.
 
-The existing search/replace plan is useful as a product-direction document, but it currently mixes together several different concepts:
+## 1. Current Project Reality
 
-- in-editor text search
-- cross-buffer replacement
-- tab lookup (`Find Tab`)
-- future provider-model extensibility
-- advanced features like regex, transactions, and multi-cursor promotion
+Scratchpad now has a much stronger editing foundation than it did when the original search/replace planning started.
 
-Scratchpad is still not ready to land all of that in one pass, but it is in a much better position than it was when the first draft of this implementation plan was written.
+Important current facts:
 
-This plan keeps the current UX intent, but restructures delivery into phases that match the architecture already in `src/app/`.
+- `BufferState` owns a `TextDocument`.
+- `TextDocument` is the editable text source used by `egui::TextEdit`.
+- each `TextDocument` owns its own undo history
+- undo/redo is per document, not global
+- `EditorViewState` already stores:
+  - `cursor_range`
+  - `pending_cursor_range`
+  - `search_highlights`
+- the editor render bridge in `src/app/ui/editor_content/text_edit.rs` already synchronizes:
+  - `TextDocument`
+  - `egui::TextEditState`
+  - selection/caret state
+  - per-document undo state
+- workspace tabs may contain:
+  - one active buffer
+  - additional buffers in the same workspace tab
+  - multiple split views pointing at those buffers
+- the app also now has a separate workspace transaction log, but normal text undo remains document-local
 
-## 1. Original Goals We Should Preserve
+These facts change the plan substantially:
 
-The original `docs/search-replace-plan.md` is still the right product reference for the user-facing goals.
+- active-buffer search is now straightforward
+- match navigation can drive selection through `pending_cursor_range`
+- replace flows must respect per-document undo instead of inventing a fake global undo model
+- cross-buffer replace-all must be treated as a multi-document operation, not one atomic undo transaction
 
-The implementation plan should continue to optimize for these outcomes:
+## 2. Product Scope We Should Ship
 
-- a compact unified search/replace strip rather than separate search and replace surfaces
-- immediate in-editor feedback while typing
+### First ship target
+
+Ship a compact in-editor search / replace strip that supports:
+
+- `Ctrl + F` to open search
+- `Ctrl + H` to open search with replace visible
+- plain-text search in the active buffer
 - next / previous match navigation
 - match count and active match index
-- replace current and replace all
-- scope selection from the same UI
-- a non-modal workflow that keeps the editor usable while search is open
-
-Those goals remain valid. What changes in this document is how we land them in the current codebase.
-
-## 2. Foundation Already Completed
-
-The earlier version of this implementation plan treated three editor limitations as blockers:
-
-- no document model
-- no persisted caret / selection state
-- no general undo / redo support
-
-Those are no longer true in the same form.
-
-Recent improvements now available in the codebase:
-
-- `BufferState` owns a `TextDocument` instead of exposing a raw public text field.
-- `TextDocument` implements `egui::TextBuffer`, which means the editor can still render and mutate it through `egui::TextEdit` without a parallel widget-only buffer.
-- `TextDocument` now owns document-level undo history via `egui::util::undoer::Undoer<(CCursorRange, String)>`.
-- `EditorViewState` now stores `cursor_range`, `pending_cursor_range`, and `search_highlights`.
-- `src/app/ui/editor_content/text_edit.rs` now synchronizes `TextDocument` undo state into `egui::TextEditState` before render and captures both updated undo state and `cursor_range` after render.
-- explicit editor undo depth is now defined as 100 undo levels per text document.
-
-This changes the search/replace plan materially:
-
-- active-buffer search highlighting is now a straightforward extension of existing view state
-- navigation-to-match can now drive selection directly through `pending_cursor_range`
-- single-document replace flows can preserve document undo history instead of inventing a second undo model
-
-## 3. Current Codebase Reality
-
-### Existing seams we should build on
-
-- `src/app/ui/editor_content/text_edit.rs` already owns the custom `TextEdit` layouter and captures the latest `Galley` into `RenderedLayout`.
-- `src/app/ui/editor_content/text_edit.rs` now also owns the bridge between `TextDocument`, `egui::TextEditState`, cursor state, and document undo history.
-- `src/app/ui/editor_area/mod.rs` owns the active workspace render path and is the right place to mount a search strip above the pane tree.
-- `src/app/app_state.rs` is the top-level owner of cross-workspace UI state and should own the active search session.
-- `src/app/commands.rs` and `src/app/shortcuts.rs` are already the command/shortcut entry points.
-- `src/app/ui/tab_strip/actions.rs` already exposes a search button, but it is still a placeholder.
-- `WorkspaceTab`, `BufferState`, and `EditorViewState` already distinguish between:
-  - the active view/buffer
-  - multiple buffers inside one workspace tab
-  - multiple tabs across the app
-
-### Constraints that matter
-
-- Search still has no app-owned state, commands, or UI module.
-- Search highlighting is not yet rendered, even though the view state now has a place to store it.
-- Cross-buffer replace-all still cannot reasonably satisfy a global one-step `Ctrl+Z` guarantee. Undo now exists per `TextDocument`, not as a cross-document transaction log.
-- `Find Tab` is still a different feature from text search and should not be coupled to replace workflows.
-
-## 4. Scope Reconciliation
-
-To keep the feature shippable, split the work into two tracks.
-
-### Track A: in-editor search / replace
-
-This is the feature that should ship first.
-
-First-pass scope:
-
-- open search with `Ctrl + F`
-- open search + replace with `Ctrl + H`
-- show a unified strip inside the active editor area
-- search the active buffer immediately while typing
-- navigate next / previous matches
-- show match count and active match index
-- replace current match
-- replace all matches in the selected scope
-- support three text scopes:
+- replace current
+- replace all in:
   - active buffer
   - active workspace tab
   - all open tabs
+- case-sensitive toggle
+- non-modal workflow so the editor remains usable while search is open
 
-Explicitly out of first pass:
+### Explicitly out of first pass
 
 - regex
-- project-wide search on disk
-- search in unopened files
-- multi-cursor promotion (`Ctrl + D`)
-- cross-document single-step undo for replace-all
-- anchoring the search strip to the toolbar button geometry
+- search on disk
+- unopened-file/project search
+- `Find Tab`
+- multi-cursor promotion
+- query history
+- toolbar-anchored popup geometry
+- global one-step undo for multi-document replace-all
 
-Clarification on undo expectations:
+## 3. Guiding Rules
 
-- single-document replace current should preserve normal editor undo/redo behavior
-- single-document replace all should be designed so one `Ctrl + Z` can revert the operation if we route it as one document mutation boundary
-- multi-document replace all should not promise one global undo step in the first pass
+### Rule 1: Search is an editor feature, not a tab-strip feature
 
-### Track B: tab lookup (`Find Tab`)
+The toolbar search button can open it, but the UI belongs in the editor area.
 
-Treat `Find Tab` as a follow-up feature. It belongs in tab-strip / overflow UI, not in the same data path as text replacement.
+### Rule 2: Replacement must use document-aware edit paths
 
-Reason:
+Search/replace cannot be allowed to mutate text through helpers that clear undo history.
 
-- it searches tab metadata, not buffer content
-- it has no meaningful replace flow
-- it introduces a second result model that would complicate the first release
+### Rule 3: Post-edit effects must be shared with normal typing
 
-## 5. Proposed Architecture
+Replacement must trigger the same metadata, dirty-state, warning, session, and settings-refresh behavior as ordinary editor edits.
 
-### App-level search session
+### Rule 4: Multi-document replace-all is not atomic undo
 
-Add a dedicated search state owned by `ScratchpadApp`.
+We should preserve per-document undo honestly, not promise cross-document atomic undo we do not have.
 
-Recommended shape:
+## 4. Proposed Architecture
+
+### 4.1 App-owned search state
+
+Add app-owned search state to `ScratchpadApp`.
+
+Recommended structure:
 
 ```rust
 pub(crate) struct SearchState {
@@ -145,7 +102,7 @@ pub(crate) struct SearchState {
     pub match_case: bool,
     pub active_match_index: Option<usize>,
     pub results: Vec<SearchMatch>,
-    pub pending_focus: SearchFocusTarget,
+    pub focus_target: SearchFocusTarget,
     pub source: SearchSourceContext,
 }
 
@@ -156,145 +113,231 @@ pub(crate) enum SearchScope {
 }
 ```
 
-`SearchSourceContext` should capture which tab/view/buffer was active when search opened so navigation and strip-close behavior can restore editor focus predictably.
+`SearchSourceContext` should remember where search was opened from so closing the strip can restore focus predictably.
 
-Also add explicit search UI focus intent so the strip can move keyboard focus between:
+`SearchFocusTarget` should explicitly model focus movement between:
 
 - find input
 - replace input
-- editor view
+- editor
 
-### Search engine module
+### 4.2 Search service module
 
-Add a pure text-search module under `src/app/services/`, for example:
+Add a plain search engine in:
 
 - `src/app/services/search.rs`
 
 Responsibilities:
 
-- resolve targets from the selected scope
+- resolve search scope into concrete targets
 - compute plain-text matches
 - support case-sensitive and case-insensitive search
-- return match ranges in character offsets, not bytes
+- operate in character offsets
+- group matches by `BufferId`
 - provide replace helpers for:
   - replace current
   - replace all in one buffer
-  - replace all across multiple buffers
+  - replace all across buffers
 
-Keep the first engine plain and deterministic. Do not introduce a provider trait or regex engine in the first pass.
+Do not introduce provider traits or regex abstraction in the first pass.
 
-### Search target model
+### 4.3 Search target model
 
-Use a small internal target struct instead of reaching into UI code directly:
+Use an internal target model so UI code does not search by poking directly through widgets:
 
 ```rust
 struct SearchTarget {
     tab_index: usize,
-    view_id: Option<ViewId>,
     buffer_id: BufferId,
+    view_ids: Vec<ViewId>,
     text: String,
 }
 ```
 
 Notes:
 
-- `ActiveBuffer` should resolve to the active view's current buffer.
-- `ActiveWorkspaceTab` should resolve all unique buffers inside the active `WorkspaceTab`.
-- `AllOpenTabs` should resolve all unique buffers across the app.
-- buffer deduplication must be by `BufferId`, not by label text.
+- `ActiveBuffer` resolves the active view's current buffer
+- `ActiveWorkspaceTab` resolves unique buffers inside the active workspace tab
+- `AllOpenTabs` resolves unique buffers across all tabs
+- deduplication must be by `BufferId`
 
-Because `BufferState` now owns a `TextDocument`, this target should read from `buffer.text()` and write back through buffer/document helpers rather than managing independent copies for mutation.
+## 5. UI Placement
 
-### UI ownership
-
-Add a new UI module for the strip, for example:
+Add:
 
 - `src/app/ui/search_replace.rs`
 
-Render it from `src/app/ui/editor_area/mod.rs` above the pane-tree render path.
+Render the strip from:
 
-Why this placement is correct for the first implementation:
+- `src/app/ui/editor_area/mod.rs`
 
-- it works for both top and vertical tab layouts
-- it avoids fragile screen-space anchoring to the toolbar button
-- it keeps the strip visually attached to the active editor workspace
-- it avoids mixing search UI concerns into tab-strip layout code
+The strip should render above the pane tree inside the editor workspace.
 
-The search toolbar button in `src/app/ui/tab_strip/actions.rs` should simply dispatch the open-search command.
+Why this is still the right first placement:
 
-## 6. Editor Integration
+- it works for top tabs and side tabs
+- it avoids brittle floating/anchored geometry
+- it keeps the feature attached to the active editing surface
+- it avoids coupling search behavior to tab chrome
 
-### Capture and restore caret / selection
+The search button in:
 
-Search navigation and replace-current need editor-level caret control.
+- `src/app/ui/tab_strip/actions.rs`
 
-This is now partially solved.
+should dispatch open-search instead of showing the current placeholder warning.
+
+## 6. Match Representation
+
+The current code already has a place to store highlights:
+
+- `EditorViewState.search_highlights`
+
+But the project should now define the unit clearly.
+
+Required decision:
+
+- all search results and highlight ranges in app/service code should use character offsets
+
+That means:
+
+- `SearchMatch` should store character-based ranges
+- replacement should operate from character-based ranges
+- any conversion needed for layout or rendering must happen at the edge
+
+Recommended shape:
+
+```rust
+pub(crate) struct SearchMatch {
+    pub tab_index: usize,
+    pub buffer_id: BufferId,
+    pub range: std::ops::Range<usize>, // character offsets
+}
+```
+
+This needs to be explicit because the current codebase contains both string operations and layout/rendering code, and Unicode safety will otherwise be easy to break.
+
+## 7. Editor Integration
+
+### 7.1 Selection and navigation
+
+Use the existing editor-view state:
+
+- `cursor_range` for persisted current selection snapshot
+- `pending_cursor_range` for programmatic match targeting
 
 Plan:
 
-- use `EditorViewState.cursor_range` as the persisted editor selection snapshot
-- use `EditorViewState.pending_cursor_range` for programmatic match navigation and replace-current repositioning
-- keep all raw `egui::TextEditState` interaction inside `src/app/ui/editor_content/text_edit.rs`
+- when search results update, compute the active match
+- when navigating next/previous, set `pending_cursor_range` on the relevant active view
+- let `egui::TextEdit` bring the caret into view naturally
 
-This should be wrapped behind helper functions inside `text_edit.rs` so the rest of the app does not depend on `egui` text-state details directly.
+Keep all raw `TextEditState` interaction inside:
 
-### Match highlighting
+- `src/app/ui/editor_content/text_edit.rs`
 
-The current custom layouter is the best place to implement highlights.
+### 7.2 Highlight rendering
+
+The current layouter in:
+
+- `src/app/ui/editor_content/text_edit.rs`
+
+is the right place to render match highlights.
 
 Plan:
 
-- extend the layouter input so it can receive `EditorViewState.search_highlights` when the rendered buffer matches the active search target
+- extend the layouter path to accept current search highlights for the rendered view/buffer
 - build a `LayoutJob` with:
-  - normal text formatting for non-match regions
-  - passive highlight formatting for all matches
-  - active highlight formatting for the selected match
+  - normal text format
+  - passive match format
+  - active match format
 
-This keeps the highlight path in one place:
+We should not use overlay painting for text highlights in the first pass.
 
-- no overlay painting
-- no manual text measurement outside the layouter
-- no duplication between wrapped and unwrapped modes
+### 7.3 Scroll-to-match
 
-### Scroll-to-match
+Do not start with custom geometry math.
 
-Do not try to scroll by geometry math in the first pass.
+First pass:
 
-Instead:
+- set `pending_cursor_range`
+- rely on `TextEdit` visibility behavior
 
-- when navigating to a match, set `pending_cursor_range` on the active view to that match range
-- let `egui::TextEdit` keep the caret visible
+If needed later, add explicit scroll helpers using `RenderedLayout`.
 
-If this proves insufficient, add a follow-up helper that uses `RenderedLayout` to compute the row position and explicitly scroll the surrounding `ScrollArea`.
+## 8. Undo Model
 
-## 7. Undo / Replace Model
+### 8.1 What we can honestly support
 
-This section changes materially because the editor now has document-level undo history.
+- replace current in one document should preserve normal document undo/redo
+- replace all in one document should ideally behave as one coherent undo boundary
+- replace all across multiple documents should preserve per-document undo only
 
-### 7.1 What is now possible
+### 8.2 What must not happen
 
-- normal text editing already supports `Ctrl + Z`, `Ctrl + Y`, and `Ctrl + Shift + Z`
-- undo depth is explicitly capped at 100 states per `TextDocument`
-- search replacement can now build on the same document-level undo history instead of bypassing it
+The current whole-document helper:
 
-### 7.2 What is still not solved
+- `TextDocument::replace_text`
 
-- there is still no app-wide transaction layer spanning multiple `TextDocument` instances
-- an `AllOpenTabs` replace-all cannot honestly promise one global undo step in the first pass
+clears undo history. That makes it unsafe for undo-preserving search replacement.
 
-### 7.3 Replacement policy
+So the implementation plan must require:
 
-- replace current: must preserve document undo history naturally
-- replace all in one document: should be implemented as one coherent document mutation boundary where practical
-- replace all across multiple documents: should preserve per-document undo, but not promise cross-document atomic undo
+- do not use whole-document replacement helpers that reset the undoer for replace-current
+- do not use them for single-document replace-all if we want undo preservation
 
-This keeps the implementation honest relative to the original goals while still benefiting from the new document model.
+Before implementation starts, we should introduce explicit document mutation helpers for search replacement that preserve or intentionally set the desired undo boundary.
 
-## 8. Command and Shortcut Plan
+### 8.3 Practical policy
+
+- replace current:
+  - mutate through document-aware edit operations
+  - preserve undo naturally
+- replace all in one buffer:
+  - mutate through one coherent document-aware path
+  - aim for one undo step
+- replace all across buffers:
+  - mutate each buffer through that same document-aware path
+  - do not promise one global undo step
+
+## 9. Shared Post-Edit Finalization
+
+This is the biggest implementation requirement the old draft did not pin down clearly enough.
+
+Today, normal typing finalization is effectively handled from:
+
+- `src/app/ui/editor_area/mod.rs`
+
+That logic currently updates:
+
+- dirty state
+- artifact metadata
+- warning/status state
+- transaction logging
+- session dirty state
+- settings TOML refresh checks
+
+Search/replace must not invent a second version of that logic.
+
+So before or during replacement work, extract a shared helper on `ScratchpadApp` for:
+
+- finalizing a buffer mutation
+- finalizing one or more mutated buffers
+
+That shared path should accept enough context to handle:
+
+- active-buffer edits
+- non-active buffer edits
+- multi-buffer replace-all
+- settings file edits
+- transaction logging for replacements
+
+Without this extraction, the plan will drift into inconsistent edit semantics.
+
+## 10. Commands and Shortcuts
 
 ### New commands
 
-Extend `AppCommand` with search-oriented actions such as:
+Extend `AppCommand` with search commands such as:
 
 - `OpenSearch`
 - `OpenSearchAndReplace`
@@ -304,255 +347,243 @@ Extend `AppCommand` with search-oriented actions such as:
 - `ReplaceCurrentMatch`
 - `ReplaceAllMatches`
 
-Do not put raw text-edit keystrokes into `AppCommand`. Query changes should remain direct state mutation from the search strip UI.
+Do not route raw query typing through `AppCommand`.
 
-### Shortcut wiring
+### Shortcut plan
 
-Add to `src/app/shortcuts.rs`:
+Add to:
 
-- `Ctrl + F` -> open search
-- `Ctrl + H` -> open search with replace expanded
-- `Enter` while the search field is focused -> next match
-- `Shift + Enter` while the search field is focused -> previous match
-- `Esc` -> close search if open, otherwise preserve current behavior
+- `src/app/shortcuts.rs`
 
-Shortcut handling needs one extra rule:
+First-pass bindings:
 
-- when search is open and one of its text fields has focus, search-local shortcuts should win before global tab/file shortcuts
+- `Ctrl + F` opens search
+- `Ctrl + H` opens search with replace visible
+- `Esc` closes search when search is open
 
-Because editor undo/redo already lives in the focused `TextEdit`, search-local shortcuts must not consume `Ctrl + Z`, `Ctrl + Y`, or `Ctrl + Shift + Z` unless a future search widget intentionally needs them.
+Navigation bindings:
 
-## 9. Replacement Semantics
+- `Enter` in find input moves to next match
+- `Shift + Enter` in find input moves to previous match
+
+Important current constraint:
+
+`src/app/shortcuts.rs` is currently global and focus-agnostic.
+
+So the implementation needs one explicit choice:
+
+- either search input widgets own `Enter`/`Shift+Enter`/`Esc` locally
+- or we add a small focus-aware shortcut layer for search
+
+Do not start implementation assuming current global shortcut handling is already enough.
+
+## 11. Replacement Semantics
 
 ### Replace current
 
 Algorithm:
 
-1. validate that the active match still exists for the current query
-2. mutate only the target buffer's `TextDocument`
-3. refresh buffer metadata (`line_count`, artifact summary)
-4. mark the owning workspace tab dirty
-5. recompute results immediately
-6. move active selection to the next sensible match
+1. validate the active match still exists for the current query
+2. mutate only the target document
+3. finalize that buffer through shared post-edit logic
+4. recompute results
+5. select the next sensible match
 
 ### Replace all
 
-For one buffer, replace in descending range order.
+For one buffer:
+
+- apply replacements in descending range order
 
 For multi-buffer scopes:
 
 1. group matches by `BufferId`
-2. for each buffer, apply descending-order replacements
-3. refresh metadata once per mutated buffer
-4. mark the owning tab(s) dirty
-5. emit one summary status message
+2. apply descending-order replacements per buffer
+3. finalize each mutated buffer through the shared post-edit path
+4. recompute results
+5. show one summary status message
 
-This keeps indices stable without introducing a transaction abstraction that the rest of the editor does not yet use.
+Descending order remains the right first-pass approach because it keeps match indices stable without introducing more complex transactional editing machinery.
 
-### Dirty-state integration
+## 12. File Change Plan
 
-After replacement, reuse the same post-edit behaviors already used by editor typing where possible:
-
-- dirty flag updates
-- artifact metadata refresh
-- status message refresh
-- settings TOML refresh checks when the edited buffer is the settings file
-
-This is important because search replace must not become a second, slightly different edit path.
-
-## 10. File-Level Change Plan
-
-Expected first-pass file additions:
+### New files
 
 - `src/app/services/search.rs`
 - `src/app/ui/search_replace.rs`
 
-Expected first-pass file edits:
+### Expected edits
 
 - `src/app/app_state.rs`
 - `src/app/commands.rs`
 - `src/app/commands/dispatch.rs`
-- `src/app/domain/buffer.rs`
 - `src/app/shortcuts.rs`
 - `src/app/domain/view.rs`
 - `src/app/ui/editor_area/mod.rs`
 - `src/app/ui/editor_content/text_edit.rs`
 - `src/app/ui/editor_content/mod.rs`
 - `src/app/ui/tab_strip/actions.rs`
-- `src/app/ui/status_bar.rs`
-
-Optional supporting edits:
-
 - `src/app/ui/mod.rs`
 - `src/app/services/mod.rs`
-- `README.md`
-- `PLAN.md`
 
-Foundation edits already completed before search implementation:
+### Likely additional edits
 
 - `src/app/domain/buffer.rs`
-- `src/app/domain/view.rs`
-- `src/app/ui/editor_content/text_edit.rs`
-- affected test files and supporting buffer call sites
+  - only if needed for explicit document-aware replacement helpers
+- transaction/status integration files if replacement should be logged distinctly
+- docs:
+  - `README.md`
+  - `PLAN.md`
+  - `docs/user-manual.md`
 
-## 11. Delivery Phases
+## 13. Delivery Phases
 
-### Phase 0: Foundation Completed
-
-Already done:
-
-- document-backed text storage via `TextDocument`
-- document-level undo state
-- persisted view cursor state
-- pending cursor targeting
-- per-view search highlight storage
-
-This phase is complete and should be treated as the prerequisite layer for the rest of the plan.
-
-### Phase 1: Search state and strip skeleton
+### Phase 1: Search state and strip shell
 
 - add `SearchState` to `ScratchpadApp`
-- add open/close commands and shortcuts
-- render a non-functional search strip in `editor_area`
-- wire the toolbar search button to open the strip instead of showing a warning
+- add open/close commands
+- add `Ctrl + F` / `Ctrl + H`
+- render strip shell in editor area
+- wire toolbar search button
 
 Definition of done:
 
-- `Ctrl + F` opens the strip
-- `Ctrl + H` opens the strip with replace visible
-- `Esc` closes the strip and restores editor focus
+- search strip opens and closes reliably
+- focus returns to editor on close
 
 ### Phase 2: Active-buffer search
 
-- implement plain-text match engine for one buffer
+- implement plain-text matching for the active buffer
 - live-update results while typing
-- show total count and active index
-- navigate next/previous
-- highlight passive and active matches in the active buffer
+- show count and active index
+- next/previous navigation
+- render highlights
 
 Definition of done:
 
-- searching in the active buffer works reliably in wrapped and unwrapped modes
-- navigation keeps the active match visible
+- search works in wrapped and unwrapped modes
+- active match selection stays stable
 
-### Phase 3: Replacement in active buffer
+### Phase 3: Active-buffer replace
 
 - implement replace current
 - implement replace all for active buffer
-- reuse existing dirty-state and status-update flows
+- route mutation through undo-safe document helpers
+- route finalization through shared post-edit helper
 
 Definition of done:
 
-- replacing content mutates the underlying buffer correctly
-- line counts and artifact status stay accurate
-- editor undo / redo still works after replacement
+- replace operations preserve expected document undo/redo behavior
+- dirty state and metadata remain correct
 
 ### Phase 4: Cross-buffer scopes
 
 - add active-workspace-tab scope
 - add all-open-tabs scope
-- deduplicate buffers correctly
-- show replacement summary in the status bar
+- deduplicate by `BufferId`
+- show replacement summary
 
 Definition of done:
 
-- replace-all can affect multiple buffers without duplicate edits
-- split views sharing one buffer do not produce duplicate replacements
+- split views of the same buffer do not double-apply edits
+- multi-buffer replace-all works predictably
 
-### Phase 5: Polish and spec catch-up
+### Phase 5: Polish
 
-- optional toolbar-button anchoring/popup placement
-- optional case toggle UI polish
-- optional preserved recent queries
-- decide whether `Find Tab` should be a separate feature or folded into a command palette later
+- UI polish
+- case toggle polish
+- performance review on larger files
+- decide later whether `Find Tab` stays separate or folds into another feature
 
-## 12. Test Plan
+## 14. Test Plan
 
-### Service tests
+### Search service tests
 
-Add focused tests for the search engine covering:
+Add tests for:
 
 - empty query
 - no matches
 - multiple matches
-- case-sensitive vs case-insensitive search
-- Unicode and multibyte characters
-- descending-order replace-all correctness
-- mixed-scope deduplication by `BufferId`
+- case-sensitive and case-insensitive behavior
+- Unicode text
+- descending replace-all correctness
+- deduplication by `BufferId`
 
-Also add tests for document-aware replacement boundaries:
+### Undo-aware replacement tests
 
-- replace current preserves undo / redo in a single document
-- replace all in one document preserves undo / redo behavior predictably
+Add explicit tests for:
 
-### App / command tests
+- replace current preserves single-document undo/redo
+- replace all in one document preserves predictable undo/redo behavior
+- multi-document replace-all preserves per-document undo
 
-Add tests covering:
+### App/command tests
 
-- `Ctrl + F` / `Ctrl + H` open state
-- `Esc` close behavior
-- next/previous match selection
-- replace-current on active buffer
-- replace-all across split buffers in one workspace tab
-- replace-all across multiple tabs
-- editing the settings file through replace still triggers settings refresh flow correctly
-- cursor range is restored when navigating to a match
+Add tests for:
 
-### UI behavior tests
+- `Ctrl + F` / `Ctrl + H` open behavior
+- close behavior
+- next/previous navigation
+- replace current on active buffer
+- replace all in active workspace tab
+- replace all across tabs
+- settings file replacement still triggers settings refresh flow correctly
 
-At minimum, unit-test the non-render logic for:
+### UI logic tests
+
+At minimum, unit-test:
 
 - scope resolution
-- active-match selection after result recompute
-- summary status text generation
+- active-match recompute rules
+- summary status text
+- focus-target transitions
 
-## 13. Risks and Mitigations
+## 15. Risks
 
-### Risk: `egui::TextEdit` state APIs are easy to misuse
-
-Mitigation:
-
-- isolate caret/selection read-write logic inside `text_edit.rs`
-- keep the rest of the app on simple app-owned structs
-
-### Risk: highlight rendering becomes slow on very large files
+### Risk: undo gets broken by the wrong mutation helper
 
 Mitigation:
 
-- keep first pass plain-text only
-- short-circuit highlighting when the query is empty
-- measure large-file behavior before adding regex or project-wide search
+- make the allowed replacement write path explicit before Phase 3 starts
+- test undo/redo behavior directly
 
-### Risk: search and normal editing diverge into separate mutation paths
-
-Mitigation:
-
-- route replacement through shared post-edit helpers
-- keep buffer metadata refresh in one place
-
-### Risk: replacement clears or corrupts document undo history
+### Risk: search and normal typing diverge
 
 Mitigation:
 
-- treat `TextDocument` as the write boundary for search replacement
-- test replace-current and replace-all against undo / redo explicitly
-- avoid replacement helpers that bypass the existing editor/document undo path unless they intentionally create one new undo boundary
+- extract shared post-edit finalization
+- do not duplicate dirty/settings/status logic in search code
 
-### Risk: the original plan's feature list keeps expanding mid-implementation
+### Risk: Unicode range bugs
 
 Mitigation:
 
-- treat Track A as the ship target
-- keep `Find Tab`, regex, and provider abstractions out of the first merge
+- define character-offset ranges as the app/service contract
+- confine conversions to the rendering edge
 
-## 14. Recommended Merge Strategy
+### Risk: focus/shortcut handling becomes brittle
 
-Use small reviewable pull requests rather than one large feature branch:
+Mitigation:
 
-1. search state + commands + shortcuts + strip shell
+- explicitly choose widget-local or focus-aware shortcut routing
+- do not assume the current global shortcut layer is sufficient
+
+### Risk: highlight rendering becomes expensive on large files
+
+Mitigation:
+
+- keep the first pass plain-text only
+- skip highlight work for empty query
+- measure before adding regex or project search
+
+## 16. Recommended Merge Strategy
+
+Use small reviewable PRs:
+
+1. search state + commands + strip shell
 2. active-buffer search + highlight rendering
-3. active-buffer replace with undo-preservation tests
+3. active-buffer replace + undo-safe mutation path + shared post-edit finalization
 4. cross-buffer scopes
-5. polish and follow-up UX
+5. polish
 
-That keeps regressions localized in a codebase that is already carrying custom chrome, tab drag/drop, split panes, settings refresh, and session persistence.
+That is the right granularity for the project as it exists today: custom chrome, split panes, combined workspace tabs, settings-file refresh behavior, per-document undo, and transaction-log integration all make a single giant feature branch riskier than it looks.

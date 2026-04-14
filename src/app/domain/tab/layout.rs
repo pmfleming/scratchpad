@@ -106,12 +106,17 @@ impl WorkspaceTab {
     }
 
     pub fn rebalance_views_equally(&mut self) -> bool {
+        self.rebalance_views_equally_for_axis(SplitAxis::Vertical)
+    }
+
+    pub fn rebalance_views_equally_for_axis(&mut self, root_axis: SplitAxis) -> bool {
         if self.views.is_empty() {
             return false;
         }
 
         let ordered_view_ids = self.rebalanced_view_order();
-        let Some(root_pane) = Self::balanced_root_from_view_ids(&ordered_view_ids) else {
+        let Some(root_pane) = Self::balanced_root_from_view_ids(&ordered_view_ids, root_axis)
+        else {
             return false;
         };
 
@@ -186,7 +191,10 @@ impl WorkspaceTab {
         }
     }
 
-    fn balanced_root_from_view_ids(ordered_view_ids: &[ViewId]) -> Option<PaneNode> {
-        PaneNode::balanced_from_view_ids(ordered_view_ids, SplitAxis::Vertical)
+    fn balanced_root_from_view_ids(
+        ordered_view_ids: &[ViewId],
+        root_axis: SplitAxis,
+    ) -> Option<PaneNode> {
+        PaneNode::balanced_from_view_ids(ordered_view_ids, root_axis)
     }
 }

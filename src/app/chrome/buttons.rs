@@ -1,5 +1,5 @@
 use crate::app::theme::*;
-use crate::app::ui::tab_drag;
+use crate::app::ui::transition;
 use eframe::egui::{self, Color32, Rect, Sense, Vec2};
 
 pub fn phosphor_button(
@@ -16,7 +16,7 @@ pub fn phosphor_button(
         rect,
         icon,
         response.hovered(),
-        tab_drag::has_tab_drag_for_context(ui.ctx()),
+        transition::suppress_interactive_chrome(ui.ctx()),
         background,
         hover_background,
     );

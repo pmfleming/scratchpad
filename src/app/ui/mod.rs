@@ -7,3 +7,4 @@ pub mod tab_drag;
 pub mod tab_overflow;
 pub mod tab_strip;
 pub mod tile_header;
+pub mod transition;

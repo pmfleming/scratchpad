@@ -128,3 +128,21 @@ fn delay_tab_list_hide_uses_configured_grace_period() {
         Some(now + Duration::from_secs_f32(4.5))
     );
 }
+
+#[test]
+fn changing_tab_list_position_starts_a_short_chrome_transition() {
+    let mut app = test_app();
+
+    app.set_tab_list_position(TabListPosition::Left);
+
+    assert!(app.chrome_transition_active());
+}
+
+#[test]
+fn changing_tab_list_width_starts_a_short_chrome_transition() {
+    let mut app = test_app();
+
+    app.set_tab_list_width_from_layout(180.0);
+
+    assert!(app.chrome_transition_active());
+}

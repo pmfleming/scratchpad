@@ -3,6 +3,8 @@ use eframe::egui::{self, Color32, Vec2};
 pub const HEADER_BG: Color32 = Color32::from_rgb(24, 27, 33);
 pub const TAB_ACTIVE_BG: Color32 = Color32::from_rgb(48, 54, 64);
 pub const TAB_HOVER_BG: Color32 = Color32::from_rgb(43, 49, 58);
+pub const TAB_SELECTED_BG: Color32 = Color32::from_rgb(34, 43, 59);
+pub const TAB_SELECTED_ACCENT: Color32 = Color32::from_rgb(104, 154, 232);
 pub const ACTION_BG: Color32 = Color32::from_rgb(38, 43, 50);
 pub const ACTION_HOVER_BG: Color32 = Color32::from_rgb(52, 58, 68);
 pub const EDITOR_BG: Color32 = Color32::from_rgb(21, 24, 29);
@@ -14,6 +16,8 @@ pub const TEXT_MUTED: Color32 = Color32::from_rgba_premultiplied(255, 255, 255, 
 const HEADER_BG_LIGHT: Color32 = Color32::from_rgb(240, 243, 248);
 const TAB_ACTIVE_BG_LIGHT: Color32 = Color32::from_rgb(255, 255, 255);
 const TAB_HOVER_BG_LIGHT: Color32 = Color32::from_rgb(226, 232, 240);
+const TAB_SELECTED_BG_LIGHT: Color32 = Color32::from_rgb(219, 231, 248);
+const TAB_SELECTED_ACCENT_LIGHT: Color32 = Color32::from_rgb(67, 118, 205);
 const ACTION_BG_LIGHT: Color32 = Color32::from_rgb(230, 236, 244);
 const ACTION_HOVER_BG_LIGHT: Color32 = Color32::from_rgb(213, 222, 234);
 const BORDER_LIGHT: Color32 = Color32::from_rgb(184, 194, 208);
@@ -47,6 +51,12 @@ macro_rules! visuals_theme_fn {
 ui_theme_fn!(header_bg, HEADER_BG, HEADER_BG_LIGHT);
 ui_theme_fn!(tab_active_bg, TAB_ACTIVE_BG, TAB_ACTIVE_BG_LIGHT);
 ui_theme_fn!(tab_hover_bg, TAB_HOVER_BG, TAB_HOVER_BG_LIGHT);
+ui_theme_fn!(tab_selected_bg, TAB_SELECTED_BG, TAB_SELECTED_BG_LIGHT);
+ui_theme_fn!(
+    tab_selected_accent,
+    TAB_SELECTED_ACCENT,
+    TAB_SELECTED_ACCENT_LIGHT
+);
 ui_theme_fn!(action_bg, ACTION_BG, ACTION_BG_LIGHT);
 ui_theme_fn!(action_hover_bg, ACTION_HOVER_BG, ACTION_HOVER_BG_LIGHT);
 ui_theme_fn!(border, BORDER, BORDER_LIGHT);

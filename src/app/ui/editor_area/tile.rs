@@ -153,11 +153,7 @@ fn paint_tile_frame(
     } else {
         background_color
     };
-    let border_color = if is_active {
-        egui::Color32::LIGHT_BLUE
-    } else {
-        border(ui)
-    };
+    let border_color = border(ui).gamma_multiply(0.0);
 
     ui.painter().rect_filled(rect, 4.0, bg);
     ui.painter().rect_stroke(
@@ -184,7 +180,7 @@ fn editor_font_id(font_size: f32) -> egui::FontId {
 }
 
 fn editor_scroll_bar_visibility(ctx: &egui::Context) -> egui::scroll_area::ScrollBarVisibility {
-    if tab_drag::has_tab_drag_for_context(ctx) {
+    if tab_drag::is_drag_active_for_context(ctx) {
         egui::scroll_area::ScrollBarVisibility::AlwaysHidden
     } else {
         egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded

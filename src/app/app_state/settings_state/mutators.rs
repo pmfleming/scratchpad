@@ -148,6 +148,7 @@ impl ScratchpadApp {
         }
 
         self.app_settings.tab_list_position = position;
+        self.begin_chrome_transition();
         self.reset_tab_list_visibility_state(false);
         if position.is_vertical() {
             self.overflow_popup_open = false;
@@ -178,6 +179,7 @@ impl ScratchpadApp {
         }
 
         self.app_settings.auto_hide_tab_list = enabled;
+        self.begin_chrome_transition();
         self.reset_tab_list_visibility_state(enabled && self.vertical_tab_list_open);
         self.persist_settings_or_error();
     }
@@ -210,6 +212,7 @@ impl ScratchpadApp {
             return;
         }
 
+        self.begin_chrome_transition();
         self.set_tab_list_width(next);
     }
 

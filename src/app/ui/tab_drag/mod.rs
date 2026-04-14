@@ -5,8 +5,8 @@ mod paint;
 mod state;
 
 pub(crate) use state::{
-    TabDropAxis, TabDropZone, TabRectEntry, active_drag_source_for_context,
-    begin_tab_drag_if_needed, has_tab_drag_for_context, is_drag_active_for_context,
+    TabDropAxis, TabDropZone, TabRectEntry, active_drag_sources_for_context,
+    begin_tab_drag_if_needed, is_drag_active_for_context,
 };
 
 pub(crate) enum TabDragCommit {
@@ -14,8 +14,16 @@ pub(crate) enum TabDragCommit {
         from_index: usize,
         to_index: usize,
     },
+    ReorderGroup {
+        from_indices: Vec<usize>,
+        to_index: usize,
+    },
     Combine {
         source_index: usize,
+        target_index: usize,
+    },
+    CombineGroup {
+        source_indices: Vec<usize>,
         target_index: usize,
     },
 }
@@ -30,7 +38,8 @@ pub(crate) fn update_tab_drag(
     total_tab_count: usize,
 ) -> Option<TabDragCommit> {
     let drag_state = state::update_current_tab_drag(ui)?;
-    let drag_active = state::drag_is_active(drag_state);
+    let drag_active = state::drag_is_active(&drag_state);
+    let dragged_indices = drag_state.dragged_indices.clone();
     let allow_combine = zones
         .iter()
         .flat_map(|zone| zone.entries.iter())
@@ -65,18 +74,32 @@ pub(crate) fn update_tab_drag(
 
     match drop_intent? {
         state::TabDropIntent::Reorder { drop_slot, .. } => {
-            let to_index =
-                state::resolve_drop_slot(drag_state.source_index, drop_slot, total_tab_count);
-            (to_index != drag_state.source_index).then_some(TabDragCommit::Reorder {
-                from_index: drag_state.source_index,
-                to_index,
-            })
+            if dragged_indices.len() > 1 {
+                Some(TabDragCommit::ReorderGroup {
+                    from_indices: dragged_indices,
+                    to_index: drop_slot.min(total_tab_count),
+                })
+            } else {
+                let to_index =
+                    state::resolve_drop_slot(drag_state.source_index, drop_slot, total_tab_count);
+                (to_index != drag_state.source_index).then_some(TabDragCommit::Reorder {
+                    from_index: drag_state.source_index,
+                    to_index,
+                })
+            }
         }
         state::TabDropIntent::Combine { target_index, .. } => {
-            (target_index != drag_state.source_index).then_some(TabDragCommit::Combine {
-                source_index: drag_state.source_index,
-                target_index,
-            })
+            if dragged_indices.len() > 1 {
+                (!dragged_indices.contains(&target_index)).then_some(TabDragCommit::CombineGroup {
+                    source_indices: dragged_indices,
+                    target_index,
+                })
+            } else {
+                (target_index != drag_state.source_index).then_some(TabDragCommit::Combine {
+                    source_index: drag_state.source_index,
+                    target_index,
+                })
+            }
         }
     }
 }
@@ -85,7 +108,7 @@ pub(crate) fn paint_dragged_tab_ghost(ctx: &egui::Context, app: &ScratchpadApp) 
     let Some(drag_state) = state::current_tab_drag_state_for_context(ctx) else {
         return;
     };
-    if !state::drag_is_active(drag_state) {
+    if !state::drag_is_active(&drag_state) {
         return;
     }
     paint::paint_dragged_tab_ghost(ctx, app, drag_state);
@@ -102,7 +125,7 @@ pub(crate) fn auto_scroll_tab_list(
     let Some(drag_state) = state::current_tab_drag_state_for_context(ctx) else {
         return;
     };
-    if !state::drag_is_active(drag_state) {
+    if !state::drag_is_active(&drag_state) {
         return;
     }
 

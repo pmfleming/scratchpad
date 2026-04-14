@@ -1,11 +1,21 @@
 #![forbid(unsafe_code)]
 
-use scratchpad::app::domain::{BufferState, RestoredBufferState, WorkspaceTab};
+use scratchpad::app::domain::{BufferFreshness, BufferState, RestoredBufferState, WorkspaceTab};
 use scratchpad::app::domain::{PaneNode, SplitAxis};
 use scratchpad::app::services::session_store::SessionStore;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+fn unique_session_root(label: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "scratchpad-{label}-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ))
+}
 
 #[test]
 fn persists_and_restores_open_tabs() {
@@ -27,6 +37,8 @@ fn persists_and_restores_open_tabs() {
             temp_id: "buffer-a".to_owned(),
             encoding: "UTF-8".to_owned(),
             has_bom: false,
+            disk_state: None,
+            freshness: BufferFreshness::InSync,
         })),
         WorkspaceTab::new(BufferState::restored(RestoredBufferState {
             id: 12,
@@ -37,6 +49,8 @@ fn persists_and_restores_open_tabs() {
             temp_id: "buffer-b".to_owned(),
             encoding: "UTF-8".to_owned(),
             has_bom: false,
+            disk_state: None,
+            freshness: BufferFreshness::InSync,
         })),
     ];
 
@@ -78,6 +92,8 @@ fn persists_encoding_metadata_for_restored_tabs() {
             temp_id: "buffer-jp".to_owned(),
             encoding: "Shift_JIS".to_owned(),
             has_bom: true,
+            disk_state: None,
+            freshness: BufferFreshness::InSync,
         },
     ))];
 
@@ -109,6 +125,8 @@ fn persists_control_character_inspection_mode() {
         temp_id: "buffer-ansi".to_owned(),
         encoding: "UTF-8".to_owned(),
         has_bom: false,
+        disk_state: None,
+        freshness: BufferFreshness::InSync,
     });
     let mut tab = WorkspaceTab::new(buffer);
     tab.active_view_mut().unwrap().show_control_chars = true;
@@ -141,6 +159,8 @@ fn persists_split_views_and_active_view() {
         temp_id: "buffer-split".to_owned(),
         encoding: "UTF-8".to_owned(),
         has_bom: false,
+        disk_state: None,
+        freshness: BufferFreshness::InSync,
     }));
     tab.active_view_mut().unwrap().show_line_numbers = true;
     tab.split_active_view(SplitAxis::Vertical).unwrap();
@@ -184,6 +204,8 @@ fn restored_tabs_allocate_new_unique_view_ids() {
         temp_id: "buffer-split".to_owned(),
         encoding: "UTF-8".to_owned(),
         has_bom: false,
+        disk_state: None,
+        freshness: BufferFreshness::InSync,
     }));
     tab.split_active_view(SplitAxis::Vertical).unwrap();
     let original_ids = tab.views.iter().map(|view| view.id).collect::<Vec<_>>();
@@ -228,6 +250,8 @@ fn persists_and_restores_combined_workspace_tabs() {
         temp_id: "buffer-left".to_owned(),
         encoding: "UTF-8".to_owned(),
         has_bom: false,
+        disk_state: None,
+        freshness: BufferFreshness::InSync,
     }));
     let source = WorkspaceTab::new(BufferState::restored(RestoredBufferState {
         id: 62,
@@ -238,6 +262,8 @@ fn persists_and_restores_combined_workspace_tabs() {
         temp_id: "buffer-right".to_owned(),
         encoding: "UTF-8".to_owned(),
         has_bom: false,
+        disk_state: None,
+        freshness: BufferFreshness::InSync,
     }));
     let source_view_id = source.active_view_id;
     target
@@ -254,6 +280,114 @@ fn persists_and_restores_combined_workspace_tabs() {
     assert_eq!(restored_tab.buffers().count(), 2);
     assert_eq!(restored_tab.active_buffer().name, "right.txt");
     assert!(restored_tab.active_buffer().is_dirty);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn restored_clean_buffer_reloads_newer_disk_content() {
+    let root = unique_session_root("session-restore-reload");
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let path = temp_dir.path().join("notes.txt");
+    fs::write(&path, "old session text\n").expect("write temp file");
+
+    let store = SessionStore::new(root.clone());
+    let mut tab = WorkspaceTab::new(BufferState::restored(RestoredBufferState {
+        id: 71,
+        name: "notes.txt".to_owned(),
+        content: "old session text\n".to_owned(),
+        path: Some(path.clone()),
+        is_dirty: false,
+        temp_id: "buffer-reload".to_owned(),
+        encoding: "UTF-8".to_owned(),
+        has_bom: false,
+        disk_state: None,
+        freshness: BufferFreshness::InSync,
+    }));
+    tab.buffer.sync_to_disk_state(
+        scratchpad::app::services::file_service::FileService::read_disk_state(&path).ok(),
+    );
+
+    store.persist(&[tab], 0, 14.0, true, true).unwrap();
+    fs::write(&path, "new disk text\n").expect("overwrite temp file");
+
+    let restored = store.load().unwrap().unwrap();
+    assert_eq!(restored.tabs[0].buffer.text(), "new disk text\n");
+    assert_eq!(restored.tabs[0].buffer.freshness, BufferFreshness::InSync);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn restored_dirty_buffer_keeps_session_text_and_marks_conflict() {
+    let root = unique_session_root("session-restore-conflict");
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let path = temp_dir.path().join("draft.txt");
+    fs::write(&path, "base text\n").expect("write temp file");
+
+    let store = SessionStore::new(root.clone());
+    let mut tab = WorkspaceTab::new(BufferState::restored(RestoredBufferState {
+        id: 72,
+        name: "draft.txt".to_owned(),
+        content: "local unsaved text\n".to_owned(),
+        path: Some(path.clone()),
+        is_dirty: true,
+        temp_id: "buffer-conflict".to_owned(),
+        encoding: "UTF-8".to_owned(),
+        has_bom: false,
+        disk_state: None,
+        freshness: BufferFreshness::InSync,
+    }));
+    tab.buffer.sync_to_disk_state(
+        scratchpad::app::services::file_service::FileService::read_disk_state(&path).ok(),
+    );
+
+    store.persist(&[tab], 0, 14.0, true, true).unwrap();
+    fs::write(&path, "newer disk text\n").expect("overwrite temp file");
+
+    let restored = store.load().unwrap().unwrap();
+    assert_eq!(restored.tabs[0].buffer.text(), "local unsaved text\n");
+    assert_eq!(
+        restored.tabs[0].buffer.freshness,
+        BufferFreshness::ConflictOnDisk
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn restored_missing_path_marks_buffer_missing_on_disk() {
+    let root = unique_session_root("session-restore-missing");
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let path = temp_dir.path().join("missing.txt");
+    fs::write(&path, "temporary text\n").expect("write temp file");
+
+    let store = SessionStore::new(root.clone());
+    let mut tab = WorkspaceTab::new(BufferState::restored(RestoredBufferState {
+        id: 73,
+        name: "missing.txt".to_owned(),
+        content: "temporary text\n".to_owned(),
+        path: Some(path.clone()),
+        is_dirty: true,
+        temp_id: "buffer-missing".to_owned(),
+        encoding: "UTF-8".to_owned(),
+        has_bom: false,
+        disk_state: None,
+        freshness: BufferFreshness::InSync,
+    }));
+    tab.buffer.sync_to_disk_state(
+        scratchpad::app::services::file_service::FileService::read_disk_state(&path).ok(),
+    );
+
+    store.persist(&[tab], 0, 14.0, true, true).unwrap();
+    fs::remove_file(&path).expect("remove temp file");
+
+    let restored = store.load().unwrap().unwrap();
+    assert_eq!(
+        restored.tabs[0].buffer.freshness,
+        BufferFreshness::MissingOnDisk
+    );
+    assert_eq!(restored.tabs[0].buffer.text(), "temporary text\n");
 
     fs::remove_dir_all(root).unwrap();
 }

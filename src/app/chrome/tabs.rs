@@ -1,5 +1,5 @@
 use crate::app::theme::*;
-use crate::app::ui::tab_drag;
+use crate::app::ui::transition;
 use eframe::egui::{self, Rect, Sense, Stroke, Vec2};
 
 struct TabButtonFrame {
@@ -12,15 +12,24 @@ pub fn tab_button(
     ui: &mut egui::Ui,
     label: &str,
     active: bool,
+    selected: bool,
     show_promote_all: bool,
 ) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
-    tab_button_with_actions(ui, label, active, show_promote_all, TAB_BUTTON_WIDTH)
+    tab_button_with_actions(
+        ui,
+        label,
+        active,
+        selected,
+        show_promote_all,
+        TAB_BUTTON_WIDTH,
+    )
 }
 
 pub fn tab_button_with_actions(
     ui: &mut egui::Ui,
     label: &str,
     active: bool,
+    selected: bool,
     show_promote_all: bool,
     width: f32,
 ) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
@@ -30,6 +39,7 @@ pub fn tab_button_with_actions(
         frame.rect,
         &frame.response,
         active,
+        selected,
         frame.drag_in_progress,
     );
     let promote_rect = show_promote_all.then(|| tab_promote_rect(frame.rect));
@@ -45,6 +55,7 @@ pub fn tab_button_sized(
     ui: &mut egui::Ui,
     label: &str,
     active: bool,
+    selected: bool,
     width: f32,
 ) -> (egui::Response, egui::Response, bool) {
     let frame = allocate_tab_button_frame(ui, width);
@@ -53,6 +64,7 @@ pub fn tab_button_sized(
         frame.rect,
         &frame.response,
         active,
+        selected,
         frame.drag_in_progress,
     );
     let truncated = paint_tab_label(ui, frame.rect, label, false);
@@ -65,10 +77,11 @@ pub fn tab_button_sized_with_actions(
     ui: &mut egui::Ui,
     label: &str,
     active: bool,
+    selected: bool,
     show_promote_all: bool,
     width: f32,
 ) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
-    tab_button_with_actions(ui, label, active, show_promote_all, width)
+    tab_button_with_actions(ui, label, active, selected, show_promote_all, width)
 }
 
 fn paint_tab_background(
@@ -76,6 +89,7 @@ fn paint_tab_background(
     rect: Rect,
     response: &egui::Response,
     active: bool,
+    selected: bool,
     drag_in_progress: bool,
 ) {
     if active {
@@ -86,6 +100,22 @@ fn paint_tab_background(
             Stroke::new(1.0, border(ui)),
             egui::StrokeKind::Outside,
         );
+    } else if selected {
+        let selected_rect = rect.shrink(1.0);
+        let accent = tab_selected_accent(ui);
+        ui.painter()
+            .rect_filled(selected_rect, 4.0, tab_selected_bg(ui));
+        ui.painter().rect_stroke(
+            selected_rect,
+            4.0,
+            Stroke::new(1.5, accent.gamma_multiply(0.95)),
+            egui::StrokeKind::Outside,
+        );
+        let selection_rail = Rect::from_min_max(
+            selected_rect.left_top() + Vec2::new(4.0, 4.0),
+            selected_rect.left_bottom() + Vec2::new(7.0, -4.0),
+        );
+        ui.painter().rect_filled(selection_rail, 2.0, accent);
     } else if response.hovered() && !drag_in_progress {
         ui.painter().rect_filled(rect, 4.0, tab_hover_bg(ui));
     }
@@ -99,7 +129,7 @@ fn allocate_tab_button_frame(ui: &mut egui::Ui, width: f32) -> TabButtonFrame {
     TabButtonFrame {
         rect,
         response,
-        drag_in_progress: tab_drag::has_tab_drag_for_context(ui.ctx()),
+        drag_in_progress: transition::suppress_interactive_chrome(ui.ctx()),
     }
 }
 

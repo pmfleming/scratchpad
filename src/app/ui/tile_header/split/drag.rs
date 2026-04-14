@@ -90,8 +90,11 @@ fn commit_split_drag_action(
     view_id: ViewId,
     actions: &mut Vec<TileAction>,
 ) {
-    if let Some((axis, new_view_first, ratio)) =
-        super::split_preview_spec(tile_rect, state.current_pos - state.start_pos)
+    if let Some((axis, new_view_first, ratio)) = super::split_preview_spec(
+        tile_rect,
+        state.start_pos,
+        state.current_pos,
+    )
     {
         actions.push(TileAction::Activate(view_id));
         actions.push(TileAction::Split {

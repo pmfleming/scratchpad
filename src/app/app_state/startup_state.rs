@@ -9,6 +9,7 @@ use crate::app::services::settings_store::{
 };
 use crate::app::startup::{StartupOpenTarget, StartupOptions};
 use crate::app::transactions::TransactionLog;
+use std::collections::BTreeSet;
 use std::time::Instant;
 
 impl ScratchpadApp {
@@ -67,6 +68,10 @@ impl ScratchpadApp {
             transaction_log: TransactionLog::default(),
             transaction_log_open: false,
             pending_text_transaction: None,
+            chrome_transition_frames_remaining: 0,
+            selected_tab_slots: BTreeSet::new(),
+            tab_selection_anchor: None,
+            workspace_reflow_axis: crate::app::domain::SplitAxis::Vertical,
         };
 
         let loaded_from_settings = app.load_settings_from_store();

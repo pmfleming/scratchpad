@@ -26,15 +26,37 @@ pub(crate) fn apply_tab_outcome(app: &mut ScratchpadApp, outcome: TabStripOutcom
 }
 
 fn apply_tab_reordering(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
+    if let Some((from_indices, to_index)) = &outcome.reordered_tab_group {
+        let _ = app.reorder_display_tab_group(from_indices.clone(), *to_index);
+        app.clear_tab_selection();
+        return;
+    }
+
     if let Some((from_index, to_index)) = outcome.reordered_tabs {
         app.handle_command(AppCommand::ReorderDisplayTab {
             from_index,
             to_index,
         });
+        app.clear_tab_selection();
     }
 }
 
 fn apply_tab_combining(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
+    if let Some((source_indices, target_index)) = &outcome.combined_tab_group {
+        let workspace_sources = source_indices
+            .iter()
+            .filter_map(|slot_index| app.workspace_index_for_slot(*slot_index))
+            .collect::<Vec<_>>();
+        if let Some(workspace_target) = app.workspace_index_for_slot(*target_index) {
+            app.handle_command(AppCommand::CombineTabsIntoTab {
+                source_indices: workspace_sources,
+                target_index: workspace_target,
+            });
+        }
+        app.clear_tab_selection();
+        return;
+    }
+
     if let Some((source_index, target_index)) = outcome.combined_tabs
         && let (Some(source_index), Some(target_index)) = (
             app.workspace_index_for_slot(source_index),
@@ -45,6 +67,7 @@ fn apply_tab_combining(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
             source_index,
             target_index,
         });
+        app.clear_tab_selection();
     }
 }
 
@@ -155,5 +178,42 @@ mod tests {
         assert_eq!(app.tabs().len(), 2);
         assert_eq!(app.active_tab_index(), 0);
         assert_eq!(app.tabs()[0].views.len(), 2);
+    }
+
+    #[test]
+    fn reordering_a_group_of_display_slots_moves_them_together() {
+        let mut app = app_with_named_tabs(&["one.txt", "two.txt", "three.txt", "four.txt"]);
+
+        apply_tab_outcome(
+            &mut app,
+            TabStripOutcome {
+                reordered_tab_group: Some((vec![1, 2], 4)),
+                ..Default::default()
+            },
+        );
+
+        let names = app
+            .tabs()
+            .iter()
+            .map(|tab| tab.active_buffer().name.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["one.txt", "four.txt", "two.txt", "three.txt"]);
+    }
+
+    #[test]
+    fn combining_a_group_of_display_slots_merges_them_into_target_tab() {
+        let mut app = app_with_named_tabs(&["one.txt", "two.txt", "three.txt", "four.txt"]);
+
+        apply_tab_outcome(
+            &mut app,
+            TabStripOutcome {
+                combined_tab_group: Some((vec![1, 2], 0)),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(app.tabs().len(), 2);
+        assert_eq!(app.active_tab_index(), 0);
+        assert_eq!(app.tabs()[0].views.len(), 3);
     }
 }

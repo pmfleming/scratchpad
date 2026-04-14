@@ -79,8 +79,7 @@ impl TileSplitHandler {
         content: &str,
         handle_rect: egui::Rect,
     ) -> SplitPreviewOverlay {
-        let spec =
-            geometry::split_preview_spec(self.tile_rect, state.current_pos - state.start_pos);
+        let spec = geometry::split_preview_spec(self.tile_rect, state.start_pos, state.current_pos);
         SplitPreviewOverlay {
             axis: spec.map(|(axis, _, _)| axis),
             new_view_first: spec
@@ -102,9 +101,10 @@ pub fn paint_split_preview(ui: &egui::Ui, overlay: &SplitPreviewOverlay) {
 
 pub fn split_preview_spec(
     tile_rect: egui::Rect,
-    drag_delta: egui::Vec2,
+    start_pos: egui::Pos2,
+    current_pos: egui::Pos2,
 ) -> Option<(SplitAxis, bool, f32)> {
-    geometry::split_preview_spec(tile_rect, drag_delta)
+    geometry::split_preview_spec(tile_rect, start_pos, current_pos)
 }
 
 pub(crate) use geometry::split_rect;

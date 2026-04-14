@@ -13,6 +13,10 @@ impl ScratchpadApp {
                 source_index,
                 target_index,
             } => self.combine_tab_into_tab_command(source_index, target_index),
+            AppCommand::CombineTabsIntoTab {
+                source_indices,
+                target_index,
+            } => self.combine_tabs_into_tab_command(source_indices, target_index),
             AppCommand::PromoteViewToTab { view_id } => self.promote_view_to_tab_command(view_id),
             AppCommand::PromoteTabFilesToTabs { index } => {
                 self.promote_tab_files_to_tabs_command(index)

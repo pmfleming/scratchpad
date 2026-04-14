@@ -228,6 +228,23 @@ pub struct BufferState {
     pub artifact_summary: TextArtifactSummary,
     pub encoding: String,
     pub has_bom: bool,
+    pub disk_state: Option<DiskFileState>,
+    pub freshness: BufferFreshness,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DiskFileState {
+    pub modified_millis: Option<u64>,
+    pub len: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BufferFreshness {
+    #[default]
+    InSync,
+    StaleOnDisk,
+    ConflictOnDisk,
+    MissingOnDisk,
 }
 
 pub struct RestoredBufferState {
@@ -239,6 +256,8 @@ pub struct RestoredBufferState {
     pub temp_id: String,
     pub encoding: String,
     pub has_bom: bool,
+    pub disk_state: Option<DiskFileState>,
+    pub freshness: BufferFreshness,
 }
 
 impl BufferState {
@@ -267,6 +286,8 @@ impl BufferState {
             artifact_summary,
             encoding,
             has_bom,
+            disk_state: None,
+            freshness: BufferFreshness::InSync,
         }
     }
 
@@ -286,6 +307,8 @@ impl BufferState {
             artifact_summary,
             encoding: restored.encoding,
             has_bom: restored.has_bom,
+            disk_state: restored.disk_state,
+            freshness: restored.freshness,
         }
     }
 
@@ -309,6 +332,51 @@ impl BufferState {
     pub fn refresh_text_metadata(&mut self) {
         self.line_count = display_line_count(self.text());
         self.artifact_summary = TextArtifactSummary::from_text(self.text());
+    }
+
+    pub fn sync_to_disk_state(&mut self, disk_state: Option<DiskFileState>) {
+        self.disk_state = disk_state;
+        self.freshness = BufferFreshness::InSync;
+    }
+
+    pub fn mark_stale_on_disk(&mut self, disk_state: Option<DiskFileState>) {
+        self.disk_state = disk_state;
+        self.freshness = BufferFreshness::StaleOnDisk;
+    }
+
+    pub fn mark_conflict_on_disk(&mut self, disk_state: Option<DiskFileState>) {
+        self.disk_state = disk_state;
+        self.freshness = BufferFreshness::ConflictOnDisk;
+    }
+
+    pub fn mark_missing_on_disk(&mut self) {
+        self.freshness = BufferFreshness::MissingOnDisk;
+    }
+
+    pub fn disk_status_label(&self) -> Option<&'static str> {
+        match self.freshness {
+            BufferFreshness::InSync => None,
+            BufferFreshness::StaleOnDisk => Some("On disk changed"),
+            BufferFreshness::ConflictOnDisk => Some("Disk conflict"),
+            BufferFreshness::MissingOnDisk => Some("File missing"),
+        }
+    }
+
+    pub fn disk_status_message(&self) -> Option<String> {
+        let path_label = self
+            .path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| self.name.clone());
+
+        match self.freshness {
+            BufferFreshness::InSync => None,
+            BufferFreshness::StaleOnDisk => Some(format!("{path_label} changed on disk.")),
+            BufferFreshness::ConflictOnDisk => Some(format!(
+                "{path_label} changed on disk. Your tab has unsaved edits."
+            )),
+            BufferFreshness::MissingOnDisk => Some(format!("{path_label} is missing on disk.")),
+        }
     }
 
     pub fn display_name(&self) -> String {

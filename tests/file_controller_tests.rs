@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use scratchpad::ScratchpadApp;
-use scratchpad::app::domain::PaneNode;
+use scratchpad::app::domain::{BufferFreshness, PaneNode, PendingAction};
 use scratchpad::app::services::file_controller::FileController;
 use scratchpad::app::services::session_store::SessionStore;
 use scratchpad::app::services::settings_store::{
@@ -377,4 +377,75 @@ fn saved_startup_behavior_can_skip_session_restore_without_clean_switch() {
 
     assert_eq!(restored.tabs().len(), 1);
     assert_eq!(restored.tabs()[0].buffer.name, "Untitled");
+}
+
+#[test]
+fn opening_file_captures_disk_state() {
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let path = temp_dir.path().join("disk-state.txt");
+    fs::write(&path, "alpha\n").expect("write temp file");
+
+    let mut app = test_app();
+    FileController::open_external_paths(&mut app, vec![path.clone()]);
+
+    let buffer = app.tabs()[app.active_tab_index()].active_buffer();
+    assert!(buffer.disk_state.is_some());
+    assert_eq!(buffer.freshness, BufferFreshness::InSync);
+}
+
+#[test]
+fn save_refreshes_disk_state_and_clears_freshness_warning() {
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let path = temp_dir.path().join("save-refresh.txt");
+    fs::write(&path, "alpha\n").expect("write temp file");
+
+    let mut app = test_app();
+    FileController::open_external_paths(&mut app, vec![path.clone()]);
+    let index = app.active_tab_index();
+    app.tabs_mut()[index]
+        .active_buffer_mut()
+        .replace_text("beta\nlonger\n".to_owned());
+    app.tabs_mut()[index]
+        .active_buffer_mut()
+        .is_dirty = true;
+
+    assert!(app.save_file_at(index));
+
+    let buffer = app.tabs()[index].active_buffer();
+    assert!(!buffer.is_dirty);
+    assert!(buffer.disk_state.is_some());
+    assert_eq!(buffer.freshness, BufferFreshness::InSync);
+}
+
+#[test]
+fn save_does_not_silently_overwrite_when_disk_changed() {
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let path = temp_dir.path().join("disk-conflict.txt");
+    fs::write(&path, "alpha\n").expect("write temp file");
+
+    let mut app = test_app();
+    FileController::open_external_paths(&mut app, vec![path.clone()]);
+    let index = app.active_tab_index();
+    app.tabs_mut()[index]
+        .active_buffer_mut()
+        .replace_text("local edit\n".to_owned());
+    app.tabs_mut()[index]
+        .active_buffer_mut()
+        .is_dirty = true;
+
+    fs::write(&path, "external version on disk\n").expect("overwrite temp file externally");
+
+    assert!(!app.save_file_at(index));
+    assert_eq!(
+        app.pending_action(),
+        Some(PendingAction::SaveConflict(index))
+    );
+    assert_eq!(
+        app.tabs()[index].active_buffer().freshness,
+        BufferFreshness::ConflictOnDisk
+    );
+    assert_eq!(
+        fs::read_to_string(&path).expect("read disk file"),
+        "external version on disk\n"
+    );
 }

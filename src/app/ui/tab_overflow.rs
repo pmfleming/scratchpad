@@ -111,7 +111,7 @@ fn show_overflow_popup(
         return None;
     }
 
-    let active_drag_source = tab_drag::active_drag_source_for_context(ctx);
+    let active_drag_sources = tab_drag::active_drag_sources_for_context(ctx);
     let popup_width = TAB_BUTTON_WIDTH;
     let area_response = egui::Area::new(request.overflow_popup_id)
         .order(egui::Order::Foreground)
@@ -132,7 +132,7 @@ fn show_overflow_popup(
                 collect_overflow_row_rects(
                     ui,
                     request.app,
-                    active_drag_source,
+                    &active_drag_sources,
                     request.visible_tab_indices,
                     &mut menu,
                 )
@@ -161,14 +161,14 @@ fn overflow_popup_anchor(
 fn collect_overflow_row_rects(
     ui: &mut egui::Ui,
     app: &ScratchpadApp,
-    active_drag_source: Option<usize>,
+    active_drag_sources: &[usize],
     visible_tab_indices: &HashSet<usize>,
     menu: &mut OverflowMenuContext<'_>,
 ) -> Vec<tab_drag::TabRectEntry> {
     let mut row_rects = Vec::with_capacity(app.total_tab_slots());
 
     for slot_index in 0..app.total_tab_slots() {
-        if !should_show_overflow_row(slot_index, active_drag_source, visible_tab_indices) {
+        if !should_show_overflow_row(slot_index, active_drag_sources, visible_tab_indices) {
             continue;
         }
 
@@ -176,7 +176,7 @@ fn collect_overflow_row_rects(
             ui,
             app,
             slot_index,
-            active_drag_source == Some(slot_index),
+            active_drag_sources.contains(&slot_index),
             menu,
         );
         row_rects.push(tab_drag::TabRectEntry {
@@ -218,7 +218,7 @@ fn should_close_overflow_popup(
 
 fn should_show_overflow_row(
     slot_index: usize,
-    _active_drag_source: Option<usize>,
+    _active_drag_sources: &[usize],
     visible_tab_indices: &HashSet<usize>,
 ) -> bool {
     match overflow_list_mode() {
@@ -256,10 +256,17 @@ fn show_overflow_row(
                 ui,
                 &row_state.display_name,
                 row_state.selected,
+                row_state.selected,
                 row_state.can_promote_all_files,
                 menu.popup_width,
             );
-        tab_drag::begin_tab_drag_if_needed(ui, slot_index, &response, &close_response);
+        tab_drag::begin_tab_drag_if_needed(
+            ui,
+            slot_index,
+            &app.dragged_tab_slots(slot_index),
+            &response,
+            &close_response,
+        );
         apply_overflow_row_actions(
             app,
             slot_index,
@@ -276,7 +283,7 @@ fn show_overflow_row(
 
 fn overflow_row_state(app: &ScratchpadApp, slot_index: usize) -> Option<OverflowRowState> {
     Some(OverflowRowState {
-        selected: app.active_tab_slot_index() == slot_index,
+        selected: app.tab_slot_selected(slot_index) || app.active_tab_slot_index() == slot_index,
         display_name: app.display_tab_name_at_slot(slot_index)?,
         can_promote_all_files: app
             .workspace_index_for_slot(slot_index)

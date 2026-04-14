@@ -49,6 +49,7 @@ Current limitations:
 ## Near-Term Roadmap
 
 - Implement search and replace.
+- Detect and handle when an open/restored file is older than the latest on-disk version, especially after external edits while Scratchpad was closed.
 - Add user-facing wrap controls if wrapping should become configurable beyond settings-driven defaults.
 - Add shortcuts or command-palette entries for tile promotion and workspace promote-all.
 - Let Open Here / workspace rebalancing choose the initial split axis from viewport shape.

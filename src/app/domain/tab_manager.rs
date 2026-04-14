@@ -1,9 +1,10 @@
 use crate::app::domain::{ViewId, WorkspaceTab};
 use crate::app::theme;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PendingAction {
     CloseTab(usize),
+    SaveConflict(usize),
 }
 
 #[derive(Clone)]
