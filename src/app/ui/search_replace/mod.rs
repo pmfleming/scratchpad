@@ -8,6 +8,8 @@ use crate::app::theme::{action_bg, border};
 use eframe::egui;
 use state::{SearchStripActions, SearchStripState};
 
+const SEARCH_DIALOG_WIDTH: f32 = 620.0;
+
 pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     if !app.search_open() {
         return;
@@ -17,21 +19,33 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let mut actions = SearchStripActions::default();
     let find_input_id = ui.make_persistent_id("search_find_input");
     let replace_input_id = ui.make_persistent_id("search_replace_input");
+    let host_rect = ui.max_rect();
+    let overlay_top = ui.ctx().content_rect().top() + 4.0;
 
-    egui::Frame::NONE
-        .fill(action_bg(ui))
-        .stroke(egui::Stroke::new(1.0, border(ui)))
-        .inner_margin(egui::Margin::same(8))
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-            controls::show_search_controls(
-                ui,
-                &mut state,
-                &mut actions,
-                find_input_id,
-                replace_input_id,
-            );
-            results::show_search_results(ui, &state, &mut actions);
+    egui::Area::new(egui::Id::new("search_dialog_overlay"))
+        .order(egui::Order::Foreground)
+        .constrain(true)
+        .fixed_pos(egui::pos2(host_rect.left() + 16.0, overlay_top))
+        .show(ui.ctx(), |ui| {
+            ui.set_width(SEARCH_DIALOG_WIDTH);
+            ui.set_min_width(SEARCH_DIALOG_WIDTH);
+
+            egui::Frame::NONE
+                .fill(action_bg(ui))
+                .stroke(egui::Stroke::new(1.0, border(ui)))
+                .corner_radius(egui::CornerRadius::same(14))
+                .inner_margin(egui::Margin::symmetric(12, 8))
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                    controls::show_search_controls(
+                        ui,
+                        &mut state,
+                        &mut actions,
+                        find_input_id,
+                        replace_input_id,
+                    );
+                    results::show_search_results(ui, &state, &mut actions);
+                });
         });
 
     apply_search_inputs(app, &state);

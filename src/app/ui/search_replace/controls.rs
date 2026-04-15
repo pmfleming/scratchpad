@@ -1,7 +1,16 @@
 use super::state::{SearchStripActions, SearchStripState};
 use crate::app::app_state::{SearchFocusTarget, SearchScope};
-use crate::app::theme::{action_hover_bg, text_muted, text_primary};
+use crate::app::chrome::phosphor_button;
+use crate::app::theme::{
+    CAPTION_BUTTON_SIZE, CLOSE_BG, CLOSE_HOVER_BG, action_bg, action_hover_bg, border,
+    tab_selected_accent, tab_selected_bg, text_muted, text_primary,
+};
 use eframe::egui;
+
+const TOOLBAR_BUTTON_HEIGHT: f32 = 30.0;
+const INPUT_HEIGHT: f32 = 38.0;
+const TOOLBAR_ICON_SIZE: f32 = 18.0;
+const INPUT_ACTION_BUTTON_WIDTH: f32 = 36.0;
 
 pub(super) fn show_search_controls(
     ui: &mut egui::Ui,
@@ -10,73 +19,270 @@ pub(super) fn show_search_controls(
     find_input_id: egui::Id,
     replace_input_id: egui::Id,
 ) {
-    ui.horizontal_wrapped(|ui| {
-        ui.label(egui::RichText::new("Find").color(text_primary(ui)));
+    let (find_response, replace_response) = ui
+        .vertical(|ui| {
+            show_toolbar(ui, state, actions);
+            ui.add_space(2.0);
+            let responses = show_input_row(ui, state, actions, find_input_id, replace_input_id);
+            ui.add_space(2.0);
+            show_footer(ui, state, actions);
+            responses
+        })
+        .inner;
 
-        let find_response = ui.add_sized(
-            [220.0, 28.0],
-            egui::TextEdit::singleline(&mut state.query)
-                .id(find_input_id)
-                .hint_text("Search all open text"),
-        );
-        state.sync_focus(&find_response, SearchFocusTarget::FindInput);
-
-        ui.label(egui::RichText::new("Replace").color(text_primary(ui)));
-        let replace_response = ui.add_sized(
-            [180.0, 28.0],
-            egui::TextEdit::singleline(&mut state.replacement)
-                .id(replace_input_id)
-                .hint_text("Replacement text"),
-        );
-        state.sync_focus(&replace_response, SearchFocusTarget::ReplaceInput);
-
-        egui::ComboBox::from_id_salt("search_scope")
-            .selected_text(state.scope.label())
-            .show_ui(ui, |ui| {
-                selectable_scope(ui, &mut state.scope, SearchScope::ActiveBuffer);
-                selectable_scope(ui, &mut state.scope, SearchScope::ActiveWorkspaceTab);
-                selectable_scope(ui, &mut state.scope, SearchScope::AllOpenTabs);
-            });
-
-        ui.toggle_value(&mut state.match_case, "Aa");
-        ui.toggle_value(&mut state.whole_word, "Whole");
-
-        if nav_button(ui, state.match_count > 0, "Prev").clicked() {
-            actions.previous_requested = true;
-        }
-        if nav_button(ui, state.match_count > 0, "Next").clicked() {
-            actions.next_requested = true;
-        }
-        if nav_button(ui, state.match_count > 0, "Replace").clicked() {
+    if find_response.has_focus() {
+        consume_find_input_keys(ui, actions);
+    }
+    if replace_response.has_focus() {
+        if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
             actions.replace_current_requested = true;
         }
-        if nav_button(ui, state.match_count > 0, "Replace All In File").clicked() {
-            actions.replace_all_requested = true;
-        }
-        ui.label(egui::RichText::new(&state.match_label).color(text_muted(ui)));
-        if ui.button("Close").clicked() {
+        if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             actions.close_requested = true;
+        }
+    }
+}
+
+fn show_toolbar(ui: &mut egui::Ui, state: &mut SearchStripState, actions: &mut SearchStripActions) {
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(egui_phosphor::regular::MAGNIFYING_GLASS)
+                .size(TOOLBAR_ICON_SIZE)
+                .color(text_primary(ui)),
+        );
+
+        if toggle_chip(
+            ui,
+            state.match_case,
+            egui_phosphor::regular::TEXT_AA,
+            None,
+            "Match case",
+        )
+        .clicked()
+        {
+            state.match_case = !state.match_case;
         }
 
-        if find_response.has_focus() {
-            consume_find_input_keys(ui, actions);
-        }
-        if replace_response.has_focus()
-            && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        if toggle_chip(
+            ui,
+            state.whole_word,
+            egui_phosphor::regular::SELECTION,
+            None,
+            "Match whole words only",
+        )
+        .clicked()
         {
-            actions.close_requested = true;
+            state.whole_word = !state.whole_word;
         }
+
+        if icon_button(
+            ui,
+            scope_icon(state.scope),
+            &scope_tooltip(state.scope),
+            true,
+        )
+        .clicked()
+        {
+            state.scope = next_scope(state.scope);
+        }
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if phosphor_button(
+                ui,
+                egui_phosphor::regular::X,
+                CAPTION_BUTTON_SIZE,
+                CLOSE_BG,
+                CLOSE_HOVER_BG,
+                "Close search",
+            )
+            .clicked()
+            {
+                actions.close_requested = true;
+            }
+
+            if icon_button(
+                ui,
+                egui_phosphor::regular::PENCIL_SIMPLE_LINE,
+                "Replace current match",
+                state.match_count > 0,
+            )
+            .clicked()
+            {
+                actions.replace_current_requested = true;
+            }
+        });
     });
 }
 
-fn selectable_scope(ui: &mut egui::Ui, scope: &mut SearchScope, value: SearchScope) {
-    ui.selectable_value(scope, value, value.label());
+fn show_input_row(
+    ui: &mut egui::Ui,
+    state: &mut SearchStripState,
+    actions: &mut SearchStripActions,
+    find_input_id: egui::Id,
+    replace_input_id: egui::Id,
+) -> (egui::Response, egui::Response) {
+    ui.horizontal(|ui| {
+        let field_width =
+            ((ui.available_width() - (INPUT_ACTION_BUTTON_WIDTH * 3.0) - 26.0) / 2.0).max(170.0);
+        let find_response = ui.add_sized(
+            [field_width, INPUT_HEIGHT],
+            search_text_edit(&mut state.query, find_input_id, "Search"),
+        );
+        state.sync_focus(&find_response, SearchFocusTarget::FindInput);
+
+        let replace_response = ui.add_sized(
+            [field_width, INPUT_HEIGHT],
+            search_text_edit(&mut state.replacement, replace_input_id, "Replace"),
+        );
+        state.sync_focus(&replace_response, SearchFocusTarget::ReplaceInput);
+
+        ui.add_space(2.0);
+
+        if input_action_button(
+            ui,
+            state.match_count > 0,
+            egui_phosphor::regular::CARET_UP,
+            "Jump to the previous match",
+        )
+        .clicked()
+        {
+            actions.previous_requested = true;
+        }
+        if input_action_button(
+            ui,
+            state.match_count > 0,
+            egui_phosphor::regular::CARET_DOWN,
+            "Jump to the next match",
+        )
+        .clicked()
+        {
+            actions.next_requested = true;
+        }
+        if input_action_button(
+            ui,
+            state.match_count > 0,
+            egui_phosphor::regular::PENCIL_LINE,
+            "Replace all matches in the current scope",
+        )
+        .clicked()
+        {
+            actions.replace_all_requested = true;
+        }
+
+        (find_response, replace_response)
+    })
+    .inner
 }
 
-fn nav_button(ui: &mut egui::Ui, enabled: bool, label: &str) -> egui::Response {
+fn show_footer(ui: &mut egui::Ui, state: &SearchStripState, _actions: &mut SearchStripActions) {
+    let left_label = if state.query.is_empty() {
+        format!("{} | Enter next, Shift+Enter previous", state.scope.label())
+    } else {
+        format!("{} | {}", state.scope.label(), state.match_label)
+    };
+    ui.label(
+        egui::RichText::new(left_label)
+            .small()
+            .color(text_muted(ui)),
+    );
+}
+
+fn toggle_chip(
+    ui: &mut egui::Ui,
+    selected: bool,
+    icon: &str,
+    label: Option<&str>,
+    tooltip: &str,
+) -> egui::Response {
+    let content = match (icon.is_empty(), label) {
+        (true, Some(label)) => label.to_owned(),
+        (false, Some(label)) => format!("{} {}", icon, label),
+        (false, None) => icon.to_owned(),
+        (true, None) => String::new(),
+    };
+
+    ui.add(
+        egui::Button::new(egui::RichText::new(content).color(text_primary(ui)))
+            .min_size(egui::vec2(30.0, TOOLBAR_BUTTON_HEIGHT))
+            .fill(if selected {
+                tab_selected_bg(ui)
+            } else {
+                action_hover_bg(ui)
+            })
+            .stroke(egui::Stroke::new(
+                1.0,
+                if selected {
+                    tab_selected_accent(ui)
+                } else {
+                    border(ui)
+                },
+            ))
+            .corner_radius(egui::CornerRadius::same(10)),
+    )
+    .on_hover_text(tooltip)
+}
+
+fn icon_button(ui: &mut egui::Ui, icon: &str, tooltip: &str, enabled: bool) -> egui::Response {
+    let button = egui::Button::new(
+        egui::RichText::new(icon)
+            .size(TOOLBAR_ICON_SIZE)
+            .color(text_primary(ui)),
+    )
+    .min_size(egui::vec2(30.0, TOOLBAR_BUTTON_HEIGHT))
+    .fill(action_bg(ui))
+    .stroke(egui::Stroke::new(1.0, border(ui)))
+    .corner_radius(egui::CornerRadius::same(10));
+
+    ui.add_enabled(enabled, button).on_hover_text(tooltip)
+}
+
+fn input_action_button(
+    ui: &mut egui::Ui,
+    enabled: bool,
+    icon: &str,
+    tooltip: &str,
+) -> egui::Response {
     ui.add_enabled(
         enabled,
-        egui::Button::new(label).fill(action_hover_bg(ui)),
+        egui::Button::new(egui::RichText::new(icon).size(16.0).color(text_primary(ui)))
+            .min_size(egui::vec2(INPUT_ACTION_BUTTON_WIDTH, INPUT_HEIGHT))
+            .fill(action_hover_bg(ui))
+            .stroke(egui::Stroke::new(1.0, border(ui)))
+            .corner_radius(egui::CornerRadius::same(8)),
+    )
+    .on_hover_text(tooltip)
+}
+
+fn search_text_edit<'a>(text: &'a mut String, id: egui::Id, hint: &str) -> egui::TextEdit<'a> {
+    egui::TextEdit::singleline(text)
+        .id(id)
+        .hint_text(hint)
+        .margin(egui::Margin::symmetric(10, 8))
+        .vertical_align(egui::Align::Center)
+}
+
+fn next_scope(scope: SearchScope) -> SearchScope {
+    match scope {
+        SearchScope::ActiveBuffer => SearchScope::ActiveWorkspaceTab,
+        SearchScope::ActiveWorkspaceTab => SearchScope::AllOpenTabs,
+        SearchScope::AllOpenTabs => SearchScope::ActiveBuffer,
+    }
+}
+
+fn scope_icon(scope: SearchScope) -> &'static str {
+    match scope {
+        SearchScope::ActiveBuffer => egui_phosphor::regular::FILE_TEXT,
+        SearchScope::ActiveWorkspaceTab => egui_phosphor::regular::TABS,
+        SearchScope::AllOpenTabs => egui_phosphor::regular::BROWSERS,
+    }
+}
+
+fn scope_tooltip(scope: SearchScope) -> String {
+    let next_scope = next_scope(scope);
+    format!(
+        "Search scope: {}. Click to switch to {}.",
+        scope.label(),
+        next_scope.label()
     )
 }
 

@@ -12,7 +12,7 @@ The goal is not only to open more encodings, but to correctly recognize how text
 
 This document should be read alongside [plain-text-artifact-handling-plan.md](plain-text-artifact-handling-plan.md). That document governs how true control-sequence artifacts are preserved and inspected. This document governs how Scratchpad should classify, display, preserve, and save text-file format variations overall.
 
-## Goal
+## Goal - this
 
 Make Scratchpad reliable for real-world text files from different operating systems, editors, terminals, and older tools without silently corrupting their format.
 
