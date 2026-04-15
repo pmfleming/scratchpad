@@ -318,9 +318,9 @@ impl FileController {
                 app.log_event(
                     LogLevel::Info,
                     format!(
-                        "Opened file into balanced current workspace layout at tab index {tab_index}: {tab_description} [encoding={}, bom={}, artifact_status={}] from {}",
-                        entry.encoding,
-                        entry.has_bom,
+                        "Opened file into balanced current workspace layout at tab index {tab_index}: {tab_description} [format={}, line_endings={}, artifact_status={}] from {}",
+                        entry.format_label,
+                        entry.line_endings_label,
                         entry.artifact_summary.unwrap_or_else(|| "none".to_owned()),
                         entry.path_display
                     ),

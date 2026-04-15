@@ -16,8 +16,8 @@ pub enum OpenPathOutcome {
 
 struct LoadedFile {
     path_display: String,
-    encoding: String,
-    has_bom: bool,
+    format_label: String,
+    line_endings_label: String,
     artifact_summary: Option<String>,
     artifact_warning: Option<String>,
     buffer: BufferState,
@@ -26,18 +26,17 @@ struct LoadedFile {
 impl LoadedFile {
     fn from_file_content(path: PathBuf, file_content: FileContent) -> Self {
         let path_display = path.display().to_string();
-        let encoding = file_content.encoding.clone();
-        let has_bom = file_content.has_bom;
+        let format_label = file_content.format.encoding_label();
+        let line_endings_label = file_content.format.line_endings_label().to_owned();
+        let format_warning = file_content.format.format_warning_text();
         let buffer = FileController::buffer_from_file_content(path, file_content);
         let artifact_summary = buffer.artifact_summary.status_text();
-        let artifact_warning = artifact_summary
-            .as_ref()
-            .map(|message| format!("Opened with formatting artifacts: {message}"));
+        let artifact_warning = combine_open_warning(format_warning, artifact_summary.clone());
 
         Self {
             path_display,
-            encoding,
-            has_bom,
+            format_label,
+            line_endings_label,
             artifact_summary,
             artifact_warning,
             buffer,
@@ -47,8 +46,8 @@ impl LoadedFile {
     fn into_parts(self) -> (BufferState, PendingOpenLogEntry) {
         let log_entry = PendingOpenLogEntry {
             path_display: self.path_display,
-            encoding: self.encoding,
-            has_bom: self.has_bom,
+            format_label: self.format_label,
+            line_endings_label: self.line_endings_label,
             artifact_summary: self.artifact_summary,
             artifact_warning: self.artifact_warning,
         };
@@ -58,10 +57,31 @@ impl LoadedFile {
 
 struct PendingOpenLogEntry {
     path_display: String,
-    encoding: String,
-    has_bom: bool,
+    format_label: String,
+    line_endings_label: String,
     artifact_summary: Option<String>,
     artifact_warning: Option<String>,
+}
+
+fn combine_open_warning(
+    format_warning: Option<String>,
+    artifact_summary: Option<String>,
+) -> Option<String> {
+    let mut warnings = Vec::new();
+    if let Some(format_warning) = format_warning {
+        warnings.push(format_warning);
+    }
+    if let Some(artifact_summary) = artifact_summary {
+        warnings.push(format!(
+            "Opened file with control characters: {artifact_summary}"
+        ));
+    }
+
+    if warnings.is_empty() {
+        None
+    } else {
+        Some(warnings.join("; "))
+    }
 }
 
 pub struct FileController;
@@ -233,15 +253,15 @@ impl FileController {
                 let disk_state = FileService::read_disk_state(&path).ok();
                 let buffer_name = {
                     let buffer = app.tabs_mut()[index].active_buffer_mut();
-                    buffer.replace_text(file_content.content);
-                    buffer.encoding = file_content.encoding;
-                    buffer.has_bom = file_content.has_bom;
+                    buffer.replace_text_with_format(file_content.content, file_content.format);
                     buffer.is_dirty = false;
                     buffer.sync_to_disk_state(disk_state);
                     buffer.name.clone()
                 };
                 app.mark_session_dirty();
-                app.set_info_status(format!("Reloaded {buffer_name} because it changed on disk."));
+                app.set_info_status(format!(
+                    "Reloaded {buffer_name} because it changed on disk."
+                ));
                 true
             }
             Err(error) => {
@@ -339,8 +359,8 @@ impl FileController {
     ) -> Option<String> {
         let LoadedFile {
             path_display,
-            encoding,
-            has_bom,
+            format_label,
+            line_endings_label,
             artifact_summary,
             artifact_warning,
             mut buffer,
@@ -353,9 +373,9 @@ impl FileController {
         app.log_event(
             LogLevel::Info,
             format!(
-                "Opened file into tab index {tab_index}: {tab_description} [encoding={}, bom={}, artifact_status={}] from {}",
-                encoding,
-                has_bom,
+                "Opened file into tab index {tab_index}: {tab_description} [format={}, line_endings={}, artifact_status={}] from {}",
+                format_label,
+                line_endings_label,
                 artifact_summary.unwrap_or_else(|| "none".to_owned()),
                 path_display
             ),
@@ -410,9 +430,7 @@ impl FileController {
                 match FileService::read_file(&path) {
                     Ok(file_content) => {
                         let buffer = app.tabs_mut()[index].active_buffer_mut();
-                        buffer.replace_text(file_content.content);
-                        buffer.encoding = file_content.encoding;
-                        buffer.has_bom = file_content.has_bom;
+                        buffer.replace_text_with_format(file_content.content, file_content.format);
                         buffer.is_dirty = false;
                         buffer.sync_to_disk_state(Some(disk_state));
                         app.set_info_status(format!(
@@ -451,7 +469,9 @@ impl FileController {
         let freshness = app.tabs()[index].active_buffer().freshness;
         if matches!(
             freshness,
-            BufferFreshness::ConflictOnDisk | BufferFreshness::MissingOnDisk | BufferFreshness::StaleOnDisk
+            BufferFreshness::ConflictOnDisk
+                | BufferFreshness::MissingOnDisk
+                | BufferFreshness::StaleOnDisk
         ) {
             app.set_pending_action(Some(crate::app::domain::PendingAction::SaveConflict(index)));
             if let Some(message) = app.tabs()[index].active_buffer().disk_status_message() {
@@ -478,7 +498,7 @@ impl FileController {
         let target_path = path.display().to_string();
         let save_result = {
             let buffer = app.tabs()[index].active_buffer();
-            FileService::write_file_with_bom(&path, buffer.text(), &buffer.encoding, buffer.has_bom)
+            FileService::write_file_with_format(&path, buffer.text(), &buffer.format)
         };
 
         match save_result {
@@ -566,13 +586,8 @@ impl FileController {
     fn buffer_from_file_content(path: PathBuf, file_content: FileContent) -> BufferState {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
         let disk_state = FileService::read_disk_state(&path).ok();
-        let mut buffer = BufferState::with_encoding(
-            name,
-            file_content.content,
-            Some(path),
-            file_content.encoding,
-            file_content.has_bom,
-        );
+        let mut buffer =
+            BufferState::with_format(name, file_content.content, Some(path), file_content.format);
         buffer.artifact_summary = file_content.artifact_summary;
         buffer.sync_to_disk_state(disk_state);
         buffer

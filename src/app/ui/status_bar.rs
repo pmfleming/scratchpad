@@ -14,11 +14,14 @@ struct StatusBarActions {
 struct ActiveStatusDetails {
     path_label: String,
     count_label: String,
-    encoding: String,
+    encoding_label: String,
+    encoding_tooltip: String,
+    line_endings_label: String,
     icon: &'static str,
     icon_tooltip: &'static str,
     icon_color: egui::Color32,
-    warning_label: Option<String>,
+    artifact_warning_label: Option<String>,
+    format_warning_label: Option<String>,
     freshness_label: Option<String>,
     is_large_file: bool,
     has_control_chars: bool,
@@ -81,21 +84,24 @@ fn collect_active_status_details(
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Untitled".to_owned()),
         count_label: line_count_label(line_count, visual_row_count),
-        encoding: tab.buffer.encoding.clone(),
+        encoding_label: tab.buffer.format.encoding_label(),
+        encoding_tooltip: tab.buffer.format.encoding_tooltip(),
+        line_endings_label: tab.buffer.format.line_endings_label().to_owned(),
         icon,
         icon_tooltip,
         icon_color,
-        warning_label: tab
+        artifact_warning_label: tab
             .buffer
             .artifact_summary
             .status_text()
             .map(|warning_text| {
                 if show_control_chars {
-                    format!("{warning_text}; all visible")
+                    format!("{warning_text}; inspection view")
                 } else {
-                    format!("{warning_text}; cleaned view")
+                    format!("{warning_text}; editing raw text")
                 }
             }),
+        format_warning_label: tab.buffer.format.format_warning_text(),
         freshness_label: tab.buffer.disk_status_label().map(str::to_owned),
         is_large_file: tab.buffer.text().len() > 5 * 1024 * 1024,
         has_control_chars,
@@ -114,7 +120,8 @@ fn render_active_status(
         show_transaction_log_button(ui, actions);
         show_control_char_toggle(ui, details, actions);
         show_logging_toggle(ui, logging_enabled, actions);
-        show_encoding(ui, &details.encoding);
+        show_line_endings(ui, &details.line_endings_label);
+        show_encoding(ui, &details.encoding_label, &details.encoding_tooltip);
         show_line_count(ui, &details.count_label, actions);
     });
 }
@@ -128,9 +135,14 @@ fn show_line_count(ui: &mut egui::Ui, count_label: &str, actions: &mut StatusBar
     }
 }
 
-fn show_encoding(ui: &mut egui::Ui, encoding: &str) {
+fn show_encoding(ui: &mut egui::Ui, encoding: &str, tooltip: &str) {
     ui.separator();
-    ui.label(encoding);
+    ui.label(encoding).on_hover_text(tooltip);
+}
+
+fn show_line_endings(ui: &mut egui::Ui, line_endings_label: &str) {
+    ui.separator();
+    ui.label(format!("EOL: {line_endings_label}"));
 }
 
 fn show_logging_toggle(ui: &mut egui::Ui, logging_enabled: bool, actions: &mut StatusBarActions) {
@@ -194,7 +206,12 @@ fn show_status_warnings(ui: &mut egui::Ui, details: &ActiveStatusDetails) {
         );
     }
 
-    if let Some(warning_label) = &details.warning_label {
+    if let Some(warning_label) = &details.format_warning_label {
+        ui.separator();
+        ui.label(egui::RichText::new(warning_label).color(egui::Color32::YELLOW));
+    }
+
+    if let Some(warning_label) = &details.artifact_warning_label {
         ui.separator();
         ui.label(egui::RichText::new(warning_label).color(egui::Color32::YELLOW));
     }
@@ -247,13 +264,13 @@ fn artifact_icon(
         if show_control_chars {
             (
                 egui_phosphor::regular::TEXT_OUTDENT,
-                "All control characters visible; click to switch to cleaned view",
+                "Visible control-character inspection active; click to return to raw-text editing",
                 egui::Color32::YELLOW,
             )
         } else {
             (
                 egui_phosphor::regular::TEXT_ALIGN_JUSTIFY,
-                "Cleaned view active; click to return to all control characters",
+                "Control characters detected; raw-text editing remains enabled; click to inspect them",
                 egui::Color32::LIGHT_GREEN,
             )
         }

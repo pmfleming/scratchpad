@@ -2,8 +2,21 @@
 
 use eframe::egui::{TextBuffer, text::CCursorRange};
 use eframe::epaint::text::cursor::CCursor;
-use scratchpad::app::domain::{BufferFreshness, BufferState, RestoredBufferState, TextDocument};
+use scratchpad::app::domain::{
+    BufferFreshness, BufferState, EncodingSource, LineEndingStyle, RestoredBufferState,
+    TextDocument, TextFormatMetadata, platform_default_line_ending,
+};
 use std::path::PathBuf;
+
+fn format_for(content: &str, encoding: &str, has_bom: bool) -> TextFormatMetadata {
+    TextFormatMetadata::detected(
+        content,
+        encoding.to_owned(),
+        has_bom,
+        EncodingSource::ExplicitUserChoice,
+        false,
+    )
+}
 
 #[test]
 fn new_buffer_starts_clean() {
@@ -40,8 +53,7 @@ fn restored_buffer_preserves_session_metadata() {
         path: Some(PathBuf::from("draft.md")),
         is_dirty: true,
         temp_id: "buffer-restore-1".to_owned(),
-        encoding: "UTF-8".to_owned(),
-        has_bom: false,
+        format: format_for("content", "UTF-8", false),
         disk_state: None,
         freshness: BufferFreshness::InSync,
     });
@@ -66,6 +78,20 @@ fn normal_crlf_line_endings_do_not_mark_control_char_artifacts() {
     );
 
     assert_eq!(buffer.line_count, 3);
+    assert!(!buffer.artifact_summary.has_control_chars());
+    assert_eq!(buffer.format.line_endings, LineEndingStyle::Crlf);
+}
+
+#[test]
+fn cr_only_line_endings_are_tracked_as_format_not_artifact() {
+    let buffer = BufferState::new(
+        "classic-mac.txt".to_owned(),
+        "alpha\rbeta\r".to_owned(),
+        None,
+    );
+
+    assert_eq!(buffer.line_count, 3);
+    assert_eq!(buffer.format.line_endings, LineEndingStyle::Cr);
     assert!(!buffer.artifact_summary.has_control_chars());
 }
 
@@ -120,4 +146,33 @@ fn text_document_replace_with_handles_unicode_content() {
     TextBuffer::replace_with(&mut document, "x🌍y");
 
     assert_eq!(document.as_str(), "x🌍y");
+}
+
+#[test]
+fn text_document_normalizes_windows_enter_key_input() {
+    let mut document = TextDocument::new("alpha".to_owned());
+    let expected_newline = platform_default_line_ending().as_str();
+    let expected_width = expected_newline.len();
+
+    assert_eq!(
+        TextBuffer::insert_text(&mut document, "\r", 5),
+        expected_width
+    );
+    assert_eq!(document.as_str(), format!("alpha{expected_newline}"));
+
+    let mut document = TextDocument::new("alpha".to_owned());
+
+    assert_eq!(
+        TextBuffer::insert_text(&mut document, "\r\n", 5),
+        expected_width
+    );
+    assert_eq!(document.as_str(), format!("alpha{expected_newline}"));
+}
+
+#[test]
+fn text_document_preserves_non_newline_control_char_inserts() {
+    let mut document = TextDocument::new("alpha".to_owned());
+
+    assert_eq!(TextBuffer::insert_text(&mut document, "\rprogress", 5), 9);
+    assert_eq!(document.as_str(), "alpha\rprogress");
 }

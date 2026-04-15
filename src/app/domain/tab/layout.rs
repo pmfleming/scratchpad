@@ -136,8 +136,7 @@ impl WorkspaceTab {
         buffer: &BufferState,
         presentation: ViewPresentationState,
     ) -> EditorViewState {
-        let mut new_view =
-            EditorViewState::new(buffer.id, buffer.artifact_summary.has_control_chars());
+        let mut new_view = EditorViewState::new(buffer.id, false);
         new_view.show_line_numbers = presentation.show_line_numbers;
         new_view.show_control_chars =
             presentation.show_control_chars && buffer.artifact_summary.has_control_chars();

@@ -9,6 +9,9 @@ pub(super) struct SettingsTypography {
 
 pub(super) struct SettingsLayout {
     pub page_max_width: f32,
+    pub page_min_viewport_width: f32,
+    pub page_min_viewport_height: f32,
+    pub page_side_padding: f32,
     pub card_max_width: f32,
     pub preview_max_width: f32,
     pub card_radius: u8,
@@ -45,6 +48,9 @@ impl SettingsUi {
     };
     pub(super) const LAYOUT: SettingsLayout = SettingsLayout {
         page_max_width: 980.0,
+        page_min_viewport_width: 1180.0,
+        page_min_viewport_height: 720.0,
+        page_side_padding: 24.0,
         card_max_width: 760.0,
         preview_max_width: 420.0,
         card_radius: 10,
@@ -111,28 +117,58 @@ impl SettingsUi {
         );
     }
 
+    pub(super) fn page_viewport_size(ui: &egui::Ui) -> egui::Vec2 {
+        ui.available_size()
+    }
+
+    pub(super) fn page_surface_size(ui: &egui::Ui) -> egui::Vec2 {
+        Self::page_surface_size_for_viewport(Self::page_viewport_size(ui))
+    }
+
+    pub(super) fn page_overflows_horizontally(viewport_size: egui::Vec2) -> bool {
+        Self::page_surface_size_for_viewport(viewport_size).x > viewport_size.x
+    }
+
     pub(super) fn page_content_width(ui: &egui::Ui) -> f32 {
-        ui.available_width().min(Self::LAYOUT.page_max_width)
+        Self::page_content_width_for_surface(ui.available_width())
     }
 
     pub(super) fn card_width(ui: &egui::Ui) -> f32 {
         ui.available_width().min(Self::LAYOUT.card_max_width)
     }
 
+    pub(super) fn control_width(ui: &egui::Ui) -> f32 {
+        ui.available_width().clamp(0.0, Self::CONTROLS.width)
+    }
+
     pub(super) fn preview_width(ui: &egui::Ui) -> f32 {
         ui.available_width().min(Self::LAYOUT.preview_max_width)
     }
 
-    pub(super) fn page_horizontal_margin(ui: &egui::Ui, content_width: f32) -> f32 {
-        ((ui.available_width() - content_width) * 0.5).max(Self::LAYOUT.body_top_space)
+    pub(super) fn page_horizontal_margin(
+        ui: &egui::Ui,
+        content_width: f32,
+        align_to_viewport_start: bool,
+    ) -> f32 {
+        Self::page_horizontal_margin_for_surface(
+            ui.available_width(),
+            content_width,
+            align_to_viewport_start,
+        )
     }
 
     pub(super) fn header_text_width(ui: &egui::Ui) -> f32 {
-        (ui.available_width() - 240.0).max(220.0)
+        let available_width = ui.available_width().max(0.0);
+        let preferred_width =
+            (available_width - Self::CONTROLS.width - Self::CONTROLS.gap - 42.0).max(220.0);
+        preferred_width.min(available_width)
     }
 
     pub(super) fn row_label_width(ui: &egui::Ui) -> f32 {
-        (ui.available_width() - 250.0).max(180.0)
+        let available_width = ui.available_width().max(0.0);
+        let preferred_width =
+            (available_width - Self::CONTROLS.width - Self::CONTROLS.gap - 52.0).max(180.0);
+        preferred_width.min(available_width)
     }
 
     pub(super) fn divider_width(ui: &egui::Ui) -> f32 {
@@ -187,7 +223,66 @@ impl SettingsUi {
         if ui.visuals().dark_mode { dark } else { light }
     }
 
-    pub(super) fn pill_width() -> f32 {
-        Self::CONTROLS.width - Self::CONTROLS.icon_button_size - Self::CONTROLS.gap
+    fn page_surface_size_for_viewport(viewport_size: egui::Vec2) -> egui::Vec2 {
+        egui::vec2(
+            viewport_size.x.max(Self::LAYOUT.page_min_viewport_width),
+            viewport_size.y.max(Self::LAYOUT.page_min_viewport_height),
+        )
+    }
+
+    fn page_content_width_for_surface(surface_width: f32) -> f32 {
+        (surface_width - Self::LAYOUT.page_side_padding * 2.0)
+            .clamp(0.0, Self::LAYOUT.page_max_width)
+    }
+
+    fn page_horizontal_margin_for_surface(
+        surface_width: f32,
+        content_width: f32,
+        align_to_viewport_start: bool,
+    ) -> f32 {
+        if align_to_viewport_start {
+            Self::LAYOUT.page_side_padding
+        } else {
+            ((surface_width - content_width) * 0.5).max(Self::LAYOUT.page_side_padding)
+        }
+    }
+
+    pub(super) fn pill_outer_width(control_width: f32) -> f32 {
+        (control_width - Self::CONTROLS.icon_button_size - Self::CONTROLS.gap).max(0.0)
+    }
+
+    pub(super) fn pill_content_width(outer_width: f32) -> f32 {
+        let horizontal_padding =
+            (Self::MARGINS.value_pill_inner.left + Self::MARGINS.value_pill_inner.right) as f32;
+        (outer_width - horizontal_padding).max(0.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_surface_grows_to_min_viewport() {
+        let surface = SettingsUi::page_surface_size_for_viewport(egui::vec2(900.0, 600.0));
+
+        assert_eq!(surface.x, SettingsUi::LAYOUT.page_min_viewport_width);
+        assert_eq!(surface.y, SettingsUi::LAYOUT.page_min_viewport_height);
+    }
+
+    #[test]
+    fn page_surface_preserves_large_viewport() {
+        let surface = SettingsUi::page_surface_size_for_viewport(egui::vec2(1440.0, 900.0));
+
+        assert_eq!(surface, egui::vec2(1440.0, 900.0));
+    }
+
+    #[test]
+    fn page_content_width_respects_padding_and_max_width() {
+        let laptop_width = SettingsUi::page_content_width_for_surface(1180.0);
+        let narrow_width = SettingsUi::page_content_width_for_surface(800.0);
+
+        assert_eq!(laptop_width, SettingsUi::LAYOUT.page_max_width);
+        assert_eq!(narrow_width, 752.0);
     }
 }

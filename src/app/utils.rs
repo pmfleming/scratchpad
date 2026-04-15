@@ -14,7 +14,7 @@ pub fn summarize_open_results(
     if opened_count > 0 {
         if artifact_count > 0 {
             parts.push(format!(
-                "Opened {} ({} with formatting artifacts)",
+                "Opened {} ({} with control characters)",
                 file_count_label(opened_count),
                 file_count_label(artifact_count)
             ));

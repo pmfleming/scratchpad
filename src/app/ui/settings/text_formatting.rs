@@ -47,9 +47,10 @@ fn render_font_family_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     inner_select_row(ui, "Family", Some("Pick the bundled editor font."), |ui| {
         let mut selected_font = app.editor_font();
         fixed_width_control(ui, |ui| {
+            let control_width = SettingsUi::control_width(ui);
             egui::ComboBox::from_id_salt("settings_editor_font")
                 .selected_text(selected_font.label())
-                .width(SettingsUi::CONTROLS.width)
+                .width(control_width)
                 .show_ui(ui, |ui| {
                     for preset in EditorFontPreset::ALL {
                         ui.selectable_value(&mut selected_font, preset, preset.label());
@@ -66,8 +67,9 @@ fn render_font_size_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     inner_select_row(ui, "Size", Some("Adjust the editor text size."), |ui| {
         let current_index = nearest_font_size_index(app.font_size());
         let mut selected_index = current_index as u32;
+        let control_width = SettingsUi::control_width(ui);
         ui.add_sized(
-            egui::vec2(SettingsUi::CONTROLS.width, 0.0),
+            egui::vec2(control_width, 0.0),
             egui::Slider::new(
                 &mut selected_index,
                 0..=(FONT_SIZE_OPTIONS.len() - 1) as u32,
@@ -92,8 +94,9 @@ fn render_gutter_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         Some("Add space around the editor text area."),
         |ui| {
             let mut selected_gutter = app.editor_gutter();
+            let control_width = SettingsUi::control_width(ui);
             ui.add_sized(
-                egui::vec2(SettingsUi::CONTROLS.width, 0.0),
+                egui::vec2(control_width, 0.0),
                 egui::Slider::new(&mut selected_gutter, 0..=32)
                     .step_by(1.0)
                     .show_value(false),

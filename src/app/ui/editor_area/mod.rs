@@ -228,7 +228,7 @@ fn apply_editor_change(app: &mut ScratchpadApp, state: &EditorRenderState) {
         .buffer
         .artifact_summary
         .status_text()
-        .map(|message| format!("Formatting artifacts remain: {message}"));
+        .map(|message| format!("{message}; raw-text editing remains enabled"));
     let became_dirty = !previous_dirty;
     let artifact_status_changed = previous_artifact_status != current_artifact_status;
     let previous_artifact_status_for_log = previous_artifact_status.clone();

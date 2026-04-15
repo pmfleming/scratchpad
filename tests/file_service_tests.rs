@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use scratchpad::app::domain::LineEndingStyle;
 use scratchpad::app::services::file_service::FileService;
 use std::fs;
 use tempfile::tempdir;
@@ -14,8 +15,9 @@ fn read_write_utf8() {
     let read = FileService::read_file(&path).unwrap();
 
     assert_eq!(read.content, content);
-    assert_eq!(read.encoding, "UTF-8");
-    assert!(!read.has_bom);
+    assert_eq!(read.format.encoding_name, "UTF-8");
+    assert!(!read.format.has_bom);
+    assert_eq!(read.format.line_endings, LineEndingStyle::None);
 }
 
 #[test]
@@ -30,15 +32,15 @@ fn read_write_utf16le() {
     FileService::write_file_with_bom(
         &path,
         &(read.content.clone() + "!"),
-        &read.encoding,
-        read.has_bom,
+        &read.format.encoding_name,
+        read.format.has_bom,
     )
     .unwrap();
     let bytes = fs::read(&path).unwrap();
 
     assert_eq!(read.content, content);
-    assert_eq!(read.encoding, "UTF-16LE");
-    assert!(read.has_bom);
+    assert_eq!(read.format.encoding_name, "UTF-16LE");
+    assert!(read.format.has_bom);
     assert_eq!(&bytes[..2], &[0xFF, 0xFE]);
 }
 
@@ -52,8 +54,8 @@ fn read_write_shift_jis() {
     let read = FileService::read_file(&path).unwrap();
 
     assert_eq!(read.content, content);
-    assert_eq!(read.encoding, "Shift_JIS");
-    assert!(!read.has_bom);
+    assert_eq!(read.format.encoding_name, "Shift_JIS");
+    assert!(!read.format.has_bom);
 }
 
 #[test]
@@ -67,7 +69,7 @@ fn read_write_windows_1252() {
     let bytes = fs::read(&path).unwrap();
 
     assert_eq!(read.content, content);
-    assert_eq!(read.encoding, "windows-1252");
+    assert_eq!(read.format.encoding_name, "windows-1252");
     assert_eq!(
         bytes,
         vec![
@@ -85,7 +87,7 @@ fn preserves_encoding_when_round_tripping_windows_1252() {
 
     let mut read = FileService::read_file(&path).unwrap();
     read.content.push('!');
-    FileService::write_file_with_bom(&path, &read.content, &read.encoding, read.has_bom).unwrap();
+    FileService::write_file_with_format(&path, &read.content, &read.format).unwrap();
 
     assert_eq!(fs::read(&path).unwrap(), vec![0x63, 0x61, 0x66, 0xE9, 0x21]);
 }
@@ -118,4 +120,18 @@ fn detects_artifacts_without_treating_crlf_as_control_chars() {
     assert!(read.artifact_summary.has_ansi_sequences);
     assert!(read.artifact_summary.has_carriage_returns);
     assert!(read.artifact_summary.has_backspaces);
+    assert_eq!(read.format.line_endings, LineEndingStyle::Mixed);
+}
+
+#[test]
+fn detects_cr_only_line_endings_without_reporting_artifacts() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("classic-mac.txt");
+    let content = "alpha\rbeta\r";
+
+    FileService::write_file_with_bom(&path, content, "UTF-8", false).unwrap();
+    let read = FileService::read_file(&path).unwrap();
+
+    assert_eq!(read.format.line_endings, LineEndingStyle::Cr);
+    assert!(!read.artifact_summary.has_control_chars());
 }

@@ -1,4 +1,6 @@
-use crate::app::domain::{DiskFileState, TextArtifactSummary};
+use crate::app::domain::{
+    DiskFileState, EncodingSource, TextArtifactSummary, TextFormatMetadata,
+};
 use chardetng::EncodingDetector;
 use encoding_rs::Encoding;
 use encoding_rs_io::DecodeReaderBytesBuilder;
@@ -12,8 +14,7 @@ pub struct FileService;
 #[derive(Debug)]
 pub struct FileContent {
     pub content: String,
-    pub encoding: String,
-    pub has_bom: bool,
+    pub format: TextFormatMetadata,
     pub artifact_summary: TextArtifactSummary,
 }
 
@@ -38,12 +39,12 @@ impl FileService {
         let prefix_len = file.read(&mut prefix)?;
         let prefix = &prefix[..prefix_len];
 
-        let (encoding, has_bom) = if let Some((enc, _)) = Encoding::for_bom(prefix) {
-            (enc, true)
+        let (encoding, has_bom, encoding_source) = if let Some((enc, _)) = Encoding::for_bom(prefix) {
+            (enc, true, EncodingSource::Bom)
         } else {
             let mut detector = EncodingDetector::new();
             detector.feed(prefix, prefix_len < 4096);
-            (detector.guess(None, true), false)
+            (detector.guess(None, true), false, EncodingSource::Heuristic)
         };
 
         if is_probably_binary(prefix, has_bom) {
@@ -67,12 +68,34 @@ impl FileService {
             ));
         }
 
-        Ok(FileContent {
-            artifact_summary: TextArtifactSummary::from_text(&content),
-            content,
-            encoding: encoding.name().to_string(),
+        let has_decoding_warnings = content.contains('\u{FFFD}');
+        let format = TextFormatMetadata::detected(
+            &content,
+            encoding.name().to_string(),
             has_bom,
+            encoding_source,
+            has_decoding_warnings,
+        );
+
+        Ok(FileContent {
+            artifact_summary: TextArtifactSummary::from_text_with_line_endings(
+                &content,
+                format.line_endings,
+            ),
+            content,
+            format,
         })
+    }
+
+    pub fn write_file_with_format(
+        path: &Path,
+        content: &str,
+        format: &TextFormatMetadata,
+    ) -> io::Result<()> {
+        let encoding = Encoding::for_label(format.encoding_name.as_bytes())
+            .unwrap_or(encoding_rs::UTF_8);
+        let bytes = encode_content(content, encoding, format.has_bom);
+        std::fs::write(path, bytes)
     }
 
     pub fn write_file_with_bom(
@@ -81,9 +104,14 @@ impl FileService {
         encoding_name: &str,
         has_bom: bool,
     ) -> io::Result<()> {
-        let encoding = Encoding::for_label(encoding_name.as_bytes()).unwrap_or(encoding_rs::UTF_8);
-        let bytes = encode_content(content, encoding, has_bom);
-        std::fs::write(path, bytes)
+        let format = TextFormatMetadata::detected(
+            content,
+            encoding_name.to_owned(),
+            has_bom,
+            EncodingSource::ExplicitUserChoice,
+            false,
+        );
+        Self::write_file_with_format(path, content, &format)
     }
 }
 

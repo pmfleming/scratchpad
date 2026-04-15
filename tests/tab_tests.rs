@@ -131,6 +131,40 @@ fn restored_tab_repairs_missing_pane_views() {
 }
 
 #[test]
+fn control_character_files_open_in_raw_text_view() {
+    let tab = WorkspaceTab::new(BufferState::new(
+        "ansi.txt".to_owned(),
+        "\u{1b}[31mred\u{1b}[0m".to_owned(),
+        None,
+    ));
+
+    assert!(tab.buffer.artifact_summary.has_control_chars());
+    assert!(!tab.active_view().unwrap().show_control_chars);
+}
+
+#[test]
+fn control_character_repairs_reset_to_raw_text_view() {
+    let buffer = BufferState::new(
+        "ansi.txt".to_owned(),
+        "\u{1b}[31mred\u{1b}[0m".to_owned(),
+        None,
+    );
+    let existing_view = EditorViewState::new(buffer.id + 1, true);
+    let existing_view_id = existing_view.id;
+    let tab = WorkspaceTab::restored(
+        buffer,
+        vec![existing_view],
+        PaneNode::Leaf {
+            view_id: existing_view_id,
+        },
+        existing_view_id,
+    );
+
+    assert!(tab.buffer.artifact_summary.has_control_chars());
+    assert!(!tab.active_view().unwrap().show_control_chars);
+}
+
+#[test]
 fn combining_tabs_merges_buffers_and_focuses_source_workspace() {
     let mut target = WorkspaceTab::new(BufferState::new(
         "left.txt".to_owned(),

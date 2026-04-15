@@ -33,9 +33,10 @@ fn render_opening_files_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         "Choose where files are opened.",
         |ui| {
             fixed_width_control(ui, |ui| {
+                let control_width = SettingsUi::control_width(ui);
                 egui::ComboBox::from_id_salt("settings_opening_files")
                     .selected_text(file_open_pill_label(selected))
-                    .width(SettingsUi::CONTROLS.width)
+                    .width(control_width)
                     .show_ui(ui, |ui| {
                         for option in FILE_OPEN_OPTIONS {
                             ui.selectable_value(&mut selected, option, file_open_label(option));

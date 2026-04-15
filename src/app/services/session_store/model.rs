@@ -1,4 +1,4 @@
-use crate::app::domain::{EditorViewState, PaneNode, SplitAxis};
+use crate::app::domain::{EditorViewState, PaneNode, SplitAxis, TextFormatMetadata};
 use crate::app::services::settings_store::{
     AppSettings, default_font_size, default_logging_enabled, default_word_wrap,
 };
@@ -63,6 +63,8 @@ pub(crate) struct SessionBuffer {
     #[serde(default)]
     pub is_settings_file: bool,
     pub temp_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<TextFormatMetadata>,
     pub encoding: String,
     pub has_bom: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -80,8 +82,9 @@ impl From<&crate::app::domain::BufferState> for SessionBuffer {
             is_dirty: buffer.is_dirty,
             is_settings_file: buffer.is_settings_file,
             temp_id: buffer.temp_id.clone(),
-            encoding: buffer.encoding.clone(),
-            has_bom: buffer.has_bom,
+            format: Some(buffer.format.clone()),
+            encoding: buffer.format.encoding_name.clone(),
+            has_bom: buffer.format.has_bom,
             disk_modified_millis: buffer.disk_state.as_ref().and_then(|state| state.modified_millis),
             disk_len: buffer.disk_state.as_ref().map(|state| state.len),
         }

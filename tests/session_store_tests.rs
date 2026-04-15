@@ -1,11 +1,24 @@
 #![forbid(unsafe_code)]
 
-use scratchpad::app::domain::{BufferFreshness, BufferState, RestoredBufferState, WorkspaceTab};
+use scratchpad::app::domain::{
+    BufferFreshness, BufferState, EncodingSource, RestoredBufferState, TextFormatMetadata,
+    WorkspaceTab,
+};
 use scratchpad::app::domain::{PaneNode, SplitAxis};
 use scratchpad::app::services::session_store::SessionStore;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+fn format_for(content: &str, encoding: &str, has_bom: bool) -> TextFormatMetadata {
+    TextFormatMetadata::detected(
+        content,
+        encoding.to_owned(),
+        has_bom,
+        EncodingSource::ExplicitUserChoice,
+        false,
+    )
+}
 
 fn unique_session_root(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
@@ -35,8 +48,7 @@ fn persists_and_restores_open_tabs() {
             path: Some(PathBuf::from("notes.txt")),
             is_dirty: true,
             temp_id: "buffer-a".to_owned(),
-            encoding: "UTF-8".to_owned(),
-            has_bom: false,
+            format: format_for("alpha", "UTF-8", false),
             disk_state: None,
             freshness: BufferFreshness::InSync,
         })),
@@ -47,8 +59,7 @@ fn persists_and_restores_open_tabs() {
             path: None,
             is_dirty: false,
             temp_id: "buffer-b".to_owned(),
-            encoding: "UTF-8".to_owned(),
-            has_bom: false,
+            format: format_for("beta", "UTF-8", false),
             disk_state: None,
             freshness: BufferFreshness::InSync,
         })),
@@ -64,7 +75,7 @@ fn persists_and_restores_open_tabs() {
     assert!(restored.legacy_settings.logging_enabled);
     assert_eq!(restored.tabs[0].buffer.text(), "alpha");
     assert!(restored.tabs[0].buffer.is_dirty);
-    assert_eq!(restored.tabs[0].buffer.encoding, "UTF-8");
+    assert_eq!(restored.tabs[0].buffer.format.encoding_name, "UTF-8");
     assert_eq!(restored.tabs[1].buffer.text(), "beta");
     assert_eq!(restored.tabs[0].views.len(), 1);
     assert!(matches!(restored.tabs[0].root_pane, PaneNode::Leaf { .. }));
@@ -90,8 +101,7 @@ fn persists_encoding_metadata_for_restored_tabs() {
             path: Some(PathBuf::from("jp.txt")),
             is_dirty: false,
             temp_id: "buffer-jp".to_owned(),
-            encoding: "Shift_JIS".to_owned(),
-            has_bom: true,
+            format: format_for("こんにちは", "Shift_JIS", true),
             disk_state: None,
             freshness: BufferFreshness::InSync,
         },
@@ -100,8 +110,8 @@ fn persists_encoding_metadata_for_restored_tabs() {
     store.persist(&tabs, 0, 14.0, true, true).unwrap();
     let restored = store.load().unwrap().unwrap();
 
-    assert_eq!(restored.tabs[0].buffer.encoding, "Shift_JIS");
-    assert!(restored.tabs[0].buffer.has_bom);
+    assert_eq!(restored.tabs[0].buffer.format.encoding_name, "Shift_JIS");
+    assert!(restored.tabs[0].buffer.format.has_bom);
 
     fs::remove_dir_all(root).unwrap();
 }
@@ -123,8 +133,7 @@ fn persists_control_character_inspection_mode() {
         path: Some(PathBuf::from("ansi.txt")),
         is_dirty: false,
         temp_id: "buffer-ansi".to_owned(),
-        encoding: "UTF-8".to_owned(),
-        has_bom: false,
+        format: format_for("\u{1b}[31mred\u{1b}[0m", "UTF-8", false),
         disk_state: None,
         freshness: BufferFreshness::InSync,
     });
@@ -157,8 +166,7 @@ fn persists_split_views_and_active_view() {
         path: Some(PathBuf::from("split.txt")),
         is_dirty: false,
         temp_id: "buffer-split".to_owned(),
-        encoding: "UTF-8".to_owned(),
-        has_bom: false,
+        format: format_for("alpha\nbeta", "UTF-8", false),
         disk_state: None,
         freshness: BufferFreshness::InSync,
     }));
@@ -202,8 +210,7 @@ fn restored_tabs_allocate_new_unique_view_ids() {
         path: Some(PathBuf::from("split.txt")),
         is_dirty: false,
         temp_id: "buffer-split".to_owned(),
-        encoding: "UTF-8".to_owned(),
-        has_bom: false,
+        format: format_for("alpha\nbeta", "UTF-8", false),
         disk_state: None,
         freshness: BufferFreshness::InSync,
     }));
@@ -248,8 +255,7 @@ fn persists_and_restores_combined_workspace_tabs() {
         path: Some(PathBuf::from("left.txt")),
         is_dirty: false,
         temp_id: "buffer-left".to_owned(),
-        encoding: "UTF-8".to_owned(),
-        has_bom: false,
+        format: format_for("left", "UTF-8", false),
         disk_state: None,
         freshness: BufferFreshness::InSync,
     }));
@@ -260,8 +266,7 @@ fn persists_and_restores_combined_workspace_tabs() {
         path: Some(PathBuf::from("right.txt")),
         is_dirty: true,
         temp_id: "buffer-right".to_owned(),
-        encoding: "UTF-8".to_owned(),
-        has_bom: false,
+        format: format_for("right", "UTF-8", false),
         disk_state: None,
         freshness: BufferFreshness::InSync,
     }));
@@ -299,8 +304,7 @@ fn restored_clean_buffer_reloads_newer_disk_content() {
         path: Some(path.clone()),
         is_dirty: false,
         temp_id: "buffer-reload".to_owned(),
-        encoding: "UTF-8".to_owned(),
-        has_bom: false,
+        format: format_for("old session text\n", "UTF-8", false),
         disk_state: None,
         freshness: BufferFreshness::InSync,
     }));
@@ -333,8 +337,7 @@ fn restored_dirty_buffer_keeps_session_text_and_marks_conflict() {
         path: Some(path.clone()),
         is_dirty: true,
         temp_id: "buffer-conflict".to_owned(),
-        encoding: "UTF-8".to_owned(),
-        has_bom: false,
+        format: format_for("local unsaved text\n", "UTF-8", false),
         disk_state: None,
         freshness: BufferFreshness::InSync,
     }));
@@ -370,8 +373,7 @@ fn restored_missing_path_marks_buffer_missing_on_disk() {
         path: Some(path.clone()),
         is_dirty: true,
         temp_id: "buffer-missing".to_owned(),
-        encoding: "UTF-8".to_owned(),
-        has_bom: false,
+        format: format_for("temporary text\n", "UTF-8", false),
         disk_state: None,
         freshness: BufferFreshness::InSync,
     }));

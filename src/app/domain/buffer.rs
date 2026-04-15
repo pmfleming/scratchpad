@@ -1,4 +1,6 @@
 use eframe::egui::{self, TextBuffer};
+use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -16,13 +18,22 @@ pub const TEXT_DOCUMENT_MAX_UNDOS: usize = 100;
 pub struct TextDocument {
     text: String,
     undoer: TextDocumentUndoer,
+    preferred_line_ending: LineEndingStyle,
 }
 
 impl TextDocument {
     pub fn new(text: String) -> Self {
+        Self::with_preferred_line_ending(text, platform_default_line_ending())
+    }
+
+    pub fn with_preferred_line_ending(
+        text: String,
+        preferred_line_ending: LineEndingStyle,
+    ) -> Self {
         Self {
             text,
             undoer: new_text_document_undoer(),
+            preferred_line_ending,
         }
     }
 
@@ -40,6 +51,10 @@ impl TextDocument {
 
     pub fn clear_undoer(&mut self) {
         self.undoer = new_text_document_undoer();
+    }
+
+    pub fn set_preferred_line_ending(&mut self, preferred_line_ending: LineEndingStyle) {
+        self.preferred_line_ending = preferred_line_ending;
     }
 
     pub fn replace_text(&mut self, text: String) {
@@ -66,8 +81,9 @@ impl TextBuffer for TextDocument {
 
     fn insert_text(&mut self, text: &str, char_index: usize) -> usize {
         let byte_idx = self.byte_index_from_char_index(char_index);
-        self.text.insert_str(byte_idx, text);
-        text.chars().count()
+        let normalized_text = normalize_editor_inserted_text(text, self.preferred_line_ending);
+        self.text.insert_str(byte_idx, normalized_text.as_ref());
+        normalized_text.chars().count()
     }
 
     fn delete_char_range(&mut self, char_range: std::ops::Range<usize>) {
@@ -86,6 +102,234 @@ impl TextBuffer for TextDocument {
     }
 }
 
+fn normalize_editor_inserted_text(
+    text: &str,
+    preferred_line_ending: LineEndingStyle,
+) -> Cow<'_, str> {
+    match text {
+        "\r" | "\r\n" | "\n" => Cow::Borrowed(preferred_line_ending.as_str()),
+        _ => Cow::Borrowed(text),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LineEndingStyle {
+    #[default]
+    None,
+    Lf,
+    Crlf,
+    Cr,
+    Mixed,
+}
+
+impl LineEndingStyle {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Lf => "LF",
+            Self::Crlf => "CRLF",
+            Self::Cr => "CR",
+            Self::Mixed => "Mixed",
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None | Self::Lf | Self::Mixed => "\n",
+            Self::Crlf => "\r\n",
+            Self::Cr => "\r",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LineEndingCounts {
+    pub lf: usize,
+    pub crlf: usize,
+    pub cr: usize,
+}
+
+impl LineEndingCounts {
+    fn dominant_style(self) -> Option<LineEndingStyle> {
+        let mut entries = [
+            (self.crlf, LineEndingStyle::Crlf),
+            (self.lf, LineEndingStyle::Lf),
+            (self.cr, LineEndingStyle::Cr),
+        ];
+        entries.sort_by(|left, right| right.0.cmp(&left.0));
+        (entries[0].0 > 0).then_some(entries[0].1)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EncodingSource {
+    Bom,
+    #[default]
+    Heuristic,
+    ExplicitUserChoice,
+    DefaultForNewFile,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TextFormatMetadata {
+    pub encoding_name: String,
+    pub has_bom: bool,
+    pub line_endings: LineEndingStyle,
+    pub line_ending_counts: LineEndingCounts,
+    pub encoding_source: EncodingSource,
+    pub is_ascii_subset: bool,
+    pub has_decoding_warnings: bool,
+}
+
+impl TextFormatMetadata {
+    pub fn utf8_for_new_file(text: &str) -> Self {
+        let mut format = Self {
+            encoding_name: "UTF-8".to_owned(),
+            has_bom: false,
+            line_endings: platform_default_line_ending(),
+            line_ending_counts: LineEndingCounts::default(),
+            encoding_source: EncodingSource::DefaultForNewFile,
+            is_ascii_subset: text.is_ascii(),
+            has_decoding_warnings: false,
+        };
+        format.refresh_from_text(text);
+        format
+    }
+
+    pub fn detected(
+        text: &str,
+        encoding_name: String,
+        has_bom: bool,
+        encoding_source: EncodingSource,
+        has_decoding_warnings: bool,
+    ) -> Self {
+        let mut format = Self {
+            encoding_name,
+            has_bom,
+            line_endings: LineEndingStyle::None,
+            line_ending_counts: LineEndingCounts::default(),
+            encoding_source,
+            is_ascii_subset: text.is_ascii(),
+            has_decoding_warnings,
+        };
+        format.refresh_from_text(text);
+        format
+    }
+
+    pub fn refresh_from_text(&mut self, text: &str) {
+        let (line_ending_counts, line_endings) = analyze_line_endings(text);
+        self.line_ending_counts = line_ending_counts;
+        self.line_endings = line_endings;
+        self.is_ascii_subset = text.is_ascii();
+    }
+
+    pub fn encoding_label(&self) -> String {
+        let base = match self.encoding_name.as_str() {
+            "windows-1252" => "Windows-1252 (ANSI)".to_owned(),
+            "UTF-8" => "UTF-8".to_owned(),
+            "UTF-16LE" => "UTF-16LE".to_owned(),
+            "UTF-16BE" => "UTF-16BE".to_owned(),
+            other => other.to_owned(),
+        };
+
+        if self.has_bom {
+            format!("{base} BOM")
+        } else {
+            base
+        }
+    }
+
+    pub fn encoding_tooltip(&self) -> String {
+        let source = match self.encoding_source {
+            EncodingSource::Bom => "Detected from BOM",
+            EncodingSource::Heuristic => "Detected heuristically",
+            EncodingSource::ExplicitUserChoice => "Selected explicitly",
+            EncodingSource::DefaultForNewFile => "Default for new files",
+        };
+        let ascii = if self.is_ascii_subset {
+            "; ASCII-only content"
+        } else {
+            ""
+        };
+        format!("{}{}", source, ascii)
+    }
+
+    pub fn line_endings_label(&self) -> &'static str {
+        self.line_endings.label()
+    }
+
+    pub fn format_warning_text(&self) -> Option<String> {
+        let mut warnings = Vec::new();
+        if self.line_endings == LineEndingStyle::Mixed {
+            warnings.push("Mixed line endings detected".to_owned());
+        }
+        if self.has_decoding_warnings {
+            warnings.push("Decoding substitutions present".to_owned());
+        }
+
+        if warnings.is_empty() {
+            None
+        } else {
+            Some(warnings.join("; "))
+        }
+    }
+
+    pub fn preferred_line_ending_style(&self) -> LineEndingStyle {
+        match self.line_endings {
+            LineEndingStyle::Lf | LineEndingStyle::Crlf | LineEndingStyle::Cr => self.line_endings,
+            LineEndingStyle::Mixed => self
+                .line_ending_counts
+                .dominant_style()
+                .unwrap_or_else(platform_default_line_ending),
+            LineEndingStyle::None => platform_default_line_ending(),
+        }
+    }
+}
+
+pub fn platform_default_line_ending() -> LineEndingStyle {
+    if cfg!(windows) {
+        LineEndingStyle::Crlf
+    } else {
+        LineEndingStyle::Lf
+    }
+}
+
+pub fn analyze_line_endings(text: &str) -> (LineEndingCounts, LineEndingStyle) {
+    let mut counts = LineEndingCounts::default();
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\r' => {
+                if chars.peek() == Some(&'\n') {
+                    counts.crlf += 1;
+                    chars.next();
+                } else {
+                    counts.cr += 1;
+                }
+            }
+            '\n' => counts.lf += 1,
+            _ => {}
+        }
+    }
+
+    let nonzero = [counts.lf > 0, counts.crlf > 0, counts.cr > 0]
+        .into_iter()
+        .filter(|present| *present)
+        .count();
+    let style = match nonzero {
+        0 => LineEndingStyle::None,
+        1 if counts.crlf > 0 => LineEndingStyle::Crlf,
+        1 if counts.lf > 0 => LineEndingStyle::Lf,
+        1 => LineEndingStyle::Cr,
+        _ => LineEndingStyle::Mixed,
+    };
+
+    (counts, style)
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TextArtifactSummary {
     pub has_ansi_sequences: bool,
@@ -96,8 +340,14 @@ pub struct TextArtifactSummary {
 
 impl TextArtifactSummary {
     pub fn from_text(text: &str) -> Self {
+        let (_, line_endings) = analyze_line_endings(text);
+        Self::from_text_with_line_endings(text, line_endings)
+    }
+
+    pub fn from_text_with_line_endings(text: &str, line_endings: LineEndingStyle) -> Self {
         let mut summary = Self::default();
         let mut chars = text.chars().peekable();
+        let structural_carriage_returns = line_endings == LineEndingStyle::Cr;
 
         while let Some(ch) = chars.next() {
             match ch {
@@ -105,7 +355,9 @@ impl TextArtifactSummary {
                     summary.has_ansi_sequences = true;
                 }
                 '\r' => {
-                    if chars.peek() != Some(&'\n') {
+                    if chars.peek() == Some(&'\n') {
+                        chars.next();
+                    } else if !structural_carriage_returns {
                         summary.has_carriage_returns = true;
                     }
                 }
@@ -150,7 +402,7 @@ impl TextArtifactSummary {
             parts.push("CTL");
         }
 
-        Some(format!("Control characters present: {}", parts.join(", ")))
+        Some(format!("Control characters detected: {}", parts.join(", ")))
     }
 }
 
@@ -226,8 +478,7 @@ pub struct BufferState {
     pub temp_id: String,
     pub line_count: usize,
     pub artifact_summary: TextArtifactSummary,
-    pub encoding: String,
-    pub has_bom: bool,
+    pub format: TextFormatMetadata,
     pub disk_state: Option<DiskFileState>,
     pub freshness: BufferFreshness,
 }
@@ -254,15 +505,19 @@ pub struct RestoredBufferState {
     pub path: Option<PathBuf>,
     pub is_dirty: bool,
     pub temp_id: String,
-    pub encoding: String,
-    pub has_bom: bool,
+    pub format: TextFormatMetadata,
     pub disk_state: Option<DiskFileState>,
     pub freshness: BufferFreshness,
 }
 
 impl BufferState {
     pub fn new(name: String, content: String, path: Option<PathBuf>) -> Self {
-        Self::with_encoding(name, content, path, "UTF-8".to_string(), false)
+        Self::with_format(
+            name,
+            content,
+            path,
+            TextFormatMetadata::utf8_for_new_file(""),
+        )
     }
 
     pub fn with_encoding(
@@ -272,20 +527,44 @@ impl BufferState {
         encoding: String,
         has_bom: bool,
     ) -> Self {
+        Self::with_format(
+            name,
+            content.clone(),
+            path,
+            TextFormatMetadata::detected(
+                &content,
+                encoding,
+                has_bom,
+                EncodingSource::Heuristic,
+                false,
+            ),
+        )
+    }
+
+    pub fn with_format(
+        name: String,
+        content: String,
+        path: Option<PathBuf>,
+        mut format: TextFormatMetadata,
+    ) -> Self {
         let line_count = display_line_count(&content);
-        let artifact_summary = TextArtifactSummary::from_text(&content);
+        format.refresh_from_text(&content);
+        let artifact_summary =
+            TextArtifactSummary::from_text_with_line_endings(&content, format.line_endings);
         Self {
             id: next_buffer_id(),
             name,
-            document: TextDocument::new(content),
+            document: TextDocument::with_preferred_line_ending(
+                content,
+                format.preferred_line_ending_style(),
+            ),
             path,
             is_dirty: false,
             is_settings_file: false,
             temp_id: next_temp_id(),
             line_count,
             artifact_summary,
-            encoding,
-            has_bom,
+            format,
             disk_state: None,
             freshness: BufferFreshness::InSync,
         }
@@ -294,19 +573,26 @@ impl BufferState {
     pub fn restored(restored: RestoredBufferState) -> Self {
         register_existing_buffer_id(restored.id);
         let line_count = display_line_count(&restored.content);
-        let artifact_summary = TextArtifactSummary::from_text(&restored.content);
+        let mut format = restored.format;
+        format.refresh_from_text(&restored.content);
+        let artifact_summary = TextArtifactSummary::from_text_with_line_endings(
+            &restored.content,
+            format.line_endings,
+        );
         Self {
             id: restored.id,
             name: restored.name,
-            document: TextDocument::new(restored.content),
+            document: TextDocument::with_preferred_line_ending(
+                restored.content,
+                format.preferred_line_ending_style(),
+            ),
             path: restored.path,
             is_dirty: restored.is_dirty,
             is_settings_file: false,
             temp_id: restored.temp_id,
             line_count,
             artifact_summary,
-            encoding: restored.encoding,
-            has_bom: restored.has_bom,
+            format,
             disk_state: restored.disk_state,
             freshness: restored.freshness,
         }
@@ -329,9 +615,24 @@ impl BufferState {
         self.refresh_text_metadata();
     }
 
+    pub fn replace_text_with_format(&mut self, text: String, mut format: TextFormatMetadata) {
+        self.document.replace_text(text);
+        let current_text = self.text().to_owned();
+        format.refresh_from_text(&current_text);
+        self.format = format;
+        self.refresh_text_metadata();
+    }
+
     pub fn refresh_text_metadata(&mut self) {
-        self.line_count = display_line_count(self.text());
-        self.artifact_summary = TextArtifactSummary::from_text(self.text());
+        let current_text = self.text().to_owned();
+        self.line_count = display_line_count(&current_text);
+        self.format.refresh_from_text(&current_text);
+        self.document
+            .set_preferred_line_ending(self.format.preferred_line_ending_style());
+        self.artifact_summary = TextArtifactSummary::from_text_with_line_endings(
+            &current_text,
+            self.format.line_endings,
+        );
     }
 
     pub fn sync_to_disk_state(&mut self, disk_state: Option<DiskFileState>) {

@@ -29,6 +29,8 @@ pub(crate) fn render_editor_content(
     view: &mut EditorViewState,
     style: EditorContentStyle<'_>,
 ) -> EditorContentOutcome {
+    let inspect_control_chars =
+        buffer.artifact_summary.has_control_chars() && view.show_control_chars;
     let gutter = i8::try_from(style.editor_gutter).unwrap_or(i8::MAX);
     egui::Frame::NONE
         .fill(style.background_color)
@@ -50,7 +52,7 @@ pub(crate) fn render_editor_content(
                     ui.separator();
                 }
 
-                if buffer.artifact_summary.has_control_chars() {
+                if inspect_control_chars {
                     render_artifact_view(ui, buffer, view, style.text_edit)
                 } else {
                     render_editor_text_edit(ui, buffer, view, style.text_edit)

@@ -100,9 +100,10 @@ fn render_theme_mode_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             let initial_selection = selected_theme_mode(app);
             let mut selected_mode = initial_selection;
             fixed_width_control(ui, |ui| {
+                let control_width = SettingsUi::control_width(ui);
                 egui::ComboBox::from_id_salt("settings_theme_mode")
                     .selected_text(selected_mode.pill_label())
-                    .width(SettingsUi::CONTROLS.width)
+                    .width(control_width)
                     .show_ui(ui, |ui| {
                         for mode in [
                             ThemeModeSelection::System,
@@ -159,9 +160,10 @@ fn render_tab_list_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         |ui| {
             let mut selected_position = app.tab_list_position();
             fixed_width_control(ui, |ui| {
+                let control_width = SettingsUi::control_width(ui);
                 egui::ComboBox::from_id_salt("settings_tab_list_position")
                     .selected_text(tab_list_position_label(selected_position))
-                    .width(SettingsUi::CONTROLS.width)
+                    .width(control_width)
                     .show_ui(ui, |ui| {
                         for position in TAB_LIST_POSITIONS {
                             ui.selectable_value(
@@ -212,8 +214,9 @@ fn render_auto_hide_delay_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             let current_index =
                 nearest_auto_hide_delay_index(app.tab_list_auto_hide_delay_seconds());
             let mut selected_index = current_index as u32;
+            let control_width = SettingsUi::control_width(ui);
             ui.add_sized(
-                egui::vec2(SettingsUi::CONTROLS.width, 0.0),
+                egui::vec2(control_width, 0.0),
                 egui::Slider::new(
                     &mut selected_index,
                     0..=(AUTO_HIDE_DELAY_OPTIONS.len() - 1) as u32,

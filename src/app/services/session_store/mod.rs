@@ -2,8 +2,8 @@ mod model;
 mod ops;
 
 use crate::app::domain::{
-    BufferFreshness, BufferState, DiskFileState, EditorViewState, PaneNode, RestoredBufferState,
-    WorkspaceTab,
+    BufferFreshness, BufferState, DiskFileState, EditorViewState, EncodingSource, PaneNode,
+    RestoredBufferState, TextFormatMetadata, WorkspaceTab,
 };
 use crate::app::services::file_service::FileService;
 use crate::app::services::settings_store::AppSettings;
@@ -227,6 +227,7 @@ impl SessionStore {
                             is_dirty,
                             is_settings_file: false,
                             temp_id,
+                            format: None,
                             encoding,
                             has_bom,
                             disk_modified_millis: None,
@@ -258,8 +259,7 @@ impl SessionStore {
                     path: buffer.path,
                     is_dirty: buffer.is_dirty,
                     temp_id: buffer.temp_id,
-                    encoding: restored.encoding,
-                    has_bom: restored.has_bom,
+                    format: restored.format,
                     disk_state: restored.disk_state,
                     freshness: restored.freshness,
                 });
@@ -279,10 +279,10 @@ impl SessionStore {
                 match current_disk_state {
                     Some(disk_state) if Some(disk_state.clone()) != session_disk_state => {
                         if buffer.is_dirty {
+                            let format = session_buffer_format(buffer, &content);
                             RestoredBufferContent {
                                 content,
-                                encoding: buffer.encoding.clone(),
-                                has_bom: buffer.has_bom,
+                                format,
                                 disk_state: Some(disk_state),
                                 freshness: BufferFreshness::ConflictOnDisk,
                             }
@@ -290,64 +290,68 @@ impl SessionStore {
                             match FileService::read_file(path) {
                                 Ok(file_content) => RestoredBufferContent {
                                     content: file_content.content,
-                                    encoding: file_content.encoding,
-                                    has_bom: file_content.has_bom,
+                                    format: file_content.format,
                                     disk_state: Some(disk_state),
                                     freshness: BufferFreshness::InSync,
                                 },
-                                Err(_) => RestoredBufferContent {
-                                    content,
-                                    encoding: buffer.encoding.clone(),
-                                    has_bom: buffer.has_bom,
-                                    disk_state: Some(disk_state),
-                                    freshness: BufferFreshness::StaleOnDisk,
-                                },
+                                Err(_) => {
+                                    let format = session_buffer_format(buffer, &content);
+                                    RestoredBufferContent {
+                                        content,
+                                        format,
+                                        disk_state: Some(disk_state),
+                                        freshness: BufferFreshness::StaleOnDisk,
+                                    }
+                                }
                             }
                         }
                     }
-                    Some(disk_state) => RestoredBufferContent {
-                        content,
-                        encoding: buffer.encoding.clone(),
-                        has_bom: buffer.has_bom,
-                        disk_state: Some(disk_state),
-                        freshness: BufferFreshness::InSync,
-                    },
-                    None => RestoredBufferContent {
-                        content,
-                        encoding: buffer.encoding.clone(),
-                        has_bom: buffer.has_bom,
-                        disk_state: None,
-                        freshness: BufferFreshness::MissingOnDisk,
-                    },
+                    Some(disk_state) => {
+                        let format = session_buffer_format(buffer, &content);
+                        RestoredBufferContent {
+                            content,
+                            format,
+                            disk_state: Some(disk_state),
+                            freshness: BufferFreshness::InSync,
+                        }
+                    }
+                    None => {
+                        let format = session_buffer_format(buffer, &content);
+                        RestoredBufferContent {
+                            content,
+                            format,
+                            disk_state: None,
+                            freshness: BufferFreshness::MissingOnDisk,
+                        }
+                    }
                 }
             }
             (Some(path), None) => match FileService::read_file(path) {
                 Ok(file_content) => RestoredBufferContent {
                     content: file_content.content,
-                    encoding: file_content.encoding,
-                    has_bom: file_content.has_bom,
+                    format: file_content.format,
                     disk_state: FileService::read_disk_state(path).ok(),
                     freshness: BufferFreshness::InSync,
                 },
                 Err(_) => RestoredBufferContent {
                     content: String::new(),
-                    encoding: buffer.encoding.clone(),
-                    has_bom: buffer.has_bom,
+                    format: session_buffer_format(buffer, ""),
                     disk_state: None,
                     freshness: BufferFreshness::MissingOnDisk,
                 },
             },
-            (None, Some(content)) => RestoredBufferContent {
-                content,
-                encoding: buffer.encoding.clone(),
-                has_bom: buffer.has_bom,
-                disk_state: None,
-                freshness: BufferFreshness::InSync,
-            },
+            (None, Some(content)) => {
+                let format = session_buffer_format(buffer, &content);
+                RestoredBufferContent {
+                    format,
+                    content,
+                    disk_state: None,
+                    freshness: BufferFreshness::InSync,
+                }
+            }
             (None, None) => RestoredBufferContent {
                 content: String::new(),
-                encoding: buffer.encoding.clone(),
-                has_bom: buffer.has_bom,
+                format: session_buffer_format(buffer, ""),
                 disk_state: None,
                 freshness: BufferFreshness::InSync,
             },
@@ -398,10 +402,28 @@ impl RestoreSummary {
 
 struct RestoredBufferContent {
     content: String,
-    encoding: String,
-    has_bom: bool,
+    format: TextFormatMetadata,
     disk_state: Option<DiskFileState>,
     freshness: BufferFreshness,
+}
+
+fn session_buffer_format(buffer: &SessionBuffer, content: &str) -> TextFormatMetadata {
+    if let Some(mut format) = buffer.format.clone() {
+        format.refresh_from_text(content);
+        return format;
+    }
+
+    TextFormatMetadata::detected(
+        content,
+        buffer.encoding.clone(),
+        buffer.has_bom,
+        if buffer.has_bom {
+            EncodingSource::Bom
+        } else {
+            EncodingSource::Heuristic
+        },
+        false,
+    )
 }
 
 fn session_disk_state(buffer: &SessionBuffer) -> Option<DiskFileState> {

@@ -16,8 +16,7 @@ pub struct WorkspaceTab {
 
 impl WorkspaceTab {
     pub fn new(buffer: BufferState) -> Self {
-        let initial_view =
-            EditorViewState::new(buffer.id, buffer.artifact_summary.has_control_chars());
+        let initial_view = EditorViewState::new(buffer.id, false);
         let active_view_id = initial_view.id;
         Self {
             buffer,

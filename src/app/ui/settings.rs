@@ -20,22 +20,34 @@ const FONT_SIZE_OPTIONS: [u32; 9] = [11, 12, 14, 16, 18, 20, 24, 28, 32];
 
 pub(crate) fn show_page(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     egui::CentralPanel::default().show_inside(ui, |ui| {
-        with_settings_page(ui, |ui| render_page_body(ui, app))
+        with_settings_page(ui, |ui, horizontal_overflow| {
+            render_page_body(ui, app, horizontal_overflow)
+        })
     });
 }
 
-fn with_settings_page(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
+fn with_settings_page(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui, bool)) {
     ui.scope(|ui| {
         SettingsUi::apply_typography(ui);
-        egui::ScrollArea::vertical()
+        let viewport_size = SettingsUi::page_viewport_size(ui);
+        let surface_size = SettingsUi::page_surface_size(ui);
+        let horizontal_overflow = SettingsUi::page_overflows_horizontally(viewport_size);
+        egui::ScrollArea::both()
+            .id_salt("settings_page_scroll")
             .auto_shrink([false, false])
-            .show(ui, |ui| add_contents(ui));
+            .show(ui, |ui| {
+                ui.set_min_size(surface_size);
+                ui.set_width(surface_size.x);
+                ui.set_max_width(surface_size.x);
+                add_contents(ui, horizontal_overflow);
+            });
     });
 }
 
-fn render_page_body(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+fn render_page_body(ui: &mut egui::Ui, app: &mut ScratchpadApp, horizontal_overflow: bool) {
     let content_width = SettingsUi::page_content_width(ui);
-    let horizontal_margin = SettingsUi::page_horizontal_margin(ui, content_width);
+    let horizontal_margin =
+        SettingsUi::page_horizontal_margin(ui, content_width, horizontal_overflow);
 
     ui.add_space(SettingsUi::LAYOUT.body_top_space);
     ui.horizontal(|ui| {

@@ -87,22 +87,30 @@ pub(super) fn settings_file_card(
 
     settings_card_frame(ui, |ui| {
         card_header(ui, icon, title, Some(description), |ui| {
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.set_width(SettingsUi::CONTROLS.width);
-                value_pill(ui, &settings_path);
-                ui.add_space(SettingsUi::CONTROLS.gap);
-                clicked = phosphor_button(
-                    ui,
-                    egui_phosphor::regular::FOLDER_OPEN,
-                    egui::vec2(
-                        SettingsUi::CONTROLS.icon_button_size,
-                        SettingsUi::CONTROLS.icon_button_size,
-                    ),
-                    action_bg(ui),
-                    action_hover_bg(ui),
-                    "Open settings file",
-                )
-                .clicked();
+            let control_width = SettingsUi::control_width(ui);
+            ui.allocate_ui(egui::vec2(control_width, 0.0), |ui| {
+                ui.set_width(control_width);
+                ui.set_max_width(control_width);
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    value_pill(
+                        ui,
+                        &settings_path,
+                        SettingsUi::pill_outer_width(control_width),
+                    );
+                    ui.add_space(SettingsUi::CONTROLS.gap);
+                    clicked = phosphor_button(
+                        ui,
+                        egui_phosphor::regular::FOLDER_OPEN,
+                        egui::vec2(
+                            SettingsUi::CONTROLS.icon_button_size,
+                            SettingsUi::CONTROLS.icon_button_size,
+                        ),
+                        action_bg(ui),
+                        action_hover_bg(ui),
+                        "Open settings file",
+                    )
+                    .clicked();
+                });
             });
         });
     });
@@ -178,9 +186,10 @@ pub(super) fn inner_select_row(
 }
 
 pub(super) fn fixed_width_control(ui: &mut egui::Ui, add_control: impl FnOnce(&mut egui::Ui)) {
-    ui.allocate_ui(egui::vec2(SettingsUi::CONTROLS.width, 0.0), |ui| {
-        ui.set_width(SettingsUi::CONTROLS.width);
-        ui.set_max_width(SettingsUi::CONTROLS.width);
+    let width = SettingsUi::control_width(ui);
+    ui.allocate_ui(egui::vec2(width, 0.0), |ui| {
+        ui.set_width(width);
+        ui.set_max_width(width);
         add_control(ui);
     });
 }
@@ -366,20 +375,20 @@ fn info_chip(ui: &mut egui::Ui, text: &str) {
         });
 }
 
-fn value_pill(ui: &mut egui::Ui, text: &str) {
+fn value_pill(ui: &mut egui::Ui, text: &str, width: f32) {
+    let content_width = SettingsUi::pill_content_width(width);
     egui::Frame::new()
         .fill(SettingsUi::control_bg(ui))
         .stroke(egui::Stroke::new(1.0, border(ui).gamma_multiply(0.75)))
         .corner_radius(egui::CornerRadius::same(8))
         .inner_margin(SettingsUi::MARGINS.value_pill_inner)
         .show(ui, |ui| {
-            let width = SettingsUi::pill_width();
-            ui.set_width(width);
-            ui.set_max_width(width);
+            ui.set_width(content_width);
+            ui.set_max_width(content_width);
             ui.set_min_height(ui.spacing().interact_size.y);
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.add_sized(
-                    egui::vec2(width, 0.0),
+                    egui::vec2(content_width, 0.0),
                     egui::Label::new(
                         egui::RichText::new(text)
                             .size(SettingsUi::TYPOGRAPHY.description)
