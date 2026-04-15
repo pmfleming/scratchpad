@@ -39,7 +39,15 @@ pub enum AppCommand {
     NewTab,
     OpenFile,
     OpenFileHere,
+    OpenSearch,
+    OpenSearchAndReplace,
     OpenSettings,
+    OpenUserManual,
+    CloseSearch,
+    NextSearchMatch,
+    PreviousSearchMatch,
+    ReplaceCurrentMatch,
+    ReplaceAllMatches,
     ReorderTab {
         from_index: usize,
         to_index: usize,
@@ -82,6 +90,7 @@ impl ScratchpadApp {
         self.activate_workspace_surface();
         self.tab_manager_mut().active_tab_index = index;
         self.tab_manager_mut().pending_scroll_to_active = true;
+        self.refresh_search_view_state();
         self.request_focus_for_active_view();
         FileController::refresh_active_buffer_disk_state(self);
         self.mark_session_dirty();
@@ -100,6 +109,7 @@ impl ScratchpadApp {
             && tab.activate_view(view_id)
         {
             let previous_view_id = tab.active_view_id;
+            self.refresh_search_view_state();
             self.request_focus_for_view(view_id);
             FileController::refresh_active_buffer_disk_state(self);
             self.mark_session_dirty();
@@ -123,6 +133,7 @@ impl ScratchpadApp {
         {
             let next_active_view = tab.active_view_id;
             let remaining_views = tab.views.len();
+            self.mark_search_dirty();
             self.request_focus_for_view(next_active_view);
             self.record_transaction("Close view", vec![tab_name.clone()], None, snapshot);
             self.mark_session_dirty();
@@ -214,6 +225,7 @@ impl ScratchpadApp {
         {
             let new_active_view = tab.active_view_id;
             let total_views = tab.views.len();
+            self.mark_search_dirty();
             self.request_focus_for_view(new_active_view);
             self.record_transaction("Split view", vec![tab_name.clone()], None, snapshot);
             self.mark_session_dirty();

@@ -1,5 +1,7 @@
 pub mod file_controller;
 pub mod file_service;
+pub mod manual_files;
+pub mod search;
 pub mod session_manager;
 pub mod session_store;
 pub mod settings_store;

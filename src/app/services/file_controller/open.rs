@@ -1,0 +1,229 @@
+use super::FileController;
+use super::support::LoadedFile;
+use crate::app::app_state::ScratchpadApp;
+use crate::app::commands::AppCommand;
+use crate::app::domain::WorkspaceTab;
+use crate::app::logging::LogLevel;
+use crate::app::services::file_service::{FileContent, FileService};
+use crate::app::utils::summarize_open_results;
+use std::path::{Path, PathBuf};
+
+enum OpenPathOutcome {
+    Opened { artifact_warning: Option<String> },
+    AlreadyOpen,
+    Failed,
+}
+
+#[derive(Default)]
+struct OpenBatchSummary {
+    opened_count: usize,
+    duplicate_count: usize,
+    failure_count: usize,
+    artifact_count: usize,
+    last_artifact_warning: Option<String>,
+}
+
+impl OpenBatchSummary {
+    fn record(mut self, outcome: OpenPathOutcome) -> Self {
+        match outcome {
+            OpenPathOutcome::Opened { artifact_warning } => {
+                self.opened_count += 1;
+                if let Some(warning) = artifact_warning {
+                    self.artifact_count += 1;
+                    self.last_artifact_warning = Some(warning);
+                }
+            }
+            OpenPathOutcome::AlreadyOpen => {
+                self.duplicate_count += 1;
+            }
+            OpenPathOutcome::Failed => {
+                self.failure_count += 1;
+            }
+        }
+
+        self
+    }
+
+    fn log_message(&self) -> String {
+        format!(
+            "Open file batch completed: opened={}, duplicates={}, failed={}, artifacts={}",
+            self.opened_count, self.duplicate_count, self.failure_count, self.artifact_count
+        )
+    }
+}
+
+impl FileController {
+    pub fn open_file(app: &mut ScratchpadApp) {
+        Self::handle_open_dialog(app, "Open file dialog", Self::open_selected_paths);
+    }
+
+    pub fn open_file_here(app: &mut ScratchpadApp) {
+        Self::handle_open_dialog(app, "Open Here dialog", Self::open_selected_paths_here);
+    }
+
+    pub fn open_paths(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+        Self::handle_external_paths(app, paths, "Open requested for", Self::open_selected_paths);
+    }
+
+    pub fn open_external_paths(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+        Self::handle_external_paths(
+            app,
+            paths,
+            "Startup open requested for",
+            Self::open_selected_paths,
+        );
+    }
+
+    pub fn open_external_paths_here(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+        Self::handle_external_paths(
+            app,
+            paths,
+            "Startup workspace-open requested for",
+            Self::open_selected_paths_here,
+        );
+    }
+
+    pub fn open_external_paths_into_tab(
+        app: &mut ScratchpadApp,
+        target_index: usize,
+        paths: Vec<PathBuf>,
+    ) {
+        if paths.is_empty() {
+            return;
+        }
+
+        if target_index >= app.tabs().len() {
+            app.log_event(
+                LogLevel::Error,
+                format!(
+                    "Startup add-to target index {} is out of range (tab count={}).",
+                    target_index + 1,
+                    app.tabs().len()
+                ),
+            );
+            app.set_error_status(format!(
+                "Startup /addto:index:{} target does not exist.",
+                target_index + 1
+            ));
+            return;
+        }
+
+        app.handle_command(AppCommand::ActivateTab {
+            index: target_index,
+        });
+        Self::open_external_paths_here(app, paths);
+    }
+
+    pub(super) fn open_selected_paths(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+        Self::prepare_to_open_paths(app);
+        let snapshot = app.capture_transaction_snapshot();
+        let affected_items = Self::affected_item_labels(&paths);
+        let summary = paths
+            .into_iter()
+            .fold(OpenBatchSummary::default(), |summary, path| {
+                summary.record(Self::open_path(app, path))
+            });
+
+        if summary.opened_count > 0 {
+            let title = if summary.opened_count == 1 {
+                "Open file"
+            } else {
+                "Open files"
+            };
+            app.record_transaction(title, affected_items, None, snapshot);
+        }
+
+        Self::apply_open_summary(app, summary);
+    }
+
+    fn open_path(app: &mut ScratchpadApp, path: PathBuf) -> OpenPathOutcome {
+        if Self::activate_existing_path(app, &path).is_some() {
+            app.log_event(
+                LogLevel::Info,
+                format!(
+                    "File already open, activating existing tab: {}",
+                    path.display()
+                ),
+            );
+            return OpenPathOutcome::AlreadyOpen;
+        }
+
+        match FileService::read_file(&path) {
+            Ok(file_content) => OpenPathOutcome::Opened {
+                artifact_warning: Self::open_loaded_file(app, path, file_content),
+            },
+            Err(error) => {
+                app.log_event(
+                    LogLevel::Error,
+                    format!("Failed to open file {}: {error}", path.display()),
+                );
+                OpenPathOutcome::Failed
+            }
+        }
+    }
+
+    fn activate_existing_path(app: &mut ScratchpadApp, path: &Path) -> Option<String> {
+        if let Some((index, view_id)) = app.find_tab_by_path(path) {
+            app.handle_command(AppCommand::ActivateTab { index });
+            app.handle_command(AppCommand::ActivateView { view_id });
+            if app.is_settings_file_path(path) {
+                app.mark_active_buffer_as_settings_file();
+            }
+            Some(
+                path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.display().to_string()),
+            )
+        } else {
+            None
+        }
+    }
+
+    fn open_loaded_file(
+        app: &mut ScratchpadApp,
+        path: PathBuf,
+        file_content: FileContent,
+    ) -> Option<String> {
+        let LoadedFile {
+            path_display,
+            format_label,
+            line_endings_label,
+            artifact_summary,
+            artifact_warning,
+            mut buffer,
+        } = LoadedFile::from_file_content(path, file_content);
+        Self::mark_settings_buffer(app, &mut buffer);
+        app.tab_manager_mut().append_tab(WorkspaceTab::new(buffer));
+        app.mark_search_dirty();
+        app.request_focus_for_active_view();
+        let tab_index = app.active_tab_index();
+        let tab_description = app.describe_active_tab();
+        app.log_event(
+            LogLevel::Info,
+            format!(
+                "Opened file into tab index {tab_index}: {tab_description} [format={}, line_endings={}, artifact_status={}] from {}",
+                format_label,
+                line_endings_label,
+                artifact_summary.unwrap_or_else(|| "none".to_owned()),
+                path_display
+            ),
+        );
+        let _ = app.persist_session_now();
+        artifact_warning
+    }
+
+    fn apply_open_summary(app: &mut ScratchpadApp, summary: OpenBatchSummary) {
+        Self::apply_open_status(
+            app,
+            summarize_open_results(
+                summary.opened_count,
+                summary.duplicate_count,
+                summary.failure_count,
+                summary.artifact_count,
+                summary.last_artifact_warning.clone(),
+            ),
+            summary.failure_count > 0 || summary.artifact_count > 0,
+            summary.log_message(),
+        );
+    }
+}

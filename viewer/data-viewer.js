@@ -3,6 +3,7 @@
     const sources = {
         hotspots: `../target/analysis/hotspots.json?v=${viewerVersion}`,
         slowspots: `../target/analysis/slowspots.json?v=${viewerVersion}`,
+        searchSpeed: `../target/analysis/search_speed.json?v=${viewerVersion}`,
         clones: `../target/analysis/clones.json?v=${viewerVersion}`,
         map: `../target/analysis/map.json?v=${viewerVersion}`,
     };
@@ -10,6 +11,7 @@
     const state = {
         hotspots: [],
         slowspots: [],
+        searchSpeed: [],
         clones: [],
         map: null,
         selectedModule: null,
@@ -22,6 +24,22 @@
     const formatNumber = new Intl.NumberFormat(undefined, {
         maximumFractionDigits: 2,
     });
+
+    const searchModeColors = {
+        active: "#6fd0ff",
+        current: "#f3c969",
+        all: "#c7a6ff",
+    };
+
+    const searchLatencyColors = {
+        completion: "#6fd0ff",
+        first_response: "#7ddc9b",
+    };
+
+    const searchLatencyDash = {
+        completion: "",
+        first_response: "8 6",
+    };
 
     function byId(id) {
         return document.getElementById(id);
@@ -178,6 +196,626 @@
         );
     }
 
+    function renderSearchSpeed() {
+        const query = byId("search-speed-filter").value;
+        const filtered = state.searchSpeed.filter((item) => matchesFilter(item, query));
+        const benchmarkKeys = new Set(state.searchSpeed.map((item) => item.benchmark_key));
+        const modes = new Set(state.searchSpeed.map((item) => item.mode));
+        const firstResponseCount = state.searchSpeed.filter((item) => item.latency_kind === "first_response").length;
+        const worst = state.searchSpeed[0];
+        const overBudget = state.searchSpeed.filter((item) => item.mean_ns / 1_000_000 > item.threshold_ms).length;
+        const bestThroughput = state.searchSpeed.reduce((max, item) => {
+            return Math.max(max, item.throughput_mb_s || 0);
+        }, 0);
+
+        renderSummary("search-speed-summary", [
+            metricCard("Records", state.searchSpeed.length),
+            metricCard("Scenarios", benchmarkKeys.size),
+            metricCard("Modes", modes.size),
+            metricCard("First-response", firstResponseCount),
+            metricCard("Over budget", overBudget),
+            metricCard("Slowest mean", worst ? `${formatNumber.format(worst.mean_ns / 1_000_000)} ms` : "-"),
+            metricCard("Best throughput", bestThroughput ? `${formatNumber.format(bestThroughput)} MB/s` : "-"),
+        ]);
+
+        renderSearchSpeedCharts(filtered);
+
+        renderTable(
+            "search-speed-table",
+            ["Scenario", "Mode", "Latency", "Axis", "Param", "Corpus", "Mean", "Median", "Efficiency", "Targets", "Signals"],
+            filtered.map((item) => {
+                const meanMs = item.mean_ns / 1_000_000;
+                const medianMs = item.median_ns / 1_000_000;
+                const meanClass = meanMs > item.threshold_ms ? "risk-bad" : "risk-good";
+                const nsPerKb = item.ns_per_kb == null ? "-" : `${formatNumber.format(item.ns_per_kb)} ns/KB`;
+                const detailBits = [];
+                if (item.description) detailBits.push(item.description);
+                if (item.response_match_limit != null) detailBits.push(`preview limit ${item.response_match_limit} matches`);
+                const detail = detailBits.length ? `<div class="muted">${escapeHtml(detailBits.join(" • "))}</div>` : "";
+                const corpus = [];
+                if (item.item_count != null) corpus.push(`${item.item_count} items`);
+                if (item.bytes_per_item != null) corpus.push(`${formatNumber.format(item.bytes_per_item / 1024)} KB/item`);
+                if (item.total_bytes != null) corpus.push(`${formatNumber.format(item.total_bytes / (1024 * 1024))} MB total`);
+
+                return `<tr>
+                    <td><code>${escapeHtml(item.scenario_label || item.name)}</code>${detail}</td>
+                    <td><span class="pill">${escapeHtml(item.mode || "unknown")}</span></td>
+                    <td><span class="pill">${escapeHtml(item.latency_kind || "completion")}</span></td>
+                    <td><span class="pill">${escapeHtml(item.scaling_axis || "aggregate_size")}</span></td>
+                    <td>${escapeHtml(item.parameter_label || "-")}</td>
+                    <td>${escapeHtml(corpus.join(" • ") || "-")}</td>
+                    <td class="${meanClass}">${formatNumber.format(meanMs)} ms<div class="muted">budget ${formatNumber.format(item.threshold_ms)} ms</div></td>
+                    <td>${formatNumber.format(medianMs)} ms</td>
+                    <td>${escapeHtml(nsPerKb)}</td>
+                    <td>${renderPills(item.targets || [])}</td>
+                    <td>${renderPills(item.signals)}</td>
+                </tr>`;
+            })
+        );
+    }
+
+    function renderSearchSpeedCharts(items) {
+        const container = byId("search-speed-charts");
+        if (!container) {
+            return;
+        }
+        if (!items.length) {
+            container.innerHTML = `<section class="panel-card chart-panel"><div class="chart-empty">No search speed data matches the current filter.</div></section>`;
+            return;
+        }
+
+        const tabsSeries = buildSearchSpeedSeries(
+            items,
+            (item) => item.mode === "all" && item.scaling_axis === "aggregate_size",
+            (item) => item.latency_kind,
+            (key) => ({
+                label: latencyLabel(key),
+                shortLabel: latencyLabel(key),
+                latencyKind: key,
+                color: searchLatencyColors[key] || "#6fd0ff",
+                dasharray: searchLatencyDash[key] || "",
+                order: key === "completion" ? 0 : 1,
+            })
+        );
+
+        const filesSeries = buildSearchSpeedSeries(
+            items,
+            (item) => item.mode === "current" && item.scaling_axis === "aggregate_size",
+            (item) => item.latency_kind,
+            (key) => ({
+                label: latencyLabel(key),
+                shortLabel: latencyLabel(key),
+                latencyKind: key,
+                color: searchLatencyColors[key] || "#6fd0ff",
+                dasharray: searchLatencyDash[key] || "",
+                order: key === "completion" ? 0 : 1,
+            })
+        );
+
+        const fileSizeSeries = buildSearchSpeedSeries(
+            items,
+            (item) => item.scaling_axis === "file_size",
+            (item) => `${item.mode}:${item.latency_kind}`,
+            (key) => {
+                const [mode, latencyKind] = key.split(":");
+                const modeLabel = titleCase(mode);
+                const latencyText = latencyKind === "first_response" ? "First response" : "Completion";
+                const latencyOrder = latencyKind === "completion" ? 0 : 1;
+                const modeOrder = { active: 0, current: 1, all: 2 }[mode] ?? 9;
+                return {
+                    label: `${modeLabel} ${latencyText}`,
+                    shortLabel: modeLabel,
+                    mode,
+                    latencyKind,
+                    color: searchModeColors[mode] || "#6fd0ff",
+                    dasharray: searchLatencyDash[latencyKind] || "",
+                    order: modeOrder * 2 + latencyOrder,
+                };
+            }
+        );
+
+        const dependencyMetrics = buildSearchDependencyMetrics(items);
+
+        container.innerHTML = [
+            buildSearchSpeedLineCard({
+                title: "Tabs Against Time",
+                subtitle: "All-open-tabs aggregate-size scenarios. Solid = completion, dashed = first response.",
+                series: tabsSeries,
+                insights: buildAggregateScopeInsights(tabsSeries),
+                hardLimitText: "No hard limit observed in the measured tab range.",
+            }),
+            buildSearchSpeedLineCard({
+                title: "Files Against Time",
+                subtitle: "Current-workspace aggregate-size scenarios. Solid = completion, dashed = first response.",
+                series: filesSeries,
+                insights: buildAggregateScopeInsights(filesSeries),
+                hardLimitText: "No hard limit observed in the measured file-count range.",
+            }),
+            buildSearchSpeedLineCard({
+                title: "File Size Against Time",
+                subtitle: "Active, Current, and All file-size scenarios. Color = mode, dashed = first response.",
+                series: fileSizeSeries,
+                insights: buildFileSizeInsights(fileSizeSeries),
+                hardLimitText: "No hard limit observed; every file-size series completed its largest sampled input.",
+            }),
+            buildSearchDependencyCard(dependencyMetrics),
+        ].join("");
+    }
+
+    function buildSearchSpeedSeries(items, predicate, keyFn, describeFn) {
+        const groups = new Map();
+
+        items.filter(predicate).forEach((item) => {
+            const key = keyFn(item);
+            if (!groups.has(key)) {
+                groups.set(key, []);
+            }
+            groups.get(key).push(item);
+        });
+
+        return Array.from(groups.entries())
+            .map(([key, group]) => {
+                const ordered = [...group].sort((left, right) => (left.parameter_value ?? 0) - (right.parameter_value ?? 0));
+                return {
+                    key,
+                    ...describeFn(key, ordered[0]),
+                    points: ordered.map((item) => ({
+                        xValue: item.parameter_value ?? 0,
+                        xLabel: item.parameter_label || String(item.parameter_value ?? "-"),
+                        meanMs: item.mean_ns / 1_000_000,
+                        thresholdMs: item.threshold_ms,
+                        throughput: item.throughput_mb_s || 0,
+                    })),
+                };
+            })
+            .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
+    }
+
+    function buildSearchSpeedLineCard({ title, subtitle, series, insights, hardLimitText }) {
+        if (!series.length) {
+            return `<section class="panel-card chart-panel"><div><h3>${escapeHtml(title)}</h3><p class="chart-caption">${escapeHtml(subtitle)}</p></div><div class="chart-empty">No matching records for this chart.</div></section>`;
+        }
+
+        const orderedX = Array.from(
+            new Map(
+                series
+                    .flatMap((entry) => entry.points)
+                    .sort((left, right) => left.xValue - right.xValue)
+                    .map((point) => [point.xValue, point.xLabel])
+            ).entries()
+        );
+
+        const allValues = series.flatMap((entry) => entry.points.map((point) => Math.max(point.meanMs, 0.001)));
+        let minValue = Math.min(...allValues);
+        let maxValue = Math.max(...allValues);
+        if (minValue === maxValue) {
+            minValue *= 0.5;
+            maxValue *= 1.5;
+        }
+        const yTicks = buildLogTicks(minValue, maxValue);
+        const yMin = yTicks[0];
+        const yMax = yTicks[yTicks.length - 1];
+
+        const width = 760;
+        const height = 320;
+        const left = 64;
+        const right = 24;
+        const top = 24;
+        const bottom = 52;
+        const plotWidth = width - left - right;
+        const plotHeight = height - top - bottom;
+        const xStep = orderedX.length > 1 ? plotWidth / (orderedX.length - 1) : 0;
+        const xLookup = new Map(
+            orderedX.map(([value], index) => [value, orderedX.length === 1 ? left + plotWidth / 2 : left + index * xStep])
+        );
+        const logMin = Math.log10(yMin);
+        const logMax = Math.log10(yMax);
+        const yPosition = (value) => {
+            const safeValue = Math.max(value, yMin);
+            const ratio = (Math.log10(safeValue) - logMin) / Math.max(logMax - logMin, 0.0001);
+            return top + plotHeight - ratio * plotHeight;
+        };
+
+        const gridLines = yTicks.map((tick) => {
+            const y = yPosition(tick);
+            return `<g>
+                <line class="chart-grid-line" x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"></line>
+                <text class="chart-tick-label" x="${left - 10}" y="${y + 4}" text-anchor="end">${escapeHtml(formatAxisMs(tick))}</text>
+            </g>`;
+        }).join("");
+
+        const xTicks = orderedX.map(([value, label]) => {
+            const x = xLookup.get(value);
+            return `<g>
+                <line class="chart-axis-line" x1="${x}" y1="${height - bottom}" x2="${x}" y2="${height - bottom + 6}"></line>
+                <text class="chart-tick-label" x="${x}" y="${height - bottom + 22}" text-anchor="middle">${escapeHtml(label)}</text>
+            </g>`;
+        }).join("");
+
+        const seriesMarkup = series.map((entry) => {
+            const path = entry.points
+                .map((point, index) => `${index === 0 ? "M" : "L"} ${xLookup.get(point.xValue)} ${yPosition(point.meanMs)}`)
+                .join(" ");
+            const markers = entry.points.map((point) => {
+                const x = xLookup.get(point.xValue);
+                const y = yPosition(point.meanMs);
+                const overBudget = point.meanMs > point.thresholdMs;
+                return `<g>
+                    <circle class="chart-point" cx="${x}" cy="${y}" r="5" stroke="${overBudget ? "#ff7474" : entry.color}" fill="#10151c"></circle>
+                    ${overBudget ? `<circle class="chart-point--over" cx="${x}" cy="${y}" r="9"></circle>` : ""}
+                </g>`;
+            }).join("");
+            return `<g>
+                <path class="chart-series-line" d="${path}" stroke="${entry.color}"${entry.dasharray ? ` stroke-dasharray="${entry.dasharray}"` : ""}></path>
+                ${markers}
+            </g>`;
+        }).join("");
+
+        const legend = renderChartLegend(series);
+        const insightMarkup = [...insights, hardLimitText]
+            .filter(Boolean)
+            .map((item) => `<li>${escapeHtml(item)}</li>`)
+            .join("");
+
+        return `<section class="panel-card chart-panel">
+            <div>
+                <h3>${escapeHtml(title)}</h3>
+                <p class="chart-caption">${escapeHtml(subtitle)}</p>
+            </div>
+            <div class="chart-frame">
+                <svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(title)}">
+                    ${gridLines}
+                    <line class="chart-axis-line" x1="${left}" y1="${top}" x2="${left}" y2="${height - bottom}"></line>
+                    <line class="chart-axis-line" x1="${left}" y1="${height - bottom}" x2="${width - right}" y2="${height - bottom}"></line>
+                    ${xTicks}
+                    ${seriesMarkup}
+                    <text class="chart-axis-label" x="${width / 2}" y="${height - 12}" text-anchor="middle">Scale</text>
+                    <text class="chart-axis-label" x="18" y="${top + plotHeight / 2}" text-anchor="middle" transform="rotate(-90 18 ${top + plotHeight / 2})">Time (ms, log scale)</text>
+                </svg>
+            </div>
+            <div class="chart-legend">${legend}</div>
+            <ul class="chart-insights">${insightMarkup}</ul>
+        </section>`;
+    }
+
+    function buildSearchDependencyCard(metrics) {
+        if (!metrics.length) {
+            return `<section class="panel-card chart-panel"><div><h3>Relative Dependency</h3><p class="chart-caption">Time multiplier when each growth axis doubles.</p></div><div class="chart-empty">No matching records for dependency analysis.</div></section>`;
+        }
+
+        const width = 760;
+        const height = 320;
+        const left = 60;
+        const right = 24;
+        const top = 24;
+        const bottom = 52;
+        const plotWidth = width - left - right;
+        const plotHeight = height - top - bottom;
+        const barValues = metrics.flatMap((item) => [item.completionMultiplier, item.firstResponseMultiplier].filter((value) => Number.isFinite(value)));
+        const maxValue = Math.max(...barValues, 1);
+        const yMax = Math.max(1.2, Math.ceil(maxValue * 1.2 * 10) / 10);
+        const yTicks = buildLinearTicks(yMax);
+        const groupWidth = plotWidth / metrics.length;
+        const barWidth = Math.min(46, groupWidth * 0.28);
+        const gap = Math.min(18, groupWidth * 0.08);
+        const yPosition = (value) => top + plotHeight - (value / yMax) * plotHeight;
+
+        const gridLines = yTicks.map((tick) => {
+            const y = yPosition(tick);
+            return `<g>
+                <line class="chart-grid-line" x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"></line>
+                <text class="chart-tick-label" x="${left - 10}" y="${y + 4}" text-anchor="end">${escapeHtml(formatNumber.format(tick))}x</text>
+            </g>`;
+        }).join("");
+
+        const bars = metrics.map((metric, index) => {
+            const groupCenter = left + groupWidth * index + groupWidth / 2;
+            const completionX = groupCenter - barWidth - gap / 2;
+            const responseX = groupCenter + gap / 2;
+            const completionHeight = (metric.completionMultiplier / yMax) * plotHeight;
+            const responseHeight = (metric.firstResponseMultiplier / yMax) * plotHeight;
+            const completionY = yPosition(metric.completionMultiplier);
+            const responseY = yPosition(metric.firstResponseMultiplier);
+            return `<g>
+                <rect class="chart-bar--completion" x="${completionX}" y="${completionY}" width="${barWidth}" height="${completionHeight}" rx="8"></rect>
+                <rect class="chart-bar--first-response" x="${responseX}" y="${responseY}" width="${barWidth}" height="${responseHeight}" rx="8"></rect>
+                <text class="chart-value-label" x="${completionX + barWidth / 2}" y="${completionY - 8}" text-anchor="middle">${escapeHtml(formatNumber.format(metric.completionMultiplier))}x</text>
+                <text class="chart-value-label" x="${responseX + barWidth / 2}" y="${responseY - 8}" text-anchor="middle">${escapeHtml(formatNumber.format(metric.firstResponseMultiplier))}x</text>
+                <text class="chart-tick-label" x="${groupCenter}" y="${height - bottom + 22}" text-anchor="middle">${escapeHtml(metric.label)}</text>
+            </g>`;
+        }).join("");
+
+        const legend = [
+            { label: "Completion", color: searchLatencyColors.completion },
+            { label: "First response", color: searchLatencyColors.first_response },
+        ].map((item) => `<span class="chart-legend__item">
+                <svg class="chart-legend__swatch" viewBox="0 0 28 10" aria-hidden="true"><line x1="1" y1="5" x2="27" y2="5" stroke="${item.color}" stroke-width="5"></line></svg>
+                <span>${escapeHtml(item.label)}</span>
+            </span>`).join("");
+
+        const insights = buildDependencyInsights(metrics)
+            .map((item) => `<li>${escapeHtml(item)}</li>`)
+            .join("");
+
+        return `<section class="panel-card chart-panel">
+            <div>
+                <h3>Relative Dependency</h3>
+                <p class="chart-caption">Time multiplier when each growth axis doubles. 1.0x is flat, 2.0x is linear, above 2.0x means time degrades faster than the input grows.</p>
+            </div>
+            <div class="chart-frame">
+                <svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Relative dependency of search speed on tabs, files, and file size">
+                    ${gridLines}
+                    <line class="chart-axis-line" x1="${left}" y1="${top}" x2="${left}" y2="${height - bottom}"></line>
+                    <line class="chart-axis-line" x1="${left}" y1="${height - bottom}" x2="${width - right}" y2="${height - bottom}"></line>
+                    ${bars}
+                    <text class="chart-axis-label" x="${width / 2}" y="${height - 12}" text-anchor="middle">Growth axis</text>
+                    <text class="chart-axis-label" x="18" y="${top + plotHeight / 2}" text-anchor="middle" transform="rotate(-90 18 ${top + plotHeight / 2})">Time multiplier per 2x growth</text>
+                </svg>
+            </div>
+            <div class="chart-legend">${legend}</div>
+            <ul class="chart-insights">${insights}</ul>
+        </section>`;
+    }
+
+    function buildAggregateScopeInsights(series) {
+        const completion = series.find((item) => item.latencyKind === "completion");
+        const firstResponse = series.find((item) => item.latencyKind === "first_response");
+        const insights = [];
+
+        if (completion) {
+            const overBudget = completion.points.find((point) => point.meanMs > point.thresholdMs);
+            insights.push(
+                overBudget
+                    ? `Completion crosses its budget at ${overBudget.xLabel}.`
+                    : `Completion stays within budget through ${completion.points[completion.points.length - 1].xLabel}.`
+            );
+        }
+
+        if (firstResponse) {
+            const overBudget = firstResponse.points.find((point) => point.meanMs > point.thresholdMs);
+            insights.push(
+                overBudget
+                    ? `First response crosses its budget at ${overBudget.xLabel}.`
+                    : `First response stays within budget through ${firstResponse.points[firstResponse.points.length - 1].xLabel}.`
+            );
+        }
+
+        const completionMultiplier = completion ? calculateDoublingMultiplier(completion.points) : null;
+        const responseMultiplier = firstResponse ? calculateDoublingMultiplier(firstResponse.points) : null;
+        if (Number.isFinite(completionMultiplier) && Number.isFinite(responseMultiplier)) {
+            insights.push(
+                `Completion is ${describeGrowth(completionMultiplier)} while first response is ${describeGrowth(responseMultiplier)}.`
+            );
+        }
+
+        return insights;
+    }
+
+    function buildFileSizeInsights(series) {
+        const completionSeries = series.filter((item) => item.latencyKind === "completion");
+        const firstResponseSeries = series.filter((item) => item.latencyKind === "first_response");
+        const insights = [];
+
+        const completionBreaks = completionSeries
+            .map((item) => {
+                const overBudget = item.points.find((point) => point.meanMs > point.thresholdMs);
+                return overBudget ? `${item.shortLabel} at ${overBudget.xLabel}` : null;
+            })
+            .filter(Boolean);
+        insights.push(
+            completionBreaks.length
+                ? `Completion budget breaks start at ${completionBreaks.join("; ")}.`
+                : "Completion stays within budget across all measured file-size series."
+        );
+
+        const firstResponseBreaks = firstResponseSeries
+            .map((item) => {
+                const overBudget = item.points.find((point) => point.meanMs > point.thresholdMs);
+                return overBudget ? `${item.shortLabel} at ${overBudget.xLabel}` : null;
+            })
+            .filter(Boolean);
+        insights.push(
+            firstResponseBreaks.length
+                ? `First response budget breaks start at ${firstResponseBreaks.join("; ")}.`
+                : "First response stays within budget across Active, Current, and All."
+        );
+
+        const completionMultiplier = mean(
+            completionSeries
+                .map((item) => calculateDoublingMultiplier(item.points))
+                .filter((value) => Number.isFinite(value))
+        );
+        const responseMultiplier = mean(
+            firstResponseSeries
+                .map((item) => calculateDoublingMultiplier(item.points))
+                .filter((value) => Number.isFinite(value))
+        );
+        if (Number.isFinite(completionMultiplier) && Number.isFinite(responseMultiplier)) {
+            insights.push(
+                `Across modes, completion is ${describeGrowth(completionMultiplier)} while first response is ${describeGrowth(responseMultiplier)}.`
+            );
+        }
+
+        return insights;
+    }
+
+    function buildSearchDependencyMetrics(items) {
+        const dimensions = [
+            {
+                label: "Tabs",
+                completionSeries: buildSearchSpeedSeries(
+                    items,
+                    (item) => item.mode === "all" && item.scaling_axis === "aggregate_size" && item.latency_kind === "completion",
+                    () => "completion",
+                    () => ({ order: 0 })
+                ),
+                firstResponseSeries: buildSearchSpeedSeries(
+                    items,
+                    (item) => item.mode === "all" && item.scaling_axis === "aggregate_size" && item.latency_kind === "first_response",
+                    () => "first_response",
+                    () => ({ order: 0 })
+                ),
+            },
+            {
+                label: "Files",
+                completionSeries: buildSearchSpeedSeries(
+                    items,
+                    (item) => item.mode === "current" && item.scaling_axis === "aggregate_size" && item.latency_kind === "completion",
+                    () => "completion",
+                    () => ({ order: 0 })
+                ),
+                firstResponseSeries: buildSearchSpeedSeries(
+                    items,
+                    (item) => item.mode === "current" && item.scaling_axis === "aggregate_size" && item.latency_kind === "first_response",
+                    () => "first_response",
+                    () => ({ order: 0 })
+                ),
+            },
+            {
+                label: "File size",
+                completionSeries: buildSearchSpeedSeries(
+                    items,
+                    (item) => item.scaling_axis === "file_size" && item.latency_kind === "completion",
+                    (item) => item.mode,
+                    (mode) => ({ order: { active: 0, current: 1, all: 2 }[mode] ?? 9 })
+                ),
+                firstResponseSeries: buildSearchSpeedSeries(
+                    items,
+                    (item) => item.scaling_axis === "file_size" && item.latency_kind === "first_response",
+                    (item) => item.mode,
+                    (mode) => ({ order: { active: 0, current: 1, all: 2 }[mode] ?? 9 })
+                ),
+            },
+        ];
+
+        return dimensions.map((dimension) => ({
+            label: dimension.label,
+            completionMultiplier: mean(
+                dimension.completionSeries
+                    .map((entry) => calculateDoublingMultiplier(entry.points))
+                    .filter((value) => Number.isFinite(value))
+            ),
+            firstResponseMultiplier: mean(
+                dimension.firstResponseSeries
+                    .map((entry) => calculateDoublingMultiplier(entry.points))
+                    .filter((value) => Number.isFinite(value))
+            ),
+        })).filter((item) => Number.isFinite(item.completionMultiplier) && Number.isFinite(item.firstResponseMultiplier));
+    }
+
+    function buildDependencyInsights(metrics) {
+        const completionSorted = [...metrics].sort((left, right) => right.completionMultiplier - left.completionMultiplier);
+        const responseSorted = [...metrics].sort((left, right) => right.firstResponseMultiplier - left.firstResponseMultiplier);
+        const flattestResponse = [...metrics].sort((left, right) => left.firstResponseMultiplier - right.firstResponseMultiplier)[0];
+        const insights = [];
+
+        if (completionSorted[0]) {
+            insights.push(
+                `Completion depends most on ${completionSorted[0].label.toLowerCase()} growth at ${formatNumber.format(completionSorted[0].completionMultiplier)}x time per 2x scale.`
+            );
+        }
+        if (responseSorted[0]) {
+            insights.push(
+                `First response depends most on ${responseSorted[0].label.toLowerCase()} growth at ${formatNumber.format(responseSorted[0].firstResponseMultiplier)}x time per 2x scale.`
+            );
+        }
+        if (flattestResponse) {
+            insights.push(
+                `First response is flattest against ${flattestResponse.label.toLowerCase()}, which is consistent with the capped-result benchmark path.`
+            );
+        }
+
+        return insights;
+    }
+
+    function renderChartLegend(series) {
+        return series.map((entry) => `<span class="chart-legend__item">
+                <svg class="chart-legend__swatch" viewBox="0 0 28 10" aria-hidden="true">
+                    <line x1="1" y1="5" x2="27" y2="5" stroke="${entry.color}" stroke-width="3"${entry.dasharray ? ` stroke-dasharray="${entry.dasharray}"` : ""}></line>
+                </svg>
+                <span>${escapeHtml(entry.label)}</span>
+            </span>`).join("");
+    }
+
+    function buildLogTicks(min, max) {
+        const safeMin = Math.max(min / 1.15, 0.001);
+        const safeMax = max * 1.15;
+        const ticks = [];
+        for (let exponent = Math.floor(Math.log10(safeMin)); exponent <= Math.ceil(Math.log10(safeMax)); exponent += 1) {
+            [1, 2, 5].forEach((factor) => {
+                const tick = factor * 10 ** exponent;
+                if (tick >= safeMin && tick <= safeMax) {
+                    ticks.push(tick);
+                }
+            });
+        }
+        return ticks.length ? ticks : [safeMin, safeMax];
+    }
+
+    function buildLinearTicks(max) {
+        const step = max <= 2 ? 0.5 : max <= 4 ? 1 : 2;
+        const ticks = [];
+        for (let value = 0; value <= max + 0.0001; value += step) {
+            ticks.push(Number(value.toFixed(2)));
+        }
+        return ticks;
+    }
+
+    function calculateDoublingMultiplier(points) {
+        if (!points || points.length < 2) {
+            return null;
+        }
+
+        const exponents = [];
+        for (let index = 1; index < points.length; index += 1) {
+            const previous = points[index - 1];
+            const current = points[index];
+            const xRatio = current.xValue / previous.xValue;
+            const yRatio = current.meanMs / previous.meanMs;
+            if (xRatio > 1 && yRatio > 0) {
+                exponents.push(Math.log2(yRatio) / Math.log2(xRatio));
+            }
+        }
+
+        return exponents.length ? 2 ** mean(exponents) : null;
+    }
+
+    function mean(values) {
+        if (!values.length) {
+            return null;
+        }
+        return values.reduce((sum, value) => sum + value, 0) / values.length;
+    }
+
+    function describeGrowth(multiplier) {
+        if (multiplier < 1.2) {
+            return `nearly flat (${formatNumber.format(multiplier)}x time per 2x growth)`;
+        }
+        if (multiplier < 1.8) {
+            return `sub-linear (${formatNumber.format(multiplier)}x time per 2x growth)`;
+        }
+        if (multiplier < 2.2) {
+            return `roughly linear (${formatNumber.format(multiplier)}x time per 2x growth)`;
+        }
+        return `super-linear (${formatNumber.format(multiplier)}x time per 2x growth)`;
+    }
+
+    function latencyLabel(value) {
+        return value === "first_response" ? "First response" : "Completion";
+    }
+
+    function titleCase(value) {
+        return String(value || "")
+            .split(/[_\s-]+/)
+            .filter(Boolean)
+            .map((item) => item.charAt(0).toUpperCase() + item.slice(1))
+            .join(" ");
+    }
+
+    function formatAxisMs(value) {
+        return value >= 10 ? formatNumber.format(value) : formatNumber.format(Number(value.toFixed(2)));
+    }
+
     function renderPills(value) {
         const values = Array.isArray(value)
             ? value
@@ -278,7 +916,7 @@
     function buildMapLayout(nodes) {
         const groups = new Map();
         const groupNames = new Set();
-        
+
         if (state.mapLayout === 'layer') {
             nodes.forEach((node) => {
                 const layer = node.layer || 'default';
@@ -324,7 +962,7 @@
             const yGap = 20;
             const topOffset = 76;
             const leftOffset = 40;
-            
+
             let maxModulesInCol = 0;
             const orderedGroups = Array.from(groupNames);
             orderedGroups.forEach((group) => {
@@ -338,7 +976,7 @@
             orderedGroups.forEach((group, colIndex) => {
                 const modules = groups.get(group) || [];
                 const colX = leftOffset + colIndex * colWidth;
-                
+
                 rows.push({
                     isColumn: true,
                     folder: group,
@@ -353,15 +991,15 @@
                 modules
                     .sort((left, right) => {
                         const metricRight = state.mapMetric === 'maintainability' ? right.maintainability_risk :
-                                            state.mapMetric === 'change' ? right.change_risk :
-                                            state.mapMetric === 'performance' ? right.performance_risk :
-                                            state.mapMetric === 'architectural' ? right.architectural_risk :
-                                            state.mapMetric === 'churn' ? right.churn : right.total_score;
+                            state.mapMetric === 'change' ? right.change_risk :
+                                state.mapMetric === 'performance' ? right.performance_risk :
+                                    state.mapMetric === 'architectural' ? right.architectural_risk :
+                                        state.mapMetric === 'churn' ? right.churn : right.total_score;
                         const metricLeft = state.mapMetric === 'maintainability' ? left.maintainability_risk :
-                                           state.mapMetric === 'change' ? left.change_risk :
-                                           state.mapMetric === 'performance' ? left.performance_risk :
-                                           state.mapMetric === 'architectural' ? left.architectural_risk :
-                                           state.mapMetric === 'churn' ? left.churn : left.total_score;
+                            state.mapMetric === 'change' ? left.change_risk :
+                                state.mapMetric === 'performance' ? left.performance_risk :
+                                    state.mapMetric === 'architectural' ? left.architectural_risk :
+                                        state.mapMetric === 'churn' ? left.churn : left.total_score;
                         return (metricRight || 0) - (metricLeft || 0);
                     })
                     .forEach((node, moduleIndex) => {
@@ -385,7 +1023,7 @@
                 const modules = groups.get(group) || [];
                 maxColumns = Math.max(maxColumns, modules.length);
                 const rowY = topOffset + rowIndex * rowHeight;
-                
+
                 rows.push({
                     isColumn: false,
                     folder: group,
@@ -398,15 +1036,15 @@
                 modules
                     .sort((left, right) => {
                         const metricRight = state.mapMetric === 'maintainability' ? right.maintainability_risk :
-                                            state.mapMetric === 'change' ? right.change_risk :
-                                            state.mapMetric === 'performance' ? right.performance_risk :
-                                            state.mapMetric === 'architectural' ? right.architectural_risk :
-                                            state.mapMetric === 'churn' ? right.churn : right.total_score;
+                            state.mapMetric === 'change' ? right.change_risk :
+                                state.mapMetric === 'performance' ? right.performance_risk :
+                                    state.mapMetric === 'architectural' ? right.architectural_risk :
+                                        state.mapMetric === 'churn' ? right.churn : right.total_score;
                         const metricLeft = state.mapMetric === 'maintainability' ? left.maintainability_risk :
-                                           state.mapMetric === 'change' ? left.change_risk :
-                                           state.mapMetric === 'performance' ? left.performance_risk :
-                                           state.mapMetric === 'architectural' ? left.architectural_risk :
-                                           state.mapMetric === 'churn' ? left.churn : left.total_score;
+                            state.mapMetric === 'change' ? left.change_risk :
+                                state.mapMetric === 'performance' ? left.performance_risk :
+                                    state.mapMetric === 'architectural' ? left.architectural_risk :
+                                        state.mapMetric === 'churn' ? left.churn : left.total_score;
                         return (metricRight || 0) - (metricLeft || 0);
                     })
                     .forEach((node, columnIndex) => {
@@ -536,12 +1174,12 @@
             outboundIds.has(node.id) ? "is-outbound" : "",
             inboundIds.has(node.id) ? "is-inbound" : "",
         ].filter(Boolean).join(" ");
-        
+
         const metricValue = state.mapMetric === 'maintainability' ? node.maintainability_risk :
-                            state.mapMetric === 'change' ? node.change_risk :
-                            state.mapMetric === 'performance' ? node.performance_risk :
-                            state.mapMetric === 'architectural' ? node.architectural_risk :
-                            state.mapMetric === 'churn' ? node.churn : node.total_score;
+            state.mapMetric === 'change' ? node.change_risk :
+                state.mapMetric === 'performance' ? node.performance_risk :
+                    state.mapMetric === 'architectural' ? node.architectural_risk :
+                        state.mapMetric === 'churn' ? node.churn : node.total_score;
         const fill = scoreFill(metricValue || 0, state.mapMetric);
         const label = shortenLabel(node.id);
         const score = formatNumber.format(metricValue || 0);
@@ -583,7 +1221,7 @@
         else if (metric === 'change') { bad = 200; warn = 80; }
         else if (metric === 'performance') { bad = 100; warn = 30; }
         else if (metric === 'churn') { bad = 500; warn = 150; }
-        
+
         if (score >= bad) return "#6b2a35";
         if (score >= warn) return "#5e4b25";
         return "#244638";
@@ -602,10 +1240,10 @@
         if (!selected) {
             const getMetric = (node) => {
                 return state.mapMetric === 'maintainability' ? node.maintainability_risk :
-                       state.mapMetric === 'change' ? node.change_risk :
-                       state.mapMetric === 'performance' ? node.performance_risk :
-                       state.mapMetric === 'architectural' ? node.architectural_risk :
-                       state.mapMetric === 'churn' ? node.churn : node.total_score;
+                    state.mapMetric === 'change' ? node.change_risk :
+                        state.mapMetric === 'performance' ? node.performance_risk :
+                            state.mapMetric === 'architectural' ? node.architectural_risk :
+                                state.mapMetric === 'churn' ? node.churn : node.total_score;
             };
             const top5 = [...modules].sort((a, b) => (getMetric(b) || 0) - (getMetric(a) || 0)).slice(0, 5);
             const top5Html = top5.map((n, i) => {
@@ -664,22 +1302,39 @@
     async function loadDefaults() {
         const status = byId("load-status");
         const detail = byId("load-detail");
-        try {
-            const [hotspots, slowspots, clones, map] = await Promise.all([
-                loadJson(sources.hotspots),
-                loadJson(sources.slowspots),
-                loadJson(sources.clones),
-                loadJson(sources.map),
-            ]);
-            state.hotspots = hotspots;
-            state.slowspots = slowspots;
-            state.clones = clones;
-            state.map = map;
+        const keys = ["hotspots", "slowspots", "searchSpeed", "clones", "map"];
+        const fallbacks = {
+            hotspots: [],
+            slowspots: [],
+            searchSpeed: [],
+            clones: [],
+            map: null,
+        };
+
+        const settled = await Promise.allSettled(keys.map((key) => loadJson(sources[key])));
+        const loaded = [];
+        const missing = [];
+
+        settled.forEach((result, index) => {
+            const key = keys[index];
+            if (result.status === "fulfilled") {
+                state[key] = result.value;
+                loaded.push(key);
+            } else {
+                state[key] = fallbacks[key];
+                missing.push(`${key}: ${result.reason.message}`);
+            }
+        });
+
+        if (missing.length === 0) {
             status.textContent = "Loaded default JSON artifacts.";
             detail.textContent = "Data came from target/analysis.";
-        } catch (error) {
+        } else if (loaded.length > 0) {
+            status.textContent = `Loaded ${loaded.length} default artifact sets.`;
+            detail.textContent = `Some default files were missing: ${missing.join("; ")}. Use the file inputs above or refresh the overview to regenerate them.`;
+        } else {
             status.textContent = "Manual JSON load available.";
-            detail.textContent = `Default fetch failed: ${error.message}. Pick JSON files above, or serve the repo root with a local HTTP server.`;
+            detail.textContent = `Default fetch failed: ${missing.join("; ")}. Pick JSON files above, or serve the repo root with a local HTTP server.`;
         }
         renderAll();
     }
@@ -712,6 +1367,7 @@
     function renderAll() {
         renderHotspots();
         renderSlowspots();
+        renderSearchSpeed();
         renderClones();
         renderMap();
     }
@@ -720,6 +1376,7 @@
     setupTabs();
     byId("hotspots-filter").addEventListener("input", renderHotspots);
     byId("slowspots-filter").addEventListener("input", renderSlowspots);
+    byId("search-speed-filter").addEventListener("input", renderSearchSpeed);
     byId("clones-filter").addEventListener("input", renderClones);
     byId("map-filter").addEventListener("input", renderMap);
     byId("map-layout").addEventListener("change", (event) => {
@@ -741,6 +1398,7 @@
     });
     readJsonFile("hotspots-file", "hotspots", renderHotspots);
     readJsonFile("slowspots-file", "slowspots", renderSlowspots);
+    readJsonFile("search-speed-file", "searchSpeed", renderSearchSpeed);
     readJsonFile("clones-file", "clones", renderClones);
     readJsonFile("map-file", "map", renderMap);
     loadDefaults();

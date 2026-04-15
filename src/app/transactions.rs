@@ -118,19 +118,19 @@ impl ScratchpadApp {
         self.transaction_log.entries()
     }
 
-    pub(crate) fn open_transaction_log(&mut self) {
+    pub fn open_transaction_log(&mut self) {
         self.transaction_log_open = true;
     }
 
-    pub(crate) fn close_transaction_log(&mut self) {
+    pub fn close_transaction_log(&mut self) {
         self.transaction_log_open = false;
     }
 
-    pub(crate) fn transaction_log_open(&self) -> bool {
+    pub fn transaction_log_open(&self) -> bool {
         self.transaction_log_open
     }
 
-    pub(crate) fn undo_transaction_entry(&mut self, entry_id: u64) -> bool {
+    pub fn undo_transaction_entry(&mut self, entry_id: u64) -> bool {
         let Some(entry) = self.transaction_log.undo_to_entry(entry_id) else {
             return false;
         };
@@ -140,6 +140,14 @@ impl ScratchpadApp {
         self.set_info_status(format!("Undid transaction: {}", title));
         let _ = self.persist_session_now();
         true
+    }
+
+    pub fn latest_transaction_entry_id(&self) -> Option<u64> {
+        self.transaction_log.entries().last().map(|entry| entry.id)
+    }
+
+    pub fn transaction_log_len(&self) -> usize {
+        self.transaction_log.entries().len()
     }
 
     pub(crate) fn active_buffer_transaction_label(&self) -> Option<String> {
@@ -323,85 +331,6 @@ fn text_preview_is_reasonable(before: &str, after: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::commands::AppCommand;
-    use crate::app::domain::SplitAxis;
-    use crate::app::services::file_controller::FileController;
-    use crate::app::services::session_store::SessionStore;
-    use std::fs;
-
-    fn test_app() -> ScratchpadApp {
-        let session_root = tempfile::tempdir().expect("create session dir");
-        let session_store = SessionStore::new(session_root.path().to_path_buf());
-        ScratchpadApp::with_session_store(session_store)
-    }
-
-    #[test]
-    fn new_tab_transaction_can_be_undone_from_log() {
-        let mut app = test_app();
-
-        app.new_tab();
-
-        assert_eq!(app.tabs().len(), 2);
-        let entry_id = app
-            .transaction_log_entries()
-            .last()
-            .expect("transaction entry")
-            .id;
-
-        assert!(app.undo_transaction_entry(entry_id));
-        assert_eq!(app.tabs().len(), 1);
-        assert!(app.transaction_log_entries().is_empty());
-    }
-
-    #[test]
-    fn split_view_transaction_can_be_undone_from_log() {
-        let mut app = test_app();
-
-        app.handle_command(AppCommand::SplitActiveView {
-            axis: SplitAxis::Vertical,
-            new_view_first: false,
-            ratio: 0.5,
-        });
-
-        assert_eq!(app.tabs()[0].views.len(), 2);
-        let entry_id = app
-            .transaction_log_entries()
-            .last()
-            .expect("transaction entry")
-            .id;
-
-        assert!(app.undo_transaction_entry(entry_id));
-        assert_eq!(app.tabs()[0].views.len(), 1);
-    }
-
-    #[test]
-    fn open_file_transaction_can_be_undone_from_log() {
-        let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let path = temp_dir.path().join("transaction-log.txt");
-        fs::write(&path, "alpha\nbeta\n").expect("write temp file");
-
-        let mut app = test_app();
-        FileController::open_external_paths(&mut app, vec![path.clone()]);
-
-        assert_eq!(app.tabs().len(), 2);
-        assert_eq!(
-            app.tabs()[app.active_tab_index()]
-                .active_buffer()
-                .path
-                .as_deref(),
-            Some(path.as_path())
-        );
-        let entry_id = app
-            .transaction_log_entries()
-            .last()
-            .expect("transaction entry")
-            .id;
-
-        assert!(app.undo_transaction_entry(entry_id));
-        assert_eq!(app.tabs().len(), 1);
-        assert_eq!(app.tabs()[0].active_buffer().path, None);
-    }
-
     #[test]
     fn transaction_entry_title_includes_affected_items() {
         let entry = TransactionLogEntry {
@@ -409,7 +338,12 @@ mod tests {
             action_label: "hello".to_owned(),
             affected_items: vec!["notes.txt".to_owned()],
             details: None,
-            snapshot_before: test_app().capture_transaction_snapshot(),
+            snapshot_before: ScratchpadApp::with_session_store(
+                crate::app::services::session_store::SessionStore::new(
+                    tempfile::tempdir().expect("create session dir").keep(),
+                ),
+            )
+            .capture_transaction_snapshot(),
         };
 
         assert_eq!(entry.title(), "hello: notes.txt");
@@ -433,21 +367,5 @@ mod tests {
             text_edit_preview_from_before("hello", "hello world"),
             Some(" world".to_owned())
         );
-    }
-
-    #[test]
-    fn undo_from_transaction_log_keeps_log_window_open() {
-        let mut app = test_app();
-        app.open_transaction_log();
-        app.new_tab();
-
-        let entry_id = app
-            .transaction_log_entries()
-            .last()
-            .expect("transaction entry")
-            .id;
-
-        assert!(app.undo_transaction_entry(entry_id));
-        assert!(app.transaction_log_open());
     }
 }

@@ -32,18 +32,23 @@ pub(crate) fn render_tab_cell_sized(
     props: TabCellProps<'_>,
 ) -> TabCellOutcome {
     ui.push_id(("tab_strip", index), |ui| {
-        let (tab_response, promote_response, close_response, truncated) =
-            tab_button_with_width(
-                ui,
-                props.display_name,
-                props.is_active,
-                props.is_selected,
-                props.can_promote_all_files,
-                props.width,
-            );
+        let (tab_response, promote_response, close_response, truncated) = tab_button_with_width(
+            ui,
+            props.display_name,
+            props.is_active,
+            props.is_selected,
+            props.can_promote_all_files,
+            props.width,
+        );
         let tab_response = maybe_attach_tab_tooltip(tab_response, props.tooltip, truncated);
         let dragged_slots = app.dragged_tab_slots(index);
-        tab_drag::begin_tab_drag_if_needed(ui, index, &dragged_slots, &tab_response, &close_response);
+        tab_drag::begin_tab_drag_if_needed(
+            ui,
+            index,
+            &dragged_slots,
+            &tab_response,
+            &close_response,
+        );
 
         if props.is_active && props.pending_scroll_to_active {
             tab_response.scroll_to_me(Some(egui::Align::Center));
@@ -86,7 +91,13 @@ fn tab_button_with_width(
     width: f32,
 ) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
     if (width - crate::app::theme::TAB_BUTTON_WIDTH).abs() <= f32::EPSILON {
-        tab_button(ui, display_name, is_active, is_selected, can_promote_all_files)
+        tab_button(
+            ui,
+            display_name,
+            is_active,
+            is_selected,
+            can_promote_all_files,
+        )
     } else {
         crate::app::chrome::tab_button_sized_with_actions(
             ui,

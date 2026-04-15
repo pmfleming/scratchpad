@@ -2,6 +2,7 @@ param(
     [switch]$FixFormatting,
     [switch]$SkipComplexity,
     [switch]$SkipSlowspots,
+    [switch]$SkipSearchSpeed,
     [switch]$SkipClones
 )
 
@@ -73,7 +74,7 @@ try {
     Invoke-NativeCommand -Label "cargo clippy" -Command { cargo clippy --all-targets --all-features -- -D warnings }
     Invoke-NativeCommand -Label "cargo test" -Command { cargo test }
 
-    $needsPythonTooling = (-not $SkipComplexity) -or (-not $SkipSlowspots) -or (-not $SkipClones)
+    $needsPythonTooling = (-not $SkipComplexity) -or (-not $SkipSlowspots) -or (-not $SkipSearchSpeed) -or (-not $SkipClones)
     if ($needsPythonTooling) {
         $python = Ensure-PythonTooling -RepoRoot $repoRoot -ScriptRoot $PSScriptRoot
         $analysisDir = Join-Path $repoRoot "target\analysis"
@@ -89,6 +90,12 @@ try {
     if (-not $SkipSlowspots) {
         Invoke-NativeCommand -Label "slowspots.py" -Command {
             & $python (Join-Path $PSScriptRoot "slowspots.py") --output (Join-Path $analysisDir "slowspots.json") --fail-on-slow
+        }
+    }
+
+    if (-not $SkipSearchSpeed) {
+        Invoke-NativeCommand -Label "search_speed.py" -Command {
+            & $python (Join-Path $PSScriptRoot "search_speed.py") --output (Join-Path $analysisDir "search_speed.json") --fail-on-slow
         }
     }
 

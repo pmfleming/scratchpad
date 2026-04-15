@@ -43,11 +43,9 @@ fn apply_tab_reordering(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
 
 fn apply_tab_combining(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
     if let Some((source_indices, target_index)) = &outcome.combined_tab_group {
-        let workspace_sources = source_indices
-            .iter()
-            .filter_map(|slot_index| app.workspace_index_for_slot(*slot_index))
-            .collect::<Vec<_>>();
-        if let Some(workspace_target) = app.workspace_index_for_slot(*target_index) {
+        if let Some((workspace_sources, workspace_target)) =
+            resolve_group_combine_targets(app, source_indices, *target_index)
+        {
             app.handle_command(AppCommand::CombineTabsIntoTab {
                 source_indices: workspace_sources,
                 target_index: workspace_target,
@@ -69,6 +67,24 @@ fn apply_tab_combining(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
         });
         app.clear_tab_selection();
     }
+}
+
+fn resolve_group_combine_targets(
+    app: &ScratchpadApp,
+    source_indices: &[usize],
+    target_index: usize,
+) -> Option<(Vec<usize>, usize)> {
+    let workspace_sources = source_indices
+        .iter()
+        .filter_map(|slot_index| app.workspace_index_for_slot(*slot_index))
+        .collect::<Vec<_>>();
+
+    if let Some(workspace_target) = app.workspace_index_for_slot(target_index) {
+        return (!workspace_sources.is_empty()).then_some((workspace_sources, workspace_target));
+    }
+
+    let (&workspace_target, remaining_sources) = workspace_sources.split_first()?;
+    (!remaining_sources.is_empty()).then_some((remaining_sources.to_vec(), workspace_target))
 }
 
 fn apply_workspace_slot_command(
@@ -201,6 +217,27 @@ mod tests {
     }
 
     #[test]
+    fn reordering_a_group_with_settings_moves_settings_with_the_group() {
+        let mut app = app_with_settings_between_tabs();
+
+        apply_tab_outcome(
+            &mut app,
+            TabStripOutcome {
+                reordered_tab_group: Some((vec![0, 1], 4)),
+                ..Default::default()
+            },
+        );
+
+        let names = app
+            .tabs()
+            .iter()
+            .map(|tab| tab.active_buffer().name.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["two.txt", "three.txt", "one.txt"]);
+        assert_eq!(app.settings_slot_index(), Some(3));
+    }
+
+    #[test]
     fn combining_a_group_of_display_slots_merges_them_into_target_tab() {
         let mut app = app_with_named_tabs(&["one.txt", "two.txt", "three.txt", "four.txt"]);
 
@@ -215,5 +252,44 @@ mod tests {
         assert_eq!(app.tabs().len(), 2);
         assert_eq!(app.active_tab_index(), 0);
         assert_eq!(app.tabs()[0].views.len(), 3);
+    }
+
+    #[test]
+    fn combining_a_group_with_settings_in_sources_leaves_settings_top_level() {
+        let mut app = app_with_settings_between_tabs();
+
+        apply_tab_outcome(
+            &mut app,
+            TabStripOutcome {
+                combined_tab_group: Some((vec![0, 1, 2], 3)),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(app.tabs().len(), 1);
+        assert_eq!(app.active_tab_index(), 0);
+        assert_eq!(app.tabs()[0].views.len(), 3);
+        assert!(app.settings_tab_open());
+        assert_eq!(app.settings_slot_index(), Some(1));
+    }
+
+    #[test]
+    fn combining_onto_settings_target_uses_first_workspace_tab_and_keeps_settings_top_level() {
+        let mut app = app_with_settings_between_tabs();
+
+        apply_tab_outcome(
+            &mut app,
+            TabStripOutcome {
+                combined_tab_group: Some((vec![0, 2], 1)),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(app.tabs().len(), 2);
+        assert_eq!(app.active_tab_index(), 0);
+        assert_eq!(app.tabs()[0].views.len(), 2);
+        assert_eq!(app.tabs()[1].active_buffer().name, "three.txt");
+        assert!(app.settings_tab_open());
+        assert_eq!(app.settings_slot_index(), Some(1));
     }
 }

@@ -19,7 +19,7 @@
         <header class="hero">
             <div>
                 <p class="eyebrow">Scratchpad data viewer</p>
-                <h1>Hotspots, slowspots, clones, and architecture risk map</h1>
+                <h1>Hotspots, slowspots, search speed, clones, and architecture risk map</h1>
                 <p class="lede">
                     A static viewer for the JSON artifacts produced by the Python measurement tools.
                 </p>
@@ -28,6 +28,7 @@
                 <div class="data-card__label">Expected inputs</div>
                 <code>target/analysis/hotspots.json</code>
                 <code>target/analysis/slowspots.json</code>
+                <code>target/analysis/search_speed.json</code>
                 <code>target/analysis/clones.json</code>
                 <code>target/analysis/map.json</code>
             </div>
@@ -53,6 +54,10 @@
                     <input id="slowspots-file" type="file" accept="application/json,.json" />
                 </label>
                 <label>
+                    Search Speed JSON
+                    <input id="search-speed-file" type="file" accept="application/json,.json" />
+                </label>
+                <label>
                     Clones JSON
                     <input id="clones-file" type="file" accept="application/json,.json" />
                 </label>
@@ -66,6 +71,7 @@
         <nav class="tabs" aria-label="Metric views">
             <button class="tab is-active" data-tab="hotspots">Hotspots</button>
             <button class="tab" data-tab="slowspots">Slowspots</button>
+            <button class="tab" data-tab="search-speed">Search Speed</button>
             <button class="tab" data-tab="clones">Clones</button>
             <button class="tab" data-tab="map">Map</button>
         </nav>
@@ -98,6 +104,23 @@
             </div>
         </section>
 
+        <section id="search-speed" class="tab-panel">
+            <div id="search-speed-summary" class="summary-grid"></div>
+            <div id="search-speed-charts" class="chart-grid"></div>
+            <div class="panel-card">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Search speed</h2>
+                        <p>Criterion-backed scaling benchmarks for full search completion and first-response latency
+                            across Active, Current, and All scopes.</p>
+                    </div>
+                    <input id="search-speed-filter" class="filter-input" type="search"
+                        placeholder="Filter search benchmarks..." />
+                </div>
+                <div id="search-speed-table" class="table-wrap"></div>
+            </div>
+        </section>
+
         <section id="clones" class="tab-panel">
             <div id="clones-summary" class="summary-grid"></div>
             <div class="panel-card">
@@ -119,7 +142,8 @@
                     <div class="panel-card__header">
                         <div>
                             <h2>Architecture risk map</h2>
-                            <p>Click a module to inspect maintainability, change, performance, and architectural risk.</p>
+                            <p>Click a module to inspect maintainability, change, performance, and architectural risk.
+                            </p>
                         </div>
                         <div class="map-controls">
                             <label class="zoom-control">

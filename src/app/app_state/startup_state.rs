@@ -1,7 +1,8 @@
-use super::{AppSurface, ScratchpadApp};
+use super::{AppSurface, ScratchpadApp, SearchState};
 use crate::app::domain::TabManager;
 use crate::app::logging::{self, LogLevel};
 use crate::app::services::file_controller::FileController;
+use crate::app::services::manual_files;
 use crate::app::services::session_manager;
 use crate::app::services::session_store::SessionStore;
 use crate::app::services::settings_store::{
@@ -54,7 +55,11 @@ impl ScratchpadApp {
             app_settings: AppSettings::default(),
             status_message: None,
             pending_editor_focus: None,
+            encoding_dialog_open: false,
+            reopen_with_encoding_choice: "UTF-8".to_owned(),
+            save_with_encoding_choice: "UTF-8".to_owned(),
             settings_store,
+            user_manual_path: manual_files::resolve_user_manual_path(),
             session_store,
             last_session_persist: Instant::now(),
             close_in_progress: false,
@@ -68,6 +73,7 @@ impl ScratchpadApp {
             transaction_log: TransactionLog::default(),
             transaction_log_open: false,
             pending_text_transaction: None,
+            search_state: SearchState::default(),
             chrome_transition_frames_remaining: 0,
             selected_tab_slots: BTreeSet::new(),
             tab_selection_anchor: None,

@@ -43,10 +43,7 @@ pub(crate) fn restore_session_state(app: &mut ScratchpadApp) -> Option<AppSettin
     }
 }
 
-fn apply_restored_session(
-    app: &mut ScratchpadApp,
-    restored: RestoredSession,
-) -> AppSettings {
+fn apply_restored_session(app: &mut ScratchpadApp, restored: RestoredSession) -> AppSettings {
     if let Some(status) = restored.restore_status.as_ref() {
         match status.level {
             RestoreStatusLevel::Info => app.set_info_status(status.message.clone()),

@@ -24,7 +24,23 @@ impl ScratchpadApp {
             AppCommand::NewTab => self.new_tab(),
             AppCommand::OpenFile => self.open_file(),
             AppCommand::OpenFileHere => self.open_file_here(),
+            AppCommand::OpenSearch => self.open_search(),
+            AppCommand::OpenSearchAndReplace => self.open_search_and_replace(),
             AppCommand::OpenSettings => self.open_settings(),
+            AppCommand::OpenUserManual => self.open_user_manual(),
+            AppCommand::CloseSearch => self.close_search(),
+            AppCommand::NextSearchMatch => {
+                self.select_next_search_match();
+            }
+            AppCommand::PreviousSearchMatch => {
+                self.select_previous_search_match();
+            }
+            AppCommand::ReplaceCurrentMatch => {
+                self.replace_current_search_match();
+            }
+            AppCommand::ReplaceAllMatches => {
+                self.replace_all_search_matches_in_active_buffer();
+            }
             AppCommand::ReorderTab {
                 from_index,
                 to_index,

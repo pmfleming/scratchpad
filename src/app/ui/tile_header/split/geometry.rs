@@ -88,8 +88,7 @@ mod tests {
 
     #[test]
     fn vertical_split_uses_pointer_x_for_ratio() {
-        let tile_rect =
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 400.0));
+        let tile_rect = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 400.0));
 
         let split = split_preview_spec(tile_rect, egui::pos2(500.0, 20.0), egui::pos2(820.0, 30.0));
 
@@ -98,8 +97,7 @@ mod tests {
 
     #[test]
     fn horizontal_split_uses_pointer_y_for_ratio() {
-        let tile_rect =
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(800.0, 1000.0));
+        let tile_rect = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(800.0, 1000.0));
 
         let split = split_preview_spec(tile_rect, egui::pos2(20.0, 500.0), egui::pos2(40.0, 220.0));
 
@@ -108,11 +106,9 @@ mod tests {
 
     #[test]
     fn split_preview_snaps_near_center() {
-        let tile_rect =
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 400.0));
+        let tile_rect = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1000.0, 400.0));
 
-        let split =
-            split_preview_spec(tile_rect, egui::pos2(500.0, 20.0), egui::pos2(540.0, 24.0));
+        let split = split_preview_spec(tile_rect, egui::pos2(500.0, 20.0), egui::pos2(540.0, 24.0));
 
         assert_eq!(split, Some((SplitAxis::Vertical, false, 0.5)));
     }

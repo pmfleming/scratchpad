@@ -176,3 +176,33 @@ fn text_document_preserves_non_newline_control_char_inserts() {
     assert_eq!(TextBuffer::insert_text(&mut document, "\rprogress", 5), 9);
     assert_eq!(document.as_str(), "alpha\rprogress");
 }
+
+#[test]
+fn text_document_normalizes_multiline_paste_to_preferred_line_endings() {
+    let mut document =
+        TextDocument::with_preferred_line_ending("header\n".to_owned(), LineEndingStyle::Lf);
+
+    let inserted = TextBuffer::insert_text(&mut document, "one\r\ntwo\nthree", 7);
+
+    assert_eq!(inserted, "one\ntwo\nthree".chars().count());
+    assert_eq!(document.as_str(), "header\none\ntwo\nthree");
+}
+
+#[test]
+fn detected_preferred_line_ending_is_retained_after_text_changes() {
+    let mut format = TextFormatMetadata::detected(
+        "alpha\r\nbeta\r\n",
+        "UTF-8".to_owned(),
+        false,
+        EncodingSource::Heuristic,
+        false,
+    );
+
+    assert_eq!(format.line_endings, LineEndingStyle::Crlf);
+    assert_eq!(format.preferred_line_ending_style(), LineEndingStyle::Crlf);
+
+    format.refresh_from_text("alpha\nbeta\r\ngamma");
+
+    assert_eq!(format.line_endings, LineEndingStyle::Mixed);
+    assert_eq!(format.preferred_line_ending_style(), LineEndingStyle::Crlf);
+}

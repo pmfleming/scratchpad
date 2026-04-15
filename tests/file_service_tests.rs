@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
+use eframe::egui::TextBuffer;
 use scratchpad::app::domain::LineEndingStyle;
+use scratchpad::app::domain::TextDocument;
 use scratchpad::app::services::file_service::FileService;
 use std::fs;
 use tempfile::tempdir;
@@ -134,4 +136,61 @@ fn detects_cr_only_line_endings_without_reporting_artifacts() {
 
     assert_eq!(read.format.line_endings, LineEndingStyle::Cr);
     assert!(!read.artifact_summary.has_control_chars());
+}
+
+#[test]
+fn preserves_loaded_crlf_style_when_editing_and_saving() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("windows-lines.txt");
+    fs::write(&path, b"alpha\r\nbeta\r\n").unwrap();
+
+    let read = FileService::read_file(&path).unwrap();
+    let mut document = TextDocument::with_preferred_line_ending(
+        read.content.clone(),
+        read.format.preferred_line_ending_style(),
+    );
+    let insert_at = document.as_str().chars().count();
+
+    TextBuffer::insert_text(&mut document, "gamma\n", insert_at);
+    FileService::write_file_with_format(&path, document.as_str(), &read.format).unwrap();
+
+    assert_eq!(fs::read(&path).unwrap(), b"alpha\r\nbeta\r\ngamma\r\n");
+}
+
+#[test]
+fn explicit_reopen_with_encoding_uses_selected_encoding() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("latin1ish.txt");
+    fs::write(&path, vec![0x63, 0x61, 0x66, 0xE9]).unwrap();
+
+    let read = FileService::read_file_with_encoding(&path, "windows-1252").unwrap();
+
+    assert_eq!(read.content, "caf\u{00E9}");
+    assert_eq!(read.format.encoding_name, "windows-1252");
+    assert_eq!(
+        read.format.encoding_source,
+        scratchpad::app::domain::EncodingSource::ExplicitUserChoice
+    );
+}
+
+#[test]
+fn saving_unencodable_text_fails_for_legacy_encoding() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cp1252-save-fail.txt");
+    let format = scratchpad::app::domain::TextFormatMetadata::detected(
+        "caf\u{00E9}",
+        "windows-1252".to_owned(),
+        false,
+        scratchpad::app::domain::EncodingSource::ExplicitUserChoice,
+        false,
+    );
+
+    let error = FileService::write_file_with_format(&path, "emoji \u{1F600}", &format)
+        .expect_err("save should fail for unencodable text");
+
+    assert!(
+        error
+            .to_string()
+            .contains("not representable in windows-1252")
+    );
 }

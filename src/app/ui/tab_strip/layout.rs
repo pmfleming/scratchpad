@@ -266,12 +266,7 @@ pub(crate) fn vertical_panel_visible(
 ) -> bool {
     let has_context = pointer_near_bar(ui, app.vertical_tab_list_width(), side)
         || pointer_in_vertical_protected_corridor(ui, app.vertical_tab_list_width(), side);
-    auto_hide_visible(
-        app,
-        ui.ctx(),
-        has_context,
-        now,
-    )
+    auto_hide_visible(app, ui.ctx(), has_context, now)
 }
 
 pub(crate) fn vertical_tab_panel(side: TabListPosition, visible: bool) -> egui::Panel {
@@ -294,8 +289,7 @@ mod tests {
 
     #[test]
     fn left_corridor_keeps_tab_list_open_near_top_controls() {
-        let viewport =
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1200.0, 800.0));
+        let viewport = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1200.0, 800.0));
 
         assert!(pointer_in_vertical_protected_corridor_at(
             viewport,
@@ -307,8 +301,7 @@ mod tests {
 
     #[test]
     fn corridor_does_not_extend_deep_into_editor() {
-        let viewport =
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1200.0, 800.0));
+        let viewport = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1200.0, 800.0));
 
         assert!(!pointer_in_vertical_protected_corridor_at(
             viewport,
@@ -320,8 +313,7 @@ mod tests {
 
     #[test]
     fn right_corridor_keeps_tab_list_open_near_top_controls() {
-        let viewport =
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1200.0, 800.0));
+        let viewport = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1200.0, 800.0));
 
         assert!(pointer_in_vertical_protected_corridor_at(
             viewport,

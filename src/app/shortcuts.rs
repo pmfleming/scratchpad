@@ -14,6 +14,27 @@ pub(crate) fn handle_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
 }
 
 fn handle_global_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
+    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F1)) {
+        app.handle_command(AppCommand::OpenUserManual);
+        return;
+    }
+
+    if !app.showing_settings()
+        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::F))
+    {
+        app.handle_command(AppCommand::OpenSearch);
+        ctx.request_repaint();
+        return;
+    }
+
+    if !app.showing_settings()
+        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::H))
+    {
+        app.handle_command(AppCommand::OpenSearchAndReplace);
+        ctx.request_repaint();
+        return;
+    }
+
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Comma)) {
         app.handle_command(AppCommand::OpenSettings);
         return;
@@ -33,6 +54,14 @@ fn handle_global_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
         app.handle_command(AppCommand::CloseSettings);
+        return;
+    }
+
+    if app.search_open()
+        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        app.handle_command(AppCommand::CloseSearch);
+        ctx.request_repaint();
         return;
     }
 
@@ -102,6 +131,26 @@ fn handle_tile_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         shift: true,
         ..Default::default()
     };
+
+    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::T))
+        && let Some(tab) = app.active_tab()
+        && tab.can_promote_view(tab.active_view_id)
+    {
+        app.handle_command(AppCommand::PromoteViewToTab {
+            view_id: tab.active_view_id,
+        });
+        return;
+    }
+
+    if ctx.input_mut(|input| input.consume_key(modifiers, egui::Key::T))
+        && let Some(tab) = app.active_tab()
+        && tab.can_promote_all_files()
+    {
+        app.handle_command(AppCommand::PromoteTabFilesToTabs {
+            index: app.active_tab_index(),
+        });
+        return;
+    }
 
     if ctx.input_mut(|input| input.consume_key(modifiers, egui::Key::W))
         && let Some(tab) = app.active_tab()

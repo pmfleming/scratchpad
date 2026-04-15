@@ -132,7 +132,7 @@ try {
         "fast"
     }
 
-    $totalSteps = if ($rebuildMode -eq "fast") { 2 } else { 7 }
+    $totalSteps = if ($rebuildMode -eq "fast") { 2 } else { 8 }
     $stepNumber = 1
 
     Ensure-Python
@@ -144,6 +144,10 @@ try {
 
         Write-Step -Number $stepNumber -Total $totalSteps -Title "Generating slowspots data"
         Invoke-StepCommand -Label "slowspots" -Arguments @("scripts/slowspots.py", "--mode", "visibility")
+        $stepNumber++
+
+        Write-Step -Number $stepNumber -Total $totalSteps -Title "Generating search speed data"
+        Invoke-StepCommand -Label "search_speed" -Arguments @("scripts/search_speed.py", "--mode", "visibility")
         $stepNumber++
 
         Write-Step -Number $stepNumber -Total $totalSteps -Title "Generating hotspots data"

@@ -405,9 +405,7 @@ fn save_refreshes_disk_state_and_clears_freshness_warning() {
     app.tabs_mut()[index]
         .active_buffer_mut()
         .replace_text("beta\nlonger\n".to_owned());
-    app.tabs_mut()[index]
-        .active_buffer_mut()
-        .is_dirty = true;
+    app.tabs_mut()[index].active_buffer_mut().is_dirty = true;
 
     assert!(app.save_file_at(index));
 
@@ -429,9 +427,7 @@ fn save_does_not_silently_overwrite_when_disk_changed() {
     app.tabs_mut()[index]
         .active_buffer_mut()
         .replace_text("local edit\n".to_owned());
-    app.tabs_mut()[index]
-        .active_buffer_mut()
-        .is_dirty = true;
+    app.tabs_mut()[index].active_buffer_mut().is_dirty = true;
 
     fs::write(&path, "external version on disk\n").expect("overwrite temp file externally");
 

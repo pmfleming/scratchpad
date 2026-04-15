@@ -40,11 +40,8 @@ pub(crate) fn update_tab_drag(
     let drag_state = state::update_current_tab_drag(ui)?;
     let drag_active = state::drag_is_active(&drag_state);
     let dragged_indices = drag_state.dragged_indices.clone();
-    let allow_combine = zones
-        .iter()
-        .flat_map(|zone| zone.entries.iter())
-        .find(|entry| entry.index == drag_state.source_index)
-        .is_some_and(|entry| entry.combine_enabled);
+    let allow_combine =
+        drag_sources_allow_combine(zones, &dragged_indices, drag_state.source_index);
     let drop_intent = drag_active
         .then(|| state::locate_drop_intent(zones, drag_state.current_pos, allow_combine))
         .flatten();
@@ -104,6 +101,29 @@ pub(crate) fn update_tab_drag(
     }
 }
 
+fn drag_sources_allow_combine(
+    zones: &[TabDropZone],
+    dragged_indices: &[usize],
+    source_index: usize,
+) -> bool {
+    let mut source_can_combine = false;
+    let mut selected_workspace_can_combine = false;
+
+    for entry in zones.iter().flat_map(|zone| zone.entries.iter()) {
+        if entry.index == source_index && entry.combine_enabled {
+            source_can_combine = true;
+        }
+        if dragged_indices.len() > 1
+            && entry.combine_enabled
+            && dragged_indices.contains(&entry.index)
+        {
+            selected_workspace_can_combine = true;
+        }
+    }
+
+    source_can_combine || selected_workspace_can_combine
+}
+
 pub(crate) fn paint_dragged_tab_ghost(ctx: &egui::Context, app: &ScratchpadApp) {
     let Some(drag_state) = state::current_tab_drag_state_for_context(ctx) else {
         return;
@@ -158,4 +178,32 @@ pub(crate) fn auto_scroll_tab_list(
     }
     next_state.store(ctx, scroll_area_id);
     ctx.request_repaint();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TabDropAxis, TabDropZone, TabRectEntry, drag_sources_allow_combine};
+    use eframe::egui::{Rect, pos2, vec2};
+
+    #[test]
+    fn multi_select_drag_from_settings_still_allows_combine_when_workspace_tabs_are_selected() {
+        let zones = vec![TabDropZone {
+            axis: TabDropAxis::Horizontal,
+            entries: vec![
+                TabRectEntry {
+                    index: 0,
+                    rect: Rect::from_min_size(pos2(10.0, 10.0), vec2(140.0, 30.0)),
+                    combine_enabled: true,
+                },
+                TabRectEntry {
+                    index: 1,
+                    rect: Rect::from_min_size(pos2(154.0, 10.0), vec2(140.0, 30.0)),
+                    combine_enabled: false,
+                },
+            ],
+        }];
+
+        assert!(drag_sources_allow_combine(&zones, &[0, 1], 1));
+        assert!(!drag_sources_allow_combine(&zones, &[1], 1));
+    }
 }

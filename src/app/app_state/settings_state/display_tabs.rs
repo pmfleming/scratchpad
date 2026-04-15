@@ -11,6 +11,10 @@ impl ScratchpadApp {
         self.selected_tab_slots.contains(&slot_index)
     }
 
+    fn tab_slot_exists(&self, slot_index: usize) -> bool {
+        self.display_tab_slot(slot_index).is_some()
+    }
+
     pub(crate) fn clear_tab_selection(&mut self) {
         self.selected_tab_slots.clear();
         self.tab_selection_anchor = None;
@@ -18,14 +22,14 @@ impl ScratchpadApp {
 
     pub(crate) fn select_only_tab_slot(&mut self, slot_index: usize) {
         self.clear_tab_selection();
-        if self.workspace_index_for_slot(slot_index).is_some() {
+        if self.tab_slot_exists(slot_index) {
             self.selected_tab_slots.insert(slot_index);
             self.tab_selection_anchor = Some(slot_index);
         }
     }
 
     pub(crate) fn toggle_tab_slot_selection(&mut self, slot_index: usize) {
-        if self.workspace_index_for_slot(slot_index).is_none() {
+        if !self.tab_slot_exists(slot_index) {
             self.clear_tab_selection();
             return;
         }
@@ -37,14 +41,17 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn select_tab_slot_range(&mut self, slot_index: usize) {
-        if self.workspace_index_for_slot(slot_index).is_none() {
+        if !self.tab_slot_exists(slot_index) {
             self.clear_tab_selection();
             return;
         }
 
         let anchor = self
             .tab_selection_anchor
-            .or_else(|| self.workspace_index_for_slot(self.active_tab_slot_index()).map(|_| self.active_tab_slot_index()))
+            .or_else(|| {
+                self.tab_slot_exists(self.active_tab_slot_index())
+                    .then_some(self.active_tab_slot_index())
+            })
             .unwrap_or(slot_index);
         let (start, end) = if anchor <= slot_index {
             (anchor, slot_index)
@@ -53,7 +60,7 @@ impl ScratchpadApp {
         };
         self.clear_tab_selection();
         for candidate in start..=end {
-            if self.workspace_index_for_slot(candidate).is_some() {
+            if self.tab_slot_exists(candidate) {
                 self.selected_tab_slots.insert(candidate);
             }
         }
@@ -173,7 +180,8 @@ impl ScratchpadApp {
             .iter()
             .map(|slot| display_slots[*slot])
             .collect::<Vec<_>>();
-        let adjusted_to_slot = to_slot.saturating_sub(from_slots.iter().filter(|slot| **slot < to_slot).count());
+        let adjusted_to_slot =
+            to_slot.saturating_sub(from_slots.iter().filter(|slot| **slot < to_slot).count());
         let remaining_slots = display_slots
             .into_iter()
             .enumerate()
@@ -209,5 +217,53 @@ impl ScratchpadApp {
             .collect::<Vec<_>>();
 
         self.apply_workspace_tab_order(workspace_order);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::app_state::ScratchpadApp;
+    use crate::app::commands::AppCommand;
+    use crate::app::domain::WorkspaceTab;
+    use crate::app::services::session_store::SessionStore;
+
+    fn test_app() -> ScratchpadApp {
+        let session_root = tempfile::tempdir().expect("create session dir");
+        let session_store = SessionStore::new(session_root.path().to_path_buf());
+        ScratchpadApp::with_session_store(session_store)
+    }
+
+    fn app_with_settings_between_tabs() -> ScratchpadApp {
+        let mut app = test_app();
+        app.tabs_mut()[0].buffer.name = "one.txt".to_owned();
+        app.append_tab(WorkspaceTab::untitled());
+        app.tabs_mut()[1].buffer.name = "two.txt".to_owned();
+        app.handle_command(AppCommand::OpenSettings);
+        app.handle_command(AppCommand::ReorderDisplayTab {
+            from_index: 2,
+            to_index: 1,
+        });
+        app
+    }
+
+    #[test]
+    fn settings_slot_can_be_selected() {
+        let mut app = app_with_settings_between_tabs();
+
+        app.select_only_tab_slot(1);
+
+        assert!(app.tab_slot_selected(1));
+    }
+
+    #[test]
+    fn range_selection_can_include_settings_slot() {
+        let mut app = app_with_settings_between_tabs();
+
+        app.select_only_tab_slot(0);
+        app.select_tab_slot_range(2);
+
+        assert!(app.tab_slot_selected(0));
+        assert!(app.tab_slot_selected(1));
+        assert!(app.tab_slot_selected(2));
     }
 }

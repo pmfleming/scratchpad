@@ -1,4 +1,5 @@
-use super::{FileController, LoadedFile, PendingOpenLogEntry};
+use super::FileController;
+use super::support::{LoadedFile, PendingOpenLogEntry};
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
 use crate::app::domain::{SplitAxis, ViewId, WorkspaceTab};
@@ -27,14 +28,7 @@ impl FileController {
     pub(super) fn open_selected_paths_here(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
         Self::prepare_to_open_paths(app);
         let snapshot = app.capture_transaction_snapshot();
-        let affected_items = paths
-            .iter()
-            .map(|path| {
-                path.file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.display().to_string())
-            })
-            .collect::<Vec<_>>();
+        let affected_items = Self::affected_item_labels(&paths);
         let anchor_view_id = app
             .tabs()
             .get(app.active_tab_index())

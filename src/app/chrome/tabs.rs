@@ -122,11 +122,6 @@ fn paint_selected_tab_overlay(ui: &egui::Ui, rect: Rect, active: bool) {
         Stroke::new(1.5, accent.gamma_multiply(0.95)),
         egui::StrokeKind::Outside,
     );
-    let selection_rail = Rect::from_min_max(
-        selected_rect.left_top() + Vec2::new(4.0, 4.0),
-        selected_rect.left_bottom() + Vec2::new(7.0, -4.0),
-    );
-    ui.painter().rect_filled(selection_rail, 2.0, accent);
 }
 
 fn allocate_tab_button_frame(ui: &mut egui::Ui, width: f32) -> TabButtonFrame {

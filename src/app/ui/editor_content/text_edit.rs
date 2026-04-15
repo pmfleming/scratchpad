@@ -1,4 +1,7 @@
-use crate::app::domain::{BufferState, EditorViewState, RenderedLayout, TextDocumentUndoer};
+use crate::app::domain::{
+    BufferState, EditorViewState, RenderedLayout, SearchHighlightState, TextDocumentUndoer,
+};
+use crate::app::theme::{search_active_match_bg, search_match_bg};
 use eframe::egui;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -6,6 +9,15 @@ use std::sync::Arc;
 
 type TextLayouter = Box<dyn FnMut(&egui::Ui, &dyn egui::TextBuffer, f32) -> Arc<egui::Galley>>;
 type LayoutCapture = Rc<RefCell<Option<Arc<egui::Galley>>>>;
+
+struct HighlightLayoutStyle<'a> {
+    wrap_width: f32,
+    word_wrap: bool,
+    font_id: &'a egui::FontId,
+    text_color: egui::Color32,
+    passive_match_bg: egui::Color32,
+    active_match_bg: egui::Color32,
+}
 
 #[derive(Clone, Copy)]
 pub struct TextEditOptions<'a> {
@@ -97,6 +109,7 @@ fn render_text_edit_widget(
         options.editor_font_id.clone(),
         options.word_wrap,
         options.text_color,
+        view.search_highlights.clone(),
     );
     let mut editor = egui::TextEdit::multiline(text)
         .id(editor_widget_id(view_id))
@@ -163,18 +176,22 @@ pub fn build_layouter(
     font_id: egui::FontId,
     word_wrap: bool,
     text_color: egui::Color32,
+    search_highlights: SearchHighlightState,
 ) -> TextLayouter {
     Box::new(
         move |ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32| {
-            let mut job = egui::text::LayoutJob::default();
-            job.wrap.max_width = if word_wrap { wrap_width } else { f32::INFINITY };
-            job.append(
+            let passive_match_bg = search_match_bg(ui);
+            let active_match_bg = search_active_match_bg(ui);
+            let job = layout_job_with_highlights(
                 buf.as_str(),
-                0.0,
-                egui::TextFormat {
-                    font_id: font_id.clone(),
-                    color: text_color,
-                    ..Default::default()
+                &search_highlights,
+                HighlightLayoutStyle {
+                    wrap_width,
+                    word_wrap,
+                    font_id: &font_id,
+                    text_color,
+                    passive_match_bg,
+                    active_match_bg,
                 },
             );
             ui.fonts_mut(|fonts| fonts.layout_job(job))
@@ -186,8 +203,9 @@ fn tracked_layouter(
     font_id: egui::FontId,
     word_wrap: bool,
     text_color: egui::Color32,
+    search_highlights: SearchHighlightState,
 ) -> (TextLayouter, LayoutCapture) {
-    let mut layouter = build_layouter(font_id, word_wrap, text_color);
+    let mut layouter = build_layouter(font_id, word_wrap, text_color, search_highlights);
     let layout_capture = Rc::new(RefCell::new(None));
     let capture_for_layouter = Rc::clone(&layout_capture);
     let tracking_layouter = Box::new(
@@ -199,6 +217,107 @@ fn tracked_layouter(
     );
 
     (tracking_layouter, layout_capture)
+}
+
+fn layout_job_with_highlights(
+    text: &str,
+    search_highlights: &SearchHighlightState,
+    style: HighlightLayoutStyle<'_>,
+) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = if style.word_wrap {
+        style.wrap_width
+    } else {
+        f32::INFINITY
+    };
+
+    if search_highlights.ranges.is_empty() {
+        append_job_segment(
+            &mut job,
+            text,
+            style.font_id,
+            style.text_color,
+            egui::Color32::TRANSPARENT,
+        );
+        return job;
+    }
+
+    let char_to_byte = char_to_byte_map(text);
+    let text_char_len = char_to_byte.len().saturating_sub(1);
+    let mut cursor = 0;
+
+    for (index, range) in search_highlights.ranges.iter().enumerate() {
+        if range.start >= range.end || range.end > text_char_len {
+            continue;
+        }
+        let start_byte = char_to_byte[range.start];
+        let end_byte = char_to_byte[range.end];
+        if cursor < start_byte {
+            append_job_segment(
+                &mut job,
+                &text[cursor..start_byte],
+                style.font_id,
+                style.text_color,
+                egui::Color32::TRANSPARENT,
+            );
+        }
+        let background = if search_highlights.active_range_index == Some(index) {
+            style.active_match_bg
+        } else {
+            style.passive_match_bg
+        };
+        append_job_segment(
+            &mut job,
+            &text[start_byte..end_byte],
+            style.font_id,
+            style.text_color,
+            background,
+        );
+        cursor = end_byte;
+    }
+
+    if cursor < text.len() {
+        append_job_segment(
+            &mut job,
+            &text[cursor..],
+            style.font_id,
+            style.text_color,
+            egui::Color32::TRANSPARENT,
+        );
+    }
+
+    job
+}
+
+fn append_job_segment(
+    job: &mut egui::text::LayoutJob,
+    text: &str,
+    font_id: &egui::FontId,
+    text_color: egui::Color32,
+    background: egui::Color32,
+) {
+    if text.is_empty() {
+        return;
+    }
+    job.append(
+        text,
+        0.0,
+        egui::TextFormat {
+            font_id: font_id.clone(),
+            color: text_color,
+            background,
+            ..Default::default()
+        },
+    );
+}
+
+fn char_to_byte_map(text: &str) -> Vec<usize> {
+    let mut offsets = text
+        .char_indices()
+        .map(|(offset, _)| offset)
+        .collect::<Vec<_>>();
+    offsets.push(text.len());
+    offsets
 }
 
 #[cfg(test)]

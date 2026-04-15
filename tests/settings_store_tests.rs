@@ -1,9 +1,11 @@
-use super::{
+#![forbid(unsafe_code)]
+
+use scratchpad::app::fonts::EditorFontPreset;
+use scratchpad::app::services::settings_store::{
     AppSettings, AppThemeMode, DEFAULT_EDITOR_GUTTER, DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS,
     DEFAULT_TAB_LIST_WIDTH, FileOpenDisposition, SettingsStore, StartupSessionBehavior,
     TabListPosition,
 };
-use crate::app::fonts::EditorFontPreset;
 use std::fs;
 
 fn test_store() -> SettingsStore {

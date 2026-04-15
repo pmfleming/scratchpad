@@ -21,6 +21,15 @@ These are the formulas currently used by the scripts and the overview viewer.
   slowspot_score = mean_ms * (1.0 + (std_dev_ns / mean_ns))
   ```
 
+- **Search speed score** (`search_speed.py`)
+  ```python
+  search_speed_score = ns_per_kb * (1.0 + (std_dev_ns / mean_ns))
+  ```
+  `ns_per_kb` normalizes a benchmark's mean latency by the total decoded text size scanned.
+  The report also distinguishes:
+  - `completion`: full-scan latency for the whole scope
+  - `first_response`: initial keypress-response latency for a partial-result path where remaining work continues in the background
+
 - **Map performance contribution** (`map.py`)
   ```python
   module_perf_score = mean_ns / 100_000.0
@@ -150,6 +159,7 @@ Clone Alert identifies redundant code segments that have been copied and pasted,
 ### Analysis Tools
 - **hotspots.py:** Analyzes static code complexity and maintainability.
 - **slowspots.py:** Analyzes dynamic execution performance and latency.
+- **search_speed.py:** Analyzes search scaling across Active, Current, and All scopes, with separate completion and first-response timings.
 - **clone_alert.py:** Detects structural and renamed code clones.
 - **map.py:** Aggregates complexity, git history, benchmark, and dependency data into maintainability, change, performance, and architectural risk.
 
@@ -174,6 +184,7 @@ CloneCheck mode: rebuilds the JSON files and uses the extended clone check (`--e
 The rebuild modes refresh:
 - `target/analysis/hotspots.json`
 - `target/analysis/slowspots.json`
+- `target/analysis/search_speed.json`
 - `target/analysis/clones.json`
 - `target/analysis/map.json`
 

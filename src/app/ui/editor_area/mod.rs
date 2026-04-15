@@ -5,8 +5,10 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::{BufferId, PaneBranch, PaneNode, ViewId};
 use crate::app::logging::LogLevel;
 use crate::app::transactions::TransactionSnapshot;
+use crate::app::ui::search_replace;
 use crate::app::ui::tile_header::{self, SplitPreviewOverlay, TileAction};
 use eframe::egui;
+use std::time::Duration;
 
 pub use divider::{render_split_divider, split_rect};
 use tile::{TileRenderRequest, TileRenderState};
@@ -17,16 +19,26 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             return;
         }
 
-        app.workspace_reflow_axis = preferred_workspace_reflow_axis(ui.max_rect());
-
         let ctx = ui.ctx().clone();
-        handle_editor_zoom(&ctx, ui, app);
+        app.refresh_search_state();
+        search_replace::show_search_strip(ui, app);
+        let workspace_rect = ui.available_rect_before_wrap();
+        if workspace_rect.width() <= 0.0 || workspace_rect.height() <= 0.0 {
+            return;
+        }
+
+        app.workspace_reflow_axis = preferred_workspace_reflow_axis(workspace_rect);
+        handle_editor_zoom(&ctx, workspace_rect, ui, app);
         let editor_state = prepare_editor_state(app);
-        let render_outcome = render_editor_workspace(ui, app, &editor_state);
+        let render_outcome = render_editor_workspace(ui, app, &editor_state, workspace_rect);
         paint_preview_overlay(ui, render_outcome.preview_overlay);
         apply_tile_actions(app, render_outcome.actions);
         if render_outcome.any_editor_changed {
             apply_editor_change(app, &editor_state);
+        }
+        app.refresh_search_state();
+        if app.search_progress().searching {
+            ctx.request_repaint_after(Duration::from_millis(16));
         }
     });
 }
@@ -83,6 +95,7 @@ fn render_editor_workspace(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
     state: &EditorRenderState,
+    workspace_rect: egui::Rect,
 ) -> EditorRenderOutcome {
     let mut outcome = EditorRenderOutcome {
         actions: Vec::new(),
@@ -103,7 +116,7 @@ fn render_editor_workspace(
         &mut context,
         &state.pane_tree,
         Vec::new(),
-        ui.max_rect(),
+        workspace_rect,
     );
     outcome
 }
@@ -138,9 +151,13 @@ fn apply_tile_actions(app: &mut ScratchpadApp, actions: Vec<TileAction>) {
     }
 }
 
-fn handle_editor_zoom(ctx: &egui::Context, ui: &egui::Ui, app: &mut ScratchpadApp) {
-    let panel_rect = ui.max_rect();
-    let pointer_over_editor = ui.rect_contains_pointer(panel_rect);
+fn handle_editor_zoom(
+    ctx: &egui::Context,
+    workspace_rect: egui::Rect,
+    ui: &egui::Ui,
+    app: &mut ScratchpadApp,
+) {
+    let pointer_over_editor = ui.rect_contains_pointer(workspace_rect);
     let zoom_factor = ctx.input(|input| input.zoom_delta());
     if pointer_over_editor && zoom_factor != 1.0 {
         let previous_font_size = app.font_size();
@@ -209,66 +226,10 @@ fn render_pane_node(
 }
 
 fn apply_editor_change(app: &mut ScratchpadApp, state: &EditorRenderState) {
-    let tab = &mut app.tabs_mut()[state.active_tab_index];
-    let previous_dirty = tab.buffer.is_dirty;
-    let previous_artifact_status = tab.buffer.artifact_summary.status_text();
-    tab.buffer.refresh_text_metadata();
-    let has_control_chars = tab.buffer.artifact_summary.has_control_chars();
-    for view in &mut tab.views {
-        if !has_control_chars {
-            view.show_control_chars = false;
-        }
-    }
-    tab.buffer.is_dirty = true;
-    let tab_name = tab.buffer.name.clone();
-    let current_artifact_status = tab.buffer.artifact_summary.status_text();
-    let line_count = tab.buffer.line_count;
-    let current_text = tab.buffer.text().to_owned();
-    let warning_message = tab
-        .buffer
-        .artifact_summary
-        .status_text()
-        .map(|message| format!("{message}; raw-text editing remains enabled"));
-    let became_dirty = !previous_dirty;
-    let artifact_status_changed = previous_artifact_status != current_artifact_status;
-    let previous_artifact_status_for_log = previous_artifact_status.clone();
-    let current_artifact_status_for_log = current_artifact_status.clone();
-    let _ = tab;
-
-    if let Some(message) = warning_message {
-        app.set_warning_status(message);
-    } else {
-        app.clear_status_message();
-    }
-    app.record_text_edit_transaction(
+    app.finalize_active_buffer_text_mutation(
+        state.active_tab_index,
         state.active_buffer_id,
         state.active_buffer_label.clone(),
         state.transaction_snapshot.clone(),
-        current_text,
     );
-    app.mark_session_dirty();
-    app.note_settings_toml_edit(state.active_tab_index);
-
-    if became_dirty {
-        app.log_event(
-            LogLevel::Info,
-            format!(
-                "Buffer '{tab_name}' became dirty after edit (line_count={line_count}, artifact_status={})",
-                current_artifact_status_for_log
-                    .clone()
-                    .unwrap_or_else(|| "none".to_owned())
-            ),
-        );
-    }
-
-    if artifact_status_changed {
-        app.log_event(
-            LogLevel::Info,
-            format!(
-                "Artifact status changed for '{tab_name}' from {} to {}",
-                previous_artifact_status_for_log.unwrap_or_else(|| "none".to_owned()),
-                current_artifact_status_for_log.unwrap_or_else(|| "none".to_owned())
-            ),
-        );
-    }
 }

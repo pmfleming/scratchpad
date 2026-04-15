@@ -1,0 +1,153 @@
+{
+    "search_active_completion_file_size": {
+        "targets": [
+            "app::services::search"
+        ],
+        "kind": "micro",
+        "mode": "active",
+        "latency_kind": "completion",
+        "scaling_axis": "file_size",
+        "threshold_ms": 25.0,
+        "parameter_unit": "bytes",
+        "query": "needle",
+        "description": "Full active-file search as the single scanned file grows"
+    },
+    "search_active_first_response_file_size": {
+        "targets": [
+            "app::services::search"
+        ],
+        "kind": "micro",
+        "mode": "active",
+        "latency_kind": "first_response",
+        "scaling_axis": "file_size",
+        "threshold_ms": 6.0,
+        "parameter_unit": "bytes",
+        "query": "needle",
+        "response_match_limit": 40,
+        "description": "Initial keypress response for active-file search before the rest of the file finishes scanning"
+    },
+    "search_current_completion_file_size": {
+        "targets": [
+            "app::services::search",
+            "app::domain::tab"
+        ],
+        "kind": "workflow",
+        "mode": "current",
+        "latency_kind": "completion",
+        "scaling_axis": "file_size",
+        "threshold_ms": 45.0,
+        "parameter_unit": "bytes",
+        "fixed_item_count": 8,
+        "query": "needle",
+        "description": "Full current-tab search with a fixed number of open files while each file gets larger"
+    },
+    "search_current_first_response_file_size": {
+        "targets": [
+            "app::services::search",
+            "app::domain::tab"
+        ],
+        "kind": "workflow",
+        "mode": "current",
+        "latency_kind": "first_response",
+        "scaling_axis": "file_size",
+        "threshold_ms": 8.0,
+        "parameter_unit": "bytes",
+        "fixed_item_count": 8,
+        "query": "needle",
+        "response_match_limit": 40,
+        "description": "Initial keypress response for current-tab search while background work finishes the remaining files"
+    },
+    "search_current_completion_aggregate_size": {
+        "targets": [
+            "app::services::search",
+            "app::domain::tab"
+        ],
+        "kind": "workflow",
+        "mode": "current",
+        "latency_kind": "completion",
+        "scaling_axis": "aggregate_size",
+        "threshold_ms": 55.0,
+        "parameter_unit": "files",
+        "bytes_per_item": 24576,
+        "query": "needle",
+        "description": "Full current-tab search as more files are added to the workspace tab"
+    },
+    "search_current_first_response_aggregate_size": {
+        "targets": [
+            "app::services::search",
+            "app::domain::tab"
+        ],
+        "kind": "workflow",
+        "mode": "current",
+        "latency_kind": "first_response",
+        "scaling_axis": "aggregate_size",
+        "threshold_ms": 10.0,
+        "parameter_unit": "files",
+        "bytes_per_item": 24576,
+        "query": "needle",
+        "response_match_limit": 40,
+        "description": "Initial keypress response for current-tab search as aggregate open-file size grows"
+    },
+    "search_all_completion_file_size": {
+        "targets": [
+            "app::services::search",
+            "app::domain::tab_manager"
+        ],
+        "kind": "workflow",
+        "mode": "all",
+        "latency_kind": "completion",
+        "scaling_axis": "file_size",
+        "threshold_ms": 70.0,
+        "parameter_unit": "bytes",
+        "fixed_item_count": 8,
+        "query": "needle",
+        "description": "Full all-open-tabs search with a fixed tab count while each tab's file gets larger"
+    },
+    "search_all_first_response_file_size": {
+        "targets": [
+            "app::services::search",
+            "app::domain::tab_manager"
+        ],
+        "kind": "workflow",
+        "mode": "all",
+        "latency_kind": "first_response",
+        "scaling_axis": "file_size",
+        "threshold_ms": 10.0,
+        "parameter_unit": "bytes",
+        "fixed_item_count": 8,
+        "query": "needle",
+        "response_match_limit": 40,
+        "description": "Initial keypress response for all-open-tabs search before global completion catches up"
+    },
+    "search_all_completion_aggregate_size": {
+        "targets": [
+            "app::services::search",
+            "app::domain::tab_manager"
+        ],
+        "kind": "workflow",
+        "mode": "all",
+        "latency_kind": "completion",
+        "scaling_axis": "aggregate_size",
+        "threshold_ms": 85.0,
+        "parameter_unit": "tabs",
+        "bytes_per_item": 16384,
+        "query": "needle",
+        "description": "Full all-open-tabs search as more tabs are opened"
+    },
+    "search_all_first_response_aggregate_size": {
+        "targets": [
+            "app::services::search",
+            "app::domain::tab_manager"
+        ],
+        "kind": "workflow",
+        "mode": "all",
+        "latency_kind": "first_response",
+        "scaling_axis": "aggregate_size",
+        "threshold_ms": 12.0,
+        "parameter_unit": "tabs",
+        "bytes_per_item": 16384,
+        "query": "needle",
+        "response_match_limit": 40,
+        "description": "Initial keypress response for all-open-tabs search as aggregate scanned text grows"
+    }
+}

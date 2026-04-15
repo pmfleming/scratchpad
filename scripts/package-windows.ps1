@@ -66,6 +66,7 @@ try {
     New-Item -ItemType Directory -Force -Path $stagingDir | Out-Null
     Copy-Item -LiteralPath $exePath -Destination (Join-Path $stagingDir "scratchpad.exe")
     Copy-Item -LiteralPath (Join-Path $repoRoot "README.md") -Destination (Join-Path $stagingDir "README.md")
+    Copy-Item -LiteralPath (Join-Path $repoRoot "docs\user-manual.md") -Destination (Join-Path $stagingDir "user-manual.md")
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "register-open-with.ps1") -Destination (Join-Path $stagingDir "register-open-with.ps1")
 
     $licensePath = Join-Path $repoRoot "LICENSE"

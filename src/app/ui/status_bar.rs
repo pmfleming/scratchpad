@@ -1,5 +1,5 @@
 use crate::app::app_state::ScratchpadApp;
-use crate::app::domain::RenderedLayout;
+use crate::app::domain::{RenderedLayout, platform_default_line_ending};
 use crate::app::theme::*;
 use eframe::egui;
 
@@ -9,6 +9,7 @@ struct StatusBarActions {
     toggle_control_chars: bool,
     toggle_logging: bool,
     open_transaction_log: bool,
+    open_encoding_dialog: bool,
 }
 
 struct ActiveStatusDetails {
@@ -16,12 +17,13 @@ struct ActiveStatusDetails {
     count_label: String,
     encoding_label: String,
     encoding_tooltip: String,
+    encoding_is_non_default: bool,
+    has_non_compliant_characters: bool,
     line_endings_label: String,
+    line_endings_are_non_default: bool,
     icon: &'static str,
     icon_tooltip: &'static str,
     icon_color: egui::Color32,
-    artifact_warning_label: Option<String>,
-    format_warning_label: Option<String>,
     freshness_label: Option<String>,
     is_large_file: bool,
     has_control_chars: bool,
@@ -86,22 +88,17 @@ fn collect_active_status_details(
         count_label: line_count_label(line_count, visual_row_count),
         encoding_label: tab.buffer.format.encoding_label(),
         encoding_tooltip: tab.buffer.format.encoding_tooltip(),
+        encoding_is_non_default: status_bar_encoding_is_non_default(&tab.buffer.format),
+        has_non_compliant_characters: tab
+            .buffer
+            .format
+            .has_non_compliant_characters(tab.buffer.text()),
         line_endings_label: tab.buffer.format.line_endings_label().to_owned(),
+        line_endings_are_non_default: tab.buffer.format.preferred_line_ending_style()
+            != platform_default_line_ending(),
         icon,
         icon_tooltip,
         icon_color,
-        artifact_warning_label: tab
-            .buffer
-            .artifact_summary
-            .status_text()
-            .map(|warning_text| {
-                if show_control_chars {
-                    format!("{warning_text}; inspection view")
-                } else {
-                    format!("{warning_text}; editing raw text")
-                }
-            }),
-        format_warning_label: tab.buffer.format.format_warning_text(),
         freshness_label: tab.buffer.disk_status_label().map(str::to_owned),
         is_large_file: tab.buffer.text().len() > 5 * 1024 * 1024,
         has_control_chars,
@@ -120,8 +117,20 @@ fn render_active_status(
         show_transaction_log_button(ui, actions);
         show_control_char_toggle(ui, details, actions);
         show_logging_toggle(ui, logging_enabled, actions);
-        show_line_endings(ui, &details.line_endings_label);
-        show_encoding(ui, &details.encoding_label, &details.encoding_tooltip);
+        show_line_endings(
+            ui,
+            &details.line_endings_label,
+            details.line_endings_are_non_default,
+        );
+        let encoding_response = show_encoding(
+            ui,
+            &details.encoding_label,
+            &details.encoding_tooltip,
+            details.encoding_is_non_default,
+        );
+        if encoding_response.clicked() {
+            actions.open_encoding_dialog = true;
+        }
         show_line_count(ui, &details.count_label, actions);
     });
 }
@@ -135,14 +144,35 @@ fn show_line_count(ui: &mut egui::Ui, count_label: &str, actions: &mut StatusBar
     }
 }
 
-fn show_encoding(ui: &mut egui::Ui, encoding: &str, tooltip: &str) {
+fn show_encoding(
+    ui: &mut egui::Ui,
+    encoding: &str,
+    tooltip: &str,
+    highlight: bool,
+) -> egui::Response {
     ui.separator();
-    ui.label(encoding).on_hover_text(tooltip);
+    ui.add(egui::Label::new(status_format_text(encoding, highlight)).sense(egui::Sense::click()))
+        .on_hover_text(format!("{tooltip}\nClick for encoding actions"))
 }
 
-fn show_line_endings(ui: &mut egui::Ui, line_endings_label: &str) {
+fn show_line_endings(ui: &mut egui::Ui, line_endings_label: &str, highlight: bool) {
     ui.separator();
-    ui.label(format!("EOL: {line_endings_label}"));
+    ui.label(status_format_text(
+        &format!("EOL: {line_endings_label}"),
+        highlight,
+    ));
+}
+
+fn status_format_text(label: &str, highlight: bool) -> egui::RichText {
+    let mut text = egui::RichText::new(label);
+    if highlight {
+        text = text.color(egui::Color32::YELLOW);
+    }
+    text
+}
+
+fn status_bar_encoding_is_non_default(format: &crate::app::domain::TextFormatMetadata) -> bool {
+    !format.encoding_name.eq_ignore_ascii_case("UTF-8") || format.has_bom
 }
 
 fn show_logging_toggle(ui: &mut egui::Ui, logging_enabled: bool, actions: &mut StatusBarActions) {
@@ -206,14 +236,9 @@ fn show_status_warnings(ui: &mut egui::Ui, details: &ActiveStatusDetails) {
         );
     }
 
-    if let Some(warning_label) = &details.format_warning_label {
+    if details.has_non_compliant_characters {
         ui.separator();
-        ui.label(egui::RichText::new(warning_label).color(egui::Color32::YELLOW));
-    }
-
-    if let Some(warning_label) = &details.artifact_warning_label {
-        ui.separator();
-        ui.label(egui::RichText::new(warning_label).color(egui::Color32::YELLOW));
+        ui.label(egui::RichText::new("Non compliant characters").color(egui::Color32::RED));
     }
 }
 
@@ -244,6 +269,10 @@ fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {
 
     if actions.open_transaction_log {
         app.open_transaction_log();
+    }
+
+    if actions.open_encoding_dialog {
+        app.open_encoding_dialog();
     }
 }
 

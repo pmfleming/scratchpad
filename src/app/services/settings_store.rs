@@ -277,6 +277,3 @@ default_fn!(
 fn invalid_data(error: impl std::error::Error + Send + Sync + 'static) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error)
 }
-
-#[cfg(test)]
-mod tests;

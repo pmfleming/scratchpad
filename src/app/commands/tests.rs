@@ -38,6 +38,40 @@ fn app_with_named_tabs(names: &[&str]) -> ScratchpadApp {
     app
 }
 
+#[test]
+fn open_user_manual_opens_a_normal_markdown_file() {
+    let temp_dir = tempfile::tempdir().expect("create manual dir");
+    let manual_path = temp_dir.path().join("user-manual.md");
+    fs::write(
+        &manual_path,
+        "# Scratchpad\n\nThis is the shipped user manual.\n",
+    )
+    .expect("write manual");
+
+    let mut app = test_app();
+    app.user_manual_path = manual_path.clone();
+
+    app.handle_command(AppCommand::OpenUserManual);
+
+    assert_eq!(app.tabs().len(), 2);
+    let buffer = app.tabs()[app.active_tab_index()].active_buffer();
+    assert_eq!(buffer.path.as_deref(), Some(manual_path.as_path()));
+    assert_eq!(buffer.name, "user-manual.md");
+    assert!(buffer.text().contains("shipped user manual"));
+    assert!(!buffer.is_settings_file);
+
+    app.handle_command(AppCommand::OpenUserManual);
+
+    assert_eq!(app.tabs().len(), 2);
+    assert_eq!(
+        app.tabs()[app.active_tab_index()]
+            .active_buffer()
+            .path
+            .as_deref(),
+        Some(manual_path.as_path())
+    );
+}
+
 fn settings_file_content(font_size: f32, settings_slot_index: Option<usize>) -> String {
     let mut lines = vec![
         format!("font_size = {font_size:.1}"),

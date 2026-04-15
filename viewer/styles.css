@@ -349,6 +349,130 @@ tr:hover td {
     min-width: 0;
 }
 
+.chart-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+    margin-bottom: 18px;
+}
+
+.chart-panel {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+}
+
+.chart-panel h3 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.chart-frame {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background:
+        linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+        #10151c;
+    background-size: 34px 34px;
+}
+
+.chart-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.chart-caption {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.chart-empty {
+    padding: 26px;
+    color: var(--muted);
+    font-size: 14px;
+}
+
+.chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+}
+
+.chart-legend__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.chart-legend__swatch {
+    width: 28px;
+    height: 10px;
+    flex: 0 0 auto;
+}
+
+.chart-insights {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding-left: 18px;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.chart-grid-line {
+    stroke: rgba(159, 176, 195, 0.18);
+    stroke-width: 1;
+}
+
+.chart-axis-line {
+    stroke: rgba(159, 176, 195, 0.32);
+    stroke-width: 1.2;
+}
+
+.chart-axis-label,
+.chart-tick-label,
+.chart-value-label {
+    fill: var(--muted);
+    font: 12px "Aptos", "Segoe UI", sans-serif;
+}
+
+.chart-axis-label {
+    font-size: 13px;
+}
+
+.chart-series-line {
+    fill: none;
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.chart-point {
+    fill: #10151c;
+    stroke-width: 2.5;
+}
+
+.chart-point--over {
+    fill: none;
+    stroke: var(--bad);
+    stroke-width: 1.5;
+    stroke-dasharray: 4 4;
+}
+
+.chart-bar--completion {
+    fill: rgba(111, 208, 255, 0.82);
+}
+
+.chart-bar--first-response {
+    fill: rgba(125, 220, 155, 0.82);
+}
+
 .map-graph {
     min-height: 720px;
     overflow: auto;
@@ -488,6 +612,7 @@ tr:hover td {
 }
 
 @media (max-width: 1100px) {
+
     .hero,
     .loader-panel,
     .panel-card__header {
@@ -497,7 +622,8 @@ tr:hover td {
 
     .file-grid,
     .summary-grid,
-    .map-layout {
+    .map-layout,
+    .chart-grid {
         grid-template-columns: 1fr;
     }
 }

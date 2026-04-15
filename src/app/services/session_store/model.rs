@@ -85,7 +85,10 @@ impl From<&crate::app::domain::BufferState> for SessionBuffer {
             format: Some(buffer.format.clone()),
             encoding: buffer.format.encoding_name.clone(),
             has_bom: buffer.format.has_bom,
-            disk_modified_millis: buffer.disk_state.as_ref().and_then(|state| state.modified_millis),
+            disk_modified_millis: buffer
+                .disk_state
+                .as_ref()
+                .and_then(|state| state.modified_millis),
             disk_len: buffer.disk_state.as_ref().map(|state| state.len),
         }
     }
