@@ -7,7 +7,7 @@ use crate::app::theme::{
 };
 use eframe::egui;
 
-const TOOLBAR_BUTTON_HEIGHT: f32 = 30.0;
+const TOOLBAR_BUTTON_HEIGHT: f32 = 24.0;
 const INPUT_HEIGHT: f32 = 38.0;
 const TOOLBAR_ICON_SIZE: f32 = 18.0;
 const INPUT_ACTION_BUTTON_WIDTH: f32 = 36.0;
@@ -209,8 +209,14 @@ fn toggle_chip(
         (true, None) => String::new(),
     };
 
-    ui.add(
-        egui::Button::new(egui::RichText::new(content).color(text_primary(ui)))
+    ui.scope(|ui| {
+        ui.spacing_mut().button_padding = egui::vec2(8.0, 0.0);
+        ui.add(
+            egui::Button::new(
+                egui::RichText::new(content)
+                    .size(13.5)
+                    .color(text_primary(ui)),
+            )
             .min_size(egui::vec2(30.0, TOOLBAR_BUTTON_HEIGHT))
             .fill(if selected {
                 tab_selected_bg(ui)
@@ -226,8 +232,10 @@ fn toggle_chip(
                 },
             ))
             .corner_radius(egui::CornerRadius::same(10)),
-    )
-    .on_hover_text(tooltip)
+        )
+        .on_hover_text(tooltip)
+    })
+    .inner
 }
 
 fn search_text_edit<'a>(text: &'a mut String, id: egui::Id, hint: &str) -> egui::TextEdit<'a> {

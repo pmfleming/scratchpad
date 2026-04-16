@@ -70,6 +70,10 @@ struct TextInspection {
 
 impl TextInspection {
     fn inspect(text: &str) -> Self {
+        Self::inspect_with_line_endings(text, None)
+    }
+
+    fn inspect_with_line_endings(text: &str, line_endings: Option<LineEndingStyle>) -> Self {
         let mut line_count = 1usize;
         let mut line_ending_counts = LineEndingCounts::default();
         let mut artifact_summary = TextArtifactSummary::default();
@@ -106,7 +110,7 @@ impl TextInspection {
             }
         }
 
-        let line_endings = line_ending_style(line_ending_counts);
+        let line_endings = line_endings.unwrap_or_else(|| line_ending_style(line_ending_counts));
         artifact_summary.has_carriage_returns =
             line_endings != LineEndingStyle::Cr && line_ending_counts.cr > 0;
 
@@ -145,20 +149,13 @@ pub struct TextFormatMetadata {
 
 impl TextFormatMetadata {
     pub fn utf8_for_new_file(text: &str) -> Self {
-        let inspection = TextInspection::inspect(text);
-        Self {
-            encoding_name: "UTF-8".to_owned(),
-            has_bom: false,
-            line_endings: inspection.line_endings,
-            line_ending_counts: inspection.line_ending_counts,
-            preferred_line_ending: resolve_preferred_line_ending(
-                inspection.line_endings,
-                inspection.line_ending_counts,
-            ),
-            encoding_source: EncodingSource::DefaultForNewFile,
-            is_ascii_subset: inspection.is_ascii_subset,
-            has_decoding_warnings: false,
-        }
+        Self::from_inspection(
+            TextInspection::inspect(text),
+            "UTF-8".to_owned(),
+            false,
+            EncodingSource::DefaultForNewFile,
+            false,
+        )
     }
 
     pub fn detected(
@@ -168,20 +165,13 @@ impl TextFormatMetadata {
         encoding_source: EncodingSource,
         has_decoding_warnings: bool,
     ) -> Self {
-        let inspection = TextInspection::inspect(text);
-        Self {
+        Self::from_inspection(
+            TextInspection::inspect(text),
             encoding_name,
             has_bom,
-            line_endings: inspection.line_endings,
-            line_ending_counts: inspection.line_ending_counts,
-            preferred_line_ending: resolve_preferred_line_ending(
-                inspection.line_endings,
-                inspection.line_ending_counts,
-            ),
             encoding_source,
-            is_ascii_subset: inspection.is_ascii_subset,
             has_decoding_warnings,
-        }
+        )
     }
 
     pub fn refresh_from_text(&mut self, text: &str) {
@@ -264,6 +254,28 @@ impl TextFormatMetadata {
         self.line_endings = inspection.line_endings;
         self.is_ascii_subset = inspection.is_ascii_subset;
     }
+
+    fn from_inspection(
+        inspection: TextInspection,
+        encoding_name: String,
+        has_bom: bool,
+        encoding_source: EncodingSource,
+        has_decoding_warnings: bool,
+    ) -> Self {
+        Self {
+            encoding_name,
+            has_bom,
+            line_endings: inspection.line_endings,
+            line_ending_counts: inspection.line_ending_counts,
+            preferred_line_ending: resolve_preferred_line_ending(
+                inspection.line_endings,
+                inspection.line_ending_counts,
+            ),
+            encoding_source,
+            is_ascii_subset: inspection.is_ascii_subset,
+            has_decoding_warnings,
+        }
+    }
 }
 
 fn resolve_preferred_line_ending(
@@ -312,34 +324,7 @@ impl TextArtifactSummary {
     }
 
     pub fn from_text_with_line_endings(text: &str, line_endings: LineEndingStyle) -> Self {
-        let mut summary = Self::default();
-        let mut chars = text.chars().peekable();
-        let structural_carriage_returns = line_endings == LineEndingStyle::Cr;
-
-        while let Some(ch) = chars.next() {
-            match ch {
-                '\u{1B}' => {
-                    summary.has_ansi_sequences = true;
-                }
-                '\r' => {
-                    if chars.peek() == Some(&'\n') {
-                        chars.next();
-                    } else if !structural_carriage_returns {
-                        summary.has_carriage_returns = true;
-                    }
-                }
-                '\u{0008}' => {
-                    summary.has_backspaces = true;
-                }
-                '\n' | '\t' => {}
-                _ if ch.is_control() => {
-                    summary.other_control_count += 1;
-                }
-                _ => {}
-            }
-        }
-
-        summary
+        TextInspection::inspect_with_line_endings(text, Some(line_endings)).artifact_summary
     }
 
     pub fn has_control_chars(&self) -> bool {

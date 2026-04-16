@@ -289,3 +289,45 @@ fn promoting_a_file_extracts_all_of_its_views_to_a_new_tab() {
     assert_eq!(promoted_tab.active_buffer().name, "alpha.txt");
     assert!(matches!(promoted_tab.root_pane, PaneNode::Split { .. }));
 }
+
+#[test]
+fn splitting_into_tabs_per_file_groups_views_by_buffer() {
+    let mut tab = WorkspaceTab::new(BufferState::new(
+        "alpha.txt".to_owned(),
+        "alpha".to_owned(),
+        None,
+    ));
+    let first_alpha_view_id = tab.active_view_id;
+    let second_alpha_view_id = tab
+        .split_active_view(SplitAxis::Vertical)
+        .expect("split should succeed");
+    tab.activate_view(first_alpha_view_id);
+    let beta_view_id = tab
+        .open_buffer_as_split(
+            BufferState::new("beta.txt".to_owned(), "beta".to_owned(), None),
+            SplitAxis::Horizontal,
+            false,
+            0.5,
+        )
+        .expect("open buffer split should succeed");
+
+    let tabs = tab.into_tabs_per_file();
+
+    assert_eq!(tabs.len(), 2);
+
+    let alpha_tab = tabs
+        .iter()
+        .find(|tab| tab.active_buffer().name == "alpha.txt")
+        .expect("alpha tab should exist");
+    assert_eq!(alpha_tab.views.len(), 2);
+    assert!(matches!(alpha_tab.root_pane, PaneNode::Split { .. }));
+    assert!(alpha_tab.view(second_alpha_view_id).is_some());
+
+    let beta_tab = tabs
+        .iter()
+        .find(|tab| tab.active_buffer().name == "beta.txt")
+        .expect("beta tab should exist");
+    assert_eq!(beta_tab.views.len(), 1);
+    assert_eq!(beta_tab.active_view_id, beta_view_id);
+    assert!(matches!(beta_tab.root_pane, PaneNode::Leaf { view_id } if view_id == beta_view_id));
+}

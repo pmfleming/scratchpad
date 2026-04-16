@@ -2,7 +2,14 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-if ($IsWindows) {
+$isWindowsPlatform = $false
+if (Get-Variable -Name IsWindows -ErrorAction SilentlyContinue) {
+    $isWindowsPlatform = [bool]$IsWindows
+} elseif ($env:OS -eq "Windows_NT") {
+    $isWindowsPlatform = $true
+}
+
+if ($isWindowsPlatform) {
     $python = Join-Path $repoRoot ".venv\Scripts\python.exe"
 } else {
     $python = Join-Path $repoRoot ".venv/bin/python"

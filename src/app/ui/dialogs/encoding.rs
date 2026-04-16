@@ -4,21 +4,21 @@ use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::services::file_controller::FileController;
 use crate::app::services::file_service::COMMON_TEXT_ENCODINGS;
 use crate::app::theme::{action_hover_bg, border, text_muted, text_primary};
+use crate::app::ui::search_replace::SEARCH_DIALOG_WIDTH;
 use crate::app::ui::{callout, settings};
 use eframe::egui;
-use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, FILE_TEXT, FLOPPY_DISK, WARNING};
+use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, FILE_TEXT, FLOPPY_DISK, TRANSLATE, WARNING};
 
-const ENCODING_DIALOG_SIZE: egui::Vec2 = egui::vec2(760.0, 516.0);
-const ENCODING_DIALOG_CONTENT_WIDTH: f32 = 700.0;
+const ENCODING_DIALOG_WIDTH: f32 = SEARCH_DIALOG_WIDTH;
+const ENCODING_DIALOG_SIZE: egui::Vec2 = egui::vec2(ENCODING_DIALOG_WIDTH, 388.0);
 const ENCODING_TITLE_SIZE: f32 = 24.0;
-const ENCODING_CARD_MIN_HEIGHT: f32 = 84.0;
-const ENCODING_CONTROL_WIDTH: f32 = 160.0;
-const ENCODING_ACTION_BUTTON_SIZE: egui::Vec2 = egui::vec2(104.0, 40.0);
+const ENCODING_CARD_MIN_HEIGHT: f32 = 48.0;
+const ENCODING_WARNING_MIN_HEIGHT: f32 = 62.0;
+const ENCODING_CONTROL_WIDTH: f32 = 132.0;
+const ENCODING_ACTION_BUTTON_SIZE: egui::Vec2 = egui::vec2(84.0, 26.0);
 const ENCODING_CARD_CORNER_RADIUS: u8 = 12;
 const ENCODING_COMBO_FILL: egui::Color32 = egui::Color32::from_rgb(74, 72, 68);
 const ENCODING_COMBO_FILL_HOVER: egui::Color32 = egui::Color32::from_rgb(84, 82, 78);
-const ENCODING_CLOSE_FILL: egui::Color32 = egui::Color32::from_rgb(155, 66, 58);
-const ENCODING_CLOSE_FILL_HOVER: egui::Color32 = egui::Color32::from_rgb(177, 77, 67);
 const ENCODING_FILE_ICON: egui::Color32 = egui::Color32::from_rgb(107, 158, 248);
 const ENCODING_WARNING_FILL: egui::Color32 = egui::Color32::from_rgb(55, 46, 45);
 const ENCODING_WARNING_ICON: egui::Color32 = egui::Color32::from_rgb(246, 177, 150);
@@ -62,6 +62,38 @@ impl EncodingDialogState {
             is_dirty,
         }
     }
+
+    fn reopen_enabled(&self) -> bool {
+        self.has_saved_path && !self.is_dirty
+    }
+
+    fn reopen_subtitle(&self) -> &'static str {
+        if !self.has_saved_path {
+            "Reopen the file using the selected encoding after it has been saved."
+        } else if self.is_dirty {
+            "Save or discard local changes before reopening with a different encoding."
+        } else {
+            "Reopen the file using the selected encoding."
+        }
+    }
+
+    fn save_subtitle(&self) -> &'static str {
+        if self.has_saved_path {
+            "Commit the file to disk using the selected encoding."
+        } else {
+            "Choose a path and save the file using the selected encoding."
+        }
+    }
+}
+
+impl EncodingActionSpec<'_> {
+    fn button_label(self) -> &'static str {
+        match self.title {
+            "Reopen with" => "Reopen",
+            "Save with" => "Save",
+            _ => "Apply",
+        }
+    }
 }
 
 pub(super) fn show_encoding_window(ctx: &egui::Context, app: &mut ScratchpadApp) {
@@ -94,40 +126,38 @@ fn render_encoding_dialog(
     settings::apply_dialog_typography(ui);
     callout::apply_spacing(ui);
     apply_encoding_dialog_typography(ui);
-    ui.spacing_mut().item_spacing = egui::vec2(10.0, 12.0);
+    ui.spacing_mut().item_spacing = egui::vec2(6.0, 8.0);
 
-    render_dialog_title_bar(ui);
-    ui.add_space(18.0);
+    if render_dialog_header(ui) {
+        *close_requested = true;
+    }
 
-    ui.horizontal(|ui| {
-        let content_width = ui.available_width().min(ENCODING_DIALOG_CONTENT_WIDTH);
-        let side_margin = ((ui.available_width() - content_width) * 0.5).max(0.0);
-        if side_margin > 0.0 {
-            ui.add_space(side_margin);
+    ui.add_space(6.0);
+
+    render_selected_file_card(ui, state);
+    ui.add_space(6.0);
+
+    render_encoding_protocol_card(ui, app);
+
+    for spec in encoding_action_specs(state) {
+        ui.add_space(6.0);
+        if trigger_encoding_action(ui, app, state.active_index, spec) {
+            *close_requested = true;
         }
+    }
 
-        ui.vertical(|ui| {
-            ui.set_width(content_width);
-            ui.set_max_width(content_width);
+    ui.add_space(6.0);
+    render_encoding_warning(ui);
+}
 
-            if render_selected_file_card(ui, state) {
-                *close_requested = true;
-            }
-            ui.add_space(settings::dialog_card_gap());
-
-            render_encoding_protocol_card(ui, app);
-
-            for spec in encoding_action_specs(state) {
-                ui.add_space(settings::dialog_card_gap());
-                if trigger_encoding_action(ui, app, state.active_index, spec) {
-                    *close_requested = true;
-                }
-            }
-
-            ui.add_space(settings::dialog_card_gap());
-            render_encoding_warning(ui);
-        });
-    });
+fn render_dialog_header(ui: &mut egui::Ui) -> bool {
+    callout::header_row(ui, "Close encoding actions", |ui| {
+        ui.label(
+            egui::RichText::new("Encoding")
+                .size(ENCODING_TITLE_SIZE)
+                .color(callout::text(ui)),
+        );
+    })
 }
 
 fn encoding_action_specs(state: &EncodingDialogState) -> [EncodingActionSpec<'static>; 2] {
@@ -135,25 +165,15 @@ fn encoding_action_specs(state: &EncodingDialogState) -> [EncodingActionSpec<'st
         EncodingActionSpec {
             icon: ARROW_COUNTER_CLOCKWISE,
             title: "Reopen with",
-            subtitle: if !state.has_saved_path {
-                "Reopen the file using the selected encoding after it has been saved."
-            } else if state.is_dirty {
-                "Save or discard local changes before reopening with a different encoding."
-            } else {
-                "Reopen the file using the selected encoding."
-            },
+            subtitle: state.reopen_subtitle(),
             tooltip: "Reopen active file with selected encoding",
-            enabled: state.has_saved_path && !state.is_dirty,
+            enabled: state.reopen_enabled(),
             action: FileController::reopen_buffer_with_encoding,
         },
         EncodingActionSpec {
             icon: FLOPPY_DISK,
             title: "Save with",
-            subtitle: if state.has_saved_path {
-                "Commit the file to disk using the selected encoding."
-            } else {
-                "Choose a path and save the file using the selected encoding."
-            },
+            subtitle: state.save_subtitle(),
             tooltip: "Save active file using selected encoding",
             enabled: true,
             action: FileController::save_file_with_encoding_at,
@@ -179,52 +199,54 @@ fn apply_encoding_dialog_typography(ui: &mut egui::Ui) {
     let font_family = egui::FontFamily::Name(EDITOR_FONT_FAMILY.into());
     let style = ui.style_mut();
     style.override_font_id = Some(egui::FontId::new(15.0, font_family.clone()));
-    style
-        .text_styles
-        .insert(egui::TextStyle::Body, egui::FontId::new(15.0, font_family.clone()));
+    style.text_styles.insert(
+        egui::TextStyle::Body,
+        egui::FontId::new(15.0, font_family.clone()),
+    );
     style.text_styles.insert(
         egui::TextStyle::Button,
         egui::FontId::new(14.0, font_family.clone()),
     );
     style
         .text_styles
-        .insert(egui::TextStyle::Small, egui::FontId::new(13.0, font_family));
+        .insert(egui::TextStyle::Small, egui::FontId::new(12.0, font_family));
 }
 
-fn render_dialog_title_bar(ui: &mut egui::Ui) {
-    ui.label(
-        egui::RichText::new("Encoding")
-            .size(ENCODING_TITLE_SIZE)
-            .color(callout::text(ui)),
-    );
-}
-
-fn render_selected_file_card(ui: &mut egui::Ui, state: &EncodingDialogState) -> bool {
-    let mut close_requested = false;
+fn render_selected_file_card(ui: &mut egui::Ui, state: &EncodingDialogState) {
     encoding_card(ui, |ui| {
-        render_dialog_card_row(
-            ui,
-            FILE_TEXT,
-            "Selected file",
-            Some(&state.buffer_label),
-            true,
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), ENCODING_CARD_MIN_HEIGHT),
+            egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
-                close_requested =
-                    render_close_card_button(ui, "Close encoding actions").clicked();
+                render_card_icon(ui, FILE_TEXT);
+                ui.add_space(12.0);
+
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new("Selected file")
+                            .size(15.0)
+                            .color(text_primary(ui)),
+                    );
+                    ui.add_space(1.0);
+                    ui.label(
+                        egui::RichText::new(state.buffer_label.as_str())
+                            .size(13.5)
+                            .color(text_primary(ui).gamma_multiply(0.92)),
+                    );
+                });
             },
         );
     });
-    close_requested
 }
 
 fn render_encoding_protocol_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     encoding_card(ui, |ui| {
         render_dialog_card_row(
             ui,
-            "Aあ",
+            TRANSLATE,
             "Encoding protocol",
-            Some("Choose how this file should be opened or saved."),
-            false,
+            "Choose how this file should be opened or saved.",
+            ENCODING_CONTROL_WIDTH,
             |ui| {
                 ui.allocate_ui(egui::vec2(ENCODING_CONTROL_WIDTH, 0.0), |ui| {
                     ui.set_width(ENCODING_CONTROL_WIDTH);
@@ -239,31 +261,30 @@ fn render_encoding_protocol_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 fn render_encoding_action_card(ui: &mut egui::Ui, spec: EncodingActionSpec<'_>) -> bool {
     let mut clicked = false;
     encoding_card(ui, |ui| {
-        render_dialog_card_row(ui, spec.icon, spec.title, Some(spec.subtitle), false, |ui| {
-            clicked = ui
-                .add_enabled(
-                    spec.enabled,
-                    egui::Button::new(
-                        egui::RichText::new(action_label(spec.title)).color(text_primary(ui)),
+        render_dialog_card_row(
+            ui,
+            spec.icon,
+            spec.title,
+            spec.subtitle,
+            ENCODING_ACTION_BUTTON_SIZE.x,
+            |ui| {
+                clicked = ui
+                    .add_enabled(
+                        spec.enabled,
+                        egui::Button::new(
+                            egui::RichText::new(spec.button_label()).color(text_primary(ui)),
+                        )
+                        .min_size(ENCODING_ACTION_BUTTON_SIZE)
+                        .fill(action_hover_bg(ui))
+                        .stroke(egui::Stroke::new(1.0, border(ui).gamma_multiply(0.75)))
+                        .corner_radius(egui::CornerRadius::same(7)),
                     )
-                    .min_size(ENCODING_ACTION_BUTTON_SIZE)
-                    .fill(action_hover_bg(ui))
-                    .stroke(egui::Stroke::new(1.0, border(ui).gamma_multiply(0.75)))
-                    .corner_radius(egui::CornerRadius::same(8)),
-                )
-                .on_hover_text(spec.tooltip)
-                .clicked();
-        });
+                    .on_hover_text(spec.tooltip)
+                    .clicked();
+            },
+        );
     });
     clicked
-}
-
-fn action_label(title: &str) -> &'static str {
-    match title {
-        "Reopen with" => "Reopen",
-        "Save with" => "Save",
-        _ => "Apply",
-    }
 }
 
 fn render_encoding_warning(ui: &mut egui::Ui) {
@@ -271,36 +292,29 @@ fn render_encoding_warning(ui: &mut egui::Ui) {
         .fill(ENCODING_WARNING_FILL)
         .stroke(egui::Stroke::new(1.0, settings::dialog_card_border(ui).gamma_multiply(0.55)))
         .show(ui, |ui| {
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
-                ui.allocate_ui(egui::vec2(28.0, 28.0), |ui| {
-                    ui.with_layout(
-                        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                        |ui| {
-                            ui.label(
-                                egui::RichText::new(WARNING)
-                                    .size(18.0)
-                                    .color(ENCODING_WARNING_ICON),
-                            );
-                        },
-                    );
-                });
-                ui.add_space(12.0);
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new("Compatibility warning")
-                            .size(15.0)
-                            .color(ENCODING_WARNING_TITLE),
-                    );
-                    ui.add_space(2.0);
-                    ui.label(
-                        egui::RichText::new(
-                            "Using an incompatible encoding may permanently corrupt characters or lose character mapping data. Proceed with caution.",
-                        )
-                        .size(12.5)
-                        .color(text_primary(ui).gamma_multiply(0.82)),
-                    );
-                });
-            });
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), ENCODING_WARNING_MIN_HEIGHT),
+                egui::Layout::left_to_right(egui::Align::TOP),
+                |ui| {
+                    render_card_icon_with_color(ui, WARNING, ENCODING_WARNING_ICON);
+                    ui.add_space(12.0);
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new("Compatibility warning")
+                                .size(15.0)
+                                .color(ENCODING_WARNING_TITLE),
+                        );
+                        ui.add_space(1.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "Using an incompatible encoding may permanently corrupt characters or lose character mapping data. Proceed with caution.",
+                            )
+                            .size(12.0)
+                            .color(text_primary(ui).gamma_multiply(0.82)),
+                        );
+                    });
+                },
+            );
         });
 }
 
@@ -308,72 +322,74 @@ fn render_dialog_card_row(
     ui: &mut egui::Ui,
     icon: &str,
     title: &str,
-    description: Option<&str>,
-    truncate_description: bool,
+    description: &str,
+    trailing_width: f32,
     add_trailing: impl FnOnce(&mut egui::Ui),
 ) {
-    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-        ui.set_min_height(ENCODING_CARD_MIN_HEIGHT);
-        render_card_icon(ui, icon);
-        ui.add_space(16.0);
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), ENCODING_CARD_MIN_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::TOP),
+        |ui| {
+            render_card_icon(ui, icon);
+            ui.add_space(12.0);
 
-        let trailing_width = ENCODING_CONTROL_WIDTH.max(ui.available_width().min(220.0));
-        let text_width = (ui.available_width() - trailing_width - 12.0).max(180.0);
+            let text_width = (ui.available_width() - trailing_width - 10.0).max(180.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(text_width, 0.0),
+                egui::Layout::top_down(egui::Align::LEFT),
+                |ui| {
+                    ui.set_width(text_width);
+                    render_card_text(ui, title, description);
+                },
+            );
 
-        ui.allocate_ui_with_layout(
-            egui::vec2(text_width, 0.0),
-            egui::Layout::top_down(egui::Align::LEFT),
-            |ui| {
-                ui.set_width(text_width);
-                ui.label(
-                    egui::RichText::new(title)
-                        .size(15.5)
-                        .color(text_primary(ui)),
-                );
-                if let Some(description) = description {
-                    ui.add_space(2.0);
-                    let description_label = egui::Label::new(
-                        egui::RichText::new(description)
-                            .size(12.5)
-                            .color(text_muted(ui)),
-                    );
-                    if truncate_description {
-                        ui.add_sized(egui::vec2(text_width, 0.0), description_label.truncate());
-                    } else {
-                        ui.add_sized(egui::vec2(text_width, 0.0), description_label.wrap());
-                    }
-                }
-            },
-        );
+            ui.add_space(10.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                ui.set_min_width(trailing_width);
+                add_trailing(ui);
+            });
+        },
+    );
+}
 
-        ui.add_space(12.0);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.set_min_width(trailing_width);
-            add_trailing(ui);
-        });
-    });
+fn render_card_text(ui: &mut egui::Ui, title: &str, description: &str) {
+    ui.label(
+        egui::RichText::new(title)
+            .size(15.0)
+            .color(text_primary(ui)),
+    );
+    ui.label(
+        egui::RichText::new(description)
+            .size(12.0)
+            .color(text_muted(ui)),
+    );
 }
 
 fn render_card_icon(ui: &mut egui::Ui, icon: &str) {
-    ui.allocate_ui(egui::vec2(28.0, 28.0), |ui| {
+    let color = if icon == FILE_TEXT {
+        ENCODING_FILE_ICON
+    } else {
+        text_muted(ui)
+    };
+    render_card_icon_with_color(ui, icon, color);
+}
+
+fn render_card_icon_with_color(ui: &mut egui::Ui, icon: &str, color: egui::Color32) {
+    ui.allocate_ui(egui::vec2(26.0, 26.0), |ui| {
         ui.with_layout(
             egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
             |ui| {
-                let color = if icon == FILE_TEXT {
-                    ENCODING_FILE_ICON
-                } else {
-                    text_muted(ui)
-                };
-                ui.label(egui::RichText::new(icon).size(18.0).color(color));
+                ui.label(
+                    egui::RichText::new(icon)
+                        .font(egui::FontId::proportional(20.0))
+                        .color(color),
+                );
             },
         );
     });
 }
 
 fn encoding_card(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
-    let card_width = ui.available_width().min(ENCODING_DIALOG_CONTENT_WIDTH);
-    ui.set_width(card_width);
-    ui.set_max_width(card_width);
     encoding_card_frame(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.set_max_width(ui.available_width());
@@ -384,34 +400,7 @@ fn encoding_card(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
 fn encoding_card_frame(ui: &egui::Ui) -> egui::Frame {
     settings::dialog_card_frame(ui)
         .corner_radius(egui::CornerRadius::same(ENCODING_CARD_CORNER_RADIUS))
-        .inner_margin(egui::Margin::symmetric(22, 18))
-}
-
-fn render_close_card_button(ui: &mut egui::Ui, tooltip: &str) -> egui::Response {
-    ui.scope(|ui| {
-        let text_color = text_primary(ui);
-        let visuals = ui.visuals_mut();
-        visuals.widgets.inactive.bg_fill = ENCODING_CLOSE_FILL;
-        visuals.widgets.hovered.bg_fill = ENCODING_CLOSE_FILL_HOVER;
-        visuals.widgets.active.bg_fill = ENCODING_CLOSE_FILL_HOVER;
-        visuals.widgets.inactive.weak_bg_fill = ENCODING_CLOSE_FILL;
-        visuals.widgets.hovered.weak_bg_fill = ENCODING_CLOSE_FILL_HOVER;
-        visuals.widgets.active.weak_bg_fill = ENCODING_CLOSE_FILL_HOVER;
-        visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
-        visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
-        visuals.widgets.active.bg_stroke = egui::Stroke::NONE;
-        visuals.widgets.inactive.fg_stroke.color = text_color;
-        visuals.widgets.hovered.fg_stroke.color = text_color;
-        visuals.widgets.active.fg_stroke.color = text_color;
-
-        ui.add(
-            egui::Button::new(egui::RichText::new(egui_phosphor::regular::X).size(20.0))
-                .min_size(egui::vec2(48.0, 48.0))
-                .corner_radius(egui::CornerRadius::same(8)),
-        )
-        .on_hover_text(tooltip)
-    })
-    .inner
+        .inner_margin(egui::Margin::symmetric(16, 8))
 }
 
 fn render_encoding_combo(ui: &mut egui::Ui, selected_encoding: &mut String) {

@@ -26,11 +26,7 @@ const PROFILE_QUERY: &str = "needle";
 const PROFILE_RESET_QUERY: &str = "zzzz-no-match";
 
 pub fn run_tab_operations_profile(tab_count: usize, iterations: usize) -> usize {
-    let mut total_view_count = 0;
-    for _ in 0..iterations {
-        total_view_count += black_box(run_tab_operations_cycle(tab_count));
-    }
-    total_view_count
+    sum_profile_iterations(iterations, || run_tab_operations_cycle(tab_count))
 }
 
 pub fn run_tab_tile_layout_profile(
@@ -39,15 +35,12 @@ pub fn run_tab_tile_layout_profile(
     iterations: usize,
 ) -> usize {
     let content = plain_text_of_size(bytes_per_tile);
-    let mut total_view_count = 0;
 
-    for _ in 0..iterations {
+    sum_profile_iterations(iterations, || {
         let mut tab = build_tile_heavy_tab(tile_count, &content);
         exercise_tile_heavy_tab(&mut tab);
-        total_view_count += black_box(tab.views.len());
-    }
-
-    total_view_count
+        tab.views.len()
+    })
 }
 
 pub fn run_search_current_app_state_profile(
@@ -126,17 +119,28 @@ fn run_search_profile_iterations(
     app.set_search_query(PROFILE_RESET_QUERY);
     wait_for_app_state_search_matches(app, 0);
 
-    let mut total_matches = 0;
-    for _ in 0..iterations {
+    sum_profile_iterations(iterations, || {
         app.set_search_query(PROFILE_QUERY);
         wait_for_app_state_search_matches(app, expected_matches);
-        total_matches += black_box(app.search_match_count());
+        let match_count = app.search_match_count();
 
         app.set_search_query(PROFILE_RESET_QUERY);
         wait_for_app_state_search_matches(app, 0);
-    }
 
-    total_matches
+        match_count
+    })
+}
+
+fn sum_profile_iterations(
+    mut iterations: usize,
+    mut run_iteration: impl FnMut() -> usize,
+) -> usize {
+    let mut total = 0;
+    while iterations > 0 {
+        total += black_box(run_iteration());
+        iterations -= 1;
+    }
+    total
 }
 
 fn with_isolated_app<T>(label: &str, run: impl FnOnce(&mut ScratchpadApp) -> T) -> T {
@@ -173,32 +177,35 @@ fn wait_for_app_state_search_matches(app: &mut ScratchpadApp, expected: usize) {
 }
 
 fn plain_text_of_size(target_bytes: usize) -> String {
-    let line = "The quick brown fox jumps over the lazy dog 0123456789.\n";
-    let repeats = (target_bytes / line.len()).max(1);
-    let mut text = String::with_capacity(repeats * line.len());
-    for _ in 0..repeats {
-        text.push_str(line);
-    }
-    text
+    repeat_line_to_target_size(
+        "The quick brown fox jumps over the lazy dog 0123456789.\n",
+        target_bytes,
+    )
 }
 
 fn corpus_text_of_size(item_index: usize, target_bytes: usize) -> String {
-    let line = format!(
-        "item {item_index} needle alpha beta gamma {}\n",
-        "x".repeat(48)
-    );
-    let repeats = (target_bytes / line.len()).max(1);
-    let mut text = String::with_capacity(repeats * line.len());
-    for _ in 0..repeats {
-        text.push_str(&line);
-    }
-    text
+    repeat_line_to_target_size(
+        &format!(
+            "item {item_index} needle alpha beta gamma {}\n",
+            "x".repeat(48)
+        ),
+        target_bytes,
+    )
 }
 
 fn build_scope_texts(item_count: usize, bytes_per_item: usize) -> Vec<String> {
     (0..item_count)
         .map(|item_index| corpus_text_of_size(item_index, bytes_per_item))
         .collect()
+}
+
+fn repeat_line_to_target_size(line: &str, target_bytes: usize) -> String {
+    let repeats = (target_bytes / line.len()).max(1);
+    let mut text = String::with_capacity(repeats * line.len());
+    for _ in 0..repeats {
+        text.push_str(line);
+    }
+    text
 }
 
 fn buffer_name_for_index(item_index: usize) -> String {

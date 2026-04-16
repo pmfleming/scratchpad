@@ -10,6 +10,11 @@ pub(crate) struct ViewPromotionPlan {
     pub(crate) replacement_buffer_id: BufferId,
 }
 
+pub(crate) struct ViewIdPartition {
+    pub(crate) selected_view_ids: HashSet<ViewId>,
+    pub(crate) remaining_view_ids: HashSet<ViewId>,
+}
+
 pub(crate) struct FileTabParts {
     pub(crate) buffer: BufferState,
     pub(crate) views: Vec<EditorViewState>,
@@ -51,6 +56,36 @@ pub(crate) fn append_missing_buffer_ids(
     }
 }
 
+pub(crate) fn ordered_buffer_ids_with_fallback(
+    views: &[EditorViewState],
+    ordered_view_ids: &[ViewId],
+) -> Vec<BufferId> {
+    let mut ordered_buffer_ids = ordered_buffer_ids(views, ordered_view_ids);
+    append_missing_buffer_ids(&mut ordered_buffer_ids, views);
+    ordered_buffer_ids
+}
+
+pub(crate) fn partition_view_ids_by_buffer(
+    views: &[EditorViewState],
+    buffer_id: BufferId,
+) -> ViewIdPartition {
+    let mut selected_view_ids = HashSet::new();
+    let mut remaining_view_ids = HashSet::new();
+
+    for view in views {
+        if view.buffer_id == buffer_id {
+            selected_view_ids.insert(view.id);
+        } else {
+            remaining_view_ids.insert(view.id);
+        }
+    }
+
+    ViewIdPartition {
+        selected_view_ids,
+        remaining_view_ids,
+    }
+}
+
 pub(crate) fn group_views_by_buffer(
     views: Vec<EditorViewState>,
 ) -> HashMap<BufferId, Vec<EditorViewState>> {
@@ -66,6 +101,28 @@ pub(crate) fn view_order_lookup(ordered_view_ids: &[ViewId]) -> HashMap<ViewId, 
         .enumerate()
         .map(|(index, view_id)| (*view_id, index))
         .collect()
+}
+
+pub(crate) fn retained_root_for_views(
+    root_pane: &PaneNode,
+    view_ids: &HashSet<ViewId>,
+) -> Option<PaneNode> {
+    let mut retained_root = root_pane.clone();
+    retained_root
+        .retain_views(view_ids)
+        .then_some(retained_root)
+}
+
+pub(crate) fn resolve_active_view_id(
+    available_view_ids: &HashSet<ViewId>,
+    preferred_view_id: ViewId,
+    root_pane: &PaneNode,
+) -> ViewId {
+    if available_view_ids.contains(&preferred_view_id) {
+        preferred_view_id
+    } else {
+        root_pane.first_view_id()
+    }
 }
 
 pub(crate) fn take_file_tab_parts(

@@ -238,8 +238,7 @@ impl ScratchpadApp {
             .map(|view| view.buffer_id);
         if let Some(active_buffer_id) = active_buffer_id
             && let Some(index) = matches.iter().position(|search_match| {
-                search_match.tab_index == self.active_tab_index()
-                    && search_match.buffer_id == active_buffer_id
+                matches_buffer(search_match, self.active_tab_index(), active_buffer_id)
             })
         {
             return Some(index);
@@ -263,14 +262,12 @@ impl ScratchpadApp {
             .matches
             .iter()
             .position(|search_match| {
-                search_match.tab_index == active_tab_index
-                    && search_match.buffer_id == active_buffer_id
+                matches_buffer(search_match, active_tab_index, active_buffer_id)
                     && search_match.range.start >= minimum_start
             })
             .or_else(|| {
                 self.search_state.matches.iter().position(|search_match| {
-                    search_match.tab_index == active_tab_index
-                        && search_match.buffer_id == active_buffer_id
+                    matches_buffer(search_match, active_tab_index, active_buffer_id)
                 })
             })
     }
@@ -330,26 +327,7 @@ impl ScratchpadApp {
         }
 
         let active_tab_index = self.active_tab_index();
-        let highlights = self
-            .tabs()
-            .get(active_tab_index)
-            .map(|tab| {
-                tab.views
-                    .iter()
-                    .map(|view| {
-                        (
-                            view.id,
-                            search_highlight_state_for_view(
-                                active_tab_index,
-                                view.buffer_id,
-                                &self.search_state.matches,
-                                self.search_state.active_match_index,
-                            ),
-                        )
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+        let highlights = self.search_highlights_for_tab(active_tab_index);
 
         self.clear_search_highlights();
         let Some(tab) = self.tabs_mut().get_mut(active_tab_index) else {
@@ -363,6 +341,28 @@ impl ScratchpadApp {
         }
     }
 
+    fn search_highlights_for_tab(&self, tab_index: usize) -> Vec<(ViewId, SearchHighlightState)> {
+        self.tabs()
+            .get(tab_index)
+            .map(|tab| {
+                tab.views
+                    .iter()
+                    .map(|view| {
+                        (
+                            view.id,
+                            search_highlight_state_for_view(
+                                tab_index,
+                                view.buffer_id,
+                                &self.search_state.matches,
+                                self.search_state.active_match_index,
+                            ),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub(super) fn clear_search_highlights(&mut self) {
         for tab in self.tabs_mut() {
             for view in &mut tab.views {
@@ -370,4 +370,8 @@ impl ScratchpadApp {
             }
         }
     }
+}
+
+fn matches_buffer(search_match: &SearchMatch, tab_index: usize, buffer_id: BufferId) -> bool {
+    search_match.tab_index == tab_index && search_match.buffer_id == buffer_id
 }

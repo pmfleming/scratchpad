@@ -90,10 +90,6 @@ pub(crate) fn apply_dialog_typography(ui: &mut egui::Ui) {
     SettingsUi::apply_typography(ui);
 }
 
-pub(crate) fn dialog_card_gap() -> f32 {
-    SettingsUi::LAYOUT.card_gap
-}
-
 pub(crate) fn dialog_card_frame(ui: &egui::Ui) -> egui::Frame {
     SettingsUi::card_frame(ui)
 }

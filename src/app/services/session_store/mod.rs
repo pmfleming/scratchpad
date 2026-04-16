@@ -13,7 +13,7 @@ use ops::{BUFFER_FILE_EXTENSION, collect_stale_buffer_files};
 use std::collections::HashSet;
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const SESSION_DIR_NAME: &str = "scratchpad";
 const SESSION_MANIFEST_NAME: &str = "session.json";
@@ -273,86 +273,87 @@ impl SessionStore {
 
         match (&buffer.path, session_text) {
             (Some(path), Some(content)) => {
-                let current_disk_state = FileService::read_disk_state(path).ok();
-                match current_disk_state {
-                    Some(disk_state) if Some(disk_state.clone()) != session_disk_state => {
-                        if buffer.is_dirty {
-                            let format = session_buffer_format(buffer, &content);
-                            RestoredBufferContent {
-                                content,
-                                format,
-                                disk_state: Some(disk_state),
-                                freshness: BufferFreshness::ConflictOnDisk,
-                            }
-                        } else {
-                            match FileService::read_file(path) {
-                                Ok(file_content) => RestoredBufferContent {
-                                    content: file_content.content,
-                                    format: file_content.format,
-                                    disk_state: Some(disk_state),
-                                    freshness: BufferFreshness::InSync,
-                                },
-                                Err(_) => {
-                                    let format = session_buffer_format(buffer, &content);
-                                    RestoredBufferContent {
-                                        content,
-                                        format,
-                                        disk_state: Some(disk_state),
-                                        freshness: BufferFreshness::StaleOnDisk,
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Some(disk_state) => {
-                        let format = session_buffer_format(buffer, &content);
-                        RestoredBufferContent {
-                            content,
-                            format,
-                            disk_state: Some(disk_state),
-                            freshness: BufferFreshness::InSync,
-                        }
-                    }
-                    None => {
-                        let format = session_buffer_format(buffer, &content);
-                        RestoredBufferContent {
-                            content,
-                            format,
-                            disk_state: None,
-                            freshness: BufferFreshness::MissingOnDisk,
-                        }
-                    }
-                }
+                self.restore_saved_buffer(buffer, path, content, session_disk_state)
             }
-            (Some(path), None) => match FileService::read_file(path) {
-                Ok(file_content) => RestoredBufferContent {
-                    content: file_content.content,
-                    format: file_content.format,
-                    disk_state: FileService::read_disk_state(path).ok(),
-                    freshness: BufferFreshness::InSync,
-                },
-                Err(_) => RestoredBufferContent {
-                    content: String::new(),
-                    format: session_buffer_format(buffer, ""),
-                    disk_state: None,
-                    freshness: BufferFreshness::MissingOnDisk,
-                },
-            },
+            (Some(path), None) => self.restore_buffer_from_disk(buffer, path),
             (None, Some(content)) => {
-                let format = session_buffer_format(buffer, &content);
-                RestoredBufferContent {
-                    format,
-                    content,
-                    disk_state: None,
-                    freshness: BufferFreshness::InSync,
-                }
+                RestoredBufferContent::from_session(buffer, content, None, BufferFreshness::InSync)
             }
-            (None, None) => RestoredBufferContent {
-                content: String::new(),
-                format: session_buffer_format(buffer, ""),
-                disk_state: None,
-                freshness: BufferFreshness::InSync,
-            },
+            (None, None) => RestoredBufferContent::empty(buffer, BufferFreshness::InSync),
+        }
+    }
+
+    fn restore_saved_buffer(
+        &self,
+        buffer: &SessionBuffer,
+        path: &Path,
+        content: String,
+        session_disk_state: Option<DiskFileState>,
+    ) -> RestoredBufferContent {
+        match FileService::read_disk_state(path).ok() {
+            Some(disk_state) if Some(disk_state.clone()) != session_disk_state => {
+                self.restore_changed_disk_buffer(buffer, path, content, disk_state)
+            }
+            Some(disk_state) => RestoredBufferContent::from_session(
+                buffer,
+                content,
+                Some(disk_state),
+                BufferFreshness::InSync,
+            ),
+            None => RestoredBufferContent::from_session(
+                buffer,
+                content,
+                None,
+                BufferFreshness::MissingOnDisk,
+            ),
+        }
+    }
+
+    fn restore_changed_disk_buffer(
+        &self,
+        buffer: &SessionBuffer,
+        path: &Path,
+        content: String,
+        disk_state: DiskFileState,
+    ) -> RestoredBufferContent {
+        if buffer.is_dirty {
+            return RestoredBufferContent::from_session(
+                buffer,
+                content,
+                Some(disk_state),
+                BufferFreshness::ConflictOnDisk,
+            );
+        }
+
+        match FileService::read_file(path) {
+            Ok(file_content) => RestoredBufferContent::new(
+                file_content.content,
+                file_content.format,
+                Some(disk_state),
+                BufferFreshness::InSync,
+            ),
+            Err(_) => RestoredBufferContent::from_session(
+                buffer,
+                content,
+                Some(disk_state),
+                BufferFreshness::StaleOnDisk,
+            ),
+        }
+    }
+
+    fn restore_buffer_from_disk(
+        &self,
+        buffer: &SessionBuffer,
+        path: &Path,
+    ) -> RestoredBufferContent {
+        match FileService::read_file(path) {
+            Ok(file_content) => RestoredBufferContent::new(
+                file_content.content,
+                file_content.format,
+                FileService::read_disk_state(path).ok(),
+                BufferFreshness::InSync,
+            ),
+            Err(_) => RestoredBufferContent::empty(buffer, BufferFreshness::MissingOnDisk),
         }
     }
 }
@@ -403,6 +404,36 @@ struct RestoredBufferContent {
     format: TextFormatMetadata,
     disk_state: Option<DiskFileState>,
     freshness: BufferFreshness,
+}
+
+impl RestoredBufferContent {
+    fn new(
+        content: String,
+        format: TextFormatMetadata,
+        disk_state: Option<DiskFileState>,
+        freshness: BufferFreshness,
+    ) -> Self {
+        Self {
+            content,
+            format,
+            disk_state,
+            freshness,
+        }
+    }
+
+    fn from_session(
+        buffer: &SessionBuffer,
+        content: String,
+        disk_state: Option<DiskFileState>,
+        freshness: BufferFreshness,
+    ) -> Self {
+        let format = session_buffer_format(buffer, &content);
+        Self::new(content, format, disk_state, freshness)
+    }
+
+    fn empty(buffer: &SessionBuffer, freshness: BufferFreshness) -> Self {
+        Self::from_session(buffer, String::new(), None, freshness)
+    }
 }
 
 fn session_buffer_format(buffer: &SessionBuffer, content: &str) -> TextFormatMetadata {

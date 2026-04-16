@@ -8,7 +8,7 @@ use crate::app::commands::AppCommand;
 use eframe::egui;
 use state::{SearchStripActions, SearchStripState};
 
-const SEARCH_DIALOG_WIDTH: f32 = 620.0;
+pub(crate) const SEARCH_DIALOG_WIDTH: f32 = 620.0;
 
 pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     if !app.search_open() {

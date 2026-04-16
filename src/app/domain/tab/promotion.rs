@@ -38,13 +38,13 @@ impl WorkspaceTab {
 
         let ordered_view_ids = Self::ordered_view_ids(&root_pane);
         let active_buffer_id = Self::active_buffer_id_for_view(&views, active_view_id);
-        let mut ordered_buffer_ids = tab_support::ordered_buffer_ids(&views, &ordered_view_ids);
+        let ordered_buffer_ids =
+            tab_support::ordered_buffer_ids_with_fallback(&views, &ordered_view_ids);
 
         let mut buffers = std::iter::once(buffer)
             .chain(extra_buffers)
             .map(|buffer| (buffer.id, buffer))
             .collect::<HashMap<_, _>>();
-        tab_support::append_missing_buffer_ids(&mut ordered_buffer_ids, &views);
 
         let mut views_by_buffer = tab_support::group_views_by_buffer(views);
         let view_order = tab_support::view_order_lookup(&ordered_view_ids);
@@ -78,14 +78,19 @@ impl WorkspaceTab {
         view_id: ViewId,
     ) -> Option<tab_support::ViewPromotionPlan> {
         let promoted_buffer_id = self.view(view_id)?.buffer_id;
-        let promoted_view_ids = self.view_ids_for_buffer(promoted_buffer_id);
-        let remaining_view_ids = self.view_ids_excluding_buffer(promoted_buffer_id);
+        let tab_support::ViewIdPartition {
+            selected_view_ids: promoted_view_ids,
+            remaining_view_ids,
+        } = tab_support::partition_view_ids_by_buffer(&self.views, promoted_buffer_id);
 
         let promoted_root = self.prepare_view_partition(&promoted_view_ids, &remaining_view_ids)?;
         let promoted_active_view_id =
-            Self::resolve_promoted_active_view_id(&promoted_view_ids, view_id, &promoted_root);
-        let remaining_active_view_id =
-            self.resolve_remaining_active_view_id(&remaining_view_ids)?;
+            tab_support::resolve_active_view_id(&promoted_view_ids, view_id, &promoted_root);
+        let remaining_active_view_id = tab_support::resolve_active_view_id(
+            &remaining_view_ids,
+            self.active_view_id,
+            &self.root_pane,
+        );
         let replacement_buffer_id = self.view(remaining_active_view_id)?.buffer_id;
 
         Some(tab_support::ViewPromotionPlan {
@@ -107,64 +112,11 @@ impl WorkspaceTab {
             return None;
         }
 
-        let promoted_root = self.retained_root_for_views(promoted_view_ids)?;
+        let promoted_root =
+            tab_support::retained_root_for_views(&self.root_pane, promoted_view_ids)?;
         self.root_pane
             .retain_views(remaining_view_ids)
             .then_some(promoted_root)
-    }
-
-    fn view_ids_for_buffer(&self, buffer_id: BufferId) -> HashSet<ViewId> {
-        self.views
-            .iter()
-            .filter(|view| view.buffer_id == buffer_id)
-            .map(|view| view.id)
-            .collect()
-    }
-
-    fn view_ids_excluding_buffer(&self, buffer_id: BufferId) -> HashSet<ViewId> {
-        self.views
-            .iter()
-            .filter(|view| view.buffer_id != buffer_id)
-            .map(|view| view.id)
-            .collect()
-    }
-
-    fn retained_root_for_views(&self, view_ids: &HashSet<ViewId>) -> Option<PaneNode> {
-        let mut retained_root = self.root_pane.clone();
-        retained_root
-            .retain_views(view_ids)
-            .then_some(retained_root)
-    }
-
-    fn resolve_promoted_active_view_id(
-        promoted_view_ids: &HashSet<ViewId>,
-        requested_view_id: ViewId,
-        promoted_root: &PaneNode,
-    ) -> ViewId {
-        Self::resolved_active_view_id(promoted_view_ids, requested_view_id, promoted_root)
-    }
-
-    fn resolve_remaining_active_view_id(
-        &self,
-        remaining_view_ids: &HashSet<ViewId>,
-    ) -> Option<ViewId> {
-        Some(Self::resolved_active_view_id(
-            remaining_view_ids,
-            self.active_view_id,
-            &self.root_pane,
-        ))
-    }
-
-    fn resolved_active_view_id(
-        available_view_ids: &HashSet<ViewId>,
-        preferred_view_id: ViewId,
-        root_pane: &PaneNode,
-    ) -> ViewId {
-        if available_view_ids.contains(&preferred_view_id) {
-            preferred_view_id
-        } else {
-            root_pane.first_view_id()
-        }
     }
 
     fn take_partitioned_views(

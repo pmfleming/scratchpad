@@ -1,5 +1,7 @@
 use super::WorkspaceTab;
-use crate::app::domain::{BufferState, EditorViewState, PaneNode, SplitAxis, SplitPath, ViewId};
+use crate::app::domain::{
+    BufferId, BufferState, EditorViewState, PaneNode, SplitAxis, SplitPath, ViewId,
+};
 use std::collections::HashSet;
 
 struct ViewPresentationState {
@@ -18,12 +20,18 @@ impl WorkspaceTab {
         new_view_first: bool,
         ratio: f32,
     ) -> Option<ViewId> {
-        let presentation = self.view_presentation_state(self.active_view_id)?;
-        let new_view = {
+        let (active_buffer_id, has_control_chars) = {
             let active_buffer = self.active_buffer();
-            Self::build_split_view(active_buffer, presentation)
+            (active_buffer.id, active_buffer.artifact_summary.has_control_chars())
         };
-        self.insert_split_view(self.active_view_id, axis, new_view, new_view_first, ratio)
+        self.split_view_for_buffer(
+            self.active_view_id,
+            active_buffer_id,
+            has_control_chars,
+            axis,
+            new_view_first,
+            ratio,
+        )
     }
 
     pub fn open_buffer_as_split(
@@ -55,11 +63,14 @@ impl WorkspaceTab {
         new_view_first: bool,
         ratio: f32,
     ) -> Option<ViewId> {
-        let presentation = self.view_presentation_state(target_view_id)?;
-        let new_view = Self::build_split_view(&buffer, presentation);
-
-        let new_view_id =
-            self.insert_split_view(target_view_id, axis, new_view, new_view_first, ratio)?;
+        let new_view_id = self.split_view_for_buffer(
+            target_view_id,
+            buffer.id,
+            buffer.artifact_summary.has_control_chars(),
+            axis,
+            new_view_first,
+            ratio,
+        )?;
         self.extra_buffers.push(buffer);
         self.sync_active_buffer_to_active_view();
         Some(new_view_id)
@@ -133,14 +144,28 @@ impl WorkspaceTab {
     }
 
     fn build_split_view(
-        buffer: &BufferState,
+        buffer_id: BufferId,
+        has_control_chars: bool,
         presentation: ViewPresentationState,
     ) -> EditorViewState {
-        let mut new_view = EditorViewState::new(buffer.id, false);
+        let mut new_view = EditorViewState::new(buffer_id, false);
         new_view.show_line_numbers = presentation.show_line_numbers;
-        new_view.show_control_chars =
-            presentation.show_control_chars && buffer.artifact_summary.has_control_chars();
+        new_view.show_control_chars = presentation.show_control_chars && has_control_chars;
         new_view
+    }
+
+    fn split_view_for_buffer(
+        &mut self,
+        target_view_id: ViewId,
+        buffer_id: BufferId,
+        has_control_chars: bool,
+        axis: SplitAxis,
+        new_view_first: bool,
+        ratio: f32,
+    ) -> Option<ViewId> {
+        let presentation = self.view_presentation_state(target_view_id)?;
+        let new_view = Self::build_split_view(buffer_id, has_control_chars, presentation);
+        self.insert_split_view(target_view_id, axis, new_view, new_view_first, ratio)
     }
 
     fn insert_split_view(

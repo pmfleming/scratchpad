@@ -25,6 +25,44 @@ enum UnsavedChoice {
     Cancel,
 }
 
+impl SaveConflictDialogState {
+    fn from_freshness(path_label: String, freshness: BufferFreshness) -> Option<Self> {
+        let (title, message) = match freshness {
+            BufferFreshness::ConflictOnDisk => (
+                "File Changed on Disk",
+                format!("{path_label} changed on disk while this tab has unsaved edits."),
+            ),
+            BufferFreshness::MissingOnDisk => (
+                "File Missing on Disk",
+                format!("{path_label} is missing on disk, but this tab still has content."),
+            ),
+            BufferFreshness::StaleOnDisk => (
+                "File Changed on Disk",
+                format!("{path_label} changed on disk."),
+            ),
+            BufferFreshness::InSync => return None,
+        };
+
+        Some(Self {
+            title,
+            message,
+            freshness,
+        })
+    }
+
+    fn primary_action_label(&self) -> &'static str {
+        if self.freshness == BufferFreshness::MissingOnDisk {
+            "Recreate"
+        } else {
+            "Overwrite"
+        }
+    }
+
+    fn can_reload(&self) -> bool {
+        self.freshness != BufferFreshness::MissingOnDisk
+    }
+}
+
 pub(super) fn show_pending_action_modal(ctx: &egui::Context, app: &mut ScratchpadApp) {
     let Some(action) = app.pending_action() else {
         return;
@@ -247,23 +285,17 @@ fn render_save_conflict_dialog(
     });
 
     ui.horizontal_wrapped(|ui| {
-        let primary_label = if state.freshness == BufferFreshness::MissingOnDisk {
-            "Recreate"
-        } else {
-            "Overwrite"
-        };
-
         if render_save_conflict_button(
             ui,
             FLOPPY_DISK,
-            primary_label,
+            state.primary_action_label(),
             "Write the current buffer back to disk",
         ) && FileController::save_conflict_overwrite(app, index)
         {
             clear_pending_action(app);
         }
 
-        if state.freshness != BufferFreshness::MissingOnDisk
+        if state.can_reload()
             && render_save_conflict_button(
                 ui,
                 ARROW_CLOCKWISE,
@@ -325,26 +357,5 @@ fn save_conflict_dialog_state(
         .as_ref()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| buffer.name.clone());
-    let freshness = buffer.freshness;
-    let title = match freshness {
-        BufferFreshness::MissingOnDisk => "File Missing on Disk",
-        BufferFreshness::ConflictOnDisk | BufferFreshness::StaleOnDisk => "File Changed on Disk",
-        BufferFreshness::InSync => return None,
-    };
-    let message = match freshness {
-        BufferFreshness::ConflictOnDisk => {
-            format!("{path_label} changed on disk while this tab has unsaved edits.")
-        }
-        BufferFreshness::MissingOnDisk => {
-            format!("{path_label} is missing on disk, but this tab still has content.")
-        }
-        BufferFreshness::StaleOnDisk => format!("{path_label} changed on disk."),
-        BufferFreshness::InSync => return None,
-    };
-
-    Some(SaveConflictDialogState {
-        title,
-        message,
-        freshness,
-    })
+    SaveConflictDialogState::from_freshness(path_label, buffer.freshness)
 }

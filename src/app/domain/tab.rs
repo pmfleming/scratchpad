@@ -1,4 +1,4 @@
-use crate::app::domain::{BufferId, BufferState, EditorViewState, PaneNode, ViewId};
+use crate::app::domain::{BufferId, BufferState, EditorViewState, PaneNode, ViewId, tab_support};
 use std::collections::HashSet;
 
 mod layout;
@@ -257,20 +257,14 @@ impl WorkspaceTab {
 
     fn distinct_buffer_names_in_view_order(&self) -> Vec<String> {
         let ordered_view_ids = Self::ordered_view_ids(&self.root_pane);
-        let mut seen_buffer_ids = HashSet::new();
-        let mut names = Vec::new();
-
-        for view_id in ordered_view_ids {
-            let Some(view) = self.view(view_id) else {
-                continue;
-            };
-            if !seen_buffer_ids.insert(view.buffer_id) {
-                continue;
-            }
-            if let Some(buffer) = self.buffer_by_id(view.buffer_id) {
-                names.push(buffer.name.clone());
-            }
-        }
+        let mut names =
+            tab_support::ordered_buffer_ids_with_fallback(&self.views, &ordered_view_ids)
+                .into_iter()
+                .filter_map(|buffer_id| {
+                    self.buffer_by_id(buffer_id)
+                        .map(|buffer| buffer.name.clone())
+                })
+                .collect::<Vec<_>>();
 
         if names.is_empty() {
             names.push(self.buffer.name.clone());

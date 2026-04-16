@@ -10,6 +10,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$isWindowsPlatform = $false
+if (Get-Variable -Name IsWindows -ErrorAction SilentlyContinue) {
+    $isWindowsPlatform = [bool]$IsWindows
+} elseif ($env:OS -eq "Windows_NT") {
+    $isWindowsPlatform = $true
+}
 
 function Invoke-NativeCommand {
     param(
@@ -30,7 +36,7 @@ function Ensure-PythonTooling {
     )
 
     $venvDir = Join-Path $RepoRoot ".venv"
-    if ($IsWindows) {
+    if ($isWindowsPlatform) {
         $python = Join-Path $venvDir "Scripts\python.exe"
     } else {
         $python = Join-Path $venvDir "bin/python"
