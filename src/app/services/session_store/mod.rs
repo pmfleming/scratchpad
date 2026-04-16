@@ -93,7 +93,6 @@ impl SessionStore {
         active_tab_index: usize,
         font_size: f32,
         word_wrap: bool,
-        logging_enabled: bool,
     ) -> io::Result<()> {
         fs::create_dir_all(&self.root)?;
 
@@ -130,7 +129,6 @@ impl SessionStore {
             active_tab_index: active_tab_index.min(tabs.len().saturating_sub(1)),
             font_size,
             word_wrap,
-            logging_enabled,
             tabs: session_tabs,
         };
         let json = serde_json::to_vec_pretty(&manifest).map_err(invalid_data)?;

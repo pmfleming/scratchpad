@@ -21,6 +21,7 @@ pub(crate) struct TransactionLogEntry {
     pub(crate) action_label: String,
     pub(crate) affected_items: Vec<String>,
     pub(crate) details: Option<String>,
+    pub(crate) created_at: Instant,
     pub(crate) snapshot_before: TransactionSnapshot,
 }
 
@@ -66,6 +67,7 @@ impl TransactionLog {
             action_label: action_label.into(),
             affected_items,
             details,
+            created_at: Instant::now(),
             snapshot_before,
         };
         self.next_id = self.next_id.saturating_add(1);
@@ -338,6 +340,7 @@ mod tests {
             action_label: "hello".to_owned(),
             affected_items: vec!["notes.txt".to_owned()],
             details: None,
+            created_at: Instant::now(),
             snapshot_before: ScratchpadApp::with_session_store(
                 crate::app::services::session_store::SessionStore::new(
                     tempfile::tempdir().expect("create session dir").keep(),

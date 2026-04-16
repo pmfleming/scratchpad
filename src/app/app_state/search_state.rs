@@ -54,6 +54,7 @@ pub(crate) struct SearchMatch {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SearchResultEntry {
     pub(crate) match_index: usize,
+    pub(crate) buffer_id: BufferId,
     pub(crate) buffer_label: String,
     pub(crate) line_number: usize,
     pub(crate) column_number: usize,

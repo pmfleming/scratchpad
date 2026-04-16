@@ -25,7 +25,6 @@ pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> std::io::Result<()
         app.active_tab_index(),
         app.font_size(),
         app.word_wrap(),
-        app.logging_enabled(),
     )?;
     app.clear_session_dirty();
     app.last_session_persist = Instant::now();

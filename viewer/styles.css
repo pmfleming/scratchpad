@@ -627,3 +627,94 @@ tr:hover td {
         grid-template-columns: 1fr;
     }
 }
+/* Flamegraphs */
+.flamegraph-layout {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 20px;
+    align-items: start;
+    margin-top: 20px;
+}
+
+.flamegraph-sidebar {
+    position: sticky;
+    top: 20px;
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+}
+
+.flamegraph-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.flamegraph-item {
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: left;
+}
+
+.flamegraph-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.flamegraph-item.is-active {
+    background: rgba(111, 208, 255, 0.1);
+    border-color: #6fd0ff;
+}
+
+.flamegraph-item h3 {
+    margin: 0 0 4px 0;
+    font-size: 14px;
+    color: #eee;
+}
+
+.flamegraph-item p {
+    margin: 0;
+    font-size: 12px;
+    color: #999;
+}
+
+.flamegraph-main {
+    min-height: 600px;
+    display: flex;
+    flex-direction: column;
+}
+
+.flamegraph-content {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #1a1a1a;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.flamegraph-content svg {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+.flamegraph-error {
+    text-align: center;
+    padding: 40px;
+}
+
+.flamegraph-error h3 {
+    color: #ff6b6b;
+    margin-bottom: 12px;
+}
+
+.flamegraph-error p {
+    color: #999;
+    max-width: 400px;
+    margin: 0 auto;
+}

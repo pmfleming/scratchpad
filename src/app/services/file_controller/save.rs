@@ -3,7 +3,6 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::{
     BufferFreshness, DiskFileState, EncodingSource, PendingAction, TextFormatMetadata,
 };
-use crate::app::logging::LogLevel;
 use crate::app::services::file_service::{FileContent, FileService};
 use std::path::PathBuf;
 
@@ -256,20 +255,13 @@ impl FileController {
     fn save_new_path(
         app: &mut ScratchpadApp,
         index: usize,
-        action_name: &str,
+        _action_name: &str,
         format_override: Option<TextFormatMetadata>,
     ) -> bool {
         if let Some(path) = rfd::FileDialog::new()
             .set_file_name(&app.tabs()[index].active_buffer().name)
             .save_file()
         {
-            app.log_event(
-                LogLevel::Info,
-                format!(
-                    "{action_name} selected destination for tab index {index}: {}",
-                    path.display()
-                ),
-            );
             Self::save_buffer_to_path(app, index, path, true, format_override)
         } else {
             app.set_info_status("Save cancelled.");
@@ -313,8 +305,6 @@ impl FileController {
         update_buffer_path: bool,
         format_override: Option<TextFormatMetadata>,
     ) -> bool {
-        let existing_tab_description = app.describe_tab_at(index);
-        let target_path = path.display().to_string();
         let save_result = {
             let buffer = app.tabs()[index].active_buffer();
             let format = format_override.as_ref().unwrap_or(&buffer.format);
@@ -324,16 +314,9 @@ impl FileController {
         match save_result {
             Ok(()) => {
                 Self::finalize_save(app, index, path, update_buffer_path, format_override);
-                Self::log_save_success(app, index, &existing_tab_description, &target_path);
                 true
             }
             Err(error) => {
-                app.log_event(
-                    LogLevel::Error,
-                    format!(
-                        "Save failed for tab index {index}: {existing_tab_description} -> {target_path}: {error}"
-                    ),
-                );
                 app.set_error_status(format!("Save failed: {error}"));
                 false
             }
@@ -365,18 +348,6 @@ impl FileController {
         app.clear_status_message();
         app.mark_session_dirty();
         let _ = app.persist_session_now();
-    }
-
-    fn log_save_success(
-        app: &ScratchpadApp,
-        index: usize,
-        existing_tab_description: &str,
-        target_path: &str,
-    ) {
-        app.log_event(
-            LogLevel::Info,
-            format!("Saved tab index {index}: {existing_tab_description} -> {target_path}"),
-        );
     }
 
     fn format_with_selected_encoding(

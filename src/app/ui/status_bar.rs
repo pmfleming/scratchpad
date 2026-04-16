@@ -7,7 +7,6 @@ use eframe::egui;
 struct StatusBarActions {
     toggle_line_numbers: bool,
     toggle_control_chars: bool,
-    toggle_logging: bool,
     open_transaction_log: bool,
     open_encoding_dialog: bool,
 }
@@ -46,7 +45,7 @@ pub(crate) fn show_status_bar(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             let mut actions = StatusBarActions::default();
 
             if let Some(details) = collect_active_status_details(app, ui.visuals().dark_mode) {
-                render_active_status(ui, &details, app.logging_enabled(), &mut actions);
+                render_active_status(ui, &details, &mut actions);
             }
 
             if let Some(message) = &app.status_message {
@@ -108,7 +107,6 @@ fn collect_active_status_details(
 fn render_active_status(
     ui: &mut egui::Ui,
     details: &ActiveStatusDetails,
-    logging_enabled: bool,
     actions: &mut StatusBarActions,
 ) {
     ui.label(format!("Path: {}", details.path_label));
@@ -116,7 +114,6 @@ fn render_active_status(
         show_status_warnings(ui, details);
         show_transaction_log_button(ui, actions);
         show_control_char_toggle(ui, details, actions);
-        show_logging_toggle(ui, logging_enabled, actions);
         show_line_endings(
             ui,
             &details.line_endings_label,
@@ -173,16 +170,6 @@ fn status_format_text(label: &str, highlight: bool) -> egui::RichText {
 
 fn status_bar_encoding_is_non_default(format: &crate::app::domain::TextFormatMetadata) -> bool {
     !format.encoding_name.eq_ignore_ascii_case("UTF-8") || format.has_bom
-}
-
-fn show_logging_toggle(ui: &mut egui::Ui, logging_enabled: bool, actions: &mut StatusBarActions) {
-    ui.separator();
-    let logging_token = ui
-        .selectable_label(logging_enabled, "LOG")
-        .on_hover_text("Toggle runtime file logging");
-    if logging_token.clicked() {
-        actions.toggle_logging = true;
-    }
 }
 
 fn show_transaction_log_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
@@ -260,11 +247,6 @@ fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {
             view.show_control_chars = !view.show_control_chars;
             app.mark_session_dirty();
         }
-    }
-
-    if actions.toggle_logging {
-        let next = !app.logging_enabled();
-        app.set_logging_enabled(next);
     }
 
     if actions.open_transaction_log {

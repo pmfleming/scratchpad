@@ -1,7 +1,10 @@
 param(
     [int]$Port = 8000,
-    [switch]$Refresh,
-    [switch]$CloneCheck
+    [switch]$Flamegraph,
+    [switch]$FullUpdate,
+    [switch]$FlamegraphOnly,
+    [switch]$SearchSpeedOnly,
+    [switch]$CloneOnly
 )
 
 Set-StrictMode -Version Latest
@@ -118,56 +121,106 @@ function Wait-ForServer {
     return $false
 }
 
+function New-OverviewTask {
+    param(
+        [string]$Title,
+        [string]$Label,
+        [string[]]$Arguments
+    )
+
+    return [pscustomobject]@{
+        Title = $Title
+        Label = $Label
+        Arguments = $Arguments
+    }
+}
+
+function Get-RefreshTasks {
+    param(
+        [switch]$IncludeFlamegraphs
+    )
+
+    $tasks = @(
+        (New-OverviewTask -Title "Generating slowspots data" -Label "slowspots" -Arguments @("scripts/slowspots.py", "--mode", "visibility")),
+        (New-OverviewTask -Title "Generating search speed data" -Label "search_speed" -Arguments @("scripts/search_speed.py", "--mode", "visibility")),
+        (New-OverviewTask -Title "Generating hotspots data" -Label "hotspots" -Arguments @("scripts/hotspots.py", "--mode", "visibility", "--paths", "src", "--scope", "all")),
+        (New-OverviewTask -Title "Generating clone alert data" -Label "clone_alert" -Arguments @("scripts/clone_alert.py", "--mode", "visibility", "--paths", "src")),
+        (New-OverviewTask -Title "Generating architecture map data" -Label "map" -Arguments @("scripts/map.py", "--mode", "visibility"))
+    )
+
+    if ($IncludeFlamegraphs) {
+        $tasks += New-OverviewTask -Title "Generating flamegraph data" -Label "generate_flamegraphs" -Arguments @("scripts/generate_flamegraphs.py", "--mode", "visibility")
+    }
+
+    return $tasks
+}
+
 Push-Location $repoRoot
 try {
-    if ($Refresh -and $CloneCheck) {
-        throw "Use either -Refresh or -CloneCheck, not both."
+    $exclusiveModes = @()
+    if ($FullUpdate) { $exclusiveModes += "-FullUpdate" }
+    if ($FlamegraphOnly) { $exclusiveModes += "-FlamegraphOnly" }
+    if ($SearchSpeedOnly) { $exclusiveModes += "-SearchSpeedOnly" }
+    if ($CloneOnly) { $exclusiveModes += "-CloneOnly" }
+
+    if ($exclusiveModes.Count -gt 1) {
+        throw "Use only one explicit update mode at a time: $($exclusiveModes -join ', ')."
     }
 
-    $rebuildMode = if ($CloneCheck) {
-        "clonecheck"
-    } elseif ($Refresh) {
-        "refresh"
-    } else {
-        "fast"
+    if ($Flamegraph -and $exclusiveModes.Count -gt 0) {
+        throw "Legacy switch -Flamegraph cannot be combined with the explicit update modes."
     }
 
-    $totalSteps = if ($rebuildMode -eq "fast") { 2 } else { 8 }
+    $updateMode = "fast"
+    $tasks = @()
+
+    if ($FullUpdate) {
+        $updateMode = "full"
+        $tasks = @(Get-RefreshTasks -IncludeFlamegraphs)
+    } elseif ($FlamegraphOnly) {
+        $updateMode = "flamegraph-only"
+        $tasks = @(
+            New-OverviewTask -Title "Generating flamegraph data" -Label "generate_flamegraphs" -Arguments @("scripts/generate_flamegraphs.py", "--mode", "visibility")
+        )
+    } elseif ($SearchSpeedOnly) {
+        $updateMode = "search-speed-only"
+        $tasks = @(
+            New-OverviewTask -Title "Generating search speed data" -Label "search_speed" -Arguments @("scripts/search_speed.py", "--mode", "visibility")
+        )
+    } elseif ($CloneOnly) {
+        $updateMode = "clone-only"
+        $tasks = @(
+            New-OverviewTask -Title "Generating clone alert data" -Label "clone_alert" -Arguments @("scripts/clone_alert.py", "--mode", "visibility", "--paths", "src")
+        )
+    } elseif ($Flamegraph) {
+        $updateMode = "flamegraph-only"
+        $tasks = @(
+            New-OverviewTask -Title "Generating flamegraph data" -Label "generate_flamegraphs" -Arguments @("scripts/generate_flamegraphs.py", "--mode", "visibility")
+        )
+    }
+
+    $totalSteps = 2
+    if ($tasks.Count -gt 0) {
+        $totalSteps += 1 + $tasks.Count
+    }
     $stepNumber = 1
 
     Ensure-Python
 
-    if ($rebuildMode -ne "fast") {
+    if ($tasks.Count -gt 0) {
         Write-Step -Number $stepNumber -Total $totalSteps -Title "Checking Python environment"
         Write-Host "Using Python: $python" -ForegroundColor Green
+        Write-Host "Update mode: $updateMode" -ForegroundColor Green
         $stepNumber++
 
-        Write-Step -Number $stepNumber -Total $totalSteps -Title "Generating slowspots data"
-        Invoke-StepCommand -Label "slowspots" -Arguments @("scripts/slowspots.py", "--mode", "visibility")
-        $stepNumber++
-
-        Write-Step -Number $stepNumber -Total $totalSteps -Title "Generating search speed data"
-        Invoke-StepCommand -Label "search_speed" -Arguments @("scripts/search_speed.py", "--mode", "visibility")
-        $stepNumber++
-
-        Write-Step -Number $stepNumber -Total $totalSteps -Title "Generating hotspots data"
-        Invoke-StepCommand -Label "hotspots" -Arguments @("scripts/hotspots.py", "--mode", "visibility", "--paths", "src", "--scope", "all")
-        $stepNumber++
-
-        Write-Step -Number $stepNumber -Total $totalSteps -Title "Generating clone alert data"
-        $cloneArguments = @("scripts/clone_alert.py", "--mode", "visibility", "--paths", "src")
-        if ($rebuildMode -eq "clonecheck") {
-            $cloneArguments += @("--engine", "all")
+        foreach ($task in $tasks) {
+            Write-Step -Number $stepNumber -Total $totalSteps -Title $task.Title
+            Invoke-StepCommand -Label $task.Label -Arguments $task.Arguments
+            $stepNumber++
         }
-        Invoke-StepCommand -Label "clone_alert" -Arguments $cloneArguments
-        $stepNumber++
-
-        Write-Step -Number $stepNumber -Total $totalSteps -Title "Generating architecture map data"
-        Invoke-StepCommand -Label "map" -Arguments @("scripts/map.py", "--mode", "visibility")
-        $stepNumber++
     }
 
-    $startTitle = if ($rebuildMode -eq "fast") {
+    $startTitle = if ($tasks.Count -eq 0) {
         "Starting viewer server"
     } else {
         "Starting Python web server"

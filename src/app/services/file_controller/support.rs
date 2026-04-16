@@ -1,15 +1,10 @@
 use super::FileController;
 use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::BufferState;
-use crate::app::logging::LogLevel;
 use crate::app::services::file_service::{FileContent, FileService};
 use std::path::{Path, PathBuf};
 
 pub(in crate::app::services::file_controller) struct LoadedFile {
-    pub(in crate::app::services::file_controller) path_display: String,
-    pub(in crate::app::services::file_controller) format_label: String,
-    pub(in crate::app::services::file_controller) line_endings_label: String,
-    pub(in crate::app::services::file_controller) artifact_summary: Option<String>,
     pub(in crate::app::services::file_controller) artifact_warning: Option<String>,
     pub(in crate::app::services::file_controller) buffer: BufferState,
 }
@@ -19,9 +14,6 @@ impl LoadedFile {
         path: PathBuf,
         file_content: FileContent,
     ) -> Self {
-        let path_display = path.display().to_string();
-        let format_label = file_content.format.encoding_label();
-        let line_endings_label = file_content.format.line_endings_label().to_owned();
         let format_warning = file_content.format.format_warning_text();
         let buffer = FileController::buffer_from_file_content(path, file_content);
         let artifact_summary = buffer.artifact_summary.status_text();
@@ -29,10 +21,6 @@ impl LoadedFile {
             combine_open_warning(format_warning.as_deref(), artifact_summary.as_deref());
 
         Self {
-            path_display,
-            format_label,
-            line_endings_label,
-            artifact_summary,
             artifact_warning,
             buffer,
         }
@@ -40,24 +28,9 @@ impl LoadedFile {
 
     pub(in crate::app::services::file_controller) fn into_parts(
         self,
-    ) -> (BufferState, PendingOpenLogEntry) {
-        let log_entry = PendingOpenLogEntry {
-            path_display: self.path_display,
-            format_label: self.format_label,
-            line_endings_label: self.line_endings_label,
-            artifact_summary: self.artifact_summary,
-            artifact_warning: self.artifact_warning,
-        };
-        (self.buffer, log_entry)
+    ) -> (BufferState, Option<String>) {
+        (self.buffer, self.artifact_warning)
     }
-}
-
-pub(in crate::app::services::file_controller) struct PendingOpenLogEntry {
-    pub(in crate::app::services::file_controller) path_display: String,
-    pub(in crate::app::services::file_controller) format_label: String,
-    pub(in crate::app::services::file_controller) line_endings_label: String,
-    pub(in crate::app::services::file_controller) artifact_summary: Option<String>,
-    pub(in crate::app::services::file_controller) artifact_warning: Option<String>,
 }
 
 fn combine_open_warning(
@@ -82,10 +55,6 @@ fn combine_open_warning(
 }
 
 impl FileController {
-    pub(super) fn open_path_count(app: &ScratchpadApp, log_prefix: &str, path_count: usize) {
-        app.log_event(LogLevel::Info, format!("{log_prefix} {path_count} path(s)"));
-    }
-
     pub(super) fn prepare_to_open_paths(app: &mut ScratchpadApp) {
         app.reload_settings_before_workspace_change();
     }
@@ -95,20 +64,16 @@ impl FileController {
         F: FnOnce(&mut ScratchpadApp, Vec<PathBuf>),
     {
         if let Some(paths) = rfd::FileDialog::new().pick_files() {
-            app.log_event(
-                LogLevel::Info,
-                format!("{} selected {} path(s)", action_name, paths.len()),
-            );
             open_action(app, paths);
         } else {
-            app.log_event(LogLevel::Info, format!("{} cancelled", action_name));
+            app.set_info_status(format!("{action_name} cancelled."));
         }
     }
 
     pub(super) fn handle_external_paths<F>(
         app: &mut ScratchpadApp,
         paths: Vec<PathBuf>,
-        log_prefix: &str,
+        _log_prefix: &str,
         open_action: F,
     ) where
         F: FnOnce(&mut ScratchpadApp, Vec<PathBuf>),
@@ -116,8 +81,6 @@ impl FileController {
         if paths.is_empty() {
             return;
         }
-
-        Self::open_path_count(app, log_prefix, paths.len());
         open_action(app, paths);
     }
 
@@ -136,14 +99,13 @@ impl FileController {
         app: &mut ScratchpadApp,
         status_message: Option<String>,
         should_warn: bool,
-        log_message: String,
+        _log_message: String,
     ) {
         match status_message {
             Some(message) if should_warn => app.set_warning_status(message),
             Some(message) => app.set_info_status(message),
             None => app.clear_status_message(),
         }
-        app.log_event(LogLevel::Info, log_message);
     }
 
     pub(super) fn buffer_from_file_content(

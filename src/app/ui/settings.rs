@@ -85,3 +85,19 @@ fn category_heading(ui: &mut egui::Ui, heading: &str) {
     );
     ui.add_space(12.0);
 }
+
+pub(crate) fn apply_dialog_typography(ui: &mut egui::Ui) {
+    SettingsUi::apply_typography(ui);
+}
+
+pub(crate) fn dialog_card_gap() -> f32 {
+    SettingsUi::LAYOUT.card_gap
+}
+
+pub(crate) fn dialog_card_frame(ui: &egui::Ui) -> egui::Frame {
+    SettingsUi::card_frame(ui)
+}
+
+pub(crate) fn dialog_card_border(ui: &egui::Ui) -> egui::Color32 {
+    SettingsUi::card_border(ui)
+}

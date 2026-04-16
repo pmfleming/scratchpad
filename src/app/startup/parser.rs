@@ -84,10 +84,6 @@ impl StartupActionParser {
     }
 
     fn try_parse_flag_switch(&mut self, arg: &str) -> Result<bool, String> {
-        if equals_switch(arg, "/log-cli") {
-            self.options.log_cli = true;
-            return Ok(true);
-        }
         if equals_switch(arg, "/clean") {
             self.requested_clean = true;
             return Ok(true);

@@ -1,6 +1,5 @@
 use crate::app::domain::{BufferId, SplitAxis, TabManager, ViewId};
 use crate::app::fonts::EditorFontPreset;
-use crate::app::logging::{self, LogLevel};
 use crate::app::services::session_store::SessionStore;
 use crate::app::services::settings_store::{AppSettings, SettingsStore};
 use crate::app::startup::StartupOptions;
@@ -37,8 +36,7 @@ pub struct ScratchpadApp {
     pub(crate) status_message: Option<String>,
     pub(crate) pending_editor_focus: Option<ViewId>,
     pub(crate) encoding_dialog_open: bool,
-    pub(crate) reopen_with_encoding_choice: String,
-    pub(crate) save_with_encoding_choice: String,
+    pub(crate) encoding_dialog_choice: String,
     pub(crate) settings_store: SettingsStore,
     pub(crate) user_manual_path: PathBuf,
     pub(crate) session_store: SessionStore,
@@ -87,22 +85,19 @@ impl Drop for ScratchpadApp {
 
 impl ScratchpadApp {
     pub(crate) fn set_info_status(&mut self, message: impl Into<String>) {
-        self.set_status(LogLevel::Info, message);
+        self.set_status(message);
     }
 
     pub(crate) fn set_warning_status(&mut self, message: impl Into<String>) {
-        self.set_status(LogLevel::Warn, message);
+        self.set_status(message);
     }
 
     pub(crate) fn set_error_status(&mut self, message: impl Into<String>) {
-        self.set_status(LogLevel::Error, message);
+        self.set_status(message);
     }
 
-    fn set_status(&mut self, level: LogLevel, message: impl Into<String>) {
+    fn set_status(&mut self, message: impl Into<String>) {
         let message = message.into();
-        self.status_message = Some(message.clone());
-        if self.app_settings.logging_enabled {
-            logging::log(level, &message);
-        }
+        self.status_message = Some(message);
     }
 }

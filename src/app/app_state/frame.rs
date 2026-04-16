@@ -8,12 +8,10 @@ use eframe::egui;
 
 impl ScratchpadApp {
     pub(crate) fn open_encoding_dialog(&mut self) {
-        let selected = self
+        self.encoding_dialog_choice = self
             .active_tab()
             .map(|tab| tab.active_buffer().format.encoding_name.clone())
             .unwrap_or_else(|| "UTF-8".to_owned());
-        self.reopen_with_encoding_choice = selected.clone();
-        self.save_with_encoding_choice = selected;
         self.encoding_dialog_open = true;
     }
 

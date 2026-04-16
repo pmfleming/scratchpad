@@ -3,7 +3,6 @@ pub mod tile;
 
 use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::{BufferId, PaneBranch, PaneNode, ViewId};
-use crate::app::logging::LogLevel;
 use crate::app::transactions::TransactionSnapshot;
 use crate::app::ui::search_replace;
 use crate::app::ui::tile_header::{self, SplitPreviewOverlay, TileAction};
@@ -160,17 +159,7 @@ fn handle_editor_zoom(
     let pointer_over_editor = ui.rect_contains_pointer(workspace_rect);
     let zoom_factor = ctx.input(|input| input.zoom_delta());
     if pointer_over_editor && zoom_factor != 1.0 {
-        let previous_font_size = app.font_size();
         app.set_font_size(app.font_size() * zoom_factor);
-        app.log_event(
-            LogLevel::Info,
-            format!(
-                "Adjusted editor zoom from {:.2} to {:.2} (zoom factor {:.3})",
-                previous_font_size,
-                app.font_size(),
-                zoom_factor
-            ),
-        );
     }
 }
 

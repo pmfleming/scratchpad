@@ -6,6 +6,7 @@
         searchSpeed: `../target/analysis/search_speed.json?v=${viewerVersion}`,
         clones: `../target/analysis/clones.json?v=${viewerVersion}`,
         map: `../target/analysis/map.json?v=${viewerVersion}`,
+        flamegraphs: `../target/analysis/flamegraphs.json?v=${viewerVersion}`,
     };
 
     const state = {
@@ -14,7 +15,9 @@
         searchSpeed: [],
         clones: [],
         map: null,
+        flamegraphs: [],
         selectedModule: null,
+        selectedFlamegraph: null,
         mapZoom: 0.65,
         mapLayout: 'folder',
         mapMetric: 'total_score',
@@ -1291,6 +1294,77 @@
         return `<div class="pill">${escapeHtml(item.name)}: ${formatNumber.format(item.mean_ms)} ms mean, ${p95}</div>`;
     }
 
+    function renderFlamegraphs() {
+        const container = byId("flamegraph-list");
+        if (!container) return;
+
+        if (!state.flamegraphs || !state.flamegraphs.length) {
+            container.innerHTML = '<p class="muted">No flamegraphs loaded.</p>';
+            byId("flamegraph-content").innerHTML = '<p class="muted">Generate flamegraphs using <code>open-overview.ps1 -Flamegraph</code> in an Administrator terminal.</p>';
+            return;
+        }
+
+        container.innerHTML = state.flamegraphs.map(item => {
+            const isActive = state.selectedFlamegraph === item.id;
+            const isError = item.type === "error";
+            return `<div class="flamegraph-item ${isActive ? 'is-active' : ''} ${isError ? 'is-error' : ''}" data-id="${escapeHtml(item.id)}">
+                <h3>${escapeHtml(item.name)}</h3>
+                <p>${escapeHtml(isError ? "Error" : item.id)}</p>
+            </div>`;
+        }).join("");
+
+        container.querySelectorAll(".flamegraph-item").forEach(el => {
+            el.addEventListener("click", () => {
+                const id = el.dataset.id;
+                state.selectedFlamegraph = id;
+                renderFlamegraphs();
+                loadSelectedFlamegraph();
+            });
+        });
+
+        if (state.selectedFlamegraph === null && state.flamegraphs.length > 0) {
+            state.selectedFlamegraph = state.flamegraphs[0].id;
+            renderFlamegraphs();
+            loadSelectedFlamegraph();
+        }
+    }
+
+    async function loadSelectedFlamegraph() {
+        const content = byId("flamegraph-content");
+        const selected = state.flamegraphs.find(f => f.id === state.selectedFlamegraph);
+        
+        if (!selected) return;
+
+        if (selected.type === "error") {
+            content.innerHTML = `<div class="flamegraph-error">
+                <h3>${escapeHtml(selected.name)}</h3>
+                <p>${escapeHtml(selected.description)}</p>
+            </div>`;
+            return;
+        }
+
+        content.innerHTML = '<p class="muted">Loading SVG...</p>';
+        try {
+            // Path in JSON is relative to repo root, but we serve from repo root.
+            // Viewer is at /viewer/, so path should be /target/analysis/flamegraphs/x.svg
+            // Or relative: ../target/analysis/flamegraphs/x.svg
+            const svgPath = `../target/analysis/${selected.path}?v=${viewerVersion}`;
+            const response = await fetch(svgPath);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const svgText = await response.text();
+            
+            // To make the SVG interactive and fit properly, we might need to strip 
+            // explicit width/height or wrap it.
+            content.innerHTML = svgText;
+        } catch (e) {
+            content.innerHTML = `<div class="flamegraph-error">
+                <h3>Failed to load SVG</h3>
+                <p>${escapeHtml(e.message)}</p>
+                <p>Ensure the file exists at <code>target/analysis/${escapeHtml(selected.path)}</code></p>
+            </div>`;
+        }
+    }
+
     async function loadJson(url) {
         const response = await fetch(url, { cache: "no-store" });
         if (!response.ok) {
@@ -1302,13 +1376,14 @@
     async function loadDefaults() {
         const status = byId("load-status");
         const detail = byId("load-detail");
-        const keys = ["hotspots", "slowspots", "searchSpeed", "clones", "map"];
+        const keys = ["hotspots", "slowspots", "searchSpeed", "clones", "map", "flamegraphs"];
         const fallbacks = {
             hotspots: [],
             slowspots: [],
             searchSpeed: [],
             clones: [],
             map: null,
+            flamegraphs: [],
         };
 
         const settled = await Promise.allSettled(keys.map((key) => loadJson(sources[key])));
@@ -1322,7 +1397,10 @@
                 loaded.push(key);
             } else {
                 state[key] = fallbacks[key];
-                missing.push(`${key}: ${result.reason.message}`);
+                // flamegraphs is often missing if not generated, so we don't treat it as a loud error
+                if (key !== "flamegraphs") {
+                    missing.push(`${key}: ${result.reason.message}`);
+                }
             }
         });
 
@@ -1360,6 +1438,11 @@
                 document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.remove("is-active"));
                 button.classList.add("is-active");
                 byId(button.dataset.tab).classList.add("is-active");
+                
+                // If switching to flamegraphs, ensure it's rendered correctly
+                if (button.dataset.tab === "flamegraphs") {
+                    renderFlamegraphs();
+                }
             });
         });
     }
@@ -1370,6 +1453,7 @@
         renderSearchSpeed();
         renderClones();
         renderMap();
+        renderFlamegraphs();
     }
 
     byId("viewer-version").textContent = viewerVersion;
@@ -1401,5 +1485,6 @@
     readJsonFile("search-speed-file", "searchSpeed", renderSearchSpeed);
     readJsonFile("clones-file", "clones", renderClones);
     readJsonFile("map-file", "map", renderMap);
+    readJsonFile("flamegraphs-file", "flamegraphs", renderFlamegraphs);
     loadDefaults();
 })();

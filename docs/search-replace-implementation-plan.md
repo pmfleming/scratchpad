@@ -1,7 +1,7 @@
 # Search / Replace Implementation Plan For Scratchpad
 
 This plan replaces the broader draft.
-
+here is another modification
 It is scoped to one implementation run and to the code that already exists today. The goal is to ship a solid active-buffer search and replace feature without promising cross-buffer behavior that the current editor and undo model do not support yet.
 
 ## 1. Ship Target

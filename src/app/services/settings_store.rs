@@ -10,7 +10,6 @@ const SETTINGS_FILE_NAME: &str = "settings.toml";
 const LEGACY_SETTINGS_FILE_NAME: &str = "settings.yaml";
 pub const DEFAULT_FONT_SIZE: f32 = 14.0;
 pub const DEFAULT_WORD_WRAP: bool = true;
-pub const DEFAULT_LOGGING_ENABLED: bool = true;
 pub const DEFAULT_EDITOR_GUTTER: u8 = 0;
 pub const DEFAULT_EDITOR_TEXT_COLOR: &str = "#ffffff";
 pub const DEFAULT_EDITOR_BACKGROUND_COLOR: &str = "#15181d";
@@ -76,7 +75,6 @@ impl TabListPosition {
 pub struct AppSettings {
     pub font_size: f32,
     pub word_wrap: bool,
-    pub logging_enabled: bool,
     #[serde(default = "default_editor_gutter")]
     pub editor_gutter: u8,
     #[serde(default)]
@@ -112,7 +110,6 @@ impl Default for AppSettings {
         Self {
             font_size: default_font_size(),
             word_wrap: default_word_wrap(),
-            logging_enabled: default_logging_enabled(),
             editor_gutter: default_editor_gutter(),
             editor_font: EditorFontPreset::default(),
             theme_mode: AppThemeMode::default(),
@@ -250,7 +247,6 @@ macro_rules! default_fn {
 
 default_fn!(default_font_size, f32, DEFAULT_FONT_SIZE);
 default_fn!(default_word_wrap, bool, DEFAULT_WORD_WRAP);
-default_fn!(default_logging_enabled, bool, DEFAULT_LOGGING_ENABLED);
 default_fn!(default_editor_gutter, u8, DEFAULT_EDITOR_GUTTER);
 
 pub(crate) fn default_editor_text_color() -> String {

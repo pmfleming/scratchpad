@@ -1,9 +1,9 @@
 use super::state::{SearchStripActions, SearchStripState};
 use crate::app::app_state::{SearchFocusTarget, SearchScope};
-use crate::app::chrome::phosphor_button;
+use crate::app::ui::callout;
 use crate::app::theme::{
-    CAPTION_BUTTON_SIZE, CLOSE_BG, CLOSE_HOVER_BG, action_bg, action_hover_bg, border,
-    tab_selected_accent, tab_selected_bg, text_muted, text_primary,
+    action_bg, action_hover_bg, border, tab_selected_accent, tab_selected_bg, text_muted,
+    text_primary,
 };
 use eframe::egui;
 
@@ -54,8 +54,8 @@ fn show_toolbar(ui: &mut egui::Ui, state: &mut SearchStripState, actions: &mut S
         if toggle_chip(
             ui,
             state.match_case,
-            egui_phosphor::regular::TEXT_AA,
-            None,
+            "",
+            Some("Aa"),
             "Match case",
         )
         .clicked()
@@ -66,8 +66,8 @@ fn show_toolbar(ui: &mut egui::Ui, state: &mut SearchStripState, actions: &mut S
         if toggle_chip(
             ui,
             state.whole_word,
-            egui_phosphor::regular::SELECTION,
-            None,
+            "",
+            Some("Whole Word"),
             "Match whole words only",
         )
         .clicked()
@@ -75,9 +75,12 @@ fn show_toolbar(ui: &mut egui::Ui, state: &mut SearchStripState, actions: &mut S
             state.whole_word = !state.whole_word;
         }
 
-        if icon_button(
+        if callout::icon_button(
             ui,
             scope_icon(state.scope),
+            TOOLBAR_ICON_SIZE,
+            egui::vec2(30.0, TOOLBAR_BUTTON_HEIGHT),
+            action_bg(ui),
             &scope_tooltip(state.scope),
             true,
         )
@@ -87,22 +90,18 @@ fn show_toolbar(ui: &mut egui::Ui, state: &mut SearchStripState, actions: &mut S
         }
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if phosphor_button(
-                ui,
-                egui_phosphor::regular::X,
-                CAPTION_BUTTON_SIZE,
-                CLOSE_BG,
-                CLOSE_HOVER_BG,
-                "Close search",
-            )
+            if callout::close_button(ui, "Close search")
             .clicked()
             {
                 actions.close_requested = true;
             }
 
-            if icon_button(
+            if callout::icon_button(
                 ui,
                 egui_phosphor::regular::PENCIL_SIMPLE_LINE,
+                TOOLBAR_ICON_SIZE,
+                egui::vec2(30.0, TOOLBAR_BUTTON_HEIGHT),
+                action_bg(ui),
                 "Replace current match",
                 state.match_count > 0,
             )
@@ -138,31 +137,40 @@ fn show_input_row(
 
         ui.add_space(2.0);
 
-        if input_action_button(
+        if callout::icon_button(
             ui,
-            state.match_count > 0,
             egui_phosphor::regular::CARET_UP,
+            16.0,
+            egui::vec2(INPUT_ACTION_BUTTON_WIDTH, INPUT_HEIGHT),
+            action_hover_bg(ui),
             "Jump to the previous match",
+            state.match_count > 0,
         )
         .clicked()
         {
             actions.previous_requested = true;
         }
-        if input_action_button(
+        if callout::icon_button(
             ui,
-            state.match_count > 0,
             egui_phosphor::regular::CARET_DOWN,
+            16.0,
+            egui::vec2(INPUT_ACTION_BUTTON_WIDTH, INPUT_HEIGHT),
+            action_hover_bg(ui),
             "Jump to the next match",
+            state.match_count > 0,
         )
         .clicked()
         {
             actions.next_requested = true;
         }
-        if input_action_button(
+        if callout::icon_button(
             ui,
-            state.match_count > 0,
             egui_phosphor::regular::PENCIL_LINE,
+            16.0,
+            egui::vec2(INPUT_ACTION_BUTTON_WIDTH, INPUT_HEIGHT),
+            action_hover_bg(ui),
             "Replace all matches in the current scope",
+            state.match_count > 0,
         )
         .clicked()
         {
@@ -218,37 +226,6 @@ fn toggle_chip(
                 },
             ))
             .corner_radius(egui::CornerRadius::same(10)),
-    )
-    .on_hover_text(tooltip)
-}
-
-fn icon_button(ui: &mut egui::Ui, icon: &str, tooltip: &str, enabled: bool) -> egui::Response {
-    let button = egui::Button::new(
-        egui::RichText::new(icon)
-            .size(TOOLBAR_ICON_SIZE)
-            .color(text_primary(ui)),
-    )
-    .min_size(egui::vec2(30.0, TOOLBAR_BUTTON_HEIGHT))
-    .fill(action_bg(ui))
-    .stroke(egui::Stroke::new(1.0, border(ui)))
-    .corner_radius(egui::CornerRadius::same(10));
-
-    ui.add_enabled(enabled, button).on_hover_text(tooltip)
-}
-
-fn input_action_button(
-    ui: &mut egui::Ui,
-    enabled: bool,
-    icon: &str,
-    tooltip: &str,
-) -> egui::Response {
-    ui.add_enabled(
-        enabled,
-        egui::Button::new(egui::RichText::new(icon).size(16.0).color(text_primary(ui)))
-            .min_size(egui::vec2(INPUT_ACTION_BUTTON_WIDTH, INPUT_HEIGHT))
-            .fill(action_hover_bg(ui))
-            .stroke(egui::Stroke::new(1.0, border(ui)))
-            .corner_radius(egui::CornerRadius::same(8)),
     )
     .on_hover_text(tooltip)
 }

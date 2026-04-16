@@ -1,8 +1,8 @@
 #[cfg(test)]
 use super::sync_stock_editor_palette_with_theme_mode;
 use super::{
-    AppSettings, AppSurface, AppThemeMode, FileController, FileOpenDisposition, LogLevel,
-    ScratchpadApp, StartupSessionBehavior, TabListPosition, color_to_hex, logging,
+    AppSettings, AppSurface, AppThemeMode, FileController, FileOpenDisposition, ScratchpadApp,
+    StartupSessionBehavior, TabListPosition, color_to_hex,
     sanitize_tab_list_auto_hide_delay_seconds, stock_editor_palette_for_selection,
 };
 use crate::app::fonts::EditorFontPreset;
@@ -247,25 +247,6 @@ impl ScratchpadApp {
         match self.persist_settings_now() {
             Ok(()) => self.set_info_status("Settings reset to defaults."),
             Err(error) => self.set_error_status(format!("Settings save failed: {error}")),
-        }
-    }
-
-    pub(crate) fn set_logging_enabled(&mut self, enabled: bool) {
-        if self.app_settings.logging_enabled == enabled {
-            return;
-        }
-
-        self.app_settings.logging_enabled = enabled;
-        if let Err(error) = self.persist_settings_now() {
-            self.set_error_status(format!("Settings save failed: {error}"));
-            return;
-        }
-
-        let state = if enabled { "enabled" } else { "disabled" };
-        if enabled {
-            logging::log(LogLevel::Info, &format!("Runtime logging {state}"));
-        } else {
-            self.status_message = Some(format!("Runtime logging {state}."));
         }
     }
 

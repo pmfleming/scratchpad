@@ -65,14 +65,13 @@ fn persists_and_restores_open_tabs() {
         })),
     ];
 
-    store.persist(&tabs, 1, 18.0, false, true).unwrap();
+    store.persist(&tabs, 1, 18.0, false).unwrap();
     let restored = store.load().unwrap().unwrap();
 
     assert_eq!(restored.tabs.len(), 2);
     assert_eq!(restored.active_tab_index, 1);
     assert_eq!(restored.legacy_settings.font_size, 18.0);
     assert!(!restored.legacy_settings.word_wrap);
-    assert!(restored.legacy_settings.logging_enabled);
     assert_eq!(restored.tabs[0].buffer.text(), "alpha");
     assert!(restored.tabs[0].buffer.is_dirty);
     assert_eq!(restored.tabs[0].buffer.format.encoding_name, "UTF-8");
@@ -107,7 +106,7 @@ fn persists_encoding_metadata_for_restored_tabs() {
         },
     ))];
 
-    store.persist(&tabs, 0, 14.0, true, true).unwrap();
+    store.persist(&tabs, 0, 14.0, true).unwrap();
     let restored = store.load().unwrap().unwrap();
 
     assert_eq!(restored.tabs[0].buffer.format.encoding_name, "Shift_JIS");
@@ -141,7 +140,7 @@ fn persists_control_character_inspection_mode() {
     tab.active_view_mut().unwrap().show_control_chars = true;
     let tabs = vec![tab];
 
-    store.persist(&tabs, 0, 14.0, true, true).unwrap();
+    store.persist(&tabs, 0, 14.0, true).unwrap();
     let restored = store.load().unwrap().unwrap();
 
     assert!(restored.tabs[0].active_view().unwrap().show_control_chars);
@@ -176,7 +175,7 @@ fn persists_split_views_and_active_view() {
     tab.active_view_mut().unwrap().show_control_chars = false;
     let tabs = vec![tab];
 
-    store.persist(&tabs, 0, 14.0, true, true).unwrap();
+    store.persist(&tabs, 0, 14.0, true).unwrap();
     let restored = store.load().unwrap().unwrap();
 
     assert_eq!(restored.tabs[0].views.len(), 2);
@@ -217,7 +216,7 @@ fn restored_tabs_allocate_new_unique_view_ids() {
     tab.split_active_view(SplitAxis::Vertical).unwrap();
     let original_ids = tab.views.iter().map(|view| view.id).collect::<Vec<_>>();
 
-    store.persist(&[tab], 0, 14.0, true, true).unwrap();
+    store.persist(&[tab], 0, 14.0, true).unwrap();
     let mut restored = store.load().unwrap().unwrap();
     let restored_tab = &mut restored.tabs[0];
     let new_view_id = restored_tab
@@ -275,7 +274,7 @@ fn persists_and_restores_combined_workspace_tabs() {
         .combine_with_tab(source, SplitAxis::Vertical, false, 0.5)
         .expect("combine should succeed");
 
-    store.persist(&[target], 0, 14.0, true, true).unwrap();
+    store.persist(&[target], 0, 14.0, true).unwrap();
     let restored = store.load().unwrap().unwrap();
     let restored_tab = &restored.tabs[0];
 
@@ -312,7 +311,7 @@ fn restored_clean_buffer_reloads_newer_disk_content() {
         scratchpad::app::services::file_service::FileService::read_disk_state(&path).ok(),
     );
 
-    store.persist(&[tab], 0, 14.0, true, true).unwrap();
+    store.persist(&[tab], 0, 14.0, true).unwrap();
     fs::write(&path, "new disk text\n").expect("overwrite temp file");
 
     let restored = store.load().unwrap().unwrap();
@@ -345,7 +344,7 @@ fn restored_dirty_buffer_keeps_session_text_and_marks_conflict() {
         scratchpad::app::services::file_service::FileService::read_disk_state(&path).ok(),
     );
 
-    store.persist(&[tab], 0, 14.0, true, true).unwrap();
+    store.persist(&[tab], 0, 14.0, true).unwrap();
     fs::write(&path, "newer disk text\n").expect("overwrite temp file");
 
     let restored = store.load().unwrap().unwrap();
@@ -381,7 +380,7 @@ fn restored_missing_path_marks_buffer_missing_on_disk() {
         scratchpad::app::services::file_service::FileService::read_disk_state(&path).ok(),
     );
 
-    store.persist(&[tab], 0, 14.0, true, true).unwrap();
+    store.persist(&[tab], 0, 14.0, true).unwrap();
     fs::remove_file(&path).expect("remove temp file");
 
     let restored = store.load().unwrap().unwrap();

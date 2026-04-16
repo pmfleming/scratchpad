@@ -17,11 +17,10 @@ fn write_settings(store: &SettingsStore, contents: &str) {
     fs::write(store.path(), contents).expect("write settings");
 }
 
-fn legacy_defaults(font_size: f32, word_wrap: bool, logging_enabled: bool) -> AppSettings {
+fn legacy_defaults(font_size: f32, word_wrap: bool) -> AppSettings {
     AppSettings {
         font_size,
         word_wrap,
-        logging_enabled,
         editor_gutter: DEFAULT_EDITOR_GUTTER,
         editor_font: EditorFontPreset::Standard,
         settings_tab_open: false,
@@ -58,7 +57,6 @@ fn save_and_load_round_trip_toml_settings() {
     let settings = AppSettings {
         font_size: 18.0,
         word_wrap: false,
-        logging_enabled: false,
         editor_gutter: 6,
         editor_font: EditorFontPreset::Standard,
         theme_mode: AppThemeMode::Light,
@@ -97,22 +95,16 @@ fn malformed_toml_returns_invalid_data_error() {
 #[test]
 fn missing_editor_font_field_defaults_for_older_toml() {
     let store = test_store();
-    write_settings(
-        &store,
-        "font_size = 16.0\nword_wrap = false\nlogging_enabled = true\n",
-    );
+    write_settings(&store, "font_size = 16.0\nword_wrap = false\n");
 
     let loaded = store.load().expect("load settings");
-    assert_eq!(loaded, Some(legacy_defaults(16.0, false, true)));
+    assert_eq!(loaded, Some(legacy_defaults(16.0, false)));
 }
 
 #[test]
 fn missing_tab_list_position_defaults_for_older_toml() {
     let store = test_store();
-    write_settings(
-        &store,
-        "font_size = 16.0\nword_wrap = false\nlogging_enabled = true\n",
-    );
+    write_settings(&store, "font_size = 16.0\nword_wrap = false\n");
 
     let loaded = store.load().expect("load settings").expect("settings");
     assert_current_defaults(&loaded);
@@ -123,7 +115,7 @@ fn legacy_auto_hide_fields_migrate_to_single_tab_list_setting() {
     let store = test_store();
     write_settings(
         &store,
-        "font_size = 16.0\nword_wrap = false\nlogging_enabled = true\nauto_hide_top_bars = true\n",
+        "font_size = 16.0\nword_wrap = false\nauto_hide_top_bars = true\n",
     );
 
     let loaded = store.load().expect("load settings").expect("settings");
@@ -137,13 +129,13 @@ fn legacy_yaml_migrates_to_toml_when_toml_is_missing() {
     let legacy_path = store.path().with_file_name("settings.yaml");
     fs::write(
         &legacy_path,
-        "font_size: 16.0\nword_wrap: false\nlogging_enabled: true\n",
+        "font_size: 16.0\nword_wrap: false\n",
     )
     .expect("write legacy yaml");
 
     let loaded = store.load().expect("load settings");
 
-    assert_eq!(loaded, Some(legacy_defaults(16.0, false, true)));
+    assert_eq!(loaded, Some(legacy_defaults(16.0, false)));
     assert!(store.path().exists());
     assert!(legacy_path.exists());
 }

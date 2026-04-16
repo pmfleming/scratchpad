@@ -1,6 +1,5 @@
 use super::super::ScratchpadApp;
 use crate::app::domain::{EditorViewState, PendingAction, TabManager, ViewId, WorkspaceTab};
-use crate::app::logging::{self, LogLevel};
 use crate::app::services::session_manager;
 use crate::app::services::session_store::SessionStore;
 use std::path::Path;
@@ -16,12 +15,6 @@ impl ScratchpadApp {
 
     pub(crate) fn active_tab_mut(&mut self) -> Option<&mut WorkspaceTab> {
         self.tab_manager.active_tab_mut()
-    }
-
-    pub(crate) fn log_event(&self, level: LogLevel, message: impl Into<String>) {
-        if self.app_settings.logging_enabled {
-            logging::log(level, &message.into());
-        }
     }
 
     pub(crate) fn describe_tab_at(&self, index: usize) -> String {

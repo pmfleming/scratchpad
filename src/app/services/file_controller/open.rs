@@ -3,7 +3,6 @@ use super::support::LoadedFile;
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
 use crate::app::domain::WorkspaceTab;
-use crate::app::logging::LogLevel;
 use crate::app::services::file_service::{FileContent, FileService};
 use crate::app::utils::summarize_open_results;
 use std::path::{Path, PathBuf};
@@ -93,14 +92,6 @@ impl FileController {
         }
 
         if target_index >= app.tabs().len() {
-            app.log_event(
-                LogLevel::Error,
-                format!(
-                    "Startup add-to target index {} is out of range (tab count={}).",
-                    target_index + 1,
-                    app.tabs().len()
-                ),
-            );
             app.set_error_status(format!(
                 "Startup /addto:index:{} target does not exist.",
                 target_index + 1
@@ -138,13 +129,6 @@ impl FileController {
 
     fn open_path(app: &mut ScratchpadApp, path: PathBuf) -> OpenPathOutcome {
         if Self::activate_existing_path(app, &path).is_some() {
-            app.log_event(
-                LogLevel::Info,
-                format!(
-                    "File already open, activating existing tab: {}",
-                    path.display()
-                ),
-            );
             return OpenPathOutcome::AlreadyOpen;
         }
 
@@ -152,13 +136,7 @@ impl FileController {
             Ok(file_content) => OpenPathOutcome::Opened {
                 artifact_warning: Self::open_loaded_file(app, path, file_content),
             },
-            Err(error) => {
-                app.log_event(
-                    LogLevel::Error,
-                    format!("Failed to open file {}: {error}", path.display()),
-                );
-                OpenPathOutcome::Failed
-            }
+            Err(_) => OpenPathOutcome::Failed,
         }
     }
 
@@ -185,29 +163,14 @@ impl FileController {
         file_content: FileContent,
     ) -> Option<String> {
         let LoadedFile {
-            path_display,
-            format_label,
-            line_endings_label,
-            artifact_summary,
             artifact_warning,
             mut buffer,
+            ..
         } = LoadedFile::from_file_content(path, file_content);
         Self::mark_settings_buffer(app, &mut buffer);
         app.tab_manager_mut().append_tab(WorkspaceTab::new(buffer));
         app.mark_search_dirty();
         app.request_focus_for_active_view();
-        let tab_index = app.active_tab_index();
-        let tab_description = app.describe_active_tab();
-        app.log_event(
-            LogLevel::Info,
-            format!(
-                "Opened file into tab index {tab_index}: {tab_description} [format={}, line_endings={}, artifact_status={}] from {}",
-                format_label,
-                line_endings_label,
-                artifact_summary.unwrap_or_else(|| "none".to_owned()),
-                path_display
-            ),
-        );
         let _ = app.persist_session_now();
         artifact_warning
     }

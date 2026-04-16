@@ -76,7 +76,6 @@ fn settings_file_content(font_size: f32, settings_slot_index: Option<usize>) -> 
     let mut lines = vec![
         format!("font_size = {font_size:.1}"),
         "word_wrap = false".to_owned(),
-        "logging_enabled = false".to_owned(),
         "editor_font = \"standard\"".to_owned(),
     ];
     if let Some(index) = settings_slot_index {
@@ -110,7 +109,6 @@ fn open_dirty_settings_file(
 fn assert_settings_applied(app: &ScratchpadApp, font_size: f32) {
     assert_eq!(app.font_size(), font_size);
     assert!(!app.word_wrap());
-    assert!(!app.logging_enabled());
     assert_eq!(app.editor_font(), EditorFontPreset::Standard);
 }
 
@@ -432,7 +430,6 @@ fn editing_other_buffer_in_settings_workspace_does_not_mark_settings_toml_pendin
         [
             "font_size = 31.0",
             "word_wrap = false",
-            "logging_enabled = false",
             "editor_font = \"standard\"",
             "",
         ]
@@ -455,7 +452,6 @@ fn editing_other_buffer_in_settings_workspace_does_not_mark_settings_toml_pendin
 
     assert_eq!(app.font_size(), 14.0);
     assert!(app.word_wrap());
-    assert!(app.logging_enabled());
 }
 
 #[test]

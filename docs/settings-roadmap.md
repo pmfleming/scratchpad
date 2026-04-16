@@ -6,7 +6,7 @@ Expose user-configurable settings in the app, provide a dedicated settings UI, a
 
 ## Why This Change
 
-The app currently stores user-facing preferences such as `font_size`, `word_wrap`, and `logging_enabled` inside the session persistence flow. That creates a coupling between:
+The app currently stores user-facing preferences such as `font_size` and `word_wrap` inside the session persistence flow. That creates a coupling between:
 
 - user preferences
 - session restore behavior
@@ -25,7 +25,6 @@ Current runtime settings live on `ScratchpadApp` in [`app_state.rs`](/C:/Code/sc
 
 - `font_size`
 - `word_wrap`
-- `logging_enabled`
 
 Current persistence happens via the session store in [`session_store/mod.rs`](/C:/Code/scratchpad/src/app/services/session_store/mod.rs), where those values are serialized alongside:
 
@@ -47,7 +46,6 @@ Suggested initial fields:
 
 - `font_size: f32`
 - `word_wrap: bool`
-- `logging_enabled: bool`
 
 Likely future fields:
 
@@ -244,13 +242,12 @@ If settings load/save fails:
 
 - keep the app usable with in-memory defaults
 - show a clear status message
-- log the failure if logging is enabled
 
 ## Risks And Watchouts
 
 ### 1. Over-coupling UI state and persisted state
 
-Avoid scattering direct writes to `font_size`, `word_wrap`, and `logging_enabled` throughout the codebase. Prefer setter methods or a central settings update path.
+Avoid scattering direct writes to `font_size` and `word_wrap` throughout the codebase. Prefer setter methods or a central settings update path.
 
 ### 2. Session restore precedence confusion
 
@@ -276,7 +273,7 @@ Ship the persistence and first three settings before expanding into a large pref
 ### Phase 2: Runtime Integration
 
 - Add central setter methods for settings mutations
-- Route existing font size / wrap / logging mutations through settings-aware setters
+- Route existing font size and wrap mutations through settings-aware setters
 - Save settings immediately on change
 
 ### Phase 3: UI
@@ -315,7 +312,6 @@ Ship the persistence and first three settings before expanding into a large pref
 - Add centralized setters such as:
 - `set_font_size(...)`
 - `set_word_wrap(...)`
-- `set_logging_enabled(...)`
 - Ensure all existing mutation sites use those setters instead of writing fields directly.
 - Persist settings immediately after changes.
 - Surface load/save failures through the existing status/log system.
@@ -336,7 +332,6 @@ Ship the persistence and first three settings before expanding into a large pref
 - Add controls for:
 - font size
 - word wrap
-- runtime logging
 - Show save/load errors in the UI status system.
 - Show the resolved settings file path somewhere in the settings UI.
 - Add a reset-to-defaults action if time allows.
@@ -358,6 +353,6 @@ The smallest useful shippable milestone is:
 - startup load
 - immediate save on change
 - one simple settings UI surface
-- migration support for current `font_size`, `word_wrap`, and `logging_enabled`
+- migration support for current `font_size` and `word_wrap`
 
 That gets the architecture right early while keeping the implementation manageable.

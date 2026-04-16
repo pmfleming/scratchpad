@@ -57,10 +57,7 @@ fn open_here_splits_file_into_current_workspace() {
 #[test]
 fn open_file_flags_settings_toml_buffer() {
     let mut app = test_app();
-    write_settings_file(
-        &app,
-        "font_size = 14.0\nword_wrap = true\nlogging_enabled = true\n",
-    );
+    write_settings_file(&app, "font_size = 14.0\nword_wrap = true\n");
     let settings_path = app.settings_path().to_path_buf();
 
     FileController::open_external_paths(&mut app, vec![settings_path.clone()]);
@@ -82,10 +79,7 @@ fn open_file_flags_settings_toml_buffer() {
 #[test]
 fn open_here_flags_settings_toml_buffer() {
     let mut app = test_app();
-    write_settings_file(
-        &app,
-        "font_size = 14.0\nword_wrap = true\nlogging_enabled = true\n",
-    );
+    write_settings_file(&app, "font_size = 14.0\nword_wrap = true\n");
     let settings_path = app.settings_path().to_path_buf();
 
     FileController::open_external_paths_here(&mut app, vec![settings_path.clone()]);
@@ -111,10 +105,7 @@ fn opening_file_from_dirty_settings_tab_refreshes_settings_on_focus_loss() {
     fs::write(&path, "alpha\n").expect("write temp file");
 
     let mut app = test_app();
-    write_settings_file(
-        &app,
-        "font_size = 14.0\nword_wrap = true\nlogging_enabled = true\n",
-    );
+    write_settings_file(&app, "font_size = 14.0\nword_wrap = true\n");
     let settings_path = app.settings_path().to_path_buf();
     FileController::open_external_paths(&mut app, vec![settings_path]);
     let settings_tab_index = app.active_tab_index();
@@ -125,7 +116,6 @@ fn opening_file_from_dirty_settings_tab_refreshes_settings_on_focus_loss() {
             [
                 "font_size = 24.0",
                 "word_wrap = false",
-                "logging_enabled = false",
                 "editor_font = \"standard\"",
                 "settings_tab_open = false",
                 "",
@@ -140,7 +130,6 @@ fn opening_file_from_dirty_settings_tab_refreshes_settings_on_focus_loss() {
 
     assert_eq!(app.font_size(), 24.0);
     assert!(!app.word_wrap());
-    assert!(!app.logging_enabled());
     assert_eq!(
         app.editor_font(),
         scratchpad::app::fonts::EditorFontPreset::Standard
@@ -161,10 +150,7 @@ fn opening_file_here_from_dirty_settings_tab_refreshes_settings_on_focus_loss() 
     fs::write(&path, "beta\n").expect("write temp file");
 
     let mut app = test_app();
-    write_settings_file(
-        &app,
-        "font_size = 14.0\nword_wrap = true\nlogging_enabled = true\n",
-    );
+    write_settings_file(&app, "font_size = 14.0\nword_wrap = true\n");
     let settings_path = app.settings_path().to_path_buf();
     FileController::open_external_paths(&mut app, vec![settings_path]);
     let settings_tab_index = app.active_tab_index();
@@ -175,7 +161,6 @@ fn opening_file_here_from_dirty_settings_tab_refreshes_settings_on_focus_loss() 
             [
                 "font_size = 25.0",
                 "word_wrap = false",
-                "logging_enabled = false",
                 "editor_font = \"standard\"",
                 "settings_tab_open = false",
                 "",
@@ -190,7 +175,6 @@ fn opening_file_here_from_dirty_settings_tab_refreshes_settings_on_focus_loss() 
 
     assert_eq!(app.font_size(), 25.0);
     assert!(!app.word_wrap());
-    assert!(!app.logging_enabled());
     assert_eq!(
         app.editor_font(),
         scratchpad::app::fonts::EditorFontPreset::Standard
@@ -263,7 +247,6 @@ fn startup_clean_launch_skips_restored_session() {
             original.active_tab_index(),
             original.font_size(),
             original.word_wrap(),
-            original.logging_enabled(),
         )
         .expect("persist session");
 
@@ -365,7 +348,6 @@ fn saved_startup_behavior_can_skip_session_restore_without_clean_switch() {
             original.active_tab_index(),
             original.font_size(),
             original.word_wrap(),
-            original.logging_enabled(),
         )
         .expect("persist session");
 

@@ -1,10 +1,7 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::{SplitAxis, ViewId, WorkspaceTab};
-use crate::app::logging::LogLevel;
 
 struct TabCombineContext {
-    source_description: String,
-    target_description: String,
     adjusted_target_index: usize,
 }
 
@@ -52,7 +49,6 @@ impl ScratchpadApp {
         let snapshot = self.capture_transaction_snapshot();
 
         let source_index = self.active_tab_index();
-        let source_description = self.describe_tab_at(source_index);
         let promoted_tab = self
             .tabs_mut()
             .get_mut(source_index)
@@ -68,13 +64,6 @@ impl ScratchpadApp {
             vec![promoted_description.clone()],
             None,
             snapshot,
-        );
-        let promoted_index = self.active_tab_index();
-        self.log_event(
-            LogLevel::Info,
-            format!(
-                "Promoted view {view_id} from tab index {source_index} into new tab index {promoted_index}: source={source_description}, promoted={promoted_description}"
-            ),
         );
         let _ = self.persist_session_now();
     }
@@ -114,7 +103,6 @@ impl ScratchpadApp {
             .iter()
             .position(|tab| tab.active_buffer().id == active_buffer_id)
             .unwrap_or(0);
-        let promoted_count = promoted_tabs.len();
         for (offset, tab) in promoted_tabs.into_iter().enumerate() {
             self.tab_manager_mut().tabs.insert(index + offset, tab);
         }
@@ -127,12 +115,6 @@ impl ScratchpadApp {
             vec![source_description.clone()],
             None,
             snapshot,
-        );
-        self.log_event(
-            LogLevel::Info,
-            format!(
-                "Promoted all files from tab index {index} into {promoted_count} tabs: source={source_description}"
-            ),
         );
         let _ = self.persist_session_now();
     }
@@ -165,7 +147,6 @@ impl ScratchpadApp {
             self.reload_settings_before_workspace_change();
         }
 
-        let target_description = self.describe_tab_at(target_index);
         let source_descriptions = source_indices
             .iter()
             .map(|index| self.describe_tab_at(*index))
@@ -202,16 +183,6 @@ impl ScratchpadApp {
         self.request_focus_for_active_view();
         self.mark_session_dirty();
         self.rebalance_combined_workspace_layout(adjusted_target_index, target_index);
-        self.log_event(
-            LogLevel::Info,
-            format!(
-                "Combined {} tabs into tab index {}: sources={}, target={}",
-                source_descriptions.len(),
-                target_index,
-                source_descriptions.join(" | "),
-                target_description
-            ),
-        );
         self.record_transaction(
             "Combine tabs",
             vec![
@@ -229,14 +200,10 @@ impl ScratchpadApp {
         source_index: usize,
         target_index: usize,
     ) -> (TabCombineContext, WorkspaceTab) {
-        let source_description = self.describe_tab_at(source_index);
-        let target_description = self.describe_tab_at(target_index);
         let adjusted_target_index = Self::adjusted_target_index(source_index, target_index);
         let source_tab = self.tab_manager_mut().tabs.remove(source_index);
         (
             TabCombineContext {
-                source_description,
-                target_description,
                 adjusted_target_index,
             },
             source_tab,
@@ -283,48 +250,24 @@ impl ScratchpadApp {
     fn rebalance_combined_workspace_layout(
         &mut self,
         adjusted_target_index: usize,
-        target_index: usize,
+        _target_index: usize,
     ) {
         let reflow_axis = self.workspace_reflow_axis;
         let Some(target_tab) = self.tab_manager_mut().tabs.get_mut(adjusted_target_index) else {
             return;
         };
-        let rebalanced_layout = target_tab.rebalance_views_equally_for_axis(reflow_axis);
-        let combined_view_count = target_tab.views.len();
-
-        if !rebalanced_layout {
-            self.log_event(
-                LogLevel::Error,
-                format!(
-                    "Combine tabs could not rebalance the merged workspace layout equally at tab index {target_index}."
-                ),
-            );
-        } else {
-            self.log_event(
-                LogLevel::Info,
-                format!(
-                    "Rebalanced combined workspace layout in tab index {target_index} to equal tile shares (views={combined_view_count})."
-                ),
-            );
-        }
+        let _ = target_tab.rebalance_views_equally_for_axis(reflow_axis);
     }
 
     fn finish_combined_tab(
         &mut self,
-        source_index: usize,
-        target_index: usize,
+        _source_index: usize,
+        _target_index: usize,
         context: TabCombineContext,
     ) {
         self.tab_manager_mut().active_tab_index = context.adjusted_target_index;
         self.tab_manager_mut().pending_scroll_to_active = true;
         self.request_focus_for_active_view();
         self.mark_session_dirty();
-        self.log_event(
-            LogLevel::Info,
-            format!(
-                "Combined tab index {source_index} into tab index {target_index}: source={}, target={}",
-                context.source_description, context.target_description
-            ),
-        );
     }
 }

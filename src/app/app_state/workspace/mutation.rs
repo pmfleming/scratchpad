@@ -1,6 +1,5 @@
 use super::super::ScratchpadApp;
 use crate::app::domain::BufferId;
-use crate::app::logging::LogLevel;
 use crate::app::transactions::TransactionSnapshot;
 
 impl ScratchpadApp {
@@ -12,8 +11,6 @@ impl ScratchpadApp {
         transaction_snapshot: TransactionSnapshot,
     ) {
         let tab = &mut self.tabs_mut()[active_tab_index];
-        let previous_dirty = tab.buffer.is_dirty;
-        let previous_artifact_status = tab.buffer.artifact_summary.status_text();
         tab.buffer.refresh_text_metadata();
         let has_control_chars = tab.buffer.artifact_summary.has_control_chars();
         for view in &mut tab.views {
@@ -22,19 +19,12 @@ impl ScratchpadApp {
             }
         }
         tab.buffer.is_dirty = true;
-        let tab_name = tab.buffer.name.clone();
-        let current_artifact_status = tab.buffer.artifact_summary.status_text();
-        let line_count = tab.buffer.line_count;
         let current_text = tab.buffer.text().to_owned();
         let warning_message = tab
             .buffer
             .artifact_summary
             .status_text()
             .map(|message| format!("{message}; raw-text editing remains enabled"));
-        let became_dirty = !previous_dirty;
-        let artifact_status_changed = previous_artifact_status != current_artifact_status;
-        let previous_artifact_status_for_log = previous_artifact_status.clone();
-        let current_artifact_status_for_log = current_artifact_status.clone();
         let _ = tab;
 
         if let Some(message) = warning_message {
@@ -51,28 +41,5 @@ impl ScratchpadApp {
         self.mark_search_dirty();
         self.mark_session_dirty();
         self.note_settings_toml_edit(active_tab_index);
-
-        if became_dirty {
-            self.log_event(
-                LogLevel::Info,
-                format!(
-                    "Buffer '{tab_name}' became dirty after edit (line_count={line_count}, artifact_status={})",
-                    current_artifact_status_for_log
-                        .clone()
-                        .unwrap_or_else(|| "none".to_owned())
-                ),
-            );
-        }
-
-        if artifact_status_changed {
-            self.log_event(
-                LogLevel::Info,
-                format!(
-                    "Artifact status changed for '{tab_name}' from {} to {}",
-                    previous_artifact_status_for_log.unwrap_or_else(|| "none".to_owned()),
-                    current_artifact_status_for_log.unwrap_or_else(|| "none".to_owned())
-                ),
-            );
-        }
     }
 }

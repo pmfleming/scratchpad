@@ -227,16 +227,6 @@ Why it belongs:
 
 - It is cheap to add and useful for scripts.
 
-### `/log-cli`
-
-Behavior:
-
-- Write parsed startup arguments and startup-open decisions to the existing runtime log.
-
-Why it belongs:
-
-- Startup parsing bugs are usually easiest to diagnose with explicit logging.
-
 ## 5. Recommended Parsing Rules
 
 ### Accepted Forms
@@ -270,7 +260,6 @@ struct StartupOptions {
     open_here: bool,
     files: Vec<PathBuf>,
     line: Option<usize>,
-    log_cli: bool,
 }
 
 enum StartupTabTarget {

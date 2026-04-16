@@ -1,6 +1,5 @@
 use super::{AppSurface, ScratchpadApp};
 use crate::app::fonts::EditorFontPreset;
-use crate::app::logging::{self, LogLevel};
 use crate::app::paths_match;
 use crate::app::services::file_controller::FileController;
 use crate::app::services::settings_store::{
@@ -68,10 +67,6 @@ impl ScratchpadApp {
 
     pub fn word_wrap(&self) -> bool {
         self.app_settings.word_wrap
-    }
-
-    pub fn logging_enabled(&self) -> bool {
-        self.app_settings.logging_enabled
     }
 
     pub fn tab_list_position(&self) -> TabListPosition {

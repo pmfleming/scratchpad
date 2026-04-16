@@ -88,6 +88,23 @@
         "response_match_limit": 40,
         "description": "Initial keypress response for current-tab search as aggregate open-file size grows"
     },
+    "search_current_app_state_completion_aggregate_size": {
+        "targets": [
+            "app::app_state::search_state::runtime",
+            "app::app_state::search_state::worker",
+            "app::services::search",
+            "app::domain::tab"
+        ],
+        "kind": "workflow",
+        "mode": "current",
+        "latency_kind": "completion",
+        "scaling_axis": "aggregate_size",
+        "threshold_ms": 85.0,
+        "parameter_unit": "files",
+        "bytes_per_item": 24576,
+        "query": "needle",
+        "description": "Full current-tab search through the Scratchpad app-state pipeline across a split workspace tab with repeated buffer names"
+    },
     "search_all_completion_file_size": {
         "targets": [
             "app::services::search",

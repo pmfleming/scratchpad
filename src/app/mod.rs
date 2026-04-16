@@ -3,7 +3,6 @@ pub mod chrome;
 pub mod commands;
 pub mod domain;
 pub mod fonts;
-pub mod logging;
 pub mod services;
 pub mod shortcuts;
 pub mod startup;

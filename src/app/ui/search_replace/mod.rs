@@ -1,10 +1,10 @@
+use super::callout;
 mod controls;
 mod results;
 mod state;
 
 use crate::app::app_state::{ScratchpadApp, SearchFocusTarget};
 use crate::app::commands::AppCommand;
-use crate::app::theme::{action_bg, border};
 use eframe::egui;
 use state::{SearchStripActions, SearchStripState};
 
@@ -22,31 +22,23 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let host_rect = ui.max_rect();
     let overlay_top = ui.ctx().content_rect().top() + 4.0;
 
-    egui::Area::new(egui::Id::new("search_dialog_overlay"))
-        .order(egui::Order::Foreground)
-        .constrain(true)
-        .fixed_pos(egui::pos2(host_rect.left() + 16.0, overlay_top))
-        .show(ui.ctx(), |ui| {
-            ui.set_width(SEARCH_DIALOG_WIDTH);
-            ui.set_min_width(SEARCH_DIALOG_WIDTH);
-
-            egui::Frame::NONE
-                .fill(action_bg(ui))
-                .stroke(egui::Stroke::new(1.0, border(ui)))
-                .corner_radius(egui::CornerRadius::same(14))
-                .inner_margin(egui::Margin::symmetric(12, 8))
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-                    controls::show_search_controls(
-                        ui,
-                        &mut state,
-                        &mut actions,
-                        find_input_id,
-                        replace_input_id,
-                    );
-                    results::show_search_results(ui, &state, &mut actions);
-                });
-        });
+    callout::show_floating(
+        ui.ctx(),
+        "search_dialog_overlay",
+        egui::pos2(host_rect.left() + 16.0, overlay_top),
+        SEARCH_DIALOG_WIDTH,
+        |ui| {
+            callout::apply_spacing(ui);
+            controls::show_search_controls(
+                ui,
+                &mut state,
+                &mut actions,
+                find_input_id,
+                replace_input_id,
+            );
+            results::show_search_results(ui, &state, &mut actions);
+        },
+    );
 
     apply_search_inputs(app, &state);
     if actions.close_requested {
@@ -96,8 +88,9 @@ fn dispatch_search_actions(
         app.request_search_focus(target_focus);
         app.handle_command(AppCommand::ReplaceAllMatches);
     }
-    if let Some(match_index) = actions.selected_match_index {
-        app.request_search_focus(target_focus);
-        app.activate_search_match_at(match_index);
+    if let Some(match_index) = actions.selected_match_index
+        && app.activate_search_match_at(match_index)
+    {
+        app.request_focus_for_active_view();
     }
 }

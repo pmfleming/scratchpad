@@ -16,7 +16,6 @@ pub struct StartupOptions {
     pub open_target: StartupOpenTarget,
     pub open_target_explicit: bool,
     pub files: Vec<PathBuf>,
-    pub log_cli: bool,
     pub startup_notice: Option<String>,
 }
 
@@ -28,7 +27,6 @@ impl Default for StartupOptions {
             open_target: StartupOpenTarget::SeparateTabs,
             open_target_explicit: false,
             files: Vec::new(),
-            log_cli: false,
             startup_notice: None,
         }
     }
@@ -95,7 +93,6 @@ pub const USAGE_TEXT: &str = concat!(
     "  /addto:active         Add incoming files into the active workspace tab\n",
     "  /addto:index:N        Add incoming files into the Nth tab (1-based)\n",
     "  /files:\"a\",\"b\"      Comma-delimited quoted file list in one argument\n",
-    "  /log-cli              Log parsed startup options to the runtime log\n",
     "  /help or /?           Show this help text\n",
     "  /version              Print the application version and exit\n",
     "\n",

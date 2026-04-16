@@ -9,24 +9,11 @@ pub(super) fn render_settings_categories(ui: &mut egui::Ui, app: &mut Scratchpad
         render_opening_category,
         render_text_formatting_category,
         render_tab_position_category,
-        render_diagnostics_category,
         render_advanced_category,
     ] {
         ui.add_space(SettingsUi::LAYOUT.section_gap);
         render_category(ui, app);
     }
-}
-
-fn render_diagnostics_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    category_heading(ui, "Diagnostics");
-    toggle_card(
-        ui,
-        egui_phosphor::regular::MAGNIFYING_GLASS,
-        "File logging",
-        "Write runtime diagnostics while Scratchpad is running.",
-        app.logging_enabled(),
-        |enabled| app.set_logging_enabled(enabled),
-    );
 }
 
 fn render_advanced_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {

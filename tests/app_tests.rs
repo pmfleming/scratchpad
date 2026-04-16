@@ -67,7 +67,6 @@ fn reordering_tabs_preserves_active_tab_and_restore_order() {
             app.active_tab_index(),
             app.font_size(),
             app.word_wrap(),
-            app.logging_enabled(),
         )
         .unwrap();
 
@@ -205,7 +204,6 @@ fn opens_configurable_number_of_tabs_defaulting_to_1000() {
             app.active_tab_index(),
             app.font_size(),
             app.word_wrap(),
-            app.logging_enabled(),
         )
         .unwrap();
 
@@ -289,7 +287,6 @@ fn startup_loads_toml_settings_before_session_restore() {
         .save(&AppSettings {
             font_size: 19.0,
             word_wrap: false,
-            logging_enabled: false,
             editor_gutter: 0,
             editor_font: EditorFontPreset::Standard,
             settings_tab_open: false,
@@ -309,7 +306,6 @@ fn startup_loads_toml_settings_before_session_restore() {
 
     assert_eq!(app.font_size(), 19.0);
     assert!(!app.word_wrap());
-    assert!(!app.logging_enabled());
     assert_eq!(app.editor_font(), EditorFontPreset::Standard);
 }
 
@@ -323,13 +319,7 @@ fn startup_migrates_legacy_session_settings_when_toml_is_missing() {
         ScratchpadApp::with_session_store(SessionStore::new(session_root.path().to_path_buf()));
     original
         .session_store()
-        .persist(
-            original.tabs(),
-            original.active_tab_index(),
-            21.0,
-            false,
-            false,
-        )
+        .persist(original.tabs(), original.active_tab_index(), 21.0, false)
         .expect("persist legacy session settings");
 
     let settings_store = SettingsStore::new(settings_root.path().to_path_buf());
@@ -341,7 +331,6 @@ fn startup_migrates_legacy_session_settings_when_toml_is_missing() {
 
     assert_eq!(app.font_size(), 21.0);
     assert!(!app.word_wrap());
-    assert!(!app.logging_enabled());
 
     let migrated = SettingsStore::new(settings_root.path().to_path_buf())
         .load()
@@ -351,7 +340,6 @@ fn startup_migrates_legacy_session_settings_when_toml_is_missing() {
         Some(AppSettings {
             font_size: 21.0,
             word_wrap: false,
-            logging_enabled: false,
             editor_gutter: 0,
             editor_font: EditorFontPreset::Standard,
             settings_tab_open: false,

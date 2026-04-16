@@ -1,36 +1,22 @@
 use super::super::ScratchpadApp;
 use crate::app::commands::AppCommand;
 use crate::app::domain::{SplitAxis, SplitPath, ViewId, WorkspaceTab};
-use crate::app::logging::LogLevel;
 use crate::app::services::file_controller::FileController;
 use crate::app::services::settings_store::FileOpenDisposition;
 
 impl ScratchpadApp {
-    fn log_tab_lifecycle_event(&self, action: &str, index: usize, description: &str) {
-        self.log_event(
-            LogLevel::Info,
-            format!(
-                "{action} at index {index}: {description} (total tabs={})",
-                self.tab_manager.tabs.len()
-            ),
-        );
-    }
-
     pub fn new_tab(&mut self) {
         let snapshot = self.capture_transaction_snapshot();
         self.create_workspace_tab(WorkspaceTab::untitled());
-        let description = self.tab_manager.describe_active_tab();
         self.record_transaction("New tab", vec![self.describe_active_tab()], None, snapshot);
-        self.log_tab_lifecycle_event(
-            "Created new tab",
-            self.tab_manager.active_tab_index,
-            &description,
-        );
         let _ = self.persist_session_now();
     }
 
     pub fn open_file(&mut self) {
-        if matches!(self.file_open_disposition(), FileOpenDisposition::CurrentTab) {
+        if matches!(
+            self.file_open_disposition(),
+            FileOpenDisposition::CurrentTab
+        ) {
             FileController::open_file_here(self);
         } else {
             FileController::open_file(self);
@@ -44,10 +30,6 @@ impl ScratchpadApp {
     pub fn open_user_manual(&mut self) {
         let path = self.user_manual_path().to_path_buf();
         if !path.is_file() {
-            self.log_event(
-                LogLevel::Error,
-                format!("User manual not found: {}", path.display()),
-            );
             self.set_error_status(format!("User manual not found: {}", path.display()));
             return;
         }
@@ -76,16 +58,11 @@ impl ScratchpadApp {
         let snapshot = self.capture_transaction_snapshot();
         let tab_description = self.close_tab_internal(index);
         self.record_transaction("Close tab", vec![tab_description.clone()], None, snapshot);
-        self.log_tab_lifecycle_event("Closed tab", index, &tab_description);
         let _ = self.persist_session_now();
     }
 
     pub fn perform_close_tab_no_persist(&mut self, index: usize) {
-        let tab_description = self.close_tab_internal(index);
-        self.log_event(
-            LogLevel::Info,
-            format!("Closed tab without immediate persist at index {index}: {tab_description}"),
-        );
+        let _ = self.close_tab_internal(index);
     }
 
     pub fn split_active_view_with_placement(

@@ -1,6 +1,5 @@
 use super::{AppSurface, ScratchpadApp, SearchState};
 use crate::app::domain::TabManager;
-use crate::app::logging::{self, LogLevel};
 use crate::app::services::file_controller::FileController;
 use crate::app::services::manual_files;
 use crate::app::services::session_manager;
@@ -56,8 +55,7 @@ impl ScratchpadApp {
             status_message: None,
             pending_editor_focus: None,
             encoding_dialog_open: false,
-            reopen_with_encoding_choice: "UTF-8".to_owned(),
-            save_with_encoding_choice: "UTF-8".to_owned(),
+            encoding_dialog_choice: "UTF-8".to_owned(),
             settings_store,
             user_manual_path: manual_files::resolve_user_manual_path(),
             session_store,
@@ -95,13 +93,6 @@ impl ScratchpadApp {
     }
 
     fn apply_startup_options(&mut self, startup_options: StartupOptions) {
-        if startup_options.log_cli {
-            logging::log(
-                LogLevel::Info,
-                &format!("Startup options resolved: {}", startup_options.describe()),
-            );
-        }
-
         if startup_options.files.is_empty() {
             if let Some(message) = startup_options.startup_notice {
                 self.set_warning_status(message);

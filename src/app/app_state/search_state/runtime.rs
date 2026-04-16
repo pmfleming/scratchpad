@@ -172,13 +172,8 @@ impl ScratchpadApp {
 
         let mut seen_buffer_ids = HashSet::new();
         let mut ordered_view_ids = Vec::with_capacity(tab.views.len());
-        ordered_view_ids.push(tab.active_view_id);
-        ordered_view_ids.extend(
-            tab.views
-                .iter()
-                .map(|view| view.id)
-                .filter(|view_id| *view_id != tab.active_view_id),
-        );
+        tab.root_pane
+            .collect_view_ids_in_order(&mut ordered_view_ids);
         let tab_label = self.search_tab_label(tab_index);
         let mut targets = Vec::new();
 
@@ -216,7 +211,7 @@ impl ScratchpadApp {
             view_id,
             buffer_id: view.buffer_id,
             tab_label: tab_label.to_owned(),
-            buffer_label: buffer.name.clone(),
+            buffer_label: buffer.display_name(),
             text: buffer.text().to_owned(),
         })
     }

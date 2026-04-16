@@ -1,0 +1,39 @@
+Form & Layout:
+
+Rounded rectangular container with soft corners and balanced proportions
+Horizontal, layered structure with clear grouping of elements
+Tight, efficient spacing with strong alignment across a single grid
+
+Visual Style
+
+Dark, desaturated background with a subtle gradient
+Light foreground elements for contrast without harsh brightness
+Thin borders and soft shadows to separate the panel from the background
+Minimal visual noise — every element feels intentional
+
+Elements
+
+Mix of small icon buttons and compact input areas
+Controls use consistent sizing, padding, and corner radius
+Buttons appear as subtle toggles rather than heavy components
+One visually stronger action element to anchor the composition
+Prefer icons and visual cues over text wherever possible
+
+Typography
+
+Clean, modern sans-serif
+Use text sparingly — only where essential
+Primary text slightly brighter; secondary text muted
+
+Interaction Design
+
+Designed for speed and efficiency
+Focus states are understated but visible (soft glow or border shift)
+Hover/active states are minimal, relying on slight contrast changes
+
+Overall Feel
+
+Lightweight, precise, and utilitarian
+Prioritizes clarity and flow over decoration
+Feels like part of a larger system rather than a standalone component
+Optimized for frequent use without drawing attention to itself

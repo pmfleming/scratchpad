@@ -87,6 +87,7 @@ impl SearchResultAccumulator {
             let (line_number, column_number, preview) = preview_for_match(&target.text, range);
             entries.push(SearchResultEntry {
                 match_index: start_index + offset,
+                buffer_id: target.buffer_id,
                 buffer_label: target.buffer_label.clone(),
                 line_number,
                 column_number,

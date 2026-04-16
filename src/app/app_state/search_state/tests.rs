@@ -1,5 +1,6 @@
-use super::{SearchScope, ScratchpadApp};
 use super::helpers::{cursor_range_from_char_range, preview_for_match};
+use super::{ScratchpadApp, SearchScope};
+use crate::app::domain::SplitAxis;
 use crate::app::services::session_store::SessionStore;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -49,6 +50,28 @@ fn search_result_groups_are_separated_by_tab() {
 }
 
 #[test]
+fn dirty_single_buffer_results_use_dirty_buffer_label_without_extra_context_split() {
+    let mut app = test_app();
+    app.tabs_mut()[0].buffer.name = "notes.txt".to_owned();
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha only here".to_owned());
+    app.tabs_mut()[0].buffer.is_dirty = true;
+
+    app.open_search();
+    app.set_search_scope(SearchScope::ActiveBuffer);
+    app.set_search_query("alpha");
+
+    wait_for_search_matches(&mut app, 1);
+
+    let groups = app.search_result_groups();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].entries.len(), 1);
+    assert_eq!(groups[0].entries[0].buffer_label, "*notes.txt");
+    assert_eq!(groups[0].tab_label, "*notes.txt");
+}
+
+#[test]
 fn activating_search_match_navigates_to_matching_tab_and_range() {
     let mut app = test_app();
     app.tabs_mut()[0].buffer.replace_text("zzz".to_owned());
@@ -68,6 +91,32 @@ fn activating_search_match_navigates_to_matching_tab_and_range() {
     let pending = app
         .active_tab()
         .and_then(|tab| tab.active_view())
+        .and_then(|view| view.pending_cursor_range);
+    assert_eq!(pending, Some(cursor_range_from_char_range(0..5)));
+}
+
+#[test]
+fn activating_search_match_uses_first_tile_for_duplicate_buffer_results() {
+    let mut app = test_app();
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha target".to_owned());
+
+    let first_view_id = app.tabs()[0].active_view_id;
+    let second_view_id = app.tabs_mut()[0]
+        .split_active_view(SplitAxis::Vertical)
+        .expect("split active view");
+    assert!(app.tabs_mut()[0].activate_view(second_view_id));
+
+    app.open_search();
+    app.set_search_scope(SearchScope::ActiveWorkspaceTab);
+    app.set_search_query("alpha");
+    wait_for_search_matches(&mut app, 1);
+
+    assert!(app.activate_search_match_at(0));
+    assert_eq!(app.tabs()[0].active_view_id, first_view_id);
+    let pending = app.tabs()[0]
+        .view(first_view_id)
         .and_then(|view| view.pending_cursor_range);
     assert_eq!(pending, Some(cursor_range_from_char_range(0..5)));
 }

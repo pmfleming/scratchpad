@@ -19,7 +19,7 @@
         <header class="hero">
             <div>
                 <p class="eyebrow">Scratchpad data viewer</p>
-                <h1>Hotspots, slowspots, search speed, clones, and architecture risk map</h1>
+                <h1>Hotspots, slowspots, search speed, clones, flamegraphs, and architecture risk map</h1>
                 <p class="lede">
                     A static viewer for the JSON artifacts produced by the Python measurement tools.
                 </p>
@@ -31,6 +31,7 @@
                 <code>target/analysis/search_speed.json</code>
                 <code>target/analysis/clones.json</code>
                 <code>target/analysis/map.json</code>
+                <code>target/analysis/flamegraphs.json</code>
             </div>
         </header>
 
@@ -65,6 +66,10 @@
                     Map JSON
                     <input id="map-file" type="file" accept="application/json,.json" />
                 </label>
+                <label>
+                    Flamegraphs JSON
+                    <input id="flamegraphs-file" type="file" accept="application/json,.json" />
+                </label>
             </div>
         </section>
 
@@ -74,6 +79,7 @@
             <button class="tab" data-tab="search-speed">Search Speed</button>
             <button class="tab" data-tab="clones">Clones</button>
             <button class="tab" data-tab="map">Map</button>
+            <button class="tab" data-tab="flamegraphs">Flamegraphs</button>
         </nav>
 
         <section id="hotspots" class="tab-panel is-active">
@@ -181,6 +187,27 @@
                     <h2>Module detail</h2>
                     <p class="muted">Select a module in the map.</p>
                 </aside>
+            </div>
+        </section>
+
+        <section id="flamegraphs" class="tab-panel">
+            <div class="flamegraph-layout">
+                <aside class="panel-card flamegraph-sidebar">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Flamegraphs</h2>
+                            <p>Select a profile to view its flamegraph.</p>
+                        </div>
+                    </div>
+                    <div id="flamegraph-list" class="flamegraph-list">
+                        <!-- List of flamegraphs will be populated here -->
+                    </div>
+                </aside>
+                <div class="panel-card flamegraph-main">
+                    <div id="flamegraph-content" class="flamegraph-content">
+                        <p class="muted">Select a profile from the sidebar to view the flamegraph.</p>
+                    </div>
+                </div>
             </div>
         </section>
     </main>

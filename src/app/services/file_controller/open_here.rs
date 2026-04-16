@@ -1,9 +1,8 @@
 use super::FileController;
-use super::support::{LoadedFile, PendingOpenLogEntry};
+use super::support::LoadedFile;
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
 use crate::app::domain::{SplitAxis, ViewId, WorkspaceTab};
-use crate::app::logging::LogLevel;
 use crate::app::services::file_service::FileService;
 use std::path::{Path, PathBuf};
 
@@ -97,25 +96,11 @@ impl FileController {
         };
 
         if !rebalanced {
-            app.log_event(
-                LogLevel::Error,
-                "Open Here could not rebalance the workspace layout equally.",
-            );
             return;
         }
 
         app.mark_session_dirty();
         let _ = app.persist_session_now();
-        app.log_event(
-            LogLevel::Info,
-            format!(
-                "Rebalanced Open Here layout in current workspace to equal tile shares (views={}).",
-                app.tabs()
-                    .get(app.active_tab_index())
-                    .map(|tab| tab.views.len())
-                    .unwrap_or_default()
-            ),
-        );
     }
 
     fn find_existing_open_here_path(
@@ -146,13 +131,6 @@ impl FileController {
                 if app.is_settings_file_path(&path) {
                     app.mark_active_buffer_as_settings_file();
                 }
-                app.log_event(
-                    LogLevel::Info,
-                    format!(
-                        "Open Here found file already in current workspace, activating view: {}",
-                        path.display()
-                    ),
-                );
                 OpenHerePathOutcome::AlreadyInCurrentTab
             }
             ExistingOpenHerePath::NeedsMigration { source_index } => {
@@ -181,23 +159,8 @@ impl FileController {
             if app.is_settings_file_path(&path) {
                 app.mark_active_buffer_as_settings_file();
             }
-            app.log_event(
-                LogLevel::Info,
-                format!(
-                    "Open Here migrated existing tab into current workspace: {}",
-                    path.display()
-                ),
-            );
             return OpenHerePathOutcome::Migrated;
         }
-
-        app.log_event(
-            LogLevel::Error,
-            format!(
-                "Open Here could not migrate existing tab into current workspace: {}",
-                path.display()
-            ),
-        );
         OpenHerePathOutcome::Failed
     }
 
@@ -213,20 +176,14 @@ impl FileController {
                 pending_files.push(loaded_file);
                 OpenHerePathOutcome::Queued
             }
-            Err(error) => {
-                app.log_event(
-                    LogLevel::Error,
-                    format!("Open Here failed for {}: {error}", path.display()),
-                );
-                OpenHerePathOutcome::Failed
-            }
+            Err(_) => OpenHerePathOutcome::Failed,
         }
     }
 
     fn build_pending_open_here_workspace(
         app: &mut ScratchpadApp,
         pending_files: Vec<LoadedFile>,
-    ) -> Option<(WorkspaceTab, Vec<PendingOpenLogEntry>)> {
+    ) -> Option<(WorkspaceTab, Vec<Option<String>>)> {
         let mut pending_iter = pending_files.into_iter();
         let first_file = pending_iter.next()?;
         let (buffer, log_entry) = first_file.into_parts();
@@ -250,12 +207,11 @@ impl FileController {
     fn append_pending_file_to_workspace(
         app: &mut ScratchpadApp,
         pending_workspace: &mut WorkspaceTab,
-        log_entries: &mut Vec<PendingOpenLogEntry>,
+        log_entries: &mut Vec<Option<String>>,
         pending_file: LoadedFile,
     ) -> bool {
-        let (buffer, log_entry) = pending_file.into_parts();
-        let failed_path = log_entry.path_display.clone();
-        log_entries.push(log_entry);
+        let (buffer, artifact_warning) = pending_file.into_parts();
+        log_entries.push(artifact_warning);
 
         if pending_workspace
             .open_buffer_with_balanced_layout(buffer)
@@ -263,10 +219,6 @@ impl FileController {
         {
             true
         } else {
-            app.log_event(
-                LogLevel::Error,
-                format!("Open Here could not build balanced layout for {failed_path}"),
-            );
             app.set_error_status("Open Here failed to create a balanced tile layout.");
             false
         }
@@ -290,37 +242,20 @@ impl FileController {
         if opened {
             true
         } else {
-            app.log_event(
-                LogLevel::Error,
-                "Open Here could not insert the balanced tile layout into the current workspace.",
-            );
             app.set_error_status("Open Here failed to create a new tile layout.");
             false
         }
     }
 
     fn log_open_here_success(
-        app: &mut ScratchpadApp,
-        log_entries: Vec<PendingOpenLogEntry>,
+        _app: &mut ScratchpadApp,
+        log_entries: Vec<Option<String>>,
     ) -> Vec<OpenHerePathOutcome> {
-        let tab_index = app.active_tab_index();
-        let tab_description = app.describe_active_tab();
-
         log_entries
             .into_iter()
-            .map(|entry| {
-                app.log_event(
-                    LogLevel::Info,
-                    format!(
-                        "Opened file into balanced current workspace layout at tab index {tab_index}: {tab_description} [format={}, line_endings={}, artifact_status={}] from {}",
-                        entry.format_label,
-                        entry.line_endings_label,
-                        entry.artifact_summary.unwrap_or_else(|| "none".to_owned()),
-                        entry.path_display
-                    ),
-                );
+            .map(|artifact_warning| {
                 OpenHerePathOutcome::Opened {
-                    artifact_warning: entry.artifact_warning,
+                    artifact_warning,
                 }
             })
             .collect()

@@ -162,3 +162,52 @@ fn toggle_search_opens_then_closes_search_strip() {
     app.toggle_search();
     assert!(!app.search_open());
 }
+
+#[test]
+fn current_tab_search_moves_across_repeated_buffer_names_in_one_workspace_tab() {
+    let mut app = test_app();
+    app.tabs_mut()[0].buffer.name = "mod.rs".to_owned();
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha first".to_owned());
+    let first_view_id = app.tabs()[0].active_view_id;
+
+    let second_view_id = app.tabs_mut()[0]
+        .open_buffer_as_split(
+            BufferState::new("mod.rs".to_owned(), "alpha second".to_owned(), None),
+            SplitAxis::Vertical,
+            false,
+            0.5,
+        )
+        .expect("open split buffer");
+
+    assert!(app.tabs_mut()[0].activate_view(first_view_id));
+    let third_view_id = app.tabs_mut()[0]
+        .open_buffer_as_split(
+            BufferState::new("lib.rs".to_owned(), "alpha third".to_owned(), None),
+            SplitAxis::Horizontal,
+            false,
+            0.5,
+        )
+        .expect("open split buffer");
+
+    app.open_search();
+    app.set_search_scope(SearchScope::ActiveWorkspaceTab);
+    app.set_search_query("alpha");
+
+    wait_for_search_matches(&mut app, 3);
+    assert_eq!(app.search_match_count(), 3);
+    assert_eq!(app.search_active_match_index(), Some(0));
+    assert_eq!(app.tabs()[0].active_view_id, third_view_id);
+    assert_eq!(app.tabs()[0].active_buffer().text(), "alpha third");
+
+    assert!(app.select_next_search_match());
+    assert_eq!(app.search_active_match_index(), Some(1));
+    assert_eq!(app.tabs()[0].active_view_id, first_view_id);
+    assert_eq!(app.tabs()[0].active_buffer().text(), "alpha first");
+
+    assert!(app.select_next_search_match());
+    assert_eq!(app.search_active_match_index(), Some(2));
+    assert_eq!(app.tabs()[0].active_view_id, second_view_id);
+    assert_eq!(app.tabs()[0].active_buffer().text(), "alpha second");
+}
