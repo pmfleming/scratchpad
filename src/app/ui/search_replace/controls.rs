@@ -88,7 +88,7 @@ fn render_search_pill(
                             ui,
                             state.scope == scope,
                             scope.label(),
-                            &scope_tooltip(scope),
+                            scope_tooltip(scope),
                         )
                         .clicked()
                         {
@@ -111,36 +111,7 @@ fn render_replace_pill(
     replace_input_id: egui::Id,
 ) -> Option<egui::Response> {
     search_card(ui, |ui| {
-        ui.horizontal(|ui| {
-            let toggle = pill_heading_button(ui, ARROW_CLOCKWISE, "Replace");
-            if toggle.clicked() {
-                state.replace_open = !state.replace_open;
-            }
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if callout::icon_button(
-                    ui,
-                    if state.replace_open {
-                        CARET_UP
-                    } else {
-                        CARET_DOWN
-                    },
-                    16.0,
-                    ICON_BUTTON_SIZE,
-                    action_hover_bg(ui),
-                    if state.replace_open {
-                        "Collapse replace controls"
-                    } else {
-                        "Expand replace controls"
-                    },
-                    true,
-                )
-                .clicked()
-                {
-                    state.replace_open = !state.replace_open;
-                }
-            });
-        });
+        render_replace_heading(ui, &mut state.replace_open);
 
         if !state.replace_open {
             return None;
@@ -161,46 +132,76 @@ fn render_replace_pill(
             egui::vec2(ui.available_width(), CONTROL_BUTTON_HEIGHT),
             egui::Layout::right_to_left(egui::Align::Center),
             |ui| {
-                if icon_action_button(ui, SWAP, "Replace all matches", state.match_count > 0)
-                    .clicked()
-                {
-                    actions.replace_all_requested = true;
-                }
-                if icon_action_button(
+                trigger_action(
                     ui,
+                    state.match_count > 0,
+                    SWAP,
+                    "Replace all matches",
+                    &mut actions.replace_all_requested,
+                );
+                trigger_action(
+                    ui,
+                    state.match_count > 0,
                     ARROW_CLOCKWISE,
                     "Replace current match",
+                    &mut actions.replace_current_requested,
+                );
+                trigger_action(
+                    ui,
                     state.match_count > 0,
-                )
-                .clicked()
-                {
-                    actions.replace_current_requested = true;
-                }
-                if icon_action_button(ui, CARET_DOWN, "Next match", state.match_count > 0).clicked()
-                {
-                    actions.next_requested = true;
-                }
-                if icon_action_button(ui, CARET_UP, "Previous match", state.match_count > 0)
-                    .clicked()
-                {
-                    actions.previous_requested = true;
-                }
+                    CARET_DOWN,
+                    "Next match",
+                    &mut actions.next_requested,
+                );
+                trigger_action(
+                    ui,
+                    state.match_count > 0,
+                    CARET_UP,
+                    "Previous match",
+                    &mut actions.previous_requested,
+                );
                 ui.add_space(6.0);
-                if icon_toggle_chip(ui, state.whole_word, TEXT_ALIGN_JUSTIFY, "Whole word")
-                    .clicked()
-                {
-                    state.whole_word = !state.whole_word;
-                }
-                if icon_toggle_chip(ui, state.match_case, CASE_SENSITIVE_ICON, "Case sensitive")
-                    .clicked()
-                {
-                    state.match_case = !state.match_case;
-                }
+                toggle_flag(ui, &mut state.whole_word, TEXT_ALIGN_JUSTIFY, "Whole word");
+                toggle_flag(
+                    ui,
+                    &mut state.match_case,
+                    CASE_SENSITIVE_ICON,
+                    "Case sensitive",
+                );
             },
         );
 
         Some(replace_response)
     })
+}
+
+fn render_replace_heading(ui: &mut egui::Ui, replace_open: &mut bool) {
+    ui.horizontal(|ui| {
+        if pill_heading_button(ui, ARROW_CLOCKWISE, "Replace").clicked() {
+            *replace_open = !*replace_open;
+        }
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let tooltip = if *replace_open {
+                "Collapse replace controls"
+            } else {
+                "Expand replace controls"
+            };
+            if callout::icon_button(
+                ui,
+                if *replace_open { CARET_UP } else { CARET_DOWN },
+                16.0,
+                ICON_BUTTON_SIZE,
+                action_hover_bg(ui),
+                tooltip,
+                true,
+            )
+            .clicked()
+            {
+                *replace_open = !*replace_open;
+            }
+        });
+    });
 }
 
 fn render_pill_heading(ui: &mut egui::Ui, icon: &str, title: &str) {
@@ -275,33 +276,18 @@ fn compact_text_field(
 }
 
 fn toggle_chip(ui: &mut egui::Ui, selected: bool, label: &str, tooltip: &str) -> egui::Response {
-    ui.scope(|ui| {
-        ui.spacing_mut().button_padding = egui::vec2(8.0, 0.0);
-        ui.add(
-            egui::Button::new(egui::RichText::new(label).size(12.5).color(if selected {
-                text_primary(ui)
-            } else {
-                text_primary(ui).gamma_multiply(0.9)
-            }))
-            .min_size(egui::vec2(0.0, CONTROL_BUTTON_HEIGHT))
-            .fill(if selected {
-                tab_selected_bg(ui)
-            } else {
-                action_hover_bg(ui)
-            })
-            .stroke(egui::Stroke::new(
-                1.0,
-                if selected {
-                    tab_selected_accent(ui)
-                } else {
-                    border(ui)
-                },
-            ))
-            .corner_radius(egui::CornerRadius::same(8)),
-        )
-        .on_hover_text(tooltip)
-    })
-    .inner
+    chip_button(
+        ui,
+        egui::RichText::new(label).size(12.5).color(if selected {
+            text_primary(ui)
+        } else {
+            text_primary(ui).gamma_multiply(0.9)
+        }),
+        selected,
+        egui::vec2(0.0, CONTROL_BUTTON_HEIGHT),
+        egui::vec2(8.0, 0.0),
+        tooltip,
+    )
 }
 
 fn icon_toggle_chip(
@@ -310,37 +296,20 @@ fn icon_toggle_chip(
     icon: &str,
     tooltip: &str,
 ) -> egui::Response {
-    ui.scope(|ui| {
-        ui.spacing_mut().button_padding = egui::vec2(0.0, 0.0);
-        ui.add(
-            egui::Button::new(
-                egui::RichText::new(icon)
-                    .font(egui::FontId::proportional(16.0))
-                    .color(if selected {
-                        text_primary(ui)
-                    } else {
-                        text_primary(ui).gamma_multiply(0.9)
-                    }),
-            )
-            .min_size(ICON_BUTTON_SIZE)
-            .fill(if selected {
-                tab_selected_bg(ui)
+    chip_button(
+        ui,
+        egui::RichText::new(icon)
+            .font(egui::FontId::proportional(16.0))
+            .color(if selected {
+                text_primary(ui)
             } else {
-                action_hover_bg(ui)
-            })
-            .stroke(egui::Stroke::new(
-                1.0,
-                if selected {
-                    tab_selected_accent(ui)
-                } else {
-                    border(ui)
-                },
-            ))
-            .corner_radius(egui::CornerRadius::same(8)),
-        )
-        .on_hover_text(tooltip)
-    })
-    .inner
+                text_primary(ui).gamma_multiply(0.9)
+            }),
+        selected,
+        ICON_BUTTON_SIZE,
+        egui::vec2(0.0, 0.0),
+        tooltip,
+    )
 }
 
 fn icon_action_button(
@@ -368,8 +337,57 @@ fn search_text_edit<'a>(text: &'a mut String, id: egui::Id, hint: &str) -> egui:
         .vertical_align(egui::Align::Center)
 }
 
-fn scope_tooltip(scope: SearchScope) -> String {
-    format!("Search scope: {}", scope.label())
+fn toggle_flag(ui: &mut egui::Ui, value: &mut bool, icon: &str, tooltip: &str) {
+    if icon_toggle_chip(ui, *value, icon, tooltip).clicked() {
+        *value = !*value;
+    }
+}
+
+fn trigger_action(ui: &mut egui::Ui, enabled: bool, icon: &str, tooltip: &str, flag: &mut bool) {
+    if icon_action_button(ui, icon, tooltip, enabled).clicked() {
+        *flag = true;
+    }
+}
+
+fn chip_button(
+    ui: &mut egui::Ui,
+    text: egui::RichText,
+    selected: bool,
+    min_size: egui::Vec2,
+    padding: egui::Vec2,
+    tooltip: &str,
+) -> egui::Response {
+    ui.scope(|ui| {
+        ui.spacing_mut().button_padding = padding;
+        ui.add(
+            egui::Button::new(text)
+                .min_size(min_size)
+                .fill(if selected {
+                    tab_selected_bg(ui)
+                } else {
+                    action_hover_bg(ui)
+                })
+                .stroke(egui::Stroke::new(
+                    1.0,
+                    if selected {
+                        tab_selected_accent(ui)
+                    } else {
+                        border(ui)
+                    },
+                ))
+                .corner_radius(egui::CornerRadius::same(8)),
+        )
+        .on_hover_text(tooltip)
+    })
+    .inner
+}
+
+fn scope_tooltip(scope: SearchScope) -> &'static str {
+    match scope {
+        SearchScope::ActiveBuffer => "Search scope: Active buffer",
+        SearchScope::ActiveWorkspaceTab => "Search scope: Active workspace tab",
+        SearchScope::AllOpenTabs => "Search scope: All open tabs",
+    }
 }
 
 fn consume_find_input_keys(ui: &mut egui::Ui, actions: &mut SearchStripActions) {

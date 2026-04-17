@@ -339,6 +339,7 @@ impl ScratchpadApp {
         let Some(search_match) = self.search_state.matches.get(index).cloned() else {
             return false;
         };
+        let preserve_session_clean = !self.session_dirty();
 
         if search_match.tab_index != self.active_tab_index() {
             self.handle_command(AppCommand::ActivateTab {
@@ -354,6 +355,9 @@ impl ScratchpadApp {
                 view_id: search_match.view_id,
             });
             self.pending_editor_focus = None;
+        }
+        if preserve_session_clean {
+            self.clear_session_dirty();
         }
         self.set_active_search_index(Some(index));
         true

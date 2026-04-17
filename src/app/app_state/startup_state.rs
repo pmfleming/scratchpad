@@ -77,6 +77,7 @@ impl ScratchpadApp {
             selected_tab_slots: BTreeSet::new(),
             tab_selection_anchor: None,
             tab_rename_state: None,
+            startup_restore_conflicts: Vec::new(),
             workspace_reflow_axis: crate::app::domain::SplitAxis::Vertical,
             settings_preview_quote_index: 2,
         };

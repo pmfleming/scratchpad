@@ -1,381 +1,437 @@
-# Search / Replace Implementation Plan For Scratchpad
+# Command Interface And Windows Open With Plan
 
-This plan replaces the broader draft.
-here is another modification
-It is scoped to one implementation run and to the code that already exists today. The goal is to ship a solid active-buffer search and replace feature without promising cross-buffer behavior that the current editor and undo model do not support yet.
+This plan is based on the current Scratchpad architecture in `src/main.rs`, `src/app/app_state.rs`, `src/app/commands.rs`, `src/app/shortcuts.rs`, and `src/app/services/file_controller.rs`.
 
-## 1. Ship Target
+This document is now scoped to:
 
-Ship a compact search / replace strip that works on the active buffer only.
+- Windows Explorer `Open with`
+- direct command-line invocation
+- startup file-routing behavior
+- command-line switches for controlling how incoming files are opened
 
-First-run feature set:
+The command palette work has been moved into its own plan.
 
-- search strip near search button
-- whole-word matching
-- plain-text search in the active buffer, active workspace tab scope & all-open-tabs scope
-- `Ctrl + F` opens search (with replace visible)
-- next / previous match navigation
-- live match count with active match index
-- case-sensitive toggle
-- replace current match
-- replace all matches in the active buffer
-- `Esc` closes the strip and returns focus to the editor
-- toolbar search buttons open the strip instead of showing the current placeholder warning
+## Current Review
 
-## 2. Explicitly Deferred
+### What Already Exists
 
-These are out of scope for this run:
+- Scratchpad already has a solid internal action layer via `AppCommand` in `src/app/commands.rs`.
+- File opening logic is centralized in `FileController`, including duplicate-path detection, batch open, existing-tab activation, and `Open Here` behavior.
+- The app has top-level state in `ScratchpadApp`, which is the right place to host startup-open requests and startup-open policy.
+- Session restore already runs during app initialization, so startup requests can be layered on top after restore completes.
 
-- search on disk or unopened files
-- regex
-- query history
-- floating or anchored popup geometry
-- `Find Tab`
-- global multi-document undo for replace-all
+### Gaps Identified
 
-That narrower scope is deliberate. The current codebase already has enough editor state and selection plumbing to ship active-buffer search cleanly, but not enough proven undo-safe mutation plumbing to justify cross-buffer replace in the same pass.
+1. There is no startup argument parsing yet.
+   `src/main.rs` does not read `std::env::args_os()`, so Explorer and direct shell invocation cannot pass files or switches into the app.
 
-## 3. Current Codebase Reality
+2. There is no defined command-line grammar.
+   The app has no parsing rules for switches, no notion of open mode, no validation, and no user-facing error strategy for invalid combinations.
 
-The revised plan should be built around the code that already exists:
+3. File-open orchestration is reusable, but not yet exposed as a startup-facing interface.
+   `FileController` can already open multiple paths and route them correctly, but it currently expects UI-driven entrypoints.
 
-- `src/app/ui/tab_strip/actions.rs` still routes search buttons to `app.set_warning_status("Search is not implemented yet.")`
-- `EditorViewState` already stores:
-  - `cursor_range`
-  - `pending_cursor_range`
-  - `search_highlights`
-- `sync_text_edit_state_before_render` in `src/app/ui/editor_content/text_edit.rs` already applies `pending_cursor_range` back into `egui::TextEditState`
-- the text layouter in `src/app/ui/editor_content/text_edit.rs` currently renders one text format only, so search highlighting is not implemented yet
-- `apply_editor_change` in `src/app/ui/editor_area/mod.rs` is the current active-buffer post-edit finalization path
-- that finalization path already covers:
-  - metadata refresh
-  - dirty-state updates
-  - artifact warning/status updates
-  - transaction logging
-  - session dirty tracking
-  - `note_settings_toml_edit`
-- `TextDocument::replace_text` and `BufferState::replace_text` clear the document undoer, which makes them invalid write paths for search replacement
-- per-document undo exists, but there is no existing non-widget replacement helper that already proves undo preservation for search-driven edits
+4. Explorer integration is only partially an app problem.
+   Even once startup argument handling exists, Windows still needs a registration strategy so `Open with` launches Scratchpad with the expected arguments.
 
-Those constraints should drive the implementation. The plan should not assume a future abstraction layer or a future global undo model.
+## Goals
 
-## 4. Design Rules
+- Support command-line invocation of Scratchpad with files and switches.
+- Support Windows `Open with` on one or more files.
+- Add explicit startup-open switches such as `/clean` and `/addto`.
+- Support quoted, comma-delimited file lists when callers choose to pass files that way.
+- Reuse the existing file open and workspace routing logic instead of creating a second file-open path.
+- Keep duplicate-path activation and session restore behavior predictable.
 
-1. Search is an editor feature, not a tab-strip feature.
-2. Ccope picker is needed.
-3. All search ranges use character offsets. Search should also be aware that it may be searching the same text represneted in different encoding. (it should be able to find the text no matter which encoding is used)
-4. Replacement must use an undo-aware range-edit path, never whole-buffer replacement helpers.
-5. Replacement must reuse the same active-buffer finalization path as ordinary typing.
-6. The implementation should stay concrete and local to the current editor architecture instead of adding provider traits or future-facing abstractions.
+## Non-Goals For The First Pass
 
-## 5. Proposed Shape
+- Command palette UI or searchable in-app action palette.
+- Single-instance IPC so an already-running process receives new file-open requests.
+- Full installer and release packaging pipeline.
+- A large Unix-style CLI with dozens of editor automation verbs.
 
-### 5.1 App-owned search state
+## Proposed CLI Model
 
-Add search state directly to `ScratchpadApp`.
+## 1. Support Both Standard File Arguments And Explicit File Lists
 
-Recommended shape:
+Scratchpad should accept files in two ways:
+
+1. Standard positional arguments
+   Example:
+
+```text
+scratchpad.exe "C:\notes\a.txt" "C:\notes\b.txt"
+```
+
+2. Explicit comma-delimited file list inside one quoted argument
+   Example:
+
+```text
+scratchpad.exe /files:"C:\notes\a.txt","C:\notes\b.txt"
+```
+
+Why both should be supported:
+
+- Explorer and normal shell launches naturally provide repeated file arguments.
+- Some custom launchers, scripts, or registry commands may prefer one explicit `/files:` payload.
+- Supporting both reduces friction and avoids making shell registration more brittle than necessary.
+
+Recommended parsing rule:
+
+- Positional file arguments remain the primary and simplest input path.
+- `/files:` is an optional explicit override for callers that need a single-argument list.
+- If both are present, combine them in the order received.
+
+## 2. Define Startup Open Modes
+
+Add a small startup-open policy layer.
+
+Suggested shape:
 
 ```rust
-pub(crate) struct SearchState {
-    pub open: bool,
-    pub replace_open: bool,
-    pub query: String,
-    pub replacement: String,
-    pub match_case: bool,
-    pub active_match_index: Option<usize>,
-    pub matches: Vec<SearchMatch>,
-    pub buffer_id: Option<BufferId>,
-    pub focus_target: SearchFocusTarget,
-}
-
-pub(crate) struct SearchMatch {
-    pub range: std::ops::Range<usize>,
-}
-
-pub(crate) enum SearchFocusTarget {
-    FindInput,
-    ReplaceInput,
-    Editor,
+enum StartupOpenMode {
+    Default,
+    Clean,
+    AddTo,
 }
 ```
 
-Notes:
+Behavior:
 
-- `buffer_id` is enough to invalidate stale results when the user switches tabs or views
-- no scope enum is needed in this run
-- no provider layer is needed in this run
+- `Default`: restore session first, then open incoming files using the normal top-level open behavior.
+- `Clean`: ignore restored tabs for this launch and start from one clean new tab before processing incoming files.
+- `AddTo`: add incoming files into one specific existing or restored tab instead of opening them as separate top-level tabs.
 
-### 5.2 Search service
+## 3. Add The Requested Switches
 
-Add `src/app/services/search.rs` as a small, read-only helper module.
+### `/clean`
+
+Requested behavior:
+
+- "opens with a single new tab"
+
+Recommended interpretation:
+
+- Do not restore the previous session into the working UI for this launch.
+- Start with exactly one fresh untitled workspace tab.
+- Open incoming files after that clean start.
+
+Important edge case:
+
+- If `/clean` is supplied with no files, launch a blank window with one untitled tab.
+
+### `/addto`
+
+Requested behavior:
+
+- "add all the files to a specific tab"
+
+This needs a target selector, so `/addto` should not be a bare boolean switch.
+
+Recommended syntax:
+
+```text
+/addto:active
+/addto:index:2
+/addto:name:"notes"
+```
+
+Recommended first-pass support:
+
+- `/addto:active`
+- `/addto:index:N`
+
+Defer `/addto:name:` unless there is a strong use case, because tab titles are not guaranteed unique.
+
+Behavior:
+
+- Restore the session first unless `/clean` is also present.
+- Resolve the target workspace tab.
+- Add all incoming files into that tab using the same layout-building path as `Open Here`.
+
+Important rule:
+
+- `/addto` should be invalid together with `/clean` unless you explicitly define what tab is being targeted after the clean launch.
+
+Recommended compatibility rule:
+
+- Allow `/clean /addto:active` and interpret it as "create one clean tab, then add all incoming files into that new active tab."
+- Reject `/clean /addto:index:N` because there is no restored tab set to index into.
+
+### `/files:`
+
+Recommended new switch:
+
+```text
+/files:"C:\a.txt","C:\b.txt"
+```
+
+Behavior:
+
+- Parse one quoted, comma-delimited list of full file paths.
+- Trim surrounding whitespace around each item.
+- Preserve commas inside paths only if escaped support is intentionally added. For the first pass, document that commas in file names are not supported inside `/files:`.
+
+Why this switch is relevant:
+
+- It satisfies the explicit requirement for comma-delimited quoted file lists.
+- It gives registry scripts and automation a stable one-argument file-list mode.
+
+## 4. Add Other Relevant Switches
+
+The following switches are useful and low-risk in the same design:
+
+### `/here`
+
+Behavior:
+
+- Open incoming files into the current active workspace tab using the same behavior as `Open Here`.
+
+Why it belongs:
+
+- It maps directly to an existing app capability.
+- It is simpler than `/addto:index:N` for common scripting usage.
+
+### `/line:N`
+
+Behavior:
+
+- After opening one file, move the caret to line `N`.
+
+Why it belongs:
+
+- It is a common editor launch behavior.
+- It is useful for future integration from scripts or tooling.
+
+Why it may be deferred:
+
+- It requires explicit cursor placement support in the view model rather than only opening files.
+
+### `/help`
+
+Behavior:
+
+- Print usage information to stdout or show a message box in release builds if no console is attached.
+
+Why it belongs:
+
+- Once switches exist, usage output becomes necessary.
+
+### `/version`
+
+Behavior:
+
+- Print application version and exit.
+
+Why it belongs:
+
+- It is cheap to add and useful for scripts.
+
+## 5. Recommended Parsing Rules
+
+### Accepted Forms
+
+- `scratchpad.exe`
+- `scratchpad.exe "C:\a.txt"`
+- `scratchpad.exe "C:\a.txt" "C:\b.txt"`
+- `scratchpad.exe /clean`
+- `scratchpad.exe /clean "C:\a.txt"`
+- `scratchpad.exe /addto:active "C:\a.txt" "C:\b.txt"`
+- `scratchpad.exe /files:"C:\a.txt","C:\b.txt"`
+- `scratchpad.exe /here /files:"C:\a.txt","C:\b.txt"`
+
+### Validation Rules
+
+- Unknown switches should produce a startup warning and abort startup-open handling for safety.
+- `/addto` requires at least one incoming file.
+- `/here` and `/addto:*` should be mutually exclusive.
+- `/line:N` should only be valid when exactly one target file is resolved.
+- `/clean` with no files is valid.
+- Empty file list entries inside `/files:` should be ignored or rejected consistently. Prefer rejection with a clear error.
+
+## 6. Add A Startup Options Model
+
+Suggested shape:
+
+```rust
+struct StartupOptions {
+    mode: StartupOpenMode,
+    add_to_target: Option<StartupTabTarget>,
+    open_here: bool,
+    files: Vec<PathBuf>,
+    line: Option<usize>,
+}
+
+enum StartupTabTarget {
+    Active,
+    Index(usize),
+}
+```
+
+Where it should live:
+
+- In a small dedicated startup module, not inside `main.rs` directly.
+
+Suggested module:
+
+- `src/app/startup.rs`
 
 Responsibilities:
 
-- `find_matches(text, query, match_case) -> Vec<SearchMatch>`
-- `next_match_index(matches, current) -> Option<usize>`
-- `previous_match_index(matches, current) -> Option<usize>`
+- parse arguments
+- validate combinations
+- expose startup decisions to app construction
 
-This module should not mutate buffers. It only computes matches and navigation results.
+## 7. Apply Startup Requests After Session Decision
 
-### 5.3 Search UI
+Recommended startup flow:
 
-Add `src/app/ui/search_replace.rs` and render it from `src/app/ui/editor_area/mod.rs` above the pane tree.
+1. Parse CLI arguments into `StartupOptions`.
+2. Decide whether session restore is enabled for this launch.
+3. Construct the app.
+4. If restoring, restore the session first.
+5. Apply startup-open requests using the selected mode.
+6. Surface any failures through status and logging.
 
-The strip should contain:
+Important policy:
 
-- find input
-- replace input when replace mode is open
-- previous button
-- next button
-- match count label
-- case-sensitive toggle
-- replace current button
-- replace all button
-- close button
+- `Default`, `/here`, and `/addto:*` should restore the session first.
+- `/clean` should bypass the restored tab set and start from a single fresh tab.
 
-That placement fits the current UI structure:
+## 8. Reuse Existing FileController Paths
 
-- it works for top tabs and side tabs
-- it stays attached to the active editing surface
-- it avoids unrelated anchored-popup work
+Do not build a second file-open engine.
 
-## 6. Editor Integration
+Instead:
 
-### 6.1 Match computation
+- Expose a startup-safe non-dialog entrypoint from `FileController`.
+- Reuse the current batch open path for normal startup file opens.
+- Reuse the current `Open Here`-style path for `/here` and `/addto:*`.
 
-Recompute matches whenever any of these change:
+Recommended additions:
 
-- search query
-- case-sensitive toggle
-- active buffer
-- active-buffer text after a replacement
+- `open_external_paths(app, paths)` for normal top-level opens
+- `open_external_paths_here(app, paths)` for adding files into an existing workspace
+- `open_external_paths_into_tab(app, target, paths)` if `/addto:index:N` is kept distinct from `/here`
 
-Rules:
+## 9. Windows Open With Registration Strategy
 
-- empty query clears matches and highlights
-- if the old active match still exists at the same range after recompute, keep it
-- otherwise choose the first match when matches exist
+Explorer integration needs a shell-registration path that launches Scratchpad with the correct arguments.
 
-### 6.2 Navigation
+Recommended first-pass registration:
 
-Use the existing `pending_cursor_range` path.
+- Register Scratchpad as an `Open with` target using repeated file arguments.
 
-When the active match changes:
+Preferred shell command shape:
 
-- set the active view's `pending_cursor_range`
-- update `search_highlights.active_range_index`
-- let `TextEdit` restore the selection on the next render
+```text
+"C:\Path\To\scratchpad.exe" "%1"
+```
 
-No custom scrolling helper is required for first ship.
+For multi-select support, evaluate shell behavior carefully and prefer repeated arguments if the registration path supports them.
 
-### 6.3 Highlight rendering
+Only use `/files:` in the registry command if repeated arguments are too awkward for the selected registration mechanism.
 
-Extend the layouter path in `src/app/ui/editor_content/text_edit.rs` so it can build a `LayoutJob` with:
+## Implementation Phases
 
-- normal text
-- passive search match styling
-- active search match styling
+## Phase 1: CLI Parsing And Startup Model
 
-Do not use overlay painting for first ship. The current text-edit bridge is already the right seam for highlight rendering because it owns the layouter and captures the latest rendered layout there.
+- Add a startup parsing module.
+- Parse positional file arguments.
+- Parse `/clean`, `/addto:*`, `/files:`, `/here`, `/help`, and `/version`.
+- Validate conflicting combinations.
 
-## 7. Replacement Path
+Definition of done:
 
-This is the main place where the previous plan was too optimistic. The current code does not yet have a proven non-widget replacement path that preserves document undo.
+- Startup options can be parsed deterministically from a raw argument list.
 
-### 7.1 Required extraction
+## Phase 2: Startup File Routing
 
-Extract the active-buffer finalization logic out of `apply_editor_change` into a reusable helper on `ScratchpadApp`.
+- Add startup options to app construction.
+- Decide restore-vs-clean behavior.
+- Add a public non-dialog file-open path in `FileController`.
+- Route `/here` and `/addto:*` through workspace-aware open logic.
 
-Target shape:
+Definition of done:
 
-- one helper that finalizes the active buffer after a text mutation
-- normal typing calls it
-- search replacement calls it
+- Direct shell launch with files opens them correctly.
+- `/clean` works.
+- `/addto:active` works.
 
-That helper should continue to cover:
+## Phase 3: Extended Targeting And Quality Of Life Switches
 
-- `refresh_text_metadata`
-- dirty-state updates
-- artifact warning/status updates
-- transaction logging
-- session dirty tracking
-- `note_settings_toml_edit`
+- Add `/addto:index:N`.
+- Add `/help` and `/version`.
+- Decide whether `/line:N` is ready or should be deferred.
+- Add explicit logging for CLI parsing and startup execution.
 
-This is enough for first ship. A multi-buffer finalization abstraction is not needed until cross-buffer replace is actually in scope.
+Definition of done:
 
-### 7.2 Required write helper
+- Startup switch behavior is documented and testable.
 
-Add an undo-aware active-buffer replacement helper in `src/app/domain/buffer.rs` or the closest active-buffer edit seam.
+## Phase 4: Windows Registration
 
-Requirements:
+- Add documentation for local shell registration.
+- Add a PowerShell or `.reg` helper for local development.
+- Validate quoted paths, spaces, and multi-file launches.
 
-- operate on character ranges
-- replace one range or many ranges in descending order
-- never call `replace_text`
-- explicitly preserve or rebuild the document undo state so `Ctrl + Z` still works after replacement
-- update the resulting selection so the next render can target the correct match
+Definition of done:
 
-Important constraint:
+- A user can choose Scratchpad from Windows `Open with` and the selected file opens with the expected startup mode.
 
-- do not assume direct `insert_text` and `delete_char_range` calls are already enough for undo preservation
+## Testing Plan
 
-The implementation order should be:
+## Unit Tests
 
-1. add the helper
-2. test undo behavior directly
-3. only then wire replace-current and replace-all
+- parse no args
+- parse positional files
+- parse `/files:` comma list
+- parse `/clean`
+- parse `/addto:active`
+- parse `/addto:index:N`
+- reject invalid switch combinations
+- reject malformed `/files:` payloads
 
-### 7.3 Replacement semantics
+## Integration Tests
 
-`Replace Current`:
+- startup open with one file
+- startup open with multiple files
+- `/clean` starts from one fresh tab
+- `/addto:active` adds all files into one workspace
+- duplicate existing paths activate instead of duplicating
+- invalid files are skipped with status/log output
 
-1. validate that the active match index is still valid
-2. replace that one range
-3. finalize the active buffer through the shared helper
-4. recompute matches
-5. move to the next sensible match
+## Manual Windows Verification
 
-`Replace All`:
+- direct executable launch from PowerShell
+- paths containing spaces
+- `Open with` from Explorer
+- multi-file Explorer selection
+- registry command quoting validation
 
-1. collect current matches for the active buffer
-2. apply replacements in descending range order
-3. finalize the active buffer through the shared helper
-4. recompute matches
-5. show a short status summary
+## Risks And Watchouts
 
-## 8. Commands And Shortcuts
+1. `src/app/services/file_controller.rs` is already a hotspot.
+   The startup-open entrypoint should be extracted carefully rather than piling more orchestration into one file.
 
-Extend `AppCommand` with search commands such as:
+2. `/files:` parsing can become fragile quickly.
+   Keep the first version intentionally narrow and document unsupported edge cases such as commas in file names.
 
-- `OpenSearch`
-- `OpenSearchAndReplace`
-- `CloseSearch`
-- `NextSearchMatch`
-- `PreviousSearchMatch`
-- `ReplaceCurrentMatch`
-- `ReplaceAllMatches`
+3. `/addto:index:N` depends on restored or current tab ordering.
+   That makes it less stable than `/addto:active`, so it should be introduced after the active-target version is solid.
 
-Shortcut plan:
+4. `Open with` may not pass arguments exactly the same way as manual shell launch.
+   The registry command should be tested manually before the switch grammar is treated as final.
 
-- `Ctrl + F` opens search and focuses the find input
-- `Ctrl + H` opens replace and focuses the find input
-- `Enter` in the find input selects the next match
-- `Shift + Enter` in the find input selects the previous match
-- `Esc` closes the strip and returns focus to the editor
+## Recommended First Implementation Slice
 
-Important current constraint:
+If the work should be broken into the smallest useful vertical slice, do this first:
 
-- global shortcut handling is mostly focus-agnostic
-- `Enter`, `Shift + Enter`, and `Esc` should be handled by the search-strip widgets locally instead of assuming the global shortcut layer already models input focus well enough
+1. Add positional file-argument parsing.
+2. Add `/clean`.
+3. Add a non-dialog external-open entrypoint.
+4. Verify direct executable launch.
+5. Add `/here` and `/addto:active`.
+6. Add `/files:` only after the basic startup-open path is working.
 
-## 9. File Plan
-
-New files:
-
-- `src/app/services/search.rs`
-- `src/app/ui/search_replace.rs`
-
-Expected edits:
-
-- `src/app/app_state.rs`
-- `src/app/commands.rs`
-- `src/app/commands/dispatch.rs`
-- `src/app/shortcuts.rs`
-- `src/app/domain/buffer.rs`
-- `src/app/domain/view.rs`
-- `src/app/ui/editor_area/mod.rs`
-- `src/app/ui/editor_content/text_edit.rs`
-- `src/app/ui/tab_strip/actions.rs`
-- `src/app/ui/mod.rs`
-- `src/app/services/mod.rs`
-
-Likely docs to update after implementation:
-
-- `README.md`
-- `PLAN.md`
-- `docs/user-manual.md`
-
-## 10. Single-Run Implementation Order
-
-This is the order that fits one development pass without inventing extra architecture:
-
-1. add `SearchState`, commands, and shortcut entry points
-2. add the search strip UI and wire the toolbar search buttons to open it
-3. add the plain-text search service and active-buffer recompute logic
-4. wire active-match navigation through `pending_cursor_range`
-5. extend the text layouter to render passive and active highlights
-6. extract the active-buffer post-edit finalization helper from `apply_editor_change`
-7. add the undo-aware active-buffer replacement helper and test it in isolation
-8. wire `Replace Current` and `Replace All` for the active buffer
-9. add status text, focus polish, and docs
-
-If step 7 cannot preserve expected document undo behavior cleanly, stop there and ship search-only first. That is a better result than landing replace behavior that silently regresses undo.
-
-## 11. Test Plan
-
-### Service tests
-
-Add tests for:
-
-- empty query
-- no matches
-- repeated matches
-- case-sensitive vs case-insensitive behavior
-- Unicode text
-- next / previous wrap behavior
-
-### Buffer/edit tests
-
-Add unit tests for the new replacement helper:
-
-- replace one range
-- replace many ranges in descending order
-- overlapping ranges are rejected or never produced
-- undo restores the previous text
-- resulting selection/cursor state is predictable after replacement
-
-### App tests
-
-Add integration-style tests for:
-
-- `Ctrl + F` opens the strip
-- `Ctrl + H` opens replace mode
-- `Esc` closes the strip
-- next / previous navigation updates the active selection
-- replace current changes only the active buffer
-- replace all updates all matches in the active buffer
-- replacing inside `settings.toml` still triggers the existing settings-refresh follow-up
-
-### UI logic tests
-
-Add focused tests for:
-
-- active-match selection after recompute
-- search state reset when the active buffer changes
-- highlight state clearing when the query becomes empty
-
-## 12. Definition Of Done
-
-This plan is complete when all of the following are true:
-
-- search and replace are available from `Ctrl + F`, `Ctrl + H`, and the toolbar search button
-- the strip works on the active buffer only, and does that reliably
-- highlights and match navigation stay synchronized with the editor selection
-- replace operations do not use undo-clearing whole-buffer helpers
-- replace operations preserve expected document undo behavior
-- normal typing and search replacement share the same active-buffer finalization path
-- replacements inside `settings.toml` still participate in the existing settings-refresh flow
-- the user manual and plan docs reflect the shipped scope
-
-## 13. Deferred Follow-Up
-
-After the active-buffer feature ships and proves stable, the next logical extensions are:
-
-- active workspace tab scope
-- all-open-tabs scope
-- better replace-all summaries
-- regex and whole-word options
-- explicit scroll-to-match polish if the default `TextEdit` behavior is not enough
-
-That order matters. Cross-buffer scope should come after the active-buffer replacement path is proven safe for undo, selection sync, and settings refresh.
+That sequence delivers the simplest reliable startup behavior first, then layers on more specific command-line control.

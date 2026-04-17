@@ -572,6 +572,68 @@ fn activating_clean_tab_reloads_newer_disk_content() {
 }
 
 #[test]
+fn startup_restore_conflict_can_open_disk_version_for_comparison() {
+    let session_root = tempfile::tempdir().expect("create session root");
+    let session_path = session_root.path().to_path_buf();
+    let file_path = session_root.path().join("notes.txt");
+    fs::write(&file_path, "disk original\n").expect("write original disk version");
+
+    let mut original = ScratchpadApp::with_session_store(SessionStore::new(session_path.clone()));
+    FileController::open_external_paths(&mut original, vec![file_path.clone()]);
+    let file_tab_index = original.active_tab_index();
+    let buffer = original.tabs_mut()[file_tab_index].active_buffer_mut();
+    buffer.replace_text("session version\n".to_owned());
+    buffer.is_dirty = true;
+    original.persist_session_now().expect("persist session");
+    drop(original);
+
+    fs::write(&file_path, "disk changed\n").expect("write changed disk version");
+
+    let mut restored = ScratchpadApp::with_session_store(SessionStore::new(session_path));
+    let (restored_file_tab_index, _) = restored
+        .find_tab_by_path(&file_path)
+        .expect("restored file tab should exist");
+    assert_eq!(
+        restored.tabs()[restored_file_tab_index]
+            .active_buffer()
+            .text(),
+        "session version\n"
+    );
+    assert_eq!(
+        restored.tabs()[restored_file_tab_index]
+            .active_buffer()
+            .freshness,
+        BufferFreshness::ConflictOnDisk
+    );
+    assert_eq!(restored.startup_restore_conflict_count(), 1);
+
+    assert!(restored.open_disk_version_for_current_startup_restore_conflict());
+    assert_eq!(restored.startup_restore_conflict_count(), 0);
+    let compare_tab_index = restored.active_tab_index();
+    assert_eq!(restored.tabs().len(), 3);
+    assert_eq!(
+        restored.tabs()[restored_file_tab_index]
+            .active_buffer()
+            .text(),
+        "session version\n"
+    );
+    assert_eq!(
+        restored.tabs()[compare_tab_index].active_buffer().text(),
+        "disk changed\n"
+    );
+    assert_eq!(
+        restored.tabs()[compare_tab_index].active_buffer().name,
+        "notes.txt (Disk)"
+    );
+    assert!(
+        restored.tabs()[compare_tab_index]
+            .active_buffer()
+            .path
+            .is_none()
+    );
+}
+
+#[test]
 fn combining_multiple_tabs_rebalances_workspace_equally() {
     let mut app = app_with_named_tabs(&["one.txt", "two.txt", "three.txt", "four.txt"]);
 

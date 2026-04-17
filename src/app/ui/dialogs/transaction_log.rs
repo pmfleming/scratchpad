@@ -34,12 +34,47 @@ enum TransactionFilter {
 }
 
 impl TransactionFilter {
+    const ALL: [Self; 4] = [
+        Self::All,
+        Self::FileChanges,
+        Self::TabOperations,
+        Self::Modifications,
+    ];
+
     fn label(self) -> &'static str {
         match self {
             Self::All => "All",
             Self::FileChanges => "File changes",
             Self::TabOperations => "Tab operations",
             Self::Modifications => "Modifications",
+        }
+    }
+
+    fn matches_category(self, category: TransactionCategory) -> bool {
+        matches!(self, Self::All)
+            || matches!(
+                (self, category),
+                (Self::FileChanges, TransactionCategory::FileChanges)
+                    | (Self::TabOperations, TransactionCategory::TabOperations)
+                    | (Self::Modifications, TransactionCategory::Modifications)
+            )
+    }
+
+    fn persisted_value(self) -> u8 {
+        match self {
+            Self::All => 0,
+            Self::FileChanges => 1,
+            Self::TabOperations => 2,
+            Self::Modifications => 3,
+        }
+    }
+
+    fn from_persisted_value(value: u8) -> Self {
+        match value {
+            1 => Self::FileChanges,
+            2 => Self::TabOperations,
+            3 => Self::Modifications,
+            _ => Self::All,
         }
     }
 }
@@ -57,6 +92,20 @@ impl TransactionCategory {
             Self::FileChanges => FILE_TEXT,
             Self::TabOperations => ARROWS_SPLIT,
             Self::Modifications => PENCIL_SIMPLE_LINE,
+        }
+    }
+
+    fn from_entry(entry: &TransactionLogEntry) -> Self {
+        let label = entry.action_label.to_ascii_lowercase();
+        if contains_any(&label, &["tab", "split", "combine", "promote", "view"]) {
+            Self::TabOperations
+        } else if contains_any(
+            &label,
+            &["file", "save", "open", "reload", "reopen", "rename"],
+        ) {
+            Self::FileChanges
+        } else {
+            Self::Modifications
         }
     }
 }
@@ -134,13 +183,24 @@ fn render_transaction_log_window(
         if filtered_entries.is_empty() {
             render_empty_state(ui, entries.is_empty());
         } else {
-            render_section_label(ui);
+            ui.label(
+                egui::RichText::new(TRANSACTION_LOG_SECTION_LABEL)
+                    .size(12.0)
+                    .color(text_muted(ui))
+                    .strong(),
+            );
             ui.add_space(10.0);
             render_entry_list(ui, &filtered_entries, undo_entry_id);
             ui.add_space(10.0);
             divider(ui);
             ui.add_space(12.0);
-            render_footer(ui, filtered_entries.len());
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(entry_count_label(filtered_entries.len()))
+                        .size(13.0)
+                        .color(text_muted(ui)),
+                );
+            });
         }
     });
 }
@@ -157,7 +217,18 @@ fn render_dialog_header(ui: &mut egui::Ui) -> bool {
 
 fn render_panel_intro(ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
-        render_intro_icon(ui);
+        ui.allocate_ui(egui::vec2(28.0, 28.0), |ui| {
+            ui.with_layout(
+                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                |ui| {
+                    ui.label(
+                        egui::RichText::new(SLIDERS_HORIZONTAL)
+                            .font(egui::FontId::proportional(18.0))
+                            .color(text_primary(ui)),
+                    );
+                },
+            );
+        });
         ui.add_space(12.0);
         ui.vertical(|ui| {
             ui.label(
@@ -174,21 +245,6 @@ fn render_panel_intro(ui: &mut egui::Ui) {
     });
 }
 
-fn render_intro_icon(ui: &mut egui::Ui) {
-    ui.allocate_ui(egui::vec2(28.0, 28.0), |ui| {
-        ui.with_layout(
-            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-            |ui| {
-                ui.label(
-                    egui::RichText::new(SLIDERS_HORIZONTAL)
-                        .font(egui::FontId::proportional(18.0))
-                        .color(text_primary(ui)),
-                );
-            },
-        );
-    });
-}
-
 fn render_filter_row(
     ui: &mut egui::Ui,
     filter: &mut TransactionFilter,
@@ -197,12 +253,7 @@ fn render_filter_row(
     clear_requested: &mut bool,
 ) {
     ui.horizontal(|ui| {
-        for option in [
-            TransactionFilter::All,
-            TransactionFilter::FileChanges,
-            TransactionFilter::TabOperations,
-            TransactionFilter::Modifications,
-        ] {
+        for option in TransactionFilter::ALL {
             if filter_chip(ui, option.label(), *filter == option).clicked() {
                 *filter = option;
                 store_transaction_filter(ui, filter_id, option);
@@ -277,15 +328,6 @@ fn render_empty_state(ui: &mut egui::Ui, log_is_empty: bool) {
     ui.add_space(32.0);
 }
 
-fn render_section_label(ui: &mut egui::Ui) {
-    ui.label(
-        egui::RichText::new(TRANSACTION_LOG_SECTION_LABEL)
-            .size(12.0)
-            .color(text_muted(ui))
-            .strong(),
-    );
-}
-
 fn render_entry_list(
     ui: &mut egui::Ui,
     entries: &[&TransactionLogEntry],
@@ -307,7 +349,7 @@ fn render_entry_row(
     entry: &TransactionLogEntry,
     undo_entry_id: &mut Option<u64>,
 ) {
-    let category = transaction_category(entry);
+    let category = TransactionCategory::from_entry(entry);
     let subtitle = transaction_log_subtitle(entry);
     transaction_entry_frame(ui).show(ui, |ui| {
         ui.allocate_ui_with_layout(
@@ -387,66 +429,14 @@ fn render_row_icon(ui: &mut egui::Ui, category: TransactionCategory) {
     });
 }
 
-fn render_footer(ui: &mut egui::Ui, entry_count: usize) {
-    ui.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new(entry_count_label(entry_count))
-                .size(13.0)
-                .color(text_muted(ui)),
-        );
-    });
-}
-
 fn filtered_entries(
     entries: &[TransactionLogEntry],
     filter: TransactionFilter,
 ) -> Vec<&TransactionLogEntry> {
     entries
         .iter()
-        .filter(|entry| match filter {
-            TransactionFilter::All => true,
-            TransactionFilter::FileChanges => {
-                matches!(
-                    transaction_category(entry),
-                    TransactionCategory::FileChanges
-                )
-            }
-            TransactionFilter::TabOperations => {
-                matches!(
-                    transaction_category(entry),
-                    TransactionCategory::TabOperations
-                )
-            }
-            TransactionFilter::Modifications => {
-                matches!(
-                    transaction_category(entry),
-                    TransactionCategory::Modifications
-                )
-            }
-        })
+        .filter(|entry| filter.matches_category(TransactionCategory::from_entry(entry)))
         .collect()
-}
-
-fn transaction_category(entry: &TransactionLogEntry) -> TransactionCategory {
-    let label = entry.action_label.to_ascii_lowercase();
-    if label.contains("tab")
-        || label.contains("split")
-        || label.contains("combine")
-        || label.contains("promote")
-        || label.contains("view")
-    {
-        TransactionCategory::TabOperations
-    } else if label.contains("file")
-        || label.contains("save")
-        || label.contains("open")
-        || label.contains("reload")
-        || label.contains("reopen")
-        || label.contains("rename")
-    {
-        TransactionCategory::FileChanges
-    } else {
-        TransactionCategory::Modifications
-    }
 }
 
 fn transaction_log_subtitle(entry: &TransactionLogEntry) -> Option<Cow<'_, str>> {
@@ -508,23 +498,16 @@ fn divider(ui: &mut egui::Ui) {
 }
 
 fn load_transaction_filter(ui: &mut egui::Ui, id: egui::Id) -> TransactionFilter {
-    match ui
-        .data_mut(|data| data.get_persisted::<u8>(id))
-        .unwrap_or(0)
-    {
-        1 => TransactionFilter::FileChanges,
-        2 => TransactionFilter::TabOperations,
-        3 => TransactionFilter::Modifications,
-        _ => TransactionFilter::All,
-    }
+    TransactionFilter::from_persisted_value(
+        ui.data_mut(|data| data.get_persisted::<u8>(id))
+            .unwrap_or_default(),
+    )
 }
 
 fn store_transaction_filter(ui: &mut egui::Ui, id: egui::Id, filter: TransactionFilter) {
-    let value = match filter {
-        TransactionFilter::All => 0,
-        TransactionFilter::FileChanges => 1,
-        TransactionFilter::TabOperations => 2,
-        TransactionFilter::Modifications => 3,
-    };
-    ui.data_mut(|data| data.insert_persisted(id, value));
+    ui.data_mut(|data| data.insert_persisted(id, filter.persisted_value()));
+}
+
+fn contains_any(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
 }

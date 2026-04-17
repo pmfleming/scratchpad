@@ -17,32 +17,26 @@ pub fn find_matches(text: &str, query: &str, options: SearchOptions) -> Vec<Rang
         return find_matches_case_sensitive(text, query, options.whole_word);
     }
     if text.is_ascii() && query.is_ascii() {
-        return find_matches_ascii_case_insensitive(text, query, options.whole_word);
+        let mut should_continue = || true;
+        return find_matches_ascii_case_insensitive_impl(
+            text.as_bytes(),
+            query.as_bytes(),
+            options.whole_word,
+            false,
+            &mut should_continue,
+        )
+        .unwrap_or_default();
     }
 
-    let query_char_len = query.chars().count();
-    let text_chars = text.chars().collect::<Vec<_>>();
-    if query_char_len > text_chars.len() {
-        return Vec::new();
-    }
-
-    let char_to_byte = char_to_byte_map(text);
-    let folded_query = query.to_lowercase();
-    let mut matches = Vec::new();
-
-    for start in 0..=text_chars.len() - query_char_len {
-        let end = start + query_char_len;
-        let candidate = &text[char_to_byte[start]..char_to_byte[end]];
-        if candidate.to_lowercase() != folded_query {
-            continue;
-        }
-        if options.whole_word && !is_whole_word_match(&text_chars, start, end) {
-            continue;
-        }
-        matches.push(start..end);
-    }
-
-    matches
+    let mut should_continue = || true;
+    find_matches_unicode_case_insensitive_impl(
+        text,
+        query,
+        options.whole_word,
+        false,
+        &mut should_continue,
+    )
+    .unwrap_or_default()
 }
 
 pub fn find_matches_interruptible<F>(
@@ -67,49 +61,22 @@ where
         );
     }
     if text.is_ascii() && query.is_ascii() {
-        return find_matches_ascii_case_insensitive_interruptible(
-            text,
-            query,
+        return find_matches_ascii_case_insensitive_impl(
+            text.as_bytes(),
+            query.as_bytes(),
             options.whole_word,
-            should_continue,
+            true,
+            &mut should_continue,
         );
     }
 
-    let query_char_len = query.chars().count();
-    let text_chars = text.chars().collect::<Vec<_>>();
-    if query_char_len > text_chars.len() {
-        return Some(Vec::new());
-    }
-
-    let char_to_byte = char_to_byte_map(text);
-    let folded_query = (!options.match_case).then(|| query.to_lowercase());
-    let mut matches = Vec::new();
-
-    for start in 0..=text_chars.len() - query_char_len {
-        if start % INTERRUPT_CHECK_INTERVAL == 0 && !should_continue() {
-            return None;
-        }
-        let end = start + query_char_len;
-        let candidate = &text[char_to_byte[start]..char_to_byte[end]];
-        let candidate_matches = if options.match_case {
-            candidate == query
-        } else {
-            candidate.to_lowercase() == folded_query.as_deref().unwrap_or_default()
-        };
-        if !candidate_matches {
-            continue;
-        }
-        if options.whole_word && !is_whole_word_match(&text_chars, start, end) {
-            continue;
-        }
-        matches.push(start..end);
-    }
-
-    if !should_continue() {
-        return None;
-    }
-
-    Some(matches)
+    find_matches_unicode_case_insensitive_impl(
+        text,
+        query,
+        options.whole_word,
+        true,
+        &mut should_continue,
+    )
 }
 
 fn find_matches_case_sensitive_interruptible<F>(
@@ -126,11 +93,15 @@ where
     }
 
     let byte_to_char = byte_to_char_map(text);
-    let text_chars = whole_word.then(|| text.chars().collect::<Vec<_>>());
+    let whole_word_matcher = WholeWordMatcher::new(text, whole_word);
     let mut matches = Vec::new();
 
-    for (step, start_byte) in text.char_indices().map(|(byte_index, _)| byte_index).enumerate() {
-        if step % INTERRUPT_CHECK_INTERVAL == 0 && !should_continue() {
+    for (step, start_byte) in text
+        .char_indices()
+        .map(|(byte_index, _)| byte_index)
+        .enumerate()
+    {
+        if should_abort(step, true, &mut should_continue) {
             return None;
         }
 
@@ -144,41 +115,32 @@ where
 
         let start = byte_to_char[start_byte];
         let end = byte_to_char[end_byte];
-        if whole_word
-            && text_chars
-                .as_deref()
-                .is_some_and(|chars| !is_whole_word_match(chars, start, end))
-        {
+        if !whole_word_matcher.allows(start, end) {
             continue;
         }
         matches.push(start..end);
     }
 
-    if !should_continue() {
-        return None;
-    }
-
-    Some(matches)
+    finalize_matches(matches, true, &mut should_continue)
 }
 
-fn find_matches_ascii_case_insensitive_interruptible<F>(
-    text: &str,
-    query: &str,
+fn find_matches_ascii_case_insensitive_impl<F>(
+    text_bytes: &[u8],
+    query_bytes: &[u8],
     whole_word: bool,
+    interruptible: bool,
     mut should_continue: F,
 ) -> Option<Vec<Range<usize>>>
 where
     F: FnMut() -> bool,
 {
-    let text_bytes = text.as_bytes();
-    let query_bytes = query.as_bytes();
     if query_bytes.len() > text_bytes.len() {
         return Some(Vec::new());
     }
 
     let mut matches = Vec::new();
     for start in 0..=text_bytes.len() - query_bytes.len() {
-        if start % INTERRUPT_CHECK_INTERVAL == 0 && !should_continue() {
+        if should_abort(start, interruptible, &mut should_continue) {
             return None;
         }
 
@@ -192,78 +154,71 @@ where
         matches.push(start..end);
     }
 
-    if !should_continue() {
-        return None;
-    }
-
-    Some(matches)
+    finalize_matches(matches, interruptible, &mut should_continue)
 }
 
 pub fn next_match_index(total_matches: usize, current: Option<usize>) -> Option<usize> {
-    match total_matches {
-        0 => None,
-        _ => Some(current.map_or(0, |index| (index + 1) % total_matches)),
-    }
+    (total_matches > 0).then(|| current.map_or(0, |index| (index + 1) % total_matches))
 }
 
 pub fn previous_match_index(total_matches: usize, current: Option<usize>) -> Option<usize> {
-    match total_matches {
-        0 => None,
-        _ => Some(current.map_or(total_matches - 1, |index| {
-            if index == 0 {
-                total_matches - 1
-            } else {
-                index - 1
-            }
-        })),
-    }
+    (total_matches > 0).then(|| {
+        current.map_or(total_matches - 1, |index| {
+            index.checked_sub(1).unwrap_or(total_matches - 1)
+        })
+    })
 }
 
 fn find_matches_case_sensitive(text: &str, query: &str, whole_word: bool) -> Vec<Range<usize>> {
-    let mut matches = Vec::new();
     let byte_to_char = byte_to_char_map(text);
-    let text_chars = whole_word.then(|| text.chars().collect::<Vec<_>>());
+    let whole_word_matcher = WholeWordMatcher::new(text, whole_word);
 
-    for (start_byte, candidate) in text.match_indices(query) {
-        let start = byte_to_char[start_byte];
-        let end = start + candidate.chars().count();
-        if whole_word
-            && text_chars
-                .as_deref()
-                .is_some_and(|chars| !is_whole_word_match(chars, start, end))
-        {
-            continue;
-        }
-        matches.push(start..end);
-    }
-
-    matches
+    text.match_indices(query)
+        .filter_map(|(start_byte, candidate)| {
+            let end_byte = start_byte + candidate.len();
+            let start = byte_to_char[start_byte];
+            let end = byte_to_char[end_byte];
+            whole_word_matcher.allows(start, end).then_some(start..end)
+        })
+        .collect()
 }
 
-fn find_matches_ascii_case_insensitive(
+fn find_matches_unicode_case_insensitive_impl<F>(
     text: &str,
     query: &str,
     whole_word: bool,
-) -> Vec<Range<usize>> {
-    let folded_text = text.to_ascii_lowercase();
-    let folded_query = query.to_ascii_lowercase();
-    let mut matches = Vec::new();
-    let text_chars = whole_word.then(|| text.chars().collect::<Vec<_>>());
+    interruptible: bool,
+    mut should_continue: F,
+) -> Option<Vec<Range<usize>>>
+where
+    F: FnMut() -> bool,
+{
+    let query_char_len = query.chars().count();
+    let char_to_byte = char_to_byte_map(text);
+    let char_count = char_to_byte.len().saturating_sub(1);
+    if query_char_len > char_count {
+        return Some(Vec::new());
+    }
 
-    for (start_byte, candidate) in folded_text.match_indices(&folded_query) {
-        let start = start_byte;
-        let end = start + candidate.len();
-        if whole_word
-            && text_chars
-                .as_deref()
-                .is_some_and(|chars| !is_whole_word_match(chars, start, end))
+    let whole_word_matcher = WholeWordMatcher::new(text, whole_word);
+    let mut matches = Vec::new();
+
+    for start in 0..=char_count - query_char_len {
+        if should_abort(start, interruptible, &mut should_continue) {
+            return None;
+        }
+
+        let end = start + query_char_len;
+        let candidate = &text[char_to_byte[start]..char_to_byte[end]];
+        if !matches_unicode_case_insensitive(candidate, query)
+            || !whole_word_matcher.allows(start, end)
         {
             continue;
         }
         matches.push(start..end);
     }
 
-    matches
+    finalize_matches(matches, interruptible, &mut should_continue)
 }
 
 fn byte_to_char_map(text: &str) -> Vec<usize> {
@@ -296,6 +251,13 @@ fn is_word_char(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '_'
 }
 
+fn matches_unicode_case_insensitive(candidate: &str, query: &str) -> bool {
+    candidate
+        .chars()
+        .flat_map(char::to_lowercase)
+        .eq(query.chars().flat_map(char::to_lowercase))
+}
+
 fn is_ascii_whole_word_match(text_bytes: &[u8], start: usize, end: usize) -> bool {
     let before_is_word = start > 0 && is_ascii_word_char(text_bytes[start - 1]);
     let after_is_word = end < text_bytes.len() && is_ascii_word_char(text_bytes[end]);
@@ -304,6 +266,46 @@ fn is_ascii_whole_word_match(text_bytes: &[u8], start: usize, end: usize) -> boo
 
 fn is_ascii_word_char(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+fn should_abort<F>(step: usize, interruptible: bool, should_continue: &mut F) -> bool
+where
+    F: FnMut() -> bool,
+{
+    interruptible && step.is_multiple_of(INTERRUPT_CHECK_INTERVAL) && !should_continue()
+}
+
+fn finalize_matches<F>(
+    matches: Vec<Range<usize>>,
+    interruptible: bool,
+    should_continue: &mut F,
+) -> Option<Vec<Range<usize>>>
+where
+    F: FnMut() -> bool,
+{
+    if interruptible && !should_continue() {
+        None
+    } else {
+        Some(matches)
+    }
+}
+
+struct WholeWordMatcher {
+    chars: Option<Vec<char>>,
+}
+
+impl WholeWordMatcher {
+    fn new(text: &str, enabled: bool) -> Self {
+        Self {
+            chars: enabled.then(|| text.chars().collect()),
+        }
+    }
+
+    fn allows(&self, start: usize, end: usize) -> bool {
+        self.chars
+            .as_deref()
+            .is_none_or(|chars| is_whole_word_match(chars, start, end))
+    }
 }
 
 #[cfg(test)]
@@ -365,8 +367,13 @@ mod tests {
 
     #[test]
     fn interruptible_search_supports_ascii_case_insensitive_matches() {
-        let matches = find_matches_interruptible("Alpha alpha ALPHA", "alpha", SearchOptions::default(), || true)
-            .expect("search should complete");
+        let matches = find_matches_interruptible(
+            "Alpha alpha ALPHA",
+            "alpha",
+            SearchOptions::default(),
+            || true,
+        )
+        .expect("search should complete");
 
         assert_eq!(matches, vec![0..5, 6..11, 12..17]);
     }

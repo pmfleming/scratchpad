@@ -51,5 +51,6 @@ fn apply_restored_session(app: &mut ScratchpadApp, restored: RestoredSession) ->
     }
     app.tab_manager_mut().tabs = restored.tabs;
     app.tab_manager_mut().active_tab_index = restored.active_tab_index;
+    app.refresh_startup_restore_conflicts();
     restored.legacy_settings
 }

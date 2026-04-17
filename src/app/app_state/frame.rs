@@ -42,6 +42,7 @@ impl ScratchpadApp {
         paint_root_background(ui, self.editor_background_color());
         self.render_tab_chrome(ui);
         self.render_active_surface(ui);
+        dialogs::show_startup_restore_conflict_modal(ctx, self);
         dialogs::show_pending_action_modal(ctx, self);
         dialogs::show_encoding_window(ctx, self);
         dialogs::show_transaction_log_window(ctx, self);

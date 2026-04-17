@@ -36,6 +36,14 @@ pub(crate) struct TabRenameState {
     pub(crate) request_focus: bool,
 }
 
+#[derive(Clone)]
+pub(crate) struct StartupRestoreConflict {
+    pub(crate) tab_index: usize,
+    pub(crate) view_id: ViewId,
+    pub(crate) buffer_name: String,
+    pub(crate) path: PathBuf,
+}
+
 pub struct ScratchpadApp {
     pub(crate) tab_manager: TabManager,
     pub(crate) app_settings: AppSettings,
@@ -64,6 +72,7 @@ pub struct ScratchpadApp {
     pub(crate) selected_tab_slots: BTreeSet<usize>,
     pub(crate) tab_selection_anchor: Option<usize>,
     pub(crate) tab_rename_state: Option<TabRenameState>,
+    pub(crate) startup_restore_conflicts: Vec<StartupRestoreConflict>,
     pub(crate) workspace_reflow_axis: SplitAxis,
     pub(crate) settings_preview_quote_index: usize,
 }

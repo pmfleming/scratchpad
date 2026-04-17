@@ -1,7 +1,7 @@
 use super::helpers::{cursor_range_from_char_range, search_highlight_state_for_view};
 use super::worker::{SearchResult, SearchTargetSnapshot, process_search_request};
 use super::{ScratchpadApp, SearchFocusTarget, SearchMatch, SearchScope};
-use crate::app::domain::{BufferId, SearchHighlightState, ViewId};
+use crate::app::domain::{BufferId, SearchHighlightState, ViewId, WorkspaceTab};
 use crate::app::services::search;
 use eframe::egui;
 use std::collections::HashSet;
@@ -133,14 +133,20 @@ impl ScratchpadApp {
     }
 
     fn apply_search_result(&mut self, result: SearchResult) {
+        let SearchResult {
+            matches,
+            displayed_match_count,
+            result_groups,
+            ..
+        } = result;
         self.search_state.active_match_index = self.preferred_active_match_index(
-            &result.matches,
+            &matches,
             self.search_state.previous_active_match.as_ref(),
         );
-        self.search_state.matches = result.matches;
+        self.search_state.matches = matches;
         self.search_state.total_match_count = self.search_state.matches.len();
-        self.search_state.displayed_match_count = result.displayed_match_count;
-        self.search_state.result_groups = result.result_groups;
+        self.search_state.displayed_match_count = displayed_match_count;
+        self.search_state.result_groups = result_groups;
         self.search_state.searching = false;
         self.search_state.previous_active_match = None;
         self.refresh_search_visual_state();
@@ -149,45 +155,49 @@ impl ScratchpadApp {
     fn collect_search_targets(&self, scope: SearchScope) -> Vec<SearchTargetSnapshot> {
         match scope {
             SearchScope::ActiveBuffer => self.active_search_target().into_iter().collect(),
-            SearchScope::ActiveWorkspaceTab => {
-                self.collect_search_targets_for_tab(self.active_tab_index())
-            }
+            SearchScope::ActiveWorkspaceTab => self.collect_search_targets_for_tab(
+                self.active_tab_index(),
+                self.active_tab()
+                    .and_then(|tab| tab.active_view())
+                    .map(|view| view.buffer_id),
+            ),
             SearchScope::AllOpenTabs => (0..self.tabs().len())
-                .flat_map(|tab_index| self.collect_search_targets_for_tab(tab_index))
+                .flat_map(|tab_index| self.collect_search_targets_for_tab(tab_index, None))
                 .collect(),
         }
     }
 
     fn active_search_target(&self) -> Option<SearchTargetSnapshot> {
         let tab_index = self.active_tab_index();
-        let view_id = self.active_tab()?.active_view_id;
         let tab_label = self.search_tab_label(tab_index);
-        self.search_target_for_view(tab_index, view_id, &tab_label)
+        let tab = self.active_tab()?;
+        build_search_target(tab_index, tab, tab.active_view_id, &tab_label)
     }
 
-    fn collect_search_targets_for_tab(&self, tab_index: usize) -> Vec<SearchTargetSnapshot> {
+    fn collect_search_targets_for_tab(
+        &self,
+        tab_index: usize,
+        prioritized_buffer_id: Option<BufferId>,
+    ) -> Vec<SearchTargetSnapshot> {
         let Some(tab) = self.tabs().get(tab_index) else {
             return Vec::new();
         };
-
-        let mut seen_buffer_ids = HashSet::new();
-        let mut ordered_view_ids = Vec::with_capacity(tab.views.len());
-        tab.root_pane
-            .collect_view_ids_in_order(&mut ordered_view_ids);
         let tab_label = self.search_tab_label(tab_index);
-        let mut targets = Vec::new();
-
-        for view_id in ordered_view_ids {
-            let Some(view) = tab.view(view_id) else {
-                continue;
-            };
-            if !seen_buffer_ids.insert(view.buffer_id) {
-                continue;
-            }
-            let Some(target) = self.search_target_for_view(tab_index, view_id, &tab_label) else {
-                continue;
-            };
-            targets.push(target);
+        let mut seen_buffer_ids = HashSet::with_capacity(tab.views.len());
+        let mut targets = tab
+            .views
+            .iter()
+            .filter_map(|view| {
+                seen_buffer_ids.insert(view.buffer_id).then_some(())?;
+                build_search_target(tab_index, tab, view.id, &tab_label)
+            })
+            .collect::<Vec<_>>();
+        if let Some(prioritized_buffer_id) = prioritized_buffer_id
+            && let Some(index) = targets
+                .iter()
+                .position(|target| target.buffer_id == prioritized_buffer_id)
+        {
+            targets.rotate_left(index);
         }
         targets
     }
@@ -195,25 +205,6 @@ impl ScratchpadApp {
     fn search_tab_label(&self, tab_index: usize) -> String {
         self.display_tab_name_at_slot(self.slot_for_workspace_index(tab_index))
             .unwrap_or_else(|| format!("Tab {}", tab_index + 1))
-    }
-
-    fn search_target_for_view(
-        &self,
-        tab_index: usize,
-        view_id: ViewId,
-        tab_label: &str,
-    ) -> Option<SearchTargetSnapshot> {
-        let tab = self.tabs().get(tab_index)?;
-        let view = tab.view(view_id)?;
-        let buffer = tab.buffer_by_id(view.buffer_id)?;
-        Some(SearchTargetSnapshot {
-            tab_index,
-            view_id,
-            buffer_id: view.buffer_id,
-            tab_label: tab_label.to_owned(),
-            buffer_label: buffer.display_name(),
-            text: buffer.text().to_owned(),
-        })
     }
 
     fn preferred_active_match_index(
@@ -225,29 +216,24 @@ impl ScratchpadApp {
             return None;
         }
         if let Some(previous_active) = previous_active
-            && let Some(index) = matches
-                .iter()
-                .position(|search_match| search_match == previous_active)
+            && let Some(index) =
+                first_match_index(matches, |search_match| search_match == previous_active)
         {
             return Some(index);
         }
 
-        let active_buffer_id = self
-            .active_tab()
-            .and_then(|tab| tab.active_view())
-            .map(|view| view.buffer_id);
-        if let Some(active_buffer_id) = active_buffer_id
-            && let Some(index) = matches.iter().position(|search_match| {
-                matches_buffer(search_match, self.active_tab_index(), active_buffer_id)
+        if let Some((active_tab_index, active_buffer_id)) = self.active_buffer_identity()
+            && let Some(index) = first_match_index(matches, |search_match| {
+                matches_buffer(search_match, active_tab_index, active_buffer_id)
             })
         {
             return Some(index);
         }
 
-        matches
-            .iter()
-            .position(|search_match| search_match.tab_index == self.active_tab_index())
-            .or(Some(0))
+        first_match_index(matches, |search_match| {
+            search_match.tab_index == self.active_tab_index()
+        })
+        .or(Some(0))
     }
 
     fn active_buffer_identity(&self) -> Option<(usize, BufferId)> {
@@ -258,18 +244,15 @@ impl ScratchpadApp {
 
     fn active_buffer_match_index_at_or_after(&self, minimum_start: usize) -> Option<usize> {
         let (active_tab_index, active_buffer_id) = self.active_buffer_identity()?;
-        self.search_state
-            .matches
-            .iter()
-            .position(|search_match| {
+        first_match_index(&self.search_state.matches, |search_match| {
+            matches_buffer(search_match, active_tab_index, active_buffer_id)
+                && search_match.range.start >= minimum_start
+        })
+        .or_else(|| {
+            first_match_index(&self.search_state.matches, |search_match| {
                 matches_buffer(search_match, active_tab_index, active_buffer_id)
-                    && search_match.range.start >= minimum_start
             })
-            .or_else(|| {
-                self.search_state.matches.iter().position(|search_match| {
-                    matches_buffer(search_match, active_tab_index, active_buffer_id)
-                })
-            })
+        })
     }
 
     fn active_search_match_range(&self) -> Option<Range<usize>> {
@@ -366,10 +349,36 @@ impl ScratchpadApp {
     pub(super) fn clear_search_highlights(&mut self) {
         for tab in self.tabs_mut() {
             for view in &mut tab.views {
-                view.search_highlights = SearchHighlightState::default();
+                view.search_highlights.ranges.clear();
+                view.search_highlights.active_range_index = None;
             }
         }
     }
+}
+
+fn build_search_target(
+    tab_index: usize,
+    tab: &WorkspaceTab,
+    view_id: ViewId,
+    tab_label: &str,
+) -> Option<SearchTargetSnapshot> {
+    let view = tab.view(view_id)?;
+    let buffer = tab.buffer_by_id(view.buffer_id)?;
+    Some(SearchTargetSnapshot {
+        tab_index,
+        view_id,
+        buffer_id: view.buffer_id,
+        tab_label: tab_label.to_owned(),
+        buffer_label: buffer.display_name(),
+        text: buffer.text().to_owned(),
+    })
+}
+
+fn first_match_index(
+    matches: &[SearchMatch],
+    mut predicate: impl FnMut(&SearchMatch) -> bool,
+) -> Option<usize> {
+    matches.iter().position(&mut predicate)
 }
 
 fn matches_buffer(search_match: &SearchMatch, tab_index: usize, buffer_id: BufferId) -> bool {

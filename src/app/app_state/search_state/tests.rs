@@ -80,6 +80,7 @@ fn activating_search_match_navigates_to_matching_tab_and_range() {
         .buffer
         .replace_text("alpha target".to_owned());
     app.tab_manager_mut().active_tab_index = 0;
+    app.clear_session_dirty();
 
     app.open_search();
     app.set_search_scope(SearchScope::AllOpenTabs);
@@ -88,6 +89,7 @@ fn activating_search_match_navigates_to_matching_tab_and_range() {
 
     assert!(app.activate_search_match_at(0));
     assert_eq!(app.active_tab_index(), 1);
+    assert!(!app.session_dirty());
     let pending = app
         .active_tab()
         .and_then(|tab| tab.active_view())

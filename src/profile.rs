@@ -4,10 +4,9 @@ use crate::app::commands::AppCommand;
 use crate::app::domain::{
     BufferState, PaneBranch, PaneNode, SplitAxis, SplitPath, ViewId, WorkspaceTab,
 };
-use crate::app::services::search::SearchOptions;
+use crate::app::services::search::{SearchOptions, find_matches};
 use crate::app::services::session_store::SessionStore;
 use std::hint::black_box;
-use std::ops::Range;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -202,21 +201,31 @@ fn sum_profile_iterations(
 }
 
 fn with_isolated_app<T>(label: &str, run: impl FnOnce(&mut ScratchpadApp) -> T) -> T {
-    let session_root = unique_profile_session_root(label);
-    let session_store = SessionStore::new(session_root.clone());
-    let mut app = ScratchpadApp::with_session_store(session_store);
-    let result = run(&mut app);
-    drop(app);
-    let _ = std::fs::remove_dir_all(&session_root);
-    result
+    with_profile_app(label, true, run)
 }
 
 fn with_steady_state_app<T>(label: &str, run: impl FnOnce(&mut ScratchpadApp) -> T) -> T {
+    with_profile_app(label, false, run)
+}
+
+fn with_profile_app<T>(
+    label: &str,
+    cleanup_session_root: bool,
+    run: impl FnOnce(&mut ScratchpadApp) -> T,
+) -> T {
     let session_root = unique_profile_session_root(label);
+    let cleanup_root = cleanup_session_root.then(|| session_root.clone());
     let session_store = SessionStore::new(session_root);
     let mut app = ScratchpadApp::with_session_store(session_store);
     let result = run(&mut app);
-    std::mem::forget(app);
+
+    if let Some(root) = cleanup_root {
+        drop(app);
+        let _ = std::fs::remove_dir_all(root);
+    } else {
+        std::mem::forget(app);
+    }
+
     result
 }
 
@@ -294,26 +303,18 @@ fn install_navigation_workspace(
 fn build_search_current_scope_tab(file_count: usize, bytes_per_file: usize) -> WorkspaceTab {
     let mut tab = build_balanced_tile_tab(0, file_count.max(1), bytes_per_file);
     let primary_view_id = tab.root_pane.first_view_id();
-    for duplicate_index in 0..SEARCH_VIEW_DUPLICATES_PER_TAB {
-        tab.activate_view(primary_view_id);
-        let _ = tab.split_active_view(alternating_axis(duplicate_index));
-    }
-    tab.activate_view(primary_view_id);
+    duplicate_primary_view(&mut tab, primary_view_id, 0);
     tab
 }
 
 fn build_search_all_tab(tab_index: usize, bytes_per_tab: usize) -> WorkspaceTab {
-    let mut tab = WorkspaceTab::new(BufferState::new(
+    let mut tab = WorkspaceTab::new(corpus_buffer(
         format!("search_tab_{tab_index}.rs"),
-        corpus_text_of_size(tab_index, bytes_per_tab),
-        None,
+        tab_index,
+        bytes_per_tab,
     ));
     let primary_view_id = tab.active_view_id;
-    for duplicate_index in 0..SEARCH_VIEW_DUPLICATES_PER_TAB {
-        tab.activate_view(primary_view_id);
-        let _ = tab.split_active_view(alternating_axis(tab_index + duplicate_index));
-    }
-    tab.activate_view(primary_view_id);
+    duplicate_primary_view(&mut tab, primary_view_id, tab_index);
     tab
 }
 
@@ -323,10 +324,10 @@ fn build_view_dense_tab(
     bytes_per_buffer: usize,
 ) -> WorkspaceTab {
     let total_views = view_count.max(1);
-    let mut tab = WorkspaceTab::new(BufferState::new(
+    let mut tab = WorkspaceTab::new(corpus_buffer(
         format!("tab_{tab_index}_root.rs"),
-        corpus_text_of_size(tab_index, bytes_per_buffer),
-        None,
+        tab_index,
+        bytes_per_buffer,
     ));
     let primary_view_id = tab.active_view_id;
 
@@ -355,21 +356,35 @@ fn build_balanced_tile_tab(
     bytes_per_tile: usize,
 ) -> WorkspaceTab {
     let total_tiles = tile_count.max(1);
-    let mut tab = WorkspaceTab::new(BufferState::new(
+    let mut tab = WorkspaceTab::new(plain_text_buffer(
         format!("tab_{tab_index}_tile_0.txt"),
-        plain_text_of_size(bytes_per_tile),
-        None,
+        bytes_per_tile,
     ));
 
     for tile_index in 1..total_tiles {
-        let _ = tab.open_buffer_with_balanced_layout(BufferState::new(
+        let _ = tab.open_buffer_with_balanced_layout(plain_text_buffer(
             format!("tab_{tab_index}_tile_{tile_index}.txt"),
-            plain_text_of_size(bytes_per_tile),
-            None,
+            bytes_per_tile,
         ));
     }
 
     tab
+}
+
+fn duplicate_primary_view(tab: &mut WorkspaceTab, primary_view_id: ViewId, axis_seed: usize) {
+    for offset in 0..SEARCH_VIEW_DUPLICATES_PER_TAB {
+        tab.activate_view(primary_view_id);
+        let _ = tab.split_active_view(alternating_axis(axis_seed + offset));
+    }
+    tab.activate_view(primary_view_id);
+}
+
+fn corpus_buffer(name: String, item_index: usize, target_bytes: usize) -> BufferState {
+    BufferState::new(name, corpus_text_of_size(item_index, target_bytes), None)
+}
+
+fn plain_text_buffer(name: String, target_bytes: usize) -> BufferState {
+    BufferState::new(name, plain_text_of_size(target_bytes), None)
 }
 
 fn expected_matches_for_tab(tab: &WorkspaceTab) -> usize {
@@ -423,84 +438,4 @@ fn alternating_axis(index: usize) -> SplitAxis {
     } else {
         SplitAxis::Horizontal
     }
-}
-
-fn find_matches(text: &str, query: &str, options: SearchOptions) -> Vec<Range<usize>> {
-    find_matches_until_limit(text, query, options, usize::MAX)
-}
-
-fn find_matches_until_limit(
-    text: &str,
-    query: &str,
-    options: SearchOptions,
-    max_results: usize,
-) -> Vec<Range<usize>> {
-    if query.is_empty() || max_results == 0 {
-        return Vec::new();
-    }
-
-    let query_char_len = query.chars().count();
-    let text_char_len = text.chars().count();
-    if query_char_len > text_char_len {
-        return Vec::new();
-    }
-
-    let char_to_byte = char_to_byte_map(text);
-    let folded_query = (!options.match_case).then(|| query.to_lowercase());
-    let text_chars = text.chars().collect::<Vec<_>>();
-    let mut matches = Vec::new();
-
-    for start in 0..=text_char_len - query_char_len {
-        let end = start + query_char_len;
-        let candidate = &text[char_to_byte[start]..char_to_byte[end]];
-        if !candidate_matches(
-            candidate,
-            query,
-            folded_query.as_deref(),
-            options.match_case,
-        ) {
-            continue;
-        }
-        if options.whole_word && !is_whole_word_match(&text_chars, start, end) {
-            continue;
-        }
-        matches.push(start..end);
-        if matches.len() >= max_results {
-            break;
-        }
-    }
-
-    matches
-}
-
-fn candidate_matches(
-    candidate: &str,
-    query: &str,
-    folded_query: Option<&str>,
-    match_case: bool,
-) -> bool {
-    if match_case {
-        candidate == query
-    } else {
-        candidate.to_lowercase() == folded_query.unwrap_or_default()
-    }
-}
-
-fn char_to_byte_map(text: &str) -> Vec<usize> {
-    let mut offsets = text
-        .char_indices()
-        .map(|(offset, _)| offset)
-        .collect::<Vec<_>>();
-    offsets.push(text.len());
-    offsets
-}
-
-fn is_whole_word_match(text_chars: &[char], start: usize, end: usize) -> bool {
-    let before_is_word = start > 0 && is_word_char(text_chars[start - 1]);
-    let after_is_word = end < text_chars.len() && is_word_char(text_chars[end]);
-    !before_is_word && !after_is_word
-}
-
-fn is_word_char(ch: char) -> bool {
-    ch.is_alphanumeric() || ch == '_'
 }
