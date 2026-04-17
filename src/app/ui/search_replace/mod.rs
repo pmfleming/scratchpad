@@ -5,6 +5,7 @@ mod state;
 
 use crate::app::app_state::{ScratchpadApp, SearchFocusTarget};
 use crate::app::commands::AppCommand;
+use crate::app::ui::settings;
 use eframe::egui;
 use state::{SearchStripActions, SearchStripState};
 
@@ -28,7 +29,9 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         egui::pos2(host_rect.left() + 16.0, overlay_top),
         SEARCH_DIALOG_WIDTH,
         |ui| {
+            settings::apply_dialog_typography(ui);
             callout::apply_spacing(ui);
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 12.0);
             controls::show_search_controls(
                 ui,
                 &mut state,
@@ -55,6 +58,9 @@ fn apply_search_inputs(app: &mut ScratchpadApp, state: &SearchStripState) {
     }
     if state.replacement != app.search_replacement() {
         app.set_search_replacement(state.replacement.clone());
+    }
+    if state.replace_open != app.search_replace_open() {
+        app.set_search_replace_open(state.replace_open);
     }
     if state.scope != app.search_scope() {
         app.set_search_scope(state.scope);

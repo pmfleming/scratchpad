@@ -62,6 +62,8 @@ fn save_and_load_round_trip_toml_settings() {
         theme_mode: AppThemeMode::Light,
         editor_text_color: "#111111".to_owned(),
         editor_background_color: "#eeeeee".to_owned(),
+        editor_text_highlight_color: "#fff36d".to_owned(),
+        editor_text_highlight_text_color: "#000000".to_owned(),
         tab_list_position: TabListPosition::Right,
         file_open_disposition: FileOpenDisposition::CurrentTab,
         startup_session_behavior: StartupSessionBehavior::StartFreshSession,
@@ -102,6 +104,19 @@ fn missing_editor_font_field_defaults_for_older_toml() {
 }
 
 #[test]
+fn legacy_slab_editor_font_maps_to_serif() {
+    let store = test_store();
+    write_settings(
+        &store,
+        "font_size = 16.0\nword_wrap = false\neditor_font = \"slab\"\n",
+    );
+
+    let loaded = store.load().expect("load settings").expect("settings");
+
+    assert_eq!(loaded.editor_font, EditorFontPreset::Serif);
+}
+
+#[test]
 fn missing_tab_list_position_defaults_for_older_toml() {
     let store = test_store();
     write_settings(&store, "font_size = 16.0\nword_wrap = false\n");
@@ -127,11 +142,7 @@ fn legacy_auto_hide_fields_migrate_to_single_tab_list_setting() {
 fn legacy_yaml_migrates_to_toml_when_toml_is_missing() {
     let store = test_store();
     let legacy_path = store.path().with_file_name("settings.yaml");
-    fs::write(
-        &legacy_path,
-        "font_size: 16.0\nword_wrap: false\n",
-    )
-    .expect("write legacy yaml");
+    fs::write(&legacy_path, "font_size: 16.0\nword_wrap: false\n").expect("write legacy yaml");
 
     let loaded = store.load().expect("load settings");
 

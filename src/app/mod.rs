@@ -1,6 +1,7 @@
 pub mod app_state;
 pub mod chrome;
 pub mod commands;
+pub mod color_contrast;
 pub mod domain;
 pub mod fonts;
 pub mod services;

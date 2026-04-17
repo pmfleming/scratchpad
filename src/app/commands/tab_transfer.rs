@@ -31,6 +31,7 @@ impl ScratchpadApp {
             return;
         }
 
+        self.begin_layout_transition();
         self.rebalance_combined_workspace_layout(context.adjusted_target_index, target_index);
         self.finish_combined_tab(source_index, target_index, context);
         self.record_transaction(
@@ -57,6 +58,7 @@ impl ScratchpadApp {
             return;
         };
 
+        self.begin_layout_transition();
         let promoted_description = promoted_tab.describe();
         self.append_tab(promoted_tab);
         self.record_transaction(
@@ -99,6 +101,7 @@ impl ScratchpadApp {
             return;
         }
 
+        self.begin_layout_transition();
         let active_tab_offset = promoted_tabs
             .iter()
             .position(|tab| tab.active_buffer().id == active_buffer_id)
@@ -178,6 +181,7 @@ impl ScratchpadApp {
             }
         }
 
+        self.begin_layout_transition();
         self.tab_manager_mut().active_tab_index = adjusted_target_index;
         self.tab_manager_mut().pending_scroll_to_active = true;
         self.request_focus_for_active_view();

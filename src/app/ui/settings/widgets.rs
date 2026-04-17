@@ -222,16 +222,7 @@ pub(super) fn render_preview_panel(ui: &mut egui::Ui, app: &ScratchpadApp) {
                     ui.set_width(ui.available_width());
                     ui.add_space(4.0);
                     let preview_family = egui::FontFamily::Name(EDITOR_FONT_FAMILY.into());
-                    ui.add_sized(
-                        egui::vec2(ui.available_width(), 0.0),
-                        egui::Label::new(
-                            egui::RichText::new(SettingsUi::PREVIEW_TEXT)
-                                .family(preview_family)
-                                .size(app.font_size())
-                                .color(app.editor_text_color()),
-                        )
-                        .wrap(),
-                    );
+                    render_preview_text(ui, app, preview_family);
                     ui.add_space(16.0);
                     ui.horizontal_wrapped(|ui| {
                         info_chip(ui, app.editor_font().label());
@@ -244,6 +235,33 @@ pub(super) fn render_preview_panel(ui: &mut egui::Ui, app: &ScratchpadApp) {
             },
         );
     });
+}
+
+fn render_preview_text(ui: &mut egui::Ui, app: &ScratchpadApp, preview_family: egui::FontFamily) {
+    let (text, highlighted_text) =
+        crate::app::ui::settings::PREVIEW_QUOTES[app.settings_preview_quote_index];
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = ui.available_width();
+
+    let base_format = egui::TextFormat {
+        font_id: egui::FontId::new(app.font_size(), preview_family.clone()),
+        color: app.editor_text_color(),
+        ..Default::default()
+    };
+    let highlight_format = egui::TextFormat {
+        font_id: egui::FontId::new(app.font_size(), preview_family),
+        color: app.editor_text_highlight_text_color(),
+        background: app.editor_text_highlight_color(),
+        ..Default::default()
+    };
+
+    let start = text.find(highlighted_text).unwrap_or(0);
+    let end = start + highlighted_text.len();
+    job.append(&text[..start], 0.0, base_format.clone());
+    job.append(&text[start..end], 0.0, highlight_format);
+    job.append(&text[end..], 0.0, base_format);
+
+    ui.label(job);
 }
 
 pub(super) fn settings_card_frame(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {

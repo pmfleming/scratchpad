@@ -11,25 +11,18 @@ pub enum EditorFontPreset {
     Standard,
     Flex,
     Mono,
-    Slab,
+    #[serde(alias = "slab")]
     Serif,
 }
 
 impl EditorFontPreset {
-    pub const ALL: [Self; 5] = [
-        Self::Standard,
-        Self::Flex,
-        Self::Mono,
-        Self::Slab,
-        Self::Serif,
-    ];
+    pub const ALL: [Self; 4] = [Self::Standard, Self::Flex, Self::Mono, Self::Serif];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Standard => "Standard",
             Self::Flex => "Flex",
             Self::Mono => "Mono",
-            Self::Slab => "Slab",
             Self::Serif => "Serif",
         }
     }
@@ -37,27 +30,53 @@ impl EditorFontPreset {
     fn font_asset(self) -> (&'static str, &'static [u8]) {
         match self {
             Self::Standard => (
-                "editor-roboto",
-                include_bytes!("../../fonts/Roboto-Regular.ttf"),
+                "editor-noto-sans-display",
+                include_bytes!("../../fonts/NotoSansDisplay-Regular.ttf"),
             ),
             Self::Flex => (
-                "editor-roboto-flex",
-                include_bytes!("../../fonts/RobotoFlex-Regular.ttf"),
+                "editor-noto-sans-flex",
+                include_bytes!("../../fonts/NotoSans-VF.ttf"),
             ),
             Self::Mono => (
-                "editor-roboto-mono",
-                include_bytes!("../../fonts/RobotoMono-Regular.ttf"),
-            ),
-            Self::Slab => (
-                "editor-roboto-slab",
-                include_bytes!("../../fonts/RobotoSlab-Regular.ttf"),
+                "editor-noto-sans-mono",
+                include_bytes!("../../fonts/NotoSansMono-Regular.ttf"),
             ),
             Self::Serif => (
-                "editor-roboto-serif",
-                include_bytes!("../../fonts/RobotoSerif-Regular.ttf"),
+                "editor-noto-serif-display",
+                include_bytes!("../../fonts/NotoSerifDisplay-Regular.ttf"),
             ),
         }
     }
+}
+
+const CJK_FONT_ASSETS: [(&str, &[u8]); 4] = [
+    (
+        "editor-noto-cjk-jp",
+        include_bytes!("../../fonts/NotoSansCJKjp-Regular.otf"),
+    ),
+    (
+        "editor-noto-cjk-kr",
+        include_bytes!("../../fonts/NotoSansCJKkr-Regular.otf"),
+    ),
+    (
+        "editor-noto-cjk-sc",
+        include_bytes!("../../fonts/NotoSansCJKsc-Regular.otf"),
+    ),
+    (
+        "editor-noto-cjk-tc",
+        include_bytes!("../../fonts/NotoSansCJKtc-Regular.otf"),
+    ),
+];
+
+fn insert_font(
+    fonts: &mut egui::FontDefinitions,
+    font_name: &'static str,
+    font_bytes: &'static [u8],
+) {
+    fonts.font_data.insert(
+        font_name.to_owned(),
+        egui::FontData::from_static(font_bytes).into(),
+    );
 }
 
 pub fn apply_editor_fonts(ctx: &egui::Context, preset: EditorFontPreset) -> Result<(), io::Error> {
@@ -65,14 +84,20 @@ pub fn apply_editor_fonts(ctx: &egui::Context, preset: EditorFontPreset) -> Resu
     egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
 
     let (font_name, font_bytes) = preset.font_asset();
-    fonts.font_data.insert(
-        font_name.to_owned(),
-        egui::FontData::from_static(font_bytes).into(),
-    );
+    insert_font(&mut fonts, font_name, font_bytes);
+    for (fallback_name, fallback_bytes) in CJK_FONT_ASSETS {
+        insert_font(&mut fonts, fallback_name, fallback_bytes);
+    }
 
     let editor_family = egui::FontFamily::Name(EDITOR_FONT_FAMILY.into());
-    let proportional_candidates = vec![font_name.to_owned(), "phosphor".to_owned()];
-    let monospace_candidates = vec![font_name.to_owned()];
+    let fallback_names = CJK_FONT_ASSETS.iter().map(|(name, _)| (*name).to_owned());
+    let proportional_candidates: Vec<String> = std::iter::once(font_name.to_owned())
+        .chain(fallback_names.clone())
+        .chain(std::iter::once("phosphor".to_owned()))
+        .collect();
+    let monospace_candidates: Vec<String> = std::iter::once(font_name.to_owned())
+        .chain(fallback_names)
+        .collect();
 
     fonts.families.insert(
         egui::FontFamily::Proportional,

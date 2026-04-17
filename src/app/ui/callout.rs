@@ -7,18 +7,8 @@ use eframe::egui;
 
 const CALLOUT_RADIUS: u8 = 14;
 const CALLOUT_SECTION_RADIUS: u8 = 10;
-pub(crate) const CALLOUT_TOP_OFFSET: f32 = 4.0;
-pub(crate) const CALLOUT_HORIZONTAL_OFFSET: f32 = 16.0;
-
 pub(crate) fn apply_spacing(ui: &mut egui::Ui) {
     ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-}
-
-pub(crate) fn top_left_position(ctx: &egui::Context, left_edge: f32) -> egui::Pos2 {
-    egui::pos2(
-        left_edge + CALLOUT_HORIZONTAL_OFFSET,
-        ctx.content_rect().top() + CALLOUT_TOP_OFFSET,
-    )
 }
 
 pub(crate) fn centered_position(ctx: &egui::Context, size: egui::Vec2) -> egui::Pos2 {
@@ -106,24 +96,17 @@ pub(crate) fn icon_button(
     tooltip: &str,
     enabled: bool,
 ) -> egui::Response {
-    let button = egui::Button::new(egui::RichText::new(icon).size(icon_size).color(text(ui)))
+    let button = egui::Button::new(
+        egui::RichText::new(icon)
+            .font(egui::FontId::proportional(icon_size))
+            .color(text(ui)),
+    )
         .min_size(size)
         .fill(fill)
         .stroke(egui::Stroke::new(1.0, border(ui)))
         .corner_radius(egui::CornerRadius::same(8));
 
     ui.add_enabled(enabled, button).on_hover_text(tooltip)
-}
-
-pub(crate) fn badge(ui: &mut egui::Ui, label: &str) {
-    egui::Frame::NONE
-        .fill(section_fill(ui))
-        .stroke(egui::Stroke::new(1.0, border(ui)))
-        .corner_radius(egui::CornerRadius::same(8))
-        .inner_margin(egui::Margin::symmetric(6, 2))
-        .show(ui, |ui| {
-            ui.label(egui::RichText::new(label).size(12.0).color(muted_text(ui)));
-        });
 }
 
 pub(crate) fn section_fill(ui: &egui::Ui) -> egui::Color32 {

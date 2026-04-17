@@ -26,6 +26,11 @@ BENCHMARKS = [
         "cargo_args": ["--bin", "profile_tab_tile_layout"],
     },
     {
+        "id": "view_navigation_profile",
+        "name": "View Navigation Profile",
+        "cargo_args": ["--bin", "profile_view_navigation"],
+    },
+    {
         "id": "search_current_app_state_profile",
         "name": "Search Current App-State Profile",
         "cargo_args": ["--bin", "profile_search_current_app_state"],

@@ -17,6 +17,20 @@ use style::SettingsUi;
 use widgets::*;
 
 const FONT_SIZE_OPTIONS: [u32; 9] = [11, 12, 14, 16, 18, 20, 24, 28, 32];
+pub(crate) const PREVIEW_QUOTES: [(&str, &str); 3] = [
+    (
+        "A man of genius makes no mistakes. His errors are volitional and are the portals of discovery.",
+        "His errors are volitional",
+    ),
+    (
+        "To learn one must be humble. But life is the great teacher.",
+        "life is the great teacher",
+    ),
+    (
+        "Hold to the now, the here, through which all future plunges to the past.",
+        "the now, the here",
+    ),
+];
 
 pub(crate) fn show_page(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     egui::CentralPanel::default().show_inside(ui, |ui| {

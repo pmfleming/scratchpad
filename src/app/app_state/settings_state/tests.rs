@@ -26,6 +26,13 @@ fn assert_dark_palette(app: &ScratchpadApp) {
     );
 }
 
+fn assert_default_highlight_color(app: &ScratchpadApp) {
+    assert_eq!(
+        app.editor_text_highlight_color(),
+        egui::Color32::from_rgb(255, 243, 109)
+    );
+}
+
 #[test]
 fn applying_light_mode_settings_migrates_stock_editor_palette() {
     let mut app = test_app();
@@ -38,6 +45,7 @@ fn applying_light_mode_settings_migrates_stock_editor_palette() {
     });
 
     assert_light_palette(&app);
+    assert_default_highlight_color(&app);
 }
 
 #[test]
@@ -97,6 +105,17 @@ fn applying_system_theme_preset_clears_custom_palette() {
     assert_eq!(app.theme_mode(), AppThemeMode::System);
     assert!(!app.has_custom_editor_palette());
     assert_dark_palette(&app);
+}
+
+#[test]
+fn changing_highlight_color_is_persisted_independently() {
+    let mut app = test_app();
+    let highlight = egui::Color32::from_rgb(255, 235, 59);
+
+    app.set_editor_text_highlight_color(highlight);
+    app.set_theme_mode(AppThemeMode::Light);
+
+    assert_eq!(app.editor_text_highlight_color(), highlight);
 }
 
 #[test]

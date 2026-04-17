@@ -3,7 +3,7 @@ use crate::app::fonts::EditorFontPreset;
 use crate::app::services::session_store::SessionStore;
 use crate::app::services::settings_store::{AppSettings, SettingsStore};
 use crate::app::startup::StartupOptions;
-use crate::app::transactions::{PendingTextTransaction, TransactionLog};
+use crate::app::transactions::{PendingLayoutTransaction, PendingTextTransaction, TransactionLog};
 use eframe::egui;
 use search_state::SearchState;
 use std::collections::BTreeSet;
@@ -30,6 +30,12 @@ pub(crate) enum AppSurface {
     Settings,
 }
 
+pub(crate) struct TabRenameState {
+    pub(crate) buffer_id: BufferId,
+    pub(crate) draft: String,
+    pub(crate) request_focus: bool,
+}
+
 pub struct ScratchpadApp {
     pub(crate) tab_manager: TabManager,
     pub(crate) app_settings: AppSettings,
@@ -51,12 +57,15 @@ pub struct ScratchpadApp {
     pub(crate) vertical_tab_list_hide_deadline: Option<Instant>,
     pub(crate) transaction_log: TransactionLog,
     pub(crate) transaction_log_open: bool,
+    pub(crate) pending_layout_transaction: Option<PendingLayoutTransaction>,
     pub(crate) pending_text_transaction: Option<PendingTextTransaction>,
     pub(crate) search_state: SearchState,
     pub(crate) chrome_transition_frames_remaining: u8,
     pub(crate) selected_tab_slots: BTreeSet<usize>,
     pub(crate) tab_selection_anchor: Option<usize>,
+    pub(crate) tab_rename_state: Option<TabRenameState>,
     pub(crate) workspace_reflow_axis: SplitAxis,
+    pub(crate) settings_preview_quote_index: usize,
 }
 
 impl Default for ScratchpadApp {
@@ -74,6 +83,16 @@ impl eframe::App for ScratchpadApp {
 
         self.prepare_frame(&ctx);
         self.render_frame(ui, &ctx);
+    }
+
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        let color = self.editor_background_color();
+        [
+            f32::from(color.r()) / 255.0,
+            f32::from(color.g()) / 255.0,
+            f32::from(color.b()) / 255.0,
+            f32::from(color.a()) / 255.0,
+        ]
     }
 }
 

@@ -1,5 +1,6 @@
-use super::super::ScratchpadApp;
+use super::super::{ScratchpadApp, TabRenameState};
 use crate::app::domain::{EditorViewState, PendingAction, TabManager, ViewId, WorkspaceTab};
+use crate::app::services::file_controller::FileController;
 use crate::app::services::session_manager;
 use crate::app::services::session_store::SessionStore;
 use std::path::Path;
@@ -105,6 +106,84 @@ impl ScratchpadApp {
     pub(crate) fn consume_focus_request(&mut self, view_id: ViewId) {
         if self.pending_editor_focus == Some(view_id) {
             self.pending_editor_focus = None;
+        }
+    }
+
+    pub(crate) fn begin_tab_rename(&mut self, index: usize) {
+        let Some(tab) = self.tabs().get(index) else {
+            return;
+        };
+        let buffer = tab.active_buffer();
+        self.tab_rename_state = Some(TabRenameState {
+            buffer_id: buffer.id,
+            draft: buffer.name.clone(),
+            request_focus: true,
+        });
+    }
+
+    pub(crate) fn tab_rename_matches_slot(&self, slot_index: usize) -> bool {
+        let Some(rename_state) = self.tab_rename_state.as_ref() else {
+            return false;
+        };
+
+        self.workspace_index_for_slot(slot_index)
+            .and_then(|index| self.tabs().get(index))
+            .is_some_and(|tab| {
+                tab.buffers()
+                    .any(|buffer| buffer.id == rename_state.buffer_id)
+            })
+    }
+
+    pub(crate) fn take_tab_rename_focus_request_for_slot(&mut self, slot_index: usize) -> bool {
+        if !self.tab_rename_matches_slot(slot_index) {
+            return false;
+        }
+
+        self.tab_rename_state
+            .as_mut()
+            .map(|rename_state| std::mem::take(&mut rename_state.request_focus))
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn request_tab_rename_focus(&mut self) {
+        if let Some(rename_state) = self.tab_rename_state.as_mut() {
+            rename_state.request_focus = true;
+        }
+    }
+
+    pub(crate) fn tab_rename_draft_mut(&mut self) -> Option<&mut String> {
+        self.tab_rename_state
+            .as_mut()
+            .map(|rename_state| &mut rename_state.draft)
+    }
+
+    pub(crate) fn cancel_tab_rename(&mut self) {
+        self.tab_rename_state = None;
+        self.request_focus_for_active_view();
+    }
+
+    pub(crate) fn commit_tab_rename(&mut self) -> bool {
+        let Some(rename_state) = self.tab_rename_state.as_ref() else {
+            return false;
+        };
+
+        let buffer_id = rename_state.buffer_id;
+        let draft = rename_state.draft.clone();
+        let Some(index) = self
+            .tabs()
+            .iter()
+            .position(|tab| tab.buffers().any(|buffer| buffer.id == buffer_id))
+        else {
+            self.tab_rename_state = None;
+            return false;
+        };
+
+        if FileController::rename_tab(self, index, &draft) {
+            self.tab_rename_state = None;
+            self.request_focus_for_active_view();
+            true
+        } else {
+            false
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::app::chrome::tab_button;
+use crate::app::chrome::{tab_button, tab_rename_editor_sized};
 use crate::app::ui::tab_drag;
 use eframe::egui;
 
@@ -21,6 +21,7 @@ pub(crate) struct TabCellOutcome {
 pub(crate) enum TabInteraction {
     None,
     Activate(usize),
+    BeginRename(usize),
     PromoteAllFiles(usize),
     RequestClose(usize),
 }
@@ -32,6 +33,10 @@ pub(crate) fn render_tab_cell_sized(
     props: TabCellProps<'_>,
 ) -> TabCellOutcome {
     ui.push_id(("tab_strip", index), |ui| {
+        if app.tab_rename_matches_slot(index) {
+            return render_tab_rename_cell(ui, app, index, props);
+        }
+
         let (tab_response, promote_response, close_response, truncated) = tab_button_with_width(
             ui,
             props.display_name,
@@ -59,6 +64,9 @@ pub(crate) fn render_tab_cell_sized(
             TabInteraction::PromoteAllFiles(index)
         } else if close_response.clicked() {
             TabInteraction::RequestClose(index)
+        } else if tab_response.double_clicked() {
+            app.select_only_tab_slot(index);
+            TabInteraction::BeginRename(index)
         } else if tab_response.clicked() {
             if modifiers.shift {
                 app.select_tab_slot_range(index);
@@ -80,6 +88,48 @@ pub(crate) fn render_tab_cell_sized(
         }
     })
     .inner
+}
+
+fn render_tab_rename_cell(
+    ui: &mut egui::Ui,
+    app: &mut crate::app::app_state::ScratchpadApp,
+    index: usize,
+    props: TabCellProps<'_>,
+) -> TabCellOutcome {
+    let request_focus = app.take_tab_rename_focus_request_for_slot(index);
+    let (rect, response) = {
+        let draft = app
+            .tab_rename_draft_mut()
+            .expect("rename draft should exist for matching tab slot");
+        tab_rename_editor_sized(
+            ui,
+            draft,
+            props.is_active,
+            props.is_selected,
+            props.width,
+            request_focus,
+        )
+    };
+
+    if props.is_active && props.pending_scroll_to_active {
+        response.scroll_to_me(Some(egui::Align::Center));
+    }
+
+    let pressed_escape = response.has_focus()
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    let pressed_enter = response.has_focus()
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+
+    if pressed_escape {
+        app.cancel_tab_rename();
+    } else if (pressed_enter || response.lost_focus()) && !app.commit_tab_rename() {
+        app.request_tab_rename_focus();
+    }
+
+    TabCellOutcome {
+        interaction: TabInteraction::None,
+        rect,
+    }
 }
 
 fn tab_button_with_width(

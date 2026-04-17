@@ -70,12 +70,15 @@ impl ScratchpadApp {
             vertical_tab_list_hide_deadline: None,
             transaction_log: TransactionLog::default(),
             transaction_log_open: false,
+            pending_layout_transaction: None,
             pending_text_transaction: None,
             search_state: SearchState::default(),
             chrome_transition_frames_remaining: 0,
             selected_tab_slots: BTreeSet::new(),
             tab_selection_anchor: None,
+            tab_rename_state: None,
             workspace_reflow_axis: crate::app::domain::SplitAxis::Vertical,
+            settings_preview_quote_index: 2,
         };
 
         let loaded_from_settings = app.load_settings_from_store();

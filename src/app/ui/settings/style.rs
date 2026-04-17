@@ -88,8 +88,6 @@ impl SettingsUi {
             bottom: 5,
         },
     };
-    pub(super) const PREVIEW_TEXT: &str = "I hear the ruin of all space, shattered glass and toppling masonry, and time one livid final flame.";
-
     const CARD_BG_DARK: egui::Color32 = egui::Color32::from_rgb(42, 47, 57);
     const CARD_BORDER_DARK: egui::Color32 = egui::Color32::from_rgb(61, 67, 77);
     const CONTROL_BG_DARK: egui::Color32 = egui::Color32::from_rgb(58, 63, 71);

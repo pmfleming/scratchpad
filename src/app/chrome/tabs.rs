@@ -84,6 +84,44 @@ pub fn tab_button_sized_with_actions(
     tab_button_with_actions(ui, label, active, selected, show_promote_all, width)
 }
 
+pub fn tab_rename_editor_sized(
+    ui: &mut egui::Ui,
+    text: &mut String,
+    active: bool,
+    selected: bool,
+    width: f32,
+    request_focus: bool,
+) -> (egui::Rect, egui::Response) {
+    let frame = allocate_tab_button_frame(ui, width);
+    paint_tab_background(
+        ui,
+        frame.rect,
+        &frame.response,
+        active,
+        selected,
+        frame.drag_in_progress,
+    );
+
+    let text_rect = Rect::from_min_max(
+        frame.rect.min + Vec2::new(6.0, 4.0),
+        frame.rect.max - Vec2::new(6.0, 4.0),
+    );
+    let response = ui.put(
+        text_rect,
+        egui::TextEdit::singleline(text)
+            .id(ui.id().with("rename_editor"))
+            .frame(egui::Frame::NONE)
+            .desired_width(text_rect.width())
+            .margin(egui::Margin::symmetric(4, 6))
+            .vertical_align(egui::Align::Center),
+    );
+    if request_focus {
+        response.request_focus();
+    }
+
+    (frame.rect, response)
+}
+
 fn paint_tab_background(
     ui: &egui::Ui,
     rect: Rect,

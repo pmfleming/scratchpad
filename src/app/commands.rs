@@ -114,10 +114,14 @@ impl ScratchpadApp {
         let index = self.active_tab_index();
         let tab_name = self.active_buffer_name_or_missing(index);
         let snapshot = self.capture_transaction_snapshot();
+        let mut next_active_view = None;
         if let Some(tab) = self.tabs_mut().get_mut(index)
             && tab.close_view(view_id)
         {
-            let next_active_view = tab.active_view_id;
+            next_active_view = Some(tab.active_view_id);
+        }
+        if let Some(next_active_view) = next_active_view {
+            self.begin_layout_transition();
             self.mark_search_dirty();
             self.request_focus_for_view(next_active_view);
             self.record_transaction("Close view", vec![tab_name.clone()], None, snapshot);
@@ -133,30 +137,31 @@ impl ScratchpadApp {
 
     fn reorder_tab_command(&mut self, from_index: usize, to_index: usize) {
         let moved_tab_description = self.describe_tab_at(from_index);
-        let snapshot = self.capture_transaction_snapshot();
+        let affected_items = vec![moved_tab_description];
+        let snapshot = self.capture_coalesced_layout_snapshot("Reorder tab", &affected_items);
         if !self.tab_manager_mut().reorder_tab(from_index, to_index) {
             return;
         }
-        self.record_transaction(
-            "Reorder tab",
-            vec![moved_tab_description.clone()],
-            None,
-            snapshot,
-        );
+        self.begin_layout_transition();
+        self.record_coalesced_layout_transaction("Reorder tab", affected_items, snapshot);
     }
 
     fn reorder_display_tab_command(&mut self, from_index: usize, to_index: usize) {
-        self.reorder_display_tab(from_index, to_index);
+        if self.reorder_display_tab(from_index, to_index) {
+            self.begin_layout_transition();
+        }
     }
 
     fn resize_split_command(&mut self, path: SplitPath, ratio: f32) {
         let index = self.active_tab_index();
         let tab_name = self.active_buffer_name_or_missing(index);
-        let snapshot = self.capture_transaction_snapshot();
+        let affected_items = vec![tab_name];
+        let snapshot = self.capture_coalesced_layout_snapshot("Resize split", &affected_items);
         if let Some(tab) = self.tabs_mut().get_mut(index)
             && tab.resize_split(path, ratio)
         {
-            self.record_transaction("Resize split", vec![tab_name.clone()], None, snapshot);
+            self.begin_layout_transition();
+            self.record_coalesced_layout_transaction("Resize split", affected_items, snapshot);
             self.mark_session_dirty();
         }
     }
@@ -165,12 +170,16 @@ impl ScratchpadApp {
         let index = self.active_tab_index();
         let tab_name = self.active_buffer_name_or_missing(index);
         let snapshot = self.capture_transaction_snapshot();
+        let mut new_active_view = None;
         if let Some(tab) = self.tabs_mut().get_mut(index)
             && tab
                 .split_active_view_with_placement(axis, new_view_first, ratio)
                 .is_some()
         {
-            let new_active_view = tab.active_view_id;
+            new_active_view = Some(tab.active_view_id);
+        }
+        if let Some(new_active_view) = new_active_view {
+            self.begin_layout_transition();
             self.mark_search_dirty();
             self.request_focus_for_view(new_active_view);
             self.record_transaction("Split view", vec![tab_name.clone()], None, snapshot);

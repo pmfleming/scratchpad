@@ -26,6 +26,9 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             return;
         }
 
+        ui.painter()
+            .rect_filled(workspace_rect, 0.0, app.editor_background_color());
+
         app.workspace_reflow_axis = preferred_workspace_reflow_axis(workspace_rect);
         handle_editor_zoom(&ctx, workspace_rect, ui, app);
         let editor_state = prepare_editor_state(app);
@@ -207,6 +210,7 @@ fn render_pane_node(
                 rect,
                 *axis,
                 *ratio,
+                context.app.editor_background_color(),
                 current_path,
                 &mut context.outcome.actions,
             );

@@ -65,6 +65,14 @@ pub(super) fn render_appearance_category(ui: &mut egui::Ui, app: &mut Scratchpad
                 |app, color| app.set_editor_background_color(color),
                 app,
             );
+            render_color_row(
+                ui,
+                "Highlight",
+                "Used for search match highlighting in the editor.",
+                app.editor_text_highlight_color(),
+                |app, color| app.set_editor_text_highlight_color(color),
+                app,
+            );
             ui.add_space(SettingsUi::LAYOUT.preview_top_margin);
             render_preview_panel(ui, app);
         },

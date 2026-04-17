@@ -1,33 +1,25 @@
-import urllib.request
-import re
 import os
+import urllib.request
 
-fonts = ["Roboto", "Roboto Flex", "Roboto Mono", "Roboto Slab", "Roboto Serif"]
+FONT_URLS = {
+    "NotoSansDisplay-Regular.ttf": "https://raw.githubusercontent.com/notofonts/noto-fonts/main/hinted/ttf/NotoSansDisplay/NotoSansDisplay-Regular.ttf",
+    "NotoSans-VF.ttf": "https://raw.githubusercontent.com/notofonts/noto-fonts/main/unhinted/variable-ttf/NotoSans-VF.ttf",
+    "NotoSansMono-Regular.ttf": "https://raw.githubusercontent.com/notofonts/noto-fonts/main/hinted/ttf/NotoSansMono/NotoSansMono-Regular.ttf",
+    "NotoSerifDisplay-Regular.ttf": "https://raw.githubusercontent.com/notofonts/noto-fonts/main/hinted/ttf/NotoSerifDisplay/NotoSerifDisplay-Regular.ttf",
+    "NotoSansCJKjp-Regular.otf": "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf",
+    "NotoSansCJKkr-Regular.otf": "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Korean/NotoSansCJKkr-Regular.otf",
+    "NotoSansCJKsc-Regular.otf": "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf",
+    "NotoSansCJKtc-Regular.otf": "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf",
+}
+
 os.makedirs("fonts", exist_ok=True)
 
-for font in fonts:
-    family = font.replace(' ', '+')
-    url = f"https://fonts.googleapis.com/css?family={family}:400"
-    print(f"Fetching CSS for {font}...")
-    
-    # Old User-Agent to force TTF format (Android 4.1.1)
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Linux; U; Android 4.1.1; en-gb; Build/KLP) AppleWebKit/534.30 (KHTML, like Gecko) Version/4.0 Safari/534.30'})
+for file_name, url in FONT_URLS.items():
+    print(f"Downloading {file_name}...")
+    target_path = os.path.join("fonts", file_name)
     try:
-        with urllib.request.urlopen(req) as response:
-            css = response.read().decode('utf-8')
-            print(f"CSS:\n{css}")
-            
-            # Find the url(...) for the normal/400 font
-            match = re.search(r"url\(([^)]+)\)", css)
-            if match:
-                ttf_url = match.group(1).strip("'\"")
-                target_name = font.replace(" ", "") + "-Regular.ttf"
-                
-                print(f"Downloading {ttf_url} to {target_name}...")
-                with urllib.request.urlopen(ttf_url) as ttf_resp:
-                    with open(os.path.join("fonts", target_name), "wb") as f:
-                        f.write(ttf_resp.read())
-            else:
-                print(f"Could not find TTF URL for {font} in CSS.")
-    except Exception as e:
-        print(f"Failed to download {font}: {e}")
+        with urllib.request.urlopen(url) as response:
+            with open(target_path, "wb") as font_file:
+                font_file.write(response.read())
+    except Exception as error:
+        print(f"Failed to download {file_name}: {error}")

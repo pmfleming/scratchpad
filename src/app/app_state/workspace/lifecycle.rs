@@ -111,6 +111,7 @@ impl ScratchpadApp {
 
     fn create_workspace_tab(&mut self, tab: WorkspaceTab) {
         self.reload_settings_before_workspace_change();
+        self.begin_layout_transition();
         self.tab_manager.append_tab(tab);
         self.mark_search_dirty();
         self.request_focus_for_active_view();
@@ -119,6 +120,7 @@ impl ScratchpadApp {
     fn close_tab_internal(&mut self, index: usize) -> String {
         let tab_description = self.tab_manager.describe_tab_at(index);
         let settings_refresh = self.settings_toml_refresh_on_tab_close(index);
+        self.begin_layout_transition();
         self.tab_manager.close_tab_internal(index);
         self.mark_search_dirty();
         self.request_focus_for_active_view();

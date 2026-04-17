@@ -13,6 +13,8 @@ pub const DEFAULT_WORD_WRAP: bool = true;
 pub const DEFAULT_EDITOR_GUTTER: u8 = 0;
 pub const DEFAULT_EDITOR_TEXT_COLOR: &str = "#ffffff";
 pub const DEFAULT_EDITOR_BACKGROUND_COLOR: &str = "#15181d";
+pub const DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR: &str = "#fff36d";
+pub const DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR: &str = "#000000";
 pub const LIGHT_EDITOR_TEXT_COLOR: &str = "#000000";
 pub const LIGHT_EDITOR_BACKGROUND_COLOR: &str = "#ffffff";
 pub const DEFAULT_TAB_LIST_WIDTH: f32 = 184.0;
@@ -85,6 +87,10 @@ pub struct AppSettings {
     pub editor_text_color: String,
     #[serde(default = "default_editor_background_color")]
     pub editor_background_color: String,
+    #[serde(default = "default_editor_text_highlight_color")]
+    pub editor_text_highlight_color: String,
+    #[serde(default = "default_editor_text_highlight_text_color")]
+    pub editor_text_highlight_text_color: String,
     #[serde(default)]
     pub tab_list_position: TabListPosition,
     #[serde(default)]
@@ -115,6 +121,8 @@ impl Default for AppSettings {
             theme_mode: AppThemeMode::default(),
             editor_text_color: default_editor_text_color(),
             editor_background_color: default_editor_background_color(),
+            editor_text_highlight_color: default_editor_text_highlight_color(),
+            editor_text_highlight_text_color: default_editor_text_highlight_text_color(),
             tab_list_position: TabListPosition::default(),
             file_open_disposition: FileOpenDisposition::default(),
             startup_session_behavior: StartupSessionBehavior::default(),
@@ -255,6 +263,14 @@ pub(crate) fn default_editor_text_color() -> String {
 
 pub(crate) fn default_editor_background_color() -> String {
     DEFAULT_EDITOR_BACKGROUND_COLOR.to_owned()
+}
+
+pub(crate) fn default_editor_text_highlight_color() -> String {
+    DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR.to_owned()
+}
+
+pub(crate) fn default_editor_text_highlight_text_color() -> String {
+    DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR.to_owned()
 }
 
 default_fn!(default_tab_list_width, f32, DEFAULT_TAB_LIST_WIDTH);

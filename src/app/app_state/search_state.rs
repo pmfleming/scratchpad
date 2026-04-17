@@ -130,12 +130,13 @@ impl Default for SearchState {
 impl SearchState {
     fn show_with_focus(&mut self, focus_target: SearchFocusTarget) {
         self.open = true;
-        self.replace_open = true;
+        self.replace_open = matches!(focus_target, SearchFocusTarget::ReplaceInput);
         self.focus_target = Some(focus_target);
     }
 
     fn close(&mut self) {
         self.open = false;
+        self.replace_open = false;
         self.focus_target = None;
         self.clear_inactive_results();
     }
@@ -218,6 +219,19 @@ impl ScratchpadApp {
 
     pub fn search_query(&self) -> &str {
         &self.search_state.query
+    }
+
+    pub fn search_replace_open(&self) -> bool {
+        self.search_state.replace_open
+    }
+
+    pub fn set_search_replace_open(&mut self, open: bool) {
+        self.search_state.replace_open = open;
+        self.search_state.focus_target = Some(if open {
+            SearchFocusTarget::ReplaceInput
+        } else {
+            SearchFocusTarget::FindInput
+        });
     }
 
     pub fn set_search_query(&mut self, query: impl Into<String>) {

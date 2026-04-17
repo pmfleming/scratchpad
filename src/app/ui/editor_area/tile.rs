@@ -3,7 +3,7 @@ use crate::app::domain::{RenderedLayout, ViewId, WorkspaceTab};
 use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::theme::*;
 use crate::app::ui::editor_content::{
-    self, EditorContentOutcome, EditorContentStyle, TextEditOptions,
+    self, EditorContentOutcome, EditorContentStyle, EditorHighlightStyle, TextEditOptions,
 };
 use crate::app::ui::tab_drag;
 use crate::app::ui::tile_header::{
@@ -90,6 +90,10 @@ fn render_tile_body(
         let word_wrap = app.word_wrap();
         let text_color = app.editor_text_color();
         let background_color = app.editor_background_color();
+        let highlight_style = EditorHighlightStyle::new(
+            app.editor_text_highlight_color(),
+            app.editor_text_highlight_text_color(),
+        );
         let tab = &mut app.tabs_mut()[request.tab_index];
         let previous_layout = take_previous_layout(tab, request.view_id);
         let outcome = show_editor_scroll_area(
@@ -107,6 +111,7 @@ fn render_tile_body(
                         word_wrap,
                         &editor_font_id,
                         text_color,
+                        highlight_style,
                     ),
                     background_color,
                 },

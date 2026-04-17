@@ -3,6 +3,7 @@ use crate::app::domain::{BufferId, TabManager};
 use std::time::{Duration, Instant};
 
 const MAX_TRANSACTION_LOG_ENTRIES: usize = 200;
+const LAYOUT_TRANSACTION_GROUP_IDLE: Duration = Duration::from_millis(250);
 const TEXT_EDIT_GROUP_IDLE: Duration = Duration::from_millis(1200);
 const TEXT_EDIT_MAX_PREVIEW_CHARS: usize = 160;
 const TEXT_EDIT_MAX_PREVIEW_LINES: usize = 3;
@@ -50,6 +51,11 @@ pub(crate) struct PendingTextTransaction {
     last_edit_at: Instant,
 }
 
+pub(crate) struct PendingLayoutTransaction {
+    entry_id: u64,
+    last_edit_at: Instant,
+}
+
 impl TransactionLog {
     pub(crate) fn entries(&self) -> &[TransactionLogEntry] {
         &self.entries
@@ -92,6 +98,10 @@ impl TransactionLog {
     pub(crate) fn next_entry_id(&self) -> u64 {
         self.next_id
     }
+
+    pub(crate) fn clear(&mut self) {
+        self.entries.clear();
+    }
 }
 
 impl ScratchpadApp {
@@ -113,7 +123,67 @@ impl ScratchpadApp {
     ) {
         self.transaction_log
             .push(action_label, affected_items, details, snapshot_before);
+        self.pending_layout_transaction = None;
         self.pending_text_transaction = None;
+    }
+
+    pub(crate) fn record_coalesced_layout_transaction(
+        &mut self,
+        action_label: &'static str,
+        affected_items: Vec<String>,
+        snapshot_before: Option<TransactionSnapshot>,
+    ) {
+        let now = Instant::now();
+        if snapshot_before.is_none() {
+            if let Some(pending) = self.pending_layout_transaction.as_mut() {
+                pending.last_edit_at = now;
+            }
+            self.pending_text_transaction = None;
+            return;
+        }
+
+        let entry_id = self.transaction_log.next_entry_id();
+        self.transaction_log.push(
+            action_label,
+            affected_items,
+            None,
+            snapshot_before.expect("snapshot checked"),
+        );
+        self.pending_layout_transaction = Some(PendingLayoutTransaction {
+            entry_id,
+            last_edit_at: now,
+        });
+        self.pending_text_transaction = None;
+    }
+
+    pub(crate) fn capture_coalesced_layout_snapshot(
+        &self,
+        action_label: &'static str,
+        affected_items: &[String],
+    ) -> Option<TransactionSnapshot> {
+        if self.can_extend_layout_transaction(action_label, affected_items) {
+            None
+        } else {
+            Some(self.capture_transaction_snapshot())
+        }
+    }
+
+    fn can_extend_layout_transaction(
+        &self,
+        action_label: &'static str,
+        affected_items: &[String],
+    ) -> bool {
+        let now = Instant::now();
+        self.pending_layout_transaction
+            .as_ref()
+            .is_some_and(|pending| {
+                now.duration_since(pending.last_edit_at) <= LAYOUT_TRANSACTION_GROUP_IDLE
+                    && self.transaction_log.entries().last().is_some_and(|entry| {
+                        entry.id == pending.entry_id
+                            && entry.action_label == action_label
+                            && entry.affected_items == affected_items
+                    })
+            })
     }
 
     pub(crate) fn transaction_log_entries(&self) -> &[TransactionLogEntry] {
@@ -152,6 +222,12 @@ impl ScratchpadApp {
         self.transaction_log.entries().len()
     }
 
+    pub fn clear_transaction_log(&mut self) {
+        self.transaction_log.clear();
+        self.pending_layout_transaction = None;
+        self.pending_text_transaction = None;
+    }
+
     pub(crate) fn active_buffer_transaction_label(&self) -> Option<String> {
         self.active_tab().map(|tab| {
             tab.active_buffer()
@@ -169,6 +245,7 @@ impl ScratchpadApp {
         snapshot_before: TransactionSnapshot,
         current_text: String,
     ) {
+        self.pending_layout_transaction = None;
         let now = Instant::now();
 
         let can_extend_existing = self
@@ -199,24 +276,20 @@ impl ScratchpadApp {
             return;
         }
 
-        let next_label = self
-            .text_edit_preview(&snapshot_before, &current_text)
+        let before_text = snapshot_before
+            .tab_manager
+            .active_tab()
+            .map(|tab| tab.active_buffer().text().to_owned())
+            .unwrap_or_default();
+        let next_label = text_edit_preview_from_before(&before_text, &current_text)
             .unwrap_or_else(|| "Edit".to_owned());
         let entry_id = self.transaction_log.next_entry_id();
-        self.transaction_log.push(
-            next_label,
-            vec![buffer_label],
-            None,
-            snapshot_before.clone(),
-        );
+        self.transaction_log
+            .push(next_label, vec![buffer_label], None, snapshot_before);
         self.pending_text_transaction = Some(PendingTextTransaction {
             entry_id,
             buffer_id,
-            before_text: snapshot_before
-                .tab_manager
-                .active_tab()
-                .map(|tab| tab.active_buffer().text().to_owned())
-                .unwrap_or_default(),
+            before_text,
             last_text: current_text,
             last_edit_at: now,
         });
@@ -229,21 +302,9 @@ impl ScratchpadApp {
         self.pending_settings_toml_refresh = snapshot.pending_settings_toml_refresh;
         self.pending_editor_focus = self.active_tab().map(|tab| tab.active_view_id);
         self.tab_manager.pending_scroll_to_active = true;
+        self.pending_layout_transaction = None;
         self.pending_text_transaction = None;
         self.mark_session_dirty();
-    }
-
-    fn text_edit_preview(
-        &self,
-        snapshot_before: &TransactionSnapshot,
-        current_text: &str,
-    ) -> Option<String> {
-        let before_text = snapshot_before
-            .tab_manager
-            .active_tab()
-            .map(|tab| tab.active_buffer().text())
-            .unwrap_or_default();
-        text_edit_preview_from_before(before_text, current_text)
     }
 }
 

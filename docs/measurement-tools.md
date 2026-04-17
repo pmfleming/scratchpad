@@ -44,6 +44,7 @@ Expected artifacts:
 .venv\Scripts\python.exe scripts\generate_flamegraphs.py --mode visibility
 cargo flamegraph --dev --bin profile_tab_operations -o target/analysis/flamegraphs/tab_operations_profile.svg
 cargo flamegraph --dev --bin profile_tab_tile_layout -o target/analysis/flamegraphs/tab_tile_layout_profile.svg
+cargo flamegraph --dev --bin profile_view_navigation -o target/analysis/flamegraphs/view_navigation_profile.svg
 cargo flamegraph --dev --bin profile_search_current_app_state -o target/analysis/flamegraphs/search_current_app_state_profile.svg
 cargo flamegraph --dev --bin profile_search_all_tabs -o target/analysis/flamegraphs/search_all_tabs_profile.svg
 .venv\Scripts\python.exe scripts\map.py --mode visibility
@@ -99,10 +100,11 @@ powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -CloneOnly
 - `scripts/generate_flamegraphs.py` writes `target/analysis/flamegraphs.json` and the referenced SVG files under `target/analysis/flamegraphs/`.
 - Flamegraph generation now targets dedicated single-entry profile binaries instead of whole Criterion suites, which keeps traces narrower and easier to interpret.
 - Recommended single-entry profile series:
-	- `profile_tab_operations`: repeated tab split, promote, and combine operations on a 64-tab workspace
-	- `profile_tab_tile_layout`: balanced tile creation plus rebalance and close work on a 16-tile workspace
-	- `profile_search_current_app_state`: current-workspace-tab search through the full app-state pipeline on 16 files
-	- `profile_search_all_tabs`: all-open-tabs search across 16 tabs to expose cross-tab scan costs separately
+	- `profile_tab_operations`: active-tab switching plus reversible tab reordering on a 64-tab, multi-view, loaded workspace
+	- `profile_tab_tile_layout`: resize-split and rebalance work on a loaded 16-tile workspace tab
+	- `profile_view_navigation`: repeated view switching inside a heavily split tab with both duplicated and distinct buffers
+	- `profile_search_current_app_state`: current-workspace-tab search through the full app-state pipeline on a file-heavy tab with extra duplicate views
+	- `profile_search_all_tabs`: all-open-tabs search across a many-tab workspace where each tab also has duplicate editor views into the same buffer
 - The search-speed dataset separates:
 	- Active / Current / All scope modes
 	- full completion latency vs first-response latency

@@ -8,7 +8,8 @@ use eframe::egui;
 pub use artifact::{make_control_chars_clean, make_control_chars_visible, render_artifact_view};
 pub use gutter::render_line_number_gutter;
 pub use text_edit::{
-    TextEditOptions, build_layouter, render_editor_text_edit, render_read_only_text_edit,
+    EditorHighlightStyle, TextEditOptions, build_layouter, render_editor_text_edit,
+    render_read_only_text_edit,
 };
 
 pub(crate) struct EditorContentOutcome {

@@ -8,8 +8,6 @@ pub const TAB_SELECTED_ACCENT: Color32 = Color32::from_rgb(104, 154, 232);
 pub const ACTION_BG: Color32 = Color32::from_rgb(38, 43, 50);
 pub const ACTION_HOVER_BG: Color32 = Color32::from_rgb(52, 58, 68);
 pub const EDITOR_BG: Color32 = Color32::from_rgb(21, 24, 29);
-pub const SEARCH_MATCH_BG: Color32 = Color32::from_rgb(81, 70, 18);
-pub const SEARCH_ACTIVE_MATCH_BG: Color32 = Color32::from_rgb(201, 122, 26);
 pub const CLOSE_BG: Color32 = Color32::from_rgb(124, 49, 49);
 pub const CLOSE_HOVER_BG: Color32 = Color32::from_rgb(164, 58, 58);
 pub const BORDER: Color32 = Color32::from_rgb(59, 66, 76);
@@ -22,8 +20,6 @@ const TAB_SELECTED_BG_LIGHT: Color32 = Color32::from_rgb(219, 231, 248);
 const TAB_SELECTED_ACCENT_LIGHT: Color32 = Color32::from_rgb(67, 118, 205);
 const ACTION_BG_LIGHT: Color32 = Color32::from_rgb(230, 236, 244);
 const ACTION_HOVER_BG_LIGHT: Color32 = Color32::from_rgb(213, 222, 234);
-const SEARCH_MATCH_BG_LIGHT: Color32 = Color32::from_rgb(255, 238, 184);
-const SEARCH_ACTIVE_MATCH_BG_LIGHT: Color32 = Color32::from_rgb(242, 177, 78);
 const BORDER_LIGHT: Color32 = Color32::from_rgb(184, 194, 208);
 const TEXT_PRIMARY_LIGHT: Color32 = Color32::from_rgb(28, 35, 45);
 const TEXT_MUTED_LIGHT: Color32 = Color32::from_rgba_premultiplied(28, 35, 45, 178);
@@ -63,12 +59,6 @@ ui_theme_fn!(
 );
 ui_theme_fn!(action_bg, ACTION_BG, ACTION_BG_LIGHT);
 ui_theme_fn!(action_hover_bg, ACTION_HOVER_BG, ACTION_HOVER_BG_LIGHT);
-ui_theme_fn!(search_match_bg, SEARCH_MATCH_BG, SEARCH_MATCH_BG_LIGHT);
-ui_theme_fn!(
-    search_active_match_bg,
-    SEARCH_ACTIVE_MATCH_BG,
-    SEARCH_ACTIVE_MATCH_BG_LIGHT
-);
 ui_theme_fn!(border, BORDER, BORDER_LIGHT);
 ui_theme_fn!(text_primary, TEXT_PRIMARY, TEXT_PRIMARY_LIGHT);
 ui_theme_fn!(text_muted, TEXT_MUTED, TEXT_MUTED_LIGHT);

@@ -209,6 +209,69 @@ fn activating_a_view_queues_focus_for_that_view() {
 }
 
 #[test]
+fn repeated_resize_split_interactions_share_one_transaction_snapshot() {
+    let mut app = test_app();
+    app.tabs_mut()[0]
+        .split_active_view(SplitAxis::Vertical)
+        .expect("split should succeed");
+
+    app.handle_command(AppCommand::ResizeSplit {
+        path: Vec::new(),
+        ratio: 0.3,
+    });
+    app.handle_command(AppCommand::ResizeSplit {
+        path: Vec::new(),
+        ratio: 0.7,
+    });
+
+    assert_eq!(app.transaction_log_len(), 1);
+
+    let entry_id = app
+        .latest_transaction_entry_id()
+        .expect("resize transaction should exist");
+    assert!(app.undo_transaction_entry(entry_id));
+
+    let mut areas = Vec::new();
+    collect_leaf_area_fractions(&app.tabs()[0].root_pane, 1.0, &mut areas);
+    assert_eq!(areas, vec![0.5, 0.5]);
+}
+
+#[test]
+fn repeated_reorder_interactions_share_one_transaction_snapshot() {
+    let mut app = app_with_named_tabs(&["one.txt", "two.txt", "three.txt"]);
+
+    app.handle_command(AppCommand::ReorderTab {
+        from_index: 0,
+        to_index: 2,
+    });
+    app.handle_command(AppCommand::ReorderTab {
+        from_index: 2,
+        to_index: 1,
+    });
+
+    assert_eq!(app.transaction_log_len(), 1);
+    assert_eq!(
+        app.tabs()
+            .iter()
+            .map(|tab| tab.active_buffer().name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["two.txt", "one.txt", "three.txt"]
+    );
+
+    let entry_id = app
+        .latest_transaction_entry_id()
+        .expect("reorder transaction should exist");
+    assert!(app.undo_transaction_entry(entry_id));
+    assert_eq!(
+        app.tabs()
+            .iter()
+            .map(|tab| tab.active_buffer().name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["one.txt", "two.txt", "three.txt"]
+    );
+}
+
+#[test]
 fn settings_commands_switch_between_workspace_and_settings_surface() {
     let mut app = test_app();
 

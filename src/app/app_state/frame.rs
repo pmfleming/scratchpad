@@ -39,6 +39,7 @@ impl ScratchpadApp {
     }
 
     pub(super) fn render_frame(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        paint_root_background(ui, self.editor_background_color());
         self.render_tab_chrome(ui);
         self.render_active_surface(ui);
         dialogs::show_pending_action_modal(ctx, self);
@@ -78,6 +79,10 @@ impl ScratchpadApp {
 
     pub(crate) fn begin_chrome_transition(&mut self) {
         self.chrome_transition_frames_remaining = CHROME_TRANSITION_FRAMES;
+    }
+
+    pub(crate) fn begin_layout_transition(&mut self) {
+        self.begin_chrome_transition();
     }
 
     pub(crate) fn chrome_transition_active(&self) -> bool {
@@ -146,4 +151,8 @@ impl ScratchpadApp {
         }
         self.applied_editor_font = Some(self.app_settings.editor_font);
     }
+}
+
+fn paint_root_background(ui: &egui::Ui, fill: egui::Color32) {
+    ui.painter().rect_filled(ui.max_rect(), 0.0, fill);
 }

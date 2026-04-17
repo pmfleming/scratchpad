@@ -122,6 +122,18 @@ impl ScratchpadApp {
         self.set_editor_palette_color(color_to_hex(color), false);
     }
 
+    pub(crate) fn set_editor_text_highlight_color(&mut self, color: egui::Color32) {
+        let next = color_to_hex(color);
+        let next_text = color_to_hex(crate::app::color_contrast::optimal_text_color(color));
+        if self.app_settings.editor_text_highlight_color == next && self.app_settings.editor_text_highlight_text_color == next_text {
+            return;
+        }
+
+        self.app_settings.editor_text_highlight_color = next;
+        self.app_settings.editor_text_highlight_text_color = next_text;
+        self.persist_settings_or_error();
+    }
+
     fn set_editor_palette_color(&mut self, next: String, is_text_color: bool) {
         let changed = {
             let current = if is_text_color {
@@ -148,7 +160,7 @@ impl ScratchpadApp {
         }
 
         self.app_settings.tab_list_position = position;
-        self.begin_chrome_transition();
+        self.begin_layout_transition();
         self.reset_tab_list_visibility_state(false);
         if position.is_vertical() {
             self.overflow_popup_open = false;
@@ -179,7 +191,7 @@ impl ScratchpadApp {
         }
 
         self.app_settings.auto_hide_tab_list = enabled;
-        self.begin_chrome_transition();
+        self.begin_layout_transition();
         self.reset_tab_list_visibility_state(enabled && self.vertical_tab_list_open);
         self.persist_settings_or_error();
     }
@@ -212,12 +224,17 @@ impl ScratchpadApp {
             return;
         }
 
-        self.begin_chrome_transition();
+        self.begin_layout_transition();
         self.set_tab_list_width(next);
     }
 
     pub(crate) fn open_settings(&mut self) {
         self.reload_settings_before_workspace_change();
+        self.begin_layout_transition();
+        if !self.settings_tab_open() {
+            self.settings_preview_quote_index =
+                (self.settings_preview_quote_index + 1) % crate::app::ui::settings::PREVIEW_QUOTES.len();
+        }
         if self.set_settings_surface(AppSurface::Settings, true) {
             self.persist_settings_or_error();
         }
@@ -230,6 +247,7 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn close_settings(&mut self) {
+        self.begin_layout_transition();
         if self.set_settings_surface(AppSurface::Workspace, false) {
             self.persist_settings_or_error();
         }

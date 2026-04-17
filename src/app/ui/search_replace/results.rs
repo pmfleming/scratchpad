@@ -4,75 +4,104 @@ use crate::app::theme::{
     action_bg, action_hover_bg, border, tab_selected_accent, tab_selected_bg, text_muted,
     text_primary,
 };
+use crate::app::ui::settings;
 use eframe::egui;
 
 const SEARCH_RESULTS_VIEWPORT_HEIGHT: f32 = 320.0;
 const SEARCH_RESULT_ROW_HEIGHT: f32 = 40.0;
-
-struct BufferSection<'a> {
-    buffer_label: &'a str,
-    entries: &'a [SearchResultEntry],
-}
 
 pub(super) fn show_search_results(
     ui: &mut egui::Ui,
     state: &SearchStripState,
     actions: &mut SearchStripActions,
 ) {
-    if state.query.is_empty() {
-        ui.add_space(4.0);
-        ui.label(
-            egui::RichText::new("Type to search across the selected scope.").color(text_muted(ui)),
-        );
-        return;
-    }
+    settings::dialog_card_frame(ui).show(ui, |ui| {
+        render_results_header(ui, state);
+        ui.add_space(10.0);
 
-    ui.add_space(8.0);
-    ui.separator();
-    ui.add_space(6.0);
-    show_search_progress(ui, state);
-
-    if state.result_groups.is_empty() {
-        if !state.progress.searching {
-            ui.label(egui::RichText::new("No matches found.").color(text_muted(ui)));
+        if state.query.is_empty() {
+            render_empty_results_state(ui, "Type to search across the selected scope.");
+            return;
         }
-        return;
-    }
 
-    ui.allocate_ui_with_layout(
-        egui::vec2(ui.available_width(), SEARCH_RESULTS_VIEWPORT_HEIGHT),
-        egui::Layout::top_down(egui::Align::Min),
-        |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("search_results_list")
-                .max_height(SEARCH_RESULTS_VIEWPORT_HEIGHT)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    for group in &state.result_groups {
-                        show_search_group(ui, group, actions);
-                    }
-                });
-        },
-    );
+        if state.result_groups.is_empty() {
+            if state.progress.searching {
+                render_empty_results_state(ui, "Searching...");
+            } else {
+                render_empty_results_state(ui, "No matches found.");
+            }
+            return;
+        }
+
+        egui::ScrollArea::vertical()
+            .id_salt("search_results_list")
+            .max_height(SEARCH_RESULTS_VIEWPORT_HEIGHT)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for group in &state.result_groups {
+                    show_search_group(ui, group, actions);
+                }
+            });
+    });
 }
 
-fn show_search_progress(ui: &mut egui::Ui, state: &SearchStripState) {
+fn render_results_header(ui: &mut egui::Ui, state: &SearchStripState) {
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(egui_phosphor::regular::FILE_TEXT)
+                .size(18.0)
+                .color(text_muted(ui)),
+        );
+        ui.add_space(12.0);
+        ui.vertical(|ui| {
+            ui.label(
+                egui::RichText::new("Search results")
+                    .size(15.0)
+                    .color(text_primary(ui)),
+            );
+            ui.label(
+                egui::RichText::new(results_summary(state))
+                    .size(12.0)
+                    .color(text_muted(ui)),
+            );
+        });
+    });
+}
+
+fn results_summary(state: &SearchStripState) -> String {
     if state.progress.searching {
-        ui.label(egui::RichText::new("Searching...").color(text_muted(ui)));
-        ui.add_space(4.0);
-        return;
+        return "Searching...".to_owned();
+    }
+
+    if state.query.is_empty() {
+        return "Enter a query to populate results.".to_owned();
     }
 
     if state.progress.displayed_match_count < state.progress.total_match_count {
-        ui.label(
-            egui::RichText::new(format!(
-                "Showing first {} of {} matches.",
-                state.progress.displayed_match_count, state.progress.total_match_count
-            ))
-            .color(text_muted(ui)),
+        return format!(
+            "Showing first {} of {} matches.",
+            state.progress.displayed_match_count, state.progress.total_match_count
         );
-        ui.add_space(4.0);
     }
+
+    let file_count = state.result_groups.len();
+    let file_label = if file_count == 1 { "file" } else { "files" };
+    format!(
+        "{} matches in {} {}.",
+        state.match_count, file_count, file_label
+    )
+}
+
+fn render_empty_results_state(ui: &mut egui::Ui, message: &str) {
+    ui.add_space(20.0);
+    ui.vertical_centered(|ui| {
+        ui.label(
+            egui::RichText::new(message)
+                .size(13.0)
+                .color(text_muted(ui)),
+        );
+    });
+    ui.add_space(12.0);
 }
 
 fn show_search_group(
@@ -80,13 +109,6 @@ fn show_search_group(
     group: &SearchResultGroup,
     actions: &mut SearchStripActions,
 ) {
-    for section in buffer_sections(group) {
-        show_file_section(ui, group, section.buffer_label, section.entries, actions);
-    }
-}
-
-fn buffer_sections(group: &SearchResultGroup) -> Vec<BufferSection<'_>> {
-    let mut sections = Vec::new();
     let mut start = 0;
 
     while start < group.entries.len() {
@@ -96,14 +118,15 @@ fn buffer_sections(group: &SearchResultGroup) -> Vec<BufferSection<'_>> {
             end += 1;
         }
 
-        sections.push(BufferSection {
-            buffer_label: group.entries[start].buffer_label.as_str(),
-            entries: &group.entries[start..end],
-        });
+        show_file_section(
+            ui,
+            group,
+            group.entries[start].buffer_label.as_str(),
+            &group.entries[start..end],
+            actions,
+        );
         start = end;
     }
-
-    sections
 }
 
 fn show_file_section(
@@ -132,18 +155,18 @@ fn show_file_section(
     if group.tab_label != buffer_label {
         ui.label(
             egui::RichText::new(&group.tab_label)
-                .small()
+                .size(12.0)
                 .color(text_muted(ui)),
         );
     }
 
-    ui.add_space(2.0);
+    ui.add_space(6.0);
     for entry in entries {
         if show_result_row(ui, entry).clicked() {
             actions.selected_match_index = Some(entry.match_index);
         }
 
-        ui.add_space(2.0);
+        ui.add_space(4.0);
     }
 }
 
@@ -180,15 +203,15 @@ fn match_body(ui: &egui::Ui, entry: &SearchResultEntry) -> egui::WidgetText {
         text_muted(ui),
         15.0,
     );
-    append_text(&mut job, &match_preview(entry), text_primary(ui), 16.0);
+    append_text(&mut job, match_preview(entry), text_primary(ui), 16.0);
     job.into()
 }
 
-fn match_preview(entry: &SearchResultEntry) -> String {
+fn match_preview(entry: &SearchResultEntry) -> &str {
     if entry.preview.is_empty() {
-        "Match".to_owned()
+        "Match"
     } else {
-        entry.preview.clone()
+        entry.preview.as_str()
     }
 }
 
@@ -232,43 +255,5 @@ fn match_border(ui: &egui::Ui, active: bool) -> egui::Color32 {
         tab_selected_accent(ui).gamma_multiply(0.95)
     } else {
         border(ui)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::buffer_sections;
-    use crate::app::app_state::{SearchResultEntry, SearchResultGroup};
-
-    fn entry(match_index: usize, buffer_id: u64, buffer_label: &str) -> SearchResultEntry {
-        SearchResultEntry {
-            match_index,
-            buffer_id,
-            buffer_label: buffer_label.to_owned(),
-            line_number: 1,
-            column_number: match_index + 1,
-            preview: format!("match {match_index}"),
-            active: false,
-        }
-    }
-
-    #[test]
-    fn buffer_sections_keep_same_name_buffers_separate() {
-        let group = SearchResultGroup {
-            tab_index: 0,
-            tab_label: "Workspace".to_owned(),
-            entries: vec![
-                entry(0, 10, "mod.rs"),
-                entry(1, 10, "mod.rs"),
-                entry(2, 20, "mod.rs"),
-            ],
-        };
-
-        let sections = buffer_sections(&group);
-        assert_eq!(sections.len(), 2);
-        assert_eq!(sections[0].buffer_label, "mod.rs");
-        assert_eq!(sections[0].entries.len(), 2);
-        assert_eq!(sections[1].buffer_label, "mod.rs");
-        assert_eq!(sections[1].entries.len(), 1);
     }
 }

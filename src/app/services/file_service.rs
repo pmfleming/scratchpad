@@ -217,6 +217,10 @@ impl FileService {
         );
         Self::write_file_with_format(path, content, &format)
     }
+
+    pub fn rename_path(from: &Path, to: &Path) -> io::Result<()> {
+        std::fs::rename(from, to)
+    }
 }
 
 fn resolve_encoding(encoding_name: &str) -> io::Result<&'static Encoding> {

@@ -135,7 +135,7 @@ fn render_unsaved_changes_dialog(
     ui.add_space(2.0);
     ui.vertical_centered(|ui| {
         ui.label(
-            egui::RichText::new("Save, discard, cancel")
+            egui::RichText::new("Unsaved Changes")
                 .size(12.0)
                 .color(callout::muted_text(ui)),
         );

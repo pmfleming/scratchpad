@@ -16,11 +16,11 @@ pub(super) struct SearchStripActions {
 pub(super) struct SearchStripState {
     pub(super) query: String,
     pub(super) replacement: String,
+    pub(super) replace_open: bool,
     pub(super) scope: SearchScope,
     pub(super) match_case: bool,
     pub(super) whole_word: bool,
     pub(super) match_count: usize,
-    pub(super) match_label: String,
     pub(super) progress: SearchProgressSnapshot,
     pub(super) result_groups: Vec<SearchResultGroup>,
     requested_focus: Option<SearchFocusTarget>,
@@ -42,14 +42,11 @@ impl SearchStripState {
         Self {
             query: app.search_query().to_owned(),
             replacement: app.search_replacement().to_owned(),
+            replace_open: app.search_replace_open(),
             scope: app.search_scope(),
             match_case: app.search_match_case(),
             whole_word: app.search_whole_word(),
             match_count,
-            match_label: app
-                .search_active_match_index()
-                .map(|index| format!("{} / {}", index + 1, match_count))
-                .unwrap_or_else(|| format!("0 / {match_count}")),
             progress: SearchProgressSnapshot::from_progress(progress),
             result_groups: app.search_result_groups().to_vec(),
             requested_focus,

@@ -16,6 +16,7 @@ pub(crate) use tab_cell::{TabInteraction, render_tab_cell_sized};
 #[derive(Default)]
 pub(crate) struct TabStripOutcome {
     pub(crate) activated_tab: Option<usize>,
+    pub(crate) rename_requested_tab: Option<usize>,
     pub(crate) activate_settings: bool,
     pub(crate) close_requested_tab: Option<usize>,
     pub(crate) close_settings: bool,
@@ -91,6 +92,10 @@ pub(crate) fn apply_tab_interaction(outcome: &mut TabStripOutcome, interaction: 
     match interaction {
         TabInteraction::None => {}
         TabInteraction::Activate(index) => outcome.activated_tab = Some(index),
+        TabInteraction::BeginRename(index) => {
+            outcome.activated_tab = Some(index);
+            outcome.rename_requested_tab = Some(index);
+        }
         TabInteraction::RequestClose(index) => outcome.close_requested_tab = Some(index),
         TabInteraction::PromoteAllFiles(index) => outcome.promote_all_files_tab = Some(index),
     }
@@ -105,6 +110,7 @@ mod tests {
         let outcome = TabStripOutcome::default();
 
         assert!(outcome.activated_tab.is_none());
+        assert!(outcome.rename_requested_tab.is_none());
         assert!(!outcome.activate_settings);
         assert!(outcome.close_requested_tab.is_none());
         assert!(!outcome.close_settings);

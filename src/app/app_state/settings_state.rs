@@ -4,6 +4,7 @@ use crate::app::paths_match;
 use crate::app::services::file_controller::FileController;
 use crate::app::services::settings_store::{
     AppSettings, AppThemeMode, DEFAULT_EDITOR_BACKGROUND_COLOR, DEFAULT_EDITOR_TEXT_COLOR,
+    DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR, DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR,
     DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, FileOpenDisposition, LIGHT_EDITOR_BACKGROUND_COLOR,
     LIGHT_EDITOR_TEXT_COLOR, StartupSessionBehavior, TabListPosition, color_from_hex, color_to_hex,
 };
@@ -54,6 +55,26 @@ impl ScratchpadApp {
         color_from_hex(
             &self.app_settings.editor_background_color,
             color_from_hex(DEFAULT_EDITOR_BACKGROUND_COLOR, egui::Color32::BLACK),
+        )
+    }
+
+    pub fn editor_text_highlight_color(&self) -> egui::Color32 {
+        color_from_hex(
+            &self.app_settings.editor_text_highlight_color,
+            color_from_hex(
+                DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR,
+                egui::Color32::from_rgb(255, 243, 109),
+            ),
+        )
+    }
+
+    pub fn editor_text_highlight_text_color(&self) -> egui::Color32 {
+        color_from_hex(
+            &self.app_settings.editor_text_highlight_text_color,
+            color_from_hex(
+                DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR,
+                egui::Color32::BLACK,
+            ),
         )
     }
 

@@ -1,9 +1,11 @@
 use crate::ScratchpadApp;
 use crate::app::app_state::SearchScope;
-use crate::app::domain::{BufferState, SplitAxis, WorkspaceTab};
+use crate::app::commands::AppCommand;
+use crate::app::domain::{
+    BufferState, PaneBranch, PaneNode, SplitAxis, SplitPath, ViewId, WorkspaceTab,
+};
 use crate::app::services::search::SearchOptions;
 use crate::app::services::session_store::SessionStore;
-use std::fs;
 use std::hint::black_box;
 use std::ops::Range;
 use std::thread;
@@ -11,10 +13,15 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const KB: usize = 1024;
 pub const RECOMMENDED_TAB_OPERATION_TABS: usize = 64;
-pub const RECOMMENDED_TAB_OPERATION_ITERATIONS: usize = 16;
+pub const RECOMMENDED_TAB_OPERATION_VIEWS_PER_TAB: usize = 10;
+pub const RECOMMENDED_TAB_OPERATION_BYTES_PER_BUFFER: usize = 48 * KB;
+pub const RECOMMENDED_TAB_OPERATION_ITERATIONS: usize = 64;
 pub const RECOMMENDED_TAB_TILE_COUNT: usize = 16;
 pub const RECOMMENDED_TAB_TILE_BYTES: usize = 64 * KB;
-pub const RECOMMENDED_TAB_TILE_ITERATIONS: usize = 12;
+pub const RECOMMENDED_TAB_TILE_ITERATIONS: usize = 48;
+pub const RECOMMENDED_VIEW_NAVIGATION_VIEWS: usize = 24;
+pub const RECOMMENDED_VIEW_NAVIGATION_BYTES_PER_BUFFER: usize = 48 * KB;
+pub const RECOMMENDED_VIEW_NAVIGATION_ITERATIONS: usize = 120;
 pub const RECOMMENDED_SEARCH_CURRENT_FILES: usize = 16;
 pub const RECOMMENDED_SEARCH_CURRENT_BYTES_PER_FILE: usize = 24 * KB;
 pub const RECOMMENDED_SEARCH_CURRENT_ITERATIONS: usize = 10;
@@ -24,9 +31,35 @@ pub const RECOMMENDED_SEARCH_ALL_ITERATIONS: usize = 10;
 
 const PROFILE_QUERY: &str = "needle";
 const PROFILE_RESET_QUERY: &str = "zzzz-no-match";
+const SEARCH_VIEW_DUPLICATES_PER_TAB: usize = 4;
 
 pub fn run_tab_operations_profile(tab_count: usize, iterations: usize) -> usize {
-    sum_profile_iterations(iterations, || run_tab_operations_cycle(tab_count))
+    with_steady_state_app("tab-operations", |app| {
+        install_navigation_workspace(
+            app,
+            tab_count,
+            RECOMMENDED_TAB_OPERATION_VIEWS_PER_TAB,
+            RECOMMENDED_TAB_OPERATION_BYTES_PER_BUFFER,
+        );
+        let tab_order = bouncing_indices(app.tabs().len());
+
+        sum_profile_iterations(iterations, || {
+            let mut operations = 0;
+            for &index in &tab_order {
+                app.handle_command(AppCommand::ActivateTab { index });
+                operations += 1;
+            }
+
+            if app.tabs().len() > 2 {
+                let last_index = app.tabs().len() - 1;
+                app.reorder_tab(1, last_index);
+                app.reorder_tab(last_index, 1);
+                operations += 2;
+            }
+
+            operations
+        })
+    })
 }
 
 pub fn run_tab_tile_layout_profile(
@@ -34,12 +67,60 @@ pub fn run_tab_tile_layout_profile(
     bytes_per_tile: usize,
     iterations: usize,
 ) -> usize {
-    let content = plain_text_of_size(bytes_per_tile);
+    with_steady_state_app("tab-tile-layout", |app| {
+        let tab = build_balanced_tile_tab(0, tile_count, bytes_per_tile);
+        let split_paths = collect_split_paths(&tab.root_pane);
+        app.tabs_mut()[0] = tab;
+        let mut ratio_phase = false;
 
-    sum_profile_iterations(iterations, || {
-        let mut tab = build_tile_heavy_tab(tile_count, &content);
-        exercise_tile_heavy_tab(&mut tab);
-        tab.views.len()
+        sum_profile_iterations(iterations, || {
+            ratio_phase = !ratio_phase;
+            let phase = if ratio_phase { 1 } else { 0 };
+            let mut operations = 0;
+
+            for (index, path) in split_paths.iter().enumerate() {
+                let ratio = if (index + phase).is_multiple_of(2) {
+                    0.35
+                } else {
+                    0.65
+                };
+                app.resize_split(path.clone(), ratio);
+                operations += 1;
+            }
+
+            if let Some(tab) = app.tabs_mut().first_mut() {
+                let _ = tab.rebalance_views_equally();
+                let _ = tab.rebalance_views_equally_for_axis(SplitAxis::Horizontal);
+                operations += tab.views.len();
+            }
+
+            operations
+        })
+    })
+}
+
+pub fn run_view_navigation_profile(
+    view_count: usize,
+    bytes_per_buffer: usize,
+    iterations: usize,
+) -> usize {
+    with_steady_state_app("view-navigation", |app| {
+        let tab = build_view_dense_tab(0, view_count, bytes_per_buffer);
+        let view_ids = ordered_view_ids(&tab.root_pane);
+        app.tabs_mut()[0] = tab;
+
+        sum_profile_iterations(iterations, || {
+            let mut activations = 0;
+            for &view_id in view_ids.iter().skip(1) {
+                app.activate_view(view_id);
+                activations += 1;
+            }
+            for &view_id in view_ids.iter().rev().skip(1) {
+                app.activate_view(view_id);
+                activations += 1;
+            }
+            activations
+        })
     })
 }
 
@@ -49,31 +130,9 @@ pub fn run_search_current_app_state_profile(
     iterations: usize,
 ) -> usize {
     with_isolated_app("search-current-app-state", |app| {
-        let texts = build_scope_texts(file_count, bytes_per_file);
-        let expected_matches = full_scan_scope(&texts, PROFILE_QUERY, SearchOptions::default());
-
-        app.tabs_mut()[0].buffer.name = buffer_name_for_index(0);
-        app.tabs_mut()[0].buffer.replace_text(texts[0].clone());
-        let first_view_id = app.tabs()[0].active_view_id;
-
-        for (item_index, text) in texts.iter().enumerate().skip(1) {
-            if item_index.is_multiple_of(2) {
-                app.tabs_mut()[0].activate_view(first_view_id);
-            }
-
-            app.tabs_mut()[0]
-                .open_buffer_as_split(
-                    BufferState::new(buffer_name_for_index(item_index), text.clone(), None),
-                    if item_index.is_multiple_of(2) {
-                        SplitAxis::Horizontal
-                    } else {
-                        SplitAxis::Vertical
-                    },
-                    false,
-                    0.5,
-                )
-                .expect("open split buffer");
-        }
+        let tab = build_search_current_scope_tab(file_count, bytes_per_file);
+        let expected_matches = expected_matches_for_tab(&tab);
+        app.tabs_mut()[0] = tab;
 
         run_search_profile_iterations(
             app,
@@ -90,19 +149,18 @@ pub fn run_search_all_tabs_profile(
     iterations: usize,
 ) -> usize {
     with_isolated_app("search-all-tabs", |app| {
-        let texts = build_scope_texts(tab_count, bytes_per_tab);
-        let expected_matches = full_scan_scope(&texts, PROFILE_QUERY, SearchOptions::default());
+        let total_tabs = tab_count.max(1);
+        let first_tab = build_search_all_tab(0, bytes_per_tab);
+        let mut expected_matches = expected_matches_for_tab(&first_tab);
+        app.tabs_mut()[0] = first_tab;
 
-        app.tabs_mut()[0].buffer.name = buffer_name_for_index(0);
-        app.tabs_mut()[0].buffer.replace_text(texts[0].clone());
-
-        for (item_index, text) in texts.iter().enumerate().skip(1) {
-            app.append_tab(WorkspaceTab::new(BufferState::new(
-                buffer_name_for_index(item_index),
-                text.clone(),
-                None,
-            )));
+        for tab_index in 1..total_tabs {
+            let tab = build_search_all_tab(tab_index, bytes_per_tab);
+            expected_matches += expected_matches_for_tab(&tab);
+            app.append_tab(tab);
         }
+
+        app.handle_command(AppCommand::ActivateTab { index: 0 });
 
         run_search_profile_iterations(app, SearchScope::AllOpenTabs, expected_matches, iterations)
     })
@@ -144,20 +202,33 @@ fn sum_profile_iterations(
 }
 
 fn with_isolated_app<T>(label: &str, run: impl FnOnce(&mut ScratchpadApp) -> T) -> T {
-    let unique_suffix = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before unix epoch")
-        .as_nanos();
-    let session_root = std::env::temp_dir().join(format!(
-        "scratchpad-profile-{label}-{}-{unique_suffix}",
-        std::process::id()
-    ));
+    let session_root = unique_profile_session_root(label);
     let session_store = SessionStore::new(session_root.clone());
     let mut app = ScratchpadApp::with_session_store(session_store);
     let result = run(&mut app);
     drop(app);
-    let _ = fs::remove_dir_all(&session_root);
+    let _ = std::fs::remove_dir_all(&session_root);
     result
+}
+
+fn with_steady_state_app<T>(label: &str, run: impl FnOnce(&mut ScratchpadApp) -> T) -> T {
+    let session_root = unique_profile_session_root(label);
+    let session_store = SessionStore::new(session_root);
+    let mut app = ScratchpadApp::with_session_store(session_store);
+    let result = run(&mut app);
+    std::mem::forget(app);
+    result
+}
+
+fn unique_profile_session_root(label: &str) -> std::path::PathBuf {
+    let unique_suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock before unix epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "scratchpad-profile-{label}-{}-{unique_suffix}",
+        std::process::id()
+    ))
 }
 
 fn wait_for_app_state_search_matches(app: &mut ScratchpadApp, expected: usize) {
@@ -193,12 +264,6 @@ fn corpus_text_of_size(item_index: usize, target_bytes: usize) -> String {
     )
 }
 
-fn build_scope_texts(item_count: usize, bytes_per_item: usize) -> Vec<String> {
-    (0..item_count)
-        .map(|item_index| corpus_text_of_size(item_index, bytes_per_item))
-        .collect()
-}
-
 fn repeat_line_to_target_size(line: &str, target_bytes: usize) -> String {
     let repeats = (target_bytes / line.len()).max(1);
     let mut text = String::with_capacity(repeats * line.len());
@@ -208,110 +273,156 @@ fn repeat_line_to_target_size(line: &str, target_bytes: usize) -> String {
     text
 }
 
-fn buffer_name_for_index(item_index: usize) -> String {
-    if item_index.is_multiple_of(2) {
-        "mod.rs".to_owned()
-    } else {
-        "lib.rs".to_owned()
+fn install_navigation_workspace(
+    app: &mut ScratchpadApp,
+    tab_count: usize,
+    views_per_tab: usize,
+    bytes_per_buffer: usize,
+) {
+    let total_tabs = tab_count.max(1);
+    app.tabs_mut()[0] = build_view_dense_tab(0, views_per_tab, bytes_per_buffer);
+    for tab_index in 1..total_tabs {
+        app.append_tab(build_view_dense_tab(
+            tab_index,
+            views_per_tab,
+            bytes_per_buffer,
+        ));
     }
+    app.handle_command(AppCommand::ActivateTab { index: 0 });
 }
 
-fn build_tabs(tab_count: usize) -> Vec<WorkspaceTab> {
-    (0..tab_count)
-        .map(|index| {
-            WorkspaceTab::new(BufferState::new(
-                format!("tab_{index}.txt"),
-                format!("Content for tab {index}\n{}", "x".repeat(256)),
-                None,
-            ))
-        })
-        .collect()
+fn build_search_current_scope_tab(file_count: usize, bytes_per_file: usize) -> WorkspaceTab {
+    let mut tab = build_balanced_tile_tab(0, file_count.max(1), bytes_per_file);
+    let primary_view_id = tab.root_pane.first_view_id();
+    for duplicate_index in 0..SEARCH_VIEW_DUPLICATES_PER_TAB {
+        tab.activate_view(primary_view_id);
+        let _ = tab.split_active_view(alternating_axis(duplicate_index));
+    }
+    tab.activate_view(primary_view_id);
+    tab
 }
 
-fn run_tab_operations_cycle(tab_count: usize) -> usize {
-    let mut tabs = build_tabs(tab_count);
-    let step_count = tab_count.clamp(8, 64) / 2;
-
-    for step in 0..step_count.max(1) {
-        let tab_index = step % tabs.len();
-        let axis = if step.is_multiple_of(2) {
-            SplitAxis::Vertical
-        } else {
-            SplitAxis::Horizontal
-        };
-        let tab = &mut tabs[tab_index];
-        tab.split_active_view(axis);
-
-        if tab.views.len() > 1 && step.is_multiple_of(3) {
-            let view_id = tab.views[0].id;
-            if let Some(promoted) = tab.promote_view_to_new_tab(view_id) {
-                tabs.push(promoted);
-            }
-        }
-    }
-
-    if tabs.len() > 2 {
-        let target_idx = tabs.len() / 2;
-        combine_tabs(&mut tabs, 0, target_idx);
-    }
-
-    tabs.iter().map(|tab| tab.views.len()).sum()
-}
-
-fn combine_tabs(tabs: &mut Vec<WorkspaceTab>, source_idx: usize, target_idx: usize) {
-    if source_idx == target_idx || source_idx >= tabs.len() || target_idx >= tabs.len() {
-        return;
-    }
-
-    let source_tab = tabs.remove(source_idx);
-    let adjusted_target_idx = if source_idx < target_idx {
-        target_idx - 1
-    } else {
-        target_idx
-    };
-    let target_tab = &mut tabs[adjusted_target_idx];
-    let _ = target_tab.combine_with_tab(source_tab, SplitAxis::Horizontal, false, 0.5);
-}
-
-fn build_tile_heavy_tab(tile_count: usize, content: &str) -> WorkspaceTab {
+fn build_search_all_tab(tab_index: usize, bytes_per_tab: usize) -> WorkspaceTab {
     let mut tab = WorkspaceTab::new(BufferState::new(
-        "root.txt".to_owned(),
-        content.to_owned(),
+        format!("search_tab_{tab_index}.rs"),
+        corpus_text_of_size(tab_index, bytes_per_tab),
+        None,
+    ));
+    let primary_view_id = tab.active_view_id;
+    for duplicate_index in 0..SEARCH_VIEW_DUPLICATES_PER_TAB {
+        tab.activate_view(primary_view_id);
+        let _ = tab.split_active_view(alternating_axis(tab_index + duplicate_index));
+    }
+    tab.activate_view(primary_view_id);
+    tab
+}
+
+fn build_view_dense_tab(
+    tab_index: usize,
+    view_count: usize,
+    bytes_per_buffer: usize,
+) -> WorkspaceTab {
+    let total_views = view_count.max(1);
+    let mut tab = WorkspaceTab::new(BufferState::new(
+        format!("tab_{tab_index}_root.rs"),
+        corpus_text_of_size(tab_index, bytes_per_buffer),
+        None,
+    ));
+    let primary_view_id = tab.active_view_id;
+
+    for view_index in 1..total_views {
+        let axis = alternating_axis(tab_index + view_index);
+        if view_index.is_multiple_of(3) {
+            tab.activate_view(primary_view_id);
+            let _ = tab.split_active_view(axis);
+            continue;
+        }
+
+        let _ = tab.open_buffer_with_balanced_layout(BufferState::new(
+            format!("tab_{tab_index}_buffer_{view_index}.rs"),
+            corpus_text_of_size(tab_index * 1000 + view_index, bytes_per_buffer),
+            None,
+        ));
+    }
+
+    tab.activate_view(primary_view_id);
+    tab
+}
+
+fn build_balanced_tile_tab(
+    tab_index: usize,
+    tile_count: usize,
+    bytes_per_tile: usize,
+) -> WorkspaceTab {
+    let total_tiles = tile_count.max(1);
+    let mut tab = WorkspaceTab::new(BufferState::new(
+        format!("tab_{tab_index}_tile_0.txt"),
+        plain_text_of_size(bytes_per_tile),
         None,
     ));
 
-    for index in 1..tile_count {
-        let axis = if index.is_multiple_of(2) {
-            SplitAxis::Vertical
-        } else {
-            SplitAxis::Horizontal
-        };
+    for tile_index in 1..total_tiles {
         let _ = tab.open_buffer_with_balanced_layout(BufferState::new(
-            format!("tile_{index}.txt"),
-            content.to_owned(),
+            format!("tab_{tab_index}_tile_{tile_index}.txt"),
+            plain_text_of_size(bytes_per_tile),
             None,
         ));
-        let _ = tab.split_active_view(axis);
     }
 
     tab
 }
 
-fn exercise_tile_heavy_tab(tab: &mut WorkspaceTab) {
-    let _ = tab.rebalance_views_equally();
-    let _ = tab.split_active_view(SplitAxis::Vertical);
-    if tab.views.len() > 2 {
-        let close_index = tab.views.len() / 3;
-        let view_id = tab.views[close_index].id;
-        let _ = tab.close_view(view_id);
+fn expected_matches_for_tab(tab: &WorkspaceTab) -> usize {
+    tab.buffers()
+        .map(|buffer| find_matches(buffer.text(), PROFILE_QUERY, SearchOptions::default()).len())
+        .sum()
+}
+
+fn ordered_view_ids(root_pane: &PaneNode) -> Vec<ViewId> {
+    let mut ordered = Vec::new();
+    root_pane.collect_view_ids_in_order(&mut ordered);
+    ordered
+}
+
+fn collect_split_paths(root_pane: &PaneNode) -> Vec<SplitPath> {
+    let mut current = Vec::new();
+    let mut paths = Vec::new();
+    collect_split_paths_inner(root_pane, &mut current, &mut paths);
+    paths
+}
+
+fn collect_split_paths_inner(node: &PaneNode, current: &mut SplitPath, paths: &mut Vec<SplitPath>) {
+    if let PaneNode::Split { first, second, .. } = node {
+        paths.push(current.clone());
+
+        current.push(PaneBranch::First);
+        collect_split_paths_inner(first, current, paths);
+        current.pop();
+
+        current.push(PaneBranch::Second);
+        collect_split_paths_inner(second, current, paths);
+        current.pop();
     }
 }
 
-fn full_scan_scope(texts: &[String], query: &str, options: SearchOptions) -> usize {
-    texts
-        .iter()
-        .map(|text| find_matches(text, query, options).len())
-        .sum()
+fn bouncing_indices(count: usize) -> Vec<usize> {
+    match count {
+        0 => Vec::new(),
+        1 => vec![0],
+        _ => {
+            let mut indices = (1..count).collect::<Vec<_>>();
+            indices.extend((0..count - 1).rev());
+            indices
+        }
+    }
+}
+
+fn alternating_axis(index: usize) -> SplitAxis {
+    if index.is_multiple_of(2) {
+        SplitAxis::Vertical
+    } else {
+        SplitAxis::Horizontal
+    }
 }
 
 fn find_matches(text: &str, query: &str, options: SearchOptions) -> Vec<Range<usize>> {
