@@ -125,6 +125,10 @@ impl ScratchpadApp {
         self.app_settings.recent_files_enabled
     }
 
+    pub fn status_bar_visible(&self) -> bool {
+        self.app_settings.status_bar_visible
+    }
+
     pub(crate) fn tab_list_auto_hide_delay(&self) -> Duration {
         Duration::from_secs_f32(sanitize_tab_list_auto_hide_delay_seconds(
             self.app_settings.tab_list_auto_hide_delay_seconds,

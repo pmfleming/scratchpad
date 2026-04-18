@@ -56,7 +56,9 @@ impl ScratchpadApp {
         } else {
             tab_strip::show_top_drag_bar(ui, self);
         }
-        status_bar::show_status_bar(ui, self);
+        if self.status_bar_visible() {
+            status_bar::show_status_bar(ui, self);
+        }
         tab_strip::show_bottom_tab_list(ui, self);
         tab_strip::show_vertical_tab_list(ui, self);
     }

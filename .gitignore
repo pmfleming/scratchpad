@@ -1,6 +1,7 @@
 /target/
 /target-codex/
 /target-tests/
+/target_test/
 /dist/
 /log/
 /hotspots.html

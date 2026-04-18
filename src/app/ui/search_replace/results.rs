@@ -7,7 +7,8 @@ use crate::app::theme::{
 use crate::app::ui::settings;
 use eframe::egui;
 
-const SEARCH_RESULTS_VIEWPORT_HEIGHT: f32 = 320.0;
+const SEARCH_RESULTS_VIEWPORT_HEIGHT_COLLAPSED: f32 = 300.0;
+const SEARCH_RESULTS_VIEWPORT_HEIGHT_EXPANDED: f32 = 220.0;
 const SEARCH_RESULT_ROW_HEIGHT: f32 = 40.0;
 
 pub(super) fn show_search_results(
@@ -35,7 +36,7 @@ pub(super) fn show_search_results(
 
         egui::ScrollArea::vertical()
             .id_salt("search_results_list")
-            .max_height(SEARCH_RESULTS_VIEWPORT_HEIGHT)
+            .max_height(results_viewport_height(state))
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for group in &state.result_groups {
@@ -90,6 +91,14 @@ fn results_summary(state: &SearchStripState) -> String {
         "{} matches in {} {}.",
         state.match_count, file_count, file_label
     )
+}
+
+fn results_viewport_height(state: &SearchStripState) -> f32 {
+    if state.replace_open {
+        SEARCH_RESULTS_VIEWPORT_HEIGHT_EXPANDED
+    } else {
+        SEARCH_RESULTS_VIEWPORT_HEIGHT_COLLAPSED
+    }
 }
 
 fn render_empty_results_state(ui: &mut egui::Ui, message: &str) {

@@ -1,5 +1,6 @@
 use crate::app::app_state::ScratchpadApp;
-use crate::app::domain::{RenderedLayout, platform_default_line_ending};
+use crate::app::commands::AppCommand;
+use crate::app::domain::platform_default_line_ending;
 use crate::app::theme::*;
 use eframe::egui;
 
@@ -9,6 +10,7 @@ struct StatusBarActions {
     toggle_control_chars: bool,
     open_transaction_log: bool,
     open_encoding_dialog: bool,
+    open_settings: bool,
 }
 
 struct ActiveStatusDetails {
@@ -64,11 +66,6 @@ fn collect_active_status_details(
 ) -> Option<ActiveStatusDetails> {
     let tab = app.active_tab()?;
     let line_count = tab.buffer.line_count;
-    let visual_row_count = tab
-        .active_view()
-        .and_then(|view| view.latest_layout.as_ref())
-        .map(RenderedLayout::visual_row_count)
-        .unwrap_or(line_count);
     let show_control_chars = tab
         .active_view()
         .map(|view| view.show_control_chars)
@@ -84,7 +81,7 @@ fn collect_active_status_details(
             .as_ref()
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Untitled".to_owned()),
-        count_label: line_count_label(line_count, visual_row_count),
+        count_label: line_count_label(line_count),
         encoding_label: tab.buffer.format.encoding_label(),
         encoding_tooltip: tab.buffer.format.encoding_tooltip(),
         encoding_is_non_default: status_bar_encoding_is_non_default(&tab.buffer.format),
@@ -112,6 +109,7 @@ fn render_active_status(
     ui.label(format!("Path: {}", details.path_label));
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         show_status_warnings(ui, details);
+        show_settings_button(ui, actions);
         show_transaction_log_button(ui, actions);
         show_control_char_toggle(ui, details, actions);
         show_line_endings(
@@ -174,12 +172,32 @@ fn status_bar_encoding_is_non_default(format: &crate::app::domain::TextFormatMet
 
 fn show_transaction_log_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
     ui.separator();
-    let response = ui
-        .button("TXN")
+    let response = status_bar_icon_button(ui, egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE)
         .on_hover_text("Open the workspace transaction log");
     if response.clicked() {
         actions.open_transaction_log = true;
     }
+}
+
+fn show_settings_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
+    ui.separator();
+    let response = status_bar_icon_button(ui, egui_phosphor::regular::GEAR).on_hover_text("Open settings");
+    if response.clicked() {
+        actions.open_settings = true;
+    }
+}
+
+fn status_bar_icon_button(ui: &mut egui::Ui, icon: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(
+            egui::RichText::new(icon)
+                .font(egui::FontId::proportional(16.0))
+                .color(TEXT_PRIMARY),
+        )
+        .min_size(egui::vec2(22.0, 22.0))
+        .fill(egui::Color32::TRANSPARENT)
+        .stroke(egui::Stroke::NONE),
+    )
 }
 
 fn show_control_char_toggle(
@@ -256,14 +274,14 @@ fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {
     if actions.open_encoding_dialog {
         app.open_encoding_dialog();
     }
+
+    if actions.open_settings {
+        app.handle_command(AppCommand::OpenSettings);
+    }
 }
 
-fn line_count_label(line_count: usize, visual_row_count: usize) -> String {
-    if visual_row_count > line_count {
-        format!("Lines: {line_count} ({visual_row_count} rows)")
-    } else {
-        format!("Lines: {line_count}")
-    }
+fn line_count_label(line_count: usize) -> String {
+    format!("Lines: {line_count}")
 }
 
 fn artifact_icon(

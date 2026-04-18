@@ -21,6 +21,7 @@ pub const DEFAULT_TAB_LIST_WIDTH: f32 = 184.0;
 pub const DEFAULT_AUTO_HIDE_TAB_LIST: bool = false;
 pub const DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS: f32 = 3.0;
 pub const DEFAULT_RECENT_FILES_ENABLED: bool = true;
+pub const DEFAULT_STATUS_BAR_VISIBLE: bool = true;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -105,6 +106,8 @@ pub struct AppSettings {
     pub tab_list_auto_hide_delay_seconds: f32,
     #[serde(default = "default_recent_files_enabled")]
     pub recent_files_enabled: bool,
+    #[serde(default = "default_status_bar_visible")]
+    pub status_bar_visible: bool,
     #[serde(default)]
     pub settings_tab_open: bool,
     #[serde(default)]
@@ -130,6 +133,7 @@ impl Default for AppSettings {
             auto_hide_tab_list: default_auto_hide_tab_list(),
             tab_list_auto_hide_delay_seconds: default_tab_list_auto_hide_delay_seconds(),
             recent_files_enabled: default_recent_files_enabled(),
+            status_bar_visible: default_status_bar_visible(),
             settings_tab_open: false,
             settings_tab_index: None,
         }
@@ -285,6 +289,7 @@ default_fn!(
     bool,
     DEFAULT_RECENT_FILES_ENABLED
 );
+default_fn!(default_status_bar_visible, bool, DEFAULT_STATUS_BAR_VISIBLE);
 
 fn invalid_data(error: impl std::error::Error + Send + Sync + 'static) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error)

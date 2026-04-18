@@ -94,6 +94,8 @@ pub(super) fn render_tab_position_category(ui: &mut egui::Ui, app: &mut Scratchp
             render_auto_hide_row(ui, app);
             inner_divider(ui);
             render_auto_hide_delay_row(ui, app);
+            inner_divider(ui);
+            render_status_bar_row(ui, app);
         },
     );
 }
@@ -241,6 +243,21 @@ fn render_auto_hide_delay_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 app.set_tab_list_auto_hide_delay_seconds(
                     AUTO_HIDE_DELAY_OPTIONS[selected_index as usize],
                 );
+            }
+        },
+    );
+}
+
+fn render_status_bar_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    inner_select_row(
+        ui,
+        "Status bar",
+        Some("Show or hide the bottom status strip with file, line, encoding, and utility controls."),
+        |ui| {
+            let mut visible = app.status_bar_visible();
+            toggle_control(ui, &mut visible);
+            if visible != app.status_bar_visible() {
+                app.set_status_bar_visible(visible);
             }
         },
     );

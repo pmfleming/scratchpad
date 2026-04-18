@@ -26,11 +26,7 @@ pub(super) fn show_search_controls(
 ) {
     let (find_response, replace_response) = ui
         .vertical(|ui| {
-            if render_header(ui) {
-                actions.close_requested = true;
-            }
-
-            let find_response = render_search_pill(ui, state, find_input_id);
+            let find_response = render_search_pill(ui, state, actions, find_input_id);
             let replace_response = render_replace_pill(ui, state, actions, replace_input_id);
             (find_response, replace_response)
         })
@@ -51,18 +47,17 @@ pub(super) fn show_search_controls(
     }
 }
 
-fn render_header(ui: &mut egui::Ui) -> bool {
-    callout::header_row(ui, "Close search", |_| {})
-}
-
 fn render_search_pill(
     ui: &mut egui::Ui,
     state: &mut SearchStripState,
+    actions: &mut SearchStripActions,
     find_input_id: egui::Id,
 ) -> egui::Response {
     search_card(ui, |ui| {
         ui.vertical(|ui| {
-            render_pill_heading(ui, MAGNIFYING_GLASS, "Search");
+            if render_search_heading(ui) {
+                actions.close_requested = true;
+            }
             ui.add_space(8.0);
 
             let find_response = compact_text_field(
@@ -79,6 +74,14 @@ fn render_search_pill(
                 egui::vec2(ui.available_width(), CONTROL_BUTTON_HEIGHT),
                 egui::Layout::right_to_left(egui::Align::Center),
                 |ui| {
+                    toggle_flag(ui, &mut state.whole_word, TEXT_ALIGN_JUSTIFY, "Whole word");
+                    toggle_flag(
+                        ui,
+                        &mut state.match_case,
+                        CASE_SENSITIVE_ICON,
+                        "Case sensitive",
+                    );
+                    ui.add_space(6.0);
                     for scope in [
                         SearchScope::ActiveBuffer,
                         SearchScope::ActiveWorkspaceTab,
@@ -160,14 +163,6 @@ fn render_replace_pill(
                     "Previous match",
                     &mut actions.previous_requested,
                 );
-                ui.add_space(6.0);
-                toggle_flag(ui, &mut state.whole_word, TEXT_ALIGN_JUSTIFY, "Whole word");
-                toggle_flag(
-                    ui,
-                    &mut state.match_case,
-                    CASE_SENSITIVE_ICON,
-                    "Case sensitive",
-                );
             },
         );
 
@@ -204,20 +199,29 @@ fn render_replace_heading(ui: &mut egui::Ui, replace_open: &mut bool) {
     });
 }
 
-fn render_pill_heading(ui: &mut egui::Ui, icon: &str, title: &str) {
+fn render_search_heading(ui: &mut egui::Ui) -> bool {
+    let mut close_requested = false;
     ui.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new(icon)
-                .size(CARD_ICON_SIZE)
-                .color(text_muted(ui)),
-        );
-        ui.add_space(10.0);
-        ui.label(
-            egui::RichText::new(title)
-                .size(15.0)
-                .color(text_primary(ui)),
-        );
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(MAGNIFYING_GLASS)
+                    .size(CARD_ICON_SIZE)
+                    .color(text_muted(ui)),
+            );
+            ui.add_space(10.0);
+            ui.label(
+                egui::RichText::new("Search")
+                    .size(15.0)
+                    .color(text_primary(ui)),
+            );
+        });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if callout::close_button(ui, "Close search").clicked() {
+                close_requested = true;
+            }
+        });
     });
+    close_requested
 }
 
 fn pill_heading_button(ui: &mut egui::Ui, icon: &str, title: &str) -> egui::Response {
@@ -333,7 +337,7 @@ fn search_text_edit<'a>(text: &'a mut String, id: egui::Id, hint: &str) -> egui:
     egui::TextEdit::singleline(text)
         .id(id)
         .hint_text(hint)
-        .margin(egui::Margin::symmetric(10, 8))
+        .margin(egui::Margin::symmetric(10, 6))
         .vertical_align(egui::Align::Center)
 }
 

@@ -10,11 +10,13 @@ use egui_phosphor::regular::{ARROW_CLOCKWISE, COPY, FILE_TEXT, FLOPPY_DISK, TRAS
 
 const UNSAVED_CHANGES_SIZE: egui::Vec2 = egui::vec2(272.0, 154.0);
 const UNSAVED_CHANGES_ACTION_BUTTON_SIZE: egui::Vec2 = egui::vec2(72.0, 54.0);
+const MISSING_FILE_DIALOG_SIZE: egui::Vec2 = egui::vec2(432.0, 154.0);
 const SAVE_CONFLICT_DIALOG_SIZE: egui::Vec2 = egui::vec2(432.0, 214.0);
 
 struct SaveConflictDialogState {
     title: &'static str,
     message: String,
+    path_label: String,
     freshness: BufferFreshness,
 }
 
@@ -46,20 +48,21 @@ impl SaveConflictDialogState {
         Some(Self {
             title,
             message,
+            path_label,
             freshness,
         })
     }
 
     fn primary_action_label(&self) -> &'static str {
-        if self.freshness == BufferFreshness::MissingOnDisk {
-            "Recreate"
-        } else {
-            "Overwrite"
-        }
+        "Overwrite"
     }
 
     fn can_reload(&self) -> bool {
         self.freshness != BufferFreshness::MissingOnDisk
+    }
+
+    fn is_missing_on_disk(&self) -> bool {
+        self.freshness == BufferFreshness::MissingOnDisk
     }
 }
 
@@ -104,12 +107,17 @@ fn show_save_conflict_confirmation(ctx: &egui::Context, app: &mut ScratchpadApp,
     };
 
     let mut close_requested = false;
+    let dialog_size = if state.is_missing_on_disk() {
+        MISSING_FILE_DIALOG_SIZE
+    } else {
+        SAVE_CONFLICT_DIALOG_SIZE
+    };
 
     show_callout(
         ctx,
         "file_change_overlay_v1",
-        callout::centered_position(ctx, SAVE_CONFLICT_DIALOG_SIZE),
-        SAVE_CONFLICT_DIALOG_SIZE.x,
+        callout::centered_position(ctx, dialog_size),
+        dialog_size.x,
         |ui| render_save_conflict_dialog(ui, app, index, &state, &mut close_requested),
     );
 
@@ -252,6 +260,11 @@ fn render_save_conflict_dialog(
     state: &SaveConflictDialogState,
     close_requested: &mut bool,
 ) {
+    if state.is_missing_on_disk() {
+        render_missing_file_dialog(ui, app, index, state, close_requested);
+        return;
+    }
+
     callout::apply_spacing(ui);
 
     if callout::header_row(ui, "Close file change prompt", |ui| {
@@ -321,6 +334,74 @@ fn render_save_conflict_dialog(
             *close_requested = true;
         }
     });
+}
+
+fn render_missing_file_dialog(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    index: usize,
+    state: &SaveConflictDialogState,
+    close_requested: &mut bool,
+) {
+    callout::apply_spacing(ui);
+    ui.spacing_mut().item_spacing = egui::vec2(10.0, 12.0);
+
+    if render_unsaved_changes_header(ui, &state.path_label) {
+        *close_requested = true;
+    }
+
+    ui.add_space(2.0);
+    ui.vertical_centered(|ui| {
+        ui.label(
+            egui::RichText::new("File Missing on Disk")
+                .size(12.0)
+                .color(callout::muted_text(ui)),
+        );
+    });
+
+    ui.add_space(2.0);
+    ui.horizontal_centered(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(12.0, 0.0);
+        for (icon, tooltip, action) in [
+            (
+                FLOPPY_DISK,
+                "Recreate the file at its original path",
+                MissingFileChoice::Save,
+            ),
+            (
+                TRASH,
+                "Discard this missing file tab",
+                MissingFileChoice::Discard,
+            ),
+        ] {
+            if callout::icon_button(
+                ui,
+                icon,
+                26.0,
+                UNSAVED_CHANGES_ACTION_BUTTON_SIZE,
+                callout::section_fill(ui),
+                tooltip,
+                true,
+            )
+            .clicked()
+            {
+                match action {
+                    MissingFileChoice::Save => {
+                        if FileController::save_conflict_overwrite(app, index) {
+                            clear_pending_action(app);
+                        }
+                    }
+                    MissingFileChoice::Discard => close_pending_tab(app, index),
+                }
+            }
+        }
+    });
+}
+
+#[derive(Clone, Copy)]
+enum MissingFileChoice {
+    Save,
+    Discard,
 }
 
 fn render_save_conflict_button(ui: &mut egui::Ui, icon: &str, label: &str, tooltip: &str) -> bool {

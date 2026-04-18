@@ -215,6 +215,16 @@ impl ScratchpadApp {
         );
     }
 
+    pub(crate) fn set_status_bar_visible(&mut self, visible: bool) {
+        if self.app_settings.status_bar_visible == visible {
+            return;
+        }
+
+        self.app_settings.status_bar_visible = visible;
+        self.begin_layout_transition();
+        self.persist_settings_or_error();
+    }
+
     pub(crate) fn set_tab_list_width_from_layout(&mut self, width: f32) {
         let next = width.clamp(
             Self::VERTICAL_TAB_LIST_MIN_WIDTH,

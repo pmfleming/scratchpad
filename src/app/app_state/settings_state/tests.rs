@@ -165,3 +165,15 @@ fn changing_tab_list_width_starts_a_short_chrome_transition() {
 
     assert!(app.chrome_transition_active());
 }
+
+#[test]
+fn changing_status_bar_visibility_persists_and_starts_a_short_chrome_transition() {
+    let mut app = test_app();
+
+    assert!(app.status_bar_visible());
+
+    app.set_status_bar_visible(false);
+
+    assert!(!app.status_bar_visible());
+    assert!(app.chrome_transition_active());
+}
