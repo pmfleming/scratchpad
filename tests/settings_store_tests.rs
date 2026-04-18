@@ -42,6 +42,7 @@ fn assert_current_defaults(settings: &AppSettings) {
         DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS
     );
     assert!(settings.recent_files_enabled);
+    assert!(settings.status_bar_visible);
 }
 
 #[test]
@@ -71,6 +72,7 @@ fn save_and_load_round_trip_toml_settings() {
         auto_hide_tab_list: true,
         tab_list_auto_hide_delay_seconds: 4.5,
         recent_files_enabled: false,
+        status_bar_visible: false,
         settings_tab_open: true,
         settings_tab_index: Some(2),
     };

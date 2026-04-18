@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from perf_report_shared import flamegraph_configs
 from report_modes import add_mode_argument, emit_report
 
 DEFAULT_OUTPUT = Path("flamegraphs.json")
@@ -14,33 +15,7 @@ FLAMEGRAPH_DIR = Path("target/analysis/flamegraphs")
 STACKS_PATH = Path("cargo-flamegraph.stacks")
 MIN_FREE_BYTES = 20 * 1024 * 1024 * 1024
 
-BENCHMARKS = [
-    {
-        "id": "tab_operations_profile",
-        "name": "Tab Operations Profile",
-        "cargo_args": ["--bin", "profile_tab_operations"],
-    },
-    {
-        "id": "tab_tile_layout_profile",
-        "name": "Tab Tile Layout Profile",
-        "cargo_args": ["--bin", "profile_tab_tile_layout"],
-    },
-    {
-        "id": "view_navigation_profile",
-        "name": "View Navigation Profile",
-        "cargo_args": ["--bin", "profile_view_navigation"],
-    },
-    {
-        "id": "search_current_app_state_profile",
-        "name": "Search Current App-State Profile",
-        "cargo_args": ["--bin", "profile_search_current_app_state"],
-    },
-    {
-        "id": "search_all_tabs_profile",
-        "name": "Search All Tabs Profile",
-        "cargo_args": ["--bin", "profile_search_all_tabs"],
-    },
-]
+BENCHMARKS = flamegraph_configs()
 
 
 class FlamegraphGenerator:
@@ -97,17 +72,60 @@ class FlamegraphGenerator:
             file=sys.stderr,
         )
 
-    def merge_results(self, existing_results: List[dict], new_results: List[dict]) -> List[dict]:
-        merged = {
-            item.get("id"): item
+    def existing_result_map(self, existing_results: List[dict]) -> dict[str, dict]:
+        return {
+            str(item.get("id")): item
             for item in existing_results
             if isinstance(item, dict) and item.get("id")
         }
-        for item in new_results:
-            item_id = item.get("id") if isinstance(item, dict) else None
-            if item_id:
-                merged[item_id] = item
-        return [merged[item_id] for item_id in sorted(merged)]
+
+    def result_from_config(
+        self,
+        config: dict,
+        existing: Optional[dict] = None,
+        *,
+        available: Optional[bool] = None,
+        issue: Optional[str] = None,
+    ) -> dict:
+        svg_path = self.output_dir / f"{config['id']}.svg"
+        relative_path = f"flamegraphs/{config['id']}.svg"
+        existing_available = bool(existing and existing.get("available")) or svg_path.exists()
+        resolved_available = existing_available if available is None else available
+        item = {
+            "id": config["id"],
+            "name": config["name"],
+            "path": relative_path,
+            "type": "svg" if resolved_available else "missing",
+            "available": resolved_available,
+            "benchmark_keys": list(config.get("benchmark_keys", [])),
+            "workload_families": list(config.get("workload_families", [])),
+            "coverage_role": config.get("coverage_role", "report-driven"),
+            "resource_focus": config.get("resource_focus", "cpu"),
+            "description": config.get("description", ""),
+        }
+        if issue:
+            item["issue"] = issue
+        return item
+
+    def materialize_index(
+        self,
+        existing_results: List[dict],
+        updates: Optional[dict[str, dict]] = None,
+        global_issue: Optional[str] = None,
+    ) -> List[dict]:
+        existing_by_id = self.existing_result_map(existing_results)
+        merged_updates = updates or {}
+        results = []
+        for config in BENCHMARKS:
+            item = merged_updates.get(config["id"])
+            if item is None:
+                item = self.result_from_config(
+                    config,
+                    existing_by_id.get(config["id"]),
+                    issue=global_issue,
+                )
+            results.append(item)
+        return results
 
     def is_disk_full_error(self, output: str) -> bool:
         lowered = output.lower()
@@ -124,29 +142,37 @@ class FlamegraphGenerator:
         existing_index_path: Optional[Path] = None,
     ) -> List[dict]:
         existing_results = self.load_existing_results(existing_index_path)
+        results_by_id: dict[str, dict] = {}
 
         if not self.check_tool():
             print("Warning: `cargo-flamegraph` not found.", file=sys.stderr)
-            if skip_if_missing:
-                return existing_results
-            return self.get_error_data("cargo-flamegraph not installed")
+            return self.materialize_index(
+                existing_results,
+                global_issue="cargo-flamegraph is not installed; coverage is indexed but new SVGs were not generated.",
+            )
 
         self.cleanup_stack_dump()
 
         if not self.has_enough_disk_space():
             self.warn_low_disk_space()
-            return existing_results
+            return self.materialize_index(
+                existing_results,
+                global_issue="Disk space was below the minimum required for flamegraph generation.",
+            )
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        results = []
-        
+
         for config in BENCHMARKS:
             svg_path = self.output_dir / f"{config['id']}.svg"
             print(f"Generating flamegraph for {config['name']}...", file=sys.stderr)
 
             if not self.has_enough_disk_space():
                 self.warn_low_disk_space()
-                return self.merge_results(existing_results, results)
+                return self.materialize_index(
+                    existing_results,
+                    updates=results_by_id,
+                    global_issue="Disk space fell below the minimum during flamegraph generation.",
+                )
 
             self.cleanup_stack_dump()
 
@@ -173,13 +199,9 @@ class FlamegraphGenerator:
                 
                 if process.returncode == 0:
                     self.cleanup_stack_dump()
-                    results.append(
-                        {
-                            "id": config["id"],
-                            "name": config["name"],
-                            "path": f"flamegraphs/{config['id']}.svg",
-                            "type": "svg",
-                        }
+                    results_by_id[config["id"]] = self.result_from_config(
+                        config,
+                        available=True,
                     )
                 else:
                     self.cleanup_stack_dump()
@@ -189,7 +211,11 @@ class FlamegraphGenerator:
                             "Warning: Flamegraph generation requires admin privileges - new flamegraphs will not be generated.",
                             file=sys.stderr,
                         )
-                        return self.merge_results(existing_results, results)
+                        results_by_id[config["id"]] = self.result_from_config(
+                            config,
+                            issue="Administrator privileges are required to generate a fresh SVG on Windows.",
+                        )
+                        return self.materialize_index(existing_results, updates=results_by_id)
                     elif self.is_disk_full_error(error_msg):
                         free_gb = self.free_bytes() / (1024**3)
                         print(
@@ -199,25 +225,26 @@ class FlamegraphGenerator:
                             ),
                             file=sys.stderr,
                         )
-                        return self.merge_results(existing_results, results)
+                        results_by_id[config["id"]] = self.result_from_config(
+                            config,
+                            issue="Generation stopped because the disk filled during this profile run.",
+                        )
+                        return self.materialize_index(existing_results, updates=results_by_id)
                     else:
                         print(f"Error: {config['id']} failed: {error_msg}", file=sys.stderr)
+                        results_by_id[config["id"]] = self.result_from_config(
+                            config,
+                            issue=f"Generation failed: {error_msg}",
+                        )
             except Exception as e:
                 self.cleanup_stack_dump()
                 print(f"Unexpected error for {config['id']}: {e}", file=sys.stderr)
+                results_by_id[config["id"]] = self.result_from_config(
+                    config,
+                    issue=f"Unexpected generation error: {e}",
+                )
 
-        return results
-
-    def get_error_data(self, reason: str) -> List[dict]:
-        return [
-            {
-                "id": "error",
-                "name": f"Error: {reason}",
-                "path": None,
-                "type": "error",
-                "description": f"Could not generate flamegraphs. Reason: {reason}. Try running this script in an Administrator terminal."
-            }
-        ]
+        return self.materialize_index(existing_results, updates=results_by_id)
 
 
 def main():
@@ -241,10 +268,14 @@ def main():
             return "No flamegraphs generated."
         lines = ["Flamegraph Results:"]
         for item in data:
-            if item.get("type") == "error":
-                lines.append(f"  [!] {item['name']}")
+            if not item.get("available"):
+                lines.append(
+                    f"  [ ] {item['name']} | {item.get('coverage_role', 'report-driven')} | {item.get('issue', 'not generated')}"
+                )
             else:
-                lines.append(f"  - {item['name']}: {item['path']}")
+                lines.append(
+                    f"  [x] {item['name']}: {item['path']} | benchmarks={', '.join(item.get('benchmark_keys', [])) or '-'}"
+                )
         return "\n".join(lines)
 
     emit_report(

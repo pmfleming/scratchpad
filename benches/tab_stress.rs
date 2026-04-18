@@ -1,7 +1,13 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use eframe::egui;
+use eframe::egui::TextBuffer;
 use rand::RngExt;
-use scratchpad::app::domain::{BufferState, SplitAxis, WorkspaceTab};
-use scratchpad::app::ui::editor_content::{make_control_chars_clean, make_control_chars_visible};
+use scratchpad::app::domain::{
+    BufferState, RenderedLayout, SearchHighlightState, SplitAxis, WorkspaceTab,
+};
+use scratchpad::app::ui::editor_content::{
+    EditorHighlightStyle, build_layouter, make_control_chars_clean, make_control_chars_visible,
+};
 
 const KB: usize = 1024;
 const MB: usize = 1024 * KB;
@@ -28,6 +34,45 @@ fn noisy_text_of_size(target_bytes: usize) -> String {
 
 fn make_buffer(name: String, content: String) -> BufferState {
     BufferState::new(name, content, None)
+}
+
+fn large_file_scroll_layout_pass(text: &str) -> usize {
+    let ctx = egui::Context::default();
+    let font_id = egui::FontId::monospace(15.0);
+    let highlight_style =
+        EditorHighlightStyle::new(egui::Color32::from_rgb(90, 146, 214), egui::Color32::WHITE);
+    let text_char_len = text.chars().count();
+    let highlight_start = (text_char_len / 7).max(1);
+    let highlight_end = (highlight_start + 48).min(text_char_len);
+    let selection_start = (text_char_len / 3).max(1);
+    let selection_end = (selection_start + 96).min(text_char_len);
+    let mut search_highlights = SearchHighlightState::default();
+    search_highlights
+        .ranges
+        .push(highlight_start..highlight_end);
+    search_highlights.active_range_index = Some(0);
+    let mut total_rows = 0usize;
+    let buffer = text.to_owned();
+
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            let mut layouter = build_layouter(
+                font_id.clone(),
+                false,
+                egui::Color32::WHITE,
+                highlight_style,
+                search_highlights.clone(),
+                Some(selection_start..selection_end),
+            );
+
+            for wrap_width in [980.0, 720.0, 520.0, 980.0] {
+                let galley = layouter(ui, &buffer, wrap_width);
+                total_rows += RenderedLayout::from_galley(galley).visual_row_count();
+            }
+        });
+    });
+
+    total_rows
 }
 
 fn build_tabs(tab_count: usize) -> Vec<WorkspaceTab> {
@@ -127,6 +172,68 @@ fn bench_large_file_loads(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_large_file_scroll_latency(c: &mut Criterion) {
+    let mut group = c.benchmark_group("large_file_scroll_latency");
+    for bytes in [256 * KB, MB, 4 * MB] {
+        let text = plain_text_of_size(bytes);
+        group.throughput(Throughput::Bytes(bytes as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(bytes), &text, |b, text| {
+            b.iter(|| criterion::black_box(large_file_scroll_layout_pass(text)));
+        });
+    }
+    group.finish();
+}
+
+fn bench_large_file_split_latency(c: &mut Criterion) {
+    let mut group = c.benchmark_group("large_file_split_latency");
+    let content = plain_text_of_size(MB);
+    for tile_count in [4usize, 8, 16] {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(tile_count),
+            &tile_count,
+            |b, &count| {
+                b.iter_batched(
+                    || build_tile_heavy_tab(count, &content),
+                    |mut tab| exercise_tile_heavy_tab(&mut tab),
+                    BatchSize::LargeInput,
+                );
+            },
+        );
+    }
+    group.finish();
+}
+
+fn bench_large_file_paste_latency(c: &mut Criterion) {
+    let mut group = c.benchmark_group("large_file_paste_latency");
+    let base_text = plain_text_of_size(MB);
+
+    for insert_bytes in [4 * KB, 32 * KB, 128 * KB, 512 * KB] {
+        let insert_text = plain_text_of_size(insert_bytes);
+        group.throughput(Throughput::Bytes(insert_bytes as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(insert_bytes),
+            &insert_text,
+            |b, insert_text| {
+                b.iter_batched(
+                    || {
+                        let buffer = make_buffer("large_paste.txt".to_owned(), base_text.clone());
+                        let midpoint = buffer.text().chars().count() / 2;
+                        (buffer, midpoint, insert_text.clone())
+                    },
+                    |(mut buffer, midpoint, pasted)| {
+                        buffer.document_mut().insert_text(&pasted, midpoint);
+                        buffer.refresh_text_metadata();
+                        criterion::black_box(buffer.line_count);
+                        criterion::black_box(buffer.text().len());
+                    },
+                    BatchSize::LargeInput,
+                );
+            },
+        );
+    }
+    group.finish();
+}
+
 fn bench_control_char_file_workflows(c: &mut Criterion) {
     {
         let mut load_group = c.benchmark_group("control_char_load");
@@ -215,6 +322,9 @@ criterion_group!(
     benches,
     bench_tab_operations,
     bench_large_file_loads,
+    bench_large_file_scroll_latency,
+    bench_large_file_split_latency,
+    bench_large_file_paste_latency,
     bench_control_char_file_workflows,
     bench_tab_scaling,
     bench_tile_scaling

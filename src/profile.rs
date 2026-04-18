@@ -2,15 +2,20 @@ use crate::ScratchpadApp;
 use crate::app::app_state::SearchScope;
 use crate::app::commands::AppCommand;
 use crate::app::domain::{
-    BufferState, PaneBranch, PaneNode, SplitAxis, SplitPath, ViewId, WorkspaceTab,
+    BufferState, PaneBranch, PaneNode, RenderedLayout, SearchHighlightState, SplitAxis, SplitPath,
+    ViewId, WorkspaceTab,
 };
 use crate::app::services::search::{SearchOptions, find_matches};
 use crate::app::services::session_store::SessionStore;
+use crate::app::ui::editor_content::{EditorHighlightStyle, build_layouter};
+use eframe::egui;
+use eframe::egui::TextBuffer;
 use std::hint::black_box;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const KB: usize = 1024;
+pub const MB: usize = 1024 * KB;
 pub const RECOMMENDED_TAB_OPERATION_TABS: usize = 64;
 pub const RECOMMENDED_TAB_OPERATION_VIEWS_PER_TAB: usize = 10;
 pub const RECOMMENDED_TAB_OPERATION_BYTES_PER_BUFFER: usize = 48 * KB;
@@ -27,6 +32,14 @@ pub const RECOMMENDED_SEARCH_CURRENT_ITERATIONS: usize = 10;
 pub const RECOMMENDED_SEARCH_ALL_TABS: usize = 16;
 pub const RECOMMENDED_SEARCH_ALL_BYTES_PER_TAB: usize = 16 * KB;
 pub const RECOMMENDED_SEARCH_ALL_ITERATIONS: usize = 10;
+pub const RECOMMENDED_LARGE_FILE_SCROLL_BYTES: usize = MB;
+pub const RECOMMENDED_LARGE_FILE_SCROLL_ITERATIONS: usize = 28;
+pub const RECOMMENDED_LARGE_FILE_PASTE_BASE_BYTES: usize = MB;
+pub const RECOMMENDED_LARGE_FILE_PASTE_INSERT_BYTES: usize = 128 * KB;
+pub const RECOMMENDED_LARGE_FILE_PASTE_ITERATIONS: usize = 20;
+pub const RECOMMENDED_LARGE_FILE_SPLIT_TILES: usize = 12;
+pub const RECOMMENDED_LARGE_FILE_SPLIT_BYTES_PER_TILE: usize = 256 * KB;
+pub const RECOMMENDED_LARGE_FILE_SPLIT_ITERATIONS: usize = 24;
 
 const PROFILE_QUERY: &str = "needle";
 const PROFILE_RESET_QUERY: &str = "zzzz-no-match";
@@ -162,6 +175,100 @@ pub fn run_search_all_tabs_profile(
         app.handle_command(AppCommand::ActivateTab { index: 0 });
 
         run_search_profile_iterations(app, SearchScope::AllOpenTabs, expected_matches, iterations)
+    })
+}
+
+pub fn run_large_file_scroll_profile(bytes: usize, iterations: usize) -> usize {
+    let text = plain_text_of_size(bytes);
+    let ctx = egui::Context::default();
+    let font_id = egui::FontId::monospace(15.0);
+    let highlight_style =
+        EditorHighlightStyle::new(egui::Color32::from_rgb(90, 146, 214), egui::Color32::WHITE);
+    let text_char_len = text.chars().count();
+    let highlight_start = (text_char_len / 7).max(1);
+    let highlight_end = (highlight_start + 48).min(text_char_len);
+    let selection_start = (text_char_len / 3).max(1);
+    let selection_end = (selection_start + 96).min(text_char_len);
+    let mut search_highlights = SearchHighlightState::default();
+    search_highlights
+        .ranges
+        .push(highlight_start..highlight_end);
+    search_highlights.active_range_index = Some(0);
+
+    sum_profile_iterations(iterations, || {
+        let mut total_rows = 0usize;
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show_inside(ui, |ui| {
+                let mut layouter = build_layouter(
+                    font_id.clone(),
+                    false,
+                    egui::Color32::WHITE,
+                    highlight_style,
+                    search_highlights.clone(),
+                    Some(selection_start..selection_end),
+                );
+
+                for wrap_width in [980.0, 720.0, 520.0, 980.0] {
+                    let galley = layouter(ui, &text, wrap_width);
+                    total_rows += RenderedLayout::from_galley(galley).visual_row_count();
+                }
+            });
+        });
+        total_rows
+    })
+}
+
+pub fn run_large_file_paste_profile(
+    base_bytes: usize,
+    insert_bytes: usize,
+    iterations: usize,
+) -> usize {
+    let base_text = plain_text_of_size(base_bytes);
+    let insert_text = plain_text_of_size(insert_bytes);
+    let insert_char_count = insert_text.chars().count();
+
+    sum_profile_iterations(iterations, || {
+        let mut buffer = BufferState::new(
+            "large_paste_profile.txt".to_owned(),
+            base_text.clone(),
+            None,
+        );
+        let midpoint = buffer.text().chars().count() / 2;
+        let _ = insert_char_count;
+        buffer.document_mut().insert_text(&insert_text, midpoint);
+        buffer.refresh_text_metadata();
+        black_box(buffer.line_count + buffer.text().len())
+    })
+}
+
+pub fn run_large_file_split_profile(
+    tile_count: usize,
+    bytes_per_tile: usize,
+    iterations: usize,
+) -> usize {
+    with_steady_state_app("large-file-split", |app| {
+        app.tabs_mut()[0] = build_balanced_tile_tab(0, tile_count, bytes_per_tile);
+        let mut axis_seed = 0usize;
+
+        sum_profile_iterations(iterations, || {
+            let mut operations = 0usize;
+            if let Some(tab) = app.tabs_mut().first_mut() {
+                let _ = tab.split_active_view(alternating_axis(axis_seed));
+                axis_seed = axis_seed.saturating_add(1);
+                operations += 1;
+
+                if tab.views.len() > tile_count
+                    && let Some(view_id) = tab.views.last().map(|view| view.id)
+                {
+                    let _ = tab.close_view(view_id);
+                    operations += 1;
+                }
+
+                let _ = tab.rebalance_views_equally();
+                operations += tab.views.len();
+            }
+            operations
+        })
     })
 }
 

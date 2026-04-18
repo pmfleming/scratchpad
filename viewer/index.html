@@ -29,6 +29,8 @@
                 <code>target/analysis/hotspots.json</code>
                 <code>target/analysis/slowspots.json</code>
                 <code>target/analysis/search_speed.json</code>
+                <code>target/analysis/capacity_report.json</code>
+                <code>target/analysis/speed_efficiency_report.json</code>
                 <code>target/analysis/clones.json</code>
                 <code>target/analysis/map.json</code>
                 <code>target/analysis/flamegraphs.json</code>
@@ -59,6 +61,14 @@
                     <input id="search-speed-file" type="file" accept="application/json,.json" />
                 </label>
                 <label>
+                    Capacity Report JSON
+                    <input id="capacity-report-file" type="file" accept="application/json,.json" />
+                </label>
+                <label>
+                    Speed Report JSON
+                    <input id="speed-report-file" type="file" accept="application/json,.json" />
+                </label>
+                <label>
                     Clones JSON
                     <input id="clones-file" type="file" accept="application/json,.json" />
                 </label>
@@ -77,6 +87,8 @@
             <button class="tab is-active" data-tab="hotspots">Hotspots</button>
             <button class="tab" data-tab="slowspots">Slowspots</button>
             <button class="tab" data-tab="search-speed">Search Speed</button>
+            <button class="tab" data-tab="speed-report">Speed Report</button>
+            <button class="tab" data-tab="capacity-report">Capacity</button>
             <button class="tab" data-tab="clones">Clones</button>
             <button class="tab" data-tab="map">Map</button>
             <button class="tab" data-tab="flamegraphs">Flamegraphs</button>
@@ -124,6 +136,69 @@
                         placeholder="Filter search benchmarks..." />
                 </div>
                 <div id="search-speed-table" class="table-wrap"></div>
+            </div>
+        </section>
+
+        <section id="speed-report" class="tab-panel">
+            <div id="speed-report-summary" class="summary-grid"></div>
+            <div class="panel-card">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Speed and efficiency report</h2>
+                        <p>Coordinated triage view across broad latency, search scaling, flamegraph coverage, and
+                            capacity ceilings.</p>
+                    </div>
+                </div>
+                <div id="speed-report-triage"></div>
+            </div>
+            <div class="panel-card">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Search section</h2>
+                        <p>Dedicated search rows remain the primary source for search scaling decisions.</p>
+                    </div>
+                </div>
+                <div id="speed-report-search" class="table-wrap"></div>
+            </div>
+            <div class="panel-card">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Editor and tabs</h2>
+                        <p>Large-file, paste, scroll, tab, and split scenarios from the broad latency view.</p>
+                    </div>
+                </div>
+                <div id="speed-report-editor" class="table-wrap"></div>
+            </div>
+            <div class="panel-card">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Flamegraph coverage</h2>
+                        <p>Configured diagnosis coverage and whether each profile is currently available.</p>
+                    </div>
+                </div>
+                <div id="speed-report-flamegraphs" class="table-wrap"></div>
+            </div>
+            <div class="panel-card">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Methodology</h2>
+                    </div>
+                </div>
+                <div id="speed-report-methodology"></div>
+            </div>
+        </section>
+
+        <section id="capacity-report" class="tab-panel">
+            <div id="capacity-report-summary" class="summary-grid"></div>
+            <div class="panel-card">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Capacity and failure ceilings</h2>
+                        <p>Threshold sweeps stay separate from latency benchmarks so unusable ceilings do not pollute
+                            the broad leaderboard.</p>
+                    </div>
+                </div>
+                <div id="capacity-report-table" class="table-wrap"></div>
             </div>
         </section>
 

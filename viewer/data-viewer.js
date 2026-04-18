@@ -4,6 +4,8 @@
         hotspots: `../target/analysis/hotspots.json?v=${viewerVersion}`,
         slowspots: `../target/analysis/slowspots.json?v=${viewerVersion}`,
         searchSpeed: `../target/analysis/search_speed.json?v=${viewerVersion}`,
+        capacityReport: `../target/analysis/capacity_report.json?v=${viewerVersion}`,
+        speedReport: `../target/analysis/speed_efficiency_report.json?v=${viewerVersion}`,
         clones: `../target/analysis/clones.json?v=${viewerVersion}`,
         map: `../target/analysis/map.json?v=${viewerVersion}`,
         flamegraphs: `../target/analysis/flamegraphs.json?v=${viewerVersion}`,
@@ -13,6 +15,8 @@
         hotspots: [],
         slowspots: [],
         searchSpeed: [],
+        capacityReport: null,
+        speedReport: null,
         clones: [],
         map: null,
         flamegraphs: [],
@@ -179,19 +183,21 @@
 
         renderTable(
             "slowspots-table",
-            ["Benchmark", "Kind", "Mean", "Median", "P95", "Threshold", "Targets", "Signals"],
+            ["Benchmark", "Family", "Kind", "Mean", "Median", "Dispersion", "Threshold", "Profiles", "Targets", "Signals"],
             filtered.map((item) => {
                 const meanMs = item.mean_ns / 1_000_000;
                 const medianMs = item.median_ns / 1_000_000;
-                const p95Ms = item.p95_ns == null ? null : item.p95_ns / 1_000_000;
+                const dispersionMs = item.dispersion_ns == null ? null : item.dispersion_ns / 1_000_000;
                 const scoreClass = meanMs > item.threshold_ms ? "risk-bad" : "risk-good";
                 return `<tr>
                     <td><code>${escapeHtml(item.name)}</code></td>
+                    <td><span class="pill">${escapeHtml(item.workload_family || "unmapped")}</span></td>
                     <td><span class="pill">${escapeHtml(item.benchmark_kind)}</span></td>
                     <td class="${scoreClass}">${formatNumber.format(meanMs)} ms</td>
                     <td>${formatNumber.format(medianMs)} ms</td>
-                    <td>${p95Ms == null ? "-" : `${formatNumber.format(p95Ms)} ms`}</td>
+                    <td>${dispersionMs == null ? "-" : `${formatNumber.format(dispersionMs)} ms`}<div class="muted">${escapeHtml(item.dispersion_label || "median_abs_dev")}</div></td>
                     <td>${formatNumber.format(item.threshold_ms)} ms</td>
+                    <td>${renderPills(item.matching_flamegraphs || [])}</td>
                     <td>${renderPills(item.targets || [])}</td>
                     <td>${renderPills(item.signals)}</td>
                 </tr>`;
@@ -225,7 +231,7 @@
 
         renderTable(
             "search-speed-table",
-            ["Scenario", "Mode", "Latency", "Axis", "Param", "Corpus", "Mean", "Median", "Efficiency", "Targets", "Signals"],
+            ["Scenario", "Family", "Mode", "Latency", "Axis", "Param", "Corpus", "Mean", "Median", "Profiles", "Efficiency", "Targets", "Signals"],
             filtered.map((item) => {
                 const meanMs = item.mean_ns / 1_000_000;
                 const medianMs = item.median_ns / 1_000_000;
@@ -242,6 +248,7 @@
 
                 return `<tr>
                     <td><code>${escapeHtml(item.scenario_label || item.name)}</code>${detail}</td>
+                    <td><span class="pill">${escapeHtml(item.workload_family || "search")}</span></td>
                     <td><span class="pill">${escapeHtml(item.mode || "unknown")}</span></td>
                     <td><span class="pill">${escapeHtml(item.latency_kind || "completion")}</span></td>
                     <td><span class="pill">${escapeHtml(item.scaling_axis || "aggregate_size")}</span></td>
@@ -249,6 +256,7 @@
                     <td>${escapeHtml(corpus.join(" • ") || "-")}</td>
                     <td class="${meanClass}">${formatNumber.format(meanMs)} ms<div class="muted">budget ${formatNumber.format(item.threshold_ms)} ms</div></td>
                     <td>${formatNumber.format(medianMs)} ms</td>
+                    <td>${renderPills(item.matching_flamegraphs || [])}</td>
                     <td>${escapeHtml(nsPerKb)}</td>
                     <td>${renderPills(item.targets || [])}</td>
                     <td>${renderPills(item.signals)}</td>
@@ -731,6 +739,105 @@
         return insights;
     }
 
+    function renderSpeedReport() {
+        const payload = state.speedReport || {};
+        const summary = payload.summary || {};
+        const triage = payload.triage || [];
+        const sections = payload.sections || {};
+
+        renderSummary("speed-report-summary", [
+            metricCard("Search rows", summary.search_scenarios ?? "-"),
+            metricCard("Editor rows", summary.editor_scenarios ?? "-"),
+            metricCard("Tabs / splits", summary.tabs_and_splits_scenarios ?? "-"),
+            metricCard("Capacity scenarios", summary.capacity_scenarios ?? "-"),
+            metricCard("Over budget", summary.over_budget_latency ?? "-"),
+            metricCard("Coverage gaps", summary.coverage_gaps ?? "-"),
+            metricCard("Near ceilings", summary.near_failure_ceilings ?? "-"),
+        ]);
+
+        byId("speed-report-triage").innerHTML = triage.length
+            ? `<div class="detail-list">${triage.map((item, index) => `<div class="detail-row"><strong>${index + 1}. ${escapeHtml(item.scenario_label)}</strong>${escapeHtml(item.recommended_action)}</div><div class="muted" style="margin-bottom: 12px;">${escapeHtml(item.family)} • ${escapeHtml(item.suspected_limiting_resource)} • ${escapeHtml(item.reason)}</div>`).join("")}</div>`
+            : '<p class="muted">No coordinated triage data loaded.</p>';
+
+        renderTable(
+            "speed-report-search",
+            ["Scenario", "Family", "Mean", "Budget", "Profiles", "Stability", "Ceiling", "Resource"],
+            (sections.search || []).map((item) => `<tr>
+                <td><code>${escapeHtml(item.scenario_label || item.scenario_id)}</code></td>
+                <td><span class="pill">${escapeHtml(item.family || "search")}</span></td>
+                <td>${formatNumber.format(item.mean_ms || 0)} ms</td>
+                <td>${formatNumber.format(item.budget_ms || 0)} ms</td>
+                <td>${renderPills(item.matching_flamegraphs || [])}</td>
+                <td><span class="pill">${escapeHtml(item.stability || "stable")}</span></td>
+                <td>${escapeHtml(item.last_known_failure_ceiling || "-")}</td>
+                <td><span class="pill">${escapeHtml(item.suspected_limiting_resource || "cpu")}</span></td>
+            </tr>`)
+        );
+
+        renderTable(
+            "speed-report-editor",
+            ["Scenario", "Family", "Mean", "Budget", "Profiles", "Signals", "Ceiling", "Resource"],
+            [...(sections.editor_file_size || []), ...(sections.tabs_and_splits || [])].map((item) => `<tr>
+                <td><code>${escapeHtml(item.scenario_label || item.scenario_id)}</code></td>
+                <td><span class="pill">${escapeHtml(item.family || "unmapped")}</span></td>
+                <td>${formatNumber.format(item.mean_ms || 0)} ms</td>
+                <td>${formatNumber.format(item.budget_ms || 0)} ms</td>
+                <td>${renderPills(item.matching_flamegraphs || [])}</td>
+                <td>${renderPills(item.signals || [])}</td>
+                <td>${escapeHtml(item.last_known_failure_ceiling || "-")}</td>
+                <td><span class="pill">${escapeHtml(item.suspected_limiting_resource || "cpu")}</span></td>
+            </tr>`)
+        );
+
+        renderTable(
+            "speed-report-flamegraphs",
+            ["Profile", "Role", "Available", "Families", "Benchmarks", "Covered scenarios", "Issue"],
+            (sections.flamegraph_coverage || []).map((item) => `<tr>
+                <td><code>${escapeHtml(item.name || item.id)}</code></td>
+                <td><span class="pill">${escapeHtml(item.coverage_role || "report-driven")}</span></td>
+                <td>${item.available ? "yes" : "no"}</td>
+                <td>${renderPills(item.workload_families || [])}</td>
+                <td>${renderPills(item.benchmark_keys || [])}</td>
+                <td>${renderPills(item.covered_scenarios || [])}</td>
+                <td>${escapeHtml(item.issue || "-")}</td>
+            </tr>`)
+        );
+
+        const methodology = sections.methodology || [];
+        byId("speed-report-methodology").innerHTML = methodology.length
+            ? `<ul class="chart-insights">${methodology.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+            : '<p class="muted">No methodology notes loaded.</p>';
+    }
+
+    function renderCapacityReport() {
+        const payload = state.capacityReport || {};
+        const summary = payload.summary || {};
+        const scenarios = payload.scenarios || [];
+
+        renderSummary("capacity-report-summary", [
+            metricCard("Scenarios", summary.scenario_count ?? "-"),
+            metricCard("Ceilings reached", summary.ceilings_reached ?? "-"),
+            metricCard("Memory bound", summary.memory_bound_scenarios ?? "-"),
+            metricCard("CPU bound", summary.cpu_bound_scenarios ?? "-"),
+        ]);
+
+        renderTable(
+            "capacity-report-table",
+            ["Scenario", "Failure mode", "Last OK", "First failure", "Resource", "Peak working set", "Growth", "Profiles", "Guidance"],
+            scenarios.map((item) => `<tr>
+                <td><code>${escapeHtml(item.scenario_label || item.scenario)}</code></td>
+                <td><span class="pill">${escapeHtml(item.failure_mode || "not_reached")}</span></td>
+                <td>${escapeHtml(item.last_successful_label || "-")}</td>
+                <td>${escapeHtml(item.first_failure_label || "-")}</td>
+                <td><span class="pill">${escapeHtml(item.suspected_limiting_resource || "cpu")}</span></td>
+                <td>${escapeHtml(formatBytes(item.peak_working_set_bytes))}</td>
+                <td>${escapeHtml(formatBytes(item.working_set_growth_bytes))}</td>
+                <td>${renderPills(item.matching_flamegraphs || [])}</td>
+                <td>${escapeHtml((item.diagnosis_guidance || []).join(" • ") || "-")}</td>
+            </tr>`)
+        );
+    }
+
     function renderChartLegend(series) {
         return series.map((entry) => `<span class="chart-legend__item">
                 <svg class="chart-legend__swatch" viewBox="0 0 28 10" aria-hidden="true">
@@ -817,6 +924,19 @@
 
     function formatAxisMs(value) {
         return value >= 10 ? formatNumber.format(value) : formatNumber.format(Number(value.toFixed(2)));
+    }
+
+    function formatBytes(value) {
+        if (value == null || !Number.isFinite(value)) {
+            return "-";
+        }
+        if (value >= 1024 * 1024) {
+            return `${formatNumber.format(value / (1024 * 1024))} MB`;
+        }
+        if (value >= 1024) {
+            return `${formatNumber.format(value / 1024)} KB`;
+        }
+        return `${formatNumber.format(value)} B`;
     }
 
     function renderPills(value) {
@@ -1290,8 +1410,9 @@
     }
 
     function renderBenchmark(item) {
-        const p95 = item.p95_ms == null ? "-" : `${formatNumber.format(item.p95_ms)} ms p95`;
-        return `<div class="pill">${escapeHtml(item.name)}: ${formatNumber.format(item.mean_ms)} ms mean, ${p95}</div>`;
+        const dispersionLabel = item.dispersion_label || "median_abs_dev";
+        const dispersion = item.dispersion_ms == null ? "-" : `${formatNumber.format(item.dispersion_ms)} ms ${dispersionLabel}`;
+        return `<div class="pill">${escapeHtml(item.name)}: ${formatNumber.format(item.mean_ms)} ms mean, ${dispersion}</div>`;
     }
 
     function renderFlamegraphs() {
@@ -1306,10 +1427,10 @@
 
         container.innerHTML = state.flamegraphs.map(item => {
             const isActive = state.selectedFlamegraph === item.id;
-            const isError = item.type === "error";
-            return `<div class="flamegraph-item ${isActive ? 'is-active' : ''} ${isError ? 'is-error' : ''}" data-id="${escapeHtml(item.id)}">
+            const isMissing = !item.available;
+            return `<div class="flamegraph-item ${isActive ? 'is-active' : ''} ${isMissing ? 'is-error' : ''}" data-id="${escapeHtml(item.id)}">
                 <h3>${escapeHtml(item.name)}</h3>
-                <p>${escapeHtml(isError ? "Error" : item.id)}</p>
+                <p>${escapeHtml(isMissing ? (item.issue || "Not generated") : item.id)}</p>
             </div>`;
         }).join("");
 
@@ -1332,13 +1453,15 @@
     async function loadSelectedFlamegraph() {
         const content = byId("flamegraph-content");
         const selected = state.flamegraphs.find(f => f.id === state.selectedFlamegraph);
-        
+
         if (!selected) return;
 
-        if (selected.type === "error") {
+        if (!selected.available) {
             content.innerHTML = `<div class="flamegraph-error">
                 <h3>${escapeHtml(selected.name)}</h3>
-                <p>${escapeHtml(selected.description)}</p>
+                <p>${escapeHtml(selected.issue || selected.description || "No SVG is currently available for this profile.")}</p>
+                <p>${escapeHtml((selected.workload_families || []).join(", ") || "-")}</p>
+                <p>${escapeHtml((selected.benchmark_keys || []).join(", ") || "-")}</p>
             </div>`;
             return;
         }
@@ -1352,7 +1475,7 @@
             const response = await fetch(svgPath);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const svgText = await response.text();
-            
+
             // To make the SVG interactive and fit properly, we might need to strip 
             // explicit width/height or wrap it.
             content.innerHTML = svgText;
@@ -1376,11 +1499,13 @@
     async function loadDefaults() {
         const status = byId("load-status");
         const detail = byId("load-detail");
-        const keys = ["hotspots", "slowspots", "searchSpeed", "clones", "map", "flamegraphs"];
+        const keys = ["hotspots", "slowspots", "searchSpeed", "capacityReport", "speedReport", "clones", "map", "flamegraphs"];
         const fallbacks = {
             hotspots: [],
             slowspots: [],
             searchSpeed: [],
+            capacityReport: null,
+            speedReport: null,
             clones: [],
             map: null,
             flamegraphs: [],
@@ -1438,7 +1563,7 @@
                 document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.remove("is-active"));
                 button.classList.add("is-active");
                 byId(button.dataset.tab).classList.add("is-active");
-                
+
                 // If switching to flamegraphs, ensure it's rendered correctly
                 if (button.dataset.tab === "flamegraphs") {
                     renderFlamegraphs();
@@ -1451,6 +1576,8 @@
         renderHotspots();
         renderSlowspots();
         renderSearchSpeed();
+        renderSpeedReport();
+        renderCapacityReport();
         renderClones();
         renderMap();
         renderFlamegraphs();
@@ -1483,6 +1610,8 @@
     readJsonFile("hotspots-file", "hotspots", renderHotspots);
     readJsonFile("slowspots-file", "slowspots", renderSlowspots);
     readJsonFile("search-speed-file", "searchSpeed", renderSearchSpeed);
+    readJsonFile("capacity-report-file", "capacityReport", renderCapacityReport);
+    readJsonFile("speed-report-file", "speedReport", renderSpeedReport);
     readJsonFile("clones-file", "clones", renderClones);
     readJsonFile("map-file", "map", renderMap);
     readJsonFile("flamegraphs-file", "flamegraphs", renderFlamegraphs);

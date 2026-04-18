@@ -602,10 +602,13 @@ class ArchitectureMapper:
                             {
                                 "name": item["name"],
                                 "mean_ms": float(item["mean_ns"]) / 1_000_000.0,
-                                "p95_ms": (
-                                    float(item["p95_ns"]) / 1_000_000.0
-                                    if item.get("p95_ns") is not None
+                                "dispersion_ms": (
+                                    float(item["dispersion_ns"]) / 1_000_000.0
+                                    if item.get("dispersion_ns") is not None
                                     else None
+                                ),
+                                "dispersion_label": item.get(
+                                    "dispersion_label", "median_abs_dev"
                                 ),
                                 "kind": item.get("benchmark_kind", "unmapped"),
                                 "threshold_ms": item.get("threshold_ms", 50.0),

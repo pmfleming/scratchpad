@@ -164,7 +164,7 @@ Clone Alert identifies redundant code segments that have been copied and pasted,
 - **map.py:** Aggregates complexity, git history, benchmark, and dependency data into maintainability, change, performance, and architectural risk.
 
 ### Overview Viewer
-The overview launcher supports three modes:
+The overview launcher supports fast mode plus explicit refresh scopes:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1
@@ -172,20 +172,33 @@ powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1
 Fast mode: uses the existing JSON files under `target/analysis/` and just opens the viewer.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -Refresh
+powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -FullUpdate
 ```
-Refresh mode: rebuilds the standard JSON files, then opens the viewer.
+FullUpdate mode: rebuilds the standard JSON files, then opens the viewer.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -CloneCheck
+powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -FlamegraphOnly
 ```
-CloneCheck mode: rebuilds the JSON files and uses the extended clone check (`--engine all`) before opening the viewer.
+FlamegraphOnly mode: refreshes only the flamegraph index and SVGs before opening the viewer.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -SearchSpeedOnly
+```
+SearchSpeedOnly mode: refreshes only the dedicated search scaling report.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -CloneOnly
+```
+CloneOnly mode: refreshes only clone analysis.
 
 The rebuild modes refresh:
 - `target/analysis/hotspots.json`
 - `target/analysis/slowspots.json`
 - `target/analysis/search_speed.json`
+- `target/analysis/capacity_report.json`
+- `target/analysis/speed_efficiency_report.json`
 - `target/analysis/clones.json`
 - `target/analysis/map.json`
+- `target/analysis/flamegraphs.json`
 
 It then starts a local HTTP server and opens the viewer under `http://localhost:<port>/viewer/`.

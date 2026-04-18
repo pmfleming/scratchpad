@@ -7,6 +7,8 @@ Scratchpad includes a small analysis toolchain for maintainability, clone drift,
 - `scripts/hotspots.py`: complexity and maintainability analysis
 - `scripts/slowspots.py`: benchmark-oriented performance and degradation analysis
 - `scripts/search_speed.py`: dedicated search scaling analysis for full-completion speed and first-response latency
+- `scripts/capacity_report.py`: threshold sweeps for file size, tabs, splits, and paste ceilings with failure-mode and resource hints
+- `scripts/speed_efficiency_report.py`: coordinated performance triage that merges latency, flamegraph coverage, and capacity ceilings
 - `scripts/clone_alert.py`: token-based clone and duplication analysis
 - `scripts/map.py`: architecture map output enriched with dependencies and analysis signals
 - `scripts/generate_flamegraphs.py`: flamegraph index generation for dedicated single-workload profile binaries
@@ -24,6 +26,8 @@ Expected artifacts:
 - `target/analysis/hotspots.json`
 - `target/analysis/slowspots.json`
 - `target/analysis/search_speed.json`
+- `target/analysis/capacity_report.json`
+- `target/analysis/speed_efficiency_report.json`
 - `target/analysis/clones.json`
 - `target/analysis/map.json`
 - `target/analysis/flamegraphs.json`
@@ -40,6 +44,8 @@ Expected artifacts:
 .venv\Scripts\python.exe scripts\search_speed.py --mode cli --skip-bench
 .venv\Scripts\python.exe scripts\search_speed.py --mode analysis --output target/analysis/search_speed.json
 .venv\Scripts\python.exe scripts\search_speed.py --mode visibility
+.venv\Scripts\python.exe scripts\capacity_report.py --mode visibility
+.venv\Scripts\python.exe scripts\speed_efficiency_report.py --mode visibility
 .venv\Scripts\python.exe scripts\generate_flamegraphs.py --mode cli
 .venv\Scripts\python.exe scripts\generate_flamegraphs.py --mode visibility
 cargo flamegraph --dev --bin profile_tab_operations -o target/analysis/flamegraphs/tab_operations_profile.svg
@@ -47,6 +53,9 @@ cargo flamegraph --dev --bin profile_tab_tile_layout -o target/analysis/flamegra
 cargo flamegraph --dev --bin profile_view_navigation -o target/analysis/flamegraphs/view_navigation_profile.svg
 cargo flamegraph --dev --bin profile_search_current_app_state -o target/analysis/flamegraphs/search_current_app_state_profile.svg
 cargo flamegraph --dev --bin profile_search_all_tabs -o target/analysis/flamegraphs/search_all_tabs_profile.svg
+cargo flamegraph --dev --bin profile_large_file_scroll -o target/analysis/flamegraphs/large_file_scroll_profile.svg
+cargo flamegraph --dev --bin profile_large_file_paste -o target/analysis/flamegraphs/large_file_paste_profile.svg
+cargo flamegraph --dev --bin profile_large_file_split -o target/analysis/flamegraphs/large_file_split_profile.svg
 .venv\Scripts\python.exe scripts\map.py --mode visibility
 .venv\Scripts\python.exe scripts\map.py --refresh --mode visibility
 ```
@@ -98,6 +107,8 @@ powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -CloneOnly
 - The Python tools produce JSON rather than HTML.
 - `scripts/search_speed.py` uses the same mode contract as the other Python tools: `cli`, `analysis`, and `visibility`.
 - `scripts/generate_flamegraphs.py` writes `target/analysis/flamegraphs.json` and the referenced SVG files under `target/analysis/flamegraphs/`.
+- `scripts/capacity_report.py` keeps threshold sweeps out of the ordinary latency leaderboard and records the first unusable ceiling separately.
+- `scripts/speed_efficiency_report.py` consumes `slowspots`, `search_speed`, `flamegraphs`, and `capacity_report` to emit a coordinated triage artifact.
 - Flamegraph generation now targets dedicated single-entry profile binaries instead of whole Criterion suites, which keeps traces narrower and easier to interpret.
 - Recommended single-entry profile series:
 	- `profile_tab_operations`: active-tab switching plus reversible tab reordering on a 64-tab, multi-view, loaded workspace
@@ -105,6 +116,9 @@ powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -CloneOnly
 	- `profile_view_navigation`: repeated view switching inside a heavily split tab with both duplicated and distinct buffers
 	- `profile_search_current_app_state`: current-workspace-tab search through the full app-state pipeline on a file-heavy tab with extra duplicate views
 	- `profile_search_all_tabs`: all-open-tabs search across a many-tab workspace where each tab also has duplicate editor views into the same buffer
+	- `profile_large_file_scroll`: headless editor layout and redraw work representative of large-file scroll latency
+	- `profile_large_file_paste`: large insert into an already large buffer, including metadata refresh work
+	- `profile_large_file_split`: repeated split and rebalance work on large file tiles
 - The search-speed dataset separates:
 	- Active / Current / All scope modes
 	- full completion latency vs first-response latency

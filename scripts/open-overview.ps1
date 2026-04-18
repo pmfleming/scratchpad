@@ -150,6 +150,7 @@ function Get-RefreshTasks {
     $tasks = @(
         (New-OverviewTask -Title "Generating slowspots data" -Label "slowspots" -Arguments @("scripts/slowspots.py", "--mode", "visibility")),
         (New-OverviewTask -Title "Generating search speed data" -Label "search_speed" -Arguments @("scripts/search_speed.py", "--mode", "visibility")),
+        (New-OverviewTask -Title "Generating capacity data" -Label "capacity_report" -Arguments @("scripts/capacity_report.py", "--mode", "visibility")),
         (New-OverviewTask -Title "Generating hotspots data" -Label "hotspots" -Arguments @("scripts/hotspots.py", "--mode", "visibility", "--paths", "src", "--scope", "all")),
         (New-OverviewTask -Title "Generating clone alert data" -Label "clone_alert" -Arguments @("scripts/clone_alert.py", "--mode", "visibility", "--paths", "src")),
         (New-OverviewTask -Title "Generating architecture map data" -Label "map" -Arguments @("scripts/map.py", "--mode", "visibility"))
@@ -158,6 +159,8 @@ function Get-RefreshTasks {
     if ($IncludeFlamegraphs) {
         $tasks += New-OverviewTask -Title "Generating flamegraph data" -Label "generate_flamegraphs" -Arguments @("scripts/generate_flamegraphs.py", "--mode", "visibility")
     }
+
+    $tasks += New-OverviewTask -Title "Generating coordinated speed-efficiency report" -Label "speed_efficiency_report" -Arguments @("scripts/speed_efficiency_report.py", "--mode", "visibility")
 
     return $tasks
 }

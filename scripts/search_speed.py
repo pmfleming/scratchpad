@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from perf_report_shared import load_benchmark_metadata, matching_flamegraph_ids
 from report_modes import add_mode_argument, emit_report
 
 BENCH_CMD = ["cargo", "bench", "--bench", "search_speed"]
@@ -27,6 +28,7 @@ class SearchSpeedMetric:
     latency_kind: str
     scaling_axis: str
     benchmark_kind: str
+    workload_family: str
     parameter_value: Optional[int]
     parameter_unit: str
     parameter_label: str
@@ -47,6 +49,10 @@ class SearchSpeedMetric:
     ns_per_kb: Optional[float]
     score: float = 0.0
     signals: str = ""
+    matching_flamegraphs: Optional[List[str]] = None
+    has_profile_coverage: bool = False
+    stability: str = "stable"
+    suspected_limiting_resource: str = "cpu"
 
     @property
     def mean_ms(self) -> float:
@@ -58,29 +64,7 @@ class SearchSpeedAnalyzer:
         self.benchmark_metadata = self.load_benchmark_metadata()
 
     def load_benchmark_metadata(self) -> Dict[str, Dict[str, Any]]:
-        if not METADATA_PATH.exists():
-            return {}
-
-        with METADATA_PATH.open("r", encoding="utf-8") as handle:
-            data = json.load(handle)
-
-        normalized: Dict[str, Dict[str, Any]] = {}
-        for key, value in data.items():
-            normalized[key] = {
-                "targets": list(value.get("targets", [])),
-                "kind": value.get("kind", "workflow"),
-                "mode": value.get("mode", "unknown"),
-                "latency_kind": value.get("latency_kind", "completion"),
-                "scaling_axis": value.get("scaling_axis", "aggregate_size"),
-                "threshold_ms": float(value.get("threshold_ms", 50.0)),
-                "parameter_unit": value.get("parameter_unit", "value"),
-                "fixed_item_count": value.get("fixed_item_count"),
-                "bytes_per_item": value.get("bytes_per_item"),
-                "response_match_limit": value.get("response_match_limit"),
-                "query": value.get("query", ""),
-                "description": value.get("description", key.replace("_", " ")),
-            }
-        return normalized
+        return load_benchmark_metadata(50.0)
 
     def run_benchmarks(self, skip_bench: bool = False) -> List[SearchSpeedMetric]:
         if not skip_bench:
@@ -186,6 +170,7 @@ class SearchSpeedAnalyzer:
                 latency_kind=str(metadata.get("latency_kind", "completion")),
                 scaling_axis=str(metadata.get("scaling_axis", "aggregate_size")),
                 benchmark_kind=str(metadata.get("kind", "workflow")),
+                workload_family=str(metadata.get("workload_family", "search")),
                 parameter_value=parameter_value,
                 parameter_unit=str(metadata.get("parameter_unit", "value")),
                 parameter_label=self.parameter_label(metadata, parameter_value),
@@ -209,7 +194,13 @@ class SearchSpeedAnalyzer:
                 ),
                 throughput_mb_s=throughput_mb_s,
                 ns_per_kb=ns_per_kb,
+                matching_flamegraphs=matching_flamegraph_ids(benchmark_key),
+                has_profile_coverage=bool(matching_flamegraph_ids(benchmark_key)),
+                suspected_limiting_resource=str(
+                    metadata.get("limiting_resource_hint", "cpu")
+                ),
             )
+            metric.stability = self.stability_label(metric)
             metric.score = self.calculate_score(metric)
             metric.signals = self.generate_signals(metric)
             results.append(metric)
@@ -321,7 +312,19 @@ class SearchSpeedAnalyzer:
             signals.append("full-scan latency")
         if metric.mean_ns > 0.0 and (metric.std_dev_ns / metric.mean_ns) > 0.2:
             signals.append("high variance")
+        if metric.matching_flamegraphs:
+            signals.append("profile coverage")
         return ", ".join(signals)
+
+    def stability_label(self, metric: SearchSpeedMetric) -> str:
+        if metric.mean_ns <= 0.0:
+            return "unknown"
+        variance_ratio = metric.std_dev_ns / metric.mean_ns
+        if variance_ratio >= 0.2:
+            return "high-variance"
+        if variance_ratio >= 0.1:
+            return "watch"
+        return "stable"
 
 
 def human_bytes(value: int) -> str:

@@ -9,6 +9,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from perf_report_shared import (
+    load_benchmark_metadata,
+    matching_flamegraph_ids,
+    metadata_for_benchmark,
+)
 from report_modes import add_mode_argument, emit_report
 
 DEFAULT_OUTPUT = Path("slowspots.json")
@@ -23,46 +28,35 @@ class PerfMetrics:
     median_ns: float
     max_ns: float
     min_ns: float
-    p95_ns: Optional[float] = None
+    dispersion_ns: Optional[float] = None
+    dispersion_label: str = "median_abs_dev"
     score: float = 0.0
     signals: str = ""
     benchmark_key: str = ""
     targets: Optional[List[str]] = None
     benchmark_kind: str = "unmapped"
+    workload_family: str = "unmapped"
     threshold_ms: float = 50.0
+    matching_flamegraphs: Optional[List[str]] = None
+    has_profile_coverage: bool = False
+    stability: str = "stable"
+    suspected_limiting_resource: str = "cpu"
 
     @property
     def mean_ms(self) -> float:
         return self.mean_ns / 1_000_000.0
 
     @property
-    def p95_ms(self) -> Optional[float]:
-        if self.p95_ns is None:
+    def dispersion_ms(self) -> Optional[float]:
+        if self.dispersion_ns is None:
             return None
-        return self.p95_ns / 1_000_000.0
+        return self.dispersion_ns / 1_000_000.0
 
 
 class SlowspotAnalyzer:
     def __init__(self, threshold_ms: float = 50.0):
         self.threshold_ms = threshold_ms
-        self.benchmark_metadata = self.load_benchmark_metadata()
-
-    def load_benchmark_metadata(self) -> Dict[str, Dict[str, Any]]:
-        metadata_path = os.path.join("benches", "benchmark_targets.json")
-        if not os.path.exists(metadata_path):
-            return {}
-
-        with open(metadata_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        return {
-            key: {
-                "targets": value.get("targets", []),
-                "kind": value.get("kind", "unmapped"),
-                "threshold_ms": float(value.get("threshold_ms", self.threshold_ms)),
-            }
-            for key, value in data.items()
-        }
+        self.benchmark_metadata = load_benchmark_metadata(self.threshold_ms)
 
     def run_benchmarks(self, skip_bench: bool = False) -> List[PerfMetrics]:
         if not skip_bench:
@@ -164,7 +158,8 @@ class SlowspotAnalyzer:
             mean = data.get("mean", {}).get("point_estimate", 0.0)
             std_dev = data.get("std_dev", {}).get("point_estimate", 0.0)
             median = data.get("median", {}).get("point_estimate", 0.0)
-            p95 = data.get("median_abs_dev", {}).get("point_estimate")
+            dispersion = data.get("median_abs_dev", {}).get("point_estimate")
+            flamegraphs = matching_flamegraph_ids(self.benchmark_key(benchmark_name))
 
             metric = PerfMetrics(
                 name=benchmark_name,
@@ -173,12 +168,19 @@ class SlowspotAnalyzer:
                 median_ns=median,
                 max_ns=mean + (2 * std_dev),
                 min_ns=max(0, mean - (2 * std_dev)),
-                p95_ns=p95,
+                dispersion_ns=dispersion,
                 benchmark_key=self.benchmark_key(benchmark_name),
                 targets=metadata["targets"],
                 benchmark_kind=metadata["kind"],
+                workload_family=str(metadata.get("workload_family", "unmapped")),
                 threshold_ms=metadata["threshold_ms"],
+                matching_flamegraphs=flamegraphs,
+                has_profile_coverage=bool(flamegraphs),
+                suspected_limiting_resource=str(
+                    metadata.get("limiting_resource_hint", "cpu")
+                ),
             )
+            metric.stability = self.stability_label(metric)
             metric.score = self.calculate_score(metric)
             metric.signals = self.generate_signals(metric)
             results.append(metric)
@@ -196,14 +198,10 @@ class SlowspotAnalyzer:
         return benchmark_name.split("/", 1)[0]
 
     def metadata_for_benchmark(self, benchmark_name: str) -> Dict[str, Any]:
-        benchmark_key = self.benchmark_key(benchmark_name)
-        return self.benchmark_metadata.get(
-            benchmark_key,
-            {
-                "targets": [],
-                "kind": "unmapped",
-                "threshold_ms": self.threshold_ms,
-            },
+        return metadata_for_benchmark(
+            benchmark_name,
+            self.benchmark_metadata,
+            self.threshold_ms,
         )
 
     def get_mock_data(self) -> List[PerfMetrics]:
@@ -246,7 +244,14 @@ class SlowspotAnalyzer:
             metric.benchmark_key = self.benchmark_key(metric.name)
             metric.targets = metadata["targets"]
             metric.benchmark_kind = metadata["kind"]
+            metric.workload_family = str(metadata.get("workload_family", "unmapped"))
             metric.threshold_ms = metadata["threshold_ms"]
+            metric.matching_flamegraphs = matching_flamegraph_ids(metric.benchmark_key)
+            metric.has_profile_coverage = bool(metric.matching_flamegraphs)
+            metric.suspected_limiting_resource = str(
+                metadata.get("limiting_resource_hint", "cpu")
+            )
+            metric.stability = self.stability_label(metric)
             metric.score = self.calculate_score(metric)
             metric.signals = self.generate_signals(metric)
         return sorted(mock, key=lambda item: -item.score)
@@ -266,7 +271,19 @@ class SlowspotAnalyzer:
             signals.append("high variance")
         if not metric.targets:
             signals.append("unmapped benchmark")
+        if metric.matching_flamegraphs:
+            signals.append("profile coverage")
         return ", ".join(signals) if signals else "nominal"
+
+    def stability_label(self, metric: PerfMetrics) -> str:
+        if metric.mean_ns <= 0:
+            return "unknown"
+        variance_ratio = metric.std_dev_ns / metric.mean_ns
+        if variance_ratio >= 0.2:
+            return "high-variance"
+        if variance_ratio >= 0.1:
+            return "watch"
+        return "stable"
 
 
 def render_cli(payload: object) -> str:
@@ -274,7 +291,7 @@ def render_cli(payload: object) -> str:
     lines = ["Slowspots"]
     for index, item in enumerate(rows[:10], start=1):
         lines.append(
-            f"{index:>2}. {item['name']} | mean={item['mean_ns'] / 1_000_000.0:.2f}ms | score={item['score']:.2f} | {item['signals']}"
+            f"{index:>2}. {item['name']} | family={item.get('workload_family', 'unmapped')} | mean={item['mean_ns'] / 1_000_000.0:.2f}ms | score={item['score']:.2f} | {item['signals']}"
         )
     if not rows:
         lines.append("No slowspots found.")
