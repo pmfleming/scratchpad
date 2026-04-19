@@ -39,7 +39,7 @@ impl ScratchpadApp {
                 self.replace_current_search_match();
             }
             AppCommand::ReplaceAllMatches => {
-                self.replace_all_search_matches_in_active_buffer();
+                self.replace_all_search_matches();
             }
             AppCommand::ReorderTab {
                 from_index,

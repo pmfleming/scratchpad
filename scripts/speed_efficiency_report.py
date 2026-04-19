@@ -11,6 +11,7 @@ SLOWSPOTS_PATH = Path("target/analysis/slowspots.json")
 SEARCH_SPEED_PATH = Path("target/analysis/search_speed.json")
 FLAMEGRAPHS_PATH = Path("target/analysis/flamegraphs.json")
 CAPACITY_PATH = Path("target/analysis/capacity_report.json")
+RESOURCE_PROFILES_PATH = Path("target/analysis/resource_profiles.json")
 
 FAMILY_PRIORITY = {
     "search": 3,
@@ -187,6 +188,7 @@ def methodology_notes() -> List[str]:
         "The dedicated search report remains the authoritative scaling view for search latency.",
         "Flamegraphs explain CPU hot paths; they do not replace benchmark budgets or capacity ceilings.",
         "Capacity sweeps stay out of the latency leaderboard and record the first unusable ceiling separately.",
+        "Resource profiles capture allocation-heavy, working-set, and session-cost scenarios that are not visible in CPU flamegraphs alone.",
         "The old slowspots p95 field is now treated as median absolute deviation dispersion, not a percentile.",
     ]
 
@@ -221,6 +223,7 @@ def main() -> None:
     search_speed = load_json(SEARCH_SPEED_PATH, [])
     flamegraphs = load_json(FLAMEGRAPHS_PATH, [])
     capacity_report = load_json(CAPACITY_PATH, {"scenarios": []})
+    resource_profiles = load_json(RESOURCE_PROFILES_PATH, {"scenarios": []})
     capacity_lookup = {
         item.get("scenario"): item for item in capacity_report.get("scenarios", [])
     }
@@ -259,6 +262,7 @@ def main() -> None:
                 str(SEARCH_SPEED_PATH),
                 str(FLAMEGRAPHS_PATH),
                 str(CAPACITY_PATH),
+                str(RESOURCE_PROFILES_PATH),
             ],
         },
         "summary": {
@@ -266,6 +270,7 @@ def main() -> None:
             "editor_scenarios": len(editor_rows),
             "tabs_and_splits_scenarios": len(tabs_rows),
             "capacity_scenarios": len(capacity_rows),
+            "resource_profile_scenarios": len(resource_profiles.get("scenarios", [])),
             "over_budget_latency": sum(
                 1
                 for row in search_rows + editor_rows + tabs_rows
@@ -286,6 +291,7 @@ def main() -> None:
             "editor_file_size": editor_rows,
             "tabs_and_splits": tabs_rows,
             "capacity": capacity_rows,
+            "resource_profiles": resource_profiles.get("scenarios", []),
             "flamegraph_coverage": flamegraph_rows,
             "methodology": methodology_notes(),
         },

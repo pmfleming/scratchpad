@@ -1,5 +1,5 @@
 use super::helpers::preview_for_match;
-use super::{SearchMatch, SearchResultEntry, SearchResultGroup};
+use super::{SearchMatch, SearchResultEntry, SearchResultGroup, SearchStatus};
 use crate::app::domain::{BufferId, ViewId};
 use crate::app::services::search::{self, SearchOptions};
 use std::ops::Range;
@@ -24,6 +24,7 @@ pub(super) struct SearchResult {
     pub(super) matches: Vec<SearchMatch>,
     pub(super) result_groups: Vec<SearchResultGroup>,
     pub(super) displayed_match_count: usize,
+    pub(super) status: SearchStatus,
 }
 
 pub(super) struct SearchTargetSnapshot {
@@ -33,6 +34,7 @@ pub(super) struct SearchTargetSnapshot {
     pub(super) tab_label: String,
     pub(super) buffer_label: String,
     pub(super) text: String,
+    pub(super) search_range: Option<Range<usize>>,
 }
 
 #[derive(Default)]
@@ -50,6 +52,7 @@ impl SearchResultAccumulator {
                 tab_index: target.tab_index,
                 view_id: target.view_id,
                 buffer_id: target.buffer_id,
+                buffer_label: target.buffer_label.clone(),
                 range,
             }));
 
@@ -105,6 +108,7 @@ impl SearchResultAccumulator {
             matches: self.matches,
             result_groups: self.result_groups,
             displayed_match_count: self.displayed_match_count,
+            status: SearchStatus::NoMatches,
         }
     }
 }
@@ -136,17 +140,52 @@ pub(super) fn process_search_request(
     let mut results = SearchResultAccumulator::default();
 
     for target in request.targets {
-        let ranges = search::find_matches_interruptible(
-            &target.text,
+        let (search_text, offset) = target_search_text(&target);
+        let outcome = search::search_text_interruptible(
+            &search_text,
             &request.query,
             request.options,
             || latest_generation.load(Ordering::Relaxed) == request.generation,
         )?;
+        if let Some(error) = outcome.error {
+            return Some(SearchResult {
+                generation: request.generation,
+                matches: Vec::new(),
+                result_groups: Vec::new(),
+                displayed_match_count: 0,
+                status: SearchStatus::InvalidQuery(error.message().to_owned()),
+            });
+        }
+        let ranges = outcome
+            .matches
+            .into_iter()
+            .map(|range| range.start + offset..range.end + offset)
+            .collect::<Vec<_>>();
         if ranges.is_empty() {
             continue;
         }
         results.push_target_matches(&target, &ranges);
     }
 
-    Some(results.finish(request.generation))
+    let mut result = results.finish(request.generation);
+    result.status = if result.matches.is_empty() {
+        SearchStatus::NoMatches
+    } else {
+        SearchStatus::Ready
+    };
+    Some(result)
+}
+
+fn target_search_text(target: &SearchTargetSnapshot) -> (String, usize) {
+    let Some(search_range) = &target.search_range else {
+        return (target.text.clone(), 0);
+    };
+
+    let chars = target.text.chars().collect::<Vec<_>>();
+    let safe_start = search_range.start.min(chars.len());
+    let safe_end = search_range.end.min(chars.len());
+    (
+        chars[safe_start..safe_end].iter().collect::<String>(),
+        safe_start,
+    )
 }

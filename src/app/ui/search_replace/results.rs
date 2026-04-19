@@ -1,5 +1,5 @@
 use super::state::{SearchStripActions, SearchStripState};
-use crate::app::app_state::{SearchResultEntry, SearchResultGroup};
+use crate::app::app_state::{SearchFreshness, SearchResultEntry, SearchResultGroup, SearchStatus};
 use crate::app::theme::{
     action_bg, action_hover_bg, border, tab_selected_accent, tab_selected_bg, text_muted,
     text_primary,
@@ -22,6 +22,11 @@ pub(super) fn show_search_results(
 
         if state.query.is_empty() {
             render_empty_results_state(ui, "Type to search across the selected scope.");
+            return;
+        }
+
+        if let Some(message) = status_message(state) {
+            render_empty_results_state(ui, message);
             return;
         }
 
@@ -70,12 +75,18 @@ fn render_results_header(ui: &mut egui::Ui, state: &SearchStripState) {
 }
 
 fn results_summary(state: &SearchStripState) -> String {
-    if state.progress.searching {
+    if state.progress.searching || state.progress.freshness == SearchFreshness::Stale {
         return "Searching...".to_owned();
     }
 
     if state.query.is_empty() {
         return "Enter a query to populate results.".to_owned();
+    }
+
+    match &state.progress.status {
+        SearchStatus::InvalidQuery(_) => return "The current query is invalid.".to_owned(),
+        SearchStatus::Error(message) => return message.clone(),
+        SearchStatus::Idle | SearchStatus::Searching | SearchStatus::Ready | SearchStatus::NoMatches => {}
     }
 
     if state.progress.displayed_match_count < state.progress.total_match_count {
@@ -91,6 +102,10 @@ fn results_summary(state: &SearchStripState) -> String {
         "{} matches in {} {}.",
         state.match_count, file_count, file_label
     )
+}
+
+fn status_message(state: &SearchStripState) -> Option<&str> {
+    state.progress.status.message()
 }
 
 fn results_viewport_height(state: &SearchStripState) -> f32 {

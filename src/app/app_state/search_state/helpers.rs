@@ -10,6 +10,18 @@ pub(super) fn cursor_range_from_char_range(range: Range<usize>) -> egui::text::C
     )
 }
 
+pub(super) fn selection_char_range(
+    cursor_range: egui::text::CCursorRange,
+) -> Option<std::ops::Range<usize>> {
+    let [left, right] = [cursor_range.primary.index, cursor_range.secondary.index];
+    let (start, end) = if left <= right {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    (start < end).then_some(start..end)
+}
+
 pub(super) fn preview_for_match(text: &str, range: &Range<usize>) -> (usize, usize, String) {
     let chars = text.chars().collect::<Vec<_>>();
     let safe_start = range.start.min(chars.len());

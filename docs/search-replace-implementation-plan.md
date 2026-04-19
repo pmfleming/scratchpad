@@ -1,437 +1,595 @@
-# Command Interface And Windows Open With Plan
+This implementation plan translates the updated product plan in `docs/search-replace-plan.md` into a realistic migration path from the current codebase.
 
-This plan is based on the current Scratchpad architecture in `src/main.rs`, `src/app/app_state.rs`, `src/app/commands.rs`, `src/app/shortcuts.rs`, and `src/app/services/file_controller.rs`.
+The goal is not to rewrite search from scratch. The current implementation already has meaningful infrastructure. The goal is to move from the current "good internal feature" to a more durable, trustworthy, and extensible search and replace system with minimal regressions.
 
-This document is now scoped to:
+---
 
-- Windows Explorer `Open with`
-- direct command-line invocation
-- startup file-routing behavior
-- command-line switches for controlling how incoming files are opened
+# Search & Replace Implementation Plan
 
-The command palette work has been moved into its own plan.
+## 1. Current Implementation Snapshot
 
-## Current Review
+The current code already provides a strong foundation:
+
+* `src/app/app_state/search_state.rs`
+  Hosts workspace-level search state, open/close behavior, match navigation, and active-buffer replace actions.
+* `src/app/app_state/search_state/runtime.rs`
+  Handles invalidation, target collection, result application, highlight refresh, and active-match selection.
+* `src/app/app_state/search_state/worker.rs`
+  Runs asynchronous matching across collected buffer snapshots and builds grouped result entries.
+* `src/app/services/search.rs`
+  Implements plain-text matching with case-sensitive and whole-word options using character-based ranges.
+* `src/app/ui/search_replace/*.rs`
+  Renders the search strip, replace controls, grouped result list, and current keyboard-driven actions.
+* `src/app/shortcuts.rs`
+  Wires `Ctrl+F`, `Ctrl+H`, and `Esc`.
 
 ### What Already Exists
 
-- Scratchpad already has a solid internal action layer via `AppCommand` in `src/app/commands.rs`.
-- File opening logic is centralized in `FileController`, including duplicate-path detection, batch open, existing-tab activation, and `Open Here` behavior.
-- The app has top-level state in `ScratchpadApp`, which is the right place to host startup-open requests and startup-open policy.
-- Session restore already runs during app initialization, so startup requests can be layered on top after restore completes.
+* Workspace-level search state instead of per-widget local state.
+* Async search worker with generation-based cancellation.
+* Scopes for:
+  * active buffer
+  * active workspace tab
+  * all open tabs
+* Grouped search results with file and tab context.
+* Active match navigation across tabs and panes.
+* Live invalidation through `mark_search_dirty()`.
+* Active-buffer replace current and replace all.
+* Reverse-order replace-all in the active buffer.
+* Character-based search ranges, which is the correct baseline for Unicode-safe editor integration.
 
-### Gaps Identified
+### Gaps Relative To The Updated Plan
 
-1. There is no startup argument parsing yet.
-   `src/main.rs` does not read `std::env::args_os()`, so Explorer and direct shell invocation cannot pass files or switches into the app.
+The current implementation still falls short of the updated product plan in several key areas:
 
-2. There is no defined command-line grammar.
-   The app has no parsing rules for switches, no notion of open mode, no validation, and no user-facing error strategy for invalid combinations.
+* Search state is still modeled primarily as "query + flags + match list", not as a fuller search session with explicit freshness, status, and replace eligibility.
+* There is no regex support yet.
+* There is no `Selection Only` scope and no scope-origin tracking.
+* Match identity is too thin for robust revalidation beyond immediate reruns.
+* Result freshness is implicit; the UI does not clearly distinguish fresh, stale, partial, invalid, or blocked states.
+* Replace is implemented only for the active buffer.
+* There is no cross-buffer replace plan, confirmation model, or summary layer.
+* The current worker pipeline is snapshot-based, but not yet abstracted as a provider model.
+* The keyboard contract is workable, but not yet formalized to match the updated plan.
+* The UI has useful grouped results, but limited replace-preview and replace-safety affordances.
 
-3. File-open orchestration is reusable, but not yet exposed as a startup-facing interface.
-   `FileController` can already open multiple paths and route them correctly, but it currently expects UI-driven entrypoints.
+---
 
-4. Explorer integration is only partially an app problem.
-   Even once startup argument handling exists, Windows still needs a registration strategy so `Open with` launches Scratchpad with the expected arguments.
+## 2. Migration Strategy
 
-## Goals
+The migration should follow four rules:
 
-- Support command-line invocation of Scratchpad with files and switches.
-- Support Windows `Open with` on one or more files.
-- Add explicit startup-open switches such as `/clean` and `/addto`.
-- Support quoted, comma-delimited file lists when callers choose to pass files that way.
-- Reuse the existing file open and workspace routing logic instead of creating a second file-open path.
-- Keep duplicate-path activation and session restore behavior predictable.
+1. **Preserve working search behavior while evolving internals.**
+2. **Separate engine/state changes from UX changes where possible.**
+3. **Ship search robustness before shipping more replace power.**
+4. **Avoid broad rewrites of the editor transaction system.**
 
-## Non-Goals For The First Pass
+This means the implementation should build on the existing `SearchState`, runtime, worker, and results UI instead of replacing them all at once.
 
-- Command palette UI or searchable in-app action palette.
-- Single-instance IPC so an already-running process receives new file-open requests.
-- Full installer and release packaging pipeline.
-- A large Unix-style CLI with dozens of editor automation verbs.
+---
 
-## Proposed CLI Model
+## 3. Target Technical Shape
 
-## 1. Support Both Standard File Arguments And Explicit File Lists
+The updated plan implies five structural shifts.
 
-Scratchpad should accept files in two ways:
+### A. Evolve `SearchState` Into A Fuller Session Model
 
-1. Standard positional arguments
-   Example:
+Current `SearchState` should become the host for a richer session contract rather than being replaced outright.
 
-```text
-scratchpad.exe "C:\notes\a.txt" "C:\notes\b.txt"
-```
+Add concepts for:
 
-2. Explicit comma-delimited file list inside one quoted argument
-   Example:
+* session status
+* result freshness
+* partial vs complete results
+* replace availability
+* scope origin
+* result anchor / active match retention policy
 
-```text
-scratchpad.exe /files:"C:\notes\a.txt","C:\notes\b.txt"
-```
-
-Why both should be supported:
-
-- Explorer and normal shell launches naturally provide repeated file arguments.
-- Some custom launchers, scripts, or registry commands may prefer one explicit `/files:` payload.
-- Supporting both reduces friction and avoids making shell registration more brittle than necessary.
-
-Recommended parsing rule:
-
-- Positional file arguments remain the primary and simplest input path.
-- `/files:` is an optional explicit override for callers that need a single-argument list.
-- If both are present, combine them in the order received.
-
-## 2. Define Startup Open Modes
-
-Add a small startup-open policy layer.
-
-Suggested shape:
+Suggested new concepts:
 
 ```rust
-enum StartupOpenMode {
-    Default,
-    Clean,
-    AddTo,
+enum SearchStatus {
+    Idle,
+    Searching,
+    Ready,
+    NoMatches,
+    InvalidQuery(String),
+    Error(String),
+}
+
+enum SearchFreshness {
+    Fresh,
+    Stale,
+}
+
+enum ReplaceAvailability {
+    Allowed,
+    Disabled,
+    RequiresConfirmation,
+    Blocked(String),
+}
+
+enum SearchScopeOrigin {
+    Manual,
+    SelectionDefault,
+    ActiveContextDefault,
 }
 ```
 
-Behavior:
+This can remain inside `src/app/app_state/search_state.rs` at first, then be split if it grows too large.
 
-- `Default`: restore session first, then open incoming files using the normal top-level open behavior.
-- `Clean`: ignore restored tabs for this launch and start from one clean new tab before processing incoming files.
-- `AddTo`: add incoming files into one specific existing or restored tab instead of opening them as separate top-level tabs.
+### B. Introduce Provider-Like Search Targets Without Breaking Current Flow
 
-## 3. Add The Requested Switches
+The current `SearchTargetSnapshot` model is a good stepping stone toward a provider architecture.
 
-### `/clean`
+Instead of introducing a large trait hierarchy immediately, phase in a lightweight provider adapter:
 
-Requested behavior:
+* keep `SearchTargetSnapshot`
+* add per-target revision / generation metadata
+* isolate target collection behind a search-target service layer
 
-- "opens with a single new tab"
+First step:
 
-Recommended interpretation:
+* move target collection logic out of `runtime.rs` into a dedicated search-target module
 
-- Do not restore the previous session into the working UI for this launch.
-- Start with exactly one fresh untitled workspace tab.
-- Open incoming files after that clean start.
+This gives the architecture room to grow without destabilizing current search behavior.
 
-Important edge case:
+### C. Separate Search Planning From Replace Execution
 
-- If `/clean` is supplied with no files, launch a blank window with one untitled tab.
+The current code jumps fairly directly from selected matches to replacement execution. To support safe replace growth, add an intermediate planning layer.
 
-### `/addto`
-
-Requested behavior:
-
-- "add all the files to a specific tab"
-
-This needs a target selector, so `/addto` should not be a bare boolean switch.
-
-Recommended syntax:
-
-```text
-/addto:active
-/addto:index:2
-/addto:name:"notes"
-```
-
-Recommended first-pass support:
-
-- `/addto:active`
-- `/addto:index:N`
-
-Defer `/addto:name:` unless there is a strong use case, because tab titles are not guaranteed unique.
-
-Behavior:
-
-- Restore the session first unless `/clean` is also present.
-- Resolve the target workspace tab.
-- Add all incoming files into that tab using the same layout-building path as `Open Here`.
-
-Important rule:
-
-- `/addto` should be invalid together with `/clean` unless you explicitly define what tab is being targeted after the clean launch.
-
-Recommended compatibility rule:
-
-- Allow `/clean /addto:active` and interpret it as "create one clean tab, then add all incoming files into that new active tab."
-- Reject `/clean /addto:index:N` because there is no restored tab set to index into.
-
-### `/files:`
-
-Recommended new switch:
-
-```text
-/files:"C:\a.txt","C:\b.txt"
-```
-
-Behavior:
-
-- Parse one quoted, comma-delimited list of full file paths.
-- Trim surrounding whitespace around each item.
-- Preserve commas inside paths only if escaped support is intentionally added. For the first pass, document that commas in file names are not supported inside `/files:`.
-
-Why this switch is relevant:
-
-- It satisfies the explicit requirement for comma-delimited quoted file lists.
-- It gives registry scripts and automation a stable one-argument file-list mode.
-
-## 4. Add Other Relevant Switches
-
-The following switches are useful and low-risk in the same design:
-
-### `/here`
-
-Behavior:
-
-- Open incoming files into the current active workspace tab using the same behavior as `Open Here`.
-
-Why it belongs:
-
-- It maps directly to an existing app capability.
-- It is simpler than `/addto:index:N` for common scripting usage.
-
-### `/line:N`
-
-Behavior:
-
-- After opening one file, move the caret to line `N`.
-
-Why it belongs:
-
-- It is a common editor launch behavior.
-- It is useful for future integration from scripts or tooling.
-
-Why it may be deferred:
-
-- It requires explicit cursor placement support in the view model rather than only opening files.
-
-### `/help`
-
-Behavior:
-
-- Print usage information to stdout or show a message box in release builds if no console is attached.
-
-Why it belongs:
-
-- Once switches exist, usage output becomes necessary.
-
-### `/version`
-
-Behavior:
-
-- Print application version and exit.
-
-Why it belongs:
-
-- It is cheap to add and useful for scripts.
-
-## 5. Recommended Parsing Rules
-
-### Accepted Forms
-
-- `scratchpad.exe`
-- `scratchpad.exe "C:\a.txt"`
-- `scratchpad.exe "C:\a.txt" "C:\b.txt"`
-- `scratchpad.exe /clean`
-- `scratchpad.exe /clean "C:\a.txt"`
-- `scratchpad.exe /addto:active "C:\a.txt" "C:\b.txt"`
-- `scratchpad.exe /files:"C:\a.txt","C:\b.txt"`
-- `scratchpad.exe /here /files:"C:\a.txt","C:\b.txt"`
-
-### Validation Rules
-
-- Unknown switches should produce a startup warning and abort startup-open handling for safety.
-- `/addto` requires at least one incoming file.
-- `/here` and `/addto:*` should be mutually exclusive.
-- `/line:N` should only be valid when exactly one target file is resolved.
-- `/clean` with no files is valid.
-- Empty file list entries inside `/files:` should be ignored or rejected consistently. Prefer rejection with a clear error.
-
-## 6. Add A Startup Options Model
-
-Suggested shape:
+Suggested concepts:
 
 ```rust
-struct StartupOptions {
-    mode: StartupOpenMode,
-    add_to_target: Option<StartupTabTarget>,
-    open_here: bool,
-    files: Vec<PathBuf>,
-    line: Option<usize>,
+struct ReplacementPlan {
+    scope: SearchScope,
+    targets: Vec<ReplacementTargetPlan>,
+    total_match_count: usize,
+    requires_confirmation: bool,
 }
 
-enum StartupTabTarget {
-    Active,
-    Index(usize),
+struct ReplacementTargetPlan {
+    buffer_id: BufferId,
+    view_id: Option<ViewId>,
+    replacements: Vec<(Range<usize>, String)>,
 }
 ```
 
-Where it should live:
+This lets the app:
 
-- In a small dedicated startup module, not inside `main.rs` directly.
+* preview replacement counts
+* enforce confirmation rules
+* reuse the same replacement planning for active-buffer and cross-buffer operations
 
-Suggested module:
+### D. Make Freshness Explicit
 
-- `src/app/startup.rs`
+The current implementation refreshes quickly, but freshness is mostly inferred. That is not enough for a best-in-class experience.
 
-Responsibilities:
+The new implementation should explicitly track:
 
-- parse arguments
-- validate combinations
-- expose startup decisions to app construction
+* the generation requested
+* the generation displayed
+* whether the underlying content changed after the displayed result set was produced
 
-## 7. Apply Startup Requests After Session Decision
+The UI should be able to show:
 
-Recommended startup flow:
+* searching
+* results ready
+* stale results pending refresh
+* invalid query
+* replace blocked
 
-1. Parse CLI arguments into `StartupOptions`.
-2. Decide whether session restore is enabled for this launch.
-3. Construct the app.
-4. If restoring, restore the session first.
-5. Apply startup-open requests using the selected mode.
-6. Surface any failures through status and logging.
+### E. Keep Character-Based Ranges As The Core Coordinate Model
 
-Important policy:
+This should remain unchanged. It is already the right internal coordinate system and should continue to be the source of truth for:
 
-- `Default`, `/here`, and `/addto:*` should restore the session first.
-- `/clean` should bypass the restored tab set and start from a single fresh tab.
+* search results
+* cursor movement
+* replace planning
+* preview generation
 
-## 8. Reuse Existing FileController Paths
+---
 
-Do not build a second file-open engine.
+## 4. Phase Plan
 
-Instead:
+## Phase 0: Baseline And Guardrails
 
-- Expose a startup-safe non-dialog entrypoint from `FileController`.
-- Reuse the current batch open path for normal startup file opens.
-- Reuse the current `Open Here`-style path for `/here` and `/addto:*`.
+Before major refactors, capture current behavior and performance.
 
-Recommended additions:
+### Goals
 
-- `open_external_paths(app, paths)` for normal top-level opens
-- `open_external_paths_here(app, paths)` for adding files into an existing workspace
-- `open_external_paths_into_tab(app, target, paths)` if `/addto:index:N` is kept distinct from `/here`
+* Prevent regressions in search navigation and replace behavior.
+* Define what already works and should remain stable.
 
-## 9. Windows Open With Registration Strategy
+### Work
 
-Explorer integration needs a shell-registration path that launches Scratchpad with the correct arguments.
+* Audit current search tests in:
+  * `src/app/services/search.rs`
+  * `src/app/app_state/search_state/tests`
+* Add or expand coverage for:
+  * active-buffer replace current
+  * active-buffer replace all
+  * scope switching
+  * active match retention after query changes
+  * async search result application
+* Preserve the existing performance profile entry points in `src/profile.rs`.
 
-Recommended first-pass registration:
+### Definition Of Done
 
-- Register Scratchpad as an `Open with` target using repeated file arguments.
+* Current behavior is documented and covered well enough to support refactoring.
 
-Preferred shell command shape:
+---
 
-```text
-"C:\Path\To\scratchpad.exe" "%1"
+## Phase 1: Session Model Refactor
+
+This phase aligns state management with the updated plan without changing user-facing behavior too much.
+
+### Goals
+
+* Expand `SearchState` into a clearer session model.
+* Make result status and freshness explicit.
+
+### Work
+
+* Add status/freshness/replace-availability fields to `SearchState`.
+* Rename or wrap fields where needed so the model reads as a session, not just a UI bag.
+* Track:
+  * latest requested generation
+  * latest applied generation
+  * whether displayed results are stale
+* Promote `dirty` handling into clearer lifecycle rules:
+  * `dirty` means content/options changed
+  * `searching` means request in flight
+  * `stale` means current results are no longer authoritative
+
+### Recommended File Targets
+
+* `src/app/app_state/search_state.rs`
+* `src/app/app_state/search_state/runtime.rs`
+* `src/app/ui/search_replace/state.rs`
+* `src/app/ui/search_replace/results.rs`
+
+### Definition Of Done
+
+* The app can distinguish idle/searching/ready/no-results/error-like states in state and UI.
+* Existing search behavior still works.
+
+---
+
+## Phase 2: Formalize Search Semantics
+
+This phase upgrades the engine contract to match the updated product plan.
+
+### Goals
+
+* Add regex support.
+* Make query validation explicit.
+* Keep plain-text search behavior stable.
+
+### Work
+
+* Extend `SearchOptions` in `src/app/services/search.rs` to support query mode:
+
+```rust
+enum SearchMode {
+    PlainText,
+    Regex,
+}
 ```
 
-For multi-select support, evaluate shell behavior carefully and prefer repeated arguments if the registration path supports them.
+* Add regex compilation and validation.
+* Return structured search outcomes so invalid regex can be surfaced without pretending there are simply zero results.
+* Keep whole-word and case-sensitive behavior consistent between plain-text and regex modes.
+* Defer advanced replacement transformations like preserve-case until later.
 
-Only use `/files:` in the registry command if repeated arguments are too awkward for the selected registration mechanism.
+### Recommended File Targets
 
-## Implementation Phases
+* `src/app/services/search.rs`
+* `src/app/app_state/search_state.rs`
+* `src/app/app_state/search_state/worker.rs`
+* `src/app/ui/search_replace/controls.rs`
+* `src/app/ui/search_replace/results.rs`
 
-## Phase 1: CLI Parsing And Startup Model
+### Definition Of Done
 
-- Add a startup parsing module.
-- Parse positional file arguments.
-- Parse `/clean`, `/addto:*`, `/files:`, `/here`, `/help`, and `/version`.
-- Validate conflicting combinations.
+* Plain-text search still works as before.
+* Regex search works for matching.
+* Invalid regex is surfaced as an explicit state, not as a silent no-results condition.
 
-Definition of done:
+---
 
-- Startup options can be parsed deterministically from a raw argument list.
+## Phase 3: Scope Model Expansion
 
-## Phase 2: Startup File Routing
+This phase aligns search scope behavior with the updated plan.
 
-- Add startup options to app construction.
-- Decide restore-vs-clean behavior.
-- Add a public non-dialog file-open path in `FileController`.
-- Route `/here` and `/addto:*` through workspace-aware open logic.
+### Goals
 
-Definition of done:
+* Add `Selection Only`.
+* Improve clarity around scope defaults and scope transitions.
 
-- Direct shell launch with files opens them correctly.
-- `/clean` works.
-- `/addto:active` works.
+### Work
 
-## Phase 3: Extended Targeting And Quality Of Life Switches
+* Extend `SearchScope`:
+  * `SelectionOnly`
+  * keep `ActiveBuffer`
+  * keep `ActiveWorkspaceTab`
+  * keep `AllOpenTabs`
+* Add scope-origin tracking so the app knows whether selection scope was auto-selected or manually chosen.
+* Add selection snapshot or selection-derived target collection for the active editor.
+* Define rules for when selection-only should automatically fall back or be cleared.
 
-- Add `/addto:index:N`.
-- Add `/help` and `/version`.
-- Decide whether `/line:N` is ready or should be deferred.
-- Add explicit logging for CLI parsing and startup execution.
+### Recommended File Targets
 
-Definition of done:
+* `src/app/app_state/search_state.rs`
+* `src/app/app_state/search_state/runtime.rs`
+* `src/app/ui/search_replace/controls.rs`
+* editor/view selection helpers as needed
 
-- Startup switch behavior is documented and testable.
+### Definition Of Done
 
-## Phase 4: Windows Registration
+* `Ctrl+F` with a live selection can default into selection scope.
+* The UI clearly shows when the search is limited to a selection.
+* Clearing the selection does not leave the app in a misleading hidden scope state.
 
-- Add documentation for local shell registration.
-- Add a PowerShell or `.reg` helper for local development.
-- Validate quoted paths, spaces, and multi-file launches.
+---
 
-Definition of done:
+## Phase 4: Target Identity And Freshness
 
-- A user can choose Scratchpad from Windows `Open with` and the selected file opens with the expected startup mode.
+This is the most important correctness phase.
 
-## Testing Plan
+### Goals
+
+* Make search results safer under live editing.
+* Improve active-match retention behavior.
+
+### Work
+
+* Add revision metadata to `SearchTargetSnapshot`.
+* Add target identity metadata to `SearchMatch`.
+* Preserve or recover the active match based on:
+  * same target
+  * same revision when valid
+  * nearest sensible fallback otherwise
+* Mark results stale immediately when an underlying target mutates after the current result generation.
+* Avoid showing old highlights as if they are still valid.
+
+### Recommended File Targets
+
+* `src/app/app_state/search_state.rs`
+* `src/app/app_state/search_state/runtime.rs`
+* `src/app/app_state/search_state/worker.rs`
+* highlight helpers and editor view integration
+
+### Definition Of Done
+
+* Search results stay coherent during ordinary typing.
+* Active match selection is preserved more reliably after edits.
+* The UI can visibly indicate stale or refreshing results.
+
+---
+
+## Phase 5: Replace Planning Layer
+
+This phase introduces the missing abstraction needed for trustworthy replace.
+
+### Goals
+
+* Separate identifying replacements from applying them.
+* Enable preview and confirmation rules.
+
+### Work
+
+* Add a `ReplacementPlan` model.
+* Build plans from current matches rather than replacing directly from UI actions.
+* Keep active-buffer replace execution working through the current transaction system.
+* Compute:
+  * total replacement count
+  * affected buffer count
+  * confirmation requirement
+  * blocked targets if any
+
+### Recommended File Targets
+
+* `src/app/app_state/search_state.rs`
+* `src/app/app_state/search_state/runtime.rs`
+* new `replace_plan` or `replace` module under `search_state`
+
+### Definition Of Done
+
+* Active-buffer replace current and replace all go through a common plan-and-execute path.
+* The UI can query replacement counts and safety state before executing.
+
+---
+
+## Phase 6: Trustworthy Replace UX
+
+This phase improves user trust without immediately expanding replace scope to everything.
+
+### Goals
+
+* Make replace behavior feel safe and explicit.
+* Improve status, confirmation, and result handling.
+
+### Work
+
+* Add replace availability / blocked state to UI state.
+* Disable replace actions when:
+  * query invalid
+  * no matches
+  * stale state not yet recomputed
+  * target not writable
+* Add a lightweight replace summary:
+  * matches affected
+  * buffers affected
+* Add confirmation rules for riskier operations.
+* Make `Esc`, `Enter`, and replace shortcuts align with the updated keyboard contract.
+
+### Recommended File Targets
+
+* `src/app/ui/search_replace/controls.rs`
+* `src/app/ui/search_replace/results.rs`
+* `src/app/ui/search_replace/state.rs`
+* `src/app/shortcuts.rs`
+
+### Definition Of Done
+
+* Replace actions are not ambiguous.
+* UI feedback is clear before and after replacement.
+* Keyboard flow is consistent and documented.
+
+---
+
+## Phase 7: Cross-Buffer Replace
+
+This is the largest functional expansion and should land only after the plan-and-execute layer is stable.
+
+### Goals
+
+* Replace across open buffers safely.
+* Preserve the transaction and status model.
+
+### Work
+
+* Extend replacement planning to all open targets in scope.
+* Decide transaction semantics:
+  * preferred: one user-level undo step per buffer, plus a top-level grouped action summary
+  * if true cross-buffer single-undo is not feasible with the current transaction system, document that limitation and avoid pretending otherwise
+* Add per-buffer success/failure handling.
+* Add final summary toast/status text.
+
+### Recommended File Targets
+
+* `src/app/app_state/search_state/runtime.rs`
+* transaction orchestration files
+* `src/app/ui/search_replace/controls.rs`
+
+### Definition Of Done
+
+* Replace-all across open buffers works with clear user feedback.
+* Failures are surfaced explicitly.
+* Undo behavior is documented and predictable.
+
+---
+
+## Phase 8: Providerization
+
+Only after the search and replace workflow is stable should we generalize the architecture for future searchable surfaces.
+
+### Goals
+
+* Decouple search UI/session from text-buffer-only target collection.
+
+### Work
+
+* Introduce a `SearchProvider` abstraction or equivalent adapter layer.
+* Migrate current buffer-target collection to the provider interface.
+* Keep the worker pipeline snapshot-driven.
+
+### Definition Of Done
+
+* Search target collection is no longer hard-coded in workspace-tab traversal logic.
+* The architecture can support future searchable surfaces without redoing the session model.
+
+---
+
+## 5. UX Rollout Order
+
+To keep quality high, ship visible improvements in this order:
+
+1. Better state/status model.
+2. Regex and explicit invalid-query handling.
+3. Selection-only scope and scope clarity.
+4. Stale-result visibility and active-match retention improvements.
+5. Replace planning and disabled/blocked replace states.
+6. Cross-buffer replace.
+7. Rich preview and advanced workflow improvements.
+
+This order matches the updated product goal: users will notice speed, clarity, and trust long before they care about provider extensibility.
+
+---
+
+## 6. Testing Plan
 
 ## Unit Tests
 
-- parse no args
-- parse positional files
-- parse `/files:` comma list
-- parse `/clean`
-- parse `/addto:active`
-- parse `/addto:index:N`
-- reject invalid switch combinations
-- reject malformed `/files:` payloads
+Add or expand tests for:
+
+* plain-text matching
+* regex matching
+* invalid regex handling
+* whole-word behavior for plain text and regex
+* active match retention after result recompute
+* replacement planning
+* reverse-order application correctness
+* scope resolution, including `SelectionOnly`
 
 ## Integration Tests
 
-- startup open with one file
-- startup open with multiple files
-- `/clean` starts from one fresh tab
-- `/addto:active` adds all files into one workspace
-- duplicate existing paths activate instead of duplicating
-- invalid files are skipped with status/log output
+Add app-level coverage for:
 
-## Manual Windows Verification
+* open search, type query, navigate results
+* switch search scope while query remains active
+* replace current in active buffer
+* replace all in active buffer
+* cross-buffer replace all
+* stale-result refresh after buffer edits
+* invalid regex disables replace
 
-- direct executable launch from PowerShell
-- paths containing spaces
-- `Open with` from Explorer
-- multi-file Explorer selection
-- registry command quoting validation
+## Manual Verification
 
-## Risks And Watchouts
+Verify:
 
-1. `src/app/services/file_controller.rs` is already a hotspot.
-   The startup-open entrypoint should be extracted carefully rather than piling more orchestration into one file.
+* `Ctrl+F`, `Ctrl+H`, `Enter`, `Shift+Enter`, and `Esc`
+* search while typing in the editor
+* match highlighting after edits
+* grouped results navigation across tabs and panes
+* replace safety messaging
+* large-file responsiveness
 
-2. `/files:` parsing can become fragile quickly.
-   Keep the first version intentionally narrow and document unsupported edge cases such as commas in file names.
+---
 
-3. `/addto:index:N` depends on restored or current tab ordering.
-   That makes it less stable than `/addto:active`, so it should be introduced after the active-target version is solid.
+## 7. Risks And Watchouts
 
-4. `Open with` may not pass arguments exactly the same way as manual shell launch.
-   The registry command should be tested manually before the switch grammar is treated as final.
+1. `search_state.rs` is already carrying a lot of responsibility.
+   Avoid continuing to enlarge it without splitting supporting logic into focused modules.
 
-## Recommended First Implementation Slice
+2. Cross-buffer replace may expose transaction model limits.
+   The implementation plan should respect current undo architecture instead of overpromising "single undo" across the entire workspace if the editor infrastructure cannot actually support that yet.
 
-If the work should be broken into the smallest useful vertical slice, do this first:
+3. Regex support can complicate preview, replace, and whole-word semantics.
+   Land regex matching first before landing regex replacement features that depend on captures.
 
-1. Add positional file-argument parsing.
-2. Add `/clean`.
-3. Add a non-dialog external-open entrypoint.
-4. Verify direct executable launch.
-5. Add `/here` and `/addto:active`.
-6. Add `/files:` only after the basic startup-open path is working.
+4. Selection-only search can become confusing if selection invalidation is not explicit.
+   Hidden scope behavior will make the UX feel broken even if the underlying engine is correct.
 
-That sequence delivers the simplest reliable startup behavior first, then layers on more specific command-line control.
+5. Result freshness is easy to get mostly right and still feel wrong.
+   The UI needs visible stale/searching/blocked states, not just correct internal flags.
+
+---
+
+## 8. Recommended First Slice
+
+If this should be broken into the smallest high-value implementation slice, do this first:
+
+1. Refactor `SearchState` into a clearer session/status model.
+2. Surface explicit ready/searching/no-results/invalid-query states in the UI.
+3. Add regex matching.
+4. Add `SelectionOnly` scope with explicit scope visibility.
+5. Add replace planning for active-buffer replace actions.
+
+That slice keeps the work grounded in current architecture, improves the user experience quickly, and creates the right base for cross-buffer replace afterward.
+
+---
+
+## 9. Exit Criteria For Alignment With The Updated Plan
+
+The implementation should be considered aligned when all of the following are true:
+
+* Search state behaves like a durable session, not a temporary widget.
+* Search status and freshness are explicit in both state and UI.
+* Plain-text and regex search are both supported.
+* `SelectionOnly`, `ActiveBuffer`, and broader scopes behave predictably.
+* Replace uses a plan-and-execute model rather than ad hoc direct actions.
+* Replace operations are visibly safe, undoable, and clearly scoped.
+* Cross-buffer replace has explicit confirmation and summary behavior.
+* The architecture can evolve toward providers without another large search rewrite.

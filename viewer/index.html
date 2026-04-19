@@ -19,7 +19,8 @@
         <header class="hero">
             <div>
                 <p class="eyebrow">Scratchpad data viewer</p>
-                <h1>Hotspots, slowspots, search speed, clones, flamegraphs, and architecture risk map</h1>
+                <h1>Hotspots, slowspots, search speed, resource profiles, clones, flamegraphs, and architecture risk map
+                </h1>
                 <p class="lede">
                     A static viewer for the JSON artifacts produced by the Python measurement tools.
                 </p>
@@ -30,6 +31,7 @@
                 <code>target/analysis/slowspots.json</code>
                 <code>target/analysis/search_speed.json</code>
                 <code>target/analysis/capacity_report.json</code>
+                <code>target/analysis/resource_profiles.json</code>
                 <code>target/analysis/speed_efficiency_report.json</code>
                 <code>target/analysis/clones.json</code>
                 <code>target/analysis/map.json</code>
@@ -65,6 +67,10 @@
                     <input id="capacity-report-file" type="file" accept="application/json,.json" />
                 </label>
                 <label>
+                    Resource Profiles JSON
+                    <input id="resource-profiles-file" type="file" accept="application/json,.json" />
+                </label>
+                <label>
                     Speed Report JSON
                     <input id="speed-report-file" type="file" accept="application/json,.json" />
                 </label>
@@ -89,6 +95,7 @@
             <button class="tab" data-tab="search-speed">Search Speed</button>
             <button class="tab" data-tab="speed-report">Speed Report</button>
             <button class="tab" data-tab="capacity-report">Capacity</button>
+            <button class="tab" data-tab="resource-profiles">Resource Profiles</button>
             <button class="tab" data-tab="clones">Clones</button>
             <button class="tab" data-tab="map">Map</button>
             <button class="tab" data-tab="flamegraphs">Flamegraphs</button>
@@ -199,6 +206,34 @@
                     </div>
                 </div>
                 <div id="capacity-report-table" class="table-wrap"></div>
+            </div>
+        </section>
+
+        <section id="resource-profiles" class="tab-panel">
+            <div id="resource-profiles-summary" class="summary-grid"></div>
+            <div class="panel-stack">
+                <div class="panel-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Resource profile scenarios</h2>
+                            <p>Allocation-heavy, working-set, page-fault, and session-cost probes for large-file open,
+                                paste, tab scaling, and session persistence.</p>
+                        </div>
+                        <input id="resource-profiles-filter" class="filter-input" type="search"
+                            placeholder="Filter resource profiles..." />
+                    </div>
+                    <div id="resource-profiles-table" class="table-wrap"></div>
+                </div>
+                <div class="panel-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Probe samples</h2>
+                            <p>Per-workload samples emitted by the resource probe, including allocation, peak live
+                                bytes, working set, and page-fault counts.</p>
+                        </div>
+                    </div>
+                    <div id="resource-profiles-samples" class="table-wrap"></div>
+                </div>
             </div>
         </section>
 

@@ -1,82 +1,220 @@
+use regex::RegexBuilder;
 use std::ops::Range;
 
 const INTERRUPT_CHECK_INTERVAL: usize = 256;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SearchMode {
+    #[default]
+    PlainText,
+    Regex,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SearchError {
+    InvalidRegex(String),
+}
+
+impl SearchError {
+    pub fn message(&self) -> &str {
+        match self {
+            Self::InvalidRegex(message) => message,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SearchOutcome {
+    pub matches: Vec<Range<usize>>,
+    pub error: Option<SearchError>,
+}
+
+impl SearchOutcome {
+    fn with_matches(matches: Vec<Range<usize>>) -> Self {
+        Self {
+            matches,
+            error: None,
+        }
+    }
+
+    fn with_error(error: SearchError) -> Self {
+        Self {
+            matches: Vec::new(),
+            error: Some(error),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SearchOptions {
+    pub mode: SearchMode,
     pub match_case: bool,
     pub whole_word: bool,
 }
 
 pub fn find_matches(text: &str, query: &str, options: SearchOptions) -> Vec<Range<usize>> {
+    search_text(text, query, options).matches
+}
+
+pub fn search_text(text: &str, query: &str, options: SearchOptions) -> SearchOutcome {
     if query.is_empty() {
-        return Vec::new();
+        return SearchOutcome::default();
     }
 
-    if options.match_case {
-        return find_matches_case_sensitive(text, query, options.whole_word);
+    match options.mode {
+        SearchMode::PlainText => plain_text_search(text, query, options),
+        SearchMode::Regex => regex_search(text, query, options),
     }
-    if text.is_ascii() && query.is_ascii() {
-        let mut should_continue = || true;
-        return find_matches_ascii_case_insensitive_impl(
-            text.as_bytes(),
-            query.as_bytes(),
-            options.whole_word,
-            false,
-            &mut should_continue,
-        )
-        .unwrap_or_default();
-    }
-
-    let mut should_continue = || true;
-    find_matches_unicode_case_insensitive_impl(
-        text,
-        query,
-        options.whole_word,
-        false,
-        &mut should_continue,
-    )
-    .unwrap_or_default()
 }
 
 pub fn find_matches_interruptible<F>(
     text: &str,
     query: &str,
     options: SearchOptions,
-    mut should_continue: F,
+    should_continue: F,
 ) -> Option<Vec<Range<usize>>>
 where
     F: FnMut() -> bool,
 {
+    search_text_interruptible(text, query, options, should_continue).map(|result| result.matches)
+}
+
+pub fn search_text_interruptible<F>(
+    text: &str,
+    query: &str,
+    options: SearchOptions,
+    should_continue: F,
+) -> Option<SearchOutcome>
+where
+    F: FnMut() -> bool,
+{
     if query.is_empty() {
-        return Some(Vec::new());
+        return Some(SearchOutcome::default());
     }
 
-    if options.match_case {
-        return find_matches_case_sensitive_interruptible(
+    match options.mode {
+        SearchMode::PlainText => plain_text_search_interruptible(text, query, options, should_continue),
+        SearchMode::Regex => regex_search_interruptible(text, query, options, should_continue),
+    }
+}
+
+fn plain_text_search(text: &str, query: &str, options: SearchOptions) -> SearchOutcome {
+    let matches = if options.match_case {
+        find_matches_case_sensitive(text, query, options.whole_word)
+    } else if text.is_ascii() && query.is_ascii() {
+        let mut should_continue = || true;
+        find_matches_ascii_case_insensitive_impl(
+            text.as_bytes(),
+            query.as_bytes(),
+            options.whole_word,
+            false,
+            &mut should_continue,
+        )
+        .unwrap_or_default()
+    } else {
+        let mut should_continue = || true;
+        find_matches_unicode_case_insensitive_impl(
             text,
             query,
             options.whole_word,
-            should_continue,
-        );
-    }
-    if text.is_ascii() && query.is_ascii() {
-        return find_matches_ascii_case_insensitive_impl(
+            false,
+            &mut should_continue,
+        )
+        .unwrap_or_default()
+    };
+
+    SearchOutcome::with_matches(matches)
+}
+
+fn plain_text_search_interruptible<F>(
+    text: &str,
+    query: &str,
+    options: SearchOptions,
+    mut should_continue: F,
+) -> Option<SearchOutcome>
+where
+    F: FnMut() -> bool,
+{
+    let matches = if options.match_case {
+        find_matches_case_sensitive_interruptible(text, query, options.whole_word, should_continue)?
+    } else if text.is_ascii() && query.is_ascii() {
+        find_matches_ascii_case_insensitive_impl(
             text.as_bytes(),
             query.as_bytes(),
             options.whole_word,
             true,
             &mut should_continue,
-        );
+        )?
+    } else {
+        find_matches_unicode_case_insensitive_impl(
+            text,
+            query,
+            options.whole_word,
+            true,
+            &mut should_continue,
+        )?
+    };
+
+    Some(SearchOutcome::with_matches(matches))
+}
+
+fn regex_search(text: &str, query: &str, options: SearchOptions) -> SearchOutcome {
+    match compile_regex(query, options) {
+        Ok(regex) => SearchOutcome::with_matches(find_regex_matches(text, &regex, options.whole_word)),
+        Err(error) => SearchOutcome::with_error(error),
+    }
+}
+
+fn regex_search_interruptible<F>(
+    text: &str,
+    query: &str,
+    options: SearchOptions,
+    mut should_continue: F,
+) -> Option<SearchOutcome>
+where
+    F: FnMut() -> bool,
+{
+    let regex = match compile_regex(query, options) {
+        Ok(regex) => regex,
+        Err(error) => return Some(SearchOutcome::with_error(error)),
+    };
+
+    let byte_to_char = byte_to_char_map(text);
+    let whole_word_matcher = WholeWordMatcher::new(text, options.whole_word);
+    let mut matches = Vec::new();
+
+    for (step, search_match) in regex.find_iter(text).enumerate() {
+        if should_abort(step, true, &mut should_continue) {
+            return None;
+        }
+        let start = byte_to_char[search_match.start()];
+        let end = byte_to_char[search_match.end()];
+        if whole_word_matcher.allows(start, end) {
+            matches.push(start..end);
+        }
     }
 
-    find_matches_unicode_case_insensitive_impl(
-        text,
-        query,
-        options.whole_word,
-        true,
-        &mut should_continue,
-    )
+    finalize_matches(matches, true, &mut should_continue).map(SearchOutcome::with_matches)
+}
+
+fn compile_regex(query: &str, options: SearchOptions) -> Result<regex::Regex, SearchError> {
+    RegexBuilder::new(query)
+        .case_insensitive(!options.match_case)
+        .build()
+        .map_err(|error| SearchError::InvalidRegex(error.to_string()))
+}
+
+fn find_regex_matches(text: &str, regex: &regex::Regex, whole_word: bool) -> Vec<Range<usize>> {
+    let byte_to_char = byte_to_char_map(text);
+    let whole_word_matcher = WholeWordMatcher::new(text, whole_word);
+    regex
+        .find_iter(text)
+        .filter_map(|search_match| {
+            let start = byte_to_char[search_match.start()];
+            let end = byte_to_char[search_match.end()];
+            whole_word_matcher.allows(start, end).then_some(start..end)
+        })
+        .collect()
 }
 
 fn find_matches_case_sensitive_interruptible<F>(
@@ -311,8 +449,8 @@ impl WholeWordMatcher {
 #[cfg(test)]
 mod tests {
     use super::{
-        SearchOptions, find_matches, find_matches_interruptible, next_match_index,
-        previous_match_index,
+        SearchError, SearchMode, SearchOptions, find_matches, search_text,
+        search_text_interruptible, next_match_index, previous_match_index,
     };
 
     #[test]
@@ -327,6 +465,7 @@ mod tests {
             "Alpha alpha ALPHA",
             "alpha",
             SearchOptions {
+                mode: SearchMode::PlainText,
                 match_case: false,
                 whole_word: false,
             },
@@ -340,6 +479,7 @@ mod tests {
             "cat concatenate cat",
             "cat",
             SearchOptions {
+                mode: SearchMode::PlainText,
                 match_case: true,
                 whole_word: true,
             },
@@ -358,6 +498,53 @@ mod tests {
     }
 
     #[test]
+    fn regex_search_supports_case_insensitive_matches() {
+        let outcome = search_text(
+            "Alpha beta alpha",
+            "alpha|beta",
+            SearchOptions {
+                mode: SearchMode::Regex,
+                match_case: false,
+                whole_word: false,
+            },
+        );
+        assert_eq!(outcome.matches, vec![0..5, 6..10, 11..16]);
+        assert_eq!(outcome.error, None);
+    }
+
+    #[test]
+    fn regex_search_reports_invalid_queries() {
+        let outcome = search_text(
+            "Alpha",
+            "(",
+            SearchOptions {
+                mode: SearchMode::Regex,
+                match_case: true,
+                whole_word: false,
+            },
+        );
+        assert!(outcome.matches.is_empty());
+        assert!(matches!(
+            outcome.error,
+            Some(SearchError::InvalidRegex(_))
+        ));
+    }
+
+    #[test]
+    fn regex_whole_word_uses_character_offsets() {
+        let outcome = search_text(
+            "cat concatenate cat",
+            "cat",
+            SearchOptions {
+                mode: SearchMode::Regex,
+                match_case: true,
+                whole_word: true,
+            },
+        );
+        assert_eq!(outcome.matches, vec![0..3, 16..19]);
+    }
+
+    #[test]
     fn next_and_previous_match_indices_wrap() {
         assert_eq!(next_match_index(3, None), Some(0));
         assert_eq!(next_match_index(3, Some(2)), Some(0));
@@ -367,7 +554,7 @@ mod tests {
 
     #[test]
     fn interruptible_search_supports_ascii_case_insensitive_matches() {
-        let matches = find_matches_interruptible(
+        let matches = search_text_interruptible(
             "Alpha alpha ALPHA",
             "alpha",
             SearchOptions::default(),
@@ -375,15 +562,16 @@ mod tests {
         )
         .expect("search should complete");
 
-        assert_eq!(matches, vec![0..5, 6..11, 12..17]);
+        assert_eq!(matches.matches, vec![0..5, 6..11, 12..17]);
     }
 
     #[test]
     fn interruptible_search_supports_case_sensitive_unicode_offsets() {
-        let matches = find_matches_interruptible(
+        let matches = search_text_interruptible(
             "naive cafe caf\u{00e9}",
             "caf\u{00e9}",
             SearchOptions {
+                mode: SearchMode::PlainText,
                 match_case: true,
                 whole_word: false,
             },
@@ -391,14 +579,14 @@ mod tests {
         )
         .expect("search should complete");
 
-        assert_eq!(matches, vec![11..15]);
+        assert_eq!(matches.matches, vec![11..15]);
     }
 
     #[test]
     fn interruptible_ascii_search_can_cancel_mid_scan() {
         let text = "a".repeat(1024);
         let mut checks = 0;
-        let result = find_matches_interruptible(&text, "b", SearchOptions::default(), || {
+        let result = search_text_interruptible(&text, "b", SearchOptions::default(), || {
             checks += 1;
             checks < 2
         });

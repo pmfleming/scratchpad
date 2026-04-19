@@ -1,6 +1,8 @@
 use crate::app::app_state::{
-    ScratchpadApp, SearchFocusTarget, SearchProgress, SearchResultGroup, SearchScope,
+    ScratchpadApp, SearchFocusTarget, SearchFreshness, SearchProgress, SearchReplaceAvailability,
+    SearchResultGroup, SearchScope, SearchScopeOrigin, SearchStatus,
 };
+use crate::app::services::search::SearchMode;
 use eframe::egui;
 
 #[derive(Default)]
@@ -18,11 +20,14 @@ pub(super) struct SearchStripState {
     pub(super) replacement: String,
     pub(super) replace_open: bool,
     pub(super) scope: SearchScope,
+    pub(super) scope_origin: SearchScopeOrigin,
+    pub(super) mode: SearchMode,
     pub(super) match_case: bool,
     pub(super) whole_word: bool,
     pub(super) match_count: usize,
     pub(super) progress: SearchProgressSnapshot,
     pub(super) result_groups: Vec<SearchResultGroup>,
+    pub(super) replace_availability: SearchReplaceAvailability,
     requested_focus: Option<SearchFocusTarget>,
     retained_focus: Option<SearchFocusTarget>,
 }
@@ -31,6 +36,8 @@ pub(super) struct SearchProgressSnapshot {
     pub(super) searching: bool,
     pub(super) displayed_match_count: usize,
     pub(super) total_match_count: usize,
+    pub(super) status: SearchStatus,
+    pub(super) freshness: SearchFreshness,
 }
 
 impl SearchStripState {
@@ -44,11 +51,14 @@ impl SearchStripState {
             replacement: app.search_replacement().to_owned(),
             replace_open: app.search_replace_open(),
             scope: app.search_scope(),
+            scope_origin: app.search_scope_origin(),
+            mode: app.search_mode(),
             match_case: app.search_match_case(),
             whole_word: app.search_whole_word(),
             match_count,
             progress: SearchProgressSnapshot::from_progress(progress),
             result_groups: app.search_result_groups().to_vec(),
+            replace_availability: app.search_replace_availability(),
             requested_focus,
             retained_focus: requested_focus,
         }
@@ -78,6 +88,8 @@ impl SearchProgressSnapshot {
             searching: progress.searching,
             displayed_match_count: progress.displayed_match_count,
             total_match_count: progress.total_match_count,
+            status: progress.status,
+            freshness: progress.freshness,
         }
     }
 }

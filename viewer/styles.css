@@ -221,6 +221,11 @@ h2 {
     border-radius: 24px;
 }
 
+.panel-stack {
+    display: grid;
+    gap: 18px;
+}
+
 .panel-card__header {
     display: flex;
     align-items: center;
@@ -627,6 +632,7 @@ tr:hover td {
         grid-template-columns: 1fr;
     }
 }
+
 /* Flamegraphs */
 .flamegraph-layout {
     display: grid;

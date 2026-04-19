@@ -18,7 +18,8 @@ mod workspace;
 
 pub use search_state::SearchScope;
 pub(crate) use search_state::{
-    SearchFocusTarget, SearchProgress, SearchResultEntry, SearchResultGroup,
+    SearchFocusTarget, SearchFreshness, SearchProgress, SearchReplaceAvailability,
+    SearchResultEntry, SearchResultGroup, SearchScopeOrigin, SearchStatus,
 };
 
 pub(crate) const SESSION_SNAPSHOT_INTERVAL: Duration = Duration::from_secs(1);

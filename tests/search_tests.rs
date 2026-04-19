@@ -128,7 +128,7 @@ fn search_prefers_active_buffer_match_when_scope_is_broader() {
 }
 
 #[test]
-fn replace_all_only_changes_the_active_buffer() {
+fn replace_all_changes_every_buffer_in_scope() {
     let mut app = test_app();
     app.tabs_mut()[0]
         .buffer
@@ -145,9 +145,9 @@ fn replace_all_only_changes_the_active_buffer() {
     app.set_search_replacement("omega");
 
     wait_for_search_matches(&mut app, 3);
-    assert!(app.replace_all_search_matches_in_active_buffer());
+    assert!(app.replace_all_search_matches());
     assert_eq!(app.tabs()[0].active_buffer().text(), "omega beta omega");
-    assert_eq!(app.tabs()[1].active_buffer().text(), "alpha gamma");
+    assert_eq!(app.tabs()[1].active_buffer().text(), "omega gamma");
 }
 
 #[test]

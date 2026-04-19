@@ -1,5 +1,8 @@
 use super::state::{SearchStripActions, SearchStripState};
-use crate::app::app_state::{SearchFocusTarget, SearchScope};
+use crate::app::app_state::{
+    SearchFocusTarget, SearchReplaceAvailability, SearchScope, SearchScopeOrigin,
+};
+use crate::app::services::search::SearchMode;
 use crate::app::theme::{
     action_hover_bg, border, tab_selected_accent, tab_selected_bg, text_muted, text_primary,
 };
@@ -10,6 +13,7 @@ use egui_phosphor::regular::{
 };
 
 const CASE_SENSITIVE_ICON: &str = "Aa";
+const REGEX_ICON: &str = ".*";
 const INPUT_HEIGHT: f32 = 36.0;
 const CARD_ICON_SIZE: f32 = 18.0;
 const CONTROL_BUTTON_HEIGHT: f32 = 34.0;
@@ -74,6 +78,7 @@ fn render_search_pill(
                 egui::vec2(ui.available_width(), CONTROL_BUTTON_HEIGHT),
                 egui::Layout::right_to_left(egui::Align::Center),
                 |ui| {
+                    toggle_mode(ui, &mut state.mode);
                     toggle_flag(ui, &mut state.whole_word, TEXT_ALIGN_JUSTIFY, "Whole word");
                     toggle_flag(
                         ui,
@@ -83,6 +88,7 @@ fn render_search_pill(
                     );
                     ui.add_space(6.0);
                     for scope in [
+                        SearchScope::SelectionOnly,
                         SearchScope::ActiveBuffer,
                         SearchScope::ActiveWorkspaceTab,
                         SearchScope::AllOpenTabs,
@@ -91,7 +97,7 @@ fn render_search_pill(
                             ui,
                             state.scope == scope,
                             scope.label(),
-                            scope_tooltip(scope),
+                            scope_tooltip(scope, state.scope_origin),
                         )
                         .clicked()
                         {
@@ -135,18 +141,27 @@ fn render_replace_pill(
             egui::vec2(ui.available_width(), CONTROL_BUTTON_HEIGHT),
             egui::Layout::right_to_left(egui::Align::Center),
             |ui| {
-                trigger_action(
-                    ui,
-                    state.match_count > 0,
-                    SWAP,
+                let replace_enabled = matches!(state.replace_availability, SearchReplaceAvailability::Allowed);
+                let replace_all_tooltip = replace_tooltip(
+                    &state.replace_availability,
                     "Replace all matches",
-                    &mut actions.replace_all_requested,
                 );
                 trigger_action(
                     ui,
-                    state.match_count > 0,
-                    ARROW_CLOCKWISE,
+                    replace_enabled,
+                    SWAP,
+                    replace_all_tooltip,
+                    &mut actions.replace_all_requested,
+                );
+                let replace_current_tooltip = replace_tooltip(
+                    &state.replace_availability,
                     "Replace current match",
+                );
+                trigger_action(
+                    ui,
+                    replace_enabled,
+                    ARROW_CLOCKWISE,
+                    replace_current_tooltip,
                     &mut actions.replace_current_requested,
                 );
                 trigger_action(
@@ -386,11 +401,37 @@ fn chip_button(
     .inner
 }
 
-fn scope_tooltip(scope: SearchScope) -> &'static str {
+fn scope_tooltip(scope: SearchScope, origin: SearchScopeOrigin) -> &'static str {
     match scope {
         SearchScope::ActiveBuffer => "Search scope: Active buffer",
+        SearchScope::SelectionOnly if origin == SearchScopeOrigin::SelectionDefault => {
+            "Search scope: Current selection (auto-selected)"
+        }
+        SearchScope::SelectionOnly => "Search scope: Current selection",
         SearchScope::ActiveWorkspaceTab => "Search scope: Active workspace tab",
         SearchScope::AllOpenTabs => "Search scope: All open tabs",
+    }
+}
+
+fn toggle_mode(ui: &mut egui::Ui, mode: &mut SearchMode) {
+    let regex_enabled = *mode == SearchMode::Regex;
+    if icon_toggle_chip(ui, regex_enabled, REGEX_ICON, "Regex").clicked() {
+        *mode = if regex_enabled {
+            SearchMode::PlainText
+        } else {
+            SearchMode::Regex
+        };
+    }
+}
+
+fn replace_tooltip<'a>(
+    availability: &'a SearchReplaceAvailability,
+    allowed_tooltip: &'a str,
+) -> &'a str {
+    match availability {
+        SearchReplaceAvailability::Allowed => allowed_tooltip,
+        SearchReplaceAvailability::Disabled => "Replace is unavailable until results are ready.",
+        SearchReplaceAvailability::Blocked(message) => message.as_str(),
     }
 }
 

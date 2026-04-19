@@ -75,6 +75,9 @@ fn apply_search_inputs(app: &mut ScratchpadApp, state: &SearchStripState) {
     if state.scope != app.search_scope() {
         app.set_search_scope(state.scope);
     }
+    if state.mode != app.search_mode() {
+        app.set_search_mode(state.mode);
+    }
     if state.match_case != app.search_match_case() {
         app.set_search_match_case(state.match_case);
     }

@@ -5,6 +5,7 @@
         slowspots: `../target/analysis/slowspots.json?v=${viewerVersion}`,
         searchSpeed: `../target/analysis/search_speed.json?v=${viewerVersion}`,
         capacityReport: `../target/analysis/capacity_report.json?v=${viewerVersion}`,
+        resourceProfiles: `../target/analysis/resource_profiles.json?v=${viewerVersion}`,
         speedReport: `../target/analysis/speed_efficiency_report.json?v=${viewerVersion}`,
         clones: `../target/analysis/clones.json?v=${viewerVersion}`,
         map: `../target/analysis/map.json?v=${viewerVersion}`,
@@ -16,6 +17,7 @@
         slowspots: [],
         searchSpeed: [],
         capacityReport: null,
+        resourceProfiles: null,
         speedReport: null,
         clones: [],
         map: null,
@@ -838,6 +840,69 @@
         );
     }
 
+    function renderResourceProfiles() {
+        const payload = state.resourceProfiles || {};
+        const summary = payload.summary || {};
+        const scenarios = payload.scenarios || [];
+        const query = byId("resource-profiles-filter")?.value || "";
+        const filteredScenarios = scenarios.filter((item) => matchesFilter(item, query));
+        const sampleRows = filteredScenarios.flatMap((scenario) =>
+            (scenario.samples || []).map((sample) => ({
+                scenarioLabel: scenario.scenario_label || scenario.scenario,
+                workloadFamily: scenario.workload_family || "unmapped",
+                focus: scenario.focus || "resource",
+                ...sample,
+            }))
+        );
+        const worstElapsed = scenarios.reduce((max, item) => Math.max(max, item.max_elapsed_ms || 0), 0);
+        const maxAllocated = scenarios.reduce((max, item) => Math.max(max, item.max_allocated_bytes || 0), 0);
+        const maxWorkingSet = scenarios.reduce((max, item) => Math.max(max, item.max_working_set_bytes || 0), 0);
+
+        renderSummary("resource-profiles-summary", [
+            metricCard("Scenarios", summary.scenario_count ?? scenarios.length),
+            metricCard("Allocation probes", summary.allocation_scenarios ?? "-"),
+            metricCard("Memory probes", summary.memory_scenarios ?? "-"),
+            metricCard("Session probes", summary.session_scenarios ?? "-"),
+            metricCard("Worst elapsed", worstElapsed ? `${formatNumber.format(worstElapsed)} ms` : "-"),
+            metricCard("Peak allocation", maxAllocated ? formatBytes(maxAllocated) : "-"),
+            metricCard("Peak working set", maxWorkingSet ? formatBytes(maxWorkingSet) : "-"),
+        ]);
+
+        renderTable(
+            "resource-profiles-table",
+            ["Scenario", "Focus", "Family", "Samples", "Max elapsed", "Allocated", "Peak live", "Working set", "PF growth", "Handle growth"],
+            filteredScenarios.map((item) => `<tr>
+                <td><code>${escapeHtml(item.scenario_label || item.scenario)}</code></td>
+                <td><span class="pill">${escapeHtml(item.focus || "resource")}</span></td>
+                <td><span class="pill">${escapeHtml(item.workload_family || "unmapped")}</span></td>
+                <td>${escapeHtml(item.sample_count ?? "-")}</td>
+                <td>${formatNumber.format(item.max_elapsed_ms || 0)} ms</td>
+                <td>${escapeHtml(formatBytes(item.max_allocated_bytes))}</td>
+                <td>${escapeHtml(formatBytes(item.max_peak_live_bytes))}</td>
+                <td>${escapeHtml(formatBytes(item.max_working_set_bytes))}</td>
+                <td>${item.page_fault_growth == null ? "-" : formatNumber.format(item.page_fault_growth)}</td>
+                <td>${item.handle_growth == null ? "-" : formatNumber.format(item.handle_growth)}</td>
+            </tr>`)
+        );
+
+        renderTable(
+            "resource-profiles-samples",
+            ["Scenario", "Workload", "Elapsed", "Allocated", "Peak live", "Working set", "Page faults", "Handles", "Result", "Status"],
+            sampleRows.map((item) => `<tr>
+                <td><code>${escapeHtml(item.scenarioLabel)}</code><div class="muted">${escapeHtml(item.focus)} • ${escapeHtml(item.workloadFamily)}</div></td>
+                <td>${escapeHtml(item.workload_label || "-")}</td>
+                <td>${formatNumber.format(item.elapsed_ms || 0)} ms</td>
+                <td>${escapeHtml(formatBytes(item.allocated_bytes))}<div class="muted">${formatNumber.format(item.allocation_count || 0)} allocs / ${formatNumber.format(item.reallocation_count || 0)} reallocs</div></td>
+                <td>${escapeHtml(formatBytes(item.peak_live_bytes))}</td>
+                <td>${escapeHtml(formatBytes(item.working_set_bytes))}</td>
+                <td>${item.page_fault_count == null ? "-" : formatNumber.format(item.page_fault_count)}</td>
+                <td>${item.handle_count == null ? "-" : formatNumber.format(item.handle_count)}</td>
+                <td>${escapeHtml(item.result_label || "-")}</td>
+                <td class="${item.status === "ok" ? "risk-good" : "risk-bad"}">${escapeHtml(item.status || "-")}${item.note ? `<div class="muted">${escapeHtml(item.note)}</div>` : ""}</td>
+            </tr>`)
+        );
+    }
+
     function renderChartLegend(series) {
         return series.map((entry) => `<span class="chart-legend__item">
                 <svg class="chart-legend__swatch" viewBox="0 0 28 10" aria-hidden="true">
@@ -1499,12 +1564,13 @@
     async function loadDefaults() {
         const status = byId("load-status");
         const detail = byId("load-detail");
-        const keys = ["hotspots", "slowspots", "searchSpeed", "capacityReport", "speedReport", "clones", "map", "flamegraphs"];
+        const keys = ["hotspots", "slowspots", "searchSpeed", "capacityReport", "resourceProfiles", "speedReport", "clones", "map", "flamegraphs"];
         const fallbacks = {
             hotspots: [],
             slowspots: [],
             searchSpeed: [],
             capacityReport: null,
+            resourceProfiles: null,
             speedReport: null,
             clones: [],
             map: null,
@@ -1578,6 +1644,7 @@
         renderSearchSpeed();
         renderSpeedReport();
         renderCapacityReport();
+        renderResourceProfiles();
         renderClones();
         renderMap();
         renderFlamegraphs();
@@ -1588,6 +1655,7 @@
     byId("hotspots-filter").addEventListener("input", renderHotspots);
     byId("slowspots-filter").addEventListener("input", renderSlowspots);
     byId("search-speed-filter").addEventListener("input", renderSearchSpeed);
+    byId("resource-profiles-filter").addEventListener("input", renderResourceProfiles);
     byId("clones-filter").addEventListener("input", renderClones);
     byId("map-filter").addEventListener("input", renderMap);
     byId("map-layout").addEventListener("change", (event) => {
@@ -1611,6 +1679,7 @@
     readJsonFile("slowspots-file", "slowspots", renderSlowspots);
     readJsonFile("search-speed-file", "searchSpeed", renderSearchSpeed);
     readJsonFile("capacity-report-file", "capacityReport", renderCapacityReport);
+    readJsonFile("resource-profiles-file", "resourceProfiles", renderResourceProfiles);
     readJsonFile("speed-report-file", "speedReport", renderSpeedReport);
     readJsonFile("clones-file", "clones", renderClones);
     readJsonFile("map-file", "map", renderMap);

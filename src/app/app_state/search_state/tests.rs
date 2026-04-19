@@ -1,6 +1,9 @@
 use super::helpers::{cursor_range_from_char_range, preview_for_match};
-use super::{ScratchpadApp, SearchScope};
+use super::{
+    ScratchpadApp, SearchReplaceAvailability, SearchScope, SearchScopeOrigin, SearchStatus,
+};
 use crate::app::domain::SplitAxis;
+use crate::app::services::search::SearchMode;
 use crate::app::services::session_store::SessionStore;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -24,6 +27,22 @@ fn wait_for_search_matches(app: &mut ScratchpadApp, expected: usize) {
         "timed out waiting for {expected} search matches; got {}",
         app.search_match_count()
     );
+}
+
+fn wait_for_search_condition(
+    app: &mut ScratchpadApp,
+    predicate: impl Fn(&ScratchpadApp) -> bool,
+    description: &str,
+) {
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < deadline {
+        app.poll_search();
+        if predicate(app) {
+            return;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    panic!("timed out waiting for search state: {description}");
 }
 
 #[test]
@@ -129,4 +148,132 @@ fn preview_for_match_reports_line_and_column() {
     assert_eq!(line, 2);
     assert_eq!(column, 5);
     assert_eq!(preview, "two alpha");
+}
+
+#[test]
+fn open_search_defaults_to_selection_scope_when_selection_exists() {
+    let mut app = test_app();
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha beta alpha".to_owned());
+    app.tabs_mut()[0]
+        .active_view_mut()
+        .expect("active view")
+        .cursor_range = Some(cursor_range_from_char_range(0..10));
+
+    app.open_search();
+
+    assert_eq!(app.search_scope(), SearchScope::SelectionOnly);
+    assert_eq!(app.search_scope_origin(), SearchScopeOrigin::SelectionDefault);
+
+    app.set_search_query("alpha");
+    wait_for_search_matches(&mut app, 1);
+    assert_eq!(app.search_match_count(), 1);
+}
+
+#[test]
+fn selection_only_scope_without_selection_reports_error_and_blocks_replace() {
+    let mut app = test_app();
+    app.tabs_mut()[0].buffer.replace_text("alpha beta".to_owned());
+
+    app.open_search();
+    app.set_search_scope(SearchScope::SelectionOnly);
+    app.set_search_query("alpha");
+
+    wait_for_search_condition(
+        &mut app,
+        |app| {
+            !app.search_progress().searching
+                && matches!(app.search_progress().status, SearchStatus::Error(_))
+        },
+        "selection-only error",
+    );
+
+    assert_eq!(app.search_match_count(), 0);
+    match app.search_progress().status {
+        SearchStatus::Error(message) => {
+            assert_eq!(message, "Selection-only search requires an active selection.");
+        }
+        other => panic!("expected selection error, got {other:?}"),
+    }
+    assert_eq!(
+        app.search_replace_availability(),
+        SearchReplaceAvailability::Blocked(
+            "Selection-only search requires an active selection.".to_owned(),
+        )
+    );
+}
+
+#[test]
+fn invalid_regex_query_reports_invalid_status_and_blocks_replace() {
+    let mut app = test_app();
+    app.tabs_mut()[0].buffer.replace_text("alpha beta".to_owned());
+
+    app.open_search();
+    app.set_search_mode(SearchMode::Regex);
+    app.set_search_query("[");
+
+    wait_for_search_condition(
+        &mut app,
+        |app| {
+            !app.search_progress().searching
+                && matches!(app.search_progress().status, SearchStatus::InvalidQuery(_))
+        },
+        "invalid regex",
+    );
+
+    assert_eq!(app.search_match_count(), 0);
+    match app.search_progress().status {
+        SearchStatus::InvalidQuery(message) => {
+            assert!(!message.is_empty());
+        }
+        other => panic!("expected invalid regex status, got {other:?}"),
+    }
+    assert!(matches!(
+        app.search_replace_availability(),
+        SearchReplaceAvailability::Blocked(_)
+    ));
+}
+
+#[test]
+fn selection_only_replace_all_stays_within_the_selected_range() {
+    let mut app = test_app();
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha beta alpha".to_owned());
+    app.tabs_mut()[0]
+        .active_view_mut()
+        .expect("active view")
+        .cursor_range = Some(cursor_range_from_char_range(0..10));
+
+    app.open_search();
+    app.set_search_query("alpha");
+    app.set_search_replacement("omega");
+
+    wait_for_search_matches(&mut app, 1);
+    assert!(app.replace_all_search_matches());
+    assert_eq!(app.tabs()[0].active_buffer().text(), "omega beta alpha");
+}
+
+#[test]
+fn replace_all_changes_every_buffer_in_scope() {
+    let mut app = test_app();
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha beta alpha".to_owned());
+    app.create_untitled_tab();
+    app.tabs_mut()[1]
+        .buffer
+        .replace_text("alpha gamma".to_owned());
+    app.tab_manager_mut().active_tab_index = 0;
+
+    app.open_search();
+    app.set_search_scope(SearchScope::AllOpenTabs);
+    app.set_search_query("alpha");
+    app.set_search_replacement("omega");
+
+    wait_for_search_matches(&mut app, 3);
+    assert!(app.replace_all_search_matches());
+    assert_eq!(app.tabs()[0].active_buffer().text(), "omega beta omega");
+    assert_eq!(app.tabs()[1].active_buffer().text(), "omega gamma");
 }
