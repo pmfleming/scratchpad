@@ -1,5 +1,6 @@
 mod analysis;
 mod document;
+mod piece_tree;
 mod state;
 
 pub(crate) use analysis::{BufferTextMetadata, buffer_text_metadata};
@@ -9,6 +10,7 @@ pub use analysis::{
 };
 pub use document::{TextDocument, TextDocumentUndoState, TextDocumentUndoer};
 pub(crate) use document::{TextReplacementError, TextReplacements};
+pub use piece_tree::{PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLite, PieceTreeMetrics};
 pub use state::{BufferFreshness, BufferId, BufferState, DiskFileState, RestoredBufferState};
 
 use std::sync::Arc;
