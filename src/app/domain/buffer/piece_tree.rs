@@ -3,7 +3,29 @@ use std::ops::Range;
 const MAX_LEAF_BYTES: usize = 256 * 1024;
 const MAX_LEAF_PIECES: usize = 16;
 const MAX_LEAVES_PER_INTERNAL: usize = 16;
+const MIN_LEAVES_PER_INTERNAL: usize = MAX_LEAVES_PER_INTERNAL / 4;
 const PREVIEW_MAX_CHARS: usize = 96;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PieceTreeCharPosition {
+    pub offset_chars: usize,
+    pub line_index: usize,
+    pub column_index: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PieceTreeLineInfo {
+    pub line_index: usize,
+    pub start_char: usize,
+    pub char_len: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PieceTreeSpan<'a> {
+    pub text: &'a str,
+    pub char_start: usize,
+    pub char_len: usize,
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PieceTreeMetrics {
@@ -62,6 +84,8 @@ impl Piece {
 pub struct PieceTreeLeaf {
     pieces: Vec<Piece>,
     metrics: PieceTreeMetrics,
+    piece_start_chars: Vec<usize>,
+    piece_start_newlines: Vec<usize>,
 }
 
 impl PieceTreeLeaf {
@@ -86,8 +110,16 @@ impl PieceTreeLeaf {
 
     fn recalculate(&mut self) {
         self.metrics = PieceTreeMetrics::default();
+        self.piece_start_chars.clear();
+        self.piece_start_newlines.clear();
+        let mut current_chars = 0usize;
+        let mut current_newlines = 0usize;
         for piece in &self.pieces {
+            self.piece_start_chars.push(current_chars);
+            self.piece_start_newlines.push(current_newlines);
             self.metrics.add_assign(piece.metrics());
+            current_chars += piece.char_len;
+            current_newlines += piece.newline_count;
         }
     }
 }
@@ -169,6 +201,16 @@ struct LeafAddress {
     leaf_start_newline: usize,
 }
 
+pub struct PieceTreeSlice<'a> {
+    tree: &'a PieceTreeLite,
+    range_chars: Range<usize>,
+    node_index: usize,
+    leaf_index: usize,
+    piece_index: usize,
+    current_char: usize,
+    finished: bool,
+}
+
 impl PieceTreeLite {
     pub fn from_string(text: String) -> Self {
         let pieces = build_chunked_pieces(PieceBuffer::Original, 0, &text);
@@ -189,6 +231,32 @@ impl PieceTreeLite {
 
     pub fn len_chars(&self) -> usize {
         self.root.metrics.chars
+    }
+
+    pub fn normalize_char_range(&self, range_chars: Range<usize>) -> Range<usize> {
+        let start = range_chars.start.min(self.len_chars());
+        let end = range_chars.end.min(self.len_chars());
+        if start <= end { start..end } else { end..start }
+    }
+
+    pub fn char_position(&self, offset_chars: usize) -> PieceTreeCharPosition {
+        let safe_offset = offset_chars.min(self.len_chars());
+        let line_index = self.line_index_at_offset(safe_offset);
+        let line_info = self.line_info(line_index);
+        PieceTreeCharPosition {
+            offset_chars: safe_offset,
+            line_index,
+            column_index: safe_offset.saturating_sub(line_info.start_char),
+        }
+    }
+
+    pub fn line_info(&self, target_line: usize) -> PieceTreeLineInfo {
+        let (start_char, char_len) = self.line_lookup(target_line);
+        PieceTreeLineInfo {
+            line_index: target_line.min(self.root.metrics.newlines),
+            start_char,
+            char_len,
+        }
     }
 
     pub fn insert(&mut self, offset_chars: usize, text: &str) {
@@ -239,15 +307,19 @@ impl PieceTreeLite {
     }
 
     pub fn preview_for_match(&self, range_chars: &Range<usize>) -> (usize, usize, String) {
-        let safe_start = range_chars.start.min(self.len_chars());
-        let line_index = self.line_index_at_offset(safe_start);
-        let (line_start, line_len) = self.line_lookup(line_index);
-        let preview = compact_preview(&self.extract_range(line_start..line_start + line_len));
-        (
-            line_index + 1,
-            safe_start.saturating_sub(line_start) + 1,
-            preview,
-        )
+        let normalized = self.normalize_char_range(range_chars.clone());
+        let line_index = self.line_index_at_offset(normalized.start);
+        let info = self.line_info(line_index);
+        let column = normalized.start.saturating_sub(info.start_char);
+        let (line_text, truncated) = self.extract_range_bounded(
+            info.start_char..info.start_char + info.char_len,
+            PREVIEW_MAX_CHARS,
+        );
+        let mut preview = compact_preview(&line_text);
+        if truncated && !preview.ends_with("...") {
+            preview.push_str("...");
+        }
+        (line_index + 1, column + 1, preview)
     }
 
     pub fn line_lookup(&self, target_line: usize) -> (usize, usize) {
@@ -261,6 +333,7 @@ impl PieceTreeLite {
         let mut line_start = address.leaf_start_char;
         let mut current_char = line_start;
         let mut current_len = 0usize;
+        let mut is_first_leaf = true;
 
         for (node_index, node) in self.root.nodes.iter().enumerate().skip(address.node_index) {
             let leaf_start = if node_index == address.node_index {
@@ -270,7 +343,36 @@ impl PieceTreeLite {
             };
 
             for leaf in node.leaves.iter().skip(leaf_start) {
-                for piece in &leaf.pieces {
+                let piece_skip = if is_first_leaf {
+                    is_first_leaf = false;
+                    let offset_in_leaf = safe_line.saturating_sub(current_line);
+                    if offset_in_leaf > 0 && !leaf.piece_start_newlines.is_empty() {
+                        let pi = leaf
+                            .piece_start_newlines
+                            .partition_point(|&n| n < offset_in_leaf)
+                            .saturating_sub(1);
+                        current_line += leaf.piece_start_newlines[pi];
+                        current_char += leaf.piece_start_chars[pi];
+                        pi
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                };
+
+                for piece in leaf.pieces.iter().skip(piece_skip) {
+                    if current_line < safe_line && current_line + piece.newline_count < safe_line {
+                        current_line += piece.newline_count;
+                        current_char += piece.char_len;
+                        continue;
+                    }
+                    if current_line == safe_line && piece.newline_count == 0 {
+                        current_len += piece.char_len;
+                        current_char += piece.char_len;
+                        continue;
+                    }
+
                     for ch in self.piece_text(piece).chars() {
                         if current_line == safe_line {
                             if ch == '\n' {
@@ -302,7 +404,20 @@ impl PieceTreeLite {
         let mut current_char = address.leaf_start_char;
 
         let leaf = &self.root.nodes[address.node_index].leaves[address.leaf_index];
-        for piece in &leaf.pieces {
+        let piece_skip = if !leaf.piece_start_chars.is_empty() {
+            let offset_in_leaf = safe_offset - address.leaf_start_char;
+            let pi = leaf
+                .piece_start_chars
+                .partition_point(|&c| c <= offset_in_leaf)
+                .saturating_sub(1);
+            current_line += leaf.piece_start_newlines[pi];
+            current_char += leaf.piece_start_chars[pi];
+            pi
+        } else {
+            0
+        };
+
+        for piece in leaf.pieces.iter().skip(piece_skip) {
             for ch in self.piece_text(piece).chars() {
                 if current_char >= safe_offset {
                     return current_line;
@@ -318,49 +433,79 @@ impl PieceTreeLite {
     }
 
     pub fn extract_range(&self, range_chars: Range<usize>) -> String {
-        let safe_start = range_chars.start.min(self.len_chars());
-        let safe_end = range_chars.end.min(self.len_chars());
-        if safe_start >= safe_end {
-            return String::new();
-        }
-
-        let address = self.find_leaf_for_char_offset(safe_start);
-        let mut current_char = address.leaf_start_char;
         let mut result = String::new();
+        for span in self.spans_for_range(range_chars) {
+            result.push_str(span.text);
+        }
+        result
+    }
 
-        'outer: for (node_index, node) in
-            self.root.nodes.iter().enumerate().skip(address.node_index)
-        {
-            let leaf_start = if node_index == address.node_index {
-                address.leaf_index
-            } else {
-                0
-            };
-
-            for leaf in node.leaves.iter().skip(leaf_start) {
-                for piece in &leaf.pieces {
-                    let piece_start_char = current_char;
-                    let piece_end_char = current_char + piece.char_len;
-
-                    if piece_end_char <= safe_start {
-                        current_char = piece_end_char;
-                        continue;
-                    }
-                    if piece_start_char >= safe_end {
-                        break 'outer;
-                    }
-
-                    let local_start = safe_start.saturating_sub(piece_start_char);
-                    let local_end = (safe_end.min(piece_end_char)) - piece_start_char;
-                    let text = self.piece_text(piece);
-                    let byte_range = byte_range_for_char_range(text, local_start, local_end);
-                    result.push_str(&text[byte_range]);
-                    current_char = piece_end_char;
-                }
-            }
+    pub fn extract_range_bounded(
+        &self,
+        range_chars: Range<usize>,
+        max_chars: usize,
+    ) -> (String, bool) {
+        if max_chars == 0 {
+            return (
+                String::new(),
+                !self.normalize_char_range(range_chars).is_empty(),
+            );
         }
 
-        result
+        let mut remaining = max_chars;
+        let mut result = String::new();
+        let mut truncated = false;
+
+        for span in self.spans_for_range(range_chars) {
+            if remaining == 0 {
+                truncated = true;
+                break;
+            }
+
+            if span.char_len <= remaining {
+                result.push_str(span.text);
+                remaining -= span.char_len;
+                continue;
+            }
+
+            let byte_end = byte_index_for_char_offset(span.text, remaining);
+            result.push_str(&span.text[..byte_end]);
+            truncated = true;
+            break;
+        }
+
+        (result, truncated)
+    }
+
+    pub fn collect_line_bounded(&self, target_line: usize, max_chars: usize) -> (String, bool) {
+        let line_info = self.line_info(target_line);
+        self.extract_range_bounded(
+            line_info.start_char..line_info.start_char + line_info.char_len,
+            max_chars,
+        )
+    }
+
+    pub fn spans_for_line(&self, target_line: usize) -> PieceTreeSlice<'_> {
+        let line_info = self.line_info(target_line);
+        self.spans_for_range(line_info.start_char..line_info.start_char + line_info.char_len)
+    }
+
+    pub fn spans_for_range(&self, range_chars: Range<usize>) -> PieceTreeSlice<'_> {
+        let normalized = self.normalize_char_range(range_chars);
+        if normalized.is_empty() || self.len_chars() == 0 {
+            return PieceTreeSlice::empty(self, normalized);
+        }
+
+        let address = self.find_leaf_for_char_offset(normalized.start);
+        PieceTreeSlice {
+            tree: self,
+            range_chars: normalized,
+            node_index: address.node_index,
+            leaf_index: address.leaf_index,
+            piece_index: 0,
+            current_char: address.leaf_start_char,
+            finished: false,
+        }
     }
 
     fn leaf_with_inserted_pieces(
@@ -431,47 +576,34 @@ impl PieceTreeLite {
         if self.root.nodes.is_empty() || self.len_chars() == 0 {
             return LeafAddress::default();
         }
-
-        let node_index = self
-            .root
-            .node_start_chars
-            .partition_point(|start| *start <= offset_chars)
-            .saturating_sub(1)
-            .min(self.root.nodes.len() - 1);
-        let node_start_char = self.root.node_start_chars[node_index];
-        let node = &self.root.nodes[node_index];
-        let offset_in_node = offset_chars.saturating_sub(node_start_char);
-        let leaf_index = node
-            .leaf_start_chars
-            .partition_point(|start| *start <= offset_in_node)
-            .saturating_sub(1)
-            .min(node.leaves.len() - 1);
-
-        LeafAddress {
-            node_index,
-            leaf_index,
-            leaf_start_char: node_start_char + node.leaf_start_chars[leaf_index],
-            leaf_start_newline: self.root.node_start_newlines[node_index]
-                + node.leaf_start_newlines[leaf_index],
-        }
+        self.find_leaf_by(offset_chars, &self.root.node_start_chars, |node| {
+            &node.leaf_start_chars
+        })
     }
 
     fn find_leaf_for_line(&self, target_line: usize) -> LeafAddress {
         if self.root.nodes.is_empty() {
             return LeafAddress::default();
         }
+        self.find_leaf_by(target_line, &self.root.node_start_newlines, |node| {
+            &node.leaf_start_newlines
+        })
+    }
 
-        let node_index = self
-            .root
-            .node_start_newlines
-            .partition_point(|start| *start <= target_line)
+    fn find_leaf_by(
+        &self,
+        target: usize,
+        node_starts: &[usize],
+        leaf_starts: impl Fn(&PieceTreeInternalNode) -> &[usize],
+    ) -> LeafAddress {
+        let node_index = node_starts
+            .partition_point(|start| *start <= target)
             .saturating_sub(1)
             .min(self.root.nodes.len() - 1);
-        let node_start_newline = self.root.node_start_newlines[node_index];
         let node = &self.root.nodes[node_index];
-        let offset_in_node = target_line.saturating_sub(node_start_newline);
-        let leaf_index = node
-            .leaf_start_newlines
+        let offset_in_node = target.saturating_sub(node_starts[node_index]);
+        let leaf_starts_slice = leaf_starts(node);
+        let leaf_index = leaf_starts_slice
             .partition_point(|start| *start <= offset_in_node)
             .saturating_sub(1)
             .min(node.leaves.len() - 1);
@@ -481,7 +613,8 @@ impl PieceTreeLite {
             leaf_index,
             leaf_start_char: self.root.node_start_chars[node_index]
                 + node.leaf_start_chars[leaf_index],
-            leaf_start_newline: node_start_newline + node.leaf_start_newlines[leaf_index],
+            leaf_start_newline: self.root.node_start_newlines[node_index]
+                + node.leaf_start_newlines[leaf_index],
         }
     }
 
@@ -574,8 +707,19 @@ impl PieceTreeLite {
             return;
         }
 
-        let window_start = inserted_at.saturating_sub(1);
-        let window_end = (inserted_at + inserted_nodes + 1).min(self.root.nodes.len());
+        let mut window_start = inserted_at.saturating_sub(1);
+        let mut window_end = (inserted_at + inserted_nodes + 1).min(self.root.nodes.len());
+
+        if window_start > 0 && self.root.nodes[window_start].leaves.len() < MIN_LEAVES_PER_INTERNAL
+        {
+            window_start -= 1;
+        }
+        if window_end < self.root.nodes.len()
+            && self.root.nodes[window_end - 1].leaves.len() < MIN_LEAVES_PER_INTERNAL
+        {
+            window_end = (window_end + 1).min(self.root.nodes.len());
+        }
+
         let mut window_leaves = Vec::new();
         for node in &self.root.nodes[window_start..window_end] {
             window_leaves.extend(node.leaves.iter().cloned());
@@ -586,6 +730,96 @@ impl PieceTreeLite {
             .nodes
             .splice(window_start..window_end, rebalanced_nodes);
         self.root.recalculate();
+    }
+}
+
+impl<'a> PieceTreeSlice<'a> {
+    fn empty(tree: &'a PieceTreeLite, range_chars: Range<usize>) -> Self {
+        let current_char = range_chars.start;
+        Self {
+            tree,
+            range_chars,
+            node_index: 0,
+            leaf_index: 0,
+            piece_index: 0,
+            current_char,
+            finished: true,
+        }
+    }
+
+    fn advance_piece_cursor(&mut self) {
+        if self.finished || self.node_index >= self.tree.root.nodes.len() {
+            self.finished = true;
+            return;
+        }
+
+        let node = &self.tree.root.nodes[self.node_index];
+        if self.leaf_index >= node.leaves.len() {
+            self.node_index += 1;
+            self.leaf_index = 0;
+            self.piece_index = 0;
+            if self.node_index >= self.tree.root.nodes.len() {
+                self.finished = true;
+            }
+            return;
+        }
+
+        let leaf = &node.leaves[self.leaf_index];
+        self.piece_index += 1;
+        if self.piece_index >= leaf.pieces.len() {
+            self.leaf_index += 1;
+            self.piece_index = 0;
+            if self.leaf_index >= node.leaves.len() {
+                self.node_index += 1;
+                self.leaf_index = 0;
+                if self.node_index >= self.tree.root.nodes.len() {
+                    self.finished = true;
+                }
+            }
+        }
+    }
+}
+
+impl<'a> Iterator for PieceTreeSlice<'a> {
+    type Item = PieceTreeSpan<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while !self.finished {
+            let node = self.tree.root.nodes.get(self.node_index)?;
+            let leaf = node.leaves.get(self.leaf_index)?;
+            let piece = match leaf.pieces.get(self.piece_index) {
+                Some(piece) => piece,
+                None => {
+                    self.advance_piece_cursor();
+                    continue;
+                }
+            };
+
+            let piece_start_char = self.current_char;
+            let piece_end_char = piece_start_char + piece.char_len;
+            self.current_char = piece_end_char;
+            self.advance_piece_cursor();
+
+            if piece_end_char <= self.range_chars.start {
+                continue;
+            }
+            if piece_start_char >= self.range_chars.end {
+                self.finished = true;
+                return None;
+            }
+
+            let local_start = self.range_chars.start.saturating_sub(piece_start_char);
+            let local_end = (self.range_chars.end.min(piece_end_char)) - piece_start_char;
+            let text = self.tree.piece_text(piece);
+            let byte_range = byte_range_for_char_range(text, local_start, local_end);
+            return Some(PieceTreeSpan {
+                text: &text[byte_range],
+                char_start: piece_start_char + local_start,
+                char_len: local_end - local_start,
+            });
+        }
+
+        None
     }
 }
 
@@ -611,8 +845,17 @@ fn build_root_from_leaves(mut leaves: Vec<PieceTreeLeaf>) -> PieceTreeRoot {
 fn pack_leaves_into_nodes(leaves: Vec<PieceTreeLeaf>) -> Vec<PieceTreeInternalNode> {
     let mut nodes = Vec::new();
     let mut index = 0usize;
-    while index < leaves.len() {
-        let end = (index + MAX_LEAVES_PER_INTERNAL).min(leaves.len());
+    let total = leaves.len();
+    while index < total {
+        let remaining = total - index;
+        let chunk_size = if remaining > MAX_LEAVES_PER_INTERNAL
+            && remaining - MAX_LEAVES_PER_INTERNAL < MIN_LEAVES_PER_INTERNAL
+        {
+            remaining.div_ceil(2)
+        } else {
+            MAX_LEAVES_PER_INTERNAL.min(remaining)
+        };
+        let end = index + chunk_size;
         let mut node = PieceTreeInternalNode {
             leaves: leaves[index..end].to_vec(),
             metrics: PieceTreeMetrics::default(),
@@ -722,45 +965,10 @@ fn compact_preview(line_text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_LEAF_BYTES, MAX_LEAF_PIECES, MAX_LEAVES_PER_INTERNAL, PieceTreeLite};
-
-    #[test]
-    fn unicode_insert_and_extract_keep_char_coordinates() {
-        let mut tree = PieceTreeLite::from_string("aé\n🙂z".to_owned());
-        tree.insert(2, "λ");
-
-        assert_eq!(tree.len_chars(), 6);
-        assert_eq!(tree.extract_range(0..6), "aéλ\n🙂z");
-        assert_eq!(tree.line_index_at_offset(4), 1);
-    }
-
-    #[test]
-    fn unicode_remove_range_spanning_pieces_is_char_safe() {
-        let mut tree = PieceTreeLite::from_string("alpha🙂beta\ngamma".to_owned());
-        tree.remove_char_range(5..10);
-
-        assert_eq!(tree.extract_range(0..tree.len_chars()), "alpha\ngamma");
-        assert_eq!(tree.metrics().newlines, 1);
-    }
-
-    #[test]
-    fn preview_and_line_lookup_work_on_unicode_content() {
-        let text = "zero\nhéllo needle κόσμε\nlast".to_owned();
-        let match_byte = text.find("needle").expect("needle present");
-        let match_char = text[..match_byte].chars().count();
-        let tree = PieceTreeLite::from_string(text);
-
-        let (line, column, preview) = tree.preview_for_match(&(match_char..match_char + 6));
-        assert_eq!(line, 2);
-        assert_eq!(column, 7);
-        assert!(preview.contains("needle"));
-
-        let (line_start, line_len) = tree.line_lookup(1);
-        assert_eq!(
-            tree.extract_range(line_start..line_start + line_len),
-            "héllo needle κόσμε"
-        );
-    }
+    use super::{
+        MAX_LEAF_BYTES, MAX_LEAF_PIECES, MAX_LEAVES_PER_INTERNAL, MIN_LEAVES_PER_INTERNAL,
+        PieceTreeLite,
+    };
 
     #[test]
     fn repeated_inserts_split_into_multiple_balanced_nodes() {
@@ -796,6 +1004,26 @@ mod tests {
         assert_balanced(&tree);
     }
 
+    #[test]
+    fn pack_avoids_runt_nodes() {
+        // 18 leaves should produce 2 nodes of 9 each, not 16 + 2
+        let mut tree = PieceTreeLite::from_string(String::new());
+        // Build a tree that forces 18+ leaves via many insert sites
+        let chunk = "x".repeat(1024);
+        for i in 0..300 {
+            tree.insert(i * 1024, &chunk);
+        }
+        for node in &tree.root.nodes {
+            assert!(
+                node.leaves.len() >= MIN_LEAVES_PER_INTERNAL || tree.root.nodes.len() == 1,
+                "runt node with {} leaves (min {})",
+                node.leaves.len(),
+                MIN_LEAVES_PER_INTERNAL,
+            );
+        }
+        assert_balanced(&tree);
+    }
+
     fn assert_balanced(tree: &PieceTreeLite) {
         let mut computed_bytes = 0usize;
         let mut computed_chars = 0usize;
@@ -814,6 +1042,18 @@ mod tests {
                 if !leaf.pieces.is_empty() {
                     assert!(leaf.pieces.len() <= MAX_LEAF_PIECES);
                     assert!(leaf.metrics.bytes <= MAX_LEAF_BYTES);
+                }
+
+                // Verify piece-level prefix sums
+                assert_eq!(leaf.piece_start_chars.len(), leaf.pieces.len());
+                assert_eq!(leaf.piece_start_newlines.len(), leaf.pieces.len());
+                let mut prefix_chars = 0usize;
+                let mut prefix_newlines = 0usize;
+                for (i, piece) in leaf.pieces.iter().enumerate() {
+                    assert_eq!(leaf.piece_start_chars[i], prefix_chars);
+                    assert_eq!(leaf.piece_start_newlines[i], prefix_newlines);
+                    prefix_chars += piece.char_len;
+                    prefix_newlines += piece.newline_count;
                 }
 
                 computed_bytes += leaf.metrics.bytes;

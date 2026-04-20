@@ -1,6 +1,6 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
-use crate::app::domain::platform_default_line_ending;
+use crate::app::domain::{BufferViewStatus, platform_default_line_ending};
 use crate::app::theme::*;
 use eframe::egui;
 
@@ -16,6 +16,9 @@ struct StatusBarActions {
 struct ActiveStatusDetails {
     path_label: String,
     count_label: String,
+    cursor_label: Option<String>,
+    selection_label: Option<String>,
+    viewport_label: Option<String>,
     encoding_label: String,
     encoding_tooltip: String,
     encoding_is_non_default: bool,
@@ -66,10 +69,20 @@ fn collect_active_status_details(
 ) -> Option<ActiveStatusDetails> {
     let tab = app.active_tab()?;
     let line_count = tab.buffer.line_count;
-    let show_control_chars = tab
-        .active_view()
+    let active_view = tab.active_view();
+    let show_control_chars = active_view
         .map(|view| view.show_control_chars)
         .unwrap_or(false);
+    let view_status = active_view
+        .map(|view| {
+            tab.buffer.view_status(
+                view.pending_cursor_range.or(view.cursor_range),
+                view.latest_layout
+                    .as_ref()
+                    .and_then(|layout| layout.visible_text.as_ref()),
+            )
+        })
+        .unwrap_or_default();
     let has_control_chars = tab.buffer.artifact_summary.has_control_chars();
     let (icon, icon_tooltip, icon_color) =
         artifact_icon(has_control_chars, show_control_chars, dark_mode);
@@ -82,13 +95,13 @@ fn collect_active_status_details(
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Untitled".to_owned()),
         count_label: line_count_label(line_count),
+        cursor_label: cursor_label(&view_status),
+        selection_label: selection_label(&view_status),
+        viewport_label: viewport_label(&view_status),
         encoding_label: tab.buffer.format.encoding_label(),
         encoding_tooltip: tab.buffer.format.encoding_tooltip(),
         encoding_is_non_default: status_bar_encoding_is_non_default(&tab.buffer.format),
-        has_non_compliant_characters: tab
-            .buffer
-            .format
-            .has_non_compliant_characters(tab.buffer.text()),
+        has_non_compliant_characters: tab.buffer.has_non_compliant_characters,
         line_endings_label: tab.buffer.format.line_endings_label().to_owned(),
         line_endings_are_non_default: tab.buffer.format.preferred_line_ending_style()
             != platform_default_line_ending(),
@@ -96,7 +109,7 @@ fn collect_active_status_details(
         icon_tooltip,
         icon_color,
         freshness_label: tab.buffer.disk_status_label().map(str::to_owned),
-        is_large_file: tab.buffer.text().len() > 5 * 1024 * 1024,
+        is_large_file: tab.buffer.document().piece_tree().len_bytes() > 5 * 1024 * 1024,
         has_control_chars,
     })
 }
@@ -126,6 +139,9 @@ fn render_active_status(
         if encoding_response.clicked() {
             actions.open_encoding_dialog = true;
         }
+        show_status_segment(ui, details.viewport_label.as_deref());
+        show_status_segment(ui, details.selection_label.as_deref());
+        show_status_segment(ui, details.cursor_label.as_deref());
         show_line_count(ui, &details.count_label, actions);
     });
 }
@@ -148,6 +164,14 @@ fn show_encoding(
     ui.separator();
     ui.add(egui::Label::new(status_format_text(encoding, highlight)).sense(egui::Sense::click()))
         .on_hover_text(format!("{tooltip}\nClick for encoding actions"))
+}
+
+fn show_status_segment(ui: &mut egui::Ui, label: Option<&str>) {
+    let Some(label) = label else {
+        return;
+    };
+    ui.separator();
+    ui.label(label);
 }
 
 fn show_line_endings(ui: &mut egui::Ui, line_endings_label: &str, highlight: bool) {
@@ -181,7 +205,8 @@ fn show_transaction_log_button(ui: &mut egui::Ui, actions: &mut StatusBarActions
 
 fn show_settings_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
     ui.separator();
-    let response = status_bar_icon_button(ui, egui_phosphor::regular::GEAR).on_hover_text("Open settings");
+    let response =
+        status_bar_icon_button(ui, egui_phosphor::regular::GEAR).on_hover_text("Open settings");
     if response.clicked() {
         actions.open_settings = true;
     }
@@ -284,6 +309,23 @@ fn line_count_label(line_count: usize) -> String {
     format!("Lines: {line_count}")
 }
 
+fn cursor_label(status: &BufferViewStatus) -> Option<String> {
+    Some(format!(
+        "Ln {}, Col {}",
+        status.cursor_line?, status.cursor_column?
+    ))
+}
+
+fn selection_label(status: &BufferViewStatus) -> Option<String> {
+    (status.selection_chars > 0).then_some(format!("Sel {}", status.selection_chars))
+}
+
+fn viewport_label(status: &BufferViewStatus) -> Option<String> {
+    let start = status.visible_line_start?;
+    let end = status.visible_line_end?;
+    Some(format!("View {start}-{end}"))
+}
+
 fn artifact_icon(
     has_control_chars: bool,
     show_control_chars: bool,
@@ -317,5 +359,39 @@ fn plain_text_icon_color(dark_mode: bool) -> egui::Color32 {
         TEXT_PRIMARY.gamma_multiply(0.8)
     } else {
         egui::Color32::from_rgb(28, 35, 45).gamma_multiply(0.8)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BufferViewStatus, cursor_label, selection_label, viewport_label};
+
+    #[test]
+    fn cursor_label_formats_one_based_coordinates() {
+        let status = BufferViewStatus {
+            cursor_line: Some(12),
+            cursor_column: Some(7),
+            ..Default::default()
+        };
+
+        assert_eq!(cursor_label(&status).as_deref(), Some("Ln 12, Col 7"));
+    }
+
+    #[test]
+    fn selection_label_is_hidden_when_selection_is_empty() {
+        let status = BufferViewStatus::default();
+
+        assert_eq!(selection_label(&status), None);
+    }
+
+    #[test]
+    fn viewport_label_formats_visible_line_band() {
+        let status = BufferViewStatus {
+            visible_line_start: Some(40),
+            visible_line_end: Some(52),
+            ..Default::default()
+        };
+
+        assert_eq!(viewport_label(&status).as_deref(), Some("View 40-52"));
     }
 }

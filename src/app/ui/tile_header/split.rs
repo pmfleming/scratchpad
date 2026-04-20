@@ -76,7 +76,7 @@ impl TileSplitHandler {
         &self,
         state: SplitHandleDragState,
         title: String,
-        content: &str,
+        preview_lines: Vec<String>,
         handle_rect: egui::Rect,
     ) -> SplitPreviewOverlay {
         let spec = geometry::split_preview_spec(self.tile_rect, state.start_pos, state.current_pos);
@@ -90,7 +90,7 @@ impl TileSplitHandler {
             tile_rect: self.tile_rect,
             handle_anchor: handle_rect.right_top(),
             title,
-            preview_lines: preview::build_preview_lines(content),
+            preview_lines,
         }
     }
 }
@@ -108,3 +108,4 @@ pub fn split_preview_spec(
 }
 
 pub(crate) use geometry::split_rect;
+pub(crate) use preview::{build_preview_lines, build_preview_lines_for_window};

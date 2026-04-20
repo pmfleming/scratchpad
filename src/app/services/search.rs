@@ -93,7 +93,9 @@ where
     }
 
     match options.mode {
-        SearchMode::PlainText => plain_text_search_interruptible(text, query, options, should_continue),
+        SearchMode::PlainText => {
+            plain_text_search_interruptible(text, query, options, should_continue)
+        }
         SearchMode::Regex => regex_search_interruptible(text, query, options, should_continue),
     }
 }
@@ -160,7 +162,9 @@ where
 
 fn regex_search(text: &str, query: &str, options: SearchOptions) -> SearchOutcome {
     match compile_regex(query, options) {
-        Ok(regex) => SearchOutcome::with_matches(find_regex_matches(text, &regex, options.whole_word)),
+        Ok(regex) => {
+            SearchOutcome::with_matches(find_regex_matches(text, &regex, options.whole_word))
+        }
         Err(error) => SearchOutcome::with_error(error),
     }
 }
@@ -449,8 +453,8 @@ impl WholeWordMatcher {
 #[cfg(test)]
 mod tests {
     use super::{
-        SearchError, SearchMode, SearchOptions, find_matches, search_text,
-        search_text_interruptible, next_match_index, previous_match_index,
+        SearchError, SearchMode, SearchOptions, find_matches, next_match_index,
+        previous_match_index, search_text, search_text_interruptible,
     };
 
     #[test]
@@ -524,10 +528,7 @@ mod tests {
             },
         );
         assert!(outcome.matches.is_empty());
-        assert!(matches!(
-            outcome.error,
-            Some(SearchError::InvalidRegex(_))
-        ));
+        assert!(matches!(outcome.error, Some(SearchError::InvalidRegex(_))));
     }
 
     #[test]

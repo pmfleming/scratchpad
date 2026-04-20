@@ -286,9 +286,15 @@ impl SearchState {
 impl ScratchpadApp {
     fn default_search_scope_and_origin(&self) -> (SearchScope, SearchScopeOrigin) {
         if self.active_search_selection_range().is_some() {
-            (SearchScope::SelectionOnly, SearchScopeOrigin::SelectionDefault)
+            (
+                SearchScope::SelectionOnly,
+                SearchScopeOrigin::SelectionDefault,
+            )
         } else {
-            (SearchScope::ActiveBuffer, SearchScopeOrigin::ActiveContextDefault)
+            (
+                SearchScope::ActiveBuffer,
+                SearchScopeOrigin::ActiveContextDefault,
+            )
         }
     }
 

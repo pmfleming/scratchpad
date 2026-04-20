@@ -121,5 +121,5 @@ impl ScratchpadApp {
 }
 
 fn settings_buffer_snapshot(buffer: &BufferState) -> (BufferId, String, bool) {
-    (buffer.id, buffer.text().to_owned(), buffer.is_dirty)
+    (buffer.id, buffer.text(), buffer.is_dirty)
 }

@@ -43,6 +43,8 @@ pub enum AppCommand {
     OpenSettings,
     OpenUserManual,
     CloseSearch,
+    UndoActiveBufferTextOperation,
+    RedoActiveBufferTextOperation,
     NextSearchMatch,
     PreviousSearchMatch,
     ReplaceCurrentMatch,

@@ -426,7 +426,11 @@ fn transaction_log_tokens(entry: &TransactionLogEntry) -> Vec<Cow<'_, str>> {
         .map(|item| Cow::Borrowed(item.as_str()))
         .collect::<Vec<_>>();
 
-    if let Some(details) = entry.details.as_deref().filter(|details| !details.is_empty()) {
+    if let Some(details) = entry
+        .details
+        .as_deref()
+        .filter(|details| !details.is_empty())
+    {
         tokens.push(Cow::Borrowed(details));
     }
 

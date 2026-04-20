@@ -1,5 +1,5 @@
 use super::shared::{collect_slot_entries, slot_cell_context};
-use super::{apply_tab_drag_feedback, DuplicateNameCounts};
+use super::{DuplicateNameCounts, apply_tab_drag_feedback};
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
 use crate::app::theme::{BUTTON_SIZE, TAB_BUTTON_WIDTH, TAB_HEIGHT, action_bg, action_hover_bg};
@@ -109,7 +109,8 @@ fn collect_tab_entries(
     ui: &mut egui::Ui,
     context: &mut TabStripEntriesContext<'_>,
 ) -> Vec<TabRectEntry> {
-    let cell_context = slot_cell_context(context.app, context.duplicate_name_counts, TAB_BUTTON_WIDTH);
+    let cell_context =
+        slot_cell_context(context.app, context.duplicate_name_counts, TAB_BUTTON_WIDTH);
     collect_slot_entries(
         ui,
         context.app,

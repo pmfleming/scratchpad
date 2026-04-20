@@ -1,15 +1,15 @@
 pub mod artifact;
 pub mod gutter;
-pub mod text_edit;
+pub mod native_editor;
 
 use crate::app::domain::{BufferState, EditorViewState, RenderedLayout};
 use eframe::egui;
 
 pub use artifact::{make_control_chars_clean, make_control_chars_visible, render_artifact_view};
 pub use gutter::render_line_number_gutter;
-pub use text_edit::{
-    EditorHighlightStyle, TextEditOptions, build_layouter, render_editor_text_edit,
-    render_read_only_text_edit,
+pub use native_editor::{
+    CursorRange, EditorHighlightStyle, TextEditOptions, build_layouter, render_editor_text_edit,
+    render_editor_visible_text_window, render_read_only_text_edit,
 };
 
 pub(crate) struct EditorContentOutcome {
@@ -19,6 +19,7 @@ pub(crate) struct EditorContentOutcome {
 
 pub(crate) struct EditorContentStyle<'a> {
     pub(crate) editor_gutter: u8,
+    pub(crate) is_active: bool,
     pub(crate) previous_layout: Option<&'a RenderedLayout>,
     pub(crate) text_edit: TextEditOptions<'a>,
     pub(crate) background_color: egui::Color32,
@@ -54,7 +55,16 @@ pub(crate) fn render_editor_content(
                 }
 
                 if inspect_control_chars {
-                    render_artifact_view(ui, buffer, view, style.text_edit)
+                    render_artifact_view(ui, buffer, view, style.previous_layout, style.text_edit)
+                } else if !style.is_active {
+                    render_editor_visible_text_window(
+                        ui,
+                        buffer,
+                        view,
+                        style.previous_layout,
+                        style.text_edit,
+                    )
+                    .unwrap_or_else(|| render_editor_text_edit(ui, buffer, view, style.text_edit))
                 } else {
                     render_editor_text_edit(ui, buffer, view, style.text_edit)
                 }

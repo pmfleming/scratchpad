@@ -1,4 +1,3 @@
-use eframe::egui::TextBuffer;
 use scratchpad::app::domain::{BufferState, SplitAxis, WorkspaceTab};
 use serde::Serialize;
 use std::hint::black_box;
@@ -65,7 +64,7 @@ fn emit_file_size_sweep() {
                     plain_text_of_size(bytes),
                     None,
                 );
-                black_box(buffer.line_count + buffer.text().len())
+                black_box(buffer.line_count + buffer.document().piece_tree().len_bytes())
             },
         );
     }
@@ -193,10 +192,10 @@ fn run_paste_capacity_cycle(insert_bytes: usize) -> usize {
         None,
     );
     let inserted = plain_text_of_size(insert_bytes);
-    let midpoint = buffer.text().chars().count() / 2;
-    buffer.document_mut().insert_text(&inserted, midpoint);
+    let midpoint = buffer.document().piece_tree().len_chars() / 2;
+    buffer.document_mut().insert_direct(midpoint, &inserted);
     buffer.refresh_text_metadata();
-    buffer.line_count + buffer.text().len()
+    buffer.line_count + buffer.document().piece_tree().len_bytes()
 }
 
 fn build_tabs(tab_count: usize, bytes_per_buffer: usize) -> Vec<WorkspaceTab> {

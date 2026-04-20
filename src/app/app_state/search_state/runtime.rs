@@ -5,7 +5,7 @@ use super::{
     SearchMatch, SearchScope, SearchStatus,
 };
 use crate::app::domain::{BufferId, SearchHighlightState, ViewId, WorkspaceTab};
-use eframe::egui;
+use crate::app::ui::editor_content::native_editor::CursorRange;
 use std::collections::HashSet;
 use std::ops::Range;
 use std::sync::atomic::AtomicU64;
@@ -44,8 +44,9 @@ impl ScratchpadApp {
             && self.active_search_selection_range().is_none()
         {
             self.search_state.searching = false;
-            self.search_state.status =
-                SearchStatus::Error("Selection-only search requires an active selection.".to_owned());
+            self.search_state.status = SearchStatus::Error(
+                "Selection-only search requires an active selection.".to_owned(),
+            );
             self.search_state.freshness = SearchFreshness::Fresh;
             self.search_state.clear_match_results();
             self.search_state.dirty = false;
@@ -62,8 +63,8 @@ impl ScratchpadApp {
         view_id: ViewId,
         buffer_id: BufferId,
         replacements: &[(Range<usize>, String)],
-        previous_selection: egui::text::CCursorRange,
-        next_selection: egui::text::CCursorRange,
+        previous_selection: CursorRange,
+        next_selection: CursorRange,
         error_message: &str,
     ) -> Option<String> {
         let active_tab_index = self.active_tab_index();
@@ -74,7 +75,11 @@ impl ScratchpadApp {
             let tab = &mut self.tabs_mut()[active_tab_index];
             let buffer = tab.buffer_by_id_mut(buffer_id)?;
             if buffer
-                .replace_char_ranges_with_undo(replacements, previous_selection, next_selection)
+                .replace_char_ranges_with_undo(
+                    replacements,
+                    previous_selection.to_egui(),
+                    next_selection.to_egui(),
+                )
                 .is_err()
             {
                 false
@@ -180,7 +185,10 @@ impl ScratchpadApp {
         }
     }
 
-    fn active_search_target(&self, search_range: Option<Range<usize>>) -> Option<SearchTargetSnapshot> {
+    fn active_search_target(
+        &self,
+        search_range: Option<Range<usize>>,
+    ) -> Option<SearchTargetSnapshot> {
         let tab_index = self.active_tab_index();
         let tab_label = self.search_tab_label(tab_index);
         let tab = self.active_tab()?;
@@ -300,7 +308,7 @@ impl ScratchpadApp {
         self.search_state.open && !self.search_state.query.is_empty()
     }
 
-    pub(super) fn select_next_active_buffer_match_from(&mut self, minimum_start: usize) {
+    pub(crate) fn select_next_active_buffer_match_from(&mut self, minimum_start: usize) {
         self.set_active_search_index(self.active_buffer_match_index_at_or_after(minimum_start));
     }
 
@@ -320,7 +328,10 @@ impl ScratchpadApp {
     fn apply_search_highlights(&mut self) {
         if !self.search_is_active()
             || self.search_state.searching
-            || !matches!(self.search_state.status, SearchStatus::Ready | SearchStatus::NoMatches)
+            || !matches!(
+                self.search_state.status,
+                SearchStatus::Ready | SearchStatus::NoMatches
+            )
         {
             self.clear_search_highlights();
             return;
@@ -389,8 +400,7 @@ impl ScratchpadApp {
                 .unwrap_or_else(|| cursor_range_from_char_range(target.replacements[0].0.clone()));
             let next_selection = cursor_range_from_char_range(
                 target.replacements[0].0.start
-                    ..target.replacements[0].0.start
-                        + target.replacements[0].1.chars().count(),
+                    ..target.replacements[0].0.start + target.replacements[0].1.chars().count(),
             );
             let Some(buffer_label) = self.replace_ranges_in_active_buffer(
                 target.view_id,
@@ -416,7 +426,9 @@ impl ScratchpadApp {
 
         for target in &plan.targets {
             if !self.apply_replacement_target(target) {
-                self.set_error_status("Search replace-all failed before all targets could be updated.");
+                self.set_error_status(
+                    "Search replace-all failed before all targets could be updated.",
+                );
                 return false;
             }
             affected_items.push(target.buffer_label.clone());
@@ -498,14 +510,17 @@ impl ScratchpadApp {
             .unwrap_or_else(|| cursor_range_from_char_range(target.replacements[0].0.clone()));
         let next_selection = cursor_range_from_char_range(
             target.replacements[0].0.start
-                ..target.replacements[0].0.start
-                    + target.replacements[0].1.chars().count(),
+                ..target.replacements[0].0.start + target.replacements[0].1.chars().count(),
         );
         let Some(buffer) = tab.buffer_by_id_mut(target.buffer_id) else {
             return false;
         };
         if buffer
-            .replace_char_ranges_with_undo(&target.replacements, previous_selection, next_selection)
+            .replace_char_ranges_with_undo(
+                &target.replacements,
+                previous_selection.to_egui(),
+                next_selection.to_egui(),
+            )
             .is_err()
         {
             return false;
@@ -546,14 +561,16 @@ fn build_search_target(
 ) -> Option<SearchTargetSnapshot> {
     let view = tab.view(view_id)?;
     let buffer = tab.buffer_by_id(view.buffer_id)?;
+    let (search_text, search_offset) = buffer.search_text_snapshot(search_range.clone());
     Some(SearchTargetSnapshot {
         tab_index,
         view_id,
         buffer_id: view.buffer_id,
         tab_label: tab_label.to_owned(),
         buffer_label: buffer.display_name(),
-        text: buffer.text().to_owned(),
-        search_range,
+        search_text,
+        search_offset,
+        preview_tree: buffer.document().piece_tree().clone(),
     })
 }
 

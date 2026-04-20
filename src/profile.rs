@@ -9,7 +9,6 @@ use crate::app::services::search::{SearchOptions, find_matches};
 use crate::app::services::session_store::SessionStore;
 use crate::app::ui::editor_content::{EditorHighlightStyle, build_layouter};
 use eframe::egui;
-use eframe::egui::TextBuffer;
 use std::hint::black_box;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -233,11 +232,11 @@ pub fn run_large_file_paste_profile(
             base_text.clone(),
             None,
         );
-        let midpoint = buffer.text().chars().count() / 2;
+        let midpoint = buffer.document().piece_tree().len_chars() / 2;
         let _ = insert_char_count;
-        buffer.document_mut().insert_text(&insert_text, midpoint);
+        buffer.document_mut().insert_direct(midpoint, &insert_text);
         buffer.refresh_text_metadata();
-        black_box(buffer.line_count + buffer.text().len())
+        black_box(buffer.line_count + buffer.document().piece_tree().len_bytes())
     })
 }
 
@@ -496,7 +495,7 @@ fn plain_text_buffer(name: String, target_bytes: usize) -> BufferState {
 
 fn expected_matches_for_tab(tab: &WorkspaceTab) -> usize {
     tab.buffers()
-        .map(|buffer| find_matches(buffer.text(), PROFILE_QUERY, SearchOptions::default()).len())
+        .map(|buffer| find_matches(&buffer.text(), PROFILE_QUERY, SearchOptions::default()).len())
         .sum()
 }
 

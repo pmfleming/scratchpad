@@ -99,6 +99,14 @@ fn dispatch_search_actions(
         app.request_search_focus(target_focus);
         app.handle_command(AppCommand::NextSearchMatch);
     }
+    if actions.undo_requested {
+        app.request_search_focus(target_focus);
+        app.handle_command(AppCommand::UndoActiveBufferTextOperation);
+    }
+    if actions.redo_requested {
+        app.request_search_focus(target_focus);
+        app.handle_command(AppCommand::RedoActiveBufferTextOperation);
+    }
     if actions.replace_current_requested {
         app.request_search_focus(target_focus);
         app.handle_command(AppCommand::ReplaceCurrentMatch);

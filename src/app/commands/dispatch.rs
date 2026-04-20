@@ -29,6 +29,12 @@ impl ScratchpadApp {
             AppCommand::OpenSettings => self.open_settings(),
             AppCommand::OpenUserManual => self.open_user_manual(),
             AppCommand::CloseSearch => self.close_search(),
+            AppCommand::UndoActiveBufferTextOperation => {
+                self.undo_active_buffer_text_operation();
+            }
+            AppCommand::RedoActiveBufferTextOperation => {
+                self.redo_active_buffer_text_operation();
+            }
             AppCommand::NextSearchMatch => {
                 self.select_next_search_match();
             }

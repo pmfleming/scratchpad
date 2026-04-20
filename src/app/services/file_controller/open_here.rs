@@ -253,11 +253,7 @@ impl FileController {
     ) -> Vec<OpenHerePathOutcome> {
         log_entries
             .into_iter()
-            .map(|artifact_warning| {
-                OpenHerePathOutcome::Opened {
-                    artifact_warning,
-                }
-            })
+            .map(|artifact_warning| OpenHerePathOutcome::Opened { artifact_warning })
             .collect()
     }
 

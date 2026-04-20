@@ -1,8 +1,10 @@
-use super::helpers::{cursor_range_from_char_range, preview_for_match};
+use super::helpers::cursor_range_from_char_range;
 use super::{
     ScratchpadApp, SearchReplaceAvailability, SearchScope, SearchScopeOrigin, SearchStatus,
 };
+use crate::app::commands::AppCommand;
 use crate::app::domain::SplitAxis;
+use crate::app::domain::buffer::PieceTreeLite;
 use crate::app::services::search::SearchMode;
 use crate::app::services::session_store::SessionStore;
 use std::thread;
@@ -144,7 +146,8 @@ fn activating_search_match_uses_first_tile_for_duplicate_buffer_results() {
 
 #[test]
 fn preview_for_match_reports_line_and_column() {
-    let (line, column, preview) = preview_for_match("one\ntwo alpha\nthree", &(8..13));
+    let tree = PieceTreeLite::from_string("one\ntwo alpha\nthree".to_owned());
+    let (line, column, preview) = tree.preview_for_match(&(8..13));
     assert_eq!(line, 2);
     assert_eq!(column, 5);
     assert_eq!(preview, "two alpha");
@@ -164,7 +167,10 @@ fn open_search_defaults_to_selection_scope_when_selection_exists() {
     app.open_search();
 
     assert_eq!(app.search_scope(), SearchScope::SelectionOnly);
-    assert_eq!(app.search_scope_origin(), SearchScopeOrigin::SelectionDefault);
+    assert_eq!(
+        app.search_scope_origin(),
+        SearchScopeOrigin::SelectionDefault
+    );
 
     app.set_search_query("alpha");
     wait_for_search_matches(&mut app, 1);
@@ -174,7 +180,9 @@ fn open_search_defaults_to_selection_scope_when_selection_exists() {
 #[test]
 fn selection_only_scope_without_selection_reports_error_and_blocks_replace() {
     let mut app = test_app();
-    app.tabs_mut()[0].buffer.replace_text("alpha beta".to_owned());
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha beta".to_owned());
 
     app.open_search();
     app.set_search_scope(SearchScope::SelectionOnly);
@@ -192,7 +200,10 @@ fn selection_only_scope_without_selection_reports_error_and_blocks_replace() {
     assert_eq!(app.search_match_count(), 0);
     match app.search_progress().status {
         SearchStatus::Error(message) => {
-            assert_eq!(message, "Selection-only search requires an active selection.");
+            assert_eq!(
+                message,
+                "Selection-only search requires an active selection."
+            );
         }
         other => panic!("expected selection error, got {other:?}"),
     }
@@ -207,7 +218,9 @@ fn selection_only_scope_without_selection_reports_error_and_blocks_replace() {
 #[test]
 fn invalid_regex_query_reports_invalid_status_and_blocks_replace() {
     let mut app = test_app();
-    app.tabs_mut()[0].buffer.replace_text("alpha beta".to_owned());
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha beta".to_owned());
 
     app.open_search();
     app.set_search_mode(SearchMode::Regex);
@@ -276,4 +289,42 @@ fn replace_all_changes_every_buffer_in_scope() {
     assert!(app.replace_all_search_matches());
     assert_eq!(app.tabs()[0].active_buffer().text(), "omega beta omega");
     assert_eq!(app.tabs()[1].active_buffer().text(), "omega gamma");
+}
+
+#[test]
+fn active_buffer_operation_undo_restores_search_replace_text() {
+    let mut app = test_app();
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha beta alpha".to_owned());
+
+    app.open_search();
+    app.set_search_query("alpha");
+    app.set_search_replacement("omega");
+
+    wait_for_search_matches(&mut app, 2);
+    assert!(app.replace_current_search_match());
+    assert_eq!(app.tabs()[0].active_buffer().text(), "omega beta alpha");
+
+    app.handle_command(AppCommand::UndoActiveBufferTextOperation);
+    assert_eq!(app.tabs()[0].active_buffer().text(), "alpha beta alpha");
+}
+
+#[test]
+fn active_buffer_operation_redo_reapplies_search_replace_text() {
+    let mut app = test_app();
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha beta alpha".to_owned());
+
+    app.open_search();
+    app.set_search_query("alpha");
+    app.set_search_replacement("omega");
+
+    wait_for_search_matches(&mut app, 2);
+    assert!(app.replace_current_search_match());
+    app.handle_command(AppCommand::UndoActiveBufferTextOperation);
+    app.handle_command(AppCommand::RedoActiveBufferTextOperation);
+
+    assert_eq!(app.tabs()[0].active_buffer().text(), "omega beta alpha");
 }

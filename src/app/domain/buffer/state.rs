@@ -1,8 +1,10 @@
 use super::{
-    BufferTextMetadata, EncodingSource, TextArtifactSummary, TextDocument, TextFormatMetadata,
-    TextReplacementError, TextReplacements, buffer_text_metadata,
+    BufferTextMetadata, EncodingSource, RenderedTextWindow, TextArtifactSummary, TextDocument,
+    TextFormatMetadata, TextReplacementError, TextReplacements, buffer_text_metadata,
 };
+use crate::app::ui::editor_content::native_editor::CursorRange;
 use eframe::egui;
+use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -26,6 +28,8 @@ pub struct BufferState {
     pub format: TextFormatMetadata,
     pub disk_state: Option<DiskFileState>,
     pub freshness: BufferFreshness,
+    pub active_selection: Option<Range<usize>>,
+    pub has_non_compliant_characters: bool,
 }
 
 struct BufferBuildState {
@@ -63,6 +67,15 @@ pub struct RestoredBufferState {
     pub format: TextFormatMetadata,
     pub disk_state: Option<DiskFileState>,
     pub freshness: BufferFreshness,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BufferViewStatus {
+    pub cursor_line: Option<usize>,
+    pub cursor_column: Option<usize>,
+    pub selection_chars: usize,
+    pub visible_line_start: Option<usize>,
+    pub visible_line_end: Option<usize>,
 }
 
 impl BufferState {
@@ -139,8 +152,134 @@ impl BufferState {
         &mut self.document
     }
 
-    pub fn text(&self) -> &str {
-        self.document.as_str()
+    pub fn text(&self) -> String {
+        self.document.extract_text()
+    }
+
+    pub fn preview_for_match(&self, range: &Range<usize>) -> (usize, usize, String) {
+        self.document.piece_tree().preview_for_match(range)
+    }
+
+    pub fn view_status(
+        &self,
+        cursor_range: Option<CursorRange>,
+        visible_window: Option<&RenderedTextWindow>,
+    ) -> BufferViewStatus {
+        let (cursor_line, cursor_column, selection_chars) = cursor_range
+            .map(|range| {
+                let position = self
+                    .document
+                    .piece_tree()
+                    .char_position(range.primary.index);
+                (
+                    Some(position.line_index + 1),
+                    Some(position.column_index + 1),
+                    range.primary.index.abs_diff(range.secondary.index),
+                )
+            })
+            .unwrap_or((None, None, 0));
+        let (visible_line_start, visible_line_end) = visible_window
+            .and_then(|window| {
+                (!window.line_range.is_empty()).then_some((
+                    Some(window.line_range.start + 1),
+                    Some(window.line_range.end),
+                ))
+            })
+            .unwrap_or((None, None));
+
+        BufferViewStatus {
+            cursor_line,
+            cursor_column,
+            selection_chars,
+            visible_line_start,
+            visible_line_end,
+        }
+    }
+
+    pub fn search_text_snapshot(&self, range: Option<Range<usize>>) -> (String, usize) {
+        let Some(range) = range else {
+            return (self.document.extract_text(), 0);
+        };
+
+        let normalized = self.document.piece_tree().normalize_char_range(range);
+        (
+            self.document.piece_tree().extract_range(normalized.clone()),
+            normalized.start,
+        )
+    }
+
+    pub fn visible_text_window(
+        &self,
+        row_range: Range<usize>,
+        char_range: Range<usize>,
+        total_rows: usize,
+    ) -> RenderedTextWindow {
+        let normalized = self.document.piece_tree().normalize_char_range(char_range);
+        let line_start = self
+            .document
+            .piece_tree()
+            .char_position(normalized.start)
+            .line_index;
+        let line_end = if normalized.is_empty() {
+            line_start
+        } else {
+            self.document
+                .piece_tree()
+                .char_position(normalized.end.saturating_sub(1))
+                .line_index
+                + 1
+        };
+
+        RenderedTextWindow {
+            row_range: row_range.clone(),
+            line_range: line_start..line_end,
+            char_range: normalized.clone(),
+            layout_row_offset: 0,
+            text: self.document.piece_tree().extract_range(normalized.clone()),
+            truncated_start: row_range.start > 0 || normalized.start > 0,
+            truncated_end: row_range.end < total_rows
+                || normalized.end < self.document.piece_tree().len_chars(),
+        }
+    }
+
+    pub fn visible_line_window(&self, line_range: Range<usize>) -> RenderedTextWindow {
+        let max_line = self.line_count.max(1);
+        let start = line_range.start.min(max_line);
+        let end = line_range.end.min(max_line);
+        if start >= end {
+            let offset = self.document.piece_tree().len_chars();
+            return RenderedTextWindow {
+                row_range: 0..0,
+                line_range: start..start,
+                char_range: offset..offset,
+                layout_row_offset: start,
+                text: String::new(),
+                truncated_start: start > 0,
+                truncated_end: end < self.line_count,
+            };
+        }
+
+        let start_char = if start < self.line_count {
+            self.document.piece_tree().line_info(start).start_char
+        } else {
+            self.document.piece_tree().len_chars()
+        };
+        let end_char = if end < self.line_count {
+            self.document.piece_tree().line_info(end).start_char
+        } else {
+            self.document.piece_tree().len_chars()
+        };
+        let char_range = start_char..end_char;
+
+        RenderedTextWindow {
+            row_range: 0..0,
+            line_range: start..end,
+            char_range: char_range.clone(),
+            layout_row_offset: start,
+            text: self.document.piece_tree().extract_range(char_range),
+            truncated_start: start > 0,
+            truncated_end: end < self.line_count,
+        }
     }
 
     pub fn replace_text(&mut self, text: String) {
@@ -166,8 +305,33 @@ impl BufferState {
         Ok(())
     }
 
+    pub fn undo_last_text_operation(&mut self) -> Option<egui::text::CCursorRange> {
+        let selection = self.document.undo_last_operation()?;
+        self.refresh_text_metadata();
+        Some(selection)
+    }
+
+    pub fn redo_last_text_operation(&mut self) -> Option<egui::text::CCursorRange> {
+        let selection = self.document.redo_last_operation()?;
+        self.refresh_text_metadata();
+        Some(selection)
+    }
+
+    pub fn undo_last_text_operation_native(&mut self) -> Option<CursorRange> {
+        let selection = self.document.undo_operation_native()?;
+        self.refresh_text_metadata();
+        Some(selection)
+    }
+
+    pub fn redo_last_text_operation_native(&mut self) -> Option<CursorRange> {
+        let selection = self.document.redo_operation_native()?;
+        self.refresh_text_metadata();
+        Some(selection)
+    }
+
     pub fn refresh_text_metadata(&mut self) {
-        let text_metadata = buffer_text_metadata(self.document.as_str(), &mut self.format);
+        let text = self.document.extract_text();
+        let text_metadata = buffer_text_metadata(&text, &mut self.format);
         self.apply_text_metadata(text_metadata);
     }
 
@@ -244,6 +408,8 @@ impl BufferState {
             format: state.format,
             disk_state: state.disk_state,
             freshness: state.freshness,
+            active_selection: None,
+            has_non_compliant_characters: text_metadata.has_non_compliant_characters,
         }
     }
 
@@ -263,6 +429,7 @@ impl BufferState {
     fn apply_text_metadata(&mut self, text_metadata: BufferTextMetadata) {
         self.line_count = text_metadata.line_count;
         self.artifact_summary = text_metadata.artifact_summary;
+        self.has_non_compliant_characters = text_metadata.has_non_compliant_characters;
         self.document
             .set_preferred_line_ending(text_metadata.preferred_line_ending);
     }
@@ -296,4 +463,87 @@ fn next_temp_id() -> String {
         .unwrap_or_default();
     let sequence = NEXT_TEMP_BUFFER_ID.fetch_add(1, Ordering::Relaxed);
     format!("buffer-{timestamp}-{sequence}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BufferState;
+    use crate::app::ui::editor_content::native_editor::CursorRange;
+
+    fn selection(start: usize, end: usize) -> CursorRange {
+        CursorRange::two(start, end)
+    }
+
+    #[test]
+    fn visible_text_window_uses_piece_tree_coordinates() {
+        let buffer = BufferState::new(
+            "notes.txt".to_owned(),
+            "zero\none\ntwo\nthree".to_owned(),
+            None,
+        );
+
+        let window = buffer.visible_text_window(1..3, 5..13, 4);
+
+        assert_eq!(window.row_range, 1..3);
+        assert_eq!(window.line_range, 1..3);
+        assert_eq!(window.char_range, 5..13);
+        assert_eq!(window.layout_row_offset, 0);
+        assert_eq!(window.text, "one\ntwo\n");
+        assert!(window.truncated_start);
+        assert!(window.truncated_end);
+    }
+
+    #[test]
+    fn visible_line_window_extracts_full_lines_from_piece_tree() {
+        let buffer = BufferState::new(
+            "notes.txt".to_owned(),
+            "zero\none\ntwo\nthree".to_owned(),
+            None,
+        );
+
+        let window = buffer.visible_line_window(1..3);
+
+        assert_eq!(window.line_range, 1..3);
+        assert_eq!(window.text, "one\ntwo\n");
+        assert_eq!(window.char_range, 5..13);
+        assert_eq!(window.layout_row_offset, 1);
+        assert!(window.truncated_start);
+        assert!(window.truncated_end);
+    }
+
+    #[test]
+    fn view_status_reports_piece_tree_cursor_and_viewport_coordinates() {
+        let buffer = BufferState::new(
+            "notes.txt".to_owned(),
+            "zero\none\ntwo\nthree".to_owned(),
+            None,
+        );
+
+        let visible_window = buffer.visible_line_window(1..3);
+        let status = buffer.view_status(Some(selection(6, 8)), Some(&visible_window));
+
+        assert_eq!(status.cursor_line, Some(2));
+        assert_eq!(status.cursor_column, Some(4));
+        assert_eq!(status.selection_chars, 2);
+        assert_eq!(status.visible_line_start, Some(2));
+        assert_eq!(status.visible_line_end, Some(3));
+    }
+
+    #[test]
+    fn view_status_still_reports_visible_lines_without_a_cursor() {
+        let buffer = BufferState::new(
+            "notes.txt".to_owned(),
+            "zero\none\ntwo\nthree".to_owned(),
+            None,
+        );
+
+        let visible_window = buffer.visible_line_window(2..4);
+        let status = buffer.view_status(None, Some(&visible_window));
+
+        assert_eq!(status.cursor_line, None);
+        assert_eq!(status.cursor_column, None);
+        assert_eq!(status.selection_chars, 0);
+        assert_eq!(status.visible_line_start, Some(3));
+        assert_eq!(status.visible_line_end, Some(4));
+    }
 }

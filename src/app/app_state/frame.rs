@@ -137,7 +137,11 @@ impl ScratchpadApp {
             .active_tab_index
             .min(self.tab_manager.tabs.len() - 1);
         let tab = &self.tab_manager.tabs[index];
-        let marker = if tab.active_buffer().is_dirty { "*" } else { "" };
+        let marker = if tab.active_buffer().is_dirty {
+            "*"
+        } else {
+            ""
+        };
         format!("{}{} - Scratchpad", marker, tab.active_buffer().name)
     }
 

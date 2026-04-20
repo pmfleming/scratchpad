@@ -308,7 +308,8 @@ impl FileController {
         let save_result = {
             let buffer = app.tabs()[index].active_buffer();
             let format = format_override.as_ref().unwrap_or(&buffer.format);
-            FileService::write_file_with_format(&path, buffer.text(), format)
+            let text = buffer.text();
+            FileService::write_file_with_format(&path, &text, format)
         };
 
         match save_result {

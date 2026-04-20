@@ -141,11 +141,12 @@ fn render_replace_pill(
             egui::vec2(ui.available_width(), CONTROL_BUTTON_HEIGHT),
             egui::Layout::right_to_left(egui::Align::Center),
             |ui| {
-                let replace_enabled = matches!(state.replace_availability, SearchReplaceAvailability::Allowed);
-                let replace_all_tooltip = replace_tooltip(
-                    &state.replace_availability,
-                    "Replace all matches",
+                let replace_enabled = matches!(
+                    state.replace_availability,
+                    SearchReplaceAvailability::Allowed
                 );
+                let replace_all_tooltip =
+                    replace_tooltip(&state.replace_availability, "Replace all matches");
                 trigger_action(
                     ui,
                     replace_enabled,
@@ -153,16 +154,28 @@ fn render_replace_pill(
                     replace_all_tooltip,
                     &mut actions.replace_all_requested,
                 );
-                let replace_current_tooltip = replace_tooltip(
-                    &state.replace_availability,
-                    "Replace current match",
-                );
+                let replace_current_tooltip =
+                    replace_tooltip(&state.replace_availability, "Replace current match");
                 trigger_action(
                     ui,
                     replace_enabled,
                     ARROW_CLOCKWISE,
                     replace_current_tooltip,
                     &mut actions.replace_current_requested,
+                );
+                trigger_text_action(
+                    ui,
+                    state.can_redo_text_operation,
+                    "Redo",
+                    "Redo the last operation-based text edit in the active buffer",
+                    &mut actions.redo_requested,
+                );
+                trigger_text_action(
+                    ui,
+                    state.can_undo_text_operation,
+                    "Undo",
+                    "Undo the last operation-based text edit in the active buffer",
+                    &mut actions.undo_requested,
                 );
                 trigger_action(
                     ui,
@@ -366,6 +379,39 @@ fn trigger_action(ui: &mut egui::Ui, enabled: bool, icon: &str, tooltip: &str, f
     if icon_action_button(ui, icon, tooltip, enabled).clicked() {
         *flag = true;
     }
+}
+
+fn trigger_text_action(
+    ui: &mut egui::Ui,
+    enabled: bool,
+    label: &str,
+    tooltip: &str,
+    flag: &mut bool,
+) {
+    if text_action_button(ui, label, tooltip, enabled).clicked() {
+        *flag = true;
+    }
+}
+
+fn text_action_button(
+    ui: &mut egui::Ui,
+    label: &str,
+    tooltip: &str,
+    enabled: bool,
+) -> egui::Response {
+    ui.add_enabled_ui(enabled, |ui| {
+        chip_button(
+            ui,
+            egui::RichText::new(label)
+                .size(12.5)
+                .color(text_primary(ui)),
+            false,
+            egui::vec2(0.0, CONTROL_BUTTON_HEIGHT),
+            egui::vec2(8.0, 0.0),
+            tooltip,
+        )
+    })
+    .inner
 }
 
 fn chip_button(

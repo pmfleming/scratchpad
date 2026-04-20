@@ -50,7 +50,9 @@ impl FileController {
             let message = app.tabs()[index]
                 .active_buffer()
                 .disk_status_message()
-                .unwrap_or_else(|| "Resolve the on-disk state before renaming this file.".to_owned());
+                .unwrap_or_else(|| {
+                    "Resolve the on-disk state before renaming this file.".to_owned()
+                });
             app.set_warning_status(message);
             return false;
         }
@@ -66,7 +68,8 @@ impl FileController {
             None => None,
         };
 
-        if let (Some(current_path), Some(target_path)) = (current_path.as_ref(), target_path.as_ref())
+        if let (Some(current_path), Some(target_path)) =
+            (current_path.as_ref(), target_path.as_ref())
             && current_path != target_path
             && let Err(error) = FileService::rename_path(current_path, target_path)
         {
@@ -93,7 +96,12 @@ impl FileController {
             }
         }
 
-        app.record_transaction(action_label, vec![normalized_name.clone()], details, snapshot);
+        app.record_transaction(
+            action_label,
+            vec![normalized_name.clone()],
+            details,
+            snapshot,
+        );
         app.set_info_status(format!("Renamed {current_name} to {normalized_name}."));
         app.mark_session_dirty();
         let _ = app.persist_session_now();
@@ -191,6 +199,9 @@ mod tests {
         assert_eq!(buffer.path.as_deref(), Some(new_path.as_path()));
         assert!(!old_path.exists());
         assert!(new_path.exists());
-        assert_eq!(fs::read_to_string(new_path).expect("read renamed file"), "hello");
+        assert_eq!(
+            fs::read_to_string(new_path).expect("read renamed file"),
+            "hello"
+        );
     }
 }

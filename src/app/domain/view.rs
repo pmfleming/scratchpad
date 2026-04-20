@@ -1,5 +1,5 @@
 use crate::app::domain::{BufferId, RenderedLayout};
-use eframe::egui::text::CCursorRange;
+use crate::app::ui::editor_content::native_editor::CursorRange;
 use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -20,8 +20,9 @@ pub struct EditorViewState {
     pub show_line_numbers: bool,
     pub show_control_chars: bool,
     pub latest_layout: Option<RenderedLayout>,
-    pub cursor_range: Option<CCursorRange>,
-    pub pending_cursor_range: Option<CCursorRange>,
+    pub cursor_range: Option<CursorRange>,
+    pub pending_cursor_range: Option<CursorRange>,
+    pub scroll_to_cursor: bool,
     pub search_highlights: SearchHighlightState,
 }
 
@@ -35,6 +36,7 @@ impl EditorViewState {
             latest_layout: None,
             cursor_range: None,
             pending_cursor_range: None,
+            scroll_to_cursor: false,
             search_highlights: SearchHighlightState::default(),
         }
     }
@@ -54,6 +56,7 @@ impl EditorViewState {
             latest_layout: None,
             cursor_range: None,
             pending_cursor_range: None,
+            scroll_to_cursor: false,
             search_highlights: SearchHighlightState::default(),
         }
     }

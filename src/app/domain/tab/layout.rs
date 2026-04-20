@@ -22,7 +22,10 @@ impl WorkspaceTab {
     ) -> Option<ViewId> {
         let (active_buffer_id, has_control_chars) = {
             let active_buffer = self.active_buffer();
-            (active_buffer.id, active_buffer.artifact_summary.has_control_chars())
+            (
+                active_buffer.id,
+                active_buffer.artifact_summary.has_control_chars(),
+            )
         };
         self.split_view_for_buffer(
             self.active_view_id,

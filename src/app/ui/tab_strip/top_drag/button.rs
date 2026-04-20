@@ -1,13 +1,14 @@
 use super::geometry::top_drag_button_position;
 use crate::app::app_state::ScratchpadApp;
 use crate::app::services::settings_store::TabListPosition;
-use crate::app::theme::{
-    BUTTON_SIZE, HEADER_HEIGHT, action_bg, action_hover_bg, text_primary,
-};
+use crate::app::theme::{BUTTON_SIZE, HEADER_HEIGHT, action_bg, action_hover_bg, text_primary};
 use eframe::egui;
 
 pub(super) fn show_top_drag_bar(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    if !matches!(app.tab_list_position(), TabListPosition::Left | TabListPosition::Right) {
+    if !matches!(
+        app.tab_list_position(),
+        TabListPosition::Left | TabListPosition::Right
+    ) {
         return;
     }
 

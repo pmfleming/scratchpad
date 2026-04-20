@@ -1,4 +1,3 @@
-use eframe::egui::TextBuffer;
 use scratchpad::app::domain::{BufferState, SplitAxis, WorkspaceTab};
 use scratchpad::app::services::file_service::FileService;
 use scratchpad::app::services::session_store::SessionStore;
@@ -285,10 +284,10 @@ fn run_large_paste_cycle(insert_bytes: usize) -> usize {
         None,
     );
     let inserted = plain_text_of_size(insert_bytes);
-    let midpoint = buffer.text().chars().count() / 2;
-    buffer.document_mut().insert_text(&inserted, midpoint);
+    let midpoint = buffer.document().piece_tree().len_chars() / 2;
+    buffer.document_mut().insert_direct(midpoint, &inserted);
     buffer.refresh_text_metadata();
-    black_box(buffer.line_count + buffer.text().len())
+    black_box(buffer.line_count + buffer.document().piece_tree().len_bytes())
 }
 
 fn run_tab_count_cycle(tab_count: usize) -> usize {

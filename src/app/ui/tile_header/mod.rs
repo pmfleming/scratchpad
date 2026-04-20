@@ -31,10 +31,7 @@ pub(crate) fn render_tile_header(
         .buffer_for_view(request.view_id)
         .map(|buffer| buffer.display_name())
         .unwrap_or_else(|| app.tabs()[request.tab_index].display_name());
-    let content_preview = app.tabs()[request.tab_index]
-        .buffer_for_view(request.view_id)
-        .map(|buffer| buffer.text().to_owned())
-        .unwrap_or_default();
+    let preview_lines = preview_lines_for_view(&app.tabs()[request.tab_index], request.view_id);
     let split_handler =
         TileSplitHandler::new(ui, request.tab_index, request.view_id, request.tile_rect);
     let controls_visible = control_visibility(ui, &split_handler, request.tile_rect);
@@ -82,7 +79,7 @@ pub(crate) fn render_tile_header(
         *state.preview_overlay = Some(split_handler.make_preview(
             preview_state,
             title.to_owned(),
-            &content_preview,
+            preview_lines,
             rects.split_hit,
         ));
     }
@@ -103,6 +100,18 @@ pub(crate) fn render_tile_header(
     {
         state.actions.push(TileAction::Close(request.view_id));
     }
+}
+
+fn preview_lines_for_view(tab: &crate::app::domain::WorkspaceTab, view_id: ViewId) -> Vec<String> {
+    tab.view(view_id)
+        .and_then(|view| view.latest_layout.as_ref())
+        .and_then(|layout| layout.visible_text.as_ref())
+        .map(split::build_preview_lines_for_window)
+        .or_else(|| {
+            tab.buffer_for_view(view_id)
+                .map(|buffer| split::build_preview_lines(&buffer.text()))
+        })
+        .unwrap_or_else(|| split::build_preview_lines(""))
 }
 
 struct TileHeaderRects {

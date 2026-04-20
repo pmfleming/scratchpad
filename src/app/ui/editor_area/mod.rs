@@ -210,7 +210,6 @@ fn render_pane_node(
                 rect,
                 *axis,
                 *ratio,
-                context.app.editor_background_color(),
                 current_path,
                 &mut context.outcome.actions,
             );

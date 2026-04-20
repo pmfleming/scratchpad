@@ -240,7 +240,9 @@ impl RectIntersections for egui::Rect {
 
 #[cfg(test)]
 mod tests {
-    use super::{preferred_top_split_center_x, resolve_drag_button_center_x, top_tile_controls_rect};
+    use super::{
+        preferred_top_split_center_x, resolve_drag_button_center_x, top_tile_controls_rect,
+    };
     use crate::app::domain::{BufferState, PaneNode, SplitAxis, WorkspaceTab};
     use crate::app::theme::BUTTON_SIZE;
     use eframe::egui;

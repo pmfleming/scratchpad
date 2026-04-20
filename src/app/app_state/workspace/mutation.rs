@@ -3,6 +3,16 @@ use crate::app::domain::BufferId;
 use crate::app::transactions::TransactionSnapshot;
 
 impl ScratchpadApp {
+    pub(crate) fn active_buffer_can_undo_text_operation(&self) -> bool {
+        self.active_tab()
+            .is_some_and(|tab| tab.active_buffer().document().operation_undo_depth() > 0)
+    }
+
+    pub(crate) fn active_buffer_can_redo_text_operation(&self) -> bool {
+        self.active_tab()
+            .is_some_and(|tab| tab.active_buffer().document().operation_redo_depth() > 0)
+    }
+
     pub(crate) fn finalize_active_buffer_text_mutation(
         &mut self,
         active_tab_index: usize,
@@ -19,7 +29,7 @@ impl ScratchpadApp {
             }
         }
         tab.buffer.is_dirty = true;
-        let current_text = tab.buffer.text().to_owned();
+        let current_text = tab.buffer.text();
         let warning_message = tab
             .buffer
             .artifact_summary
@@ -41,5 +51,60 @@ impl ScratchpadApp {
         self.mark_search_dirty();
         self.mark_session_dirty();
         self.note_settings_toml_edit(active_tab_index);
+    }
+
+    pub(crate) fn undo_active_buffer_text_operation(&mut self) -> bool {
+        self.apply_active_buffer_text_operation(true)
+    }
+
+    pub(crate) fn redo_active_buffer_text_operation(&mut self) -> bool {
+        self.apply_active_buffer_text_operation(false)
+    }
+
+    fn apply_active_buffer_text_operation(&mut self, undo: bool) -> bool {
+        let active_tab_index = self.active_tab_index();
+        let active_buffer_id = match self.active_tab() {
+            Some(tab) => tab.active_buffer().id,
+            None => return false,
+        };
+        let active_buffer_label = match self.active_buffer_transaction_label() {
+            Some(label) => label,
+            None => return false,
+        };
+        let transaction_snapshot = self.capture_transaction_snapshot();
+
+        let selection = {
+            let tab = &mut self.tabs_mut()[active_tab_index];
+            let Some(selection) = ({
+                let buffer = &mut tab.buffer;
+                if undo {
+                    buffer.undo_last_text_operation_native()
+                } else {
+                    buffer.redo_last_text_operation_native()
+                }
+            }) else {
+                return false;
+            };
+
+            if let Some(view) = tab.active_view_mut() {
+                view.cursor_range = Some(selection);
+                view.pending_cursor_range = Some(selection);
+            }
+            selection
+        };
+
+        self.finalize_active_buffer_text_mutation(
+            active_tab_index,
+            active_buffer_id,
+            active_buffer_label.clone(),
+            transaction_snapshot,
+        );
+        self.refresh_search_state();
+        self.select_next_active_buffer_match_from(selection.primary.index);
+        let action = if undo { "Undid" } else { "Redid" };
+        self.set_info_status(format!(
+            "{action} last text operation in {active_buffer_label}."
+        ));
+        true
     }
 }

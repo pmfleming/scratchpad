@@ -252,7 +252,9 @@ fn render_status_bar_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     inner_select_row(
         ui,
         "Status bar",
-        Some("Show or hide the bottom status strip with file, line, encoding, and utility controls."),
+        Some(
+            "Show or hide the bottom status strip with file, line, encoding, and utility controls.",
+        ),
         |ui| {
             let mut visible = app.status_bar_visible();
             toggle_control(ui, &mut visible);

@@ -366,6 +366,7 @@ pub(crate) struct BufferTextMetadata {
     pub(crate) line_count: usize,
     pub(crate) artifact_summary: TextArtifactSummary,
     pub(crate) preferred_line_ending: LineEndingStyle,
+    pub(crate) has_non_compliant_characters: bool,
 }
 
 pub(crate) fn buffer_text_metadata(
@@ -374,9 +375,11 @@ pub(crate) fn buffer_text_metadata(
 ) -> BufferTextMetadata {
     let inspection = TextInspection::inspect(text);
     format.apply_inspection(&inspection);
+    let has_non_compliant = format.has_non_compliant_characters(text);
     BufferTextMetadata {
         line_count: inspection.line_count,
         artifact_summary: inspection.artifact_summary,
         preferred_line_ending: format.preferred_line_ending_style(),
+        has_non_compliant_characters: has_non_compliant,
     }
 }

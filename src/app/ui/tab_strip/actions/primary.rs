@@ -18,33 +18,25 @@ pub(super) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         egui::vec2(width, TAB_HEIGHT),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
-            primary_action_button(
-                ui,
-                egui_phosphor::regular::FOLDER_OPEN,
-                "Open File",
-                || app.handle_command(AppCommand::OpenFile),
-            );
-            ui.add_space(PRIMARY_ACTION_SPACING);
-            primary_action_button(
-                ui,
-                egui_phosphor::regular::FLOPPY_DISK,
-                "Save As",
-                || app.handle_command(AppCommand::SaveFileAs),
-            );
-            ui.add_space(PRIMARY_ACTION_SPACING);
-            primary_action_button(ui, egui_phosphor::regular::MAGNIFYING_GLASS, search_tooltip, || {
-                app.toggle_search()
+            primary_action_button(ui, egui_phosphor::regular::FOLDER_OPEN, "Open File", || {
+                app.handle_command(AppCommand::OpenFile)
             });
+            ui.add_space(PRIMARY_ACTION_SPACING);
+            primary_action_button(ui, egui_phosphor::regular::FLOPPY_DISK, "Save As", || {
+                app.handle_command(AppCommand::SaveFileAs)
+            });
+            ui.add_space(PRIMARY_ACTION_SPACING);
+            primary_action_button(
+                ui,
+                egui_phosphor::regular::MAGNIFYING_GLASS,
+                search_tooltip,
+                || app.toggle_search(),
+            );
         },
     );
 }
 
-fn primary_action_button(
-    ui: &mut egui::Ui,
-    icon: &str,
-    tooltip: &str,
-    on_click: impl FnOnce(),
-) {
+fn primary_action_button(ui: &mut egui::Ui, icon: &str, tooltip: &str, on_click: impl FnOnce()) {
     if phosphor_button(
         ui,
         icon,

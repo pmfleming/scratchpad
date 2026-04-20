@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-use eframe::egui::TextBuffer;
 use scratchpad::app::domain::LineEndingStyle;
 use scratchpad::app::domain::TextDocument;
 use scratchpad::app::services::file_service::FileService;
@@ -149,10 +148,11 @@ fn preserves_loaded_crlf_style_when_editing_and_saving() {
         read.content.clone(),
         read.format.preferred_line_ending_style(),
     );
-    let insert_at = document.as_str().chars().count();
+    let insert_at = document.piece_tree().len_chars();
 
-    TextBuffer::insert_text(&mut document, "gamma\n", insert_at);
-    FileService::write_file_with_format(&path, document.as_str(), &read.format).unwrap();
+    document.insert_direct(insert_at, "gamma\r\n");
+    let text = document.extract_text();
+    FileService::write_file_with_format(&path, &text, &read.format).unwrap();
 
     assert_eq!(fs::read(&path).unwrap(), b"alpha\r\nbeta\r\ngamma\r\n");
 }

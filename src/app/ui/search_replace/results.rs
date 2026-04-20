@@ -86,7 +86,10 @@ fn results_summary(state: &SearchStripState) -> String {
     match &state.progress.status {
         SearchStatus::InvalidQuery(_) => return "The current query is invalid.".to_owned(),
         SearchStatus::Error(message) => return message.clone(),
-        SearchStatus::Idle | SearchStatus::Searching | SearchStatus::Ready | SearchStatus::NoMatches => {}
+        SearchStatus::Idle
+        | SearchStatus::Searching
+        | SearchStatus::Ready
+        | SearchStatus::NoMatches => {}
     }
 
     if state.progress.displayed_match_count < state.progress.total_match_count {

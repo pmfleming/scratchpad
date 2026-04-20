@@ -13,7 +13,6 @@ pub fn render_split_divider(
     rect: egui::Rect,
     axis: SplitAxis,
     ratio: f32,
-    gutter_fill: egui::Color32,
     path: SplitPath,
     actions: &mut Vec<TileAction>,
 ) {
@@ -23,7 +22,6 @@ pub fn render_split_divider(
 
     let style = divider_style(ui, &response);
     let handle_rect = divider_handle_rect(divider_center, axis);
-    paint_divider_gutter(ui.painter(), rect, divider_center, axis, gutter_fill);
     paint_divider_line(ui.painter(), rect, divider_center, axis, style.line_fill);
     paint_divider_handle(ui.painter(), handle_rect, axis, &style);
 }
@@ -108,24 +106,6 @@ fn paint_divider_line(
         ),
     };
     painter.rect_filled(line_rect, 0.0, line_fill);
-}
-
-fn paint_divider_gutter(
-    painter: &egui::Painter,
-    rect: egui::Rect,
-    divider_center: egui::Pos2,
-    axis: SplitAxis,
-    gutter_fill: egui::Color32,
-) {
-    let gutter_rect = match axis {
-        SplitAxis::Vertical => {
-            egui::Rect::from_center_size(divider_center, egui::vec2(TILE_GAP, rect.height()))
-        }
-        SplitAxis::Horizontal => {
-            egui::Rect::from_center_size(divider_center, egui::vec2(rect.width(), TILE_GAP))
-        }
-    };
-    painter.rect_filled(gutter_rect, 0.0, gutter_fill);
 }
 
 fn paint_divider_handle(

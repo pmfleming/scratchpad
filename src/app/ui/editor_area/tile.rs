@@ -105,6 +105,7 @@ fn render_tile_body(
                 scroll_bar_visibility: editor_scroll_bar_visibility(ui.ctx()),
                 content_style: EditorContentStyle {
                     editor_gutter,
+                    is_active: request.is_active,
                     previous_layout: previous_layout.as_ref(),
                     text_edit: TextEditOptions::new(
                         request_focus,

@@ -105,12 +105,7 @@ fn render_restore_conflict_dialog(
     });
 }
 
-fn restore_conflict_button(
-    ui: &mut egui::Ui,
-    icon: &str,
-    label: &str,
-    tooltip: &str,
-) -> bool {
+fn restore_conflict_button(ui: &mut egui::Ui, icon: &str, label: &str, tooltip: &str) -> bool {
     ui.add(
         egui::Button::new(
             egui::RichText::new(format!("{icon} {label}"))

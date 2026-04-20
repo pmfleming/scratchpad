@@ -10,6 +10,8 @@ pub(super) struct SearchStripActions {
     pub(super) close_requested: bool,
     pub(super) next_requested: bool,
     pub(super) previous_requested: bool,
+    pub(super) undo_requested: bool,
+    pub(super) redo_requested: bool,
     pub(super) replace_current_requested: bool,
     pub(super) replace_all_requested: bool,
     pub(super) selected_match_index: Option<usize>,
@@ -28,6 +30,8 @@ pub(super) struct SearchStripState {
     pub(super) progress: SearchProgressSnapshot,
     pub(super) result_groups: Vec<SearchResultGroup>,
     pub(super) replace_availability: SearchReplaceAvailability,
+    pub(super) can_undo_text_operation: bool,
+    pub(super) can_redo_text_operation: bool,
     requested_focus: Option<SearchFocusTarget>,
     retained_focus: Option<SearchFocusTarget>,
 }
@@ -59,6 +63,8 @@ impl SearchStripState {
             progress: SearchProgressSnapshot::from_progress(progress),
             result_groups: app.search_result_groups().to_vec(),
             replace_availability: app.search_replace_availability(),
+            can_undo_text_operation: app.active_buffer_can_undo_text_operation(),
+            can_redo_text_operation: app.active_buffer_can_redo_text_operation(),
             requested_focus,
             retained_focus: requested_focus,
         }

@@ -1,3 +1,4 @@
+use super::HeaderLayout;
 use super::actions::{show_caption_controls, show_primary_actions};
 use super::entries::{show_tab_region, show_vertical_tab_region};
 use super::layout::{
@@ -6,7 +7,6 @@ use super::layout::{
     vertical_tab_panel,
 };
 use super::outcome::apply_tab_outcome;
-use super::HeaderLayout;
 use crate::app::app_state::ScratchpadApp;
 use crate::app::services::settings_store::TabListPosition;
 use eframe::egui;

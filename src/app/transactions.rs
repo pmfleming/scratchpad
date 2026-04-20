@@ -279,7 +279,7 @@ impl ScratchpadApp {
         let before_text = snapshot_before
             .tab_manager
             .active_tab()
-            .map(|tab| tab.active_buffer().text().to_owned())
+            .map(|tab| tab.active_buffer().text())
             .unwrap_or_default();
         let next_label = text_edit_preview_from_before(&before_text, &current_text)
             .unwrap_or_else(|| "Edit".to_owned());

@@ -1,6 +1,5 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use eframe::egui;
-use eframe::egui::TextBuffer;
 use rand::RngExt;
 use scratchpad::app::domain::{
     BufferState, RenderedLayout, SearchHighlightState, SplitAxis, WorkspaceTab,
@@ -221,7 +220,7 @@ fn bench_large_file_paste_latency(c: &mut Criterion) {
                         (buffer, midpoint, insert_text.clone())
                     },
                     |(mut buffer, midpoint, pasted)| {
-                        buffer.document_mut().insert_text(&pasted, midpoint);
+                        buffer.document_mut().insert_direct(midpoint, &pasted);
                         buffer.refresh_text_metadata();
                         criterion::black_box(buffer.line_count);
                         criterion::black_box(buffer.text().len());

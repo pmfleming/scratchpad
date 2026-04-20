@@ -101,10 +101,10 @@ pub(crate) fn icon_button(
             .font(egui::FontId::proportional(icon_size))
             .color(text(ui)),
     )
-        .min_size(size)
-        .fill(fill)
-        .stroke(egui::Stroke::new(1.0, border(ui)))
-        .corner_radius(egui::CornerRadius::same(8));
+    .min_size(size)
+    .fill(fill)
+    .stroke(egui::Stroke::new(1.0, border(ui)))
+    .corner_radius(egui::CornerRadius::same(8));
 
     ui.add_enabled(enabled, button).on_hover_text(tooltip)
 }

@@ -1,5 +1,5 @@
-use super::helpers::preview_for_match;
 use super::{SearchMatch, SearchResultEntry, SearchResultGroup, SearchStatus};
+use crate::app::domain::buffer::PieceTreeLite;
 use crate::app::domain::{BufferId, ViewId};
 use crate::app::services::search::{self, SearchOptions};
 use std::ops::Range;
@@ -33,8 +33,9 @@ pub(super) struct SearchTargetSnapshot {
     pub(super) buffer_id: BufferId,
     pub(super) tab_label: String,
     pub(super) buffer_label: String,
-    pub(super) text: String,
-    pub(super) search_range: Option<Range<usize>>,
+    pub(super) search_text: String,
+    pub(super) search_offset: usize,
+    pub(super) preview_tree: PieceTreeLite,
 }
 
 #[derive(Default)]
@@ -87,7 +88,8 @@ impl SearchResultAccumulator {
 
         let mut entries = Vec::with_capacity(ranges.len().min(remaining_capacity));
         for (offset, range) in ranges.iter().take(remaining_capacity).enumerate() {
-            let (line_number, column_number, preview) = preview_for_match(&target.text, range);
+            let (line_number, column_number, preview) =
+                target.preview_tree.preview_for_match(range);
             entries.push(SearchResultEntry {
                 match_index: start_index + offset,
                 buffer_id: target.buffer_id,
@@ -140,9 +142,8 @@ pub(super) fn process_search_request(
     let mut results = SearchResultAccumulator::default();
 
     for target in request.targets {
-        let (search_text, offset) = target_search_text(&target);
         let outcome = search::search_text_interruptible(
-            &search_text,
+            &target.search_text,
             &request.query,
             request.options,
             || latest_generation.load(Ordering::Relaxed) == request.generation,
@@ -159,7 +160,7 @@ pub(super) fn process_search_request(
         let ranges = outcome
             .matches
             .into_iter()
-            .map(|range| range.start + offset..range.end + offset)
+            .map(|range| range.start + target.search_offset..range.end + target.search_offset)
             .collect::<Vec<_>>();
         if ranges.is_empty() {
             continue;
@@ -174,18 +175,4 @@ pub(super) fn process_search_request(
         SearchStatus::Ready
     };
     Some(result)
-}
-
-fn target_search_text(target: &SearchTargetSnapshot) -> (String, usize) {
-    let Some(search_range) = &target.search_range else {
-        return (target.text.clone(), 0);
-    };
-
-    let chars = target.text.chars().collect::<Vec<_>>();
-    let safe_start = search_range.start.min(chars.len());
-    let safe_end = search_range.end.min(chars.len());
-    (
-        chars[safe_start..safe_end].iter().collect::<String>(),
-        safe_start,
-    )
 }
