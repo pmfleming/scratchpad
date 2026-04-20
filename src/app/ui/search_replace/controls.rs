@@ -15,7 +15,7 @@ use egui_phosphor::regular::{
 const CASE_SENSITIVE_ICON: &str = "Aa";
 const REGEX_ICON: &str = ".*";
 const INPUT_HEIGHT: f32 = 36.0;
-const CARD_ICON_SIZE: f32 = 18.0;
+const ICON_SIZE: f32 = 20.0;
 const CONTROL_BUTTON_HEIGHT: f32 = 34.0;
 const ICON_BUTTON_SIZE: egui::Vec2 = egui::vec2(36.0, CONTROL_BUTTON_HEIGHT);
 const SEARCH_CARD_CORNER_RADIUS: u8 = 12;
@@ -54,26 +54,38 @@ pub(super) fn show_search_controls(
 fn render_search_pill(
     ui: &mut egui::Ui,
     state: &mut SearchStripState,
-    actions: &mut SearchStripActions,
+    _actions: &mut SearchStripActions,
     find_input_id: egui::Id,
 ) -> egui::Response {
     search_card(ui, |ui| {
         ui.vertical(|ui| {
-            if render_search_heading(ui) {
-                actions.close_requested = true;
-            }
-            ui.add_space(8.0);
-
-            let find_response = compact_text_field(
-                ui,
-                &mut state.query,
-                find_input_id,
-                "Search",
-                ui.available_width(),
-            );
+            // Icon + text field on the same row
+            let find_response = ui
+                .horizontal(|ui| {
+                    ui.allocate_ui(egui::vec2(28.0, INPUT_HEIGHT), |ui| {
+                        ui.with_layout(
+                            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                            |ui| {
+                                ui.label(
+                                    egui::RichText::new(MAGNIFYING_GLASS)
+                                        .font(egui::FontId::proportional(ICON_SIZE))
+                                        .color(text_muted(ui)),
+                                );
+                            },
+                        );
+                    });
+                    compact_text_field(
+                        ui,
+                        &mut state.query,
+                        find_input_id,
+                        "Search",
+                        ui.available_width(),
+                    )
+                })
+                .inner;
             state.sync_focus(&find_response, SearchFocusTarget::FindInput);
 
-            ui.add_space(8.0);
+            ui.add_space(4.0);
             ui.allocate_ui_with_layout(
                 egui::vec2(ui.available_width(), CONTROL_BUTTON_HEIGHT),
                 egui::Layout::right_to_left(egui::Align::Center),
@@ -126,17 +138,35 @@ fn render_replace_pill(
             return None;
         }
 
-        ui.add_space(8.0);
-        let replace_response = compact_text_field(
-            ui,
-            &mut state.replacement,
-            replace_input_id,
-            "Replace",
-            ui.available_width(),
-        );
+        ui.add_space(4.0);
+
+        // Icon + text field on the same row
+        let replace_response = ui
+            .horizontal(|ui| {
+                ui.allocate_ui(egui::vec2(28.0, INPUT_HEIGHT), |ui| {
+                    ui.with_layout(
+                        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                        |ui| {
+                            ui.label(
+                                egui::RichText::new(ARROW_CLOCKWISE)
+                                    .font(egui::FontId::proportional(ICON_SIZE))
+                                    .color(text_muted(ui)),
+                            );
+                        },
+                    );
+                });
+                compact_text_field(
+                    ui,
+                    &mut state.replacement,
+                    replace_input_id,
+                    "Replace",
+                    ui.available_width(),
+                )
+            })
+            .inner;
         state.sync_focus(&replace_response, SearchFocusTarget::ReplaceInput);
 
-        ui.add_space(8.0);
+        ui.add_space(4.0);
         ui.allocate_ui_with_layout(
             egui::vec2(ui.available_width(), CONTROL_BUTTON_HEIGHT),
             egui::Layout::right_to_left(egui::Align::Center),
@@ -225,31 +255,6 @@ fn render_replace_heading(ui: &mut egui::Ui, replace_open: &mut bool) {
             }
         });
     });
-}
-
-fn render_search_heading(ui: &mut egui::Ui) -> bool {
-    let mut close_requested = false;
-    ui.horizontal(|ui| {
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(MAGNIFYING_GLASS)
-                    .size(CARD_ICON_SIZE)
-                    .color(text_muted(ui)),
-            );
-            ui.add_space(10.0);
-            ui.label(
-                egui::RichText::new("Search")
-                    .size(15.0)
-                    .color(text_primary(ui)),
-            );
-        });
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if callout::close_button(ui, "Close search").clicked() {
-                close_requested = true;
-            }
-        });
-    });
-    close_requested
 }
 
 fn pill_heading_button(ui: &mut egui::Ui, icon: &str, title: &str) -> egui::Response {

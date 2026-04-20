@@ -34,6 +34,10 @@ struct ActiveStatusDetails {
 }
 
 pub(crate) fn show_status_bar(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    if let Some(tab) = app.active_tab_mut() {
+        tab.buffer.recheck_encoding_compliance();
+    }
+
     egui::Panel::bottom("status").show_inside(ui, |ui| {
         ui.horizontal(|ui| {
             if app.showing_settings() {

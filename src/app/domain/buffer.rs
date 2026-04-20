@@ -3,7 +3,7 @@ mod document;
 mod piece_tree;
 mod state;
 
-pub(crate) use analysis::{BufferTextMetadata, buffer_text_metadata};
+pub(crate) use analysis::{BufferTextMetadata, buffer_text_metadata, buffer_text_metadata_from_piece_tree};
 pub use analysis::{
     EncodingSource, LineEndingCounts, LineEndingStyle, TextArtifactSummary, TextFormatMetadata,
     analyze_line_endings, display_line_count, platform_default_line_ending,

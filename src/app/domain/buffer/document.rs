@@ -57,8 +57,7 @@ impl TextDocument {
 
     /// Extract the full text content as a new String from the piece tree.
     pub fn extract_text(&self) -> String {
-        self.piece_tree
-            .extract_range(0..self.piece_tree.len_chars())
+        self.piece_tree.extract_text()
     }
 
     pub fn piece_tree(&self) -> &PieceTreeLite {

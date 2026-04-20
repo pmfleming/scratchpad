@@ -183,17 +183,36 @@ where
         Err(error) => return Some(SearchOutcome::with_error(error)),
     };
 
-    let byte_to_char = byte_to_char_map(text);
-    let whole_word_matcher = WholeWordMatcher::new(text, options.whole_word);
+    let ascii = text.is_ascii();
+    let byte_to_char = if ascii {
+        Vec::new()
+    } else {
+        byte_to_char_map(text)
+    };
+    let whole_word_matcher = if ascii {
+        WholeWordMatcher::disabled()
+    } else {
+        WholeWordMatcher::new(text, options.whole_word)
+    };
     let mut matches = Vec::new();
 
     for (step, search_match) in regex.find_iter(text).enumerate() {
         if should_abort(step, true, &mut should_continue) {
             return None;
         }
-        let start = byte_to_char[search_match.start()];
-        let end = byte_to_char[search_match.end()];
-        if whole_word_matcher.allows(start, end) {
+        let (start, end) = if ascii {
+            (search_match.start(), search_match.end())
+        } else {
+            (
+                byte_to_char[search_match.start()],
+                byte_to_char[search_match.end()],
+            )
+        };
+        if ascii {
+            if !options.whole_word || is_ascii_whole_word_match(text.as_bytes(), start, end) {
+                matches.push(start..end);
+            }
+        } else if whole_word_matcher.allows(start, end) {
             matches.push(start..end);
         }
     }
@@ -209,6 +228,20 @@ fn compile_regex(query: &str, options: SearchOptions) -> Result<regex::Regex, Se
 }
 
 fn find_regex_matches(text: &str, regex: &regex::Regex, whole_word: bool) -> Vec<Range<usize>> {
+    if text.is_ascii() {
+        return regex
+            .find_iter(text)
+            .filter_map(|search_match| {
+                let start = search_match.start();
+                let end = search_match.end();
+                if whole_word && !is_ascii_whole_word_match(text.as_bytes(), start, end) {
+                    return None;
+                }
+                Some(start..end)
+            })
+            .collect();
+    }
+
     let byte_to_char = byte_to_char_map(text);
     let whole_word_matcher = WholeWordMatcher::new(text, whole_word);
     regex
@@ -232,6 +265,26 @@ where
 {
     if query.len() > text.len() {
         return Some(Vec::new());
+    }
+
+    if text.is_ascii() {
+        let text_bytes = text.as_bytes();
+        let query_bytes = query.as_bytes();
+        let mut matches = Vec::new();
+        for start in 0..=text_bytes.len() - query_bytes.len() {
+            if should_abort(start, true, &mut should_continue) {
+                return None;
+            }
+            let end = start + query_bytes.len();
+            if &text_bytes[start..end] != query_bytes {
+                continue;
+            }
+            if whole_word && !is_ascii_whole_word_match(text_bytes, start, end) {
+                continue;
+            }
+            matches.push(start..end);
+        }
+        return finalize_matches(matches, true, &mut should_continue);
     }
 
     let byte_to_char = byte_to_char_map(text);
@@ -312,6 +365,19 @@ pub fn previous_match_index(total_matches: usize, current: Option<usize>) -> Opt
 }
 
 fn find_matches_case_sensitive(text: &str, query: &str, whole_word: bool) -> Vec<Range<usize>> {
+    if text.is_ascii() {
+        return text
+            .match_indices(query)
+            .filter_map(|(start, candidate)| {
+                let end = start + candidate.len();
+                if whole_word && !is_ascii_whole_word_match(text.as_bytes(), start, end) {
+                    return None;
+                }
+                Some(start..end)
+            })
+            .collect();
+    }
+
     let byte_to_char = byte_to_char_map(text);
     let whole_word_matcher = WholeWordMatcher::new(text, whole_word);
 
@@ -441,6 +507,10 @@ impl WholeWordMatcher {
         Self {
             chars: enabled.then(|| text.chars().collect()),
         }
+    }
+
+    fn disabled() -> Self {
+        Self { chars: None }
     }
 
     fn allows(&self, start: usize, end: usize) -> bool {

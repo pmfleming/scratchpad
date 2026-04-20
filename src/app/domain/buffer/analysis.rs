@@ -1,6 +1,8 @@
 use encoding_rs::Encoding;
 use serde::{Deserialize, Serialize};
 
+use super::piece_tree::PieceTreeLite;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LineEndingStyle {
@@ -111,6 +113,69 @@ impl TextInspection {
         }
 
         let line_endings = line_endings.unwrap_or_else(|| line_ending_style(line_ending_counts));
+        artifact_summary.has_carriage_returns =
+            line_endings != LineEndingStyle::Cr && line_ending_counts.cr > 0;
+
+        Self {
+            line_count,
+            line_endings,
+            line_ending_counts,
+            artifact_summary,
+            is_ascii_subset,
+        }
+    }
+
+    fn inspect_spans<'a>(spans: impl Iterator<Item = &'a str>) -> Self {
+        let mut line_count = 1usize;
+        let mut line_ending_counts = LineEndingCounts::default();
+        let mut artifact_summary = TextArtifactSummary::default();
+        let mut is_ascii_subset = true;
+        let mut pending_cr = false;
+
+        for span in spans {
+            for ch in span.chars() {
+                if pending_cr {
+                    pending_cr = false;
+                    if ch == '\n' {
+                        line_ending_counts.crlf += 1;
+                        line_count += 1;
+                        continue;
+                    } else {
+                        line_ending_counts.cr += 1;
+                        line_count += 1;
+                    }
+                }
+
+                is_ascii_subset &= ch.is_ascii();
+                match ch {
+                    '\r' => {
+                        pending_cr = true;
+                    }
+                    '\n' => {
+                        line_ending_counts.lf += 1;
+                        line_count += 1;
+                    }
+                    '\u{1B}' => {
+                        artifact_summary.has_ansi_sequences = true;
+                    }
+                    '\u{0008}' => {
+                        artifact_summary.has_backspaces = true;
+                    }
+                    '\t' => {}
+                    _ if ch.is_control() => {
+                        artifact_summary.other_control_count += 1;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if pending_cr {
+            line_ending_counts.cr += 1;
+            line_count += 1;
+        }
+
+        let line_endings = line_ending_style(line_ending_counts);
         artifact_summary.has_carriage_returns =
             line_endings != LineEndingStyle::Cr && line_ending_counts.cr > 0;
 
@@ -249,6 +314,39 @@ impl TextFormatMetadata {
         had_replacements
     }
 
+    pub fn has_non_compliant_characters_spans<'a>(
+        &self,
+        spans: impl Iterator<Item = &'a str>,
+    ) -> bool {
+        let Some(encoding) = Encoding::for_label(self.encoding_name.as_bytes()) else {
+            return true;
+        };
+
+        if encoding == encoding_rs::UTF_8 {
+            return false;
+        }
+
+        let mut encoder = encoding.new_encoder();
+        let mut dst = [0u8; 4096];
+        for span in spans {
+            let mut src = span;
+            loop {
+                let (result, read, _written, had_errors) =
+                    encoder.encode_from_utf8(src, &mut dst, false);
+                if had_errors {
+                    return true;
+                }
+                src = &src[read..];
+                if result == encoding_rs::CoderResult::InputEmpty {
+                    break;
+                }
+            }
+        }
+        let (_result, _read, _written, had_errors) =
+            encoder.encode_from_utf8("", &mut dst, true);
+        had_errors
+    }
+
     fn apply_inspection(&mut self, inspection: &TextInspection) {
         self.line_ending_counts = inspection.line_ending_counts;
         self.line_endings = inspection.line_endings;
@@ -381,5 +479,20 @@ pub(crate) fn buffer_text_metadata(
         artifact_summary: inspection.artifact_summary,
         preferred_line_ending: format.preferred_line_ending_style(),
         has_non_compliant_characters: has_non_compliant,
+    }
+}
+
+pub(crate) fn buffer_text_metadata_from_piece_tree(
+    tree: &PieceTreeLite,
+    format: &mut TextFormatMetadata,
+) -> BufferTextMetadata {
+    let spans = tree.spans_for_range(0..tree.len_chars());
+    let inspection = TextInspection::inspect_spans(spans.map(|s| s.text));
+    format.apply_inspection(&inspection);
+    BufferTextMetadata {
+        line_count: inspection.line_count,
+        artifact_summary: inspection.artifact_summary,
+        preferred_line_ending: format.preferred_line_ending_style(),
+        has_non_compliant_characters: false,
     }
 }

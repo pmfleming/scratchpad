@@ -262,7 +262,9 @@ impl SearchState {
         self.previous_active_match = self
             .active_match_index
             .and_then(|index| self.matches.get(index).cloned());
-        self.clear_match_results();
+        // Keep old result_groups visible until new results arrive (avoids flicker).
+        // Only clear the active match index so highlights don't point at stale data.
+        self.active_match_index = None;
     }
 
     fn search_options(&self) -> SearchOptions {

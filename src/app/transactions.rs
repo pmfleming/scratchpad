@@ -114,6 +114,15 @@ impl ScratchpadApp {
         }
     }
 
+    pub(crate) fn has_coalescable_text_transaction(&self, buffer_id: BufferId) -> bool {
+        self.pending_text_transaction
+            .as_ref()
+            .is_some_and(|pending| {
+                pending.buffer_id == buffer_id
+                    && Instant::now().duration_since(pending.last_edit_at) <= TEXT_EDIT_GROUP_IDLE
+            })
+    }
+
     pub(crate) fn record_transaction(
         &mut self,
         action_label: impl Into<String>,

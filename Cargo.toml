@@ -7,10 +7,8 @@ default-run = "scratchpad"
 [dependencies]
 eframe = "0.34.1"
 egui-phosphor = "0.12.0"
-image = { version = "0.25", default-features = false, features = ["png"] }
 rfd = "0.14"
 regex = "1.11"
-ropey = "1.6"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
@@ -19,7 +17,6 @@ encoding_rs = "0.8"
 encoding_rs_io = "0.1"
 chardetng = "0.1"
 syn = { version = "2.0", features = ["full", "extra-traits", "visit"] }
-quote = "1.0"
 proc-macro2 = { version = "1.0", features = ["span-locations"] }
 
 [dev-dependencies]

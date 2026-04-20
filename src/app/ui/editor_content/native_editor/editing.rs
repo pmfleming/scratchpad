@@ -1,6 +1,6 @@
 use super::types::{CharCursor, CursorRange, EditOperation, OperationRecord};
+use super::word_boundary;
 use crate::app::domain::BufferState;
-use crate::app::domain::buffer::PieceTreeLite;
 
 pub(super) fn apply_text_insert(
     buffer: &mut BufferState,
@@ -34,7 +34,7 @@ pub(super) fn apply_backspace(
     }
 
     let delete_start = if modifiers.alt || modifiers.ctrl {
-        find_word_boundary_left(buffer.document().piece_tree(), start)
+        word_boundary::find_word_boundary_left(buffer.document().piece_tree(), start)
     } else {
         start - 1
     };
@@ -57,7 +57,7 @@ pub(super) fn apply_delete(
     }
 
     let delete_end = if modifiers.alt || modifiers.ctrl {
-        find_word_boundary_right(buffer.document().piece_tree(), start)
+        word_boundary::find_word_boundary_right(buffer.document().piece_tree(), start)
     } else {
         start + 1
     }
@@ -85,6 +85,51 @@ pub(super) fn apply_delete_selection(
         String::new(),
     );
     new_cursor
+}
+
+pub(super) fn apply_outdent(buffer: &mut BufferState, cursor: &CursorRange) -> Option<CursorRange> {
+    let piece_tree = buffer.document().piece_tree();
+    let caret = cursor.primary.index;
+
+    // Find the start of the current logical line
+    let text_before = piece_tree.extract_range(0..caret);
+    let line_start = text_before
+        .rfind('\n')
+        .map_or(0, |p| text_before[..=p].chars().count());
+
+    // Check what's at the start of the line
+    let line_text = piece_tree.extract_range(line_start..piece_tree.len_chars());
+    let first_char = line_text.chars().next()?;
+
+    let chars_to_remove = if first_char == '\t' {
+        1
+    } else if first_char == ' ' {
+        // Remove up to 4 spaces
+        line_text.chars().take(4).take_while(|&c| c == ' ').count()
+    } else {
+        return None;
+    };
+
+    if chars_to_remove == 0 {
+        return None;
+    }
+
+    let deleted_text = piece_tree.extract_range(line_start..line_start + chars_to_remove);
+    buffer
+        .document_mut()
+        .delete_char_range_direct(line_start..line_start + chars_to_remove);
+
+    let new_caret = caret.saturating_sub(chars_to_remove);
+    let new_cursor = CursorRange::one(CharCursor::new(new_caret));
+    record_edit(
+        buffer,
+        cursor,
+        new_cursor,
+        line_start,
+        deleted_text,
+        String::new(),
+    );
+    Some(new_cursor)
 }
 
 pub(super) fn apply_cut(buffer: &mut BufferState, cursor: &CursorRange) -> (CursorRange, String) {
@@ -183,37 +228,4 @@ fn normalize_line_endings(text: &str, preferred: &str) -> String {
         }
     }
     result
-}
-
-fn find_word_boundary_left(piece_tree: &PieceTreeLite, index: usize) -> usize {
-    if index == 0 {
-        return 0;
-    }
-    let text = piece_tree.extract_range(0..index);
-    let chars: Vec<char> = text.chars().collect();
-    let mut pos = chars.len();
-    while pos > 0 && chars[pos - 1].is_whitespace() {
-        pos -= 1;
-    }
-    while pos > 0 && !chars[pos - 1].is_whitespace() {
-        pos -= 1;
-    }
-    pos
-}
-
-fn find_word_boundary_right(piece_tree: &PieceTreeLite, index: usize) -> usize {
-    let total = piece_tree.len_chars();
-    if index >= total {
-        return total;
-    }
-    let text = piece_tree.extract_range(index..total);
-    let chars: Vec<char> = text.chars().collect();
-    let mut pos = 0;
-    while pos < chars.len() && !chars[pos].is_whitespace() {
-        pos += 1;
-    }
-    while pos < chars.len() && chars[pos].is_whitespace() {
-        pos += 1;
-    }
-    index + pos
 }

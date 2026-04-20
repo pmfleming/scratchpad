@@ -89,8 +89,8 @@ fn layout_job_with_highlights(
         f32::INFINITY
     };
 
-    let char_to_byte = char_to_byte_map(text);
-    let text_char_len = char_to_byte.len().saturating_sub(1);
+    let char_to_byte = CharByteMap::build(text);
+    let text_char_len = char_to_byte.char_len();
     let highlights = merged_highlight_ranges(search_highlights, selection_range, text_char_len);
 
     if highlights.is_empty() {
@@ -118,8 +118,8 @@ fn layout_job_with_highlights(
         if segment_start >= segment_end || segment_end > text_char_len {
             continue;
         }
-        let start_byte = char_to_byte[segment_start];
-        let end_byte = char_to_byte[segment_end];
+        let start_byte = char_to_byte.byte_offset(segment_start);
+        let end_byte = char_to_byte.byte_offset(segment_end);
         let kind = highlight_kind_for_segment(&highlights, segment_start);
         let (text_color, background) = match kind {
             Some(HighlightKind::Selection | HighlightKind::SearchActive) => (
@@ -214,11 +214,35 @@ fn append_job_segment(
     );
 }
 
-fn char_to_byte_map(text: &str) -> Vec<usize> {
-    let mut offsets = text
-        .char_indices()
-        .map(|(offset, _)| offset)
-        .collect::<Vec<_>>();
-    offsets.push(text.len());
-    offsets
+enum CharByteMap {
+    /// All ASCII: char offset == byte offset, no allocation needed.
+    Ascii { len: usize },
+    /// Non-ASCII: lookup table from char index to byte offset.
+    Map(Vec<usize>),
+}
+
+impl CharByteMap {
+    fn build(text: &str) -> Self {
+        if text.is_ascii() {
+            CharByteMap::Ascii { len: text.len() }
+        } else {
+            let mut offsets: Vec<usize> = text.char_indices().map(|(offset, _)| offset).collect();
+            offsets.push(text.len());
+            CharByteMap::Map(offsets)
+        }
+    }
+
+    fn char_len(&self) -> usize {
+        match self {
+            CharByteMap::Ascii { len } => *len,
+            CharByteMap::Map(offsets) => offsets.len().saturating_sub(1),
+        }
+    }
+
+    fn byte_offset(&self, char_index: usize) -> usize {
+        match self {
+            CharByteMap::Ascii { .. } => char_index,
+            CharByteMap::Map(offsets) => offsets[char_index],
+        }
+    }
 }

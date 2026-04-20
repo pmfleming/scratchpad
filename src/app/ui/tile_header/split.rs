@@ -29,7 +29,6 @@ pub enum TileAction {
     Activate(ViewId),
     Close(ViewId),
     Promote(ViewId),
-    #[allow(dead_code)]
     ResizeSplit {
         path: crate::app::domain::SplitPath,
         ratio: f32,
@@ -43,8 +42,6 @@ pub enum TileAction {
 
 pub struct TileSplitHandler {
     id: egui::Id,
-    #[allow(dead_code)]
-    tab_index: usize,
     view_id: ViewId,
     tile_rect: egui::Rect,
 }
@@ -53,7 +50,6 @@ impl TileSplitHandler {
     pub fn new(ui: &egui::Ui, tab_index: usize, view_id: ViewId, tile_rect: egui::Rect) -> Self {
         Self {
             id: drag::split_drag_state_id(ui, tab_index, view_id),
-            tab_index,
             view_id,
             tile_rect,
         }

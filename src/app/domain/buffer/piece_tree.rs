@@ -57,6 +57,7 @@ struct Piece {
     byte_len: usize,
     char_len: usize,
     newline_count: usize,
+    is_ascii: bool,
 }
 
 impl Piece {
@@ -67,6 +68,7 @@ impl Piece {
             byte_len: text.len(),
             char_len: text.chars().count(),
             newline_count: count_newlines(text),
+            is_ascii: text.is_ascii(),
         }
     }
 
@@ -191,6 +193,7 @@ pub struct PieceTreeLite {
     original: String,
     add: String,
     root: PieceTreeRoot,
+    generation: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -218,11 +221,16 @@ impl PieceTreeLite {
             original: text,
             add: String::new(),
             root: build_root_from_pieces(pieces),
+            generation: 0,
         }
     }
 
     pub fn metrics(&self) -> PieceTreeMetrics {
         self.root.metrics
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     pub fn len_bytes(&self) -> usize {
@@ -264,6 +272,7 @@ impl PieceTreeLite {
         if text.is_empty() {
             return;
         }
+        self.generation = self.generation.wrapping_add(1);
 
         let add_start = self.add.len();
         self.add.push_str(text);
@@ -296,6 +305,7 @@ impl PieceTreeLite {
         if range_chars.is_empty() {
             return;
         }
+        self.generation = self.generation.wrapping_add(1);
 
         let start_address = self.find_leaf_for_char_offset(range_chars.start);
         let end_probe = range_chars.end.saturating_sub(1);
@@ -432,6 +442,14 @@ impl PieceTreeLite {
         current_line
     }
 
+    pub fn extract_text(&self) -> String {
+        // Fast path: no edits have been made, original covers the whole buffer.
+        if self.add.is_empty() && self.root.metrics.bytes == self.original.len() {
+            return self.original.clone();
+        }
+        self.extract_range(0..self.len_chars())
+    }
+
     pub fn extract_range(&self, range_chars: Range<usize>) -> String {
         let mut result = String::new();
         for span in self.spans_for_range(range_chars) {
@@ -556,7 +574,11 @@ impl PieceTreeLite {
 
     fn slice_piece_by_chars(&self, piece: &Piece, start_char: usize, char_len: usize) -> Piece {
         let text = self.piece_text(piece);
-        let byte_range = byte_range_for_char_range(text, start_char, start_char + char_len);
+        let byte_range = if piece.is_ascii {
+            start_char..(start_char + char_len)
+        } else {
+            byte_range_for_char_range(text, start_char, start_char + char_len)
+        };
         Piece::from_slice(
             piece.buffer,
             piece.start_byte + byte_range.start,
@@ -811,7 +833,21 @@ impl<'a> Iterator for PieceTreeSlice<'a> {
             let local_start = self.range_chars.start.saturating_sub(piece_start_char);
             let local_end = (self.range_chars.end.min(piece_end_char)) - piece_start_char;
             let text = self.tree.piece_text(piece);
-            let byte_range = byte_range_for_char_range(text, local_start, local_end);
+
+            // Fast path: entire piece is returned — no byte conversion needed.
+            if local_start == 0 && local_end == piece.char_len {
+                return Some(PieceTreeSpan {
+                    text,
+                    char_start: piece_start_char,
+                    char_len: piece.char_len,
+                });
+            }
+
+            let byte_range = if piece.is_ascii {
+                local_start..local_end
+            } else {
+                byte_range_for_char_range(text, local_start, local_end)
+            };
             return Some(PieceTreeSpan {
                 text: &text[byte_range],
                 char_start: piece_start_char + local_start,
@@ -941,6 +977,9 @@ fn byte_range_for_char_range(text: &str, start_char: usize, end_char: usize) -> 
 fn byte_index_for_char_offset(text: &str, char_offset: usize) -> usize {
     if char_offset == 0 {
         return 0;
+    }
+    if text.is_ascii() {
+        return char_offset.min(text.len());
     }
 
     text.char_indices()

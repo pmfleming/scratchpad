@@ -58,7 +58,7 @@ struct EditorRenderState {
     pane_tree: PaneNode,
     active_view_id: ViewId,
     leaf_count: usize,
-    transaction_snapshot: TransactionSnapshot,
+    transaction_snapshot: Option<TransactionSnapshot>,
     active_buffer_label: String,
     active_buffer_id: BufferId,
 }
@@ -76,8 +76,16 @@ fn prepare_editor_state(app: &mut ScratchpadApp) -> EditorRenderState {
     let pane_tree = app.tabs()[active_tab_index].root_pane.clone();
     let active_view_id = app.tabs()[active_tab_index].active_view_id;
     let leaf_count = pane_tree.leaf_count();
-    let transaction_snapshot = app.capture_transaction_snapshot();
     let active_buffer_id = app.tabs()[active_tab_index].active_buffer().id;
+
+    // Skip the expensive deep-clone when the next edit will coalesce into
+    // an already-pending text transaction (the snapshot would be dropped unused).
+    let transaction_snapshot = if app.has_coalescable_text_transaction(active_buffer_id) {
+        None
+    } else {
+        Some(app.capture_transaction_snapshot())
+    };
+
     let active_buffer_label = app
         .active_buffer_transaction_label()
         .unwrap_or_else(|| "Untitled".to_owned());
@@ -218,10 +226,14 @@ fn render_pane_node(
 }
 
 fn apply_editor_change(app: &mut ScratchpadApp, state: &EditorRenderState) {
+    let snapshot = state
+        .transaction_snapshot
+        .clone()
+        .unwrap_or_else(|| app.capture_transaction_snapshot());
     app.finalize_active_buffer_text_mutation(
         state.active_tab_index,
         state.active_buffer_id,
         state.active_buffer_label.clone(),
-        state.transaction_snapshot.clone(),
+        snapshot,
     );
 }

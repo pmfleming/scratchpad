@@ -194,6 +194,8 @@ pub fn run_large_file_scroll_profile(bytes: usize, iterations: usize) -> usize {
         .push(highlight_start..highlight_end);
     search_highlights.active_range_index = Some(0);
 
+    let selection = selection_start..selection_end;
+
     sum_profile_iterations(iterations, || {
         let mut total_rows = 0usize;
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -204,7 +206,7 @@ pub fn run_large_file_scroll_profile(bytes: usize, iterations: usize) -> usize {
                     egui::Color32::WHITE,
                     highlight_style,
                     search_highlights.clone(),
-                    Some(selection_start..selection_end),
+                    Some(selection.clone()),
                 );
 
                 for wrap_width in [980.0, 720.0, 520.0, 980.0] {
@@ -226,12 +228,9 @@ pub fn run_large_file_paste_profile(
     let insert_text = plain_text_of_size(insert_bytes);
     let insert_char_count = insert_text.chars().count();
 
+    let mut buffer = BufferState::new("large_paste_profile.txt".to_owned(), base_text, None);
+
     sum_profile_iterations(iterations, || {
-        let mut buffer = BufferState::new(
-            "large_paste_profile.txt".to_owned(),
-            base_text.clone(),
-            None,
-        );
         let midpoint = buffer.document().piece_tree().len_chars() / 2;
         let _ = insert_char_count;
         buffer.document_mut().insert_direct(midpoint, &insert_text);

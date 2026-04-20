@@ -1,9 +1,11 @@
 use super::{
     BufferTextMetadata, EncodingSource, RenderedTextWindow, TextArtifactSummary, TextDocument,
     TextFormatMetadata, TextReplacementError, TextReplacements, buffer_text_metadata,
+    buffer_text_metadata_from_piece_tree,
 };
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use eframe::egui;
+use std::cell::RefCell;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -30,6 +32,8 @@ pub struct BufferState {
     pub freshness: BufferFreshness,
     pub active_selection: Option<Range<usize>>,
     pub has_non_compliant_characters: bool,
+    encoding_compliance_stale: bool,
+    cached_full_text: RefCell<Option<(u64, String)>>,
 }
 
 struct BufferBuildState {
@@ -198,7 +202,18 @@ impl BufferState {
 
     pub fn search_text_snapshot(&self, range: Option<Range<usize>>) -> (String, usize) {
         let Some(range) = range else {
-            return (self.document.extract_text(), 0);
+            let current_gen = self.document.piece_tree().generation();
+            {
+                let cache = self.cached_full_text.borrow();
+                if let Some((cached_gen, ref text)) = *cache
+                    && cached_gen == current_gen
+                {
+                    return (text.clone(), 0);
+                }
+            }
+            let text = self.document.extract_text();
+            *self.cached_full_text.borrow_mut() = Some((current_gen, text.clone()));
+            return (text, 0);
         };
 
         let normalized = self.document.piece_tree().normalize_char_range(range);
@@ -330,9 +345,24 @@ impl BufferState {
     }
 
     pub fn refresh_text_metadata(&mut self) {
-        let text = self.document.extract_text();
-        let text_metadata = buffer_text_metadata(&text, &mut self.format);
-        self.apply_text_metadata(text_metadata);
+        let metadata =
+            buffer_text_metadata_from_piece_tree(self.document.piece_tree(), &mut self.format);
+        self.line_count = metadata.line_count;
+        self.artifact_summary = metadata.artifact_summary;
+        self.document
+            .set_preferred_line_ending(metadata.preferred_line_ending);
+        self.encoding_compliance_stale = true;
+    }
+
+    pub fn recheck_encoding_compliance(&mut self) {
+        if !self.encoding_compliance_stale {
+            return;
+        }
+        let tree = self.document.piece_tree();
+        self.has_non_compliant_characters = self.format.has_non_compliant_characters_spans(
+            tree.spans_for_range(0..tree.len_chars()).map(|s| s.text),
+        );
+        self.encoding_compliance_stale = false;
     }
 
     pub fn sync_to_disk_state(&mut self, disk_state: Option<DiskFileState>) {
@@ -378,8 +408,11 @@ impl BufferState {
     }
 
     pub fn display_name(&self) -> String {
-        let marker = if self.is_dirty { "*" } else { "" };
-        format!("{}{}", marker, self.name)
+        if self.is_dirty {
+            format!("*{}", self.name)
+        } else {
+            self.name.clone()
+        }
     }
 
     pub fn overflow_context_label(&self) -> Option<String> {
@@ -410,6 +443,8 @@ impl BufferState {
             freshness: state.freshness,
             active_selection: None,
             has_non_compliant_characters: text_metadata.has_non_compliant_characters,
+            encoding_compliance_stale: false,
+            cached_full_text: RefCell::new(None),
         }
     }
 
@@ -424,14 +459,6 @@ impl BufferState {
     fn set_disk_state(&mut self, disk_state: Option<DiskFileState>, freshness: BufferFreshness) {
         self.disk_state = disk_state;
         self.freshness = freshness;
-    }
-
-    fn apply_text_metadata(&mut self, text_metadata: BufferTextMetadata) {
-        self.line_count = text_metadata.line_count;
-        self.artifact_summary = text_metadata.artifact_summary;
-        self.has_non_compliant_characters = text_metadata.has_non_compliant_characters;
-        self.document
-            .set_preferred_line_ending(text_metadata.preferred_line_ending);
     }
 }
 

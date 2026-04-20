@@ -2,6 +2,7 @@ mod cursor;
 mod editing;
 mod highlighting;
 mod types;
+mod word_boundary;
 
 pub use highlighting::build_layouter;
 pub use types::{
@@ -27,10 +28,7 @@ pub fn render_editor_text_edit(
     view: &mut EditorViewState,
     options: TextEditOptions<'_>,
 ) -> (bool, bool) {
-    let text = buffer
-        .document()
-        .piece_tree()
-        .extract_range(0..buffer.document().piece_tree().len_chars());
+    let text = buffer.document().extract_text();
     let total_chars = buffer.document().piece_tree().len_chars();
 
     let selection_range = buffer.active_selection.clone();
@@ -70,7 +68,14 @@ pub fn render_editor_text_edit(
     }
 
     let prev_cursor = view.cursor_range;
-    handle_mouse_interaction(ui, &response, &galley, rect, view);
+    handle_mouse_interaction(
+        ui,
+        &response,
+        &galley,
+        rect,
+        view,
+        buffer.document().piece_tree(),
+    );
 
     let focused = response.has_focus() || response.gained_focus();
 
@@ -187,12 +192,24 @@ pub fn render_read_only_text_edit(
 // Private: mouse & keyboard handling
 // ---------------------------------------------------------------------------
 
+const MULTI_CLICK_MAX_DELAY: f64 = 0.4;
+const MULTI_CLICK_MAX_DISTANCE: f32 = 4.0;
+
+#[derive(Clone, Default)]
+struct ClickState {
+    last_click_time: f64,
+    last_click_pos: egui::Pos2,
+    click_count: u32,
+    was_pointer_down: bool,
+}
+
 fn handle_mouse_interaction(
     ui: &mut egui::Ui,
     response: &egui::Response,
     galley: &egui::Galley,
     rect: egui::Rect,
     view: &mut EditorViewState,
+    piece_tree: &crate::app::domain::buffer::PieceTreeLite,
 ) {
     if response.hovered() {
         ui.output_mut(|o| o.mutable_text_under_cursor = true);
@@ -209,6 +226,12 @@ fn handle_mouse_interaction(
         prefer_next_row: cursor_at_pointer.prefer_next_row,
     };
 
+    let click_id = response.id.with("click_state");
+    let mut click_state: ClickState = ui.data_mut(|d| d.get_temp(click_id)).unwrap_or_default();
+
+    let is_pointer_down = response.is_pointer_button_down_on();
+    let is_new_pointer_press = is_pointer_down && !click_state.was_pointer_down;
+
     if response.dragged() {
         // Extend selection from anchor
         if let Some(existing) = &view.cursor_range {
@@ -217,25 +240,66 @@ fn handle_mouse_interaction(
                 secondary: existing.secondary,
             });
         }
-    } else if response.is_pointer_button_down_on() {
-        // Pointer pressed: set cursor and anchor for potential drag
+    } else if is_new_pointer_press {
         let modifiers = ui.input(|i| i.modifiers);
-        if modifiers.shift {
-            if let Some(existing) = &view.cursor_range {
-                view.cursor_range = Some(CursorRange {
-                    primary: char_cursor,
-                    secondary: existing.secondary,
-                });
-            } else {
-                view.cursor_range = Some(CursorRange::one(char_cursor));
-            }
+        let now = ui.input(|i| i.time);
+
+        let is_repeat = (now - click_state.last_click_time) < MULTI_CLICK_MAX_DELAY
+            && (pointer_pos - click_state.last_click_pos).length() < MULTI_CLICK_MAX_DISTANCE;
+
+        if is_repeat {
+            click_state.click_count += 1;
         } else {
-            view.cursor_range = Some(CursorRange::one(char_cursor));
+            click_state.click_count = 1;
+        }
+        click_state.last_click_time = now;
+        click_state.last_click_pos = pointer_pos;
+
+        match click_state.click_count {
+            2 => {
+                // Double-click: word selection
+                let start = word_boundary::word_start(piece_tree, char_cursor.index);
+                let end = word_boundary::word_end(piece_tree, char_cursor.index);
+                view.cursor_range = Some(CursorRange::two(start, end));
+            }
+            n if n >= 3 => {
+                // Triple-click: line selection
+                let row_start = galley.cursor_begin_of_row(&cursor_at_pointer);
+                let row_end = galley.cursor_end_of_row(&cursor_at_pointer);
+                view.cursor_range = Some(CursorRange {
+                    primary: CharCursor {
+                        index: row_end.index,
+                        prefer_next_row: row_end.prefer_next_row,
+                    },
+                    secondary: CharCursor {
+                        index: row_start.index,
+                        prefer_next_row: row_start.prefer_next_row,
+                    },
+                });
+            }
+            _ => {
+                // Single click
+                if modifiers.shift {
+                    if let Some(existing) = &view.cursor_range {
+                        view.cursor_range = Some(CursorRange {
+                            primary: char_cursor,
+                            secondary: existing.secondary,
+                        });
+                    } else {
+                        view.cursor_range = Some(CursorRange::one(char_cursor));
+                    }
+                } else {
+                    view.cursor_range = Some(CursorRange::one(char_cursor));
+                }
+            }
         }
     }
 
+    click_state.was_pointer_down = is_pointer_down;
+    ui.data_mut(|d| d.insert_temp(click_id, click_state));
+
     // Request focus whenever pointer is actively on the widget
-    if response.is_pointer_button_down_on() {
+    if is_pointer_down {
         response.request_focus();
     }
 }
@@ -281,6 +345,18 @@ fn handle_keyboard_events(
             } if !modifiers.shift => {
                 view.cursor_range = Some(editing::apply_text_insert(buffer, &cursor, "\t"));
                 changed = true;
+            }
+
+            egui::Event::Key {
+                key: egui::Key::Tab,
+                pressed: true,
+                modifiers,
+                ..
+            } if modifiers.shift => {
+                if let Some(new_cursor) = editing::apply_outdent(buffer, &cursor) {
+                    view.cursor_range = Some(new_cursor);
+                    changed = true;
+                }
             }
 
             egui::Event::Key {
@@ -504,7 +580,6 @@ fn render_visible_text_window(
         (start < end).then_some(start..end)
     });
 
-    let text = visible_window.text.clone();
     let wrap_width = if options.word_wrap {
         ui.available_width()
     } else {
@@ -512,7 +587,7 @@ fn render_visible_text_window(
     };
     let galley = highlighting::build_galley(
         ui,
-        &text,
+        &visible_window.text,
         options,
         &SearchHighlightState::default(),
         window_selection,

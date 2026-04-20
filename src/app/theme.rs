@@ -7,7 +7,6 @@ pub const TAB_SELECTED_BG: Color32 = Color32::from_rgb(34, 43, 59);
 pub const TAB_SELECTED_ACCENT: Color32 = Color32::from_rgb(104, 154, 232);
 pub const ACTION_BG: Color32 = Color32::from_rgb(38, 43, 50);
 pub const ACTION_HOVER_BG: Color32 = Color32::from_rgb(52, 58, 68);
-pub const EDITOR_BG: Color32 = Color32::from_rgb(21, 24, 29);
 pub const CLOSE_BG: Color32 = Color32::from_rgb(124, 49, 49);
 pub const CLOSE_HOVER_BG: Color32 = Color32::from_rgb(164, 58, 58);
 pub const BORDER: Color32 = Color32::from_rgb(59, 66, 76);

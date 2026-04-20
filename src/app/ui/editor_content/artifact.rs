@@ -104,7 +104,8 @@ pub fn make_control_chars_visible(text: &str) -> String {
             '\r' if chars.peek() == Some(&'\n') => visible.push('␍'),
             '\r' => visible.push('␍'),
             _ if ch.is_control() && ch != '\n' => {
-                visible.push_str(&format!("\\x{:02X}", ch as u32));
+                use std::fmt::Write;
+                let _ = write!(visible, "\\x{:02X}", ch as u32);
             }
             _ => visible.push(ch),
         }

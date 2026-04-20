@@ -1,6 +1,9 @@
 use super::types::{CharCursor, CursorRange};
+use super::word_boundary;
 use crate::app::domain::buffer::PieceTreeLite;
 use eframe::egui;
+
+const PAGE_JUMP_ROWS: usize = 30;
 
 pub(super) fn apply_cursor_movement(
     cursor: &CursorRange,
@@ -15,20 +18,18 @@ pub(super) fn apply_cursor_movement(
     let new_primary = match key {
         egui::Key::ArrowLeft => {
             if modifiers.alt || modifiers.ctrl {
-                Some(egui::text::CCursor::new(find_word_boundary_left(
-                    piece_tree,
-                    cursor.primary.index,
-                )))
+                Some(egui::text::CCursor::new(
+                    word_boundary::find_word_boundary_left(piece_tree, cursor.primary.index),
+                ))
             } else {
                 Some(galley.cursor_left_one_character(&egui_cursor))
             }
         }
         egui::Key::ArrowRight => {
             if modifiers.alt || modifiers.ctrl {
-                Some(egui::text::CCursor::new(find_word_boundary_right(
-                    piece_tree,
-                    cursor.primary.index,
-                )))
+                Some(egui::text::CCursor::new(
+                    word_boundary::find_word_boundary_right(piece_tree, cursor.primary.index),
+                ))
             } else {
                 Some(galley.cursor_right_one_character(&egui_cursor))
             }
@@ -60,6 +61,20 @@ pub(super) fn apply_cursor_movement(
             } else {
                 Some(galley.cursor_end_of_row(&egui_cursor))
             }
+        }
+        egui::Key::PageUp => {
+            let mut c = egui_cursor;
+            for _ in 0..PAGE_JUMP_ROWS {
+                c = galley.cursor_up_one_row(&c, None).0;
+            }
+            Some(c)
+        }
+        egui::Key::PageDown => {
+            let mut c = egui_cursor;
+            for _ in 0..PAGE_JUMP_ROWS {
+                c = galley.cursor_down_one_row(&c, None).0;
+            }
+            Some(c)
         }
         _ => None,
     };
@@ -93,37 +108,4 @@ pub(super) fn apply_cursor_movement(
     }
 
     Some(CursorRange::one(new_primary_char))
-}
-
-fn find_word_boundary_left(piece_tree: &PieceTreeLite, index: usize) -> usize {
-    if index == 0 {
-        return 0;
-    }
-    let text = piece_tree.extract_range(0..index);
-    let chars: Vec<char> = text.chars().collect();
-    let mut pos = chars.len();
-    while pos > 0 && chars[pos - 1].is_whitespace() {
-        pos -= 1;
-    }
-    while pos > 0 && !chars[pos - 1].is_whitespace() {
-        pos -= 1;
-    }
-    pos
-}
-
-fn find_word_boundary_right(piece_tree: &PieceTreeLite, index: usize) -> usize {
-    let total = piece_tree.len_chars();
-    if index >= total {
-        return total;
-    }
-    let text = piece_tree.extract_range(index..total);
-    let chars: Vec<char> = text.chars().collect();
-    let mut pos = 0;
-    while pos < chars.len() && !chars[pos].is_whitespace() {
-        pos += 1;
-    }
-    while pos < chars.len() && chars[pos].is_whitespace() {
-        pos += 1;
-    }
-    index + pos
 }

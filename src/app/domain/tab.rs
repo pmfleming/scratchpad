@@ -248,11 +248,16 @@ impl WorkspaceTab {
     }
 
     fn distinct_buffer_count(&self) -> usize {
-        self.views
-            .iter()
-            .map(|view| view.buffer_id)
-            .collect::<HashSet<_>>()
-            .len()
+        let mut count = 0;
+        for (i, view) in self.views.iter().enumerate() {
+            if self.views[..i]
+                .iter()
+                .all(|v| v.buffer_id != view.buffer_id)
+            {
+                count += 1;
+            }
+        }
+        count
     }
 
     fn distinct_buffer_names_in_view_order(&self) -> Vec<String> {
