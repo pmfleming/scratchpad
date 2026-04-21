@@ -2,9 +2,8 @@
 
 Scratchpad is a Rust-based text editor for Windows environments. 
 
-The goal is to build as a crash-resistant, safe-by-design replacement for the standard Notepad application.
-
-Extensively documenting the performance characteristics to guide development.
+It should be a crash-resistant, safe-by-design replacement for the standard Notepad application.
+With the main goal of this project being: using performance & complexity metrics to guide development.
 
 It is 100% focused on general text processing rather than software development.
 This helps it be safer; there are no components/updates etc.

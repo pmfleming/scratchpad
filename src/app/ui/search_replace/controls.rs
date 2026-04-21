@@ -1,3 +1,4 @@
+use super::results::results_summary;
 use super::state::{SearchStripActions, SearchStripState};
 use crate::app::app_state::{
     SearchFocusTarget, SearchReplaceAvailability, SearchScope, SearchScopeOrigin,
@@ -87,10 +88,18 @@ fn render_search_pill(
             state.sync_focus(&find_response, SearchFocusTarget::FindInput);
 
             ui.add_space(4.0);
-            ui.allocate_ui_with_layout(
-                egui::vec2(ui.available_width(), CONTROL_BUTTON_HEIGHT),
-                egui::Layout::right_to_left(egui::Align::Center),
-                |ui| {
+            ui.horizontal(|ui| {
+                let summary = results_summary(state);
+                if !summary.is_empty() {
+                    ui.label(
+                        egui::RichText::new(summary)
+                            .size(12.5)
+                            .color(text_muted(ui)),
+                    );
+                    ui.add_space(10.0);
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     toggle_mode(ui, &mut state.mode);
                     toggle_flag(ui, &mut state.whole_word, TEXTBOX, "Whole word");
                     toggle_flag(
@@ -117,8 +126,8 @@ fn render_search_pill(
                             state.scope = scope;
                         }
                     }
-                },
-            );
+                });
+            });
 
             find_response
         })

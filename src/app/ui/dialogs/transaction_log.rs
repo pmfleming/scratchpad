@@ -11,7 +11,6 @@ use egui_phosphor::regular::{
     ARROW_COUNTER_CLOCKWISE, ARROWS_SPLIT, CLOCK_COUNTER_CLOCKWISE, FILE_TEXT, PENCIL_SIMPLE_LINE,
     SLIDERS_HORIZONTAL,
 };
-use std::borrow::Cow;
 
 const TRANSACTION_LOG_WIDTH: f32 = search_replace::SEARCH_DIALOG_WIDTH;
 const TRANSACTION_LOG_SIZE: egui::Vec2 = egui::vec2(TRANSACTION_LOG_WIDTH, 560.0);
@@ -23,6 +22,9 @@ const TRANSACTION_LOG_UNDO_BUTTON_SIZE: egui::Vec2 = egui::vec2(42.0, 38.0);
 const TRANSACTION_LOG_SECTION_LABEL: &str = "TODAY";
 const TRANSACTION_LOG_FILE_ICON: egui::Color32 = egui::Color32::from_rgb(238, 240, 244);
 const TRANSACTION_LOG_MUTED_BLUE: egui::Color32 = egui::Color32::from_rgb(144, 198, 255);
+const TRANSACTION_LOG_MAX_VISIBLE_TOKENS: usize = 4;
+const TRANSACTION_LOG_TOKEN_MAX_CHARS: usize = 28;
+const TRANSACTION_LOG_TOKEN_MAX_WIDTH: f32 = 220.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TransactionFilter {
@@ -419,11 +421,11 @@ fn filtered_entries(
         .collect()
 }
 
-fn transaction_log_tokens(entry: &TransactionLogEntry) -> Vec<Cow<'_, str>> {
+fn transaction_log_tokens(entry: &TransactionLogEntry) -> Vec<String> {
     let mut tokens = entry
         .affected_items
         .iter()
-        .map(|item| Cow::Borrowed(item.as_str()))
+        .map(|item| truncate_transaction_token(item))
         .collect::<Vec<_>>();
 
     if let Some(details) = entry
@@ -431,13 +433,19 @@ fn transaction_log_tokens(entry: &TransactionLogEntry) -> Vec<Cow<'_, str>> {
         .as_deref()
         .filter(|details| !details.is_empty())
     {
-        tokens.push(Cow::Borrowed(details));
+        tokens.push(truncate_transaction_token(details));
+    }
+
+    if tokens.len() > TRANSACTION_LOG_MAX_VISIBLE_TOKENS {
+        let hidden_count = tokens.len() - TRANSACTION_LOG_MAX_VISIBLE_TOKENS;
+        tokens.truncate(TRANSACTION_LOG_MAX_VISIBLE_TOKENS);
+        tokens.push(format!("+{hidden_count} more"));
     }
 
     tokens
 }
 
-fn render_entry_pills(ui: &mut egui::Ui, tokens: &[Cow<'_, str>]) {
+fn render_entry_pills(ui: &mut egui::Ui, tokens: &[String]) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
         for token in tokens {
@@ -451,14 +459,32 @@ fn render_entry_pills(ui: &mut egui::Ui, tokens: &[Cow<'_, str>]) {
                 .corner_radius(egui::CornerRadius::same(8))
                 .inner_margin(egui::Margin::symmetric(8, 4))
                 .show(ui, |ui| {
-                    ui.label(
-                        egui::RichText::new(token.as_ref())
-                            .size(12.0)
-                            .color(text_muted(ui)),
+                    let pill_width = ui.available_width().min(TRANSACTION_LOG_TOKEN_MAX_WIDTH);
+                    ui.add_sized(
+                        egui::vec2(pill_width, 0.0),
+                        egui::Label::new(
+                            egui::RichText::new(token).size(12.0).color(text_muted(ui)),
+                        )
+                        .truncate(),
                     );
                 });
         }
     });
+}
+
+fn truncate_transaction_token(token: &str) -> String {
+    let trimmed = token.trim();
+    let char_count = trimmed.chars().count();
+    if char_count <= TRANSACTION_LOG_TOKEN_MAX_CHARS {
+        return trimmed.to_owned();
+    }
+
+    let mut truncated = trimmed
+        .chars()
+        .take(TRANSACTION_LOG_TOKEN_MAX_CHARS.saturating_sub(1))
+        .collect::<String>();
+    truncated.push('…');
+    truncated
 }
 
 fn entry_count_label(entry_count: usize) -> String {
