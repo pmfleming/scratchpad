@@ -3,22 +3,24 @@ use eframe::egui::{self, CursorIcon, Rect, Sense, Vec2, pos2, viewport::ResizeDi
 const RESIZE_BORDER: f32 = 6.0;
 const RESIZE_CORNER: f32 = 18.0;
 
-pub fn handle_window_resize(ctx: &egui::Context) {
+pub fn handle_window_resize(ctx: &egui::Context) -> bool {
     let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
     if maximized {
-        return;
+        return false;
     }
 
     let screen_rect = ctx.input(|input| input.content_rect());
-    request_repaint_after_content_rect_change(ctx, screen_rect);
+    let content_rect_changed = request_repaint_after_content_rect_change(ctx, screen_rect);
     egui::Area::new(egui::Id::new("window_resize_handles"))
         .fixed_pos(screen_rect.min)
         .order(egui::Order::Foreground)
         .interactable(false)
         .show(ctx, |ui| render_resize_handles(ui, ctx, screen_rect.size()));
+
+    content_rect_changed
 }
 
-fn request_repaint_after_content_rect_change(ctx: &egui::Context, screen_rect: Rect) {
+fn request_repaint_after_content_rect_change(ctx: &egui::Context, screen_rect: Rect) -> bool {
     let rect_id = egui::Id::new("window_content_rect");
     let changed = ctx.data_mut(|data| {
         let previous = data.get_persisted::<Rect>(rect_id);
@@ -29,6 +31,8 @@ fn request_repaint_after_content_rect_change(ctx: &egui::Context, screen_rect: R
     if changed {
         ctx.request_repaint();
     }
+
+    changed
 }
 
 fn render_resize_handles(ui: &mut egui::Ui, ctx: &egui::Context, size: Vec2) {

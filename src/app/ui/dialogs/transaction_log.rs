@@ -205,9 +205,9 @@ fn render_transaction_log_window(
 }
 
 fn render_dialog_header(ui: &mut egui::Ui) -> bool {
-    callout::header_row(ui, "Close transaction log", |ui| {
+    callout::header_row(ui, "Close history", |ui| {
         ui.label(
-            egui::RichText::new("Transaction log")
+            egui::RichText::new("History")
                 .size(TRANSACTION_LOG_TITLE_SIZE)
                 .color(callout::text(ui)),
         );
@@ -309,7 +309,7 @@ fn render_empty_state(ui: &mut egui::Ui, log_is_empty: bool) {
         ui.add_space(6.0);
         ui.label(
             egui::RichText::new(if log_is_empty {
-                "No transaction entries yet."
+                "No history entries yet."
             } else {
                 "No entries match the current filter."
             })

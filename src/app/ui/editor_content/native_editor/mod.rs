@@ -1,6 +1,7 @@
 mod cursor;
 mod editing;
 mod highlighting;
+mod interactions;
 mod types;
 mod word_boundary;
 
@@ -14,9 +15,18 @@ use crate::app::domain::{
     BufferState, EditorViewState, RenderedLayout, RenderedTextWindow, SearchHighlightState,
 };
 use eframe::egui;
+use interactions::{
+    handle_keyboard_events, handle_mouse_interaction, sync_view_cursor_before_render,
+};
 use std::sync::Arc;
 
 const VISIBLE_ROW_OVERSCAN: usize = 2;
+const EDITOR_FOCUS_LOCK_FILTER: egui::EventFilter = egui::EventFilter {
+    horizontal_arrows: true,
+    vertical_arrows: true,
+    tab: false,
+    escape: false,
+};
 
 pub struct EditorWidgetOutcome {
     pub changed: bool,
@@ -73,6 +83,10 @@ pub fn render_editor_text_edit(
         response.request_focus();
     }
 
+    if response.has_focus() {
+        ui.memory_mut(|mem| mem.set_focus_lock_filter(response.id, EDITOR_FOCUS_LOCK_FILTER));
+    }
+
     let prev_cursor = view.cursor_range;
     handle_mouse_interaction(
         ui,
@@ -83,7 +97,8 @@ pub fn render_editor_text_edit(
         buffer.document().piece_tree(),
     );
 
-    let focused = response.has_focus() || response.gained_focus();
+    let focused = response.has_focus() || response.gained_focus() || options.request_focus;
+    sync_view_cursor_before_render(view, focused);
 
     let changed = if focused {
         handle_keyboard_events(ui, buffer, view, &galley, total_chars)
@@ -216,308 +231,6 @@ pub fn cut_selected_text(
     cursor: CursorRange,
 ) -> Option<(CursorRange, String)> {
     (!cursor.is_empty()).then(|| editing::apply_cut(buffer, &cursor))
-}
-
-// ---------------------------------------------------------------------------
-// Private: mouse & keyboard handling
-// ---------------------------------------------------------------------------
-
-const MULTI_CLICK_MAX_DELAY: f64 = 0.4;
-const MULTI_CLICK_MAX_DISTANCE: f32 = 4.0;
-
-#[derive(Clone, Default)]
-struct ClickState {
-    last_click_time: f64,
-    last_click_pos: egui::Pos2,
-    click_count: u32,
-    was_primary_pointer_down: bool,
-}
-
-fn handle_mouse_interaction(
-    ui: &mut egui::Ui,
-    response: &egui::Response,
-    galley: &egui::Galley,
-    rect: egui::Rect,
-    view: &mut EditorViewState,
-    piece_tree: &crate::app::domain::buffer::PieceTreeLite,
-) {
-    if response.hovered() {
-        ui.output_mut(|o| o.mutable_text_under_cursor = true);
-        ui.set_cursor_icon(egui::CursorIcon::Text);
-    }
-
-    let Some(pointer_pos) = response.interact_pointer_pos() else {
-        return;
-    };
-
-    let cursor_at_pointer = galley.cursor_from_pos(pointer_pos - rect.min);
-    let char_cursor = CharCursor {
-        index: cursor_at_pointer.index,
-        prefer_next_row: cursor_at_pointer.prefer_next_row,
-    };
-
-    let click_id = response.id.with("click_state");
-    let mut click_state: ClickState = ui.data_mut(|d| d.get_temp(click_id)).unwrap_or_default();
-
-    let secondary_pointer_down = response.contains_pointer()
-        && ui.input(|input| input.pointer.button_down(egui::PointerButton::Secondary));
-    if secondary_pointer_down || response.secondary_clicked() {
-        click_state.was_primary_pointer_down = false;
-        ui.data_mut(|d| d.insert_temp(click_id, click_state));
-        return;
-    }
-
-    let primary_pointer_down = response.contains_pointer()
-        && ui.input(|input| input.pointer.button_down(egui::PointerButton::Primary));
-    let is_new_primary_press = primary_pointer_down && !click_state.was_primary_pointer_down;
-
-    if primary_pointer_down && response.dragged() {
-        // Extend selection from anchor
-        if let Some(existing) = &view.cursor_range {
-            view.cursor_range = Some(CursorRange {
-                primary: char_cursor,
-                secondary: existing.secondary,
-            });
-        }
-    } else if is_new_primary_press {
-        let modifiers = ui.input(|i| i.modifiers);
-        let now = ui.input(|i| i.time);
-
-        let is_repeat = (now - click_state.last_click_time) < MULTI_CLICK_MAX_DELAY
-            && (pointer_pos - click_state.last_click_pos).length() < MULTI_CLICK_MAX_DISTANCE;
-
-        if is_repeat {
-            click_state.click_count += 1;
-        } else {
-            click_state.click_count = 1;
-        }
-        click_state.last_click_time = now;
-        click_state.last_click_pos = pointer_pos;
-
-        match click_state.click_count {
-            2 => {
-                // Double-click: word selection
-                let start = word_boundary::word_start(piece_tree, char_cursor.index);
-                let end = word_boundary::word_end(piece_tree, char_cursor.index);
-                view.cursor_range = Some(CursorRange::two(start, end));
-            }
-            n if n >= 3 => {
-                // Triple-click: line selection
-                let row_start = galley.cursor_begin_of_row(&cursor_at_pointer);
-                let row_end = galley.cursor_end_of_row(&cursor_at_pointer);
-                view.cursor_range = Some(CursorRange {
-                    primary: CharCursor {
-                        index: row_end.index,
-                        prefer_next_row: row_end.prefer_next_row,
-                    },
-                    secondary: CharCursor {
-                        index: row_start.index,
-                        prefer_next_row: row_start.prefer_next_row,
-                    },
-                });
-            }
-            _ => {
-                // Single click
-                if modifiers.shift {
-                    if let Some(existing) = &view.cursor_range {
-                        view.cursor_range = Some(CursorRange {
-                            primary: char_cursor,
-                            secondary: existing.secondary,
-                        });
-                    } else {
-                        view.cursor_range = Some(CursorRange::one(char_cursor));
-                    }
-                } else {
-                    view.cursor_range = Some(CursorRange::one(char_cursor));
-                }
-            }
-        }
-    }
-
-    click_state.was_primary_pointer_down = primary_pointer_down;
-    ui.data_mut(|d| d.insert_temp(click_id, click_state));
-
-    // Request focus whenever pointer is actively on the widget
-    if primary_pointer_down {
-        response.request_focus();
-    }
-}
-
-fn handle_keyboard_events(
-    ui: &mut egui::Ui,
-    buffer: &mut BufferState,
-    view: &mut EditorViewState,
-    galley: &egui::Galley,
-    total_chars: usize,
-) -> bool {
-    let events = ui.input(|i| i.events.clone());
-    let cursor = view.cursor_range.unwrap_or_default();
-    let mut changed = false;
-
-    for event in &events {
-        match event {
-            egui::Event::Text(text_to_insert)
-                if !text_to_insert.is_empty()
-                    && text_to_insert != "\n"
-                    && text_to_insert != "\r" =>
-            {
-                view.cursor_range =
-                    Some(editing::apply_text_insert(buffer, &cursor, text_to_insert));
-                changed = true;
-            }
-
-            egui::Event::Key {
-                key: egui::Key::Enter,
-                pressed: true,
-                ..
-            } => {
-                let line_ending = buffer.document().preferred_line_ending_str().to_owned();
-                view.cursor_range = Some(editing::apply_text_insert(buffer, &cursor, &line_ending));
-                changed = true;
-            }
-
-            egui::Event::Key {
-                key: egui::Key::Tab,
-                pressed: true,
-                modifiers,
-                ..
-            } if !modifiers.shift => {
-                view.cursor_range = Some(editing::apply_text_insert(buffer, &cursor, "\t"));
-                changed = true;
-            }
-
-            egui::Event::Key {
-                key: egui::Key::Tab,
-                pressed: true,
-                modifiers,
-                ..
-            } if modifiers.shift => {
-                if let Some(new_cursor) = editing::apply_outdent(buffer, &cursor) {
-                    view.cursor_range = Some(new_cursor);
-                    changed = true;
-                }
-            }
-
-            egui::Event::Key {
-                key: egui::Key::Backspace,
-                pressed: true,
-                modifiers,
-                ..
-            } => {
-                view.cursor_range = Some(editing::apply_backspace(buffer, &cursor, modifiers));
-                changed = true;
-            }
-
-            egui::Event::Key {
-                key: egui::Key::Delete,
-                pressed: true,
-                modifiers,
-                ..
-            } => {
-                view.cursor_range = Some(editing::apply_delete(buffer, &cursor, modifiers));
-                changed = true;
-            }
-
-            egui::Event::Key {
-                key: egui::Key::Z,
-                pressed: true,
-                modifiers,
-                ..
-            } if modifiers.command && !modifiers.shift => {
-                if let Some(selection) = buffer.undo_last_text_operation_native() {
-                    view.cursor_range = Some(selection);
-                    changed = true;
-                }
-            }
-
-            egui::Event::Key {
-                key: egui::Key::Z | egui::Key::Y,
-                pressed: true,
-                modifiers,
-                ..
-            } if modifiers.command && (event_key_is_y(event) || modifiers.shift) => {
-                if let Some(selection) = buffer.redo_last_text_operation_native() {
-                    view.cursor_range = Some(selection);
-                    changed = true;
-                }
-            }
-
-            egui::Event::Key {
-                key: egui::Key::A,
-                pressed: true,
-                modifiers,
-                ..
-            } if modifiers.command => {
-                view.cursor_range = Some(CursorRange::two(0, total_chars));
-            }
-
-            egui::Event::Copy => {
-                copy_selection(ui, buffer, &cursor);
-            }
-
-            egui::Event::Cut => {
-                if !cursor.is_empty() {
-                    let (new_cursor, selected) = editing::apply_cut(buffer, &cursor);
-                    ui.copy_text(selected);
-                    view.cursor_range = Some(new_cursor);
-                    changed = true;
-                }
-            }
-
-            egui::Event::Paste(text_to_paste) if !text_to_paste.is_empty() => {
-                view.cursor_range =
-                    Some(editing::apply_text_insert(buffer, &cursor, text_to_paste));
-                changed = true;
-            }
-
-            egui::Event::Key {
-                key,
-                pressed: true,
-                modifiers,
-                ..
-            } => {
-                if let Some(new_cursor) = cursor::apply_cursor_movement(
-                    &cursor,
-                    *key,
-                    modifiers,
-                    galley,
-                    total_chars,
-                    buffer.document().piece_tree(),
-                ) {
-                    view.cursor_range = Some(new_cursor);
-                }
-            }
-
-            egui::Event::Ime(egui::ImeEvent::Commit(commit_text))
-                if !commit_text.is_empty() && commit_text != "\n" && commit_text != "\r" =>
-            {
-                view.cursor_range = Some(editing::apply_text_insert(buffer, &cursor, commit_text));
-                changed = true;
-            }
-
-            _ => {}
-        }
-    }
-
-    changed
-}
-
-fn event_key_is_y(event: &egui::Event) -> bool {
-    matches!(
-        event,
-        egui::Event::Key {
-            key: egui::Key::Y,
-            ..
-        }
-    )
-}
-
-fn copy_selection(ui: &mut egui::Ui, buffer: &BufferState, cursor: &CursorRange) {
-    if !cursor.is_empty() {
-        let (start, end) = cursor.sorted_indices();
-        let selected = buffer.document().piece_tree().extract_range(start..end);
-        ui.copy_text(selected);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -703,4 +416,36 @@ fn visible_row_range_for_galley(
     let start = first_visible.saturating_sub(VISIBLE_ROW_OVERSCAN);
     let end = (last_visible + 1 + VISIBLE_ROW_OVERSCAN).min(galley.rows.len());
     Some(start..end)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CharCursor, CursorRange, sync_view_cursor_before_render};
+    use crate::app::domain::EditorViewState;
+
+    #[test]
+    fn focused_editor_without_cursor_starts_at_document_beginning() {
+        let mut view = EditorViewState::new(1, false);
+
+        sync_view_cursor_before_render(&mut view, true);
+
+        assert_eq!(
+            view.cursor_range,
+            Some(CursorRange::one(CharCursor::new(0)))
+        );
+        assert!(view.scroll_to_cursor);
+    }
+
+    #[test]
+    fn pending_cursor_range_overrides_missing_native_editor_cursor() {
+        let mut view = EditorViewState::new(1, false);
+        let pending = CursorRange::one(CharCursor::new(7));
+        view.pending_cursor_range = Some(pending);
+
+        sync_view_cursor_before_render(&mut view, true);
+
+        assert_eq!(view.cursor_range, Some(pending));
+        assert_eq!(view.pending_cursor_range, None);
+        assert!(view.scroll_to_cursor);
+    }
 }

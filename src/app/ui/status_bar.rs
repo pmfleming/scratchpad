@@ -43,7 +43,7 @@ pub(crate) fn show_status_bar(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             if app.showing_settings() {
                 ui.label("Settings");
                 ui.separator();
-                ui.label(app.settings_path().display().to_string());
+                show_copyable_path(ui, &app.settings_path().display().to_string());
                 if let Some(message) = &app.status_message {
                     ui.separator();
                     ui.label(message);
@@ -123,7 +123,7 @@ fn render_active_status(
     details: &ActiveStatusDetails,
     actions: &mut StatusBarActions,
 ) {
-    ui.label(format!("Path: {}", details.path_label));
+    show_copyable_path(ui, &format!("Path: {}", details.path_label));
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         show_status_warnings(ui, details);
         show_settings_button(ui, actions);
@@ -148,6 +148,22 @@ fn render_active_status(
         show_status_segment(ui, details.cursor_label.as_deref());
         show_line_count(ui, &details.count_label, actions);
     });
+}
+
+fn show_copyable_path(ui: &mut egui::Ui, label: &str) {
+    let response = ui
+        .add(
+            egui::Button::new(label)
+                .frame(false)
+                .stroke(egui::Stroke::NONE)
+                .fill(egui::Color32::TRANSPARENT)
+                .min_size(egui::vec2(0.0, 22.0)),
+        )
+        .on_hover_text("Double-click to copy path");
+    if response.double_clicked() {
+        let copied = label.strip_prefix("Path: ").unwrap_or(label);
+        ui.copy_text(copied.to_owned());
+    }
 }
 
 fn show_line_count(ui: &mut egui::Ui, count_label: &str, actions: &mut StatusBarActions) {
@@ -201,7 +217,7 @@ fn status_bar_encoding_is_non_default(format: &crate::app::domain::TextFormatMet
 fn show_transaction_log_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
     ui.separator();
     let response = status_bar_icon_button(ui, egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE)
-        .on_hover_text("Open the workspace transaction log");
+        .on_hover_text("Open history");
     if response.clicked() {
         actions.open_transaction_log = true;
     }

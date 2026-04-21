@@ -46,7 +46,7 @@ fn handle_global_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         ..Default::default()
     };
     if ctx.input_mut(|input| input.consume_key(transaction_log_modifiers, egui::Key::Z)) {
-        app.open_transaction_log();
+        app.handle_command(AppCommand::OpenHistory);
         return;
     }
 

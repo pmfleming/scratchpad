@@ -1,18 +1,26 @@
 # Scratchpad
 
-Scratchpad is a Windows-focused Rust text editor built with `egui` / `eframe`, with custom chrome, shared tab/workspace state, tiled editor layouts, encoding-aware file handling, TOML settings, transaction history, and session restore.
+Scratchpad is a Rust-based text editor for Windows environments. 
+
+The goal is to build as a crash-resistant, safe-by-design replacement for the standard Notepad application.
+
+Extensively documenting the performance characteristics to guide development.
+
+It is 100% focused on general text processing rather than software development.
+This helps it be safer; there are no components/updates etc.
 
 ## Features
 
 - Shared tab order across the tab strip, overflow list, Settings surface, and drag/drop flows
 - Multi-pane workspace tabs with split creation, split resizing, Open Here, tile promotion, and tab combining
+- Search and search/replace across selections, buffers, workspace tabs, and all open tabs, with plain-text and regex modes
 - Native open/save/save-as flows with dirty confirmation, duplicate-path checks, encoding detection, and BOM preservation
 - Artifact-heavy text detection with cleaned and raw inspection modes
 - Document-local undo/redo plus a separate transaction log for text edits and workspace operations
 - Status bar with path, line count, encoding, artifact state, runtime logging, and transaction-log access
 - TOML-backed settings plus session persistence for tabs, views, pane layout, and metadata
 
-Gaps: search, context menus / command palette actions, and installer packaging.
+Gaps: command palette actions and installer packaging.
 
 ## Docs
 

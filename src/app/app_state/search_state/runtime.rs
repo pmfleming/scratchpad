@@ -30,10 +30,7 @@ impl ScratchpadApp {
     pub(crate) fn refresh_search_state(&mut self) {
         self.poll_search_results();
         if !self.search_is_active() {
-            self.search_state.clear_inactive_results();
-            self.search_state.status = SearchStatus::Idle;
-            self.search_state.freshness = SearchFreshness::Fresh;
-            self.clear_search_highlights();
+            self.clear_inactive_search_state();
             return;
         }
         if !self.search_state.dirty {
@@ -43,14 +40,7 @@ impl ScratchpadApp {
         if self.search_state.scope == SearchScope::SelectionOnly
             && self.active_search_selection_range().is_none()
         {
-            self.search_state.searching = false;
-            self.search_state.status = SearchStatus::Error(
-                "Selection-only search requires an active selection.".to_owned(),
-            );
-            self.search_state.freshness = SearchFreshness::Fresh;
-            self.search_state.clear_match_results();
-            self.search_state.dirty = false;
-            self.clear_search_highlights();
+            self.set_selection_only_search_error();
             return;
         }
 
@@ -172,17 +162,38 @@ impl ScratchpadApp {
                 .into_iter()
                 .collect(),
             SearchScope::ActiveBuffer => self.active_search_target(None).into_iter().collect(),
-            SearchScope::ActiveWorkspaceTab => self.collect_search_targets_for_tab(
-                self.active_tab_index(),
-                self.active_tab()
-                    .and_then(|tab| tab.active_view())
-                    .map(|view| view.buffer_id),
-                None,
-            ),
+            SearchScope::ActiveWorkspaceTab => self.collect_active_tab_search_targets(),
             SearchScope::AllOpenTabs => (0..self.tabs().len())
                 .flat_map(|tab_index| self.collect_search_targets_for_tab(tab_index, None, None))
                 .collect(),
         }
+    }
+
+    fn clear_inactive_search_state(&mut self) {
+        self.search_state.clear_inactive_results();
+        self.search_state.status = SearchStatus::Idle;
+        self.search_state.freshness = SearchFreshness::Fresh;
+        self.clear_search_highlights();
+    }
+
+    fn set_selection_only_search_error(&mut self) {
+        self.search_state.searching = false;
+        self.search_state.status =
+            SearchStatus::Error("Selection-only search requires an active selection.".to_owned());
+        self.search_state.freshness = SearchFreshness::Fresh;
+        self.search_state.clear_match_results();
+        self.search_state.dirty = false;
+        self.clear_search_highlights();
+    }
+
+    fn collect_active_tab_search_targets(&self) -> Vec<SearchTargetSnapshot> {
+        self.collect_search_targets_for_tab(
+            self.active_tab_index(),
+            self.active_tab()
+                .and_then(|tab| tab.active_view())
+                .map(|view| view.buffer_id),
+            None,
+        )
     }
 
     fn active_search_target(
@@ -206,18 +217,35 @@ impl ScratchpadApp {
         };
         let tab_label = self.search_tab_label(tab_index);
         let mut seen_buffer_ids = HashSet::with_capacity(tab.views.len());
-        let ordered_views = tab
-            .ordered_view_ids_in_layout_order()
-            .into_iter()
-            .filter_map(|view_id| tab.view(view_id))
-            .collect::<Vec<_>>();
-        let mut targets = ordered_views
-            .iter()
-            .filter_map(|view| {
-                seen_buffer_ids.insert(view.buffer_id).then_some(())?;
-                build_search_target(tab_index, tab, view.id, &tab_label, search_range.clone())
-            })
-            .collect::<Vec<_>>();
+        let mut first_visible_view_by_buffer =
+            std::collections::HashMap::with_capacity(tab.views.len());
+        for view_id in tab.ordered_view_ids_in_layout_order() {
+            let Some(view) = tab.view(view_id) else {
+                continue;
+            };
+            first_visible_view_by_buffer
+                .entry(view.buffer_id)
+                .or_insert(view.id);
+        }
+        let mut targets = Vec::with_capacity(tab.views.len());
+        for view in &tab.views {
+            if !seen_buffer_ids.insert(view.buffer_id) {
+                continue;
+            }
+            let representative_view_id = first_visible_view_by_buffer
+                .get(&view.buffer_id)
+                .copied()
+                .unwrap_or(view.id);
+            if let Some(target) = build_search_target(
+                tab_index,
+                tab,
+                representative_view_id,
+                &tab_label,
+                search_range.clone(),
+            ) {
+                targets.push(target);
+            }
+        }
         if let Some(prioritized_buffer_id) = prioritized_buffer_id
             && let Some(index) = targets
                 .iter()
@@ -466,43 +494,13 @@ impl ScratchpadApp {
             return None;
         }
 
-        let mut targets = Vec::new();
-        let mut start = 0;
-        while start < self.search_state.matches.len() {
-            let current_match = &self.search_state.matches[start];
-            let mut end = start + 1;
-            while end < self.search_state.matches.len()
-                && self.search_state.matches[end].tab_index == current_match.tab_index
-                && self.search_state.matches[end].buffer_id == current_match.buffer_id
-            {
-                end += 1;
-            }
-
-            let replacements = self.search_state.matches[start..end]
-                .iter()
-                .rev()
-                .map(|search_match| {
-                    (
-                        search_match.range.clone(),
-                        self.search_state.replacement.clone(),
-                    )
-                })
-                .collect::<Vec<_>>();
-
-            targets.push(ReplacementTargetPlan {
-                tab_index: current_match.tab_index,
-                view_id: current_match.view_id,
-                buffer_id: current_match.buffer_id,
-                buffer_label: current_match.buffer_label.clone(),
-                replacements,
-            });
-            start = end;
-        }
-
         Some(ReplacementPlan {
             scope: self.search_state.scope,
             total_match_count: self.search_state.matches.len(),
-            targets,
+            targets: build_replacement_targets(
+                &self.search_state.matches,
+                &self.search_state.replacement,
+            ),
         })
     }
 
@@ -513,11 +511,8 @@ impl ScratchpadApp {
         let previous_selection = tab
             .view(target.view_id)
             .and_then(|view| view.cursor_range)
-            .unwrap_or_else(|| cursor_range_from_char_range(target.replacements[0].0.clone()));
-        let next_selection = cursor_range_from_char_range(
-            target.replacements[0].0.start
-                ..target.replacements[0].0.start + target.replacements[0].1.chars().count(),
-        );
+            .unwrap_or_else(|| fallback_selection_for_target(target));
+        let next_selection = next_selection_for_target(target);
         let Some(buffer) = tab.buffer_by_id_mut(target.buffer_id) else {
             return false;
         };
@@ -556,6 +551,51 @@ impl ScratchpadApp {
         let _ = tab;
         self.note_settings_toml_edit(tab_index);
     }
+}
+
+fn build_replacement_targets(
+    matches: &[SearchMatch],
+    replacement: &str,
+) -> Vec<ReplacementTargetPlan> {
+    let mut targets = Vec::new();
+    let mut start = 0;
+    while start < matches.len() {
+        let current_match = &matches[start];
+        let mut end = start + 1;
+        while end < matches.len() && same_replacement_target(&matches[end], current_match) {
+            end += 1;
+        }
+
+        let replacements = matches[start..end]
+            .iter()
+            .rev()
+            .map(|search_match| (search_match.range.clone(), replacement.to_owned()))
+            .collect();
+
+        targets.push(ReplacementTargetPlan {
+            tab_index: current_match.tab_index,
+            view_id: current_match.view_id,
+            buffer_id: current_match.buffer_id,
+            buffer_label: current_match.buffer_label.clone(),
+            replacements,
+        });
+        start = end;
+    }
+    targets
+}
+
+fn same_replacement_target(left: &SearchMatch, right: &SearchMatch) -> bool {
+    left.tab_index == right.tab_index && left.buffer_id == right.buffer_id
+}
+
+fn fallback_selection_for_target(target: &ReplacementTargetPlan) -> CursorRange {
+    cursor_range_from_char_range(target.replacements[0].0.clone())
+}
+
+fn next_selection_for_target(target: &ReplacementTargetPlan) -> CursorRange {
+    let range = &target.replacements[0].0;
+    let replacement_len = target.replacements[0].1.chars().count();
+    cursor_range_from_char_range(range.start..range.start + replacement_len)
 }
 
 fn build_search_target(

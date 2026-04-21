@@ -55,7 +55,7 @@ pub(crate) fn render_tile_header(
             rects.promote_hit,
             TileControlSpec {
                 label: egui_phosphor::regular::ARROW_LINE_UP,
-                tooltip: Some("Promote this file's tiles into a new top-level tab"),
+                tooltip: Some("Promote Tile"),
                 style: TileControlStyle::Default,
                 sense: egui::Sense::click(),
                 id_prefix: "promote_view",

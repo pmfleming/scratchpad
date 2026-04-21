@@ -258,14 +258,23 @@ pub(crate) fn vertical_tab_list_frame(ui: &egui::Ui) -> egui::Frame {
         .inner_margin(egui::Margin::same(VERTICAL_TAB_LIST_PADDING as i8))
 }
 
+pub(crate) fn hidden_vertical_tab_list_frame() -> egui::Frame {
+    egui::Frame::NONE
+}
+
 pub(crate) fn vertical_panel_visible(
     ui: &egui::Ui,
     app: &mut ScratchpadApp,
     side: TabListPosition,
     now: Instant,
 ) -> bool {
-    let has_context = pointer_near_bar(ui, app.vertical_tab_list_width(), side)
-        || pointer_in_vertical_protected_corridor(ui, app.vertical_tab_list_width(), side);
+    let reveal_width = if app.vertical_tab_list_open {
+        app.vertical_tab_list_width()
+    } else {
+        HEADER_HEIGHT
+    };
+    let has_context = pointer_near_bar(ui, reveal_width, side)
+        || pointer_in_vertical_protected_corridor(ui, reveal_width, side);
     auto_hide_visible(app, ui.ctx(), has_context, now)
 }
 

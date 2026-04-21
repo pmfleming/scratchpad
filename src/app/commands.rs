@@ -38,6 +38,7 @@ pub enum AppCommand {
     NewTab,
     OpenFile,
     OpenFileHere,
+    OpenHistory,
     OpenSearch,
     OpenSearchAndReplace,
     OpenSettings,

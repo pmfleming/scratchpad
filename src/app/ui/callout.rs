@@ -1,6 +1,6 @@
 use crate::app::chrome::phosphor_button;
 use crate::app::theme::{
-    CAPTION_BUTTON_SIZE, CLOSE_BG, CLOSE_HOVER_BG, action_bg, action_hover_bg, border, text_muted,
+    CAPTION_BUTTON_SIZE, CLOSE_BG, CLOSE_HOVER_BG, action_hover_bg, border, text_muted,
     text_primary,
 };
 use eframe::egui;
@@ -39,9 +39,12 @@ pub(crate) fn show_floating(
 }
 
 pub(crate) fn frame(ui: &egui::Ui) -> egui::Frame {
+    let popup_frame = egui::Frame::popup(ui.style());
+
     egui::Frame::NONE
-        .fill(action_bg(ui))
-        .stroke(egui::Stroke::new(1.0, border(ui)))
+        .fill(popup_frame.fill)
+        .stroke(popup_frame.stroke)
+        .shadow(popup_frame.shadow)
         .corner_radius(egui::CornerRadius::same(CALLOUT_RADIUS))
         .inner_margin(egui::Margin::symmetric(12, 8))
 }

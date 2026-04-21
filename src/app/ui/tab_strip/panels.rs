@@ -2,9 +2,9 @@ use super::HeaderLayout;
 use super::actions::{show_caption_controls, show_primary_actions};
 use super::entries::{show_tab_region, show_vertical_tab_region};
 use super::layout::{
-    AUTO_HIDE_PEEK_SIZE, auto_hide_panel_extent, horizontal_bar_visible,
-    show_horizontal_edge_tab_list, vertical_panel_visible, vertical_tab_list_frame,
-    vertical_tab_panel,
+    AUTO_HIDE_PEEK_SIZE, auto_hide_panel_extent, hidden_vertical_tab_list_frame,
+    horizontal_bar_visible, show_horizontal_edge_tab_list, vertical_panel_visible,
+    vertical_tab_list_frame, vertical_tab_panel,
 };
 use super::outcome::apply_tab_outcome;
 use crate::app::app_state::ScratchpadApp;
@@ -36,7 +36,11 @@ fn show_vertical_tab_panel(ui: &mut egui::Ui, app: &mut ScratchpadApp, side: Tab
         .default_size(panel_width)
         .size_range(vertical_tab_panel_size_range(panel_visible))
         .resizable(panel_visible)
-        .frame(vertical_tab_list_frame(ui))
+        .frame(if panel_visible {
+            vertical_tab_list_frame(ui)
+        } else {
+            hidden_vertical_tab_list_frame()
+        })
         .show_inside(ui, |ui| {
             if !panel_visible {
                 return;

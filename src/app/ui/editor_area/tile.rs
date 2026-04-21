@@ -13,12 +13,15 @@ use crate::app::ui::tile_header::{
 };
 use eframe::egui;
 use egui_phosphor::regular::{
-    ARROWS_SPLIT, CARET_RIGHT, CLIPBOARD_TEXT, COPY, FLOPPY_DISK, FOLDER_OPEN, MAGNIFYING_GLASS,
-    SCISSORS, SELECTION_ALL,
+    ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_LEFT, ARROW_LINE_UP, ARROW_RIGHT,
+    ARROW_UP, ARROWS_COUNTER_CLOCKWISE, ARROWS_SPLIT, CARET_RIGHT, CLIPBOARD_TEXT,
+    CLOCK_COUNTER_CLOCKWISE, COPY, FLOPPY_DISK, FOLDER_OPEN, MAGNIFYING_GLASS, SCISSORS,
+    SELECTION_ALL, X,
 };
 
 const DEFAULT_SPLIT_RATIO: f32 = 0.5;
-const EDITOR_CONTEXT_MENU_WIDTH: f32 = 220.0;
+const EDITOR_CONTEXT_MENU_WIDTH: f32 = 192.0;
+const EDITOR_CONTEXT_SUBMENU_WIDTH: f32 = 168.0;
 const EDITOR_CONTEXT_ICON_BUTTON_SIZE: egui::Vec2 = egui::vec2(38.0, 30.0);
 
 struct TileBodyOutcome {
@@ -194,11 +197,12 @@ fn attach_editor_context_menu(
 
     tile_response.context_menu(|ui| {
         ui.set_min_width(EDITOR_CONTEXT_MENU_WIDTH);
+        ui.set_max_width(EDITOR_CONTEXT_MENU_WIDTH);
 
         if menu_action_button(
             ui,
             "Undo",
-            None,
+            Some(ARROW_COUNTER_CLOCKWISE),
             app.active_buffer_can_undo_text_operation(),
         ) {
             app.handle_command(AppCommand::UndoActiveBufferTextOperation);
@@ -208,11 +212,15 @@ fn attach_editor_context_menu(
         if menu_action_button(
             ui,
             "Redo",
-            None,
+            Some(ARROW_CLOCKWISE),
             app.active_buffer_can_redo_text_operation(),
         ) {
             app.handle_command(AppCommand::RedoActiveBufferTextOperation);
             app.request_focus_for_active_view();
+            ui.close();
+        }
+        if menu_action_button(ui, "History", Some(CLOCK_COUNTER_CLOCKWISE), true) {
+            app.handle_command(AppCommand::OpenHistory);
             ui.close();
         }
 
@@ -222,7 +230,7 @@ fn attach_editor_context_menu(
             app.handle_command(AppCommand::OpenSearch);
             ui.close();
         }
-        if menu_action_button(ui, "Replace", None, true) {
+        if menu_action_button(ui, "Replace", Some(ARROWS_COUNTER_CLOCKWISE), true) {
             app.handle_command(AppCommand::OpenSearchAndReplace);
             ui.close();
         }
@@ -248,49 +256,13 @@ fn attach_editor_context_menu(
 
         ui.separator();
 
-        ui.menu_button(
-            egui::RichText::new(format!("{ARROWS_SPLIT}  Split {CARET_RIGHT}")),
-            |ui| {
-                if split_menu_button(ui, "Split Left") {
-                    actions.push(TileAction::Split {
-                        axis: SplitAxis::Vertical,
-                        new_view_first: true,
-                        ratio: DEFAULT_SPLIT_RATIO,
-                    });
-                    ui.close();
-                }
-                if split_menu_button(ui, "Split Right") {
-                    actions.push(TileAction::Split {
-                        axis: SplitAxis::Vertical,
-                        new_view_first: false,
-                        ratio: DEFAULT_SPLIT_RATIO,
-                    });
-                    ui.close();
-                }
-                if split_menu_button(ui, "Split Up") {
-                    actions.push(TileAction::Split {
-                        axis: SplitAxis::Horizontal,
-                        new_view_first: true,
-                        ratio: DEFAULT_SPLIT_RATIO,
-                    });
-                    ui.close();
-                }
-                if split_menu_button(ui, "Split Down") {
-                    actions.push(TileAction::Split {
-                        axis: SplitAxis::Horizontal,
-                        new_view_first: false,
-                        ratio: DEFAULT_SPLIT_RATIO,
-                    });
-                    ui.close();
-                }
-            },
-        );
+        split_menu_row(ui, actions);
 
-        if menu_action_button(ui, "Move Tile To New Tab", None, can_promote) {
+        if menu_action_button(ui, "Promote Tile", Some(ARROW_LINE_UP), can_promote) {
             actions.push(TileAction::Promote(request.view_id));
             ui.close();
         }
-        if menu_action_button(ui, "Close Tile", None, request.can_close) {
+        if menu_action_button(ui, "Close Tile", Some(X), request.can_close) {
             actions.push(TileAction::Close(request.view_id));
             ui.close();
         }
@@ -330,38 +302,127 @@ fn menu_action_button(ui: &mut egui::Ui, label: &str, icon: Option<&str>, enable
         Some(icon) => format!("{icon}  {label}"),
         None => label.to_owned(),
     };
-    ui.add_enabled(
-        enabled,
-        egui::Button::new(egui::RichText::new(text).color(text_primary(ui)))
-            .min_size(egui::vec2(ui.available_width(), 28.0))
-            .fill(egui::Color32::TRANSPARENT)
-            .stroke(egui::Stroke::NONE),
-    )
-    .clicked()
+    ui.scope(|ui| {
+        apply_context_menu_row_hover_style(ui);
+        ui.add_enabled(
+            enabled,
+            egui::Button::new(egui::RichText::new(text).color(text_primary(ui)))
+                .min_size(egui::vec2(EDITOR_CONTEXT_MENU_WIDTH, 28.0))
+                .stroke(egui::Stroke::NONE),
+        )
+        .clicked()
+    })
+    .inner
 }
 
-fn split_menu_button(ui: &mut egui::Ui, label: &str) -> bool {
-    ui.add(
-        egui::Button::new(egui::RichText::new(label).color(text_primary(ui)))
-            .min_size(egui::vec2(160.0, 28.0))
-            .fill(egui::Color32::TRANSPARENT)
+fn split_menu_row(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
+    ui.scope(|ui| {
+        apply_context_menu_row_hover_style(ui);
+        let button = egui::Button::new(
+            egui::RichText::new(format!("{ARROWS_SPLIT}  Split")).color(text_primary(ui)),
+        )
+        .min_size(egui::vec2(EDITOR_CONTEXT_MENU_WIDTH, 28.0))
+        .stroke(egui::Stroke::NONE)
+        .right_text(egui::RichText::new(CARET_RIGHT).color(text_primary(ui)));
+
+        egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
+            ui.set_min_width(EDITOR_CONTEXT_SUBMENU_WIDTH);
+            ui.set_max_width(EDITOR_CONTEXT_SUBMENU_WIDTH);
+
+            if split_menu_button(ui, "Split Left", ARROW_LEFT) {
+                actions.push(TileAction::Split {
+                    axis: SplitAxis::Vertical,
+                    new_view_first: true,
+                    ratio: DEFAULT_SPLIT_RATIO,
+                });
+                ui.close();
+            }
+            if split_menu_button(ui, "Split Right", ARROW_RIGHT) {
+                actions.push(TileAction::Split {
+                    axis: SplitAxis::Vertical,
+                    new_view_first: false,
+                    ratio: DEFAULT_SPLIT_RATIO,
+                });
+                ui.close();
+            }
+            if split_menu_button(ui, "Split Up", ARROW_UP) {
+                actions.push(TileAction::Split {
+                    axis: SplitAxis::Horizontal,
+                    new_view_first: true,
+                    ratio: DEFAULT_SPLIT_RATIO,
+                });
+                ui.close();
+            }
+            if split_menu_button(ui, "Split Down", ARROW_DOWN) {
+                actions.push(TileAction::Split {
+                    axis: SplitAxis::Horizontal,
+                    new_view_first: false,
+                    ratio: DEFAULT_SPLIT_RATIO,
+                });
+                ui.close();
+            }
+        });
+    });
+}
+
+fn split_menu_button(ui: &mut egui::Ui, label: &str, icon: &str) -> bool {
+    ui.scope(|ui| {
+        apply_context_menu_row_hover_style(ui);
+        ui.add(
+            egui::Button::new(
+                egui::RichText::new(format!("{icon}  {label}")).color(text_primary(ui)),
+            )
+            .min_size(egui::vec2(EDITOR_CONTEXT_SUBMENU_WIDTH, 28.0))
             .stroke(egui::Stroke::NONE),
-    )
-    .clicked()
+        )
+        .clicked()
+    })
+    .inner
+}
+
+fn apply_context_menu_row_hover_style(ui: &mut egui::Ui) {
+    let hover_bg = action_hover_bg(ui);
+    let visuals = ui.visuals_mut();
+    visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+    visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+    visuals.widgets.hovered.bg_fill = hover_bg;
+    visuals.widgets.hovered.weak_bg_fill = hover_bg;
+    visuals.widgets.active.bg_fill = hover_bg;
+    visuals.widgets.active.weak_bg_fill = hover_bg;
+    visuals.widgets.open.bg_fill = hover_bg;
+    visuals.widgets.open.weak_bg_fill = hover_bg;
+    visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
+    visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
+    visuals.widgets.active.bg_stroke = egui::Stroke::NONE;
+    visuals.widgets.open.bg_stroke = egui::Stroke::NONE;
 }
 
 fn icon_rail_button(ui: &mut egui::Ui, icon: &str, tooltip: &str, enabled: bool) -> egui::Response {
-    let button = egui::Button::new(
-        egui::RichText::new(icon)
-            .font(egui::FontId::proportional(17.0))
-            .color(text_primary(ui)),
-    )
-    .min_size(EDITOR_CONTEXT_ICON_BUTTON_SIZE)
-    .fill(action_hover_bg(ui))
-    .stroke(egui::Stroke::new(1.0, border(ui)))
-    .corner_radius(egui::CornerRadius::same(8));
+    ui.scope(|ui| {
+        let idle_bg = action_bg(ui);
+        let hover_bg = action_hover_bg(ui);
+        let visuals = ui.visuals_mut();
+        visuals.widgets.inactive.bg_fill = idle_bg;
+        visuals.widgets.inactive.weak_bg_fill = idle_bg;
+        visuals.widgets.hovered.bg_fill = hover_bg;
+        visuals.widgets.hovered.weak_bg_fill = hover_bg;
+        visuals.widgets.active.bg_fill = hover_bg;
+        visuals.widgets.active.weak_bg_fill = hover_bg;
+        visuals.widgets.open.bg_fill = hover_bg;
+        visuals.widgets.open.weak_bg_fill = hover_bg;
 
-    ui.add_enabled(enabled, button).on_hover_text(tooltip)
+        let button = egui::Button::new(
+            egui::RichText::new(icon)
+                .font(egui::FontId::proportional(17.0))
+                .color(text_primary(ui)),
+        )
+        .min_size(EDITOR_CONTEXT_ICON_BUTTON_SIZE)
+        .stroke(egui::Stroke::new(1.0, border(ui)))
+        .corner_radius(egui::CornerRadius::same(8));
+
+        ui.add_enabled(enabled, button).on_hover_text(tooltip)
+    })
+    .inner
 }
 
 fn paint_tile_frame(

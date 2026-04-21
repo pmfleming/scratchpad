@@ -46,6 +46,7 @@ struct OverflowPopupRequest<'a> {
 }
 
 const BOTTOM_OVERFLOW_GAP: f32 = 6.0;
+const OVERFLOW_POPUP_VIEWPORT_MARGIN: f32 = 8.0;
 
 pub(crate) fn show_overflow_button(
     ctx: &egui::Context,
@@ -69,12 +70,12 @@ pub(crate) fn show_overflow_button(
         pivot,
     };
 
-    if let Some(area_response) =
+    if let Some(popup_response) =
         show_overflow_popup(ctx, popup_request, overflow_popup_open, &mut outcome)
         && should_close_overflow_popup(
             ctx,
             &overflow_button_response,
-            &area_response.response,
+            &popup_response,
             outcome.close_requested_tab,
         )
     {
@@ -106,13 +107,15 @@ fn show_overflow_popup(
     request: OverflowPopupRequest<'_>,
     overflow_popup_open: &mut bool,
     outcome: &mut OverflowMenuOutcome,
-) -> Option<egui::InnerResponse<egui::InnerResponse<Vec<tab_drag::TabRectEntry>>>> {
+) -> Option<egui::Response> {
     if !*overflow_popup_open {
         return None;
     }
 
     let active_drag_sources = tab_drag::active_drag_sources_for_context(ctx);
     let popup_width = TAB_BUTTON_WIDTH;
+    let popup_max_height = overflow_popup_max_height(ctx, request.anchor, request.pivot);
+    let visible_row_count = overflow_row_count(request.app, request.visible_tab_indices) - 1;
     let area_response = egui::Area::new(request.overflow_popup_id)
         .order(egui::Order::Foreground)
         .constrain(true)
@@ -129,18 +132,29 @@ fn show_overflow_popup(
                     overflow_popup_open,
                 };
 
-                collect_overflow_row_rects(
-                    ui,
-                    request.app,
-                    &active_drag_sources,
-                    request.visible_tab_indices,
-                    &mut menu,
-                )
+                egui::ScrollArea::vertical()
+                    .id_salt(request.overflow_popup_id.with("scroll"))
+                    .auto_shrink([false, false])
+                    .min_scrolled_height(overflow_popup_target_height(
+                        visible_row_count,
+                        popup_max_height,
+                    ))
+                    .max_height(popup_max_height)
+                    .show(ui, |ui| {
+                        collect_overflow_row_rects(
+                            ui,
+                            request.app,
+                            &active_drag_sources,
+                            request.visible_tab_indices,
+                            &mut menu,
+                        )
+                    })
+                    .inner
             })
         });
 
     outcome.drop_zone = build_overflow_drop_zone(&area_response.inner.inner);
-    Some(area_response)
+    Some(area_response.response)
 }
 
 fn overflow_popup_anchor(
@@ -156,6 +170,29 @@ fn overflow_popup_anchor(
             (button_rect.right_bottom(), egui::Align2::RIGHT_TOP)
         }
     }
+}
+
+fn overflow_popup_max_height(ctx: &egui::Context, anchor: egui::Pos2, pivot: egui::Align2) -> f32 {
+    let viewport = ctx.content_rect();
+    let available_height = match pivot.y() {
+        egui::Align::TOP => viewport.bottom() - anchor.y,
+        egui::Align::BOTTOM => anchor.y - viewport.top(),
+        egui::Align::Center => viewport.height(),
+    };
+
+    (available_height - OVERFLOW_POPUP_VIEWPORT_MARGIN).max(TAB_HEIGHT)
+}
+
+fn overflow_popup_target_height(visible_row_count: usize, popup_max_height: f32) -> f32 {
+    ((visible_row_count.saturating_sub(1)) as f32 * TAB_HEIGHT)
+        .min(popup_max_height)
+        .max(TAB_HEIGHT)
+}
+
+fn overflow_row_count(app: &ScratchpadApp, visible_tab_indices: &HashSet<usize>) -> usize {
+    (0..app.total_tab_slots())
+        .filter(|slot_index| should_show_overflow_row(*slot_index, &[], visible_tab_indices))
+        .count()
 }
 
 fn collect_overflow_row_rects(

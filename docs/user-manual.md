@@ -1,6 +1,8 @@
 # Scratchpad User Manual
 
-Scratchpad is a Windows text editor built for tabbed workspaces, tiled editing, and text files that are awkward enough to break simpler tools.
+Scratchpad is a Windows text editor built as a safe-by-design Notepad replacement for general text work.
+
+It is designed to stay responsive, handle awkward encodings and control-character artifacts safely, and avoid drifting into a coding-first editor.
 
 ## Getting Started
 
@@ -102,13 +104,15 @@ Scratchpad preserves the file's detected encoding and BOM state when saving.
 
 The search strip supports:
 
+- selection-only scope when text is selected
 - active file scope
 - current workspace-tab scope
 - all-open-tabs scope
+- plain-text and regex modes
 - case-sensitive matching
 - whole-word matching
 - replace current match
-- replace all matches in the active file
+- replace all matches in the current scope when replacement is allowed
 
 Search operates on the decoded text already loaded into each open buffer. That means the same search query can match across open files even when those files were loaded from different encodings.
 
@@ -222,9 +226,8 @@ If you update the shipped file on disk, Scratchpad will open your updated versio
 
 ## Current Limits
 
-- Replace all only targets the active file.
 - Search only covers text already open in Scratchpad; it does not search unopened files or folders on disk.
-- Regex search is not implemented yet.
-- Context menus are still limited.
+- Context menus exist, but command coverage is still narrower than a full command palette.
 - A command palette is planned but not available yet.
 - Windows packaging is currently zip-based.
+- Scratchpad is intentionally focused on text editing rather than language-aware coding workflows.

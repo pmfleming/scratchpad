@@ -1,5 +1,6 @@
 use crate::app::chrome::{tab_button, tab_rename_editor_sized};
 use crate::app::ui::tab_drag;
+use crate::app::ui::tab_strip::context_menu::attach_tab_context_menu;
 use eframe::egui;
 
 pub(crate) struct TabCellProps<'a> {
@@ -81,6 +82,8 @@ pub(crate) fn render_tab_cell_sized(
         } else {
             TabInteraction::None
         };
+
+        attach_tab_context_menu(&tab_response, app, index);
 
         TabCellOutcome {
             interaction,

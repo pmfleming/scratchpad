@@ -9,7 +9,8 @@ use crate::app::theme::{
 use crate::app::ui::{callout, settings};
 use eframe::egui;
 use egui_phosphor::regular::{
-    ARROW_CLOCKWISE, CARET_DOWN, CARET_UP, MAGNIFYING_GLASS, SWAP, TEXT_ALIGN_JUSTIFY,
+    ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE, ARROWS_COUNTER_CLOCKWISE, CARDS, CARET_DOWN,
+    CARET_UP, MAGNIFYING_GLASS, RECTANGLE, SWAP, TABS, TEXT_ALIGN_JUSTIFY, TEXTBOX,
 };
 
 const CASE_SENSITIVE_ICON: &str = "Aa";
@@ -91,7 +92,7 @@ fn render_search_pill(
                 egui::Layout::right_to_left(egui::Align::Center),
                 |ui| {
                     toggle_mode(ui, &mut state.mode);
-                    toggle_flag(ui, &mut state.whole_word, TEXT_ALIGN_JUSTIFY, "Whole word");
+                    toggle_flag(ui, &mut state.whole_word, TEXTBOX, "Whole word");
                     toggle_flag(
                         ui,
                         &mut state.match_case,
@@ -105,10 +106,10 @@ fn render_search_pill(
                         SearchScope::ActiveWorkspaceTab,
                         SearchScope::AllOpenTabs,
                     ] {
-                        if toggle_chip(
+                        if icon_toggle_chip(
                             ui,
                             state.scope == scope,
-                            scope.label(),
+                            scope_icon(scope),
                             scope_tooltip(scope, state.scope_origin),
                         )
                         .clicked()
@@ -148,7 +149,7 @@ fn render_replace_pill(
                         egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
                         |ui| {
                             ui.label(
-                                egui::RichText::new(ARROW_CLOCKWISE)
+                                egui::RichText::new(ARROWS_COUNTER_CLOCKWISE)
                                     .font(egui::FontId::proportional(ICON_SIZE))
                                     .color(text_muted(ui)),
                             );
@@ -189,21 +190,21 @@ fn render_replace_pill(
                 trigger_action(
                     ui,
                     replace_enabled,
-                    ARROW_CLOCKWISE,
+                    ARROWS_COUNTER_CLOCKWISE,
                     replace_current_tooltip,
                     &mut actions.replace_current_requested,
                 );
-                trigger_text_action(
+                trigger_action(
                     ui,
                     state.can_redo_text_operation,
-                    "Redo",
+                    ARROW_CLOCKWISE,
                     "Redo the last operation-based text edit in the active buffer",
                     &mut actions.redo_requested,
                 );
-                trigger_text_action(
+                trigger_action(
                     ui,
                     state.can_undo_text_operation,
-                    "Undo",
+                    ARROW_COUNTER_CLOCKWISE,
                     "Undo the last operation-based text edit in the active buffer",
                     &mut actions.undo_requested,
                 );
@@ -230,7 +231,7 @@ fn render_replace_pill(
 
 fn render_replace_heading(ui: &mut egui::Ui, replace_open: &mut bool) {
     ui.horizontal(|ui| {
-        if pill_heading_button(ui, ARROW_CLOCKWISE, "Replace").clicked() {
+        if pill_heading_button(ui, "Replace").clicked() {
             *replace_open = !*replace_open;
         }
 
@@ -257,10 +258,10 @@ fn render_replace_heading(ui: &mut egui::Ui, replace_open: &mut bool) {
     });
 }
 
-fn pill_heading_button(ui: &mut egui::Ui, icon: &str, title: &str) -> egui::Response {
+fn pill_heading_button(ui: &mut egui::Ui, title: &str) -> egui::Response {
     ui.add(
         egui::Button::new(
-            egui::RichText::new(format!("{icon}  {title}"))
+            egui::RichText::new(title)
                 .size(15.0)
                 .color(text_primary(ui)),
         )
@@ -289,10 +290,17 @@ fn compact_text_field(
         .corner_radius(egui::CornerRadius::same(SEARCH_INPUT_CORNER_RADIUS))
         .inner_margin(egui::Margin::symmetric(2, 0))
         .show(ui, |ui| {
-            ui.add_sized(
-                [width, INPUT_HEIGHT],
-                search_text_edit(text, id, hint).frame(egui::Frame::NONE),
+            ui.allocate_ui_with_layout(
+                egui::vec2(width, INPUT_HEIGHT),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.add_sized(
+                        [width, INPUT_HEIGHT],
+                        search_text_edit(text, id, hint).frame(egui::Frame::NONE),
+                    )
+                },
             )
+            .inner
         });
 
     let stroke = if inner.inner.has_focus() {
@@ -310,21 +318,6 @@ fn compact_text_field(
     );
 
     inner.inner
-}
-
-fn toggle_chip(ui: &mut egui::Ui, selected: bool, label: &str, tooltip: &str) -> egui::Response {
-    chip_button(
-        ui,
-        egui::RichText::new(label).size(12.5).color(if selected {
-            text_primary(ui)
-        } else {
-            text_primary(ui).gamma_multiply(0.9)
-        }),
-        selected,
-        egui::vec2(0.0, CONTROL_BUTTON_HEIGHT),
-        egui::vec2(8.0, 0.0),
-        tooltip,
-    )
 }
 
 fn icon_toggle_chip(
@@ -371,7 +364,6 @@ fn search_text_edit<'a>(text: &'a mut String, id: egui::Id, hint: &str) -> egui:
         .id(id)
         .hint_text(hint)
         .margin(egui::Margin::symmetric(10, 6))
-        .vertical_align(egui::Align::Center)
 }
 
 fn toggle_flag(ui: &mut egui::Ui, value: &mut bool, icon: &str, tooltip: &str) {
@@ -384,39 +376,6 @@ fn trigger_action(ui: &mut egui::Ui, enabled: bool, icon: &str, tooltip: &str, f
     if icon_action_button(ui, icon, tooltip, enabled).clicked() {
         *flag = true;
     }
-}
-
-fn trigger_text_action(
-    ui: &mut egui::Ui,
-    enabled: bool,
-    label: &str,
-    tooltip: &str,
-    flag: &mut bool,
-) {
-    if text_action_button(ui, label, tooltip, enabled).clicked() {
-        *flag = true;
-    }
-}
-
-fn text_action_button(
-    ui: &mut egui::Ui,
-    label: &str,
-    tooltip: &str,
-    enabled: bool,
-) -> egui::Response {
-    ui.add_enabled_ui(enabled, |ui| {
-        chip_button(
-            ui,
-            egui::RichText::new(label)
-                .size(12.5)
-                .color(text_primary(ui)),
-            false,
-            egui::vec2(0.0, CONTROL_BUTTON_HEIGHT),
-            egui::vec2(8.0, 0.0),
-            tooltip,
-        )
-    })
-    .inner
 }
 
 fn chip_button(
@@ -454,13 +413,22 @@ fn chip_button(
 
 fn scope_tooltip(scope: SearchScope, origin: SearchScopeOrigin) -> &'static str {
     match scope {
-        SearchScope::ActiveBuffer => "Search scope: Active buffer",
+        SearchScope::ActiveBuffer => "Search the Current Focused File",
         SearchScope::SelectionOnly if origin == SearchScopeOrigin::SelectionDefault => {
-            "Search scope: Current selection (auto-selected)"
+            "Search Selected Text (auto-selected)"
         }
-        SearchScope::SelectionOnly => "Search scope: Current selection",
-        SearchScope::ActiveWorkspaceTab => "Search scope: Active workspace tab",
-        SearchScope::AllOpenTabs => "Search scope: All open tabs",
+        SearchScope::SelectionOnly => "Search Selected Text",
+        SearchScope::ActiveWorkspaceTab => "Search All Files on This Tab",
+        SearchScope::AllOpenTabs => "Search All Open Files",
+    }
+}
+
+fn scope_icon(scope: SearchScope) -> &'static str {
+    match scope {
+        SearchScope::SelectionOnly => TEXT_ALIGN_JUSTIFY,
+        SearchScope::ActiveBuffer => RECTANGLE,
+        SearchScope::ActiveWorkspaceTab => CARDS,
+        SearchScope::AllOpenTabs => TABS,
     }
 }
 

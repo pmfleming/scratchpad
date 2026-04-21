@@ -218,7 +218,7 @@ impl ScratchpadApp {
 
         let title = entry.title();
         self.restore_transaction_snapshot(entry.snapshot_before);
-        self.set_info_status(format!("Undid transaction: {}", title));
+        self.set_info_status(format!("Undid history entry: {}", title));
         let _ = self.persist_session_now();
         true
     }

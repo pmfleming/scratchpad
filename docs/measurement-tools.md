@@ -1,6 +1,8 @@
 # Scratchpad Measurement Tools
 
-Scratchpad includes a small analysis toolchain for maintainability, clone drift, benchmark visibility, and architecture mapping.
+Scratchpad treats measurement as part of the product, not as a side task.
+
+This toolchain exists to document the performance, capacity, resource cost, and maintainability of a safe-by-design Rust Notepad replacement while it evolves.
 
 ## Scripts
 
@@ -130,14 +132,14 @@ powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -CloneOnly
 - The viewer is intentionally decoupled from the analysis scripts.
 - The current workflow is aimed at local review and CI visibility rather than polished end-user reporting.
 
-## Planned Suite Additions
+## What The Suite Covers Today
 
-The measurement suite should be expanded with the following capacity and profiling coverage:
+Today the measurement workflow covers:
 
 - allocation profiling for large-file open
 - allocation profiling for large paste into a large buffer
 - working-set and page-fault tracking while scaling tab count
-- real file-backed large-file tests, not only synthetic in-memory probes
+- real file-backed large-file tests alongside synthetic in-memory probes
 - session persist and restore cost with hundreds or thousands of tabs
 
-These additions should sit alongside the current slowspots, search-speed, flamegraph, and capacity-report flows so large-buffer and high-tab regressions are measured directly rather than inferred from CPU-only traces.
+Those measurements sit alongside slowspots, search-speed, flamegraphs, clone analysis, and architecture mapping so large-buffer and high-tab regressions are visible before they turn into user-facing failures.
