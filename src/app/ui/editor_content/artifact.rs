@@ -1,4 +1,4 @@
-use super::native_editor::{TextEditOptions, render_read_only_text_edit};
+use super::native_editor::{EditorWidgetOutcome, TextEditOptions, render_read_only_text_edit};
 use crate::app::domain::{BufferState, EditorViewState, RenderedLayout};
 
 pub fn render_artifact_view(
@@ -7,8 +7,8 @@ pub fn render_artifact_view(
     view: &mut EditorViewState,
     previous_layout: Option<&RenderedLayout>,
     options: TextEditOptions<'_>,
-) -> (bool, bool) {
-    let focused = if view.show_control_chars {
+) -> EditorWidgetOutcome {
+    if view.show_control_chars {
         try_render_visible_artifact_window(
             ui,
             buffer,
@@ -39,9 +39,7 @@ pub fn render_artifact_view(
             let clean_text = make_control_chars_clean(&buffer.text());
             render_read_only_text_edit(ui, view, clean_text, buffer.line_count, options)
         })
-    };
-
-    (false, focused)
+    }
 }
 
 fn try_render_visible_artifact_window(
@@ -51,7 +49,7 @@ fn try_render_visible_artifact_window(
     previous_layout: Option<&RenderedLayout>,
     options: TextEditOptions<'_>,
     transform: impl Fn(&str) -> String,
-) -> Option<bool> {
+) -> Option<EditorWidgetOutcome> {
     if options.word_wrap {
         return None;
     }
@@ -72,7 +70,7 @@ fn try_render_visible_artifact_window(
         ui.add_space(row_height * top_padding_lines as f32);
     }
 
-    let focused = render_read_only_text_edit(
+    let outcome = render_read_only_text_edit(
         ui,
         view,
         transform(&visible_window.text),
@@ -89,7 +87,7 @@ fn try_render_visible_artifact_window(
         ui.add_space(row_height * bottom_padding_lines as f32);
     }
 
-    Some(focused)
+    Some(outcome)
 }
 
 pub fn make_control_chars_visible(text: &str) -> String {

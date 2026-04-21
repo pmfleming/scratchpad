@@ -3,8 +3,8 @@ use super::{
     ScratchpadApp, SearchReplaceAvailability, SearchScope, SearchScopeOrigin, SearchStatus,
 };
 use crate::app::commands::AppCommand;
-use crate::app::domain::SplitAxis;
 use crate::app::domain::buffer::PieceTreeLite;
+use crate::app::domain::{BufferState, SplitAxis};
 use crate::app::services::search::SearchMode;
 use crate::app::services::session_store::SessionStore;
 use std::thread;
@@ -68,6 +68,42 @@ fn search_result_groups_are_separated_by_tab() {
     assert_eq!(groups.len(), 2);
     assert_eq!(groups[0].entries.len(), 1);
     assert_eq!(groups[1].entries.len(), 1);
+    assert_eq!(groups[0].buffer_label, "Untitled");
+    assert_eq!(groups[0].total_match_count, 1);
+    assert_eq!(groups[1].buffer_label, "Untitled");
+    assert_eq!(groups[1].total_match_count, 1);
+}
+
+#[test]
+fn search_result_groups_are_separated_by_file_within_a_tab() {
+    let mut app = test_app();
+    app.tabs_mut()[0].buffer.name = "one.txt".to_owned();
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha one".to_owned());
+    app.tabs_mut()[0]
+        .open_buffer_as_split(
+            BufferState::new("two.txt".to_owned(), "alpha two".to_owned(), None),
+            SplitAxis::Vertical,
+            false,
+            0.5,
+        )
+        .expect("open buffer split should succeed");
+
+    app.open_search();
+    app.set_search_scope(SearchScope::ActiveWorkspaceTab);
+    app.set_search_query("alpha");
+
+    wait_for_search_matches(&mut app, 2);
+
+    let groups = app.search_result_groups();
+    assert_eq!(groups.len(), 2);
+    let labels = groups
+        .iter()
+        .map(|group| group.buffer_label.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(labels, vec!["two.txt", "one.txt"]);
+    assert!(groups.iter().all(|group| group.total_match_count == 1));
 }
 
 #[test]
@@ -142,6 +178,59 @@ fn activating_search_match_uses_first_tile_for_duplicate_buffer_results() {
         .view(first_view_id)
         .and_then(|view| view.pending_cursor_range);
     assert_eq!(pending, Some(cursor_range_from_char_range(0..5)));
+}
+
+#[test]
+fn focusing_search_result_file_uses_first_tile_without_selecting_a_match() {
+    let mut app = test_app();
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha target".to_owned());
+
+    let first_view_id = app.tabs()[0].active_view_id;
+    let second_view_id = app.tabs_mut()[0]
+        .split_active_view(SplitAxis::Vertical)
+        .expect("split active view");
+    assert!(app.tabs_mut()[0].activate_view(second_view_id));
+    app.clear_session_dirty();
+
+    app.open_search();
+    app.set_search_scope(SearchScope::ActiveWorkspaceTab);
+    app.set_search_query("alpha");
+    wait_for_search_matches(&mut app, 1);
+    let active_match_index = app.search_active_match_index();
+
+    assert!(app.focus_search_result_file_at(0));
+    assert_eq!(app.tabs()[0].active_view_id, first_view_id);
+    assert_eq!(app.search_active_match_index(), active_match_index);
+    let pending = app.tabs()[0]
+        .view(first_view_id)
+        .and_then(|view| view.pending_cursor_range);
+    assert_eq!(pending, None);
+    assert!(!app.session_dirty());
+}
+
+#[test]
+fn focusing_search_result_file_prefers_first_visible_tile_for_duplicate_buffers() {
+    let mut app = test_app();
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha target".to_owned());
+
+    let original_view_id = app.tabs()[0].active_view_id;
+    let leading_view_id = app.tabs_mut()[0]
+        .split_active_view_with_placement(SplitAxis::Vertical, true, 0.5)
+        .expect("split active view with leading placement");
+    assert_ne!(original_view_id, leading_view_id);
+    assert!(app.tabs_mut()[0].activate_view(original_view_id));
+
+    app.open_search();
+    app.set_search_scope(SearchScope::ActiveWorkspaceTab);
+    app.set_search_query("alpha");
+    wait_for_search_matches(&mut app, 1);
+
+    assert!(app.focus_search_result_file_at(0));
+    assert_eq!(app.tabs()[0].active_view_id, leading_view_id);
 }
 
 #[test]

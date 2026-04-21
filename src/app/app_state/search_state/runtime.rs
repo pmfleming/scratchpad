@@ -206,8 +206,12 @@ impl ScratchpadApp {
         };
         let tab_label = self.search_tab_label(tab_index);
         let mut seen_buffer_ids = HashSet::with_capacity(tab.views.len());
-        let mut targets = tab
-            .views
+        let ordered_views = tab
+            .ordered_view_ids_in_layout_order()
+            .into_iter()
+            .filter_map(|view_id| tab.view(view_id))
+            .collect::<Vec<_>>();
+        let mut targets = ordered_views
             .iter()
             .filter_map(|view| {
                 seen_buffer_ids.insert(view.buffer_id).then_some(())?;
@@ -319,8 +323,10 @@ impl ScratchpadApp {
     fn sync_search_result_group_activity(&mut self) {
         let active_match_index = self.search_state.active_match_index;
         for group in &mut self.search_state.result_groups {
+            group.active = false;
             for entry in &mut group.entries {
                 entry.active = Some(entry.match_index) == active_match_index;
+                group.active |= entry.active;
             }
         }
     }

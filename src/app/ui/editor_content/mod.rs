@@ -15,6 +15,7 @@ pub use native_editor::{
 pub(crate) struct EditorContentOutcome {
     pub(crate) changed: bool,
     pub(crate) focused: bool,
+    pub(crate) interaction_response: Option<egui::Response>,
 }
 
 pub(crate) struct EditorContentStyle<'a> {
@@ -75,8 +76,12 @@ pub(crate) fn render_editor_content(
         .into()
 }
 
-impl From<(bool, bool)> for EditorContentOutcome {
-    fn from((changed, focused): (bool, bool)) -> Self {
-        Self { changed, focused }
+impl From<native_editor::EditorWidgetOutcome> for EditorContentOutcome {
+    fn from(outcome: native_editor::EditorWidgetOutcome) -> Self {
+        Self {
+            changed: outcome.changed,
+            focused: outcome.focused,
+            interaction_response: Some(outcome.response),
+        }
     }
 }

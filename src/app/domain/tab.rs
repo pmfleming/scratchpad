@@ -261,7 +261,7 @@ impl WorkspaceTab {
     }
 
     fn distinct_buffer_names_in_view_order(&self) -> Vec<String> {
-        let ordered_view_ids = Self::ordered_view_ids(&self.root_pane);
+        let ordered_view_ids = self.ordered_view_ids_in_layout_order();
         let mut names =
             tab_support::ordered_buffer_ids_with_fallback(&self.views, &ordered_view_ids)
                 .into_iter()
@@ -313,6 +313,10 @@ impl WorkspaceTab {
 
         self.extra_buffers
             .retain(|buffer| referenced_buffer_ids.contains(&buffer.id));
+    }
+
+    pub(crate) fn ordered_view_ids_in_layout_order(&self) -> Vec<ViewId> {
+        Self::ordered_view_ids(&self.root_pane)
     }
 
     fn ordered_view_ids(root_pane: &PaneNode) -> Vec<ViewId> {

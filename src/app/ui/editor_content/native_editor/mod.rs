@@ -18,6 +18,12 @@ use std::sync::Arc;
 
 const VISIBLE_ROW_OVERSCAN: usize = 2;
 
+pub struct EditorWidgetOutcome {
+    pub changed: bool,
+    pub focused: bool,
+    pub response: egui::Response,
+}
+
 // ---------------------------------------------------------------------------
 // Public rendering entry points
 // ---------------------------------------------------------------------------
@@ -27,7 +33,7 @@ pub fn render_editor_text_edit(
     buffer: &mut BufferState,
     view: &mut EditorViewState,
     options: TextEditOptions<'_>,
-) -> (bool, bool) {
+) -> EditorWidgetOutcome {
     let text = buffer.document().extract_text();
     let total_chars = buffer.document().piece_tree().len_chars();
 
@@ -115,7 +121,11 @@ pub fn render_editor_text_edit(
         buffer.refresh_text_metadata();
     }
 
-    (changed, focused)
+    EditorWidgetOutcome {
+        changed,
+        focused,
+        response,
+    }
 }
 
 pub fn render_editor_visible_text_window(
@@ -124,7 +134,7 @@ pub fn render_editor_visible_text_window(
     view: &mut EditorViewState,
     previous_layout: Option<&RenderedLayout>,
     options: TextEditOptions<'_>,
-) -> Option<(bool, bool)> {
+) -> Option<EditorWidgetOutcome> {
     if options.word_wrap || options.request_focus {
         return None;
     }
@@ -151,7 +161,7 @@ pub fn render_read_only_text_edit(
     text: String,
     desired_rows: usize,
     options: TextEditOptions<'_>,
-) -> bool {
+) -> EditorWidgetOutcome {
     let selection_range = view
         .cursor_range
         .as_ref()
@@ -185,7 +195,27 @@ pub fn render_read_only_text_edit(
     let focused = response.has_focus() || response.gained_focus();
     view.latest_layout = Some(RenderedLayout::from_galley(galley));
     view.cursor_range = None;
-    focused
+    EditorWidgetOutcome {
+        changed: false,
+        focused,
+        response,
+    }
+}
+
+pub fn select_all_cursor(total_chars: usize) -> CursorRange {
+    CursorRange::two(0, total_chars)
+}
+
+pub fn selected_text(buffer: &BufferState, cursor: CursorRange) -> Option<String> {
+    let range = types::selection_char_range(&cursor)?;
+    Some(buffer.document().piece_tree().extract_range(range))
+}
+
+pub fn cut_selected_text(
+    buffer: &mut BufferState,
+    cursor: CursorRange,
+) -> Option<(CursorRange, String)> {
+    (!cursor.is_empty()).then(|| editing::apply_cut(buffer, &cursor))
 }
 
 // ---------------------------------------------------------------------------
@@ -200,7 +230,7 @@ struct ClickState {
     last_click_time: f64,
     last_click_pos: egui::Pos2,
     click_count: u32,
-    was_pointer_down: bool,
+    was_primary_pointer_down: bool,
 }
 
 fn handle_mouse_interaction(
@@ -229,10 +259,19 @@ fn handle_mouse_interaction(
     let click_id = response.id.with("click_state");
     let mut click_state: ClickState = ui.data_mut(|d| d.get_temp(click_id)).unwrap_or_default();
 
-    let is_pointer_down = response.is_pointer_button_down_on();
-    let is_new_pointer_press = is_pointer_down && !click_state.was_pointer_down;
+    let secondary_pointer_down = response.contains_pointer()
+        && ui.input(|input| input.pointer.button_down(egui::PointerButton::Secondary));
+    if secondary_pointer_down || response.secondary_clicked() {
+        click_state.was_primary_pointer_down = false;
+        ui.data_mut(|d| d.insert_temp(click_id, click_state));
+        return;
+    }
 
-    if response.dragged() {
+    let primary_pointer_down = response.contains_pointer()
+        && ui.input(|input| input.pointer.button_down(egui::PointerButton::Primary));
+    let is_new_primary_press = primary_pointer_down && !click_state.was_primary_pointer_down;
+
+    if primary_pointer_down && response.dragged() {
         // Extend selection from anchor
         if let Some(existing) = &view.cursor_range {
             view.cursor_range = Some(CursorRange {
@@ -240,7 +279,7 @@ fn handle_mouse_interaction(
                 secondary: existing.secondary,
             });
         }
-    } else if is_new_pointer_press {
+    } else if is_new_primary_press {
         let modifiers = ui.input(|i| i.modifiers);
         let now = ui.input(|i| i.time);
 
@@ -295,11 +334,11 @@ fn handle_mouse_interaction(
         }
     }
 
-    click_state.was_pointer_down = is_pointer_down;
+    click_state.was_primary_pointer_down = primary_pointer_down;
     ui.data_mut(|d| d.insert_temp(click_id, click_state));
 
     // Request focus whenever pointer is actively on the widget
-    if is_pointer_down {
+    if primary_pointer_down {
         response.request_focus();
     }
 }
@@ -563,7 +602,7 @@ fn render_visible_text_window(
     options: TextEditOptions<'_>,
     total_line_count: usize,
     active_selection: Option<&std::ops::Range<usize>>,
-) -> (bool, bool) {
+) -> EditorWidgetOutcome {
     let row_height = ui.fonts_mut(|fonts| fonts.row_height(options.editor_font_id));
     let top_padding_lines = visible_window.layout_row_offset;
     let bottom_padding_lines = total_line_count.saturating_sub(visible_window.line_range.end);
@@ -595,9 +634,9 @@ fn render_visible_text_window(
     );
 
     let desired_height = visible_window.line_range.len().max(1) as f32 * row_height;
-    let (rect, _response) = ui.allocate_exact_size(
+    let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), desired_height),
-        egui::Sense::hover(),
+        egui::Sense::click(),
     );
 
     if ui.is_rect_visible(rect) {
@@ -616,7 +655,11 @@ fn render_visible_text_window(
         ui.add_space(row_height * bottom_padding_lines as f32);
     }
 
-    (false, false)
+    EditorWidgetOutcome {
+        changed: false,
+        focused: false,
+        response,
+    }
 }
 
 // ---------------------------------------------------------------------------

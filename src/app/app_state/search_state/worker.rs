@@ -2,6 +2,7 @@ use super::{SearchMatch, SearchResultEntry, SearchResultGroup, SearchStatus};
 use crate::app::domain::buffer::PieceTreeLite;
 use crate::app::domain::{BufferId, ViewId};
 use crate::app::services::search::{self, SearchOptions};
+use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{
@@ -42,6 +43,7 @@ pub(super) struct SearchTargetSnapshot {
 struct SearchResultAccumulator {
     matches: Vec<SearchMatch>,
     result_groups: Vec<SearchResultGroup>,
+    group_lookup: HashMap<(usize, BufferId), usize>,
     displayed_match_count: usize,
 }
 
@@ -62,17 +64,28 @@ impl SearchResultAccumulator {
             return;
         }
 
-        if let Some(group) = self.result_groups.last_mut()
-            && group.tab_index == target.tab_index
-        {
-            group.entries.extend(entries);
-        } else {
-            self.result_groups.push(SearchResultGroup {
-                tab_index: target.tab_index,
-                tab_label: target.tab_label.clone(),
-                entries,
-            });
-        }
+        let group_index =
+            if let Some(index) = self.group_lookup.get(&(target.tab_index, target.buffer_id)) {
+                *index
+            } else {
+                let index = self.result_groups.len();
+                self.result_groups.push(SearchResultGroup {
+                    tab_index: target.tab_index,
+                    buffer_id: target.buffer_id,
+                    buffer_label: target.buffer_label.clone(),
+                    tab_label: target.tab_label.clone(),
+                    total_match_count: 0,
+                    entries: Vec::new(),
+                    active: false,
+                });
+                self.group_lookup
+                    .insert((target.tab_index, target.buffer_id), index);
+                index
+            };
+
+        let group = &mut self.result_groups[group_index];
+        group.total_match_count += ranges.len();
+        group.entries.extend(entries);
     }
 
     fn build_entries(

@@ -115,8 +115,12 @@ pub(crate) struct SearchResultEntry {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SearchResultGroup {
     pub(crate) tab_index: usize,
+    pub(crate) buffer_id: BufferId,
+    pub(crate) buffer_label: String,
     pub(crate) tab_label: String,
+    pub(crate) total_match_count: usize,
     pub(crate) entries: Vec<SearchResultEntry>,
+    pub(crate) active: bool,
 }
 
 #[derive(Clone)]
@@ -474,6 +478,13 @@ impl ScratchpadApp {
         &self.search_state.result_groups
     }
 
+    pub(crate) fn focus_search_result_file_at(&mut self, index: usize) -> bool {
+        let Some(search_match) = self.search_state.matches.get(index).cloned() else {
+            return false;
+        };
+        self.focus_search_match(search_match)
+    }
+
     pub(crate) fn activate_search_match_at(&mut self, index: usize) -> bool {
         self.activate_search_match(index)
     }
@@ -508,6 +519,15 @@ impl ScratchpadApp {
         let Some(search_match) = self.search_state.matches.get(index).cloned() else {
             return false;
         };
+        if !self.focus_search_match(search_match) {
+            return false;
+        }
+
+        self.set_active_search_index(Some(index));
+        true
+    }
+
+    fn focus_search_match(&mut self, search_match: SearchMatch) -> bool {
         let preserve_session_clean = !self.session_dirty();
 
         if search_match.tab_index != self.active_tab_index() {
@@ -528,7 +548,6 @@ impl ScratchpadApp {
         if preserve_session_clean {
             self.clear_session_dirty();
         }
-        self.set_active_search_index(Some(index));
         true
     }
 

@@ -10,6 +10,7 @@ use eframe::egui;
 use state::{SearchStripActions, SearchStripState};
 
 pub(crate) const SEARCH_DIALOG_WIDTH: f32 = 620.0;
+const SEARCH_DIALOG_HEIGHT: f32 = 520.0;
 const SEARCH_TITLE_SIZE: f32 = 24.0;
 
 pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
@@ -22,7 +23,10 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let find_input_id = ui.make_persistent_id("search_find_input");
     let replace_input_id = ui.make_persistent_id("search_replace_input");
 
-    let default_pos = callout::centered_position(ui.ctx(), egui::vec2(SEARCH_DIALOG_WIDTH, 460.0));
+    let default_pos = callout::centered_position(
+        ui.ctx(),
+        egui::vec2(SEARCH_DIALOG_WIDTH, SEARCH_DIALOG_HEIGHT),
+    );
 
     egui::Area::new(egui::Id::new("search_dialog_overlay"))
         .order(egui::Order::Foreground)
@@ -114,6 +118,11 @@ fn dispatch_search_actions(
     if actions.replace_all_requested {
         app.request_search_focus(target_focus);
         app.handle_command(AppCommand::ReplaceAllMatches);
+    }
+    if let Some(match_index) = actions.focused_file_match_index
+        && app.focus_search_result_file_at(match_index)
+    {
+        app.request_focus_for_active_view();
     }
     if let Some(match_index) = actions.selected_match_index
         && app.activate_search_match_at(match_index)

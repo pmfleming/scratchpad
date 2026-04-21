@@ -14,6 +14,7 @@ pub(super) struct SearchStripActions {
     pub(super) redo_requested: bool,
     pub(super) replace_current_requested: bool,
     pub(super) replace_all_requested: bool,
+    pub(super) focused_file_match_index: Option<usize>,
     pub(super) selected_match_index: Option<usize>,
 }
 

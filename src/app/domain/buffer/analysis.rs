@@ -342,8 +342,7 @@ impl TextFormatMetadata {
                 }
             }
         }
-        let (_result, _read, _written, had_errors) =
-            encoder.encode_from_utf8("", &mut dst, true);
+        let (_result, _read, _written, had_errors) = encoder.encode_from_utf8("", &mut dst, true);
         had_errors
     }
 
