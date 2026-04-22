@@ -4,7 +4,8 @@ use crate::app::theme;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PendingAction {
     CloseTab(usize),
-    SaveConflict(usize),
+    CloseView { tab_index: usize, view_id: ViewId },
+    SaveConflict { tab_index: usize, view_id: ViewId },
 }
 
 #[derive(Clone)]

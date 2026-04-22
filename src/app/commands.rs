@@ -112,10 +112,41 @@ impl ScratchpadApp {
     }
 
     fn close_view_command(&mut self, view_id: ViewId) {
+        let index = self.active_tab_index();
+        let Some(tab) = self.tabs().get(index) else {
+            return;
+        };
+        if tab.root_pane.leaf_count() <= 1 || !tab.root_pane.contains_view(view_id) {
+            return;
+        }
+
+        if tab
+            .buffer_for_view(view_id)
+            .is_some_and(|buffer| buffer.is_dirty)
+            && tab.is_last_view_for_buffer(view_id) == Some(true)
+        {
+            self.set_pending_action(Some(PendingAction::CloseView {
+                tab_index: index,
+                view_id,
+            }));
+            return;
+        }
+
+        self.perform_close_view(view_id);
+    }
+
+    pub(crate) fn perform_close_view(&mut self, view_id: ViewId) {
         self.reload_settings_if_closing_view(view_id);
 
         let index = self.active_tab_index();
-        let tab_name = self.active_buffer_name_or_missing(index);
+        let tab_name = self.tabs().get(index).map_or_else(
+            || "<missing>".to_owned(),
+            |tab| {
+                tab.buffer_for_view(view_id)
+                    .map(|buffer| buffer.name.clone())
+                    .unwrap_or_else(|| tab.active_buffer().name.clone())
+            },
+        );
         let snapshot = self.capture_transaction_snapshot();
         let mut next_active_view = None;
         if let Some(tab) = self.tabs_mut().get_mut(index)

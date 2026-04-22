@@ -1,7 +1,7 @@
 use super::common::show_callout;
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
-use crate::app::domain::{BufferFreshness, PendingAction};
+use crate::app::domain::{BufferFreshness, PendingAction, ViewId};
 use crate::app::services::file_controller::FileController;
 use crate::app::theme::CAPTION_BUTTON_SIZE;
 use crate::app::ui::callout;
@@ -77,10 +77,23 @@ pub(super) fn show_pending_action_modal(ctx: &egui::Context, app: &mut Scratchpa
             Some(tab) if !tab.buffer.is_dirty => close_pending_tab(app, index),
             Some(_) => show_close_tab_confirmation(ctx, app, index),
         },
-        PendingAction::SaveConflict(index) if save_conflict_dialog_state(app, index).is_some() => {
-            show_save_conflict_confirmation(ctx, app, index)
+        PendingAction::CloseView { tab_index, view_id } => match app.tabs().get(tab_index) {
+            None => clear_pending_action(app),
+            Some(tab) if tab.is_last_view_for_buffer(view_id) != Some(true) => {
+                close_pending_view(app, tab_index, view_id)
+            }
+            Some(tab) => match tab.buffer_for_view(view_id) {
+                None => clear_pending_action(app),
+                Some(buffer) if !buffer.is_dirty => close_pending_view(app, tab_index, view_id),
+                Some(_) => show_close_view_confirmation(ctx, app, tab_index, view_id),
+            },
+        },
+        PendingAction::SaveConflict { tab_index, view_id }
+            if save_conflict_dialog_state(app, tab_index, view_id).is_some() =>
+        {
+            show_save_conflict_confirmation(ctx, app, tab_index, view_id)
         }
-        PendingAction::SaveConflict(_) => clear_pending_action(app),
+        PendingAction::SaveConflict { .. } => clear_pending_action(app),
     }
 }
 
@@ -101,8 +114,52 @@ fn show_close_tab_confirmation(ctx: &egui::Context, app: &mut ScratchpadApp, ind
     }
 }
 
-fn show_save_conflict_confirmation(ctx: &egui::Context, app: &mut ScratchpadApp, index: usize) {
-    let Some(state) = save_conflict_dialog_state(app, index) else {
+fn show_close_view_confirmation(
+    ctx: &egui::Context,
+    app: &mut ScratchpadApp,
+    tab_index: usize,
+    view_id: ViewId,
+) {
+    let Some(tab_name) = app
+        .tabs()
+        .get(tab_index)
+        .and_then(|tab| tab.buffer_for_view(view_id))
+        .map(|buffer| buffer.name.clone())
+    else {
+        clear_pending_action(app);
+        return;
+    };
+    let mut close_requested = false;
+
+    show_callout(
+        ctx,
+        "unsaved_changes_overlay_v3",
+        callout::centered_position(ctx, UNSAVED_CHANGES_SIZE),
+        UNSAVED_CHANGES_SIZE.x,
+        |ui| {
+            render_unsaved_changes_view_dialog(
+                ui,
+                &tab_name,
+                app,
+                tab_index,
+                view_id,
+                &mut close_requested,
+            )
+        },
+    );
+
+    if close_requested {
+        clear_pending_action(app);
+    }
+}
+
+fn show_save_conflict_confirmation(
+    ctx: &egui::Context,
+    app: &mut ScratchpadApp,
+    tab_index: usize,
+    view_id: ViewId,
+) {
+    let Some(state) = save_conflict_dialog_state(app, tab_index, view_id) else {
         return;
     };
 
@@ -118,12 +175,65 @@ fn show_save_conflict_confirmation(ctx: &egui::Context, app: &mut ScratchpadApp,
         "file_change_overlay_v1",
         callout::centered_position(ctx, dialog_size),
         dialog_size.x,
-        |ui| render_save_conflict_dialog(ui, app, index, &state, &mut close_requested),
+        |ui| render_save_conflict_dialog(ui, app, tab_index, view_id, &state, &mut close_requested),
     );
 
     if close_requested {
         clear_pending_action(app);
     }
+}
+
+fn render_unsaved_changes_view_dialog(
+    ui: &mut egui::Ui,
+    tab_name: &str,
+    app: &mut ScratchpadApp,
+    tab_index: usize,
+    view_id: ViewId,
+    close_requested: &mut bool,
+) {
+    callout::apply_spacing(ui);
+    ui.spacing_mut().item_spacing = egui::vec2(10.0, 12.0);
+
+    if render_unsaved_changes_header(ui, tab_name) {
+        *close_requested = true;
+    }
+
+    ui.add_space(2.0);
+    ui.vertical_centered(|ui| {
+        ui.label(
+            egui::RichText::new("Unsaved Changes")
+                .size(12.0)
+                .color(callout::muted_text(ui)),
+        );
+    });
+
+    ui.add_space(2.0);
+    ui.horizontal_centered(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(12.0, 0.0);
+        for (icon, tooltip, choice) in [
+            (FLOPPY_DISK, "Save changes", UnsavedChoice::Save),
+            (TRASH, "Discard changes", UnsavedChoice::Discard),
+            (X, "Cancel", UnsavedChoice::Cancel),
+        ] {
+            if callout::icon_button(
+                ui,
+                icon,
+                26.0,
+                UNSAVED_CHANGES_ACTION_BUTTON_SIZE,
+                callout::section_fill(ui),
+                tooltip,
+                true,
+            )
+            .clicked()
+            {
+                match choice {
+                    UnsavedChoice::Save => save_and_close_pending_view(app, tab_index, view_id),
+                    UnsavedChoice::Discard => close_pending_view(app, tab_index, view_id),
+                    UnsavedChoice::Cancel => *close_requested = true,
+                }
+            }
+        }
+    });
 }
 
 fn render_unsaved_changes_dialog(
@@ -253,15 +363,27 @@ fn save_and_close_pending_tab(app: &mut ScratchpadApp, index: usize) {
     }
 }
 
+fn save_and_close_pending_view(app: &mut ScratchpadApp, tab_index: usize, view_id: ViewId) {
+    if !activate_pending_view(app, tab_index, view_id) {
+        clear_pending_action(app);
+        return;
+    }
+
+    if app.save_file_at(tab_index) {
+        close_pending_view(app, tab_index, view_id);
+    }
+}
+
 fn render_save_conflict_dialog(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
-    index: usize,
+    tab_index: usize,
+    view_id: ViewId,
     state: &SaveConflictDialogState,
     close_requested: &mut bool,
 ) {
     if state.is_missing_on_disk() {
-        render_missing_file_dialog(ui, app, index, state, close_requested);
+        render_missing_file_dialog(ui, app, tab_index, view_id, state, close_requested);
         return;
     }
 
@@ -303,7 +425,8 @@ fn render_save_conflict_dialog(
             FLOPPY_DISK,
             state.primary_action_label(),
             "Write the current buffer back to disk",
-        ) && FileController::save_conflict_overwrite(app, index)
+        ) && activate_pending_view(app, tab_index, view_id)
+            && FileController::save_conflict_overwrite(app, tab_index)
         {
             clear_pending_action(app);
         }
@@ -315,7 +438,8 @@ fn render_save_conflict_dialog(
                 "Reload",
                 "Discard local buffer state and reload from disk",
             )
-            && FileController::reload_buffer_from_disk(app, index)
+            && activate_pending_view(app, tab_index, view_id)
+            && FileController::reload_buffer_from_disk(app, tab_index)
         {
             clear_pending_action(app);
         }
@@ -325,7 +449,8 @@ fn render_save_conflict_dialog(
             COPY,
             "Save As Copy",
             "Keep this buffer by saving it to a new file",
-        ) && app.save_file_as_at(index)
+        ) && activate_pending_view(app, tab_index, view_id)
+            && app.save_file_as_at(tab_index)
         {
             clear_pending_action(app);
         }
@@ -339,7 +464,8 @@ fn render_save_conflict_dialog(
 fn render_missing_file_dialog(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
-    index: usize,
+    tab_index: usize,
+    view_id: ViewId,
     state: &SaveConflictDialogState,
     close_requested: &mut bool,
 ) {
@@ -387,11 +513,13 @@ fn render_missing_file_dialog(
             {
                 match action {
                     MissingFileChoice::Save => {
-                        if FileController::save_conflict_overwrite(app, index) {
+                        if activate_pending_view(app, tab_index, view_id)
+                            && FileController::save_conflict_overwrite(app, tab_index)
+                        {
                             clear_pending_action(app);
                         }
                     }
-                    MissingFileChoice::Discard => close_pending_tab(app, index),
+                    MissingFileChoice::Discard => close_pending_view(app, tab_index, view_id),
                 }
             }
         }
@@ -424,15 +552,48 @@ fn close_pending_tab(app: &mut ScratchpadApp, index: usize) {
     app.handle_command(AppCommand::CloseTab { index });
 }
 
+fn close_pending_view(app: &mut ScratchpadApp, tab_index: usize, view_id: ViewId) {
+    clear_pending_action(app);
+    if activate_pending_view(app, tab_index, view_id) {
+        app.perform_close_view(view_id);
+    }
+}
+
+fn activate_pending_view(app: &mut ScratchpadApp, tab_index: usize, view_id: ViewId) -> bool {
+    if tab_index >= app.tabs().len() {
+        return false;
+    }
+
+    if app.active_tab_index() != tab_index {
+        app.handle_command(AppCommand::ActivateTab { index: tab_index });
+    }
+
+    let Some(tab) = app.tabs().get(tab_index) else {
+        return false;
+    };
+    if tab.view(view_id).is_none() {
+        return false;
+    }
+
+    if tab.active_view_id != view_id {
+        app.handle_command(AppCommand::ActivateView { view_id });
+    }
+
+    app.tabs()
+        .get(tab_index)
+        .is_some_and(|tab| tab.active_view_id == view_id)
+}
+
 fn clear_pending_action(app: &mut ScratchpadApp) {
     app.set_pending_action(None);
 }
 
 fn save_conflict_dialog_state(
     app: &ScratchpadApp,
-    index: usize,
+    tab_index: usize,
+    view_id: ViewId,
 ) -> Option<SaveConflictDialogState> {
-    let buffer = app.tabs()[index].active_buffer();
+    let buffer = app.tabs().get(tab_index)?.buffer_for_view(view_id)?;
     let path_label = buffer
         .path
         .as_ref()

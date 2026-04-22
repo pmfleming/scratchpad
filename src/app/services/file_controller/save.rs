@@ -242,7 +242,10 @@ impl FileController {
                 | BufferFreshness::StaleOnDisk
         ) {
             let status_message = app.tabs()[index].active_buffer().disk_status_message();
-            app.set_pending_action(Some(PendingAction::SaveConflict(index)));
+            app.set_pending_action(Some(PendingAction::SaveConflict {
+                tab_index: index,
+                view_id: app.tabs()[index].active_view_id,
+            }));
             if let Some(message) = status_message {
                 app.set_warning_status(message);
             }

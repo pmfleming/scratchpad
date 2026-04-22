@@ -414,10 +414,11 @@ fn save_does_not_silently_overwrite_when_disk_changed() {
     fs::write(&path, "external version on disk\n").expect("overwrite temp file externally");
 
     assert!(!app.save_file_at(index));
-    assert_eq!(
+    assert!(matches!(
         app.pending_action(),
-        Some(PendingAction::SaveConflict(index))
-    );
+        Some(PendingAction::SaveConflict { tab_index, view_id })
+            if tab_index == index && view_id == app.tabs()[index].active_view_id
+    ));
     assert_eq!(
         app.tabs()[index].active_buffer().freshness,
         BufferFreshness::ConflictOnDisk

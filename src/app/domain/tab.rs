@@ -137,6 +137,17 @@ impl WorkspaceTab {
         self.buffer_by_id(view.buffer_id)
     }
 
+    pub fn is_last_view_for_buffer(&self, view_id: ViewId) -> Option<bool> {
+        let buffer_id = self.view(view_id)?.buffer_id;
+        Some(
+            self.views
+                .iter()
+                .filter(|view| view.buffer_id == buffer_id)
+                .count()
+                <= 1,
+        )
+    }
+
     pub fn buffer_and_view_mut(
         &mut self,
         view_id: ViewId,

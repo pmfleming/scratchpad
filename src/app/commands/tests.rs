@@ -1,6 +1,8 @@
 use super::AppCommand;
 use crate::app::app_state::ScratchpadApp;
-use crate::app::domain::{BufferFreshness, BufferState, PaneNode, SplitAxis, WorkspaceTab};
+use crate::app::domain::{
+    BufferFreshness, BufferState, PaneNode, PendingAction, SplitAxis, WorkspaceTab,
+};
 use crate::app::fonts::EditorFontPreset;
 use crate::app::services::file_controller::FileController;
 use crate::app::services::session_store::SessionStore;
@@ -177,6 +179,103 @@ fn promote_tab_files_to_tabs_splits_workspace_into_individual_tabs() {
         app.pending_editor_focus,
         Some(app.tabs()[app.active_tab_index()].active_view_id)
     );
+}
+
+#[test]
+fn closing_dirty_non_active_view_in_multi_file_tab_requires_confirmation() {
+    let mut app = test_app();
+    app.tabs_mut()[0].buffer.name = "one.txt".to_owned();
+    app.tabs_mut()[0].buffer.replace_text("one".to_owned());
+
+    let second_view_id = app.tabs_mut()[0]
+        .open_buffer_as_split(
+            BufferState::new("two.txt".to_owned(), "two".to_owned(), None),
+            SplitAxis::Vertical,
+            false,
+            0.5,
+        )
+        .expect("open second split");
+    let third_view_id = app.tabs_mut()[0]
+        .open_buffer_as_split(
+            BufferState::new("three.txt".to_owned(), "three".to_owned(), None),
+            SplitAxis::Horizontal,
+            false,
+            0.5,
+        )
+        .expect("open third split");
+
+    app.handle_command(AppCommand::ActivateView {
+        view_id: third_view_id,
+    });
+
+    let second_buffer_id = app.tabs()[0]
+        .view(second_view_id)
+        .expect("second view should exist")
+        .buffer_id;
+    let second_buffer = app.tabs_mut()[0]
+        .buffer_by_id_mut(second_buffer_id)
+        .expect("second buffer should exist");
+    second_buffer.is_dirty = true;
+    second_buffer.mark_conflict_on_disk(None);
+
+    app.handle_command(AppCommand::CloseView {
+        view_id: second_view_id,
+    });
+
+    assert!(matches!(
+        app.pending_action(),
+        Some(PendingAction::CloseView { tab_index: 0, view_id }) if view_id == second_view_id
+    ));
+    assert_eq!(app.tabs()[0].active_view_id, third_view_id);
+    assert!(app.tabs()[0].view(second_view_id).is_some());
+}
+
+#[test]
+fn closing_dirty_duplicate_view_only_prompts_for_last_remaining_view() {
+    let mut app = test_app();
+    app.tabs_mut()[0].buffer.name = "one.txt".to_owned();
+    app.tabs_mut()[0].buffer.replace_text("one".to_owned());
+
+    let duplicate_view_id = app.tabs_mut()[0]
+        .split_active_view(SplitAxis::Vertical)
+        .expect("split duplicate view");
+    let other_file_view_id = app.tabs_mut()[0]
+        .open_buffer_as_split(
+            BufferState::new("two.txt".to_owned(), "two".to_owned(), None),
+            SplitAxis::Horizontal,
+            false,
+            0.5,
+        )
+        .expect("open second file");
+    let original_view_id = app.tabs()[0]
+        .views
+        .iter()
+        .find(|view| view.id != duplicate_view_id && view.buffer_id == app.tabs()[0].buffer.id)
+        .expect("original view should remain")
+        .id;
+
+    app.tabs_mut()[0].buffer.is_dirty = true;
+    app.handle_command(AppCommand::ActivateView {
+        view_id: other_file_view_id,
+    });
+
+    app.handle_command(AppCommand::CloseView {
+        view_id: duplicate_view_id,
+    });
+
+    assert_eq!(app.pending_action(), None);
+    assert!(app.tabs()[0].view(duplicate_view_id).is_none());
+    assert!(app.tabs()[0].view(original_view_id).is_some());
+
+    app.handle_command(AppCommand::CloseView {
+        view_id: original_view_id,
+    });
+
+    assert!(matches!(
+        app.pending_action(),
+        Some(PendingAction::CloseView { tab_index: 0, view_id }) if view_id == original_view_id
+    ));
+    assert!(app.tabs()[0].view(original_view_id).is_some());
 }
 
 #[test]
