@@ -1,6 +1,7 @@
 use super::state::{TabDragState, TabDropAxis, TabDropZone};
 use crate::app::app_state::ScratchpadApp;
 use crate::app::theme::*;
+use crate::app::ui::widget_ids;
 use eframe::egui;
 
 const TAB_REORDER_MARKER_COLOR: egui::Color32 = egui::Color32::from_rgb(104, 154, 232);
@@ -26,7 +27,7 @@ pub(super) fn paint_dragged_tab_ghost(
     .translate(egui::vec2(0.0, 2.0));
     let painter = ctx.layer_painter(egui::LayerId::new(
         egui::Order::Foreground,
-        egui::Id::new("dragged_tab_ghost"),
+        widget_ids::global("dragged_tab_ghost"),
     ));
     let visuals = &ctx.global_style().visuals;
 
@@ -92,7 +93,7 @@ pub(super) fn paint_tab_reorder_marker(ctx: &egui::Context, zone: &TabDropZone, 
 
     let painter = ctx.layer_painter(egui::LayerId::new(
         egui::Order::Foreground,
-        egui::Id::new("tab_reorder_marker"),
+        widget_ids::global("tab_reorder_marker"),
     ));
 
     match zone.axis {
@@ -131,7 +132,7 @@ pub(super) fn paint_tab_combine_target(
 
     let painter = ctx.layer_painter(egui::LayerId::new(
         egui::Order::Foreground,
-        egui::Id::new("tab_combine_target"),
+        widget_ids::global("tab_combine_target"),
     ));
     painter.rect_filled(target_rect.shrink(2.0), 4.0, tab_combine_highlight_color());
     painter.rect_stroke(

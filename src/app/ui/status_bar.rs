@@ -2,6 +2,7 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
 use crate::app::domain::{BufferViewStatus, platform_default_line_ending};
 use crate::app::theme::*;
+use crate::app::ui::widget_ids;
 use eframe::egui;
 
 #[derive(Default)]
@@ -152,13 +153,16 @@ fn render_active_status(
 
 fn show_copyable_path(ui: &mut egui::Ui, label: &str) {
     let response = ui
-        .add(
-            egui::Button::new(label)
-                .frame(false)
-                .stroke(egui::Stroke::NONE)
-                .fill(egui::Color32::TRANSPARENT)
-                .min_size(egui::vec2(0.0, 22.0)),
-        )
+        .push_id(("scratchpad.widget", "status_path"), |ui| {
+            ui.add(
+                egui::Button::new(label)
+                    .frame(false)
+                    .stroke(egui::Stroke::NONE)
+                    .fill(egui::Color32::TRANSPARENT)
+                    .min_size(egui::vec2(0.0, 22.0)),
+            )
+        })
+        .inner
         .on_hover_text("Double-click to copy path");
     if response.double_clicked() {
         let copied = label.strip_prefix("Path: ").unwrap_or(label);
@@ -168,7 +172,10 @@ fn show_copyable_path(ui: &mut egui::Ui, label: &str) {
 
 fn show_line_count(ui: &mut egui::Ui, count_label: &str, actions: &mut StatusBarActions) {
     let line_count_response = ui
-        .label(count_label)
+        .push_id(("scratchpad.widget", "status_line_count"), |ui| {
+            ui.label(count_label)
+        })
+        .inner
         .on_hover_text("Double-click to toggle line numbers");
     if line_count_response.double_clicked() {
         actions.toggle_line_numbers = true;
@@ -182,8 +189,13 @@ fn show_encoding(
     highlight: bool,
 ) -> egui::Response {
     ui.separator();
-    ui.add(egui::Label::new(status_format_text(encoding, highlight)).sense(egui::Sense::click()))
-        .on_hover_text(format!("{tooltip}\nClick for encoding actions"))
+    widget_ids::scope(ui, "status_encoding", |ui| {
+        ui.add(
+            egui::Label::new(status_format_text(encoding, highlight)).sense(egui::Sense::click()),
+        )
+    })
+    .inner
+    .on_hover_text(format!("{tooltip}\nClick for encoding actions"))
 }
 
 fn show_status_segment(ui: &mut egui::Ui, label: Option<&str>) {
@@ -216,7 +228,11 @@ fn status_bar_encoding_is_non_default(format: &crate::app::domain::TextFormatMet
 
 fn show_transaction_log_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
     ui.separator();
-    let response = status_bar_icon_button(ui, egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE)
+    let response = ui
+        .push_id(("scratchpad.widget", "status_history"), |ui| {
+            status_bar_icon_button(ui, egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE)
+        })
+        .inner
         .on_hover_text("Open history");
     if response.clicked() {
         actions.open_transaction_log = true;
@@ -225,8 +241,12 @@ fn show_transaction_log_button(ui: &mut egui::Ui, actions: &mut StatusBarActions
 
 fn show_settings_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
     ui.separator();
-    let response =
-        status_bar_icon_button(ui, egui_phosphor::regular::GEAR).on_hover_text("Open settings");
+    let response = ui
+        .push_id(("scratchpad.widget", "status_settings"), |ui| {
+            status_bar_icon_button(ui, egui_phosphor::regular::GEAR)
+        })
+        .inner
+        .on_hover_text("Open settings");
     if response.clicked() {
         actions.open_settings = true;
     }
@@ -251,12 +271,16 @@ fn show_control_char_toggle(
     actions: &mut StatusBarActions,
 ) {
     ui.separator();
-    let button_response = ui.add(
-        egui::Button::new("")
-            .min_size(egui::vec2(22.0, 22.0))
-            .fill(egui::Color32::TRANSPARENT)
-            .stroke(egui::Stroke::NONE),
-    );
+    let button_response = ui
+        .push_id(("scratchpad.widget", "status_control_chars"), |ui| {
+            ui.add(
+                egui::Button::new("")
+                    .min_size(egui::vec2(22.0, 22.0))
+                    .fill(egui::Color32::TRANSPARENT)
+                    .stroke(egui::Stroke::NONE),
+            )
+        })
+        .inner;
     ui.painter().text(
         button_response.rect.center(),
         egui::Align2::CENTER_CENTER,

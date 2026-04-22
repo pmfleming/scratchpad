@@ -166,57 +166,9 @@ impl FileController {
         };
 
         match FileService::read_disk_state(&path) {
-            Ok(disk_state) => {
-                let (is_dirty, known_disk_state, buffer_name) = {
-                    let buffer = app.tabs()[index].active_buffer();
-                    (
-                        buffer.is_dirty,
-                        buffer.disk_state.clone(),
-                        buffer.name.clone(),
-                    )
-                };
-
-                if known_disk_state.as_ref() == Some(&disk_state) || known_disk_state.is_none() {
-                    Self::sync_buffer_disk_state(app, index, Some(disk_state));
-                    return false;
-                }
-
-                if is_dirty {
-                    let buffer = app.tabs_mut()[index].active_buffer_mut();
-                    buffer.mark_conflict_on_disk(Some(disk_state));
-                    app.set_warning_status(format!(
-                        "{} changed on disk. Your tab has unsaved edits.",
-                        buffer_name
-                    ));
-                    app.mark_session_dirty();
-                    return true;
-                }
-
-                let buffer_id = app.tabs()[index].active_buffer().id;
-                if Self::has_pending_reload_for_buffer(app, buffer_id) {
-                    return true;
-                }
-
-                app.queue_background_path_loads(
-                    vec![path.clone()],
-                    PendingBackgroundAction::ReloadBuffer(PendingReloadBufferAction {
-                        buffer_id,
-                        expected_path: path,
-                        buffer_name,
-                        previous_disk_state: known_disk_state,
-                        mode: PendingReloadMode::AutoRefreshCleanBuffer,
-                    }),
-                );
-                true
-            }
+            Ok(disk_state) => Self::handle_refreshed_disk_state(app, index, path, disk_state),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let buffer_name = app.tabs()[index].active_buffer().name.clone();
-                let buffer = app.tabs_mut()[index].active_buffer_mut();
-                buffer.disk_state = None;
-                buffer.mark_missing_on_disk();
-                app.set_warning_status(format!("{buffer_name} is missing on disk."));
-                app.mark_session_dirty();
-                true
+                Self::mark_buffer_missing_on_disk(app, index)
             }
             Err(_) => false,
         }
@@ -408,17 +360,14 @@ impl FileController {
         action: PendingReloadBufferAction,
         mut results: Vec<LoadedPathResult>,
     ) {
-        let Some(result) = results.pop() else {
+        let Some((tab_index, result)) = Self::resolve_background_result(
+            app,
+            action.buffer_id,
+            &action.expected_path,
+            &mut results,
+        ) else {
             return;
         };
-
-        let Some((tab_index, current_path)) = Self::find_buffer_location(app, action.buffer_id)
-        else {
-            return;
-        };
-        if !crate::app::paths_match(&current_path, &action.expected_path) {
-            return;
-        }
 
         let current_buffer = app.tabs()[tab_index]
             .buffer_by_id(action.buffer_id)
@@ -459,22 +408,9 @@ impl FileController {
                     }
                 }
             }
-            Err(error) => match action.mode {
-                PendingReloadMode::AutoRefreshCleanBuffer => {
-                    let buffer = app.tabs_mut()[tab_index]
-                        .buffer_by_id_mut(action.buffer_id)
-                        .expect("buffer location validated");
-                    buffer.mark_stale_on_disk(result.disk_state);
-                    app.set_warning_status(format!(
-                        "Detected a newer on-disk version of {} but could not reload it: {error}",
-                        action.buffer_name
-                    ));
-                    app.mark_session_dirty();
-                }
-                PendingReloadMode::ExplicitReload => {
-                    app.set_error_status(format!("Reload failed: {error}"));
-                }
-            },
+            Err(error) => {
+                Self::handle_async_reload_error(app, tab_index, &action, result.disk_state, error)
+            }
         }
     }
 
@@ -483,17 +419,14 @@ impl FileController {
         action: PendingReopenWithEncodingAction,
         mut results: Vec<LoadedPathResult>,
     ) {
-        let Some(result) = results.pop() else {
+        let Some((tab_index, result)) = Self::resolve_background_result(
+            app,
+            action.buffer_id,
+            &action.expected_path,
+            &mut results,
+        ) else {
             return;
         };
-
-        let Some((tab_index, current_path)) = Self::find_buffer_location(app, action.buffer_id)
-        else {
-            return;
-        };
-        if !crate::app::paths_match(&current_path, &action.expected_path) {
-            return;
-        }
 
         if app.tabs()[tab_index]
             .buffer_by_id(action.buffer_id)
@@ -528,5 +461,98 @@ impl FileController {
                 .and_then(|buffer| buffer.path.clone())
                 .map(|path| (tab_index, path))
         })
+    }
+
+    fn handle_refreshed_disk_state(
+        app: &mut ScratchpadApp,
+        index: usize,
+        path: PathBuf,
+        disk_state: DiskFileState,
+    ) -> bool {
+        let (buffer_id, is_dirty, known_disk_state, buffer_name) = {
+            let buffer = app.tabs()[index].active_buffer();
+            (
+                buffer.id,
+                buffer.is_dirty,
+                buffer.disk_state.clone(),
+                buffer.name.clone(),
+            )
+        };
+
+        if known_disk_state.as_ref() == Some(&disk_state) || known_disk_state.is_none() {
+            Self::sync_buffer_disk_state(app, index, Some(disk_state));
+            return false;
+        }
+        if is_dirty {
+            let buffer = app.tabs_mut()[index].active_buffer_mut();
+            buffer.mark_conflict_on_disk(Some(disk_state));
+            app.set_warning_status(format!(
+                "{} changed on disk. Your tab has unsaved edits.",
+                buffer_name
+            ));
+            app.mark_session_dirty();
+            return true;
+        }
+        if Self::has_pending_reload_for_buffer(app, buffer_id) {
+            return true;
+        }
+
+        app.queue_background_path_loads(
+            vec![path.clone()],
+            PendingBackgroundAction::ReloadBuffer(PendingReloadBufferAction {
+                buffer_id,
+                expected_path: path,
+                buffer_name,
+                previous_disk_state: known_disk_state,
+                mode: PendingReloadMode::AutoRefreshCleanBuffer,
+            }),
+        );
+        true
+    }
+
+    fn mark_buffer_missing_on_disk(app: &mut ScratchpadApp, index: usize) -> bool {
+        let buffer_name = app.tabs()[index].active_buffer().name.clone();
+        let buffer = app.tabs_mut()[index].active_buffer_mut();
+        buffer.disk_state = None;
+        buffer.mark_missing_on_disk();
+        app.set_warning_status(format!("{buffer_name} is missing on disk."));
+        app.mark_session_dirty();
+        true
+    }
+
+    fn resolve_background_result(
+        app: &mut ScratchpadApp,
+        buffer_id: BufferId,
+        expected_path: &PathBuf,
+        results: &mut Vec<LoadedPathResult>,
+    ) -> Option<(usize, LoadedPathResult)> {
+        let result = results.pop()?;
+        let (tab_index, current_path) = Self::find_buffer_location(app, buffer_id)?;
+        crate::app::paths_match(&current_path, expected_path).then_some((tab_index, result))
+    }
+
+    fn handle_async_reload_error(
+        app: &mut ScratchpadApp,
+        tab_index: usize,
+        action: &PendingReloadBufferAction,
+        disk_state: Option<DiskFileState>,
+        error: String,
+    ) {
+        match action.mode {
+            PendingReloadMode::AutoRefreshCleanBuffer => {
+                let buffer = app.tabs_mut()[tab_index]
+                    .buffer_by_id_mut(action.buffer_id)
+                    .expect("buffer location validated");
+                buffer.mark_stale_on_disk(disk_state);
+                app.set_warning_status(format!(
+                    "Detected a newer on-disk version of {} but could not reload it: {error}",
+                    action.buffer_name
+                ));
+                app.mark_session_dirty();
+            }
+            PendingReloadMode::ExplicitReload => {
+                app.set_error_status(format!("Reload failed: {error}"));
+            }
+        }
     }
 }

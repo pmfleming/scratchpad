@@ -70,121 +70,123 @@ struct TextInspection {
     is_ascii_subset: bool,
 }
 
+#[derive(Default)]
+struct InspectionState {
+    line_count: usize,
+    line_ending_counts: LineEndingCounts,
+    artifact_summary: TextArtifactSummary,
+    is_ascii_subset: bool,
+    pending_cr: bool,
+}
+
 impl TextInspection {
     fn inspect(text: &str) -> Self {
         Self::inspect_with_line_endings(text, None)
     }
 
     fn inspect_with_line_endings(text: &str, line_endings: Option<LineEndingStyle>) -> Self {
-        let mut line_count = 1usize;
-        let mut line_ending_counts = LineEndingCounts::default();
-        let mut artifact_summary = TextArtifactSummary::default();
-        let mut is_ascii_subset = true;
+        let mut state = InspectionState::new();
         let mut chars = text.chars().peekable();
 
         while let Some(ch) = chars.next() {
-            is_ascii_subset &= ch.is_ascii();
-            match ch {
-                '\r' => {
-                    if chars.peek() == Some(&'\n') {
-                        line_ending_counts.crlf += 1;
-                        chars.next();
-                    } else {
-                        line_ending_counts.cr += 1;
-                    }
-                    line_count += 1;
+            if ch == '\r' {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                    state.record_crlf();
+                } else {
+                    state.record_cr();
                 }
-                '\n' => {
-                    line_ending_counts.lf += 1;
-                    line_count += 1;
-                }
-                '\u{1B}' => {
-                    artifact_summary.has_ansi_sequences = true;
-                }
-                '\u{0008}' => {
-                    artifact_summary.has_backspaces = true;
-                }
-                '\t' => {}
-                _ if ch.is_control() => {
-                    artifact_summary.other_control_count += 1;
-                }
-                _ => {}
+                continue;
             }
+            state.observe_char(ch);
         }
 
-        let line_endings = line_endings.unwrap_or_else(|| line_ending_style(line_ending_counts));
-        artifact_summary.has_carriage_returns =
-            line_endings != LineEndingStyle::Cr && line_ending_counts.cr > 0;
-
-        Self {
-            line_count,
-            line_endings,
-            line_ending_counts,
-            artifact_summary,
-            is_ascii_subset,
-        }
+        state.finish(line_endings)
     }
 
     fn inspect_spans<'a>(spans: impl Iterator<Item = &'a str>) -> Self {
-        let mut line_count = 1usize;
-        let mut line_ending_counts = LineEndingCounts::default();
-        let mut artifact_summary = TextArtifactSummary::default();
-        let mut is_ascii_subset = true;
-        let mut pending_cr = false;
+        let mut state = InspectionState::new();
 
         for span in spans {
             for ch in span.chars() {
-                if pending_cr {
-                    pending_cr = false;
-                    if ch == '\n' {
-                        line_ending_counts.crlf += 1;
-                        line_count += 1;
-                        continue;
-                    } else {
-                        line_ending_counts.cr += 1;
-                        line_count += 1;
-                    }
-                }
-
-                is_ascii_subset &= ch.is_ascii();
-                match ch {
-                    '\r' => {
-                        pending_cr = true;
-                    }
-                    '\n' => {
-                        line_ending_counts.lf += 1;
-                        line_count += 1;
-                    }
-                    '\u{1B}' => {
-                        artifact_summary.has_ansi_sequences = true;
-                    }
-                    '\u{0008}' => {
-                        artifact_summary.has_backspaces = true;
-                    }
-                    '\t' => {}
-                    _ if ch.is_control() => {
-                        artifact_summary.other_control_count += 1;
-                    }
-                    _ => {}
-                }
+                state.observe_span_char(ch);
             }
         }
 
-        if pending_cr {
-            line_ending_counts.cr += 1;
-            line_count += 1;
+        state.finish(None)
+    }
+}
+
+impl InspectionState {
+    fn new() -> Self {
+        Self {
+            line_count: 1,
+            is_ascii_subset: true,
+            ..Self::default()
+        }
+    }
+
+    fn observe_span_char(&mut self, ch: char) {
+        if self.pending_cr {
+            self.pending_cr = false;
+            if ch == '\n' {
+                self.record_crlf();
+                return;
+            }
+            self.record_cr();
         }
 
-        let line_endings = line_ending_style(line_ending_counts);
-        artifact_summary.has_carriage_returns =
-            line_endings != LineEndingStyle::Cr && line_ending_counts.cr > 0;
+        if ch == '\r' {
+            self.pending_cr = true;
+            return;
+        }
 
-        Self {
-            line_count,
+        self.observe_char(ch);
+    }
+
+    fn observe_char(&mut self, ch: char) {
+        self.is_ascii_subset &= ch.is_ascii();
+        match ch {
+            '\n' => self.record_lf(),
+            '\u{1B}' => self.artifact_summary.has_ansi_sequences = true,
+            '\u{0008}' => self.artifact_summary.has_backspaces = true,
+            '\t' => {}
+            _ if ch.is_control() => self.artifact_summary.other_control_count += 1,
+            _ => {}
+        }
+    }
+
+    fn record_crlf(&mut self) {
+        self.line_ending_counts.crlf += 1;
+        self.line_count += 1;
+    }
+
+    fn record_cr(&mut self) {
+        self.line_ending_counts.cr += 1;
+        self.line_count += 1;
+    }
+
+    fn record_lf(&mut self) {
+        self.line_ending_counts.lf += 1;
+        self.line_count += 1;
+    }
+
+    fn finish(mut self, line_endings: Option<LineEndingStyle>) -> TextInspection {
+        if self.pending_cr {
+            self.record_cr();
+        }
+
+        let line_endings =
+            line_endings.unwrap_or_else(|| line_ending_style(self.line_ending_counts));
+        self.artifact_summary.has_carriage_returns =
+            line_endings != LineEndingStyle::Cr && self.line_ending_counts.cr > 0;
+
+        TextInspection {
+            line_count: self.line_count,
             line_endings,
-            line_ending_counts,
-            artifact_summary,
-            is_ascii_subset,
+            line_ending_counts: self.line_ending_counts,
+            artifact_summary: self.artifact_summary,
+            is_ascii_subset: self.is_ascii_subset,
         }
     }
 }

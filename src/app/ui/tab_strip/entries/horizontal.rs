@@ -8,6 +8,7 @@ use crate::app::ui::tab_overflow;
 use crate::app::ui::tab_strip::{
     HeaderLayout, TabStripOutcome, maybe_auto_scroll_tab_strip, record_visible_tab,
 };
+use crate::app::ui::widget_ids;
 use eframe::egui::{self, Sense};
 use std::collections::HashSet;
 
@@ -176,7 +177,7 @@ fn show_scrolling_tab_strip(
     visible_tab_indices: &mut HashSet<usize>,
     outcome: &mut TabStripOutcome,
 ) -> Option<TabDropZone> {
-    let scroll_area_id = ui.id().with("tab_strip");
+    let scroll_area_id = widget_ids::local(ui, "tab_strip");
     let entries = allocate_tab_strip_entries(
         ui,
         app,
@@ -195,14 +196,17 @@ fn show_scrolling_tab_strip(
 
 fn render_new_tab_action(ui: &mut egui::Ui, app: &mut ScratchpadApp, spacing: f32) {
     ui.add_space(spacing);
-    if crate::app::chrome::phosphor_button(
-        ui,
-        egui_phosphor::regular::PLUS,
-        BUTTON_SIZE,
-        action_bg(ui),
-        action_hover_bg(ui),
-        "New Tab",
-    )
+    if widget_ids::scope(ui, "horizontal_new_tab", |ui| {
+        crate::app::chrome::phosphor_button(
+            ui,
+            egui_phosphor::regular::PLUS,
+            BUTTON_SIZE,
+            action_bg(ui),
+            action_hover_bg(ui),
+            "New Tab",
+        )
+    })
+    .inner
     .clicked()
     {
         app.handle_command(AppCommand::NewTab);

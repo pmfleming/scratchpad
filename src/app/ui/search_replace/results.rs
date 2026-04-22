@@ -4,6 +4,7 @@ use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::theme::{
     action_bg, border, tab_selected_accent, tab_selected_bg, text_muted, text_primary,
 };
+use crate::app::ui::widget_ids;
 use eframe::egui;
 use egui_phosphor::regular::{CARET_DOWN, CARET_RIGHT};
 
@@ -92,7 +93,7 @@ fn show_result_group(
     group: &SearchResultGroup,
     actions: &mut SearchStripActions,
 ) {
-    let expansion_id = ui.make_persistent_id(("search_result_group", group.buffer_id));
+    let expansion_id = widget_ids::local(ui, ("search_result_group", group.buffer_id));
     let expanded = ui
         .data_mut(|data| data.get_persisted::<bool>(expansion_id))
         .unwrap_or(false);

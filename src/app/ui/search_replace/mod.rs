@@ -6,6 +6,7 @@ mod state;
 use crate::app::app_state::{ScratchpadApp, SearchFocusTarget};
 use crate::app::commands::AppCommand;
 use crate::app::ui::settings;
+use crate::app::ui::widget_ids;
 use eframe::egui;
 use state::{SearchStripActions, SearchStripState};
 
@@ -20,15 +21,15 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 
     let mut state = SearchStripState::from_app(app);
     let mut actions = SearchStripActions::default();
-    let find_input_id = ui.make_persistent_id("search_find_input");
-    let replace_input_id = ui.make_persistent_id("search_replace_input");
+    let find_input_id = widget_ids::local(ui, "search_find_input");
+    let replace_input_id = widget_ids::local(ui, "search_replace_input");
 
     let default_pos = callout::centered_position(
         ui.ctx(),
         egui::vec2(SEARCH_DIALOG_WIDTH, SEARCH_DIALOG_HEIGHT),
     );
 
-    egui::Area::new(egui::Id::new("search_dialog_overlay"))
+    egui::Area::new(widget_ids::global("search_dialog_overlay"))
         .order(egui::Order::Foreground)
         .constrain(true)
         .movable(true)

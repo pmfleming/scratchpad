@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::ui::widget_ids;
 
 pub(super) fn expandable_card(
     ui: &mut egui::Ui,
@@ -9,7 +10,7 @@ pub(super) fn expandable_card(
     default_open: bool,
     add_body: impl FnOnce(&mut egui::Ui),
 ) {
-    let id = ui.make_persistent_id(id_source);
+    let id = widget_ids::local(ui, id_source);
     let is_open = ui
         .data_mut(|data| data.get_persisted::<bool>(id))
         .unwrap_or(default_open);

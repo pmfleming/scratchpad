@@ -404,26 +404,7 @@ fn encoding_card_frame(ui: &egui::Ui) -> egui::Frame {
 }
 
 fn render_encoding_combo(ui: &mut egui::Ui, selected_encoding: &mut String) {
-    ui.scope(|ui| {
-        let text_color = text_primary(ui);
-        let visuals = ui.visuals_mut();
-        visuals.widgets.inactive.bg_fill = ENCODING_COMBO_FILL;
-        visuals.widgets.hovered.bg_fill = ENCODING_COMBO_FILL_HOVER;
-        visuals.widgets.active.bg_fill = ENCODING_COMBO_FILL_HOVER;
-        visuals.widgets.open.bg_fill = ENCODING_COMBO_FILL_HOVER;
-        visuals.widgets.inactive.weak_bg_fill = ENCODING_COMBO_FILL;
-        visuals.widgets.hovered.weak_bg_fill = ENCODING_COMBO_FILL_HOVER;
-        visuals.widgets.active.weak_bg_fill = ENCODING_COMBO_FILL_HOVER;
-        visuals.widgets.open.weak_bg_fill = ENCODING_COMBO_FILL_HOVER;
-        visuals.widgets.inactive.fg_stroke.color = text_color;
-        visuals.widgets.hovered.fg_stroke.color = text_color;
-        visuals.widgets.active.fg_stroke.color = text_color;
-        visuals.widgets.open.fg_stroke.color = text_color;
-        visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
-        visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
-        visuals.widgets.active.bg_stroke = egui::Stroke::NONE;
-        visuals.widgets.open.bg_stroke = egui::Stroke::NONE;
-
+    with_visual_overrides(ui, apply_encoding_combo_style, |ui| {
         egui::ComboBox::from_id_salt("encoding_dialog_combo")
             .selected_text(
                 egui::RichText::new(selected_encoding.as_str())
@@ -458,4 +439,37 @@ fn render_encoding_combo(ui: &mut egui::Ui, selected_encoding: &mut String) {
                 }
             });
     });
+}
+
+fn apply_encoding_combo_style(ui: &mut egui::Ui) {
+    let text_color = text_primary(ui);
+    let visuals = ui.visuals_mut();
+    visuals.widgets.inactive.bg_fill = ENCODING_COMBO_FILL;
+    visuals.widgets.hovered.bg_fill = ENCODING_COMBO_FILL_HOVER;
+    visuals.widgets.active.bg_fill = ENCODING_COMBO_FILL_HOVER;
+    visuals.widgets.open.bg_fill = ENCODING_COMBO_FILL_HOVER;
+    visuals.widgets.inactive.weak_bg_fill = ENCODING_COMBO_FILL;
+    visuals.widgets.hovered.weak_bg_fill = ENCODING_COMBO_FILL_HOVER;
+    visuals.widgets.active.weak_bg_fill = ENCODING_COMBO_FILL_HOVER;
+    visuals.widgets.open.weak_bg_fill = ENCODING_COMBO_FILL_HOVER;
+    visuals.widgets.inactive.fg_stroke.color = text_color;
+    visuals.widgets.hovered.fg_stroke.color = text_color;
+    visuals.widgets.active.fg_stroke.color = text_color;
+    visuals.widgets.open.fg_stroke.color = text_color;
+    visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
+    visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
+    visuals.widgets.active.bg_stroke = egui::Stroke::NONE;
+    visuals.widgets.open.bg_stroke = egui::Stroke::NONE;
+}
+
+fn with_visual_overrides<R>(
+    ui: &mut egui::Ui,
+    configure: impl FnOnce(&mut egui::Ui),
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    let previous_visuals = ui.visuals().clone();
+    configure(ui);
+    let result = add_contents(ui);
+    *ui.visuals_mut() = previous_visuals;
+    result
 }

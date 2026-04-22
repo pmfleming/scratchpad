@@ -36,6 +36,7 @@ impl ScratchpadApp {
         }
         self.poll_background_io(ctx);
         self.apply_theme_to_context(ctx);
+        crate::app::ui::widget_ids::configure_debug_options(ctx);
         self.sync_editor_fonts(ctx);
         crate::app::services::session_manager::maybe_persist_session(self, ctx);
         transition::set_chrome_transition_active(ctx, self.chrome_transition_active());

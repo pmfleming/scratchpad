@@ -1,3 +1,4 @@
+use crate::app::ui::widget_ids;
 use eframe::egui::{self, CursorIcon, Rect, Sense, Vec2, pos2, viewport::ResizeDirection};
 
 const RESIZE_BORDER: f32 = 6.0;
@@ -11,7 +12,7 @@ pub fn handle_window_resize(ctx: &egui::Context) -> bool {
 
     let screen_rect = ctx.input(|input| input.content_rect());
     let content_rect_changed = request_repaint_after_content_rect_change(ctx, screen_rect);
-    egui::Area::new(egui::Id::new("window_resize_handles"))
+    egui::Area::new(widget_ids::global("window_resize_handles"))
         .fixed_pos(screen_rect.min)
         .order(egui::Order::Foreground)
         .interactable(false)
@@ -21,7 +22,7 @@ pub fn handle_window_resize(ctx: &egui::Context) -> bool {
 }
 
 fn request_repaint_after_content_rect_change(ctx: &egui::Context, screen_rect: Rect) -> bool {
-    let rect_id = egui::Id::new("window_content_rect");
+    let rect_id = widget_ids::global("window_content_rect");
     let changed = ctx.data_mut(|data| {
         let previous = data.get_persisted::<Rect>(rect_id);
         data.insert_persisted(rect_id, screen_rect);
@@ -37,9 +38,14 @@ fn request_repaint_after_content_rect_change(ctx: &egui::Context, screen_rect: R
 
 fn render_resize_handles(ui: &mut egui::Ui, ctx: &egui::Context, size: Vec2) {
     for grip in resize_grips(size) {
-        let response = ui
-            .interact(grip.rect, ui.id().with(grip.id), Sense::click_and_drag())
-            .on_hover_cursor(grip.cursor);
+        let response = widget_ids::interact(
+            ui,
+            grip.rect,
+            widget_ids::child(ui.id(), grip.id),
+            Sense::click_and_drag(),
+            "resize_grip",
+        )
+        .on_hover_cursor(grip.cursor);
 
         if response.drag_started() {
             ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(grip.direction));

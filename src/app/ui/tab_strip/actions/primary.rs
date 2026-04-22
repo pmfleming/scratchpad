@@ -2,6 +2,7 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::chrome::phosphor_button;
 use crate::app::commands::AppCommand;
 use crate::app::theme::{BUTTON_SIZE, TAB_HEIGHT, action_bg, action_hover_bg};
+use crate::app::ui::widget_ids;
 use eframe::egui;
 
 const PRIMARY_ACTION_SPACING: f32 = 4.0;
@@ -18,16 +19,25 @@ pub(super) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         egui::vec2(width, TAB_HEIGHT),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
-            primary_action_button(ui, egui_phosphor::regular::FOLDER_OPEN, "Open File", || {
-                app.handle_command(AppCommand::OpenFile)
-            });
-            ui.add_space(PRIMARY_ACTION_SPACING);
-            primary_action_button(ui, egui_phosphor::regular::FLOPPY_DISK, "Save As", || {
-                app.handle_command(AppCommand::SaveFileAs)
-            });
+            primary_action_button(
+                ui,
+                "primary_open_file",
+                egui_phosphor::regular::FOLDER_OPEN,
+                "Open File",
+                || app.handle_command(AppCommand::OpenFile),
+            );
             ui.add_space(PRIMARY_ACTION_SPACING);
             primary_action_button(
                 ui,
+                "primary_save_as",
+                egui_phosphor::regular::FLOPPY_DISK,
+                "Save As",
+                || app.handle_command(AppCommand::SaveFileAs),
+            );
+            ui.add_space(PRIMARY_ACTION_SPACING);
+            primary_action_button(
+                ui,
+                "primary_search",
                 egui_phosphor::regular::MAGNIFYING_GLASS,
                 search_tooltip,
                 || app.toggle_search(),
@@ -36,15 +46,24 @@ pub(super) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     );
 }
 
-fn primary_action_button(ui: &mut egui::Ui, icon: &str, tooltip: &str, on_click: impl FnOnce()) {
-    if phosphor_button(
-        ui,
-        icon,
-        BUTTON_SIZE,
-        action_bg(ui),
-        action_hover_bg(ui),
-        tooltip,
-    )
+fn primary_action_button(
+    ui: &mut egui::Ui,
+    id_source: &'static str,
+    icon: &str,
+    tooltip: &str,
+    on_click: impl FnOnce(),
+) {
+    if widget_ids::scope(ui, id_source, |ui| {
+        phosphor_button(
+            ui,
+            icon,
+            BUTTON_SIZE,
+            action_bg(ui),
+            action_hover_bg(ui),
+            tooltip,
+        )
+    })
+    .inner
     .clicked()
     {
         on_click();

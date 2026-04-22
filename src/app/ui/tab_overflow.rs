@@ -4,6 +4,7 @@ use crate::app::domain::WorkspaceTab;
 use crate::app::services::settings_store::TabListPosition;
 use crate::app::theme::*;
 use crate::app::ui::tab_drag;
+use crate::app::ui::widget_ids;
 use eframe::egui::{self, Stroke};
 use std::collections::{HashMap, HashSet};
 
@@ -57,7 +58,7 @@ pub(crate) fn show_overflow_button(
     _duplicate_name_counts: &HashMap<String, usize>,
 ) -> OverflowMenuOutcome {
     let mut outcome = OverflowMenuOutcome::default();
-    let overflow_popup_id = ui.id().with("tab_overflow_popup");
+    let overflow_popup_id = widget_ids::local(ui, "tab_overflow_popup");
     let overflow_button_response = overflow_button(ui);
     toggle_overflow_popup(overflow_popup_open, &overflow_button_response);
 

@@ -2,6 +2,7 @@ use super::geometry::top_drag_button_position;
 use crate::app::app_state::ScratchpadApp;
 use crate::app::services::settings_store::TabListPosition;
 use crate::app::theme::{BUTTON_SIZE, HEADER_HEIGHT, action_bg, action_hover_bg, text_primary};
+use crate::app::ui::widget_ids;
 use eframe::egui;
 
 pub(super) fn show_top_drag_bar(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
@@ -19,7 +20,7 @@ pub(super) fn show_top_drag_bar(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     }
 
     let button_position = top_drag_button_position(app, viewport);
-    egui::Area::new(egui::Id::new("top_drag_button"))
+    egui::Area::new(widget_ids::global("top_drag_button"))
         .order(egui::Order::Foreground)
         .fixed_pos(button_position)
         .show(&ctx, |ui| {

@@ -48,46 +48,23 @@ pub fn render_editor_text_edit(
 ) -> EditorWidgetOutcome {
     let text = buffer.document().extract_text();
     let total_chars = buffer.document().piece_tree().len_chars();
-
-    let selection_range = buffer.active_selection.clone();
-
-    let wrap_width = if options.word_wrap {
-        ui.available_width()
-    } else {
-        f32::INFINITY
-    };
+    let wrap_width = editor_wrap_width(ui, options.word_wrap);
 
     let galley = highlighting::build_galley(
         ui,
         &text,
         options,
         &view.search_highlights,
-        selection_range,
+        buffer.active_selection.clone(),
         wrap_width,
     );
 
     let row_height = ui.fonts_mut(|fonts| fonts.row_height(options.editor_font_id));
-    let desired_rows = buffer.line_count.max(1);
-    let visible_height = ui.available_height();
-    let bottom_padding = visible_height * 0.5;
-    let desired_height = desired_rows as f32 * row_height + bottom_padding;
-    let desired_width = wrap_width;
-
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(
-            desired_width.min(ui.available_width()),
-            desired_height.max(ui.available_height()),
-        ),
+        editor_desired_size(ui, wrap_width, row_height, buffer.line_count.max(1)),
         egui::Sense::click_and_drag(),
     );
-
-    if options.request_focus {
-        response.request_focus();
-    }
-
-    if response.has_focus() {
-        ui.memory_mut(|mem| mem.set_focus_lock_filter(response.id, EDITOR_FOCUS_LOCK_FILTER));
-    }
+    request_editor_focus(ui, &response, options.request_focus);
 
     let prev_cursor = view.cursor_range;
     handle_mouse_interaction(
@@ -113,12 +90,7 @@ pub fn render_editor_text_edit(
     }
 
     // Publish active view's selection to the buffer so all views can show it
-    if focused {
-        buffer.active_selection = view
-            .cursor_range
-            .as_ref()
-            .and_then(types::selection_char_range);
-    }
+    publish_active_selection(buffer, view, focused);
 
     let galley_pos = rect.min;
     if ui.is_rect_visible(rect) {
@@ -360,18 +332,8 @@ fn render_visible_text_window(
     }
 
     // Map buffer-level selection into window-local char offsets
-    let window_selection = active_selection.and_then(|sel| {
-        let win = &visible_window.char_range;
-        let start = sel.start.max(win.start).saturating_sub(win.start);
-        let end = sel.end.min(win.end).saturating_sub(win.start);
-        (start < end).then_some(start..end)
-    });
-
-    let wrap_width = if options.word_wrap {
-        ui.available_width()
-    } else {
-        f32::INFINITY
-    };
+    let window_selection = window_selection(active_selection, &visible_window.char_range);
+    let wrap_width = editor_wrap_width(ui, options.word_wrap);
     let galley = highlighting::build_galley(
         ui,
         &visible_window.text,
@@ -392,12 +354,7 @@ fn render_visible_text_window(
     );
 
     let (focused, request_editor_focus) = if let Some(buffer) = buffer {
-        if options.request_focus {
-            response.request_focus();
-        }
-        if response.has_focus() {
-            ui.memory_mut(|mem| mem.set_focus_lock_filter(response.id, EDITOR_FOCUS_LOCK_FILTER));
-        }
+        request_editor_focus(ui, &response, options.request_focus);
 
         let prev_cursor = view.cursor_range;
         handle_mouse_interaction_window(
@@ -428,12 +385,7 @@ fn render_visible_text_window(
             view.scroll_to_cursor = true;
         }
 
-        if focused {
-            buffer.active_selection = view
-                .cursor_range
-                .as_ref()
-                .and_then(types::selection_char_range);
-        }
+        publish_active_selection(buffer, view, focused);
 
         if changed {
             buffer.refresh_text_metadata();
@@ -548,6 +500,63 @@ fn update_visible_layout(
         layout.set_visible_text(visible_text);
     }
     view.latest_layout = latest_layout;
+}
+
+fn editor_wrap_width(ui: &egui::Ui, word_wrap: bool) -> f32 {
+    if word_wrap {
+        ui.available_width()
+    } else {
+        f32::INFINITY
+    }
+}
+
+fn editor_desired_size(
+    ui: &egui::Ui,
+    wrap_width: f32,
+    row_height: f32,
+    desired_rows: usize,
+) -> egui::Vec2 {
+    let visible_height = ui.available_height();
+    let desired_height = desired_rows as f32 * row_height + visible_height * 0.5;
+    egui::vec2(
+        wrap_width.min(ui.available_width()),
+        desired_height.max(visible_height),
+    )
+}
+
+fn request_editor_focus(ui: &mut egui::Ui, response: &egui::Response, request_focus: bool) {
+    if request_focus {
+        response.request_focus();
+    }
+    if response.has_focus() {
+        ui.memory_mut(|mem| mem.set_focus_lock_filter(response.id, EDITOR_FOCUS_LOCK_FILTER));
+    }
+}
+
+fn publish_active_selection(buffer: &mut BufferState, view: &EditorViewState, focused: bool) {
+    if focused {
+        buffer.active_selection = view
+            .cursor_range
+            .as_ref()
+            .and_then(types::selection_char_range);
+    }
+}
+
+fn window_selection(
+    active_selection: Option<&std::ops::Range<usize>>,
+    char_range: &std::ops::Range<usize>,
+) -> Option<std::ops::Range<usize>> {
+    active_selection.and_then(|selection| {
+        let start = selection
+            .start
+            .max(char_range.start)
+            .saturating_sub(char_range.start);
+        let end = selection
+            .end
+            .min(char_range.end)
+            .saturating_sub(char_range.start);
+        (start < end).then_some(start..end)
+    })
 }
 
 fn focused_visible_line_range(

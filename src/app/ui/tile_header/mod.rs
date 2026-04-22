@@ -4,6 +4,7 @@ pub mod split;
 use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::ViewId;
 use crate::app::ui::transition;
+use crate::app::ui::widget_ids;
 use eframe::egui;
 
 pub use control::{TileControl, TileControlStyle};
@@ -183,7 +184,7 @@ fn show_split_control(
         .show(
             ui,
             split_hit,
-            ui.make_persistent_id(("split_handle", tab_index, view_id)),
+            widget_ids::local(ui, ("split_handle", tab_index, view_id)),
             egui::Sense::click_and_drag(),
         )
 }
@@ -204,7 +205,7 @@ fn show_control(
     tile_control.show(
         ui,
         hit_rect,
-        ui.make_persistent_id((spec.id_prefix, control.tab_index, control.view_id)),
+        widget_ids::local(ui, (spec.id_prefix, control.tab_index, control.view_id)),
         spec.sense,
     )
 }

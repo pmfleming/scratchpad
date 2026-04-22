@@ -1,4 +1,5 @@
 use super::{TAB_DRAG_THRESHOLD, TabDragState};
+use crate::app::ui::widget_ids;
 use eframe::egui;
 
 pub(crate) fn begin_tab_drag_if_needed(
@@ -86,7 +87,7 @@ pub(super) fn collected_dragged_indices(dragged_indices: &[usize], index: usize)
 }
 
 fn tab_drag_state_id() -> egui::Id {
-    egui::Id::new("tab_strip_drag_state")
+    widget_ids::global("tab_strip_drag_state")
 }
 
 fn current_tab_drag_state(ui: &egui::Ui) -> Option<TabDragState> {

@@ -1,6 +1,7 @@
 use crate::app::domain::{SplitAxis, SplitPath};
 use crate::app::theme::*;
 use crate::app::ui::tile_header::{TILE_GAP, TileAction};
+use crate::app::ui::widget_ids;
 use eframe::egui;
 
 pub const DIVIDER_HIT_THICKNESS: f32 = 18.0;
@@ -33,10 +34,12 @@ fn divider_response(
     ratio: f32,
     path: &SplitPath,
 ) -> egui::Response {
-    ui.interact(
+    widget_ids::interact(
+        ui,
         divider_hit_rect(rect, axis, ratio),
-        ui.make_persistent_id(("split_divider", path)),
+        widget_ids::local(ui, ("split_divider", path)),
         egui::Sense::click_and_drag(),
+        "split_divider",
     )
     .on_hover_cursor(divider_cursor(axis))
 }

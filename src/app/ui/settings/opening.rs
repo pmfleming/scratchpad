@@ -1,5 +1,6 @@
 use super::*;
 use crate::app::services::settings_store::{FileOpenDisposition, StartupSessionBehavior};
+use crate::app::ui::widget_ids;
 
 const FILE_OPEN_OPTIONS: [FileOpenDisposition; 2] =
     [FileOpenDisposition::NewTab, FileOpenDisposition::CurrentTab];
@@ -52,7 +53,7 @@ fn render_opening_files_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 }
 
 fn render_startup_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    let id = ui.make_persistent_id("settings_startup_behavior_card");
+    let id = widget_ids::local(ui, "settings_startup_behavior_card");
     let is_open = ui
         .data_mut(|data| data.get_persisted::<bool>(id))
         .unwrap_or(true);

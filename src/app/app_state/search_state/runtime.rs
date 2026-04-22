@@ -232,46 +232,29 @@ impl ScratchpadApp {
         let tab_label = self.search_tab_label(tab_index);
         let mut seen_buffer_ids = HashSet::with_capacity(tab.views.len());
         let mut targets = Vec::with_capacity(tab.views.len());
-        for view_id in tab.ordered_view_ids_in_layout_order() {
-            let Some(view) = tab.view(view_id) else {
-                continue;
-            };
-            if !seen_buffer_ids.insert(view.buffer_id) {
-                continue;
-            }
-            if let Some(target) = build_search_target_from_view(
+        self.extend_search_targets_for_views(
+            tab_index,
+            tab,
+            &tab_label,
+            search_range.clone(),
+            tab.ordered_view_ids_in_layout_order()
+                .into_iter()
+                .filter_map(|view_id| tab.view(view_id)),
+            &mut seen_buffer_ids,
+            &mut targets,
+        );
+        if seen_buffer_ids.len() < tab.views.len() {
+            self.extend_search_targets_for_views(
                 tab_index,
                 tab,
-                view,
                 &tab_label,
-                search_range.clone(),
-            ) {
-                targets.push(target);
-            }
+                search_range,
+                tab.views.iter(),
+                &mut seen_buffer_ids,
+                &mut targets,
+            );
         }
-        if seen_buffer_ids.len() < tab.views.len() {
-            for view in &tab.views {
-                if !seen_buffer_ids.insert(view.buffer_id) {
-                    continue;
-                }
-                if let Some(target) = build_search_target_from_view(
-                    tab_index,
-                    tab,
-                    view,
-                    &tab_label,
-                    search_range.clone(),
-                ) {
-                    targets.push(target);
-                }
-            }
-        }
-        if let Some(prioritized_buffer_id) = prioritized_buffer_id
-            && let Some(index) = targets
-                .iter()
-                .position(|target| target.buffer_id == prioritized_buffer_id)
-        {
-            targets.rotate_left(index);
-        }
+        rotate_prioritized_target(&mut targets, prioritized_buffer_id);
         targets
     }
 
@@ -445,35 +428,51 @@ impl ScratchpadApp {
         }
 
         if plan.scope == SearchScope::ActiveBuffer && plan.targets.len() == 1 {
-            let target = &plan.targets[0];
-            let previous_selection = self
-                .active_tab()
-                .and_then(|tab| tab.view(target.view_id))
-                .and_then(|view| view.cursor_range)
-                .unwrap_or_else(|| cursor_range_from_char_range(target.replacements[0].0.clone()));
-            let next_selection = cursor_range_from_char_range(
-                target.replacements[0].0.start
-                    ..target.replacements[0].0.start + target.replacements[0].1.chars().count(),
-            );
-            let Some(buffer_label) = self.replace_ranges_in_active_buffer(
-                target.view_id,
-                target.buffer_id,
-                &target.replacements,
-                previous_selection,
-                next_selection,
-                "Search replace-all failed for the active buffer.",
-            ) else {
-                return false;
-            };
-            self.refresh_search_state();
-            self.select_first_match_in_active_buffer();
-            self.set_info_status(format!(
-                "Replaced {} matches in {}.",
-                plan.total_match_count, buffer_label
-            ));
-            return true;
+            return self.replace_all_in_active_buffer(&plan);
         }
 
+        let replaced = self.replace_all_in_multiple_buffers(&plan);
+        if replaced {
+            self.set_info_status(format!(
+                "Replaced {} matches across {} buffers.",
+                plan.total_match_count,
+                plan.affected_buffer_count()
+            ));
+        }
+        replaced
+    }
+
+    fn replace_all_in_active_buffer(&mut self, plan: &ReplacementPlan) -> bool {
+        let target = &plan.targets[0];
+        let previous_selection = self
+            .active_tab()
+            .and_then(|tab| tab.view(target.view_id))
+            .and_then(|view| view.cursor_range)
+            .unwrap_or_else(|| cursor_range_from_char_range(target.replacements[0].0.clone()));
+        let next_selection = cursor_range_from_char_range(
+            target.replacements[0].0.start
+                ..target.replacements[0].0.start + target.replacements[0].1.chars().count(),
+        );
+        let Some(buffer_label) = self.replace_ranges_in_active_buffer(
+            target.view_id,
+            target.buffer_id,
+            &target.replacements,
+            previous_selection,
+            next_selection,
+            "Search replace-all failed for the active buffer.",
+        ) else {
+            return false;
+        };
+        self.refresh_search_state();
+        self.select_first_match_in_active_buffer();
+        self.set_info_status(format!(
+            "Replaced {} matches in {}.",
+            plan.total_match_count, buffer_label
+        ));
+        true
+    }
+
+    fn replace_all_in_multiple_buffers(&mut self, plan: &ReplacementPlan) -> bool {
         let snapshot = self.capture_transaction_snapshot();
         let mut affected_items = Vec::with_capacity(plan.targets.len());
 
@@ -500,11 +499,6 @@ impl ScratchpadApp {
         self.mark_search_dirty();
         self.mark_session_dirty();
         self.refresh_search_state();
-        self.set_info_status(format!(
-            "Replaced {} matches across {} buffers.",
-            plan.total_match_count,
-            plan.affected_buffer_count()
-        ));
         true
     }
 
@@ -566,6 +560,28 @@ impl ScratchpadApp {
         let _ = tab;
         self.note_settings_toml_edit(tab_index);
     }
+
+    fn extend_search_targets_for_views<'a>(
+        &self,
+        tab_index: usize,
+        tab: &WorkspaceTab,
+        tab_label: &str,
+        search_range: Option<Range<usize>>,
+        views: impl IntoIterator<Item = &'a EditorViewState>,
+        seen_buffer_ids: &mut HashSet<BufferId>,
+        targets: &mut Vec<SearchTargetSnapshot>,
+    ) {
+        for view in views {
+            if !seen_buffer_ids.insert(view.buffer_id) {
+                continue;
+            }
+            if let Some(target) =
+                build_search_target_from_view(tab_index, tab, view, tab_label, search_range.clone())
+            {
+                targets.push(target);
+            }
+        }
+    }
 }
 
 fn build_replacement_targets(
@@ -597,6 +613,21 @@ fn build_replacement_targets(
         start = end;
     }
     targets
+}
+
+fn rotate_prioritized_target(
+    targets: &mut [SearchTargetSnapshot],
+    prioritized_buffer_id: Option<BufferId>,
+) {
+    let Some(prioritized_buffer_id) = prioritized_buffer_id else {
+        return;
+    };
+    if let Some(index) = targets
+        .iter()
+        .position(|target| target.buffer_id == prioritized_buffer_id)
+    {
+        targets.rotate_left(index);
+    }
 }
 
 fn same_replacement_target(left: &SearchMatch, right: &SearchMatch) -> bool {

@@ -1,5 +1,6 @@
 use crate::app::theme::*;
 use crate::app::ui::transition;
+use crate::app::ui::widget_ids;
 use eframe::egui::{self, Color32, Rect, Sense, Vec2};
 
 pub fn phosphor_button(
@@ -53,14 +54,17 @@ fn render_caption_buttons(ui: &mut egui::Ui, ctx: &egui::Context) -> bool {
 }
 
 fn render_minimize_button(ui: &mut egui::Ui, ctx: &egui::Context) {
-    if phosphor_button(
-        ui,
-        egui_phosphor::regular::MINUS,
-        CAPTION_BUTTON_SIZE,
-        action_bg(ui),
-        action_hover_bg(ui),
-        "Minimize",
-    )
+    if widget_ids::scope(ui, "caption_minimize", |ui| {
+        phosphor_button(
+            ui,
+            egui_phosphor::regular::MINUS,
+            CAPTION_BUTTON_SIZE,
+            action_bg(ui),
+            action_hover_bg(ui),
+            "Minimize",
+        )
+    })
+    .inner
     .clicked()
     {
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
@@ -75,14 +79,17 @@ fn render_maximize_restore_button(ui: &mut egui::Ui, ctx: &egui::Context) {
         (egui_phosphor::regular::SQUARE, "Maximize", true)
     };
 
-    if phosphor_button(
-        ui,
-        icon,
-        CAPTION_BUTTON_SIZE,
-        action_bg(ui),
-        action_hover_bg(ui),
-        tooltip,
-    )
+    if widget_ids::scope(ui, "caption_maximize", |ui| {
+        phosphor_button(
+            ui,
+            icon,
+            CAPTION_BUTTON_SIZE,
+            action_bg(ui),
+            action_hover_bg(ui),
+            tooltip,
+        )
+    })
+    .inner
     .clicked()
     {
         ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(next_maximized));
@@ -90,15 +97,18 @@ fn render_maximize_restore_button(ui: &mut egui::Ui, ctx: &egui::Context) {
 }
 
 fn render_close_button(ui: &mut egui::Ui) -> bool {
-    phosphor_button(
-        ui,
-        egui_phosphor::regular::X,
-        CAPTION_BUTTON_SIZE,
-        CLOSE_BG,
-        CLOSE_HOVER_BG,
-        "Close",
-    )
-    .clicked()
+    widget_ids::scope(ui, "caption_close", |ui| {
+        phosphor_button(
+            ui,
+            egui_phosphor::regular::X,
+            CAPTION_BUTTON_SIZE,
+            CLOSE_BG,
+            CLOSE_HOVER_BG,
+            "Close",
+        )
+        .clicked()
+    })
+    .inner
 }
 
 fn paint_phosphor_button(

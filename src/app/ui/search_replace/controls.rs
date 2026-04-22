@@ -395,9 +395,10 @@ fn chip_button(
     padding: egui::Vec2,
     tooltip: &str,
 ) -> egui::Response {
-    ui.scope(|ui| {
-        ui.spacing_mut().button_padding = padding;
-        ui.add(
+    let previous_padding = ui.spacing().button_padding;
+    ui.spacing_mut().button_padding = padding;
+    let response = ui
+        .add(
             egui::Button::new(text)
                 .min_size(min_size)
                 .fill(if selected {
@@ -415,9 +416,9 @@ fn chip_button(
                 ))
                 .corner_radius(egui::CornerRadius::same(8)),
         )
-        .on_hover_text(tooltip)
-    })
-    .inner
+        .on_hover_text(tooltip);
+    ui.spacing_mut().button_padding = previous_padding;
+    response
 }
 
 fn scope_tooltip(scope: SearchScope, origin: SearchScopeOrigin) -> &'static str {

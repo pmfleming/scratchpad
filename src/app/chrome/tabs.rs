@@ -1,5 +1,6 @@
 use crate::app::theme::*;
 use crate::app::ui::transition;
+use crate::app::ui::widget_ids;
 use eframe::egui::{self, Rect, Sense, Stroke, Vec2};
 
 struct TabButtonFrame {
@@ -109,7 +110,7 @@ pub fn tab_rename_editor_sized(
     let response = ui.put(
         text_rect,
         egui::TextEdit::singleline(text)
-            .id(ui.id().with("rename_editor"))
+            .id(widget_ids::child(ui.id(), "rename_editor"))
             .frame(egui::Frame::NONE)
             .desired_width(text_rect.width())
             .margin(egui::Margin::symmetric(4, 6))
@@ -165,7 +166,13 @@ fn paint_selected_tab_overlay(ui: &egui::Ui, rect: Rect, active: bool) {
 fn allocate_tab_button_frame(ui: &mut egui::Ui, width: f32) -> TabButtonFrame {
     let size = Vec2::new(width, TAB_HEIGHT);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
-    let response = ui.interact(rect, ui.id().with("tab_button"), Sense::click_and_drag());
+    let response = widget_ids::interact(
+        ui,
+        rect,
+        widget_ids::child(ui.id(), "tab_button"),
+        Sense::click_and_drag(),
+        "tab_button",
+    );
 
     TabButtonFrame {
         rect,
@@ -207,7 +214,13 @@ fn render_tab_promote_button(
     promote_rect: Rect,
     drag_in_progress: bool,
 ) -> egui::Response {
-    let promote_response = ui.interact(promote_rect, ui.id().with("promote_all"), Sense::click());
+    let promote_response = widget_ids::interact(
+        ui,
+        promote_rect,
+        widget_ids::child(ui.id(), "promote_all"),
+        Sense::click(),
+        "tab_promote",
+    );
     if promote_response.hovered() && !drag_in_progress {
         ui.painter()
             .rect_filled(promote_rect, 2.0, action_hover_bg(ui));
@@ -232,7 +245,13 @@ fn render_tab_close_button(
         Vec2::new(18.0, 18.0),
     );
 
-    let close_response = ui.interact(close_rect, ui.id().with("close"), Sense::click());
+    let close_response = widget_ids::interact(
+        ui,
+        close_rect,
+        widget_ids::child(ui.id(), "close"),
+        Sense::click(),
+        "tab_close",
+    );
     paint_tab_close_button(ui, close_rect, close_response.hovered(), drag_in_progress);
 
     (close_rect, close_response)

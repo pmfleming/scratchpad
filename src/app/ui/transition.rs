@@ -1,8 +1,9 @@
 use crate::app::ui::tab_drag;
+use crate::app::ui::widget_ids;
 use eframe::egui;
 
 fn chrome_transition_id() -> egui::Id {
-    egui::Id::new("chrome_transition_active")
+    widget_ids::global("chrome_transition_active")
 }
 
 pub(crate) fn set_chrome_transition_active(ctx: &egui::Context, active: bool) {

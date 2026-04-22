@@ -4,6 +4,7 @@ mod windowing;
 use crate::app::domain::{
     BufferState, EditorViewState, RenderedLayout, RenderedTextWindow, SearchHighlightState,
 };
+use crate::app::ui::widget_ids;
 use eframe::egui;
 use std::cell::RefCell;
 use std::ops::Range;
@@ -177,11 +178,11 @@ pub fn render_read_only_text_edit(
 }
 
 fn editor_widget_id(view_id: u64) -> egui::Id {
-    egui::Id::new(("editor_text", view_id))
+    widget_ids::global(("editor_text", view_id))
 }
 
 fn preview_widget_id(view_id: u64) -> egui::Id {
-    egui::Id::new(("editor_text_preview", view_id))
+    widget_ids::global(("editor_text_preview", view_id))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -469,7 +470,7 @@ mod tests {
     #[test]
     fn existing_text_edit_state_is_not_overwritten_by_stored_view_cursor() {
         let ctx = egui::Context::default();
-        let widget_id = egui::Id::new("selection-sync");
+        let widget_id = widget_ids::global("selection-sync");
         let live_selection = range(2, 6);
         let stale_view_selection = CursorRange::two(2, 3);
 
@@ -489,7 +490,7 @@ mod tests {
     #[test]
     fn pending_cursor_range_overrides_existing_text_edit_state() {
         let ctx = egui::Context::default();
-        let widget_id = egui::Id::new("pending-selection-sync");
+        let widget_id = widget_ids::global("pending-selection-sync");
         let existing_selection = range(4, 8);
         let requested_selection = CursorRange::two(10, 14);
 

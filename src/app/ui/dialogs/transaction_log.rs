@@ -5,7 +5,7 @@ use crate::app::theme::{
     action_hover_bg, border, tab_selected_accent, tab_selected_bg, text_muted, text_primary,
 };
 use crate::app::transactions::TransactionLogEntry;
-use crate::app::ui::{callout, search_replace, settings};
+use crate::app::ui::{callout, search_replace, settings, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{
     ARROW_COUNTER_CLOCKWISE, ARROWS_SPLIT, CLOCK_COUNTER_CLOCKWISE, FILE_TEXT, PENCIL_SIMPLE_LINE,
@@ -136,13 +136,7 @@ pub(super) fn show_transaction_log_window(ctx: &egui::Context, app: &mut Scratch
         },
     );
 
-    if let Some(entry_id) = undo_entry_id {
-        let _ = app.undo_transaction_entry(entry_id);
-    } else if clear_requested {
-        app.clear_transaction_log();
-    } else if close_requested {
-        app.close_transaction_log();
-    }
+    apply_transaction_log_window_actions(app, undo_entry_id, clear_requested, close_requested);
 }
 
 fn render_transaction_log_window(
@@ -164,7 +158,7 @@ fn render_transaction_log_window(
     ui.add_space(8.0);
 
     transaction_log_panel_frame(ui).show(ui, |ui| {
-        let filter_id = ui.make_persistent_id("transaction_log_filter");
+        let filter_id = widget_ids::local(ui, "transaction_log_filter");
         let mut filter = load_transaction_filter(ui, filter_id);
 
         render_panel_intro(ui);
@@ -181,28 +175,7 @@ fn render_transaction_log_window(
         divider(ui);
         ui.add_space(12.0);
 
-        if filtered_entries.is_empty() {
-            render_empty_state(ui, entries.is_empty());
-        } else {
-            ui.label(
-                egui::RichText::new(TRANSACTION_LOG_SECTION_LABEL)
-                    .size(12.0)
-                    .color(text_muted(ui))
-                    .strong(),
-            );
-            ui.add_space(10.0);
-            render_entry_list(ui, &filtered_entries, undo_entry_id);
-            ui.add_space(10.0);
-            divider(ui);
-            ui.add_space(12.0);
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(entry_count_label(filtered_entries.len()))
-                        .size(13.0)
-                        .color(text_muted(ui)),
-                );
-            });
-        }
+        render_transaction_log_entries(ui, entries, &filtered_entries, undo_entry_id);
     });
 }
 
@@ -247,13 +220,7 @@ fn render_filter_row(
     clear_requested: &mut bool,
 ) {
     ui.horizontal(|ui| {
-        for option in TransactionFilter::ALL {
-            if filter_chip(ui, option.label(), *filter == option).clicked() {
-                *filter = option;
-                store_transaction_filter(ui, filter_id, option);
-            }
-            ui.add_space(4.0);
-        }
+        render_filter_chips(ui, filter, filter_id);
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let clear = ui
@@ -352,46 +319,9 @@ fn render_entry_row(
 
             let meta_width = 130.0;
             let content_width = (ui.available_width() - meta_width - 40.0).max(160.0);
-            ui.allocate_ui_with_layout(
-                egui::vec2(content_width, 0.0),
-                egui::Layout::top_down(egui::Align::LEFT),
-                |ui| {
-                    ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new(&entry.action_label)
-                            .size(14.5)
-                            .color(text_primary(ui)),
-                    );
-                    if !tokens.is_empty() {
-                        ui.add_space(6.0);
-                        render_entry_pills(ui, &tokens);
-                    }
-                },
-            );
+            render_entry_content(ui, entry, &tokens, content_width);
 
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                let undo = callout::icon_button(
-                    ui,
-                    ARROW_COUNTER_CLOCKWISE,
-                    18.0,
-                    TRANSACTION_LOG_UNDO_BUTTON_SIZE,
-                    action_hover_bg(ui),
-                    "Undo to this point",
-                    true,
-                );
-                if undo.clicked() {
-                    *undo_entry_id = Some(entry.id);
-                }
-                ui.add_space(12.0);
-                ui.label(
-                    egui::RichText::new(format!(
-                        "{} ago",
-                        relative_age_label(entry.created_at.elapsed())
-                    ))
-                    .size(12.5)
-                    .color(text_muted(ui)),
-                );
-            });
+            render_entry_meta(ui, entry, undo_entry_id);
         });
     });
 }
@@ -510,6 +440,118 @@ fn apply_transaction_log_typography(ui: &mut egui::Ui) {
     style
         .text_styles
         .insert(egui::TextStyle::Small, egui::FontId::new(12.0, font_family));
+}
+
+fn apply_transaction_log_window_actions(
+    app: &mut ScratchpadApp,
+    undo_entry_id: Option<u64>,
+    clear_requested: bool,
+    close_requested: bool,
+) {
+    if let Some(entry_id) = undo_entry_id {
+        let _ = app.undo_transaction_entry(entry_id);
+        return;
+    }
+    if clear_requested {
+        app.clear_transaction_log();
+    } else if close_requested {
+        app.close_transaction_log();
+    }
+}
+
+fn render_transaction_log_entries(
+    ui: &mut egui::Ui,
+    entries: &[TransactionLogEntry],
+    filtered_entries: &[&TransactionLogEntry],
+    undo_entry_id: &mut Option<u64>,
+) {
+    if filtered_entries.is_empty() {
+        render_empty_state(ui, entries.is_empty());
+        return;
+    }
+
+    ui.label(
+        egui::RichText::new(TRANSACTION_LOG_SECTION_LABEL)
+            .size(12.0)
+            .color(text_muted(ui))
+            .strong(),
+    );
+    ui.add_space(10.0);
+    render_entry_list(ui, filtered_entries, undo_entry_id);
+    ui.add_space(10.0);
+    divider(ui);
+    ui.add_space(12.0);
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(entry_count_label(filtered_entries.len()))
+                .size(13.0)
+                .color(text_muted(ui)),
+        );
+    });
+}
+
+fn render_filter_chips(ui: &mut egui::Ui, filter: &mut TransactionFilter, filter_id: egui::Id) {
+    for option in TransactionFilter::ALL {
+        if filter_chip(ui, option.label(), *filter == option).clicked() {
+            *filter = option;
+            store_transaction_filter(ui, filter_id, option);
+        }
+        ui.add_space(4.0);
+    }
+}
+
+fn render_entry_content(
+    ui: &mut egui::Ui,
+    entry: &TransactionLogEntry,
+    tokens: &[String],
+    content_width: f32,
+) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(content_width, 0.0),
+        egui::Layout::top_down(egui::Align::LEFT),
+        |ui| {
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(&entry.action_label)
+                    .size(14.5)
+                    .color(text_primary(ui)),
+            );
+            if !tokens.is_empty() {
+                ui.add_space(6.0);
+                render_entry_pills(ui, tokens);
+            }
+        },
+    );
+}
+
+fn render_entry_meta(
+    ui: &mut egui::Ui,
+    entry: &TransactionLogEntry,
+    undo_entry_id: &mut Option<u64>,
+) {
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+        let undo = callout::icon_button(
+            ui,
+            ARROW_COUNTER_CLOCKWISE,
+            18.0,
+            TRANSACTION_LOG_UNDO_BUTTON_SIZE,
+            action_hover_bg(ui),
+            "Undo to this point",
+            true,
+        );
+        if undo.clicked() {
+            *undo_entry_id = Some(entry.id);
+        }
+        ui.add_space(12.0);
+        ui.label(
+            egui::RichText::new(format!(
+                "{} ago",
+                relative_age_label(entry.created_at.elapsed())
+            ))
+            .size(12.5)
+            .color(text_muted(ui)),
+        );
+    });
 }
 
 fn transaction_log_panel_frame(ui: &egui::Ui) -> egui::Frame {

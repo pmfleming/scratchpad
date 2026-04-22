@@ -94,26 +94,7 @@ pub fn run_tab_tile_layout_profile(
 
         sum_profile_iterations(iterations, || {
             ratio_phase = !ratio_phase;
-            let phase = if ratio_phase { 1 } else { 0 };
-            let mut operations = 0;
-
-            for (index, path) in split_paths.iter().enumerate() {
-                let ratio = if (index + phase).is_multiple_of(2) {
-                    0.35
-                } else {
-                    0.65
-                };
-                app.resize_split(path.clone(), ratio);
-                operations += 1;
-            }
-
-            if let Some(tab) = app.tabs_mut().first_mut() {
-                let _ = tab.rebalance_views_equally();
-                let _ = tab.rebalance_views_equally_for_axis(SplitAxis::Horizontal);
-                operations += tab.views.len();
-            }
-
-            operations
+            resize_profile_splits(app, &split_paths, ratio_phase) + rebalance_profile_tab(app)
         })
     })
 }
@@ -128,18 +109,7 @@ pub fn run_view_navigation_profile(
         let view_ids = ordered_view_ids(&tab.root_pane);
         app.tabs_mut()[0] = tab;
 
-        sum_profile_iterations(iterations, || {
-            let mut activations = 0;
-            for &view_id in view_ids.iter().skip(1) {
-                app.activate_view(view_id);
-                activations += 1;
-            }
-            for &view_id in view_ids.iter().rev().skip(1) {
-                app.activate_view(view_id);
-                activations += 1;
-            }
-            activations
-        })
+        sum_profile_iterations(iterations, || cycle_profile_views(app, &view_ids))
     })
 }
 
@@ -353,8 +323,7 @@ pub fn run_large_file_split_profile(
                     operations += 1;
                 }
 
-                let _ = tab.rebalance_views_equally();
-                operations += tab.views.len();
+                operations += rebalance_profile_tab_views(tab);
             }
             operations
         })
@@ -615,6 +584,49 @@ fn collect_split_paths_inner(node: &PaneNode, current: &mut SplitPath, paths: &m
         collect_split_paths_inner(second, current, paths);
         current.pop();
     }
+}
+
+fn resize_profile_splits(
+    app: &mut ScratchpadApp,
+    split_paths: &[SplitPath],
+    ratio_phase: bool,
+) -> usize {
+    let phase = usize::from(ratio_phase);
+    for (index, path) in split_paths.iter().enumerate() {
+        let ratio = if (index + phase).is_multiple_of(2) {
+            0.35
+        } else {
+            0.65
+        };
+        app.resize_split(path.clone(), ratio);
+    }
+    split_paths.len()
+}
+
+fn rebalance_profile_tab(app: &mut ScratchpadApp) -> usize {
+    app.tabs_mut()
+        .first_mut()
+        .map(rebalance_profile_tab_views)
+        .unwrap_or(0)
+}
+
+fn rebalance_profile_tab_views(tab: &mut WorkspaceTab) -> usize {
+    let _ = tab.rebalance_views_equally();
+    let _ = tab.rebalance_views_equally_for_axis(SplitAxis::Horizontal);
+    tab.views.len()
+}
+
+fn cycle_profile_views(app: &mut ScratchpadApp, view_ids: &[ViewId]) -> usize {
+    let mut activations = 0;
+    for &view_id in view_ids.iter().skip(1) {
+        app.activate_view(view_id);
+        activations += 1;
+    }
+    for &view_id in view_ids.iter().rev().skip(1) {
+        app.activate_view(view_id);
+        activations += 1;
+    }
+    activations
 }
 
 fn bouncing_indices(count: usize) -> Vec<usize> {

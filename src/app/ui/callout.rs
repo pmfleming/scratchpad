@@ -3,6 +3,7 @@ use crate::app::theme::{
     CAPTION_BUTTON_SIZE, CLOSE_BG, CLOSE_HOVER_BG, action_hover_bg, border, text_muted,
     text_primary,
 };
+use crate::app::ui::widget_ids;
 use eframe::egui;
 
 const CALLOUT_RADIUS: u8 = 14;
@@ -26,7 +27,7 @@ pub(crate) fn show_floating(
     width: f32,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) {
-    egui::Area::new(egui::Id::new(id))
+    egui::Area::new(widget_ids::global(id))
         .order(egui::Order::Foreground)
         .constrain(true)
         .movable(true)

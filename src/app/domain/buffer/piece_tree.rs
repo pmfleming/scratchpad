@@ -259,19 +259,7 @@ impl PieceTreeLite {
         }
 
         let address = self.find_leaf_for_char_offset(offset_chars);
-        let leaf = self
-            .root
-            .nodes
-            .get(address.node_index)?
-            .leaves
-            .get(address.leaf_index)?;
-        let offset_in_leaf = offset_chars.saturating_sub(address.leaf_start_char);
-        let piece_index = leaf
-            .piece_start_chars
-            .partition_point(|&char_start| char_start <= offset_in_leaf)
-            .saturating_sub(1);
-        let piece = leaf.pieces.get(piece_index)?;
-        let offset_in_piece = offset_in_leaf.saturating_sub(leaf.piece_start_chars[piece_index]);
+        let (piece, offset_in_piece) = self.piece_at_char_offset(address, offset_chars)?;
         let piece_text = self.piece_text(piece);
 
         if piece.is_ascii {
@@ -350,23 +338,13 @@ impl PieceTreeLite {
             };
 
             for leaf in node.leaves.iter().skip(leaf_start) {
-                let piece_skip = if is_first_leaf {
-                    is_first_leaf = false;
-                    let offset_in_leaf = safe_line.saturating_sub(current_line);
-                    if offset_in_leaf > 0 && !leaf.piece_start_newlines.is_empty() {
-                        let pi = leaf
-                            .piece_start_newlines
-                            .partition_point(|&n| n < offset_in_leaf)
-                            .saturating_sub(1);
-                        current_line += leaf.piece_start_newlines[pi];
-                        current_char += leaf.piece_start_chars[pi];
-                        pi
-                    } else {
-                        0
-                    }
-                } else {
-                    0
-                };
+                let piece_skip = first_leaf_piece_skip(
+                    leaf,
+                    &mut is_first_leaf,
+                    safe_line,
+                    &mut current_line,
+                    &mut current_char,
+                );
 
                 for piece in leaf.pieces.iter().skip(piece_skip) {
                     if current_line < safe_line && current_line + piece.newline_count < safe_line {
@@ -380,18 +358,15 @@ impl PieceTreeLite {
                         continue;
                     }
 
-                    for ch in self.piece_text(piece).chars() {
-                        if current_line == safe_line {
-                            if ch == '\n' {
-                                return (line_start, current_len);
-                            }
-                            current_len += 1;
-                        } else if ch == '\n' {
-                            current_line += 1;
-                            line_start = current_char + 1;
-                            current_len = 0;
-                        }
-                        current_char += 1;
+                    if let Some(line_info) = scan_piece_for_line_lookup(
+                        self.piece_text(piece),
+                        safe_line,
+                        &mut current_line,
+                        &mut line_start,
+                        &mut current_char,
+                        &mut current_len,
+                    ) {
+                        return line_info;
                     }
                 }
             }
@@ -517,6 +492,27 @@ impl PieceTreeLite {
             max_chars,
         )
     }
+
+    fn piece_at_char_offset(
+        &self,
+        address: LeafAddress,
+        offset_chars: usize,
+    ) -> Option<(&Piece, usize)> {
+        let leaf = self
+            .root
+            .nodes
+            .get(address.node_index)?
+            .leaves
+            .get(address.leaf_index)?;
+        let offset_in_leaf = offset_chars.saturating_sub(address.leaf_start_char);
+        let piece_index = leaf
+            .piece_start_chars
+            .partition_point(|&char_start| char_start <= offset_in_leaf)
+            .saturating_sub(1);
+        let piece = leaf.pieces.get(piece_index)?;
+        let offset_in_piece = offset_in_leaf.saturating_sub(leaf.piece_start_chars[piece_index]);
+        Some((piece, offset_in_piece))
+    }
 }
 
 fn previews_for_matches_in_contiguous_text(
@@ -533,40 +529,21 @@ fn previews_for_matches_in_contiguous_text(
     let mut cached_preview = String::new();
 
     for range in ranges {
-        while current_char < range.start && current_byte < text.len() {
-            let Some(ch) = text[current_byte..].chars().next() else {
-                break;
-            };
-            let next_byte = current_byte + ch.len_utf8();
-            if ch == '\n' {
-                line_number += 1;
-                line_start_char = current_char + 1;
-                line_start_byte = next_byte;
-            }
-            current_char += 1;
-            current_byte = next_byte;
-        }
-
-        if cached_line_start_byte != Some(line_start_byte) {
-            let line_slice = match text[line_start_byte..].find('\n') {
-                Some(relative_end) => &text[line_start_byte..line_start_byte + relative_end],
-                None => &text[line_start_byte..],
-            };
-            let mut bounded = String::new();
-            let mut chars = line_slice.chars();
-            for _ in 0..PREVIEW_MAX_CHARS {
-                let Some(ch) = chars.next() else {
-                    break;
-                };
-                bounded.push(ch);
-            }
-            let truncated = chars.next().is_some();
-            cached_preview = compact_preview(&bounded);
-            if truncated && !cached_preview.ends_with("...") {
-                cached_preview.push_str("...");
-            }
-            cached_line_start_byte = Some(line_start_byte);
-        }
+        advance_preview_cursor_to(
+            text,
+            range.start,
+            &mut current_char,
+            &mut current_byte,
+            &mut line_number,
+            &mut line_start_char,
+            &mut line_start_byte,
+        );
+        update_cached_line_preview(
+            text,
+            line_start_byte,
+            &mut cached_line_start_byte,
+            &mut cached_preview,
+        );
 
         previews.push((
             line_number,
@@ -576,6 +553,109 @@ fn previews_for_matches_in_contiguous_text(
     }
 
     previews
+}
+
+fn first_leaf_piece_skip(
+    leaf: &PieceTreeLeaf,
+    is_first_leaf: &mut bool,
+    safe_line: usize,
+    current_line: &mut usize,
+    current_char: &mut usize,
+) -> usize {
+    if !*is_first_leaf {
+        return 0;
+    }
+
+    *is_first_leaf = false;
+    let offset_in_leaf = safe_line.saturating_sub(*current_line);
+    if offset_in_leaf == 0 || leaf.piece_start_newlines.is_empty() {
+        return 0;
+    }
+
+    let piece_index = leaf
+        .piece_start_newlines
+        .partition_point(|&newline_count| newline_count < offset_in_leaf)
+        .saturating_sub(1);
+    *current_line += leaf.piece_start_newlines[piece_index];
+    *current_char += leaf.piece_start_chars[piece_index];
+    piece_index
+}
+
+fn scan_piece_for_line_lookup(
+    piece_text: &str,
+    safe_line: usize,
+    current_line: &mut usize,
+    line_start: &mut usize,
+    current_char: &mut usize,
+    current_len: &mut usize,
+) -> Option<(usize, usize)> {
+    for ch in piece_text.chars() {
+        if *current_line == safe_line {
+            if ch == '\n' {
+                return Some((*line_start, *current_len));
+            }
+            *current_len += 1;
+        } else if ch == '\n' {
+            *current_line += 1;
+            *line_start = *current_char + 1;
+            *current_len = 0;
+        }
+        *current_char += 1;
+    }
+    None
+}
+
+fn advance_preview_cursor_to(
+    text: &str,
+    target_char: usize,
+    current_char: &mut usize,
+    current_byte: &mut usize,
+    line_number: &mut usize,
+    line_start_char: &mut usize,
+    line_start_byte: &mut usize,
+) {
+    while *current_char < target_char && *current_byte < text.len() {
+        let Some(ch) = text[*current_byte..].chars().next() else {
+            break;
+        };
+        let next_byte = *current_byte + ch.len_utf8();
+        if ch == '\n' {
+            *line_number += 1;
+            *line_start_char = *current_char + 1;
+            *line_start_byte = next_byte;
+        }
+        *current_char += 1;
+        *current_byte = next_byte;
+    }
+}
+
+fn update_cached_line_preview(
+    text: &str,
+    line_start_byte: usize,
+    cached_line_start_byte: &mut Option<usize>,
+    cached_preview: &mut String,
+) {
+    if *cached_line_start_byte == Some(line_start_byte) {
+        return;
+    }
+
+    let line_slice = match text[line_start_byte..].find('\n') {
+        Some(relative_end) => &text[line_start_byte..line_start_byte + relative_end],
+        None => &text[line_start_byte..],
+    };
+    let mut bounded = String::new();
+    let mut chars = line_slice.chars();
+    for _ in 0..PREVIEW_MAX_CHARS {
+        let Some(ch) = chars.next() else {
+            break;
+        };
+        bounded.push(ch);
+    }
+    *cached_preview = compact_preview(&bounded);
+    if chars.next().is_some() && !cached_preview.ends_with("...") {
+        cached_preview.push_str("...");
+    }
+    *cached_line_start_byte = Some(line_start_byte);
 }
 
 #[cfg(test)]

@@ -5,6 +5,7 @@ use crate::app::commands::AppCommand;
 use crate::app::theme::{BUTTON_SIZE, TAB_BUTTON_WIDTH, action_bg, border};
 use crate::app::ui::tab_drag::{self, TabDropAxis, TabDropZone};
 use crate::app::ui::tab_strip::TabStripOutcome;
+use crate::app::ui::widget_ids;
 use eframe::egui::{self, Stroke};
 
 pub(super) fn show_vertical_tab_region(
@@ -47,8 +48,8 @@ fn show_vertical_tab_entries_above_new_tab(
 
 fn show_vertical_new_tab_action(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let width = ui.available_width().max(BUTTON_SIZE.x);
-    if ui
-        .add_sized(
+    if widget_ids::scope(ui, "vertical_new_tab", |ui| {
+        ui.add_sized(
             egui::vec2(width, BUTTON_SIZE.y),
             egui::Button::new(format!("{} New tab", egui_phosphor::regular::PLUS))
                 .fill(action_bg(ui))
@@ -56,6 +57,8 @@ fn show_vertical_new_tab_action(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         )
         .on_hover_text("New Tab")
         .clicked()
+    })
+    .inner
     {
         app.handle_command(AppCommand::NewTab);
     }
@@ -67,7 +70,7 @@ fn show_scrolling_vertical_tab_list(
     duplicate_name_counts: &DuplicateNameCounts,
     outcome: &mut TabStripOutcome,
 ) -> Option<TabDropZone> {
-    let scroll_area_id = ui.id().with("vertical_tab_list");
+    let scroll_area_id = widget_ids::local(ui, "vertical_tab_list");
     let entries = egui::ScrollArea::vertical()
         .id_salt(scroll_area_id)
         .auto_shrink([false, false])

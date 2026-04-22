@@ -11,6 +11,7 @@ use crate::app::ui::tab_drag;
 use crate::app::ui::tile_header::{
     self, SplitPreviewOverlay, TileAction, TileHeaderRequest, TileHeaderState,
 };
+use crate::app::ui::widget_ids;
 use eframe::egui;
 use egui_phosphor::regular::{
     ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_LEFT, ARROW_LINE_UP, ARROW_RIGHT,
@@ -23,6 +24,7 @@ const DEFAULT_SPLIT_RATIO: f32 = 0.5;
 const EDITOR_CONTEXT_MENU_WIDTH: f32 = 192.0;
 const EDITOR_CONTEXT_SUBMENU_WIDTH: f32 = 168.0;
 const EDITOR_CONTEXT_ICON_BUTTON_SIZE: egui::Vec2 = egui::vec2(38.0, 30.0);
+const EDITOR_CONTEXT_CARET_WIDTH: f32 = 28.0;
 
 struct TileBodyOutcome {
     changed: bool,
@@ -167,7 +169,7 @@ fn handle_tile_click(
 ) -> egui::Response {
     let tile_response = ui.interact(
         request.rect,
-        ui.make_persistent_id(("tile", request.tab_index, request.view_id)),
+        widget_ids::local(ui, ("tile", request.tab_index, request.view_id)),
         egui::Sense::click(),
     );
     if tile_response.secondary_clicked() && !request.is_active {
@@ -270,32 +272,38 @@ fn attach_editor_context_menu(
         }
 
         ui.separator();
-        ui.horizontal(|ui| {
-            let copied = icon_rail_button(ui, SCISSORS, "Cut", true).clicked()
-                && app.cut_selected_text_in_active_view().is_some_and(|text| {
-                    ui.copy_text(text);
-                    true
-                });
-            let copied_selection = icon_rail_button(ui, COPY, "Copy", true).clicked()
-                && app.copy_selected_text_in_active_view().is_some_and(|text| {
-                    ui.copy_text(text);
-                    true
-                });
-            let pasted = icon_rail_button(ui, CLIPBOARD_TEXT, "Paste", true)
-                .clicked()
-                .then(|| {
-                    app.request_focus_for_active_view();
-                    ui.ctx()
-                        .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
-                });
-            let selected_all = icon_rail_button(ui, SELECTION_ALL, "Select All", true).clicked()
-                && app.select_all_in_active_view();
+        ui.with_layout(
+            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+            |ui| {
+                ui.horizontal(|ui| {
+                    let copied = icon_rail_button(ui, SCISSORS, "Cut", true).clicked()
+                        && app.cut_selected_text_in_active_view().is_some_and(|text| {
+                            ui.copy_text(text);
+                            true
+                        });
+                    let copied_selection = icon_rail_button(ui, COPY, "Copy", true).clicked()
+                        && app.copy_selected_text_in_active_view().is_some_and(|text| {
+                            ui.copy_text(text);
+                            true
+                        });
+                    let pasted = icon_rail_button(ui, CLIPBOARD_TEXT, "Paste", true)
+                        .clicked()
+                        .then(|| {
+                            app.request_focus_for_active_view();
+                            ui.ctx()
+                                .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+                        });
+                    let selected_all = icon_rail_button(ui, SELECTION_ALL, "Select All", true)
+                        .clicked()
+                        && app.select_all_in_active_view();
 
-            if copied || copied_selection || pasted.is_some() || selected_all {
-                app.request_focus_for_active_view();
-                ui.close();
-            }
-        });
+                    if copied || copied_selection || pasted.is_some() || selected_all {
+                        app.request_focus_for_active_view();
+                        ui.close();
+                    }
+                });
+            },
+        );
     });
 }
 
@@ -304,8 +312,7 @@ fn menu_action_button(ui: &mut egui::Ui, label: &str, icon: Option<&str>, enable
         Some(icon) => format!("{icon}  {label}"),
         None => label.to_owned(),
     };
-    ui.scope(|ui| {
-        apply_context_menu_row_hover_style(ui);
+    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
         ui.add_enabled(
             enabled,
             egui::Button::new(egui::RichText::new(text).color(text_primary(ui)))
@@ -314,62 +321,23 @@ fn menu_action_button(ui: &mut egui::Ui, label: &str, icon: Option<&str>, enable
         )
         .clicked()
     })
-    .inner
 }
 
 fn split_menu_row(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
-    ui.scope(|ui| {
-        apply_context_menu_row_hover_style(ui);
-        let button = egui::Button::new(
-            egui::RichText::new(format!("{ARROWS_SPLIT}  Split")).color(text_primary(ui)),
-        )
-        .min_size(egui::vec2(EDITOR_CONTEXT_MENU_WIDTH, 28.0))
-        .stroke(egui::Stroke::NONE)
-        .right_text(egui::RichText::new(CARET_RIGHT).color(text_primary(ui)));
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
 
-        egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
-            ui.set_min_width(EDITOR_CONTEXT_SUBMENU_WIDTH);
-            ui.set_max_width(EDITOR_CONTEXT_SUBMENU_WIDTH);
+        let split_clicked = render_split_primary_button(ui);
+        render_split_submenu(ui, actions);
 
-            if split_menu_button(ui, "Split Left", ARROW_LEFT) {
-                actions.push(TileAction::Split {
-                    axis: SplitAxis::Vertical,
-                    new_view_first: true,
-                    ratio: DEFAULT_SPLIT_RATIO,
-                });
-                ui.close();
-            }
-            if split_menu_button(ui, "Split Right", ARROW_RIGHT) {
-                actions.push(TileAction::Split {
-                    axis: SplitAxis::Vertical,
-                    new_view_first: false,
-                    ratio: DEFAULT_SPLIT_RATIO,
-                });
-                ui.close();
-            }
-            if split_menu_button(ui, "Split Up", ARROW_UP) {
-                actions.push(TileAction::Split {
-                    axis: SplitAxis::Horizontal,
-                    new_view_first: true,
-                    ratio: DEFAULT_SPLIT_RATIO,
-                });
-                ui.close();
-            }
-            if split_menu_button(ui, "Split Down", ARROW_DOWN) {
-                actions.push(TileAction::Split {
-                    axis: SplitAxis::Horizontal,
-                    new_view_first: false,
-                    ratio: DEFAULT_SPLIT_RATIO,
-                });
-                ui.close();
-            }
-        });
+        if split_clicked {
+            queue_split_action(actions, SplitDirection::Right);
+        }
     });
 }
 
 fn split_menu_button(ui: &mut egui::Ui, label: &str, icon: &str) -> bool {
-    ui.scope(|ui| {
-        apply_context_menu_row_hover_style(ui);
+    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
         ui.add(
             egui::Button::new(
                 egui::RichText::new(format!("{icon}  {label}")).color(text_primary(ui)),
@@ -379,7 +347,74 @@ fn split_menu_button(ui: &mut egui::Ui, label: &str, icon: &str) -> bool {
         )
         .clicked()
     })
-    .inner
+}
+
+fn render_split_primary_button(ui: &mut egui::Ui) -> bool {
+    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
+        let response = ui.add(
+            egui::Button::new("")
+                .min_size(egui::vec2(
+                    EDITOR_CONTEXT_MENU_WIDTH - EDITOR_CONTEXT_CARET_WIDTH,
+                    28.0,
+                ))
+                .stroke(egui::Stroke::NONE),
+        );
+        ui.painter().text(
+            response.rect.left_center() + egui::vec2(10.0, 0.0),
+            egui::Align2::LEFT_CENTER,
+            format!("{ARROWS_SPLIT}  Split"),
+            egui::TextStyle::Button.resolve(ui.style()),
+            text_primary(ui),
+        );
+        response.clicked()
+    })
+}
+
+fn render_split_submenu(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
+    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
+        let button = egui::Button::new(egui::RichText::new(CARET_RIGHT).color(text_primary(ui)))
+            .min_size(egui::vec2(EDITOR_CONTEXT_CARET_WIDTH, 28.0))
+            .stroke(egui::Stroke::NONE);
+
+        egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
+            ui.set_min_width(EDITOR_CONTEXT_SUBMENU_WIDTH);
+            ui.set_max_width(EDITOR_CONTEXT_SUBMENU_WIDTH);
+
+            for (label, icon, direction) in [
+                ("Split Left", ARROW_LEFT, SplitDirection::Left),
+                ("Split Right", ARROW_RIGHT, SplitDirection::Right),
+                ("Split Up", ARROW_UP, SplitDirection::Up),
+                ("Split Down", ARROW_DOWN, SplitDirection::Down),
+            ] {
+                if split_menu_button(ui, label, icon) {
+                    queue_split_action(actions, direction);
+                    ui.close();
+                }
+            }
+        });
+    });
+}
+
+#[derive(Clone, Copy)]
+enum SplitDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+fn queue_split_action(actions: &mut Vec<TileAction>, direction: SplitDirection) {
+    let (axis, new_view_first) = match direction {
+        SplitDirection::Left => (SplitAxis::Vertical, true),
+        SplitDirection::Right => (SplitAxis::Vertical, false),
+        SplitDirection::Up => (SplitAxis::Horizontal, true),
+        SplitDirection::Down => (SplitAxis::Horizontal, false),
+    };
+    actions.push(TileAction::Split {
+        axis,
+        new_view_first,
+        ratio: DEFAULT_SPLIT_RATIO,
+    });
 }
 
 fn apply_context_menu_row_hover_style(ui: &mut egui::Ui) {
@@ -400,19 +435,7 @@ fn apply_context_menu_row_hover_style(ui: &mut egui::Ui) {
 }
 
 fn icon_rail_button(ui: &mut egui::Ui, icon: &str, tooltip: &str, enabled: bool) -> egui::Response {
-    ui.scope(|ui| {
-        let idle_bg = action_bg(ui);
-        let hover_bg = action_hover_bg(ui);
-        let visuals = ui.visuals_mut();
-        visuals.widgets.inactive.bg_fill = idle_bg;
-        visuals.widgets.inactive.weak_bg_fill = idle_bg;
-        visuals.widgets.hovered.bg_fill = hover_bg;
-        visuals.widgets.hovered.weak_bg_fill = hover_bg;
-        visuals.widgets.active.bg_fill = hover_bg;
-        visuals.widgets.active.weak_bg_fill = hover_bg;
-        visuals.widgets.open.bg_fill = hover_bg;
-        visuals.widgets.open.weak_bg_fill = hover_bg;
-
+    with_visual_overrides(ui, apply_icon_rail_button_style, |ui| {
         let button = egui::Button::new(
             egui::RichText::new(icon)
                 .font(egui::FontId::proportional(17.0))
@@ -424,7 +447,32 @@ fn icon_rail_button(ui: &mut egui::Ui, icon: &str, tooltip: &str, enabled: bool)
 
         ui.add_enabled(enabled, button).on_hover_text(tooltip)
     })
-    .inner
+}
+
+fn apply_icon_rail_button_style(ui: &mut egui::Ui) {
+    let idle_bg = action_bg(ui);
+    let hover_bg = action_hover_bg(ui);
+    let visuals = ui.visuals_mut();
+    visuals.widgets.inactive.bg_fill = idle_bg;
+    visuals.widgets.inactive.weak_bg_fill = idle_bg;
+    visuals.widgets.hovered.bg_fill = hover_bg;
+    visuals.widgets.hovered.weak_bg_fill = hover_bg;
+    visuals.widgets.active.bg_fill = hover_bg;
+    visuals.widgets.active.weak_bg_fill = hover_bg;
+    visuals.widgets.open.bg_fill = hover_bg;
+    visuals.widgets.open.weak_bg_fill = hover_bg;
+}
+
+fn with_visual_overrides<R>(
+    ui: &mut egui::Ui,
+    configure: impl FnOnce(&mut egui::Ui),
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    let previous_visuals = ui.visuals().clone();
+    configure(ui);
+    let result = add_contents(ui);
+    *ui.visuals_mut() = previous_visuals;
+    result
 }
 
 fn paint_tile_frame(
