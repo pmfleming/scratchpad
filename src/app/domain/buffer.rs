@@ -1,6 +1,7 @@
 mod analysis;
 mod document;
 mod piece_tree;
+mod snapshot;
 mod state;
 
 pub(crate) use analysis::{
@@ -16,12 +17,12 @@ pub use piece_tree::{
     PieceTreeCharPosition, PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLineInfo, PieceTreeLite,
     PieceTreeMetrics, PieceTreeSlice, PieceTreeSpan,
 };
+pub use snapshot::DocumentSnapshot;
 pub use state::{
     BufferFreshness, BufferId, BufferState, BufferViewStatus, DiskFileState, RestoredBufferState,
 };
 
 use std::ops::Range;
-use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RenderedTextWindow {
@@ -36,18 +37,22 @@ pub struct RenderedTextWindow {
 
 #[derive(Clone)]
 pub struct RenderedLayout {
-    pub galley: Arc<eframe::egui::Galley>,
+    content_height: f32,
+    row_tops: Vec<f32>,
     pub row_line_numbers: Vec<Option<usize>>,
     row_char_ranges: Vec<Range<usize>>,
     pub visible_text: Option<RenderedTextWindow>,
 }
 
 impl RenderedLayout {
-    pub fn from_galley(galley: Arc<eframe::egui::Galley>) -> Self {
+    pub fn from_galley(galley: std::sync::Arc<eframe::egui::Galley>) -> Self {
+        let content_height = galley.rect.height();
+        let row_tops = row_tops_for_galley(&galley);
         let row_line_numbers = row_line_numbers_for_galley(&galley);
         let row_char_ranges = row_char_ranges_for_galley(&galley);
         Self {
-            galley,
+            content_height,
+            row_tops,
             row_line_numbers,
             row_char_ranges,
             visible_text: None,
@@ -60,6 +65,14 @@ impl RenderedLayout {
 
     pub fn row_count(&self) -> usize {
         self.row_char_ranges.len()
+    }
+
+    pub fn content_height(&self) -> f32 {
+        self.content_height
+    }
+
+    pub fn row_top(&self, row_index: usize) -> Option<f32> {
+        self.row_tops.get(row_index).copied()
     }
 
     pub fn visible_row_range(&self) -> Range<usize> {
@@ -116,6 +129,10 @@ impl RenderedLayout {
     }
 }
 
+fn row_tops_for_galley(galley: &eframe::egui::Galley) -> Vec<f32> {
+    galley.rows.iter().map(|row| row.pos.y).collect()
+}
+
 fn row_line_numbers_for_galley(galley: &eframe::egui::Galley) -> Vec<Option<usize>> {
     let mut current_line = 1usize;
     let mut starts_new_line = true;
@@ -149,7 +166,6 @@ fn row_char_ranges_for_galley(galley: &eframe::egui::Galley) -> Vec<Range<usize>
 mod tests {
     use super::{RenderedLayout, RenderedTextWindow};
     use eframe::egui;
-    use std::sync::Arc;
 
     fn test_layout(line_count: usize) -> RenderedLayout {
         let ctx = egui::Context::default();
@@ -167,7 +183,7 @@ mod tests {
                     400.0,
                 ))
             });
-            layout = Some(RenderedLayout::from_galley(Arc::new((*galley).clone())));
+            layout = Some(RenderedLayout::from_galley(galley));
         });
         layout.expect("layout should be captured")
     }

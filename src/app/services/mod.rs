@@ -1,3 +1,4 @@
+pub mod background_io;
 pub mod file_controller;
 pub mod file_service;
 pub mod manual_files;

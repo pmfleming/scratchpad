@@ -54,6 +54,7 @@ fn open_user_manual_opens_a_normal_markdown_file() {
     app.user_manual_path = manual_path.clone();
 
     app.handle_command(AppCommand::OpenUserManual);
+    app.wait_for_background_io_idle();
 
     assert_eq!(app.tabs().len(), 2);
     let buffer = app.tabs()[app.active_tab_index()].active_buffer();
@@ -63,6 +64,7 @@ fn open_user_manual_opens_a_normal_markdown_file() {
     assert!(!buffer.is_settings_file);
 
     app.handle_command(AppCommand::OpenUserManual);
+    app.wait_for_background_io_idle();
 
     assert_eq!(app.tabs().len(), 2);
     assert_eq!(
@@ -97,6 +99,7 @@ fn open_dirty_settings_file(
 ) -> usize {
     app.handle_command(AppCommand::OpenSettings);
     app.open_settings_file_tab();
+    app.wait_for_background_io_idle();
     let settings_tab_index = app.active_tab_index();
     app.tabs_mut()[settings_tab_index]
         .active_buffer_mut()
@@ -478,6 +481,7 @@ fn opening_settings_file_keeps_settings_tab_open() {
     let settings_path = app.settings_path().to_path_buf();
 
     app.open_settings_file_tab();
+    app.wait_for_background_io_idle();
 
     assert!(!app.showing_settings());
     assert_eq!(app.settings_slot_index(), Some(settings_slot));
@@ -527,6 +531,7 @@ fn activating_view_away_from_settings_file_applies_toml_edits() {
     let mut app = test_app();
     app.handle_command(AppCommand::OpenSettings);
     app.open_settings_file_tab();
+    app.wait_for_background_io_idle();
     let settings_tab_index = app.active_tab_index();
     let settings_view_id = app.tabs()[settings_tab_index].active_view_id;
     let normal_view_id = app.tabs_mut()[settings_tab_index]
@@ -566,6 +571,7 @@ fn editing_other_buffer_in_settings_workspace_does_not_mark_settings_toml_pendin
     let mut app = test_app();
     app.handle_command(AppCommand::OpenSettings);
     app.open_settings_file_tab();
+    app.wait_for_background_io_idle();
     let settings_path = app.settings_path().to_path_buf();
     let settings_tab_index = app.active_tab_index();
     app.tabs_mut()[settings_tab_index]
@@ -664,6 +670,7 @@ fn activating_clean_tab_reloads_newer_disk_content() {
     app.handle_command(AppCommand::ActivateTab {
         index: first_tab_index,
     });
+    app.wait_for_background_io_idle();
 
     let buffer = app.tabs()[app.active_tab_index()].active_buffer();
     assert_eq!(buffer.text(), "alpha changed on disk\n");
@@ -707,6 +714,7 @@ fn startup_restore_conflict_can_open_disk_version_for_comparison() {
     assert_eq!(restored.startup_restore_conflict_count(), 1);
 
     assert!(restored.open_disk_version_for_current_startup_restore_conflict());
+    restored.wait_for_background_io_idle();
     assert_eq!(restored.startup_restore_conflict_count(), 0);
     let compare_tab_index = restored.active_tab_index();
     assert_eq!(restored.tabs().len(), 3);

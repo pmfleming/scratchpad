@@ -115,6 +115,123 @@ pub(super) fn apply_cursor_movement(
     Some(CursorRange::one(new_primary_char))
 }
 
+pub(super) fn apply_cursor_movement_unwrapped(
+    cursor: &CursorRange,
+    key: egui::Key,
+    modifiers: &egui::Modifiers,
+    total_chars: usize,
+    piece_tree: &PieceTreeLite,
+) -> Option<CursorRange> {
+    let current = cursor.primary.index.min(total_chars);
+    let new_index = match key {
+        egui::Key::ArrowLeft => {
+            if modifiers.alt || modifiers.ctrl {
+                word_boundary::find_word_boundary_left(piece_tree, current)
+            } else {
+                current.saturating_sub(1)
+            }
+        }
+        egui::Key::ArrowRight => {
+            if modifiers.alt || modifiers.ctrl {
+                word_boundary::find_word_boundary_right(piece_tree, current)
+            } else {
+                (current + 1).min(total_chars)
+            }
+        }
+        egui::Key::ArrowUp => {
+            if modifiers.command {
+                0
+            } else {
+                move_vertically(piece_tree, current, -1)
+            }
+        }
+        egui::Key::ArrowDown => {
+            if modifiers.command {
+                total_chars
+            } else {
+                move_vertically(piece_tree, current, 1)
+            }
+        }
+        egui::Key::Home => {
+            if modifiers.command {
+                0
+            } else {
+                current_line(piece_tree, current).start_char
+            }
+        }
+        egui::Key::End => {
+            if modifiers.command {
+                total_chars
+            } else {
+                let info = current_line(piece_tree, current);
+                info.start_char + info.char_len
+            }
+        }
+        egui::Key::PageUp => {
+            if modifiers.command {
+                0
+            } else {
+                move_vertically(piece_tree, current, -(PAGE_JUMP_ROWS as isize))
+            }
+        }
+        egui::Key::PageDown => {
+            if modifiers.command {
+                total_chars
+            } else {
+                move_vertically(piece_tree, current, PAGE_JUMP_ROWS as isize)
+            }
+        }
+        _ => return None,
+    };
+
+    let new_primary = CharCursor {
+        index: new_index.min(total_chars),
+        prefer_next_row: false,
+    };
+
+    if modifiers.shift {
+        return Some(CursorRange {
+            primary: new_primary,
+            secondary: cursor.secondary,
+        });
+    }
+
+    if !cursor.is_empty()
+        && (key == egui::Key::ArrowLeft || key == egui::Key::ArrowRight)
+        && !modifiers.alt
+        && !modifiers.ctrl
+        && !modifiers.command
+    {
+        let (start, end) = cursor.sorted_indices();
+        return Some(CursorRange::one(CharCursor::new(
+            if key == egui::Key::ArrowLeft {
+                start
+            } else {
+                end
+            },
+        )));
+    }
+
+    Some(CursorRange::one(new_primary))
+}
+
+fn move_vertically(piece_tree: &PieceTreeLite, current: usize, delta_lines: isize) -> usize {
+    let position = piece_tree.char_position(current);
+    let current_line = position.line_index as isize;
+    let max_line = piece_tree.metrics().newlines as isize;
+    let target_line = (current_line + delta_lines).clamp(0, max_line) as usize;
+    let target_info = piece_tree.line_info(target_line);
+    target_info.start_char + position.column_index.min(target_info.char_len)
+}
+
+fn current_line(
+    piece_tree: &PieceTreeLite,
+    current: usize,
+) -> crate::app::domain::buffer::PieceTreeLineInfo {
+    let position = piece_tree.char_position(current);
+    piece_tree.line_info(position.line_index)
+}
+
 fn clamp_char_cursor(
     galley: &egui::Galley,
     total_chars: usize,
@@ -129,7 +246,7 @@ fn clamp_char_cursor(
 
 #[cfg(test)]
 mod tests {
-    use super::apply_cursor_movement;
+    use super::{apply_cursor_movement, apply_cursor_movement_unwrapped};
     use crate::app::domain::buffer::PieceTreeLite;
     use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
     use eframe::egui;
@@ -172,5 +289,24 @@ mod tests {
 
         assert_eq!(moved.primary.index, 2);
         assert_eq!(moved.secondary.index, 2);
+    }
+
+    #[test]
+    fn unwrapped_vertical_movement_preserves_column_across_lines() {
+        let text = "abcd\nxy\nmnop";
+        let piece_tree = PieceTreeLite::from_string(text.to_owned());
+        let cursor = CursorRange::one(CharCursor::new(7));
+
+        let moved = apply_cursor_movement_unwrapped(
+            &cursor,
+            egui::Key::ArrowDown,
+            &egui::Modifiers::default(),
+            piece_tree.len_chars(),
+            &piece_tree,
+        )
+        .expect("down movement");
+
+        assert_eq!(moved.primary.index, 10);
+        assert_eq!(moved.secondary.index, 10);
     }
 }

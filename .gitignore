@@ -1,5 +1,6 @@
 /target/
 /target-codex/
+/target-codex-tests/
 /target-tests/
 /target_test/
 /dist/

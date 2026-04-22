@@ -117,6 +117,17 @@ mod tests {
     }
 
     #[test]
+    fn settings_tab_close_gesture_closes_unfocused_settings_surface() {
+        let mut outcome = TabStripOutcome::default();
+
+        apply_settings_tab_interaction(&mut outcome, false, true, false);
+
+        assert!(outcome.close_settings);
+        assert!(!outcome.activate_settings);
+        assert!(outcome.close_requested_tab.is_none());
+    }
+
+    #[test]
     fn clicking_settings_tab_activates_settings_surface() {
         let mut outcome = TabStripOutcome::default();
 

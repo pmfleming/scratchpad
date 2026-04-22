@@ -20,24 +20,24 @@ fn classify(ch: char) -> CharClass {
 /// Move left to the start of the previous word, skipping whitespace first then
 /// stopping at a character-class transition.
 pub(super) fn find_word_boundary_left(piece_tree: &PieceTreeLite, index: usize) -> usize {
-    if index == 0 {
-        return 0;
-    }
-    let text = piece_tree.extract_range(0..index);
-    let chars: Vec<char> = text.chars().collect();
-    let mut pos = chars.len();
-
-    // Skip trailing whitespace
-    while pos > 0 && classify(chars[pos - 1]) == CharClass::Whitespace {
+    let mut pos = index.min(piece_tree.len_chars());
+    while pos > 0
+        && piece_tree
+            .char_at(pos - 1)
+            .is_some_and(|ch| classify(ch) == CharClass::Whitespace)
+    {
         pos -= 1;
     }
     if pos == 0 {
         return 0;
     }
 
-    // Skip run of same class
-    let class = classify(chars[pos - 1]);
-    while pos > 0 && classify(chars[pos - 1]) == class {
+    let class = classify(piece_tree.char_at(pos - 1).unwrap_or_default());
+    while pos > 0
+        && piece_tree
+            .char_at(pos - 1)
+            .is_some_and(|ch| classify(ch) == class)
+    {
         pos -= 1;
     }
     pos
@@ -47,40 +47,42 @@ pub(super) fn find_word_boundary_left(piece_tree: &PieceTreeLite, index: usize) 
 /// the start of the next word.
 pub(super) fn find_word_boundary_right(piece_tree: &PieceTreeLite, index: usize) -> usize {
     let total = piece_tree.len_chars();
-    if index >= total {
+    let mut pos = index.min(total);
+    if pos >= total {
         return total;
     }
-    let text = piece_tree.extract_range(index..total);
-    let chars: Vec<char> = text.chars().collect();
-    let mut pos = 0;
 
-    // Skip run of same class as current char
-    let class = classify(chars[pos]);
-    while pos < chars.len() && classify(chars[pos]) == class {
+    let class = classify(piece_tree.char_at(pos).unwrap_or_default());
+    while pos < total
+        && piece_tree
+            .char_at(pos)
+            .is_some_and(|ch| classify(ch) == class)
+    {
         pos += 1;
     }
 
-    // Skip whitespace after the word
-    while pos < chars.len() && classify(chars[pos]) == CharClass::Whitespace {
+    while pos < total
+        && piece_tree
+            .char_at(pos)
+            .is_some_and(|ch| classify(ch) == CharClass::Whitespace)
+    {
         pos += 1;
     }
-    index + pos
+    pos
 }
 
 /// Find the start of the word surrounding `index` (for double-click selection).
 pub(super) fn word_start(piece_tree: &PieceTreeLite, index: usize) -> usize {
-    if index == 0 {
-        return 0;
-    }
-    let text = piece_tree.extract_range(0..index);
-    let chars: Vec<char> = text.chars().collect();
-    let mut pos = chars.len();
+    let mut pos = index.min(piece_tree.len_chars());
     if pos == 0 {
         return 0;
     }
-
-    let class = classify(chars[pos - 1]);
-    while pos > 0 && classify(chars[pos - 1]) == class {
+    let class = classify(piece_tree.char_at(pos - 1).unwrap_or_default());
+    while pos > 0
+        && piece_tree
+            .char_at(pos - 1)
+            .is_some_and(|ch| classify(ch) == class)
+    {
         pos -= 1;
     }
     pos
@@ -89,19 +91,17 @@ pub(super) fn word_start(piece_tree: &PieceTreeLite, index: usize) -> usize {
 /// Find the end of the word surrounding `index` (for double-click selection).
 pub(super) fn word_end(piece_tree: &PieceTreeLite, index: usize) -> usize {
     let total = piece_tree.len_chars();
-    if index >= total {
+    let mut pos = index.min(total);
+    if pos >= total {
         return total;
     }
-    let text = piece_tree.extract_range(index..total);
-    let chars: Vec<char> = text.chars().collect();
-    let mut pos = 0;
-    if chars.is_empty() {
-        return index;
-    }
-
-    let class = classify(chars[0]);
-    while pos < chars.len() && classify(chars[pos]) == class {
+    let class = classify(piece_tree.char_at(pos).unwrap_or_default());
+    while pos < total
+        && piece_tree
+            .char_at(pos)
+            .is_some_and(|ch| classify(ch) == class)
+    {
         pos += 1;
     }
-    index + pos
+    pos
 }

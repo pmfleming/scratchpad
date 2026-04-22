@@ -1,11 +1,9 @@
 use super::{
-    BufferTextMetadata, EncodingSource, RenderedTextWindow, TextArtifactSummary, TextDocument,
-    TextFormatMetadata, TextReplacementError, TextReplacements, buffer_text_metadata,
+    BufferTextMetadata, DocumentSnapshot, EncodingSource, RenderedTextWindow, TextArtifactSummary,
+    TextDocument, TextFormatMetadata, TextReplacementError, TextReplacements, buffer_text_metadata,
     buffer_text_metadata_from_piece_tree,
 };
 use crate::app::ui::editor_content::native_editor::CursorRange;
-use eframe::egui;
-use std::cell::RefCell;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -33,7 +31,6 @@ pub struct BufferState {
     pub active_selection: Option<Range<usize>>,
     pub has_non_compliant_characters: bool,
     encoding_compliance_stale: bool,
-    cached_full_text: RefCell<Option<(u64, String)>>,
 }
 
 struct BufferBuildState {
@@ -164,6 +161,10 @@ impl BufferState {
         self.document.piece_tree().preview_for_match(range)
     }
 
+    pub fn document_snapshot(&self) -> DocumentSnapshot {
+        self.document.snapshot()
+    }
+
     pub fn view_status(
         &self,
         cursor_range: Option<CursorRange>,
@@ -198,29 +199,6 @@ impl BufferState {
             visible_line_start,
             visible_line_end,
         }
-    }
-
-    pub fn search_text_snapshot(&self, range: Option<Range<usize>>) -> (String, usize) {
-        let Some(range) = range else {
-            let current_gen = self.document.piece_tree().generation();
-            {
-                let cache = self.cached_full_text.borrow();
-                if let Some((cached_gen, ref text)) = *cache
-                    && cached_gen == current_gen
-                {
-                    return (text.clone(), 0);
-                }
-            }
-            let text = self.document.extract_text();
-            *self.cached_full_text.borrow_mut() = Some((current_gen, text.clone()));
-            return (text, 0);
-        };
-
-        let normalized = self.document.piece_tree().normalize_char_range(range);
-        (
-            self.document.piece_tree().extract_range(normalized.clone()),
-            normalized.start,
-        )
     }
 
     pub fn visible_text_window(
@@ -308,8 +286,8 @@ impl BufferState {
     pub(crate) fn replace_char_ranges_with_undo(
         &mut self,
         replacements: TextReplacements<'_>,
-        previous_selection: egui::text::CCursorRange,
-        next_selection: egui::text::CCursorRange,
+        previous_selection: CursorRange,
+        next_selection: CursorRange,
     ) -> Result<(), TextReplacementError> {
         self.document.replace_char_ranges_with_undo(
             replacements,
@@ -320,26 +298,14 @@ impl BufferState {
         Ok(())
     }
 
-    pub fn undo_last_text_operation(&mut self) -> Option<egui::text::CCursorRange> {
+    pub fn undo_last_text_operation(&mut self) -> Option<CursorRange> {
         let selection = self.document.undo_last_operation()?;
         self.refresh_text_metadata();
         Some(selection)
     }
 
-    pub fn redo_last_text_operation(&mut self) -> Option<egui::text::CCursorRange> {
+    pub fn redo_last_text_operation(&mut self) -> Option<CursorRange> {
         let selection = self.document.redo_last_operation()?;
-        self.refresh_text_metadata();
-        Some(selection)
-    }
-
-    pub fn undo_last_text_operation_native(&mut self) -> Option<CursorRange> {
-        let selection = self.document.undo_operation_native()?;
-        self.refresh_text_metadata();
-        Some(selection)
-    }
-
-    pub fn redo_last_text_operation_native(&mut self) -> Option<CursorRange> {
-        let selection = self.document.redo_operation_native()?;
         self.refresh_text_metadata();
         Some(selection)
     }
@@ -444,7 +410,6 @@ impl BufferState {
             active_selection: None,
             has_non_compliant_characters: text_metadata.has_non_compliant_characters,
             encoding_compliance_stale: false,
-            cached_full_text: RefCell::new(None),
         }
     }
 

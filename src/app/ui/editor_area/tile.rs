@@ -140,6 +140,8 @@ fn render_tile_body(
         restore_previous_layout_if_needed(tab, request.view_id, previous_layout);
         if request_focus {
             app.consume_focus_request(request.view_id);
+        } else if outcome.request_editor_focus {
+            app.request_focus_for_view(request.view_id);
         }
 
         TileBodyOutcome {
@@ -512,6 +514,7 @@ fn missing_editor_content_outcome() -> EditorContentOutcome {
     EditorContentOutcome {
         changed: false,
         focused: false,
+        request_editor_focus: false,
         interaction_response: None,
     }
 }

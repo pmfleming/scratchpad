@@ -1,4 +1,6 @@
-use crate::app::domain::{DiskFileState, EncodingSource, TextArtifactSummary, TextFormatMetadata};
+use crate::app::domain::{
+    DiskFileState, DocumentSnapshot, EncodingSource, TextArtifactSummary, TextFormatMetadata,
+};
 use chardetng::EncodingDetector;
 use encoding_rs::Encoding;
 use encoding_rs_io::DecodeReaderBytesBuilder;
@@ -202,6 +204,15 @@ impl FileService {
         std::fs::write(path, bytes)
     }
 
+    pub fn write_snapshot_with_format(
+        path: &Path,
+        snapshot: &DocumentSnapshot,
+        format: &TextFormatMetadata,
+    ) -> io::Result<()> {
+        let content = snapshot.extract_text();
+        Self::write_file_with_format(path, &content, format)
+    }
+
     pub fn write_file_with_bom(
         path: &Path,
         content: &str,
@@ -322,4 +333,32 @@ fn is_probably_binary(prefix: &[u8], has_bom: bool) -> bool {
     }
 
     prefix.contains(&0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FileService;
+    use crate::app::domain::TextDocument;
+
+    #[test]
+    fn writing_snapshot_uses_captured_revision_text() {
+        let tempdir = tempfile::tempdir().expect("create tempdir");
+        let path = tempdir.path().join("snapshot.txt");
+        let mut document = TextDocument::new("before".to_owned());
+        let snapshot = document.snapshot();
+
+        document.insert_direct(6, " after");
+
+        FileService::write_snapshot_with_format(
+            &path,
+            &snapshot,
+            &crate::app::domain::TextFormatMetadata::utf8_for_new_file("before"),
+        )
+        .expect("write snapshot");
+
+        assert_eq!(
+            std::fs::read_to_string(path).expect("read written file"),
+            "before"
+        );
+    }
 }

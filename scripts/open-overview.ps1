@@ -132,13 +132,110 @@ function New-OverviewTask {
     param(
         [string]$Title,
         [string]$Label,
-        [string[]]$Arguments
+        [string[]]$Arguments,
+        [string]$ParallelGroup = ""
     )
 
     return [pscustomobject]@{
         Title = $Title
         Label = $Label
         Arguments = $Arguments
+        ParallelGroup = $ParallelGroup
+    }
+}
+
+function Get-ParallelGroupTitle {
+    param(
+        [string]$ParallelGroup,
+        [int]$TaskCount
+    )
+
+    switch ($ParallelGroup) {
+        "static-analysis" {
+            if ($TaskCount -eq 1) {
+                return "Generating static analysis data"
+            }
+
+            return "Generating static analysis data in parallel"
+        }
+        default {
+            if ($TaskCount -eq 1) {
+                return "Running parallelizable overview task"
+            }
+
+            return "Running parallelizable overview tasks"
+        }
+    }
+}
+
+function Invoke-StepCommandsParallel {
+    param(
+        [string]$BatchLabel,
+        [object[]]$Tasks
+    )
+
+    if ($Tasks.Count -eq 0) {
+        return
+    }
+
+    $labels = $Tasks | ForEach-Object { $_.Label }
+    Write-Host "Running in parallel: $($labels -join ', ')" -ForegroundColor DarkGray
+
+    $jobs = @()
+    foreach ($task in $Tasks) {
+        Write-Host "Starting: $($task.Label)" -ForegroundColor DarkGray
+        $jobs += Start-Job -Name $task.Label -ScriptBlock {
+            param(
+                [string]$PythonPath,
+                [string]$RepoPath,
+                [string]$TaskLabel,
+                [string[]]$TaskArguments
+            )
+
+            Set-StrictMode -Version Latest
+            $ErrorActionPreference = "Stop"
+
+            Push-Location $RepoPath
+            try {
+                & $PythonPath @TaskArguments 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    throw "'$TaskLabel' failed with exit code $LASTEXITCODE."
+                }
+            }
+            finally {
+                Pop-Location
+            }
+        } -ArgumentList $python, $repoRoot, $task.Label, $task.Arguments
+    }
+
+    try {
+        Wait-Job -Job $jobs | Out-Null
+
+        $failures = @()
+        foreach ($job in $jobs) {
+            $jobOutput = @(Receive-Job -Job $job)
+            if ($jobOutput.Count -gt 0) {
+                Write-Host ""
+                Write-Host "Output from $($job.Name):" -ForegroundColor DarkGray
+                $jobOutput | ForEach-Object { Write-Host $_ }
+            }
+
+            if ($job.State -ne "Completed") {
+                $reason = $job.ChildJobs[0].JobStateInfo.Reason
+                if ($null -ne $reason) {
+                    $failures += "'$($job.Name)' failed: $reason"
+                } else {
+                    $failures += "'$($job.Name)' did not complete successfully."
+                }
+            }
+        }
+
+        if ($failures.Count -gt 0) {
+            throw ($failures -join [Environment]::NewLine)
+        }
+    }
+    finally {
+        $jobs | Remove-Job -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -152,9 +249,9 @@ function Get-RefreshTasks {
         (New-OverviewTask -Title "Generating search speed data" -Label "search_speed" -Arguments @("scripts/search_speed.py", "--mode", "visibility")),
         (New-OverviewTask -Title "Generating capacity data" -Label "capacity_report" -Arguments @("scripts/capacity_report.py", "--mode", "visibility")),
         (New-OverviewTask -Title "Generating resource profile data" -Label "resource_profiles" -Arguments @("scripts/resource_profiles.py", "--mode", "visibility")),
-        (New-OverviewTask -Title "Generating hotspots data" -Label "hotspots" -Arguments @("scripts/hotspots.py", "--mode", "visibility", "--paths", "src", "--scope", "all")),
-        (New-OverviewTask -Title "Generating clone alert data" -Label "clone_alert" -Arguments @("scripts/clone_alert.py", "--mode", "visibility", "--paths", "src")),
-        (New-OverviewTask -Title "Generating architecture map data" -Label "map" -Arguments @("scripts/map.py", "--mode", "visibility"))
+        (New-OverviewTask -Title "Generating hotspots data" -Label "hotspots" -Arguments @("scripts/hotspots.py", "--mode", "visibility", "--paths", "src", "--scope", "all") -ParallelGroup "static-analysis"),
+        (New-OverviewTask -Title "Generating clone alert data" -Label "clone_alert" -Arguments @("scripts/clone_alert.py", "--mode", "visibility", "--paths", "src") -ParallelGroup "static-analysis"),
+        (New-OverviewTask -Title "Generating architecture map data" -Label "map" -Arguments @("scripts/map.py", "--mode", "visibility") -ParallelGroup "static-analysis")
     )
 
     if ($IncludeFlamegraphs) {
@@ -210,9 +307,23 @@ try {
         )
     }
 
+    $taskStepCount = 0
+    $seenParallelGroups = @{}
+    foreach ($task in $tasks) {
+        if ([string]::IsNullOrWhiteSpace($task.ParallelGroup)) {
+            $taskStepCount++
+            continue
+        }
+
+        if (-not $seenParallelGroups.ContainsKey($task.ParallelGroup)) {
+            $seenParallelGroups[$task.ParallelGroup] = $true
+            $taskStepCount++
+        }
+    }
+
     $totalSteps = 2
     if ($tasks.Count -gt 0) {
-        $totalSteps += 1 + $tasks.Count
+        $totalSteps += 1 + $taskStepCount
     }
     $stepNumber = 1
 
@@ -224,9 +335,30 @@ try {
         Write-Host "Update mode: $updateMode" -ForegroundColor Green
         $stepNumber++
 
-        foreach ($task in $tasks) {
-            Write-Step -Number $stepNumber -Total $totalSteps -Title $task.Title
-            Invoke-StepCommand -Label $task.Label -Arguments $task.Arguments
+        $taskIndex = 0
+        while ($taskIndex -lt $tasks.Count) {
+            $task = $tasks[$taskIndex]
+            if ([string]::IsNullOrWhiteSpace($task.ParallelGroup)) {
+                Write-Step -Number $stepNumber -Total $totalSteps -Title $task.Title
+                Invoke-StepCommand -Label $task.Label -Arguments $task.Arguments
+                $stepNumber++
+                $taskIndex++
+                continue
+            }
+
+            $parallelTasks = @()
+            $parallelGroup = $task.ParallelGroup
+            while (
+                $taskIndex -lt $tasks.Count -and
+                $tasks[$taskIndex].ParallelGroup -eq $parallelGroup
+            ) {
+                $parallelTasks += $tasks[$taskIndex]
+                $taskIndex++
+            }
+
+            $parallelTitle = Get-ParallelGroupTitle -ParallelGroup $parallelGroup -TaskCount $parallelTasks.Count
+            Write-Step -Number $stepNumber -Total $totalSteps -Title $parallelTitle
+            Invoke-StepCommandsParallel -BatchLabel $parallelTitle -Tasks $parallelTasks
             $stepNumber++
         }
     }

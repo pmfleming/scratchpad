@@ -1,15 +1,20 @@
-use crate::app::domain::{BufferId, SplitAxis, TabManager, ViewId};
+use crate::app::domain::{BufferId, DiskFileState, SplitAxis, TabManager, ViewId};
 use crate::app::fonts::EditorFontPreset;
+use crate::app::services::background_io::{BackgroundIoRequest, BackgroundIoResult};
 use crate::app::services::session_store::SessionStore;
 use crate::app::services::settings_store::{AppSettings, SettingsStore};
 use crate::app::startup::StartupOptions;
-use crate::app::transactions::{PendingLayoutTransaction, PendingTextTransaction, TransactionLog};
+use crate::app::transactions::{
+    PendingLayoutTransaction, PendingTextTransaction, TransactionLog, TransactionSnapshot,
+};
 use eframe::egui;
 use search_state::SearchState;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
+mod background_io;
 mod frame;
 mod search_state;
 mod settings_state;
@@ -45,6 +50,59 @@ pub(crate) struct StartupRestoreConflict {
     pub(crate) path: PathBuf,
 }
 
+pub(crate) struct PendingOpenTabsAction {
+    pub(crate) duplicate_count: usize,
+    pub(crate) affected_items: Vec<String>,
+    pub(crate) transaction_snapshot: TransactionSnapshot,
+}
+
+pub(crate) struct PendingOpenHereAction {
+    pub(crate) already_here_count: usize,
+    pub(crate) migrated_count: usize,
+    pub(crate) failure_count: usize,
+    pub(crate) affected_items: Vec<String>,
+    pub(crate) transaction_snapshot: TransactionSnapshot,
+    pub(crate) anchor_view_id: Option<ViewId>,
+}
+
+pub(crate) struct PendingStartupRestoreAction {
+    pub(crate) startup_options: StartupOptions,
+    pub(crate) loaded_from_settings: bool,
+}
+
+pub(crate) struct PendingReloadBufferAction {
+    pub(crate) buffer_id: BufferId,
+    pub(crate) expected_path: PathBuf,
+    pub(crate) buffer_name: String,
+    pub(crate) previous_disk_state: Option<DiskFileState>,
+    pub(crate) mode: PendingReloadMode,
+}
+
+pub(crate) struct PendingReopenWithEncodingAction {
+    pub(crate) buffer_id: BufferId,
+    pub(crate) expected_path: PathBuf,
+    pub(crate) buffer_name: String,
+}
+
+pub(crate) struct PendingStartupRestoreCompareAction {
+    pub(crate) conflict: StartupRestoreConflict,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PendingReloadMode {
+    AutoRefreshCleanBuffer,
+    ExplicitReload,
+}
+
+pub(crate) enum PendingBackgroundAction {
+    OpenTabs(PendingOpenTabsAction),
+    OpenHere(PendingOpenHereAction),
+    StartupRestore(PendingStartupRestoreAction),
+    ReloadBuffer(PendingReloadBufferAction),
+    ReopenWithEncoding(PendingReopenWithEncodingAction),
+    StartupRestoreCompare(PendingStartupRestoreCompareAction),
+}
+
 pub struct ScratchpadApp {
     pub(crate) tab_manager: TabManager,
     pub(crate) app_settings: AppSettings,
@@ -55,6 +113,7 @@ pub struct ScratchpadApp {
     pub(crate) settings_store: SettingsStore,
     pub(crate) user_manual_path: PathBuf,
     pub(crate) session_store: SessionStore,
+    pub(crate) persist_session_on_drop: bool,
     pub(crate) last_session_persist: Instant,
     pub(crate) close_in_progress: bool,
     pub(crate) overflow_popup_open: bool,
@@ -76,6 +135,10 @@ pub struct ScratchpadApp {
     pub(crate) startup_restore_conflicts: Vec<StartupRestoreConflict>,
     pub(crate) workspace_reflow_axis: SplitAxis,
     pub(crate) settings_preview_quote_index: usize,
+    pub(crate) background_io_tx: Sender<BackgroundIoRequest>,
+    pub(crate) background_io_rx: Receiver<BackgroundIoResult>,
+    pub(crate) next_background_request_id: u64,
+    pub(crate) pending_background_actions: HashMap<u64, PendingBackgroundAction>,
 }
 
 impl Default for ScratchpadApp {
@@ -108,7 +171,9 @@ impl eframe::App for ScratchpadApp {
 
 impl Drop for ScratchpadApp {
     fn drop(&mut self) {
-        let _ = self.persist_session_now();
+        if self.persist_session_on_drop {
+            let _ = self.persist_session_now();
+        }
     }
 }
 

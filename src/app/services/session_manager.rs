@@ -1,5 +1,7 @@
 use crate::app::app_state::ScratchpadApp;
-use crate::app::services::session_store::{RestoreStatusLevel, RestoredSession};
+use crate::app::services::session_store::{
+    RestoreStatusLevel, RestoredSession, SessionPersistRequest,
+};
 use crate::app::services::settings_store::AppSettings;
 use eframe::egui;
 use std::time::Instant;
@@ -20,12 +22,13 @@ pub(crate) fn maybe_persist_session(app: &mut ScratchpadApp, ctx: &egui::Context
 }
 
 pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> std::io::Result<()> {
-    app.session_store.persist(
+    let request = SessionPersistRequest::capture(
         app.tabs(),
         app.active_tab_index(),
         app.font_size(),
         app.word_wrap(),
-    )?;
+    );
+    app.session_store.persist_request(request)?;
     app.clear_session_dirty();
     app.last_session_persist = Instant::now();
     Ok(())
@@ -42,7 +45,10 @@ pub(crate) fn restore_session_state(app: &mut ScratchpadApp) -> Option<AppSettin
     }
 }
 
-fn apply_restored_session(app: &mut ScratchpadApp, restored: RestoredSession) -> AppSettings {
+pub(crate) fn apply_restored_session(
+    app: &mut ScratchpadApp,
+    restored: RestoredSession,
+) -> AppSettings {
     if let Some(status) = restored.restore_status.as_ref() {
         match status.level {
             RestoreStatusLevel::Info => app.set_info_status(status.message.clone()),

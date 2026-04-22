@@ -15,6 +15,7 @@ RESOURCE_PROFILES_PATH = Path("target/analysis/resource_profiles.json")
 
 FAMILY_PRIORITY = {
     "search": 3,
+    "search-dispatch": 3,
     "edit-paste": 3,
     "scroll": 3,
     "split-layout": 2,
@@ -142,13 +143,14 @@ def flamegraph_coverage_rows(
 
 
 def build_triage(
+    dispatch_rows: List[Dict[str, Any]],
     search_rows: List[Dict[str, Any]],
     editor_rows: List[Dict[str, Any]],
     tabs_rows: List[Dict[str, Any]],
     capacity_rows: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     triage = []
-    for row in search_rows + editor_rows + tabs_rows:
+    for row in dispatch_rows + search_rows + editor_rows + tabs_rows:
         if not row.get("over_budget") and row.get("stability") == "stable":
             continue
         triage.append(
@@ -228,6 +230,11 @@ def main() -> None:
         item.get("scenario"): item for item in capacity_report.get("scenarios", [])
     }
 
+    search_dispatch_rows = [
+        normalize_latency_row(item, capacity_lookup)
+        for item in search_speed
+        if str(item.get("workload_family", "search")) == "search-dispatch"
+    ]
     search_rows = [
         normalize_latency_row(item, capacity_lookup)
         for item in search_speed
@@ -250,9 +257,15 @@ def main() -> None:
     ]
     flamegraph_rows = flamegraph_coverage_rows(
         flamegraphs,
-        search_rows + editor_rows + tabs_rows,
+        search_dispatch_rows + search_rows + editor_rows + tabs_rows,
     )
-    triage = build_triage(search_rows, editor_rows, tabs_rows, capacity_rows)
+    triage = build_triage(
+        search_dispatch_rows,
+        search_rows,
+        editor_rows,
+        tabs_rows,
+        capacity_rows,
+    )
 
     payload = {
         "meta": {
@@ -267,18 +280,19 @@ def main() -> None:
         },
         "summary": {
             "search_scenarios": len(search_rows),
+            "search_dispatch_scenarios": len(search_dispatch_rows),
             "editor_scenarios": len(editor_rows),
             "tabs_and_splits_scenarios": len(tabs_rows),
             "capacity_scenarios": len(capacity_rows),
             "resource_profile_scenarios": len(resource_profiles.get("scenarios", [])),
             "over_budget_latency": sum(
                 1
-                for row in search_rows + editor_rows + tabs_rows
+                for row in search_dispatch_rows + search_rows + editor_rows + tabs_rows
                 if row.get("over_budget")
             ),
             "coverage_gaps": sum(
                 1
-                for row in search_rows + editor_rows + tabs_rows
+                for row in search_dispatch_rows + search_rows + editor_rows + tabs_rows
                 if row.get("over_budget") and not row.get("has_profile_coverage")
             ),
             "near_failure_ceilings": sum(
@@ -287,6 +301,7 @@ def main() -> None:
         },
         "triage": triage,
         "sections": {
+            "search_dispatch": search_dispatch_rows,
             "search": search_rows,
             "editor_file_size": editor_rows,
             "tabs_and_splits": tabs_rows,

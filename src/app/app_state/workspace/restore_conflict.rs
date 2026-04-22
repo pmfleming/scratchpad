@@ -1,7 +1,10 @@
-use super::super::{ScratchpadApp, StartupRestoreConflict};
+use super::super::{
+    PendingBackgroundAction, PendingStartupRestoreCompareAction, ScratchpadApp,
+    StartupRestoreConflict,
+};
 use crate::app::commands::AppCommand;
 use crate::app::domain::{BufferFreshness, BufferId, BufferState, ViewId, WorkspaceTab};
-use crate::app::services::file_service::FileService;
+use crate::app::services::background_io::LoadedPathResult;
 
 impl ScratchpadApp {
     pub(crate) fn refresh_startup_restore_conflicts(&mut self) {
@@ -32,14 +35,33 @@ impl ScratchpadApp {
             return false;
         };
 
-        let file_content = match FileService::read_file(&conflict.path) {
+        self.queue_background_path_loads(
+            vec![conflict.path.clone()],
+            PendingBackgroundAction::StartupRestoreCompare(PendingStartupRestoreCompareAction {
+                conflict,
+            }),
+        );
+        true
+    }
+
+    pub(crate) fn apply_async_startup_restore_compare_result(
+        &mut self,
+        action: PendingStartupRestoreCompareAction,
+        mut results: Vec<LoadedPathResult>,
+    ) {
+        let Some(result) = results.pop() else {
+            return;
+        };
+        let conflict = action.conflict;
+
+        let file_content = match result.result {
             Ok(file_content) => file_content,
             Err(error) => {
                 self.set_warning_status(format!(
                     "Could not open disk version of {} for comparison: {error}",
                     conflict.buffer_name
                 ));
-                return false;
+                return;
             }
         };
 
@@ -58,13 +80,12 @@ impl ScratchpadApp {
             None,
             file_content.format,
         );
-        compare_buffer.sync_to_disk_state(FileService::read_disk_state(&conflict.path).ok());
+        compare_buffer.sync_to_disk_state(result.disk_state);
         self.append_tab(WorkspaceTab::new(compare_buffer));
         self.set_info_status(format!(
             "Opened disk version of {} for comparison.",
             conflict.buffer_name
         ));
-        true
     }
 }
 

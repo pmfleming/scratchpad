@@ -35,7 +35,7 @@ impl ScratchpadApp {
         }
 
         self.activate_workspace_surface();
-        FileController::open_paths(self, vec![path]);
+        FileController::open_paths_async(self, vec![path]);
     }
 
     pub fn save_file(&mut self) {

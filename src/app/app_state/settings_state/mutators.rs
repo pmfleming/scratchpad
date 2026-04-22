@@ -255,7 +255,7 @@ impl ScratchpadApp {
     pub(crate) fn open_settings_file_tab(&mut self) {
         let path = self.settings_path().to_path_buf();
         self.activate_workspace_surface();
-        FileController::open_paths(self, vec![path]);
+        FileController::open_paths_async(self, vec![path]);
     }
 
     pub(crate) fn close_settings(&mut self) {

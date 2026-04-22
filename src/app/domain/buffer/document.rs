@@ -1,8 +1,8 @@
-use super::{LineEndingStyle, PieceTreeLite, platform_default_line_ending};
+use super::{DocumentSnapshot, LineEndingStyle, PieceTreeLite, platform_default_line_ending};
 use crate::app::ui::editor_content::native_editor::{CursorRange, OperationRecord};
-use eframe::egui;
 use std::borrow::Cow;
 use std::ops::Range;
+use std::sync::Arc;
 
 pub const TEXT_DOCUMENT_MAX_UNDOS: usize = 100;
 pub(crate) type TextReplacements<'a> = &'a [(Range<usize>, String)];
@@ -16,8 +16,8 @@ pub struct TextDocumentEditOperation {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextDocumentOperationRecord {
-    pub previous_selection: egui::text::CCursorRange,
-    pub next_selection: egui::text::CCursorRange,
+    pub previous_selection: CursorRange,
+    pub next_selection: CursorRange,
     pub edits: Vec<TextDocumentEditOperation>,
 }
 
@@ -31,7 +31,7 @@ pub(crate) enum TextReplacementError {
 
 #[derive(Clone)]
 pub struct TextDocument {
-    piece_tree: PieceTreeLite,
+    piece_tree: Arc<PieceTreeLite>,
     operation_undo: Vec<TextDocumentOperationRecord>,
     operation_redo: Vec<TextDocumentOperationRecord>,
     preferred_line_ending: LineEndingStyle,
@@ -46,7 +46,7 @@ impl TextDocument {
         text: String,
         preferred_line_ending: LineEndingStyle,
     ) -> Self {
-        let piece_tree = PieceTreeLite::from_string(text);
+        let piece_tree = Arc::new(PieceTreeLite::from_string(text));
         Self {
             piece_tree,
             operation_undo: Vec::new(),
@@ -61,7 +61,11 @@ impl TextDocument {
     }
 
     pub fn piece_tree(&self) -> &PieceTreeLite {
-        &self.piece_tree
+        self.piece_tree.as_ref()
+    }
+
+    pub fn snapshot(&self) -> DocumentSnapshot {
+        DocumentSnapshot::from_shared(self.piece_tree.clone())
     }
 
     pub fn operation_undo_depth(&self) -> usize {
@@ -82,15 +86,15 @@ impl TextDocument {
     }
 
     pub fn replace_text(&mut self, text: String) {
-        self.piece_tree = PieceTreeLite::from_string(text);
+        self.piece_tree = Arc::new(PieceTreeLite::from_string(text));
         self.clear_operation_history();
     }
 
     pub(crate) fn replace_char_ranges_with_undo(
         &mut self,
         replacements: TextReplacements<'_>,
-        previous_selection: egui::text::CCursorRange,
-        next_selection: egui::text::CCursorRange,
+        previous_selection: CursorRange,
+        next_selection: CursorRange,
     ) -> Result<(), TextReplacementError> {
         if replacements.is_empty() {
             return Ok(());
@@ -120,7 +124,7 @@ impl TextDocument {
         Ok(())
     }
 
-    pub fn undo_last_operation(&mut self) -> Option<egui::text::CCursorRange> {
+    pub fn undo_last_operation(&mut self) -> Option<CursorRange> {
         let record = self.operation_undo.pop()?;
         self.apply_operation_record_undo(&record);
         let selection = record.previous_selection;
@@ -128,7 +132,7 @@ impl TextDocument {
         Some(selection)
     }
 
-    pub fn redo_last_operation(&mut self) -> Option<egui::text::CCursorRange> {
+    pub fn redo_last_operation(&mut self) -> Option<CursorRange> {
         let record = self.operation_redo.pop()?;
         self.apply_operation_record_redo(&record);
         let selection = record.next_selection;
@@ -155,8 +159,8 @@ impl TextDocument {
     /// Push a native operation record for undo/redo.
     pub fn push_edit_operation(&mut self, record: OperationRecord) {
         let converted = TextDocumentOperationRecord {
-            previous_selection: record.previous_cursor.to_egui(),
-            next_selection: record.next_cursor.to_egui(),
+            previous_selection: record.previous_cursor,
+            next_selection: record.next_cursor,
             edits: record
                 .edits
                 .into_iter()
@@ -170,26 +174,8 @@ impl TextDocument {
         self.push_operation_record(converted);
     }
 
-    /// Undo last operation, returning the native CursorRange.
-    pub fn undo_operation_native(&mut self) -> Option<CursorRange> {
-        let record = self.operation_undo.pop()?;
-        self.apply_operation_record_undo(&record);
-        let selection = CursorRange::from_egui(record.previous_selection);
-        self.operation_redo.push(record);
-        Some(selection)
-    }
-
-    /// Redo last operation, returning the native CursorRange.
-    pub fn redo_operation_native(&mut self) -> Option<CursorRange> {
-        let record = self.operation_redo.pop()?;
-        self.apply_operation_record_redo(&record);
-        let selection = CursorRange::from_egui(record.next_selection);
-        self.operation_undo.push(record);
-        Some(selection)
-    }
-
     fn insert_raw_text(&mut self, text: &str, char_index: usize) -> usize {
-        self.piece_tree.insert(char_index, text);
+        Arc::make_mut(&mut self.piece_tree).insert(char_index, text);
         text.chars().count()
     }
 
@@ -198,7 +184,7 @@ impl TextDocument {
             char_range.start <= char_range.end,
             "start must be <= end, but got {char_range:?}"
         );
-        self.piece_tree.remove_char_range(char_range);
+        Arc::make_mut(&mut self.piece_tree).remove_char_range(char_range);
     }
 
     fn replace_char_range_raw(&mut self, char_range: Range<usize>, replacement: &str) {
@@ -297,13 +283,10 @@ fn validate_replacements(
 #[cfg(test)]
 mod tests {
     use super::{TextDocument, TextReplacementError};
-    use eframe::egui;
+    use crate::app::ui::editor_content::native_editor::CursorRange;
 
-    fn selection(start: usize, end: usize) -> egui::text::CCursorRange {
-        egui::text::CCursorRange::two(
-            egui::text::CCursor::new(start),
-            egui::text::CCursor::new(end),
-        )
+    fn selection(start: usize, end: usize) -> CursorRange {
+        CursorRange::two(start, end)
     }
 
     #[test]

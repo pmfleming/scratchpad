@@ -151,7 +151,7 @@ What already exists:
 
 What is still missing or incomplete:
 
-- cheap thread-safe snapshots that do not deep-clone backing strings
+- broader snapshot coverage that avoids flattening whole search ranges inside worker-side scan paths
 - richer incremental metadata for rendering and search-adjacent work
 - strong randomized correctness coverage
 - broader conversion of editor helpers away from flattening
@@ -170,15 +170,16 @@ Relevant code:
 What works:
 
 - matching work is offloaded
+- search targets already carry revisioned `DocumentSnapshot` handles instead of cloned preview trees
+- bounded target fanout exists for wider current-scope and all-tabs search requests
 - generation-based cancellation exists
 - stale work is already rejected
 
 What still costs too much:
 
 - target preparation happens before worker dispatch
-- search text is still flattened into owned snapshots
-- preview data is still cloned eagerly
-- the worker still processes wide scopes serially
+- worker-side scan still flattens each target into owned text before matching
+- result delivery still waits for full-request completion rather than emitting partial groups as they land
 
 This means search is backgrounded, but not yet cheap to launch and not yet able to exploit wide-scope parallelism cleanly.
 
@@ -399,6 +400,13 @@ Goal:
 
 - stop wasting the new document core on avoidable temporary strings
 
+Status update:
+
+- `DocumentSnapshot` now exists and is already used across search request construction and preview generation
+- hot word-boundary and cursor-motion helpers no longer rely on whole-prefix or whole-suffix extraction in the common path
+- viewport-oriented extraction has dedicated benchmark and profile coverage
+- the remaining work in this phase is consolidation: remove compatibility fallbacks and other residual flattening on still-hot read paths
+
 Priority conversions:
 
 - word-boundary logic
@@ -412,12 +420,12 @@ Design rules:
 
 - prefer iterators and bounded local scans over full-prefix extraction
 - avoid `extract_range(0..index)` patterns on hot cursor paths
-- avoid "clone the tree and flatten later" request building
+- avoid reintroducing "clone the tree and flatten later" request building on newer snapshot-based flows
 - keep the small-document fast path simple when it is actually cheaper
 
 Exit criteria:
 
-- common cursor, selection, and preview paths no longer allocate whole-prefix or whole-suffix temporary strings on large documents
+- common cursor, selection, preview, and visible-range helper paths stay on bounded piece-tree reads by default, with compatibility fallbacks limited to clearly isolated paths
 
 ## Phase 4. Rebuild search on top of snapshots and bounded fanout
 
@@ -425,14 +433,21 @@ Goal:
 
 - make search both cheap to dispatch and scalable across buffers
 
+Status update:
+
+- search requests already carry revisioned snapshot handles instead of cloned whole-buffer payloads
+- match previews are already built from snapshot-backed preview helpers
+- bounded fanout exists for wide-scope target processing
+- report-driven coverage now includes `search_dispatch_profile` alongside the existing current-scope and all-tabs search profiles
+- the remaining work is no longer foundational wiring; it is targeted latency reduction in two separate slices: runtime dispatch preparation and worker-side scan/completion
+
 Work:
 
-- replace copied search payloads with revisioned snapshot handles
-- build previews from piece-tree slices after matches are found
+- reduce runtime target collection and request assembly cost on the UI-thread side of dispatch
+- reduce worker-side scan cost where `DocumentSnapshot` is still flattened into a temporary search string per target
 - keep the single-buffer small-work path lightweight
-- fan out wide-scope search across buffers using bounded concurrency
-- stream partial results as they arrive
-- preserve generation-based cancellation and stale-result rejection
+- decide whether partial result streaming still earns its complexity after dispatch-path and scan-path reductions
+- preserve generation-based cancellation, stale-result rejection, and bounded fanout while tightening variance on wide-scope search
 
 Important rule:
 
@@ -442,7 +457,7 @@ Exit criteria:
 
 - dispatch cost is small enough that worker offload actually matters
 - `ActiveWorkspaceTab` and `AllOpenTabs` search scale without major UI-thread preparation spikes
-- first-result latency improves materially on large scopes
+- first-result and completion latency both improve materially on large scopes, with dispatch-path and worker-scan regressions measurable independently
 
 ## Phase 5. Move file, save, restore, and persistence flows onto snapshot-based workers
 
@@ -529,9 +544,9 @@ If the repo wants the best return with the least wasted effort, the order should
 
 1. measure dispatch, snapshot, and I/O costs explicitly
 2. finish and harden the piece-tree core
-3. add immutable revisioned snapshots
-4. convert hot read paths to piece-tree-native access
-5. rebuild search on snapshot-based bounded fanout
+3. consolidate the landed snapshot model so the remaining hot search paths stop flattening unnecessarily
+4. finish converting hot read paths to piece-tree-native access
+5. split search follow-up into dispatch-path and worker-scan reductions, each with dedicated profile-driven validation
 6. move file, save, restore, and persistence to background snapshot consumers
 7. build the large-document viewport path
 
@@ -578,16 +593,16 @@ The piece tree is the prerequisite that makes bounded parallelism worthwhile.
 
 Based on the latest full overview in `target/analysis/`, the immediate order of work should be:
 
-1. Fix search dispatch and search snapshot cost for current-scope completion.
-   The worst row is `search_current_completion_aggregate_size/256`, and the rest of the top triage is also dominated by current-scope completion over aggregate size. This is the clearest sign that request-building and whole-scope search preparation are still too expensive before or during worker execution.
+1. Reduce dispatch-path cost independently from worker scan cost.
+   The new dispatch baselines and `search_dispatch_profile` now make runtime target collection and request assembly measurable on their own. Use `search_current_dispatch_aggregate_size` and `search_all_dispatch_aggregate_size` to shrink the preparation path before worker-side scanning begins.
 
-2. Add immutable revisioned document snapshots and stop deep-cloning search payloads.
-   The overview still points to search as CPU-bound, but the codebase also still clones too much state before dispatch. This is the highest-leverage architectural change because it helps search, preview, save, restore, and persistence at the same time.
+2. Reduce worker-side scan and completion cost independently from dispatch.
+   The top over-budget rows are still dominated by current-scope and all-tabs completion scenarios, especially `search_current_completion_aggregate_size/256`. Use `search_current_app_state_profile` and `search_all_tabs_profile` to drive improvements in the worker scan path after dispatch overhead is separated out.
 
-3. Add profile coverage for the missing over-budget search scenarios.
-   The current report still has coverage gaps for the most expensive current-scope and active-scope search rows. Before broad optimization work, add or align flamegraph coverage for those scenarios so the next round of changes is guided by hot-path evidence rather than inference.
+3. Keep the landed snapshot and fanout foundations, but remove the remaining flattening inside hot search paths.
+   The foundational snapshot, preview, fanout, and coverage work is already in place. The next leverage point is reducing the temporary string work that still happens after target collection and before or during matching.
 
-4. Convert hot editor read paths away from whole-prefix and whole-suffix extraction.
+4. Convert the remaining hot editor read paths away from whole-prefix and whole-suffix extraction.
    Word-boundary and nearby cursor helpers still allocate temporary strings in ways that blunt the benefit of the piece tree. This is smaller than the search snapshot problem, but it is on the same architectural path and should happen early.
 
 5. Move normal session persistence onto snapshot-based background work.
@@ -601,7 +616,7 @@ Based on the latest full overview in `target/analysis/`, the immediate order of 
 The next implementation step should be:
 
 1. harden the current piece-tree core with stronger invariants and randomized validation
-2. introduce immutable revisioned snapshots with shared backing storage
-3. convert search request building and hot editor read paths to use those snapshots
+2. reduce dispatch-path overhead using `search_dispatch_profile` plus the dispatch aggregate-size benchmarks
+3. reduce worker scan and completion overhead using `search_current_app_state_profile` and `search_all_tabs_profile`
 
-After those three steps, a shared bounded executor becomes an optimization multiplier instead of a bandage.
+After those three steps, the next round of search work can be split cleanly between runtime preparation cost and worker-side scan cost instead of treating them as one blended bottleneck.

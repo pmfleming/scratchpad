@@ -1,8 +1,9 @@
 use super::FileController;
 use super::support::LoadedFile;
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{PendingBackgroundAction, PendingOpenHereAction, ScratchpadApp};
 use crate::app::commands::AppCommand;
 use crate::app::domain::{SplitAxis, ViewId, WorkspaceTab};
+use crate::app::services::background_io::LoadedPathResult;
 use crate::app::services::file_service::FileService;
 use std::path::{Path, PathBuf};
 
@@ -24,6 +25,15 @@ enum ExistingOpenHerePath {
 }
 
 impl FileController {
+    pub fn open_external_paths_here_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+        Self::handle_external_paths(
+            app,
+            paths,
+            "Background workspace-open requested for",
+            Self::open_selected_paths_here_async,
+        );
+    }
+
     pub(super) fn open_selected_paths_here(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
         Self::prepare_to_open_paths(app);
         let snapshot = app.capture_transaction_snapshot();
@@ -57,6 +67,59 @@ impl FileController {
         Self::apply_open_here_summary(app, summary);
     }
 
+    pub(super) fn open_selected_paths_here_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+        Self::prepare_to_open_paths(app);
+        let transaction_snapshot = app.capture_transaction_snapshot();
+        let affected_items = Self::affected_item_labels(&paths);
+        let anchor_view_id = app
+            .tabs()
+            .get(app.active_tab_index())
+            .map(|tab| tab.active_view_id);
+        let mut pending_paths = Vec::new();
+        let mut summary = OpenHereBatchSummary::default();
+        let mut already_here_count = 0;
+        let mut migrated_count = 0;
+        let mut failure_count = 0;
+
+        for path in paths {
+            let outcome = Self::prepare_open_path_here_async(app, path, &mut pending_paths);
+            match outcome {
+                OpenHerePathOutcome::Migrated => migrated_count += 1,
+                OpenHerePathOutcome::AlreadyInCurrentTab => already_here_count += 1,
+                OpenHerePathOutcome::Failed => failure_count += 1,
+                OpenHerePathOutcome::Opened { .. } | OpenHerePathOutcome::Queued => {}
+            }
+            summary = summary.record(outcome);
+        }
+
+        if pending_paths.is_empty() {
+            if summary.opened_count > 0 || summary.migrated_count > 0 {
+                Self::rebalance_open_here_layout(app);
+                let action_count = summary.opened_count + summary.migrated_count;
+                let title = if action_count == 1 {
+                    "Open file here"
+                } else {
+                    "Open files here"
+                };
+                app.record_transaction(title, affected_items, None, transaction_snapshot);
+            }
+            Self::apply_open_here_summary(app, summary);
+            return;
+        }
+
+        app.queue_background_path_loads(
+            pending_paths,
+            PendingBackgroundAction::OpenHere(PendingOpenHereAction {
+                already_here_count,
+                migrated_count,
+                failure_count,
+                affected_items,
+                transaction_snapshot,
+                anchor_view_id,
+            }),
+        );
+    }
+
     fn prepare_open_path_here(
         app: &mut ScratchpadApp,
         path: PathBuf,
@@ -67,6 +130,19 @@ impl FileController {
         }
 
         Self::queue_open_here_path(app, path, pending_files)
+    }
+
+    fn prepare_open_path_here_async(
+        app: &mut ScratchpadApp,
+        path: PathBuf,
+        pending_paths: &mut Vec<PathBuf>,
+    ) -> OpenHerePathOutcome {
+        if let Some(existing_path) = Self::find_existing_open_here_path(app, &path) {
+            return Self::resolve_existing_open_here_path(app, path, existing_path);
+        }
+
+        pending_paths.push(path);
+        OpenHerePathOutcome::Queued
     }
 
     fn open_pending_files_here(
@@ -85,6 +161,42 @@ impl FileController {
         }
 
         Self::log_open_here_success(app, log_entries)
+    }
+
+    fn open_loaded_files_here(
+        app: &mut ScratchpadApp,
+        anchor_view_id: Option<ViewId>,
+        loaded_paths: Vec<LoadedPathResult>,
+    ) -> Vec<OpenHerePathOutcome> {
+        let mut pending_files = Vec::new();
+        let mut outcomes = Vec::new();
+
+        for loaded in loaded_paths {
+            if let Some(existing_path) = Self::find_existing_open_here_path(app, &loaded.path) {
+                outcomes.push(Self::resolve_existing_open_here_path(
+                    app,
+                    loaded.path,
+                    existing_path,
+                ));
+                continue;
+            }
+
+            match loaded.result {
+                Ok(file_content) => {
+                    let mut loaded_file = LoadedFile::from_file_content(loaded.path, file_content);
+                    Self::mark_settings_buffer(app, &mut loaded_file.buffer);
+                    pending_files.push(loaded_file);
+                }
+                Err(_) => outcomes.push(OpenHerePathOutcome::Failed),
+            }
+        }
+
+        outcomes.extend(Self::open_pending_files_here(
+            app,
+            anchor_view_id,
+            pending_files,
+        ));
+        outcomes
     }
 
     fn rebalance_open_here_layout(app: &mut ScratchpadApp) {
@@ -270,5 +382,43 @@ impl FileController {
             summary.failure_count > 0 || summary.artifact_count > 0,
             summary.log_message(),
         );
+    }
+
+    pub(crate) fn apply_async_open_here_result(
+        app: &mut ScratchpadApp,
+        action: PendingOpenHereAction,
+        results: Vec<LoadedPathResult>,
+    ) {
+        let mut summary = OpenHereBatchSummary::default();
+        for _ in 0..action.already_here_count {
+            summary = summary.record(OpenHerePathOutcome::AlreadyInCurrentTab);
+        }
+        for _ in 0..action.migrated_count {
+            summary = summary.record(OpenHerePathOutcome::Migrated);
+        }
+        for _ in 0..action.failure_count {
+            summary = summary.record(OpenHerePathOutcome::Failed);
+        }
+        summary = Self::open_loaded_files_here(app, action.anchor_view_id, results)
+            .into_iter()
+            .fold(summary, |summary, outcome| summary.record(outcome));
+
+        if summary.opened_count > 0 || summary.migrated_count > 0 {
+            Self::rebalance_open_here_layout(app);
+            let action_count = summary.opened_count + summary.migrated_count;
+            let title = if action_count == 1 {
+                "Open file here"
+            } else {
+                "Open files here"
+            };
+            app.record_transaction(
+                title,
+                action.affected_items,
+                None,
+                action.transaction_snapshot,
+            );
+        }
+
+        Self::apply_open_here_summary(app, summary);
     }
 }

@@ -1,10 +1,21 @@
 use super::FileController;
-use crate::app::app_state::ScratchpadApp;
-use crate::app::domain::{
-    BufferFreshness, DiskFileState, EncodingSource, PendingAction, TextFormatMetadata,
+use crate::app::app_state::{
+    PendingBackgroundAction, PendingReloadBufferAction, PendingReloadMode,
+    PendingReopenWithEncodingAction, ScratchpadApp,
 };
+use crate::app::domain::{
+    BufferFreshness, BufferId, DiskFileState, DocumentSnapshot, EncodingSource, PendingAction,
+    TextFormatMetadata,
+};
+use crate::app::services::background_io::LoadedPathResult;
 use crate::app::services::file_service::{FileContent, FileService};
 use std::path::PathBuf;
+
+struct SaveWriteRequest {
+    path: PathBuf,
+    snapshot: DocumentSnapshot,
+    format: TextFormatMetadata,
+}
 
 impl FileController {
     pub fn save_file(app: &mut ScratchpadApp) {
@@ -77,22 +88,22 @@ impl FileController {
         let Some(path) = Self::buffer_path(app, index) else {
             return false;
         };
-
-        match FileService::read_file(&path) {
-            Ok(file_content) => {
-                let disk_state = FileService::read_disk_state(&path).ok();
-                let buffer_name =
-                    Self::replace_buffer_from_file_content(app, index, file_content, disk_state);
-                app.set_info_status(format!(
-                    "Reloaded {buffer_name} because it changed on disk."
-                ));
-                true
-            }
-            Err(error) => {
-                app.set_error_status(format!("Reload failed: {error}"));
-                false
-            }
+        let buffer = app.tabs()[index].active_buffer();
+        if Self::has_pending_reload_for_buffer(app, buffer.id) {
+            return true;
         }
+
+        app.queue_background_path_loads(
+            vec![path.clone()],
+            PendingBackgroundAction::ReloadBuffer(PendingReloadBufferAction {
+                buffer_id: buffer.id,
+                expected_path: path,
+                buffer_name: buffer.name.clone(),
+                previous_disk_state: buffer.disk_state.clone(),
+                mode: PendingReloadMode::ExplicitReload,
+            }),
+        );
+        true
     }
 
     pub(crate) fn reopen_buffer_with_encoding(
@@ -116,20 +127,21 @@ impl FileController {
             return false;
         };
 
-        match FileService::read_file_with_encoding(&path, encoding_name) {
-            Ok(file_content) => {
-                let disk_state = FileService::read_disk_state(&path).ok();
-                let encoding_label = file_content.format.encoding_label();
-                let buffer_name =
-                    Self::replace_buffer_from_file_content(app, index, file_content, disk_state);
-                app.set_info_status(format!("Reopened {buffer_name} with {encoding_label}."));
-                true
-            }
-            Err(error) => {
-                app.set_error_status(format!("Reopen with encoding failed: {error}"));
-                false
-            }
+        let buffer = app.tabs()[index].active_buffer();
+        if Self::has_pending_reopen_with_encoding_for_buffer(app, buffer.id) {
+            return true;
         }
+
+        app.queue_background_path_load_with_encoding(
+            path.clone(),
+            encoding_name.to_owned(),
+            PendingBackgroundAction::ReopenWithEncoding(PendingReopenWithEncodingAction {
+                buffer_id: buffer.id,
+                expected_path: path,
+                buffer_name: buffer.name.clone(),
+            }),
+        );
+        true
     }
 
     pub(crate) fn save_conflict_overwrite(app: &mut ScratchpadApp, index: usize) -> bool {
@@ -180,32 +192,22 @@ impl FileController {
                     return true;
                 }
 
-                match FileService::read_file(&path) {
-                    Ok(file_content) => {
-                        Self::replace_buffer_from_file_content(
-                            app,
-                            index,
-                            file_content,
-                            Some(disk_state),
-                        );
-                        app.set_info_status(format!(
-                            "Reloaded {} because it changed on disk.",
-                            buffer_name
-                        ));
-                        app.mark_session_dirty();
-                        true
-                    }
-                    Err(error) => {
-                        let buffer = app.tabs_mut()[index].active_buffer_mut();
-                        buffer.mark_stale_on_disk(Some(disk_state));
-                        app.set_warning_status(format!(
-                            "Detected a newer on-disk version of {} but could not reload it: {error}",
-                            buffer_name
-                        ));
-                        app.mark_session_dirty();
-                        true
-                    }
+                let buffer_id = app.tabs()[index].active_buffer().id;
+                if Self::has_pending_reload_for_buffer(app, buffer_id) {
+                    return true;
                 }
+
+                app.queue_background_path_loads(
+                    vec![path.clone()],
+                    PendingBackgroundAction::ReloadBuffer(PendingReloadBufferAction {
+                        buffer_id,
+                        expected_path: path,
+                        buffer_name,
+                        previous_disk_state: known_disk_state,
+                        mode: PendingReloadMode::AutoRefreshCleanBuffer,
+                    }),
+                );
+                true
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 let buffer_name = app.tabs()[index].active_buffer().name.clone();
@@ -308,12 +310,21 @@ impl FileController {
         update_buffer_path: bool,
         format_override: Option<TextFormatMetadata>,
     ) -> bool {
-        let save_result = {
+        let request = {
             let buffer = app.tabs()[index].active_buffer();
-            let format = format_override.as_ref().unwrap_or(&buffer.format);
-            let text = buffer.text();
-            FileService::write_file_with_format(&path, &text, format)
+            SaveWriteRequest {
+                path: path.clone(),
+                snapshot: buffer.document_snapshot(),
+                format: format_override
+                    .clone()
+                    .unwrap_or_else(|| buffer.format.clone()),
+            }
         };
+        let save_result = FileService::write_snapshot_with_format(
+            &request.path,
+            &request.snapshot,
+            &request.format,
+        );
 
         match save_result {
             Ok(()) => {
@@ -367,5 +378,155 @@ impl FileController {
             format.has_bom = false;
         }
         Ok(format)
+    }
+
+    fn has_pending_reload_for_buffer(app: &ScratchpadApp, buffer_id: BufferId) -> bool {
+        app.pending_background_actions.values().any(|action| {
+            matches!(
+                action,
+                PendingBackgroundAction::ReloadBuffer(reload)
+                    if reload.buffer_id == buffer_id
+            )
+        })
+    }
+
+    fn has_pending_reopen_with_encoding_for_buffer(
+        app: &ScratchpadApp,
+        buffer_id: BufferId,
+    ) -> bool {
+        app.pending_background_actions.values().any(|action| {
+            matches!(
+                action,
+                PendingBackgroundAction::ReopenWithEncoding(reopen)
+                    if reopen.buffer_id == buffer_id
+            )
+        })
+    }
+
+    pub(crate) fn apply_async_reload_buffer_result(
+        app: &mut ScratchpadApp,
+        action: PendingReloadBufferAction,
+        mut results: Vec<LoadedPathResult>,
+    ) {
+        let Some(result) = results.pop() else {
+            return;
+        };
+
+        let Some((tab_index, current_path)) = Self::find_buffer_location(app, action.buffer_id)
+        else {
+            return;
+        };
+        if !crate::app::paths_match(&current_path, &action.expected_path) {
+            return;
+        }
+
+        let current_buffer = app.tabs()[tab_index]
+            .buffer_by_id(action.buffer_id)
+            .expect("buffer location validated");
+        if current_buffer.is_dirty && action.mode == PendingReloadMode::AutoRefreshCleanBuffer {
+            let buffer = app.tabs_mut()[tab_index]
+                .buffer_by_id_mut(action.buffer_id)
+                .expect("buffer location validated");
+            buffer.mark_conflict_on_disk(result.disk_state);
+            app.set_warning_status(format!(
+                "{} changed on disk. Your tab has unsaved edits.",
+                action.buffer_name
+            ));
+            app.mark_session_dirty();
+            return;
+        }
+
+        if action.mode == PendingReloadMode::AutoRefreshCleanBuffer
+            && current_buffer.disk_state != action.previous_disk_state
+        {
+            return;
+        }
+
+        match result.result {
+            Ok(file_content) => {
+                let buffer_name = Self::replace_buffer_from_file_content(
+                    app,
+                    tab_index,
+                    file_content,
+                    result.disk_state,
+                );
+                match action.mode {
+                    PendingReloadMode::AutoRefreshCleanBuffer => app.set_info_status(format!(
+                        "Reloaded {buffer_name} because it changed on disk."
+                    )),
+                    PendingReloadMode::ExplicitReload => {
+                        app.set_info_status(format!("Reloaded {buffer_name} from disk."))
+                    }
+                }
+            }
+            Err(error) => match action.mode {
+                PendingReloadMode::AutoRefreshCleanBuffer => {
+                    let buffer = app.tabs_mut()[tab_index]
+                        .buffer_by_id_mut(action.buffer_id)
+                        .expect("buffer location validated");
+                    buffer.mark_stale_on_disk(result.disk_state);
+                    app.set_warning_status(format!(
+                        "Detected a newer on-disk version of {} but could not reload it: {error}",
+                        action.buffer_name
+                    ));
+                    app.mark_session_dirty();
+                }
+                PendingReloadMode::ExplicitReload => {
+                    app.set_error_status(format!("Reload failed: {error}"));
+                }
+            },
+        }
+    }
+
+    pub(crate) fn apply_async_reopen_with_encoding_result(
+        app: &mut ScratchpadApp,
+        action: PendingReopenWithEncodingAction,
+        mut results: Vec<LoadedPathResult>,
+    ) {
+        let Some(result) = results.pop() else {
+            return;
+        };
+
+        let Some((tab_index, current_path)) = Self::find_buffer_location(app, action.buffer_id)
+        else {
+            return;
+        };
+        if !crate::app::paths_match(&current_path, &action.expected_path) {
+            return;
+        }
+
+        if app.tabs()[tab_index]
+            .buffer_by_id(action.buffer_id)
+            .is_some_and(|buffer| buffer.is_dirty)
+        {
+            return;
+        }
+
+        match result.result {
+            Ok(file_content) => {
+                let encoding_label = file_content.format.encoding_label();
+                let buffer_name = Self::replace_buffer_from_file_content(
+                    app,
+                    tab_index,
+                    file_content,
+                    result.disk_state,
+                );
+                app.set_info_status(format!("Reopened {buffer_name} with {encoding_label}."));
+            }
+            Err(error) => {
+                app.set_error_status(format!(
+                    "Reopen with encoding failed for {}: {error}",
+                    action.buffer_name
+                ));
+            }
+        }
+    }
+
+    fn find_buffer_location(app: &ScratchpadApp, buffer_id: BufferId) -> Option<(usize, PathBuf)> {
+        app.tabs().iter().enumerate().find_map(|(tab_index, tab)| {
+            tab.buffer_by_id(buffer_id)
+                .and_then(|buffer| buffer.path.clone())
+                .map(|path| (tab_index, path))
+        })
     }
 }

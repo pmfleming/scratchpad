@@ -64,6 +64,46 @@
     "threshold_ms": 70.0,
     "limiting_resource_hint": "cpu"
   },
+  "document_snapshot_creation_latency": {
+    "targets": [
+      "app::domain::buffer::document",
+      "app::domain::buffer::snapshot"
+    ],
+    "family": "snapshot",
+    "kind": "micro",
+    "threshold_ms": 5.0,
+    "limiting_resource_hint": "cpu"
+  },
+  "viewport_extraction_latency": {
+    "targets": [
+      "app::domain::buffer",
+      "app::domain::buffer::piece_tree"
+    ],
+    "family": "viewport",
+    "kind": "workflow",
+    "threshold_ms": 16.0,
+    "limiting_resource_hint": "cpu"
+  },
+  "search_current_dispatch_aggregate_size": {
+    "targets": [
+      "app::app_state::search_state::runtime",
+      "app::domain::buffer::snapshot"
+    ],
+    "family": "search-dispatch",
+    "kind": "workflow",
+    "threshold_ms": 12.0,
+    "limiting_resource_hint": "cpu"
+  },
+  "search_all_dispatch_aggregate_size": {
+    "targets": [
+      "app::app_state::search_state::runtime",
+      "app::domain::buffer::snapshot"
+    ],
+    "family": "search-dispatch",
+    "kind": "workflow",
+    "threshold_ms": 20.0,
+    "limiting_resource_hint": "cpu"
+  },
   "control_char_load": {
     "targets": [
       "app::domain::buffer",

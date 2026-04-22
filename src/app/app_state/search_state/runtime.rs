@@ -1,10 +1,10 @@
 use super::helpers::{cursor_range_from_char_range, search_highlight_state_for_view};
-use super::worker::{SearchResult, SearchTargetSnapshot, process_search_request};
+use super::worker::{SearchRequest, SearchResult, SearchTargetSnapshot, process_search_request};
 use super::{
     ReplacementPlan, ReplacementTargetPlan, ScratchpadApp, SearchFocusTarget, SearchFreshness,
     SearchMatch, SearchScope, SearchStatus,
 };
-use crate::app::domain::{BufferId, SearchHighlightState, ViewId, WorkspaceTab};
+use crate::app::domain::{BufferId, EditorViewState, SearchHighlightState, ViewId, WorkspaceTab};
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use std::collections::HashSet;
 use std::ops::Range;
@@ -65,11 +65,7 @@ impl ScratchpadApp {
             let tab = &mut self.tabs_mut()[active_tab_index];
             let buffer = tab.buffer_by_id_mut(buffer_id)?;
             if buffer
-                .replace_char_ranges_with_undo(
-                    replacements,
-                    previous_selection.to_egui(),
-                    next_selection.to_egui(),
-                )
+                .replace_char_ranges_with_undo(replacements, previous_selection, next_selection)
                 .is_err()
             {
                 false
@@ -155,6 +151,24 @@ impl ScratchpadApp {
         self.refresh_search_visual_state();
     }
 
+    #[doc(hidden)]
+    pub fn profile_build_search_request(&self, scope: SearchScope, query: &str) -> usize {
+        let generation = self.search_state.requested_generation.saturating_add(1);
+        let targets = self.collect_search_targets(scope);
+        let request = SearchRequest {
+            generation,
+            query: query.to_owned(),
+            options: self.search_state.search_options(),
+            targets,
+        };
+        request
+            .targets
+            .iter()
+            .map(|target| target.document_snapshot.len_chars())
+            .sum::<usize>()
+            + request.query.len()
+    }
+
     fn collect_search_targets(&self, scope: SearchScope) -> Vec<SearchTargetSnapshot> {
         match scope {
             SearchScope::SelectionOnly => self
@@ -217,33 +231,38 @@ impl ScratchpadApp {
         };
         let tab_label = self.search_tab_label(tab_index);
         let mut seen_buffer_ids = HashSet::with_capacity(tab.views.len());
-        let mut first_visible_view_by_buffer =
-            std::collections::HashMap::with_capacity(tab.views.len());
+        let mut targets = Vec::with_capacity(tab.views.len());
         for view_id in tab.ordered_view_ids_in_layout_order() {
             let Some(view) = tab.view(view_id) else {
                 continue;
             };
-            first_visible_view_by_buffer
-                .entry(view.buffer_id)
-                .or_insert(view.id);
-        }
-        let mut targets = Vec::with_capacity(tab.views.len());
-        for view in &tab.views {
             if !seen_buffer_ids.insert(view.buffer_id) {
                 continue;
             }
-            let representative_view_id = first_visible_view_by_buffer
-                .get(&view.buffer_id)
-                .copied()
-                .unwrap_or(view.id);
-            if let Some(target) = build_search_target(
+            if let Some(target) = build_search_target_from_view(
                 tab_index,
                 tab,
-                representative_view_id,
+                view,
                 &tab_label,
                 search_range.clone(),
             ) {
                 targets.push(target);
+            }
+        }
+        if seen_buffer_ids.len() < tab.views.len() {
+            for view in &tab.views {
+                if !seen_buffer_ids.insert(view.buffer_id) {
+                    continue;
+                }
+                if let Some(target) = build_search_target_from_view(
+                    tab_index,
+                    tab,
+                    view,
+                    &tab_label,
+                    search_range.clone(),
+                ) {
+                    targets.push(target);
+                }
             }
         }
         if let Some(prioritized_buffer_id) = prioritized_buffer_id
@@ -517,11 +536,7 @@ impl ScratchpadApp {
             return false;
         };
         if buffer
-            .replace_char_ranges_with_undo(
-                &target.replacements,
-                previous_selection.to_egui(),
-                next_selection.to_egui(),
-            )
+            .replace_char_ranges_with_undo(&target.replacements, previous_selection, next_selection)
             .is_err()
         {
             return false;
@@ -606,17 +621,27 @@ fn build_search_target(
     search_range: Option<Range<usize>>,
 ) -> Option<SearchTargetSnapshot> {
     let view = tab.view(view_id)?;
+    build_search_target_from_view(tab_index, tab, view, tab_label, search_range)
+}
+
+fn build_search_target_from_view(
+    tab_index: usize,
+    tab: &WorkspaceTab,
+    view: &EditorViewState,
+    tab_label: &str,
+    search_range: Option<Range<usize>>,
+) -> Option<SearchTargetSnapshot> {
     let buffer = tab.buffer_by_id(view.buffer_id)?;
-    let (search_text, search_offset) = buffer.search_text_snapshot(search_range.clone());
+    let document_snapshot = buffer.document_snapshot();
+    let search_range = search_range.map(|range| document_snapshot.normalize_char_range(range));
     Some(SearchTargetSnapshot {
         tab_index,
-        view_id,
+        view_id: view.id,
         buffer_id: view.buffer_id,
         tab_label: tab_label.to_owned(),
         buffer_label: buffer.display_name(),
-        search_text,
-        search_offset,
-        preview_tree: buffer.document().piece_tree().clone(),
+        document_snapshot,
+        search_range,
     })
 }
 

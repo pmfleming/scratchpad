@@ -37,7 +37,7 @@ fn main() -> eframe::Result<()> {
                 scratchpad::app::startup::StartupAction::Help
                 | scratchpad::app::startup::StartupAction::Version => StartupOptions::default(),
             };
-            let app = ScratchpadApp::with_startup_options(startup_options);
+            let app = ScratchpadApp::with_runtime_startup_options(startup_options);
             let _ = fonts::apply_editor_fonts(&cc.egui_ctx, app.editor_font());
             app.apply_theme_to_context(&cc.egui_ctx);
             cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);

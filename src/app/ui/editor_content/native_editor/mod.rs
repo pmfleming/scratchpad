@@ -16,7 +16,8 @@ use crate::app::domain::{
 };
 use eframe::egui;
 use interactions::{
-    handle_keyboard_events, handle_mouse_interaction, sync_view_cursor_before_render,
+    handle_keyboard_events, handle_keyboard_events_unwrapped, handle_mouse_interaction,
+    handle_mouse_interaction_window, sync_view_cursor_before_render,
 };
 use std::sync::Arc;
 
@@ -31,6 +32,7 @@ const EDITOR_FOCUS_LOCK_FILTER: egui::EventFilter = egui::EventFilter {
 pub struct EditorWidgetOutcome {
     pub changed: bool,
     pub focused: bool,
+    pub request_editor_focus: bool,
     pub response: egui::Response,
 }
 
@@ -136,9 +138,12 @@ pub fn render_editor_text_edit(
         buffer.refresh_text_metadata();
     }
 
+    view.editor_has_focus = focused;
+
     EditorWidgetOutcome {
         changed,
         focused,
+        request_editor_focus: false,
         response,
     }
 }
@@ -162,11 +167,38 @@ pub fn render_editor_visible_text_window(
     let visible_window = buffer.visible_line_window(visible_lines);
     Some(render_visible_text_window(
         ui,
+        None,
         view,
         visible_window,
         options,
         buffer.line_count,
         buffer.active_selection.as_ref(),
+    ))
+}
+
+pub fn render_editor_focused_text_window(
+    ui: &mut egui::Ui,
+    buffer: &mut BufferState,
+    view: &mut EditorViewState,
+    previous_layout: Option<&RenderedLayout>,
+    options: TextEditOptions<'_>,
+) -> Option<EditorWidgetOutcome> {
+    if options.word_wrap || options.request_focus {
+        return None;
+    }
+
+    let visible_lines = focused_visible_line_range(buffer, view, previous_layout?)?;
+    let visible_window = buffer.visible_line_window(visible_lines);
+    let line_count = buffer.line_count;
+    let active_selection = buffer.active_selection.clone();
+    Some(render_visible_text_window(
+        ui,
+        Some(buffer),
+        view,
+        visible_window,
+        options,
+        line_count,
+        active_selection.as_ref(),
     ))
 }
 
@@ -210,9 +242,11 @@ pub fn render_read_only_text_edit(
     let focused = response.has_focus() || response.gained_focus();
     view.latest_layout = Some(RenderedLayout::from_galley(galley));
     view.cursor_range = None;
+    view.editor_has_focus = focused;
     EditorWidgetOutcome {
         changed: false,
         focused,
+        request_editor_focus: false,
         response,
     }
 }
@@ -310,6 +344,7 @@ fn cursor_rect_at(galley: &egui::Galley, galley_pos: egui::Pos2, cursor: CharCur
 
 fn render_visible_text_window(
     ui: &mut egui::Ui,
+    buffer: Option<&mut BufferState>,
     view: &mut EditorViewState,
     mut visible_window: RenderedTextWindow,
     options: TextEditOptions<'_>,
@@ -349,11 +384,83 @@ fn render_visible_text_window(
     let desired_height = visible_window.line_range.len().max(1) as f32 * row_height;
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), desired_height),
-        egui::Sense::click(),
+        if buffer.is_some() {
+            egui::Sense::click_and_drag()
+        } else {
+            egui::Sense::click()
+        },
     );
+
+    let (focused, request_editor_focus) = if let Some(buffer) = buffer {
+        if options.request_focus {
+            response.request_focus();
+        }
+        if response.has_focus() {
+            ui.memory_mut(|mem| mem.set_focus_lock_filter(response.id, EDITOR_FOCUS_LOCK_FILTER));
+        }
+
+        let prev_cursor = view.cursor_range;
+        handle_mouse_interaction_window(
+            ui,
+            &response,
+            &galley,
+            rect,
+            view,
+            buffer.document().piece_tree(),
+            visible_window.char_range.start,
+        );
+
+        let focused = response.has_focus() || response.gained_focus() || options.request_focus;
+        sync_view_cursor_before_render(view, focused);
+
+        let changed = if focused {
+            handle_keyboard_events_unwrapped(
+                ui,
+                buffer,
+                view,
+                buffer.document().piece_tree().len_chars(),
+            )
+        } else {
+            false
+        };
+
+        if view.cursor_range != prev_cursor {
+            view.scroll_to_cursor = true;
+        }
+
+        if focused {
+            buffer.active_selection = view
+                .cursor_range
+                .as_ref()
+                .and_then(types::selection_char_range);
+        }
+
+        if changed {
+            buffer.refresh_text_metadata();
+        }
+
+        (Some((focused, changed)), false)
+    } else {
+        (
+            None,
+            apply_visible_window_click_focus(ui, &response, &galley, rect, view, &visible_window),
+        )
+    };
 
     if ui.is_rect_visible(rect) {
         paint_galley(ui, &galley, rect.min, options.text_color);
+        if let Some((focused, changed)) = focused
+            && focused
+            && !changed
+            && let Some(cursor_range) = view.cursor_range
+            && let Some(local_cursor) = local_cursor_in_window(
+                cursor_range.primary,
+                visible_window.char_range.start,
+                visible_window.char_range.end,
+            )
+        {
+            paint_window_cursor(ui, &galley, rect, local_cursor, view);
+        }
     }
 
     let mut latest_layout = Some(RenderedLayout::from_galley(galley));
@@ -363,16 +470,60 @@ fn render_visible_text_window(
         layout.set_visible_text(visible_window);
     }
     view.latest_layout = latest_layout;
+    view.editor_has_focus = focused.is_some_and(|(focused, _)| focused);
 
     if bottom_padding_lines > 0 {
         ui.add_space(row_height * bottom_padding_lines as f32);
     }
 
     EditorWidgetOutcome {
-        changed: false,
-        focused: false,
+        changed: focused.is_some_and(|(_, changed)| changed),
+        focused: focused.is_some_and(|(focused, _)| focused),
+        request_editor_focus,
         response,
     }
+}
+
+fn apply_visible_window_click_focus(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    galley: &Arc<egui::Galley>,
+    rect: egui::Rect,
+    view: &mut EditorViewState,
+    visible_window: &RenderedTextWindow,
+) -> bool {
+    if !response.clicked() {
+        return false;
+    }
+
+    let Some(pointer_pos) = response.interact_pointer_pos() else {
+        return true;
+    };
+
+    let clicked = galley.cursor_from_pos(pointer_pos - rect.min);
+    let buffer_index =
+        (visible_window.char_range.start + clicked.index).min(visible_window.char_range.end);
+    let clicked_cursor = CharCursor {
+        index: buffer_index,
+        prefer_next_row: clicked.prefer_next_row,
+    };
+
+    let shift = ui.input(|input| input.modifiers.shift);
+    let next_cursor = if shift {
+        view.cursor_range
+            .map(|existing| CursorRange {
+                primary: clicked_cursor,
+                secondary: existing.secondary,
+            })
+            .unwrap_or_else(|| CursorRange::one(clicked_cursor))
+    } else {
+        CursorRange::one(clicked_cursor)
+    };
+
+    view.cursor_range = Some(next_cursor);
+    view.pending_cursor_range = Some(next_cursor);
+    view.scroll_to_cursor = true;
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -397,6 +548,86 @@ fn update_visible_layout(
         layout.set_visible_text(visible_text);
     }
     view.latest_layout = latest_layout;
+}
+
+fn focused_visible_line_range(
+    buffer: &BufferState,
+    view: &EditorViewState,
+    previous_layout: &RenderedLayout,
+) -> Option<std::ops::Range<usize>> {
+    let previous = previous_layout.visible_line_range();
+    if previous.is_empty() {
+        return None;
+    }
+
+    let window_len = previous.len().max(1);
+    let max_line = buffer.line_count.max(1);
+    let mut start = previous.start.min(max_line.saturating_sub(1));
+    let end = (start + window_len).min(max_line);
+    if end <= start {
+        return None;
+    }
+
+    let cursor = view.pending_cursor_range.or(view.cursor_range)?;
+    let cursor_line = buffer
+        .document()
+        .piece_tree()
+        .char_position(cursor.primary.index)
+        .line_index;
+    let overscan = 2usize;
+
+    if cursor_line < start.saturating_add(overscan) {
+        start = cursor_line.saturating_sub(overscan);
+    } else if cursor_line + overscan >= end {
+        start = cursor_line
+            .saturating_add(overscan + 1)
+            .saturating_sub(window_len)
+            .min(max_line.saturating_sub(window_len.max(1)));
+    }
+
+    Some(start..(start + window_len).min(max_line))
+}
+
+fn local_cursor_in_window(
+    cursor: CharCursor,
+    char_start: usize,
+    char_end: usize,
+) -> Option<CharCursor> {
+    (cursor.index >= char_start && cursor.index <= char_end).then_some(CharCursor {
+        index: cursor.index.saturating_sub(char_start),
+        prefer_next_row: cursor.prefer_next_row,
+    })
+}
+
+fn paint_window_cursor(
+    ui: &mut egui::Ui,
+    galley: &Arc<egui::Galley>,
+    rect: egui::Rect,
+    local_cursor: CharCursor,
+    view: &EditorViewState,
+) {
+    let painter = ui.painter_at(rect.expand(1.0));
+    let cursor_rect = cursor_rect_at(galley, rect.min, local_cursor);
+    let stroke = ui.visuals().text_cursor.stroke;
+    painter.line_segment(
+        [cursor_rect.center_top(), cursor_rect.center_bottom()],
+        (stroke.width, stroke.color),
+    );
+
+    if view.scroll_to_cursor {
+        ui.scroll_to_rect(cursor_rect, None);
+    }
+
+    let to_global = ui
+        .ctx()
+        .layer_transform_to_global(ui.layer_id())
+        .unwrap_or_default();
+    ui.output_mut(|o| {
+        o.ime = Some(egui::output::IMEOutput {
+            rect: to_global * rect,
+            cursor_rect: to_global * cursor_rect,
+        });
+    });
 }
 
 fn visible_row_range_for_galley(

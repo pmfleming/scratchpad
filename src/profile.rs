@@ -31,6 +31,14 @@ pub const RECOMMENDED_SEARCH_CURRENT_ITERATIONS: usize = 10;
 pub const RECOMMENDED_SEARCH_ALL_TABS: usize = 16;
 pub const RECOMMENDED_SEARCH_ALL_BYTES_PER_TAB: usize = 16 * KB;
 pub const RECOMMENDED_SEARCH_ALL_ITERATIONS: usize = 10;
+pub const RECOMMENDED_SEARCH_DISPATCH_CURRENT_FILES: usize = 64;
+pub const RECOMMENDED_SEARCH_DISPATCH_ALL_TABS: usize = 64;
+pub const RECOMMENDED_SEARCH_DISPATCH_BYTES_PER_ITEM: usize = 24 * KB;
+pub const RECOMMENDED_SEARCH_DISPATCH_ITERATIONS: usize = 32;
+pub const RECOMMENDED_DOCUMENT_SNAPSHOT_BYTES: usize = 4 * MB;
+pub const RECOMMENDED_DOCUMENT_SNAPSHOT_ITERATIONS: usize = 128;
+pub const RECOMMENDED_VIEWPORT_EXTRACTION_BYTES: usize = 4 * MB;
+pub const RECOMMENDED_VIEWPORT_EXTRACTION_ITERATIONS: usize = 96;
 pub const RECOMMENDED_LARGE_FILE_SCROLL_BYTES: usize = MB;
 pub const RECOMMENDED_LARGE_FILE_SCROLL_ITERATIONS: usize = 28;
 pub const RECOMMENDED_LARGE_FILE_PASTE_BASE_BYTES: usize = MB;
@@ -174,6 +182,89 @@ pub fn run_search_all_tabs_profile(
         app.handle_command(AppCommand::ActivateTab { index: 0 });
 
         run_search_profile_iterations(app, SearchScope::AllOpenTabs, expected_matches, iterations)
+    })
+}
+
+pub fn run_search_dispatch_current_profile(
+    file_count: usize,
+    bytes_per_file: usize,
+    iterations: usize,
+) -> usize {
+    with_isolated_app("search-dispatch-current", |app| {
+        app.tabs_mut()[0] = build_search_current_scope_tab(file_count, bytes_per_file);
+        sum_profile_iterations(iterations, || {
+            black_box(
+                app.profile_build_search_request(SearchScope::ActiveWorkspaceTab, PROFILE_QUERY),
+            )
+        })
+    })
+}
+
+pub fn run_search_dispatch_all_tabs_profile(
+    tab_count: usize,
+    bytes_per_tab: usize,
+    iterations: usize,
+) -> usize {
+    with_isolated_app("search-dispatch-all", |app| {
+        let total_tabs = tab_count.max(1);
+        app.tabs_mut()[0] = build_search_all_tab(0, bytes_per_tab);
+        for tab_index in 1..total_tabs {
+            app.append_tab(build_search_all_tab(tab_index, bytes_per_tab));
+        }
+
+        sum_profile_iterations(iterations, || {
+            black_box(app.profile_build_search_request(SearchScope::AllOpenTabs, PROFILE_QUERY))
+        })
+    })
+}
+
+pub fn run_document_snapshot_profile(bytes: usize, iterations: usize) -> usize {
+    let buffer = BufferState::new(
+        "document_snapshot_profile.txt".to_owned(),
+        plain_text_of_size(bytes),
+        None,
+    );
+
+    sum_profile_iterations(iterations, || {
+        let snapshot = buffer.document_snapshot();
+        black_box(snapshot.len_chars() + snapshot.revision() as usize)
+    })
+}
+
+pub fn run_viewport_extraction_profile(bytes: usize, iterations: usize) -> usize {
+    let buffer = BufferState::new(
+        "viewport_extraction_profile.txt".to_owned(),
+        plain_text_of_size(bytes),
+        None,
+    );
+    let viewport_lines = 48usize;
+    let overscan_lines = 12usize;
+    let line_step = 17usize;
+    let line_count = buffer.line_count.max(1);
+    let mut line_start = 0usize;
+
+    sum_profile_iterations(iterations, || {
+        let end = (line_start + viewport_lines + overscan_lines).min(line_count);
+        let line_window = buffer.visible_line_window(line_start..end);
+        let row_window = (line_window.layout_row_offset)
+            ..(line_window.layout_row_offset + line_window.line_range.len());
+        let visible_window =
+            buffer.visible_text_window(row_window, line_window.char_range.clone(), line_count);
+
+        line_start = if end >= line_count {
+            0
+        } else {
+            (line_start + line_step).min(line_count.saturating_sub(1))
+        };
+
+        black_box(
+            line_window.text.len()
+                + visible_window.text.len()
+                + visible_window
+                    .char_range
+                    .end
+                    .saturating_sub(visible_window.char_range.start),
+        )
     })
 }
 
@@ -322,6 +413,7 @@ fn with_profile_app<T>(
     let cleanup_root = cleanup_session_root.then(|| session_root.clone());
     let session_store = SessionStore::new(session_root);
     let mut app = ScratchpadApp::with_session_store(session_store);
+    app.set_session_persist_on_drop(false);
     let result = run(&mut app);
 
     if let Some(root) = cleanup_root {

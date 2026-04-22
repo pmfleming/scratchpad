@@ -1,8 +1,9 @@
 use super::FileController;
 use super::support::LoadedFile;
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{PendingBackgroundAction, PendingOpenTabsAction, ScratchpadApp};
 use crate::app::commands::AppCommand;
 use crate::app::domain::WorkspaceTab;
+use crate::app::services::background_io::LoadedPathResult;
 use crate::app::services::file_service::{FileContent, FileService};
 use crate::app::utils::summarize_open_results;
 use std::path::{Path, PathBuf};
@@ -53,15 +54,28 @@ impl OpenBatchSummary {
 
 impl FileController {
     pub fn open_file(app: &mut ScratchpadApp) {
-        Self::handle_open_dialog(app, "Open file dialog", Self::open_selected_paths);
+        Self::handle_open_dialog(app, "Open file dialog", Self::open_selected_paths_async);
     }
 
     pub fn open_file_here(app: &mut ScratchpadApp) {
-        Self::handle_open_dialog(app, "Open Here dialog", Self::open_selected_paths_here);
+        Self::handle_open_dialog(
+            app,
+            "Open Here dialog",
+            Self::open_selected_paths_here_async,
+        );
     }
 
     pub fn open_paths(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
         Self::handle_external_paths(app, paths, "Open requested for", Self::open_selected_paths);
+    }
+
+    pub fn open_paths_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+        Self::handle_external_paths(
+            app,
+            paths,
+            "Background open requested for",
+            Self::open_selected_paths_async,
+        );
     }
 
     pub fn open_external_paths(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
@@ -70,6 +84,15 @@ impl FileController {
             paths,
             "Startup open requested for",
             Self::open_selected_paths,
+        );
+    }
+
+    pub fn open_external_paths_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+        Self::handle_external_paths(
+            app,
+            paths,
+            "Background open requested for",
+            Self::open_selected_paths_async,
         );
     }
 
@@ -105,6 +128,29 @@ impl FileController {
         Self::open_external_paths_here(app, paths);
     }
 
+    pub fn open_external_paths_into_tab_async(
+        app: &mut ScratchpadApp,
+        target_index: usize,
+        paths: Vec<PathBuf>,
+    ) {
+        if paths.is_empty() {
+            return;
+        }
+
+        if target_index >= app.tabs().len() {
+            app.set_error_status(format!(
+                "Startup /addto:index:{} target does not exist.",
+                target_index + 1
+            ));
+            return;
+        }
+
+        app.handle_command(AppCommand::ActivateTab {
+            index: target_index,
+        });
+        Self::open_external_paths_here_async(app, paths);
+    }
+
     pub(super) fn open_selected_paths(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
         Self::prepare_to_open_paths(app);
         let snapshot = app.capture_transaction_snapshot();
@@ -122,9 +168,46 @@ impl FileController {
                 "Open files"
             };
             app.record_transaction(title, affected_items, None, snapshot);
+            let _ = app.persist_session_now();
         }
 
         Self::apply_open_summary(app, summary);
+    }
+
+    pub(super) fn open_selected_paths_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+        Self::prepare_to_open_paths(app);
+        let transaction_snapshot = app.capture_transaction_snapshot();
+        let affected_items = Self::affected_item_labels(&paths);
+        let mut duplicate_count = 0;
+        let mut pending_paths = Vec::new();
+
+        for path in paths {
+            if Self::activate_existing_path(app, &path).is_some() {
+                duplicate_count += 1;
+            } else {
+                pending_paths.push(path);
+            }
+        }
+
+        if pending_paths.is_empty() {
+            Self::apply_open_summary(
+                app,
+                OpenBatchSummary {
+                    duplicate_count,
+                    ..OpenBatchSummary::default()
+                },
+            );
+            return;
+        }
+
+        app.queue_background_path_loads(
+            pending_paths,
+            PendingBackgroundAction::OpenTabs(PendingOpenTabsAction {
+                duplicate_count,
+                affected_items,
+                transaction_snapshot,
+            }),
+        );
     }
 
     fn open_path(app: &mut ScratchpadApp, path: PathBuf) -> OpenPathOutcome {
@@ -171,7 +254,6 @@ impl FileController {
         app.tab_manager_mut().append_tab(WorkspaceTab::new(buffer));
         app.mark_search_dirty();
         app.request_focus_for_active_view();
-        let _ = app.persist_session_now();
         artifact_warning
     }
 
@@ -188,5 +270,51 @@ impl FileController {
             summary.failure_count > 0 || summary.artifact_count > 0,
             summary.log_message(),
         );
+    }
+
+    pub(crate) fn apply_async_open_tabs_result(
+        app: &mut ScratchpadApp,
+        action: PendingOpenTabsAction,
+        results: Vec<LoadedPathResult>,
+    ) {
+        let mut summary = OpenBatchSummary {
+            duplicate_count: action.duplicate_count,
+            ..OpenBatchSummary::default()
+        };
+
+        for loaded in results {
+            if Self::activate_existing_path(app, &loaded.path).is_some() {
+                summary = summary.record(OpenPathOutcome::AlreadyOpen);
+                continue;
+            }
+
+            match loaded.result {
+                Ok(file_content) => {
+                    summary = summary.record(OpenPathOutcome::Opened {
+                        artifact_warning: Self::open_loaded_file(app, loaded.path, file_content),
+                    });
+                }
+                Err(_) => {
+                    summary = summary.record(OpenPathOutcome::Failed);
+                }
+            }
+        }
+
+        if summary.opened_count > 0 {
+            let title = if summary.opened_count == 1 {
+                "Open file"
+            } else {
+                "Open files"
+            };
+            app.record_transaction(
+                title,
+                action.affected_items,
+                None,
+                action.transaction_snapshot,
+            );
+            let _ = app.persist_session_now();
+        }
+
+        Self::apply_open_summary(app, summary);
     }
 }

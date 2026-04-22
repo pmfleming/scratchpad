@@ -90,22 +90,18 @@ pub(super) fn apply_delete_selection(
 pub(super) fn apply_outdent(buffer: &mut BufferState, cursor: &CursorRange) -> Option<CursorRange> {
     let piece_tree = buffer.document().piece_tree();
     let caret = cursor.primary.index;
-
-    // Find the start of the current logical line
-    let text_before = piece_tree.extract_range(0..caret);
-    let line_start = text_before
-        .rfind('\n')
-        .map_or(0, |p| text_before[..=p].chars().count());
-
-    // Check what's at the start of the line
-    let line_text = piece_tree.extract_range(line_start..piece_tree.len_chars());
-    let first_char = line_text.chars().next()?;
+    let line_index = piece_tree.line_index_at_offset(caret);
+    let line_info = piece_tree.line_info(line_index);
+    let line_start = line_info.start_char;
+    let line_end = line_start + line_info.char_len;
+    let (line_prefix, _) = piece_tree.extract_range_bounded(line_start..line_end, 4);
+    let mut prefix_chars = line_prefix.chars();
+    let first_char = prefix_chars.next()?;
 
     let chars_to_remove = if first_char == '\t' {
         1
     } else if first_char == ' ' {
-        // Remove up to 4 spaces
-        line_text.chars().take(4).take_while(|&c| c == ' ').count()
+        line_prefix.chars().take_while(|&c| c == ' ').count()
     } else {
         return None;
     };

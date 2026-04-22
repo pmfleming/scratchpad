@@ -32,6 +32,10 @@ harness = false
 name = "search_speed"
 harness = false
 
+[[bench]]
+name = "parallelism_baselines"
+harness = false
+
 [[bin]]
 name = "ast_hasher"
 path = "scripts/ast_hasher.rs"

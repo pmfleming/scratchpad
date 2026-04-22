@@ -1,7 +1,38 @@
 use regex::RegexBuilder;
 use std::ops::Range;
 
-const INTERRUPT_CHECK_INTERVAL: usize = 256;
+const INTERRUPT_CHECK_INTERVAL: u16 = 1024;
+
+struct InterruptCheck {
+    enabled: bool,
+    steps_until_check: u16,
+}
+
+impl InterruptCheck {
+    fn new(interruptible: bool) -> Self {
+        Self {
+            enabled: interruptible,
+            steps_until_check: 0,
+        }
+    }
+
+    #[inline(always)]
+    fn should_abort<F>(&mut self, should_continue: &mut F) -> bool
+    where
+        F: FnMut() -> bool,
+    {
+        if !self.enabled {
+            return false;
+        }
+        if self.steps_until_check == 0 {
+            self.steps_until_check = INTERRUPT_CHECK_INTERVAL - 1;
+            return !should_continue();
+        }
+
+        self.steps_until_check -= 1;
+        false
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SearchMode {
@@ -54,6 +85,17 @@ pub struct SearchOptions {
 
 pub fn find_matches(text: &str, query: &str, options: SearchOptions) -> Vec<Range<usize>> {
     search_text(text, query, options).matches
+}
+
+pub fn validate_search_query(query: &str, options: SearchOptions) -> Option<SearchError> {
+    if query.is_empty() {
+        return None;
+    }
+
+    match options.mode {
+        SearchMode::PlainText => None,
+        SearchMode::Regex => compile_regex(query, options).err(),
+    }
 }
 
 pub fn search_text(text: &str, query: &str, options: SearchOptions) -> SearchOutcome {
@@ -222,6 +264,7 @@ fn collect_regex_matches<F>(
 where
     F: FnMut() -> bool,
 {
+    let mut interrupt_check = InterruptCheck::new(interruptible);
     let ascii = text.is_ascii();
     let byte_to_char = if ascii {
         Vec::new()
@@ -236,7 +279,8 @@ where
     let mut matches = Vec::new();
 
     for (step, search_match) in regex.find_iter(text).enumerate() {
-        if should_abort(step, interruptible, should_continue) {
+        let _ = step;
+        if interrupt_check.should_abort(should_continue) {
             return None;
         }
         let (start, end) = if ascii {
@@ -273,12 +317,14 @@ where
         return Some(Vec::new());
     }
 
+    let mut interrupt_check = InterruptCheck::new(interruptible);
+
     if text.is_ascii() {
         let text_bytes = text.as_bytes();
         let query_bytes = query.as_bytes();
         let mut matches = Vec::new();
         for start in 0..=text_bytes.len() - query_bytes.len() {
-            if should_abort(start, interruptible, &mut should_continue) {
+            if interrupt_check.should_abort(&mut should_continue) {
                 return None;
             }
             let end = start + query_bytes.len();
@@ -302,7 +348,8 @@ where
         .map(|(byte_index, _)| byte_index)
         .enumerate()
     {
-        if should_abort(step, interruptible, &mut should_continue) {
+        let _ = step;
+        if interrupt_check.should_abort(&mut should_continue) {
             return None;
         }
 
@@ -339,14 +386,55 @@ where
         return Some(Vec::new());
     }
 
+    if query_bytes.len() == 1 {
+        let query_byte = query_bytes[0].to_ascii_lowercase();
+        let mut interrupt_check = InterruptCheck::new(interruptible);
+        let mut matches = Vec::new();
+
+        for (start, byte) in text_bytes.iter().copied().enumerate() {
+            if interrupt_check.should_abort(&mut should_continue) {
+                return None;
+            }
+            if byte.to_ascii_lowercase() != query_byte {
+                continue;
+            }
+
+            let end = start + 1;
+            if whole_word && !is_ascii_whole_word_match(text_bytes, start, end) {
+                continue;
+            }
+            matches.push(start..end);
+        }
+
+        return finalize_matches(matches, interruptible, &mut should_continue);
+    }
+
+    let query_lower = query_bytes
+        .iter()
+        .map(u8::to_ascii_lowercase)
+        .collect::<Vec<_>>();
+    let first_query_byte = query_lower[0];
+    let last_query_byte = query_lower[query_lower.len() - 1];
+    let middle_query_bytes = &query_lower[1..query_lower.len().saturating_sub(1)];
+    let last_start = text_bytes.len() - query_lower.len();
+    let mut interrupt_check = InterruptCheck::new(interruptible);
     let mut matches = Vec::new();
-    for start in 0..=text_bytes.len() - query_bytes.len() {
-        if should_abort(start, interruptible, &mut should_continue) {
+    for start in 0..=last_start {
+        if interrupt_check.should_abort(&mut should_continue) {
             return None;
         }
 
-        let end = start + query_bytes.len();
-        if !text_bytes[start..end].eq_ignore_ascii_case(query_bytes) {
+        if text_bytes[start].to_ascii_lowercase() != first_query_byte {
+            continue;
+        }
+        let end = start + query_lower.len();
+        if end > start + 1 && text_bytes[end - 1].to_ascii_lowercase() != last_query_byte {
+            continue;
+        }
+        if !ascii_case_insensitive_bytes_match(
+            &text_bytes[start + 1..end.saturating_sub(1)],
+            middle_query_bytes,
+        ) {
             continue;
         }
         if whole_word && !is_ascii_whole_word_match(text_bytes, start, end) {
@@ -388,10 +476,11 @@ where
     }
 
     let whole_word_matcher = WholeWordMatcher::new(text, whole_word);
+    let mut interrupt_check = InterruptCheck::new(interruptible);
     let mut matches = Vec::new();
 
     for start in 0..=char_count - query_char_len {
-        if should_abort(start, interruptible, &mut should_continue) {
+        if interrupt_check.should_abort(&mut should_continue) {
             return None;
         }
 
@@ -455,11 +544,18 @@ fn is_ascii_word_char(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
-fn should_abort<F>(step: usize, interruptible: bool, should_continue: &mut F) -> bool
-where
-    F: FnMut() -> bool,
-{
-    interruptible && step.is_multiple_of(INTERRUPT_CHECK_INTERVAL) && !should_continue()
+#[inline(always)]
+fn ascii_case_insensitive_bytes_match(text_bytes: &[u8], query_lower_bytes: &[u8]) -> bool {
+    debug_assert_eq!(text_bytes.len(), query_lower_bytes.len());
+
+    let mut index = 0;
+    while index < query_lower_bytes.len() {
+        if text_bytes[index].to_ascii_lowercase() != query_lower_bytes[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
 }
 
 fn finalize_matches<F>(
@@ -613,6 +709,12 @@ mod tests {
         .expect("search should complete");
 
         assert_eq!(matches.matches, vec![0..5, 6..11, 12..17]);
+    }
+
+    #[test]
+    fn case_insensitive_ascii_search_handles_single_byte_queries() {
+        let matches = find_matches("AaA", "a", SearchOptions::default());
+        assert_eq!(matches, vec![0..1, 1..2, 2..3]);
     }
 
     #[test]

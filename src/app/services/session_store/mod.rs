@@ -2,8 +2,8 @@ mod model;
 mod ops;
 
 use crate::app::domain::{
-    BufferFreshness, BufferState, DiskFileState, EditorViewState, EncodingSource, PaneNode,
-    RestoredBufferState, TextFormatMetadata, WorkspaceTab,
+    BufferFreshness, BufferState, DiskFileState, DocumentSnapshot, EditorViewState, EncodingSource,
+    PaneNode, RestoredBufferState, TextFormatMetadata, WorkspaceTab,
 };
 use crate::app::services::file_service::FileService;
 use crate::app::services::settings_store::AppSettings;
@@ -20,9 +20,27 @@ const SESSION_MANIFEST_NAME: &str = "session.json";
 
 pub use model::SESSION_VERSION;
 
+#[derive(Clone)]
 pub struct SessionStore {
     root: PathBuf,
     manifest_path: PathBuf,
+}
+
+pub(crate) struct SessionPersistRequest {
+    active_tab_index: usize,
+    font_size: f32,
+    word_wrap: bool,
+    tabs: Vec<CapturedSessionTab>,
+}
+
+struct CapturedSessionTab {
+    session_tab: SessionTab,
+    buffer_snapshots: Vec<CapturedSessionBuffer>,
+}
+
+struct CapturedSessionBuffer {
+    temp_id: String,
+    snapshot: DocumentSnapshot,
 }
 
 pub struct RestoredSession {
@@ -94,41 +112,39 @@ impl SessionStore {
         font_size: f32,
         word_wrap: bool,
     ) -> io::Result<()> {
+        self.persist_request(SessionPersistRequest::capture(
+            tabs,
+            active_tab_index,
+            font_size,
+            word_wrap,
+        ))
+    }
+
+    pub(crate) fn persist_request(&self, request: SessionPersistRequest) -> io::Result<()> {
         fs::create_dir_all(&self.root)?;
 
-        let mut active_temp_paths = HashSet::with_capacity(tabs.len());
-        let session_tabs = tabs
-            .iter()
-            .map(|tab| {
-                for buffer in tab.buffers() {
-                    let temp_path = self.buffer_path(&buffer.temp_id);
-                    write_atomic(&temp_path, buffer.text().as_bytes())?;
-                    active_temp_paths.insert(temp_path);
-                }
+        let mut active_temp_paths = HashSet::new();
+        let mut session_tabs = Vec::with_capacity(request.tabs.len());
 
-                Ok(SessionTab {
-                    buffers: tab.buffers().map(SessionBuffer::from).collect(),
-                    buffer_id: None,
-                    name: None,
-                    path: None,
-                    is_dirty: None,
-                    temp_id: None,
-                    encoding: None,
-                    has_bom: None,
-                    active_view_id: tab.active_view_id,
-                    views: tab.views.iter().map(SessionView::from).collect(),
-                    root_pane: SessionPaneNode::from(&tab.root_pane),
-                })
-            })
-            .collect::<io::Result<Vec<_>>>()?;
+        for captured_tab in request.tabs {
+            for buffer in captured_tab.buffer_snapshots {
+                let temp_path = self.buffer_path(&buffer.temp_id);
+                let text = buffer.snapshot.extract_text();
+                write_atomic(&temp_path, text.as_bytes())?;
+                active_temp_paths.insert(temp_path);
+            }
+            session_tabs.push(captured_tab.session_tab);
+        }
 
         self.remove_stale_buffer_files(&active_temp_paths)?;
 
         let manifest = SessionManifest {
             version: SESSION_VERSION,
-            active_tab_index: active_tab_index.min(tabs.len().saturating_sub(1)),
-            font_size,
-            word_wrap,
+            active_tab_index: request
+                .active_tab_index
+                .min(session_tabs.len().saturating_sub(1)),
+            font_size: request.font_size,
+            word_wrap: request.word_wrap,
             tabs: session_tabs,
         };
         let json = serde_json::to_vec_pretty(&manifest).map_err(invalid_data)?;
@@ -358,6 +374,49 @@ impl SessionStore {
     }
 }
 
+impl SessionPersistRequest {
+    pub(crate) fn capture(
+        tabs: &[WorkspaceTab],
+        active_tab_index: usize,
+        font_size: f32,
+        word_wrap: bool,
+    ) -> Self {
+        Self {
+            active_tab_index,
+            font_size,
+            word_wrap,
+            tabs: tabs.iter().map(CapturedSessionTab::capture).collect(),
+        }
+    }
+}
+
+impl CapturedSessionTab {
+    fn capture(tab: &WorkspaceTab) -> Self {
+        Self {
+            session_tab: SessionTab {
+                buffers: tab.buffers().map(SessionBuffer::from).collect(),
+                buffer_id: None,
+                name: None,
+                path: None,
+                is_dirty: None,
+                temp_id: None,
+                encoding: None,
+                has_bom: None,
+                active_view_id: tab.active_view_id,
+                views: tab.views.iter().map(SessionView::from).collect(),
+                root_pane: SessionPaneNode::from(&tab.root_pane),
+            },
+            buffer_snapshots: tab
+                .buffers()
+                .map(|buffer| CapturedSessionBuffer {
+                    temp_id: buffer.temp_id.clone(),
+                    snapshot: buffer.document_snapshot(),
+                })
+                .collect(),
+        }
+    }
+}
+
 #[derive(Default)]
 struct RestoreSummary {
     reloaded_clean_buffers: usize,
@@ -464,4 +523,32 @@ fn session_disk_state(buffer: &SessionBuffer) -> Option<DiskFileState> {
 
 fn invalid_data(error: impl ToString) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SessionPersistRequest, SessionStore};
+    use crate::app::domain::{BufferState, WorkspaceTab};
+
+    #[test]
+    fn persist_request_uses_captured_snapshot_content() {
+        let tempdir = tempfile::tempdir().expect("create session dir");
+        let store = SessionStore::new(tempdir.path().to_path_buf());
+        let mut tab = WorkspaceTab::new(BufferState::new(
+            "notes.txt".to_owned(),
+            "before".to_owned(),
+            None,
+        ));
+        let temp_id = tab.active_buffer().temp_id.clone();
+        let request = SessionPersistRequest::capture(&[tab.clone()], 0, 14.0, true);
+
+        tab.active_buffer_mut().replace_text("after".to_owned());
+        store
+            .persist_request(request)
+            .expect("persist captured session");
+
+        let persisted = std::fs::read_to_string(store.buffer_path(&temp_id))
+            .expect("read persisted buffer payload");
+        assert_eq!(persisted, "before");
+    }
 }

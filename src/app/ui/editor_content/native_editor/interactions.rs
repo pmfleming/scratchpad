@@ -13,6 +13,13 @@ struct ClickState {
     was_primary_pointer_down: bool,
 }
 
+#[derive(Clone, Copy)]
+struct WindowClickSelection {
+    cursor_at_pointer: egui::text::CCursor,
+    char_cursor: CharCursor,
+    char_offset_base: usize,
+}
+
 pub(super) fn handle_mouse_interaction(
     ui: &mut egui::Ui,
     response: &egui::Response,
@@ -76,6 +83,73 @@ pub(super) fn handle_mouse_interaction(
     }
 }
 
+pub(super) fn handle_mouse_interaction_window(
+    ui: &mut egui::Ui,
+    response: &egui::Response,
+    galley: &egui::Galley,
+    rect: egui::Rect,
+    view: &mut EditorViewState,
+    piece_tree: &crate::app::domain::buffer::PieceTreeLite,
+    char_offset_base: usize,
+) {
+    if response.hovered() {
+        ui.output_mut(|output| output.mutable_text_under_cursor = true);
+        ui.set_cursor_icon(egui::CursorIcon::Text);
+    }
+
+    let Some(pointer_pos) = response.interact_pointer_pos() else {
+        return;
+    };
+
+    let cursor_at_pointer = galley.cursor_from_pos(pointer_pos - rect.min);
+    let char_cursor = CharCursor {
+        index: char_offset_base + cursor_at_pointer.index,
+        prefer_next_row: cursor_at_pointer.prefer_next_row,
+    };
+
+    let click_id = response.id.with("click_state");
+    let mut click_state: ClickState = ui
+        .data_mut(|data| data.get_temp(click_id))
+        .unwrap_or_default();
+
+    let secondary_pointer_down = response.contains_pointer()
+        && ui.input(|input| input.pointer.button_down(egui::PointerButton::Secondary));
+    if secondary_pointer_down || response.secondary_clicked() {
+        click_state.was_primary_pointer_down = false;
+        ui.data_mut(|data| data.insert_temp(click_id, click_state));
+        return;
+    }
+
+    let primary_pointer_down = response.contains_pointer()
+        && ui.input(|input| input.pointer.button_down(egui::PointerButton::Primary));
+    let is_new_primary_press = primary_pointer_down && !click_state.was_primary_pointer_down;
+
+    if primary_pointer_down && response.dragged() {
+        extend_selection_to_cursor(view, char_cursor);
+    } else if is_new_primary_press {
+        update_click_count(ui, pointer_pos, &mut click_state);
+        apply_click_selection_window(
+            ui,
+            view,
+            piece_tree,
+            galley,
+            click_state.click_count,
+            WindowClickSelection {
+                cursor_at_pointer,
+                char_cursor,
+                char_offset_base,
+            },
+        );
+    }
+
+    click_state.was_primary_pointer_down = primary_pointer_down;
+    ui.data_mut(|data| data.insert_temp(click_id, click_state));
+
+    if primary_pointer_down {
+        response.request_focus();
+    }
+}
+
 pub(super) fn handle_keyboard_events(
     ui: &mut egui::Ui,
     buffer: &mut BufferState,
@@ -95,6 +169,34 @@ pub(super) fn handle_keyboard_events(
         }
 
         if handle_key_event(event, buffer, view, &cursor, galley, total_chars) {
+            changed = true;
+            continue;
+        }
+
+        changed |= handle_clipboard_event(ui, event, buffer, view, &cursor);
+    }
+
+    changed
+}
+
+pub(super) fn handle_keyboard_events_unwrapped(
+    ui: &mut egui::Ui,
+    buffer: &mut BufferState,
+    view: &mut EditorViewState,
+    total_chars: usize,
+) -> bool {
+    let events = ui.input(|input| input.events.clone());
+    let mut changed = false;
+
+    for event in &events {
+        let cursor = view.cursor_range.unwrap_or_default();
+        let text_changed = handle_text_event(event, buffer, view, &cursor);
+        changed |= text_changed;
+        if text_changed {
+            continue;
+        }
+
+        if handle_key_event_unwrapped(event, buffer, view, &cursor, total_chars) {
             changed = true;
             continue;
         }
@@ -168,6 +270,38 @@ fn apply_click_selection(
             });
         }
         _ => apply_single_click(ui, view, char_cursor),
+    }
+}
+
+fn apply_click_selection_window(
+    ui: &egui::Ui,
+    view: &mut EditorViewState,
+    piece_tree: &crate::app::domain::buffer::PieceTreeLite,
+    galley: &egui::Galley,
+    click_count: u32,
+    selection: WindowClickSelection,
+) {
+    match click_count {
+        2 => {
+            let start = word_boundary::word_start(piece_tree, selection.char_cursor.index);
+            let end = word_boundary::word_end(piece_tree, selection.char_cursor.index);
+            view.cursor_range = Some(CursorRange::two(start, end));
+        }
+        n if n >= 3 => {
+            let row_start = galley.cursor_begin_of_row(&selection.cursor_at_pointer);
+            let row_end = galley.cursor_end_of_row(&selection.cursor_at_pointer);
+            view.cursor_range = Some(CursorRange {
+                primary: CharCursor {
+                    index: selection.char_offset_base + row_end.index,
+                    prefer_next_row: row_end.prefer_next_row,
+                },
+                secondary: CharCursor {
+                    index: selection.char_offset_base + row_start.index,
+                    prefer_next_row: row_start.prefer_next_row,
+                },
+            });
+        }
+        _ => apply_single_click(ui, view, selection.char_cursor),
     }
 }
 
@@ -268,7 +402,7 @@ fn handle_key_event(
             modifiers,
             ..
         } if modifiers.command && !modifiers.shift => {
-            apply_history(view, buffer.undo_last_text_operation_native())
+            apply_history(view, buffer.undo_last_text_operation())
         }
 
         egui::Event::Key {
@@ -277,7 +411,7 @@ fn handle_key_event(
             modifiers,
             ..
         } if modifiers.command && (event_key_is_y(event) || modifiers.shift) => {
-            apply_history(view, buffer.redo_last_text_operation_native())
+            apply_history(view, buffer.redo_last_text_operation())
         }
 
         egui::Event::Key {
@@ -300,6 +434,110 @@ fn handle_key_event(
             *key,
             modifiers,
             galley,
+            total_chars,
+            buffer.document().piece_tree(),
+        )
+        .map(|new_cursor| {
+            view.cursor_range = Some(new_cursor);
+        })
+        .is_some(),
+
+        _ => false,
+    }
+}
+
+fn handle_key_event_unwrapped(
+    event: &egui::Event,
+    buffer: &mut BufferState,
+    view: &mut EditorViewState,
+    cursor: &CursorRange,
+    total_chars: usize,
+) -> bool {
+    match event {
+        egui::Event::Key {
+            key: egui::Key::Enter,
+            pressed: true,
+            ..
+        } => {
+            let line_ending = buffer.document().preferred_line_ending_str().to_owned();
+            insert_text(buffer, view, cursor, &line_ending)
+        }
+
+        egui::Event::Key {
+            key: egui::Key::Tab,
+            pressed: true,
+            modifiers,
+            ..
+        } if !modifiers.shift => insert_text(buffer, view, cursor, "\t"),
+
+        egui::Event::Key {
+            key: egui::Key::Tab,
+            pressed: true,
+            modifiers,
+            ..
+        } if modifiers.shift => editing::apply_outdent(buffer, cursor)
+            .map(|new_cursor| {
+                view.cursor_range = Some(new_cursor);
+            })
+            .is_some(),
+
+        egui::Event::Key {
+            key: egui::Key::Backspace,
+            pressed: true,
+            modifiers,
+            ..
+        } => {
+            view.cursor_range = Some(editing::apply_backspace(buffer, cursor, modifiers));
+            true
+        }
+
+        egui::Event::Key {
+            key: egui::Key::Delete,
+            pressed: true,
+            modifiers,
+            ..
+        } => {
+            view.cursor_range = Some(editing::apply_delete(buffer, cursor, modifiers));
+            true
+        }
+
+        egui::Event::Key {
+            key: egui::Key::Z,
+            pressed: true,
+            modifiers,
+            ..
+        } if modifiers.command && !modifiers.shift => {
+            apply_history(view, buffer.undo_last_text_operation())
+        }
+
+        egui::Event::Key {
+            key: egui::Key::Z | egui::Key::Y,
+            pressed: true,
+            modifiers,
+            ..
+        } if modifiers.command && (event_key_is_y(event) || modifiers.shift) => {
+            apply_history(view, buffer.redo_last_text_operation())
+        }
+
+        egui::Event::Key {
+            key: egui::Key::A,
+            pressed: true,
+            modifiers,
+            ..
+        } if modifiers.command => {
+            view.cursor_range = Some(select_all_cursor(total_chars));
+            false
+        }
+
+        egui::Event::Key {
+            key,
+            pressed: true,
+            modifiers,
+            ..
+        } => cursor::apply_cursor_movement_unwrapped(
+            cursor,
+            *key,
+            modifiers,
             total_chars,
             buffer.document().piece_tree(),
         )

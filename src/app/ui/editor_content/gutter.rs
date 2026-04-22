@@ -50,7 +50,7 @@ fn render_layout_gutter_rows(
     let row_height = ui.fonts_mut(|fonts| fonts.row_height(font_id));
     let desired_size = egui::vec2(
         ui.available_width(),
-        layout.galley.rect.height().max(ui.available_height()),
+        layout.content_height().max(ui.available_height()),
     );
     let (rect, _) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
     let painter = ui.painter();
@@ -58,7 +58,7 @@ fn render_layout_gutter_rows(
     let y_offset = visible_layout_y_offset(layout, row_height);
 
     for row_index in visible_rows {
-        let Some(row) = layout.galley.rows.get(row_index) else {
+        let Some(row_top) = layout.row_top(row_index) else {
             continue;
         };
         let Some(line_number) = layout
@@ -70,7 +70,7 @@ fn render_layout_gutter_rows(
         };
 
         painter.text(
-            egui::pos2(rect.right() - 8.0, rect.top() + y_offset + row.pos.y),
+            egui::pos2(rect.right() - 8.0, rect.top() + y_offset + row_top),
             egui::Align2::RIGHT_TOP,
             line_number.to_string(),
             font_id.clone(),
@@ -140,7 +140,6 @@ mod tests {
     use super::{max_gutter_line_number, visible_layout_y_offset};
     use crate::app::domain::{RenderedLayout, RenderedTextWindow};
     use eframe::egui;
-    use std::sync::Arc;
 
     fn test_layout(line_count: usize) -> RenderedLayout {
         let ctx = egui::Context::default();
@@ -158,7 +157,7 @@ mod tests {
                     400.0,
                 ))
             });
-            layout = Some(RenderedLayout::from_galley(Arc::new((*galley).clone())));
+            layout = Some(RenderedLayout::from_galley(galley));
         });
         layout.expect("layout should be captured")
     }

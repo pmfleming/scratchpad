@@ -58,6 +58,9 @@ cargo flamegraph --dev --bin profile_tab_tile_layout -o target/analysis/flamegra
 cargo flamegraph --dev --bin profile_view_navigation -o target/analysis/flamegraphs/view_navigation_profile.svg
 cargo flamegraph --dev --bin profile_search_current_app_state -o target/analysis/flamegraphs/search_current_app_state_profile.svg
 cargo flamegraph --dev --bin profile_search_all_tabs -o target/analysis/flamegraphs/search_all_tabs_profile.svg
+cargo flamegraph --dev --bin profile_search_dispatch -o target/analysis/flamegraphs/search_dispatch_profile.svg
+cargo flamegraph --dev --bin profile_document_snapshot -o target/analysis/flamegraphs/document_snapshot_profile.svg
+cargo flamegraph --dev --bin profile_viewport_extraction -o target/analysis/flamegraphs/viewport_extraction_profile.svg
 cargo flamegraph --dev --bin profile_large_file_scroll -o target/analysis/flamegraphs/large_file_scroll_profile.svg
 cargo flamegraph --dev --bin profile_large_file_paste -o target/analysis/flamegraphs/large_file_paste_profile.svg
 cargo flamegraph --dev --bin profile_large_file_split -o target/analysis/flamegraphs/large_file_split_profile.svg
@@ -122,6 +125,9 @@ powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -CloneOnly
 	- `profile_view_navigation`: repeated view switching inside a heavily split tab with both duplicated and distinct buffers
 	- `profile_search_current_app_state`: current-workspace-tab search through the full app-state pipeline on a file-heavy tab with extra duplicate views
 	- `profile_search_all_tabs`: all-open-tabs search across a many-tab workspace where each tab also has duplicate editor views into the same buffer
+	- `profile_search_dispatch`: search target collection and request-building cost before worker-side matching
+	- `profile_document_snapshot`: cheap-clone snapshot creation cost on large piece-tree-backed documents
+	- `profile_viewport_extraction`: visible-line and overscanned text-window extraction cost for large buffers
 	- `profile_large_file_scroll`: headless editor layout and redraw work representative of large-file scroll latency
 	- `profile_large_file_paste`: large insert into an already large buffer, including metadata refresh work
 	- `profile_large_file_split`: repeated split and rebalance work on large file tiles
@@ -141,5 +147,8 @@ Today the measurement workflow covers:
 - working-set and page-fault tracking while scaling tab count
 - real file-backed large-file tests alongside synthetic in-memory probes
 - session persist and restore cost with hundreds or thousands of tabs
+- snapshot creation baselines for large piece-tree-backed documents
+- explicit search request-build and target-collection baselines separate from scan cost
+- viewport extraction baselines for piece-tree visible-range reads
 
 Those measurements sit alongside slowspots, search-speed, flamegraphs, clone analysis, and architecture mapping so large-buffer and high-tab regressions are visible before they turn into user-facing failures.

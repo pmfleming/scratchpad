@@ -113,6 +113,7 @@ impl PieceTreeLeaf {
             last.byte_len += piece.byte_len;
             last.char_len += piece.char_len;
             last.newline_count += piece.newline_count;
+            last.is_ascii &= piece.is_ascii;
         } else {
             self.pieces.push(piece);
         }
@@ -252,6 +253,37 @@ impl PieceTreeLite {
         }
     }
 
+    pub fn char_at(&self, offset_chars: usize) -> Option<char> {
+        if offset_chars >= self.len_chars() || self.root.nodes.is_empty() {
+            return None;
+        }
+
+        let address = self.find_leaf_for_char_offset(offset_chars);
+        let leaf = self
+            .root
+            .nodes
+            .get(address.node_index)?
+            .leaves
+            .get(address.leaf_index)?;
+        let offset_in_leaf = offset_chars.saturating_sub(address.leaf_start_char);
+        let piece_index = leaf
+            .piece_start_chars
+            .partition_point(|&char_start| char_start <= offset_in_leaf)
+            .saturating_sub(1);
+        let piece = leaf.pieces.get(piece_index)?;
+        let offset_in_piece = offset_in_leaf.saturating_sub(leaf.piece_start_chars[piece_index]);
+        let piece_text = self.piece_text(piece);
+
+        if piece.is_ascii {
+            piece_text
+                .as_bytes()
+                .get(offset_in_piece)
+                .map(|byte| *byte as char)
+        } else {
+            piece_text.chars().nth(offset_in_piece)
+        }
+    }
+
     pub fn line_info(&self, target_line: usize) -> PieceTreeLineInfo {
         let (start_char, char_len) = self.line_lookup(target_line);
         PieceTreeLineInfo {
@@ -275,6 +307,26 @@ impl PieceTreeLite {
             preview.push_str("...");
         }
         (line_index + 1, column + 1, preview)
+    }
+
+    pub fn previews_for_matches(
+        &self,
+        ranges: &[Range<usize>],
+        limit: usize,
+    ) -> Vec<(usize, usize, String)> {
+        let limited_ranges = &ranges[..ranges.len().min(limit)];
+        if limited_ranges.is_empty() {
+            return Vec::new();
+        }
+
+        if let Some(text) = self.borrow_range(0..self.len_chars()) {
+            return previews_for_matches_in_contiguous_text(text, limited_ranges);
+        }
+
+        limited_ranges
+            .iter()
+            .map(|range| self.preview_for_match(range))
+            .collect()
     }
 
     pub fn line_lookup(&self, target_line: usize) -> (usize, usize) {
@@ -395,6 +447,24 @@ impl PieceTreeLite {
         self.extract_range(0..self.len_chars())
     }
 
+    pub fn borrow_range(&self, range_chars: Range<usize>) -> Option<&str> {
+        let normalized = self.normalize_char_range(range_chars);
+        if normalized.is_empty() {
+            return Some("");
+        }
+
+        let mut spans = self.spans_for_range(normalized.clone());
+        let first = spans.next()?;
+        if first.char_start != normalized.start || first.char_len != normalized.len() {
+            return None;
+        }
+        if spans.next().is_some() {
+            return None;
+        }
+
+        Some(first.text)
+    }
+
     pub fn extract_range(&self, range_chars: Range<usize>) -> String {
         let mut result = String::new();
         for span in self.spans_for_range(range_chars) {
@@ -449,12 +519,74 @@ impl PieceTreeLite {
     }
 }
 
+fn previews_for_matches_in_contiguous_text(
+    text: &str,
+    ranges: &[Range<usize>],
+) -> Vec<(usize, usize, String)> {
+    let mut previews = Vec::with_capacity(ranges.len());
+    let mut current_char = 0usize;
+    let mut current_byte = 0usize;
+    let mut line_number = 1usize;
+    let mut line_start_char = 0usize;
+    let mut line_start_byte = 0usize;
+    let mut cached_line_start_byte = None;
+    let mut cached_preview = String::new();
+
+    for range in ranges {
+        while current_char < range.start && current_byte < text.len() {
+            let Some(ch) = text[current_byte..].chars().next() else {
+                break;
+            };
+            let next_byte = current_byte + ch.len_utf8();
+            if ch == '\n' {
+                line_number += 1;
+                line_start_char = current_char + 1;
+                line_start_byte = next_byte;
+            }
+            current_char += 1;
+            current_byte = next_byte;
+        }
+
+        if cached_line_start_byte != Some(line_start_byte) {
+            let line_slice = match text[line_start_byte..].find('\n') {
+                Some(relative_end) => &text[line_start_byte..line_start_byte + relative_end],
+                None => &text[line_start_byte..],
+            };
+            let mut bounded = String::new();
+            let mut chars = line_slice.chars();
+            for _ in 0..PREVIEW_MAX_CHARS {
+                let Some(ch) = chars.next() else {
+                    break;
+                };
+                bounded.push(ch);
+            }
+            let truncated = chars.next().is_some();
+            cached_preview = compact_preview(&bounded);
+            if truncated && !cached_preview.ends_with("...") {
+                cached_preview.push_str("...");
+            }
+            cached_line_start_byte = Some(line_start_byte);
+        }
+
+        previews.push((
+            line_number,
+            range.start.saturating_sub(line_start_char) + 1,
+            cached_preview.clone(),
+        ));
+    }
+
+    previews
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         MAX_LEAF_BYTES, MAX_LEAF_PIECES, MAX_LEAVES_PER_INTERNAL, MIN_LEAVES_PER_INTERNAL,
         PieceTreeLite,
     };
+    use rand::RngExt;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     #[test]
     fn repeated_inserts_split_into_multiple_balanced_nodes() {
@@ -510,6 +642,65 @@ mod tests {
         assert_balanced(&tree);
     }
 
+    #[test]
+    fn randomized_edit_sequences_match_string_model() {
+        for seed in [
+            0xC0DE_0001_u64,
+            0xC0DE_0002_u64,
+            0xC0DE_0003_u64,
+            0xC0DE_0004_u64,
+        ] {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let mut expected = random_text(&mut rng, 96);
+            let mut tree = PieceTreeLite::from_string(expected.clone());
+            assert_tree_matches_string_model(&tree, &expected);
+
+            for _step in 0..300 {
+                match rng.random_range(0..4) {
+                    0 => {
+                        let at = rng.random_range(0..=expected.chars().count());
+                        let inserted_len = rng.random_range(0..=12);
+                        let inserted = random_text(&mut rng, inserted_len);
+                        tree.insert(at, &inserted);
+                        insert_string_at_char(&mut expected, at, &inserted);
+                    }
+                    1 => {
+                        if expected.is_empty() {
+                            continue;
+                        }
+                        let len = expected.chars().count();
+                        let start = rng.random_range(0..len);
+                        let end = rng.random_range(start + 1..=len);
+                        tree.remove_char_range(start..end);
+                        remove_string_char_range(&mut expected, start..end);
+                    }
+                    2 => {
+                        let len = expected.chars().count();
+                        let start = rng.random_range(0..=len);
+                        let end = rng.random_range(start..=len);
+                        let replacement_len = rng.random_range(0..=10);
+                        let replacement = random_text(&mut rng, replacement_len);
+                        tree.remove_char_range(start..end);
+                        if !replacement.is_empty() {
+                            tree.insert(start, &replacement);
+                        }
+                        replace_string_char_range(&mut expected, start..end, &replacement);
+                    }
+                    _ => {
+                        let full = tree.extract_range(0..tree.len_chars());
+                        let rebuilt = PieceTreeLite::from_string(full.clone());
+                        assert_eq!(rebuilt.extract_range(0..rebuilt.len_chars()), full);
+                        assert_eq!(rebuilt.metrics().bytes, tree.metrics().bytes);
+                        assert_eq!(rebuilt.metrics().chars, tree.metrics().chars);
+                        assert_eq!(rebuilt.metrics().newlines, tree.metrics().newlines);
+                    }
+                }
+
+                assert_tree_matches_string_model(&tree, &expected);
+            }
+        }
+    }
+
     fn assert_balanced(tree: &PieceTreeLite) {
         let mut computed_bytes = 0usize;
         let mut computed_chars = 0usize;
@@ -555,6 +746,62 @@ mod tests {
         assert_eq!(tree.metrics().pieces, computed_pieces);
     }
 
+    fn assert_tree_matches_string_model(tree: &PieceTreeLite, expected: &str) {
+        assert_eq!(tree.extract_range(0..tree.len_chars()), expected);
+        assert_eq!(tree.len_chars(), expected.chars().count());
+        assert_eq!(tree.len_bytes(), expected.len());
+        assert_eq!(tree.metrics().chars, expected.chars().count());
+        assert_eq!(tree.metrics().bytes, expected.len());
+        assert_eq!(tree.metrics().newlines, expected.matches('\n').count());
+
+        for (offset, ch) in expected.chars().enumerate() {
+            assert_eq!(tree.char_at(offset), Some(ch), "char mismatch at {offset}");
+        }
+        assert_eq!(tree.char_at(expected.chars().count()), None);
+
+        let lines = split_lines_without_newlines(expected);
+        for (line_index, expected_line) in lines.iter().enumerate() {
+            let info = tree.line_info(line_index);
+            assert_eq!(info.line_index, line_index);
+            assert_eq!(
+                tree.extract_range(info.start_char..info.start_char + info.char_len),
+                *expected_line,
+                "line {line_index} mismatch"
+            );
+        }
+
+        assert_balanced(tree);
+    }
+
+    #[test]
+    fn batched_previews_match_individual_preview_generation() {
+        let tree = PieceTreeLite::from_string("one\ntwo alpha\nthree alpha\nfour".to_owned());
+        let ranges = vec![8..13, 20..25];
+
+        let previews = tree.previews_for_matches(&ranges, ranges.len());
+        let expected = ranges
+            .iter()
+            .map(|range| tree.preview_for_match(range))
+            .collect::<Vec<_>>();
+
+        assert_eq!(previews, expected);
+    }
+
+    #[test]
+    fn batched_previews_match_individual_preview_generation_after_fragmentation() {
+        let mut tree = PieceTreeLite::from_string("one\ntwo alpha\nthree alpha\nfour".to_owned());
+        tree.insert(0, "zero\n");
+        let ranges = vec![13..18, 25..30];
+
+        let previews = tree.previews_for_matches(&ranges, ranges.len());
+        let expected = ranges
+            .iter()
+            .map(|range| tree.preview_for_match(range))
+            .collect::<Vec<_>>();
+
+        assert_eq!(previews, expected);
+    }
+
     fn insert_string_at_char(text: &mut String, char_offset: usize, inserted: &str) {
         let byte_offset = char_to_byte_offset(text, char_offset);
         text.insert_str(byte_offset, inserted);
@@ -566,6 +813,16 @@ mod tests {
         text.replace_range(start..end, "");
     }
 
+    fn replace_string_char_range(
+        text: &mut String,
+        range: std::ops::Range<usize>,
+        replacement: &str,
+    ) {
+        let start = char_to_byte_offset(text, range.start);
+        let end = char_to_byte_offset(text, range.end);
+        text.replace_range(start..end, replacement);
+    }
+
     fn char_to_byte_offset(text: &str, char_offset: usize) -> usize {
         if char_offset == 0 {
             return 0;
@@ -575,5 +832,24 @@ mod tests {
             .map(|(index, _)| index)
             .nth(char_offset)
             .unwrap_or(text.len())
+    }
+
+    fn random_text(rng: &mut StdRng, max_len: usize) -> String {
+        const ALPHABET: &[char] = &[
+            'a', 'b', 'c', 'x', 'y', 'z', '0', '1', '2', ' ', '\n', 'é', 'λ', 'β', '🙂', '界',
+        ];
+        let len = rng.random_range(0..=max_len);
+        let mut text = String::new();
+        for _ in 0..len {
+            text.push(ALPHABET[rng.random_range(0..ALPHABET.len())]);
+        }
+        text
+    }
+
+    fn split_lines_without_newlines(text: &str) -> Vec<&str> {
+        if text.is_empty() {
+            return vec![""];
+        }
+        text.split('\n').collect()
     }
 }

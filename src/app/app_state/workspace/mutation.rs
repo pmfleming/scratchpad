@@ -143,9 +143,9 @@ impl ScratchpadApp {
             let Some(selection) = ({
                 let buffer = &mut tab.buffer;
                 if undo {
-                    buffer.undo_last_text_operation_native()
+                    buffer.undo_last_text_operation()
                 } else {
-                    buffer.redo_last_text_operation_native()
+                    buffer.redo_last_text_operation()
                 }
             }) else {
                 return false;
