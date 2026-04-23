@@ -1,6 +1,6 @@
 use super::{SearchMatch, SearchResultEntry, SearchResultGroup, SearchStatus};
 use crate::app::domain::{BufferId, DocumentSnapshot, ViewId};
-use crate::app::services::search::{self, SearchOptions};
+use crate::app::services::search::{self, SearchMode, SearchOptions};
 use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -13,6 +13,7 @@ use std::thread;
 const SEARCH_RESULT_LIMIT: usize = 200;
 const SEARCH_TARGET_PARALLELISM_CAP: usize = 4;
 const SEARCH_TARGET_PARALLELISM_MIN_TARGETS: usize = 4;
+const SEARCH_FRAGMENT_CHUNK_CHARS: usize = 64 * 1024;
 
 pub(super) struct SearchRequest {
     pub(super) generation: u64,
@@ -255,19 +256,14 @@ fn process_search_target_chunk(
             return None;
         }
 
-        let (search_text, search_offset) = target
-            .document_snapshot
-            .search_text_cow(target.search_range.clone());
-        let outcome =
-            search::search_text_interruptible(search_text.as_ref(), query, options, || {
-                latest_generation.load(Ordering::Relaxed) == generation
-            })?;
-        debug_assert!(outcome.error.is_none());
-        let ranges = outcome
-            .matches
-            .into_iter()
-            .map(|range| range.start + search_offset..range.end + search_offset)
-            .collect::<Vec<_>>();
+        let ranges = search_target_ranges(
+            &target.document_snapshot,
+            target.search_range.clone(),
+            query,
+            options,
+            generation,
+            latest_generation,
+        )?;
         outcomes.push(TargetSearchOutcome {
             target_index,
             target,
@@ -276,6 +272,101 @@ fn process_search_target_chunk(
     }
 
     Some(outcomes)
+}
+
+fn search_target_ranges(
+    snapshot: &DocumentSnapshot,
+    search_range: Option<Range<usize>>,
+    query: &str,
+    options: SearchOptions,
+    generation: u64,
+    latest_generation: &AtomicU64,
+) -> Option<Vec<Range<usize>>> {
+    let normalized = search_range
+        .map(|range| snapshot.normalize_char_range(range))
+        .unwrap_or(0..snapshot.len_chars());
+
+    if let Some(text) = snapshot.piece_tree().borrow_range(normalized.clone()) {
+        let outcome = search::search_text_interruptible(text, query, options, || {
+            latest_generation.load(Ordering::Relaxed) == generation
+        })?;
+        debug_assert!(outcome.error.is_none());
+        return Some(
+            outcome
+                .matches
+                .into_iter()
+                .map(|range| range.start + normalized.start..range.end + normalized.start)
+                .collect(),
+        );
+    }
+
+    if options.mode == SearchMode::PlainText {
+        return search_fragmented_plain_text(
+            snapshot,
+            normalized,
+            query,
+            options,
+            generation,
+            latest_generation,
+        );
+    }
+
+    let flattened = snapshot.extract_range(normalized.clone());
+    let outcome = search::search_text_interruptible(&flattened, query, options, || {
+        latest_generation.load(Ordering::Relaxed) == generation
+    })?;
+    debug_assert!(outcome.error.is_none());
+    Some(
+        outcome
+            .matches
+            .into_iter()
+            .map(|range| range.start + normalized.start..range.end + normalized.start)
+            .collect(),
+    )
+}
+
+fn search_fragmented_plain_text(
+    snapshot: &DocumentSnapshot,
+    range: Range<usize>,
+    query: &str,
+    options: SearchOptions,
+    generation: u64,
+    latest_generation: &AtomicU64,
+) -> Option<Vec<Range<usize>>> {
+    if range.is_empty() || query.is_empty() {
+        return Some(Vec::new());
+    }
+
+    let query_chars = query.chars().count().max(1);
+    let overlap_chars = query_chars + usize::from(options.whole_word);
+    let chunk_chars = SEARCH_FRAGMENT_CHUNK_CHARS.max(query_chars.saturating_mul(4));
+    let mut chunk_start = range.start;
+    let mut matches = Vec::new();
+
+    while chunk_start < range.end {
+        if latest_generation.load(Ordering::Relaxed) != generation {
+            return None;
+        }
+
+        let core_end = (chunk_start + chunk_chars).min(range.end);
+        let window_start = range.start.max(chunk_start.saturating_sub(overlap_chars));
+        let window_end = range.end.min(core_end.saturating_add(overlap_chars));
+        let window_text = snapshot.extract_range(window_start..window_end);
+        let outcome = search::search_text_interruptible(&window_text, query, options, || {
+            latest_generation.load(Ordering::Relaxed) == generation
+        })?;
+        debug_assert!(outcome.error.is_none());
+
+        matches.extend(outcome.matches.into_iter().filter_map(|matched| {
+            let global_start = window_start + matched.start;
+            let global_end = window_start + matched.end;
+            (global_start >= chunk_start && global_start < core_end)
+                .then_some(global_start..global_end)
+        }));
+        chunk_start = core_end;
+    }
+
+    Some(matches)
 }
 
 fn search_target_parallelism(target_count: usize) -> usize {
@@ -291,7 +382,10 @@ fn search_target_parallelism(target_count: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{SearchRequest, SearchTargetSnapshot, process_search_request};
+    use super::{
+        SEARCH_FRAGMENT_CHUNK_CHARS, SearchRequest, SearchTargetSnapshot, process_search_request,
+        search_target_ranges,
+    };
     use crate::app::app_state::SearchStatus;
     use crate::app::domain::{BufferState, DocumentSnapshot};
     use crate::app::services::search::SearchOptions;
@@ -328,5 +422,35 @@ mod tests {
         assert_eq!(result.result_groups.len(), 8);
         assert_eq!(result.result_groups[0].buffer_label, "buffer_0.txt");
         assert_eq!(result.result_groups[7].buffer_label, "buffer_7.txt");
+    }
+
+    #[test]
+    fn fragmented_plain_text_search_scans_in_chunks_without_losing_matches() {
+        let mut text = "a".repeat(SEARCH_FRAGMENT_CHUNK_CHARS - 2);
+        text.push(' ');
+        text.push_str("needle");
+        text.push(' ');
+        text.push_str(&"b".repeat(SEARCH_FRAGMENT_CHUNK_CHARS));
+
+        let mut buffer = BufferState::new("search.txt".to_owned(), text.clone(), None);
+        buffer.document_mut().insert_direct(1, "!");
+        let snapshot = buffer.document_snapshot();
+
+        let mut expected_text = text;
+        expected_text.insert(1, '!');
+        let expected_start = expected_text.find("needle").expect("needle present");
+
+        let latest_generation = AtomicU64::new(7);
+        let ranges = search_target_ranges(
+            &snapshot,
+            None,
+            "needle",
+            SearchOptions::default(),
+            7,
+            &latest_generation,
+        )
+        .expect("search should complete");
+
+        assert_eq!(ranges, vec![expected_start..expected_start + "needle".len()]);
     }
 }

@@ -76,6 +76,10 @@ impl TextDocument {
         self.operation_redo.len()
     }
 
+    pub fn latest_operation_record(&self) -> Option<&TextDocumentOperationRecord> {
+        self.operation_undo.last()
+    }
+
     pub fn clear_operation_history(&mut self) {
         self.operation_undo.clear();
         self.operation_redo.clear();

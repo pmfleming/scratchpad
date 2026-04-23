@@ -129,8 +129,7 @@ impl SessionStore {
         for captured_tab in request.tabs {
             for buffer in captured_tab.buffer_snapshots {
                 let temp_path = self.buffer_path(&buffer.temp_id);
-                let text = buffer.snapshot.extract_text();
-                write_atomic(&temp_path, text.as_bytes())?;
+                FileService::write_snapshot_utf8(&temp_path, &buffer.snapshot)?;
                 active_temp_paths.insert(temp_path);
             }
             session_tabs.push(captured_tab.session_tab);

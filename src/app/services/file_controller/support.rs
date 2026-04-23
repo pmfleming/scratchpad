@@ -14,8 +14,13 @@ impl LoadedFile {
         path: PathBuf,
         file_content: FileContent,
     ) -> Self {
-        let format_warning = file_content.format.format_warning_text();
-        let buffer = FileController::buffer_from_file_content(path, file_content);
+        let disk_state = FileService::read_disk_state(&path).ok();
+        let buffer = FileService::build_buffer_from_file_content(&path, file_content, disk_state);
+        Self::from_buffer(buffer)
+    }
+
+    pub(in crate::app::services::file_controller) fn from_buffer(buffer: BufferState) -> Self {
+        let format_warning = buffer.format.format_warning_text();
         let artifact_summary = buffer.artifact_summary.status_text();
         let artifact_warning =
             combine_open_warning(format_warning.as_deref(), artifact_summary.as_deref());
@@ -106,19 +111,6 @@ impl FileController {
             Some(message) => app.set_info_status(message),
             None => app.clear_status_message(),
         }
-    }
-
-    pub(super) fn buffer_from_file_content(
-        path: PathBuf,
-        file_content: FileContent,
-    ) -> BufferState {
-        let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        let disk_state = FileService::read_disk_state(&path).ok();
-        let mut buffer =
-            BufferState::with_format(name, file_content.content, Some(path), file_content.format);
-        buffer.artifact_summary = file_content.artifact_summary;
-        buffer.sync_to_disk_state(disk_state);
-        buffer
     }
 
     pub(super) fn mark_settings_buffer(app: &ScratchpadApp, buffer: &mut BufferState) {

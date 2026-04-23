@@ -1,5 +1,7 @@
 use crate::app::app_state::{AppSurface, ScratchpadApp};
+use crate::app::domain::buffer::TextDocumentOperationRecord;
 use crate::app::domain::{BufferId, TabManager};
+use std::ops::Range;
 use std::time::{Duration, Instant};
 
 const MAX_TRANSACTION_LOG_ENTRIES: usize = 200;
@@ -46,9 +48,15 @@ pub(crate) struct TransactionLog {
 pub(crate) struct PendingTextTransaction {
     entry_id: u64,
     buffer_id: BufferId,
-    before_text: String,
-    last_text: String,
+    preview_state: Option<TextEditPreviewState>,
     last_edit_at: Instant,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TextEditPreviewState {
+    text: String,
+    span: Range<usize>,
+    mergeable: bool,
 }
 
 pub(crate) struct PendingLayoutTransaction {
@@ -252,10 +260,13 @@ impl ScratchpadApp {
         buffer_id: BufferId,
         buffer_label: String,
         snapshot_before: TransactionSnapshot,
-        current_text: String,
+        latest_edit: Option<TextDocumentOperationRecord>,
     ) {
         self.pending_layout_transaction = None;
         let now = Instant::now();
+        let next_preview: Option<TextEditPreviewState> = latest_edit
+            .as_ref()
+            .and_then(TextEditPreviewState::from_operation);
 
         let can_extend_existing = self
             .pending_text_transaction
@@ -263,7 +274,6 @@ impl ScratchpadApp {
             .is_some_and(|pending| {
                 pending.buffer_id == buffer_id
                     && now.duration_since(pending.last_edit_at) <= TEXT_EDIT_GROUP_IDLE
-                    && text_preview_is_reasonable(&pending.before_text, &current_text)
             });
 
         if can_extend_existing {
@@ -271,26 +281,30 @@ impl ScratchpadApp {
                 .pending_text_transaction
                 .as_mut()
                 .expect("pending text transaction");
-            let next_label = text_edit_preview_from_before(&pending.before_text, &current_text)
-                .unwrap_or_else(|| "Edit".to_owned());
-            pending.last_text = current_text;
+            let previous_preview = pending.preview_state.take();
+            let merged_preview: Option<TextEditPreviewState> = match (previous_preview, next_preview) {
+                (Some(existing), Some(next)) => existing.merge(next),
+                _ => None,
+            };
+            pending.preview_state = merged_preview;
             pending.last_edit_at = now;
             if let Some(entry) = self
                 .transaction_log
                 .last_entry_mut()
                 .filter(|entry| entry.id == pending.entry_id)
             {
-                entry.action_label = next_label;
+                entry.action_label = pending
+                    .preview_state
+                    .as_ref()
+                    .and_then(TextEditPreviewState::label)
+                    .unwrap_or_else(|| "Edit".to_owned());
             }
             return;
         }
 
-        let before_text = snapshot_before
-            .tab_manager
-            .active_tab()
-            .map(|tab| tab.active_buffer().text())
-            .unwrap_or_default();
-        let next_label = text_edit_preview_from_before(&before_text, &current_text)
+        let next_label = next_preview
+            .as_ref()
+            .and_then(TextEditPreviewState::label)
             .unwrap_or_else(|| "Edit".to_owned());
         let entry_id = self.transaction_log.next_entry_id();
         self.transaction_log
@@ -298,8 +312,7 @@ impl ScratchpadApp {
         self.pending_text_transaction = Some(PendingTextTransaction {
             entry_id,
             buffer_id,
-            before_text,
-            last_text: current_text,
+            preview_state: next_preview,
             last_edit_at: now,
         });
     }
@@ -315,59 +328,6 @@ impl ScratchpadApp {
         self.pending_text_transaction = None;
         self.mark_session_dirty();
     }
-}
-
-fn text_edit_preview_from_before(before_text: &str, current_text: &str) -> Option<String> {
-    let (_, inserted, _) = changed_span(before_text, current_text);
-    inserted_text_preview(inserted)
-}
-
-fn changed_span<'a>(before: &'a str, after: &'a str) -> (&'a str, &'a str, &'a str) {
-    let prefix_len = before
-        .chars()
-        .zip(after.chars())
-        .take_while(|(left, right)| left == right)
-        .count();
-
-    let before_tail = before.chars().count().saturating_sub(prefix_len);
-    let after_tail = after.chars().count().saturating_sub(prefix_len);
-    let suffix_len = before
-        .chars()
-        .rev()
-        .take(before_tail)
-        .zip(after.chars().rev().take(after_tail))
-        .take_while(|(left, right)| left == right)
-        .count();
-
-    let inserted_end = after.chars().count().saturating_sub(suffix_len);
-    let inserted = slice_chars(after, prefix_len, inserted_end);
-    let removed = slice_chars(
-        before,
-        prefix_len,
-        before.chars().count().saturating_sub(suffix_len),
-    );
-    let unchanged_suffix = slice_chars(after, inserted_end, after.chars().count());
-    (removed, inserted, unchanged_suffix)
-}
-
-fn slice_chars(text: &str, start: usize, end: usize) -> &str {
-    let start_byte = if start == 0 {
-        0
-    } else {
-        text.char_indices()
-            .nth(start)
-            .map(|(index, _)| index)
-            .unwrap_or(text.len())
-    };
-    let end_byte = if end >= text.chars().count() {
-        text.len()
-    } else {
-        text.char_indices()
-            .nth(end)
-            .map(|(index, _)| index)
-            .unwrap_or(text.len())
-    };
-    &text[start_byte..end_byte]
 }
 
 fn inserted_text_preview(inserted: &str) -> Option<String> {
@@ -393,11 +353,50 @@ fn inserted_text_preview(inserted: &str) -> Option<String> {
     Some(preview)
 }
 
-fn text_preview_is_reasonable(before: &str, after: &str) -> bool {
-    let (_, inserted, _) = changed_span(before, after);
-    let line_count = inserted.lines().count().max(1);
-    line_count <= TEXT_EDIT_MAX_PREVIEW_LINES
-        && inserted.chars().count() <= TEXT_EDIT_MAX_PREVIEW_CHARS
+fn preview_text_is_reasonable(text: &str) -> bool {
+    let line_count = text.lines().count().max(1);
+    line_count <= TEXT_EDIT_MAX_PREVIEW_LINES && text.chars().count() <= TEXT_EDIT_MAX_PREVIEW_CHARS
+}
+
+impl TextEditPreviewState {
+    fn from_operation(operation: &TextDocumentOperationRecord) -> Option<Self> {
+        if operation.edits.len() != 1 {
+            return None;
+        }
+
+        let edit = operation.edits.first()?;
+        if edit.inserted_text.is_empty() || !preview_text_is_reasonable(&edit.inserted_text) {
+            return None;
+        }
+
+        Some(Self {
+            text: edit.inserted_text.clone(),
+            span: edit.start_char..edit.start_char + edit.inserted_text.chars().count(),
+            mergeable: edit.deleted_text.is_empty(),
+        })
+    }
+
+    fn label(&self) -> Option<String> {
+        inserted_text_preview(&self.text)
+    }
+
+    fn merge(mut self, next: Self) -> Option<Self> {
+        if !self.mergeable || !next.mergeable {
+            return None;
+        }
+
+        if self.span.end == next.span.start {
+            self.text.push_str(&next.text);
+            self.span.end = next.span.end;
+        } else if next.span.end == self.span.start {
+            self.text = format!("{}{}", next.text, self.text);
+            self.span.start = next.span.start;
+        } else {
+            return None;
+        }
+
+        preview_text_is_reasonable(&self.text).then_some(self)
+    }
 }
 
 #[cfg(test)]
@@ -431,14 +430,19 @@ mod tests {
     }
 
     #[test]
-    fn grouped_text_preview_uses_the_start_of_the_transaction() {
-        assert_eq!(
-            text_edit_preview_from_before("", "hello world"),
-            Some("hello world".to_owned())
-        );
-        assert_eq!(
-            text_edit_preview_from_before("hello", "hello world"),
-            Some(" world".to_owned())
-        );
+    fn edit_preview_state_merges_adjacent_insertions() {
+        let first = TextEditPreviewState {
+            text: "hello".to_owned(),
+            span: 0..5,
+            mergeable: true,
+        };
+        let second = TextEditPreviewState {
+            text: " world".to_owned(),
+            span: 5..11,
+            mergeable: true,
+        };
+
+        let merged = first.merge(second).expect("adjacent insertions should merge");
+        assert_eq!(merged.label(), Some("hello world".to_owned()));
     }
 }

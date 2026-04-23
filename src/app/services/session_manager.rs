@@ -15,10 +15,23 @@ pub(crate) fn maybe_persist_session(app: &mut ScratchpadApp, ctx: &egui::Context
     if app.last_session_persist.elapsed() < crate::app::app_state::SESSION_SNAPSHOT_INTERVAL {
         return;
     }
-
-    if let Err(error) = persist_session_now(app) {
-        app.set_error_status(format!("Session save failed: {error}"));
+    if app.pending_background_actions.values().any(|action| {
+        matches!(
+            action,
+            crate::app::app_state::PendingBackgroundAction::PersistSession(_)
+        )
+    }) {
+        return;
     }
+
+    let request = SessionPersistRequest::capture(
+        app.tabs(),
+        app.active_tab_index(),
+        app.font_size(),
+        app.word_wrap(),
+    );
+    app.clear_session_dirty();
+    app.queue_background_session_persist(request);
 }
 
 pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> std::io::Result<()> {

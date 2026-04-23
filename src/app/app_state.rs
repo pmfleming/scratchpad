@@ -88,6 +88,13 @@ pub(crate) struct PendingStartupRestoreCompareAction {
     pub(crate) conflict: StartupRestoreConflict,
 }
 
+pub(crate) struct PendingSessionPersistAction;
+
+pub(crate) struct PendingEncodingComplianceAction {
+    pub(crate) buffer_id: BufferId,
+    pub(crate) revision: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PendingReloadMode {
     AutoRefreshCleanBuffer,
@@ -101,6 +108,8 @@ pub(crate) enum PendingBackgroundAction {
     ReloadBuffer(PendingReloadBufferAction),
     ReopenWithEncoding(PendingReopenWithEncodingAction),
     StartupRestoreCompare(PendingStartupRestoreCompareAction),
+    PersistSession(PendingSessionPersistAction),
+    RefreshEncodingCompliance(PendingEncodingComplianceAction),
 }
 
 pub struct ScratchpadApp {

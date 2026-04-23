@@ -6,6 +6,11 @@ Date: 2026-04-23
 
 This document captures the current state of Scratchpad's piece-table and piece-tree work, identifies the remaining performance bottlenecks, and lays out a no-code implementation plan for selectively moving more data into memory where it is likely to produce the best performance return.
 
+This revision sharpens the plan around two specific next-step focuses:
+
+1. reducing the number of contexts where the piece tree is flattened back into a full `String`
+2. expanding bounded background work for file load, piece-tree construction, session restore, and metadata recalculation where revision-safe snapshots make that practical
+
 This plan is not only about search.
 
 It is explicitly about four scale cases:
@@ -46,9 +51,10 @@ But the broader issue is larger than that:
 The next performance phase should therefore focus on:
 
 1. eliminating unnecessary whole-buffer flattening on interactive paths
-2. adding selective in-memory caches where fragmentation makes flattening unavoidable
-3. keeping persistence-boundary flattening as an acceptable exception
-4. adding explicit memory-tier rules for active, warm, and cold buffers
+2. splitting metadata into foreground-critical work and deferred background work where correctness allows
+3. adding selective in-memory caches where fragmentation makes flattening unavoidable
+4. keeping persistence-boundary flattening as an acceptable exception
+5. adding explicit memory-tier rules for active, warm, and cold buffers
 
 The key policy point is that "large file" does not automatically mean "do not use memory."
 
@@ -199,6 +205,13 @@ The active native editor render path still begins by extracting the entire docum
 
 That is the most important remaining interactive bottleneck because it keeps large-document editing tied to full-buffer flattening and full-buffer layout cost.
 
+Concrete current examples:
+
+- `src/app/ui/editor_content/text_edit.rs` starts editable rendering with `buffer.document().extract_text()`
+- `src/app/ui/editor_content/native_editor/mod.rs` still has a full-text extraction path for active editing
+
+This is the first place where piece-tree-native access needs to become the default rather than a side path.
+
 ## 2. Fragmented search still falls back to owned text
 
 `DocumentSnapshot::search_text_cow` already borrows contiguous text cheaply when possible.
@@ -206,6 +219,10 @@ That is the most important remaining interactive bottleneck because it keeps lar
 When the requested range is fragmented across pieces, it still builds an owned `String`.
 
 That is much better than the old model, but it still means search on edited or fragmented documents can pay a full flattening cost before matching work begins.
+
+Concrete current example:
+
+- `src/app/app_state/search_state/worker.rs` calls `document_snapshot.search_text_cow(...)`, which still becomes owned text for fragmented revisions
 
 ## 3. Undo still stores deleted and inserted text as `String`
 
@@ -219,7 +236,32 @@ Cursor movement, word-boundary logic, preview generation, and line navigation ar
 
 Even so, some of those helpers still repeatedly call `char_at`, `line_info`, or local scans in ways that may become noticeable at scale, especially after fragmentation.
 
-## 5. Persistence still flattens, but that is acceptable
+There are also still small but important whole-text compatibility reads outside the main editor path, including:
+
+- control-character presentation helpers in `src/app/ui/editor_content/artifact.rs`
+- split-preview helpers in `src/app/ui/tile_header/mod.rs`
+- full-text reads for text-transaction labeling in `src/app/app_state/workspace/mutation.rs` and `src/app/transactions.rs`
+
+These are not all equally expensive, but together they show that the piece tree still has several escape hatches back to whole-buffer strings.
+
+## 5. Metadata refresh is still whole-document and foreground-coupled
+
+`BufferState::refresh_text_metadata()` still performs full-document metadata recomputation from the piece tree immediately after text mutation.
+
+That means the app currently couples three different concerns on the interactive path:
+
+- the mutation itself
+- the minimum metadata needed to keep editing correct
+- broader recomputation such as artifact-summary refresh and other whole-document scans
+
+This is an opportunity for better staging, not for unsafe eventual consistency.
+
+The plan should separate:
+
+- metadata that must be correct immediately for cursoring, layout, and line counts
+- metadata that can be recomputed from a stable snapshot and applied later if the revision still matches
+
+## 6. Persistence still flattens, but that is acceptable
 
 Session persistence and file save still extract full text.
 
@@ -231,7 +273,7 @@ However, persistence volume still matters at workspace scale because a large sav
 
 So save-path flattening is acceptable, but eager restore of every saved buffer is not automatically acceptable.
 
-## 6. Buffer residency policy is still too simple
+## 7. Buffer residency policy is still too simple
 
 Today the system largely assumes that an open buffer remains a fully hydrated live document.
 
@@ -442,14 +484,67 @@ Assessment:
 
 This is a strong companion to progressive hydration and should be treated as part of the same workspace-scale design.
 
+## Option I. Background piece-tree construction and staged install
+
+Shape:
+
+- keep disk read and decode off the UI thread
+- build the initial `PieceTreeLite` and any initial snapshot-friendly metadata off the UI thread as well
+- install the ready buffer into live UI state only after the heavy build work completes
+
+Benefits:
+
+- removes more of large-file open and restore from the UI-critical path
+- keeps the UI-thread responsibility narrow: install, focus, selection, and layout orchestration
+- aligns open and restore with the actual document core instead of backgrounding only the raw file read
+
+Costs:
+
+- requires a clearer handoff type between background load and live buffer installation
+- requires revision-safe handling for races, cancellation, and open-order guarantees
+
+Assessment:
+
+This is one of the clearest concurrency opportunities now that the piece tree is real.
+
+The background I/O lane should evolve from "read bytes and decode text" toward "prepare installable document state".
+
+## Option J. Deferred snapshot-based metadata recomputation
+
+Shape:
+
+- keep the mutation and minimum correctness-critical metadata on the foreground path
+- publish a revisioned snapshot after mutation
+- perform heavier artifact and compliance scans in the background
+- apply the result only if the document revision still matches
+
+Benefits:
+
+- reduces post-edit stall on large documents
+- makes large paste and large replace operations less likely to cross the usability threshold
+- turns metadata work into a bounded, discardable background task rather than guaranteed foreground work
+
+Costs:
+
+- needs explicit separation between critical and deferrable metadata
+- requires stale-result rejection rules and visible behavior for "metadata pending"
+
+Assessment:
+
+This is the most important concurrency opportunity after staged open and restore.
+
+It should be treated as a document-pipeline optimization, not as generic background-task scattering.
+
 ## Recommended Direction
 
 The best near-term performance strategy is:
 
 1. keep the piece tree as the canonical storage model
 2. avoid eager duplication of all document text
-3. add selective lazy in-memory caches only for active paths that still require contiguous text
-4. add an explicit residency and hydration strategy for inactive buffers and large restored workspaces
+3. remove hot-path full-text fallbacks before adding new caches
+4. add selective lazy in-memory caches only for active paths that still require contiguous text
+5. add an explicit residency and hydration strategy for inactive buffers and large restored workspaces
+6. move staged open, staged restore, and deferred metadata work onto bounded snapshot-safe background execution
 
 That should be read as a dynamic policy, not a memory-avoidance policy.
 
@@ -461,7 +556,19 @@ That leads to the following priority order.
 
 ## Recommended Priority Order
 
-### Priority 1. Progressive hydration and residency policy
+### Priority 1. Remove the highest-value flattening sites
+
+Before more caching or wider concurrency, the app should remove the remaining places where the piece tree is present but bypassed.
+
+The first priority should be:
+
+- replace active-editor whole-document extraction with visible-window or bounded-text paths wherever possible
+- reduce fragmented-search fallback flattening
+- remove avoidable whole-text reads in artifact rendering, split previews, and text-transaction bookkeeping
+
+This is the fastest path to making the current piece-tree work matter more.
+
+### Priority 2. Progressive hydration and residency policy
 
 Before adding more caches, the app needs rules for which buffers stay fully live.
 
@@ -474,7 +581,7 @@ The first priority should be:
 
 This is the most important correction for many-open-tab and many-buffer scenarios.
 
-### Priority 2. Lazy shadow-text cache for fragmented active revisions
+### Priority 3. Lazy shadow-text cache for fragmented active revisions
 
 Use a lazy contiguous-text cache only when:
 
@@ -489,7 +596,17 @@ But for the active document, especially a very large one, the threshold should b
 
 If the user is actively working in a 1 GB file and the machine has headroom, the system should prefer faster repeated operations over strict memory minimalism.
 
-## Priority 3. Make visible-window rendering the default for large unwrapped buffers
+## Priority 4. Separate immediate metadata from deferred metadata
+
+Metadata work should stop behaving like a single indivisible foreground step.
+
+The next plan should:
+
+- identify which metadata must update synchronously for correctness
+- move artifact-summary and similar whole-document scans onto snapshot-based background work where possible
+- reject stale metadata results by revision
+
+## Priority 5. Make visible-window rendering the default for large unwrapped buffers
 
 The existing piece-tree-backed visible-line window path is already in the codebase.
 
@@ -497,7 +614,7 @@ The next step should be to expand the conditions under which that path becomes t
 
 This is likely a bigger real-world win than adding more metadata everywhere.
 
-## Priority 4. Add leaf-local line-start caches
+## Priority 6. Add leaf-local line-start caches
 
 Once full-text flattening is less dominant, line-local indexing is the most promising lightweight in-memory enhancement.
 
@@ -508,13 +625,21 @@ It targets:
 - viewport slicing
 - vertical cursor movement
 
-## Priority 5. Rework undo toward piece-descriptor history
+## Priority 7. Rework undo toward piece-descriptor history
 
 This does not need to happen before the rendering and search wins.
 
 But it is still the most direct way to realize the original piece-table advantage in long edit histories.
 
-## Priority 6. Consider smaller hot-helper caches only if profiles still point there
+## Priority 8. Expand bounded background preparation for open and restore
+
+Once flattening and metadata staging are addressed, widen the background pipeline to include:
+
+- piece-tree construction during open and restore
+- install-ready buffer preparation
+- restore batching by active, warm, and cold priority
+
+## Priority 9. Consider smaller hot-helper caches only if profiles still point there
 
 Word-boundary hints or search-specific caches should come only after measurement confirms they matter.
 
@@ -525,6 +650,7 @@ Word-boundary hints or search-specific caches should come only after measurement
 Goal:
 
 - establish whether current cost is dominated by active-document work, startup restore, multi-buffer residency, or workspace-wide tab count
+- explicitly separate flattening cost from non-flattening piece-tree traversal cost
 
 Work:
 
@@ -535,6 +661,10 @@ Work:
   - one tab with many buffers
   - many tabs with mixed active and inactive buffers
 - compare contiguous documents against fragmented edited documents
+- record which workflows still flatten whole text and whether the flattening is:
+  - interactive and unacceptable
+  - repeated but cacheable
+  - persistence-boundary and acceptable
 - record both elapsed time and memory deltas
 
 Exit criteria:
@@ -564,7 +694,25 @@ Exit criteria:
 - large restored workspaces do not eagerly pay the same full cost for every buffer at startup
 - inactive clean buffers have a cheaper steady-state memory story than active buffers
 
-## Phase 3. Add lazy contiguous shadow-text caching for active fragmented revisions
+## Phase 3. Remove the highest-value hot-path flattening
+
+Goal:
+
+- make the piece tree the real hot-path read surface for active editing and common UI helpers
+
+Work:
+
+- replace active-editor whole-document extraction where visible-window and bounded-range reads can work
+- reduce or isolate full-text extraction in artifact rendering and split-preview paths
+- stop using whole-text reads for transaction labeling where bounded previews are sufficient
+- document the remaining approved flattening boundaries explicitly
+
+Exit criteria:
+
+- the active editing path and nearby UI helpers no longer flatten full document text by default
+- remaining whole-text extraction sites are limited and intentional
+
+## Phase 4. Add lazy contiguous shadow-text caching for active fragmented revisions
 
 Goal:
 
@@ -582,7 +730,25 @@ Exit criteria:
 - repeated work over the same active fragmented revision no longer rebuilds full text each time
 - cold buffers are not forced to keep these caches alive
 
-## Phase 4. Push large-buffer editing harder onto visible-window rendering
+## Phase 5. Separate immediate metadata from deferred metadata recomputation
+
+Goal:
+
+- reduce large-edit stall by splitting correctness-critical metadata from background-safe derived metadata
+
+Work:
+
+- identify the minimum metadata required immediately after edit for layout and cursor correctness
+- define a snapshot-based background recomputation path for artifact summaries and other whole-document scans
+- attach revision identity to deferred metadata work and reject stale completions
+- keep user-visible rules clear when metadata is pending or refreshed asynchronously
+
+Exit criteria:
+
+- large edits no longer always force every metadata pass to complete synchronously
+- metadata correctness is preserved through revision checks and clear ownership rules
+
+## Phase 6. Push large-buffer editing harder onto visible-window rendering
 
 Goal:
 
@@ -598,7 +764,7 @@ Exit criteria:
 
 - large unwrapped buffers no longer rely on full-document text extraction during normal editing
 
-## Phase 5. Add leaf-local line indexes
+## Phase 7. Add leaf-local line indexes
 
 Goal:
 
@@ -614,7 +780,7 @@ Exit criteria:
 
 - line and preview operations show lower scan cost on fragmented large documents
 
-## Phase 6. Revisit undo representation
+## Phase 8. Revisit undo representation
 
 Goal:
 
@@ -630,21 +796,25 @@ Exit criteria:
 
 - undo-heavy workloads improve in both memory behavior and elapsed time
 
-## Phase 7. Revisit open and restore parallelism
+## Phase 9. Expand open, restore, and persistence preparation in the background
 
 Goal:
 
-- improve load and restore throughput once hydration policy and buffer tiers exist
+- improve load, restore, and persistence throughput once hydration policy, flattening rules, and snapshot-safe metadata boundaries exist
 
 Work:
 
 - revisit the bounded background I/O lane
+- move more of file open beyond raw read and decode toward install-ready document preparation
+- batch restore work by active, warm, and cold priority
 - determine whether path loads or session restore should gain more controlled fanout
+- move normal session persistence off the UI thread using stable snapshots
 - keep prioritization tied to active and visible content rather than raw bulk concurrency
 
 Exit criteria:
 
 - large open and restore workflows improve without causing larger memory spikes or regressing interaction quality
+- normal persistence no longer sits directly on interactive flows
 
 ## What Not To Do Yet
 
@@ -668,6 +838,8 @@ The next stage should be considered successful if it achieves most of the follow
 - many open tabs and many multi-buffer workspaces have a better steady-state memory story
 - large edited documents no longer pay whole-document extraction during normal unwrapped editing
 - repeated work against fragmented active revisions reuses contiguous text when it must exist
+- full-document flattening is concentrated at explicit boundaries rather than scattered through hot UI helpers
+- heavy metadata recomputation can be deferred safely behind revision checks where correctness allows
 - line and preview operations avoid repeated deep rescans inside leaves
 - memory growth stays selective and revision-scoped rather than permanently duplicating all open buffers
 - undo remains correct and is positioned for later piece-descriptor storage
@@ -683,10 +855,13 @@ But it may be entirely correct to store the active document twice, or maintain o
 The immediate next move is to:
 
 1. keep the piece tree canonical
-2. add a real residency model for active, warm, and cold buffers
-3. restore and open workspaces progressively instead of treating every saved buffer as equally urgent
-4. add a lazy contiguous shadow-text cache only for active fragmented revisions that truly need it
-5. push the visible-window editor path further into the default large-buffer route
-6. add leaf-local line indexing only after measuring the post-cache bottlenecks
+2. remove the highest-value full-text hot-path fallbacks first
+3. add a real residency model for active, warm, and cold buffers
+4. restore and open workspaces progressively instead of treating every saved buffer as equally urgent
+5. add a lazy contiguous shadow-text cache only for active fragmented revisions that truly need it
+6. split metadata work into immediate and deferred parts
+7. push the visible-window editor path further into the default large-buffer route
+8. expand bounded background preparation for open, restore, and persistence once those foreground boundaries are clear
+9. add leaf-local line indexing only after measuring the post-cache bottlenecks
 
 That path is the best balance between performance, memory discipline, and implementation risk.

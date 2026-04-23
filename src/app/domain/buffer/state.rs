@@ -165,6 +165,10 @@ impl BufferState {
         self.document.snapshot()
     }
 
+    pub fn document_revision(&self) -> u64 {
+        self.document.piece_tree().generation()
+    }
+
     pub fn view_status(
         &self,
         cursor_range: Option<CursorRange>,
@@ -283,6 +287,27 @@ impl BufferState {
         self.replace_document_text(text, Some(format));
     }
 
+    pub fn replace_from_loaded_buffer(&mut self, loaded: BufferState) {
+        self.name = loaded.name;
+        self.document = loaded.document;
+        self.path = loaded.path;
+        self.line_count = loaded.line_count;
+        self.artifact_summary = loaded.artifact_summary;
+        self.format = loaded.format;
+        self.disk_state = loaded.disk_state;
+        self.freshness = loaded.freshness;
+        self.active_selection = None;
+        self.has_non_compliant_characters = loaded.has_non_compliant_characters;
+        self.encoding_compliance_stale = loaded.encoding_compliance_stale;
+    }
+
+    pub fn replace_format_without_text_change(&mut self, format: TextFormatMetadata) {
+        self.format = format;
+        self.document
+            .set_preferred_line_ending(self.format.preferred_line_ending_style());
+        self.encoding_compliance_stale = true;
+    }
+
     pub(crate) fn replace_char_ranges_with_undo(
         &mut self,
         replacements: TextReplacements<'_>,
@@ -328,6 +353,18 @@ impl BufferState {
         self.has_non_compliant_characters = self.format.has_non_compliant_characters_spans(
             tree.spans_for_range(0..tree.len_chars()).map(|s| s.text),
         );
+        self.encoding_compliance_stale = false;
+    }
+
+    pub fn encoding_compliance_refresh_needed(&self) -> bool {
+        self.encoding_compliance_stale
+    }
+
+    pub fn apply_encoding_compliance_refresh(&mut self, revision: u64, has_non_compliant: bool) {
+        if self.document_revision() != revision {
+            return;
+        }
+        self.has_non_compliant_characters = has_non_compliant;
         self.encoding_compliance_stale = false;
     }
 

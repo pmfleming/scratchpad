@@ -289,10 +289,17 @@ impl FileController {
             }
 
             match loaded.result {
-                Ok(file_content) => {
-                    summary = summary.record(OpenPathOutcome::Opened {
-                        artifact_warning: Self::open_loaded_file(app, loaded.path, file_content),
-                    });
+                Ok(buffer) => {
+                    let LoadedFile {
+                        artifact_warning,
+                        mut buffer,
+                        ..
+                    } = LoadedFile::from_buffer(buffer);
+                    Self::mark_settings_buffer(app, &mut buffer);
+                    app.tab_manager_mut().append_tab(WorkspaceTab::new(buffer));
+                    app.mark_search_dirty();
+                    app.request_focus_for_active_view();
+                    summary = summary.record(OpenPathOutcome::Opened { artifact_warning });
                 }
                 Err(_) => {
                     summary = summary.record(OpenPathOutcome::Failed);

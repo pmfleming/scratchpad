@@ -182,8 +182,8 @@ impl FileController {
             }
 
             match loaded.result {
-                Ok(file_content) => {
-                    let mut loaded_file = LoadedFile::from_file_content(loaded.path, file_content);
+                Ok(buffer) => {
+                    let mut loaded_file = LoadedFile::from_buffer(buffer);
                     Self::mark_settings_buffer(app, &mut loaded_file.buffer);
                     pending_files.push(loaded_file);
                 }

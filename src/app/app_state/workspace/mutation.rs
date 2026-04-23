@@ -25,6 +25,7 @@ impl ScratchpadApp {
     ) {
         let tab = &mut self.tabs_mut()[active_tab_index];
         tab.buffer.refresh_text_metadata();
+        let latest_edit = tab.buffer.document().latest_operation_record().cloned();
         let has_control_chars = tab.buffer.artifact_summary.has_control_chars();
         for view in &mut tab.views {
             if !has_control_chars {
@@ -32,7 +33,6 @@ impl ScratchpadApp {
             }
         }
         tab.buffer.is_dirty = true;
-        let current_text = tab.buffer.text();
         let warning_message = tab
             .buffer
             .artifact_summary
@@ -49,7 +49,7 @@ impl ScratchpadApp {
             active_buffer_id,
             active_buffer_label,
             transaction_snapshot,
-            current_text,
+            latest_edit,
         );
         self.mark_search_dirty();
         self.mark_session_dirty();

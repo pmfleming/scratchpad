@@ -1,9 +1,13 @@
-use super::{PendingBackgroundAction, PendingStartupRestoreAction, ScratchpadApp};
+use super::{
+    PendingBackgroundAction, PendingEncodingComplianceAction, PendingSessionPersistAction,
+    PendingStartupRestoreAction, ScratchpadApp,
+};
 use crate::app::services::background_io::{
     BackgroundIoRequest, BackgroundIoResult, LoadedPathResult, PathLoadRequest,
 };
 use crate::app::services::file_controller::FileController;
 use crate::app::services::session_manager;
+use crate::app::services::session_store::SessionPersistRequest;
 use crate::app::startup::StartupOptions;
 use eframe::egui;
 use std::path::PathBuf;
@@ -36,6 +40,24 @@ impl ScratchpadApp {
             std::thread::sleep(Duration::from_millis(5));
         }
         self.drain_background_io_results();
+    }
+
+    pub(crate) fn queue_active_buffer_encoding_compliance_refresh(&mut self) {
+        let Some((buffer_id, revision, snapshot, format)) = self.active_tab().and_then(|tab| {
+            let buffer = tab.active_buffer();
+            buffer.encoding_compliance_refresh_needed().then(|| {
+                (
+                    buffer.id,
+                    buffer.document_revision(),
+                    buffer.document_snapshot(),
+                    buffer.format.clone(),
+                )
+            })
+        }) else {
+            return;
+        };
+
+        self.queue_background_encoding_compliance_refresh(buffer_id, revision, snapshot, format);
     }
 
     pub(crate) fn queue_background_path_loads(
@@ -115,6 +137,69 @@ impl ScratchpadApp {
         }
     }
 
+    pub(crate) fn queue_background_session_persist(&mut self, request: SessionPersistRequest) {
+        let request_id = self.allocate_background_request_id();
+        self.pending_background_actions
+            .insert(request_id, PendingBackgroundAction::PersistSession(PendingSessionPersistAction));
+
+        let request = BackgroundIoRequest::PersistSession {
+            request_id,
+            session_store: self.session_store.clone(),
+            request,
+        };
+        if let Err(error) = self.background_io_tx.send(request) {
+            self.pending_background_actions.remove(&request_id);
+            self.apply_background_io_result(BackgroundIoResult::SessionPersisted {
+                request_id,
+                result: error.0.into_persist_result(),
+            });
+        }
+    }
+
+    pub(crate) fn queue_background_encoding_compliance_refresh(
+        &mut self,
+        buffer_id: u64,
+        revision: u64,
+        snapshot: crate::app::domain::DocumentSnapshot,
+        format: crate::app::domain::TextFormatMetadata,
+    ) {
+        if self.pending_background_actions.values().any(|action| {
+            matches!(
+                action,
+                PendingBackgroundAction::RefreshEncodingCompliance(pending)
+                    if pending.buffer_id == buffer_id && pending.revision == revision
+            )
+        }) {
+            return;
+        }
+
+        let request_id = self.allocate_background_request_id();
+        self.pending_background_actions.insert(
+            request_id,
+            PendingBackgroundAction::RefreshEncodingCompliance(PendingEncodingComplianceAction {
+                buffer_id,
+                revision,
+            }),
+        );
+
+        let request = BackgroundIoRequest::RefreshEncodingCompliance {
+            request_id,
+            buffer_id,
+            revision,
+            snapshot,
+            format,
+        };
+        if let Err(error) = self.background_io_tx.send(request) {
+            self.pending_background_actions.remove(&request_id);
+            self.apply_background_io_result(BackgroundIoResult::EncodingComplianceRefreshed {
+                request_id,
+                buffer_id,
+                revision,
+                result: error.0.into_encoding_compliance_result(),
+            });
+        }
+    }
+
     fn allocate_background_request_id(&mut self) -> u64 {
         let request_id = self.next_background_request_id;
         self.next_background_request_id = self.next_background_request_id.saturating_add(1);
@@ -142,7 +227,10 @@ impl ScratchpadApp {
                 Some(PendingBackgroundAction::StartupRestoreCompare(action)) => {
                     self.apply_async_startup_restore_compare_result(action, results);
                 }
-                Some(PendingBackgroundAction::StartupRestore(_)) | None => {}
+                Some(PendingBackgroundAction::StartupRestore(_))
+                | Some(PendingBackgroundAction::PersistSession(_))
+                | Some(PendingBackgroundAction::RefreshEncodingCompliance(_))
+                | None => {}
             },
             BackgroundIoResult::SessionRestored { request_id, result } => {
                 let Some(PendingBackgroundAction::StartupRestore(action)) =
@@ -151,6 +239,45 @@ impl ScratchpadApp {
                     return;
                 };
                 self.apply_runtime_startup_restore_result(action, result);
+            }
+            BackgroundIoResult::SessionPersisted { request_id, result } => {
+                let Some(PendingBackgroundAction::PersistSession(_)) =
+                    self.pending_background_actions.remove(&request_id)
+                else {
+                    return;
+                };
+                match result {
+                    Ok(()) => {
+                        self.last_session_persist = Instant::now();
+                    }
+                    Err(error) => {
+                        self.mark_session_dirty();
+                        self.set_error_status(format!("Session save failed: {error}"));
+                    }
+                }
+            }
+            BackgroundIoResult::EncodingComplianceRefreshed {
+                request_id,
+                buffer_id,
+                revision,
+                result,
+            } => {
+                let Some(PendingBackgroundAction::RefreshEncodingCompliance(_)) =
+                    self.pending_background_actions.remove(&request_id)
+                else {
+                    return;
+                };
+                if let Ok(has_non_compliant_characters) = result
+                    && let Some(buffer) = self
+                        .tabs_mut()
+                        .iter_mut()
+                        .find_map(|tab| tab.buffer_by_id_mut(buffer_id))
+                {
+                    buffer.apply_encoding_compliance_refresh(
+                        revision,
+                        has_non_compliant_characters,
+                    );
+                }
             }
         }
     }
@@ -185,6 +312,8 @@ trait BackgroundIoFallback {
     fn into_restore_result(
         self,
     ) -> Result<Option<crate::app::services::session_store::RestoredSession>, String>;
+    fn into_persist_result(self) -> Result<(), String>;
+    fn into_encoding_compliance_result(self) -> Result<bool, String>;
 }
 
 impl BackgroundIoFallback for BackgroundIoRequest {
@@ -200,7 +329,9 @@ impl BackgroundIoFallback for BackgroundIoRequest {
                     })
                     .collect(),
             ),
-            BackgroundIoRequest::RestoreSession { .. } => None,
+            BackgroundIoRequest::RestoreSession { .. }
+            | BackgroundIoRequest::PersistSession { .. }
+            | BackgroundIoRequest::RefreshEncodingCompliance { .. } => None,
         }
     }
 
@@ -211,7 +342,31 @@ impl BackgroundIoFallback for BackgroundIoRequest {
             BackgroundIoRequest::RestoreSession { .. } => {
                 Err("Background session restore unavailable.".to_owned())
             }
-            BackgroundIoRequest::LoadPaths { .. } => Ok(None),
+            BackgroundIoRequest::LoadPaths { .. }
+            | BackgroundIoRequest::PersistSession { .. }
+            | BackgroundIoRequest::RefreshEncodingCompliance { .. } => Ok(None),
+        }
+    }
+
+    fn into_persist_result(self) -> Result<(), String> {
+        match self {
+            BackgroundIoRequest::PersistSession { .. } => {
+                Err("Background session save unavailable.".to_owned())
+            }
+            BackgroundIoRequest::LoadPaths { .. }
+            | BackgroundIoRequest::RestoreSession { .. }
+            | BackgroundIoRequest::RefreshEncodingCompliance { .. } => Ok(()),
+        }
+    }
+
+    fn into_encoding_compliance_result(self) -> Result<bool, String> {
+        match self {
+            BackgroundIoRequest::RefreshEncodingCompliance { .. } => {
+                Err("Background encoding compliance refresh unavailable.".to_owned())
+            }
+            BackgroundIoRequest::LoadPaths { .. }
+            | BackgroundIoRequest::RestoreSession { .. }
+            | BackgroundIoRequest::PersistSession { .. } => Ok(false),
         }
     }
 }

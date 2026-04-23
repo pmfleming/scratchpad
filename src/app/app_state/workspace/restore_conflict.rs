@@ -3,7 +3,7 @@ use super::super::{
     StartupRestoreConflict,
 };
 use crate::app::commands::AppCommand;
-use crate::app::domain::{BufferFreshness, BufferId, BufferState, ViewId, WorkspaceTab};
+use crate::app::domain::{BufferFreshness, BufferId, ViewId, WorkspaceTab};
 use crate::app::services::background_io::LoadedPathResult;
 
 impl ScratchpadApp {
@@ -54,8 +54,8 @@ impl ScratchpadApp {
         };
         let conflict = action.conflict;
 
-        let file_content = match result.result {
-            Ok(file_content) => file_content,
+        let mut compare_buffer = match result.result {
+            Ok(buffer) => buffer,
             Err(error) => {
                 self.set_warning_status(format!(
                     "Could not open disk version of {} for comparison: {error}",
@@ -74,12 +74,9 @@ impl ScratchpadApp {
             });
         }
 
-        let mut compare_buffer = BufferState::with_format(
-            format!("{} (Disk)", conflict.buffer_name),
-            file_content.content,
-            None,
-            file_content.format,
-        );
+        compare_buffer.name = format!("{} (Disk)", conflict.buffer_name);
+        compare_buffer.path = None;
+        compare_buffer.is_settings_file = false;
         compare_buffer.sync_to_disk_state(result.disk_state);
         self.append_tab(WorkspaceTab::new(compare_buffer));
         self.set_info_status(format!(

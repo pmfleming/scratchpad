@@ -8,7 +8,7 @@ use crate::app::domain::{
     TextFormatMetadata,
 };
 use crate::app::services::background_io::LoadedPathResult;
-use crate::app::services::file_service::{FileContent, FileService};
+use crate::app::services::file_service::FileService;
 use std::path::PathBuf;
 
 struct SaveWriteRequest {
@@ -239,14 +239,14 @@ impl FileController {
         buffer.sync_to_disk_state(disk_state);
     }
 
-    fn replace_buffer_from_file_content(
+    fn replace_buffer_from_loaded_buffer(
         app: &mut ScratchpadApp,
         index: usize,
-        file_content: FileContent,
+        loaded: crate::app::domain::BufferState,
         disk_state: Option<DiskFileState>,
     ) -> String {
         let buffer = app.tabs_mut()[index].active_buffer_mut();
-        buffer.replace_text_with_format(file_content.content, file_content.format);
+        buffer.replace_from_loaded_buffer(loaded);
         buffer.is_dirty = false;
         buffer.sync_to_disk_state(disk_state);
         let buffer_name = buffer.name.clone();
@@ -300,8 +300,7 @@ impl FileController {
         let settings_path = app.settings_path().to_path_buf();
         let buffer = app.tabs_mut()[index].active_buffer_mut();
         if let Some(format) = format_override {
-            buffer.format = format;
-            buffer.refresh_text_metadata();
+            buffer.replace_format_without_text_change(format);
         }
         if update_buffer_path {
             Self::assign_saved_path(buffer, &path);
@@ -392,11 +391,11 @@ impl FileController {
         }
 
         match result.result {
-            Ok(file_content) => {
-                let buffer_name = Self::replace_buffer_from_file_content(
+            Ok(loaded) => {
+                let buffer_name = Self::replace_buffer_from_loaded_buffer(
                     app,
                     tab_index,
-                    file_content,
+                    loaded,
                     result.disk_state,
                 );
                 match action.mode {
@@ -436,12 +435,12 @@ impl FileController {
         }
 
         match result.result {
-            Ok(file_content) => {
-                let encoding_label = file_content.format.encoding_label();
-                let buffer_name = Self::replace_buffer_from_file_content(
+            Ok(loaded) => {
+                let encoding_label = loaded.format.encoding_label();
+                let buffer_name = Self::replace_buffer_from_loaded_buffer(
                     app,
                     tab_index,
-                    file_content,
+                    loaded,
                     result.disk_state,
                 );
                 app.set_info_status(format!("Reopened {buffer_name} with {encoding_label}."));

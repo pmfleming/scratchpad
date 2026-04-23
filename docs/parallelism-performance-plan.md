@@ -18,8 +18,9 @@ Scratchpad now has a real `PieceTreeLite` implementation in `src/app/domain/buff
 So the revised priority is:
 
 - make the piece tree safe, cheap, and complete enough to serve as the primary read and write surface
+- remove the remaining hot paths that still flatten the piece tree back into whole-buffer strings
 - introduce worker-safe document snapshots
-- then move search, persistence, restore, and file pipelines onto bounded background execution
+- then move search, metadata, persistence, restore, and file pipelines onto bounded background execution
 
 ## Executive Summary
 
@@ -42,6 +43,7 @@ But it also still has:
 - word and cursor helpers that extract large temporary strings
 - session and file pipelines that still serialize too much work
 - rendering paths that still assume contiguous text for large buffers
+- metadata refresh that still does too much whole-document work directly after mutation
 
 The result is that Scratchpad is partially parallelized but not yet architected to benefit from parallelism as much as it should.
 
@@ -183,6 +185,10 @@ What still costs too much:
 
 This means search is backgrounded, but not yet cheap to launch and not yet able to exploit wide-scope parallelism cleanly.
 
+That same pattern is the warning sign for the rest of the app:
+
+- backgrounding work helps only after the piece-tree and snapshot path stop paying avoidable flattening costs up front
+
 ## 4. File, session, and restore flows are still too synchronous
 
 Relevant code:
@@ -203,6 +209,15 @@ The old diagnosis still holds:
 
 The difference now is that these flows should be redesigned around stable document snapshots, not just moved into ad hoc worker threads.
 
+The most important concurrency opportunity is therefore not "add more workers" in the abstract.
+
+It is:
+
+- move file read and decode off-thread
+- move initial piece-tree construction and install-ready buffer preparation off-thread
+- stage restore so active content is prepared first and cold content waits behind bounded background budgeting
+- move normal session persistence off the UI path
+
 ## 5. Large-document rendering is still structurally limited
 
 Relevant code:
@@ -219,6 +234,11 @@ The document core and the rendering path now need to meet in the middle:
 
 - the piece tree should provide visible-range extraction and coordinate services
 - the renderer should stop demanding full-buffer contiguous text for large documents
+
+Concrete current examples worth planning against:
+
+- `src/app/ui/editor_content/text_edit.rs` still starts editable rendering from `buffer.document().extract_text()`
+- `src/app/ui/editor_content/native_editor/mod.rs` still has a whole-document extraction path for active editing
 
 ## Primary Goal
 
@@ -296,8 +316,10 @@ This should serve:
 
 - search
 - file read and decode
+- piece-tree construction and install-ready buffer preparation
 - restore
 - save and session persistence
+- deferred metadata recomputation
 - future analysis and indexing tasks
 
 ## Implementation Plan
@@ -469,6 +491,7 @@ Goal:
 
 - keep user intent and tab placement decisions on the UI thread
 - move read, decode, and artifact detection onto workers
+- move initial piece-tree construction and any install-ready document preparation onto workers as well
 - preserve deterministic tab ordering for multi-file open
 - allow bounded parallel open for independent files
 
@@ -492,9 +515,17 @@ Goal:
 - install ready buffers incrementally or in coarse batches
 - keep the startup surface coherent while work completes progressively
 
+### 5.5 Deferred metadata recomputation
+
+- keep mutation and correctness-critical metadata on the foreground path
+- publish revisioned snapshots for heavier artifact and compliance scans
+- recompute deferred metadata on workers
+- apply results only if the revision still matches
+
 Exit criteria:
 
 - open, save, restore, and normal persistence no longer cause avoidable frame stalls
+- large edits do not require every whole-document metadata pass to finish synchronously
 
 ## Phase 6. Build the large-document editor path on piece-tree windows
 
@@ -544,11 +575,12 @@ If the repo wants the best return with the least wasted effort, the order should
 
 1. measure dispatch, snapshot, and I/O costs explicitly
 2. finish and harden the piece-tree core
-3. consolidate the landed snapshot model so the remaining hot search paths stop flattening unnecessarily
-4. finish converting hot read paths to piece-tree-native access
+3. finish converting hot read paths to piece-tree-native access so the remaining flattening is explicit and rare
+4. consolidate the landed snapshot model so the remaining hot search paths stop flattening unnecessarily
 5. split search follow-up into dispatch-path and worker-scan reductions, each with dedicated profile-driven validation
-6. move file, save, restore, and persistence to background snapshot consumers
-7. build the large-document viewport path
+6. move file open, piece-tree build, restore, and persistence to background snapshot consumers
+7. separate immediate metadata from deferred metadata recomputation
+8. build the large-document viewport path
 
 This order matters.
 
@@ -608,7 +640,13 @@ Based on the latest full overview in `target/analysis/`, the immediate order of 
 5. Move normal session persistence onto snapshot-based background work.
    The resource profile shows session persist cost growing to roughly 1.7 seconds at 1000 tabs. That is too expensive to keep coupled tightly to interactive flows once the snapshot model exists.
 
-6. Build the large-document viewport path after search and snapshots land.
+6. Move more of file open and restore beyond raw I/O into background document preparation.
+   The current background lane already helps with read and decode, but large-file open is still too expensive because installable document state is prepared too late and too synchronously.
+
+7. Separate immediate metadata updates from deferred whole-document metadata recomputation.
+   Large paste and other large-document edits still pay too much post-mutation work on the foreground path. Revision-safe deferred metadata work is now one of the clearest concurrency opportunities.
+
+8. Build the large-document viewport path after search and snapshots land.
    The capacity output still says file-size and paste ceilings are memory-bound, with file-size usability dropping after 32 MB and paste usability dropping after 8 MB. That means the app still needs visible-range rendering and incremental document access, not just more worker threads.
 
 ## Recommendation
@@ -616,7 +654,10 @@ Based on the latest full overview in `target/analysis/`, the immediate order of 
 The next implementation step should be:
 
 1. harden the current piece-tree core with stronger invariants and randomized validation
-2. reduce dispatch-path overhead using `search_dispatch_profile` plus the dispatch aggregate-size benchmarks
-3. reduce worker scan and completion overhead using `search_current_app_state_profile` and `search_all_tabs_profile`
+2. remove the highest-value remaining flattening on active editor and hot helper paths
+3. reduce dispatch-path overhead using `search_dispatch_profile` plus the dispatch aggregate-size benchmarks
+4. reduce worker scan and completion overhead using `search_current_app_state_profile` and `search_all_tabs_profile`
+5. move session persistence and more of open and restore preparation onto bounded snapshot-based background work
+6. split metadata work into immediate and deferred revision-safe stages
 
 After those three steps, the next round of search work can be split cleanly between runtime preparation cost and worker-side scan cost instead of treating them as one blended bottleneck.

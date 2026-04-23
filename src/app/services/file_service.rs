@@ -1,11 +1,13 @@
 use crate::app::domain::{
-    DiskFileState, DocumentSnapshot, EncodingSource, TextArtifactSummary, TextFormatMetadata,
+    BufferState, DiskFileState, DocumentSnapshot, EncodingSource, TextArtifactSummary,
+    TextFormatMetadata,
 };
+use crate::app::services::store_io::write_atomic_with;
 use chardetng::EncodingDetector;
 use encoding_rs::Encoding;
 use encoding_rs_io::DecodeReaderBytesBuilder;
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
@@ -187,6 +189,26 @@ impl FileService {
         Ok(resolve_encoding(encoding_name)?.name().to_string())
     }
 
+    pub fn build_buffer_from_file_content(
+        path: &Path,
+        file_content: FileContent,
+        disk_state: Option<DiskFileState>,
+    ) -> BufferState {
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        let mut buffer = BufferState::with_format(
+            name,
+            file_content.content,
+            Some(path.to_path_buf()),
+            file_content.format,
+        );
+        buffer.artifact_summary = file_content.artifact_summary;
+        buffer.sync_to_disk_state(disk_state);
+        buffer
+    }
+
     pub fn encoding_supports_bom(encoding_name: &str) -> io::Result<bool> {
         let encoding = resolve_encoding(encoding_name)?;
         Ok(encoding == encoding_rs::UTF_8
@@ -209,8 +231,11 @@ impl FileService {
         snapshot: &DocumentSnapshot,
         format: &TextFormatMetadata,
     ) -> io::Result<()> {
-        let content = snapshot.extract_text();
-        Self::write_file_with_format(path, &content, format)
+        write_atomic_with(path, |file| write_snapshot_to_writer(file, snapshot, format))
+    }
+
+    pub fn write_snapshot_utf8(path: &Path, snapshot: &DocumentSnapshot) -> io::Result<()> {
+        write_atomic_with(path, |file| write_snapshot_utf8_to_writer(file, snapshot, false))
     }
 
     pub fn write_file_with_bom(
@@ -320,6 +345,119 @@ fn encode_non_utf16(
     }
 }
 
+fn write_snapshot_to_writer(
+    writer: &mut dyn Write,
+    snapshot: &DocumentSnapshot,
+    format: &TextFormatMetadata,
+) -> io::Result<()> {
+    let encoding = resolve_encoding(&format.encoding_name)?;
+    if encoding == encoding_rs::UTF_16LE {
+        return write_snapshot_utf16_to_writer(writer, snapshot, format.has_bom, Endianness::Little);
+    }
+    if encoding == encoding_rs::UTF_16BE {
+        return write_snapshot_utf16_to_writer(writer, snapshot, format.has_bom, Endianness::Big);
+    }
+    if encoding == encoding_rs::UTF_8 {
+        return write_snapshot_utf8_to_writer(writer, snapshot, format.has_bom);
+    }
+
+    write_snapshot_encoded_to_writer(writer, snapshot, encoding)
+}
+
+fn write_snapshot_utf8_to_writer(
+    writer: &mut dyn Write,
+    snapshot: &DocumentSnapshot,
+    has_bom: bool,
+) -> io::Result<()> {
+    if has_bom {
+        writer.write_all(&[0xEF, 0xBB, 0xBF])?;
+    }
+
+    let tree = snapshot.piece_tree();
+    for span in tree.spans_for_range(0..tree.len_chars()) {
+        writer.write_all(span.text.as_bytes())?;
+    }
+    Ok(())
+}
+
+fn write_snapshot_utf16_to_writer(
+    writer: &mut dyn Write,
+    snapshot: &DocumentSnapshot,
+    has_bom: bool,
+    endianness: Endianness,
+) -> io::Result<()> {
+    if has_bom {
+        writer.write_all(match endianness {
+            Endianness::Little => &[0xFF, 0xFE],
+            Endianness::Big => &[0xFE, 0xFF],
+        })?;
+    }
+
+    let tree = snapshot.piece_tree();
+    for span in tree.spans_for_range(0..tree.len_chars()) {
+        for unit in span.text.encode_utf16() {
+            let bytes = match endianness {
+                Endianness::Little => unit.to_le_bytes(),
+                Endianness::Big => unit.to_be_bytes(),
+            };
+            writer.write_all(&bytes)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn write_snapshot_encoded_to_writer(
+    writer: &mut dyn Write,
+    snapshot: &DocumentSnapshot,
+    encoding: &'static Encoding,
+) -> io::Result<()> {
+    let mut encoder = encoding.new_encoder();
+    let mut dst = [0u8; 8192];
+    let tree = snapshot.piece_tree();
+
+    for span in tree.spans_for_range(0..tree.len_chars()) {
+        let mut src = span.text;
+        while !src.is_empty() {
+            let (result, read, written, had_errors) =
+                encoder.encode_from_utf8(src, &mut dst, false);
+            if had_errors {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "Text contains characters not representable in {}",
+                        encoding.name()
+                    ),
+                ));
+            }
+            writer.write_all(&dst[..written])?;
+            src = &src[read..];
+            if result == encoding_rs::CoderResult::InputEmpty {
+                break;
+            }
+        }
+    }
+
+    loop {
+        let (result, _read, written, had_errors) = encoder.encode_from_utf8("", &mut dst, true);
+        if had_errors {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Text contains characters not representable in {}",
+                    encoding.name()
+                ),
+            ));
+        }
+        writer.write_all(&dst[..written])?;
+        if result == encoding_rs::CoderResult::InputEmpty {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
 fn prepend_bom(mut bytes: Vec<u8>, bom: &[u8]) -> Vec<u8> {
     let mut with_bom = Vec::with_capacity(bytes.len() + bom.len());
     with_bom.extend_from_slice(bom);
@@ -338,7 +476,7 @@ fn is_probably_binary(prefix: &[u8], has_bom: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::FileService;
-    use crate::app::domain::TextDocument;
+    use crate::app::domain::{EncodingSource, TextDocument, TextFormatMetadata};
 
     #[test]
     fn writing_snapshot_uses_captured_revision_text() {
@@ -360,5 +498,27 @@ mod tests {
             std::fs::read_to_string(path).expect("read written file"),
             "before"
         );
+    }
+
+    #[test]
+    fn writing_fragmented_snapshot_with_utf16_preserves_content() {
+        let tempdir = tempfile::tempdir().expect("create tempdir");
+        let path = tempdir.path().join("snapshot-utf16.txt");
+        let mut document = TextDocument::new("hello world".to_owned());
+        document.insert_direct(5, " wide");
+        let snapshot = document.snapshot();
+        let format = TextFormatMetadata::detected(
+            "hello wide world",
+            "UTF-16LE".to_owned(),
+            true,
+            EncodingSource::ExplicitUserChoice,
+            false,
+        );
+
+        FileService::write_snapshot_with_format(&path, &snapshot, &format)
+            .expect("write fragmented snapshot");
+
+        let reloaded = FileService::read_file(&path).expect("read UTF-16 snapshot");
+        assert_eq!(reloaded.content, "hello wide world");
     }
 }

@@ -12,7 +12,7 @@ pub use analysis::{
     analyze_line_endings, display_line_count, platform_default_line_ending,
 };
 pub use document::TextDocument;
-pub(crate) use document::{TextReplacementError, TextReplacements};
+pub(crate) use document::{TextDocumentOperationRecord, TextReplacementError, TextReplacements};
 pub use piece_tree::{
     PieceTreeCharPosition, PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLineInfo, PieceTreeLite,
     PieceTreeMetrics, PieceTreeSlice, PieceTreeSpan,

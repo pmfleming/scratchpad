@@ -106,10 +106,6 @@ pub fn render_editor_text_edit(
 
     update_visible_layout(&galley, galley_pos, rect, buffer, view);
 
-    if changed {
-        buffer.refresh_text_metadata();
-    }
-
     view.editor_has_focus = focused;
 
     EditorWidgetOutcome {
@@ -386,10 +382,6 @@ fn render_visible_text_window(
         }
 
         publish_active_selection(buffer, view, focused);
-
-        if changed {
-            buffer.refresh_text_metadata();
-        }
 
         (Some((focused, changed)), false)
     } else {
