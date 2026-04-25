@@ -4,7 +4,8 @@ param(
     [switch]$FullUpdate,
     [switch]$FlamegraphOnly,
     [switch]$SearchSpeedOnly,
-    [switch]$CloneOnly
+    [switch]$CloneOnly,
+    [switch]$LegacyStaticServer
 )
 
 Set-StrictMode -Version Latest
@@ -251,6 +252,8 @@ function Get-RefreshTasks {
         (New-OverviewTask -Title "Generating resource profile data" -Label "resource_profiles" -Arguments @("scripts/resource_profiles.py", "--mode", "visibility")),
         (New-OverviewTask -Title "Generating hotspots data" -Label "hotspots" -Arguments @("scripts/hotspots.py", "--mode", "visibility", "--paths", "src", "--scope", "all") -ParallelGroup "static-analysis"),
         (New-OverviewTask -Title "Generating clone alert data" -Label "clone_alert" -Arguments @("scripts/clone_alert.py", "--mode", "visibility", "--paths", "src") -ParallelGroup "static-analysis"),
+        (New-OverviewTask -Title "Generating correctness review data" -Label "test_catalog" -Arguments @("scripts/test_catalog.py", "--mode", "visibility") -ParallelGroup "static-analysis"),
+        (New-OverviewTask -Title "Generating measurement catalog data" -Label "measurement_catalog" -Arguments @("scripts/measurement_catalog.py", "--mode", "visibility") -ParallelGroup "static-analysis"),
         (New-OverviewTask -Title "Generating architecture map data" -Label "map" -Arguments @("scripts/map.py", "--mode", "visibility") -ParallelGroup "static-analysis")
     )
 
@@ -373,8 +376,13 @@ try {
     if ($activePort -ne $Port) {
         Write-Host "Port $Port is already in use. Using port $activePort instead." -ForegroundColor Yellow
     }
+    $serverArgs = if ($LegacyStaticServer) {
+        @("-m", "http.server", "$activePort")
+    } else {
+        @("scripts/dashboard_server.py", "--port", "$activePort")
+    }
     $serverProcess = Start-Process -FilePath $python `
-        -ArgumentList @("-m", "http.server", "$activePort") `
+        -ArgumentList $serverArgs `
         -WorkingDirectory $repoRoot `
         -PassThru
     Write-Host "Started server with PID $($serverProcess.Id) on port $activePort." -ForegroundColor Green

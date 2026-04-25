@@ -6,7 +6,7 @@ use super::{
 };
 use crate::app::domain::{BufferId, EditorViewState, SearchHighlightState, ViewId, WorkspaceTab};
 use crate::app::ui::editor_content::native_editor::CursorRange;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::atomic::AtomicU64;
 
@@ -230,32 +230,17 @@ impl ScratchpadApp {
             return Vec::new();
         };
         let tab_label = self.search_tab_label(tab_index);
-        let mut seen_buffer_ids = HashSet::with_capacity(tab.views.len());
-        let mut targets = Vec::with_capacity(tab.views.len());
-        self.extend_search_targets_for_views(
+        collect_search_targets_for_views(
             tab_index,
             tab,
             &tab_label,
-            search_range.clone(),
+            search_range,
+            prioritized_buffer_id,
             tab.ordered_view_ids_in_layout_order()
                 .into_iter()
-                .filter_map(|view_id| tab.view(view_id)),
-            &mut seen_buffer_ids,
-            &mut targets,
-        );
-        if seen_buffer_ids.len() < tab.views.len() {
-            self.extend_search_targets_for_views(
-                tab_index,
-                tab,
-                &tab_label,
-                search_range,
-                tab.views.iter(),
-                &mut seen_buffer_ids,
-                &mut targets,
-            );
-        }
-        rotate_prioritized_target(&mut targets, prioritized_buffer_id);
-        targets
+                .filter_map(|view_id| tab.view(view_id))
+                .chain(tab.views.iter()),
+        )
     }
 
     fn search_tab_label(&self, tab_index: usize) -> String {
@@ -560,28 +545,6 @@ impl ScratchpadApp {
         let _ = tab;
         self.note_settings_toml_edit(tab_index);
     }
-
-    fn extend_search_targets_for_views<'a>(
-        &self,
-        tab_index: usize,
-        tab: &WorkspaceTab,
-        tab_label: &str,
-        search_range: Option<Range<usize>>,
-        views: impl IntoIterator<Item = &'a EditorViewState>,
-        seen_buffer_ids: &mut HashSet<BufferId>,
-        targets: &mut Vec<SearchTargetSnapshot>,
-    ) {
-        for view in views {
-            if !seen_buffer_ids.insert(view.buffer_id) {
-                continue;
-            }
-            if let Some(target) =
-                build_search_target_from_view(tab_index, tab, view, tab_label, search_range.clone())
-            {
-                targets.push(target);
-            }
-        }
-    }
 }
 
 fn build_replacement_targets(
@@ -615,18 +578,57 @@ fn build_replacement_targets(
     targets
 }
 
-fn rotate_prioritized_target(
-    targets: &mut [SearchTargetSnapshot],
+fn collect_search_targets_for_views<'a>(
+    tab_index: usize,
+    tab: &WorkspaceTab,
+    tab_label: &str,
+    search_range: Option<Range<usize>>,
+    prioritized_buffer_id: Option<BufferId>,
+    views: impl IntoIterator<Item = &'a EditorViewState>,
+) -> Vec<SearchTargetSnapshot> {
+    let mut targets_by_buffer = HashMap::with_capacity(tab.views.len());
+    for view in views {
+        if targets_by_buffer.contains_key(&view.buffer_id) {
+            continue;
+        }
+        if let Some(target) =
+            build_search_target_from_view(tab_index, tab, view, tab_label, search_range.clone())
+        {
+            targets_by_buffer.insert(view.buffer_id, target);
+        }
+    }
+
+    let mut ordered_buffer_ids = ordered_unique_buffer_ids(tab);
+    rotate_prioritized_buffer_id(&mut ordered_buffer_ids, prioritized_buffer_id);
+    ordered_buffer_ids
+        .into_iter()
+        .filter_map(|buffer_id| targets_by_buffer.remove(&buffer_id))
+        .collect()
+}
+
+fn ordered_unique_buffer_ids(tab: &WorkspaceTab) -> Vec<BufferId> {
+    let mut seen_buffer_ids = HashSet::with_capacity(tab.views.len());
+    let mut ordered_buffer_ids = Vec::with_capacity(tab.views.len());
+    for view in &tab.views {
+        if seen_buffer_ids.insert(view.buffer_id) {
+            ordered_buffer_ids.push(view.buffer_id);
+        }
+    }
+    ordered_buffer_ids
+}
+
+fn rotate_prioritized_buffer_id(
+    ordered_buffer_ids: &mut [BufferId],
     prioritized_buffer_id: Option<BufferId>,
 ) {
     let Some(prioritized_buffer_id) = prioritized_buffer_id else {
         return;
     };
-    if let Some(index) = targets
+    if let Some(index) = ordered_buffer_ids
         .iter()
-        .position(|target| target.buffer_id == prioritized_buffer_id)
+        .position(|buffer_id| *buffer_id == prioritized_buffer_id)
     {
-        targets.rotate_left(index);
+        ordered_buffer_ids.rotate_left(index);
     }
 }
 

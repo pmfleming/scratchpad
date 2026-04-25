@@ -31,6 +31,8 @@ class CodeMetrics:
     abc_mag: float
     nom_fn: int
     nom_cl: int
+    quality_score: float = 0.0
+    size_score: float = 0.0
     score: float = 0.0
     signals: str = ""
     abc_density: float = 0.0
@@ -75,21 +77,25 @@ class HotspotAnalyzer:
             nom_fn=int(self._extract_metric(m, "nom", "functions")),
             nom_cl=int(self._extract_metric(m, "nom", "closures")),
         )
-        metrics.score = self.calculate_score(metrics)
+        metrics.quality_score = self.calculate_quality_score(metrics)
+        metrics.size_score = self.calculate_size_score(metrics)
+        metrics.score = metrics.quality_score
         metrics.signals = self.generate_signals(metrics)
 
         if metrics.sloc > 0:
             metrics.abc_density = metrics.abc_mag / metrics.sloc
-            metrics.complexity_density = metrics.score / metrics.sloc
+            metrics.complexity_density = metrics.quality_score / metrics.sloc
 
         return metrics
 
-    def calculate_score(self, m: CodeMetrics) -> float:
+    def calculate_quality_score(self, m: CodeMetrics) -> float:
         score = (m.cognitive * 4.0) + (m.cyclomatic * 2.5)
         score += max(0.0, 70.0 - m.mi) * 1.5
         score += min(30.0, m.effort / 1000.0)
-        score += min(20.0, m.sloc / 10.0)
         return round(score, 2)
+
+    def calculate_size_score(self, m: CodeMetrics) -> float:
+        return round(min(20.0, m.sloc / 10.0), 2)
 
     def generate_signals(self, m: CodeMetrics) -> str:
         signals = []
@@ -102,7 +108,7 @@ class HotspotAnalyzer:
         if m.effort >= 15000:
             signals.append(f"high effort={m.effort:,.0f}")
         if m.sloc >= 150:
-            signals.append(f"large sloc={m.sloc}")
+            signals.append(f"large size={m.sloc} sloc")
         return ", ".join(signals) if signals else "stable"
 
     def flatten(self, node: Dict, results: List[CodeMetrics]) -> None:

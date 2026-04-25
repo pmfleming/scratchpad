@@ -6,6 +6,7 @@ mod state;
 
 pub(crate) use analysis::{
     BufferTextMetadata, buffer_text_metadata, buffer_text_metadata_from_piece_tree,
+    detected_text_format_and_metadata,
 };
 pub use analysis::{
     EncodingSource, LineEndingCounts, LineEndingStyle, TextArtifactSummary, TextFormatMetadata,

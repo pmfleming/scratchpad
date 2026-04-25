@@ -1,6 +1,9 @@
 mod model;
 mod ops;
 
+use crate::app::domain::buffer::{
+    BufferTextMetadata, buffer_text_metadata, detected_text_format_and_metadata,
+};
 use crate::app::domain::{
     BufferFreshness, BufferState, DiskFileState, DocumentSnapshot, EditorViewState, EncodingSource,
     PaneNode, RestoredBufferState, TextFormatMetadata, WorkspaceTab,
@@ -265,17 +268,20 @@ impl SessionStore {
                     summary.reloaded_clean_buffers += 1;
                 }
                 summary.record(restored.freshness);
-                let mut restored_buffer = BufferState::restored(RestoredBufferState {
-                    id: buffer.id,
-                    name: buffer.name,
-                    content: restored.content,
-                    path: buffer.path,
-                    is_dirty: buffer.is_dirty,
-                    temp_id: buffer.temp_id,
-                    format: restored.format,
-                    disk_state: restored.disk_state,
-                    freshness: restored.freshness,
-                });
+                let mut restored_buffer = BufferState::restored_with_text_metadata(
+                    RestoredBufferState {
+                        id: buffer.id,
+                        name: buffer.name,
+                        content: restored.content,
+                        path: buffer.path,
+                        is_dirty: buffer.is_dirty,
+                        temp_id: buffer.temp_id,
+                        format: restored.format,
+                        disk_state: restored.disk_state,
+                        freshness: restored.freshness,
+                    },
+                    restored.text_metadata,
+                );
                 restored_buffer.is_settings_file = buffer.is_settings_file;
                 restored_buffer
             })
@@ -341,9 +347,8 @@ impl SessionStore {
         }
 
         match FileService::read_file(path) {
-            Ok(file_content) => RestoredBufferContent::new(
-                file_content.content,
-                file_content.format,
+            Ok(file_content) => RestoredBufferContent::from_file_content(
+                file_content,
                 Some(disk_state),
                 BufferFreshness::InSync,
             ),
@@ -362,9 +367,8 @@ impl SessionStore {
         path: &Path,
     ) -> RestoredBufferContent {
         match FileService::read_file(path) {
-            Ok(file_content) => RestoredBufferContent::new(
-                file_content.content,
-                file_content.format,
+            Ok(file_content) => RestoredBufferContent::from_file_content(
+                file_content,
                 FileService::read_disk_state(path).ok(),
                 BufferFreshness::InSync,
             ),
@@ -460,6 +464,7 @@ impl RestoreSummary {
 struct RestoredBufferContent {
     content: String,
     format: TextFormatMetadata,
+    text_metadata: BufferTextMetadata,
     disk_state: Option<DiskFileState>,
     freshness: BufferFreshness,
 }
@@ -468,15 +473,31 @@ impl RestoredBufferContent {
     fn new(
         content: String,
         format: TextFormatMetadata,
+        text_metadata: BufferTextMetadata,
         disk_state: Option<DiskFileState>,
         freshness: BufferFreshness,
     ) -> Self {
         Self {
             content,
             format,
+            text_metadata,
             disk_state,
             freshness,
         }
+    }
+
+    fn from_file_content(
+        file_content: crate::app::services::file_service::FileContent,
+        disk_state: Option<DiskFileState>,
+        freshness: BufferFreshness,
+    ) -> Self {
+        Self::new(
+            file_content.content,
+            file_content.format,
+            file_content.text_metadata,
+            disk_state,
+            freshness,
+        )
     }
 
     fn from_session(
@@ -485,8 +506,8 @@ impl RestoredBufferContent {
         disk_state: Option<DiskFileState>,
         freshness: BufferFreshness,
     ) -> Self {
-        let format = session_buffer_format(buffer, &content);
-        Self::new(content, format, disk_state, freshness)
+        let (format, text_metadata) = session_buffer_format_and_metadata(buffer, &content);
+        Self::new(content, format, text_metadata, disk_state, freshness)
     }
 
     fn empty(buffer: &SessionBuffer, freshness: BufferFreshness) -> Self {
@@ -494,21 +515,26 @@ impl RestoredBufferContent {
     }
 }
 
-fn session_buffer_format(buffer: &SessionBuffer, content: &str) -> TextFormatMetadata {
+fn session_buffer_format_and_metadata(
+    buffer: &SessionBuffer,
+    content: &str,
+) -> (TextFormatMetadata, BufferTextMetadata) {
+    let encoding_source = if buffer.has_bom {
+        EncodingSource::Bom
+    } else {
+        EncodingSource::Heuristic
+    };
+
     if let Some(mut format) = buffer.format.clone() {
-        format.refresh_from_text(content);
-        return format;
+        let text_metadata = buffer_text_metadata(content, &mut format);
+        return (format, text_metadata);
     }
 
-    TextFormatMetadata::detected(
+    detected_text_format_and_metadata(
         content,
         buffer.encoding.clone(),
         buffer.has_bom,
-        if buffer.has_bom {
-            EncodingSource::Bom
-        } else {
-            EncodingSource::Heuristic
-        },
+        encoding_source,
         false,
     )
 }

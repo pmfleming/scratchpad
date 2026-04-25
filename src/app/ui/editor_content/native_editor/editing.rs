@@ -2,6 +2,10 @@ use super::types::{CharCursor, CursorRange, EditOperation, OperationRecord};
 use super::word_boundary;
 use crate::app::domain::BufferState;
 
+fn is_wordwise_modifier(modifiers: &eframe::egui::Modifiers) -> bool {
+    modifiers.alt || modifiers.ctrl
+}
+
 pub(super) fn apply_text_insert(
     buffer: &mut BufferState,
     cursor: &CursorRange,
@@ -33,7 +37,7 @@ pub(super) fn apply_backspace(
         return *cursor;
     }
 
-    let delete_start = if modifiers.alt || modifiers.ctrl {
+    let delete_start = if is_wordwise_modifier(modifiers) {
         word_boundary::find_word_boundary_left(buffer.document().piece_tree(), start)
     } else {
         start - 1
@@ -56,7 +60,7 @@ pub(super) fn apply_delete(
         return *cursor;
     }
 
-    let delete_end = if modifiers.alt || modifiers.ctrl {
+    let delete_end = if is_wordwise_modifier(modifiers) {
         word_boundary::find_word_boundary_right(buffer.document().piece_tree(), start)
     } else {
         start + 1
@@ -71,20 +75,7 @@ pub(super) fn apply_delete_selection(
     cursor: &CursorRange,
 ) -> CursorRange {
     let (start, end) = cursor.sorted_indices();
-    let deleted_text = extract_and_delete_range(buffer, start, end);
-    let new_cursor = CursorRange::one(CharCursor {
-        index: start,
-        prefer_next_row: true,
-    });
-    record_edit(
-        buffer,
-        cursor,
-        new_cursor,
-        start,
-        deleted_text,
-        String::new(),
-    );
-    new_cursor
+    delete_range(buffer, cursor, start, end, true).0
 }
 
 pub(super) fn apply_outdent(buffer: &mut BufferState, cursor: &CursorRange) -> Option<CursorRange> {
@@ -130,21 +121,7 @@ pub(super) fn apply_outdent(buffer: &mut BufferState, cursor: &CursorRange) -> O
 
 pub(super) fn apply_cut(buffer: &mut BufferState, cursor: &CursorRange) -> (CursorRange, String) {
     let (start, end) = cursor.sorted_indices();
-    let selected = buffer.document().piece_tree().extract_range(start..end);
-    let deleted_text = extract_and_delete_range(buffer, start, end);
-    let new_cursor = CursorRange::one(CharCursor {
-        index: start,
-        prefer_next_row: true,
-    });
-    record_edit(
-        buffer,
-        cursor,
-        new_cursor,
-        start,
-        deleted_text,
-        String::new(),
-    );
-    (new_cursor, selected)
+    delete_range(buffer, cursor, start, end, true)
 }
 
 fn apply_char_delete(
@@ -154,26 +131,30 @@ fn apply_char_delete(
     delete_end: usize,
     prefer_next_row: bool,
 ) -> CursorRange {
-    let deleted_text = buffer
-        .document()
-        .piece_tree()
-        .extract_range(delete_start..delete_end);
-    buffer
-        .document_mut()
-        .delete_char_range_direct(delete_start..delete_end);
+    delete_range(buffer, cursor, delete_start, delete_end, prefer_next_row).0
+}
+
+fn delete_range(
+    buffer: &mut BufferState,
+    cursor: &CursorRange,
+    start: usize,
+    end: usize,
+    prefer_next_row: bool,
+) -> (CursorRange, String) {
+    let deleted_text = extract_and_delete_range(buffer, start, end);
     let new_cursor = CursorRange::one(CharCursor {
-        index: delete_start,
+        index: start,
         prefer_next_row,
     });
     record_edit(
         buffer,
         cursor,
         new_cursor,
-        delete_start,
-        deleted_text,
+        start,
+        deleted_text.clone(),
         String::new(),
     );
-    new_cursor
+    (new_cursor, deleted_text)
 }
 
 fn extract_and_delete_range(buffer: &mut BufferState, start: usize, end: usize) -> String {

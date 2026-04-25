@@ -24,8 +24,9 @@ impl ScratchpadApp {
         transaction_snapshot: TransactionSnapshot,
     ) {
         let tab = &mut self.tabs_mut()[active_tab_index];
-        tab.buffer.refresh_text_metadata();
         let latest_edit = tab.buffer.document().latest_operation_record().cloned();
+        tab.buffer
+            .refresh_text_metadata_after_operation(latest_edit.as_ref());
         let has_control_chars = tab.buffer.artifact_summary.has_control_chars();
         for view in &mut tab.views {
             if !has_control_chars {

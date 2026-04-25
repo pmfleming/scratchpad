@@ -18,7 +18,6 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             return;
         }
 
-        let ctx = ui.ctx().clone();
         app.refresh_search_state();
         search_replace::show_search_strip(ui, app);
         let workspace_rect = ui.available_rect_before_wrap();
@@ -26,23 +25,20 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             return;
         }
 
-        ui.painter()
-            .rect_filled(workspace_rect, 0.0, app.editor_background_color());
+        paint_workspace_background(ui, workspace_rect, app.editor_background_color());
 
         app.workspace_reflow_axis = preferred_workspace_reflow_axis(workspace_rect);
-        handle_editor_zoom(&ctx, workspace_rect, ui, app);
+        handle_editor_zoom(ui, workspace_rect, app);
         let editor_state = prepare_editor_state(app);
         let render_outcome = render_editor_workspace(ui, app, &editor_state, workspace_rect);
-        paint_preview_overlay(ui, render_outcome.preview_overlay);
-        apply_tile_actions(app, render_outcome.actions);
-        if render_outcome.any_editor_changed {
-            apply_editor_change(app, &editor_state);
-        }
+        finalize_editor_render(ui, app, &editor_state, render_outcome);
         app.refresh_search_state();
-        if app.search_progress().searching {
-            ctx.request_repaint_after(Duration::from_millis(16));
-        }
+        request_search_repaint(ui.ctx(), app.search_progress().searching);
     });
+}
+
+fn paint_workspace_background(ui: &egui::Ui, workspace_rect: egui::Rect, fill: egui::Color32) {
+    ui.painter().rect_filled(workspace_rect, 0.0, fill);
 }
 
 fn preferred_workspace_reflow_axis(rect: egui::Rect) -> crate::app::domain::SplitAxis {
@@ -139,9 +135,29 @@ struct PaneRenderContext<'a> {
     outcome: &'a mut EditorRenderOutcome,
 }
 
+struct SplitPane<'a> {
+    axis: crate::app::domain::SplitAxis,
+    ratio: f32,
+    first: &'a PaneNode,
+    second: &'a PaneNode,
+}
+
 fn paint_preview_overlay(ui: &egui::Ui, preview_overlay: Option<SplitPreviewOverlay>) {
     if let Some(preview_overlay) = preview_overlay {
         tile_header::paint_split_preview(ui, &preview_overlay);
+    }
+}
+
+fn finalize_editor_render(
+    ui: &egui::Ui,
+    app: &mut ScratchpadApp,
+    state: &EditorRenderState,
+    render_outcome: EditorRenderOutcome,
+) {
+    paint_preview_overlay(ui, render_outcome.preview_overlay);
+    apply_tile_actions(app, render_outcome.actions);
+    if render_outcome.any_editor_changed {
+        apply_editor_change(app, state);
     }
 }
 
@@ -161,14 +177,15 @@ fn apply_tile_actions(app: &mut ScratchpadApp, actions: Vec<TileAction>) {
     }
 }
 
-fn handle_editor_zoom(
-    ctx: &egui::Context,
-    workspace_rect: egui::Rect,
-    ui: &egui::Ui,
-    app: &mut ScratchpadApp,
-) {
+fn request_search_repaint(ctx: &egui::Context, searching: bool) {
+    if searching {
+        ctx.request_repaint_after(Duration::from_millis(16));
+    }
+}
+
+fn handle_editor_zoom(ui: &egui::Ui, workspace_rect: egui::Rect, app: &mut ScratchpadApp) {
     let pointer_over_editor = ui.rect_contains_pointer(workspace_rect);
-    let zoom_factor = ctx.input(|input| input.zoom_delta());
+    let zoom_factor = ui.ctx().input(|input| input.zoom_delta());
     if pointer_over_editor && zoom_factor != 1.0 {
         app.set_font_size(app.font_size() * zoom_factor);
     }
@@ -182,47 +199,87 @@ fn render_pane_node(
     rect: egui::Rect,
 ) {
     match node {
-        PaneNode::Leaf { view_id } => {
-            let request = TileRenderRequest {
-                tab_index: context.tab_index,
-                view_id: *view_id,
-                rect,
-                is_active: *view_id == context.active_view_id,
-                can_close: context.leaf_count > 1,
-            };
-            let app = &mut *context.app;
-            let outcome = &mut *context.outcome;
-            let mut tile_state = TileRenderState {
-                actions: &mut outcome.actions,
-                any_editor_changed: &mut outcome.any_editor_changed,
-                preview_overlay: &mut outcome.preview_overlay,
-            };
-            tile::render_tile(ui, app, request, &mut tile_state)
-        }
+        PaneNode::Leaf { view_id } => render_leaf_tile(ui, context, *view_id, rect),
         PaneNode::Split {
             axis,
             ratio,
             first,
             second,
-        } => {
-            let current_path = path;
-            let (first_rect, second_rect) = split_rect(rect, *axis, *ratio);
-            let mut first_path = current_path.clone();
-            first_path.push(PaneBranch::First);
-            render_pane_node(ui, context, first, first_path, first_rect);
-            let mut second_path = current_path.clone();
-            second_path.push(PaneBranch::Second);
-            render_pane_node(ui, context, second, second_path, second_rect);
-            render_split_divider(
-                ui,
-                rect,
-                *axis,
-                *ratio,
-                current_path,
-                &mut context.outcome.actions,
-            );
-        }
+        } => render_split_pane(
+            ui,
+            context,
+            path,
+            rect,
+            SplitPane {
+                axis: *axis,
+                ratio: *ratio,
+                first,
+                second,
+            },
+        ),
     }
+}
+
+fn render_leaf_tile(
+    ui: &mut egui::Ui,
+    context: &mut PaneRenderContext<'_>,
+    view_id: ViewId,
+    rect: egui::Rect,
+) {
+    let request = TileRenderRequest {
+        tab_index: context.tab_index,
+        view_id,
+        rect,
+        is_active: view_id == context.active_view_id,
+        can_close: context.leaf_count > 1,
+    };
+    let app = &mut *context.app;
+    let outcome = &mut *context.outcome;
+    let mut tile_state = TileRenderState {
+        actions: &mut outcome.actions,
+        any_editor_changed: &mut outcome.any_editor_changed,
+        preview_overlay: &mut outcome.preview_overlay,
+    };
+    tile::render_tile(ui, app, request, &mut tile_state)
+}
+
+fn render_split_pane(
+    ui: &mut egui::Ui,
+    context: &mut PaneRenderContext<'_>,
+    path: Vec<PaneBranch>,
+    rect: egui::Rect,
+    split: SplitPane<'_>,
+) {
+    let (first_rect, second_rect) = split_rect(rect, split.axis, split.ratio);
+    render_pane_node(
+        ui,
+        context,
+        split.first,
+        branched_path(&path, PaneBranch::First),
+        first_rect,
+    );
+    render_pane_node(
+        ui,
+        context,
+        split.second,
+        branched_path(&path, PaneBranch::Second),
+        second_rect,
+    );
+    render_split_divider(
+        ui,
+        rect,
+        split.axis,
+        split.ratio,
+        path,
+        &mut context.outcome.actions,
+    );
+}
+
+fn branched_path(path: &[PaneBranch], branch: PaneBranch) -> Vec<PaneBranch> {
+    let mut branched = Vec::with_capacity(path.len() + 1);
+    branched.extend_from_slice(path);
+    branched.push(branch);
+    branched
 }
 
 fn apply_editor_change(app: &mut ScratchpadApp, state: &EditorRenderState) {
@@ -236,4 +293,198 @@ fn apply_editor_change(app: &mut ScratchpadApp, state: &EditorRenderState) {
         state.active_buffer_label.clone(),
         snapshot,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{show_editor, split_rect};
+    use crate::app::app_state::ScratchpadApp;
+    use crate::app::domain::{BufferState, PaneNode, SplitAxis, ViewId};
+    use crate::app::fonts;
+    use crate::app::services::session_store::SessionStore;
+    use eframe::egui;
+    use std::collections::HashMap;
+
+    const TEST_SCREEN_RECT: egui::Rect =
+        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1200.0, 900.0));
+
+    fn test_app() -> ScratchpadApp {
+        let session_root = tempfile::tempdir().expect("create session dir");
+        let session_store = SessionStore::new(session_root.path().to_path_buf());
+        let mut app = ScratchpadApp::with_session_store(session_store);
+        app.set_session_persist_on_drop(false);
+        app
+    }
+
+    fn run_editor_frame(
+        ctx: &egui::Context,
+        app: &mut ScratchpadApp,
+        time: f64,
+        events: Vec<egui::Event>,
+    ) {
+        let _ = fonts::apply_editor_fonts(ctx, app.editor_font());
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(TEST_SCREEN_RECT),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ui| show_editor(ui, app),
+        );
+    }
+
+    fn move_event(pos: egui::Pos2) -> egui::Event {
+        egui::Event::PointerMoved(pos)
+    }
+
+    fn button_event(pos: egui::Pos2, button: egui::PointerButton, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        }
+    }
+
+    fn click_pointer(
+        ctx: &egui::Context,
+        app: &mut ScratchpadApp,
+        mut time: f64,
+        pos: egui::Pos2,
+        button: egui::PointerButton,
+    ) -> f64 {
+        run_editor_frame(ctx, app, time, vec![move_event(pos)]);
+        time += 1.0;
+        run_editor_frame(
+            ctx,
+            app,
+            time,
+            vec![move_event(pos), button_event(pos, button, true)],
+        );
+        time += 1.0;
+        run_editor_frame(
+            ctx,
+            app,
+            time,
+            vec![move_event(pos), button_event(pos, button, false)],
+        );
+        time + 1.0
+    }
+
+    fn settle_frame(ctx: &egui::Context, app: &mut ScratchpadApp, time: f64) -> f64 {
+        run_editor_frame(ctx, app, time, Vec::new());
+        time + 1.0
+    }
+
+    fn view_rects(node: &PaneNode, rect: egui::Rect) -> HashMap<ViewId, egui::Rect> {
+        let mut rects = HashMap::new();
+        collect_view_rects(node, rect, &mut rects);
+        rects
+    }
+
+    fn collect_view_rects(
+        node: &PaneNode,
+        rect: egui::Rect,
+        rects: &mut HashMap<ViewId, egui::Rect>,
+    ) {
+        match node {
+            PaneNode::Leaf { view_id } => {
+                rects.insert(*view_id, rect);
+            }
+            PaneNode::Split {
+                axis,
+                ratio,
+                first,
+                second,
+            } => {
+                let (first_rect, second_rect) = split_rect(rect, *axis, *ratio);
+                collect_view_rects(first, first_rect, rects);
+                collect_view_rects(second, second_rect, rects);
+            }
+        }
+    }
+
+    fn editor_point(rect: egui::Rect) -> egui::Pos2 {
+        let x = (rect.left() + 48.0).clamp(rect.left() + 12.0, rect.right() - 12.0);
+        let y = (rect.top() + 72.0).clamp(rect.top() + 12.0, rect.bottom() - 12.0);
+        egui::pos2(x, y)
+    }
+
+    #[test]
+    fn focus_transitions_follow_primary_clicks_across_mixed_split_layout() {
+        let ctx = egui::Context::default();
+        let mut app = test_app();
+        app.tabs_mut()[0].buffer.name = "one.txt".to_owned();
+        app.tabs_mut()[0]
+            .buffer
+            .replace_text("alpha beta gamma\nsecond line\nthird line\n".to_owned());
+
+        let duplicate_view_id = app.tabs_mut()[0]
+            .split_active_view(SplitAxis::Vertical)
+            .expect("split duplicate view");
+        let other_file_view_id = app.tabs_mut()[0]
+            .open_buffer_with_balanced_layout(BufferState::new(
+                "two.txt".to_owned(),
+                "delta epsilon zeta\nother file line\n".to_owned(),
+                None,
+            ))
+            .expect("open second file");
+        let original_view_id = app.tabs()[0]
+            .views
+            .iter()
+            .find(|view| view.id != duplicate_view_id && view.id != other_file_view_id)
+            .expect("original view")
+            .id;
+        assert!(app.tabs_mut()[0].activate_view(original_view_id));
+
+        let rects = view_rects(&app.tabs()[0].root_pane, TEST_SCREEN_RECT);
+        let duplicate_target =
+            editor_point(*rects.get(&duplicate_view_id).expect("duplicate rect"));
+        let other_target = editor_point(*rects.get(&other_file_view_id).expect("other rect"));
+
+        let mut time = 0.0;
+        time = settle_frame(&ctx, &mut app, time);
+        time = click_pointer(
+            &ctx,
+            &mut app,
+            time,
+            duplicate_target,
+            egui::PointerButton::Primary,
+        );
+        time = settle_frame(&ctx, &mut app, time);
+
+        assert_eq!(app.tabs()[0].active_view_id, duplicate_view_id);
+        assert!(
+            app.tabs()[0]
+                .view(duplicate_view_id)
+                .is_some_and(|view| view.editor_has_focus && view.cursor_range.is_some())
+        );
+        assert!(
+            app.tabs()[0]
+                .view(original_view_id)
+                .is_some_and(|view| !view.editor_has_focus)
+        );
+
+        time = click_pointer(
+            &ctx,
+            &mut app,
+            time,
+            other_target,
+            egui::PointerButton::Primary,
+        );
+        let _ = settle_frame(&ctx, &mut app, time);
+
+        assert_eq!(app.tabs()[0].active_view_id, other_file_view_id);
+        assert!(
+            app.tabs()[0]
+                .view(other_file_view_id)
+                .is_some_and(|view| view.editor_has_focus && view.cursor_range.is_some())
+        );
+        assert!(
+            app.tabs()[0]
+                .view(duplicate_view_id)
+                .is_some_and(|view| !view.editor_has_focus)
+        );
+    }
 }

@@ -96,30 +96,26 @@ fn dispatch_search_actions(
     target_focus: SearchFocusTarget,
     actions: SearchStripActions,
 ) {
-    if actions.previous_requested {
-        app.request_search_focus(target_focus);
-        app.handle_command(AppCommand::PreviousSearchMatch);
+    for (requested, command) in [
+        (actions.previous_requested, AppCommand::PreviousSearchMatch),
+        (actions.next_requested, AppCommand::NextSearchMatch),
+        (
+            actions.undo_requested,
+            AppCommand::UndoActiveBufferTextOperation,
+        ),
+        (
+            actions.redo_requested,
+            AppCommand::RedoActiveBufferTextOperation,
+        ),
+        (
+            actions.replace_current_requested,
+            AppCommand::ReplaceCurrentMatch,
+        ),
+        (actions.replace_all_requested, AppCommand::ReplaceAllMatches),
+    ] {
+        dispatch_requested_command(app, target_focus, requested, command);
     }
-    if actions.next_requested {
-        app.request_search_focus(target_focus);
-        app.handle_command(AppCommand::NextSearchMatch);
-    }
-    if actions.undo_requested {
-        app.request_search_focus(target_focus);
-        app.handle_command(AppCommand::UndoActiveBufferTextOperation);
-    }
-    if actions.redo_requested {
-        app.request_search_focus(target_focus);
-        app.handle_command(AppCommand::RedoActiveBufferTextOperation);
-    }
-    if actions.replace_current_requested {
-        app.request_search_focus(target_focus);
-        app.handle_command(AppCommand::ReplaceCurrentMatch);
-    }
-    if actions.replace_all_requested {
-        app.request_search_focus(target_focus);
-        app.handle_command(AppCommand::ReplaceAllMatches);
-    }
+
     if let Some(match_index) = actions.focused_file_match_index
         && app.focus_search_result_file_at(match_index)
     {
@@ -130,6 +126,20 @@ fn dispatch_search_actions(
     {
         app.request_focus_for_active_view();
     }
+}
+
+fn dispatch_requested_command(
+    app: &mut ScratchpadApp,
+    target_focus: SearchFocusTarget,
+    requested: bool,
+    command: AppCommand,
+) {
+    if !requested {
+        return;
+    }
+
+    app.request_search_focus(target_focus);
+    app.handle_command(command);
 }
 
 fn render_search_header(ui: &mut egui::Ui) -> bool {

@@ -9,7 +9,7 @@ use crate::app::domain::{
 };
 use crate::app::services::background_io::LoadedPathResult;
 use crate::app::services::file_service::FileService;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 struct SaveWriteRequest {
     path: PathBuf,
@@ -245,13 +245,16 @@ impl FileController {
         loaded: crate::app::domain::BufferState,
         disk_state: Option<DiskFileState>,
     ) -> String {
-        let buffer = app.tabs_mut()[index].active_buffer_mut();
-        buffer.replace_from_loaded_buffer(loaded);
-        buffer.is_dirty = false;
-        buffer.sync_to_disk_state(disk_state);
-        let buffer_name = buffer.name.clone();
+        let (buffer_name, deferred_refresh) = {
+            let buffer = app.tabs_mut()[index].active_buffer_mut();
+            buffer.replace_from_loaded_buffer(loaded);
+            buffer.is_dirty = false;
+            buffer.sync_to_disk_state(disk_state);
+            (buffer.name.clone(), Self::deferred_buffer_refresh(buffer))
+        };
         app.mark_search_dirty();
         app.mark_session_dirty();
+        Self::queue_deferred_buffer_refreshes(app, deferred_refresh);
         buffer_name
     }
 
@@ -522,7 +525,7 @@ impl FileController {
     fn resolve_background_result(
         app: &mut ScratchpadApp,
         buffer_id: BufferId,
-        expected_path: &PathBuf,
+        expected_path: &Path,
         results: &mut Vec<LoadedPathResult>,
     ) -> Option<(usize, LoadedPathResult)> {
         let result = results.pop()?;

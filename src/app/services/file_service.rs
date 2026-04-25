@@ -1,3 +1,4 @@
+use crate::app::domain::buffer::{BufferTextMetadata, detected_text_format_and_metadata};
 use crate::app::domain::{
     BufferState, DiskFileState, DocumentSnapshot, EncodingSource, TextArtifactSummary,
     TextFormatMetadata,
@@ -64,6 +65,9 @@ pub const COMMON_TEXT_ENCODINGS: &[EncodingOption] = &[
     },
 ];
 
+const LARGE_FILE_STAGED_METADATA_BYTES: usize = 5 * 1024 * 1024;
+const STAGED_METADATA_SAMPLE_BYTES: usize = 64 * 1024;
+
 pub struct FileService;
 
 #[derive(Debug)]
@@ -71,6 +75,8 @@ pub struct FileContent {
     pub content: String,
     pub format: TextFormatMetadata,
     pub artifact_summary: TextArtifactSummary,
+    pub(crate) text_metadata: BufferTextMetadata,
+    pub(crate) metadata_complete: bool,
 }
 
 impl FileService {
@@ -125,22 +131,13 @@ impl FileService {
         }
 
         let has_decoding_warnings = content.contains('\u{FFFD}');
-        let format = TextFormatMetadata::detected(
-            &content,
+        Ok(build_file_content(
+            content,
             encoding.name().to_string(),
             has_bom,
             encoding_source,
             has_decoding_warnings,
-        );
-
-        Ok(FileContent {
-            artifact_summary: TextArtifactSummary::from_text_with_line_endings(
-                &content,
-                format.line_endings,
-            ),
-            content,
-            format,
-        })
+        ))
     }
 
     pub fn read_file_with_encoding(path: &Path, encoding_name: &str) -> io::Result<FileContent> {
@@ -167,22 +164,13 @@ impl FileService {
         }
 
         let has_decoding_warnings = content.contains('\u{FFFD}');
-        let format = TextFormatMetadata::detected(
-            &content,
+        Ok(build_file_content(
+            content,
             encoding.name().to_string(),
             has_bom,
             EncodingSource::ExplicitUserChoice,
             has_decoding_warnings,
-        );
-
-        Ok(FileContent {
-            artifact_summary: TextArtifactSummary::from_text_with_line_endings(
-                &content,
-                format.line_endings,
-            ),
-            content,
-            format,
-        })
+        ))
     }
 
     pub fn canonical_encoding_name(encoding_name: &str) -> io::Result<String> {
@@ -198,13 +186,31 @@ impl FileService {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.display().to_string());
-        let mut buffer = BufferState::with_format(
-            name,
-            file_content.content,
-            Some(path.to_path_buf()),
-            file_content.format,
-        );
-        buffer.artifact_summary = file_content.artifact_summary;
+        let FileContent {
+            content,
+            format,
+            text_metadata,
+            metadata_complete,
+            ..
+        } = file_content;
+        let mut buffer = if metadata_complete {
+            BufferState::with_text_metadata(
+                name,
+                content,
+                Some(path.to_path_buf()),
+                format,
+                text_metadata,
+            )
+        } else {
+            BufferState::with_text_metadata_refresh_state(
+                name,
+                content,
+                Some(path.to_path_buf()),
+                format,
+                text_metadata,
+                true,
+            )
+        };
         buffer.sync_to_disk_state(disk_state);
         buffer
     }
@@ -231,11 +237,15 @@ impl FileService {
         snapshot: &DocumentSnapshot,
         format: &TextFormatMetadata,
     ) -> io::Result<()> {
-        write_atomic_with(path, |file| write_snapshot_to_writer(file, snapshot, format))
+        write_atomic_with(path, |file| {
+            write_snapshot_to_writer(file, snapshot, format)
+        })
     }
 
     pub fn write_snapshot_utf8(path: &Path, snapshot: &DocumentSnapshot) -> io::Result<()> {
-        write_atomic_with(path, |file| write_snapshot_utf8_to_writer(file, snapshot, false))
+        write_atomic_with(path, |file| {
+            write_snapshot_utf8_to_writer(file, snapshot, false)
+        })
     }
 
     pub fn write_file_with_bom(
@@ -276,6 +286,69 @@ fn read_text_with_encoding(path: &Path, encoding: &'static Encoding) -> io::Resu
     let mut content = String::new();
     decoder.read_to_string(&mut content)?;
     Ok(content)
+}
+
+fn build_file_content(
+    content: String,
+    encoding_name: String,
+    has_bom: bool,
+    encoding_source: EncodingSource,
+    has_decoding_warnings: bool,
+) -> FileContent {
+    if content.len() < LARGE_FILE_STAGED_METADATA_BYTES {
+        let (format, text_metadata) = detected_text_format_and_metadata(
+            &content,
+            encoding_name,
+            has_bom,
+            encoding_source,
+            has_decoding_warnings,
+        );
+        let artifact_summary = text_metadata.artifact_summary.clone();
+        return FileContent {
+            content,
+            format,
+            artifact_summary,
+            text_metadata,
+            metadata_complete: true,
+        };
+    }
+
+    let sample = staged_metadata_sample(&content);
+    let (mut format, sample_metadata) = detected_text_format_and_metadata(
+        sample,
+        encoding_name,
+        has_bom,
+        encoding_source,
+        has_decoding_warnings,
+    );
+    format.is_ascii_subset = false;
+    let text_metadata = BufferTextMetadata {
+        line_count: content
+            .as_bytes()
+            .iter()
+            .filter(|byte| **byte == b'\n')
+            .count()
+            .saturating_add(1),
+        artifact_summary: sample_metadata.artifact_summary.clone(),
+        preferred_line_ending: format.preferred_line_ending_style(),
+        has_non_compliant_characters: false,
+    };
+    let artifact_summary = text_metadata.artifact_summary.clone();
+    FileContent {
+        content,
+        format,
+        artifact_summary,
+        text_metadata,
+        metadata_complete: false,
+    }
+}
+
+fn staged_metadata_sample(content: &str) -> &str {
+    let mut end = STAGED_METADATA_SAMPLE_BYTES.min(content.len());
+    while end > 0 && !content.is_char_boundary(end) {
+        end -= 1;
+    }
+    &content[..end]
 }
 
 fn encode_content(
@@ -352,7 +425,12 @@ fn write_snapshot_to_writer(
 ) -> io::Result<()> {
     let encoding = resolve_encoding(&format.encoding_name)?;
     if encoding == encoding_rs::UTF_16LE {
-        return write_snapshot_utf16_to_writer(writer, snapshot, format.has_bom, Endianness::Little);
+        return write_snapshot_utf16_to_writer(
+            writer,
+            snapshot,
+            format.has_bom,
+            Endianness::Little,
+        );
     }
     if encoding == encoding_rs::UTF_16BE {
         return write_snapshot_utf16_to_writer(writer, snapshot, format.has_bom, Endianness::Big);
@@ -520,5 +598,21 @@ mod tests {
 
         let reloaded = FileService::read_file(&path).expect("read UTF-16 snapshot");
         assert_eq!(reloaded.content, "hello wide world");
+    }
+
+    #[test]
+    fn large_file_read_stages_metadata_refresh() {
+        let tempdir = tempfile::tempdir().expect("create tempdir");
+        let path = tempdir.path().join("large.txt");
+        let content = "alpha\n".repeat((super::LARGE_FILE_STAGED_METADATA_BYTES / 6) + 1);
+        std::fs::write(&path, &content).expect("write large file");
+
+        let reloaded = FileService::read_file(&path).expect("read large file");
+
+        assert!(!reloaded.metadata_complete);
+        assert_eq!(
+            reloaded.text_metadata.line_count,
+            content.matches('\n').count() + 1
+        );
     }
 }

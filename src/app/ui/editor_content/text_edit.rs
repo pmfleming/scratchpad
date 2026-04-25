@@ -96,6 +96,7 @@ pub fn render_editor_text_edit(
     options: TextEditOptions<'_>,
 ) -> (bool, bool) {
     let line_count = buffer.line_count;
+    let document_revision = buffer.document_revision();
     let mut text = buffer.document().extract_text();
     let mut outcome = render_text_edit_widget(
         ui,
@@ -115,7 +116,13 @@ pub fn render_editor_text_edit(
             buffer.visible_text_window(visible_row_range, char_range, layout.row_count());
         layout.set_visible_text(visible_text);
     }
-    view.latest_layout = latest_layout;
+    if outcome.changed {
+        view.latest_layout = None;
+        view.latest_layout_revision = None;
+    } else {
+        view.latest_layout = latest_layout;
+        view.latest_layout_revision = Some(document_revision);
+    }
     view.cursor_range = outcome
         .cursor_range
         .map(super::native_editor::CursorRange::from_egui);
@@ -171,6 +178,7 @@ pub fn render_read_only_text_edit(
 ) -> bool {
     let outcome = render_text_edit_widget(ui, &mut text, view, desired_rows, options, false, false);
     view.latest_layout = outcome.latest_layout;
+    view.latest_layout_revision = None;
     view.cursor_range = outcome
         .cursor_range
         .map(super::native_editor::CursorRange::from_egui);
@@ -293,6 +301,7 @@ fn render_visible_text_window(
         latest_layout: None,
         cursor_range: None,
         pending_cursor_range: None,
+        latest_layout_revision: None,
         ..view.clone()
     };
     let mut text = visible_window.text.clone();
@@ -314,6 +323,7 @@ fn render_visible_text_window(
         layout.set_visible_text(visible_window);
     }
     view.latest_layout = latest_layout;
+    view.latest_layout_revision = None;
 
     if bottom_padding_lines > 0 {
         ui.add_space(row_height * bottom_padding_lines as f32);

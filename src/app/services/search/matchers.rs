@@ -269,7 +269,7 @@ fn whole_word_allows(
     end: usize,
 ) -> bool {
     if ascii {
-        !whole_word || is_ascii_whole_word_match(text_bytes, start, end)
+        ascii_whole_word_allows(text_bytes, whole_word, start, end)
     } else {
         whole_word_matcher.allows(start, end)
     }
@@ -293,7 +293,7 @@ where
         }
         let end = start + query_bytes.len();
         if &text_bytes[start..end] == query_bytes
-            && (!whole_word || is_ascii_whole_word_match(text_bytes, start, end))
+            && ascii_whole_word_allows(text_bytes, whole_word, start, end)
         {
             matches.push(start..end);
         }
@@ -319,7 +319,7 @@ where
         }
         let end = start + 1;
         if byte.to_ascii_lowercase() == query_byte
-            && (!whole_word || is_ascii_whole_word_match(text_bytes, start, end))
+            && ascii_whole_word_allows(text_bytes, whole_word, start, end)
         {
             matches.push(start..end);
         }
@@ -355,7 +355,7 @@ where
                 &text_bytes[start + 1..end.saturating_sub(1)],
                 middle_query_bytes,
             )
-            || (whole_word && !is_ascii_whole_word_match(text_bytes, start, end))
+            || !ascii_whole_word_allows(text_bytes, whole_word, start, end)
         {
             continue;
         }
@@ -407,6 +407,10 @@ fn is_ascii_whole_word_match(text_bytes: &[u8], start: usize, end: usize) -> boo
     let before_is_word = start > 0 && is_ascii_word_char(text_bytes[start - 1]);
     let after_is_word = end < text_bytes.len() && is_ascii_word_char(text_bytes[end]);
     !before_is_word && !after_is_word
+}
+
+fn ascii_whole_word_allows(text_bytes: &[u8], whole_word: bool, start: usize, end: usize) -> bool {
+    !whole_word || is_ascii_whole_word_match(text_bytes, start, end)
 }
 
 fn is_ascii_word_char(byte: u8) -> bool {

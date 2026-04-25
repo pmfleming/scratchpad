@@ -15,8 +15,11 @@ This toolchain exists to document the performance, capacity, resource cost, and 
 - `scripts/clone_alert.py`: token-based clone and duplication analysis
 - `scripts/map.py`: architecture map output enriched with dependencies and analysis signals
 - `scripts/generate_flamegraphs.py`: flamegraph index generation for dedicated single-workload profile binaries
+- `scripts/test_catalog.py`: correctness review catalog for integration and inline tests by architecture layer
+- `scripts/measurement_catalog.py`: dashboard task catalog for full, category, subcategory, and item refreshes
+- `scripts/dashboard_server.py`: local-only dashboard server with refresh APIs and run logs
 - `scripts/ci.ps1`: local and CI entry point for formatting, linting, tests, and analysis checks
-- `scripts/open-overview.ps1`: launches the static viewer against the analysis output
+- `scripts/open-overview.ps1`: launches the dashboard server and viewer against the analysis output
 
 ## Output Location
 
@@ -35,6 +38,10 @@ Expected artifacts:
 - `target/analysis/clones.json`
 - `target/analysis/map.json`
 - `target/analysis/flamegraphs.json`
+- `target/analysis/correctness_review.json`
+- `target/analysis/test_catalog.json`
+- `target/analysis/measurement_catalog.json`
+- `target/analysis/measurement_runs.json`
 
 ## Common Commands
 
@@ -53,6 +60,9 @@ Expected artifacts:
 .venv\Scripts\python.exe scripts\speed_efficiency_report.py --mode visibility
 .venv\Scripts\python.exe scripts\generate_flamegraphs.py --mode cli
 .venv\Scripts\python.exe scripts\generate_flamegraphs.py --mode visibility
+.venv\Scripts\python.exe scripts\test_catalog.py --mode visibility
+.venv\Scripts\python.exe scripts\test_catalog.py --mode visibility --run
+.venv\Scripts\python.exe scripts\measurement_catalog.py --mode visibility
 cargo flamegraph --dev --bin profile_tab_operations -o target/analysis/flamegraphs/tab_operations_profile.svg
 cargo flamegraph --dev --bin profile_tab_tile_layout -o target/analysis/flamegraphs/tab_tile_layout_profile.svg
 cargo flamegraph --dev --bin profile_view_navigation -o target/analysis/flamegraphs/view_navigation_profile.svg
@@ -68,15 +78,33 @@ cargo flamegraph --dev --bin profile_large_file_split -o target/analysis/flamegr
 .venv\Scripts\python.exe scripts\map.py --refresh --mode visibility
 ```
 
-## Viewer
+## Dashboard
 
-Start a simple local server:
+Start the dashboard server:
 
 ```powershell
-.venv\Scripts\python.exe -m http.server 8000
+.venv\Scripts\python.exe scripts\dashboard_server.py --port 8000
 ```
 
 Then browse to `http://localhost:8000/viewer/`.
+
+The dashboard has top-level views for:
+
+- Overview
+- Quality Review
+- Performance Review
+- Correctness Review
+- Map
+- Run Log
+
+Refresh controls call local API routes exposed by `scripts/dashboard_server.py`:
+
+- `POST /api/run/all`
+- `POST /api/run/category/{category}`
+- `POST /api/run/item/{id}`
+- `GET /api/catalog`
+- `GET /api/runs`
+- `GET /api/run/{run_id}/log`
 
 ## Overview Launcher
 
@@ -110,9 +138,21 @@ Clone-only update mode:
 powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -CloneOnly
 ```
 
+Legacy static server mode:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -LegacyStaticServer
+```
+
 ## Notes
 
 - The Python tools produce JSON rather than HTML.
+- The dashboard is category-first, but the scripts remain the measurement producers.
+- `scripts/open-overview.ps1` now starts `scripts/dashboard_server.py` by default so refreshes can be initiated from the dashboard.
+- The old static HTTP server path is still available with `-LegacyStaticServer`.
+- Quality Review separates SLOC from the hotspot score. SLOC is displayed as size context, while `quality_score` uses cognitive, cyclomatic, maintainability index, and Halstead effort.
+- Correctness Review catalogs integration tests under `tests/` and inline tests under `src/`, groups them by architectural layer, and keeps descriptions under 10 words.
+- Map nodes include quality, performance, and correctness health fields while retaining dependency layout and existing risk metrics.
 - `scripts/search_speed.py` uses the same mode contract as the other Python tools: `cli`, `analysis`, and `visibility`.
 - `scripts/generate_flamegraphs.py` writes `target/analysis/flamegraphs.json` and the referenced SVG files under `target/analysis/flamegraphs/`.
 - `scripts/capacity_report.py` keeps threshold sweeps out of the ordinary latency leaderboard and records the first unusable ceiling separately.

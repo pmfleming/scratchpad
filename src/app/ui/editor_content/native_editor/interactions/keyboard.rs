@@ -2,42 +2,64 @@ use super::super::{CursorRange, cursor, editing, select_all_cursor};
 use crate::app::domain::{BufferState, EditorViewState};
 use eframe::egui;
 
+#[derive(Clone, Copy)]
+struct PressedKeyEvent {
+    key: egui::Key,
+    modifiers: egui::Modifiers,
+}
+
 pub(super) fn handle_keyboard_events(
     ui: &mut egui::Ui,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
     galley: &egui::Galley,
+    page_jump_rows: usize,
     total_chars: usize,
 ) -> bool {
-    let events = ui.input(|input| input.events.clone());
-    let mut changed = false;
-
-    for event in &events {
-        let cursor = view.cursor_range.unwrap_or_default();
-        let text_changed = handle_text_event(event, buffer, view, &cursor);
-        changed |= text_changed;
-        if text_changed {
-            continue;
-        }
-
-        if handle_key_event(event, buffer, view, &cursor, galley, total_chars) {
-            changed = true;
-            continue;
-        }
-
-        changed |= handle_clipboard_event(ui, event, buffer, view, &cursor);
-    }
-
-    changed
+    handle_keyboard_events_with(ui, buffer, view, |key_event, buffer, cursor| {
+        cursor::apply_cursor_movement(
+            cursor,
+            key_event.key,
+            &key_event.modifiers,
+            galley,
+            page_jump_rows,
+            total_chars,
+            buffer.document().piece_tree(),
+        )
+    })
 }
 
 pub(super) fn handle_keyboard_events_unwrapped(
     ui: &mut egui::Ui,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
+    page_jump_rows: usize,
     total_chars: usize,
 ) -> bool {
+    handle_keyboard_events_with(ui, buffer, view, |key_event, buffer, cursor| {
+        cursor::apply_cursor_movement_unwrapped(
+            cursor,
+            key_event.key,
+            &key_event.modifiers,
+            page_jump_rows,
+            total_chars,
+            buffer.document().piece_tree(),
+        )
+    })
+}
+
+fn handle_keyboard_events_with(
+    ui: &mut egui::Ui,
+    buffer: &mut BufferState,
+    view: &mut EditorViewState,
+    mut handle_movement_event: impl FnMut(
+        PressedKeyEvent,
+        &mut BufferState,
+        &CursorRange,
+    ) -> Option<CursorRange>,
+) -> bool {
     let events = ui.input(|input| input.events.clone());
+    let total_chars = buffer.document().piece_tree().len_chars();
     let mut changed = false;
 
     for event in &events {
@@ -48,9 +70,18 @@ pub(super) fn handle_keyboard_events_unwrapped(
             continue;
         }
 
-        if handle_key_event_unwrapped(event, buffer, view, &cursor, total_chars) {
-            changed = true;
-            continue;
+        if let Some(key_event) = pressed_key_event(event) {
+            if let Some(handled) =
+                handle_non_movement_key_event(key_event, buffer, view, &cursor, total_chars)
+            {
+                changed |= handled;
+                continue;
+            }
+
+            if apply_cursor_update(view, handle_movement_event(key_event, buffer, &cursor)) {
+                changed = true;
+                continue;
+            }
         }
 
         changed |= handle_clipboard_event(ui, event, buffer, view, &cursor);
@@ -82,145 +113,72 @@ fn handle_text_event(
     }
 }
 
-fn handle_key_event(
-    event: &egui::Event,
-    buffer: &mut BufferState,
-    view: &mut EditorViewState,
-    cursor: &CursorRange,
-    galley: &egui::Galley,
-    total_chars: usize,
-) -> bool {
-    if let Some(handled) = handle_non_movement_key_event(event, buffer, view, cursor, total_chars) {
-        return handled;
-    }
-
-    match event {
-        egui::Event::Key {
-            key,
-            pressed: true,
-            modifiers,
-            ..
-        } => apply_cursor_update(
-            view,
-            cursor::apply_cursor_movement(
-                cursor,
-                *key,
-                modifiers,
-                galley,
-                total_chars,
-                buffer.document().piece_tree(),
-            ),
-        ),
-        _ => false,
-    }
-}
-
-fn handle_key_event_unwrapped(
-    event: &egui::Event,
-    buffer: &mut BufferState,
-    view: &mut EditorViewState,
-    cursor: &CursorRange,
-    total_chars: usize,
-) -> bool {
-    if let Some(handled) = handle_non_movement_key_event(event, buffer, view, cursor, total_chars) {
-        return handled;
-    }
-
-    match event {
-        egui::Event::Key {
-            key,
-            pressed: true,
-            modifiers,
-            ..
-        } => apply_cursor_update(
-            view,
-            cursor::apply_cursor_movement_unwrapped(
-                cursor,
-                *key,
-                modifiers,
-                total_chars,
-                buffer.document().piece_tree(),
-            ),
-        ),
-        _ => false,
-    }
-}
-
 fn handle_non_movement_key_event(
-    event: &egui::Event,
+    key_event: PressedKeyEvent,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
     cursor: &CursorRange,
     total_chars: usize,
 ) -> Option<bool> {
-    match event {
-        egui::Event::Key {
-            key: egui::Key::Enter,
-            pressed: true,
-            ..
-        } => {
+    match key_event.key {
+        egui::Key::Enter => {
             let line_ending = buffer.document().preferred_line_ending_str().to_owned();
             Some(insert_text(buffer, view, cursor, &line_ending))
         }
-        egui::Event::Key {
-            key: egui::Key::Tab,
-            pressed: true,
-            modifiers,
-            ..
-        } if !modifiers.shift => Some(insert_text(buffer, view, cursor, "\t")),
-        egui::Event::Key {
-            key: egui::Key::Tab,
-            pressed: true,
-            ..
-        } => Some(apply_cursor_update(
+        egui::Key::Tab if !key_event.modifiers.shift => {
+            Some(insert_text(buffer, view, cursor, "\t"))
+        }
+        egui::Key::Tab => Some(apply_cursor_update(
             view,
             editing::apply_outdent(buffer, cursor),
         )),
-        egui::Event::Key {
-            key: egui::Key::Backspace,
-            pressed: true,
-            modifiers,
-            ..
-        } => {
-            view.cursor_range = Some(editing::apply_backspace(buffer, cursor, modifiers));
+        egui::Key::Backspace => {
+            view.cursor_range = Some(editing::apply_backspace(
+                buffer,
+                cursor,
+                &key_event.modifiers,
+            ));
             Some(true)
         }
-        egui::Event::Key {
-            key: egui::Key::Delete,
-            pressed: true,
-            modifiers,
-            ..
-        } => {
-            view.cursor_range = Some(editing::apply_delete(buffer, cursor, modifiers));
+        egui::Key::Delete => {
+            view.cursor_range = Some(editing::apply_delete(buffer, cursor, &key_event.modifiers));
             Some(true)
         }
-        egui::Event::Key {
-            key: egui::Key::Z,
-            pressed: true,
-            modifiers,
-            ..
-        } if modifiers.command && !modifiers.shift => {
+        egui::Key::Z if is_undo_shortcut(key_event.modifiers) => {
             Some(apply_history(view, buffer.undo_last_text_operation()))
         }
-        egui::Event::Key {
-            key: egui::Key::Z | egui::Key::Y,
-            pressed: true,
-            modifiers,
-            ..
-        } if modifiers.command && (event_key_is_y(event) || modifiers.shift) => {
+        egui::Key::Z | egui::Key::Y if is_redo_shortcut(key_event) => {
             Some(apply_history(view, buffer.redo_last_text_operation()))
         }
-        egui::Event::Key {
-            key: egui::Key::A,
-            pressed: true,
-            modifiers,
-            ..
-        } if modifiers.command => {
+        egui::Key::A if key_event.modifiers.command => {
             view.cursor_range = Some(select_all_cursor(total_chars));
             Some(false)
         }
         _ => None,
     }
+}
+
+fn pressed_key_event(event: &egui::Event) -> Option<PressedKeyEvent> {
+    match event {
+        egui::Event::Key {
+            key,
+            pressed: true,
+            modifiers,
+            ..
+        } => Some(PressedKeyEvent {
+            key: *key,
+            modifiers: *modifiers,
+        }),
+        _ => None,
+    }
+}
+
+fn is_undo_shortcut(modifiers: egui::Modifiers) -> bool {
+    modifiers.command && !modifiers.shift
+}
+
+fn is_redo_shortcut(key_event: PressedKeyEvent) -> bool {
+    key_event.modifiers.command && (key_event.key == egui::Key::Y || key_event.modifiers.shift)
 }
 
 fn handle_clipboard_event(
@@ -266,16 +224,6 @@ fn apply_history(view: &mut EditorViewState, selection: Option<CursorRange>) -> 
     } else {
         false
     }
-}
-
-fn event_key_is_y(event: &egui::Event) -> bool {
-    matches!(
-        event,
-        egui::Event::Key {
-            key: egui::Key::Y,
-            ..
-        }
-    )
 }
 
 fn copy_selection(ui: &mut egui::Ui, buffer: &BufferState, cursor: &CursorRange) {

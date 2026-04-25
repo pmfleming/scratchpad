@@ -461,11 +461,19 @@ pub fn display_line_count(text: &str) -> usize {
     TextInspection::inspect(text).line_count
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BufferTextMetadata {
     pub(crate) line_count: usize,
     pub(crate) artifact_summary: TextArtifactSummary,
     pub(crate) preferred_line_ending: LineEndingStyle,
     pub(crate) has_non_compliant_characters: bool,
+}
+
+pub(crate) struct IncrementalMetadataEdit<'a> {
+    pub(crate) previous_char: Option<char>,
+    pub(crate) deleted_text: &'a str,
+    pub(crate) inserted_text: &'a str,
+    pub(crate) next_char: Option<char>,
 }
 
 pub(crate) fn buffer_text_metadata(
@@ -474,13 +482,78 @@ pub(crate) fn buffer_text_metadata(
 ) -> BufferTextMetadata {
     let inspection = TextInspection::inspect(text);
     format.apply_inspection(&inspection);
-    let has_non_compliant = format.has_non_compliant_characters(text);
-    BufferTextMetadata {
-        line_count: inspection.line_count,
-        artifact_summary: inspection.artifact_summary,
-        preferred_line_ending: format.preferred_line_ending_style(),
-        has_non_compliant_characters: has_non_compliant,
+    build_buffer_text_metadata(
+        inspection,
+        format,
+        format.has_non_compliant_characters(text),
+    )
+}
+
+pub(crate) fn buffer_text_metadata_from_edit(
+    line_count: usize,
+    artifact_summary: &TextArtifactSummary,
+    format: &mut TextFormatMetadata,
+    edit: IncrementalMetadataEdit<'_>,
+) -> Option<BufferTextMetadata> {
+    if !can_update_metadata_incrementally(format, edit.deleted_text, edit.inserted_text) {
+        return None;
     }
+
+    let deleted_window = boundary_window(edit.previous_char, edit.deleted_text, edit.next_char);
+    let inserted_window = boundary_window(edit.previous_char, edit.inserted_text, edit.next_char);
+    let deleted_inspection = TextInspection::inspect(&deleted_window);
+    let inserted_inspection = TextInspection::inspect(&inserted_window);
+
+    let deleted_breaks = deleted_inspection.line_count.saturating_sub(1);
+    let inserted_breaks = inserted_inspection.line_count.saturating_sub(1);
+    let line_count = line_count
+        .checked_sub(deleted_breaks)?
+        .checked_add(inserted_breaks)?;
+
+    let mut line_ending_counts = format.line_ending_counts;
+    apply_line_ending_delta(
+        &mut line_ending_counts,
+        deleted_inspection.line_ending_counts,
+        inserted_inspection.line_ending_counts,
+    )?;
+
+    format.line_ending_counts = line_ending_counts;
+    format.line_endings = line_ending_style(line_ending_counts);
+    format.is_ascii_subset &= edit.inserted_text.is_ascii();
+
+    let mut artifact_summary = artifact_summary.clone();
+    artifact_summary.has_carriage_returns =
+        format.line_endings != LineEndingStyle::Cr && line_ending_counts.cr > 0;
+
+    Some(BufferTextMetadata {
+        line_count,
+        artifact_summary,
+        preferred_line_ending: format.preferred_line_ending_style(),
+        has_non_compliant_characters: false,
+    })
+}
+
+pub(crate) fn detected_text_format_and_metadata(
+    text: &str,
+    encoding_name: String,
+    has_bom: bool,
+    encoding_source: EncodingSource,
+    has_decoding_warnings: bool,
+) -> (TextFormatMetadata, BufferTextMetadata) {
+    let inspection = TextInspection::inspect(text);
+    let format = TextFormatMetadata::from_inspection(
+        inspection.clone(),
+        encoding_name,
+        has_bom,
+        encoding_source,
+        has_decoding_warnings,
+    );
+    let metadata = build_buffer_text_metadata(
+        inspection,
+        &format,
+        format.has_non_compliant_characters(text),
+    );
+    (format, metadata)
 }
 
 pub(crate) fn buffer_text_metadata_from_piece_tree(
@@ -490,10 +563,69 @@ pub(crate) fn buffer_text_metadata_from_piece_tree(
     let spans = tree.spans_for_range(0..tree.len_chars());
     let inspection = TextInspection::inspect_spans(spans.map(|s| s.text));
     format.apply_inspection(&inspection);
+    build_buffer_text_metadata(inspection, format, false)
+}
+
+fn build_buffer_text_metadata(
+    inspection: TextInspection,
+    format: &TextFormatMetadata,
+    has_non_compliant_characters: bool,
+) -> BufferTextMetadata {
     BufferTextMetadata {
         line_count: inspection.line_count,
         artifact_summary: inspection.artifact_summary,
         preferred_line_ending: format.preferred_line_ending_style(),
-        has_non_compliant_characters: false,
+        has_non_compliant_characters,
     }
+}
+
+fn can_update_metadata_incrementally(
+    format: &TextFormatMetadata,
+    deleted_text: &str,
+    inserted_text: &str,
+) -> bool {
+    !contains_non_line_ending_control_chars(deleted_text)
+        && !contains_non_line_ending_control_chars(inserted_text)
+        && (format.is_ascii_subset || (deleted_text.is_ascii() && inserted_text.is_ascii()))
+}
+
+fn contains_non_line_ending_control_chars(text: &str) -> bool {
+    text.chars()
+        .any(|ch| ch.is_control() && !matches!(ch, '\r' | '\n' | '\t'))
+}
+
+fn boundary_window(previous_char: Option<char>, text: &str, next_char: Option<char>) -> String {
+    let mut window = String::with_capacity(
+        text.len()
+            + usize::from(previous_char.is_some()) * 4
+            + usize::from(next_char.is_some()) * 4,
+    );
+    if let Some(previous_char) = previous_char {
+        window.push(previous_char);
+    }
+    window.push_str(text);
+    if let Some(next_char) = next_char {
+        window.push(next_char);
+    }
+    window
+}
+
+fn apply_line_ending_delta(
+    line_ending_counts: &mut LineEndingCounts,
+    deleted_counts: LineEndingCounts,
+    inserted_counts: LineEndingCounts,
+) -> Option<()> {
+    line_ending_counts.lf = line_ending_counts
+        .lf
+        .checked_sub(deleted_counts.lf)?
+        .checked_add(inserted_counts.lf)?;
+    line_ending_counts.crlf = line_ending_counts
+        .crlf
+        .checked_sub(deleted_counts.crlf)?
+        .checked_add(inserted_counts.crlf)?;
+    line_ending_counts.cr = line_ending_counts
+        .cr
+        .checked_sub(deleted_counts.cr)?
+        .checked_add(inserted_counts.cr)?;
+    Some(())
 }

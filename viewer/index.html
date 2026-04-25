@@ -18,24 +18,21 @@
     <main class="app-shell">
         <header class="hero">
             <div>
-                <p class="eyebrow">Scratchpad data viewer</p>
-                <h1>Hotspots, slowspots, search speed, resource profiles, clones, flamegraphs, and architecture risk map
-                </h1>
+                <p class="eyebrow">Scratchpad measurement dashboard</p>
+                <h1>Quality, performance, correctness, and module health</h1>
                 <p class="lede">
-                    A static viewer for the JSON artifacts produced by the Python measurement tools.
+                    Dashboard-first review for the JSON artifacts produced by the measurement tools.
                 </p>
             </div>
             <div class="data-card">
-                <div class="data-card__label">Expected inputs</div>
+                <div class="data-card__label">Primary inputs</div>
+                <code>target/analysis/measurement_catalog.json</code>
+                <code>target/analysis/measurement_runs.json</code>
                 <code>target/analysis/hotspots.json</code>
-                <code>target/analysis/slowspots.json</code>
-                <code>target/analysis/search_speed.json</code>
-                <code>target/analysis/capacity_report.json</code>
-                <code>target/analysis/resource_profiles.json</code>
-                <code>target/analysis/speed_efficiency_report.json</code>
                 <code>target/analysis/clones.json</code>
+                <code>target/analysis/speed_efficiency_report.json</code>
+                <code>target/analysis/correctness_review.json</code>
                 <code>target/analysis/map.json</code>
-                <code>target/analysis/flamegraphs.json</code>
             </div>
         </header>
 
@@ -49,7 +46,22 @@
                     Viewer version: <code id="viewer-version">loading</code>
                 </p>
             </div>
+            <div class="run-toolbar" aria-label="Refresh controls">
+                <button class="run-button" data-run="all">Refresh All</button>
+                <button class="run-button" data-run-category="quality">Quality</button>
+                <button class="run-button" data-run-category="performance">Performance</button>
+                <button class="run-button" data-run-category="correctness">Correctness</button>
+                <button class="run-button" data-run-category="map">Map</button>
+            </div>
             <div class="file-grid">
+                <label>
+                    Catalog JSON
+                    <input id="catalog-file" type="file" accept="application/json,.json" />
+                </label>
+                <label>
+                    Runs JSON
+                    <input id="runs-file" type="file" accept="application/json,.json" />
+                </label>
                 <label>
                     Hotspots JSON
                     <input id="hotspots-file" type="file" accept="application/json,.json" />
@@ -86,82 +98,149 @@
                     Flamegraphs JSON
                     <input id="flamegraphs-file" type="file" accept="application/json,.json" />
                 </label>
+                <label>
+                    Correctness JSON
+                    <input id="correctness-file" type="file" accept="application/json,.json" />
+                </label>
             </div>
         </section>
 
         <nav class="tabs" aria-label="Metric views">
-            <button class="tab is-active" data-tab="hotspots">Hotspots</button>
-            <button class="tab" data-tab="slowspots">Slowspots</button>
-            <button class="tab" data-tab="search-speed">Search Speed</button>
-            <button class="tab" data-tab="speed-report">Speed Report</button>
-            <button class="tab" data-tab="capacity-report">Capacity</button>
-            <button class="tab" data-tab="resource-profiles">Resource Profiles</button>
-            <button class="tab" data-tab="clones">Clones</button>
+            <button class="tab is-active" data-tab="overview">Overview</button>
+            <button class="tab" data-tab="quality-review">Quality Review</button>
+            <button class="tab" data-tab="performance-review">Performance Review</button>
+            <button class="tab" data-tab="correctness-review">Correctness Review</button>
             <button class="tab" data-tab="map">Map</button>
-            <button class="tab" data-tab="flamegraphs">Flamegraphs</button>
+            <button class="tab" data-tab="run-log">Run Log</button>
         </nav>
 
-        <section id="hotspots" class="tab-panel is-active">
+        <section id="overview" class="tab-panel is-active">
+            <div id="overview-summary" class="summary-grid"></div>
+            <div class="review-grid">
+                <div class="panel-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Highest Quality Risks</h2>
+                            <p>Complexity and clone signals.</p>
+                        </div>
+                    </div>
+                    <div id="overview-quality" class="table-wrap"></div>
+                </div>
+                <div class="panel-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Highest Performance Risks</h2>
+                            <p>Slow, near-ceiling, or unprofiled scenarios.</p>
+                        </div>
+                    </div>
+                    <div id="overview-performance" class="table-wrap"></div>
+                </div>
+                <div class="panel-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Correctness Health</h2>
+                            <p>Tests grouped by architecture layer.</p>
+                        </div>
+                    </div>
+                    <div id="overview-correctness" class="table-wrap"></div>
+                </div>
+                <div class="panel-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Recent Runs</h2>
+                            <p>Latest dashboard refresh activity.</p>
+                        </div>
+                    </div>
+                    <div id="overview-runs" class="table-wrap"></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="quality-review" class="tab-panel">
+            <div class="category-header">
+                <div>
+                    <h2>Quality Review</h2>
+                    <p>Hotspots focus on complexity and maintainability. SLOC is shown separately as size context.</p>
+                </div>
+                <button class="run-button" data-run-category="quality">Refresh Quality</button>
+            </div>
             <div id="hotspots-summary" class="summary-grid"></div>
             <div class="panel-card">
                 <div class="panel-card__header">
                     <div>
-                        <h2>Complexity hotspots</h2>
-                        <p>Ranked by the hotspot score emitted by <code>scripts/hotspots.py</code>.</p>
+                        <h2>Hotspots</h2>
+                        <p>Ranked by cognitive, cyclomatic, maintainability index, and Halstead effort.</p>
                     </div>
+                    <button class="run-button" data-run-item="quality.hotspots">Refresh</button>
                     <input id="hotspots-filter" class="filter-input" type="search" placeholder="Filter hotspots..." />
                 </div>
                 <div id="hotspots-table" class="table-wrap"></div>
             </div>
+            <div class="panel-card">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Clones</h2>
+                        <p>Repeated structures and cross-file duplication drift.</p>
+                    </div>
+                    <button class="run-button" data-run-item="quality.clones">Refresh</button>
+                    <input id="clones-filter" class="filter-input" type="search" placeholder="Filter clones..." />
+                </div>
+                <div id="clones-summary" class="summary-grid"></div>
+                <div id="clones-table" class="table-wrap"></div>
+            </div>
         </section>
 
-        <section id="slowspots" class="tab-panel">
+        <section id="performance-review" class="tab-panel">
+            <div class="category-header">
+                <div>
+                    <h2>Performance Review</h2>
+                    <p>Scenario-first view across speed tests, capacity reports, resource profiles, and flamegraphs.</p>
+                </div>
+                <button class="run-button" data-run-category="performance">Refresh Performance</button>
+            </div>
+            <div id="performance-scenarios" class="scenario-grid"></div>
             <div id="slowspots-summary" class="summary-grid"></div>
             <div class="panel-card">
                 <div class="panel-card__header">
                     <div>
-                        <h2>Performance slowspots</h2>
+                        <h2>Broad Speed Tests</h2>
                         <p>Criterion benchmark results enriched with explicit module ownership.</p>
                     </div>
+                    <button class="run-button" data-run-item="performance.slowspots">Refresh</button>
                     <input id="slowspots-filter" class="filter-input" type="search" placeholder="Filter slowspots..." />
                 </div>
                 <div id="slowspots-table" class="table-wrap"></div>
             </div>
-        </section>
-
-        <section id="search-speed" class="tab-panel">
+            <div id="speed-report-summary" class="summary-grid"></div>
+            <div class="panel-card">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Speed And Efficiency Report</h2>
+                        <p>Coordinated triage view across broad latency, search scaling, flamegraph coverage, and
+                            capacity ceilings.</p>
+                    </div>
+                    <button class="run-button" data-run-item="performance.report">Refresh</button>
+                </div>
+                <div id="speed-report-triage"></div>
+            </div>
             <div id="search-speed-summary" class="summary-grid"></div>
             <div id="search-speed-charts" class="chart-grid"></div>
             <div class="panel-card">
                 <div class="panel-card__header">
                     <div>
-                        <h2>Search speed</h2>
-                        <p>Criterion-backed scaling benchmarks for full search completion and first-response latency
-                            across Active, Current, and All scopes.</p>
+                        <h2>Searching: Large Files And Lots Of Files</h2>
+                        <p>Full-completion and first-response latency across Active, Current, and All scopes.</p>
                     </div>
+                    <button class="run-button" data-run-item="performance.search">Refresh</button>
                     <input id="search-speed-filter" class="filter-input" type="search"
                         placeholder="Filter search benchmarks..." />
                 </div>
                 <div id="search-speed-table" class="table-wrap"></div>
             </div>
-        </section>
-
-        <section id="speed-report" class="tab-panel">
-            <div id="speed-report-summary" class="summary-grid"></div>
             <div class="panel-card">
                 <div class="panel-card__header">
                     <div>
-                        <h2>Speed and efficiency report</h2>
-                        <p>Coordinated triage view across broad latency, search scaling, flamegraph coverage, and
-                            capacity ceilings.</p>
-                    </div>
-                </div>
-                <div id="speed-report-triage"></div>
-            </div>
-            <div class="panel-card">
-                <div class="panel-card__header">
-                    <div>
-                        <h2>Search section</h2>
+                        <h2>Search Section</h2>
                         <p>Dedicated search rows remain the primary source for search scaling decisions.</p>
                     </div>
                 </div>
@@ -193,9 +272,6 @@
                 </div>
                 <div id="speed-report-methodology"></div>
             </div>
-        </section>
-
-        <section id="capacity-report" class="tab-panel">
             <div id="capacity-report-summary" class="summary-grid"></div>
             <div class="panel-card">
                 <div class="panel-card__header">
@@ -204,12 +280,10 @@
                         <p>Threshold sweeps stay separate from latency benchmarks so unusable ceilings do not pollute
                             the broad leaderboard.</p>
                     </div>
+                    <button class="run-button" data-run-item="performance.capacity">Refresh</button>
                 </div>
                 <div id="capacity-report-table" class="table-wrap"></div>
             </div>
-        </section>
-
-        <section id="resource-profiles" class="tab-panel">
             <div id="resource-profiles-summary" class="summary-grid"></div>
             <div class="panel-stack">
                 <div class="panel-card">
@@ -219,6 +293,7 @@
                             <p>Allocation-heavy, working-set, page-fault, and session-cost probes for large-file open,
                                 paste, tab scaling, and session persistence.</p>
                         </div>
+                        <button class="run-button" data-run-item="performance.resources">Refresh</button>
                         <input id="resource-profiles-filter" class="filter-input" type="search"
                             placeholder="Filter resource profiles..." />
                     </div>
@@ -235,31 +310,72 @@
                     <div id="resource-profiles-samples" class="table-wrap"></div>
                 </div>
             </div>
+            <div class="flamegraph-layout">
+                <aside class="panel-card flamegraph-sidebar">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Flamegraphs</h2>
+                            <p>Select a profile to view its flamegraph.</p>
+                        </div>
+                    </div>
+                    <button class="run-button" data-run-item="performance.flamegraphs">Refresh Flamegraphs</button>
+                    <div id="flamegraph-list" class="flamegraph-list"></div>
+                </aside>
+                <div class="panel-card flamegraph-main">
+                    <div id="flamegraph-content" class="flamegraph-content">
+                        <p class="muted">Select a profile from the sidebar to view the flamegraph.</p>
+                    </div>
+                </div>
+            </div>
         </section>
 
-        <section id="clones" class="tab-panel">
-            <div id="clones-summary" class="summary-grid"></div>
+        <section id="correctness-review" class="tab-panel">
+            <div class="category-header">
+                <div>
+                    <h2>Correctness Review</h2>
+                    <p>Integration and inline tests categorized by architectural layer.</p>
+                </div>
+                <button class="run-button" data-run-category="correctness">Refresh Correctness</button>
+            </div>
+            <div id="correctness-summary" class="summary-grid"></div>
             <div class="panel-card">
                 <div class="panel-card__header">
                     <div>
-                        <h2>Code clones</h2>
-                        <p>Structural and Type-2 clones detected by <code>scripts/clone_alert.py</code>.</p>
+                        <h2>Architectural Layers</h2>
+                        <p>Test ownership and current result state.</p>
                     </div>
-                    <input id="clones-filter" class="filter-input" type="search" placeholder="Filter clones..." />
                 </div>
-                <div id="clones-table" class="table-wrap"></div>
+                <div id="correctness-layers" class="table-wrap"></div>
+            </div>
+            <div class="panel-card">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Tests</h2>
+                        <p>Each item has a short explanation of what it covers.</p>
+                    </div>
+                    <button class="run-button" data-run-item="correctness.catalog">Refresh Catalog</button>
+                    <button class="run-button" data-run-item="correctness.all">Run All Tests</button>
+                    <input id="correctness-filter" class="filter-input" type="search" placeholder="Filter tests..." />
+                </div>
+                <div id="correctness-table" class="table-wrap"></div>
             </div>
         </section>
 
         <section id="map" class="tab-panel">
+            <div class="category-header">
+                <div>
+                    <h2>Map</h2>
+                    <p>Dependency layout with quality, performance, and correctness health per module.</p>
+                </div>
+                <button class="run-button" data-run-category="map">Refresh Map</button>
+            </div>
             <div id="map-summary" class="summary-grid"></div>
             <div class="map-layout">
                 <div class="panel-card graph-card">
                     <div class="panel-card__header">
                         <div>
                             <h2>Architecture risk map</h2>
-                            <p>Click a module to inspect maintainability, change, performance, and architectural risk.
-                            </p>
+                            <p>Click a module to inspect quality, performance, correctness, and dependencies.</p>
                         </div>
                         <div class="map-controls">
                             <label class="zoom-control">
@@ -277,7 +393,9 @@
                                 <span>Metric Color</span>
                                 <select id="map-metric" class="filter-input" style="padding: 4px 8px; font-size: 13px;">
                                     <option value="total_score">Total Risk</option>
+                                    <option value="quality">Quality Risk</option>
                                     <option value="maintainability">Maintainability Risk</option>
+                                    <option value="correctness">Correctness Risk</option>
                                     <option value="change">Change Risk</option>
                                     <option value="performance">Performance Risk</option>
                                     <option value="architectural">Architectural Risk</option>
@@ -300,24 +418,26 @@
             </div>
         </section>
 
-        <section id="flamegraphs" class="tab-panel">
-            <div class="flamegraph-layout">
-                <aside class="panel-card flamegraph-sidebar">
-                    <div class="panel-card__header">
-                        <div>
-                            <h2>Flamegraphs</h2>
-                            <p>Select a profile to view its flamegraph.</p>
-                        </div>
-                    </div>
-                    <div id="flamegraph-list" class="flamegraph-list">
-                        <!-- List of flamegraphs will be populated here -->
-                    </div>
-                </aside>
-                <div class="panel-card flamegraph-main">
-                    <div id="flamegraph-content" class="flamegraph-content">
-                        <p class="muted">Select a profile from the sidebar to view the flamegraph.</p>
+        <section id="run-log" class="tab-panel">
+            <div class="category-header">
+                <div>
+                    <h2>Run Log</h2>
+                    <p>Dashboard refreshes, task status, artifacts, and command logs.</p>
+                </div>
+                <button class="run-button" data-run="all">Refresh All</button>
+            </div>
+            <div id="run-log-summary" class="summary-grid"></div>
+            <div class="panel-card">
+                <div id="run-log-table" class="table-wrap"></div>
+            </div>
+            <div class="panel-card">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Selected Log</h2>
+                        <p>Click a run row to load its command output.</p>
                     </div>
                 </div>
+                <pre id="run-log-output" class="log-output">No run selected.</pre>
             </div>
         </section>
     </main>

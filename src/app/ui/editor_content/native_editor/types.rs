@@ -154,8 +154,7 @@ pub struct OperationRecord {
 }
 
 pub(super) fn selection_char_range(cursor_range: &CursorRange) -> Option<Range<usize>> {
-    let (start, end) = cursor_range.sorted_indices();
-    (start < end).then_some(start..end)
+    (!cursor_range.is_empty()).then(|| cursor_range.as_sorted_char_range())
 }
 
 pub(super) fn blend_colors(

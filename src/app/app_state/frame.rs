@@ -34,6 +34,7 @@ impl ScratchpadApp {
             // Rebuild the overflow popup lazily against the resized viewport.
             self.overflow_popup_open = false;
         }
+        self.tab_manager.evict_inactive_tab_state();
         self.poll_background_io(ctx);
         self.apply_theme_to_context(ctx);
         crate::app::ui::widget_ids::configure_debug_options(ctx);

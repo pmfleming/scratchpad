@@ -13,6 +13,7 @@ HOTSPOT_CMD = [".venv/Scripts/python.exe", "scripts/hotspots.py"]
 SLOWSPOT_CMD = [".venv/Scripts/python.exe", "scripts/slowspots.py", "--skip-bench"]
 DEFAULT_OUTPUT = Path("map.json")
 VISIBILITY_OUTPUT = Path("target/analysis/map.json")
+CORRECTNESS_PATH = Path("target/analysis/correctness_review.json")
 
 AREA_COLORS = {
     "chrome": "#569cd6",
@@ -52,6 +53,7 @@ class ArchitectureMapper:
         self.module_sources: Dict[str, str] = {}
         self.public_api_counts: Dict[str, int] = {}
         self.test_support: Dict[str, Dict[str, object]] = {}
+        self.correctness: Dict[str, Dict[str, object]] = {}
         self.git_history: Dict[str, Dict[str, object]] = {}
         self.cycle_members: Set[str] = set()
         self.risk_breakdown: Dict[str, Dict[str, object]] = {}
@@ -243,6 +245,73 @@ class ArchitectureMapper:
                 "coverage_hint": has_inline_tests or bool(references),
             }
 
+    def gather_correctness(self) -> None:
+        if not CORRECTNESS_PATH.exists():
+            return
+        try:
+            payload = json.loads(CORRECTNESS_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+
+        tests = payload.get("tests", []) if isinstance(payload, dict) else []
+        for item in tests:
+            module = str(item.get("module", ""))
+            if not module:
+                continue
+            candidates = [
+                module,
+                module.replace("/", "::"),
+                module.replace("\\", "::"),
+            ]
+            matched = None
+            for candidate in candidates:
+                if candidate in self.module_paths:
+                    matched = candidate
+                    break
+            if matched is None:
+                matched = self._match_test_to_module(str(item.get("path", "")), module)
+            if matched is None:
+                continue
+            entry = self.correctness.setdefault(
+                matched,
+                {
+                    "test_count": 0,
+                    "failed_tests": 0,
+                    "unknown_tests": 0,
+                    "skipped_tests": 0,
+                    "tests": [],
+                },
+            )
+            entry["test_count"] = int(entry["test_count"]) + 1
+            status = str(item.get("last_status", "unknown"))
+            if status == "failed":
+                entry["failed_tests"] = int(entry["failed_tests"]) + 1
+            elif status == "unknown":
+                entry["unknown_tests"] = int(entry["unknown_tests"]) + 1
+            elif status == "skipped":
+                entry["skipped_tests"] = int(entry["skipped_tests"]) + 1
+            tests_list = entry["tests"]
+            if isinstance(tests_list, list):
+                tests_list.append(
+                    {
+                        "id": item.get("id"),
+                        "name": item.get("name"),
+                        "path": item.get("path"),
+                        "line": item.get("line"),
+                        "status": status,
+                        "description": item.get("description"),
+                    }
+                )
+
+    def _match_test_to_module(self, path_text: str, module: str) -> Optional[str]:
+        stem = Path(path_text).stem
+        hints = [stem, module.split("::")[-1], module.split("/")[-1]]
+        for mod_name in self.module_paths:
+            tail = mod_name.split("::")[-1]
+            if tail in hints or any(hint and hint in mod_name for hint in hints):
+                return mod_name
+        return None
+
     def gather_git_history(self) -> None:
         cmd = [
             "git",
@@ -382,6 +451,7 @@ class ArchitectureMapper:
             perf = self.performance.get(mod_name, {})
             git = self.git_history.get(mod_name, {})
             tests = self.test_support.get(mod_name, {})
+            correctness = self.correctness.get(mod_name, {})
             outbound, inbound = self._dependency_density(mod_name)
             public_api = self.public_api_counts.get(mod_name, 0)
             sloc = float(metric.get("sloc", 0.0))
@@ -391,6 +461,11 @@ class ArchitectureMapper:
             defect_commits = int(git.get("defect_commits", 0))
             commit_count = int(git.get("commits", 0))
             has_tests = bool(tests.get("coverage_hint", False))
+            test_count = int(correctness.get("test_count", 0))
+            failed_tests = int(correctness.get("failed_tests", 0))
+            unknown_tests = int(correctness.get("unknown_tests", 0))
+            skipped_tests = int(correctness.get("skipped_tests", 0))
+            has_correctness_tests = has_tests or test_count > 0
             perf_score = float(perf.get("score", 0.0))
             perf_mean_ms = float(perf.get("mean_ms", 0.0))
             perf_variance = float(perf.get("variance", 0.0))
@@ -409,7 +484,15 @@ class ArchitectureMapper:
                 + min(100.0, commit_count * 2.5)
                 + min(80.0, contributors * 14.0)
                 + min(90.0, defect_commits * 18.0)
-                + (90.0 if not has_tests else 0.0),
+                + (90.0 if not has_correctness_tests else 0.0),
+                2,
+            )
+            correctness_risk = round(
+                (140.0 if failed_tests else 0.0)
+                + min(120.0, failed_tests * 45.0)
+                + min(80.0, unknown_tests * 4.0)
+                + min(40.0, skipped_tests * 10.0)
+                + (90.0 if not has_correctness_tests else 0.0),
                 2,
             )
             performance = round(
@@ -427,13 +510,14 @@ class ArchitectureMapper:
                 2,
             )
             total = round(
-                maintainability + change_risk + performance + architectural, 2
+                maintainability + change_risk + performance + architectural + correctness_risk, 2
             )
 
             signals: Dict[str, List[str]] = {
                 "maintainability": [],
                 "change": [],
                 "performance": [],
+                "correctness": [],
                 "architectural": [],
             }
             if complexity >= 300:
@@ -449,7 +533,7 @@ class ArchitectureMapper:
                     f"high coupling in={inbound} out={outbound}"
                 )
 
-            if not has_tests:
+            if not has_correctness_tests:
                 signals["change"].append("low test evidence")
             if churn >= 200:
                 signals["change"].append(f"high churn {int(churn)} lines")
@@ -467,6 +551,15 @@ class ArchitectureMapper:
             if not perf.get("items"):
                 signals["performance"].append("no benchmark mapping")
 
+            if failed_tests:
+                signals["correctness"].append(f"failing tests {failed_tests}")
+            if unknown_tests:
+                signals["correctness"].append(f"unknown tests {unknown_tests}")
+            if skipped_tests:
+                signals["correctness"].append(f"skipped tests {skipped_tests}")
+            if not has_correctness_tests:
+                signals["correctness"].append("no direct tests")
+
             if layer_violations >= 1:
                 signals["architectural"].append(
                     f"layer violations {layer_violations}"
@@ -482,6 +575,8 @@ class ArchitectureMapper:
                 "maintainability_risk": maintainability,
                 "change_risk": change_risk,
                 "performance_risk": performance,
+                "correctness_risk": correctness_risk,
+                "quality_risk": maintainability,
                 "architectural_risk": architectural,
                 "total_score": total,
                 "signals": {key: value or ["stable"] for key, value in signals.items()},
@@ -496,8 +591,13 @@ class ArchitectureMapper:
                     "contributors": git.get("contributors", []),
                     "contributor_count": contributors,
                     "defect_commits": defect_commits,
-                    "has_tests": has_tests,
+                    "has_tests": has_correctness_tests,
                     "test_refs": tests.get("external_refs", []),
+                    "test_count": test_count,
+                    "failed_tests": failed_tests,
+                    "unknown_tests": unknown_tests,
+                    "skipped_tests": skipped_tests,
+                    "correctness_tests": correctness.get("tests", []),
                     "layer_violations": layer_violations,
                     "cycle_member": cycle_member,
                     "perf_mean_ms": perf_mean_ms,
@@ -564,9 +664,11 @@ class ArchitectureMapper:
                         "parent": group_id("::".join(mod_name.split("::")[:-1]) or None),
                         "comp_score": float(metric.get("score", 0.0)),
                         "perf_score": float(perf_data.get("score", 0.0)),
+                        "quality_risk": float(risk.get("quality_risk", risk.get("maintainability_risk", 0.0))),
                         "maintainability_risk": float(
                             risk.get("maintainability_risk", 0.0)
                         ),
+                        "correctness_risk": float(risk.get("correctness_risk", 0.0)),
                         "change_risk": float(risk.get("change_risk", 0.0)),
                         "performance_risk": float(risk.get("performance_risk", 0.0)),
                         "architectural_risk": float(
@@ -591,6 +693,9 @@ class ArchitectureMapper:
                             ),
                             "performance": self.risk_color(
                                 float(risk.get("performance_risk", 0.0))
+                            ),
+                            "correctness": self.risk_color(
+                                float(risk.get("correctness_risk", 0.0))
                             ),
                             "architectural": self.risk_color(
                                 float(risk.get("architectural_risk", 0.0))
@@ -651,6 +756,12 @@ class ArchitectureMapper:
                 ),
                 2,
             ),
+            "correctness": round(
+                sum(
+                    item["correctness_risk"] for item in self.risk_breakdown.values()
+                ),
+                2,
+            ),
             "architectural": round(
                 sum(
                     item["architectural_risk"] for item in self.risk_breakdown.values()
@@ -681,8 +792,9 @@ class ArchitectureMapper:
                 "risk_model": [
                     "maintainability",
                     "change",
-                    "performance",
-                    "architectural",
+                "performance",
+                "correctness",
+                "architectural",
                 ],
                 "summary": self.meta_summary(),
             },
@@ -744,6 +856,7 @@ def main() -> None:
     mapper.gather_metrics()
     mapper.gather_performance()
     mapper.gather_test_support()
+    mapper.gather_correctness()
     mapper.gather_git_history()
     mapper.compute_risks()
 

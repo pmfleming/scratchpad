@@ -60,6 +60,13 @@ impl TextDocument {
         self.piece_tree.extract_text()
     }
 
+    pub fn text_cow(&self) -> Cow<'_, str> {
+        self.piece_tree
+            .borrow_range(0..self.piece_tree.len_chars())
+            .map(Cow::Borrowed)
+            .unwrap_or_else(|| Cow::Owned(self.piece_tree.extract_text()))
+    }
+
     pub fn piece_tree(&self) -> &PieceTreeLite {
         self.piece_tree.as_ref()
     }

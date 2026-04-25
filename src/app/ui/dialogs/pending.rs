@@ -238,47 +238,17 @@ fn render_unsaved_changes_body(
     tab_name: &str,
     close_requested: &mut bool,
 ) -> Option<UnsavedChoice> {
-    callout::apply_spacing(ui);
-    ui.spacing_mut().item_spacing = egui::vec2(10.0, 12.0);
-
-    if render_unsaved_changes_header(ui, tab_name) {
-        *close_requested = true;
-    }
-
-    ui.add_space(2.0);
-    ui.vertical_centered(|ui| {
-        ui.label(
-            egui::RichText::new("Unsaved Changes")
-                .size(12.0)
-                .color(callout::muted_text(ui)),
-        );
-    });
-
-    ui.add_space(2.0);
-    let mut action = None;
-    ui.horizontal_centered(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(12.0, 0.0);
-        for (icon, tooltip, choice) in [
+    render_icon_choice_dialog(
+        ui,
+        tab_name,
+        "Unsaved Changes",
+        close_requested,
+        [
             (FLOPPY_DISK, "Save changes", UnsavedChoice::Save),
             (TRASH, "Discard changes", UnsavedChoice::Discard),
             (X, "Cancel", UnsavedChoice::Cancel),
-        ] {
-            if callout::icon_button(
-                ui,
-                icon,
-                26.0,
-                UNSAVED_CHANGES_ACTION_BUTTON_SIZE,
-                callout::section_fill(ui),
-                tooltip,
-                true,
-            )
-            .clicked()
-            {
-                action = Some(choice);
-            }
-        }
-    });
-    action
+        ],
+    )
 }
 
 fn render_unsaved_changes_header(ui: &mut egui::Ui, tab_name: &str) -> bool {
@@ -462,7 +432,7 @@ fn render_missing_file_dialog(
     state: &SaveConflictDialogState,
     close_requested: &mut bool,
 ) {
-    if let Some(action) = render_pending_icon_dialog(
+    if let Some(action) = render_icon_choice_dialog(
         ui,
         &state.path_label,
         "File Missing on Disk",
@@ -493,12 +463,12 @@ fn render_missing_file_dialog(
     }
 }
 
-fn render_pending_icon_dialog<T: Copy>(
+fn render_icon_choice_dialog<T: Copy, const N: usize>(
     ui: &mut egui::Ui,
     title: &str,
     subtitle: &str,
     close_requested: &mut bool,
-    actions: [(&str, &str, T); 2],
+    actions: [(&str, &str, T); N],
 ) -> Option<T> {
     callout::apply_spacing(ui);
     ui.spacing_mut().item_spacing = egui::vec2(10.0, 12.0);
@@ -517,6 +487,13 @@ fn render_pending_icon_dialog<T: Copy>(
     });
 
     ui.add_space(2.0);
+    render_icon_choice_actions(ui, actions)
+}
+
+fn render_icon_choice_actions<T: Copy, const N: usize>(
+    ui: &mut egui::Ui,
+    actions: [(&str, &str, T); N],
+) -> Option<T> {
     let mut selected = None;
     ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(12.0, 0.0);

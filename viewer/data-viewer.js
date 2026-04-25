@@ -1,6 +1,8 @@
 (function () {
     const viewerVersion = window.SCRATCHPAD_VIEWER_VERSION || "dev";
     const sources = {
+        catalog: `../target/analysis/measurement_catalog.json?v=${viewerVersion}`,
+        runs: `../target/analysis/measurement_runs.json?v=${viewerVersion}`,
         hotspots: `../target/analysis/hotspots.json?v=${viewerVersion}`,
         slowspots: `../target/analysis/slowspots.json?v=${viewerVersion}`,
         searchSpeed: `../target/analysis/search_speed.json?v=${viewerVersion}`,
@@ -10,9 +12,12 @@
         clones: `../target/analysis/clones.json?v=${viewerVersion}`,
         map: `../target/analysis/map.json?v=${viewerVersion}`,
         flamegraphs: `../target/analysis/flamegraphs.json?v=${viewerVersion}`,
+        correctness: `../target/analysis/correctness_review.json?v=${viewerVersion}`,
     };
 
     const state = {
+        catalog: null,
+        runs: [],
         hotspots: [],
         slowspots: [],
         searchSpeed: [],
@@ -22,8 +27,11 @@
         clones: [],
         map: null,
         flamegraphs: [],
+        correctness: null,
         selectedModule: null,
         selectedFlamegraph: null,
+        selectedRun: null,
+        lastObservedFinishedRun: null,
         mapZoom: 0.65,
         mapLayout: 'folder',
         mapMetric: 'total_score',
@@ -101,32 +109,40 @@
         const filtered = state.hotspots.filter((item) => matchesFilter(item, query));
         const worst = state.hotspots[0];
         const files = new Set(state.hotspots.filter((item) => item.kind === "unit").map((item) => item.name));
+        const largeFiles = state.hotspots.filter((item) => Number(item.sloc || 0) >= 150).length;
 
         renderSummary("hotspots-summary", [
             metricCard("Records", state.hotspots.length),
             metricCard("Files", files.size),
-            metricCard("Worst score", worst ? formatNumber.format(worst.score) : "-"),
+            metricCard("Worst quality", worst ? formatNumber.format(qualityScore(worst)) : "-"),
+            metricCard("Large items", largeFiles),
             metricCard("Worst item", worst ? worst.name.split(/[\\/]/).pop() : "-"),
         ]);
 
         renderTable(
             "hotspots-table",
-            ["Rank", "Kind", "Name", "Score", "Cog", "Cyc", "MI", "SLOC", "Signals"],
+            ["Rank", "Kind", "Name", "Quality", "Cog", "Cyc", "MI", "Halstead Effort", "SLOC", "Signals"],
             filtered.map((item, index) => {
-                const scoreClass = riskClass(item.score, 300, 600);
+                const score = qualityScore(item);
+                const scoreClass = riskClass(score, 300, 600);
                 return `<tr>
                     <td>${index + 1}</td>
                     <td><span class="pill">${escapeHtml(item.kind)}</span></td>
                     <td><code>${escapeHtml(item.name)}</code><div class="muted">line ${escapeHtml(item.start_line)}</div></td>
-                    <td class="${scoreClass}">${formatNumber.format(item.score)}</td>
+                    <td class="${scoreClass}">${formatNumber.format(score)}</td>
                     <td>${formatNumber.format(item.cognitive)}</td>
                     <td>${formatNumber.format(item.cyclomatic)}</td>
                     <td>${formatNumber.format(item.mi)}</td>
+                    <td>${formatNumber.format(item.effort || 0)}</td>
                     <td>${formatNumber.format(item.sloc)}</td>
                     <td>${renderPills(item.signals)}</td>
                 </tr>`;
             })
         );
+    }
+
+    function qualityScore(item) {
+        return Number(item.quality_score ?? item.score ?? 0);
     }
 
     function renderClones() {
@@ -1017,6 +1033,202 @@
         return values.map((item) => `<span class="pill">${escapeHtml(item)}</span>`).join("");
     }
 
+    function renderOverview() {
+        const latestRun = [...state.runs].reverse().find(Boolean);
+        const correctnessSummary = state.correctness?.summary || {};
+        const speedSummary = state.speedReport?.summary || {};
+        const mapSummary = state.map?.meta?.summary || {};
+        renderSummary("overview-summary", [
+            metricCard("Quality Items", state.hotspots.length + state.clones.length),
+            metricCard("Performance Rows", (speedSummary.search_scenarios || 0) + (speedSummary.editor_scenarios || 0) + (speedSummary.tabs_and_splits_scenarios || 0)),
+            metricCard("Tests", correctnessSummary.test_count ?? "-"),
+            metricCard("Map Modules", mapSummary.measured_modules ?? "-"),
+            metricCard("Latest Run", latestRun ? escapeHtml(latestRun.status) : "-"),
+            metricCard("Stale Unknown Tests", correctnessSummary.unknown ?? "-"),
+        ]);
+
+        renderTable(
+            "overview-quality",
+            ["Item", "Score", "Size", "Signals"],
+            [...state.hotspots]
+                .sort((left, right) => qualityScore(right) - qualityScore(left))
+                .slice(0, 6)
+                .map((item) => `<tr>
+                    <td><code>${escapeHtml(item.name)}</code></td>
+                    <td class="${riskClass(qualityScore(item), 300, 600)}">${formatNumber.format(qualityScore(item))}</td>
+                    <td>${formatNumber.format(item.sloc || 0)} SLOC</td>
+                    <td>${renderPills(item.signals)}</td>
+                </tr>`)
+        );
+
+        const triage = state.speedReport?.triage || [];
+        renderTable(
+            "overview-performance",
+            ["Scenario", "Family", "Resource", "Action"],
+            triage.slice(0, 6).map((item) => `<tr>
+                <td><code>${escapeHtml(item.scenario_label || item.scenario_id)}</code></td>
+                <td><span class="pill">${escapeHtml(item.family || "-")}</span></td>
+                <td><span class="pill">${escapeHtml(item.suspected_limiting_resource || "-")}</span></td>
+                <td>${escapeHtml(item.recommended_action || "-")}</td>
+            </tr>`)
+        );
+
+        renderTable(
+            "overview-correctness",
+            ["Layer", "Tests", "Failed", "Unknown"],
+            (state.correctness?.layers || []).map((item) => `<tr>
+                <td>${escapeHtml(item.name)}</td>
+                <td>${formatNumber.format(item.total || 0)}</td>
+                <td class="${item.failed ? "risk-bad" : "risk-good"}">${formatNumber.format(item.failed || 0)}</td>
+                <td>${formatNumber.format(item.unknown || 0)}</td>
+            </tr>`)
+        );
+
+        renderTable(
+            "overview-runs",
+            ["Run", "Selector", "Status", "Duration"],
+            [...state.runs].reverse().slice(0, 6).map((item) => `<tr>
+                <td><code>${escapeHtml(item.id)}</code></td>
+                <td>${escapeHtml(item.selector || "-")}</td>
+                <td><span class="pill">${escapeHtml(item.status || "-")}</span></td>
+                <td>${item.duration_seconds == null ? "-" : `${formatNumber.format(item.duration_seconds)} s`}</td>
+            </tr>`)
+        );
+    }
+
+    function renderPerformanceScenarios() {
+        const scenarios = [
+            {
+                title: "Large Files: Loading And Manipulating",
+                description: "Open, scroll, viewport, snapshot, and large-document edit evidence.",
+                families: ["large-file-load", "scroll"],
+                profiles: ["large_file_scroll", "viewport_extraction", "document_snapshot"],
+            },
+            {
+                title: "Large Amount Of Tabs: Loading And Manipulating",
+                description: "Tab count, switching, reordering, and tab-strip manipulation.",
+                families: ["tab-management"],
+                profiles: ["tab_operations", "tab_tile_layout"],
+            },
+            {
+                title: "Cutting/Pasting: Large Amounts Of Data",
+                description: "Large paste, cut, undo, redo, and metadata refresh costs.",
+                families: ["edit-paste"],
+                profiles: ["large_file_paste"],
+            },
+            {
+                title: "Splitting: Large Amount Of Tabs",
+                description: "Split creation, rebalance, close, promote, and restore costs.",
+                families: ["split-layout"],
+                profiles: ["large_file_split", "tab_tile_layout"],
+            },
+            {
+                title: "Session Persistence Restore",
+                description: "Persist and restore cost for large saved workspaces.",
+                families: ["session"],
+                profiles: [],
+                tests: ["tests/session_store_tests.rs", "tests/startup_tests.rs"],
+            },
+            {
+                title: "Searching: Large Files And Lots Of Files",
+                description: "Active, current, and all-tab search scaling.",
+                families: ["search", "search-dispatch"],
+                profiles: ["search_current_app_state", "search_all_tabs", "search_dispatch"],
+                tests: ["tests/search_tests.rs"],
+            },
+        ];
+        const slowspots = state.slowspots || [];
+        const capacity = state.capacityReport?.scenarios || [];
+        const resources = state.resourceProfiles?.scenarios || [];
+        const flamegraphs = state.flamegraphs || [];
+        byId("performance-scenarios").innerHTML = scenarios.map((scenario) => {
+            const familySet = new Set(scenario.families);
+            const speedCount = slowspots.filter((item) => familySet.has(item.workload_family)).length;
+            const capacityCount = capacity.filter((item) => familySet.has(item.workload_family)).length;
+            const resourceCount = resources.filter((item) => familySet.has(item.workload_family)).length;
+            const profileMatches = flamegraphs.filter((item) => scenario.profiles.includes(item.id) || (item.workload_families || []).some((family) => familySet.has(family)));
+            return `<article class="scenario-card">
+                <h3>${escapeHtml(scenario.title)}</h3>
+                <p>${escapeHtml(scenario.description)}</p>
+                <div class="scenario-evidence">
+                    <span class="pill">${speedCount} speed</span>
+                    <span class="pill">${capacityCount} capacity</span>
+                    <span class="pill">${resourceCount} resource</span>
+                    <span class="pill">${profileMatches.filter((item) => item.available).length}/${profileMatches.length} flamegraphs</span>
+                    ${renderPills(scenario.tests || [])}
+                </div>
+            </article>`;
+        }).join("");
+    }
+
+    function renderCorrectness() {
+        const payload = state.correctness || {};
+        const summary = payload.summary || {};
+        const layers = payload.layers || [];
+        const tests = payload.tests || [];
+        const query = byId("correctness-filter")?.value || "";
+        const filtered = tests.filter((item) => matchesFilter(item, query));
+        renderSummary("correctness-summary", [
+            metricCard("Tests", summary.test_count ?? tests.length),
+            metricCard("Integration", summary.integration_count ?? "-"),
+            metricCard("Inline", summary.inline_count ?? "-"),
+            metricCard("Layers", summary.layers ?? layers.length),
+            metricCard("Failed", summary.failed ?? "-"),
+            metricCard("Unknown", summary.unknown ?? "-"),
+        ]);
+        renderTable(
+            "correctness-layers",
+            ["Layer", "Total", "Passed", "Failed", "Skipped", "Unknown"],
+            layers.map((item) => `<tr>
+                <td>${escapeHtml(item.name)}</td>
+                <td>${formatNumber.format(item.total || 0)}</td>
+                <td class="risk-good">${formatNumber.format(item.passed || 0)}</td>
+                <td class="${item.failed ? "risk-bad" : "risk-good"}">${formatNumber.format(item.failed || 0)}</td>
+                <td>${formatNumber.format(item.skipped || 0)}</td>
+                <td>${formatNumber.format(item.unknown || 0)}</td>
+            </tr>`)
+        );
+        renderTable(
+            "correctness-table",
+            ["Layer", "Test", "Description", "Kind", "Status", "Command"],
+            filtered.map((item) => `<tr>
+                <td><span class="pill">${escapeHtml(item.layer)}</span></td>
+                <td><code>${escapeHtml(item.path)}:${escapeHtml(item.line)}</code><div class="muted">${escapeHtml(item.name)}</div></td>
+                <td>${escapeHtml(item.description)}</td>
+                <td><span class="pill">${escapeHtml(item.kind)}</span></td>
+                <td class="${item.last_status === "failed" ? "risk-bad" : item.last_status === "passed" ? "risk-good" : "risk-warn"}">${escapeHtml(item.last_status)}</td>
+                <td><code>${escapeHtml(item.command)}</code></td>
+            </tr>`)
+        );
+    }
+
+    function renderRunLog() {
+        const runs = [...state.runs].reverse();
+        const running = runs.filter((item) => item.status === "running" || item.status === "queued").length;
+        const failed = runs.filter((item) => item.status === "failed").length;
+        renderSummary("run-log-summary", [
+            metricCard("Runs", runs.length),
+            metricCard("Running", running),
+            metricCard("Failed", failed),
+            metricCard("Latest", runs[0]?.status || "-"),
+        ]);
+        renderTable(
+            "run-log-table",
+            ["Run", "Selector", "Tasks", "Status", "Duration", "Artifacts"],
+            runs.map((item) => `<tr class="run-row" data-run-id="${escapeHtml(item.id)}">
+                <td><code>${escapeHtml(item.id)}</code></td>
+                <td>${escapeHtml(item.selector || "-")}</td>
+                <td>${renderPills(item.task_ids || [])}</td>
+                <td><span class="pill">${escapeHtml(item.status || "-")}</span></td>
+                <td>${item.duration_seconds == null ? "-" : `${formatNumber.format(item.duration_seconds)} s`}</td>
+                <td>${renderPills(item.artifacts || [])}</td>
+            </tr>`)
+        );
+        byId("run-log-table").querySelectorAll(".run-row").forEach((row) => {
+            row.addEventListener("click", () => loadRunLog(row.dataset.runId));
+        });
+    }
+
     function renderMap() {
         const payload = state.map;
         if (!payload?.graph) {
@@ -1181,11 +1393,15 @@
                         const metricRight = state.mapMetric === 'maintainability' ? right.maintainability_risk :
                             state.mapMetric === 'change' ? right.change_risk :
                                 state.mapMetric === 'performance' ? right.performance_risk :
+                                    state.mapMetric === 'quality' ? right.quality_risk :
+                                        state.mapMetric === 'correctness' ? right.correctness_risk :
                                     state.mapMetric === 'architectural' ? right.architectural_risk :
                                         state.mapMetric === 'churn' ? right.churn : right.total_score;
                         const metricLeft = state.mapMetric === 'maintainability' ? left.maintainability_risk :
                             state.mapMetric === 'change' ? left.change_risk :
                                 state.mapMetric === 'performance' ? left.performance_risk :
+                                    state.mapMetric === 'quality' ? left.quality_risk :
+                                        state.mapMetric === 'correctness' ? left.correctness_risk :
                                     state.mapMetric === 'architectural' ? left.architectural_risk :
                                         state.mapMetric === 'churn' ? left.churn : left.total_score;
                         return (metricRight || 0) - (metricLeft || 0);
@@ -1226,11 +1442,15 @@
                         const metricRight = state.mapMetric === 'maintainability' ? right.maintainability_risk :
                             state.mapMetric === 'change' ? right.change_risk :
                                 state.mapMetric === 'performance' ? right.performance_risk :
+                                    state.mapMetric === 'quality' ? right.quality_risk :
+                                        state.mapMetric === 'correctness' ? right.correctness_risk :
                                     state.mapMetric === 'architectural' ? right.architectural_risk :
                                         state.mapMetric === 'churn' ? right.churn : right.total_score;
                         const metricLeft = state.mapMetric === 'maintainability' ? left.maintainability_risk :
                             state.mapMetric === 'change' ? left.change_risk :
                                 state.mapMetric === 'performance' ? left.performance_risk :
+                                    state.mapMetric === 'quality' ? left.quality_risk :
+                                        state.mapMetric === 'correctness' ? left.correctness_risk :
                                     state.mapMetric === 'architectural' ? left.architectural_risk :
                                         state.mapMetric === 'churn' ? left.churn : left.total_score;
                         return (metricRight || 0) - (metricLeft || 0);
@@ -1363,16 +1583,14 @@
             inboundIds.has(node.id) ? "is-inbound" : "",
         ].filter(Boolean).join(" ");
 
-        const metricValue = state.mapMetric === 'maintainability' ? node.maintainability_risk :
-            state.mapMetric === 'change' ? node.change_risk :
-                state.mapMetric === 'performance' ? node.performance_risk :
-                    state.mapMetric === 'architectural' ? node.architectural_risk :
-                        state.mapMetric === 'churn' ? node.churn : node.total_score;
+        const metricValue = mapMetricValue(node);
         const fill = scoreFill(metricValue || 0, state.mapMetric);
         const label = shortenLabel(node.id);
         const score = formatNumber.format(metricValue || 0);
         const chips = [
+            `Q ${Math.round(node.quality_risk ?? node.maintainability_risk ?? 0)}`,
             `M ${Math.round(node.maintainability_risk || 0)}`,
+            `T ${Math.round(node.correctness_risk || 0)}`,
             `C ${Math.round(node.change_risk || 0)}`,
             `P ${Math.round(node.performance_risk || 0)}`,
             `A ${Math.round(node.architectural_risk || 0)}`,
@@ -1402,10 +1620,23 @@
         return new Set(ids);
     }
 
+    function mapMetricValue(node) {
+        if (state.mapMetric === 'maintainability') return node.maintainability_risk;
+        if (state.mapMetric === 'quality') return node.quality_risk ?? node.maintainability_risk;
+        if (state.mapMetric === 'correctness') return node.correctness_risk;
+        if (state.mapMetric === 'change') return node.change_risk;
+        if (state.mapMetric === 'performance') return node.performance_risk;
+        if (state.mapMetric === 'architectural') return node.architectural_risk;
+        if (state.mapMetric === 'churn') return node.churn;
+        return node.total_score;
+    }
+
     function scoreFill(score, metric) {
         let bad = 600;
         let warn = 300;
         if (metric === 'maintainability' || metric === 'architectural') { bad = 350; warn = 150; }
+        else if (metric === 'quality') { bad = 350; warn = 150; }
+        else if (metric === 'correctness') { bad = 120; warn = 60; }
         else if (metric === 'change') { bad = 200; warn = 80; }
         else if (metric === 'performance') { bad = 100; warn = 30; }
         else if (metric === 'churn') { bad = 500; warn = 150; }
@@ -1426,13 +1657,7 @@
     function renderMapDetail(modules, edges) {
         const selected = modules.find((node) => node.id === state.selectedModule);
         if (!selected) {
-            const getMetric = (node) => {
-                return state.mapMetric === 'maintainability' ? node.maintainability_risk :
-                    state.mapMetric === 'change' ? node.change_risk :
-                        state.mapMetric === 'performance' ? node.performance_risk :
-                            state.mapMetric === 'architectural' ? node.architectural_risk :
-                                state.mapMetric === 'churn' ? node.churn : node.total_score;
-            };
+            const getMetric = (node) => mapMetricValue(node);
             const top5 = [...modules].sort((a, b) => (getMetric(b) || 0) - (getMetric(a) || 0)).slice(0, 5);
             const top5Html = top5.map((n, i) => {
                 return `<div class="detail-row"><strong>${i + 1}. ${escapeHtml(shortenLabel(n.id))}</strong>${formatNumber.format(getMetric(n) || 0)}</div>`;
@@ -1453,7 +1678,9 @@
         byId("map-detail").innerHTML = `<h2>${escapeHtml(selected.id)}</h2>
             <div class="detail-list">
                 <div class="detail-row"><strong>Total risk</strong>${formatNumber.format(selected.total_score || 0)}</div>
+                <div class="detail-row"><strong>Quality risk</strong>${formatNumber.format(selected.quality_risk ?? selected.maintainability_risk ?? 0)}</div>
                 <div class="detail-row"><strong>Maintainability risk</strong>${formatNumber.format(selected.maintainability_risk || 0)}</div>
+                <div class="detail-row"><strong>Correctness risk</strong>${formatNumber.format(selected.correctness_risk || 0)}</div>
                 <div class="detail-row"><strong>Change risk</strong>${formatNumber.format(selected.change_risk || 0)}</div>
                 <div class="detail-row"><strong>Performance risk</strong>${formatNumber.format(selected.performance_risk || 0)}</div>
                 <div class="detail-row"><strong>Architectural risk</strong>${formatNumber.format(selected.architectural_risk || 0)}</div>
@@ -1461,11 +1688,13 @@
                 <div class="detail-row"><strong>Maintainability signals</strong>${renderPills(categorySignals.maintainability || [])}</div>
                 <div class="detail-row"><strong>Change signals</strong>${renderPills(categorySignals.change || [])}</div>
                 <div class="detail-row"><strong>Performance signals</strong>${renderPills(categorySignals.performance || [])}</div>
+                <div class="detail-row"><strong>Correctness signals</strong>${renderPills(categorySignals.correctness || [])}</div>
                 <div class="detail-row"><strong>Architectural signals</strong>${renderPills(categorySignals.architectural || [])}</div>
                 <div class="detail-row"><strong>Public API</strong>${formatNumber.format(evidence.public_api_count || 0)}</div>
                 <div class="detail-row"><strong>Commits / churn</strong>${formatNumber.format(evidence.commit_count || 0)} / ${formatNumber.format(evidence.churn || 0)}</div>
                 <div class="detail-row"><strong>Contributors / defects</strong>${formatNumber.format(evidence.contributor_count || 0)} / ${formatNumber.format(evidence.defect_commits || 0)}</div>
-                <div class="detail-row"><strong>Tests</strong>${evidence.has_tests ? "evidence found" : "no direct evidence"}</div>
+                <div class="detail-row"><strong>Tests</strong>${evidence.has_tests ? "evidence found" : "no direct evidence"}${evidence.test_count != null ? ` (${formatNumber.format(evidence.test_count)})` : ""}</div>
+                <div class="detail-row"><strong>Failed / unknown tests</strong>${formatNumber.format(evidence.failed_tests || 0)} / ${formatNumber.format(evidence.unknown_tests || 0)}</div>
                 <div class="detail-row"><strong>Layer violations</strong>${formatNumber.format(evidence.layer_violations || 0)}</div>
                 <div class="detail-row"><strong>Cycle member</strong>${evidence.cycle_member ? "yes" : "no"}</div>
                 <div class="detail-row"><strong>Outbound dependencies</strong>${renderPills(outbound)}</div>
@@ -1553,6 +1782,57 @@
         }
     }
 
+    async function loadRunLog(runId) {
+        if (!runId) return;
+        state.selectedRun = runId;
+        const output = byId("run-log-output");
+        output.textContent = "Loading run log...";
+        try {
+            const response = await fetch(`/api/run/${encodeURIComponent(runId)}/log`, { cache: "no-store" });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            output.textContent = await response.text();
+        } catch (error) {
+            output.textContent = `No log available from the dashboard server.\n${error.message}`;
+        }
+    }
+
+    async function refreshRuns() {
+        try {
+            const previousFinished = state.lastObservedFinishedRun;
+            state.runs = await loadJson(`/api/runs?v=${Date.now()}`);
+            const latestFinished = [...state.runs].reverse().find((item) => item.finished_at);
+            if (latestFinished && latestFinished.id !== previousFinished) {
+                state.lastObservedFinishedRun = latestFinished.id;
+                await loadDefaults();
+                return;
+            }
+            renderOverview();
+            renderRunLog();
+        } catch {
+            renderRunLog();
+        }
+    }
+
+    async function triggerRun(endpoint, button) {
+        const original = button.textContent;
+        button.disabled = true;
+        button.textContent = "Queued...";
+        try {
+            const response = await fetch(endpoint, { method: "POST" });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const payload = await response.json();
+            byId("load-status").textContent = `Queued ${payload.run_id}.`;
+            byId("load-detail").textContent = "Refresh is running through the local dashboard server.";
+            await refreshRuns();
+        } catch (error) {
+            byId("load-status").textContent = "Dashboard refresh unavailable.";
+            byId("load-detail").textContent = `Start with scripts/open-overview.ps1 to enable refresh controls. ${error.message}`;
+        } finally {
+            button.disabled = false;
+            button.textContent = original;
+        }
+    }
+
     async function loadJson(url) {
         const response = await fetch(url, { cache: "no-store" });
         if (!response.ok) {
@@ -1564,8 +1844,10 @@
     async function loadDefaults() {
         const status = byId("load-status");
         const detail = byId("load-detail");
-        const keys = ["hotspots", "slowspots", "searchSpeed", "capacityReport", "resourceProfiles", "speedReport", "clones", "map", "flamegraphs"];
+        const keys = ["catalog", "runs", "hotspots", "slowspots", "searchSpeed", "capacityReport", "resourceProfiles", "speedReport", "clones", "map", "flamegraphs", "correctness"];
         const fallbacks = {
+            catalog: null,
+            runs: [],
             hotspots: [],
             slowspots: [],
             searchSpeed: [],
@@ -1575,6 +1857,7 @@
             clones: [],
             map: null,
             flamegraphs: [],
+            correctness: null,
         };
 
         const settled = await Promise.allSettled(keys.map((key) => loadJson(sources[key])));
@@ -1589,7 +1872,7 @@
             } else {
                 state[key] = fallbacks[key];
                 // flamegraphs is often missing if not generated, so we don't treat it as a loud error
-                if (key !== "flamegraphs") {
+                if (key !== "flamegraphs" && key !== "runs" && key !== "catalog") {
                     missing.push(`${key}: ${result.reason.message}`);
                 }
             }
@@ -1630,8 +1913,7 @@
                 button.classList.add("is-active");
                 byId(button.dataset.tab).classList.add("is-active");
 
-                // If switching to flamegraphs, ensure it's rendered correctly
-                if (button.dataset.tab === "flamegraphs") {
+                if (button.dataset.tab === "performance-review") {
                     renderFlamegraphs();
                 }
             });
@@ -1639,6 +1921,7 @@
     }
 
     function renderAll() {
+        renderOverview();
         renderHotspots();
         renderSlowspots();
         renderSearchSpeed();
@@ -1646,8 +1929,11 @@
         renderCapacityReport();
         renderResourceProfiles();
         renderClones();
+        renderPerformanceScenarios();
+        renderCorrectness();
         renderMap();
         renderFlamegraphs();
+        renderRunLog();
     }
 
     byId("viewer-version").textContent = viewerVersion;
@@ -1657,6 +1943,7 @@
     byId("search-speed-filter").addEventListener("input", renderSearchSpeed);
     byId("resource-profiles-filter").addEventListener("input", renderResourceProfiles);
     byId("clones-filter").addEventListener("input", renderClones);
+    byId("correctness-filter").addEventListener("input", renderCorrectness);
     byId("map-filter").addEventListener("input", renderMap);
     byId("map-layout").addEventListener("change", (event) => {
         state.mapLayout = event.target.value;
@@ -1676,6 +1963,8 @@
         renderMap();
     });
     readJsonFile("hotspots-file", "hotspots", renderHotspots);
+    readJsonFile("catalog-file", "catalog", renderAll);
+    readJsonFile("runs-file", "runs", renderRunLog);
     readJsonFile("slowspots-file", "slowspots", renderSlowspots);
     readJsonFile("search-speed-file", "searchSpeed", renderSearchSpeed);
     readJsonFile("capacity-report-file", "capacityReport", renderCapacityReport);
@@ -1684,5 +1973,16 @@
     readJsonFile("clones-file", "clones", renderClones);
     readJsonFile("map-file", "map", renderMap);
     readJsonFile("flamegraphs-file", "flamegraphs", renderFlamegraphs);
+    readJsonFile("correctness-file", "correctness", renderCorrectness);
+    document.querySelectorAll("[data-run]").forEach((button) => {
+        button.addEventListener("click", () => triggerRun("/api/run/all", button));
+    });
+    document.querySelectorAll("[data-run-category]").forEach((button) => {
+        button.addEventListener("click", () => triggerRun(`/api/run/category/${encodeURIComponent(button.dataset.runCategory)}`, button));
+    });
+    document.querySelectorAll("[data-run-item]").forEach((button) => {
+        button.addEventListener("click", () => triggerRun(`/api/run/item/${encodeURIComponent(button.dataset.runItem)}`, button));
+    });
+    window.setInterval(refreshRuns, 5000);
     loadDefaults();
 })();

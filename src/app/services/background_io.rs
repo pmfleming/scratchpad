@@ -1,8 +1,10 @@
-use crate::app::domain::{BufferState, DiskFileState, DocumentSnapshot, TextFormatMetadata};
+use crate::app::domain::{
+    BufferState, DiskFileState, DocumentSnapshot, TextArtifactSummary, TextFormatMetadata,
+};
 use crate::app::services::file_service::FileService;
 use crate::app::services::session_store::{RestoredSession, SessionPersistRequest, SessionStore};
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, SendError, Sender};
 use std::thread;
 
 pub(crate) enum PathLoadRequest {
@@ -36,6 +38,13 @@ pub(crate) enum BackgroundIoRequest {
         session_store: SessionStore,
         request: SessionPersistRequest,
     },
+    RefreshTextMetadata {
+        request_id: u64,
+        buffer_id: u64,
+        revision: u64,
+        snapshot: DocumentSnapshot,
+        format: TextFormatMetadata,
+    },
     RefreshEncodingCompliance {
         request_id: u64,
         buffer_id: u64,
@@ -58,6 +67,12 @@ pub(crate) enum BackgroundIoResult {
         request_id: u64,
         result: Result<(), String>,
     },
+    TextMetadataRefreshed {
+        request_id: u64,
+        buffer_id: u64,
+        revision: u64,
+        result: Result<(usize, TextArtifactSummary, TextFormatMetadata), String>,
+    },
     EncodingComplianceRefreshed {
         request_id: u64,
         buffer_id: u64,
@@ -72,20 +87,83 @@ pub(crate) struct LoadedPathResult {
     pub(crate) result: Result<BufferState, String>,
 }
 
-pub(crate) fn spawn_background_io_worker()
--> (Sender<BackgroundIoRequest>, Receiver<BackgroundIoResult>) {
-    let (request_tx, request_rx) = mpsc::channel::<BackgroundIoRequest>();
+pub(crate) struct BackgroundIoDispatcher {
+    path_tx: Sender<BackgroundIoRequest>,
+    session_tx: Sender<BackgroundIoRequest>,
+    analysis_tx: Sender<BackgroundIoRequest>,
+}
+
+impl BackgroundIoDispatcher {
+    pub(crate) fn send(
+        &self,
+        request: BackgroundIoRequest,
+    ) -> Result<(), SendError<BackgroundIoRequest>> {
+        match request {
+            request @ BackgroundIoRequest::LoadPaths { .. } => self.path_tx.send(request),
+            request @ BackgroundIoRequest::RestoreSession { .. }
+            | request @ BackgroundIoRequest::PersistSession { .. } => self.session_tx.send(request),
+            request @ BackgroundIoRequest::RefreshTextMetadata { .. }
+            | request @ BackgroundIoRequest::RefreshEncodingCompliance { .. } => {
+                self.analysis_tx.send(request)
+            }
+        }
+    }
+}
+
+pub(crate) fn spawn_background_io_worker() -> (BackgroundIoDispatcher, Receiver<BackgroundIoResult>)
+{
     let (result_tx, result_rx) = mpsc::channel::<BackgroundIoResult>();
+    let (path_tx, path_rx) = mpsc::channel::<BackgroundIoRequest>();
+    let (session_tx, session_rx) = mpsc::channel::<BackgroundIoRequest>();
+    let (analysis_tx, analysis_rx) = mpsc::channel::<BackgroundIoRequest>();
+
+    spawn_path_lane(path_rx, result_tx.clone());
+    spawn_session_lane(session_rx, result_tx.clone());
+    spawn_analysis_lane(analysis_rx, result_tx);
+
+    (
+        BackgroundIoDispatcher {
+            path_tx,
+            session_tx,
+            analysis_tx,
+        },
+        result_rx,
+    )
+}
+
+fn spawn_path_lane(
+    request_rx: Receiver<BackgroundIoRequest>,
+    result_tx: Sender<BackgroundIoResult>,
+) {
+    thread::spawn(move || {
+        while let Ok(request) = request_rx.recv() {
+            let BackgroundIoRequest::LoadPaths {
+                request_id,
+                requests,
+            } = request
+            else {
+                continue;
+            };
+            if result_tx
+                .send(BackgroundIoResult::PathsLoaded {
+                    request_id,
+                    results: load_paths(requests),
+                })
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+}
+
+fn spawn_session_lane(
+    request_rx: Receiver<BackgroundIoRequest>,
+    result_tx: Sender<BackgroundIoResult>,
+) {
     thread::spawn(move || {
         while let Ok(request) = request_rx.recv() {
             let result = match request {
-                BackgroundIoRequest::LoadPaths {
-                    request_id,
-                    requests,
-                } => BackgroundIoResult::PathsLoaded {
-                    request_id,
-                    results: load_paths(requests),
-                },
                 BackgroundIoRequest::RestoreSession {
                     request_id,
                     session_store,
@@ -102,6 +180,37 @@ pub(crate) fn spawn_background_io_worker()
                     result: session_store
                         .persist_request(request)
                         .map_err(|error| error.to_string()),
+                },
+                BackgroundIoRequest::LoadPaths { .. }
+                | BackgroundIoRequest::RefreshTextMetadata { .. }
+                | BackgroundIoRequest::RefreshEncodingCompliance { .. } => continue,
+            };
+
+            if result_tx.send(result).is_err() {
+                break;
+            }
+        }
+    });
+}
+
+fn spawn_analysis_lane(
+    request_rx: Receiver<BackgroundIoRequest>,
+    result_tx: Sender<BackgroundIoResult>,
+) {
+    thread::spawn(move || {
+        while let Ok(request) = request_rx.recv() {
+            let result = match request {
+                BackgroundIoRequest::RefreshTextMetadata {
+                    request_id,
+                    buffer_id,
+                    revision,
+                    snapshot,
+                    format,
+                } => BackgroundIoResult::TextMetadataRefreshed {
+                    request_id,
+                    buffer_id,
+                    revision,
+                    result: Ok(refresh_text_metadata(snapshot, format)),
                 },
                 BackgroundIoRequest::RefreshEncodingCompliance {
                     request_id,
@@ -120,6 +229,9 @@ pub(crate) fn spawn_background_io_worker()
                             .map(|span| span.text),
                     )),
                 },
+                BackgroundIoRequest::LoadPaths { .. }
+                | BackgroundIoRequest::RestoreSession { .. }
+                | BackgroundIoRequest::PersistSession { .. } => continue,
             };
 
             if result_tx.send(result).is_err() {
@@ -127,7 +239,6 @@ pub(crate) fn spawn_background_io_worker()
             }
         }
     });
-    (request_tx, result_rx)
 }
 
 fn load_paths(requests: Vec<PathLoadRequest>) -> Vec<LoadedPathResult> {
@@ -173,4 +284,15 @@ fn load_paths(requests: Vec<PathLoadRequest>) -> Vec<LoadedPathResult> {
             }
         })
         .collect()
+}
+
+fn refresh_text_metadata(
+    snapshot: DocumentSnapshot,
+    mut format: TextFormatMetadata,
+) -> (usize, TextArtifactSummary, TextFormatMetadata) {
+    let metadata = crate::app::domain::buffer::buffer_text_metadata_from_piece_tree(
+        snapshot.piece_tree(),
+        &mut format,
+    );
+    (metadata.line_count, metadata.artifact_summary, format)
 }

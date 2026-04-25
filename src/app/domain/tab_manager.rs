@@ -46,6 +46,15 @@ impl TabManager {
         self.session_dirty = true;
     }
 
+    pub fn evict_inactive_tab_state(&mut self) {
+        let active_index = self.active_tab_index;
+        for (index, tab) in self.tabs.iter_mut().enumerate() {
+            if index != active_index {
+                tab.clear_transient_view_state();
+            }
+        }
+    }
+
     pub fn estimated_tab_strip_width(&self, spacing: f32) -> f32 {
         if self.tabs.is_empty() {
             return 0.0;

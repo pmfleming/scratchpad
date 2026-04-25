@@ -1,10 +1,9 @@
 use super::FileController;
-use super::support::LoadedFile;
+use super::support::{DeferredBufferRefresh, LoadedFile};
 use crate::app::app_state::{PendingBackgroundAction, PendingOpenHereAction, ScratchpadApp};
 use crate::app::commands::AppCommand;
 use crate::app::domain::{SplitAxis, ViewId, WorkspaceTab};
 use crate::app::services::background_io::LoadedPathResult;
-use crate::app::services::file_service::FileService;
 use std::path::{Path, PathBuf};
 
 mod summary;
@@ -34,37 +33,12 @@ impl FileController {
         );
     }
 
-    pub(super) fn open_selected_paths_here(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
-        Self::prepare_to_open_paths(app);
-        let snapshot = app.capture_transaction_snapshot();
-        let affected_items = Self::affected_item_labels(&paths);
-        let anchor_view_id = app
-            .tabs()
-            .get(app.active_tab_index())
-            .map(|tab| tab.active_view_id);
-        let mut pending_files = Vec::new();
-        let summary = paths
-            .into_iter()
-            .fold(OpenHereBatchSummary::default(), |summary, path| {
-                summary.record(Self::prepare_open_path_here(app, path, &mut pending_files))
-            });
-
-        let summary = Self::open_pending_files_here(app, anchor_view_id, pending_files)
-            .into_iter()
-            .fold(summary, |summary, outcome| summary.record(outcome));
-
-        if summary.opened_count > 0 || summary.migrated_count > 0 {
-            Self::rebalance_open_here_layout(app);
-            let action_count = summary.opened_count + summary.migrated_count;
-            let title = if action_count == 1 {
-                "Open file here"
-            } else {
-                "Open files here"
-            };
-            app.record_transaction(title, affected_items, None, snapshot);
-        }
-
-        Self::apply_open_here_summary(app, summary);
+    pub(super) fn open_selected_paths_here_background_blocking(
+        app: &mut ScratchpadApp,
+        paths: Vec<PathBuf>,
+    ) {
+        Self::open_selected_paths_here_async(app, paths);
+        app.wait_for_background_io_idle();
     }
 
     pub(super) fn open_selected_paths_here_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
@@ -120,18 +94,6 @@ impl FileController {
         );
     }
 
-    fn prepare_open_path_here(
-        app: &mut ScratchpadApp,
-        path: PathBuf,
-        pending_files: &mut Vec<LoadedFile>,
-    ) -> OpenHerePathOutcome {
-        if let Some(existing_path) = Self::find_existing_open_here_path(app, &path) {
-            return Self::resolve_existing_open_here_path(app, path, existing_path);
-        }
-
-        Self::queue_open_here_path(app, path, pending_files)
-    }
-
     fn prepare_open_path_here_async(
         app: &mut ScratchpadApp,
         path: PathBuf,
@@ -150,7 +112,7 @@ impl FileController {
         anchor_view_id: Option<ViewId>,
         pending_files: Vec<LoadedFile>,
     ) -> Vec<OpenHerePathOutcome> {
-        let Some((pending_workspace, log_entries)) =
+        let Some((pending_workspace, log_entries, deferred_refreshes)) =
             Self::build_pending_open_here_workspace(app, pending_files)
         else {
             return Vec::new();
@@ -160,6 +122,7 @@ impl FileController {
             return Self::failed_open_here_outcomes(log_entries.len());
         }
 
+        Self::queue_deferred_buffer_refreshes(app, deferred_refreshes);
         Self::log_open_here_success(app, log_entries)
     }
 
@@ -276,29 +239,17 @@ impl FileController {
         OpenHerePathOutcome::Failed
     }
 
-    fn queue_open_here_path(
-        app: &mut ScratchpadApp,
-        path: PathBuf,
-        pending_files: &mut Vec<LoadedFile>,
-    ) -> OpenHerePathOutcome {
-        match FileService::read_file(&path) {
-            Ok(file_content) => {
-                let mut loaded_file = LoadedFile::from_file_content(path, file_content);
-                Self::mark_settings_buffer(app, &mut loaded_file.buffer);
-                pending_files.push(loaded_file);
-                OpenHerePathOutcome::Queued
-            }
-            Err(_) => OpenHerePathOutcome::Failed,
-        }
-    }
-
     fn build_pending_open_here_workspace(
         app: &mut ScratchpadApp,
         pending_files: Vec<LoadedFile>,
-    ) -> Option<(WorkspaceTab, Vec<Option<String>>)> {
+    ) -> Option<(WorkspaceTab, Vec<Option<String>>, Vec<DeferredBufferRefresh>)> {
         let mut pending_iter = pending_files.into_iter();
         let first_file = pending_iter.next()?;
         let (buffer, log_entry) = first_file.into_parts();
+        let mut deferred_refreshes = Vec::new();
+        if let Some(refresh) = Self::deferred_buffer_refresh(&buffer) {
+            deferred_refreshes.push(refresh);
+        }
         let mut pending_workspace = WorkspaceTab::new(buffer);
         let mut log_entries = vec![log_entry];
 
@@ -307,22 +258,27 @@ impl FileController {
                 app,
                 &mut pending_workspace,
                 &mut log_entries,
+                &mut deferred_refreshes,
                 pending_file,
             ) {
                 return None;
             }
         }
 
-        Some((pending_workspace, log_entries))
+        Some((pending_workspace, log_entries, deferred_refreshes))
     }
 
     fn append_pending_file_to_workspace(
         app: &mut ScratchpadApp,
         pending_workspace: &mut WorkspaceTab,
         log_entries: &mut Vec<Option<String>>,
+        deferred_refreshes: &mut Vec<DeferredBufferRefresh>,
         pending_file: LoadedFile,
     ) -> bool {
         let (buffer, artifact_warning) = pending_file.into_parts();
+        if let Some(refresh) = Self::deferred_buffer_refresh(&buffer) {
+            deferred_refreshes.push(refresh);
+        }
         log_entries.push(artifact_warning);
 
         if pending_workspace

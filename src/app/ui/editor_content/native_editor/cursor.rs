@@ -3,13 +3,74 @@ use super::word_boundary;
 use crate::app::domain::buffer::PieceTreeLite;
 use eframe::egui;
 
-const PAGE_JUMP_ROWS: usize = 30;
+fn is_wordwise_movement(modifiers: &egui::Modifiers) -> bool {
+    modifiers.alt || modifiers.ctrl
+}
+
+fn collapsed_selection_target(
+    cursor: &CursorRange,
+    key: egui::Key,
+    modifiers: &egui::Modifiers,
+) -> Option<usize> {
+    if cursor.is_empty()
+        || (key != egui::Key::ArrowLeft && key != egui::Key::ArrowRight)
+        || is_wordwise_movement(modifiers)
+        || modifiers.command
+    {
+        return None;
+    }
+
+    let (start, end) = cursor.sorted_indices();
+    Some(if key == egui::Key::ArrowLeft {
+        start
+    } else {
+        end
+    })
+}
+
+fn finalize_cursor_movement(
+    cursor: &CursorRange,
+    key: egui::Key,
+    modifiers: &egui::Modifiers,
+    new_primary: CharCursor,
+) -> CursorRange {
+    if modifiers.shift {
+        return CursorRange {
+            primary: new_primary,
+            secondary: cursor.secondary,
+        };
+    }
+
+    if let Some(index) = collapsed_selection_target(cursor, key, modifiers) {
+        return CursorRange::one(CharCursor::new(index));
+    }
+
+    CursorRange::one(new_primary)
+}
+
+fn move_by_page_rows(
+    galley: &egui::Galley,
+    cursor: egui::text::CCursor,
+    page_jump_rows: usize,
+    downward: bool,
+) -> egui::text::CCursor {
+    let mut cursor = cursor;
+    for _ in 0..page_jump_rows.max(1) {
+        cursor = if downward {
+            galley.cursor_down_one_row(&cursor, None).0
+        } else {
+            galley.cursor_up_one_row(&cursor, None).0
+        };
+    }
+    cursor
+}
 
 pub(super) fn apply_cursor_movement(
     cursor: &CursorRange,
     key: egui::Key,
     modifiers: &egui::Modifiers,
     galley: &egui::Galley,
+    page_jump_rows: usize,
     total_chars: usize,
     piece_tree: &PieceTreeLite,
 ) -> Option<CursorRange> {
@@ -17,7 +78,7 @@ pub(super) fn apply_cursor_movement(
 
     let new_primary = match key {
         egui::Key::ArrowLeft => {
-            if modifiers.alt || modifiers.ctrl {
+            if is_wordwise_movement(modifiers) {
                 Some(egui::text::CCursor::new(
                     word_boundary::find_word_boundary_left(piece_tree, cursor.primary.index),
                 ))
@@ -26,7 +87,7 @@ pub(super) fn apply_cursor_movement(
             }
         }
         egui::Key::ArrowRight => {
-            if modifiers.alt || modifiers.ctrl {
+            if is_wordwise_movement(modifiers) {
                 Some(egui::text::CCursor::new(
                     word_boundary::find_word_boundary_right(piece_tree, cursor.primary.index),
                 ))
@@ -62,77 +123,46 @@ pub(super) fn apply_cursor_movement(
                 Some(galley.cursor_end_of_row(&egui_cursor))
             }
         }
-        egui::Key::PageUp => {
-            let mut c = egui_cursor;
-            for _ in 0..PAGE_JUMP_ROWS {
-                c = galley.cursor_up_one_row(&c, None).0;
-            }
-            Some(c)
-        }
-        egui::Key::PageDown => {
-            let mut c = egui_cursor;
-            for _ in 0..PAGE_JUMP_ROWS {
-                c = galley.cursor_down_one_row(&c, None).0;
-            }
-            Some(c)
-        }
+        egui::Key::PageUp => Some(move_by_page_rows(
+            galley,
+            egui_cursor,
+            page_jump_rows,
+            false,
+        )),
+        egui::Key::PageDown => Some(move_by_page_rows(galley, egui_cursor, page_jump_rows, true)),
         _ => None,
     };
 
     let new_primary = new_primary?;
     let new_primary_char = clamp_char_cursor(galley, total_chars, new_primary);
-
-    if modifiers.shift {
-        return Some(CursorRange {
-            primary: new_primary_char,
-            secondary: cursor.secondary,
-        });
-    }
-
-    // When collapsing selection on arrow keys
-    if !cursor.is_empty()
-        && (key == egui::Key::ArrowLeft || key == egui::Key::ArrowRight)
-        && !modifiers.alt
-        && !modifiers.ctrl
-        && !modifiers.command
-    {
-        let (start, end) = cursor.sorted_indices();
-        return if key == egui::Key::ArrowLeft {
-            Some(CursorRange::one(clamp_char_cursor(
-                galley,
-                total_chars,
-                egui::text::CCursor::new(start),
-            )))
-        } else {
-            Some(CursorRange::one(clamp_char_cursor(
-                galley,
-                total_chars,
-                egui::text::CCursor::new(end),
-            )))
-        };
-    }
-
-    Some(CursorRange::one(new_primary_char))
+    Some(finalize_cursor_movement(
+        cursor,
+        key,
+        modifiers,
+        new_primary_char,
+    ))
 }
 
 pub(super) fn apply_cursor_movement_unwrapped(
     cursor: &CursorRange,
     key: egui::Key,
     modifiers: &egui::Modifiers,
+    page_jump_rows: usize,
     total_chars: usize,
     piece_tree: &PieceTreeLite,
 ) -> Option<CursorRange> {
+    let page_jump_rows = page_jump_rows.max(1);
     let current = cursor.primary.index.min(total_chars);
     let new_index = match key {
         egui::Key::ArrowLeft => {
-            if modifiers.alt || modifiers.ctrl {
+            if is_wordwise_movement(modifiers) {
                 word_boundary::find_word_boundary_left(piece_tree, current)
             } else {
                 current.saturating_sub(1)
             }
         }
         egui::Key::ArrowRight => {
-            if modifiers.alt || modifiers.ctrl {
+            if is_wordwise_movement(modifiers) {
                 word_boundary::find_word_boundary_right(piece_tree, current)
             } else {
                 (current + 1).min(total_chars)
@@ -171,14 +201,14 @@ pub(super) fn apply_cursor_movement_unwrapped(
             if modifiers.command {
                 0
             } else {
-                move_vertically(piece_tree, current, -(PAGE_JUMP_ROWS as isize))
+                move_vertically(piece_tree, current, -(page_jump_rows as isize))
             }
         }
         egui::Key::PageDown => {
             if modifiers.command {
                 total_chars
             } else {
-                move_vertically(piece_tree, current, PAGE_JUMP_ROWS as isize)
+                move_vertically(piece_tree, current, page_jump_rows as isize)
             }
         }
         _ => return None,
@@ -189,30 +219,12 @@ pub(super) fn apply_cursor_movement_unwrapped(
         prefer_next_row: false,
     };
 
-    if modifiers.shift {
-        return Some(CursorRange {
-            primary: new_primary,
-            secondary: cursor.secondary,
-        });
-    }
-
-    if !cursor.is_empty()
-        && (key == egui::Key::ArrowLeft || key == egui::Key::ArrowRight)
-        && !modifiers.alt
-        && !modifiers.ctrl
-        && !modifiers.command
-    {
-        let (start, end) = cursor.sorted_indices();
-        return Some(CursorRange::one(CharCursor::new(
-            if key == egui::Key::ArrowLeft {
-                start
-            } else {
-                end
-            },
-        )));
-    }
-
-    Some(CursorRange::one(new_primary))
+    Some(finalize_cursor_movement(
+        cursor,
+        key,
+        modifiers,
+        new_primary,
+    ))
 }
 
 fn move_vertically(piece_tree: &PieceTreeLite, current: usize, delta_lines: isize) -> usize {
@@ -282,6 +294,7 @@ mod tests {
             egui::Key::ArrowLeft,
             &egui::Modifiers::default(),
             &galley,
+            10,
             piece_tree.len_chars(),
             &piece_tree,
         )
@@ -301,6 +314,7 @@ mod tests {
             &cursor,
             egui::Key::ArrowDown,
             &egui::Modifiers::default(),
+            1,
             piece_tree.len_chars(),
             &piece_tree,
         )
@@ -308,5 +322,27 @@ mod tests {
 
         assert_eq!(moved.primary.index, 10);
         assert_eq!(moved.secondary.index, 10);
+    }
+
+    #[test]
+    fn page_down_uses_the_requested_page_size() {
+        let text = (0..40)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let piece_tree = PieceTreeLite::from_string(text);
+        let cursor = CursorRange::one(CharCursor::new(piece_tree.line_info(3).start_char));
+
+        let moved = apply_cursor_movement_unwrapped(
+            &cursor,
+            egui::Key::PageDown,
+            &egui::Modifiers::default(),
+            7,
+            piece_tree.len_chars(),
+            &piece_tree,
+        )
+        .expect("page down movement");
+
+        assert_eq!(piece_tree.char_position(moved.primary.index).line_index, 10,);
     }
 }

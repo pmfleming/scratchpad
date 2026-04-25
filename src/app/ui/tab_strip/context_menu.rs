@@ -597,7 +597,7 @@ fn collect_close_targets(
             .tabs()
             .get(index)
             .is_some_and(|tab| tab.buffers().any(|buffer| buffer.is_dirty));
-        if should_close_slot(mode, is_dirty) {
+        if !is_dirty {
             workspace_indices.push(index);
         } else if matches!(mode, CloseDisplayTabs::SkipDirty) && is_dirty {
             skipped_dirty += 1;
@@ -605,13 +605,6 @@ fn collect_close_targets(
     }
 
     (workspace_indices, close_settings, skipped_dirty)
-}
-
-fn should_close_slot(mode: CloseDisplayTabs, is_dirty: bool) -> bool {
-    match mode {
-        CloseDisplayTabs::SkipDirty => !is_dirty,
-        CloseDisplayTabs::SavedOnly => !is_dirty,
-    }
 }
 
 #[cfg(target_os = "windows")]

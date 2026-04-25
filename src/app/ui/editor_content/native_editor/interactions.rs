@@ -16,6 +16,14 @@ pub(super) fn handle_mouse_interaction(
     mouse::handle_mouse_interaction(ui, response, galley, rect, view, piece_tree);
 }
 
+pub(super) fn cursor_range_after_click(
+    ui: &egui::Ui,
+    current: Option<CursorRange>,
+    char_cursor: CharCursor,
+) -> CursorRange {
+    mouse::cursor_range_after_click(ui, current, char_cursor)
+}
+
 pub(super) fn handle_mouse_interaction_window(
     ui: &mut egui::Ui,
     response: &egui::Response,
@@ -41,18 +49,20 @@ pub(super) fn handle_keyboard_events(
     buffer: &mut BufferState,
     view: &mut EditorViewState,
     galley: &egui::Galley,
+    page_jump_rows: usize,
     total_chars: usize,
 ) -> bool {
-    keyboard::handle_keyboard_events(ui, buffer, view, galley, total_chars)
+    keyboard::handle_keyboard_events(ui, buffer, view, galley, page_jump_rows, total_chars)
 }
 
 pub(super) fn handle_keyboard_events_unwrapped(
     ui: &mut egui::Ui,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
+    page_jump_rows: usize,
     total_chars: usize,
 ) -> bool {
-    keyboard::handle_keyboard_events_unwrapped(ui, buffer, view, total_chars)
+    keyboard::handle_keyboard_events_unwrapped(ui, buffer, view, page_jump_rows, total_chars)
 }
 
 pub(super) fn sync_view_cursor_before_render(view: &mut EditorViewState, focused: bool) {

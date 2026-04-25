@@ -46,7 +46,7 @@ pub(crate) fn track(ctx: &egui::Context, id: Id, rect: Rect, kind: &'static str)
 
 #[cfg(test)]
 mod tests {
-    use super::{child, global, local};
+    use super::{child, global, local, scope};
     use eframe::egui;
 
     #[test]
@@ -76,5 +76,35 @@ mod tests {
         let parent = global("tabs");
         assert_eq!(child(parent, "close"), child(parent, "close"));
         assert_ne!(child(parent, "close"), child(parent, "rename"));
+    }
+
+    #[test]
+    fn scoped_auto_ids_differ_for_different_scope_keys() {
+        let ctx = egui::Context::default();
+        let mut left = None;
+        let mut right = None;
+
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            egui::CentralPanel::default().show_inside(ui, |ui| {
+                left = Some(
+                    scope(ui, "left", |ui| {
+                        ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::click())
+                            .1
+                            .id
+                    })
+                    .inner,
+                );
+                right = Some(
+                    scope(ui, "right", |ui| {
+                        ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::click())
+                            .1
+                            .id
+                    })
+                    .inner,
+                );
+            });
+        });
+
+        assert_ne!(left, right);
     }
 }

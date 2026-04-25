@@ -1,6 +1,6 @@
 use super::{
     PendingBackgroundAction, PendingEncodingComplianceAction, PendingSessionPersistAction,
-    PendingStartupRestoreAction, ScratchpadApp,
+    PendingStartupRestoreAction, PendingTextMetadataAction, ScratchpadApp,
 };
 use crate::app::services::background_io::{
     BackgroundIoRequest, BackgroundIoResult, LoadedPathResult, PathLoadRequest,
@@ -139,8 +139,10 @@ impl ScratchpadApp {
 
     pub(crate) fn queue_background_session_persist(&mut self, request: SessionPersistRequest) {
         let request_id = self.allocate_background_request_id();
-        self.pending_background_actions
-            .insert(request_id, PendingBackgroundAction::PersistSession(PendingSessionPersistAction));
+        self.pending_background_actions.insert(
+            request_id,
+            PendingBackgroundAction::PersistSession(PendingSessionPersistAction),
+        );
 
         let request = BackgroundIoRequest::PersistSession {
             request_id,
@@ -152,6 +154,50 @@ impl ScratchpadApp {
             self.apply_background_io_result(BackgroundIoResult::SessionPersisted {
                 request_id,
                 result: error.0.into_persist_result(),
+            });
+        }
+    }
+
+    pub(crate) fn queue_background_text_metadata_refresh(
+        &mut self,
+        buffer_id: u64,
+        revision: u64,
+        snapshot: crate::app::domain::DocumentSnapshot,
+        format: crate::app::domain::TextFormatMetadata,
+    ) {
+        if self.pending_background_actions.values().any(|action| {
+            matches!(
+                action,
+                PendingBackgroundAction::RefreshTextMetadata(pending)
+                    if pending.buffer_id == buffer_id && pending.revision == revision
+            )
+        }) {
+            return;
+        }
+
+        let request_id = self.allocate_background_request_id();
+        self.pending_background_actions.insert(
+            request_id,
+            PendingBackgroundAction::RefreshTextMetadata(PendingTextMetadataAction {
+                buffer_id,
+                revision,
+            }),
+        );
+
+        let request = BackgroundIoRequest::RefreshTextMetadata {
+            request_id,
+            buffer_id,
+            revision,
+            snapshot,
+            format,
+        };
+        if let Err(error) = self.background_io_tx.send(request) {
+            self.pending_background_actions.remove(&request_id);
+            self.apply_background_io_result(BackgroundIoResult::TextMetadataRefreshed {
+                request_id,
+                buffer_id,
+                revision,
+                result: error.0.into_text_metadata_result(),
             });
         }
     }
@@ -229,6 +275,7 @@ impl ScratchpadApp {
                 }
                 Some(PendingBackgroundAction::StartupRestore(_))
                 | Some(PendingBackgroundAction::PersistSession(_))
+                | Some(PendingBackgroundAction::RefreshTextMetadata(_))
                 | Some(PendingBackgroundAction::RefreshEncodingCompliance(_))
                 | None => {}
             },
@@ -256,6 +303,31 @@ impl ScratchpadApp {
                     }
                 }
             }
+            BackgroundIoResult::TextMetadataRefreshed {
+                request_id,
+                buffer_id,
+                revision,
+                result,
+            } => {
+                let Some(PendingBackgroundAction::RefreshTextMetadata(_)) =
+                    self.pending_background_actions.remove(&request_id)
+                else {
+                    return;
+                };
+                if let Ok((line_count, artifact_summary, format)) = result
+                    && let Some(buffer) = self
+                        .tabs_mut()
+                        .iter_mut()
+                        .find_map(|tab| tab.buffer_by_id_mut(buffer_id))
+                {
+                    buffer.apply_text_metadata_refresh(
+                        revision,
+                        line_count,
+                        artifact_summary,
+                        format,
+                    );
+                }
+            }
             BackgroundIoResult::EncodingComplianceRefreshed {
                 request_id,
                 buffer_id,
@@ -273,10 +345,8 @@ impl ScratchpadApp {
                         .iter_mut()
                         .find_map(|tab| tab.buffer_by_id_mut(buffer_id))
                 {
-                    buffer.apply_encoding_compliance_refresh(
-                        revision,
-                        has_non_compliant_characters,
-                    );
+                    buffer
+                        .apply_encoding_compliance_refresh(revision, has_non_compliant_characters);
                 }
             }
         }
@@ -313,6 +383,16 @@ trait BackgroundIoFallback {
         self,
     ) -> Result<Option<crate::app::services::session_store::RestoredSession>, String>;
     fn into_persist_result(self) -> Result<(), String>;
+    fn into_text_metadata_result(
+        self,
+    ) -> Result<
+        (
+            usize,
+            crate::app::domain::TextArtifactSummary,
+            crate::app::domain::TextFormatMetadata,
+        ),
+        String,
+    >;
     fn into_encoding_compliance_result(self) -> Result<bool, String>;
 }
 
@@ -331,6 +411,7 @@ impl BackgroundIoFallback for BackgroundIoRequest {
             ),
             BackgroundIoRequest::RestoreSession { .. }
             | BackgroundIoRequest::PersistSession { .. }
+            | BackgroundIoRequest::RefreshTextMetadata { .. }
             | BackgroundIoRequest::RefreshEncodingCompliance { .. } => None,
         }
     }
@@ -344,6 +425,7 @@ impl BackgroundIoFallback for BackgroundIoRequest {
             }
             BackgroundIoRequest::LoadPaths { .. }
             | BackgroundIoRequest::PersistSession { .. }
+            | BackgroundIoRequest::RefreshTextMetadata { .. }
             | BackgroundIoRequest::RefreshEncodingCompliance { .. } => Ok(None),
         }
     }
@@ -355,7 +437,31 @@ impl BackgroundIoFallback for BackgroundIoRequest {
             }
             BackgroundIoRequest::LoadPaths { .. }
             | BackgroundIoRequest::RestoreSession { .. }
+            | BackgroundIoRequest::RefreshTextMetadata { .. }
             | BackgroundIoRequest::RefreshEncodingCompliance { .. } => Ok(()),
+        }
+    }
+
+    fn into_text_metadata_result(
+        self,
+    ) -> Result<
+        (
+            usize,
+            crate::app::domain::TextArtifactSummary,
+            crate::app::domain::TextFormatMetadata,
+        ),
+        String,
+    > {
+        match self {
+            BackgroundIoRequest::RefreshTextMetadata { .. } => {
+                Err("Background text metadata refresh unavailable.".to_owned())
+            }
+            BackgroundIoRequest::LoadPaths { .. }
+            | BackgroundIoRequest::RestoreSession { .. }
+            | BackgroundIoRequest::PersistSession { .. }
+            | BackgroundIoRequest::RefreshEncodingCompliance { .. } => {
+                Err("Background I/O channel unavailable.".to_owned())
+            }
         }
     }
 
@@ -366,7 +472,8 @@ impl BackgroundIoFallback for BackgroundIoRequest {
             }
             BackgroundIoRequest::LoadPaths { .. }
             | BackgroundIoRequest::RestoreSession { .. }
-            | BackgroundIoRequest::PersistSession { .. } => Ok(false),
+            | BackgroundIoRequest::PersistSession { .. }
+            | BackgroundIoRequest::RefreshTextMetadata { .. } => Ok(false),
         }
     }
 }

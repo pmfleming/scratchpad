@@ -1,6 +1,6 @@
 use crate::app::domain::{BufferId, DiskFileState, SplitAxis, TabManager, ViewId};
 use crate::app::fonts::EditorFontPreset;
-use crate::app::services::background_io::{BackgroundIoRequest, BackgroundIoResult};
+use crate::app::services::background_io::{BackgroundIoDispatcher, BackgroundIoResult};
 use crate::app::services::session_store::SessionStore;
 use crate::app::services::settings_store::{AppSettings, SettingsStore};
 use crate::app::startup::StartupOptions;
@@ -11,7 +11,7 @@ use eframe::egui;
 use search_state::SearchState;
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 mod background_io;
@@ -95,6 +95,11 @@ pub(crate) struct PendingEncodingComplianceAction {
     pub(crate) revision: u64,
 }
 
+pub(crate) struct PendingTextMetadataAction {
+    pub(crate) buffer_id: BufferId,
+    pub(crate) revision: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PendingReloadMode {
     AutoRefreshCleanBuffer,
@@ -109,6 +114,7 @@ pub(crate) enum PendingBackgroundAction {
     ReopenWithEncoding(PendingReopenWithEncodingAction),
     StartupRestoreCompare(PendingStartupRestoreCompareAction),
     PersistSession(PendingSessionPersistAction),
+    RefreshTextMetadata(PendingTextMetadataAction),
     RefreshEncodingCompliance(PendingEncodingComplianceAction),
 }
 
@@ -144,7 +150,7 @@ pub struct ScratchpadApp {
     pub(crate) startup_restore_conflicts: Vec<StartupRestoreConflict>,
     pub(crate) workspace_reflow_axis: SplitAxis,
     pub(crate) settings_preview_quote_index: usize,
-    pub(crate) background_io_tx: Sender<BackgroundIoRequest>,
+    pub(crate) background_io_tx: BackgroundIoDispatcher,
     pub(crate) background_io_rx: Receiver<BackgroundIoResult>,
     pub(crate) next_background_request_id: u64,
     pub(crate) pending_background_actions: HashMap<u64, PendingBackgroundAction>,

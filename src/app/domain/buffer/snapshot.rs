@@ -34,12 +34,20 @@ impl DocumentSnapshot {
         self.piece_tree.normalize_char_range(range_chars)
     }
 
-    pub fn extract_text(&self) -> String {
+    pub fn flatten_text(&self) -> String {
         self.piece_tree.extract_text()
     }
 
-    pub fn extract_range(&self, range_chars: Range<usize>) -> String {
+    pub fn flatten_range(&self, range_chars: Range<usize>) -> String {
         self.piece_tree.extract_range(range_chars)
+    }
+
+    pub fn extract_text(&self) -> String {
+        self.flatten_text()
+    }
+
+    pub fn extract_range(&self, range_chars: Range<usize>) -> String {
+        self.flatten_range(range_chars)
     }
 
     pub fn extract_range_bounded(
@@ -78,7 +86,7 @@ impl DocumentSnapshot {
                 self.piece_tree
                     .borrow_range(0..self.len_chars())
                     .map(Cow::Borrowed)
-                    .unwrap_or_else(|| Cow::Owned(self.extract_text())),
+                    .unwrap_or_else(|| Cow::Owned(self.flatten_text())),
                 0,
             );
         };
@@ -89,7 +97,7 @@ impl DocumentSnapshot {
             self.piece_tree
                 .borrow_range(normalized.clone())
                 .map(Cow::Borrowed)
-                .unwrap_or_else(|| Cow::Owned(self.extract_range(normalized))),
+                .unwrap_or_else(|| Cow::Owned(self.flatten_range(normalized))),
             start,
         )
     }
@@ -135,5 +143,17 @@ mod tests {
         assert!(matches!(search_text, Cow::Owned(_)));
         assert_eq!(search_text.as_ref(), "alpha! beta");
         assert_eq!(offset, 0);
+    }
+
+    #[test]
+    fn snapshot_search_text_borrows_contiguous_subrange_after_fragmentation() {
+        let mut document = TextDocument::new("abcdef".to_owned());
+        document.insert_direct(3, "!");
+        let snapshot: DocumentSnapshot = document.snapshot();
+
+        let (search_text, offset) = snapshot.search_text_cow(Some(4..6));
+
+        assert!(matches!(search_text, Cow::Borrowed("de")));
+        assert_eq!(offset, 4);
     }
 }

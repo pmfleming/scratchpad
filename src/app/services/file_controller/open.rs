@@ -4,7 +4,6 @@ use crate::app::app_state::{PendingBackgroundAction, PendingOpenTabsAction, Scra
 use crate::app::commands::AppCommand;
 use crate::app::domain::WorkspaceTab;
 use crate::app::services::background_io::LoadedPathResult;
-use crate::app::services::file_service::{FileContent, FileService};
 use crate::app::utils::summarize_open_results;
 use std::path::{Path, PathBuf};
 
@@ -66,7 +65,12 @@ impl FileController {
     }
 
     pub fn open_paths(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
-        Self::handle_external_paths(app, paths, "Open requested for", Self::open_selected_paths);
+        Self::handle_external_paths(
+            app,
+            paths,
+            "Open requested for",
+            Self::open_selected_paths_background_blocking,
+        );
     }
 
     pub fn open_paths_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
@@ -83,7 +87,7 @@ impl FileController {
             app,
             paths,
             "Startup open requested for",
-            Self::open_selected_paths,
+            Self::open_selected_paths_background_blocking,
         );
     }
 
@@ -101,7 +105,7 @@ impl FileController {
             app,
             paths,
             "Startup workspace-open requested for",
-            Self::open_selected_paths_here,
+            Self::open_selected_paths_here_background_blocking,
         );
     }
 
@@ -151,27 +155,9 @@ impl FileController {
         Self::open_external_paths_here_async(app, paths);
     }
 
-    pub(super) fn open_selected_paths(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
-        Self::prepare_to_open_paths(app);
-        let snapshot = app.capture_transaction_snapshot();
-        let affected_items = Self::affected_item_labels(&paths);
-        let summary = paths
-            .into_iter()
-            .fold(OpenBatchSummary::default(), |summary, path| {
-                summary.record(Self::open_path(app, path))
-            });
-
-        if summary.opened_count > 0 {
-            let title = if summary.opened_count == 1 {
-                "Open file"
-            } else {
-                "Open files"
-            };
-            app.record_transaction(title, affected_items, None, snapshot);
-            let _ = app.persist_session_now();
-        }
-
-        Self::apply_open_summary(app, summary);
+    fn open_selected_paths_background_blocking(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+        Self::open_selected_paths_async(app, paths);
+        app.wait_for_background_io_idle();
     }
 
     pub(super) fn open_selected_paths_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
@@ -210,19 +196,6 @@ impl FileController {
         );
     }
 
-    fn open_path(app: &mut ScratchpadApp, path: PathBuf) -> OpenPathOutcome {
-        if Self::activate_existing_path(app, &path).is_some() {
-            return OpenPathOutcome::AlreadyOpen;
-        }
-
-        match FileService::read_file(&path) {
-            Ok(file_content) => OpenPathOutcome::Opened {
-                artifact_warning: Self::open_loaded_file(app, path, file_content),
-            },
-            Err(_) => OpenPathOutcome::Failed,
-        }
-    }
-
     fn activate_existing_path(app: &mut ScratchpadApp, path: &Path) -> Option<String> {
         if let Some((index, view_id)) = app.find_tab_by_path(path) {
             app.handle_command(AppCommand::ActivateTab { index });
@@ -238,23 +211,6 @@ impl FileController {
         } else {
             None
         }
-    }
-
-    fn open_loaded_file(
-        app: &mut ScratchpadApp,
-        path: PathBuf,
-        file_content: FileContent,
-    ) -> Option<String> {
-        let LoadedFile {
-            artifact_warning,
-            mut buffer,
-            ..
-        } = LoadedFile::from_file_content(path, file_content);
-        Self::mark_settings_buffer(app, &mut buffer);
-        app.tab_manager_mut().append_tab(WorkspaceTab::new(buffer));
-        app.mark_search_dirty();
-        app.request_focus_for_active_view();
-        artifact_warning
     }
 
     fn apply_open_summary(app: &mut ScratchpadApp, summary: OpenBatchSummary) {
@@ -290,6 +246,7 @@ impl FileController {
 
             match loaded.result {
                 Ok(buffer) => {
+                    let deferred_refresh = Self::deferred_buffer_refresh(&buffer);
                     let LoadedFile {
                         artifact_warning,
                         mut buffer,
@@ -297,6 +254,7 @@ impl FileController {
                     } = LoadedFile::from_buffer(buffer);
                     Self::mark_settings_buffer(app, &mut buffer);
                     app.tab_manager_mut().append_tab(WorkspaceTab::new(buffer));
+                    Self::queue_deferred_buffer_refreshes(app, deferred_refresh);
                     app.mark_search_dirty();
                     app.request_focus_for_active_view();
                     summary = summary.record(OpenPathOutcome::Opened { artifact_warning });

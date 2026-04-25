@@ -104,13 +104,7 @@ fn layout_job_with_highlights(
         return job;
     }
 
-    let mut boundaries = vec![0, text_char_len];
-    for highlight in &highlights {
-        boundaries.push(highlight.range.start);
-        boundaries.push(highlight.range.end);
-    }
-    boundaries.sort_unstable();
-    boundaries.dedup();
+    let boundaries = highlight_boundaries(&highlights, text_char_len);
 
     for window in boundaries.windows(2) {
         let segment_start = window[0];
@@ -121,17 +115,7 @@ fn layout_job_with_highlights(
         let start_byte = char_to_byte.byte_offset(segment_start);
         let end_byte = char_to_byte.byte_offset(segment_end);
         let kind = highlight_kind_for_segment(&highlights, segment_start);
-        let (text_color, background) = match kind {
-            Some(HighlightKind::Selection | HighlightKind::SearchActive) => (
-                style.highlight.text_color(),
-                style.highlight.active_background(style.dark_mode),
-            ),
-            Some(HighlightKind::SearchPassive) => (
-                style.highlight.text_color(),
-                style.highlight.passive_background(),
-            ),
-            None => (style.text_color, egui::Color32::TRANSPARENT),
-        };
+        let (text_color, background) = segment_colors(kind, &style);
         append_job_segment(
             &mut job,
             &text[start_byte..end_byte],
@@ -142,6 +126,34 @@ fn layout_job_with_highlights(
     }
 
     job
+}
+
+fn highlight_boundaries(highlights: &[TextHighlightRange], text_char_len: usize) -> Vec<usize> {
+    let mut boundaries = vec![0, text_char_len];
+    for highlight in highlights {
+        boundaries.push(highlight.range.start);
+        boundaries.push(highlight.range.end);
+    }
+    boundaries.sort_unstable();
+    boundaries.dedup();
+    boundaries
+}
+
+fn segment_colors(
+    kind: Option<HighlightKind>,
+    style: &HighlightLayoutStyle<'_>,
+) -> (egui::Color32, egui::Color32) {
+    match kind {
+        Some(HighlightKind::Selection | HighlightKind::SearchActive) => (
+            style.highlight.text_color(),
+            style.highlight.active_background(style.dark_mode),
+        ),
+        Some(HighlightKind::SearchPassive) => (
+            style.highlight.text_color(),
+            style.highlight.passive_background(),
+        ),
+        None => (style.text_color, egui::Color32::TRANSPARENT),
+    }
 }
 
 fn merged_highlight_ranges(

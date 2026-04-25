@@ -48,7 +48,6 @@ pub(super) struct TileRenderState<'a> {
 }
 
 struct TileScrollRequest<'a> {
-    tab_index: usize,
     view_id: ViewId,
     scroll_bar_visibility: egui::scroll_area::ScrollBarVisibility,
     content_style: EditorContentStyle<'a>,
@@ -105,46 +104,38 @@ fn render_tile_body(
     request: TileRenderRequest,
 ) -> TileBodyOutcome {
     ui.scope_builder(tile_ui_builder(request.rect), |ui| {
-        let editor_font_id = editor_font_id(app.font_size());
         let request_focus = app.should_focus_view(request.view_id);
-        let editor_gutter = app.editor_gutter();
-        let word_wrap = app.word_wrap();
-        let text_color = app.editor_text_color();
-        let background_color = app.editor_background_color();
-        let highlight_style = EditorHighlightStyle::new(
-            app.editor_text_highlight_color(),
-            app.editor_text_highlight_text_color(),
-        );
+        let editor_font_id = editor_font_id(app.font_size());
+        let content_style =
+            editor_content_style(app, request.is_active, request_focus, &editor_font_id);
         let tab = &mut app.tabs_mut()[request.tab_index];
+        let Some(_buffer) = tab.buffer_for_view(request.view_id) else {
+            return TileBodyOutcome {
+                changed: false,
+                focused: false,
+                interaction_response: None,
+            };
+        };
         let previous_layout = take_previous_layout(tab, request.view_id);
         let outcome = show_editor_scroll_area(
             ui,
             tab,
             TileScrollRequest {
-                tab_index: request.tab_index,
                 view_id: request.view_id,
                 scroll_bar_visibility: editor_scroll_bar_visibility(ui.ctx()),
                 content_style: EditorContentStyle {
-                    editor_gutter,
-                    is_active: request.is_active,
                     previous_layout: previous_layout.as_ref(),
-                    text_edit: TextEditOptions::new(
-                        request_focus,
-                        word_wrap,
-                        &editor_font_id,
-                        text_color,
-                        highlight_style,
-                    ),
-                    background_color,
+                    ..content_style
                 },
             },
         );
         restore_previous_layout_if_needed(tab, request.view_id, previous_layout);
-        if request_focus {
-            app.consume_focus_request(request.view_id);
-        } else if outcome.request_editor_focus {
-            app.request_focus_for_view(request.view_id);
-        }
+        apply_tile_focus_request(
+            app,
+            request.view_id,
+            request_focus,
+            outcome.request_editor_focus,
+        );
 
         TileBodyOutcome {
             changed: outcome.changed,
@@ -172,14 +163,22 @@ fn handle_tile_click(
         widget_ids::local(ui, ("tile", request.tab_index, request.view_id)),
         egui::Sense::click(),
     );
-    if tile_response.secondary_clicked() && !request.is_active {
-        app.activate_view(request.view_id);
-        app.request_focus_for_view(request.view_id);
-    }
+    activate_inactive_tile_on_secondary_click(app, &tile_response, request);
     if tile_response.clicked() {
         actions.push(TileAction::Activate(request.view_id));
     }
     tile_response
+}
+
+fn activate_inactive_tile_on_secondary_click(
+    app: &mut ScratchpadApp,
+    tile_response: &egui::Response,
+    request: TileRenderRequest,
+) {
+    if tile_response.secondary_clicked() && !request.is_active {
+        app.activate_view(request.view_id);
+        app.request_focus_for_view(request.view_id);
+    }
 }
 
 fn attach_editor_context_menu(
@@ -189,122 +188,219 @@ fn attach_editor_context_menu(
     request: TileRenderRequest,
     actions: &mut Vec<TileAction>,
 ) {
-    if tile_response.secondary_clicked() && !request.is_active {
-        app.activate_view(request.view_id);
-        app.request_focus_for_view(request.view_id);
-    }
+    activate_inactive_tile_on_secondary_click(app, tile_response, request);
 
     let can_promote = app.tabs()[request.tab_index].can_promote_view(request.view_id);
     let save_existing = app.tabs()[request.tab_index]
         .buffer_for_view(request.view_id)
         .is_some_and(|buffer| buffer.path.is_some());
-
     tile_response.context_menu(|ui| {
-        ui.set_min_width(EDITOR_CONTEXT_MENU_WIDTH);
-        ui.set_max_width(EDITOR_CONTEXT_MENU_WIDTH);
-
-        if menu_action_button(
-            ui,
-            "Undo",
-            Some(ARROW_COUNTER_CLOCKWISE),
-            app.active_buffer_can_undo_text_operation(),
-        ) {
-            app.handle_command(AppCommand::UndoActiveBufferTextOperation);
-            app.request_focus_for_active_view();
-            ui.close();
-        }
-        if menu_action_button(
-            ui,
-            "Redo",
-            Some(ARROW_CLOCKWISE),
-            app.active_buffer_can_redo_text_operation(),
-        ) {
-            app.handle_command(AppCommand::RedoActiveBufferTextOperation);
-            app.request_focus_for_active_view();
-            ui.close();
-        }
-        if menu_action_button(ui, "History", Some(CLOCK_COUNTER_CLOCKWISE), true) {
-            app.handle_command(AppCommand::OpenHistory);
-            ui.close();
-        }
-
+        set_menu_width(ui, EDITOR_CONTEXT_MENU_WIDTH);
+        render_history_menu(ui, app);
         ui.separator();
+        render_file_menu(ui, app, save_existing);
+        ui.separator();
+        render_tile_menu(ui, actions, request, can_promote);
+        ui.separator();
+        render_icon_rail_menu(ui, app);
+    });
+}
 
-        if menu_action_button(ui, "Find", Some(MAGNIFYING_GLASS), true) {
-            app.handle_command(AppCommand::OpenSearch);
-            ui.close();
-        }
-        if menu_action_button(ui, "Replace", Some(ARROWS_COUNTER_CLOCKWISE), true) {
-            app.handle_command(AppCommand::OpenSearchAndReplace);
-            ui.close();
-        }
-        if menu_action_button(ui, "Open File Here", Some(FOLDER_OPEN), true) {
-            app.handle_command(AppCommand::OpenFileHere);
-            app.request_focus_for_active_view();
-            ui.close();
-        }
-        if menu_action_button(
-            ui,
-            if save_existing { "Save" } else { "Save As" },
-            Some(FLOPPY_DISK),
-            true,
-        ) {
+fn set_menu_width(ui: &mut egui::Ui, width: f32) {
+    ui.set_min_width(width);
+    ui.set_max_width(width);
+}
+
+fn render_history_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    run_menu_command(
+        ui,
+        app,
+        "Undo",
+        Some(ARROW_COUNTER_CLOCKWISE),
+        app.active_buffer_can_undo_text_operation(),
+        AppCommand::UndoActiveBufferTextOperation,
+        true,
+    );
+    run_menu_command(
+        ui,
+        app,
+        "Redo",
+        Some(ARROW_CLOCKWISE),
+        app.active_buffer_can_redo_text_operation(),
+        AppCommand::RedoActiveBufferTextOperation,
+        true,
+    );
+    run_menu_command(
+        ui,
+        app,
+        "History",
+        Some(CLOCK_COUNTER_CLOCKWISE),
+        true,
+        AppCommand::OpenHistory,
+        false,
+    );
+}
+
+fn render_file_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp, save_existing: bool) {
+    run_menu_command(
+        ui,
+        app,
+        "Find",
+        Some(MAGNIFYING_GLASS),
+        true,
+        AppCommand::OpenSearch,
+        false,
+    );
+    run_menu_command(
+        ui,
+        app,
+        "Replace",
+        Some(ARROWS_COUNTER_CLOCKWISE),
+        true,
+        AppCommand::OpenSearchAndReplace,
+        false,
+    );
+    run_menu_command(
+        ui,
+        app,
+        "Open File Here",
+        Some(FOLDER_OPEN),
+        true,
+        AppCommand::OpenFileHere,
+        true,
+    );
+    run_save_menu_action(ui, app, save_existing);
+}
+
+fn render_tile_menu(
+    ui: &mut egui::Ui,
+    actions: &mut Vec<TileAction>,
+    request: TileRenderRequest,
+    can_promote: bool,
+) {
+    split_menu_row(ui, actions);
+    if menu_action_button(ui, "Promote Tile", Some(ARROW_LINE_UP), can_promote) {
+        actions.push(TileAction::Promote(request.view_id));
+        ui.close();
+    }
+    if menu_action_button(ui, "Close Tile", Some(X), request.can_close) {
+        actions.push(TileAction::Close(request.view_id));
+        ui.close();
+    }
+}
+
+fn render_icon_rail_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    let any_action = ui
+        .with_layout(
+            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+            |ui| {
+                ui.horizontal(|ui| {
+                    run_icon_rail_action(ui, app, SCISSORS, "Cut", |ui, app| {
+                        copy_icon_text(ui, app.cut_selected_text_in_active_view())
+                    }) || run_icon_rail_action(ui, app, COPY, "Copy", |ui, app| {
+                        copy_icon_text(ui, app.copy_selected_text_in_active_view())
+                    }) || run_icon_rail_action(ui, app, CLIPBOARD_TEXT, "Paste", |ui, _| {
+                        ui.ctx()
+                            .clone()
+                            .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+                        true
+                    }) || run_icon_rail_action(ui, app, SELECTION_ALL, "Select All", |_, app| {
+                        app.select_all_in_active_view()
+                    })
+                })
+                .inner
+            },
+        )
+        .inner;
+
+    if any_action {
+        app.request_focus_for_active_view();
+        ui.close();
+    }
+}
+
+fn run_menu_command(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    label: &str,
+    icon: Option<&str>,
+    enabled: bool,
+    command: AppCommand,
+    request_focus: bool,
+) -> bool {
+    run_context_menu_action(
+        ui,
+        label,
+        icon,
+        enabled,
+        |_, app| {
+            app.handle_command(command);
+            if request_focus {
+                app.request_focus_for_active_view();
+            }
+            true
+        },
+        app,
+    )
+}
+
+fn icon_action_clicked(ui: &mut egui::Ui, icon: &str, tooltip: &str) -> bool {
+    icon_rail_button(ui, icon, tooltip, true).clicked()
+}
+
+fn run_save_menu_action(ui: &mut egui::Ui, app: &mut ScratchpadApp, save_existing: bool) -> bool {
+    run_context_menu_action(
+        ui,
+        if save_existing { "Save" } else { "Save As" },
+        Some(FLOPPY_DISK),
+        true,
+        |_, app| {
             app.request_focus_for_active_view();
             if save_existing {
                 app.save_file();
             } else {
                 app.save_file_as();
             }
-            ui.close();
-        }
+            true
+        },
+        app,
+    )
+}
 
-        ui.separator();
+fn run_context_menu_action(
+    ui: &mut egui::Ui,
+    label: &str,
+    icon: Option<&str>,
+    enabled: bool,
+    action: impl FnOnce(&mut egui::Ui, &mut ScratchpadApp) -> bool,
+    app: &mut ScratchpadApp,
+) -> bool {
+    if !menu_action_button(ui, label, icon, enabled) {
+        return false;
+    }
 
-        split_menu_row(ui, actions);
+    let handled = action(ui, app);
+    if handled {
+        ui.close();
+    }
+    handled
+}
 
-        if menu_action_button(ui, "Promote Tile", Some(ARROW_LINE_UP), can_promote) {
-            actions.push(TileAction::Promote(request.view_id));
-            ui.close();
-        }
-        if menu_action_button(ui, "Close Tile", Some(X), request.can_close) {
-            actions.push(TileAction::Close(request.view_id));
-            ui.close();
-        }
+fn run_icon_rail_action(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    icon: &str,
+    tooltip: &str,
+    action: impl FnOnce(&mut egui::Ui, &mut ScratchpadApp) -> bool,
+) -> bool {
+    icon_action_clicked(ui, icon, tooltip) && action(ui, app)
+}
 
-        ui.separator();
-        ui.with_layout(
-            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-            |ui| {
-                ui.horizontal(|ui| {
-                    let copied = icon_rail_button(ui, SCISSORS, "Cut", true).clicked()
-                        && app.cut_selected_text_in_active_view().is_some_and(|text| {
-                            ui.copy_text(text);
-                            true
-                        });
-                    let copied_selection = icon_rail_button(ui, COPY, "Copy", true).clicked()
-                        && app.copy_selected_text_in_active_view().is_some_and(|text| {
-                            ui.copy_text(text);
-                            true
-                        });
-                    let pasted = icon_rail_button(ui, CLIPBOARD_TEXT, "Paste", true)
-                        .clicked()
-                        .then(|| {
-                            app.request_focus_for_active_view();
-                            ui.ctx()
-                                .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
-                        });
-                    let selected_all = icon_rail_button(ui, SELECTION_ALL, "Select All", true)
-                        .clicked()
-                        && app.select_all_in_active_view();
-
-                    if copied || copied_selection || pasted.is_some() || selected_all {
-                        app.request_focus_for_active_view();
-                        ui.close();
-                    }
-                });
-            },
-        );
-    });
+fn copy_icon_text(ui: &mut egui::Ui, text: Option<String>) -> bool {
+    text.is_some_and(|text| {
+        ui.copy_text(text);
+        true
+    })
 }
 
 fn menu_action_button(ui: &mut egui::Ui, label: &str, icon: Option<&str>, enabled: bool) -> bool {
@@ -377,8 +473,7 @@ fn render_split_submenu(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
             .stroke(egui::Stroke::NONE);
 
         egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
-            ui.set_min_width(EDITOR_CONTEXT_SUBMENU_WIDTH);
-            ui.set_max_width(EDITOR_CONTEXT_SUBMENU_WIDTH);
+            set_menu_width(ui, EDITOR_CONTEXT_SUBMENU_WIDTH);
 
             for (label, icon, direction) in [
                 ("Split Left", ARROW_LEFT, SplitDirection::Left),
@@ -512,6 +607,44 @@ fn editor_font_id(font_size: f32) -> egui::FontId {
     egui::FontId::new(font_size, egui::FontFamily::Name(EDITOR_FONT_FAMILY.into()))
 }
 
+fn editor_content_style<'a>(
+    app: &ScratchpadApp,
+    is_active: bool,
+    request_focus: bool,
+    editor_font_id: &'a egui::FontId,
+) -> EditorContentStyle<'a> {
+    EditorContentStyle {
+        editor_gutter: app.editor_gutter(),
+        is_active,
+        viewport: None,
+        previous_layout: None,
+        text_edit: TextEditOptions::new(
+            request_focus,
+            app.word_wrap(),
+            editor_font_id,
+            app.editor_text_color(),
+            EditorHighlightStyle::new(
+                app.editor_text_highlight_color(),
+                app.editor_text_highlight_text_color(),
+            ),
+        ),
+        background_color: app.editor_background_color(),
+    }
+}
+
+fn apply_tile_focus_request(
+    app: &mut ScratchpadApp,
+    view_id: ViewId,
+    request_focus: bool,
+    request_editor_focus: bool,
+) {
+    if request_focus {
+        app.consume_focus_request(view_id);
+    } else if request_editor_focus {
+        app.request_focus_for_view(view_id);
+    }
+}
+
 fn editor_scroll_bar_visibility(ctx: &egui::Context) -> egui::scroll_area::ScrollBarVisibility {
     if tab_drag::is_drag_active_for_context(ctx) {
         egui::scroll_area::ScrollBarVisibility::AlwaysHidden
@@ -521,8 +654,22 @@ fn editor_scroll_bar_visibility(ctx: &egui::Context) -> egui::scroll_area::Scrol
 }
 
 fn take_previous_layout(tab: &mut WorkspaceTab, view_id: ViewId) -> Option<RenderedLayout> {
-    tab.view_mut(view_id)
-        .and_then(|view| view.latest_layout.take())
+    let current_revision = tab
+        .buffer_for_view(view_id)
+        .map(|buffer| buffer.document_revision());
+    tab.view_mut(view_id).and_then(|view| {
+        if view.latest_layout_revision == current_revision {
+            view.latest_layout.take()
+        } else {
+            view.latest_layout = None;
+            view.latest_layout_revision = None;
+            None
+        }
+    })
+}
+
+fn editor_scroll_id(view_id: ViewId) -> egui::Id {
+    egui::Id::new(("editor_scroll", view_id))
 }
 
 fn show_editor_scroll_area(
@@ -530,18 +677,68 @@ fn show_editor_scroll_area(
     tab: &mut WorkspaceTab,
     request: TileScrollRequest<'_>,
 ) -> EditorContentOutcome {
-    egui::ScrollArea::both()
-        .id_salt(("editor_scroll", request.tab_index, request.view_id))
+    let scroll_offset = tab
+        .view(request.view_id)
+        .map(|view| view.editor_scroll_offset())
+        .unwrap_or_default();
+    let wheel_requested_scroll_offset =
+        requested_scroll_offset_for_pointer_wheel(ui, scroll_offset);
+    let output = egui::ScrollArea::both()
+        .id_salt(editor_scroll_id(request.view_id))
+        .scroll_offset(scroll_offset)
         .auto_shrink([false, false])
         .scroll_bar_visibility(request.scroll_bar_visibility)
-        .show(ui, |ui| {
+        .show_viewport(ui, |ui, viewport| {
+            let mut content_style = request.content_style;
+            content_style.viewport = Some(viewport);
             tab.buffer_and_view_mut(request.view_id)
                 .map(|(buffer, view)| {
-                    editor_content::render_editor_content(ui, buffer, view, request.content_style)
+                    editor_content::render_editor_content(
+                        ui,
+                        buffer,
+                        view,
+                        request.view_id,
+                        content_style,
+                    )
                 })
                 .unwrap_or_else(missing_editor_content_outcome)
-        })
-        .inner
+        });
+    if let Some(view) = tab.view_mut(request.view_id) {
+        view.set_editor_scroll_offset(
+            wheel_requested_scroll_offset
+                .or(output.inner.requested_scroll_offset)
+                .unwrap_or(output.state.offset),
+        );
+    }
+    output.inner
+}
+
+fn requested_scroll_offset_for_pointer_wheel(
+    ui: &egui::Ui,
+    current_offset: egui::Vec2,
+) -> Option<egui::Vec2> {
+    let pointer_over_tile = ui.input(|input| {
+        input
+            .pointer
+            .hover_pos()
+            .is_some_and(|pos| ui.max_rect().contains(pos))
+    });
+    if !pointer_over_tile {
+        return None;
+    }
+
+    scroll_offset_from_wheel_delta(current_offset, ui.input(|input| input.smooth_scroll_delta))
+}
+
+fn scroll_offset_from_wheel_delta(
+    current_offset: egui::Vec2,
+    scroll_delta: egui::Vec2,
+) -> Option<egui::Vec2> {
+    let desired = egui::vec2(
+        (current_offset.x - scroll_delta.x).max(0.0),
+        (current_offset.y - scroll_delta.y).max(0.0),
+    );
+    (desired != current_offset).then_some(desired)
 }
 
 fn restore_previous_layout_if_needed(
@@ -563,6 +760,62 @@ fn missing_editor_content_outcome() -> EditorContentOutcome {
         changed: false,
         focused: false,
         request_editor_focus: false,
+        requested_scroll_offset: None,
         interaction_response: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{editor_scroll_id, scroll_offset_from_wheel_delta};
+    use crate::app::domain::{EditorViewState, WorkspaceTab};
+    use eframe::egui;
+
+    #[test]
+    fn editor_scroll_id_is_scoped_to_the_view() {
+        assert_eq!(editor_scroll_id(7), editor_scroll_id(7));
+        assert_ne!(editor_scroll_id(7), editor_scroll_id(8));
+    }
+
+    #[test]
+    fn wheel_delta_requests_explicit_scroll_offset() {
+        assert_eq!(
+            scroll_offset_from_wheel_delta(egui::vec2(12.0, 90.0), egui::vec2(4.0, -18.0)),
+            Some(egui::vec2(8.0, 108.0))
+        );
+        assert_eq!(
+            scroll_offset_from_wheel_delta(egui::vec2(0.0, 10.0), egui::vec2(0.0, 20.0)),
+            Some(egui::vec2(0.0, 0.0))
+        );
+    }
+
+    #[test]
+    fn duplicated_views_can_track_independent_scroll_offsets() {
+        let mut tab = WorkspaceTab::untitled();
+        let buffer_id = tab.buffer.id;
+        let first_view_id = tab.active_view_id;
+        let second_view = EditorViewState::new(buffer_id, false);
+        let second_view_id = second_view.id;
+        tab.views.push(second_view);
+
+        tab.view_mut(first_view_id)
+            .expect("first view")
+            .set_editor_scroll_offset(egui::vec2(0.0, 120.0));
+        tab.view_mut(second_view_id)
+            .expect("second view")
+            .set_editor_scroll_offset(egui::vec2(0.0, 420.0));
+
+        assert_eq!(
+            tab.view(first_view_id)
+                .expect("first view")
+                .editor_scroll_offset(),
+            egui::vec2(0.0, 120.0)
+        );
+        assert_eq!(
+            tab.view(second_view_id)
+                .expect("second view")
+                .editor_scroll_offset(),
+            egui::vec2(0.0, 420.0)
+        );
     }
 }

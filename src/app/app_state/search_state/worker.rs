@@ -311,17 +311,13 @@ fn search_target_ranges(
         );
     }
 
-    let flattened = snapshot.extract_range(normalized.clone());
-    let outcome = search::search_text_interruptible(&flattened, query, options, || {
-        latest_generation.load(Ordering::Relaxed) == generation
-    })?;
-    debug_assert!(outcome.error.is_none());
-    Some(
-        outcome
-            .matches
-            .into_iter()
-            .map(|range| range.start + normalized.start..range.end + normalized.start)
-            .collect(),
+    search_fragmented_regex_by_flattening(
+        snapshot,
+        normalized,
+        query,
+        options,
+        generation,
+        latest_generation,
     )
 }
 
@@ -351,15 +347,16 @@ fn search_fragmented_plain_text(
         let core_end = (chunk_start + chunk_chars).min(range.end);
         let window_start = range.start.max(chunk_start.saturating_sub(overlap_chars));
         let window_end = range.end.min(core_end.saturating_add(overlap_chars));
-        let window_text = snapshot.extract_range(window_start..window_end);
-        let outcome = search::search_text_interruptible(&window_text, query, options, || {
-            latest_generation.load(Ordering::Relaxed) == generation
-        })?;
+        let (window_text, window_offset) = snapshot.search_text_cow(Some(window_start..window_end));
+        let outcome =
+            search::search_text_interruptible(window_text.as_ref(), query, options, || {
+                latest_generation.load(Ordering::Relaxed) == generation
+            })?;
         debug_assert!(outcome.error.is_none());
 
         matches.extend(outcome.matches.into_iter().filter_map(|matched| {
-            let global_start = window_start + matched.start;
-            let global_end = window_start + matched.end;
+            let global_start = window_offset + matched.start;
+            let global_end = window_offset + matched.end;
             (global_start >= chunk_start && global_start < core_end)
                 .then_some(global_start..global_end)
         }));
@@ -367,6 +364,30 @@ fn search_fragmented_plain_text(
     }
 
     Some(matches)
+}
+
+fn search_fragmented_regex_by_flattening(
+    snapshot: &DocumentSnapshot,
+    range: Range<usize>,
+    query: &str,
+    options: SearchOptions,
+    generation: u64,
+    latest_generation: &AtomicU64,
+) -> Option<Vec<Range<usize>>> {
+    // Regexes can match across arbitrary piece and chunk boundaries. Keep this
+    // as the explicit rare flattening path; plain text search stays windowed.
+    let flattened = snapshot.flatten_range(range.clone());
+    let outcome = search::search_text_interruptible(&flattened, query, options, || {
+        latest_generation.load(Ordering::Relaxed) == generation
+    })?;
+    debug_assert!(outcome.error.is_none());
+    Some(
+        outcome
+            .matches
+            .into_iter()
+            .map(|matched| matched.start + range.start..matched.end + range.start)
+            .collect(),
+    )
 }
 
 fn search_target_parallelism(target_count: usize) -> usize {
@@ -451,6 +472,9 @@ mod tests {
         )
         .expect("search should complete");
 
-        assert_eq!(ranges, vec![expected_start..expected_start + "needle".len()]);
+        assert_eq!(
+            ranges,
+            vec![expected_start..expected_start + "needle".len()]
+        );
     }
 }

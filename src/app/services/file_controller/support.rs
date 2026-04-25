@@ -1,8 +1,14 @@
 use super::FileController;
 use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::BufferState;
-use crate::app::services::file_service::{FileContent, FileService};
 use std::path::{Path, PathBuf};
+
+pub(in crate::app::services::file_controller) struct DeferredBufferRefresh {
+    pub(in crate::app::services::file_controller) buffer_id: u64,
+    pub(in crate::app::services::file_controller) revision: u64,
+    pub(in crate::app::services::file_controller) snapshot: crate::app::domain::DocumentSnapshot,
+    pub(in crate::app::services::file_controller) format: crate::app::domain::TextFormatMetadata,
+}
 
 pub(in crate::app::services::file_controller) struct LoadedFile {
     pub(in crate::app::services::file_controller) artifact_warning: Option<String>,
@@ -10,15 +16,6 @@ pub(in crate::app::services::file_controller) struct LoadedFile {
 }
 
 impl LoadedFile {
-    pub(in crate::app::services::file_controller) fn from_file_content(
-        path: PathBuf,
-        file_content: FileContent,
-    ) -> Self {
-        let disk_state = FileService::read_disk_state(&path).ok();
-        let buffer = FileService::build_buffer_from_file_content(&path, file_content, disk_state);
-        Self::from_buffer(buffer)
-    }
-
     pub(in crate::app::services::file_controller) fn from_buffer(buffer: BufferState) -> Self {
         let format_warning = buffer.format.format_warning_text();
         let artifact_summary = buffer.artifact_summary.status_text();
@@ -123,5 +120,30 @@ impl FileController {
     pub(super) fn assign_saved_path(buffer: &mut BufferState, path: &Path) {
         buffer.path = Some(path.to_path_buf());
         buffer.name = path.file_name().unwrap().to_string_lossy().into_owned();
+    }
+
+    pub(super) fn deferred_buffer_refresh(buffer: &BufferState) -> Option<DeferredBufferRefresh> {
+        buffer
+            .text_metadata_refresh_needed()
+            .then(|| DeferredBufferRefresh {
+                buffer_id: buffer.id,
+                revision: buffer.document_revision(),
+                snapshot: buffer.document_snapshot(),
+                format: buffer.format.clone(),
+            })
+    }
+
+    pub(super) fn queue_deferred_buffer_refreshes(
+        app: &mut ScratchpadApp,
+        refreshes: impl IntoIterator<Item = DeferredBufferRefresh>,
+    ) {
+        for refresh in refreshes {
+            app.queue_background_text_metadata_refresh(
+                refresh.buffer_id,
+                refresh.revision,
+                refresh.snapshot,
+                refresh.format,
+            );
+        }
     }
 }

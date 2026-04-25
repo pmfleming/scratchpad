@@ -328,51 +328,16 @@ impl PieceTreeLite {
         let mut line_start = address.leaf_start_char;
         let mut current_char = line_start;
         let mut current_len = 0usize;
-        let mut is_first_leaf = true;
-
-        for (node_index, node) in self.root.nodes.iter().enumerate().skip(address.node_index) {
-            let leaf_start = if node_index == address.node_index {
-                address.leaf_index
-            } else {
-                0
-            };
-
-            for leaf in node.leaves.iter().skip(leaf_start) {
-                let piece_skip = first_leaf_piece_skip(
-                    leaf,
-                    &mut is_first_leaf,
-                    safe_line,
-                    &mut current_line,
-                    &mut current_char,
-                );
-
-                for piece in leaf.pieces.iter().skip(piece_skip) {
-                    if current_line < safe_line && current_line + piece.newline_count < safe_line {
-                        current_line += piece.newline_count;
-                        current_char += piece.char_len;
-                        continue;
-                    }
-                    if current_line == safe_line && piece.newline_count == 0 {
-                        current_len += piece.char_len;
-                        current_char += piece.char_len;
-                        continue;
-                    }
-
-                    if let Some(line_info) = scan_piece_for_line_lookup(
-                        self.piece_text(piece),
-                        safe_line,
-                        &mut current_line,
-                        &mut line_start,
-                        &mut current_char,
-                        &mut current_len,
-                    ) {
-                        return line_info;
-                    }
-                }
-            }
-        }
-
-        (line_start, current_len)
+        find_line_lookup_in_leaves(
+            self,
+            address,
+            safe_line,
+            &mut current_line,
+            &mut line_start,
+            &mut current_char,
+            &mut current_len,
+        )
+        .unwrap_or((line_start, current_len))
     }
 
     pub fn line_index_at_offset(&self, offset_chars: usize) -> usize {
@@ -602,6 +567,62 @@ fn scan_piece_for_line_lookup(
         }
         *current_char += 1;
     }
+    None
+}
+
+fn find_line_lookup_in_leaves(
+    tree: &PieceTreeLite,
+    address: LeafAddress,
+    safe_line: usize,
+    current_line: &mut usize,
+    line_start: &mut usize,
+    current_char: &mut usize,
+    current_len: &mut usize,
+) -> Option<(usize, usize)> {
+    let mut is_first_leaf = true;
+
+    for (node_index, node) in tree.root.nodes.iter().enumerate().skip(address.node_index) {
+        let leaf_start = if node_index == address.node_index {
+            address.leaf_index
+        } else {
+            0
+        };
+
+        for leaf in node.leaves.iter().skip(leaf_start) {
+            let piece_skip = first_leaf_piece_skip(
+                leaf,
+                &mut is_first_leaf,
+                safe_line,
+                current_line,
+                current_char,
+            );
+
+            for piece in leaf.pieces.iter().skip(piece_skip) {
+                if *current_line < safe_line && *current_line + piece.newline_count < safe_line {
+                    *current_line += piece.newline_count;
+                    *current_char += piece.char_len;
+                    continue;
+                }
+                if *current_line == safe_line && piece.newline_count == 0 {
+                    *current_len += piece.char_len;
+                    *current_char += piece.char_len;
+                    continue;
+                }
+
+                if let Some(line_info) = scan_piece_for_line_lookup(
+                    tree.piece_text(piece),
+                    safe_line,
+                    current_line,
+                    line_start,
+                    current_char,
+                    current_len,
+                ) {
+                    return Some(line_info);
+                }
+            }
+        }
+    }
+
     None
 }
 

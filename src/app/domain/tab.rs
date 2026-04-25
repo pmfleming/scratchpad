@@ -203,6 +203,14 @@ impl WorkspaceTab {
         }
     }
 
+    pub fn clear_transient_view_state(&mut self) {
+        for view in &mut self.views {
+            view.editor_has_focus = false;
+            view.latest_layout = None;
+            view.latest_layout_revision = None;
+        }
+    }
+
     pub fn view(&self, view_id: ViewId) -> Option<&EditorViewState> {
         self.views.iter().find(|view| view.id == view_id)
     }
