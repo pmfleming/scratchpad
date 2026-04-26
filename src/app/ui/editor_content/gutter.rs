@@ -1,17 +1,16 @@
-use crate::app::domain::{BufferState, EditorViewState, RenderedLayout};
+use crate::app::domain::{BufferState, RenderedLayout};
 use eframe::egui;
 
 pub fn render_line_number_gutter(
     ui: &mut egui::Ui,
     buffer: &BufferState,
-    view: &EditorViewState,
     previous_layout: Option<&RenderedLayout>,
     font_id: &egui::FontId,
     text_color: egui::Color32,
     background_color: egui::Color32,
 ) {
-    let fallback_line_count = displayed_line_count(buffer, view);
-    let max_number = max_gutter_line_number(previous_layout, fallback_line_count);
+    let line_count = buffer.line_count;
+    let max_number = max_gutter_line_number(previous_layout, line_count);
     let digits = max_number.max(1).to_string().len().max(3);
     let gutter_width = ui.fonts_mut(|fonts| {
         fonts
@@ -31,46 +30,45 @@ pub fn render_line_number_gutter(
             ui.painter()
                 .rect_filled(ui.max_rect(), 0.0, background_color);
             ui.set_width(gutter_width);
+            let row_height = ui.fonts_mut(|fonts| fonts.row_height(font_id));
+            let previous_layout =
+                previous_layout.filter(|layout| layout.matches_row_height(row_height));
 
             if let Some(layout) = previous_layout {
-                render_layout_gutter_rows(ui, layout, font_id, text_color);
+                render_gutter_rows(
+                    ui,
+                    layout.content_height().max(ui.available_height()),
+                    font_id,
+                    text_color,
+                    layout_gutter_rows(layout, row_height),
+                );
             } else {
-                render_fallback_gutter_rows(ui, fallback_line_count, font_id, text_color);
+                render_gutter_rows(
+                    ui,
+                    row_height * line_count.max(1) as f32,
+                    font_id,
+                    text_color,
+                    fallback_gutter_rows(line_count, row_height),
+                );
             }
         },
     );
 }
 
-fn render_layout_gutter_rows(
+fn render_gutter_rows(
     ui: &mut egui::Ui,
-    layout: &RenderedLayout,
+    desired_height: f32,
     font_id: &egui::FontId,
     text_color: egui::Color32,
+    rows: impl Iterator<Item = (f32, usize)>,
 ) {
-    let row_height = ui.fonts_mut(|fonts| fonts.row_height(font_id));
-    let desired_size = egui::vec2(
-        ui.available_width(),
-        layout.content_height().max(ui.available_height()),
-    );
+    let desired_size = egui::vec2(ui.available_width(), desired_height);
     let (rect, _) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
     let painter = ui.painter();
-    let visible_rows = layout.visible_row_range();
-    let y_offset = visible_layout_y_offset(layout, row_height);
 
-    for row_index in visible_rows {
-        let Some(row_top) = layout.row_top(row_index) else {
-            continue;
-        };
-        let Some(line_number) = layout
-            .row_line_numbers
-            .get(row_index)
-            .and_then(|line_number| *line_number)
-        else {
-            continue;
-        };
-
+    for (row_top, line_number) in rows {
         painter.text(
-            egui::pos2(rect.right() - 8.0, rect.top() + y_offset + row_top),
+            egui::pos2(rect.right() - 8.0, rect.top() + row_top),
             egui::Align2::RIGHT_TOP,
             line_number.to_string(),
             font_id.clone(),
@@ -79,34 +77,25 @@ fn render_layout_gutter_rows(
     }
 }
 
-fn render_fallback_gutter_rows(
-    ui: &mut egui::Ui,
-    line_count: usize,
-    font_id: &egui::FontId,
-    text_color: egui::Color32,
-) {
-    let row_height = ui.fonts_mut(|fonts| fonts.row_height(font_id));
-    let row_count = line_count.max(1);
-    let desired_size = egui::vec2(ui.available_width(), row_height * row_count as f32);
-    let (rect, _) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
-    let painter = ui.painter();
+fn layout_gutter_rows(
+    layout: &RenderedLayout,
+    row_height: f32,
+) -> impl Iterator<Item = (f32, usize)> + '_ {
+    let y_offset = visible_layout_y_offset(layout, row_height);
 
-    for row_index in 0..row_count {
-        painter.text(
-            egui::pos2(
-                rect.right() - 8.0,
-                rect.top() + row_height * row_index as f32,
-            ),
-            egui::Align2::RIGHT_TOP,
-            (row_index + 1).to_string(),
-            font_id.clone(),
-            text_color.gamma_multiply(0.62),
-        );
-    }
+    layout.visible_row_range().filter_map(move |row_index| {
+        let row_top = layout.row_top(row_index)?;
+        let line_number = layout
+            .row_line_numbers
+            .get(row_index)
+            .and_then(|line_number| *line_number)?;
+        Some((y_offset + row_top, line_number))
+    })
 }
 
-fn displayed_line_count(buffer: &BufferState, _view: &EditorViewState) -> usize {
-    buffer.line_count
+fn fallback_gutter_rows(line_count: usize, row_height: f32) -> impl Iterator<Item = (f32, usize)> {
+    let row_count = line_count.max(1);
+    (0..row_count).map(move |row_index| (row_height * row_index as f32, row_index + 1))
 }
 
 fn max_gutter_line_number(

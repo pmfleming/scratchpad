@@ -323,12 +323,7 @@ fn build_file_content(
     );
     format.is_ascii_subset = false;
     let text_metadata = BufferTextMetadata {
-        line_count: content
-            .as_bytes()
-            .iter()
-            .filter(|byte| **byte == b'\n')
-            .count()
-            .saturating_add(1),
+        line_count: staged_display_line_count(&content),
         artifact_summary: sample_metadata.artifact_summary.clone(),
         preferred_line_ending: format.preferred_line_ending_style(),
         has_non_compliant_characters: false,
@@ -349,6 +344,32 @@ fn staged_metadata_sample(content: &str) -> &str {
         end -= 1;
     }
     &content[..end]
+}
+
+fn staged_display_line_count(content: &str) -> usize {
+    let bytes = content.as_bytes();
+    let mut lines = 1usize;
+    let mut index = 0usize;
+
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\r' => {
+                lines += 1;
+                index += if bytes.get(index + 1) == Some(&b'\n') {
+                    2
+                } else {
+                    1
+                };
+            }
+            b'\n' => {
+                lines += 1;
+                index += 1;
+            }
+            _ => index += 1,
+        }
+    }
+
+    lines
 }
 
 fn encode_content(
@@ -553,8 +574,10 @@ fn is_probably_binary(prefix: &[u8], has_bom: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::FileService;
-    use crate::app::domain::{EncodingSource, TextDocument, TextFormatMetadata};
+    use super::{FileService, staged_display_line_count};
+    use crate::app::domain::{
+        EncodingSource, TextDocument, TextFormatMetadata, display_line_count,
+    };
 
     #[test]
     fn writing_snapshot_uses_captured_revision_text() {
@@ -613,6 +636,16 @@ mod tests {
         assert_eq!(
             reloaded.text_metadata.line_count,
             content.matches('\n').count() + 1
+        );
+    }
+
+    #[test]
+    fn staged_line_count_matches_display_line_count_for_cr_and_mixed_endings() {
+        let content = "alpha\rbravo\r\ncharlie\ndelta\r";
+
+        assert_eq!(
+            staged_display_line_count(content),
+            display_line_count(content)
         );
     }
 }

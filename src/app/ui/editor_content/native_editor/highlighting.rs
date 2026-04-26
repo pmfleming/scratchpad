@@ -76,6 +76,48 @@ pub fn build_layouter(
     })
 }
 
+pub(super) fn windowed_search_highlights(
+    search_highlights: &SearchHighlightState,
+    visible_char_range: &Range<usize>,
+) -> SearchHighlightState {
+    let mut ranges = Vec::new();
+    let mut active_range_index = None;
+
+    for (index, range) in search_highlights.ranges.iter().enumerate() {
+        let Some(range) = windowed_char_range(Some(range.clone()), visible_char_range) else {
+            continue;
+        };
+        if search_highlights.active_range_index == Some(index) {
+            active_range_index = Some(ranges.len());
+        }
+        ranges.push(range);
+    }
+
+    SearchHighlightState {
+        ranges,
+        active_range_index,
+    }
+}
+
+pub(super) fn windowed_char_range(
+    range: Option<Range<usize>>,
+    visible_char_range: &Range<usize>,
+) -> Option<Range<usize>> {
+    let range = range.filter(|range| range.start < range.end)?;
+    let visible_char_range = normalize_char_window(visible_char_range);
+    let start = range.start.max(visible_char_range.start);
+    let end = range.end.min(visible_char_range.end);
+    (start < end).then_some(
+        start.saturating_sub(visible_char_range.start)
+            ..end.saturating_sub(visible_char_range.start),
+    )
+}
+
+fn normalize_char_window(visible_char_range: &Range<usize>) -> Range<usize> {
+    visible_char_range.start.min(visible_char_range.end)
+        ..visible_char_range.start.max(visible_char_range.end)
+}
+
 fn layout_job_with_highlights(
     text: &str,
     search_highlights: &SearchHighlightState,
@@ -256,5 +298,41 @@ impl CharByteMap {
             CharByteMap::Ascii { .. } => char_index,
             CharByteMap::Map(offsets) => offsets[char_index],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{windowed_char_range, windowed_search_highlights};
+    use crate::app::domain::SearchHighlightState;
+
+    #[test]
+    fn windowed_search_highlights_rebases_ranges_into_visible_slice() {
+        let highlights = SearchHighlightState {
+            ranges: vec![3..5, 8..12, 14..18],
+            active_range_index: Some(1),
+        };
+
+        let rebased = windowed_search_highlights(&highlights, &(8..18));
+
+        assert_eq!(rebased.ranges, vec![0..4, 6..10]);
+        assert_eq!(rebased.active_range_index, Some(0));
+    }
+
+    #[test]
+    fn windowed_char_range_clips_partial_matches_at_window_edges() {
+        assert_eq!(windowed_char_range(Some(4..9), &(6..14)), Some(0..3));
+        assert_eq!(windowed_char_range(Some(12..18), &(6..14)), Some(6..8));
+        assert_eq!(windowed_char_range(Some(1..5), &(6..14)), None);
+    }
+
+    #[test]
+    fn windowed_char_range_normalizes_reversed_windows() {
+        let reversed_window = std::ops::Range { start: 14, end: 6 };
+
+        assert_eq!(
+            windowed_char_range(Some(4..9), &reversed_window),
+            Some(0..3)
+        );
     }
 }

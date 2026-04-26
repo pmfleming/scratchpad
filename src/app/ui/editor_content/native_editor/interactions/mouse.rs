@@ -43,40 +43,52 @@ pub(super) fn handle_mouse_interaction(
     rect: egui::Rect,
     view: &mut EditorViewState,
     piece_tree: &crate::app::domain::buffer::PieceTreeLite,
-) {
-    handle_mouse_interaction_with_offset(
-        ui,
-        view,
-        MouseInteractionContext {
-            response,
-            galley,
-            rect,
-            piece_tree,
-            char_offset_base: 0,
-        },
-    );
-}
-
-pub(super) fn handle_mouse_interaction_window(
-    ui: &mut egui::Ui,
-    response: &egui::Response,
-    galley: &egui::Galley,
-    rect: egui::Rect,
-    view: &mut EditorViewState,
-    piece_tree: &crate::app::domain::buffer::PieceTreeLite,
     char_offset_base: usize,
 ) {
-    handle_mouse_interaction_with_offset(
+    let context = MouseInteractionContext {
+        response,
+        galley,
+        rect,
+        piece_tree,
+        char_offset_base,
+    };
+    update_hover_cursor(ui, context.response);
+
+    let Some((pointer_pos, selection)) = pointer_selection(ui, context) else {
+        return;
+    };
+    let selection_context = ClickSelectionContext {
+        piece_tree: context.piece_tree,
+        galley: context.galley,
+        char_offset_base: context.char_offset_base,
+    };
+    let click_id = context.response.id.with("click_state");
+    let mut click_state = load_click_state(ui, click_id);
+
+    if should_ignore_secondary_pointer(ui, context.response) {
+        click_state.was_primary_pointer_down = false;
+        store_click_state(ui, click_id, click_state);
+        return;
+    }
+
+    let primary_pointer_down = is_primary_pointer_down(ui, context.response);
+    handle_primary_pointer(
         ui,
         view,
-        MouseInteractionContext {
-            response,
-            galley,
-            rect,
-            piece_tree,
-            char_offset_base,
-        },
+        context.response,
+        selection_context,
+        selection,
+        pointer_pos,
+        &mut click_state,
+        primary_pointer_down,
     );
+
+    click_state.was_primary_pointer_down = primary_pointer_down;
+    store_click_state(ui, click_id, click_state);
+
+    if primary_pointer_down {
+        context.response.request_focus();
+    }
 }
 
 fn extend_selection_to_cursor(view: &mut EditorViewState, char_cursor: CharCursor) {
@@ -150,15 +162,14 @@ pub(super) fn cursor_range_after_click(
     current: Option<CursorRange>,
     clicked_cursor: CharCursor,
 ) -> CursorRange {
-    if ui.input(|input| input.modifiers.shift) {
-        current
-            .map(|existing| CursorRange {
-                primary: clicked_cursor,
-                secondary: existing.secondary,
-            })
-            .unwrap_or_else(|| CursorRange::one(clicked_cursor))
-    } else {
-        CursorRange::one(clicked_cursor)
+    let shift_pressed = ui.input(|input| input.modifiers.shift);
+    let Some(existing) = current.filter(|_| shift_pressed) else {
+        return CursorRange::one(clicked_cursor);
+    };
+
+    CursorRange {
+        primary: clicked_cursor,
+        secondary: existing.secondary,
     }
 }
 
@@ -179,17 +190,15 @@ fn normalize_click_count(
     }
 }
 
-fn handle_mouse_interaction_with_offset(
-    ui: &mut egui::Ui,
-    view: &mut EditorViewState,
+fn pointer_selection(
+    ui: &egui::Ui,
     context: MouseInteractionContext<'_>,
-) {
-    update_hover_cursor(ui, context.response);
-
-    let Some(pointer_pos) = context.response.interact_pointer_pos() else {
-        return;
-    };
-
+) -> Option<(egui::Pos2, PointerSelection)> {
+    let pointer_pos = tracked_pointer_pos(
+        context.response.interact_pointer_pos(),
+        ui.input(|input| input.pointer.latest_pos()),
+        context.response.dragged_by(egui::PointerButton::Primary),
+    )?;
     let cursor_at_pointer = context
         .galley
         .cursor_from_pos(pointer_pos - context.rect.min);
@@ -197,43 +206,52 @@ fn handle_mouse_interaction_with_offset(
         index: context.char_offset_base + cursor_at_pointer.index,
         prefer_next_row: cursor_at_pointer.prefer_next_row,
     };
-    let selection_context = ClickSelectionContext {
-        piece_tree: context.piece_tree,
-        galley: context.galley,
-        char_offset_base: context.char_offset_base,
-    };
-    let click_id = context.response.id.with("click_state");
-    let mut click_state = load_click_state(ui, click_id);
 
-    if should_ignore_secondary_pointer(ui, context.response) {
-        click_state.was_primary_pointer_down = false;
-        store_click_state(ui, click_id, click_state);
+    Some((
+        pointer_pos,
+        PointerSelection {
+            cursor_at_pointer,
+            char_cursor,
+            click_count: 1,
+        },
+    ))
+}
+
+fn tracked_pointer_pos(
+    interact_pointer_pos: Option<egui::Pos2>,
+    latest_pointer_pos: Option<egui::Pos2>,
+    is_dragged: bool,
+) -> Option<egui::Pos2> {
+    interact_pointer_pos.or_else(|| is_dragged.then_some(latest_pointer_pos).flatten())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_primary_pointer(
+    ui: &egui::Ui,
+    view: &mut EditorViewState,
+    response: &egui::Response,
+    selection_context: ClickSelectionContext<'_>,
+    mut selection: PointerSelection,
+    pointer_pos: egui::Pos2,
+    click_state: &mut ClickState,
+    primary_pointer_down: bool,
+) {
+    if !primary_pointer_down {
         return;
     }
 
-    let primary_pointer_down = is_primary_pointer_down(ui, context.response);
-    if primary_pointer_down && context.response.dragged() {
-        extend_selection_to_cursor(view, char_cursor);
-    } else if primary_pointer_down && !click_state.was_primary_pointer_down {
-        update_click_count(ui, pointer_pos, &mut click_state);
-        apply_click_selection(
-            ui,
-            view,
-            selection_context,
-            PointerSelection {
-                cursor_at_pointer,
-                char_cursor,
-                click_count: click_state.click_count,
-            },
-        );
+    if response.dragged() {
+        extend_selection_to_cursor(view, selection.char_cursor);
+        return;
     }
 
-    click_state.was_primary_pointer_down = primary_pointer_down;
-    store_click_state(ui, click_id, click_state);
-
-    if primary_pointer_down {
-        context.response.request_focus();
+    if click_state.was_primary_pointer_down {
+        return;
     }
+
+    update_click_count(ui, pointer_pos, click_state);
+    selection.click_count = click_state.click_count;
+    apply_click_selection(ui, view, selection_context, selection);
 }
 
 fn update_hover_cursor(ui: &mut egui::Ui, response: &egui::Response) {
@@ -259,8 +277,19 @@ fn should_ignore_secondary_pointer(ui: &egui::Ui, response: &egui::Response) -> 
 }
 
 fn is_primary_pointer_down(ui: &egui::Ui, response: &egui::Response) -> bool {
-    response.contains_pointer()
-        && ui.input(|input| input.pointer.button_down(egui::PointerButton::Primary))
+    primary_pointer_tracking_active(
+        ui.input(|input| input.pointer.button_down(egui::PointerButton::Primary)),
+        response.contains_pointer(),
+        response.dragged_by(egui::PointerButton::Primary),
+    )
+}
+
+fn primary_pointer_tracking_active(
+    primary_button_down: bool,
+    contains_pointer: bool,
+    is_dragged: bool,
+) -> bool {
+    primary_button_down && (contains_pointer || is_dragged)
 }
 
 #[cfg(test)]
@@ -268,6 +297,7 @@ mod tests {
     use super::{
         ClickSelectionContext, PointerSelection, apply_click_selection, cursor_range_after_click,
         extend_selection_to_cursor, line_selection_range, normalize_click_count,
+        primary_pointer_tracking_active, tracked_pointer_pos,
     };
     use crate::app::domain::{EditorViewState, buffer::PieceTreeLite};
     use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
@@ -352,6 +382,23 @@ mod tests {
 
         assert_eq!(normalize_click_count(&galley, interior, 2), 2);
         assert_eq!(normalize_click_count(&galley, interior, 3), 3);
+    }
+
+    #[test]
+    fn primary_pointer_tracking_continues_for_active_drag_outside_response() {
+        assert!(primary_pointer_tracking_active(true, false, true));
+        assert!(primary_pointer_tracking_active(true, true, false));
+        assert!(!primary_pointer_tracking_active(false, true, true));
+        assert!(!primary_pointer_tracking_active(true, false, false));
+    }
+
+    #[test]
+    fn tracked_pointer_pos_falls_back_to_latest_position_for_active_drag() {
+        let latest = egui::pos2(24.0, 48.0);
+
+        assert_eq!(tracked_pointer_pos(None, Some(latest), true), Some(latest));
+        assert_eq!(tracked_pointer_pos(Some(latest), None, false), Some(latest));
+        assert_eq!(tracked_pointer_pos(None, Some(latest), false), None);
     }
 
     #[test]

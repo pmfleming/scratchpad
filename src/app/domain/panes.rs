@@ -43,17 +43,14 @@ impl PaneNode {
     }
 
     pub fn remove_view(&mut self, target: ViewId) -> bool {
+        if let Some(replacement) = self.replacement_after_removing_leaf(target) {
+            *self = replacement;
+            return true;
+        }
+
         match self {
             Self::Leaf { .. } => false,
             Self::Split { first, second, .. } => {
-                if matches!(first.as_ref(), Self::Leaf { view_id } if *view_id == target) {
-                    *self = (**second).clone();
-                    return true;
-                }
-                if matches!(second.as_ref(), Self::Leaf { view_id } if *view_id == target) {
-                    *self = (**first).clone();
-                    return true;
-                }
                 first.remove_view(target) || second.remove_view(target)
             }
         }
@@ -137,5 +134,57 @@ impl PaneNode {
                 }
             }
         }
+    }
+
+    fn leaf_view_id(&self) -> Option<ViewId> {
+        match self {
+            Self::Leaf { view_id } => Some(*view_id),
+            Self::Split { .. } => None,
+        }
+    }
+
+    fn replacement_after_removing_leaf(&self, target: ViewId) -> Option<Self> {
+        match self {
+            Self::Split { first, second, .. } if first.leaf_view_id() == Some(target) => {
+                Some((**second).clone())
+            }
+            Self::Split { first, second, .. } if second.leaf_view_id() == Some(target) => {
+                Some((**first).clone())
+            }
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PaneNode, SplitAxis};
+    use std::collections::HashSet;
+
+    #[test]
+    fn pane_node_remove_view_promotes_sibling_leaf() {
+        let mut pane = PaneNode::Split {
+            axis: SplitAxis::Horizontal,
+            ratio: 0.5,
+            first: Box::new(PaneNode::leaf(1)),
+            second: Box::new(PaneNode::leaf(2)),
+        };
+
+        assert!(pane.remove_view(1));
+        assert!(matches!(pane, PaneNode::Leaf { view_id: 2 }));
+    }
+
+    #[test]
+    fn pane_node_retain_views_promotes_surviving_branch() {
+        let mut pane = PaneNode::Split {
+            axis: SplitAxis::Vertical,
+            ratio: 0.5,
+            first: Box::new(PaneNode::leaf(3)),
+            second: Box::new(PaneNode::leaf(4)),
+        };
+        let valid = HashSet::from([4]);
+
+        assert!(pane.retain_views(&valid));
+        assert!(matches!(pane, PaneNode::Leaf { view_id: 4 }));
     }
 }

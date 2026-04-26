@@ -71,7 +71,7 @@ fn collect_active_status_details(
     dark_mode: bool,
 ) -> Option<ActiveStatusDetails> {
     let tab = app.active_tab()?;
-    let line_count = tab.buffer.line_count;
+    let file_length = tab.buffer.current_file_length();
     let active_view = tab.active_view();
     let show_control_chars = active_view
         .map(|view| view.show_control_chars)
@@ -97,7 +97,7 @@ fn collect_active_status_details(
             .as_ref()
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Untitled".to_owned()),
-        count_label: line_count_label(line_count),
+        count_label: line_count_label(file_length.lines),
         cursor_label: cursor_label(&view_status),
         selection_label: selection_label(&view_status),
         viewport_label: viewport_label(&view_status),
@@ -112,7 +112,7 @@ fn collect_active_status_details(
         icon_tooltip,
         icon_color,
         freshness_label: tab.buffer.disk_status_label().map(str::to_owned),
-        is_large_file: tab.buffer.document().piece_tree().len_bytes() > 5 * 1024 * 1024,
+        is_large_file: file_length.bytes > 5 * 1024 * 1024,
         has_control_chars,
     })
 }

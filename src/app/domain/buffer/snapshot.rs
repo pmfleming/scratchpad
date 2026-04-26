@@ -1,10 +1,11 @@
-use super::{PieceTreeLite, PieceTreeSlice};
+use super::{BufferLength, PieceTreeLite, PieceTreeSlice, display_line_count_from_piece_tree};
 use std::borrow::Cow;
 use std::ops::Range;
 use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct DocumentSnapshot {
+    length: BufferLength,
     revision: u64,
     piece_tree: Arc<PieceTreeLite>,
 }
@@ -12,10 +13,19 @@ pub struct DocumentSnapshot {
 impl DocumentSnapshot {
     pub(crate) fn from_shared(piece_tree: Arc<PieceTreeLite>) -> Self {
         let revision = piece_tree.generation();
+        let length = BufferLength::from_metrics(
+            piece_tree.metrics(),
+            display_line_count_from_piece_tree(piece_tree.as_ref()),
+        );
         Self {
+            length,
             revision,
             piece_tree,
         }
+    }
+
+    pub(crate) fn document_length(&self) -> BufferLength {
+        self.length
     }
 
     pub fn revision(&self) -> u64 {
@@ -27,7 +37,7 @@ impl DocumentSnapshot {
     }
 
     pub fn len_chars(&self) -> usize {
-        self.piece_tree.len_chars()
+        self.length.chars
     }
 
     pub fn normalize_char_range(&self, range_chars: Range<usize>) -> Range<usize> {
@@ -81,25 +91,22 @@ impl DocumentSnapshot {
     }
 
     pub fn search_text_cow(&self, range_chars: Option<Range<usize>>) -> (Cow<'_, str>, usize) {
-        let Some(range_chars) = range_chars else {
-            return (
-                self.piece_tree
-                    .borrow_range(0..self.len_chars())
-                    .map(Cow::Borrowed)
-                    .unwrap_or_else(|| Cow::Owned(self.flatten_text())),
-                0,
-            );
-        };
-
-        let normalized = self.normalize_char_range(range_chars);
+        let normalized = range_chars
+            .map(|range_chars| self.normalize_char_range(range_chars))
+            .unwrap_or_else(|| self.full_char_range());
         let start = normalized.start;
-        (
-            self.piece_tree
-                .borrow_range(normalized.clone())
-                .map(Cow::Borrowed)
-                .unwrap_or_else(|| Cow::Owned(self.flatten_range(normalized))),
-            start,
-        )
+        (self.borrow_or_flatten_range(normalized), start)
+    }
+
+    fn full_char_range(&self) -> Range<usize> {
+        0..self.document_length().chars
+    }
+
+    fn borrow_or_flatten_range(&self, range_chars: Range<usize>) -> Cow<'_, str> {
+        self.piece_tree
+            .borrow_range(range_chars.clone())
+            .map(Cow::Borrowed)
+            .unwrap_or_else(|| Cow::Owned(self.flatten_range(range_chars)))
     }
 }
 
@@ -107,6 +114,7 @@ impl DocumentSnapshot {
 mod tests {
     use super::DocumentSnapshot;
     use crate::app::domain::TextDocument;
+    use crate::app::domain::buffer::BufferLength;
     use std::borrow::Cow;
 
     #[test]
@@ -155,5 +163,20 @@ mod tests {
 
         assert!(matches!(search_text, Cow::Borrowed("de")));
         assert_eq!(offset, 4);
+    }
+
+    #[test]
+    fn snapshot_document_length_tracks_bytes_chars_and_lines() {
+        let document = TextDocument::new("a\rb\r\nc".to_owned());
+        let snapshot: DocumentSnapshot = document.snapshot();
+
+        assert_eq!(
+            snapshot.document_length(),
+            BufferLength {
+                bytes: 6,
+                chars: 6,
+                lines: 3,
+            }
+        );
     }
 }

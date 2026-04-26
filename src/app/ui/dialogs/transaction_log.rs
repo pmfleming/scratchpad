@@ -1,6 +1,5 @@
-use super::common::{relative_age_label, show_callout};
+use super::common::{apply_editor_dialog_typography, relative_age_label, show_centered_callout};
 use crate::app::app_state::ScratchpadApp;
-use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::theme::{
     action_hover_bg, border, tab_selected_accent, tab_selected_bg, text_muted, text_primary,
 };
@@ -111,7 +110,7 @@ impl TransactionCategory {
     }
 }
 
-pub(super) fn show_transaction_log_window(ctx: &egui::Context, app: &mut ScratchpadApp) {
+pub(crate) fn show_transaction_log_window(ctx: &egui::Context, app: &mut ScratchpadApp) {
     if !app.transaction_log_open() {
         return;
     }
@@ -120,11 +119,10 @@ pub(super) fn show_transaction_log_window(ctx: &egui::Context, app: &mut Scratch
     let mut undo_entry_id = None;
     let mut clear_requested = false;
 
-    show_callout(
+    show_centered_callout(
         ctx,
         "transaction_log_overlay_v3",
-        callout::centered_position(ctx, TRANSACTION_LOG_SIZE),
-        TRANSACTION_LOG_SIZE.x,
+        TRANSACTION_LOG_SIZE,
         |ui| {
             render_transaction_log_window(
                 ui,
@@ -147,7 +145,7 @@ fn render_transaction_log_window(
     close_requested: &mut bool,
 ) {
     settings::apply_dialog_typography(ui);
-    apply_transaction_log_typography(ui);
+    apply_editor_dialog_typography(ui);
     callout::apply_spacing(ui);
     ui.spacing_mut().item_spacing = egui::vec2(8.0, 12.0);
 
@@ -423,23 +421,6 @@ fn entry_count_label(entry_count: usize) -> String {
     } else {
         format!("{entry_count} entries")
     }
-}
-
-fn apply_transaction_log_typography(ui: &mut egui::Ui) {
-    let font_family = egui::FontFamily::Name(EDITOR_FONT_FAMILY.into());
-    let style = ui.style_mut();
-    style.override_font_id = Some(egui::FontId::new(15.0, font_family.clone()));
-    style.text_styles.insert(
-        egui::TextStyle::Body,
-        egui::FontId::new(15.0, font_family.clone()),
-    );
-    style.text_styles.insert(
-        egui::TextStyle::Button,
-        egui::FontId::new(14.0, font_family.clone()),
-    );
-    style
-        .text_styles
-        .insert(egui::TextStyle::Small, egui::FontId::new(12.0, font_family));
 }
 
 fn apply_transaction_log_window_actions(

@@ -1,0 +1,143 @@
+use eframe::egui;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct AutoScrollConfig {
+    pub(crate) edge_extent: f32,
+    pub(crate) max_step: f32,
+    pub(crate) cross_axis_margin: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AutoScrollAxis {
+    Horizontal,
+    Vertical,
+}
+
+pub(crate) fn edge_auto_scroll_delta(
+    viewport_rect: egui::Rect,
+    pointer_pos: egui::Pos2,
+    axis: AutoScrollAxis,
+    config: AutoScrollConfig,
+) -> f32 {
+    if !cross_axis_bounds(viewport_rect, axis, config.cross_axis_margin)
+        .contains(&cross_axis_coordinate(pointer_pos, axis))
+    {
+        return 0.0;
+    }
+
+    let leading_distance = distance_to_leading_edge(viewport_rect, pointer_pos, axis);
+    if leading_distance <= config.edge_extent {
+        return -scaled_auto_scroll_delta(leading_distance, config);
+    }
+
+    let trailing_distance = distance_to_trailing_edge(viewport_rect, pointer_pos, axis);
+    if trailing_distance <= config.edge_extent {
+        return scaled_auto_scroll_delta(trailing_distance, config);
+    }
+
+    0.0
+}
+
+fn cross_axis_bounds(
+    viewport_rect: egui::Rect,
+    axis: AutoScrollAxis,
+    margin: f32,
+) -> std::ops::RangeInclusive<f32> {
+    match axis {
+        AutoScrollAxis::Horizontal => {
+            (viewport_rect.top() - margin)..=(viewport_rect.bottom() + margin)
+        }
+        AutoScrollAxis::Vertical => {
+            (viewport_rect.left() - margin)..=(viewport_rect.right() + margin)
+        }
+    }
+}
+
+fn cross_axis_coordinate(pointer_pos: egui::Pos2, axis: AutoScrollAxis) -> f32 {
+    match axis {
+        AutoScrollAxis::Horizontal => pointer_pos.y,
+        AutoScrollAxis::Vertical => pointer_pos.x,
+    }
+}
+
+fn distance_to_leading_edge(
+    viewport_rect: egui::Rect,
+    pointer_pos: egui::Pos2,
+    axis: AutoScrollAxis,
+) -> f32 {
+    match axis {
+        AutoScrollAxis::Horizontal => pointer_pos.x - viewport_rect.left(),
+        AutoScrollAxis::Vertical => pointer_pos.y - viewport_rect.top(),
+    }
+}
+
+fn distance_to_trailing_edge(
+    viewport_rect: egui::Rect,
+    pointer_pos: egui::Pos2,
+    axis: AutoScrollAxis,
+) -> f32 {
+    match axis {
+        AutoScrollAxis::Horizontal => viewport_rect.right() - pointer_pos.x,
+        AutoScrollAxis::Vertical => viewport_rect.bottom() - pointer_pos.y,
+    }
+}
+
+fn scaled_auto_scroll_delta(distance: f32, config: AutoScrollConfig) -> f32 {
+    let intensity = (1.0 - distance / config.edge_extent).clamp(0.0, 1.0);
+    config.max_step * intensity
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AutoScrollAxis, AutoScrollConfig, edge_auto_scroll_delta};
+    use eframe::egui::{Rect, pos2, vec2};
+
+    const CONFIG: AutoScrollConfig = AutoScrollConfig {
+        edge_extent: 36.0,
+        max_step: 18.0,
+        cross_axis_margin: 12.0,
+    };
+
+    #[test]
+    fn edge_auto_scroll_delta_pushes_toward_leading_edge() {
+        let viewport = Rect::from_min_size(pos2(40.0, 10.0), vec2(240.0, 30.0));
+
+        assert!(
+            edge_auto_scroll_delta(
+                viewport,
+                pos2(42.0, 24.0),
+                AutoScrollAxis::Horizontal,
+                CONFIG,
+            ) < 0.0
+        );
+    }
+
+    #[test]
+    fn edge_auto_scroll_delta_pushes_toward_trailing_edge() {
+        let viewport = Rect::from_min_size(pos2(40.0, 10.0), vec2(140.0, 240.0));
+
+        assert!(
+            edge_auto_scroll_delta(
+                viewport,
+                pos2(70.0, 248.0),
+                AutoScrollAxis::Vertical,
+                CONFIG,
+            ) > 0.0
+        );
+    }
+
+    #[test]
+    fn edge_auto_scroll_delta_is_zero_outside_cross_axis_margin() {
+        let viewport = Rect::from_min_size(pos2(40.0, 10.0), vec2(240.0, 30.0));
+
+        assert_eq!(
+            edge_auto_scroll_delta(
+                viewport,
+                pos2(42.0, 80.0),
+                AutoScrollAxis::Horizontal,
+                CONFIG,
+            ),
+            0.0
+        );
+    }
+}

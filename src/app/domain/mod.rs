@@ -9,9 +9,9 @@ pub use buffer::{
     BufferFreshness, BufferId, BufferState, BufferViewStatus, DiskFileState, DocumentSnapshot,
     EncodingSource, LineEndingCounts, LineEndingStyle, RenderedLayout, RenderedTextWindow,
     RestoredBufferState, TextArtifactSummary, TextDocument, TextFormatMetadata,
-    analyze_line_endings, display_line_count, platform_default_line_ending,
+    VisibleWindowLayoutKey, analyze_line_endings, display_line_count, platform_default_line_ending,
 };
 pub use panes::{PaneBranch, PaneNode, SplitAxis, SplitPath};
 pub use tab::WorkspaceTab;
 pub use tab_manager::{PendingAction, TabManager};
-pub use view::{EditorViewState, SearchHighlightState, ViewId};
+pub use view::{CursorRevealMode, EditorViewState, SearchHighlightState, ViewId};

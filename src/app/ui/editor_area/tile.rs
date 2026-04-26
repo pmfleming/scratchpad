@@ -4,6 +4,7 @@ use crate::app::domain::SplitAxis;
 use crate::app::domain::{RenderedLayout, ViewId, WorkspaceTab};
 use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::theme::*;
+use crate::app::ui::autoscroll::{AutoScrollAxis, AutoScrollConfig, edge_auto_scroll_delta};
 use crate::app::ui::editor_content::{
     self, EditorContentOutcome, EditorContentStyle, EditorHighlightStyle, TextEditOptions,
 };
@@ -25,6 +26,11 @@ const EDITOR_CONTEXT_MENU_WIDTH: f32 = 192.0;
 const EDITOR_CONTEXT_SUBMENU_WIDTH: f32 = 168.0;
 const EDITOR_CONTEXT_ICON_BUTTON_SIZE: egui::Vec2 = egui::vec2(38.0, 30.0);
 const EDITOR_CONTEXT_CARET_WIDTH: f32 = 28.0;
+const EDITOR_SELECTION_AUTOSCROLL_CONFIG: AutoScrollConfig = AutoScrollConfig {
+    edge_extent: 36.0,
+    max_step: 18.0,
+    cross_axis_margin: 12.0,
+};
 
 struct TileBodyOutcome {
     changed: bool,
@@ -683,10 +689,12 @@ fn show_editor_scroll_area(
         .unwrap_or_default();
     let wheel_requested_scroll_offset =
         requested_scroll_offset_for_pointer_wheel(ui, scroll_offset);
+    let render_scroll_offset = wheel_requested_scroll_offset.unwrap_or(scroll_offset);
     let output = egui::ScrollArea::both()
         .id_salt(editor_scroll_id(request.view_id))
-        .scroll_offset(scroll_offset)
+        .scroll_offset(render_scroll_offset)
         .auto_shrink([false, false])
+        .scroll_source(editor_scroll_source())
         .scroll_bar_visibility(request.scroll_bar_visibility)
         .show_viewport(ui, |ui, viewport| {
             let mut content_style = request.content_style;
@@ -703,31 +711,123 @@ fn show_editor_scroll_area(
                 })
                 .unwrap_or_else(missing_editor_content_outcome)
         });
+    let drag_requested_scroll_offset = requested_scroll_offset_for_selection_edge_drag(
+        ui,
+        scroll_offset,
+        output.inner.interaction_response.as_ref(),
+        output.content_size,
+        output.inner_rect.size(),
+        output.inner_rect,
+    )
+    .or_else(|| {
+        requested_scroll_offset_for_pointer_drag(
+            ui,
+            scroll_offset,
+            output.inner.interaction_response.as_ref(),
+            output.content_size,
+            output.inner_rect.size(),
+            output.inner_rect,
+        )
+    });
     if let Some(view) = tab.view_mut(request.view_id) {
-        view.set_editor_scroll_offset(
-            wheel_requested_scroll_offset
-                .or(output.inner.requested_scroll_offset)
-                .unwrap_or(output.state.offset),
-        );
+        view.set_editor_scroll_offset(resolve_editor_scroll_offset(
+            &output,
+            wheel_requested_scroll_offset,
+            drag_requested_scroll_offset,
+        ));
     }
     output.inner
+}
+
+fn editor_scroll_source() -> egui::scroll_area::ScrollSource {
+    egui::scroll_area::ScrollSource {
+        drag: false,
+        mouse_wheel: false,
+        ..egui::scroll_area::ScrollSource::ALL
+    }
+}
+
+fn resolve_editor_scroll_offset(
+    output: &egui::scroll_area::ScrollAreaOutput<EditorContentOutcome>,
+    wheel_requested_scroll_offset: Option<egui::Vec2>,
+    drag_requested_scroll_offset: Option<egui::Vec2>,
+) -> egui::Vec2 {
+    clamp_scroll_offset(
+        wheel_requested_scroll_offset
+            .or(drag_requested_scroll_offset)
+            .or(output.inner.requested_scroll_offset)
+            .unwrap_or(output.state.offset),
+        output.content_size,
+        output.inner_rect.size(),
+    )
+}
+
+fn requested_scroll_offset_for_pointer_drag(
+    ui: &egui::Ui,
+    current_offset: egui::Vec2,
+    interaction_response: Option<&egui::Response>,
+    content_size: egui::Vec2,
+    viewport_size: egui::Vec2,
+    inner_rect: egui::Rect,
+) -> Option<egui::Vec2> {
+    if !pointer_over_rect(ui, inner_rect)
+        || !ui.input(|input| input.pointer.button_down(egui::PointerButton::Primary))
+        || interaction_response
+            .is_some_and(|response| response.dragged_by(egui::PointerButton::Primary))
+    {
+        return None;
+    }
+
+    scroll_offset_from_drag_delta(
+        current_offset,
+        ui.input(|input| input.pointer.delta()),
+        content_size,
+        viewport_size,
+    )
+}
+
+fn requested_scroll_offset_for_selection_edge_drag(
+    ui: &egui::Ui,
+    current_offset: egui::Vec2,
+    interaction_response: Option<&egui::Response>,
+    content_size: egui::Vec2,
+    viewport_size: egui::Vec2,
+    inner_rect: egui::Rect,
+) -> Option<egui::Vec2> {
+    if !ui.input(|input| input.pointer.button_down(egui::PointerButton::Primary))
+        || !interaction_response
+            .is_some_and(|response| response.dragged_by(egui::PointerButton::Primary))
+    {
+        return None;
+    }
+
+    let pointer_pos = ui.input(|input| input.pointer.latest_pos())?;
+    scroll_offset_from_selection_edge_drag(
+        current_offset,
+        selection_edge_drag_delta(inner_rect, pointer_pos),
+        content_size,
+        viewport_size,
+    )
 }
 
 fn requested_scroll_offset_for_pointer_wheel(
     ui: &egui::Ui,
     current_offset: egui::Vec2,
 ) -> Option<egui::Vec2> {
-    let pointer_over_tile = ui.input(|input| {
-        input
-            .pointer
-            .hover_pos()
-            .is_some_and(|pos| ui.max_rect().contains(pos))
-    });
-    if !pointer_over_tile {
+    if !pointer_over_rect(ui, ui.max_rect()) {
         return None;
     }
 
     scroll_offset_from_wheel_delta(current_offset, ui.input(|input| input.smooth_scroll_delta))
+}
+
+fn pointer_over_rect(ui: &egui::Ui, rect: egui::Rect) -> bool {
+    ui.input(|input| {
+        input
+            .pointer
+            .hover_pos()
+            .is_some_and(|pos| rect.contains(pos))
+    })
 }
 
 fn scroll_offset_from_wheel_delta(
@@ -739,6 +839,70 @@ fn scroll_offset_from_wheel_delta(
         (current_offset.y - scroll_delta.y).max(0.0),
     );
     (desired != current_offset).then_some(desired)
+}
+
+fn scroll_offset_from_drag_delta(
+    current_offset: egui::Vec2,
+    drag_delta: egui::Vec2,
+    content_size: egui::Vec2,
+    viewport_size: egui::Vec2,
+) -> Option<egui::Vec2> {
+    if drag_delta == egui::Vec2::ZERO {
+        return None;
+    }
+
+    let desired = clamp_scroll_offset(current_offset - drag_delta, content_size, viewport_size);
+    (desired != current_offset).then_some(desired)
+}
+
+fn scroll_offset_from_selection_edge_drag(
+    current_offset: egui::Vec2,
+    drag_delta: egui::Vec2,
+    content_size: egui::Vec2,
+    viewport_size: egui::Vec2,
+) -> Option<egui::Vec2> {
+    if drag_delta == egui::Vec2::ZERO {
+        return None;
+    }
+
+    let desired = clamp_scroll_offset(current_offset + drag_delta, content_size, viewport_size);
+    (desired != current_offset).then_some(desired)
+}
+
+fn selection_edge_drag_delta(viewport_rect: egui::Rect, pointer_pos: egui::Pos2) -> egui::Vec2 {
+    egui::vec2(
+        edge_auto_scroll_delta(
+            viewport_rect,
+            pointer_pos,
+            AutoScrollAxis::Horizontal,
+            EDITOR_SELECTION_AUTOSCROLL_CONFIG,
+        ),
+        edge_auto_scroll_delta(
+            viewport_rect,
+            pointer_pos,
+            AutoScrollAxis::Vertical,
+            EDITOR_SELECTION_AUTOSCROLL_CONFIG,
+        ),
+    )
+}
+
+fn clamp_scroll_offset(
+    offset: egui::Vec2,
+    content_size: egui::Vec2,
+    viewport_size: egui::Vec2,
+) -> egui::Vec2 {
+    let max_offset = max_scroll_offset(content_size, viewport_size);
+    egui::vec2(
+        offset.x.clamp(0.0, max_offset.x),
+        offset.y.clamp(0.0, max_offset.y),
+    )
+}
+
+fn max_scroll_offset(content_size: egui::Vec2, viewport_size: egui::Vec2) -> egui::Vec2 {
+    egui::vec2(
+        (content_size.x - viewport_size.x).max(0.0),
+        (content_size.y - viewport_size.y).max(0.0),
+    )
 }
 
 fn restore_previous_layout_if_needed(
@@ -767,7 +931,11 @@ fn missing_editor_content_outcome() -> EditorContentOutcome {
 
 #[cfg(test)]
 mod tests {
-    use super::{editor_scroll_id, scroll_offset_from_wheel_delta};
+    use super::{
+        clamp_scroll_offset, editor_scroll_id, editor_scroll_source, max_scroll_offset,
+        scroll_offset_from_drag_delta, scroll_offset_from_selection_edge_drag,
+        scroll_offset_from_wheel_delta, selection_edge_drag_delta,
+    };
     use crate::app::domain::{EditorViewState, WorkspaceTab};
     use eframe::egui;
 
@@ -786,6 +954,79 @@ mod tests {
         assert_eq!(
             scroll_offset_from_wheel_delta(egui::vec2(0.0, 10.0), egui::vec2(0.0, 20.0)),
             Some(egui::vec2(0.0, 0.0))
+        );
+    }
+
+    #[test]
+    fn editor_scroll_source_disables_builtin_drag_scrolling() {
+        let source = editor_scroll_source();
+
+        assert!(!source.drag);
+        assert!(!source.mouse_wheel);
+        assert!(source.scroll_bar);
+    }
+
+    #[test]
+    fn drag_delta_requests_clamped_scroll_offset() {
+        assert_eq!(
+            scroll_offset_from_drag_delta(
+                egui::vec2(80.0, 60.0),
+                egui::vec2(-200.0, -160.0),
+                egui::vec2(320.0, 260.0),
+                egui::vec2(120.0, 100.0),
+            ),
+            Some(egui::vec2(200.0, 160.0))
+        );
+    }
+
+    #[test]
+    fn selection_edge_drag_delta_pushes_down_near_bottom_edge() {
+        assert_eq!(
+            selection_edge_drag_delta(
+                egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(200.0, 120.0)),
+                egui::pos2(100.0, 150.0),
+            ),
+            egui::vec2(0.0, 18.0)
+        );
+    }
+
+    #[test]
+    fn selection_edge_drag_delta_is_zero_away_from_edges() {
+        assert_eq!(
+            selection_edge_drag_delta(
+                egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(200.0, 120.0)),
+                egui::pos2(100.0, 80.0),
+            ),
+            egui::Vec2::ZERO
+        );
+    }
+
+    #[test]
+    fn selection_edge_drag_requests_clamped_scroll_offset() {
+        assert_eq!(
+            scroll_offset_from_selection_edge_drag(
+                egui::vec2(80.0, 60.0),
+                egui::vec2(0.0, 18.0),
+                egui::vec2(320.0, 260.0),
+                egui::vec2(120.0, 100.0),
+            ),
+            Some(egui::vec2(80.0, 78.0))
+        );
+    }
+
+    #[test]
+    fn clamp_scroll_offset_limits_east_and_south_to_content_bounds() {
+        assert_eq!(
+            clamp_scroll_offset(
+                egui::vec2(280.0, 220.0),
+                egui::vec2(320.0, 260.0),
+                egui::vec2(120.0, 100.0),
+            ),
+            egui::vec2(200.0, 160.0)
+        );
+        assert_eq!(
+            max_scroll_offset(egui::vec2(320.0, 260.0), egui::vec2(120.0, 100.0)),
+            egui::vec2(200.0, 160.0)
         );
     }
 

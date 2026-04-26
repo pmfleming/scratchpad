@@ -7,6 +7,12 @@ use std::sync::Arc;
 pub const TEXT_DOCUMENT_MAX_UNDOS: usize = 100;
 pub(crate) type TextReplacements<'a> = &'a [(Range<usize>, String)];
 
+#[derive(Clone, Copy)]
+enum OperationDirection {
+    Undo,
+    Redo,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextDocumentEditOperation {
     pub start_char: usize,
@@ -136,19 +142,11 @@ impl TextDocument {
     }
 
     pub fn undo_last_operation(&mut self) -> Option<CursorRange> {
-        let record = self.operation_undo.pop()?;
-        self.apply_operation_record_undo(&record);
-        let selection = record.previous_selection;
-        self.operation_redo.push(record);
-        Some(selection)
+        self.replay_last_operation(OperationDirection::Undo)
     }
 
     pub fn redo_last_operation(&mut self) -> Option<CursorRange> {
-        let record = self.operation_redo.pop()?;
-        self.apply_operation_record_redo(&record);
-        let selection = record.next_selection;
-        self.operation_undo.push(record);
-        Some(selection)
+        self.replay_last_operation(OperationDirection::Redo)
     }
 
     // --- Native editor direct mutation API ---
@@ -211,23 +209,77 @@ impl TextDocument {
         self.operation_redo.clear();
     }
 
-    fn apply_operation_record_undo(&mut self, record: &TextDocumentOperationRecord) {
-        for edit in record.edits.iter().rev() {
-            let inserted_len = edit.inserted_text.chars().count();
-            self.replace_char_range_raw(
-                edit.start_char..edit.start_char + inserted_len,
-                &edit.deleted_text,
-            );
+    fn replay_last_operation(&mut self, direction: OperationDirection) -> Option<CursorRange> {
+        let record = self.take_operation_record(direction)?;
+        let selection = direction.selection(&record);
+        self.apply_operation_record(&record, direction);
+        self.store_replayed_operation(record, direction);
+        Some(selection)
+    }
+
+    fn take_operation_record(
+        &mut self,
+        direction: OperationDirection,
+    ) -> Option<TextDocumentOperationRecord> {
+        match direction {
+            OperationDirection::Undo => self.operation_undo.pop(),
+            OperationDirection::Redo => self.operation_redo.pop(),
         }
     }
 
-    fn apply_operation_record_redo(&mut self, record: &TextDocumentOperationRecord) {
-        for edit in &record.edits {
-            let deleted_len = edit.deleted_text.chars().count();
-            self.replace_char_range_raw(
-                edit.start_char..edit.start_char + deleted_len,
-                &edit.inserted_text,
-            );
+    fn store_replayed_operation(
+        &mut self,
+        record: TextDocumentOperationRecord,
+        direction: OperationDirection,
+    ) {
+        match direction {
+            OperationDirection::Undo => self.operation_redo.push(record),
+            OperationDirection::Redo => self.operation_undo.push(record),
+        }
+    }
+
+    fn apply_operation_record(
+        &mut self,
+        record: &TextDocumentOperationRecord,
+        direction: OperationDirection,
+    ) {
+        match direction {
+            OperationDirection::Undo => {
+                for edit in record.edits.iter().rev() {
+                    self.apply_operation_edit(
+                        edit,
+                        edit.inserted_text.chars().count(),
+                        &edit.deleted_text,
+                    );
+                }
+            }
+            OperationDirection::Redo => {
+                for edit in &record.edits {
+                    self.apply_operation_edit(
+                        edit,
+                        edit.deleted_text.chars().count(),
+                        &edit.inserted_text,
+                    );
+                }
+            }
+        }
+    }
+
+    fn apply_operation_edit(
+        &mut self,
+        edit: &TextDocumentEditOperation,
+        replaced_len: usize,
+        replacement: &str,
+    ) {
+        self.replace_char_range_raw(edit.start_char..edit.start_char + replaced_len, replacement);
+    }
+}
+
+impl OperationDirection {
+    fn selection(self, record: &TextDocumentOperationRecord) -> CursorRange {
+        match self {
+            OperationDirection::Undo => record.previous_selection,
+            OperationDirection::Redo => record.next_selection,
         }
     }
 }

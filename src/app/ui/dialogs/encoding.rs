@@ -1,6 +1,5 @@
-use super::common::show_callout;
+use super::common::{apply_editor_dialog_typography, show_centered_callout};
 use crate::app::app_state::ScratchpadApp;
-use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::services::file_controller::FileController;
 use crate::app::services::file_service::COMMON_TEXT_ENCODINGS;
 use crate::app::theme::{action_hover_bg, border, text_muted, text_primary};
@@ -96,7 +95,7 @@ impl EncodingActionSpec<'_> {
     }
 }
 
-pub(super) fn show_encoding_window(ctx: &egui::Context, app: &mut ScratchpadApp) {
+pub(crate) fn show_encoding_window(ctx: &egui::Context, app: &mut ScratchpadApp) {
     if !app.encoding_dialog_open {
         return;
     }
@@ -104,13 +103,9 @@ pub(super) fn show_encoding_window(ctx: &egui::Context, app: &mut ScratchpadApp)
     let state = EncodingDialogState::from_app(app);
     let mut close_requested = false;
 
-    show_callout(
-        ctx,
-        "encoding_overlay_v1",
-        callout::centered_position(ctx, ENCODING_DIALOG_SIZE),
-        ENCODING_DIALOG_SIZE.x,
-        |ui| render_encoding_dialog(ui, app, &state, &mut close_requested),
-    );
+    show_centered_callout(ctx, "encoding_overlay_v1", ENCODING_DIALOG_SIZE, |ui| {
+        render_encoding_dialog(ui, app, &state, &mut close_requested)
+    });
 
     if close_requested {
         app.close_encoding_dialog();
@@ -125,7 +120,7 @@ fn render_encoding_dialog(
 ) {
     settings::apply_dialog_typography(ui);
     callout::apply_spacing(ui);
-    apply_encoding_dialog_typography(ui);
+    apply_editor_dialog_typography(ui);
     ui.spacing_mut().item_spacing = egui::vec2(6.0, 8.0);
 
     if render_dialog_header(ui) {
@@ -193,23 +188,6 @@ fn trigger_encoding_action(
         app.encoding_dialog_choice = encoding_name;
         result
     }
-}
-
-fn apply_encoding_dialog_typography(ui: &mut egui::Ui) {
-    let font_family = egui::FontFamily::Name(EDITOR_FONT_FAMILY.into());
-    let style = ui.style_mut();
-    style.override_font_id = Some(egui::FontId::new(15.0, font_family.clone()));
-    style.text_styles.insert(
-        egui::TextStyle::Body,
-        egui::FontId::new(15.0, font_family.clone()),
-    );
-    style.text_styles.insert(
-        egui::TextStyle::Button,
-        egui::FontId::new(14.0, font_family.clone()),
-    );
-    style
-        .text_styles
-        .insert(egui::TextStyle::Small, egui::FontId::new(12.0, font_family));
 }
 
 fn render_selected_file_card(ui: &mut egui::Ui, state: &EncodingDialogState) {

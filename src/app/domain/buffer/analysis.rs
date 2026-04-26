@@ -461,6 +461,11 @@ pub fn display_line_count(text: &str) -> usize {
     TextInspection::inspect(text).line_count
 }
 
+pub(crate) fn display_line_count_from_piece_tree(tree: &PieceTreeLite) -> usize {
+    let spans = tree.spans_for_range(0..tree.len_chars());
+    TextInspection::inspect_spans(spans.map(|span| span.text)).line_count
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BufferTextMetadata {
     pub(crate) line_count: usize,
@@ -525,12 +530,12 @@ pub(crate) fn buffer_text_metadata_from_edit(
     artifact_summary.has_carriage_returns =
         format.line_endings != LineEndingStyle::Cr && line_ending_counts.cr > 0;
 
-    Some(BufferTextMetadata {
+    Some(buffer_text_metadata_parts(
         line_count,
         artifact_summary,
-        preferred_line_ending: format.preferred_line_ending_style(),
-        has_non_compliant_characters: false,
-    })
+        format.preferred_line_ending_style(),
+        false,
+    ))
 }
 
 pub(crate) fn detected_text_format_and_metadata(
@@ -571,10 +576,24 @@ fn build_buffer_text_metadata(
     format: &TextFormatMetadata,
     has_non_compliant_characters: bool,
 ) -> BufferTextMetadata {
+    buffer_text_metadata_parts(
+        inspection.line_count,
+        inspection.artifact_summary,
+        format.preferred_line_ending_style(),
+        has_non_compliant_characters,
+    )
+}
+
+fn buffer_text_metadata_parts(
+    line_count: usize,
+    artifact_summary: TextArtifactSummary,
+    preferred_line_ending: LineEndingStyle,
+    has_non_compliant_characters: bool,
+) -> BufferTextMetadata {
     BufferTextMetadata {
-        line_count: inspection.line_count,
-        artifact_summary: inspection.artifact_summary,
-        preferred_line_ending: format.preferred_line_ending_style(),
+        line_count,
+        artifact_summary,
+        preferred_line_ending,
         has_non_compliant_characters,
     }
 }

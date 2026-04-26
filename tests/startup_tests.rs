@@ -94,6 +94,19 @@ fn rejects_invalid_switch_combinations() {
 }
 
 #[test]
+fn rejects_addto_without_files() {
+    let action = parse_startup_action(args(&["/addto"]));
+
+    match action {
+        StartupAction::Run(options) => {
+            assert!(options.files.is_empty());
+            assert!(options.startup_notice.is_some());
+        }
+        _ => panic!("expected normal run action"),
+    }
+}
+
+#[test]
 fn returns_help_action() {
     let action = parse_startup_action(args(&["/help"]));
     assert!(matches!(action, StartupAction::Help));

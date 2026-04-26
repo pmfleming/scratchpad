@@ -4,7 +4,7 @@ use super::{
 };
 use crate::app::commands::AppCommand;
 use crate::app::domain::buffer::PieceTreeLite;
-use crate::app::domain::{BufferState, SplitAxis};
+use crate::app::domain::{BufferState, SearchHighlightState, SplitAxis};
 use crate::app::services::search::SearchMode;
 use crate::app::services::session_store::SessionStore;
 use std::thread;
@@ -152,6 +152,11 @@ fn activating_search_match_navigates_to_matching_tab_and_range() {
         .and_then(|tab| tab.active_view())
         .and_then(|view| view.pending_cursor_range);
     assert_eq!(pending, Some(cursor_range_from_char_range(0..5)));
+    assert!(
+        app.active_tab()
+            .and_then(|tab| tab.active_view())
+            .is_some_and(|view| view.scroll_to_cursor)
+    );
 }
 
 #[test]
@@ -178,6 +183,11 @@ fn activating_search_match_uses_first_tile_for_duplicate_buffer_results() {
         .view(first_view_id)
         .and_then(|view| view.pending_cursor_range);
     assert_eq!(pending, Some(cursor_range_from_char_range(0..5)));
+    assert!(
+        app.tabs()[0]
+            .view(first_view_id)
+            .is_some_and(|view| view.scroll_to_cursor)
+    );
 }
 
 #[test]
@@ -335,6 +345,34 @@ fn invalid_regex_query_reports_invalid_status_and_blocks_replace() {
         app.search_replace_availability(),
         SearchReplaceAvailability::Blocked(_)
     ));
+}
+
+#[test]
+fn submitting_search_request_keeps_existing_highlights_until_results_arrive() {
+    let mut app = test_app();
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha beta alpha".to_owned());
+    app.open_search();
+    app.tabs_mut()[0]
+        .active_view_mut()
+        .expect("active view")
+        .search_highlights = SearchHighlightState {
+        ranges: vec![0..5, 11..16],
+        active_range_index: Some(0),
+    };
+    app.search_state.query = "alpha".to_owned();
+    app.search_state.dirty = true;
+
+    app.refresh_search_state();
+
+    let highlights = &app.tabs()[0]
+        .active_view()
+        .expect("active view")
+        .search_highlights;
+    assert!(app.search_progress().searching);
+    assert_eq!(highlights.ranges, vec![0..5, 11..16]);
+    assert_eq!(highlights.active_range_index, Some(0));
 }
 
 #[test]

@@ -4,7 +4,9 @@ use super::{
     ReplacementPlan, ReplacementTargetPlan, ScratchpadApp, SearchFocusTarget, SearchFreshness,
     SearchMatch, SearchScope, SearchStatus,
 };
-use crate::app::domain::{BufferId, EditorViewState, SearchHighlightState, ViewId, WorkspaceTab};
+use crate::app::domain::{
+    BufferId, CursorRevealMode, EditorViewState, SearchHighlightState, ViewId, WorkspaceTab,
+};
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -73,6 +75,7 @@ impl ScratchpadApp {
                 if let Some(view) = tab.view_mut(view_id) {
                     view.cursor_range = Some(next_selection);
                     view.pending_cursor_range = Some(next_selection);
+                    view.request_cursor_reveal(CursorRevealMode::Center);
                 }
                 true
             }
@@ -105,7 +108,6 @@ impl ScratchpadApp {
         let targets = self.collect_search_targets(self.search_state.scope);
         let request = self.search_state.build_request(generation, targets);
         self.search_state.begin_request(generation);
-        self.clear_search_highlights();
 
         if let Err(error) = self.search_state.request_tx.send(request) {
             let latest_generation = AtomicU64::new(generation);
@@ -164,7 +166,7 @@ impl ScratchpadApp {
         request
             .targets
             .iter()
-            .map(|target| target.document_snapshot.len_chars())
+            .map(|target| target.document_snapshot.document_length().chars)
             .sum::<usize>()
             + request.query.len()
     }
@@ -309,6 +311,7 @@ impl ScratchpadApp {
         };
         if let Some(view) = self.active_view_mut() {
             view.pending_cursor_range = Some(cursor_range_from_char_range(search_range));
+            view.request_cursor_reveal(CursorRevealMode::Center);
         }
     }
 
@@ -347,13 +350,19 @@ impl ScratchpadApp {
     }
 
     fn apply_search_highlights(&mut self) {
-        if !self.search_is_active()
-            || self.search_state.searching
-            || !matches!(
-                self.search_state.status,
-                SearchStatus::Ready | SearchStatus::NoMatches
-            )
-        {
+        if !self.search_is_active() {
+            self.clear_search_highlights();
+            return;
+        }
+
+        if self.search_state.searching {
+            return;
+        }
+
+        if !matches!(
+            self.search_state.status,
+            SearchStatus::Ready | SearchStatus::NoMatches
+        ) {
             self.clear_search_highlights();
             return;
         }
@@ -523,6 +532,7 @@ impl ScratchpadApp {
         if let Some(view) = tab.view_mut(target.view_id) {
             view.cursor_range = Some(next_selection);
             view.pending_cursor_range = Some(next_selection);
+            view.request_cursor_reveal(CursorRevealMode::Center);
         }
         self.finalize_tab_buffer_mutation(target.tab_index, target.buffer_id);
         true

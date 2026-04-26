@@ -52,7 +52,7 @@ pub(super) fn apply_delete(
     modifiers: &eframe::egui::Modifiers,
 ) -> CursorRange {
     let (start, end) = cursor.sorted_indices();
-    let total = buffer.document().piece_tree().len_chars();
+    let total = buffer.current_file_length().chars;
     if start < end {
         return apply_delete_selection(buffer, cursor);
     }

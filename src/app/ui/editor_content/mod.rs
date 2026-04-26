@@ -55,7 +55,6 @@ pub(crate) fn render_editor_content(
                         render_line_number_gutter(
                             ui,
                             buffer,
-                            view,
                             style.previous_layout,
                             style.text_edit.editor_font_id,
                             style.text_edit.text_color,
@@ -143,7 +142,7 @@ fn should_prefer_visible_window(
     }
 
     !style.is_active
-        || (buffer.document().piece_tree().len_bytes() >= LARGE_BUFFER_VIEWPORT_BYTES
+        || (buffer.current_file_length().bytes >= LARGE_BUFFER_VIEWPORT_BYTES
             && !view.editor_has_focus)
 }
 
@@ -156,5 +155,5 @@ fn should_prefer_focused_window(
         && (view.editor_has_focus || style.text_edit.request_focus)
         && !style.text_edit.word_wrap
         && (style.previous_layout.is_some() || style.viewport.is_some())
-        && buffer.document().piece_tree().len_bytes() >= LARGE_BUFFER_VIEWPORT_BYTES
+        && buffer.current_file_length().bytes >= LARGE_BUFFER_VIEWPORT_BYTES
 }

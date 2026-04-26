@@ -50,8 +50,7 @@ fn strip_switch_prefix<'a>(arg: &'a str, prefix: &str) -> Option<&'a str> {
 struct StartupActionParser {
     options: StartupOptions,
     requested_clean: bool,
-    saw_here: bool,
-    saw_addto: bool,
+    workspace_target_switch: Option<WorkspaceTargetSwitch>,
 }
 
 enum ParseDirective {
@@ -60,83 +59,65 @@ enum ParseDirective {
     Version,
 }
 
+enum ParsedArgument {
+    Help,
+    Version,
+    Switch(StartupSwitch),
+    File(PathBuf),
+}
+
+enum StartupSwitch {
+    Clean,
+    WorkspaceTarget(WorkspaceTargetSwitch, StartupOpenTarget),
+    Files(Vec<PathBuf>),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WorkspaceTargetSwitch {
+    Here,
+    AddTo,
+}
+
 impl StartupActionParser {
     fn parse_argument(&mut self, raw_arg: OsString) -> Result<ParseDirective, String> {
-        let arg = raw_arg.to_string_lossy().into_owned();
-
-        if is_help_switch(&arg) {
-            return Ok(ParseDirective::Help);
+        match parse_argument_kind(raw_arg)? {
+            ParsedArgument::Help => Ok(ParseDirective::Help),
+            ParsedArgument::Version => Ok(ParseDirective::Version),
+            ParsedArgument::Switch(startup_switch) => {
+                self.apply_switch(startup_switch)?;
+                Ok(ParseDirective::Continue)
+            }
+            ParsedArgument::File(path) => {
+                self.options.files.push(path);
+                Ok(ParseDirective::Continue)
+            }
         }
-        if is_version_switch(&arg) {
-            return Ok(ParseDirective::Version);
-        }
-        if self.try_parse_flag_switch(&arg)? || self.try_parse_prefixed_switch(&arg)? {
-            return Ok(ParseDirective::Continue);
-        }
-        if arg.starts_with('/') {
-            return Err(format!(
-                "Unknown startup switch: {arg}. Use /help to show supported switches."
-            ));
-        }
-
-        self.options.files.push(PathBuf::from(raw_arg));
-        Ok(ParseDirective::Continue)
     }
 
-    fn try_parse_flag_switch(&mut self, arg: &str) -> Result<bool, String> {
-        if equals_switch(arg, "/clean") {
-            self.requested_clean = true;
-            return Ok(true);
+    fn apply_switch(&mut self, startup_switch: StartupSwitch) -> Result<(), String> {
+        match startup_switch {
+            StartupSwitch::Clean => self.requested_clean = true,
+            StartupSwitch::WorkspaceTarget(kind, target) => {
+                self.apply_workspace_target_switch(kind, target)?;
+            }
+            StartupSwitch::Files(mut files) => self.options.files.append(&mut files),
         }
-        if equals_switch(arg, "/here") {
-            self.activate_here_target()?;
-            return Ok(true);
-        }
-        if equals_switch(arg, "/addto") {
-            self.activate_addto_target(StartupOpenTarget::ActiveTab)?;
-            return Ok(true);
-        }
-
-        Ok(false)
-    }
-
-    fn try_parse_prefixed_switch(&mut self, arg: &str) -> Result<bool, String> {
-        if let Some(payload) = strip_switch_prefix(arg, "/addto:") {
-            self.activate_addto_target(parse_addto_target(payload)?)?;
-            return Ok(true);
-        }
-        if let Some(payload) = strip_switch_prefix(arg, "/files:") {
-            let mut files = parse_file_list(payload)?;
-            self.options.files.append(&mut files);
-            return Ok(true);
-        }
-
-        Ok(false)
-    }
-
-    fn activate_here_target(&mut self) -> Result<(), String> {
-        if self.saw_addto {
-            return Err(
-                "/here cannot be combined with /addto. Use one workspace-targeting switch."
-                    .to_owned(),
-            );
-        }
-
-        self.saw_here = true;
-        self.options.open_target = StartupOpenTarget::ActiveTab;
-        self.options.open_target_explicit = true;
         Ok(())
     }
 
-    fn activate_addto_target(&mut self, target: StartupOpenTarget) -> Result<(), String> {
-        if self.saw_here {
-            return Err(
-                "/addto cannot be combined with /here. Use one workspace-targeting switch."
-                    .to_owned(),
-            );
+    fn apply_workspace_target_switch(
+        &mut self,
+        kind: WorkspaceTargetSwitch,
+        target: StartupOpenTarget,
+    ) -> Result<(), String> {
+        if let Some(existing) = self.workspace_target_switch
+            && existing != kind
+        {
+            return Err(kind.conflict_message());
         }
 
-        self.saw_addto = true;
+        self.workspace_target_switch = Some(kind);
+        self.options.open_target = StartupOpenTarget::ActiveTab;
         self.options.open_target = target;
         self.options.open_target_explicit = true;
         Ok(())
@@ -156,7 +137,11 @@ impl StartupActionParser {
     }
 
     fn validate_final_state(&self) -> Result<(), String> {
-        if self.saw_addto && self.options.files.is_empty() {
+        if matches!(
+            self.workspace_target_switch,
+            Some(WorkspaceTargetSwitch::AddTo)
+        ) && self.options.files.is_empty()
+        {
             return Err(
                 "/addto requires at least one incoming file path or a /files: payload.".to_owned(),
             );
@@ -173,6 +158,71 @@ impl StartupActionParser {
 
         Ok(())
     }
+}
+
+impl WorkspaceTargetSwitch {
+    fn conflict_message(self) -> String {
+        match self {
+            Self::Here => {
+                "/here cannot be combined with /addto. Use one workspace-targeting switch."
+                    .to_owned()
+            }
+            Self::AddTo => {
+                "/addto cannot be combined with /here. Use one workspace-targeting switch."
+                    .to_owned()
+            }
+        }
+    }
+}
+
+fn parse_argument_kind(raw_arg: OsString) -> Result<ParsedArgument, String> {
+    let arg = raw_arg.to_string_lossy().into_owned();
+
+    if is_help_switch(&arg) {
+        return Ok(ParsedArgument::Help);
+    }
+    if is_version_switch(&arg) {
+        return Ok(ParsedArgument::Version);
+    }
+    if let Some(startup_switch) = parse_switch(&arg)? {
+        return Ok(ParsedArgument::Switch(startup_switch));
+    }
+    if arg.starts_with('/') {
+        return Err(format!(
+            "Unknown startup switch: {arg}. Use /help to show supported switches."
+        ));
+    }
+
+    Ok(ParsedArgument::File(PathBuf::from(raw_arg)))
+}
+
+fn parse_switch(arg: &str) -> Result<Option<StartupSwitch>, String> {
+    if equals_switch(arg, "/clean") {
+        return Ok(Some(StartupSwitch::Clean));
+    }
+    if equals_switch(arg, "/here") {
+        return Ok(Some(StartupSwitch::WorkspaceTarget(
+            WorkspaceTargetSwitch::Here,
+            StartupOpenTarget::ActiveTab,
+        )));
+    }
+    if equals_switch(arg, "/addto") {
+        return Ok(Some(StartupSwitch::WorkspaceTarget(
+            WorkspaceTargetSwitch::AddTo,
+            StartupOpenTarget::ActiveTab,
+        )));
+    }
+    if let Some(payload) = strip_switch_prefix(arg, "/addto:") {
+        return Ok(Some(StartupSwitch::WorkspaceTarget(
+            WorkspaceTargetSwitch::AddTo,
+            parse_addto_target(payload)?,
+        )));
+    }
+    if let Some(payload) = strip_switch_prefix(arg, "/files:") {
+        return Ok(Some(StartupSwitch::Files(parse_file_list(payload)?)));
+    }
+
+    Ok(None)
 }
 
 fn parse_addto_target(payload: &str) -> Result<StartupOpenTarget, String> {

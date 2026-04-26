@@ -242,7 +242,11 @@ impl FileController {
     fn build_pending_open_here_workspace(
         app: &mut ScratchpadApp,
         pending_files: Vec<LoadedFile>,
-    ) -> Option<(WorkspaceTab, Vec<Option<String>>, Vec<DeferredBufferRefresh>)> {
+    ) -> Option<(
+        WorkspaceTab,
+        Vec<Option<String>>,
+        Vec<DeferredBufferRefresh>,
+    )> {
         let mut pending_iter = pending_files.into_iter();
         let first_file = pending_iter.next()?;
         let (buffer, log_entry) = first_file.into_parts();

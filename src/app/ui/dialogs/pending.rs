@@ -1,4 +1,4 @@
-use super::common::show_callout;
+use super::common::show_centered_callout;
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
 use crate::app::domain::{BufferFreshness, PendingAction, ViewId};
@@ -66,7 +66,7 @@ impl SaveConflictDialogState {
     }
 }
 
-pub(super) fn show_pending_action_modal(ctx: &egui::Context, app: &mut ScratchpadApp) {
+pub(crate) fn show_pending_action_modal(ctx: &egui::Context, app: &mut ScratchpadApp) {
     let Some(action) = app.pending_action() else {
         return;
     };
@@ -120,11 +120,10 @@ fn show_close_tab_confirmation(ctx: &egui::Context, app: &mut ScratchpadApp, ind
     let tab_name = app.tabs()[index].buffer.name.clone();
     let mut close_requested = false;
 
-    show_callout(
+    show_centered_callout(
         ctx,
         "unsaved_changes_overlay_v3",
-        callout::centered_position(ctx, UNSAVED_CHANGES_SIZE),
-        UNSAVED_CHANGES_SIZE.x,
+        UNSAVED_CHANGES_SIZE,
         |ui| render_unsaved_changes_dialog(ui, &tab_name, app, index, &mut close_requested),
     );
 
@@ -150,11 +149,10 @@ fn show_close_view_confirmation(
     };
     let mut close_requested = false;
 
-    show_callout(
+    show_centered_callout(
         ctx,
         "unsaved_changes_overlay_v3",
-        callout::centered_position(ctx, UNSAVED_CHANGES_SIZE),
-        UNSAVED_CHANGES_SIZE.x,
+        UNSAVED_CHANGES_SIZE,
         |ui| {
             render_unsaved_changes_view_dialog(
                 ui,
@@ -189,13 +187,9 @@ fn show_save_conflict_confirmation(
         SAVE_CONFLICT_DIALOG_SIZE
     };
 
-    show_callout(
-        ctx,
-        "file_change_overlay_v1",
-        callout::centered_position(ctx, dialog_size),
-        dialog_size.x,
-        |ui| render_save_conflict_dialog(ui, app, tab_index, view_id, &state, &mut close_requested),
-    );
+    show_centered_callout(ctx, "file_change_overlay_v1", dialog_size, |ui| {
+        render_save_conflict_dialog(ui, app, tab_index, view_id, &state, &mut close_requested)
+    });
 
     if close_requested {
         clear_pending_action(app);

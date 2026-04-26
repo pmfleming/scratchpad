@@ -2,7 +2,7 @@ mod keyboard;
 mod mouse;
 
 use super::{CharCursor, CursorRange};
-use crate::app::domain::{BufferState, EditorViewState};
+use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
 use eframe::egui;
 
 pub(super) fn handle_mouse_interaction(
@@ -13,7 +13,7 @@ pub(super) fn handle_mouse_interaction(
     view: &mut EditorViewState,
     piece_tree: &crate::app::domain::buffer::PieceTreeLite,
 ) {
-    mouse::handle_mouse_interaction(ui, response, galley, rect, view, piece_tree);
+    mouse::handle_mouse_interaction(ui, response, galley, rect, view, piece_tree, 0);
 }
 
 pub(super) fn cursor_range_after_click(
@@ -33,7 +33,7 @@ pub(super) fn handle_mouse_interaction_window(
     piece_tree: &crate::app::domain::buffer::PieceTreeLite,
     char_offset_base: usize,
 ) {
-    mouse::handle_mouse_interaction_window(
+    mouse::handle_mouse_interaction(
         ui,
         response,
         galley,
@@ -68,9 +68,9 @@ pub(super) fn handle_keyboard_events_unwrapped(
 pub(super) fn sync_view_cursor_before_render(view: &mut EditorViewState, focused: bool) {
     if let Some(cursor_range) = view.pending_cursor_range.take() {
         view.cursor_range = Some(cursor_range);
-        view.scroll_to_cursor = true;
+        view.request_cursor_reveal(CursorRevealMode::Center);
     } else if focused && view.cursor_range.is_none() {
         view.cursor_range = Some(CursorRange::one(CharCursor::new(0)));
-        view.scroll_to_cursor = true;
+        view.request_cursor_reveal(CursorRevealMode::KeepVisible);
     }
 }

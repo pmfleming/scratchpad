@@ -1,4 +1,4 @@
-use super::common::show_callout;
+use super::common::show_centered_callout;
 use crate::app::app_state::{ScratchpadApp, StartupRestoreConflict};
 use crate::app::ui::callout;
 use eframe::egui;
@@ -6,7 +6,7 @@ use egui_phosphor::regular::{COPY, FILE_TEXT, WARNING, X};
 
 const RESTORE_CONFLICT_DIALOG_SIZE: egui::Vec2 = egui::vec2(452.0, 220.0);
 
-pub(super) fn show_startup_restore_conflict_modal(ctx: &egui::Context, app: &mut ScratchpadApp) {
+pub(crate) fn show_startup_restore_conflict_modal(ctx: &egui::Context, app: &mut ScratchpadApp) {
     let Some(conflict) = app.current_startup_restore_conflict().cloned() else {
         return;
     };
@@ -15,11 +15,10 @@ pub(super) fn show_startup_restore_conflict_modal(ctx: &egui::Context, app: &mut
     let mut open_compare = false;
     let total_conflicts = app.startup_restore_conflict_count();
 
-    show_callout(
+    show_centered_callout(
         ctx,
         "startup_restore_conflict_overlay_v1",
-        callout::centered_position(ctx, RESTORE_CONFLICT_DIALOG_SIZE),
-        RESTORE_CONFLICT_DIALOG_SIZE.x,
+        RESTORE_CONFLICT_DIALOG_SIZE,
         |ui| {
             render_restore_conflict_dialog(
                 ui,

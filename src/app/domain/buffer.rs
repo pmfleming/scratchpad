@@ -4,6 +4,7 @@ mod piece_tree;
 mod snapshot;
 mod state;
 
+pub(crate) use analysis::display_line_count_from_piece_tree;
 pub(crate) use analysis::{
     BufferTextMetadata, buffer_text_metadata, buffer_text_metadata_from_piece_tree,
     detected_text_format_and_metadata,
@@ -24,6 +25,36 @@ pub use state::{
 };
 
 use std::ops::Range;
+use std::sync::Arc;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct BufferLength {
+    pub(crate) bytes: usize,
+    pub(crate) chars: usize,
+    pub(crate) lines: usize,
+}
+
+impl BufferLength {
+    pub(crate) fn from_metrics(metrics: PieceTreeMetrics, lines: usize) -> Self {
+        Self {
+            bytes: metrics.bytes,
+            chars: metrics.chars,
+            lines,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VisibleWindowLayoutKey {
+    pub wrap_width_bits: u32,
+    pub font_size_bits: u32,
+    pub dark_mode: bool,
+    pub text_color: eframe::egui::Color32,
+    pub highlight_background: eframe::egui::Color32,
+    pub highlight_text: eframe::egui::Color32,
+    pub selection_range: Option<Range<usize>>,
+    pub search_highlight_signature: u64,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RenderedTextWindow {
@@ -38,11 +69,14 @@ pub struct RenderedTextWindow {
 
 #[derive(Clone)]
 pub struct RenderedLayout {
+    galley: Arc<eframe::egui::Galley>,
     content_height: f32,
     row_tops: Vec<f32>,
     pub row_line_numbers: Vec<Option<usize>>,
     row_char_ranges: Vec<Range<usize>>,
+    row_height_bits: Option<u32>,
     pub visible_text: Option<RenderedTextWindow>,
+    visible_window_layout_key: Option<VisibleWindowLayoutKey>,
 }
 
 impl RenderedLayout {
@@ -52,11 +86,14 @@ impl RenderedLayout {
         let row_line_numbers = row_line_numbers_for_galley(&galley);
         let row_char_ranges = row_char_ranges_for_galley(&galley);
         Self {
+            galley,
             content_height,
             row_tops,
             row_line_numbers,
             row_char_ranges,
+            row_height_bits: None,
             visible_text: None,
+            visible_window_layout_key: None,
         }
     }
 
@@ -70,6 +107,18 @@ impl RenderedLayout {
 
     pub fn content_height(&self) -> f32 {
         self.content_height
+    }
+
+    pub fn set_row_height(&mut self, row_height: f32) {
+        self.row_height_bits = Some(row_height.to_bits());
+    }
+
+    pub fn matches_row_height(&self, row_height: f32) -> bool {
+        self.row_height_bits == Some(row_height.to_bits())
+    }
+
+    pub fn galley(&self) -> &Arc<eframe::egui::Galley> {
+        &self.galley
     }
 
     pub fn row_top(&self, row_index: usize) -> Option<f32> {
@@ -126,8 +175,38 @@ impl RenderedLayout {
     }
 
     pub fn set_visible_text(&mut self, visible_text: RenderedTextWindow) {
+        self.visible_window_layout_key = None;
         self.visible_text = Some(visible_text);
     }
+
+    pub fn set_visible_text_with_cache_key(
+        &mut self,
+        visible_text: RenderedTextWindow,
+        cache_key: VisibleWindowLayoutKey,
+    ) {
+        self.visible_text = Some(visible_text);
+        self.visible_window_layout_key = Some(cache_key);
+    }
+
+    pub fn matches_visible_window_layout(
+        &self,
+        visible_text: &RenderedTextWindow,
+        cache_key: &VisibleWindowLayoutKey,
+    ) -> bool {
+        self.visible_text
+            .as_ref()
+            .is_some_and(|cached| visible_window_matches(cached, visible_text))
+            && self.visible_window_layout_key.as_ref() == Some(cache_key)
+    }
+}
+
+fn visible_window_matches(cached: &RenderedTextWindow, current: &RenderedTextWindow) -> bool {
+    cached.line_range == current.line_range
+        && cached.char_range == current.char_range
+        && cached.layout_row_offset == current.layout_row_offset
+        && cached.text == current.text
+        && cached.truncated_start == current.truncated_start
+        && cached.truncated_end == current.truncated_end
 }
 
 fn row_tops_for_galley(galley: &eframe::egui::Galley) -> Vec<f32> {
@@ -165,7 +244,7 @@ fn row_char_ranges_for_galley(galley: &eframe::egui::Galley) -> Vec<Range<usize>
 
 #[cfg(test)]
 mod tests {
-    use super::{RenderedLayout, RenderedTextWindow};
+    use super::{RenderedLayout, RenderedTextWindow, VisibleWindowLayoutKey};
     use eframe::egui;
 
     fn test_layout(line_count: usize) -> RenderedLayout {
@@ -212,6 +291,47 @@ mod tests {
 
         assert_eq!(layout.visible_row_range(), 1..4);
         assert_eq!(layout.visible_line_range(), 1..4);
+    }
+
+    #[test]
+    fn visible_window_layout_match_ignores_layout_row_range() {
+        let mut layout = test_layout(3);
+        let cache_key = VisibleWindowLayoutKey {
+            wrap_width_bits: 0.0f32.to_bits(),
+            font_size_bits: 14.0f32.to_bits(),
+            dark_mode: true,
+            text_color: egui::Color32::WHITE,
+            highlight_background: egui::Color32::LIGHT_BLUE,
+            highlight_text: egui::Color32::BLACK,
+            selection_range: Some(0..4),
+            search_highlight_signature: 17,
+        };
+
+        layout.set_visible_text_with_cache_key(
+            RenderedTextWindow {
+                row_range: 0..5,
+                line_range: 40..43,
+                char_range: 100..118,
+                layout_row_offset: 40,
+                text: "line 40\nline 41\nline 42\n".to_owned(),
+                truncated_start: true,
+                truncated_end: true,
+            },
+            cache_key.clone(),
+        );
+
+        assert!(layout.matches_visible_window_layout(
+            &RenderedTextWindow {
+                row_range: 0..0,
+                line_range: 40..43,
+                char_range: 100..118,
+                layout_row_offset: 40,
+                text: "line 40\nline 41\nline 42\n".to_owned(),
+                truncated_start: true,
+                truncated_end: true,
+            },
+            &cache_key,
+        ));
     }
 
     #[test]

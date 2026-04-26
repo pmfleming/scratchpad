@@ -282,10 +282,11 @@ impl ScratchpadApp {
                 .as_mut()
                 .expect("pending text transaction");
             let previous_preview = pending.preview_state.take();
-            let merged_preview: Option<TextEditPreviewState> = match (previous_preview, next_preview) {
-                (Some(existing), Some(next)) => existing.merge(next),
-                _ => None,
-            };
+            let merged_preview: Option<TextEditPreviewState> =
+                match (previous_preview, next_preview) {
+                    (Some(existing), Some(next)) => existing.merge(next),
+                    _ => None,
+                };
             pending.preview_state = merged_preview;
             pending.last_edit_at = now;
             if let Some(entry) = self
@@ -442,7 +443,9 @@ mod tests {
             mergeable: true,
         };
 
-        let merged = first.merge(second).expect("adjacent insertions should merge");
+        let merged = first
+            .merge(second)
+            .expect("adjacent insertions should merge");
         assert_eq!(merged.label(), Some("hello world".to_owned()));
     }
 }

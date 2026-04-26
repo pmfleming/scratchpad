@@ -225,7 +225,7 @@ fn spawn_analysis_lane(
                     result: Ok(format.has_non_compliant_characters_spans(
                         snapshot
                             .piece_tree()
-                            .spans_for_range(0..snapshot.len_chars())
+                            .spans_for_range(0..snapshot.document_length().chars)
                             .map(|span| span.text),
                     )),
                 },

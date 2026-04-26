@@ -59,35 +59,73 @@ fn handle_keyboard_events_with(
     ) -> Option<CursorRange>,
 ) -> bool {
     let events = ui.input(|input| input.events.clone());
-    let total_chars = buffer.document().piece_tree().len_chars();
+    let total_chars = buffer.current_file_length().chars;
     let mut changed = false;
 
     for event in &events {
-        let cursor = view.cursor_range.unwrap_or_default();
-        let text_changed = handle_text_event(event, buffer, view, &cursor);
-        changed |= text_changed;
-        if text_changed {
-            continue;
-        }
-
-        if let Some(key_event) = pressed_key_event(event) {
-            if let Some(handled) =
-                handle_non_movement_key_event(key_event, buffer, view, &cursor, total_chars)
-            {
-                changed |= handled;
-                continue;
-            }
-
-            if apply_cursor_update(view, handle_movement_event(key_event, buffer, &cursor)) {
-                changed = true;
-                continue;
-            }
-        }
-
-        changed |= handle_clipboard_event(ui, event, buffer, view, &cursor);
+        changed |= handle_keyboard_event(
+            ui,
+            event,
+            buffer,
+            view,
+            total_chars,
+            &mut handle_movement_event,
+        );
     }
 
     changed
+}
+
+fn handle_keyboard_event(
+    ui: &mut egui::Ui,
+    event: &egui::Event,
+    buffer: &mut BufferState,
+    view: &mut EditorViewState,
+    total_chars: usize,
+    handle_movement_event: &mut impl FnMut(
+        PressedKeyEvent,
+        &mut BufferState,
+        &CursorRange,
+    ) -> Option<CursorRange>,
+) -> bool {
+    let cursor = view.cursor_range.unwrap_or_default();
+    if handle_text_event(event, buffer, view, &cursor) {
+        return true;
+    }
+
+    if let Some(key_event) = pressed_key_event(event) {
+        return handle_key_event(
+            key_event,
+            buffer,
+            view,
+            &cursor,
+            total_chars,
+            handle_movement_event,
+        );
+    }
+
+    handle_clipboard_event(ui, event, buffer, view, &cursor)
+}
+
+fn handle_key_event(
+    key_event: PressedKeyEvent,
+    buffer: &mut BufferState,
+    view: &mut EditorViewState,
+    cursor: &CursorRange,
+    total_chars: usize,
+    handle_movement_event: &mut impl FnMut(
+        PressedKeyEvent,
+        &mut BufferState,
+        &CursorRange,
+    ) -> Option<CursorRange>,
+) -> bool {
+    if let Some(handled) =
+        handle_non_movement_key_event(key_event, buffer, view, cursor, total_chars)
+    {
+        return handled;
+    }
+
+    apply_cursor_update(view, handle_movement_event(key_event, buffer, cursor))
 }
 
 fn handle_text_event(
@@ -96,21 +134,26 @@ fn handle_text_event(
     view: &mut EditorViewState,
     cursor: &CursorRange,
 ) -> bool {
-    match event {
-        egui::Event::Text(text_to_insert)
-            if !text_to_insert.is_empty() && text_to_insert != "\n" && text_to_insert != "\r" =>
-        {
-            view.cursor_range = Some(editing::apply_text_insert(buffer, cursor, text_to_insert));
-            true
-        }
-        egui::Event::Ime(egui::ImeEvent::Commit(commit_text))
-            if !commit_text.is_empty() && commit_text != "\n" && commit_text != "\r" =>
-        {
-            view.cursor_range = Some(editing::apply_text_insert(buffer, cursor, commit_text));
-            true
-        }
-        _ => false,
-    }
+    let Some(text) = text_event_payload(event) else {
+        return false;
+    };
+
+    view.cursor_range = Some(editing::apply_text_insert(buffer, cursor, text));
+    true
+}
+
+fn text_event_payload(event: &egui::Event) -> Option<&str> {
+    let text = match event {
+        egui::Event::Text(text) => text,
+        egui::Event::Ime(egui::ImeEvent::Commit(text)) => text,
+        _ => return None,
+    };
+
+    is_insertable_text(text).then_some(text.as_str())
+}
+
+fn is_insertable_text(text: &str) -> bool {
+    !text.is_empty() && text != "\n" && text != "\r"
 }
 
 fn handle_non_movement_key_event(
@@ -128,10 +171,14 @@ fn handle_non_movement_key_event(
         egui::Key::Tab if !key_event.modifiers.shift => {
             Some(insert_text(buffer, view, cursor, "\t"))
         }
-        egui::Key::Tab => Some(apply_cursor_update(
-            view,
-            editing::apply_outdent(buffer, cursor),
-        )),
+        egui::Key::Tab => {
+            if let Some(new_cursor) = editing::apply_outdent(buffer, cursor) {
+                view.cursor_range = Some(new_cursor);
+                Some(true)
+            } else {
+                Some(false)
+            }
+        }
         egui::Key::Backspace => {
             view.cursor_range = Some(editing::apply_backspace(
                 buffer,
@@ -234,9 +281,74 @@ fn copy_selection(ui: &mut egui::Ui, buffer: &BufferState, cursor: &CursorRange)
 }
 
 fn apply_cursor_update(view: &mut EditorViewState, next_cursor: Option<CursorRange>) -> bool {
-    next_cursor
-        .map(|new_cursor| {
-            view.cursor_range = Some(new_cursor);
-        })
-        .is_some()
+    if let Some(new_cursor) = next_cursor {
+        view.cursor_range = Some(new_cursor);
+    }
+
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PressedKeyEvent, apply_cursor_update, handle_key_event, handle_text_event};
+    use crate::app::domain::{BufferState, EditorViewState};
+    use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
+    use eframe::egui;
+
+    #[test]
+    fn cursor_only_keyboard_movement_does_not_mark_document_changed() {
+        let mut buffer = BufferState::new("test.txt".to_owned(), "alpha\nbeta".to_owned(), None);
+        let mut view = EditorViewState::new(buffer.id, false);
+        let cursor = CursorRange::one(CharCursor::new(0));
+        let next_cursor = CursorRange::one(CharCursor::new(6));
+        let total_chars = buffer.current_file_length().chars;
+        let mut movement = |_: PressedKeyEvent,
+                            _: &mut BufferState,
+                            _: &CursorRange|
+         -> Option<CursorRange> { Some(next_cursor) };
+
+        let changed = handle_key_event(
+            PressedKeyEvent {
+                key: egui::Key::ArrowDown,
+                modifiers: egui::Modifiers::default(),
+            },
+            &mut buffer,
+            &mut view,
+            &cursor,
+            total_chars,
+            &mut movement,
+        );
+
+        assert!(!changed);
+        assert_eq!(view.cursor_range, Some(next_cursor));
+    }
+
+    #[test]
+    fn text_keyboard_input_still_marks_document_changed() {
+        let mut buffer = BufferState::new("test.txt".to_owned(), "alpha".to_owned(), None);
+        let mut view = EditorViewState::new(buffer.id, false);
+        let cursor = CursorRange::one(CharCursor::new(5));
+
+        let changed = handle_text_event(
+            &egui::Event::Text("!".to_owned()),
+            &mut buffer,
+            &mut view,
+            &cursor,
+        );
+
+        assert!(changed);
+        assert_eq!(
+            view.cursor_range,
+            Some(CursorRange::one(CharCursor::new(6)))
+        );
+    }
+
+    #[test]
+    fn cursor_update_helper_reports_no_document_change() {
+        let mut view = EditorViewState::new(1, false);
+        let next_cursor = CursorRange::one(CharCursor::new(3));
+
+        assert!(!apply_cursor_update(&mut view, Some(next_cursor)));
+        assert_eq!(view.cursor_range, Some(next_cursor));
+    }
 }

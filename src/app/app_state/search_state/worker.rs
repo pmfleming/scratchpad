@@ -284,7 +284,7 @@ fn search_target_ranges(
 ) -> Option<Vec<Range<usize>>> {
     let normalized = search_range
         .map(|range| snapshot.normalize_char_range(range))
-        .unwrap_or(0..snapshot.len_chars());
+        .unwrap_or(0..snapshot.document_length().chars);
 
     if let Some(text) = snapshot.piece_tree().borrow_range(normalized.clone()) {
         let outcome = search::search_text_interruptible(text, query, options, || {

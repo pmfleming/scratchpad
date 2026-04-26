@@ -1,8 +1,9 @@
 use super::analysis::{IncrementalMetadataEdit, buffer_text_metadata_from_edit};
 use super::{
-    BufferTextMetadata, DocumentSnapshot, EncodingSource, RenderedTextWindow, TextArtifactSummary,
-    TextDocument, TextDocumentOperationRecord, TextFormatMetadata, TextReplacementError,
-    TextReplacements, buffer_text_metadata, buffer_text_metadata_from_piece_tree,
+    BufferLength, BufferTextMetadata, DocumentSnapshot, EncodingSource, LineEndingStyle,
+    RenderedTextWindow, TextArtifactSummary, TextDocument, TextDocumentOperationRecord,
+    TextFormatMetadata, TextReplacementError, TextReplacements, buffer_text_metadata,
+    buffer_text_metadata_from_piece_tree,
 };
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use eframe::egui;
@@ -242,6 +243,10 @@ impl BufferState {
         self.document.piece_tree().generation()
     }
 
+    pub(crate) fn current_file_length(&self) -> BufferLength {
+        BufferLength::from_metrics(self.document.piece_tree().metrics(), self.line_count)
+    }
+
     pub fn editor_scroll_offset(&self) -> egui::Vec2 {
         self.editor_scroll_offset.to_vec2()
     }
@@ -369,8 +374,7 @@ impl BufferState {
 
     pub fn replace_format_without_text_change(&mut self, format: TextFormatMetadata) {
         self.format = format;
-        self.document
-            .set_preferred_line_ending(self.format.preferred_line_ending_style());
+        self.sync_document_preferred_line_ending();
         self.encoding_compliance_stale = true;
     }
 
@@ -404,12 +408,7 @@ impl BufferState {
     pub fn refresh_text_metadata(&mut self) {
         let metadata =
             buffer_text_metadata_from_piece_tree(self.document.piece_tree(), &mut self.format);
-        self.line_count = metadata.line_count;
-        self.artifact_summary = metadata.artifact_summary;
-        self.document
-            .set_preferred_line_ending(metadata.preferred_line_ending);
-        self.text_metadata_refresh_stale = false;
-        self.encoding_compliance_stale = true;
+        self.apply_text_metadata(metadata);
     }
 
     pub fn refresh_text_metadata_after_operation(
@@ -428,12 +427,7 @@ impl BufferState {
         if let Some(metadata) = operation
             .and_then(|operation| self.incremental_text_metadata_after_operation(operation))
         {
-            self.line_count = metadata.line_count;
-            self.artifact_summary = metadata.artifact_summary;
-            self.document
-                .set_preferred_line_ending(metadata.preferred_line_ending);
-            self.text_metadata_refresh_stale = false;
-            self.encoding_compliance_stale = true;
+            self.apply_text_metadata(metadata);
             return;
         }
 
@@ -481,10 +475,11 @@ impl BufferState {
         self.line_count = line_count;
         self.artifact_summary = artifact_summary;
         self.format = format;
-        self.document
-            .set_preferred_line_ending(self.format.preferred_line_ending_style());
-        self.text_metadata_refresh_stale = false;
-        self.encoding_compliance_stale = true;
+        self.apply_text_metadata_fields(
+            line_count,
+            self.artifact_summary.clone(),
+            self.format.preferred_line_ending_style(),
+        );
     }
 
     pub fn sync_to_disk_state(&mut self, disk_state: Option<DiskFileState>) {
@@ -577,6 +572,33 @@ impl BufferState {
             self.format = format;
         }
         self.refresh_text_metadata();
+    }
+
+    fn apply_text_metadata(&mut self, metadata: BufferTextMetadata) {
+        self.apply_text_metadata_fields(
+            metadata.line_count,
+            metadata.artifact_summary,
+            metadata.preferred_line_ending,
+        );
+    }
+
+    fn apply_text_metadata_fields(
+        &mut self,
+        line_count: usize,
+        artifact_summary: TextArtifactSummary,
+        preferred_line_ending: LineEndingStyle,
+    ) {
+        self.line_count = line_count;
+        self.artifact_summary = artifact_summary;
+        self.document
+            .set_preferred_line_ending(preferred_line_ending);
+        self.text_metadata_refresh_stale = false;
+        self.encoding_compliance_stale = true;
+    }
+
+    fn sync_document_preferred_line_ending(&mut self) {
+        self.document
+            .set_preferred_line_ending(self.format.preferred_line_ending_style());
     }
 
     fn can_skip_metadata_rescan(&self, operation: &TextDocumentOperationRecord) -> bool {
@@ -700,6 +722,7 @@ fn next_temp_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::{BufferState, metadata_neutral_ascii_text};
+    use crate::app::domain::buffer::BufferLength;
     use crate::app::domain::buffer::document::{
         TextDocumentEditOperation, TextDocumentOperationRecord,
     };
@@ -795,6 +818,20 @@ mod tests {
 
         buffer.set_editor_scroll_offset(egui::vec2(-4.0, f32::INFINITY));
         assert_eq!(buffer.editor_scroll_offset(), egui::Vec2::ZERO);
+    }
+
+    #[test]
+    fn current_file_length_tracks_bytes_chars_and_lines() {
+        let buffer = BufferState::new("notes.txt".to_owned(), "hi\nworld".to_owned(), None);
+
+        assert_eq!(
+            buffer.current_file_length(),
+            BufferLength {
+                bytes: 8,
+                chars: 8,
+                lines: 2,
+            }
+        );
     }
 
     #[test]
