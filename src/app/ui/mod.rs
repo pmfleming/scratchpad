@@ -3,6 +3,7 @@ mod callout;
 pub mod dialogs;
 pub mod editor_area;
 pub mod editor_content;
+pub mod scrolling;
 pub mod search_replace;
 pub mod settings;
 pub mod status_bar;

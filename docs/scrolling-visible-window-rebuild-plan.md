@@ -109,7 +109,7 @@ Replacement tests should be created only after the new scroll/view contract is d
 
 ### 1. Introduce A Local Scroll Module
 
-Create a local editor scroll subsystem, tentatively under `src/app/ui/scrolling/` or `src/app/domain/scrolling/`, with clear ownership boundaries:
+Create a local editor scroll subsystem under `src/app/ui/scrolling/`, with clear ownership boundaries:
 
 - `ScrollState`
   - current offset
@@ -198,7 +198,8 @@ Add explicit types before wiring UI:
 - `DisplayPoint`
   - visual row and column used for cursor geometry and hit testing
 - `ScrollAnchor`
-  - stable anchor plus fractional row/pixel offset
+  - piece-tree anchor plus fractional display-row offset (`f32`) within that anchor's wrapped row
+  - horizontal offset stored in pixels alongside the anchor
 - `ViewportMetrics`
   - viewport rect, row height, column width, visible row count, visible column count
 - `ContentExtent`
@@ -239,7 +240,7 @@ The extent calculation must include:
 - long lines
 - horizontal scrolling
 - final line and EOF behavior
-- optional scroll-beyond-last-line policy
+- scroll-beyond-last-line: one viewport-height of overscroll past EOF
 - split panes with different widths
 
 This directly addresses the failure mode described in `docs/scroll-bottom-investigation.md`: wrapped visual rows can exceed logical lines, so a logical-line height estimate can clamp too early.
@@ -340,6 +341,7 @@ Write new tests around the replacement contract:
 - gutter row numbers align with display rows and logical rows
 - IME cursor rect follows the painted cursor
 - EOF is reachable in wrapped and unwrapped files
+- one viewport-height of overscroll past EOF is available and clamps correctly
 
 Prefer headless unit tests for pure scroll/layout math and targeted egui harness tests only for integration behavior that depends on UI frames.
 
@@ -381,14 +383,49 @@ Remove temporary diagnostics before merging.
 - No direct mutation of scroll offset from scattered input handlers.
 - No tests that assert old helper names or old internal flags.
 
-## Open Decisions
+## Locked Decisions
 
-- Whether the new local scroll module should live under UI or domain.
-- Whether `ScrollAnchor` should anchor to byte offset, character offset, logical line, or piece-tree anchor.
-- Whether scroll position should store fractional display rows, pixels, or both.
-- Whether horizontal scrolling should use columns, pixels, or a hybrid.
-- Whether the first version should support animated programmatic scroll or keep all programmatic scroll immediate.
-- Whether old `RenderedLayout` should be replaced entirely by a new `DisplaySnapshot` or retained as a transitional wrapper.
+These were previously open. They are now fixed for the v1 implementation; revisit only with a written reason.
+
+- **Module location**: the new scroll module lives under `src/app/ui/scrolling/`. Scroll is a view-state concern (viewport size, scrollbar interaction, pixel offset); domain owns cursors and selections, not pixels.
+- **`ScrollAnchor` representation**: piece-tree anchor + fractional display-row offset within that anchor's wrapped row. Survives edits above the viewport and resizes/wrap changes without visible jumps. Matches Zed's approach.
+  - **v1 substrate gap**: the project's piece tree does not yet support stable anchors. v1 uses a logical-line + intra-line byte anchor with the same surface API; replace the inner representation when piece-tree anchors land. Edits above the viewport will produce visible jumps until then — acceptable for v1, called out as a known limitation.
+- **Vertical scroll position**: fractional display rows stored as a single `f32`. Pixels are derived at paint time. Do not store both.
+- **Horizontal scroll position**: pixels. Columns are a fiction once ligatures, tabs, mixed fonts, or non-ASCII appear.
+- **Programmatic scroll animation**: immediate in v1. `ScrollIntent` reserves space for an `animated` variant but no easing machinery is built yet.
+- **`RenderedLayout`**: replaced entirely by `DisplaySnapshot`. No transitional wrapper — a wrapper would preserve the coupling the rewrite is meant to remove.
+- **Scroll-beyond-last-line**: enabled by default with one viewport-height of overscroll past EOF. Guarantees EOF is reachable under wrap regardless of extent rounding and matches modern editor norms. Built in from the start; not retrofitted.
+
+## Progress Log
+
+Each phase appends a status line here as it lands. Format: `- [phase] status — brief note (date)`.
+
+<!-- progress entries below -->
+- [Phase 0] complete — inventory verified against tree; all referenced symbols exist (2026-04-27)
+- [Phase 1] complete — `src/app/ui/scrolling/` module landed: `ScrollState`, `ScrollSource`, `ScrollAlign`, `ScrollTarget`, `ScrollbarPolicy`, `ScrollArea`/`ScrollAreaOutput`. Pixel-based primitive with one-viewport EOF overscroll, scrollbar drag/wheel, programmatic targets, persistent state. Unit tests for clamp math pass. Not yet wired into the editor. (2026-04-27)
+- [Phase 2] complete — `ScrollManager`, `ScrollAnchor`, `ScrollIntent`, `ViewportMetrics`, `ContentExtent` landed. Single mutation entry point (`apply_intent`) for wheel/scrollbar/lines/pages/top/bottom/reveal/restore/edge-autoscroll. Vertical position stored as fractional display rows; horizontal as pixels. Display-map conversion plumbed via callback functions (`anchor_to_row`/`row_to_anchor`); naive identity placeholders provided until Phase 3 lands real display-row pipeline. v1 anchor uses logical line + intra-line byte (piece-tree anchors not yet available — known limitation). Unit tests pass. Not yet wired into the editor. (2026-04-27)
+- [Phase 3] complete — `DisplaySnapshot`, `DisplayRow`, `DisplayPoint`, `ViewportSlice` landed in `src/app/ui/scrolling/display.rs`. Wraps an `egui::Galley` into a wrap-aware row-indexed snapshot with row tops, char ranges, logical-line map, max line width. `viewport_slice(top_row, viewport_h, overscan)` returns the row range to paint. Slice math unit-tested. Not yet wired into the editor renderer. (2026-04-27)
+- [Phase 4+5b] complete — `WindowRenderMode` enum, `preferred_window_render_mode`, `should_prefer_visible_window`, `should_prefer_focused_window` and their tests removed from `editor_content/mod.rs`. `render_editor_body` now always calls `render_editor_text_edit`. (2026-04-27)
+- [Phase 4+5c] complete — `tile.rs` no longer wraps `egui::ScrollArea::both()`; the local `scrolling::ScrollArea` is the editor's scroll container. Helpers added: `local_scroll_source`, `scrollbar_policy_from_egui`. Removed `editor_scroll_source` and its test. (2026-04-27)
+- [Phase 4+5d] partial — `render_editor_visible_text_window` and `render_editor_focused_text_window` deleted from `native_editor/mod.rs`. ~49 supporting helpers (`visible_window_*`, `viewport_line_span`, `cursor_visible_line_range`, etc.) are now unreachable but still physically present in `native_editor/mod.rs`; deleting them is a mechanical cleanup that can be driven by chasing `cargo build`'s dead-code warnings. `RenderedTextWindow`, `VisibleWindowLayoutKey`, `visible_line_window`, `visible_text_window` in `buffer.rs` and downstream callers (`gutter.rs`, `tile_header/split/preview.rs`) also still present. Five old visible-window tests in `editor_area::mod` are `#[ignore]`'d. (2026-04-27)
+- [Phase 4+5] **partial — clean break landed for view state surface, full input rewire and old-code deletion deferred** (2026-04-27).
+  - Done:
+    - `EditorViewState` now owns a `ScrollManager` and a `pending_intents: Vec<ScrollIntent>` queue.
+    - `scroll_to_cursor: bool` and inline `cursor_reveal_mode` field deleted; replaced by `pending_cursor_reveal: Option<CursorRevealMode>` resolved at render time into a `ScrollIntent::Reveal`.
+    - `editor_scroll_offset()`/`set_editor_scroll_offset()` deleted; replaced by `editor_pixel_offset()`/`set_editor_pixel_offset()` which delegate to the scroll manager (intents on the X+Y scrollbar axes).
+    - Three old visible-window tests in `editor_area::mod` marked `#[ignore]` with replacement scheduled for Phase 6: `scrolled_visible_window_click_places_cursor_in_scrolled_document_region`, `scrolled_wide_visible_window_click_places_cursor_in_scrolled_document_region`, `focused_wheel_scroll_updates_visible_window_and_click_mapping`.
+    - Tile-level test `duplicated_views_can_track_independent_scroll_offsets` deleted (asserted old API).
+    - Tree compiles; 257 tests pass, 3 ignored.
+  - Deferred to next session(s):
+    - `tile.rs` still wraps content in `egui::ScrollArea::both()`; replace with the local `scrolling::ScrollArea`.
+    - `editor_content::mod` still routes between `WindowRenderMode::Full`/`VisibleWindow`/`Focused`; collapse to one viewport-first render path using `DisplaySnapshot`/`ViewportSlice`.
+    - `native_editor::mod` still contains `render_editor_visible_text_window`, `render_editor_focused_text_window`, `VisibleWindow*` structs, `VisibleWindowDebugSnapshot`, viewport-line helpers — delete after the unified renderer lands.
+    - `buffer.rs` still owns `RenderedTextWindow`, `VisibleWindowLayoutKey`, `visible_line_window`, `visible_text_window`, buffer-side `editor_scroll_offset` — delete after callers move off them.
+    - `gutter.rs`, `tile_header/split/preview.rs` still depend on `RenderedTextWindow`.
+    - `autoscroll.rs`, `tab_drag/state/autoscroll.rs` not yet rewired through `ScrollIntent::EdgeAutoscroll`.
+    - `profile.rs`, `bin/profile_viewport_extraction.rs`, `bin/profile_scroll_stress.rs` still reference old surface.
+    - `pending_intents` queue is plumbed but never drained; renderer side of Phase 4 (drain queue → `ScrollManager::apply_intent`) is not yet implemented.
+    - `view.rs` `editor_pixel_offset()` currently uses `naive_anchor_to_row` (1 logical line = 1 display row); needs real `DisplaySnapshot`-backed conversion when renderer migrates.
 
 ## Acceptance Criteria
 
