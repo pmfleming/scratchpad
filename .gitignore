@@ -12,6 +12,7 @@
 /hotspots.json
 /slowspots.json
 /map.json
+/.claude/
 
 # Python virtual environment and caches
 .venv/
