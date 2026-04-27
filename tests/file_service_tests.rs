@@ -15,7 +15,7 @@ fn read_write_utf8() {
     FileService::write_file_with_bom(&path, content, "UTF-8", false).unwrap();
     let read = FileService::read_file(&path).unwrap();
 
-    assert_eq!(read.content, content);
+    assert_eq!(read.document.extract_text(), content);
     assert_eq!(read.format.encoding_name, "UTF-8");
     assert!(!read.format.has_bom);
     assert_eq!(read.format.line_endings, LineEndingStyle::None);
@@ -30,16 +30,18 @@ fn read_write_utf16le() {
     FileService::write_file_with_bom(&path, content, "UTF-16LE", true).unwrap();
 
     let read = FileService::read_file(&path).unwrap();
+    let mut updated = read.document.extract_text();
+    updated.push('!');
     FileService::write_file_with_bom(
         &path,
-        &(read.content.clone() + "!"),
+        &updated,
         &read.format.encoding_name,
         read.format.has_bom,
     )
     .unwrap();
     let bytes = fs::read(&path).unwrap();
 
-    assert_eq!(read.content, content);
+    assert_eq!(read.document.extract_text(), content);
     assert_eq!(read.format.encoding_name, "UTF-16LE");
     assert!(read.format.has_bom);
     assert_eq!(&bytes[..2], &[0xFF, 0xFE]);
@@ -54,7 +56,7 @@ fn read_write_shift_jis() {
     FileService::write_file_with_bom(&path, content, "Shift_JIS", false).unwrap();
     let read = FileService::read_file(&path).unwrap();
 
-    assert_eq!(read.content, content);
+    assert_eq!(read.document.extract_text(), content);
     assert_eq!(read.format.encoding_name, "Shift_JIS");
     assert!(!read.format.has_bom);
 }
@@ -69,7 +71,7 @@ fn read_write_windows_1252() {
     let read = FileService::read_file(&path).unwrap();
     let bytes = fs::read(&path).unwrap();
 
-    assert_eq!(read.content, content);
+    assert_eq!(read.document.extract_text(), content);
     assert_eq!(read.format.encoding_name, "windows-1252");
     assert_eq!(
         bytes,
@@ -87,8 +89,10 @@ fn preserves_encoding_when_round_tripping_windows_1252() {
     fs::write(&path, &original).unwrap();
 
     let mut read = FileService::read_file(&path).unwrap();
-    read.content.push('!');
-    FileService::write_file_with_format(&path, &read.content, &read.format).unwrap();
+    let insert_at = read.document.piece_tree().len_chars();
+    read.document.insert_direct(insert_at, "!");
+    let updated = read.document.extract_text();
+    FileService::write_file_with_format(&path, &updated, &read.format).unwrap();
 
     assert_eq!(fs::read(&path).unwrap(), vec![0x63, 0x61, 0x66, 0xE9, 0x21]);
 }
@@ -102,11 +106,10 @@ fn detect_binary_file() {
     fs::write(&path, content).unwrap();
     let result = FileService::read_file(&path);
 
-    assert!(result.is_err());
-    assert_eq!(
-        result.unwrap_err().to_string(),
-        "Binary files are not supported"
-    );
+    match result {
+        Ok(_) => panic!("binary files should be rejected"),
+        Err(error) => assert_eq!(error.to_string(), "Binary files are not supported"),
+    }
 }
 
 #[test]
@@ -145,7 +148,7 @@ fn preserves_loaded_crlf_style_when_editing_and_saving() {
 
     let read = FileService::read_file(&path).unwrap();
     let mut document = TextDocument::with_preferred_line_ending(
-        read.content.clone(),
+        read.document.extract_text(),
         read.format.preferred_line_ending_style(),
     );
     let insert_at = document.piece_tree().len_chars();
@@ -165,7 +168,7 @@ fn explicit_reopen_with_encoding_uses_selected_encoding() {
 
     let read = FileService::read_file_with_encoding(&path, "windows-1252").unwrap();
 
-    assert_eq!(read.content, "caf\u{00E9}");
+    assert_eq!(read.document.extract_text(), "caf\u{00E9}");
     assert_eq!(read.format.encoding_name, "windows-1252");
     assert_eq!(
         read.format.encoding_source,

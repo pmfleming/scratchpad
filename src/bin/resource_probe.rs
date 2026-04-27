@@ -13,7 +13,7 @@ const KB: usize = 1024;
 const MB: usize = 1024 * KB;
 const TAB_BYTES_PER_BUFFER: usize = 48 * KB;
 const SESSION_BYTES_PER_BUFFER: usize = 16 * KB;
-const LARGE_PASTE_BASE_BYTES: usize = MB;
+const PASTE_RESOURCE_BASE_BYTES: usize = MB;
 
 static ALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
 static DEALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
@@ -123,7 +123,7 @@ struct AllocationSnapshot {
 
 fn main() {
     emit_file_backed_open_allocations();
-    emit_large_paste_allocations();
+    emit_paste_allocations();
     emit_tab_count_resource_tracking();
     emit_session_persist_restore_costs();
 }
@@ -133,13 +133,13 @@ fn emit_file_backed_open_allocations() {
     std::fs::create_dir_all(&root).expect("create file-backed open root");
 
     for (step_index, bytes) in [32 * MB, 128 * MB].into_iter().enumerate() {
-        let path = root.join(format!("large_file_open_{bytes}.txt"));
+        let path = root.join(format!("file_open_{bytes}.txt"));
         write_plain_text_file(&path, bytes).expect("write probe file");
         emit_step(
             StepDescriptor {
                 scenario: "file_backed_open_allocation",
-                scenario_label: "File-backed large-file open allocation",
-                workload_family: "large-file-load",
+                scenario_label: "File-backed open allocation",
+                workload_family: "file-load",
                 focus: "allocation",
                 step_index,
                 workload_value: bytes,
@@ -153,12 +153,12 @@ fn emit_file_backed_open_allocations() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-fn emit_large_paste_allocations() {
+fn emit_paste_allocations() {
     for (step_index, insert_bytes) in [8 * MB, 64 * MB].into_iter().enumerate() {
         emit_step(
             StepDescriptor {
-                scenario: "large_paste_allocation",
-                scenario_label: "Large paste allocation profile",
+                scenario: "paste_allocation",
+                scenario_label: "Paste allocation profile",
                 workload_family: "edit-paste",
                 focus: "allocation",
                 step_index,
@@ -166,7 +166,7 @@ fn emit_large_paste_allocations() {
                 workload_unit: "bytes",
                 workload_label: human_bytes(insert_bytes),
             },
-            || run_large_paste_cycle(insert_bytes),
+            || run_paste_cycle(insert_bytes),
         );
     }
 }
@@ -273,14 +273,14 @@ fn emit_step(step: StepDescriptor, run: impl FnOnce() -> usize) {
 }
 
 fn run_file_backed_open_cycle(path: &Path) -> usize {
-    let file = FileService::read_file(path).expect("open large file through file service");
-    black_box(file.content.len() + file.artifact_summary.other_control_count)
+    let file = FileService::read_file(path).expect("open file through file service");
+    black_box(file.document.piece_tree().len_bytes() + file.artifact_summary.other_control_count)
 }
 
-fn run_large_paste_cycle(insert_bytes: usize) -> usize {
+fn run_paste_cycle(insert_bytes: usize) -> usize {
     let mut buffer = BufferState::new(
-        "large_paste_resource.txt".to_owned(),
-        plain_text_of_size(LARGE_PASTE_BASE_BYTES),
+        "paste_resource.txt".to_owned(),
+        plain_text_of_size(PASTE_RESOURCE_BASE_BYTES),
         None,
     );
     let inserted = plain_text_of_size(insert_bytes);
@@ -309,9 +309,7 @@ fn run_tab_count_cycle(tab_count: usize) -> usize {
 }
 
 fn run_session_persist_cycle(store: &SessionStore, tabs: &[WorkspaceTab]) -> usize {
-    store
-        .persist(tabs, 0, 14.0, true)
-        .expect("persist large session");
+    store.persist(tabs, 0, 14.0, true).expect("persist session");
     black_box(tabs.len())
 }
 

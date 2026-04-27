@@ -35,7 +35,7 @@ fn make_buffer(name: String, content: String) -> BufferState {
     BufferState::new(name, content, None)
 }
 
-fn large_file_scroll_layout_pass(text: &str) -> usize {
+fn scroll_layout_pass(text: &str) -> usize {
     let ctx = egui::Context::default();
     let font_id = egui::FontId::monospace(15.0);
     let highlight_style =
@@ -151,8 +151,8 @@ fn exercise_tile_heavy_tab(tab: &mut WorkspaceTab) {
     }
 }
 
-fn bench_large_file_loads(c: &mut Criterion) {
-    let mut group = c.benchmark_group("large_file_load");
+fn bench_file_loads(c: &mut Criterion) {
+    let mut group = c.benchmark_group("file_load");
     for bytes in [64 * KB, 256 * KB, MB] {
         group.throughput(Throughput::Bytes(bytes as u64));
         let text = plain_text_of_size(bytes);
@@ -171,20 +171,20 @@ fn bench_large_file_loads(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_large_file_scroll_latency(c: &mut Criterion) {
-    let mut group = c.benchmark_group("large_file_scroll_latency");
+fn bench_scroll_stress_latency(c: &mut Criterion) {
+    let mut group = c.benchmark_group("scroll_stress_latency");
     for bytes in [256 * KB, MB, 4 * MB] {
         let text = plain_text_of_size(bytes);
         group.throughput(Throughput::Bytes(bytes as u64));
         group.bench_with_input(BenchmarkId::from_parameter(bytes), &text, |b, text| {
-            b.iter(|| criterion::black_box(large_file_scroll_layout_pass(text)));
+            b.iter(|| criterion::black_box(scroll_layout_pass(text)));
         });
     }
     group.finish();
 }
 
-fn bench_large_file_split_latency(c: &mut Criterion) {
-    let mut group = c.benchmark_group("large_file_split_latency");
+fn bench_split_stress_latency(c: &mut Criterion) {
+    let mut group = c.benchmark_group("split_stress_latency");
     let content = plain_text_of_size(MB);
     for tile_count in [4usize, 8, 16] {
         group.bench_with_input(
@@ -202,8 +202,8 @@ fn bench_large_file_split_latency(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_large_file_paste_latency(c: &mut Criterion) {
-    let mut group = c.benchmark_group("large_file_paste_latency");
+fn bench_paste_stress_latency(c: &mut Criterion) {
+    let mut group = c.benchmark_group("paste_stress_latency");
     let base_text = plain_text_of_size(MB);
 
     for insert_bytes in [4 * KB, 32 * KB, 128 * KB, 512 * KB] {
@@ -215,7 +215,7 @@ fn bench_large_file_paste_latency(c: &mut Criterion) {
             |b, insert_text| {
                 b.iter_batched(
                     || {
-                        let buffer = make_buffer("large_paste.txt".to_owned(), base_text.clone());
+                        let buffer = make_buffer("paste.txt".to_owned(), base_text.clone());
                         let midpoint = buffer.text().chars().count() / 2;
                         (buffer, midpoint, insert_text.clone())
                     },
@@ -320,10 +320,10 @@ fn bench_tab_operations(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_tab_operations,
-    bench_large_file_loads,
-    bench_large_file_scroll_latency,
-    bench_large_file_split_latency,
-    bench_large_file_paste_latency,
+    bench_file_loads,
+    bench_scroll_stress_latency,
+    bench_split_stress_latency,
+    bench_paste_stress_latency,
     bench_control_char_file_workflows,
     bench_tab_scaling,
     bench_tile_scaling

@@ -1,12 +1,11 @@
 use crate::app::domain::buffer::{BufferTextMetadata, detected_text_format_and_metadata};
 use crate::app::domain::{
     BufferState, DiskFileState, DocumentSnapshot, EncodingSource, TextArtifactSummary,
-    TextFormatMetadata,
+    TextDocument, TextFormatMetadata,
 };
 use crate::app::services::store_io::write_atomic_with;
 use chardetng::EncodingDetector;
 use encoding_rs::Encoding;
-use encoding_rs_io::DecodeReaderBytesBuilder;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::Path;
@@ -65,18 +64,15 @@ pub const COMMON_TEXT_ENCODINGS: &[EncodingOption] = &[
     },
 ];
 
-const LARGE_FILE_STAGED_METADATA_BYTES: usize = 5 * 1024 * 1024;
 const STAGED_METADATA_SAMPLE_BYTES: usize = 64 * 1024;
 
 pub struct FileService;
 
-#[derive(Debug)]
 pub struct FileContent {
-    pub content: String,
+    pub document: TextDocument,
     pub format: TextFormatMetadata,
     pub artifact_summary: TextArtifactSummary,
     pub(crate) text_metadata: BufferTextMetadata,
-    pub(crate) metadata_complete: bool,
 }
 
 impl FileService {
@@ -95,82 +91,23 @@ impl FileService {
     }
 
     pub fn read_file(path: &Path) -> io::Result<FileContent> {
-        let mut file = File::open(path)?;
-        let mut prefix = [0_u8; 4096];
-        let prefix_len = file.read(&mut prefix)?;
-        let prefix = &prefix[..prefix_len];
-
-        let (encoding, has_bom, encoding_source) = if let Some((enc, _)) = Encoding::for_bom(prefix)
-        {
-            (enc, true, EncodingSource::Bom)
-        } else {
-            let mut detector = EncodingDetector::new();
-            detector.feed(prefix, prefix_len < 4096);
-            (detector.guess(None, true), false, EncodingSource::Heuristic)
-        };
-
-        if is_probably_binary(prefix, has_bom) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Binary files are not supported",
-            ));
-        }
-
-        let file = File::open(path)?;
-        let mut decoder = DecodeReaderBytesBuilder::new()
-            .encoding(Some(encoding))
-            .build(file);
-        let mut content = String::new();
-        decoder.read_to_string(&mut content)?;
-
-        if content.contains('\0') {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Binary files are not supported",
-            ));
-        }
-
-        let has_decoding_warnings = content.contains('\u{FFFD}');
-        Ok(build_file_content(
-            content,
-            encoding.name().to_string(),
-            has_bom,
-            encoding_source,
-            has_decoding_warnings,
-        ))
+        let prefix = inspect_file_prefix(path)?;
+        read_file_content(
+            path,
+            prefix.encoding,
+            prefix.has_bom,
+            prefix.encoding_source,
+        )
     }
 
     pub fn read_file_with_encoding(path: &Path, encoding_name: &str) -> io::Result<FileContent> {
-        let mut file = File::open(path)?;
-        let mut prefix = [0_u8; 4096];
-        let prefix_len = file.read(&mut prefix)?;
-        let prefix = &prefix[..prefix_len];
-        let encoding = resolve_encoding(encoding_name)?;
-        let has_bom = Encoding::for_bom(prefix).is_some();
-
-        if is_probably_binary(prefix, has_bom) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Binary files are not supported",
-            ));
-        }
-
-        let content = read_text_with_encoding(path, encoding)?;
-        if content.contains('\0') {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Binary files are not supported",
-            ));
-        }
-
-        let has_decoding_warnings = content.contains('\u{FFFD}');
-        Ok(build_file_content(
-            content,
-            encoding.name().to_string(),
-            has_bom,
+        let prefix = inspect_file_prefix(path)?;
+        read_file_content(
+            path,
+            resolve_encoding(encoding_name)?,
+            prefix.has_bom,
             EncodingSource::ExplicitUserChoice,
-            has_decoding_warnings,
-        ))
+        )
     }
 
     pub fn canonical_encoding_name(encoding_name: &str) -> io::Result<String> {
@@ -187,30 +124,19 @@ impl FileService {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.display().to_string());
         let FileContent {
-            content,
+            document,
             format,
             text_metadata,
-            metadata_complete,
             ..
         } = file_content;
-        let mut buffer = if metadata_complete {
-            BufferState::with_text_metadata(
-                name,
-                content,
-                Some(path.to_path_buf()),
-                format,
-                text_metadata,
-            )
-        } else {
-            BufferState::with_text_metadata_refresh_state(
-                name,
-                content,
-                Some(path.to_path_buf()),
-                format,
-                text_metadata,
-                true,
-            )
-        };
+        let mut buffer = BufferState::with_document_text_metadata_refresh_state(
+            name,
+            document,
+            Some(path.to_path_buf()),
+            format,
+            text_metadata,
+            true,
+        );
         buffer.sync_to_disk_state(disk_state);
         buffer
     }
@@ -278,44 +204,81 @@ fn resolve_encoding(encoding_name: &str) -> io::Result<&'static Encoding> {
     })
 }
 
-fn read_text_with_encoding(path: &Path, encoding: &'static Encoding) -> io::Result<String> {
-    let file = File::open(path)?;
-    let mut decoder = DecodeReaderBytesBuilder::new()
-        .encoding(Some(encoding))
-        .build(file);
-    let mut content = String::new();
-    decoder.read_to_string(&mut content)?;
-    Ok(content)
+struct LoadedDocument {
+    document: TextDocument,
+    sample: String,
+    line_count: usize,
+    has_decoding_warnings: bool,
+}
+
+struct PrefixInspection {
+    encoding: &'static Encoding,
+    has_bom: bool,
+    encoding_source: EncodingSource,
+}
+
+fn inspect_file_prefix(path: &Path) -> io::Result<PrefixInspection> {
+    let mut file = File::open(path)?;
+    let mut prefix = [0_u8; 4096];
+    let prefix_len = file.read(&mut prefix)?;
+    let prefix = &prefix[..prefix_len];
+
+    let (encoding, has_bom, encoding_source) =
+        if let Some((encoding, _)) = Encoding::for_bom(prefix) {
+            (encoding, true, EncodingSource::Bom)
+        } else {
+            let mut detector = EncodingDetector::new();
+            detector.feed(prefix, prefix_len < prefix.len());
+            (detector.guess(None, true), false, EncodingSource::Heuristic)
+        };
+
+    ensure_text_prefix(prefix, has_bom)?;
+    Ok(PrefixInspection {
+        encoding,
+        has_bom,
+        encoding_source,
+    })
+}
+
+fn ensure_text_prefix(prefix: &[u8], has_bom: bool) -> io::Result<()> {
+    if is_probably_binary(prefix, has_bom) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Binary files are not supported",
+        ));
+    }
+    Ok(())
+}
+
+fn read_file_content(
+    path: &Path,
+    encoding: &'static Encoding,
+    has_bom: bool,
+    encoding_source: EncodingSource,
+) -> io::Result<FileContent> {
+    let loaded = read_document_with_encoding(path, encoding, has_bom)?;
+    Ok(build_file_content(
+        loaded.document,
+        loaded.sample,
+        loaded.line_count,
+        loaded.has_decoding_warnings,
+        encoding.name().to_string(),
+        has_bom,
+        encoding_source,
+    ))
 }
 
 fn build_file_content(
-    content: String,
+    document: TextDocument,
+    sample: String,
+    line_count: usize,
+    has_decoding_warnings: bool,
     encoding_name: String,
     has_bom: bool,
     encoding_source: EncodingSource,
-    has_decoding_warnings: bool,
 ) -> FileContent {
-    if content.len() < LARGE_FILE_STAGED_METADATA_BYTES {
-        let (format, text_metadata) = detected_text_format_and_metadata(
-            &content,
-            encoding_name,
-            has_bom,
-            encoding_source,
-            has_decoding_warnings,
-        );
-        let artifact_summary = text_metadata.artifact_summary.clone();
-        return FileContent {
-            content,
-            format,
-            artifact_summary,
-            text_metadata,
-            metadata_complete: true,
-        };
-    }
-
-    let sample = staged_metadata_sample(&content);
     let (mut format, sample_metadata) = detected_text_format_and_metadata(
-        sample,
+        &sample,
         encoding_name,
         has_bom,
         encoding_source,
@@ -323,29 +286,100 @@ fn build_file_content(
     );
     format.is_ascii_subset = false;
     let text_metadata = BufferTextMetadata {
-        line_count: staged_display_line_count(&content),
+        line_count,
         artifact_summary: sample_metadata.artifact_summary.clone(),
         preferred_line_ending: format.preferred_line_ending_style(),
         has_non_compliant_characters: false,
     };
     let artifact_summary = text_metadata.artifact_summary.clone();
     FileContent {
-        content,
+        document,
         format,
         artifact_summary,
         text_metadata,
-        metadata_complete: false,
     }
 }
 
-fn staged_metadata_sample(content: &str) -> &str {
-    let mut end = STAGED_METADATA_SAMPLE_BYTES.min(content.len());
-    while end > 0 && !content.is_char_boundary(end) {
-        end -= 1;
+fn read_document_with_encoding(
+    path: &Path,
+    encoding: &'static Encoding,
+    has_bom: bool,
+) -> io::Result<LoadedDocument> {
+    const RAW_READ_BYTES: usize = 16 * 1024;
+    const DECODED_CHUNK_BYTES: usize = 32 * 1024;
+
+    let mut file = File::open(path)?;
+    let mut decoder = if has_bom {
+        encoding.new_decoder_with_bom_removal()
+    } else {
+        encoding.new_decoder_without_bom_handling()
+    };
+    let mut document = TextDocument::new(String::new());
+    let mut sample = String::new();
+    let mut line_count = 1usize;
+    let mut line_count_pending_cr = false;
+    let mut has_decoding_warnings = false;
+    let mut raw = [0u8; RAW_READ_BYTES];
+    let mut pending = Vec::new();
+    let mut decoded = [0u8; DECODED_CHUNK_BYTES];
+
+    loop {
+        let read = file.read(&mut raw)?;
+        let eof = read == 0;
+        if read > 0 {
+            pending.extend_from_slice(&raw[..read]);
+        }
+
+        let mut consumed = 0usize;
+        loop {
+            let input = &pending[consumed..];
+            let (result, read, written, had_errors) =
+                decoder.decode_to_utf8(input, &mut decoded, eof);
+            has_decoding_warnings |= had_errors;
+            let text = std::str::from_utf8(&decoded[..written]).map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Decoded UTF-8 error: {error}"),
+                )
+            })?;
+            if text.contains('\0') {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Binary files are not supported",
+                ));
+            }
+            if !text.is_empty() {
+                let end = document.piece_tree().len_chars();
+                document.insert_direct(end, text);
+                append_staged_metadata_sample(&mut sample, text);
+                line_count =
+                    accumulate_staged_line_count(text, line_count, &mut line_count_pending_cr);
+            }
+            consumed += read;
+
+            if result == encoding_rs::CoderResult::InputEmpty {
+                break;
+            }
+        }
+
+        if consumed > 0 {
+            pending.drain(..consumed);
+        }
+
+        if eof {
+            break;
+        }
     }
-    &content[..end]
+
+    Ok(LoadedDocument {
+        document,
+        sample,
+        line_count,
+        has_decoding_warnings,
+    })
 }
 
+#[cfg(test)]
 fn staged_display_line_count(content: &str) -> usize {
     let bytes = content.as_bytes();
     let mut lines = 1usize;
@@ -370,6 +404,52 @@ fn staged_display_line_count(content: &str) -> usize {
     }
 
     lines
+}
+
+fn append_staged_metadata_sample(sample: &mut String, chunk: &str) {
+    if sample.len() >= STAGED_METADATA_SAMPLE_BYTES {
+        return;
+    }
+
+    let remaining = STAGED_METADATA_SAMPLE_BYTES - sample.len();
+    if chunk.len() <= remaining {
+        sample.push_str(chunk);
+        return;
+    }
+
+    let mut end = remaining;
+    while end > 0 && !chunk.is_char_boundary(end) {
+        end -= 1;
+    }
+    sample.push_str(&chunk[..end]);
+}
+
+fn accumulate_staged_line_count(
+    chunk: &str,
+    mut line_count: usize,
+    pending_cr: &mut bool,
+) -> usize {
+    for byte in chunk.bytes() {
+        if *pending_cr {
+            *pending_cr = false;
+            if byte == b'\n' {
+                continue;
+            }
+        }
+
+        match byte {
+            b'\r' => {
+                line_count += 1;
+                *pending_cr = true;
+            }
+            b'\n' => {
+                line_count += 1;
+            }
+            _ => {}
+        }
+    }
+
+    line_count
 }
 
 fn encode_content(
@@ -620,23 +700,35 @@ mod tests {
             .expect("write fragmented snapshot");
 
         let reloaded = FileService::read_file(&path).expect("read UTF-16 snapshot");
-        assert_eq!(reloaded.content, "hello wide world");
+        assert_eq!(reloaded.document.extract_text(), "hello wide world");
     }
 
     #[test]
-    fn large_file_read_stages_metadata_refresh() {
+    fn opened_small_file_stages_metadata_refresh() {
         let tempdir = tempfile::tempdir().expect("create tempdir");
-        let path = tempdir.path().join("large.txt");
-        let content = "alpha\n".repeat((super::LARGE_FILE_STAGED_METADATA_BYTES / 6) + 1);
-        std::fs::write(&path, &content).expect("write large file");
+        let path = tempdir.path().join("small.txt");
+        let content = "alpha\nbravo\ncharlie\n";
+        std::fs::write(&path, content).expect("write small file");
 
-        let reloaded = FileService::read_file(&path).expect("read large file");
+        let file_content = FileService::read_file(&path).expect("read small file");
+        let buffer = FileService::build_buffer_from_file_content(&path, file_content, None);
 
-        assert!(!reloaded.metadata_complete);
-        assert_eq!(
-            reloaded.text_metadata.line_count,
-            content.matches('\n').count() + 1
-        );
+        assert!(buffer.text_metadata_refresh_needed());
+        assert_eq!(buffer.line_count, content.matches('\n').count() + 1);
+    }
+
+    #[test]
+    fn opened_sample_sized_file_stages_metadata_refresh() {
+        let tempdir = tempfile::tempdir().expect("create tempdir");
+        let path = tempdir.path().join("sample-sized.txt");
+        let content = "alpha\n".repeat((super::STAGED_METADATA_SAMPLE_BYTES / 6) + 1);
+        std::fs::write(&path, &content).expect("write sample-sized file");
+
+        let file_content = FileService::read_file(&path).expect("read sample-sized file");
+        let buffer = FileService::build_buffer_from_file_content(&path, file_content, None);
+
+        assert!(buffer.text_metadata_refresh_needed());
+        assert_eq!(buffer.line_count, content.matches('\n').count() + 1);
     }
 
     #[test]

@@ -23,7 +23,7 @@ SCENARIO_CONFIG = {
         "workload_family": "capacity-stress",
         "cpu_flamegraph_id": None,
         "memory_guidance": "Use allocation or working-set profiling before adding another CPU flamegraph.",
-        "cpu_guidance": "If load or redraw dominates, compare against the large-file load and scroll latency rows before adding a dedicated load profile.",
+        "cpu_guidance": "If load or redraw dominates, compare against the file-load and scroll latency rows before adding a dedicated load profile.",
     },
     "tab_count_ceiling": {
         "threshold_ms": 140.0,
@@ -35,16 +35,16 @@ SCENARIO_CONFIG = {
     "split_count_ceiling": {
         "threshold_ms": 120.0,
         "workload_family": "capacity-stress",
-        "cpu_flamegraph_id": "large_file_split_profile",
+        "cpu_flamegraph_id": "split_stress_profile",
         "memory_guidance": "Inspect pane-tree growth and allocation churn before chasing another CPU-only explanation.",
-        "cpu_guidance": "Capture the large-file split flamegraph if split rebalance is the limiting path.",
+        "cpu_guidance": "Capture the split-stress flamegraph if split rebalance is the limiting path.",
     },
     "paste_size_ceiling": {
         "threshold_ms": 150.0,
         "workload_family": "capacity-stress",
-        "cpu_flamegraph_id": "large_file_paste_profile",
+        "cpu_flamegraph_id": "paste_stress_profile",
         "memory_guidance": "Check working-set growth and page-fault pressure around paste plus metadata refresh.",
-        "cpu_guidance": "Capture the large-file paste flamegraph if mutation latency dominates without large memory growth.",
+        "cpu_guidance": "Capture the paste-stress flamegraph if mutation latency dominates without large memory growth.",
     },
 }
 

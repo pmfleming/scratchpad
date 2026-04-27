@@ -52,7 +52,7 @@ pub(super) fn handle_mouse_interaction(
         piece_tree,
         char_offset_base,
     };
-    update_hover_cursor(ui, context.response);
+    update_hover_cursor(ui, context.rect);
 
     let Some((pointer_pos, selection)) = pointer_selection(ui, context) else {
         return;
@@ -65,13 +65,13 @@ pub(super) fn handle_mouse_interaction(
     let click_id = context.response.id.with("click_state");
     let mut click_state = load_click_state(ui, click_id);
 
-    if should_ignore_secondary_pointer(ui, context.response) {
+    if should_ignore_secondary_pointer(ui, context.response, context.rect) {
         click_state.was_primary_pointer_down = false;
         store_click_state(ui, click_id, click_state);
         return;
     }
 
-    let primary_pointer_down = is_primary_pointer_down(ui, context.response);
+    let primary_pointer_down = is_primary_pointer_down(ui, context.response, context.rect);
     handle_primary_pointer(
         ui,
         view,
@@ -126,17 +126,15 @@ fn apply_click_selection(
         selection.click_count,
     );
 
-    match click_count {
+    view.cursor_range = Some(match click_count {
         2 => {
             let start = word_boundary::word_start(context.piece_tree, selection.char_cursor.index);
             let end = word_boundary::word_end(context.piece_tree, selection.char_cursor.index);
-            view.cursor_range = Some(CursorRange::two(start, end));
+            CursorRange::two(start, end)
         }
-        n if n >= 3 => {
-            view.cursor_range = Some(line_selection_range(context, selection.cursor_at_pointer))
-        }
-        _ => apply_single_click(ui, view, selection.char_cursor),
-    }
+        n if n >= 3 => line_selection_range(context, selection.cursor_at_pointer),
+        _ => cursor_range_after_click(ui, view.cursor_range, selection.char_cursor),
+    });
 }
 
 fn line_selection_range(
@@ -146,14 +144,8 @@ fn line_selection_range(
     let row_start = context.galley.cursor_begin_of_row(&cursor_at_pointer);
     let row_end = context.galley.cursor_end_of_row(&cursor_at_pointer);
     CursorRange {
-        primary: CharCursor {
-            index: context.char_offset_base + row_end.index,
-            prefer_next_row: row_end.prefer_next_row,
-        },
-        secondary: CharCursor {
-            index: context.char_offset_base + row_start.index,
-            prefer_next_row: row_start.prefer_next_row,
-        },
+        primary: char_cursor_with_offset(row_end, context.char_offset_base),
+        secondary: char_cursor_with_offset(row_start, context.char_offset_base),
     }
 }
 
@@ -171,10 +163,6 @@ pub(super) fn cursor_range_after_click(
         primary: clicked_cursor,
         secondary: existing.secondary,
     }
-}
-
-fn apply_single_click(ui: &egui::Ui, view: &mut EditorViewState, char_cursor: CharCursor) {
-    view.cursor_range = Some(cursor_range_after_click(ui, view.cursor_range, char_cursor));
 }
 
 fn normalize_click_count(
@@ -197,15 +185,13 @@ fn pointer_selection(
     let pointer_pos = tracked_pointer_pos(
         context.response.interact_pointer_pos(),
         ui.input(|input| input.pointer.latest_pos()),
+        context.rect,
         context.response.dragged_by(egui::PointerButton::Primary),
     )?;
     let cursor_at_pointer = context
         .galley
         .cursor_from_pos(pointer_pos - context.rect.min);
-    let char_cursor = CharCursor {
-        index: context.char_offset_base + cursor_at_pointer.index,
-        prefer_next_row: cursor_at_pointer.prefer_next_row,
-    };
+    let char_cursor = char_cursor_with_offset(cursor_at_pointer, context.char_offset_base);
 
     Some((
         pointer_pos,
@@ -220,9 +206,17 @@ fn pointer_selection(
 fn tracked_pointer_pos(
     interact_pointer_pos: Option<egui::Pos2>,
     latest_pointer_pos: Option<egui::Pos2>,
+    rect: egui::Rect,
     is_dragged: bool,
 ) -> Option<egui::Pos2> {
-    interact_pointer_pos.or_else(|| is_dragged.then_some(latest_pointer_pos).flatten())
+    interact_pointer_pos.or_else(|| latest_pointer_pos.filter(|pos| is_dragged || rect.contains(*pos)))
+}
+
+fn char_cursor_with_offset(cursor: egui::text::CCursor, char_offset_base: usize) -> CharCursor {
+    CharCursor {
+        index: char_offset_base + cursor.index,
+        prefer_next_row: cursor.prefer_next_row,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -254,8 +248,10 @@ fn handle_primary_pointer(
     apply_click_selection(ui, view, selection_context, selection);
 }
 
-fn update_hover_cursor(ui: &mut egui::Ui, response: &egui::Response) {
-    if response.hovered() {
+fn update_hover_cursor(ui: &mut egui::Ui, rect: egui::Rect) {
+    if ui
+        .input(|input| input.pointer.hover_pos().is_some_and(|pos| rect.contains(pos)))
+    {
         ui.output_mut(|output| output.mutable_text_under_cursor = true);
         ui.set_cursor_icon(egui::CursorIcon::Text);
     }
@@ -270,16 +266,20 @@ fn store_click_state(ui: &mut egui::Ui, click_id: egui::Id, click_state: ClickSt
     ui.data_mut(|data| data.insert_temp(click_id, click_state));
 }
 
-fn should_ignore_secondary_pointer(ui: &egui::Ui, response: &egui::Response) -> bool {
+fn should_ignore_secondary_pointer(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    rect: egui::Rect,
+) -> bool {
     response.secondary_clicked()
-        || (response.contains_pointer()
+        || (ui.input(|input| input.pointer.latest_pos().is_some_and(|pos| rect.contains(pos)))
             && ui.input(|input| input.pointer.button_down(egui::PointerButton::Secondary)))
 }
 
-fn is_primary_pointer_down(ui: &egui::Ui, response: &egui::Response) -> bool {
+fn is_primary_pointer_down(ui: &egui::Ui, response: &egui::Response, rect: egui::Rect) -> bool {
     primary_pointer_tracking_active(
         ui.input(|input| input.pointer.button_down(egui::PointerButton::Primary)),
-        response.contains_pointer(),
+        ui.input(|input| input.pointer.latest_pos().is_some_and(|pos| rect.contains(pos))),
         response.dragged_by(egui::PointerButton::Primary),
     )
 }
@@ -295,9 +295,9 @@ fn primary_pointer_tracking_active(
 #[cfg(test)]
 mod tests {
     use super::{
-        ClickSelectionContext, PointerSelection, apply_click_selection, cursor_range_after_click,
-        extend_selection_to_cursor, line_selection_range, normalize_click_count,
-        primary_pointer_tracking_active, tracked_pointer_pos,
+        ClickSelectionContext, PointerSelection, apply_click_selection, char_cursor_with_offset,
+        cursor_range_after_click, extend_selection_to_cursor, line_selection_range,
+        normalize_click_count, primary_pointer_tracking_active, tracked_pointer_pos,
     };
     use crate::app::domain::{EditorViewState, buffer::PieceTreeLite};
     use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
@@ -395,10 +395,28 @@ mod tests {
     #[test]
     fn tracked_pointer_pos_falls_back_to_latest_position_for_active_drag() {
         let latest = egui::pos2(24.0, 48.0);
+        let rect = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(32.0, 64.0));
 
-        assert_eq!(tracked_pointer_pos(None, Some(latest), true), Some(latest));
-        assert_eq!(tracked_pointer_pos(Some(latest), None, false), Some(latest));
-        assert_eq!(tracked_pointer_pos(None, Some(latest), false), None);
+        assert_eq!(tracked_pointer_pos(None, Some(latest), rect, true), Some(latest));
+        assert_eq!(tracked_pointer_pos(Some(latest), None, rect, false), Some(latest));
+        assert_eq!(tracked_pointer_pos(None, Some(latest), rect, false), Some(latest));
+        assert_eq!(
+            tracked_pointer_pos(None, Some(egui::pos2(48.0, 96.0)), rect, false),
+            None
+        );
+    }
+
+    #[test]
+    fn char_cursor_with_offset_preserves_prefer_next_row() {
+        let cursor = egui::text::CCursor {
+            index: 5,
+            prefer_next_row: true,
+        };
+
+        let adjusted = char_cursor_with_offset(cursor, 7);
+
+        assert_eq!(adjusted.index, 12);
+        assert!(adjusted.prefer_next_row);
     }
 
     #[test]

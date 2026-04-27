@@ -13,7 +13,7 @@ pub(super) fn handle_mouse_interaction(
     view: &mut EditorViewState,
     piece_tree: &crate::app::domain::buffer::PieceTreeLite,
 ) {
-    mouse::handle_mouse_interaction(ui, response, galley, rect, view, piece_tree, 0);
+    handle_mouse_interaction_window(ui, response, galley, rect, view, piece_tree, 0);
 }
 
 pub(super) fn cursor_range_after_click(
@@ -67,10 +67,22 @@ pub(super) fn handle_keyboard_events_unwrapped(
 
 pub(super) fn sync_view_cursor_before_render(view: &mut EditorViewState, focused: bool) {
     if let Some(cursor_range) = view.pending_cursor_range.take() {
-        view.cursor_range = Some(cursor_range);
-        view.request_cursor_reveal(CursorRevealMode::Center);
-    } else if focused && view.cursor_range.is_none() {
-        view.cursor_range = Some(CursorRange::one(CharCursor::new(0)));
-        view.request_cursor_reveal(CursorRevealMode::KeepVisible);
+        restore_pending_cursor(view, cursor_range);
+        return;
     }
+
+    if !focused || view.cursor_range.is_some() {
+        return;
+    }
+
+    view.cursor_range = Some(CursorRange::one(CharCursor::new(0)));
+    view.request_cursor_reveal(CursorRevealMode::KeepVisible);
+}
+
+fn restore_pending_cursor(view: &mut EditorViewState, cursor_range: CursorRange) {
+    view.cursor_range = Some(cursor_range);
+    view.request_cursor_reveal(
+        view.cursor_reveal_mode()
+            .unwrap_or(CursorRevealMode::Center),
+    );
 }

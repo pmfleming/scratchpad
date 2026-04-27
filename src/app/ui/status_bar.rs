@@ -30,7 +30,8 @@ struct ActiveStatusDetails {
     icon_tooltip: &'static str,
     icon_color: egui::Color32,
     freshness_label: Option<String>,
-    is_large_file: bool,
+    metadata_refresh_pending: bool,
+    encoding_compliance_pending: bool,
     has_control_chars: bool,
 }
 
@@ -112,7 +113,8 @@ fn collect_active_status_details(
         icon_tooltip,
         icon_color,
         freshness_label: tab.buffer.disk_status_label().map(str::to_owned),
-        is_large_file: file_length.bytes > 5 * 1024 * 1024,
+        metadata_refresh_pending: tab.buffer.text_metadata_refresh_needed(),
+        encoding_compliance_pending: tab.buffer.encoding_compliance_refresh_needed(),
         has_control_chars,
     })
 }
@@ -300,12 +302,17 @@ fn show_status_warnings(ui: &mut egui::Ui, details: &ActiveStatusDetails) {
         ui.label(egui::RichText::new(freshness_label).color(egui::Color32::YELLOW));
     }
 
-    if details.is_large_file {
+    if let Some(metadata_warning) = metadata_refresh_warning(details.metadata_refresh_pending) {
         ui.separator();
-        ui.label(
-            egui::RichText::new("Large file: performance may be degraded")
-                .color(egui::Color32::YELLOW),
-        );
+        ui.label(egui::RichText::new(metadata_warning).color(egui::Color32::YELLOW));
+    }
+
+    if let Some(encoding_warning) = encoding_compliance_warning(
+        details.encoding_compliance_pending,
+        details.has_non_compliant_characters,
+    ) {
+        ui.separator();
+        ui.label(egui::RichText::new(encoding_warning).color(egui::Color32::YELLOW));
     }
 
     if details.has_non_compliant_characters {
@@ -368,6 +375,18 @@ fn viewport_label(status: &BufferViewStatus) -> Option<String> {
     Some(format!("View {start}-{end}"))
 }
 
+fn metadata_refresh_warning(metadata_refresh_pending: bool) -> Option<&'static str> {
+    metadata_refresh_pending.then_some("Metadata refreshing")
+}
+
+fn encoding_compliance_warning(
+    encoding_compliance_pending: bool,
+    has_non_compliant_characters: bool,
+) -> Option<&'static str> {
+    (encoding_compliance_pending && !has_non_compliant_characters)
+        .then_some("Encoding compliance checking")
+}
+
 fn artifact_icon(
     has_control_chars: bool,
     show_control_chars: bool,
@@ -406,7 +425,10 @@ fn plain_text_icon_color(dark_mode: bool) -> egui::Color32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{BufferViewStatus, cursor_label, selection_label, viewport_label};
+    use super::{
+        BufferViewStatus, cursor_label, encoding_compliance_warning, metadata_refresh_warning,
+        selection_label, viewport_label,
+    };
 
     #[test]
     fn cursor_label_formats_one_based_coordinates() {
@@ -435,5 +457,21 @@ mod tests {
         };
 
         assert_eq!(viewport_label(&status).as_deref(), Some("View 40-52"));
+    }
+
+    #[test]
+    fn metadata_refresh_warning_tracks_pending_refresh_state() {
+        assert_eq!(metadata_refresh_warning(true), Some("Metadata refreshing"));
+        assert_eq!(metadata_refresh_warning(false), None);
+    }
+
+    #[test]
+    fn encoding_compliance_warning_hides_when_non_compliance_is_already_known() {
+        assert_eq!(
+            encoding_compliance_warning(true, false),
+            Some("Encoding compliance checking")
+        );
+        assert_eq!(encoding_compliance_warning(true, true), None);
+        assert_eq!(encoding_compliance_warning(false, false), None);
     }
 }

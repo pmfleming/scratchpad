@@ -134,9 +134,11 @@ impl BufferState {
         mut format: TextFormatMetadata,
     ) -> Self {
         let text_metadata = buffer_text_metadata(&content, &mut format);
+        let document =
+            TextDocument::with_preferred_line_ending(content, text_metadata.preferred_line_ending);
         Self::build(
             next_buffer_id(),
-            content,
+            document,
             text_metadata,
             BufferBuildState {
                 name,
@@ -151,19 +153,9 @@ impl BufferState {
         )
     }
 
-    pub(crate) fn with_text_metadata(
+    pub(crate) fn with_document_text_metadata_refresh_state(
         name: String,
-        content: String,
-        path: Option<PathBuf>,
-        format: TextFormatMetadata,
-        text_metadata: BufferTextMetadata,
-    ) -> Self {
-        Self::with_text_metadata_refresh_state(name, content, path, format, text_metadata, false)
-    }
-
-    pub(crate) fn with_text_metadata_refresh_state(
-        name: String,
-        content: String,
+        document: TextDocument,
         path: Option<PathBuf>,
         format: TextFormatMetadata,
         text_metadata: BufferTextMetadata,
@@ -171,7 +163,7 @@ impl BufferState {
     ) -> Self {
         Self::build(
             next_buffer_id(),
-            content,
+            document,
             text_metadata,
             BufferBuildState {
                 name,
@@ -197,14 +189,30 @@ impl BufferState {
         restored: RestoredBufferState,
         text_metadata: BufferTextMetadata,
     ) -> Self {
-        register_existing_buffer_id(restored.id);
-        Self::restore_build(restored, text_metadata)
+        let document = TextDocument::with_preferred_line_ending(
+            restored.content.clone(),
+            text_metadata.preferred_line_ending,
+        );
+        Self::restored_with_document_text_metadata(restored, document, text_metadata)
     }
 
-    fn restore_build(restored: RestoredBufferState, text_metadata: BufferTextMetadata) -> Self {
+    pub(crate) fn restored_with_document_text_metadata(
+        restored: RestoredBufferState,
+        document: TextDocument,
+        text_metadata: BufferTextMetadata,
+    ) -> Self {
+        register_existing_buffer_id(restored.id);
+        Self::restore_build(restored, document, text_metadata)
+    }
+
+    fn restore_build(
+        restored: RestoredBufferState,
+        document: TextDocument,
+        text_metadata: BufferTextMetadata,
+    ) -> Self {
         Self::build(
             restored.id,
-            restored.content,
+            document,
             text_metadata,
             BufferBuildState {
                 name: restored.name,
@@ -538,17 +546,14 @@ impl BufferState {
 
     fn build(
         id: BufferId,
-        content: String,
+        document: TextDocument,
         text_metadata: BufferTextMetadata,
         state: BufferBuildState,
     ) -> Self {
         Self {
             id,
             name: state.name,
-            document: TextDocument::with_preferred_line_ending(
-                content,
-                text_metadata.preferred_line_ending,
-            ),
+            document,
             path: state.path,
             is_dirty: state.is_dirty,
             is_settings_file: false,

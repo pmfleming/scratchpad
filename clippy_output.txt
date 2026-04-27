@@ -1,0 +1,5 @@
+    Blocking waiting for file lock on build directory
+warning: error finalizing incremental compilation session directory `\\?\D:\Code\scratchpad\target\debug\incremental\scratchpad-0b79c9mfc7xt1\s-hhza8szo86-1bbvuaa-working`: Access is denied. (os error 5)
+
+warning: `scratchpad` (lib) generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 39.88s

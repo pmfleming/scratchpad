@@ -1,9 +1,10 @@
 use crate::app::domain::{
     BufferState, DiskFileState, DocumentSnapshot, TextArtifactSummary, TextFormatMetadata,
 };
-use crate::app::services::file_service::FileService;
+use crate::app::services::file_service::{FileContent, FileService};
 use crate::app::services::session_store::{RestoredSession, SessionPersistRequest, SessionStore};
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, SendError, Sender};
 use std::thread;
 
@@ -93,19 +94,39 @@ pub(crate) struct BackgroundIoDispatcher {
     analysis_tx: Sender<BackgroundIoRequest>,
 }
 
+pub(crate) struct BackgroundIoSendError {
+    request: Box<BackgroundIoRequest>,
+}
+
+impl BackgroundIoSendError {
+    fn from_send_error(error: SendError<BackgroundIoRequest>) -> Self {
+        Self {
+            request: Box::new(error.0),
+        }
+    }
+
+    pub(crate) fn into_request(self) -> BackgroundIoRequest {
+        *self.request
+    }
+}
+
 impl BackgroundIoDispatcher {
-    pub(crate) fn send(
-        &self,
-        request: BackgroundIoRequest,
-    ) -> Result<(), SendError<BackgroundIoRequest>> {
+    pub(crate) fn send(&self, request: BackgroundIoRequest) -> Result<(), BackgroundIoSendError> {
         match request {
-            request @ BackgroundIoRequest::LoadPaths { .. } => self.path_tx.send(request),
+            request @ BackgroundIoRequest::LoadPaths { .. } => self
+                .path_tx
+                .send(request)
+                .map_err(BackgroundIoSendError::from_send_error),
             request @ BackgroundIoRequest::RestoreSession { .. }
-            | request @ BackgroundIoRequest::PersistSession { .. } => self.session_tx.send(request),
+            | request @ BackgroundIoRequest::PersistSession { .. } => self
+                .session_tx
+                .send(request)
+                .map_err(BackgroundIoSendError::from_send_error),
             request @ BackgroundIoRequest::RefreshTextMetadata { .. }
-            | request @ BackgroundIoRequest::RefreshEncodingCompliance { .. } => {
-                self.analysis_tx.send(request)
-            }
+            | request @ BackgroundIoRequest::RefreshEncodingCompliance { .. } => self
+                .analysis_tx
+                .send(request)
+                .map_err(BackgroundIoSendError::from_send_error),
         }
     }
 }
@@ -245,45 +266,32 @@ fn load_paths(requests: Vec<PathLoadRequest>) -> Vec<LoadedPathResult> {
     requests
         .into_iter()
         .map(|request| match request {
-            PathLoadRequest::Standard(path) => {
-                let disk_state = FileService::read_disk_state(&path).ok();
-                let result = FileService::read_file(&path)
-                    .map(|file_content| {
-                        FileService::build_buffer_from_file_content(
-                            &path,
-                            file_content,
-                            disk_state.clone(),
-                        )
-                    })
-                    .map_err(|error| error.to_string());
-                LoadedPathResult {
-                    path,
-                    disk_state,
-                    result,
-                }
-            }
+            PathLoadRequest::Standard(path) => load_path_result(path, FileService::read_file),
             PathLoadRequest::WithEncoding {
                 path,
                 encoding_name,
-            } => {
-                let disk_state = FileService::read_disk_state(&path).ok();
-                let result = FileService::read_file_with_encoding(&path, &encoding_name)
-                    .map(|file_content| {
-                        FileService::build_buffer_from_file_content(
-                            &path,
-                            file_content,
-                            disk_state.clone(),
-                        )
-                    })
-                    .map_err(|error| error.to_string());
-                LoadedPathResult {
-                    path,
-                    disk_state,
-                    result,
-                }
-            }
+            } => load_path_result(path, |path| {
+                FileService::read_file_with_encoding(path, &encoding_name)
+            }),
         })
         .collect()
+}
+
+fn load_path_result(
+    path: PathBuf,
+    read_file: impl FnOnce(&Path) -> io::Result<FileContent>,
+) -> LoadedPathResult {
+    let disk_state = FileService::read_disk_state(&path).ok();
+    let result = read_file(&path)
+        .map(|file_content| {
+            FileService::build_buffer_from_file_content(&path, file_content, disk_state.clone())
+        })
+        .map_err(|error| error.to_string());
+    LoadedPathResult {
+        path,
+        disk_state,
+        result,
+    }
 }
 
 fn refresh_text_metadata(

@@ -2,6 +2,7 @@ mod matchers;
 
 use matchers::{collect_regex_matches, plain_text_matches};
 use regex::RegexBuilder;
+use regex_syntax::parse;
 use std::ops::Range;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -14,12 +15,13 @@ pub enum SearchMode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SearchError {
     InvalidRegex(String),
+    UnsupportedRegex(String),
 }
 
 impl SearchError {
     pub fn message(&self) -> &str {
         match self {
-            Self::InvalidRegex(message) => message,
+            Self::InvalidRegex(message) | Self::UnsupportedRegex(message) => message,
         }
     }
 }
@@ -64,7 +66,7 @@ pub fn validate_search_query(query: &str, options: SearchOptions) -> Option<Sear
 
     match options.mode {
         SearchMode::PlainText => None,
-        SearchMode::Regex => compile_regex(query, options).err(),
+        SearchMode::Regex => compile_supported_regex(query, options).err(),
     }
 }
 
@@ -112,6 +114,23 @@ where
     }
 }
 
+pub fn regex_max_match_chars(query: &str) -> Option<usize> {
+    parse(query).ok()?.properties().maximum_len()
+}
+
+fn compile_supported_regex(
+    query: &str,
+    options: SearchOptions,
+) -> Result<regex::Regex, SearchError> {
+    let regex = compile_regex(query, options)?;
+    if regex_max_match_chars(query).is_none() {
+        return Err(SearchError::UnsupportedRegex(
+            "Regex search requires a bounded maximum match length.".to_owned(),
+        ));
+    }
+    Ok(regex)
+}
+
 fn plain_text_search(text: &str, query: &str, options: SearchOptions) -> SearchOutcome {
     let mut should_continue = || true;
     SearchOutcome::with_matches(
@@ -133,7 +152,7 @@ where
 }
 
 fn regex_search(text: &str, query: &str, options: SearchOptions) -> SearchOutcome {
-    match compile_regex(query, options) {
+    match compile_supported_regex(query, options) {
         Ok(regex) => {
             let mut should_continue = || true;
             SearchOutcome::with_matches(
@@ -160,7 +179,7 @@ fn regex_search_interruptible<F>(
 where
     F: FnMut() -> bool,
 {
-    let regex = match compile_regex(query, options) {
+    let regex = match compile_supported_regex(query, options) {
         Ok(regex) => regex,
         Err(error) => return Some(SearchOutcome::with_error(error)),
     };
@@ -282,6 +301,25 @@ mod tests {
         );
         assert!(outcome.matches.is_empty());
         assert!(matches!(outcome.error, Some(SearchError::InvalidRegex(_))));
+    }
+
+    #[test]
+    fn regex_search_reports_unbounded_queries_as_unsupported() {
+        let outcome = search_text(
+            "Alpha beta alpha",
+            "alpha+",
+            SearchOptions {
+                mode: SearchMode::Regex,
+                match_case: true,
+                whole_word: false,
+            },
+        );
+
+        assert!(outcome.matches.is_empty());
+        assert!(matches!(
+            outcome.error,
+            Some(SearchError::UnsupportedRegex(_))
+        ));
     }
 
     #[test]

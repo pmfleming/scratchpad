@@ -39,14 +39,14 @@ pub const RECOMMENDED_DOCUMENT_SNAPSHOT_BYTES: usize = 4 * MB;
 pub const RECOMMENDED_DOCUMENT_SNAPSHOT_ITERATIONS: usize = 128;
 pub const RECOMMENDED_VIEWPORT_EXTRACTION_BYTES: usize = 4 * MB;
 pub const RECOMMENDED_VIEWPORT_EXTRACTION_ITERATIONS: usize = 96;
-pub const RECOMMENDED_LARGE_FILE_SCROLL_BYTES: usize = MB;
-pub const RECOMMENDED_LARGE_FILE_SCROLL_ITERATIONS: usize = 28;
-pub const RECOMMENDED_LARGE_FILE_PASTE_BASE_BYTES: usize = MB;
-pub const RECOMMENDED_LARGE_FILE_PASTE_INSERT_BYTES: usize = 128 * KB;
-pub const RECOMMENDED_LARGE_FILE_PASTE_ITERATIONS: usize = 20;
-pub const RECOMMENDED_LARGE_FILE_SPLIT_TILES: usize = 12;
-pub const RECOMMENDED_LARGE_FILE_SPLIT_BYTES_PER_TILE: usize = 256 * KB;
-pub const RECOMMENDED_LARGE_FILE_SPLIT_ITERATIONS: usize = 24;
+pub const RECOMMENDED_SCROLL_STRESS_BYTES: usize = MB;
+pub const RECOMMENDED_SCROLL_STRESS_ITERATIONS: usize = 28;
+pub const RECOMMENDED_PASTE_STRESS_BASE_BYTES: usize = MB;
+pub const RECOMMENDED_PASTE_STRESS_INSERT_BYTES: usize = 128 * KB;
+pub const RECOMMENDED_PASTE_STRESS_ITERATIONS: usize = 20;
+pub const RECOMMENDED_SPLIT_STRESS_TILES: usize = 12;
+pub const RECOMMENDED_SPLIT_STRESS_BYTES_PER_TILE: usize = 256 * KB;
+pub const RECOMMENDED_SPLIT_STRESS_ITERATIONS: usize = 24;
 
 const PROFILE_QUERY: &str = "needle";
 const PROFILE_RESET_QUERY: &str = "zzzz-no-match";
@@ -238,7 +238,7 @@ pub fn run_viewport_extraction_profile(bytes: usize, iterations: usize) -> usize
     })
 }
 
-pub fn run_large_file_scroll_profile(bytes: usize, iterations: usize) -> usize {
+pub fn run_scroll_stress_profile(bytes: usize, iterations: usize) -> usize {
     let text = plain_text_of_size(bytes);
     let ctx = egui::Context::default();
     let font_id = egui::FontId::monospace(15.0);
@@ -280,7 +280,7 @@ pub fn run_large_file_scroll_profile(bytes: usize, iterations: usize) -> usize {
     })
 }
 
-pub fn run_large_file_paste_profile(
+pub fn run_paste_stress_profile(
     base_bytes: usize,
     insert_bytes: usize,
     iterations: usize,
@@ -289,7 +289,7 @@ pub fn run_large_file_paste_profile(
     let insert_text = plain_text_of_size(insert_bytes);
     let insert_char_count = insert_text.chars().count();
 
-    let mut buffer = BufferState::new("large_paste_profile.txt".to_owned(), base_text, None);
+    let mut buffer = BufferState::new("paste_stress_profile.txt".to_owned(), base_text, None);
 
     sum_profile_iterations(iterations, || {
         let midpoint = buffer.document().piece_tree().len_chars() / 2;
@@ -300,12 +300,12 @@ pub fn run_large_file_paste_profile(
     })
 }
 
-pub fn run_large_file_split_profile(
+pub fn run_split_stress_profile(
     tile_count: usize,
     bytes_per_tile: usize,
     iterations: usize,
 ) -> usize {
-    with_steady_state_app("large-file-split", |app| {
+    with_steady_state_app("split-stress", |app| {
         app.tabs_mut()[0] = build_balanced_tile_tab(0, tile_count, bytes_per_tile);
         let mut axis_seed = 0usize;
 

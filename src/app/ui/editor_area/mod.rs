@@ -297,11 +297,14 @@ fn apply_editor_change(app: &mut ScratchpadApp, state: &EditorRenderState) {
 
 #[cfg(test)]
 mod tests {
-    use super::{show_editor, split_rect};
+    use super::{show_editor, split_rect, tile};
     use crate::app::app_state::ScratchpadApp;
     use crate::app::domain::{BufferState, PaneNode, SplitAxis, ViewId};
     use crate::app::fonts;
     use crate::app::services::session_store::SessionStore;
+    use crate::app::ui::editor_content::native_editor::{
+        VisibleWindowDebugSnapshot, load_visible_window_debug_snapshot,
+    };
     use eframe::egui;
     use std::collections::HashMap;
 
@@ -334,6 +337,25 @@ mod tests {
         );
     }
 
+    fn run_editor_frame_with_rect(
+        ctx: &egui::Context,
+        app: &mut ScratchpadApp,
+        time: f64,
+        events: Vec<egui::Event>,
+        screen_rect: egui::Rect,
+    ) {
+        let _ = fonts::apply_editor_fonts(ctx, app.editor_font());
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(screen_rect),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ui| show_editor(ui, app),
+        );
+    }
+
     fn move_event(pos: egui::Pos2) -> egui::Event {
         egui::Event::PointerMoved(pos)
     }
@@ -343,6 +365,25 @@ mod tests {
             pos,
             button,
             pressed,
+            modifiers: egui::Modifiers::default(),
+        }
+    }
+
+    fn mouse_wheel_event(delta: egui::Vec2) -> egui::Event {
+        egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta,
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::default(),
+        }
+    }
+
+    fn key_event(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
             modifiers: egui::Modifiers::default(),
         }
     }
@@ -372,8 +413,46 @@ mod tests {
         time + 1.0
     }
 
+    fn click_pointer_with_rect(
+        ctx: &egui::Context,
+        app: &mut ScratchpadApp,
+        mut time: f64,
+        pos: egui::Pos2,
+        button: egui::PointerButton,
+        screen_rect: egui::Rect,
+    ) -> f64 {
+        run_editor_frame_with_rect(ctx, app, time, vec![move_event(pos)], screen_rect);
+        time += 1.0;
+        run_editor_frame_with_rect(
+            ctx,
+            app,
+            time,
+            vec![move_event(pos), button_event(pos, button, true)],
+            screen_rect,
+        );
+        time += 1.0;
+        run_editor_frame_with_rect(
+            ctx,
+            app,
+            time,
+            vec![move_event(pos), button_event(pos, button, false)],
+            screen_rect,
+        );
+        time + 1.0
+    }
+
     fn settle_frame(ctx: &egui::Context, app: &mut ScratchpadApp, time: f64) -> f64 {
         run_editor_frame(ctx, app, time, Vec::new());
+        time + 1.0
+    }
+
+    fn settle_frame_with_rect(
+        ctx: &egui::Context,
+        app: &mut ScratchpadApp,
+        time: f64,
+        screen_rect: egui::Rect,
+    ) -> f64 {
+        run_editor_frame_with_rect(ctx, app, time, Vec::new(), screen_rect);
         time + 1.0
     }
 
@@ -409,6 +488,437 @@ mod tests {
         let x = (rect.left() + 48.0).clamp(rect.left() + 12.0, rect.right() - 12.0);
         let y = (rect.top() + 72.0).clamp(rect.top() + 12.0, rect.bottom() - 12.0);
         egui::pos2(x, y)
+    }
+
+    fn active_scroll_area_state(
+        ctx: &egui::Context,
+        app: &ScratchpadApp,
+    ) -> Option<tile::EditorScrollAreaDebugState> {
+        let tab = &app.tabs()[0];
+        tile::load_editor_scroll_debug_state(ctx, tab.active_view_id)
+    }
+
+    fn active_visible_window_debug(
+        ctx: &egui::Context,
+        app: &ScratchpadApp,
+    ) -> Option<VisibleWindowDebugSnapshot> {
+        let tab = &app.tabs()[0];
+        load_visible_window_debug_snapshot(ctx, tab.active_view_id)
+    }
+
+    fn visible_window_click_point(
+        snapshot: &VisibleWindowDebugSnapshot,
+        target_line: usize,
+    ) -> egui::Pos2 {
+        assert!(
+            !snapshot.line_range.is_empty(),
+            "expected visible lines in snapshot: {snapshot:?}"
+        );
+        let clamped_line =
+            target_line.clamp(snapshot.line_range.start, snapshot.line_range.end - 1);
+        let row_index = clamped_line - snapshot.line_range.start;
+        let x = (snapshot.rect.left() + 48.0)
+            .clamp(snapshot.rect.left() + 4.0, snapshot.rect.right() - 4.0);
+        let y = (snapshot.rect.top() + (row_index as f32 + 0.5) * snapshot.row_height)
+            .clamp(snapshot.rect.top() + 1.0, snapshot.rect.bottom() - 1.0);
+        egui::pos2(x, y)
+    }
+
+    fn line_index_for_active_cursor(app: &ScratchpadApp) -> Option<usize> {
+        let tab = &app.tabs()[0];
+        let view = tab.view(tab.active_view_id)?;
+        let cursor = view.pending_cursor_range.or(view.cursor_range)?;
+        Some(
+            tab.buffer
+                .document()
+                .piece_tree()
+                .char_position(cursor.primary.index)
+                .line_index,
+        )
+    }
+
+    fn active_view_visible_lines(app: &ScratchpadApp) -> Option<std::ops::Range<usize>> {
+        let tab = &app.tabs()[0];
+        let view = tab.view(tab.active_view_id)?;
+        Some(view.latest_layout.as_ref()?.visible_line_range())
+    }
+
+    #[test]
+    fn visible_window_release_snapshot_tracks_widget_rect_and_pointer_path() {
+        let screen_rect = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(900.0, 320.0));
+        let ctx = egui::Context::default();
+        let mut app = test_app();
+        app.set_font_size(32.0);
+        app.set_word_wrap(false);
+        let long_line = "x".repeat(20_000);
+        app.tabs_mut()[0].buffer.replace_text(
+            (0..300)
+                .map(|line| format!("line {line:03} {long_line}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        let active_view_id = app.tabs()[0].active_view_id;
+
+        let mut time = 0.0;
+        time = settle_frame_with_rect(&ctx, &mut app, time, screen_rect);
+        {
+            let view = app.tabs_mut()[0]
+                .view_mut(active_view_id)
+                .expect("active view");
+            view.editor_has_focus = false;
+            view.cursor_range = None;
+            view.pending_cursor_range = None;
+            view.clear_cursor_reveal();
+        }
+        time = settle_frame_with_rect(&ctx, &mut app, time, screen_rect);
+
+        let visible_window =
+            active_visible_window_debug(&ctx, &app).expect("visible window snapshot after settle");
+        let target_line = visible_window.line_range.start.saturating_add(1);
+        let target = visible_window_click_point(&visible_window, target_line);
+
+        let _ = click_pointer_with_rect(
+            &ctx,
+            &mut app,
+            time,
+            target,
+            egui::PointerButton::Primary,
+            screen_rect,
+        );
+
+        let release_snapshot =
+            active_visible_window_debug(&ctx, &app).expect("visible window release snapshot");
+        assert!(
+            release_snapshot.primary_released,
+            "expected release-frame snapshot, got {release_snapshot:?}"
+        );
+        assert!(
+            release_snapshot.rect.contains(target),
+            "expected click target inside release rect, target={target:?}, snapshot={release_snapshot:?}"
+        );
+        assert_eq!(release_snapshot.latest_pointer_pos, Some(target));
+    }
+
+    #[test]
+    fn scrolled_visible_window_click_places_cursor_in_scrolled_document_region() {
+        let ctx = egui::Context::default();
+        let mut app = test_app();
+        app.set_font_size(14.0);
+        app.set_word_wrap(false);
+        app.tabs_mut()[0].buffer.replace_text(
+            (0..150)
+                .map(|line| format!("line {line:03}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        let active_view_id = app.tabs()[0].active_view_id;
+
+        let mut time = 0.0;
+        time = settle_frame(&ctx, &mut app, time);
+        {
+            let view = app.tabs_mut()[0]
+                .view_mut(active_view_id)
+                .expect("active view");
+            view.set_editor_scroll_offset(egui::vec2(0.0, 100.0 * 18.0));
+            view.editor_has_focus = false;
+            view.cursor_range = None;
+            view.pending_cursor_range = None;
+            view.clear_cursor_reveal();
+        }
+        time = settle_frame(&ctx, &mut app, time);
+
+        let settled_offset =
+            active_scroll_area_state(&ctx, &app).expect("scroll area state after settle");
+        let visible_lines = active_view_visible_lines(&app).expect("visible lines after settle");
+        assert!(
+            settled_offset.offset.y >= 95.0 * 18.0,
+            "expected scrolled offset near line 100, got {settled_offset:?}"
+        );
+        assert!(
+            visible_lines.start >= 95,
+            "expected visible window near line 100 before click, got {visible_lines:?}"
+        );
+        let visible_window =
+            active_visible_window_debug(&ctx, &app).expect("visible window snapshot after settle");
+        assert!(
+            visible_window.line_range.contains(&100),
+            "expected release target line in visible window, got {visible_window:?}"
+        );
+
+        let target = visible_window_click_point(&visible_window, 100);
+        time = click_pointer_with_rect(
+            &ctx,
+            &mut app,
+            time,
+            target,
+            egui::PointerButton::Primary,
+            TEST_SCREEN_RECT,
+        );
+        let release_snapshot =
+            active_visible_window_debug(&ctx, &app).expect("visible window release snapshot");
+        assert!(
+            release_snapshot.primary_released,
+            "expected release-frame snapshot, got {release_snapshot:?}"
+        );
+        assert!(
+            release_snapshot.rect.contains(target),
+            "expected click target inside release rect, target={target:?}, snapshot={release_snapshot:?}"
+        );
+        let _ = settle_frame(&ctx, &mut app, time);
+
+        let clicked_line = line_index_for_active_cursor(&app).unwrap_or_else(|| {
+            panic!("cursor after click; release snapshot: {release_snapshot:?}")
+        });
+        assert!(
+            clicked_line >= 95,
+            "expected visible-window click after scrolling to land near line 100, got {clicked_line}"
+        );
+    }
+
+    #[test]
+    fn scrolled_wide_visible_window_click_places_cursor_in_scrolled_document_region() {
+        let screen_rect = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(900.0, 320.0));
+        let ctx = egui::Context::default();
+        let mut app = test_app();
+        app.set_font_size(32.0);
+        app.set_word_wrap(false);
+        let long_line = "x".repeat(20_000);
+        app.tabs_mut()[0].buffer.replace_text(
+            (0..300)
+                .map(|line| format!("line {line:03} {long_line}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        let active_view_id = app.tabs()[0].active_view_id;
+
+        let mut time = 0.0;
+        time = settle_frame_with_rect(&ctx, &mut app, time, screen_rect);
+        time = settle_frame_with_rect(&ctx, &mut app, time, screen_rect);
+        let row_height = app.tabs()[0]
+            .view(active_view_id)
+            .and_then(|view| view.latest_layout.as_ref())
+            .and_then(|layout| Some(layout.row_top(1)? - layout.row_top(0)?))
+            .expect("layout row height");
+        {
+            let view = app.tabs_mut()[0]
+                .view_mut(active_view_id)
+                .expect("active view");
+            view.set_editor_scroll_offset(egui::vec2(0.0, 100.0 * row_height));
+            view.editor_has_focus = false;
+            view.cursor_range = None;
+            view.pending_cursor_range = None;
+            view.clear_cursor_reveal();
+        }
+        time = settle_frame_with_rect(&ctx, &mut app, time, screen_rect);
+
+        let settled_offset =
+            active_scroll_area_state(&ctx, &app).expect("scroll area state after settle");
+        let visible_lines = active_view_visible_lines(&app).expect("visible lines after settle");
+        assert!(
+            settled_offset.offset.y >= 95.0 * row_height,
+            "expected scrolled offset near line 100, got {settled_offset:?}"
+        );
+        assert!(
+            visible_lines.start >= 95,
+            "expected wide visible window near line 100 before click, got {visible_lines:?}"
+        );
+        let visible_window =
+            active_visible_window_debug(&ctx, &app).expect("visible window snapshot after settle");
+        assert!(
+            visible_window.line_range.contains(&100),
+            "expected release target line in visible window, got {visible_window:?}"
+        );
+
+        let target = visible_window_click_point(&visible_window, 100);
+        time = click_pointer_with_rect(
+            &ctx,
+            &mut app,
+            time,
+            target,
+            egui::PointerButton::Primary,
+            screen_rect,
+        );
+        let release_snapshot =
+            active_visible_window_debug(&ctx, &app).expect("visible window release snapshot");
+        assert!(
+            release_snapshot.primary_released,
+            "expected release-frame snapshot, got {release_snapshot:?}"
+        );
+        assert!(
+            release_snapshot.rect.contains(target),
+            "expected click target inside release rect, target={target:?}, snapshot={release_snapshot:?}"
+        );
+        let _ = settle_frame_with_rect(&ctx, &mut app, time, screen_rect);
+
+        let clicked_line = line_index_for_active_cursor(&app).unwrap_or_else(|| {
+            panic!("cursor after click; release snapshot: {release_snapshot:?}")
+        });
+        assert!(
+            clicked_line >= 95,
+            "expected wide visible-window click after scrolling to land near line 100, got {clicked_line}"
+        );
+    }
+
+    #[test]
+    fn focused_wheel_scroll_updates_visible_window_and_click_mapping() {
+        let screen_rect = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(900.0, 320.0));
+        let ctx = egui::Context::default();
+        let mut app = test_app();
+        app.set_font_size(32.0);
+        app.set_word_wrap(false);
+        let long_line = "x".repeat(20_000);
+        app.tabs_mut()[0].buffer.replace_text(
+            (0..300)
+                .map(|line| format!("line {line:03} {long_line}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        let active_view_id = app.tabs()[0].active_view_id;
+
+        let mut time = 0.0;
+        time = settle_frame_with_rect(&ctx, &mut app, time, screen_rect);
+        let row_height = app.tabs()[0]
+            .view(active_view_id)
+            .and_then(|view| view.latest_layout.as_ref())
+            .and_then(|layout| Some(layout.row_top(1)? - layout.row_top(0)?))
+            .expect("layout row height");
+
+        let focus_target = editor_point(screen_rect);
+        time = click_pointer_with_rect(
+            &ctx,
+            &mut app,
+            time,
+            focus_target,
+            egui::PointerButton::Primary,
+            screen_rect,
+        );
+        time = settle_frame_with_rect(&ctx, &mut app, time, screen_rect);
+        assert!(
+            app.tabs()[0]
+                .view(active_view_id)
+                .is_some_and(|view| view.editor_has_focus && view.cursor_range.is_some()),
+            "expected editor to hold focus before wheel scrolling"
+        );
+
+        let editor_target = editor_point(screen_rect);
+        run_editor_frame_with_rect(
+            &ctx,
+            &mut app,
+            time,
+            vec![move_event(editor_target), mouse_wheel_event(egui::vec2(0.0, -100.0 * row_height))],
+            screen_rect,
+        );
+        time += 1.0;
+
+        let visible_lines = active_view_visible_lines(&app).expect("visible lines after wheel");
+        let viewport_rect = active_scroll_area_state(&ctx, &app)
+            .expect("scroll area state after wheel")
+            .inner_rect;
+        assert!(
+            visible_lines.start > 30,
+            "expected focused visible window to move beyond the top-of-file region after wheel, got {visible_lines:?}"
+        );
+
+        let visible_window =
+            active_visible_window_debug(&ctx, &app).expect("visible window snapshot after wheel");
+        let target_line = visible_window.line_range.start.saturating_add(2);
+        assert!(
+            target_line < visible_window.line_range.end,
+            "expected a clickable target inside the wheel-scrolled focused window, got {visible_window:?}"
+        );
+
+        let target = egui::pos2(
+            (viewport_rect.left() + 48.0).clamp(viewport_rect.left() + 4.0, viewport_rect.right() - 4.0),
+            (viewport_rect.top() + (target_line - visible_lines.start) as f32 * row_height + row_height * 0.5)
+                .clamp(viewport_rect.top() + 1.0, viewport_rect.bottom() - 1.0),
+        );
+        time = click_pointer_with_rect(
+            &ctx,
+            &mut app,
+            time,
+            target,
+            egui::PointerButton::Primary,
+            screen_rect,
+        );
+        let _ = settle_frame_with_rect(&ctx, &mut app, time, screen_rect);
+
+        let clicked_line = line_index_for_active_cursor(&app).expect("cursor after focused click");
+        assert!(
+            clicked_line >= visible_lines.start,
+            "expected focused wheel-scrolled click to land in the current visible region {visible_lines:?}, got {clicked_line}"
+        );
+    }
+
+    #[test]
+    fn focused_arrow_down_reveals_cursor_after_wheel_scroll() {
+        let screen_rect = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(900.0, 320.0));
+        let ctx = egui::Context::default();
+        let mut app = test_app();
+        app.set_font_size(32.0);
+        app.set_word_wrap(false);
+        let long_line = "x".repeat(20_000);
+        app.tabs_mut()[0].buffer.replace_text(
+            (0..300)
+                .map(|line| format!("line {line:03} {long_line}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        let active_view_id = app.tabs()[0].active_view_id;
+
+        let mut time = 0.0;
+        time = settle_frame_with_rect(&ctx, &mut app, time, screen_rect);
+        time = settle_frame_with_rect(&ctx, &mut app, time, screen_rect);
+        let row_height = app.tabs()[0]
+            .view(active_view_id)
+            .and_then(|view| view.latest_layout.as_ref())
+            .and_then(|layout| Some(layout.row_top(1)? - layout.row_top(0)?))
+            .expect("layout row height");
+
+        time = click_pointer_with_rect(
+            &ctx,
+            &mut app,
+            time,
+            editor_point(screen_rect),
+            egui::PointerButton::Primary,
+            screen_rect,
+        );
+        time = settle_frame_with_rect(&ctx, &mut app, time, screen_rect);
+
+        run_editor_frame_with_rect(
+            &ctx,
+            &mut app,
+            time,
+            vec![
+                move_event(editor_point(screen_rect)),
+                mouse_wheel_event(egui::vec2(0.0, -100.0 * row_height)),
+            ],
+            screen_rect,
+        );
+        time += 1.0;
+
+        let scrolled_lines = active_view_visible_lines(&app).expect("visible lines after wheel");
+        assert!(
+            scrolled_lines.start > 30,
+            "expected wheel scroll to move away from the initial cursor region, got {scrolled_lines:?}"
+        );
+
+        run_editor_frame_with_rect(
+            &ctx,
+            &mut app,
+            time,
+            vec![key_event(egui::Key::ArrowDown)],
+            screen_rect,
+        );
+        time += 1.0;
+        let _ = settle_frame_with_rect(&ctx, &mut app, time, screen_rect);
+
+        let cursor_line = line_index_for_active_cursor(&app).expect("cursor after ArrowDown");
+        let visible_lines = active_view_visible_lines(&app).expect("visible lines after ArrowDown");
+        assert_eq!(cursor_line, 2, "expected ArrowDown to move the cursor one line");
+        assert!(
+            visible_lines.contains(&cursor_line),
+            "expected ArrowDown to reveal the off-screen cursor, cursor_line={cursor_line}, visible_lines={visible_lines:?}"
+        );
     }
 
     #[test]

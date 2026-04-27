@@ -311,11 +311,14 @@ fn search_target_ranges(
         );
     }
 
-    search_fragmented_regex_by_flattening(
+    let max_match_chars = search::regex_max_match_chars(query)
+        .expect("unbounded regex queries should be rejected during validation");
+    search_fragmented_bounded_regex(
         snapshot,
         normalized,
         query,
         options,
+        max_match_chars,
         generation,
         latest_generation,
     )
@@ -366,28 +369,51 @@ fn search_fragmented_plain_text(
     Some(matches)
 }
 
-fn search_fragmented_regex_by_flattening(
+fn search_fragmented_bounded_regex(
     snapshot: &DocumentSnapshot,
     range: Range<usize>,
     query: &str,
     options: SearchOptions,
+    max_match_chars: usize,
     generation: u64,
     latest_generation: &AtomicU64,
 ) -> Option<Vec<Range<usize>>> {
-    // Regexes can match across arbitrary piece and chunk boundaries. Keep this
-    // as the explicit rare flattening path; plain text search stays windowed.
-    let flattened = snapshot.flatten_range(range.clone());
-    let outcome = search::search_text_interruptible(&flattened, query, options, || {
-        latest_generation.load(Ordering::Relaxed) == generation
-    })?;
-    debug_assert!(outcome.error.is_none());
-    Some(
-        outcome
-            .matches
-            .into_iter()
-            .map(|matched| matched.start + range.start..matched.end + range.start)
-            .collect(),
-    )
+    if range.is_empty() || query.is_empty() {
+        return Some(Vec::new());
+    }
+
+    let context_chars = 1 + usize::from(options.whole_word);
+    let overlap_chars = max_match_chars.saturating_add(context_chars);
+    let chunk_chars = SEARCH_FRAGMENT_CHUNK_CHARS.max(overlap_chars.max(1));
+    let mut chunk_start = range.start;
+    let mut matches = Vec::new();
+
+    while chunk_start < range.end {
+        if latest_generation.load(Ordering::Relaxed) != generation {
+            return None;
+        }
+
+        let core_end = (chunk_start + chunk_chars).min(range.end);
+        let window_start = range.start.max(chunk_start.saturating_sub(context_chars));
+        let window_end = range.end.min(core_end.saturating_add(overlap_chars));
+        let (window_text, window_offset) = snapshot.search_text_cow(Some(window_start..window_end));
+        let outcome =
+            search::search_text_interruptible(window_text.as_ref(), query, options, || {
+                latest_generation.load(Ordering::Relaxed) == generation
+            })?;
+        debug_assert!(outcome.error.is_none());
+
+        matches.extend(outcome.matches.into_iter().filter_map(|matched| {
+            let global_start = window_offset + matched.start;
+            let global_end = window_offset + matched.end;
+            ((global_start >= chunk_start && global_start < core_end)
+                || (core_end == range.end && global_start == range.end))
+                .then_some(global_start..global_end)
+        }));
+        chunk_start = core_end;
+    }
+
+    Some(matches)
 }
 
 fn search_target_parallelism(target_count: usize) -> usize {
@@ -409,7 +435,7 @@ mod tests {
     };
     use crate::app::app_state::SearchStatus;
     use crate::app::domain::{BufferState, DocumentSnapshot};
-    use crate::app::services::search::SearchOptions;
+    use crate::app::services::search::{SearchMode, SearchOptions};
     use std::sync::atomic::AtomicU64;
 
     fn snapshot(text: &str) -> DocumentSnapshot {
@@ -476,5 +502,65 @@ mod tests {
             ranges,
             vec![expected_start..expected_start + "needle".len()]
         );
+    }
+
+    #[test]
+    fn fragmented_bounded_regex_search_scans_in_chunks_without_flattening() {
+        let mut text = "a".repeat(SEARCH_FRAGMENT_CHUNK_CHARS - 4);
+        text.push_str("id-1234");
+        text.push_str(&"b".repeat(SEARCH_FRAGMENT_CHUNK_CHARS));
+
+        let mut buffer = BufferState::new("search.txt".to_owned(), text.clone(), None);
+        buffer.document_mut().insert_direct(1, "!");
+        let snapshot = buffer.document_snapshot();
+
+        let mut expected_text = text;
+        expected_text.insert(1, '!');
+        let expected_start = expected_text.find("id-1234").expect("regex match present");
+
+        let latest_generation = AtomicU64::new(9);
+        let ranges = search_target_ranges(
+            &snapshot,
+            None,
+            r"id-\d{4}",
+            SearchOptions {
+                mode: SearchMode::Regex,
+                match_case: true,
+                whole_word: false,
+            },
+            9,
+            &latest_generation,
+        )
+        .expect("search should complete");
+
+        assert_eq!(ranges, vec![expected_start..expected_start + 7]);
+    }
+
+    #[test]
+    fn process_search_request_rejects_unbounded_regex_queries() {
+        let request = SearchRequest {
+            generation: 1,
+            query: "a+ needle".to_owned(),
+            options: SearchOptions {
+                mode: SearchMode::Regex,
+                match_case: true,
+                whole_word: false,
+            },
+            targets: vec![SearchTargetSnapshot {
+                tab_index: 0,
+                view_id: 1,
+                buffer_id: 1,
+                tab_label: "Tab 1".to_owned(),
+                buffer_label: "buffer.txt".to_owned(),
+                document_snapshot: snapshot("prefix aaaa needle suffix"),
+                search_range: None,
+            }],
+        };
+
+        let latest_generation = AtomicU64::new(1);
+        let result = process_search_request(request, &latest_generation).expect("search result");
+
+        assert!(result.matches.is_empty());
+        assert!(matches!(result.status, SearchStatus::InvalidQuery(_)));
     }
 }

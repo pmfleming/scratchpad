@@ -678,20 +678,64 @@ fn editor_scroll_id(view_id: ViewId) -> egui::Id {
     egui::Id::new(("editor_scroll", view_id))
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct EditorScrollAreaDebugState {
+    pub(super) offset: egui::Vec2,
+    pub(super) content_size: egui::Vec2,
+    pub(super) inner_rect: egui::Rect,
+}
+
+#[cfg(test)]
+fn editor_scroll_debug_id(view_id: ViewId) -> egui::Id {
+    egui::Id::new(("editor_scroll_debug", view_id))
+}
+
+#[cfg(test)]
+fn store_editor_scroll_debug_state(
+    ctx: &egui::Context,
+    view_id: ViewId,
+    state: EditorScrollAreaDebugState,
+) {
+    ctx.data_mut(|data| data.insert_temp(editor_scroll_debug_id(view_id), state));
+}
+
+#[cfg(test)]
+pub(super) fn load_editor_scroll_debug_state(
+    ctx: &egui::Context,
+    view_id: ViewId,
+) -> Option<EditorScrollAreaDebugState> {
+    ctx.data(|data| data.get_temp(editor_scroll_debug_id(view_id)))
+}
+
 fn show_editor_scroll_area(
     ui: &mut egui::Ui,
     tab: &mut WorkspaceTab,
     request: TileScrollRequest<'_>,
 ) -> EditorContentOutcome {
+    let scroll_id = editor_scroll_id(request.view_id);
     let scroll_offset = tab
         .view(request.view_id)
         .map(|view| view.editor_scroll_offset())
         .unwrap_or_default();
     let wheel_requested_scroll_offset =
         requested_scroll_offset_for_pointer_wheel(ui, scroll_offset);
+    if wheel_requested_scroll_offset.is_some()
+        && let Some(view) = tab.view_mut(request.view_id)
+    {
+        view.clear_cursor_reveal();
+    }
     let render_scroll_offset = wheel_requested_scroll_offset.unwrap_or(scroll_offset);
+    sync_editor_scroll_state(ui, scroll_id, render_scroll_offset);
+    let row_height =
+        ui.fonts_mut(|fonts| fonts.row_height(request.content_style.text_edit.editor_font_id));
+    let virtual_row_height = row_height.max(request.content_style.text_edit.editor_font_id.size);
+    let virtual_content_height = tab
+        .buffer_for_view(request.view_id)
+        .map(|buffer| buffer.line_count.max(1) as f32 * virtual_row_height)
+        .unwrap_or_default();
     let output = egui::ScrollArea::both()
-        .id_salt(editor_scroll_id(request.view_id))
+        .id_salt(scroll_id)
         .scroll_offset(render_scroll_offset)
         .auto_shrink([false, false])
         .scroll_source(editor_scroll_source())
@@ -711,11 +755,22 @@ fn show_editor_scroll_area(
                 })
                 .unwrap_or_else(missing_editor_content_outcome)
         });
+    let content_size = editor_scroll_content_size(output.content_size, virtual_content_height);
+    #[cfg(test)]
+    store_editor_scroll_debug_state(
+        ui.ctx(),
+        request.view_id,
+        EditorScrollAreaDebugState {
+            offset: output.state.offset,
+            content_size,
+            inner_rect: output.inner_rect,
+        },
+    );
     let drag_requested_scroll_offset = requested_scroll_offset_for_selection_edge_drag(
         ui,
         scroll_offset,
         output.inner.interaction_response.as_ref(),
-        output.content_size,
+        content_size,
         output.inner_rect.size(),
         output.inner_rect,
     )
@@ -724,7 +779,7 @@ fn show_editor_scroll_area(
             ui,
             scroll_offset,
             output.inner.interaction_response.as_ref(),
-            output.content_size,
+            content_size,
             output.inner_rect.size(),
             output.inner_rect,
         )
@@ -732,11 +787,22 @@ fn show_editor_scroll_area(
     if let Some(view) = tab.view_mut(request.view_id) {
         view.set_editor_scroll_offset(resolve_editor_scroll_offset(
             &output,
+            content_size,
+            render_scroll_offset,
             wheel_requested_scroll_offset,
             drag_requested_scroll_offset,
         ));
     }
     output.inner
+}
+
+fn sync_editor_scroll_state(ui: &egui::Ui, scroll_id: egui::Id, offset: egui::Vec2) {
+    let persistent_id = ui.make_persistent_id(scroll_id);
+    let mut state = egui::scroll_area::State::load(ui.ctx(), persistent_id).unwrap_or_default();
+    if state.offset != offset {
+        state.offset = offset;
+        state.store(ui.ctx(), persistent_id);
+    }
 }
 
 fn editor_scroll_source() -> egui::scroll_area::ScrollSource {
@@ -749,16 +815,25 @@ fn editor_scroll_source() -> egui::scroll_area::ScrollSource {
 
 fn resolve_editor_scroll_offset(
     output: &egui::scroll_area::ScrollAreaOutput<EditorContentOutcome>,
+    content_size: egui::Vec2,
+    fallback_scroll_offset: egui::Vec2,
     wheel_requested_scroll_offset: Option<egui::Vec2>,
     drag_requested_scroll_offset: Option<egui::Vec2>,
 ) -> egui::Vec2 {
     clamp_scroll_offset(
-        wheel_requested_scroll_offset
-            .or(drag_requested_scroll_offset)
+        drag_requested_scroll_offset
             .or(output.inner.requested_scroll_offset)
-            .unwrap_or(output.state.offset),
-        output.content_size,
+            .or(wheel_requested_scroll_offset)
+            .unwrap_or(fallback_scroll_offset),
+        content_size,
         output.inner_rect.size(),
+    )
+}
+
+fn editor_scroll_content_size(content_size: egui::Vec2, virtual_content_height: f32) -> egui::Vec2 {
+    egui::vec2(
+        content_size.x,
+        content_size.y.max(virtual_content_height.max(0.0)),
     )
 }
 

@@ -6,7 +6,7 @@ use crate::app::domain::buffer::{
 };
 use crate::app::domain::{
     BufferFreshness, BufferState, DiskFileState, DocumentSnapshot, EditorViewState, EncodingSource,
-    PaneNode, RestoredBufferState, TextFormatMetadata, WorkspaceTab,
+    PaneNode, RestoredBufferState, TextDocument, TextFormatMetadata, WorkspaceTab,
 };
 use crate::app::services::file_service::FileService;
 use crate::app::services::settings_store::AppSettings;
@@ -268,11 +268,11 @@ impl SessionStore {
                     summary.reloaded_clean_buffers += 1;
                 }
                 summary.record(restored.freshness);
-                let mut restored_buffer = BufferState::restored_with_text_metadata(
+                let mut restored_buffer = BufferState::restored_with_document_text_metadata(
                     RestoredBufferState {
                         id: buffer.id,
                         name: buffer.name,
-                        content: restored.content,
+                        content: String::new(),
                         path: buffer.path,
                         is_dirty: buffer.is_dirty,
                         temp_id: buffer.temp_id,
@@ -280,6 +280,7 @@ impl SessionStore {
                         disk_state: restored.disk_state,
                         freshness: restored.freshness,
                     },
+                    restored.document,
                     restored.text_metadata,
                 );
                 restored_buffer.is_settings_file = buffer.is_settings_file;
@@ -462,7 +463,7 @@ impl RestoreSummary {
 }
 
 struct RestoredBufferContent {
-    content: String,
+    document: TextDocument,
     format: TextFormatMetadata,
     text_metadata: BufferTextMetadata,
     disk_state: Option<DiskFileState>,
@@ -471,14 +472,14 @@ struct RestoredBufferContent {
 
 impl RestoredBufferContent {
     fn new(
-        content: String,
+        document: TextDocument,
         format: TextFormatMetadata,
         text_metadata: BufferTextMetadata,
         disk_state: Option<DiskFileState>,
         freshness: BufferFreshness,
     ) -> Self {
         Self {
-            content,
+            document,
             format,
             text_metadata,
             disk_state,
@@ -492,7 +493,7 @@ impl RestoredBufferContent {
         freshness: BufferFreshness,
     ) -> Self {
         Self::new(
-            file_content.content,
+            file_content.document,
             file_content.format,
             file_content.text_metadata,
             disk_state,
@@ -507,7 +508,9 @@ impl RestoredBufferContent {
         freshness: BufferFreshness,
     ) -> Self {
         let (format, text_metadata) = session_buffer_format_and_metadata(buffer, &content);
-        Self::new(content, format, text_metadata, disk_state, freshness)
+        let document =
+            TextDocument::with_preferred_line_ending(content, text_metadata.preferred_line_ending);
+        Self::new(document, format, text_metadata, disk_state, freshness)
     }
 
     fn empty(buffer: &SessionBuffer, freshness: BufferFreshness) -> Self {

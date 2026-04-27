@@ -25,16 +25,16 @@
     "kind": "workflow",
     "threshold_ms": 50.0
   },
-  "large_file_load": {
+  "file_load": {
     "targets": [
       "app::domain::buffer",
       "app::services::file_service"
     ],
-    "family": "large-file-load",
+    "family": "file-load",
     "kind": "workflow",
     "threshold_ms": 50.0
   },
-  "large_file_scroll_latency": {
+  "scroll_stress_latency": {
     "targets": [
       "app::ui::editor_content",
       "app::domain::buffer"
@@ -44,7 +44,7 @@
     "threshold_ms": 32.0,
     "limiting_resource_hint": "cpu"
   },
-  "large_file_split_latency": {
+  "split_stress_latency": {
     "targets": [
       "app::domain::tab",
       "app::domain::panes"
@@ -54,7 +54,7 @@
     "threshold_ms": 85.0,
     "limiting_resource_hint": "cpu"
   },
-  "large_file_paste_latency": {
+  "paste_stress_latency": {
     "targets": [
       "app::domain::buffer",
       "app::transactions"

@@ -2,10 +2,19 @@ use super::super::{CursorRange, cursor, editing, select_all_cursor};
 use crate::app::domain::{BufferState, EditorViewState};
 use eframe::egui;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct PressedKeyEvent {
     key: egui::Key,
     modifiers: egui::Modifiers,
+}
+
+#[derive(Debug)]
+enum RelevantInputEvent {
+    Text(String),
+    Key(PressedKeyEvent),
+    Copy,
+    Cut,
+    Paste(String),
 }
 
 pub(super) fn handle_keyboard_events(
@@ -58,12 +67,12 @@ fn handle_keyboard_events_with(
         &CursorRange,
     ) -> Option<CursorRange>,
 ) -> bool {
-    let events = ui.input(|input| input.events.clone());
+    let events = relevant_input_events(ui);
     let total_chars = buffer.current_file_length().chars;
     let mut changed = false;
 
-    for event in &events {
-        changed |= handle_keyboard_event(
+    for event in events {
+        changed |= handle_relevant_input_event(
             ui,
             event,
             buffer,
@@ -76,9 +85,9 @@ fn handle_keyboard_events_with(
     changed
 }
 
-fn handle_keyboard_event(
+fn handle_relevant_input_event(
     ui: &mut egui::Ui,
-    event: &egui::Event,
+    event: RelevantInputEvent,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
     total_chars: usize,
@@ -89,22 +98,30 @@ fn handle_keyboard_event(
     ) -> Option<CursorRange>,
 ) -> bool {
     let cursor = view.cursor_range.unwrap_or_default();
-    if handle_text_event(event, buffer, view, &cursor) {
-        return true;
-    }
 
-    if let Some(key_event) = pressed_key_event(event) {
-        return handle_key_event(
+    match event {
+        RelevantInputEvent::Text(text) => insert_text(buffer, view, &cursor, &text),
+        RelevantInputEvent::Key(key_event) => handle_key_event(
             key_event,
             buffer,
             view,
             &cursor,
             total_chars,
             handle_movement_event,
-        );
+        ),
+        RelevantInputEvent::Copy => {
+            copy_selection(ui, buffer, &cursor);
+            false
+        }
+        RelevantInputEvent::Cut if !cursor.is_empty() => {
+            let (new_cursor, selected) = editing::apply_cut(buffer, &cursor);
+            ui.copy_text(selected);
+            view.cursor_range = Some(new_cursor);
+            true
+        }
+        RelevantInputEvent::Cut => false,
+        RelevantInputEvent::Paste(text) => insert_text(buffer, view, &cursor, &text),
     }
-
-    handle_clipboard_event(ui, event, buffer, view, &cursor)
 }
 
 fn handle_key_event(
@@ -128,28 +145,37 @@ fn handle_key_event(
     apply_cursor_update(view, handle_movement_event(key_event, buffer, cursor))
 }
 
-fn handle_text_event(
-    event: &egui::Event,
-    buffer: &mut BufferState,
-    view: &mut EditorViewState,
-    cursor: &CursorRange,
-) -> bool {
-    let Some(text) = text_event_payload(event) else {
-        return false;
-    };
-
-    view.cursor_range = Some(editing::apply_text_insert(buffer, cursor, text));
-    true
+fn relevant_input_events(ui: &egui::Ui) -> Vec<RelevantInputEvent> {
+    ui.input(|input| {
+        input
+            .events
+            .iter()
+            .filter_map(relevant_input_event)
+            .collect()
+    })
 }
 
-fn text_event_payload(event: &egui::Event) -> Option<&str> {
-    let text = match event {
-        egui::Event::Text(text) => text,
-        egui::Event::Ime(egui::ImeEvent::Commit(text)) => text,
-        _ => return None,
-    };
-
-    is_insertable_text(text).then_some(text.as_str())
+fn relevant_input_event(event: &egui::Event) -> Option<RelevantInputEvent> {
+    match event {
+        egui::Event::Text(text) | egui::Event::Ime(egui::ImeEvent::Commit(text)) => {
+            is_insertable_text(text).then(|| RelevantInputEvent::Text(text.clone()))
+        }
+        egui::Event::Key {
+            key,
+            pressed: true,
+            modifiers,
+            ..
+        } => Some(RelevantInputEvent::Key(PressedKeyEvent {
+            key: *key,
+            modifiers: *modifiers,
+        })),
+        egui::Event::Copy => Some(RelevantInputEvent::Copy),
+        egui::Event::Cut => Some(RelevantInputEvent::Cut),
+        egui::Event::Paste(text) if !text.is_empty() => {
+            Some(RelevantInputEvent::Paste(text.clone()))
+        }
+        _ => None,
+    }
 }
 
 fn is_insertable_text(text: &str) -> bool {
@@ -205,53 +231,12 @@ fn handle_non_movement_key_event(
     }
 }
 
-fn pressed_key_event(event: &egui::Event) -> Option<PressedKeyEvent> {
-    match event {
-        egui::Event::Key {
-            key,
-            pressed: true,
-            modifiers,
-            ..
-        } => Some(PressedKeyEvent {
-            key: *key,
-            modifiers: *modifiers,
-        }),
-        _ => None,
-    }
-}
-
 fn is_undo_shortcut(modifiers: egui::Modifiers) -> bool {
     modifiers.command && !modifiers.shift
 }
 
 fn is_redo_shortcut(key_event: PressedKeyEvent) -> bool {
     key_event.modifiers.command && (key_event.key == egui::Key::Y || key_event.modifiers.shift)
-}
-
-fn handle_clipboard_event(
-    ui: &mut egui::Ui,
-    event: &egui::Event,
-    buffer: &mut BufferState,
-    view: &mut EditorViewState,
-    cursor: &CursorRange,
-) -> bool {
-    match event {
-        egui::Event::Copy => {
-            copy_selection(ui, buffer, cursor);
-            false
-        }
-        egui::Event::Cut if !cursor.is_empty() => {
-            let (new_cursor, selected) = editing::apply_cut(buffer, cursor);
-            ui.copy_text(selected);
-            view.cursor_range = Some(new_cursor);
-            true
-        }
-        egui::Event::Paste(text_to_paste) if !text_to_paste.is_empty() => {
-            view.cursor_range = Some(editing::apply_text_insert(buffer, cursor, text_to_paste));
-            true
-        }
-        _ => false,
-    }
 }
 
 fn insert_text(
@@ -290,7 +275,10 @@ fn apply_cursor_update(view: &mut EditorViewState, next_cursor: Option<CursorRan
 
 #[cfg(test)]
 mod tests {
-    use super::{PressedKeyEvent, apply_cursor_update, handle_key_event, handle_text_event};
+    use super::{
+        PressedKeyEvent, RelevantInputEvent, apply_cursor_update, handle_key_event,
+        relevant_input_event,
+    };
     use crate::app::domain::{BufferState, EditorViewState};
     use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
     use eframe::egui;
@@ -329,18 +317,23 @@ mod tests {
         let mut view = EditorViewState::new(buffer.id, false);
         let cursor = CursorRange::one(CharCursor::new(5));
 
-        let changed = handle_text_event(
-            &egui::Event::Text("!".to_owned()),
-            &mut buffer,
-            &mut view,
-            &cursor,
-        );
+        let changed = match relevant_input_event(&egui::Event::Text("!".to_owned())) {
+            Some(RelevantInputEvent::Text(text)) => {
+                super::insert_text(&mut buffer, &mut view, &cursor, &text)
+            }
+            other => panic!("expected text event, got {other:?}"),
+        };
 
         assert!(changed);
         assert_eq!(
             view.cursor_range,
             Some(CursorRange::one(CharCursor::new(6)))
         );
+    }
+
+    #[test]
+    fn relevant_input_event_ignores_non_insertable_text() {
+        assert!(relevant_input_event(&egui::Event::Text("\n".to_owned())).is_none());
     }
 
     #[test]

@@ -80,7 +80,10 @@ impl ScratchpadApp {
             self.pending_background_actions.remove(&request_id);
             self.apply_background_io_result(BackgroundIoResult::PathsLoaded {
                 request_id,
-                results: error.0.into_loaded_path_results().unwrap_or_default(),
+                results: error
+                    .into_request()
+                    .into_loaded_path_results()
+                    .unwrap_or_default(),
             });
         }
     }
@@ -105,7 +108,10 @@ impl ScratchpadApp {
             self.pending_background_actions.remove(&request_id);
             self.apply_background_io_result(BackgroundIoResult::PathsLoaded {
                 request_id,
-                results: error.0.into_loaded_path_results().unwrap_or_default(),
+                results: error
+                    .into_request()
+                    .into_loaded_path_results()
+                    .unwrap_or_default(),
             });
         }
     }
@@ -132,7 +138,7 @@ impl ScratchpadApp {
             self.pending_background_actions.remove(&request_id);
             self.apply_background_io_result(BackgroundIoResult::SessionRestored {
                 request_id,
-                result: error.0.into_restore_result(),
+                result: error.into_request().into_restore_result(),
             });
         }
     }
@@ -153,7 +159,7 @@ impl ScratchpadApp {
             self.pending_background_actions.remove(&request_id);
             self.apply_background_io_result(BackgroundIoResult::SessionPersisted {
                 request_id,
-                result: error.0.into_persist_result(),
+                result: error.into_request().into_persist_result(),
             });
         }
     }
@@ -197,7 +203,7 @@ impl ScratchpadApp {
                 request_id,
                 buffer_id,
                 revision,
-                result: error.0.into_text_metadata_result(),
+                result: error.into_request().into_text_metadata_result(),
             });
         }
     }
@@ -241,7 +247,7 @@ impl ScratchpadApp {
                 request_id,
                 buffer_id,
                 revision,
-                result: error.0.into_encoding_compliance_result(),
+                result: error.into_request().into_encoding_compliance_result(),
             });
         }
     }

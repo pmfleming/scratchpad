@@ -269,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn page_surface_preserves_large_viewport() {
+    fn page_surface_preserves_expanded_viewport() {
         let surface = SettingsUi::page_surface_size_for_viewport(egui::vec2(1440.0, 900.0));
 
         assert_eq!(surface, egui::vec2(1440.0, 900.0));

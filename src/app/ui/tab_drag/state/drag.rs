@@ -100,7 +100,7 @@ mod tests {
     use super::collected_dragged_indices;
 
     #[test]
-    fn collected_dragged_indices_preserves_large_selection() {
+    fn collected_dragged_indices_preserves_multi_item_selection() {
         let dragged_indices = (0..24).collect::<Vec<_>>();
 
         assert_eq!(
