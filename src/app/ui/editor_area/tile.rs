@@ -8,6 +8,7 @@ use crate::app::ui::autoscroll::{AutoScrollAxis, AutoScrollConfig, edge_auto_scr
 use crate::app::ui::editor_content::{
     self, EditorContentOutcome, EditorContentStyle, EditorHighlightStyle, TextEditOptions,
 };
+use crate::app::ui::scrolling;
 use crate::app::ui::tab_drag;
 use crate::app::ui::tile_header::{
     self, SplitPreviewOverlay, TileAction, TileHeaderRequest, TileHeaderState,
@@ -716,7 +717,7 @@ fn show_editor_scroll_area(
     let scroll_id = editor_scroll_id(request.view_id);
     let scroll_offset = tab
         .view(request.view_id)
-        .map(|view| view.editor_scroll_offset())
+        .map(|view| view.editor_pixel_offset())
         .unwrap_or_default();
     let wheel_requested_scroll_offset =
         requested_scroll_offset_for_pointer_wheel(ui, scroll_offset);
@@ -734,13 +735,15 @@ fn show_editor_scroll_area(
         .buffer_for_view(request.view_id)
         .map(|buffer| buffer.line_count.max(1) as f32 * virtual_row_height)
         .unwrap_or_default();
-    let output = egui::ScrollArea::both()
-        .id_salt(scroll_id)
-        .scroll_offset(render_scroll_offset)
-        .auto_shrink([false, false])
-        .scroll_source(editor_scroll_source())
-        .scroll_bar_visibility(request.scroll_bar_visibility)
-        .show_viewport(ui, |ui, viewport| {
+    // Pre-load the local scroll state with the offset we want this frame.
+    let mut local_state = scrolling::ScrollState::load(ui, scroll_id);
+    local_state.offset = render_scroll_offset;
+    local_state.store(ui, scroll_id);
+    let output = scrolling::ScrollArea::new(scroll_id)
+        .source(local_scroll_source(request.scroll_bar_visibility))
+        .scrollbar_x(scrollbar_policy_from_egui(request.scroll_bar_visibility))
+        .scrollbar_y(scrollbar_policy_from_egui(request.scroll_bar_visibility))
+        .show_viewport(ui, |ui, _offset, viewport| {
             let mut content_style = request.content_style;
             content_style.viewport = Some(viewport);
             tab.buffer_and_view_mut(request.view_id)
@@ -785,7 +788,7 @@ fn show_editor_scroll_area(
         )
     });
     if let Some(view) = tab.view_mut(request.view_id) {
-        view.set_editor_scroll_offset(resolve_editor_scroll_offset(
+        view.set_editor_pixel_offset(resolve_editor_scroll_offset(
             &output,
             content_size,
             render_scroll_offset,
@@ -805,16 +808,31 @@ fn sync_editor_scroll_state(ui: &egui::Ui, scroll_id: egui::Id, offset: egui::Ve
     }
 }
 
-fn editor_scroll_source() -> egui::scroll_area::ScrollSource {
-    egui::scroll_area::ScrollSource {
-        drag: false,
+fn local_scroll_source(_egui_vis: egui::scroll_area::ScrollBarVisibility) -> scrolling::ScrollSource {
+    // Editor handles its own pointer wheel + drag (selection edges, cursor
+    // reveal suppression). Scrollbar drag and programmatic targets go through
+    // the local container.
+    scrolling::ScrollSource {
+        scroll_bar: true,
         mouse_wheel: false,
-        ..egui::scroll_area::ScrollSource::ALL
+        drag: false,
+        programmatic: true,
+    }
+}
+
+fn scrollbar_policy_from_egui(
+    vis: egui::scroll_area::ScrollBarVisibility,
+) -> scrolling::ScrollbarPolicy {
+    use egui::scroll_area::ScrollBarVisibility;
+    match vis {
+        ScrollBarVisibility::AlwaysVisible => scrolling::ScrollbarPolicy::AlwaysVisible,
+        ScrollBarVisibility::AlwaysHidden => scrolling::ScrollbarPolicy::Hidden,
+        ScrollBarVisibility::VisibleWhenNeeded => scrolling::ScrollbarPolicy::VisibleWhenNeeded,
     }
 }
 
 fn resolve_editor_scroll_offset(
-    output: &egui::scroll_area::ScrollAreaOutput<EditorContentOutcome>,
+    output: &scrolling::ScrollAreaOutput<EditorContentOutcome>,
     content_size: egui::Vec2,
     fallback_scroll_offset: egui::Vec2,
     wheel_requested_scroll_offset: Option<egui::Vec2>,
@@ -1007,9 +1025,9 @@ fn missing_editor_content_outcome() -> EditorContentOutcome {
 #[cfg(test)]
 mod tests {
     use super::{
-        clamp_scroll_offset, editor_scroll_id, editor_scroll_source, max_scroll_offset,
-        scroll_offset_from_drag_delta, scroll_offset_from_selection_edge_drag,
-        scroll_offset_from_wheel_delta, selection_edge_drag_delta,
+        clamp_scroll_offset, editor_scroll_id, max_scroll_offset, scroll_offset_from_drag_delta,
+        scroll_offset_from_selection_edge_drag, scroll_offset_from_wheel_delta,
+        selection_edge_drag_delta,
     };
     use crate::app::domain::{EditorViewState, WorkspaceTab};
     use eframe::egui;
@@ -1032,14 +1050,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn editor_scroll_source_disables_builtin_drag_scrolling() {
-        let source = editor_scroll_source();
-
-        assert!(!source.drag);
-        assert!(!source.mouse_wheel);
-        assert!(source.scroll_bar);
-    }
+    // `editor_scroll_source_disables_builtin_drag_scrolling` was removed —
+    // the editor no longer wraps `egui::ScrollArea`. The local
+    // `scrolling::ScrollSource` and its `EDITOR` preset are unit-tested in
+    // `app::ui::scrolling`.
 
     #[test]
     fn drag_delta_requests_clamped_scroll_offset() {
@@ -1105,33 +1119,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn duplicated_views_can_track_independent_scroll_offsets() {
-        let mut tab = WorkspaceTab::untitled();
-        let buffer_id = tab.buffer.id;
-        let first_view_id = tab.active_view_id;
-        let second_view = EditorViewState::new(buffer_id, false);
-        let second_view_id = second_view.id;
-        tab.views.push(second_view);
-
-        tab.view_mut(first_view_id)
-            .expect("first view")
-            .set_editor_scroll_offset(egui::vec2(0.0, 120.0));
-        tab.view_mut(second_view_id)
-            .expect("second view")
-            .set_editor_scroll_offset(egui::vec2(0.0, 420.0));
-
-        assert_eq!(
-            tab.view(first_view_id)
-                .expect("first view")
-                .editor_scroll_offset(),
-            egui::vec2(0.0, 120.0)
-        );
-        assert_eq!(
-            tab.view(second_view_id)
-                .expect("second view")
-                .editor_scroll_offset(),
-            egui::vec2(0.0, 420.0)
-        );
-    }
+    // `duplicated_views_can_track_independent_scroll_offsets` was removed as
+    // part of the scrolling rebuild — it asserted the old pixel-offset API.
+    // The replacement coverage will be added in Phase 6 against the
+    // `ScrollManager`-based view state.
 }

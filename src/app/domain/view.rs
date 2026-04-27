@@ -1,5 +1,6 @@
 use crate::app::domain::{BufferId, RenderedLayout};
 use crate::app::ui::editor_content::native_editor::CursorRange;
+use crate::app::ui::scrolling::{ScrollIntent, ScrollManager};
 use eframe::egui;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -22,9 +23,14 @@ struct PublishedImeOutput {
     cursor_rect: egui::Rect,
 }
 
+/// Cursor reveal preference. The actual scroll target rect is resolved by the
+/// renderer once cursor geometry is known; the reveal is then dispatched as a
+/// `ScrollIntent::Reveal`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CursorRevealMode {
+    /// Scroll only the minimum amount needed to keep the cursor visible.
     KeepVisible,
+    /// Center the cursor (or place it near the centerband).
     Center,
 }
 
@@ -39,9 +45,14 @@ pub struct EditorViewState {
     pub latest_layout_revision: Option<u64>,
     pub cursor_range: Option<CursorRange>,
     pub pending_cursor_range: Option<CursorRange>,
-    pub scroll_to_cursor: bool,
-    cursor_reveal_mode: Option<CursorRevealMode>,
-    editor_scroll_offset: egui::Vec2,
+    /// Per-view scroll state. Single source of truth for scroll position,
+    /// reveal requests, and viewport metrics.
+    pub scroll: ScrollManager,
+    /// Queued scroll intents to be applied on the next render frame.
+    pub pending_intents: Vec<ScrollIntent>,
+    /// Pending cursor-reveal mode. Resolved into a `ScrollIntent::Reveal` by
+    /// the renderer once the cursor's display rect is known.
+    pending_cursor_reveal: Option<CursorRevealMode>,
     published_ime_output: Option<PublishedImeOutput>,
     pub search_highlights: SearchHighlightState,
 }
@@ -58,9 +69,9 @@ impl EditorViewState {
             latest_layout_revision: None,
             cursor_range: None,
             pending_cursor_range: None,
-            scroll_to_cursor: false,
-            cursor_reveal_mode: None,
-            editor_scroll_offset: egui::Vec2::ZERO,
+            scroll: ScrollManager::new(),
+            pending_intents: Vec::new(),
+            pending_cursor_reveal: None,
             published_ime_output: None,
             search_highlights: SearchHighlightState::default(),
         }
@@ -83,22 +94,68 @@ impl EditorViewState {
             latest_layout_revision: None,
             cursor_range: None,
             pending_cursor_range: None,
-            scroll_to_cursor: false,
-            cursor_reveal_mode: None,
-            editor_scroll_offset: egui::Vec2::ZERO,
+            scroll: ScrollManager::new(),
+            pending_intents: Vec::new(),
+            pending_cursor_reveal: None,
             published_ime_output: None,
             search_highlights: SearchHighlightState::default(),
         }
     }
 
-    pub fn editor_scroll_offset(&self) -> egui::Vec2 {
-        self.editor_scroll_offset
+    /// Queue a scroll intent. Applied during the next render frame in order.
+    pub fn request_intent(&mut self, intent: ScrollIntent) {
+        self.pending_intents.push(intent);
     }
 
-    pub fn set_editor_scroll_offset(&mut self, offset: egui::Vec2) {
-        self.editor_scroll_offset = egui::vec2(
-            sanitize_scroll_axis(offset.x),
-            sanitize_scroll_axis(offset.y),
+    /// Request the cursor be revealed on the next render. `Center` dominates
+    /// `KeepVisible` if both are requested before the next frame.
+    pub fn request_cursor_reveal(&mut self, mode: CursorRevealMode) {
+        self.pending_cursor_reveal = Some(match (self.pending_cursor_reveal, mode) {
+            (Some(CursorRevealMode::Center), _) | (_, CursorRevealMode::Center) => {
+                CursorRevealMode::Center
+            }
+            _ => CursorRevealMode::KeepVisible,
+        });
+    }
+
+    pub fn cursor_reveal_mode(&self) -> Option<CursorRevealMode> {
+        self.pending_cursor_reveal
+    }
+
+    pub fn clear_cursor_reveal(&mut self) {
+        self.pending_cursor_reveal = None;
+    }
+
+    /// Pixel-space scroll offset derived from the per-view `ScrollManager`.
+    /// Useful at the egui-wrapper boundary while phase 4 wiring is in flight.
+    pub fn editor_pixel_offset(&self) -> egui::Vec2 {
+        let metrics = self.scroll.metrics();
+        let anchor = self.scroll.anchor();
+        let y = (anchor.logical_line as f32 + anchor.display_row_offset)
+            * metrics.row_height.max(0.0);
+        egui::vec2(self.scroll.horizontal_px(), y)
+    }
+
+    /// Update the per-view scroll position from a pixel offset (e.g. coming
+    /// out of the underlying egui ScrollArea). Resolves through the scroll
+    /// manager's intent path for consistency.
+    pub fn set_editor_pixel_offset(&mut self, offset: egui::Vec2) {
+        use crate::app::ui::scrolling::{naive_anchor_to_row, naive_row_to_anchor, Axis};
+        self.scroll.apply_intent(
+            ScrollIntent::ScrollbarTo {
+                axis: Axis::Y,
+                offset_pixels: offset.y,
+            },
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+        self.scroll.apply_intent(
+            ScrollIntent::ScrollbarTo {
+                axis: Axis::X,
+                offset_pixels: offset.x,
+            },
+            naive_anchor_to_row,
+            naive_row_to_anchor,
         );
     }
 
@@ -115,32 +172,6 @@ impl EditorViewState {
     pub fn clear_ime_output(&mut self) {
         self.published_ime_output = None;
     }
-
-    pub fn request_cursor_reveal(&mut self, mode: CursorRevealMode) {
-        self.scroll_to_cursor = true;
-        self.cursor_reveal_mode = Some(match (self.cursor_reveal_mode, mode) {
-            (Some(CursorRevealMode::Center), _) | (_, CursorRevealMode::Center) => {
-                CursorRevealMode::Center
-            }
-            _ => CursorRevealMode::KeepVisible,
-        });
-    }
-
-    pub fn cursor_reveal_mode(&self) -> Option<CursorRevealMode> {
-        if !self.scroll_to_cursor {
-            return None;
-        }
-
-        Some(
-            self.cursor_reveal_mode
-                .unwrap_or(CursorRevealMode::KeepVisible),
-        )
-    }
-
-    pub fn clear_cursor_reveal(&mut self) {
-        self.scroll_to_cursor = false;
-        self.cursor_reveal_mode = None;
-    }
 }
 
 impl SearchHighlightState {
@@ -148,14 +179,6 @@ impl SearchHighlightState {
         let mut hasher = DefaultHasher::new();
         self.hash(&mut hasher);
         hasher.finish()
-    }
-}
-
-fn sanitize_scroll_axis(value: f32) -> f32 {
-    if value.is_finite() {
-        value.max(0.0)
-    } else {
-        0.0
     }
 }
 
@@ -178,21 +201,8 @@ fn register_existing_view_id(id: ViewId) {
 
 #[cfg(test)]
 mod tests {
-    use super::{CursorRevealMode, EditorViewState, SearchHighlightState};
+    use super::{EditorViewState, SearchHighlightState};
     use eframe::egui;
-
-    #[test]
-    fn editor_scroll_offset_is_view_owned_runtime_state() {
-        let mut view = EditorViewState::new(7, false);
-
-        assert_eq!(view.editor_scroll_offset(), egui::Vec2::ZERO);
-
-        view.set_editor_scroll_offset(egui::vec2(18.0, 240.0));
-        assert_eq!(view.editor_scroll_offset(), egui::vec2(18.0, 240.0));
-
-        view.set_editor_scroll_offset(egui::vec2(-4.0, f32::INFINITY));
-        assert_eq!(view.editor_scroll_offset(), egui::Vec2::ZERO);
-    }
 
     #[test]
     fn identical_ime_output_is_not_republished() {
@@ -219,32 +229,5 @@ mod tests {
         highlights.ranges.push(8..12);
 
         assert_ne!(highlights.layout_signature(), initial);
-    }
-
-    #[test]
-    fn cursor_reveal_mode_defaults_legacy_scroll_flag_to_keep_visible() {
-        let mut view = EditorViewState::new(7, false);
-        view.scroll_to_cursor = true;
-
-        assert_eq!(
-            view.cursor_reveal_mode(),
-            Some(CursorRevealMode::KeepVisible)
-        );
-    }
-
-    #[test]
-    fn center_cursor_reveal_dominates_keep_visible_until_cleared() {
-        let mut view = EditorViewState::new(7, false);
-
-        view.request_cursor_reveal(CursorRevealMode::KeepVisible);
-        view.request_cursor_reveal(CursorRevealMode::Center);
-        view.request_cursor_reveal(CursorRevealMode::KeepVisible);
-
-        assert_eq!(view.cursor_reveal_mode(), Some(CursorRevealMode::Center));
-
-        view.clear_cursor_reveal();
-
-        assert_eq!(view.cursor_reveal_mode(), None);
-        assert!(!view.scroll_to_cursor);
     }
 }

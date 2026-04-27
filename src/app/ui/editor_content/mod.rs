@@ -10,8 +10,7 @@ pub use artifact::{make_control_chars_clean, make_control_chars_visible, render_
 pub use gutter::render_line_number_gutter;
 pub use native_editor::{
     CursorRange, EditorHighlightStyle, TextEditOptions, build_layouter,
-    render_editor_focused_text_window, render_editor_text_edit, render_editor_visible_text_window,
-    render_read_only_text_edit,
+    render_editor_text_edit, render_read_only_text_edit,
 };
 
 pub(crate) struct EditorContentOutcome {
@@ -29,12 +28,6 @@ pub(crate) struct EditorContentStyle<'a> {
     pub(crate) previous_layout: Option<&'a RenderedLayout>,
     pub(crate) text_edit: TextEditOptions<'a>,
     pub(crate) background_color: egui::Color32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WindowRenderMode {
-    Focused,
-    Visible,
 }
 
 pub(crate) fn render_editor_content(
@@ -85,31 +78,11 @@ fn render_editor_body(
         return render_artifact_view(ui, buffer, view, style.previous_layout, style.text_edit);
     }
 
-    match preferred_window_render_mode(view, style) {
-        Some(WindowRenderMode::Focused) => render_editor_focused_text_window(
-            ui,
-            buffer,
-            view,
-            style.previous_layout,
-            style.text_edit,
-            style.viewport,
-        )
-        .unwrap_or_else(|| {
-            render_editor_text_edit(ui, buffer, view, style.text_edit, style.viewport)
-        }),
-        Some(WindowRenderMode::Visible) => render_editor_visible_text_window(
-            ui,
-            buffer,
-            view,
-            style.previous_layout,
-            style.text_edit,
-            style.viewport,
-        )
-        .unwrap_or_else(|| {
-            render_editor_text_edit(ui, buffer, view, style.text_edit, style.viewport)
-        }),
-        None => render_editor_text_edit(ui, buffer, view, style.text_edit, style.viewport),
-    }
+    // Single viewport-first render path. The visible-window/focused-window
+    // forks were removed in Phase 4+5 of the scrolling rebuild — the unified
+    // renderer is responsible for slicing to the viewport via
+    // `scrolling::DisplaySnapshot`/`ViewportSlice`.
+    render_editor_text_edit(ui, buffer, view, style.text_edit, style.viewport)
 }
 
 impl From<native_editor::EditorWidgetOutcome> for EditorContentOutcome {
@@ -124,124 +97,7 @@ impl From<native_editor::EditorWidgetOutcome> for EditorContentOutcome {
     }
 }
 
-#[cfg(test)]
-fn should_prefer_visible_window(view: &EditorViewState, style: &EditorContentStyle<'_>) -> bool {
-    matches!(
-        preferred_window_render_mode(view, style),
-        Some(WindowRenderMode::Visible)
-    )
-}
 
-#[cfg(test)]
-fn should_prefer_focused_window(view: &EditorViewState, style: &EditorContentStyle<'_>) -> bool {
-    matches!(
-        preferred_window_render_mode(view, style),
-        Some(WindowRenderMode::Focused)
-    )
-}
-
-fn preferred_window_render_mode(
-    view: &EditorViewState,
-    style: &EditorContentStyle<'_>,
-) -> Option<WindowRenderMode> {
-    if style.text_edit.word_wrap || (style.previous_layout.is_none() && style.viewport.is_none()) {
-        return None;
-    }
-
-    if style.is_active && (view.editor_has_focus || style.text_edit.request_focus) {
-        return Some(WindowRenderMode::Focused);
-    }
-
-    (!style.text_edit.request_focus).then_some(WindowRenderMode::Visible)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use eframe::egui::{self, FontId};
-
-    fn editor_font_id() -> &'static FontId {
-        static EDITOR_FONT_ID: std::sync::LazyLock<FontId> =
-            std::sync::LazyLock::new(|| FontId::monospace(14.0));
-        &EDITOR_FONT_ID
-    }
-
-    fn text_edit_options() -> TextEditOptions<'static> {
-        TextEditOptions {
-            request_focus: false,
-            word_wrap: false,
-            editor_font_id: editor_font_id(),
-            text_color: egui::Color32::WHITE,
-            highlight_style: EditorHighlightStyle::new(
-                egui::Color32::LIGHT_BLUE,
-                egui::Color32::BLACK,
-            ),
-        }
-    }
-
-    fn style<'a>(
-        text_edit: TextEditOptions<'a>,
-        previous_layout: Option<&'a RenderedLayout>,
-    ) -> EditorContentStyle<'a> {
-        EditorContentStyle {
-            editor_gutter: 0,
-            is_active: false,
-            viewport: None,
-            previous_layout,
-            text_edit,
-            background_color: egui::Color32::BLACK,
-        }
-    }
-
-    #[test]
-    fn visible_window_no_longer_depends_on_buffer_size() {
-        let buffer = BufferState::new("notes.txt".to_owned(), "short text".to_owned(), None);
-        let mut view = EditorViewState::new(buffer.id, false);
-        let mut style = style(text_edit_options(), None);
-        style.viewport = Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(100.0, 100.0),
-        ));
-
-        assert!(should_prefer_visible_window(&view, &style));
-
-        style.is_active = true;
-        view.editor_has_focus = true;
-        assert!(!should_prefer_visible_window(&view, &style));
-    }
-
-    #[test]
-    fn focused_window_no_longer_depends_on_buffer_size() {
-        let buffer = BufferState::new("notes.txt".to_owned(), "short text".to_owned(), None);
-        let mut view = EditorViewState::new(buffer.id, false);
-        let mut style = style(text_edit_options(), None);
-
-        style.is_active = true;
-        style.viewport = Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(100.0, 100.0),
-        ));
-        view.editor_has_focus = true;
-        assert!(should_prefer_focused_window(&view, &style));
-    }
-
-    #[test]
-    fn visible_window_still_requires_viewport_or_layout_and_no_wrap() {
-        let buffer = BufferState::new("notes.txt".to_owned(), "short text".to_owned(), None);
-        let view = EditorViewState::new(buffer.id, false);
-        let mut wrapped = text_edit_options();
-        wrapped.word_wrap = true;
-
-        assert!(!should_prefer_visible_window(
-            &view,
-            &style(text_edit_options(), None)
-        ));
-
-        let mut viewport_style = style(wrapped, None);
-        viewport_style.viewport = Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(100.0, 100.0),
-        ));
-        assert!(!should_prefer_visible_window(&view, &viewport_style));
-    }
-}
+// Phase 4+5: tests for the WindowRenderMode/preferred_window_render_mode
+// helpers were deleted along with those helpers. Replacement coverage for the
+// unified viewport-first render path will be added in Phase 6.
