@@ -1,7 +1,9 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use scratchpad::profile::{
-    KB, MB, run_document_snapshot_profile, run_search_dispatch_all_tabs_profile,
-    run_search_dispatch_current_profile, run_viewport_extraction_profile,
+    KB, MB, run_cursor_reveal_profile, run_display_rebuild_profile,
+    run_display_snapshot_memory_profile, run_document_snapshot_profile,
+    run_search_dispatch_all_tabs_profile, run_search_dispatch_current_profile,
+    run_viewport_extraction_profile,
 };
 use std::time::Duration;
 
@@ -30,6 +32,45 @@ fn bench_viewport_extraction_latency(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(bytes as u64));
         group.bench_with_input(BenchmarkId::from_parameter(bytes), &bytes, |b, &bytes| {
             b.iter(|| criterion::black_box(run_viewport_extraction_profile(bytes, 1)));
+        });
+    }
+    group.finish();
+}
+
+fn bench_display_rebuild_latency(c: &mut Criterion) {
+    let mut group = c.benchmark_group("display_rebuild_latency");
+    group.sample_size(20);
+    group.measurement_time(Duration::from_secs(4));
+    for bytes in [256 * KB, MB] {
+        group.throughput(Throughput::Bytes(bytes as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(bytes), &bytes, |b, &bytes| {
+            b.iter(|| criterion::black_box(run_display_rebuild_profile(bytes, 1)));
+        });
+    }
+    group.finish();
+}
+
+fn bench_cursor_reveal_latency(c: &mut Criterion) {
+    let mut group = c.benchmark_group("cursor_reveal_latency");
+    group.sample_size(30);
+    group.measurement_time(Duration::from_secs(4));
+    for bytes in [256 * KB, MB, 4 * MB] {
+        group.throughput(Throughput::Bytes(bytes as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(bytes), &bytes, |b, &bytes| {
+            b.iter(|| criterion::black_box(run_cursor_reveal_profile(bytes, 1)));
+        });
+    }
+    group.finish();
+}
+
+fn bench_display_snapshot_memory(c: &mut Criterion) {
+    let mut group = c.benchmark_group("display_snapshot_memory");
+    group.sample_size(20);
+    group.measurement_time(Duration::from_secs(4));
+    for bytes in [MB, 4 * MB] {
+        group.throughput(Throughput::Bytes(bytes as u64));
+        group.bench_with_input(BenchmarkId::from_parameter(bytes), &bytes, |b, &bytes| {
+            b.iter(|| criterion::black_box(run_display_snapshot_memory_profile(bytes, 1)));
         });
     }
     group.finish();
@@ -87,6 +128,9 @@ criterion_group!(
     benches,
     bench_document_snapshot_creation_latency,
     bench_viewport_extraction_latency,
+    bench_display_rebuild_latency,
+    bench_cursor_reveal_latency,
+    bench_display_snapshot_memory,
     bench_search_current_dispatch_aggregate_size,
     bench_search_all_dispatch_aggregate_size
 );

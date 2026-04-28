@@ -1,5 +1,7 @@
 use eframe::egui;
 
+use crate::app::ui::scrolling::{Axis, ScrollIntent};
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct AutoScrollConfig {
     pub(crate) edge_extent: f32,
@@ -87,9 +89,43 @@ fn scaled_auto_scroll_delta(distance: f32, config: AutoScrollConfig) -> f32 {
     config.max_step * intensity
 }
 
+/// Convert a per-frame edge-autoscroll pixel delta into the `ScrollIntent`s
+/// that the unified `ScrollManager` consumes.
+///
+/// `delta` is the output of two `edge_auto_scroll_delta` calls (one per axis)
+/// — a *pixel-per-frame* nudge. `frame_dt` is the elapsed time for the frame
+/// being rendered. The intent's `velocity` is therefore `delta / frame_dt`,
+/// which `ScrollManager::tick_edge_autoscroll(dt, ...)` integrates back into a
+/// pixel offset on subsequent frames.
+///
+/// Emits one `EdgeAutoscroll` per axis whose component is non-zero. Returns
+/// an empty slice (via the array length) when the pointer is away from any
+/// edge.
+#[allow(dead_code)] // Bridge for future ScrollManager plumbing; covered by unit tests.
+pub(crate) fn drag_delta_to_intents(delta: egui::Vec2, frame_dt: f32) -> Vec<ScrollIntent> {
+    let mut out = Vec::with_capacity(2);
+    if frame_dt <= 0.0 {
+        return out;
+    }
+    if delta.x != 0.0 {
+        out.push(ScrollIntent::EdgeAutoscroll {
+            axis: Axis::X,
+            velocity: delta.x / frame_dt,
+        });
+    }
+    if delta.y != 0.0 {
+        out.push(ScrollIntent::EdgeAutoscroll {
+            axis: Axis::Y,
+            velocity: delta.y / frame_dt,
+        });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{AutoScrollAxis, AutoScrollConfig, edge_auto_scroll_delta};
+    use super::{AutoScrollAxis, AutoScrollConfig, drag_delta_to_intents, edge_auto_scroll_delta};
+    use crate::app::ui::scrolling::{Axis, ScrollIntent};
     use eframe::egui::{Rect, pos2, vec2};
 
     const CONFIG: AutoScrollConfig = AutoScrollConfig {
@@ -139,5 +175,46 @@ mod tests {
             ),
             0.0
         );
+    }
+
+    // ---- drag_delta_to_intents ----
+
+    #[test]
+    fn drag_delta_zero_emits_no_intents() {
+        let intents = drag_delta_to_intents(vec2(0.0, 0.0), 1.0 / 60.0);
+        assert!(intents.is_empty());
+    }
+
+    #[test]
+    fn drag_delta_y_only_emits_one_y_intent() {
+        let intents = drag_delta_to_intents(vec2(0.0, 4.0), 1.0 / 60.0);
+        assert_eq!(intents.len(), 1);
+        match intents[0] {
+            ScrollIntent::EdgeAutoscroll { axis, velocity } => {
+                assert_eq!(axis, Axis::Y);
+                assert!((velocity - 4.0 * 60.0).abs() < 1e-3);
+            }
+            _ => panic!("expected EdgeAutoscroll, got {:?}", intents[0]),
+        }
+    }
+
+    #[test]
+    fn drag_delta_both_axes_emits_two_intents_in_x_then_y_order() {
+        let intents = drag_delta_to_intents(vec2(-2.0, 5.0), 1.0 / 60.0);
+        assert_eq!(intents.len(), 2);
+        assert!(matches!(
+            intents[0],
+            ScrollIntent::EdgeAutoscroll { axis: Axis::X, .. }
+        ));
+        assert!(matches!(
+            intents[1],
+            ScrollIntent::EdgeAutoscroll { axis: Axis::Y, .. }
+        ));
+    }
+
+    #[test]
+    fn drag_delta_zero_or_negative_dt_emits_no_intents() {
+        assert!(drag_delta_to_intents(vec2(3.0, 4.0), 0.0).is_empty());
+        assert!(drag_delta_to_intents(vec2(3.0, 4.0), -1.0 / 60.0).is_empty());
     }
 }

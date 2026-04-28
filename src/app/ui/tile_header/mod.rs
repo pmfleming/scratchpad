@@ -104,14 +104,13 @@ pub(crate) fn render_tile_header(
 }
 
 fn preview_lines_for_view(tab: &crate::app::domain::WorkspaceTab, view_id: ViewId) -> Vec<String> {
-    tab.view(view_id)
-        .and_then(|view| view.latest_layout.as_ref())
-        .and_then(|layout| layout.visible_text.as_ref())
-        .map(split::build_preview_lines_for_window)
-        .or_else(|| {
-            tab.buffer_for_view(view_id)
-                .map(|buffer| split::build_preview_lines(&buffer.text()))
-        })
+    let layout_window = tab.view(view_id).and_then(|view| view.published_viewport());
+    let buffer = tab.buffer_for_view(view_id);
+    if let (Some(window), Some(buffer)) = (layout_window, buffer) {
+        return split::build_preview_lines_for_window(buffer, window);
+    }
+    buffer
+        .map(|buffer| split::build_preview_lines(&buffer.text()))
         .unwrap_or_else(|| split::build_preview_lines(""))
 }
 

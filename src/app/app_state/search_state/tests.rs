@@ -155,7 +155,7 @@ fn activating_search_match_navigates_to_matching_tab_and_range() {
     assert!(
         app.active_tab()
             .and_then(|tab| tab.active_view())
-            .is_some_and(|view| view.cursor_reveal_mode().is_some())
+            .is_some_and(|view| view.reveal_request().is_some())
     );
 }
 
@@ -186,7 +186,7 @@ fn activating_search_match_uses_first_tile_for_duplicate_buffer_results() {
     assert!(
         app.tabs()[0]
             .view(first_view_id)
-            .is_some_and(|view| view.cursor_reveal_mode().is_some())
+            .is_some_and(|view| view.reveal_request().is_some())
     );
 }
 

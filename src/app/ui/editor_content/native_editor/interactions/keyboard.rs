@@ -38,25 +38,6 @@ pub(super) fn handle_keyboard_events(
     })
 }
 
-pub(super) fn handle_keyboard_events_unwrapped(
-    ui: &mut egui::Ui,
-    buffer: &mut BufferState,
-    view: &mut EditorViewState,
-    page_jump_rows: usize,
-    total_chars: usize,
-) -> bool {
-    handle_keyboard_events_with(ui, buffer, view, |key_event, buffer, cursor| {
-        cursor::apply_cursor_movement_unwrapped(
-            cursor,
-            key_event.key,
-            &key_event.modifiers,
-            page_jump_rows,
-            total_chars,
-            buffer.document().piece_tree(),
-        )
-    })
-}
-
 fn handle_keyboard_events_with(
     ui: &mut egui::Ui,
     buffer: &mut BufferState,

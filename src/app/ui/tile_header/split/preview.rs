@@ -1,5 +1,5 @@
 use super::{SplitAxis, SplitPreviewOverlay, split_rect};
-use crate::app::domain::RenderedTextWindow;
+use crate::app::domain::{BufferState, PublishedViewport};
 use crate::app::theme::header_bg;
 use eframe::egui;
 
@@ -35,20 +35,30 @@ pub fn build_preview_lines(content: &str) -> Vec<String> {
     lines
 }
 
-pub fn build_preview_lines_for_window(window: &RenderedTextWindow) -> Vec<String> {
+pub fn build_preview_lines_for_window(
+    buffer: &BufferState,
+    window: &PublishedViewport,
+) -> Vec<String> {
+    if window.line_range.is_empty() {
+        return vec![String::from("Untitled")];
+    }
+
     let mut lines = Vec::with_capacity(4);
-    if window.truncated_start {
+    let truncated_start = window.line_range.start > 0;
+    let truncated_end = window.line_range.end < buffer.line_count;
+    if truncated_start {
         lines.push(String::from("..."));
     }
 
-    for line in window.text.lines() {
+    let text = buffer.extract_text_for_lines(window.line_range.clone());
+    for line in text.lines() {
         if lines.len() >= 4 {
             break;
         }
         lines.push(line.replace('\t', "    "));
     }
 
-    if window.truncated_end && lines.len() < 4 {
+    if truncated_end && lines.len() < 4 {
         lines.push(String::from("..."));
     }
 
@@ -254,22 +264,23 @@ fn elide_preview_line(line: &str, max_width: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::build_preview_lines_for_window;
-    use crate::app::domain::RenderedTextWindow;
+    use crate::app::domain::{BufferState, PublishedViewport};
 
     #[test]
-    fn visible_window_previews_include_truncation_markers() {
-        let window = RenderedTextWindow {
+    fn published_viewport_previews_include_truncation_markers() {
+        let buffer = BufferState::new(
+            "notes.txt".to_owned(),
+            "line0\nline1\nline2\nline3\nalpha\nbeta\ngamma\nline7\nline8".to_owned(),
+            None,
+        );
+        let window = PublishedViewport {
             row_range: 12..15,
-            line_range: 12..15,
-            char_range: 120..150,
+            line_range: 4..7,
             layout_row_offset: 0,
-            text: "alpha\nbeta\ngamma\n".to_owned(),
-            truncated_start: true,
-            truncated_end: true,
         };
 
         assert_eq!(
-            build_preview_lines_for_window(&window),
+            build_preview_lines_for_window(&buffer, &window),
             vec![
                 "...".to_owned(),
                 "alpha".to_owned(),
@@ -281,18 +292,15 @@ mod tests {
 
     #[test]
     fn empty_window_previews_fall_back_to_untitled() {
-        let window = RenderedTextWindow {
+        let buffer = BufferState::new("notes.txt".to_owned(), String::new(), None);
+        let window = PublishedViewport {
             row_range: 0..0,
             line_range: 0..0,
-            char_range: 0..0,
             layout_row_offset: 0,
-            text: String::new(),
-            truncated_start: false,
-            truncated_end: false,
         };
 
         assert_eq!(
-            build_preview_lines_for_window(&window),
+            build_preview_lines_for_window(&buffer, &window),
             vec!["Untitled".to_owned()]
         );
     }

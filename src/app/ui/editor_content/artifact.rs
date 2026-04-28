@@ -1,5 +1,5 @@
 use super::native_editor::{EditorWidgetOutcome, TextEditOptions, render_read_only_text_edit};
-use crate::app::domain::{BufferState, EditorViewState, RenderedLayout};
+use crate::app::domain::{BufferState, EditorViewState, PublishedViewport, RenderedLayout};
 
 pub fn render_artifact_view(
     ui: &mut eframe::egui::Ui,
@@ -54,16 +54,22 @@ fn try_render_visible_artifact_window(
         return None;
     }
 
-    let visible_lines = previous_layout?.visible_line_range();
+    let _ = previous_layout?;
+    let visible_lines = view.published_viewport()?.line_range.clone();
     if visible_lines.is_empty() {
         return None;
     }
 
-    let mut visible_window = buffer.visible_line_window(visible_lines.clone());
-    let top_padding_lines = visible_window.line_range.start;
-    let bottom_padding_lines = buffer
-        .line_count
-        .saturating_sub(visible_window.line_range.end);
+    let max_line = buffer.line_count.max(1);
+    let start_line = visible_lines.start.min(max_line);
+    let end_line = visible_lines.end.min(max_line);
+    if start_line >= end_line {
+        return None;
+    }
+    let line_range = start_line..end_line;
+    let visible_text = buffer.extract_text_for_lines(line_range.clone());
+    let top_padding_lines = line_range.start;
+    let bottom_padding_lines = buffer.line_count.saturating_sub(line_range.end);
     let row_height = ui.fonts_mut(|fonts| fonts.row_height(options.editor_font_id));
 
     if top_padding_lines > 0 {
@@ -73,14 +79,18 @@ fn try_render_visible_artifact_window(
     let outcome = render_read_only_text_edit(
         ui,
         view,
-        transform(&visible_window.text),
-        visible_window.line_range.len().max(1),
+        transform(&visible_text),
+        line_range.len().max(1),
         options,
     );
     if let Some(layout) = view.latest_layout.as_mut() {
-        layout.offset_line_numbers(visible_window.line_range.start);
-        visible_window.row_range = 0..layout.row_count();
-        layout.set_visible_text(visible_window);
+        layout.offset_line_numbers(line_range.start);
+        let row_range = 0..layout.row_count();
+        view.publish_viewport(PublishedViewport {
+            row_range,
+            line_range: line_range.clone(),
+            layout_row_offset: line_range.start,
+        });
     }
 
     if bottom_padding_lines > 0 {

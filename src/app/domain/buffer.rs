@@ -44,29 +44,6 @@ impl BufferLength {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct VisibleWindowLayoutKey {
-    pub wrap_width_bits: u32,
-    pub font_size_bits: u32,
-    pub dark_mode: bool,
-    pub text_color: eframe::egui::Color32,
-    pub highlight_background: eframe::egui::Color32,
-    pub highlight_text: eframe::egui::Color32,
-    pub selection_range: Option<Range<usize>>,
-    pub search_highlight_signature: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RenderedTextWindow {
-    pub row_range: Range<usize>,
-    pub line_range: Range<usize>,
-    pub char_range: Range<usize>,
-    pub layout_row_offset: usize,
-    pub text: String,
-    pub truncated_start: bool,
-    pub truncated_end: bool,
-}
-
 #[derive(Clone)]
 pub struct RenderedLayout {
     galley: Arc<eframe::egui::Galley>,
@@ -75,8 +52,6 @@ pub struct RenderedLayout {
     pub row_line_numbers: Vec<Option<usize>>,
     row_char_ranges: Vec<Range<usize>>,
     row_height_bits: Option<u32>,
-    pub visible_text: Option<RenderedTextWindow>,
-    visible_window_layout_key: Option<VisibleWindowLayoutKey>,
 }
 
 impl RenderedLayout {
@@ -92,8 +67,6 @@ impl RenderedLayout {
             row_line_numbers,
             row_char_ranges,
             row_height_bits: None,
-            visible_text: None,
-            visible_window_layout_key: None,
         }
     }
 
@@ -125,27 +98,39 @@ impl RenderedLayout {
         self.row_tops.get(row_index).copied()
     }
 
-    pub fn visible_row_range(&self) -> Range<usize> {
-        self.visible_text
-            .as_ref()
-            .map(|window| window.row_range.clone())
-            .unwrap_or(0..self.row_count())
-    }
+    /// Compute the 0-indexed logical line range that owns the given display
+    /// row range, using only the layout's own metadata (no buffer access).
+    /// Returns `None` if the row range is empty or out of bounds.
+    pub fn line_range_for_rows(&self, rows: Range<usize>) -> Option<Range<usize>> {
+        if self.row_line_numbers.is_empty() {
+            return None;
+        }
+        let start = rows.start.min(self.row_line_numbers.len());
+        let end = rows.end.min(self.row_line_numbers.len());
+        if start >= end {
+            return None;
+        }
 
-    pub fn visible_line_range(&self) -> Range<usize> {
-        self.visible_text
-            .as_ref()
-            .map(|window| window.line_range.clone())
-            .unwrap_or_else(|| {
-                let line_count = self
-                    .row_line_numbers
-                    .iter()
-                    .flatten()
-                    .copied()
-                    .next_back()
-                    .unwrap_or(1);
-                0..line_count
-            })
+        // Walk forward from `start` to find the first 1-indexed line number.
+        let first_line = (start..end)
+            .find_map(|row| self.row_line_numbers[row])
+            .or_else(|| {
+                // No labelled rows in the range; fall back to the most recent
+                // labelled row at or before `start`.
+                (0..=start.min(self.row_line_numbers.len().saturating_sub(1)))
+                    .rev()
+                    .find_map(|row| self.row_line_numbers[row])
+            })?;
+        // Walk backward from `end-1` to find the last labelled row that begins
+        // a wrapped block, then the line range extends through that line.
+        let last_line = (start..end)
+            .rev()
+            .find_map(|row| self.row_line_numbers[row])
+            .unwrap_or(first_line);
+
+        let start_line = first_line.saturating_sub(1);
+        let end_line = last_line; // 1-indexed last line → exclusive 0-indexed end.
+        Some(start_line..end_line)
     }
 
     pub fn offset_line_numbers(&mut self, line_offset: usize) {
@@ -174,39 +159,55 @@ impl RenderedLayout {
         Some(self.row_char_ranges[start].start..self.row_char_ranges[end - 1].end)
     }
 
-    pub fn set_visible_text(&mut self, visible_text: RenderedTextWindow) {
-        self.visible_window_layout_key = None;
-        self.visible_text = Some(visible_text);
+    /// First display row that belongs to the given 0-indexed logical line.
+    /// Returns `None` if the logical line is past the layout's last row.
+    pub fn display_row_for_logical_line(&self, logical_line: usize) -> Option<usize> {
+        let target = logical_line.saturating_add(1);
+        let mut current = 0usize;
+        for (row_index, line_number) in self.row_line_numbers.iter().enumerate() {
+            if let Some(num) = *line_number {
+                current = num;
+                if num == target {
+                    return Some(row_index);
+                }
+                if num > target {
+                    return Some(row_index.saturating_sub(1));
+                }
+            }
+        }
+        if current >= target {
+            Some(self.row_line_numbers.len().saturating_sub(1))
+        } else {
+            None
+        }
     }
 
-    pub fn set_visible_text_with_cache_key(
-        &mut self,
-        visible_text: RenderedTextWindow,
-        cache_key: VisibleWindowLayoutKey,
-    ) {
-        self.visible_text = Some(visible_text);
-        self.visible_window_layout_key = Some(cache_key);
-    }
+    /// 0-indexed logical line that owns the given display row, plus the
+    /// fractional offset (in display rows) within that wrapped block.
+    pub fn anchor_at_display_row(&self, display_row: f32) -> (usize, f32) {
+        if self.row_line_numbers.is_empty() {
+            return (0, display_row.max(0.0));
+        }
+        let max_row = self.row_line_numbers.len().saturating_sub(1);
+        let clamped = display_row.max(0.0);
+        let row_floor = (clamped as usize).min(max_row);
+        let frac = clamped - row_floor as f32;
 
-    pub fn matches_visible_window_layout(
-        &self,
-        visible_text: &RenderedTextWindow,
-        cache_key: &VisibleWindowLayoutKey,
-    ) -> bool {
-        self.visible_text
-            .as_ref()
-            .is_some_and(|cached| visible_window_matches(cached, visible_text))
-            && self.visible_window_layout_key.as_ref() == Some(cache_key)
+        // Walk backwards from row_floor to find the start of its wrapped block,
+        // and pick up the (1-indexed) logical line number.
+        let mut block_start = row_floor;
+        let mut line_number = None;
+        for back in (0..=row_floor).rev() {
+            if let Some(num) = self.row_line_numbers[back] {
+                line_number = Some(num);
+                block_start = back;
+                break;
+            }
+        }
+        let logical_line = line_number.map(|n| n.saturating_sub(1)).unwrap_or(0);
+        let intra_block = (row_floor - block_start) as f32 + frac;
+        (logical_line, intra_block)
     }
-}
-
-fn visible_window_matches(cached: &RenderedTextWindow, current: &RenderedTextWindow) -> bool {
-    cached.line_range == current.line_range
-        && cached.char_range == current.char_range
-        && cached.layout_row_offset == current.layout_row_offset
-        && cached.text == current.text
-        && cached.truncated_start == current.truncated_start
-        && cached.truncated_end == current.truncated_end
 }
 
 fn row_tops_for_galley(galley: &eframe::egui::Galley) -> Vec<f32> {
@@ -244,7 +245,7 @@ fn row_char_ranges_for_galley(galley: &eframe::egui::Galley) -> Vec<Range<usize>
 
 #[cfg(test)]
 mod tests {
-    use super::{RenderedLayout, RenderedTextWindow, VisibleWindowLayoutKey};
+    use super::RenderedLayout;
     use eframe::egui;
 
     fn test_layout(line_count: usize) -> RenderedLayout {
@@ -269,77 +270,101 @@ mod tests {
     }
 
     #[test]
-    fn visible_ranges_default_to_full_layout() {
-        let layout = test_layout(4);
-
-        assert_eq!(layout.visible_row_range(), 0..4);
-        assert_eq!(layout.visible_line_range(), 0..4);
-    }
-
-    #[test]
-    fn visible_ranges_follow_visible_text_window() {
-        let mut layout = test_layout(5);
-        layout.set_visible_text(RenderedTextWindow {
-            row_range: 1..4,
-            line_range: 1..4,
-            char_range: 7..28,
-            layout_row_offset: 0,
-            text: "line 1\nline 2\nline 3".to_owned(),
-            truncated_start: true,
-            truncated_end: true,
-        });
-
-        assert_eq!(layout.visible_row_range(), 1..4);
-        assert_eq!(layout.visible_line_range(), 1..4);
-    }
-
-    #[test]
-    fn visible_window_layout_match_ignores_layout_row_range() {
-        let mut layout = test_layout(3);
-        let cache_key = VisibleWindowLayoutKey {
-            wrap_width_bits: 0.0f32.to_bits(),
-            font_size_bits: 14.0f32.to_bits(),
-            dark_mode: true,
-            text_color: egui::Color32::WHITE,
-            highlight_background: egui::Color32::LIGHT_BLUE,
-            highlight_text: egui::Color32::BLACK,
-            selection_range: Some(0..4),
-            search_highlight_signature: 17,
-        };
-
-        layout.set_visible_text_with_cache_key(
-            RenderedTextWindow {
-                row_range: 0..5,
-                line_range: 40..43,
-                char_range: 100..118,
-                layout_row_offset: 40,
-                text: "line 40\nline 41\nline 42\n".to_owned(),
-                truncated_start: true,
-                truncated_end: true,
-            },
-            cache_key.clone(),
-        );
-
-        assert!(layout.matches_visible_window_layout(
-            &RenderedTextWindow {
-                row_range: 0..0,
-                line_range: 40..43,
-                char_range: 100..118,
-                layout_row_offset: 40,
-                text: "line 40\nline 41\nline 42\n".to_owned(),
-                truncated_start: true,
-                truncated_end: true,
-            },
-            &cache_key,
-        ));
-    }
-
-    #[test]
     fn line_number_offsets_shift_visible_rows() {
         let mut layout = test_layout(3);
 
         layout.offset_line_numbers(5);
 
         assert_eq!(layout.row_line_numbers, vec![Some(6), Some(7), Some(8)]);
+    }
+
+    /// Build a layout where the first logical line wraps across multiple
+    /// display rows, exercising the `Some(n), None, None, ...` shape that
+    /// `line_range_for_rows` must navigate.
+    fn wrapped_layout() -> RenderedLayout {
+        let ctx = egui::Context::default();
+        let mut layout = None;
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            // Two long lines that will wrap, plus two short lines.
+            let text = format!("{}\n{}\nshort\nlast", "x".repeat(40), "y".repeat(40));
+            let galley = ui.ctx().fonts_mut(|fonts| {
+                fonts.layout_job(egui::text::LayoutJob::simple(
+                    text,
+                    egui::FontId::monospace(14.0),
+                    egui::Color32::WHITE,
+                    100.0, // narrow width forces wrapping
+                ))
+            });
+            layout = Some(RenderedLayout::from_galley(galley));
+        });
+        layout.expect("layout should be captured")
+    }
+
+    #[test]
+    fn line_range_for_rows_returns_none_for_empty_or_out_of_bounds() {
+        // An empty galley still has one row, but ranges that cannot resolve
+        // should still return None.
+        let layout = test_layout(3);
+        // Empty range
+        assert!(layout.line_range_for_rows(2..2).is_none());
+        // Range entirely past row_count.
+        assert!(layout.line_range_for_rows(10..20).is_none());
+    }
+
+    #[test]
+    fn line_range_for_rows_unwrapped_one_row_per_line() {
+        let layout = test_layout(5);
+        assert_eq!(layout.line_range_for_rows(0..1), Some(0..1));
+        assert_eq!(layout.line_range_for_rows(0..3), Some(0..3));
+        assert_eq!(layout.line_range_for_rows(2..5), Some(2..5));
+        assert_eq!(layout.line_range_for_rows(0..5), Some(0..5));
+    }
+
+    #[test]
+    fn line_range_for_rows_handles_wrapped_lines() {
+        let layout = wrapped_layout();
+        // Sanity: we should have at least 4 display rows but only 4 logical lines,
+        // so something must have wrapped.
+        assert!(
+            layout.row_count() > 4,
+            "wrapped layout should produce more rows than logical lines, got {}",
+            layout.row_count()
+        );
+        let labelled_rows: Vec<usize> = layout
+            .row_line_numbers
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, n)| n.map(|_| idx))
+            .collect();
+        assert!(
+            labelled_rows.len() >= 4,
+            "expected 4 line-start rows, got {labelled_rows:?}"
+        );
+
+        // A row range entirely inside the first wrapped block (a continuation
+        // row only) must still resolve to the owning logical line 0.
+        if labelled_rows[1] > 1 {
+            // labelled_rows[1] is the start of line 2 (1-indexed); rows in
+            // 1..labelled_rows[1] are continuation rows of line 1.
+            let cont_row = 1;
+            let range = layout.line_range_for_rows(cont_row..cont_row + 1);
+            assert_eq!(range, Some(0..1));
+        }
+
+        // A row range covering all rows of the document spans every logical line.
+        let full = layout.line_range_for_rows(0..layout.row_count());
+        assert_eq!(full, Some(0..4));
+
+        // A row range covering just the last row resolves to the last logical line.
+        let last_row = layout.row_count() - 1;
+        let last = layout.line_range_for_rows(last_row..last_row + 1);
+        assert_eq!(last, Some(3..4));
+    }
+
+    #[test]
+    fn line_range_for_rows_clamps_overrun_end() {
+        let layout = test_layout(3);
+        // Asking for more rows than exist should clamp at row_count.
+        assert_eq!(layout.line_range_for_rows(0..100), Some(0..3));
     }
 }

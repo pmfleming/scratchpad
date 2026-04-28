@@ -30,6 +30,7 @@ struct ActiveStatusDetails {
     icon_tooltip: &'static str,
     icon_color: egui::Color32,
     freshness_label: Option<String>,
+    render_notice_label: Option<String>,
     metadata_refresh_pending: bool,
     encoding_compliance_pending: bool,
     has_control_chars: bool,
@@ -81,9 +82,7 @@ fn collect_active_status_details(
         .map(|view| {
             tab.buffer.view_status(
                 view.pending_cursor_range.or(view.cursor_range),
-                view.latest_layout
-                    .as_ref()
-                    .and_then(|layout| layout.visible_text.as_ref()),
+                view.published_viewport(),
             )
         })
         .unwrap_or_default();
@@ -113,6 +112,9 @@ fn collect_active_status_details(
         icon_tooltip,
         icon_color,
         freshness_label: tab.buffer.disk_status_label().map(str::to_owned),
+        render_notice_label: active_view
+            .and_then(|view| view.render_notice())
+            .map(|notice| notice.message().to_owned()),
         metadata_refresh_pending: tab.buffer.text_metadata_refresh_needed(),
         encoding_compliance_pending: tab.buffer.encoding_compliance_refresh_needed(),
         has_control_chars,
@@ -300,6 +302,11 @@ fn show_status_warnings(ui: &mut egui::Ui, details: &ActiveStatusDetails) {
     if let Some(freshness_label) = &details.freshness_label {
         ui.separator();
         ui.label(egui::RichText::new(freshness_label).color(egui::Color32::YELLOW));
+    }
+
+    if let Some(render_notice) = &details.render_notice_label {
+        ui.separator();
+        ui.label(egui::RichText::new(render_notice).color(egui::Color32::YELLOW));
     }
 
     if let Some(metadata_warning) = metadata_refresh_warning(details.metadata_refresh_pending) {

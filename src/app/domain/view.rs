@@ -1,6 +1,6 @@
 use crate::app::domain::{BufferId, RenderedLayout};
 use crate::app::ui::editor_content::native_editor::CursorRange;
-use crate::app::ui::scrolling::{ScrollIntent, ScrollManager};
+use crate::app::ui::scrolling::{DisplaySnapshot, ScrollAnchor, ScrollIntent, ScrollManager};
 use eframe::egui;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -23,11 +23,38 @@ struct PublishedImeOutput {
     cursor_rect: egui::Rect,
 }
 
-/// Cursor reveal preference. The actual scroll target rect is resolved by the
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EditorRenderNotice {
+    message: String,
+}
+
+/// View-owned metadata for the display rows currently published by the
+/// renderer. This is the shared source consumed by gutter, status bar, split
+/// preview, and artifact mode.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PublishedViewport {
+    pub row_range: Range<usize>,
+    pub line_range: Range<usize>,
+    pub layout_row_offset: usize,
+}
+
+impl EditorRenderNotice {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+/// High-level reveal request. The actual scroll target rect is resolved by the
 /// renderer once cursor geometry is known; the reveal is then dispatched as a
 /// `ScrollIntent::Reveal`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CursorRevealMode {
+pub enum RevealRequest {
     /// Scroll only the minimum amount needed to keep the cursor visible.
     KeepVisible,
     /// Center the cursor (or place it near the centerband).
@@ -42,6 +69,7 @@ pub struct EditorViewState {
     pub show_control_chars: bool,
     pub editor_has_focus: bool,
     pub latest_layout: Option<RenderedLayout>,
+    pub latest_display_snapshot: Option<DisplaySnapshot>,
     pub latest_layout_revision: Option<u64>,
     pub cursor_range: Option<CursorRange>,
     pub pending_cursor_range: Option<CursorRange>,
@@ -50,10 +78,12 @@ pub struct EditorViewState {
     pub scroll: ScrollManager,
     /// Queued scroll intents to be applied on the next render frame.
     pub pending_intents: Vec<ScrollIntent>,
-    /// Pending cursor-reveal mode. Resolved into a `ScrollIntent::Reveal` by
+    /// Pending reveal request. Resolved into a `ScrollIntent::Reveal` by
     /// the renderer once the cursor's display rect is known.
-    pending_cursor_reveal: Option<CursorRevealMode>,
+    pending_reveal_request: Option<RevealRequest>,
     published_ime_output: Option<PublishedImeOutput>,
+    published_viewport: Option<PublishedViewport>,
+    render_notice: Option<EditorRenderNotice>,
     pub search_highlights: SearchHighlightState,
 }
 
@@ -66,13 +96,16 @@ impl EditorViewState {
             show_control_chars,
             editor_has_focus: false,
             latest_layout: None,
+            latest_display_snapshot: None,
             latest_layout_revision: None,
             cursor_range: None,
             pending_cursor_range: None,
             scroll: ScrollManager::new(),
             pending_intents: Vec::new(),
-            pending_cursor_reveal: None,
+            pending_reveal_request: None,
             published_ime_output: None,
+            published_viewport: None,
+            render_notice: None,
             search_highlights: SearchHighlightState::default(),
         }
     }
@@ -91,13 +124,16 @@ impl EditorViewState {
             show_control_chars,
             editor_has_focus: false,
             latest_layout: None,
+            latest_display_snapshot: None,
             latest_layout_revision: None,
             cursor_range: None,
             pending_cursor_range: None,
             scroll: ScrollManager::new(),
             pending_intents: Vec::new(),
-            pending_cursor_reveal: None,
+            pending_reveal_request: None,
             published_ime_output: None,
+            published_viewport: None,
+            render_notice: None,
             search_highlights: SearchHighlightState::default(),
         }
     }
@@ -107,56 +143,63 @@ impl EditorViewState {
         self.pending_intents.push(intent);
     }
 
-    /// Request the cursor be revealed on the next render. `Center` dominates
-    /// `KeepVisible` if both are requested before the next frame.
-    pub fn request_cursor_reveal(&mut self, mode: CursorRevealMode) {
-        self.pending_cursor_reveal = Some(match (self.pending_cursor_reveal, mode) {
-            (Some(CursorRevealMode::Center), _) | (_, CursorRevealMode::Center) => {
-                CursorRevealMode::Center
-            }
-            _ => CursorRevealMode::KeepVisible,
+    /// Request a reveal on the next render. `Center` dominates `KeepVisible`
+    /// if both are requested before the next frame.
+    pub fn request_reveal(&mut self, request: RevealRequest) {
+        self.pending_reveal_request = Some(match (self.pending_reveal_request, request) {
+            (Some(RevealRequest::Center), _) | (_, RevealRequest::Center) => RevealRequest::Center,
+            _ => RevealRequest::KeepVisible,
         });
     }
 
-    pub fn cursor_reveal_mode(&self) -> Option<CursorRevealMode> {
-        self.pending_cursor_reveal
+    pub fn reveal_request(&self) -> Option<RevealRequest> {
+        self.pending_reveal_request
     }
 
-    pub fn clear_cursor_reveal(&mut self) {
-        self.pending_cursor_reveal = None;
+    pub fn clear_reveal_request(&mut self) {
+        self.pending_reveal_request = None;
     }
 
     /// Pixel-space scroll offset derived from the per-view `ScrollManager`.
-    /// Useful at the egui-wrapper boundary while phase 4 wiring is in flight.
+    /// Uses the latest `RenderedLayout` when available to translate the anchor
+    /// through the actual display-row map (handles soft wrap correctly);
+    /// falls back to the naive identity map until layout is published.
     pub fn editor_pixel_offset(&self) -> egui::Vec2 {
         let metrics = self.scroll.metrics();
-        let anchor = self.scroll.anchor();
-        let y = (anchor.logical_line as f32 + anchor.display_row_offset)
-            * metrics.row_height.max(0.0);
-        egui::vec2(self.scroll.horizontal_px(), y)
+        let row_height = metrics.row_height.max(0.0);
+        let row = self.layout_anchor_to_row(self.scroll.anchor());
+        egui::vec2(self.scroll.horizontal_px(), row * row_height)
     }
 
     /// Update the per-view scroll position from a pixel offset (e.g. coming
     /// out of the underlying egui ScrollArea). Resolves through the scroll
     /// manager's intent path for consistency.
     pub fn set_editor_pixel_offset(&mut self, offset: egui::Vec2) {
-        use crate::app::ui::scrolling::{naive_anchor_to_row, naive_row_to_anchor, Axis};
+        use crate::app::ui::scrolling::Axis;
+        let layout = self.latest_layout.clone();
+        let to_row = move |anchor| layout_anchor_to_row(layout.as_ref(), anchor);
+        let layout2 = self.latest_layout.clone();
+        let to_anchor = move |row| layout_row_to_anchor(layout2.as_ref(), row);
         self.scroll.apply_intent(
             ScrollIntent::ScrollbarTo {
                 axis: Axis::Y,
                 offset_pixels: offset.y,
             },
-            naive_anchor_to_row,
-            naive_row_to_anchor,
+            &to_row,
+            &to_anchor,
         );
         self.scroll.apply_intent(
             ScrollIntent::ScrollbarTo {
                 axis: Axis::X,
                 offset_pixels: offset.x,
             },
-            naive_anchor_to_row,
-            naive_row_to_anchor,
+            &to_row,
+            &to_anchor,
         );
+    }
+
+    fn layout_anchor_to_row(&self, anchor: crate::app::ui::scrolling::ScrollAnchor) -> f32 {
+        layout_anchor_to_row(self.latest_layout.as_ref(), anchor)
     }
 
     pub fn mark_ime_output(&mut self, rect: egui::Rect, cursor_rect: egui::Rect) -> bool {
@@ -172,6 +215,32 @@ impl EditorViewState {
     pub fn clear_ime_output(&mut self) {
         self.published_ime_output = None;
     }
+
+    pub fn publish_viewport(&mut self, viewport: PublishedViewport) {
+        self.published_viewport = Some(viewport);
+    }
+
+    pub fn clear_published_viewport(&mut self) {
+        self.published_viewport = None;
+    }
+
+    pub fn published_viewport(&self) -> Option<&PublishedViewport> {
+        self.published_viewport.as_ref()
+    }
+
+    pub fn set_render_notice(&mut self, notice: EditorRenderNotice) {
+        if self.render_notice.as_ref() != Some(&notice) {
+            self.render_notice = Some(notice);
+        }
+    }
+
+    pub fn clear_render_notice(&mut self) {
+        self.render_notice = None;
+    }
+
+    pub fn render_notice(&self) -> Option<&EditorRenderNotice> {
+        self.render_notice.as_ref()
+    }
 }
 
 impl SearchHighlightState {
@@ -184,6 +253,38 @@ impl SearchHighlightState {
 
 pub fn next_view_id() -> ViewId {
     NEXT_VIEW_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn layout_anchor_to_row(layout: Option<&RenderedLayout>, anchor: ScrollAnchor) -> f32 {
+    match layout {
+        Some(layout) => layout
+            .display_row_for_logical_line(anchor.logical_line as usize)
+            .map(|row| row as f32 + anchor.display_row_offset)
+            .unwrap_or_else(|| anchor.logical_line as f32 + anchor.display_row_offset),
+        None => anchor.logical_line as f32 + anchor.display_row_offset,
+    }
+}
+
+fn layout_row_to_anchor(layout: Option<&RenderedLayout>, row: f32) -> ScrollAnchor {
+    match layout {
+        Some(layout) => {
+            let (logical_line, frac) = layout.anchor_at_display_row(row);
+            ScrollAnchor {
+                logical_line: logical_line as u32,
+                byte_in_line: 0,
+                display_row_offset: frac,
+            }
+        }
+        None => {
+            let line = row.max(0.0).floor() as u32;
+            let frac = (row - line as f32).max(0.0);
+            ScrollAnchor {
+                logical_line: line,
+                byte_in_line: 0,
+                display_row_offset: frac,
+            }
+        }
+    }
 }
 
 fn register_existing_view_id(id: ViewId) {
@@ -202,6 +303,7 @@ fn register_existing_view_id(id: ViewId) {
 #[cfg(test)]
 mod tests {
     use super::{EditorViewState, SearchHighlightState};
+    use crate::app::ui::scrolling::{ContentExtent, ViewportMetrics};
     use eframe::egui;
 
     #[test]
@@ -229,5 +331,82 @@ mod tests {
         highlights.ranges.push(8..12);
 
         assert_ne!(highlights.layout_signature(), initial);
+    }
+
+    #[test]
+    fn editor_pixel_offset_round_trips_after_scroll_metrics_are_set() {
+        let mut view = EditorViewState::new(7, false);
+        view.scroll.set_metrics(ViewportMetrics {
+            viewport_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 180.0)),
+            row_height: 18.0,
+            column_width: 8.0,
+            visible_rows: 10,
+            visible_columns: 50,
+        });
+        view.scroll.set_extent(ContentExtent {
+            display_rows: 100,
+            height: 1800.0,
+            max_line_width: 900.0,
+        });
+
+        view.set_editor_pixel_offset(egui::vec2(120.0, 360.0));
+
+        assert_eq!(view.editor_pixel_offset(), egui::vec2(120.0, 360.0));
+    }
+
+    #[test]
+    fn editor_pixel_offset_uses_layout_when_available_for_wrapped_text() {
+        use crate::app::domain::RenderedLayout;
+
+        // Build a wrapped layout: 1 logical line that wraps into 3 display rows,
+        // followed by 2 unwrapped lines. The naive identity map would place
+        // logical_line=2 at row 2, but the layout-aware map should place it at row 3.
+        let ctx = egui::Context::default();
+        let mut layout = None;
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            let text = format!("{}\nshort\nshort", "x".repeat(60));
+            let galley = ui.ctx().fonts_mut(|fonts| {
+                fonts.layout_job(egui::text::LayoutJob::simple(
+                    text,
+                    egui::FontId::monospace(14.0),
+                    egui::Color32::WHITE,
+                    100.0,
+                ))
+            });
+            layout = Some(RenderedLayout::from_galley(galley));
+        });
+        let layout = layout.expect("layout should be captured");
+
+        // Sanity: there is wrap.
+        assert!(layout.row_count() > 3, "expected wrapped layout");
+        let first_unwrapped_row = layout
+            .display_row_for_logical_line(1)
+            .expect("logical line 1 maps to a display row");
+        assert!(
+            first_unwrapped_row >= 2,
+            "logical line 1 should land past the wrapped block"
+        );
+
+        let mut view = EditorViewState::new(7, false);
+        view.latest_layout = Some(layout);
+        view.scroll.set_metrics(ViewportMetrics {
+            viewport_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0)),
+            row_height: 18.0,
+            column_width: 8.0,
+            visible_rows: 5,
+            visible_columns: 12,
+        });
+        view.scroll.set_extent(ContentExtent {
+            display_rows: 100,
+            height: 1800.0,
+            max_line_width: 900.0,
+        });
+
+        view.set_editor_pixel_offset(egui::vec2(0.0, first_unwrapped_row as f32 * 18.0));
+        let anchor = view.scroll.anchor();
+        assert_eq!(
+            anchor.logical_line, 1,
+            "scrolling to row {first_unwrapped_row} should land on logical line 1"
+        );
     }
 }

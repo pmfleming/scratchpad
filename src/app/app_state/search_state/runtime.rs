@@ -5,7 +5,7 @@ use super::{
     SearchMatch, SearchScope, SearchStatus,
 };
 use crate::app::domain::{
-    BufferId, CursorRevealMode, EditorViewState, SearchHighlightState, ViewId, WorkspaceTab,
+    BufferId, EditorViewState, RevealRequest, SearchHighlightState, ViewId, WorkspaceTab,
 };
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use std::collections::{HashMap, HashSet};
@@ -75,7 +75,7 @@ impl ScratchpadApp {
                 if let Some(view) = tab.view_mut(view_id) {
                     view.cursor_range = Some(next_selection);
                     view.pending_cursor_range = Some(next_selection);
-                    view.request_cursor_reveal(CursorRevealMode::Center);
+                    view.request_reveal(RevealRequest::Center);
                 }
                 true
             }
@@ -311,7 +311,7 @@ impl ScratchpadApp {
         };
         if let Some(view) = self.active_view_mut() {
             view.pending_cursor_range = Some(cursor_range_from_char_range(search_range));
-            view.request_cursor_reveal(CursorRevealMode::Center);
+            view.request_reveal(RevealRequest::Center);
         }
     }
 
@@ -532,7 +532,7 @@ impl ScratchpadApp {
         if let Some(view) = tab.view_mut(target.view_id) {
             view.cursor_range = Some(next_selection);
             view.pending_cursor_range = Some(next_selection);
-            view.request_cursor_reveal(CursorRevealMode::Center);
+            view.request_reveal(RevealRequest::Center);
         }
         self.finalize_tab_buffer_mutation(target.tab_index, target.buffer_id);
         true

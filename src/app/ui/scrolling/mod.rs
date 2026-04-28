@@ -20,10 +20,10 @@ mod target;
 
 pub use anchor::ScrollAnchor;
 pub use area::{ScrollArea, ScrollAreaOutput};
-pub use display::{DisplayPoint, DisplayRow, DisplaySnapshot, ViewportSlice};
+pub use display::{DisplayPoint, DisplayRow, DisplaySnapshot, DisplaySnapshotError, ViewportSlice};
 pub use intent::{Axis, ScrollIntent};
-pub use manager::{naive_anchor_to_row, naive_row_to_anchor, ScrollManager};
-pub use metrics::{ContentExtent, ViewportMetrics};
+pub use manager::{ScrollManager, naive_anchor_to_row, naive_row_to_anchor};
+pub use metrics::{ContentExtent, ScrollInvariantError, ViewportMetrics};
 pub use source::ScrollSource;
 pub use state::ScrollState;
 pub use target::{ScrollAlign, ScrollTarget, ScrollbarPolicy};

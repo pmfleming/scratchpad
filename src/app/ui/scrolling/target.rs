@@ -89,15 +89,88 @@ impl ScrollTarget {
 }
 
 /// When the scrollbar should be drawn.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ScrollbarPolicy {
     AlwaysVisible,
+    #[default]
     VisibleWhenNeeded,
     Hidden,
 }
 
-impl Default for ScrollbarPolicy {
-    fn default() -> Self {
-        Self::VisibleWhenNeeded
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rng(min: f32, max: f32) -> Rangef {
+        Rangef::new(min, max)
+    }
+
+    #[test]
+    fn min_align_brings_target_top_to_viewport_top() {
+        let new = ScrollAlign::Min.resolve(rng(500.0, 520.0), 400.0, 2_000.0, 0.0);
+        assert_eq!(new, 500.0);
+    }
+
+    #[test]
+    fn max_align_brings_target_bottom_to_viewport_bottom() {
+        let new = ScrollAlign::Max.resolve(rng(500.0, 520.0), 400.0, 2_000.0, 0.0);
+        // 520 - 400 = 120
+        assert_eq!(new, 120.0);
+    }
+
+    #[test]
+    fn center_align_centers_target_in_viewport() {
+        let new = ScrollAlign::Center.resolve(rng(500.0, 520.0), 400.0, 2_000.0, 0.0);
+        // mid 510, viewport half 200 → offset 310
+        assert_eq!(new, 310.0);
+    }
+
+    #[test]
+    fn nearest_with_margin_does_not_move_when_target_already_inside() {
+        let cur = 100.0;
+        // viewport [100, 500), target [200, 220], margin 10 → fits inside.
+        let new =
+            ScrollAlign::NearestWithMargin(10.0).resolve(rng(200.0, 220.0), 400.0, 2_000.0, cur);
+        assert_eq!(new, cur);
+    }
+
+    #[test]
+    fn nearest_with_margin_pulls_target_below_viewport_into_view() {
+        let cur = 0.0;
+        // viewport [0, 400), target [600, 620], margin 20 → new = 620 - 400 + 20 = 240.
+        let new =
+            ScrollAlign::NearestWithMargin(20.0).resolve(rng(600.0, 620.0), 400.0, 2_000.0, cur);
+        assert_eq!(new, 240.0);
+    }
+
+    #[test]
+    fn nearest_with_margin_pulls_target_above_viewport_into_view() {
+        let cur = 800.0;
+        // viewport [800, 1200), target [700, 720], margin 30 → new = 700 - 30 = 670.
+        let new =
+            ScrollAlign::NearestWithMargin(30.0).resolve(rng(700.0, 720.0), 400.0, 2_000.0, cur);
+        assert_eq!(new, 670.0);
+    }
+
+    #[test]
+    fn align_clamps_to_zero_when_target_near_top() {
+        let new = ScrollAlign::Center.resolve(rng(0.0, 20.0), 400.0, 2_000.0, 500.0);
+        assert_eq!(new, 0.0);
+    }
+
+    #[test]
+    fn align_clamps_to_max_offset_when_target_near_bottom() {
+        // content 1_000, viewport 400 → max_offset 600.
+        let new = ScrollAlign::Center.resolve(rng(990.0, 1_000.0), 400.0, 1_000.0, 0.0);
+        assert_eq!(new, 600.0);
+    }
+
+    #[test]
+    fn fraction_align_places_target_at_specified_viewport_fraction() {
+        // Place target at 25% from the top: f = 0.25.
+        // new = target.min - f * (viewport - (max - min))
+        //     = 600 - 0.25 * (400 - 20) = 600 - 95 = 505.
+        let new = ScrollAlign::Fraction(0.25).resolve(rng(600.0, 620.0), 400.0, 2_000.0, 0.0);
+        assert_eq!(new, 505.0);
     }
 }

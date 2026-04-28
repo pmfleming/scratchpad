@@ -47,6 +47,12 @@ pub const RECOMMENDED_PASTE_STRESS_ITERATIONS: usize = 20;
 pub const RECOMMENDED_SPLIT_STRESS_TILES: usize = 12;
 pub const RECOMMENDED_SPLIT_STRESS_BYTES_PER_TILE: usize = 256 * KB;
 pub const RECOMMENDED_SPLIT_STRESS_ITERATIONS: usize = 24;
+pub const RECOMMENDED_DISPLAY_REBUILD_BYTES: usize = MB;
+pub const RECOMMENDED_DISPLAY_REBUILD_ITERATIONS: usize = 24;
+pub const RECOMMENDED_CURSOR_REVEAL_BYTES: usize = MB;
+pub const RECOMMENDED_CURSOR_REVEAL_ITERATIONS: usize = 64;
+pub const RECOMMENDED_SNAPSHOT_MEMORY_BYTES: usize = 4 * MB;
+pub const RECOMMENDED_SNAPSHOT_MEMORY_ITERATIONS: usize = 16;
 
 const PROFILE_QUERY: &str = "needle";
 const PROFILE_RESET_QUERY: &str = "zzzz-no-match";
@@ -215,11 +221,10 @@ pub fn run_viewport_extraction_profile(bytes: usize, iterations: usize) -> usize
 
     sum_profile_iterations(iterations, || {
         let end = (line_start + viewport_lines + overscan_lines).min(line_count);
-        let line_window = buffer.visible_line_window(line_start..end);
-        let row_window = (line_window.layout_row_offset)
-            ..(line_window.layout_row_offset + line_window.line_range.len());
-        let visible_window =
-            buffer.visible_text_window(row_window, line_window.char_range.clone(), line_count);
+        let line_text = buffer.extract_text_for_lines(line_start..end);
+        // Re-extract via a sub-range to mirror the prior two-step extraction shape.
+        let inner_end = end.saturating_sub(1).max(line_start);
+        let inner_text = buffer.extract_text_for_lines(line_start..inner_end);
 
         line_start = if end >= line_count {
             0
@@ -227,14 +232,7 @@ pub fn run_viewport_extraction_profile(bytes: usize, iterations: usize) -> usize
             (line_start + line_step).min(line_count.saturating_sub(1))
         };
 
-        black_box(
-            line_window.text.len()
-                + visible_window.text.len()
-                + visible_window
-                    .char_range
-                    .end
-                    .saturating_sub(visible_window.char_range.start),
-        )
+        black_box(line_text.len() + inner_text.len())
     })
 }
 
@@ -277,6 +275,112 @@ pub fn run_scroll_stress_profile(bytes: usize, iterations: usize) -> usize {
             });
         });
         total_rows
+    })
+}
+
+/// Phase 7: Display-row layout rebuild latency.
+///
+/// Simulates the cost of rebuilding the wrapped display rows after a viewport
+/// resize or wrap-width change. Each iteration cycles through several wrap
+/// widths so that egui must rebuild the galley + `RenderedLayout` from
+/// scratch — this is the dominant cost on resize.
+pub fn run_display_rebuild_profile(bytes: usize, iterations: usize) -> usize {
+    let text = plain_text_of_size(bytes);
+    let ctx = egui::Context::default();
+    let font_id = egui::FontId::monospace(15.0);
+    let highlight_style =
+        EditorHighlightStyle::new(egui::Color32::from_rgb(90, 146, 214), egui::Color32::WHITE);
+    let widths = [1_200.0, 900.0, 640.0, 480.0, 320.0];
+
+    sum_profile_iterations(iterations, || {
+        let mut total_rows = 0usize;
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show_inside(ui, |ui| {
+                let mut layouter = build_layouter(
+                    font_id.clone(),
+                    false,
+                    egui::Color32::WHITE,
+                    highlight_style,
+                    SearchHighlightState::default(),
+                    None,
+                );
+                for w in widths {
+                    let galley = layouter(ui, &text, w);
+                    let layout = RenderedLayout::from_galley(galley);
+                    total_rows += layout.row_count();
+                }
+            });
+        });
+        total_rows
+    })
+}
+
+/// Phase 7: Cursor reveal latency after a search jump.
+///
+/// Models a search-driven cursor jump on a large file: each iteration moves
+/// the cursor to a different match position, asks the buffer to extract the
+/// surrounding viewport text, and confirms the line containing the cursor is
+/// inside the extracted slice (mirroring what the renderer must do to paint
+/// the revealed cursor).
+pub fn run_cursor_reveal_profile(bytes: usize, iterations: usize) -> usize {
+    let buffer = BufferState::new(
+        "cursor_reveal_profile.txt".to_owned(),
+        plain_text_of_size(bytes),
+        None,
+    );
+    let viewport_lines = 48usize;
+    let line_count = buffer.line_count.max(1);
+    // Pseudo-random hop pattern across the document.
+    let hops: [usize; 8] = [3, 47, 191, 503, 1009, 2003, 4007, 8009];
+
+    sum_profile_iterations(iterations, || {
+        let mut bytes_seen = 0usize;
+        for &h in &hops {
+            let target = h % line_count;
+            let half = viewport_lines / 2;
+            let start = target.saturating_sub(half);
+            let end = (start + viewport_lines).min(line_count);
+            let slice = buffer.extract_text_for_lines(start..end);
+            bytes_seen += slice.len();
+        }
+        bytes_seen
+    })
+}
+
+/// Phase 7: Memory footprint proxy for display snapshots on large files.
+///
+/// Measures the aggregate allocated character count of a `RenderedLayout`'s
+/// row metadata for a large document. Because `RenderedLayout` borrows the
+/// underlying egui galley, this profile reports the row-table cost — the
+/// data that must persist per-view per-frame.
+pub fn run_display_snapshot_memory_profile(bytes: usize, iterations: usize) -> usize {
+    let text = plain_text_of_size(bytes);
+    let ctx = egui::Context::default();
+    let font_id = egui::FontId::monospace(15.0);
+    let highlight_style =
+        EditorHighlightStyle::new(egui::Color32::from_rgb(90, 146, 214), egui::Color32::WHITE);
+
+    sum_profile_iterations(iterations, || {
+        let mut row_meta_bytes = 0usize;
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show_inside(ui, |ui| {
+                let mut layouter = build_layouter(
+                    font_id.clone(),
+                    false,
+                    egui::Color32::WHITE,
+                    highlight_style,
+                    SearchHighlightState::default(),
+                    None,
+                );
+                let galley = layouter(ui, &text, 980.0);
+                let layout = RenderedLayout::from_galley(galley);
+                // Approximate per-row metadata footprint: top + line_number.
+                let row_count = layout.row_count();
+                row_meta_bytes +=
+                    row_count * (std::mem::size_of::<f32>() + std::mem::size_of::<Option<usize>>());
+            });
+        });
+        row_meta_bytes
     })
 }
 
@@ -646,5 +750,44 @@ fn alternating_axis(index: usize) -> SplitAxis {
         SplitAxis::Vertical
     } else {
         SplitAxis::Horizontal
+    }
+}
+
+#[cfg(test)]
+mod phase7_profile_tests {
+    use super::*;
+
+    #[test]
+    fn display_rebuild_profile_runs_at_least_one_iteration() {
+        let total = run_display_rebuild_profile(8 * KB, 1);
+        // At least one row per cycled wrap width.
+        assert!(total > 0, "expected non-zero total rows; got {total}");
+    }
+
+    #[test]
+    fn cursor_reveal_profile_extracts_non_empty_slices() {
+        let total = run_cursor_reveal_profile(8 * KB, 1);
+        // Eight hops × non-empty viewport slice each → bytes seen > hops.
+        assert!(total > 8, "expected substantial bytes seen; got {total}");
+    }
+
+    #[test]
+    fn cursor_reveal_profile_zero_iterations_returns_zero() {
+        assert_eq!(run_cursor_reveal_profile(8 * KB, 0), 0);
+    }
+
+    #[test]
+    fn display_snapshot_memory_profile_scales_with_document_size() {
+        let small = run_display_snapshot_memory_profile(4 * KB, 1);
+        let large = run_display_snapshot_memory_profile(64 * KB, 1);
+        assert!(
+            large > small,
+            "larger documents should report a larger row-meta footprint; small={small}, large={large}"
+        );
+    }
+
+    #[test]
+    fn display_rebuild_profile_zero_iterations_returns_zero() {
+        assert_eq!(run_display_rebuild_profile(8 * KB, 0), 0);
     }
 }

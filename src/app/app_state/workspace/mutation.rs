@@ -1,5 +1,5 @@
 use super::super::ScratchpadApp;
-use crate::app::domain::{BufferId, CursorRevealMode};
+use crate::app::domain::{BufferId, RevealRequest};
 use crate::app::transactions::TransactionSnapshot;
 use crate::app::ui::editor_content::native_editor::{
     cut_selected_text, select_all_cursor, selected_text,
@@ -79,7 +79,7 @@ impl ScratchpadApp {
         };
         view.cursor_range = Some(selection);
         view.pending_cursor_range = Some(selection);
-        view.request_cursor_reveal(CursorRevealMode::Center);
+        view.request_reveal(RevealRequest::Center);
         tab.active_buffer_mut().active_selection =
             (!selection.is_empty()).then_some(selection.as_sorted_char_range());
         true
@@ -111,7 +111,7 @@ impl ScratchpadApp {
             let (next_selection, selected_text) = cut_selected_text(buffer, current_selection)?;
             view.cursor_range = Some(next_selection);
             view.pending_cursor_range = Some(next_selection);
-            view.request_cursor_reveal(CursorRevealMode::KeepVisible);
+            view.request_reveal(RevealRequest::KeepVisible);
             buffer.active_selection = None;
             (next_selection, selected_text)
         };
@@ -155,7 +155,7 @@ impl ScratchpadApp {
             if let Some(view) = tab.active_view_mut() {
                 view.cursor_range = Some(selection);
                 view.pending_cursor_range = Some(selection);
-                view.request_cursor_reveal(CursorRevealMode::Center);
+                view.request_reveal(RevealRequest::Center);
             }
             selection
         };

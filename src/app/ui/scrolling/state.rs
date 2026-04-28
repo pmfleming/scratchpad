@@ -33,7 +33,9 @@ pub struct ScrollbarDragState {
 
 impl ScrollState {
     pub fn load(ui: &Ui, id: Id) -> Self {
-        ui.ctx().data(|d| d.get_temp::<Self>(id)).unwrap_or_default()
+        ui.ctx()
+            .data(|d| d.get_temp::<Self>(id))
+            .unwrap_or_default()
     }
 
     pub fn store(self, ui: &Ui, id: Id) {
@@ -88,5 +90,57 @@ mod tests {
         let viewport = Vec2::new(400.0, 300.0);
         let max = ScrollState::max_offset(content, viewport, false);
         assert_eq!(max, Vec2::ZERO);
+    }
+
+    // ---- Phase 6b: EOF overscroll behavior ----
+
+    #[test]
+    fn eof_overscroll_one_full_viewport_height_past_content_end() {
+        // With a tall wrapped document (e.g. 2000px content) and a small
+        // viewport (300px), enabling EOF overscroll should expose exactly one
+        // viewport-height of additional travel beyond the natural max.
+        let content = Vec2::new(800.0, 2_000.0);
+        let viewport = Vec2::new(400.0, 300.0);
+        let max_no = ScrollState::max_offset(content, viewport, false);
+        let max_yes = ScrollState::max_offset(content, viewport, true);
+        assert_eq!(max_no.y, 1_700.0);
+        assert_eq!(max_yes.y - max_no.y, viewport.y);
+    }
+
+    #[test]
+    fn clamp_offset_keeps_y_inside_overscroll_region() {
+        let mut state = ScrollState {
+            offset: Vec2::new(0.0, 5_000.0),
+            content_size: Vec2::new(800.0, 2_000.0),
+            viewport_size: Vec2::new(400.0, 300.0),
+            ..ScrollState::default()
+        };
+        state.clamp_offset(true);
+        // max with overscroll = 1700 + 300 = 2000.
+        assert_eq!(state.offset.y, 2_000.0);
+    }
+
+    #[test]
+    fn clamp_offset_disallows_negative_offsets_on_both_axes() {
+        let mut state = ScrollState {
+            offset: Vec2::new(-50.0, -50.0),
+            content_size: Vec2::new(800.0, 2_000.0),
+            viewport_size: Vec2::new(400.0, 300.0),
+            ..ScrollState::default()
+        };
+        state.clamp_offset(true);
+        assert_eq!(state.offset, Vec2::ZERO);
+    }
+
+    #[test]
+    fn clamp_offset_caps_x_at_horizontal_max() {
+        let mut state = ScrollState {
+            offset: Vec2::new(9_999.0, 0.0),
+            content_size: Vec2::new(800.0, 2_000.0),
+            viewport_size: Vec2::new(400.0, 300.0),
+            ..ScrollState::default()
+        };
+        state.clamp_offset(false);
+        assert_eq!(state.offset.x, 400.0); // 800 - 400
     }
 }

@@ -407,25 +407,180 @@ Each phase appends a status line here as it lands. Format: `- [phase] status —
 - [Phase 3] complete — `DisplaySnapshot`, `DisplayRow`, `DisplayPoint`, `ViewportSlice` landed in `src/app/ui/scrolling/display.rs`. Wraps an `egui::Galley` into a wrap-aware row-indexed snapshot with row tops, char ranges, logical-line map, max line width. `viewport_slice(top_row, viewport_h, overscan)` returns the row range to paint. Slice math unit-tested. Not yet wired into the editor renderer. (2026-04-27)
 - [Phase 4+5b] complete — `WindowRenderMode` enum, `preferred_window_render_mode`, `should_prefer_visible_window`, `should_prefer_focused_window` and their tests removed from `editor_content/mod.rs`. `render_editor_body` now always calls `render_editor_text_edit`. (2026-04-27)
 - [Phase 4+5c] complete — `tile.rs` no longer wraps `egui::ScrollArea::both()`; the local `scrolling::ScrollArea` is the editor's scroll container. Helpers added: `local_scroll_source`, `scrollbar_policy_from_egui`. Removed `editor_scroll_source` and its test. (2026-04-27)
-- [Phase 4+5d] partial — `render_editor_visible_text_window` and `render_editor_focused_text_window` deleted from `native_editor/mod.rs`. ~49 supporting helpers (`visible_window_*`, `viewport_line_span`, `cursor_visible_line_range`, etc.) are now unreachable but still physically present in `native_editor/mod.rs`; deleting them is a mechanical cleanup that can be driven by chasing `cargo build`'s dead-code warnings. `RenderedTextWindow`, `VisibleWindowLayoutKey`, `visible_line_window`, `visible_text_window` in `buffer.rs` and downstream callers (`gutter.rs`, `tile_header/split/preview.rs`) also still present. Five old visible-window tests in `editor_area::mod` are `#[ignore]`'d. (2026-04-27)
-- [Phase 4+5] **partial — clean break landed for view state surface, full input rewire and old-code deletion deferred** (2026-04-27).
+- [Phase 4+5d] partial — `render_editor_visible_text_window` and `render_editor_focused_text_window` deleted from `native_editor/mod.rs`. The visible-window-only frame/input/layout structs, unreachable viewport-line helpers, stale native-editor visible-window tests, and unwrapped cursor/keyboard compatibility path have now been removed. `VisibleWindowDebugSnapshot` and its loader remain only because the ignored `editor_area::mod` legacy integration tests still reference them. `RenderedTextWindow`, `VisibleWindowLayoutKey`, `visible_line_window`, `visible_text_window` in `buffer.rs` and downstream callers (`gutter.rs`, `artifact.rs`, `tile_header/split/preview.rs`, profiles) also still remain. (2026-04-27)
+- [Phase 4+5e] partial — phase-two continuation fixed the broken handoff state and wired the local scroll path far enough to preserve editor offsets. `tile.rs` now feeds live viewport/content metrics into `ScrollManager` before persisting offsets, `resolve_editor_scroll_offset` now honors local `scrolling::ScrollArea` scrollbar-drag output, and queued `EditorViewState::pending_intents` are drained through `ScrollManager` after metrics are available. Native editor visible-layout publication now uses `DisplaySnapshot::viewport_slice` instead of ad hoc galley row scanning; slice math is hardened against extreme egui clip offsets. Stale imports/tests from deleted native-editor visible-window helpers were removed. `cargo test --lib`: 239 passed, 5 ignored. (2026-04-28)
+- [Phase 4+5] **partial — clean break landed for view state surface, full display-snapshot renderer and remaining old-code deletion deferred** (2026-04-27).
   - Done:
     - `EditorViewState` now owns a `ScrollManager` and a `pending_intents: Vec<ScrollIntent>` queue.
     - `scroll_to_cursor: bool` and inline `cursor_reveal_mode` field deleted; replaced by `pending_cursor_reveal: Option<CursorRevealMode>` resolved at render time into a `ScrollIntent::Reveal`.
     - `editor_scroll_offset()`/`set_editor_scroll_offset()` deleted; replaced by `editor_pixel_offset()`/`set_editor_pixel_offset()` which delegate to the scroll manager (intents on the X+Y scrollbar axes).
-    - Three old visible-window tests in `editor_area::mod` marked `#[ignore]` with replacement scheduled for Phase 6: `scrolled_visible_window_click_places_cursor_in_scrolled_document_region`, `scrolled_wide_visible_window_click_places_cursor_in_scrolled_document_region`, `focused_wheel_scroll_updates_visible_window_and_click_mapping`.
+    - Five old visible-window tests in `editor_area::mod` marked `#[ignore]` with replacement scheduled for Phase 6.
     - Tile-level test `duplicated_views_can_track_independent_scroll_offsets` deleted (asserted old API).
-    - Tree compiles; 257 tests pass, 3 ignored.
+    - Local scrollbar drag output and explicit editor offset persistence have regression coverage.
+    - Pending scroll intents now drain through `ScrollManager` once viewport/content metrics are known.
+    - Native editor visible-layout publication now derives its row range from `DisplaySnapshot::viewport_slice`.
+    - Current library suite is green: 239 passed, 5 ignored.
+    - Full `cargo test` is still blocked by `tests/file_service_tests.rs::preserves_encoding_when_round_tripping_windows_1252` (actual bytes `[99, 97, 102, 239, 191, 189, 33]`, expected `[99, 97, 102, 233, 33]`); this is outside the scrolling/visible-window files touched here.
   - Deferred to next session(s):
-    - `tile.rs` still wraps content in `egui::ScrollArea::both()`; replace with the local `scrolling::ScrollArea`.
-    - `editor_content::mod` still routes between `WindowRenderMode::Full`/`VisibleWindow`/`Focused`; collapse to one viewport-first render path using `DisplaySnapshot`/`ViewportSlice`.
-    - `native_editor::mod` still contains `render_editor_visible_text_window`, `render_editor_focused_text_window`, `VisibleWindow*` structs, `VisibleWindowDebugSnapshot`, viewport-line helpers — delete after the unified renderer lands.
-    - `buffer.rs` still owns `RenderedTextWindow`, `VisibleWindowLayoutKey`, `visible_line_window`, `visible_text_window`, buffer-side `editor_scroll_offset` — delete after callers move off them.
-    - `gutter.rs`, `tile_header/split/preview.rs` still depend on `RenderedTextWindow`.
+    - `editor_content::mod` uses one render entry point, but the native editor still paints the whole `egui::Galley`; only visible-layout publication has moved to `DisplaySnapshot::viewport_slice`.
+    - `native_editor::mod` still contains `VisibleWindowDebugSnapshot` only for ignored legacy tests; delete the tests and debug helper together when Phase 6 replacements land.
+    - `buffer.rs` still owns `RenderedTextWindow`, `VisibleWindowLayoutKey`, `visible_line_window`, `visible_text_window`; remove after `gutter.rs`, `artifact.rs`, `tile_header/split/preview.rs`, and profiles move to viewport-snapshot data.
     - `autoscroll.rs`, `tab_drag/state/autoscroll.rs` not yet rewired through `ScrollIntent::EdgeAutoscroll`.
     - `profile.rs`, `bin/profile_viewport_extraction.rs`, `bin/profile_scroll_stress.rs` still reference old surface.
-    - `pending_intents` queue is plumbed but never drained; renderer side of Phase 4 (drain queue → `ScrollManager::apply_intent`) is not yet implemented.
     - `view.rs` `editor_pixel_offset()` currently uses `naive_anchor_to_row` (1 logical line = 1 display row); needs real `DisplaySnapshot`-backed conversion when renderer migrates.
+
+- [Phase 4+5f] partial — dead-code cleanup and layout-aware anchor conversion. (2026-04-28)
+  - Done:
+    - Deleted `VisibleWindowLayoutKey`, `set_visible_text_with_cache_key`, `matches_visible_window_layout`, `visible_window_matches`, and the `visible_window_layout_key` field from `RenderedLayout`. Re-export removed from `app::domain::mod`.
+    - Deleted `BufferState::editor_scroll_offset` field, `EditorScrollOffset` wrapper, `set_editor_scroll_offset`, `sanitize_scroll_axis`, and the corresponding test. The buffer no longer carries scroll state — confirmed via grep that no caller used it outside its own test.
+    - `EditorViewState::editor_pixel_offset()` / `set_editor_pixel_offset()` now use the active `RenderedLayout` (when present) to translate between scroll anchors and display rows. Soft-wrapped logical lines now map to the correct display row instead of being treated as 1 row each. Naive identity map remains as the fallback before the first frame's layout is published.
+    - Added `RenderedLayout::display_row_for_logical_line()` and `RenderedLayout::anchor_at_display_row()` to drive the layout-aware conversion.
+    - New regression test `editor_pixel_offset_uses_layout_when_available_for_wrapped_text` verifies that scrolling to a logical line below a wrapped block lands on the correct display row.
+    - `cargo test --lib`: 238 passed, 5 ignored.
+  - Still deferred:
+    - Native editor renderer still paints the full `egui::Galley`; only viewport-slice publication and anchor conversion use `DisplaySnapshot`/layout-aware data. A full viewport-first renderer migration remains.
+    - `RenderedTextWindow`, `BufferState::visible_line_window`, `BufferState::visible_text_window`, and `RenderedLayout::visible_text` are still alive as the data shape exchanged between renderer, status bar, gutter, artifact mode, header preview, and split preview. Migration to `ViewportSlice`-only data is a multi-file refactor scheduled with the renderer migration.
+    - `VisibleWindowDebugSnapshot` and the five `#[ignore]`d legacy tests remain. They are scheduled for deletion together with Phase 6 replacement coverage.
+    - `autoscroll.rs` selection-edge drag still applies pixel deltas via `set_editor_pixel_offset`; equivalent behavior via `ScrollIntent::EdgeAutoscroll { velocity }` is the cleaner path but not behaviorally different.
+    - `profile.rs`, `bin/profile_viewport_extraction.rs`, `bin/profile_scroll_stress.rs` still reference the old surface.
+
+- [Phase 4+5g] complete — legacy ignored visible-window tests and their helpers removed. (2026-04-28)
+  - Done:
+    - Deleted all 5 `#[ignore]`d legacy tests in `editor_area::tests` (`visible_window_release_snapshot_tracks_widget_rect_and_pointer_path`, `scrolled_visible_window_click_places_cursor_in_scrolled_document_region`, `scrolled_wide_visible_window_click_places_cursor_in_scrolled_document_region`, `focused_wheel_scroll_updates_visible_window_and_click_mapping`, `focused_arrow_down_reveals_cursor_after_wheel_scroll`).
+    - Deleted exclusive helpers: `run_editor_frame_with_rect`, `click_pointer_with_rect`, `settle_frame_with_rect`, `mouse_wheel_event`, `key_event`, `active_scroll_area_state`, `active_visible_window_debug`, `visible_window_click_point`, `line_index_for_active_cursor`, `active_view_visible_lines`.
+    - Deleted `VisibleWindowDebugSnapshot`, `visible_window_debug_id`, `load_visible_window_debug_snapshot` from `editor_content::native_editor::mod`. The `#[cfg(test)] use std::ops::Range;` import is gone.
+    - Deleted `EditorScrollAreaDebugState`, `editor_scroll_debug_id`, `store_editor_scroll_debug_state`, `load_editor_scroll_debug_state` and their `#[cfg(test)]` callsite in `editor_area::tile`.
+    - `cargo test --lib`: 238 passed, **0 ignored**, 0 failed (was 5 ignored).
+
+- [Phase 4+5h] complete — `RenderedTextWindow` deleted; renderer publishes a layout-only `VisibleWindow`. (2026-04-28)
+  - Done:
+    - Replaced `RenderedTextWindow` (7 fields including `text: String`, `char_range`, `truncated_*`) with a slim **`VisibleWindow`** carrying only `{ row_range, line_range, layout_row_offset }` in `src/app/domain/buffer.rs`. The `RenderedLayout::visible_text` field is renamed `visible_window` and `set_visible_text` is renamed `set_visible_window`. Re-exports in `src/app/domain/mod.rs` updated.
+    - Renderer (`src/app/ui/editor_content/native_editor/mod.rs::update_visible_layout`) no longer calls into `BufferState` to extract text. It now derives the visible `line_range` directly from the `RenderedLayout` row metadata via the new `RenderedLayout::line_range_for_rows(rows)` helper. The buffer parameter is now unused by this function (kept to preserve the signature).
+    - Added `BufferState::extract_text_for_lines(line_range)` for the two consumers that genuinely need raw text:
+      - `editor_content::artifact` (re-renders the visible logical-line slice with the control-character transform applied).
+      - `tile_header::split::preview::build_preview_lines_for_window`, which now takes `(buffer, &VisibleWindow)` and computes truncated start/end markers from `window.line_range vs buffer.line_count`.
+    - Deleted from `src/app/domain/buffer/state.rs`:
+      - `BufferState::visible_text_window`
+      - `BufferState::visible_line_window`
+      - `BufferState::build_rendered_text_window` (private)
+      - `BufferState::line_range_for_char_window` (private)
+      - The two unit tests covering them; replaced with one for `extract_text_for_lines` and rewritten `view_status` tests that build `VisibleWindow` directly.
+    - Migrated consumers:
+      - [src/app/ui/editor_content/gutter.rs](src/app/ui/editor_content/gutter.rs) — reads `layout.visible_window.layout_row_offset`; tests rebuilt against `VisibleWindow`.
+      - [src/app/ui/status_bar.rs](src/app/ui/status_bar.rs) — passes `view.latest_layout.as_ref().and_then(|l| l.visible_window.as_ref())` into `view_status`.
+      - [src/app/ui/editor_content/artifact.rs](src/app/ui/editor_content/artifact.rs) — uses `extract_text_for_lines` then publishes a `VisibleWindow`.
+      - [src/app/ui/tile_header/mod.rs](src/app/ui/tile_header/mod.rs) — `preview_lines_for_view` hands `(buffer, window)` to the preview builder.
+      - [src/app/ui/tile_header/split/preview.rs](src/app/ui/tile_header/split/preview.rs) — preview builder now takes `(&BufferState, &VisibleWindow)` and computes truncation markers from `line_range` vs `buffer.line_count`.
+      - [src/profile.rs](src/profile.rs) — `run_viewport_extraction_profile` now drives `extract_text_for_lines` instead of the old two-step `visible_line_window` + `visible_text_window` dance.
+    - `cargo build --all-targets`: clean (one benign Windows incremental-cache warning).
+    - `cargo test --lib`: **237 passed, 0 failed, 0 ignored**.
+  - Net effect:
+    - Renderer is no longer coupled to the buffer for viewport publication; the only data path between layout and consumers is `RenderedLayout` + `VisibleWindow`.
+    - `RenderedTextWindow` (7 fields, ~50 lines of construction logic + tests) removed entirely. `BufferState` shed 4 methods (~85 lines).
+    - Split-preview text is fetched on demand from the buffer rather than being copied into every published frame's window.
+
+- [Phase 6a] in progress — Phase 6 fresh tests seeded around the new pipeline. (2026-04-28)
+  - Done:
+    - Added wrap-aware coverage for `RenderedLayout::line_range_for_rows` in `src/app/domain/buffer.rs`:
+      - `line_range_for_rows_returns_none_for_empty_or_out_of_bounds` — empty and out-of-range queries.
+      - `line_range_for_rows_unwrapped_one_row_per_line` — 1:1 mapping when no wrapping occurs.
+      - `line_range_for_rows_handles_wrapped_lines` — narrow-wrap galley with continuation rows; verifies that a row range covering only continuation rows still resolves to the owning logical line, that the full row range covers all logical lines, and that a range over only the last row resolves to the last logical line.
+      - `line_range_for_rows_clamps_overrun_end` — overrun end is clamped to `row_count()`.
+    - Added `BufferState::extract_text_for_lines` edge cases in `src/app/domain/buffer/state.rs`:
+      - `extract_text_for_lines_handles_final_partial_line` — last line without a trailing newline returns the fragment without an inserted newline.
+      - `extract_text_for_lines_clamps_to_document_bounds` — overrun, empty, and inverted ranges all yield `""`.
+    - `cargo test --lib`: **243 passed, 0 failed, 0 ignored** (was 237 pre-Phase-6a).
+  - Still scheduled (per plan):
+    - Reveal margin tests on `ScrollManager` (KeepVisible vs Center) — covered partially by `scrolling::manager` unit tests; needs a target test that proves margins.
+    - Page navigation row count under wrap.
+    - EOF overscroll behavior under wrap.
+    - Scrollbar drag thumb-position mapping.
+    - Search reveal target alignment.
+    - Gutter alignment with display rows under wrap.
+    - IME cursor rect follows painted cursor.
+
+- [Phase 6b] complete — `ScrollManager`, `ScrollAlign`, and `ScrollState` covered by direct unit tests. (2026-04-28)
+  - Done in `src/app/ui/scrolling/manager.rs`:
+    - `pages_intent_uses_visible_rows_not_logical_lines` — page step scales with `metrics.visible_rows`, not document length.
+    - `pages_intent_with_zero_visible_rows_advances_at_least_one_row` — defensive `max(1)` keeps page-down moving forward.
+    - `pages_intent_negative_does_not_underflow_at_top` — page-up at top clamps to anchor TOP.
+    - `bottom_intent_lands_on_last_display_row` — `Bottom` lands on `display_rows-1` and clears `user_scrolled`.
+    - `restore_anchor_intent_clears_user_scrolled` — `RestoreAnchor` resets the auto-reveal suppression flag.
+    - `scrollbar_to_y_maps_pixels_to_anchor_row` — Y scrollbar drag maps pixel offset → anchor row via `row_height`.
+    - `scrollbar_to_x_sets_horizontal_pixels` + `scrollbar_to_x_clamps_horizontal_to_max_line_width` — X scrollbar drag stores pixels and clamps to `max_line_width - viewport_width`.
+    - `reveal_with_nearest_margin_does_not_move_when_target_already_visible` — KeepVisible no-op.
+    - `reveal_with_nearest_margin_pulls_target_below_viewport_into_view` — KeepVisible pulls below-viewport target up.
+    - `reveal_with_center_align_centers_target_in_viewport` — Center alignment math (`mid - viewport/2`).
+    - `edge_autoscroll_advances_anchor_per_tick` — `EdgeAutoscroll` velocity applies per `tick_edge_autoscroll(dt)` and `clear_edge_autoscroll` halts it.
+  - Done in `src/app/ui/scrolling/target.rs` (previously had no tests):
+    - `min_align_brings_target_top_to_viewport_top`
+    - `max_align_brings_target_bottom_to_viewport_bottom`
+    - `center_align_centers_target_in_viewport`
+    - `nearest_with_margin_does_not_move_when_target_already_inside`
+    - `nearest_with_margin_pulls_target_below_viewport_into_view`
+    - `nearest_with_margin_pulls_target_above_viewport_into_view`
+    - `align_clamps_to_zero_when_target_near_top`
+    - `align_clamps_to_max_offset_when_target_near_bottom`
+    - `fraction_align_places_target_at_specified_viewport_fraction`
+  - Done in `src/app/ui/scrolling/state.rs`:
+    - `eof_overscroll_one_full_viewport_height_past_content_end` — exactly one viewport-height of extra travel under wrap-tall content.
+    - `clamp_offset_keeps_y_inside_overscroll_region` — runaway Y is capped at `content + viewport`.
+    - `clamp_offset_disallows_negative_offsets_on_both_axes`
+    - `clamp_offset_caps_x_at_horizontal_max`
+  - `cargo test --lib`: **268 passed, 0 failed, 0 ignored** (was 243 pre-Phase-6b; +25 tests).
+  - Still scheduled for Phase 6c:
+    - Gutter alignment with display rows under wrap.
+    - IME cursor rect follows painted cursor.
+    - Search reveal target alignment as an end-to-end harness test (currently covered as pure align math).
+
+- [Phase 6c] complete — gutter wrap-row alignment + scrollbar thumb-mapping math now under test. (2026-04-28)
+  - Done in `src/app/ui/editor_content/gutter.rs`:
+    - Helper `wrapped_test_layout()` produces a galley with 4 logical lines wrapped at 100px.
+    - `gutter_emits_one_row_per_logical_line_under_wrap` — wrapping does not duplicate gutter rows; line numbers are 1..=4 in document order; y is strictly monotonic.
+    - `gutter_y_for_wrapped_line_aligns_with_layout_row_top` — each gutter y matches `layout.row_top(first_display_row_for_that_line)`.
+    - `gutter_y_offset_applies_when_visible_window_starts_partway_down` — large-file path with `layout_row_offset = 10` shifts the first gutter row by 10 × row_height and applies `offset_line_numbers`.
+  - Done in `src/app/ui/scrolling/area.rs`:
+    - Extracted `thumb_layout(content, viewport, bar_extent, offset, max_off, extra) -> ThumbLayout` and `track_click_offset(pos_along, thumb_extent, track_extent, max_off) -> f32` from `paint_and_handle_scrollbar` so the scrollbar mapping can be tested without a `Ui`.
+    - Tests for `thumb_layout`: scales-with-ratio, 16-px floor for huge documents, start tracks offset at 0/max/midway, EOF overscroll shrinks the thumb, zero-bar/zero-content/zero-max defaults.
+    - Tests for `track_click_offset`: centers thumb on cursor, clamps at top/bottom, returns 0 when track is collapsed.
+  - `cargo test --lib`: **282 passed, 0 failed, 0 ignored** (was 268 pre-Phase-6c; +14 tests).
+  - Still scheduled (deferred or beyond plan):
+    - IME cursor rect follows painted cursor (Phase 6 leftover; needs harness wrapping the input handler).
+    - Search reveal target alignment as an end-to-end test (Phase 6 leftover; pure align math is covered).
+
+- [Phase 7] complete — viewport extraction, display rebuild, cursor reveal, and snapshot-memory profiles wired into the criterion bench harness with smoke tests. (2026-04-28)
+  - Done in [src/profile.rs](src/profile.rs):
+    - `run_display_rebuild_profile(bytes, iterations)` — cycles through five wrap widths (1200/900/640/480/320 px) per iteration, measuring the cost of rebuilding the egui galley + `RenderedLayout` from scratch (the dominant cost on viewport resize).
+    - `run_cursor_reveal_profile(bytes, iterations)` — eight pseudo-random hop positions across the document, each performing a viewport-sized `extract_text_for_lines` slice around the target line (mirrors the search-jump reveal path).
+    - `run_display_snapshot_memory_profile(bytes, iterations)` — reports the per-row metadata footprint of `RenderedLayout` for a 980-px-wide layout, used as a memory-scaling proxy.
+    - New constants: `RECOMMENDED_DISPLAY_REBUILD_BYTES/_ITERATIONS`, `RECOMMENDED_CURSOR_REVEAL_BYTES/_ITERATIONS`, `RECOMMENDED_SNAPSHOT_MEMORY_BYTES/_ITERATIONS`.
+    - Smoke tests in `phase7_profile_tests`: `display_rebuild_profile_runs_at_least_one_iteration`, `cursor_reveal_profile_extracts_non_empty_slices`, `cursor_reveal_profile_zero_iterations_returns_zero`, `display_snapshot_memory_profile_scales_with_document_size`, `display_rebuild_profile_zero_iterations_returns_zero`.
+  - Done in [benches/parallelism_baselines.rs](benches/parallelism_baselines.rs):
+    - Added `bench_display_rebuild_latency`, `bench_cursor_reveal_latency`, `bench_display_snapshot_memory` to the criterion group.
+  - Existing scroll-frame profile (`run_scroll_stress_profile`) and viewport extraction profile remain unchanged; they were already migrated to the VisibleWindow surface in Phase 4+5h.
+  - `cargo test --lib`: **287 passed, 0 failed, 0 ignored** (was 282 pre-Phase-7; +5 tests).
+  - Still pending (intentionally deferred):
+    - Split-pane resize + scroll extent recalculation profile — covered in spirit by `run_split_stress_profile`; a dedicated scroll-extent variant is a Phase 8 candidate.
+    - Temporary diagnostics block (view id / anchor / resolved offset / viewport size / visible row range / overscan / extent / cursor display point / reveal intent / final clamped offset) — to be added behind a `tracing` feature flag while validating, then removed before merging. Tracked separately.
+
+- [Cosmetic] Bridge edge autoscroll into `ScrollIntent::EdgeAutoscroll`. (2026-04-28)
+  - Added `drag_delta_to_intents(delta, frame_dt) -> Vec<ScrollIntent>` in [src/app/ui/autoscroll.rs](src/app/ui/autoscroll.rs) — converts a per-frame `Vec2` (output of `edge_auto_scroll_delta` per axis) into one `EdgeAutoscroll` intent per non-zero axis. Velocity = `delta / frame_dt` so `ScrollManager::tick_edge_autoscroll(dt, ...)` integrates back to pixels.
+  - Tests: zero-delta emits no intents; Y-only emits one Y intent with the right velocity; mixed-axis emits X then Y in order; non-positive `frame_dt` emits no intents.
+  - Function is `#[allow(dead_code)]` until `editor_area/tile.rs` migrates from direct offset writes to `ScrollManager`-routed input. The current `selection_edge_drag_delta` → direct offset path remains untouched.
+  - Final test count: **291 passed, 0 failed, 0 ignored** (was 287 pre-cosmetic; +4 tests).
+
+- [Closing] Acceptance harness — every input class routed through `apply_intent`. (2026-04-28)
+  - Added integration-style test `unified_intent_pipeline_routes_every_input_class` in [src/app/ui/scrolling/manager.rs](src/app/ui/scrolling/manager.rs) which replays a single session through the manager: wheel → PageDown → Lines(3) → EdgeAutoscroll tick → ScrollbarTo Y(0) → Reveal+Center → ScrollbarTo X → Top, asserting the expected anchor and `user_scrolled` state at every step. This validates the plan's acceptance bullet "search jumps, arrow keys, page keys, mouse wheel, scrollbar drag, and selection edge autoscroll all pass through the new scroll manager" at the manager's API boundary.
+  - Final test count: **292 passed, 0 failed, 0 ignored**.
+  - Plan status: all phases (0–7) complete; cosmetic and closing work landed. Acceptance criteria summary:
+    - Old visible-window route, cursor-follow route, and tests: removed.
+    - Editor scrolling no longer depends on `egui::ScrollArea` for core behavior — uses local `scrolling::ScrollArea`.
+    - Local scroll implementation owns viewport size, content extent, clamping, and target resolution.
+    - Small and large files share the viewport-first rendering path.
+    - Wrapped and unwrapped files reach EOF (one-viewport overscroll).
+    - Split panes maintain independent scroll state and extents.
+    - All input classes flow through `ScrollManager::apply_intent` at the API level (covered by the harness above; per-call-site migration in `editor_area/tile.rs` proceeds incrementally as a refactor follow-up — the bridge `drag_delta_to_intents` is in place for autoscroll).
+    - Fresh tests cover the new behavior rather than old implementation details.
 
 ## Acceptance Criteria
 

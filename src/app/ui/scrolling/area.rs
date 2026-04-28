@@ -1,4 +1,4 @@
-use eframe::egui::{self, epaint::Shape, pos2, vec2, Id, Rect, Sense, Ui, UiBuilder, Vec2};
+use eframe::egui::{self, Id, Rect, Sense, Ui, UiBuilder, Vec2, epaint::Shape, pos2, vec2};
 
 use super::source::ScrollSource;
 use super::state::{ScrollState, ScrollbarDragState};
@@ -103,8 +103,16 @@ impl ScrollArea {
             state.content_size.y,
             state.viewport_size.y.max(outer_rect.height()),
         );
-        let bar_x = if show_x { self.scrollbar_thickness } else { 0.0 };
-        let bar_y = if show_y { self.scrollbar_thickness } else { 0.0 };
+        let bar_x = if show_x {
+            self.scrollbar_thickness
+        } else {
+            0.0
+        };
+        let bar_y = if show_y {
+            self.scrollbar_thickness
+        } else {
+            0.0
+        };
 
         let inner_rect = Rect::from_min_max(
             outer_rect.min,
@@ -114,26 +122,26 @@ impl ScrollArea {
         state.viewport_size = inner_rect.size();
 
         // Resolve any pending programmatic target before clamping.
-        if self.source.programmatic {
-            if let Some(target) = state.pending_target.take() {
-                if let Some(align) = target.align_y {
-                    state.offset.y = align.resolve(
-                        egui::Rangef::new(target.rect.min.y, target.rect.max.y),
-                        inner_rect.height(),
-                        state.content_size.y,
-                        state.offset.y,
-                    );
-                }
-                if let Some(align) = target.align_x {
-                    state.offset.x = align.resolve(
-                        egui::Rangef::new(target.rect.min.x, target.rect.max.x),
-                        inner_rect.width(),
-                        state.content_size.x,
-                        state.offset.x,
-                    );
-                }
-                state.user_scrolled = false;
+        if self.source.programmatic
+            && let Some(target) = state.pending_target.take()
+        {
+            if let Some(align) = target.align_y {
+                state.offset.y = align.resolve(
+                    egui::Rangef::new(target.rect.min.y, target.rect.max.y),
+                    inner_rect.height(),
+                    state.content_size.y,
+                    state.offset.y,
+                );
             }
+            if let Some(align) = target.align_x {
+                state.offset.x = align.resolve(
+                    egui::Rangef::new(target.rect.min.x, target.rect.max.x),
+                    inner_rect.width(),
+                    state.content_size.x,
+                    state.offset.x,
+                );
+            }
+            state.user_scrolled = false;
         }
 
         // Hover gates wheel/scrollbar input.
@@ -154,10 +162,8 @@ impl ScrollArea {
         state.clamp_offset(self.eof_overscroll);
 
         // Build a child Ui clipped to the inner rect.
-        let visible_rect = Rect::from_min_size(
-            pos2(state.offset.x, state.offset.y),
-            inner_rect.size(),
-        );
+        let visible_rect =
+            Rect::from_min_size(pos2(state.offset.x, state.offset.y), inner_rect.size());
 
         let mut content_ui = ui.new_child(
             UiBuilder::new()
@@ -182,7 +188,10 @@ impl ScrollArea {
         // Paint scrollbars and handle drag.
         if show_y {
             let bar_rect = Rect::from_min_max(
-                pos2(outer_rect.max.x - self.scrollbar_thickness, outer_rect.min.y),
+                pos2(
+                    outer_rect.max.x - self.scrollbar_thickness,
+                    outer_rect.min.y,
+                ),
                 pos2(outer_rect.max.x, outer_rect.max.y - bar_x),
             );
             paint_and_handle_scrollbar(
@@ -197,7 +206,10 @@ impl ScrollArea {
         }
         if show_x {
             let bar_rect = Rect::from_min_max(
-                pos2(outer_rect.min.x, outer_rect.max.y - self.scrollbar_thickness),
+                pos2(
+                    outer_rect.min.x,
+                    outer_rect.max.y - self.scrollbar_thickness,
+                ),
                 pos2(outer_rect.max.x - bar_y, outer_rect.max.y),
             );
             paint_and_handle_scrollbar(
@@ -242,6 +254,69 @@ fn scrollbar_visible(policy: ScrollbarPolicy, content: f32, viewport: f32) -> bo
     }
 }
 
+/// Layout of a scrollbar thumb along a single axis. Pure math, exposed for
+/// testing the thumb-position mapping in isolation from egui painting.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ThumbLayout {
+    pub thumb_start: f32,
+    pub thumb_extent: f32,
+    pub track_extent: f32,
+}
+
+/// Compute the thumb's position and extent along the bar.
+///
+/// * `content` is the total content size on this axis.
+/// * `viewport` is the visible viewport size on this axis.
+/// * `bar_extent` is the bar's pixel length on this axis.
+/// * `offset` is the current scroll offset (0..=max_off).
+/// * `max_off` is the maximum scroll offset for this axis (already accounts
+///   for EOF overscroll if applicable).
+/// * `extra` is `viewport` for the Y axis when EOF overscroll is enabled,
+///   else 0.0.
+pub(crate) fn thumb_layout(
+    content: f32,
+    viewport: f32,
+    bar_extent: f32,
+    offset: f32,
+    max_off: f32,
+    extra: f32,
+) -> ThumbLayout {
+    if bar_extent <= 0.0 || content <= 0.0 {
+        return ThumbLayout {
+            thumb_start: 0.0,
+            thumb_extent: 0.0,
+            track_extent: 0.0,
+        };
+    }
+    let virtual_content = content + extra;
+    let thumb_frac = (viewport / virtual_content).clamp(0.05, 1.0);
+    let thumb_extent = (bar_extent * thumb_frac).max(16.0).min(bar_extent);
+    let track_extent = (bar_extent - thumb_extent).max(0.0);
+    let pos_frac = if max_off > 0.0 { offset / max_off } else { 0.0 };
+    let thumb_start = pos_frac * track_extent;
+    ThumbLayout {
+        thumb_start,
+        thumb_extent,
+        track_extent,
+    }
+}
+
+/// Map a pointer coordinate along the bar to a scroll offset, centering the
+/// thumb on the click. Used for click-on-track jumps.
+pub(crate) fn track_click_offset(
+    pos_along_bar: f32,
+    thumb_extent: f32,
+    track_extent: f32,
+    max_off: f32,
+) -> f32 {
+    let new_thumb_start = (pos_along_bar - thumb_extent * 0.5).clamp(0.0, track_extent);
+    if track_extent > 0.0 {
+        new_thumb_start / track_extent * max_off
+    } else {
+        0.0
+    }
+}
+
 fn paint_and_handle_scrollbar(
     ui: &mut Ui,
     id: Id,
@@ -267,16 +342,19 @@ fn paint_and_handle_scrollbar(
     } else {
         0.0
     };
-    let virtual_content = content + extra;
-    let thumb_frac = (viewport / virtual_content).clamp(0.05, 1.0);
-    let thumb_extent = (bar_extent * thumb_frac).max(16.0).min(bar_extent);
-    let track_extent = (bar_extent - thumb_extent).max(0.0);
-    let pos_frac = if max_off > 0.0 {
-        state.offset[axis_idx] / max_off
-    } else {
-        0.0
-    };
-    let thumb_start = pos_frac * track_extent;
+    let layout = thumb_layout(
+        content,
+        viewport,
+        bar_extent,
+        state.offset[axis_idx],
+        max_off,
+        extra,
+    );
+    let ThumbLayout {
+        thumb_start,
+        thumb_extent,
+        track_extent,
+    } = layout;
 
     let thumb_rect = match axis {
         Axis::X => Rect::from_min_size(
@@ -289,7 +367,11 @@ fn paint_and_handle_scrollbar(
         ),
     };
 
-    let sense = if interactive { Sense::click_and_drag() } else { Sense::hover() };
+    let sense = if interactive {
+        Sense::click_and_drag()
+    } else {
+        Sense::hover()
+    };
     let response = ui.interact(bar_rect, id, sense);
 
     if interactive {
@@ -304,12 +386,7 @@ fn paint_and_handle_scrollbar(
                         Axis::X => p.x - bar_rect.min.x,
                         Axis::Y => p.y - bar_rect.min.y,
                     };
-                    let new_thumb_start = (pos_along - thumb_extent * 0.5).clamp(0.0, track_extent);
-                    if track_extent > 0.0 {
-                        new_thumb_start / track_extent * max_off
-                    } else {
-                        0.0
-                    }
+                    track_click_offset(pos_along, thumb_extent, track_extent, max_off)
                 };
                 state.scrollbar_drag[axis_idx] = Some(ScrollbarDragState {
                     origin_pointer: p,
@@ -344,7 +421,110 @@ fn paint_and_handle_scrollbar(
     } else {
         visuals.widgets.inactive.bg_fill
     };
-    ui.painter().add(Shape::rect_filled(bar_rect, 0.0, track_color));
-    ui.painter().add(Shape::rect_filled(thumb_rect, 2.0, thumb_color));
+    ui.painter()
+        .add(Shape::rect_filled(bar_rect, 0.0, track_color));
+    ui.painter()
+        .add(Shape::rect_filled(thumb_rect, 2.0, thumb_color));
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{ThumbLayout, thumb_layout, track_click_offset};
+
+    #[test]
+    fn thumb_extent_scales_with_viewport_to_content_ratio() {
+        // viewport = 50% of content → thumb covers 50% of bar.
+        let lay = thumb_layout(1_000.0, 500.0, 200.0, 0.0, 500.0, 0.0);
+        assert_eq!(lay.thumb_extent, 100.0);
+        assert_eq!(lay.track_extent, 100.0);
+        assert_eq!(lay.thumb_start, 0.0);
+    }
+
+    #[test]
+    fn thumb_extent_floors_at_sixteen_pixels_for_huge_documents() {
+        // viewport tiny relative to content → thumb_frac would be < 16/200,
+        // so the floor at 16 px engages.
+        let lay = thumb_layout(100_000.0, 200.0, 200.0, 0.0, 99_800.0, 0.0);
+        assert_eq!(lay.thumb_extent, 16.0);
+        assert_eq!(lay.track_extent, 184.0);
+    }
+
+    #[test]
+    fn thumb_start_tracks_offset_at_zero_and_max() {
+        let lay_top = thumb_layout(2_000.0, 400.0, 200.0, 0.0, 1_600.0, 0.0);
+        assert_eq!(lay_top.thumb_start, 0.0);
+
+        let lay_bot = thumb_layout(2_000.0, 400.0, 200.0, 1_600.0, 1_600.0, 0.0);
+        assert_eq!(lay_bot.thumb_start, lay_bot.track_extent);
+    }
+
+    #[test]
+    fn thumb_start_is_proportional_at_midway() {
+        let lay = thumb_layout(2_000.0, 400.0, 200.0, 800.0, 1_600.0, 0.0);
+        // pos_frac = 0.5 → thumb_start = 0.5 * track_extent.
+        assert_eq!(lay.thumb_start, lay.track_extent * 0.5);
+    }
+
+    #[test]
+    fn thumb_layout_handles_eof_overscroll_extra() {
+        // With overscroll, virtual_content = content + viewport, so thumb_frac
+        // shrinks: viewport / (content + viewport).
+        let lay_no = thumb_layout(2_000.0, 400.0, 200.0, 0.0, 1_600.0, 0.0);
+        let lay_yes = thumb_layout(2_000.0, 400.0, 200.0, 0.0, 2_000.0, 400.0);
+        assert!(lay_yes.thumb_extent < lay_no.thumb_extent);
+    }
+
+    #[test]
+    fn thumb_layout_returns_zero_when_bar_or_content_empty() {
+        assert_eq!(
+            thumb_layout(1_000.0, 500.0, 0.0, 0.0, 500.0, 0.0),
+            ThumbLayout {
+                thumb_start: 0.0,
+                thumb_extent: 0.0,
+                track_extent: 0.0,
+            }
+        );
+        assert_eq!(
+            thumb_layout(0.0, 500.0, 200.0, 0.0, 500.0, 0.0),
+            ThumbLayout {
+                thumb_start: 0.0,
+                thumb_extent: 0.0,
+                track_extent: 0.0,
+            }
+        );
+    }
+
+    #[test]
+    fn thumb_start_is_zero_when_max_offset_is_zero() {
+        // Content fits in viewport → max_off = 0 → thumb pinned at start.
+        let lay = thumb_layout(300.0, 400.0, 200.0, 0.0, 0.0, 0.0);
+        assert_eq!(lay.thumb_start, 0.0);
+    }
+
+    #[test]
+    fn track_click_centers_thumb_on_cursor() {
+        // Bar 200, thumb 50, track 150. Click at pos_along = 100 → desired
+        // thumb_start = 100 - 25 = 75 → offset = 75/150 * max = 0.5 * 1000 = 500.
+        let off = track_click_offset(100.0, 50.0, 150.0, 1_000.0);
+        assert_eq!(off, 500.0);
+    }
+
+    #[test]
+    fn track_click_clamps_to_zero_at_top() {
+        let off = track_click_offset(0.0, 50.0, 150.0, 1_000.0);
+        assert_eq!(off, 0.0);
+    }
+
+    #[test]
+    fn track_click_clamps_to_max_off_at_bottom() {
+        let off = track_click_offset(10_000.0, 50.0, 150.0, 1_000.0);
+        assert_eq!(off, 1_000.0);
+    }
+
+    #[test]
+    fn track_click_returns_zero_when_track_collapsed() {
+        // Thumb fills the bar → no track room → any click maps to 0.
+        let off = track_click_offset(50.0, 200.0, 0.0, 1_000.0);
+        assert_eq!(off, 0.0);
+    }
+}
