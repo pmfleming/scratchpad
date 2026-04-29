@@ -16,8 +16,9 @@ pub use analysis::{
 pub use document::TextDocument;
 pub(crate) use document::{TextDocumentOperationRecord, TextReplacementError, TextReplacements};
 pub use piece_tree::{
-    AnchorBias, AnchorId, PieceTreeCharPosition, PieceTreeInternalNode, PieceTreeLeaf,
-    PieceTreeLineInfo, PieceTreeLite, PieceTreeMetrics, PieceTreeSlice, PieceTreeSpan,
+    AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind, PieceTreeCharPosition,
+    PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLineInfo, PieceTreeLite, PieceTreeMetrics,
+    PieceTreeSlice, PieceTreeSpan,
 };
 pub use snapshot::DocumentSnapshot;
 pub use state::{

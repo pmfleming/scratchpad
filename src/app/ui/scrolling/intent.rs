@@ -24,7 +24,7 @@ pub enum ScrollIntent {
     /// search jumps, go-to-line.
     Reveal {
         rect: Rect,
-        align_y: ScrollAlign,
+        align_y: Option<ScrollAlign>,
         align_x: Option<ScrollAlign>,
     },
     /// Restore a previously-saved anchor (e.g. on view re-mount).

@@ -30,9 +30,9 @@ impl ScratchpadApp {
             {
                 false
             } else {
-                if let Some(view) = tab.view_mut(view_id) {
-                    view.cursor_range = Some(next_selection);
-                    view.pending_cursor_range = Some(next_selection);
+                if let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) {
+                    view.set_cursor_range_anchored(buffer, next_selection);
+                    view.set_pending_cursor_range_anchored(buffer, next_selection);
                     view.request_cursor_reveal(CursorRevealMode::Center);
                 }
                 true
@@ -168,9 +168,9 @@ impl ScratchpadApp {
         {
             return false;
         }
-        if let Some(view) = tab.view_mut(target.view_id) {
-            view.cursor_range = Some(next_selection);
-            view.pending_cursor_range = Some(next_selection);
+        if let Some((buffer, view)) = tab.buffer_and_view_mut(target.view_id) {
+            view.set_cursor_range_anchored(buffer, next_selection);
+            view.set_pending_cursor_range_anchored(buffer, next_selection);
             view.request_cursor_reveal(CursorRevealMode::Center);
         }
         self.finalize_tab_buffer_mutation(target.tab_index, target.buffer_id);

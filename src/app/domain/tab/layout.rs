@@ -31,10 +31,46 @@ impl WorkspaceTab {
     }
 
     pub fn clear_transient_view_state(&mut self) {
+        let mut anchors_to_release = Vec::new();
         for view in &mut self.views {
             view.editor_has_focus = false;
             view.latest_display_snapshot = None;
             view.latest_display_snapshot_revision = None;
+            for anchor in view.take_runtime_anchors_for_release() {
+                anchors_to_release.push((view.buffer_id, anchor));
+            }
+        }
+
+        for (buffer_id, anchor) in anchors_to_release {
+            if let Some(buffer) = self.buffer_by_id_mut(buffer_id) {
+                buffer
+                    .document_mut()
+                    .piece_tree_mut()
+                    .release_anchor(anchor);
+            }
+        }
+    }
+
+    pub fn clear_view_state_for_buffer_replacement(&mut self, buffer_id: BufferId) {
+        let mut anchors_to_release = Vec::new();
+        for view in &mut self.views {
+            if view.buffer_id != buffer_id {
+                continue;
+            }
+            view.latest_display_snapshot = None;
+            view.latest_display_snapshot_revision = None;
+            for anchor in view.take_runtime_anchors_for_release() {
+                anchors_to_release.push(anchor);
+            }
+        }
+
+        if let Some(buffer) = self.buffer_by_id_mut(buffer_id) {
+            for anchor in anchors_to_release {
+                buffer
+                    .document_mut()
+                    .piece_tree_mut()
+                    .release_anchor(anchor);
+            }
         }
     }
 
@@ -53,6 +89,15 @@ impl WorkspaceTab {
 
         if !self.root_pane.contains_view(view_id) {
             return false;
+        }
+
+        if let Some((buffer, view)) = self.buffer_and_view_mut(view_id) {
+            for anchor in view.take_runtime_anchors_for_release() {
+                buffer
+                    .document_mut()
+                    .piece_tree_mut()
+                    .release_anchor(anchor);
+            }
         }
 
         if !self.root_pane.remove_view(view_id) {
@@ -291,5 +336,75 @@ impl WorkspaceTab {
         root_axis: SplitAxis,
     ) -> Option<PaneNode> {
         PaneNode::balanced_from_view_ids(ordered_view_ids, root_axis)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::domain::AnchorOwner;
+    use crate::app::ui::scrolling::{ContentExtent, DisplaySnapshot, ViewportMetrics};
+    use eframe::egui;
+
+    fn snapshot_for(text: &str) -> DisplaySnapshot {
+        let ctx = egui::Context::default();
+        let mut galley = None;
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            galley = Some(ui.fonts_mut(|fonts| {
+                fonts.layout_job(egui::text::LayoutJob::simple(
+                    text.to_owned(),
+                    egui::FontId::monospace(14.0),
+                    egui::Color32::WHITE,
+                    f32::INFINITY,
+                ))
+            }));
+        });
+        DisplaySnapshot::from_galley(galley.expect("galley"), 10.0)
+    }
+
+    #[test]
+    fn buffer_replacement_clears_view_piece_anchor_before_document_swap() {
+        let text = "zero\none\ntwo\nthree\nfour\nfive\n";
+        let mut tab = WorkspaceTab::new(BufferState::new(
+            "notes.txt".to_owned(),
+            text.to_owned(),
+            None,
+        ));
+        let view_id = tab.active_view_id;
+        let buffer_id = tab.active_buffer().id;
+        let snapshot = snapshot_for(text);
+
+        {
+            let (buffer, view) = tab.buffer_and_view_mut(view_id).expect("active view");
+            view.scroll.set_metrics(ViewportMetrics {
+                viewport_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 40.0)),
+                row_height: 10.0,
+                column_width: 5.0,
+                visible_rows: 4,
+                visible_columns: 40,
+            });
+            view.scroll.set_extent(ContentExtent {
+                display_rows: snapshot.row_count(),
+                height: snapshot.content_height(),
+                max_line_width: snapshot.max_line_width(),
+            });
+            view.latest_display_snapshot = Some(snapshot);
+            view.set_editor_pixel_offset(egui::vec2(0.0, 30.0));
+            view.upgrade_scroll_anchor_to_piece(buffer);
+            let anchor = view.scroll.anchor().piece_anchor().expect("piece anchor");
+            assert_eq!(buffer.document().piece_tree().live_anchor_count(), 1);
+            assert_eq!(
+                buffer.document().piece_tree().anchor_owner(anchor),
+                Some(AnchorOwner::view_scroll(view.id))
+            );
+        }
+
+        tab.clear_view_state_for_buffer_replacement(buffer_id);
+
+        let (buffer, view) = tab.buffer_and_view_mut(view_id).expect("active view");
+        assert_eq!(buffer.document().piece_tree().live_anchor_count(), 0);
+        assert!(view.scroll.anchor().piece_anchor().is_none());
+        assert!(view.latest_display_snapshot.is_none());
+        assert!(view.latest_display_snapshot_revision.is_none());
     }
 }

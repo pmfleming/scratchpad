@@ -12,6 +12,11 @@ pub struct DocumentSnapshot {
 
 impl DocumentSnapshot {
     pub(crate) fn from_shared(piece_tree: Arc<PieceTreeLite>) -> Self {
+        let piece_tree = if piece_tree.has_live_anchors() {
+            Arc::new(piece_tree.clone_without_anchors())
+        } else {
+            piece_tree
+        };
         let revision = piece_tree.generation();
         let length = BufferLength::from_metrics(
             piece_tree.metrics(),
@@ -113,9 +118,14 @@ impl DocumentSnapshot {
 #[cfg(test)]
 mod tests {
     use super::DocumentSnapshot;
-    use crate::app::domain::TextDocument;
     use crate::app::domain::buffer::BufferLength;
+    use crate::app::domain::{AnchorBias, TextDocument};
+    use crate::app::ui::editor_content::native_editor::CursorRange;
     use std::borrow::Cow;
+
+    fn selection(start: usize, end: usize) -> CursorRange {
+        CursorRange::two(start, end)
+    }
 
     #[test]
     fn snapshot_preserves_prior_revision_after_document_mutation() {
@@ -178,5 +188,52 @@ mod tests {
                 lines: 3,
             }
         );
+    }
+
+    #[test]
+    fn snapshot_strips_live_piece_tree_anchors() {
+        let mut document = TextDocument::new("alpha beta".to_owned());
+        let anchor = document.piece_tree_mut().create_anchor(6, AnchorBias::Left);
+
+        let snapshot: DocumentSnapshot = document.snapshot();
+
+        assert_eq!(document.piece_tree().anchor_position(anchor), Some(6));
+        assert_eq!(snapshot.piece_tree().anchor_position(anchor), None);
+    }
+
+    #[test]
+    fn snapshot_does_not_affect_live_anchor_after_undo_redo() {
+        let mut document = TextDocument::new("alpha beta gamma".to_owned());
+        let anchor = document
+            .piece_tree_mut()
+            .create_anchor(11, AnchorBias::Left);
+
+        document
+            .replace_char_ranges_with_undo(
+                &[(6..10, "BETA!".to_owned())],
+                selection(6, 10),
+                selection(6, 11),
+            )
+            .expect("replace current match");
+        assert_eq!(document.extract_text(), "alpha BETA! gamma");
+        assert_eq!(document.piece_tree().anchor_position(anchor), Some(12));
+
+        let snapshot = document.snapshot();
+        let snapshot_clone = snapshot.clone();
+        assert_eq!(snapshot.extract_text(), "alpha BETA! gamma");
+        assert_eq!(snapshot.piece_tree().anchor_position(anchor), None);
+        assert_eq!(snapshot_clone.piece_tree().anchor_position(anchor), None);
+
+        document.undo_last_operation();
+        assert_eq!(document.extract_text(), "alpha beta gamma");
+        assert_eq!(document.piece_tree().anchor_position(anchor), Some(11));
+        assert_eq!(snapshot.extract_text(), "alpha BETA! gamma");
+        assert_eq!(snapshot.piece_tree().anchor_position(anchor), None);
+
+        document.redo_last_operation();
+        assert_eq!(document.extract_text(), "alpha BETA! gamma");
+        assert_eq!(document.piece_tree().anchor_position(anchor), Some(12));
+        assert_eq!(snapshot_clone.extract_text(), "alpha BETA! gamma");
+        assert_eq!(snapshot_clone.piece_tree().anchor_position(anchor), None);
     }
 }

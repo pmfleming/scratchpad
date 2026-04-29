@@ -151,7 +151,7 @@ impl ScrollManager {
                 Axis::X => self.edge_autoscroll_x = velocity,
             },
         }
-        self.clamp(&row_to_anchor);
+        self.clamp(&anchor_to_row, &row_to_anchor);
     }
 
     /// Apply per-frame edge-autoscroll velocity. `dt` is seconds since the last
@@ -169,7 +169,7 @@ impl ScrollManager {
                 &anchor_to_row,
                 &row_to_anchor,
             );
-            self.clamp(&row_to_anchor);
+            self.clamp(&anchor_to_row, &row_to_anchor);
         }
     }
 
@@ -207,21 +207,23 @@ impl ScrollManager {
     fn reveal(
         &mut self,
         rect: eframe::egui::Rect,
-        align_y: ScrollAlign,
+        align_y: Option<ScrollAlign>,
         align_x: Option<ScrollAlign>,
         anchor_to_row: &dyn Fn(ScrollAnchor) -> f32,
         row_to_anchor: &dyn Fn(f32) -> ScrollAnchor,
     ) {
-        let viewport_h = self.metrics.viewport_rect.height();
-        let content_h = self.extent.height;
-        let cur_y = self.pixel_offset_y(anchor_to_row);
-        let new_y = align_y.resolve(
-            eframe::egui::Rangef::new(rect.min.y, rect.max.y),
-            viewport_h,
-            content_h,
-            cur_y,
-        );
-        self.set_pixel_offset_y(new_y, row_to_anchor);
+        if let Some(align_y) = align_y {
+            let viewport_h = self.metrics.viewport_rect.height();
+            let content_h = self.extent.height;
+            let cur_y = self.pixel_offset_y(anchor_to_row);
+            let new_y = align_y.resolve(
+                eframe::egui::Rangef::new(rect.min.y, rect.max.y),
+                viewport_h,
+                content_h,
+                cur_y,
+            );
+            self.set_pixel_offset_y(new_y, row_to_anchor);
+        }
 
         if let Some(align_x) = align_x {
             let viewport_w = self.metrics.viewport_rect.width();
@@ -235,15 +237,26 @@ impl ScrollManager {
         }
     }
 
-    fn clamp(&mut self, _row_to_anchor: &dyn Fn(f32) -> ScrollAnchor) {
-        // Anchor row clamping is the caller's responsibility — `apply_intent`
-        // does it via `row_to_anchor` after each move. Here we only normalize
-        // the fractional offset and clamp horizontal pixels.
+    fn clamp(
+        &mut self,
+        anchor_to_row: &dyn Fn(ScrollAnchor) -> f32,
+        row_to_anchor: &dyn Fn(f32) -> ScrollAnchor,
+    ) {
+        if self.metrics.row_height > 0.0 && self.extent.height > 0.0 {
+            let max_y = (self.extent.height - self.metrics.viewport_rect.height()).max(0.0);
+            let current_y = self.pixel_offset_y(anchor_to_row);
+            let clamped_y = current_y.clamp(0.0, max_y);
+            if clamped_y != current_y {
+                self.anchor = row_to_anchor(clamped_y / self.metrics.row_height);
+            }
+        }
         if self.anchor.display_row_offset() < 0.0 {
             self.anchor = self.anchor.with_display_row_offset(0.0);
         }
-        let max_x = (self.extent.max_line_width - self.metrics.viewport_rect.width()).max(0.0);
-        self.horizontal_px = self.horizontal_px.clamp(0.0, max_x);
+        if self.extent.max_line_width > 0.0 {
+            let max_x = (self.extent.max_line_width - self.metrics.viewport_rect.width()).max(0.0);
+            self.horizontal_px = self.horizontal_px.clamp(0.0, max_x);
+        }
     }
 }
 
@@ -422,6 +435,44 @@ mod tests {
         sm.tick_edge_autoscroll(1.0, naive_anchor_to_row, naive_row_to_anchor);
         // 40 px / 20 px-per-row = 2 rows.
         assert_eq!(sm.anchor().logical_line().unwrap(), 2);
+    }
+
+    #[test]
+    fn edge_autoscroll_y_clamps_to_bottom_scroll_bound() {
+        let mut sm = manager(1000, 800.0);
+        sm.apply_intent(
+            ScrollIntent::Lines(974),
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+        apply_edge_autoscroll(&mut sm, Axis::Y, 1000.0);
+
+        sm.tick_edge_autoscroll(1.0, naive_anchor_to_row, naive_row_to_anchor);
+
+        assert_eq!(sm.anchor().logical_line().unwrap(), 975);
+    }
+
+    #[test]
+    fn horizontal_only_reveal_preserves_vertical_anchor() {
+        let mut sm = manager(1000, 4000.0);
+        sm.apply_intent(
+            ScrollIntent::Lines(10),
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+
+        sm.apply_intent(
+            ScrollIntent::Reveal {
+                rect: Rect::from_min_size(pos2(1200.0, 4000.0), Vec2::new(8.0, 20.0)),
+                align_y: None,
+                align_x: Some(ScrollAlign::NearestWithMargin(0.0)),
+            },
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+
+        assert_eq!(sm.anchor().logical_line().unwrap(), 10);
+        assert!(sm.horizontal_px() > 0.0);
     }
 
     #[test]

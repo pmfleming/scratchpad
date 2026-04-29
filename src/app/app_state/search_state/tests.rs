@@ -4,9 +4,13 @@ use super::{
 };
 use crate::app::commands::AppCommand;
 use crate::app::domain::buffer::PieceTreeLite;
-use crate::app::domain::{BufferState, SearchHighlightState, SplitAxis};
+use crate::app::domain::{BufferState, CursorRevealMode, SearchHighlightState, SplitAxis};
 use crate::app::services::search::SearchMode;
 use crate::app::services::session_store::SessionStore;
+use crate::app::ui::scrolling::{
+    ContentExtent, DisplaySnapshot, ScrollAlign, ScrollIntent, ViewportMetrics,
+};
+use eframe::egui;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -45,6 +49,39 @@ fn wait_for_search_condition(
         thread::sleep(Duration::from_millis(5));
     }
     panic!("timed out waiting for search state: {description}");
+}
+
+fn snapshot_for(text: &str) -> DisplaySnapshot {
+    let ctx = egui::Context::default();
+    let mut galley = None;
+    let _ = ctx.run_ui(Default::default(), |ui| {
+        galley = Some(ui.fonts_mut(|fonts| {
+            fonts.layout_job(egui::text::LayoutJob::simple(
+                text.to_owned(),
+                egui::FontId::monospace(14.0),
+                egui::Color32::WHITE,
+                f32::INFINITY,
+            ))
+        }));
+    });
+    DisplaySnapshot::from_galley(galley.expect("galley"), 10.0)
+}
+
+fn install_snapshot_on_active_view(app: &mut ScratchpadApp, snapshot: DisplaySnapshot) {
+    let view = app.tabs_mut()[0].active_view_mut().expect("active view");
+    view.scroll.set_metrics(ViewportMetrics {
+        viewport_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 40.0)),
+        row_height: snapshot.row_height(),
+        column_width: 5.0,
+        visible_rows: 4,
+        visible_columns: 40,
+    });
+    view.scroll.set_extent(ContentExtent {
+        display_rows: snapshot.row_count(),
+        height: snapshot.content_height(),
+        max_line_width: snapshot.max_line_width(),
+    });
+    view.latest_display_snapshot = Some(snapshot);
 }
 
 #[test]
@@ -156,6 +193,34 @@ fn activating_search_match_navigates_to_matching_tab_and_range() {
         app.active_tab()
             .and_then(|tab| tab.active_view())
             .is_some_and(|view| view.cursor_reveal_mode().is_some())
+    );
+}
+
+#[test]
+fn activating_search_match_queues_scroll_reveal_when_snapshot_exists() {
+    let mut app = test_app();
+    let text = format!("{}alpha target\n", "preface\n".repeat(30));
+    app.tabs_mut()[0].buffer.replace_text(text.clone());
+
+    app.open_search();
+    app.set_search_query("alpha");
+    wait_for_search_matches(&mut app, 1);
+    install_snapshot_on_active_view(&mut app, snapshot_for(&text));
+
+    assert!(app.activate_search_match_at(0));
+
+    let view = app.tabs()[0].active_view().expect("active view");
+    assert!(view.pending_intents.iter().any(|intent| matches!(
+        intent,
+        ScrollIntent::Reveal {
+            align_y: Some(ScrollAlign::Center),
+            align_x: None,
+            ..
+        }
+    )));
+    assert_eq!(
+        view.cursor_reveal_mode(),
+        Some(CursorRevealMode::KeepHorizontalVisible)
     );
 }
 

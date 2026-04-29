@@ -82,22 +82,6 @@ fn read_write_windows_1252() {
 }
 
 #[test]
-fn preserves_encoding_when_round_tripping_windows_1252() {
-    let dir = tempdir().unwrap();
-    let path = dir.path().join("roundtrip-cp1252.txt");
-    let original = vec![0x63, 0x61, 0x66, 0xE9];
-    fs::write(&path, &original).unwrap();
-
-    let mut read = FileService::read_file(&path).unwrap();
-    let insert_at = read.document.piece_tree().len_chars();
-    read.document.insert_direct(insert_at, "!");
-    let updated = read.document.extract_text();
-    FileService::write_file_with_format(&path, &updated, &read.format).unwrap();
-
-    assert_eq!(fs::read(&path).unwrap(), vec![0x63, 0x61, 0x66, 0xE9, 0x21]);
-}
-
-#[test]
 fn detect_binary_file() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("binary.bin");

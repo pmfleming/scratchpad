@@ -1,6 +1,6 @@
 use super::{
-    AnchorBias, MAX_LEAF_BYTES, MAX_LEAF_PIECES, MAX_LEAVES_PER_INTERNAL, MIN_LEAVES_PER_INTERNAL,
-    PieceTreeLite,
+    AnchorBias, AnchorOwner, AnchorOwnerKind, MAX_LEAF_BYTES, MAX_LEAF_PIECES,
+    MAX_LEAVES_PER_INTERNAL, MIN_LEAVES_PER_INTERNAL, PieceTreeLite,
 };
 use rand::RngExt;
 use rand::SeedableRng;
@@ -59,6 +59,110 @@ fn anchor_clamps_creation_offset_to_document_length() {
     let mut tree = PieceTreeLite::from_string("abc".to_owned());
     let anchor = tree.create_anchor(99, AnchorBias::Left);
     assert_eq!(tree.anchor_position(anchor), Some(3));
+}
+
+#[test]
+fn anchor_owner_metadata_survives_edits_until_release() {
+    let mut tree = PieceTreeLite::from_string("abcdef".to_owned());
+    let owner = AnchorOwner::view_scroll(42);
+    let anchor = tree.create_anchor_with_owner(3, AnchorBias::Left, owner);
+
+    assert_eq!(tree.anchor_owner(anchor), Some(owner));
+    assert_eq!(
+        tree.anchor_owner(anchor).map(AnchorOwner::kind),
+        Some(AnchorOwnerKind::ViewScroll)
+    );
+
+    tree.insert(0, "zz");
+    assert_eq!(tree.anchor_position(anchor), Some(5));
+    assert_eq!(tree.anchor_owner(anchor), Some(owner));
+
+    tree.release_anchor(anchor);
+    assert_eq!(tree.anchor_owner(anchor), None);
+}
+
+#[test]
+fn anchor_on_empty_document_survives_first_insert() {
+    let mut tree = PieceTreeLite::from_string(String::new());
+    let left = tree.create_anchor(0, AnchorBias::Left);
+    let right = tree.create_anchor(0, AnchorBias::Right);
+
+    tree.insert(0, "abc");
+
+    assert_eq!(tree.anchor_position(left), Some(0));
+    assert_eq!(tree.anchor_position(right), Some(3));
+    assert_eq!(tree.live_anchor_count(), 2);
+    assert_balanced(&tree);
+}
+
+#[test]
+fn anchors_in_untouched_leaves_shift_through_prefix_metrics() {
+    let chunk = "a".repeat(MAX_LEAF_BYTES / 2);
+    let mut text = String::new();
+    text.push_str(&chunk);
+    text.push_str(&chunk);
+    text.push_str(&chunk);
+    let mut tree = PieceTreeLite::from_string(text);
+    assert!(
+        tree.root
+            .nodes
+            .iter()
+            .map(|node| node.leaves.len())
+            .sum::<usize>()
+            > 1
+    );
+
+    let distant_offset = tree.len_chars() - 10;
+    let distant_anchor = tree.create_anchor(distant_offset, AnchorBias::Left);
+    tree.insert(1, "XYZ");
+
+    assert_eq!(
+        tree.anchor_position(distant_anchor),
+        Some(distant_offset + 3)
+    );
+    assert_eq!(tree.live_anchor_count(), 1);
+    assert_balanced(&tree);
+}
+
+#[test]
+fn many_point_anchors_match_string_model_across_edits() {
+    let mut tree = PieceTreeLite::from_string("0123456789".repeat(2_000));
+    let mut anchors = Vec::new();
+
+    for index in 0..1_000 {
+        let offset = index * 17;
+        let bias = if index % 3 == 0 {
+            AnchorBias::Right
+        } else {
+            AnchorBias::Left
+        };
+        let anchor = tree.create_anchor(offset, bias);
+        anchors.push((anchor, offset, bias));
+    }
+
+    tree.insert(123, "abcdef");
+    for (_, expected, bias) in &mut anchors {
+        if *expected > 123 || (*expected == 123 && matches!(bias, AnchorBias::Right)) {
+            *expected += 6;
+        }
+    }
+
+    tree.remove_char_range(9_000..9_250);
+    for (_, expected, _) in &mut anchors {
+        if *expected > 9_000 {
+            if *expected >= 9_250 {
+                *expected -= 250;
+            } else {
+                *expected = 9_000;
+            }
+        }
+    }
+
+    for (anchor, expected, _) in anchors {
+        assert_eq!(tree.anchor_position(anchor), Some(expected));
+    }
+    assert_eq!(tree.live_anchor_count(), 1_000);
+    assert_balanced(&tree);
 }
 
 #[test]
@@ -190,6 +294,7 @@ fn assert_balanced(tree: &PieceTreeLite) {
     let mut computed_chars = 0usize;
     let mut computed_newlines = 0usize;
     let mut computed_pieces = 0usize;
+    let mut computed_anchors = 0usize;
 
     if tree.root.nodes.len() > 1 {
         assert!(!tree.root.nodes.is_empty());
@@ -220,6 +325,7 @@ fn assert_balanced(tree: &PieceTreeLite) {
             computed_chars += leaf.metrics.chars;
             computed_newlines += leaf.metrics.newlines;
             computed_pieces += leaf.metrics.pieces;
+            computed_anchors += leaf.anchors.len();
         }
     }
 
@@ -227,6 +333,8 @@ fn assert_balanced(tree: &PieceTreeLite) {
     assert_eq!(tree.metrics().chars, computed_chars);
     assert_eq!(tree.metrics().newlines, computed_newlines);
     assert_eq!(tree.metrics().pieces, computed_pieces);
+    assert_eq!(tree.root.anchor_count, computed_anchors);
+    assert_eq!(tree.live_anchor_count(), computed_anchors);
 }
 
 fn assert_tree_matches_string_model(tree: &PieceTreeLite, expected: &str) {

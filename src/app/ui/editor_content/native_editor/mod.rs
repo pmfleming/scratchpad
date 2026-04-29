@@ -50,6 +50,7 @@ pub fn render_editor_text_edit(
     options: TextEditOptions<'_>,
     viewport: Option<egui::Rect>,
 ) -> EditorWidgetOutcome {
+    view.resolve_anchored_ranges(buffer);
     let mut document_revision = buffer.document_revision();
     let total_chars = buffer.current_file_length().chars;
     let mut galley = build_editor_galley(ui, buffer, view, options, viewport);
@@ -130,6 +131,7 @@ fn process_editor_input(
     request: EditorInputRequest<'_>,
 ) -> EditorInputOutcome {
     let prev_cursor = view.cursor_range;
+    let prev_cursor_line = prev_cursor.and_then(|cursor| primary_line_index(buffer, cursor));
     handle_mouse_interaction(
         ui,
         request.response,
@@ -143,12 +145,51 @@ fn process_editor_input(
         || request.options.request_focus;
     sync_view_cursor_before_render(view, focused);
     let changed = handle_focused_keyboard_input(ui, buffer, view, &request, focused);
-    if view.cursor_range != prev_cursor {
-        view.request_cursor_reveal(CursorRevealMode::KeepVisible);
-    }
+    request_cursor_reveal_after_input(buffer, view, prev_cursor, prev_cursor_line, changed);
     publish_active_selection(buffer, view, focused);
+    view.sync_cursor_anchors_from_ranges(buffer);
     request_page_navigation_intent(ui, view, focused);
     EditorInputOutcome { focused, changed }
+}
+
+fn request_cursor_reveal_after_input(
+    buffer: &BufferState,
+    view: &mut EditorViewState,
+    prev_cursor: Option<CursorRange>,
+    prev_cursor_line: Option<usize>,
+    changed: bool,
+) {
+    if view.cursor_range == prev_cursor {
+        return;
+    }
+
+    if !changed
+        || edit_moved_primary_cursor_to_new_line(buffer, view.cursor_range, prev_cursor_line)
+    {
+        view.request_cursor_reveal(CursorRevealMode::KeepVisible);
+    } else {
+        view.request_cursor_reveal(CursorRevealMode::KeepHorizontalVisible);
+    }
+}
+
+fn edit_moved_primary_cursor_to_new_line(
+    buffer: &BufferState,
+    cursor: Option<CursorRange>,
+    prev_cursor_line: Option<usize>,
+) -> bool {
+    let Some(prev_line) = prev_cursor_line else {
+        return true;
+    };
+    primary_line_index(buffer, cursor.unwrap_or_default()).is_none_or(|line| line != prev_line)
+}
+
+fn primary_line_index(buffer: &BufferState, cursor: CursorRange) -> Option<usize> {
+    (cursor.primary.index <= buffer.current_file_length().chars).then(|| {
+        buffer
+            .document()
+            .piece_tree()
+            .line_index_at_offset(cursor.primary.index)
+    })
 }
 
 fn handle_focused_keyboard_input(
@@ -297,9 +338,10 @@ fn paint_cursor_effects(
     if let Some(mode) = reveal_mode {
         let align_y = match mode {
             CursorRevealMode::KeepVisible => {
-                ScrollAlign::NearestWithMargin(CURSOR_REVEAL_MARGIN_PX)
+                Some(ScrollAlign::NearestWithMargin(CURSOR_REVEAL_MARGIN_PX))
             }
-            CursorRevealMode::Center => ScrollAlign::Center,
+            CursorRevealMode::KeepHorizontalVisible => None,
+            CursorRevealMode::Center => Some(ScrollAlign::Center),
         };
         view.request_intent(ScrollIntent::Reveal {
             rect: cursor_rect_content,
@@ -553,9 +595,9 @@ mod tests {
     use super::{
         CharCursor, CursorRange, consume_cursor_reveal, consumed_page_navigation_direction,
         editor_content_height, editor_desired_size, editor_desired_width, editor_wrap_width,
-        sync_view_cursor_before_render,
+        request_cursor_reveal_after_input, sync_view_cursor_before_render,
     };
-    use crate::app::domain::{CursorRevealMode, EditorViewState};
+    use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
     use eframe::egui;
 
     #[test]
@@ -628,6 +670,36 @@ mod tests {
         consume_cursor_reveal(&mut view, false, false);
 
         assert!(view.cursor_reveal_mode().is_some());
+    }
+
+    #[test]
+    fn same_line_edit_requests_horizontal_only_cursor_reveal() {
+        let buffer = BufferState::new("test.txt".to_owned(), "alpha!".to_owned(), None);
+        let mut view = EditorViewState::new(buffer.id, false);
+        let previous = CursorRange::one(CharCursor::new(5));
+        view.cursor_range = Some(CursorRange::one(CharCursor::new(6)));
+
+        request_cursor_reveal_after_input(&buffer, &mut view, Some(previous), Some(0), true);
+
+        assert_eq!(
+            view.cursor_reveal_mode(),
+            Some(CursorRevealMode::KeepHorizontalVisible)
+        );
+    }
+
+    #[test]
+    fn newline_edit_keeps_vertical_cursor_reveal() {
+        let buffer = BufferState::new("test.txt".to_owned(), "alpha\n".to_owned(), None);
+        let mut view = EditorViewState::new(buffer.id, false);
+        let previous = CursorRange::one(CharCursor::new(5));
+        view.cursor_range = Some(CursorRange::one(CharCursor::new(6)));
+
+        request_cursor_reveal_after_input(&buffer, &mut view, Some(previous), Some(0), true);
+
+        assert_eq!(
+            view.cursor_reveal_mode(),
+            Some(CursorRevealMode::KeepVisible)
+        );
     }
 
     #[test]

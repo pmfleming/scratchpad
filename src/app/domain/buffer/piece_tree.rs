@@ -3,11 +3,12 @@ mod edit;
 mod slice;
 mod support;
 
-pub use anchor::{AnchorBias, AnchorId};
+pub use anchor::{AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind};
 
 use std::ops::Range;
 
 use self::slice::previews_for_matches_in_contiguous_text;
+use anchor::{LeafAnchor, LeafId};
 use support::{
     build_chunked_pieces, build_root_from_pieces, byte_index_for_char_offset,
     byte_range_for_char_range, compact_preview, count_newlines, line_lookup_in_leaves,
@@ -98,10 +99,12 @@ impl Piece {
 
 #[derive(Clone, Debug, Default)]
 pub struct PieceTreeLeaf {
+    leaf_id: LeafId,
     pieces: Vec<Piece>,
     metrics: PieceTreeMetrics,
     piece_start_chars: Vec<usize>,
     piece_start_newlines: Vec<usize>,
+    anchors: Vec<LeafAnchor>,
 }
 
 impl PieceTreeLeaf {
@@ -141,6 +144,7 @@ pub struct PieceTreeInternalNode {
     metrics: PieceTreeMetrics,
     leaf_start_chars: Vec<usize>,
     leaf_start_newlines: Vec<usize>,
+    anchor_count: usize,
 }
 
 impl PieceTreeInternalNode {
@@ -158,6 +162,7 @@ impl PieceTreeInternalNode {
             &mut self.leaf_start_newlines,
             |leaf| leaf.metrics,
         );
+        self.anchor_count = self.leaves.iter().map(|leaf| leaf.anchors.len()).sum();
     }
 }
 
@@ -167,6 +172,7 @@ pub struct PieceTreeRoot {
     metrics: PieceTreeMetrics,
     node_start_chars: Vec<usize>,
     node_start_newlines: Vec<usize>,
+    anchor_count: usize,
 }
 
 impl PieceTreeRoot {
@@ -184,6 +190,7 @@ impl PieceTreeRoot {
             &mut self.node_start_newlines,
             |node| node.metrics,
         );
+        self.anchor_count = self.nodes.iter().map(|node| node.anchor_count).sum();
     }
 }
 
@@ -194,6 +201,7 @@ pub struct PieceTreeLite {
     root: PieceTreeRoot,
     generation: u64,
     anchors: anchor::AnchorRegistry,
+    next_leaf_id: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -217,13 +225,16 @@ pub struct PieceTreeSlice<'a> {
 impl PieceTreeLite {
     pub fn from_string(text: String) -> Self {
         let pieces = build_chunked_pieces(PieceBuffer::Original, 0, &text);
-        Self {
+        let mut tree = Self {
             original: text,
             add: String::new(),
             root: build_root_from_pieces(pieces),
             generation: 0,
             anchors: anchor::AnchorRegistry::default(),
-        }
+            next_leaf_id: 1,
+        };
+        tree.assign_missing_leaf_ids();
+        tree
     }
 
     /// Create a stable anchor at `char_offset`. The returned `AnchorId`
@@ -231,25 +242,89 @@ impl PieceTreeLite {
     /// tree shifts the underlying offset on `insert`/`remove_char_range`
     /// according to `bias`.
     pub fn create_anchor(&mut self, char_offset: usize, bias: AnchorBias) -> AnchorId {
+        self.create_anchor_with_owner(char_offset, bias, AnchorOwner::unspecified())
+    }
+
+    /// Create a stable anchor with explicit runtime ownership metadata. Owner
+    /// metadata does not affect position semantics; it exists so lifecycle
+    /// code can distinguish scroll, cursor, selection, and search anchors.
+    pub fn create_anchor_with_owner(
+        &mut self,
+        char_offset: usize,
+        bias: AnchorBias,
+        owner: AnchorOwner,
+    ) -> AnchorId {
         let safe = char_offset.min(self.len_chars());
-        self.anchors.create(safe, bias)
+        self.ensure_anchorable_leaf();
+        let address = self.find_leaf_for_char_offset(safe);
+        let leaf_id = self.root.nodes[address.node_index].leaves[address.leaf_index].leaf_id;
+        let id = self.anchors.create(leaf_id, bias, owner);
+        self.root.nodes[address.node_index].leaves[address.leaf_index]
+            .anchors
+            .push(LeafAnchor {
+                id,
+                local_offset: safe.saturating_sub(address.leaf_start_char),
+            });
+        self.root.recalculate();
+        id
     }
 
     /// Release an anchor. Anchor IDs are not recycled, so it is safe to
     /// release IDs that may already be released; the call is a no-op then.
     pub fn release_anchor(&mut self, id: AnchorId) {
-        self.anchors.release(id);
+        let Some(entry) = self.anchors.release(id) else {
+            return;
+        };
+        if let Some((node_index, leaf_index)) = self.find_leaf_indices_by_id(entry.leaf_id) {
+            self.root.nodes[node_index].leaves[leaf_index]
+                .anchors
+                .retain(|anchor| anchor.id != id);
+            self.root.recalculate();
+        }
     }
 
     /// Resolve an anchor to its current `char_offset`, or `None` if it has
     /// been released.
     pub fn anchor_position(&self, id: AnchorId) -> Option<usize> {
-        self.anchors.position(id)
+        let entry = self.anchors.entry(id)?;
+        let (address, leaf) = self.find_leaf_by_id(entry.leaf_id)?;
+        let leaf_anchor = leaf.anchors.iter().find(|anchor| anchor.id == id)?;
+        Some(address.leaf_start_char + leaf_anchor.local_offset.min(leaf.metrics.chars))
     }
 
     /// Bias the anchor was created with, or `None` if released.
     pub fn anchor_bias(&self, id: AnchorId) -> Option<AnchorBias> {
         self.anchors.entry(id).map(|entry| entry.bias)
+    }
+
+    /// Owner metadata the anchor was created with, or `None` if released.
+    pub fn anchor_owner(&self, id: AnchorId) -> Option<AnchorOwner> {
+        self.anchors.entry(id).map(|entry| entry.owner)
+    }
+
+    pub(crate) fn clone_without_anchors(&self) -> Self {
+        let mut clone = self.clone();
+        clone.clear_anchors();
+        clone
+    }
+
+    pub(crate) fn has_live_anchors(&self) -> bool {
+        !self.anchors.is_empty()
+    }
+
+    pub(crate) fn clear_anchors(&mut self) {
+        self.anchors.clear();
+        for node in &mut self.root.nodes {
+            for leaf in &mut node.leaves {
+                leaf.anchors.clear();
+            }
+        }
+        self.root.recalculate();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn live_anchor_count(&self) -> usize {
+        self.anchors.live_count()
     }
 
     pub fn metrics(&self) -> PieceTreeMetrics {
@@ -496,6 +571,53 @@ impl PieceTreeLite {
         let piece = leaf.pieces.get(piece_index)?;
         let offset_in_piece = offset_in_leaf.saturating_sub(leaf.piece_start_chars[piece_index]);
         Some((piece, offset_in_piece))
+    }
+
+    fn ensure_anchorable_leaf(&mut self) {
+        if self.root.nodes.is_empty() {
+            self.root.nodes.push(PieceTreeInternalNode::default());
+        }
+        self.assign_missing_leaf_ids();
+    }
+
+    pub(super) fn assign_missing_leaf_ids(&mut self) {
+        for node in &mut self.root.nodes {
+            for leaf in &mut node.leaves {
+                if leaf.leaf_id.is_unassigned() {
+                    leaf.leaf_id = LeafId::next(&mut self.next_leaf_id);
+                }
+            }
+        }
+        self.root.recalculate();
+    }
+
+    fn find_leaf_by_id(&self, leaf_id: LeafId) -> Option<(LeafAddress, &PieceTreeLeaf)> {
+        let (node_index, leaf_index) = self.find_leaf_indices_by_id(leaf_id)?;
+        let address = self.address_for_leaf_indices(node_index, leaf_index);
+        let leaf = &self.root.nodes[node_index].leaves[leaf_index];
+        Some((address, leaf))
+    }
+
+    fn find_leaf_indices_by_id(&self, leaf_id: LeafId) -> Option<(usize, usize)> {
+        for (node_index, node) in self.root.nodes.iter().enumerate() {
+            for (leaf_index, leaf) in node.leaves.iter().enumerate() {
+                if leaf.leaf_id == leaf_id {
+                    return Some((node_index, leaf_index));
+                }
+            }
+        }
+        None
+    }
+
+    fn address_for_leaf_indices(&self, node_index: usize, leaf_index: usize) -> LeafAddress {
+        LeafAddress {
+            node_index,
+            leaf_index,
+            leaf_start_char: self.root.node_start_chars[node_index]
+                + self.root.nodes[node_index].leaf_start_chars[leaf_index],
+            leaf_start_newline: self.root.node_start_newlines[node_index]
+                + self.root.nodes[node_index].leaf_start_newlines[leaf_index],
+        }
     }
 }
 

@@ -1,5 +1,5 @@
 use crate::app::domain::BufferId;
-use crate::app::domain::buffer::AnchorId;
+use crate::app::domain::buffer::{AnchorBias, AnchorId, AnchorOwner};
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use crate::app::ui::scrolling::{DisplaySnapshot, ScrollAnchor, ScrollIntent, ScrollManager};
 use eframe::egui;
@@ -18,6 +18,24 @@ pub struct SearchHighlightState {
     pub active_range_index: Option<usize>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct AnchoredEndpoint {
+    anchor: AnchorId,
+    prefer_next_row: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct AnchoredCursorRange {
+    primary: AnchoredEndpoint,
+    secondary: AnchoredEndpoint,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct AnchoredSearchRange {
+    start: AnchorId,
+    end: AnchorId,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct PublishedImeOutput {
     rect: egui::Rect,
@@ -31,6 +49,8 @@ struct PublishedImeOutput {
 pub enum CursorRevealMode {
     /// Scroll only the minimum amount needed to keep the cursor visible.
     KeepVisible,
+    /// Scroll only horizontally to keep the cursor visible.
+    KeepHorizontalVisible,
     /// Center the cursor (or place it near the centerband).
     Center,
 }
@@ -65,6 +85,9 @@ pub struct EditorViewState {
     /// allocating a replacement so the piece tree's anchor registry does not
     /// grow unbounded.
     last_piece_anchor: Option<AnchorId>,
+    cursor_anchor_range: Option<AnchoredCursorRange>,
+    pending_cursor_anchor_range: Option<AnchoredCursorRange>,
+    search_highlight_anchors: Vec<AnchoredSearchRange>,
     published_ime_output: Option<PublishedImeOutput>,
     pub search_highlights: SearchHighlightState,
 }
@@ -85,6 +108,9 @@ impl EditorViewState {
             pending_intents: Vec::new(),
             pending_cursor_reveal: None,
             last_piece_anchor: None,
+            cursor_anchor_range: None,
+            pending_cursor_anchor_range: None,
+            search_highlight_anchors: Vec::new(),
             published_ime_output: None,
             search_highlights: SearchHighlightState::default(),
         }
@@ -111,6 +137,9 @@ impl EditorViewState {
             pending_intents: Vec::new(),
             pending_cursor_reveal: None,
             last_piece_anchor: None,
+            cursor_anchor_range: None,
+            pending_cursor_anchor_range: None,
+            search_highlight_anchors: Vec::new(),
             published_ime_output: None,
             search_highlights: SearchHighlightState::default(),
         }
@@ -164,7 +193,11 @@ impl EditorViewState {
         let anchor_id = buffer
             .document_mut()
             .piece_tree_mut()
-            .create_anchor(char_offset, AnchorBias::Left);
+            .create_anchor_with_owner(
+                char_offset,
+                AnchorBias::Left,
+                AnchorOwner::view_scroll(self.id),
+            );
         self.last_piece_anchor = Some(anchor_id);
         let frac = self.scroll.anchor().display_row_offset();
         self.scroll.replace_anchor(ScrollAnchor::Piece {
@@ -185,7 +218,10 @@ impl EditorViewState {
             (Some(CursorRevealMode::Center), _) | (_, CursorRevealMode::Center) => {
                 CursorRevealMode::Center
             }
-            _ => CursorRevealMode::KeepVisible,
+            (Some(CursorRevealMode::KeepVisible), _) | (_, CursorRevealMode::KeepVisible) => {
+                CursorRevealMode::KeepVisible
+            }
+            _ => CursorRevealMode::KeepHorizontalVisible,
         });
     }
 
@@ -195,6 +231,128 @@ impl EditorViewState {
 
     pub fn clear_cursor_reveal(&mut self) {
         self.pending_cursor_reveal = None;
+    }
+
+    /// Take the view-owned piece anchor so its buffer can release it before
+    /// this view is cleared, closed, or detached from the buffer context.
+    pub fn take_piece_anchor_for_release(&mut self) -> Option<AnchorId> {
+        let anchor = self.last_piece_anchor.take()?;
+        if self.scroll.anchor().piece_anchor() == Some(anchor) {
+            self.scroll.replace_anchor(ScrollAnchor::TOP);
+        }
+        Some(anchor)
+    }
+
+    pub fn take_runtime_anchors_for_release(&mut self) -> Vec<AnchorId> {
+        let mut anchors = Vec::new();
+        if let Some(anchor) = self.take_piece_anchor_for_release() {
+            anchors.push(anchor);
+        }
+        anchors.extend(take_cursor_anchors(&mut self.cursor_anchor_range));
+        anchors.extend(take_cursor_anchors(&mut self.pending_cursor_anchor_range));
+        anchors.extend(take_search_anchors(&mut self.search_highlight_anchors));
+        self.search_highlights.ranges.clear();
+        self.search_highlights.active_range_index = None;
+        anchors
+    }
+
+    pub fn resolve_anchored_ranges(&mut self, buffer: &crate::app::domain::BufferState) {
+        if let Some(cursor_range) = resolve_cursor_anchor_range(self.cursor_anchor_range, buffer) {
+            self.cursor_range = Some(cursor_range);
+        }
+        if let Some(cursor_range) =
+            resolve_cursor_anchor_range(self.pending_cursor_anchor_range, buffer)
+        {
+            self.pending_cursor_range = Some(cursor_range);
+        }
+        self.resolve_search_highlight_anchors(buffer);
+    }
+
+    pub fn sync_cursor_anchors_from_ranges(
+        &mut self,
+        buffer: &mut crate::app::domain::BufferState,
+    ) {
+        sync_optional_cursor_anchor_range(
+            self.id,
+            buffer,
+            self.cursor_range,
+            &mut self.cursor_anchor_range,
+        );
+        sync_optional_cursor_anchor_range(
+            self.id,
+            buffer,
+            self.pending_cursor_range,
+            &mut self.pending_cursor_anchor_range,
+        );
+    }
+
+    pub fn set_cursor_range_anchored(
+        &mut self,
+        buffer: &mut crate::app::domain::BufferState,
+        cursor_range: CursorRange,
+    ) {
+        self.cursor_range = Some(cursor_range);
+        sync_optional_cursor_anchor_range(
+            self.id,
+            buffer,
+            self.cursor_range,
+            &mut self.cursor_anchor_range,
+        );
+    }
+
+    pub fn set_pending_cursor_range_anchored(
+        &mut self,
+        buffer: &mut crate::app::domain::BufferState,
+        cursor_range: CursorRange,
+    ) {
+        self.pending_cursor_range = Some(cursor_range);
+        sync_optional_cursor_anchor_range(
+            self.id,
+            buffer,
+            self.pending_cursor_range,
+            &mut self.pending_cursor_anchor_range,
+        );
+    }
+
+    pub fn set_search_highlights_anchored(
+        &mut self,
+        buffer: &mut crate::app::domain::BufferState,
+        highlights: SearchHighlightState,
+    ) {
+        release_anchors(
+            buffer,
+            take_search_anchors(&mut self.search_highlight_anchors),
+        );
+        self.search_highlights = highlights;
+        for range in &self.search_highlights.ranges {
+            if range.start >= range.end {
+                continue;
+            }
+            let start = buffer
+                .document_mut()
+                .piece_tree_mut()
+                .create_anchor_with_owner(
+                    range.start,
+                    AnchorBias::Left,
+                    AnchorOwner::search_endpoint(self.id),
+                );
+            let end = buffer
+                .document_mut()
+                .piece_tree_mut()
+                .create_anchor_with_owner(
+                    range.end,
+                    AnchorBias::Right,
+                    AnchorOwner::search_endpoint(self.id),
+                );
+            self.search_highlight_anchors
+                .push(AnchoredSearchRange { start, end });
+        }
+    }
+
+    pub fn clear_search_highlights_for_release(&mut self) -> Vec<AnchorId> {
+        self.search_highlights.ranges.clear();
+        self.search_highlights.active_range_index = None;
+        take_search_anchors(&mut self.search_highlight_anchors)
     }
 
     /// Pixel-space scroll offset derived from the per-view `ScrollManager`.
@@ -266,6 +424,73 @@ impl EditorViewState {
         );
     }
 
+    /// Update the per-view scroll position from a pixel offset while using
+    /// the latest display snapshot to seed a piece-tree-backed vertical
+    /// anchor. Falls back to logical mapping until a snapshot is available.
+    pub fn set_editor_pixel_offset_resolved(
+        &mut self,
+        buffer: &mut crate::app::domain::BufferState,
+        offset: egui::Vec2,
+    ) {
+        let Some(anchor) = self.anchor_for_pixel_offset(buffer, offset) else {
+            self.set_editor_pixel_offset(offset);
+            return;
+        };
+
+        self.scroll.replace_anchor(anchor);
+        self.set_horizontal_pixel_offset(offset.x);
+    }
+
+    fn anchor_for_pixel_offset(
+        &mut self,
+        buffer: &mut crate::app::domain::BufferState,
+        offset: egui::Vec2,
+    ) -> Option<ScrollAnchor> {
+        use crate::app::domain::AnchorBias;
+        let snapshot = self.latest_display_snapshot.as_ref()?;
+        let metrics = self.scroll.metrics();
+        if metrics.row_height <= 0.0 || snapshot.row_count() == 0 {
+            return None;
+        }
+
+        let row = (offset.y / metrics.row_height).max(0.0);
+        let row_index = row.floor() as u32;
+        let clamped_row = row_index.min(snapshot.row_count().saturating_sub(1));
+        let row_range =
+            snapshot.row_char_range(crate::app::ui::scrolling::DisplayRow(clamped_row))?;
+        if let Some(previous) = self.last_piece_anchor.take() {
+            buffer
+                .document_mut()
+                .piece_tree_mut()
+                .release_anchor(previous);
+        }
+        let anchor_id = buffer
+            .document_mut()
+            .piece_tree_mut()
+            .create_anchor_with_owner(
+                row_range.start as usize,
+                AnchorBias::Left,
+                AnchorOwner::view_scroll(self.id),
+            );
+        self.last_piece_anchor = Some(anchor_id);
+        Some(ScrollAnchor::Piece {
+            anchor: anchor_id,
+            display_row_offset: (row - clamped_row as f32).max(0.0),
+        })
+    }
+
+    fn set_horizontal_pixel_offset(&mut self, offset_x: f32) {
+        use crate::app::ui::scrolling::{Axis, naive_anchor_to_row, naive_row_to_anchor};
+        self.scroll.apply_intent(
+            ScrollIntent::ScrollbarTo {
+                axis: Axis::X,
+                offset_pixels: offset_x,
+            },
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+    }
+
     pub fn mark_ime_output(&mut self, rect: egui::Rect, cursor_rect: egui::Rect) -> bool {
         let next = PublishedImeOutput { rect, cursor_rect };
         if self.published_ime_output == Some(next) {
@@ -289,6 +514,140 @@ impl SearchHighlightState {
     }
 }
 
+fn sync_optional_cursor_anchor_range(
+    view_id: ViewId,
+    buffer: &mut crate::app::domain::BufferState,
+    cursor_range: Option<CursorRange>,
+    anchored: &mut Option<AnchoredCursorRange>,
+) {
+    if resolve_cursor_anchor_range(*anchored, buffer) == cursor_range {
+        return;
+    }
+    release_anchors(buffer, take_cursor_anchors(anchored));
+    let Some(cursor_range) = cursor_range else {
+        return;
+    };
+    *anchored = Some(create_cursor_anchor_range(view_id, buffer, cursor_range));
+}
+
+fn create_cursor_anchor_range(
+    view_id: ViewId,
+    buffer: &mut crate::app::domain::BufferState,
+    cursor_range: CursorRange,
+) -> AnchoredCursorRange {
+    let (start, end) = cursor_range.sorted_indices();
+    AnchoredCursorRange {
+        primary: create_cursor_endpoint_anchor(
+            buffer,
+            cursor_range.primary.index,
+            cursor_endpoint_bias(cursor_range.primary.index, start, end),
+            AnchorOwner::cursor(view_id),
+            cursor_range.primary.prefer_next_row,
+        ),
+        secondary: create_cursor_endpoint_anchor(
+            buffer,
+            cursor_range.secondary.index,
+            cursor_endpoint_bias(cursor_range.secondary.index, start, end),
+            AnchorOwner::selection_endpoint(view_id),
+            cursor_range.secondary.prefer_next_row,
+        ),
+    }
+}
+
+fn cursor_endpoint_bias(index: usize, start: usize, end: usize) -> AnchorBias {
+    if start == end || index >= end {
+        AnchorBias::Right
+    } else {
+        AnchorBias::Left
+    }
+}
+
+fn create_cursor_endpoint_anchor(
+    buffer: &mut crate::app::domain::BufferState,
+    index: usize,
+    bias: AnchorBias,
+    owner: AnchorOwner,
+    prefer_next_row: bool,
+) -> AnchoredEndpoint {
+    let anchor = buffer
+        .document_mut()
+        .piece_tree_mut()
+        .create_anchor_with_owner(index, bias, owner);
+    AnchoredEndpoint {
+        anchor,
+        prefer_next_row,
+    }
+}
+
+fn resolve_cursor_anchor_range(
+    anchored: Option<AnchoredCursorRange>,
+    buffer: &crate::app::domain::BufferState,
+) -> Option<CursorRange> {
+    let anchored = anchored?;
+    let piece_tree = buffer.document().piece_tree();
+    Some(CursorRange {
+        primary: crate::app::ui::editor_content::native_editor::CharCursor {
+            index: piece_tree.anchor_position(anchored.primary.anchor)?,
+            prefer_next_row: anchored.primary.prefer_next_row,
+        },
+        secondary: crate::app::ui::editor_content::native_editor::CharCursor {
+            index: piece_tree.anchor_position(anchored.secondary.anchor)?,
+            prefer_next_row: anchored.secondary.prefer_next_row,
+        },
+    })
+}
+
+fn take_cursor_anchors(anchored: &mut Option<AnchoredCursorRange>) -> Vec<AnchorId> {
+    anchored
+        .take()
+        .map(|range| vec![range.primary.anchor, range.secondary.anchor])
+        .unwrap_or_default()
+}
+
+fn take_search_anchors(anchors: &mut Vec<AnchoredSearchRange>) -> Vec<AnchorId> {
+    anchors
+        .drain(..)
+        .flat_map(|range| [range.start, range.end])
+        .collect()
+}
+
+fn release_anchors(buffer: &mut crate::app::domain::BufferState, anchors: Vec<AnchorId>) {
+    for anchor in anchors {
+        buffer
+            .document_mut()
+            .piece_tree_mut()
+            .release_anchor(anchor);
+    }
+}
+
+impl EditorViewState {
+    fn resolve_search_highlight_anchors(&mut self, buffer: &crate::app::domain::BufferState) {
+        if self.search_highlight_anchors.is_empty() {
+            return;
+        }
+        let piece_tree = buffer.document().piece_tree();
+        let mut ranges = Vec::with_capacity(self.search_highlight_anchors.len());
+        let mut active_range_index = None;
+        for (index, anchored) in self.search_highlight_anchors.iter().enumerate() {
+            let Some(start) = piece_tree.anchor_position(anchored.start) else {
+                continue;
+            };
+            let Some(end) = piece_tree.anchor_position(anchored.end) else {
+                continue;
+            };
+            if start >= end {
+                continue;
+            }
+            if self.search_highlights.active_range_index == Some(index) {
+                active_range_index = Some(ranges.len());
+            }
+            ranges.push(start..end);
+        }
+        self.search_highlights.ranges = ranges;
+        self.search_highlights.active_range_index = active_range_index;
+    }
+}
+
 pub fn next_view_id() -> ViewId {
     NEXT_VIEW_ID.fetch_add(1, Ordering::Relaxed)
 }
@@ -309,7 +668,43 @@ fn register_existing_view_id(id: ViewId) {
 #[cfg(test)]
 mod tests {
     use super::{EditorViewState, SearchHighlightState};
+    use crate::app::domain::{AnchorOwner, BufferState};
+    use crate::app::ui::scrolling::{
+        ContentExtent, DisplaySnapshot, ScrollAnchor, ViewportMetrics,
+    };
     use eframe::egui;
+
+    fn snapshot_for(text: &str) -> DisplaySnapshot {
+        let ctx = egui::Context::default();
+        let mut galley = None;
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            galley = Some(ui.fonts_mut(|fonts| {
+                fonts.layout_job(egui::text::LayoutJob::simple(
+                    text.to_owned(),
+                    egui::FontId::monospace(14.0),
+                    egui::Color32::WHITE,
+                    f32::INFINITY,
+                ))
+            }));
+        });
+        DisplaySnapshot::from_galley(galley.expect("galley"), 10.0)
+    }
+
+    fn install_snapshot(view: &mut EditorViewState, snapshot: DisplaySnapshot) {
+        view.scroll.set_metrics(ViewportMetrics {
+            viewport_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 40.0)),
+            row_height: snapshot.row_height(),
+            column_width: 5.0,
+            visible_rows: 4,
+            visible_columns: 40,
+        });
+        view.scroll.set_extent(ContentExtent {
+            display_rows: snapshot.row_count(),
+            height: snapshot.content_height(),
+            max_line_width: snapshot.max_line_width(),
+        });
+        view.latest_display_snapshot = Some(snapshot);
+    }
 
     #[test]
     fn identical_ime_output_is_not_republished() {
@@ -336,5 +731,107 @@ mod tests {
         highlights.ranges.push(8..12);
 
         assert_ne!(highlights.layout_signature(), initial);
+    }
+
+    #[test]
+    fn resolved_pixel_offset_seeds_view_owned_piece_anchor() {
+        let text = "zero\none\ntwo\nthree\nfour\nfive\n";
+        let mut buffer = BufferState::new("notes.txt".to_owned(), text.to_owned(), None);
+        let mut view = EditorViewState::new(buffer.id, false);
+        install_snapshot(&mut view, snapshot_for(text));
+
+        view.set_editor_pixel_offset_resolved(&mut buffer, egui::vec2(12.0, 20.0));
+
+        let ScrollAnchor::Piece { anchor, .. } = view.scroll.anchor() else {
+            panic!("expected piece-backed scroll anchor");
+        };
+        assert_eq!(buffer.document().piece_tree().live_anchor_count(), 1);
+        assert_eq!(
+            buffer.document().piece_tree().anchor_owner(anchor),
+            Some(AnchorOwner::view_scroll(view.id))
+        );
+        assert_eq!(view.editor_pixel_offset_resolved(&buffer).y, 20.0);
+
+        view.set_editor_pixel_offset_resolved(&mut buffer, egui::vec2(4.0, 30.0));
+
+        assert_eq!(buffer.document().piece_tree().live_anchor_count(), 1);
+        assert_eq!(view.editor_pixel_offset_resolved(&buffer).y, 30.0);
+    }
+
+    #[test]
+    fn cursor_and_selection_endpoint_anchors_track_edits_above_range() {
+        let mut buffer =
+            BufferState::new("notes.txt".to_owned(), "alpha beta gamma".to_owned(), None);
+        let mut view = EditorViewState::new(buffer.id, false);
+        let selected = crate::app::ui::editor_content::native_editor::CursorRange::two(6, 10);
+
+        view.set_cursor_range_anchored(&mut buffer, selected);
+
+        assert_eq!(buffer.document().piece_tree().live_anchor_count(), 2);
+        let anchored = view.cursor_anchor_range.expect("cursor anchors");
+        assert_eq!(
+            buffer
+                .document()
+                .piece_tree()
+                .anchor_owner(anchored.primary.anchor),
+            Some(AnchorOwner::cursor(view.id))
+        );
+        assert_eq!(
+            buffer
+                .document()
+                .piece_tree()
+                .anchor_owner(anchored.secondary.anchor),
+            Some(AnchorOwner::selection_endpoint(view.id))
+        );
+
+        buffer.document_mut().insert_direct(0, "zz ");
+        view.resolve_anchored_ranges(&buffer);
+
+        assert_eq!(
+            view.cursor_range
+                .expect("resolved cursor")
+                .as_sorted_char_range(),
+            9..13
+        );
+    }
+
+    #[test]
+    fn search_endpoint_anchors_track_edits_and_release_cleanly() {
+        let mut buffer =
+            BufferState::new("notes.txt".to_owned(), "alpha beta gamma".to_owned(), None);
+        let mut view = EditorViewState::new(buffer.id, false);
+
+        view.set_search_highlights_anchored(
+            &mut buffer,
+            SearchHighlightState {
+                ranges: std::iter::once(6..10).collect(),
+                active_range_index: Some(0),
+            },
+        );
+
+        assert_eq!(buffer.document().piece_tree().live_anchor_count(), 2);
+        let anchored = view.search_highlight_anchors[0];
+        assert_eq!(
+            buffer.document().piece_tree().anchor_owner(anchored.start),
+            Some(AnchorOwner::search_endpoint(view.id))
+        );
+        assert_eq!(
+            buffer.document().piece_tree().anchor_owner(anchored.end),
+            Some(AnchorOwner::search_endpoint(view.id))
+        );
+
+        buffer.document_mut().insert_direct(0, "zz ");
+        view.resolve_anchored_ranges(&buffer);
+
+        assert_eq!(view.search_highlights.ranges, vec![9..13]);
+        assert_eq!(view.search_highlights.active_range_index, Some(0));
+
+        for anchor in view.clear_search_highlights_for_release() {
+            buffer
+                .document_mut()
+                .piece_tree_mut()
+                .release_anchor(anchor);
+        }
+        assert_eq!(buffer.document().piece_tree().live_anchor_count(), 0);
     }
 }

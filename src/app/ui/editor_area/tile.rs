@@ -9,7 +9,7 @@ use crate::app::ui::editor_content::{
     self, EditorContentOutcome, EditorContentStyle, EditorHighlightStyle, TextEditOptions,
 };
 use crate::app::ui::scrolling;
-use crate::app::ui::scrolling::DisplaySnapshot;
+use crate::app::ui::scrolling::{DisplaySnapshot, ScrollAnchor};
 use crate::app::ui::tab_drag;
 use crate::app::ui::tile_header::{
     self, SplitPreviewOverlay, TileAction, TileHeaderRequest, TileHeaderState,
@@ -19,7 +19,7 @@ use eframe::egui;
 
 const EDITOR_SELECTION_AUTOSCROLL_CONFIG: AutoScrollConfig = AutoScrollConfig {
     edge_extent: 36.0,
-    max_step: 18.0,
+    max_step: 10.0,
     cross_axis_margin: 12.0,
 };
 
@@ -346,6 +346,7 @@ fn prepare_editor_scroll_frame<'a>(
 ) -> EditorScrollFrame<'a> {
     let scroll_id = editor_scroll_id(view_id);
     let previous_snapshot = content_style.previous_snapshot;
+    recover_unresolved_piece_anchor(ui, tab, view_id, scroll_id, previous_snapshot);
     if let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) {
         drain_pending_scroll_intents(view, buffer, previous_snapshot);
     }
@@ -391,6 +392,44 @@ fn resolved_scroll_offset_for_view(
         .unwrap_or_default()
 }
 
+fn recover_unresolved_piece_anchor(
+    ui: &egui::Ui,
+    tab: &mut WorkspaceTab,
+    view_id: ViewId,
+    scroll_id: egui::Id,
+    snapshot_fallback: Option<&DisplaySnapshot>,
+) {
+    let preserved_offset = scrolling::ScrollState::load(ui, scroll_id).offset;
+    let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) else {
+        return;
+    };
+    let ScrollAnchor::Piece { anchor, .. } = view.scroll.anchor() else {
+        return;
+    };
+    let snapshot = view.latest_display_snapshot.as_ref().or(snapshot_fallback);
+    let resolved_char_offset = buffer.document().piece_tree().anchor_position(anchor);
+    let unresolved = match resolved_char_offset {
+        Some(char_offset) => snapshot
+            .is_some_and(|snapshot| snapshot.row_for_char_offset(char_offset as u32).is_none()),
+        None => true,
+    };
+    if !unresolved {
+        return;
+    }
+
+    let tracked_anchor = view.take_piece_anchor_for_release();
+    if tracked_anchor.is_none() {
+        view.scroll.replace_anchor(ScrollAnchor::TOP);
+    }
+    view.set_editor_pixel_offset(preserved_offset);
+    if let Some(anchor) = tracked_anchor {
+        buffer
+            .document_mut()
+            .piece_tree_mut()
+            .release_anchor(anchor);
+    }
+}
+
 fn sync_local_scroll_state(ui: &egui::Ui, scroll_id: egui::Id, offset: egui::Vec2) {
     sync_editor_scroll_state(ui, scroll_id, offset);
     let mut local_state = scrolling::ScrollState::load(ui, scroll_id);
@@ -427,7 +466,7 @@ fn finish_editor_scroll_frame(
             drag_requested_scroll_offset,
             scrollbar_requested_scroll_offset,
         ) {
-            view.set_editor_pixel_offset(offset);
+            view.set_editor_pixel_offset_resolved(buffer, offset);
         }
         view.upgrade_scroll_anchor_to_piece(buffer);
     }
@@ -756,13 +795,20 @@ fn missing_editor_content_outcome() -> EditorContentOutcome {
 mod tests {
     use super::{
         clamp_scroll_offset, editor_pixel_offset_resolved, editor_scroll_id, max_scroll_offset,
-        scroll_offset_from_drag_delta, scroll_offset_from_wheel_delta, selection_edge_drag_delta,
+        recover_unresolved_piece_anchor, scroll_offset_from_drag_delta,
+        scroll_offset_from_wheel_delta, selection_edge_drag_delta,
     };
-    use crate::app::domain::{AnchorBias, BufferState, EditorViewState};
-    use crate::app::ui::scrolling::{DisplaySnapshot, ScrollAnchor, ViewportMetrics};
+    use crate::app::domain::{AnchorBias, BufferState, EditorViewState, WorkspaceTab};
+    use crate::app::ui::scrolling::{
+        ContentExtent, DisplayRow, DisplaySnapshot, ScrollAnchor, ScrollState, ViewportMetrics,
+    };
     use eframe::egui;
 
     fn galley_for(text: &str) -> std::sync::Arc<egui::Galley> {
+        galley_for_width(text, f32::INFINITY)
+    }
+
+    fn galley_for_width(text: &str, wrap_width: f32) -> std::sync::Arc<egui::Galley> {
         let ctx = egui::Context::default();
         let mut galley = None;
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -771,11 +817,76 @@ mod tests {
                     text.to_owned(),
                     egui::FontId::monospace(14.0),
                     egui::Color32::WHITE,
-                    f32::INFINITY,
+                    wrap_width,
                 ))
             }));
         });
         galley.expect("galley")
+    }
+
+    fn snapshot_for(text: &str, wrap_width: f32) -> DisplaySnapshot {
+        DisplaySnapshot::from_galley(galley_for_width(text, wrap_width), 10.0)
+    }
+
+    fn numbered_lines(count: usize) -> String {
+        (0..count).map(|line| format!("line {line:03}\n")).collect()
+    }
+
+    fn char_offset_for_line(text: &str, line_index: usize) -> usize {
+        text.lines()
+            .take(line_index)
+            .map(|line| line.chars().count() + 1)
+            .sum()
+    }
+
+    fn set_view_geometry(view: &mut EditorViewState, snapshot: &DisplaySnapshot) {
+        view.scroll.set_metrics(ViewportMetrics {
+            viewport_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 40.0)),
+            row_height: 10.0,
+            column_width: 5.0,
+            visible_rows: 4,
+            visible_columns: 40,
+        });
+        view.scroll.set_extent(ContentExtent {
+            display_rows: snapshot.row_count(),
+            height: snapshot.content_height(),
+            max_line_width: snapshot.max_line_width(),
+        });
+    }
+
+    fn set_piece_scroll_anchor_at_row(
+        view: &mut EditorViewState,
+        buffer: &mut BufferState,
+        snapshot: DisplaySnapshot,
+        row: u32,
+    ) {
+        set_view_geometry(view, &snapshot);
+        view.latest_display_snapshot = Some(snapshot);
+        view.set_editor_pixel_offset(egui::vec2(0.0, row as f32 * 10.0));
+        view.upgrade_scroll_anchor_to_piece(buffer);
+    }
+
+    fn rebuild_view_snapshot(view: &mut EditorViewState, text: &str, wrap_width: f32) {
+        let snapshot = snapshot_for(text, wrap_width);
+        set_view_geometry(view, &snapshot);
+        view.latest_display_snapshot = Some(snapshot);
+    }
+
+    fn top_row_text(view: &EditorViewState, buffer: &BufferState) -> String {
+        let offset = editor_pixel_offset_resolved(view, buffer, None);
+        let snapshot = view.latest_display_snapshot.as_ref().expect("snapshot");
+        let row = (offset.y / view.scroll.metrics().row_height)
+            .floor()
+            .max(0.0) as u32;
+        let range = snapshot
+            .row_char_range(DisplayRow(row.min(snapshot.row_count().saturating_sub(1))))
+            .expect("row range");
+        buffer
+            .document()
+            .piece_tree()
+            .extract_range(range.start as usize..range.end as usize)
+            .trim_end_matches('\n')
+            .to_owned()
     }
 
     #[test]
@@ -811,6 +922,194 @@ mod tests {
             editor_pixel_offset_resolved(&view, &buffer, Some(&snapshot)).y,
             32.5
         );
+    }
+
+    #[test]
+    fn unresolved_piece_anchor_recovers_from_local_scroll_state() {
+        let text = numbered_lines(120);
+        let snapshot = snapshot_for(&text, f32::INFINITY);
+        let buffer = BufferState::new("notes.txt".to_owned(), text.clone(), None);
+        let mut tab = WorkspaceTab::new(buffer);
+        let view_id = tab.active_view_id;
+        let scroll_id = editor_scroll_id(view_id);
+
+        {
+            let (buffer, view) = tab.buffer_and_view_mut(view_id).expect("active view");
+            set_piece_scroll_anchor_at_row(view, buffer, snapshot.clone(), 60);
+            let anchor = view.scroll.anchor().piece_anchor().expect("piece anchor");
+            buffer
+                .document_mut()
+                .piece_tree_mut()
+                .release_anchor(anchor);
+            assert_eq!(buffer.document().piece_tree().anchor_position(anchor), None);
+        }
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            let state = ScrollState {
+                offset: egui::vec2(0.0, 600.0),
+                ..Default::default()
+            };
+            state.store(ui, scroll_id);
+
+            recover_unresolved_piece_anchor(ui, &mut tab, view_id, scroll_id, Some(&snapshot));
+        });
+
+        let (buffer, view) = tab.buffer_and_view_mut(view_id).expect("active view");
+        assert_eq!(view.scroll.anchor().logical_line(), Some(60));
+        assert_eq!(
+            editor_pixel_offset_resolved(view, buffer, Some(&snapshot)).y,
+            600.0
+        );
+
+        view.upgrade_scroll_anchor_to_piece(buffer);
+
+        assert!(matches!(view.scroll.anchor(), ScrollAnchor::Piece { .. }));
+        assert_eq!(top_row_text(view, buffer), "line 060");
+    }
+
+    #[test]
+    fn piece_anchor_keeps_top_content_after_insert_above_viewport() {
+        let text = numbered_lines(120);
+        let mut buffer = BufferState::new("notes.txt".to_owned(), text.clone(), None);
+        let snapshot = snapshot_for(&text, f32::INFINITY);
+        let mut view = EditorViewState::new(buffer.id, false);
+
+        set_piece_scroll_anchor_at_row(&mut view, &mut buffer, snapshot, 60);
+        buffer
+            .document_mut()
+            .insert_direct(0, "new 000\nnew 001\nnew 002\nnew 003\nnew 004\n");
+        rebuild_view_snapshot(&mut view, &buffer.text(), f32::INFINITY);
+
+        assert_eq!(top_row_text(&view, &buffer), "line 060");
+    }
+
+    #[test]
+    fn piece_anchor_keeps_top_content_after_delete_above_viewport() {
+        let text = numbered_lines(120);
+        let mut buffer = BufferState::new("notes.txt".to_owned(), text.clone(), None);
+        let snapshot = snapshot_for(&text, f32::INFINITY);
+        let mut view = EditorViewState::new(buffer.id, false);
+        let delete_start = char_offset_for_line(&text, 10);
+        let delete_end = char_offset_for_line(&text, 20);
+
+        set_piece_scroll_anchor_at_row(&mut view, &mut buffer, snapshot, 60);
+        buffer
+            .document_mut()
+            .delete_char_range_direct(delete_start..delete_end);
+        rebuild_view_snapshot(&mut view, &buffer.text(), f32::INFINITY);
+
+        assert_eq!(top_row_text(&view, &buffer), "line 060");
+    }
+
+    #[test]
+    fn top_of_viewport_insert_uses_left_bias_semantics() {
+        let text = numbered_lines(40);
+        let mut buffer = BufferState::new("notes.txt".to_owned(), text.clone(), None);
+        let snapshot = snapshot_for(&text, f32::INFINITY);
+        let mut view = EditorViewState::new(buffer.id, false);
+        let insert_at = char_offset_for_line(&text, 20);
+
+        set_piece_scroll_anchor_at_row(&mut view, &mut buffer, snapshot, 20);
+        buffer
+            .document_mut()
+            .insert_direct(insert_at, "inserted at top\n");
+        rebuild_view_snapshot(&mut view, &buffer.text(), f32::INFINITY);
+
+        assert_eq!(top_row_text(&view, &buffer), "inserted at top");
+    }
+
+    #[test]
+    fn piece_anchor_keeps_wrapped_top_row_after_insert_above_viewport() {
+        let line = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\n";
+        let text = line.repeat(40);
+        let mut buffer = BufferState::new("wrapped.txt".to_owned(), text.clone(), None);
+        let snapshot = snapshot_for(&text, 120.0);
+        let mut view = EditorViewState::new(buffer.id, false);
+        let anchored_row = 18;
+        let original_top = snapshot
+            .row_char_range(DisplayRow(anchored_row))
+            .map(|range| {
+                text.chars()
+                    .skip(range.start as usize)
+                    .take((range.end - range.start) as usize)
+                    .collect::<String>()
+            })
+            .expect("row text")
+            .trim_end_matches('\n')
+            .to_owned();
+
+        set_piece_scroll_anchor_at_row(&mut view, &mut buffer, snapshot, anchored_row);
+        buffer
+            .document_mut()
+            .insert_direct(0, "short inserted line\nshort inserted line\n");
+        rebuild_view_snapshot(&mut view, &buffer.text(), 120.0);
+
+        assert_eq!(top_row_text(&view, &buffer), original_top);
+    }
+
+    #[test]
+    fn split_views_keep_independent_piece_anchors_with_different_wrap_widths() {
+        let line = "one two three four five six seven eight nine ten eleven twelve\n";
+        let text = line.repeat(80);
+        let mut buffer = BufferState::new("split.txt".to_owned(), text.clone(), None);
+        let narrow_snapshot = snapshot_for(&text, 110.0);
+        let wide_snapshot = snapshot_for(&text, 320.0);
+        let mut narrow_view = EditorViewState::new(buffer.id, false);
+        let mut wide_view = EditorViewState::new(buffer.id, false);
+        let narrow_row = 24;
+        let wide_row = 18;
+        let narrow_top = narrow_snapshot
+            .row_char_range(DisplayRow(narrow_row))
+            .map(|range| {
+                text.chars()
+                    .skip(range.start as usize)
+                    .take((range.end - range.start) as usize)
+                    .collect::<String>()
+            })
+            .expect("narrow row text")
+            .trim_end_matches('\n')
+            .to_owned();
+        let wide_top = wide_snapshot
+            .row_char_range(DisplayRow(wide_row))
+            .map(|range| {
+                text.chars()
+                    .skip(range.start as usize)
+                    .take((range.end - range.start) as usize)
+                    .collect::<String>()
+            })
+            .expect("wide row text")
+            .trim_end_matches('\n')
+            .to_owned();
+
+        set_piece_scroll_anchor_at_row(&mut narrow_view, &mut buffer, narrow_snapshot, narrow_row);
+        set_piece_scroll_anchor_at_row(&mut wide_view, &mut buffer, wide_snapshot, wide_row);
+        buffer
+            .document_mut()
+            .insert_direct(0, "preface\npreface\npreface\n");
+        rebuild_view_snapshot(&mut narrow_view, &buffer.text(), 110.0);
+        rebuild_view_snapshot(&mut wide_view, &buffer.text(), 320.0);
+
+        assert_eq!(top_row_text(&narrow_view, &buffer), narrow_top);
+        assert_eq!(top_row_text(&wide_view, &buffer), wide_top);
+    }
+
+    #[test]
+    fn near_eof_piece_anchor_remains_resolvable_after_delete_above_viewport() {
+        let text = numbered_lines(90);
+        let mut buffer = BufferState::new("tail.txt".to_owned(), text.clone(), None);
+        let snapshot = snapshot_for(&text, f32::INFINITY);
+        let mut view = EditorViewState::new(buffer.id, false);
+        let delete_start = char_offset_for_line(&text, 5);
+        let delete_end = char_offset_for_line(&text, 25);
+
+        set_piece_scroll_anchor_at_row(&mut view, &mut buffer, snapshot, 88);
+        buffer
+            .document_mut()
+            .delete_char_range_direct(delete_start..delete_end);
+        rebuild_view_snapshot(&mut view, &buffer.text(), f32::INFINITY);
+
+        assert_eq!(top_row_text(&view, &buffer), "line 088");
     }
 
     #[test]
@@ -850,7 +1149,7 @@ mod tests {
                 egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(200.0, 120.0)),
                 egui::pos2(100.0, 150.0),
             ),
-            egui::vec2(0.0, 18.0)
+            egui::vec2(0.0, 10.0)
         );
     }
 

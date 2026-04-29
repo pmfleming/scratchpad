@@ -37,6 +37,9 @@
         mapLayout: 'folder',
         mapMetric: 'total_score',
         focusMode: false,
+        overviewRiskMode: 'top',
+        overviewRiskFilter: 'all',
+        expandedQualityKey: null,
     };
 
     const formatNumber = new Intl.NumberFormat(undefined, {
@@ -58,6 +61,14 @@
         completion: "",
         first_response: "8 6",
     };
+
+    const riskMetricLabels = [
+        ["maintainability_risk", "Maintainability"],
+        ["change_risk", "Change"],
+        ["performance_risk", "Performance"],
+        ["correctness_risk", "Correctness"],
+        ["architectural_risk", "Architecture"],
+    ];
 
     function byId(id) {
         return document.getElementById(id);
@@ -144,6 +155,10 @@
 
     function qualityScore(item) {
         return Number(item.quality_score ?? item.score ?? 0);
+    }
+
+    function normalizePath(value) {
+        return String(value || "").replaceAll("\\", "/").toLowerCase();
     }
 
     function renderClones() {
@@ -774,9 +789,7 @@
             metricCard("Near ceilings", summary.near_failure_ceilings ?? "-"),
         ]);
 
-        byId("speed-report-triage").innerHTML = triage.length
-            ? `<div class="detail-list">${triage.map((item, index) => `<div class="detail-row"><strong>${index + 1}. ${escapeHtml(item.scenario_label)}</strong>${escapeHtml(item.recommended_action)}</div><div class="muted" style="margin-bottom: 12px;">${escapeHtml(item.family)} • ${escapeHtml(item.suspected_limiting_resource)} • ${escapeHtml(item.reason)}</div>`).join("")}</div>`
-            : '<p class="muted">No coordinated triage data loaded.</p>';
+        byId("speed-report-triage").innerHTML = renderSpeedTriageVisual(triage, payload.triage_summary || {});
 
         renderTable(
             "speed-report-search",
@@ -826,6 +839,84 @@
         byId("speed-report-methodology").innerHTML = methodology.length
             ? `<ul class="chart-insights">${methodology.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
             : '<p class="muted">No methodology notes loaded.</p>';
+    }
+
+    function renderSpeedTriageVisual(triage, triageSummary = {}) {
+        if (!triage.length) {
+            return '<p class="muted">No coordinated triage data loaded.</p>';
+        }
+        const groups = new Map();
+        triage.forEach((item) => {
+            const key = [
+                item.scenario_label || item.scenario_id || "Unknown scenario",
+                item.family || "unmapped",
+                item.suspected_limiting_resource || "resource",
+                item.recommended_action || "",
+            ].join("|");
+            const group = groups.get(key) || {
+                label: item.scenario_label || item.scenario_id || "Unknown scenario",
+                family: item.family || "unmapped",
+                resource: item.suspected_limiting_resource || "resource",
+                action: item.recommended_action || "",
+                count: 0,
+                rankScore: 0,
+                reasons: new Set(),
+            };
+            group.count += 1;
+            group.rankScore = Math.max(group.rankScore, Number(item.rank_score || 0));
+            pillValues(item.reason).forEach((reason) => group.reasons.add(reason));
+            groups.set(key, group);
+        });
+        const cards = [...groups.values()]
+            .sort((a, b) => b.rankScore - a.rankScore)
+            .slice(0, 5);
+        const maxScore = cards[0]?.rankScore || 1;
+        const total = (triageSummary.critical || 0) + (triageSummary.watch || 0) + (triageSummary.ok || 0);
+        const criticalPct = total ? ((triageSummary.critical || 0) / total) * 100 : 0;
+        const watchPct = total ? ((triageSummary.watch || 0) / total) * 100 : 0;
+        const okPct = Math.max(0, 100 - criticalPct - watchPct);
+        return `<div class="triage-snapshot">
+            <div class="triage-severity" aria-label="Triage severity distribution">
+                <div class="triage-severity__track">
+                    <span class="triage-severity__critical" style="width:${criticalPct}%"></span>
+                    <span class="triage-severity__watch" style="width:${watchPct}%"></span>
+                    <span class="triage-severity__ok" style="width:${okPct}%"></span>
+                </div>
+                <div class="triage-severity__legend">
+                    <span><strong>${formatNumber.format(triageSummary.critical || 0)}</strong> critical</span>
+                    <span><strong>${formatNumber.format(triageSummary.watch || 0)}</strong> watch</span>
+                    <span><strong>${formatNumber.format(triageSummary.ok || 0)}</strong> ok</span>
+                </div>
+            </div>
+            <div class="triage-visual">
+                ${cards.map((item, index) => renderSpeedTriageCard(item, index, maxScore)).join("")}
+            </div>
+        </div>`;
+    }
+
+    function renderSpeedTriageCard(item, index, maxScore) {
+        const scorePct = Math.max(6, Math.min(100, (item.rankScore / maxScore) * 100));
+        const reasons = [...item.reasons].slice(0, 4);
+        const profile = (item.action.match(/Inspect\s+([^\s]+)_profile/i) || [])[1];
+        return `<article class="triage-card">
+            <div class="triage-card__rank">${index + 1}</div>
+            <div class="triage-card__body">
+                <div class="triage-card__header">
+                    <h3>${escapeHtml(item.label)}</h3>
+                    <strong>${formatNumber.format(item.rankScore)}</strong>
+                </div>
+                <div class="triage-card__bar"><span style="width:${scorePct}%"></span></div>
+                <div class="triage-card__chips">
+                    <span class="pill">${escapeHtml(item.family)}</span>
+                    <span class="pill">${escapeHtml(item.resource)}</span>
+                    ${item.count > 1 ? `<span class="pill">${item.count} scale points</span>` : ""}
+                    ${profile ? `<span class="pill">${escapeHtml(profile)}</span>` : ""}
+                </div>
+                <div class="triage-card__signals">
+                    ${reasons.map((reason) => `<span>${escapeHtml(reason)}</span>`).join("")}
+                </div>
+            </div>
+        </article>`;
     }
 
     function renderCapacityReport() {
@@ -1232,8 +1323,41 @@
 
     function moduleScoreFor(module, metric) {
         const m = module.metrics || {};
-        if (metric === "total_score") return Number(m.total_score || 0);
-        return Number(m[metric] || 0);
+        if (metric === "total_score") return Number(module.total_score ?? m.total_score ?? 0);
+        return Number(module[metric] ?? m[metric] ?? 0);
+    }
+
+    function moduleSloc(module) {
+        const m = module.metrics || {};
+        return Number(module.sloc ?? module.size ?? m.sloc ?? m.size ?? 1);
+    }
+
+    function moduleSignals(module) {
+        const m = module.metrics || {};
+        if (Array.isArray(module.signals)) return module.signals;
+        if (Array.isArray(m.signals)) return m.signals;
+        return [];
+    }
+
+    function moduleRiskDrivers(module) {
+        return riskMetricLabels
+            .map(([key, label]) => ({ label, score: moduleScoreFor(module, key) }))
+            .filter((item) => item.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 3);
+    }
+
+    function riskTooltip(module, score) {
+        const signals = moduleSignals(module).slice(0, 3);
+        const drivers = moduleRiskDrivers(module)
+            .map((item) => `${item.label} ${formatNumber.format(item.score)}`);
+        return [
+            module.id || module.name || "Unknown module",
+            `Total risk ${formatNumber.format(score)}`,
+            drivers.length ? `Top drivers: ${drivers.join(", ")}` : "",
+            signals.length ? `Signals: ${signals.join("; ")}` : "",
+            `SLOC ${formatNumber.format(moduleSloc(module))}`,
+        ].filter(Boolean).join("\n");
     }
 
     function colorForScore(score, max) {
@@ -1269,17 +1393,35 @@
             target.innerHTML = `<div class="risk-treemap__empty">No modules to display.</div>`;
             return;
         }
-        const ranked = modules
+        const filtered = modules
             .map((m) => ({ module: m, score: moduleScoreFor(m, "total_score") }))
-            .sort((a, b) => b.score - a.score)
-            .slice(0, 60);
+            .filter(({ module, score }) => {
+                if (state.overviewRiskFilter === "high") return score >= 600;
+                if (state.overviewRiskFilter === "with-signals") return moduleSignals(module).length > 0;
+                return true;
+            })
+            .sort((a, b) => b.score - a.score);
+        const ranked = state.overviewRiskMode === "top" ? filtered.slice(0, 24) : filtered;
+        if (!ranked.length) {
+            target.innerHTML = `<div class="risk-treemap__empty">No modules match the selected risk filters.</div>`;
+            return;
+        }
         const maxScore = ranked[0]?.score || 1;
-        target.innerHTML = ranked.map(({ module, score }) => {
-            const sloc = Number(module.metrics?.sloc || module.metrics?.size || 1);
+        const scopeLabel = state.overviewRiskMode === "top" ? "Top risk" : "All modules";
+        const filterLabel = state.overviewRiskFilter === "high" ? "high risk only"
+            : state.overviewRiskFilter === "with-signals" ? "with signals"
+                : "all risk levels";
+        target.innerHTML = `<div class="risk-treemap__meta">${escapeHtml(scopeLabel)}: showing ${ranked.length} of ${modules.length} modules, ${escapeHtml(filterLabel)}. Highest score ${formatNumber.format(maxScore)}.</div>` + ranked.map(({ module, score }) => {
+            const sloc = moduleSloc(module);
             const widthBasis = Math.max(80, Math.min(260, 60 + Math.sqrt(sloc) * 4));
             const color = colorForScore(score, maxScore);
             const label = (module.name || module.id || "?").split(/[\\/]/).slice(-2).join("/");
-            return `<div class="risk-treemap__cell" style="flex: 1 1 ${widthBasis}px; background:${color};" title="${escapeHtml(module.id)} — score ${formatNumber.format(score)}" data-module-id="${escapeHtml(module.id)}">${escapeHtml(label)}</div>`;
+            const drivers = moduleRiskDrivers(module).map((item) => item.label).join(", ");
+            return `<div class="risk-treemap__cell" style="flex: 1 1 ${widthBasis}px; background:${color};" title="${escapeHtml(riskTooltip(module, score))}" data-module-id="${escapeHtml(module.id)}">
+                <span class="risk-treemap__label">${escapeHtml(label)}</span>
+                <span class="risk-treemap__score">${formatNumber.format(score)}</span>
+                ${drivers ? `<span class="risk-treemap__drivers">${escapeHtml(drivers)}</span>` : ""}
+            </div>`;
         }).join("");
         target.querySelectorAll(".risk-treemap__cell").forEach((el) => {
             el.addEventListener("click", () => {
@@ -1436,21 +1578,55 @@
         const capacity = state.capacityReport?.scenarios || [];
         const resources = state.resourceProfiles?.scenarios || [];
         const flamegraphs = state.flamegraphs || [];
-        byId("performance-scenarios").innerHTML = scenarios.map((scenario) => {
+        const scenarioStats = scenarios.map((scenario) => {
             const familySet = new Set(scenario.families);
             const speedCount = slowspots.filter((item) => familySet.has(item.workload_family)).length;
             const capacityCount = capacity.filter((item) => familySet.has(item.workload_family)).length;
             const resourceCount = resources.filter((item) => familySet.has(item.workload_family)).length;
             const profileMatches = flamegraphs.filter((item) => scenario.profiles.includes(item.id) || (item.workload_families || []).some((family) => familySet.has(family)));
+            return {
+                ...scenario,
+                speedCount,
+                capacityCount,
+                resourceCount,
+                profileAvailable: profileMatches.filter((item) => item.available).length,
+                profileTotal: profileMatches.length,
+            };
+        });
+        const maxEvidence = Math.max(1, ...scenarioStats.flatMap((scenario) => [
+            scenario.speedCount,
+            scenario.capacityCount,
+            scenario.resourceCount,
+        ]));
+        byId("performance-scenarios").innerHTML = scenarioStats.map((scenario) => {
+            const rows = [
+                { label: "Speed", value: scenario.speedCount, cls: "speed" },
+                { label: "Capacity", value: scenario.capacityCount, cls: "capacity" },
+                { label: "Resource", value: scenario.resourceCount, cls: "resource" },
+            ];
+            const profilePct = scenario.profileTotal ? (scenario.profileAvailable / scenario.profileTotal) * 100 : 0;
             return `<article class="scenario-card">
                 <h3>${escapeHtml(scenario.title)}</h3>
-                <p>${escapeHtml(scenario.description)}</p>
-                <div class="scenario-evidence">
-                    <span class="pill">${speedCount} speed</span>
-                    <span class="pill">${capacityCount} capacity</span>
-                    <span class="pill">${resourceCount} resource</span>
-                    <span class="pill">${profileMatches.filter((item) => item.available).length}/${profileMatches.length} flamegraphs</span>
-                    ${renderPills(scenario.tests || [])}
+                <div class="scenario-graphs">
+                    <div class="scenario-bars">
+                        ${rows.map((row) => `<div class="scenario-bars__row">
+                            <span>${escapeHtml(row.label)}</span>
+                            <div class="scenario-bars__track">
+                                <span class="scenario-bars__fill scenario-bars__fill--${row.cls}" style="width:${Math.max(row.value ? 4 : 0, (row.value / maxEvidence) * 100)}%"></span>
+                            </div>
+                            <strong>${formatNumber.format(row.value)}</strong>
+                        </div>`).join("")}
+                    </div>
+                    <div class="scenario-coverage">
+                        <div class="scenario-coverage__top">
+                            <span>Flamegraphs</span>
+                            <strong>${formatNumber.format(scenario.profileAvailable)}/${formatNumber.format(scenario.profileTotal)}</strong>
+                        </div>
+                        <div class="scenario-coverage__track">
+                            <span style="width:${profilePct}%"></span>
+                        </div>
+                        ${scenario.tests?.length ? `<div class="scenario-tests">${renderPills(scenario.tests)}</div>` : ""}
+                    </div>
                 </div>
             </article>`;
         }).join("");
@@ -2317,21 +2493,33 @@
             else good++;
             pillValues(h.signals).forEach((sig) => signalCounts.set(sig, (signalCounts.get(sig) || 0) + 1));
         });
-        const max = Math.max(good, warn, bad, 1);
+        const total = good + warn + bad;
         const sigSorted = [...signalCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
         const sigMax = sigSorted.length ? sigSorted[0][1] : 1;
-        const histogram = `
-            <div class="quality-histogram">
-                ${["good", "warn", "bad"].map((cls, i) => {
-            const v = [good, warn, bad][i];
-            const label = ["< 300", "300–599", "≥ 600"][i];
-            const heightPct = (v / max) * 100;
-            return `<div class="quality-histogram__bucket">
-                        <div class="quality-histogram__bar quality-histogram__bar--${cls}" style="height:${heightPct}%"></div>
-                        <strong>${v}</strong>
-                        <span>${escapeHtml(label)}</span>
-                    </div>`;
-        }).join("")}
+        const goodPct = total ? (good / total) * 100 : 0;
+        const warnPct = total ? (warn / total) * 100 : 0;
+        const warnEnd = goodPct + warnPct;
+        const buckets = [
+            { cls: "good", label: "< 300", value: good },
+            { cls: "warn", label: "300-599", value: warn },
+            { cls: "bad", label: ">= 600", value: bad },
+        ];
+        const pie = `
+            <div class="quality-pie-card">
+                <div class="quality-pie" role="img" aria-label="Quality risk score buckets: ${good} below 300, ${warn} from 300 to 599, ${bad} at or above 600"
+                    style="background: conic-gradient(var(--good) 0 ${goodPct}%, var(--warn) ${goodPct}% ${warnEnd}%, var(--bad) ${warnEnd}% 100%);">
+                </div>
+                <div class="quality-pie__summary">
+                    <strong>${formatNumber.format(total)}</strong>
+                    <span>items</span>
+                </div>
+                <div class="quality-pie__legend">
+                    ${buckets.map((bucket) => `<div class="quality-pie__legend-item">
+                        <span class="quality-pie__swatch quality-pie__swatch--${bucket.cls}"></span>
+                        <span>${escapeHtml(bucket.label)}</span>
+                        <strong>${formatNumber.format(bucket.value)}</strong>
+                    </div>`).join("")}
+                </div>
             </div>`;
         const signals = sigSorted.length
             ? `<div class="signal-bars">${sigSorted.map(([sig, count]) => `
@@ -2341,7 +2529,7 @@
                     <span class="signal-bars__count">${count}</span>
                 </div>`).join("")}</div>`
             : `<p class="muted">No signal data.</p>`;
-        target.innerHTML = histogram + signals;
+        target.innerHTML = pie + signals;
     }
 
     function renderQualityFeed() {
@@ -2349,21 +2537,27 @@
         if (!target) return;
         const filter = (byId("quality-feed-filter")?.value || "").toLowerCase();
         const hotspots = (state.hotspots || []).map((h) => ({
+            key: `hotspot:${h.name}:${h.start_line || ""}`,
             kind: "hotspot",
             name: h.name,
             score: qualityScore(h),
             signals: h.signals || [],
             details: `${formatNumber.format(h.sloc || 0)} SLOC`,
+            raw: h,
+            searchText: [h.kind, h.name, h.signals, h.sloc, qualityScore(h)].join(" "),
         }));
         const clones = (state.clones || []).map((c) => ({
+            key: `clone:${c.hash || c.group_hash || c.name || ""}`,
             kind: "clone",
             name: `clone ${c.hash?.substring(0, 8) || ""} (${c.instance_count || c.instances?.length || 0}x)`,
             score: c.score || 0,
             signals: c.signals || [],
             details: `${c.token_count || 0} tokens`,
+            raw: c,
+            searchText: [c.engine, c.hash, c.score, c.token_count, c.signals, ...(c.instances || []).map((inst) => inst.file_path)].join(" "),
         }));
         const merged = [...hotspots, ...clones]
-            .filter((it) => !filter || JSON.stringify(it).toLowerCase().includes(filter))
+            .filter((it) => !filter || it.searchText.toLowerCase().includes(filter))
             .sort((a, b) => b.score - a.score)
             .slice(0, 60);
         if (!merged.length) {
@@ -2373,12 +2567,145 @@
         target.innerHTML = merged.map((it) => {
             const cls = riskClass(it.score, 300, 600);
             const tail = (it.name || "").split(/[\\/]/).pop();
-            return `<div class="quality-feed__row">
+            const isExpanded = state.expandedQualityKey === it.key;
+            return `<button type="button" class="quality-feed__row ${isExpanded ? "is-expanded" : ""}" data-quality-key="${escapeHtml(it.key)}" aria-expanded="${isExpanded ? "true" : "false"}">
                 <span class="pill">${escapeHtml(it.kind)}</span>
-                <span class="quality-feed__name"><code>${escapeHtml(tail)}</code><div class="muted">${escapeHtml(it.details)}</div></span>
+                <span class="quality-feed__name"><code>${escapeHtml(tail)}</code><span class="muted quality-feed__detail">${escapeHtml(it.details)}</span></span>
                 <span class="${cls}">${formatNumber.format(it.score)}</span>
-            </div>`;
+            </button>
+            ${isExpanded ? renderQualityFeedDetail(it) : ""}`;
         }).join("");
+        target.querySelectorAll("[data-quality-key]").forEach((button) => {
+            button.addEventListener("click", () => {
+                state.expandedQualityKey = state.expandedQualityKey === button.dataset.qualityKey ? null : button.dataset.qualityKey;
+                renderQualityFeed();
+            });
+        });
+    }
+
+    function renderMetricGrid(metrics) {
+        return `<div class="quality-detail__metrics">${metrics.map(({ label, value, cls }) => `
+            <div class="quality-detail__metric">
+                <span>${escapeHtml(label)}</span>
+                <strong class="${cls || ""}">${value}</strong>
+            </div>`).join("")}</div>`;
+    }
+
+    function cloneTouchesFile(clone, fileName) {
+        const needle = normalizePath(fileName);
+        return (clone.instances || []).some((inst) => normalizePath(inst.file_path) === needle);
+    }
+
+    function hotspotTouchesClone(hotspot, clone) {
+        const files = new Set((clone.instances || []).map((inst) => normalizePath(inst.file_path)));
+        return files.has(normalizePath(hotspot.name));
+    }
+
+    function renderQualityFeedDetail(item) {
+        if (item.kind === "clone") {
+            const clone = item.raw || {};
+            const relatedHotspots = (state.hotspots || [])
+                .filter((hotspot) => hotspotTouchesClone(hotspot, clone))
+                .sort((a, b) => qualityScore(b) - qualityScore(a))
+                .slice(0, 8);
+            return `<div class="quality-detail">
+                ${renderCloneDetail(clone)}
+                <div class="quality-detail__section">
+                    <h4>Related quality metrics</h4>
+                    ${relatedHotspots.length ? relatedHotspots.map((hotspot) => renderHotspotDetail(hotspot, { compact: true })).join("") : `<p class="muted">No matching quality hotspot records.</p>`}
+                </div>
+            </div>`;
+        }
+
+        const hotspot = item.raw || {};
+        const matchingClones = (state.clones || [])
+            .filter((clone) => cloneTouchesFile(clone, hotspot.name))
+            .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
+            .slice(0, 8);
+        return `<div class="quality-detail">
+            ${renderHotspotDetail(hotspot)}
+            <div class="quality-detail__section">
+                <h4>Clone metrics for this file</h4>
+                ${matchingClones.length ? matchingClones.map((clone) => renderCloneDetail(clone, { compact: true })).join("") : `<p class="muted">No clone groups found for this file.</p>`}
+            </div>
+        </div>`;
+    }
+
+    function renderHotspotDetail(hotspot, options = {}) {
+        const score = qualityScore(hotspot);
+        const metrics = [
+            { label: "Quality", value: formatNumber.format(score), cls: riskClass(score, 300, 600) },
+            { label: "Cog", value: formatNumber.format(hotspot.cognitive || 0) },
+            { label: "Cyc", value: formatNumber.format(hotspot.cyclomatic || 0) },
+            { label: "MI", value: formatNumber.format(hotspot.mi || 0) },
+            { label: "Halstead Effort", value: formatNumber.format(hotspot.effort || 0) },
+            { label: "SLOC", value: formatNumber.format(hotspot.sloc || 0) },
+            { label: "Start Line", value: escapeHtml(hotspot.start_line || "-") },
+        ];
+        return `<div class="quality-detail__section ${options.compact ? "quality-detail__section--compact" : ""}">
+            <h4>${escapeHtml(hotspot.name || "Quality metrics")}</h4>
+            ${renderMetricGrid(metrics)}
+            <div class="quality-detail__signals">${renderPills(hotspot.signals)}</div>
+        </div>`;
+    }
+
+    function renderCloneDetail(clone, options = {}) {
+        const hash = clone.hash || clone.group_hash || "";
+        const instances = clone.instances || [];
+        const fileCount = clone.file_count ?? new Set(instances.map((inst) => normalizePath(inst.file_path))).size;
+        const score = Number(clone.score || 0);
+        const metrics = [
+            { label: "Engine", value: escapeHtml(clone.engine || "token") },
+            { label: "Group Hash", value: `<code>${escapeHtml(hash.substring(0, options.compact ? 8 : 16) || "-")}</code>` },
+            { label: "Instances", value: formatNumber.format(clone.instance_count || instances.length || 0) },
+            { label: "Files", value: formatNumber.format(fileCount) },
+            { label: "Score", value: formatNumber.format(score), cls: riskClass(score, 20, 40) },
+            { label: "Token Count", value: formatNumber.format(clone.token_count || 0) },
+            { label: "Max Line Span", value: formatNumber.format(clone.max_line_span || 0) },
+        ];
+        const locations = instances.length
+            ? `<div class="quality-detail__locations">${instances.slice(0, options.compact ? 4 : 12).map((inst) => `
+                <code>${escapeHtml(inst.file_path)}:${escapeHtml(inst.start_line)}-${escapeHtml(inst.end_line)}</code>`).join("")}</div>`
+            : `<p class="muted">No clone locations recorded.</p>`;
+        return `<div class="quality-detail__section ${options.compact ? "quality-detail__section--compact" : ""}">
+            <h4>${escapeHtml(options.compact ? `Clone ${hash.substring(0, 8)}` : "Clone metrics")}</h4>
+            ${renderMetricGrid(metrics)}
+            <div class="quality-detail__signals">${renderPills(clone.signals)}</div>
+            ${locations}
+        </div>`;
+    }
+
+    function titleCaseMetricName(value) {
+        return String(value || "")
+            .replace(/^search_/, "")
+            .replaceAll("_", " ")
+            .replace(/\b\w/g, (letter) => letter.toUpperCase());
+    }
+
+    function budgetParameterLabel(item) {
+        if (item.parameter_label) return item.parameter_label;
+        const rawValue = String(item.name || "").split("/").pop();
+        const numericValue = Number(rawValue);
+        const key = item.benchmark_key || item.name || "";
+        if (!rawValue || rawValue === String(item.name || "")) return "";
+        if (Number.isFinite(numericValue)) {
+            if (key.includes("file_size") || key.includes("bytes")) return formatBytes(numericValue);
+            if (key.includes("aggregate_size")) return `${formatNumber.format(numericValue)} tabs`;
+            if (key.includes("tab_count")) return `${formatNumber.format(numericValue)} tabs`;
+            if (key.includes("split")) return `${formatNumber.format(numericValue)} splits`;
+        }
+        return rawValue;
+    }
+
+    function budgetLabelParts(item) {
+        const key = item.benchmark_key || String(item.name || "").split("/")[0];
+        const title = item.scenario_label || titleCaseMetricName(key);
+        const details = [
+            budgetParameterLabel(item),
+            item.workload_family || item.mode,
+            item.latency_kind,
+        ].filter(Boolean);
+        return { title, subtitle: [...new Set(details)].join(" - ") };
     }
 
     function renderBudgetBars(targetId, items) {
@@ -2395,6 +2722,7 @@
                 if (!budget) return null;
                 return {
                     label: it.scenario_label || it.name,
+                    labelParts: budgetLabelParts(it),
                     meanMs,
                     budget,
                     ratio: meanMs / budget,
@@ -2413,9 +2741,11 @@
             const thresholdPct = (1 / maxRatio) * 100;
             const cls = r.ratio > 1 ? "bad" : r.ratio > 0.85 ? "warn" : "good";
             const fillClass = cls === "good" ? "" : `budget-bars__fill--${cls}`;
-            const tail = (r.label || "").split(/[\\/]/).pop() || r.label;
             return `<div class="budget-bars__row" title="${escapeHtml(r.label)}">
-                <span class="budget-bars__label"><code>${escapeHtml(tail)}</code></span>
+                <span class="budget-bars__label">
+                    <strong>${escapeHtml(r.labelParts.title)}</strong>
+                    ${r.labelParts.subtitle ? `<span>${escapeHtml(r.labelParts.subtitle)}</span>` : ""}
+                </span>
                 <div class="budget-bars__track">
                     <div class="budget-bars__fill ${fillClass}" style="width:${Math.min(100, fillPct)}%"></div>
                     <div class="budget-bars__threshold" style="left:${thresholdPct}%"></div>
@@ -2507,6 +2837,21 @@
         state.mapZoom = Number(event.target.value);
         byId("map-zoom-value").textContent = `${Math.round(state.mapZoom * 100)}%`;
         renderMap();
+    });
+    document.querySelectorAll("[data-overview-risk-mode]").forEach((button) => {
+        button.addEventListener("click", () => {
+            state.overviewRiskMode = button.dataset.overviewRiskMode;
+            document.querySelectorAll("[data-overview-risk-mode]").forEach((item) => {
+                const active = item === button;
+                item.classList.toggle("is-active", active);
+                item.setAttribute("aria-pressed", active ? "true" : "false");
+            });
+            renderRiskTreemap();
+        });
+    });
+    byId("overview-risk-filter")?.addEventListener("change", (event) => {
+        state.overviewRiskFilter = event.target.value;
+        renderRiskTreemap();
     });
     document.querySelectorAll("[data-run]").forEach((button) => {
         button.addEventListener("click", () => triggerRun("/api/run/all", button));

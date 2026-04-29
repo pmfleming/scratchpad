@@ -65,6 +65,25 @@
                         <h2>Module risk map</h2>
                         <p>Modules sized and colored by total risk score. Click a cell to open it in the Map tab.</p>
                     </div>
+                    <div class="risk-map-controls" aria-label="Module risk map controls">
+                        <div class="segmented-control" role="group" aria-label="Module risk scope">
+                            <button type="button" class="is-active" data-overview-risk-mode="top" aria-pressed="true">Top risk</button>
+                            <button type="button" data-overview-risk-mode="all" aria-pressed="false">All modules</button>
+                        </div>
+                        <label class="risk-filter-control">
+                            <span>Filter</span>
+                            <select id="overview-risk-filter" class="filter-input">
+                                <option value="all">All risk levels</option>
+                                <option value="high">High only</option>
+                                <option value="with-signals">Has signals</option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
+                <div class="risk-map-legend" aria-label="Risk color legend">
+                    <span><i class="risk-map-legend__swatch risk-map-legend__swatch--good"></i>Lower</span>
+                    <span><i class="risk-map-legend__swatch risk-map-legend__swatch--warn"></i>Watch</span>
+                    <span><i class="risk-map-legend__swatch risk-map-legend__swatch--bad"></i>Highest</span>
                 </div>
                 <div id="overview-treemap" class="risk-treemap"></div>
             </div>
@@ -244,9 +263,8 @@
             <div class="panel-card">
                 <div class="panel-card__header">
                     <div>
-                        <h2>Speed and efficiency triage</h2>
-                        <p>Coordinated triage view across broad latency, search scaling, flamegraph coverage, and
-                            capacity ceilings.</p>
+                        <h2>Triage snapshot</h2>
+                        <p>Grouped performance risks by severity and scale.</p>
                     </div>
                     <button class="run-button" data-run-item="performance.report">Refresh</button>
                 </div>

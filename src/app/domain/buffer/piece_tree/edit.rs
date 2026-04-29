@@ -1,7 +1,7 @@
 use super::{
-    LeafAddress, Piece, PieceBuffer, PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLite,
-    build_chunked_pieces, build_root_from_pieces, byte_range_for_char_range,
-    pack_pieces_into_leaves, support::pack_leaves_into_nodes,
+    LeafAddress, LeafAnchor, LeafId, Piece, PieceBuffer, PieceTreeInternalNode, PieceTreeLeaf,
+    PieceTreeLite, build_chunked_pieces, byte_range_for_char_range, pack_pieces_into_leaves,
+    support::pack_leaves_into_nodes,
 };
 use std::ops::Range;
 
@@ -13,15 +13,10 @@ impl PieceTreeLite {
         }
         self.generation = self.generation.wrapping_add(1);
         let inserted_chars = text.chars().count();
-        self.anchors.shift_for_insert(offset_chars, inserted_chars);
 
         let add_start = self.add.len();
         self.add.push_str(text);
         let inserted_pieces = build_chunked_pieces(PieceBuffer::Add, add_start, text);
-        if self.len_chars() == 0 {
-            self.root = build_root_from_pieces(inserted_pieces);
-            return;
-        }
 
         let address = self.find_leaf_for_char_offset(offset_chars);
         let replacement = {
@@ -32,7 +27,9 @@ impl PieceTreeLite {
                 inserted_pieces,
             )
         };
-        let replacement_leaves = pack_pieces_into_leaves(replacement);
+        let mut replacement_leaves = pack_pieces_into_leaves(replacement);
+        let anchors = self.reposition_inserted_leaf_anchors(address, offset_chars, inserted_chars);
+        self.redistribute_anchors_into_leaves(&mut replacement_leaves, anchors);
         self.replace_leaf_span(address, address, replacement_leaves);
     }
 
@@ -47,14 +44,16 @@ impl PieceTreeLite {
             return;
         }
         self.generation = self.generation.wrapping_add(1);
-        self.anchors.shift_for_remove(range_chars.clone());
 
         let start_address = self.find_leaf_for_char_offset(range_chars.start);
         let end_probe = range_chars.end.saturating_sub(1);
         let end_address = self.find_leaf_for_char_offset(end_probe);
+        let anchors =
+            self.reposition_removed_span_anchors(start_address, end_address, &range_chars);
         let affected_pieces =
             self.retained_pieces_for_removal(start_address, end_address, range_chars);
-        let replacement_leaves = pack_pieces_into_leaves(affected_pieces);
+        let mut replacement_leaves = pack_pieces_into_leaves(affected_pieces);
+        self.redistribute_anchors_into_leaves(&mut replacement_leaves, anchors);
         self.replace_leaf_span(start_address, end_address, replacement_leaves);
     }
 
@@ -285,5 +284,117 @@ impl PieceTreeLite {
             .nodes
             .splice(window_start..window_end, rebalanced_nodes);
         self.root.recalculate();
+    }
+
+    fn reposition_inserted_leaf_anchors(
+        &self,
+        address: LeafAddress,
+        offset_chars: usize,
+        inserted_chars: usize,
+    ) -> Vec<LeafAnchor> {
+        let leaf = &self.root.nodes[address.node_index].leaves[address.leaf_index];
+        let insert_local_offset = offset_chars
+            .saturating_sub(address.leaf_start_char)
+            .min(leaf.metrics.chars);
+
+        leaf.anchors
+            .iter()
+            .filter_map(|anchor| {
+                let entry = self.anchors.entry(anchor.id)?;
+                let mut local_offset = anchor.local_offset;
+                if local_offset > insert_local_offset
+                    || (local_offset == insert_local_offset
+                        && matches!(entry.bias, super::AnchorBias::Right))
+                {
+                    local_offset += inserted_chars;
+                }
+                Some(LeafAnchor {
+                    id: anchor.id,
+                    local_offset,
+                })
+            })
+            .collect()
+    }
+
+    fn reposition_removed_span_anchors(
+        &self,
+        start_address: LeafAddress,
+        end_address: LeafAddress,
+        range_chars: &Range<usize>,
+    ) -> Vec<LeafAnchor> {
+        let removed_chars = range_chars.end - range_chars.start;
+        let mut anchors = Vec::new();
+
+        for node_index in start_address.node_index..=end_address.node_index {
+            let node = &self.root.nodes[node_index];
+            let leaf_start = if node_index == start_address.node_index {
+                start_address.leaf_index
+            } else {
+                0
+            };
+            let leaf_end = if node_index == end_address.node_index {
+                end_address.leaf_index
+            } else {
+                node.leaves.len() - 1
+            };
+
+            for leaf_index in leaf_start..=leaf_end {
+                let address = self.address_for_leaf_indices(node_index, leaf_index);
+                let leaf = &self.root.nodes[node_index].leaves[leaf_index];
+                for anchor in &leaf.anchors {
+                    let global_offset = address.leaf_start_char + anchor.local_offset;
+                    let new_global_offset = if global_offset <= range_chars.start {
+                        global_offset
+                    } else if global_offset >= range_chars.end {
+                        global_offset - removed_chars
+                    } else {
+                        range_chars.start
+                    };
+                    anchors.push(LeafAnchor {
+                        id: anchor.id,
+                        local_offset: new_global_offset
+                            .saturating_sub(start_address.leaf_start_char),
+                    });
+                }
+            }
+        }
+
+        anchors
+    }
+
+    fn redistribute_anchors_into_leaves(
+        &mut self,
+        leaves: &mut [PieceTreeLeaf],
+        anchors: Vec<LeafAnchor>,
+    ) {
+        if leaves.is_empty() {
+            return;
+        }
+
+        let mut leaf_starts = Vec::with_capacity(leaves.len());
+        let mut current_offset = 0usize;
+        for leaf in leaves.iter_mut() {
+            if leaf.leaf_id.is_unassigned() {
+                leaf.leaf_id = LeafId::next(&mut self.next_leaf_id);
+            }
+            leaf.anchors.clear();
+            leaf_starts.push(current_offset);
+            current_offset += leaf.metrics.chars;
+        }
+
+        for anchor in anchors {
+            let bounded_offset = anchor.local_offset.min(current_offset);
+            let leaf_index = leaf_starts
+                .partition_point(|start| *start <= bounded_offset)
+                .saturating_sub(1)
+                .min(leaves.len() - 1);
+            let leaf_local_offset = bounded_offset.saturating_sub(leaf_starts[leaf_index]);
+            let leaf_id = leaves[leaf_index].leaf_id;
+            self.anchors.set_leaf(anchor.id, leaf_id);
+            leaves[leaf_index].anchors.push(LeafAnchor {
+                id: anchor.id,
+                local_offset: leaf_local_offset.min(leaves[leaf_index].metrics.chars),
+            });
+        }
     }
 }

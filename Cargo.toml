@@ -37,6 +37,10 @@ harness = false
 name = "parallelism_baselines"
 harness = false
 
+[[bench]]
+name = "anchor_storage"
+harness = false
+
 [[bin]]
 name = "ast_hasher"
 path = "scripts/ast_hasher.rs"

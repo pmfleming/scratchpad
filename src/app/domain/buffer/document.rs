@@ -355,6 +355,7 @@ fn validate_replacements(
 #[cfg(test)]
 mod tests {
     use super::{TextDocument, TextReplacementError};
+    use crate::app::domain::AnchorBias;
     use crate::app::ui::editor_content::native_editor::CursorRange;
 
     fn selection(start: usize, end: usize) -> CursorRange {
@@ -461,7 +462,6 @@ mod tests {
             )
             .expect("replace current match");
         assert_eq!(document.extract_text(), "alpha BETA gamma");
-
         assert_eq!(document.undo_last_operation(), Some(previous_selection));
         assert_eq!(document.extract_text(), "alpha beta gamma");
         assert_eq!(document.operation_undo_depth(), 0);
@@ -471,6 +471,92 @@ mod tests {
         assert_eq!(document.extract_text(), "alpha BETA gamma");
         assert_eq!(document.operation_undo_depth(), 1);
         assert_eq!(document.operation_redo_depth(), 0);
+    }
+
+    #[test]
+    fn replacement_with_undo_and_redo_tracks_live_anchor_after_edit() {
+        let mut document = TextDocument::new("alpha beta gamma".to_owned());
+        let anchor = document
+            .piece_tree_mut()
+            .create_anchor(11, AnchorBias::Left);
+        let previous_selection = selection(6, 10);
+        let next_selection = selection(6, 11);
+
+        document
+            .replace_char_ranges_with_undo(
+                &[(6..10, "BETA!".to_owned())],
+                previous_selection,
+                next_selection,
+            )
+            .expect("replace current match");
+
+        assert_eq!(document.extract_text(), "alpha BETA! gamma");
+        assert_eq!(document.piece_tree().anchor_position(anchor), Some(12));
+
+        assert_eq!(document.undo_last_operation(), Some(previous_selection));
+        assert_eq!(document.extract_text(), "alpha beta gamma");
+        assert_eq!(document.piece_tree().anchor_position(anchor), Some(11));
+
+        assert_eq!(document.redo_last_operation(), Some(next_selection));
+        assert_eq!(document.extract_text(), "alpha BETA! gamma");
+        assert_eq!(document.piece_tree().anchor_position(anchor), Some(12));
+    }
+
+    #[test]
+    fn replacement_with_undo_and_redo_tracks_live_anchor_inside_edit() {
+        let mut document = TextDocument::new("alpha beta gamma".to_owned());
+        let left = document.piece_tree_mut().create_anchor(8, AnchorBias::Left);
+        let right = document
+            .piece_tree_mut()
+            .create_anchor(8, AnchorBias::Right);
+        let previous_selection = selection(6, 10);
+        let next_selection = selection(6, 11);
+
+        document
+            .replace_char_ranges_with_undo(
+                &[(6..10, "BETA!".to_owned())],
+                previous_selection,
+                next_selection,
+            )
+            .expect("replace current match");
+
+        assert_eq!(document.piece_tree().anchor_position(left), Some(6));
+        assert_eq!(document.piece_tree().anchor_position(right), Some(11));
+
+        document.undo_last_operation();
+        assert_eq!(document.piece_tree().anchor_position(left), Some(6));
+        assert_eq!(document.piece_tree().anchor_position(right), Some(10));
+
+        document.redo_last_operation();
+        assert_eq!(document.piece_tree().anchor_position(left), Some(6));
+        assert_eq!(document.piece_tree().anchor_position(right), Some(11));
+    }
+
+    #[test]
+    fn unicode_replacement_tracks_anchor_by_char_offset() {
+        let mut document = TextDocument::new("é🙂alpha\nζeta".to_owned());
+        let zeta_start = "é🙂alpha\n".chars().count();
+        let anchor = document
+            .piece_tree_mut()
+            .create_anchor(zeta_start, AnchorBias::Left);
+
+        document
+            .replace_char_ranges_with_undo(
+                &[(2..7, "βeta".to_owned())],
+                selection(2, 7),
+                selection(2, 6),
+            )
+            .expect("replace unicode text by char range");
+
+        assert_eq!(document.extract_text(), "é🙂βeta\nζeta");
+        assert_eq!(document.piece_tree().anchor_position(anchor), Some(7));
+
+        document.undo_last_operation();
+        assert_eq!(document.extract_text(), "é🙂alpha\nζeta");
+        assert_eq!(
+            document.piece_tree().anchor_position(anchor),
+            Some(zeta_start)
+        );
     }
 
     #[test]

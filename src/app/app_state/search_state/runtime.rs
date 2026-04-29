@@ -6,7 +6,11 @@ use super::worker::{SearchRequest, SearchResult, SearchTargetSnapshot, process_s
 use super::{
     ScratchpadApp, SearchFocusTarget, SearchFreshness, SearchMatch, SearchScope, SearchStatus,
 };
-use crate::app::domain::{BufferId, CursorRevealMode, SearchHighlightState, ViewId};
+use crate::app::domain::{
+    BufferId, CursorRevealMode, EditorViewState, SearchHighlightState, ViewId,
+};
+use crate::app::ui::scrolling::{ScrollAlign, ScrollIntent};
+use eframe::egui;
 use std::ops::Range;
 use std::sync::atomic::AtomicU64;
 
@@ -263,9 +267,19 @@ impl ScratchpadApp {
         let Some(search_range) = self.active_search_match_range() else {
             return;
         };
-        if let Some(view) = self.active_view_mut() {
-            view.pending_cursor_range = Some(cursor_range_from_char_range(search_range));
-            view.request_cursor_reveal(CursorRevealMode::Center);
+        let cursor_range = cursor_range_from_char_range(search_range.clone());
+        let active_tab_index = self.active_tab_index();
+        let Some(view_id) = self.active_tab().map(|tab| tab.active_view_id) else {
+            return;
+        };
+        if let Some((buffer, view)) = self.tabs_mut()[active_tab_index].buffer_and_view_mut(view_id)
+        {
+            view.set_pending_cursor_range_anchored(buffer, cursor_range);
+            if request_search_reveal_intent(view, &search_range) {
+                view.request_cursor_reveal(CursorRevealMode::KeepHorizontalVisible);
+            } else {
+                view.request_cursor_reveal(CursorRevealMode::Center);
+            }
         }
     }
 
@@ -330,8 +344,8 @@ impl ScratchpadApp {
         };
 
         for (view_id, highlights) in highlights {
-            if let Some(view) = tab.view_mut(view_id) {
-                view.search_highlights = highlights;
+            if let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) {
+                view.set_search_highlights_anchored(buffer, highlights);
             }
         }
     }
@@ -360,10 +374,39 @@ impl ScratchpadApp {
 
     pub(super) fn clear_search_highlights(&mut self) {
         for tab in self.tabs_mut() {
+            let mut anchors_to_release = Vec::new();
             for view in &mut tab.views {
-                view.search_highlights.ranges.clear();
-                view.search_highlights.active_range_index = None;
+                for anchor in view.clear_search_highlights_for_release() {
+                    anchors_to_release.push((view.buffer_id, anchor));
+                }
+            }
+            for (buffer_id, anchor) in anchors_to_release {
+                if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
+                    buffer
+                        .document_mut()
+                        .piece_tree_mut()
+                        .release_anchor(anchor);
+                }
             }
         }
     }
+}
+
+fn request_search_reveal_intent(view: &mut EditorViewState, search_range: &Range<usize>) -> bool {
+    let Some(snapshot) = view.latest_display_snapshot.as_ref() else {
+        return false;
+    };
+    let Some(y) = snapshot.pixel_y_for_char_offset(search_range.start as u32) else {
+        return false;
+    };
+    let row_height = snapshot
+        .row_height()
+        .max(view.scroll.metrics().row_height)
+        .max(1.0);
+    view.request_intent(ScrollIntent::Reveal {
+        rect: egui::Rect::from_min_size(egui::pos2(0.0, y), egui::vec2(1.0, row_height)),
+        align_y: Some(ScrollAlign::Center),
+        align_x: None,
+    });
+    true
 }

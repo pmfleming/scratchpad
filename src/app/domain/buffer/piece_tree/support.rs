@@ -43,6 +43,7 @@ fn build_root_from_leaves(mut leaves: Vec<PieceTreeLeaf>) -> PieceTreeRoot {
         metrics: PieceTreeMetrics::default(),
         node_start_chars: Vec::new(),
         node_start_newlines: Vec::new(),
+        anchor_count: 0,
     };
     root.recalculate();
     root
@@ -67,6 +68,7 @@ pub(super) fn pack_leaves_into_nodes(leaves: Vec<PieceTreeLeaf>) -> Vec<PieceTre
             metrics: PieceTreeMetrics::default(),
             leaf_start_chars: Vec::new(),
             leaf_start_newlines: Vec::new(),
+            anchor_count: 0,
         };
         node.recalculate();
         nodes.push(node);

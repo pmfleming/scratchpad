@@ -8,11 +8,10 @@
 //!   current `char_offset`, then converts that to a logical line / display
 //!   row via the active `DisplaySnapshot`.
 //! * `ScrollAnchor::Logical { logical_line, byte_in_line, display_row_offset }`
-//!   — the v1 fallback used when the renderer has not yet handed the
-//!   `ScrollManager` a piece-tree-backed anchor (e.g. unit tests, the
-//!   first frame before any document is loaded). Edits above the viewport
-//!   produce visible jumps under this fallback; that is acceptable for v1
-//!   per the locked design and called out in the plan.
+//!   — a bootstrapping/test fallback used before the renderer has handed the
+//!   `ScrollManager` a piece-tree-backed anchor, or from buffer-less tests.
+//!   Live editor paths should upgrade to `Piece` once a buffer and
+//!   `DisplaySnapshot` are available.
 //!
 //! `display_row_offset` is a fractional offset (0.0..1.0+) measured in
 //! display rows from the start of the wrapped block that contains this
@@ -28,8 +27,8 @@ pub enum ScrollAnchor {
         anchor: AnchorId,
         display_row_offset: f32,
     },
-    /// v1 fallback: logical line + intra-line byte offset. Used until a
-    /// piece-tree-backed anchor is supplied.
+    /// Bootstrapping/test fallback: logical line + intra-line byte offset.
+    /// Used until a piece-tree-backed anchor is supplied.
     Logical {
         logical_line: u32,
         byte_in_line: u32,

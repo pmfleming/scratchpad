@@ -245,6 +245,8 @@ impl FileController {
         loaded: crate::app::domain::BufferState,
         disk_state: Option<DiskFileState>,
     ) -> String {
+        let buffer_id = app.tabs()[index].active_buffer().id;
+        app.tabs_mut()[index].clear_view_state_for_buffer_replacement(buffer_id);
         let (buffer_name, deferred_refresh) = {
             let buffer = app.tabs_mut()[index].active_buffer_mut();
             buffer.replace_from_loaded_buffer(loaded);
