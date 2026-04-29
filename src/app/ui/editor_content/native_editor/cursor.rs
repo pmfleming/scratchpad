@@ -1,6 +1,7 @@
 use super::types::{CharCursor, CursorRange};
 use super::word_boundary;
 use crate::app::domain::buffer::PieceTreeLite;
+use crate::app::ui::scrolling::{DisplayMap, DisplayRow};
 use eframe::egui;
 
 fn is_wordwise_movement(modifiers: &egui::Modifiers) -> bool {
@@ -48,151 +49,164 @@ fn finalize_cursor_movement(
     CursorRange::one(new_primary)
 }
 
-fn move_by_page_rows(
-    galley: &egui::Galley,
-    cursor: egui::text::CCursor,
-    page_jump_rows: usize,
-    downward: bool,
-) -> egui::text::CCursor {
-    let mut cursor = cursor;
-    for _ in 0..page_jump_rows.max(1) {
-        cursor = if downward {
-            galley.cursor_down_one_row(&cursor, None).0
-        } else {
-            galley.cursor_up_one_row(&cursor, None).0
-        };
-    }
-    cursor
-}
-
-pub(super) fn apply_cursor_movement(
+pub(super) fn apply_cursor_movement_display_map(
     cursor: &CursorRange,
     key: egui::Key,
     modifiers: &egui::Modifiers,
-    galley: &egui::Galley,
+    display_map: &DisplayMap,
     page_jump_rows: usize,
     total_chars: usize,
     piece_tree: &PieceTreeLite,
 ) -> Option<CursorRange> {
-    let egui_cursor = galley.clamp_cursor(&cursor.primary.to_egui_ccursor());
-
+    let current = cursor.primary.index.min(total_chars);
     let new_primary = match key {
         egui::Key::ArrowLeft => {
             if is_wordwise_movement(modifiers) {
-                Some(egui::text::CCursor::new(
-                    word_boundary::find_word_boundary_left(piece_tree, cursor.primary.index),
-                ))
+                Some(CharCursor::new(word_boundary::find_word_boundary_left(
+                    piece_tree, current,
+                )))
             } else {
-                Some(galley.cursor_left_one_character(&egui_cursor))
+                Some(CharCursor::new(current.saturating_sub(1)))
             }
         }
         egui::Key::ArrowRight => {
             if is_wordwise_movement(modifiers) {
-                Some(egui::text::CCursor::new(
-                    word_boundary::find_word_boundary_right(piece_tree, cursor.primary.index),
-                ))
+                Some(CharCursor::new(word_boundary::find_word_boundary_right(
+                    piece_tree, current,
+                )))
             } else {
-                Some(galley.cursor_right_one_character(&egui_cursor))
+                Some(CharCursor::new((current + 1).min(total_chars)))
             }
         }
         egui::Key::ArrowUp => {
             if modifiers.command {
-                Some(galley.begin())
+                Some(CharCursor::new(0))
             } else {
-                Some(galley.cursor_up_one_row(&egui_cursor, None).0)
+                move_display_rows(display_map, current, -(1_i32))
             }
         }
         egui::Key::ArrowDown => {
             if modifiers.command {
-                Some(galley.end())
+                Some(CharCursor::new(total_chars))
             } else {
-                Some(galley.cursor_down_one_row(&egui_cursor, None).0)
+                move_display_rows(display_map, current, 1)
             }
         }
         egui::Key::Home => {
             if modifiers.command {
-                Some(galley.begin())
+                Some(CharCursor::new(0))
             } else {
-                Some(galley.cursor_begin_of_row(&egui_cursor))
+                row_for_char(display_map, current)
+                    .and_then(|row| display_map.row(row))
+                    .map(|row| CharCursor::new(row.char_range.start.min(total_chars)))
             }
         }
         egui::Key::End => {
             if modifiers.command {
-                Some(galley.end())
+                Some(CharCursor::new(total_chars))
             } else {
-                Some(galley.cursor_end_of_row(&egui_cursor))
+                row_for_char(display_map, current)
+                    .and_then(|row| display_map.row(row))
+                    .map(|row| CharCursor::new(row.char_range.end.min(total_chars)))
             }
         }
-        egui::Key::PageUp => Some(move_by_page_rows(
-            galley,
-            egui_cursor,
-            page_jump_rows,
-            false,
-        )),
-        egui::Key::PageDown => Some(move_by_page_rows(galley, egui_cursor, page_jump_rows, true)),
+        egui::Key::PageUp => move_display_rows(
+            display_map,
+            current,
+            -(i32::try_from(page_jump_rows.max(1)).unwrap_or(i32::MAX)),
+        ),
+        egui::Key::PageDown => move_display_rows(
+            display_map,
+            current,
+            i32::try_from(page_jump_rows.max(1)).unwrap_or(i32::MAX),
+        ),
         _ => None,
-    };
+    }?;
 
-    let new_primary = new_primary?;
-    let new_primary_char = clamp_char_cursor(galley, total_chars, new_primary);
     Some(finalize_cursor_movement(
         cursor,
         key,
         modifiers,
-        new_primary_char,
+        CharCursor {
+            index: new_primary.index.min(total_chars),
+            prefer_next_row: new_primary.prefer_next_row,
+        },
     ))
 }
 
-fn clamp_char_cursor(
-    galley: &egui::Galley,
-    total_chars: usize,
-    cursor: egui::text::CCursor,
-) -> CharCursor {
-    let clamped = galley.clamp_cursor(&cursor);
-    CharCursor {
-        index: clamped.index.min(total_chars),
-        prefer_next_row: clamped.prefer_next_row,
-    }
+fn row_for_char(display_map: &DisplayMap, char_index: usize) -> Option<DisplayRow> {
+    display_map.display_row_for_char(char_index)
+}
+
+fn move_display_rows(
+    display_map: &DisplayMap,
+    char_index: usize,
+    delta_rows: i32,
+) -> Option<CharCursor> {
+    let current_row = row_for_char(display_map, char_index)?;
+    let current_span = display_map.row(current_row)?;
+    let offset_in_row = char_index.saturating_sub(current_span.char_range.start);
+    let target_row = if delta_rows < 0 {
+        current_row.0.saturating_sub(delta_rows.unsigned_abs())
+    } else {
+        current_row
+            .0
+            .saturating_add(delta_rows as u32)
+            .min(display_map.row_count().saturating_sub(1))
+    };
+    let target_span = display_map.row(DisplayRow(target_row))?;
+    let target_len = target_span
+        .char_range
+        .end
+        .saturating_sub(target_span.char_range.start);
+    Some(CharCursor::new(
+        target_span.char_range.start + offset_in_row.min(target_len),
+    ))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::apply_cursor_movement;
+    use super::apply_cursor_movement_display_map;
     use crate::app::domain::buffer::PieceTreeLite;
     use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
+    use crate::app::ui::scrolling::DisplayMap;
     use eframe::egui;
 
-    fn galley_for(text: &str) -> std::sync::Arc<egui::Galley> {
+    fn display_map_for(tree: &PieceTreeLite) -> DisplayMap {
         let ctx = egui::Context::default();
-        let mut galley = None;
+        let mut map = None;
         let _ = ctx.run_ui(Default::default(), |ui| {
-            galley = Some(ui.fonts_mut(|fonts| {
-                fonts.layout_job(egui::text::LayoutJob::simple(
-                    text.to_owned(),
-                    egui::FontId::monospace(14.0),
-                    egui::Color32::WHITE,
+            map = Some(
+                DisplayMap::from_piece_tree(
+                    ui,
+                    tree,
+                    1,
+                    &egui::FontId::monospace(14.0),
+                    false,
                     f32::INFINITY,
-                ))
-            }));
+                    18.0,
+                )
+                .expect("display map"),
+            );
         });
-        galley.expect("galley")
+        map.expect("display map")
     }
 
     #[test]
     fn arrow_left_clamps_stale_cursor_before_moving() {
         let text = "abc";
-        let galley = galley_for(text);
         let piece_tree = PieceTreeLite::from_string(text.to_owned());
+        let display_map = display_map_for(&piece_tree);
         let stale_cursor = CursorRange::one(CharCursor {
             index: 99,
             prefer_next_row: true,
         });
 
-        let moved = apply_cursor_movement(
+        let moved = apply_cursor_movement_display_map(
             &stale_cursor,
             egui::Key::ArrowLeft,
             &egui::Modifiers::default(),
-            &galley,
+            &display_map,
             10,
             piece_tree.len_chars(),
             &piece_tree,

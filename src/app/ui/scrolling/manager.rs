@@ -22,8 +22,9 @@ pub struct ScrollManager {
     /// Suppresses cursor snap-back when reveal margins would overrule a manual
     /// scroll position the user is happy with.
     user_scrolled: bool,
-    /// Pending edge-autoscroll velocity (pixels/sec on Y) from a selection
+    /// Pending edge-autoscroll velocity (pixels/sec) from a selection
     /// drag. Applied per-frame until cleared.
+    edge_autoscroll_x: f32,
     edge_autoscroll_y: f32,
 }
 
@@ -60,11 +61,11 @@ impl ScrollManager {
         self.extent = extent;
     }
 
-    /// Total fractional display row at the top of the viewport. Useful for
-    /// rendering and for converting to pixel offset for the underlying
-    /// `ScrollArea`.
+    /// Total fractional display row at the top of the viewport. The
+    /// `anchor_to_row` callback must return the full fractional display row,
+    /// including `ScrollAnchor::display_row_offset`.
     pub fn top_display_row(&self, anchor_to_row: impl Fn(ScrollAnchor) -> f32) -> f32 {
-        anchor_to_row(self.anchor) + self.anchor.display_row_offset
+        anchor_to_row(self.anchor)
     }
 
     /// Convert top-of-viewport display row back into pixel offset for the
@@ -100,17 +101,13 @@ impl ScrollManager {
             },
             ScrollIntent::Lines(n) => {
                 let delta_rows = n as f32;
-                let new_row =
-                    (anchor_to_row(self.anchor) + self.anchor.display_row_offset + delta_rows)
-                        .max(0.0);
+                let new_row = (anchor_to_row(self.anchor) + delta_rows).max(0.0);
                 self.anchor = row_to_anchor(new_row);
                 self.user_scrolled = true;
             }
             ScrollIntent::Pages(n) => {
                 let delta_rows = (n as f32) * self.metrics.visible_rows.max(1) as f32;
-                let new_row =
-                    (anchor_to_row(self.anchor) + self.anchor.display_row_offset + delta_rows)
-                        .max(0.0);
+                let new_row = (anchor_to_row(self.anchor) + delta_rows).max(0.0);
                 self.anchor = row_to_anchor(new_row);
                 self.user_scrolled = true;
             }
@@ -137,7 +134,7 @@ impl ScrollManager {
             }
             ScrollIntent::EdgeAutoscroll { axis, velocity } => match axis {
                 Axis::Y => self.edge_autoscroll_y = velocity,
-                Axis::X => { /* horizontal edge autoscroll not yet supported */ }
+                Axis::X => self.edge_autoscroll_x = velocity,
             },
         }
         self.clamp(&anchor_to_row, &row_to_anchor);
@@ -151,17 +148,19 @@ impl ScrollManager {
         anchor_to_row: impl Fn(ScrollAnchor) -> f32,
         row_to_anchor: impl Fn(f32) -> ScrollAnchor,
     ) {
-        if self.edge_autoscroll_y != 0.0 {
+        if self.edge_autoscroll_x != 0.0 || self.edge_autoscroll_y != 0.0 {
             self.scroll_pixels(
-                0.0,
+                self.edge_autoscroll_x * dt,
                 self.edge_autoscroll_y * dt,
                 &anchor_to_row,
                 &row_to_anchor,
             );
+            self.clamp(&anchor_to_row, &row_to_anchor);
         }
     }
 
     pub fn clear_edge_autoscroll(&mut self) {
+        self.edge_autoscroll_x = 0.0;
         self.edge_autoscroll_y = 0.0;
     }
 
@@ -177,7 +176,7 @@ impl ScrollManager {
         }
         if dy != 0.0 && self.metrics.row_height > 0.0 {
             let drows = dy / self.metrics.row_height;
-            let cur = anchor_to_row(self.anchor) + self.anchor.display_row_offset;
+            let cur = anchor_to_row(self.anchor);
             let next = (cur + drows).max(0.0);
             self.anchor = row_to_anchor(next);
         }
@@ -354,6 +353,67 @@ mod tests {
         );
         // viewport width 800, content 600 -> max_x = 0
         assert_eq!(sm.horizontal_px(), 0.0);
+    }
+
+    #[test]
+    fn top_display_row_does_not_double_count_anchor_fraction() {
+        let mut sm = ScrollManager::new();
+        sm.set_metrics(metrics(20.0, 25, 500.0));
+        sm.set_extent(extent(1000, 20.0, 800.0));
+        sm.apply_intent(
+            ScrollIntent::RestoreAnchor(ScrollAnchor {
+                logical_line: 1,
+                byte_in_line: 0,
+                display_row_offset: 0.5,
+            }),
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+
+        assert_eq!(sm.top_display_row(naive_anchor_to_row), 1.5);
+    }
+
+    #[test]
+    fn wheel_scroll_preserves_fractional_display_row() {
+        let mut sm = ScrollManager::new();
+        sm.set_metrics(metrics(20.0, 25, 500.0));
+        sm.set_extent(extent(1000, 20.0, 800.0));
+        sm.apply_intent(
+            ScrollIntent::Wheel {
+                delta_x: 0.0,
+                delta_y: -30.0,
+            },
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+
+        assert_eq!(sm.anchor().logical_line, 1);
+        assert!((sm.anchor().display_row_offset - 0.5).abs() < 0.001);
+        assert_eq!(sm.pixel_offset_y(naive_anchor_to_row), 30.0);
+    }
+
+    #[test]
+    fn pages_intent_preserves_fractional_display_row() {
+        let mut sm = ScrollManager::new();
+        sm.set_metrics(metrics(20.0, 25, 500.0));
+        sm.set_extent(extent(1000, 20.0, 800.0));
+        sm.apply_intent(
+            ScrollIntent::RestoreAnchor(ScrollAnchor {
+                logical_line: 3,
+                byte_in_line: 0,
+                display_row_offset: 0.5,
+            }),
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+        sm.apply_intent(
+            ScrollIntent::Pages(1),
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+
+        assert_eq!(sm.anchor().logical_line, 28);
+        assert!((sm.anchor().display_row_offset - 0.5).abs() < 0.001);
     }
 
     // ---- Phase 6b: reveal margins, EOF overscroll, page-nav under wrap ----
@@ -593,6 +653,73 @@ mod tests {
         sm.tick_edge_autoscroll(1.0, naive_anchor_to_row, naive_row_to_anchor);
         // No further advance after clear.
         assert_eq!(sm.anchor().logical_line, 10);
+    }
+
+    #[test]
+    fn horizontal_edge_autoscroll_advances_per_tick() {
+        let mut sm = ScrollManager::new();
+        sm.set_metrics(metrics(20.0, 25, 500.0));
+        sm.set_extent(extent(1000, 20.0, 1_500.0));
+        sm.apply_intent(
+            ScrollIntent::EdgeAutoscroll {
+                axis: Axis::X,
+                velocity: 100.0,
+            },
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+
+        sm.tick_edge_autoscroll(0.5, naive_anchor_to_row, naive_row_to_anchor);
+
+        assert_eq!(sm.horizontal_px(), 50.0);
+    }
+
+    #[test]
+    fn horizontal_edge_autoscroll_clamps_to_content_width() {
+        let mut sm = ScrollManager::new();
+        sm.set_metrics(metrics(20.0, 25, 500.0));
+        sm.set_extent(extent(1000, 20.0, 1_000.0));
+        sm.apply_intent(
+            ScrollIntent::EdgeAutoscroll {
+                axis: Axis::X,
+                velocity: 9_999.0,
+            },
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+
+        sm.tick_edge_autoscroll(1.0, naive_anchor_to_row, naive_row_to_anchor);
+
+        assert_eq!(sm.horizontal_px(), 200.0);
+    }
+
+    #[test]
+    fn clear_edge_autoscroll_stops_both_axes() {
+        let mut sm = ScrollManager::new();
+        sm.set_metrics(metrics(20.0, 25, 500.0));
+        sm.set_extent(extent(1000, 20.0, 1_500.0));
+        sm.apply_intent(
+            ScrollIntent::EdgeAutoscroll {
+                axis: Axis::X,
+                velocity: 100.0,
+            },
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+        sm.apply_intent(
+            ScrollIntent::EdgeAutoscroll {
+                axis: Axis::Y,
+                velocity: 200.0,
+            },
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+
+        sm.clear_edge_autoscroll();
+        sm.tick_edge_autoscroll(1.0, naive_anchor_to_row, naive_row_to_anchor);
+
+        assert_eq!(sm.horizontal_px(), 0.0);
+        assert_eq!(sm.anchor(), ScrollAnchor::TOP);
     }
 
     /// End-to-end acceptance harness — verifies that every input class in the

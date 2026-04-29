@@ -172,10 +172,26 @@ fn handle_tile_click(
         egui::Sense::click(),
     );
     activate_inactive_tile_on_secondary_click(app, &tile_response, request);
-    if tile_response.clicked() {
+    if tile_response.clicked() || primary_click_in_rect(ui, request.rect) {
         actions.push(TileAction::Activate(request.view_id));
     }
     tile_response
+}
+
+fn primary_click_in_rect(ui: &egui::Ui, rect: egui::Rect) -> bool {
+    ui.input(|input| {
+        input.events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    ..
+                } if rect.contains(*pos)
+            )
+        })
+    })
 }
 
 fn activate_inactive_tile_on_secondary_click(
@@ -687,12 +703,8 @@ fn show_editor_scroll_area(
     let scroll_id = editor_scroll_id(request.view_id);
     queue_wheel_scroll_intent(ui, tab, request.view_id);
     if let Some(view) = tab.view_mut(request.view_id) {
-        apply_pending_scroll_intents(view);
-        view.scroll.tick_edge_autoscroll(
-            ui.input(|input| input.stable_dt),
-            scrolling::naive_anchor_to_row,
-            scrolling::naive_row_to_anchor,
-        );
+        view.apply_pending_scroll_intents();
+        view.tick_edge_autoscroll(ui.input(|input| input.stable_dt));
     }
     let render_scroll_offset = tab
         .view(request.view_id)
@@ -801,16 +813,6 @@ fn update_view_scroll_metrics(
 
     view.scroll.set_metrics(metrics);
     view.scroll.set_extent(extent);
-}
-
-fn apply_pending_scroll_intents(view: &mut crate::app::domain::EditorViewState) {
-    for intent in std::mem::take(&mut view.pending_intents) {
-        view.scroll.apply_intent(
-            intent,
-            scrolling::naive_anchor_to_row,
-            scrolling::naive_row_to_anchor,
-        );
-    }
 }
 
 fn editor_scroll_content_size(content_size: egui::Vec2) -> egui::Vec2 {
@@ -966,9 +968,9 @@ fn missing_editor_content_outcome() -> EditorContentOutcome {
 #[cfg(test)]
 mod tests {
     use super::{
-        EditorContentOutcome, apply_pending_scroll_intents, editor_scroll_id,
-        queue_scrollbar_intents, queue_selection_edge_autoscroll_intents,
-        selection_edge_drag_delta, update_view_scroll_metrics,
+        EditorContentOutcome, editor_scroll_id, queue_scrollbar_intents,
+        queue_selection_edge_autoscroll_intents, selection_edge_drag_delta,
+        update_view_scroll_metrics,
     };
     use crate::app::domain::EditorViewState;
     use crate::app::ui::scrolling;
@@ -1078,7 +1080,7 @@ mod tests {
         );
 
         view.request_intent(scrolling::ScrollIntent::Lines(3));
-        apply_pending_scroll_intents(&mut view);
+        view.apply_pending_scroll_intents();
 
         assert!(view.pending_intents.is_empty());
         assert_eq!(view.editor_pixel_offset().y, 60.0);

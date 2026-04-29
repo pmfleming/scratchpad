@@ -20,7 +20,10 @@ mod target;
 
 pub use anchor::ScrollAnchor;
 pub use area::{ScrollArea, ScrollAreaOutput};
-pub use display::{DisplayPoint, DisplayRow, DisplaySnapshot, DisplaySnapshotError, ViewportSlice};
+pub use display::{
+    DisplayMap, DisplayMapBuildStats, DisplayMapCache, DisplayPoint, DisplayRow, DisplayRowSpan,
+    DisplaySnapshot, DisplaySnapshotError, ViewportSlice,
+};
 pub use intent::{Axis, ScrollIntent};
 pub use manager::{ScrollManager, naive_anchor_to_row, naive_row_to_anchor};
 pub use metrics::{ContentExtent, ScrollInvariantError, ViewportMetrics};

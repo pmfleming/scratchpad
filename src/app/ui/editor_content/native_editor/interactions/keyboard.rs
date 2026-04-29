@@ -1,5 +1,6 @@
 use super::super::{CursorRange, cursor, editing, select_all_cursor};
 use crate::app::domain::{BufferState, EditorViewState};
+use crate::app::ui::scrolling::DisplayMap;
 use eframe::egui;
 
 #[derive(Clone, Copy, Debug)]
@@ -17,20 +18,20 @@ enum RelevantInputEvent {
     Paste(String),
 }
 
-pub(super) fn handle_keyboard_events(
+pub(super) fn handle_keyboard_events_display_map(
     ui: &mut egui::Ui,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
-    galley: &egui::Galley,
+    display_map: &DisplayMap,
     page_jump_rows: usize,
     total_chars: usize,
 ) -> bool {
     handle_keyboard_events_with(ui, buffer, view, |key_event, buffer, cursor| {
-        cursor::apply_cursor_movement(
+        cursor::apply_cursor_movement_display_map(
             cursor,
             key_event.key,
             &key_event.modifiers,
-            galley,
+            display_map,
             page_jump_rows,
             total_chars,
             buffer.document().piece_tree(),

@@ -582,6 +582,9 @@ Each phase appends a status line here as it lands. Format: `- [phase] status —
     - All input classes flow through `ScrollManager::apply_intent` at the API level (covered by the harness above; per-call-site migration in `editor_area/tile.rs` proceeds incrementally as a refactor follow-up — the bridge `drag_delta_to_intents` is in place for autoscroll).
     - Fresh tests cover the new behavior rather than old implementation details.
 
+- [Follow-up review] complete — four outstanding gaps were identified after the rebuild completion note and closed in `docs/scrolling-visible-window-outstanding-gap-plan.md`: fractional display-row offsets are represented once, live editor intents use display-snapshot/layout-aware conversion, horizontal edge autoscroll is manager-owned, and the normal editor path now builds a piece-tree-backed `DisplayMap` before laying out only the overscanned viewport text. The full-galley snapshot path and standalone read-only text renderer were removed. (2026-04-29)
+- [Follow-up review] complete — `DisplayMapCache` added to the same normal DisplayMap path: exact revision/geometry matches reuse the whole map, changed revisions reuse unchanged line layouts by fingerprint, and changed lines rebuild without branching into a separate large-file or long-line renderer. (2026-04-29)
+
 ## Acceptance Criteria
 
 - The old visible-window route is gone.

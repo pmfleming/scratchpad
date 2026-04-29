@@ -3,18 +3,8 @@ mod mouse;
 
 use super::{CharCursor, CursorRange};
 use crate::app::domain::{BufferState, EditorViewState, RevealRequest};
+use crate::app::ui::scrolling::DisplayMap;
 use eframe::egui;
-
-pub(super) fn handle_mouse_interaction(
-    ui: &mut egui::Ui,
-    response: &egui::Response,
-    galley: &egui::Galley,
-    rect: egui::Rect,
-    view: &mut EditorViewState,
-    piece_tree: &crate::app::domain::buffer::PieceTreeLite,
-) {
-    handle_mouse_interaction_window(ui, response, galley, rect, view, piece_tree, 0);
-}
 
 pub(super) fn handle_mouse_interaction_window(
     ui: &mut egui::Ui,
@@ -36,15 +26,22 @@ pub(super) fn handle_mouse_interaction_window(
     );
 }
 
-pub(super) fn handle_keyboard_events(
+pub(super) fn handle_keyboard_events_display_map(
     ui: &mut egui::Ui,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
-    galley: &egui::Galley,
+    display_map: &DisplayMap,
     page_jump_rows: usize,
     total_chars: usize,
 ) -> bool {
-    keyboard::handle_keyboard_events(ui, buffer, view, galley, page_jump_rows, total_chars)
+    keyboard::handle_keyboard_events_display_map(
+        ui,
+        buffer,
+        view,
+        display_map,
+        page_jump_rows,
+        total_chars,
+    )
 }
 
 pub(super) fn sync_view_cursor_before_render(view: &mut EditorViewState, focused: bool) {

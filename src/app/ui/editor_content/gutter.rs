@@ -165,8 +165,9 @@ mod tests {
     use super::{
         layout_gutter_rows, max_gutter_line_number, snapshot_gutter_rows, visible_layout_y_offset,
     };
+    use crate::app::domain::buffer::PieceTreeLite;
     use crate::app::domain::{PublishedViewport, RenderedLayout};
-    use crate::app::ui::scrolling::DisplaySnapshot;
+    use crate::app::ui::scrolling::{DisplayMap, DisplaySnapshot};
     use eframe::egui;
 
     fn test_layout(line_count: usize) -> RenderedLayout {
@@ -233,18 +234,21 @@ mod tests {
 
     fn wrapped_test_snapshot() -> DisplaySnapshot {
         let ctx = egui::Context::default();
+        let text = format!("{}\n{}\nshort\nlast", "x".repeat(40), "y".repeat(40),);
+        let tree = PieceTreeLite::from_string(text);
         let mut snapshot = None;
         let _ = ctx.run_ui(Default::default(), |ui| {
-            let text = format!("{}\n{}\nshort\nlast", "x".repeat(40), "y".repeat(40),);
-            let galley = ui.ctx().fonts_mut(|fonts| {
-                fonts.layout_job(egui::text::LayoutJob::simple(
-                    text,
-                    egui::FontId::monospace(14.0),
-                    egui::Color32::WHITE,
-                    100.0,
-                ))
-            });
-            snapshot = Some(DisplaySnapshot::from_galley(galley, 18.0));
+            let map = DisplayMap::from_piece_tree(
+                ui,
+                &tree,
+                4,
+                &egui::FontId::monospace(14.0),
+                true,
+                100.0,
+                18.0,
+            )
+            .expect("display map");
+            snapshot = Some(DisplaySnapshot::from_display_map(&map));
         });
         snapshot.expect("snapshot should be captured")
     }

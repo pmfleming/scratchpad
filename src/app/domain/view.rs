@@ -1,6 +1,8 @@
 use crate::app::domain::{BufferId, RenderedLayout};
 use crate::app::ui::editor_content::native_editor::CursorRange;
-use crate::app::ui::scrolling::{DisplaySnapshot, ScrollAnchor, ScrollIntent, ScrollManager};
+use crate::app::ui::scrolling::{
+    DisplayMapCache, DisplaySnapshot, ScrollAnchor, ScrollIntent, ScrollManager,
+};
 use eframe::egui;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -70,6 +72,7 @@ pub struct EditorViewState {
     pub editor_has_focus: bool,
     pub latest_layout: Option<RenderedLayout>,
     pub latest_display_snapshot: Option<DisplaySnapshot>,
+    pub display_map_cache: DisplayMapCache,
     pub latest_layout_revision: Option<u64>,
     pub cursor_range: Option<CursorRange>,
     pub pending_cursor_range: Option<CursorRange>,
@@ -97,6 +100,7 @@ impl EditorViewState {
             editor_has_focus: false,
             latest_layout: None,
             latest_display_snapshot: None,
+            display_map_cache: DisplayMapCache::default(),
             latest_layout_revision: None,
             cursor_range: None,
             pending_cursor_range: None,
@@ -125,6 +129,7 @@ impl EditorViewState {
             editor_has_focus: false,
             latest_layout: None,
             latest_display_snapshot: None,
+            display_map_cache: DisplayMapCache::default(),
             latest_layout_revision: None,
             cursor_range: None,
             pending_cursor_range: None,
@@ -167,7 +172,7 @@ impl EditorViewState {
     pub fn editor_pixel_offset(&self) -> egui::Vec2 {
         let metrics = self.scroll.metrics();
         let row_height = metrics.row_height.max(0.0);
-        let row = self.layout_anchor_to_row(self.scroll.anchor());
+        let row = self.display_anchor_to_row(self.scroll.anchor());
         egui::vec2(self.scroll.horizontal_px(), row * row_height)
     }
 
@@ -176,30 +181,50 @@ impl EditorViewState {
     /// manager's intent path for consistency.
     pub fn set_editor_pixel_offset(&mut self, offset: egui::Vec2) {
         use crate::app::ui::scrolling::Axis;
-        let layout = self.latest_layout.clone();
-        let to_row = move |anchor| layout_anchor_to_row(layout.as_ref(), anchor);
-        let layout2 = self.latest_layout.clone();
-        let to_anchor = move |row| layout_row_to_anchor(layout2.as_ref(), row);
-        self.scroll.apply_intent(
-            ScrollIntent::ScrollbarTo {
-                axis: Axis::Y,
-                offset_pixels: offset.y,
-            },
-            &to_row,
-            &to_anchor,
-        );
-        self.scroll.apply_intent(
-            ScrollIntent::ScrollbarTo {
-                axis: Axis::X,
-                offset_pixels: offset.x,
-            },
-            &to_row,
-            &to_anchor,
-        );
+        self.apply_scroll_intent(ScrollIntent::ScrollbarTo {
+            axis: Axis::Y,
+            offset_pixels: offset.y,
+        });
+        self.apply_scroll_intent(ScrollIntent::ScrollbarTo {
+            axis: Axis::X,
+            offset_pixels: offset.x,
+        });
     }
 
-    fn layout_anchor_to_row(&self, anchor: crate::app::ui::scrolling::ScrollAnchor) -> f32 {
-        layout_anchor_to_row(self.latest_layout.as_ref(), anchor)
+    pub fn apply_pending_scroll_intents(&mut self) {
+        for intent in std::mem::take(&mut self.pending_intents) {
+            self.apply_scroll_intent(intent);
+        }
+    }
+
+    pub fn tick_edge_autoscroll(&mut self, dt: f32) {
+        let layout = self.latest_layout.clone();
+        let snapshot = self.latest_display_snapshot.clone();
+        let to_row =
+            move |anchor| display_anchor_to_row(snapshot.as_ref(), layout.as_ref(), anchor);
+        let layout2 = self.latest_layout.clone();
+        let snapshot2 = self.latest_display_snapshot.clone();
+        let to_anchor = move |row| display_row_to_anchor(snapshot2.as_ref(), layout2.as_ref(), row);
+        self.scroll.tick_edge_autoscroll(dt, &to_row, &to_anchor);
+    }
+
+    fn apply_scroll_intent(&mut self, intent: ScrollIntent) {
+        let layout = self.latest_layout.clone();
+        let snapshot = self.latest_display_snapshot.clone();
+        let to_row =
+            move |anchor| display_anchor_to_row(snapshot.as_ref(), layout.as_ref(), anchor);
+        let layout2 = self.latest_layout.clone();
+        let snapshot2 = self.latest_display_snapshot.clone();
+        let to_anchor = move |row| display_row_to_anchor(snapshot2.as_ref(), layout2.as_ref(), row);
+        self.scroll.apply_intent(intent, &to_row, &to_anchor);
+    }
+
+    fn display_anchor_to_row(&self, anchor: crate::app::ui::scrolling::ScrollAnchor) -> f32 {
+        display_anchor_to_row(
+            self.latest_display_snapshot.as_ref(),
+            self.latest_layout.as_ref(),
+            anchor,
+        )
     }
 
     pub fn mark_ime_output(&mut self, rect: egui::Rect, cursor_rect: egui::Rect) -> bool {
@@ -255,7 +280,16 @@ pub fn next_view_id() -> ViewId {
     NEXT_VIEW_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-fn layout_anchor_to_row(layout: Option<&RenderedLayout>, anchor: ScrollAnchor) -> f32 {
+fn display_anchor_to_row(
+    snapshot: Option<&DisplaySnapshot>,
+    layout: Option<&RenderedLayout>,
+    anchor: ScrollAnchor,
+) -> f32 {
+    if let Some(snapshot) = snapshot
+        && let Some(row) = snapshot.display_row_for_logical_line(anchor.logical_line as usize)
+    {
+        return row as f32 + anchor.display_row_offset;
+    }
     match layout {
         Some(layout) => layout
             .display_row_for_logical_line(anchor.logical_line as usize)
@@ -265,7 +299,19 @@ fn layout_anchor_to_row(layout: Option<&RenderedLayout>, anchor: ScrollAnchor) -
     }
 }
 
-fn layout_row_to_anchor(layout: Option<&RenderedLayout>, row: f32) -> ScrollAnchor {
+fn display_row_to_anchor(
+    snapshot: Option<&DisplaySnapshot>,
+    layout: Option<&RenderedLayout>,
+    row: f32,
+) -> ScrollAnchor {
+    if let Some(snapshot) = snapshot {
+        let (logical_line, frac) = snapshot.anchor_at_display_row(row);
+        return ScrollAnchor {
+            logical_line: logical_line as u32,
+            byte_in_line: 0,
+            display_row_offset: frac,
+        };
+    }
     match layout {
         Some(layout) => {
             let (logical_line, frac) = layout.anchor_at_display_row(row);
@@ -303,7 +349,7 @@ fn register_existing_view_id(id: ViewId) {
 #[cfg(test)]
 mod tests {
     use super::{EditorViewState, SearchHighlightState};
-    use crate::app::ui::scrolling::{ContentExtent, ViewportMetrics};
+    use crate::app::ui::scrolling::{ContentExtent, ScrollIntent, ViewportMetrics};
     use eframe::egui;
 
     #[test]
@@ -407,6 +453,55 @@ mod tests {
         assert_eq!(
             anchor.logical_line, 1,
             "scrolling to row {first_unwrapped_row} should land on logical line 1"
+        );
+    }
+
+    #[test]
+    fn pending_scroll_intents_use_layout_when_available_for_wrapped_text() {
+        use crate::app::domain::RenderedLayout;
+
+        let ctx = egui::Context::default();
+        let mut layout = None;
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            let text = format!("{}\nshort\nshort", "x".repeat(60));
+            let galley = ui.ctx().fonts_mut(|fonts| {
+                fonts.layout_job(egui::text::LayoutJob::simple(
+                    text,
+                    egui::FontId::monospace(14.0),
+                    egui::Color32::WHITE,
+                    100.0,
+                ))
+            });
+            layout = Some(RenderedLayout::from_galley(galley));
+        });
+        let layout = layout.expect("layout should be captured");
+        let first_unwrapped_row = layout
+            .display_row_for_logical_line(1)
+            .expect("logical line 1 maps to a display row");
+        assert!(first_unwrapped_row > 1, "expected first line to wrap");
+
+        let mut view = EditorViewState::new(7, false);
+        view.latest_layout = Some(layout);
+        view.scroll.set_metrics(ViewportMetrics {
+            viewport_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0)),
+            row_height: 18.0,
+            column_width: 8.0,
+            visible_rows: 5,
+            visible_columns: 12,
+        });
+        view.scroll.set_extent(ContentExtent {
+            display_rows: 100,
+            height: 1800.0,
+            max_line_width: 900.0,
+        });
+
+        view.request_intent(ScrollIntent::Lines(first_unwrapped_row as i32));
+        view.apply_pending_scroll_intents();
+
+        assert_eq!(
+            view.scroll.anchor().logical_line,
+            1,
+            "live intent application should resolve rows through the wrapped layout"
         );
     }
 }

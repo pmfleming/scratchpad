@@ -18,9 +18,9 @@ use crate::app::ui::scrolling;
 use crate::app::ui::scrolling::ScrollIntent;
 use eframe::egui;
 use interactions::{
-    handle_keyboard_events, handle_mouse_interaction, sync_view_cursor_before_render,
+    handle_keyboard_events_display_map, handle_mouse_interaction_window,
+    sync_view_cursor_before_render,
 };
-use std::fmt;
 use std::sync::Arc;
 
 const VISIBLE_ROW_OVERSCAN: usize = 2;
@@ -46,19 +46,7 @@ struct CursorPaintOutcome {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ViewportRenderError {
-    InvalidWrapWidth,
-    MissingSourceSpan,
     EmptyViewportSlice,
-}
-
-impl fmt::Display for ViewportRenderError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidWrapWidth => write!(f, "invalid editor wrap width"),
-            Self::MissingSourceSpan => write!(f, "could not extract viewport source span"),
-            Self::EmptyViewportSlice => write!(f, "viewport slice has no paintable rows"),
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -74,47 +62,98 @@ pub fn render_editor_text_edit(
 ) -> EditorWidgetOutcome {
     let document_revision = buffer.document_revision();
     let total_chars = buffer.current_file_length().chars;
-    let wrap_width = editor_wrap_width(ui, options.word_wrap);
-
-    let galley = {
-        let text = buffer.document().text_cow();
-        highlighting::build_galley(
-            ui,
-            text.as_ref(),
-            options,
-            &view.search_highlights,
-            buffer.active_selection.clone(),
-            wrap_width,
-        )
-    };
-
+    let wrap_width = editor_wrap_width(ui, options.word_wrap, viewport);
     let row_height = editor_row_height(ui, options.editor_font_id);
+    let display_map = scrolling::DisplayMap::from_piece_tree_cached(
+        ui,
+        buffer.document().piece_tree(),
+        document_revision,
+        buffer.line_count,
+        options.editor_font_id,
+        options.word_wrap,
+        wrap_width,
+        row_height,
+        &mut view.display_map_cache,
+    )
+    .expect("editor wrap width should be finite and positive when wrapping");
     let (rect, response) = ui.allocate_exact_size(
         editor_desired_size(
             ui,
-            editor_desired_width(ui, &galley, options.word_wrap),
-            editor_content_height(&galley, row_height),
+            editor_desired_width_for_extent(
+                ui,
+                display_map.max_line_width(),
+                options.word_wrap,
+                viewport,
+            ),
+            display_map.content_height(),
+            viewport,
         ),
         egui::Sense::click_and_drag(),
     );
     request_editor_focus(ui, &response, options.request_focus);
 
     let prev_cursor = view.cursor_range;
-    handle_mouse_interaction(
-        ui,
-        &response,
-        &galley,
-        rect,
-        view,
-        buffer.document().piece_tree(),
-    );
-
-    let focused = response.has_focus() || response.gained_focus() || options.request_focus;
+    let focused = response.has_focus()
+        || response.gained_focus()
+        || response.clicked()
+        || response.drag_started()
+        || options.request_focus;
     sync_view_cursor_before_render(view, focused);
     let page_jump_rows = page_jump_rows(viewport, row_height);
 
+    let galley_pos = rect.min;
+    let display_snapshot = scrolling::DisplaySnapshot::from_display_map(&display_map);
+    let viewport_slice = viewport_slice_for_visible_rect_from_map(
+        &display_map,
+        viewport,
+        ui.clip_rect(),
+        galley_pos,
+        rect,
+        row_height,
+    );
+    let visible_paint = match build_visible_paint_galley(
+        ui,
+        buffer,
+        view,
+        options,
+        wrap_width,
+        &display_map,
+        &viewport_slice,
+        galley_pos,
+    ) {
+        Ok(paint) => {
+            view.clear_render_notice();
+            Some(paint)
+        }
+        Err(error) => {
+            view.set_render_notice(crate::app::domain::EditorRenderNotice::new(format!(
+                "Editor rendering degraded: {error:?}"
+            )));
+            None
+        }
+    };
+
+    if let Some(visible_paint) = visible_paint.as_ref() {
+        handle_mouse_interaction_window(
+            ui,
+            &response,
+            &visible_paint.galley,
+            visible_paint.rect(),
+            view,
+            buffer.document().piece_tree(),
+            visible_paint.char_range.start,
+        );
+    }
+
     let changed = if focused {
-        handle_keyboard_events(ui, buffer, view, &galley, page_jump_rows, total_chars)
+        handle_keyboard_events_display_map(
+            ui,
+            buffer,
+            view,
+            &display_map,
+            page_jump_rows,
+            total_chars,
+        )
     } else {
         false
     };
@@ -127,36 +166,11 @@ pub fn render_editor_text_edit(
     publish_active_selection(buffer, view, focused);
 
     queue_page_navigation_intents(ui, focused, view, viewport, row_height);
-
-    let galley_pos = rect.min;
-    let display_snapshot = scrolling::DisplaySnapshot::from_galley(galley.clone(), row_height);
-    let viewport_slice = viewport_slice_for_rect(&display_snapshot, galley_pos, rect, row_height);
-    let visible_paint = match build_visible_paint_galley(
-        ui,
-        buffer,
-        view,
-        options,
-        wrap_width,
-        &display_snapshot,
-        &viewport_slice,
-        galley_pos,
-    ) {
-        Ok(paint) => {
-            view.clear_render_notice();
-            Some(paint)
-        }
-        Err(error) => {
-            view.set_render_notice(crate::app::domain::EditorRenderNotice::new(format!(
-                "Editor rendering degraded: {error}"
-            )));
-            None
-        }
-    };
     let paint_outcome = if ui.is_rect_visible(rect) {
         paint_editor(
             ui,
-            &galley,
             visible_paint.as_ref(),
+            &display_map,
             galley_pos,
             rect,
             view,
@@ -178,13 +192,9 @@ pub fn render_editor_text_edit(
     } else {
         update_visible_layout(
             VisibleLayoutInput {
-                galley: &galley,
-                display_snapshot: Some(display_snapshot),
-                viewport_slice: Some(viewport_slice),
-                galley_pos,
-                rect,
+                display_snapshot,
+                viewport_slice,
                 document_revision,
-                row_height,
             },
             view,
         );
@@ -194,69 +204,6 @@ pub fn render_editor_text_edit(
 
     EditorWidgetOutcome {
         changed,
-        focused,
-        request_editor_focus: false,
-        response,
-    }
-}
-
-// The old focused/unfocused window render entry points were removed in the
-// scrolling rebuild. The unified renderer in `render_editor_text_edit` is now
-// the only entry point; viewport slicing is done via
-// `scrolling::DisplaySnapshot`/`ViewportSlice`.
-
-pub fn render_read_only_text_edit(
-    ui: &mut egui::Ui,
-    view: &mut EditorViewState,
-    text: String,
-    desired_rows: usize,
-    options: TextEditOptions<'_>,
-) -> EditorWidgetOutcome {
-    let selection_range = view
-        .cursor_range
-        .as_ref()
-        .and_then(types::selection_char_range);
-
-    let wrap_width = if options.word_wrap {
-        ui.available_width()
-    } else {
-        f32::INFINITY
-    };
-    let galley = highlighting::build_galley(
-        ui,
-        &text,
-        options,
-        &view.search_highlights,
-        selection_range,
-        wrap_width,
-    );
-
-    let row_height = editor_row_height(ui, options.editor_font_id);
-    let desired_height = desired_rows.max(1) as f32 * row_height;
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(
-            editor_desired_width(ui, &galley, options.word_wrap),
-            desired_height,
-        ),
-        egui::Sense::click(),
-    );
-
-    if ui.is_rect_visible(rect) {
-        paint_galley(ui, &galley, rect.min, options.text_color);
-    }
-
-    let focused = response.has_focus() || response.gained_focus();
-    sync_ime_output_focus(view, focused);
-    let display_snapshot = scrolling::DisplaySnapshot::from_galley(galley.clone(), row_height);
-    let mut layout = RenderedLayout::from_galley(galley);
-    layout.set_row_height(row_height);
-    view.latest_display_snapshot = Some(display_snapshot);
-    view.latest_layout = Some(layout);
-    view.latest_layout_revision = None;
-    view.cursor_range = None;
-    view.editor_has_focus = focused;
-    EditorWidgetOutcome {
-        changed: false,
         focused,
         request_editor_focus: false,
         response,
@@ -286,8 +233,8 @@ pub fn cut_selected_text(
 #[allow(clippy::too_many_arguments)]
 fn paint_editor(
     ui: &mut egui::Ui,
-    galley: &Arc<egui::Galley>,
     visible_paint: Option<&VisiblePaintGalley>,
+    display_map: &scrolling::DisplayMap,
     galley_pos: egui::Pos2,
     rect: egui::Rect,
     view: &mut EditorViewState,
@@ -303,8 +250,6 @@ fn paint_editor(
             visible_paint.position,
             options.text_color,
         );
-    } else {
-        paint_galley(ui, galley, galley_pos, options.text_color);
     }
 
     if !focused {
@@ -314,9 +259,21 @@ fn paint_editor(
     if let Some(cursor_range) = &view.cursor_range
         && !changed
     {
-        // Paint cursor (skip when changed — galley is stale, next frame corrects it)
-        let cursor_rect = cursor_rect_at(galley, galley_pos, cursor_range.primary);
-        return paint_cursor_effects(ui, rect, cursor_rect, view, viewport);
+        let cursor_rect = visible_paint
+            .and_then(|paint| paint.cursor_rect(cursor_range.primary))
+            .or_else(|| {
+                cursor_rect_from_display_map(
+                    display_map,
+                    galley_pos,
+                    cursor_range.primary,
+                    options.editor_font_id.size * 0.6,
+                    rect.height(),
+                )
+            });
+        if let Some(cursor_rect) = cursor_rect {
+            let should_paint = cursor_rect.intersects(rect.expand(2.0));
+            return paint_cursor_effects(ui, rect, cursor_rect, view, viewport, should_paint);
+        }
     }
 
     CursorPaintOutcome::default()
@@ -339,15 +296,39 @@ fn cursor_rect_at(galley: &egui::Galley, galley_pos: egui::Pos2, cursor: CharCur
         .translate(galley_pos.to_vec2())
 }
 
+fn cursor_rect_from_display_map(
+    display_map: &scrolling::DisplayMap,
+    galley_pos: egui::Pos2,
+    cursor: CharCursor,
+    column_width: f32,
+    viewport_height: f32,
+) -> Option<egui::Rect> {
+    let row = display_map.display_row_for_char(cursor.index)?;
+    let span = display_map.row(row)?;
+    let row_top = display_map.row_top(row)?;
+    let x = cursor
+        .index
+        .saturating_sub(span.char_range.start)
+        .min(span.char_range.end.saturating_sub(span.char_range.start)) as f32
+        * column_width.max(1.0);
+    Some(egui::Rect::from_min_size(
+        galley_pos + egui::vec2(x, row_top),
+        egui::vec2(2.0, display_map.row_height().min(viewport_height).max(1.0)),
+    ))
+}
+
 fn paint_cursor_effects(
     ui: &mut egui::Ui,
     rect: egui::Rect,
     cursor_rect: egui::Rect,
     view: &mut EditorViewState,
     viewport: Option<egui::Rect>,
+    should_paint: bool,
 ) -> CursorPaintOutcome {
-    paint_cursor(ui, rect, cursor_rect);
-    publish_ime_output(ui, rect, cursor_rect, view);
+    if should_paint {
+        paint_cursor(ui, rect, cursor_rect);
+        publish_ime_output(ui, rect, cursor_rect, view);
+    }
     CursorPaintOutcome {
         reveal_attempted: queue_cursor_reveal_intent(
             view.reveal_request(),
@@ -432,46 +413,50 @@ fn rect_is_finite(rect: egui::Rect) -> bool {
 // Private: layout helpers
 // ---------------------------------------------------------------------------
 
-struct VisibleLayoutInput<'a> {
-    galley: &'a Arc<egui::Galley>,
-    display_snapshot: Option<scrolling::DisplaySnapshot>,
-    viewport_slice: Option<scrolling::ViewportSlice>,
-    galley_pos: egui::Pos2,
-    rect: egui::Rect,
+struct VisibleLayoutInput {
+    display_snapshot: scrolling::DisplaySnapshot,
+    viewport_slice: scrolling::ViewportSlice,
     document_revision: u64,
-    row_height: f32,
 }
 
-fn update_visible_layout(input: VisibleLayoutInput<'_>, view: &mut EditorViewState) {
-    let display_snapshot = input.display_snapshot.unwrap_or_else(|| {
-        scrolling::DisplaySnapshot::from_galley(input.galley.clone(), input.row_height)
-    });
-    let viewport_slice = input.viewport_slice.unwrap_or_else(|| {
-        viewport_slice_for_rect(
-            &display_snapshot,
-            input.galley_pos,
-            input.rect,
-            input.row_height,
-        )
-    });
+fn update_visible_layout(input: VisibleLayoutInput, view: &mut EditorViewState) {
     let visible_row_range =
-        (viewport_slice.rows.start as usize)..(viewport_slice.rows.end as usize);
-    let mut latest_layout = RenderedLayout::from_galley(input.galley.clone());
-    latest_layout.set_row_height(input.row_height);
-    if let Some(line_range) = latest_layout.line_range_for_rows(visible_row_range.clone()) {
+        (input.viewport_slice.rows.start as usize)..(input.viewport_slice.rows.end as usize);
+    if let Some(line_range) = input
+        .display_snapshot
+        .line_range_for_rows(input.viewport_slice.rows.clone())
+    {
         view.publish_viewport(PublishedViewport {
             row_range: visible_row_range.clone(),
             line_range,
             layout_row_offset: 0,
         });
     }
-    view.latest_display_snapshot = Some(display_snapshot);
-    set_latest_layout(view, Some(latest_layout), Some(input.document_revision));
+    view.latest_display_snapshot = Some(input.display_snapshot);
+    set_latest_layout(view, None, Some(input.document_revision));
 }
 
 struct VisiblePaintGalley {
     galley: Arc<egui::Galley>,
     position: egui::Pos2,
+    char_range: std::ops::Range<usize>,
+}
+
+impl VisiblePaintGalley {
+    fn rect(&self) -> egui::Rect {
+        egui::Rect::from_min_size(self.position, self.galley.rect.size())
+    }
+
+    fn cursor_rect(&self, cursor: CharCursor) -> Option<egui::Rect> {
+        if cursor.index < self.char_range.start || cursor.index > self.char_range.end {
+            return None;
+        }
+        let local = CharCursor {
+            index: cursor.index - self.char_range.start,
+            prefer_next_row: cursor.prefer_next_row,
+        };
+        Some(cursor_rect_at(&self.galley, self.position, local))
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -481,22 +466,17 @@ fn build_visible_paint_galley(
     view: &EditorViewState,
     options: TextEditOptions<'_>,
     wrap_width: f32,
-    display_snapshot: &scrolling::DisplaySnapshot,
+    display_map: &scrolling::DisplayMap,
     viewport_slice: &scrolling::ViewportSlice,
     galley_pos: egui::Pos2,
 ) -> Result<VisiblePaintGalley, ViewportRenderError> {
-    if !wrap_width.is_finite() && !options.word_wrap {
-        // Infinite width is intentional for unwrapped layout.
-    } else if !wrap_width.is_finite() || wrap_width <= 0.0 {
-        return Err(ViewportRenderError::InvalidWrapWidth);
-    }
-    let char_range = char_range_for_viewport(display_snapshot, viewport_slice)
+    let char_range = display_map
+        .char_range_for_rows(viewport_slice.rows.clone())
         .map_err(|_| ViewportRenderError::EmptyViewportSlice)?;
-    let text = buffer.document().text_cow();
-    let text = text.as_ref();
-    let byte_range = byte_range_for_char_range(text, char_range.clone())
-        .ok_or(ViewportRenderError::MissingSourceSpan)?;
-    let visible_text = &text[byte_range];
+    let visible_text = buffer
+        .document()
+        .piece_tree()
+        .extract_range(char_range.clone());
     let search_highlights = rebase_search_highlights(&view.search_highlights, char_range.clone());
     let selection_range = buffer
         .active_selection
@@ -504,63 +484,42 @@ fn build_visible_paint_galley(
         .and_then(|range| rebase_range(range, &char_range));
     let galley = highlighting::build_galley(
         ui,
-        visible_text,
+        &visible_text,
         options,
         &search_highlights,
         selection_range,
         wrap_width,
     );
     let first_row = scrolling::DisplayRow(viewport_slice.rows.start);
-    let y_offset = display_snapshot.row_top(first_row).unwrap_or_default();
+    let y_offset = display_map.row_top(first_row).unwrap_or_default();
     Ok(VisiblePaintGalley {
         galley,
         position: galley_pos + egui::vec2(0.0, y_offset),
+        char_range,
     })
 }
 
-fn viewport_slice_for_rect(
-    display_snapshot: &scrolling::DisplaySnapshot,
+fn viewport_slice_for_visible_rect_from_map(
+    display_map: &scrolling::DisplayMap,
+    viewport: Option<egui::Rect>,
+    clip_rect: egui::Rect,
     galley_pos: egui::Pos2,
     rect: egui::Rect,
     row_height: f32,
 ) -> scrolling::ViewportSlice {
-    display_snapshot.viewport_slice(
+    if let Some(viewport) = viewport {
+        return display_map.viewport_slice(
+            top_display_row_for_rect(galley_pos, clip_rect, row_height),
+            viewport.height(),
+            VISIBLE_ROW_OVERSCAN as u32,
+        );
+    }
+
+    display_map.viewport_slice(
         top_display_row_for_rect(galley_pos, rect, row_height),
         rect.height(),
         VISIBLE_ROW_OVERSCAN as u32,
     )
-}
-
-fn char_range_for_viewport(
-    display_snapshot: &scrolling::DisplaySnapshot,
-    viewport_slice: &scrolling::ViewportSlice,
-) -> Result<std::ops::Range<usize>, scrolling::DisplaySnapshotError> {
-    display_snapshot.char_range_for_rows(viewport_slice.rows.clone())
-}
-
-fn byte_range_for_char_range(
-    text: &str,
-    range: std::ops::Range<usize>,
-) -> Option<std::ops::Range<usize>> {
-    let mut start_byte = None;
-    let mut end_byte = None;
-    for (char_index, (byte_index, _)) in text.char_indices().enumerate() {
-        if char_index == range.start {
-            start_byte = Some(byte_index);
-        }
-        if char_index == range.end {
-            end_byte = Some(byte_index);
-            break;
-        }
-    }
-    let total_chars = text.chars().count();
-    if range.start == total_chars {
-        start_byte = Some(text.len());
-    }
-    if range.end == total_chars {
-        end_byte = Some(text.len());
-    }
-    Some(start_byte?..end_byte?)
 }
 
 fn rebase_search_highlights(
@@ -611,29 +570,67 @@ fn clear_latest_layout(view: &mut EditorViewState) {
     set_latest_layout(view, None, None);
 }
 
-fn editor_wrap_width(ui: &egui::Ui, word_wrap: bool) -> f32 {
+fn editor_wrap_width(ui: &egui::Ui, word_wrap: bool, viewport: Option<egui::Rect>) -> f32 {
     if word_wrap {
-        ui.available_width()
+        finite_positive_view_width(ui, viewport)
     } else {
         f32::INFINITY
     }
 }
 
-fn editor_desired_size(ui: &egui::Ui, desired_width: f32, desired_height: f32) -> egui::Vec2 {
-    let visible_height = ui.available_height();
+fn editor_desired_size(
+    ui: &egui::Ui,
+    desired_width: f32,
+    desired_height: f32,
+    viewport: Option<egui::Rect>,
+) -> egui::Vec2 {
+    let visible_height = viewport
+        .map(|viewport| viewport.height())
+        .filter(|height| height.is_finite() && *height > 0.0)
+        .unwrap_or_else(|| ui.available_height());
     egui::vec2(desired_width.max(1.0), desired_height.max(visible_height))
 }
 
+#[cfg(test)]
 fn editor_content_height(galley: &egui::Galley, row_height: f32) -> f32 {
     galley.rect.height().max(row_height).ceil().max(1.0)
 }
 
+#[cfg(test)]
 fn editor_desired_width(ui: &egui::Ui, galley: &egui::Galley, word_wrap: bool) -> f32 {
     if word_wrap {
         ui.available_width()
     } else {
         galley.rect.width().max(1.0)
     }
+}
+
+fn editor_desired_width_for_extent(
+    ui: &egui::Ui,
+    max_line_width: f32,
+    word_wrap: bool,
+    viewport: Option<egui::Rect>,
+) -> f32 {
+    if word_wrap {
+        finite_positive_view_width(ui, viewport)
+    } else {
+        max_line_width.max(1.0)
+    }
+}
+
+fn finite_positive_view_width(ui: &egui::Ui, viewport: Option<egui::Rect>) -> f32 {
+    for width in [
+        viewport.map(|rect| rect.width()).unwrap_or_default(),
+        ui.available_width(),
+        ui.available_rect_before_wrap().width(),
+        ui.max_rect().width(),
+        ui.clip_rect().width(),
+    ] {
+        if width.is_finite() && width > 0.0 {
+            return width;
+        }
+    }
+    1.0
 }
 
 fn consume_cursor_reveal(view: &mut EditorViewState, changed: bool, reveal_attempted: bool) {
@@ -871,9 +868,17 @@ mod tests {
 
     #[test]
     fn editor_desired_size_does_not_add_extra_trailing_scroll_space() {
-        let desired = editor_desired_size_for_test(400.0, 200.0, 400.0, 400.0);
+        let desired = editor_desired_size_for_test(400.0, 200.0, 400.0, 400.0, None);
 
         assert_eq!(desired, Some(egui::vec2(400.0, 400.0)));
+    }
+
+    #[test]
+    fn editor_desired_size_uses_scroll_viewport_height_when_available() {
+        let viewport = egui::Rect::from_min_size(egui::pos2(0.0, 90.0), egui::vec2(400.0, 720.0));
+        let desired = editor_desired_size_for_test(400.0, 80.0, 400.0, 40.0, Some(viewport));
+
+        assert_eq!(desired, Some(egui::vec2(400.0, 720.0)));
     }
 
     #[test]
@@ -933,13 +938,19 @@ mod tests {
         available_height: f32,
         desired_width: f32,
         desired_height: f32,
+        viewport: Option<egui::Rect>,
     ) -> Option<egui::Vec2> {
         let ctx = egui::Context::default();
         let mut desired = None;
         let _ = ctx.run_ui(Default::default(), |ui| {
             ui.set_width(available_width);
             ui.set_height(available_height);
-            desired = Some(editor_desired_size(ui, desired_width, desired_height));
+            desired = Some(editor_desired_size(
+                ui,
+                desired_width,
+                desired_height,
+                viewport,
+            ));
         });
         desired
     }
