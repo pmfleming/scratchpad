@@ -77,6 +77,15 @@ impl TextDocument {
         self.piece_tree.as_ref()
     }
 
+    /// Mutable access to the underlying piece tree. Used by view code to
+    /// create/release stable anchors. Triggers `Arc::make_mut`, which clones
+    /// the tree if it is currently shared (e.g. by an undo snapshot) — that
+    /// is the intended copy-on-write behavior; the view's anchors must live
+    /// on the new clone, not the snapshot.
+    pub fn piece_tree_mut(&mut self) -> &mut PieceTreeLite {
+        Arc::make_mut(&mut self.piece_tree)
+    }
+
     pub fn snapshot(&self) -> DocumentSnapshot {
         DocumentSnapshot::from_shared(self.piece_tree.clone())
     }

@@ -6,7 +6,6 @@ use super::{
     buffer_text_metadata_from_piece_tree,
 };
 use crate::app::ui::editor_content::native_editor::CursorRange;
-use eframe::egui;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -16,25 +15,6 @@ static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_TEMP_BUFFER_ID: AtomicU64 = AtomicU64::new(1);
 
 pub type BufferId = u64;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct EditorScrollOffset {
-    x: f32,
-    y: f32,
-}
-
-impl EditorScrollOffset {
-    fn from_vec2(offset: egui::Vec2) -> Self {
-        Self {
-            x: sanitize_scroll_axis(offset.x),
-            y: sanitize_scroll_axis(offset.y),
-        }
-    }
-
-    fn to_vec2(self) -> egui::Vec2 {
-        egui::vec2(self.x, self.y)
-    }
-}
 
 #[derive(Clone)]
 pub struct BufferState {
@@ -51,7 +31,6 @@ pub struct BufferState {
     pub disk_state: Option<DiskFileState>,
     pub freshness: BufferFreshness,
     pub active_selection: Option<Range<usize>>,
-    editor_scroll_offset: EditorScrollOffset,
     pub has_non_compliant_characters: bool,
     text_metadata_refresh_stale: bool,
     encoding_compliance_stale: bool,
@@ -253,14 +232,6 @@ impl BufferState {
 
     pub(crate) fn current_file_length(&self) -> BufferLength {
         BufferLength::from_metrics(self.document.piece_tree().metrics(), self.line_count)
-    }
-
-    pub fn editor_scroll_offset(&self) -> egui::Vec2 {
-        self.editor_scroll_offset.to_vec2()
-    }
-
-    pub fn set_editor_scroll_offset(&mut self, offset: egui::Vec2) {
-        self.editor_scroll_offset = EditorScrollOffset::from_vec2(offset);
     }
 
     pub fn view_status(
@@ -564,7 +535,6 @@ impl BufferState {
             disk_state: state.disk_state,
             freshness: state.freshness,
             active_selection: None,
-            editor_scroll_offset: EditorScrollOffset::default(),
             has_non_compliant_characters: text_metadata.has_non_compliant_characters,
             text_metadata_refresh_stale: state.text_metadata_refresh_stale,
             encoding_compliance_stale: false,
@@ -690,10 +660,6 @@ fn metadata_neutral_ascii_text(text: &str) -> bool {
         .all(|byte| byte.is_ascii() && !matches!(byte, b'\n' | b'\r' | 0x00..=0x1F))
 }
 
-fn sanitize_scroll_axis(axis: f32) -> f32 {
-    if axis.is_finite() { axis.max(0.0) } else { 0.0 }
-}
-
 fn next_buffer_id() -> BufferId {
     NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed)
 }
@@ -733,7 +699,6 @@ mod tests {
     };
     use crate::app::domain::{LineEndingCounts, TextArtifactSummary};
     use crate::app::ui::editor_content::native_editor::CursorRange;
-    use eframe::egui;
 
     fn selection(start: usize, end: usize) -> CursorRange {
         CursorRange::two(start, end)
@@ -810,19 +775,6 @@ mod tests {
         assert_eq!(status.selection_chars, 0);
         assert_eq!(status.visible_line_start, Some(3));
         assert_eq!(status.visible_line_end, Some(4));
-    }
-
-    #[test]
-    fn editor_scroll_offset_is_buffer_owned_runtime_state() {
-        let mut buffer = BufferState::new("notes.txt".to_owned(), "hello".to_owned(), None);
-
-        assert_eq!(buffer.editor_scroll_offset(), egui::Vec2::ZERO);
-
-        buffer.set_editor_scroll_offset(egui::vec2(18.0, 240.0));
-        assert_eq!(buffer.editor_scroll_offset(), egui::vec2(18.0, 240.0));
-
-        buffer.set_editor_scroll_offset(egui::vec2(-4.0, f32::INFINITY));
-        assert_eq!(buffer.editor_scroll_offset(), egui::Vec2::ZERO);
     }
 
     #[test]

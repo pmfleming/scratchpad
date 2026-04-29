@@ -1,4 +1,4 @@
-use eframe::egui::{self, epaint::Shape, pos2, vec2, Id, Rect, Sense, Ui, UiBuilder, Vec2};
+use eframe::egui::{self, Id, Rect, Sense, Ui, UiBuilder, Vec2, epaint::Shape, pos2, vec2};
 
 use super::source::ScrollSource;
 use super::state::{ScrollState, ScrollbarDragState};
@@ -103,8 +103,16 @@ impl ScrollArea {
             state.content_size.y,
             state.viewport_size.y.max(outer_rect.height()),
         );
-        let bar_x = if show_x { self.scrollbar_thickness } else { 0.0 };
-        let bar_y = if show_y { self.scrollbar_thickness } else { 0.0 };
+        let bar_x = if show_x {
+            self.scrollbar_thickness
+        } else {
+            0.0
+        };
+        let bar_y = if show_y {
+            self.scrollbar_thickness
+        } else {
+            0.0
+        };
 
         let inner_rect = Rect::from_min_max(
             outer_rect.min,
@@ -114,26 +122,26 @@ impl ScrollArea {
         state.viewport_size = inner_rect.size();
 
         // Resolve any pending programmatic target before clamping.
-        if self.source.programmatic {
-            if let Some(target) = state.pending_target.take() {
-                if let Some(align) = target.align_y {
-                    state.offset.y = align.resolve(
-                        egui::Rangef::new(target.rect.min.y, target.rect.max.y),
-                        inner_rect.height(),
-                        state.content_size.y,
-                        state.offset.y,
-                    );
-                }
-                if let Some(align) = target.align_x {
-                    state.offset.x = align.resolve(
-                        egui::Rangef::new(target.rect.min.x, target.rect.max.x),
-                        inner_rect.width(),
-                        state.content_size.x,
-                        state.offset.x,
-                    );
-                }
-                state.user_scrolled = false;
+        if self.source.programmatic
+            && let Some(target) = state.pending_target.take()
+        {
+            if let Some(align) = target.align_y {
+                state.offset.y = align.resolve(
+                    egui::Rangef::new(target.rect.min.y, target.rect.max.y),
+                    inner_rect.height(),
+                    state.content_size.y,
+                    state.offset.y,
+                );
             }
+            if let Some(align) = target.align_x {
+                state.offset.x = align.resolve(
+                    egui::Rangef::new(target.rect.min.x, target.rect.max.x),
+                    inner_rect.width(),
+                    state.content_size.x,
+                    state.offset.x,
+                );
+            }
+            state.user_scrolled = false;
         }
 
         // Hover gates wheel/scrollbar input.
@@ -154,10 +162,8 @@ impl ScrollArea {
         state.clamp_offset(self.eof_overscroll);
 
         // Build a child Ui clipped to the inner rect.
-        let visible_rect = Rect::from_min_size(
-            pos2(state.offset.x, state.offset.y),
-            inner_rect.size(),
-        );
+        let visible_rect =
+            Rect::from_min_size(pos2(state.offset.x, state.offset.y), inner_rect.size());
 
         let mut content_ui = ui.new_child(
             UiBuilder::new()
@@ -182,7 +188,10 @@ impl ScrollArea {
         // Paint scrollbars and handle drag.
         if show_y {
             let bar_rect = Rect::from_min_max(
-                pos2(outer_rect.max.x - self.scrollbar_thickness, outer_rect.min.y),
+                pos2(
+                    outer_rect.max.x - self.scrollbar_thickness,
+                    outer_rect.min.y,
+                ),
                 pos2(outer_rect.max.x, outer_rect.max.y - bar_x),
             );
             paint_and_handle_scrollbar(
@@ -197,7 +206,10 @@ impl ScrollArea {
         }
         if show_x {
             let bar_rect = Rect::from_min_max(
-                pos2(outer_rect.min.x, outer_rect.max.y - self.scrollbar_thickness),
+                pos2(
+                    outer_rect.min.x,
+                    outer_rect.max.y - self.scrollbar_thickness,
+                ),
                 pos2(outer_rect.max.x - bar_y, outer_rect.max.y),
             );
             paint_and_handle_scrollbar(
@@ -289,7 +301,11 @@ fn paint_and_handle_scrollbar(
         ),
     };
 
-    let sense = if interactive { Sense::click_and_drag() } else { Sense::hover() };
+    let sense = if interactive {
+        Sense::click_and_drag()
+    } else {
+        Sense::hover()
+    };
     let response = ui.interact(bar_rect, id, sense);
 
     if interactive {
@@ -344,7 +360,8 @@ fn paint_and_handle_scrollbar(
     } else {
         visuals.widgets.inactive.bg_fill
     };
-    ui.painter().add(Shape::rect_filled(bar_rect, 0.0, track_color));
-    ui.painter().add(Shape::rect_filled(thumb_rect, 2.0, thumb_color));
+    ui.painter()
+        .add(Shape::rect_filled(bar_rect, 0.0, track_color));
+    ui.painter()
+        .add(Shape::rect_filled(thumb_rect, 2.0, thumb_color));
 }
-

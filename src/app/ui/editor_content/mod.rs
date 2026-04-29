@@ -23,7 +23,6 @@ pub(crate) struct EditorContentOutcome {
 
 pub(crate) struct EditorContentStyle<'a> {
     pub(crate) editor_gutter: u8,
-    pub(crate) is_active: bool,
     pub(crate) viewport: Option<egui::Rect>,
     pub(crate) previous_layout: Option<&'a RenderedLayout>,
     pub(crate) text_edit: TextEditOptions<'a>,
@@ -78,10 +77,6 @@ fn render_editor_body(
         return render_artifact_view(ui, buffer, view, style.previous_layout, style.text_edit);
     }
 
-    // Single viewport-first render path. The visible-window/focused-window
-    // forks were removed in Phase 4+5 of the scrolling rebuild — the unified
-    // renderer is responsible for slicing to the viewport via
-    // `scrolling::DisplaySnapshot`/`ViewportSlice`.
     render_editor_text_edit(ui, buffer, view, style.text_edit, style.viewport)
 }
 
@@ -96,8 +91,3 @@ impl From<native_editor::EditorWidgetOutcome> for EditorContentOutcome {
         }
     }
 }
-
-
-// Phase 4+5: tests for the WindowRenderMode/preferred_window_render_mode
-// helpers were deleted along with those helpers. Replacement coverage for the
-// unified viewport-first render path will be added in Phase 6.

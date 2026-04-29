@@ -616,13 +616,12 @@ fn editor_font_id(font_size: f32) -> egui::FontId {
 
 fn editor_content_style<'a>(
     app: &ScratchpadApp,
-    is_active: bool,
+    _is_active: bool,
     request_focus: bool,
     editor_font_id: &'a egui::FontId,
 ) -> EditorContentStyle<'a> {
     EditorContentStyle {
         editor_gutter: app.editor_gutter(),
-        is_active,
         viewport: None,
         previous_layout: None,
         text_edit: TextEditOptions::new(
@@ -679,45 +678,21 @@ fn editor_scroll_id(view_id: ViewId) -> egui::Id {
     egui::Id::new(("editor_scroll", view_id))
 }
 
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct EditorScrollAreaDebugState {
-    pub(super) offset: egui::Vec2,
-    pub(super) content_size: egui::Vec2,
-    pub(super) inner_rect: egui::Rect,
-}
-
-#[cfg(test)]
-fn editor_scroll_debug_id(view_id: ViewId) -> egui::Id {
-    egui::Id::new(("editor_scroll_debug", view_id))
-}
-
-#[cfg(test)]
-fn store_editor_scroll_debug_state(
-    ctx: &egui::Context,
-    view_id: ViewId,
-    state: EditorScrollAreaDebugState,
-) {
-    ctx.data_mut(|data| data.insert_temp(editor_scroll_debug_id(view_id), state));
-}
-
-#[cfg(test)]
-pub(super) fn load_editor_scroll_debug_state(
-    ctx: &egui::Context,
-    view_id: ViewId,
-) -> Option<EditorScrollAreaDebugState> {
-    ctx.data(|data| data.get_temp(editor_scroll_debug_id(view_id)))
-}
-
 fn show_editor_scroll_area(
     ui: &mut egui::Ui,
     tab: &mut WorkspaceTab,
     request: TileScrollRequest<'_>,
 ) -> EditorContentOutcome {
     let scroll_id = editor_scroll_id(request.view_id);
+    if let Some((buffer, view)) = tab.buffer_and_view_mut(request.view_id) {
+        drain_pending_scroll_intents(view, buffer);
+    }
     let scroll_offset = tab
         .view(request.view_id)
-        .map(|view| view.editor_pixel_offset())
+        .and_then(|view| {
+            tab.buffer_for_view(request.view_id)
+                .map(|buffer| view.editor_pixel_offset_resolved(buffer))
+        })
         .unwrap_or_default();
     let wheel_requested_scroll_offset =
         requested_scroll_offset_for_pointer_wheel(ui, scroll_offset);
@@ -759,35 +734,28 @@ fn show_editor_scroll_area(
                 .unwrap_or_else(missing_editor_content_outcome)
         });
     let content_size = editor_scroll_content_size(output.content_size, virtual_content_height);
-    #[cfg(test)]
-    store_editor_scroll_debug_state(
-        ui.ctx(),
+    // Selection-edge drag emits an `EdgeAutoscroll` intent to the per-view
+    // ScrollManager rather than a one-shot pixel-offset override. The manager
+    // applies it through the standard tick path so position bookkeeping stays
+    // single-sourced. Pointer-only (non-edge) drag keeps the back-channel for
+    // now since it represents an absolute scroll target, not a velocity.
+    apply_selection_edge_autoscroll_intent(
+        ui,
+        tab,
         request.view_id,
-        EditorScrollAreaDebugState {
-            offset: output.state.offset,
-            content_size,
-            inner_rect: output.inner_rect,
-        },
+        output.inner.interaction_response.as_ref(),
+        output.inner_rect,
     );
-    let drag_requested_scroll_offset = requested_scroll_offset_for_selection_edge_drag(
+    let drag_requested_scroll_offset = requested_scroll_offset_for_pointer_drag(
         ui,
         scroll_offset,
         output.inner.interaction_response.as_ref(),
         content_size,
         output.inner_rect.size(),
         output.inner_rect,
-    )
-    .or_else(|| {
-        requested_scroll_offset_for_pointer_drag(
-            ui,
-            scroll_offset,
-            output.inner.interaction_response.as_ref(),
-            content_size,
-            output.inner_rect.size(),
-            output.inner_rect,
-        )
-    });
-    if let Some(view) = tab.view_mut(request.view_id) {
+    );
+    if let Some((buffer, view)) = tab.buffer_and_view_mut(request.view_id) {
+        publish_scroll_manager_metrics(view, output.inner_rect, row_height, content_size);
         view.set_editor_pixel_offset(resolve_editor_scroll_offset(
             &output,
             content_size,
@@ -795,8 +763,68 @@ fn show_editor_scroll_area(
             wheel_requested_scroll_offset,
             drag_requested_scroll_offset,
         ));
+        // Phase-3 anchor stickiness: once the renderer has produced a
+        // DisplaySnapshot for this view, upgrade the v1 logical anchor to a
+        // piece-tree-backed anchor so subsequent edits above the viewport
+        // keep the viewport pinned to the same content.
+        view.upgrade_scroll_anchor_to_piece(buffer);
     }
     output.inner
+}
+
+/// Publish the latest viewport rect, row height, and content extent to the
+/// per-view `ScrollManager` so subsequent `ScrollIntent::Pages` / `Reveal`
+/// resolution operates on real geometry rather than zeros.
+fn publish_scroll_manager_metrics(
+    view: &mut crate::app::domain::EditorViewState,
+    viewport_rect: egui::Rect,
+    row_height: f32,
+    content_size: egui::Vec2,
+) {
+    let visible_rows = if row_height > 0.0 {
+        (viewport_rect.height() / row_height).ceil().max(1.0) as u32
+    } else {
+        1
+    };
+    view.scroll.set_metrics(scrolling::ViewportMetrics {
+        viewport_rect,
+        row_height,
+        column_width: row_height * 0.5,
+        visible_rows,
+        visible_columns: 0,
+    });
+    let display_rows = if row_height > 0.0 {
+        (content_size.y / row_height).ceil().max(0.0) as u32
+    } else {
+        0
+    };
+    view.scroll.set_extent(scrolling::ContentExtent {
+        display_rows,
+        height: content_size.y,
+        max_line_width: content_size.x,
+    });
+}
+
+/// Drain any `ScrollIntent`s queued on the view through the per-view
+/// `ScrollManager`. This is the renderer-side half of Phase 4 wiring: input
+/// emitters push intents (search jumps, programmatic scrolls, future page/line
+/// nav), and the renderer consumes them once per frame before deriving the
+/// pixel offset that drives the egui-style `ScrollArea`.
+fn drain_pending_scroll_intents(
+    view: &mut crate::app::domain::EditorViewState,
+    buffer: &crate::app::domain::BufferState,
+) {
+    if view.pending_intents.is_empty() {
+        return;
+    }
+    let intents = std::mem::take(&mut view.pending_intents);
+    let snapshot = view.latest_display_snapshot.clone();
+    let resolve = |id| buffer.document().piece_tree().anchor_position(id);
+    let anchor_to_row = scrolling::display_aware_anchor_to_row(snapshot.as_ref(), resolve);
+    for intent in intents {
+        view.scroll
+            .apply_intent(intent, &anchor_to_row, scrolling::naive_row_to_anchor);
+    }
 }
 
 fn sync_editor_scroll_state(ui: &egui::Ui, scroll_id: egui::Id, offset: egui::Vec2) {
@@ -808,7 +836,9 @@ fn sync_editor_scroll_state(ui: &egui::Ui, scroll_id: egui::Id, offset: egui::Ve
     }
 }
 
-fn local_scroll_source(_egui_vis: egui::scroll_area::ScrollBarVisibility) -> scrolling::ScrollSource {
+fn local_scroll_source(
+    _egui_vis: egui::scroll_area::ScrollBarVisibility,
+) -> scrolling::ScrollSource {
     // Editor handles its own pointer wheel + drag (selection edges, cursor
     // reveal suppression). Scrollbar drag and programmatic targets go through
     // the local container.
@@ -879,28 +909,63 @@ fn requested_scroll_offset_for_pointer_drag(
     )
 }
 
-fn requested_scroll_offset_for_selection_edge_drag(
+/// Selection-edge autoscroll: while the user is drag-selecting near the
+/// viewport edge, push an `EdgeAutoscroll` velocity intent to the
+/// `ScrollManager` and tick once so the manager applies one frame of
+/// movement. The velocity is the per-frame proximity-scaled delta produced
+/// by [`selection_edge_drag_delta`].
+fn apply_selection_edge_autoscroll_intent(
     ui: &egui::Ui,
-    current_offset: egui::Vec2,
+    tab: &mut WorkspaceTab,
+    view_id: u64,
     interaction_response: Option<&egui::Response>,
-    content_size: egui::Vec2,
-    viewport_size: egui::Vec2,
     inner_rect: egui::Rect,
-) -> Option<egui::Vec2> {
+) {
     if !ui.input(|input| input.pointer.button_down(egui::PointerButton::Primary))
         || !interaction_response
             .is_some_and(|response| response.dragged_by(egui::PointerButton::Primary))
     {
-        return None;
+        return;
     }
-
-    let pointer_pos = ui.input(|input| input.pointer.latest_pos())?;
-    scroll_offset_from_selection_edge_drag(
-        current_offset,
-        selection_edge_drag_delta(inner_rect, pointer_pos),
-        content_size,
-        viewport_size,
-    )
+    let Some(pointer_pos) = ui.input(|input| input.pointer.latest_pos()) else {
+        return;
+    };
+    let delta = selection_edge_drag_delta(inner_rect, pointer_pos);
+    if delta == egui::Vec2::ZERO {
+        if let Some(view) = tab.view_mut(view_id) {
+            view.scroll.clear_edge_autoscroll();
+        }
+        return;
+    }
+    let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) else {
+        return;
+    };
+    let snapshot = view.latest_display_snapshot.clone();
+    let resolve = |id| buffer.document().piece_tree().anchor_position(id);
+    let anchor_to_row = scrolling::display_aware_anchor_to_row(snapshot.as_ref(), resolve);
+    // Velocity expressed as pixels-per-tick; we then tick with dt=1.0 to
+    // apply exactly the per-frame proximity delta produced by the helper.
+    view.scroll.apply_intent(
+        scrolling::ScrollIntent::EdgeAutoscroll {
+            axis: scrolling::Axis::X,
+            velocity: delta.x,
+        },
+        &anchor_to_row,
+        scrolling::naive_row_to_anchor,
+    );
+    view.scroll.apply_intent(
+        scrolling::ScrollIntent::EdgeAutoscroll {
+            axis: scrolling::Axis::Y,
+            velocity: delta.y,
+        },
+        &anchor_to_row,
+        scrolling::naive_row_to_anchor,
+    );
+    view.scroll
+        .tick_edge_autoscroll(1.0, &anchor_to_row, scrolling::naive_row_to_anchor);
+    // Reset velocity so a subsequent frame without proximity does not keep
+    // scrolling on its own.
+    view.scroll.clear_edge_autoscroll();
 }
 
 fn requested_scroll_offset_for_pointer_wheel(
@@ -945,20 +1010,6 @@ fn scroll_offset_from_drag_delta(
     }
 
     let desired = clamp_scroll_offset(current_offset - drag_delta, content_size, viewport_size);
-    (desired != current_offset).then_some(desired)
-}
-
-fn scroll_offset_from_selection_edge_drag(
-    current_offset: egui::Vec2,
-    drag_delta: egui::Vec2,
-    content_size: egui::Vec2,
-    viewport_size: egui::Vec2,
-) -> Option<egui::Vec2> {
-    if drag_delta == egui::Vec2::ZERO {
-        return None;
-    }
-
-    let desired = clamp_scroll_offset(current_offset + drag_delta, content_size, viewport_size);
     (desired != current_offset).then_some(desired)
 }
 
@@ -1026,10 +1077,8 @@ fn missing_editor_content_outcome() -> EditorContentOutcome {
 mod tests {
     use super::{
         clamp_scroll_offset, editor_scroll_id, max_scroll_offset, scroll_offset_from_drag_delta,
-        scroll_offset_from_selection_edge_drag, scroll_offset_from_wheel_delta,
-        selection_edge_drag_delta,
+        scroll_offset_from_wheel_delta, selection_edge_drag_delta,
     };
-    use crate::app::domain::{EditorViewState, WorkspaceTab};
     use eframe::egui;
 
     #[test]
@@ -1087,19 +1136,6 @@ mod tests {
                 egui::pos2(100.0, 80.0),
             ),
             egui::Vec2::ZERO
-        );
-    }
-
-    #[test]
-    fn selection_edge_drag_requests_clamped_scroll_offset() {
-        assert_eq!(
-            scroll_offset_from_selection_edge_drag(
-                egui::vec2(80.0, 60.0),
-                egui::vec2(0.0, 18.0),
-                egui::vec2(320.0, 260.0),
-                egui::vec2(120.0, 100.0),
-            ),
-            Some(egui::vec2(80.0, 78.0))
         );
     }
 

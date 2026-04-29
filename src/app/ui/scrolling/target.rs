@@ -89,15 +89,10 @@ impl ScrollTarget {
 }
 
 /// When the scrollbar should be drawn.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ScrollbarPolicy {
     AlwaysVisible,
+    #[default]
     VisibleWhenNeeded,
     Hidden,
-}
-
-impl Default for ScrollbarPolicy {
-    fn default() -> Self {
-        Self::VisibleWhenNeeded
-    }
 }

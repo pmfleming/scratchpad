@@ -1,6 +1,9 @@
+mod anchor;
 mod edit;
 mod slice;
 mod support;
+
+pub use anchor::{AnchorBias, AnchorId};
 
 use std::ops::Range;
 
@@ -189,6 +192,7 @@ pub struct PieceTreeLite {
     add: String,
     root: PieceTreeRoot,
     generation: u64,
+    anchors: anchor::AnchorRegistry,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -217,7 +221,34 @@ impl PieceTreeLite {
             add: String::new(),
             root: build_root_from_pieces(pieces),
             generation: 0,
+            anchors: anchor::AnchorRegistry::default(),
         }
+    }
+
+    /// Create a stable anchor at `char_offset`. The returned `AnchorId`
+    /// continues to identify the same logical position across edits — the
+    /// tree shifts the underlying offset on `insert`/`remove_char_range`
+    /// according to `bias`.
+    pub fn create_anchor(&mut self, char_offset: usize, bias: AnchorBias) -> AnchorId {
+        let safe = char_offset.min(self.len_chars());
+        self.anchors.create(safe, bias)
+    }
+
+    /// Release an anchor. Anchor IDs are not recycled, so it is safe to
+    /// release IDs that may already be released; the call is a no-op then.
+    pub fn release_anchor(&mut self, id: AnchorId) {
+        self.anchors.release(id);
+    }
+
+    /// Resolve an anchor to its current `char_offset`, or `None` if it has
+    /// been released.
+    pub fn anchor_position(&self, id: AnchorId) -> Option<usize> {
+        self.anchors.position(id)
+    }
+
+    /// Bias the anchor was created with, or `None` if released.
+    pub fn anchor_bias(&self, id: AnchorId) -> Option<AnchorBias> {
+        self.anchors.entry(id).map(|entry| entry.bias)
     }
 
     pub fn metrics(&self) -> PieceTreeMetrics {
@@ -682,12 +713,78 @@ fn update_cached_line_preview(
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_LEAF_BYTES, MAX_LEAF_PIECES, MAX_LEAVES_PER_INTERNAL, MIN_LEAVES_PER_INTERNAL,
-        PieceTreeLite,
+        AnchorBias, MAX_LEAF_BYTES, MAX_LEAF_PIECES, MAX_LEAVES_PER_INTERNAL,
+        MIN_LEAVES_PER_INTERNAL, PieceTreeLite,
     };
     use rand::RngExt;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+
+    #[test]
+    fn anchor_follows_content_across_inserts_and_removals() {
+        let mut tree = PieceTreeLite::from_string("hello world".to_owned());
+        // Anchor between "hello " and "world" — index 6.
+        let anchor = tree.create_anchor(6, AnchorBias::Right);
+
+        tree.insert(0, "[prefix] ");
+        assert_eq!(tree.anchor_position(anchor), Some(6 + "[prefix] ".chars().count()));
+
+        tree.remove_char_range(0..3); // remove "[pr"
+        assert_eq!(tree.anchor_position(anchor), Some(6 + "[prefix] ".chars().count() - 3));
+    }
+
+    #[test]
+    fn anchor_left_bias_stays_at_split_point_under_insertion() {
+        let mut tree = PieceTreeLite::from_string("ab".to_owned());
+        let left = tree.create_anchor(1, AnchorBias::Left);
+        let right = tree.create_anchor(1, AnchorBias::Right);
+
+        tree.insert(1, "XYZ");
+
+        assert_eq!(tree.anchor_position(left), Some(1));
+        assert_eq!(tree.anchor_position(right), Some(4));
+    }
+
+    #[test]
+    fn anchor_inside_removed_range_collapses_to_start() {
+        let mut tree = PieceTreeLite::from_string("abcdefghij".to_owned());
+        let anchor = tree.create_anchor(5, AnchorBias::Left);
+
+        tree.remove_char_range(3..8);
+
+        assert_eq!(tree.anchor_position(anchor), Some(3));
+    }
+
+    #[test]
+    fn anchor_release_drops_anchor_from_tree() {
+        let mut tree = PieceTreeLite::from_string("abc".to_owned());
+        let anchor = tree.create_anchor(2, AnchorBias::Left);
+        tree.release_anchor(anchor);
+        assert_eq!(tree.anchor_position(anchor), None);
+    }
+
+    #[test]
+    fn anchor_clamps_creation_offset_to_document_length() {
+        let mut tree = PieceTreeLite::from_string("abc".to_owned());
+        let anchor = tree.create_anchor(99, AnchorBias::Left);
+        // Clamped to len_chars at creation time.
+        assert_eq!(tree.anchor_position(anchor), Some(3));
+    }
+
+    #[test]
+    fn anchor_survives_clone_of_tree_independently() {
+        // Cloning forks the registry; subsequent edits in either side update
+        // only that clone's anchors, not the other's.
+        let mut tree = PieceTreeLite::from_string("abcdef".to_owned());
+        let anchor = tree.create_anchor(3, AnchorBias::Left);
+        let mut other = tree.clone();
+
+        tree.insert(0, "ZZ");
+        other.remove_char_range(0..2);
+
+        assert_eq!(tree.anchor_position(anchor), Some(5));
+        assert_eq!(other.anchor_position(anchor), Some(1));
+    }
 
     #[test]
     fn repeated_inserts_split_into_multiple_balanced_nodes() {

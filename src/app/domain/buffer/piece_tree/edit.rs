@@ -12,6 +12,8 @@ impl PieceTreeLite {
             return;
         }
         self.generation = self.generation.wrapping_add(1);
+        let inserted_chars = text.chars().count();
+        self.anchors.shift_for_insert(offset_chars, inserted_chars);
 
         let add_start = self.add.len();
         self.add.push_str(text);
@@ -45,6 +47,7 @@ impl PieceTreeLite {
             return;
         }
         self.generation = self.generation.wrapping_add(1);
+        self.anchors.shift_for_remove(range_chars.clone());
 
         let start_address = self.find_leaf_for_char_offset(range_chars.start);
         let end_probe = range_chars.end.saturating_sub(1);

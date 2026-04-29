@@ -110,6 +110,28 @@ impl DisplaySnapshot {
         self.row_char_ranges.get(row.0 as usize).cloned()
     }
 
+    /// Locate the display row that contains the given char offset. Returns
+    /// the last row's index if `char_offset` is past end-of-content. Returns
+    /// `None` for an empty snapshot.
+    pub fn row_for_char_offset(&self, char_offset: u32) -> Option<DisplayRow> {
+        if self.row_char_ranges.is_empty() {
+            return None;
+        }
+        let position = self
+            .row_char_ranges
+            .partition_point(|range| range.end <= char_offset);
+        let clamped = position.min(self.row_char_ranges.len() - 1);
+        Some(DisplayRow(clamped as u32))
+    }
+
+    /// Pixel y of the row containing `char_offset` plus the fractional offset
+    /// within that row. Useful for cursor-reveal computations driven by a
+    /// piece-tree-backed `ScrollAnchor`.
+    pub fn pixel_y_for_char_offset(&self, char_offset: u32) -> Option<f32> {
+        let row = self.row_for_char_offset(char_offset)?;
+        self.row_top(row)
+    }
+
     /// Compute the visible row range for a given scroll offset (top display
     /// row) and viewport height in pixels. `overscan_rows` adds a margin on
     /// both sides for smoother scrolling.

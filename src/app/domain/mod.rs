@@ -6,9 +6,9 @@ pub(crate) mod tab_support;
 pub mod view;
 
 pub use buffer::{
-    BufferFreshness, BufferId, BufferState, BufferViewStatus, DiskFileState, DocumentSnapshot,
-    EncodingSource, LineEndingCounts, LineEndingStyle, RenderedLayout, RenderedTextWindow,
-    RestoredBufferState, TextArtifactSummary, TextDocument, TextFormatMetadata,
+    AnchorBias, AnchorId, BufferFreshness, BufferId, BufferState, BufferViewStatus, DiskFileState,
+    DocumentSnapshot, EncodingSource, LineEndingCounts, LineEndingStyle, RenderedLayout,
+    RenderedTextWindow, RestoredBufferState, TextArtifactSummary, TextDocument, TextFormatMetadata,
     VisibleWindowLayoutKey, analyze_line_endings, display_line_count, platform_default_line_ending,
 };
 pub use panes::{PaneBranch, PaneNode, SplitAxis, SplitPath};
