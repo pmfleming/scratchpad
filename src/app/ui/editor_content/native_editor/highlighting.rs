@@ -94,38 +94,56 @@ fn layout_job_with_highlights(
     let highlights = merged_highlight_ranges(search_highlights, selection_range, text_char_len);
 
     if highlights.is_empty() {
-        append_job_segment(
-            &mut job,
-            text,
-            style.font_id,
-            style.text_color,
-            egui::Color32::TRANSPARENT,
-        );
+        append_plain_text_segment(&mut job, text, &style);
         return job;
     }
 
-    let boundaries = highlight_boundaries(&highlights, text_char_len);
-
-    for window in boundaries.windows(2) {
-        let segment_start = window[0];
-        let segment_end = window[1];
-        if segment_start >= segment_end || segment_end > text_char_len {
-            continue;
-        }
-        let start_byte = char_to_byte.byte_offset(segment_start);
-        let end_byte = char_to_byte.byte_offset(segment_end);
-        let kind = highlight_kind_for_segment(&highlights, segment_start);
-        let (text_color, background) = segment_colors(kind, &style);
-        append_job_segment(
-            &mut job,
-            &text[start_byte..end_byte],
-            style.font_id,
-            text_color,
-            background,
-        );
-    }
-
+    append_highlighted_segments(&mut job, text, &char_to_byte, &highlights, &style);
     job
+}
+
+fn append_plain_text_segment(
+    job: &mut egui::text::LayoutJob,
+    text: &str,
+    style: &HighlightLayoutStyle<'_>,
+) {
+    append_job_segment(
+        job,
+        text,
+        style.font_id,
+        style.text_color,
+        egui::Color32::TRANSPARENT,
+    );
+}
+
+fn append_highlighted_segments(
+    job: &mut egui::text::LayoutJob,
+    text: &str,
+    char_to_byte: &CharByteMap,
+    highlights: &[TextHighlightRange],
+    style: &HighlightLayoutStyle<'_>,
+) {
+    for window in highlight_boundaries(highlights, char_to_byte.char_len()).windows(2) {
+        append_highlight_window(job, text, char_to_byte, highlights, style, window);
+    }
+}
+
+fn append_highlight_window(
+    job: &mut egui::text::LayoutJob,
+    text: &str,
+    char_to_byte: &CharByteMap,
+    highlights: &[TextHighlightRange],
+    style: &HighlightLayoutStyle<'_>,
+    window: &[usize],
+) {
+    let segment = window[0]..window[1];
+    if segment.is_empty() || segment.end > char_to_byte.char_len() {
+        return;
+    }
+    let bytes = char_to_byte.byte_offset(segment.start)..char_to_byte.byte_offset(segment.end);
+    let kind = highlight_kind_for_segment(highlights, segment.start);
+    let (text_color, background) = segment_colors(kind, style);
+    append_job_segment(job, &text[bytes], style.font_id, text_color, background);
 }
 
 fn highlight_boundaries(highlights: &[TextHighlightRange], text_char_len: usize) -> Vec<usize> {
@@ -162,26 +180,49 @@ fn merged_highlight_ranges(
     text_char_len: usize,
 ) -> Vec<TextHighlightRange> {
     let mut highlights = Vec::new();
+    push_selection_highlight(&mut highlights, selection_range, text_char_len);
+    push_search_highlights(&mut highlights, search_highlights, text_char_len);
+    highlights
+}
+
+fn push_selection_highlight(
+    highlights: &mut Vec<TextHighlightRange>,
+    selection_range: Option<Range<usize>>,
+    text_char_len: usize,
+) {
     if let Some(range) = selection_range.filter(|range| range.end <= text_char_len) {
         highlights.push(TextHighlightRange {
             range,
             kind: HighlightKind::Selection,
         });
     }
+}
+
+fn push_search_highlights(
+    highlights: &mut Vec<TextHighlightRange>,
+    search_highlights: &SearchHighlightState,
+    text_char_len: usize,
+) {
     for (index, range) in search_highlights.ranges.iter().enumerate() {
-        if range.start >= range.end || range.end > text_char_len {
-            continue;
+        if valid_highlight_range(range, text_char_len) {
+            highlights.push(TextHighlightRange {
+                range: range.clone(),
+                kind: search_highlight_kind(search_highlights, index),
+            });
         }
-        highlights.push(TextHighlightRange {
-            range: range.clone(),
-            kind: if search_highlights.active_range_index == Some(index) {
-                HighlightKind::SearchActive
-            } else {
-                HighlightKind::SearchPassive
-            },
-        });
     }
-    highlights
+}
+
+fn valid_highlight_range(range: &Range<usize>, text_char_len: usize) -> bool {
+    range.start < range.end && range.end <= text_char_len
+}
+
+fn search_highlight_kind(search_highlights: &SearchHighlightState, index: usize) -> HighlightKind {
+    if search_highlights.active_range_index == Some(index) {
+        HighlightKind::SearchActive
+    } else {
+        HighlightKind::SearchPassive
+    }
 }
 
 fn highlight_kind_for_segment(
@@ -190,18 +231,36 @@ fn highlight_kind_for_segment(
 ) -> Option<HighlightKind> {
     let mut best: Option<HighlightKind> = None;
     for highlight in highlights {
-        if highlight.range.start <= segment_start && segment_start < highlight.range.end {
-            match highlight.kind {
-                HighlightKind::Selection => return Some(HighlightKind::Selection),
-                HighlightKind::SearchActive => best = Some(HighlightKind::SearchActive),
-                HighlightKind::SearchPassive if best.is_none() => {
-                    best = Some(HighlightKind::SearchPassive);
-                }
-                _ => {}
-            }
+        if !highlight.range.contains(&segment_start) {
+            continue;
+        }
+        match promote_highlight_kind(best, highlight.kind) {
+            HighlightPromotion::Done(kind) => return Some(kind),
+            HighlightPromotion::Continue(kind) => best = kind,
         }
     }
     best
+}
+
+enum HighlightPromotion {
+    Done(HighlightKind),
+    Continue(Option<HighlightKind>),
+}
+
+fn promote_highlight_kind(
+    current: Option<HighlightKind>,
+    candidate: HighlightKind,
+) -> HighlightPromotion {
+    match candidate {
+        HighlightKind::Selection => HighlightPromotion::Done(HighlightKind::Selection),
+        HighlightKind::SearchActive => {
+            HighlightPromotion::Continue(Some(HighlightKind::SearchActive))
+        }
+        HighlightKind::SearchPassive if current.is_none() => {
+            HighlightPromotion::Continue(Some(HighlightKind::SearchPassive))
+        }
+        HighlightKind::SearchPassive => HighlightPromotion::Continue(current),
+    }
 }
 
 fn append_job_segment(
@@ -258,4 +317,3 @@ impl CharByteMap {
         }
     }
 }
-

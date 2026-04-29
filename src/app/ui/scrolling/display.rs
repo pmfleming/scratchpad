@@ -99,7 +99,10 @@ impl DisplaySnapshot {
     }
 
     pub fn logical_line_for(&self, row: DisplayRow) -> Option<u32> {
-        self.row_logical_lines.get(row.0 as usize).copied().flatten()
+        self.row_logical_lines
+            .get(row.0 as usize)
+            .copied()
+            .flatten()
     }
 
     pub fn row_top(&self, row: DisplayRow) -> Option<f32> {
@@ -168,7 +171,13 @@ mod tests {
     use super::*;
 
     /// Test the slice math directly without constructing a real galley.
-    fn slice_math(top_row: f32, viewport_h: f32, row_h: f32, total: u32, overscan: u32) -> Range<u32> {
+    fn slice_math(
+        top_row: f32,
+        viewport_h: f32,
+        row_h: f32,
+        total: u32,
+        overscan: u32,
+    ) -> Range<u32> {
         let visible_rows = (viewport_h / row_h).ceil() as u32 + 1;
         let start = (top_row.floor() as i32 - overscan as i32).max(0) as u32;
         let end = (top_row.ceil() as u32 + visible_rows + overscan).min(total);

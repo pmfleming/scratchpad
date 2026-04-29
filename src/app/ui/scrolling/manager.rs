@@ -334,11 +334,24 @@ mod tests {
         }
     }
 
-    #[test]
-    fn lines_intent_advances_anchor_by_rows() {
+    fn manager(rows: u32, max_line_width: f32) -> ScrollManager {
         let mut sm = ScrollManager::new();
         sm.set_metrics(metrics(20.0, 25, 500.0));
-        sm.set_extent(extent(1000, 20.0, 800.0));
+        sm.set_extent(extent(rows, 20.0, max_line_width));
+        sm
+    }
+
+    fn apply_edge_autoscroll(sm: &mut ScrollManager, axis: Axis, velocity: f32) {
+        sm.apply_intent(
+            ScrollIntent::EdgeAutoscroll { axis, velocity },
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+    }
+
+    #[test]
+    fn lines_intent_advances_anchor_by_rows() {
+        let mut sm = manager(1000, 800.0);
         sm.apply_intent(
             ScrollIntent::Lines(5),
             naive_anchor_to_row,
@@ -349,9 +362,7 @@ mod tests {
 
     #[test]
     fn pages_intent_uses_visible_rows() {
-        let mut sm = ScrollManager::new();
-        sm.set_metrics(metrics(20.0, 25, 500.0));
-        sm.set_extent(extent(1000, 20.0, 800.0));
+        let mut sm = manager(1000, 800.0);
         sm.apply_intent(
             ScrollIntent::Pages(2),
             naive_anchor_to_row,
@@ -362,9 +373,7 @@ mod tests {
 
     #[test]
     fn top_intent_clears_anchor() {
-        let mut sm = ScrollManager::new();
-        sm.set_metrics(metrics(20.0, 25, 500.0));
-        sm.set_extent(extent(1000, 20.0, 800.0));
+        let mut sm = manager(1000, 800.0);
         sm.apply_intent(
             ScrollIntent::Lines(50),
             naive_anchor_to_row,
@@ -376,9 +385,7 @@ mod tests {
 
     #[test]
     fn wheel_marks_user_scrolled() {
-        let mut sm = ScrollManager::new();
-        sm.set_metrics(metrics(20.0, 25, 500.0));
-        sm.set_extent(extent(1000, 20.0, 800.0));
+        let mut sm = manager(1000, 800.0);
         sm.apply_intent(
             ScrollIntent::Wheel {
                 delta_x: 0.0,
@@ -393,9 +400,7 @@ mod tests {
 
     #[test]
     fn horizontal_clamps_to_max_line_width() {
-        let mut sm = ScrollManager::new();
-        sm.set_metrics(metrics(20.0, 25, 500.0));
-        sm.set_extent(extent(10, 20.0, 600.0));
+        let mut sm = manager(10, 600.0);
         sm.apply_intent(
             ScrollIntent::Wheel {
                 delta_x: -1000.0,
@@ -410,17 +415,8 @@ mod tests {
 
     #[test]
     fn edge_autoscroll_y_advances_anchor_after_tick() {
-        let mut sm = ScrollManager::new();
-        sm.set_metrics(metrics(20.0, 25, 500.0));
-        sm.set_extent(extent(1000, 20.0, 800.0));
-        sm.apply_intent(
-            ScrollIntent::EdgeAutoscroll {
-                axis: Axis::Y,
-                velocity: 40.0,
-            },
-            naive_anchor_to_row,
-            naive_row_to_anchor,
-        );
+        let mut sm = manager(1000, 800.0);
+        apply_edge_autoscroll(&mut sm, Axis::Y, 40.0);
         // Setting velocity alone does not advance the anchor.
         assert_eq!(sm.anchor().logical_line().unwrap(), 0);
         sm.tick_edge_autoscroll(1.0, naive_anchor_to_row, naive_row_to_anchor);
@@ -430,42 +426,17 @@ mod tests {
 
     #[test]
     fn edge_autoscroll_x_advances_horizontal_after_tick() {
-        let mut sm = ScrollManager::new();
-        sm.set_metrics(metrics(20.0, 25, 500.0));
-        sm.set_extent(extent(1000, 20.0, 4000.0));
-        sm.apply_intent(
-            ScrollIntent::EdgeAutoscroll {
-                axis: Axis::X,
-                velocity: 30.0,
-            },
-            naive_anchor_to_row,
-            naive_row_to_anchor,
-        );
+        let mut sm = manager(1000, 4000.0);
+        apply_edge_autoscroll(&mut sm, Axis::X, 30.0);
         sm.tick_edge_autoscroll(1.0, naive_anchor_to_row, naive_row_to_anchor);
         assert!((sm.horizontal_px() - 30.0).abs() < 0.001);
     }
 
     #[test]
     fn clear_edge_autoscroll_zeros_both_axes() {
-        let mut sm = ScrollManager::new();
-        sm.set_metrics(metrics(20.0, 25, 500.0));
-        sm.set_extent(extent(1000, 20.0, 4000.0));
-        sm.apply_intent(
-            ScrollIntent::EdgeAutoscroll {
-                axis: Axis::Y,
-                velocity: 50.0,
-            },
-            naive_anchor_to_row,
-            naive_row_to_anchor,
-        );
-        sm.apply_intent(
-            ScrollIntent::EdgeAutoscroll {
-                axis: Axis::X,
-                velocity: 25.0,
-            },
-            naive_anchor_to_row,
-            naive_row_to_anchor,
-        );
+        let mut sm = manager(1000, 4000.0);
+        apply_edge_autoscroll(&mut sm, Axis::Y, 50.0);
+        apply_edge_autoscroll(&mut sm, Axis::X, 25.0);
         sm.clear_edge_autoscroll();
         // After clearing, a tick should produce no movement.
         let before_row = sm.anchor();

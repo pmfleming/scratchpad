@@ -1,27 +1,17 @@
-use crate::app::domain::{BufferState, RenderedLayout};
+use crate::app::domain::BufferState;
+use crate::app::ui::scrolling::{DisplayRow, DisplaySnapshot};
 use eframe::egui;
 
 pub fn render_line_number_gutter(
     ui: &mut egui::Ui,
     buffer: &BufferState,
-    previous_layout: Option<&RenderedLayout>,
+    previous_snapshot: Option<&DisplaySnapshot>,
     font_id: &egui::FontId,
     text_color: egui::Color32,
     background_color: egui::Color32,
 ) {
     let line_count = buffer.line_count;
-    let max_number = max_gutter_line_number(previous_layout, line_count);
-    let digits = max_number.max(1).to_string().len().max(3);
-    let gutter_width = ui.fonts_mut(|fonts| {
-        fonts
-            .layout_no_wrap(
-                "0".repeat(digits),
-                font_id.clone(),
-                text_color.gamma_multiply(0.62),
-            )
-            .size()
-            .x
-    }) + 16.0;
+    let gutter_width = gutter_width(ui, font_id, text_color, previous_snapshot, line_count);
 
     ui.allocate_ui_with_layout(
         egui::vec2(gutter_width, ui.available_height()),
@@ -31,28 +21,72 @@ pub fn render_line_number_gutter(
                 .rect_filled(ui.max_rect(), 0.0, background_color);
             ui.set_width(gutter_width);
             let row_height = ui.fonts_mut(|fonts| fonts.row_height(font_id));
-            let previous_layout =
-                previous_layout.filter(|layout| layout.matches_row_height(row_height));
-
-            if let Some(layout) = previous_layout {
-                render_gutter_rows(
-                    ui,
-                    layout.content_height().max(ui.available_height()),
-                    font_id,
-                    text_color,
-                    layout_gutter_rows(layout, row_height),
-                );
-            } else {
-                render_gutter_rows(
-                    ui,
-                    row_height * line_count.max(1) as f32,
-                    font_id,
-                    text_color,
-                    fallback_gutter_rows(line_count, row_height),
-                );
-            }
+            render_gutter_body(
+                ui,
+                previous_snapshot,
+                line_count,
+                row_height,
+                font_id,
+                text_color,
+            );
         },
     );
+}
+
+fn gutter_width(
+    ui: &mut egui::Ui,
+    font_id: &egui::FontId,
+    text_color: egui::Color32,
+    previous_snapshot: Option<&DisplaySnapshot>,
+    line_count: usize,
+) -> f32 {
+    let max_number = max_gutter_line_number(previous_snapshot, line_count);
+    let digits = max_number.max(1).to_string().len().max(3);
+    ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(
+                "0".repeat(digits),
+                font_id.clone(),
+                text_color.gamma_multiply(0.62),
+            )
+            .size()
+            .x
+    }) + 16.0
+}
+
+fn render_gutter_body(
+    ui: &mut egui::Ui,
+    previous_snapshot: Option<&DisplaySnapshot>,
+    line_count: usize,
+    row_height: f32,
+    font_id: &egui::FontId,
+    text_color: egui::Color32,
+) {
+    if let Some(snapshot) = matching_row_height_snapshot(previous_snapshot, row_height) {
+        render_gutter_rows(
+            ui,
+            snapshot.content_height().max(ui.available_height()),
+            font_id,
+            text_color,
+            snapshot_gutter_rows(snapshot),
+        );
+        return;
+    }
+
+    render_gutter_rows(
+        ui,
+        row_height * line_count.max(1) as f32,
+        font_id,
+        text_color,
+        fallback_gutter_rows(line_count, row_height),
+    );
+}
+
+fn matching_row_height_snapshot(
+    snapshot: Option<&DisplaySnapshot>,
+    row_height: f32,
+) -> Option<&DisplaySnapshot> {
+    snapshot.filter(|snap| (snap.row_height() - row_height).abs() < 0.01)
 }
 
 fn render_gutter_rows(
@@ -77,19 +111,16 @@ fn render_gutter_rows(
     }
 }
 
-fn layout_gutter_rows(
-    layout: &RenderedLayout,
-    row_height: f32,
-) -> impl Iterator<Item = (f32, usize)> + '_ {
-    let y_offset = visible_layout_y_offset(layout, row_height);
-
-    layout.visible_row_range().filter_map(move |row_index| {
-        let row_top = layout.row_top(row_index)?;
-        let line_number = layout
-            .row_line_numbers
-            .get(row_index)
-            .and_then(|line_number| *line_number)?;
-        Some((y_offset + row_top, line_number))
+fn snapshot_gutter_rows(snapshot: &DisplaySnapshot) -> impl Iterator<Item = (f32, usize)> + '_ {
+    let row_count = snapshot.row_count();
+    let mut prev_logical: Option<u32> = None;
+    (0..row_count).filter_map(move |i| {
+        let row = DisplayRow(i);
+        let row_top = snapshot.row_top(row)?;
+        let logical = snapshot.logical_line_for(row)?;
+        let is_leading = prev_logical != Some(logical);
+        prev_logical = Some(logical);
+        is_leading.then_some((row_top, logical as usize + 1))
     })
 }
 
@@ -99,88 +130,18 @@ fn fallback_gutter_rows(line_count: usize, row_height: f32) -> impl Iterator<Ite
 }
 
 fn max_gutter_line_number(
-    previous_layout: Option<&RenderedLayout>,
+    previous_snapshot: Option<&DisplaySnapshot>,
     fallback_line_count: usize,
 ) -> usize {
-    previous_layout
-        .and_then(|layout| {
-            layout
-                .row_line_numbers
-                .iter()
-                .rev()
-                .flatten()
-                .copied()
-                .next()
+    previous_snapshot
+        .and_then(|snap| {
+            let count = snap.row_count();
+            if count == 0 {
+                return None;
+            }
+            snap.logical_line_for(DisplayRow(count - 1))
+                .map(|n| n as usize + 1)
         })
         .unwrap_or(fallback_line_count)
         .max(fallback_line_count)
-}
-
-fn visible_layout_y_offset(layout: &RenderedLayout, row_height: f32) -> f32 {
-    layout
-        .visible_text
-        .as_ref()
-        .map(|window| window.layout_row_offset as f32 * row_height)
-        .unwrap_or(0.0)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{max_gutter_line_number, visible_layout_y_offset};
-    use crate::app::domain::{RenderedLayout, RenderedTextWindow};
-    use eframe::egui;
-
-    fn test_layout(line_count: usize) -> RenderedLayout {
-        let ctx = egui::Context::default();
-        let mut layout = None;
-        let _ = ctx.run_ui(Default::default(), |ui| {
-            let text = (0..line_count)
-                .map(|index| format!("line {index}"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            let galley = ui.ctx().fonts_mut(|fonts| {
-                fonts.layout_job(egui::text::LayoutJob::simple(
-                    text,
-                    egui::FontId::monospace(14.0),
-                    egui::Color32::WHITE,
-                    400.0,
-                ))
-            });
-            layout = Some(RenderedLayout::from_galley(galley));
-        });
-        layout.expect("layout should be captured")
-    }
-
-    #[test]
-    fn gutter_width_uses_full_document_line_count() {
-        let mut layout = test_layout(10);
-        layout.set_visible_text(RenderedTextWindow {
-            row_range: 0..3,
-            line_range: 97..100,
-            char_range: 0..12,
-            layout_row_offset: 97,
-            text: "line 97\nline 98\nline 99\n".to_owned(),
-            truncated_start: true,
-            truncated_end: true,
-        });
-        layout.offset_line_numbers(97);
-
-        assert_eq!(max_gutter_line_number(Some(&layout), 1_000), 1_000);
-    }
-
-    #[test]
-    fn visible_line_windows_shift_gutter_rows_down_by_their_row_offset() {
-        let mut layout = test_layout(3);
-        layout.set_visible_text(RenderedTextWindow {
-            row_range: 0..3,
-            line_range: 40..43,
-            char_range: 0..18,
-            layout_row_offset: 40,
-            text: "line 40\nline 41\nline 42\n".to_owned(),
-            truncated_start: true,
-            truncated_end: true,
-        });
-
-        assert_eq!(visible_layout_y_offset(&layout, 18.0), 720.0);
-    }
 }

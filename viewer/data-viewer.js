@@ -31,6 +31,7 @@
         selectedModule: null,
         selectedFlamegraph: null,
         selectedRun: null,
+        selectedLayer: null,
         lastObservedFinishedRun: null,
         mapZoom: 0.65,
         mapLayout: 'folder',
@@ -1020,13 +1021,17 @@
         return `${formatNumber.format(value)} B`;
     }
 
-    function renderPills(value) {
-        const values = Array.isArray(value)
+    function pillValues(value) {
+        return Array.isArray(value)
             ? value
             : String(value || "")
                 .split(",")
                 .map((item) => item.trim())
                 .filter(Boolean);
+    }
+
+    function renderPills(value) {
+        const values = pillValues(value);
         if (!values.length) {
             return '<span class="muted">-</span>';
         }
@@ -1034,67 +1039,356 @@
     }
 
     function renderOverview() {
-        const latestRun = [...state.runs].reverse().find(Boolean);
-        const correctnessSummary = state.correctness?.summary || {};
-        const speedSummary = state.speedReport?.summary || {};
-        const mapSummary = state.map?.meta?.summary || {};
-        renderOverviewCharts();
-        renderSummary("overview-summary", [
-            metricCard("Quality Items", state.hotspots.length + state.clones.length),
-            metricCard("Performance Rows", (speedSummary.search_scenarios || 0) + (speedSummary.editor_scenarios || 0) + (speedSummary.tabs_and_splits_scenarios || 0)),
-            metricCard("Tests", correctnessSummary.test_count ?? "-"),
-            metricCard("Map Modules", mapSummary.measured_modules ?? "-"),
-            metricCard("Latest Run", latestRun ? escapeHtml(latestRun.status) : "-"),
-            metricCard("Stale Unknown Tests", correctnessSummary.unknown ?? "-"),
-        ]);
+        renderHealthGauges();
+        renderRiskTreemap();
+        renderTopConcerns();
+        renderRunStrip();
+    }
 
-        renderTable(
-            "overview-quality",
-            ["Item", "Score", "Size", "Signals"],
-            [...state.hotspots]
-                .sort((left, right) => qualityScore(right) - qualityScore(left))
-                .slice(0, 6)
-                .map((item) => `<tr>
-                    <td><code>${escapeHtml(item.name)}</code></td>
-                    <td class="${riskClass(qualityScore(item), 300, 600)}">${formatNumber.format(qualityScore(item))}</td>
-                    <td>${formatNumber.format(item.sloc || 0)} SLOC</td>
-                    <td>${renderPills(item.signals)}</td>
-                </tr>`)
-        );
+    function classifyStatus(level) {
+        if (level === "stale") return { label: "Stale", cls: "stale" };
+        if (level === "bad") return { label: "Regressed", cls: "bad" };
+        if (level === "watch") return { label: "Watch", cls: "watch" };
+        return { label: "OK", cls: "ok" };
+    }
 
-        const triage = state.speedReport?.triage || [];
-        renderTable(
-            "overview-performance",
-            ["Scenario", "Family", "Resource", "Action"],
-            triage.slice(0, 6).map((item) => `<tr>
-                <td><code>${escapeHtml(item.scenario_label || item.scenario_id)}</code></td>
-                <td><span class="pill">${escapeHtml(item.family || "-")}</span></td>
-                <td><span class="pill">${escapeHtml(item.suspected_limiting_resource || "-")}</span></td>
-                <td>${escapeHtml(item.recommended_action || "-")}</td>
-            </tr>`)
-        );
+    function renderGaugeCard({ id, title, value, status, driver, sparkline, deltaInfo }) {
+        const s = classifyStatus(status);
+        const delta = deltaInfo
+            ? `<span class="gauge-card__delta gauge-card__delta--${deltaInfo.direction}">${escapeHtml(deltaInfo.label)}</span>`
+            : `<span class="gauge-card__delta">no history</span>`;
+        const spark = sparkline && sparkline.length >= 2 ? renderSparkline(sparkline) : "";
+        return `<div class="gauge-card" id="${id}">
+            <div class="gauge-card__title">
+                <span>${escapeHtml(title)}</span>
+                <span class="gauge-card__status gauge-card__status--${s.cls}">${s.label}</span>
+            </div>
+            <div class="gauge-card__metric">
+                <span class="gauge-card__value">${escapeHtml(value)}</span>
+                ${delta}
+            </div>
+            <div class="gauge-card__driver">${escapeHtml(driver || "")}</div>
+            ${spark}
+        </div>`;
+    }
 
-        renderTable(
-            "overview-correctness",
-            ["Layer", "Tests", "Failed", "Unknown"],
-            (state.correctness?.layers || []).map((item) => `<tr>
-                <td>${escapeHtml(item.name)}</td>
-                <td>${formatNumber.format(item.total || 0)}</td>
-                <td class="${item.failed ? "risk-bad" : "risk-good"}">${formatNumber.format(item.failed || 0)}</td>
-                <td>${formatNumber.format(item.unknown || 0)}</td>
-            </tr>`)
-        );
+    function renderSparkline(values) {
+        if (!values.length) return "";
+        const w = 200, h = 44, pad = 2;
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const range = max - min || 1;
+        const points = values.map((v, i) => {
+            const x = pad + (i * (w - pad * 2)) / Math.max(1, values.length - 1);
+            const y = h - pad - ((v - min) / range) * (h - pad * 2);
+            return `${x.toFixed(1)},${y.toFixed(1)}`;
+        }).join(" ");
+        const last = values[values.length - 1];
+        const lastX = w - pad;
+        const lastY = h - pad - ((last - min) / range) * (h - pad * 2);
+        return `<svg class="gauge-card__sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+            <polyline fill="none" stroke="#6fd0ff" stroke-width="2" points="${points}" />
+            <circle cx="${lastX}" cy="${lastY.toFixed(1)}" r="2.5" fill="#6fd0ff" />
+        </svg>`;
+    }
 
-        renderTable(
-            "overview-runs",
-            ["Run", "Selector", "Status", "Duration"],
-            [...state.runs].reverse().slice(0, 6).map((item) => `<tr>
-                <td><code>${escapeHtml(item.id)}</code></td>
-                <td>${escapeHtml(item.selector || "-")}</td>
-                <td><span class="pill">${escapeHtml(item.status || "-")}</span></td>
-                <td>${item.duration_seconds == null ? "-" : `${formatNumber.format(item.duration_seconds)} s`}</td>
-            </tr>`)
-        );
+    function runMetricSeries(metricKey) {
+        // Pull headline metric values from finished runs in chronological order.
+        return state.runs
+            .filter((run) => run.metrics && run.metrics[metricKey] != null && run.finished_at)
+            .map((run) => Number(run.metrics[metricKey]))
+            .filter((v) => Number.isFinite(v))
+            .slice(-12);
+    }
+
+    function describeDelta(series, { higherIsBetter = false } = {}) {
+        if (!series || series.length < 2) return null;
+        const last = series[series.length - 1];
+        const prev = series[series.length - 2];
+        if (prev === 0 && last === 0) return null;
+        const diff = last - prev;
+        const pct = prev === 0 ? null : (diff / Math.abs(prev)) * 100;
+        const arrow = diff === 0 ? "" : diff > 0 ? "▲" : "▼";
+        const direction = diff === 0 ? "flat" : (diff > 0 ? (higherIsBetter ? "down" : "up") : (higherIsBetter ? "up" : "down"));
+        const label = pct == null ? `${arrow} ${formatNumber.format(diff)}` : `${arrow} ${formatNumber.format(Math.abs(pct))}%`;
+        return { direction, label };
+    }
+
+    function computeQualityHealth() {
+        const hotspots = state.hotspots || [];
+        const clones = state.clones || [];
+        const bad = hotspots.filter((h) => qualityScore(h) >= 600).length;
+        const warn = hotspots.filter((h) => {
+            const s = qualityScore(h);
+            return s >= 300 && s < 600;
+        }).length;
+        const cloneRisks = clones.filter((c) => (c.score || 0) >= 40).length;
+        const total = bad + warn + cloneRisks;
+        let status = "ok";
+        if (bad > 0 || cloneRisks > 0) status = "bad";
+        else if (warn > 0) status = "watch";
+        if (!hotspots.length && !clones.length) status = "stale";
+        const worst = hotspots[0];
+        const driver = worst
+            ? `Worst: ${worst.name.split(/[\\/]/).pop()} (${formatNumber.format(qualityScore(worst))})`
+            : "No hotspots data";
+        return {
+            status,
+            value: String(total),
+            driver,
+            series: runMetricSeries("quality_risk_count"),
+        };
+    }
+
+    function computeCapacityHealth() {
+        const speed = state.speedReport || {};
+        const summary = speed.summary || {};
+        const triageSummary = speed.triage_summary || null;
+        const overBudget = summary.over_budget_latency ?? 0;
+        const coverageGaps = summary.coverage_gaps ?? 0;
+        const ceilings = summary.near_failure_ceilings ?? 0;
+        let status = "ok";
+        let value = "0";
+        let driver = "All scenarios within budget";
+        if (triageSummary) {
+            const critical = triageSummary.critical ?? 0;
+            const watch = triageSummary.watch ?? 0;
+            value = String(critical + watch);
+            if (critical > 0) { status = "bad"; driver = `${critical} critical, ${watch} to watch`; }
+            else if (watch > 0) { status = "watch"; driver = `${watch} scenarios approaching budget`; }
+        } else {
+            const total = overBudget + ceilings;
+            value = String(total);
+            if (overBudget > 0 || ceilings > 0) {
+                status = overBudget > 2 || ceilings > 0 ? "bad" : "watch";
+                driver = `${overBudget} over budget, ${ceilings} near ceiling, ${coverageGaps} coverage gaps`;
+            }
+        }
+        if (!state.speedReport) { status = "stale"; value = "—"; driver = "Run performance refresh"; }
+        return {
+            status,
+            value,
+            driver,
+            series: runMetricSeries("capacity_risk_count"),
+        };
+    }
+
+    function computeCorrectnessHealth() {
+        const c = state.correctness || {};
+        const summary = c.summary || {};
+        const failed = summary.failed ?? 0;
+        const unknown = summary.unknown ?? 0;
+        const total = summary.test_count ?? 0;
+        let status = "ok";
+        let driver = `${total} tests, all passing`;
+        if (failed > 0) { status = "bad"; driver = `${failed} failed, ${unknown} unknown`; }
+        else if (unknown > 0) { status = "watch"; driver = `${unknown} tests have not been run`; }
+        if (!state.correctness) { status = "stale"; driver = "Run correctness refresh"; }
+        const value = state.correctness ? `${total - failed - unknown}/${total}` : "—";
+        return {
+            status,
+            value,
+            driver,
+            series: runMetricSeries("tests_passed"),
+        };
+    }
+
+    function renderHealthGauges() {
+        const target = byId("overview-health");
+        if (!target) return;
+        const quality = computeQualityHealth();
+        const capacity = computeCapacityHealth();
+        const correctness = computeCorrectnessHealth();
+        target.innerHTML = [
+            renderGaugeCard({
+                id: "gauge-quality",
+                title: "Quality",
+                value: quality.value,
+                status: quality.status,
+                driver: quality.driver,
+                sparkline: quality.series,
+                deltaInfo: describeDelta(quality.series),
+            }),
+            renderGaugeCard({
+                id: "gauge-capacity",
+                title: "Capacity",
+                value: capacity.value,
+                status: capacity.status,
+                driver: capacity.driver,
+                sparkline: capacity.series,
+                deltaInfo: describeDelta(capacity.series),
+            }),
+            renderGaugeCard({
+                id: "gauge-correctness",
+                title: "Correctness",
+                value: correctness.value,
+                status: correctness.status,
+                driver: correctness.driver,
+                sparkline: correctness.series,
+                deltaInfo: describeDelta(correctness.series, { higherIsBetter: true }),
+            }),
+        ].join("");
+    }
+
+    function moduleScoreFor(module, metric) {
+        const m = module.metrics || {};
+        if (metric === "total_score") return Number(m.total_score || 0);
+        return Number(m[metric] || 0);
+    }
+
+    function colorForScore(score, max) {
+        const t = max ? Math.min(1, score / max) : 0;
+        // Interpolate good -> warn -> bad.
+        if (t < 0.5) {
+            const k = t / 0.5;
+            return mixColor([125, 220, 155], [243, 201, 105], k);
+        }
+        const k = (t - 0.5) / 0.5;
+        return mixColor([243, 201, 105], [255, 116, 116], k);
+    }
+
+    function mixColor(a, b, t) {
+        const r = Math.round(a[0] + (b[0] - a[0]) * t);
+        const g = Math.round(a[1] + (b[1] - a[1]) * t);
+        const bl = Math.round(a[2] + (b[2] - a[2]) * t);
+        return `rgb(${r}, ${g}, ${bl})`;
+    }
+
+    function renderRiskTreemap() {
+        const target = byId("overview-treemap");
+        if (!target) return;
+        const graph = state.map?.graph;
+        if (!graph || !graph.nodes) {
+            target.innerHTML = `<div class="risk-treemap__empty">No map data. Run the Map refresh.</div>`;
+            return;
+        }
+        const modules = graph.nodes
+            .map((n) => n.data)
+            .filter((n) => n && !n.is_group);
+        if (!modules.length) {
+            target.innerHTML = `<div class="risk-treemap__empty">No modules to display.</div>`;
+            return;
+        }
+        const ranked = modules
+            .map((m) => ({ module: m, score: moduleScoreFor(m, "total_score") }))
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 60);
+        const maxScore = ranked[0]?.score || 1;
+        target.innerHTML = ranked.map(({ module, score }) => {
+            const sloc = Number(module.metrics?.sloc || module.metrics?.size || 1);
+            const widthBasis = Math.max(80, Math.min(260, 60 + Math.sqrt(sloc) * 4));
+            const color = colorForScore(score, maxScore);
+            const label = (module.name || module.id || "?").split(/[\\/]/).slice(-2).join("/");
+            return `<div class="risk-treemap__cell" style="flex: 1 1 ${widthBasis}px; background:${color};" title="${escapeHtml(module.id)} — score ${formatNumber.format(score)}" data-module-id="${escapeHtml(module.id)}">${escapeHtml(label)}</div>`;
+        }).join("");
+        target.querySelectorAll(".risk-treemap__cell").forEach((el) => {
+            el.addEventListener("click", () => {
+                state.selectedModule = el.dataset.moduleId;
+                document.querySelector('.tab[data-tab="map"]')?.click();
+                renderMap();
+            });
+        });
+    }
+
+    function renderTopListCard({ title, subtitle, items, emptyText }) {
+        const list = items.length
+            ? `<ol>${items.map((item) => `<li><span class="top-list-card__label">${item.label}</span><span class="top-list-card__value">${item.value}</span></li>`).join("")}</ol>`
+            : `<p class="muted">${escapeHtml(emptyText)}</p>`;
+        return `<div class="top-list-card">
+            <h3>${escapeHtml(title)}</h3>
+            <p>${escapeHtml(subtitle)}</p>
+            ${list}
+        </div>`;
+    }
+
+    function renderTopConcerns() {
+        const target = byId("overview-top-concerns");
+        if (!target) return;
+
+        const qualityItems = [...(state.hotspots || [])]
+            .sort((a, b) => qualityScore(b) - qualityScore(a))
+            .slice(0, 5)
+            .map((item) => ({
+                label: `<code>${escapeHtml((item.name || "").split(/[\\/]/).pop() || item.name)}</code>`,
+                value: `<span class="${riskClass(qualityScore(item), 300, 600)}">${formatNumber.format(qualityScore(item))}</span>`,
+            }));
+
+        const slowItems = [...(state.slowspots || []), ...(state.searchSpeed || [])]
+            .map((item) => ({
+                name: item.scenario_label || item.name,
+                ratio: item.threshold_ms ? (item.mean_ns / 1_000_000) / item.threshold_ms : 0,
+            }))
+            .filter((it) => it.ratio > 0)
+            .sort((a, b) => b.ratio - a.ratio)
+            .slice(0, 5)
+            .map((it) => ({
+                label: `<code>${escapeHtml((it.name || "").split(/[\\/]/).pop() || it.name)}</code>`,
+                value: `<span class="${it.ratio > 1 ? "risk-bad" : it.ratio > 0.85 ? "risk-warn" : "risk-good"}">${formatNumber.format(it.ratio * 100)}%</span>`,
+            }));
+
+        const tests = state.correctness?.tests || [];
+        const testItems = tests
+            .filter((t) => t.last_status === "failed" || t.last_status === "unknown")
+            .slice(0, 5)
+            .map((t) => ({
+                label: `<code>${escapeHtml(t.name || t.path)}</code>`,
+                value: `<span class="${t.last_status === "failed" ? "risk-bad" : "risk-warn"}">${escapeHtml(t.last_status)}</span>`,
+            }));
+
+        target.innerHTML = [
+            renderTopListCard({
+                title: "Top quality risks",
+                subtitle: "Highest hotspot scores.",
+                items: qualityItems,
+                emptyText: "No hotspot data.",
+            }),
+            renderTopListCard({
+                title: "Slowest vs budget",
+                subtitle: "Mean latency relative to threshold.",
+                items: slowItems,
+                emptyText: "No benchmark data.",
+            }),
+            renderTopListCard({
+                title: "Failing or unknown tests",
+                subtitle: "Need attention or have not run.",
+                items: testItems,
+                emptyText: state.correctness ? "All tests passing." : "No test data.",
+            }),
+        ].join("");
+    }
+
+    function renderRunStrip() {
+        const target = byId("overview-run-strip");
+        if (!target) return;
+        const runs = [...state.runs].slice(-12).reverse();
+        if (!runs.length) {
+            target.innerHTML = `<p class="muted">No runs yet. Use the Refresh buttons above to start one.</p>`;
+            return;
+        }
+        target.innerHTML = runs.map((run) => {
+            const status = (run.status || "queued").toLowerCase();
+            const dur = run.duration_seconds == null ? "" : ` ${formatNumber.format(run.duration_seconds)}s`;
+            const ts = run.finished_at || run.started_at || run.created_at || 0;
+            const tsLabel = ts ? new Date(ts * 1000).toLocaleTimeString() : run.id;
+            const isActive = state.selectedRun === run.id;
+            return `<button type="button" class="run-strip__dot ${isActive ? "is-active" : ""}" data-run-id="${escapeHtml(run.id)}" title="${escapeHtml(run.selector || run.id)}">
+                <span class="run-strip__bullet run-strip__bullet--${status}"></span>
+                <span>${escapeHtml(tsLabel)}${escapeHtml(dur)}</span>
+            </button>`;
+        }).join("");
+        target.querySelectorAll(".run-strip__dot").forEach((el) => {
+            el.addEventListener("click", () => {
+                const id = el.dataset.runId;
+                state.selectedRun = id;
+                const out = byId("overview-run-log");
+                if (out) {
+                    out.hidden = false;
+                    out.textContent = "Loading run log...";
+                }
+                loadRunLog(id, "overview-run-log");
+                renderRunStrip();
+            });
+        });
     }
 
     function renderPerformanceScenarios() {
@@ -1168,7 +1462,15 @@
         const layers = payload.layers || [];
         const tests = payload.tests || [];
         const query = byId("correctness-filter")?.value || "";
-        const filtered = tests.filter((item) => matchesFilter(item, query));
+        const showAll = byId("correctness-show-all")?.checked ?? false;
+        const layerFilter = state.selectedLayer;
+        let filtered = tests.filter((item) => matchesFilter(item, query));
+        if (layerFilter) {
+            filtered = filtered.filter((item) => item.layer === layerFilter);
+        }
+        if (!showAll) {
+            filtered = filtered.filter((item) => item.last_status === "failed" || item.last_status === "unknown");
+        }
         renderSummary("correctness-summary", [
             metricCard("Tests", summary.test_count ?? tests.length),
             metricCard("Integration", summary.integration_count ?? "-"),
@@ -1207,19 +1509,22 @@
         const runs = [...state.runs].reverse();
         const running = runs.filter((item) => item.status === "running" || item.status === "queued").length;
         const failed = runs.filter((item) => item.status === "failed").length;
+        const activeRun = runs.find((item) => item.status === "running" || item.status === "queued");
         renderSummary("run-log-summary", [
             metricCard("Runs", runs.length),
             metricCard("Running", running),
             metricCard("Failed", failed),
             metricCard("Latest", runs[0]?.status || "-"),
+            metricCard("Active Progress", activeRun ? runProgressLabel(activeRun) : "-"),
         ]);
         renderTable(
             "run-log-table",
-            ["Run", "Selector", "Tasks", "Status", "Duration", "Artifacts"],
+            ["Run", "Selector", "Tasks", "Progress", "Status", "Duration", "Artifacts"],
             runs.map((item) => `<tr class="run-row" data-run-id="${escapeHtml(item.id)}">
                 <td><code>${escapeHtml(item.id)}</code></td>
                 <td>${escapeHtml(item.selector || "-")}</td>
                 <td>${renderPills(item.task_ids || [])}</td>
+                <td>${renderRunProgress(item, "table")}</td>
                 <td><span class="pill">${escapeHtml(item.status || "-")}</span></td>
                 <td>${item.duration_seconds == null ? "-" : `${formatNumber.format(item.duration_seconds)} s`}</td>
                 <td>${renderPills(item.artifacts || [])}</td>
@@ -1228,6 +1533,59 @@
         byId("run-log-table").querySelectorAll(".run-row").forEach((row) => {
             row.addEventListener("click", () => loadRunLog(row.dataset.runId));
         });
+        renderSelectedRunProgress();
+    }
+
+    function runProgress(run) {
+        const taskIds = run.task_ids || [];
+        const total = Number(run.total_tasks ?? taskIds.length ?? 0);
+        let done = Number(run.completed_tasks ?? 0);
+        if (!Number.isFinite(done)) done = 0;
+        if (run.status === "completed" && total > 0) done = total;
+        done = Math.max(0, Math.min(done, total));
+        const left = Math.max(0, total - done);
+        const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+        return { total, done, left, percent };
+    }
+
+    function runProgressLabel(run) {
+        const progress = runProgress(run);
+        if (!progress.total) return "-";
+        const current = run.current_task_id ? ` · ${run.current_task_id}` : "";
+        return `${progress.done}/${progress.total}${current}`;
+    }
+
+    function renderRunProgress(run, density = "detail") {
+        const progress = runProgress(run);
+        if (!progress.total) return '<span class="muted">-</span>';
+        const statusClass = run.status === "failed"
+            ? "is-failed"
+            : run.status === "completed"
+                ? "is-complete"
+                : run.status === "interrupted"
+                    ? "is-interrupted"
+                    : "is-running";
+        const current = run.current_task_id
+            ? `<span class="run-progress__current">${escapeHtml(run.current_task_id)}</span>`
+            : "";
+        return `<div class="run-progress run-progress--${density} ${statusClass}">
+            <div class="run-progress__track" role="progressbar" aria-valuenow="${progress.percent}" aria-valuemin="0" aria-valuemax="100" aria-label="${escapeHtml(run.id)} progress">
+                <div class="run-progress__bar" style="width:${progress.percent}%"></div>
+            </div>
+            <div class="run-progress__meta">
+                <span>${progress.done} done</span>
+                <span>${progress.left} left</span>
+                <span>${progress.percent}%</span>
+            </div>
+            ${current}
+        </div>`;
+    }
+
+    function renderSelectedRunProgress() {
+        const target = byId("run-log-progress");
+        if (!target) return;
+        const run = state.runs.find((item) => item.id === state.selectedRun);
+        target.innerHTML = run ? renderRunProgress(run, "detail") : "";
     }
 
     function renderMap() {
@@ -1396,15 +1754,15 @@
                                 state.mapMetric === 'performance' ? right.performance_risk :
                                     state.mapMetric === 'quality' ? right.quality_risk :
                                         state.mapMetric === 'correctness' ? right.correctness_risk :
-                                    state.mapMetric === 'architectural' ? right.architectural_risk :
-                                        state.mapMetric === 'churn' ? right.churn : right.total_score;
+                                            state.mapMetric === 'architectural' ? right.architectural_risk :
+                                                state.mapMetric === 'churn' ? right.churn : right.total_score;
                         const metricLeft = state.mapMetric === 'maintainability' ? left.maintainability_risk :
                             state.mapMetric === 'change' ? left.change_risk :
                                 state.mapMetric === 'performance' ? left.performance_risk :
                                     state.mapMetric === 'quality' ? left.quality_risk :
                                         state.mapMetric === 'correctness' ? left.correctness_risk :
-                                    state.mapMetric === 'architectural' ? left.architectural_risk :
-                                        state.mapMetric === 'churn' ? left.churn : left.total_score;
+                                            state.mapMetric === 'architectural' ? left.architectural_risk :
+                                                state.mapMetric === 'churn' ? left.churn : left.total_score;
                         return (metricRight || 0) - (metricLeft || 0);
                     })
                     .forEach((node, moduleIndex) => {
@@ -1445,15 +1803,15 @@
                                 state.mapMetric === 'performance' ? right.performance_risk :
                                     state.mapMetric === 'quality' ? right.quality_risk :
                                         state.mapMetric === 'correctness' ? right.correctness_risk :
-                                    state.mapMetric === 'architectural' ? right.architectural_risk :
-                                        state.mapMetric === 'churn' ? right.churn : right.total_score;
+                                            state.mapMetric === 'architectural' ? right.architectural_risk :
+                                                state.mapMetric === 'churn' ? right.churn : right.total_score;
                         const metricLeft = state.mapMetric === 'maintainability' ? left.maintainability_risk :
                             state.mapMetric === 'change' ? left.change_risk :
                                 state.mapMetric === 'performance' ? left.performance_risk :
                                     state.mapMetric === 'quality' ? left.quality_risk :
                                         state.mapMetric === 'correctness' ? left.correctness_risk :
-                                    state.mapMetric === 'architectural' ? left.architectural_risk :
-                                        state.mapMetric === 'churn' ? left.churn : left.total_score;
+                                            state.mapMetric === 'architectural' ? left.architectural_risk :
+                                                state.mapMetric === 'churn' ? left.churn : left.total_score;
                         return (metricRight || 0) - (metricLeft || 0);
                     })
                     .forEach((node, columnIndex) => {
@@ -1783,10 +2141,13 @@
         }
     }
 
-    async function loadRunLog(runId) {
+    async function loadRunLog(runId, targetId = "run-log-output") {
         if (!runId) return;
         state.selectedRun = runId;
-        const output = byId("run-log-output");
+        renderSelectedRunProgress();
+        const output = byId(targetId);
+        if (!output) return;
+        if (targetId === "overview-run-log") output.hidden = false;
         output.textContent = "Loading run log...";
         try {
             const response = await fetch(`/api/run/${encodeURIComponent(runId)}/log`, { cache: "no-store" });
@@ -1820,7 +2181,18 @@
         button.textContent = "Queued...";
         try {
             const response = await fetch(endpoint, { method: "POST" });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            if (!response.ok) {
+                const payload = await response.json().catch(() => null);
+                if (response.status === 409 && payload) {
+                    byId("load-status").textContent = "Refresh already running.";
+                    byId("load-detail").textContent = payload.active_run_id
+                        ? `Waiting for ${payload.active_run_id} to finish.`
+                        : "Wait for the current dashboard refresh to finish.";
+                    await refreshRuns();
+                    return;
+                }
+                throw new Error(`HTTP ${response.status}`);
+            }
             const payload = await response.json();
             byId("load-status").textContent = `Queued ${payload.run_id}.`;
             byId("load-detail").textContent = "Refresh is running through the local dashboard server.";
@@ -1884,26 +2256,12 @@
             detail.textContent = "Data came from target/analysis.";
         } else if (loaded.length > 0) {
             status.textContent = `Loaded ${loaded.length} default artifact sets.`;
-            detail.textContent = `Some default files were missing: ${missing.join("; ")}. Use the file inputs above or refresh the overview to regenerate them.`;
+            detail.textContent = `Some default files were missing: ${missing.join("; ")}. Use Refresh to regenerate them.`;
         } else {
-            status.textContent = "Manual JSON load available.";
-            detail.textContent = `Default fetch failed: ${missing.join("; ")}. Pick JSON files above, or serve the repo root with a local HTTP server.`;
+            status.textContent = "No artifacts loaded.";
+            detail.textContent = `Default fetch failed: ${missing.join("; ")}. Start with scripts/open-overview.ps1 and use Refresh to regenerate artifacts.`;
         }
         renderAll();
-    }
-
-    function readJsonFile(inputId, stateKey, renderFn) {
-        byId(inputId).addEventListener("change", async (event) => {
-            const file = event.target.files?.[0];
-            if (!file) {
-                return;
-            }
-            const text = await file.text();
-            state[stateKey] = JSON.parse(text);
-            byId("load-status").textContent = `Loaded ${file.name}.`;
-            byId("load-detail").textContent = "Manual file input updated the viewer state.";
-            renderFn();
-        });
     }
 
     function setupTabs() {
@@ -1924,27 +2282,214 @@
     function renderAll() {
         renderOverview();
         renderHotspots();
+        renderQualityDistribution();
+        renderQualityFeed();
         renderSlowspots();
         renderSearchSpeed();
+        renderSearchBudget();
+        renderEditorBudget();
         renderSpeedReport();
         renderCapacityReport();
         renderResourceProfiles();
         renderClones();
         renderPerformanceScenarios();
         renderCorrectness();
+        renderCorrectnessMatrix();
         renderMap();
         renderFlamegraphs();
         renderRunLog();
     }
 
+    function renderQualityDistribution() {
+        const target = byId("quality-distribution");
+        if (!target) return;
+        const hotspots = state.hotspots || [];
+        if (!hotspots.length) {
+            target.innerHTML = `<p class="muted">No hotspot data.</p>`;
+            return;
+        }
+        let good = 0, warn = 0, bad = 0;
+        const signalCounts = new Map();
+        hotspots.forEach((h) => {
+            const s = qualityScore(h);
+            if (s >= 600) bad++;
+            else if (s >= 300) warn++;
+            else good++;
+            pillValues(h.signals).forEach((sig) => signalCounts.set(sig, (signalCounts.get(sig) || 0) + 1));
+        });
+        const max = Math.max(good, warn, bad, 1);
+        const sigSorted = [...signalCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+        const sigMax = sigSorted.length ? sigSorted[0][1] : 1;
+        const histogram = `
+            <div class="quality-histogram">
+                ${["good", "warn", "bad"].map((cls, i) => {
+            const v = [good, warn, bad][i];
+            const label = ["< 300", "300–599", "≥ 600"][i];
+            const heightPct = (v / max) * 100;
+            return `<div class="quality-histogram__bucket">
+                        <div class="quality-histogram__bar quality-histogram__bar--${cls}" style="height:${heightPct}%"></div>
+                        <strong>${v}</strong>
+                        <span>${escapeHtml(label)}</span>
+                    </div>`;
+        }).join("")}
+            </div>`;
+        const signals = sigSorted.length
+            ? `<div class="signal-bars">${sigSorted.map(([sig, count]) => `
+                <div class="signal-bars__row">
+                    <span>${escapeHtml(sig)}</span>
+                    <div class="signal-bars__track"><span class="signal-bars__fill" style="width:${(count / sigMax) * 100}%"></span></div>
+                    <span class="signal-bars__count">${count}</span>
+                </div>`).join("")}</div>`
+            : `<p class="muted">No signal data.</p>`;
+        target.innerHTML = histogram + signals;
+    }
+
+    function renderQualityFeed() {
+        const target = byId("quality-feed");
+        if (!target) return;
+        const filter = (byId("quality-feed-filter")?.value || "").toLowerCase();
+        const hotspots = (state.hotspots || []).map((h) => ({
+            kind: "hotspot",
+            name: h.name,
+            score: qualityScore(h),
+            signals: h.signals || [],
+            details: `${formatNumber.format(h.sloc || 0)} SLOC`,
+        }));
+        const clones = (state.clones || []).map((c) => ({
+            kind: "clone",
+            name: `clone ${c.hash?.substring(0, 8) || ""} (${c.instance_count || c.instances?.length || 0}x)`,
+            score: c.score || 0,
+            signals: c.signals || [],
+            details: `${c.token_count || 0} tokens`,
+        }));
+        const merged = [...hotspots, ...clones]
+            .filter((it) => !filter || JSON.stringify(it).toLowerCase().includes(filter))
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 60);
+        if (!merged.length) {
+            target.innerHTML = `<p class="muted">No items match.</p>`;
+            return;
+        }
+        target.innerHTML = merged.map((it) => {
+            const cls = riskClass(it.score, 300, 600);
+            const tail = (it.name || "").split(/[\\/]/).pop();
+            return `<div class="quality-feed__row">
+                <span class="pill">${escapeHtml(it.kind)}</span>
+                <span class="quality-feed__name"><code>${escapeHtml(tail)}</code><div class="muted">${escapeHtml(it.details)}</div></span>
+                <span class="${cls}">${formatNumber.format(it.score)}</span>
+            </div>`;
+        }).join("");
+    }
+
+    function renderBudgetBars(targetId, items) {
+        const target = byId(targetId);
+        if (!target) return;
+        if (!items.length) {
+            target.innerHTML = `<div class="budget-bars__empty">No data. Run the relevant refresh.</div>`;
+            return;
+        }
+        const ratios = items
+            .map((it) => {
+                const meanMs = (it.mean_ns || 0) / 1_000_000;
+                const budget = it.threshold_ms || 0;
+                if (!budget) return null;
+                return {
+                    label: it.scenario_label || it.name,
+                    meanMs,
+                    budget,
+                    ratio: meanMs / budget,
+                };
+            })
+            .filter(Boolean)
+            .sort((a, b) => b.ratio - a.ratio)
+            .slice(0, 30);
+        if (!ratios.length) {
+            target.innerHTML = `<div class="budget-bars__empty">No budget thresholds available.</div>`;
+            return;
+        }
+        const maxRatio = Math.max(1.2, ...ratios.map((r) => r.ratio));
+        target.innerHTML = ratios.map((r) => {
+            const fillPct = (r.ratio / maxRatio) * 100;
+            const thresholdPct = (1 / maxRatio) * 100;
+            const cls = r.ratio > 1 ? "bad" : r.ratio > 0.85 ? "warn" : "good";
+            const fillClass = cls === "good" ? "" : `budget-bars__fill--${cls}`;
+            const tail = (r.label || "").split(/[\\/]/).pop() || r.label;
+            return `<div class="budget-bars__row" title="${escapeHtml(r.label)}">
+                <span class="budget-bars__label"><code>${escapeHtml(tail)}</code></span>
+                <div class="budget-bars__track">
+                    <div class="budget-bars__fill ${fillClass}" style="width:${Math.min(100, fillPct)}%"></div>
+                    <div class="budget-bars__threshold" style="left:${thresholdPct}%"></div>
+                </div>
+                <span class="budget-bars__value">${formatNumber.format(r.ratio * 100)}%</span>
+            </div>`;
+        }).join("");
+    }
+
+    function renderSearchBudget() {
+        renderBudgetBars("search-budget", state.searchSpeed || []);
+    }
+
+    function renderEditorBudget() {
+        renderBudgetBars("editor-budget", state.slowspots || []);
+    }
+
+    function renderCorrectnessMatrix() {
+        const target = byId("correctness-matrix");
+        if (!target) return;
+        const layers = state.correctness?.layers || [];
+        if (!layers.length) {
+            target.innerHTML = `<p class="muted">No correctness data.</p>`;
+            return;
+        }
+        target.innerHTML = layers.map((layer) => {
+            const total = layer.total || 0;
+            const passed = layer.passed || 0;
+            const failed = layer.failed || 0;
+            const unknown = layer.unknown || 0;
+            const ratio = layer.failed_ratio != null
+                ? Number(layer.failed_ratio)
+                : total ? failed / total : 0;
+            let cls = "ok";
+            if (failed > 0) cls = "bad";
+            else if (unknown > 0 && total) cls = "warn";
+            else if (!total) cls = "stale";
+            const pct = (n) => total ? `${(n / total) * 100}%` : "0%";
+            const isActive = state.selectedLayer === layer.name;
+            return `<div class="layer-matrix__cell layer-matrix__cell--${cls} ${isActive ? "is-active" : ""}" data-layer="${escapeHtml(layer.name)}">
+                <div class="layer-matrix__name">${escapeHtml(layer.name)}</div>
+                <div class="layer-matrix__counts">
+                    <span class="risk-good">${passed} pass</span>
+                    <span class="${failed ? "risk-bad" : "muted"}">${failed} fail</span>
+                    <span class="muted">${unknown} unknown</span>
+                </div>
+                <div class="layer-matrix__bar">
+                    <span class="passed" style="width:${pct(passed)}"></span>
+                    <span class="failed" style="width:${pct(failed)}"></span>
+                    <span class="unknown" style="width:${pct(unknown)}"></span>
+                </div>
+                <div class="muted" style="font-size:11px">${total} tests · ${formatNumber.format(ratio * 100)}% failing</div>
+            </div>`;
+        }).join("");
+        target.querySelectorAll(".layer-matrix__cell").forEach((cell) => {
+            cell.addEventListener("click", () => {
+                const layer = cell.dataset.layer;
+                state.selectedLayer = state.selectedLayer === layer ? null : layer;
+                renderCorrectnessMatrix();
+                renderCorrectness();
+            });
+        });
+    }
+
     byId("viewer-version").textContent = viewerVersion;
     setupTabs();
-    byId("hotspots-filter").addEventListener("input", renderHotspots);
-    byId("slowspots-filter").addEventListener("input", renderSlowspots);
-    byId("search-speed-filter").addEventListener("input", renderSearchSpeed);
-    byId("resource-profiles-filter").addEventListener("input", renderResourceProfiles);
-    byId("clones-filter").addEventListener("input", renderClones);
-    byId("correctness-filter").addEventListener("input", renderCorrectness);
+    byId("hotspots-filter")?.addEventListener("input", renderHotspots);
+    byId("slowspots-filter")?.addEventListener("input", renderSlowspots);
+    byId("search-speed-filter")?.addEventListener("input", renderSearchSpeed);
+    byId("resource-profiles-filter")?.addEventListener("input", renderResourceProfiles);
+    byId("clones-filter")?.addEventListener("input", renderClones);
+    byId("correctness-filter")?.addEventListener("input", renderCorrectness);
+    byId("correctness-show-all")?.addEventListener("change", renderCorrectness);
+    byId("quality-feed-filter")?.addEventListener("input", renderQualityFeed);
     byId("map-filter").addEventListener("input", renderMap);
     byId("map-layout").addEventListener("change", (event) => {
         state.mapLayout = event.target.value;
@@ -1963,18 +2508,6 @@
         byId("map-zoom-value").textContent = `${Math.round(state.mapZoom * 100)}%`;
         renderMap();
     });
-    readJsonFile("hotspots-file", "hotspots", renderHotspots);
-    readJsonFile("catalog-file", "catalog", renderAll);
-    readJsonFile("runs-file", "runs", renderRunLog);
-    readJsonFile("slowspots-file", "slowspots", renderSlowspots);
-    readJsonFile("search-speed-file", "searchSpeed", renderSearchSpeed);
-    readJsonFile("capacity-report-file", "capacityReport", renderCapacityReport);
-    readJsonFile("resource-profiles-file", "resourceProfiles", renderResourceProfiles);
-    readJsonFile("speed-report-file", "speedReport", renderSpeedReport);
-    readJsonFile("clones-file", "clones", renderClones);
-    readJsonFile("map-file", "map", renderMap);
-    readJsonFile("flamegraphs-file", "flamegraphs", renderFlamegraphs);
-    readJsonFile("correctness-file", "correctness", renderCorrectness);
     document.querySelectorAll("[data-run]").forEach((button) => {
         button.addEventListener("click", () => triggerRun("/api/run/all", button));
     });
@@ -1987,94 +2520,3 @@
     window.setInterval(refreshRuns, 5000);
     loadDefaults();
 })();
-
-
-    function renderOverviewCharts() {
-        const container = byId("overview-charts");
-        if (!container) return;
-
-        // Correctness Chart (Pie or Horizontal Bar)
-        const cPassed = state.correctness?.summary?.passed || 0;
-        const cFailed = state.correctness?.summary?.failed || 0;
-        const cUnknown = state.correctness?.summary?.unknown || 0;
-        const cTotal = cPassed + cFailed + cUnknown || 1;
-
-        // Quality Chart
-        const qHotspots = state.hotspots?.length || 0;
-        const qClones = state.clones?.length || 0;
-        const qTotal = qHotspots + qClones || 1;
-
-        // Map Risk
-        let mGood = 0, mWarn = 0, mBad = 0;
-        const modules = state.map?.modules || [];
-        modules.forEach(m => {
-            const r = m.metrics?.total_score || 0;
-            if (r > 600) mBad++;
-            else if (r > 300) mWarn++;
-            else mGood++;
-        });
-        const mTotal = mGood + mWarn + mBad || 1;
-        
-        // Performance Chart
-        const speedSummary = state.speedReport?.summary || {};
-        const pSearch = speedSummary.search_scenarios || 0;
-        const pEditor = speedSummary.editor_scenarios || 0;
-        const pTabs = speedSummary.tabs_and_splits_scenarios || 0;
-        const pTotal = pSearch + pEditor + pTabs || 1;
-
-        container.innerHTML = `
-            <div class="panel-card chart-panel">
-                <div><h3>Quality Summary</h3><p class="chart-caption">Hotspots vs Clones.</p></div>
-                <div style="height: 30px; display: flex; border-radius: 8px; overflow: hidden; margin-top: 10px;">
-                    <div style="width: ${(qHotspots / qTotal) * 100}%; background: var(--warn);" title="Hotspots: ${qHotspots}"></div>
-                    <div style="width: ${(qClones / qTotal) * 100}%; background: var(--purple);" title="Clones: ${qClones}"></div>
-                </div>
-                <div class="chart-legend" style="margin-top: 10px;">
-                    <span class="chart-legend__item"><span style="color:var(--warn)">&#9632;</span> Hotspots (${qHotspots})</span>
-                    <span class="chart-legend__item"><span style="color:var(--purple)">&#9632;</span> Clones (${qClones})</span>
-                </div>
-            </div>
-
-            <div class="panel-card chart-panel">
-                <div><h3>Performance Scenarios</h3><p class="chart-caption">Breakdown by benchmark domain.</p></div>
-                <div style="height: 30px; display: flex; border-radius: 8px; overflow: hidden; margin-top: 10px;">
-                    <div style="width: ${(pSearch / pTotal) * 100}%; background: var(--accent);" title="Search: ${pSearch}"></div>
-                    <div style="width: ${(pEditor / pTotal) * 100}%; background: var(--good);" title="Editor: ${pEditor}"></div>
-                    <div style="width: ${(pTabs / pTotal) * 100}%; background: var(--muted);" title="Tabs & Splits: ${pTabs}"></div>
-                </div>
-                <div class="chart-legend" style="margin-top: 10px;">
-                    <span class="chart-legend__item"><span style="color:var(--accent)">&#9632;</span> Search (${pSearch})</span>
-                    <span class="chart-legend__item"><span style="color:var(--good)">&#9632;</span> Editor (${pEditor})</span>
-                    <span class="chart-legend__item"><span style="color:var(--muted)">&#9632;</span> Tabs & Splits (${pTabs})</span>
-                </div>
-            </div>
-
-            <div class="panel-card chart-panel">
-                <div><h3>Correctness Health</h3><p class="chart-caption">Test execution results.</p></div>
-                <div style="height: 30px; display: flex; border-radius: 8px; overflow: hidden; margin-top: 10px;">
-                    <div style="width: ${(cPassed / cTotal) * 100}%; background: var(--good);" title="Passed: ${cPassed}"></div>
-                    <div style="width: ${(cFailed / cTotal) * 100}%; background: var(--bad);" title="Failed: ${cFailed}"></div>
-                    <div style="width: ${(cUnknown / cTotal) * 100}%; background: var(--muted);" title="Unknown: ${cUnknown}"></div>
-                </div>
-                <div class="chart-legend" style="margin-top: 10px;">
-                    <span class="chart-legend__item"><span style="color:var(--good)">&#9632;</span> Passed (${cPassed})</span>
-                    <span class="chart-legend__item"><span style="color:var(--bad)">&#9632;</span> Failed (${cFailed})</span>
-                    <span class="chart-legend__item"><span style="color:var(--muted)">&#9632;</span> Unknown (${cUnknown})</span>
-                </div>
-            </div>
-            
-            <div class="panel-card chart-panel">
-                <div><h3>Module Architecture Risk</h3><p class="chart-caption">Modules grouped by total risk score.</p></div>
-                <div style="height: 30px; display: flex; border-radius: 8px; overflow: hidden; margin-top: 10px;">
-                    <div style="width: ${(mGood / mTotal) * 100}%; background: var(--good);" title="Good: ${mGood}"></div>
-                    <div style="width: ${(mWarn / mTotal) * 100}%; background: var(--warn);" title="Warn: ${mWarn}"></div>
-                    <div style="width: ${(mBad / mTotal) * 100}%; background: var(--bad);" title="Bad: ${mBad}"></div>
-                </div>
-                <div class="chart-legend" style="margin-top: 10px;">
-                    <span class="chart-legend__item"><span style="color:var(--good)">&#9632;</span> Low Risk (${mGood})</span>
-                    <span class="chart-legend__item"><span style="color:var(--warn)">&#9632;</span> Medium Risk (${mWarn})</span>
-                    <span class="chart-legend__item"><span style="color:var(--bad)">&#9632;</span> High Risk (${mBad})</span>
-                </div>
-            </div>
-        `;
-    }

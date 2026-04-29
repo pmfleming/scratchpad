@@ -1,6 +1,8 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
-use crate::app::domain::{BufferViewStatus, platform_default_line_ending};
+use crate::app::domain::{
+    BufferFreshness, BufferState, BufferViewStatus, platform_default_line_ending,
+};
 use crate::app::theme::*;
 use crate::app::ui::widget_ids;
 use eframe::egui;
@@ -19,7 +21,6 @@ struct ActiveStatusDetails {
     count_label: String,
     cursor_label: Option<String>,
     selection_label: Option<String>,
-    viewport_label: Option<String>,
     encoding_label: String,
     encoding_tooltip: String,
     encoding_is_non_default: bool,
@@ -30,8 +31,6 @@ struct ActiveStatusDetails {
     icon_tooltip: &'static str,
     icon_color: egui::Color32,
     freshness_label: Option<String>,
-    metadata_refresh_pending: bool,
-    encoding_compliance_pending: bool,
     has_control_chars: bool,
 }
 
@@ -79,12 +78,8 @@ fn collect_active_status_details(
         .unwrap_or(false);
     let view_status = active_view
         .map(|view| {
-            tab.buffer.view_status(
-                view.pending_cursor_range.or(view.cursor_range),
-                view.latest_layout
-                    .as_ref()
-                    .and_then(|layout| layout.visible_text.as_ref()),
-            )
+            tab.buffer
+                .view_status(view.pending_cursor_range.or(view.cursor_range))
         })
         .unwrap_or_default();
     let has_control_chars = tab.buffer.artifact_summary.has_control_chars();
@@ -101,7 +96,6 @@ fn collect_active_status_details(
         count_label: line_count_label(file_length.lines),
         cursor_label: cursor_label(&view_status),
         selection_label: selection_label(&view_status),
-        viewport_label: viewport_label(&view_status),
         encoding_label: tab.buffer.format.encoding_label(),
         encoding_tooltip: tab.buffer.format.encoding_tooltip(),
         encoding_is_non_default: status_bar_encoding_is_non_default(&tab.buffer.format),
@@ -112,9 +106,7 @@ fn collect_active_status_details(
         icon,
         icon_tooltip,
         icon_color,
-        freshness_label: tab.buffer.disk_status_label().map(str::to_owned),
-        metadata_refresh_pending: tab.buffer.text_metadata_refresh_needed(),
-        encoding_compliance_pending: tab.buffer.encoding_compliance_refresh_needed(),
+        freshness_label: visible_disk_status_label(&tab.buffer).map(str::to_owned),
         has_control_chars,
     })
 }
@@ -144,7 +136,6 @@ fn render_active_status(
         if encoding_response.clicked() {
             actions.open_encoding_dialog = true;
         }
-        show_status_segment(ui, details.viewport_label.as_deref());
         show_status_segment(ui, details.selection_label.as_deref());
         show_status_segment(ui, details.cursor_label.as_deref());
         show_line_count(ui, &details.count_label, actions);
@@ -302,19 +293,6 @@ fn show_status_warnings(ui: &mut egui::Ui, details: &ActiveStatusDetails) {
         ui.label(egui::RichText::new(freshness_label).color(egui::Color32::YELLOW));
     }
 
-    if let Some(metadata_warning) = metadata_refresh_warning(details.metadata_refresh_pending) {
-        ui.separator();
-        ui.label(egui::RichText::new(metadata_warning).color(egui::Color32::YELLOW));
-    }
-
-    if let Some(encoding_warning) = encoding_compliance_warning(
-        details.encoding_compliance_pending,
-        details.has_non_compliant_characters,
-    ) {
-        ui.separator();
-        ui.label(egui::RichText::new(encoding_warning).color(egui::Color32::YELLOW));
-    }
-
     if details.has_non_compliant_characters {
         ui.separator();
         ui.label(egui::RichText::new("Non compliant characters").color(egui::Color32::RED));
@@ -369,22 +347,14 @@ fn selection_label(status: &BufferViewStatus) -> Option<String> {
     (status.selection_chars > 0).then_some(format!("Sel {}", status.selection_chars))
 }
 
-fn viewport_label(status: &BufferViewStatus) -> Option<String> {
-    let start = status.visible_line_start?;
-    let end = status.visible_line_end?;
-    Some(format!("View {start}-{end}"))
-}
+fn visible_disk_status_label(buffer: &BufferState) -> Option<&'static str> {
+    if buffer.freshness == BufferFreshness::MissingOnDisk
+        && buffer.path.as_ref().is_some_and(|path| path.exists())
+    {
+        return None;
+    }
 
-fn metadata_refresh_warning(metadata_refresh_pending: bool) -> Option<&'static str> {
-    metadata_refresh_pending.then_some("Metadata refreshing")
-}
-
-fn encoding_compliance_warning(
-    encoding_compliance_pending: bool,
-    has_non_compliant_characters: bool,
-) -> Option<&'static str> {
-    (encoding_compliance_pending && !has_non_compliant_characters)
-        .then_some("Encoding compliance checking")
+    buffer.disk_status_label()
 }
 
 fn artifact_icon(
@@ -425,10 +395,9 @@ fn plain_text_icon_color(dark_mode: bool) -> egui::Color32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        BufferViewStatus, cursor_label, encoding_compliance_warning, metadata_refresh_warning,
-        selection_label, viewport_label,
-    };
+    use super::{BufferViewStatus, cursor_label, selection_label, visible_disk_status_label};
+    use crate::app::domain::{BufferFreshness, BufferState};
+    use std::fs;
 
     #[test]
     fn cursor_label_formats_one_based_coordinates() {
@@ -449,29 +418,21 @@ mod tests {
     }
 
     #[test]
-    fn viewport_label_formats_visible_line_band() {
-        let status = BufferViewStatus {
-            visible_line_start: Some(40),
-            visible_line_end: Some(52),
-            ..Default::default()
-        };
-
-        assert_eq!(viewport_label(&status).as_deref(), Some("View 40-52"));
-    }
-
-    #[test]
-    fn metadata_refresh_warning_tracks_pending_refresh_state() {
-        assert_eq!(metadata_refresh_warning(true), Some("Metadata refreshing"));
-        assert_eq!(metadata_refresh_warning(false), None);
-    }
-
-    #[test]
-    fn encoding_compliance_warning_hides_when_non_compliance_is_already_known() {
-        assert_eq!(
-            encoding_compliance_warning(true, false),
-            Some("Encoding compliance checking")
+    fn visible_disk_status_hides_stale_missing_label_when_path_exists() {
+        let path = std::env::temp_dir().join(format!(
+            "scratchpad-status-existing-{}.txt",
+            std::process::id()
+        ));
+        fs::write(&path, "still here").expect("temp file");
+        let mut buffer = BufferState::new(
+            "scratchpad-status-existing.txt".to_owned(),
+            "still here".to_owned(),
+            Some(path.clone()),
         );
-        assert_eq!(encoding_compliance_warning(true, true), None);
-        assert_eq!(encoding_compliance_warning(false, false), None);
+        buffer.freshness = BufferFreshness::MissingOnDisk;
+
+        assert_eq!(visible_disk_status_label(&buffer), None);
+
+        let _ = fs::remove_file(path);
     }
 }

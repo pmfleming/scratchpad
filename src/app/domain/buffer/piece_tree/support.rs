@@ -1,7 +1,7 @@
 use super::{
-    MAX_LEAF_BYTES, MAX_LEAF_PIECES, MAX_LEAVES_PER_INTERNAL, MIN_LEAVES_PER_INTERNAL,
-    PREVIEW_MAX_CHARS, Piece, PieceBuffer, PieceTreeInternalNode, PieceTreeLeaf, PieceTreeMetrics,
-    PieceTreeRoot,
+    LeafAddress, MAX_LEAF_BYTES, MAX_LEAF_PIECES, MAX_LEAVES_PER_INTERNAL, MIN_LEAVES_PER_INTERNAL,
+    PREVIEW_MAX_CHARS, Piece, PieceBuffer, PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLite,
+    PieceTreeMetrics, PieceTreeRoot,
 };
 
 pub(super) fn recalculate_prefix_metrics<T>(
@@ -104,11 +104,7 @@ pub(super) fn pack_pieces_into_leaves(pieces: Vec<Piece>) -> Vec<PieceTreeLeaf> 
             continue;
         }
 
-        let would_exceed_bytes =
-            !current.pieces.is_empty() && current.metrics.bytes + piece.byte_len > MAX_LEAF_BYTES;
-        let would_exceed_pieces =
-            !current.pieces.is_empty() && current.pieces.len() >= MAX_LEAF_PIECES;
-        if would_exceed_bytes || would_exceed_pieces {
+        if should_start_new_leaf(&current, &piece) {
             current.recalculate();
             leaves.push(current);
             current = PieceTreeLeaf::default();
@@ -123,6 +119,15 @@ pub(super) fn pack_pieces_into_leaves(pieces: Vec<Piece>) -> Vec<PieceTreeLeaf> 
     }
 
     leaves
+}
+
+fn should_start_new_leaf(current: &PieceTreeLeaf, piece: &Piece) -> bool {
+    if current.pieces.is_empty() {
+        return false;
+    }
+
+    current.metrics.bytes + piece.byte_len > MAX_LEAF_BYTES
+        || current.pieces.len() >= MAX_LEAF_PIECES
 }
 
 fn next_chunk_len(text: &str, offset: usize, max_len: usize) -> usize {
@@ -178,4 +183,149 @@ pub(super) fn compact_preview(line_text: &str) -> String {
         .collect::<String>();
     preview.push_str("...");
     preview
+}
+
+pub(super) fn line_lookup_in_leaves(
+    tree: &PieceTreeLite,
+    address: LeafAddress,
+    safe_line: usize,
+) -> (usize, usize) {
+    let mut is_first_leaf = true;
+    let mut cursor = LineLookupCursor::new(address);
+
+    for (node_index, node) in tree.root.nodes.iter().enumerate().skip(address.node_index) {
+        let leaf_start = if node_index == address.node_index {
+            address.leaf_index
+        } else {
+            0
+        };
+
+        for leaf in node.leaves.iter().skip(leaf_start) {
+            let piece_skip =
+                first_leaf_piece_skip(leaf, &mut is_first_leaf, safe_line, &mut cursor);
+            if let Some(line_info) =
+                scan_leaf_for_line_lookup(tree, leaf, piece_skip, safe_line, &mut cursor)
+            {
+                return line_info;
+            }
+        }
+    }
+
+    cursor.line_info()
+}
+
+struct LineLookupCursor {
+    current_line: usize,
+    line_start: usize,
+    current_char: usize,
+    current_len: usize,
+}
+
+impl LineLookupCursor {
+    fn new(address: LeafAddress) -> Self {
+        Self {
+            current_line: address.leaf_start_newline,
+            line_start: address.leaf_start_char,
+            current_char: address.leaf_start_char,
+            current_len: 0,
+        }
+    }
+
+    fn line_info(&self) -> (usize, usize) {
+        (self.line_start, self.current_len)
+    }
+}
+
+fn first_leaf_piece_skip(
+    leaf: &PieceTreeLeaf,
+    is_first_leaf: &mut bool,
+    safe_line: usize,
+    cursor: &mut LineLookupCursor,
+) -> usize {
+    if !*is_first_leaf {
+        return 0;
+    }
+
+    *is_first_leaf = false;
+    let offset_in_leaf = safe_line.saturating_sub(cursor.current_line);
+    if offset_in_leaf == 0 || leaf.piece_start_newlines.is_empty() {
+        return 0;
+    }
+
+    let piece_index = leaf
+        .piece_start_newlines
+        .partition_point(|&newline_count| newline_count < offset_in_leaf)
+        .saturating_sub(1);
+    cursor.current_line += leaf.piece_start_newlines[piece_index];
+    cursor.current_char += leaf.piece_start_chars[piece_index];
+    piece_index
+}
+
+fn scan_leaf_for_line_lookup(
+    tree: &PieceTreeLite,
+    leaf: &PieceTreeLeaf,
+    piece_skip: usize,
+    safe_line: usize,
+    cursor: &mut LineLookupCursor,
+) -> Option<(usize, usize)> {
+    for piece in leaf.pieces.iter().skip(piece_skip) {
+        if skip_piece_before_line(piece, safe_line, cursor) {
+            continue;
+        }
+        if append_piece_to_target_line(piece, safe_line, cursor) {
+            continue;
+        }
+
+        if let Some(line_info) =
+            scan_piece_for_line_lookup(tree.piece_text(piece), safe_line, cursor)
+        {
+            return Some(line_info);
+        }
+    }
+    None
+}
+
+fn skip_piece_before_line(piece: &Piece, safe_line: usize, cursor: &mut LineLookupCursor) -> bool {
+    if cursor.current_line < safe_line && cursor.current_line + piece.newline_count < safe_line {
+        cursor.current_line += piece.newline_count;
+        cursor.current_char += piece.char_len;
+        true
+    } else {
+        false
+    }
+}
+
+fn append_piece_to_target_line(
+    piece: &Piece,
+    safe_line: usize,
+    cursor: &mut LineLookupCursor,
+) -> bool {
+    if cursor.current_line == safe_line && piece.newline_count == 0 {
+        cursor.current_len += piece.char_len;
+        cursor.current_char += piece.char_len;
+        true
+    } else {
+        false
+    }
+}
+
+fn scan_piece_for_line_lookup(
+    piece_text: &str,
+    safe_line: usize,
+    cursor: &mut LineLookupCursor,
+) -> Option<(usize, usize)> {
+    for ch in piece_text.chars() {
+        if cursor.current_line == safe_line {
+            if ch == '\n' {
+                return Some(cursor.line_info());
+            }
+            cursor.current_len += 1;
+        } else if ch == '\n' {
+            cursor.current_line += 1;
+            cursor.line_start = cursor.current_char + 1;
+            cursor.current_len = 0;
+        }
+        cursor.current_char += 1;
+    }
+    None
 }

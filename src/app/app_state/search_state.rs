@@ -10,6 +10,7 @@ use std::sync::{
 };
 
 mod helpers;
+mod replace;
 mod runtime;
 mod worker;
 

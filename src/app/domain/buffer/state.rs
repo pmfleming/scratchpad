@@ -1,8 +1,8 @@
 use super::analysis::{IncrementalMetadataEdit, buffer_text_metadata_from_edit};
 use super::{
     BufferLength, BufferTextMetadata, DocumentSnapshot, EncodingSource, LineEndingStyle,
-    RenderedTextWindow, TextArtifactSummary, TextDocument, TextDocumentOperationRecord,
-    TextFormatMetadata, TextReplacementError, TextReplacements, buffer_text_metadata,
+    TextArtifactSummary, TextDocument, TextDocumentOperationRecord, TextFormatMetadata,
+    TextReplacementError, TextReplacements, buffer_text_metadata,
     buffer_text_metadata_from_piece_tree,
 };
 use crate::app::ui::editor_content::native_editor::CursorRange;
@@ -79,8 +79,6 @@ pub struct BufferViewStatus {
     pub cursor_line: Option<usize>,
     pub cursor_column: Option<usize>,
     pub selection_chars: usize,
-    pub visible_line_start: Option<usize>,
-    pub visible_line_end: Option<usize>,
 }
 
 impl BufferState {
@@ -234,11 +232,7 @@ impl BufferState {
         BufferLength::from_metrics(self.document.piece_tree().metrics(), self.line_count)
     }
 
-    pub fn view_status(
-        &self,
-        cursor_range: Option<CursorRange>,
-        visible_window: Option<&RenderedTextWindow>,
-    ) -> BufferViewStatus {
+    pub fn view_status(&self, cursor_range: Option<CursorRange>) -> BufferViewStatus {
         let (cursor_line, cursor_column, selection_chars) = cursor_range
             .map(|range| {
                 let position = self
@@ -252,80 +246,12 @@ impl BufferState {
                 )
             })
             .unwrap_or((None, None, 0));
-        let (visible_line_start, visible_line_end) = visible_window
-            .and_then(|window| {
-                (!window.line_range.is_empty()).then_some((
-                    Some(window.line_range.start + 1),
-                    Some(window.line_range.end),
-                ))
-            })
-            .unwrap_or((None, None));
 
         BufferViewStatus {
             cursor_line,
             cursor_column,
             selection_chars,
-            visible_line_start,
-            visible_line_end,
         }
-    }
-
-    pub fn visible_text_window(
-        &self,
-        row_range: Range<usize>,
-        char_range: Range<usize>,
-        total_rows: usize,
-    ) -> RenderedTextWindow {
-        let tree = self.document.piece_tree();
-        let char_range = tree.normalize_char_range(char_range);
-        let line_range = self.line_range_for_char_window(&char_range);
-        let truncated_start = row_range.start > 0 || char_range.start > 0;
-        let truncated_end = row_range.end < total_rows || char_range.end < tree.len_chars();
-
-        self.build_rendered_text_window(
-            row_range,
-            line_range,
-            char_range,
-            0,
-            truncated_start,
-            truncated_end,
-        )
-    }
-
-    pub fn visible_line_window(&self, line_range: Range<usize>) -> RenderedTextWindow {
-        let max_line = self.line_count.max(1);
-        let start = line_range.start.min(max_line);
-        let end = line_range.end.min(max_line);
-        if start >= end {
-            let offset = self.document.piece_tree().len_chars();
-            return self.build_rendered_text_window(
-                0..0,
-                start..start,
-                offset..offset,
-                start,
-                start > 0,
-                end < self.line_count,
-            );
-        }
-
-        let start_char = if start < self.line_count {
-            self.document.piece_tree().line_info(start).start_char
-        } else {
-            self.document.piece_tree().len_chars()
-        };
-        let end_char = if end < self.line_count {
-            self.document.piece_tree().line_info(end).start_char
-        } else {
-            self.document.piece_tree().len_chars()
-        };
-        self.build_rendered_text_window(
-            0..0,
-            start..end,
-            start_char..end_char,
-            start,
-            start > 0,
-            end < self.line_count,
-        )
     }
 
     pub fn replace_text(&mut self, text: String) {
@@ -615,40 +541,6 @@ impl BufferState {
         )
     }
 
-    fn line_range_for_char_window(&self, char_range: &Range<usize>) -> Range<usize> {
-        let tree = self.document.piece_tree();
-        let start = tree.char_position(char_range.start).line_index;
-        let end = if char_range.is_empty() {
-            start
-        } else {
-            tree.char_position(char_range.end.saturating_sub(1))
-                .line_index
-                + 1
-        };
-        start..end
-    }
-
-    fn build_rendered_text_window(
-        &self,
-        row_range: Range<usize>,
-        line_range: Range<usize>,
-        char_range: Range<usize>,
-        layout_row_offset: usize,
-        truncated_start: bool,
-        truncated_end: bool,
-    ) -> RenderedTextWindow {
-        let text = self.document.piece_tree().extract_range(char_range.clone());
-        RenderedTextWindow {
-            row_range,
-            line_range,
-            char_range,
-            layout_row_offset,
-            text,
-            truncated_start,
-            truncated_end,
-        }
-    }
-
     fn set_disk_state(&mut self, disk_state: Option<DiskFileState>, freshness: BufferFreshness) {
         self.disk_state = disk_state;
         self.freshness = freshness;
@@ -705,76 +597,18 @@ mod tests {
     }
 
     #[test]
-    fn visible_text_window_uses_piece_tree_coordinates() {
+    fn view_status_reports_piece_tree_cursor_coordinates() {
         let buffer = BufferState::new(
             "notes.txt".to_owned(),
             "zero\none\ntwo\nthree".to_owned(),
             None,
         );
 
-        let window = buffer.visible_text_window(1..3, 5..13, 4);
-
-        assert_eq!(window.row_range, 1..3);
-        assert_eq!(window.line_range, 1..3);
-        assert_eq!(window.char_range, 5..13);
-        assert_eq!(window.layout_row_offset, 0);
-        assert_eq!(window.text, "one\ntwo\n");
-        assert!(window.truncated_start);
-        assert!(window.truncated_end);
-    }
-
-    #[test]
-    fn visible_line_window_extracts_full_lines_from_piece_tree() {
-        let buffer = BufferState::new(
-            "notes.txt".to_owned(),
-            "zero\none\ntwo\nthree".to_owned(),
-            None,
-        );
-
-        let window = buffer.visible_line_window(1..3);
-
-        assert_eq!(window.line_range, 1..3);
-        assert_eq!(window.text, "one\ntwo\n");
-        assert_eq!(window.char_range, 5..13);
-        assert_eq!(window.layout_row_offset, 1);
-        assert!(window.truncated_start);
-        assert!(window.truncated_end);
-    }
-
-    #[test]
-    fn view_status_reports_piece_tree_cursor_and_viewport_coordinates() {
-        let buffer = BufferState::new(
-            "notes.txt".to_owned(),
-            "zero\none\ntwo\nthree".to_owned(),
-            None,
-        );
-
-        let visible_window = buffer.visible_line_window(1..3);
-        let status = buffer.view_status(Some(selection(6, 8)), Some(&visible_window));
+        let status = buffer.view_status(Some(selection(6, 8)));
 
         assert_eq!(status.cursor_line, Some(2));
         assert_eq!(status.cursor_column, Some(4));
         assert_eq!(status.selection_chars, 2);
-        assert_eq!(status.visible_line_start, Some(2));
-        assert_eq!(status.visible_line_end, Some(3));
-    }
-
-    #[test]
-    fn view_status_still_reports_visible_lines_without_a_cursor() {
-        let buffer = BufferState::new(
-            "notes.txt".to_owned(),
-            "zero\none\ntwo\nthree".to_owned(),
-            None,
-        );
-
-        let visible_window = buffer.visible_line_window(2..4);
-        let status = buffer.view_status(None, Some(&visible_window));
-
-        assert_eq!(status.cursor_line, None);
-        assert_eq!(status.cursor_column, None);
-        assert_eq!(status.selection_chars, 0);
-        assert_eq!(status.visible_line_start, Some(3));
-        assert_eq!(status.visible_line_end, Some(4));
     }
 
     #[test]

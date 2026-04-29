@@ -7,9 +7,14 @@ use crate::app::services::store_io::write_atomic_with;
 use chardetng::EncodingDetector;
 use encoding_rs::Encoding;
 use std::fs::File;
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::path::Path;
 use std::time::UNIX_EPOCH;
+
+mod write;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone, Copy)]
 pub struct EncodingOption {
@@ -154,7 +159,7 @@ impl FileService {
         format: &TextFormatMetadata,
     ) -> io::Result<()> {
         let encoding = resolve_encoding(&format.encoding_name)?;
-        let bytes = encode_content(content, encoding, format.has_bom)?;
+        let bytes = write::encode_content(content, encoding, format.has_bom)?;
         std::fs::write(path, bytes)
     }
 
@@ -164,13 +169,13 @@ impl FileService {
         format: &TextFormatMetadata,
     ) -> io::Result<()> {
         write_atomic_with(path, |file| {
-            write_snapshot_to_writer(file, snapshot, format)
+            write::write_snapshot_to_writer(file, snapshot, format)
         })
     }
 
     pub fn write_snapshot_utf8(path: &Path, snapshot: &DocumentSnapshot) -> io::Result<()> {
         write_atomic_with(path, |file| {
-            write_snapshot_utf8_to_writer(file, snapshot, false)
+            write::write_snapshot_utf8_to_writer(file, snapshot, false)
         })
     }
 
@@ -452,292 +457,10 @@ fn accumulate_staged_line_count(
     line_count
 }
 
-fn encode_content(
-    content: &str,
-    encoding: &'static Encoding,
-    has_bom: bool,
-) -> io::Result<Vec<u8>> {
-    if encoding == encoding_rs::UTF_16LE {
-        return Ok(encode_utf16(content, has_bom, Endianness::Little));
-    }
-
-    if encoding == encoding_rs::UTF_16BE {
-        return Ok(encode_utf16(content, has_bom, Endianness::Big));
-    }
-
-    encode_non_utf16(content, encoding, has_bom)
-}
-
-enum Endianness {
-    Little,
-    Big,
-}
-
-fn encode_utf16(content: &str, has_bom: bool, endianness: Endianness) -> Vec<u8> {
-    let utf16: Vec<u16> = content.encode_utf16().collect();
-    let mut bytes = Vec::with_capacity((utf16.len() * 2) + if has_bom { 2 } else { 0 });
-
-    if has_bom {
-        bytes.extend_from_slice(match endianness {
-            Endianness::Little => &[0xFF, 0xFE],
-            Endianness::Big => &[0xFE, 0xFF],
-        });
-    }
-
-    for unit in utf16 {
-        let encoded_unit = match endianness {
-            Endianness::Little => unit.to_le_bytes(),
-            Endianness::Big => unit.to_be_bytes(),
-        };
-        bytes.extend_from_slice(&encoded_unit);
-    }
-
-    bytes
-}
-
-fn encode_non_utf16(
-    content: &str,
-    encoding: &'static Encoding,
-    has_bom: bool,
-) -> io::Result<Vec<u8>> {
-    let (bytes, _, had_replacements) = encoding.encode(content);
-    if had_replacements {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "Text contains characters not representable in {}",
-                encoding.name()
-            ),
-        ));
-    }
-    let bytes = bytes.into_owned();
-
-    if has_bom && encoding == encoding_rs::UTF_8 {
-        Ok(prepend_bom(bytes, &[0xEF, 0xBB, 0xBF]))
-    } else {
-        Ok(bytes)
-    }
-}
-
-fn write_snapshot_to_writer(
-    writer: &mut dyn Write,
-    snapshot: &DocumentSnapshot,
-    format: &TextFormatMetadata,
-) -> io::Result<()> {
-    let encoding = resolve_encoding(&format.encoding_name)?;
-    if encoding == encoding_rs::UTF_16LE {
-        return write_snapshot_utf16_to_writer(
-            writer,
-            snapshot,
-            format.has_bom,
-            Endianness::Little,
-        );
-    }
-    if encoding == encoding_rs::UTF_16BE {
-        return write_snapshot_utf16_to_writer(writer, snapshot, format.has_bom, Endianness::Big);
-    }
-    if encoding == encoding_rs::UTF_8 {
-        return write_snapshot_utf8_to_writer(writer, snapshot, format.has_bom);
-    }
-
-    write_snapshot_encoded_to_writer(writer, snapshot, encoding)
-}
-
-fn write_snapshot_utf8_to_writer(
-    writer: &mut dyn Write,
-    snapshot: &DocumentSnapshot,
-    has_bom: bool,
-) -> io::Result<()> {
-    if has_bom {
-        writer.write_all(&[0xEF, 0xBB, 0xBF])?;
-    }
-
-    let tree = snapshot.piece_tree();
-    for span in tree.spans_for_range(0..tree.len_chars()) {
-        writer.write_all(span.text.as_bytes())?;
-    }
-    Ok(())
-}
-
-fn write_snapshot_utf16_to_writer(
-    writer: &mut dyn Write,
-    snapshot: &DocumentSnapshot,
-    has_bom: bool,
-    endianness: Endianness,
-) -> io::Result<()> {
-    if has_bom {
-        writer.write_all(match endianness {
-            Endianness::Little => &[0xFF, 0xFE],
-            Endianness::Big => &[0xFE, 0xFF],
-        })?;
-    }
-
-    let tree = snapshot.piece_tree();
-    for span in tree.spans_for_range(0..tree.len_chars()) {
-        for unit in span.text.encode_utf16() {
-            let bytes = match endianness {
-                Endianness::Little => unit.to_le_bytes(),
-                Endianness::Big => unit.to_be_bytes(),
-            };
-            writer.write_all(&bytes)?;
-        }
-    }
-
-    Ok(())
-}
-
-fn write_snapshot_encoded_to_writer(
-    writer: &mut dyn Write,
-    snapshot: &DocumentSnapshot,
-    encoding: &'static Encoding,
-) -> io::Result<()> {
-    let mut encoder = encoding.new_encoder();
-    let mut dst = [0u8; 8192];
-    let tree = snapshot.piece_tree();
-
-    for span in tree.spans_for_range(0..tree.len_chars()) {
-        let mut src = span.text;
-        while !src.is_empty() {
-            let (result, read, written, had_errors) =
-                encoder.encode_from_utf8(src, &mut dst, false);
-            if had_errors {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!(
-                        "Text contains characters not representable in {}",
-                        encoding.name()
-                    ),
-                ));
-            }
-            writer.write_all(&dst[..written])?;
-            src = &src[read..];
-            if result == encoding_rs::CoderResult::InputEmpty {
-                break;
-            }
-        }
-    }
-
-    loop {
-        let (result, _read, written, had_errors) = encoder.encode_from_utf8("", &mut dst, true);
-        if had_errors {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "Text contains characters not representable in {}",
-                    encoding.name()
-                ),
-            ));
-        }
-        writer.write_all(&dst[..written])?;
-        if result == encoding_rs::CoderResult::InputEmpty {
-            break;
-        }
-    }
-
-    Ok(())
-}
-
-fn prepend_bom(mut bytes: Vec<u8>, bom: &[u8]) -> Vec<u8> {
-    let mut with_bom = Vec::with_capacity(bytes.len() + bom.len());
-    with_bom.extend_from_slice(bom);
-    with_bom.append(&mut bytes);
-    with_bom
-}
-
 fn is_probably_binary(prefix: &[u8], has_bom: bool) -> bool {
     if has_bom || prefix.is_empty() {
         return false;
     }
 
     prefix.contains(&0)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{FileService, staged_display_line_count};
-    use crate::app::domain::{
-        EncodingSource, TextDocument, TextFormatMetadata, display_line_count,
-    };
-
-    #[test]
-    fn writing_snapshot_uses_captured_revision_text() {
-        let tempdir = tempfile::tempdir().expect("create tempdir");
-        let path = tempdir.path().join("snapshot.txt");
-        let mut document = TextDocument::new("before".to_owned());
-        let snapshot = document.snapshot();
-
-        document.insert_direct(6, " after");
-
-        FileService::write_snapshot_with_format(
-            &path,
-            &snapshot,
-            &crate::app::domain::TextFormatMetadata::utf8_for_new_file("before"),
-        )
-        .expect("write snapshot");
-
-        assert_eq!(
-            std::fs::read_to_string(path).expect("read written file"),
-            "before"
-        );
-    }
-
-    #[test]
-    fn writing_fragmented_snapshot_with_utf16_preserves_content() {
-        let tempdir = tempfile::tempdir().expect("create tempdir");
-        let path = tempdir.path().join("snapshot-utf16.txt");
-        let mut document = TextDocument::new("hello world".to_owned());
-        document.insert_direct(5, " wide");
-        let snapshot = document.snapshot();
-        let format = TextFormatMetadata::detected(
-            "hello wide world",
-            "UTF-16LE".to_owned(),
-            true,
-            EncodingSource::ExplicitUserChoice,
-            false,
-        );
-
-        FileService::write_snapshot_with_format(&path, &snapshot, &format)
-            .expect("write fragmented snapshot");
-
-        let reloaded = FileService::read_file(&path).expect("read UTF-16 snapshot");
-        assert_eq!(reloaded.document.extract_text(), "hello wide world");
-    }
-
-    #[test]
-    fn opened_small_file_stages_metadata_refresh() {
-        let tempdir = tempfile::tempdir().expect("create tempdir");
-        let path = tempdir.path().join("small.txt");
-        let content = "alpha\nbravo\ncharlie\n";
-        std::fs::write(&path, content).expect("write small file");
-
-        let file_content = FileService::read_file(&path).expect("read small file");
-        let buffer = FileService::build_buffer_from_file_content(&path, file_content, None);
-
-        assert!(buffer.text_metadata_refresh_needed());
-        assert_eq!(buffer.line_count, content.matches('\n').count() + 1);
-    }
-
-    #[test]
-    fn opened_sample_sized_file_stages_metadata_refresh() {
-        let tempdir = tempfile::tempdir().expect("create tempdir");
-        let path = tempdir.path().join("sample-sized.txt");
-        let content = "alpha\n".repeat((super::STAGED_METADATA_SAMPLE_BYTES / 6) + 1);
-        std::fs::write(&path, &content).expect("write sample-sized file");
-
-        let file_content = FileService::read_file(&path).expect("read sample-sized file");
-        let buffer = FileService::build_buffer_from_file_content(&path, file_content, None);
-
-        assert!(buffer.text_metadata_refresh_needed());
-        assert_eq!(buffer.line_count, content.matches('\n').count() + 1);
-    }
-
-    #[test]
-    fn staged_line_count_matches_display_line_count_for_cr_and_mixed_endings() {
-        let content = "alpha\rbravo\r\ncharlie\ndelta\r";
-
-        assert_eq!(
-            staged_display_line_count(content),
-            display_line_count(content)
-        );
-    }
 }

@@ -1,7 +1,7 @@
+mod context_menu;
+
 use crate::app::app_state::ScratchpadApp;
-use crate::app::commands::AppCommand;
-use crate::app::domain::SplitAxis;
-use crate::app::domain::{RenderedLayout, ViewId, WorkspaceTab};
+use crate::app::domain::{ViewId, WorkspaceTab};
 use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::theme::*;
 use crate::app::ui::autoscroll::{AutoScrollAxis, AutoScrollConfig, edge_auto_scroll_delta};
@@ -9,24 +9,14 @@ use crate::app::ui::editor_content::{
     self, EditorContentOutcome, EditorContentStyle, EditorHighlightStyle, TextEditOptions,
 };
 use crate::app::ui::scrolling;
+use crate::app::ui::scrolling::DisplaySnapshot;
 use crate::app::ui::tab_drag;
 use crate::app::ui::tile_header::{
     self, SplitPreviewOverlay, TileAction, TileHeaderRequest, TileHeaderState,
 };
 use crate::app::ui::widget_ids;
 use eframe::egui;
-use egui_phosphor::regular::{
-    ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_LEFT, ARROW_LINE_UP, ARROW_RIGHT,
-    ARROW_UP, ARROWS_COUNTER_CLOCKWISE, ARROWS_SPLIT, CARET_RIGHT, CLIPBOARD_TEXT,
-    CLOCK_COUNTER_CLOCKWISE, COPY, FLOPPY_DISK, FOLDER_OPEN, MAGNIFYING_GLASS, SCISSORS,
-    SELECTION_ALL, X,
-};
 
-const DEFAULT_SPLIT_RATIO: f32 = 0.5;
-const EDITOR_CONTEXT_MENU_WIDTH: f32 = 192.0;
-const EDITOR_CONTEXT_SUBMENU_WIDTH: f32 = 168.0;
-const EDITOR_CONTEXT_ICON_BUTTON_SIZE: egui::Vec2 = egui::vec2(38.0, 30.0);
-const EDITOR_CONTEXT_CARET_WIDTH: f32 = 28.0;
 const EDITOR_SELECTION_AUTOSCROLL_CONFIG: AutoScrollConfig = AutoScrollConfig {
     edge_extent: 36.0,
     max_step: 18.0,
@@ -101,7 +91,13 @@ pub(super) fn render_tile(
                 preview_overlay: state.preview_overlay,
             },
         );
-        attach_editor_context_menu(context_menu_response, ui, app, request, state.actions);
+        context_menu::attach_editor_context_menu(
+            context_menu_response,
+            ui,
+            app,
+            request,
+            state.actions,
+        );
     });
 }
 
@@ -123,7 +119,7 @@ fn render_tile_body(
                 interaction_response: None,
             };
         };
-        let previous_layout = take_previous_layout(tab, request.view_id);
+        let previous_snapshot = take_previous_snapshot(tab, request.view_id);
         let outcome = show_editor_scroll_area(
             ui,
             tab,
@@ -131,12 +127,12 @@ fn render_tile_body(
                 view_id: request.view_id,
                 scroll_bar_visibility: editor_scroll_bar_visibility(ui.ctx()),
                 content_style: EditorContentStyle {
-                    previous_layout: previous_layout.as_ref(),
+                    previous_snapshot: previous_snapshot.as_ref(),
                     ..content_style
                 },
             },
         );
-        restore_previous_layout_if_needed(tab, request.view_id, previous_layout);
+        restore_previous_snapshot_if_needed(tab, request.view_id, previous_snapshot);
         apply_tile_focus_request(
             app,
             request.view_id,
@@ -170,411 +166,11 @@ fn handle_tile_click(
         widget_ids::local(ui, ("tile", request.tab_index, request.view_id)),
         egui::Sense::click(),
     );
-    activate_inactive_tile_on_secondary_click(app, &tile_response, request);
+    context_menu::activate_inactive_tile_on_secondary_click(app, &tile_response, request);
     if tile_response.clicked() {
         actions.push(TileAction::Activate(request.view_id));
     }
     tile_response
-}
-
-fn activate_inactive_tile_on_secondary_click(
-    app: &mut ScratchpadApp,
-    tile_response: &egui::Response,
-    request: TileRenderRequest,
-) {
-    if tile_response.secondary_clicked() && !request.is_active {
-        app.activate_view(request.view_id);
-        app.request_focus_for_view(request.view_id);
-    }
-}
-
-fn attach_editor_context_menu(
-    tile_response: &egui::Response,
-    _ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    request: TileRenderRequest,
-    actions: &mut Vec<TileAction>,
-) {
-    activate_inactive_tile_on_secondary_click(app, tile_response, request);
-
-    let can_promote = app.tabs()[request.tab_index].can_promote_view(request.view_id);
-    let save_existing = app.tabs()[request.tab_index]
-        .buffer_for_view(request.view_id)
-        .is_some_and(|buffer| buffer.path.is_some());
-    tile_response.context_menu(|ui| {
-        set_menu_width(ui, EDITOR_CONTEXT_MENU_WIDTH);
-        render_history_menu(ui, app);
-        ui.separator();
-        render_file_menu(ui, app, save_existing);
-        ui.separator();
-        render_tile_menu(ui, actions, request, can_promote);
-        ui.separator();
-        render_icon_rail_menu(ui, app);
-    });
-}
-
-fn set_menu_width(ui: &mut egui::Ui, width: f32) {
-    ui.set_min_width(width);
-    ui.set_max_width(width);
-}
-
-fn render_history_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    run_menu_command(
-        ui,
-        app,
-        "Undo",
-        Some(ARROW_COUNTER_CLOCKWISE),
-        app.active_buffer_can_undo_text_operation(),
-        AppCommand::UndoActiveBufferTextOperation,
-        true,
-    );
-    run_menu_command(
-        ui,
-        app,
-        "Redo",
-        Some(ARROW_CLOCKWISE),
-        app.active_buffer_can_redo_text_operation(),
-        AppCommand::RedoActiveBufferTextOperation,
-        true,
-    );
-    run_menu_command(
-        ui,
-        app,
-        "History",
-        Some(CLOCK_COUNTER_CLOCKWISE),
-        true,
-        AppCommand::OpenHistory,
-        false,
-    );
-}
-
-fn render_file_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp, save_existing: bool) {
-    run_menu_command(
-        ui,
-        app,
-        "Find",
-        Some(MAGNIFYING_GLASS),
-        true,
-        AppCommand::OpenSearch,
-        false,
-    );
-    run_menu_command(
-        ui,
-        app,
-        "Replace",
-        Some(ARROWS_COUNTER_CLOCKWISE),
-        true,
-        AppCommand::OpenSearchAndReplace,
-        false,
-    );
-    run_menu_command(
-        ui,
-        app,
-        "Open File Here",
-        Some(FOLDER_OPEN),
-        true,
-        AppCommand::OpenFileHere,
-        true,
-    );
-    run_save_menu_action(ui, app, save_existing);
-}
-
-fn render_tile_menu(
-    ui: &mut egui::Ui,
-    actions: &mut Vec<TileAction>,
-    request: TileRenderRequest,
-    can_promote: bool,
-) {
-    split_menu_row(ui, actions);
-    if menu_action_button(ui, "Promote Tile", Some(ARROW_LINE_UP), can_promote) {
-        actions.push(TileAction::Promote(request.view_id));
-        ui.close();
-    }
-    if menu_action_button(ui, "Close Tile", Some(X), request.can_close) {
-        actions.push(TileAction::Close(request.view_id));
-        ui.close();
-    }
-}
-
-fn render_icon_rail_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    let any_action = ui
-        .with_layout(
-            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-            |ui| {
-                ui.horizontal(|ui| {
-                    run_icon_rail_action(ui, app, SCISSORS, "Cut", |ui, app| {
-                        copy_icon_text(ui, app.cut_selected_text_in_active_view())
-                    }) || run_icon_rail_action(ui, app, COPY, "Copy", |ui, app| {
-                        copy_icon_text(ui, app.copy_selected_text_in_active_view())
-                    }) || run_icon_rail_action(ui, app, CLIPBOARD_TEXT, "Paste", |ui, _| {
-                        ui.ctx()
-                            .clone()
-                            .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
-                        true
-                    }) || run_icon_rail_action(ui, app, SELECTION_ALL, "Select All", |_, app| {
-                        app.select_all_in_active_view()
-                    })
-                })
-                .inner
-            },
-        )
-        .inner;
-
-    if any_action {
-        app.request_focus_for_active_view();
-        ui.close();
-    }
-}
-
-fn run_menu_command(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    label: &str,
-    icon: Option<&str>,
-    enabled: bool,
-    command: AppCommand,
-    request_focus: bool,
-) -> bool {
-    run_context_menu_action(
-        ui,
-        label,
-        icon,
-        enabled,
-        |_, app| {
-            app.handle_command(command);
-            if request_focus {
-                app.request_focus_for_active_view();
-            }
-            true
-        },
-        app,
-    )
-}
-
-fn icon_action_clicked(ui: &mut egui::Ui, icon: &str, tooltip: &str) -> bool {
-    icon_rail_button(ui, icon, tooltip, true).clicked()
-}
-
-fn run_save_menu_action(ui: &mut egui::Ui, app: &mut ScratchpadApp, save_existing: bool) -> bool {
-    run_context_menu_action(
-        ui,
-        if save_existing { "Save" } else { "Save As" },
-        Some(FLOPPY_DISK),
-        true,
-        |_, app| {
-            app.request_focus_for_active_view();
-            if save_existing {
-                app.save_file();
-            } else {
-                app.save_file_as();
-            }
-            true
-        },
-        app,
-    )
-}
-
-fn run_context_menu_action(
-    ui: &mut egui::Ui,
-    label: &str,
-    icon: Option<&str>,
-    enabled: bool,
-    action: impl FnOnce(&mut egui::Ui, &mut ScratchpadApp) -> bool,
-    app: &mut ScratchpadApp,
-) -> bool {
-    if !menu_action_button(ui, label, icon, enabled) {
-        return false;
-    }
-
-    let handled = action(ui, app);
-    if handled {
-        ui.close();
-    }
-    handled
-}
-
-fn run_icon_rail_action(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    icon: &str,
-    tooltip: &str,
-    action: impl FnOnce(&mut egui::Ui, &mut ScratchpadApp) -> bool,
-) -> bool {
-    icon_action_clicked(ui, icon, tooltip) && action(ui, app)
-}
-
-fn copy_icon_text(ui: &mut egui::Ui, text: Option<String>) -> bool {
-    text.is_some_and(|text| {
-        ui.copy_text(text);
-        true
-    })
-}
-
-fn menu_action_button(ui: &mut egui::Ui, label: &str, icon: Option<&str>, enabled: bool) -> bool {
-    let text = match icon {
-        Some(icon) => format!("{icon}  {label}"),
-        None => label.to_owned(),
-    };
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        ui.add_enabled(
-            enabled,
-            egui::Button::new(egui::RichText::new(text).color(text_primary(ui)))
-                .min_size(egui::vec2(EDITOR_CONTEXT_MENU_WIDTH, 28.0))
-                .stroke(egui::Stroke::NONE),
-        )
-        .clicked()
-    })
-}
-
-fn split_menu_row(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-
-        let split_clicked = render_split_primary_button(ui);
-        render_split_submenu(ui, actions);
-
-        if split_clicked {
-            queue_split_action(actions, SplitDirection::Right);
-        }
-    });
-}
-
-fn split_menu_button(ui: &mut egui::Ui, label: &str, icon: &str) -> bool {
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        ui.add(
-            egui::Button::new(
-                egui::RichText::new(format!("{icon}  {label}")).color(text_primary(ui)),
-            )
-            .min_size(egui::vec2(EDITOR_CONTEXT_SUBMENU_WIDTH, 28.0))
-            .stroke(egui::Stroke::NONE),
-        )
-        .clicked()
-    })
-}
-
-fn render_split_primary_button(ui: &mut egui::Ui) -> bool {
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let response = ui.add(
-            egui::Button::new("")
-                .min_size(egui::vec2(
-                    EDITOR_CONTEXT_MENU_WIDTH - EDITOR_CONTEXT_CARET_WIDTH,
-                    28.0,
-                ))
-                .stroke(egui::Stroke::NONE),
-        );
-        ui.painter().text(
-            response.rect.left_center() + egui::vec2(10.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            format!("{ARROWS_SPLIT}  Split"),
-            egui::TextStyle::Button.resolve(ui.style()),
-            text_primary(ui),
-        );
-        response.clicked()
-    })
-}
-
-fn render_split_submenu(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let button = egui::Button::new(egui::RichText::new(CARET_RIGHT).color(text_primary(ui)))
-            .min_size(egui::vec2(EDITOR_CONTEXT_CARET_WIDTH, 28.0))
-            .stroke(egui::Stroke::NONE);
-
-        egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
-            set_menu_width(ui, EDITOR_CONTEXT_SUBMENU_WIDTH);
-
-            for (label, icon, direction) in [
-                ("Split Left", ARROW_LEFT, SplitDirection::Left),
-                ("Split Right", ARROW_RIGHT, SplitDirection::Right),
-                ("Split Up", ARROW_UP, SplitDirection::Up),
-                ("Split Down", ARROW_DOWN, SplitDirection::Down),
-            ] {
-                if split_menu_button(ui, label, icon) {
-                    queue_split_action(actions, direction);
-                    ui.close();
-                }
-            }
-        });
-    });
-}
-
-#[derive(Clone, Copy)]
-enum SplitDirection {
-    Left,
-    Right,
-    Up,
-    Down,
-}
-
-fn queue_split_action(actions: &mut Vec<TileAction>, direction: SplitDirection) {
-    let (axis, new_view_first) = match direction {
-        SplitDirection::Left => (SplitAxis::Vertical, true),
-        SplitDirection::Right => (SplitAxis::Vertical, false),
-        SplitDirection::Up => (SplitAxis::Horizontal, true),
-        SplitDirection::Down => (SplitAxis::Horizontal, false),
-    };
-    actions.push(TileAction::Split {
-        axis,
-        new_view_first,
-        ratio: DEFAULT_SPLIT_RATIO,
-    });
-}
-
-fn apply_context_menu_row_hover_style(ui: &mut egui::Ui) {
-    let hover_bg = action_hover_bg(ui);
-    let visuals = ui.visuals_mut();
-    visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
-    visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-    visuals.widgets.hovered.bg_fill = hover_bg;
-    visuals.widgets.hovered.weak_bg_fill = hover_bg;
-    visuals.widgets.active.bg_fill = hover_bg;
-    visuals.widgets.active.weak_bg_fill = hover_bg;
-    visuals.widgets.open.bg_fill = hover_bg;
-    visuals.widgets.open.weak_bg_fill = hover_bg;
-    visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
-    visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
-    visuals.widgets.active.bg_stroke = egui::Stroke::NONE;
-    visuals.widgets.open.bg_stroke = egui::Stroke::NONE;
-}
-
-fn icon_rail_button(ui: &mut egui::Ui, icon: &str, tooltip: &str, enabled: bool) -> egui::Response {
-    with_visual_overrides(ui, apply_icon_rail_button_style, |ui| {
-        let button = egui::Button::new(
-            egui::RichText::new(icon)
-                .font(egui::FontId::proportional(17.0))
-                .color(text_primary(ui)),
-        )
-        .min_size(EDITOR_CONTEXT_ICON_BUTTON_SIZE)
-        .stroke(egui::Stroke::new(1.0, border(ui)))
-        .corner_radius(egui::CornerRadius::same(8));
-
-        ui.add_enabled(enabled, button).on_hover_text(tooltip)
-    })
-}
-
-fn apply_icon_rail_button_style(ui: &mut egui::Ui) {
-    let idle_bg = action_bg(ui);
-    let hover_bg = action_hover_bg(ui);
-    let visuals = ui.visuals_mut();
-    visuals.widgets.inactive.bg_fill = idle_bg;
-    visuals.widgets.inactive.weak_bg_fill = idle_bg;
-    visuals.widgets.hovered.bg_fill = hover_bg;
-    visuals.widgets.hovered.weak_bg_fill = hover_bg;
-    visuals.widgets.active.bg_fill = hover_bg;
-    visuals.widgets.active.weak_bg_fill = hover_bg;
-    visuals.widgets.open.bg_fill = hover_bg;
-    visuals.widgets.open.weak_bg_fill = hover_bg;
-}
-
-fn with_visual_overrides<R>(
-    ui: &mut egui::Ui,
-    configure: impl FnOnce(&mut egui::Ui),
-    add_contents: impl FnOnce(&mut egui::Ui) -> R,
-) -> R {
-    let previous_visuals = ui.visuals().clone();
-    configure(ui);
-    let result = add_contents(ui);
-    *ui.visuals_mut() = previous_visuals;
-    result
 }
 
 fn paint_tile_frame(
@@ -623,7 +219,7 @@ fn editor_content_style<'a>(
     EditorContentStyle {
         editor_gutter: app.editor_gutter(),
         viewport: None,
-        previous_layout: None,
+        previous_snapshot: None,
         text_edit: TextEditOptions::new(
             request_focus,
             app.word_wrap(),
@@ -659,16 +255,16 @@ fn editor_scroll_bar_visibility(ctx: &egui::Context) -> egui::scroll_area::Scrol
     }
 }
 
-fn take_previous_layout(tab: &mut WorkspaceTab, view_id: ViewId) -> Option<RenderedLayout> {
+fn take_previous_snapshot(tab: &mut WorkspaceTab, view_id: ViewId) -> Option<DisplaySnapshot> {
     let current_revision = tab
         .buffer_for_view(view_id)
         .map(|buffer| buffer.document_revision());
     tab.view_mut(view_id).and_then(|view| {
-        if view.latest_layout_revision == current_revision {
-            view.latest_layout.take()
+        if view.latest_display_snapshot_revision == current_revision {
+            view.latest_display_snapshot.take()
         } else {
-            view.latest_layout = None;
-            view.latest_layout_revision = None;
+            view.latest_display_snapshot = None;
+            view.latest_display_snapshot_revision = None;
             None
         }
     })
@@ -683,41 +279,12 @@ fn show_editor_scroll_area(
     tab: &mut WorkspaceTab,
     request: TileScrollRequest<'_>,
 ) -> EditorContentOutcome {
-    let scroll_id = editor_scroll_id(request.view_id);
-    if let Some((buffer, view)) = tab.buffer_and_view_mut(request.view_id) {
-        drain_pending_scroll_intents(view, buffer);
-    }
-    let scroll_offset = tab
-        .view(request.view_id)
-        .and_then(|view| {
-            tab.buffer_for_view(request.view_id)
-                .map(|buffer| view.editor_pixel_offset_resolved(buffer))
-        })
-        .unwrap_or_default();
-    let wheel_requested_scroll_offset =
-        requested_scroll_offset_for_pointer_wheel(ui, scroll_offset);
-    if wheel_requested_scroll_offset.is_some()
-        && let Some(view) = tab.view_mut(request.view_id)
-    {
-        view.clear_cursor_reveal();
-    }
-    let render_scroll_offset = wheel_requested_scroll_offset.unwrap_or(scroll_offset);
-    sync_editor_scroll_state(ui, scroll_id, render_scroll_offset);
-    let row_height =
-        ui.fonts_mut(|fonts| fonts.row_height(request.content_style.text_edit.editor_font_id));
-    let virtual_row_height = row_height.max(request.content_style.text_edit.editor_font_id.size);
-    let virtual_content_height = tab
-        .buffer_for_view(request.view_id)
-        .map(|buffer| buffer.line_count.max(1) as f32 * virtual_row_height)
-        .unwrap_or_default();
-    // Pre-load the local scroll state with the offset we want this frame.
-    let mut local_state = scrolling::ScrollState::load(ui, scroll_id);
-    local_state.offset = render_scroll_offset;
-    local_state.store(ui, scroll_id);
-    let output = scrolling::ScrollArea::new(scroll_id)
+    let frame = prepare_editor_scroll_frame(ui, tab, request.view_id, &request.content_style);
+    let output = scrolling::ScrollArea::new(frame.scroll_id)
         .source(local_scroll_source(request.scroll_bar_visibility))
         .scrollbar_x(scrollbar_policy_from_egui(request.scroll_bar_visibility))
         .scrollbar_y(scrollbar_policy_from_egui(request.scroll_bar_visibility))
+        .min_content_size(egui::vec2(0.0, frame.virtual_content_height))
         .show_viewport(ui, |ui, _offset, viewport| {
             let mut content_style = request.content_style;
             content_style.viewport = Some(viewport);
@@ -733,12 +300,9 @@ fn show_editor_scroll_area(
                 })
                 .unwrap_or_else(missing_editor_content_outcome)
         });
-    let content_size = editor_scroll_content_size(output.content_size, virtual_content_height);
-    // Selection-edge drag emits an `EdgeAutoscroll` intent to the per-view
-    // ScrollManager rather than a one-shot pixel-offset override. The manager
-    // applies it through the standard tick path so position bookkeeping stays
-    // single-sourced. Pointer-only (non-edge) drag keeps the back-channel for
-    // now since it represents an absolute scroll target, not a velocity.
+
+    let content_size =
+        editor_scroll_content_size(output.content_size, frame.virtual_content_height);
     apply_selection_edge_autoscroll_intent(
         ui,
         tab,
@@ -748,28 +312,125 @@ fn show_editor_scroll_area(
     );
     let drag_requested_scroll_offset = requested_scroll_offset_for_pointer_drag(
         ui,
-        scroll_offset,
+        frame.scroll_offset,
         output.inner.interaction_response.as_ref(),
         content_size,
         output.inner_rect.size(),
         output.inner_rect,
     );
-    if let Some((buffer, view)) = tab.buffer_and_view_mut(request.view_id) {
-        publish_scroll_manager_metrics(view, output.inner_rect, row_height, content_size);
-        view.set_editor_pixel_offset(resolve_editor_scroll_offset(
-            &output,
+    finish_editor_scroll_frame(
+        tab,
+        request.view_id,
+        &frame,
+        &output,
+        content_size,
+        drag_requested_scroll_offset,
+    );
+    output.inner
+}
+
+struct EditorScrollFrame<'a> {
+    scroll_id: egui::Id,
+    previous_snapshot: Option<&'a DisplaySnapshot>,
+    scroll_offset: egui::Vec2,
+    wheel_requested_scroll_offset: Option<egui::Vec2>,
+    row_height: f32,
+    virtual_content_height: f32,
+}
+
+fn prepare_editor_scroll_frame<'a>(
+    ui: &egui::Ui,
+    tab: &mut WorkspaceTab,
+    view_id: ViewId,
+    content_style: &EditorContentStyle<'a>,
+) -> EditorScrollFrame<'a> {
+    let scroll_id = editor_scroll_id(view_id);
+    let previous_snapshot = content_style.previous_snapshot;
+    if let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) {
+        drain_pending_scroll_intents(view, buffer, previous_snapshot);
+    }
+    let scroll_offset = resolved_scroll_offset_for_view(tab, view_id, previous_snapshot);
+    let wheel_requested_scroll_offset =
+        requested_scroll_offset_for_pointer_wheel(ui, scroll_offset);
+    if wheel_requested_scroll_offset.is_some()
+        && let Some(view) = tab.view_mut(view_id)
+    {
+        view.clear_cursor_reveal();
+    }
+    sync_local_scroll_state(
+        ui,
+        scroll_id,
+        wheel_requested_scroll_offset.unwrap_or(scroll_offset),
+    );
+    let row_height = ui.fonts_mut(|fonts| fonts.row_height(content_style.text_edit.editor_font_id));
+    let virtual_content_height = virtual_editor_content_height(
+        tab,
+        view_id,
+        row_height.max(content_style.text_edit.editor_font_id.size),
+    );
+    EditorScrollFrame {
+        scroll_id,
+        previous_snapshot,
+        scroll_offset,
+        wheel_requested_scroll_offset,
+        row_height,
+        virtual_content_height,
+    }
+}
+
+fn resolved_scroll_offset_for_view(
+    tab: &WorkspaceTab,
+    view_id: ViewId,
+    previous_snapshot: Option<&DisplaySnapshot>,
+) -> egui::Vec2 {
+    tab.view(view_id)
+        .and_then(|view| {
+            tab.buffer_for_view(view_id)
+                .map(|buffer| editor_pixel_offset_resolved(view, buffer, previous_snapshot))
+        })
+        .unwrap_or_default()
+}
+
+fn sync_local_scroll_state(ui: &egui::Ui, scroll_id: egui::Id, offset: egui::Vec2) {
+    sync_editor_scroll_state(ui, scroll_id, offset);
+    let mut local_state = scrolling::ScrollState::load(ui, scroll_id);
+    local_state.offset = offset;
+    local_state.store(ui, scroll_id);
+}
+
+fn virtual_editor_content_height(
+    tab: &WorkspaceTab,
+    view_id: ViewId,
+    virtual_row_height: f32,
+) -> f32 {
+    tab.buffer_for_view(view_id)
+        .map(|buffer| buffer.line_count.max(1) as f32 * virtual_row_height)
+        .unwrap_or_default()
+}
+
+fn finish_editor_scroll_frame(
+    tab: &mut WorkspaceTab,
+    view_id: ViewId,
+    frame: &EditorScrollFrame<'_>,
+    output: &scrolling::ScrollAreaOutput<EditorContentOutcome>,
+    content_size: egui::Vec2,
+    drag_requested_scroll_offset: Option<egui::Vec2>,
+) {
+    if let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) {
+        publish_scroll_manager_metrics(view, output.inner_rect, frame.row_height, content_size);
+        drain_pending_scroll_intents(view, buffer, frame.previous_snapshot);
+        let scrollbar_requested_scroll_offset = output.did_scroll.then_some(output.state.offset);
+        if let Some(offset) = resolve_editor_scroll_offset_override(
             content_size,
-            render_scroll_offset,
-            wheel_requested_scroll_offset,
+            output.inner_rect.size(),
+            frame.wheel_requested_scroll_offset,
             drag_requested_scroll_offset,
-        ));
-        // Phase-3 anchor stickiness: once the renderer has produced a
-        // DisplaySnapshot for this view, upgrade the v1 logical anchor to a
-        // piece-tree-backed anchor so subsequent edits above the viewport
-        // keep the viewport pinned to the same content.
+            scrollbar_requested_scroll_offset,
+        ) {
+            view.set_editor_pixel_offset(offset);
+        }
         view.upgrade_scroll_anchor_to_piece(buffer);
     }
-    output.inner
 }
 
 /// Publish the latest viewport rect, row height, and content extent to the
@@ -805,6 +466,20 @@ fn publish_scroll_manager_metrics(
     });
 }
 
+fn editor_pixel_offset_resolved(
+    view: &crate::app::domain::EditorViewState,
+    buffer: &crate::app::domain::BufferState,
+    snapshot_fallback: Option<&DisplaySnapshot>,
+) -> egui::Vec2 {
+    let metrics = view.scroll.metrics();
+    let snapshot = view.latest_display_snapshot.as_ref().or(snapshot_fallback);
+    let resolve = |id| buffer.document().piece_tree().anchor_position(id);
+    let anchor_to_row = scrolling::display_aware_anchor_to_row(snapshot, resolve);
+    let row = anchor_to_row(view.scroll.anchor());
+    let y = row * metrics.row_height.max(0.0);
+    egui::vec2(view.scroll.horizontal_px(), y)
+}
+
 /// Drain any `ScrollIntent`s queued on the view through the per-view
 /// `ScrollManager`. This is the renderer-side half of Phase 4 wiring: input
 /// emitters push intents (search jumps, programmatic scrolls, future page/line
@@ -813,12 +488,17 @@ fn publish_scroll_manager_metrics(
 fn drain_pending_scroll_intents(
     view: &mut crate::app::domain::EditorViewState,
     buffer: &crate::app::domain::BufferState,
+    snapshot_fallback: Option<&DisplaySnapshot>,
 ) {
     if view.pending_intents.is_empty() {
         return;
     }
     let intents = std::mem::take(&mut view.pending_intents);
-    let snapshot = view.latest_display_snapshot.clone();
+    let snapshot = view
+        .latest_display_snapshot
+        .as_ref()
+        .or(snapshot_fallback)
+        .cloned();
     let resolve = |id| buffer.document().piece_tree().anchor_position(id);
     let anchor_to_row = scrolling::display_aware_anchor_to_row(snapshot.as_ref(), resolve);
     for intent in intents {
@@ -861,21 +541,17 @@ fn scrollbar_policy_from_egui(
     }
 }
 
-fn resolve_editor_scroll_offset(
-    output: &scrolling::ScrollAreaOutput<EditorContentOutcome>,
+fn resolve_editor_scroll_offset_override(
     content_size: egui::Vec2,
-    fallback_scroll_offset: egui::Vec2,
+    viewport_size: egui::Vec2,
     wheel_requested_scroll_offset: Option<egui::Vec2>,
     drag_requested_scroll_offset: Option<egui::Vec2>,
-) -> egui::Vec2 {
-    clamp_scroll_offset(
-        drag_requested_scroll_offset
-            .or(output.inner.requested_scroll_offset)
-            .or(wheel_requested_scroll_offset)
-            .unwrap_or(fallback_scroll_offset),
-        content_size,
-        output.inner_rect.size(),
-    )
+    scrollbar_requested_scroll_offset: Option<egui::Vec2>,
+) -> Option<egui::Vec2> {
+    drag_requested_scroll_offset
+        .or(scrollbar_requested_scroll_offset)
+        .or(wheel_requested_scroll_offset)
+        .map(|offset| clamp_scroll_offset(offset, content_size, viewport_size))
 }
 
 fn editor_scroll_content_size(content_size: egui::Vec2, virtual_content_height: f32) -> egui::Vec2 {
@@ -909,63 +585,67 @@ fn requested_scroll_offset_for_pointer_drag(
     )
 }
 
-/// Selection-edge autoscroll: while the user is drag-selecting near the
-/// viewport edge, push an `EdgeAutoscroll` velocity intent to the
-/// `ScrollManager` and tick once so the manager applies one frame of
-/// movement. The velocity is the per-frame proximity-scaled delta produced
-/// by [`selection_edge_drag_delta`].
 fn apply_selection_edge_autoscroll_intent(
     ui: &egui::Ui,
     tab: &mut WorkspaceTab,
-    view_id: u64,
+    view_id: ViewId,
     interaction_response: Option<&egui::Response>,
     inner_rect: egui::Rect,
 ) {
-    if !ui.input(|input| input.pointer.button_down(egui::PointerButton::Primary))
-        || !interaction_response
-            .is_some_and(|response| response.dragged_by(egui::PointerButton::Primary))
-    {
-        return;
-    }
-    let Some(pointer_pos) = ui.input(|input| input.pointer.latest_pos()) else {
+    let Some(delta) = selection_edge_autoscroll_delta(ui, interaction_response, inner_rect) else {
         return;
     };
-    let delta = selection_edge_drag_delta(inner_rect, pointer_pos);
     if delta == egui::Vec2::ZERO {
-        if let Some(view) = tab.view_mut(view_id) {
-            view.scroll.clear_edge_autoscroll();
-        }
+        clear_edge_autoscroll(tab, view_id);
         return;
     }
+    apply_edge_autoscroll_delta(tab, view_id, delta);
+}
+
+fn selection_edge_autoscroll_delta(
+    ui: &egui::Ui,
+    interaction_response: Option<&egui::Response>,
+    inner_rect: egui::Rect,
+) -> Option<egui::Vec2> {
+    let is_drag_selecting = ui
+        .input(|input| input.pointer.button_down(egui::PointerButton::Primary))
+        && interaction_response
+            .is_some_and(|response| response.dragged_by(egui::PointerButton::Primary));
+    let pointer_pos = ui.input(|input| input.pointer.latest_pos())?;
+    is_drag_selecting.then(|| selection_edge_drag_delta(inner_rect, pointer_pos))
+}
+
+fn clear_edge_autoscroll(tab: &mut WorkspaceTab, view_id: ViewId) {
+    if let Some(view) = tab.view_mut(view_id) {
+        view.scroll.clear_edge_autoscroll();
+    }
+}
+
+fn apply_edge_autoscroll_delta(tab: &mut WorkspaceTab, view_id: ViewId, delta: egui::Vec2) {
     let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) else {
         return;
     };
     let snapshot = view.latest_display_snapshot.clone();
     let resolve = |id| buffer.document().piece_tree().anchor_position(id);
     let anchor_to_row = scrolling::display_aware_anchor_to_row(snapshot.as_ref(), resolve);
-    // Velocity expressed as pixels-per-tick; we then tick with dt=1.0 to
-    // apply exactly the per-frame proximity delta produced by the helper.
-    view.scroll.apply_intent(
-        scrolling::ScrollIntent::EdgeAutoscroll {
-            axis: scrolling::Axis::X,
-            velocity: delta.x,
-        },
-        &anchor_to_row,
-        scrolling::naive_row_to_anchor,
-    );
-    view.scroll.apply_intent(
-        scrolling::ScrollIntent::EdgeAutoscroll {
-            axis: scrolling::Axis::Y,
-            velocity: delta.y,
-        },
-        &anchor_to_row,
-        scrolling::naive_row_to_anchor,
-    );
+    apply_edge_autoscroll_axis(view, scrolling::Axis::X, delta.x, &anchor_to_row);
+    apply_edge_autoscroll_axis(view, scrolling::Axis::Y, delta.y, &anchor_to_row);
     view.scroll
         .tick_edge_autoscroll(1.0, &anchor_to_row, scrolling::naive_row_to_anchor);
-    // Reset velocity so a subsequent frame without proximity does not keep
-    // scrolling on its own.
     view.scroll.clear_edge_autoscroll();
+}
+
+fn apply_edge_autoscroll_axis(
+    view: &mut crate::app::domain::EditorViewState,
+    axis: scrolling::Axis,
+    velocity: f32,
+    anchor_to_row: &impl Fn(scrolling::ScrollAnchor) -> f32,
+) {
+    view.scroll.apply_intent(
+        scrolling::ScrollIntent::EdgeAutoscroll { axis, velocity },
+        anchor_to_row,
+        scrolling::naive_row_to_anchor,
+    );
 }
 
 fn requested_scroll_offset_for_pointer_wheel(
@@ -1049,17 +729,17 @@ fn max_scroll_offset(content_size: egui::Vec2, viewport_size: egui::Vec2) -> egu
     )
 }
 
-fn restore_previous_layout_if_needed(
+fn restore_previous_snapshot_if_needed(
     tab: &mut WorkspaceTab,
     view_id: ViewId,
-    previous_layout: Option<RenderedLayout>,
+    previous_snapshot: Option<DisplaySnapshot>,
 ) {
     if tab
         .view(view_id)
-        .is_some_and(|view| view.latest_layout.is_none())
+        .is_some_and(|view| view.latest_display_snapshot.is_none())
         && let Some(view) = tab.view_mut(view_id)
     {
-        view.latest_layout = previous_layout;
+        view.latest_display_snapshot = previous_snapshot;
     }
 }
 
@@ -1068,7 +748,6 @@ fn missing_editor_content_outcome() -> EditorContentOutcome {
         changed: false,
         focused: false,
         request_editor_focus: false,
-        requested_scroll_offset: None,
         interaction_response: None,
     }
 }
@@ -1076,15 +755,62 @@ fn missing_editor_content_outcome() -> EditorContentOutcome {
 #[cfg(test)]
 mod tests {
     use super::{
-        clamp_scroll_offset, editor_scroll_id, max_scroll_offset, scroll_offset_from_drag_delta,
-        scroll_offset_from_wheel_delta, selection_edge_drag_delta,
+        clamp_scroll_offset, editor_pixel_offset_resolved, editor_scroll_id, max_scroll_offset,
+        scroll_offset_from_drag_delta, scroll_offset_from_wheel_delta, selection_edge_drag_delta,
     };
+    use crate::app::domain::{AnchorBias, BufferState, EditorViewState};
+    use crate::app::ui::scrolling::{DisplaySnapshot, ScrollAnchor, ViewportMetrics};
     use eframe::egui;
+
+    fn galley_for(text: &str) -> std::sync::Arc<egui::Galley> {
+        let ctx = egui::Context::default();
+        let mut galley = None;
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            galley = Some(ui.fonts_mut(|fonts| {
+                fonts.layout_job(egui::text::LayoutJob::simple(
+                    text.to_owned(),
+                    egui::FontId::monospace(14.0),
+                    egui::Color32::WHITE,
+                    f32::INFINITY,
+                ))
+            }));
+        });
+        galley.expect("galley")
+    }
 
     #[test]
     fn editor_scroll_id_is_scoped_to_the_view() {
         assert_eq!(editor_scroll_id(7), editor_scroll_id(7));
         assert_ne!(editor_scroll_id(7), editor_scroll_id(8));
+    }
+
+    #[test]
+    fn piece_anchor_pixel_offset_uses_previous_snapshot_fallback() {
+        let text = "zero\none\ntwo\nthree\nfour";
+        let mut buffer = BufferState::new("notes.txt".to_owned(), text.to_owned(), None);
+        let anchor = buffer
+            .document_mut()
+            .piece_tree_mut()
+            .create_anchor(text.find("three").expect("line start"), AnchorBias::Left);
+        let snapshot = DisplaySnapshot::from_galley(galley_for(text), 10.0);
+        let mut view = EditorViewState::new(buffer.id, false);
+        view.scroll.set_metrics(ViewportMetrics {
+            viewport_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 40.0)),
+            row_height: 10.0,
+            column_width: 5.0,
+            visible_rows: 4,
+            visible_columns: 40,
+        });
+        view.scroll.replace_anchor(ScrollAnchor::Piece {
+            anchor,
+            display_row_offset: 0.25,
+        });
+
+        assert_eq!(editor_pixel_offset_resolved(&view, &buffer, None).y, 2.5);
+        assert_eq!(
+            editor_pixel_offset_resolved(&view, &buffer, Some(&snapshot)).y,
+            32.5
+        );
     }
 
     #[test]

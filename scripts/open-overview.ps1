@@ -16,16 +16,74 @@ $repoRoot = Split-Path -Parent $scriptRoot
 $isWindowsPlatform = $false
 if (Get-Variable -Name IsWindows -ErrorAction SilentlyContinue) {
     $isWindowsPlatform = [bool]$IsWindows
-} elseif ($env:OS -eq "Windows_NT") {
+}
+elseif ($env:OS -eq "Windows_NT") {
     $isWindowsPlatform = $true
 }
 
 if ($isWindowsPlatform) {
     $python = Join-Path $repoRoot ".venv\Scripts\python.exe"
-} else {
+}
+else {
     $python = Join-Path $repoRoot ".venv/bin/python"
 }
 $activePort = $Port
+
+function Test-IsAdministrator {
+    if (-not $isWindowsPlatform) {
+        return $true
+    }
+
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Quote-ProcessArgument {
+    param([string]$Value)
+
+    if ($Value -notmatch '[\s"]') {
+        return $Value
+    }
+
+    return '"' + ($Value -replace '"', '\"') + '"'
+}
+
+function Restart-AsAdministrator {
+    $arguments = @(
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        $PSCommandPath,
+        "-Port",
+        [string]$Port
+    )
+
+    foreach ($entry in @(
+            @($Flamegraph, "-Flamegraph"),
+            @($FullUpdate, "-FullUpdate"),
+            @($FlamegraphOnly, "-FlamegraphOnly"),
+            @($SearchSpeedOnly, "-SearchSpeedOnly"),
+            @($CloneOnly, "-CloneOnly"),
+            @($LegacyStaticServer, "-LegacyStaticServer")
+        )) {
+        if ($entry[0]) {
+            $arguments += $entry[1]
+        }
+    }
+
+    Write-Host "Re-launching overview in an Administrator PowerShell..." -ForegroundColor Yellow
+    Start-Process -FilePath "powershell.exe" `
+        -ArgumentList (($arguments | ForEach-Object { Quote-ProcessArgument $_ }) -join " ") `
+        -WorkingDirectory $repoRoot `
+        -Verb RunAs | Out-Null
+}
+
+if ($isWindowsPlatform -and -not (Test-IsAdministrator)) {
+    Restart-AsAdministrator
+    return
+}
 
 function Write-Step {
     param(
@@ -40,7 +98,7 @@ function Write-Step {
     Write-Host "[$Number/$Total] $Title" -ForegroundColor Cyan
 }
 
-function Ensure-Python {
+function Initialize-PythonEnvironment {
     $venvDir = Join-Path $repoRoot ".venv"
 
     if (-not (Test-Path $python)) {
@@ -138,9 +196,9 @@ function New-OverviewTask {
     )
 
     return [pscustomobject]@{
-        Title = $Title
-        Label = $Label
-        Arguments = $Arguments
+        Title         = $Title
+        Label         = $Label
+        Arguments     = $Arguments
         ParallelGroup = $ParallelGroup
     }
 }
@@ -225,7 +283,8 @@ function Invoke-StepCommandsParallel {
                 $reason = $job.ChildJobs[0].JobStateInfo.Reason
                 if ($null -ne $reason) {
                     $failures += "'$($job.Name)' failed: $reason"
-                } else {
+                }
+                else {
                     $failures += "'$($job.Name)' did not complete successfully."
                 }
             }
@@ -288,22 +347,26 @@ try {
     if ($FullUpdate) {
         $updateMode = "full"
         $tasks = @(Get-RefreshTasks -IncludeFlamegraphs)
-    } elseif ($FlamegraphOnly) {
+    }
+    elseif ($FlamegraphOnly) {
         $updateMode = "flamegraph-only"
         $tasks = @(
             New-OverviewTask -Title "Generating flamegraph data" -Label "generate_flamegraphs" -Arguments @("scripts/generate_flamegraphs.py", "--mode", "visibility")
         )
-    } elseif ($SearchSpeedOnly) {
+    }
+    elseif ($SearchSpeedOnly) {
         $updateMode = "search-speed-only"
         $tasks = @(
             New-OverviewTask -Title "Generating search speed data" -Label "search_speed" -Arguments @("scripts/search_speed.py", "--mode", "visibility")
         )
-    } elseif ($CloneOnly) {
+    }
+    elseif ($CloneOnly) {
         $updateMode = "clone-only"
         $tasks = @(
             New-OverviewTask -Title "Generating clone alert data" -Label "clone_alert" -Arguments @("scripts/clone_alert.py", "--mode", "visibility", "--paths", "src")
         )
-    } elseif ($Flamegraph) {
+    }
+    elseif ($Flamegraph) {
         $updateMode = "flamegraph-only"
         $tasks = @(
             New-OverviewTask -Title "Generating flamegraph data" -Label "generate_flamegraphs" -Arguments @("scripts/generate_flamegraphs.py", "--mode", "visibility")
@@ -330,7 +393,7 @@ try {
     }
     $stepNumber = 1
 
-    Ensure-Python
+    Initialize-PythonEnvironment
 
     if ($tasks.Count -gt 0) {
         Write-Step -Number $stepNumber -Total $totalSteps -Title "Checking Python environment"
@@ -368,7 +431,8 @@ try {
 
     $startTitle = if ($tasks.Count -eq 0) {
         "Starting viewer server"
-    } else {
+    }
+    else {
         "Starting Python web server"
     }
     Write-Step -Number $stepNumber -Total $totalSteps -Title $startTitle
@@ -378,7 +442,8 @@ try {
     }
     $serverArgs = if ($LegacyStaticServer) {
         @("-m", "http.server", "$activePort")
-    } else {
+    }
+    else {
         @("scripts/dashboard_server.py", "--port", "$activePort")
     }
     $serverProcess = Start-Process -FilePath $python `
@@ -387,7 +452,7 @@ try {
         -PassThru
     Write-Host "Started server with PID $($serverProcess.Id) on port $activePort." -ForegroundColor Green
 
-    $viewerUrl = "http://localhost:$activePort/viewer/?v=$(Get-Date -Format 'yyyyMMddHHmmss')"
+    $viewerUrl = "http://127.0.0.1:$activePort/viewer/?v=$(Get-Date -Format 'yyyyMMddHHmmss')"
 
     if (-not (Wait-ForServer -Url $viewerUrl)) {
         throw "The local web server did not become ready at $viewerUrl."

@@ -1,9 +1,7 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use eframe::egui;
 use rand::RngExt;
-use scratchpad::app::domain::{
-    BufferState, RenderedLayout, SearchHighlightState, SplitAxis, WorkspaceTab,
-};
+use scratchpad::app::domain::{BufferState, SearchHighlightState, SplitAxis, WorkspaceTab};
 use scratchpad::app::ui::editor_content::{
     EditorHighlightStyle, build_layouter, make_control_chars_clean, make_control_chars_visible,
 };
@@ -66,7 +64,7 @@ fn scroll_layout_pass(text: &str) -> usize {
 
             for wrap_width in [980.0, 720.0, 520.0, 980.0] {
                 let galley = layouter(ui, &buffer, wrap_width);
-                total_rows += RenderedLayout::from_galley(galley).visual_row_count();
+                total_rows += galley.rows.len().max(1);
             }
         });
     });

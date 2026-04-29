@@ -79,32 +79,11 @@ pub(super) fn apply_delete_selection(
 }
 
 pub(super) fn apply_outdent(buffer: &mut BufferState, cursor: &CursorRange) -> Option<CursorRange> {
-    let piece_tree = buffer.document().piece_tree();
     let caret = cursor.primary.index;
-    let line_index = piece_tree.line_index_at_offset(caret);
-    let line_info = piece_tree.line_info(line_index);
-    let line_start = line_info.start_char;
-    let line_end = line_start + line_info.char_len;
-    let (line_prefix, _) = piece_tree.extract_range_bounded(line_start..line_end, 4);
-    let mut prefix_chars = line_prefix.chars();
-    let first_char = prefix_chars.next()?;
-
-    let chars_to_remove = if first_char == '\t' {
-        1
-    } else if first_char == ' ' {
-        line_prefix.chars().take_while(|&c| c == ' ').count()
-    } else {
-        return None;
-    };
-
-    if chars_to_remove == 0 {
-        return None;
-    }
-
-    let deleted_text = piece_tree.extract_range(line_start..line_start + chars_to_remove);
-    buffer
-        .document_mut()
-        .delete_char_range_direct(line_start..line_start + chars_to_remove);
+    let (line_start, line_end) = cursor_line_span(buffer, caret);
+    let line_prefix = line_prefix(buffer, line_start, line_end);
+    let chars_to_remove = leading_outdent_width(&line_prefix)?;
+    let deleted_text = remove_line_prefix(buffer, line_start, chars_to_remove);
 
     let new_caret = caret.saturating_sub(chars_to_remove);
     let new_cursor = CursorRange::one(CharCursor::new(new_caret));
@@ -117,6 +96,46 @@ pub(super) fn apply_outdent(buffer: &mut BufferState, cursor: &CursorRange) -> O
         String::new(),
     );
     Some(new_cursor)
+}
+
+fn cursor_line_span(buffer: &BufferState, caret: usize) -> (usize, usize) {
+    let piece_tree = buffer.document().piece_tree();
+    let line_index = piece_tree.line_index_at_offset(caret);
+    let line_info = piece_tree.line_info(line_index);
+    let line_start = line_info.start_char;
+    (line_start, line_start + line_info.char_len)
+}
+
+fn line_prefix(buffer: &BufferState, line_start: usize, line_end: usize) -> String {
+    buffer
+        .document()
+        .piece_tree()
+        .extract_range_bounded(line_start..line_end, 4)
+        .0
+}
+
+fn leading_outdent_width(line_prefix: &str) -> Option<usize> {
+    match line_prefix.chars().next()? {
+        '\t' => Some(1),
+        ' ' => {
+            Some(line_prefix.chars().take_while(|&ch| ch == ' ').count()).filter(|&width| width > 0)
+        }
+        _ => None,
+    }
+}
+
+fn remove_line_prefix(
+    buffer: &mut BufferState,
+    line_start: usize,
+    chars_to_remove: usize,
+) -> String {
+    let remove_range = line_start..line_start + chars_to_remove;
+    let deleted_text = buffer
+        .document()
+        .piece_tree()
+        .extract_range(remove_range.clone());
+    buffer.document_mut().delete_char_range_direct(remove_range);
+    deleted_text
 }
 
 pub(super) fn apply_cut(buffer: &mut BufferState, cursor: &CursorRange) -> (CursorRange, String) {
@@ -193,16 +212,29 @@ fn normalize_line_endings(text: &str, preferred: &str) -> String {
     let mut result = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     while let Some(ch) = chars.next() {
-        match ch {
-            '\r' => {
-                if chars.peek() == Some(&'\n') {
-                    chars.next();
-                }
-                result.push_str(preferred);
-            }
-            '\n' => result.push_str(preferred),
-            _ => result.push(ch),
-        }
+        push_normalized_line_char(&mut result, ch, &mut chars, preferred);
     }
     result
+}
+
+fn push_normalized_line_char(
+    result: &mut String,
+    ch: char,
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    preferred: &str,
+) {
+    match ch {
+        '\r' => {
+            consume_lf_after_cr(chars);
+            result.push_str(preferred);
+        }
+        '\n' => result.push_str(preferred),
+        _ => result.push(ch),
+    }
+}
+
+fn consume_lf_after_cr(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    if chars.peek() == Some(&'\n') {
+        chars.next();
+    }
 }

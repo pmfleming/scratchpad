@@ -1,93 +1,19 @@
 use super::native_editor::{EditorWidgetOutcome, TextEditOptions, render_read_only_text_edit};
-use crate::app::domain::{BufferState, EditorViewState, RenderedLayout};
+use crate::app::domain::{BufferState, EditorViewState};
 
 pub fn render_artifact_view(
     ui: &mut eframe::egui::Ui,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
-    previous_layout: Option<&RenderedLayout>,
     options: TextEditOptions<'_>,
 ) -> EditorWidgetOutcome {
-    if view.show_control_chars {
-        try_render_visible_artifact_window(
-            ui,
-            buffer,
-            view,
-            previous_layout,
-            options,
-            make_control_chars_visible,
-        )
-        .unwrap_or_else(|| {
-            render_read_only_text_edit(
-                ui,
-                view,
-                make_control_chars_visible(&buffer.text()),
-                buffer.line_count,
-                options,
-            )
-        })
+    let transform: fn(&str) -> String = if view.show_control_chars {
+        make_control_chars_visible
     } else {
-        try_render_visible_artifact_window(
-            ui,
-            buffer,
-            view,
-            previous_layout,
-            options,
-            make_control_chars_clean,
-        )
-        .unwrap_or_else(|| {
-            let clean_text = make_control_chars_clean(&buffer.text());
-            render_read_only_text_edit(ui, view, clean_text, buffer.line_count, options)
-        })
-    }
-}
-
-fn try_render_visible_artifact_window(
-    ui: &mut eframe::egui::Ui,
-    buffer: &BufferState,
-    view: &mut EditorViewState,
-    previous_layout: Option<&RenderedLayout>,
-    options: TextEditOptions<'_>,
-    transform: impl Fn(&str) -> String,
-) -> Option<EditorWidgetOutcome> {
-    if options.word_wrap {
-        return None;
-    }
-
-    let visible_lines = previous_layout?.visible_line_range();
-    if visible_lines.is_empty() {
-        return None;
-    }
-
-    let mut visible_window = buffer.visible_line_window(visible_lines.clone());
-    let top_padding_lines = visible_window.line_range.start;
-    let bottom_padding_lines = buffer
-        .line_count
-        .saturating_sub(visible_window.line_range.end);
-    let row_height = ui.fonts_mut(|fonts| fonts.row_height(options.editor_font_id));
-
-    if top_padding_lines > 0 {
-        ui.add_space(row_height * top_padding_lines as f32);
-    }
-
-    let outcome = render_read_only_text_edit(
-        ui,
-        view,
-        transform(&visible_window.text),
-        visible_window.line_range.len().max(1),
-        options,
-    );
-    if let Some(layout) = view.latest_layout.as_mut() {
-        layout.offset_line_numbers(visible_window.line_range.start);
-        visible_window.row_range = 0..layout.row_count();
-        layout.set_visible_text(visible_window);
-    }
-
-    if bottom_padding_lines > 0 {
-        ui.add_space(row_height * bottom_padding_lines as f32);
-    }
-
-    Some(outcome)
+        make_control_chars_clean
+    };
+    let text = transform(&buffer.text());
+    render_read_only_text_edit(ui, view, text, buffer.line_count, options)
 }
 
 pub fn make_control_chars_visible(text: &str) -> String {
@@ -95,21 +21,39 @@ pub fn make_control_chars_visible(text: &str) -> String {
     let mut chars = text.chars().peekable();
 
     while let Some(ch) = chars.next() {
-        match ch {
-            '\u{1B}' => visible.push('␛'),
-            '\u{0008}' => visible.push('␈'),
-            '\t' => visible.push('→'),
-            '\r' if chars.peek() == Some(&'\n') => visible.push('␍'),
-            '\r' => visible.push('␍'),
-            _ if ch.is_control() && ch != '\n' => {
-                use std::fmt::Write;
-                let _ = write!(visible, "\\x{:02X}", ch as u32);
-            }
-            _ => visible.push(ch),
-        }
+        push_visible_char(&mut visible, ch, chars.peek().copied());
     }
 
     visible
+}
+
+fn push_visible_char(visible: &mut String, ch: char, next: Option<char>) {
+    match visible_control_char(ch, next) {
+        Some(ControlCharDisplay::Literal(replacement)) => visible.push(replacement),
+        Some(ControlCharDisplay::Hex) => {
+            use std::fmt::Write;
+            let _ = write!(visible, "\\x{:02X}", ch as u32);
+        }
+        None => visible.push(ch),
+    }
+}
+
+enum ControlCharDisplay {
+    Literal(char),
+    Hex,
+}
+
+fn visible_control_char(ch: char, next: Option<char>) -> Option<ControlCharDisplay> {
+    match ch {
+        '\u{1B}' => Some(ControlCharDisplay::Literal('␛')),
+        '\u{0008}' => Some(ControlCharDisplay::Literal('␈')),
+        '\t' => Some(ControlCharDisplay::Literal('→')),
+        '\r' if next == Some('\n') => Some(ControlCharDisplay::Literal('␍')),
+        '\r' => Some(ControlCharDisplay::Literal('␍')),
+        '\n' => None,
+        _ if ch.is_control() => Some(ControlCharDisplay::Hex),
+        _ => None,
+    }
 }
 
 pub fn make_control_chars_clean(text: &str) -> String {
@@ -117,45 +61,54 @@ pub fn make_control_chars_clean(text: &str) -> String {
     let mut chars = text.chars().peekable();
 
     while let Some(ch) = chars.next() {
-        match ch {
-            '\u{1B}' => skip_ansi_sequence(&mut chars),
-            '\u{0008}' => {
-                clean.pop();
-            }
-            '\r' if chars.peek() == Some(&'\n') => {}
-            '\r' => clean.push('\n'),
-            '\n' | '\t' => clean.push(ch),
-            _ if ch.is_control() => {}
-            _ => clean.push(ch),
-        }
+        push_clean_char(&mut clean, ch, &mut chars);
     }
 
     clean
 }
 
+fn push_clean_char(
+    clean: &mut String,
+    ch: char,
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+) {
+    match ch {
+        '\u{1B}' => skip_ansi_sequence(chars),
+        '\u{0008}' => {
+            clean.pop();
+        }
+        '\r' if chars.peek() == Some(&'\n') => {}
+        '\r' => clean.push('\n'),
+        '\n' | '\t' => clean.push(ch),
+        _ if ch.is_control() => {}
+        _ => clean.push(ch),
+    }
+}
+
 fn skip_ansi_sequence(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
-    match chars.peek().copied() {
-        Some('[') => {
-            chars.next();
-            for ch in chars.by_ref() {
-                if ('@'..='~').contains(&ch) {
-                    break;
-                }
-            }
+    if chars.next_if_eq(&'[').is_some() {
+        skip_csi_sequence(chars);
+    } else if chars.next_if_eq(&']').is_some() {
+        skip_osc_sequence(chars);
+    }
+}
+
+fn skip_csi_sequence(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    for ch in chars.by_ref() {
+        if ('@'..='~').contains(&ch) {
+            break;
         }
-        Some(']') => {
-            chars.next();
-            while let Some(ch) = chars.next() {
-                if ch == '\u{0007}' {
-                    break;
-                }
-                if ch == '\u{1B}' && chars.peek() == Some(&'\\') {
-                    chars.next();
-                    break;
-                }
-            }
+    }
+}
+
+fn skip_osc_sequence(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    while let Some(ch) = chars.next() {
+        if ch == '\u{0007}' {
+            break;
         }
-        _ => {}
+        if ch == '\u{1B}' && chars.next_if_eq(&'\\').is_some() {
+            break;
+        }
     }
 }
 

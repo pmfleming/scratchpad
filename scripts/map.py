@@ -739,6 +739,15 @@ class ArchitectureMapper:
 
     def meta_summary(self) -> Dict[str, object]:
         measured_modules = len(self.risk_breakdown)
+        good = warn = bad = 0
+        for item in self.risk_breakdown.values():
+            score = float(item.get("total_score") or item.get("total_risk") or 0)
+            if score >= 600:
+                bad += 1
+            elif score >= 300:
+                warn += 1
+            else:
+                good += 1
         category_totals = {
             "maintainability": round(
                 sum(
@@ -778,6 +787,9 @@ class ArchitectureMapper:
                 if not bool(item["evidence"]["has_tests"])
             ),
             "category_totals": category_totals,
+            "good": good,
+            "warn": warn,
+            "bad": bad,
         }
 
     def viewer_payload(self) -> Dict:

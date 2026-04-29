@@ -170,46 +170,80 @@ fn handle_non_movement_key_event(
     cursor: &CursorRange,
     total_chars: usize,
 ) -> Option<bool> {
+    if let Some(changed) = handle_text_key(key_event, buffer, view, cursor) {
+        return Some(changed);
+    }
+    if let Some(changed) = handle_delete_key(key_event, buffer, view, cursor) {
+        return Some(changed);
+    }
+    if let Some(changed) = handle_history_key(key_event, buffer, view) {
+        return Some(changed);
+    }
+    if key_event.key == egui::Key::A && key_event.modifiers.command {
+        view.cursor_range = Some(select_all_cursor(total_chars));
+        return Some(false);
+    }
+
+    None
+}
+
+fn handle_text_key(
+    key_event: PressedKeyEvent,
+    buffer: &mut BufferState,
+    view: &mut EditorViewState,
+    cursor: &CursorRange,
+) -> Option<bool> {
     match key_event.key {
         egui::Key::Enter => {
             let line_ending = buffer.document().preferred_line_ending_str().to_owned();
             Some(insert_text(buffer, view, cursor, &line_ending))
         }
-        egui::Key::Tab if !key_event.modifiers.shift => {
-            Some(insert_text(buffer, view, cursor, "\t"))
-        }
-        egui::Key::Tab => {
-            if let Some(new_cursor) = editing::apply_outdent(buffer, cursor) {
-                view.cursor_range = Some(new_cursor);
-                Some(true)
-            } else {
-                Some(false)
-            }
-        }
-        egui::Key::Backspace => {
-            view.cursor_range = Some(editing::apply_backspace(
-                buffer,
-                cursor,
-                &key_event.modifiers,
-            ));
-            Some(true)
-        }
-        egui::Key::Delete => {
-            view.cursor_range = Some(editing::apply_delete(buffer, cursor, &key_event.modifiers));
-            Some(true)
-        }
-        egui::Key::Z if is_undo_shortcut(key_event.modifiers) => {
-            Some(apply_history(view, buffer.undo_last_text_operation()))
-        }
-        egui::Key::Z | egui::Key::Y if is_redo_shortcut(key_event) => {
-            Some(apply_history(view, buffer.redo_last_text_operation()))
-        }
-        egui::Key::A if key_event.modifiers.command => {
-            view.cursor_range = Some(select_all_cursor(total_chars));
-            Some(false)
-        }
+        egui::Key::Tab => Some(handle_tab_key(key_event.modifiers, buffer, view, cursor)),
         _ => None,
     }
+}
+
+fn handle_tab_key(
+    modifiers: egui::Modifiers,
+    buffer: &mut BufferState,
+    view: &mut EditorViewState,
+    cursor: &CursorRange,
+) -> bool {
+    if !modifiers.shift {
+        return insert_text(buffer, view, cursor, "\t");
+    }
+
+    apply_cursor_update(view, editing::apply_outdent(buffer, cursor))
+}
+
+fn handle_delete_key(
+    key_event: PressedKeyEvent,
+    buffer: &mut BufferState,
+    view: &mut EditorViewState,
+    cursor: &CursorRange,
+) -> Option<bool> {
+    let new_cursor = match key_event.key {
+        egui::Key::Backspace => editing::apply_backspace(buffer, cursor, &key_event.modifiers),
+        egui::Key::Delete => editing::apply_delete(buffer, cursor, &key_event.modifiers),
+        _ => return None,
+    };
+    view.cursor_range = Some(new_cursor);
+    Some(true)
+}
+
+fn handle_history_key(
+    key_event: PressedKeyEvent,
+    buffer: &mut BufferState,
+    view: &mut EditorViewState,
+) -> Option<bool> {
+    if key_event.key == egui::Key::Z && is_undo_shortcut(key_event.modifiers) {
+        return Some(apply_history(view, buffer.undo_last_text_operation()));
+    }
+    if matches!(key_event.key, egui::Key::Z | egui::Key::Y) && is_redo_shortcut(key_event) {
+        return Some(apply_history(view, buffer.redo_last_text_operation()));
+    }
+
+    None
 }
 
 fn is_undo_shortcut(modifiers: egui::Modifiers) -> bool {

@@ -104,4 +104,4 @@ pub fn split_preview_spec(
 }
 
 pub(crate) use geometry::split_rect;
-pub(crate) use preview::{build_preview_lines, build_preview_lines_for_window};
+pub(crate) use preview::build_preview_lines;

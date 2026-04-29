@@ -10,6 +10,74 @@ struct ViewPresentationState {
 }
 
 impl WorkspaceTab {
+    pub fn active_view(&self) -> Option<&EditorViewState> {
+        self.view(self.active_view_id)
+    }
+
+    pub fn active_view_mut(&mut self) -> Option<&mut EditorViewState> {
+        self.view_mut(self.active_view_id)
+    }
+
+    pub fn line_numbers_visible(&self) -> bool {
+        self.active_view()
+            .map(|view| view.show_line_numbers)
+            .unwrap_or(false)
+    }
+
+    pub fn set_line_numbers_visible(&mut self, visible: bool) {
+        for view in &mut self.views {
+            view.show_line_numbers = visible;
+        }
+    }
+
+    pub fn clear_transient_view_state(&mut self) {
+        for view in &mut self.views {
+            view.editor_has_focus = false;
+            view.latest_display_snapshot = None;
+            view.latest_display_snapshot_revision = None;
+        }
+    }
+
+    pub fn view(&self, view_id: ViewId) -> Option<&EditorViewState> {
+        self.views.iter().find(|view| view.id == view_id)
+    }
+
+    pub fn view_mut(&mut self, view_id: ViewId) -> Option<&mut EditorViewState> {
+        self.views.iter_mut().find(|view| view.id == view_id)
+    }
+
+    pub fn close_view(&mut self, view_id: ViewId) -> bool {
+        if self.root_pane.leaf_count() <= 1 {
+            return false;
+        }
+
+        if !self.root_pane.contains_view(view_id) {
+            return false;
+        }
+
+        if !self.root_pane.remove_view(view_id) {
+            return false;
+        }
+
+        self.views.retain(|view| view.id != view_id);
+        if self.active_view_id == view_id {
+            self.active_view_id = self.root_pane.first_view_id();
+        }
+        self.sync_active_buffer_to_active_view();
+        self.prune_unused_buffers();
+        true
+    }
+
+    pub(crate) fn ordered_view_ids_in_layout_order(&self) -> Vec<ViewId> {
+        Self::ordered_view_ids(&self.root_pane)
+    }
+
+    pub(super) fn ordered_view_ids(root_pane: &PaneNode) -> Vec<ViewId> {
+        let mut ordered = Vec::new();
+        root_pane.collect_view_ids_in_order(&mut ordered);
+        ordered
+    }
+
     pub fn split_active_view(&mut self, axis: SplitAxis) -> Option<ViewId> {
         self.split_active_view_with_placement(axis, false, 0.5)
     }

@@ -267,6 +267,24 @@ def main() -> None:
         capacity_rows,
     )
 
+    latency_rows = search_dispatch_rows + search_rows + editor_rows + tabs_rows
+    critical_count = sum(
+        1
+        for row in latency_rows
+        if row.get("over_budget")
+    ) + sum(1 for row in capacity_rows if row.get("ceiling_reached"))
+    watch_count = sum(
+        1
+        for row in latency_rows
+        if not row.get("over_budget") and row.get("stability") != "stable"
+    )
+    ok_count = (len(latency_rows) + len(capacity_rows)) - critical_count - watch_count
+    triage_summary = {
+        "critical": critical_count,
+        "watch": watch_count,
+        "ok": max(0, ok_count),
+    }
+
     payload = {
         "meta": {
             "generated_from": "scripts/speed_efficiency_report.py",
@@ -299,6 +317,7 @@ def main() -> None:
                 1 for row in capacity_rows if row.get("ceiling_reached")
             ),
         },
+        "triage_summary": triage_summary,
         "triage": triage,
         "sections": {
             "search_dispatch": search_dispatch_rows,

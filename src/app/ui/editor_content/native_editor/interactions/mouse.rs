@@ -209,7 +209,8 @@ fn tracked_pointer_pos(
     rect: egui::Rect,
     is_dragged: bool,
 ) -> Option<egui::Pos2> {
-    interact_pointer_pos.or_else(|| latest_pointer_pos.filter(|pos| is_dragged || rect.contains(*pos)))
+    interact_pointer_pos
+        .or_else(|| latest_pointer_pos.filter(|pos| is_dragged || rect.contains(*pos)))
 }
 
 fn char_cursor_with_offset(cursor: egui::text::CCursor, char_offset_base: usize) -> CharCursor {
@@ -249,9 +250,12 @@ fn handle_primary_pointer(
 }
 
 fn update_hover_cursor(ui: &mut egui::Ui, rect: egui::Rect) {
-    if ui
-        .input(|input| input.pointer.hover_pos().is_some_and(|pos| rect.contains(pos)))
-    {
+    if ui.input(|input| {
+        input
+            .pointer
+            .hover_pos()
+            .is_some_and(|pos| rect.contains(pos))
+    }) {
         ui.output_mut(|output| output.mutable_text_under_cursor = true);
         ui.set_cursor_icon(egui::CursorIcon::Text);
     }
@@ -272,14 +276,23 @@ fn should_ignore_secondary_pointer(
     rect: egui::Rect,
 ) -> bool {
     response.secondary_clicked()
-        || (ui.input(|input| input.pointer.latest_pos().is_some_and(|pos| rect.contains(pos)))
-            && ui.input(|input| input.pointer.button_down(egui::PointerButton::Secondary)))
+        || (ui.input(|input| {
+            input
+                .pointer
+                .latest_pos()
+                .is_some_and(|pos| rect.contains(pos))
+        }) && ui.input(|input| input.pointer.button_down(egui::PointerButton::Secondary)))
 }
 
 fn is_primary_pointer_down(ui: &egui::Ui, response: &egui::Response, rect: egui::Rect) -> bool {
     primary_pointer_tracking_active(
         ui.input(|input| input.pointer.button_down(egui::PointerButton::Primary)),
-        ui.input(|input| input.pointer.latest_pos().is_some_and(|pos| rect.contains(pos))),
+        ui.input(|input| {
+            input
+                .pointer
+                .latest_pos()
+                .is_some_and(|pos| rect.contains(pos))
+        }),
         response.dragged_by(egui::PointerButton::Primary),
     )
 }
@@ -397,9 +410,18 @@ mod tests {
         let latest = egui::pos2(24.0, 48.0);
         let rect = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(32.0, 64.0));
 
-        assert_eq!(tracked_pointer_pos(None, Some(latest), rect, true), Some(latest));
-        assert_eq!(tracked_pointer_pos(Some(latest), None, rect, false), Some(latest));
-        assert_eq!(tracked_pointer_pos(None, Some(latest), rect, false), Some(latest));
+        assert_eq!(
+            tracked_pointer_pos(None, Some(latest), rect, true),
+            Some(latest)
+        );
+        assert_eq!(
+            tracked_pointer_pos(Some(latest), None, rect, false),
+            Some(latest)
+        );
+        assert_eq!(
+            tracked_pointer_pos(None, Some(latest), rect, false),
+            Some(latest)
+        );
         assert_eq!(
             tracked_pointer_pos(None, Some(egui::pos2(48.0, 96.0)), rect, false),
             None

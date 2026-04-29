@@ -13,7 +13,8 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $isWindowsPlatform = $false
 if (Get-Variable -Name IsWindows -ErrorAction SilentlyContinue) {
     $isWindowsPlatform = [bool]$IsWindows
-} elseif ($env:OS -eq "Windows_NT") {
+}
+elseif ($env:OS -eq "Windows_NT") {
     $isWindowsPlatform = $true
 }
 
@@ -29,7 +30,7 @@ function Invoke-NativeCommand {
     }
 }
 
-function Ensure-PythonTooling {
+function Initialize-PythonTooling {
     param(
         [string]$RepoRoot,
         [string]$ScriptRoot
@@ -38,7 +39,8 @@ function Ensure-PythonTooling {
     $venvDir = Join-Path $RepoRoot ".venv"
     if ($isWindowsPlatform) {
         $python = Join-Path $venvDir "Scripts\python.exe"
-    } else {
+    }
+    else {
         $python = Join-Path $venvDir "bin/python"
     }
 
@@ -82,7 +84,7 @@ try {
 
     $needsPythonTooling = (-not $SkipComplexity) -or (-not $SkipSlowspots) -or (-not $SkipSearchSpeed) -or (-not $SkipClones)
     if ($needsPythonTooling) {
-        $python = Ensure-PythonTooling -RepoRoot $repoRoot -ScriptRoot $PSScriptRoot
+        $python = Initialize-PythonTooling -RepoRoot $repoRoot -ScriptRoot $PSScriptRoot
         $analysisDir = Join-Path $repoRoot "target\analysis"
         New-Item -ItemType Directory -Force -Path $analysisDir | Out-Null
     }

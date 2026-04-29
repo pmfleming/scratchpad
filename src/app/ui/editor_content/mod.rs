@@ -2,29 +2,29 @@ pub mod artifact;
 pub mod gutter;
 pub mod native_editor;
 
-use crate::app::domain::{BufferState, EditorViewState, RenderedLayout, ViewId};
+use crate::app::domain::{BufferState, EditorViewState, ViewId};
+use crate::app::ui::scrolling::DisplaySnapshot;
 use crate::app::ui::widget_ids;
 use eframe::egui;
 
 pub use artifact::{make_control_chars_clean, make_control_chars_visible, render_artifact_view};
 pub use gutter::render_line_number_gutter;
 pub use native_editor::{
-    CursorRange, EditorHighlightStyle, TextEditOptions, build_layouter,
-    render_editor_text_edit, render_read_only_text_edit,
+    CursorRange, EditorHighlightStyle, TextEditOptions, build_layouter, render_editor_text_edit,
+    render_read_only_text_edit,
 };
 
 pub(crate) struct EditorContentOutcome {
     pub(crate) changed: bool,
     pub(crate) focused: bool,
     pub(crate) request_editor_focus: bool,
-    pub(crate) requested_scroll_offset: Option<egui::Vec2>,
     pub(crate) interaction_response: Option<egui::Response>,
 }
 
 pub(crate) struct EditorContentStyle<'a> {
     pub(crate) editor_gutter: u8,
     pub(crate) viewport: Option<egui::Rect>,
-    pub(crate) previous_layout: Option<&'a RenderedLayout>,
+    pub(crate) previous_snapshot: Option<&'a DisplaySnapshot>,
     pub(crate) text_edit: TextEditOptions<'a>,
     pub(crate) background_color: egui::Color32,
 }
@@ -49,7 +49,7 @@ pub(crate) fn render_editor_content(
                         render_line_number_gutter(
                             ui,
                             buffer,
-                            style.previous_layout,
+                            style.previous_snapshot,
                             style.text_edit.editor_font_id,
                             style.text_edit.text_color,
                             style.background_color,
@@ -74,7 +74,7 @@ fn render_editor_body(
     style: &EditorContentStyle<'_>,
 ) -> native_editor::EditorWidgetOutcome {
     if buffer.artifact_summary.has_control_chars() && view.show_control_chars {
-        return render_artifact_view(ui, buffer, view, style.previous_layout, style.text_edit);
+        return render_artifact_view(ui, buffer, view, style.text_edit);
     }
 
     render_editor_text_edit(ui, buffer, view, style.text_edit, style.viewport)
@@ -86,7 +86,6 @@ impl From<native_editor::EditorWidgetOutcome> for EditorContentOutcome {
             changed: outcome.changed,
             focused: outcome.focused,
             request_editor_focus: outcome.request_editor_focus,
-            requested_scroll_offset: outcome.requested_scroll_offset,
             interaction_response: Some(outcome.response),
         }
     }

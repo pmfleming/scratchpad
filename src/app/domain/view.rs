@@ -1,5 +1,5 @@
+use crate::app::domain::BufferId;
 use crate::app::domain::buffer::AnchorId;
-use crate::app::domain::{BufferId, RenderedLayout};
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use crate::app::ui::scrolling::{DisplaySnapshot, ScrollAnchor, ScrollIntent, ScrollManager};
 use eframe::egui;
@@ -42,12 +42,14 @@ pub struct EditorViewState {
     pub show_line_numbers: bool,
     pub show_control_chars: bool,
     pub editor_has_focus: bool,
-    pub latest_layout: Option<RenderedLayout>,
-    pub latest_layout_revision: Option<u64>,
     /// Wrap-aware display-row snapshot derived from the most recently painted
-    /// galley. Phase-3 viewport-first queries (`row_for_char_offset`,
-    /// `viewport_slice`) read from this. None until the first frame paints.
+    /// galley. Single source of truth for wrap-aware row data on the view.
+    /// None until the first frame paints.
     pub latest_display_snapshot: Option<DisplaySnapshot>,
+    /// Document revision tag for `latest_display_snapshot`; lets the
+    /// `take_previous_snapshot`/restore dance only restore stale snapshots
+    /// when the buffer hasn't changed under them.
+    pub latest_display_snapshot_revision: Option<u64>,
     pub cursor_range: Option<CursorRange>,
     pub pending_cursor_range: Option<CursorRange>,
     /// Per-view scroll state. Single source of truth for scroll position,
@@ -75,9 +77,8 @@ impl EditorViewState {
             show_line_numbers: false,
             show_control_chars,
             editor_has_focus: false,
-            latest_layout: None,
-            latest_layout_revision: None,
             latest_display_snapshot: None,
+            latest_display_snapshot_revision: None,
             cursor_range: None,
             pending_cursor_range: None,
             scroll: ScrollManager::new(),
@@ -102,9 +103,8 @@ impl EditorViewState {
             show_line_numbers,
             show_control_chars,
             editor_has_focus: false,
-            latest_layout: None,
-            latest_layout_revision: None,
             latest_display_snapshot: None,
+            latest_display_snapshot_revision: None,
             cursor_range: None,
             pending_cursor_range: None,
             scroll: ScrollManager::new(),

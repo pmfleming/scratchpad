@@ -67,8 +67,12 @@ impl ScrollAnchor {
 
     pub fn display_row_offset(self) -> f32 {
         match self {
-            Self::Piece { display_row_offset, .. }
-            | Self::Logical { display_row_offset, .. } => display_row_offset,
+            Self::Piece {
+                display_row_offset, ..
+            }
+            | Self::Logical {
+                display_row_offset, ..
+            } => display_row_offset,
         }
     }
 

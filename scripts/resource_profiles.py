@@ -3,9 +3,10 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from report_modes import add_mode_argument, emit_report
 
@@ -13,6 +14,7 @@ DEFAULT_OUTPUT = Path("resource_profiles.json")
 VISIBILITY_OUTPUT = Path("target/analysis/resource_profiles.json")
 BUILD_CMD = ["cargo", "build", "--release", "--quiet", "--bin", "resource_probe"]
 PROBE_PATH = Path("target/release/resource_probe.exe" if os.name == "nt" else "target/release/resource_probe")
+PROBE_TIMEOUT_SECONDS = int(os.environ.get("SCRATCHPAD_RESOURCE_PROBE_TIMEOUT_SECONDS", "300"))
 MB = 1024 * 1024
 GB = 1024 * MB
 
@@ -118,7 +120,20 @@ def sample_posix_process(pid: int) -> Dict[str, Optional[int]]:
         }
 
 
-def run_probe() -> List[Dict[str, Any]]:
+def terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            capture_output=True,
+            text=True,
+        )
+        return
+    process.kill()
+
+
+def run_probe() -> Tuple[List[Dict[str, Any]], str]:
     subprocess.run(BUILD_CMD, check=True, capture_output=True, text=True)
     process = subprocess.Popen(
         [str(PROBE_PATH)],
@@ -129,29 +144,65 @@ def run_probe() -> List[Dict[str, Any]]:
     )
     samples: List[Dict[str, Any]] = []
 
-    assert process.stdout is not None
-    for raw_line in process.stdout:
-        line = raw_line.strip()
-        if not line:
-            continue
+    def read_stdout() -> None:
+        assert process.stdout is not None
+        for raw_line in process.stdout:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            event.update(sample_process(process.pid))
+            samples.append(event)
+
+    reader = threading.Thread(target=read_stdout, daemon=True)
+    reader.start()
+
+    probe_status = "completed"
+    try:
+        return_code = process.wait(timeout=PROBE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        probe_status = "timed_out"
+        terminate_process_tree(process)
+        return_code = 124
         try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        event.update(sample_process(process.pid))
-        samples.append(event)
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+    reader.join(timeout=5)
 
     stderr = ""
     if process.stderr is not None:
         stderr = process.stderr.read().strip()
 
-    return_code = process.wait()
-    if return_code != 0:
+    if return_code != 0 and probe_status != "timed_out":
         raise RuntimeError(
             f"resource probe failed with exit code {return_code}: {stderr or 'no stderr'}"
         )
 
-    return samples
+    return samples, probe_status
+
+
+def empty_payload(reason: str) -> Dict[str, Any]:
+    return {
+        "meta": {
+            "generated_from": "scripts/resource_profiles.py",
+            "probe_command": str(PROBE_PATH),
+            "scenario_count": 0,
+            "probe_status": "failed",
+            "error": reason,
+        },
+        "summary": {
+            "scenario_count": 0,
+            "allocation_scenarios": 0,
+            "memory_scenarios": 0,
+            "session_scenarios": 0,
+            "probe_status": "failed",
+        },
+        "scenarios": [],
+    }
 
 
 def safe_delta(last: Optional[int], first: Optional[int]) -> Optional[int]:
@@ -248,8 +299,13 @@ def main() -> None:
     add_mode_argument(parser)
     args = parser.parse_args()
 
-    samples = run_probe()
-    payload = summarize_probe(samples)
+    try:
+        samples, probe_status = run_probe()
+        payload = summarize_probe(samples) if samples else empty_payload("No probe samples were recorded.")
+        payload["meta"]["probe_status"] = probe_status
+        payload["summary"]["probe_status"] = probe_status
+    except Exception as exc:
+        payload = empty_payload(str(exc))
     emit_report(
         payload,
         mode=args.mode,

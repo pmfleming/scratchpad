@@ -1,4 +1,7 @@
-use super::{PieceTreeLite, PieceTreeSlice, PieceTreeSpan, byte_range_for_char_range};
+use super::{
+    PREVIEW_MAX_CHARS, PieceTreeLite, PieceTreeSlice, PieceTreeSpan, byte_range_for_char_range,
+    compact_preview,
+};
 use std::ops::Range;
 
 impl PieceTreeLite {
@@ -127,4 +130,95 @@ impl<'a> Iterator for PieceTreeSlice<'a> {
 
         None
     }
+}
+
+pub(super) fn previews_for_matches_in_contiguous_text(
+    text: &str,
+    ranges: &[Range<usize>],
+) -> Vec<(usize, usize, String)> {
+    let mut previews = Vec::with_capacity(ranges.len());
+    let mut cursor = PreviewCursor::default();
+    let mut cached_line_start_byte = None;
+    let mut cached_preview = String::new();
+
+    for range in ranges {
+        cursor.advance_to(text, range.start);
+        update_cached_line_preview(
+            text,
+            cursor.line_start_byte,
+            &mut cached_line_start_byte,
+            &mut cached_preview,
+        );
+
+        previews.push((
+            cursor.line_number,
+            range.start.saturating_sub(cursor.line_start_char) + 1,
+            cached_preview.clone(),
+        ));
+    }
+
+    previews
+}
+
+#[derive(Default)]
+struct PreviewCursor {
+    current_char: usize,
+    current_byte: usize,
+    line_number: usize,
+    line_start_char: usize,
+    line_start_byte: usize,
+}
+
+impl PreviewCursor {
+    fn advance_to(&mut self, text: &str, target_char: usize) {
+        if self.line_number == 0 {
+            self.line_number = 1;
+        }
+        while self.current_char < target_char && self.current_byte < text.len() {
+            let Some(ch) = text[self.current_byte..].chars().next() else {
+                break;
+            };
+            self.advance_char(ch);
+        }
+    }
+
+    fn advance_char(&mut self, ch: char) {
+        let next_byte = self.current_byte + ch.len_utf8();
+        if ch == '\n' {
+            self.line_number += 1;
+            self.line_start_char = self.current_char + 1;
+            self.line_start_byte = next_byte;
+        }
+        self.current_char += 1;
+        self.current_byte = next_byte;
+    }
+}
+
+fn update_cached_line_preview(
+    text: &str,
+    line_start_byte: usize,
+    cached_line_start_byte: &mut Option<usize>,
+    cached_preview: &mut String,
+) {
+    if *cached_line_start_byte == Some(line_start_byte) {
+        return;
+    }
+
+    let line_slice = match text[line_start_byte..].find('\n') {
+        Some(relative_end) => &text[line_start_byte..line_start_byte + relative_end],
+        None => &text[line_start_byte..],
+    };
+    let mut bounded = String::new();
+    let mut chars = line_slice.chars();
+    for _ in 0..PREVIEW_MAX_CHARS {
+        let Some(ch) = chars.next() else {
+            break;
+        };
+        bounded.push(ch);
+    }
+    *cached_preview = compact_preview(&bounded);
+    if chars.next().is_some() && !cached_preview.ends_with("...") {
+        cached_preview.push_str("...");
+    }
+    *cached_line_start_byte = Some(line_start_byte);
 }

@@ -33,7 +33,9 @@ pub struct ScrollbarDragState {
 
 impl ScrollState {
     pub fn load(ui: &Ui, id: Id) -> Self {
-        ui.ctx().data(|d| d.get_temp::<Self>(id)).unwrap_or_default()
+        ui.ctx()
+            .data(|d| d.get_temp::<Self>(id))
+            .unwrap_or_default()
     }
 
     pub fn store(self, ui: &Ui, id: Id) {
@@ -44,9 +46,17 @@ impl ScrollState {
         self.pending_target = Some(target);
     }
 
+    pub fn sanitize(&mut self) {
+        self.offset = finite_vec2(self.offset);
+        self.content_size = finite_vec2(self.content_size);
+        self.viewport_size = finite_vec2(self.viewport_size);
+    }
+
     /// Maximum permissible offset for the given content/viewport, including
     /// one viewport-height of vertical overscroll past EOF.
     pub fn max_offset(content: Vec2, viewport: Vec2, eof_overscroll: bool) -> Vec2 {
+        let content = finite_vec2(content);
+        let viewport = finite_vec2(viewport);
         let extra_y = if eof_overscroll { viewport.y } else { 0.0 };
         Vec2::new(
             (content.x - viewport.x).max(0.0),
@@ -55,10 +65,23 @@ impl ScrollState {
     }
 
     pub fn clamp_offset(&mut self, eof_overscroll: bool) {
+        self.sanitize();
         let max = Self::max_offset(self.content_size, self.viewport_size, eof_overscroll);
         self.offset.x = self.offset.x.clamp(0.0, max.x);
         self.offset.y = self.offset.y.clamp(0.0, max.y);
     }
+}
+
+fn finite_axis(value: f32) -> f32 {
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
+    }
+}
+
+pub(super) fn finite_vec2(value: Vec2) -> Vec2 {
+    Vec2::new(finite_axis(value.x), finite_axis(value.y))
 }
 
 #[cfg(test)]
@@ -88,5 +111,21 @@ mod tests {
         let viewport = Vec2::new(400.0, 300.0);
         let max = ScrollState::max_offset(content, viewport, false);
         assert_eq!(max, Vec2::ZERO);
+    }
+
+    #[test]
+    fn clamp_offset_recovers_from_non_finite_state() {
+        let mut state = ScrollState {
+            offset: Vec2::new(f32::INFINITY, f32::NAN),
+            content_size: Vec2::new(f32::INFINITY, 1000.0),
+            viewport_size: Vec2::new(400.0, f32::NAN),
+            ..Default::default()
+        };
+
+        state.clamp_offset(true);
+
+        assert_eq!(state.offset, Vec2::ZERO);
+        assert_eq!(state.content_size, Vec2::new(0.0, 1000.0));
+        assert_eq!(state.viewport_size, Vec2::new(400.0, 0.0));
     }
 }

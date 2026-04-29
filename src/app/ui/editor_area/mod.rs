@@ -529,8 +529,7 @@ mod tests {
     fn queued_intents_drain_through_scroll_manager() {
         use crate::app::domain::EditorViewState;
         use crate::app::ui::scrolling::{
-            ContentExtent, ScrollIntent, ViewportMetrics, naive_anchor_to_row,
-            naive_row_to_anchor,
+            ContentExtent, ScrollIntent, ViewportMetrics, naive_anchor_to_row, naive_row_to_anchor,
         };
 
         let mut view = EditorViewState::new(1, false);

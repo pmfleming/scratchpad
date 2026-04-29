@@ -69,7 +69,13 @@ class SearchSpeedAnalyzer:
     def run_benchmarks(self, skip_bench: bool = False) -> List[SearchSpeedMetric]:
         if not skip_bench:
             print("Running focused search benchmarks via cargo bench...", file=sys.stderr)
-            self.run_bench_command(BENCH_CMD)
+            try:
+                self.run_bench_command(BENCH_CMD)
+            except subprocess.CalledProcessError as exc:
+                print(f"Search benchmarking failed: {exc}", file=sys.stderr)
+                if exc.output:
+                    print(exc.output, file=sys.stderr)
+                print("Falling back to existing Criterion search results.", file=sys.stderr)
 
         return self.load_criterion_results(Path("target") / "criterion")
 

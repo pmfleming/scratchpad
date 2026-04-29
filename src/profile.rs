@@ -2,8 +2,8 @@ use crate::ScratchpadApp;
 use crate::app::app_state::SearchScope;
 use crate::app::commands::AppCommand;
 use crate::app::domain::{
-    BufferState, PaneBranch, PaneNode, RenderedLayout, SearchHighlightState, SplitAxis, SplitPath,
-    ViewId, WorkspaceTab,
+    BufferState, PaneBranch, PaneNode, SearchHighlightState, SplitAxis, SplitPath, ViewId,
+    WorkspaceTab,
 };
 use crate::app::services::search::{SearchOptions, find_matches};
 use crate::app::services::session_store::SessionStore;
@@ -212,14 +212,21 @@ pub fn run_viewport_extraction_profile(bytes: usize, iterations: usize) -> usize
     let line_step = 17usize;
     let line_count = buffer.line_count.max(1);
     let mut line_start = 0usize;
+    let tree = buffer.document().piece_tree().clone();
 
     sum_profile_iterations(iterations, || {
         let end = (line_start + viewport_lines + overscan_lines).min(line_count);
-        let line_window = buffer.visible_line_window(line_start..end);
-        let row_window = (line_window.layout_row_offset)
-            ..(line_window.layout_row_offset + line_window.line_range.len());
-        let visible_window =
-            buffer.visible_text_window(row_window, line_window.char_range.clone(), line_count);
+        let start_char = if line_start < line_count {
+            tree.line_info(line_start).start_char
+        } else {
+            tree.len_chars()
+        };
+        let end_char = if end < line_count {
+            tree.line_info(end).start_char
+        } else {
+            tree.len_chars()
+        };
+        let extracted = tree.extract_range(start_char..end_char);
 
         line_start = if end >= line_count {
             0
@@ -227,14 +234,7 @@ pub fn run_viewport_extraction_profile(bytes: usize, iterations: usize) -> usize
             (line_start + line_step).min(line_count.saturating_sub(1))
         };
 
-        black_box(
-            line_window.text.len()
-                + visible_window.text.len()
-                + visible_window
-                    .char_range
-                    .end
-                    .saturating_sub(visible_window.char_range.start),
-        )
+        black_box(extracted.len() + end_char.saturating_sub(start_char))
     })
 }
 
@@ -272,7 +272,7 @@ pub fn run_scroll_stress_profile(bytes: usize, iterations: usize) -> usize {
 
                 for wrap_width in [980.0, 720.0, 520.0, 980.0] {
                     let galley = layouter(ui, &text, wrap_width);
-                    total_rows += RenderedLayout::from_galley(galley).visual_row_count();
+                    total_rows += galley.rows.len().max(1);
                 }
             });
         });

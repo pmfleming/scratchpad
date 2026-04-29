@@ -15,7 +15,7 @@ if ($isWindowsPlatform) {
     $python = Join-Path $repoRoot ".venv/bin/python"
 }
 
-function Ensure-Python {
+function Initialize-PythonEnvironment {
     $venvDir = Join-Path $repoRoot ".venv"
 
     if (-not (Test-Path $python)) {
@@ -49,7 +49,7 @@ function Ensure-Python {
 
 Push-Location $repoRoot
 try {
-    Ensure-Python
+    Initialize-PythonEnvironment
     & $python "scripts/clone_alert.py" --paths src --engine all @args
     if ($LASTEXITCODE -ne 0) {
         throw "Experimental clone analysis failed with exit code $LASTEXITCODE."

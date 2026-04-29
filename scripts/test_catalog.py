@@ -203,7 +203,11 @@ def build_payload(run: bool = False) -> Dict[str, Any]:
         "generated_from": "scripts/test_catalog.py",
         "summary": summary,
         "layers": [
-            {"name": layer, **counts}
+            {
+                "name": layer,
+                **counts,
+                "failed_ratio": (counts["failed"] / counts["total"]) if counts["total"] else 0.0,
+            }
             for layer, counts in sorted(by_layer.items(), key=lambda entry: entry[0])
         ],
         "tests": tests,
