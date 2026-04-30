@@ -289,6 +289,37 @@ fn randomized_edit_sequences_match_string_model() {
     }
 }
 
+#[test]
+fn large_local_edit_history_preserves_line_and_span_reads() {
+    let mut tree = PieceTreeLite::from_string("root\n".repeat(4_096));
+    let mut expected = "root\n".repeat(4_096);
+
+    for step in 0..1_024 {
+        let insert_at = 5 + step * 3;
+        tree.insert(insert_at, "é🙂x\n");
+        insert_string_at_char(&mut expected, insert_at, "é🙂x\n");
+
+        if step % 4 == 0 {
+            let remove_start = insert_at.saturating_sub(2);
+            let remove_end = (remove_start + 2).min(expected.chars().count());
+            tree.remove_char_range(remove_start..remove_end);
+            remove_string_char_range(&mut expected, remove_start..remove_end);
+        }
+    }
+
+    assert_tree_matches_string_model(&tree, &expected);
+
+    for line_index in [0, 1, 17, 255, 1_023, tree.metrics().newlines] {
+        let line = tree.line_info(line_index);
+        let from_spans = tree
+            .spans_for_range(line.start_char..line.start_char + line.char_len)
+            .map(|span| span.text)
+            .collect::<String>();
+        let from_extract = tree.extract_range(line.start_char..line.start_char + line.char_len);
+        assert_eq!(from_spans, from_extract, "line {line_index} span mismatch");
+    }
+}
+
 fn assert_balanced(tree: &PieceTreeLite) {
     let mut computed_bytes = 0usize;
     let mut computed_chars = 0usize;

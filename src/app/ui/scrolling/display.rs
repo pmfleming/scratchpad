@@ -38,32 +38,101 @@ pub struct DisplaySnapshot {
     row_logical_lines: Vec<Option<u32>>,
     /// Source char range in the underlying text for each display row.
     row_char_ranges: Vec<Range<u32>>,
+    row_records: Vec<DisplayRowRecord>,
     max_line_width: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DisplayRowFlags {
+    pub ascii: bool,
+    pub has_selection: bool,
+    pub has_search: bool,
+    pub long_line: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DisplayRowRecord {
+    pub logical_line: u32,
+    pub char_range: Range<u32>,
+    pub y_top: f32,
+    pub height: f32,
+    pub wrap_index: u16,
+    pub flags: DisplayRowFlags,
 }
 
 impl DisplaySnapshot {
     pub fn from_galley(galley: Arc<Galley>, row_height: f32) -> Self {
+        Self::from_galley_with_base(galley, row_height, 0, 0)
+    }
+
+    pub fn from_galley_with_base(
+        galley: Arc<Galley>,
+        row_height: f32,
+        char_offset_base: usize,
+        logical_line_base: usize,
+    ) -> Self {
+        Self::from_galley_with_base_and_overlays(
+            galley,
+            row_height,
+            char_offset_base,
+            logical_line_base,
+            None,
+            &[],
+        )
+    }
+
+    pub fn from_galley_with_base_and_overlays(
+        galley: Arc<Galley>,
+        row_height: f32,
+        char_offset_base: usize,
+        logical_line_base: usize,
+        selection_range: Option<Range<usize>>,
+        search_ranges: &[Range<usize>],
+    ) -> Self {
         let mut row_tops = Vec::with_capacity(galley.rows.len() + 1);
         let mut row_logical_lines = Vec::with_capacity(galley.rows.len());
         let mut row_char_ranges = Vec::with_capacity(galley.rows.len());
+        let mut row_records = Vec::with_capacity(galley.rows.len());
         let mut max_line_width: f32 = 0.0;
-        let mut current_logical: u32 = 0;
-        let mut current_char: u32 = 0;
+        let mut current_logical = saturating_u32(logical_line_base);
+        let mut current_char = saturating_u32(char_offset_base);
+        let mut wrap_index: u16 = 0;
 
         for row in galley.rows.iter() {
             row_tops.push(row.pos.y);
             row_logical_lines.push(Some(current_logical));
             let row_start = current_char;
             current_char = current_char.saturating_add(row.char_count_including_newline() as u32);
-            row_char_ranges.push(row_start..current_char);
+            let char_range = row_start..current_char;
+            row_char_ranges.push(char_range.clone());
             let row_width = row
                 .glyphs
                 .last()
                 .map(|g| g.pos.x + g.advance_width)
                 .unwrap_or(0.0);
             max_line_width = max_line_width.max(row_width);
+            row_records.push(DisplayRowRecord {
+                logical_line: current_logical,
+                char_range,
+                y_top: row.pos.y,
+                height: row_height,
+                wrap_index,
+                flags: DisplayRowFlags {
+                    ascii: true,
+                    has_selection: selection_range.as_ref().is_some_and(|selection| {
+                        ranges_overlap_u32(selection, &row_start, &current_char)
+                    }),
+                    has_search: search_ranges
+                        .iter()
+                        .any(|range| ranges_overlap_u32(range, &row_start, &current_char)),
+                    long_line: row_width > 4_096.0,
+                },
+            });
             if row.ends_with_newline {
                 current_logical = current_logical.saturating_add(1);
+                wrap_index = 0;
+            } else {
+                wrap_index = wrap_index.saturating_add(1);
             }
         }
         row_tops.push(galley.rect.height());
@@ -74,6 +143,7 @@ impl DisplaySnapshot {
             row_tops,
             row_logical_lines,
             row_char_ranges,
+            row_records,
             max_line_width,
         }
     }
@@ -111,6 +181,14 @@ impl DisplaySnapshot {
 
     pub fn row_char_range(&self, row: DisplayRow) -> Option<Range<u32>> {
         self.row_char_ranges.get(row.0 as usize).cloned()
+    }
+
+    pub fn row_record(&self, row: DisplayRow) -> Option<&DisplayRowRecord> {
+        self.row_records.get(row.0 as usize)
+    }
+
+    pub fn row_records(&self) -> &[DisplayRowRecord] {
+        &self.row_records
     }
 
     /// Locate the display row that contains the given char offset. Returns
@@ -157,6 +235,16 @@ impl DisplaySnapshot {
     }
 }
 
+fn saturating_u32(value: usize) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
+}
+
+fn ranges_overlap_u32(range: &Range<usize>, row_start: &u32, row_end: &u32) -> bool {
+    let start = saturating_u32(range.start);
+    let end = saturating_u32(range.end);
+    start < *row_end && end > *row_start
+}
+
 /// A range of display rows to paint, with the fractional top-of-viewport row
 /// for sub-pixel scroll positioning.
 #[derive(Clone, Debug)]
@@ -169,6 +257,23 @@ pub struct ViewportSlice {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use eframe::egui;
+
+    fn galley_for(text: &str) -> Arc<Galley> {
+        let ctx = egui::Context::default();
+        let mut galley = None;
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            galley = Some(ui.fonts_mut(|fonts| {
+                fonts.layout_job(egui::text::LayoutJob::simple(
+                    text.to_owned(),
+                    egui::FontId::monospace(14.0),
+                    egui::Color32::WHITE,
+                    f32::INFINITY,
+                ))
+            }));
+        });
+        galley.expect("galley")
+    }
 
     /// Test the slice math directly without constructing a real galley.
     fn slice_math(
@@ -205,5 +310,46 @@ mod tests {
         // top_row * row_height
         let pixel_offset = 3.5_f32 * 18.0;
         assert!((pixel_offset - 63.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn display_snapshot_records_document_line_and_char_bases() {
+        let snapshot =
+            DisplaySnapshot::from_galley_with_base(galley_for("alpha\nbravo"), 10.0, 40, 5);
+
+        let first = snapshot.row_record(DisplayRow(0)).expect("first row");
+        assert_eq!(first.logical_line, 5);
+        assert_eq!(first.char_range.start, 40);
+
+        let second = snapshot.row_record(DisplayRow(1)).expect("second row");
+        assert_eq!(second.logical_line, 6);
+        assert!(second.char_range.start > first.char_range.start);
+    }
+
+    #[test]
+    fn display_snapshot_records_selection_and_search_flags() {
+        let snapshot = DisplaySnapshot::from_galley_with_base_and_overlays(
+            galley_for("alpha\nbravo"),
+            10.0,
+            40,
+            5,
+            Some(41..43),
+            &[47..49],
+        );
+
+        assert!(
+            snapshot
+                .row_record(DisplayRow(0))
+                .expect("first row")
+                .flags
+                .has_selection
+        );
+        assert!(
+            snapshot
+                .row_record(DisplayRow(1))
+                .expect("second row")
+                .flags
+                .has_search
+        );
     }
 }

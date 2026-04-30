@@ -73,10 +73,22 @@ pub(super) fn apply_cursor_movement(
     page_jump_rows: usize,
     total_chars: usize,
     piece_tree: &PieceTreeLite,
+    char_offset_base: usize,
+    slice_chars: usize,
 ) -> Option<CursorRange> {
-    let egui_cursor = galley.clamp_cursor(&cursor.primary.to_egui_ccursor());
+    let local_cursor = CharCursor {
+        index: cursor
+            .primary
+            .index
+            .saturating_sub(char_offset_base)
+            .min(slice_chars),
+        prefer_next_row: cursor.primary.prefer_next_row,
+    };
+    let egui_cursor = galley.clamp_cursor(&local_cursor.to_egui_ccursor());
     let new_primary = horizontal_movement_target(
         cursor.primary.index,
+        char_offset_base,
+        slice_chars,
         key,
         modifiers,
         galley,
@@ -86,7 +98,7 @@ pub(super) fn apply_cursor_movement(
     .or_else(|| vertical_movement_target(key, modifiers, galley, &egui_cursor))
     .or_else(|| row_edge_movement_target(key, modifiers, galley, &egui_cursor))
     .or_else(|| page_movement_target(key, galley, egui_cursor, page_jump_rows))?;
-    let new_primary_char = clamp_char_cursor(galley, total_chars, new_primary);
+    let new_primary_char = clamp_char_cursor(galley, total_chars, new_primary, char_offset_base);
     Some(finalize_cursor_movement(
         cursor,
         key,
@@ -97,6 +109,8 @@ pub(super) fn apply_cursor_movement(
 
 fn horizontal_movement_target(
     current_index: usize,
+    char_offset_base: usize,
+    slice_chars: usize,
     key: egui::Key,
     modifiers: &egui::Modifiers,
     galley: &egui::Galley,
@@ -104,16 +118,32 @@ fn horizontal_movement_target(
     piece_tree: &PieceTreeLite,
 ) -> Option<egui::text::CCursor> {
     match key {
-        egui::Key::ArrowLeft if is_wordwise_movement(modifiers) => Some(egui::text::CCursor::new(
-            word_boundary::find_word_boundary_left(piece_tree, current_index),
-        )),
+        egui::Key::ArrowLeft if is_wordwise_movement(modifiers) => {
+            Some(local_cursor_for_document_index(
+                word_boundary::find_word_boundary_left(piece_tree, current_index),
+                char_offset_base,
+                slice_chars,
+            ))
+        }
         egui::Key::ArrowLeft => Some(galley.cursor_left_one_character(egui_cursor)),
-        egui::Key::ArrowRight if is_wordwise_movement(modifiers) => Some(egui::text::CCursor::new(
-            word_boundary::find_word_boundary_right(piece_tree, current_index),
-        )),
+        egui::Key::ArrowRight if is_wordwise_movement(modifiers) => {
+            Some(local_cursor_for_document_index(
+                word_boundary::find_word_boundary_right(piece_tree, current_index),
+                char_offset_base,
+                slice_chars,
+            ))
+        }
         egui::Key::ArrowRight => Some(galley.cursor_right_one_character(egui_cursor)),
         _ => None,
     }
+}
+
+fn local_cursor_for_document_index(
+    index: usize,
+    char_offset_base: usize,
+    slice_chars: usize,
+) -> egui::text::CCursor {
+    egui::text::CCursor::new(index.saturating_sub(char_offset_base).min(slice_chars))
 }
 
 fn vertical_movement_target(
@@ -168,10 +198,13 @@ fn clamp_char_cursor(
     galley: &egui::Galley,
     total_chars: usize,
     cursor: egui::text::CCursor,
+    char_offset_base: usize,
 ) -> CharCursor {
     let clamped = galley.clamp_cursor(&cursor);
     CharCursor {
-        index: clamped.index.min(total_chars),
+        index: char_offset_base
+            .saturating_add(clamped.index)
+            .min(total_chars),
         prefer_next_row: clamped.prefer_next_row,
     }
 }
@@ -217,6 +250,8 @@ mod tests {
             10,
             piece_tree.len_chars(),
             &piece_tree,
+            0,
+            piece_tree.len_chars(),
         )
         .expect("left movement");
 

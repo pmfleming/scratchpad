@@ -192,7 +192,6 @@ pub(super) fn line_lookup_in_leaves(
     address: LeafAddress,
     safe_line: usize,
 ) -> (usize, usize) {
-    let mut is_first_leaf = true;
     let mut cursor = LineLookupCursor::new(address);
 
     for (node_index, node) in tree.root.nodes.iter().enumerate().skip(address.node_index) {
@@ -203,11 +202,7 @@ pub(super) fn line_lookup_in_leaves(
         };
 
         for leaf in node.leaves.iter().skip(leaf_start) {
-            let piece_skip =
-                first_leaf_piece_skip(leaf, &mut is_first_leaf, safe_line, &mut cursor);
-            if let Some(line_info) =
-                scan_leaf_for_line_lookup(tree, leaf, piece_skip, safe_line, &mut cursor)
-            {
+            if let Some(line_info) = scan_leaf_for_line_lookup(tree, leaf, safe_line, &mut cursor) {
                 return line_info;
             }
         }
@@ -238,39 +233,13 @@ impl LineLookupCursor {
     }
 }
 
-fn first_leaf_piece_skip(
-    leaf: &PieceTreeLeaf,
-    is_first_leaf: &mut bool,
-    safe_line: usize,
-    cursor: &mut LineLookupCursor,
-) -> usize {
-    if !*is_first_leaf {
-        return 0;
-    }
-
-    *is_first_leaf = false;
-    let offset_in_leaf = safe_line.saturating_sub(cursor.current_line);
-    if offset_in_leaf == 0 || leaf.piece_start_newlines.is_empty() {
-        return 0;
-    }
-
-    let piece_index = leaf
-        .piece_start_newlines
-        .partition_point(|&newline_count| newline_count < offset_in_leaf)
-        .saturating_sub(1);
-    cursor.current_line += leaf.piece_start_newlines[piece_index];
-    cursor.current_char += leaf.piece_start_chars[piece_index];
-    piece_index
-}
-
 fn scan_leaf_for_line_lookup(
     tree: &PieceTreeLite,
     leaf: &PieceTreeLeaf,
-    piece_skip: usize,
     safe_line: usize,
     cursor: &mut LineLookupCursor,
 ) -> Option<(usize, usize)> {
-    for piece in leaf.pieces.iter().skip(piece_skip) {
+    for piece in &leaf.pieces {
         if skip_piece_before_line(piece, safe_line, cursor) {
             continue;
         }

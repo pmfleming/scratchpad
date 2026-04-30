@@ -3,9 +3,11 @@ use crate::app::domain::buffer::{AnchorBias, AnchorId, AnchorOwner};
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use crate::app::ui::scrolling::{DisplaySnapshot, ScrollAnchor, ScrollIntent, ScrollManager};
 use eframe::egui;
+use std::collections::VecDeque;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_VIEW_ID: AtomicU64 = AtomicU64::new(1);
@@ -16,6 +18,79 @@ pub type ViewId = u64;
 pub struct SearchHighlightState {
     pub ranges: Vec<Range<usize>>,
     pub active_range_index: Option<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LayoutCacheKey {
+    pub revision: u64,
+    pub char_range: Range<usize>,
+    pub font_family: String,
+    pub font_size_bits: u32,
+    pub wrap_width_bits: u32,
+    pub word_wrap: bool,
+    pub text_color: egui::Color32,
+    pub dark_mode: bool,
+    pub selection_range: Option<Range<usize>>,
+    pub search_highlights: SearchHighlightState,
+}
+
+#[derive(Clone)]
+pub struct LayoutCacheEntry {
+    pub key: LayoutCacheKey,
+    pub galley: Arc<egui::Galley>,
+    pub input_bytes: usize,
+}
+
+#[derive(Clone, Default)]
+pub struct LayoutCache {
+    entries: VecDeque<LayoutCacheEntry>,
+    bytes: usize,
+}
+
+impl LayoutCache {
+    const MAX_ENTRIES: usize = 8;
+    const MAX_BYTES: usize = 4 * 1024 * 1024;
+
+    pub fn get(&mut self, key: &LayoutCacheKey) -> Option<Arc<egui::Galley>> {
+        let index = self.entries.iter().position(|entry| &entry.key == key)?;
+        let entry = self.entries.remove(index)?;
+        let galley = entry.galley.clone();
+        self.entries.push_front(entry);
+        Some(galley)
+    }
+
+    pub fn insert(&mut self, key: LayoutCacheKey, galley: Arc<egui::Galley>, input_bytes: usize) {
+        if let Some(index) = self.entries.iter().position(|entry| entry.key == key)
+            && let Some(existing) = self.entries.remove(index)
+        {
+            self.bytes = self.bytes.saturating_sub(existing.input_bytes);
+        }
+        self.bytes = self.bytes.saturating_add(input_bytes);
+        self.entries.push_front(LayoutCacheEntry {
+            key,
+            galley,
+            input_bytes,
+        });
+        self.evict_over_budget();
+    }
+
+    pub fn retain_revision(&mut self, revision: u64) {
+        self.entries.retain(|entry| entry.key.revision == revision);
+        self.bytes = self.entries.iter().map(|entry| entry.input_bytes).sum();
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    fn evict_over_budget(&mut self) {
+        while self.entries.len() > Self::MAX_ENTRIES || self.bytes > Self::MAX_BYTES {
+            let Some(entry) = self.entries.pop_back() else {
+                break;
+            };
+            self.bytes = self.bytes.saturating_sub(entry.input_bytes);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -70,6 +145,7 @@ pub struct EditorViewState {
     /// `take_previous_snapshot`/restore dance only restore stale snapshots
     /// when the buffer hasn't changed under them.
     pub latest_display_snapshot_revision: Option<u64>,
+    pub layout_cache: LayoutCache,
     pub cursor_range: Option<CursorRange>,
     pub pending_cursor_range: Option<CursorRange>,
     /// Per-view scroll state. Single source of truth for scroll position,
@@ -102,6 +178,7 @@ impl EditorViewState {
             editor_has_focus: false,
             latest_display_snapshot: None,
             latest_display_snapshot_revision: None,
+            layout_cache: LayoutCache::default(),
             cursor_range: None,
             pending_cursor_range: None,
             scroll: ScrollManager::new(),
@@ -131,6 +208,7 @@ impl EditorViewState {
             editor_has_focus: false,
             latest_display_snapshot: None,
             latest_display_snapshot_revision: None,
+            layout_cache: LayoutCache::default(),
             cursor_range: None,
             pending_cursor_range: None,
             scroll: ScrollManager::new(),
@@ -503,6 +581,67 @@ impl EditorViewState {
 
     pub fn clear_ime_output(&mut self) {
         self.published_ime_output = None;
+    }
+}
+
+#[cfg(test)]
+mod layout_cache_tests {
+    use super::{LayoutCache, LayoutCacheKey, SearchHighlightState};
+    use eframe::egui;
+    use std::sync::Arc;
+
+    fn key(revision: u64, start: usize) -> LayoutCacheKey {
+        LayoutCacheKey {
+            revision,
+            char_range: start..start + 10,
+            font_family: "Monospace".to_owned(),
+            font_size_bits: 14.0_f32.to_bits(),
+            wrap_width_bits: f32::INFINITY.to_bits(),
+            word_wrap: false,
+            text_color: egui::Color32::WHITE,
+            dark_mode: true,
+            selection_range: None,
+            search_highlights: SearchHighlightState::default(),
+        }
+    }
+
+    fn galley() -> Arc<egui::Galley> {
+        let ctx = egui::Context::default();
+        let mut galley = None;
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            galley = Some(ui.fonts_mut(|fonts| {
+                fonts.layout_job(egui::text::LayoutJob::simple(
+                    "cached".to_owned(),
+                    egui::FontId::monospace(14.0),
+                    egui::Color32::WHITE,
+                    f32::INFINITY,
+                ))
+            }));
+        });
+        galley.expect("galley")
+    }
+
+    #[test]
+    fn layout_cache_returns_matching_revision_and_range() {
+        let mut cache = LayoutCache::default();
+        let cached_key = key(7, 10);
+        cache.insert(cached_key.clone(), galley(), 6);
+
+        assert!(cache.get(&cached_key).is_some());
+        assert!(cache.get(&key(8, 10)).is_none());
+    }
+
+    #[test]
+    fn layout_cache_evicts_stale_revisions() {
+        let mut cache = LayoutCache::default();
+        cache.insert(key(7, 0), galley(), 6);
+        cache.insert(key(8, 0), galley(), 6);
+
+        cache.retain_revision(8);
+
+        assert_eq!(cache.len(), 1);
+        assert!(cache.get(&key(7, 0)).is_none());
+        assert!(cache.get(&key(8, 0)).is_some());
     }
 }
 

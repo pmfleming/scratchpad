@@ -1,7 +1,17 @@
-use super::{BufferLength, PieceTreeLite, PieceTreeSlice, display_line_count_from_piece_tree};
+use super::{
+    BufferLength, PieceTreeLineInfo, PieceTreeLite, PieceTreeSlice,
+    display_line_count_from_piece_tree,
+};
+use crate::app::capacity_metrics;
 use std::borrow::Cow;
 use std::ops::Range;
 use std::sync::Arc;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DocumentChunk {
+    pub core_range: Range<usize>,
+    pub window_range: Range<usize>,
+}
 
 #[derive(Clone)]
 pub struct DocumentSnapshot {
@@ -45,16 +55,41 @@ impl DocumentSnapshot {
         self.length.chars
     }
 
+    pub fn len_bytes(&self) -> usize {
+        self.length.bytes
+    }
+
+    pub fn line_count(&self) -> usize {
+        self.length.lines
+    }
+
+    pub fn line_info(&self, line_index: usize) -> PieceTreeLineInfo {
+        self.piece_tree.line_info(line_index)
+    }
+
+    pub fn line_index_at_offset(&self, offset_chars: usize) -> usize {
+        self.piece_tree.line_index_at_offset(offset_chars)
+    }
+
+    pub fn line_char_range(&self, line_index: usize) -> Range<usize> {
+        let line = self.line_info(line_index);
+        line.start_char..line.start_char + line.char_len
+    }
+
     pub fn normalize_char_range(&self, range_chars: Range<usize>) -> Range<usize> {
         self.piece_tree.normalize_char_range(range_chars)
     }
 
     pub fn flatten_text(&self) -> String {
-        self.piece_tree.extract_text()
+        let text = self.piece_tree.extract_text();
+        capacity_metrics::record_full_text_flatten(text.len());
+        text
     }
 
     pub fn flatten_range(&self, range_chars: Range<usize>) -> String {
-        self.piece_tree.extract_range(range_chars)
+        let text = self.piece_tree.extract_range(range_chars);
+        capacity_metrics::record_range_flatten(text.len());
+        text
     }
 
     pub fn extract_text(&self) -> String {
@@ -76,6 +111,49 @@ impl DocumentSnapshot {
 
     pub fn spans_for_range(&self, range_chars: Range<usize>) -> PieceTreeSlice<'_> {
         self.piece_tree.spans_for_range(range_chars)
+    }
+
+    pub fn spans_for_line(&self, line_index: usize) -> PieceTreeSlice<'_> {
+        self.piece_tree.spans_for_line(line_index)
+    }
+
+    pub fn chunks_for_range(
+        &self,
+        range_chars: Range<usize>,
+        target_chunk_chars: usize,
+        leading_context_chars: usize,
+        trailing_context_chars: usize,
+    ) -> Vec<DocumentChunk> {
+        let normalized = self.normalize_char_range(range_chars);
+        if normalized.is_empty() {
+            return Vec::new();
+        }
+
+        let chunk_chars = target_chunk_chars.max(1);
+        let mut chunks = Vec::new();
+        let mut chunk_start = normalized.start;
+
+        while chunk_start < normalized.end {
+            let rough_end = chunk_start.saturating_add(chunk_chars).min(normalized.end);
+            let core_end = self
+                .next_line_boundary_after(rough_end, normalized.end)
+                .filter(|line_start| *line_start > chunk_start)
+                .unwrap_or(rough_end)
+                .min(normalized.end);
+            let window_start = normalized
+                .start
+                .max(chunk_start.saturating_sub(leading_context_chars));
+            let window_end = normalized
+                .end
+                .min(core_end.saturating_add(trailing_context_chars));
+            chunks.push(DocumentChunk {
+                core_range: chunk_start..core_end,
+                window_range: window_start..window_end,
+            });
+            chunk_start = core_end;
+        }
+
+        chunks
     }
 
     pub fn preview_for_match(&self, range_chars: &Range<usize>) -> (usize, usize, String) {
@@ -105,6 +183,20 @@ impl DocumentSnapshot {
 
     fn full_char_range(&self) -> Range<usize> {
         0..self.document_length().chars
+    }
+
+    fn next_line_boundary_after(&self, offset_chars: usize, range_end: usize) -> Option<usize> {
+        if offset_chars >= range_end {
+            return Some(range_end);
+        }
+
+        let line_index = self.line_index_at_offset(offset_chars);
+        let next_line = line_index.saturating_add(1);
+        if next_line >= self.line_count() {
+            return Some(range_end);
+        }
+
+        Some(self.line_info(next_line).start_char.min(range_end))
     }
 
     fn borrow_or_flatten_range(&self, range_chars: Range<usize>) -> Cow<'_, str> {
@@ -188,6 +280,39 @@ mod tests {
                 lines: 3,
             }
         );
+    }
+
+    #[test]
+    fn snapshot_exposes_line_metadata_and_line_spans() {
+        let mut document = TextDocument::new("alpha\nbravo\ncharlie".to_owned());
+        document.insert_direct(6, "wide ");
+        let snapshot = document.snapshot();
+
+        assert_eq!(snapshot.line_count(), 3);
+        assert_eq!(snapshot.line_index_at_offset(8), 1);
+        assert_eq!(snapshot.line_char_range(1), 6..16);
+
+        let line_text = snapshot
+            .spans_for_line(1)
+            .map(|span| span.text)
+            .collect::<String>();
+        assert_eq!(line_text, "wide bravo");
+    }
+
+    #[test]
+    fn snapshot_chunks_align_core_ranges_to_line_boundaries() {
+        let document = TextDocument::new("aaaa\nbbbb\ncccc\ndddd\neeee".to_owned());
+        let snapshot = document.snapshot();
+
+        let chunks = snapshot.chunks_for_range(0..snapshot.len_chars(), 7, 2, 3);
+
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0].core_range, 0..10);
+        assert_eq!(chunks[0].window_range, 0..13);
+        assert_eq!(chunks[1].core_range, 10..20);
+        assert_eq!(chunks[1].window_range, 8..23);
+        assert_eq!(chunks[2].core_range, 20..24);
+        assert_eq!(chunks[2].window_range, 18..24);
     }
 
     #[test]

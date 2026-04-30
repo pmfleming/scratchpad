@@ -1,4 +1,8 @@
-use scratchpad::app::domain::{BufferState, SplitAxis, WorkspaceTab};
+use scratchpad::app::capacity_metrics::{
+    CapacityMetricsSnapshot, capacity_metrics_snapshot, reset_capacity_metrics,
+};
+use scratchpad::app::domain::{BufferState, SearchHighlightState, SplitAxis, WorkspaceTab};
+use scratchpad::app::ui::editor_content::{EditorHighlightStyle, build_layouter};
 use serde::Serialize;
 use std::hint::black_box;
 use std::io::Write;
@@ -22,6 +26,7 @@ struct CapacityEvent {
     workload_unit: &'static str,
     workload_label: String,
     elapsed_ns: u128,
+    metrics: CapacityMetricsSnapshot,
     status: &'static str,
     note: Option<String>,
 }
@@ -38,6 +43,7 @@ struct StepDescriptor {
 
 fn main() {
     emit_file_size_sweep();
+    emit_layout_bytes_sweep();
     emit_tab_count_sweep();
     emit_split_count_sweep();
     emit_paste_size_sweep();
@@ -66,6 +72,26 @@ fn emit_file_size_sweep() {
                 );
                 black_box(buffer.line_count + buffer.document().piece_tree().len_bytes())
             },
+        );
+    }
+}
+
+fn emit_layout_bytes_sweep() {
+    for (step_index, bytes) in [64 * KB, MB, 8 * MB, 32 * MB, 128 * MB]
+        .into_iter()
+        .enumerate()
+    {
+        emit_step(
+            StepDescriptor {
+                scenario: "layout_bytes_ceiling",
+                scenario_label: "Layout bytes ceiling sweep",
+                workload_family: "capacity-measurement",
+                step_index,
+                workload_value: bytes,
+                workload_unit: "bytes",
+                workload_label: human_bytes(bytes),
+            },
+            || black_box(run_layout_capacity_cycle(bytes)),
         );
     }
 }
@@ -128,9 +154,11 @@ fn emit_paste_size_sweep() {
 }
 
 fn emit_step(step: StepDescriptor, run: impl FnOnce() -> usize) {
+    reset_capacity_metrics();
     let start = Instant::now();
     let result = catch_unwind(AssertUnwindSafe(run));
     let elapsed_ns = start.elapsed().as_nanos();
+    let metrics = capacity_metrics_snapshot();
     let (status, note) = match result {
         Ok(_) => ("ok", None),
         Err(payload) => ("panic", Some(panic_message(payload))),
@@ -145,6 +173,7 @@ fn emit_step(step: StepDescriptor, run: impl FnOnce() -> usize) {
         workload_unit: step.workload_unit,
         workload_label: step.workload_label,
         elapsed_ns,
+        metrics,
         status,
         note,
     };
@@ -153,6 +182,37 @@ fn emit_step(step: StepDescriptor, run: impl FnOnce() -> usize) {
         serde_json::to_string(&event).expect("serialize capacity event")
     );
     let _ = std::io::stdout().flush();
+}
+
+fn run_layout_capacity_cycle(bytes: usize) -> usize {
+    let text = plain_text_of_size(bytes);
+    let ctx = eframe::egui::Context::default();
+    let font_id = eframe::egui::FontId::monospace(15.0);
+    let highlight_style = EditorHighlightStyle::new(
+        eframe::egui::Color32::from_rgb(90, 146, 214),
+        eframe::egui::Color32::WHITE,
+    );
+    let mut total_rows = 0usize;
+
+    let _ = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+        eframe::egui::CentralPanel::default().show_inside(ui, |ui| {
+            let mut layouter = build_layouter(
+                font_id.clone(),
+                false,
+                eframe::egui::Color32::WHITE,
+                highlight_style,
+                SearchHighlightState::default(),
+                None,
+            );
+
+            for wrap_width in [980.0, 720.0, 520.0, 980.0] {
+                let galley = layouter(ui, &text, wrap_width);
+                total_rows += galley.rows.len().max(1);
+            }
+        });
+    });
+
+    total_rows
 }
 
 fn run_tab_capacity_cycle(tab_count: usize) -> usize {

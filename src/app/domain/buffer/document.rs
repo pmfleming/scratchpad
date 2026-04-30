@@ -1,4 +1,5 @@
 use super::{DocumentSnapshot, LineEndingStyle, PieceTreeLite, platform_default_line_ending};
+use crate::app::capacity_metrics;
 use crate::app::ui::editor_content::native_editor::{CursorRange, OperationRecord};
 use std::borrow::Cow;
 use std::ops::Range;
@@ -63,14 +64,20 @@ impl TextDocument {
 
     /// Extract the full text content as a new String from the piece tree.
     pub fn extract_text(&self) -> String {
-        self.piece_tree.extract_text()
+        let text = self.piece_tree.extract_text();
+        capacity_metrics::record_full_text_flatten(text.len());
+        text
     }
 
     pub fn text_cow(&self) -> Cow<'_, str> {
         self.piece_tree
             .borrow_range(0..self.piece_tree.len_chars())
             .map(Cow::Borrowed)
-            .unwrap_or_else(|| Cow::Owned(self.piece_tree.extract_text()))
+            .unwrap_or_else(|| {
+                let text = self.piece_tree.extract_text();
+                capacity_metrics::record_full_text_flatten(text.len());
+                Cow::Owned(text)
+            })
     }
 
     pub fn piece_tree(&self) -> &PieceTreeLite {

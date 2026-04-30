@@ -134,15 +134,6 @@ impl PieceTreeLite {
         })
     }
 
-    pub(super) fn find_leaf_for_line(&self, target_line: usize) -> LeafAddress {
-        if self.root.nodes.is_empty() {
-            return LeafAddress::default();
-        }
-        self.find_leaf_by(target_line, &self.root.node_start_newlines, |node| {
-            &node.leaf_start_newlines
-        })
-    }
-
     fn find_leaf_by(
         &self,
         target: usize,

@@ -11,7 +11,9 @@ pub use types::{
     TextEditOptions,
 };
 
-use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
+use crate::app::domain::{
+    BufferState, CursorRevealMode, EditorViewState, LayoutCacheKey, SearchHighlightState,
+};
 use crate::app::ui::scrolling::{DisplaySnapshot, ScrollAlign, ScrollIntent};
 use eframe::egui;
 use interactions::{
@@ -39,6 +41,19 @@ struct CursorPaintOutcome {
     reveal_attempted: bool,
 }
 
+struct EditorGalleyContext {
+    galley: Arc<egui::Galley>,
+    char_offset_base: usize,
+    logical_line_base: usize,
+    slice_chars: usize,
+}
+
+struct ViewportTextSlice {
+    text: String,
+    char_range: std::ops::Range<usize>,
+    start_line: usize,
+}
+
 // ---------------------------------------------------------------------------
 // Public rendering entry points
 // ---------------------------------------------------------------------------
@@ -53,10 +68,11 @@ pub fn render_editor_text_edit(
     view.resolve_anchored_ranges(buffer);
     let mut document_revision = buffer.document_revision();
     let total_chars = buffer.current_file_length().chars;
-    let mut galley = build_editor_galley(ui, buffer, view, options, viewport);
+    let mut galley_context = build_editor_galley(ui, buffer, view, options, viewport);
 
     let row_height = editor_row_height(ui, options.editor_font_id);
-    let (rect, response) = allocate_editor_rect(ui, &galley, options, row_height, viewport);
+    let (rect, response) =
+        allocate_editor_rect(ui, &galley_context.galley, options, row_height, viewport);
     request_editor_focus(ui, &response, options.request_focus);
 
     let input = process_editor_input(
@@ -65,31 +81,34 @@ pub fn render_editor_text_edit(
         view,
         EditorInputRequest {
             response: &response,
-            galley: &galley,
+            galley: &galley_context.galley,
             rect,
             options,
             viewport,
             row_height,
             total_chars,
+            char_offset_base: galley_context.char_offset_base,
+            slice_chars: galley_context.slice_chars,
         },
     );
 
     if input.changed {
         document_revision = buffer.document_revision();
-        galley = build_editor_galley(ui, buffer, view, options, viewport);
+        galley_context = build_editor_galley(ui, buffer, view, options, viewport);
     }
 
     let galley_pos = rect.min;
     let paint_outcome = if ui.is_rect_visible(rect) {
         paint_editor(
             ui,
-            &galley,
+            &galley_context.galley,
             galley_pos,
             rect,
             view,
             options,
             input.focused,
             false,
+            galley_context.char_offset_base,
         )
     } else {
         CursorPaintOutcome::default()
@@ -97,7 +116,15 @@ pub fn render_editor_text_edit(
     consume_cursor_reveal(view, false, paint_outcome.reveal_attempted);
     sync_ime_output_focus(view, input.focused);
 
-    store_latest_snapshot(view, &galley, row_height, false, Some(document_revision));
+    store_latest_snapshot(
+        view,
+        &galley_context.galley,
+        row_height,
+        false,
+        Some(document_revision),
+        galley_context.char_offset_base,
+        galley_context.logical_line_base,
+    );
 
     view.editor_has_focus = input.focused;
 
@@ -122,6 +149,8 @@ struct EditorInputRequest<'a> {
     viewport: Option<egui::Rect>,
     row_height: f32,
     total_chars: usize,
+    char_offset_base: usize,
+    slice_chars: usize,
 }
 
 fn process_editor_input(
@@ -139,6 +168,7 @@ fn process_editor_input(
         request.rect,
         view,
         buffer.document().piece_tree(),
+        request.char_offset_base,
     );
     let focused = request.response.has_focus()
         || request.response.gained_focus()
@@ -207,6 +237,8 @@ fn handle_focused_keyboard_input(
             request.galley,
             page_jump_rows(request.viewport, request.row_height),
             request.total_chars,
+            request.char_offset_base,
+            request.slice_chars,
         )
 }
 
@@ -252,7 +284,7 @@ pub fn render_read_only_text_edit(
 
     let focused = response.has_focus() || response.gained_focus();
     sync_ime_output_focus(view, focused);
-    store_latest_snapshot(view, &galley, row_height, false, None);
+    store_latest_snapshot(view, &galley, row_height, false, None, 0, 0);
     view.cursor_range = None;
     view.editor_has_focus = focused;
     EditorWidgetOutcome {
@@ -293,6 +325,7 @@ fn paint_editor(
     options: TextEditOptions<'_>,
     focused: bool,
     changed: bool,
+    char_offset_base: usize,
 ) -> CursorPaintOutcome {
     // Paint galley — selection highlight is already baked into the LayoutJob
     paint_galley(ui, galley, galley_pos, options.text_color);
@@ -306,13 +339,20 @@ fn paint_editor(
     {
         // Paint cursor (skip when changed — galley is stale, next frame corrects it)
         let content_cursor_rect = galley
-            .pos_from_cursor(cursor_range.primary.to_egui_ccursor())
+            .pos_from_cursor(local_cursor(cursor_range.primary, char_offset_base).to_egui_ccursor())
             .expand(1.5);
         let cursor_rect = content_cursor_rect.translate(galley_pos.to_vec2());
         return paint_cursor_effects(ui, rect, cursor_rect, content_cursor_rect, view);
     }
 
     CursorPaintOutcome::default()
+}
+
+fn local_cursor(cursor: CharCursor, char_offset_base: usize) -> CharCursor {
+    CharCursor {
+        index: cursor.index.saturating_sub(char_offset_base),
+        prefer_next_row: cursor.prefer_next_row,
+    }
 }
 
 fn paint_galley(
@@ -375,19 +415,147 @@ fn paint_cursor(ui: &egui::Ui, rect: egui::Rect, cursor_rect: egui::Rect) {
 fn build_editor_galley(
     ui: &mut egui::Ui,
     buffer: &BufferState,
-    view: &EditorViewState,
+    view: &mut EditorViewState,
     options: TextEditOptions<'_>,
     viewport: Option<egui::Rect>,
-) -> Arc<egui::Galley> {
-    let text = buffer.document().text_cow();
-    highlighting::build_galley(
-        ui,
-        text.as_ref(),
-        options,
-        &view.search_highlights,
+) -> EditorGalleyContext {
+    let effective_viewport = viewport.unwrap_or_else(|| bounded_editor_viewport(ui));
+    let slice = viewport_text_slice(
+        buffer,
+        effective_viewport,
+        editor_row_height(ui, options.editor_font_id),
+    );
+    let selection = local_range(
         buffer.active_selection.clone(),
-        editor_wrap_width(ui, options.word_wrap, viewport),
+        slice.char_range.start,
+        slice.char_range.end,
+    );
+    let search_highlights = local_search_highlights(
+        &view.search_highlights,
+        slice.char_range.start,
+        slice.char_range.end,
+    );
+    let wrap_width = editor_wrap_width(ui, options.word_wrap, Some(effective_viewport));
+    let cache_key = layout_cache_key(
+        buffer.document_revision(),
+        slice.char_range.clone(),
+        options,
+        &search_highlights,
+        selection.clone(),
+        wrap_width,
+        ui.visuals().dark_mode,
+    );
+    view.layout_cache
+        .retain_revision(buffer.document_revision());
+    let galley = view.layout_cache.get(&cache_key).unwrap_or_else(|| {
+        let galley = highlighting::build_galley(
+            ui,
+            &slice.text,
+            options,
+            &search_highlights,
+            selection,
+            wrap_width,
+        );
+        view.layout_cache
+            .insert(cache_key, galley.clone(), slice.text.len());
+        galley
+    });
+    let slice_chars = slice.char_range.end.saturating_sub(slice.char_range.start);
+    EditorGalleyContext {
+        galley,
+        char_offset_base: slice.char_range.start,
+        logical_line_base: slice.start_line,
+        slice_chars,
+    }
+}
+
+fn layout_cache_key(
+    revision: u64,
+    char_range: std::ops::Range<usize>,
+    options: TextEditOptions<'_>,
+    search_highlights: &SearchHighlightState,
+    selection_range: Option<std::ops::Range<usize>>,
+    wrap_width: f32,
+    dark_mode: bool,
+) -> LayoutCacheKey {
+    LayoutCacheKey {
+        revision,
+        char_range,
+        font_family: format!("{:?}", options.editor_font_id.family),
+        font_size_bits: options.editor_font_id.size.to_bits(),
+        wrap_width_bits: wrap_width.to_bits(),
+        word_wrap: options.word_wrap,
+        text_color: options.text_color,
+        dark_mode,
+        selection_range,
+        search_highlights: search_highlights.clone(),
+    }
+}
+
+fn viewport_text_slice(
+    buffer: &BufferState,
+    viewport: egui::Rect,
+    row_height: f32,
+) -> ViewportTextSlice {
+    let line_count = buffer.line_count.max(1);
+    let top_line = if row_height > 0.0 {
+        (viewport.min.y.max(0.0) / row_height).floor() as usize
+    } else {
+        0
+    };
+    let visible_lines = viewport_line_capacity(viewport, row_height).unwrap_or(1);
+    let overscan_lines = visible_lines.min(24).max(4);
+    let start_line = top_line
+        .saturating_sub(overscan_lines)
+        .min(line_count.saturating_sub(1));
+    let end_line = (top_line + visible_lines + overscan_lines).min(line_count.saturating_sub(1));
+    let tree = buffer.document().piece_tree();
+    let start_char = tree.line_info(start_line).start_char;
+    let end_info = tree.line_info(end_line);
+    let end_char = (end_info.start_char + end_info.char_len).min(tree.len_chars());
+    ViewportTextSlice {
+        text: tree.extract_range(start_char..end_char),
+        char_range: start_char..end_char,
+        start_line,
+    }
+}
+
+fn bounded_editor_viewport(ui: &egui::Ui) -> egui::Rect {
+    egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        egui::vec2(
+            ui.available_width().max(1.0),
+            ui.available_height().max(1.0),
+        ),
     )
+}
+
+fn local_search_highlights(
+    highlights: &SearchHighlightState,
+    slice_start: usize,
+    slice_end: usize,
+) -> SearchHighlightState {
+    let mut local = SearchHighlightState::default();
+    for (index, range) in highlights.ranges.iter().enumerate() {
+        if let Some(range) = local_range(Some(range.clone()), slice_start, slice_end) {
+            if highlights.active_range_index == Some(index) {
+                local.active_range_index = Some(local.ranges.len());
+            }
+            local.ranges.push(range);
+        }
+    }
+    local
+}
+
+fn local_range(
+    range: Option<std::ops::Range<usize>>,
+    slice_start: usize,
+    slice_end: usize,
+) -> Option<std::ops::Range<usize>> {
+    let range = range?;
+    let start = range.start.max(slice_start);
+    let end = range.end.min(slice_end);
+    (start < end).then_some(start.saturating_sub(slice_start)..end.saturating_sub(slice_start))
 }
 
 fn allocate_editor_rect(
@@ -419,13 +587,25 @@ fn store_latest_snapshot(
     row_height: f32,
     changed: bool,
     revision: Option<u64>,
+    char_offset_base: usize,
+    logical_line_base: usize,
 ) {
     if changed {
         view.latest_display_snapshot = None;
         view.latest_display_snapshot_revision = None;
     } else {
-        view.latest_display_snapshot =
-            Some(DisplaySnapshot::from_galley(galley.clone(), row_height));
+        let selection_range = view
+            .cursor_range
+            .as_ref()
+            .and_then(types::selection_char_range);
+        view.latest_display_snapshot = Some(DisplaySnapshot::from_galley_with_base_and_overlays(
+            galley.clone(),
+            row_height,
+            char_offset_base,
+            logical_line_base,
+            selection_range,
+            &view.search_highlights.ranges,
+        ));
         view.latest_display_snapshot_revision = revision;
     }
 }
@@ -604,9 +784,12 @@ mod tests {
     use super::{
         CharCursor, CursorRange, consume_cursor_reveal, consumed_page_navigation_direction,
         editor_content_height, editor_desired_size, editor_desired_width, editor_wrap_width,
-        request_cursor_reveal_after_input, sync_view_cursor_before_render,
+        local_cursor, local_range, local_search_highlights, request_cursor_reveal_after_input,
+        sync_view_cursor_before_render, viewport_text_slice,
     };
-    use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
+    use crate::app::domain::{
+        BufferState, CursorRevealMode, EditorViewState, SearchHighlightState,
+    };
     use eframe::egui;
 
     #[test]
@@ -620,6 +803,50 @@ mod tests {
             Some(CursorRange::one(CharCursor::new(0)))
         );
         assert!(view.cursor_reveal_mode().is_some());
+    }
+
+    #[test]
+    fn viewport_text_slice_extracts_visible_lines_with_overscan() {
+        let text = (0..100)
+            .map(|line| format!("line-{line}\n"))
+            .collect::<String>();
+        let buffer = BufferState::new("slice.txt".to_owned(), text, None);
+        let row_height = 10.0;
+        let viewport = egui::Rect::from_min_size(egui::pos2(0.0, 500.0), egui::vec2(320.0, 40.0));
+
+        let slice = viewport_text_slice(&buffer, viewport, row_height);
+
+        assert!(slice.text.starts_with("line-46\n"));
+        assert!(slice.text.contains("line-57\n"));
+        assert!(!slice.text.contains("line-45\n"));
+        assert!(slice.char_range.start > 0);
+    }
+
+    #[test]
+    fn local_ranges_are_clipped_to_viewport_slice() {
+        assert_eq!(local_range(Some(10..20), 5, 30), Some(5..15));
+        assert_eq!(local_range(Some(0..10), 5, 30), Some(0..5));
+        assert_eq!(local_range(Some(30..40), 5, 30), None);
+    }
+
+    #[test]
+    fn local_search_highlights_preserve_active_visible_range() {
+        let highlights = SearchHighlightState {
+            ranges: vec![0..5, 10..20, 40..50],
+            active_range_index: Some(1),
+        };
+
+        let local = local_search_highlights(&highlights, 8, 24);
+
+        assert_eq!(local.ranges, vec![2..12]);
+        assert_eq!(local.active_range_index, Some(0));
+    }
+
+    #[test]
+    fn cursor_paint_uses_viewport_local_offset() {
+        let local = local_cursor(CharCursor::new(42), 40);
+
+        assert_eq!(local.index, 2);
     }
 
     #[test]

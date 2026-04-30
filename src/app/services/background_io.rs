@@ -1,3 +1,4 @@
+use crate::app::capacity_metrics::{self, BackgroundIoLane};
 use crate::app::domain::{
     BufferState, DiskFileState, DocumentSnapshot, TextArtifactSummary, TextFormatMetadata,
 };
@@ -5,8 +6,9 @@ use crate::app::services::file_service::{FileContent, FileService};
 use crate::app::services::session_store::{RestoredSession, SessionPersistRequest, SessionStore};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, SendError, Sender};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
 use std::thread;
+use std::time::Instant;
 
 pub(crate) enum PathLoadRequest {
     Standard(PathBuf),
@@ -89,9 +91,9 @@ pub(crate) struct LoadedPathResult {
 }
 
 pub(crate) struct BackgroundIoDispatcher {
-    path_tx: Sender<BackgroundIoRequest>,
-    session_tx: Sender<BackgroundIoRequest>,
-    analysis_tx: Sender<BackgroundIoRequest>,
+    path_tx: SyncSender<BackgroundIoRequest>,
+    session_tx: SyncSender<BackgroundIoRequest>,
+    analysis_tx: SyncSender<BackgroundIoRequest>,
 }
 
 pub(crate) struct BackgroundIoSendError {
@@ -99,9 +101,12 @@ pub(crate) struct BackgroundIoSendError {
 }
 
 impl BackgroundIoSendError {
-    fn from_send_error(error: SendError<BackgroundIoRequest>) -> Self {
+    fn from_try_send_error(error: TrySendError<BackgroundIoRequest>) -> Self {
+        let request = match error {
+            TrySendError::Full(request) | TrySendError::Disconnected(request) => request,
+        };
         Self {
-            request: Box::new(error.0),
+            request: Box::new(request),
         }
     }
 
@@ -115,28 +120,34 @@ impl BackgroundIoDispatcher {
         match request {
             request @ BackgroundIoRequest::LoadPaths { .. } => self
                 .path_tx
-                .send(request)
-                .map_err(BackgroundIoSendError::from_send_error),
+                .try_send(request)
+                .map_err(BackgroundIoSendError::from_try_send_error),
             request @ BackgroundIoRequest::RestoreSession { .. }
             | request @ BackgroundIoRequest::PersistSession { .. } => self
                 .session_tx
-                .send(request)
-                .map_err(BackgroundIoSendError::from_send_error),
+                .try_send(request)
+                .map_err(BackgroundIoSendError::from_try_send_error),
             request @ BackgroundIoRequest::RefreshTextMetadata { .. }
             | request @ BackgroundIoRequest::RefreshEncodingCompliance { .. } => self
                 .analysis_tx
-                .send(request)
-                .map_err(BackgroundIoSendError::from_send_error),
+                .try_send(request)
+                .map_err(BackgroundIoSendError::from_try_send_error),
         }
     }
 }
 
+const PATH_LANE_QUEUE_BOUND: usize = 8;
+const SESSION_LANE_QUEUE_BOUND: usize = 2;
+const ANALYSIS_LANE_QUEUE_BOUND: usize = 16;
+
 pub(crate) fn spawn_background_io_worker() -> (BackgroundIoDispatcher, Receiver<BackgroundIoResult>)
 {
     let (result_tx, result_rx) = mpsc::channel::<BackgroundIoResult>();
-    let (path_tx, path_rx) = mpsc::channel::<BackgroundIoRequest>();
-    let (session_tx, session_rx) = mpsc::channel::<BackgroundIoRequest>();
-    let (analysis_tx, analysis_rx) = mpsc::channel::<BackgroundIoRequest>();
+    let (path_tx, path_rx) = mpsc::sync_channel::<BackgroundIoRequest>(PATH_LANE_QUEUE_BOUND);
+    let (session_tx, session_rx) =
+        mpsc::sync_channel::<BackgroundIoRequest>(SESSION_LANE_QUEUE_BOUND);
+    let (analysis_tx, analysis_rx) =
+        mpsc::sync_channel::<BackgroundIoRequest>(ANALYSIS_LANE_QUEUE_BOUND);
 
     spawn_path_lane(path_rx, result_tx.clone());
     spawn_session_lane(session_rx, result_tx.clone());
@@ -158,6 +169,7 @@ fn spawn_path_lane(
 ) {
     thread::spawn(move || {
         while let Ok(request) = request_rx.recv() {
+            let started_at = Instant::now();
             let BackgroundIoRequest::LoadPaths {
                 request_id,
                 requests,
@@ -174,6 +186,10 @@ fn spawn_path_lane(
             {
                 break;
             }
+            capacity_metrics::record_background_io_lane(
+                BackgroundIoLane::Path,
+                started_at.elapsed(),
+            );
         }
     });
 }
@@ -184,6 +200,7 @@ fn spawn_session_lane(
 ) {
     thread::spawn(move || {
         while let Ok(request) = request_rx.recv() {
+            let started_at = Instant::now();
             let result = match request {
                 BackgroundIoRequest::RestoreSession {
                     request_id,
@@ -210,6 +227,10 @@ fn spawn_session_lane(
             if result_tx.send(result).is_err() {
                 break;
             }
+            capacity_metrics::record_background_io_lane(
+                BackgroundIoLane::Session,
+                started_at.elapsed(),
+            );
         }
     });
 }
@@ -220,6 +241,7 @@ fn spawn_analysis_lane(
 ) {
     thread::spawn(move || {
         while let Ok(request) = request_rx.recv() {
+            let started_at = Instant::now();
             let result = match request {
                 BackgroundIoRequest::RefreshTextMetadata {
                     request_id,
@@ -258,6 +280,10 @@ fn spawn_analysis_lane(
             if result_tx.send(result).is_err() {
                 break;
             }
+            capacity_metrics::record_background_io_lane(
+                BackgroundIoLane::Analysis,
+                started_at.elapsed(),
+            );
         }
     });
 }
@@ -303,4 +329,40 @@ fn refresh_text_metadata(
         &mut format,
     );
     (metadata.line_count, metadata.artifact_summary, format)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BackgroundIoDispatcher, BackgroundIoRequest};
+    use std::sync::mpsc;
+
+    #[test]
+    fn dispatcher_returns_request_when_path_lane_is_full() {
+        let (path_tx, _path_rx) = mpsc::sync_channel(1);
+        let (session_tx, _session_rx) = mpsc::sync_channel(1);
+        let (analysis_tx, _analysis_rx) = mpsc::sync_channel(1);
+        let dispatcher = BackgroundIoDispatcher {
+            path_tx,
+            session_tx,
+            analysis_tx,
+        };
+
+        assert!(dispatcher
+            .send(BackgroundIoRequest::LoadPaths {
+                request_id: 1,
+                requests: Vec::new(),
+            })
+            .is_ok());
+        let error = dispatcher
+            .send(BackgroundIoRequest::LoadPaths {
+                request_id: 2,
+                requests: Vec::new(),
+            })
+            .expect_err("second request should hit backpressure");
+
+        match error.into_request() {
+            BackgroundIoRequest::LoadPaths { request_id, .. } => assert_eq!(request_id, 2),
+            _ => panic!("expected load request"),
+        }
+    }
 }

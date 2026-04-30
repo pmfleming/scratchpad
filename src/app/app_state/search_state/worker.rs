@@ -1,4 +1,5 @@
 use super::{SearchMatch, SearchResultEntry, SearchResultGroup, SearchStatus};
+use crate::app::capacity_metrics;
 use crate::app::domain::{BufferId, DocumentSnapshot, ViewId};
 use crate::app::services::search::{self, SearchMode, SearchOptions};
 use std::collections::HashMap;
@@ -9,6 +10,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 use std::thread;
+use std::time::Instant;
 
 const SEARCH_RESULT_LIMIT: usize = 200;
 const SEARCH_TARGET_PARALLELISM_CAP: usize = 4;
@@ -144,14 +146,19 @@ pub(super) fn spawn_search_worker(
     let (result_tx, result_rx) = mpsc::channel::<SearchResult>();
     thread::spawn(move || {
         while let Ok(mut request) = request_rx.recv() {
+            let mut coalesced_queue_depth = 1usize;
             while let Ok(next_request) = request_rx.try_recv() {
                 request = next_request;
+                coalesced_queue_depth += 1;
             }
+            capacity_metrics::record_search_request(request.targets.len(), coalesced_queue_depth);
+            let started_at = Instant::now();
             if let Some(result) = process_search_request(request, &latest_generation)
                 && result_tx.send(result).is_err()
             {
                 break;
             }
+            capacity_metrics::record_search_worker_active(started_at.elapsed());
         }
     });
     (request_tx, result_rx)
@@ -339,18 +346,16 @@ fn search_fragmented_plain_text(
     let query_chars = query.chars().count().max(1);
     let overlap_chars = query_chars + usize::from(options.whole_word);
     let chunk_chars = SEARCH_FRAGMENT_CHUNK_CHARS.max(query_chars.saturating_mul(4));
-    let mut chunk_start = range.start;
+    let chunks = snapshot.chunks_for_range(range, chunk_chars, overlap_chars, overlap_chars);
+    capacity_metrics::record_search_chunks(chunks.len());
     let mut matches = Vec::new();
 
-    while chunk_start < range.end {
+    for chunk in chunks {
         if latest_generation.load(Ordering::Relaxed) != generation {
             return None;
         }
 
-        let core_end = (chunk_start + chunk_chars).min(range.end);
-        let window_start = range.start.max(chunk_start.saturating_sub(overlap_chars));
-        let window_end = range.end.min(core_end.saturating_add(overlap_chars));
-        let (window_text, window_offset) = snapshot.search_text_cow(Some(window_start..window_end));
+        let (window_text, window_offset) = snapshot.search_text_cow(Some(chunk.window_range));
         let outcome =
             search::search_text_interruptible(window_text.as_ref(), query, options, || {
                 latest_generation.load(Ordering::Relaxed) == generation
@@ -360,10 +365,9 @@ fn search_fragmented_plain_text(
         matches.extend(outcome.matches.into_iter().filter_map(|matched| {
             let global_start = window_offset + matched.start;
             let global_end = window_offset + matched.end;
-            (global_start >= chunk_start && global_start < core_end)
+            (global_start >= chunk.core_range.start && global_start < chunk.core_range.end)
                 .then_some(global_start..global_end)
         }));
-        chunk_start = core_end;
     }
 
     Some(matches)
@@ -385,18 +389,17 @@ fn search_fragmented_bounded_regex(
     let context_chars = 1 + usize::from(options.whole_word);
     let overlap_chars = max_match_chars.saturating_add(context_chars);
     let chunk_chars = SEARCH_FRAGMENT_CHUNK_CHARS.max(overlap_chars.max(1));
-    let mut chunk_start = range.start;
+    let range_end = range.end;
+    let chunks = snapshot.chunks_for_range(range, chunk_chars, context_chars, overlap_chars);
+    capacity_metrics::record_search_chunks(chunks.len());
     let mut matches = Vec::new();
 
-    while chunk_start < range.end {
+    for chunk in chunks {
         if latest_generation.load(Ordering::Relaxed) != generation {
             return None;
         }
 
-        let core_end = (chunk_start + chunk_chars).min(range.end);
-        let window_start = range.start.max(chunk_start.saturating_sub(context_chars));
-        let window_end = range.end.min(core_end.saturating_add(overlap_chars));
-        let (window_text, window_offset) = snapshot.search_text_cow(Some(window_start..window_end));
+        let (window_text, window_offset) = snapshot.search_text_cow(Some(chunk.window_range));
         let outcome =
             search::search_text_interruptible(window_text.as_ref(), query, options, || {
                 latest_generation.load(Ordering::Relaxed) == generation
@@ -406,11 +409,10 @@ fn search_fragmented_bounded_regex(
         matches.extend(outcome.matches.into_iter().filter_map(|matched| {
             let global_start = window_offset + matched.start;
             let global_end = window_offset + matched.end;
-            ((global_start >= chunk_start && global_start < core_end)
-                || (core_end == range.end && global_start == range.end))
+            ((global_start >= chunk.core_range.start && global_start < chunk.core_range.end)
+                || (chunk.core_range.end == range_end && global_start == range_end))
                 .then_some(global_start..global_end)
         }));
-        chunk_start = core_end;
     }
 
     Some(matches)

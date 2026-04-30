@@ -1,8 +1,10 @@
 use super::types::{EditorHighlightStyle, TextEditOptions};
+use crate::app::capacity_metrics;
 use crate::app::domain::SearchHighlightState;
 use eframe::egui;
 use std::ops::Range;
 use std::sync::Arc;
+use std::time::Instant;
 
 #[derive(Clone, Copy)]
 enum HighlightKind {
@@ -34,6 +36,7 @@ pub(super) fn build_galley(
     selection_range: Option<Range<usize>>,
     wrap_width: f32,
 ) -> Arc<egui::Galley> {
+    let started_at = Instant::now();
     let job = layout_job_with_highlights(
         text,
         search_highlights,
@@ -47,7 +50,9 @@ pub(super) fn build_galley(
             dark_mode: ui.visuals().dark_mode,
         },
     );
-    ui.fonts_mut(|fonts| fonts.layout_job(job))
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    capacity_metrics::record_layout_job(text.len(), started_at.elapsed());
+    galley
 }
 
 pub fn build_layouter(
@@ -59,6 +64,7 @@ pub fn build_layouter(
     selection_range: Option<Range<usize>>,
 ) -> super::types::LayouterFn {
     Box::new(move |ui: &egui::Ui, text: &str, wrap_width: f32| {
+        let started_at = Instant::now();
         let job = layout_job_with_highlights(
             text,
             &search_highlights,
@@ -72,7 +78,9 @@ pub fn build_layouter(
                 dark_mode: ui.visuals().dark_mode,
             },
         );
-        ui.fonts_mut(|fonts| fonts.layout_job(job))
+        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        capacity_metrics::record_layout_job(text.len(), started_at.elapsed());
+        galley
     })
 }
 

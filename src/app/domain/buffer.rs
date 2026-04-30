@@ -20,7 +20,7 @@ pub use piece_tree::{
     PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLineInfo, PieceTreeLite, PieceTreeMetrics,
     PieceTreeSlice, PieceTreeSpan,
 };
-pub use snapshot::DocumentSnapshot;
+pub use snapshot::{DocumentChunk, DocumentSnapshot};
 pub use state::{
     BufferFreshness, BufferId, BufferState, BufferViewStatus, DiskFileState, RestoredBufferState,
 };

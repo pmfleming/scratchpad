@@ -1,4 +1,5 @@
 pub mod app_state;
+pub mod capacity_metrics;
 pub mod chrome;
 pub mod color_contrast;
 pub mod commands;

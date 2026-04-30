@@ -24,6 +24,8 @@ pub(super) fn handle_keyboard_events(
     galley: &egui::Galley,
     page_jump_rows: usize,
     total_chars: usize,
+    char_offset_base: usize,
+    slice_chars: usize,
 ) -> bool {
     handle_keyboard_events_with(ui, buffer, view, |key_event, buffer, cursor| {
         cursor::apply_cursor_movement(
@@ -34,6 +36,8 @@ pub(super) fn handle_keyboard_events(
             page_jump_rows,
             total_chars,
             buffer.document().piece_tree(),
+            char_offset_base,
+            slice_chars,
         )
     })
 }
