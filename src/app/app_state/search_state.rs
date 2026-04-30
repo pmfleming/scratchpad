@@ -9,6 +9,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
+mod fragments;
 mod helpers;
 mod replace;
 mod runtime;

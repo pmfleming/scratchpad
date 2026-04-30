@@ -1,3 +1,5 @@
+mod model;
+
 use super::common::{apply_editor_dialog_typography, relative_age_label, show_centered_callout};
 use crate::app::app_state::ScratchpadApp;
 use crate::app::theme::{
@@ -7,8 +9,11 @@ use crate::app::transactions::TransactionLogEntry;
 use crate::app::ui::{callout, search_replace, settings, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{
-    ARROW_COUNTER_CLOCKWISE, ARROWS_SPLIT, CLOCK_COUNTER_CLOCKWISE, FILE_TEXT, PENCIL_SIMPLE_LINE,
-    SLIDERS_HORIZONTAL,
+    ARROW_COUNTER_CLOCKWISE, CLOCK_COUNTER_CLOCKWISE, SLIDERS_HORIZONTAL,
+};
+use model::{
+    TransactionCategory, TransactionFilter, TransactionLogToken, entry_count_label,
+    filtered_entries, transaction_log_tokens,
 };
 
 const TRANSACTION_LOG_WIDTH: f32 = search_replace::SEARCH_DIALOG_WIDTH;
@@ -20,96 +25,10 @@ const TRANSACTION_LOG_LIST_MAX_HEIGHT: f32 = 300.0;
 const TRANSACTION_LOG_UNDO_BUTTON_SIZE: egui::Vec2 = egui::vec2(42.0, 38.0);
 const TRANSACTION_LOG_FILE_ICON: egui::Color32 = egui::Color32::from_rgb(238, 240, 244);
 const TRANSACTION_LOG_MUTED_BLUE: egui::Color32 = egui::Color32::from_rgb(144, 198, 255);
-const TRANSACTION_LOG_TOKEN_MAX_CHARS: usize = 28;
 const TRANSACTION_LOG_TOKEN_MAX_WIDTH: f32 = 220.0;
 const TRANSACTION_LOG_META_WIDTH: f32 = 160.0;
 const TRANSACTION_LOG_CONTENT_META_GAP: f32 = 8.0;
 const TRANSACTION_LOG_ENTRY_HORIZONTAL_MARGIN: f32 = 24.0;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum TransactionFilter {
-    All,
-    FileChanges,
-    TabOperations,
-    Modifications,
-}
-
-impl TransactionFilter {
-    const ALL: [Self; 4] = [
-        Self::All,
-        Self::FileChanges,
-        Self::TabOperations,
-        Self::Modifications,
-    ];
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::All => "All",
-            Self::FileChanges => "File changes",
-            Self::TabOperations => "Tab operations",
-            Self::Modifications => "Modifications",
-        }
-    }
-
-    fn matches_category(self, category: TransactionCategory) -> bool {
-        matches!(self, Self::All)
-            || matches!(
-                (self, category),
-                (Self::FileChanges, TransactionCategory::FileChanges)
-                    | (Self::TabOperations, TransactionCategory::TabOperations)
-                    | (Self::Modifications, TransactionCategory::Modifications)
-            )
-    }
-
-    fn persisted_value(self) -> u8 {
-        match self {
-            Self::All => 0,
-            Self::FileChanges => 1,
-            Self::TabOperations => 2,
-            Self::Modifications => 3,
-        }
-    }
-
-    fn from_persisted_value(value: u8) -> Self {
-        match value {
-            1 => Self::FileChanges,
-            2 => Self::TabOperations,
-            3 => Self::Modifications,
-            _ => Self::All,
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum TransactionCategory {
-    FileChanges,
-    TabOperations,
-    Modifications,
-}
-
-impl TransactionCategory {
-    fn icon(self) -> &'static str {
-        match self {
-            Self::FileChanges => FILE_TEXT,
-            Self::TabOperations => ARROWS_SPLIT,
-            Self::Modifications => PENCIL_SIMPLE_LINE,
-        }
-    }
-
-    fn from_entry(entry: &TransactionLogEntry) -> Self {
-        let label = entry.action_label.to_ascii_lowercase();
-        if contains_any(&label, &["tab", "split", "combine", "promote", "view"]) {
-            Self::TabOperations
-        } else if contains_any(
-            &label,
-            &["file", "save", "open", "reload", "reopen", "rename"],
-        ) {
-            Self::FileChanges
-        } else {
-            Self::Modifications
-        }
-    }
-}
 
 pub(crate) fn show_transaction_log_window(ctx: &egui::Context, app: &mut ScratchpadApp) {
     if !app.transaction_log_open() {
@@ -362,65 +281,6 @@ fn render_row_icon(ui: &mut egui::Ui, category: TransactionCategory) {
     });
 }
 
-fn filtered_entries(
-    entries: &[TransactionLogEntry],
-    filter: TransactionFilter,
-) -> Vec<&TransactionLogEntry> {
-    entries
-        .iter()
-        .filter(|entry| filter.matches_category(TransactionCategory::from_entry(entry)))
-        .collect()
-}
-
-struct TransactionLogToken {
-    display: String,
-    full: String,
-}
-
-fn transaction_log_tokens(entry: &TransactionLogEntry) -> Vec<TransactionLogToken> {
-    representative_transaction_token(entry)
-        .into_iter()
-        .collect()
-}
-
-fn representative_transaction_token(entry: &TransactionLogEntry) -> Option<TransactionLogToken> {
-    if entry.affected_items.is_empty() {
-        return entry
-            .details
-            .as_deref()
-            .filter(|details| !details.trim().is_empty())
-            .map(|details| TransactionLogToken {
-                display: truncate_transaction_token(details),
-                full: details.to_owned(),
-            });
-    }
-
-    let target = entry
-        .affected_items
-        .iter()
-        .rev()
-        .find_map(|item| {
-            item.strip_prefix("target: ")
-                .or_else(|| item.strip_prefix("Target: "))
-        })
-        .or_else(|| entry.affected_items.first().map(String::as_str))
-        .unwrap_or_default();
-
-    let mut tooltip_lines = entry.affected_items.clone();
-    if let Some(details) = entry
-        .details
-        .as_deref()
-        .filter(|details| !details.trim().is_empty())
-    {
-        tooltip_lines.push(details.to_owned());
-    }
-
-    Some(TransactionLogToken {
-        display: truncate_transaction_token(target),
-        full: tooltip_lines.join("\n"),
-    })
-}
-
 fn render_entry_pills(ui: &mut egui::Ui, tokens: &[TransactionLogToken]) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
@@ -464,29 +324,6 @@ fn transaction_token_display_width(ui: &egui::Ui, token: &str) -> f32 {
             .size()
             .x
     })
-}
-
-fn truncate_transaction_token(token: &str) -> String {
-    let trimmed = token.trim();
-    let char_count = trimmed.chars().count();
-    if char_count <= TRANSACTION_LOG_TOKEN_MAX_CHARS {
-        return trimmed.to_owned();
-    }
-
-    let mut truncated = trimmed
-        .chars()
-        .take(TRANSACTION_LOG_TOKEN_MAX_CHARS.saturating_sub(1))
-        .collect::<String>();
-    truncated.push('…');
-    truncated
-}
-
-fn entry_count_label(entry_count: usize) -> String {
-    if entry_count == 1 {
-        "1 entry".to_owned()
-    } else {
-        format!("{entry_count} entries")
-    }
 }
 
 fn apply_transaction_log_window_actions(
@@ -621,8 +458,4 @@ fn load_transaction_filter(ui: &mut egui::Ui, id: egui::Id) -> TransactionFilter
 
 fn store_transaction_filter(ui: &mut egui::Ui, id: egui::Id, filter: TransactionFilter) {
     ui.data_mut(|data| data.insert_persisted(id, filter.persisted_value()));
-}
-
-fn contains_any(text: &str, needles: &[&str]) -> bool {
-    needles.iter().any(|needle| text.contains(needle))
 }

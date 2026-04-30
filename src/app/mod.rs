@@ -5,6 +5,7 @@ pub mod color_contrast;
 pub mod commands;
 pub mod domain;
 pub mod fonts;
+pub mod memory_budget;
 pub mod services;
 pub mod shortcuts;
 pub mod startup;

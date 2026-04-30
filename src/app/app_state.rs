@@ -1,6 +1,7 @@
 use crate::app::domain::{BufferId, DiskFileState, SplitAxis, TabManager, ViewId};
 use crate::app::fonts::EditorFontPreset;
 use crate::app::services::background_io::{BackgroundIoDispatcher, BackgroundIoResult};
+use crate::app::services::file_controller::OpenBatchSummary;
 use crate::app::services::session_store::SessionStore;
 use crate::app::services::settings_store::{AppSettings, SettingsStore};
 use crate::app::startup::StartupOptions;
@@ -51,9 +52,12 @@ pub(crate) struct StartupRestoreConflict {
 }
 
 pub(crate) struct PendingOpenTabsAction {
-    pub(crate) duplicate_count: usize,
     pub(crate) affected_items: Vec<String>,
     pub(crate) transaction_snapshot: TransactionSnapshot,
+    /// Streaming accumulator: filled in as individual paths arrive across
+    /// multiple `PathsLoaded { is_partial: true }` messages. Finalized when
+    /// the terminating `is_partial: false` message arrives.
+    pub(crate) accumulator: OpenBatchSummary,
 }
 
 pub(crate) struct PendingOpenHereAction {
@@ -169,8 +173,10 @@ impl eframe::App for ScratchpadApp {
             return;
         }
 
+        let frame_started_at = std::time::Instant::now();
         self.prepare_frame(&ctx);
         self.render_frame(ui, &ctx);
+        crate::app::capacity_metrics::record_frame(frame_started_at.elapsed());
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {

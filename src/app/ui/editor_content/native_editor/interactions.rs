@@ -25,6 +25,7 @@ pub(super) fn handle_mouse_interaction(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_keyboard_events(
     ui: &mut egui::Ui,
     buffer: &mut BufferState,

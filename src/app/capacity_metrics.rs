@@ -12,17 +12,29 @@ pub struct CapacityMetricsSnapshot {
     pub layout_job_count: u64,
     pub layout_input_bytes: u64,
     pub layout_time_ns: u64,
+    pub layout_cache_hit_count: u64,
+    pub layout_cache_miss_count: u64,
     pub search_request_count: u64,
     pub search_target_count: u64,
     pub search_chunk_count: u64,
+    pub search_intra_buffer_max_workers: u64,
     pub search_worker_active_ns: u64,
     pub search_max_queue_depth: u64,
     pub background_io_path_requests: u64,
     pub background_io_path_active_ns: u64,
+    pub background_io_path_max_queue_depth: u64,
     pub background_io_session_requests: u64,
     pub background_io_session_active_ns: u64,
+    pub background_io_session_max_queue_depth: u64,
     pub background_io_analysis_requests: u64,
     pub background_io_analysis_active_ns: u64,
+    pub background_io_analysis_max_queue_depth: u64,
+    pub background_io_path_saturation_count: u64,
+    pub background_io_session_saturation_count: u64,
+    pub background_io_analysis_saturation_count: u64,
+    pub frame_count: u64,
+    pub frame_time_total_ns: u64,
+    pub frame_time_max_ns: u64,
 }
 
 static FULL_TEXT_FLATTEN_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -35,14 +47,26 @@ static LAYOUT_TIME_NS: AtomicU64 = AtomicU64::new(0);
 static SEARCH_REQUEST_COUNT: AtomicU64 = AtomicU64::new(0);
 static SEARCH_TARGET_COUNT: AtomicU64 = AtomicU64::new(0);
 static SEARCH_CHUNK_COUNT: AtomicU64 = AtomicU64::new(0);
+static SEARCH_INTRA_BUFFER_MAX_WORKERS: AtomicU64 = AtomicU64::new(0);
 static SEARCH_WORKER_ACTIVE_NS: AtomicU64 = AtomicU64::new(0);
 static SEARCH_MAX_QUEUE_DEPTH: AtomicU64 = AtomicU64::new(0);
 static BACKGROUND_IO_PATH_REQUESTS: AtomicU64 = AtomicU64::new(0);
 static BACKGROUND_IO_PATH_ACTIVE_NS: AtomicU64 = AtomicU64::new(0);
+static BACKGROUND_IO_PATH_MAX_QUEUE_DEPTH: AtomicU64 = AtomicU64::new(0);
 static BACKGROUND_IO_SESSION_REQUESTS: AtomicU64 = AtomicU64::new(0);
 static BACKGROUND_IO_SESSION_ACTIVE_NS: AtomicU64 = AtomicU64::new(0);
+static BACKGROUND_IO_SESSION_MAX_QUEUE_DEPTH: AtomicU64 = AtomicU64::new(0);
 static BACKGROUND_IO_ANALYSIS_REQUESTS: AtomicU64 = AtomicU64::new(0);
 static BACKGROUND_IO_ANALYSIS_ACTIVE_NS: AtomicU64 = AtomicU64::new(0);
+static BACKGROUND_IO_ANALYSIS_MAX_QUEUE_DEPTH: AtomicU64 = AtomicU64::new(0);
+static BACKGROUND_IO_PATH_SATURATION_COUNT: AtomicU64 = AtomicU64::new(0);
+static BACKGROUND_IO_SESSION_SATURATION_COUNT: AtomicU64 = AtomicU64::new(0);
+static BACKGROUND_IO_ANALYSIS_SATURATION_COUNT: AtomicU64 = AtomicU64::new(0);
+static LAYOUT_CACHE_HIT_COUNT: AtomicU64 = AtomicU64::new(0);
+static LAYOUT_CACHE_MISS_COUNT: AtomicU64 = AtomicU64::new(0);
+static FRAME_COUNT: AtomicU64 = AtomicU64::new(0);
+static FRAME_TIME_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_TIME_MAX_NS: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackgroundIoLane {
@@ -62,14 +86,26 @@ pub fn reset_capacity_metrics() {
     SEARCH_REQUEST_COUNT.store(0, Ordering::Relaxed);
     SEARCH_TARGET_COUNT.store(0, Ordering::Relaxed);
     SEARCH_CHUNK_COUNT.store(0, Ordering::Relaxed);
+    SEARCH_INTRA_BUFFER_MAX_WORKERS.store(0, Ordering::Relaxed);
     SEARCH_WORKER_ACTIVE_NS.store(0, Ordering::Relaxed);
     SEARCH_MAX_QUEUE_DEPTH.store(0, Ordering::Relaxed);
     BACKGROUND_IO_PATH_REQUESTS.store(0, Ordering::Relaxed);
     BACKGROUND_IO_PATH_ACTIVE_NS.store(0, Ordering::Relaxed);
+    BACKGROUND_IO_PATH_MAX_QUEUE_DEPTH.store(0, Ordering::Relaxed);
     BACKGROUND_IO_SESSION_REQUESTS.store(0, Ordering::Relaxed);
     BACKGROUND_IO_SESSION_ACTIVE_NS.store(0, Ordering::Relaxed);
+    BACKGROUND_IO_SESSION_MAX_QUEUE_DEPTH.store(0, Ordering::Relaxed);
     BACKGROUND_IO_ANALYSIS_REQUESTS.store(0, Ordering::Relaxed);
     BACKGROUND_IO_ANALYSIS_ACTIVE_NS.store(0, Ordering::Relaxed);
+    BACKGROUND_IO_ANALYSIS_MAX_QUEUE_DEPTH.store(0, Ordering::Relaxed);
+    BACKGROUND_IO_PATH_SATURATION_COUNT.store(0, Ordering::Relaxed);
+    BACKGROUND_IO_SESSION_SATURATION_COUNT.store(0, Ordering::Relaxed);
+    BACKGROUND_IO_ANALYSIS_SATURATION_COUNT.store(0, Ordering::Relaxed);
+    LAYOUT_CACHE_HIT_COUNT.store(0, Ordering::Relaxed);
+    LAYOUT_CACHE_MISS_COUNT.store(0, Ordering::Relaxed);
+    FRAME_COUNT.store(0, Ordering::Relaxed);
+    FRAME_TIME_TOTAL_NS.store(0, Ordering::Relaxed);
+    FRAME_TIME_MAX_NS.store(0, Ordering::Relaxed);
 }
 
 pub fn capacity_metrics_snapshot() -> CapacityMetricsSnapshot {
@@ -84,14 +120,32 @@ pub fn capacity_metrics_snapshot() -> CapacityMetricsSnapshot {
         search_request_count: SEARCH_REQUEST_COUNT.load(Ordering::Relaxed),
         search_target_count: SEARCH_TARGET_COUNT.load(Ordering::Relaxed),
         search_chunk_count: SEARCH_CHUNK_COUNT.load(Ordering::Relaxed),
+        search_intra_buffer_max_workers: SEARCH_INTRA_BUFFER_MAX_WORKERS.load(Ordering::Relaxed),
         search_worker_active_ns: SEARCH_WORKER_ACTIVE_NS.load(Ordering::Relaxed),
         search_max_queue_depth: SEARCH_MAX_QUEUE_DEPTH.load(Ordering::Relaxed),
         background_io_path_requests: BACKGROUND_IO_PATH_REQUESTS.load(Ordering::Relaxed),
         background_io_path_active_ns: BACKGROUND_IO_PATH_ACTIVE_NS.load(Ordering::Relaxed),
+        background_io_path_max_queue_depth: BACKGROUND_IO_PATH_MAX_QUEUE_DEPTH
+            .load(Ordering::Relaxed),
         background_io_session_requests: BACKGROUND_IO_SESSION_REQUESTS.load(Ordering::Relaxed),
         background_io_session_active_ns: BACKGROUND_IO_SESSION_ACTIVE_NS.load(Ordering::Relaxed),
+        background_io_session_max_queue_depth: BACKGROUND_IO_SESSION_MAX_QUEUE_DEPTH
+            .load(Ordering::Relaxed),
         background_io_analysis_requests: BACKGROUND_IO_ANALYSIS_REQUESTS.load(Ordering::Relaxed),
         background_io_analysis_active_ns: BACKGROUND_IO_ANALYSIS_ACTIVE_NS.load(Ordering::Relaxed),
+        background_io_analysis_max_queue_depth: BACKGROUND_IO_ANALYSIS_MAX_QUEUE_DEPTH
+            .load(Ordering::Relaxed),
+        background_io_path_saturation_count: BACKGROUND_IO_PATH_SATURATION_COUNT
+            .load(Ordering::Relaxed),
+        background_io_session_saturation_count: BACKGROUND_IO_SESSION_SATURATION_COUNT
+            .load(Ordering::Relaxed),
+        background_io_analysis_saturation_count: BACKGROUND_IO_ANALYSIS_SATURATION_COUNT
+            .load(Ordering::Relaxed),
+        layout_cache_hit_count: LAYOUT_CACHE_HIT_COUNT.load(Ordering::Relaxed),
+        layout_cache_miss_count: LAYOUT_CACHE_MISS_COUNT.load(Ordering::Relaxed),
+        frame_count: FRAME_COUNT.load(Ordering::Relaxed),
+        frame_time_total_ns: FRAME_TIME_TOTAL_NS.load(Ordering::Relaxed),
+        frame_time_max_ns: FRAME_TIME_MAX_NS.load(Ordering::Relaxed),
     }
 }
 
@@ -124,6 +178,10 @@ pub fn record_search_chunks(chunk_count: usize) {
     SEARCH_CHUNK_COUNT.fetch_add(saturating_u64(chunk_count), Ordering::Relaxed);
 }
 
+pub fn record_search_intra_buffer_workers(workers: usize) {
+    update_max(&SEARCH_INTRA_BUFFER_MAX_WORKERS, saturating_u64(workers));
+}
+
 pub fn record_search_worker_active(elapsed: Duration) {
     SEARCH_WORKER_ACTIVE_NS.fetch_add(saturating_u64(elapsed.as_nanos()), Ordering::Relaxed);
 }
@@ -146,6 +204,40 @@ pub fn record_background_io_lane(lane: BackgroundIoLane, elapsed: Duration) {
     }
 }
 
+pub fn record_background_io_queue_depth(lane: BackgroundIoLane, depth: usize) {
+    let value = saturating_u64(depth);
+    let counter = match lane {
+        BackgroundIoLane::Path => &BACKGROUND_IO_PATH_MAX_QUEUE_DEPTH,
+        BackgroundIoLane::Session => &BACKGROUND_IO_SESSION_MAX_QUEUE_DEPTH,
+        BackgroundIoLane::Analysis => &BACKGROUND_IO_ANALYSIS_MAX_QUEUE_DEPTH,
+    };
+    update_max(counter, value);
+}
+
+pub fn record_background_io_saturation(lane: BackgroundIoLane) {
+    let counter = match lane {
+        BackgroundIoLane::Path => &BACKGROUND_IO_PATH_SATURATION_COUNT,
+        BackgroundIoLane::Session => &BACKGROUND_IO_SESSION_SATURATION_COUNT,
+        BackgroundIoLane::Analysis => &BACKGROUND_IO_ANALYSIS_SATURATION_COUNT,
+    };
+    counter.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_layout_cache_hit() {
+    LAYOUT_CACHE_HIT_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_layout_cache_miss() {
+    LAYOUT_CACHE_MISS_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_frame(elapsed: Duration) {
+    let elapsed_ns = saturating_u64(elapsed.as_nanos());
+    FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
+    FRAME_TIME_TOTAL_NS.fetch_add(elapsed_ns, Ordering::Relaxed);
+    update_max(&FRAME_TIME_MAX_NS, elapsed_ns);
+}
+
 fn update_max(counter: &AtomicU64, value: u64) {
     let mut current = counter.load(Ordering::Relaxed);
     while value > current {
@@ -164,8 +256,10 @@ fn saturating_u64(value: impl TryInto<u64>) -> u64 {
 mod tests {
     use super::{
         BackgroundIoLane, capacity_metrics_snapshot, record_background_io_lane,
-        record_full_text_flatten, record_layout_job, record_range_flatten, record_search_chunks,
-        record_search_request, record_search_worker_active, reset_capacity_metrics,
+        record_background_io_queue_depth, record_background_io_saturation, record_frame,
+        record_full_text_flatten, record_layout_cache_hit, record_layout_cache_miss,
+        record_layout_job, record_range_flatten, record_search_chunks, record_search_request,
+        record_search_worker_active, reset_capacity_metrics,
     };
     use std::time::Duration;
 
@@ -183,6 +277,18 @@ mod tests {
         record_background_io_lane(BackgroundIoLane::Path, Duration::from_nanos(10));
         record_background_io_lane(BackgroundIoLane::Session, Duration::from_nanos(20));
         record_background_io_lane(BackgroundIoLane::Analysis, Duration::from_nanos(30));
+        record_background_io_queue_depth(BackgroundIoLane::Path, 3);
+        record_background_io_queue_depth(BackgroundIoLane::Path, 1);
+        record_background_io_queue_depth(BackgroundIoLane::Session, 2);
+        record_background_io_queue_depth(BackgroundIoLane::Analysis, 6);
+        record_background_io_saturation(BackgroundIoLane::Path);
+        record_background_io_saturation(BackgroundIoLane::Path);
+        record_background_io_saturation(BackgroundIoLane::Analysis);
+        record_layout_cache_hit();
+        record_layout_cache_hit();
+        record_layout_cache_miss();
+        record_frame(Duration::from_nanos(50));
+        record_frame(Duration::from_nanos(80));
 
         let snapshot = capacity_metrics_snapshot();
         assert_eq!(snapshot.full_text_flatten_count, 1);
@@ -203,6 +309,17 @@ mod tests {
         assert_eq!(snapshot.background_io_session_active_ns, 20);
         assert_eq!(snapshot.background_io_analysis_requests, 1);
         assert_eq!(snapshot.background_io_analysis_active_ns, 30);
+        assert_eq!(snapshot.background_io_path_max_queue_depth, 3);
+        assert_eq!(snapshot.background_io_session_max_queue_depth, 2);
+        assert_eq!(snapshot.background_io_analysis_max_queue_depth, 6);
+        assert_eq!(snapshot.background_io_path_saturation_count, 2);
+        assert_eq!(snapshot.background_io_session_saturation_count, 0);
+        assert_eq!(snapshot.background_io_analysis_saturation_count, 1);
+        assert_eq!(snapshot.layout_cache_hit_count, 2);
+        assert_eq!(snapshot.layout_cache_miss_count, 1);
+        assert_eq!(snapshot.frame_count, 2);
+        assert_eq!(snapshot.frame_time_total_ns, 130);
+        assert_eq!(snapshot.frame_time_max_ns, 80);
 
         reset_capacity_metrics();
         assert_eq!(capacity_metrics_snapshot().layout_job_count, 0);

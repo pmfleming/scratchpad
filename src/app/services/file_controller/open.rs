@@ -7,23 +7,23 @@ use crate::app::services::background_io::LoadedPathResult;
 use crate::app::utils::summarize_open_results;
 use std::path::{Path, PathBuf};
 
-enum OpenPathOutcome {
+pub(crate) enum OpenPathOutcome {
     Opened { artifact_warning: Option<String> },
     AlreadyOpen,
     Failed,
 }
 
 #[derive(Default)]
-struct OpenBatchSummary {
-    opened_count: usize,
-    duplicate_count: usize,
-    failure_count: usize,
-    artifact_count: usize,
-    last_artifact_warning: Option<String>,
+pub(crate) struct OpenBatchSummary {
+    pub(crate) opened_count: usize,
+    pub(crate) duplicate_count: usize,
+    pub(crate) failure_count: usize,
+    pub(crate) artifact_count: usize,
+    pub(crate) last_artifact_warning: Option<String>,
 }
 
 impl OpenBatchSummary {
-    fn record(mut self, outcome: OpenPathOutcome) -> Self {
+    pub(crate) fn record_outcome(&mut self, outcome: OpenPathOutcome) {
         match outcome {
             OpenPathOutcome::Opened { artifact_warning } => {
                 self.opened_count += 1;
@@ -39,8 +39,6 @@ impl OpenBatchSummary {
                 self.failure_count += 1;
             }
         }
-
-        self
     }
 
     fn log_message(&self) -> String {
@@ -186,12 +184,15 @@ impl FileController {
             return;
         }
 
-        app.queue_background_path_loads(
+        app.queue_background_path_loads_streaming(
             pending_paths,
             PendingBackgroundAction::OpenTabs(PendingOpenTabsAction {
-                duplicate_count,
                 affected_items,
                 transaction_snapshot,
+                accumulator: OpenBatchSummary {
+                    duplicate_count,
+                    ..OpenBatchSummary::default()
+                },
             }),
         );
     }
@@ -233,38 +234,60 @@ impl FileController {
         action: PendingOpenTabsAction,
         results: Vec<LoadedPathResult>,
     ) {
-        let mut summary = OpenBatchSummary {
-            duplicate_count: action.duplicate_count,
-            ..OpenBatchSummary::default()
-        };
-
+        let mut summary = action.accumulator;
         for loaded in results {
-            if Self::activate_existing_path(app, &loaded.path).is_some() {
-                summary = summary.record(OpenPathOutcome::AlreadyOpen);
-                continue;
-            }
-
-            match loaded.result {
-                Ok(buffer) => {
-                    let deferred_refresh = Self::deferred_buffer_refresh(&buffer);
-                    let LoadedFile {
-                        artifact_warning,
-                        mut buffer,
-                        ..
-                    } = LoadedFile::from_buffer(buffer);
-                    Self::mark_settings_buffer(app, &mut buffer);
-                    app.tab_manager_mut().append_tab(WorkspaceTab::new(buffer));
-                    Self::queue_deferred_buffer_refreshes(app, deferred_refresh);
-                    app.mark_search_dirty();
-                    app.request_focus_for_active_view();
-                    summary = summary.record(OpenPathOutcome::Opened { artifact_warning });
-                }
-                Err(_) => {
-                    summary = summary.record(OpenPathOutcome::Failed);
-                }
-            }
+            Self::process_open_tab_result(app, &mut summary, loaded);
         }
 
+        Self::finalize_open_tabs(
+            app,
+            PendingOpenTabsAction {
+                accumulator: summary,
+                ..action
+            },
+        );
+    }
+
+    /// Streaming entry point: consume one `LoadedPathResult` from a partial
+    /// `PathsLoaded` message. Borrows the accumulator on the action so the
+    /// caller can keep the action in `pending_background_actions` for further
+    /// partials.
+    pub(crate) fn process_open_tab_result(
+        app: &mut ScratchpadApp,
+        summary: &mut OpenBatchSummary,
+        loaded: LoadedPathResult,
+    ) {
+        if Self::activate_existing_path(app, &loaded.path).is_some() {
+            summary.record_outcome(OpenPathOutcome::AlreadyOpen);
+            return;
+        }
+
+        match loaded.result {
+            Ok(buffer) => {
+                let deferred_refresh = Self::deferred_buffer_refresh(&buffer);
+                let LoadedFile {
+                    artifact_warning,
+                    mut buffer,
+                    ..
+                } = LoadedFile::from_buffer(buffer);
+                Self::mark_settings_buffer(app, &mut buffer);
+                app.tab_manager_mut().append_tab(WorkspaceTab::new(buffer));
+                Self::queue_deferred_buffer_refreshes(app, deferred_refresh);
+                app.mark_search_dirty();
+                app.request_focus_for_active_view();
+                summary.record_outcome(OpenPathOutcome::Opened { artifact_warning });
+            }
+            Err(_) => {
+                summary.record_outcome(OpenPathOutcome::Failed);
+            }
+        }
+    }
+
+    /// Finalize a streaming open: record the transaction, persist session,
+    /// emit summary status. Called after the last `PathsLoaded` partial
+    /// (`is_partial: false`) is processed.
+    pub(crate) fn finalize_open_tabs(app: &mut ScratchpadApp, action: PendingOpenTabsAction) {
+        let summary = action.accumulator;
         if summary.opened_count > 0 {
             let title = if summary.opened_count == 1 {
                 "Open file"

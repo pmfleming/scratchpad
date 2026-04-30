@@ -4,12 +4,13 @@
 //! Display rows are the scroll unit (after wrap/folds). The renderer asks for
 //! a `ViewportSlice` from a `DisplaySnapshot` and paints from that.
 //!
-//! v1 wraps an `egui::Galley`, since galley rows are already wrap-aware
-//! display rows. The API is designed so a non-galley implementation can
-//! replace it without touching call sites.
+//! The snapshot stores only the row metadata it needs (tops, char ranges,
+//! logical-line mapping, overlay flags). It does NOT retain the
+//! `egui::Galley` it was built from; the painter constructs an ephemeral
+//! galley at paint time from the cached layout. This guarantees we cannot
+//! accidentally hold onto a full-document galley behind the snapshot.
 
 use std::ops::Range;
-use std::sync::Arc;
 
 use eframe::egui::Galley;
 
@@ -28,10 +29,14 @@ pub struct DisplayPoint {
 
 /// Snapshot of a buffer's wrap-aware display rows. Owned by a view; rebuilt
 /// whenever wrap width, font size, or content changes.
+///
+/// The snapshot is detached from any underlying `egui::Galley`: it stores
+/// only row metadata. The painter rebuilds an ephemeral galley for the
+/// current viewport slice at paint time.
 #[derive(Clone)]
 pub struct DisplaySnapshot {
-    galley: Arc<Galley>,
     row_height: f32,
+    content_height: f32,
     /// Row tops in pixels, length = row_count + 1 (last entry = total height).
     row_tops: Vec<f32>,
     /// Logical line number for each display row (for gutter).
@@ -61,12 +66,15 @@ pub struct DisplayRowRecord {
 }
 
 impl DisplaySnapshot {
-    pub fn from_galley(galley: Arc<Galley>, row_height: f32) -> Self {
+    /// Extract row metadata from the given galley. The galley itself is
+    /// dropped at the end of this call -- only `DisplayRowRecord`s are
+    /// retained.
+    pub fn from_galley(galley: &Galley, row_height: f32) -> Self {
         Self::from_galley_with_base(galley, row_height, 0, 0)
     }
 
     pub fn from_galley_with_base(
-        galley: Arc<Galley>,
+        galley: &Galley,
         row_height: f32,
         char_offset_base: usize,
         logical_line_base: usize,
@@ -82,7 +90,7 @@ impl DisplaySnapshot {
     }
 
     pub fn from_galley_with_base_and_overlays(
-        galley: Arc<Galley>,
+        galley: &Galley,
         row_height: f32,
         char_offset_base: usize,
         logical_line_base: usize,
@@ -136,20 +144,17 @@ impl DisplaySnapshot {
             }
         }
         row_tops.push(galley.rect.height());
+        let content_height = galley.rect.height();
 
         Self {
-            galley,
             row_height,
+            content_height,
             row_tops,
             row_logical_lines,
             row_char_ranges,
             row_records,
             max_line_width,
         }
-    }
-
-    pub fn galley(&self) -> &Arc<Galley> {
-        &self.galley
     }
 
     pub fn row_count(&self) -> u32 {
@@ -161,7 +166,7 @@ impl DisplaySnapshot {
     }
 
     pub fn content_height(&self) -> f32 {
-        self.galley.rect.height()
+        self.content_height
     }
 
     pub fn max_line_width(&self) -> f32 {
@@ -258,6 +263,7 @@ pub struct ViewportSlice {
 mod tests {
     use super::*;
     use eframe::egui;
+    use std::sync::Arc;
 
     fn galley_for(text: &str) -> Arc<Galley> {
         let ctx = egui::Context::default();
@@ -315,7 +321,7 @@ mod tests {
     #[test]
     fn display_snapshot_records_document_line_and_char_bases() {
         let snapshot =
-            DisplaySnapshot::from_galley_with_base(galley_for("alpha\nbravo"), 10.0, 40, 5);
+            DisplaySnapshot::from_galley_with_base(&galley_for("alpha\nbravo"), 10.0, 40, 5);
 
         let first = snapshot.row_record(DisplayRow(0)).expect("first row");
         assert_eq!(first.logical_line, 5);
@@ -329,7 +335,7 @@ mod tests {
     #[test]
     fn display_snapshot_records_selection_and_search_flags() {
         let snapshot = DisplaySnapshot::from_galley_with_base_and_overlays(
-            galley_for("alpha\nbravo"),
+            &galley_for("alpha\nbravo"),
             10.0,
             40,
             5,

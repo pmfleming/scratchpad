@@ -65,6 +65,7 @@ fn move_by_page_rows(
     cursor
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn apply_cursor_movement(
     cursor: &CursorRange,
     key: egui::Key,
@@ -107,6 +108,7 @@ pub(super) fn apply_cursor_movement(
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn horizontal_movement_target(
     current_index: usize,
     char_offset_base: usize,

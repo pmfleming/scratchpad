@@ -1,16 +1,25 @@
+use super::fragments::{SEARCH_FRAGMENT_CHUNK_CHARS, search_target_ranges};
 use super::helpers::cursor_range_from_char_range;
+use super::worker::{
+    SearchRequest, SearchResult, SearchTargetSnapshot, process_search_request,
+    process_search_request_with_partials,
+};
 use super::{
     ScratchpadApp, SearchReplaceAvailability, SearchScope, SearchScopeOrigin, SearchStatus,
 };
 use crate::app::commands::AppCommand;
 use crate::app::domain::buffer::PieceTreeLite;
-use crate::app::domain::{BufferState, CursorRevealMode, SearchHighlightState, SplitAxis};
-use crate::app::services::search::SearchMode;
+use crate::app::domain::{
+    BufferState, CursorRevealMode, DocumentSnapshot, SearchHighlightState, SplitAxis,
+};
+use crate::app::services::search::{SearchMode, SearchOptions};
 use crate::app::services::session_store::SessionStore;
 use crate::app::ui::scrolling::{
     ContentExtent, DisplaySnapshot, ScrollAlign, ScrollIntent, ViewportMetrics,
 };
 use eframe::egui;
+use std::ops::Range;
+use std::sync::atomic::AtomicU64;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -64,7 +73,11 @@ fn snapshot_for(text: &str) -> DisplaySnapshot {
             ))
         }));
     });
-    DisplaySnapshot::from_galley(galley.expect("galley"), 10.0)
+    DisplaySnapshot::from_galley(&galley.expect("galley"), 10.0)
+}
+
+fn worker_snapshot(text: &str) -> DocumentSnapshot {
+    BufferState::new("search.txt".to_owned(), text.to_owned(), None).document_snapshot()
 }
 
 fn install_snapshot_on_active_view(app: &mut ScratchpadApp, snapshot: DisplaySnapshot) {
@@ -519,4 +532,255 @@ fn active_buffer_operation_redo_reapplies_search_replace_text() {
     app.handle_command(AppCommand::RedoActiveBufferTextOperation);
 
     assert_eq!(app.tabs()[0].active_buffer().text(), "omega beta alpha");
+}
+
+#[test]
+fn process_search_request_preserves_target_order_with_parallel_fanout() {
+    let request = SearchRequest {
+        generation: 1,
+        query: "needle".to_owned(),
+        options: SearchOptions::default(),
+        targets: (0..8)
+            .map(|index| SearchTargetSnapshot {
+                tab_index: 0,
+                view_id: index as u64 + 1,
+                buffer_id: index as u64 + 1,
+                tab_label: "Tab 1".to_owned(),
+                buffer_label: format!("buffer_{index}.txt"),
+                document_snapshot: worker_snapshot(&format!("needle {index}\nneedle {index}")),
+                search_range: None,
+            })
+            .collect(),
+    };
+
+    let latest_generation = AtomicU64::new(1);
+    let result = process_search_request(request, &latest_generation).expect("search result");
+
+    assert_eq!(result.status, SearchStatus::Ready);
+    assert_eq!(result.matches.len(), 16);
+    assert_eq!(result.result_groups.len(), 8);
+    assert_eq!(result.result_groups[0].buffer_label, "buffer_0.txt");
+    assert_eq!(result.result_groups[7].buffer_label, "buffer_7.txt");
+}
+
+#[test]
+fn parallel_partials_arrive_in_target_index_prefix_order() {
+    let request = SearchRequest {
+        generation: 1,
+        query: "needle".to_owned(),
+        options: SearchOptions::default(),
+        targets: (0..8)
+            .map(|index| SearchTargetSnapshot {
+                tab_index: 0,
+                view_id: index as u64 + 1,
+                buffer_id: index as u64 + 1,
+                tab_label: "Tab 1".to_owned(),
+                buffer_label: format!("buffer_{index}.txt"),
+                document_snapshot: worker_snapshot(&format!("needle {index}")),
+                search_range: None,
+            })
+            .collect(),
+    };
+
+    let latest_generation = AtomicU64::new(1);
+    let mut partials: Vec<SearchResult> = Vec::new();
+    let mut emit = |partial: SearchResult| partials.push(partial);
+    let result = process_search_request_with_partials(request, &latest_generation, Some(&mut emit))
+        .expect("final result");
+
+    assert_eq!(result.result_groups.len(), 8);
+    let mut last_len = 0;
+    for partial in &partials {
+        assert!(matches!(partial.status, SearchStatus::Searching));
+        assert!(partial.result_groups.len() > last_len);
+        for (i, group) in partial.result_groups.iter().enumerate() {
+            assert_eq!(group.buffer_label, format!("buffer_{i}.txt"));
+        }
+        last_len = partial.result_groups.len();
+    }
+    assert!(partials.iter().all(|p| p.result_groups.len() < 8));
+}
+
+#[test]
+fn fragmented_plain_text_search_scans_in_chunks_without_losing_matches() {
+    let mut text = "a".repeat(SEARCH_FRAGMENT_CHUNK_CHARS - 2);
+    text.push(' ');
+    text.push_str("needle");
+    text.push(' ');
+    text.push_str(&"b".repeat(SEARCH_FRAGMENT_CHUNK_CHARS));
+
+    let mut buffer = BufferState::new("search.txt".to_owned(), text.clone(), None);
+    buffer.document_mut().insert_direct(1, "!");
+    let snapshot = buffer.document_snapshot();
+
+    let mut expected_text = text;
+    expected_text.insert(1, '!');
+    let expected_start = expected_text.find("needle").expect("needle present");
+
+    let latest_generation = AtomicU64::new(7);
+    let ranges = search_target_ranges(
+        &snapshot,
+        None,
+        "needle",
+        SearchOptions::default(),
+        7,
+        &latest_generation,
+        1,
+    )
+    .expect("search should complete");
+
+    assert_eq!(
+        ranges,
+        vec![expected_start..expected_start + "needle".len()]
+    );
+}
+
+#[test]
+fn fragmented_bounded_regex_search_scans_in_chunks_without_flattening() {
+    let mut text = "a".repeat(SEARCH_FRAGMENT_CHUNK_CHARS - 4);
+    text.push_str("id-1234");
+    text.push_str(&"b".repeat(SEARCH_FRAGMENT_CHUNK_CHARS));
+
+    let mut buffer = BufferState::new("search.txt".to_owned(), text.clone(), None);
+    buffer.document_mut().insert_direct(1, "!");
+    let snapshot = buffer.document_snapshot();
+
+    let mut expected_text = text;
+    expected_text.insert(1, '!');
+    let expected_start = expected_text.find("id-1234").expect("regex match present");
+
+    let latest_generation = AtomicU64::new(9);
+    let ranges = search_target_ranges(
+        &snapshot,
+        None,
+        r"id-\d{4}",
+        SearchOptions {
+            mode: SearchMode::Regex,
+            match_case: true,
+            whole_word: false,
+        },
+        9,
+        &latest_generation,
+        1,
+    )
+    .expect("search should complete");
+
+    assert_eq!(ranges, vec![expected_start..expected_start + 7]);
+}
+
+#[test]
+fn process_search_request_rejects_unbounded_regex_queries() {
+    let request = SearchRequest {
+        generation: 1,
+        query: "a+ needle".to_owned(),
+        options: SearchOptions {
+            mode: SearchMode::Regex,
+            match_case: true,
+            whole_word: false,
+        },
+        targets: vec![SearchTargetSnapshot {
+            tab_index: 0,
+            view_id: 1,
+            buffer_id: 1,
+            tab_label: "Tab 1".to_owned(),
+            buffer_label: "buffer.txt".to_owned(),
+            document_snapshot: worker_snapshot("prefix aaaa needle suffix"),
+            search_range: None,
+        }],
+    };
+
+    let latest_generation = AtomicU64::new(1);
+    let result = process_search_request(request, &latest_generation).expect("search result");
+
+    assert!(result.matches.is_empty());
+    assert!(matches!(result.status, SearchStatus::InvalidQuery(_)));
+}
+
+#[test]
+fn intra_buffer_parallel_chunked_search_matches_sequential() {
+    let mut text = String::new();
+    let needle = "needle";
+    for i in 0..32 {
+        text.push_str(&"x".repeat(SEARCH_FRAGMENT_CHUNK_CHARS / 2));
+        text.push('\n');
+        text.push_str(&format!("line-{i}-{needle}\n"));
+    }
+
+    let mut buffer = BufferState::new("search.txt".to_owned(), text.clone(), None);
+    buffer.document_mut().insert_direct(1, "!");
+    let snapshot = buffer.document_snapshot();
+
+    let mut expected_text = text;
+    expected_text.insert(1, '!');
+    let mut expected_starts: Vec<usize> = Vec::new();
+    let mut cursor = 0;
+    while let Some(rel) = expected_text[cursor..].find(needle) {
+        expected_starts.push(cursor + rel);
+        cursor += rel + needle.len();
+    }
+    let expected: Vec<Range<usize>> = expected_starts
+        .iter()
+        .map(|&start| start..start + needle.len())
+        .collect();
+    assert!(
+        expected.len() >= 8,
+        "test invariant: expect many chunked matches, got {}",
+        expected.len()
+    );
+
+    let latest_generation = AtomicU64::new(1);
+    let sequential = search_target_ranges(
+        &snapshot,
+        None,
+        needle,
+        SearchOptions::default(),
+        1,
+        &latest_generation,
+        1,
+    )
+    .expect("sequential search");
+    let parallel = search_target_ranges(
+        &snapshot,
+        None,
+        needle,
+        SearchOptions::default(),
+        1,
+        &latest_generation,
+        4,
+    )
+    .expect("parallel search");
+
+    assert_eq!(
+        sequential, expected,
+        "sequential matches differ from oracle"
+    );
+    assert_eq!(
+        parallel, sequential,
+        "intra-buffer parallel result must equal sequential result"
+    );
+}
+
+#[test]
+fn intra_buffer_parallel_search_aborts_when_generation_changes() {
+    let mut text = String::new();
+    for i in 0..16 {
+        text.push_str(&"y".repeat(SEARCH_FRAGMENT_CHUNK_CHARS / 2));
+        text.push('\n');
+        text.push_str(&format!("hit-{i}-needle\n"));
+    }
+    let mut buffer = BufferState::new("search.txt".to_owned(), text, None);
+    buffer.document_mut().insert_direct(1, "!");
+    let snapshot = buffer.document_snapshot();
+
+    let latest_generation = AtomicU64::new(2);
+    let result = search_target_ranges(
+        &snapshot,
+        None,
+        "needle",
+        SearchOptions::default(),
+        1,
+        &latest_generation,
+        4,
+    );
+    assert!(result.is_none(), "stale request should return None");
 }

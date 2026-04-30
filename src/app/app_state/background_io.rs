@@ -65,6 +65,27 @@ impl ScratchpadApp {
         paths: Vec<PathBuf>,
         action: PendingBackgroundAction,
     ) {
+        self.queue_background_path_loads_inner(paths, action, false);
+    }
+
+    /// Queue a multi-path load that streams individual results back as each
+    /// file finishes loading. The action stays in `pending_background_actions`
+    /// across multiple `PathsLoaded { is_partial: true }` deliveries; it is
+    /// removed when the final `is_partial: false` arrives.
+    pub(crate) fn queue_background_path_loads_streaming(
+        &mut self,
+        paths: Vec<PathBuf>,
+        action: PendingBackgroundAction,
+    ) {
+        self.queue_background_path_loads_inner(paths, action, true);
+    }
+
+    fn queue_background_path_loads_inner(
+        &mut self,
+        paths: Vec<PathBuf>,
+        action: PendingBackgroundAction,
+        streaming: bool,
+    ) {
         if paths.is_empty() {
             return;
         }
@@ -75,6 +96,7 @@ impl ScratchpadApp {
         let request = BackgroundIoRequest::LoadPaths {
             request_id,
             requests: paths.into_iter().map(PathLoadRequest::Standard).collect(),
+            streaming,
         };
         if let Err(error) = self.background_io_tx.send(request) {
             self.pending_background_actions.remove(&request_id);
@@ -84,6 +106,7 @@ impl ScratchpadApp {
                     .into_request()
                     .into_loaded_path_results()
                     .unwrap_or_default(),
+                is_partial: false,
             });
         }
     }
@@ -103,6 +126,7 @@ impl ScratchpadApp {
                 path,
                 encoding_name,
             }],
+            streaming: false,
         };
         if let Err(error) = self.background_io_tx.send(request) {
             self.pending_background_actions.remove(&request_id);
@@ -112,6 +136,7 @@ impl ScratchpadApp {
                     .into_request()
                     .into_loaded_path_results()
                     .unwrap_or_default(),
+                is_partial: false,
             });
         }
     }
@@ -263,28 +288,56 @@ impl ScratchpadApp {
             BackgroundIoResult::PathsLoaded {
                 request_id,
                 results,
-            } => match self.pending_background_actions.remove(&request_id) {
-                Some(PendingBackgroundAction::OpenTabs(action)) => {
-                    FileController::apply_async_open_tabs_result(self, action, results);
+                is_partial,
+            } => {
+                if is_partial {
+                    // Streaming partial: peek the action without removing,
+                    // dispatch per-path install. Only `OpenTabs` is wired for
+                    // streaming today; other actions never see partials.
+                    if let Some(PendingBackgroundAction::OpenTabs(action)) =
+                        self.pending_background_actions.get_mut(&request_id)
+                    {
+                        // Re-borrow split: take the accumulator out, install,
+                        // then put it back. This avoids holding a &mut on the
+                        // map while calling into FileController which needs
+                        // &mut ScratchpadApp.
+                        let mut summary = std::mem::take(&mut action.accumulator);
+                        for loaded in results {
+                            FileController::process_open_tab_result(self, &mut summary, loaded);
+                        }
+                        if let Some(PendingBackgroundAction::OpenTabs(action)) =
+                            self.pending_background_actions.get_mut(&request_id)
+                        {
+                            action.accumulator = summary;
+                        }
+                    }
+                    return;
                 }
-                Some(PendingBackgroundAction::OpenHere(action)) => {
-                    FileController::apply_async_open_here_result(self, action, results);
+                match self.pending_background_actions.remove(&request_id) {
+                    Some(PendingBackgroundAction::OpenTabs(action)) => {
+                        FileController::apply_async_open_tabs_result(self, action, results);
+                    }
+                    Some(PendingBackgroundAction::OpenHere(action)) => {
+                        FileController::apply_async_open_here_result(self, action, results);
+                    }
+                    Some(PendingBackgroundAction::ReloadBuffer(action)) => {
+                        FileController::apply_async_reload_buffer_result(self, action, results);
+                    }
+                    Some(PendingBackgroundAction::ReopenWithEncoding(action)) => {
+                        FileController::apply_async_reopen_with_encoding_result(
+                            self, action, results,
+                        );
+                    }
+                    Some(PendingBackgroundAction::StartupRestoreCompare(action)) => {
+                        self.apply_async_startup_restore_compare_result(action, results);
+                    }
+                    Some(PendingBackgroundAction::StartupRestore(_))
+                    | Some(PendingBackgroundAction::PersistSession(_))
+                    | Some(PendingBackgroundAction::RefreshTextMetadata(_))
+                    | Some(PendingBackgroundAction::RefreshEncodingCompliance(_))
+                    | None => {}
                 }
-                Some(PendingBackgroundAction::ReloadBuffer(action)) => {
-                    FileController::apply_async_reload_buffer_result(self, action, results);
-                }
-                Some(PendingBackgroundAction::ReopenWithEncoding(action)) => {
-                    FileController::apply_async_reopen_with_encoding_result(self, action, results);
-                }
-                Some(PendingBackgroundAction::StartupRestoreCompare(action)) => {
-                    self.apply_async_startup_restore_compare_result(action, results);
-                }
-                Some(PendingBackgroundAction::StartupRestore(_))
-                | Some(PendingBackgroundAction::PersistSession(_))
-                | Some(PendingBackgroundAction::RefreshTextMetadata(_))
-                | Some(PendingBackgroundAction::RefreshEncodingCompliance(_))
-                | None => {}
-            },
+            }
             BackgroundIoResult::SessionRestored { request_id, result } => {
                 let Some(PendingBackgroundAction::StartupRestore(action)) =
                     self.pending_background_actions.remove(&request_id)

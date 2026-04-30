@@ -1,9 +1,118 @@
-use super::worker::SearchTargetSnapshot;
-use super::{ReplacementTargetPlan, SearchMatch};
+use super::worker::{SearchResult, SearchTargetSnapshot};
+use super::{
+    ReplacementTargetPlan, SearchMatch, SearchResultEntry, SearchResultGroup, SearchStatus,
+};
 use crate::app::domain::{BufferId, EditorViewState, SearchHighlightState, ViewId, WorkspaceTab};
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+
+const SEARCH_RESULT_LIMIT: usize = 200;
+
+#[derive(Default, Clone)]
+pub(super) struct SearchResultAccumulator {
+    matches: Vec<SearchMatch>,
+    result_groups: Vec<SearchResultGroup>,
+    group_lookup: HashMap<(usize, BufferId), usize>,
+    displayed_match_count: usize,
+}
+
+impl SearchResultAccumulator {
+    pub(super) fn push_target_matches(
+        &mut self,
+        target: &SearchTargetSnapshot,
+        ranges: &[Range<usize>],
+    ) {
+        let start_index = self.matches.len();
+        self.matches
+            .extend(ranges.iter().cloned().map(|range| SearchMatch {
+                tab_index: target.tab_index,
+                view_id: target.view_id,
+                buffer_id: target.buffer_id,
+                buffer_label: target.buffer_label.clone(),
+                range,
+            }));
+
+        let entries = self.build_entries(target, ranges, start_index);
+        if entries.is_empty() {
+            return;
+        }
+
+        let group_index =
+            if let Some(index) = self.group_lookup.get(&(target.tab_index, target.buffer_id)) {
+                *index
+            } else {
+                let index = self.result_groups.len();
+                self.result_groups.push(SearchResultGroup {
+                    tab_index: target.tab_index,
+                    buffer_id: target.buffer_id,
+                    buffer_label: target.buffer_label.clone(),
+                    tab_label: target.tab_label.clone(),
+                    total_match_count: 0,
+                    entries: Vec::new(),
+                    active: false,
+                });
+                self.group_lookup
+                    .insert((target.tab_index, target.buffer_id), index);
+                index
+            };
+
+        let group = &mut self.result_groups[group_index];
+        group.total_match_count += ranges.len();
+        group.entries.extend(entries);
+    }
+
+    pub(super) fn finish(self, generation: u64) -> SearchResult {
+        SearchResult {
+            generation,
+            matches: self.matches,
+            result_groups: self.result_groups,
+            displayed_match_count: self.displayed_match_count,
+            status: SearchStatus::NoMatches,
+        }
+    }
+
+    pub(super) fn partial_snapshot(&self, generation: u64) -> SearchResult {
+        SearchResult {
+            generation,
+            matches: self.matches.clone(),
+            result_groups: self.result_groups.clone(),
+            displayed_match_count: self.displayed_match_count,
+            status: SearchStatus::Searching,
+        }
+    }
+
+    fn build_entries(
+        &mut self,
+        target: &SearchTargetSnapshot,
+        ranges: &[Range<usize>],
+        start_index: usize,
+    ) -> Vec<SearchResultEntry> {
+        let remaining_capacity = SEARCH_RESULT_LIMIT.saturating_sub(self.displayed_match_count);
+        if remaining_capacity == 0 {
+            return Vec::new();
+        }
+
+        let preview_rows = target
+            .document_snapshot
+            .previews_for_matches(ranges, remaining_capacity);
+        let mut entries = Vec::with_capacity(preview_rows.len());
+        for (offset, (line_number, column_number, preview)) in preview_rows.into_iter().enumerate()
+        {
+            entries.push(SearchResultEntry {
+                match_index: start_index + offset,
+                buffer_id: target.buffer_id,
+                buffer_label: target.buffer_label.clone(),
+                line_number,
+                column_number,
+                preview,
+                active: false,
+            });
+        }
+        self.displayed_match_count += entries.len();
+        entries
+    }
+}
 
 pub(super) fn cursor_range_from_char_range(range: Range<usize>) -> CursorRange {
     CursorRange::two(range.start, range.end)

@@ -1,4 +1,124 @@
-use scratchpad::app::domain::buffer::{PieceTreeCharPosition, PieceTreeLineInfo, PieceTreeLite};
+use scratchpad::app::domain::buffer::{
+    AnchorBias, AnchorOwner, AnchorOwnerKind, PieceTreeCharPosition, PieceTreeLineInfo,
+    PieceTreeLite,
+};
+
+#[test]
+fn anchor_follows_content_across_inserts_and_removals() {
+    let mut tree = PieceTreeLite::from_string("hello world".to_owned());
+    let anchor = tree.create_anchor(6, AnchorBias::Right);
+
+    tree.insert(0, "[prefix] ");
+    assert_eq!(
+        tree.anchor_position(anchor),
+        Some(6 + "[prefix] ".chars().count())
+    );
+
+    tree.remove_char_range(0..3);
+    assert_eq!(
+        tree.anchor_position(anchor),
+        Some(6 + "[prefix] ".chars().count() - 3)
+    );
+}
+
+#[test]
+fn anchor_left_bias_stays_at_split_point_under_insertion() {
+    let mut tree = PieceTreeLite::from_string("ab".to_owned());
+    let left = tree.create_anchor(1, AnchorBias::Left);
+    let right = tree.create_anchor(1, AnchorBias::Right);
+
+    tree.insert(1, "XYZ");
+
+    assert_eq!(tree.anchor_position(left), Some(1));
+    assert_eq!(tree.anchor_position(right), Some(4));
+}
+
+#[test]
+fn anchor_inside_removed_range_collapses_to_start() {
+    let mut tree = PieceTreeLite::from_string("abcdefghij".to_owned());
+    let anchor = tree.create_anchor(5, AnchorBias::Left);
+
+    tree.remove_char_range(3..8);
+
+    assert_eq!(tree.anchor_position(anchor), Some(3));
+}
+
+#[test]
+fn anchor_release_drops_anchor_from_tree() {
+    let mut tree = PieceTreeLite::from_string("abc".to_owned());
+    let anchor = tree.create_anchor(2, AnchorBias::Left);
+    tree.release_anchor(anchor);
+    assert_eq!(tree.anchor_position(anchor), None);
+}
+
+#[test]
+fn anchor_clamps_creation_offset_to_document_length() {
+    let mut tree = PieceTreeLite::from_string("abc".to_owned());
+    let anchor = tree.create_anchor(99, AnchorBias::Left);
+    assert_eq!(tree.anchor_position(anchor), Some(3));
+}
+
+#[test]
+fn anchor_owner_metadata_survives_edits_until_release() {
+    let mut tree = PieceTreeLite::from_string("abcdef".to_owned());
+    let owner = AnchorOwner::view_scroll(42);
+    let anchor = tree.create_anchor_with_owner(3, AnchorBias::Left, owner);
+
+    assert_eq!(tree.anchor_owner(anchor), Some(owner));
+    assert_eq!(
+        tree.anchor_owner(anchor).map(AnchorOwner::kind),
+        Some(AnchorOwnerKind::ViewScroll)
+    );
+
+    tree.insert(0, "zz");
+    assert_eq!(tree.anchor_position(anchor), Some(5));
+    assert_eq!(tree.anchor_owner(anchor), Some(owner));
+
+    tree.release_anchor(anchor);
+    assert_eq!(tree.anchor_owner(anchor), None);
+}
+
+#[test]
+fn anchor_survives_clone_of_tree_independently() {
+    let mut tree = PieceTreeLite::from_string("abcdef".to_owned());
+    let anchor = tree.create_anchor(3, AnchorBias::Left);
+    let mut other = tree.clone();
+
+    tree.insert(0, "ZZ");
+    other.remove_char_range(0..2);
+
+    assert_eq!(tree.anchor_position(anchor), Some(5));
+    assert_eq!(other.anchor_position(anchor), Some(1));
+}
+
+#[test]
+fn batched_previews_match_individual_preview_generation() {
+    let tree = PieceTreeLite::from_string("one\ntwo alpha\nthree alpha\nfour".to_owned());
+    let ranges = vec![8..13, 20..25];
+
+    let previews = tree.previews_for_matches(&ranges, ranges.len());
+    let expected = ranges
+        .iter()
+        .map(|range| tree.preview_for_match(range))
+        .collect::<Vec<_>>();
+
+    assert_eq!(previews, expected);
+}
+
+#[test]
+fn batched_previews_match_individual_preview_generation_after_fragmentation() {
+    let mut tree = PieceTreeLite::from_string("one\ntwo alpha\nthree alpha\nfour".to_owned());
+    tree.insert(0, "zero\n");
+    let ranges = vec![13..18, 25..30];
+
+    let previews = tree.previews_for_matches(&ranges, ranges.len());
+    let expected = ranges
+        .iter()
+        .map(|range| tree.preview_for_match(range))
+        .collect::<Vec<_>>();
+
+    assert_eq!(previews, expected);
+}
 
 #[test]
 fn normalized_ranges_are_half_open_clamped_and_ascending() {

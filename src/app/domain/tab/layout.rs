@@ -359,7 +359,7 @@ mod tests {
                 ))
             }));
         });
-        DisplaySnapshot::from_galley(galley.expect("galley"), 10.0)
+        DisplaySnapshot::from_galley(&galley.expect("galley"), 10.0)
     }
 
     #[test]

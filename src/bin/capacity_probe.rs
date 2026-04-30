@@ -2,6 +2,7 @@ use scratchpad::app::capacity_metrics::{
     CapacityMetricsSnapshot, capacity_metrics_snapshot, reset_capacity_metrics,
 };
 use scratchpad::app::domain::{BufferState, SearchHighlightState, SplitAxis, WorkspaceTab};
+use scratchpad::app::memory_budget::{self, MemoryBudgetSnapshot};
 use scratchpad::app::ui::editor_content::{EditorHighlightStyle, build_layouter};
 use serde::Serialize;
 use std::hint::black_box;
@@ -27,6 +28,7 @@ struct CapacityEvent {
     workload_label: String,
     elapsed_ns: u128,
     metrics: CapacityMetricsSnapshot,
+    memory_budget: MemoryBudgetSnapshot,
     status: &'static str,
     note: Option<String>,
 }
@@ -155,10 +157,12 @@ fn emit_paste_size_sweep() {
 
 fn emit_step(step: StepDescriptor, run: impl FnOnce() -> usize) {
     reset_capacity_metrics();
+    memory_budget::reset();
     let start = Instant::now();
     let result = catch_unwind(AssertUnwindSafe(run));
     let elapsed_ns = start.elapsed().as_nanos();
     let metrics = capacity_metrics_snapshot();
+    let memory_budget_snapshot = memory_budget::snapshot();
     let (status, note) = match result {
         Ok(_) => ("ok", None),
         Err(payload) => ("panic", Some(panic_message(payload))),
@@ -174,6 +178,7 @@ fn emit_step(step: StepDescriptor, run: impl FnOnce() -> usize) {
         workload_label: step.workload_label,
         elapsed_ns,
         metrics,
+        memory_budget: memory_budget_snapshot,
         status,
         note,
     };

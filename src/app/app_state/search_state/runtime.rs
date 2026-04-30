@@ -95,6 +95,7 @@ impl ScratchpadApp {
             result_groups,
             status,
         } = result;
+        let is_partial = matches!(status, SearchStatus::Searching);
         self.search_state.active_match_index = self.preferred_active_match_index(
             &matches,
             self.search_state.previous_active_match.as_ref(),
@@ -103,8 +104,10 @@ impl ScratchpadApp {
         self.search_state.total_match_count = self.search_state.matches.len();
         self.search_state.displayed_match_count = displayed_match_count;
         self.search_state.result_groups = result_groups;
-        self.search_state.searching = false;
-        self.search_state.previous_active_match = None;
+        self.search_state.searching = is_partial;
+        if !is_partial {
+            self.search_state.previous_active_match = None;
+        }
         self.search_state.applied_generation = generation;
         self.search_state.status = status;
         self.search_state.freshness = SearchFreshness::Fresh;

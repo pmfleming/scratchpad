@@ -3,6 +3,10 @@
 use scratchpad::ScratchpadApp;
 use scratchpad::app::app_state::SearchScope;
 use scratchpad::app::domain::{BufferState, SplitAxis};
+use scratchpad::app::services::search::{
+    SearchError, SearchMode, SearchOptions, find_matches, next_match_index, previous_match_index,
+    search_text, search_text_interruptible,
+};
 use scratchpad::app::services::session_store::SessionStore;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -26,6 +30,169 @@ fn wait_for_search_matches(app: &mut ScratchpadApp, expected: usize) {
         "timed out waiting for {expected} search matches; got {}",
         app.search_match_count()
     );
+}
+
+#[test]
+fn find_matches_returns_character_ranges() {
+    let matches = find_matches("naive cafe", "cafe", SearchOptions::default());
+    assert_eq!(matches, vec![6..10]);
+}
+
+#[test]
+fn find_matches_supports_case_insensitive_search() {
+    let matches = find_matches(
+        "Alpha alpha ALPHA",
+        "alpha",
+        SearchOptions {
+            mode: SearchMode::PlainText,
+            match_case: false,
+            whole_word: false,
+        },
+    );
+    assert_eq!(matches, vec![0..5, 6..11, 12..17]);
+}
+
+#[test]
+fn whole_word_matching_rejects_embedded_hits() {
+    let matches = find_matches(
+        "cat concatenate cat",
+        "cat",
+        SearchOptions {
+            mode: SearchMode::PlainText,
+            match_case: true,
+            whole_word: true,
+        },
+    );
+    assert_eq!(matches, vec![0..3, 16..19]);
+}
+
+#[test]
+fn unicode_search_uses_character_offsets() {
+    let matches = find_matches(
+        "cafe cafe caf\u{00e9}",
+        "caf\u{00e9}",
+        SearchOptions::default(),
+    );
+    assert_eq!(matches, vec![10..14]);
+}
+
+#[test]
+fn regex_search_supports_case_insensitive_matches() {
+    let outcome = search_text(
+        "Alpha beta alpha",
+        "alpha|beta",
+        SearchOptions {
+            mode: SearchMode::Regex,
+            match_case: false,
+            whole_word: false,
+        },
+    );
+    assert_eq!(outcome.matches, vec![0..5, 6..10, 11..16]);
+    assert_eq!(outcome.error, None);
+}
+
+#[test]
+fn regex_search_reports_invalid_queries() {
+    let outcome = search_text(
+        "Alpha",
+        "(",
+        SearchOptions {
+            mode: SearchMode::Regex,
+            match_case: true,
+            whole_word: false,
+        },
+    );
+    assert!(outcome.matches.is_empty());
+    assert!(matches!(outcome.error, Some(SearchError::InvalidRegex(_))));
+}
+
+#[test]
+fn regex_search_reports_unbounded_queries_as_unsupported() {
+    let outcome = search_text(
+        "Alpha beta alpha",
+        "alpha+",
+        SearchOptions {
+            mode: SearchMode::Regex,
+            match_case: true,
+            whole_word: false,
+        },
+    );
+
+    assert!(outcome.matches.is_empty());
+    assert!(matches!(
+        outcome.error,
+        Some(SearchError::UnsupportedRegex(_))
+    ));
+}
+
+#[test]
+fn regex_whole_word_uses_character_offsets() {
+    let outcome = search_text(
+        "cat concatenate cat",
+        "cat",
+        SearchOptions {
+            mode: SearchMode::Regex,
+            match_case: true,
+            whole_word: true,
+        },
+    );
+    assert_eq!(outcome.matches, vec![0..3, 16..19]);
+}
+
+#[test]
+fn next_and_previous_match_indices_wrap() {
+    assert_eq!(next_match_index(3, None), Some(0));
+    assert_eq!(next_match_index(3, Some(2)), Some(0));
+    assert_eq!(previous_match_index(3, None), Some(2));
+    assert_eq!(previous_match_index(3, Some(0)), Some(2));
+}
+
+#[test]
+fn interruptible_search_supports_ascii_case_insensitive_matches() {
+    let matches = search_text_interruptible(
+        "Alpha alpha ALPHA",
+        "alpha",
+        SearchOptions::default(),
+        || true,
+    )
+    .expect("search should complete");
+
+    assert_eq!(matches.matches, vec![0..5, 6..11, 12..17]);
+}
+
+#[test]
+fn case_insensitive_ascii_search_handles_single_byte_queries() {
+    let matches = find_matches("AaA", "a", SearchOptions::default());
+    assert_eq!(matches, vec![0..1, 1..2, 2..3]);
+}
+
+#[test]
+fn interruptible_search_supports_case_sensitive_unicode_offsets() {
+    let matches = search_text_interruptible(
+        "naive cafe caf\u{00e9}",
+        "caf\u{00e9}",
+        SearchOptions {
+            mode: SearchMode::PlainText,
+            match_case: true,
+            whole_word: false,
+        },
+        || true,
+    )
+    .expect("search should complete");
+
+    assert_eq!(matches.matches, vec![11..15]);
+}
+
+#[test]
+fn interruptible_ascii_search_can_cancel_mid_scan() {
+    let text = "a".repeat(1024);
+    let mut checks = 0;
+    let result = search_text_interruptible(&text, "b", SearchOptions::default(), || {
+        checks += 1;
+        checks < 2
+    });
+
+    assert_eq!(result, None);
 }
 
 #[test]
