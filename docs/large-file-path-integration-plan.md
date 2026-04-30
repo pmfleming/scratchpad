@@ -1,6 +1,6 @@
 # Single-Path Text Pipeline Plan
 
-## Goal
+## Goal (3)
 
 Integrate the current large-file path into the normal file path so the editor has one primary text pipeline instead of a separate special-case mode.
 
@@ -22,7 +22,7 @@ The current design still splits normal files and large files in ways that increa
 
 That creates multiple behavior surfaces for:
 
-- scrolling
+- scrolling 
 - focus transitions
 - selection and cursor movement
 - wrap behavior
@@ -89,7 +89,7 @@ That means:
 - cache and prefetch behavior are chosen without any file-size-based branching
 
 The current large-file visible-window path should be treated as a prototype for the default rendering model, not as a permanent parallel mode.
-
+kk
 ### 3. Capability flags instead of special-case mode
 
 The editor should distinguish feature readiness from document identity.
@@ -132,7 +132,7 @@ This especially applies to:
 - search snapshots and previews
 - undo history storage
 - layout and wrap measurement
-
+heheheellelelele
 ## Phased Plan
 
 ### Phase 1: Define the unified path contract

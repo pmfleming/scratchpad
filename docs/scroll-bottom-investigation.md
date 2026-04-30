@@ -63,7 +63,7 @@ Those requested offsets still flow through the same final clamp in `tile.rs`. So
 
 ## Other Plausible Causes
 
-1. Stale layout after tile resize
+1. Stale layout after tile resize 
 
    Tile splits, divider resizing, font changes, and word-wrap changes alter visual row count. `latest_layout` is view-owned and revision-checked, but document revision does not change when only the viewport width changes. Cache keys for visible-window layout include wrap width, but the main full-document path still sizes from line count. Width-only layout changes deserve explicit invalidation or extent recalculation.
 

@@ -1,0 +1,58 @@
+
+Make metadata refresh incremental, Make large-file open staged instead of fully decoded plus fully inspected up front, Virtualize inactive tab state, Split background work into purpose-specific lanes only after the synchronous hot paths are reduced
+
+review: 
+
+The following modules have become sources of complexity/maintainability/risk.
+
+one by one, review each module to improve cognitive, clomatic & effort metrics.
+while reducing cloning & total lines of code. (use sub modules as a last resort)
+
+src\app\domain\buffer\piece_tree.rs
+src\app\app_state\search_state\runtime.rs
+src\app\ui\editor_content\native_editor\mod.rs
+src\app\ui\tab_strip\context_menu.rs
+src\app\ui\dialogs\pending.rs
+src\app\domain\buffer\analysis.rs
+src\app\services\search\matchers.rs
+src\app\ui\editor_area\tile.rs
+
+hello world - this is my editor.
+
+mouse is still allowed the pull the editor eastwards beyond the end of the text & do other thing bounce back. do 2 things :
+
+1. Track All Modules involved in Mouse Drag, and extablishing the end of viewport window. one by one, review each module to improve cognitive, clomatic & effort metrics.
+while reducing cloning & total lines of code. (use sub modules as a last resort)
+2. Reduce the Extra Lenght added to East & South of the View poert & disable/heavily reduce bounce back.
+
+Scroll bars/Arrows keys do not reliably allow the user to scroll to the bottom of a file. 
+Here is a hypothesis. When Loading we know the lenght of a file. For Scroll we need ot know the amount of visibile rows. This changes - depending on the view into the file.
+
+criteria are: - the text is wrapped or not. how wide is the view window.
+This file can then be divided into multiple tiles. This will necessarily reduce the view window (maybe bother horizontall& ertically).Each tile will then need to be aware of these changes & addjust scrolling bars appropiately.
+
+meaning each tile needs its own scroll data calculate from file lenght but independant of other views into the same file.
+
+Investigate this as a possible hypothesis - but also consider other reasons why scrolling (mouse & arrow keys) is not work properly.
+
+reaa
+
+This works well - there are two situations:
+word wrap - the width of the text area is calculated at the wrap point.
+no word wrap - the width of the text area must be calculated as the width of the longest line.
+
+How is lenght of the current file calcuated & used throughout the project.
+
+Can we trace it - and then look condense it into a single function. review each module lenght interacts with  to improve cognitive, clomatic & effort metrics.
+while reducing cloning & total lines of code. (use sub modules as a last resort)
+
+Several modules have become sources of complexity/maintainability/risk. (ie any modules with a quality score of greater than 600 - see image for examples)
+
+one by one, review each module to improve cognitive, clomatic & effort metrics.
+while reducing cloning & total lines of code. 
+
+(already extant associated modules can be a good path for improving quality - create sub modules as a last resort)
+
+The goal should be to reduce each module below 600 - but where not feasible improve score by 200 - 300 points.
+
+

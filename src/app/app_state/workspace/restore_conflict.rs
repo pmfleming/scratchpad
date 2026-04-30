@@ -20,6 +20,7 @@ impl ScratchpadApp {
         self.startup_restore_conflicts.first()
     }
 
+    #[cfg(test)]
     pub(crate) fn startup_restore_conflict_count(&self) -> usize {
         self.startup_restore_conflicts.len()
     }

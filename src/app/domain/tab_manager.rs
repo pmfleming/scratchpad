@@ -127,7 +127,7 @@ impl TabManager {
     pub fn describe_tab_at(&self, index: usize) -> String {
         self.tabs
             .get(index)
-            .map(|t| t.describe())
+            .map(|t| t.display_name())
             .unwrap_or_else(|| format!("tab#{index}<missing>"))
     }
 

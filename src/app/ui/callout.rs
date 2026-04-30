@@ -8,6 +8,8 @@ use eframe::egui;
 
 const CALLOUT_RADIUS: u8 = 14;
 const CALLOUT_SECTION_RADIUS: u8 = 10;
+const SCROLL_BLOCK_HOVER_SECONDS: f64 = 0.25;
+
 pub(crate) fn apply_spacing(ui: &mut egui::Ui) {
     ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
 }
@@ -35,8 +37,29 @@ pub(crate) fn show_floating(
         .show(ctx, |ui| {
             ui.set_width(width);
             ui.set_min_width(width);
-            frame(ui).show(ui, add_contents);
+            ui.set_max_width(width);
+            let inner = frame(ui).show(ui, add_contents);
+            mark_scroll_blocker_if_hovered(ctx, &inner.response);
         });
+}
+
+pub(crate) fn mark_scroll_blocker_if_hovered(ctx: &egui::Context, response: &egui::Response) {
+    if response.hovered() || response.contains_pointer() {
+        let now = ctx.input(|input| input.time);
+        ctx.data_mut(|data| data.insert_temp(scroll_blocker_id(), now));
+    }
+}
+
+pub(crate) fn scroll_blocker_hovered(ctx: &egui::Context) -> bool {
+    let now = ctx.input(|input| input.time);
+    ctx.data(|data| {
+        data.get_temp::<f64>(scroll_blocker_id())
+            .is_some_and(|last_hovered| now - last_hovered <= SCROLL_BLOCK_HOVER_SECONDS)
+    })
+}
+
+fn scroll_blocker_id() -> egui::Id {
+    widget_ids::global("callout_scroll_blocker_hover")
 }
 
 pub(crate) fn frame(ui: &egui::Ui) -> egui::Frame {

@@ -74,7 +74,6 @@ cargo flamegraph --dev --bin profile_viewport_extraction -o target/analysis/flam
 cargo flamegraph --dev --bin profile_large_file_scroll -o target/analysis/flamegraphs/large_file_scroll_profile.svg
 cargo flamegraph --dev --bin profile_large_file_paste -o target/analysis/flamegraphs/large_file_paste_profile.svg
 cargo flamegraph --dev --bin profile_large_file_split -o target/analysis/flamegraphs/large_file_split_profile.svg
-cargo bench --bench anchor_storage
 .venv\Scripts\python.exe scripts\map.py --mode visibility
 .venv\Scripts\python.exe scripts\map.py --refresh --mode visibility
 ```
@@ -178,7 +177,6 @@ powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -LegacyStatic
 	- single-file growth vs aggregate corpus growth
 - The viewer is intentionally decoupled from the analysis scripts.
 - The current workflow is aimed at local review and CI visibility rather than polished end-user reporting.
-- `cargo bench --bench anchor_storage` measures point-anchor insert/remove cost at 1, 10, 100, 1,000, and 10,000 live anchors.
 
 ## What The Suite Covers Today
 

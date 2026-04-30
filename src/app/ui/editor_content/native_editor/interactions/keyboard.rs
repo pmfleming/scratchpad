@@ -97,7 +97,7 @@ fn handle_relevant_input_event(
         RelevantInputEvent::Cut if !cursor.is_empty() => {
             let (new_cursor, selected) = editing::apply_cut(buffer, &cursor);
             ui.copy_text(selected);
-            view.cursor_range = Some(new_cursor);
+            view.set_cursor_range_anchored(buffer, new_cursor);
             true
         }
         RelevantInputEvent::Cut => false,
@@ -123,7 +123,8 @@ fn handle_key_event(
         return handled;
     }
 
-    apply_cursor_update(view, handle_movement_event(key_event, buffer, cursor))
+    let next_cursor = handle_movement_event(key_event, buffer, cursor);
+    apply_cursor_update(view, buffer, next_cursor)
 }
 
 fn relevant_input_events(ui: &egui::Ui) -> Vec<RelevantInputEvent> {
@@ -180,7 +181,7 @@ fn handle_non_movement_key_event(
         return Some(changed);
     }
     if key_event.key == egui::Key::A && key_event.modifiers.command {
-        view.cursor_range = Some(select_all_cursor(total_chars));
+        view.set_cursor_range_anchored(buffer, select_all_cursor(total_chars));
         return Some(false);
     }
 
@@ -213,7 +214,8 @@ fn handle_tab_key(
         return insert_text(buffer, view, cursor, "\t");
     }
 
-    apply_cursor_update(view, editing::apply_outdent(buffer, cursor))
+    let next_cursor = editing::apply_outdent(buffer, cursor);
+    apply_cursor_update(view, buffer, next_cursor)
 }
 
 fn handle_delete_key(
@@ -227,7 +229,7 @@ fn handle_delete_key(
         egui::Key::Delete => editing::apply_delete(buffer, cursor, &key_event.modifiers),
         _ => return None,
     };
-    view.cursor_range = Some(new_cursor);
+    view.set_cursor_range_anchored(buffer, new_cursor);
     Some(true)
 }
 
@@ -237,10 +239,12 @@ fn handle_history_key(
     view: &mut EditorViewState,
 ) -> Option<bool> {
     if key_event.key == egui::Key::Z && is_undo_shortcut(key_event.modifiers) {
-        return Some(apply_history(view, buffer.undo_last_text_operation()));
+        let selection = buffer.undo_last_text_operation();
+        return Some(apply_history(view, buffer, selection));
     }
     if matches!(key_event.key, egui::Key::Z | egui::Key::Y) && is_redo_shortcut(key_event) {
-        return Some(apply_history(view, buffer.redo_last_text_operation()));
+        let selection = buffer.redo_last_text_operation();
+        return Some(apply_history(view, buffer, selection));
     }
 
     None
@@ -260,13 +264,18 @@ fn insert_text(
     cursor: &CursorRange,
     text: &str,
 ) -> bool {
-    view.cursor_range = Some(editing::apply_text_insert(buffer, cursor, text));
+    let new_cursor = editing::apply_text_insert(buffer, cursor, text);
+    view.set_cursor_range_anchored(buffer, new_cursor);
     true
 }
 
-fn apply_history(view: &mut EditorViewState, selection: Option<CursorRange>) -> bool {
+fn apply_history(
+    view: &mut EditorViewState,
+    buffer: &mut BufferState,
+    selection: Option<CursorRange>,
+) -> bool {
     if let Some(selection) = selection {
-        view.cursor_range = Some(selection);
+        view.set_cursor_range_anchored(buffer, selection);
         true
     } else {
         false
@@ -280,9 +289,13 @@ fn copy_selection(ui: &mut egui::Ui, buffer: &BufferState, cursor: &CursorRange)
     }
 }
 
-fn apply_cursor_update(view: &mut EditorViewState, next_cursor: Option<CursorRange>) -> bool {
+fn apply_cursor_update(
+    view: &mut EditorViewState,
+    buffer: &mut BufferState,
+    next_cursor: Option<CursorRange>,
+) -> bool {
     if let Some(new_cursor) = next_cursor {
-        view.cursor_range = Some(new_cursor);
+        view.set_cursor_range_anchored(buffer, new_cursor);
     }
 
     false
@@ -353,10 +366,15 @@ mod tests {
 
     #[test]
     fn cursor_update_helper_reports_no_document_change() {
-        let mut view = EditorViewState::new(1, false);
+        let mut buffer = BufferState::new("test.txt".to_owned(), "alpha".to_owned(), None);
+        let mut view = EditorViewState::new(buffer.id, false);
         let next_cursor = CursorRange::one(CharCursor::new(3));
 
-        assert!(!apply_cursor_update(&mut view, Some(next_cursor)));
+        assert!(!apply_cursor_update(
+            &mut view,
+            &mut buffer,
+            Some(next_cursor)
+        ));
         assert_eq!(view.cursor_range, Some(next_cursor));
     }
 }

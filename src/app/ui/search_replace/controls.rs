@@ -303,9 +303,10 @@ fn compact_text_field(
                 egui::vec2(width, INPUT_HEIGHT),
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
-                    ui.add_sized(
-                        [width, INPUT_HEIGHT],
-                        search_text_edit(text, id, hint).frame(egui::Frame::NONE),
+                    ui.add(
+                        search_text_edit(text, id, hint)
+                            .frame(egui::Frame::NONE)
+                            .desired_width(width),
                     )
                 },
             )
@@ -373,6 +374,7 @@ fn search_text_edit<'a>(text: &'a mut String, id: egui::Id, hint: &str) -> egui:
         .id(id)
         .hint_text(hint)
         .margin(egui::Margin::symmetric(10, 6))
+        .vertical_align(egui::Align::Center)
 }
 
 fn toggle_flag(ui: &mut egui::Ui, value: &mut bool, icon: &str, tooltip: &str) {

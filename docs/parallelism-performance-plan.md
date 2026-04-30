@@ -658,6 +658,7 @@ The next implementation step should be:
 3. reduce dispatch-path overhead using `search_dispatch_profile` plus the dispatch aggregate-size benchmarks
 4. reduce worker scan and completion overhead using `search_current_app_state_profile` and `search_all_tabs_profile`
 5. move session persistence and more of open and restore preparation onto bounded snapshot-based background work
-6. split metadata work into immediate and deferred revision-safe stages
+6. split metadata work into immediate and deferred revision-safe stages
+
 
 After those three steps, the next round of search work can be split cleanly between runtime preparation cost and worker-side scan cost instead of treating them as one blended bottleneck.

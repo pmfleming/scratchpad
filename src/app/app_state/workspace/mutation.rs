@@ -67,18 +67,21 @@ impl ScratchpadApp {
 
     pub(crate) fn select_all_in_active_view(&mut self) -> bool {
         let active_tab_index = self.active_tab_index();
-        let total_chars = match self.active_tab() {
-            Some(tab) => tab.active_buffer().current_file_length().chars,
+        let (total_chars, active_view_id) = match self.active_tab() {
+            Some(tab) => (
+                tab.active_buffer().current_file_length().chars,
+                tab.active_view_id,
+            ),
             None => return false,
         };
         let selection = select_all_cursor(total_chars);
 
         let tab = &mut self.tabs_mut()[active_tab_index];
-        let Some(view) = tab.active_view_mut() else {
+        let Some((buffer, view)) = tab.buffer_and_view_mut(active_view_id) else {
             return false;
         };
-        view.cursor_range = Some(selection);
-        view.pending_cursor_range = Some(selection);
+        view.set_cursor_range_anchored(buffer, selection);
+        view.set_pending_cursor_range_anchored(buffer, selection);
         view.request_cursor_reveal(CursorRevealMode::Center);
         tab.active_buffer_mut().active_selection =
             (!selection.is_empty()).then_some(selection.as_sorted_char_range());
@@ -109,8 +112,8 @@ impl ScratchpadApp {
             let (buffer, view) = tab.buffer_and_view_mut(active_view_id)?;
             let current_selection = view.cursor_range?;
             let (next_selection, selected_text) = cut_selected_text(buffer, current_selection)?;
-            view.cursor_range = Some(next_selection);
-            view.pending_cursor_range = Some(next_selection);
+            view.set_cursor_range_anchored(buffer, next_selection);
+            view.set_pending_cursor_range_anchored(buffer, next_selection);
             view.request_cursor_reveal(CursorRevealMode::KeepVisible);
             buffer.active_selection = None;
             (next_selection, selected_text)
@@ -152,9 +155,10 @@ impl ScratchpadApp {
                 return false;
             };
 
-            if let Some(view) = tab.active_view_mut() {
-                view.cursor_range = Some(selection);
-                view.pending_cursor_range = Some(selection);
+            let active_view_id = tab.active_view_id;
+            if let Some((buffer, view)) = tab.buffer_and_view_mut(active_view_id) {
+                view.set_cursor_range_anchored(buffer, selection);
+                view.set_pending_cursor_range_anchored(buffer, selection);
                 view.request_cursor_reveal(CursorRevealMode::Center);
             }
             selection

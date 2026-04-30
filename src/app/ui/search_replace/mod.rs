@@ -37,7 +37,8 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         .show(ui.ctx(), |ui| {
             ui.set_width(SEARCH_DIALOG_WIDTH);
             ui.set_min_width(SEARCH_DIALOG_WIDTH);
-            callout::frame(ui).show(ui, |ui| {
+            ui.set_max_width(SEARCH_DIALOG_WIDTH);
+            let inner = callout::frame(ui).show(ui, |ui| {
                 settings::apply_dialog_typography(ui);
                 callout::apply_spacing(ui);
                 ui.spacing_mut().item_spacing = egui::vec2(8.0, 12.0);
@@ -56,6 +57,7 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 );
                 results::show_search_results(ui, &state, &mut actions);
             });
+            callout::mark_scroll_blocker_if_hovered(ui.ctx(), &inner.response);
         });
 
     apply_search_inputs(app, &state);

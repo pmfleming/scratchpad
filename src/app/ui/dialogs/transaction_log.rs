@@ -18,12 +18,13 @@ const TRANSACTION_LOG_PANEL_CORNER_RADIUS: u8 = 12;
 const TRANSACTION_LOG_FILTER_HEIGHT: f32 = 36.0;
 const TRANSACTION_LOG_LIST_MAX_HEIGHT: f32 = 300.0;
 const TRANSACTION_LOG_UNDO_BUTTON_SIZE: egui::Vec2 = egui::vec2(42.0, 38.0);
-const TRANSACTION_LOG_SECTION_LABEL: &str = "TODAY";
 const TRANSACTION_LOG_FILE_ICON: egui::Color32 = egui::Color32::from_rgb(238, 240, 244);
 const TRANSACTION_LOG_MUTED_BLUE: egui::Color32 = egui::Color32::from_rgb(144, 198, 255);
-const TRANSACTION_LOG_MAX_VISIBLE_TOKENS: usize = 4;
 const TRANSACTION_LOG_TOKEN_MAX_CHARS: usize = 28;
 const TRANSACTION_LOG_TOKEN_MAX_WIDTH: f32 = 220.0;
+const TRANSACTION_LOG_META_WIDTH: f32 = 160.0;
+const TRANSACTION_LOG_CONTENT_META_GAP: f32 = 8.0;
+const TRANSACTION_LOG_ENTRY_HORIZONTAL_MARGIN: f32 = 24.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TransactionFilter {
@@ -155,10 +156,10 @@ fn render_transaction_log_window(
 
     ui.add_space(8.0);
 
-    transaction_log_panel_frame(ui).show(ui, |ui| {
-        let filter_id = widget_ids::local(ui, "transaction_log_filter");
-        let mut filter = load_transaction_filter(ui, filter_id);
+    let filter_id = widget_ids::local(ui, "transaction_log_filter");
+    let mut filter = load_transaction_filter(ui, filter_id);
 
+    transaction_log_panel_frame(ui).show(ui, |ui| {
         render_panel_intro(ui);
         ui.add_space(14.0);
         render_filter_row(
@@ -168,13 +169,11 @@ fn render_transaction_log_window(
             !entries.is_empty(),
             clear_requested,
         );
-        let filtered_entries = filtered_entries(entries, filter);
-        ui.add_space(12.0);
-        divider(ui);
-        ui.add_space(12.0);
-
-        render_transaction_log_entries(ui, entries, &filtered_entries, undo_entry_id);
     });
+
+    let filtered_entries = filtered_entries(entries, filter);
+    ui.add_space(12.0);
+    render_transaction_log_entries(ui, entries, &filtered_entries, undo_entry_id);
 }
 
 fn render_dialog_header(ui: &mut egui::Ui) -> bool {
@@ -292,10 +291,13 @@ fn render_entry_list(
     entries: &[&TransactionLogEntry],
     undo_entry_id: &mut Option<u64>,
 ) {
+    let list_width = ui.available_width();
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .max_height(TRANSACTION_LOG_LIST_MAX_HEIGHT)
         .show(ui, |ui| {
+            ui.set_width(list_width);
+            ui.set_max_width(list_width);
             for entry in entries.iter().rev() {
                 render_entry_row(ui, entry, undo_entry_id);
                 ui.add_space(8.0);
@@ -310,18 +312,39 @@ fn render_entry_row(
 ) {
     let category = TransactionCategory::from_entry(entry);
     let tokens = transaction_log_tokens(entry);
-    transaction_entry_frame(ui).show(ui, |ui| {
-        ui.horizontal(|ui| {
-            render_row_icon(ui, category);
-            ui.add_space(12.0);
-
-            let meta_width = 130.0;
-            let content_width = (ui.available_width() - meta_width - 40.0).max(160.0);
-            render_entry_content(ui, entry, &tokens, content_width);
-
-            render_entry_meta(ui, entry, undo_entry_id);
-        });
-    });
+    let row_width = ui.available_width();
+    let row_inner_width = (row_width - TRANSACTION_LOG_ENTRY_HORIZONTAL_MARGIN).max(0.0);
+    ui.allocate_ui_with_layout(
+        egui::vec2(row_width, 0.0),
+        egui::Layout::top_down(egui::Align::LEFT),
+        |ui| {
+            ui.set_width(row_width);
+            ui.set_max_width(row_width);
+            transaction_entry_frame(ui).show(ui, |ui| {
+                ui.set_width(row_inner_width);
+                ui.set_max_width(row_inner_width);
+                ui.horizontal(|ui| {
+                    render_row_icon(ui, category);
+                    ui.add_space(12.0);
+                    let content_width = (ui.available_width()
+                        - TRANSACTION_LOG_META_WIDTH
+                        - TRANSACTION_LOG_CONTENT_META_GAP)
+                        .max(180.0);
+                    render_entry_content(ui, entry, &tokens, content_width);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(
+                            TRANSACTION_LOG_META_WIDTH,
+                            TRANSACTION_LOG_UNDO_BUTTON_SIZE.y,
+                        ),
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            render_entry_meta(ui, entry, undo_entry_id);
+                        },
+                    );
+                });
+            });
+        },
+    );
 }
 
 fn render_row_icon(ui: &mut egui::Ui, category: TransactionCategory) {
@@ -349,34 +372,62 @@ fn filtered_entries(
         .collect()
 }
 
-fn transaction_log_tokens(entry: &TransactionLogEntry) -> Vec<String> {
-    let mut tokens = entry
+struct TransactionLogToken {
+    display: String,
+    full: String,
+}
+
+fn transaction_log_tokens(entry: &TransactionLogEntry) -> Vec<TransactionLogToken> {
+    representative_transaction_token(entry)
+        .into_iter()
+        .collect()
+}
+
+fn representative_transaction_token(entry: &TransactionLogEntry) -> Option<TransactionLogToken> {
+    if entry.affected_items.is_empty() {
+        return entry
+            .details
+            .as_deref()
+            .filter(|details| !details.trim().is_empty())
+            .map(|details| TransactionLogToken {
+                display: truncate_transaction_token(details),
+                full: details.to_owned(),
+            });
+    }
+
+    let target = entry
         .affected_items
         .iter()
-        .map(|item| truncate_transaction_token(item))
-        .collect::<Vec<_>>();
+        .rev()
+        .find_map(|item| {
+            item.strip_prefix("target: ")
+                .or_else(|| item.strip_prefix("Target: "))
+        })
+        .or_else(|| entry.affected_items.first().map(String::as_str))
+        .unwrap_or_default();
 
+    let mut tooltip_lines = entry.affected_items.clone();
     if let Some(details) = entry
         .details
         .as_deref()
-        .filter(|details| !details.is_empty())
+        .filter(|details| !details.trim().is_empty())
     {
-        tokens.push(truncate_transaction_token(details));
+        tooltip_lines.push(details.to_owned());
     }
 
-    if tokens.len() > TRANSACTION_LOG_MAX_VISIBLE_TOKENS {
-        let hidden_count = tokens.len() - TRANSACTION_LOG_MAX_VISIBLE_TOKENS;
-        tokens.truncate(TRANSACTION_LOG_MAX_VISIBLE_TOKENS);
-        tokens.push(format!("+{hidden_count} more"));
-    }
-
-    tokens
+    Some(TransactionLogToken {
+        display: truncate_transaction_token(target),
+        full: tooltip_lines.join("\n"),
+    })
 }
 
-fn render_entry_pills(ui: &mut egui::Ui, tokens: &[String]) {
+fn render_entry_pills(ui: &mut egui::Ui, tokens: &[TransactionLogToken]) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
         for token in tokens {
+            let pill_width = transaction_token_display_width(ui, &token.display)
+                .min(TRANSACTION_LOG_TOKEN_MAX_WIDTH)
+                .min(ui.available_width().max(0.0));
             egui::Frame::NONE
                 .fill(if ui.visuals().dark_mode {
                     action_hover_bg(ui)
@@ -387,17 +438,32 @@ fn render_entry_pills(ui: &mut egui::Ui, tokens: &[String]) {
                 .corner_radius(egui::CornerRadius::same(8))
                 .inner_margin(egui::Margin::symmetric(8, 4))
                 .show(ui, |ui| {
-                    let pill_width = ui.available_width().min(TRANSACTION_LOG_TOKEN_MAX_WIDTH);
-                    ui.add_sized(
+                    let label = ui.add_sized(
                         egui::vec2(pill_width, 0.0),
                         egui::Label::new(
-                            egui::RichText::new(token).size(12.0).color(text_muted(ui)),
+                            egui::RichText::new(&token.display)
+                                .size(12.0)
+                                .color(text_muted(ui)),
                         )
-                        .truncate(),
+                        .truncate()
+                        .sense(egui::Sense::hover()),
                     );
+                    if token.full != token.display {
+                        label.on_hover_text(&token.full);
+                    }
                 });
         }
     });
+}
+
+fn transaction_token_display_width(ui: &egui::Ui, token: &str) -> f32 {
+    let font_id = egui::FontId::new(12.0, egui::FontFamily::Monospace);
+    ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(token.to_owned(), font_id, text_muted(ui))
+            .size()
+            .x
+    })
 }
 
 fn truncate_transaction_token(token: &str) -> String {
@@ -447,21 +513,14 @@ fn render_transaction_log_entries(
     undo_entry_id: &mut Option<u64>,
 ) {
     if filtered_entries.is_empty() {
-        render_empty_state(ui, entries.is_empty());
+        transaction_log_panel_frame(ui).show(ui, |ui| {
+            render_empty_state(ui, entries.is_empty());
+        });
         return;
     }
 
-    ui.label(
-        egui::RichText::new(TRANSACTION_LOG_SECTION_LABEL)
-            .size(12.0)
-            .color(text_muted(ui))
-            .strong(),
-    );
-    ui.add_space(10.0);
     render_entry_list(ui, filtered_entries, undo_entry_id);
-    ui.add_space(10.0);
-    divider(ui);
-    ui.add_space(12.0);
+    ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new(entry_count_label(filtered_entries.len()))
@@ -484,22 +543,28 @@ fn render_filter_chips(ui: &mut egui::Ui, filter: &mut TransactionFilter, filter
 fn render_entry_content(
     ui: &mut egui::Ui,
     entry: &TransactionLogEntry,
-    tokens: &[String],
+    tokens: &[TransactionLogToken],
     content_width: f32,
 ) {
     ui.allocate_ui_with_layout(
         egui::vec2(content_width, 0.0),
         egui::Layout::top_down(egui::Align::LEFT),
         |ui| {
-            ui.add_space(4.0);
-            ui.label(
-                egui::RichText::new(&entry.action_label)
-                    .size(14.5)
-                    .color(text_primary(ui)),
+            let title = ui.add_sized(
+                egui::vec2(content_width, 0.0),
+                egui::Label::new(
+                    egui::RichText::new(&entry.action_label)
+                        .size(14.5)
+                        .color(text_primary(ui)),
+                )
+                .truncate(),
             );
             if !tokens.is_empty() {
                 ui.add_space(6.0);
                 render_entry_pills(ui, tokens);
+            }
+            if title.rect.width() >= content_width {
+                title.on_hover_text(&entry.action_label);
             }
         },
     );
@@ -510,29 +575,27 @@ fn render_entry_meta(
     entry: &TransactionLogEntry,
     undo_entry_id: &mut Option<u64>,
 ) {
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-        let undo = callout::icon_button(
-            ui,
-            ARROW_COUNTER_CLOCKWISE,
-            18.0,
-            TRANSACTION_LOG_UNDO_BUTTON_SIZE,
-            action_hover_bg(ui),
-            "Undo to this point",
-            true,
-        );
-        if undo.clicked() {
-            *undo_entry_id = Some(entry.id);
-        }
-        ui.add_space(12.0);
-        ui.label(
-            egui::RichText::new(format!(
-                "{} ago",
-                relative_age_label(entry.created_at.elapsed())
-            ))
-            .size(12.5)
-            .color(text_muted(ui)),
-        );
-    });
+    let undo = callout::icon_button(
+        ui,
+        ARROW_COUNTER_CLOCKWISE,
+        18.0,
+        TRANSACTION_LOG_UNDO_BUTTON_SIZE,
+        action_hover_bg(ui),
+        "Undo to this point",
+        true,
+    );
+    if undo.clicked() {
+        *undo_entry_id = Some(entry.id);
+    }
+    ui.add_space(12.0);
+    ui.label(
+        egui::RichText::new(format!(
+            "{} ago",
+            relative_age_label(entry.created_at.elapsed())
+        ))
+        .size(12.5)
+        .color(text_muted(ui)),
+    );
 }
 
 fn transaction_log_panel_frame(ui: &egui::Ui) -> egui::Frame {
@@ -547,13 +610,6 @@ fn transaction_entry_frame(ui: &egui::Ui) -> egui::Frame {
     settings::dialog_card_frame(ui)
         .corner_radius(egui::CornerRadius::same(10))
         .inner_margin(egui::Margin::symmetric(12, 6))
-}
-
-fn divider(ui: &mut egui::Ui) {
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
-    ui.painter()
-        .rect_filled(rect, 0.0, border(ui).gamma_multiply(0.85));
 }
 
 fn load_transaction_filter(ui: &mut egui::Ui, id: egui::Id) -> TransactionFilter {

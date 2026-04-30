@@ -75,15 +75,18 @@ pub(super) fn render_dialog_header(ui: &mut egui::Ui, title: &str) -> bool {
 
             let label_width = (ui.available_width() - CAPTION_BUTTON_SIZE.x - 6.0).max(0.0);
             let label = truncate_dialog_title(ui, title, label_width);
-            ui.add_sized(
+            let label_response = ui.add_sized(
                 egui::vec2(label_width, 0.0),
                 egui::Label::new(
-                    egui::RichText::new(label)
+                    egui::RichText::new(&label)
                         .size(15.0)
                         .monospace()
                         .color(callout::text(ui)),
                 ),
             );
+            if label != title {
+                label_response.on_hover_text(title);
+            }
 
             callout::close_button(ui, "Cancel").clicked()
         },

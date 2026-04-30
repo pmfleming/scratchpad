@@ -343,8 +343,17 @@ fn paint_cursor_effects(
             CursorRevealMode::KeepHorizontalVisible => None,
             CursorRevealMode::Center => Some(ScrollAlign::Center),
         };
+        // Collapse the cursor to a zero-height point at its vertical center so
+        // the `NearestWithMargin` trigger fires symmetrically at the top and
+        // bottom of the viewport. With a non-zero-height target, the bottom
+        // check uses `target.max` and the top uses `target.min`, which makes
+        // bottom-edge reveals trigger one row earlier than top-edge reveals.
+        let reveal_rect = egui::Rect::from_min_max(
+            egui::pos2(cursor_rect_content.left(), cursor_rect_content.center().y),
+            egui::pos2(cursor_rect_content.right(), cursor_rect_content.center().y),
+        );
         view.request_intent(ScrollIntent::Reveal {
-            rect: cursor_rect_content,
+            rect: reveal_rect,
             align_y,
             align_x: Some(ScrollAlign::NearestWithMargin(0.0)),
         });

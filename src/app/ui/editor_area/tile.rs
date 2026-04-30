@@ -5,6 +5,7 @@ use crate::app::domain::{ViewId, WorkspaceTab};
 use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::theme::*;
 use crate::app::ui::autoscroll::{AutoScrollAxis, AutoScrollConfig, edge_auto_scroll_delta};
+use crate::app::ui::callout;
 use crate::app::ui::editor_content::{
     self, EditorContentOutcome, EditorContentStyle, EditorHighlightStyle, TextEditOptions,
 };
@@ -17,11 +18,17 @@ use crate::app::ui::tile_header::{
 use crate::app::ui::widget_ids;
 use eframe::egui;
 
-const EDITOR_SELECTION_AUTOSCROLL_CONFIG: AutoScrollConfig = AutoScrollConfig {
-    edge_extent: 36.0,
-    max_step: 10.0,
-    cross_axis_margin: 12.0,
-};
+const EDITOR_SELECTION_AUTOSCROLL_EDGE_ROWS: f32 = 2.0;
+const EDITOR_SELECTION_AUTOSCROLL_MAX_STEP: f32 = 10.0;
+const EDITOR_SELECTION_AUTOSCROLL_CROSS_AXIS_MARGIN: f32 = 12.0;
+
+fn editor_selection_autoscroll_config(row_height: f32) -> AutoScrollConfig {
+    AutoScrollConfig {
+        edge_extent: (EDITOR_SELECTION_AUTOSCROLL_EDGE_ROWS * row_height).max(1.0),
+        max_step: EDITOR_SELECTION_AUTOSCROLL_MAX_STEP,
+        cross_axis_margin: EDITOR_SELECTION_AUTOSCROLL_CROSS_AXIS_MARGIN,
+    }
+}
 
 struct TileBodyOutcome {
     changed: bool,
@@ -309,6 +316,7 @@ fn show_editor_scroll_area(
         request.view_id,
         output.inner.interaction_response.as_ref(),
         output.inner_rect,
+        frame.row_height,
     );
     let drag_requested_scroll_offset = requested_scroll_offset_for_pointer_drag(
         ui,
@@ -630,8 +638,11 @@ fn apply_selection_edge_autoscroll_intent(
     view_id: ViewId,
     interaction_response: Option<&egui::Response>,
     inner_rect: egui::Rect,
+    row_height: f32,
 ) {
-    let Some(delta) = selection_edge_autoscroll_delta(ui, interaction_response, inner_rect) else {
+    let Some(delta) =
+        selection_edge_autoscroll_delta(ui, interaction_response, inner_rect, row_height)
+    else {
         return;
     };
     if delta == egui::Vec2::ZERO {
@@ -645,13 +656,14 @@ fn selection_edge_autoscroll_delta(
     ui: &egui::Ui,
     interaction_response: Option<&egui::Response>,
     inner_rect: egui::Rect,
+    row_height: f32,
 ) -> Option<egui::Vec2> {
     let is_drag_selecting = ui
         .input(|input| input.pointer.button_down(egui::PointerButton::Primary))
         && interaction_response
             .is_some_and(|response| response.dragged_by(egui::PointerButton::Primary));
     let pointer_pos = ui.input(|input| input.pointer.latest_pos())?;
-    is_drag_selecting.then(|| selection_edge_drag_delta(inner_rect, pointer_pos))
+    is_drag_selecting.then(|| selection_edge_drag_delta(inner_rect, pointer_pos, row_height))
 }
 
 fn clear_edge_autoscroll(tab: &mut WorkspaceTab, view_id: ViewId) {
@@ -691,6 +703,9 @@ fn requested_scroll_offset_for_pointer_wheel(
     ui: &egui::Ui,
     current_offset: egui::Vec2,
 ) -> Option<egui::Vec2> {
+    if callout::scroll_blocker_hovered(ui.ctx()) {
+        return None;
+    }
     if !pointer_over_rect(ui, ui.max_rect()) {
         return None;
     }
@@ -732,20 +747,20 @@ fn scroll_offset_from_drag_delta(
     (desired != current_offset).then_some(desired)
 }
 
-fn selection_edge_drag_delta(viewport_rect: egui::Rect, pointer_pos: egui::Pos2) -> egui::Vec2 {
+fn selection_edge_drag_delta(
+    viewport_rect: egui::Rect,
+    pointer_pos: egui::Pos2,
+    row_height: f32,
+) -> egui::Vec2 {
+    let config = editor_selection_autoscroll_config(row_height);
     egui::vec2(
         edge_auto_scroll_delta(
             viewport_rect,
             pointer_pos,
             AutoScrollAxis::Horizontal,
-            EDITOR_SELECTION_AUTOSCROLL_CONFIG,
+            config,
         ),
-        edge_auto_scroll_delta(
-            viewport_rect,
-            pointer_pos,
-            AutoScrollAxis::Vertical,
-            EDITOR_SELECTION_AUTOSCROLL_CONFIG,
-        ),
+        edge_auto_scroll_delta(viewport_rect, pointer_pos, AutoScrollAxis::Vertical, config),
     )
 }
 
@@ -1143,11 +1158,38 @@ mod tests {
     }
 
     #[test]
+    fn selection_edge_drag_delta_is_symmetric_at_top_and_bottom() {
+        let viewport = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(200.0, 200.0));
+        let row_height = 18.0;
+        let mid_x = 100.0;
+        let edge_offset = 1.5 * row_height;
+
+        let top = selection_edge_drag_delta(
+            viewport,
+            egui::pos2(mid_x, viewport.top() + edge_offset),
+            row_height,
+        );
+        let bottom = selection_edge_drag_delta(
+            viewport,
+            egui::pos2(mid_x, viewport.bottom() - edge_offset),
+            row_height,
+        );
+
+        assert!(top.y < 0.0, "top should scroll up, got {top:?}");
+        assert!(bottom.y > 0.0, "bottom should scroll down, got {bottom:?}");
+        assert!(
+            (top.y + bottom.y).abs() < 1e-3,
+            "top/bottom magnitudes should match: {top:?} vs {bottom:?}"
+        );
+    }
+
+    #[test]
     fn selection_edge_drag_delta_pushes_down_near_bottom_edge() {
         assert_eq!(
             selection_edge_drag_delta(
                 egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(200.0, 120.0)),
                 egui::pos2(100.0, 150.0),
+                18.0,
             ),
             egui::vec2(0.0, 10.0)
         );
@@ -1159,6 +1201,7 @@ mod tests {
             selection_edge_drag_delta(
                 egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(200.0, 120.0)),
                 egui::pos2(100.0, 80.0),
+                18.0,
             ),
             egui::Vec2::ZERO
         );

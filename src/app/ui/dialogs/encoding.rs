@@ -270,6 +270,8 @@ fn render_encoding_warning(ui: &mut egui::Ui) {
         .fill(ENCODING_WARNING_FILL)
         .stroke(egui::Stroke::new(1.0, settings::dialog_card_border(ui).gamma_multiply(0.55)))
         .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.set_max_width(ui.available_width());
             ui.allocate_ui_with_layout(
                 egui::vec2(ui.available_width(), ENCODING_WARNING_MIN_HEIGHT),
                 egui::Layout::left_to_right(egui::Align::TOP),
