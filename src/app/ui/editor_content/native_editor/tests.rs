@@ -3,7 +3,7 @@ use super::{
     CharCursor, CursorRange, consumed_page_navigation_direction, editor_content_height,
     editor_desired_size, editor_desired_width, editor_wrap_width, local_range,
     local_search_highlights, request_cursor_reveal_after_input, sync_view_cursor_before_render,
-    viewport_text_slice,
+    total_editor_content_height, viewport_text_slice,
 };
 use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState, SearchHighlightState};
 use eframe::egui;
@@ -131,7 +131,7 @@ fn same_line_edit_requests_horizontal_only_cursor_reveal() {
     let previous = CursorRange::one(CharCursor::new(5));
     view.cursor_range = Some(CursorRange::one(CharCursor::new(6)));
 
-    request_cursor_reveal_after_input(&buffer, &mut view, Some(previous), Some(0), true);
+    request_cursor_reveal_after_input(&buffer, &mut view, Some(previous), Some(0), true, false);
 
     assert_eq!(
         view.cursor_reveal_mode(),
@@ -146,12 +146,25 @@ fn newline_edit_keeps_vertical_cursor_reveal() {
     let previous = CursorRange::one(CharCursor::new(5));
     view.cursor_range = Some(CursorRange::one(CharCursor::new(6)));
 
-    request_cursor_reveal_after_input(&buffer, &mut view, Some(previous), Some(0), true);
+    request_cursor_reveal_after_input(&buffer, &mut view, Some(previous), Some(0), true, false);
 
     assert_eq!(
         view.cursor_reveal_mode(),
         Some(CursorRevealMode::KeepVisible)
     );
+}
+
+#[test]
+fn selection_drag_suppresses_cursor_reveal() {
+    let buffer = BufferState::new("test.txt".to_owned(), "alpha\nbravo\n".to_owned(), None);
+    let mut view = EditorViewState::new(buffer.id, false);
+    let previous = CursorRange::one(CharCursor::new(8));
+    view.cursor_range = Some(CursorRange::one(CharCursor::new(2)));
+    view.request_cursor_reveal(CursorRevealMode::KeepVisible);
+
+    request_cursor_reveal_after_input(&buffer, &mut view, Some(previous), Some(1), false, true);
+
+    assert_eq!(view.cursor_reveal_mode(), None);
 }
 
 #[test]
@@ -166,6 +179,13 @@ fn editor_content_height_tracks_wrapped_visual_rows() {
     let height = editor_content_height_for_test(80.0, "W".repeat(200).as_str());
 
     assert!(height.is_some_and(|(height, row_height)| height > row_height * 2.0));
+}
+
+#[test]
+fn total_editor_content_height_includes_eof_tail_for_final_line_top_scroll() {
+    let height = total_editor_content_height_for_test(120, 40.0, "tail");
+
+    assert_eq!(height, Some(1230.0));
 }
 
 #[test]
@@ -231,6 +251,34 @@ fn editor_content_height_for_test(wrap_width: f32, text: &str) -> Option<(f32, f
             fonts.layout_job(job)
         });
         height = Some((editor_content_height(&galley, row_height), row_height));
+    });
+    height
+}
+
+fn total_editor_content_height_for_test(
+    line_count: usize,
+    viewport_height: f32,
+    text: &str,
+) -> Option<f32> {
+    let ctx = egui::Context::default();
+    let mut height = None;
+    let _ = ctx.run_ui(Default::default(), |ui| {
+        let font_id = egui::FontId::monospace(14.0);
+        let row_height = 10.0;
+        let galley = ui.ctx().fonts_mut(|fonts| {
+            fonts.layout_job(egui::text::LayoutJob::simple(
+                text.to_owned(),
+                font_id,
+                egui::Color32::WHITE,
+                f32::INFINITY,
+            ))
+        });
+        height = Some(total_editor_content_height(
+            line_count,
+            row_height,
+            &galley,
+            viewport_height,
+        ));
     });
     height
 }

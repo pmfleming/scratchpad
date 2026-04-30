@@ -18,6 +18,7 @@ struct MouseInteractionContext<'a> {
     response: &'a egui::Response,
     galley: &'a egui::Galley,
     rect: egui::Rect,
+    galley_pos: egui::Pos2,
     piece_tree: &'a crate::app::domain::buffer::PieceTreeLite,
     char_offset_base: usize,
 }
@@ -36,11 +37,13 @@ struct PointerSelection {
     click_count: u32,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_mouse_interaction(
     ui: &mut egui::Ui,
     response: &egui::Response,
     galley: &egui::Galley,
     rect: egui::Rect,
+    galley_pos: egui::Pos2,
     view: &mut EditorViewState,
     piece_tree: &crate::app::domain::buffer::PieceTreeLite,
     char_offset_base: usize,
@@ -49,6 +52,7 @@ pub(super) fn handle_mouse_interaction(
         response,
         galley,
         rect,
+        galley_pos,
         piece_tree,
         char_offset_base,
     };
@@ -190,7 +194,7 @@ fn pointer_selection(
     )?;
     let cursor_at_pointer = context
         .galley
-        .cursor_from_pos(pointer_pos - context.rect.min);
+        .cursor_from_pos(pointer_pos - context.galley_pos);
     let char_cursor = char_cursor_with_offset(cursor_at_pointer, context.char_offset_base);
 
     Some((

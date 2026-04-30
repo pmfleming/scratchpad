@@ -1,11 +1,12 @@
 use super::{
     clamp_scroll_offset, editor_pixel_offset_resolved, editor_scroll_id, max_scroll_offset,
-    recover_unresolved_piece_anchor, scroll_offset_from_drag_delta, scroll_offset_from_wheel_delta,
-    selection_edge_drag_delta,
+    recover_unresolved_piece_anchor, scroll_offset_from_wheel_delta, selection_edge_drag_velocity,
+    suppress_view_reveals_for_selection_drag, virtual_editor_content_height,
 };
 use crate::app::domain::{AnchorBias, BufferState, EditorViewState, WorkspaceTab};
 use crate::app::ui::scrolling::{
-    ContentExtent, DisplayRow, DisplaySnapshot, ScrollAnchor, ScrollState, ViewportMetrics,
+    ContentExtent, DisplayRow, DisplaySnapshot, ScrollAlign, ScrollAnchor, ScrollIntent,
+    ScrollState, ViewportMetrics,
 };
 use eframe::egui;
 
@@ -31,6 +32,22 @@ fn galley_for_width(text: &str, wrap_width: f32) -> std::sync::Arc<egui::Galley>
 
 fn snapshot_for(text: &str, wrap_width: f32) -> DisplaySnapshot {
     DisplaySnapshot::from_galley(&galley_for_width(text, wrap_width), 10.0)
+}
+
+fn sliced_snapshot_for_lines(text: &str, start_line: usize, end_line: usize) -> DisplaySnapshot {
+    let start_char = char_offset_for_line(text, start_line);
+    let end_char = char_offset_for_line(text, end_line);
+    let slice = text
+        .chars()
+        .skip(start_char)
+        .take(end_char.saturating_sub(start_char))
+        .collect::<String>();
+    DisplaySnapshot::from_galley_with_base(
+        &galley_for_width(&slice, f32::INFINITY),
+        10.0,
+        start_char,
+        start_line,
+    )
 }
 
 fn numbered_lines(count: usize) -> String {
@@ -59,6 +76,21 @@ fn set_view_geometry(view: &mut EditorViewState, snapshot: &DisplaySnapshot) {
     });
 }
 
+fn set_full_document_geometry(view: &mut EditorViewState, rows: u32) {
+    view.scroll.set_metrics(ViewportMetrics {
+        viewport_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 40.0)),
+        row_height: 10.0,
+        column_width: 5.0,
+        visible_rows: 4,
+        visible_columns: 40,
+    });
+    view.scroll.set_extent(ContentExtent {
+        display_rows: rows,
+        height: rows as f32 * 10.0,
+        max_line_width: 200.0,
+    });
+}
+
 fn set_piece_scroll_anchor_at_row(
     view: &mut EditorViewState,
     buffer: &mut BufferState,
@@ -82,9 +114,10 @@ fn top_row_text(view: &EditorViewState, buffer: &BufferState) -> String {
     let snapshot = view.latest_display_snapshot.as_ref().expect("snapshot");
     let row = (offset.y / view.scroll.metrics().row_height)
         .floor()
-        .max(0.0) as u32;
+        .max(0.0);
     let range = snapshot
-        .row_char_range(DisplayRow(row.min(snapshot.row_count().saturating_sub(1))))
+        .row_for_document_row(row)
+        .and_then(|row| snapshot.row_char_range(row))
         .expect("row range");
     buffer
         .document()
@@ -127,6 +160,42 @@ fn piece_anchor_pixel_offset_uses_previous_snapshot_fallback() {
         editor_pixel_offset_resolved(&view, &buffer, Some(&snapshot)).y,
         32.5
     );
+}
+
+#[test]
+fn sliced_snapshot_piece_anchor_resolves_to_document_pixel_offset_near_eof() {
+    let text = numbered_lines(120);
+    let mut buffer = BufferState::new("tail.txt".to_owned(), text.clone(), None);
+    let snapshot = sliced_snapshot_for_lines(&text, 116, 120);
+    let anchor = buffer
+        .document_mut()
+        .piece_tree_mut()
+        .create_anchor(char_offset_for_line(&text, 118), AnchorBias::Left);
+    let mut view = EditorViewState::new(buffer.id, false);
+    set_full_document_geometry(&mut view, 120);
+    view.latest_display_snapshot = Some(snapshot);
+    view.scroll.replace_anchor(ScrollAnchor::Piece {
+        anchor,
+        display_row_offset: 0.0,
+    });
+
+    assert_eq!(editor_pixel_offset_resolved(&view, &buffer, None).y, 1180.0);
+}
+
+#[test]
+fn bottom_scroll_offset_seeds_piece_anchor_from_sliced_snapshot() {
+    let text = numbered_lines(120);
+    let mut buffer = BufferState::new("tail.txt".to_owned(), text.clone(), None);
+    let snapshot = sliced_snapshot_for_lines(&text, 116, 120);
+    let mut view = EditorViewState::new(buffer.id, false);
+    set_full_document_geometry(&mut view, 120);
+    view.latest_display_snapshot = Some(snapshot);
+
+    view.set_editor_pixel_offset_resolved(&mut buffer, egui::vec2(0.0, 1160.0));
+
+    assert!(matches!(view.scroll.anchor(), ScrollAnchor::Piece { .. }));
+    assert_eq!(editor_pixel_offset_resolved(&view, &buffer, None).y, 1160.0);
+    assert_eq!(top_row_text(&view, &buffer), "line 116");
 }
 
 #[test]
@@ -335,31 +404,18 @@ fn wheel_delta_requests_explicit_scroll_offset() {
 // `app::ui::scrolling`.
 
 #[test]
-fn drag_delta_requests_clamped_scroll_offset() {
-    assert_eq!(
-        scroll_offset_from_drag_delta(
-            egui::vec2(80.0, 60.0),
-            egui::vec2(-200.0, -160.0),
-            egui::vec2(320.0, 260.0),
-            egui::vec2(120.0, 100.0),
-        ),
-        Some(egui::vec2(200.0, 160.0))
-    );
-}
-
-#[test]
-fn selection_edge_drag_delta_is_symmetric_at_top_and_bottom() {
+fn selection_edge_drag_velocity_is_symmetric_at_top_and_bottom() {
     let viewport = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(200.0, 200.0));
     let row_height = 18.0;
     let mid_x = 100.0;
-    let edge_offset = 1.5 * row_height;
+    let edge_offset = 1.5 * row_height - 1.0;
 
-    let top = selection_edge_drag_delta(
+    let top = selection_edge_drag_velocity(
         viewport,
         egui::pos2(mid_x, viewport.top() + edge_offset),
         row_height,
     );
-    let bottom = selection_edge_drag_delta(
+    let bottom = selection_edge_drag_velocity(
         viewport,
         egui::pos2(mid_x, viewport.bottom() - edge_offset),
         row_height,
@@ -374,27 +430,94 @@ fn selection_edge_drag_delta_is_symmetric_at_top_and_bottom() {
 }
 
 #[test]
-fn selection_edge_drag_delta_pushes_down_near_bottom_edge() {
-    assert_eq!(
-        selection_edge_drag_delta(
+fn selection_edge_drag_velocity_pushes_down_near_bottom_edge() {
+    assert!(
+        selection_edge_drag_velocity(
             egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(200.0, 120.0)),
             egui::pos2(100.0, 150.0),
             18.0,
-        ),
-        egui::vec2(0.0, 10.0)
+        )
+        .y > 0.0
     );
 }
 
 #[test]
-fn selection_edge_drag_delta_is_zero_away_from_edges() {
+fn selection_edge_drag_velocity_is_zero_away_from_edges() {
     assert_eq!(
-        selection_edge_drag_delta(
+        selection_edge_drag_velocity(
             egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(200.0, 120.0)),
             egui::pos2(100.0, 80.0),
             18.0,
         ),
         egui::Vec2::ZERO
     );
+}
+
+#[test]
+fn selection_edge_drag_velocity_starts_at_edge_activation_zone() {
+    let viewport = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(200.0, 120.0));
+    let row_height = 18.0;
+    let edge_extent = 24.0_f32.max(row_height * 1.5);
+
+    assert_eq!(
+        selection_edge_drag_velocity(
+            viewport,
+            egui::pos2(100.0, viewport.bottom() - edge_extent),
+            row_height,
+        ),
+        egui::Vec2::ZERO
+    );
+    assert!(
+        selection_edge_drag_velocity(
+            viewport,
+            egui::pos2(100.0, viewport.bottom() - edge_extent + 1.0),
+            row_height,
+        )
+        .y >= row_height * 8.0
+    );
+}
+
+#[test]
+fn selection_edge_drag_velocity_accelerates_outside_viewport() {
+    let viewport = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(200.0, 120.0));
+    let row_height = 18.0;
+    let near_edge = selection_edge_drag_velocity(
+        viewport,
+        egui::pos2(100.0, viewport.bottom() - 8.0),
+        row_height,
+    );
+    let outside = selection_edge_drag_velocity(
+        viewport,
+        egui::pos2(100.0, viewport.bottom() + row_height * 3.0),
+        row_height,
+    );
+
+    assert!(
+        outside.y > near_edge.y,
+        "outside={outside:?}, near_edge={near_edge:?}"
+    );
+    assert!(
+        outside.y >= row_height * 30.0,
+        "outside should move briskly enough for large selections: {outside:?}"
+    );
+}
+
+#[test]
+fn selection_drag_suppresses_pending_reveal_scroll_intents() {
+    let mut view = EditorViewState::new(1, false);
+    view.request_cursor_reveal(crate::app::domain::CursorRevealMode::KeepVisible);
+    view.request_intent(ScrollIntent::Reveal {
+        rect: egui::Rect::from_min_size(egui::pos2(0.0, 200.0), egui::vec2(8.0, 10.0)),
+        align_y: Some(ScrollAlign::NearestWithMargin(24.0)),
+        align_x: None,
+    });
+    view.request_intent(ScrollIntent::Lines(1));
+
+    suppress_view_reveals_for_selection_drag(&mut view);
+
+    assert_eq!(view.cursor_reveal_mode(), None);
+    assert_eq!(view.pending_intents.len(), 1);
+    assert!(matches!(view.pending_intents[0], ScrollIntent::Lines(1)));
 }
 
 #[test]
@@ -410,6 +533,20 @@ fn clamp_scroll_offset_limits_east_and_south_to_content_bounds() {
     assert_eq!(
         max_scroll_offset(egui::vec2(320.0, 260.0), egui::vec2(120.0, 100.0)),
         egui::vec2(200.0, 160.0)
+    );
+}
+
+#[test]
+fn virtual_content_height_includes_eof_tail_for_final_line_top_scroll() {
+    let buffer = BufferState::new("tail.txt".to_owned(), numbered_lines(120), None);
+    let line_count = buffer.line_count.max(1) as f32;
+    let tab = WorkspaceTab::new(buffer);
+    let content_height = virtual_editor_content_height(&tab, tab.active_view_id, 10.0, 40.0);
+
+    assert_eq!(content_height, line_count * 10.0 + 30.0);
+    assert_eq!(
+        max_scroll_offset(egui::vec2(200.0, content_height), egui::vec2(200.0, 40.0)).y,
+        (line_count - 1.0) * 10.0
     );
 }
 

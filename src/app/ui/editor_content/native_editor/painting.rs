@@ -33,11 +33,17 @@ pub(super) fn paint_editor(
     if let Some(cursor_range) = &view.cursor_range
         && !changed
     {
-        let content_cursor_rect = galley
+        let galley_local_cursor_rect = galley
             .pos_from_cursor(local_cursor(cursor_range.primary, char_offset_base).to_egui_ccursor())
             .expand(1.5);
-        let cursor_rect = content_cursor_rect.translate(galley_pos.to_vec2());
-        return paint_cursor_effects(ui, rect, cursor_rect, content_cursor_rect, view);
+        let cursor_rect = galley_local_cursor_rect.translate(galley_pos.to_vec2());
+        // Reveal targets must be in scroll-content coordinates. The editor rect
+        // spans the full document and starts at the content origin, so subtract
+        // `rect.min` to translate the screen-space cursor rect into content space.
+        // (The slice galley is offset by `start_line * row_height` within the
+        // rect, so galley-local coords are NOT content coords.)
+        let cursor_rect_content = cursor_rect.translate(-rect.min.to_vec2());
+        return paint_cursor_effects(ui, rect, cursor_rect, cursor_rect_content, view);
     }
 
     CursorPaintOutcome::default()

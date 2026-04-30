@@ -37,6 +37,8 @@ pub struct DisplayPoint {
 pub struct DisplaySnapshot {
     row_height: f32,
     content_height: f32,
+    /// Document display row represented by snapshot-local row 0.
+    display_row_base: u32,
     /// Row tops in pixels, length = row_count + 1 (last entry = total height).
     row_tops: Vec<f32>,
     /// Logical line number for each display row (for gutter).
@@ -149,6 +151,7 @@ impl DisplaySnapshot {
         Self {
             row_height,
             content_height,
+            display_row_base: saturating_u32(logical_line_base),
             row_tops,
             row_logical_lines,
             row_char_ranges,
@@ -196,11 +199,16 @@ impl DisplaySnapshot {
         &self.row_records
     }
 
-    /// Locate the display row that contains the given char offset. Returns
-    /// the last row's index if `char_offset` is past end-of-content. Returns
-    /// `None` for an empty snapshot.
+    /// Locate the snapshot-local display row that contains the given char
+    /// offset. Returns `None` when the offset is outside this snapshot's
+    /// sliced char range.
     pub fn row_for_char_offset(&self, char_offset: u32) -> Option<DisplayRow> {
         if self.row_char_ranges.is_empty() {
+            return None;
+        }
+        let first = self.row_char_ranges.first()?;
+        let last = self.row_char_ranges.last()?;
+        if char_offset < first.start || char_offset > last.end {
             return None;
         }
         let position = self
@@ -210,12 +218,31 @@ impl DisplaySnapshot {
         Some(DisplayRow(clamped as u32))
     }
 
+    /// Document display row for a snapshot-local row.
+    pub fn document_row_for_snapshot_row(&self, row: DisplayRow) -> Option<f32> {
+        self.row_record(row)?;
+        Some(self.display_row_base.saturating_add(row.0) as f32)
+    }
+
+    pub fn row_for_document_row(&self, document_row: f32) -> Option<DisplayRow> {
+        if !document_row.is_finite() || document_row < 0.0 {
+            return None;
+        }
+        let target = document_row.floor() as u32;
+        let local = target.checked_sub(self.display_row_base)?;
+        (local < self.row_count()).then_some(DisplayRow(local))
+    }
+
+    pub fn document_row_for_char_offset(&self, char_offset: u32) -> Option<f32> {
+        let row = self.row_for_char_offset(char_offset)?;
+        self.document_row_for_snapshot_row(row)
+    }
+
     /// Pixel y of the row containing `char_offset` plus the fractional offset
     /// within that row. Useful for cursor-reveal computations driven by a
     /// piece-tree-backed `ScrollAnchor`.
     pub fn pixel_y_for_char_offset(&self, char_offset: u32) -> Option<f32> {
-        let row = self.row_for_char_offset(char_offset)?;
-        self.row_top(row)
+        Some(self.document_row_for_char_offset(char_offset)? * self.row_height)
     }
 
     /// Compute the visible row range for a given scroll offset (top display
@@ -330,6 +357,19 @@ mod tests {
         let second = snapshot.row_record(DisplayRow(1)).expect("second row");
         assert_eq!(second.logical_line, 6);
         assert!(second.char_range.start > first.char_range.start);
+    }
+
+    #[test]
+    fn sliced_snapshot_resolves_document_rows_and_rejects_outside_offsets() {
+        let snapshot =
+            DisplaySnapshot::from_galley_with_base(&galley_for("alpha\nbravo"), 10.0, 40, 90);
+
+        assert_eq!(snapshot.row_for_char_offset(39), None);
+        assert_eq!(snapshot.document_row_for_char_offset(40), Some(90.0));
+        assert_eq!(snapshot.document_row_for_char_offset(46), Some(91.0));
+        assert_eq!(snapshot.row_for_document_row(90.0), Some(DisplayRow(0)));
+        assert_eq!(snapshot.row_for_document_row(91.0), Some(DisplayRow(1)));
+        assert_eq!(snapshot.row_for_document_row(12.0), None);
     }
 
     #[test]

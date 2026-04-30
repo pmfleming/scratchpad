@@ -4,7 +4,7 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::{ViewId, WorkspaceTab};
 use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::theme::*;
-use crate::app::ui::autoscroll::{AutoScrollAxis, AutoScrollConfig, edge_auto_scroll_delta};
+use crate::app::ui::autoscroll::{AutoScrollAxis, AutoScrollConfig, edge_auto_scroll_velocity};
 use crate::app::ui::callout;
 use crate::app::ui::editor_content::{
     self, EditorContentOutcome, EditorContentStyle, EditorHighlightStyle, TextEditOptions,
@@ -18,14 +18,21 @@ use crate::app::ui::tile_header::{
 use crate::app::ui::widget_ids;
 use eframe::egui;
 
-const EDITOR_SELECTION_AUTOSCROLL_EDGE_ROWS: f32 = 2.0;
-const EDITOR_SELECTION_AUTOSCROLL_MAX_STEP: f32 = 10.0;
-const EDITOR_SELECTION_AUTOSCROLL_CROSS_AXIS_MARGIN: f32 = 12.0;
+const EDITOR_SELECTION_AUTOSCROLL_EDGE_ROWS: f32 = 1.5;
+const EDITOR_SELECTION_AUTOSCROLL_MIN_EDGE_PX: f32 = 24.0;
+const EDITOR_SELECTION_AUTOSCROLL_OUTSIDE_ROWS: f32 = 8.0;
+const EDITOR_SELECTION_AUTOSCROLL_MIN_ROWS_PER_SEC: f32 = 8.0;
+const EDITOR_SELECTION_AUTOSCROLL_MAX_ROWS_PER_SEC: f32 = 120.0;
+const EDITOR_SELECTION_AUTOSCROLL_CROSS_AXIS_MARGIN: f32 = 24.0;
 
 fn editor_selection_autoscroll_config(row_height: f32) -> AutoScrollConfig {
+    let row_height = row_height.max(1.0);
     AutoScrollConfig {
-        edge_extent: (EDITOR_SELECTION_AUTOSCROLL_EDGE_ROWS * row_height).max(1.0),
-        max_step: EDITOR_SELECTION_AUTOSCROLL_MAX_STEP,
+        edge_extent: (EDITOR_SELECTION_AUTOSCROLL_EDGE_ROWS * row_height)
+            .max(EDITOR_SELECTION_AUTOSCROLL_MIN_EDGE_PX),
+        outside_extent: EDITOR_SELECTION_AUTOSCROLL_OUTSIDE_ROWS * row_height,
+        min_velocity: EDITOR_SELECTION_AUTOSCROLL_MIN_ROWS_PER_SEC * row_height,
+        max_velocity: EDITOR_SELECTION_AUTOSCROLL_MAX_ROWS_PER_SEC * row_height,
         cross_axis_margin: EDITOR_SELECTION_AUTOSCROLL_CROSS_AXIS_MARGIN,
     }
 }
@@ -292,6 +299,11 @@ fn show_editor_scroll_area(
         .scrollbar_x(scrollbar_policy_from_egui(request.scroll_bar_visibility))
         .scrollbar_y(scrollbar_policy_from_egui(request.scroll_bar_visibility))
         .min_content_size(egui::vec2(0.0, frame.virtual_content_height))
+        // Match the no-overscroll clamp applied in `resolve_editor_scroll_offset_override`.
+        // Otherwise the scrollbar's track is sized for one extra viewport-height of
+        // overscroll while the offset is clamped to `content - viewport`, so the thumb
+        // pins at ~93% of the track and the per-frame clamp tug-of-war flickers.
+        .eof_overscroll(false)
         .show_viewport(ui, |ui, _offset, viewport| {
             let mut content_style = request.content_style;
             content_style.viewport = Some(viewport);
@@ -310,29 +322,22 @@ fn show_editor_scroll_area(
 
     let content_size =
         editor_scroll_content_size(output.content_size, frame.virtual_content_height);
+    if selection_drag_active(
+        ui,
+        output.inner.interaction_response.as_ref(),
+        output.inner_rect,
+    ) {
+        suppress_selection_drag_reveals(tab, request.view_id);
+    }
+    finish_editor_scroll_frame(tab, request.view_id, &frame, &output, content_size);
     apply_selection_edge_autoscroll_intent(
         ui,
         tab,
         request.view_id,
+        frame.scroll_id,
         output.inner.interaction_response.as_ref(),
         output.inner_rect,
         frame.row_height,
-    );
-    let drag_requested_scroll_offset = requested_scroll_offset_for_pointer_drag(
-        ui,
-        frame.scroll_offset,
-        output.inner.interaction_response.as_ref(),
-        content_size,
-        output.inner_rect.size(),
-        output.inner_rect,
-    );
-    finish_editor_scroll_frame(
-        tab,
-        request.view_id,
-        &frame,
-        &output,
-        content_size,
-        drag_requested_scroll_offset,
     );
     output.inner
 }
@@ -340,7 +345,6 @@ fn show_editor_scroll_area(
 struct EditorScrollFrame<'a> {
     scroll_id: egui::Id,
     previous_snapshot: Option<&'a DisplaySnapshot>,
-    scroll_offset: egui::Vec2,
     wheel_requested_scroll_offset: Option<egui::Vec2>,
     row_height: f32,
     virtual_content_height: f32,
@@ -372,15 +376,16 @@ fn prepare_editor_scroll_frame<'a>(
         wheel_requested_scroll_offset.unwrap_or(scroll_offset),
     );
     let row_height = ui.fonts_mut(|fonts| fonts.row_height(content_style.text_edit.editor_font_id));
+    let viewport_height = ui.available_rect_before_wrap().height().max(0.0);
     let virtual_content_height = virtual_editor_content_height(
         tab,
         view_id,
         row_height.max(content_style.text_edit.editor_font_id.size),
+        viewport_height,
     );
     EditorScrollFrame {
         scroll_id,
         previous_snapshot,
-        scroll_offset,
         wheel_requested_scroll_offset,
         row_height,
         virtual_content_height,
@@ -449,10 +454,22 @@ fn virtual_editor_content_height(
     tab: &WorkspaceTab,
     view_id: ViewId,
     virtual_row_height: f32,
+    viewport_height: f32,
 ) -> f32 {
     tab.buffer_for_view(view_id)
-        .map(|buffer| buffer.line_count.max(1) as f32 * virtual_row_height)
+        .map(|buffer| {
+            buffer.line_count.max(1) as f32 * virtual_row_height
+                + editor_eof_tail_height(viewport_height, virtual_row_height)
+        })
         .unwrap_or_default()
+}
+
+fn editor_eof_tail_height(viewport_height: f32, row_height: f32) -> f32 {
+    if viewport_height.is_finite() && row_height.is_finite() && row_height > 0.0 {
+        (viewport_height - row_height).max(0.0)
+    } else {
+        0.0
+    }
 }
 
 fn finish_editor_scroll_frame(
@@ -461,7 +478,6 @@ fn finish_editor_scroll_frame(
     frame: &EditorScrollFrame<'_>,
     output: &scrolling::ScrollAreaOutput<EditorContentOutcome>,
     content_size: egui::Vec2,
-    drag_requested_scroll_offset: Option<egui::Vec2>,
 ) {
     if let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) {
         publish_scroll_manager_metrics(view, output.inner_rect, frame.row_height, content_size);
@@ -471,7 +487,6 @@ fn finish_editor_scroll_frame(
             content_size,
             output.inner_rect.size(),
             frame.wheel_requested_scroll_offset,
-            drag_requested_scroll_offset,
             scrollbar_requested_scroll_offset,
         ) {
             view.set_editor_pixel_offset_resolved(buffer, offset);
@@ -518,12 +533,10 @@ fn editor_pixel_offset_resolved(
     buffer: &crate::app::domain::BufferState,
     snapshot_fallback: Option<&DisplaySnapshot>,
 ) -> egui::Vec2 {
-    let metrics = view.scroll.metrics();
     let snapshot = view.latest_display_snapshot.as_ref().or(snapshot_fallback);
     let resolve = |id| buffer.document().piece_tree().anchor_position(id);
     let anchor_to_row = scrolling::display_aware_anchor_to_row(snapshot, resolve);
-    let row = anchor_to_row(view.scroll.anchor());
-    let y = row * metrics.row_height.max(0.0);
+    let y = view.scroll.pixel_offset_y(anchor_to_row);
     egui::vec2(view.scroll.horizontal_px(), y)
 }
 
@@ -592,11 +605,9 @@ fn resolve_editor_scroll_offset_override(
     content_size: egui::Vec2,
     viewport_size: egui::Vec2,
     wheel_requested_scroll_offset: Option<egui::Vec2>,
-    drag_requested_scroll_offset: Option<egui::Vec2>,
     scrollbar_requested_scroll_offset: Option<egui::Vec2>,
 ) -> Option<egui::Vec2> {
-    drag_requested_scroll_offset
-        .or(scrollbar_requested_scroll_offset)
+    scrollbar_requested_scroll_offset
         .or(wheel_requested_scroll_offset)
         .map(|offset| clamp_scroll_offset(offset, content_size, viewport_size))
 }
@@ -608,62 +619,74 @@ fn editor_scroll_content_size(content_size: egui::Vec2, virtual_content_height: 
     )
 }
 
-fn requested_scroll_offset_for_pointer_drag(
-    ui: &egui::Ui,
-    current_offset: egui::Vec2,
-    interaction_response: Option<&egui::Response>,
-    content_size: egui::Vec2,
-    viewport_size: egui::Vec2,
-    inner_rect: egui::Rect,
-) -> Option<egui::Vec2> {
-    if !pointer_over_rect(ui, inner_rect)
-        || !ui.input(|input| input.pointer.button_down(egui::PointerButton::Primary))
-        || interaction_response
-            .is_some_and(|response| response.dragged_by(egui::PointerButton::Primary))
-    {
-        return None;
-    }
-
-    scroll_offset_from_drag_delta(
-        current_offset,
-        ui.input(|input| input.pointer.delta()),
-        content_size,
-        viewport_size,
-    )
-}
-
 fn apply_selection_edge_autoscroll_intent(
     ui: &egui::Ui,
     tab: &mut WorkspaceTab,
     view_id: ViewId,
+    scroll_id: egui::Id,
     interaction_response: Option<&egui::Response>,
     inner_rect: egui::Rect,
     row_height: f32,
 ) {
-    let Some(delta) =
-        selection_edge_autoscroll_delta(ui, interaction_response, inner_rect, row_height)
-    else {
+    if !selection_drag_active(ui, interaction_response, inner_rect) {
+        return;
+    }
+    let Some(velocity) = selection_edge_autoscroll_velocity(ui, inner_rect, row_height) else {
         return;
     };
-    if delta == egui::Vec2::ZERO {
+    if velocity == egui::Vec2::ZERO {
         clear_edge_autoscroll(tab, view_id);
         return;
     }
-    apply_edge_autoscroll_delta(tab, view_id, delta);
+    ui.ctx().request_repaint();
+    let dt = ui.input(|input| input.stable_dt).min(0.1);
+    apply_edge_autoscroll_velocity(ui, tab, view_id, scroll_id, velocity, dt);
 }
 
-fn selection_edge_autoscroll_delta(
+fn selection_edge_autoscroll_velocity(
     ui: &egui::Ui,
-    interaction_response: Option<&egui::Response>,
     inner_rect: egui::Rect,
     row_height: f32,
 ) -> Option<egui::Vec2> {
-    let is_drag_selecting = ui
-        .input(|input| input.pointer.button_down(egui::PointerButton::Primary))
-        && interaction_response
-            .is_some_and(|response| response.dragged_by(egui::PointerButton::Primary));
     let pointer_pos = ui.input(|input| input.pointer.latest_pos())?;
-    is_drag_selecting.then(|| selection_edge_drag_delta(inner_rect, pointer_pos, row_height))
+    Some(selection_edge_drag_velocity(
+        inner_rect,
+        pointer_pos,
+        row_height,
+    ))
+}
+
+fn selection_drag_active(
+    ui: &egui::Ui,
+    interaction_response: Option<&egui::Response>,
+    inner_rect: egui::Rect,
+) -> bool {
+    let primary_down = ui.input(|input| input.pointer.button_down(egui::PointerButton::Primary));
+    let pointer_near_editor = ui.input(|input| {
+        input
+            .pointer
+            .latest_pos()
+            .is_some_and(|pos| inner_rect.expand(32.0).contains(pos))
+    });
+    primary_down
+        && interaction_response.is_some_and(|response| {
+            response.dragged_by(egui::PointerButton::Primary)
+                || response.has_focus()
+                || response.hovered()
+                || pointer_near_editor
+        })
+}
+
+fn suppress_selection_drag_reveals(tab: &mut WorkspaceTab, view_id: ViewId) {
+    if let Some(view) = tab.view_mut(view_id) {
+        suppress_view_reveals_for_selection_drag(view);
+    }
+}
+
+fn suppress_view_reveals_for_selection_drag(view: &mut crate::app::domain::EditorViewState) {
+    view.clear_cursor_reveal();
+    view.pending_intents
+        .retain(|intent| !matches!(intent, scrolling::ScrollIntent::Reveal { .. }));
 }
 
 fn clear_edge_autoscroll(tab: &mut WorkspaceTab, view_id: ViewId) {
@@ -672,18 +695,27 @@ fn clear_edge_autoscroll(tab: &mut WorkspaceTab, view_id: ViewId) {
     }
 }
 
-fn apply_edge_autoscroll_delta(tab: &mut WorkspaceTab, view_id: ViewId, delta: egui::Vec2) {
+fn apply_edge_autoscroll_velocity(
+    ui: &egui::Ui,
+    tab: &mut WorkspaceTab,
+    view_id: ViewId,
+    scroll_id: egui::Id,
+    velocity: egui::Vec2,
+    dt: f32,
+) {
     let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) else {
         return;
     };
     let snapshot = view.latest_display_snapshot.clone();
     let resolve = |id| buffer.document().piece_tree().anchor_position(id);
     let anchor_to_row = scrolling::display_aware_anchor_to_row(snapshot.as_ref(), resolve);
-    apply_edge_autoscroll_axis(view, scrolling::Axis::X, delta.x, &anchor_to_row);
-    apply_edge_autoscroll_axis(view, scrolling::Axis::Y, delta.y, &anchor_to_row);
+    apply_edge_autoscroll_axis(view, scrolling::Axis::X, velocity.x, &anchor_to_row);
+    apply_edge_autoscroll_axis(view, scrolling::Axis::Y, velocity.y, &anchor_to_row);
     view.scroll
-        .tick_edge_autoscroll(1.0, &anchor_to_row, scrolling::naive_row_to_anchor);
+        .tick_edge_autoscroll(dt, &anchor_to_row, scrolling::naive_row_to_anchor);
     view.scroll.clear_edge_autoscroll();
+    let offset = editor_pixel_offset_resolved(view, buffer, snapshot.as_ref());
+    sync_local_scroll_state(ui, scroll_id, offset);
 }
 
 fn apply_edge_autoscroll_axis(
@@ -733,34 +765,20 @@ fn scroll_offset_from_wheel_delta(
     (desired != current_offset).then_some(desired)
 }
 
-fn scroll_offset_from_drag_delta(
-    current_offset: egui::Vec2,
-    drag_delta: egui::Vec2,
-    content_size: egui::Vec2,
-    viewport_size: egui::Vec2,
-) -> Option<egui::Vec2> {
-    if drag_delta == egui::Vec2::ZERO {
-        return None;
-    }
-
-    let desired = clamp_scroll_offset(current_offset - drag_delta, content_size, viewport_size);
-    (desired != current_offset).then_some(desired)
-}
-
-fn selection_edge_drag_delta(
+fn selection_edge_drag_velocity(
     viewport_rect: egui::Rect,
     pointer_pos: egui::Pos2,
     row_height: f32,
 ) -> egui::Vec2 {
     let config = editor_selection_autoscroll_config(row_height);
     egui::vec2(
-        edge_auto_scroll_delta(
+        edge_auto_scroll_velocity(
             viewport_rect,
             pointer_pos,
             AutoScrollAxis::Horizontal,
             config,
         ),
-        edge_auto_scroll_delta(viewport_rect, pointer_pos, AutoScrollAxis::Vertical, config),
+        edge_auto_scroll_velocity(viewport_rect, pointer_pos, AutoScrollAxis::Vertical, config),
     )
 }
 

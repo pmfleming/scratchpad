@@ -262,22 +262,15 @@ impl ScrollManager {
 
 /// Default approximation for callers that have not yet plumbed a real
 /// display-map. Treats every logical line as exactly one display row, ignoring
-/// wrap and folds. Used as the v1 fallback when no piece-tree-backed anchor
-/// is available; piece-tree-backed anchors should be resolved by the renderer
-/// using the active `DisplaySnapshot` instead.
+/// wrap and folds. Returns the anchor's base row only; callers that need the
+/// top-of-viewport row add `display_row_offset` exactly once.
 pub fn naive_anchor_to_row(anchor: ScrollAnchor) -> f32 {
     match anchor {
-        ScrollAnchor::Logical {
-            logical_line,
-            display_row_offset,
-            ..
-        } => logical_line as f32 + display_row_offset,
+        ScrollAnchor::Logical { logical_line, .. } => logical_line as f32,
         // For piece-backed anchors, the renderer should provide a display-map
-        // closure; fall back to the fractional offset alone if the naive
-        // helper is used directly.
-        ScrollAnchor::Piece {
-            display_row_offset, ..
-        } => display_row_offset,
+        // closure; fall back to the top base row if the naive helper is used
+        // directly.
+        ScrollAnchor::Piece { .. } => 0.0,
     }
 }
 
@@ -292,34 +285,26 @@ pub fn naive_row_to_anchor(row: f32) -> ScrollAnchor {
 }
 
 /// Build an `anchor_to_row` closure that resolves piece-tree-backed anchors
-/// through the active `DisplaySnapshot`. Falls back to the naive logical
-/// mapping when no snapshot is available, when the anchor cannot be located
-/// in the piece tree (released anchor), or when the resolved char offset is
-/// outside the snapshot's range. Logical anchors always use the naive mapping.
+/// through the active `DisplaySnapshot`. Returns the anchor's base row only;
+/// callers that need the top-of-viewport row add `display_row_offset` exactly
+/// once. Falls back to the top base row when a piece anchor cannot be resolved.
 pub fn display_aware_anchor_to_row<'a>(
     snapshot: Option<&'a DisplaySnapshot>,
     resolve_piece: impl Fn(AnchorId) -> Option<usize> + 'a,
 ) -> impl Fn(ScrollAnchor) -> f32 + 'a {
     move |anchor| match anchor {
-        ScrollAnchor::Logical {
-            logical_line,
-            display_row_offset,
-            ..
-        } => logical_line as f32 + display_row_offset,
-        ScrollAnchor::Piece {
-            anchor: id,
-            display_row_offset,
-        } => {
+        ScrollAnchor::Logical { logical_line, .. } => logical_line as f32,
+        ScrollAnchor::Piece { anchor: id, .. } => {
             let Some(snapshot) = snapshot else {
-                return display_row_offset;
+                return 0.0;
             };
             let Some(char_offset) = resolve_piece(id) else {
-                return display_row_offset;
+                return 0.0;
             };
-            let Some(row) = snapshot.row_for_char_offset(char_offset as u32) else {
-                return display_row_offset;
+            let Some(row) = snapshot.document_row_for_char_offset(char_offset as u32) else {
+                return 0.0;
             };
-            row.0 as f32 + display_row_offset
+            row
         }
     }
 }
@@ -409,6 +394,43 @@ mod tests {
         );
         assert!(sm.user_scrolled());
         assert_eq!(sm.anchor().logical_line().unwrap(), 2);
+    }
+
+    #[test]
+    fn fractional_display_row_offset_is_counted_once() {
+        let mut sm = manager(1000, 800.0);
+        sm.apply_intent(
+            ScrollIntent::ScrollbarTo {
+                axis: Axis::Y,
+                offset_pixels: 210.0,
+            },
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+
+        assert_eq!(naive_anchor_to_row(sm.anchor()), 10.0);
+        assert_eq!(sm.anchor().display_row_offset(), 0.5);
+        assert_eq!(sm.top_display_row(naive_anchor_to_row), 10.5);
+        assert_eq!(sm.pixel_offset_y(naive_anchor_to_row), 210.0);
+    }
+
+    #[test]
+    fn negative_edge_autoscroll_decreases_fractional_top_row() {
+        let mut sm = manager(1000, 800.0);
+        sm.apply_intent(
+            ScrollIntent::ScrollbarTo {
+                axis: Axis::Y,
+                offset_pixels: 210.0,
+            },
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+        apply_edge_autoscroll(&mut sm, Axis::Y, -10.0);
+
+        sm.tick_edge_autoscroll(1.0, naive_anchor_to_row, naive_row_to_anchor);
+
+        assert_eq!(sm.top_display_row(naive_anchor_to_row), 10.0);
+        assert_eq!(sm.pixel_offset_y(naive_anchor_to_row), 200.0);
     }
 
     #[test]

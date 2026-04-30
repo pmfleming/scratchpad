@@ -3,7 +3,9 @@ use eframe::egui;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct AutoScrollConfig {
     pub(crate) edge_extent: f32,
-    pub(crate) max_step: f32,
+    pub(crate) outside_extent: f32,
+    pub(crate) min_velocity: f32,
+    pub(crate) max_velocity: f32,
     pub(crate) cross_axis_margin: f32,
 }
 
@@ -13,7 +15,7 @@ pub(crate) enum AutoScrollAxis {
     Vertical,
 }
 
-pub(crate) fn edge_auto_scroll_delta(
+pub(crate) fn edge_auto_scroll_velocity(
     viewport_rect: egui::Rect,
     pointer_pos: egui::Pos2,
     axis: AutoScrollAxis,
@@ -26,13 +28,13 @@ pub(crate) fn edge_auto_scroll_delta(
     }
 
     let leading_distance = distance_to_leading_edge(viewport_rect, pointer_pos, axis);
-    if leading_distance <= config.edge_extent {
-        return -scaled_auto_scroll_delta(leading_distance, config);
+    if leading_distance < config.edge_extent {
+        return -scaled_auto_scroll_velocity(leading_distance, config);
     }
 
     let trailing_distance = distance_to_trailing_edge(viewport_rect, pointer_pos, axis);
-    if trailing_distance <= config.edge_extent {
-        return scaled_auto_scroll_delta(trailing_distance, config);
+    if trailing_distance < config.edge_extent {
+        return scaled_auto_scroll_velocity(trailing_distance, config);
     }
 
     0.0
@@ -82,28 +84,37 @@ fn distance_to_trailing_edge(
     }
 }
 
-fn scaled_auto_scroll_delta(distance: f32, config: AutoScrollConfig) -> f32 {
-    let intensity = (1.0 - distance / config.edge_extent).clamp(0.0, 1.0);
-    config.max_step * intensity
+fn scaled_auto_scroll_velocity(distance_to_edge: f32, config: AutoScrollConfig) -> f32 {
+    if config.edge_extent <= 0.0 || config.max_velocity <= 0.0 {
+        return 0.0;
+    }
+    let inside_edge = (config.edge_extent - distance_to_edge).clamp(0.0, config.edge_extent);
+    let outside_edge = (-distance_to_edge).clamp(0.0, config.outside_extent.max(0.0));
+    let max_penetration = (config.edge_extent + config.outside_extent.max(0.0)).max(1.0);
+    let intensity = ((inside_edge + outside_edge) / max_penetration).clamp(0.0, 1.0);
+    let curved = intensity * intensity;
+    config.min_velocity.max(0.0) + (config.max_velocity - config.min_velocity).max(0.0) * curved
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AutoScrollAxis, AutoScrollConfig, edge_auto_scroll_delta};
+    use super::{AutoScrollAxis, AutoScrollConfig, edge_auto_scroll_velocity};
     use eframe::egui::{Rect, pos2, vec2};
 
     const CONFIG: AutoScrollConfig = AutoScrollConfig {
         edge_extent: 36.0,
-        max_step: 18.0,
+        outside_extent: 72.0,
+        min_velocity: 20.0,
+        max_velocity: 180.0,
         cross_axis_margin: 12.0,
     };
 
     #[test]
-    fn edge_auto_scroll_delta_pushes_toward_leading_edge() {
+    fn edge_auto_scroll_velocity_pushes_toward_leading_edge() {
         let viewport = Rect::from_min_size(pos2(40.0, 10.0), vec2(240.0, 30.0));
 
         assert!(
-            edge_auto_scroll_delta(
+            edge_auto_scroll_velocity(
                 viewport,
                 pos2(42.0, 24.0),
                 AutoScrollAxis::Horizontal,
@@ -113,11 +124,11 @@ mod tests {
     }
 
     #[test]
-    fn edge_auto_scroll_delta_pushes_toward_trailing_edge() {
+    fn edge_auto_scroll_velocity_pushes_toward_trailing_edge() {
         let viewport = Rect::from_min_size(pos2(40.0, 10.0), vec2(140.0, 240.0));
 
         assert!(
-            edge_auto_scroll_delta(
+            edge_auto_scroll_velocity(
                 viewport,
                 pos2(70.0, 248.0),
                 AutoScrollAxis::Vertical,
@@ -127,11 +138,11 @@ mod tests {
     }
 
     #[test]
-    fn edge_auto_scroll_delta_is_zero_outside_cross_axis_margin() {
+    fn edge_auto_scroll_velocity_is_zero_outside_cross_axis_margin() {
         let viewport = Rect::from_min_size(pos2(40.0, 10.0), vec2(240.0, 30.0));
 
         assert_eq!(
-            edge_auto_scroll_delta(
+            edge_auto_scroll_velocity(
                 viewport,
                 pos2(42.0, 80.0),
                 AutoScrollAxis::Horizontal,
@@ -139,5 +150,51 @@ mod tests {
             ),
             0.0
         );
+    }
+
+    #[test]
+    fn edge_auto_scroll_velocity_starts_only_inside_edge_zone() {
+        let viewport = Rect::from_min_size(pos2(40.0, 10.0), vec2(140.0, 240.0));
+
+        assert_eq!(
+            edge_auto_scroll_velocity(
+                viewport,
+                pos2(70.0, viewport.bottom() - CONFIG.edge_extent),
+                AutoScrollAxis::Vertical,
+                CONFIG,
+            ),
+            0.0
+        );
+        assert!(
+            edge_auto_scroll_velocity(
+                viewport,
+                pos2(70.0, viewport.bottom() - CONFIG.edge_extent + 1.0),
+                AutoScrollAxis::Vertical,
+                CONFIG,
+            ) > 0.0
+        );
+    }
+
+    #[test]
+    fn edge_auto_scroll_velocity_accelerates_outside_viewport() {
+        let viewport = Rect::from_min_size(pos2(40.0, 10.0), vec2(140.0, 240.0));
+        let near_edge = edge_auto_scroll_velocity(
+            viewport,
+            pos2(70.0, viewport.bottom() - 8.0),
+            AutoScrollAxis::Vertical,
+            CONFIG,
+        );
+        let outside = edge_auto_scroll_velocity(
+            viewport,
+            pos2(70.0, viewport.bottom() + 40.0),
+            AutoScrollAxis::Vertical,
+            CONFIG,
+        );
+
+        assert!(
+            outside > near_edge,
+            "outside={outside}, near_edge={near_edge}"
+        );
+        assert!(outside <= CONFIG.max_velocity);
     }
 }

@@ -5,11 +5,13 @@ use super::{CharCursor, CursorRange};
 use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
 use eframe::egui;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_mouse_interaction(
     ui: &mut egui::Ui,
     response: &egui::Response,
     galley: &egui::Galley,
     rect: egui::Rect,
+    galley_pos: egui::Pos2,
     view: &mut EditorViewState,
     piece_tree: &crate::app::domain::buffer::PieceTreeLite,
     char_offset_base: usize,
@@ -19,6 +21,7 @@ pub(super) fn handle_mouse_interaction(
         response,
         galley,
         rect,
+        galley_pos,
         view,
         piece_tree,
         char_offset_base,

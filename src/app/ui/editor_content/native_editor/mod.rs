@@ -62,15 +62,34 @@ pub fn render_editor_text_edit(
     viewport: Option<egui::Rect>,
 ) -> EditorWidgetOutcome {
     view.resolve_anchored_ranges(buffer);
-    let mut document_revision = buffer.document_revision();
     let total_chars = buffer.current_file_length().chars;
     let mut galley_context = build_editor_galley(ui, buffer, view, options, viewport);
 
     let row_height = editor_row_height(ui, options.editor_font_id);
-    let (rect, response) =
-        allocate_editor_rect(ui, &galley_context.galley, options, row_height, viewport);
+    let viewport_height = editor_viewport_height(ui, viewport);
+    let total_content_height = total_editor_content_height(
+        buffer.line_count.max(1),
+        row_height,
+        &galley_context.galley,
+        viewport_height,
+    );
+    let (rect, response) = allocate_editor_rect(
+        ui,
+        &galley_context.galley,
+        options,
+        total_content_height,
+        viewport,
+    );
+    let mut galley_pos = galley_origin(rect, galley_context.logical_line_base, row_height);
     request_editor_focus(ui, &response, options.request_focus);
 
+    // The pre-input galley bakes `buffer.active_selection` into its layout.
+    // If `process_editor_input` changes either the document or that
+    // selection (mouse-drag, cursor move, focus gain), the painted
+    // highlight would otherwise lag one frame and flicker. Capture the
+    // exact value the pre-input galley used so we can rebuild only when
+    // the bake actually became stale.
+    let pre_active_selection = buffer.active_selection.clone();
     let input = process_editor_input(
         ui,
         buffer,
@@ -79,6 +98,7 @@ pub fn render_editor_text_edit(
             response: &response,
             galley: &galley_context.galley,
             rect,
+            galley_pos,
             options,
             viewport,
             row_height,
@@ -88,12 +108,13 @@ pub fn render_editor_text_edit(
         },
     );
 
-    if input.changed {
+    let mut document_revision = buffer.document_revision();
+    if input.changed || pre_active_selection != buffer.active_selection {
         document_revision = buffer.document_revision();
         galley_context = build_editor_galley(ui, buffer, view, options, viewport);
+        galley_pos = galley_origin(rect, galley_context.logical_line_base, row_height);
     }
 
-    let galley_pos = rect.min;
     let paint_outcome = if ui.is_rect_visible(rect) {
         paint_editor(
             ui,
@@ -141,6 +162,7 @@ struct EditorInputRequest<'a> {
     response: &'a egui::Response,
     galley: &'a egui::Galley,
     rect: egui::Rect,
+    galley_pos: egui::Pos2,
     options: TextEditOptions<'a>,
     viewport: Option<egui::Rect>,
     row_height: f32,
@@ -162,16 +184,25 @@ fn process_editor_input(
         request.response,
         request.galley,
         request.rect,
+        request.galley_pos,
         view,
         buffer.document().piece_tree(),
         request.char_offset_base,
     );
+    let suppress_cursor_reveal = request.response.dragged_by(egui::PointerButton::Primary);
     let focused = request.response.has_focus()
         || request.response.gained_focus()
         || request.options.request_focus;
     sync_view_cursor_before_render(view, focused);
     let changed = handle_focused_keyboard_input(ui, buffer, view, &request, focused);
-    request_cursor_reveal_after_input(buffer, view, prev_cursor, prev_cursor_line, changed);
+    request_cursor_reveal_after_input(
+        buffer,
+        view,
+        prev_cursor,
+        prev_cursor_line,
+        changed,
+        suppress_cursor_reveal,
+    );
     publish_active_selection(buffer, view, focused);
     view.sync_cursor_anchors_from_ranges(buffer);
     request_page_navigation_intent(ui, view, focused);
@@ -184,7 +215,13 @@ fn request_cursor_reveal_after_input(
     prev_cursor: Option<CursorRange>,
     prev_cursor_line: Option<usize>,
     changed: bool,
+    suppress_reveal: bool,
 ) {
+    if suppress_reveal {
+        view.clear_cursor_reveal();
+        return;
+    }
+
     if view.cursor_range == prev_cursor {
         return;
     }
@@ -541,17 +578,55 @@ fn allocate_editor_rect(
     ui: &mut egui::Ui,
     galley: &egui::Galley,
     options: TextEditOptions<'_>,
-    row_height: f32,
+    total_content_height: f32,
     viewport: Option<egui::Rect>,
 ) -> (egui::Rect, egui::Response) {
     ui.allocate_exact_size(
         editor_desired_size(
             ui,
             editor_desired_width(ui, galley, options.word_wrap, viewport),
-            editor_content_height(galley, row_height),
+            total_content_height,
         ),
         egui::Sense::click_and_drag(),
     )
+}
+
+fn galley_origin(rect: egui::Rect, logical_line_base: usize, row_height: f32) -> egui::Pos2 {
+    rect.min + egui::vec2(0.0, logical_line_base as f32 * row_height)
+}
+
+fn editor_content_height(galley: &egui::Galley, row_height: f32) -> f32 {
+    galley.rect.height().max(row_height).ceil().max(1.0)
+}
+
+fn editor_viewport_height(ui: &egui::Ui, viewport: Option<egui::Rect>) -> f32 {
+    viewport
+        .map(|rect| rect.height())
+        .filter(|height| height.is_finite() && *height > 0.0)
+        .unwrap_or_else(|| ui.available_height().max(0.0))
+}
+
+fn editor_eof_tail_height(viewport_height: f32, row_height: f32) -> f32 {
+    if viewport_height.is_finite() && row_height.is_finite() && row_height > 0.0 {
+        (viewport_height - row_height).max(0.0)
+    } else {
+        0.0
+    }
+}
+
+/// Full document content height, used to size the editor rect so the scroll
+/// area can scroll across the entire document. The galley itself only covers
+/// a slice (visible rows + overscan); the rest of the rect stays empty.
+fn total_editor_content_height(
+    line_count: usize,
+    row_height: f32,
+    galley: &egui::Galley,
+    viewport_height: f32,
+) -> f32 {
+    let by_lines = (line_count as f32 * row_height).max(row_height);
+    (by_lines.max(editor_content_height(galley, row_height))
+        + editor_eof_tail_height(viewport_height, row_height))
+    .ceil()
 }
 
 fn request_page_navigation_intent(ui: &egui::Ui, view: &mut EditorViewState, focused: bool) {
@@ -604,10 +679,6 @@ fn editor_wrap_width(ui: &egui::Ui, word_wrap: bool, viewport: Option<egui::Rect
 fn editor_desired_size(ui: &egui::Ui, desired_width: f32, desired_height: f32) -> egui::Vec2 {
     let visible_height = ui.available_height();
     egui::vec2(desired_width.max(1.0), desired_height.max(visible_height))
-}
-
-fn editor_content_height(galley: &egui::Galley, row_height: f32) -> f32 {
-    galley.rect.height().max(row_height).ceil().max(1.0)
 }
 
 fn editor_desired_width(

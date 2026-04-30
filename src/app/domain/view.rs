@@ -296,15 +296,15 @@ impl EditorViewState {
         // Resolve the current top display row to a char offset via the
         // snapshot, then create a stable anchor at that offset.
         let pixel_y = self.editor_pixel_offset().y;
-        let top_row = (pixel_y / metrics.row_height).floor().max(0.0) as u32;
+        let top_row = (pixel_y / metrics.row_height).floor().max(0.0);
         let row_count = snapshot.row_count();
         if row_count == 0 {
             return;
         }
-        let clamped_row = top_row.min(row_count.saturating_sub(1));
-        let Some(range) =
-            snapshot.row_char_range(crate::app::ui::scrolling::DisplayRow(clamped_row))
-        else {
+        let Some(snapshot_row) = snapshot.row_for_document_row(top_row) else {
+            return;
+        };
+        let Some(range) = snapshot.row_char_range(snapshot_row) else {
             return;
         };
         let char_offset = range.start as usize;
@@ -518,12 +518,10 @@ impl EditorViewState {
         buffer: &crate::app::domain::BufferState,
     ) -> egui::Vec2 {
         use crate::app::ui::scrolling::display_aware_anchor_to_row;
-        let metrics = self.scroll.metrics();
         let snapshot = self.latest_display_snapshot.as_ref();
         let resolve = |id| buffer.document().piece_tree().anchor_position(id);
         let anchor_to_row = display_aware_anchor_to_row(snapshot, resolve);
-        let row = anchor_to_row(self.scroll.anchor());
-        let y = row * metrics.row_height.max(0.0);
+        let y = self.scroll.pixel_offset_y(anchor_to_row);
         egui::vec2(self.scroll.horizontal_px(), y)
     }
 
@@ -580,10 +578,13 @@ impl EditorViewState {
         }
 
         let row = (offset.y / metrics.row_height).max(0.0);
-        let row_index = row.floor() as u32;
-        let clamped_row = row_index.min(snapshot.row_count().saturating_sub(1));
-        let row_range =
-            snapshot.row_char_range(crate::app::ui::scrolling::DisplayRow(clamped_row))?;
+        // The display snapshot only covers the rendered slice (visible rows +
+        // overscan). If the requested row is outside that window, fall back
+        // to the naive logical mapping in `set_editor_pixel_offset` — the
+        // piece anchor would otherwise be capped to the slice's last row,
+        // which silently bounds vertical scroll to the slice end.
+        let snapshot_row = snapshot.row_for_document_row(row)?;
+        let row_range = snapshot.row_char_range(snapshot_row)?;
         if let Some(previous) = self.last_piece_anchor.take() {
             buffer
                 .document_mut()
@@ -599,9 +600,12 @@ impl EditorViewState {
                 AnchorOwner::view_scroll(self.id),
             );
         self.last_piece_anchor = Some(anchor_id);
+        let document_row = snapshot
+            .document_row_for_snapshot_row(snapshot_row)
+            .unwrap_or_else(|| row.floor());
         Some(ScrollAnchor::Piece {
             anchor: anchor_id,
-            display_row_offset: (row - clamped_row as f32).max(0.0),
+            display_row_offset: (row - document_row).max(0.0),
         })
     }
 
