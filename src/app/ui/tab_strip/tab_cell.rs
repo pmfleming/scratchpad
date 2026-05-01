@@ -1,6 +1,7 @@
 use crate::app::chrome::{tab_button, tab_rename_editor_sized};
 use crate::app::ui::tab_drag;
 use crate::app::ui::tab_strip::context_menu::attach_tab_context_menu;
+use crate::app::ui::widget_ids;
 use eframe::egui;
 
 pub(crate) struct TabCellProps<'a> {
@@ -33,7 +34,7 @@ pub(crate) fn render_tab_cell_sized(
     index: usize,
     props: TabCellProps<'_>,
 ) -> TabCellOutcome {
-    ui.push_id(("tab_strip", index), |ui| {
+    widget_ids::scope(ui, ("tab_strip", index), |ui| {
         if app.tab_rename_matches_slot(index) {
             return render_tab_rename_cell(ui, app, index, props);
         }

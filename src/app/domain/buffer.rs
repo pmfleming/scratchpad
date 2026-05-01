@@ -14,13 +14,17 @@ pub use analysis::{
     analyze_line_endings, display_line_count, platform_default_line_ending,
 };
 pub use document::TextDocument;
-pub(crate) use document::{TextDocumentOperationRecord, TextReplacementError, TextReplacements};
+pub(crate) use document::{
+    TextDocumentEditOperation, TextDocumentOperationRecord, TextHistoryApplyError,
+    TextReplacementError, TextReplacements,
+};
 pub use piece_tree::{
     AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind, PieceTreeCharPosition,
     PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLineInfo, PieceTreeLite, PieceTreeMetrics,
     PieceTreeSlice, PieceTreeSpan,
 };
 pub use snapshot::{DocumentChunk, DocumentSnapshot};
+pub(crate) use state::TextHistoryEvent;
 pub use state::{
     BufferFreshness, BufferId, BufferState, BufferViewStatus, DiskFileState, RestoredBufferState,
 };

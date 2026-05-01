@@ -44,7 +44,11 @@ pub(super) fn show_search_controls(
     if let Some(replace_response) = replace_response
         && replace_response.has_focus()
     {
-        if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
+        if ui.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Enter)) {
+            actions.replace_current_requested = true;
+        } else if ui.input_mut(|input| input.consume_key(egui::Modifiers::ALT, egui::Key::Enter)) {
+            actions.replace_all_requested = true;
+        } else if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
             actions.replace_current_requested = true;
         }
         if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -467,7 +471,11 @@ fn replace_tooltip<'a>(
 }
 
 fn consume_find_input_keys(ui: &mut egui::Ui, actions: &mut SearchStripActions) {
-    if ui.input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::Enter)) {
+    if ui.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Enter)) {
+        actions.replace_current_requested = true;
+    } else if ui.input_mut(|input| input.consume_key(egui::Modifiers::ALT, egui::Key::Enter)) {
+        actions.replace_all_requested = true;
+    } else if ui.input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::Enter)) {
         actions.previous_requested = true;
     } else if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
         actions.next_requested = true;

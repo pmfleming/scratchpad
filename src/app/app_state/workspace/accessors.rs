@@ -18,14 +18,6 @@ impl ScratchpadApp {
         self.tab_manager.active_tab_mut()
     }
 
-    pub(crate) fn describe_tab_at(&self, index: usize) -> String {
-        self.tab_manager.describe_tab_at(index)
-    }
-
-    pub(crate) fn describe_active_tab(&self) -> String {
-        self.tab_manager.describe_active_tab()
-    }
-
     pub(crate) fn active_view_mut(&mut self) -> Option<&mut EditorViewState> {
         self.active_tab_mut()
             .and_then(WorkspaceTab::active_view_mut)

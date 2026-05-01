@@ -6,9 +6,7 @@ use crate::app::services::settings_store::FileOpenDisposition;
 
 impl ScratchpadApp {
     pub fn new_tab(&mut self) {
-        let snapshot = self.capture_transaction_snapshot();
         self.create_workspace_tab(WorkspaceTab::untitled());
-        self.record_transaction("New tab", vec![self.describe_active_tab()], None, snapshot);
         let _ = self.persist_session_now();
     }
 
@@ -55,9 +53,7 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn perform_close_tab(&mut self, index: usize) {
-        let snapshot = self.capture_transaction_snapshot();
-        let tab_description = self.close_tab_internal(index);
-        self.record_transaction("Close tab", vec![tab_description.clone()], None, snapshot);
+        self.close_tab_internal(index);
         let _ = self.persist_session_now();
     }
 
@@ -113,15 +109,23 @@ impl ScratchpadApp {
         self.reload_settings_before_workspace_change();
         self.begin_layout_transition();
         self.tab_manager.append_tab(tab);
+        self.ensure_active_tab_slot_selected();
         self.mark_search_dirty();
         self.request_focus_for_active_view();
     }
 
     fn close_tab_internal(&mut self, index: usize) -> String {
+        let closed_buffer_ids = self
+            .tabs()
+            .get(index)
+            .map(|tab| tab.buffers().map(|buffer| buffer.id).collect::<Vec<_>>())
+            .unwrap_or_default();
         let tab_description = self.tab_manager.describe_tab_at(index);
         let settings_refresh = self.settings_toml_refresh_on_tab_close(index);
         self.begin_layout_transition();
         self.tab_manager.close_tab_internal(index);
+        self.prune_text_history_for_buffers(closed_buffer_ids);
+        self.ensure_active_tab_slot_selected();
         self.mark_search_dirty();
         self.request_focus_for_active_view();
         self.apply_settings_toml_refresh(settings_refresh);

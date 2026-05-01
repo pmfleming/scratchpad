@@ -24,10 +24,10 @@ impl ScratchpadApp {
             AppCommand::NewTab => self.new_tab(),
             AppCommand::OpenFile => self.open_file(),
             AppCommand::OpenFileHere => self.open_file_here(),
-            AppCommand::OpenHistory => self.open_transaction_log(),
             AppCommand::OpenSearch => self.open_search(),
             AppCommand::OpenSearchAndReplace => self.open_search_and_replace(),
             AppCommand::OpenSettings => self.open_settings(),
+            AppCommand::OpenTextHistory => self.open_text_history(),
             AppCommand::OpenUserManual => self.open_user_manual(),
             AppCommand::CloseSearch => self.close_search(),
             AppCommand::UndoActiveBufferTextOperation => {

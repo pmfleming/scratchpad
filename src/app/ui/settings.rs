@@ -3,6 +3,7 @@ use crate::app::chrome::phosphor_button;
 use crate::app::fonts::{EDITOR_FONT_FAMILY, EditorFontPreset};
 use crate::app::services::settings_store::{AppThemeMode, TabListPosition};
 use crate::app::theme::*;
+use crate::app::ui::widget_ids;
 use eframe::egui;
 
 mod appearance;
@@ -47,7 +48,7 @@ fn with_settings_page(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui
         let surface_size = SettingsUi::page_surface_size(ui);
         let horizontal_overflow = SettingsUi::page_overflows_horizontally(viewport_size);
         egui::ScrollArea::both()
-            .id_salt("settings_page_scroll")
+            .id_salt(widget_ids::local(ui, "settings_page_scroll"))
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.set_min_size(surface_size);

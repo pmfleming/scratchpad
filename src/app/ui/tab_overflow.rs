@@ -39,7 +39,7 @@ struct OverflowRowState {
 }
 
 struct OverflowPopupRequest<'a> {
-    app: &'a ScratchpadApp,
+    app: &'a mut ScratchpadApp,
     visible_tab_indices: &'a HashSet<usize>,
     overflow_popup_id: egui::Id,
     anchor: egui::Pos2,
@@ -52,7 +52,7 @@ const OVERFLOW_POPUP_VIEWPORT_MARGIN: f32 = 8.0;
 pub(crate) fn show_overflow_button(
     ctx: &egui::Context,
     ui: &mut egui::Ui,
-    app: &ScratchpadApp,
+    app: &mut ScratchpadApp,
     overflow_popup_open: &mut bool,
     visible_tab_indices: &HashSet<usize>,
     _duplicate_name_counts: &HashMap<String, usize>,
@@ -198,7 +198,7 @@ fn overflow_row_count(app: &ScratchpadApp, visible_tab_indices: &HashSet<usize>)
 
 fn collect_overflow_row_rects(
     ui: &mut egui::Ui,
-    app: &ScratchpadApp,
+    app: &mut ScratchpadApp,
     active_drag_sources: &[usize],
     visible_tab_indices: &HashSet<usize>,
     menu: &mut OverflowMenuContext<'_>,
@@ -275,12 +275,12 @@ fn overflow_list_mode() -> OverflowListMode {
 
 fn show_overflow_row(
     ui: &mut egui::Ui,
-    app: &ScratchpadApp,
+    app: &mut ScratchpadApp,
     slot_index: usize,
     is_drag_source: bool,
     menu: &mut OverflowMenuContext<'_>,
 ) -> egui::Rect {
-    ui.push_id(("tab_overflow", slot_index), |ui| {
+    widget_ids::scope(ui, ("tab_overflow", slot_index), |ui| {
         if is_drag_source {
             return render_drag_source_placeholder(ui, menu.popup_width);
         }
@@ -305,12 +305,14 @@ fn show_overflow_row(
             &response,
             &close_response,
         );
+        let modifiers = ui.input(|input| input.modifiers);
         apply_overflow_row_actions(
             app,
             slot_index,
             &response,
             promote_response.as_ref(),
             &close_response,
+            modifiers,
             menu,
         );
 
@@ -321,7 +323,7 @@ fn show_overflow_row(
 
 fn overflow_row_state(app: &ScratchpadApp, slot_index: usize) -> Option<OverflowRowState> {
     Some(OverflowRowState {
-        selected: app.tab_slot_selected(slot_index) || app.active_tab_slot_index() == slot_index,
+        selected: app.tab_slot_selected(slot_index),
         display_name: app.display_tab_name_at_slot(slot_index)?,
         can_promote_all_files: app
             .workspace_index_for_slot(slot_index)
@@ -331,11 +333,12 @@ fn overflow_row_state(app: &ScratchpadApp, slot_index: usize) -> Option<Overflow
 }
 
 fn apply_overflow_row_actions(
-    app: &ScratchpadApp,
+    app: &mut ScratchpadApp,
     slot_index: usize,
     response: &egui::Response,
     promote_response: Option<&egui::Response>,
     close_response: &egui::Response,
+    modifiers: egui::Modifiers,
     menu: &mut OverflowMenuContext<'_>,
 ) {
     if promote_response.is_some_and(|promote| promote.clicked())
@@ -347,6 +350,13 @@ fn apply_overflow_row_actions(
     }
 
     if response.clicked() {
+        if modifiers.shift {
+            app.select_tab_slot_range(slot_index);
+        } else if modifiers.command || modifiers.ctrl {
+            app.toggle_tab_slot_selection(slot_index);
+        } else {
+            app.select_only_tab_slot(slot_index);
+        }
         handle_overflow_slot_action(app, slot_index, menu, false);
     }
 

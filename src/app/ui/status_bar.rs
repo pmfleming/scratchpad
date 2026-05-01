@@ -11,7 +11,7 @@ use eframe::egui;
 struct StatusBarActions {
     toggle_line_numbers: bool,
     toggle_control_chars: bool,
-    open_transaction_log: bool,
+    open_text_history: bool,
     open_encoding_dialog: bool,
     open_settings: bool,
 }
@@ -120,7 +120,7 @@ fn render_active_status(
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         show_status_warnings(ui, details);
         show_settings_button(ui, actions);
-        show_transaction_log_button(ui, actions);
+        show_text_history_button(ui, actions);
         show_control_char_toggle(ui, details, actions);
         show_line_endings(
             ui,
@@ -143,18 +143,17 @@ fn render_active_status(
 }
 
 fn show_copyable_path(ui: &mut egui::Ui, label: &str) {
-    let response = ui
-        .push_id(("scratchpad.widget", "status_path"), |ui| {
-            ui.add(
-                egui::Button::new(label)
-                    .frame(false)
-                    .stroke(egui::Stroke::NONE)
-                    .fill(egui::Color32::TRANSPARENT)
-                    .min_size(egui::vec2(0.0, 22.0)),
-            )
-        })
-        .inner
-        .on_hover_text("Double-click to copy path");
+    let response = widget_ids::scope(ui, "status_path", |ui| {
+        ui.add(
+            egui::Button::new(label)
+                .frame(false)
+                .stroke(egui::Stroke::NONE)
+                .fill(egui::Color32::TRANSPARENT)
+                .min_size(egui::vec2(0.0, 22.0)),
+        )
+    })
+    .inner
+    .on_hover_text("Double-click to copy path");
     if response.double_clicked() {
         let copied = label.strip_prefix("Path: ").unwrap_or(label);
         ui.copy_text(copied.to_owned());
@@ -162,12 +161,10 @@ fn show_copyable_path(ui: &mut egui::Ui, label: &str) {
 }
 
 fn show_line_count(ui: &mut egui::Ui, count_label: &str, actions: &mut StatusBarActions) {
-    let line_count_response = ui
-        .push_id(("scratchpad.widget", "status_line_count"), |ui| {
-            ui.label(count_label)
-        })
-        .inner
-        .on_hover_text("Double-click to toggle line numbers");
+    let line_count_response =
+        widget_ids::scope(ui, "status_line_count", |ui| ui.label(count_label))
+            .inner
+            .on_hover_text("Double-click to toggle line numbers");
     if line_count_response.double_clicked() {
         actions.toggle_line_numbers = true;
     }
@@ -217,29 +214,27 @@ fn status_bar_encoding_is_non_default(format: &crate::app::domain::TextFormatMet
     !format.encoding_name.eq_ignore_ascii_case("UTF-8") || format.has_bom
 }
 
-fn show_transaction_log_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
+fn show_settings_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
     ui.separator();
-    let response = ui
-        .push_id(("scratchpad.widget", "status_history"), |ui| {
-            status_bar_icon_button(ui, egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE)
-        })
-        .inner
-        .on_hover_text("Open history");
+    let response = widget_ids::scope(ui, "status_settings", |ui| {
+        status_bar_icon_button(ui, egui_phosphor::regular::GEAR)
+    })
+    .inner
+    .on_hover_text("Open settings");
     if response.clicked() {
-        actions.open_transaction_log = true;
+        actions.open_settings = true;
     }
 }
 
-fn show_settings_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
+fn show_text_history_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
     ui.separator();
-    let response = ui
-        .push_id(("scratchpad.widget", "status_settings"), |ui| {
-            status_bar_icon_button(ui, egui_phosphor::regular::GEAR)
-        })
-        .inner
-        .on_hover_text("Open settings");
+    let response = widget_ids::scope(ui, "status_text_history", |ui| {
+        status_bar_icon_button(ui, egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE)
+    })
+    .inner
+    .on_hover_text("Open text history");
     if response.clicked() {
-        actions.open_settings = true;
+        actions.open_text_history = true;
     }
 }
 
@@ -262,16 +257,15 @@ fn show_control_char_toggle(
     actions: &mut StatusBarActions,
 ) {
     ui.separator();
-    let button_response = ui
-        .push_id(("scratchpad.widget", "status_control_chars"), |ui| {
-            ui.add(
-                egui::Button::new("")
-                    .min_size(egui::vec2(22.0, 22.0))
-                    .fill(egui::Color32::TRANSPARENT)
-                    .stroke(egui::Stroke::NONE),
-            )
-        })
-        .inner;
+    let button_response = widget_ids::scope(ui, "status_control_chars", |ui| {
+        ui.add(
+            egui::Button::new("")
+                .min_size(egui::vec2(22.0, 22.0))
+                .fill(egui::Color32::TRANSPARENT)
+                .stroke(egui::Stroke::NONE),
+        )
+    })
+    .inner;
     ui.painter().text(
         button_response.rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -319,12 +313,12 @@ fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {
         }
     }
 
-    if actions.open_transaction_log {
-        app.open_transaction_log();
-    }
-
     if actions.open_encoding_dialog {
         app.open_encoding_dialog();
+    }
+
+    if actions.open_text_history {
+        app.handle_command(AppCommand::OpenTextHistory);
     }
 
     if actions.open_settings {

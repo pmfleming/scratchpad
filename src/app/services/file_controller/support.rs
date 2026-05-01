@@ -86,17 +86,6 @@ impl FileController {
         open_action(app, paths);
     }
 
-    pub(super) fn affected_item_labels(paths: &[PathBuf]) -> Vec<String> {
-        paths
-            .iter()
-            .map(|path| {
-                path.file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.display().to_string())
-            })
-            .collect()
-    }
-
     pub(super) fn apply_open_status(
         app: &mut ScratchpadApp,
         status_message: Option<String>,

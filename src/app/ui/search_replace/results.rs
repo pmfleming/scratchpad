@@ -29,7 +29,7 @@ pub(super) fn show_search_results(
     let empty_message = empty_message(state);
 
     egui::ScrollArea::vertical()
-        .id_salt("search_results_list")
+        .id_salt(widget_ids::local(ui, "search_results_list"))
         .max_height(results_height)
         .min_scrolled_height(results_height)
         .auto_shrink([false, false])

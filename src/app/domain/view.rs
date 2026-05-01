@@ -214,6 +214,7 @@ pub struct EditorViewState {
     search_highlight_anchors: Vec<AnchoredSearchRange>,
     published_ime_output: Option<PublishedImeOutput>,
     pub search_highlights: SearchHighlightState,
+    pub search_replacement_preview: Option<String>,
 }
 
 impl EditorViewState {
@@ -238,6 +239,7 @@ impl EditorViewState {
             search_highlight_anchors: Vec::new(),
             published_ime_output: None,
             search_highlights: SearchHighlightState::default(),
+            search_replacement_preview: None,
         }
     }
 
@@ -268,6 +270,7 @@ impl EditorViewState {
             search_highlight_anchors: Vec::new(),
             published_ime_output: None,
             search_highlights: SearchHighlightState::default(),
+            search_replacement_preview: None,
         }
     }
 
@@ -379,6 +382,7 @@ impl EditorViewState {
         anchors.extend(take_search_anchors(&mut self.search_highlight_anchors));
         self.search_highlights.ranges.clear();
         self.search_highlights.active_range_index = None;
+        self.search_replacement_preview = None;
         anchors
     }
 
@@ -478,7 +482,12 @@ impl EditorViewState {
     pub fn clear_search_highlights_for_release(&mut self) -> Vec<AnchorId> {
         self.search_highlights.ranges.clear();
         self.search_highlights.active_range_index = None;
+        self.search_replacement_preview = None;
         take_search_anchors(&mut self.search_highlight_anchors)
+    }
+
+    pub fn set_search_replacement_preview(&mut self, replacement: Option<String>) {
+        self.search_replacement_preview = replacement;
     }
 
     /// Pixel-space scroll offset derived from the per-view `ScrollManager`.

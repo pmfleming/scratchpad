@@ -11,17 +11,48 @@ impl ScratchpadApp {
         self.selected_tab_slots.contains(&slot_index)
     }
 
+    pub(crate) fn ensure_active_tab_slot_selected(&mut self) {
+        let invalid_slots = self
+            .selected_tab_slots
+            .iter()
+            .copied()
+            .filter(|slot_index| !self.tab_slot_exists(*slot_index))
+            .collect::<Vec<_>>();
+        for slot_index in invalid_slots {
+            self.selected_tab_slots.remove(&slot_index);
+        }
+
+        if self.total_tab_slots() == 0 {
+            self.tab_selection_anchor = None;
+            return;
+        }
+
+        let active_slot = self.active_tab_slot_index();
+        self.selected_tab_slots.insert(active_slot);
+        if self
+            .tab_selection_anchor
+            .is_none_or(|slot_index| !self.tab_slot_exists(slot_index))
+        {
+            self.tab_selection_anchor = Some(active_slot);
+        }
+    }
+
     fn tab_slot_exists(&self, slot_index: usize) -> bool {
         self.display_tab_slot(slot_index).is_some()
     }
 
-    pub(crate) fn clear_tab_selection(&mut self) {
+    fn reset_tab_selection(&mut self) {
         self.selected_tab_slots.clear();
         self.tab_selection_anchor = None;
     }
 
+    pub(crate) fn clear_tab_selection(&mut self) {
+        self.reset_tab_selection();
+        self.ensure_active_tab_slot_selected();
+    }
+
     pub(crate) fn select_only_tab_slot(&mut self, slot_index: usize) {
-        self.clear_tab_selection();
+        self.reset_tab_selection();
         if self.tab_slot_exists(slot_index) {
             self.selected_tab_slots.insert(slot_index);
             self.tab_selection_anchor = Some(slot_index);
@@ -38,11 +69,13 @@ impl ScratchpadApp {
             self.selected_tab_slots.insert(slot_index);
         }
         self.tab_selection_anchor = Some(slot_index);
+        self.ensure_active_tab_slot_selected();
     }
 
     pub(crate) fn select_tab_slot_range(&mut self, slot_index: usize) {
         if !self.tab_slot_exists(slot_index) {
-            self.clear_tab_selection();
+            self.reset_tab_selection();
+            self.ensure_active_tab_slot_selected();
             return;
         }
 
@@ -58,7 +91,7 @@ impl ScratchpadApp {
         } else {
             (slot_index, anchor)
         };
-        self.clear_tab_selection();
+        self.reset_tab_selection();
         for candidate in start..=end {
             if self.tab_slot_exists(candidate) {
                 self.selected_tab_slots.insert(candidate);
@@ -253,6 +286,57 @@ mod tests {
         app.select_only_tab_slot(1);
 
         assert!(app.tab_slot_selected(1));
+    }
+
+    #[test]
+    fn startup_selects_active_tab_slot() {
+        let app = test_app();
+
+        assert!(app.tab_slot_selected(app.active_tab_slot_index()));
+    }
+
+    #[test]
+    fn clearing_selection_keeps_active_tab_selected() {
+        let mut app = app_with_settings_between_tabs();
+        app.select_only_tab_slot(2);
+
+        app.clear_tab_selection();
+
+        assert!(app.tab_slot_selected(app.active_tab_slot_index()));
+        assert_eq!(app.selected_tab_slots.len(), 1);
+    }
+
+    #[test]
+    fn toggling_active_tab_selection_reselects_active_tab() {
+        let mut app = test_app();
+        let active_slot = app.active_tab_slot_index();
+
+        app.toggle_tab_slot_selection(active_slot);
+
+        assert!(app.tab_slot_selected(active_slot));
+        assert_eq!(app.selected_tab_slots.len(), 1);
+    }
+
+    #[test]
+    fn activating_workspace_tab_selects_activated_slot() {
+        let mut app = app_with_settings_between_tabs();
+
+        app.handle_command(AppCommand::ActivateTab { index: 1 });
+
+        assert!(app.tab_slot_selected(app.active_tab_slot_index()));
+        assert_eq!(app.active_tab_slot_index(), 2);
+    }
+
+    #[test]
+    fn opening_settings_selects_settings_slot() {
+        let mut app = test_app();
+
+        app.handle_command(AppCommand::OpenSettings);
+
+        let settings_slot = app
+            .settings_slot_index()
+            .expect("settings slot should exist");
+        assert!(app.tab_slot_selected(settings_slot));
     }
 
     #[test]

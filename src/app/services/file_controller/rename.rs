@@ -77,13 +77,6 @@ impl FileController {
             return false;
         }
 
-        let action_label = if target_path.is_some() {
-            "Rename file"
-        } else {
-            "Rename tab"
-        };
-        let snapshot = app.capture_transaction_snapshot();
-        let details = Some(format!("{current_name} -> {normalized_name}"));
         let settings_path = app.settings_path().to_path_buf();
 
         {
@@ -96,12 +89,6 @@ impl FileController {
             }
         }
 
-        app.record_transaction(
-            action_label,
-            vec![normalized_name.clone()],
-            details,
-            snapshot,
-        );
         app.set_info_status(format!("Renamed {current_name} to {normalized_name}."));
         app.mark_session_dirty();
         let _ = app.persist_session_now();

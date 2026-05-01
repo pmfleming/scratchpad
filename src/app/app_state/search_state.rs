@@ -100,7 +100,9 @@ pub(crate) struct SearchMatch {
     pub(crate) view_id: ViewId,
     pub(crate) buffer_id: BufferId,
     pub(crate) buffer_label: String,
+    pub(crate) target_revision: u64,
     pub(crate) range: Range<usize>,
+    pub(crate) matched_text: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -140,6 +142,8 @@ pub(crate) struct ReplacementTargetPlan {
     pub(crate) view_id: ViewId,
     pub(crate) buffer_id: BufferId,
     pub(crate) buffer_label: String,
+    pub(crate) target_revision: u64,
+    pub(crate) expected_matches: Vec<(Range<usize>, String)>,
     pub(crate) replacements: Vec<(Range<usize>, String)>,
 }
 
@@ -153,6 +157,45 @@ pub(crate) struct ReplacementPlan {
 impl ReplacementPlan {
     pub(crate) fn affected_buffer_count(&self) -> usize {
         self.targets.len()
+    }
+
+    fn requires_confirmation(&self) -> bool {
+        const HIGH_REPLACE_ALL_MATCH_COUNT: usize = 100;
+        self.affected_buffer_count() > 1 || self.total_match_count > HIGH_REPLACE_ALL_MATCH_COUNT
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ReplaceAllConfirmation {
+    pub(crate) scope: SearchScope,
+    pub(crate) affected_buffer_count: usize,
+    pub(crate) total_match_count: usize,
+    pub(crate) replacement: String,
+    requested_generation: u64,
+}
+
+impl ReplaceAllConfirmation {
+    fn from_plan(plan: &ReplacementPlan, replacement: &str, requested_generation: u64) -> Self {
+        Self {
+            scope: plan.scope,
+            affected_buffer_count: plan.affected_buffer_count(),
+            total_match_count: plan.total_match_count,
+            replacement: replacement.to_owned(),
+            requested_generation,
+        }
+    }
+
+    fn matches_plan(
+        &self,
+        plan: &ReplacementPlan,
+        replacement: &str,
+        requested_generation: u64,
+    ) -> bool {
+        self.scope == plan.scope
+            && self.affected_buffer_count == plan.affected_buffer_count()
+            && self.total_match_count == plan.total_match_count
+            && self.replacement == replacement
+            && self.requested_generation == requested_generation
     }
 }
 
@@ -179,6 +222,7 @@ pub(crate) struct SearchState {
     pub(crate) status: SearchStatus,
     pub(crate) freshness: SearchFreshness,
     pub(crate) previous_active_match: Option<SearchMatch>,
+    pub(crate) pending_replace_all_confirmation: Option<ReplaceAllConfirmation>,
     latest_generation: Arc<AtomicU64>,
     request_tx: Sender<SearchRequest>,
     result_rx: Receiver<SearchResult>,
@@ -211,6 +255,7 @@ impl Default for SearchState {
             status: SearchStatus::Idle,
             freshness: SearchFreshness::Fresh,
             previous_active_match: None,
+            pending_replace_all_confirmation: None,
             latest_generation,
             request_tx,
             result_rx,
@@ -251,6 +296,10 @@ impl SearchState {
         self.result_groups.clear();
     }
 
+    fn clear_replace_all_confirmation(&mut self) {
+        self.pending_replace_all_confirmation = None;
+    }
+
     fn clear_inactive_results(&mut self) {
         self.clear_match_results();
         self.dirty = false;
@@ -268,9 +317,8 @@ impl SearchState {
         self.previous_active_match = self
             .active_match_index
             .and_then(|index| self.matches.get(index).cloned());
-        // Keep old result_groups visible until new results arrive (avoids flicker).
-        // Only clear the active match index so highlights don't point at stale data.
-        self.active_match_index = None;
+        self.clear_match_results();
+        self.clear_replace_all_confirmation();
     }
 
     fn search_options(&self) -> SearchOptions {
@@ -356,12 +404,17 @@ impl ScratchpadApp {
         } else {
             SearchFocusTarget::FindInput
         });
+        self.search_state.clear_replace_all_confirmation();
+        if self.search_state.open && !self.search_state.query.is_empty() {
+            self.refresh_search_visual_state();
+        }
     }
 
     pub fn set_search_query(&mut self, query: impl Into<String>) {
         let query = query.into();
         if self.search_state.query != query {
             self.search_state.query = query;
+            self.search_state.clear_replace_all_confirmation();
             self.mark_search_dirty();
             self.refresh_search_state();
         }
@@ -372,7 +425,14 @@ impl ScratchpadApp {
     }
 
     pub fn set_search_replacement(&mut self, replacement: impl Into<String>) {
-        self.search_state.replacement = replacement.into();
+        let replacement = replacement.into();
+        if self.search_state.replacement != replacement {
+            self.search_state.replacement = replacement;
+            self.search_state.clear_replace_all_confirmation();
+            if self.search_state.open && !self.search_state.query.is_empty() {
+                self.refresh_search_visual_state();
+            }
+        }
     }
 
     pub fn search_scope(&self) -> SearchScope {
@@ -395,6 +455,7 @@ impl ScratchpadApp {
         if self.search_state.scope != scope || self.search_state.scope_origin != origin {
             self.search_state.scope = scope;
             self.search_state.scope_origin = origin;
+            self.search_state.clear_replace_all_confirmation();
             self.mark_search_dirty();
             self.refresh_search_state();
         }
@@ -407,6 +468,7 @@ impl ScratchpadApp {
     pub(crate) fn set_search_mode(&mut self, mode: SearchMode) {
         if self.search_state.mode != mode {
             self.search_state.mode = mode;
+            self.search_state.clear_replace_all_confirmation();
             self.mark_search_dirty();
             self.refresh_search_state();
         }
@@ -419,6 +481,7 @@ impl ScratchpadApp {
     pub fn set_search_match_case(&mut self, enabled: bool) {
         if self.search_state.match_case != enabled {
             self.search_state.match_case = enabled;
+            self.search_state.clear_replace_all_confirmation();
             self.mark_search_dirty();
             self.refresh_search_state();
         }
@@ -431,6 +494,7 @@ impl ScratchpadApp {
     pub fn set_search_whole_word(&mut self, enabled: bool) {
         if self.search_state.whole_word != enabled {
             self.search_state.whole_word = enabled;
+            self.search_state.clear_replace_all_confirmation();
             self.mark_search_dirty();
             self.refresh_search_state();
         }
@@ -538,6 +602,8 @@ impl ScratchpadApp {
             });
             self.pending_editor_focus = None;
         }
+        let destination_slot = self.slot_for_workspace_index(search_match.tab_index);
+        self.select_only_tab_slot(destination_slot);
         if self
             .active_tab()
             .is_some_and(|tab| tab.active_view_id != search_match.view_id)
@@ -563,6 +629,13 @@ impl ScratchpadApp {
         let Some(search_match) = self.search_state.matches.get(index).cloned() else {
             return false;
         };
+        if !self.validate_search_match_for_replace(&search_match) {
+            self.search_state.clear_replace_all_confirmation();
+            self.set_error_status("Search replace was blocked because results are stale.");
+            self.mark_search_dirty();
+            self.refresh_search_state();
+            return false;
+        }
         if !self.activate_search_match(index) {
             return false;
         }
@@ -611,5 +684,23 @@ impl ScratchpadApp {
             .active_view()
             .and_then(|view| view.cursor_range)
             .and_then(selection_char_range)
+    }
+
+    pub(crate) fn validate_search_match_for_replace(&self, search_match: &SearchMatch) -> bool {
+        let Some(tab) = self.tabs().get(search_match.tab_index) else {
+            return false;
+        };
+        let Some(buffer) = tab.buffer_by_id(search_match.buffer_id) else {
+            return false;
+        };
+        buffer.document_revision() == search_match.target_revision
+            && buffer
+                .validate_char_replacements(&[(search_match.range.clone(), String::new())])
+                .is_ok()
+            && buffer
+                .document()
+                .piece_tree()
+                .extract_range(search_match.range.clone())
+                == search_match.matched_text
     }
 }

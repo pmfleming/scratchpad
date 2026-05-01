@@ -66,6 +66,7 @@ impl ScratchpadApp {
         let targets = self.collect_search_targets(self.search_state.scope);
         let request = self.search_state.build_request(generation, targets);
         self.search_state.begin_request(generation);
+        self.clear_search_highlights();
 
         if let Err(error) = self.search_state.request_tx.send(request) {
             let latest_generation = AtomicU64::new(generation);
@@ -286,7 +287,7 @@ impl ScratchpadApp {
         }
     }
 
-    fn refresh_search_visual_state(&mut self) {
+    pub(super) fn refresh_search_visual_state(&mut self) {
         self.sync_search_result_group_activity();
         self.apply_search_highlights();
     }
@@ -327,6 +328,7 @@ impl ScratchpadApp {
         }
 
         if self.search_state.searching {
+            self.clear_search_highlights();
             return;
         }
 
@@ -340,6 +342,7 @@ impl ScratchpadApp {
 
         let active_tab_index = self.active_tab_index();
         let highlights = self.search_highlights_for_tab(active_tab_index);
+        let replacement_preview = self.search_replacement_preview();
 
         self.clear_search_highlights();
         let Some(tab) = self.tabs_mut().get_mut(active_tab_index) else {
@@ -349,8 +352,14 @@ impl ScratchpadApp {
         for (view_id, highlights) in highlights {
             if let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) {
                 view.set_search_highlights_anchored(buffer, highlights);
+                view.set_search_replacement_preview(replacement_preview.clone());
             }
         }
+    }
+
+    fn search_replacement_preview(&self) -> Option<String> {
+        (self.search_state.replace_open && self.search_state.status == SearchStatus::Ready)
+            .then(|| self.search_state.replacement.clone())
     }
 
     fn search_highlights_for_tab(&self, tab_index: usize) -> Vec<(ViewId, SearchHighlightState)> {

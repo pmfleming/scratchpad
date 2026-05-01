@@ -5,9 +5,7 @@ use crate::app::services::file_controller::OpenBatchSummary;
 use crate::app::services::session_store::SessionStore;
 use crate::app::services::settings_store::{AppSettings, SettingsStore};
 use crate::app::startup::StartupOptions;
-use crate::app::transactions::{
-    PendingLayoutTransaction, PendingTextTransaction, TransactionLog, TransactionSnapshot,
-};
+use crate::app::text_history::TextHistoryLedger;
 use eframe::egui;
 use search_state::SearchState;
 use std::collections::{BTreeSet, HashMap};
@@ -52,8 +50,6 @@ pub(crate) struct StartupRestoreConflict {
 }
 
 pub(crate) struct PendingOpenTabsAction {
-    pub(crate) affected_items: Vec<String>,
-    pub(crate) transaction_snapshot: TransactionSnapshot,
     /// Streaming accumulator: filled in as individual paths arrive across
     /// multiple `PathsLoaded { is_partial: true }` messages. Finalized when
     /// the terminating `is_partial: false` message arrives.
@@ -64,8 +60,6 @@ pub(crate) struct PendingOpenHereAction {
     pub(crate) already_here_count: usize,
     pub(crate) migrated_count: usize,
     pub(crate) failure_count: usize,
-    pub(crate) affected_items: Vec<String>,
-    pub(crate) transaction_snapshot: TransactionSnapshot,
     pub(crate) anchor_view_id: Option<ViewId>,
 }
 
@@ -142,10 +136,8 @@ pub struct ScratchpadApp {
     pub(crate) pending_settings_toml_refresh: Option<BufferId>,
     pub(crate) vertical_tab_list_open: bool,
     pub(crate) vertical_tab_list_hide_deadline: Option<Instant>,
-    pub(crate) transaction_log: TransactionLog,
-    pub(crate) transaction_log_open: bool,
-    pub(crate) pending_layout_transaction: Option<PendingLayoutTransaction>,
-    pub(crate) pending_text_transaction: Option<PendingTextTransaction>,
+    pub(crate) text_history: TextHistoryLedger,
+    pub(crate) text_history_open: bool,
     pub(crate) search_state: SearchState,
     pub(crate) chrome_transition_frames_remaining: u8,
     pub(crate) selected_tab_slots: BTreeSet<usize>,

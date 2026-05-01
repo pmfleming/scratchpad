@@ -81,10 +81,10 @@ fn render_history_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     run_menu_command(
         ui,
         app,
-        "History",
+        "Text History",
         Some(CLOCK_COUNTER_CLOCKWISE),
         true,
-        AppCommand::OpenHistory,
+        AppCommand::OpenTextHistory,
         false,
     );
 }

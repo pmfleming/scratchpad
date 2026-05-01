@@ -84,7 +84,7 @@ These shortcuts already exist and the plan should treat them as reserved unless 
 - `Ctrl + F`: open search focused on the find field
 - `Ctrl + H`: open search focused on the replace field
 - `Ctrl + ,`: open settings
-- `Esc`: close settings, search, or transaction log when applicable
+- `Esc`: close settings or search when applicable
 - `Ctrl + N`: new tab
 - `Ctrl + O`: open file
 - `Ctrl + Shift + O`: open file into the current workspace
@@ -98,11 +98,6 @@ These shortcuts already exist and the plan should treat them as reserved unless 
 - `Ctrl + Shift + T`: promote all files in the active workspace into tabs
 - `Ctrl + Shift + W`: close active tile
 - `Ctrl + Shift + Arrow`: split active tile
-- `Ctrl + Shift + Z`: open transaction log
-
-Important current shortcut constraint:
-
-- `Ctrl + Shift + Z` is already globally owned by the transaction log, so editor redo should be treated as `Ctrl + Y` unless we deliberately redesign that shortcut map
 
 ### Currently Implemented Search-Strip Keys
 
@@ -270,13 +265,13 @@ Target behavior:
 
 - editor text edits use operation-based undo/redo
 - search-driven replacements should restore both text and selection coherently
-- workspace-level history remains separate in the transaction log
+- workspace actions are not part of undo/redo history
 
 Shortcut rule:
 
 - keep `Ctrl + Z` for text undo
 - keep `Ctrl + Y` for text redo
-- do not silently rely on `Ctrl + Shift + Z` for redo while it is globally bound to the transaction log
+- do not bind `Ctrl + Shift + Z` to undo or redo
 
 ### H. Search And Replace Focus
 
@@ -472,5 +467,5 @@ Recommended work:
 2. Add tests for the currently shipped native-editor behaviors before expanding the interaction surface further.
 3. Implement the missing baseline items in this order:
    `Page Up/Page Down`, double-click word select, triple-click line select, shared word-boundary rules.
-4. Keep `Ctrl + Y` as redo until or unless the transaction-log shortcut map changes.
+4. Keep `Ctrl + Y` as the only redo shortcut.
 5. Update the user manual only after the code and this plan agree.

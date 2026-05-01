@@ -49,12 +49,6 @@ Scratchpad includes a Settings surface for editor and workspace behavior.
 
 The settings file itself is still a normal text file. You can open it, edit it, and save it like any other document.
 
-### Transaction Log
-
-Normal undo and redo affect the focused document.
-
-The transaction log tracks broader app actions such as opening files, splitting views, promoting tiles, and other workspace-level changes. Use it when the thing you want to undo is larger than a simple text edit.
-
 ## Everyday Tasks
 
 ### Open Files
@@ -122,9 +116,6 @@ Search operates on the decoded text already loaded into each open buffer. That m
 
 - `Ctrl + Z`: undo text edits in the focused document
 - `Ctrl + Y`: redo text edits in the focused document
-- `Ctrl + Shift + Z`: open the transaction log
-
-The text editor undo stack and the transaction log are related, but they are not the same thing.
 
 ### Zoom and Layout Aids
 
@@ -157,7 +148,6 @@ The status bar reports the current document state, including:
 - encoding
 - artifact warnings
 - logging state
-- transaction log access via `TXN`
 
 If Scratchpad notices an on-disk conflict, stale file, or decoding issue, the status area is one of the first places to check.
 
@@ -214,7 +204,6 @@ If you update the shipped file on disk, Scratchpad will open your updated versio
 - `Ctrl + H`: focus the replace field in the search strip
 - `Ctrl + Z`: undo editor text changes for the focused document
 - `Ctrl + Y`: redo editor text changes for the focused document
-- `Ctrl + Shift + Z`: open the transaction log
 - `Ctrl + T`: promote active tile to its own tab
 - `Ctrl + Shift + T`: promote all files in the active workspace to tabs
 - `Ctrl + W`: close active tab
@@ -222,7 +211,7 @@ If you update the shipped file on disk, Scratchpad will open your updated versio
 - `Ctrl + Shift + Arrow`: split active tile
 - `Ctrl + +` / `Ctrl + =`, `Ctrl + -`, `Ctrl + Mouse Wheel`: zoom editor font
 - `Ctrl + 0`: toggle line numbers for the current workspace tab
-- `Escape`: close Settings or the transaction log when focused or open
+- `Escape`: close Settings or search when focused or open
 
 ## Current Limits
 

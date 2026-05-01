@@ -285,7 +285,7 @@ fn take_previous_snapshot(tab: &mut WorkspaceTab, view_id: ViewId) -> Option<Dis
 }
 
 fn editor_scroll_id(view_id: ViewId) -> egui::Id {
-    egui::Id::new(("editor_scroll", view_id))
+    widget_ids::global(("editor_scroll", view_id))
 }
 
 fn show_editor_scroll_area(

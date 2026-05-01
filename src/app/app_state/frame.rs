@@ -51,7 +51,7 @@ impl ScratchpadApp {
         dialogs::show_startup_restore_conflict_modal(ctx, self);
         dialogs::show_pending_action_modal(ctx, self);
         dialogs::show_encoding_window(ctx, self);
-        dialogs::show_transaction_log_window(ctx, self);
+        dialogs::show_text_history_window(ctx, self);
         shortcuts::handle_shortcuts(self, ctx);
         self.finish_frame_transitions(ctx);
     }

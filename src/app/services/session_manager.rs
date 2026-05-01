@@ -70,6 +70,7 @@ pub(crate) fn apply_restored_session(
     }
     app.tab_manager_mut().tabs = restored.tabs;
     app.tab_manager_mut().active_tab_index = restored.active_tab_index;
+    app.ensure_active_tab_slot_selected();
     app.refresh_startup_restore_conflicts();
     restored.legacy_settings
 }

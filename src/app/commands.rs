@@ -1,5 +1,5 @@
 use crate::app::app_state::ScratchpadApp;
-use crate::app::domain::{PendingAction, SplitAxis, SplitPath, ViewId};
+use crate::app::domain::{BufferId, PendingAction, SplitAxis, SplitPath, ViewId};
 use crate::app::services::file_controller::FileController;
 
 mod dispatch;
@@ -38,10 +38,10 @@ pub enum AppCommand {
     NewTab,
     OpenFile,
     OpenFileHere,
-    OpenHistory,
     OpenSearch,
     OpenSearchAndReplace,
     OpenSettings,
+    OpenTextHistory,
     OpenUserManual,
     CloseSearch,
     UndoActiveBufferTextOperation,
@@ -75,11 +75,12 @@ pub enum AppCommand {
 }
 
 impl ScratchpadApp {
-    fn active_buffer_name_or_missing(&self, index: usize) -> String {
-        self.tabs().get(index).map_or_else(
-            || "<missing>".to_owned(),
-            |tab| tab.active_buffer().name.to_owned(),
-        )
+    pub fn open_text_history(&mut self) {
+        self.text_history_open = true;
+    }
+
+    pub fn close_text_history(&mut self) {
+        self.text_history_open = false;
     }
 
     fn activate_tab(&mut self, index: usize) {
@@ -90,6 +91,7 @@ impl ScratchpadApp {
         self.reload_settings_before_workspace_change();
         self.activate_workspace_surface();
         self.tab_manager_mut().active_tab_index = index;
+        self.ensure_active_tab_slot_selected();
         self.tab_manager_mut().pending_scroll_to_active = true;
         self.refresh_search_view_state();
         self.request_focus_for_active_view();
@@ -139,15 +141,11 @@ impl ScratchpadApp {
         self.reload_settings_if_closing_view(view_id);
 
         let index = self.active_tab_index();
-        let tab_name = self.tabs().get(index).map_or_else(
-            || "<missing>".to_owned(),
-            |tab| {
-                tab.buffer_for_view(view_id)
-                    .map(|buffer| buffer.name.clone())
-                    .unwrap_or_else(|| tab.active_buffer().name.clone())
-            },
-        );
-        let snapshot = self.capture_transaction_snapshot();
+        let open_buffer_ids_before = self
+            .tabs()
+            .get(index)
+            .map(|tab| tab.buffers().map(|buffer| buffer.id).collect::<Vec<_>>())
+            .unwrap_or_default();
         let mut next_active_view = None;
         if let Some(tab) = self.tabs_mut().get_mut(index)
             && tab.close_view(view_id)
@@ -155,10 +153,17 @@ impl ScratchpadApp {
             next_active_view = Some(tab.active_view_id);
         }
         if let Some(next_active_view) = next_active_view {
+            let open_buffer_ids_after = self
+                .tabs()
+                .get(index)
+                .map(|tab| tab.buffers().map(|buffer| buffer.id).collect::<Vec<_>>())
+                .unwrap_or_default();
+            let closed_buffer_ids =
+                removed_buffer_ids(open_buffer_ids_before, &open_buffer_ids_after);
+            self.prune_text_history_for_buffers(closed_buffer_ids);
             self.begin_layout_transition();
             self.mark_search_dirty();
             self.request_focus_for_view(next_active_view);
-            self.record_transaction("Close view", vec![tab_name.clone()], None, snapshot);
             self.mark_session_dirty();
         }
     }
@@ -170,14 +175,11 @@ impl ScratchpadApp {
     }
 
     fn reorder_tab_command(&mut self, from_index: usize, to_index: usize) {
-        let moved_tab_description = self.describe_tab_at(from_index);
-        let affected_items = vec![moved_tab_description];
-        let snapshot = self.capture_coalesced_layout_snapshot("Reorder tab", &affected_items);
         if !self.tab_manager_mut().reorder_tab(from_index, to_index) {
             return;
         }
         self.begin_layout_transition();
-        self.record_coalesced_layout_transaction("Reorder tab", affected_items, snapshot);
+        self.mark_session_dirty();
     }
 
     fn reorder_display_tab_command(&mut self, from_index: usize, to_index: usize) {
@@ -188,22 +190,16 @@ impl ScratchpadApp {
 
     fn resize_split_command(&mut self, path: SplitPath, ratio: f32) {
         let index = self.active_tab_index();
-        let tab_name = self.active_buffer_name_or_missing(index);
-        let affected_items = vec![tab_name];
-        let snapshot = self.capture_coalesced_layout_snapshot("Resize split", &affected_items);
         if let Some(tab) = self.tabs_mut().get_mut(index)
             && tab.resize_split(path, ratio)
         {
             self.begin_layout_transition();
-            self.record_coalesced_layout_transaction("Resize split", affected_items, snapshot);
             self.mark_session_dirty();
         }
     }
 
     fn split_active_view_command(&mut self, axis: SplitAxis, new_view_first: bool, ratio: f32) {
         let index = self.active_tab_index();
-        let tab_name = self.active_buffer_name_or_missing(index);
-        let snapshot = self.capture_transaction_snapshot();
         let mut new_active_view = None;
         if let Some(tab) = self.tabs_mut().get_mut(index)
             && tab
@@ -216,8 +212,14 @@ impl ScratchpadApp {
             self.begin_layout_transition();
             self.mark_search_dirty();
             self.request_focus_for_view(new_active_view);
-            self.record_transaction("Split view", vec![tab_name.clone()], None, snapshot);
             self.mark_session_dirty();
         }
     }
+}
+
+fn removed_buffer_ids(before: Vec<BufferId>, after: &[BufferId]) -> Vec<BufferId> {
+    before
+        .into_iter()
+        .filter(|buffer_id| !after.contains(buffer_id))
+        .collect()
 }

@@ -374,13 +374,14 @@ mod tests {
 
     #[test]
     fn display_snapshot_records_selection_and_search_flags() {
+        let search_ranges = std::iter::once(47..49).collect::<Vec<_>>();
         let snapshot = DisplaySnapshot::from_galley_with_base_and_overlays(
             &galley_for("alpha\nbravo"),
             10.0,
             40,
             5,
             Some(41..43),
-            &[47..49],
+            &search_ranges,
         );
 
         assert!(

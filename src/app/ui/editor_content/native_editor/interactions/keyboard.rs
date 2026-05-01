@@ -247,7 +247,7 @@ fn handle_history_key(
         let selection = buffer.undo_last_text_operation();
         return Some(apply_history(view, buffer, selection));
     }
-    if matches!(key_event.key, egui::Key::Z | egui::Key::Y) && is_redo_shortcut(key_event) {
+    if key_event.key == egui::Key::Y && is_redo_shortcut(key_event.modifiers) {
         let selection = buffer.redo_last_text_operation();
         return Some(apply_history(view, buffer, selection));
     }
@@ -259,8 +259,8 @@ fn is_undo_shortcut(modifiers: egui::Modifiers) -> bool {
     modifiers.command && !modifiers.shift
 }
 
-fn is_redo_shortcut(key_event: PressedKeyEvent) -> bool {
-    key_event.modifiers.command && (key_event.key == egui::Key::Y || key_event.modifiers.shift)
+fn is_redo_shortcut(modifiers: egui::Modifiers) -> bool {
+    modifiers.command && !modifiers.shift
 }
 
 fn insert_text(

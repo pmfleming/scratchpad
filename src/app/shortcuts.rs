@@ -40,16 +40,6 @@ fn handle_global_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         return;
     }
 
-    let transaction_log_modifiers = egui::Modifiers {
-        ctrl: true,
-        shift: true,
-        ..Default::default()
-    };
-    if ctx.input_mut(|input| input.consume_key(transaction_log_modifiers, egui::Key::Z)) {
-        app.handle_command(AppCommand::OpenHistory);
-        return;
-    }
-
     if app.showing_settings()
         && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
@@ -62,13 +52,6 @@ fn handle_global_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
     {
         app.handle_command(AppCommand::CloseSearch);
         ctx.request_repaint();
-        return;
-    }
-
-    if app.transaction_log_open()
-        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-    {
-        app.close_transaction_log();
     }
 }
 

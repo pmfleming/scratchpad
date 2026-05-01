@@ -131,7 +131,9 @@ fn paint_tab_background(
     selected: bool,
     drag_in_progress: bool,
 ) {
-    if active {
+    let highlighted = active || selected;
+
+    if highlighted {
         ui.painter().rect_filled(rect, 4.0, tab_active_bg(ui));
         ui.painter().rect_stroke(
             rect,
@@ -143,18 +145,14 @@ fn paint_tab_background(
         ui.painter().rect_filled(rect, 4.0, tab_hover_bg(ui));
     }
 
-    if selected {
-        paint_selected_tab_overlay(ui, rect, active);
+    if highlighted {
+        paint_selected_tab_overlay(ui, rect);
     }
 }
 
-fn paint_selected_tab_overlay(ui: &egui::Ui, rect: Rect, active: bool) {
+fn paint_selected_tab_overlay(ui: &egui::Ui, rect: Rect) {
     let selected_rect = rect.shrink(1.0);
     let accent = tab_selected_accent(ui);
-    if !active {
-        ui.painter()
-            .rect_filled(selected_rect, 4.0, tab_selected_bg(ui));
-    }
     ui.painter().rect_stroke(
         selected_rect,
         4.0,

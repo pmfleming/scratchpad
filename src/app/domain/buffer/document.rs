@@ -36,6 +36,12 @@ pub(crate) enum TextReplacementError {
     OverlappingRanges,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TextHistoryApplyError {
+    OutOfBounds,
+    Conflict,
+}
+
 #[derive(Clone)]
 pub struct TextDocument {
     piece_tree: Arc<PieceTreeLite>,
@@ -157,12 +163,33 @@ impl TextDocument {
         Ok(())
     }
 
+    pub(crate) fn validate_char_replacements(
+        &self,
+        replacements: TextReplacements<'_>,
+    ) -> Result<(), TextReplacementError> {
+        validate_replacements(replacements, self.piece_tree.len_chars())
+    }
+
     pub fn undo_last_operation(&mut self) -> Option<CursorRange> {
         self.replay_last_operation(OperationDirection::Undo)
     }
 
     pub fn redo_last_operation(&mut self) -> Option<CursorRange> {
         self.replay_last_operation(OperationDirection::Redo)
+    }
+
+    pub(crate) fn apply_text_history_undo(
+        &mut self,
+        record: &TextDocumentOperationRecord,
+    ) -> Result<CursorRange, TextHistoryApplyError> {
+        self.apply_text_history_record(record, OperationDirection::Undo)
+    }
+
+    pub(crate) fn apply_text_history_redo(
+        &mut self,
+        record: &TextDocumentOperationRecord,
+    ) -> Result<CursorRange, TextHistoryApplyError> {
+        self.apply_text_history_record(record, OperationDirection::Redo)
     }
 
     // --- Native editor direct mutation API ---
@@ -288,6 +315,43 @@ impl TextDocument {
         replacement: &str,
     ) {
         self.replace_char_range_raw(edit.start_char..edit.start_char + replaced_len, replacement);
+    }
+
+    fn apply_text_history_record(
+        &mut self,
+        record: &TextDocumentOperationRecord,
+        direction: OperationDirection,
+    ) -> Result<CursorRange, TextHistoryApplyError> {
+        self.validate_text_history_record(record, direction)?;
+        self.apply_operation_record(record, direction);
+        Ok(direction.selection(record))
+    }
+
+    fn validate_text_history_record(
+        &self,
+        record: &TextDocumentOperationRecord,
+        direction: OperationDirection,
+    ) -> Result<(), TextHistoryApplyError> {
+        for edit in &record.edits {
+            let (expected, replaced_len) = match direction {
+                OperationDirection::Undo => (
+                    edit.inserted_text.as_str(),
+                    edit.inserted_text.chars().count(),
+                ),
+                OperationDirection::Redo => (
+                    edit.deleted_text.as_str(),
+                    edit.deleted_text.chars().count(),
+                ),
+            };
+            let range = edit.start_char..edit.start_char + replaced_len;
+            if range.end > self.piece_tree.len_chars() {
+                return Err(TextHistoryApplyError::OutOfBounds);
+            }
+            if !expected.is_empty() && self.piece_tree.extract_range(range) != expected {
+                return Err(TextHistoryApplyError::Conflict);
+            }
+        }
+        Ok(())
     }
 }
 

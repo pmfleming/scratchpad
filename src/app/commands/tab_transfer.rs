@@ -15,14 +15,9 @@ impl ScratchpadApp {
             return;
         }
 
-        let snapshot = self.capture_transaction_snapshot();
-
         if source_index == self.active_tab_index() || target_index == self.active_tab_index() {
             self.reload_settings_before_workspace_change();
         }
-
-        let source_description = self.describe_tab_at(source_index);
-        let target_description = self.describe_tab_at(target_index);
 
         let (context, source_tab) = self.remove_source_tab_for_combine(source_index, target_index);
         let mut source_tab = Some(source_tab);
@@ -37,20 +32,10 @@ impl ScratchpadApp {
         self.begin_layout_transition();
         self.rebalance_combined_workspace_layout(context.adjusted_target_index, target_index);
         self.finish_combined_tab(source_index, target_index, context);
-        self.record_transaction(
-            "Combine tab",
-            vec![
-                format!("source: {source_description}"),
-                format!("target: {target_description}"),
-            ],
-            None,
-            snapshot,
-        );
     }
 
     pub(super) fn promote_view_to_tab_command(&mut self, view_id: ViewId) {
         self.reload_settings_before_workspace_change();
-        let snapshot = self.capture_transaction_snapshot();
 
         let source_index = self.active_tab_index();
         let promoted_tab = self
@@ -62,14 +47,7 @@ impl ScratchpadApp {
         };
 
         self.begin_layout_transition();
-        let promoted_description = promoted_tab.display_name();
         self.append_tab(promoted_tab);
-        self.record_transaction(
-            "Promote view to tab",
-            vec![promoted_description.clone()],
-            None,
-            snapshot,
-        );
         let _ = self.persist_session_now();
     }
 
@@ -78,13 +56,9 @@ impl ScratchpadApp {
             return;
         }
 
-        let snapshot = self.capture_transaction_snapshot();
-
         if index == self.active_tab_index() {
             self.reload_settings_before_workspace_change();
         }
-
-        let source_description = self.describe_tab_at(index);
         let source_tab = self.tab_manager_mut().tabs.remove(index);
         if !source_tab.can_promote_all_files() {
             self.tab_manager_mut().tabs.insert(index, source_tab);
@@ -113,15 +87,10 @@ impl ScratchpadApp {
             self.tab_manager_mut().tabs.insert(index + offset, tab);
         }
         self.tab_manager_mut().active_tab_index = index + active_tab_offset;
+        self.ensure_active_tab_slot_selected();
         self.tab_manager_mut().pending_scroll_to_active = true;
         self.request_focus_for_active_view();
         self.mark_session_dirty();
-        self.record_transaction(
-            "Promote files to tabs",
-            vec![source_description.clone()],
-            None,
-            snapshot,
-        );
         let _ = self.persist_session_now();
     }
 
@@ -146,18 +115,11 @@ impl ScratchpadApp {
             return;
         }
 
-        let snapshot = self.capture_transaction_snapshot();
         if source_indices.contains(&self.active_tab_index())
             || target_index == self.active_tab_index()
         {
             self.reload_settings_before_workspace_change();
         }
-
-        let source_descriptions = source_indices
-            .iter()
-            .map(|index| self.describe_tab_at(*index))
-            .collect::<Vec<_>>();
-        let target_description = self.describe_tab_at(target_index);
 
         if self.tab_manager().tabs.get(target_index).is_none() {
             return;
@@ -187,14 +149,11 @@ impl ScratchpadApp {
 
         self.begin_layout_transition();
         self.tab_manager_mut().active_tab_index = adjusted_target_index;
+        self.ensure_active_tab_slot_selected();
         self.tab_manager_mut().pending_scroll_to_active = true;
         self.request_focus_for_active_view();
         self.mark_session_dirty();
         self.rebalance_combined_workspace_layout(adjusted_target_index, target_index);
-        let mut combine_items = Vec::with_capacity(source_descriptions.len() + 1);
-        combine_items.extend(source_descriptions.iter().cloned());
-        combine_items.push(format!("target: {target_description}"));
-        self.record_transaction("Combine tabs", combine_items, None, snapshot);
         let _ = self.persist_session_now();
     }
 
@@ -269,6 +228,7 @@ impl ScratchpadApp {
         context: TabCombineContext,
     ) {
         self.tab_manager_mut().active_tab_index = context.adjusted_target_index;
+        self.ensure_active_tab_slot_selected();
         self.tab_manager_mut().pending_scroll_to_active = true;
         self.request_focus_for_active_view();
         self.mark_session_dirty();

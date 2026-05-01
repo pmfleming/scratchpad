@@ -193,7 +193,7 @@ fn record_edit(
     deleted_text: String,
     inserted_text: String,
 ) {
-    buffer.document_mut().push_edit_operation(OperationRecord {
+    buffer.push_text_edit_operation(OperationRecord {
         previous_cursor: *cursor,
         next_cursor: new_cursor,
         edits: vec![EditOperation {

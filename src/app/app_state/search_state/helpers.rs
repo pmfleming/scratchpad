@@ -24,14 +24,20 @@ impl SearchResultAccumulator {
         ranges: &[Range<usize>],
     ) {
         let start_index = self.matches.len();
-        self.matches
-            .extend(ranges.iter().cloned().map(|range| SearchMatch {
+        self.matches.extend(ranges.iter().cloned().map(|range| {
+            SearchMatch {
                 tab_index: target.tab_index,
                 view_id: target.view_id,
                 buffer_id: target.buffer_id,
                 buffer_label: target.buffer_label.clone(),
+                target_revision: target.document_snapshot.revision(),
+                matched_text: target
+                    .document_snapshot
+                    .piece_tree()
+                    .extract_range(range.clone()),
                 range,
-            }));
+            }
+        }));
 
         let entries = self.build_entries(target, ranges, start_index);
         if entries.is_empty() {
@@ -166,12 +172,24 @@ pub(super) fn build_replacement_targets(
             .rev()
             .map(|search_match| (search_match.range.clone(), replacement.to_owned()))
             .collect();
+        let expected_matches = matches[start..end]
+            .iter()
+            .rev()
+            .map(|search_match| {
+                (
+                    search_match.range.clone(),
+                    search_match.matched_text.clone(),
+                )
+            })
+            .collect();
 
         targets.push(ReplacementTargetPlan {
             tab_index: current_match.tab_index,
             view_id: current_match.view_id,
             buffer_id: current_match.buffer_id,
             buffer_label: current_match.buffer_label.clone(),
+            target_revision: current_match.target_revision,
+            expected_matches,
             replacements,
         });
         start = end;

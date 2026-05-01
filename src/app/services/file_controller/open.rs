@@ -160,8 +160,6 @@ impl FileController {
 
     pub(super) fn open_selected_paths_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
         Self::prepare_to_open_paths(app);
-        let transaction_snapshot = app.capture_transaction_snapshot();
-        let affected_items = Self::affected_item_labels(&paths);
         let mut duplicate_count = 0;
         let mut pending_paths = Vec::new();
 
@@ -187,8 +185,6 @@ impl FileController {
         app.queue_background_path_loads_streaming(
             pending_paths,
             PendingBackgroundAction::OpenTabs(PendingOpenTabsAction {
-                affected_items,
-                transaction_snapshot,
                 accumulator: OpenBatchSummary {
                     duplicate_count,
                     ..OpenBatchSummary::default()
@@ -243,7 +239,6 @@ impl FileController {
             app,
             PendingOpenTabsAction {
                 accumulator: summary,
-                ..action
             },
         );
     }
@@ -272,6 +267,7 @@ impl FileController {
                 } = LoadedFile::from_buffer(buffer);
                 Self::mark_settings_buffer(app, &mut buffer);
                 app.tab_manager_mut().append_tab(WorkspaceTab::new(buffer));
+                app.ensure_active_tab_slot_selected();
                 Self::queue_deferred_buffer_refreshes(app, deferred_refresh);
                 app.mark_search_dirty();
                 app.request_focus_for_active_view();
@@ -283,23 +279,12 @@ impl FileController {
         }
     }
 
-    /// Finalize a streaming open: record the transaction, persist session,
+    /// Finalize a streaming open, persist session,
     /// emit summary status. Called after the last `PathsLoaded` partial
     /// (`is_partial: false`) is processed.
     pub(crate) fn finalize_open_tabs(app: &mut ScratchpadApp, action: PendingOpenTabsAction) {
         let summary = action.accumulator;
         if summary.opened_count > 0 {
-            let title = if summary.opened_count == 1 {
-                "Open file"
-            } else {
-                "Open files"
-            };
-            app.record_transaction(
-                title,
-                action.affected_items,
-                None,
-                action.transaction_snapshot,
-            );
             let _ = app.persist_session_now();
         }
 

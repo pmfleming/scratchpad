@@ -9,8 +9,8 @@ pub mod memory_budget;
 pub mod services;
 pub mod shortcuts;
 pub mod startup;
+pub(crate) mod text_history;
 pub mod theme;
-pub mod transactions;
 pub mod ui;
 pub mod utils;
 

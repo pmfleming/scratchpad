@@ -6,6 +6,7 @@ use crate::app::domain::{
 use crate::app::fonts::EditorFontPreset;
 use crate::app::services::file_controller::FileController;
 use crate::app::services::session_store::SessionStore;
+use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
 use std::fs;
 
 fn collect_leaf_area_fractions(node: &PaneNode, area_fraction: f32, output: &mut Vec<f32>) {
@@ -38,6 +39,17 @@ fn app_with_named_tabs(names: &[&str]) -> ScratchpadApp {
         app.tabs_mut()[index].buffer.name = (*name).to_owned();
     }
     app
+}
+
+#[test]
+fn open_text_history_command_opens_history_window() {
+    let mut app = test_app();
+
+    app.handle_command(AppCommand::OpenTextHistory);
+    assert!(app.text_history_open);
+
+    app.close_text_history();
+    assert!(!app.text_history_open);
 }
 
 #[test]
@@ -282,6 +294,37 @@ fn closing_dirty_duplicate_view_only_prompts_for_last_remaining_view() {
 }
 
 #[test]
+fn closing_view_prunes_removed_buffer_text_history_entries() {
+    let mut app = test_app();
+    app.tabs_mut()[0].buffer.name = "one.txt".to_owned();
+    let second_view_id = app.tabs_mut()[0]
+        .open_buffer_as_split(
+            BufferState::new("two.txt".to_owned(), "alpha".to_owned(), None),
+            SplitAxis::Vertical,
+            false,
+            0.5,
+        )
+        .expect("open second file");
+    let second_buffer_id = app.tabs()[0]
+        .view(second_view_id)
+        .expect("second view should exist")
+        .buffer_id;
+    let selection = CursorRange::one(CharCursor::new(0));
+
+    app.tabs_mut()[0]
+        .buffer_by_id_mut(second_buffer_id)
+        .expect("second buffer should exist")
+        .replace_char_ranges_with_undo(&[(0..5, "omega".to_owned())], selection, selection)
+        .expect("replace second buffer text");
+    app.record_pending_text_history_event(0, second_buffer_id);
+    assert_eq!(app.text_history_len_for_buffer(second_buffer_id), 1);
+
+    app.perform_close_view(second_view_id);
+
+    assert_eq!(app.text_history_len_for_buffer(second_buffer_id), 0);
+}
+
+#[test]
 fn activating_a_tab_queues_focus_for_its_active_view() {
     let mut app = test_app();
     app.append_tab(WorkspaceTab::untitled());
@@ -308,69 +351,6 @@ fn activating_a_view_queues_focus_for_that_view() {
 
     assert_eq!(app.tabs()[0].active_view_id, second_view_id);
     assert_eq!(app.pending_editor_focus, Some(second_view_id));
-}
-
-#[test]
-fn repeated_resize_split_interactions_share_one_transaction_snapshot() {
-    let mut app = test_app();
-    app.tabs_mut()[0]
-        .split_active_view(SplitAxis::Vertical)
-        .expect("split should succeed");
-
-    app.handle_command(AppCommand::ResizeSplit {
-        path: Vec::new(),
-        ratio: 0.3,
-    });
-    app.handle_command(AppCommand::ResizeSplit {
-        path: Vec::new(),
-        ratio: 0.7,
-    });
-
-    assert_eq!(app.transaction_log_len(), 1);
-
-    let entry_id = app
-        .latest_transaction_entry_id()
-        .expect("resize transaction should exist");
-    assert!(app.undo_transaction_entry(entry_id));
-
-    let mut areas = Vec::new();
-    collect_leaf_area_fractions(&app.tabs()[0].root_pane, 1.0, &mut areas);
-    assert_eq!(areas, vec![0.5, 0.5]);
-}
-
-#[test]
-fn repeated_reorder_interactions_share_one_transaction_snapshot() {
-    let mut app = app_with_named_tabs(&["one.txt", "two.txt", "three.txt"]);
-
-    app.handle_command(AppCommand::ReorderTab {
-        from_index: 0,
-        to_index: 2,
-    });
-    app.handle_command(AppCommand::ReorderTab {
-        from_index: 2,
-        to_index: 1,
-    });
-
-    assert_eq!(app.transaction_log_len(), 1);
-    assert_eq!(
-        app.tabs()
-            .iter()
-            .map(|tab| tab.active_buffer().name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["two.txt", "one.txt", "three.txt"]
-    );
-
-    let entry_id = app
-        .latest_transaction_entry_id()
-        .expect("reorder transaction should exist");
-    assert!(app.undo_transaction_entry(entry_id));
-    assert_eq!(
-        app.tabs()
-            .iter()
-            .map(|tab| tab.active_buffer().name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["one.txt", "two.txt", "three.txt"]
-    );
 }
 
 #[test]

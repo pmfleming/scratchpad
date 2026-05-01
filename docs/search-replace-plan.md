@@ -107,9 +107,8 @@ Supported scopes should be explicit and ordered from narrowest to widest:
 
 * **Selection Only**
 * **Active Buffer**
-* **Visible Pane Group** if the product supports multi-pane workflows where only some panes are active at once
-* **Open Buffers**
-* **Workspace Files** as a future phase
+* **Current Tab**
+* **All Open Tabs**
 
 Rules:
 
@@ -128,6 +127,7 @@ The plan should define first-class support for:
 * regex toggle
 * whole word toggle
 * preserve case behavior for replacement as a later enhancement, not a launch dependency
+* regex replacement should stay simple: regex may define the match, but replacement text is treated literally, with no capture expansion
 
 The engine should treat search semantics as a stable contract. The UI cannot feel reliable if the matching rules are fuzzy or inconsistent between search and replace.
 
@@ -173,17 +173,26 @@ Replace All should require strong guarantees:
 ### Replace Preview
 For the best experience, the product should support lightweight preview before destructive multi-target operations.
 
+Live preview expectation:
+
+* As the user types in the replace field, the editor should show a live preview of the pending replacement at all currently targeted match locations.
+* That preview should read like multi-cursor or multi-site pending text, so users can judge the effect before committing a replace action.
+* The preview must be transient state, not a partially committed document mutation.
+* Leaving replace mode, changing the query/scope, or cancelling the action must remove the preview completely if the user has not executed replace-one or replace-all.
+* The preview path must remain fully undo-safe: abandoning preview should require no cleanup undo steps, and executing the actual replace should still collapse into the documented user-level undo unit.
+
 Minimum acceptable preview:
 
 * total match count
 * number of affected buffers
 * visible replacement string
+* regex replacements use the same visible literal replacement string as plain-text replacements
 
 Preferred preview:
 
 * per-buffer counts
 * a compact list of changed contexts
-* regex replacement preview where captures materially affect output
+* in-editor live preview at the active match sites, with deterministic reveal/focus for the active view
 
 ### Confirmation Rules
 Confirmation should be selective, not noisy:
@@ -191,7 +200,7 @@ Confirmation should be selective, not noisy:
 * no confirmation for single replace
 * no confirmation for replace-all within one active buffer if the count is small and undo is guaranteed
 * confirmation for cross-buffer replace-all
-* confirmation for regex replace-all when replacement text uses captures or when the result count is high
+* confirmation for replace-all when the result count is high
 
 ---
 
@@ -234,6 +243,36 @@ The UI should clearly distinguish:
 
 The user should never have to infer whether they are searching one buffer or many.
 
+### Search Result Navigation And Tab Selection
+Search-result clicks should be treated as navigation, not as additive tab-selection gestures.
+
+Rules:
+
+* Clicking a file-level search result must move tab selection to exactly the tab that owns that file.
+* Search navigation must not add the destination tab to an existing multi-tab selection.
+* Search navigation must not preserve an unrelated multi-tab selection from prior tab-strip gestures.
+* After the destination tab is selected, focus should move to the first visible tile in that tab that shows the target file. If no existing tile already shows that file, focus should move to the first tile that becomes responsible for revealing it.
+
+Line-result behavior:
+
+* Clicking a line or match row must move tab selection to exactly the tab that owns that file.
+* It must then focus the tile/view responsible for that file.
+* It must reveal the clicked match location in that view and make that view the active editor context for subsequent keyboard actions.
+* The reveal action should scroll to the match predictably and keep the clicked result as the active search result.
+
+Best-practice notes:
+
+* Search-result clicks are semantic workspace navigation commands, so they should behave like `select destination and go there`, not like `Ctrl` or `Shift` tab selection.
+* File-result clicks should be treated as file navigation only; they should not move the caret to an arbitrary match if the user selected the file row rather than a specific line row.
+* Line-result clicks should be treated as exact-location navigation and should restore enough editor focus that arrow keys, typing, and follow-up search commands act on the revealed view immediately.
+* If the destination file is shown in multiple tiles within the same tab, pick one deterministic target view rather than leaving focus ambiguous.
+
+Acceptance notes:
+
+* Clicking any search result clears unrelated tab multi-selection and leaves only the destination tab selected.
+* Clicking a file result lands the user on the correct tab and focuses a predictable tile for that file.
+* Clicking a line result lands the user on the correct tab, focuses the correct tile, and reveals the clicked location.
+
 ### Empty and Error States
 The current "No results found" note is a start, but the plan should define:
 
@@ -269,7 +308,7 @@ The prior latency target is good, but the plan needs explicit tactics:
 * invalidate results by target revision, not by broad global resets
 * cap expensive previews for cross-buffer operations
 
-For large workspace search in future phases, background execution and progressive result streaming should be part of the design, not retrofitted later.
+If open-buffer searches become large enough to feel slow, background execution and progressive result streaming should remain part of that design.
 
 ---
 
@@ -333,7 +372,6 @@ Candidates:
 * session persistence across workspace reopen
 * preview-rich replace-all
 * multi-cursor promotion
-* workspace-on-disk search
 * history of recent queries and replacements
 
 ---

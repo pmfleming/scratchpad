@@ -312,6 +312,9 @@ fn replace_all_changes_every_buffer_in_scope() {
     app.set_search_replacement("omega");
 
     wait_for_search_matches(&mut app, 3);
+    assert!(!app.replace_all_search_matches());
+    assert_eq!(app.tabs()[0].active_buffer().text(), "alpha beta alpha");
+    assert_eq!(app.tabs()[1].active_buffer().text(), "alpha gamma");
     assert!(app.replace_all_search_matches());
     assert_eq!(app.tabs()[0].active_buffer().text(), "omega beta omega");
     assert_eq!(app.tabs()[1].active_buffer().text(), "omega gamma");

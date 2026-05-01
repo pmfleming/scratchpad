@@ -10,6 +10,7 @@ pub(crate) fn apply_tab_outcome(app: &mut ScratchpadApp, outcome: TabStripOutcom
         .rename_requested_tab
         .and_then(|slot_index| app.workspace_index_for_slot(slot_index))
     {
+        app.handle_command(AppCommand::ActivateTab { index });
         app.begin_tab_rename(index);
     }
     if outcome.activate_settings {

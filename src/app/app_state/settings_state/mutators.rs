@@ -48,6 +48,7 @@ impl ScratchpadApp {
         self.settings_tab_index = self.settings_tab_index.min(self.tabs().len());
         self.app_settings.settings_tab_open = open;
         self.active_surface = surface;
+        self.ensure_active_tab_slot_selected();
         self.tab_manager.pending_scroll_to_active = true;
         changed
     }
@@ -298,6 +299,7 @@ impl ScratchpadApp {
             .iter()
             .position(|&index| index == active_workspace_index)
             .unwrap_or(0);
+        self.ensure_active_tab_slot_selected();
         self.tab_manager.pending_scroll_to_active = true;
         self.mark_session_dirty();
         self.persist_settings_or_error();

@@ -3,7 +3,6 @@ use crate::app::theme::CAPTION_BUTTON_SIZE;
 use crate::app::ui::callout;
 use eframe::egui;
 use egui_phosphor::regular::FILE_TEXT;
-use std::time::Duration;
 
 pub(super) const ICON_CHOICE_BUTTON_SIZE: egui::Vec2 = egui::vec2(72.0, 54.0);
 
@@ -47,18 +46,6 @@ pub(super) fn apply_editor_dialog_typography(ui: &mut egui::Ui) {
     style
         .text_styles
         .insert(egui::TextStyle::Small, egui::FontId::new(12.0, font_family));
-}
-
-pub(super) fn relative_age_label(age: Duration) -> String {
-    if age < Duration::from_secs(60) {
-        format!("{}s", age.as_secs().max(1))
-    } else if age < Duration::from_secs(60 * 60) {
-        format!("{}m", age.as_secs() / 60)
-    } else if age < Duration::from_secs(60 * 60 * 24) {
-        format!("{}h", age.as_secs() / (60 * 60))
-    } else {
-        format!("{}d", age.as_secs() / (60 * 60 * 24))
-    }
 }
 
 pub(super) fn render_dialog_header(ui: &mut egui::Ui, title: &str) -> bool {

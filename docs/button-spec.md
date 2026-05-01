@@ -216,6 +216,36 @@ Future-compatible expectation:
   - window title
   - custom tab label formatting
 
+### Planned Unified Activity And Selection
+
+Goal:
+
+- Collapse the current visual distinction between `active` and `selected` tab slots into one visible state.
+- Active tabs and selected tabs should both render as a darkened tab with the same blue outlined square treatment.
+- The active tab remains a distinct logical concept for focus, command routing, and window-title state, but it no longer has a separate visual style.
+
+Proposed behavior:
+
+- The active tab must always be included in the selected tab-slot set.
+- A normal tab click should activate the clicked tab and reset selection to only that tab.
+- `Ctrl` click should add or remove extra selected tabs, but must never leave the active tab outside the selected set.
+- `Shift` click should extend selection from the current anchor while ensuring the active tab remains selected.
+- Multi-selection should be treated as `selected tabs`, with exactly one of them also marked as the active tab for focus-sensitive actions.
+
+Implementation plan:
+
+- Replace the separate active-only paint path and selected-overlay paint path with one shared selected-state visual treatment.
+- Keep `active_tab_index` for editor focus and command targeting, but define it as a guaranteed member of `selected_tab_slots`.
+- Tighten selection mutations so any activate/select flow preserves the invariant `active in selected_tab_slots`.
+- Audit overflow-list, drag/drop, context-menu, and settings-tab rendering so they all use the same unified selected appearance.
+- Update any docs and tests that currently describe active and selected tabs as visually different states.
+
+Acceptance notes:
+
+- Users should no longer need to infer meaning from two tab highlight styles.
+- Single-selection should still feel unchanged: one active tab that is also visibly selected.
+- Multi-selection should read as `one active tab inside a selected group`, not as two competing highlight systems.
+
 ### Maximize State
 
 - Maximize state is derived from `IsZoomed(hwnd)`

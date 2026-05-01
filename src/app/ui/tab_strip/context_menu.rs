@@ -33,6 +33,11 @@ pub(crate) fn attach_tab_context_menu(
 ) {
     if response.secondary_clicked() {
         app.select_only_tab_slot(slot_index);
+        if let Some(index) = app.workspace_index_for_slot(slot_index) {
+            app.handle_command(AppCommand::ActivateTab { index });
+        } else if app.tab_slot_is_settings(slot_index) {
+            app.handle_command(AppCommand::OpenSettings);
+        }
     }
 
     let menu_state = TabContextMenuState::new(app, slot_index);

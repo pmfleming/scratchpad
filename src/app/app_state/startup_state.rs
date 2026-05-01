@@ -9,7 +9,6 @@ use crate::app::services::settings_store::{
     AppSettings, FileOpenDisposition, SettingsStore, StartupSessionBehavior,
 };
 use crate::app::startup::{StartupOpenTarget, StartupOptions};
-use crate::app::transactions::TransactionLog;
 use std::collections::BTreeSet;
 use std::time::Instant;
 
@@ -96,10 +95,8 @@ impl ScratchpadApp {
             pending_settings_toml_refresh: None,
             vertical_tab_list_open: false,
             vertical_tab_list_hide_deadline: None,
-            transaction_log: TransactionLog::default(),
-            transaction_log_open: false,
-            pending_layout_transaction: None,
-            pending_text_transaction: None,
+            text_history: crate::app::text_history::TextHistoryLedger::default(),
+            text_history_open: false,
             search_state: SearchState::default(),
             chrome_transition_frames_remaining: 0,
             selected_tab_slots: BTreeSet::new(),
@@ -133,6 +130,8 @@ impl ScratchpadApp {
             app.request_focus_for_active_view();
             app.apply_startup_options(startup_options);
         }
+
+        app.ensure_active_tab_slot_selected();
 
         app
     }

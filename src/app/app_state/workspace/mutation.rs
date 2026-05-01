@@ -1,11 +1,22 @@
 use super::super::ScratchpadApp;
+use crate::app::domain::buffer::TextHistoryEvent;
 use crate::app::domain::{BufferId, CursorRevealMode};
-use crate::app::transactions::TransactionSnapshot;
+use crate::app::text_history::TextHistorySource;
 use crate::app::ui::editor_content::native_editor::{
     cut_selected_text, select_all_cursor, selected_text,
 };
 
 impl ScratchpadApp {
+    pub(crate) fn active_buffer_transaction_label(&self) -> Option<String> {
+        self.active_tab().map(|tab| {
+            tab.active_buffer()
+                .path
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| tab.active_buffer().name.clone())
+        })
+    }
+
     pub(crate) fn active_buffer_can_undo_text_operation(&self) -> bool {
         self.active_tab()
             .is_some_and(|tab| tab.active_buffer().document().operation_undo_depth() > 0)
@@ -16,14 +27,46 @@ impl ScratchpadApp {
             .is_some_and(|tab| tab.active_buffer().document().operation_redo_depth() > 0)
     }
 
-    pub(crate) fn finalize_active_buffer_text_mutation(
-        &mut self,
-        active_tab_index: usize,
-        active_buffer_id: BufferId,
-        active_buffer_label: String,
-        transaction_snapshot: TransactionSnapshot,
-    ) {
+    pub fn text_history_len(&self) -> usize {
+        self.text_history.len()
+    }
+
+    pub fn text_history_len_for_buffer(&self, buffer_id: BufferId) -> usize {
+        self.text_history.len_for_buffer(buffer_id)
+    }
+
+    pub fn text_history_editor_len(&self) -> usize {
+        self.text_history.len_for_source(TextHistorySource::Editor)
+    }
+
+    pub fn text_history_search_replace_len(&self) -> usize {
+        self.text_history
+            .len_for_source(TextHistorySource::SearchReplace)
+    }
+
+    pub fn text_history_redo_len(&self) -> usize {
+        self.text_history.redo_len()
+    }
+
+    pub fn latest_text_history_entry_id_for_buffer(&self, buffer_id: BufferId) -> Option<u64> {
+        self.text_history.latest_entry_id_for_buffer(buffer_id)
+    }
+
+    pub fn latest_text_history_summary(&self) -> Option<&str> {
+        self.text_history.latest_summary()
+    }
+
+    pub fn latest_text_history_edit_count(&self) -> Option<usize> {
+        self.text_history.latest_edit_count()
+    }
+
+    pub fn latest_text_history_inserted_text(&self) -> Option<&str> {
+        self.text_history.latest_inserted_text()
+    }
+
+    pub(crate) fn finalize_active_buffer_text_mutation(&mut self, active_tab_index: usize) {
         let tab = &mut self.tabs_mut()[active_tab_index];
+        let buffer_id = tab.buffer.id;
         let latest_edit = tab.buffer.document().latest_operation_record().cloned();
         tab.buffer
             .refresh_text_metadata_after_operation(latest_edit.as_ref());
@@ -46,15 +89,146 @@ impl ScratchpadApp {
         } else {
             self.clear_status_message();
         }
-        self.record_text_edit_transaction(
-            active_buffer_id,
-            active_buffer_label,
-            transaction_snapshot,
-            latest_edit,
-        );
+        self.record_pending_text_history_event(active_tab_index, buffer_id);
         self.mark_search_dirty();
         self.mark_session_dirty();
         self.note_settings_toml_edit(active_tab_index);
+    }
+
+    pub(crate) fn prune_text_history_for_buffers(
+        &mut self,
+        buffer_ids: impl IntoIterator<Item = BufferId>,
+    ) {
+        self.text_history.prune_buffers(buffer_ids);
+    }
+
+    pub(crate) fn record_pending_text_history_event(
+        &mut self,
+        tab_index: usize,
+        buffer_id: BufferId,
+    ) {
+        let pending = {
+            let Some(buffer) = self
+                .tabs_mut()
+                .get_mut(tab_index)
+                .and_then(|tab| tab.buffer_by_id_mut(buffer_id))
+            else {
+                return;
+            };
+            buffer
+                .take_text_history_event()
+                .and_then(|event| match event {
+                    TextHistoryEvent::Edit { source, operation } => Some((
+                        buffer.id,
+                        buffer
+                            .path
+                            .as_ref()
+                            .map(|path| path.display().to_string())
+                            .unwrap_or_else(|| format!("untitled:{}", buffer.temp_id)),
+                        buffer
+                            .path
+                            .as_ref()
+                            .map(|path| path.display().to_string())
+                            .unwrap_or_else(|| buffer.name.clone()),
+                        source,
+                        operation,
+                    )),
+                    TextHistoryEvent::Replay => None,
+                })
+        };
+
+        if let Some((buffer_id, file_identity, label, source, operation)) = pending {
+            self.text_history
+                .record_components(buffer_id, file_identity, label, source, operation);
+        }
+    }
+
+    pub fn undo_text_history_entry(&mut self, entry_id: u64) -> bool {
+        self.apply_text_history_entry(entry_id, true)
+    }
+
+    pub fn redo_text_history_entry(&mut self, entry_id: u64) -> bool {
+        self.apply_text_history_entry(entry_id, false)
+    }
+
+    fn apply_text_history_entry(&mut self, entry_id: u64, undo: bool) -> bool {
+        let action = if undo {
+            self.text_history.prepare_selective_undo(entry_id)
+        } else {
+            self.text_history.prepare_selective_redo(entry_id)
+        };
+        let Ok(action) = action else {
+            self.set_error_status("Text history entry is no longer available.".to_owned());
+            return false;
+        };
+        let Some(tab_index) = self.tab_index_for_buffer(action.buffer_id) else {
+            self.text_history.prune_buffer(action.buffer_id);
+            self.set_error_status("Text history entry belongs to a closed file.".to_owned());
+            return false;
+        };
+
+        let selection = {
+            let tab = &mut self.tabs_mut()[tab_index];
+            let Some(buffer) = tab.buffer_by_id_mut(action.buffer_id) else {
+                return false;
+            };
+            let result = if undo {
+                buffer.apply_text_history_undo(&action.operation)
+            } else {
+                buffer.apply_text_history_redo(&action.operation)
+            };
+            match result {
+                Ok(selection) => {
+                    buffer.is_dirty = true;
+                    selection
+                }
+                Err(_) => {
+                    self.set_error_status(
+                        "Text history entry conflicts with the current file contents.".to_owned(),
+                    );
+                    return false;
+                }
+            }
+        };
+
+        if undo {
+            self.text_history.mark_undone(action.entry_id);
+        } else {
+            self.text_history.mark_redone(action.entry_id);
+        }
+        self.restore_text_history_selection(tab_index, action.buffer_id, selection);
+        self.mark_search_dirty();
+        self.mark_session_dirty();
+        true
+    }
+
+    fn tab_index_for_buffer(&self, buffer_id: BufferId) -> Option<usize> {
+        self.tabs()
+            .iter()
+            .position(|tab| tab.buffers().any(|buffer| buffer.id == buffer_id))
+    }
+
+    fn restore_text_history_selection(
+        &mut self,
+        tab_index: usize,
+        buffer_id: BufferId,
+        selection: crate::app::ui::editor_content::native_editor::CursorRange,
+    ) {
+        let Some(view_id) = self.tabs().get(tab_index).and_then(|tab| {
+            tab.views
+                .iter()
+                .find(|view| view.buffer_id == buffer_id)
+                .map(|view| view.id)
+        }) else {
+            return;
+        };
+        let tab = &mut self.tabs_mut()[tab_index];
+        let _ = tab.activate_view(view_id);
+        if let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) {
+            view.set_cursor_range_anchored(buffer, selection);
+            view.set_pending_cursor_range_anchored(buffer, selection);
+            view.request_cursor_reveal(CursorRevealMode::Center);
+        }
     }
 
     pub(crate) fn undo_active_buffer_text_operation(&mut self) -> bool {
@@ -97,15 +271,10 @@ impl ScratchpadApp {
 
     pub(crate) fn cut_selected_text_in_active_view(&mut self) -> Option<String> {
         let active_tab_index = self.active_tab_index();
-        let (active_buffer_id, active_buffer_label, active_view_id) = {
+        let active_view_id = {
             let tab = self.active_tab()?;
-            (
-                tab.active_buffer().id,
-                self.active_buffer_transaction_label()?,
-                tab.active_view_id,
-            )
+            tab.active_view_id
         };
-        let transaction_snapshot = self.capture_transaction_snapshot();
 
         let (next_selection, selected_text) = {
             let tab = &mut self.tabs_mut()[active_tab_index];
@@ -119,12 +288,7 @@ impl ScratchpadApp {
             (next_selection, selected_text)
         };
 
-        self.finalize_active_buffer_text_mutation(
-            active_tab_index,
-            active_buffer_id,
-            active_buffer_label,
-            transaction_snapshot,
-        );
+        self.finalize_active_buffer_text_mutation(active_tab_index);
         self.refresh_search_state();
         self.select_next_active_buffer_match_from(next_selection.primary.index);
         Some(selected_text)
@@ -132,15 +296,10 @@ impl ScratchpadApp {
 
     fn apply_active_buffer_text_operation(&mut self, undo: bool) -> bool {
         let active_tab_index = self.active_tab_index();
-        let active_buffer_id = match self.active_tab() {
-            Some(tab) => tab.active_buffer().id,
-            None => return false,
-        };
         let active_buffer_label = match self.active_buffer_transaction_label() {
             Some(label) => label,
             None => return false,
         };
-        let transaction_snapshot = self.capture_transaction_snapshot();
 
         let selection = {
             let tab = &mut self.tabs_mut()[active_tab_index];
@@ -164,12 +323,7 @@ impl ScratchpadApp {
             selection
         };
 
-        self.finalize_active_buffer_text_mutation(
-            active_tab_index,
-            active_buffer_id,
-            active_buffer_label.clone(),
-            transaction_snapshot,
-        );
+        self.finalize_active_buffer_text_mutation(active_tab_index);
         self.refresh_search_state();
         self.select_next_active_buffer_match_from(selection.primary.index);
         let action = if undo { "Undid" } else { "Redid" };

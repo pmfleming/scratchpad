@@ -2,10 +2,11 @@ use super::analysis::{IncrementalMetadataEdit, buffer_text_metadata_from_edit};
 use super::{
     BufferLength, BufferTextMetadata, DocumentSnapshot, EncodingSource, LineEndingStyle,
     TextArtifactSummary, TextDocument, TextDocumentOperationRecord, TextFormatMetadata,
-    TextReplacementError, TextReplacements, buffer_text_metadata,
+    TextHistoryApplyError, TextReplacementError, TextReplacements, buffer_text_metadata,
     buffer_text_metadata_from_piece_tree,
 };
-use crate::app::ui::editor_content::native_editor::CursorRange;
+use crate::app::text_history::TextHistorySource;
+use crate::app::ui::editor_content::native_editor::{CursorRange, OperationRecord};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -34,6 +35,16 @@ pub struct BufferState {
     pub has_non_compliant_characters: bool,
     text_metadata_refresh_stale: bool,
     encoding_compliance_stale: bool,
+    pending_text_history_event: Option<TextHistoryEvent>,
+}
+
+#[derive(Clone)]
+pub(crate) enum TextHistoryEvent {
+    Edit {
+        source: TextHistorySource,
+        operation: TextDocumentOperationRecord,
+    },
+    Replay,
 }
 
 struct BufferBuildState {
@@ -275,6 +286,7 @@ impl BufferState {
         self.has_non_compliant_characters = loaded.has_non_compliant_characters;
         self.text_metadata_refresh_stale = loaded.text_metadata_refresh_stale;
         self.encoding_compliance_stale = loaded.encoding_compliance_stale;
+        self.pending_text_history_event = None;
     }
 
     pub fn replace_format_without_text_change(&mut self, format: TextFormatMetadata) {
@@ -294,20 +306,69 @@ impl BufferState {
             previous_selection,
             next_selection,
         )?;
+        if let Some(operation) = self.document.latest_operation_record().cloned() {
+            self.pending_text_history_event = Some(TextHistoryEvent::Edit {
+                source: TextHistorySource::SearchReplace,
+                operation,
+            });
+        }
         self.refresh_text_metadata();
         Ok(())
     }
 
+    pub(crate) fn push_text_edit_operation(&mut self, record: OperationRecord) {
+        self.document.push_edit_operation(record);
+        if let Some(operation) = self.document.latest_operation_record().cloned() {
+            self.pending_text_history_event = Some(TextHistoryEvent::Edit {
+                source: TextHistorySource::Editor,
+                operation,
+            });
+        }
+    }
+
+    pub(crate) fn take_text_history_event(&mut self) -> Option<TextHistoryEvent> {
+        self.pending_text_history_event.take()
+    }
+
+    pub(crate) fn validate_char_replacements(
+        &self,
+        replacements: TextReplacements<'_>,
+    ) -> Result<(), TextReplacementError> {
+        self.document.validate_char_replacements(replacements)
+    }
+
     pub fn undo_last_text_operation(&mut self) -> Option<CursorRange> {
         let selection = self.document.undo_last_operation()?;
+        self.pending_text_history_event = Some(TextHistoryEvent::Replay);
         self.refresh_text_metadata();
         Some(selection)
     }
 
     pub fn redo_last_text_operation(&mut self) -> Option<CursorRange> {
         let selection = self.document.redo_last_operation()?;
+        self.pending_text_history_event = Some(TextHistoryEvent::Replay);
         self.refresh_text_metadata();
         Some(selection)
+    }
+
+    pub(crate) fn apply_text_history_undo(
+        &mut self,
+        operation: &TextDocumentOperationRecord,
+    ) -> Result<CursorRange, TextHistoryApplyError> {
+        let selection = self.document.apply_text_history_undo(operation)?;
+        self.pending_text_history_event = Some(TextHistoryEvent::Replay);
+        self.refresh_text_metadata();
+        Ok(selection)
+    }
+
+    pub(crate) fn apply_text_history_redo(
+        &mut self,
+        operation: &TextDocumentOperationRecord,
+    ) -> Result<CursorRange, TextHistoryApplyError> {
+        let selection = self.document.apply_text_history_redo(operation)?;
+        self.pending_text_history_event = Some(TextHistoryEvent::Replay);
+        self.refresh_text_metadata();
+        Ok(selection)
     }
 
     pub fn refresh_text_metadata(&mut self) {
@@ -464,6 +525,7 @@ impl BufferState {
             has_non_compliant_characters: text_metadata.has_non_compliant_characters,
             text_metadata_refresh_stale: state.text_metadata_refresh_stale,
             encoding_compliance_stale: false,
+            pending_text_history_event: None,
         }
     }
 

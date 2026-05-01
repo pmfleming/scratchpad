@@ -126,6 +126,7 @@ pub fn render_editor_text_edit(
             input.focused,
             false,
             galley_context.char_offset_base,
+            galley_context.slice_chars,
         )
     } else {
         CursorPaintOutcome::default()

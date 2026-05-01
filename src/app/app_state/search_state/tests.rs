@@ -14,6 +14,9 @@ use crate::app::domain::{
 };
 use crate::app::services::search::{SearchMode, SearchOptions};
 use crate::app::services::session_store::SessionStore;
+use crate::app::ui::editor_content::native_editor::{
+    CharCursor, CursorRange, EditOperation, OperationRecord,
+};
 use crate::app::ui::scrolling::{
     ContentExtent, DisplaySnapshot, ScrollAlign, ScrollIntent, ViewportMetrics,
 };
@@ -426,7 +429,7 @@ fn invalid_regex_query_reports_invalid_status_and_blocks_replace() {
 }
 
 #[test]
-fn submitting_search_request_keeps_existing_highlights_until_results_arrive() {
+fn submitting_search_request_clears_stale_highlights_until_results_arrive() {
     let mut app = test_app();
     app.tabs_mut()[0]
         .buffer
@@ -449,8 +452,8 @@ fn submitting_search_request_keeps_existing_highlights_until_results_arrive() {
         .expect("active view")
         .search_highlights;
     assert!(app.search_progress().searching);
-    assert_eq!(highlights.ranges, vec![0..5, 11..16]);
-    assert_eq!(highlights.active_range_index, Some(0));
+    assert!(highlights.ranges.is_empty());
+    assert_eq!(highlights.active_range_index, None);
 }
 
 #[test]
@@ -474,6 +477,44 @@ fn selection_only_replace_all_stays_within_the_selected_range() {
 }
 
 #[test]
+fn replacement_preview_tracks_replace_field_without_mutating_text() {
+    let mut app = test_app();
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha beta alpha".to_owned());
+
+    app.open_search();
+    app.set_search_replace_open(true);
+    app.set_search_query("alpha");
+    wait_for_search_matches(&mut app, 2);
+    app.set_search_replacement("omega");
+
+    let view = app.tabs()[0].active_view().expect("active view");
+    assert_eq!(view.search_replacement_preview.as_deref(), Some("omega"));
+    assert_eq!(view.search_highlights.ranges, vec![0..5, 11..16]);
+    assert_eq!(app.tabs()[0].active_buffer().text(), "alpha beta alpha");
+
+    app.set_search_replacement("delta");
+    assert_eq!(
+        app.tabs()[0]
+            .active_view()
+            .expect("active view")
+            .search_replacement_preview
+            .as_deref(),
+        Some("delta")
+    );
+
+    app.set_search_replace_open(false);
+    assert_eq!(
+        app.tabs()[0]
+            .active_view()
+            .expect("active view")
+            .search_replacement_preview,
+        None
+    );
+}
+
+#[test]
 fn replace_all_changes_every_buffer_in_scope() {
     let mut app = test_app();
     app.tabs_mut()[0]
@@ -491,9 +532,65 @@ fn replace_all_changes_every_buffer_in_scope() {
     app.set_search_replacement("omega");
 
     wait_for_search_matches(&mut app, 3);
+    assert!(!app.replace_all_search_matches());
+    assert_eq!(app.tabs()[0].active_buffer().text(), "alpha beta alpha");
+    assert_eq!(app.tabs()[1].active_buffer().text(), "alpha gamma");
     assert!(app.replace_all_search_matches());
     assert_eq!(app.tabs()[0].active_buffer().text(), "omega beta omega");
     assert_eq!(app.tabs()[1].active_buffer().text(), "omega gamma");
+}
+
+#[test]
+fn cross_buffer_replace_all_revalidates_before_mutating_any_buffer() {
+    let mut app = test_app();
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha beta alpha".to_owned());
+    app.create_untitled_tab();
+    app.tabs_mut()[1]
+        .buffer
+        .replace_text("alpha gamma".to_owned());
+    app.tab_manager_mut().active_tab_index = 0;
+
+    app.open_search();
+    app.set_search_scope(SearchScope::AllOpenTabs);
+    app.set_search_query("alpha");
+    app.set_search_replacement("omega");
+
+    wait_for_search_matches(&mut app, 3);
+    app.tabs_mut()[1]
+        .buffer
+        .document_mut()
+        .insert_direct(0, "stale ");
+
+    assert!(!app.replace_all_search_matches());
+    assert_eq!(app.tabs()[0].active_buffer().text(), "alpha beta alpha");
+    assert_eq!(app.tabs()[1].active_buffer().text(), "stale alpha gamma");
+}
+
+#[test]
+fn search_navigation_clears_unrelated_tab_multi_selection() {
+    let mut app = test_app();
+    app.tabs_mut()[0].buffer.replace_text("zzz".to_owned());
+    app.create_untitled_tab();
+    app.tabs_mut()[1]
+        .buffer
+        .replace_text("alpha target".to_owned());
+    app.create_untitled_tab();
+    app.tabs_mut()[2].buffer.replace_text("zzz".to_owned());
+    app.tab_manager_mut().active_tab_index = 0;
+    app.select_tab_slot_range(2);
+
+    app.open_search();
+    app.set_search_scope(SearchScope::AllOpenTabs);
+    app.set_search_query("alpha");
+    wait_for_search_matches(&mut app, 1);
+
+    assert!(app.activate_search_match_at(0));
+
+    let destination_slot = app.slot_for_workspace_index(1);
+    assert_eq!(app.selected_tab_slots.len(), 1);
+    assert!(app.tab_slot_selected(destination_slot));
 }
 
 #[test]
@@ -513,6 +610,203 @@ fn active_buffer_operation_undo_restores_search_replace_text() {
 
     app.handle_command(AppCommand::UndoActiveBufferTextOperation);
     assert_eq!(app.tabs()[0].active_buffer().text(), "alpha beta alpha");
+}
+
+#[test]
+fn search_replace_records_one_text_history_entry() {
+    let mut app = test_app();
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha beta alpha".to_owned());
+    let buffer_id = app.tabs()[0].active_buffer().id;
+
+    app.open_search();
+    app.set_search_query("alpha");
+    app.set_search_replacement("omega");
+
+    wait_for_search_matches(&mut app, 2);
+    assert!(app.replace_current_search_match());
+
+    assert_eq!(app.text_history_len(), 1);
+    assert_eq!(app.text_history_len_for_buffer(buffer_id), 1);
+    assert_eq!(app.latest_text_history_summary(), Some("Replace match"));
+}
+
+#[test]
+fn adjacent_editor_insertions_coalesce_into_one_text_history_entry() {
+    let mut app = test_app();
+    app.tabs_mut()[0].buffer.replace_text(String::new());
+    let buffer_id = app.tabs()[0].active_buffer().id;
+
+    record_editor_insert(&mut app, 0, "a");
+    record_editor_insert(&mut app, 1, "b");
+
+    assert_eq!(app.text_history_len(), 1);
+    assert_eq!(app.text_history_len_for_buffer(buffer_id), 1);
+    assert_eq!(app.latest_text_history_edit_count(), Some(1));
+    assert_eq!(app.latest_text_history_inserted_text(), Some("ab"));
+    assert_eq!(app.latest_text_history_summary(), Some("Insert \"ab\""));
+}
+
+#[test]
+fn text_history_exposes_global_per_file_and_source_lenses() {
+    let mut app = test_app();
+    app.tabs_mut()[0].buffer.replace_text("alpha".to_owned());
+    let buffer_id = app.tabs()[0].active_buffer().id;
+
+    record_editor_insert(&mut app, 5, "!");
+    app.open_search();
+    app.set_search_query("alpha");
+    app.set_search_replacement("omega");
+    wait_for_search_matches(&mut app, 1);
+    assert!(app.replace_current_search_match());
+
+    assert_eq!(app.text_history_len(), 2);
+    assert_eq!(app.text_history_len_for_buffer(buffer_id), 2);
+    assert_eq!(app.text_history_editor_len(), 1);
+    assert_eq!(app.text_history_search_replace_len(), 1);
+}
+
+#[test]
+fn selective_undo_rebases_older_file_entry_over_later_same_file_insert() {
+    let mut app = test_app();
+    app.tabs_mut()[0].buffer.replace_text("abc".to_owned());
+    let buffer_id = app.tabs()[0].active_buffer().id;
+
+    record_editor_insert(&mut app, 1, "X");
+    let older_entry_id = app
+        .latest_text_history_entry_id_for_buffer(buffer_id)
+        .expect("older entry id");
+    record_editor_insert(&mut app, 0, "Y");
+    assert_eq!(app.tabs()[0].active_buffer().text(), "YaXbc");
+
+    assert!(app.undo_text_history_entry(older_entry_id));
+
+    assert_eq!(app.tabs()[0].active_buffer().text(), "Yabc");
+    assert_eq!(app.text_history_len_for_buffer(buffer_id), 1);
+    assert_eq!(app.text_history_redo_len(), 1);
+
+    assert!(app.redo_text_history_entry(older_entry_id));
+
+    assert_eq!(app.tabs()[0].active_buffer().text(), "YaXbc");
+    assert_eq!(app.text_history_len_for_buffer(buffer_id), 2);
+    assert_eq!(app.text_history_redo_len(), 0);
+}
+
+#[test]
+fn selective_undo_conflict_leaves_document_and_history_unchanged() {
+    let mut app = test_app();
+    app.tabs_mut()[0].buffer.replace_text("abc".to_owned());
+    let buffer_id = app.tabs()[0].active_buffer().id;
+
+    record_editor_insert(&mut app, 1, "X");
+    let older_entry_id = app
+        .latest_text_history_entry_id_for_buffer(buffer_id)
+        .expect("older entry id");
+    record_editor_delete(&mut app, 1, "X");
+    assert_eq!(app.tabs()[0].active_buffer().text(), "abc");
+
+    assert!(!app.undo_text_history_entry(older_entry_id));
+
+    assert_eq!(app.tabs()[0].active_buffer().text(), "abc");
+    assert_eq!(app.text_history_len_for_buffer(buffer_id), 2);
+    assert_eq!(app.text_history_redo_len(), 0);
+}
+
+#[test]
+fn close_and_reopen_starts_with_fresh_text_history_identity() {
+    let mut app = test_app();
+    app.tabs_mut()[0].buffer.replace_text(String::new());
+    let closed_buffer_id = app.tabs()[0].active_buffer().id;
+    record_editor_insert(&mut app, 0, "a");
+    assert_eq!(app.text_history_len_for_buffer(closed_buffer_id), 1);
+
+    app.perform_close_tab_no_persist(0);
+
+    let reopened_buffer_id = app.tabs()[0].active_buffer().id;
+    assert_ne!(closed_buffer_id, reopened_buffer_id);
+    assert_eq!(app.text_history_len_for_buffer(closed_buffer_id), 0);
+    assert_eq!(app.text_history_len_for_buffer(reopened_buffer_id), 0);
+}
+
+fn record_editor_insert(app: &mut ScratchpadApp, start_char: usize, text: &str) {
+    let buffer_id = app.tabs()[0].active_buffer().id;
+    let previous_cursor = CursorRange::one(CharCursor::new(start_char));
+    let next_cursor = CursorRange::one(CharCursor::new(start_char + text.chars().count()));
+    let buffer = &mut app.tabs_mut()[0].buffer;
+    buffer.document_mut().insert_direct(start_char, text);
+    buffer.push_text_edit_operation(OperationRecord {
+        previous_cursor,
+        next_cursor,
+        edits: vec![EditOperation {
+            start_char,
+            deleted_text: String::new(),
+            inserted_text: text.to_owned(),
+        }],
+    });
+    app.record_pending_text_history_event(0, buffer_id);
+}
+
+fn record_editor_delete(app: &mut ScratchpadApp, start_char: usize, deleted_text: &str) {
+    let buffer_id = app.tabs()[0].active_buffer().id;
+    let previous_cursor =
+        CursorRange::one(CharCursor::new(start_char + deleted_text.chars().count()));
+    let next_cursor = CursorRange::one(CharCursor::new(start_char));
+    let buffer = &mut app.tabs_mut()[0].buffer;
+    buffer
+        .document_mut()
+        .delete_char_range_direct(start_char..start_char + deleted_text.chars().count());
+    buffer.push_text_edit_operation(OperationRecord {
+        previous_cursor,
+        next_cursor,
+        edits: vec![EditOperation {
+            start_char,
+            deleted_text: deleted_text.to_owned(),
+            inserted_text: String::new(),
+        }],
+    });
+    app.record_pending_text_history_event(0, buffer_id);
+}
+
+#[test]
+fn undo_redo_replays_do_not_add_text_history_entries() {
+    let mut app = test_app();
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha beta alpha".to_owned());
+
+    app.open_search();
+    app.set_search_query("alpha");
+    app.set_search_replacement("omega");
+
+    wait_for_search_matches(&mut app, 2);
+    assert!(app.replace_current_search_match());
+    assert_eq!(app.text_history_len(), 1);
+
+    app.handle_command(AppCommand::UndoActiveBufferTextOperation);
+    app.handle_command(AppCommand::RedoActiveBufferTextOperation);
+
+    assert_eq!(app.text_history_len(), 1);
+}
+
+#[test]
+fn closing_file_prunes_its_text_history_entries() {
+    let mut app = test_app();
+    app.tabs_mut()[0]
+        .buffer
+        .replace_text("alpha beta alpha".to_owned());
+
+    app.open_search();
+    app.set_search_query("alpha");
+    app.set_search_replacement("omega");
+
+    wait_for_search_matches(&mut app, 2);
+    assert!(app.replace_current_search_match());
+    assert_eq!(app.text_history_len(), 1);
+
+    app.perform_close_tab_no_persist(0);
+
+    assert_eq!(app.text_history_len(), 0);
 }
 
 #[test]
