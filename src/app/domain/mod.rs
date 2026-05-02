@@ -8,8 +8,9 @@ pub mod view;
 pub use buffer::{
     AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind, BufferFreshness, BufferId, BufferState,
     BufferViewStatus, DiskFileState, DocumentChunk, DocumentSnapshot, EncodingSource,
-    LineEndingCounts, LineEndingStyle, RestoredBufferState, TextArtifactSummary, TextDocument,
-    TextFormatMetadata, analyze_line_endings, display_line_count, platform_default_line_ending,
+    LineEndingCounts, LineEndingStyle, PersistedHistoryEntry, PieceSource, RestoredBufferState,
+    TextArtifactSummary, TextDocument, TextFormatMetadata, TextHistoryBudget, analyze_line_endings,
+    display_line_count, platform_default_line_ending, source_label,
 };
 pub use panes::{PaneBranch, PaneNode, SplitAxis, SplitPath};
 pub use tab::WorkspaceTab;

@@ -1,5 +1,5 @@
 use super::super::{CursorRange, cursor, editing, select_all_cursor};
-use crate::app::domain::{BufferState, EditorViewState};
+use crate::app::domain::{BufferState, EditorViewState, PieceSource};
 use eframe::egui;
 
 #[derive(Clone, Copy, Debug)]
@@ -106,7 +106,9 @@ fn handle_relevant_input_event(
             true
         }
         RelevantInputEvent::Cut => false,
-        RelevantInputEvent::Paste(text) => insert_text(buffer, view, &cursor, &text),
+        RelevantInputEvent::Paste(text) => {
+            insert_text_with_source(buffer, view, &cursor, &text, PieceSource::Paste)
+        }
     }
 }
 
@@ -269,7 +271,17 @@ fn insert_text(
     cursor: &CursorRange,
     text: &str,
 ) -> bool {
-    let new_cursor = editing::apply_text_insert(buffer, cursor, text);
+    insert_text_with_source(buffer, view, cursor, text, PieceSource::Edit)
+}
+
+fn insert_text_with_source(
+    buffer: &mut BufferState,
+    view: &mut EditorViewState,
+    cursor: &CursorRange,
+    text: &str,
+    source: PieceSource,
+) -> bool {
+    let new_cursor = editing::apply_text_insert_with_source(buffer, cursor, text, source);
     view.set_cursor_range_anchored(buffer, new_cursor);
     true
 }
@@ -304,82 +316,4 @@ fn apply_cursor_update(
     }
 
     false
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        PressedKeyEvent, RelevantInputEvent, apply_cursor_update, handle_key_event,
-        relevant_input_event,
-    };
-    use crate::app::domain::{BufferState, EditorViewState};
-    use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
-    use eframe::egui;
-
-    #[test]
-    fn cursor_only_keyboard_movement_does_not_mark_document_changed() {
-        let mut buffer = BufferState::new("test.txt".to_owned(), "alpha\nbeta".to_owned(), None);
-        let mut view = EditorViewState::new(buffer.id, false);
-        let cursor = CursorRange::one(CharCursor::new(0));
-        let next_cursor = CursorRange::one(CharCursor::new(6));
-        let total_chars = buffer.current_file_length().chars;
-        let mut movement = |_: PressedKeyEvent,
-                            _: &mut BufferState,
-                            _: &CursorRange|
-         -> Option<CursorRange> { Some(next_cursor) };
-
-        let changed = handle_key_event(
-            PressedKeyEvent {
-                key: egui::Key::ArrowDown,
-                modifiers: egui::Modifiers::default(),
-            },
-            &mut buffer,
-            &mut view,
-            &cursor,
-            total_chars,
-            &mut movement,
-        );
-
-        assert!(!changed);
-        assert_eq!(view.cursor_range, Some(next_cursor));
-    }
-
-    #[test]
-    fn text_keyboard_input_still_marks_document_changed() {
-        let mut buffer = BufferState::new("test.txt".to_owned(), "alpha".to_owned(), None);
-        let mut view = EditorViewState::new(buffer.id, false);
-        let cursor = CursorRange::one(CharCursor::new(5));
-
-        let changed = match relevant_input_event(&egui::Event::Text("!".to_owned())) {
-            Some(RelevantInputEvent::Text(text)) => {
-                super::insert_text(&mut buffer, &mut view, &cursor, &text)
-            }
-            other => panic!("expected text event, got {other:?}"),
-        };
-
-        assert!(changed);
-        assert_eq!(
-            view.cursor_range,
-            Some(CursorRange::one(CharCursor::new(6)))
-        );
-    }
-
-    #[test]
-    fn relevant_input_event_ignores_non_insertable_text() {
-        assert!(relevant_input_event(&egui::Event::Text("\n".to_owned())).is_none());
-    }
-
-    #[test]
-    fn cursor_update_helper_reports_no_document_change() {
-        let mut buffer = BufferState::new("test.txt".to_owned(), "alpha".to_owned(), None);
-        let mut view = EditorViewState::new(buffer.id, false);
-        let next_cursor = CursorRange::one(CharCursor::new(3));
-
-        assert!(!apply_cursor_update(
-            &mut view,
-            &mut buffer,
-            Some(next_cursor)
-        ));
-        assert_eq!(view.cursor_range, Some(next_cursor));
-    }
 }

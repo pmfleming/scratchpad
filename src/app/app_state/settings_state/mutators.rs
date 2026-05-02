@@ -1,10 +1,9 @@
-#[cfg(test)]
-use super::sync_stock_editor_palette_with_theme_mode;
 use super::{
     AppSettings, AppSurface, AppThemeMode, FileController, FileOpenDisposition, ScratchpadApp,
     StartupSessionBehavior, TabListPosition, color_to_hex,
     sanitize_tab_list_auto_hide_delay_seconds, stock_editor_palette_for_selection,
 };
+use crate::app::domain::TextHistoryBudget;
 use crate::app::fonts::EditorFontPreset;
 use eframe::egui;
 use std::time::Instant;
@@ -84,14 +83,6 @@ impl ScratchpadApp {
         let next = gutter.min(32);
         self.persist_settings_if_changed(self.app_settings.editor_gutter, next, |app, value| {
             app.app_settings.editor_gutter = value
-        });
-    }
-
-    #[cfg(test)]
-    pub(crate) fn set_theme_mode(&mut self, theme_mode: AppThemeMode) {
-        self.persist_settings_if_changed(self.app_settings.theme_mode, theme_mode, |app, next| {
-            app.app_settings.theme_mode = next;
-            sync_stock_editor_palette_with_theme_mode(&mut app.app_settings);
         });
     }
 
@@ -225,6 +216,23 @@ impl ScratchpadApp {
 
         self.app_settings.status_bar_visible = visible;
         self.begin_layout_transition();
+        self.persist_settings_or_error();
+    }
+
+    pub(crate) fn set_history_budget(&mut self, mut budget: TextHistoryBudget) {
+        budget = budget.sanitized();
+        if self.app_settings.history_budget == budget {
+            return;
+        }
+        budget.derived_from_memory = false;
+        self.app_settings.history_budget = budget;
+        self.apply_history_budget_to_open_buffers();
+        self.persist_settings_or_error();
+    }
+
+    pub(crate) fn reset_history_budget_to_auto(&mut self) {
+        self.app_settings.history_budget = TextHistoryBudget::derive_from_available_memory();
+        self.apply_history_budget_to_open_buffers();
         self.persist_settings_or_error();
     }
 

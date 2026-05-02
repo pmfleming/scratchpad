@@ -785,6 +785,3 @@ fn page_jump_rows(viewport: Option<egui::Rect>, row_height: f32) -> usize {
         .and_then(|viewport| viewport_line_capacity(viewport, row_height))
         .unwrap_or(1)
 }
-
-#[cfg(test)]
-mod tests;

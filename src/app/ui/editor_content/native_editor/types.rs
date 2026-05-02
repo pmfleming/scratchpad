@@ -1,3 +1,4 @@
+use crate::app::domain::buffer::ByteSpan;
 use eframe::egui;
 use std::ops::Range;
 use std::sync::Arc;
@@ -144,6 +145,7 @@ pub struct EditOperation {
     pub start_char: usize,
     pub deleted_text: String,
     pub inserted_text: String,
+    pub deleted_spans: Vec<ByteSpan>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

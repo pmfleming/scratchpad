@@ -20,21 +20,53 @@ impl ScratchpadApp {
         self.startup_restore_conflicts.first()
     }
 
-    #[cfg(test)]
-    pub(crate) fn startup_restore_conflict_count(&self) -> usize {
-        self.startup_restore_conflicts.len()
-    }
-
     pub(crate) fn dismiss_current_startup_restore_conflict(&mut self) {
         if !self.startup_restore_conflicts.is_empty() {
             self.startup_restore_conflicts.remove(0);
         }
     }
 
+    pub(crate) fn keep_session_version_for_current_startup_restore_conflict(&mut self) {
+        let Some(conflict) = self.current_startup_restore_conflict().cloned() else {
+            return;
+        };
+        if let Some(buffer) = self
+            .tabs_mut()
+            .get_mut(conflict.tab_index)
+            .and_then(|tab| {
+                tab.buffer_for_view(conflict.view_id)
+                    .map(|buffer| buffer.id)
+            })
+            .and_then(|buffer_id| {
+                self.tabs_mut()
+                    .get_mut(conflict.tab_index)
+                    .and_then(|tab| tab.buffer_by_id_mut(buffer_id))
+            })
+        {
+            buffer.document_mut().revalidate_history_for_current_text();
+        }
+        self.dismiss_current_startup_restore_conflict();
+    }
+
     pub(crate) fn open_disk_version_for_current_startup_restore_conflict(&mut self) -> bool {
         let Some(conflict) = take_current_startup_restore_conflict(self) else {
             return false;
         };
+        if let Some(buffer) = self
+            .tabs_mut()
+            .get_mut(conflict.tab_index)
+            .and_then(|tab| {
+                tab.buffer_for_view(conflict.view_id)
+                    .map(|buffer| buffer.id)
+            })
+            .and_then(|buffer_id| {
+                self.tabs_mut()
+                    .get_mut(conflict.tab_index)
+                    .and_then(|tab| tab.buffer_by_id_mut(buffer_id))
+            })
+        {
+            buffer.document_mut().clear_operation_history();
+        }
 
         self.queue_background_path_loads(
             vec![conflict.path.clone()],

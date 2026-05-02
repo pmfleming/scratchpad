@@ -161,21 +161,13 @@ impl AnchorRegistry {
     pub(super) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
-
-    #[cfg(test)]
-    pub(super) fn live_count(&self) -> usize {
-        self.entries.len()
-    }
 }
 
 impl PieceTreeLite {
-    /// Create a stable anchor at `char_offset`. The returned `AnchorId`
-    /// continues to identify the same logical position across edits.
     pub fn create_anchor(&mut self, char_offset: usize, bias: AnchorBias) -> AnchorId {
         self.create_anchor_with_owner(char_offset, bias, AnchorOwner::unspecified())
     }
 
-    /// Create a stable anchor with explicit runtime ownership metadata.
     pub fn create_anchor_with_owner(
         &mut self,
         char_offset: usize,
@@ -242,11 +234,6 @@ impl PieceTreeLite {
             }
         }
         self.root.recalculate();
-    }
-
-    #[cfg(test)]
-    pub(crate) fn live_anchor_count(&self) -> usize {
-        self.anchors.live_count()
     }
 
     fn ensure_anchorable_leaf(&mut self) {

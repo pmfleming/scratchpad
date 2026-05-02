@@ -1,4 +1,6 @@
-use crate::app::domain::{EditorViewState, PaneNode, SplitAxis, TextFormatMetadata};
+use crate::app::domain::{
+    EditorViewState, PaneNode, PersistedHistoryEntry, SplitAxis, TextFormatMetadata,
+};
 use crate::app::services::settings_store::{AppSettings, default_font_size, default_word_wrap};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -66,6 +68,8 @@ pub(crate) struct SessionBuffer {
     pub disk_modified_millis: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disk_len: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub text_history: Vec<PersistedHistoryEntry>,
 }
 
 impl From<&crate::app::domain::BufferState> for SessionBuffer {
@@ -85,6 +89,7 @@ impl From<&crate::app::domain::BufferState> for SessionBuffer {
                 .as_ref()
                 .and_then(|state| state.modified_millis),
             disk_len: buffer.disk_state.as_ref().map(|state| state.len),
+            text_history: buffer.document().exported_history(),
         }
     }
 }

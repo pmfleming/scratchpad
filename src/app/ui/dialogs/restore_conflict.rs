@@ -33,7 +33,10 @@ pub(crate) fn show_startup_restore_conflict_modal(ctx: &egui::Context, app: &mut
         Some(RestoreConflictChoice::OpenDisk) => {
             let _ = app.open_disk_version_for_current_startup_restore_conflict();
         }
-        Some(RestoreConflictChoice::KeepSession) | Some(RestoreConflictChoice::Dismiss) => {
+        Some(RestoreConflictChoice::KeepSession) => {
+            app.keep_session_version_for_current_startup_restore_conflict();
+        }
+        Some(RestoreConflictChoice::Dismiss) => {
             app.dismiss_current_startup_restore_conflict();
         }
         None => {

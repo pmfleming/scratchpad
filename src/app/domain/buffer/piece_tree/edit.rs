@@ -1,12 +1,16 @@
 use super::{
-    LeafAddress, Piece, PieceBuffer, PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLite,
-    build_chunked_pieces, byte_range_for_char_range, pack_pieces_into_leaves,
-    support::pack_leaves_into_nodes,
+    ByteSpan, LeafAddress, Piece, PieceBuffer, PieceProvenance, PieceSource, PieceTreeInternalNode,
+    PieceTreeLeaf, PieceTreeLite, build_chunked_pieces, byte_range_for_char_range,
+    pack_pieces_into_leaves, support::pack_leaves_into_nodes,
 };
 use std::ops::Range;
 
 impl PieceTreeLite {
     pub fn insert(&mut self, offset_chars: usize, text: &str) {
+        self.insert_with_source(offset_chars, text, PieceSource::Edit);
+    }
+
+    pub fn insert_with_source(&mut self, offset_chars: usize, text: &str, source: PieceSource) {
         assert!(offset_chars <= self.len_chars());
         if text.is_empty() {
             return;
@@ -16,6 +20,7 @@ impl PieceTreeLite {
 
         let add_start = self.add.len();
         self.add.push_str(text);
+        self.record_add_provenance(add_start, text.len(), source);
         let inserted_pieces = build_chunked_pieces(PieceBuffer::Add, add_start, text);
 
         let address = self.find_leaf_for_char_offset(offset_chars);
@@ -55,6 +60,105 @@ impl PieceTreeLite {
         let mut replacement_leaves = pack_pieces_into_leaves(affected_pieces);
         self.redistribute_anchors_into_leaves(&mut replacement_leaves, anchors);
         self.replace_leaf_span(start_address, end_address, replacement_leaves);
+    }
+
+    pub fn add_buffer_len(&self) -> usize {
+        self.add.len()
+    }
+
+    pub fn append_history_text(&mut self, text: &str, source: PieceSource) -> ByteSpan {
+        let start = self.add.len();
+        self.add.push_str(text);
+        self.record_add_provenance(start, text.len(), source);
+        ByteSpan {
+            buffer: PieceBuffer::Add,
+            start_byte: start.min(u32::MAX as usize) as u32,
+            byte_len: text.len().min(u32::MAX as usize) as u32,
+        }
+    }
+
+    pub fn text_for_span(&self, span: ByteSpan) -> &str {
+        let start = span.start_byte as usize;
+        let end = start.saturating_add(span.byte_len as usize);
+        match span.buffer {
+            PieceBuffer::Original => &self.original[start..end],
+            PieceBuffer::Add => &self.add[start..end],
+        }
+    }
+
+    pub fn compact_add_buffer(&mut self, history_spans: &mut [ByteSpan]) {
+        if self.add.is_empty() {
+            return;
+        }
+
+        let old_add = std::mem::take(&mut self.add);
+        let mut new_add = String::with_capacity(old_add.len());
+        let mut relocated = std::collections::HashMap::<ByteSpan, ByteSpan>::new();
+
+        for node in &mut self.root.nodes {
+            for leaf in &mut node.leaves {
+                for piece in &mut leaf.pieces {
+                    if piece.buffer != PieceBuffer::Add || piece.byte_len == 0 {
+                        continue;
+                    }
+                    let old_start = piece.start_byte;
+                    let old_end = old_start.saturating_add(piece.byte_len);
+                    let text = &old_add[old_start..old_end];
+                    let new_start = new_add.len();
+                    new_add.push_str(text);
+                    let old_span = ByteSpan {
+                        buffer: PieceBuffer::Add,
+                        start_byte: old_start.min(u32::MAX as usize) as u32,
+                        byte_len: piece.byte_len.min(u32::MAX as usize) as u32,
+                    };
+                    let new_span = ByteSpan {
+                        buffer: PieceBuffer::Add,
+                        start_byte: new_start.min(u32::MAX as usize) as u32,
+                        byte_len: piece.byte_len.min(u32::MAX as usize) as u32,
+                    };
+                    relocated.insert(old_span, new_span);
+                    piece.start_byte = new_start;
+                }
+            }
+        }
+
+        for span in history_spans {
+            if span.buffer != PieceBuffer::Add || span.byte_len == 0 {
+                continue;
+            }
+            if let Some(new_span) = relocated.get(span) {
+                *span = *new_span;
+                continue;
+            }
+            let old_start = span.start_byte as usize;
+            let old_end = old_start.saturating_add(span.byte_len as usize);
+            let text = &old_add[old_start..old_end];
+            let new_start = new_add.len();
+            new_add.push_str(text);
+            span.start_byte = new_start.min(u32::MAX as usize) as u32;
+        }
+
+        self.add = new_add;
+        self.root.recalculate();
+    }
+
+    pub fn provenance_for_span(&self, span: ByteSpan) -> PieceProvenance {
+        self.provenance.provenance_for(span)
+    }
+
+    fn record_add_provenance(&mut self, start_byte: usize, byte_len: usize, source: PieceSource) {
+        self.provenance.record(
+            ByteSpan {
+                buffer: PieceBuffer::Add,
+                start_byte: start_byte.min(u32::MAX as usize) as u32,
+                byte_len: byte_len.min(u32::MAX as usize) as u32,
+            },
+            PieceProvenance {
+                change_id: self.generation,
+                source,
+                session_generation: 0,
+            },
+        );
     }
 
     fn leaf_with_inserted_pieces(

@@ -1,6 +1,6 @@
 use super::{
-    PREVIEW_MAX_CHARS, PieceTreeLite, PieceTreeSlice, PieceTreeSpan, byte_range_for_char_range,
-    compact_preview,
+    ByteSpan, PREVIEW_MAX_CHARS, PieceTreeLite, PieceTreeSlice, PieceTreeSpan,
+    byte_range_for_char_range, compact_preview,
 };
 use std::ops::Range;
 
@@ -113,6 +113,11 @@ impl<'a> Iterator for PieceTreeSlice<'a> {
                     text,
                     char_start: piece_start_char,
                     char_len: piece.char_len,
+                    byte_span: ByteSpan {
+                        buffer: piece.buffer,
+                        start_byte: piece.start_byte.min(u32::MAX as usize) as u32,
+                        byte_len: piece.byte_len.min(u32::MAX as usize) as u32,
+                    },
                 });
             }
 
@@ -121,10 +126,17 @@ impl<'a> Iterator for PieceTreeSlice<'a> {
             } else {
                 byte_range_for_char_range(text, local_start, local_end)
             };
+            let start_byte = piece.start_byte + byte_range.start;
+            let byte_len = byte_range.len();
             return Some(PieceTreeSpan {
                 text: &text[byte_range],
                 char_start: piece_start_char + local_start,
                 char_len: local_end - local_start,
+                byte_span: ByteSpan {
+                    buffer: piece.buffer,
+                    start_byte: start_byte.min(u32::MAX as usize) as u32,
+                    byte_len: byte_len.min(u32::MAX as usize) as u32,
+                },
             });
         }
 

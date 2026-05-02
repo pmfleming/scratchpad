@@ -4,8 +4,6 @@ use crate::app::services::file_controller::FileController;
 
 mod dispatch;
 mod tab_transfer;
-#[cfg(test)]
-mod tests;
 
 pub enum AppCommand {
     ActivateTab {

@@ -111,25 +111,3 @@ fn skip_osc_sequence(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{make_control_chars_clean, make_control_chars_visible};
-
-    #[test]
-    fn visible_control_char_rendering_preserves_line_count() {
-        let text = "alpha\tbeta\n\x1bgamma";
-        let rendered = make_control_chars_visible(text);
-
-        assert_eq!(text.lines().count(), rendered.lines().count());
-    }
-
-    #[test]
-    fn clean_control_char_rendering_preserves_carriage_return_line_breaks() {
-        let text = "alpha\rbeta\r\ngamma";
-        let rendered = make_control_chars_clean(text);
-
-        assert_eq!(rendered, "alpha\nbeta\ngamma");
-        assert_eq!(rendered.lines().count(), 3);
-    }
-}

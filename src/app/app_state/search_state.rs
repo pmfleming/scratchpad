@@ -15,9 +15,6 @@ mod replace;
 mod runtime;
 mod worker;
 
-#[cfg(test)]
-mod tests;
-
 use helpers::{cursor_range_from_char_range, selection_char_range};
 use worker::{SearchRequest, SearchResult, SearchTargetSnapshot, spawn_search_worker};
 

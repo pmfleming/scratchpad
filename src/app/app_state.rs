@@ -5,7 +5,7 @@ use crate::app::services::file_controller::OpenBatchSummary;
 use crate::app::services::session_store::SessionStore;
 use crate::app::services::settings_store::{AppSettings, SettingsStore};
 use crate::app::startup::StartupOptions;
-use crate::app::text_history::TextHistoryLedger;
+use crate::app::text_history::TextHistoryCache;
 use eframe::egui;
 use search_state::SearchState;
 use std::collections::{BTreeSet, HashMap};
@@ -136,7 +136,7 @@ pub struct ScratchpadApp {
     pub(crate) pending_settings_toml_refresh: Option<BufferId>,
     pub(crate) vertical_tab_list_open: bool,
     pub(crate) vertical_tab_list_hide_deadline: Option<Instant>,
-    pub(crate) text_history: TextHistoryLedger,
+    pub(crate) text_history_cache: TextHistoryCache,
     pub(crate) text_history_open: bool,
     pub(crate) search_state: SearchState,
     pub(crate) chrome_transition_frames_remaining: u8,

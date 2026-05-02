@@ -1,5 +1,6 @@
 mod analysis;
 mod document;
+mod history;
 mod piece_tree;
 mod snapshot;
 mod state;
@@ -15,8 +16,15 @@ pub use analysis::{
 };
 pub use document::TextDocument;
 pub(crate) use document::{
-    TextDocumentEditOperation, TextDocumentOperationRecord, TextHistoryApplyError,
-    TextReplacementError, TextReplacements,
+    TextDocumentOperationRecord, TextHistoryApplyError, TextReplacementError, TextReplacements,
+};
+pub(crate) use history::{
+    ByteSpan, PieceHistoryEdit, PieceHistoryEdits, PieceHistoryEntry, PieceHistoryFlags,
+    TEXT_HISTORY_COALESCE_WINDOW, fingerprint_parts, preview_text,
+};
+pub use history::{
+    PersistedCursorRange, PersistedHistoryEdit, PersistedHistoryEntry, PieceSource,
+    TextHistoryBudget, source_label,
 };
 pub use piece_tree::{
     AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind, PieceTreeCharPosition,
@@ -24,7 +32,6 @@ pub use piece_tree::{
     PieceTreeSlice, PieceTreeSpan,
 };
 pub use snapshot::{DocumentChunk, DocumentSnapshot};
-pub(crate) use state::TextHistoryEvent;
 pub use state::{
     BufferFreshness, BufferId, BufferState, BufferViewStatus, DiskFileState, RestoredBufferState,
 };

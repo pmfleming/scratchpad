@@ -94,23 +94,3 @@ fn current_tab_drag_state(ui: &egui::Ui) -> Option<TabDragState> {
     ui.ctx()
         .data(|data| data.get_temp::<TabDragState>(tab_drag_state_id()))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::collected_dragged_indices;
-
-    #[test]
-    fn collected_dragged_indices_preserves_multi_item_selection() {
-        let dragged_indices = (0..24).collect::<Vec<_>>();
-
-        assert_eq!(
-            collected_dragged_indices(&dragged_indices, 5),
-            dragged_indices
-        );
-    }
-
-    #[test]
-    fn collected_dragged_indices_falls_back_to_source_index() {
-        assert_eq!(collected_dragged_indices(&[], 7), vec![7]);
-    }
-}

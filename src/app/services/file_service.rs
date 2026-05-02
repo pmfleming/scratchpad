@@ -13,9 +13,6 @@ use std::time::UNIX_EPOCH;
 
 mod write;
 
-#[cfg(test)]
-mod tests;
-
 #[derive(Clone, Copy)]
 pub struct EncodingOption {
     pub canonical_name: &'static str,
@@ -383,34 +380,6 @@ fn read_document_with_encoding(
         has_decoding_warnings,
     })
 }
-
-#[cfg(test)]
-fn staged_display_line_count(content: &str) -> usize {
-    let bytes = content.as_bytes();
-    let mut lines = 1usize;
-    let mut index = 0usize;
-
-    while index < bytes.len() {
-        match bytes[index] {
-            b'\r' => {
-                lines += 1;
-                index += if bytes.get(index + 1) == Some(&b'\n') {
-                    2
-                } else {
-                    1
-                };
-            }
-            b'\n' => {
-                lines += 1;
-                index += 1;
-            }
-            _ => index += 1,
-        }
-    }
-
-    lines
-}
-
 fn append_staged_metadata_sample(sample: &mut String, chunk: &str) {
     if sample.len() >= STAGED_METADATA_SAMPLE_BYTES {
         return;

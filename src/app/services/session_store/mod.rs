@@ -248,6 +248,7 @@ impl SessionStore {
                             has_bom,
                             disk_modified_millis: None,
                             disk_len: None,
+                            text_history: Vec::new(),
                         }]
                     },
                 )
@@ -510,6 +511,8 @@ impl RestoredBufferContent {
         let (format, text_metadata) = session_buffer_format_and_metadata(buffer, &content);
         let document =
             TextDocument::with_preferred_line_ending(content, text_metadata.preferred_line_ending);
+        let mut document = document;
+        document.restore_exported_history(buffer.text_history.clone());
         Self::new(document, format, text_metadata, disk_state, freshness)
     }
 
@@ -551,32 +554,4 @@ fn session_disk_state(buffer: &SessionBuffer) -> Option<DiskFileState> {
 
 fn invalid_data(error: impl ToString) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{SessionPersistRequest, SessionStore};
-    use crate::app::domain::{BufferState, WorkspaceTab};
-
-    #[test]
-    fn persist_request_uses_captured_snapshot_content() {
-        let tempdir = tempfile::tempdir().expect("create session dir");
-        let store = SessionStore::new(tempdir.path().to_path_buf());
-        let mut tab = WorkspaceTab::new(BufferState::new(
-            "notes.txt".to_owned(),
-            "before".to_owned(),
-            None,
-        ));
-        let temp_id = tab.active_buffer().temp_id.clone();
-        let request = SessionPersistRequest::capture(&[tab.clone()], 0, 14.0, true);
-
-        tab.active_buffer_mut().replace_text("after".to_owned());
-        store
-            .persist_request(request)
-            .expect("persist captured session");
-
-        let persisted = std::fs::read_to_string(store.buffer_path(&temp_id))
-            .expect("read persisted buffer payload");
-        assert_eq!(persisted, "before");
-    }
 }

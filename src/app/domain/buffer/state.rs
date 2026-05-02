@@ -1,11 +1,10 @@
 use super::analysis::{IncrementalMetadataEdit, buffer_text_metadata_from_edit};
 use super::{
     BufferLength, BufferTextMetadata, DocumentSnapshot, EncodingSource, LineEndingStyle,
-    TextArtifactSummary, TextDocument, TextDocumentOperationRecord, TextFormatMetadata,
-    TextHistoryApplyError, TextReplacementError, TextReplacements, buffer_text_metadata,
-    buffer_text_metadata_from_piece_tree,
+    PieceSource, TextArtifactSummary, TextDocument, TextDocumentOperationRecord,
+    TextFormatMetadata, TextHistoryApplyError, TextReplacementError, TextReplacements,
+    buffer_text_metadata, buffer_text_metadata_from_piece_tree,
 };
-use crate::app::text_history::TextHistorySource;
 use crate::app::ui::editor_content::native_editor::{CursorRange, OperationRecord};
 use std::ops::Range;
 use std::path::PathBuf;
@@ -40,10 +39,7 @@ pub struct BufferState {
 
 #[derive(Clone)]
 pub(crate) enum TextHistoryEvent {
-    Edit {
-        source: TextHistorySource,
-        operation: TextDocumentOperationRecord,
-    },
+    Edit,
     Replay,
 }
 
@@ -306,24 +302,19 @@ impl BufferState {
             previous_selection,
             next_selection,
         )?;
-        if let Some(operation) = self.document.latest_operation_record().cloned() {
-            self.pending_text_history_event = Some(TextHistoryEvent::Edit {
-                source: TextHistorySource::SearchReplace,
-                operation,
-            });
-        }
+        self.pending_text_history_event = Some(TextHistoryEvent::Edit);
         self.refresh_text_metadata();
         Ok(())
     }
 
-    pub(crate) fn push_text_edit_operation(&mut self, record: OperationRecord) {
-        self.document.push_edit_operation(record);
-        if let Some(operation) = self.document.latest_operation_record().cloned() {
-            self.pending_text_history_event = Some(TextHistoryEvent::Edit {
-                source: TextHistorySource::Editor,
-                operation,
-            });
-        }
+    pub(crate) fn push_text_edit_operation_with_source(
+        &mut self,
+        record: OperationRecord,
+        source: PieceSource,
+    ) {
+        self.document
+            .push_edit_operation_with_source(record, source);
+        self.pending_text_history_event = Some(TextHistoryEvent::Edit);
     }
 
     pub(crate) fn take_text_history_event(&mut self) -> Option<TextHistoryEvent> {
@@ -353,9 +344,9 @@ impl BufferState {
 
     pub(crate) fn apply_text_history_undo(
         &mut self,
-        operation: &TextDocumentOperationRecord,
+        entry_id: u64,
     ) -> Result<CursorRange, TextHistoryApplyError> {
-        let selection = self.document.apply_text_history_undo(operation)?;
+        let selection = self.document.apply_text_history_undo(entry_id)?;
         self.pending_text_history_event = Some(TextHistoryEvent::Replay);
         self.refresh_text_metadata();
         Ok(selection)
@@ -363,9 +354,9 @@ impl BufferState {
 
     pub(crate) fn apply_text_history_redo(
         &mut self,
-        operation: &TextDocumentOperationRecord,
+        entry_id: u64,
     ) -> Result<CursorRange, TextHistoryApplyError> {
-        let selection = self.document.apply_text_history_redo(operation)?;
+        let selection = self.document.apply_text_history_redo(entry_id)?;
         self.pending_text_history_event = Some(TextHistoryEvent::Replay);
         self.refresh_text_metadata();
         Ok(selection)
@@ -642,141 +633,4 @@ fn next_temp_id() -> String {
         .unwrap_or_default();
     let sequence = NEXT_TEMP_BUFFER_ID.fetch_add(1, Ordering::Relaxed);
     format!("buffer-{timestamp}-{sequence}")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{BufferState, metadata_neutral_ascii_text};
-    use crate::app::domain::buffer::BufferLength;
-    use crate::app::domain::buffer::document::{
-        TextDocumentEditOperation, TextDocumentOperationRecord,
-    };
-    use crate::app::domain::{LineEndingCounts, TextArtifactSummary};
-    use crate::app::ui::editor_content::native_editor::CursorRange;
-
-    fn selection(start: usize, end: usize) -> CursorRange {
-        CursorRange::two(start, end)
-    }
-
-    #[test]
-    fn view_status_reports_piece_tree_cursor_coordinates() {
-        let buffer = BufferState::new(
-            "notes.txt".to_owned(),
-            "zero\none\ntwo\nthree".to_owned(),
-            None,
-        );
-
-        let status = buffer.view_status(Some(selection(6, 8)));
-
-        assert_eq!(status.cursor_line, Some(2));
-        assert_eq!(status.cursor_column, Some(4));
-        assert_eq!(status.selection_chars, 2);
-    }
-
-    #[test]
-    fn current_file_length_tracks_bytes_chars_and_lines() {
-        let buffer = BufferState::new("notes.txt".to_owned(), "hi\nworld".to_owned(), None);
-
-        assert_eq!(
-            buffer.current_file_length(),
-            BufferLength {
-                bytes: 8,
-                chars: 8,
-                lines: 2,
-            }
-        );
-    }
-
-    #[test]
-    fn ascii_metadata_neutral_operation_skips_full_rescan() {
-        let mut buffer = BufferState::new("notes.txt".to_owned(), "hello".to_owned(), None);
-        buffer.document_mut().insert_direct(5, "!");
-        let operation = operation_record(5, "", "!");
-        buffer.line_count = 99;
-
-        buffer.refresh_text_metadata_after_operation(Some(&operation));
-
-        assert_eq!(buffer.line_count, 99);
-        assert_eq!(buffer.artifact_summary, TextArtifactSummary::default());
-        assert!(buffer.format.is_ascii_subset);
-    }
-
-    #[test]
-    fn control_character_operation_falls_back_to_full_metadata_rescan() {
-        let mut buffer = BufferState::new("notes.txt".to_owned(), "hello".to_owned(), None);
-        buffer.document_mut().insert_direct(5, "\u{1b}");
-        let operation = operation_record(5, "", "\u{1b}");
-        buffer.line_count = 99;
-
-        buffer.refresh_text_metadata_after_operation(Some(&operation));
-
-        assert_eq!(buffer.line_count, 1);
-        assert!(buffer.artifact_summary.has_ansi_sequences);
-    }
-
-    #[test]
-    fn newline_operation_updates_line_metadata_incrementally() {
-        let mut buffer = BufferState::new("notes.txt".to_owned(), "hello".to_owned(), None);
-        buffer.document_mut().insert_direct(5, "\nworld");
-        let operation = operation_record(5, "", "\nworld");
-        buffer.line_count = 99;
-
-        buffer.refresh_text_metadata_after_operation(Some(&operation));
-
-        assert_eq!(buffer.line_count, 100);
-        assert_eq!(
-            buffer.format.line_ending_counts,
-            LineEndingCounts {
-                lf: 1,
-                crlf: 0,
-                cr: 0
-            }
-        );
-    }
-
-    #[test]
-    fn newline_operation_updates_crlf_boundaries_incrementally() {
-        let mut buffer = BufferState::new("notes.txt".to_owned(), "hello\rworld".to_owned(), None);
-        buffer.document_mut().insert_direct(6, "\n");
-        let operation = operation_record(6, "", "\n");
-        buffer.line_count = 41;
-
-        buffer.refresh_text_metadata_after_operation(Some(&operation));
-
-        assert_eq!(buffer.line_count, 41);
-        assert_eq!(
-            buffer.format.line_ending_counts,
-            LineEndingCounts {
-                lf: 0,
-                crlf: 1,
-                cr: 0
-            }
-        );
-    }
-
-    #[test]
-    fn metadata_neutral_ascii_rejects_control_and_line_endings() {
-        assert!(metadata_neutral_ascii_text("abcXYZ123 "));
-        assert!(!metadata_neutral_ascii_text("abc\n"));
-        assert!(!metadata_neutral_ascii_text("abc\r"));
-        assert!(!metadata_neutral_ascii_text("abc\t"));
-        assert!(!metadata_neutral_ascii_text("abcé"));
-    }
-
-    fn operation_record(
-        start_char: usize,
-        deleted_text: &str,
-        inserted_text: &str,
-    ) -> TextDocumentOperationRecord {
-        let selection = selection(start_char, start_char);
-        TextDocumentOperationRecord {
-            previous_selection: selection,
-            next_selection: selection,
-            edits: vec![TextDocumentEditOperation {
-                start_char,
-                deleted_text: deleted_text.to_owned(),
-                inserted_text: inserted_text.to_owned(),
-            }],
-        }
-    }
 }

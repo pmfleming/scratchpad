@@ -1,26 +1,39 @@
 use super::types::{CharCursor, CursorRange, EditOperation, OperationRecord};
 use super::word_boundary;
-use crate::app::domain::BufferState;
+use crate::app::domain::buffer::ByteSpan;
+use crate::app::domain::{BufferState, PieceSource};
 
 fn is_wordwise_modifier(modifiers: &eframe::egui::Modifiers) -> bool {
     modifiers.alt || modifiers.ctrl
 }
 
-pub(super) fn apply_text_insert(
+pub(super) fn apply_text_insert_with_source(
     buffer: &mut BufferState,
     cursor: &CursorRange,
     text: &str,
+    source: PieceSource,
 ) -> CursorRange {
     let (start, end) = cursor.sorted_indices();
-    let deleted_text = extract_and_delete_range(buffer, start, end);
+    let (deleted_text, deleted_spans) = extract_spans_and_delete_range(buffer, start, end);
 
     let line_ending = buffer.document().preferred_line_ending_str().to_owned();
     let normalized = normalize_line_endings(text, &line_ending);
     let inserted_chars = normalized.chars().count();
-    buffer.document_mut().insert_direct(start, &normalized);
+    buffer
+        .document_mut()
+        .insert_direct_with_source(start, &normalized, source);
 
     let new_cursor = CursorRange::one(CharCursor::new(start + inserted_chars));
-    record_edit(buffer, cursor, new_cursor, start, deleted_text, normalized);
+    record_edit(
+        buffer,
+        cursor,
+        new_cursor,
+        start,
+        deleted_text,
+        normalized,
+        deleted_spans,
+        source,
+    );
     new_cursor
 }
 
@@ -83,7 +96,7 @@ pub(super) fn apply_outdent(buffer: &mut BufferState, cursor: &CursorRange) -> O
     let (line_start, line_end) = cursor_line_span(buffer, caret);
     let line_prefix = line_prefix(buffer, line_start, line_end);
     let chars_to_remove = leading_outdent_width(&line_prefix)?;
-    let deleted_text = remove_line_prefix(buffer, line_start, chars_to_remove);
+    let (deleted_text, deleted_spans) = remove_line_prefix(buffer, line_start, chars_to_remove);
 
     let new_caret = caret.saturating_sub(chars_to_remove);
     let new_cursor = CursorRange::one(CharCursor::new(new_caret));
@@ -94,6 +107,8 @@ pub(super) fn apply_outdent(buffer: &mut BufferState, cursor: &CursorRange) -> O
         line_start,
         deleted_text,
         String::new(),
+        deleted_spans,
+        PieceSource::Edit,
     );
     Some(new_cursor)
 }
@@ -128,19 +143,20 @@ fn remove_line_prefix(
     buffer: &mut BufferState,
     line_start: usize,
     chars_to_remove: usize,
-) -> String {
+) -> (String, Vec<ByteSpan>) {
     let remove_range = line_start..line_start + chars_to_remove;
     let deleted_text = buffer
         .document()
         .piece_tree()
         .extract_range(remove_range.clone());
+    let deleted_spans = buffer.document().byte_spans_for_range(remove_range.clone());
     buffer.document_mut().delete_char_range_direct(remove_range);
-    deleted_text
+    (deleted_text, deleted_spans)
 }
 
 pub(super) fn apply_cut(buffer: &mut BufferState, cursor: &CursorRange) -> (CursorRange, String) {
     let (start, end) = cursor.sorted_indices();
-    delete_range(buffer, cursor, start, end, true)
+    delete_range_with_source(buffer, cursor, start, end, true, PieceSource::Cut)
 }
 
 fn apply_char_delete(
@@ -160,7 +176,25 @@ fn delete_range(
     end: usize,
     prefer_next_row: bool,
 ) -> (CursorRange, String) {
-    let deleted_text = extract_and_delete_range(buffer, start, end);
+    delete_range_with_source(
+        buffer,
+        cursor,
+        start,
+        end,
+        prefer_next_row,
+        PieceSource::Edit,
+    )
+}
+
+fn delete_range_with_source(
+    buffer: &mut BufferState,
+    cursor: &CursorRange,
+    start: usize,
+    end: usize,
+    prefer_next_row: bool,
+    source: PieceSource,
+) -> (CursorRange, String) {
+    let (deleted_text, deleted_spans) = extract_spans_and_delete_range(buffer, start, end);
     let new_cursor = CursorRange::one(CharCursor {
         index: start,
         prefer_next_row,
@@ -172,17 +206,24 @@ fn delete_range(
         start,
         deleted_text.clone(),
         String::new(),
+        deleted_spans,
+        source,
     );
     (new_cursor, deleted_text)
 }
 
-fn extract_and_delete_range(buffer: &mut BufferState, start: usize, end: usize) -> String {
+fn extract_spans_and_delete_range(
+    buffer: &mut BufferState,
+    start: usize,
+    end: usize,
+) -> (String, Vec<ByteSpan>) {
     if start >= end {
-        return String::new();
+        return (String::new(), Vec::new());
     }
     let text = buffer.document().piece_tree().extract_range(start..end);
+    let spans = buffer.document().byte_spans_for_range(start..end);
     buffer.document_mut().delete_char_range_direct(start..end);
-    text
+    (text, spans)
 }
 
 fn record_edit(
@@ -192,16 +233,22 @@ fn record_edit(
     start_char: usize,
     deleted_text: String,
     inserted_text: String,
+    deleted_spans: Vec<ByteSpan>,
+    source: PieceSource,
 ) {
-    buffer.push_text_edit_operation(OperationRecord {
-        previous_cursor: *cursor,
-        next_cursor: new_cursor,
-        edits: vec![EditOperation {
-            start_char,
-            deleted_text,
-            inserted_text,
-        }],
-    });
+    buffer.push_text_edit_operation_with_source(
+        OperationRecord {
+            previous_cursor: *cursor,
+            next_cursor: new_cursor,
+            edits: vec![EditOperation {
+                start_char,
+                deleted_text,
+                inserted_text,
+                deleted_spans,
+            }],
+        },
+        source,
+    );
 }
 
 fn normalize_line_endings(text: &str, preferred: &str) -> String {

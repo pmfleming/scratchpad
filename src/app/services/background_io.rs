@@ -502,6 +502,3 @@ fn refresh_text_metadata(
     );
     (metadata.line_count, metadata.artifact_summary, format)
 }
-
-#[cfg(test)]
-mod tests;

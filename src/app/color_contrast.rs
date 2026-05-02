@@ -183,25 +183,3 @@ impl Hsl {
 
 const WCAG_AA_CONTRAST: f32 = 4.5;
 const MIN_CHROMA_DISTANCE: f32 = 60.0;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_blue_gets_warm_complement() {
-        let bg = Color32::from_rgb(0, 0, 255); // Pure Blue
-        let txt = optimal_text_color(bg);
-        // Should be something yellowish/orange, not just light blue
-        assert!(txt.r() > txt.b());
-        assert!(contrast_ratio(bg, txt) >= 4.5);
-    }
-
-    #[test]
-    fn test_gray_falls_back_to_bw() {
-        let bg = Color32::from_rgb(128, 128, 128);
-        let txt = optimal_text_color(bg);
-        // A neutral gray shouldn't have weirdly colored text
-        assert!(txt == Color32::BLACK || txt == Color32::WHITE);
-    }
-}

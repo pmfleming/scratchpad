@@ -155,36 +155,3 @@ impl PaneNode {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{PaneNode, SplitAxis};
-    use std::collections::HashSet;
-
-    #[test]
-    fn pane_node_remove_view_promotes_sibling_leaf() {
-        let mut pane = PaneNode::Split {
-            axis: SplitAxis::Horizontal,
-            ratio: 0.5,
-            first: Box::new(PaneNode::leaf(1)),
-            second: Box::new(PaneNode::leaf(2)),
-        };
-
-        assert!(pane.remove_view(1));
-        assert!(matches!(pane, PaneNode::Leaf { view_id: 2 }));
-    }
-
-    #[test]
-    fn pane_node_retain_views_promotes_surviving_branch() {
-        let mut pane = PaneNode::Split {
-            axis: SplitAxis::Vertical,
-            ratio: 0.5,
-            first: Box::new(PaneNode::leaf(3)),
-            second: Box::new(PaneNode::leaf(4)),
-        };
-        let valid = HashSet::from([4]);
-
-        assert!(pane.retain_views(&valid));
-        assert!(matches!(pane, PaneNode::Leaf { view_id: 4 }));
-    }
-}

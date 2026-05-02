@@ -95,7 +95,7 @@ impl ScratchpadApp {
             pending_settings_toml_refresh: None,
             vertical_tab_list_open: false,
             vertical_tab_list_hide_deadline: None,
-            text_history: crate::app::text_history::TextHistoryLedger::default(),
+            text_history_cache: crate::app::text_history::TextHistoryCache::default(),
             text_history_open: false,
             search_state: SearchState::default(),
             chrome_transition_frames_remaining: 0,

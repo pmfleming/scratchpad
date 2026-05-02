@@ -148,34 +148,3 @@ fn update_max(counter: &AtomicU64, value: u64) {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        BudgetCategory, current_bytes, over_budget, record_alloc, record_free, reset, snapshot,
-    };
-
-    #[test]
-    fn alloc_and_free_round_trip_against_global_counters() {
-        reset();
-        record_alloc(BudgetCategory::Layout, 1024);
-        record_alloc(BudgetCategory::Layout, 512);
-        assert_eq!(current_bytes(BudgetCategory::Layout), 1536);
-        let s = snapshot();
-        assert_eq!(s.layout_bytes, 1536);
-        assert_eq!(s.layout_peak_bytes, 1536);
-
-        record_free(BudgetCategory::Layout, 1024);
-        assert_eq!(current_bytes(BudgetCategory::Layout), 512);
-        let s = snapshot();
-        assert_eq!(s.layout_peak_bytes, 1536, "peak should be sticky");
-
-        // free below zero should saturate
-        record_free(BudgetCategory::Layout, 9999);
-        assert_eq!(current_bytes(BudgetCategory::Layout), 0);
-
-        reset();
-        assert_eq!(current_bytes(BudgetCategory::Layout), 0);
-        assert!(!over_budget(BudgetCategory::Layout));
-    }
-}

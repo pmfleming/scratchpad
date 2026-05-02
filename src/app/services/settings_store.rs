@@ -1,3 +1,4 @@
+use crate::app::domain::TextHistoryBudget;
 use crate::app::fonts::EditorFontPreset;
 use crate::app::services::store_io::write_atomic;
 use eframe::egui;
@@ -112,6 +113,8 @@ pub struct AppSettings {
     pub settings_tab_open: bool,
     #[serde(default)]
     pub settings_tab_index: Option<usize>,
+    #[serde(default)]
+    pub history_budget: TextHistoryBudget,
 }
 
 impl Default for AppSettings {
@@ -136,6 +139,7 @@ impl Default for AppSettings {
             status_bar_visible: default_status_bar_visible(),
             settings_tab_open: false,
             settings_tab_index: None,
+            history_budget: TextHistoryBudget::default(),
         }
     }
 }

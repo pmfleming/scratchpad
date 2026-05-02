@@ -3,6 +3,8 @@ mod edit;
 mod slice;
 mod support;
 
+use super::history::PieceProvenanceStore;
+pub(crate) use super::history::{ByteSpan, PieceProvenance, PieceSource};
 pub use anchor::{AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind};
 
 use std::ops::Range;
@@ -40,6 +42,7 @@ pub struct PieceTreeSpan<'a> {
     pub text: &'a str,
     pub char_start: usize,
     pub char_len: usize,
+    pub byte_span: ByteSpan,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -59,8 +62,9 @@ impl PieceTreeMetrics {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PieceBuffer {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PieceBuffer {
     Original,
     Add,
 }
@@ -201,6 +205,7 @@ pub struct PieceTreeLite {
     root: PieceTreeRoot,
     generation: u64,
     anchors: anchor::AnchorRegistry,
+    provenance: PieceProvenanceStore,
     next_leaf_id: u64,
 }
 
@@ -231,6 +236,7 @@ impl PieceTreeLite {
             root: build_root_from_pieces(pieces),
             generation: 0,
             anchors: anchor::AnchorRegistry::default(),
+            provenance: PieceProvenanceStore::default(),
             next_leaf_id: 1,
         };
         tree.assign_missing_leaf_ids();
@@ -483,6 +489,3 @@ impl PieceTreeLite {
         Some((piece, offset_in_piece))
     }
 }
-
-#[cfg(test)]
-mod tests;

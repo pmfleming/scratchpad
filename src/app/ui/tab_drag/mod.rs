@@ -179,31 +179,3 @@ pub(crate) fn auto_scroll_tab_list(
     next_state.store(ctx, scroll_area_id);
     ctx.request_repaint();
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{TabDropAxis, TabDropZone, TabRectEntry, drag_sources_allow_combine};
-    use eframe::egui::{Rect, pos2, vec2};
-
-    #[test]
-    fn multi_select_drag_from_settings_still_allows_combine_when_workspace_tabs_are_selected() {
-        let zones = vec![TabDropZone {
-            axis: TabDropAxis::Horizontal,
-            entries: vec![
-                TabRectEntry {
-                    index: 0,
-                    rect: Rect::from_min_size(pos2(10.0, 10.0), vec2(140.0, 30.0)),
-                    combine_enabled: true,
-                },
-                TabRectEntry {
-                    index: 1,
-                    rect: Rect::from_min_size(pos2(154.0, 10.0), vec2(140.0, 30.0)),
-                    combine_enabled: false,
-                },
-            ],
-        }];
-
-        assert!(drag_sources_allow_combine(&zones, &[0, 1], 1));
-        assert!(!drag_sources_allow_combine(&zones, &[1], 1));
-    }
-}

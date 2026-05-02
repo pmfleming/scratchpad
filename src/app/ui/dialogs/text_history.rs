@@ -1,13 +1,15 @@
 use super::common::show_centered_callout;
 use crate::app::app_state::ScratchpadApp;
-use crate::app::domain::BufferId;
-use crate::app::text_history::{TextHistoryEntry, TextHistorySource};
+use crate::app::chrome::phosphor_button;
+use crate::app::domain::{BufferId, PieceSource, source_label};
+use crate::app::text_history::TextHistoryEntryView;
 use crate::app::theme::{action_bg, action_hover_bg, border, tab_selected_accent, tab_selected_bg};
 use crate::app::ui::settings::dialog_card_frame;
 use crate::app::ui::{callout, settings, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{
-    ARROWS_LEFT_RIGHT, BACKSPACE, MAGNIFYING_GLASS, PENCIL_SIMPLE, STACK,
+    ARROWS_LEFT_RIGHT, BACKSPACE, CARET_DOWN, CARET_RIGHT, CROSSHAIR, MAGNIFYING_GLASS,
+    PENCIL_SIMPLE, STACK,
 };
 
 const TEXT_HISTORY_SIZE: egui::Vec2 =
@@ -49,17 +51,16 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
         return;
     }
 
-    let chronological = app
-        .text_history
-        .all_entries()
-        .map(row_from_entry)
-        .collect::<Vec<_>>();
-    let file_groups = file_groups_from_entries(app.text_history.all_entries());
+    let entries = app.cached_text_history_entries();
+    let chronological = entries.iter().map(row_from_entry).collect::<Vec<_>>();
+    let file_groups = file_groups_from_entries(entries.iter());
 
-    let mut action: Option<(u64, bool)> = None;
+    let mut action: Option<u64> = None;
     let mut close_requested = false;
     let active_tab = read_active_tab(ctx);
     let mut next_tab = active_tab;
+    let follow_focus = read_follow_focus(ctx);
+    let mut next_follow_focus = follow_focus;
 
     show_centered_callout(ctx, "text_history_window", TEXT_HISTORY_SIZE, |ui| {
         render_text_history_window(
@@ -68,6 +69,8 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
             &file_groups,
             active_tab,
             &mut next_tab,
+            follow_focus,
+            &mut next_follow_focus,
             &mut action,
             &mut close_requested,
         );
@@ -76,30 +79,29 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
     if next_tab != active_tab {
         write_active_tab(ctx, next_tab);
     }
+    if next_follow_focus != follow_focus {
+        write_follow_focus(ctx, next_follow_focus);
+    }
     if close_requested {
         app.close_text_history();
     }
-    if let Some((entry_id, redo)) = action {
-        if redo {
-            let _ = app.redo_text_history_entry(entry_id);
-        } else {
-            let _ = app.undo_text_history_entry(entry_id);
-        }
+    if let Some(entry_id) = action {
+        let _ = app.apply_text_history_to_entry(entry_id, next_follow_focus);
     }
 }
 
-fn row_from_entry(entry: &TextHistoryEntry) -> TextHistoryRow {
+fn row_from_entry(entry: &TextHistoryEntryView) -> TextHistoryRow {
     TextHistoryRow {
         entry_id: entry.id,
         title: entry.summary.clone(),
         detail: format!("{} · {}", entry.label, source_label(entry.source)),
         icon: entry_icon(entry),
-        undone: entry.is_undone(),
+        undone: entry.undone,
     }
 }
 
 fn file_groups_from_entries<'a>(
-    entries: impl Iterator<Item = &'a TextHistoryEntry>,
+    entries: impl Iterator<Item = &'a TextHistoryEntryView>,
 ) -> Vec<TextHistoryFileGroup> {
     let mut groups = Vec::<TextHistoryFileGroup>::new();
     for entry in entries {
@@ -120,22 +122,17 @@ fn file_groups_from_entries<'a>(
     groups
 }
 
-fn source_label(source: TextHistorySource) -> &'static str {
-    match source {
-        TextHistorySource::Editor => "Editor",
-        TextHistorySource::SearchReplace => "Search/replace",
-    }
-}
-
-fn entry_icon(entry: &TextHistoryEntry) -> &'static str {
-    if entry.source == TextHistorySource::SearchReplace {
+fn entry_icon(entry: &TextHistoryEntryView) -> &'static str {
+    if entry.source == PieceSource::SearchReplace {
         return MAGNIFYING_GLASS;
     }
-    if entry.operation.edits.len() != 1 {
+    if entry.edit_count != 1 {
         return STACK;
     }
-    let edit = &entry.operation.edits[0];
-    match (edit.deleted_text.is_empty(), edit.inserted_text.is_empty()) {
+    match (
+        entry.first_deleted_text.is_empty(),
+        entry.first_inserted_text.is_empty(),
+    ) {
         (true, false) => PENCIL_SIMPLE,
         (false, true) => BACKSPACE,
         (false, false) => ARROWS_LEFT_RIGHT,
@@ -149,13 +146,15 @@ fn render_text_history_window(
     file_groups: &[TextHistoryFileGroup],
     active_tab: HistoryTab,
     next_tab: &mut HistoryTab,
-    action: &mut Option<(u64, bool)>,
+    follow_focus: bool,
+    next_follow_focus: &mut bool,
+    action: &mut Option<u64>,
     close_requested: &mut bool,
 ) {
     settings::apply_dialog_typography(ui);
     callout::apply_spacing(ui);
     ui.spacing_mut().item_spacing = egui::vec2(8.0, 12.0);
-    if render_header(ui) {
+    if render_header(ui, follow_focus, next_follow_focus) {
         *close_requested = true;
     }
     ui.add_space(4.0);
@@ -176,14 +175,46 @@ fn history_card<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -
         .inner
 }
 
-fn render_header(ui: &mut egui::Ui) -> bool {
+fn render_header(ui: &mut egui::Ui, follow_focus: bool, next_follow_focus: &mut bool) -> bool {
     callout::header_row(ui, "Close text history", |ui| {
         ui.label(
             egui::RichText::new("Text History")
                 .size(TEXT_HISTORY_TITLE_SIZE)
                 .color(callout::text(ui)),
         );
+        ui.add_space(8.0);
+        render_follow_focus_toggle(ui, follow_focus, next_follow_focus);
     })
+}
+
+fn render_follow_focus_toggle(ui: &mut egui::Ui, follow_focus: bool, next_follow_focus: &mut bool) {
+    let (fill, hover_fill, tooltip) = if follow_focus {
+        (
+            tab_selected_bg(ui),
+            action_hover_bg(ui),
+            "Follow undo: focus jumps to the last reverted edit. Click to disable.",
+        )
+    } else {
+        (
+            action_bg(ui),
+            action_hover_bg(ui),
+            "Follow undo is off: focus stays put. Click to re-enable.",
+        )
+    };
+    let response = widget_ids::scope(ui, "text_history.follow_focus_toggle", |ui| {
+        phosphor_button(
+            ui,
+            CROSSHAIR,
+            egui::vec2(28.0, 28.0),
+            fill,
+            hover_fill,
+            tooltip,
+        )
+    })
+    .inner;
+    if response.clicked() {
+        *next_follow_focus = !follow_focus;
+    }
 }
 
 fn render_tabs(ui: &mut egui::Ui, active: HistoryTab, next: &mut HistoryTab) {
@@ -215,11 +246,7 @@ fn tab_button(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response 
     ui.add(button)
 }
 
-fn render_timeline(
-    ui: &mut egui::Ui,
-    chronological: &[TextHistoryRow],
-    action: &mut Option<(u64, bool)>,
-) {
+fn render_timeline(ui: &mut egui::Ui, chronological: &[TextHistoryRow], action: &mut Option<u64>) {
     widget_ids::scope(ui, "text_history.section.timeline", |ui| {
         if chronological.is_empty() {
             ui.label(
@@ -242,21 +269,22 @@ fn render_timeline(
 fn render_timeline_rows(
     ui: &mut egui::Ui,
     chronological: &[TextHistoryRow],
-    action: &mut Option<(u64, bool)>,
+    action: &mut Option<u64>,
 ) {
     let now_after = newest_applied_index(chronological);
+    let nothing_to_redo = chronological.iter().all(|row| !row.undone);
     let mut newest_first = chronological.iter().enumerate().collect::<Vec<_>>();
     newest_first.reverse();
     let mut now_rendered = false;
 
     for (idx, row) in newest_first {
-        if !now_rendered && now_line_belongs_above(idx, now_after) {
+        if !nothing_to_redo && !now_rendered && now_line_belongs_above(idx, now_after) {
             render_now_line(ui);
             now_rendered = true;
         }
         render_row(ui, row, action);
     }
-    if !now_rendered {
+    if !nothing_to_redo && !now_rendered {
         render_now_line(ui);
     }
 }
@@ -272,11 +300,7 @@ fn now_line_belongs_above(current_idx: usize, newest_applied: Option<usize>) -> 
     }
 }
 
-fn render_by_file(
-    ui: &mut egui::Ui,
-    groups: &[TextHistoryFileGroup],
-    action: &mut Option<(u64, bool)>,
-) {
+fn render_by_file(ui: &mut egui::Ui, groups: &[TextHistoryFileGroup], action: &mut Option<u64>) {
     widget_ids::scope(ui, "text_history.section.by_file", |ui| {
         if groups.is_empty() {
             ui.label(
@@ -301,25 +325,104 @@ fn render_by_file(
     });
 }
 
-fn render_file_group(
-    ui: &mut egui::Ui,
-    group: &TextHistoryFileGroup,
-    action: &mut Option<(u64, bool)>,
-) {
+fn render_file_group(ui: &mut egui::Ui, group: &TextHistoryFileGroup, action: &mut Option<u64>) {
     widget_ids::scope(ui, ("text_history.file_group", group.buffer_id), |ui| {
-        history_card(ui, |ui| {
-            ui.label(
-                egui::RichText::new(&group.label)
-                    .size(13.0)
-                    .color(callout::text(ui)),
-            );
-            ui.add_space(4.0);
-            render_timeline_rows(ui, &group.rows, action);
+        let expansion_id =
+            widget_ids::local(ui, ("text_history.file_group.expanded", group.buffer_id));
+        let expanded = ui
+            .data_mut(|data| data.get_persisted::<bool>(expansion_id))
+            .unwrap_or(false);
+        let (group_response, toggle_requested) = render_file_header_pill(ui, group, expanded);
+        if group_response.clicked() || toggle_requested {
+            ui.data_mut(|data| data.insert_persisted(expansion_id, !expanded));
+        }
+        if !expanded {
+            return;
+        }
+        ui.add_space(HISTORY_PILL_SPACING);
+        ui.indent(("text_history.file_group.indent", group.buffer_id), |ui| {
+            render_file_history_rows(ui, &group.rows, action);
         });
     });
 }
 
-fn render_row(ui: &mut egui::Ui, row: &TextHistoryRow, action: &mut Option<(u64, bool)>) {
+fn render_file_header_pill(
+    ui: &mut egui::Ui,
+    group: &TextHistoryFileGroup,
+    expanded: bool,
+) -> (egui::Response, bool) {
+    let count_label = if group.rows.len() == 1 {
+        "1 change".to_owned()
+    } else {
+        format!("{} changes", group.rows.len())
+    };
+    egui::Frame::NONE
+        .fill(action_bg(ui))
+        .stroke(egui::Stroke::new(1.0, border(ui)))
+        .corner_radius(egui::CornerRadius::same(HISTORY_PILL_CORNER_RADIUS))
+        .inner_margin(egui::Margin::same(HISTORY_PILL_INNER_MARGIN))
+        .show(ui, |ui| {
+            let mut toggle_requested = false;
+            let mut group_response = None;
+
+            ui.horizontal(|ui| {
+                let caret = ui
+                    .add_sized(
+                        egui::vec2(24.0, 24.0),
+                        egui::Button::new(
+                            egui::RichText::new(if expanded { CARET_DOWN } else { CARET_RIGHT })
+                                .size(14.0)
+                                .color(callout::muted_text(ui)),
+                        )
+                        .fill(egui::Color32::TRANSPARENT)
+                        .stroke(egui::Stroke::NONE),
+                    )
+                    .on_hover_text(if expanded {
+                        "Collapse history for this file"
+                    } else {
+                        "Expand history for this file"
+                    });
+                if caret.clicked() {
+                    toggle_requested = true;
+                }
+
+                let label_width = (ui.available_width() - 96.0).max(120.0);
+                let response = ui.add_sized(
+                    egui::vec2(label_width, 24.0),
+                    egui::Button::new(
+                        egui::RichText::new(&group.label)
+                            .size(13.0)
+                            .color(callout::text(ui)),
+                    )
+                    .fill(egui::Color32::TRANSPARENT)
+                    .stroke(egui::Stroke::NONE),
+                );
+                group_response = Some(response);
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(count_label)
+                            .size(12.0)
+                            .color(callout::muted_text(ui)),
+                    );
+                });
+            });
+
+            (
+                group_response.unwrap_or_else(|| ui.label("")),
+                toggle_requested,
+            )
+        })
+        .inner
+}
+
+fn render_file_history_rows(ui: &mut egui::Ui, rows: &[TextHistoryRow], action: &mut Option<u64>) {
+    for row in rows {
+        render_row(ui, row, action);
+    }
+}
+
+fn render_row(ui: &mut egui::Ui, row: &TextHistoryRow, action: &mut Option<u64>) {
     let response = widget_ids::scope(ui, ("text_history.row", row.entry_id), |ui| {
         history_pill(ui, row)
     })
@@ -331,7 +434,7 @@ fn render_row(ui: &mut egui::Ui, row: &TextHistoryRow, action: &mut Option<(u64,
     });
 
     if response.clicked() {
-        *action = Some((row.entry_id, row.undone));
+        *action = Some(row.entry_id);
     }
     ui.add_space(HISTORY_PILL_SPACING);
 }
@@ -445,6 +548,17 @@ fn read_active_tab(ctx: &egui::Context) -> HistoryTab {
 fn write_active_tab(ctx: &egui::Context, tab: HistoryTab) {
     let id = widget_ids::global("text_history.active_tab");
     ctx.data_mut(|data| data.insert_persisted(id, tab_to_persisted(tab)));
+}
+
+fn read_follow_focus(ctx: &egui::Context) -> bool {
+    let id = widget_ids::global("text_history.follow_undo");
+    ctx.data_mut(|data| data.get_persisted::<bool>(id))
+        .unwrap_or(true)
+}
+
+fn write_follow_focus(ctx: &egui::Context, follow: bool) {
+    let id = widget_ids::global("text_history.follow_undo");
+    ctx.data_mut(|data| data.insert_persisted(id, follow));
 }
 
 fn tab_from_persisted(value: u8) -> Option<HistoryTab> {

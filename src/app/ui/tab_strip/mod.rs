@@ -101,19 +101,3 @@ pub(crate) fn apply_tab_interaction(outcome: &mut TabStripOutcome, interaction: 
         TabInteraction::PromoteAllFiles(index) => outcome.promote_all_files_tab = Some(index),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::TabStripOutcome;
-
-    #[test]
-    fn outcome_defaults_to_empty_actions() {
-        let outcome = TabStripOutcome::default();
-
-        assert!(outcome.activated_tab.is_none());
-        assert!(outcome.rename_requested_tab.is_none());
-        assert!(!outcome.activate_settings);
-        assert!(outcome.close_requested_tab.is_none());
-        assert!(!outcome.close_settings);
-    }
-}

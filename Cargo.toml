@@ -19,6 +19,9 @@ encoding_rs_io = "0.1"
 chardetng = "0.1"
 syn = { version = "2.0", features = ["full", "extra-traits", "visit"] }
 proc-macro2 = { version = "1.0", features = ["span-locations"] }
+rustc-hash = "2.0"
+smallvec = { version = "1.13", features = ["serde"] }
+sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 
 [dev-dependencies]
 rand = "0.10.0"

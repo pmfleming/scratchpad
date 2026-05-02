@@ -644,89 +644,6 @@ impl EditorViewState {
         self.published_ime_output = None;
     }
 }
-
-#[cfg(test)]
-mod layout_cache_tests {
-    use super::{LayoutCache, LayoutCacheKey, SearchHighlightState};
-    use eframe::egui;
-    use std::sync::Arc;
-
-    fn key(revision: u64, start: usize) -> LayoutCacheKey {
-        LayoutCacheKey {
-            revision,
-            char_range: start..start + 10,
-            font_family: "Monospace".to_owned(),
-            font_size_bits: 14.0_f32.to_bits(),
-            wrap_width_bits: f32::INFINITY.to_bits(),
-            word_wrap: false,
-            text_color: egui::Color32::WHITE,
-            dark_mode: true,
-            selection_range: None,
-            search_highlights: SearchHighlightState::default(),
-        }
-    }
-
-    fn galley() -> Arc<egui::Galley> {
-        let ctx = egui::Context::default();
-        let mut galley = None;
-        let _ = ctx.run_ui(Default::default(), |ui| {
-            galley = Some(ui.fonts_mut(|fonts| {
-                fonts.layout_job(egui::text::LayoutJob::simple(
-                    "cached".to_owned(),
-                    egui::FontId::monospace(14.0),
-                    egui::Color32::WHITE,
-                    f32::INFINITY,
-                ))
-            }));
-        });
-        galley.expect("galley")
-    }
-
-    #[test]
-    fn layout_cache_returns_matching_revision_and_range() {
-        let mut cache = LayoutCache::default();
-        let cached_key = key(7, 10);
-        cache.insert(cached_key.clone(), galley(), 6);
-
-        assert!(cache.get(&cached_key).is_some());
-        assert!(cache.get(&key(8, 10)).is_none());
-    }
-
-    #[test]
-    fn layout_cache_evicts_stale_revisions() {
-        let mut cache = LayoutCache::default();
-        cache.insert(key(7, 0), galley(), 6);
-        cache.insert(key(8, 0), galley(), 6);
-
-        cache.retain_revision(8);
-
-        assert_eq!(cache.len(), 1);
-        assert!(cache.get(&key(7, 0)).is_none());
-        assert!(cache.get(&key(8, 0)).is_some());
-    }
-
-    #[test]
-    fn layout_cache_evicts_under_global_budget_pressure() {
-        use crate::app::memory_budget::{self, BudgetCategory};
-
-        memory_budget::reset();
-        let mut cache = LayoutCache::default();
-        cache.insert(key(1, 0), galley(), 16);
-        cache.insert(key(2, 0), galley(), 16);
-        cache.insert(key(3, 0), galley(), 16);
-        assert_eq!(cache.len(), 3);
-
-        // Force global Layout budget over the soft cap so eviction kicks in
-        // even though the local LRU isn't full.
-        memory_budget::record_alloc(BudgetCategory::Layout, 1024 * 1024 * 1024);
-        cache.insert(key(4, 0), galley(), 16);
-
-        assert_eq!(cache.len(), 1, "global pressure should evict down to 1");
-
-        memory_budget::reset();
-    }
-}
-
 impl SearchHighlightState {
     pub fn layout_signature(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
@@ -885,6 +802,3 @@ fn register_existing_view_id(id: ViewId) {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

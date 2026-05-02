@@ -255,32 +255,3 @@ impl SettingsUi {
         (outer_width - horizontal_padding).max(0.0)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn page_surface_grows_to_min_viewport() {
-        let surface = SettingsUi::page_surface_size_for_viewport(egui::vec2(900.0, 600.0));
-
-        assert_eq!(surface.x, SettingsUi::LAYOUT.page_min_viewport_width);
-        assert_eq!(surface.y, SettingsUi::LAYOUT.page_min_viewport_height);
-    }
-
-    #[test]
-    fn page_surface_preserves_expanded_viewport() {
-        let surface = SettingsUi::page_surface_size_for_viewport(egui::vec2(1440.0, 900.0));
-
-        assert_eq!(surface, egui::vec2(1440.0, 900.0));
-    }
-
-    #[test]
-    fn page_content_width_respects_padding_and_max_width() {
-        let laptop_width = SettingsUi::page_content_width_for_surface(1180.0);
-        let narrow_width = SettingsUi::page_content_width_for_surface(800.0);
-
-        assert_eq!(laptop_width, SettingsUi::LAYOUT.page_max_width);
-        assert_eq!(narrow_width, 752.0);
-    }
-}

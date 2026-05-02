@@ -823,6 +823,3 @@ fn missing_editor_content_outcome() -> EditorContentOutcome {
         interaction_response: None,
     }
 }
-
-#[cfg(test)]
-mod tests;

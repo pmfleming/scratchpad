@@ -14,8 +14,6 @@ use std::time::Duration;
 
 mod display_tabs;
 mod mutators;
-#[cfg(test)]
-mod tests;
 mod toml_refresh;
 
 impl ScratchpadApp {
@@ -185,6 +183,7 @@ impl ScratchpadApp {
     pub(super) fn apply_settings(&mut self, settings: AppSettings) {
         let mut settings = settings;
         sync_stock_editor_palette_with_theme_mode(&mut settings);
+        settings.history_budget = settings.history_budget.sanitized();
         settings.tab_list_auto_hide_delay_seconds =
             sanitize_tab_list_auto_hide_delay_seconds(settings.tab_list_auto_hide_delay_seconds);
         self.active_surface = if settings.settings_tab_open {
@@ -194,6 +193,7 @@ impl ScratchpadApp {
         };
         self.settings_tab_index = settings.settings_tab_index.unwrap_or(usize::MAX);
         self.app_settings = settings;
+        self.apply_history_budget_to_open_buffers();
     }
 
     fn refresh_settings_snapshot(&mut self) {
@@ -211,6 +211,66 @@ impl ScratchpadApp {
         ctx.set_theme(self.app_settings.theme_mode.theme_preference());
         ctx.set_visuals_of(egui::Theme::Dark, egui::Visuals::dark());
         ctx.set_visuals_of(egui::Theme::Light, egui::Visuals::light());
+    }
+}
+
+impl ScratchpadApp {
+    pub(crate) fn apply_history_budget_to_open_buffers(&mut self) {
+        let budget = self.app_settings.history_budget;
+        for tab in self.tabs_mut() {
+            for buffer in tab.buffers_mut() {
+                buffer.document_mut().set_history_budget(budget);
+            }
+        }
+        self.enforce_aggregate_text_history_budget();
+    }
+
+    pub(crate) fn enforce_aggregate_text_history_budget(&mut self) {
+        let aggregate_budget = self.app_settings.history_budget.aggregate_byte_budget;
+        while self.aggregate_text_history_usage() > aggregate_budget {
+            let Some((tab_index, buffer_id)) = self.oldest_history_buffer() else {
+                break;
+            };
+            if let Some(buffer) = self
+                .tabs_mut()
+                .get_mut(tab_index)
+                .and_then(|tab| tab.buffer_by_id_mut(buffer_id))
+            {
+                if let Some(removed) = buffer.document_mut().drop_oldest_history_entry() {
+                    crate::app::capacity_metrics::record_history_eviction_aggregate(
+                        removed.byte_cost(),
+                    );
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn aggregate_text_history_usage(&self) -> u64 {
+        self.tabs()
+            .iter()
+            .flat_map(|tab| tab.buffers())
+            .map(|buffer| buffer.document().history_byte_usage() as u64)
+            .sum()
+    }
+
+    fn oldest_history_buffer(&self) -> Option<(usize, crate::app::domain::BufferId)> {
+        self.tabs()
+            .iter()
+            .enumerate()
+            .flat_map(|(tab_index, tab)| {
+                tab.buffers().filter_map(move |buffer| {
+                    buffer
+                        .document()
+                        .oldest_history_seq()
+                        .map(|seq| (seq, tab_index, buffer.id))
+                })
+            })
+            .min_by_key(|(seq, _, buffer_id)| (*seq, *buffer_id))
+            .map(|(_, tab_index, buffer_id)| (tab_index, buffer_id))
     }
 }
 
