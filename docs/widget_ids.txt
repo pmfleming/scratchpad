@@ -1,0 +1,25 @@
+
+Honest assessment of [widget_ids.rs](src/app/ui/widget_ids.rs):
+
+**What works well**
+- `local(ui, key)` and `scope(ui, key, …)` correctly incorporate the ui's id stack, so the same key inside different parent scopes resolves to different ids. That's the right protection against cross-region collisions.
+- Centralizing a `"scratchpad.widget"` namespace prefix is mildly nice for filtering vs egui internals.
+- `interact()` wrapper auto-runs `check_for_id_clash` so app-level interactive widgets get clash diagnostics.
+
+**Weaknesses**
+1. **`global(key)` is dangerously named.** It produces a context-level id with no parent scoping — two unrelated callers using `global("active_tab")` would collide silently. It's used for ctx.data persistence (active tab, drag state, areas), not for tree-positioned widgets. A name like `ctx_persistent` or `data_key` would prevent misuse.
+2. **The `ID_NAMESPACE` prefix doesn't add intra-app safety.** Adding "scratchpad.widget" to every key just shifts the id space; it doesn't prevent two parts of *this* app from picking the same key. The real safety comes from `local`/`scope` adding the ui stack.
+3. **Clash tracking is partial.** `check_for_id_clash` runs only on the explicit `widget_ids::interact` path. egui's native widgets (`Frame::show`, `Button`, `ScrollArea`) handle their own and only fire when `warn_on_id_clash` is on — which it is in debug. So clashes ARE getting reported globally; the helper just adds a hook on top.
+4. **No "section discriminator" pattern.** Nothing forces a caller to include "which tab/dialog am I in" when scoping. Today the row scope key is `("text_history.row", buffer_id, entry_id)`, identical between Timeline and ByFile. It only avoids collision because the parent `section.timeline` vs `section.by_file` scope wraps it. If a refactor flattens that wrapper, every row collides silently.
+
+**Is the helper *causing* the tab-switch flash?** Probably not directly. But (4) is a latent risk that could surface depending on future changes, and the current symptom suggests something in the same family.
+
+**My honest recommendation for *this* issue**
+
+I've been pattern-matching without proof. Before more guessing, the cheapest diagnostic: in debug, `check_for_id_clash` writes the colliding id and the rects to egui's logger when a clash fires — running the binary with `RUST_LOG=egui=warn` (or stderr capture) on a tab-switch will name the offending widget directly.
+
+Two options:
+- **(a)** You reproduce once with logging on, paste me the clash message, and I fix the named widget.
+- **(b)** I apply belt-and-braces hardening blind: include a `&'static str` tab discriminator in the row scope key, switch `render_now_line` to non-interactive `allocate_space` (drop the `Sense::hover` it doesn't use), and re-test.
+
+(a) is faster and correct; (b) is a guess that might mask the real issue. Which do you prefer?

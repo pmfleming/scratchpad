@@ -38,6 +38,16 @@ pub(super) fn paint_editor(
     char_offset_base: usize,
     slice_chars: usize,
 ) -> CursorPaintOutcome {
+    paint_contiguous_selection_background(
+        ui,
+        galley,
+        galley_pos,
+        rect,
+        view,
+        options,
+        char_offset_base,
+        slice_chars,
+    );
     paint_galley(ui, galley, galley_pos, options.text_color);
     paint_replacement_previews(
         ReplacementPreviewContext {
@@ -73,6 +83,66 @@ pub(super) fn paint_editor(
     }
 
     CursorPaintOutcome::default()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_contiguous_selection_background(
+    ui: &egui::Ui,
+    galley: &egui::Galley,
+    galley_pos: egui::Pos2,
+    rect: egui::Rect,
+    view: &EditorViewState,
+    options: TextEditOptions<'_>,
+    char_offset_base: usize,
+    slice_chars: usize,
+) {
+    let Some(cursor_range) = view.cursor_range.as_ref().filter(|range| !range.is_empty()) else {
+        return;
+    };
+    let slice_start = char_offset_base;
+    let slice_end = char_offset_base.saturating_add(slice_chars);
+    let selection = cursor_range.as_sorted_char_range();
+    let local_start = selection.start.max(slice_start).saturating_sub(slice_start);
+    let local_end = selection.end.min(slice_end).saturating_sub(slice_start);
+    if local_start >= local_end {
+        return;
+    }
+
+    let fill = options
+        .highlight_style
+        .active_background(ui.visuals().dark_mode);
+    let painter = ui.painter_at(rect.expand(1.0));
+    let mut row_start = 0usize;
+    for row in &galley.rows {
+        let row_text_chars = row.char_count_excluding_newline();
+        let row_end = row_start.saturating_add(row.char_count_including_newline());
+        if local_start < row_end && local_end > row_start {
+            let start_col = local_start.saturating_sub(row_start).min(row_text_chars);
+            let end_col = local_end.saturating_sub(row_start).min(row_text_chars);
+            let selection_reaches_line_end =
+                row.ends_with_newline && local_end > row_start + row_text_chars;
+            let selection_covers_whole_row = local_start <= row_start && local_end >= row_end;
+            let left = row_screen_x(galley, galley_pos, row.pos.x, row.x_offset(start_col));
+            let right = if selection_reaches_line_end || selection_covers_whole_row {
+                rect.right()
+            } else {
+                row_screen_x(galley, galley_pos, row.pos.x, row.x_offset(end_col))
+            };
+            let highlight_rect = egui::Rect::from_min_max(
+                egui::pos2(left.min(right), galley_pos.y + row.min_y()),
+                egui::pos2(left.max(right), galley_pos.y + row.max_y()),
+            )
+            .intersect(rect.expand(1.0));
+            if highlight_rect.width() > 0.0 && highlight_rect.height() > 0.0 {
+                painter.rect_filled(highlight_rect, egui::CornerRadius::ZERO, fill);
+            }
+        }
+        row_start = row_end;
+    }
+}
+
+fn row_screen_x(galley: &egui::Galley, galley_pos: egui::Pos2, row_x: f32, column_x: f32) -> f32 {
+    galley_pos.x + column_x + row_x - galley.rect.left()
 }
 
 fn paint_replacement_previews(context: ReplacementPreviewContext<'_>, view: &EditorViewState) {

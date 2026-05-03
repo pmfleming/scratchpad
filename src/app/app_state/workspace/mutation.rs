@@ -124,6 +124,24 @@ impl ScratchpadApp {
             .collect()
     }
 
+    pub(crate) fn clear_text_history(&mut self) -> bool {
+        let mut cleared = false;
+        for tab in self.tabs_mut() {
+            for buffer in tab.buffers_mut() {
+                if !buffer.document().history_entries().is_empty() {
+                    buffer.document_mut().clear_operation_history();
+                    cleared = true;
+                }
+            }
+        }
+        if cleared {
+            self.text_history_cache = Default::default();
+            self.mark_session_dirty();
+            self.set_info_status("Cleared text history.");
+        }
+        cleared
+    }
+
     pub(crate) fn finalize_active_buffer_text_mutation(&mut self, active_tab_index: usize) {
         let tab = &mut self.tabs_mut()[active_tab_index];
         let buffer_id = tab.buffer.id;
@@ -177,12 +195,12 @@ impl ScratchpadApp {
         }
     }
 
-    pub fn undo_text_history_entry(&mut self, entry_id: u64) -> bool {
-        self.apply_text_history_entry_with_focus(entry_id, true, true)
+    pub fn undo_text_history_entry(&mut self, buffer_id: BufferId, entry_id: u64) -> bool {
+        self.apply_text_history_entry_with_focus(buffer_id, entry_id, true, true)
     }
 
-    pub fn redo_text_history_entry(&mut self, entry_id: u64) -> bool {
-        self.apply_text_history_entry_with_focus(entry_id, false, true)
+    pub fn redo_text_history_entry(&mut self, buffer_id: BufferId, entry_id: u64) -> bool {
+        self.apply_text_history_entry_with_focus(buffer_id, entry_id, false, true)
     }
 
     /// Undo or redo every entry between the current "Now" boundary and the
@@ -193,11 +211,16 @@ impl ScratchpadApp {
     /// given any single entry id, so a single call is enough. Other buffers'
     /// histories are left alone even when their seqs fall between Now and the
     /// click target.
-    pub fn apply_text_history_to_entry(&mut self, entry_id: u64, follow_focus: bool) -> bool {
+    pub fn apply_text_history_to_entry(
+        &mut self,
+        buffer_id: BufferId,
+        entry_id: u64,
+        follow_focus: bool,
+    ) -> bool {
         let target = match self
             .text_history_entries()
             .into_iter()
-            .find(|entry| entry.id == entry_id)
+            .find(|entry| entry.buffer_id == buffer_id && entry.id == entry_id)
         {
             Some(target) => target,
             None => {
@@ -206,11 +229,12 @@ impl ScratchpadApp {
             }
         };
         let undo = !target.undone;
-        self.apply_text_history_entry_with_focus(entry_id, undo, follow_focus)
+        self.apply_text_history_entry_with_focus(buffer_id, entry_id, undo, follow_focus)
     }
 
     fn apply_text_history_entry_with_focus(
         &mut self,
+        buffer_id: BufferId,
         entry_id: u64,
         undo: bool,
         follow_focus: bool,
@@ -218,7 +242,7 @@ impl ScratchpadApp {
         let Some(action) = self
             .text_history_entries()
             .into_iter()
-            .find(|entry| entry.id == entry_id)
+            .find(|entry| entry.buffer_id == buffer_id && entry.id == entry_id)
         else {
             self.set_error_status("Text history entry is no longer available.".to_owned());
             return false;
