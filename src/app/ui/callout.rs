@@ -29,7 +29,7 @@ pub(crate) fn show_floating(
     width: f32,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) {
-    egui::Area::new(widget_ids::global(id))
+    widget_ids::area(id)
         .order(egui::Order::Foreground)
         .constrain(true)
         .movable(true)
@@ -59,7 +59,7 @@ pub(crate) fn scroll_blocker_hovered(ctx: &egui::Context) -> bool {
 }
 
 fn scroll_blocker_id() -> egui::Id {
-    widget_ids::global("callout_scroll_blocker_hover")
+    widget_ids::ctx_key("callout_scroll_blocker_hover")
 }
 
 pub(crate) fn frame(ui: &egui::Ui) -> egui::Frame {

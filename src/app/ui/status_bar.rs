@@ -38,30 +38,32 @@ pub(crate) fn show_status_bar(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     app.queue_active_buffer_encoding_compliance_refresh();
 
     egui::Panel::bottom("status").show_inside(ui, |ui| {
-        ui.horizontal(|ui| {
-            if app.showing_settings() {
-                ui.label("Settings");
-                ui.separator();
-                show_copyable_path(ui, &app.settings_path().display().to_string());
+        widget_ids::feature_scope(ui, "status_bar", |ui| {
+            ui.horizontal(|ui| {
+                if app.showing_settings() {
+                    ui.label("Settings");
+                    ui.separator();
+                    show_copyable_path(ui, &app.settings_path().display().to_string());
+                    if let Some(message) = &app.status_message {
+                        ui.separator();
+                        ui.label(message);
+                    }
+                    return;
+                }
+
+                let mut actions = StatusBarActions::default();
+
+                if let Some(details) = collect_active_status_details(app, ui.visuals().dark_mode) {
+                    render_active_status(ui, &details, &mut actions);
+                }
+
                 if let Some(message) = &app.status_message {
                     ui.separator();
                     ui.label(message);
                 }
-                return;
-            }
 
-            let mut actions = StatusBarActions::default();
-
-            if let Some(details) = collect_active_status_details(app, ui.visuals().dark_mode) {
-                render_active_status(ui, &details, &mut actions);
-            }
-
-            if let Some(message) = &app.status_message {
-                ui.separator();
-                ui.label(message);
-            }
-
-            apply_status_actions(app, actions);
+                apply_status_actions(app, actions);
+            });
         });
     });
 }

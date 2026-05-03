@@ -5,6 +5,7 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::{PaneBranch, PaneNode, ViewId};
 use crate::app::ui::search_replace;
 use crate::app::ui::tile_header::{self, SplitPreviewOverlay, TileAction};
+use crate::app::ui::widget_ids;
 use eframe::egui;
 use std::time::Duration;
 
@@ -13,26 +14,28 @@ use tile::{TileRenderRequest, TileRenderState};
 
 pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     egui::CentralPanel::default().show_inside(ui, |ui| {
-        if app.tabs().is_empty() {
-            return;
-        }
+        widget_ids::feature_scope(ui, "editor_area", |ui| {
+            if app.tabs().is_empty() {
+                return;
+            }
 
-        app.refresh_search_state();
-        search_replace::show_search_strip(ui, app);
-        let workspace_rect = ui.available_rect_before_wrap();
-        if workspace_rect.width() <= 0.0 || workspace_rect.height() <= 0.0 {
-            return;
-        }
+            app.refresh_search_state();
+            search_replace::show_search_strip(ui, app);
+            let workspace_rect = ui.available_rect_before_wrap();
+            if workspace_rect.width() <= 0.0 || workspace_rect.height() <= 0.0 {
+                return;
+            }
 
-        paint_workspace_background(ui, workspace_rect, app.editor_background_color());
+            paint_workspace_background(ui, workspace_rect, app.editor_background_color());
 
-        app.workspace_reflow_axis = preferred_workspace_reflow_axis(workspace_rect);
-        handle_editor_zoom(ui, workspace_rect, app);
-        let editor_state = prepare_editor_state(app);
-        let render_outcome = render_editor_workspace(ui, app, &editor_state, workspace_rect);
-        finalize_editor_render(ui, app, &editor_state, render_outcome);
-        app.refresh_search_state();
-        request_search_repaint(ui.ctx(), app.search_progress().searching);
+            app.workspace_reflow_axis = preferred_workspace_reflow_axis(workspace_rect);
+            handle_editor_zoom(ui, workspace_rect, app);
+            let editor_state = prepare_editor_state(app);
+            let render_outcome = render_editor_workspace(ui, app, &editor_state, workspace_rect);
+            finalize_editor_render(ui, app, &editor_state, render_outcome);
+            app.refresh_search_state();
+            request_search_repaint(ui.ctx(), app.search_progress().searching);
+        });
     });
 }
 

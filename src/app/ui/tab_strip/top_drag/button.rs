@@ -20,7 +20,7 @@ pub(super) fn show_top_drag_bar(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     }
 
     let button_position = top_drag_button_position(app, viewport);
-    egui::Area::new(widget_ids::global("top_drag_button"))
+    widget_ids::area("top_drag_button")
         .order(egui::Order::Foreground)
         .fixed_pos(button_position)
         .show(&ctx, |ui| {

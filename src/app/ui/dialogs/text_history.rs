@@ -35,6 +35,7 @@ enum HistoryTab {
 struct TextHistoryRow {
     buffer_id: BufferId,
     entry_id: u64,
+    global_seq: u64,
     title: String,
     detail: String,
     icon: &'static str,
@@ -54,13 +55,28 @@ struct TextHistoryFileGroup {
     rows: Vec<TextHistoryRow>,
 }
 
+struct TextHistoryWindowInputs<'a> {
+    timeline_rows: &'a [TextHistoryRow],
+    file_groups: &'a [TextHistoryFileGroup],
+    active_tab: HistoryTab,
+    follow_focus: bool,
+}
+
+struct TextHistoryWindowState<'a> {
+    next_tab: &'a mut HistoryTab,
+    next_follow_focus: &'a mut bool,
+    action: &'a mut Option<TextHistoryAction>,
+    close_requested: &'a mut bool,
+    clear_requested: &'a mut bool,
+}
+
 pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut ScratchpadApp) {
     if !app.text_history_open {
         return;
     }
 
     let entries = app.cached_text_history_entries();
-    let chronological = entries.iter().map(row_from_entry).collect::<Vec<_>>();
+    let timeline_rows = entries.iter().rev().map(row_from_entry).collect::<Vec<_>>();
     let file_groups = file_groups_from_entries(entries.iter());
 
     let mut action: Option<TextHistoryAction> = None;
@@ -72,21 +88,27 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
     let mut next_follow_focus = follow_focus;
 
     show_centered_callout(ctx, "text_history_window", TEXT_HISTORY_SIZE, |ui| {
-        ui.set_width(TEXT_HISTORY_SIZE.x);
-        ui.set_min_width(TEXT_HISTORY_SIZE.x);
-        ui.set_max_width(TEXT_HISTORY_SIZE.x);
-        render_text_history_window(
-            ui,
-            &chronological,
-            &file_groups,
-            active_tab,
-            &mut next_tab,
-            follow_focus,
-            &mut next_follow_focus,
-            &mut action,
-            &mut close_requested,
-            &mut clear_requested,
-        );
+        widget_ids::feature_scope(ui, "text_history_dialog", |ui| {
+            ui.set_width(TEXT_HISTORY_SIZE.x);
+            ui.set_min_width(TEXT_HISTORY_SIZE.x);
+            ui.set_max_width(TEXT_HISTORY_SIZE.x);
+            render_text_history_window(
+                ui,
+                TextHistoryWindowInputs {
+                    timeline_rows: &timeline_rows,
+                    file_groups: &file_groups,
+                    active_tab,
+                    follow_focus,
+                },
+                TextHistoryWindowState {
+                    next_tab: &mut next_tab,
+                    next_follow_focus: &mut next_follow_focus,
+                    action: &mut action,
+                    close_requested: &mut close_requested,
+                    clear_requested: &mut clear_requested,
+                },
+            );
+        });
     });
 
     if next_tab != active_tab {
@@ -111,6 +133,7 @@ fn row_from_entry(entry: &TextHistoryEntryView) -> TextHistoryRow {
     TextHistoryRow {
         buffer_id: entry.buffer_id,
         entry_id: entry.id,
+        global_seq: entry.global_seq,
         title: entry.summary.clone(),
         detail: format!("{} · {}", entry.label, source_label(entry.source)),
         icon: entry_icon(entry),
@@ -137,6 +160,25 @@ fn file_groups_from_entries<'a>(
             });
         }
     }
+    for group in &mut groups {
+        group.rows.reverse();
+    }
+    groups.sort_by(|left, right| {
+        let left_seq = left
+            .rows
+            .first()
+            .map(|row| row.global_seq)
+            .unwrap_or_default();
+        let right_seq = right
+            .rows
+            .first()
+            .map(|row| row.global_seq)
+            .unwrap_or_default();
+        right_seq
+            .cmp(&left_seq)
+            .then_with(|| left.label.cmp(&right.label))
+            .then_with(|| left.buffer_id.cmp(&right.buffer_id))
+    });
     groups
 }
 
@@ -166,47 +208,43 @@ fn entry_icon(entry: &TextHistoryEntryView) -> &'static str {
 
 fn render_text_history_window(
     ui: &mut egui::Ui,
-    chronological: &[TextHistoryRow],
-    file_groups: &[TextHistoryFileGroup],
-    active_tab: HistoryTab,
-    next_tab: &mut HistoryTab,
-    follow_focus: bool,
-    next_follow_focus: &mut bool,
-    action: &mut Option<TextHistoryAction>,
-    close_requested: &mut bool,
-    clear_requested: &mut bool,
+    inputs: TextHistoryWindowInputs<'_>,
+    state: TextHistoryWindowState<'_>,
 ) {
     settings::apply_dialog_typography(ui);
     callout::apply_spacing(ui);
     ui.spacing_mut().item_spacing = egui::vec2(8.0, 12.0);
     if render_header(ui) {
-        *close_requested = true;
+        *state.close_requested = true;
     }
     ui.add_space(4.0);
     history_card(ui, |ui| {
         render_controls(
             ui,
-            active_tab,
-            next_tab,
-            follow_focus,
-            next_follow_focus,
-            !chronological.is_empty(),
-            clear_requested,
+            inputs.active_tab,
+            state.next_tab,
+            inputs.follow_focus,
+            state.next_follow_focus,
+            !inputs.timeline_rows.is_empty(),
+            state.clear_requested,
         );
     });
 
-    match active_tab {
-        HistoryTab::Timeline => render_timeline(ui, chronological, action),
-        HistoryTab::ByFile => render_by_file(ui, file_groups, action),
+    match inputs.active_tab {
+        HistoryTab::Timeline => render_timeline(ui, inputs.timeline_rows, state.action),
+        HistoryTab::ByFile => render_by_file(ui, inputs.file_groups, state.action),
     }
 }
 
 fn history_card<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let width = ui.available_width();
+    let content_width = (width - 24.0).max(0.0);
     dialog_card_frame(ui)
         .corner_radius(egui::CornerRadius::same(HISTORY_CARD_CORNER_RADIUS))
         .show(ui, |ui| {
-            ui.set_min_width(width - 24.0);
+            ui.set_width(content_width);
+            ui.set_min_width(content_width);
+            ui.set_max_width(content_width);
             add_contents(ui)
         })
         .inner
@@ -305,11 +343,11 @@ fn control_icon_button(
 
 fn render_timeline(
     ui: &mut egui::Ui,
-    chronological: &[TextHistoryRow],
+    rows: &[TextHistoryRow],
     action: &mut Option<TextHistoryAction>,
 ) {
     widget_ids::scope(ui, "text_history.section.timeline", |ui| {
-        if chronological.is_empty() {
+        if rows.is_empty() {
             ui.label(
                 egui::RichText::new("No entries")
                     .size(13.0)
@@ -318,24 +356,25 @@ fn render_timeline(
             return;
         }
         egui::ScrollArea::vertical()
-            .id_salt(widget_ids::local(ui, "text_history.scroll.timeline"))
+            .id_salt(widget_ids::scroll_id(ui, "text_history.scroll.timeline"))
             .auto_shrink([false, false])
             .max_height(ui.available_height())
             .min_scrolled_height(TEXT_HISTORY_LIST_MIN_HEIGHT)
             .show(ui, |ui| {
-                render_timeline_rows(ui, chronological, action);
+                ui.set_max_width(ui.available_width());
+                render_timeline_rows(ui, rows, action);
             });
     });
 }
 
 fn render_timeline_rows(
     ui: &mut egui::Ui,
-    chronological: &[TextHistoryRow],
+    rows: &[TextHistoryRow],
     action: &mut Option<TextHistoryAction>,
 ) {
-    let anchors = timeline_now_line_anchors(chronological);
+    let anchors = timeline_now_line_anchors(rows);
 
-    for row in chronological.iter().rev() {
+    for row in rows {
         if anchors.contains(&(row.buffer_id, row.entry_id)) {
             render_now_line(ui);
         }
@@ -344,10 +383,9 @@ fn render_timeline_rows(
 }
 
 /// Each buffer with a mixed applied/undone state contributes one Now-line in
-/// the global Timeline, anchored to its newest applied entry. Rendered in
-/// newest-first order, the Now-line therefore appears just above that row,
-/// separating the buffer's redo targets (newer, above) from its applied
-/// entries (older, below).
+/// the global Timeline, anchored to its newest applied entry. Rows are already
+/// newest-first, so the Now-line appears just above that row, separating the
+/// buffer's redo targets (newer, above) from its applied entries (older, below).
 fn timeline_now_line_anchors(rows: &[TextHistoryRow]) -> HashSet<(BufferId, u64)> {
     let mut newest_applied: HashMap<BufferId, u64> = HashMap::new();
     let mut has_undone: HashSet<BufferId> = HashSet::new();
@@ -355,9 +393,7 @@ fn timeline_now_line_anchors(rows: &[TextHistoryRow]) -> HashSet<(BufferId, u64)
         if row.undone {
             has_undone.insert(row.buffer_id);
         } else {
-            // rows arrive in chronological order, so the last write per buffer
-            // is the newest applied entry for that buffer.
-            newest_applied.insert(row.buffer_id, row.entry_id);
+            newest_applied.entry(row.buffer_id).or_insert(row.entry_id);
         }
     }
     newest_applied
@@ -367,7 +403,7 @@ fn timeline_now_line_anchors(rows: &[TextHistoryRow]) -> HashSet<(BufferId, u64)
 }
 
 fn newest_applied_index(rows: &[TextHistoryRow]) -> Option<usize> {
-    rows.iter().rposition(|row| !row.undone)
+    rows.iter().position(|row| !row.undone)
 }
 
 fn render_by_file(
@@ -385,11 +421,12 @@ fn render_by_file(
             return;
         }
         egui::ScrollArea::vertical()
-            .id_salt(widget_ids::local(ui, "text_history.scroll.by_file"))
+            .id_salt(widget_ids::scroll_id(ui, "text_history.scroll.by_file"))
             .auto_shrink([false, false])
             .max_height(ui.available_height())
             .min_scrolled_height(TEXT_HISTORY_LIST_MIN_HEIGHT)
             .show(ui, |ui| {
+                ui.set_max_width(ui.available_width());
                 for (index, group) in groups.iter().enumerate() {
                     render_file_group(ui, group, action);
                     if index + 1 < groups.len() {
@@ -444,7 +481,10 @@ fn render_file_header_pill(
         .corner_radius(egui::CornerRadius::same(HISTORY_PILL_CORNER_RADIUS))
         .inner_margin(egui::Margin::same(HISTORY_PILL_INNER_MARGIN))
         .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
+            let content_width = ui.available_width();
+            ui.set_width(content_width);
+            ui.set_min_width(content_width);
+            ui.set_max_width(content_width);
             let mut toggle_requested = false;
             let mut group_response = None;
 
@@ -470,16 +510,15 @@ fn render_file_header_pill(
                 }
 
                 let label_width = (ui.available_width() - 96.0).max(120.0);
-                let response = ui.add_sized(
-                    egui::vec2(label_width, 24.0),
-                    egui::Button::new(
-                        egui::RichText::new(&group.label)
-                            .size(13.0)
-                            .color(callout::text(ui)),
-                    )
-                    .fill(egui::Color32::TRANSPARENT)
-                    .stroke(egui::Stroke::NONE),
-                );
+                let response = truncated_label(
+                    ui,
+                    &group.label,
+                    label_width,
+                    13.0,
+                    callout::text(ui),
+                    egui::Sense::click(),
+                )
+                .on_hover_text(&group.label);
                 group_response = Some(response);
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -517,8 +556,8 @@ fn render_file_history_rows(
 }
 
 fn per_file_now_line_insert_index(rows: &[TextHistoryRow]) -> Option<usize> {
-    let insert_index = newest_applied_index(rows)?.saturating_add(1);
-    (insert_index < rows.len()).then_some(insert_index)
+    let insert_index = newest_applied_index(rows)?;
+    (insert_index > 0).then_some(insert_index)
 }
 
 fn render_row(ui: &mut egui::Ui, row: &TextHistoryRow, action: &mut Option<TextHistoryAction>) {
@@ -580,7 +619,10 @@ fn history_pill(ui: &mut egui::Ui, row: &TextHistoryRow) -> egui::Response {
         .corner_radius(egui::CornerRadius::same(HISTORY_PILL_CORNER_RADIUS))
         .inner_margin(egui::Margin::same(HISTORY_PILL_INNER_MARGIN))
         .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
+            let content_width = ui.available_width();
+            ui.set_width(content_width);
+            ui.set_min_width(content_width);
+            ui.set_max_width(content_width);
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(row.icon)
@@ -589,16 +631,25 @@ fn history_pill(ui: &mut egui::Ui, row: &TextHistoryRow) -> egui::Response {
                 );
                 ui.add_space(8.0);
                 ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new(&row.title)
-                            .size(14.0)
-                            .color(title_color),
-                    );
-                    ui.label(
-                        egui::RichText::new(&row.detail)
-                            .size(12.0)
-                            .color(muted_color),
-                    );
+                    let text_width = ui.available_width().max(0.0);
+                    truncated_label(
+                        ui,
+                        &row.title,
+                        text_width,
+                        14.0,
+                        title_color,
+                        egui::Sense::hover(),
+                    )
+                    .on_hover_text(&row.title);
+                    truncated_label(
+                        ui,
+                        &row.detail,
+                        text_width,
+                        12.0,
+                        muted_color,
+                        egui::Sense::hover(),
+                    )
+                    .on_hover_text(&row.detail);
                 });
             });
         });
@@ -609,6 +660,22 @@ fn history_pill(ui: &mut egui::Ui, row: &TextHistoryRow) -> egui::Response {
         frame_id,
         egui::Sense::click(),
         "text_history.row.pill",
+    )
+}
+
+fn truncated_label(
+    ui: &mut egui::Ui,
+    text: &str,
+    width: f32,
+    size: f32,
+    color: egui::Color32,
+    sense: egui::Sense,
+) -> egui::Response {
+    ui.add_sized(
+        egui::vec2(width, 0.0),
+        egui::Label::new(egui::RichText::new(text).size(size).color(color))
+            .truncate()
+            .sense(sense),
     )
 }
 
@@ -650,26 +717,41 @@ fn render_now_line(ui: &mut egui::Ui) {
 }
 
 fn read_active_tab(ctx: &egui::Context) -> HistoryTab {
-    let id = widget_ids::global("text_history.active_tab");
+    let id = widget_ids::ctx_key("text_history.active_tab");
     ctx.data_mut(|data| data.get_persisted::<u8>(id))
         .and_then(tab_from_persisted)
         .unwrap_or(HistoryTab::Timeline)
 }
 
 fn write_active_tab(ctx: &egui::Context, tab: HistoryTab) {
-    let id = widget_ids::global("text_history.active_tab");
+    let id = widget_ids::ctx_key("text_history.active_tab");
     ctx.data_mut(|data| data.insert_persisted(id, tab_to_persisted(tab)));
 }
 
 fn read_follow_focus(ctx: &egui::Context) -> bool {
-    let id = widget_ids::global("text_history.follow_undo");
+    let id = widget_ids::ctx_key("text_history.follow_undo");
     ctx.data_mut(|data| data.get_persisted::<bool>(id))
         .unwrap_or(true)
 }
 
 fn write_follow_focus(ctx: &egui::Context, follow: bool) {
-    let id = widget_ids::global("text_history.follow_undo");
+    let id = widget_ids::ctx_key("text_history.follow_undo");
     ctx.data_mut(|data| data.insert_persisted(id, follow));
+}
+
+fn tab_from_persisted(value: u8) -> Option<HistoryTab> {
+    match value {
+        0 => Some(HistoryTab::Timeline),
+        1 => Some(HistoryTab::ByFile),
+        _ => None,
+    }
+}
+
+fn tab_to_persisted(tab: HistoryTab) -> u8 {
+    match tab {
+        HistoryTab::Timeline => 0,
+        HistoryTab::ByFile => 1,
+    }
 }
 
 #[cfg(test)]
@@ -703,11 +785,11 @@ mod tests {
 
     #[test]
     fn per_file_now_line_sits_between_applied_and_undone_rows() {
-        let rows = vec![row(false), row(false), row(true), row(true)];
+        let rows = vec![row(true), row(true), row(false), row(false)];
 
         let newest_applied = newest_applied_index(&rows);
 
-        assert_eq!(newest_applied, Some(1));
+        assert_eq!(newest_applied, Some(2));
         assert_eq!(per_file_now_line_insert_index(&rows), Some(2));
     }
 
@@ -725,7 +807,7 @@ mod tests {
     fn per_file_now_line_is_suppressed_when_everything_is_applied() {
         let rows = vec![row(false), row(false)];
 
-        assert_eq!(newest_applied_index(&rows), Some(1));
+        assert_eq!(newest_applied_index(&rows), Some(0));
         assert_eq!(per_file_now_line_insert_index(&rows), None);
     }
 
@@ -735,8 +817,8 @@ mod tests {
     }
 
     #[test]
-    fn per_file_groups_keep_rows_in_chronological_order() {
-        let entries = vec![
+    fn per_file_groups_keep_rows_in_reverse_chronological_order() {
+        let entries = [
             entry(1, 10, 1, "one"),
             entry(2, 11, 2, "other"),
             entry(3, 12, 1, "two"),
@@ -744,12 +826,25 @@ mod tests {
 
         let groups = file_groups_from_entries(entries.iter());
 
-        assert_eq!(group_entry_ids(&groups, 1), vec![1, 3]);
+        assert_eq!(group_entry_ids(&groups, 1), vec![3, 1]);
+    }
+
+    #[test]
+    fn per_file_groups_sort_by_latest_change_first() {
+        let entries = [
+            entry(1, 10, 1, "one"),
+            entry(2, 12, 2, "other"),
+            entry(3, 11, 1, "two"),
+        ];
+
+        let groups = file_groups_from_entries(entries.iter());
+
+        assert_eq!(group_buffer_ids(&groups), vec![2, 1]);
     }
 
     #[test]
     fn per_file_rows_preserve_buffer_id_when_entry_ids_collide() {
-        let entries = vec![entry(1, 10, 1, "one"), entry(1, 11, 2, "other")];
+        let entries = [entry(1, 10, 1, "one"), entry(1, 11, 2, "other")];
 
         let groups = file_groups_from_entries(entries.iter());
 
@@ -761,6 +856,7 @@ mod tests {
         TextHistoryRow {
             buffer_id: 0,
             entry_id: 0,
+            global_seq: 0,
             title: String::new(),
             detail: String::new(),
             icon: "",
@@ -772,6 +868,7 @@ mod tests {
         TextHistoryRow {
             buffer_id,
             entry_id,
+            global_seq: entry_id,
             title: String::new(),
             detail: String::new(),
             icon: "",
@@ -781,17 +878,17 @@ mod tests {
 
     #[test]
     fn timeline_now_line_anchors_one_per_buffer_in_mixed_state() {
-        // Buffer 1: entries 1 (applied), 2 (applied), 3 (undone)
-        // Buffer 2: entries 4 (applied), 5 (applied) — all applied, no anchor
-        // Buffer 3: entries 6 (undone), 7 (undone) — all undone, no anchor
+        // Buffer 1: entries 3 (undone), 2 (applied), 1 (applied)
+        // Buffer 2: entries 5 (applied), 4 (applied) — all applied, no anchor
+        // Buffer 3: entries 7 (undone), 6 (undone) — all undone, no anchor
         let rows = vec![
-            timeline_row(1, 1, false),
-            timeline_row(1, 2, false),
-            timeline_row(1, 3, true),
-            timeline_row(2, 4, false),
-            timeline_row(2, 5, false),
-            timeline_row(3, 6, true),
             timeline_row(3, 7, true),
+            timeline_row(3, 6, true),
+            timeline_row(2, 5, false),
+            timeline_row(2, 4, false),
+            timeline_row(1, 3, true),
+            timeline_row(1, 2, false),
+            timeline_row(1, 1, false),
         ];
 
         let anchors = timeline_now_line_anchors(&rows);
@@ -804,11 +901,11 @@ mod tests {
     fn timeline_now_line_anchors_multiple_buffers() {
         // Two buffers, both in mixed state — expect one anchor each.
         let rows = vec![
-            timeline_row(1, 1, false),
             timeline_row(1, 2, true),
-            timeline_row(2, 3, false),
-            timeline_row(2, 4, false),
+            timeline_row(1, 1, false),
             timeline_row(2, 5, true),
+            timeline_row(2, 4, false),
+            timeline_row(2, 3, false),
         ];
 
         let anchors = timeline_now_line_anchors(&rows);
@@ -825,10 +922,10 @@ mod tests {
         assert!(timeline_now_line_anchors(&rows).is_empty());
     }
 
-    fn entry(id: u64, seq: u64, buffer_id: u64, summary: &str) -> TextHistoryEntryView {
+    fn entry(id: u64, global_seq: u64, buffer_id: u64, summary: &str) -> TextHistoryEntryView {
         TextHistoryEntryView {
             id,
-            seq,
+            global_seq,
             buffer_id,
             label: format!("file-{buffer_id}"),
             source: PieceSource::Edit,
@@ -849,6 +946,10 @@ mod tests {
             .unwrap_or_default()
     }
 
+    fn group_buffer_ids(groups: &[TextHistoryFileGroup]) -> Vec<u64> {
+        groups.iter().map(|group| group.buffer_id).collect()
+    }
+
     fn group_targets(groups: &[TextHistoryFileGroup], buffer_id: u64) -> Vec<(u64, u64)> {
         groups
             .iter()
@@ -861,20 +962,5 @@ mod tests {
                     .collect()
             })
             .unwrap_or_default()
-    }
-}
-
-fn tab_from_persisted(value: u8) -> Option<HistoryTab> {
-    match value {
-        0 => Some(HistoryTab::Timeline),
-        1 => Some(HistoryTab::ByFile),
-        _ => None,
-    }
-}
-
-fn tab_to_persisted(tab: HistoryTab) -> u8 {
-    match tab {
-        HistoryTab::Timeline => 0,
-        HistoryTab::ByFile => 1,
     }
 }

@@ -265,11 +265,11 @@ impl ScratchpadApp {
                 tab.buffers().filter_map(move |buffer| {
                     buffer
                         .document()
-                        .oldest_history_seq()
-                        .map(|seq| (seq, tab_index, buffer.id))
+                        .oldest_history_global_seq()
+                        .map(|global_seq| (global_seq, tab_index, buffer.id))
                 })
             })
-            .min_by_key(|(seq, _, buffer_id)| (*seq, *buffer_id))
+            .min_by_key(|(global_seq, _, buffer_id)| (*global_seq, *buffer_id))
             .map(|(_, tab_index, buffer_id)| (tab_index, buffer_id))
     }
 }

@@ -3,6 +3,7 @@ pub mod capacity_metrics;
 pub mod chrome;
 pub mod color_contrast;
 pub mod commands;
+pub mod diagnostics;
 pub mod domain;
 pub mod fonts;
 pub mod memory_budget;

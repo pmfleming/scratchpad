@@ -67,7 +67,7 @@ impl ScratchpadApp {
         self.text_history_entries()
             .into_iter()
             .filter(|entry| entry.buffer_id == buffer_id && !entry.undone)
-            .max_by_key(|entry| entry.seq)
+            .max_by_key(|entry| entry.global_seq)
             .map(|entry| entry.id)
     }
 
@@ -75,7 +75,7 @@ impl ScratchpadApp {
         self.text_history_entries()
             .into_iter()
             .filter(|entry| !entry.undone)
-            .max_by_key(|entry| entry.seq)
+            .max_by_key(|entry| entry.global_seq)
             .map(|entry| entry.summary)
     }
 
@@ -83,7 +83,7 @@ impl ScratchpadApp {
         self.text_history_entries()
             .into_iter()
             .filter(|entry| !entry.undone)
-            .max_by_key(|entry| entry.seq)
+            .max_by_key(|entry| entry.global_seq)
             .map(|entry| entry.edit_count)
     }
 
@@ -91,7 +91,7 @@ impl ScratchpadApp {
         self.text_history_entries()
             .into_iter()
             .filter(|entry| !entry.undone)
-            .max_by_key(|entry| entry.seq)
+            .max_by_key(|entry| entry.global_seq)
             .map(|entry| entry.first_inserted_text)
     }
 
@@ -101,7 +101,7 @@ impl ScratchpadApp {
             .iter()
             .flat_map(|tab| tab.buffers().flat_map(entries_for_buffer))
             .collect::<Vec<_>>();
-        entries.sort_by_key(|entry| (entry.seq, entry.buffer_id));
+        sort_text_history_entries(&mut entries);
         entries
     }
 
@@ -417,5 +417,48 @@ impl ScratchpadApp {
             "{action} last text operation in {active_buffer_label}."
         ));
         true
+    }
+}
+
+fn sort_text_history_entries(entries: &mut [TextHistoryEntryView]) {
+    entries.sort_by_key(|entry| (entry.global_seq, entry.buffer_id, entry.id));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sort_text_history_entries;
+    use crate::app::domain::{BufferId, PieceSource};
+    use crate::app::text_history::TextHistoryEntryView;
+
+    #[test]
+    fn text_history_sort_uses_global_sequence_before_entry_id() {
+        let mut entries = vec![entry(30, 10, 1), entry(1, 20, 2)];
+
+        sort_text_history_entries(&mut entries);
+
+        assert_eq!(
+            entries
+                .iter()
+                .rev()
+                .map(|entry| (entry.buffer_id, entry.id))
+                .collect::<Vec<_>>(),
+            vec![(2, 1), (1, 30)]
+        );
+    }
+
+    fn entry(id: u64, global_seq: u64, buffer_id: BufferId) -> TextHistoryEntryView {
+        TextHistoryEntryView {
+            id,
+            global_seq,
+            buffer_id,
+            label: format!("file-{buffer_id}"),
+            source: PieceSource::Edit,
+            summary: String::new(),
+            undone: false,
+            replayable: true,
+            edit_count: 1,
+            first_deleted_text: String::new(),
+            first_inserted_text: String::new(),
+        }
     }
 }

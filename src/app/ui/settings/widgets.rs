@@ -285,7 +285,13 @@ pub(super) fn clickable_card_header(
     add_trailing: impl FnOnce(&mut egui::Ui),
 ) -> egui::Response {
     let inner = card_header(ui, icon, title, description, add_trailing);
-    ui.interact(inner.response.rect, id, egui::Sense::click())
+    widget_ids::interact(
+        ui,
+        inner.response.rect,
+        id,
+        egui::Sense::click(),
+        "settings_card_header",
+    )
 }
 
 pub(super) fn card_header(

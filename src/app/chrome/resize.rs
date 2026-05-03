@@ -12,7 +12,7 @@ pub fn handle_window_resize(ctx: &egui::Context) -> bool {
 
     let screen_rect = ctx.input(|input| input.content_rect());
     let content_rect_changed = request_repaint_after_content_rect_change(ctx, screen_rect);
-    egui::Area::new(widget_ids::global("window_resize_handles"))
+    widget_ids::area("window_resize_handles")
         .fixed_pos(screen_rect.min)
         .order(egui::Order::Foreground)
         .interactable(false)
@@ -22,7 +22,7 @@ pub fn handle_window_resize(ctx: &egui::Context) -> bool {
 }
 
 fn request_repaint_after_content_rect_change(ctx: &egui::Context, screen_rect: Rect) -> bool {
-    let rect_id = widget_ids::global("window_content_rect");
+    let rect_id = widget_ids::ctx_key("window_content_rect");
     let changed = ctx.data_mut(|data| {
         let previous = data.get_persisted::<Rect>(rect_id);
         data.insert_persisted(rect_id, screen_rect);

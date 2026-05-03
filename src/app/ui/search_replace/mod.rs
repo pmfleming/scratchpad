@@ -29,35 +29,37 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         egui::vec2(SEARCH_DIALOG_WIDTH, SEARCH_DIALOG_HEIGHT),
     );
 
-    egui::Area::new(widget_ids::global("search_dialog_overlay"))
+    widget_ids::area("search_dialog_overlay")
         .order(egui::Order::Foreground)
         .constrain(true)
         .movable(true)
         .default_pos(default_pos)
         .show(ui.ctx(), |ui| {
-            ui.set_width(SEARCH_DIALOG_WIDTH);
-            ui.set_min_width(SEARCH_DIALOG_WIDTH);
-            ui.set_max_width(SEARCH_DIALOG_WIDTH);
-            let inner = callout::frame(ui).show(ui, |ui| {
-                settings::apply_dialog_typography(ui);
-                callout::apply_spacing(ui);
-                ui.spacing_mut().item_spacing = egui::vec2(8.0, 12.0);
+            widget_ids::feature_scope(ui, "search_dialog", |ui| {
+                ui.set_width(SEARCH_DIALOG_WIDTH);
+                ui.set_min_width(SEARCH_DIALOG_WIDTH);
+                ui.set_max_width(SEARCH_DIALOG_WIDTH);
+                let inner = callout::frame(ui).show(ui, |ui| {
+                    settings::apply_dialog_typography(ui);
+                    callout::apply_spacing(ui);
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 12.0);
 
-                if render_search_header(ui) {
-                    actions.close_requested = true;
-                }
-                ui.add_space(4.0);
+                    if render_search_header(ui) {
+                        actions.close_requested = true;
+                    }
+                    ui.add_space(4.0);
 
-                controls::show_search_controls(
-                    ui,
-                    &mut state,
-                    &mut actions,
-                    find_input_id,
-                    replace_input_id,
-                );
-                results::show_search_results(ui, &state, &mut actions);
+                    controls::show_search_controls(
+                        ui,
+                        &mut state,
+                        &mut actions,
+                        find_input_id,
+                        replace_input_id,
+                    );
+                    results::show_search_results(ui, &state, &mut actions);
+                });
+                callout::mark_scroll_blocker_if_hovered(ui.ctx(), &inner.response);
             });
-            callout::mark_scroll_blocker_if_hovered(ui.ctx(), &inner.response);
         });
 
     apply_search_inputs(app, &state);

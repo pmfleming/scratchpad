@@ -30,26 +30,28 @@ pub(super) fn show_tab_region(
     let mut visible_tab_indices = HashSet::new();
     let mut outcome = TabStripOutcome::default();
 
-    ui.allocate_ui_with_layout(
-        egui::vec2(layout.tab_area_width, TAB_HEIGHT),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            tab_drag::sync_drag_state(ui);
-            ui.spacing_mut().item_spacing.x = 0.0;
-            let drop_zones = collect_tab_drop_zones(
-                ctx,
-                ui,
-                app,
-                layout,
-                duplicate_name_counts,
-                &mut visible_tab_indices,
-                &mut outcome,
-            );
-            apply_tab_drag_feedback(ui, app, &drop_zones, &mut outcome);
-            render_new_tab_action(ui, app, layout.spacing);
-            show_drag_region(ctx, ui, layout.drag_width);
-        },
-    );
+    widget_ids::feature_scope(ui, "tab_strip_horizontal", |ui| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(layout.tab_area_width, TAB_HEIGHT),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                tab_drag::sync_drag_state(ui);
+                ui.spacing_mut().item_spacing.x = 0.0;
+                let drop_zones = collect_tab_drop_zones(
+                    ctx,
+                    ui,
+                    app,
+                    layout,
+                    duplicate_name_counts,
+                    &mut visible_tab_indices,
+                    &mut outcome,
+                );
+                apply_tab_drag_feedback(ui, app, &drop_zones, &mut outcome);
+                render_new_tab_action(ui, app, layout.spacing);
+                show_drag_region(ctx, ui, layout.drag_width);
+            },
+        );
+    });
 
     outcome
 }
@@ -177,7 +179,7 @@ fn show_scrolling_tab_strip(
     visible_tab_indices: &mut HashSet<usize>,
     outcome: &mut TabStripOutcome,
 ) -> Option<TabDropZone> {
-    let scroll_area_id = widget_ids::local(ui, "tab_strip");
+    let scroll_area_id = widget_ids::scroll_id(ui, "tab_strip");
     let entries = allocate_tab_strip_entries(
         ui,
         app,

@@ -1,4 +1,5 @@
 use super::{AppSurface, ScratchpadApp, SearchState};
+use crate::app::diagnostics;
 use crate::app::domain::TabManager;
 use crate::app::services::background_io::spawn_background_io_worker;
 use crate::app::services::file_controller::FileController;
@@ -74,6 +75,8 @@ impl ScratchpadApp {
         startup_options: StartupOptions,
         runtime_background_startup: bool,
     ) -> Self {
+        diagnostics::initialize(diagnostics::error_log_path(session_store.root()));
+
         let (background_io_tx, background_io_rx) = spawn_background_io_worker();
         let mut app = Self {
             tab_manager: TabManager::default(),

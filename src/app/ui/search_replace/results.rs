@@ -29,7 +29,7 @@ pub(super) fn show_search_results(
     let empty_message = empty_message(state);
 
     egui::ScrollArea::vertical()
-        .id_salt(widget_ids::local(ui, "search_results_list"))
+        .id_salt(widget_ids::scroll_id(ui, "search_results_list"))
         .max_height(results_height)
         .min_scrolled_height(results_height)
         .auto_shrink([false, false])
@@ -112,16 +112,19 @@ fn show_result_group(
     }
 
     ui.add_space(SEARCH_RESULT_LINE_SPACING);
-    ui.indent(("search_result_indent", group.buffer_id), |ui| {
-        for (index, entry) in group.entries.iter().enumerate() {
-            if show_match_pill(ui, entry).clicked() {
-                actions.selected_match_index = Some(entry.match_index);
+    ui.indent(
+        widget_ids::local(ui, ("search_result_indent", group.buffer_id)),
+        |ui| {
+            for (index, entry) in group.entries.iter().enumerate() {
+                if show_match_pill(ui, entry).clicked() {
+                    actions.selected_match_index = Some(entry.match_index);
+                }
+                if index + 1 < group.entries.len() {
+                    ui.add_space(SEARCH_RESULT_LINE_SPACING);
+                }
             }
-            if index + 1 < group.entries.len() {
-                ui.add_space(SEARCH_RESULT_LINE_SPACING);
-            }
-        }
-    });
+        },
+    );
 }
 
 fn show_group_pill(

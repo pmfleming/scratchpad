@@ -2,7 +2,8 @@ use super::{
     ByteSpan, DocumentSnapshot, LineEndingStyle, PersistedCursorRange, PersistedHistoryEdit,
     PersistedHistoryEntry, PieceHistoryEdit, PieceHistoryEdits, PieceHistoryEntry,
     PieceHistoryFlags, PieceSource, PieceTreeLite, TEXT_HISTORY_COALESCE_WINDOW, TextHistoryBudget,
-    fingerprint_parts, platform_default_line_ending,
+    fingerprint_parts, next_text_history_global_seq, platform_default_line_ending,
+    register_text_history_global_seq,
 };
 use crate::app::capacity_metrics;
 use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange, OperationRecord};
@@ -14,8 +15,7 @@ use std::time::Instant;
 /// After a soft divider (`,` `;` `:`) the entry is sealed only if the next
 /// keystroke arrives later than this. Inside this window the entry keeps
 /// growing past the soft boundary so a continuous typing burst stays one entry.
-const TEXT_HISTORY_SOFT_DIVIDER_PAUSE: std::time::Duration =
-    std::time::Duration::from_millis(400);
+const TEXT_HISTORY_SOFT_DIVIDER_PAUSE: std::time::Duration = std::time::Duration::from_millis(400);
 
 fn is_hard_divider(ch: char) -> bool {
     matches!(ch, '.' | '?' | '!' | '\n' | '\r')
@@ -168,8 +168,8 @@ impl TextDocument {
         self.history.iter().map(PieceHistoryEntry::byte_cost).sum()
     }
 
-    pub fn oldest_history_seq(&self) -> Option<u64> {
-        self.history.first().map(|entry| entry.seq)
+    pub fn oldest_history_global_seq(&self) -> Option<u64> {
+        self.history.first().map(|entry| entry.global_seq)
     }
 
     pub fn drop_oldest_history_entry(&mut self) -> Option<PieceHistoryEntry> {
@@ -574,7 +574,7 @@ impl TextDocument {
     fn export_history_entry(&self, entry: &PieceHistoryEntry) -> PersistedHistoryEntry {
         PersistedHistoryEntry {
             id: entry.id,
-            seq: entry.seq,
+            global_seq: entry.global_seq,
             source: entry.source,
             visible_generation_before: entry.visible_generation_before,
             visible_generation_after: entry.visible_generation_after,
@@ -637,9 +637,10 @@ impl TextDocument {
         let restored_fingerprint = self.fingerprint_for_history_edits(&edits);
         let mut flags = persisted.flags;
         flags.replayable &= all_payloads && restored_fingerprint == persisted.fingerprint;
+        register_text_history_global_seq(persisted.global_seq);
         PieceHistoryEntry {
             id: persisted.id,
-            seq: persisted.seq,
+            global_seq: persisted.global_seq,
             source: persisted.source,
             visible_generation_before: persisted.visible_generation_before,
             visible_generation_after: persisted.visible_generation_after,
@@ -731,7 +732,7 @@ impl TextDocument {
         self.latest_history_update_at = Some(Instant::now());
         let entry = PieceHistoryEntry {
             id: self.next_history_id,
-            seq: self.next_history_id,
+            global_seq: next_text_history_global_seq(),
             source,
             visible_generation_before: generation_before,
             visible_generation_after: generation_after,
@@ -887,6 +888,7 @@ impl TextDocument {
         latest.edits = edits;
         latest.next_selection = merged_record.next_selection;
         latest.visible_generation_after = self.piece_tree.generation().min(u32::MAX as u64) as u32;
+        latest.global_seq = next_text_history_global_seq();
         latest.fingerprint = fingerprint;
         latest.summary = operation_summary(latest.source, merged_record);
         self.latest_history_update_at = Some(now);

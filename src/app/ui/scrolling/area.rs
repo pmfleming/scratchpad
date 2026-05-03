@@ -1,5 +1,7 @@
 use eframe::egui::{self, Id, Rect, Sense, Ui, UiBuilder, Vec2, epaint::Shape, pos2, vec2};
 
+use crate::app::ui::widget_ids;
+
 use super::source::ScrollSource;
 use super::state::{ScrollState, ScrollbarDragState, finite_vec2};
 use super::target::ScrollbarPolicy;
@@ -108,7 +110,13 @@ impl ScrollArea {
         apply_pending_target(&mut state, self.source, inner_rect);
 
         // Hover gates wheel/scrollbar input.
-        let outer_response = ui.interact(outer_rect, self.id.with("__outer"), Sense::hover());
+        let outer_response = widget_ids::interact(
+            ui,
+            outer_rect,
+            self.id.with("__outer"),
+            Sense::hover(),
+            "scroll_area_outer",
+        );
 
         // Mouse wheel.
         let prev_offset = state.offset;
@@ -405,7 +413,7 @@ fn paint_and_handle_scrollbar(
     } else {
         Sense::hover()
     };
-    let response = ui.interact(bar_rect, id, sense);
+    let response = widget_ids::interact(ui, bar_rect, id, sense, "scrollbar");
 
     if interactive {
         handle_scrollbar_drag(ui, &response, bar_rect, axis, state, &geometry);

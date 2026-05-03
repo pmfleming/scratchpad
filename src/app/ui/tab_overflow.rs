@@ -58,30 +58,32 @@ pub(crate) fn show_overflow_button(
     _duplicate_name_counts: &HashMap<String, usize>,
 ) -> OverflowMenuOutcome {
     let mut outcome = OverflowMenuOutcome::default();
-    let overflow_popup_id = widget_ids::local(ui, "tab_overflow_popup");
-    let overflow_button_response = overflow_button(ui);
-    toggle_overflow_popup(overflow_popup_open, &overflow_button_response);
+    widget_ids::feature_scope(ui, "tab_overflow", |ui| {
+        let overflow_popup_id = widget_ids::local(ui, "tab_overflow_popup");
+        let overflow_button_response = overflow_button(ui);
+        toggle_overflow_popup(overflow_popup_open, &overflow_button_response);
 
-    let (anchor, pivot) = overflow_popup_anchor(app, overflow_button_response.rect);
-    let popup_request = OverflowPopupRequest {
-        app,
-        visible_tab_indices,
-        overflow_popup_id,
-        anchor,
-        pivot,
-    };
+        let (anchor, pivot) = overflow_popup_anchor(app, overflow_button_response.rect);
+        let popup_request = OverflowPopupRequest {
+            app,
+            visible_tab_indices,
+            overflow_popup_id,
+            anchor,
+            pivot,
+        };
 
-    if let Some(popup_response) =
-        show_overflow_popup(ctx, popup_request, overflow_popup_open, &mut outcome)
-        && should_close_overflow_popup(
-            ctx,
-            &overflow_button_response,
-            &popup_response,
-            outcome.close_requested_tab,
-        )
-    {
-        *overflow_popup_open = false;
-    }
+        if let Some(popup_response) =
+            show_overflow_popup(ctx, popup_request, overflow_popup_open, &mut outcome)
+            && should_close_overflow_popup(
+                ctx,
+                &overflow_button_response,
+                &popup_response,
+                outcome.close_requested_tab,
+            )
+        {
+            *overflow_popup_open = false;
+        }
+    });
 
     outcome
 }
@@ -117,7 +119,7 @@ fn show_overflow_popup(
     let popup_width = TAB_BUTTON_WIDTH;
     let popup_max_height = overflow_popup_max_height(ctx, request.anchor, request.pivot);
     let visible_row_count = overflow_row_count(request.app, request.visible_tab_indices) - 1;
-    let area_response = egui::Area::new(request.overflow_popup_id)
+    let area_response = widget_ids::area(("tab_overflow_popup", request.overflow_popup_id))
         .order(egui::Order::Foreground)
         .constrain(true)
         .fixed_pos(request.anchor)
@@ -134,7 +136,7 @@ fn show_overflow_popup(
                 };
 
                 egui::ScrollArea::vertical()
-                    .id_salt(request.overflow_popup_id.with("scroll"))
+                    .id_salt(widget_ids::child(request.overflow_popup_id, "scroll"))
                     .auto_shrink([false, false])
                     .min_scrolled_height(overflow_popup_target_height(
                         visible_row_count,

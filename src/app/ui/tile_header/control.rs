@@ -1,5 +1,6 @@
 use crate::app::theme::*;
 use crate::app::ui::transition;
+use crate::app::ui::widget_ids;
 use eframe::egui;
 
 pub enum TileControlStyle {
@@ -53,7 +54,7 @@ impl<'a> TileControl<'a> {
         id: egui::Id,
         sense: egui::Sense,
     ) -> egui::Response {
-        let response = ui.interact(rect, id, sense);
+        let response = widget_ids::interact(ui, rect, id, sense, "tile_header_control");
         let drag_in_progress = transition::suppress_interactive_chrome(ui.ctx());
 
         if self.visibility > 0.0 {

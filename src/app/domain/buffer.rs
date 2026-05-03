@@ -20,7 +20,8 @@ pub(crate) use document::{
 };
 pub(crate) use history::{
     ByteSpan, PieceHistoryEdit, PieceHistoryEdits, PieceHistoryEntry, PieceHistoryFlags,
-    TEXT_HISTORY_COALESCE_WINDOW, fingerprint_parts, preview_text,
+    TEXT_HISTORY_COALESCE_WINDOW, fingerprint_parts, next_text_history_global_seq, preview_text,
+    register_text_history_global_seq,
 };
 pub use history::{
     PersistedCursorRange, PersistedHistoryEdit, PersistedHistoryEntry, PieceSource,

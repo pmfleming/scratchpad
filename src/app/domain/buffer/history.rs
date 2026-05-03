@@ -3,8 +3,11 @@ use crate::app::ui::editor_content::native_editor::CursorRange;
 use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub type PieceHistoryEdits = SmallVec<[PieceHistoryEdit; 1]>;
+
+static NEXT_TEXT_HISTORY_GLOBAL_SEQ: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) const TEXT_HISTORY_COALESCE_WINDOW: std::time::Duration =
     std::time::Duration::from_millis(1200);
@@ -141,7 +144,7 @@ pub enum PieceHistoryEdit {
 #[derive(Clone, Debug)]
 pub struct PieceHistoryEntry {
     pub id: u64,
-    pub seq: u64,
+    pub global_seq: u64,
     pub source: PieceSource,
     pub visible_generation_before: u32,
     pub visible_generation_after: u32,
@@ -164,7 +167,7 @@ pub struct PersistedCursorRange {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PersistedHistoryEntry {
     pub id: u64,
-    pub seq: u64,
+    pub global_seq: u64,
     pub source: PieceSource,
     pub visible_generation_before: u32,
     pub visible_generation_after: u32,
@@ -303,6 +306,25 @@ impl PieceHistoryEntry {
             })
             .sum::<usize>();
         std::mem::size_of::<Self>() + edit_bytes
+    }
+}
+
+pub(crate) fn next_text_history_global_seq() -> u64 {
+    NEXT_TEXT_HISTORY_GLOBAL_SEQ.fetch_add(1, Ordering::Relaxed)
+}
+
+pub(crate) fn register_text_history_global_seq(seq: u64) {
+    let mut current = NEXT_TEXT_HISTORY_GLOBAL_SEQ.load(Ordering::Relaxed);
+    while current <= seq {
+        match NEXT_TEXT_HISTORY_GLOBAL_SEQ.compare_exchange_weak(
+            current,
+            seq.saturating_add(1),
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => break,
+            Err(next_current) => current = next_current,
+        }
     }
 }
 

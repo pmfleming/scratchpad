@@ -3,7 +3,7 @@ use crate::app::ui::widget_ids;
 use eframe::egui;
 
 fn chrome_transition_id() -> egui::Id {
-    widget_ids::global("chrome_transition_active")
+    widget_ids::ctx_key("chrome_transition_active")
 }
 
 pub(crate) fn set_chrome_transition_active(ctx: &egui::Context, active: bool) {

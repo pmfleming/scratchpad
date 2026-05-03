@@ -48,7 +48,7 @@ fn render_font_family_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         let mut selected_font = app.editor_font();
         fixed_width_control(ui, |ui| {
             let control_width = SettingsUi::control_width(ui);
-            egui::ComboBox::from_id_salt("settings_editor_font")
+            widget_ids::combo_box(ui, "settings_editor_font")
                 .selected_text(selected_font.label())
                 .width(control_width)
                 .show_ui(ui, |ui| {

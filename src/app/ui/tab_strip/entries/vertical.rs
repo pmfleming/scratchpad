@@ -13,14 +13,16 @@ pub(super) fn show_vertical_tab_region(
     app: &mut ScratchpadApp,
     duplicate_name_counts: &DuplicateNameCounts,
 ) -> TabStripOutcome {
-    tab_drag::sync_drag_state(ui);
     let mut outcome = TabStripOutcome::default();
 
-    super::super::actions::show_vertical_primary_actions(ui, app);
-    ui.add_space(8.0);
-    let drop_zones =
-        show_vertical_tab_entries_above_new_tab(ui, app, duplicate_name_counts, &mut outcome);
-    apply_tab_drag_feedback(ui, app, &drop_zones, &mut outcome);
+    widget_ids::feature_scope(ui, "tab_strip_vertical", |ui| {
+        tab_drag::sync_drag_state(ui);
+        super::super::actions::show_vertical_primary_actions(ui, app);
+        ui.add_space(8.0);
+        let drop_zones =
+            show_vertical_tab_entries_above_new_tab(ui, app, duplicate_name_counts, &mut outcome);
+        apply_tab_drag_feedback(ui, app, &drop_zones, &mut outcome);
+    });
     outcome
 }
 
@@ -70,7 +72,7 @@ fn show_scrolling_vertical_tab_list(
     duplicate_name_counts: &DuplicateNameCounts,
     outcome: &mut TabStripOutcome,
 ) -> Option<TabDropZone> {
-    let scroll_area_id = widget_ids::local(ui, "vertical_tab_list");
+    let scroll_area_id = widget_ids::scroll_id(ui, "vertical_tab_list");
     let entries = egui::ScrollArea::vertical()
         .id_salt(scroll_area_id)
         .auto_shrink([false, false])

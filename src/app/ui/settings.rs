@@ -35,9 +35,11 @@ pub(crate) const PREVIEW_QUOTES: [(&str, &str); 3] = [
 
 pub(crate) fn show_page(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     egui::CentralPanel::default().show_inside(ui, |ui| {
-        with_settings_page(ui, |ui, horizontal_overflow| {
-            render_page_body(ui, app, horizontal_overflow)
-        })
+        widget_ids::feature_scope(ui, "settings", |ui| {
+            with_settings_page(ui, |ui, horizontal_overflow| {
+                render_page_body(ui, app, horizontal_overflow)
+            })
+        });
     });
 }
 
@@ -48,7 +50,7 @@ fn with_settings_page(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui
         let surface_size = SettingsUi::page_surface_size(ui);
         let horizontal_overflow = SettingsUi::page_overflows_horizontally(viewport_size);
         egui::ScrollArea::both()
-            .id_salt(widget_ids::local(ui, "settings_page_scroll"))
+            .id_salt(widget_ids::scroll_id(ui, "settings_page_scroll"))
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.set_min_size(surface_size);

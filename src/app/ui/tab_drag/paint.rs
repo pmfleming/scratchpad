@@ -25,9 +25,9 @@ pub(super) fn paint_dragged_tab_ghost(
         egui::vec2(TAB_BUTTON_WIDTH, TAB_HEIGHT),
     )
     .translate(egui::vec2(0.0, 2.0));
-    let painter = ctx.layer_painter(egui::LayerId::new(
+    let painter = ctx.layer_painter(widget_ids::layer_id(
         egui::Order::Foreground,
-        widget_ids::global("dragged_tab_ghost"),
+        "dragged_tab_ghost",
     ));
     let visuals = &ctx.global_style().visuals;
 
@@ -91,9 +91,9 @@ pub(super) fn paint_tab_reorder_marker(ctx: &egui::Context, zone: &TabDropZone, 
         return;
     };
 
-    let painter = ctx.layer_painter(egui::LayerId::new(
+    let painter = ctx.layer_painter(widget_ids::layer_id(
         egui::Order::Foreground,
-        widget_ids::global("tab_reorder_marker"),
+        "tab_reorder_marker",
     ));
 
     match zone.axis {
@@ -130,9 +130,9 @@ pub(super) fn paint_tab_combine_target(
         return;
     };
 
-    let painter = ctx.layer_painter(egui::LayerId::new(
+    let painter = ctx.layer_painter(widget_ids::layer_id(
         egui::Order::Foreground,
-        widget_ids::global("tab_combine_target"),
+        "tab_combine_target",
     ));
     painter.rect_filled(target_rect.shrink(2.0), 4.0, tab_combine_highlight_color());
     painter.rect_stroke(

@@ -3,6 +3,14 @@ use super::word_boundary;
 use crate::app::domain::buffer::ByteSpan;
 use crate::app::domain::{BufferState, PieceSource};
 
+struct RecordedEdit {
+    new_cursor: CursorRange,
+    start_char: usize,
+    deleted_text: String,
+    inserted_text: String,
+    deleted_spans: Vec<ByteSpan>,
+}
+
 fn is_wordwise_modifier(modifiers: &eframe::egui::Modifiers) -> bool {
     modifiers.alt || modifiers.ctrl
 }
@@ -27,11 +35,13 @@ pub(super) fn apply_text_insert_with_source(
     record_edit(
         buffer,
         cursor,
-        new_cursor,
-        start,
-        deleted_text,
-        normalized,
-        deleted_spans,
+        RecordedEdit {
+            new_cursor,
+            start_char: start,
+            deleted_text,
+            inserted_text: normalized,
+            deleted_spans,
+        },
         source,
     );
     new_cursor
@@ -103,11 +113,13 @@ pub(super) fn apply_outdent(buffer: &mut BufferState, cursor: &CursorRange) -> O
     record_edit(
         buffer,
         cursor,
-        new_cursor,
-        line_start,
-        deleted_text,
-        String::new(),
-        deleted_spans,
+        RecordedEdit {
+            new_cursor,
+            start_char: line_start,
+            deleted_text,
+            inserted_text: String::new(),
+            deleted_spans,
+        },
         PieceSource::Edit,
     );
     Some(new_cursor)
@@ -202,11 +214,13 @@ fn delete_range_with_source(
     record_edit(
         buffer,
         cursor,
-        new_cursor,
-        start,
-        deleted_text.clone(),
-        String::new(),
-        deleted_spans,
+        RecordedEdit {
+            new_cursor,
+            start_char: start,
+            deleted_text: deleted_text.clone(),
+            inserted_text: String::new(),
+            deleted_spans,
+        },
         source,
     );
     (new_cursor, deleted_text)
@@ -229,22 +243,18 @@ fn extract_spans_and_delete_range(
 fn record_edit(
     buffer: &mut BufferState,
     cursor: &CursorRange,
-    new_cursor: CursorRange,
-    start_char: usize,
-    deleted_text: String,
-    inserted_text: String,
-    deleted_spans: Vec<ByteSpan>,
+    edit: RecordedEdit,
     source: PieceSource,
 ) {
     buffer.push_text_edit_operation_with_source(
         OperationRecord {
             previous_cursor: *cursor,
-            next_cursor: new_cursor,
+            next_cursor: edit.new_cursor,
             edits: vec![EditOperation {
-                start_char,
-                deleted_text,
-                inserted_text,
-                deleted_spans,
+                start_char: edit.start_char,
+                deleted_text: edit.deleted_text,
+                inserted_text: edit.inserted_text,
+                deleted_spans: edit.deleted_spans,
             }],
         },
         source,

@@ -87,7 +87,7 @@ pub(super) fn collected_dragged_indices(dragged_indices: &[usize], index: usize)
 }
 
 fn tab_drag_state_id() -> egui::Id {
-    widget_ids::global("tab_strip_drag_state")
+    widget_ids::ctx_key("tab_strip_drag_state")
 }
 
 fn current_tab_drag_state(ui: &egui::Ui) -> Option<TabDragState> {

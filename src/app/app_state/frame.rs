@@ -30,6 +30,7 @@ impl ScratchpadApp {
     }
 
     pub(super) fn prepare_frame(&mut self, ctx: &egui::Context) {
+        crate::app::diagnostics::begin_frame();
         if handle_window_resize(ctx) && self.overflow_popup_open {
             // Rebuild the overflow popup lazily against the resized viewport.
             self.overflow_popup_open = false;

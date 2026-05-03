@@ -1,25 +1,58 @@
+Widget ID policy assessment and implementation notes
 
-Honest assessment of [widget_ids.rs](src/app/ui/widget_ids.rs):
+**egui sanity check**
+- Local crate version: `eframe = "0.34.1"`, which uses `egui 0.34.1`.
+- egui provides the building blocks for safe ids, not a single function that automatically prevents all app-level id conflicts.
+- Useful egui APIs include `Ui::make_persistent_id`, `Ui::push_id`, container `id_salt` hooks, `Options::warn_on_id_clash`, and `Context::check_for_id_clash`.
+- egui still expects callers to provide unique salts/scopes. The app therefore needs a project-wide id vocabulary and audit policy.
 
-**What works well**
-- `local(ui, key)` and `scope(ui, key, …)` correctly incorporate the ui's id stack, so the same key inside different parent scopes resolves to different ids. That's the right protection against cross-region collisions.
-- Centralizing a `"scratchpad.widget"` namespace prefix is mildly nice for filtering vs egui internals.
-- `interact()` wrapper auto-runs `check_for_id_clash` so app-level interactive widgets get clash diagnostics.
+**Implemented helper vocabulary**
+- `ctx_key(key)`: persistent `Context::data` and memory keys.
+- `area_id(key)` / `area(key)`: overlay, popup, and `Area` roots.
+- `root_id(key)` / `layer_id(order, key)`: ids that must be independent of the current `Ui`.
+- `local(ui, key)`: persistent ids derived from the current `Ui` id stack.
+- `scroll_id(ui, key)`: `ScrollArea` salts derived from the current `Ui`.
+- `combo_box(ui, key)`: `ComboBox` construction with a scoped id.
+- `child(id, key)`: ids derived from an already-scoped parent id.
+- `feature_scope(ui, feature, ...)`: explicit top-level feature roots.
+- `scope(ui, key, ...)`: local child `Ui` scopes.
+- `interact(ui, rect, id, sense, kind)`: custom rect interactions plus debug clash tracking.
+- `track(ctx, id, rect, kind)`: direct debug tracking for wrappers that must interact outside `interact`.
 
-**Weaknesses**
-1. **`global(key)` is dangerously named.** It produces a context-level id with no parent scoping — two unrelated callers using `global("active_tab")` would collide silently. It's used for ctx.data persistence (active tab, drag state, areas), not for tree-positioned widgets. A name like `ctx_persistent` or `data_key` would prevent misuse.
-2. **The `ID_NAMESPACE` prefix doesn't add intra-app safety.** Adding "scratchpad.widget" to every key just shifts the id space; it doesn't prevent two parts of *this* app from picking the same key. The real safety comes from `local`/`scope` adding the ui stack.
-3. **Clash tracking is partial.** `check_for_id_clash` runs only on the explicit `widget_ids::interact` path. egui's native widgets (`Frame::show`, `Button`, `ScrollArea`) handle their own and only fire when `warn_on_id_clash` is on — which it is in debug. So clashes ARE getting reported globally; the helper just adds a hook on top.
-4. **No "section discriminator" pattern.** Nothing forces a caller to include "which tab/dialog am I in" when scoping. Today the row scope key is `("text_history.row", buffer_id, entry_id)`, identical between Timeline and ByFile. It only avoids collision because the parent `section.timeline` vs `section.by_file` scope wraps it. If a refactor flattens that wrapper, every row collides silently.
+The old broad `global(key)` helper has been removed. Context, area, layer, and local widget ids now use separate helper names so call sites have to declare the kind of id they are creating.
 
-**Is the helper *causing* the tab-switch flash?** Probably not directly. But (4) is a latent risk that could surface depending on future changes, and the current symptom suggests something in the same family.
+**Feature roots now explicit**
+- Status bar.
+- Settings.
+- Editor area.
+- Search dialog.
+- Text history dialog.
+- Tab overflow.
+- Horizontal tab strip.
+- Vertical tab strip.
 
-**My honest recommendation for *this* issue**
+Repeated subtrees use natural discriminators such as buffer id, view id, tab position, row id, popup id, and section name.
 
-I've been pattern-matching without proof. Before more guessing, the cheapest diagnostic: in debug, `check_for_id_clash` writes the colliding id and the rects to egui's logger when a clash fires — running the binary with `RUST_LOG=egui=warn` (or stderr capture) on a tab-switch will name the offending widget directly.
+**Strict widget checklist for new or audited UI blocks**
+- Top-level UI surfaces enter `widget_ids::feature_scope(...)` before internal widgets.
+- Repeated rows and controls wrap their subtree in `widget_ids::scope(...)` or derive ids from an already-scoped parent with `child(...)`.
+- `ui.interact(...)` is not used directly in app code; use `widget_ids::interact(...)`.
+- `Area::new`, `LayerId::new`, `ComboBox::from_id_salt`, `Ui::make_persistent_id`, and `Ui::push_id` are centralized in `widget_ids.rs`.
+- `ScrollArea` call sites must set `.id_salt(...)` from `widget_ids::scroll_id(...)` or another id derived from `widget_ids`.
+- `TextEdit` call sites must provide `.id(...)` / `.id_salt(...)` when focus or state can persist across frames.
+- Custom painted rows and icon controls must either use native egui widgets with scoped parents or use `widget_ids::interact(...)` for their hit target.
 
-Two options:
-- **(a)** You reproduce once with logging on, paste me the clash message, and I fix the named widget.
-- **(b)** I apply belt-and-braces hardening blind: include a `&'static str` tab discriminator in the row scope key, switch `render_now_line` to non-interactive `allocate_space` (drop the `Sense::hover` it doesn't use), and re-test.
+**App-code escape hatch removal**
+- Raw app-owned id APIs are intentionally centralized in `src/app/ui/widget_ids.rs`.
+- A unit test audits `src/app` and fails if app code reintroduces:
+  - `widget_ids::global`
+  - direct `ui.interact(...)`
+  - direct `.make_persistent_id(...)`
+  - direct `.push_id(...)`
+  - direct `egui::Area::new(...)`
+  - direct `egui::LayerId::new(...)`
+  - direct `ComboBox::from_id_salt(...)`
+- Remaining `.id_salt(...)` usage is allowed only when the value passed in comes from `widget_ids`.
 
-(a) is faster and correct; (b) is a guess that might mask the real issue. Which do you prefer?
+**Follow-up audit target**
+- If this policy is extended further, the next useful pass is custom `allocate_exact_size(..., Sense::click...)` responses. Several are native egui allocation responses rather than raw id constructors, but interactive custom-painted widgets should continue moving toward explicit `widget_ids::interact(...)` ids when audited.

@@ -111,7 +111,7 @@ fn render_theme_mode_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             let mut selected_mode = initial_selection;
             fixed_width_control(ui, |ui| {
                 let control_width = SettingsUi::control_width(ui);
-                egui::ComboBox::from_id_salt("settings_theme_mode")
+                widget_ids::combo_box(ui, "settings_theme_mode")
                     .selected_text(selected_mode.pill_label())
                     .width(control_width)
                     .show_ui(ui, |ui| {
@@ -171,7 +171,7 @@ fn render_tab_list_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             let mut selected_position = app.tab_list_position();
             fixed_width_control(ui, |ui| {
                 let control_width = SettingsUi::control_width(ui);
-                egui::ComboBox::from_id_salt("settings_tab_list_position")
+                widget_ids::combo_box(ui, "settings_tab_list_position")
                     .selected_text(tab_list_position_label(selected_position))
                     .width(control_width)
                     .show_ui(ui, |ui| {

@@ -10,7 +10,7 @@ pub(crate) struct TextHistoryCache {
 #[derive(Clone, Debug)]
 pub(crate) struct TextHistoryEntryView {
     pub(crate) id: u64,
-    pub(crate) seq: u64,
+    pub(crate) global_seq: u64,
     pub(crate) buffer_id: BufferId,
     pub(crate) label: String,
     pub(crate) source: PieceSource,
@@ -45,7 +45,7 @@ fn entry_view(
     let (deleted, inserted) = first_text_pair(buffer, entry);
     TextHistoryEntryView {
         id: entry.id,
-        seq: entry.seq,
+        global_seq: entry.global_seq,
         buffer_id,
         label: label.to_owned(),
         source: entry.source,

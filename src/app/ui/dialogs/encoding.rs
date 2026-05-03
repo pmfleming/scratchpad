@@ -4,7 +4,7 @@ use crate::app::services::file_controller::FileController;
 use crate::app::services::file_service::COMMON_TEXT_ENCODINGS;
 use crate::app::theme::{action_hover_bg, border, text_muted, text_primary};
 use crate::app::ui::search_replace::SEARCH_DIALOG_WIDTH;
-use crate::app::ui::{callout, settings};
+use crate::app::ui::{callout, settings, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, FILE_TEXT, FLOPPY_DISK, TRANSLATE, WARNING};
 
@@ -385,7 +385,7 @@ fn encoding_card_frame(ui: &egui::Ui) -> egui::Frame {
 
 fn render_encoding_combo(ui: &mut egui::Ui, selected_encoding: &mut String) {
     with_visual_overrides(ui, apply_encoding_combo_style, |ui| {
-        egui::ComboBox::from_id_salt("encoding_dialog_combo")
+        widget_ids::combo_box(ui, "encoding_dialog_combo")
             .selected_text(
                 egui::RichText::new(selected_encoding.as_str())
                     .size(13.5)

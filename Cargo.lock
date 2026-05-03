@@ -3231,6 +3231,7 @@ dependencies = [
  "egui-phosphor",
  "encoding_rs",
  "encoding_rs_io",
+ "log",
  "proc-macro2",
  "rand 0.10.0",
  "regex",

@@ -175,10 +175,12 @@ fn handle_tile_click(
     request: TileRenderRequest,
     actions: &mut Vec<TileAction>,
 ) -> egui::Response {
-    let tile_response = ui.interact(
+    let tile_response = widget_ids::interact(
+        ui,
         request.rect,
         widget_ids::local(ui, ("tile", request.tab_index, request.view_id)),
         egui::Sense::click(),
+        "editor_tile",
     );
     context_menu::activate_inactive_tile_on_secondary_click(app, &tile_response, request);
     if tile_response.clicked() {
@@ -285,7 +287,7 @@ fn take_previous_snapshot(tab: &mut WorkspaceTab, view_id: ViewId) -> Option<Dis
 }
 
 fn editor_scroll_id(view_id: ViewId) -> egui::Id {
-    widget_ids::global(("editor_scroll", view_id))
+    widget_ids::root_id(("editor_scroll", view_id))
 }
 
 fn show_editor_scroll_area(
@@ -568,7 +570,7 @@ fn drain_pending_scroll_intents(
 }
 
 fn sync_editor_scroll_state(ui: &egui::Ui, scroll_id: egui::Id, offset: egui::Vec2) {
-    let persistent_id = ui.make_persistent_id(scroll_id);
+    let persistent_id = widget_ids::local(ui, ("editor_scroll_state", scroll_id));
     let mut state = egui::scroll_area::State::load(ui.ctx(), persistent_id).unwrap_or_default();
     if state.offset != offset {
         state.offset = offset;

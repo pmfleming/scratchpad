@@ -35,7 +35,7 @@ fn render_opening_files_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         |ui| {
             fixed_width_control(ui, |ui| {
                 let control_width = SettingsUi::control_width(ui);
-                egui::ComboBox::from_id_salt("settings_opening_files")
+                widget_ids::combo_box(ui, "settings_opening_files")
                     .selected_text(file_open_pill_label(selected))
                     .width(control_width)
                     .show_ui(ui, |ui| {
