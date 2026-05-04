@@ -2,6 +2,7 @@ use super::FileController;
 use super::support::{DeferredBufferRefresh, LoadedFile};
 use crate::app::app_state::{PendingBackgroundAction, PendingOpenHereAction, ScratchpadApp};
 use crate::app::commands::AppCommand;
+use crate::app::diagnostics;
 use crate::app::domain::{SplitAxis, ViewId, WorkspaceTab};
 use crate::app::services::background_io::LoadedPathResult;
 use std::path::{Path, PathBuf};
@@ -139,7 +140,15 @@ impl FileController {
                     Self::mark_settings_buffer(app, &mut loaded_file.buffer);
                     pending_files.push(loaded_file);
                 }
-                Err(_) => outcomes.push(OpenHerePathOutcome::Failed),
+                Err(error) => {
+                    diagnostics::record_io_error(
+                        "open_here",
+                        Some(&loaded.path),
+                        "file_controller::open_here",
+                        &error,
+                    );
+                    outcomes.push(OpenHerePathOutcome::Failed);
+                }
             }
         }
 

@@ -1,3 +1,4 @@
+use crate::app::diagnostics;
 use crate::app::domain::buffer::{BufferTextMetadata, detected_text_format_and_metadata};
 use crate::app::domain::{
     BufferState, DiskFileState, DocumentSnapshot, EncodingSource, TextArtifactSummary,
@@ -79,7 +80,14 @@ pub struct FileContent {
 
 impl FileService {
     pub fn read_disk_state(path: &Path) -> io::Result<DiskFileState> {
-        let metadata = std::fs::metadata(path)?;
+        let metadata = std::fs::metadata(path).inspect_err(|error| {
+            diagnostics::record_io_error(
+                "read_disk_state",
+                Some(path),
+                "file_service::read_disk_state",
+                &error,
+            );
+        })?;
         let modified_millis = metadata
             .modified()
             .ok()
@@ -93,23 +101,55 @@ impl FileService {
     }
 
     pub fn read_file(path: &Path) -> io::Result<FileContent> {
-        let prefix = inspect_file_prefix(path)?;
+        let prefix = inspect_file_prefix(path).inspect_err(|error| {
+            diagnostics::record_io_error(
+                "read_file",
+                Some(path),
+                "file_service::read_file",
+                &error,
+            );
+        })?;
         read_file_content(
             path,
             prefix.encoding,
             prefix.has_bom,
             prefix.encoding_source,
         )
+        .inspect_err(|error| {
+            diagnostics::record_io_error(
+                "read_file",
+                Some(path),
+                "file_service::read_file",
+                &error,
+            );
+        })
     }
 
     pub fn read_file_with_encoding(path: &Path, encoding_name: &str) -> io::Result<FileContent> {
-        let prefix = inspect_file_prefix(path)?;
+        let prefix = inspect_file_prefix(path).inspect_err(|error| {
+            diagnostics::record_io_error_with_details(
+                "read_file_with_encoding",
+                Some(path),
+                "file_service::read_file_with_encoding",
+                &error,
+                [("encoding", encoding_name.to_owned())],
+            );
+        })?;
         read_file_content(
             path,
             resolve_encoding(encoding_name)?,
             prefix.has_bom,
             EncodingSource::ExplicitUserChoice,
         )
+        .inspect_err(|error| {
+            diagnostics::record_io_error_with_details(
+                "read_file_with_encoding",
+                Some(path),
+                "file_service::read_file_with_encoding",
+                &error,
+                [("encoding", encoding_name.to_owned())],
+            );
+        })
     }
 
     pub fn canonical_encoding_name(encoding_name: &str) -> io::Result<String> {
@@ -157,7 +197,15 @@ impl FileService {
     ) -> io::Result<()> {
         let encoding = resolve_encoding(&format.encoding_name)?;
         let bytes = write::encode_content(content, encoding, format.has_bom)?;
-        std::fs::write(path, bytes)
+        std::fs::write(path, bytes).inspect_err(|error| {
+            diagnostics::record_io_error_with_details(
+                "write_file_with_format",
+                Some(path),
+                "file_service::write_file_with_format",
+                &error,
+                [("encoding", format.encoding_name.clone())],
+            );
+        })
     }
 
     pub fn write_snapshot_with_format(
@@ -168,11 +216,28 @@ impl FileService {
         write_atomic_with(path, |file| {
             write::write_snapshot_to_writer(file, snapshot, format)
         })
+        .inspect_err(|error| {
+            diagnostics::record_io_error_with_details(
+                "write_snapshot_with_format",
+                Some(path),
+                "file_service::write_snapshot_with_format",
+                &error,
+                [("encoding", format.encoding_name.clone())],
+            );
+        })
     }
 
     pub fn write_snapshot_utf8(path: &Path, snapshot: &DocumentSnapshot) -> io::Result<()> {
         write_atomic_with(path, |file| {
             write::write_snapshot_utf8_to_writer(file, snapshot, false)
+        })
+        .inspect_err(|error| {
+            diagnostics::record_io_error(
+                "write_snapshot_utf8",
+                Some(path),
+                "file_service::write_snapshot_utf8",
+                &error,
+            );
         })
     }
 
@@ -193,7 +258,15 @@ impl FileService {
     }
 
     pub fn rename_path(from: &Path, to: &Path) -> io::Result<()> {
-        std::fs::rename(from, to)
+        std::fs::rename(from, to).inspect_err(|error| {
+            diagnostics::record_io_error_with_details(
+                "rename_path",
+                Some(from),
+                "file_service::rename_path",
+                &error,
+                [("target_path", to.display().to_string())],
+            );
+        })
     }
 }
 

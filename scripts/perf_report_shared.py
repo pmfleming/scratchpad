@@ -1,4 +1,6 @@
 import json
+import os
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -147,6 +149,19 @@ def matching_flamegraph_ids(benchmark_key: str) -> List[str]:
         if benchmark_key in config.get("benchmark_keys", []):
             matches.append(str(config["id"]))
     return matches
+
+
+def terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            capture_output=True,
+            text=True,
+        )
+        return
+    process.kill()
 
 
 def load_benchmark_metadata(default_threshold: float = 50.0) -> Dict[str, Dict[str, Any]]:

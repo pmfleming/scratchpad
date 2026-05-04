@@ -1,5 +1,6 @@
 use super::super::ScratchpadApp;
 use crate::app::commands::AppCommand;
+use crate::app::diagnostics;
 use crate::app::domain::{SplitAxis, SplitPath, ViewId, WorkspaceTab};
 use crate::app::services::file_controller::FileController;
 use crate::app::services::settings_store::FileOpenDisposition;
@@ -28,6 +29,12 @@ impl ScratchpadApp {
     pub fn open_user_manual(&mut self) {
         let path = self.user_manual_path().to_path_buf();
         if !path.is_file() {
+            diagnostics::record_io_error(
+                "open_user_manual",
+                Some(&path),
+                "workspace::lifecycle",
+                &"User manual not found",
+            );
             self.set_error_status(format!("User manual not found: {}", path.display()));
             return;
         }

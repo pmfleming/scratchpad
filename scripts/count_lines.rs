@@ -291,9 +291,10 @@ mod tests {
 
         let stats = count_lines_in_source(source, &excluded_test_lines(source, true));
 
-        assert_eq!(stats.files, 1);
-        assert_eq!(stats.total_lines, 2);
-        assert_eq!(stats.code_lines, 1);
+        assert_eq!(
+            (stats.files, stats.total_lines, stats.code_lines),
+            (1, 2, 1)
+        );
         assert_eq!(stats.blank_lines, 1);
         assert_eq!(stats.comment_lines, 0);
     }
@@ -304,8 +305,9 @@ mod tests {
 
         let stats = count_lines_in_source(source, &excluded_test_lines(source, true));
 
-        assert_eq!(stats.files, 1);
-        assert_eq!(stats.total_lines, 1);
-        assert_eq!(stats.code_lines, 1);
+        assert_eq!(
+            (stats.files, stats.total_lines, stats.code_lines),
+            (1, 1, 1)
+        );
     }
 }

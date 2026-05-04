@@ -13,6 +13,7 @@
         map: `../target/analysis/map.json?v=${viewerVersion}`,
         flamegraphs: `../target/analysis/flamegraphs.json?v=${viewerVersion}`,
         correctness: `../target/analysis/correctness_review.json?v=${viewerVersion}`,
+        appPackage: `/api/app-package?v=${viewerVersion}`,
     };
 
     const state = {
@@ -28,6 +29,7 @@
         map: null,
         flamegraphs: [],
         correctness: null,
+        appPackage: null,
         selectedModule: null,
         selectedFlamegraph: null,
         selectedRun: null,
@@ -39,7 +41,10 @@
         focusMode: false,
         overviewRiskMode: 'top',
         overviewRiskFilter: 'all',
+        qualityDistributionMode: 'counts',
+        cloneDistributionMode: 'counts',
         expandedQualityKey: null,
+        expandedCloneKey: null,
     };
 
     const formatNumber = new Intl.NumberFormat(undefined, {
@@ -95,6 +100,21 @@
 
     function metricCard(label, value) {
         return `<div class="metric-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
+    }
+
+    function activeProgressPill(run) {
+        if (!run) {
+            return `<div class="active-progress-pill"><span>Active Progress</span><strong>-</strong></div>`;
+        }
+        const progress = runProgress(run);
+        const task = run.current_task_id || run.status || "-";
+        const detail = run.current_task_detail ? `<em>${escapeHtml(run.current_task_detail)}</em>` : "";
+        return `<div class="active-progress-pill ${run.status === "running" || run.status === "queued" ? "is-running" : ""}">
+            <span>Active Progress</span>
+            <strong>${progress.done}/${progress.total}</strong>
+            <code>${escapeHtml(task)}</code>
+            ${detail}
+        </div>`;
     }
 
     function renderSummary(targetId, cards) {
@@ -1469,6 +1489,7 @@
             }));
 
         const tests = state.correctness?.tests || [];
+        const lastRun = state.correctness?.summary?.last_run;
         const testItems = tests
             .filter((t) => t.last_status === "failed" || t.last_status === "unknown")
             .slice(0, 5)
@@ -1476,6 +1497,15 @@
                 label: `<code>${escapeHtml(t.name || t.path)}</code>`,
                 value: `<span class="${t.last_status === "failed" ? "risk-bad" : "risk-warn"}">${escapeHtml(t.last_status)}</span>`,
             }));
+        if (lastRun?.status === "failed") {
+            testItems.unshift({
+                label: `<code>cargo test run</code>`,
+                value: `<span class="risk-bad">failed</span>`,
+            });
+            testItems.splice(5);
+        }
+
+        const diagnosticItems = commonDiagnosticItems();
 
         target.innerHTML = [
             renderTopListCard({
@@ -1496,7 +1526,33 @@
                 items: testItems,
                 emptyText: state.correctness ? "All tests passing." : "No test data.",
             }),
+            renderTopListCard({
+                title: "Top diagnostics",
+                subtitle: "Most common app package messages.",
+                items: diagnosticItems,
+                emptyText: state.appPackage ? "No diagnostics recorded." : "No app package data.",
+            }),
         ].join("");
+    }
+
+    function commonDiagnosticItems() {
+        const diagnostics = state.appPackage?.diagnostics || [];
+        const grouped = new Map();
+        diagnostics.forEach((item, index) => {
+            const message = String(item.message || item.operation || item.kind || "Unknown diagnostic").trim();
+            const key = message.toLowerCase();
+            const existing = grouped.get(key) || { message, count: 0, lastIndex: index };
+            existing.count += 1;
+            existing.lastIndex = index;
+            grouped.set(key, existing);
+        });
+        return [...grouped.values()]
+            .sort((a, b) => b.count - a.count || b.lastIndex - a.lastIndex)
+            .slice(0, 5)
+            .map((item) => ({
+                label: `<code>${escapeHtml(item.message)}</code>`,
+                value: `<span class="${item.count > 1 ? "risk-warn" : "risk-good"}">${formatNumber.format(item.count)}</span>`,
+            }));
     }
 
     function renderRunStrip() {
@@ -1691,7 +1747,7 @@
             metricCard("Running", running),
             metricCard("Failed", failed),
             metricCard("Latest", runs[0]?.status || "-"),
-            metricCard("Active Progress", activeRun ? runProgressLabel(activeRun) : "-"),
+            activeProgressPill(activeRun),
         ]);
         renderTable(
             "run-log-table",
@@ -1728,7 +1784,8 @@
         const progress = runProgress(run);
         if (!progress.total) return "-";
         const current = run.current_task_id ? ` · ${run.current_task_id}` : "";
-        return `${progress.done}/${progress.total}${current}`;
+        const detail = run.current_task_detail ? ` · ${run.current_task_detail}` : "";
+        return `${progress.done}/${progress.total}${current}${detail}`;
     }
 
     function renderRunProgress(run, density = "detail") {
@@ -1744,6 +1801,9 @@
         const current = run.current_task_id
             ? `<span class="run-progress__current">${escapeHtml(run.current_task_id)}</span>`
             : "";
+        const detail = run.current_task_detail
+            ? `<span class="run-progress__detail">${escapeHtml(run.current_task_detail)}</span>`
+            : "";
         return `<div class="run-progress run-progress--${density} ${statusClass}">
             <div class="run-progress__track" role="progressbar" aria-valuenow="${progress.percent}" aria-valuemin="0" aria-valuemax="100" aria-label="${escapeHtml(run.id)} progress">
                 <div class="run-progress__bar" style="width:${progress.percent}%"></div>
@@ -1754,6 +1814,7 @@
                 <span>${progress.percent}%</span>
             </div>
             ${current}
+            ${detail}
         </div>`;
     }
 
@@ -2334,6 +2395,23 @@
         }
     }
 
+    async function refreshAppPackage() {
+        const button = byId("app-package-refresh");
+        if (button) button.disabled = true;
+        try {
+            state.appPackage = await loadJson(`/api/app-package?v=${Date.now()}`);
+            byId("load-status").textContent = "Loaded app package.";
+            byId("load-detail").textContent = `Session root: ${state.appPackage.session_root || "unknown"}`;
+        } catch (error) {
+            state.appPackage = null;
+            byId("load-status").textContent = "App package unavailable.";
+            byId("load-detail").textContent = `Start with scripts/open-overview.ps1 to enable the local dashboard API. ${error.message}`;
+        } finally {
+            if (button) button.disabled = false;
+            renderAppPackage();
+        }
+    }
+
     async function refreshRuns() {
         try {
             const previousFinished = state.lastObservedFinishedRun;
@@ -2393,7 +2471,7 @@
     async function loadDefaults() {
         const status = byId("load-status");
         const detail = byId("load-detail");
-        const keys = ["catalog", "runs", "hotspots", "slowspots", "searchSpeed", "capacityReport", "resourceProfiles", "speedReport", "clones", "map", "flamegraphs", "correctness"];
+        const keys = ["catalog", "runs", "hotspots", "slowspots", "searchSpeed", "capacityReport", "resourceProfiles", "speedReport", "clones", "map", "flamegraphs", "correctness", "appPackage"];
         const fallbacks = {
             catalog: null,
             runs: [],
@@ -2407,6 +2485,7 @@
             map: null,
             flamegraphs: [],
             correctness: null,
+            appPackage: null,
         };
 
         const settled = await Promise.allSettled(keys.map((key) => loadJson(sources[key])));
@@ -2421,7 +2500,7 @@
             } else {
                 state[key] = fallbacks[key];
                 // flamegraphs is often missing if not generated, so we don't treat it as a loud error
-                if (key !== "flamegraphs" && key !== "runs" && key !== "catalog") {
+                if (key !== "flamegraphs" && key !== "runs" && key !== "catalog" && key !== "appPackage") {
                     missing.push(`${key}: ${result.reason.message}`);
                 }
             }
@@ -2443,23 +2522,38 @@
     function setupTabs() {
         document.querySelectorAll(".tab").forEach((button) => {
             button.addEventListener("click", () => {
-                document.querySelectorAll(".tab").forEach((tab) => tab.classList.remove("is-active"));
-                document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.remove("is-active"));
-                button.classList.add("is-active");
-                byId(button.dataset.tab).classList.add("is-active");
-
-                if (button.dataset.tab === "performance-review") {
-                    renderFlamegraphs();
-                }
+                activateTab(button.dataset.tab);
             });
         });
+    }
+
+    function activateTab(tabId) {
+        const button = document.querySelector(`.tab[data-tab="${CSS.escape(tabId)}"]`);
+        const panel = byId(tabId);
+        if (!button || !panel) return;
+        document.querySelectorAll(".tab").forEach((tab) => tab.classList.remove("is-active"));
+        document.querySelectorAll(".tab-panel").forEach((item) => item.classList.remove("is-active"));
+        button.classList.add("is-active");
+        panel.classList.add("is-active");
+        if (tabId === "performance-review") {
+            renderFlamegraphs();
+        }
+        if (tabId === "app-package") {
+            renderAppPackage();
+        }
+    }
+
+    function initialTabFromLocation() {
+        const params = new URLSearchParams(window.location.search);
+        const requested = params.get("tab") || window.location.hash.replace(/^#/, "");
+        return requested || "overview";
     }
 
     function renderAll() {
         renderOverview();
         renderHotspots();
         renderQualityDistribution();
-        renderQualityFeed();
+        renderCloneDistribution();
         renderSlowspots();
         renderSearchSpeed();
         renderSearchBudget();
@@ -2473,70 +2567,143 @@
         renderCorrectnessMatrix();
         renderMap();
         renderFlamegraphs();
+        renderAppPackage();
         renderRunLog();
+    }
+
+    function renderAppPackage() {
+        const payload = state.appPackage;
+        const summaryTarget = byId("app-package-summary");
+        if (!summaryTarget) return;
+        if (!payload) {
+            renderSummary("app-package-summary", [
+                metricCard("Status", "Unavailable"),
+                metricCard("Tabs", "-"),
+                metricCard("Buffers", "-"),
+                metricCard("Diagnostics", "-"),
+            ]);
+            byId("app-package-root").innerHTML = `<p class="muted">No app package payload loaded.</p>`;
+            renderTable("app-package-buffers", ["Buffer", "Path", "Encoding", "Snapshot", "Dirty"], []);
+            renderTable("app-package-topology", ["Tab", "Active View", "Views", "Root Pane"], []);
+            renderTable("app-package-diagnostics", ["Line", "Kind", "Operation", "Source", "Message"], []);
+            byId("app-package-warnings").innerHTML = `<p class="muted">No loader warnings.</p>`;
+            return;
+        }
+
+        const summary = payload.manifest_summary || {};
+        renderSummary("app-package-summary", [
+            metricCard("Status", payload.exists ? "Found" : "Missing"),
+            metricCard("Version", summary.version ?? "-"),
+            metricCard("Tabs", summary.tab_count ?? 0),
+            metricCard("Buffers", summary.buffer_count ?? 0),
+            metricCard("Dirty", summary.dirty_buffer_count ?? 0),
+            metricCard("Views", summary.view_count ?? 0),
+            metricCard("Snapshots", summary.snapshot_file_count ?? 0),
+            metricCard("Diagnostics", summary.diagnostic_count ?? 0),
+        ]);
+
+        byId("app-package-root").innerHTML = `
+            <div class="package-paths__row"><span>Session root</span><code>${escapeHtml(payload.session_root || "-")}</code></div>
+            <div class="package-paths__row"><span>Manifest</span><code>${escapeHtml(payload.manifest_path || "-")}</code></div>
+            <div class="package-paths__row"><span>Error log</span><code>${escapeHtml(payload.error_log_path || "-")}</code></div>
+        `;
+
+        renderAppPackageBuffers(payload.buffers || []);
+        renderAppPackageTopology(payload.topology || []);
+        renderAppPackageDiagnostics(payload.diagnostics || []);
+        const warnings = payload.warnings || [];
+        byId("app-package-warnings").innerHTML = warnings.length
+            ? `<ul class="warning-list">${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>`
+            : `<p class="muted">No loader warnings.</p>`;
+    }
+
+    function renderAppPackageBuffers(buffers) {
+        const query = byId("app-package-buffer-filter")?.value || "";
+        const filtered = buffers.filter((buffer) => matchesFilter(buffer, query));
+        renderTable(
+            "app-package-buffers",
+            ["Tab", "Buffer", "Path", "Encoding", "Snapshot", "History", "Dirty"],
+            filtered.map((buffer) => {
+                const snapshot = buffer.snapshot || {};
+                const snapshotText = snapshot.exists
+                    ? `${formatBytes(snapshot.size_bytes || 0)} / ${escapeHtml(snapshot.name || "-")}`
+                    : "missing";
+                return `<tr>
+                    <td>${Number(buffer.tab_index || 0) + 1}</td>
+                    <td><code>${escapeHtml(buffer.name || "Untitled")}</code><div class="muted">id ${escapeHtml(buffer.id ?? "-")} / temp ${escapeHtml(buffer.temp_id || "-")}</div></td>
+                    <td><code>${escapeHtml(buffer.path || "unsaved")}</code></td>
+                    <td>${escapeHtml(buffer.encoding || "-")}<div class="muted">BOM ${buffer.has_bom ? "yes" : "no"}</div></td>
+                    <td class="${snapshot.exists ? "risk-good" : "risk-bad"}">${snapshotText}</td>
+                    <td>${formatNumber.format(buffer.text_history_count || 0)}</td>
+                    <td>${buffer.is_dirty ? `<span class="risk-warn">dirty</span>` : `<span class="muted">clean</span>`}</td>
+                </tr>`;
+            })
+        );
+    }
+
+    function renderAppPackageTopology(topology) {
+        renderTable(
+            "app-package-topology",
+            ["Tab", "Active View", "Views", "Root Pane"],
+            topology.map((tab) => `<tr>
+                <td>${Number(tab.tab_index || 0) + 1}</td>
+                <td><code>${escapeHtml(tab.active_view_id ?? "-")}</code></td>
+                <td>${formatNumber.format(tab.view_count || 0)}<div class="muted">${escapeHtml((tab.view_ids || []).join(", ") || "-")}</div></td>
+                <td><span class="pill">${escapeHtml(tab.root_pane_kind || "unknown")}</span></td>
+            </tr>`)
+        );
+    }
+
+    function renderAppPackageDiagnostics(diagnostics) {
+        const query = byId("app-package-diagnostics-filter")?.value || "";
+        const filtered = diagnostics.filter((item) => matchesFilter(item, query)).slice().reverse();
+        renderTable(
+            "app-package-diagnostics",
+            ["Line", "Kind", "Operation", "Source", "Message", "Details"],
+            filtered.map((item) => {
+                const details = item.details && typeof item.details === "object"
+                    ? Object.entries(item.details).map(([key, value]) => `${key}=${value}`).join("; ")
+                    : "";
+                return `<tr>
+                    <td>${escapeHtml(item.line ?? "-")}</td>
+                    <td><span class="pill">${escapeHtml(item.kind || "-")}</span></td>
+                    <td>${escapeHtml(item.operation || "-")}</td>
+                    <td><code>${escapeHtml(item.source || "-")}</code></td>
+                    <td>${escapeHtml(item.message || "-")}<div class="muted">${escapeHtml(item.path || "")}</div></td>
+                    <td class="small-text">${escapeHtml(details)}</td>
+                </tr>`;
+            })
+        );
     }
 
     function renderQualityDistribution() {
         const target = byId("quality-distribution");
         if (!target) return;
-        const hotspots = state.hotspots || [];
-        if (!hotspots.length) {
-            target.innerHTML = `<p class="muted">No hotspot data.</p>`;
-            return;
-        }
-        let good = 0, warn = 0, bad = 0;
-        const signalCounts = new Map();
-        hotspots.forEach((h) => {
-            const s = qualityScore(h);
-            if (s >= 600) bad++;
-            else if (s >= 300) warn++;
-            else good++;
-            pillValues(h.signals).forEach((sig) => signalCounts.set(sig, (signalCounts.get(sig) || 0) + 1));
+        renderRiskDistribution(target, qualityDistributionItems(), {
+            empty: "No hotspot data.",
+            modeKey: "qualityDistributionMode",
+            expandedKey: "expandedQualityKey",
+            warn: 300,
+            bad: 600,
+            scoreLabel: "quality score",
         });
-        const total = good + warn + bad;
-        const sigSorted = [...signalCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
-        const sigMax = sigSorted.length ? sigSorted[0][1] : 1;
-        const goodPct = total ? (good / total) * 100 : 0;
-        const warnPct = total ? (warn / total) * 100 : 0;
-        const warnEnd = goodPct + warnPct;
-        const buckets = [
-            { cls: "good", label: "< 300", value: good },
-            { cls: "warn", label: "300-599", value: warn },
-            { cls: "bad", label: ">= 600", value: bad },
-        ];
-        const pie = `
-            <div class="quality-pie-card">
-                <div class="quality-pie" role="img" aria-label="Quality risk score buckets: ${good} below 300, ${warn} from 300 to 599, ${bad} at or above 600"
-                    style="background: conic-gradient(var(--good) 0 ${goodPct}%, var(--warn) ${goodPct}% ${warnEnd}%, var(--bad) ${warnEnd}% 100%);">
-                </div>
-                <div class="quality-pie__summary">
-                    <strong>${formatNumber.format(total)}</strong>
-                    <span>items</span>
-                </div>
-                <div class="quality-pie__legend">
-                    ${buckets.map((bucket) => `<div class="quality-pie__legend-item">
-                        <span class="quality-pie__swatch quality-pie__swatch--${bucket.cls}"></span>
-                        <span>${escapeHtml(bucket.label)}</span>
-                        <strong>${formatNumber.format(bucket.value)}</strong>
-                    </div>`).join("")}
-                </div>
-            </div>`;
-        const signals = sigSorted.length
-            ? `<div class="signal-bars">${sigSorted.map(([sig, count]) => `
-                <div class="signal-bars__row">
-                    <span>${escapeHtml(sig)}</span>
-                    <div class="signal-bars__track"><span class="signal-bars__fill" style="width:${(count / sigMax) * 100}%"></span></div>
-                    <span class="signal-bars__count">${count}</span>
-                </div>`).join("")}</div>`
-            : `<p class="muted">No signal data.</p>`;
-        target.innerHTML = pie + signals;
     }
 
-    function renderQualityFeed() {
-        const target = byId("quality-feed");
+    function renderCloneDistribution() {
+        const target = byId("clone-distribution");
         if (!target) return;
-        const filter = (byId("quality-feed-filter")?.value || "").toLowerCase();
-        const hotspots = (state.hotspots || []).map((h) => ({
+        renderRiskDistribution(target, cloneDistributionItems(), {
+            empty: "No clone data.",
+            modeKey: "cloneDistributionMode",
+            expandedKey: "expandedCloneKey",
+            warn: 20,
+            bad: 40,
+            scoreLabel: "clone score",
+        });
+    }
+
+    function qualityDistributionItems() {
+        return (state.hotspots || []).map((h) => ({
             key: `hotspot:${h.name}:${h.start_line || ""}`,
             kind: "hotspot",
             name: h.name,
@@ -2546,17 +2713,161 @@
             raw: h,
             searchText: [h.kind, h.name, h.signals, h.sloc, qualityScore(h)].join(" "),
         }));
-        const clones = (state.clones || []).map((c) => ({
-            key: `clone:${c.hash || c.group_hash || c.name || ""}`,
-            kind: "clone",
-            name: `clone ${c.hash?.substring(0, 8) || ""} (${c.instance_count || c.instances?.length || 0}x)`,
-            score: c.score || 0,
-            signals: c.signals || [],
-            details: `${c.token_count || 0} tokens`,
-            raw: c,
-            searchText: [c.engine, c.hash, c.score, c.token_count, c.signals, ...(c.instances || []).map((inst) => inst.file_path)].join(" "),
-        }));
-        const merged = [...hotspots, ...clones]
+    }
+
+    function cloneDistributionItems() {
+        return (state.clones || []).map((c) => {
+            const hash = c.hash || c.group_hash || "";
+            const instances = c.instances || [];
+            return {
+                key: `clone:${c.hash || c.group_hash || c.name || ""}`,
+                kind: "clone",
+                name: `clone ${hash.substring(0, 8) || "group"} (${c.instance_count || instances.length || 0}x)`,
+                score: Number(c.score || 0),
+                signals: c.signals || [],
+                details: `${c.token_count || 0} tokens`,
+                raw: c,
+                searchText: [c.engine, hash, c.score, c.token_count, c.signals, ...instances.map((inst) => inst.file_path)].join(" "),
+            };
+        });
+    }
+
+    function renderRiskDistribution(target, items, options) {
+        if (!items.length) {
+            target.innerHTML = `<p class="muted">${escapeHtml(options.empty)}</p>`;
+            return;
+        }
+        const sorted = items.slice().sort((a, b) => b.score - a.score);
+        const mode = state[options.modeKey] || "counts";
+        const curve = riskDistributionCurve(sorted, options);
+        const body = mode === "counts"
+            ? renderRiskDistributionCounts(sorted, options)
+            : renderDistributionRows(sorted.slice(0, 10), options, { ranked: true });
+        target.innerHTML = curve + body;
+        target.querySelectorAll("[data-risk-key]").forEach((button) => {
+            button.addEventListener("click", () => {
+                state[options.expandedKey] = state[options.expandedKey] === button.dataset.riskKey ? null : button.dataset.riskKey;
+                renderRiskDistribution(target, items, options);
+            });
+        });
+    }
+
+    function renderRiskDistributionCounts(items, options) {
+        const buckets = riskBuckets(items, options.warn, options.bad);
+        const signalCounts = new Map();
+        items.forEach((item) => pillValues(item.signals).forEach((sig) => signalCounts.set(sig, (signalCounts.get(sig) || 0) + 1)));
+        const sigSorted = [...signalCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+        const sigMax = sigSorted.length ? sigSorted[0][1] : 1;
+        return `<div class="risk-count-grid">
+            <div class="risk-bucket-list">
+                ${buckets.map((bucket) => `<div class="risk-bucket-list__item">
+                    <span class="quality-pie__swatch quality-pie__swatch--${bucket.cls}"></span>
+                    <span>${escapeHtml(bucket.label)}</span>
+                    <strong>${formatNumber.format(bucket.value)}</strong>
+                </div>`).join("")}
+            </div>
+            ${sigSorted.length ? `<div class="signal-bars">${sigSorted.map(([sig, count]) => `
+                <div class="signal-bars__row">
+                    <span>${escapeHtml(sig)}</span>
+                    <div class="signal-bars__track"><span class="signal-bars__fill" style="width:${(count / sigMax) * 100}%"></span></div>
+                    <span class="signal-bars__count">${formatNumber.format(count)}</span>
+                </div>`).join("")}</div>` : `<p class="muted">No signal data.</p>`}
+        </div>`;
+    }
+
+    function renderDistributionRows(items, options, flags = {}) {
+        if (!items.length) {
+            return `<p class="muted">No items match.</p>`;
+        }
+        return `<div class="quality-feed ${flags.ranked ? "quality-feed--ranked" : ""}">${items.map((it, index) => {
+            const cls = riskClass(it.score, options.warn, options.bad);
+            const tail = (it.name || "").split(/[\\/]/).pop();
+            const isExpanded = state[options.expandedKey] === it.key;
+            return `<button type="button" class="quality-feed__row ${isExpanded ? "is-expanded" : ""}" data-risk-key="${escapeHtml(it.key)}" aria-expanded="${isExpanded ? "true" : "false"}">
+                ${flags.ranked ? `<span class="rank-pill">${index + 1}</span>` : `<span class="pill">${escapeHtml(it.kind)}</span>`}
+                <span class="quality-feed__name"><code>${escapeHtml(tail)}</code><span class="muted quality-feed__detail">${escapeHtml(it.details)}</span></span>
+                <span class="${cls}">${formatNumber.format(it.score)}</span>
+            </button>
+            ${isExpanded ? renderQualityFeedDetail(it) : ""}`;
+        }).join("")}</div>`;
+    }
+
+    function riskBuckets(items, warn, bad) {
+        let good = 0, medium = 0, high = 0;
+        items.forEach((item) => {
+            if (item.score >= bad) high++;
+            else if (item.score >= warn) medium++;
+            else good++;
+        });
+        return [
+            { cls: "good", label: `< ${warn}`, value: good },
+            { cls: "warn", label: `${warn}-${bad - 1}`, value: medium },
+            { cls: "bad", label: `>= ${bad}`, value: high },
+        ];
+    }
+
+    function riskDistributionCurve(items, options) {
+        const scores = items.map((item) => Number(item.score || 0)).filter(Number.isFinite);
+        const total = scores.length;
+        const maxScore = Math.max(options.bad * 1.2, ...scores, 1);
+        const mean = scores.reduce((sum, score) => sum + score, 0) / total;
+        const variance = scores.reduce((sum, score) => sum + Math.pow(score - mean, 2), 0) / Math.max(total, 1);
+        const stdDev = Math.max(Math.sqrt(variance), maxScore * 0.045);
+        const width = 640;
+        const height = 190;
+        const left = 30;
+        const right = 610;
+        const baseline = 148;
+        const top = 24;
+        const bucketCount = 22;
+        const bins = Array.from({ length: bucketCount }, () => 0);
+        scores.forEach((score) => {
+            const index = Math.min(bucketCount - 1, Math.floor((score / maxScore) * bucketCount));
+            bins[index]++;
+        });
+        const maxBin = Math.max(...bins, 1);
+        const bars = bins.map((count, index) => {
+            const x = left + (index / bucketCount) * (right - left);
+            const barWidth = ((right - left) / bucketCount) - 3;
+            const barHeight = (count / maxBin) * 76;
+            return `<rect x="${x.toFixed(1)}" y="${(baseline - barHeight).toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barHeight.toFixed(1)}" rx="3" class="risk-curve__bar"></rect>`;
+        }).join("");
+        const density = (score) => Math.exp(-0.5 * Math.pow((score - mean) / stdDev, 2));
+        const maxDensity = Math.max(...Array.from({ length: 80 }, (_, index) => density((index / 79) * maxScore)), 1);
+        const points = Array.from({ length: 80 }, (_, index) => {
+            const score = (index / 79) * maxScore;
+            const x = left + (score / maxScore) * (right - left);
+            const y = baseline - ((density(score) / maxDensity) * (baseline - top));
+            return `${x.toFixed(1)},${y.toFixed(1)}`;
+        });
+        const path = `M ${points.join(" L ")}`;
+        const marker = (score, cls) => {
+            const x = left + (Math.min(score, maxScore) / maxScore) * (right - left);
+            return `<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${top}" y2="${baseline}" class="risk-curve__marker risk-curve__marker--${cls}"></line>`;
+        };
+        const meanX = left + (mean / maxScore) * (right - left);
+        return `<div class="risk-curve-card">
+            <svg class="risk-curve" viewBox="0 0 ${width} ${height}" role="img" aria-label="Normal distribution curve for ${escapeHtml(options.scoreLabel)}">
+                <line x1="${left}" x2="${right}" y1="${baseline}" y2="${baseline}" class="risk-curve__axis"></line>
+                ${bars}
+                ${marker(options.warn, "warn")}
+                ${marker(options.bad, "bad")}
+                <path d="${path}" class="risk-curve__line"></path>
+                <circle cx="${meanX.toFixed(1)}" cy="${baseline - 6}" r="4" class="risk-curve__mean"></circle>
+            </svg>
+            <div class="risk-curve-card__stats">
+                <span><strong>${formatNumber.format(total)}</strong> items</span>
+                <span><strong>${formatNumber.format(mean)}</strong> mean</span>
+                <span><strong>${formatNumber.format(stdDev)}</strong> std dev</span>
+            </div>
+        </div>`;
+    }
+
+    function renderQualityFeed() {
+        const target = byId("quality-feed");
+        if (!target) return;
+        const filter = (byId("quality-feed-filter")?.value || "").toLowerCase();
+        const merged = [...qualityDistributionItems(), ...cloneDistributionItems()]
             .filter((it) => !filter || it.searchText.toLowerCase().includes(filter))
             .sort((a, b) => b.score - a.score)
             .slice(0, 60);
@@ -2819,7 +3130,36 @@
     byId("clones-filter")?.addEventListener("input", renderClones);
     byId("correctness-filter")?.addEventListener("input", renderCorrectness);
     byId("correctness-show-all")?.addEventListener("change", renderCorrectness);
-    byId("quality-feed-filter")?.addEventListener("input", renderQualityFeed);
+    document.querySelectorAll("[data-quality-distribution-mode]").forEach((button) => {
+        button.addEventListener("click", () => {
+            state.qualityDistributionMode = button.dataset.qualityDistributionMode || "counts";
+            document.querySelectorAll("[data-quality-distribution-mode]").forEach((item) => {
+                const active = item === button;
+                item.classList.toggle("is-active", active);
+                item.setAttribute("aria-pressed", active ? "true" : "false");
+            });
+            renderQualityDistribution();
+        });
+    });
+    document.querySelectorAll("[data-clone-distribution-mode]").forEach((button) => {
+        button.addEventListener("click", () => {
+            state.cloneDistributionMode = button.dataset.cloneDistributionMode || "counts";
+            document.querySelectorAll("[data-clone-distribution-mode]").forEach((item) => {
+                const active = item === button;
+                item.classList.toggle("is-active", active);
+                item.setAttribute("aria-pressed", active ? "true" : "false");
+            });
+            renderCloneDistribution();
+        });
+    });
+    byId("app-package-refresh")?.addEventListener("click", refreshAppPackage);
+    document.querySelectorAll("[data-app-package-jump]").forEach((button) => {
+        button.addEventListener("click", () => {
+            byId(button.dataset.appPackageJump)?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+    });
+    byId("app-package-buffer-filter")?.addEventListener("input", renderAppPackage);
+    byId("app-package-diagnostics-filter")?.addEventListener("input", renderAppPackage);
     byId("map-filter").addEventListener("input", renderMap);
     byId("map-layout").addEventListener("change", (event) => {
         state.mapLayout = event.target.value;
@@ -2863,5 +3203,5 @@
         button.addEventListener("click", () => triggerRun(`/api/run/item/${encodeURIComponent(button.dataset.runItem)}`, button));
     });
     window.setInterval(refreshRuns, 5000);
-    loadDefaults();
+    loadDefaults().then(() => activateTab(initialTabFromLocation()));
 })();

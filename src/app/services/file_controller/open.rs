@@ -2,6 +2,7 @@ use super::FileController;
 use super::support::LoadedFile;
 use crate::app::app_state::{PendingBackgroundAction, PendingOpenTabsAction, ScratchpadApp};
 use crate::app::commands::AppCommand;
+use crate::app::diagnostics;
 use crate::app::domain::WorkspaceTab;
 use crate::app::services::background_io::LoadedPathResult;
 use crate::app::utils::summarize_open_results;
@@ -273,7 +274,13 @@ impl FileController {
                 app.request_focus_for_active_view();
                 summary.record_outcome(OpenPathOutcome::Opened { artifact_warning });
             }
-            Err(_) => {
+            Err(error) => {
+                diagnostics::record_io_error(
+                    "open_file",
+                    Some(&loaded.path),
+                    "file_controller::open",
+                    &error,
+                );
                 summary.record_outcome(OpenPathOutcome::Failed);
             }
         }

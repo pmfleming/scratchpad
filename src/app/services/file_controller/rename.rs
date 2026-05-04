@@ -1,5 +1,6 @@
 use super::FileController;
 use crate::app::app_state::ScratchpadApp;
+use crate::app::diagnostics;
 use crate::app::domain::BufferFreshness;
 use crate::app::services::file_service::FileService;
 use std::io;
@@ -14,6 +15,12 @@ impl FileController {
         let normalized_name = match normalize_requested_name(requested_name) {
             Ok(name) => name,
             Err(error) => {
+                diagnostics::record_warning(
+                    "rename_validate_name",
+                    None,
+                    "file_controller::rename",
+                    error.to_string(),
+                );
                 app.set_warning_status(format!("Rename failed: {error}"));
                 return false;
             }
@@ -61,6 +68,12 @@ impl FileController {
             Some(path) => match renamed_path(path, &normalized_name) {
                 Ok(path) => Some(path),
                 Err(error) => {
+                    diagnostics::record_io_error(
+                        "rename_build_target_path",
+                        Some(path),
+                        "file_controller::rename",
+                        &error,
+                    );
                     app.set_error_status(format!("Rename failed: {error}"));
                     return false;
                 }
@@ -73,6 +86,13 @@ impl FileController {
             && current_path != target_path
             && let Err(error) = FileService::rename_path(current_path, target_path)
         {
+            diagnostics::record_io_error_with_details(
+                "rename_file",
+                Some(current_path),
+                "file_controller::rename",
+                &error,
+                [("target_path", target_path.display().to_string())],
+            );
             app.set_error_status(format!("Rename failed: {error}"));
             return false;
         }

@@ -54,6 +54,7 @@
             <button class="tab" data-tab="performance-review">Performance Review</button>
             <button class="tab" data-tab="correctness-review">Correctness Review</button>
             <button class="tab" data-tab="map">Map</button>
+            <button class="tab" data-tab="app-package">App Package</button>
             <button class="tab" data-tab="run-log">Run Log</button>
         </nav>
 
@@ -67,8 +68,10 @@
                     </div>
                     <div class="risk-map-controls" aria-label="Module risk map controls">
                         <div class="segmented-control" role="group" aria-label="Module risk scope">
-                            <button type="button" class="is-active" data-overview-risk-mode="top" aria-pressed="true">Top risk</button>
-                            <button type="button" data-overview-risk-mode="all" aria-pressed="false">All modules</button>
+                            <button type="button" class="is-active" data-overview-risk-mode="top"
+                                aria-pressed="true">Top risk</button>
+                            <button type="button" data-overview-risk-mode="all" aria-pressed="false">All
+                                modules</button>
                         </div>
                         <label class="risk-filter-control">
                             <span>Filter</span>
@@ -114,7 +117,13 @@
                     <div class="panel-card__header">
                         <div>
                             <h2>Quality risk distribution</h2>
-                            <p>Score buckets and what is driving them.</p>
+                            <p>Score curve and what is driving it.</p>
+                        </div>
+                        <div class="segmented-control" role="group" aria-label="Quality distribution mode">
+                            <button type="button" class="is-active" data-quality-distribution-mode="counts"
+                                aria-pressed="true">Counts</button>
+                            <button type="button" data-quality-distribution-mode="worst" aria-pressed="false">Worst
+                                items</button>
                         </div>
                     </div>
                     <div id="quality-distribution" class="quality-distribution"></div>
@@ -122,13 +131,17 @@
                 <div class="panel-card">
                     <div class="panel-card__header">
                         <div>
-                            <h2>Worst items</h2>
-                            <p>Hotspots and clones merged, sorted by score.</p>
+                            <h2>Clone risk distribution</h2>
+                            <p>Clone score curve and highest duplication groups.</p>
                         </div>
-                        <input id="quality-feed-filter" class="filter-input" type="search"
-                            placeholder="Filter worst items..." />
+                        <div class="segmented-control" role="group" aria-label="Clone distribution mode">
+                            <button type="button" class="is-active" data-clone-distribution-mode="counts"
+                                aria-pressed="true">Counts</button>
+                            <button type="button" data-clone-distribution-mode="worst" aria-pressed="false">Worst
+                                items</button>
+                        </div>
                     </div>
-                    <div id="quality-feed" class="quality-feed"></div>
+                    <div id="clone-distribution" class="quality-distribution"></div>
                 </div>
             </div>
             <details class="disclose">
@@ -169,14 +182,15 @@
                     <h2>Performance Review</h2>
                     <p>Scenario-first view across speed tests, capacity reports, resource profiles, and flamegraphs.</p>
                 </div>
-                <button class="run-button" data-run-category="performance">Refresh Performance</button>
+                <div class="performance-actions" aria-label="Performance quick links">
+                    <a href="#perf-search" class="run-button">Search</a>
+                    <a href="#perf-editor" class="run-button">Editor &amp; Tabs</a>
+                    <a href="#perf-capacity" class="run-button">Capacity &amp; Resources</a>
+                    <a href="#perf-flamegraphs" class="run-button">Flamegraphs</a>
+                    <button type="button" class="run-button" data-run-category="performance">Refresh
+                        Performance</button>
+                </div>
             </div>
-            <nav class="anchor-nav" aria-label="Performance sections">
-                <a href="#perf-search" class="anchor-pill">Search</a>
-                <a href="#perf-editor" class="anchor-pill">Editor &amp; Tabs</a>
-                <a href="#perf-capacity" class="anchor-pill">Capacity &amp; Resources</a>
-                <a href="#perf-flamegraphs" class="anchor-pill">Flamegraphs</a>
-            </nav>
 
             <h3 id="perf-search" class="anchor-target">Search</h3>
             <div class="panel-card">
@@ -454,6 +468,75 @@
                     <h2>Module detail</h2>
                     <p class="muted">Select a module in the map.</p>
                 </aside>
+            </div>
+        </section>
+
+        <section id="app-package" class="tab-panel">
+            <div class="category-header">
+                <div>
+                    <h2>App Package</h2>
+                    <p>Runtime session manifest, buffer snapshots, and structured diagnostics from the active app
+                        session root.</p>
+                </div>
+                <div class="app-package-actions" aria-label="App package quick links">
+                    <button type="button" class="run-button"
+                        data-app-package-jump="app-package-diagnostics-panel">Diagnostics</button>
+                    <button type="button" class="run-button"
+                        data-app-package-jump="app-package-buffers-panel">Buffers</button>
+                    <button type="button" class="run-button"
+                        data-app-package-jump="app-package-topology-panel">Topology</button>
+                    <button type="button" class="run-button" id="app-package-refresh">Refresh Package</button>
+                </div>
+            </div>
+            <div id="app-package-summary" class="summary-grid"></div>
+            <div class="panel-card" id="app-package-diagnostics-panel">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Diagnostics</h2>
+                        <p>Recent newline-delimited JSON events from error.log.</p>
+                    </div>
+                    <input id="app-package-diagnostics-filter" class="filter-input" type="search"
+                        placeholder="Filter diagnostics..." />
+                </div>
+                <div id="app-package-diagnostics" class="table-wrap"></div>
+            </div>
+            <div class="panel-card" id="app-package-root-panel">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Session root</h2>
+                        <p>The server resolves this path from the same OS temp convention as the app.</p>
+                    </div>
+                </div>
+                <div id="app-package-root" class="package-paths"></div>
+            </div>
+            <div class="panel-card" id="app-package-buffers-panel">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Buffers</h2>
+                        <p>Manifest rows joined with snapshot file metadata.</p>
+                    </div>
+                    <input id="app-package-buffer-filter" class="filter-input" type="search"
+                        placeholder="Filter buffers..." />
+                </div>
+                <div id="app-package-buffers" class="table-wrap"></div>
+            </div>
+            <div class="panel-card" id="app-package-topology-panel">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Topology</h2>
+                        <p>Tab and view layout summary from the persisted manifest.</p>
+                    </div>
+                </div>
+                <div id="app-package-topology" class="table-wrap"></div>
+            </div>
+            <div class="panel-card">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Warnings</h2>
+                        <p>Non-fatal loader issues while reading live app state.</p>
+                    </div>
+                </div>
+                <div id="app-package-warnings"></div>
             </div>
         </section>
 

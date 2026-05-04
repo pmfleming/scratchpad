@@ -183,26 +183,19 @@ fn file_groups_from_entries<'a>(
 }
 
 fn entry_icon(entry: &TextHistoryEntryView) -> &'static str {
-    if entry.source == PieceSource::SearchReplace {
-        return MAGNIFYING_GLASS;
-    }
-    if entry.source == PieceSource::Paste {
-        return CLIPBOARD;
-    }
-    if entry.source == PieceSource::Cut {
-        return SCISSORS;
-    }
-    if entry.edit_count != 1 {
-        return STACK;
-    }
-    match (
-        entry.first_deleted_text.is_empty(),
-        entry.first_inserted_text.is_empty(),
-    ) {
-        (true, false) => PENCIL_SIMPLE,
-        (false, true) => BACKSPACE,
-        (false, false) => ARROWS_LEFT_RIGHT,
-        (true, true) => PENCIL_SIMPLE,
+    match entry.source {
+        PieceSource::SearchReplace => MAGNIFYING_GLASS,
+        PieceSource::Paste => CLIPBOARD,
+        PieceSource::Cut => SCISSORS,
+        _ if entry.edit_count != 1 => STACK,
+        _ => match (
+            entry.first_deleted_text.is_empty(),
+            entry.first_inserted_text.is_empty(),
+        ) {
+            (false, true) => BACKSPACE,
+            (false, false) => ARROWS_LEFT_RIGHT,
+            (true, _) => PENCIL_SIMPLE,
+        },
     }
 }
 
@@ -272,6 +265,7 @@ fn render_controls(
     ui.horizontal(|ui| {
         if control_icon_button(
             ui,
+            "timeline",
             CLOCK_COUNTER_CLOCKWISE,
             "Timeline",
             active == HistoryTab::Timeline,
@@ -281,11 +275,21 @@ fn render_controls(
         {
             *next = HistoryTab::Timeline;
         }
-        if control_icon_button(ui, FILES, "By file", active == HistoryTab::ByFile, true).clicked() {
+        if control_icon_button(
+            ui,
+            "by_file",
+            FILES,
+            "By file",
+            active == HistoryTab::ByFile,
+            true,
+        )
+        .clicked()
+        {
             *next = HistoryTab::ByFile;
         }
         if control_icon_button(
             ui,
+            "follow_focus",
             CROSSHAIR,
             if follow_focus {
                 "Follow undo is on"
@@ -300,8 +304,15 @@ fn render_controls(
             *next_follow_focus = !follow_focus;
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if control_icon_button(ui, TRASH, "Clear all text history", false, has_history)
-                .clicked()
+            if control_icon_button(
+                ui,
+                "clear_history",
+                TRASH,
+                "Clear all text history",
+                false,
+                has_history,
+            )
+            .clicked()
             {
                 *clear_requested = true;
             }
@@ -311,6 +322,7 @@ fn render_controls(
 
 fn control_icon_button(
     ui: &mut egui::Ui,
+    id_source: &'static str,
     icon: &str,
     tooltip: &str,
     selected: bool,
@@ -338,7 +350,11 @@ fn control_icon_button(
     .fill(fill)
     .stroke(egui::Stroke::new(1.0, stroke_color))
     .corner_radius(egui::CornerRadius::same(8));
-    ui.add_enabled(enabled, button).on_hover_text(tooltip)
+    widget_ids::scope(ui, ("text_history.control", id_source), |ui| {
+        ui.add_enabled(enabled, button)
+    })
+    .inner
+    .on_hover_text(tooltip)
 }
 
 fn render_timeline(
@@ -346,23 +362,39 @@ fn render_timeline(
     rows: &[TextHistoryRow],
     action: &mut Option<TextHistoryAction>,
 ) {
-    widget_ids::scope(ui, "text_history.section.timeline", |ui| {
-        if rows.is_empty() {
+    render_history_section(
+        ui,
+        "text_history.section.timeline",
+        rows.is_empty(),
+        "No entries",
+        |ui| render_timeline_rows(ui, rows, action),
+    );
+}
+
+fn render_history_section(
+    ui: &mut egui::Ui,
+    scope_id: &'static str,
+    is_empty: bool,
+    empty_label: &'static str,
+    show: impl FnOnce(&mut egui::Ui),
+) {
+    widget_ids::scope(ui, scope_id, |ui| {
+        if is_empty {
             ui.label(
-                egui::RichText::new("No entries")
+                egui::RichText::new(empty_label)
                     .size(13.0)
                     .color(callout::muted_text(ui)),
             );
             return;
         }
         egui::ScrollArea::vertical()
-            .id_salt(widget_ids::scroll_id(ui, "text_history.scroll.timeline"))
+            .id_salt(text_history_content_scroll_id())
             .auto_shrink([false, false])
             .max_height(ui.available_height())
             .min_scrolled_height(TEXT_HISTORY_LIST_MIN_HEIGHT)
             .show(ui, |ui| {
                 ui.set_max_width(ui.available_width());
-                render_timeline_rows(ui, rows, action);
+                show(ui);
             });
     });
 }
@@ -411,30 +443,24 @@ fn render_by_file(
     groups: &[TextHistoryFileGroup],
     action: &mut Option<TextHistoryAction>,
 ) {
-    widget_ids::scope(ui, "text_history.section.by_file", |ui| {
-        if groups.is_empty() {
-            ui.label(
-                egui::RichText::new("No file history")
-                    .size(13.0)
-                    .color(callout::muted_text(ui)),
-            );
-            return;
-        }
-        egui::ScrollArea::vertical()
-            .id_salt(widget_ids::scroll_id(ui, "text_history.scroll.by_file"))
-            .auto_shrink([false, false])
-            .max_height(ui.available_height())
-            .min_scrolled_height(TEXT_HISTORY_LIST_MIN_HEIGHT)
-            .show(ui, |ui| {
-                ui.set_max_width(ui.available_width());
-                for (index, group) in groups.iter().enumerate() {
-                    render_file_group(ui, group, action);
-                    if index + 1 < groups.len() {
-                        ui.add_space(12.0);
-                    }
+    render_history_section(
+        ui,
+        "text_history.section.by_file",
+        groups.is_empty(),
+        "No file history",
+        |ui| {
+            for (index, group) in groups.iter().enumerate() {
+                render_file_group(ui, group, action);
+                if index + 1 < groups.len() {
+                    ui.add_space(12.0);
                 }
-            });
-    });
+            }
+        },
+    );
+}
+
+fn text_history_content_scroll_id() -> egui::Id {
+    widget_ids::ctx_key("text_history.scroll.content")
 }
 
 fn render_file_group(
@@ -582,6 +608,14 @@ fn render_row(ui: &mut egui::Ui, row: &TextHistoryRow, action: &mut Option<TextH
     ui.add_space(HISTORY_PILL_SPACING);
 }
 
+fn dim_if(undone: bool, color: egui::Color32) -> egui::Color32 {
+    if undone {
+        color.gamma_multiply(UNDONE_OPACITY)
+    } else {
+        color
+    }
+}
+
 fn history_pill(ui: &mut egui::Ui, row: &TextHistoryRow) -> egui::Response {
     let frame_id = widget_ids::local(ui, "text_history.row.pill");
     let hovered = ui
@@ -595,23 +629,10 @@ fn history_pill(ui: &mut egui::Ui, row: &TextHistoryRow) -> egui::Response {
     } else {
         action_bg(ui)
     };
-    let fill = if row.undone {
-        base_fill.gamma_multiply(UNDONE_OPACITY)
-    } else {
-        base_fill
-    };
-    let stroke = if row.undone {
-        border(ui).gamma_multiply(UNDONE_OPACITY)
-    } else {
-        border(ui)
-    };
-    let title_color = if row.undone {
-        callout::text(ui).gamma_multiply(UNDONE_OPACITY)
-    } else {
-        callout::text(ui)
-    };
-    let muted_color =
-        callout::muted_text(ui).gamma_multiply(if row.undone { UNDONE_OPACITY } else { 1.0 });
+    let fill = dim_if(row.undone, base_fill);
+    let stroke = dim_if(row.undone, border(ui));
+    let title_color = dim_if(row.undone, callout::text(ui));
+    let muted_color = dim_if(row.undone, callout::muted_text(ui));
 
     let inner = egui::Frame::NONE
         .fill(fill)
@@ -716,27 +737,49 @@ fn render_now_line(ui: &mut egui::Ui) {
     ui.add_space(HISTORY_PILL_SPACING);
 }
 
+/// Persist `value` into `active_id` immediately and also queue a pending
+/// write at `pending_id` to fire on the next frame, requesting a repaint.
+fn write_pending<T: Clone + Send + Sync + 'static>(
+    ctx: &egui::Context,
+    pending_id: egui::Id,
+    active_id: egui::Id,
+    value: T,
+) {
+    let apply_frame = ctx.cumulative_frame_nr().saturating_add(1);
+    ctx.data_mut(|data| {
+        data.insert_persisted(active_id, value.clone());
+        data.insert_persisted(pending_id, (value, apply_frame));
+    });
+    ctx.request_repaint();
+}
+
+fn read_persisted<T: Clone + Send + Sync + 'static>(
+    ctx: &egui::Context,
+    active_id: egui::Id,
+) -> Option<T> {
+    ctx.data_mut(|data| data.get_persisted::<T>(active_id))
+}
+
 fn read_active_tab(ctx: &egui::Context) -> HistoryTab {
-    let id = widget_ids::ctx_key("text_history.active_tab");
-    ctx.data_mut(|data| data.get_persisted::<u8>(id))
+    read_persisted::<u8>(ctx, widget_ids::ctx_key("text_history.active_tab"))
         .and_then(tab_from_persisted)
         .unwrap_or(HistoryTab::Timeline)
 }
 
 fn write_active_tab(ctx: &egui::Context, tab: HistoryTab) {
-    let id = widget_ids::ctx_key("text_history.active_tab");
-    ctx.data_mut(|data| data.insert_persisted(id, tab_to_persisted(tab)));
+    let active_id = widget_ids::ctx_key("text_history.active_tab");
+    let pending_id = widget_ids::ctx_key("text_history.active_tab.pending");
+    write_pending(ctx, pending_id, active_id, tab_to_persisted(tab));
 }
 
 fn read_follow_focus(ctx: &egui::Context) -> bool {
-    let id = widget_ids::ctx_key("text_history.follow_undo");
-    ctx.data_mut(|data| data.get_persisted::<bool>(id))
-        .unwrap_or(true)
+    read_persisted::<bool>(ctx, widget_ids::ctx_key("text_history.follow_undo")).unwrap_or(true)
 }
 
 fn write_follow_focus(ctx: &egui::Context, follow: bool) {
-    let id = widget_ids::ctx_key("text_history.follow_undo");
-    ctx.data_mut(|data| data.insert_persisted(id, follow));
+    let active_id = widget_ids::ctx_key("text_history.follow_undo");
+    let pending_id = widget_ids::ctx_key("text_history.follow_undo.pending");
+    write_pending(ctx, pending_id, active_id, follow);
 }
 
 fn tab_from_persisted(value: u8) -> Option<HistoryTab> {

@@ -2,8 +2,10 @@ use super::{
     PendingBackgroundAction, PendingEncodingComplianceAction, PendingSessionPersistAction,
     PendingStartupRestoreAction, PendingTextMetadataAction, ScratchpadApp,
 };
+use crate::app::diagnostics;
 use crate::app::services::background_io::{
-    BackgroundIoRequest, BackgroundIoResult, LoadedPathResult, PathLoadRequest,
+    BackgroundIoRequest, BackgroundIoResult, BackgroundIoSendError, LoadedPathResult,
+    PathLoadRequest,
 };
 use crate::app::services::file_controller::FileController;
 use crate::app::services::session_manager;
@@ -99,6 +101,7 @@ impl ScratchpadApp {
             streaming,
         };
         if let Err(error) = self.background_io_tx.send(request) {
+            record_background_send_error(&error);
             self.pending_background_actions.remove(&request_id);
             self.apply_background_io_result(BackgroundIoResult::PathsLoaded {
                 request_id,
@@ -129,6 +132,7 @@ impl ScratchpadApp {
             streaming: false,
         };
         if let Err(error) = self.background_io_tx.send(request) {
+            record_background_send_error(&error);
             self.pending_background_actions.remove(&request_id);
             self.apply_background_io_result(BackgroundIoResult::PathsLoaded {
                 request_id,
@@ -160,6 +164,7 @@ impl ScratchpadApp {
             session_store: self.session_store.clone(),
         };
         if let Err(error) = self.background_io_tx.send(request) {
+            record_background_send_error(&error);
             self.pending_background_actions.remove(&request_id);
             self.apply_background_io_result(BackgroundIoResult::SessionRestored {
                 request_id,
@@ -181,6 +186,7 @@ impl ScratchpadApp {
             request,
         };
         if let Err(error) = self.background_io_tx.send(request) {
+            record_background_send_error(&error);
             self.pending_background_actions.remove(&request_id);
             self.apply_background_io_result(BackgroundIoResult::SessionPersisted {
                 request_id,
@@ -223,6 +229,7 @@ impl ScratchpadApp {
             format,
         };
         if let Err(error) = self.background_io_tx.send(request) {
+            record_background_send_error(&error);
             self.pending_background_actions.remove(&request_id);
             self.apply_background_io_result(BackgroundIoResult::TextMetadataRefreshed {
                 request_id,
@@ -267,6 +274,7 @@ impl ScratchpadApp {
             format,
         };
         if let Err(error) = self.background_io_tx.send(request) {
+            record_background_send_error(&error);
             self.pending_background_actions.remove(&request_id);
             self.apply_background_io_result(BackgroundIoResult::EncodingComplianceRefreshed {
                 request_id,
@@ -357,6 +365,12 @@ impl ScratchpadApp {
                         self.last_session_persist = Instant::now();
                     }
                     Err(error) => {
+                        diagnostics::record_background_failure(
+                            "session_persist_result",
+                            "app_state::background_io",
+                            &error,
+                            [("request_id", request_id.to_string())],
+                        );
                         self.mark_session_dirty();
                         self.set_error_status(format!("Session save failed: {error}"));
                     }
@@ -420,6 +434,12 @@ impl ScratchpadApp {
             Ok(Some(restored)) => Some(session_manager::apply_restored_session(self, restored)),
             Ok(None) => None,
             Err(error) => {
+                diagnostics::record_background_failure(
+                    "session_restore_result",
+                    "app_state::background_io",
+                    &error,
+                    std::iter::empty(),
+                );
                 self.set_error_status(format!("Session restore failed: {error}"));
                 None
             }
@@ -434,6 +454,23 @@ impl ScratchpadApp {
         self.request_focus_for_active_view();
         self.apply_startup_options_async(action.startup_options);
     }
+}
+
+fn record_background_send_error(error: &BackgroundIoSendError) {
+    diagnostics::record_background_failure(
+        "background_send",
+        "app_state::background_io",
+        format!(
+            "Background I/O request '{}' could not be queued: {}",
+            error.request_kind(),
+            error.reason()
+        ),
+        [
+            ("lane", error.lane_name().to_owned()),
+            ("reason", error.reason().to_owned()),
+            ("request_kind", error.request_kind().to_owned()),
+        ],
+    );
 }
 
 trait BackgroundIoFallback {

@@ -407,13 +407,19 @@ impl ScratchpadApp {
         }
     }
 
+    /// Common post-update side effects for parameters that change query results
+    /// (query, scope, mode, match_case, whole_word).
+    fn after_search_param_change(&mut self) {
+        self.search_state.clear_replace_all_confirmation();
+        self.mark_search_dirty();
+        self.refresh_search_state();
+    }
+
     pub fn set_search_query(&mut self, query: impl Into<String>) {
         let query = query.into();
         if self.search_state.query != query {
             self.search_state.query = query;
-            self.search_state.clear_replace_all_confirmation();
-            self.mark_search_dirty();
-            self.refresh_search_state();
+            self.after_search_param_change();
         }
     }
 
@@ -452,9 +458,7 @@ impl ScratchpadApp {
         if self.search_state.scope != scope || self.search_state.scope_origin != origin {
             self.search_state.scope = scope;
             self.search_state.scope_origin = origin;
-            self.search_state.clear_replace_all_confirmation();
-            self.mark_search_dirty();
-            self.refresh_search_state();
+            self.after_search_param_change();
         }
     }
 
@@ -465,9 +469,7 @@ impl ScratchpadApp {
     pub(crate) fn set_search_mode(&mut self, mode: SearchMode) {
         if self.search_state.mode != mode {
             self.search_state.mode = mode;
-            self.search_state.clear_replace_all_confirmation();
-            self.mark_search_dirty();
-            self.refresh_search_state();
+            self.after_search_param_change();
         }
     }
 
@@ -478,9 +480,7 @@ impl ScratchpadApp {
     pub fn set_search_match_case(&mut self, enabled: bool) {
         if self.search_state.match_case != enabled {
             self.search_state.match_case = enabled;
-            self.search_state.clear_replace_all_confirmation();
-            self.mark_search_dirty();
-            self.refresh_search_state();
+            self.after_search_param_change();
         }
     }
 
@@ -491,9 +491,7 @@ impl ScratchpadApp {
     pub fn set_search_whole_word(&mut self, enabled: bool) {
         if self.search_state.whole_word != enabled {
             self.search_state.whole_word = enabled;
-            self.search_state.clear_replace_all_confirmation();
-            self.mark_search_dirty();
-            self.refresh_search_state();
+            self.after_search_param_change();
         }
     }
 
@@ -553,23 +551,21 @@ impl ScratchpadApp {
     }
 
     pub fn select_next_search_match(&mut self) -> bool {
-        if !self.search_replace_availability().allows_actions() {
-            return false;
-        }
-        let Some(index) = search::next_match_index(
-            self.search_state.matches.len(),
-            self.search_state.active_match_index,
-        ) else {
-            return false;
-        };
-        self.activate_search_match(index)
+        self.select_search_match_via(search::next_match_index)
     }
 
     pub fn select_previous_search_match(&mut self) -> bool {
+        self.select_search_match_via(search::previous_match_index)
+    }
+
+    fn select_search_match_via(
+        &mut self,
+        pick: impl FnOnce(usize, Option<usize>) -> Option<usize>,
+    ) -> bool {
         if !self.search_replace_availability().allows_actions() {
             return false;
         }
-        let Some(index) = search::previous_match_index(
+        let Some(index) = pick(
             self.search_state.matches.len(),
             self.search_state.active_match_index,
         ) else {

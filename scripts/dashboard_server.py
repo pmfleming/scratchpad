@@ -1,16 +1,19 @@
 import argparse
 import json
 import os
+from queue import Empty, Queue
 import subprocess
 import sys
 import threading
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 from urllib.parse import unquote, urlparse
 
+from app_package import app_package_payload
 from measurement_catalog import build_catalog
+from perf_report_shared import terminate_process_tree
 
 RUNS_PATH = Path("target/analysis/measurement_runs.json")
 LOG_DIR = Path("target/analysis/logs")
@@ -130,44 +133,107 @@ def normalize_command(command: List[str]) -> List[str]:
     return command
 
 
-def terminate_process_tree(process: subprocess.Popen[str]) -> None:
-    if process.poll() is not None:
-        return
-    if os.name == "nt":
-        subprocess.run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-            capture_output=True,
-            text=True,
-        )
-        return
-    process.kill()
+def progress_detail(line: str, limit: int = 160) -> str:
+    detail = " ".join(line.strip().split())
+    if len(detail) <= limit:
+        return detail
+    return detail[: limit - 3] + "..."
 
 
-def run_command(command: List[str]) -> subprocess.CompletedProcess[str]:
+def run_command(
+    command: List[str],
+    *,
+    on_output: Callable[[str], None] | None = None,
+    on_heartbeat: Callable[[], None] | None = None,
+) -> subprocess.CompletedProcess[str]:
     creationflags = (
         getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
     )
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
+        bufsize=1,
         creationflags=creationflags,
     )
+    output_queue: Queue[str | None] = Queue()
+    stdout_chunks: List[str] = []
+
+    def pump_stdout() -> None:
+        assert process.stdout is not None
+        try:
+            for line in process.stdout:
+                output_queue.put(line)
+        finally:
+            output_queue.put(None)
+
+    reader = threading.Thread(target=pump_stdout, daemon=True)
+    reader.start()
+    deadline = time.time() + COMMAND_TIMEOUT_SECONDS
+    reader_finished = False
     try:
-        stdout, stderr = process.communicate(timeout=COMMAND_TIMEOUT_SECONDS)
-        return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+        while True:
+            if on_heartbeat is not None:
+                on_heartbeat()
+            if time.time() >= deadline:
+                raise subprocess.TimeoutExpired(command, COMMAND_TIMEOUT_SECONDS)
+            try:
+                item = output_queue.get(timeout=1)
+            except Empty:
+                if process.poll() is not None and reader_finished:
+                    break
+                continue
+            if item is None:
+                reader_finished = True
+                if process.poll() is not None:
+                    break
+                continue
+            stdout_chunks.append(item)
+            if on_output is not None:
+                on_output(item)
+
+        while True:
+            try:
+                item = output_queue.get_nowait()
+            except Empty:
+                break
+            if item is None:
+                break
+            stdout_chunks.append(item)
+            if on_output is not None:
+                on_output(item)
+
+        reader.join(timeout=1)
+        return subprocess.CompletedProcess(
+            command,
+            process.wait(),
+            "".join(stdout_chunks),
+            "",
+        )
     except subprocess.TimeoutExpired:
         terminate_process_tree(process)
         try:
-            stdout, stderr = process.communicate(timeout=10)
+            process.wait(timeout=10)
         except subprocess.TimeoutExpired:
-            stdout, stderr = "", ""
+            pass
+        while True:
+            try:
+                item = output_queue.get(timeout=0.2)
+            except Empty:
+                if process.poll() is not None:
+                    break
+                continue
+            if item is None:
+                break
+            stdout_chunks.append(item)
+            if on_output is not None:
+                on_output(item)
+        reader.join(timeout=1)
         stderr = (
-            stderr
-            + f"\nCommand timed out after {COMMAND_TIMEOUT_SECONDS} seconds and was stopped.\n"
+            f"\nCommand timed out after {COMMAND_TIMEOUT_SECONDS} seconds and was stopped.\n"
         )
-        return subprocess.CompletedProcess(command, 124, stdout, stderr)
+        return subprocess.CompletedProcess(command, 124, "".join(stdout_chunks), stderr)
 
 
 def cleanup_stale_measurement_processes() -> List[Dict[str, Any]]:
@@ -277,12 +343,32 @@ def run_task_batch(run_id: str, selector: str, tasks: List[Dict[str, Any]]) -> N
                     write_stale_cleanup_log(log, cleanup_stale_measurement_processes())
                     log.flush()
                 for task in tasks:
+                    last_store_update = 0.0
+
+                    def update_progress(*, detail: str | None = None, force: bool = False) -> None:
+                        nonlocal last_store_update
+                        changes: Dict[str, Any] = {
+                            "current_task_id": task["id"],
+                            "completed_tasks": len(completed_task_ids),
+                            "total_tasks": total_tasks,
+                            "completed_task_ids": list(completed_task_ids),
+                            "last_update_at": time.time(),
+                        }
+                        if detail is not None:
+                            changes["current_task_detail"] = detail
+                        if not force and time.time() - last_store_update < 5:
+                            return
+                        STORE.update(run_id, **changes)
+                        last_store_update = time.time()
+
                     STORE.update(
                         run_id,
                         current_task_id=task["id"],
+                        current_task_detail=None,
                         completed_tasks=len(completed_task_ids),
                         total_tasks=total_tasks,
                         completed_task_ids=list(completed_task_ids),
+                        last_update_at=time.time(),
                     )
                     log.write(f"## {task['id']} - {task['title']}\n")
                     log.flush()
@@ -290,9 +376,27 @@ def run_task_batch(run_id: str, selector: str, tasks: List[Dict[str, Any]]) -> N
                         command = normalize_command(list(raw_command))
                         log.write(f"$ {' '.join(command)}\n")
                         log.flush()
-                        process = run_command(command)
-                        if process.stdout:
-                            log.write(process.stdout)
+
+                        def append_output(chunk: str) -> None:
+                            log.write(chunk)
+                            log.flush()
+                            detail = progress_detail(chunk)
+                            if detail:
+                                STORE.update(
+                                    run_id,
+                                    current_task_id=task["id"],
+                                    current_task_detail=detail,
+                                    completed_tasks=len(completed_task_ids),
+                                    total_tasks=total_tasks,
+                                    completed_task_ids=list(completed_task_ids),
+                                    last_update_at=time.time(),
+                                )
+
+                        process = run_command(
+                            command,
+                            on_output=append_output,
+                            on_heartbeat=update_progress,
+                        )
                         if process.stderr:
                             log.write(process.stderr)
                         log.write(f"\nexit={process.returncode}\n\n")
@@ -325,9 +429,11 @@ def run_task_batch(run_id: str, selector: str, tasks: List[Dict[str, Any]]) -> N
             "artifacts": sorted(set(artifacts)),
             "metrics": metrics,
             "current_task_id": None,
+            "current_task_detail": None,
             "completed_tasks": len(completed_task_ids),
             "total_tasks": total_tasks,
             "completed_task_ids": completed_task_ids,
+            "last_update_at": finished,
         }
         if error_message:
             changes["error"] = error_message
@@ -421,6 +527,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if path == "/api/catalog":
             json_response(self, 200, task_catalog())
             return
+        if path == "/api/app-package":
+            json_response(self, 200, app_package_payload())
+            return
         if path == "/api/runs":
             json_response(self, 200, STORE.snapshot())
             return
@@ -472,9 +581,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "duration_seconds": None,
             "artifacts": [],
             "current_task_id": None,
+            "current_task_detail": None,
             "completed_tasks": 0,
             "total_tasks": len(tasks),
             "completed_task_ids": [],
+            "last_update_at": time.time(),
         }
         active = STORE.try_add_queued(run)
         if active is not None:

@@ -199,6 +199,50 @@ h2 {
     font-size: 30px;
 }
 
+.active-progress-pill {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: max-content max-content minmax(0, max-content) minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    min-width: 0;
+    padding: 12px 16px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: rgba(35, 43, 54, 0.7);
+}
+
+.active-progress-pill.is-running {
+    border-color: rgba(111, 208, 255, 0.42);
+    box-shadow: inset 0 0 0 1px rgba(111, 208, 255, 0.08);
+}
+
+.active-progress-pill span {
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.active-progress-pill strong {
+    font-size: 16px;
+}
+
+.active-progress-pill code,
+.active-progress-pill em {
+    overflow: hidden;
+    min-width: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.active-progress-pill code {
+    color: var(--text);
+}
+
+.active-progress-pill em {
+    color: var(--muted);
+    font-style: normal;
+}
+
 .panel-card {
     padding: 20px;
     border-radius: 24px;
@@ -220,12 +264,18 @@ h2 {
 }
 
 .run-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     padding: 9px 13px;
     color: var(--text);
     border: 1px solid rgba(111, 208, 255, 0.42);
     border-radius: 8px;
     background: rgba(111, 208, 255, 0.12);
     cursor: pointer;
+    font: inherit;
+    line-height: 1.2;
+    text-decoration: none;
 }
 
 .run-button:hover {
@@ -485,6 +535,44 @@ h2 {
     white-space: pre-wrap;
 }
 
+.package-paths {
+    display: grid;
+    gap: 10px;
+}
+
+.package-paths__row {
+    display: grid;
+    grid-template-columns: 140px minmax(0, 1fr);
+    gap: 12px;
+    align-items: baseline;
+    min-width: 0;
+}
+
+.package-paths__row span {
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.package-paths__row code {
+    overflow-wrap: anywhere;
+}
+
+.app-package-actions,
+.performance-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.warning-list {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding-left: 18px;
+    color: var(--warn);
+}
+
 .run-progress-detail {
     margin-bottom: 14px;
 }
@@ -534,6 +622,14 @@ h2 {
 .run-progress__current {
     overflow: hidden;
     color: var(--text);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.run-progress__detail {
+    overflow: hidden;
+    color: var(--muted);
     font-size: 12px;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1043,6 +1139,14 @@ tr:hover td {
     .chart-grid {
         grid-template-columns: 1fr;
     }
+
+    .active-progress-pill {
+        grid-template-columns: max-content max-content minmax(0, 1fr);
+    }
+
+    .active-progress-pill em {
+        grid-column: 1 / -1;
+    }
 }
 
 /* Overview monitor components */
@@ -1211,7 +1315,7 @@ tr:hover td {
 
 .top-concerns-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 18px;
     margin-bottom: 18px;
 }
@@ -1336,7 +1440,7 @@ tr:hover td {
 /* Quality two-pane */
 .quality-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 18px;
     margin-bottom: 18px;
 }
@@ -1344,6 +1448,110 @@ tr:hover td {
 .quality-distribution {
     display: grid;
     gap: 16px;
+}
+
+.risk-curve-card {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+}
+
+.risk-curve {
+    width: 100%;
+    height: auto;
+    min-height: 180px;
+}
+
+.risk-curve__axis {
+    stroke: rgba(159, 176, 195, 0.28);
+    stroke-width: 2;
+}
+
+.risk-curve__bar {
+    fill: rgba(111, 208, 255, 0.18);
+}
+
+.risk-curve__line {
+    fill: none;
+    stroke: var(--accent);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 4;
+}
+
+.risk-curve__mean {
+    fill: var(--accent-2);
+    stroke: rgba(16, 21, 28, 0.92);
+    stroke-width: 2;
+}
+
+.risk-curve__marker {
+    opacity: 0.38;
+    stroke-dasharray: 6 6;
+    stroke-width: 2;
+}
+
+.risk-curve__marker--warn {
+    stroke: var(--warn);
+}
+
+.risk-curve__marker--bad {
+    stroke: var(--bad);
+}
+
+.risk-curve-card__stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.risk-curve-card__stats span,
+.rank-pill {
+    display: inline-flex;
+    align-items: center;
+    min-height: 26px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: rgba(159, 176, 195, 0.12);
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.risk-curve-card__stats strong {
+    margin-right: 4px;
+    color: var(--text);
+}
+
+.rank-pill {
+    justify-content: center;
+    min-width: 28px;
+    color: var(--accent-2);
+    font-weight: 700;
+}
+
+.risk-count-grid {
+    display: grid;
+    grid-template-columns: minmax(120px, 0.45fr) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+}
+
+.risk-bucket-list {
+    display: grid;
+    gap: 8px;
+}
+
+.risk-bucket-list__item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.risk-bucket-list__item strong {
+    color: var(--text);
 }
 
 .quality-pie-card {
@@ -1825,6 +2033,10 @@ tr:hover td {
     }
 
     .quality-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .risk-count-grid {
         grid-template-columns: 1fr;
     }
 }

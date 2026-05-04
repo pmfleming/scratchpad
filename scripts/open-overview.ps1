@@ -5,6 +5,7 @@ param(
     [switch]$FlamegraphOnly,
     [switch]$SearchSpeedOnly,
     [switch]$CloneOnly,
+    [switch]$AppPackage,
     [switch]$LegacyStaticServer
 )
 
@@ -66,6 +67,7 @@ function Restart-AsAdministrator {
             @($FlamegraphOnly, "-FlamegraphOnly"),
             @($SearchSpeedOnly, "-SearchSpeedOnly"),
             @($CloneOnly, "-CloneOnly"),
+            @($AppPackage, "-AppPackage"),
             @($LegacyStaticServer, "-LegacyStaticServer")
         )) {
         if ($entry[0]) {
@@ -327,6 +329,7 @@ function Get-RefreshTasks {
 
 Push-Location $repoRoot
 try {
+    $sessionRoot = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "scratchpad")
     $exclusiveModes = @()
     if ($FullUpdate) { $exclusiveModes += "-FullUpdate" }
     if ($FlamegraphOnly) { $exclusiveModes += "-FlamegraphOnly" }
@@ -339,6 +342,10 @@ try {
 
     if ($Flamegraph -and $exclusiveModes.Count -gt 0) {
         throw "Legacy switch -Flamegraph cannot be combined with the explicit update modes."
+    }
+
+    if ($AppPackage -and $LegacyStaticServer) {
+        throw "-AppPackage requires the dashboard server API and cannot be combined with -LegacyStaticServer."
     }
 
     $updateMode = "fast"
@@ -436,6 +443,9 @@ try {
         "Starting Python web server"
     }
     Write-Step -Number $stepNumber -Total $totalSteps -Title $startTitle
+    if ($AppPackage) {
+        Write-Host "App package session root: $sessionRoot" -ForegroundColor Green
+    }
     $activePort = Get-AvailablePort -StartPort $Port
     if ($activePort -ne $Port) {
         Write-Host "Port $Port is already in use. Using port $activePort instead." -ForegroundColor Yellow
@@ -452,7 +462,11 @@ try {
         -PassThru
     Write-Host "Started server with PID $($serverProcess.Id) on port $activePort." -ForegroundColor Green
 
-    $viewerUrl = "http://127.0.0.1:$activePort/viewer/?v=$(Get-Date -Format 'yyyyMMddHHmmss')"
+    $viewerQuery = "v=$(Get-Date -Format 'yyyyMMddHHmmss')"
+    if ($AppPackage) {
+        $viewerQuery += "&tab=app-package"
+    }
+    $viewerUrl = "http://127.0.0.1:$activePort/viewer/?$viewerQuery"
 
     if (-not (Wait-ForServer -Url $viewerUrl)) {
         throw "The local web server did not become ready at $viewerUrl."

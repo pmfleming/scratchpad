@@ -1,8 +1,9 @@
-use super::piece_tree::PieceBuffer;
-use crate::app::ui::editor_content::native_editor::CursorRange;
+use super::piece_tree::{PieceBuffer, PieceTreeLite};
+use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
 use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub type PieceHistoryEdits = SmallVec<[PieceHistoryEdit; 1]>;
@@ -280,31 +281,177 @@ impl PersistedHistoryEntry {
     }
 }
 
+fn char_len_u32(text: &str) -> u32 {
+    text.chars().count().min(u32::MAX as usize) as u32
+}
+
+pub(crate) fn empty_byte_span() -> ByteSpan {
+    ByteSpan {
+        buffer: PieceBuffer::Add,
+        start_byte: 0,
+        byte_len: 0,
+    }
+}
+
+impl PieceHistoryEdit {
+    /// Build a persisted form. `text_for_span` is the caller's view onto a
+    /// byte span (typically `tree.text_for_span(...)`).
+    pub fn to_persisted(
+        &self,
+        mut text_for_span: impl FnMut(ByteSpan) -> String,
+    ) -> PersistedHistoryEdit {
+        match self {
+            PieceHistoryEdit::Inserted { start_char, span } => {
+                let text = text_for_span(*span);
+                PersistedHistoryEdit::Inserted {
+                    start_char: *start_char,
+                    inserted_len: char_len_u32(&text),
+                    inserted_payload: Some(text),
+                }
+            }
+            PieceHistoryEdit::Deleted { start_char, spans } => {
+                let text = spans
+                    .iter()
+                    .copied()
+                    .map(&mut text_for_span)
+                    .collect::<String>();
+                PersistedHistoryEdit::Deleted {
+                    start_char: *start_char,
+                    deleted_len: char_len_u32(&text),
+                    deleted_payload: Some(text),
+                }
+            }
+            PieceHistoryEdit::Replaced {
+                start_char,
+                deleted,
+                inserted,
+            } => {
+                let deleted_text = deleted
+                    .iter()
+                    .copied()
+                    .map(&mut text_for_span)
+                    .collect::<String>();
+                let inserted_text = text_for_span(*inserted);
+                PersistedHistoryEdit::Replaced {
+                    start_char: *start_char,
+                    deleted_len: char_len_u32(&deleted_text),
+                    inserted_len: char_len_u32(&inserted_text),
+                    deleted_payload: Some(deleted_text),
+                    inserted_payload: Some(inserted_text),
+                }
+            }
+        }
+    }
+}
+
+impl PersistedHistoryEdit {
+    /// Reconstruct a piece-tree edit. `append_text` is the caller's
+    /// span-allocator (typically `tree.append_history_text(text, source)`).
+    pub fn into_piece(self, mut append_text: impl FnMut(&str) -> ByteSpan) -> PieceHistoryEdit {
+        let span_or_empty = |payload: Option<String>, append: &mut dyn FnMut(&str) -> ByteSpan| {
+            payload
+                .as_deref()
+                .map(append)
+                .unwrap_or_else(empty_byte_span)
+        };
+        let span_vec = |payload: Option<String>, append: &mut dyn FnMut(&str) -> ByteSpan| {
+            payload
+                .as_deref()
+                .map(append)
+                .map(|span| vec![span])
+                .unwrap_or_default()
+        };
+        match self {
+            PersistedHistoryEdit::Inserted {
+                start_char,
+                inserted_payload,
+                ..
+            } => PieceHistoryEdit::Inserted {
+                start_char,
+                span: span_or_empty(inserted_payload, &mut append_text),
+            },
+            PersistedHistoryEdit::Deleted {
+                start_char,
+                deleted_payload,
+                ..
+            } => PieceHistoryEdit::Deleted {
+                start_char,
+                spans: span_vec(deleted_payload, &mut append_text),
+            },
+            PersistedHistoryEdit::Replaced {
+                start_char,
+                deleted_payload,
+                inserted_payload,
+                ..
+            } => PieceHistoryEdit::Replaced {
+                start_char,
+                deleted: span_vec(deleted_payload, &mut append_text),
+                inserted: span_or_empty(inserted_payload, &mut append_text),
+            },
+        }
+    }
+}
+
+impl PieceHistoryEdit {
+    pub fn start_char(&self) -> u32 {
+        match self {
+            Self::Inserted { start_char, .. }
+            | Self::Deleted { start_char, .. }
+            | Self::Replaced { start_char, .. } => *start_char,
+        }
+    }
+
+    pub fn deleted_spans(&self) -> &[ByteSpan] {
+        match self {
+            Self::Inserted { .. } => &[],
+            Self::Deleted { spans, .. } => spans,
+            Self::Replaced { deleted, .. } => deleted,
+        }
+    }
+
+    pub fn inserted_span(&self) -> Option<ByteSpan> {
+        match self {
+            Self::Inserted { span, .. } => Some(*span),
+            Self::Deleted { .. } => None,
+            Self::Replaced { inserted, .. } => Some(*inserted),
+        }
+    }
+
+    /// All byte spans this edit references, in fingerprint order
+    /// (deleted spans first, then any inserted span).
+    pub fn spans(&self) -> impl Iterator<Item = ByteSpan> + '_ {
+        self.deleted_spans()
+            .iter()
+            .copied()
+            .chain(self.inserted_span())
+    }
+
+    pub fn each_span_mut(&mut self, mut visit: impl FnMut(&mut ByteSpan)) {
+        match self {
+            Self::Inserted { span, .. } => visit(span),
+            Self::Deleted { spans, .. } => spans.iter_mut().for_each(&mut visit),
+            Self::Replaced {
+                deleted, inserted, ..
+            } => {
+                deleted.iter_mut().for_each(&mut visit);
+                visit(inserted);
+            }
+        }
+    }
+}
+
 impl PieceHistoryEntry {
     pub fn is_undone(&self) -> bool {
         self.flags.undone
     }
 
     pub fn byte_cost(&self) -> usize {
-        let edit_bytes = self
+        let edit_bytes: usize = self
             .edits
             .iter()
-            .map(|edit| match edit {
-                PieceHistoryEdit::Inserted { span, .. } => span.byte_len as usize,
-                PieceHistoryEdit::Deleted { spans, .. } => {
-                    spans.iter().map(|span| span.byte_len as usize).sum()
-                }
-                PieceHistoryEdit::Replaced {
-                    deleted, inserted, ..
-                } => {
-                    deleted
-                        .iter()
-                        .map(|span| span.byte_len as usize)
-                        .sum::<usize>()
-                        + inserted.byte_len as usize
-                }
-            })
-            .sum::<usize>();
+            .flat_map(PieceHistoryEdit::spans)
+            .map(|span| span.byte_len as usize)
+            .sum();
         std::mem::size_of::<Self>() + edit_bytes
     }
 }
@@ -357,4 +504,347 @@ pub(crate) fn fingerprint_parts<'a>(parts: impl IntoIterator<Item = &'a str>) ->
         0xff_u8.hash(&mut hasher);
     }
     hasher.finish()
+}
+
+// =============================================================================
+// Operation records and direction
+// =============================================================================
+
+/// After a soft divider (`,` `;` `:`) the entry is sealed only if the next
+/// keystroke arrives later than this. Inside this window the entry keeps
+/// growing past the soft boundary so a continuous typing burst stays one entry.
+pub(crate) const TEXT_HISTORY_SOFT_DIVIDER_PAUSE: std::time::Duration =
+    std::time::Duration::from_millis(400);
+
+#[derive(Clone, Copy)]
+pub(crate) enum OperationDirection {
+    Undo,
+    Redo,
+}
+
+impl OperationDirection {
+    pub(crate) fn selection(self, record: &TextDocumentOperationRecord) -> CursorRange {
+        match self {
+            OperationDirection::Undo => record.previous_selection,
+            OperationDirection::Redo => record.next_selection,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TextHistoryApplyError {
+    OutOfBounds,
+    Conflict,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextDocumentEditOperation {
+    pub start_char: usize,
+    pub deleted_text: String,
+    pub inserted_text: String,
+    pub deleted_spans: Vec<ByteSpan>,
+}
+
+impl TextDocumentEditOperation {
+    /// Text that is expected to currently exist at `start_char` for the given
+    /// replay direction (the "before" side).
+    pub(crate) fn expected_text(&self, direction: OperationDirection) -> &str {
+        match direction {
+            OperationDirection::Undo => &self.inserted_text,
+            OperationDirection::Redo => &self.deleted_text,
+        }
+    }
+
+    /// Text that should replace `expected_text` for the given replay direction
+    /// (the "after" side).
+    pub(crate) fn replacement_text(&self, direction: OperationDirection) -> &str {
+        match direction {
+            OperationDirection::Undo => &self.deleted_text,
+            OperationDirection::Redo => &self.inserted_text,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextDocumentOperationRecord {
+    pub previous_selection: CursorRange,
+    pub next_selection: CursorRange,
+    pub edits: Vec<TextDocumentEditOperation>,
+}
+
+pub(crate) enum CoalescedEdit {
+    Record(TextDocumentOperationRecord),
+    Noop,
+}
+
+// =============================================================================
+// Coalescing
+// =============================================================================
+
+fn is_hard_divider(ch: char) -> bool {
+    matches!(ch, '.' | '?' | '!' | '\n' | '\r')
+}
+
+fn is_soft_divider(ch: char) -> bool {
+    matches!(ch, ',' | ';' | ':' | '-')
+}
+
+fn cursor_ranges_share_position(left: &CursorRange, right: &CursorRange) -> bool {
+    left.primary.index == right.primary.index && left.secondary.index == right.secondary.index
+}
+
+fn coalescable_edit_text(edit: &TextDocumentEditOperation) -> bool {
+    // Inserts may contain a hard divider (newline) that joins the prior entry
+    // and then seals it; only the delete side is restricted to single line.
+    is_single_line(&edit.deleted_text)
+}
+
+/// Decide whether the latest entry has been "sealed" by a divider in its
+/// inserted text. Hard dividers always seal; soft dividers seal only if the
+/// user paused after typing them.
+pub(crate) fn entry_sealed_by_divider(
+    latest: &TextDocumentOperationRecord,
+    elapsed: Option<std::time::Duration>,
+) -> bool {
+    let Some(edit) = latest.edits.last() else {
+        return false;
+    };
+    let Some(last_char) = edit.inserted_text.chars().next_back() else {
+        return false;
+    };
+    if is_hard_divider(last_char) {
+        return true;
+    }
+    if is_soft_divider(last_char) {
+        return elapsed.is_none_or(|d| d >= TEXT_HISTORY_SOFT_DIVIDER_PAUSE);
+    }
+    false
+}
+
+pub(crate) fn coalesced_local_edit_record(
+    latest: TextDocumentOperationRecord,
+    incoming: &TextDocumentOperationRecord,
+) -> Option<CoalescedEdit> {
+    if latest.edits.len() != 1 || incoming.edits.len() != 1 {
+        return None;
+    }
+    // Compare by index only — `prefer_next_row` is a UI hint that flips at
+    // soft-wrap boundaries, and treating it as a cursor jump would split
+    // continuous typing into spurious entries.
+    if !cursor_ranges_share_position(&latest.next_selection, &incoming.previous_selection)
+        || !latest.next_selection.is_empty()
+        || !incoming.next_selection.is_empty()
+    {
+        return None;
+    }
+    let latest_edit = latest.edits.first()?;
+    let incoming_edit = incoming.edits.first()?;
+    if !coalescable_edit_text(latest_edit) || !coalescable_edit_text(incoming_edit) {
+        return None;
+    }
+
+    if !latest_edit.inserted_text.is_empty() {
+        return coalesce_into_inserted_text(latest, incoming);
+    }
+
+    if !latest_edit.deleted_text.is_empty() && latest_edit.inserted_text.is_empty() {
+        return coalesce_after_delete(latest, incoming);
+    }
+
+    None
+}
+
+fn coalesce_into_inserted_text(
+    mut latest: TextDocumentOperationRecord,
+    incoming: &TextDocumentOperationRecord,
+) -> Option<CoalescedEdit> {
+    let latest_edit = latest.edits.first_mut()?;
+    let incoming_edit = incoming.edits.first()?;
+    let inserted_len = latest_edit.inserted_text.chars().count();
+    let deleted_len = incoming_edit.deleted_text.chars().count();
+    let inserted_start = latest_edit.start_char;
+    let incoming_end = incoming_edit.start_char.checked_add(deleted_len)?;
+    let inserted_end = inserted_start.checked_add(inserted_len)?;
+    if incoming_edit.start_char < inserted_start || incoming_end > inserted_end {
+        return None;
+    }
+
+    let relative_start = incoming_edit.start_char - inserted_start;
+    let relative_end = relative_start + deleted_len;
+    latest_edit.inserted_text = replace_char_range_in_text(
+        &latest_edit.inserted_text,
+        relative_start..relative_end,
+        &incoming_edit.inserted_text,
+    );
+    latest.next_selection = incoming.next_selection;
+
+    if latest_edit.deleted_text.is_empty() && latest_edit.inserted_text.is_empty() {
+        return Some(CoalescedEdit::Noop);
+    }
+
+    Some(CoalescedEdit::Record(latest))
+}
+
+fn coalesce_after_delete(
+    mut latest: TextDocumentOperationRecord,
+    incoming: &TextDocumentOperationRecord,
+) -> Option<CoalescedEdit> {
+    let latest_edit = latest.edits.first_mut()?;
+    let incoming_edit = incoming.edits.first()?;
+    let latest_start = latest_edit.start_char;
+    let incoming_deleted_len = incoming_edit.deleted_text.chars().count();
+
+    if incoming_edit.deleted_text.is_empty() && !incoming_edit.inserted_text.is_empty() {
+        if incoming_edit.start_char != latest_start {
+            return None;
+        }
+        latest_edit.inserted_text = incoming_edit.inserted_text.clone();
+        latest.next_selection = incoming.next_selection;
+        return Some(CoalescedEdit::Record(latest));
+    }
+
+    if incoming_edit.inserted_text.is_empty() && !incoming_edit.deleted_text.is_empty() {
+        if incoming_edit.start_char == latest_start {
+            latest_edit
+                .deleted_text
+                .push_str(&incoming_edit.deleted_text);
+        } else if incoming_edit.start_char + incoming_deleted_len == latest_start {
+            latest_edit.start_char = incoming_edit.start_char;
+            latest_edit.deleted_text =
+                format!("{}{}", incoming_edit.deleted_text, latest_edit.deleted_text);
+        } else {
+            return None;
+        }
+        latest_edit.deleted_spans.clear();
+        latest.next_selection = incoming.next_selection;
+        return Some(CoalescedEdit::Record(latest));
+    }
+
+    None
+}
+
+fn replace_char_range_in_text(text: &str, range: Range<usize>, replacement: &str) -> String {
+    let start = byte_index_for_char(text, range.start);
+    let end = byte_index_for_char(text, range.end);
+    let mut result = String::with_capacity(text.len() + replacement.len());
+    result.push_str(&text[..start]);
+    result.push_str(replacement);
+    result.push_str(&text[end..]);
+    result
+}
+
+fn byte_index_for_char(text: &str, char_index: usize) -> usize {
+    text.char_indices()
+        .map(|(index, _)| index)
+        .nth(char_index)
+        .unwrap_or(text.len())
+}
+
+fn is_single_line(text: &str) -> bool {
+    !text.contains('\n') && !text.contains('\r')
+}
+
+// =============================================================================
+// Persistence helpers
+// =============================================================================
+
+pub(crate) fn persist_cursor_range(range: CursorRange) -> PersistedCursorRange {
+    PersistedCursorRange {
+        primary_index: range.primary.index,
+        primary_prefer_next_row: range.primary.prefer_next_row,
+        secondary_index: range.secondary.index,
+        secondary_prefer_next_row: range.secondary.prefer_next_row,
+    }
+}
+
+pub(crate) fn restore_cursor_range(range: PersistedCursorRange) -> CursorRange {
+    CursorRange {
+        primary: CharCursor {
+            index: range.primary_index,
+            prefer_next_row: range.primary_prefer_next_row,
+        },
+        secondary: CharCursor {
+            index: range.secondary_index,
+            prefer_next_row: range.secondary_prefer_next_row,
+        },
+    }
+}
+
+pub(crate) fn record_expected_parts(
+    record: &TextDocumentOperationRecord,
+    direction: OperationDirection,
+) -> Vec<&str> {
+    record
+        .edits
+        .iter()
+        .map(|edit| edit.expected_text(direction))
+        .collect()
+}
+
+pub(crate) fn record_current_parts(
+    tree: &PieceTreeLite,
+    record: &TextDocumentOperationRecord,
+    direction: OperationDirection,
+) -> Result<Vec<String>, TextHistoryApplyError> {
+    record
+        .edits
+        .iter()
+        .map(|edit| {
+            let range = edit.start_char..edit.start_char + edit.expected_text(direction).chars().count();
+            if range.end > tree.len_chars() {
+                return Err(TextHistoryApplyError::OutOfBounds);
+            }
+            Ok(tree.extract_range(range))
+        })
+        .collect()
+}
+
+pub(crate) fn deleted_spans_or_payload(
+    tree: &mut PieceTreeLite,
+    edit: &TextDocumentEditOperation,
+    source: PieceSource,
+) -> Vec<ByteSpan> {
+    if !edit.deleted_spans.is_empty() {
+        return edit.deleted_spans.clone();
+    }
+    vec![tree.append_history_text(&edit.deleted_text, source)]
+}
+
+// =============================================================================
+// Operation summary
+// =============================================================================
+
+pub(crate) fn operation_summary(
+    source: PieceSource,
+    operation: &TextDocumentOperationRecord,
+) -> String {
+    match source {
+        PieceSource::SearchReplace if operation.edits.len() == 1 => "Replace match".to_owned(),
+        PieceSource::SearchReplace => format!("Replace {} matches", operation.edits.len()),
+        PieceSource::Paste => operation
+            .edits
+            .first()
+            .map(|edit| format!("Paste \"{}\"", preview_text(&edit.inserted_text)))
+            .unwrap_or_else(|| "Paste".to_owned()),
+        PieceSource::Cut => operation
+            .edits
+            .first()
+            .map(|edit| format!("Cut \"{}\"", preview_text(&edit.deleted_text)))
+            .unwrap_or_else(|| "Cut".to_owned()),
+        _ if operation.edits.len() != 1 => format!("Edit {} ranges", operation.edits.len()),
+        _ => operation
+            .edits
+            .first()
+            .map(
+                |edit| match (edit.deleted_text.is_empty(), edit.inserted_text.is_empty()) {
+                    (true, false) => format!("Insert \"{}\"", preview_text(&edit.inserted_text)),
+                    (false, true) => format!("Delete \"{}\"", preview_text(&edit.deleted_text)),
+                    (false, false) => {
+                        format!("Replace with \"{}\"", preview_text(&edit.inserted_text))
+                    }
+                    (true, true) => "Edit".to_owned(),
+                },
+            )
+            .unwrap_or_else(|| "Edit".to_owned()),
+    }
 }

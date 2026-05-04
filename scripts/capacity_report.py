@@ -8,7 +8,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from perf_report_shared import matching_flamegraph_ids
+from perf_report_shared import matching_flamegraph_ids, terminate_process_tree
 from report_modes import add_mode_argument, emit_report
 
 DEFAULT_OUTPUT = Path("capacity_report.json")
@@ -154,19 +154,6 @@ def sample_posix_process(pid: int) -> Dict[str, Optional[int]]:
             "page_fault_count": None,
             "handle_count": None,
         }
-
-
-def terminate_process_tree(process: subprocess.Popen[str]) -> None:
-    if process.poll() is not None:
-        return
-    if os.name == "nt":
-        subprocess.run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-            capture_output=True,
-            text=True,
-        )
-        return
-    process.kill()
 
 
 def run_probe() -> Tuple[List[Dict[str, Any]], str]:

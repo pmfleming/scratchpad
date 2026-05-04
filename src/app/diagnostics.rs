@@ -1,7 +1,7 @@
 use eframe::egui;
 use log::{Level, LevelFilter, Log, Metadata, Record};
 use serde::Serialize;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::panic;
@@ -34,6 +34,10 @@ pub(crate) struct AppDiagnostic {
     kind: AppDiagnosticKind,
     message: String,
     source: Option<String>,
+    operation: Option<String>,
+    path: Option<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    details: BTreeMap<String, String>,
     widget_id: Option<String>,
     rect: Option<String>,
     frame: Option<u64>,
@@ -46,6 +50,9 @@ impl AppDiagnostic {
             kind,
             message: message.into(),
             source: None,
+            operation: None,
+            path: None,
+            details: BTreeMap::new(),
             widget_id: None,
             rect: None,
             frame: None,
@@ -54,6 +61,23 @@ impl AppDiagnostic {
 
     fn with_source(mut self, source: impl Into<String>) -> Self {
         self.source = Some(source.into());
+        self
+    }
+
+    fn with_operation(mut self, operation: impl Into<String>) -> Self {
+        self.operation = Some(operation.into());
+        self
+    }
+
+    fn with_path(mut self, path: &Path) -> Self {
+        self.path = Some(path.display().to_string());
+        self
+    }
+
+    fn with_details(mut self, details: impl IntoIterator<Item = (&'static str, String)>) -> Self {
+        for (key, value) in details {
+            self.details.insert(key.to_owned(), value);
+        }
         self
     }
 
@@ -239,6 +263,90 @@ pub(crate) fn track_widget_id(id: egui::Id, rect: egui::Rect, kind: &'static str
     with_state(|state| state.track_widget(id, rect, kind));
 }
 
+pub(crate) fn record_io_error(
+    operation: &'static str,
+    path: Option<&Path>,
+    source: &'static str,
+    error: &dyn std::fmt::Display,
+) {
+    record_diagnostic(build_io_diagnostic(
+        operation,
+        path,
+        source,
+        error.to_string(),
+        std::iter::empty(),
+    ));
+}
+
+pub(crate) fn record_io_error_with_details(
+    operation: &'static str,
+    path: Option<&Path>,
+    source: &'static str,
+    error: &dyn std::fmt::Display,
+    details: impl IntoIterator<Item = (&'static str, String)>,
+) {
+    record_diagnostic(build_io_diagnostic(
+        operation,
+        path,
+        source,
+        error.to_string(),
+        details,
+    ));
+}
+
+pub(crate) fn record_warning(
+    operation: &'static str,
+    path: Option<&Path>,
+    source: &'static str,
+    message: impl Into<String>,
+) {
+    let mut diagnostic = AppDiagnostic::new(AppDiagnosticKind::Other, message)
+        .with_source(source)
+        .with_operation(operation);
+    if let Some(path) = path {
+        diagnostic = diagnostic.with_path(path);
+    }
+    record_diagnostic(diagnostic);
+}
+
+pub(crate) fn record_background_failure(
+    operation: &'static str,
+    source: &'static str,
+    message: impl Into<String>,
+    details: impl IntoIterator<Item = (&'static str, String)>,
+) {
+    record_diagnostic(
+        AppDiagnostic::new(AppDiagnosticKind::Other, message)
+            .with_source(source)
+            .with_operation(operation)
+            .with_details(details),
+    );
+}
+
+fn build_io_diagnostic(
+    operation: &'static str,
+    path: Option<&Path>,
+    source: &'static str,
+    message: String,
+    details: impl IntoIterator<Item = (&'static str, String)>,
+) -> AppDiagnostic {
+    let mut diagnostic = AppDiagnostic::new(AppDiagnosticKind::Io, message)
+        .with_source(source)
+        .with_operation(operation)
+        .with_details(details);
+    if let Some(path) = path {
+        diagnostic = diagnostic.with_path(path);
+    }
+    diagnostic
+}
+
+fn record_diagnostic(diagnostic: AppDiagnostic) {
+    with_state(|state| {
+        let diagnostic = diagnostic.with_frame(state.frame);
+        state.append_diagnostic(&diagnostic);
+    });
+}
+
 fn install_logger() {
     LOGGER_INSTALLED.get_or_init(|| {
         if log::set_logger(&LOGGER).is_ok() {
@@ -302,7 +410,14 @@ fn panic_message(info: &panic::PanicHookInfo<'_>) -> String {
 
 fn should_capture_log_record(metadata: &Metadata<'_>, message: &str) -> bool {
     metadata.level() <= Level::Warn
-        && (is_egui_target(metadata.target()) || is_egui_warning_message(message))
+        && (is_app_target(metadata.target())
+            || is_egui_target(metadata.target())
+            || is_egui_warning_message(message))
+}
+
+fn is_app_target(target: &str) -> bool {
+    target == env!("CARGO_CRATE_NAME")
+        || target.starts_with(concat!(env!("CARGO_CRATE_NAME"), "::"))
 }
 
 fn is_egui_target(target: &str) -> bool {
@@ -370,6 +485,30 @@ mod tests {
     }
 
     #[test]
+    fn structured_io_diagnostic_includes_operation_path_and_details() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(ERROR_LOG_NAME);
+        let target_path = directory.path().join("target.txt");
+        let diagnostic = build_io_diagnostic(
+            "save_file",
+            Some(&target_path),
+            "test_source",
+            "disk full".to_owned(),
+            [("encoding", "UTF-8".to_owned())],
+        );
+
+        append_diagnostic_to_path(&path, &diagnostic).unwrap();
+
+        let contents = fs::read_to_string(path).unwrap();
+        let payload: serde_json::Value = serde_json::from_str(contents.trim()).unwrap();
+        assert_eq!(payload["kind"], "io");
+        assert_eq!(payload["operation"], "save_file");
+        assert_eq!(payload["source"], "test_source");
+        assert_eq!(payload["path"], target_path.display().to_string());
+        assert_eq!(payload["details"]["encoding"], "UTF-8");
+    }
+
+    #[test]
     fn unavailable_log_path_does_not_panic() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().to_path_buf();
@@ -408,10 +547,20 @@ mod tests {
     }
 
     #[test]
-    fn logger_filter_ignores_unrelated_warnings() {
+    fn logger_filter_captures_app_warnings() {
         let metadata = Metadata::builder()
             .level(Level::Warn)
             .target("scratchpad")
+            .build();
+
+        assert!(should_capture_log_record(&metadata, "ordinary warning"));
+    }
+
+    #[test]
+    fn logger_filter_ignores_dependency_warnings() {
+        let metadata = Metadata::builder()
+            .level(Level::Warn)
+            .target("some_dependency")
             .build();
 
         assert!(!should_capture_log_record(&metadata, "ordinary warning"));

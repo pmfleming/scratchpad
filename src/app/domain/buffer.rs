@@ -15,12 +15,11 @@ pub use analysis::{
     analyze_line_endings, display_line_count, platform_default_line_ending,
 };
 pub use document::TextDocument;
-pub(crate) use document::{
-    TextDocumentOperationRecord, TextHistoryApplyError, TextReplacementError, TextReplacements,
-};
+pub(crate) use document::{TextReplacementError, TextReplacements};
 pub(crate) use history::{
     ByteSpan, PieceHistoryEdit, PieceHistoryEdits, PieceHistoryEntry, PieceHistoryFlags,
-    TEXT_HISTORY_COALESCE_WINDOW, fingerprint_parts, next_text_history_global_seq, preview_text,
+    TEXT_HISTORY_COALESCE_WINDOW, TextDocumentOperationRecord, TextHistoryApplyError,
+    fingerprint_parts, next_text_history_global_seq, preview_text,
     register_text_history_global_seq,
 };
 pub use history::{

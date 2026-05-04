@@ -33,6 +33,13 @@ LAYER_ORDER = {
 }
 
 DEFECT_KEYWORDS = ("fix", "bug", "regress", "panic", "crash", "issue", "fault")
+RISK_CATEGORIES = (
+    "maintainability",
+    "change",
+    "performance",
+    "correctness",
+    "architectural",
+)
 
 
 def group_id(mod_name: Optional[str]) -> Optional[str]:
@@ -684,23 +691,7 @@ class ArchitectureMapper:
                             )
                         ),
                         "category_signals": category_signals,
-                        "risk_colors": {
-                            "maintainability": self.risk_color(
-                                float(risk.get("maintainability_risk", 0.0))
-                            ),
-                            "change": self.risk_color(
-                                float(risk.get("change_risk", 0.0))
-                            ),
-                            "performance": self.risk_color(
-                                float(risk.get("performance_risk", 0.0))
-                            ),
-                            "correctness": self.risk_color(
-                                float(risk.get("correctness_risk", 0.0))
-                            ),
-                            "architectural": self.risk_color(
-                                float(risk.get("architectural_risk", 0.0))
-                            ),
-                        },
+                        "risk_colors": self.risk_colors(risk),
                         "evidence": evidence,
                         "is_slow": bool(perf_items),
                         "perf_benchmarks": [
@@ -737,6 +728,12 @@ class ArchitectureMapper:
 
         return {"nodes": nodes, "edges": edges}
 
+    def risk_colors(self, risk: Dict[str, object]) -> Dict[str, str]:
+        return {
+            category: self.risk_color(float(risk.get(f"{category}_risk", 0.0)))
+            for category in RISK_CATEGORIES
+        }
+
     def meta_summary(self) -> Dict[str, object]:
         measured_modules = len(self.risk_breakdown)
         good = warn = bad = 0
@@ -749,34 +746,11 @@ class ArchitectureMapper:
             else:
                 good += 1
         category_totals = {
-            "maintainability": round(
-                sum(
-                    item["maintainability_risk"]
-                    for item in self.risk_breakdown.values()
-                ),
+            category: round(
+                sum(item[f"{category}_risk"] for item in self.risk_breakdown.values()),
                 2,
-            ),
-            "change": round(
-                sum(item["change_risk"] for item in self.risk_breakdown.values()), 2
-            ),
-            "performance": round(
-                sum(
-                    item["performance_risk"] for item in self.risk_breakdown.values()
-                ),
-                2,
-            ),
-            "correctness": round(
-                sum(
-                    item["correctness_risk"] for item in self.risk_breakdown.values()
-                ),
-                2,
-            ),
-            "architectural": round(
-                sum(
-                    item["architectural_risk"] for item in self.risk_breakdown.values()
-                ),
-                2,
-            ),
+            )
+            for category in RISK_CATEGORIES
         }
         return {
             "measured_modules": measured_modules,
@@ -801,13 +775,7 @@ class ArchitectureMapper:
                 "source_root": "src",
                 "node_count": len(graph["nodes"]),
                 "edge_count": len(graph["edges"]),
-                "risk_model": [
-                    "maintainability",
-                    "change",
-                "performance",
-                "correctness",
-                "architectural",
-                ],
+                "risk_model": list(RISK_CATEGORIES),
                 "summary": self.meta_summary(),
             },
             "graph": graph,

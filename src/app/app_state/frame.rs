@@ -1,5 +1,6 @@
 use super::{AppSurface, CHROME_TRANSITION_FRAMES, ScratchpadApp};
 use crate::app::chrome::handle_window_resize;
+use crate::app::diagnostics;
 use crate::app::fonts;
 use crate::app::services::settings_store::TabListPosition;
 use crate::app::shortcuts;
@@ -158,6 +159,15 @@ impl ScratchpadApp {
         }
 
         if let Err(error) = fonts::apply_editor_fonts(ctx, self.app_settings.editor_font) {
+            diagnostics::record_warning(
+                "apply_editor_font",
+                None,
+                "app_state::frame",
+                format!(
+                    "Editor font '{}' unavailable; using default fallback: {error}",
+                    self.app_settings.editor_font.label()
+                ),
+            );
             self.set_warning_status(format!(
                 "Editor font '{}' unavailable; using default fallback: {error}",
                 self.app_settings.editor_font.label()

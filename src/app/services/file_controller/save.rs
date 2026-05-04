@@ -3,6 +3,7 @@ use crate::app::app_state::{
     PendingBackgroundAction, PendingReloadBufferAction, PendingReloadMode,
     PendingReopenWithEncodingAction, ScratchpadApp,
 };
+use crate::app::diagnostics;
 use crate::app::domain::{
     BufferFreshness, BufferId, DiskFileState, DocumentSnapshot, EncodingSource, PendingAction,
     TextFormatMetadata,
@@ -55,6 +56,13 @@ impl FileController {
         let format = match Self::format_with_selected_encoding(app, index, encoding_name) {
             Ok(format) => format,
             Err(error) => {
+                diagnostics::record_io_error_with_details(
+                    "save_with_encoding",
+                    Self::buffer_path(app, index).as_deref(),
+                    "file_controller::save",
+                    &error,
+                    [("encoding", encoding_name.to_owned())],
+                );
                 app.set_error_status(format!("Save with encoding failed: {error}"));
                 return false;
             }
@@ -170,7 +178,15 @@ impl FileController {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 Self::mark_buffer_missing_on_disk(app, index)
             }
-            Err(_) => false,
+            Err(error) => {
+                diagnostics::record_io_error(
+                    "refresh_disk_state",
+                    Some(&path),
+                    "file_controller::save",
+                    &error,
+                );
+                false
+            }
         }
     }
 
@@ -289,6 +305,16 @@ impl FileController {
                 true
             }
             Err(error) => {
+                diagnostics::record_io_error(
+                    if update_buffer_path {
+                        "save_as"
+                    } else {
+                        "save_file"
+                    },
+                    Some(&request.path),
+                    "file_controller::save",
+                    &error,
+                );
                 app.set_error_status(format!("Save failed: {error}"));
                 false
             }
@@ -413,6 +439,12 @@ impl FileController {
                 }
             }
             Err(error) => {
+                diagnostics::record_io_error(
+                    "reload_file",
+                    Some(&action.expected_path),
+                    "file_controller::save",
+                    &error,
+                );
                 Self::handle_async_reload_error(app, tab_index, &action, result.disk_state, error)
             }
         }
@@ -451,6 +483,12 @@ impl FileController {
                 app.set_info_status(format!("Reopened {buffer_name} with {encoding_label}."));
             }
             Err(error) => {
+                diagnostics::record_io_error(
+                    "reopen_with_encoding",
+                    Some(&action.expected_path),
+                    "file_controller::save",
+                    &error,
+                );
                 app.set_error_status(format!(
                     "Reopen with encoding failed for {}: {error}",
                     action.buffer_name

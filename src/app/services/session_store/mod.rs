@@ -1,6 +1,7 @@
 mod model;
 mod ops;
 
+use crate::app::diagnostics;
 use crate::app::domain::buffer::{
     BufferTextMetadata, buffer_text_metadata, detected_text_format_and_metadata,
 };
@@ -124,7 +125,14 @@ impl SessionStore {
     }
 
     pub(crate) fn persist_request(&self, request: SessionPersistRequest) -> io::Result<()> {
-        fs::create_dir_all(&self.root)?;
+        fs::create_dir_all(&self.root).inspect_err(|error| {
+            diagnostics::record_io_error(
+                "session_create_root",
+                Some(&self.root),
+                "session_store::persist_request",
+                &error,
+            );
+        })?;
 
         let mut active_temp_paths = HashSet::new();
         let mut session_tabs = Vec::with_capacity(request.tabs.len());
@@ -132,7 +140,17 @@ impl SessionStore {
         for captured_tab in request.tabs {
             for buffer in captured_tab.buffer_snapshots {
                 let temp_path = self.buffer_path(&buffer.temp_id);
-                FileService::write_snapshot_utf8(&temp_path, &buffer.snapshot)?;
+                FileService::write_snapshot_utf8(&temp_path, &buffer.snapshot).inspect_err(
+                    |error| {
+                        diagnostics::record_io_error_with_details(
+                            "session_write_buffer_snapshot",
+                            Some(&temp_path),
+                            "session_store::persist_request",
+                            &error,
+                            [("temp_id", buffer.temp_id.clone())],
+                        );
+                    },
+                )?;
                 active_temp_paths.insert(temp_path);
             }
             session_tabs.push(captured_tab.session_tab);
@@ -149,16 +167,47 @@ impl SessionStore {
             word_wrap: request.word_wrap,
             tabs: session_tabs,
         };
-        let json = serde_json::to_vec_pretty(&manifest).map_err(invalid_data)?;
-        write_atomic(&self.manifest_path, &json)
+        let json = serde_json::to_vec_pretty(&manifest).map_err(|error| {
+            let error = invalid_data(error);
+            diagnostics::record_io_error(
+                "session_serialize_manifest",
+                Some(&self.manifest_path),
+                "session_store::persist_request",
+                &error,
+            );
+            error
+        })?;
+        write_atomic(&self.manifest_path, &json).inspect_err(|error| {
+            diagnostics::record_io_error(
+                "session_write_manifest",
+                Some(&self.manifest_path),
+                "session_store::persist_request",
+                &error,
+            );
+        })
     }
 
     fn remove_stale_buffer_files(&self, active_temp_paths: &HashSet<PathBuf>) -> io::Result<()> {
         let stale_paths =
-            collect_stale_buffer_files(&self.root, &self.manifest_path, active_temp_paths)?;
+            collect_stale_buffer_files(&self.root, &self.manifest_path, active_temp_paths)
+                .inspect_err(|error| {
+                    diagnostics::record_io_error(
+                        "session_collect_stale_buffers",
+                        Some(&self.root),
+                        "session_store::remove_stale_buffer_files",
+                        &error,
+                    );
+                })?;
 
         for path in stale_paths {
-            remove_file_if_exists(&path)?;
+            remove_file_if_exists(&path).inspect_err(|error| {
+                diagnostics::record_io_error(
+                    "session_remove_stale_buffer",
+                    Some(&path),
+                    "session_store::remove_stale_buffer_files",
+                    &error,
+                );
+            })?;
         }
 
         Ok(())
@@ -173,10 +222,36 @@ impl SessionStore {
             return Ok(None);
         }
 
-        let raw = fs::read_to_string(&self.manifest_path)?;
-        let manifest: SessionManifest = serde_json::from_str(&raw).map_err(invalid_data)?;
+        let raw = fs::read_to_string(&self.manifest_path).inspect_err(|error| {
+            diagnostics::record_io_error(
+                "session_read_manifest",
+                Some(&self.manifest_path),
+                "session_store::load_manifest",
+                &error,
+            );
+        })?;
+        let manifest: SessionManifest = serde_json::from_str(&raw).map_err(|error| {
+            let error = invalid_data(error);
+            diagnostics::record_io_error(
+                "session_parse_manifest",
+                Some(&self.manifest_path),
+                "session_store::load_manifest",
+                &error,
+            );
+            error
+        })?;
 
         if manifest.version != model::SESSION_VERSION {
+            diagnostics::record_warning(
+                "session_version_mismatch",
+                Some(&self.manifest_path),
+                "session_store::load_manifest",
+                format!(
+                    "Session manifest version {} is not supported by version {}.",
+                    manifest.version,
+                    model::SESSION_VERSION
+                ),
+            );
             return Ok(None);
         }
 
@@ -292,7 +367,20 @@ impl SessionStore {
 
     fn restore_buffer_content(&self, buffer: &SessionBuffer) -> RestoredBufferContent {
         let session_disk_state = session_disk_state(buffer);
-        let session_text = fs::read_to_string(self.buffer_path(&buffer.temp_id)).ok();
+        let session_path = self.buffer_path(&buffer.temp_id);
+        let session_text = match fs::read_to_string(&session_path) {
+            Ok(content) => Some(content),
+            Err(error) => {
+                diagnostics::record_io_error_with_details(
+                    "session_read_buffer_snapshot",
+                    Some(&session_path),
+                    "session_store::restore_buffer_content",
+                    &error,
+                    [("temp_id", buffer.temp_id.clone())],
+                );
+                None
+            }
+        };
 
         match (&buffer.path, session_text) {
             (Some(path), Some(content)) => {

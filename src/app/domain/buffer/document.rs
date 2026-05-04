@@ -1,52 +1,24 @@
 use super::{
-    ByteSpan, DocumentSnapshot, LineEndingStyle, PersistedCursorRange, PersistedHistoryEdit,
-    PersistedHistoryEntry, PieceHistoryEdit, PieceHistoryEdits, PieceHistoryEntry,
-    PieceHistoryFlags, PieceSource, PieceTreeLite, TEXT_HISTORY_COALESCE_WINDOW, TextHistoryBudget,
+    ByteSpan, DocumentSnapshot, LineEndingStyle, PersistedHistoryEdit, PersistedHistoryEntry,
+    PieceHistoryEdit, PieceHistoryEdits, PieceHistoryEntry, PieceHistoryFlags, PieceSource,
+    PieceTreeLite, TEXT_HISTORY_COALESCE_WINDOW, TextDocumentOperationRecord, TextHistoryBudget,
     fingerprint_parts, next_text_history_global_seq, platform_default_line_ending,
     register_text_history_global_seq,
 };
+use super::history::{
+    CoalescedEdit, OperationDirection, TextDocumentEditOperation, TextHistoryApplyError,
+    coalesced_local_edit_record, deleted_spans_or_payload, entry_sealed_by_divider,
+    operation_summary, persist_cursor_range, record_current_parts, record_expected_parts,
+    restore_cursor_range,
+};
 use crate::app::capacity_metrics;
-use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange, OperationRecord};
+use crate::app::ui::editor_content::native_editor::{CursorRange, OperationRecord};
 use std::borrow::Cow;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Instant;
 
-/// After a soft divider (`,` `;` `:`) the entry is sealed only if the next
-/// keystroke arrives later than this. Inside this window the entry keeps
-/// growing past the soft boundary so a continuous typing burst stays one entry.
-const TEXT_HISTORY_SOFT_DIVIDER_PAUSE: std::time::Duration = std::time::Duration::from_millis(400);
-
-fn is_hard_divider(ch: char) -> bool {
-    matches!(ch, '.' | '?' | '!' | '\n' | '\r')
-}
-
-fn is_soft_divider(ch: char) -> bool {
-    matches!(ch, ',' | ';' | ':' | '-')
-}
-
 pub(crate) type TextReplacements<'a> = &'a [(Range<usize>, String)];
-
-#[derive(Clone, Copy)]
-enum OperationDirection {
-    Undo,
-    Redo,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TextDocumentEditOperation {
-    pub start_char: usize,
-    pub deleted_text: String,
-    pub inserted_text: String,
-    pub deleted_spans: Vec<ByteSpan>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct TextDocumentOperationRecord {
-    pub previous_selection: CursorRange,
-    pub next_selection: CursorRange,
-    pub edits: Vec<TextDocumentEditOperation>,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TextReplacementError {
@@ -54,12 +26,6 @@ pub(crate) enum TextReplacementError {
     OutOfBounds,
     NotDescending,
     OverlappingRanges,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TextHistoryApplyError {
-    OutOfBounds,
-    Conflict,
 }
 
 #[derive(Clone)]
@@ -441,35 +407,36 @@ impl TextDocument {
         record: &TextDocumentOperationRecord,
         direction: OperationDirection,
     ) {
-        match direction {
-            OperationDirection::Undo => {
-                for edit in record.edits.iter().rev() {
-                    self.apply_operation_edit(
-                        edit,
-                        edit.inserted_text.chars().count(),
-                        &edit.deleted_text,
-                    );
-                }
-            }
-            OperationDirection::Redo => {
-                for edit in &record.edits {
-                    self.apply_operation_edit(
-                        edit,
-                        edit.deleted_text.chars().count(),
-                        &edit.inserted_text,
-                    );
-                }
-            }
+        let ordered: Box<dyn Iterator<Item = &TextDocumentEditOperation>> = match direction {
+            OperationDirection::Undo => Box::new(record.edits.iter().rev()),
+            OperationDirection::Redo => Box::new(record.edits.iter()),
+        };
+        for edit in ordered {
+            let replaced_len = edit.expected_text(direction).chars().count();
+            self.replace_char_range_raw(
+                edit.start_char..edit.start_char + replaced_len,
+                edit.replacement_text(direction),
+            );
         }
     }
 
-    fn apply_operation_edit(
-        &mut self,
-        edit: &TextDocumentEditOperation,
-        replaced_len: usize,
-        replacement: &str,
-    ) {
-        self.replace_char_range_raw(edit.start_char..edit.start_char + replaced_len, replacement);
+    fn replayable_indices_at(
+        &self,
+        index: usize,
+        direction: OperationDirection,
+    ) -> Result<Vec<usize>, TextHistoryApplyError> {
+        let entry_undone = self.history[index].is_undone();
+        match direction {
+            OperationDirection::Undo if entry_undone => Err(TextHistoryApplyError::Conflict),
+            OperationDirection::Redo if !entry_undone => Err(TextHistoryApplyError::Conflict),
+            OperationDirection::Undo => Ok((index..self.history.len())
+                .rev()
+                .filter(|i| !self.history[*i].is_undone())
+                .collect()),
+            OperationDirection::Redo => Ok((0..=index)
+                .filter(|i| self.history[*i].is_undone())
+                .collect()),
+        }
     }
 
     fn apply_text_history_entry(
@@ -482,25 +449,7 @@ impl TextDocument {
             .iter()
             .position(|entry| entry.id == entry_id)
             .ok_or(TextHistoryApplyError::OutOfBounds)?;
-        let indices = match direction {
-            OperationDirection::Undo => {
-                if self.history[index].is_undone() {
-                    return Err(TextHistoryApplyError::Conflict);
-                }
-                (index..self.history.len())
-                    .rev()
-                    .filter(|idx| !self.history[*idx].is_undone())
-                    .collect::<Vec<_>>()
-            }
-            OperationDirection::Redo => {
-                if !self.history[index].is_undone() {
-                    return Err(TextHistoryApplyError::Conflict);
-                }
-                (0..=index)
-                    .filter(|idx| self.history[*idx].is_undone())
-                    .collect::<Vec<_>>()
-            }
-        };
+        let indices = self.replayable_indices_at(index, direction)?;
 
         let mut applied_selection = None;
         for idx in indices {
@@ -526,10 +475,7 @@ impl TextDocument {
         let expected_generation = self
             .history
             .iter()
-            .find(|entry| {
-                let entry_record = self.operation_from_history_entry(entry);
-                entry_record == *record
-            })
+            .find(|entry| self.operation_from_history_entry(entry) == *record)
             .map(|entry| match direction {
                 OperationDirection::Undo => entry.visible_generation_after,
                 OperationDirection::Redo => entry.visible_generation_before,
@@ -539,7 +485,7 @@ impl TextDocument {
         }
 
         let expected_parts = record_expected_parts(record, direction);
-        let expected_fingerprint = fingerprint_parts(expected_parts.iter().map(String::as_str));
+        let expected_fingerprint = fingerprint_parts(expected_parts.iter().copied());
         let current_fingerprint = fingerprint_parts(
             record_current_parts(self.piece_tree.as_ref(), record, direction)?
                 .iter()
@@ -550,17 +496,8 @@ impl TextDocument {
         }
 
         for edit in &record.edits {
-            let (expected, replaced_len) = match direction {
-                OperationDirection::Undo => (
-                    edit.inserted_text.as_str(),
-                    edit.inserted_text.chars().count(),
-                ),
-                OperationDirection::Redo => (
-                    edit.deleted_text.as_str(),
-                    edit.deleted_text.chars().count(),
-                ),
-            };
-            let range = edit.start_char..edit.start_char + replaced_len;
+            let expected = edit.expected_text(direction);
+            let range = edit.start_char..edit.start_char + expected.chars().count();
             if range.end > self.piece_tree.len_chars() {
                 return Err(TextHistoryApplyError::OutOfBounds);
             }
@@ -592,39 +529,7 @@ impl TextDocument {
     }
 
     fn export_history_edit(&self, edit: &PieceHistoryEdit) -> PersistedHistoryEdit {
-        match edit {
-            PieceHistoryEdit::Inserted { start_char, span } => {
-                let text = self.piece_tree.text_for_span(*span).to_owned();
-                PersistedHistoryEdit::Inserted {
-                    start_char: *start_char,
-                    inserted_len: text.chars().count().min(u32::MAX as usize) as u32,
-                    inserted_payload: Some(text),
-                }
-            }
-            PieceHistoryEdit::Deleted { start_char, spans } => {
-                let text = self.text_for_spans(spans);
-                PersistedHistoryEdit::Deleted {
-                    start_char: *start_char,
-                    deleted_len: text.chars().count().min(u32::MAX as usize) as u32,
-                    deleted_payload: Some(text),
-                }
-            }
-            PieceHistoryEdit::Replaced {
-                start_char,
-                deleted,
-                inserted,
-            } => {
-                let deleted_text = self.text_for_spans(deleted);
-                let inserted_text = self.piece_tree.text_for_span(*inserted).to_owned();
-                PersistedHistoryEdit::Replaced {
-                    start_char: *start_char,
-                    deleted_len: deleted_text.chars().count().min(u32::MAX as usize) as u32,
-                    inserted_len: inserted_text.chars().count().min(u32::MAX as usize) as u32,
-                    deleted_payload: Some(deleted_text),
-                    inserted_payload: Some(inserted_text),
-                }
-            }
-        }
+        edit.to_persisted(|span| self.piece_tree.text_for_span(span).to_owned())
     }
 
     fn import_history_entry(&mut self, persisted: PersistedHistoryEntry) -> PieceHistoryEntry {
@@ -658,54 +563,8 @@ impl TextDocument {
         edit: PersistedHistoryEdit,
         source: PieceSource,
     ) -> PieceHistoryEdit {
-        let empty = || ByteSpan {
-            buffer: super::piece_tree::PieceBuffer::Add,
-            start_byte: 0,
-            byte_len: 0,
-        };
         let tree = Arc::make_mut(&mut self.piece_tree);
-        match edit {
-            PersistedHistoryEdit::Inserted {
-                start_char,
-                inserted_payload,
-                ..
-            } => PieceHistoryEdit::Inserted {
-                start_char,
-                span: inserted_payload
-                    .as_deref()
-                    .map(|text| tree.append_history_text(text, source))
-                    .unwrap_or_else(empty),
-            },
-            PersistedHistoryEdit::Deleted {
-                start_char,
-                deleted_payload,
-                ..
-            } => PieceHistoryEdit::Deleted {
-                start_char,
-                spans: deleted_payload
-                    .as_deref()
-                    .map(|text| tree.append_history_text(text, source))
-                    .map(|span| vec![span])
-                    .unwrap_or_default(),
-            },
-            PersistedHistoryEdit::Replaced {
-                start_char,
-                deleted_payload,
-                inserted_payload,
-                ..
-            } => PieceHistoryEdit::Replaced {
-                start_char,
-                deleted: deleted_payload
-                    .as_deref()
-                    .map(|text| tree.append_history_text(text, source))
-                    .map(|span| vec![span])
-                    .unwrap_or_default(),
-                inserted: inserted_payload
-                    .as_deref()
-                    .map(|text| tree.append_history_text(text, source))
-                    .unwrap_or_else(empty),
-            },
-        }
+        edit.into_piece(|text| tree.append_history_text(text, source))
     }
 
     fn history_entry_from_operation(
@@ -787,37 +646,23 @@ impl TextDocument {
         &self,
         entry: &PieceHistoryEntry,
     ) -> TextDocumentOperationRecord {
+        let edits = entry
+            .edits
+            .iter()
+            .map(|edit| TextDocumentEditOperation {
+                start_char: edit.start_char() as usize,
+                deleted_text: self.text_for_spans(edit.deleted_spans()),
+                inserted_text: edit
+                    .inserted_span()
+                    .map(|span| self.piece_tree.text_for_span(span).to_owned())
+                    .unwrap_or_default(),
+                deleted_spans: edit.deleted_spans().to_vec(),
+            })
+            .collect();
         TextDocumentOperationRecord {
             previous_selection: entry.previous_selection,
             next_selection: entry.next_selection,
-            edits: entry
-                .edits
-                .iter()
-                .map(|edit| match edit {
-                    PieceHistoryEdit::Inserted { start_char, span } => TextDocumentEditOperation {
-                        start_char: *start_char as usize,
-                        deleted_text: String::new(),
-                        inserted_text: self.piece_tree.text_for_span(*span).to_owned(),
-                        deleted_spans: Vec::new(),
-                    },
-                    PieceHistoryEdit::Deleted { start_char, spans } => TextDocumentEditOperation {
-                        start_char: *start_char as usize,
-                        deleted_text: self.text_for_spans(spans),
-                        inserted_text: String::new(),
-                        deleted_spans: spans.clone(),
-                    },
-                    PieceHistoryEdit::Replaced {
-                        start_char,
-                        deleted,
-                        inserted,
-                    } => TextDocumentEditOperation {
-                        start_char: *start_char as usize,
-                        deleted_text: self.text_for_spans(deleted),
-                        inserted_text: self.piece_tree.text_for_span(*inserted).to_owned(),
-                        deleted_spans: deleted.clone(),
-                    },
-                })
-                .collect(),
+            edits,
         }
     }
 
@@ -895,28 +740,12 @@ impl TextDocument {
     }
 
     fn fingerprint_for_history_edits(&self, edits: &[PieceHistoryEdit]) -> u64 {
-        let mut parts = Vec::new();
-        for edit in edits {
-            match edit {
-                PieceHistoryEdit::Inserted { span, .. } => {
-                    parts.push(self.piece_tree.text_for_span(*span));
-                }
-                PieceHistoryEdit::Deleted { spans, .. } => {
-                    for span in spans {
-                        parts.push(self.piece_tree.text_for_span(*span));
-                    }
-                }
-                PieceHistoryEdit::Replaced {
-                    deleted, inserted, ..
-                } => {
-                    for span in deleted {
-                        parts.push(self.piece_tree.text_for_span(*span));
-                    }
-                    parts.push(self.piece_tree.text_for_span(*inserted));
-                }
-            }
-        }
-        fingerprint_parts(parts)
+        fingerprint_parts(
+            edits
+                .iter()
+                .flat_map(PieceHistoryEdit::spans)
+                .map(|span| self.piece_tree.text_for_span(span)),
+        )
     }
 
     fn enforce_history_budget(&mut self) {
@@ -947,336 +776,25 @@ impl TextDocument {
     }
 
     fn history_spans(&self) -> Vec<ByteSpan> {
-        let mut spans = Vec::new();
-        for entry in &self.history {
-            for edit in &entry.edits {
-                match edit {
-                    PieceHistoryEdit::Inserted { span, .. } => spans.push(*span),
-                    PieceHistoryEdit::Deleted { spans: deleted, .. } => {
-                        spans.extend(deleted.iter().copied());
-                    }
-                    PieceHistoryEdit::Replaced {
-                        deleted, inserted, ..
-                    } => {
-                        spans.extend(deleted.iter().copied());
-                        spans.push(*inserted);
-                    }
-                }
-            }
-        }
-        spans
+        self.history
+            .iter()
+            .flat_map(|entry| entry.edits.iter())
+            .flat_map(PieceHistoryEdit::spans)
+            .collect()
     }
 
     fn replace_history_spans(&mut self, spans: Vec<ByteSpan>) {
         let mut spans = spans.into_iter();
         for entry in &mut self.history {
             for edit in &mut entry.edits {
-                match edit {
-                    PieceHistoryEdit::Inserted { span, .. } => {
-                        if let Some(next) = spans.next() {
-                            *span = next;
-                        }
+                edit.each_span_mut(|slot| {
+                    if let Some(next) = spans.next() {
+                        *slot = next;
                     }
-                    PieceHistoryEdit::Deleted { spans: deleted, .. } => {
-                        for span in deleted {
-                            if let Some(next) = spans.next() {
-                                *span = next;
-                            }
-                        }
-                    }
-                    PieceHistoryEdit::Replaced {
-                        deleted, inserted, ..
-                    } => {
-                        for span in deleted {
-                            if let Some(next) = spans.next() {
-                                *span = next;
-                            }
-                        }
-                        if let Some(next) = spans.next() {
-                            *inserted = next;
-                        }
-                    }
-                }
+                });
             }
         }
     }
-}
-
-impl OperationDirection {
-    fn selection(self, record: &TextDocumentOperationRecord) -> CursorRange {
-        match self {
-            OperationDirection::Undo => record.previous_selection,
-            OperationDirection::Redo => record.next_selection,
-        }
-    }
-}
-
-enum CoalescedEdit {
-    Record(TextDocumentOperationRecord),
-    Noop,
-}
-
-fn coalesced_local_edit_record(
-    latest: TextDocumentOperationRecord,
-    incoming: &TextDocumentOperationRecord,
-) -> Option<CoalescedEdit> {
-    if latest.edits.len() != 1 || incoming.edits.len() != 1 {
-        return None;
-    }
-    // Compare by index only — `prefer_next_row` is a UI hint that flips at
-    // soft-wrap boundaries, and treating it as a cursor jump would split
-    // continuous typing into spurious entries.
-    if !cursor_ranges_share_position(&latest.next_selection, &incoming.previous_selection)
-        || !latest.next_selection.is_empty()
-        || !incoming.next_selection.is_empty()
-    {
-        return None;
-    }
-    let latest_edit = latest.edits.first()?;
-    let incoming_edit = incoming.edits.first()?;
-    if !coalescable_edit_text(latest_edit) || !coalescable_edit_text(incoming_edit) {
-        return None;
-    }
-
-    if !latest_edit.inserted_text.is_empty() {
-        return coalesce_into_inserted_text(latest, incoming);
-    }
-
-    if !latest_edit.deleted_text.is_empty() && latest_edit.inserted_text.is_empty() {
-        return coalesce_after_delete(latest, incoming);
-    }
-
-    None
-}
-
-fn cursor_ranges_share_position(left: &CursorRange, right: &CursorRange) -> bool {
-    left.primary.index == right.primary.index && left.secondary.index == right.secondary.index
-}
-
-fn coalescable_edit_text(edit: &TextDocumentEditOperation) -> bool {
-    // Inserts may contain a hard divider (newline) that joins the prior entry
-    // and then seals it; only the delete side is restricted to single line.
-    is_single_line(&edit.deleted_text)
-}
-
-/// Decide whether the latest entry has been "sealed" by a divider in its
-/// inserted text. Hard dividers always seal; soft dividers seal only if the
-/// user paused after typing them.
-fn entry_sealed_by_divider(
-    latest: &TextDocumentOperationRecord,
-    elapsed: Option<std::time::Duration>,
-) -> bool {
-    let Some(edit) = latest.edits.last() else {
-        return false;
-    };
-    let Some(last_char) = edit.inserted_text.chars().next_back() else {
-        return false;
-    };
-    if is_hard_divider(last_char) {
-        return true;
-    }
-    if is_soft_divider(last_char) {
-        return elapsed.is_none_or(|d| d >= TEXT_HISTORY_SOFT_DIVIDER_PAUSE);
-    }
-    false
-}
-
-fn coalesce_into_inserted_text(
-    mut latest: TextDocumentOperationRecord,
-    incoming: &TextDocumentOperationRecord,
-) -> Option<CoalescedEdit> {
-    let latest_edit = latest.edits.first_mut()?;
-    let incoming_edit = incoming.edits.first()?;
-    let inserted_len = latest_edit.inserted_text.chars().count();
-    let deleted_len = incoming_edit.deleted_text.chars().count();
-    let inserted_start = latest_edit.start_char;
-    let incoming_end = incoming_edit.start_char.checked_add(deleted_len)?;
-    let inserted_end = inserted_start.checked_add(inserted_len)?;
-    if incoming_edit.start_char < inserted_start || incoming_end > inserted_end {
-        return None;
-    }
-
-    let relative_start = incoming_edit.start_char - inserted_start;
-    let relative_end = relative_start + deleted_len;
-    latest_edit.inserted_text = replace_char_range_in_text(
-        &latest_edit.inserted_text,
-        relative_start..relative_end,
-        &incoming_edit.inserted_text,
-    );
-    latest.next_selection = incoming.next_selection;
-
-    if latest_edit.deleted_text.is_empty() && latest_edit.inserted_text.is_empty() {
-        return Some(CoalescedEdit::Noop);
-    }
-
-    Some(CoalescedEdit::Record(latest))
-}
-
-fn coalesce_after_delete(
-    mut latest: TextDocumentOperationRecord,
-    incoming: &TextDocumentOperationRecord,
-) -> Option<CoalescedEdit> {
-    let latest_edit = latest.edits.first_mut()?;
-    let incoming_edit = incoming.edits.first()?;
-    let latest_start = latest_edit.start_char;
-    let incoming_deleted_len = incoming_edit.deleted_text.chars().count();
-
-    if incoming_edit.deleted_text.is_empty() && !incoming_edit.inserted_text.is_empty() {
-        if incoming_edit.start_char != latest_start {
-            return None;
-        }
-        latest_edit.inserted_text = incoming_edit.inserted_text.clone();
-        latest.next_selection = incoming.next_selection;
-        return Some(CoalescedEdit::Record(latest));
-    }
-
-    if incoming_edit.inserted_text.is_empty() && !incoming_edit.deleted_text.is_empty() {
-        if incoming_edit.start_char == latest_start {
-            latest_edit
-                .deleted_text
-                .push_str(&incoming_edit.deleted_text);
-        } else if incoming_edit.start_char + incoming_deleted_len == latest_start {
-            latest_edit.start_char = incoming_edit.start_char;
-            latest_edit.deleted_text =
-                format!("{}{}", incoming_edit.deleted_text, latest_edit.deleted_text);
-        } else {
-            return None;
-        }
-        latest_edit.deleted_spans.clear();
-        latest.next_selection = incoming.next_selection;
-        return Some(CoalescedEdit::Record(latest));
-    }
-
-    None
-}
-
-fn replace_char_range_in_text(text: &str, range: Range<usize>, replacement: &str) -> String {
-    let start = byte_index_for_char(text, range.start);
-    let end = byte_index_for_char(text, range.end);
-    let mut result = String::with_capacity(text.len() + replacement.len());
-    result.push_str(&text[..start]);
-    result.push_str(replacement);
-    result.push_str(&text[end..]);
-    result
-}
-
-fn byte_index_for_char(text: &str, char_index: usize) -> usize {
-    text.char_indices()
-        .map(|(index, _)| index)
-        .nth(char_index)
-        .unwrap_or(text.len())
-}
-
-fn is_single_line(text: &str) -> bool {
-    !text.contains('\n') && !text.contains('\r')
-}
-
-fn operation_summary(source: PieceSource, operation: &TextDocumentOperationRecord) -> String {
-    match source {
-        PieceSource::SearchReplace if operation.edits.len() == 1 => "Replace match".to_owned(),
-        PieceSource::SearchReplace => format!("Replace {} matches", operation.edits.len()),
-        PieceSource::Paste => operation
-            .edits
-            .first()
-            .map(|edit| format!("Paste \"{}\"", super::preview_text(&edit.inserted_text)))
-            .unwrap_or_else(|| "Paste".to_owned()),
-        PieceSource::Cut => operation
-            .edits
-            .first()
-            .map(|edit| format!("Cut \"{}\"", super::preview_text(&edit.deleted_text)))
-            .unwrap_or_else(|| "Cut".to_owned()),
-        _ if operation.edits.len() != 1 => format!("Edit {} ranges", operation.edits.len()),
-        _ => operation
-            .edits
-            .first()
-            .map(
-                |edit| match (edit.deleted_text.is_empty(), edit.inserted_text.is_empty()) {
-                    (true, false) => {
-                        format!("Insert \"{}\"", super::preview_text(&edit.inserted_text))
-                    }
-                    (false, true) => {
-                        format!("Delete \"{}\"", super::preview_text(&edit.deleted_text))
-                    }
-                    (false, false) => {
-                        format!(
-                            "Replace with \"{}\"",
-                            super::preview_text(&edit.inserted_text)
-                        )
-                    }
-                    (true, true) => "Edit".to_owned(),
-                },
-            )
-            .unwrap_or_else(|| "Edit".to_owned()),
-    }
-}
-
-fn persist_cursor_range(range: CursorRange) -> PersistedCursorRange {
-    PersistedCursorRange {
-        primary_index: range.primary.index,
-        primary_prefer_next_row: range.primary.prefer_next_row,
-        secondary_index: range.secondary.index,
-        secondary_prefer_next_row: range.secondary.prefer_next_row,
-    }
-}
-
-fn restore_cursor_range(range: PersistedCursorRange) -> CursorRange {
-    CursorRange {
-        primary: CharCursor {
-            index: range.primary_index,
-            prefer_next_row: range.primary_prefer_next_row,
-        },
-        secondary: CharCursor {
-            index: range.secondary_index,
-            prefer_next_row: range.secondary_prefer_next_row,
-        },
-    }
-}
-
-fn record_expected_parts(
-    record: &TextDocumentOperationRecord,
-    direction: OperationDirection,
-) -> Vec<String> {
-    record
-        .edits
-        .iter()
-        .map(|edit| match direction {
-            OperationDirection::Undo => edit.inserted_text.clone(),
-            OperationDirection::Redo => edit.deleted_text.clone(),
-        })
-        .collect()
-}
-
-fn record_current_parts(
-    tree: &PieceTreeLite,
-    record: &TextDocumentOperationRecord,
-    direction: OperationDirection,
-) -> Result<Vec<String>, TextHistoryApplyError> {
-    record
-        .edits
-        .iter()
-        .map(|edit| {
-            let replaced_len = match direction {
-                OperationDirection::Undo => edit.inserted_text.chars().count(),
-                OperationDirection::Redo => edit.deleted_text.chars().count(),
-            };
-            let range = edit.start_char..edit.start_char + replaced_len;
-            if range.end > tree.len_chars() {
-                return Err(TextHistoryApplyError::OutOfBounds);
-            }
-            Ok(tree.extract_range(range))
-        })
-        .collect()
-}
-
-fn deleted_spans_or_payload(
-    tree: &mut PieceTreeLite,
-    edit: &TextDocumentEditOperation,
-    source: PieceSource,
-) -> Vec<ByteSpan> {
-    if !edit.deleted_spans.is_empty() {
-        return edit.deleted_spans.clone();
-    }
-    vec![tree.append_history_text(&edit.deleted_text, source)]
 }
 
 fn normalize_editor_inserted_text(
@@ -1341,7 +859,8 @@ fn validate_replacements(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::ui::editor_content::native_editor::EditOperation;
+    use super::super::history::TEXT_HISTORY_SOFT_DIVIDER_PAUSE;
+    use crate::app::ui::editor_content::native_editor::{CharCursor, EditOperation};
     use std::time::Duration;
 
     #[test]

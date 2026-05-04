@@ -13,6 +13,7 @@ DEFAULT_OUTPUT = Path("correctness_review.json")
 VISIBILITY_OUTPUT = Path("target/analysis/correctness_review.json")
 TEST_CATALOG_OUTPUT = Path("target/analysis/test_catalog.json")
 DESCRIPTIONS_PATH = Path("scripts/test_descriptions.json")
+MANIFEST_PATH = Path("Cargo.toml")
 
 LAYER_RULES = [
     ("App Shell and State", ("app_state", "app_tests.rs")),
@@ -98,20 +99,46 @@ def description_for(path: Path, name: str, overrides: Dict[str, str]) -> str:
 
 
 def iter_rust_files(paths: Iterable[Path]) -> Iterable[Path]:
+    seen = set()
     for root in paths:
         if not root.exists():
             continue
         if root.is_file() and root.suffix == ".rs":
-            yield root
+            normalized = root.as_posix()
+            if normalized not in seen:
+                seen.add(normalized)
+                yield root
         else:
-            yield from root.rglob("*.rs")
+            for path in root.rglob("*.rs"):
+                normalized = path.as_posix()
+                if normalized not in seen:
+                    seen.add(normalized)
+                    yield path
+
+
+def cargo_manifest_rust_targets() -> List[Path]:
+    if not MANIFEST_PATH.exists():
+        return []
+    try:
+        text = MANIFEST_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    targets: List[Path] = []
+    for block in re.split(r"(?m)^\s*\[\[", text):
+        if not block.startswith(("bin]]", "test]]")):
+            continue
+        path_match = re.search(r'(?m)^\s*path\s*=\s*"([^"]+\.rs)"', block)
+        if path_match:
+            targets.append(Path(path_match.group(1)))
+    targets.extend(Path("src/bin").glob("*.rs"))
+    return targets
 
 
 def discover_tests() -> List[Dict[str, Any]]:
     overrides = load_descriptions()
     tests: List[Dict[str, Any]] = []
     pattern = re.compile(r"^\s*#\[(?:test|tokio::test|async_std::test)\]\s*(?:\r?\n\s*#\[[^\]]+\]\s*)*\r?\n\s*(?:async\s+)?fn\s+([A-Za-z0-9_]+)", re.MULTILINE)
-    for path in sorted(iter_rust_files([Path("tests"), Path("src")])):
+    for path in sorted(iter_rust_files([Path("tests"), Path("src"), *cargo_manifest_rust_targets()])):
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
