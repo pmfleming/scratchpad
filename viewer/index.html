@@ -111,7 +111,11 @@
                 </div>
                 <button class="run-button" data-run-category="quality">Refresh Quality</button>
             </div>
+            
             <div id="hotspots-summary" class="summary-grid"></div>
+            <div id="clones-summary" class="summary-grid"></div>
+            <div id="locality-leverage-summary" class="summary-grid"></div>
+
             <div class="quality-layout">
                 <div class="panel-card">
                     <div class="panel-card__header">
@@ -144,6 +148,28 @@
                     <div id="clone-distribution" class="quality-distribution"></div>
                 </div>
             </div>
+
+            <div class="quality-layout">
+                <div class="panel-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Locality distribution</h2>
+                            <p>Score curve for cache and branch mispredictions.</p>
+                        </div>
+                    </div>
+                    <div id="locality-distribution" class="quality-distribution"></div>
+                </div>
+                <div class="panel-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Leverage distribution</h2>
+                            <p>Score curve for iterator use and direct pointers.</p>
+                        </div>
+                    </div>
+                    <div id="leverage-distribution" class="quality-distribution"></div>
+                </div>
+            </div>
+
             <details class="disclose">
                 <summary>Show full hotspots table</summary>
                 <div class="panel-card">
@@ -159,6 +185,7 @@
                     <div id="hotspots-table" class="table-wrap"></div>
                 </div>
             </details>
+
             <details class="disclose">
                 <summary>Show full clones table</summary>
                 <div class="panel-card">
@@ -170,8 +197,37 @@
                         <button class="run-button" data-run-item="quality.clones">Refresh</button>
                         <input id="clones-filter" class="filter-input" type="search" placeholder="Filter clones..." />
                     </div>
-                    <div id="clones-summary" class="summary-grid"></div>
                     <div id="clones-table" class="table-wrap"></div>
+                </div>
+            </details>
+
+            <details class="disclose">
+                <summary>Show full locality breakdown</summary>
+                <div class="panel-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Locality Breakdown</h2>
+                            <p>Ranked by Locality score.</p>
+                        </div>
+                        <button class="run-button" data-run-item="quality.locality_dynamic">Refresh</button>
+                        <input id="locality-filter" class="filter-input" type="search" placeholder="Filter locality..." />
+                    </div>
+                    <div id="locality-table" class="table-wrap"></div>
+                </div>
+            </details>
+
+            <details class="disclose">
+                <summary>Show full leverage breakdown</summary>
+                <div class="panel-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Leverage Breakdown</h2>
+                            <p>Ranked by total Leverage score.</p>
+                        </div>
+                        <button class="run-button" data-run-item="quality.locality_leverage">Refresh</button>
+                        <input id="leverage-filter" class="filter-input" type="search" placeholder="Filter leverage..." />
+                    </div>
+                    <div id="leverage-table" class="table-wrap"></div>
                 </div>
             </details>
         </section>
@@ -367,6 +423,66 @@
             </div>
         </section>
 
+        <section id="locality-leverage" class="tab-panel">
+            <div class="category-header">
+                <div>
+                    <h2>Locality &amp; Leverage</h2>
+                    <p>Static code leverage and dynamic locality measurements.</p>
+                </div>
+                <button class="run-button" data-run-category="locality">Refresh Measurements</button>
+            </div>
+            <div id="locality-leverage-summary" class="summary-grid"></div>
+            
+            <div class="quality-layout">
+                <div class="panel-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Locality distribution</h2>
+                            <p>Score curve for cache and branch mispredictions.</p>
+                        </div>
+                    </div>
+                    <div id="locality-distribution" class="quality-distribution"></div>
+                </div>
+                <div class="panel-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Leverage distribution</h2>
+                            <p>Score curve for iterator use and direct pointers.</p>
+                        </div>
+                    </div>
+                    <div id="leverage-distribution" class="quality-distribution"></div>
+                </div>
+            </div>
+
+            <details class="disclose">
+                <summary>Show full locality breakdown</summary>
+                <div class="panel-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Locality Breakdown</h2>
+                            <p>Ranked by Locality score.</p>
+                        </div>
+                        <input id="locality-filter" class="filter-input" type="search" placeholder="Filter locality..." />
+                    </div>
+                    <div id="locality-table" class="table-wrap"></div>
+                </div>
+            </details>
+
+            <details class="disclose">
+                <summary>Show full leverage breakdown</summary>
+                <div class="panel-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Leverage Breakdown</h2>
+                            <p>Ranked by total Leverage score.</p>
+                        </div>
+                        <input id="leverage-filter" class="filter-input" type="search" placeholder="Filter leverage..." />
+                    </div>
+                    <div id="leverage-table" class="table-wrap"></div>
+                </div>
+            </details>
+        </section>
+
         <section id="correctness-review" class="tab-panel">
             <div class="category-header">
                 <div>
@@ -452,6 +568,8 @@
                                     <option value="change">Change Risk</option>
                                     <option value="performance">Performance Risk</option>
                                     <option value="architectural">Architectural Risk</option>
+                                    <option value="locality">Locality Risk</option>
+                                    <option value="leverage">Leverage Risk</option>
                                     <option value="churn">Churn</option>
                                 </select>
                             </label>

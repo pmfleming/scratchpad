@@ -10,6 +10,8 @@
         resourceProfiles: `../target/analysis/resource_profiles.json?v=${viewerVersion}`,
         speedReport: `../target/analysis/speed_efficiency_report.json?v=${viewerVersion}`,
         clones: `../target/analysis/clones.json?v=${viewerVersion}`,
+        locality: `../target/analysis/locality_metrics.json?v=${viewerVersion}`,
+        leverage: `../target/analysis/leverage_metrics.json?v=${viewerVersion}`,
         map: `../target/analysis/map.json?v=${viewerVersion}`,
         flamegraphs: `../target/analysis/flamegraphs.json?v=${viewerVersion}`,
         correctness: `../target/analysis/correctness_review.json?v=${viewerVersion}`,
@@ -26,6 +28,8 @@
         resourceProfiles: null,
         speedReport: null,
         clones: [],
+        locality: [],
+        leverage: [],
         map: null,
         flamegraphs: [],
         correctness: null,
@@ -73,6 +77,8 @@
         ["performance_risk", "Performance"],
         ["correctness_risk", "Correctness"],
         ["architectural_risk", "Architecture"],
+        ["locality", "Locality"],
+        ["leverage", "Leverage"],
     ];
 
     function byId(id) {
@@ -1825,6 +1831,105 @@
         target.innerHTML = run ? renderRunProgress(run, "detail") : "";
     }
 
+    function renderLocalityLeverage() {
+        const localityTarget = byId("locality-table");
+        const leverageTarget = byId("leverage-table");
+        if (!localityTarget || !leverageTarget) return;
+
+        const localityQuery = byId("locality-filter")?.value || "";
+        const leverageQuery = byId("leverage-filter")?.value || "";
+
+        const filteredLocality = state.locality.filter((item) => matchesFilter(item, localityQuery));
+        const filteredLeverage = state.leverage.filter((item) => matchesFilter(item, leverageQuery));
+
+        const avgL1Miss = mean(state.locality.map(i => i.l1_miss_ratio)) || 0;
+        const avgBranchMiss = mean(state.locality.map(i => i.branch_mispredict_ratio)) || 0;
+        const avgIterator = mean(state.leverage.map(i => i.iterator_leverage_score)) || 0;
+        const avgIndirection = mean(state.leverage.map(i => i.indirection_ratio)) || 0;
+        const totalUnsafe = state.leverage.reduce((sum, item) => sum + (item.unsafe_blocks || 0), 0);
+
+        renderSummary("locality-leverage-summary", [
+            metricCard("Avg L1 Miss", `${formatNumber.format(avgL1Miss)}%`),
+            metricCard("Avg Branch Miss", `${formatNumber.format(avgBranchMiss)}%`),
+            metricCard("Avg Iterator Use", `${formatNumber.format(avgIterator)}%`),
+            metricCard("Avg Indirection", `${formatNumber.format(avgIndirection)}%`),
+            metricCard("Total Unsafe Blocks", totalUnsafe),
+        ]);
+
+        const localityDistItems = state.locality.map((item) => ({
+            key: `locality:${item.benchmark_name}`,
+            kind: "locality",
+            name: item.benchmark_name,
+            score: 100 - (item.locality_score || 0), // Invert score so risk distribution treats higher as worse
+            signals: item.signals || [],
+            details: `L1 ${formatNumber.format(item.l1_miss_ratio)}%`,
+            raw: item,
+            searchText: [item.benchmark_name, ...item.signals].join(" "),
+        }));
+
+        const leverageDistItems = state.leverage.map((item) => ({
+            key: `leverage:${item.module_name}`,
+            kind: "leverage",
+            name: item.module_name,
+            score: 100 - (item.total_leverage_score || 0), // Invert score so risk distribution treats higher as worse
+            signals: item.signals || [],
+            details: `Iter ${formatNumber.format(item.iterator_leverage_score)}%`,
+            raw: item,
+            searchText: [item.module_name, ...item.signals].join(" "),
+        }));
+
+        renderRiskDistribution(byId("locality-distribution"), localityDistItems, {
+            empty: "No locality data.",
+            modeKey: "qualityDistributionMode", // re-use count mode
+            expandedKey: "expandedLocalityKey",
+            warn: 15,
+            bad: 30,
+            scoreLabel: "locality risk",
+        });
+
+        renderRiskDistribution(byId("leverage-distribution"), leverageDistItems, {
+            empty: "No leverage data.",
+            modeKey: "qualityDistributionMode", // re-use count mode
+            expandedKey: "expandedLeverageKey",
+            warn: 20,
+            bad: 40,
+            scoreLabel: "leverage risk",
+        });
+
+        renderTable(
+            "locality-table",
+            ["Rank", "Benchmark", "Locality Score", "L1 Miss Ratio", "Branch Miss Ratio", "Signals"],
+            filteredLocality.map((item, index) => {
+                const scoreClass = riskClass(100 - item.locality_score, 15, 30);
+                return `<tr>
+                    <td>${index + 1}</td>
+                    <td><code>${escapeHtml(item.benchmark_name)}</code></td>
+                    <td class="${scoreClass}">${formatNumber.format(item.locality_score)}</td>
+                    <td>${formatNumber.format(item.l1_miss_ratio)}%</td>
+                    <td>${formatNumber.format(item.branch_mispredict_ratio)}%</td>
+                    <td>${renderPills(item.signals)}</td>
+                </tr>`;
+            })
+        );
+
+        renderTable(
+            "leverage-table",
+            ["Rank", "Module", "Leverage Score", "Iterator %", "Indirection %", "Unsafe Blocks", "Signals"],
+            filteredLeverage.map((item, index) => {
+                const scoreClass = riskClass(100 - item.total_leverage_score, 20, 40);
+                return `<tr>
+                    <td>${index + 1}</td>
+                    <td><code>${escapeHtml(item.module_name)}</code></td>
+                    <td class="${scoreClass}">${formatNumber.format(item.total_leverage_score)}</td>
+                    <td>${formatNumber.format(item.iterator_leverage_score)}%</td>
+                    <td>${formatNumber.format(item.indirection_ratio)}%</td>
+                    <td>${item.unsafe_blocks}</td>
+                    <td>${renderPills(item.signals)}</td>
+                </tr>`;
+            })
+        );
+    }
+
     function renderMap() {
         const payload = state.map;
         if (!payload?.graph) {
@@ -2471,7 +2576,7 @@
     async function loadDefaults() {
         const status = byId("load-status");
         const detail = byId("load-detail");
-        const keys = ["catalog", "runs", "hotspots", "slowspots", "searchSpeed", "capacityReport", "resourceProfiles", "speedReport", "clones", "map", "flamegraphs", "correctness", "appPackage"];
+        const keys = ["catalog", "runs", "hotspots", "slowspots", "searchSpeed", "capacityReport", "resourceProfiles", "speedReport", "clones", "locality", "leverage", "map", "flamegraphs", "correctness", "appPackage"];
         const fallbacks = {
             catalog: null,
             runs: [],
@@ -2482,6 +2587,8 @@
             resourceProfiles: null,
             speedReport: null,
             clones: [],
+            locality: [],
+            leverage: [],
             map: null,
             flamegraphs: [],
             correctness: null,
@@ -2565,6 +2672,7 @@
         renderPerformanceScenarios();
         renderCorrectness();
         renderCorrectnessMatrix();
+        renderLocalityLeverage();
         renderMap();
         renderFlamegraphs();
         renderAppPackage();
@@ -3129,6 +3237,8 @@
     byId("resource-profiles-filter")?.addEventListener("input", renderResourceProfiles);
     byId("clones-filter")?.addEventListener("input", renderClones);
     byId("correctness-filter")?.addEventListener("input", renderCorrectness);
+    byId("locality-filter")?.addEventListener("input", renderLocalityLeverage);
+    byId("leverage-filter")?.addEventListener("input", renderLocalityLeverage);
     byId("correctness-show-all")?.addEventListener("change", renderCorrectness);
     document.querySelectorAll("[data-quality-distribution-mode]").forEach((button) => {
         button.addEventListener("click", () => {

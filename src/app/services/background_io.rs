@@ -263,7 +263,7 @@ pub(crate) fn spawn_background_io_worker() -> (BackgroundIoDispatcher, Receiver<
 /// Outcome of a per-request handler.
 enum LaneOutcome {
     /// Send `result` over `result_tx`; if that fails, terminate the lane.
-    Result(BackgroundIoResult),
+    Result(Box<BackgroundIoResult>),
     /// Handler emitted its own messages; continue if `false`, terminate if `true`.
     HandledWithSendFailure(bool),
     /// Skip this request (wrong lane) — keep running.
@@ -275,16 +275,14 @@ fn spawn_lane(
     request_rx: Receiver<BackgroundIoRequest>,
     result_tx: Sender<BackgroundIoResult>,
     lane_depths: Arc<LaneDepths>,
-    handle: impl Fn(BackgroundIoRequest, &Sender<BackgroundIoResult>) -> LaneOutcome
-    + Send
-    + 'static,
+    handle: impl Fn(BackgroundIoRequest, &Sender<BackgroundIoResult>) -> LaneOutcome + Send + 'static,
 ) {
     thread::spawn(move || {
         while let Ok(request) = request_rx.recv() {
             lane_depths.decrement(lane);
             let started_at = Instant::now();
             let send_failed = match handle(request, &result_tx) {
-                LaneOutcome::Result(result) => result_tx.send(result).is_err(),
+                LaneOutcome::Result(result) => result_tx.send(*result).is_err(),
                 LaneOutcome::HandledWithSendFailure(failed) => failed,
                 LaneOutcome::Skip => continue,
             };
@@ -320,11 +318,11 @@ fn spawn_path_lane(
                     request_id, requests, result_tx,
                 ))
             } else {
-                LaneOutcome::Result(BackgroundIoResult::PathsLoaded {
+                LaneOutcome::Result(Box::new(BackgroundIoResult::PathsLoaded {
                     request_id,
                     results: load_paths(requests),
                     is_partial: false,
-                })
+                }))
             }
         },
     );
@@ -338,7 +336,10 @@ const MAX_CONCURRENT_READS: usize = 4;
 /// Fan `requests` out across up to `MAX_CONCURRENT_READS` scoped workers,
 /// invoking `consume` on each `(index, result)` tuple as it arrives. The
 /// scope blocks until all workers complete.
-fn for_each_loaded(requests: Vec<PathLoadRequest>, mut consume: impl FnMut(usize, LoadedPathResult)) {
+fn for_each_loaded(
+    requests: Vec<PathLoadRequest>,
+    mut consume: impl FnMut(usize, LoadedPathResult),
+) {
     let total = requests.len();
     if total == 0 {
         return;
@@ -433,20 +434,20 @@ fn spawn_session_lane(
             BackgroundIoRequest::RestoreSession {
                 request_id,
                 session_store,
-            } => LaneOutcome::Result(BackgroundIoResult::SessionRestored {
+            } => LaneOutcome::Result(Box::new(BackgroundIoResult::SessionRestored {
                 request_id,
                 result: session_store.load().map_err(|error| error.to_string()),
-            }),
+            })),
             BackgroundIoRequest::PersistSession {
                 request_id,
                 session_store,
                 request,
-            } => LaneOutcome::Result(BackgroundIoResult::SessionPersisted {
+            } => LaneOutcome::Result(Box::new(BackgroundIoResult::SessionPersisted {
                 request_id,
                 result: session_store
                     .persist_request(request)
                     .map_err(|error| error.to_string()),
-            }),
+            })),
             _ => LaneOutcome::Skip,
         },
     );
@@ -469,19 +470,19 @@ fn spawn_analysis_lane(
                 revision,
                 snapshot,
                 format,
-            } => LaneOutcome::Result(BackgroundIoResult::TextMetadataRefreshed {
+            } => LaneOutcome::Result(Box::new(BackgroundIoResult::TextMetadataRefreshed {
                 request_id,
                 buffer_id,
                 revision,
                 result: Ok(refresh_text_metadata(snapshot, format)),
-            }),
+            })),
             BackgroundIoRequest::RefreshEncodingCompliance {
                 request_id,
                 buffer_id,
                 revision,
                 snapshot,
                 format,
-            } => LaneOutcome::Result(BackgroundIoResult::EncodingComplianceRefreshed {
+            } => LaneOutcome::Result(Box::new(BackgroundIoResult::EncodingComplianceRefreshed {
                 request_id,
                 buffer_id,
                 revision,
@@ -491,7 +492,7 @@ fn spawn_analysis_lane(
                         .spans_for_range(0..snapshot.document_length().chars)
                         .map(|span| span.text),
                 )),
-            }),
+            })),
             _ => LaneOutcome::Skip,
         },
     );

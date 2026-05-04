@@ -262,30 +262,21 @@ fn render_controls(
     has_history: bool,
     clear_requested: &mut bool,
 ) {
-    ui.horizontal(|ui| {
-        if control_icon_button(
-            ui,
+    let tabs = [
+        (
             "timeline",
             CLOCK_COUNTER_CLOCKWISE,
             "Timeline",
-            active == HistoryTab::Timeline,
-            true,
-        )
-        .clicked()
-        {
-            *next = HistoryTab::Timeline;
-        }
-        if control_icon_button(
-            ui,
-            "by_file",
-            FILES,
-            "By file",
-            active == HistoryTab::ByFile,
-            true,
-        )
-        .clicked()
-        {
-            *next = HistoryTab::ByFile;
+            HistoryTab::Timeline,
+        ),
+        ("by_file", FILES, "By file", HistoryTab::ByFile),
+    ];
+
+    ui.horizontal(|ui| {
+        for (id_source, icon, tooltip, tab) in tabs {
+            if control_icon_button(ui, id_source, icon, tooltip, active == tab, true).clicked() {
+                *next = tab;
+            }
         }
         if control_icon_button(
             ui,
@@ -496,10 +487,14 @@ fn render_file_header_pill(
     group: &TextHistoryFileGroup,
     expanded: bool,
 ) -> (egui::Response, bool) {
-    let count_label = if group.rows.len() == 1 {
-        "1 change".to_owned()
+    let count_label = match group.rows.len() {
+        1 => "1 change".to_owned(),
+        count => format!("{count} changes"),
+    };
+    let (caret_icon, caret_tooltip) = if expanded {
+        (CARET_DOWN, "Collapse history for this file")
     } else {
-        format!("{} changes", group.rows.len())
+        (CARET_RIGHT, "Expand history for this file")
     };
     egui::Frame::NONE
         .fill(action_bg(ui))
@@ -512,54 +507,47 @@ fn render_file_header_pill(
             ui.set_min_width(content_width);
             ui.set_max_width(content_width);
             let mut toggle_requested = false;
-            let mut group_response = None;
-
-            ui.horizontal(|ui| {
-                let caret = ui
-                    .add_sized(
-                        egui::vec2(24.0, 24.0),
-                        egui::Button::new(
-                            egui::RichText::new(if expanded { CARET_DOWN } else { CARET_RIGHT })
-                                .size(14.0)
-                                .color(callout::muted_text(ui)),
+            let group_response = ui
+                .horizontal(|ui| {
+                    let caret = ui
+                        .add_sized(
+                            egui::vec2(24.0, 24.0),
+                            egui::Button::new(
+                                egui::RichText::new(caret_icon)
+                                    .size(14.0)
+                                    .color(callout::muted_text(ui)),
+                            )
+                            .fill(egui::Color32::TRANSPARENT)
+                            .stroke(egui::Stroke::NONE),
                         )
-                        .fill(egui::Color32::TRANSPARENT)
-                        .stroke(egui::Stroke::NONE),
+                        .on_hover_text(caret_tooltip);
+                    if caret.clicked() {
+                        toggle_requested = true;
+                    }
+
+                    let label_width = (ui.available_width() - 96.0).max(120.0);
+                    let response = truncated_label(
+                        ui,
+                        &group.label,
+                        label_width,
+                        13.0,
+                        callout::text(ui),
+                        egui::Sense::click(),
                     )
-                    .on_hover_text(if expanded {
-                        "Collapse history for this file"
-                    } else {
-                        "Expand history for this file"
+                    .on_hover_text(&group.label);
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new(count_label)
+                                .size(12.0)
+                                .color(callout::muted_text(ui)),
+                        );
                     });
-                if caret.clicked() {
-                    toggle_requested = true;
-                }
+                    response
+                })
+                .inner;
 
-                let label_width = (ui.available_width() - 96.0).max(120.0);
-                let response = truncated_label(
-                    ui,
-                    &group.label,
-                    label_width,
-                    13.0,
-                    callout::text(ui),
-                    egui::Sense::click(),
-                )
-                .on_hover_text(&group.label);
-                group_response = Some(response);
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(count_label)
-                            .size(12.0)
-                            .color(callout::muted_text(ui)),
-                    );
-                });
-            });
-
-            (
-                group_response.unwrap_or_else(|| ui.label("")),
-                toggle_requested,
-            )
+            (group_response, toggle_requested)
         })
         .inner
 }

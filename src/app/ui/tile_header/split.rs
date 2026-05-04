@@ -25,6 +25,7 @@ pub struct SplitPreviewOverlay {
     pub preview_lines: Vec<String>,
 }
 
+#[derive(Clone)]
 pub enum TileAction {
     Activate(ViewId),
     Close(ViewId),

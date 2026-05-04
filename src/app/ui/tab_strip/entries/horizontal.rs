@@ -253,8 +253,14 @@ fn show_drag_region(ctx: &egui::Context, ui: &mut egui::Ui, drag_width: f32) {
         return;
     }
 
-    let (rect, drag_response) =
-        ui.allocate_exact_size(egui::vec2(drag_width, TAB_HEIGHT), Sense::click_and_drag());
+    let (_, rect) = ui.allocate_space(egui::vec2(drag_width, TAB_HEIGHT));
+    let drag_response = widget_ids::interact(
+        ui,
+        rect,
+        widget_ids::child(ui.id(), "window_drag_region"),
+        Sense::click_and_drag(),
+        "window_drag_region",
+    );
     if drag_response.drag_started() {
         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
     }

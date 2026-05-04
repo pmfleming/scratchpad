@@ -8,6 +8,58 @@ use crate::app::ui::editor_content::native_editor::CursorRange;
 use std::ops::Range;
 
 impl ScratchpadApp {
+    pub fn replace_current_search_match(&mut self) -> bool {
+        if !self.search_replace_availability().allows_actions() {
+            return false;
+        }
+        let Some(index) = self.search_state.active_match_index else {
+            return false;
+        };
+        let Some(search_match) = self.search_state.matches.get(index).cloned() else {
+            return false;
+        };
+        if !self.validate_search_match_for_replace(&search_match) {
+            self.search_state.clear_replace_all_confirmation();
+            self.set_error_status("Search replace was blocked because results are stale.");
+            self.mark_search_dirty();
+            self.refresh_search_state();
+            return false;
+        }
+        if !self.activate_search_match(index) {
+            return false;
+        }
+
+        let replacement = self.search_state.replacement.clone();
+        let replacement_char_count = replacement.chars().count();
+        let previous_selection = self
+            .active_tab()
+            .and_then(|tab| tab.view(search_match.view_id))
+            .and_then(|view| view.cursor_range)
+            .unwrap_or_else(|| cursor_range_from_char_range(search_match.range.clone()));
+        let replacement_range =
+            search_match.range.start..search_match.range.start + replacement_char_count;
+        let next_selection = cursor_range_from_char_range(replacement_range.clone());
+        let replacements = vec![(search_match.range.clone(), replacement)];
+
+        if self
+            .replace_ranges_in_active_buffer(
+                search_match.view_id,
+                search_match.buffer_id,
+                &replacements,
+                previous_selection,
+                next_selection,
+                "Search replace failed for the active match.",
+            )
+            .is_none()
+        {
+            return false;
+        }
+
+        self.refresh_search_state();
+        self.select_next_active_buffer_match_from(replacement_range.start);
+        true
+    }
+
     pub(super) fn replace_ranges_in_active_buffer(
         &mut self,
         view_id: ViewId,
@@ -199,6 +251,24 @@ impl ScratchpadApp {
         target.expected_matches.iter().all(|(range, expected)| {
             buffer.document().piece_tree().extract_range(range.clone()) == *expected
         })
+    }
+
+    fn validate_search_match_for_replace(&self, search_match: &super::SearchMatch) -> bool {
+        let Some(tab) = self.tabs().get(search_match.tab_index) else {
+            return false;
+        };
+        let Some(buffer) = tab.buffer_by_id(search_match.buffer_id) else {
+            return false;
+        };
+        buffer.document_revision() == search_match.target_revision
+            && buffer
+                .validate_char_replacements(&[(search_match.range.clone(), String::new())])
+                .is_ok()
+            && buffer
+                .document()
+                .piece_tree()
+                .extract_range(search_match.range.clone())
+                == search_match.matched_text
     }
 
     fn build_replace_all_plan(&self) -> Option<ReplacementPlan> {

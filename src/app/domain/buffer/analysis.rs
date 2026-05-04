@@ -2,6 +2,7 @@ use encoding_rs::Encoding;
 use serde::{Deserialize, Serialize};
 
 use super::piece_tree::PieceTreeLite;
+pub(crate) use inspection::normalize_inserted_text_line_endings;
 use inspection::{TextInspection, line_ending_style};
 
 mod inspection;

@@ -152,6 +152,24 @@ def build_catalog() -> Dict[str, Any]:
             [[py, "scripts/map.py", "--mode", "visibility"]],
             ["target/analysis/map.json"],
         ),
+        item(
+            "quality.locality_dynamic",
+            "quality",
+            "locality",
+            "Dynamic Locality",
+            "Measures ground-truth cache misses and branch mispredictions.",
+            [[py, "scripts/locality_bench.py", "--mode", "visibility"]],
+            ["target/analysis/locality_metrics.json"],
+        ),
+        item(
+            "quality.locality_leverage",
+            "quality",
+            "leverage",
+            "Static Leverage",
+            "Measures indirection and iterator leverage.",
+            [[py, "scripts/leverage_metrics.py", "--paths", "src", "--mode", "visibility"]],
+            ["target/analysis/leverage_metrics.json"],
+        ),
     ]
     categories = [
         {"id": "quality", "title": "Quality Review"},

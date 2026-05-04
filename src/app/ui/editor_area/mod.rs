@@ -19,6 +19,8 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 return;
             }
 
+            apply_deferred_tile_actions(ui.ctx(), app);
+
             app.refresh_search_state();
             search_replace::show_search_strip(ui, app);
             let workspace_rect = ui.available_rect_before_wrap();
@@ -139,10 +141,38 @@ fn finalize_editor_render(
     render_outcome: EditorRenderOutcome,
 ) {
     paint_preview_overlay(ui, render_outcome.preview_overlay);
-    apply_tile_actions(app, render_outcome.actions);
+    defer_tile_actions(ui.ctx(), render_outcome.actions);
     if render_outcome.any_editor_changed {
         apply_editor_change(app, state);
     }
+}
+
+fn deferred_tile_actions_id() -> egui::Id {
+    widget_ids::ctx_key("editor_area.deferred_tile_actions")
+}
+
+fn apply_deferred_tile_actions(ctx: &egui::Context, app: &mut ScratchpadApp) {
+    if ctx.current_pass_index() != 0 {
+        return;
+    }
+    let actions = ctx
+        .data_mut(|data| data.remove_temp::<Vec<TileAction>>(deferred_tile_actions_id()))
+        .unwrap_or_default();
+    apply_tile_actions(app, actions);
+}
+
+fn defer_tile_actions(ctx: &egui::Context, actions: Vec<TileAction>) {
+    if actions.is_empty() {
+        return;
+    }
+    ctx.data_mut(|data| {
+        let mut pending = data
+            .remove_temp::<Vec<TileAction>>(deferred_tile_actions_id())
+            .unwrap_or_default();
+        pending.extend(actions);
+        data.insert_temp(deferred_tile_actions_id(), pending);
+    });
+    ctx.request_repaint();
 }
 
 fn apply_tile_actions(app: &mut ScratchpadApp, actions: Vec<TileAction>) {

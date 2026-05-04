@@ -101,6 +101,7 @@ impl AppDiagnostic {
 struct TrackedWidget {
     kind: String,
     rect: String,
+    location: String,
 }
 
 #[derive(Debug)]
@@ -108,6 +109,8 @@ struct DiagnosticsState {
     log_path: PathBuf,
     frame: u64,
     seen_ids: HashMap<String, TrackedWidget>,
+    prev_pass: HashMap<String, TrackedWidget>,
+    current_pass: HashMap<String, TrackedWidget>,
     recent_conflicts: HashSet<String>,
     recent_conflict_order: VecDeque<String>,
     last_write_error: Option<String>,
@@ -119,6 +122,8 @@ impl DiagnosticsState {
             log_path,
             frame: 0,
             seen_ids: HashMap::new(),
+            prev_pass: HashMap::new(),
+            current_pass: HashMap::new(),
             recent_conflicts: HashSet::new(),
             recent_conflict_order: VecDeque::new(),
             last_write_error: None,
@@ -129,6 +134,8 @@ impl DiagnosticsState {
         if self.log_path != log_path {
             self.log_path = log_path;
             self.seen_ids.clear();
+            self.prev_pass.clear();
+            self.current_pass.clear();
             self.recent_conflicts.clear();
             self.recent_conflict_order.clear();
             self.last_write_error = None;
@@ -138,13 +145,36 @@ impl DiagnosticsState {
     fn begin_frame(&mut self) {
         self.frame = self.frame.saturating_add(1);
         self.seen_ids.clear();
+        self.prev_pass.clear();
+        self.current_pass.clear();
     }
 
-    fn track_widget(&mut self, id: String, rect: String, kind: &'static str) {
+    fn begin_pass(&mut self, pass_index: usize) {
+        if pass_index == 0 {
+            self.begin_frame();
+            return;
+        }
+
+        self.prev_pass = std::mem::take(&mut self.current_pass);
+        self.seen_ids.clear();
+    }
+
+    fn track_widget(
+        &mut self,
+        id: String,
+        short_hex: String,
+        rect: String,
+        kind: &'static str,
+        location: String,
+    ) {
         let current = TrackedWidget {
             kind: kind.to_owned(),
-            rect,
+            rect: rect.clone(),
+            location: location.clone(),
         };
+
+        self.current_pass.insert(short_hex, current.clone());
+
         if let Some(previous) = self.seen_ids.get(&id).cloned() {
             let fingerprint = format!(
                 "{}|{}|{}|{}|{}",
@@ -178,10 +208,47 @@ impl DiagnosticsState {
         } else {
             AppDiagnosticKind::Other
         };
-        let diagnostic = AppDiagnostic::new(kind, message)
+        let mut diagnostic = AppDiagnostic::new(kind, message.clone())
             .with_source(format!("log::{level}:{target}"))
             .with_frame(self.frame);
+
+        if diagnostic.kind == AppDiagnosticKind::EguiWarning
+            && message.starts_with("Widget rect ")
+            && message.contains("changed id between passes")
+        {
+            let prev_sites =
+                self.resolve_sites(extract_hexes(&message, "prev ids: [", "]"), &self.prev_pass);
+            if !prev_sites.is_empty() {
+                diagnostic
+                    .details
+                    .insert("prev_site".to_owned(), prev_sites.join(" | "));
+            }
+            let new_sites = self.resolve_sites(
+                extract_hexes(&message, "new ids: [", "]"),
+                &self.current_pass,
+            );
+            if !new_sites.is_empty() {
+                diagnostic
+                    .details
+                    .insert("new_site".to_owned(), new_sites.join(" | "));
+            }
+        }
+
         self.append_diagnostic(&diagnostic);
+    }
+
+    fn resolve_sites(
+        &self,
+        hexes: Vec<String>,
+        pass: &HashMap<String, TrackedWidget>,
+    ) -> Vec<String> {
+        hexes
+            .into_iter()
+            .filter_map(|hex| {
+                pass.get(&hex)
+                    .map(|widget| format!("{} {} {}", hex, widget.location, widget.kind))
+            })
+            .collect()
     }
 
     fn log_panic(&mut self, message: String) {
@@ -253,14 +320,39 @@ pub(crate) fn initialize(log_path: PathBuf) {
     install_panic_hook();
 }
 
-pub(crate) fn begin_frame() {
-    with_state(|state| state.begin_frame());
+pub(crate) fn begin_pass(pass_index: usize) {
+    with_state(|state| state.begin_pass(pass_index));
 }
 
-pub(crate) fn track_widget_id(id: egui::Id, rect: egui::Rect, kind: &'static str) {
-    let id = format!("{id:?}");
-    let rect = format!("{rect:?}");
-    with_state(|state| state.track_widget(id, rect, kind));
+pub(crate) fn track_widget_id(
+    id: egui::Id,
+    rect: egui::Rect,
+    kind: &'static str,
+    location: &'static std::panic::Location<'static>,
+) {
+    let id_str = format!("{:016X}", id.value());
+    let short_hex = id.short_debug_format();
+    let rect_str = format!("{rect:?}");
+    let loc_str = format!("{}:{}", location.file(), location.line());
+    with_state(|state| state.track_widget(id_str, short_hex, rect_str, kind, loc_str));
+}
+
+fn extract_hexes(message: &str, prefix: &str, suffix: &str) -> Vec<String> {
+    let Some(start) = message.find(prefix) else {
+        return Vec::new();
+    };
+    let after_prefix = &message[start + prefix.len()..];
+    let Some(end) = after_prefix.find(suffix) else {
+        return Vec::new();
+    };
+
+    after_prefix[..end]
+        .split(',')
+        .filter_map(|part| {
+            let hex = part.trim().trim_matches('"');
+            (!hex.is_empty()).then(|| hex.to_owned())
+        })
+        .collect()
 }
 
 pub(crate) fn record_io_error(
@@ -526,14 +618,84 @@ mod tests {
         let mut state = DiagnosticsState::new(path.clone());
         state.begin_frame();
 
-        state.track_widget("id".to_owned(), "rect-a".to_owned(), "first");
-        state.track_widget("id".to_owned(), "rect-b".to_owned(), "second");
+        state.track_widget(
+            "id".to_owned(),
+            "hex".to_owned(),
+            "rect-a".to_owned(),
+            "first",
+            "loc".to_owned(),
+        );
+        state.track_widget(
+            "id".to_owned(),
+            "hex".to_owned(),
+            "rect-b".to_owned(),
+            "second",
+            "loc".to_owned(),
+        );
         state.begin_frame();
-        state.track_widget("id".to_owned(), "rect-a".to_owned(), "first");
-        state.track_widget("id".to_owned(), "rect-b".to_owned(), "second");
+        state.track_widget(
+            "id".to_owned(),
+            "hex".to_owned(),
+            "rect-a".to_owned(),
+            "first",
+            "loc".to_owned(),
+        );
+        state.track_widget(
+            "id".to_owned(),
+            "hex".to_owned(),
+            "rect-b".to_owned(),
+            "second",
+            "loc".to_owned(),
+        );
 
         let contents = fs::read_to_string(path).unwrap();
         assert_eq!(contents.matches("egui_id_conflict").count(), 1);
+    }
+
+    #[test]
+    fn extract_hexes_reads_all_warning_ids() {
+        let message = "Widget rect [[0.0 0.0] - [1.0 1.0]] changed id between passes: prev ids: [\"AAAA\", \"BBBB\", \"CCCC\"], new ids: [\"DDDD\"]";
+
+        assert_eq!(
+            extract_hexes(message, "prev ids: [", "]"),
+            vec!["AAAA", "BBBB", "CCCC"]
+        );
+        assert_eq!(extract_hexes(message, "new ids: [", "]"), vec!["DDDD"]);
+    }
+
+    #[test]
+    fn changed_id_warning_attributes_all_matching_pass_sites() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(ERROR_LOG_NAME);
+        let mut state = DiagnosticsState::new(path.clone());
+
+        state.begin_pass(0);
+        state.track_widget(
+            "prev-id".to_owned(),
+            "BBBB".to_owned(),
+            "prev-rect".to_owned(),
+            "prev_kind",
+            "prev.rs:10".to_owned(),
+        );
+        state.begin_pass(1);
+        state.track_widget(
+            "new-id".to_owned(),
+            "DDDD".to_owned(),
+            "new-rect".to_owned(),
+            "new_kind",
+            "new.rs:20".to_owned(),
+        );
+
+        state.log_record(
+            Level::Warn,
+            "egui::context",
+            "Widget rect [[0.0 0.0] - [1.0 1.0]] changed id between passes: prev ids: [\"AAAA\", \"BBBB\"], new ids: [\"CCCC\", \"DDDD\"]".to_owned(),
+        );
+
+        let contents = fs::read_to_string(path).unwrap();
+        let payload: serde_json::Value = serde_json::from_str(contents.trim()).unwrap();
+        assert_eq!(payload["details"]["prev_site"], "BBBB prev.rs:10 prev_kind");
+        assert_eq!(payload["details"]["new_site"], "DDDD new.rs:20 new_kind");
     }
 
     #[test]

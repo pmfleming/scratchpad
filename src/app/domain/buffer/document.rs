@@ -1,15 +1,15 @@
-use super::{
-    ByteSpan, DocumentSnapshot, LineEndingStyle, PersistedHistoryEdit, PersistedHistoryEntry,
-    PieceHistoryEdit, PieceHistoryEdits, PieceHistoryEntry, PieceHistoryFlags, PieceSource,
-    PieceTreeLite, TEXT_HISTORY_COALESCE_WINDOW, TextDocumentOperationRecord, TextHistoryBudget,
-    fingerprint_parts, next_text_history_global_seq, platform_default_line_ending,
-    register_text_history_global_seq,
-};
 use super::history::{
     CoalescedEdit, OperationDirection, TextDocumentEditOperation, TextHistoryApplyError,
     coalesced_local_edit_record, deleted_spans_or_payload, entry_sealed_by_divider,
     operation_summary, persist_cursor_range, record_current_parts, record_expected_parts,
     restore_cursor_range,
+};
+use super::{
+    ByteSpan, DocumentSnapshot, LineEndingStyle, PersistedHistoryEdit, PersistedHistoryEntry,
+    PieceHistoryEdit, PieceHistoryEdits, PieceHistoryEntry, PieceHistoryFlags, PieceSource,
+    PieceTreeLite, TEXT_HISTORY_COALESCE_WINDOW, TextDocumentOperationRecord, TextHistoryBudget,
+    fingerprint_parts, next_text_history_global_seq, normalize_inserted_text_line_endings,
+    platform_default_line_ending, register_text_history_global_seq,
 };
 use crate::app::capacity_metrics;
 use crate::app::ui::editor_content::native_editor::{CursorRange, OperationRecord};
@@ -241,7 +241,7 @@ impl TextDocument {
             let deleted_text = self.piece_tree.extract_range(range.clone());
             let deleted_spans = self.byte_spans_for_range(range.clone());
             let normalized =
-                normalize_editor_inserted_text(replacement, self.preferred_line_ending)
+                normalize_inserted_text_line_endings(replacement, self.preferred_line_ending)
                     .into_owned();
             self.delete_char_range_internal(range.clone());
             self.insert_raw_text_with_source(&normalized, range.start, source);
@@ -495,7 +495,7 @@ impl TextDocument {
             return Ok(());
         }
 
-        for edit in &record.edits {
+        record.edits.iter().try_for_each(|edit| {
             let expected = edit.expected_text(direction);
             let range = edit.start_char..edit.start_char + expected.chars().count();
             if range.end > self.piece_tree.len_chars() {
@@ -504,8 +504,8 @@ impl TextDocument {
             if !expected.is_empty() && self.piece_tree.extract_range(range) != expected {
                 return Err(TextHistoryApplyError::Conflict);
             }
-        }
-        Ok(())
+            Ok(())
+        })
     }
 
     fn export_history_entry(&self, entry: &PieceHistoryEntry) -> PersistedHistoryEntry {
@@ -797,43 +797,11 @@ impl TextDocument {
     }
 }
 
-fn normalize_editor_inserted_text(
-    text: &str,
-    preferred_line_ending: LineEndingStyle,
-) -> Cow<'_, str> {
-    match text {
-        "\r" | "\r\n" | "\n" => Cow::Borrowed(preferred_line_ending.as_str()),
-        _ if !text.contains('\n') => Cow::Borrowed(text),
-        _ => {
-            let replacement = preferred_line_ending.as_str();
-            let mut normalized = String::with_capacity(text.len());
-            let mut chars = text.chars().peekable();
-
-            while let Some(ch) = chars.next() {
-                match ch {
-                    '\r' => {
-                        if chars.peek() == Some(&'\n') {
-                            chars.next();
-                            normalized.push_str(replacement);
-                        } else {
-                            normalized.push(ch);
-                        }
-                    }
-                    '\n' => normalized.push_str(replacement),
-                    _ => normalized.push(ch),
-                }
-            }
-
-            Cow::Owned(normalized)
-        }
-    }
-}
-
 fn validate_replacements(
     replacements: TextReplacements<'_>,
     text_char_len: usize,
 ) -> Result<(), TextReplacementError> {
-    let mut previous_start = None;
+    let mut previous_start = text_char_len;
 
     for (range, _) in replacements {
         if range.start > range.end {
@@ -842,15 +810,13 @@ fn validate_replacements(
         if range.end > text_char_len {
             return Err(TextReplacementError::OutOfBounds);
         }
-        if let Some(last_start) = previous_start {
-            if range.start > last_start {
-                return Err(TextReplacementError::NotDescending);
-            }
-            if range.end > last_start {
-                return Err(TextReplacementError::OverlappingRanges);
-            }
+        if range.start > previous_start {
+            return Err(TextReplacementError::NotDescending);
         }
-        previous_start = Some(range.start);
+        if range.end > previous_start {
+            return Err(TextReplacementError::OverlappingRanges);
+        }
+        previous_start = range.start;
     }
 
     Ok(())
@@ -858,64 +824,94 @@ fn validate_replacements(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::history::TEXT_HISTORY_SOFT_DIVIDER_PAUSE;
+    use super::*;
     use crate::app::ui::editor_content::native_editor::{CharCursor, EditOperation};
     use std::time::Duration;
 
+    macro_rules! empty_document {
+        () => {
+            TextDocument::new(String::new())
+        };
+    }
+
+    macro_rules! insert_sequence {
+        ($document:expr, $text:expr) => {
+            for (offset, ch) in $text.chars().enumerate() {
+                insert_edit($document, offset, &ch.to_string());
+            }
+        };
+    }
+
+    macro_rules! insert_isolated_sequence {
+        ($document:expr, $text:expr) => {
+            for (offset, ch) in $text.chars().enumerate() {
+                insert_isolated_edit($document, offset, &ch.to_string());
+            }
+        };
+    }
+
+    macro_rules! assert_entry_inserted_text {
+        ($document:expr, $index:expr, $text:expr) => {
+            assert_eq!(
+                entry_record($document, $index).edits[0].inserted_text,
+                $text
+            );
+        };
+    }
+
+    macro_rules! assert_single_entry_insert {
+        ($document:expr, $text:expr) => {
+            assert_eq!($document.extract_text(), $text);
+            assert_eq!($document.operation_undo_depth(), 1);
+            assert_entry_inserted_text!($document, 0, $text);
+        };
+    }
+
+    macro_rules! assert_undo_restores_text {
+        ($document:expr, $expected:expr) => {
+            $document.undo_last_operation();
+            assert_eq!($document.extract_text(), $expected);
+        };
+    }
+
     #[test]
     fn adjacent_typing_coalesces_into_one_undo_entry() {
-        let mut document = TextDocument::new(String::new());
+        let mut document = empty_document!();
 
-        insert_edit(&mut document, 0, "a");
-        insert_edit(&mut document, 1, "b");
-        insert_edit(&mut document, 2, "c");
+        insert_sequence!(&mut document, "abc");
 
-        assert_eq!(document.extract_text(), "abc");
-        assert_eq!(document.operation_undo_depth(), 1);
-        assert_eq!(history_record(&document).edits[0].inserted_text, "abc");
-
-        document.undo_last_operation();
-        assert_eq!(document.extract_text(), "");
+        assert_single_entry_insert!(&document, "abc");
+        assert_undo_restores_text!(&mut document, "");
     }
 
     #[test]
     fn backspace_inside_typing_burst_shrinks_the_insert_entry() {
-        let mut document = TextDocument::new(String::new());
+        let mut document = empty_document!();
 
-        insert_edit(&mut document, 0, "a");
-        insert_edit(&mut document, 1, "b");
-        insert_edit(&mut document, 2, "c");
+        insert_sequence!(&mut document, "abc");
         delete_edit(&mut document, 2..3, 3, 2);
         insert_edit(&mut document, 2, "d");
 
-        assert_eq!(document.extract_text(), "abd");
-        assert_eq!(document.operation_undo_depth(), 1);
-        assert_eq!(history_record(&document).edits[0].inserted_text, "abd");
-
-        document.undo_last_operation();
-        assert_eq!(document.extract_text(), "");
+        assert_single_entry_insert!(&document, "abd");
+        assert_undo_restores_text!(&mut document, "");
     }
 
     #[test]
     fn mistype_delete_retype_drops_the_transient_mistype() {
-        let mut document = TextDocument::new(String::new());
+        let mut document = empty_document!();
 
         insert_edit(&mut document, 0, "x");
         delete_edit(&mut document, 0..1, 1, 0);
         insert_edit(&mut document, 0, "y");
 
-        assert_eq!(document.extract_text(), "y");
-        assert_eq!(document.operation_undo_depth(), 1);
-        assert_eq!(history_record(&document).edits[0].inserted_text, "y");
-
-        document.undo_last_operation();
-        assert_eq!(document.extract_text(), "");
+        assert_single_entry_insert!(&document, "y");
+        assert_undo_restores_text!(&mut document, "");
     }
 
     #[test]
     fn removed_transient_edit_does_not_reopen_previous_coalescing_window() {
-        let mut document = TextDocument::new(String::new());
+        let mut document = empty_document!();
 
         insert_edit(&mut document, 0, "a");
         document.latest_history_update_at = None;
@@ -925,14 +921,8 @@ mod tests {
 
         assert_eq!(document.extract_text(), "ay");
         assert_eq!(document.operation_undo_depth(), 2);
-        assert_eq!(history_record(&document).edits[0].inserted_text, "a");
-        assert_eq!(
-            document
-                .operation_from_history_entry(&document.history_entries()[1])
-                .edits[0]
-                .inserted_text,
-            "y"
-        );
+        assert_entry_inserted_text!(&document, 0, "a");
+        assert_entry_inserted_text!(&document, 1, "y");
     }
 
     #[test]
@@ -955,44 +945,29 @@ mod tests {
 
     #[test]
     fn long_typing_burst_stays_one_entry() {
-        let mut document = TextDocument::new(String::new());
+        let mut document = empty_document!();
         let phrase = "highlighting should be consistent";
 
-        for (offset, ch) in phrase.chars().enumerate() {
-            insert_edit(&mut document, offset, &ch.to_string());
-        }
+        insert_sequence!(&mut document, phrase);
 
-        assert_eq!(document.extract_text(), phrase);
-        assert_eq!(document.operation_undo_depth(), 1);
-        assert_eq!(history_record(&document).edits[0].inserted_text, phrase);
+        assert_single_entry_insert!(&document, phrase);
     }
 
     #[test]
     fn hard_divider_seals_the_entry() {
-        let mut document = TextDocument::new(String::new());
+        let mut document = empty_document!();
 
-        insert_edit(&mut document, 0, "H");
-        insert_edit(&mut document, 1, "i");
-        insert_edit(&mut document, 2, ".");
-        insert_edit(&mut document, 3, "B");
-        insert_edit(&mut document, 4, "y");
-        insert_edit(&mut document, 5, "e");
+        insert_sequence!(&mut document, "Hi.Bye");
 
         assert_eq!(document.extract_text(), "Hi.Bye");
         assert_eq!(document.operation_undo_depth(), 2);
-        assert_eq!(history_record(&document).edits[0].inserted_text, "Hi.");
-        assert_eq!(
-            document
-                .operation_from_history_entry(&document.history_entries()[1])
-                .edits[0]
-                .inserted_text,
-            "Bye"
-        );
+        assert_entry_inserted_text!(&document, 0, "Hi.");
+        assert_entry_inserted_text!(&document, 1, "Bye");
     }
 
     #[test]
     fn newline_seals_the_entry() {
-        let mut document = TextDocument::new(String::new());
+        let mut document = empty_document!();
 
         insert_edit(&mut document, 0, "a");
         insert_edit(&mut document, 1, "\n");
@@ -1004,28 +979,18 @@ mod tests {
 
     #[test]
     fn soft_divider_does_not_seal_inside_a_continuous_burst() {
-        let mut document = TextDocument::new(String::new());
+        let mut document = empty_document!();
 
-        insert_edit(&mut document, 0, "H");
-        insert_edit(&mut document, 1, "i");
-        insert_edit(&mut document, 2, ",");
-        insert_edit(&mut document, 3, " ");
-        insert_edit(&mut document, 4, "y");
-        insert_edit(&mut document, 5, "o");
-        insert_edit(&mut document, 6, "u");
+        insert_sequence!(&mut document, "Hi, you");
 
-        assert_eq!(document.extract_text(), "Hi, you");
-        assert_eq!(document.operation_undo_depth(), 1);
-        assert_eq!(history_record(&document).edits[0].inserted_text, "Hi, you");
+        assert_single_entry_insert!(&document, "Hi, you");
     }
 
     #[test]
     fn soft_divider_seals_after_a_pause() {
-        let mut document = TextDocument::new(String::new());
+        let mut document = empty_document!();
 
-        insert_edit(&mut document, 0, "H");
-        insert_edit(&mut document, 1, "i");
-        insert_edit(&mut document, 2, ",");
+        insert_sequence!(&mut document, "Hi,");
         // Simulate the user pausing past the soft-divider seal threshold.
         document.latest_history_update_at =
             Some(Instant::now() - TEXT_HISTORY_SOFT_DIVIDER_PAUSE - Duration::from_millis(50));
@@ -1033,7 +998,7 @@ mod tests {
 
         assert_eq!(document.extract_text(), "Hi, ");
         assert_eq!(document.operation_undo_depth(), 2);
-        assert_eq!(history_record(&document).edits[0].inserted_text, "Hi,");
+        assert_entry_inserted_text!(&document, 0, "Hi,");
     }
 
     #[test]
@@ -1077,23 +1042,16 @@ mod tests {
 
     #[test]
     fn dash_is_a_soft_divider() {
-        let mut document = TextDocument::new(String::new());
+        let mut document = empty_document!();
 
         // A continuous burst through the dash stays in one entry.
-        for (offset, ch) in "well-known".chars().enumerate() {
-            insert_edit(&mut document, offset, &ch.to_string());
-        }
+        insert_sequence!(&mut document, "well-known");
         assert_eq!(document.operation_undo_depth(), 1);
-        assert_eq!(
-            history_record(&document).edits[0].inserted_text,
-            "well-known"
-        );
+        assert_entry_inserted_text!(&document, 0, "well-known");
 
         // A burst that ends on a dash, then a pause, seals the entry.
-        let mut other = TextDocument::new(String::new());
-        for (offset, ch) in "well-".chars().enumerate() {
-            insert_edit(&mut other, offset, &ch.to_string());
-        }
+        let mut other = empty_document!();
+        insert_sequence!(&mut other, "well-");
         other.latest_history_update_at =
             Some(Instant::now() - TEXT_HISTORY_SOFT_DIVIDER_PAUSE - Duration::from_millis(50));
         insert_edit(&mut other, 5, "k");
@@ -1113,10 +1071,8 @@ mod tests {
 
     #[test]
     fn keyboard_redo_replays_one_history_entry_at_a_time() {
-        let mut document = TextDocument::new(String::new());
-        insert_isolated_edit(&mut document, 0, "a");
-        insert_isolated_edit(&mut document, 1, "b");
-        insert_isolated_edit(&mut document, 2, "c");
+        let mut document = empty_document!();
+        insert_isolated_sequence!(&mut document, "abc");
 
         document.undo_last_operation();
         document.undo_last_operation();
@@ -1139,10 +1095,8 @@ mod tests {
 
     #[test]
     fn target_history_redo_replays_through_the_clicked_entry() {
-        let mut document = TextDocument::new(String::new());
-        insert_isolated_edit(&mut document, 0, "a");
-        insert_isolated_edit(&mut document, 1, "b");
-        insert_isolated_edit(&mut document, 2, "c");
+        let mut document = empty_document!();
+        insert_isolated_sequence!(&mut document, "abc");
         let clicked_entry = document.history_entries()[2].id;
 
         document.undo_last_operation();
@@ -1157,10 +1111,8 @@ mod tests {
 
     #[test]
     fn target_history_undo_replays_clicked_entry_and_later_entries() {
-        let mut document = TextDocument::new(String::new());
-        insert_isolated_edit(&mut document, 0, "a");
-        insert_isolated_edit(&mut document, 1, "b");
-        insert_isolated_edit(&mut document, 2, "c");
+        let mut document = empty_document!();
+        insert_isolated_sequence!(&mut document, "abc");
         let clicked_entry = document.history_entries()[1].id;
 
         document.apply_text_history_undo(clicked_entry).unwrap();
@@ -1221,7 +1173,11 @@ mod tests {
     }
 
     fn history_record(document: &TextDocument) -> TextDocumentOperationRecord {
-        document.operation_from_history_entry(&document.history_entries()[0])
+        entry_record(document, 0)
+    }
+
+    fn entry_record(document: &TextDocument, index: usize) -> TextDocumentOperationRecord {
+        document.operation_from_history_entry(&document.history_entries()[index])
     }
 
     fn cursor(index: usize) -> CursorRange {

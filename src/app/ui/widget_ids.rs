@@ -5,6 +5,23 @@ const ID_NAMESPACE: &str = "scratchpad.widget";
 
 pub(crate) fn configure_debug_options(ctx: &egui::Context) {
     ctx.options_mut(|options| options.warn_on_id_clash = cfg!(debug_assertions));
+    let registration_id = ctx_key("diagnostics_begin_pass_registered");
+    let should_register = ctx.data_mut(|data| {
+        if data.get_persisted::<bool>(registration_id).unwrap_or(false) {
+            false
+        } else {
+            data.insert_persisted(registration_id, true);
+            true
+        }
+    });
+    if should_register {
+        ctx.on_begin_pass(
+            "diagnostics",
+            std::sync::Arc::new(|ctx| {
+                crate::app::diagnostics::begin_pass(ctx.current_pass_index());
+            }),
+        );
+    }
 }
 
 pub(crate) fn ctx_key(key: impl Hash) -> Id {
@@ -59,6 +76,7 @@ pub(crate) fn scope<R>(
     ui.push_id((ID_NAMESPACE, key), add_contents)
 }
 
+#[track_caller]
 pub(crate) fn interact(
     ui: &egui::Ui,
     rect: Rect,
@@ -67,14 +85,14 @@ pub(crate) fn interact(
     kind: &'static str,
 ) -> Response {
     let response = ui.interact(rect, id, sense);
-    track(ui.ctx(), id, response.rect, kind);
+    track(id, response.rect, kind);
     response
 }
 
-pub(crate) fn track(ctx: &egui::Context, id: Id, rect: Rect, kind: &'static str) {
-    crate::app::diagnostics::track_widget_id(id, rect, kind);
-    #[cfg(debug_assertions)]
-    ctx.check_for_id_clash(id, rect, kind);
+#[track_caller]
+pub(crate) fn track(id: Id, rect: Rect, kind: &'static str) {
+    let location = std::panic::Location::caller();
+    crate::app::diagnostics::track_widget_id(id, rect, kind, location);
 }
 
 #[cfg(test)]

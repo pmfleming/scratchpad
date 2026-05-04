@@ -3,7 +3,9 @@ param(
     [switch]$SkipComplexity,
     [switch]$SkipSlowspots,
     [switch]$SkipSearchSpeed,
-    [switch]$SkipClones
+    [switch]$SkipClones,
+    [switch]$SkipLocality,
+    [switch]$SkipLeverage
 )
 
 Set-StrictMode -Version Latest
@@ -82,7 +84,7 @@ try {
     Invoke-NativeCommand -Label "cargo clippy" -Command { cargo clippy --all-targets --all-features -- -D warnings }
     Invoke-NativeCommand -Label "cargo test" -Command { cargo test }
 
-    $needsPythonTooling = (-not $SkipComplexity) -or (-not $SkipSlowspots) -or (-not $SkipSearchSpeed) -or (-not $SkipClones)
+    $needsPythonTooling = (-not $SkipComplexity) -or (-not $SkipSlowspots) -or (-not $SkipSearchSpeed) -or (-not $SkipClones) -or (-not $SkipLocality) -or (-not $SkipLeverage)
     if ($needsPythonTooling) {
         $python = Initialize-PythonTooling -RepoRoot $repoRoot -ScriptRoot $PSScriptRoot
         $analysisDir = Join-Path $repoRoot "target\analysis"
@@ -110,6 +112,18 @@ try {
     if (-not $SkipClones) {
         Invoke-NativeCommand -Label "clone_alert.py" -Command {
             & $python (Join-Path $PSScriptRoot "clone_alert.py") --paths src --output (Join-Path $analysisDir "clones.json")
+        }
+    }
+
+    if (-not $SkipLocality) {
+        Invoke-NativeCommand -Label "locality_bench.py" -Command {
+            & $python (Join-Path $PSScriptRoot "locality_bench.py") --output (Join-Path $analysisDir "locality_metrics.json")
+        }
+    }
+
+    if (-not $SkipLeverage) {
+        Invoke-NativeCommand -Label "leverage_metrics.py" -Command {
+            & $python (Join-Path $PSScriptRoot "leverage_metrics.py") --paths src --output (Join-Path $analysisDir "leverage_metrics.json")
         }
     }
 }

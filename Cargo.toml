@@ -52,3 +52,7 @@ path = "scripts/ast_hasher.rs"
 [[bin]]
 name = "count_lines"
 path = "scripts/count_lines.rs"
+
+[[bin]]
+name = "leverage_ast"
+path = "scripts/leverage_ast.rs"

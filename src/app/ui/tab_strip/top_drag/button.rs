@@ -38,7 +38,14 @@ fn pointer_near_top_edge(ui: &egui::Ui, viewport: egui::Rect) -> bool {
 }
 
 fn render_top_drag_button(ctx: &egui::Context, ui: &mut egui::Ui) {
-    let (rect, response) = ui.allocate_exact_size(BUTTON_SIZE, egui::Sense::click_and_drag());
+    let (_, rect) = ui.allocate_space(BUTTON_SIZE);
+    let response = widget_ids::interact(
+        ui,
+        rect,
+        widget_ids::child(ui.id(), "top_drag_button"),
+        egui::Sense::click_and_drag(),
+        "top_drag_button",
+    );
     let fill = if response.hovered() {
         action_hover_bg(ui)
     } else {

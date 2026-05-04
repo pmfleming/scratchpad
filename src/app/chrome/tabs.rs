@@ -163,7 +163,7 @@ fn paint_selected_tab_overlay(ui: &egui::Ui, rect: Rect) {
 
 fn allocate_tab_button_frame(ui: &mut egui::Ui, width: f32) -> TabButtonFrame {
     let size = Vec2::new(width, TAB_HEIGHT);
-    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let (_, rect) = ui.allocate_space(size);
     let response = widget_ids::interact(
         ui,
         rect,

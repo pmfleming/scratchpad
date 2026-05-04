@@ -625,21 +625,19 @@ pub(crate) fn coalesced_local_edit_record(
     latest: TextDocumentOperationRecord,
     incoming: &TextDocumentOperationRecord,
 ) -> Option<CoalescedEdit> {
-    if latest.edits.len() != 1 || incoming.edits.len() != 1 {
+    let ([latest_edit], [incoming_edit]) = (latest.edits.as_slice(), incoming.edits.as_slice())
+    else {
         return None;
-    }
+    };
     // Compare by index only — `prefer_next_row` is a UI hint that flips at
     // soft-wrap boundaries, and treating it as a cursor jump would split
     // continuous typing into spurious entries.
     if !cursor_ranges_share_position(&latest.next_selection, &incoming.previous_selection)
         || !latest.next_selection.is_empty()
         || !incoming.next_selection.is_empty()
+        || !coalescable_edit_text(latest_edit)
+        || !coalescable_edit_text(incoming_edit)
     {
-        return None;
-    }
-    let latest_edit = latest.edits.first()?;
-    let incoming_edit = incoming.edits.first()?;
-    if !coalescable_edit_text(latest_edit) || !coalescable_edit_text(incoming_edit) {
         return None;
     }
 
@@ -693,34 +691,35 @@ fn coalesce_after_delete(
     let incoming_edit = incoming.edits.first()?;
     let latest_start = latest_edit.start_char;
     let incoming_deleted_len = incoming_edit.deleted_text.chars().count();
-
-    if incoming_edit.deleted_text.is_empty() && !incoming_edit.inserted_text.is_empty() {
-        if incoming_edit.start_char != latest_start {
-            return None;
+    let merged = match (
+        incoming_edit.deleted_text.is_empty(),
+        incoming_edit.inserted_text.is_empty(),
+    ) {
+        (true, false) if incoming_edit.start_char == latest_start => {
+            latest_edit.inserted_text = incoming_edit.inserted_text.clone();
+            true
         }
-        latest_edit.inserted_text = incoming_edit.inserted_text.clone();
-        latest.next_selection = incoming.next_selection;
-        return Some(CoalescedEdit::Record(latest));
-    }
-
-    if incoming_edit.inserted_text.is_empty() && !incoming_edit.deleted_text.is_empty() {
-        if incoming_edit.start_char == latest_start {
+        (false, true) if incoming_edit.start_char == latest_start => {
             latest_edit
                 .deleted_text
                 .push_str(&incoming_edit.deleted_text);
-        } else if incoming_edit.start_char + incoming_deleted_len == latest_start {
+            latest_edit.deleted_spans.clear();
+            true
+        }
+        (false, true) if incoming_edit.start_char + incoming_deleted_len == latest_start => {
             latest_edit.start_char = incoming_edit.start_char;
             latest_edit.deleted_text =
                 format!("{}{}", incoming_edit.deleted_text, latest_edit.deleted_text);
-        } else {
-            return None;
+            latest_edit.deleted_spans.clear();
+            true
         }
-        latest_edit.deleted_spans.clear();
-        latest.next_selection = incoming.next_selection;
-        return Some(CoalescedEdit::Record(latest));
+        _ => false,
+    };
+    if !merged {
+        return None;
     }
-
-    None
+    latest.next_selection = incoming.next_selection;
+    Some(CoalescedEdit::Record(latest))
 }
 
 fn replace_char_range_in_text(text: &str, range: Range<usize>, replacement: &str) -> String {
@@ -790,7 +789,8 @@ pub(crate) fn record_current_parts(
         .edits
         .iter()
         .map(|edit| {
-            let range = edit.start_char..edit.start_char + edit.expected_text(direction).chars().count();
+            let range =
+                edit.start_char..edit.start_char + edit.expected_text(direction).chars().count();
             if range.end > tree.len_chars() {
                 return Err(TextHistoryApplyError::OutOfBounds);
             }
@@ -818,33 +818,37 @@ pub(crate) fn operation_summary(
     source: PieceSource,
     operation: &TextDocumentOperationRecord,
 ) -> String {
-    match source {
-        PieceSource::SearchReplace if operation.edits.len() == 1 => "Replace match".to_owned(),
-        PieceSource::SearchReplace => format!("Replace {} matches", operation.edits.len()),
-        PieceSource::Paste => operation
-            .edits
-            .first()
+    let edit_count = operation.edits.len();
+    if source == PieceSource::SearchReplace {
+        return if edit_count == 1 {
+            "Replace match".to_owned()
+        } else {
+            format!("Replace {edit_count} matches")
+        };
+    }
+
+    let first_edit = operation.edits.first();
+    if source == PieceSource::Paste {
+        return first_edit
             .map(|edit| format!("Paste \"{}\"", preview_text(&edit.inserted_text)))
-            .unwrap_or_else(|| "Paste".to_owned()),
-        PieceSource::Cut => operation
-            .edits
-            .first()
+            .unwrap_or_else(|| "Paste".to_owned());
+    }
+    if source == PieceSource::Cut {
+        return first_edit
             .map(|edit| format!("Cut \"{}\"", preview_text(&edit.deleted_text)))
-            .unwrap_or_else(|| "Cut".to_owned()),
-        _ if operation.edits.len() != 1 => format!("Edit {} ranges", operation.edits.len()),
-        _ => operation
-            .edits
-            .first()
-            .map(
-                |edit| match (edit.deleted_text.is_empty(), edit.inserted_text.is_empty()) {
-                    (true, false) => format!("Insert \"{}\"", preview_text(&edit.inserted_text)),
-                    (false, true) => format!("Delete \"{}\"", preview_text(&edit.deleted_text)),
-                    (false, false) => {
-                        format!("Replace with \"{}\"", preview_text(&edit.inserted_text))
-                    }
-                    (true, true) => "Edit".to_owned(),
-                },
-            )
-            .unwrap_or_else(|| "Edit".to_owned()),
+            .unwrap_or_else(|| "Cut".to_owned());
+    }
+    if edit_count != 1 {
+        return format!("Edit {edit_count} ranges");
+    }
+
+    let Some(edit) = first_edit else {
+        return "Edit".to_owned();
+    };
+    match (edit.deleted_text.is_empty(), edit.inserted_text.is_empty()) {
+        (true, false) => format!("Insert \"{}\"", preview_text(&edit.inserted_text)),
+        (false, true) => format!("Delete \"{}\"", preview_text(&edit.deleted_text)),
+        (false, false) => format!("Replace with \"{}\"", preview_text(&edit.inserted_text)),
+        (true, true) => "Edit".to_owned(),
     }
 }
