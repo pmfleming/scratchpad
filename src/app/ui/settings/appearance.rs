@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::services::settings_store::NewTabPlacement;
 
 const AUTO_HIDE_DELAY_OPTIONS: [f32; 13] = [
     0.1, 0.3, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,
@@ -8,6 +9,12 @@ const TAB_LIST_POSITIONS: [TabListPosition; 4] = [
     TabListPosition::Bottom,
     TabListPosition::Left,
     TabListPosition::Right,
+];
+const NEW_TAB_PLACEMENT_OPTIONS: [NewTabPlacement; 4] = [
+    NewTabPlacement::Start,
+    NewTabPlacement::End,
+    NewTabPlacement::AfterSelection,
+    NewTabPlacement::BeforeSelection,
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -90,6 +97,8 @@ pub(super) fn render_tab_position_category(ui: &mut egui::Ui, app: &mut Scratchp
         true,
         |ui| {
             render_tab_list_row(ui, app);
+            inner_divider(ui);
+            render_new_tab_placement_row(ui, app);
             inner_divider(ui);
             render_auto_hide_row(ui, app);
             inner_divider(ui);
@@ -191,12 +200,59 @@ fn render_tab_list_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     );
 }
 
+fn render_new_tab_placement_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    inner_select_row(
+        ui,
+        "New tabs",
+        Some("Choose where newly opened tabs are placed."),
+        |ui| {
+            let mut selected = app.new_tab_placement();
+            fixed_width_control(ui, |ui| {
+                let control_width = SettingsUi::control_width(ui);
+                widget_ids::combo_box(ui, "settings_new_tab_placement")
+                    .selected_text(new_tab_placement_pill_label(selected))
+                    .width(control_width)
+                    .show_ui(ui, |ui| {
+                        for placement in NEW_TAB_PLACEMENT_OPTIONS {
+                            ui.selectable_value(
+                                &mut selected,
+                                placement,
+                                new_tab_placement_label(placement),
+                            );
+                        }
+                    });
+            });
+            if selected != app.new_tab_placement() {
+                app.set_new_tab_placement(selected);
+            }
+        },
+    );
+}
+
 fn tab_list_position_label(position: TabListPosition) -> &'static str {
     match position {
         TabListPosition::Top => "Top",
         TabListPosition::Bottom => "Bottom",
         TabListPosition::Left => "Left",
         TabListPosition::Right => "Right",
+    }
+}
+
+fn new_tab_placement_label(placement: NewTabPlacement) -> &'static str {
+    match placement {
+        NewTabPlacement::Start => "Start of list",
+        NewTabPlacement::End => "End of list",
+        NewTabPlacement::BeforeSelection => "Before selection",
+        NewTabPlacement::AfterSelection => "After selection",
+    }
+}
+
+fn new_tab_placement_pill_label(placement: NewTabPlacement) -> &'static str {
+    match placement {
+        NewTabPlacement::Start => "Start",
+        NewTabPlacement::End => "End",
+        NewTabPlacement::BeforeSelection => "Before",
+        NewTabPlacement::AfterSelection => "After",
     }
 }
 
@@ -266,7 +322,7 @@ fn render_status_bar_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             let mut visible = app.status_bar_visible();
             toggle_control(ui, "settings.status_bar_visible", &mut visible);
             if visible != app.status_bar_visible() {
-                app.set_status_bar_visible(visible);
+                app.defer_status_bar_visible(visible, ui.ctx());
             }
         },
     );

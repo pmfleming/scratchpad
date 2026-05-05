@@ -1,14 +1,20 @@
+mod model;
+mod persistence;
+
+use self::model::{
+    TextHistoryAction, TextHistoryFileGroup, TextHistoryRow, file_groups_from_entries,
+    row_from_entry,
+};
+use self::persistence::{read_active_tab, read_follow_focus, write_active_tab, write_follow_focus};
 use super::common::show_centered_callout;
 use crate::app::app_state::ScratchpadApp;
-use crate::app::domain::{BufferId, PieceSource, source_label};
-use crate::app::text_history::TextHistoryEntryView;
+use crate::app::domain::BufferId;
 use crate::app::theme::{action_bg, action_hover_bg, border, tab_selected_accent, tab_selected_bg};
 use crate::app::ui::settings::dialog_card_frame;
 use crate::app::ui::{callout, settings, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{
-    ARROWS_LEFT_RIGHT, BACKSPACE, CARET_DOWN, CARET_RIGHT, CLIPBOARD, CLOCK_COUNTER_CLOCKWISE,
-    CROSSHAIR, FILES, MAGNIFYING_GLASS, PENCIL_SIMPLE, SCISSORS, STACK, TRASH,
+    CARET_DOWN, CARET_RIGHT, CLOCK_COUNTER_CLOCKWISE, CROSSHAIR, FILES, TRASH,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -29,30 +35,6 @@ const UNDONE_OPACITY: f32 = 0.55;
 enum HistoryTab {
     Timeline,
     ByFile,
-}
-
-#[derive(Clone)]
-struct TextHistoryRow {
-    buffer_id: BufferId,
-    entry_id: u64,
-    global_seq: u64,
-    title: String,
-    detail: String,
-    icon: &'static str,
-    undone: bool,
-}
-
-#[derive(Clone, Copy)]
-struct TextHistoryAction {
-    buffer_id: BufferId,
-    entry_id: u64,
-}
-
-#[derive(Clone)]
-struct TextHistoryFileGroup {
-    buffer_id: BufferId,
-    label: String,
-    rows: Vec<TextHistoryRow>,
 }
 
 struct TextHistoryWindowInputs<'a> {
@@ -126,76 +108,6 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
     if let Some(action) = action {
         let _ =
             app.apply_text_history_to_entry(action.buffer_id, action.entry_id, next_follow_focus);
-    }
-}
-
-fn row_from_entry(entry: &TextHistoryEntryView) -> TextHistoryRow {
-    TextHistoryRow {
-        buffer_id: entry.buffer_id,
-        entry_id: entry.id,
-        global_seq: entry.global_seq,
-        title: entry.summary.clone(),
-        detail: format!("{} · {}", entry.label, source_label(entry.source)),
-        icon: entry_icon(entry),
-        undone: entry.undone,
-    }
-}
-
-fn file_groups_from_entries<'a>(
-    entries: impl Iterator<Item = &'a TextHistoryEntryView>,
-) -> Vec<TextHistoryFileGroup> {
-    let mut groups = Vec::<TextHistoryFileGroup>::new();
-    for entry in entries {
-        let row = row_from_entry(entry);
-        if let Some(group) = groups
-            .iter_mut()
-            .find(|group| group.buffer_id == entry.buffer_id)
-        {
-            group.rows.push(row);
-        } else {
-            groups.push(TextHistoryFileGroup {
-                buffer_id: entry.buffer_id,
-                label: entry.label.clone(),
-                rows: vec![row],
-            });
-        }
-    }
-    for group in &mut groups {
-        group.rows.reverse();
-    }
-    groups.sort_by(|left, right| {
-        let left_seq = left
-            .rows
-            .first()
-            .map(|row| row.global_seq)
-            .unwrap_or_default();
-        let right_seq = right
-            .rows
-            .first()
-            .map(|row| row.global_seq)
-            .unwrap_or_default();
-        right_seq
-            .cmp(&left_seq)
-            .then_with(|| left.label.cmp(&right.label))
-            .then_with(|| left.buffer_id.cmp(&right.buffer_id))
-    });
-    groups
-}
-
-fn entry_icon(entry: &TextHistoryEntryView) -> &'static str {
-    match entry.source {
-        PieceSource::SearchReplace => MAGNIFYING_GLASS,
-        PieceSource::Paste => CLIPBOARD,
-        PieceSource::Cut => SCISSORS,
-        _ if entry.edit_count != 1 => STACK,
-        _ => match (
-            entry.first_deleted_text.is_empty(),
-            entry.first_inserted_text.is_empty(),
-        ) {
-            (false, true) => BACKSPACE,
-            (false, false) => ARROWS_LEFT_RIGHT,
-            (true, _) => PENCIL_SIMPLE,
-        },
     }
 }
 
@@ -341,12 +253,10 @@ fn control_icon_button(
     .fill(fill)
     .stroke(egui::Stroke::new(1.0, stroke_color))
     .corner_radius(egui::CornerRadius::same(8));
-    widget_ids::surface_response(
-        ui,
-        ("text_history.control", id_source),
-        widget_ids::WidgetRole::IconButton,
-        |ui| ui.add_enabled(enabled, button),
-    )
+    widget_ids::scope(ui, ("text_history.control", id_source), |ui| {
+        ui.add_enabled(enabled, button)
+    })
+    .inner
     .on_hover_text(tooltip)
 }
 
@@ -399,11 +309,11 @@ fn render_timeline_rows(
 ) {
     let anchors = timeline_now_line_anchors(rows);
 
-    for (index, row) in rows.iter().enumerate() {
+    for row in rows {
         if anchors.contains(&(row.buffer_id, row.entry_id)) {
-            render_now_line(ui, ("timeline", index));
+            render_now_line(ui);
         }
-        render_row(ui, ("timeline", index), row, action);
+        render_row(ui, row, action);
     }
 }
 
@@ -443,7 +353,7 @@ fn render_by_file(
         "No file history",
         |ui| {
             for (index, group) in groups.iter().enumerate() {
-                render_file_group(ui, index, group, action);
+                render_file_group(ui, group, action);
                 if index + 1 < groups.len() {
                     ui.add_space(12.0);
                 }
@@ -458,19 +368,18 @@ fn text_history_content_scroll_id() -> egui::Id {
 
 fn render_file_group(
     ui: &mut egui::Ui,
-    group_index: usize,
     group: &TextHistoryFileGroup,
     action: &mut Option<TextHistoryAction>,
 ) {
-    widget_ids::surface_scope(ui, ("text_history.file_group", group_index), |ui| {
-        let active_id = text_history_file_group_expanded_id(group.buffer_id);
-        let pending_id = text_history_file_group_expanded_pending_id(group.buffer_id);
-        let expanded = widget_ids::read_deferred_persisted::<bool>(ui.ctx(), pending_id, active_id)
+    widget_ids::scope(ui, ("text_history.file_group", group.buffer_id), |ui| {
+        let expansion_id =
+            widget_ids::local(ui, ("text_history.file_group.expanded", group.buffer_id));
+        let expanded = ui
+            .data_mut(|data| data.get_persisted::<bool>(expansion_id))
             .unwrap_or(true);
-        let (group_response, toggle_requested) =
-            render_file_header_pill(ui, group_index, group, expanded);
+        let (group_response, toggle_requested) = render_file_header_pill(ui, group, expanded);
         if group_response.clicked() || toggle_requested {
-            widget_ids::write_deferred_persisted(ui.ctx(), pending_id, !expanded);
+            ui.data_mut(|data| data.insert_persisted(expansion_id, !expanded));
         }
         if !expanded {
             return;
@@ -485,17 +394,8 @@ fn render_file_group(
     });
 }
 
-fn text_history_file_group_expanded_id(buffer_id: BufferId) -> egui::Id {
-    widget_ids::ctx_key(("text_history.file_group.expanded", buffer_id))
-}
-
-fn text_history_file_group_expanded_pending_id(buffer_id: BufferId) -> egui::Id {
-    widget_ids::ctx_key(("text_history.file_group.expanded.pending", buffer_id))
-}
-
 fn render_file_header_pill(
     ui: &mut egui::Ui,
-    group_index: usize,
     group: &TextHistoryFileGroup,
     expanded: bool,
 ) -> (egui::Response, bool) {
@@ -521,45 +421,31 @@ fn render_file_header_pill(
             let mut toggle_requested = false;
             let group_response = ui
                 .horizontal(|ui| {
-                    let caret = widget_ids::surface_response(
-                        ui,
-                        ("text_history.file_group.caret", group_index),
-                        widget_ids::WidgetRole::ActionButton,
-                        |ui| {
-                            ui.add_sized(
-                                egui::vec2(24.0, 24.0),
-                                egui::Button::new(
-                                    egui::RichText::new(caret_icon)
-                                        .size(14.0)
-                                        .color(callout::muted_text(ui)),
-                                )
-                                .fill(egui::Color32::TRANSPARENT)
-                                .stroke(egui::Stroke::NONE),
+                    let caret = ui
+                        .add_sized(
+                            egui::vec2(24.0, 24.0),
+                            egui::Button::new(
+                                egui::RichText::new(caret_icon)
+                                    .size(14.0)
+                                    .color(callout::muted_text(ui)),
                             )
-                        },
-                    )
-                    .on_hover_text(caret_tooltip);
+                            .fill(egui::Color32::TRANSPARENT)
+                            .stroke(egui::Stroke::NONE),
+                        )
+                        .on_hover_text(caret_tooltip);
                     if caret.clicked() {
                         toggle_requested = true;
                     }
 
                     let label_width = (ui.available_width() - 96.0).max(120.0);
-                    let response = widget_ids::scope(
+                    let response = truncated_label(
                         ui,
-                        ("text_history.file_group.label", group_index),
-                        |ui| {
-                            truncated_label(
-                                ui,
-                                ("text_history.file_group.label", group_index),
-                                &group.label,
-                                label_width,
-                                13.0,
-                                callout::text(ui),
-                                egui::Sense::click(),
-                            )
-                        },
+                        &group.label,
+                        label_width,
+                        13.0,
+                        callout::text(ui),
+                        egui::Sense::click(),
                     )
-                    .inner
                     .on_hover_text(&group.label);
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -588,10 +474,10 @@ fn render_file_history_rows(
 
     for (idx, row) in rows.iter().enumerate() {
         if !now_rendered && now_line_index == Some(idx) {
-            render_now_line(ui, ("by_file", idx));
+            render_now_line(ui);
             now_rendered = true;
         }
-        render_row(ui, ("by_file", idx), row, action);
+        render_row(ui, row, action);
     }
 }
 
@@ -600,15 +486,12 @@ fn per_file_now_line_insert_index(rows: &[TextHistoryRow]) -> Option<usize> {
     (insert_index > 0).then_some(insert_index)
 }
 
-fn render_row(
-    ui: &mut egui::Ui,
-    surface_key: impl std::hash::Hash,
-    row: &TextHistoryRow,
-    action: &mut Option<TextHistoryAction>,
-) {
-    let response = widget_ids::surface_scope(ui, ("text_history.row", surface_key), |ui| {
-        history_pill(ui, row)
-    })
+fn render_row(ui: &mut egui::Ui, row: &TextHistoryRow, action: &mut Option<TextHistoryAction>) {
+    let response = widget_ids::scope(
+        ui,
+        ("text_history.row", row.buffer_id, row.entry_id),
+        |ui| history_pill(ui, row),
+    )
     .inner
     .on_hover_text(if row.undone {
         "Click to redo this text change"
@@ -672,7 +555,6 @@ fn history_pill(ui: &mut egui::Ui, row: &TextHistoryRow) -> egui::Response {
                     let text_width = ui.available_width().max(0.0);
                     truncated_label(
                         ui,
-                        ("text_history.row.title", row.entry_id),
                         &row.title,
                         text_width,
                         14.0,
@@ -682,7 +564,6 @@ fn history_pill(ui: &mut egui::Ui, row: &TextHistoryRow) -> egui::Response {
                     .on_hover_text(&row.title);
                     truncated_label(
                         ui,
-                        ("text_history.row.detail", row.entry_id),
                         &row.detail,
                         text_width,
                         12.0,
@@ -705,36 +586,29 @@ fn history_pill(ui: &mut egui::Ui, row: &TextHistoryRow) -> egui::Response {
 
 fn truncated_label(
     ui: &mut egui::Ui,
-    surface_key: impl std::hash::Hash,
     text: &str,
     width: f32,
     size: f32,
     color: egui::Color32,
     sense: egui::Sense,
 ) -> egui::Response {
-    widget_ids::surface_response(ui, surface_key, widget_ids::WidgetRole::Label, |ui| {
-        ui.add_sized(
-            egui::vec2(width, 0.0),
-            egui::Label::new(egui::RichText::new(text).size(size).color(color))
-                .truncate()
-                .sense(sense),
-        )
-    })
+    ui.add_sized(
+        egui::vec2(width, 0.0),
+        egui::Label::new(egui::RichText::new(text).size(size).color(color))
+            .truncate()
+            .sense(sense),
+    )
 }
 
-fn render_now_line(ui: &mut egui::Ui, key: impl std::hash::Hash) {
+fn render_now_line(ui: &mut egui::Ui) {
     let accent = tab_selected_accent(ui);
     let muted = callout::muted_text(ui);
     let label_font = egui::FontId::proportional(11.0);
 
-    let response = widget_ids::allocate_exact_interact(
-        ui,
+    let (rect, _) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), NOW_LINE_HEIGHT),
-        widget_ids::root_id(("text_history.now_line", key)),
         egui::Sense::hover(),
-        "text_history.now_line",
     );
-    let rect = response.rect;
     let painter = ui.painter_at(rect);
     let mid_y = rect.center().y;
     let label = "Now";
@@ -763,265 +637,5 @@ fn render_now_line(ui: &mut egui::Ui, key: impl std::hash::Hash) {
     ui.add_space(HISTORY_PILL_SPACING);
 }
 
-fn read_active_tab(ctx: &egui::Context) -> HistoryTab {
-    widget_ids::read_deferred_persisted::<u8>(
-        ctx,
-        widget_ids::ctx_key("text_history.active_tab.pending"),
-        widget_ids::ctx_key("text_history.active_tab"),
-    )
-    .and_then(tab_from_persisted)
-    .unwrap_or(HistoryTab::Timeline)
-}
-
-fn write_active_tab(ctx: &egui::Context, tab: HistoryTab) {
-    let pending_id = widget_ids::ctx_key("text_history.active_tab.pending");
-    widget_ids::write_deferred_persisted(ctx, pending_id, tab_to_persisted(tab));
-}
-
-fn read_follow_focus(ctx: &egui::Context) -> bool {
-    widget_ids::read_deferred_persisted::<bool>(
-        ctx,
-        widget_ids::ctx_key("text_history.follow_undo.pending"),
-        widget_ids::ctx_key("text_history.follow_undo"),
-    )
-    .unwrap_or(true)
-}
-
-fn write_follow_focus(ctx: &egui::Context, follow: bool) {
-    let pending_id = widget_ids::ctx_key("text_history.follow_undo.pending");
-    widget_ids::write_deferred_persisted(ctx, pending_id, follow);
-}
-
-fn tab_from_persisted(value: u8) -> Option<HistoryTab> {
-    match value {
-        0 => Some(HistoryTab::Timeline),
-        1 => Some(HistoryTab::ByFile),
-        _ => None,
-    }
-}
-
-fn tab_to_persisted(tab: HistoryTab) -> u8 {
-    match tab {
-        HistoryTab::Timeline => 0,
-        HistoryTab::ByFile => 1,
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::{
-        TextHistoryFileGroup, TextHistoryRow, file_groups_from_entries, newest_applied_index,
-        per_file_now_line_insert_index, read_follow_focus, timeline_now_line_anchors,
-        write_follow_focus,
-    };
-    use crate::app::domain::BufferId;
-    use crate::app::domain::PieceSource;
-    use crate::app::text_history::TextHistoryEntryView;
-
-    #[test]
-    fn follow_focus_defaults_to_enabled() {
-        let ctx = eframe::egui::Context::default();
-
-        assert!(read_follow_focus(&ctx));
-    }
-
-    #[test]
-    fn follow_focus_persistence_round_trips() {
-        let ctx = eframe::egui::Context::default();
-
-        write_follow_focus(&ctx, false);
-        assert!(read_follow_focus(&ctx));
-        advance_egui_frame(&ctx);
-        assert!(!read_follow_focus(&ctx));
-
-        write_follow_focus(&ctx, true);
-        assert!(!read_follow_focus(&ctx));
-        advance_egui_frame(&ctx);
-        assert!(read_follow_focus(&ctx));
-    }
-
-    fn advance_egui_frame(ctx: &eframe::egui::Context) {
-        let _ = ctx.run_ui(eframe::egui::RawInput::default(), |_| {});
-    }
-
-    #[test]
-    fn per_file_now_line_sits_between_applied_and_undone_rows() {
-        let rows = vec![row(true), row(true), row(false), row(false)];
-
-        let newest_applied = newest_applied_index(&rows);
-
-        assert_eq!(newest_applied, Some(2));
-        assert_eq!(per_file_now_line_insert_index(&rows), Some(2));
-    }
-
-    #[test]
-    fn per_file_now_line_is_suppressed_when_it_would_sit_at_top() {
-        let rows = vec![row(true), row(true)];
-
-        let newest_applied = newest_applied_index(&rows);
-
-        assert_eq!(newest_applied, None);
-        assert_eq!(per_file_now_line_insert_index(&rows), None);
-    }
-
-    #[test]
-    fn per_file_now_line_is_suppressed_when_everything_is_applied() {
-        let rows = vec![row(false), row(false)];
-
-        assert_eq!(newest_applied_index(&rows), Some(0));
-        assert_eq!(per_file_now_line_insert_index(&rows), None);
-    }
-
-    #[test]
-    fn per_file_now_line_is_absent_for_empty_file_history() {
-        assert_eq!(per_file_now_line_insert_index(&[]), None);
-    }
-
-    #[test]
-    fn per_file_groups_keep_rows_in_reverse_chronological_order() {
-        let entries = [
-            entry(1, 10, 1, "one"),
-            entry(2, 11, 2, "other"),
-            entry(3, 12, 1, "two"),
-        ];
-
-        let groups = file_groups_from_entries(entries.iter());
-
-        assert_eq!(group_entry_ids(&groups, 1), vec![3, 1]);
-    }
-
-    #[test]
-    fn per_file_groups_sort_by_latest_change_first() {
-        let entries = [
-            entry(1, 10, 1, "one"),
-            entry(2, 12, 2, "other"),
-            entry(3, 11, 1, "two"),
-        ];
-
-        let groups = file_groups_from_entries(entries.iter());
-
-        assert_eq!(group_buffer_ids(&groups), vec![2, 1]);
-    }
-
-    #[test]
-    fn per_file_rows_preserve_buffer_id_when_entry_ids_collide() {
-        let entries = [entry(1, 10, 1, "one"), entry(1, 11, 2, "other")];
-
-        let groups = file_groups_from_entries(entries.iter());
-
-        assert_eq!(group_targets(&groups, 1), vec![(1, 1)]);
-        assert_eq!(group_targets(&groups, 2), vec![(2, 1)]);
-    }
-
-    fn row(undone: bool) -> TextHistoryRow {
-        TextHistoryRow {
-            buffer_id: 0,
-            entry_id: 0,
-            global_seq: 0,
-            title: String::new(),
-            detail: String::new(),
-            icon: "",
-            undone,
-        }
-    }
-
-    fn timeline_row(buffer_id: BufferId, entry_id: u64, undone: bool) -> TextHistoryRow {
-        TextHistoryRow {
-            buffer_id,
-            entry_id,
-            global_seq: entry_id,
-            title: String::new(),
-            detail: String::new(),
-            icon: "",
-            undone,
-        }
-    }
-
-    #[test]
-    fn timeline_now_line_anchors_one_per_buffer_in_mixed_state() {
-        // Buffer 1: entries 3 (undone), 2 (applied), 1 (applied)
-        // Buffer 2: entries 5 (applied), 4 (applied) — all applied, no anchor
-        // Buffer 3: entries 7 (undone), 6 (undone) — all undone, no anchor
-        let rows = vec![
-            timeline_row(3, 7, true),
-            timeline_row(3, 6, true),
-            timeline_row(2, 5, false),
-            timeline_row(2, 4, false),
-            timeline_row(1, 3, true),
-            timeline_row(1, 2, false),
-            timeline_row(1, 1, false),
-        ];
-
-        let anchors = timeline_now_line_anchors(&rows);
-
-        assert_eq!(anchors.len(), 1);
-        assert!(anchors.contains(&(1, 2)));
-    }
-
-    #[test]
-    fn timeline_now_line_anchors_multiple_buffers() {
-        // Two buffers, both in mixed state — expect one anchor each.
-        let rows = vec![
-            timeline_row(1, 2, true),
-            timeline_row(1, 1, false),
-            timeline_row(2, 5, true),
-            timeline_row(2, 4, false),
-            timeline_row(2, 3, false),
-        ];
-
-        let anchors = timeline_now_line_anchors(&rows);
-
-        assert_eq!(anchors.len(), 2);
-        assert!(anchors.contains(&(1, 1)));
-        assert!(anchors.contains(&(2, 4)));
-    }
-
-    #[test]
-    fn timeline_now_line_anchors_empty_when_no_history() {
-        let rows: Vec<TextHistoryRow> = Vec::new();
-
-        assert!(timeline_now_line_anchors(&rows).is_empty());
-    }
-
-    fn entry(id: u64, global_seq: u64, buffer_id: u64, summary: &str) -> TextHistoryEntryView {
-        TextHistoryEntryView {
-            id,
-            global_seq,
-            buffer_id,
-            label: format!("file-{buffer_id}"),
-            source: PieceSource::Edit,
-            summary: summary.to_owned(),
-            undone: false,
-            replayable: true,
-            edit_count: 1,
-            first_deleted_text: String::new(),
-            first_inserted_text: summary.to_owned(),
-        }
-    }
-
-    fn group_entry_ids(groups: &[TextHistoryFileGroup], buffer_id: u64) -> Vec<u64> {
-        groups
-            .iter()
-            .find(|group| group.buffer_id == buffer_id)
-            .map(|group| group.rows.iter().map(|row| row.entry_id).collect())
-            .unwrap_or_default()
-    }
-
-    fn group_buffer_ids(groups: &[TextHistoryFileGroup]) -> Vec<u64> {
-        groups.iter().map(|group| group.buffer_id).collect()
-    }
-
-    fn group_targets(groups: &[TextHistoryFileGroup], buffer_id: u64) -> Vec<(u64, u64)> {
-        groups
-            .iter()
-            .find(|group| group.buffer_id == buffer_id)
-            .map(|group| {
-                group
-                    .rows
-                    .iter()
-                    .map(|row| (row.buffer_id, row.entry_id))
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-}
+mod tests;

@@ -5,6 +5,7 @@ use crate::app::commands::AppCommand;
 use crate::app::theme::{BUTTON_SIZE, TAB_BUTTON_WIDTH, action_bg, border};
 use crate::app::ui::tab_drag::{self, TabDropAxis, TabDropZone};
 use crate::app::ui::tab_strip::TabStripOutcome;
+use crate::app::ui::tab_strip::context_menu::attach_tab_list_context_menu;
 use crate::app::ui::widget_ids;
 use eframe::egui::{self, Stroke};
 
@@ -33,19 +34,44 @@ fn show_vertical_tab_entries_above_new_tab(
     outcome: &mut TabStripOutcome,
 ) -> Vec<TabDropZone> {
     let scroll_height = (ui.available_height() - BUTTON_SIZE.y - 8.0).max(0.0);
-    let drop_zones = ui
-        .allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), scroll_height),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| show_scrolling_vertical_tab_list(ui, app, duplicate_name_counts, outcome),
-        )
-        .inner
-        .into_iter()
+    let output = ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), scroll_height),
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| show_scrolling_vertical_tab_list(ui, app, duplicate_name_counts, outcome),
+    );
+    let drop_zones = output.inner.into_iter().collect::<Vec<_>>();
+    let entries = drop_zones
+        .iter()
+        .flat_map(|zone| zone.entries.iter())
+        .copied()
         .collect::<Vec<_>>();
+    attach_tab_list_background_context_menu(ui, output.response.rect, app, &entries);
 
     ui.add_space(8.0);
     show_vertical_new_tab_action(ui, app);
     drop_zones
+}
+
+fn attach_tab_list_background_context_menu(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    app: &mut ScratchpadApp,
+    entries: &[crate::app::ui::tab_drag::TabRectEntry],
+) {
+    let pointer_over_tab = ui
+        .input(|input| input.pointer.interact_pos())
+        .is_some_and(|pos| entries.iter().any(|entry| entry.rect.contains(pos)));
+    if pointer_over_tab {
+        return;
+    }
+    let response = widget_ids::interact(
+        ui,
+        rect,
+        widget_ids::local(ui, "vertical_tab_list_background_context"),
+        egui::Sense::click(),
+        "vertical_tab_list_background_context",
+    );
+    attach_tab_list_context_menu(&response, app);
 }
 
 fn show_vertical_new_tab_action(ui: &mut egui::Ui, app: &mut ScratchpadApp) {

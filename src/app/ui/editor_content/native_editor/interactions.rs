@@ -65,10 +65,75 @@ pub(super) fn sync_view_cursor_before_render(view: &mut EditorViewState, focused
     view.request_cursor_reveal(CursorRevealMode::KeepVisible);
 }
 
+pub(super) fn request_page_navigation_intent(
+    ui: &egui::Ui,
+    view: &mut EditorViewState,
+    focused: bool,
+) {
+    if focused && let Some(direction) = consumed_page_navigation_direction(ui) {
+        view.request_intent(crate::app::ui::scrolling::ScrollIntent::Pages(direction));
+    }
+}
+
+pub(super) fn page_jump_rows(viewport: Option<egui::Rect>, row_height: f32) -> usize {
+    viewport
+        .and_then(|viewport| viewport_line_capacity(viewport, row_height))
+        .unwrap_or(1)
+}
+
 fn restore_pending_cursor(view: &mut EditorViewState, cursor_range: CursorRange) {
     view.cursor_range = Some(cursor_range);
     view.request_cursor_reveal(
         view.cursor_reveal_mode()
             .unwrap_or(CursorRevealMode::Center),
     );
+}
+
+pub(super) fn viewport_line_capacity(viewport: egui::Rect, row_height: f32) -> Option<usize> {
+    if row_height <= 0.0 || viewport.max.y <= viewport.min.y {
+        return None;
+    }
+
+    Some(
+        ((viewport.max.y - viewport.min.y) / row_height)
+            .ceil()
+            .max(1.0) as usize,
+    )
+}
+
+/// Inspect this frame's input events for an unconsumed PageUp/PageDown press
+/// and return the direction (-1 or +1) suitable for `ScrollIntent::Pages`.
+/// Returns `None` if no page-navigation key was pressed (or if a modifier
+/// such as Cmd/Ctrl was held).
+fn consumed_page_navigation_direction(ui: &egui::Ui) -> Option<i32> {
+    let direction = ui.input(|input| {
+        input
+            .events
+            .iter()
+            .filter_map(page_navigation_direction)
+            .sum::<i32>()
+    });
+    (direction != 0).then_some(direction)
+}
+
+fn page_navigation_direction(event: &egui::Event) -> Option<i32> {
+    let egui::Event::Key {
+        key,
+        pressed: true,
+        modifiers,
+        ..
+    } = event
+    else {
+        return None;
+    };
+
+    if modifiers.command {
+        return None;
+    }
+
+    match key {
+        egui::Key::PageUp => Some(-1),
+        egui::Key::PageDown => Some(1),
+        _ => None,
+    }
 }

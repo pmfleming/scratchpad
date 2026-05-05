@@ -58,6 +58,14 @@ pub(super) fn handle_mouse_interaction(
     };
     update_hover_cursor(ui, context.rect);
 
+    if crate::app::ui::tile_header::split::split_drag_active_for_context(ui.ctx()) {
+        let click_id = context.response.id.with("click_state");
+        let mut click_state = load_click_state(ui, click_id);
+        click_state.was_primary_pointer_down = false;
+        store_click_state(ui, click_id, click_state);
+        return;
+    }
+
     let Some((pointer_pos, selection)) = pointer_selection(ui, context) else {
         return;
     };

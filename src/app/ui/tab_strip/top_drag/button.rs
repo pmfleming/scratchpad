@@ -42,7 +42,7 @@ fn render_top_drag_button(ctx: &egui::Context, ui: &mut egui::Ui) {
     let response = widget_ids::interact(
         ui,
         rect,
-        widget_ids::child(ui.id(), "top_drag_button"),
+        widget_ids::root_id("top_drag_button"),
         egui::Sense::click_and_drag(),
         "top_drag_button",
     );

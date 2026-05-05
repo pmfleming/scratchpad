@@ -71,6 +71,14 @@ impl TabManager {
         self.mark_session_dirty();
     }
 
+    pub fn insert_tab(&mut self, index: usize, tab: WorkspaceTab) {
+        let index = index.min(self.tabs.len());
+        self.tabs.insert(index, tab);
+        self.active_tab_index = index;
+        self.pending_scroll_to_active = true;
+        self.mark_session_dirty();
+    }
+
     pub fn create_untitled_tab(&mut self) {
         self.append_tab(WorkspaceTab::untitled());
     }

@@ -16,6 +16,8 @@ const TAB_CONTEXT_MENU_WIDTH: f32 = 220.0;
 const TAB_CONTEXT_SUBMENU_WIDTH: f32 = 176.0;
 const TAB_CONTEXT_MENU_ROW_HEIGHT: f32 = 28.0;
 const TAB_CONTEXT_MENU_CARET_WIDTH: f32 = 28.0;
+const TAB_CONTEXT_MENU_ICON_CENTER_X: f32 = 20.0;
+const TAB_CONTEXT_MENU_LABEL_X: f32 = 52.0;
 
 struct TabContextMenuState {
     workspace_index: Option<usize>,
@@ -94,6 +96,10 @@ pub(crate) fn attach_tab_context_menu(
             ui.close();
         }
     });
+}
+
+pub(crate) fn attach_tab_list_context_menu(response: &egui::Response, app: &mut ScratchpadApp) {
+    attach_tab_context_menu(response, app, app.active_tab_slot_index());
 }
 
 fn render_file_actions(
@@ -219,25 +225,22 @@ fn menu_button(
     icon: Option<&str>,
     enabled: bool,
 ) -> bool {
-    let text = match icon {
-        Some(icon) => format!("{icon}  {label}"),
-        None => label.to_owned(),
-    };
     with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        widget_ids::surface_response(
+        let response = widget_ids::surface_response(
             ui,
             ("tab_context.menu_button", label),
             widget_ids::WidgetRole::ActionButton,
             |ui| {
                 ui.add_enabled(
                     enabled,
-                    egui::Button::new(egui::RichText::new(text).color(text_primary(ui)))
+                    egui::Button::new("")
                         .min_size(egui::vec2(width, TAB_CONTEXT_MENU_ROW_HEIGHT))
                         .stroke(egui::Stroke::NONE),
                 )
             },
-        )
-        .clicked()
+        );
+        paint_context_menu_row_label(ui, response.rect, icon, label, enabled);
+        response.clicked()
     })
 }
 
@@ -322,13 +325,7 @@ fn render_close_primary_button(ui: &mut egui::Ui) -> bool {
                 )
             },
         );
-        ui.painter().text(
-            response.rect.left_center() + egui::vec2(12.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            format!("{X}  Close"),
-            egui::TextStyle::Button.resolve(ui.style()),
-            text_primary(ui),
-        );
+        paint_context_menu_row_label(ui, response.rect, Some(X), "Close", true);
         response.clicked()
     })
 }
@@ -350,15 +347,40 @@ fn render_tab_list_primary_button(ui: &mut egui::Ui, label: &str, icon: &str) ->
                 )
             },
         );
-        ui.painter().text(
-            response.rect.left_center() + egui::vec2(12.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            format!("{icon}  {label}"),
-            egui::TextStyle::Button.resolve(ui.style()),
-            text_primary(ui),
-        );
+        paint_context_menu_row_label(ui, response.rect, Some(icon), label, true);
         response.clicked()
     })
+}
+
+fn paint_context_menu_row_label(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    icon: Option<&str>,
+    label: &str,
+    enabled: bool,
+) {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let color = if enabled {
+        text_primary(ui)
+    } else {
+        text_primary(ui).gamma_multiply(0.45)
+    };
+    if let Some(icon) = icon {
+        ui.painter().text(
+            rect.left_center() + egui::vec2(TAB_CONTEXT_MENU_ICON_CENTER_X, 0.0),
+            egui::Align2::CENTER_CENTER,
+            icon,
+            font.clone(),
+            color,
+        );
+    }
+    ui.painter().text(
+        rect.left_center() + egui::vec2(TAB_CONTEXT_MENU_LABEL_X, 0.0),
+        egui::Align2::LEFT_CENTER,
+        label,
+        font,
+        color,
+    );
 }
 
 fn render_tab_list_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
@@ -495,7 +517,7 @@ fn close_direction_label(position: TabListPosition) -> &'static str {
     if position.is_vertical() {
         "Close Down"
     } else {
-        "Close To The Right"
+        "Close Right"
     }
 }
 

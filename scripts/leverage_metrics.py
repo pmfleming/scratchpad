@@ -63,7 +63,7 @@ class LeverageAnalyzer:
             print(f"Warning: Leverage AST output was malformed: {exc}", file=sys.stderr)
             return []
 
-        ranked = sorted(records, key=lambda item: (-item.get("total_leverage_score", 0.0), item.get("module_name", "")))
+        ranked = sorted(records, key=lambda item: (item.get("total_leverage_score", 0.0), item.get("module_key") or item.get("module_name", "")))
         if self.top is not None:
             return ranked[: self.top]
         return ranked
@@ -78,7 +78,7 @@ def render_cli(payload: object) -> str:
 
     for index, item in enumerate(rows[:10], start=1):
         lines.append(
-            f"{index:>2}. {item['module_name']} | score={item['total_leverage_score']:.2f} | iterator={item['iterator_leverage_score']:.1f}% | indirection={item['indirection_ratio']:.1f}% | unsafe={item['unsafe_blocks']}"
+            f"{index:>2}. {item.get('module_key') or item['module_name']} | score={item['total_leverage_score']:.2f} | iterator={item['iterator_leverage_score']:.1f}% | indirection={item['indirection_ratio']:.1f}% | unsafe={item['unsafe_blocks']}"
         )
 
     if len(rows) > 10:

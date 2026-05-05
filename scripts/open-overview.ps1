@@ -311,7 +311,7 @@ function Get-RefreshTasks {
         (New-OverviewTask -Title "Generating search speed data" -Label "search_speed" -Arguments @("scripts/search_speed.py", "--mode", "visibility")),
         (New-OverviewTask -Title "Generating capacity data" -Label "capacity_report" -Arguments @("scripts/capacity_report.py", "--mode", "visibility")),
         (New-OverviewTask -Title "Generating resource profile data" -Label "resource_profiles" -Arguments @("scripts/resource_profiles.py", "--mode", "visibility")),
-        (New-OverviewTask -Title "Generating dynamic locality data" -Label "locality_dynamic" -Arguments @("scripts/locality_bench.py", "--mode", "visibility")),
+        (New-OverviewTask -Title "Generating code locality data" -Label "locality_dynamic" -Arguments @("scripts/locality_bench.py", "--mode", "visibility")),
         (New-OverviewTask -Title "Generating static leverage data" -Label "locality_leverage" -Arguments @("scripts/leverage_metrics.py", "--paths", "src", "--mode", "visibility") -ParallelGroup "static-analysis"),
         (New-OverviewTask -Title "Generating hotspots data" -Label "hotspots" -Arguments @("scripts/hotspots.py", "--mode", "visibility", "--paths", "src", "--scope", "all") -ParallelGroup "static-analysis"),
         (New-OverviewTask -Title "Generating clone alert data" -Label "clone_alert" -Arguments @("scripts/clone_alert.py", "--mode", "visibility", "--paths", "src") -ParallelGroup "static-analysis"),

@@ -44,7 +44,7 @@ pub(crate) fn show_page(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 }
 
 fn with_settings_page(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui, bool)) {
-    ui.scope(|ui| {
+    widget_ids::scope(ui, "settings_page", |ui| {
         SettingsUi::apply_typography(ui);
         let viewport_size = SettingsUi::page_viewport_size(ui);
         let surface_size = SettingsUi::page_surface_size(ui);

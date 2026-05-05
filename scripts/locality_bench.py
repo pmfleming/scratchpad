@@ -1,100 +1,221 @@
 import argparse
-import json
-import os
-import shutil
-import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
+from map import ArchitectureMapper
 from report_modes import add_mode_argument, emit_report
 
 DEFAULT_OUTPUT = Path("locality_metrics.json")
 VISIBILITY_OUTPUT = Path("target/analysis/locality_metrics.json")
 
+
 @dataclass
-class LocalityMetrics:
-    benchmark_name: str
-    l1_miss_ratio: float
-    branch_mispredict_ratio: float
+class CodeLocalityMetrics:
+    module_name: str
+    module_key: str
+    path: str
     locality_score: float
+    code_locality_score: float
+    locality_risk: float
+    outbound_dependencies: int
+    inbound_dependencies: int
+    far_dependencies: int
+    layer_violations: int
+    churn: int
+    commit_count: int
+    contributor_count: int
+    has_inline_tests: bool
+    external_test_refs: int
+    test_locality: str
     signals: List[str]
+    signal_weights: Dict[str, float]
+    source: str = "static_code"
+    mock: bool = False
 
 
-class LocalityAnalyzer:
+class CodeLocalityAnalyzer:
     def __init__(self, top: Optional[int] = None):
         self.top = top
 
     def run(self) -> List[Dict]:
-        if not shutil.which("perf") or not shutil.which("cargo"):
-            print("Warning: 'perf' or 'cargo' not found; using mock data for locality metrics.", file=sys.stderr)
-            return self.get_mock_data()
-        
-        # NOTE: Full implementation would compile benchmarks and run them via perf stat
-        # For now, returning mock data as the typical pipeline isn't fully set up for perf stat on all CI runners
-        return self.get_mock_data()
+        mapper = ArchitectureMapper()
+        mapper.extract_dependencies("src")
+        mapper.gather_test_support()
+        mapper.gather_git_history()
 
-    def get_mock_data(self) -> List[Dict]:
-        mock = [
-            LocalityMetrics(
-                benchmark_name="tab_stress_operations",
-                l1_miss_ratio=2.4,
-                branch_mispredict_ratio=0.8,
-                locality_score=95.5,
-                signals=["stable"],
-            ),
-            LocalityMetrics(
-                benchmark_name="file_open_latency",
-                l1_miss_ratio=15.3,
-                branch_mispredict_ratio=5.2,
-                locality_score=68.0,
-                signals=["high L1 miss", "branch mispredict"],
-            ),
-            LocalityMetrics(
-                benchmark_name="buffer_search_regex",
-                l1_miss_ratio=5.1,
-                branch_mispredict_ratio=1.2,
-                locality_score=88.0,
-                signals=["stable"],
-            ),
-            LocalityMetrics(
-                benchmark_name="ui_render_frame",
-                l1_miss_ratio=8.2,
-                branch_mispredict_ratio=2.4,
-                locality_score=81.5,
-                signals=["watch L1"],
-            )
+        rows = [
+            asdict(self._metrics_for_module(mapper, module_key))
+            for module_key in sorted(mapper.module_paths)
         ]
-        
-        ranked = sorted(mock, key=lambda item: (-item.locality_score, item.benchmark_name))
-        results = [asdict(metric) for metric in ranked]
-        
+        ranked = sorted(rows, key=lambda item: (item["locality_score"], item["module_key"]))
         if self.top is not None:
-            return results[: self.top]
-        return results
+            return ranked[: self.top]
+        return ranked
+
+    def _metrics_for_module(
+        self, mapper: ArchitectureMapper, module_key: str
+    ) -> CodeLocalityMetrics:
+        outbound = mapper.dependencies.get(module_key, set())
+        inbound = mapper.reverse_dependencies.get(module_key, set())
+        far_dependencies = self._far_dependency_count(module_key, outbound)
+        layer_violations = mapper._count_layer_violations(module_key)
+        tests = mapper.test_support.get(module_key, {})
+        git = mapper.git_history.get(module_key, {})
+        has_inline_tests = bool(tests.get("has_inline_tests", False))
+        external_refs = tests.get("external_refs", [])
+        external_test_refs = len(external_refs) if isinstance(external_refs, list) else 0
+        has_tests = has_inline_tests or external_test_refs > 0
+        test_locality = (
+            "inline"
+            if has_inline_tests
+            else "external"
+            if external_test_refs > 0
+            else "none"
+        )
+        churn = int(git.get("churn", 0))
+        commit_count = int(git.get("commits", 0))
+        contributor_count = int(git.get("contributor_count", 0))
+
+        risk = self._risk_score(
+            outbound_count=len(outbound),
+            inbound_count=len(inbound),
+            far_dependencies=far_dependencies,
+            layer_violations=layer_violations,
+            churn=churn,
+            contributor_count=contributor_count,
+            has_inline_tests=has_inline_tests,
+            has_tests=has_tests,
+        )
+        score = max(0.0, min(100.0, 100.0 - risk))
+
+        signals = self._signals(
+            far_dependencies=far_dependencies,
+            layer_violations=layer_violations,
+            outbound_count=len(outbound),
+            inbound_count=len(inbound),
+            churn=churn,
+            contributor_count=contributor_count,
+            has_inline_tests=has_inline_tests,
+            has_tests=has_tests,
+        )
+
+        return CodeLocalityMetrics(
+            module_name=module_key,
+            module_key=module_key,
+            path=self._path_for_module(mapper, module_key),
+            locality_score=score,
+            code_locality_score=score,
+            locality_risk=risk,
+            outbound_dependencies=len(outbound),
+            inbound_dependencies=len(inbound),
+            far_dependencies=far_dependencies,
+            layer_violations=layer_violations,
+            churn=churn,
+            commit_count=commit_count,
+            contributor_count=contributor_count,
+            has_inline_tests=has_inline_tests,
+            external_test_refs=external_test_refs,
+            test_locality=test_locality,
+            signals=list(signals.keys()),
+            signal_weights=signals,
+        )
+
+    def _risk_score(
+        self,
+        *,
+        outbound_count: int,
+        inbound_count: int,
+        far_dependencies: int,
+        layer_violations: int,
+        churn: int,
+        contributor_count: int,
+        has_inline_tests: bool,
+        has_tests: bool,
+    ) -> float:
+        dependency_spread = min(
+            58.0,
+            far_dependencies * 9.0
+            + layer_violations * 16.0
+            + max(0, outbound_count - 4) * 4.0
+            + max(0, inbound_count - 8) * 2.0,
+        )
+        test_distance = 0.0 if has_inline_tests else 0.5 if has_tests else 1.0
+        change_spread = min(28.0, churn / 90.0 + max(0, contributor_count - 2) * 3.0)
+        return dependency_spread + test_distance + change_spread
+
+    def _signals(
+        self,
+        *,
+        far_dependencies: int,
+        layer_violations: int,
+        outbound_count: int,
+        inbound_count: int,
+        churn: int,
+        contributor_count: int,
+        has_inline_tests: bool,
+        has_tests: bool,
+    ) -> Dict[str, float]:
+        signals = {}
+        if far_dependencies:
+            signals[f"far dependencies {far_dependencies}"] = far_dependencies * 9.0
+        if layer_violations:
+            signals[f"layer violations {layer_violations}"] = layer_violations * 16.0
+        if outbound_count >= 6:
+            signals[f"broad outbound surface {outbound_count}"] = max(1, outbound_count - 4) * 4.0
+        if inbound_count >= 8:
+            signals[f"shared by many modules {inbound_count}"] = max(1, inbound_count - 8) * 2.0
+        if not has_tests:
+            signals["no nearby tests"] = 1.0
+        elif not has_inline_tests:
+            signals["external tests only"] = 0.5
+        if churn >= 400:
+            signals[f"high churn {churn}"] = min(28.0, churn / 90.0)
+        if contributor_count >= 4:
+            signals[f"many contributors {contributor_count}"] = max(1, contributor_count - 2) * 3.0
+        return signals
+
+    def _far_dependency_count(self, module_key: str, outbound: Set[str]) -> int:
+        return sum(1 for dependency in outbound if not self._is_near_dependency(module_key, dependency))
+
+    def _is_near_dependency(self, module_key: str, dependency: str) -> bool:
+        if dependency == module_key:
+            return True
+        if dependency.startswith(f"{module_key}::") or module_key.startswith(f"{dependency}::"):
+            return True
+        module_parent = module_key.rsplit("::", 1)[0] if "::" in module_key else module_key
+        dependency_parent = dependency.rsplit("::", 1)[0] if "::" in dependency else dependency
+        return module_parent == dependency_parent
+
+    def _path_for_module(self, mapper: ArchitectureMapper, module_key: str) -> str:
+        path = mapper.mod_to_file.get(module_key, "")
+        try:
+            return Path(path).relative_to(Path.cwd()).as_posix()
+        except ValueError:
+            return Path(path).as_posix()
+
 
 def render_cli(payload: object) -> str:
     rows = payload if isinstance(payload, list) else []
-    lines = ["Locality Metrics"]
+    lines = ["Code Locality Metrics"]
     if not rows:
-        lines.append("No locality metrics found.")
+        lines.append("No code locality metrics found.")
         return "\n".join(lines)
 
     for index, item in enumerate(rows[:10], start=1):
         lines.append(
-            f"{index:>2}. {item['benchmark_name']} | score={item['locality_score']:.1f} | L1 miss={item['l1_miss_ratio']:.1f}% | branch miss={item['branch_mispredict_ratio']:.1f}%"
+            f"{index:>2}. {item['module_key']} | score={item['locality_score']:.1f} | far={item['far_dependencies']} | deps={item['outbound_dependencies']}/{item['inbound_dependencies']} | tests={item['test_locality']}"
         )
 
     if len(rows) > 10:
-        lines.append(f"... and {len(rows) - 10} more benchmarks.")
+        lines.append(f"... and {len(rows) - 10} more modules.")
 
     return "\n".join(lines)
 
+
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Emit Dynamic Locality metrics as JSON"
-    )
+    parser = argparse.ArgumentParser(description="Emit static code locality metrics as JSON")
     parser.add_argument(
         "--top",
         type=int,
@@ -110,17 +231,22 @@ def main() -> None:
     add_mode_argument(parser)
 
     args = parser.parse_args()
-    analyzer = LocalityAnalyzer(top=args.top)
-    payload = analyzer.run()
-    
+    analyzer = CodeLocalityAnalyzer(top=args.top)
+    try:
+        payload = analyzer.run()
+    except Exception as exc:
+        print(f"Error: code locality analysis failed: {exc}", file=sys.stderr)
+        raise
+
     emit_report(
         payload,
         mode=args.mode,
         output_path=args.output,
         visibility_path=VISIBILITY_OUTPUT,
         cli_renderer=render_cli,
-        label="locality",
+        label="code locality",
     )
+
 
 if __name__ == "__main__":
     main()

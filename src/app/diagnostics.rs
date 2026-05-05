@@ -1,7 +1,16 @@
+mod egui_warning;
+mod model;
+
+use egui_warning::{
+    extract_hexes, is_egui_target, is_egui_warning_message, should_capture_log_record,
+    widget_rect_changed_fingerprint,
+};
+pub use model::AppDiagnosticKind;
+use model::{AppDiagnostic, TrackedWidget};
+
 use eframe::egui;
 use log::{Level, LevelFilter, Log, Metadata, Record};
-use serde::Serialize;
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::panic;
@@ -17,97 +26,11 @@ static LOGGER: AppDiagnosticsLogger = AppDiagnosticsLogger;
 static LOGGER_INSTALLED: OnceLock<()> = OnceLock::new();
 static PANIC_HOOK_INSTALLED: OnceLock<()> = OnceLock::new();
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AppDiagnosticKind {
-    SessionStarted,
-    EguiIdConflict,
-    EguiWarning,
-    Panic,
-    Io,
-    Other,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub(crate) struct AppDiagnostic {
-    timestamp: String,
-    kind: AppDiagnosticKind,
-    message: String,
-    source: Option<String>,
-    operation: Option<String>,
-    path: Option<String>,
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    details: BTreeMap<String, String>,
-    widget_id: Option<String>,
-    rect: Option<String>,
-    frame: Option<u64>,
-}
-
-impl AppDiagnostic {
-    fn new(kind: AppDiagnosticKind, message: impl Into<String>) -> Self {
-        Self {
-            timestamp: timestamp_now(),
-            kind,
-            message: message.into(),
-            source: None,
-            operation: None,
-            path: None,
-            details: BTreeMap::new(),
-            widget_id: None,
-            rect: None,
-            frame: None,
-        }
-    }
-
-    fn with_source(mut self, source: impl Into<String>) -> Self {
-        self.source = Some(source.into());
-        self
-    }
-
-    fn with_operation(mut self, operation: impl Into<String>) -> Self {
-        self.operation = Some(operation.into());
-        self
-    }
-
-    fn with_path(mut self, path: &Path) -> Self {
-        self.path = Some(path.display().to_string());
-        self
-    }
-
-    fn with_details(mut self, details: impl IntoIterator<Item = (&'static str, String)>) -> Self {
-        for (key, value) in details {
-            self.details.insert(key.to_owned(), value);
-        }
-        self
-    }
-
-    fn with_widget_id(mut self, widget_id: impl Into<String>) -> Self {
-        self.widget_id = Some(widget_id.into());
-        self
-    }
-
-    fn with_rect(mut self, rect: impl Into<String>) -> Self {
-        self.rect = Some(rect.into());
-        self
-    }
-
-    fn with_frame(mut self, frame: u64) -> Self {
-        self.frame = Some(frame);
-        self
-    }
-}
-
-#[derive(Clone, Debug)]
-struct TrackedWidget {
-    kind: String,
-    rect: String,
-    location: String,
-}
-
 #[derive(Debug)]
 struct DiagnosticsState {
     log_path: PathBuf,
     frame: u64,
+    pass_index: usize,
     seen_ids: HashMap<String, TrackedWidget>,
     prev_pass: HashMap<String, TrackedWidget>,
     current_pass: HashMap<String, TrackedWidget>,
@@ -121,6 +44,7 @@ impl DiagnosticsState {
         Self {
             log_path,
             frame: 0,
+            pass_index: 0,
             seen_ids: HashMap::new(),
             prev_pass: HashMap::new(),
             current_pass: HashMap::new(),
@@ -144,12 +68,14 @@ impl DiagnosticsState {
 
     fn begin_frame(&mut self) {
         self.frame = self.frame.saturating_add(1);
+        self.pass_index = 0;
         self.seen_ids.clear();
         self.prev_pass.clear();
         self.current_pass.clear();
     }
 
     fn begin_pass(&mut self, pass_index: usize) {
+        self.pass_index = pass_index;
         if pass_index == 0 {
             self.begin_frame();
             return;
@@ -166,11 +92,14 @@ impl DiagnosticsState {
         rect: String,
         kind: &'static str,
         location: String,
+        parent_ui_id: Option<String>,
     ) {
         let current = TrackedWidget {
             kind: kind.to_owned(),
             rect: rect.clone(),
             location: location.clone(),
+            pass_index: self.pass_index,
+            parent_ui_id,
         };
 
         self.current_pass.insert(short_hex, current.clone());
@@ -194,6 +123,18 @@ impl DiagnosticsState {
                     "previous={} current={}",
                     previous.rect, current.rect
                 ))
+                .with_details([
+                    (
+                        "previous_parent_ui_id",
+                        detail_or_unknown(previous.parent_ui_id.as_deref()),
+                    ),
+                    (
+                        "current_parent_ui_id",
+                        detail_or_unknown(current.parent_ui_id.as_deref()),
+                    ),
+                    ("previous_pass", previous.pass_index.to_string()),
+                    ("current_pass", current.pass_index.to_string()),
+                ])
                 .with_frame(self.frame);
                 self.append_diagnostic(&diagnostic);
             }
@@ -232,6 +173,11 @@ impl DiagnosticsState {
                     .details
                     .insert("new_site".to_owned(), new_sites.join(" | "));
             }
+
+            let fingerprint = widget_rect_changed_fingerprint(&message, &prev_sites, &new_sites);
+            if !self.mark_conflict_reported(fingerprint) {
+                return;
+            }
         }
 
         self.append_diagnostic(&diagnostic);
@@ -245,8 +191,13 @@ impl DiagnosticsState {
         hexes
             .into_iter()
             .filter_map(|hex| {
-                pass.get(&hex)
-                    .map(|widget| format!("{} {} {}", hex, widget.location, widget.kind))
+                pass.get(&hex).map(|widget| {
+                    let parent = widget.parent_ui_id.as_deref().unwrap_or("<unknown_parent>");
+                    format!(
+                        "{} {} {} pass={} parent_ui_id={}",
+                        hex, widget.location, widget.kind, widget.pass_index, parent
+                    )
+                })
             })
             .collect()
     }
@@ -297,6 +248,10 @@ impl DiagnosticsState {
     }
 }
 
+fn detail_or_unknown(value: Option<&str>) -> String {
+    value.unwrap_or("<unknown>").to_owned()
+}
+
 pub fn default_error_log_path() -> PathBuf {
     std::env::temp_dir().join("scratchpad").join(ERROR_LOG_NAME)
 }
@@ -329,30 +284,16 @@ pub(crate) fn track_widget_id(
     rect: egui::Rect,
     kind: &'static str,
     location: &'static std::panic::Location<'static>,
+    parent_ui_id: Option<egui::Id>,
 ) {
     let id_str = format!("{:016X}", id.value());
     let short_hex = id.short_debug_format();
     let rect_str = format!("{rect:?}");
     let loc_str = format!("{}:{}", location.file(), location.line());
-    with_state(|state| state.track_widget(id_str, short_hex, rect_str, kind, loc_str));
-}
-
-fn extract_hexes(message: &str, prefix: &str, suffix: &str) -> Vec<String> {
-    let Some(start) = message.find(prefix) else {
-        return Vec::new();
-    };
-    let after_prefix = &message[start + prefix.len()..];
-    let Some(end) = after_prefix.find(suffix) else {
-        return Vec::new();
-    };
-
-    after_prefix[..end]
-        .split(',')
-        .filter_map(|part| {
-            let hex = part.trim().trim_matches('"');
-            (!hex.is_empty()).then(|| hex.to_owned())
-        })
-        .collect()
+    let parent_ui_id = parent_ui_id.map(|id| format!("{:016X}", id.value()));
+    with_state(|state| {
+        state.track_widget(id_str, short_hex, rect_str, kind, loc_str, parent_ui_id)
+    });
 }
 
 pub(crate) fn record_io_error(
@@ -500,30 +441,6 @@ fn panic_message(info: &panic::PanicHookInfo<'_>) -> String {
     format!("thread={thread}; location={location}; message={payload}")
 }
 
-fn should_capture_log_record(metadata: &Metadata<'_>, message: &str) -> bool {
-    metadata.level() <= Level::Warn
-        && (is_app_target(metadata.target())
-            || is_egui_target(metadata.target())
-            || is_egui_warning_message(message))
-}
-
-fn is_app_target(target: &str) -> bool {
-    target == env!("CARGO_CRATE_NAME")
-        || target.starts_with(concat!(env!("CARGO_CRATE_NAME"), "::"))
-}
-
-fn is_egui_target(target: &str) -> bool {
-    target.starts_with("egui") || target.starts_with("eframe")
-}
-
-fn is_egui_warning_message(message: &str) -> bool {
-    let message = message.to_ascii_lowercase();
-    message.contains("id clash")
-        || message.contains("id conflict")
-        || message.contains("duplicate id")
-        || message.contains("duplicate egui id")
-}
-
 struct AppDiagnosticsLogger;
 
 impl Log for AppDiagnosticsLogger {
@@ -624,6 +541,7 @@ mod tests {
             "rect-a".to_owned(),
             "first",
             "loc".to_owned(),
+            None,
         );
         state.track_widget(
             "id".to_owned(),
@@ -631,6 +549,7 @@ mod tests {
             "rect-b".to_owned(),
             "second",
             "loc".to_owned(),
+            None,
         );
         state.begin_frame();
         state.track_widget(
@@ -639,6 +558,7 @@ mod tests {
             "rect-a".to_owned(),
             "first",
             "loc".to_owned(),
+            None,
         );
         state.track_widget(
             "id".to_owned(),
@@ -646,6 +566,7 @@ mod tests {
             "rect-b".to_owned(),
             "second",
             "loc".to_owned(),
+            None,
         );
 
         let contents = fs::read_to_string(path).unwrap();
@@ -676,6 +597,7 @@ mod tests {
             "prev-rect".to_owned(),
             "prev_kind",
             "prev.rs:10".to_owned(),
+            Some("prev-parent".to_owned()),
         );
         state.begin_pass(1);
         state.track_widget(
@@ -684,6 +606,7 @@ mod tests {
             "new-rect".to_owned(),
             "new_kind",
             "new.rs:20".to_owned(),
+            Some("new-parent".to_owned()),
         );
 
         state.log_record(
@@ -694,8 +617,14 @@ mod tests {
 
         let contents = fs::read_to_string(path).unwrap();
         let payload: serde_json::Value = serde_json::from_str(contents.trim()).unwrap();
-        assert_eq!(payload["details"]["prev_site"], "BBBB prev.rs:10 prev_kind");
-        assert_eq!(payload["details"]["new_site"], "DDDD new.rs:20 new_kind");
+        assert_eq!(
+            payload["details"]["prev_site"],
+            "BBBB prev.rs:10 prev_kind pass=0 parent_ui_id=prev-parent"
+        );
+        assert_eq!(
+            payload["details"]["new_site"],
+            "DDDD new.rs:20 new_kind pass=1 parent_ui_id=new-parent"
+        );
     }
 
     #[test]

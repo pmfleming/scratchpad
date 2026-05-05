@@ -38,6 +38,7 @@
         selectedFlamegraph: null,
         selectedRun: null,
         selectedLayer: null,
+        selectedCorrectnessCategory: null,
         lastObservedFinishedRun: null,
         mapZoom: 0.65,
         mapLayout: 'folder',
@@ -77,8 +78,6 @@
         ["performance_risk", "Performance"],
         ["correctness_risk", "Correctness"],
         ["architectural_risk", "Architecture"],
-        ["locality", "Locality"],
-        ["leverage", "Leverage"],
     ];
 
     function byId(id) {
@@ -124,7 +123,9 @@
     }
 
     function renderSummary(targetId, cards) {
-        byId(targetId).innerHTML = cards.join("");
+        const target = byId(targetId);
+        if (!target) return;
+        target.innerHTML = cards.join("");
     }
 
     function renderTable(targetId, headers, rows) {
@@ -181,6 +182,99 @@
 
     function qualityScore(item) {
         return Number(item.quality_score ?? item.score ?? 0);
+    }
+
+    function renderQualityOverview() {
+        const target = byId("quality-overview");
+        if (!target) return;
+
+        const hotspots = state.hotspots || [];
+        const clones = state.clones || [];
+        const locality = state.locality || [];
+        const leverage = state.leverage || [];
+        const worstHotspot = hotspots.reduce((worst, item) => {
+            if (!worst) return item;
+            return qualityScore(item) > qualityScore(worst) ? item : worst;
+        }, null);
+        const hotspotFiles = new Set(hotspots.filter((item) => item.kind === "unit").map((item) => item.name));
+        const largeHotspots = hotspots.filter((item) => Number(item.sloc || 0) >= 150).length;
+        const cloneInstances = clones.reduce((sum, item) => sum + ((item.instances || []).length), 0);
+        const cloneGroups = clones.length;
+        const crossFileClones = clones.filter((item) => (item.file_count || 0) >= 2).length;
+        const astClones = clones.filter((item) => item.engine === "ast").length;
+        const widestClone = clones.reduce((max, item) => Math.max(max, item.max_line_span || 0), 0);
+        const avgCodeLocality = mean(locality.map(i => i.locality_score)) || 0;
+        const farDependencyModules = locality.filter((item) => (item.far_dependencies || 0) > 0).length;
+        const modulesWithoutNearbyTests = locality.filter((item) => item.test_locality === "none").length;
+        const avgIterator = mean(leverage.map(i => i.iterator_leverage_score)) || 0;
+        const avgIndirection = mean(leverage.map(i => i.indirection_ratio)) || 0;
+        const totalUnsafe = leverage.reduce((sum, item) => sum + (item.unsafe_blocks || 0), 0);
+
+        const groups = [
+            {
+                cls: "maintainability",
+                title: "Maintainability",
+                summary: worstHotspot
+                    ? `${formatNumber.format(qualityScore(worstHotspot))} worst score`
+                    : "No hotspot score",
+                metrics: [
+                    ["Records", hotspots.length],
+                    ["Files", hotspotFiles.size],
+                    ["Worst quality", worstHotspot ? formatNumber.format(qualityScore(worstHotspot)) : "-"],
+                    ["Large items", largeHotspots],
+                    ["Worst item", worstHotspot ? worstHotspot.name.split(/[\\/]/).pop() : "-"],
+                ],
+            },
+            {
+                cls: "duplication",
+                title: "Duplication",
+                summary: `${formatNumber.format(cloneGroups)} clone groups`,
+                metrics: [
+                    ["Clone Groups", cloneGroups],
+                    ["Total Instances", cloneInstances],
+                    ["Avg Instances", cloneGroups ? (cloneInstances / cloneGroups).toFixed(1) : "-"],
+                    ["Cross-file Groups", crossFileClones],
+                    ["AST Groups", astClones],
+                    ["Widest Span", widestClone ? `${widestClone} lines` : "-"],
+                ],
+            },
+            {
+                cls: "locality",
+                title: "Code Locality",
+                summary: `${formatNumber.format(locality.length)} module probes`,
+                metrics: [
+                    ["Avg Score", formatNumber.format(avgCodeLocality)],
+                    ["Far Dependencies", farDependencyModules],
+                    ["No Nearby Tests", modulesWithoutNearbyTests],
+                ],
+            },
+            {
+                cls: "leverage",
+                title: "Leverage",
+                summary: `${formatNumber.format(leverage.length)} module probes`,
+                metrics: [
+                    ["Avg Iterator Use", `${formatNumber.format(avgIterator)}%`],
+                    ["Avg Indirection", `${formatNumber.format(avgIndirection)}%`],
+                    ["Total Unsafe Blocks", totalUnsafe],
+                ],
+            },
+        ];
+
+        target.innerHTML = groups.map((group) => `<section class="quality-overview-card quality-overview-card--${group.cls}">
+            <div class="quality-overview-card__header">
+                <span class="quality-overview-card__marker"></span>
+                <div>
+                    <h3>${escapeHtml(group.title)}</h3>
+                    <p>${escapeHtml(group.summary)}</p>
+                </div>
+            </div>
+            <div class="quality-overview-card__metrics">
+                ${group.metrics.map(([label, value]) => `<div class="quality-overview-metric">
+                    <span>${escapeHtml(label)}</span>
+                    <strong>${escapeHtml(value)}</strong>
+                </div>`).join("")}
+            </div>
+        </section>`).join("");
     }
 
     function normalizePath(value) {
@@ -1175,7 +1269,7 @@
             ? `<span class="gauge-card__delta gauge-card__delta--${deltaInfo.direction}">${escapeHtml(deltaInfo.label)}</span>`
             : `<span class="gauge-card__delta">no history</span>`;
         const spark = sparkline && sparkline.length >= 2 ? renderSparkline(sparkline) : "";
-        return `<div class="gauge-card" id="${id}">
+        return `<div class="gauge-card gauge-card--${s.cls}" id="${id}">
             <div class="gauge-card__title">
                 <span>${escapeHtml(title)}</span>
                 <span class="gauge-card__status gauge-card__status--${s.cls}">${s.label}</span>
@@ -1458,13 +1552,18 @@
         });
     }
 
-    function renderTopListCard({ title, subtitle, items, emptyText }) {
+    function renderTopListCard({ title, subtitle, items, emptyText, tone = "neutral" }) {
         const list = items.length
-            ? `<ol>${items.map((item) => `<li><span class="top-list-card__label">${item.label}</span><span class="top-list-card__value">${item.value}</span></li>`).join("")}</ol>`
+            ? `<ol>${items.map((item, index) => `<li><span class="top-list-card__rank">${index + 1}</span><span class="top-list-card__label">${item.label}</span><span class="top-list-card__value">${item.value}</span></li>`).join("")}</ol>`
             : `<p class="muted">${escapeHtml(emptyText)}</p>`;
-        return `<div class="top-list-card">
-            <h3>${escapeHtml(title)}</h3>
-            <p>${escapeHtml(subtitle)}</p>
+        return `<div class="top-list-card top-list-card--${escapeHtml(tone)}">
+            <div class="top-list-card__header">
+                <span class="top-list-card__marker"></span>
+                <div>
+                    <h3>${escapeHtml(title)}</h3>
+                    <p>${escapeHtml(subtitle)}</p>
+                </div>
+            </div>
             ${list}
         </div>`;
     }
@@ -1519,24 +1618,28 @@
                 subtitle: "Highest hotspot scores.",
                 items: qualityItems,
                 emptyText: "No hotspot data.",
+                tone: "quality",
             }),
             renderTopListCard({
                 title: "Slowest vs budget",
                 subtitle: "Mean latency relative to threshold.",
                 items: slowItems,
                 emptyText: "No benchmark data.",
+                tone: "speed",
             }),
             renderTopListCard({
                 title: "Failing or unknown tests",
                 subtitle: "Need attention or have not run.",
                 items: testItems,
                 emptyText: state.correctness ? "All tests passing." : "No test data.",
+                tone: "correctness",
             }),
             renderTopListCard({
                 title: "Top diagnostics",
                 subtitle: "Most common app package messages.",
                 items: diagnosticItems,
                 emptyText: state.appPackage ? "No diagnostics recorded." : "No app package data.",
+                tone: "diagnostics",
             }),
         ].join("");
     }
@@ -1702,21 +1805,19 @@
         const query = byId("correctness-filter")?.value || "";
         const showAll = byId("correctness-show-all")?.checked ?? false;
         const layerFilter = state.selectedLayer;
+        const categoryFilter = state.selectedCorrectnessCategory;
         let filtered = tests.filter((item) => matchesFilter(item, query));
         if (layerFilter) {
             filtered = filtered.filter((item) => item.layer === layerFilter);
         }
+        if (categoryFilter) {
+            filtered = filtered.filter((item) => inlineTestCategory(item) === categoryFilter);
+        }
         if (!showAll) {
             filtered = filtered.filter((item) => item.last_status === "failed" || item.last_status === "unknown");
         }
-        renderSummary("correctness-summary", [
-            metricCard("Tests", summary.test_count ?? tests.length),
-            metricCard("Integration", summary.integration_count ?? "-"),
-            metricCard("Inline", summary.inline_count ?? "-"),
-            metricCard("Layers", summary.layers ?? layers.length),
-            metricCard("Failed", summary.failed ?? "-"),
-            metricCard("Unknown", summary.unknown ?? "-"),
-        ]);
+        renderCorrectnessOverview(payload, filtered, { query, showAll, layerFilter, categoryFilter });
+        renderCorrectnessSummary(payload);
         renderTable(
             "correctness-layers",
             ["Layer", "Total", "Passed", "Failed", "Skipped", "Unknown"],
@@ -1731,16 +1832,197 @@
         );
         renderTable(
             "correctness-table",
-            ["Layer", "Test", "Description", "Kind", "Status", "Command"],
+            ["Layer", "Module", "Test", "Description", "Category", "Status", "Command"],
             filtered.map((item) => `<tr>
                 <td><span class="pill">${escapeHtml(item.layer)}</span></td>
+                <td><code>${escapeHtml(item.module || "-")}</code></td>
                 <td><code>${escapeHtml(item.path)}:${escapeHtml(item.line)}</code><div class="muted">${escapeHtml(item.name)}</div></td>
                 <td>${escapeHtml(item.description)}</td>
-                <td><span class="pill">${escapeHtml(item.kind)}</span></td>
+                <td><button type="button" class="pill correctness-category-pill" data-correctness-category="${escapeHtml(inlineTestCategory(item))}">${escapeHtml(inlineTestCategory(item))}</button></td>
                 <td class="${item.last_status === "failed" ? "risk-bad" : item.last_status === "passed" ? "risk-good" : "risk-warn"}">${escapeHtml(item.last_status)}</td>
                 <td><code>${escapeHtml(item.command)}</code></td>
             </tr>`)
         );
+        attachCorrectnessCategoryFilterHandlers(byId("correctness-table"));
+    }
+
+    function renderCorrectnessOverview(payload, visibleTests, filters) {
+        const target = byId("correctness-overview");
+        const note = byId("correctness-table-note");
+        if (!target) return;
+
+        const summary = payload.summary || {};
+        const tests = payload.tests || [];
+        const layers = payload.layers || [];
+        const statusCounts = countBy(tests, (item) => item.last_status || "unknown");
+        const categoryCounts = countBy(tests, inlineTestCategory);
+        const categoryEntries = sortedCountEntries(categoryCounts);
+        const moduleCount = new Set(tests.map((item) => item.module).filter(Boolean)).size;
+        const summaryTotal = summary.test_count ?? tests.length;
+        const catalogMismatch = summaryTotal !== tests.length;
+        const lastRun = summary.last_run || null;
+        const lastRunStatus = lastRun?.status || "not run";
+        const lastRunDuration = Number.isFinite(lastRun?.duration)
+            ? `${formatNumber.format(lastRun.duration)}s`
+            : "-";
+        const filterLabel = [
+            filters.layerFilter ? `layer: ${filters.layerFilter}` : "all layers",
+            filters.categoryFilter ? `category: ${filters.categoryFilter}` : "all categories",
+            filters.query ? `search: ${filters.query}` : "no search",
+            filters.showAll ? "all statuses" : "failed/unknown only",
+        ].join(" · ");
+
+        target.innerHTML = [
+            correctnessOverviewCard("Catalog", catalogMismatch ? "warn" : "ok", [
+                ["Summary tests", summaryTotal],
+                ["Payload rows", tests.length],
+                ["Modules", moduleCount],
+                ["Layers", layers.length],
+            ]),
+            correctnessOverviewCard("Status", statusCounts.failed ? "bad" : statusCounts.unknown ? "warn" : "ok", [
+                ["Passed", statusCounts.passed || 0],
+                ["Failed", statusCounts.failed || 0],
+                ["Skipped", statusCounts.skipped || 0],
+                ["Unknown", statusCounts.unknown || 0],
+            ]),
+            correctnessCategoryCard("Inline Coverage", categoryEntries.length ? "ok" : "stale", categoryEntries, filters.categoryFilter),
+            correctnessOverviewCard("Current View", visibleTests.length ? "ok" : "stale", [
+                ["Visible rows", visibleTests.length],
+                ["Last run", lastRunStatus],
+                ["Duration", lastRunDuration],
+            ]),
+        ].join("");
+
+        if (note) {
+            note.innerHTML = `<span>${escapeHtml(filterLabel)}</span>${catalogMismatch
+                ? `<strong class="risk-warn">Catalog summary and payload row count differ.</strong>`
+                : `<strong>${formatNumber.format(visibleTests.length)} of ${formatNumber.format(tests.length)} tests visible.</strong>`}`;
+        }
+        attachCorrectnessCategoryFilterHandlers(target);
+    }
+
+    function renderCorrectnessSummary(payload) {
+        const target = byId("correctness-summary");
+        if (!target) return;
+        const summary = payload.summary || {};
+        const layers = payload.layers || [];
+        const tests = payload.tests || [];
+        const statusCounts = countBy(tests, (item) => item.last_status || "unknown");
+        const total = summary.test_count ?? tests.length;
+        const failed = summary.failed ?? statusCounts.failed ?? 0;
+        const unknown = summary.unknown ?? statusCounts.unknown ?? 0;
+        const passed = statusCounts.passed ?? Math.max(0, total - failed - unknown);
+        const passRate = total ? Math.round((passed / total) * 100) : 0;
+        const categoryCounts = countBy(tests, inlineTestCategory);
+        const categoryEntries = sortedCountEntries(categoryCounts);
+        const layerCount = summary.layers ?? layers.length;
+        const outcome = failed > 0 ? "failing" : unknown > 0 ? "needs review" : "passing";
+
+        target.innerHTML = `<section class="correctness-summary-card correctness-summary-card--hero">
+                <span class="correctness-summary-card__label">Health</span>
+                <strong>${escapeHtml(outcome)}</strong>
+                <div class="correctness-pass-meter" aria-label="${passRate}% pass rate">
+                    <span style="width:${passRate}%"></span>
+                </div>
+                <div class="correctness-summary-card__meta">
+                    <span>${formatNumber.format(passed)} passed</span>
+                    <span>${formatNumber.format(passRate)}% pass rate</span>
+                </div>
+            </section>
+            ${correctnessSummaryCard("Tests", total, "Total cataloged test entries")}
+            ${correctnessSummaryCard("Coverage Areas", categoryEntries.length, categoryEntries.slice(0, 2).map(([label, count]) => `${label} ${formatNumber.format(count)}`).join(" · ") || "No categories")}
+            ${correctnessSummaryCard("Layers", layerCount, "Architectural groups represented")}
+            ${correctnessSummaryCard("Attention", `${formatNumber.format(failed)} failed`, `${formatNumber.format(unknown)} unknown`, failed || unknown ? "warn" : "ok")}`;
+    }
+
+    function correctnessSummaryCard(label, value, detail, tone = "neutral") {
+        return `<section class="correctness-summary-card correctness-summary-card--${escapeHtml(tone)}">
+            <span class="correctness-summary-card__label">${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+            <span class="correctness-summary-card__detail">${escapeHtml(detail)}</span>
+        </section>`;
+    }
+
+    function correctnessOverviewCard(title, status, metrics) {
+        return `<section class="correctness-overview-card correctness-overview-card--${escapeHtml(status)}">
+            <div class="correctness-overview-card__header">
+                <h3>${escapeHtml(title)}</h3>
+                <span>${escapeHtml(status)}</span>
+            </div>
+            <div class="correctness-overview-card__metrics">
+                ${metrics.map(([label, value]) => `<div>
+                    <span>${escapeHtml(label)}</span>
+                    <strong>${escapeHtml(value)}</strong>
+                </div>`).join("")}
+            </div>
+        </section>`;
+    }
+
+    function correctnessCategoryCard(title, status, categories, activeCategory) {
+        return `<section class="correctness-overview-card correctness-overview-card--${escapeHtml(status)}">
+            <div class="correctness-overview-card__header">
+                <h3>${escapeHtml(title)}</h3>
+                <span>${escapeHtml(activeCategory || status)}</span>
+            </div>
+            <div class="correctness-category-grid">
+                ${categories.map(([label, value]) => `<button type="button" class="correctness-category-chip ${activeCategory === label ? "is-active" : ""}" data-correctness-category="${escapeHtml(label)}">
+                    <span>${escapeHtml(label)}</span>
+                    <strong>${escapeHtml(value)}</strong>
+                </button>`).join("")}
+            </div>
+        </section>`;
+    }
+
+    function attachCorrectnessCategoryFilterHandlers(root) {
+        root?.querySelectorAll("[data-correctness-category]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const category = button.dataset.correctnessCategory;
+                state.selectedCorrectnessCategory = state.selectedCorrectnessCategory === category ? null : category;
+                renderCorrectness();
+            });
+        });
+    }
+
+    function countBy(items, keyFn) {
+        return items.reduce((counts, item) => {
+            const key = keyFn(item);
+            counts[key] = (counts[key] || 0) + 1;
+            return counts;
+        }, {});
+    }
+
+    function sortedCountEntries(counts) {
+        return Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    }
+
+    function inlineTestCategory(item) {
+        const haystack = [
+            item.name,
+            item.description,
+            item.module,
+            item.path,
+            item.layer,
+        ].join(" ").toLowerCase().replace(/[_-]+/g, " ");
+
+        if (/\b(text history|now line|timeline|follow focus|per file|chronological|entry ids collide|buffer id|global sequence)\b/.test(haystack)) {
+            return "Text history UI";
+        }
+        if (/\b(undo|redo|typing|backspace|mistype|divider|coalesc|history entry|cursor jump|replay|seals|entry|transient edit)\b/.test(haystack)) {
+            return "Undo and replay";
+        }
+        if (/\b(encoding|utf|windows_1252|save|snapshot|line ending|crlf|mixed)\b/.test(haystack)) {
+            return "Encoding and save";
+        }
+        if (/\b(widget|raw egui ids|duplicate widget ids)\b/.test(haystack)) {
+            return "Widget identity";
+        }
+        if (/\b(diagnostic|log|warning|logger|panic|egui id)\b/.test(haystack)) {
+            return "Diagnostics";
+        }
+        if (/\b(count lines|leverage|iterator|unsafe|cfg test|paths are detected|test functions)\b/.test(haystack)) {
+            return "Analysis tooling";
+        }
+        return "Behavior";
     }
 
     function renderRunLog() {
@@ -1842,40 +2124,27 @@
         const filteredLocality = state.locality.filter((item) => matchesFilter(item, localityQuery));
         const filteredLeverage = state.leverage.filter((item) => matchesFilter(item, leverageQuery));
 
-        const avgL1Miss = mean(state.locality.map(i => i.l1_miss_ratio)) || 0;
-        const avgBranchMiss = mean(state.locality.map(i => i.branch_mispredict_ratio)) || 0;
-        const avgIterator = mean(state.leverage.map(i => i.iterator_leverage_score)) || 0;
-        const avgIndirection = mean(state.leverage.map(i => i.indirection_ratio)) || 0;
-        const totalUnsafe = state.leverage.reduce((sum, item) => sum + (item.unsafe_blocks || 0), 0);
-
-        renderSummary("locality-leverage-summary", [
-            metricCard("Avg L1 Miss", `${formatNumber.format(avgL1Miss)}%`),
-            metricCard("Avg Branch Miss", `${formatNumber.format(avgBranchMiss)}%`),
-            metricCard("Avg Iterator Use", `${formatNumber.format(avgIterator)}%`),
-            metricCard("Avg Indirection", `${formatNumber.format(avgIndirection)}%`),
-            metricCard("Total Unsafe Blocks", totalUnsafe),
-        ]);
-
         const localityDistItems = state.locality.map((item) => ({
-            key: `locality:${item.benchmark_name}`,
+            key: `locality:${item.module_key || item.module_name}`,
             kind: "locality",
-            name: item.benchmark_name,
+            name: item.module_key || item.module_name,
             score: 100 - (item.locality_score || 0), // Invert score so risk distribution treats higher as worse
             signals: item.signals || [],
-            details: `L1 ${formatNumber.format(item.l1_miss_ratio)}%`,
+            signalWeights: item.signal_weights || null,
+            details: `Far deps ${formatNumber.format(item.far_dependencies || 0)}`,
             raw: item,
-            searchText: [item.benchmark_name, ...item.signals].join(" "),
+            searchText: [item.module_key, item.module_name, item.path, item.test_locality, ...item.signals].join(" "),
         }));
 
         const leverageDistItems = state.leverage.map((item) => ({
-            key: `leverage:${item.module_name}`,
+            key: `leverage:${item.module_key || item.module_name}`,
             kind: "leverage",
-            name: item.module_name,
+            name: item.module_key || item.module_name,
             score: 100 - (item.total_leverage_score || 0), // Invert score so risk distribution treats higher as worse
             signals: item.signals || [],
             details: `Iter ${formatNumber.format(item.iterator_leverage_score)}%`,
             raw: item,
-            searchText: [item.module_name, ...item.signals].join(" "),
+            searchText: [item.module_key, item.module_name, item.path, ...item.signals].join(" "),
         }));
 
         renderRiskDistribution(byId("locality-distribution"), localityDistItems, {
@@ -1898,15 +2167,20 @@
 
         renderTable(
             "locality-table",
-            ["Rank", "Benchmark", "Locality Score", "L1 Miss Ratio", "Branch Miss Ratio", "Signals"],
+            ["Rank", "Module", "Path", "Code Locality", "Far Deps", "Out/In", "Layer Violations", "Churn", "Tests", "Signals"],
             filteredLocality.map((item, index) => {
                 const scoreClass = riskClass(100 - item.locality_score, 15, 30);
+                const moduleName = item.module_key || item.module_name;
                 return `<tr>
                     <td>${index + 1}</td>
-                    <td><code>${escapeHtml(item.benchmark_name)}</code></td>
+                    <td><code>${escapeHtml(moduleName)}</code></td>
+                    <td><code>${escapeHtml(item.path || "")}</code></td>
                     <td class="${scoreClass}">${formatNumber.format(item.locality_score)}</td>
-                    <td>${formatNumber.format(item.l1_miss_ratio)}%</td>
-                    <td>${formatNumber.format(item.branch_mispredict_ratio)}%</td>
+                    <td>${formatNumber.format(item.far_dependencies || 0)}</td>
+                    <td>${formatNumber.format(item.outbound_dependencies || 0)} / ${formatNumber.format(item.inbound_dependencies || 0)}</td>
+                    <td>${formatNumber.format(item.layer_violations || 0)}</td>
+                    <td>${formatNumber.format(item.churn || 0)}</td>
+                    <td>${escapeHtml(item.test_locality || "-")}</td>
                     <td>${renderPills(item.signals)}</td>
                 </tr>`;
             })
@@ -1914,15 +2188,21 @@
 
         renderTable(
             "leverage-table",
-            ["Rank", "Module", "Leverage Score", "Iterator %", "Indirection %", "Unsafe Blocks", "Signals"],
+            ["Rank", "Module", "Path", "Leverage Score", "Iterator %", "Indirection %", "Loops", "Iterator Calls", "Indirect Types", "Unsafe", "Signals"],
             filteredLeverage.map((item, index) => {
                 const scoreClass = riskClass(100 - item.total_leverage_score, 20, 40);
+                const moduleName = item.module_key || item.module_name;
+                const path = item.path || item.module_name;
                 return `<tr>
                     <td>${index + 1}</td>
-                    <td><code>${escapeHtml(item.module_name)}</code></td>
+                    <td><code>${escapeHtml(moduleName)}</code></td>
+                    <td><code>${escapeHtml(path)}</code></td>
                     <td class="${scoreClass}">${formatNumber.format(item.total_leverage_score)}</td>
                     <td>${formatNumber.format(item.iterator_leverage_score)}%</td>
                     <td>${formatNumber.format(item.indirection_ratio)}%</td>
+                    <td>${formatNumber.format(item.for_loop_count ?? 0)}</td>
+                    <td>${formatNumber.format(item.iterator_method_count ?? 0)}</td>
+                    <td>${formatNumber.format(item.heap_allocating_type_count ?? 0)}</td>
                     <td>${item.unsafe_blocks}</td>
                     <td>${renderPills(item.signals)}</td>
                 </tr>`;
@@ -2659,6 +2939,7 @@
     function renderAll() {
         renderOverview();
         renderHotspots();
+        renderQualityOverview();
         renderQualityDistribution();
         renderCloneDistribution();
         renderSlowspots();
@@ -2863,7 +3144,13 @@
     function renderRiskDistributionCounts(items, options) {
         const buckets = riskBuckets(items, options.warn, options.bad);
         const signalCounts = new Map();
-        items.forEach((item) => pillValues(item.signals).forEach((sig) => signalCounts.set(sig, (signalCounts.get(sig) || 0) + 1)));
+        const usesWeightedSignals = items.some((item) => item.signalWeights);
+        items.forEach((item) => {
+            pillValues(item.signals).forEach((sig) => {
+                const weight = item.signalWeights?.[sig] ?? 1;
+                signalCounts.set(sig, (signalCounts.get(sig) || 0) + weight);
+            });
+        });
         const sigSorted = [...signalCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
         const sigMax = sigSorted.length ? sigSorted[0][1] : 1;
         return `<div class="risk-count-grid">
@@ -2878,7 +3165,7 @@
                 <div class="signal-bars__row">
                     <span>${escapeHtml(sig)}</span>
                     <div class="signal-bars__track"><span class="signal-bars__fill" style="width:${(count / sigMax) * 100}%"></span></div>
-                    <span class="signal-bars__count">${formatNumber.format(count)}</span>
+                    <span class="signal-bars__count">${formatNumber.format(count)}${usesWeightedSignals ? " impact" : ""}</span>
                 </div>`).join("")}</div>` : `<p class="muted">No signal data.</p>`}
         </div>`;
     }
@@ -3194,6 +3481,7 @@
             const total = layer.total || 0;
             const passed = layer.passed || 0;
             const failed = layer.failed || 0;
+            const skipped = layer.skipped || 0;
             const unknown = layer.unknown || 0;
             const ratio = layer.failed_ratio != null
                 ? Number(layer.failed_ratio)
@@ -3204,20 +3492,28 @@
             else if (!total) cls = "stale";
             const pct = (n) => total ? `${(n / total) * 100}%` : "0%";
             const isActive = state.selectedLayer === layer.name;
-            return `<div class="layer-matrix__cell layer-matrix__cell--${cls} ${isActive ? "is-active" : ""}" data-layer="${escapeHtml(layer.name)}">
-                <div class="layer-matrix__name">${escapeHtml(layer.name)}</div>
+            return `<button type="button" class="layer-matrix__cell layer-matrix__cell--${cls} ${isActive ? "is-active" : ""}" data-layer="${escapeHtml(layer.name)}">
+                <div class="layer-matrix__topline">
+                    <div>
+                        <div class="layer-matrix__eyebrow">${formatNumber.format(total)} tests</div>
+                        <div class="layer-matrix__name" title="${escapeHtml(layer.name)}">${escapeHtml(layer.name)}</div>
+                    </div>
+                    <span class="layer-matrix__ratio">${formatNumber.format(ratio * 100)}%</span>
+                </div>
                 <div class="layer-matrix__counts">
-                    <span class="risk-good">${passed} pass</span>
-                    <span class="${failed ? "risk-bad" : "muted"}">${failed} fail</span>
-                    <span class="muted">${unknown} unknown</span>
+                    <span><strong class="risk-good">${passed}</strong><em>pass</em></span>
+                    <span><strong class="${failed ? "risk-bad" : "muted"}">${failed}</strong><em>fail</em></span>
+                    <span><strong class="muted">${skipped}</strong><em>skip</em></span>
+                    <span><strong class="muted">${unknown}</strong><em>unknown</em></span>
                 </div>
                 <div class="layer-matrix__bar">
                     <span class="passed" style="width:${pct(passed)}"></span>
                     <span class="failed" style="width:${pct(failed)}"></span>
+                    <span class="skipped" style="width:${pct(skipped)}"></span>
                     <span class="unknown" style="width:${pct(unknown)}"></span>
                 </div>
-                <div class="muted" style="font-size:11px">${total} tests · ${formatNumber.format(ratio * 100)}% failing</div>
-            </div>`;
+                <div class="layer-matrix__footer">${cls === "ok" ? "Clear" : cls === "bad" ? "Failing" : cls === "warn" ? "Review" : "No data"} layer</div>
+            </button>`;
         }).join("");
         target.querySelectorAll(".layer-matrix__cell").forEach((cell) => {
             cell.addEventListener("click", () => {

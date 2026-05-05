@@ -41,7 +41,7 @@ fn render_resize_handles(ui: &mut egui::Ui, ctx: &egui::Context, size: Vec2) {
         let response = widget_ids::interact(
             ui,
             grip.rect,
-            widget_ids::child(ui.id(), grip.id),
+            widget_ids::root_id(("resize_grip", grip.id)),
             Sense::click_and_drag(),
             "resize_grip",
         )

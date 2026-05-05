@@ -1,9 +1,7 @@
 use crate::app::app_state::ScratchpadApp;
-use crate::app::chrome::phosphor_button;
+use crate::app::chrome::{phosphor_button, phosphor_button_with_hover_icon_color};
 use crate::app::commands::AppCommand;
-use crate::app::theme::{
-    CAPTION_BUTTON_SIZE, CLOSE_BG, CLOSE_HOVER_BG, action_bg, action_hover_bg,
-};
+use crate::app::theme::{CAPTION_BUTTON_SIZE, CLOSE_HOVER_BG, action_bg, action_hover_bg};
 use eframe::egui;
 
 pub(super) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
@@ -237,22 +235,36 @@ fn render_button(
     button: VerticalActionButton,
     button_size: egui::Vec2,
 ) {
-    let (background, hover_background) = if matches!(button.action, VerticalAction::CloseWindow) {
-        (CLOSE_BG, CLOSE_HOVER_BG)
+    let is_close = matches!(button.action, VerticalAction::CloseWindow);
+    let (background, hover_background) = if is_close {
+        (action_bg(ui), CLOSE_HOVER_BG)
     } else {
         (action_bg(ui), action_hover_bg(ui))
     };
-    if phosphor_button(
-        ui,
-        button.action.id_key(),
-        button.icon,
-        button_size,
-        background,
-        hover_background,
-        button.tooltip,
-    )
-    .clicked()
-    {
+    let response = if is_close {
+        phosphor_button_with_hover_icon_color(
+            ui,
+            button.action.id_key(),
+            button.icon,
+            button_size,
+            background,
+            hover_background,
+            crate::app::theme::text_primary(ui),
+            egui::Color32::WHITE,
+            button.tooltip,
+        )
+    } else {
+        phosphor_button(
+            ui,
+            button.action.id_key(),
+            button.icon,
+            button_size,
+            background,
+            hover_background,
+            button.tooltip,
+        )
+    };
+    if response.clicked() {
         handle_vertical_action(ui.ctx(), app, button.action);
     }
 }

@@ -5,6 +5,7 @@ use crate::app::commands::AppCommand;
 use crate::app::theme::{BUTTON_SIZE, TAB_BUTTON_WIDTH, TAB_HEIGHT, action_bg, action_hover_bg};
 use crate::app::ui::tab_drag::{self, TabDropAxis, TabDropZone, TabRectEntry};
 use crate::app::ui::tab_overflow;
+use crate::app::ui::tab_strip::context_menu::attach_tab_list_context_menu;
 use crate::app::ui::tab_strip::{
     HeaderLayout, TabStripOutcome, maybe_auto_scroll_tab_strip, record_visible_tab,
 };
@@ -48,7 +49,7 @@ pub(super) fn show_tab_region(
                 );
                 apply_tab_drag_feedback(ui, app, &drop_zones, &mut outcome);
                 render_new_tab_action(ui, app, layout.spacing);
-                show_drag_region(ctx, ui, layout.drag_width);
+                show_drag_region(ctx, ui, app, layout.drag_width);
             },
         );
     });
@@ -64,8 +65,8 @@ fn allocate_tab_strip_entries(
     duplicate_name_counts: &DuplicateNameCounts,
     visible_tab_indices: &mut HashSet<usize>,
     outcome: &mut TabStripOutcome,
-) -> Vec<TabRectEntry> {
-    ui.allocate_ui_with_layout(
+) -> (Vec<TabRectEntry>, egui::Rect) {
+    let output = ui.allocate_ui_with_layout(
         egui::vec2(layout.visible_strip_width, TAB_HEIGHT),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
@@ -81,8 +82,8 @@ fn allocate_tab_strip_entries(
             };
             render_tab_strip_entries(ui, layout, scroll_area_id, &mut context)
         },
-    )
-    .inner
+    );
+    (output.inner, output.response.rect)
 }
 
 fn configure_tab_strip_viewport(ui: &mut egui::Ui, visible_strip_width: f32) {
@@ -180,7 +181,7 @@ fn show_scrolling_tab_strip(
     outcome: &mut TabStripOutcome,
 ) -> Option<TabDropZone> {
     let scroll_area_id = widget_ids::scroll_id(ui, "tab_strip");
-    let entries = allocate_tab_strip_entries(
+    let (entries, background_rect) = allocate_tab_strip_entries(
         ui,
         app,
         layout,
@@ -189,11 +190,34 @@ fn show_scrolling_tab_strip(
         visible_tab_indices,
         outcome,
     );
+    attach_tab_list_background_context_menu(ui, background_rect, app, &entries);
 
     (!entries.is_empty()).then_some(TabDropZone {
         axis: TabDropAxis::Horizontal,
         entries,
     })
+}
+
+fn attach_tab_list_background_context_menu(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    app: &mut ScratchpadApp,
+    entries: &[TabRectEntry],
+) {
+    let pointer_pos = ui.input(|input| input.pointer.interact_pos());
+    let pointer_over_tab =
+        pointer_pos.is_some_and(|pos| entries.iter().any(|entry| entry.rect.contains(pos)));
+    if pointer_over_tab {
+        return;
+    }
+    let response = widget_ids::interact(
+        ui,
+        rect,
+        widget_ids::local(ui, "tab_strip_background_context"),
+        Sense::click(),
+        "tab_strip_background_context",
+    );
+    attach_tab_list_context_menu(&response, app);
 }
 
 fn render_new_tab_action(ui: &mut egui::Ui, app: &mut ScratchpadApp, spacing: f32) {
@@ -246,7 +270,12 @@ fn show_overflow_controls(
     overflow_outcome.drop_zone
 }
 
-fn show_drag_region(ctx: &egui::Context, ui: &mut egui::Ui, drag_width: f32) {
+fn show_drag_region(
+    ctx: &egui::Context,
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    drag_width: f32,
+) {
     if drag_width <= 0.0 {
         return;
     }
@@ -255,7 +284,7 @@ fn show_drag_region(ctx: &egui::Context, ui: &mut egui::Ui, drag_width: f32) {
     let drag_response = widget_ids::interact(
         ui,
         rect,
-        widget_ids::child(ui.id(), "window_drag_region"),
+        widget_ids::local(ui, "window_drag_region"),
         Sense::click_and_drag(),
         "window_drag_region",
     );
@@ -266,6 +295,9 @@ fn show_drag_region(ctx: &egui::Context, ui: &mut egui::Ui, drag_width: f32) {
         let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
     }
+    // The open strip doubles as window drag space, but a secondary click there
+    // should still expose the tab-list commands.
+    attach_tab_list_context_menu(&drag_response, app);
     ui.painter()
         .rect_filled(rect, 0.0, crate::app::theme::header_bg(ui));
 }

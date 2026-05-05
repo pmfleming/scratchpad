@@ -6,7 +6,8 @@ use crate::app::services::settings_store::{
     AppSettings, AppThemeMode, DEFAULT_EDITOR_BACKGROUND_COLOR, DEFAULT_EDITOR_TEXT_COLOR,
     DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR, DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR,
     DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, FileOpenDisposition, LIGHT_EDITOR_BACKGROUND_COLOR,
-    LIGHT_EDITOR_TEXT_COLOR, StartupSessionBehavior, TabListPosition, color_from_hex, color_to_hex,
+    LIGHT_EDITOR_TEXT_COLOR, NewTabPlacement, StartupSessionBehavior, TabListPosition,
+    color_from_hex, color_to_hex,
 };
 use eframe::egui;
 use std::path::Path;
@@ -94,6 +95,10 @@ impl ScratchpadApp {
 
     pub fn file_open_disposition(&self) -> FileOpenDisposition {
         self.app_settings.file_open_disposition
+    }
+
+    pub fn new_tab_placement(&self) -> NewTabPlacement {
+        self.app_settings.new_tab_placement
     }
 
     pub fn startup_session_behavior(&self) -> StartupSessionBehavior {

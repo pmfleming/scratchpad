@@ -24,6 +24,7 @@ Gaps: command palette actions and installer packaging.
 ## Docs
 
 - [User manual](docs/user-manual.md)
+- [Encoding review report](docs/encoding-review-report.md)
 - [Measurement tools](docs/measurement-tools.md)
 - [Project plan](PLAN.md)
 

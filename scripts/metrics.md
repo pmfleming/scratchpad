@@ -36,6 +36,32 @@ These are the formulas currently used by the scripts and the overview viewer.
   ```
   The architecture map keeps the **highest** benchmark contribution for each targeted module.
 
+- **Code locality score** (`locality_bench.py`)
+  ```python
+  dependency_spread = min(
+      58.0,
+      far_dependencies * 9.0
+      + layer_violations * 16.0
+      + max(0, outbound_dependencies - 4) * 4.0
+      + max(0, inbound_dependencies - 8) * 2.0,
+  )
+  test_distance = 0.0 if has_inline_tests else 0.5 if has_tests else 1.0
+  change_spread = min(28.0, churn / 90.0 + max(0, contributor_count - 2) * 3.0)
+  locality_score = 100.0 - (dependency_spread + test_distance + change_spread)
+  ```
+  Higher scores mean related code is more locally organized: dependencies stay nearby, architectural layers are respected, and the module has less change spread. Missing nearby tests is a low-severity hint, not a primary locality failure.
+
+- **Leverage score** (`leverage_ast.rs`)
+  ```rust
+  indirection_ratio = heap_allocating_type_count / (heap_allocating_type_count + inline_type_count) * 100.0
+  iterator_leverage_score = iterator_method_count / (iterator_method_count + for_loop_count) * 100.0
+  total_leverage_score =
+      ((100.0 - indirection_ratio) * 0.4)
+      + (iterator_leverage_score * 0.6)
+      - min(50.0, unsafe_blocks * 5.0)
+  ```
+  Lower leverage scores are shown first in the overview because they are the triage targets. The JSON also preserves raw counts such as iterator method count, `for` loop count, heap-allocating type count, and unsafe surface counts.
+
 - **Maintainability risk** (`map.py`)
   ```python
   maintainability_risk = (
@@ -154,6 +180,12 @@ Clone Alert identifies redundant code segments that have been copied and pasted,
   score = (InstanceCount * TokenCount) / 10.0
   ```
 
+## 10. Locality & Leverage
+Locality and leverage are static quality measurements surfaced in the Quality Review.
+- **Code Locality:** Estimates how locally organized each module is by combining dependency spread, layer violations, nearby test evidence, churn, and contributor spread.
+- **Leverage:** Static Rust AST analysis that highlights modules with low iterator use, high indirection pressure, or unsafe surface area.
+- **Triage Direction:** Locality and leverage scores are "higher is better"; the dashboard inverts them for risk distributions and ranks leverage tables by the lowest score first.
+
 ---
 
 ### Analysis Tools
@@ -161,6 +193,8 @@ Clone Alert identifies redundant code segments that have been copied and pasted,
 - **slowspots.py:** Analyzes dynamic execution performance and latency.
 - **search_speed.py:** Analyzes search scaling across Active, Current, and All scopes, with separate completion and first-response timings.
 - **clone_alert.py:** Detects structural and renamed code clones.
+- **locality_bench.py:** Emits static Code Locality metrics from dependency structure, test proximity, and git history.
+- **leverage_metrics.py / leverage_ast.rs:** Emit Rust AST leverage metrics with raw counts and derived scores.
 - **map.py:** Aggregates complexity, git history, benchmark, and dependency data into maintainability, change, performance, and architectural risk.
 
 ### Overview Viewer
@@ -198,6 +232,8 @@ The rebuild modes refresh:
 - `target/analysis/capacity_report.json`
 - `target/analysis/speed_efficiency_report.json`
 - `target/analysis/clones.json`
+- `target/analysis/locality_metrics.json`
+- `target/analysis/leverage_metrics.json`
 - `target/analysis/map.json`
 - `target/analysis/flamegraphs.json`
 

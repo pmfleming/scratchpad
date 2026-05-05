@@ -16,8 +16,11 @@ use egui_phosphor::regular::{
 const DEFAULT_SPLIT_RATIO: f32 = 0.5;
 const EDITOR_CONTEXT_MENU_WIDTH: f32 = 192.0;
 const EDITOR_CONTEXT_SUBMENU_WIDTH: f32 = 168.0;
+const EDITOR_CONTEXT_ROW_HEIGHT: f32 = 28.0;
 const EDITOR_CONTEXT_ICON_BUTTON_SIZE: egui::Vec2 = egui::vec2(38.0, 30.0);
 const EDITOR_CONTEXT_CARET_WIDTH: f32 = 28.0;
+const EDITOR_CONTEXT_ICON_CENTER_X: f32 = 20.0;
+const EDITOR_CONTEXT_LABEL_X: f32 = 52.0;
 
 pub(super) fn attach_editor_context_menu(
     tile_response: &egui::Response,
@@ -82,7 +85,7 @@ fn render_history_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     run_menu_command(
         ui,
         app,
-        "Text History",
+        "History",
         Some(CLOCK_COUNTER_CLOCKWISE),
         true,
         AppCommand::OpenTextHistory,
@@ -140,26 +143,26 @@ fn render_tile_menu(
 
 fn render_icon_rail_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let any_action = ui
-        .with_layout(
-            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-            |ui| {
-                ui.horizontal(|ui| {
-                    run_icon_rail_action(ui, app, SCISSORS, "Cut", |ui, app| {
-                        copy_icon_text(ui, app.cut_selected_text_in_active_view())
-                    }) || run_icon_rail_action(ui, app, COPY, "Copy", |ui, app| {
-                        copy_icon_text(ui, app.copy_selected_text_in_active_view())
-                    }) || run_icon_rail_action(ui, app, CLIPBOARD_TEXT, "Paste", |ui, _| {
-                        ui.ctx()
-                            .clone()
-                            .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
-                        true
-                    }) || run_icon_rail_action(ui, app, SELECTION_ALL, "Select All", |_, app| {
-                        app.select_all_in_active_view()
-                    })
-                })
-                .inner
-            },
-        )
+        .horizontal(|ui| {
+            let button_count = 4.0;
+            let button_spacing = ui.spacing().item_spacing.x;
+            let rail_width = EDITOR_CONTEXT_ICON_BUTTON_SIZE.x * button_count
+                + button_spacing * (button_count - 1.0);
+            ui.add_space(((ui.available_width() - rail_width) * 0.5).max(0.0));
+
+            run_icon_rail_action(ui, app, SCISSORS, "Cut", |ui, app| {
+                copy_icon_text(ui, app.cut_selected_text_in_active_view())
+            }) || run_icon_rail_action(ui, app, COPY, "Copy", |ui, app| {
+                copy_icon_text(ui, app.copy_selected_text_in_active_view())
+            }) || run_icon_rail_action(ui, app, CLIPBOARD_TEXT, "Paste", |ui, _| {
+                ui.ctx()
+                    .clone()
+                    .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+                true
+            }) || run_icon_rail_action(ui, app, SELECTION_ALL, "Select All", |_, app| {
+                app.select_all_in_active_view()
+            })
+        })
         .inner;
 
     if any_action {
@@ -253,25 +256,22 @@ fn copy_icon_text(ui: &mut egui::Ui, text: Option<String>) -> bool {
 }
 
 fn menu_action_button(ui: &mut egui::Ui, label: &str, icon: Option<&str>, enabled: bool) -> bool {
-    let text = match icon {
-        Some(icon) => format!("{icon}  {label}"),
-        None => label.to_owned(),
-    };
     with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        widget_ids::surface_response(
+        let response = widget_ids::surface_response(
             ui,
             ("editor_context.menu_action", label),
             widget_ids::WidgetRole::ActionButton,
             |ui| {
                 ui.add_enabled(
                     enabled,
-                    egui::Button::new(egui::RichText::new(text).color(text_primary(ui)))
+                    egui::Button::new("")
                         .min_size(egui::vec2(EDITOR_CONTEXT_MENU_WIDTH, 28.0))
                         .stroke(egui::Stroke::NONE),
                 )
             },
-        )
-        .clicked()
+        );
+        paint_context_menu_row_label(ui, response.rect, icon, label, enabled);
+        response.clicked()
     })
 }
 
@@ -290,21 +290,23 @@ fn split_menu_row(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
 
 fn split_menu_button(ui: &mut egui::Ui, label: &str, icon: &str) -> bool {
     with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        widget_ids::surface_response(
+        let response = widget_ids::surface_response(
             ui,
             ("editor_context.split_submenu", label),
             widget_ids::WidgetRole::ActionButton,
             |ui| {
                 ui.add(
-                    egui::Button::new(
-                        egui::RichText::new(format!("{icon}  {label}")).color(text_primary(ui)),
-                    )
-                    .min_size(egui::vec2(EDITOR_CONTEXT_SUBMENU_WIDTH, 28.0))
-                    .stroke(egui::Stroke::NONE),
+                    egui::Button::new("")
+                        .min_size(egui::vec2(
+                            EDITOR_CONTEXT_SUBMENU_WIDTH,
+                            EDITOR_CONTEXT_ROW_HEIGHT,
+                        ))
+                        .stroke(egui::Stroke::NONE),
                 )
             },
-        )
-        .clicked()
+        );
+        paint_context_menu_row_label(ui, response.rect, Some(icon), label, true);
+        response.clicked()
     })
 }
 
@@ -325,13 +327,7 @@ fn render_split_primary_button(ui: &mut egui::Ui) -> bool {
                 )
             },
         );
-        ui.painter().text(
-            response.rect.left_center() + egui::vec2(10.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            format!("{ARROWS_SPLIT}  Split"),
-            egui::TextStyle::Button.resolve(ui.style()),
-            text_primary(ui),
-        );
+        paint_context_menu_row_label(ui, response.rect, Some(ARROWS_SPLIT), "Split", true);
         response.clicked()
     })
 }
@@ -339,7 +335,10 @@ fn render_split_primary_button(ui: &mut egui::Ui) -> bool {
 fn render_split_submenu(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
     with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
         let button = egui::Button::new(egui::RichText::new(CARET_RIGHT).color(text_primary(ui)))
-            .min_size(egui::vec2(EDITOR_CONTEXT_CARET_WIDTH, 28.0))
+            .min_size(egui::vec2(
+                EDITOR_CONTEXT_CARET_WIDTH,
+                EDITOR_CONTEXT_ROW_HEIGHT,
+            ))
             .stroke(egui::Stroke::NONE);
 
         widget_ids::surface_widget(ui, "editor_context.split_caret", "submenu", |ui| {
@@ -360,6 +359,37 @@ fn render_split_submenu(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
             });
         });
     });
+}
+
+fn paint_context_menu_row_label(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    icon: Option<&str>,
+    label: &str,
+    enabled: bool,
+) {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let color = if enabled {
+        text_primary(ui)
+    } else {
+        text_primary(ui).gamma_multiply(0.45)
+    };
+    if let Some(icon) = icon {
+        ui.painter().text(
+            rect.left_center() + egui::vec2(EDITOR_CONTEXT_ICON_CENTER_X, 0.0),
+            egui::Align2::CENTER_CENTER,
+            icon,
+            font.clone(),
+            color,
+        );
+    }
+    ui.painter().text(
+        rect.left_center() + egui::vec2(EDITOR_CONTEXT_LABEL_X, 0.0),
+        egui::Align2::LEFT_CENTER,
+        label,
+        font,
+        color,
+    );
 }
 
 #[derive(Clone, Copy)]

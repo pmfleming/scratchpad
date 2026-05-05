@@ -286,7 +286,8 @@ fn render_tab_close_button(
 }
 
 fn paint_tab_close_button(ui: &egui::Ui, close_rect: Rect, hovered: bool, drag_in_progress: bool) {
-    if hovered && !drag_in_progress {
+    let danger_hovered = hovered && !drag_in_progress;
+    if danger_hovered {
         ui.painter().rect_filled(close_rect, 2.0, CLOSE_HOVER_BG);
     }
 
@@ -295,7 +296,11 @@ fn paint_tab_close_button(ui: &egui::Ui, close_rect: Rect, hovered: bool, drag_i
         egui::Align2::CENTER_CENTER,
         egui_phosphor::regular::X,
         egui::FontId::proportional(14.0),
-        text_primary(ui),
+        if danger_hovered {
+            egui::Color32::WHITE
+        } else {
+            text_primary(ui)
+        },
     );
 }
 

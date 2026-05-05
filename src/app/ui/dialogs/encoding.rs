@@ -16,12 +16,13 @@ const ENCODING_WARNING_MIN_HEIGHT: f32 = 62.0;
 const ENCODING_CONTROL_WIDTH: f32 = 132.0;
 const ENCODING_ACTION_BUTTON_SIZE: egui::Vec2 = egui::vec2(84.0, 26.0);
 const ENCODING_CARD_CORNER_RADIUS: u8 = 12;
-const ENCODING_COMBO_FILL: egui::Color32 = egui::Color32::from_rgb(74, 72, 68);
-const ENCODING_COMBO_FILL_HOVER: egui::Color32 = egui::Color32::from_rgb(84, 82, 78);
+const ENCODING_COMBO_FILL_DARK: egui::Color32 = egui::Color32::from_rgb(74, 72, 68);
+const ENCODING_COMBO_FILL_HOVER_DARK: egui::Color32 = egui::Color32::from_rgb(84, 82, 78);
+const ENCODING_COMBO_FILL_LIGHT: egui::Color32 = egui::Color32::from_rgb(226, 235, 246);
+const ENCODING_COMBO_FILL_HOVER_LIGHT: egui::Color32 = egui::Color32::from_rgb(212, 224, 239);
 const ENCODING_FILE_ICON: egui::Color32 = egui::Color32::from_rgb(107, 158, 248);
-const ENCODING_WARNING_FILL: egui::Color32 = egui::Color32::from_rgb(55, 46, 45);
-const ENCODING_WARNING_ICON: egui::Color32 = egui::Color32::from_rgb(246, 177, 150);
-const ENCODING_WARNING_TITLE: egui::Color32 = egui::Color32::from_rgb(246, 177, 150);
+const ENCODING_WARNING_FILL: egui::Color32 = egui::Color32::from_rgb(142, 52, 52);
+const ENCODING_WARNING_TEXT: egui::Color32 = egui::Color32::WHITE;
 
 struct EncodingDialogState {
     active_index: usize,
@@ -281,13 +282,13 @@ fn render_encoding_warning(ui: &mut egui::Ui) {
                 egui::vec2(ui.available_width(), ENCODING_WARNING_MIN_HEIGHT),
                 egui::Layout::left_to_right(egui::Align::TOP),
                 |ui| {
-                    render_card_icon_with_color(ui, WARNING, ENCODING_WARNING_ICON);
+                    render_card_icon_with_color(ui, WARNING, ENCODING_WARNING_TEXT);
                     ui.add_space(12.0);
                     ui.vertical(|ui| {
                         ui.label(
                             egui::RichText::new("Compatibility warning")
                                 .size(15.0)
-                                .color(ENCODING_WARNING_TITLE),
+                                .color(ENCODING_WARNING_TEXT),
                         );
                         ui.add_space(1.0);
                         ui.label(
@@ -295,7 +296,7 @@ fn render_encoding_warning(ui: &mut egui::Ui) {
                                 "Using an incompatible encoding may permanently corrupt characters or lose character mapping data. Proceed with caution.",
                             )
                             .size(12.0)
-                            .color(text_primary(ui).gamma_multiply(0.82)),
+                            .color(ENCODING_WARNING_TEXT.gamma_multiply(0.86)),
                         );
                     });
                 },
@@ -428,15 +429,20 @@ fn render_encoding_combo(ui: &mut egui::Ui, selected_encoding: &mut String) {
 
 fn apply_encoding_combo_style(ui: &mut egui::Ui) {
     let text_color = text_primary(ui);
+    let (fill, hover_fill) = if ui.visuals().dark_mode {
+        (ENCODING_COMBO_FILL_DARK, ENCODING_COMBO_FILL_HOVER_DARK)
+    } else {
+        (ENCODING_COMBO_FILL_LIGHT, ENCODING_COMBO_FILL_HOVER_LIGHT)
+    };
     let visuals = ui.visuals_mut();
-    visuals.widgets.inactive.bg_fill = ENCODING_COMBO_FILL;
-    visuals.widgets.hovered.bg_fill = ENCODING_COMBO_FILL_HOVER;
-    visuals.widgets.active.bg_fill = ENCODING_COMBO_FILL_HOVER;
-    visuals.widgets.open.bg_fill = ENCODING_COMBO_FILL_HOVER;
-    visuals.widgets.inactive.weak_bg_fill = ENCODING_COMBO_FILL;
-    visuals.widgets.hovered.weak_bg_fill = ENCODING_COMBO_FILL_HOVER;
-    visuals.widgets.active.weak_bg_fill = ENCODING_COMBO_FILL_HOVER;
-    visuals.widgets.open.weak_bg_fill = ENCODING_COMBO_FILL_HOVER;
+    visuals.widgets.inactive.bg_fill = fill;
+    visuals.widgets.hovered.bg_fill = hover_fill;
+    visuals.widgets.active.bg_fill = hover_fill;
+    visuals.widgets.open.bg_fill = hover_fill;
+    visuals.widgets.inactive.weak_bg_fill = fill;
+    visuals.widgets.hovered.weak_bg_fill = hover_fill;
+    visuals.widgets.active.weak_bg_fill = hover_fill;
+    visuals.widgets.open.weak_bg_fill = hover_fill;
     visuals.widgets.inactive.fg_stroke.color = text_color;
     visuals.widgets.hovered.fg_stroke.color = text_color;
     visuals.widgets.active.fg_stroke.color = text_color;

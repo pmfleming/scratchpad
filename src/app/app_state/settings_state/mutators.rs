@@ -1,6 +1,6 @@
 use super::{
-    AppSettings, AppSurface, AppThemeMode, FileController, FileOpenDisposition, ScratchpadApp,
-    StartupSessionBehavior, TabListPosition, color_to_hex,
+    AppSettings, AppSurface, AppThemeMode, FileController, FileOpenDisposition, NewTabPlacement,
+    ScratchpadApp, StartupSessionBehavior, TabListPosition, color_to_hex,
     sanitize_tab_list_auto_hide_delay_seconds, stock_editor_palette_for_selection,
 };
 use crate::app::domain::TextHistoryBudget;
@@ -171,6 +171,14 @@ impl ScratchpadApp {
         );
     }
 
+    pub(crate) fn set_new_tab_placement(&mut self, placement: NewTabPlacement) {
+        self.persist_settings_if_changed(
+            self.app_settings.new_tab_placement,
+            placement,
+            |app, next| app.app_settings.new_tab_placement = next,
+        );
+    }
+
     pub(crate) fn set_startup_session_behavior(&mut self, behavior: StartupSessionBehavior) {
         self.persist_settings_if_changed(
             self.app_settings.startup_session_behavior,
@@ -211,12 +219,21 @@ impl ScratchpadApp {
 
     pub(crate) fn set_status_bar_visible(&mut self, visible: bool) {
         if self.app_settings.status_bar_visible == visible {
+            self.pending_status_bar_visible = None;
             return;
         }
 
         self.app_settings.status_bar_visible = visible;
         self.begin_layout_transition();
         self.persist_settings_or_error();
+    }
+
+    pub(crate) fn defer_status_bar_visible(&mut self, visible: bool, ctx: &egui::Context) {
+        self.pending_status_bar_visible =
+            (self.app_settings.status_bar_visible != visible).then_some(visible);
+        if self.pending_status_bar_visible.is_some() {
+            ctx.request_repaint();
+        }
     }
 
     pub(crate) fn set_history_budget(&mut self, mut budget: TextHistoryBudget) {

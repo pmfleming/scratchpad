@@ -267,7 +267,7 @@ impl FileController {
                     ..
                 } = LoadedFile::from_buffer(buffer);
                 Self::mark_settings_buffer(app, &mut buffer);
-                app.tab_manager_mut().append_tab(WorkspaceTab::new(buffer));
+                app.insert_new_tab_from_settings(WorkspaceTab::new(buffer));
                 app.ensure_active_tab_slot_selected();
                 Self::queue_deferred_buffer_refreshes(app, deferred_refresh);
                 app.mark_search_dirty();

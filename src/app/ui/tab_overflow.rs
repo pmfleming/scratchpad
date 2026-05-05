@@ -4,6 +4,7 @@ use crate::app::domain::WorkspaceTab;
 use crate::app::services::settings_store::TabListPosition;
 use crate::app::theme::*;
 use crate::app::ui::tab_drag;
+use crate::app::ui::tab_strip::context_menu::attach_tab_list_context_menu;
 use crate::app::ui::widget_ids;
 use eframe::egui::{self, Stroke};
 use std::collections::{HashMap, HashSet};
@@ -52,7 +53,7 @@ const OVERFLOW_POPUP_VIEWPORT_MARGIN: f32 = 8.0;
 pub(crate) fn show_overflow_button(
     ctx: &egui::Context,
     ui: &mut egui::Ui,
-    app: &ScratchpadApp,
+    app: &mut ScratchpadApp,
     overflow_popup_open: &mut bool,
     visible_tab_indices: &HashSet<usize>,
     _duplicate_name_counts: &HashMap<String, usize>,
@@ -60,6 +61,7 @@ pub(crate) fn show_overflow_button(
     let mut outcome = OverflowMenuOutcome::default();
     let overflow_popup_id = widget_ids::root_id("tab_overflow_popup");
     let overflow_button_response = overflow_button(ui);
+    attach_tab_list_context_menu(&overflow_button_response, app);
     toggle_overflow_popup(overflow_popup_open, &overflow_button_response);
 
     let (anchor, pivot) = overflow_popup_anchor(app, overflow_button_response.rect);

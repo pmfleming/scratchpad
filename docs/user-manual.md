@@ -86,7 +86,7 @@ When only one tile remains in a workspace, closing the tab and closing the tile 
 
 - `Ctrl + S`: save the active file
 
-Scratchpad preserves the file's detected encoding and BOM state when saving.
+Scratchpad preserves the file's detected encoding and supported BOM state when saving. If the current document contains characters that cannot be represented in the selected encoding, Scratchpad warns before writing so the file is not silently corrupted.
 
 ### Search and Replace
 
@@ -139,6 +139,35 @@ Scratchpad is designed to cope with text files that contain:
 
 When Scratchpad detects these conditions, it keeps the underlying file editable while surfacing warnings and cleaned views where appropriate.
 
+### Encoding Detection
+
+When opening a file, Scratchpad checks for a byte order mark first. If there is no BOM, it uses heuristic detection and stores the resolved encoding as document metadata.
+
+The status bar shows the active file's encoding. Click the encoding label to open encoding actions for the current file.
+
+### Reopen or Save With Encoding
+
+Use the Encoding dialog when text appears incorrectly decoded or when a file needs to be saved with a different text encoding.
+
+The dialog lets you:
+
+- reopen the active file using the selected encoding
+- save the active file using the selected encoding
+
+Reopen is safest before editing. If the file has unsaved changes, save or discard those changes before reopening with a different encoding.
+
+### BOM and Line Endings
+
+Scratchpad tracks BOM state and line-ending metadata separately from the decoded text. The status bar shows line-ending state next to encoding state.
+
+Current save behavior preserves the document's encoded text and supported BOM state. Files with a single line-ending style are saved using the stored preferred line-ending policy. Mixed line endings are preserved exactly unless a future explicit normalization command changes them; see [Encoding Review Report](encoding-review-report.md) for the active implementation checklist.
+
+### Decoding and Compatibility Warnings
+
+If Scratchpad detects decoding substitutions, stale disk state, unsupported save characters, or other format risks, check the status bar and Encoding dialog before saving.
+
+The important rule is: Scratchpad should make format risk visible before write operations rather than silently changing bytes behind the user's back.
+
 ## Status Bar
 
 The status bar reports the current document state, including:
@@ -146,6 +175,7 @@ The status bar reports the current document state, including:
 - file path
 - line count
 - encoding
+- line endings
 - artifact warnings
 - logging state
 

@@ -96,6 +96,7 @@ impl ScratchpadApp {
             active_surface: AppSurface::Workspace,
             settings_tab_index: usize::MAX,
             pending_settings_toml_refresh: None,
+            pending_status_bar_visible: None,
             vertical_tab_list_open: false,
             vertical_tab_list_hide_deadline: None,
             text_history_cache: crate::app::text_history::TextHistoryCache::default(),

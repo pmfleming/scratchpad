@@ -3,7 +3,7 @@ use crate::app::commands::AppCommand;
 use crate::app::diagnostics;
 use crate::app::domain::{SplitAxis, SplitPath, ViewId, WorkspaceTab};
 use crate::app::services::file_controller::FileController;
-use crate::app::services::settings_store::FileOpenDisposition;
+use crate::app::services::settings_store::{FileOpenDisposition, NewTabPlacement};
 
 impl ScratchpadApp {
     pub fn new_tab(&mut self) {
@@ -105,6 +105,10 @@ impl ScratchpadApp {
         self.create_workspace_tab(WorkspaceTab::untitled());
     }
 
+    pub(crate) fn insert_new_tab_from_settings(&mut self, tab: WorkspaceTab) {
+        self.create_workspace_tab(tab);
+    }
+
     pub fn reorder_tab(&mut self, from_index: usize, to_index: usize) {
         self.handle_command(AppCommand::ReorderTab {
             from_index,
@@ -115,10 +119,41 @@ impl ScratchpadApp {
     fn create_workspace_tab(&mut self, tab: WorkspaceTab) {
         self.reload_settings_before_workspace_change();
         self.begin_layout_transition();
-        self.tab_manager.append_tab(tab);
-        self.ensure_active_tab_slot_selected();
+        let index = self.new_tab_insert_index();
+        self.tab_manager.insert_tab(index, tab);
+        self.activate_workspace_surface();
+        self.select_only_tab_slot(self.slot_for_workspace_index(index));
         self.mark_search_dirty();
         self.request_focus_for_active_view();
+    }
+
+    fn new_tab_insert_index(&self) -> usize {
+        match self.new_tab_placement() {
+            NewTabPlacement::Start => 0,
+            NewTabPlacement::End => self.tabs().len(),
+            NewTabPlacement::BeforeSelection => self.selected_workspace_tab_range().0,
+            NewTabPlacement::AfterSelection => self.selected_workspace_tab_range().1 + 1,
+        }
+        .min(self.tabs().len())
+    }
+
+    fn selected_workspace_tab_range(&self) -> (usize, usize) {
+        let selected = self
+            .selected_tab_slots
+            .iter()
+            .filter_map(|slot_index| self.workspace_index_for_slot(*slot_index))
+            .collect::<Vec<_>>();
+        let first = selected.iter().min().copied();
+        let last = selected.iter().max().copied();
+        match (first, last) {
+            (Some(first), Some(last)) => (first, last),
+            _ => {
+                let active = self
+                    .active_tab_index()
+                    .min(self.tabs().len().saturating_sub(1));
+                (active, active)
+            }
+        }
     }
 
     fn close_tab_internal(&mut self, index: usize) -> String {

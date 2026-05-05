@@ -34,6 +34,16 @@ pub enum FileOpenDisposition {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum NewTabPlacement {
+    Start,
+    #[default]
+    End,
+    BeforeSelection,
+    AfterSelection,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum StartupSessionBehavior {
     #[default]
     ContinuePreviousSession,
@@ -98,6 +108,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub file_open_disposition: FileOpenDisposition,
     #[serde(default)]
+    pub new_tab_placement: NewTabPlacement,
+    #[serde(default)]
     pub startup_session_behavior: StartupSessionBehavior,
     #[serde(default = "default_tab_list_width")]
     pub tab_list_width: f32,
@@ -131,6 +143,7 @@ impl Default for AppSettings {
             editor_text_highlight_text_color: default_editor_text_highlight_text_color(),
             tab_list_position: TabListPosition::default(),
             file_open_disposition: FileOpenDisposition::default(),
+            new_tab_placement: NewTabPlacement::default(),
             startup_session_behavior: StartupSessionBehavior::default(),
             tab_list_width: default_tab_list_width(),
             auto_hide_tab_list: default_auto_hide_tab_list(),

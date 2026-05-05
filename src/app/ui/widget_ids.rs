@@ -21,6 +21,7 @@ pub(crate) enum WidgetRole {
 
 pub(crate) fn configure_debug_options(ctx: &egui::Context) {
     ctx.options_mut(|options| options.warn_on_id_clash = cfg!(debug_assertions));
+    ctx.global_style_mut(|style| style.debug.warn_if_rect_changes_id = false);
     let registration_id = ctx_key("diagnostics_begin_pass_registered");
     let should_register = ctx.data_mut(|data| {
         if data.get_persisted::<bool>(registration_id).unwrap_or(false) {
@@ -217,7 +218,8 @@ pub(crate) fn interact(
     kind: &'static str,
 ) -> Response {
     let response = ui.interact(rect, id, sense);
-    track(id, response.rect, kind);
+    let location = std::panic::Location::caller();
+    crate::app::diagnostics::track_widget_id(id, response.rect, kind, location, Some(ui.id()));
     response
 }
 
@@ -255,12 +257,6 @@ pub(crate) fn allocate_exact_rect(ui: &mut egui::Ui, size: egui::Vec2) -> Rect {
     rect
 }
 
-#[track_caller]
-pub(crate) fn track(id: Id, rect: Rect, kind: &'static str) {
-    let location = std::panic::Location::caller();
-    crate::app::diagnostics::track_widget_id(id, rect, kind, location);
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -273,6 +269,8 @@ mod tests {
         "egui::UiBuilder::new(",
         "ui.allocate_exact_size(",
         "ui.interact(",
+        "ui.id()",
+        "ui.scope(",
         ".make_persistent_id(",
         ".push_id(",
         "ui.indent((",

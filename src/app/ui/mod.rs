@@ -1,5 +1,5 @@
 pub mod autoscroll;
-mod callout;
+pub(crate) mod callout;
 pub mod dialogs;
 pub mod editor_area;
 pub mod editor_content;

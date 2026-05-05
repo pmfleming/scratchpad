@@ -3,6 +3,11 @@ use crate::app::domain::{SplitPath, ViewId};
 use crate::app::ui::widget_ids;
 use eframe::egui;
 
+pub fn split_drag_active_for_context(ctx: &egui::Context) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(global_split_drag_state_id()))
+        .unwrap_or(false)
+}
+
 pub fn split_drag_active(ui: &egui::Ui, id: egui::Id) -> bool {
     split_drag_state(ui, id).is_some()
 }
@@ -46,6 +51,7 @@ fn begin_split_drag_if_needed(
                 },
             );
         });
+        mark_global_split_drag_active(ui);
     }
 }
 
@@ -77,13 +83,24 @@ fn refresh_split_drag_state(
     ui.ctx().data_mut(|data| {
         data.insert_temp(split_drag_state_id, state);
     });
+    mark_global_split_drag_active(ui);
     Some(state)
 }
 
 fn clear_split_drag_state(ui: &egui::Ui, split_drag_state_id: egui::Id) {
     ui.ctx().data_mut(|data| {
         data.remove::<SplitHandleDragState>(split_drag_state_id);
+        data.remove::<bool>(global_split_drag_state_id());
     });
+}
+
+fn mark_global_split_drag_active(ui: &egui::Ui) {
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(global_split_drag_state_id(), true));
+}
+
+fn global_split_drag_state_id() -> egui::Id {
+    widget_ids::ctx_key("tile_split_drag_active")
 }
 
 fn commit_split_drag_action(

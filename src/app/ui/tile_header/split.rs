@@ -104,5 +104,9 @@ pub fn split_preview_spec(
     geometry::split_preview_spec(tile_rect, start_pos, current_pos)
 }
 
+pub(crate) fn split_drag_active_for_context(ctx: &egui::Context) -> bool {
+    drag::split_drag_active_for_context(ctx)
+}
+
 pub(crate) use geometry::split_rect;
 pub(crate) use preview::build_preview_lines;

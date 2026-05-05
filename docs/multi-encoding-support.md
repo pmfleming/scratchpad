@@ -10,7 +10,7 @@ The goal is not only to open more encodings, but to correctly recognize how text
 - newline conventions from Windows, Unix, and older Mac tooling
 - files that mix valid text structure with terminal artifacts or control characters
 
-This document should be read alongside [plain-text-artifact-handling-plan.md](plain-text-artifact-handling-plan.md). That document governs how true control-sequence artifacts are preserved and inspected. This document governs how Scratchpad should classify, display, preserve, and save text-file format variations overall.
+This document should be read alongside [plain-text-artifact-handling-plan.md](plain-text-artifact-handling-plan.md) and [encoding-review-report.md](encoding-review-report.md). The artifact plan governs how true control-sequence artifacts are preserved and inspected. The encoding review report tracks the current implementation gaps and execution order. This document governs how Scratchpad should classify, display, preserve, and save text-file format variations overall.
 
 ## Goal - this
 

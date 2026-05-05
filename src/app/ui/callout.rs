@@ -1,7 +1,6 @@
-use crate::app::chrome::phosphor_button;
+use crate::app::chrome::phosphor_button_with_hover_icon_color;
 use crate::app::theme::{
-    CAPTION_BUTTON_SIZE, CLOSE_BG, CLOSE_HOVER_BG, action_hover_bg, border, text_muted,
-    text_primary,
+    CAPTION_BUTTON_SIZE, CLOSE_HOVER_BG, action_hover_bg, border, text_muted, text_primary,
 };
 use crate::app::ui::widget_ids;
 use eframe::egui;
@@ -59,8 +58,23 @@ pub(crate) fn scroll_blocker_hovered(ctx: &egui::Context) -> bool {
     })
 }
 
+pub(crate) fn set_modal_scroll_blocker_active(ctx: &egui::Context, active: bool) {
+    if active {
+        ctx.data_mut(|data| data.insert_temp(modal_scroll_blocker_id(), true));
+    }
+}
+
+pub(crate) fn scroll_blocker_active(ctx: &egui::Context) -> bool {
+    scroll_blocker_hovered(ctx)
+        || ctx.data(|data| data.get_temp::<bool>(modal_scroll_blocker_id()) == Some(true))
+}
+
 fn scroll_blocker_id() -> egui::Id {
     widget_ids::ctx_key("callout_scroll_blocker_hover")
+}
+
+fn modal_scroll_blocker_id() -> egui::Id {
+    widget_ids::ctx_key("callout_scroll_blocker_modal")
 }
 
 pub(crate) fn frame(ui: &egui::Ui) -> egui::Frame {
@@ -110,13 +124,15 @@ pub(crate) fn close_button(
     surface_key: impl Hash,
     tooltip: &str,
 ) -> egui::Response {
-    phosphor_button(
+    phosphor_button_with_hover_icon_color(
         ui,
         surface_key,
         egui_phosphor::regular::X,
         CAPTION_BUTTON_SIZE,
-        CLOSE_BG,
+        action_hover_bg(ui),
         CLOSE_HOVER_BG,
+        text_primary(ui),
+        egui::Color32::WHITE,
         tooltip,
     )
 }

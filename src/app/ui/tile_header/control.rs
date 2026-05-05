@@ -3,6 +3,7 @@ use crate::app::ui::transition;
 use crate::app::ui::widget_ids;
 use eframe::egui;
 
+#[derive(Clone, Copy)]
 pub enum TileControlStyle {
     Default,
     Danger,
@@ -126,10 +127,14 @@ fn tile_control_colors(
     visibility: f32,
 ) -> TileControlColors {
     let (fill, stroke) = base_tile_control_colors(ui, style, hovered);
+    let text_color = match style {
+        TileControlStyle::Danger if hovered => egui::Color32::WHITE,
+        _ => text_primary(ui),
+    };
     TileControlColors {
         fill: fill.gamma_multiply(visibility),
         stroke: stroke.gamma_multiply(visibility),
-        text_color: text_primary(ui).gamma_multiply(visibility),
+        text_color: text_color.gamma_multiply(visibility),
     }
 }
 
@@ -159,19 +164,9 @@ fn default_tile_control_colors(ui: &egui::Ui, hovered: bool) -> (egui::Color32, 
 }
 
 fn danger_tile_control_colors(ui: &egui::Ui, hovered: bool) -> (egui::Color32, egui::Color32) {
-    let fill = if hovered {
-        CLOSE_HOVER_BG
-    } else if ui.visuals().dark_mode {
-        egui::Color32::from_white_alpha(12)
+    if hovered {
+        (CLOSE_HOVER_BG, egui::Color32::from_rgb(255, 196, 196))
     } else {
-        egui::Color32::from_rgb(252, 232, 232)
-    };
-    let stroke = if hovered {
-        egui::Color32::from_rgb(255, 196, 196)
-    } else if ui.visuals().dark_mode {
-        egui::Color32::from_white_alpha(20)
-    } else {
-        egui::Color32::from_rgb(220, 150, 150)
-    };
-    (fill, stroke)
+        default_tile_control_colors(ui, false)
+    }
 }

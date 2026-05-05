@@ -184,6 +184,7 @@ fn show_encoding(
             egui::Label::new(status_format_text(encoding, highlight)).sense(egui::Sense::click()),
         )
     })
+    .on_hover_cursor(egui::CursorIcon::PointingHand)
     .on_hover_text(format!("{tooltip}\nClick for encoding actions"))
 }
 
@@ -230,6 +231,7 @@ fn status_bar_encoding_is_non_default(format: &crate::app::domain::TextFormatMet
 fn show_settings_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
     ui.separator();
     let response = status_bar_icon_button(ui, "status_settings", egui_phosphor::regular::GEAR)
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text("Open settings");
     if response.clicked() {
         actions.open_settings = true;
@@ -243,6 +245,7 @@ fn show_text_history_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
         "status_text_history",
         egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE,
     )
+    .on_hover_cursor(egui::CursorIcon::PointingHand)
     .on_hover_text("Open text history");
     if response.clicked() {
         actions.open_text_history = true;

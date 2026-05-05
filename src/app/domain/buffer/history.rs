@@ -1,9 +1,16 @@
+mod budget;
+mod coalescing;
+
+pub use budget::TextHistoryBudget;
+#[cfg(test)]
+pub(crate) use coalescing::TEXT_HISTORY_SOFT_DIVIDER_PAUSE;
+pub(crate) use coalescing::{CoalescedEdit, coalesced_local_edit_record, entry_sealed_by_divider};
+
 use super::piece_tree::{PieceBuffer, PieceTreeLite};
 use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
 use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub type PieceHistoryEdits = SmallVec<[PieceHistoryEdit; 1]>;
@@ -13,58 +20,6 @@ static NEXT_TEXT_HISTORY_GLOBAL_SEQ: AtomicU64 = AtomicU64::new(1);
 pub(crate) const TEXT_HISTORY_COALESCE_WINDOW: std::time::Duration =
     std::time::Duration::from_millis(1200);
 pub(crate) const TEXT_HISTORY_PREVIEW_MAX_CHARS: usize = 80;
-const MIB: u64 = 1024 * 1024;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct TextHistoryBudget {
-    pub per_file_entry_limit: usize,
-    pub per_file_byte_budget: u64,
-    pub aggregate_byte_budget: u64,
-    pub persisted_payload_budget: u64,
-    pub derived_from_memory: bool,
-}
-
-impl Default for TextHistoryBudget {
-    fn default() -> Self {
-        Self::derive_from_available_memory()
-    }
-}
-
-impl TextHistoryBudget {
-    pub fn derive_from_available_memory() -> Self {
-        let available = available_memory_bytes().unwrap_or(2 * 1024 * MIB);
-        let aggregate = clamp_u64(available / 50, 16 * MIB, 512 * MIB);
-        let per_file = clamp_u64(aggregate / 8, 4 * MIB, 64 * MIB);
-        let persisted = clamp_u64(aggregate / 16, MIB, 16 * MIB);
-        let entries = clamp_u64(per_file / (8 * 1024), 500, 10_000) as usize;
-        Self {
-            per_file_entry_limit: entries,
-            per_file_byte_budget: per_file,
-            aggregate_byte_budget: aggregate,
-            persisted_payload_budget: persisted,
-            derived_from_memory: true,
-        }
-    }
-
-    pub fn sanitized(mut self) -> Self {
-        self.per_file_entry_limit = self.per_file_entry_limit.clamp(100, 100_000);
-        self.per_file_byte_budget = self.per_file_byte_budget.clamp(MIB, 1024 * MIB);
-        self.aggregate_byte_budget = self.aggregate_byte_budget.clamp(4 * MIB, 4096 * MIB);
-        self.persisted_payload_budget = self.persisted_payload_budget.clamp(0, 1024 * MIB);
-        self
-    }
-}
-
-fn clamp_u64(value: u64, min: u64, max: u64) -> u64 {
-    value.clamp(min, max)
-}
-
-fn available_memory_bytes() -> Option<u64> {
-    let mut system = sysinfo::System::new();
-    system.refresh_memory();
-    let available = system.available_memory();
-    (available > 0).then_some(available)
-}
 
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
@@ -510,12 +465,6 @@ pub(crate) fn fingerprint_parts<'a>(parts: impl IntoIterator<Item = &'a str>) ->
 // Operation records and direction
 // =============================================================================
 
-/// After a soft divider (`,` `;` `:`) the entry is sealed only if the next
-/// keystroke arrives later than this. Inside this window the entry keeps
-/// growing past the soft boundary so a continuous typing burst stays one entry.
-pub(crate) const TEXT_HISTORY_SOFT_DIVIDER_PAUSE: std::time::Duration =
-    std::time::Duration::from_millis(400);
-
 #[derive(Clone, Copy)]
 pub(crate) enum OperationDirection {
     Undo,
@@ -570,177 +519,6 @@ pub struct TextDocumentOperationRecord {
     pub previous_selection: CursorRange,
     pub next_selection: CursorRange,
     pub edits: Vec<TextDocumentEditOperation>,
-}
-
-pub(crate) enum CoalescedEdit {
-    Record(TextDocumentOperationRecord),
-    Noop,
-}
-
-// =============================================================================
-// Coalescing
-// =============================================================================
-
-fn is_hard_divider(ch: char) -> bool {
-    matches!(ch, '.' | '?' | '!' | '\n' | '\r')
-}
-
-fn is_soft_divider(ch: char) -> bool {
-    matches!(ch, ',' | ';' | ':' | '-')
-}
-
-fn cursor_ranges_share_position(left: &CursorRange, right: &CursorRange) -> bool {
-    left.primary.index == right.primary.index && left.secondary.index == right.secondary.index
-}
-
-fn coalescable_edit_text(edit: &TextDocumentEditOperation) -> bool {
-    // Inserts may contain a hard divider (newline) that joins the prior entry
-    // and then seals it; only the delete side is restricted to single line.
-    is_single_line(&edit.deleted_text)
-}
-
-/// Decide whether the latest entry has been "sealed" by a divider in its
-/// inserted text. Hard dividers always seal; soft dividers seal only if the
-/// user paused after typing them.
-pub(crate) fn entry_sealed_by_divider(
-    latest: &TextDocumentOperationRecord,
-    elapsed: Option<std::time::Duration>,
-) -> bool {
-    let Some(edit) = latest.edits.last() else {
-        return false;
-    };
-    let Some(last_char) = edit.inserted_text.chars().next_back() else {
-        return false;
-    };
-    if is_hard_divider(last_char) {
-        return true;
-    }
-    if is_soft_divider(last_char) {
-        return elapsed.is_none_or(|d| d >= TEXT_HISTORY_SOFT_DIVIDER_PAUSE);
-    }
-    false
-}
-
-pub(crate) fn coalesced_local_edit_record(
-    latest: TextDocumentOperationRecord,
-    incoming: &TextDocumentOperationRecord,
-) -> Option<CoalescedEdit> {
-    let ([latest_edit], [incoming_edit]) = (latest.edits.as_slice(), incoming.edits.as_slice())
-    else {
-        return None;
-    };
-    // Compare by index only — `prefer_next_row` is a UI hint that flips at
-    // soft-wrap boundaries, and treating it as a cursor jump would split
-    // continuous typing into spurious entries.
-    if !cursor_ranges_share_position(&latest.next_selection, &incoming.previous_selection)
-        || !latest.next_selection.is_empty()
-        || !incoming.next_selection.is_empty()
-        || !coalescable_edit_text(latest_edit)
-        || !coalescable_edit_text(incoming_edit)
-    {
-        return None;
-    }
-
-    if !latest_edit.inserted_text.is_empty() {
-        return coalesce_into_inserted_text(latest, incoming);
-    }
-
-    if !latest_edit.deleted_text.is_empty() && latest_edit.inserted_text.is_empty() {
-        return coalesce_after_delete(latest, incoming);
-    }
-
-    None
-}
-
-fn coalesce_into_inserted_text(
-    mut latest: TextDocumentOperationRecord,
-    incoming: &TextDocumentOperationRecord,
-) -> Option<CoalescedEdit> {
-    let latest_edit = latest.edits.first_mut()?;
-    let incoming_edit = incoming.edits.first()?;
-    let inserted_len = latest_edit.inserted_text.chars().count();
-    let deleted_len = incoming_edit.deleted_text.chars().count();
-    let inserted_start = latest_edit.start_char;
-    let incoming_end = incoming_edit.start_char.checked_add(deleted_len)?;
-    let inserted_end = inserted_start.checked_add(inserted_len)?;
-    if incoming_edit.start_char < inserted_start || incoming_end > inserted_end {
-        return None;
-    }
-
-    let relative_start = incoming_edit.start_char - inserted_start;
-    let relative_end = relative_start + deleted_len;
-    latest_edit.inserted_text = replace_char_range_in_text(
-        &latest_edit.inserted_text,
-        relative_start..relative_end,
-        &incoming_edit.inserted_text,
-    );
-    latest.next_selection = incoming.next_selection;
-
-    if latest_edit.deleted_text.is_empty() && latest_edit.inserted_text.is_empty() {
-        return Some(CoalescedEdit::Noop);
-    }
-
-    Some(CoalescedEdit::Record(latest))
-}
-
-fn coalesce_after_delete(
-    mut latest: TextDocumentOperationRecord,
-    incoming: &TextDocumentOperationRecord,
-) -> Option<CoalescedEdit> {
-    let latest_edit = latest.edits.first_mut()?;
-    let incoming_edit = incoming.edits.first()?;
-    let latest_start = latest_edit.start_char;
-    let incoming_deleted_len = incoming_edit.deleted_text.chars().count();
-    let merged = match (
-        incoming_edit.deleted_text.is_empty(),
-        incoming_edit.inserted_text.is_empty(),
-    ) {
-        (true, false) if incoming_edit.start_char == latest_start => {
-            latest_edit.inserted_text = incoming_edit.inserted_text.clone();
-            true
-        }
-        (false, true) if incoming_edit.start_char == latest_start => {
-            latest_edit
-                .deleted_text
-                .push_str(&incoming_edit.deleted_text);
-            latest_edit.deleted_spans.clear();
-            true
-        }
-        (false, true) if incoming_edit.start_char + incoming_deleted_len == latest_start => {
-            latest_edit.start_char = incoming_edit.start_char;
-            latest_edit.deleted_text =
-                format!("{}{}", incoming_edit.deleted_text, latest_edit.deleted_text);
-            latest_edit.deleted_spans.clear();
-            true
-        }
-        _ => false,
-    };
-    if !merged {
-        return None;
-    }
-    latest.next_selection = incoming.next_selection;
-    Some(CoalescedEdit::Record(latest))
-}
-
-fn replace_char_range_in_text(text: &str, range: Range<usize>, replacement: &str) -> String {
-    let start = byte_index_for_char(text, range.start);
-    let end = byte_index_for_char(text, range.end);
-    let mut result = String::with_capacity(text.len() + replacement.len());
-    result.push_str(&text[..start]);
-    result.push_str(replacement);
-    result.push_str(&text[end..]);
-    result
-}
-
-fn byte_index_for_char(text: &str, char_index: usize) -> usize {
-    text.char_indices()
-        .map(|(index, _)| index)
-        .nth(char_index)
-        .unwrap_or(text.len())
-}
-
-fn is_single_line(text: &str) -> bool {
-    !text.contains('\n') && !text.contains('\r')
 }
 
 // =============================================================================

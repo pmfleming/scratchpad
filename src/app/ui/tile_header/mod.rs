@@ -29,27 +29,37 @@ pub(crate) fn render_tile_header(
     request: TileHeaderRequest,
     state: &mut TileHeaderState<'_>,
 ) {
-    let title = app.tabs()[request.tab_index]
-        .buffer_for_view(request.view_id)
-        .map(|buffer| buffer.display_name())
-        .unwrap_or_else(|| app.tabs()[request.tab_index].display_name());
-    let preview_lines = preview_lines_for_view(&app.tabs()[request.tab_index], request.view_id);
     let split_handler =
         TileSplitHandler::new(&request.pane_path, request.view_id, request.tile_rect);
     let controls_visible = control_visibility(ui, &split_handler, request.tile_rect);
-    if controls_visible <= 0.0 {
+    let can_promote = app.tabs()[request.tab_index].can_promote_view(request.view_id);
+    let layout = pass_stable_header_layout(
+        ui,
+        request.tab_index,
+        request.view_id,
+        TileHeaderLayout {
+            controls_visible,
+            can_promote,
+            can_close: request.can_close,
+        },
+    );
+    if layout.controls_visible <= 0.0 {
         return;
     }
 
-    let can_promote = app.tabs()[request.tab_index].can_promote_view(request.view_id);
-    let metrics = tile_control_metrics(request.tile_rect, request.can_close);
-    let rects = tile_header_rects(request.tile_rect, can_promote, request.can_close, &metrics);
+    let metrics = tile_control_metrics(request.tile_rect, layout.can_close);
+    let rects = tile_header_rects(
+        request.tile_rect,
+        layout.can_promote,
+        layout.can_close,
+        &metrics,
+    );
     let control = TileControlContext {
         font_size: metrics.font_size,
         visibility: controls_visible,
         pane_path: request.pane_path.clone(),
     };
-    if can_promote
+    if layout.can_promote
         && show_control(
             ui,
             &control,
@@ -71,11 +81,17 @@ pub(crate) fn render_tile_header(
         &request.pane_path,
         rects.split_hit,
         metrics.font_size,
-        controls_visible,
+        layout.controls_visible,
     );
     if let Some(preview_state) =
         split_handler.handle_interaction(ui, &split_response, state.actions)
     {
+        let tab = &app.tabs()[request.tab_index];
+        let title = tab
+            .buffer_for_view(request.view_id)
+            .map(|buffer| buffer.display_name())
+            .unwrap_or_else(|| tab.display_name());
+        let preview_lines = preview_lines_for_view(tab, request.view_id);
         *state.preview_overlay = Some(split_handler.make_preview(
             preview_state,
             title.to_owned(),
@@ -83,7 +99,7 @@ pub(crate) fn render_tile_header(
             rects.split_hit,
         ));
     }
-    if request.can_close
+    if layout.can_close
         && show_control(
             ui,
             &control,
@@ -114,6 +130,13 @@ struct TileHeaderRects {
     close_hit: egui::Rect,
 }
 
+#[derive(Clone, Copy)]
+struct TileHeaderLayout {
+    controls_visible: f32,
+    can_promote: bool,
+    can_close: bool,
+}
+
 struct TileControlMetrics {
     button_size: f32,
     padding: f32,
@@ -140,6 +163,27 @@ const TILE_CONTROL_PADDING: f32 = 6.0;
 const TILE_CONTROL_MIN_SIZE: f32 = 18.0;
 const TILE_CONTROL_MAX_SIZE: f32 = crate::app::theme::BUTTON_SIZE.x;
 const TILE_CONTROL_RIGHT_INSET: f32 = 14.0;
+
+fn pass_stable_header_layout(
+    ui: &egui::Ui,
+    tab_index: usize,
+    view_id: ViewId,
+    layout: TileHeaderLayout,
+) -> TileHeaderLayout {
+    let storage_id = widget_ids::root_id(("tile_header.layout", tab_index, view_id));
+    let frame = ui.ctx().cumulative_frame_nr();
+    if ui.ctx().current_pass_index() == 0 {
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(storage_id, (frame, layout)));
+        return layout;
+    }
+
+    ui.ctx()
+        .data(|data| data.get_temp::<(u64, TileHeaderLayout)>(storage_id))
+        .filter(|(stable_frame, _)| *stable_frame == frame)
+        .map(|(_, stable_layout)| stable_layout)
+        .unwrap_or(layout)
+}
 
 fn control_visibility(
     ui: &egui::Ui,

@@ -69,9 +69,12 @@ pub(super) fn paint_editor(
     if let Some(cursor_range) = &view.cursor_range
         && !changed
     {
-        let galley_local_cursor_rect = galley
-            .pos_from_cursor(local_cursor(cursor_range.primary, char_offset_base).to_egui_ccursor())
-            .expand(1.5);
+        let galley_local_cursor_rect = cursor_rect_for_galley(
+            ui,
+            galley,
+            options,
+            local_cursor(cursor_range.primary, char_offset_base),
+        );
         let cursor_rect = galley_local_cursor_rect.translate(galley_pos.to_vec2());
         // Reveal targets must be in scroll-content coordinates. The editor rect
         // spans the full document and starts at the content origin, so subtract
@@ -83,6 +86,33 @@ pub(super) fn paint_editor(
     }
 
     CursorPaintOutcome::default()
+}
+
+fn cursor_rect_for_galley(
+    ui: &egui::Ui,
+    galley: &egui::Galley,
+    options: TextEditOptions<'_>,
+    cursor: CharCursor,
+) -> egui::Rect {
+    let row_height = ui
+        .fonts_mut(|fonts| fonts.row_height(options.editor_font_id))
+        .max(options.editor_font_id.size)
+        .max(1.0);
+    let rect = if galley.rows.is_empty() {
+        egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1.0, row_height))
+    } else {
+        galley.pos_from_cursor(cursor.to_egui_ccursor())
+    };
+
+    if !rect.is_finite() || rect.height() >= row_height * 0.5 {
+        return rect.expand(1.5);
+    }
+
+    egui::Rect::from_min_size(
+        egui::pos2(rect.center().x, rect.min.y),
+        egui::vec2(1.0, row_height),
+    )
+    .expand(1.5)
 }
 
 #[allow(clippy::too_many_arguments)]

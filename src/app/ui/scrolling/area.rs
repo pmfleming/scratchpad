@@ -1,6 +1,6 @@
 use eframe::egui::{self, Id, Rect, Sense, Ui, Vec2, epaint::Shape, pos2, vec2};
 
-use crate::app::ui::widget_ids;
+use crate::app::ui::{callout, widget_ids};
 
 use super::source::ScrollSource;
 use super::state::{ScrollState, ScrollbarDragState, finite_vec2};
@@ -99,13 +99,12 @@ impl ScrollArea {
         let mut state = ScrollState::load(ui, self.id);
         state.sanitize();
         state.content_size = content_size_with_minimum(state.content_size, self.min_content_size);
-        let layout_state = pass_stable_layout_state(ui, self.id, state);
-
         let outer_rect = scroll_area_outer_rect(ui, self.max_size);
 
         // Determine which scrollbars will be visible from the previous frame's
         // content/viewport sizes. This causes a one-frame lag on first show
         // when scrollbar visibility flips, matching egui's behavior.
+        let layout_state = pass_stable_layout_state(ui, self.id, state);
         let bars = visible_scrollbars(
             self.scrollbar_x,
             self.scrollbar_y,
@@ -137,7 +136,13 @@ impl ScrollArea {
         let visible_rect =
             Rect::from_min_size(pos2(state.offset.x, state.offset.y), inner_rect.size());
         let child_size = child_content_rect_size(state.content_size, inner_rect.size());
-        let mut content_ui = clipped_content_ui(ui, inner_rect, state.offset, child_size);
+        let mut content_ui = clipped_content_ui(
+            ui,
+            self.id.with("__content_ui"),
+            inner_rect,
+            state.offset,
+            child_size,
+        );
 
         let inner_value = add_contents(&mut content_ui, state.offset, visible_rect);
         // Content size derived from the inner Ui's min_rect, translated back
@@ -189,18 +194,11 @@ impl ScrollArea {
     }
 }
 
-fn pass_stable_layout_state(ui: &Ui, id: Id, state: ScrollState) -> ScrollState {
-    let snapshot_id = widget_ids::child(id, "__pass_layout_state");
-    if ui.ctx().current_pass_index() == 0 {
-        ui.ctx().data_mut(|data| {
-            data.insert_temp(snapshot_id, state);
-        });
-        return state;
-    }
-
-    ui.ctx()
-        .data(|data| data.get_temp::<ScrollState>(snapshot_id))
-        .unwrap_or(state)
+#[derive(Clone, Copy)]
+struct PassStableScrollLayout {
+    frame: u64,
+    content_size: Vec2,
+    viewport_size: Vec2,
 }
 
 #[derive(Clone, Copy)]
@@ -316,6 +314,34 @@ fn visible_scrollbars(
     }
 }
 
+fn pass_stable_layout_state(ui: &Ui, id: Id, state: ScrollState) -> ScrollState {
+    let storage_id = id.with("__pass_stable_layout_state");
+    let frame = ui.ctx().cumulative_frame_nr();
+    if ui.ctx().current_pass_index() == 0 {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(
+                storage_id,
+                PassStableScrollLayout {
+                    frame,
+                    content_size: state.content_size,
+                    viewport_size: state.viewport_size,
+                },
+            );
+        });
+        return state;
+    }
+
+    ui.ctx()
+        .data(|data| data.get_temp::<PassStableScrollLayout>(storage_id))
+        .filter(|layout| layout.frame == frame)
+        .map(|layout| ScrollState {
+            content_size: layout.content_size,
+            viewport_size: layout.viewport_size,
+            ..state
+        })
+        .unwrap_or(state)
+}
+
 fn inner_rect_for_bars(outer_rect: Rect, bars: VisibleScrollbars) -> Rect {
     Rect::from_min_max(
         outer_rect.min,
@@ -353,7 +379,7 @@ fn apply_pending_target(state: &mut ScrollState, source: ScrollSource, inner_rec
 }
 
 fn apply_mouse_wheel(ui: &Ui, hovered: bool, source: ScrollSource, state: &mut ScrollState) {
-    if !hovered || !source.mouse_wheel {
+    if !hovered || !source.mouse_wheel || callout::scroll_blocker_active(ui.ctx()) {
         return;
     }
     let scroll = ui.input(|i| i.smooth_scroll_delta);
@@ -365,10 +391,10 @@ fn apply_mouse_wheel(ui: &Ui, hovered: bool, source: ScrollSource, state: &mut S
     state.user_scrolled = true;
 }
 
-fn clipped_content_ui(ui: &mut Ui, inner_rect: Rect, offset: Vec2, child_size: Vec2) -> Ui {
+fn clipped_content_ui(ui: &mut Ui, id: Id, inner_rect: Rect, offset: Vec2, child_size: Vec2) -> Ui {
     let content_rect = Rect::from_min_size(inner_rect.min - offset, child_size);
     let mut content_ui =
-        widget_ids::rect_child_ui(ui, content_rect, "scroll_content", *ui.layout());
+        widget_ids::rect_child_ui(ui, content_rect, ("scroll_content", id), *ui.layout());
     content_ui.set_clip_rect(inner_rect);
     content_ui
 }

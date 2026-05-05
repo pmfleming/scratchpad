@@ -1,5 +1,5 @@
 pub mod actions;
-mod context_menu;
+pub(crate) mod context_menu;
 mod entries;
 pub mod layout;
 mod outcome;

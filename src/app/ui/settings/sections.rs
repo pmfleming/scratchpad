@@ -5,9 +5,9 @@ use super::*;
 
 pub(super) fn render_settings_categories(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     for render_category in [
-        render_appearance_category as fn(&mut egui::Ui, &mut ScratchpadApp),
+        render_text_formatting_category as fn(&mut egui::Ui, &mut ScratchpadApp),
+        render_appearance_category,
         render_opening_category,
-        render_text_formatting_category,
         render_tab_position_category,
         render_advanced_category,
     ] {
@@ -44,58 +44,54 @@ fn text_history_budget_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         ui,
         "advanced.text_history_budget",
         egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE,
-        "Text history",
-        "Per-file undo storage and replay payload budgets.",
+        "Memory Assigned to Undo Operations",
+        "Adjust the size of undo history.",
         false,
         |ui| {
             let mut budget = app.app_settings.history_budget;
-            let auto = crate::app::domain::TextHistoryBudget::derive_from_available_memory();
-            budget_row(
-                ui,
-                "Per-file entry limit",
-                auto.per_file_entry_limit as u64,
-                &mut budget.per_file_entry_limit,
-                100,
-                100_000,
-            );
             byte_budget_row(
                 ui,
-                "Per-file byte budget",
-                auto.per_file_byte_budget,
+                "Per-file",
+                "how much undo data one file is allowed to keep.",
                 &mut budget.per_file_byte_budget,
                 1,
                 1024,
             );
             byte_budget_row(
                 ui,
-                "Aggregate byte budget",
-                auto.aggregate_byte_budget,
+                "Total",
+                "Data allowed across all files.",
                 &mut budget.aggregate_byte_budget,
                 4,
                 4096,
             );
             byte_budget_row(
                 ui,
-                "Persisted payload budget",
-                auto.persisted_payload_budget,
+                "Session",
+                "how much undo/replay data can be saved/restored between sessions.",
                 &mut budget.persisted_payload_budget,
                 0,
                 1024,
             );
-            inner_select_row(ui, "Automatic defaults", Some(auto_label(&budget)), |ui| {
-                fixed_width_control(ui, |ui| {
-                    if widget_ids::surface_response(
-                        ui,
-                        "settings.history_budget.reset_auto",
-                        widget_ids::WidgetRole::ActionButton,
-                        |ui| ui.button("Reset to auto"),
-                    )
-                    .clicked()
-                    {
-                        app.reset_history_budget_to_auto();
-                    }
-                });
-            });
+            inner_select_row(
+                ui,
+                "Automatic defaults",
+                Some("Use values based on this system's available memory."),
+                |ui| {
+                    fixed_width_control(ui, |ui| {
+                        if widget_ids::surface_response(
+                            ui,
+                            "settings.history_budget.reset_auto",
+                            widget_ids::WidgetRole::ActionButton,
+                            |ui| ui.button("Reset to auto"),
+                        )
+                        .clicked()
+                        {
+                            app.reset_history_budget_to_auto();
+                        }
+                    });
+                },
+            );
             if budget != app.app_settings.history_budget {
                 app.set_history_budget(budget);
             }
@@ -103,60 +99,31 @@ fn text_history_budget_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     );
 }
 
-fn budget_row(
-    ui: &mut egui::Ui,
-    label: &str,
-    auto_value: u64,
-    value: &mut usize,
-    min: usize,
-    max: usize,
-) {
-    inner_select_row(ui, label, Some(&format!("Auto: {auto_value}")), |ui| {
-        fixed_width_control(ui, |ui| {
-            widget_ids::surface_response(
-                ui,
-                ("settings.history_budget.drag", label),
-                widget_ids::WidgetRole::ActionButton,
-                |ui| ui.add(egui::DragValue::new(value).range(min..=max).speed(10)),
-            );
-        });
-    });
-}
-
 fn byte_budget_row(
     ui: &mut egui::Ui,
     label: &str,
-    auto_value: u64,
+    description: &str,
     value: &mut u64,
-    min_mib: u64,
-    max_mib: u64,
+    min_mb: u64,
+    max_mb: u64,
 ) {
-    let mut mib = (*value / (1024 * 1024)).clamp(min_mib, max_mib);
-    inner_select_row(
-        ui,
-        label,
-        Some(&format!("Auto: {} MiB", auto_value / (1024 * 1024))),
-        |ui| {
-            fixed_width_control(ui, |ui| {
-                ui.horizontal(|ui| {
-                    widget_ids::surface_response(
-                        ui,
-                        ("settings.history_budget.byte_drag", label),
-                        widget_ids::WidgetRole::ActionButton,
-                        |ui| ui.add(egui::DragValue::new(&mut mib).range(min_mib..=max_mib)),
-                    );
-                    ui.label("MiB");
-                });
-            });
-        },
-    );
-    *value = mib * 1024 * 1024;
-}
+    const BYTES_PER_DISPLAY_MB: u64 = 1024 * 1024;
 
-fn auto_label(budget: &crate::app::domain::TextHistoryBudget) -> &'static str {
-    if budget.derived_from_memory {
-        "Using memory-derived startup values."
-    } else {
-        "Using user-set values."
-    }
+    let mut mb = (*value / BYTES_PER_DISPLAY_MB).clamp(min_mb, max_mb);
+    inner_select_row(ui, label, Some(description), |ui| {
+        fixed_width_control(ui, |ui| {
+            let control_width = SettingsUi::control_width(ui);
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    egui::vec2((control_width - 58.0).max(0.0), 0.0),
+                    egui::Slider::new(&mut mb, min_mb..=max_mb)
+                        .step_by(1.0)
+                        .show_value(false),
+                );
+                ui.add_space(8.0);
+                ui.label(format!("{mb} MB"));
+            });
+        });
+    });
+    *value = mb * BYTES_PER_DISPLAY_MB;
 }

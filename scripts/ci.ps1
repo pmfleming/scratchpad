@@ -116,7 +116,7 @@ try {
     }
 
     if (-not $SkipLocality) {
-        Invoke-NativeCommand -Label "locality_bench.py" -Command {
+        Invoke-NativeCommand -Label "code locality" -Command {
             & $python (Join-Path $PSScriptRoot "locality_bench.py") --output (Join-Path $analysisDir "locality_metrics.json")
         }
     }

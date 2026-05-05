@@ -262,11 +262,20 @@ impl WorkspaceTab {
     fn build_split_view(
         buffer_id: BufferId,
         has_control_chars: bool,
+        source_view: &EditorViewState,
         presentation: ViewPresentationState,
     ) -> EditorViewState {
         let mut new_view = EditorViewState::new(buffer_id, false);
         new_view.show_line_numbers = presentation.show_line_numbers;
         new_view.show_control_chars = presentation.show_control_chars && has_control_chars;
+        new_view.cursor_range = source_view.cursor_range;
+        new_view.pending_cursor_range = source_view.pending_cursor_range;
+        new_view.scroll = source_view.scroll.clone();
+        new_view.latest_display_snapshot = source_view.latest_display_snapshot.clone();
+        new_view.latest_display_snapshot_revision = source_view.latest_display_snapshot_revision;
+        new_view.layout_cache = source_view.layout_cache.clone();
+        new_view.search_highlights = source_view.search_highlights.clone();
+        new_view.search_replacement_preview = source_view.search_replacement_preview.clone();
         new_view
     }
 
@@ -280,7 +289,9 @@ impl WorkspaceTab {
         ratio: f32,
     ) -> Option<ViewId> {
         let presentation = self.view_presentation_state(target_view_id)?;
-        let new_view = Self::build_split_view(buffer_id, has_control_chars, presentation);
+        let source_view = self.view(target_view_id)?;
+        let new_view =
+            Self::build_split_view(buffer_id, has_control_chars, source_view, presentation);
         self.insert_split_view(target_view_id, axis, new_view, new_view_first, ratio)
     }
 

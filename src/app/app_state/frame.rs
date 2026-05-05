@@ -4,7 +4,7 @@ use crate::app::diagnostics;
 use crate::app::fonts;
 use crate::app::services::settings_store::TabListPosition;
 use crate::app::shortcuts;
-use crate::app::ui::{dialogs, editor_area, settings, status_bar, tab_strip, transition};
+use crate::app::ui::{callout, dialogs, editor_area, settings, status_bar, tab_strip, transition};
 use eframe::egui;
 
 impl ScratchpadApp {
@@ -41,11 +41,13 @@ impl ScratchpadApp {
         crate::app::ui::widget_ids::configure_debug_options(ctx);
         self.sync_editor_fonts(ctx);
         crate::app::services::session_manager::maybe_persist_session(self, ctx);
+        callout::set_modal_scroll_blocker_active(ctx, self.modal_callout_open());
         transition::set_chrome_transition_active(ctx, self.chrome_transition_active());
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
     }
 
     pub(super) fn render_frame(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        self.apply_deferred_layout_settings(ctx);
         paint_root_background(ui, self.editor_background_color());
         self.render_tab_chrome(ui);
         self.render_active_surface(ui);
@@ -99,6 +101,13 @@ impl ScratchpadApp {
         self.chrome_transition_frames_remaining > 0
     }
 
+    fn modal_callout_open(&self) -> bool {
+        self.encoding_dialog_open
+            || self.text_history_open
+            || self.pending_action().is_some()
+            || self.current_startup_restore_conflict().is_some()
+    }
+
     fn finish_frame_transitions(&mut self, ctx: &egui::Context) {
         if self.chrome_transition_frames_remaining > 0 {
             self.chrome_transition_frames_remaining -= 1;
@@ -106,6 +115,15 @@ impl ScratchpadApp {
         transition::set_chrome_transition_active(ctx, self.chrome_transition_active());
         if self.chrome_transition_active() {
             ctx.request_repaint();
+        }
+    }
+
+    fn apply_deferred_layout_settings(&mut self, ctx: &egui::Context) {
+        if ctx.current_pass_index() != 0 {
+            return;
+        }
+        if let Some(visible) = self.pending_status_bar_visible.take() {
+            self.set_status_bar_visible(visible);
         }
     }
 
