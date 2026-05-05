@@ -2,6 +2,7 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
 use crate::app::services::settings_store::TabListPosition;
 use crate::app::theme::{action_hover_bg, text_primary};
+use crate::app::ui::widget_ids;
 use eframe::egui;
 use egui_phosphor::regular::{
     ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT, ARROW_UP, CARET_RIGHT, COPY, FLOPPY_DISK, FOLDER_OPEN,
@@ -223,11 +224,18 @@ fn menu_button(
         None => label.to_owned(),
     };
     with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        ui.add_enabled(
-            enabled,
-            egui::Button::new(egui::RichText::new(text).color(text_primary(ui)))
-                .min_size(egui::vec2(width, TAB_CONTEXT_MENU_ROW_HEIGHT))
-                .stroke(egui::Stroke::NONE),
+        widget_ids::surface_response(
+            ui,
+            ("tab_context.menu_button", label),
+            widget_ids::WidgetRole::ActionButton,
+            |ui| {
+                ui.add_enabled(
+                    enabled,
+                    egui::Button::new(egui::RichText::new(text).color(text_primary(ui)))
+                        .min_size(egui::vec2(width, TAB_CONTEXT_MENU_ROW_HEIGHT))
+                        .stroke(egui::Stroke::NONE),
+                )
+            },
         )
         .clicked()
     })
@@ -299,13 +307,20 @@ fn render_tab_list_actions(
 
 fn render_close_primary_button(ui: &mut egui::Ui) -> bool {
     with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let response = ui.add(
-            egui::Button::new("")
-                .min_size(egui::vec2(
-                    TAB_CONTEXT_MENU_WIDTH - TAB_CONTEXT_MENU_CARET_WIDTH,
-                    TAB_CONTEXT_MENU_ROW_HEIGHT,
-                ))
-                .stroke(egui::Stroke::NONE),
+        let response = widget_ids::surface_response(
+            ui,
+            "tab_context.close_primary",
+            widget_ids::WidgetRole::ActionButton,
+            |ui| {
+                ui.add(
+                    egui::Button::new("")
+                        .min_size(egui::vec2(
+                            TAB_CONTEXT_MENU_WIDTH - TAB_CONTEXT_MENU_CARET_WIDTH,
+                            TAB_CONTEXT_MENU_ROW_HEIGHT,
+                        ))
+                        .stroke(egui::Stroke::NONE),
+                )
+            },
         );
         ui.painter().text(
             response.rect.left_center() + egui::vec2(12.0, 0.0),
@@ -320,13 +335,20 @@ fn render_close_primary_button(ui: &mut egui::Ui) -> bool {
 
 fn render_tab_list_primary_button(ui: &mut egui::Ui, label: &str, icon: &str) -> bool {
     with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let response = ui.add(
-            egui::Button::new("")
-                .min_size(egui::vec2(
-                    TAB_CONTEXT_MENU_WIDTH - TAB_CONTEXT_MENU_CARET_WIDTH,
-                    TAB_CONTEXT_MENU_ROW_HEIGHT,
-                ))
-                .stroke(egui::Stroke::NONE),
+        let response = widget_ids::surface_response(
+            ui,
+            ("tab_context.tab_list_primary", label),
+            widget_ids::WidgetRole::ActionButton,
+            |ui| {
+                ui.add(
+                    egui::Button::new("")
+                        .min_size(egui::vec2(
+                            TAB_CONTEXT_MENU_WIDTH - TAB_CONTEXT_MENU_CARET_WIDTH,
+                            TAB_CONTEXT_MENU_ROW_HEIGHT,
+                        ))
+                        .stroke(egui::Stroke::NONE),
+                )
+            },
         );
         ui.painter().text(
             response.rect.left_center() + egui::vec2(12.0, 0.0),
@@ -348,27 +370,29 @@ fn render_tab_list_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             ))
             .stroke(egui::Stroke::NONE);
 
-        egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
-            ui.set_min_width(TAB_CONTEXT_SUBMENU_WIDTH);
-            ui.set_max_width(TAB_CONTEXT_SUBMENU_WIDTH);
+        widget_ids::surface_widget(ui, "tab_context.tab_list_caret", "submenu", |ui| {
+            egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
+                ui.set_min_width(TAB_CONTEXT_SUBMENU_WIDTH);
+                ui.set_max_width(TAB_CONTEXT_SUBMENU_WIDTH);
 
-            for position in [
-                TabListPosition::Top,
-                TabListPosition::Bottom,
-                TabListPosition::Left,
-                TabListPosition::Right,
-            ] {
-                if menu_button(
-                    ui,
-                    TAB_CONTEXT_SUBMENU_WIDTH,
-                    tab_list_position_label(position),
-                    Some(tab_list_position_icon(position)),
-                    true,
-                ) {
-                    app.set_tab_list_position(position);
-                    ui.close();
+                for position in [
+                    TabListPosition::Top,
+                    TabListPosition::Bottom,
+                    TabListPosition::Left,
+                    TabListPosition::Right,
+                ] {
+                    if menu_button(
+                        ui,
+                        TAB_CONTEXT_SUBMENU_WIDTH,
+                        tab_list_position_label(position),
+                        Some(tab_list_position_icon(position)),
+                        true,
+                    ) {
+                        app.set_tab_list_position(position);
+                        ui.close();
+                    }
                 }
-            }
+            });
         });
     });
 }
@@ -388,30 +412,32 @@ fn render_close_submenu(
             ))
             .stroke(egui::Stroke::NONE);
 
-        egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
-            ui.set_min_width(TAB_CONTEXT_SUBMENU_WIDTH);
-            ui.set_max_width(TAB_CONTEXT_SUBMENU_WIDTH);
+        widget_ids::surface_widget(ui, "tab_context.close_caret", "submenu", |ui| {
+            egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
+                ui.set_min_width(TAB_CONTEXT_SUBMENU_WIDTH);
+                ui.set_max_width(TAB_CONTEXT_SUBMENU_WIDTH);
 
-            for (label, icon, action) in [
-                ("Close Others", TABS, TabCloseAction::Others),
-                (
-                    close_direction_label,
-                    close_direction_icon,
-                    TabCloseAction::After,
-                ),
-                ("Close Saved", FLOPPY_DISK, TabCloseAction::Saved),
-                ("Close All", X_SQUARE, TabCloseAction::All),
-            ] {
-                if menu_button(ui, TAB_CONTEXT_SUBMENU_WIDTH, label, Some(icon), true) {
-                    match action {
-                        TabCloseAction::Others => close::close_other_slots(app, slot_index),
-                        TabCloseAction::After => close::close_slots_after(app, slot_index),
-                        TabCloseAction::Saved => close::close_saved_slots(app),
-                        TabCloseAction::All => close::close_all_slots(app),
+                for (label, icon, action) in [
+                    ("Close Others", TABS, TabCloseAction::Others),
+                    (
+                        close_direction_label,
+                        close_direction_icon,
+                        TabCloseAction::After,
+                    ),
+                    ("Close Saved", FLOPPY_DISK, TabCloseAction::Saved),
+                    ("Close All", X_SQUARE, TabCloseAction::All),
+                ] {
+                    if menu_button(ui, TAB_CONTEXT_SUBMENU_WIDTH, label, Some(icon), true) {
+                        match action {
+                            TabCloseAction::Others => close::close_other_slots(app, slot_index),
+                            TabCloseAction::After => close::close_slots_after(app, slot_index),
+                            TabCloseAction::Saved => close::close_saved_slots(app),
+                            TabCloseAction::All => close::close_all_slots(app),
+                        }
+                        ui.close();
                     }
-                    ui.close();
                 }
-            }
+            });
         });
     });
 }

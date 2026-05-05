@@ -1,17 +1,26 @@
 use crate::app::theme::*;
 use crate::app::ui::transition;
-use crate::app::ui::widget_ids;
+use crate::app::ui::widget_ids::{self, WidgetRole};
 use eframe::egui::{self, Color32, Rect, Sense, Vec2};
+use std::hash::Hash;
 
 pub fn phosphor_button(
     ui: &mut egui::Ui,
+    surface_key: impl Hash,
     icon: &str,
     size: Vec2,
     background: Color32,
     hover_background: Color32,
     tooltip: &str,
 ) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let response = widget_ids::allocate_exact_interact(
+        ui,
+        size,
+        widget_ids::surface_role(surface_key, WidgetRole::IconButton),
+        Sense::click(),
+        "phosphor_button",
+    );
+    let rect = response.rect;
     paint_phosphor_button(
         ui,
         rect,
@@ -54,17 +63,15 @@ fn render_caption_buttons(ui: &mut egui::Ui, ctx: &egui::Context) -> bool {
 }
 
 fn render_minimize_button(ui: &mut egui::Ui, ctx: &egui::Context) {
-    if widget_ids::scope(ui, "caption_minimize", |ui| {
-        phosphor_button(
-            ui,
-            egui_phosphor::regular::MINUS,
-            CAPTION_BUTTON_SIZE,
-            action_bg(ui),
-            action_hover_bg(ui),
-            "Minimize",
-        )
-    })
-    .inner
+    if phosphor_button(
+        ui,
+        "caption_minimize",
+        egui_phosphor::regular::MINUS,
+        CAPTION_BUTTON_SIZE,
+        action_bg(ui),
+        action_hover_bg(ui),
+        "Minimize",
+    )
     .clicked()
     {
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
@@ -79,17 +86,15 @@ fn render_maximize_restore_button(ui: &mut egui::Ui, ctx: &egui::Context) {
         (egui_phosphor::regular::SQUARE, "Maximize", true)
     };
 
-    if widget_ids::scope(ui, "caption_maximize", |ui| {
-        phosphor_button(
-            ui,
-            icon,
-            CAPTION_BUTTON_SIZE,
-            action_bg(ui),
-            action_hover_bg(ui),
-            tooltip,
-        )
-    })
-    .inner
+    if phosphor_button(
+        ui,
+        "caption_maximize",
+        icon,
+        CAPTION_BUTTON_SIZE,
+        action_bg(ui),
+        action_hover_bg(ui),
+        tooltip,
+    )
     .clicked()
     {
         ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(next_maximized));
@@ -97,18 +102,16 @@ fn render_maximize_restore_button(ui: &mut egui::Ui, ctx: &egui::Context) {
 }
 
 fn render_close_button(ui: &mut egui::Ui) -> bool {
-    widget_ids::scope(ui, "caption_close", |ui| {
-        phosphor_button(
-            ui,
-            egui_phosphor::regular::X,
-            CAPTION_BUTTON_SIZE,
-            CLOSE_BG,
-            CLOSE_HOVER_BG,
-            "Close",
-        )
-        .clicked()
-    })
-    .inner
+    phosphor_button(
+        ui,
+        "caption_close",
+        egui_phosphor::regular::X,
+        CAPTION_BUTTON_SIZE,
+        CLOSE_BG,
+        CLOSE_HOVER_BG,
+        "Close",
+    )
+    .clicked()
 }
 
 fn paint_phosphor_button(

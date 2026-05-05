@@ -213,7 +213,7 @@ fn render_pane_node(
     rect: egui::Rect,
 ) {
     match node {
-        PaneNode::Leaf { view_id } => render_leaf_tile(ui, context, *view_id, rect),
+        PaneNode::Leaf { view_id } => render_leaf_tile(ui, context, *view_id, path, rect),
         PaneNode::Split {
             axis,
             ratio,
@@ -238,11 +238,13 @@ fn render_leaf_tile(
     ui: &mut egui::Ui,
     context: &mut PaneRenderContext<'_>,
     view_id: ViewId,
+    path: Vec<PaneBranch>,
     rect: egui::Rect,
 ) {
     let request = TileRenderRequest {
         tab_index: context.tab_index,
         view_id,
+        pane_path: path,
         rect,
         is_active: view_id == context.active_view_id,
         can_close: context.leaf_count > 1,

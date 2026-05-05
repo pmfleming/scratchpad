@@ -7,7 +7,7 @@ use crate::app::services::search::SearchMode;
 use crate::app::theme::{
     action_hover_bg, border, tab_selected_accent, tab_selected_bg, text_muted, text_primary,
 };
-use crate::app::ui::{callout, settings};
+use crate::app::ui::{callout, settings, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{
     ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE, ARROWS_COUNTER_CLOCKWISE, CARDS, CARET_DOWN,
@@ -256,6 +256,7 @@ fn render_replace_heading(ui: &mut egui::Ui, replace_open: &mut bool) {
             };
             if callout::icon_button(
                 ui,
+                "search_replace.replace_heading",
                 if *replace_open { CARET_UP } else { CARET_DOWN },
                 16.0,
                 ICON_BUTTON_SIZE,
@@ -272,14 +273,21 @@ fn render_replace_heading(ui: &mut egui::Ui, replace_open: &mut bool) {
 }
 
 fn pill_heading_button(ui: &mut egui::Ui, title: &str) -> egui::Response {
-    ui.add(
-        egui::Button::new(
-            egui::RichText::new(title)
-                .size(15.0)
-                .color(text_primary(ui)),
-        )
-        .fill(egui::Color32::TRANSPARENT)
-        .stroke(egui::Stroke::NONE),
+    widget_ids::surface_response(
+        ui,
+        ("search_replace.heading", title),
+        widget_ids::WidgetRole::ActionButton,
+        |ui| {
+            ui.add(
+                egui::Button::new(
+                    egui::RichText::new(title)
+                        .size(15.0)
+                        .color(text_primary(ui)),
+                )
+                .fill(egui::Color32::TRANSPARENT)
+                .stroke(egui::Stroke::NONE),
+            )
+        },
     )
 }
 
@@ -364,6 +372,7 @@ fn icon_action_button(
 ) -> egui::Response {
     callout::icon_button(
         ui,
+        ("search_replace.action", tooltip),
         icon,
         16.0,
         ICON_BUTTON_SIZE,
@@ -403,26 +412,32 @@ fn chip_button(
 ) -> egui::Response {
     let previous_padding = ui.spacing().button_padding;
     ui.spacing_mut().button_padding = padding;
-    let response = ui
-        .add(
-            egui::Button::new(text)
-                .min_size(min_size)
-                .fill(if selected {
-                    tab_selected_bg(ui)
-                } else {
-                    action_hover_bg(ui)
-                })
-                .stroke(egui::Stroke::new(
-                    1.0,
-                    if selected {
-                        tab_selected_accent(ui)
+    let response = widget_ids::surface_response(
+        ui,
+        ("search_replace.chip", tooltip),
+        widget_ids::WidgetRole::ToggleChip,
+        |ui| {
+            ui.add(
+                egui::Button::new(text)
+                    .min_size(min_size)
+                    .fill(if selected {
+                        tab_selected_bg(ui)
                     } else {
-                        border(ui)
-                    },
-                ))
-                .corner_radius(egui::CornerRadius::same(8)),
-        )
-        .on_hover_text(tooltip);
+                        action_hover_bg(ui)
+                    })
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        if selected {
+                            tab_selected_accent(ui)
+                        } else {
+                            border(ui)
+                        },
+                    ))
+                    .corner_radius(egui::CornerRadius::same(8)),
+            )
+        },
+    )
+    .on_hover_text(tooltip);
     ui.spacing_mut().button_padding = previous_padding;
     response
 }

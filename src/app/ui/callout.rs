@@ -5,6 +5,7 @@ use crate::app::theme::{
 };
 use crate::app::ui::widget_ids;
 use eframe::egui;
+use std::hash::Hash;
 
 const CALLOUT_RADIUS: u8 = 14;
 const CALLOUT_SECTION_RADIUS: u8 = 10;
@@ -83,6 +84,7 @@ pub(crate) fn section_frame(ui: &egui::Ui) -> egui::Frame {
 
 pub(crate) fn header_row(
     ui: &mut egui::Ui,
+    surface_key: impl Hash,
     close_tooltip: &str,
     add_leading: impl FnOnce(&mut egui::Ui),
 ) -> bool {
@@ -97,15 +99,20 @@ pub(crate) fn header_row(
                 ui.add_space(trailing_space);
             }
 
-            close_button(ui, close_tooltip).clicked()
+            close_button(ui, (surface_key, "close"), close_tooltip).clicked()
         },
     )
     .inner
 }
 
-pub(crate) fn close_button(ui: &mut egui::Ui, tooltip: &str) -> egui::Response {
+pub(crate) fn close_button(
+    ui: &mut egui::Ui,
+    surface_key: impl Hash,
+    tooltip: &str,
+) -> egui::Response {
     phosphor_button(
         ui,
+        surface_key,
         egui_phosphor::regular::X,
         CAPTION_BUTTON_SIZE,
         CLOSE_BG,
@@ -116,6 +123,7 @@ pub(crate) fn close_button(ui: &mut egui::Ui, tooltip: &str) -> egui::Response {
 
 pub(crate) fn icon_button(
     ui: &mut egui::Ui,
+    surface_key: impl Hash,
     icon: &str,
     icon_size: f32,
     size: egui::Vec2,
@@ -133,7 +141,10 @@ pub(crate) fn icon_button(
     .stroke(egui::Stroke::new(1.0, border(ui)))
     .corner_radius(egui::CornerRadius::same(8));
 
-    ui.add_enabled(enabled, button).on_hover_text(tooltip)
+    widget_ids::surface_response(ui, surface_key, widget_ids::WidgetRole::IconButton, |ui| {
+        ui.add_enabled(enabled, button)
+    })
+    .on_hover_text(tooltip)
 }
 
 pub(crate) fn section_fill(ui: &egui::Ui) -> egui::Color32 {

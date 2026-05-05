@@ -47,7 +47,7 @@ pub(super) fn show_search_results(
             }
 
             for (index, group) in state.result_groups.iter().enumerate() {
-                show_result_group(ui, group, actions);
+                show_result_group(ui, index, group, actions);
                 if index + 1 < state.result_groups.len() {
                     ui.add_space(SEARCH_RESULT_FILE_SPACING);
                 }
@@ -90,45 +90,57 @@ pub(super) fn results_summary(state: &SearchStripState) -> String {
 
 fn show_result_group(
     ui: &mut egui::Ui,
+    group_index: usize,
     group: &SearchResultGroup,
     actions: &mut SearchStripActions,
 ) {
-    let expansion_id = widget_ids::local(ui, ("search_result_group", group.buffer_id));
-    let expanded = ui
-        .data_mut(|data| data.get_persisted::<bool>(expansion_id))
-        .unwrap_or(false);
+    widget_ids::surface_scope(ui, ("search_result_group", group_index), |ui| {
+        let active_id = search_result_group_expanded_id(group.buffer_id);
+        let pending_id = search_result_group_expanded_pending_id(group.buffer_id);
+        let expanded = widget_ids::read_deferred_persisted::<bool>(ui.ctx(), pending_id, active_id)
+            .unwrap_or(false);
 
-    let (group_response, toggle_requested) = show_group_pill(ui, group, expanded);
-    if group_response.clicked() && !group.entries.is_empty() {
-        actions.focused_file_match_index = Some(group.entries[0].match_index);
-    }
+        let (group_response, toggle_requested) = show_group_pill(ui, group_index, group, expanded);
+        if group_response.clicked() && !group.entries.is_empty() {
+            actions.focused_file_match_index = Some(group.entries[0].match_index);
+        }
 
-    if toggle_requested {
-        ui.data_mut(|data| data.insert_persisted(expansion_id, !expanded));
-    }
+        if toggle_requested {
+            widget_ids::write_deferred_persisted(ui.ctx(), pending_id, !expanded);
+        }
 
-    if !expanded {
-        return;
-    }
+        if !expanded {
+            return;
+        }
 
-    ui.add_space(SEARCH_RESULT_LINE_SPACING);
-    ui.indent(
-        widget_ids::local(ui, ("search_result_indent", group.buffer_id)),
-        |ui| {
-            for (index, entry) in group.entries.iter().enumerate() {
-                if show_match_pill(ui, entry).clicked() {
-                    actions.selected_match_index = Some(entry.match_index);
+        ui.add_space(SEARCH_RESULT_LINE_SPACING);
+        ui.indent(
+            widget_ids::local(ui, ("search_result_indent", group.buffer_id)),
+            |ui| {
+                for (index, entry) in group.entries.iter().enumerate() {
+                    if show_match_pill(ui, index, entry).clicked() {
+                        actions.selected_match_index = Some(entry.match_index);
+                    }
+                    if index + 1 < group.entries.len() {
+                        ui.add_space(SEARCH_RESULT_LINE_SPACING);
+                    }
                 }
-                if index + 1 < group.entries.len() {
-                    ui.add_space(SEARCH_RESULT_LINE_SPACING);
-                }
-            }
-        },
-    );
+            },
+        );
+    });
+}
+
+fn search_result_group_expanded_id(buffer_id: u64) -> egui::Id {
+    widget_ids::ctx_key(("search_result_group.expanded", buffer_id))
+}
+
+fn search_result_group_expanded_pending_id(buffer_id: u64) -> egui::Id {
+    widget_ids::ctx_key(("search_result_group.expanded.pending", buffer_id))
 }
 
 fn show_group_pill(
     ui: &mut egui::Ui,
+    group_index: usize,
     group: &SearchResultGroup,
     expanded: bool,
 ) -> (egui::Response, bool) {
@@ -144,76 +156,98 @@ fn show_group_pill(
         .inner_margin(egui::Margin::symmetric(10, 8))
         .show(ui, |ui| {
             let mut toggle_requested = false;
-            let mut group_response = None;
 
-            ui.horizontal(|ui| {
-                let caret = ui
-                    .add_sized(
-                        egui::vec2(26.0, 26.0),
-                        egui::Button::new(
-                            egui::RichText::new(if expanded { CARET_DOWN } else { CARET_RIGHT })
-                                .size(14.0)
-                                .color(text_muted(ui)),
-                        )
-                        .fill(egui::Color32::TRANSPARENT)
-                        .stroke(egui::Stroke::NONE),
+            let group_response = ui
+                .horizontal(|ui| {
+                    let caret = widget_ids::surface_scope(
+                        ui,
+                        ("search_result_group.caret", group_index),
+                        |ui| {
+                            ui.add_sized(
+                                egui::vec2(26.0, 26.0),
+                                egui::Button::new(
+                                    egui::RichText::new(if expanded {
+                                        CARET_DOWN
+                                    } else {
+                                        CARET_RIGHT
+                                    })
+                                    .size(14.0)
+                                    .color(text_muted(ui)),
+                                )
+                                .fill(egui::Color32::TRANSPARENT)
+                                .stroke(egui::Stroke::NONE),
+                            )
+                        },
                     )
+                    .inner
                     .on_hover_text(if expanded {
                         "Collapse results for this file"
                     } else {
                         "Expand results for this file"
                     });
-                if caret.clicked() {
-                    toggle_requested = true;
-                }
+                    if caret.clicked() {
+                        toggle_requested = true;
+                    }
 
-                let label_width = (ui.available_width() - 110.0).max(120.0);
-                let mut response = ui.add_sized(
-                    egui::vec2(label_width, SEARCH_RESULT_FILE_PILL_HEIGHT),
-                    egui::Button::new(group_body(ui, group))
-                        .fill(egui::Color32::TRANSPARENT)
-                        .stroke(egui::Stroke::NONE),
-                );
-                if group.tab_label != group.buffer_label {
-                    response = response.on_hover_text(format!("Tab: {}", group.tab_label));
-                }
-                group_response = Some(response);
+                    let label_width = (ui.available_width() - 110.0).max(120.0);
+                    let mut response = widget_ids::surface_scope(
+                        ui,
+                        ("search_result_group.body", group_index),
+                        |ui| {
+                            ui.add_sized(
+                                egui::vec2(label_width, SEARCH_RESULT_FILE_PILL_HEIGHT),
+                                egui::Button::new(group_body(ui, group))
+                                    .fill(egui::Color32::TRANSPARENT)
+                                    .stroke(egui::Stroke::NONE),
+                            )
+                        },
+                    )
+                    .inner;
+                    if group.tab_label != group.buffer_label {
+                        response = response.on_hover_text(format!("Tab: {}", group.tab_label));
+                    }
 
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(file_match_count_label(group.total_match_count))
-                            .size(12.0)
-                            .color(text_muted(ui)),
-                    );
-                });
-            });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new(file_match_count_label(group.total_match_count))
+                                .size(12.0)
+                                .color(text_muted(ui)),
+                        );
+                    });
+                    response
+                })
+                .inner;
 
-            (
-                group_response.unwrap_or_else(|| ui.label("")),
-                toggle_requested,
-            )
+            (group_response, toggle_requested)
         })
         .inner
 }
 
-fn show_match_pill(ui: &mut egui::Ui, entry: &SearchResultEntry) -> egui::Response {
-    egui::Frame::NONE
-        .fill(match_fill(ui, entry.active))
-        .stroke(egui::Stroke::new(1.0, match_border(ui, entry.active)))
-        .corner_radius(egui::CornerRadius::same(
-            SEARCH_RESULT_LINE_PILL_CORNER_RADIUS,
-        ))
-        .inner_margin(egui::Margin::symmetric(10, 8))
-        .show(ui, |ui| {
-            let row_width = ui.available_width();
-            let (rect, response) = ui.allocate_exact_size(
-                egui::vec2(row_width, SEARCH_RESULT_LINE_PILL_HEIGHT),
-                egui::Sense::click(),
-            );
-            paint_match_row(ui, rect, entry);
-            response
-        })
-        .inner
+fn show_match_pill(ui: &mut egui::Ui, index: usize, entry: &SearchResultEntry) -> egui::Response {
+    widget_ids::surface_scope(ui, ("search_result.match", index), |ui| {
+        egui::Frame::NONE
+            .fill(match_fill(ui, entry.active))
+            .stroke(egui::Stroke::new(1.0, match_border(ui, entry.active)))
+            .corner_radius(egui::CornerRadius::same(
+                SEARCH_RESULT_LINE_PILL_CORNER_RADIUS,
+            ))
+            .inner_margin(egui::Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                let row_width = ui.available_width();
+                let response = widget_ids::allocate_exact_interact(
+                    ui,
+                    egui::vec2(row_width, SEARCH_RESULT_LINE_PILL_HEIGHT),
+                    widget_ids::surface_id(("search_result.match", index)),
+                    egui::Sense::click(),
+                    "search_result.match",
+                );
+                let rect = response.rect;
+                paint_match_row(ui, rect, entry);
+                response
+            })
+            .inner
+    })
+    .inner
 }
 
 fn group_body(ui: &egui::Ui, group: &SearchResultGroup) -> egui::WidgetText {

@@ -244,7 +244,7 @@ fn history_card<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -
 }
 
 fn render_header(ui: &mut egui::Ui) -> bool {
-    callout::header_row(ui, "Close history", |ui| {
+    callout::header_row(ui, "text_history.header", "Close history", |ui| {
         ui.label(
             egui::RichText::new("History")
                 .size(TEXT_HISTORY_TITLE_SIZE)
@@ -341,10 +341,12 @@ fn control_icon_button(
     .fill(fill)
     .stroke(egui::Stroke::new(1.0, stroke_color))
     .corner_radius(egui::CornerRadius::same(8));
-    widget_ids::scope(ui, ("text_history.control", id_source), |ui| {
-        ui.add_enabled(enabled, button)
-    })
-    .inner
+    widget_ids::surface_response(
+        ui,
+        ("text_history.control", id_source),
+        widget_ids::WidgetRole::IconButton,
+        |ui| ui.add_enabled(enabled, button),
+    )
     .on_hover_text(tooltip)
 }
 
@@ -397,11 +399,11 @@ fn render_timeline_rows(
 ) {
     let anchors = timeline_now_line_anchors(rows);
 
-    for row in rows {
+    for (index, row) in rows.iter().enumerate() {
         if anchors.contains(&(row.buffer_id, row.entry_id)) {
-            render_now_line(ui);
+            render_now_line(ui, ("timeline", index));
         }
-        render_row(ui, row, action);
+        render_row(ui, ("timeline", index), row, action);
     }
 }
 
@@ -441,7 +443,7 @@ fn render_by_file(
         "No file history",
         |ui| {
             for (index, group) in groups.iter().enumerate() {
-                render_file_group(ui, group, action);
+                render_file_group(ui, index, group, action);
                 if index + 1 < groups.len() {
                     ui.add_space(12.0);
                 }
@@ -456,18 +458,19 @@ fn text_history_content_scroll_id() -> egui::Id {
 
 fn render_file_group(
     ui: &mut egui::Ui,
+    group_index: usize,
     group: &TextHistoryFileGroup,
     action: &mut Option<TextHistoryAction>,
 ) {
-    widget_ids::scope(ui, ("text_history.file_group", group.buffer_id), |ui| {
-        let expansion_id =
-            widget_ids::local(ui, ("text_history.file_group.expanded", group.buffer_id));
-        let expanded = ui
-            .data_mut(|data| data.get_persisted::<bool>(expansion_id))
+    widget_ids::surface_scope(ui, ("text_history.file_group", group_index), |ui| {
+        let active_id = text_history_file_group_expanded_id(group.buffer_id);
+        let pending_id = text_history_file_group_expanded_pending_id(group.buffer_id);
+        let expanded = widget_ids::read_deferred_persisted::<bool>(ui.ctx(), pending_id, active_id)
             .unwrap_or(true);
-        let (group_response, toggle_requested) = render_file_header_pill(ui, group, expanded);
+        let (group_response, toggle_requested) =
+            render_file_header_pill(ui, group_index, group, expanded);
         if group_response.clicked() || toggle_requested {
-            ui.data_mut(|data| data.insert_persisted(expansion_id, !expanded));
+            widget_ids::write_deferred_persisted(ui.ctx(), pending_id, !expanded);
         }
         if !expanded {
             return;
@@ -482,8 +485,17 @@ fn render_file_group(
     });
 }
 
+fn text_history_file_group_expanded_id(buffer_id: BufferId) -> egui::Id {
+    widget_ids::ctx_key(("text_history.file_group.expanded", buffer_id))
+}
+
+fn text_history_file_group_expanded_pending_id(buffer_id: BufferId) -> egui::Id {
+    widget_ids::ctx_key(("text_history.file_group.expanded.pending", buffer_id))
+}
+
 fn render_file_header_pill(
     ui: &mut egui::Ui,
+    group_index: usize,
     group: &TextHistoryFileGroup,
     expanded: bool,
 ) -> (egui::Response, bool) {
@@ -509,31 +521,45 @@ fn render_file_header_pill(
             let mut toggle_requested = false;
             let group_response = ui
                 .horizontal(|ui| {
-                    let caret = ui
-                        .add_sized(
-                            egui::vec2(24.0, 24.0),
-                            egui::Button::new(
-                                egui::RichText::new(caret_icon)
-                                    .size(14.0)
-                                    .color(callout::muted_text(ui)),
+                    let caret = widget_ids::surface_response(
+                        ui,
+                        ("text_history.file_group.caret", group_index),
+                        widget_ids::WidgetRole::ActionButton,
+                        |ui| {
+                            ui.add_sized(
+                                egui::vec2(24.0, 24.0),
+                                egui::Button::new(
+                                    egui::RichText::new(caret_icon)
+                                        .size(14.0)
+                                        .color(callout::muted_text(ui)),
+                                )
+                                .fill(egui::Color32::TRANSPARENT)
+                                .stroke(egui::Stroke::NONE),
                             )
-                            .fill(egui::Color32::TRANSPARENT)
-                            .stroke(egui::Stroke::NONE),
-                        )
-                        .on_hover_text(caret_tooltip);
+                        },
+                    )
+                    .on_hover_text(caret_tooltip);
                     if caret.clicked() {
                         toggle_requested = true;
                     }
 
                     let label_width = (ui.available_width() - 96.0).max(120.0);
-                    let response = truncated_label(
+                    let response = widget_ids::scope(
                         ui,
-                        &group.label,
-                        label_width,
-                        13.0,
-                        callout::text(ui),
-                        egui::Sense::click(),
+                        ("text_history.file_group.label", group_index),
+                        |ui| {
+                            truncated_label(
+                                ui,
+                                ("text_history.file_group.label", group_index),
+                                &group.label,
+                                label_width,
+                                13.0,
+                                callout::text(ui),
+                                egui::Sense::click(),
+                            )
+                        },
                     )
+                    .inner
                     .on_hover_text(&group.label);
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -562,10 +588,10 @@ fn render_file_history_rows(
 
     for (idx, row) in rows.iter().enumerate() {
         if !now_rendered && now_line_index == Some(idx) {
-            render_now_line(ui);
+            render_now_line(ui, ("by_file", idx));
             now_rendered = true;
         }
-        render_row(ui, row, action);
+        render_row(ui, ("by_file", idx), row, action);
     }
 }
 
@@ -574,12 +600,15 @@ fn per_file_now_line_insert_index(rows: &[TextHistoryRow]) -> Option<usize> {
     (insert_index > 0).then_some(insert_index)
 }
 
-fn render_row(ui: &mut egui::Ui, row: &TextHistoryRow, action: &mut Option<TextHistoryAction>) {
-    let response = widget_ids::scope(
-        ui,
-        ("text_history.row", row.buffer_id, row.entry_id),
-        |ui| history_pill(ui, row),
-    )
+fn render_row(
+    ui: &mut egui::Ui,
+    surface_key: impl std::hash::Hash,
+    row: &TextHistoryRow,
+    action: &mut Option<TextHistoryAction>,
+) {
+    let response = widget_ids::surface_scope(ui, ("text_history.row", surface_key), |ui| {
+        history_pill(ui, row)
+    })
     .inner
     .on_hover_text(if row.undone {
         "Click to redo this text change"
@@ -643,6 +672,7 @@ fn history_pill(ui: &mut egui::Ui, row: &TextHistoryRow) -> egui::Response {
                     let text_width = ui.available_width().max(0.0);
                     truncated_label(
                         ui,
+                        ("text_history.row.title", row.entry_id),
                         &row.title,
                         text_width,
                         14.0,
@@ -652,6 +682,7 @@ fn history_pill(ui: &mut egui::Ui, row: &TextHistoryRow) -> egui::Response {
                     .on_hover_text(&row.title);
                     truncated_label(
                         ui,
+                        ("text_history.row.detail", row.entry_id),
                         &row.detail,
                         text_width,
                         12.0,
@@ -674,29 +705,36 @@ fn history_pill(ui: &mut egui::Ui, row: &TextHistoryRow) -> egui::Response {
 
 fn truncated_label(
     ui: &mut egui::Ui,
+    surface_key: impl std::hash::Hash,
     text: &str,
     width: f32,
     size: f32,
     color: egui::Color32,
     sense: egui::Sense,
 ) -> egui::Response {
-    ui.add_sized(
-        egui::vec2(width, 0.0),
-        egui::Label::new(egui::RichText::new(text).size(size).color(color))
-            .truncate()
-            .sense(sense),
-    )
+    widget_ids::surface_response(ui, surface_key, widget_ids::WidgetRole::Label, |ui| {
+        ui.add_sized(
+            egui::vec2(width, 0.0),
+            egui::Label::new(egui::RichText::new(text).size(size).color(color))
+                .truncate()
+                .sense(sense),
+        )
+    })
 }
 
-fn render_now_line(ui: &mut egui::Ui) {
+fn render_now_line(ui: &mut egui::Ui, key: impl std::hash::Hash) {
     let accent = tab_selected_accent(ui);
     let muted = callout::muted_text(ui);
     let label_font = egui::FontId::proportional(11.0);
 
-    let (rect, _) = ui.allocate_exact_size(
+    let response = widget_ids::allocate_exact_interact(
+        ui,
         egui::vec2(ui.available_width(), NOW_LINE_HEIGHT),
+        widget_ids::root_id(("text_history.now_line", key)),
         egui::Sense::hover(),
+        "text_history.now_line",
     );
+    let rect = response.rect;
     let painter = ui.painter_at(rect);
     let mid_y = rect.center().y;
     let label = "Now";
@@ -725,49 +763,33 @@ fn render_now_line(ui: &mut egui::Ui) {
     ui.add_space(HISTORY_PILL_SPACING);
 }
 
-/// Persist `value` into `active_id` immediately and also queue a pending
-/// write at `pending_id` to fire on the next frame, requesting a repaint.
-fn write_pending<T: Clone + Send + Sync + 'static>(
-    ctx: &egui::Context,
-    pending_id: egui::Id,
-    active_id: egui::Id,
-    value: T,
-) {
-    let apply_frame = ctx.cumulative_frame_nr().saturating_add(1);
-    ctx.data_mut(|data| {
-        data.insert_persisted(active_id, value.clone());
-        data.insert_persisted(pending_id, (value, apply_frame));
-    });
-    ctx.request_repaint();
-}
-
-fn read_persisted<T: Clone + Send + Sync + 'static>(
-    ctx: &egui::Context,
-    active_id: egui::Id,
-) -> Option<T> {
-    ctx.data_mut(|data| data.get_persisted::<T>(active_id))
-}
-
 fn read_active_tab(ctx: &egui::Context) -> HistoryTab {
-    read_persisted::<u8>(ctx, widget_ids::ctx_key("text_history.active_tab"))
-        .and_then(tab_from_persisted)
-        .unwrap_or(HistoryTab::Timeline)
+    widget_ids::read_deferred_persisted::<u8>(
+        ctx,
+        widget_ids::ctx_key("text_history.active_tab.pending"),
+        widget_ids::ctx_key("text_history.active_tab"),
+    )
+    .and_then(tab_from_persisted)
+    .unwrap_or(HistoryTab::Timeline)
 }
 
 fn write_active_tab(ctx: &egui::Context, tab: HistoryTab) {
-    let active_id = widget_ids::ctx_key("text_history.active_tab");
     let pending_id = widget_ids::ctx_key("text_history.active_tab.pending");
-    write_pending(ctx, pending_id, active_id, tab_to_persisted(tab));
+    widget_ids::write_deferred_persisted(ctx, pending_id, tab_to_persisted(tab));
 }
 
 fn read_follow_focus(ctx: &egui::Context) -> bool {
-    read_persisted::<bool>(ctx, widget_ids::ctx_key("text_history.follow_undo")).unwrap_or(true)
+    widget_ids::read_deferred_persisted::<bool>(
+        ctx,
+        widget_ids::ctx_key("text_history.follow_undo.pending"),
+        widget_ids::ctx_key("text_history.follow_undo"),
+    )
+    .unwrap_or(true)
 }
 
 fn write_follow_focus(ctx: &egui::Context, follow: bool) {
-    let active_id = widget_ids::ctx_key("text_history.follow_undo");
     let pending_id = widget_ids::ctx_key("text_history.follow_undo.pending");
-    write_pending(ctx, pending_id, active_id, follow);
+    widget_ids::write_deferred_persisted(ctx, pending_id, follow);
 }
 
 fn tab_from_persisted(value: u8) -> Option<HistoryTab> {
@@ -808,10 +830,18 @@ mod tests {
         let ctx = eframe::egui::Context::default();
 
         write_follow_focus(&ctx, false);
+        assert!(read_follow_focus(&ctx));
+        advance_egui_frame(&ctx);
         assert!(!read_follow_focus(&ctx));
 
         write_follow_focus(&ctx, true);
+        assert!(!read_follow_focus(&ctx));
+        advance_egui_frame(&ctx);
         assert!(read_follow_focus(&ctx));
+    }
+
+    fn advance_egui_frame(ctx: &eframe::egui::Context) {
+        let _ = ctx.run_ui(eframe::egui::RawInput::default(), |_| {});
     }
 
     #[test]

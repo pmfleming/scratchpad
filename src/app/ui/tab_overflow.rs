@@ -4,6 +4,7 @@ use crate::app::domain::WorkspaceTab;
 use crate::app::services::settings_store::TabListPosition;
 use crate::app::theme::*;
 use crate::app::ui::tab_drag;
+use crate::app::ui::widget_ids;
 use eframe::egui::{self, Stroke};
 use std::collections::{HashMap, HashSet};
 
@@ -57,7 +58,7 @@ pub(crate) fn show_overflow_button(
     _duplicate_name_counts: &HashMap<String, usize>,
 ) -> OverflowMenuOutcome {
     let mut outcome = OverflowMenuOutcome::default();
-    let overflow_popup_id = ui.id().with("tab_overflow_popup");
+    let overflow_popup_id = widget_ids::root_id("tab_overflow_popup");
     let overflow_button_response = overflow_button(ui);
     toggle_overflow_popup(overflow_popup_open, &overflow_button_response);
 
@@ -86,13 +87,20 @@ pub(crate) fn show_overflow_button(
 }
 
 fn overflow_button(ui: &mut egui::Ui) -> egui::Response {
-    ui.add_sized(
-        [BUTTON_SIZE.x, BUTTON_SIZE.y],
-        egui::Button::new(
-            egui::RichText::new(egui_phosphor::regular::CARET_DOWN).color(text_primary(ui)),
-        )
-        .fill(action_bg(ui))
-        .stroke(Stroke::new(1.0, border(ui))),
+    widget_ids::surface_response(
+        ui,
+        "tab_overflow.button",
+        widget_ids::WidgetRole::IconButton,
+        |ui| {
+            ui.add_sized(
+                [BUTTON_SIZE.x, BUTTON_SIZE.y],
+                egui::Button::new(
+                    egui::RichText::new(egui_phosphor::regular::CARET_DOWN).color(text_primary(ui)),
+                )
+                .fill(action_bg(ui))
+                .stroke(Stroke::new(1.0, border(ui))),
+            )
+        },
     )
 }
 
@@ -116,7 +124,7 @@ fn show_overflow_popup(
     let popup_width = TAB_BUTTON_WIDTH;
     let popup_max_height = overflow_popup_max_height(ctx, request.anchor, request.pivot);
     let visible_row_count = overflow_row_count(request.app, request.visible_tab_indices);
-    let area_response = egui::Area::new(request.overflow_popup_id)
+    let area_response = widget_ids::area(request.overflow_popup_id)
         .order(egui::Order::Foreground)
         .constrain(true)
         .fixed_pos(request.anchor)
@@ -279,7 +287,7 @@ fn show_overflow_row(
     is_drag_source: bool,
     menu: &mut OverflowMenuContext<'_>,
 ) -> egui::Rect {
-    ui.push_id(("tab_overflow", slot_index), |ui| {
+    widget_ids::surface_scope(ui, ("tab_overflow.slot", slot_index), |ui| {
         if is_drag_source {
             return render_drag_source_placeholder(ui, menu.popup_width);
         }
@@ -291,6 +299,7 @@ fn show_overflow_row(
         let (response, promote_response, close_response, _truncated) =
             tab_button_sized_with_actions(
                 ui,
+                ("tab_overflow.slot", slot_index),
                 &row_state.display_name,
                 row_state.selected,
                 row_state.selected,

@@ -147,7 +147,7 @@ fn dispatch_requested_command(
 }
 
 fn render_search_header(ui: &mut egui::Ui) -> bool {
-    callout::header_row(ui, "Close search", |ui| {
+    callout::header_row(ui, "search_replace.header", "Close search", |ui| {
         ui.label(
             egui::RichText::new("Search")
                 .size(SEARCH_TITLE_SIZE)

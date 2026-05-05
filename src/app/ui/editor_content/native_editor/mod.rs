@@ -16,6 +16,7 @@ use crate::app::domain::{
     BufferState, CursorRevealMode, EditorViewState, LayoutCacheKey, SearchHighlightState,
 };
 use crate::app::ui::scrolling::DisplaySnapshot;
+use crate::app::ui::widget_ids::{self, WidgetRole};
 use eframe::egui;
 use interactions::{
     handle_keyboard_events, handle_mouse_interaction, sync_view_cursor_before_render,
@@ -304,13 +305,17 @@ pub fn render_read_only_text_edit(
 
     let row_height = editor_row_height(ui, options.editor_font_id);
     let desired_height = desired_rows.max(1) as f32 * row_height;
-    let (rect, response) = ui.allocate_exact_size(
+    let response = widget_ids::allocate_exact_rect_interact(
+        ui,
         egui::vec2(
             editor_desired_width(ui, &galley, options.word_wrap, None),
             desired_height,
         ),
+        ("native_read_only_editor", WidgetRole::TextEdit),
         egui::Sense::click(),
+        "native_read_only_editor",
     );
+    let rect = response.rect;
 
     if ui.is_rect_visible(rect) {
         paint_galley(ui, &galley, rect.min, options.text_color);
@@ -582,14 +587,18 @@ fn allocate_editor_rect(
     total_content_height: f32,
     viewport: Option<egui::Rect>,
 ) -> (egui::Rect, egui::Response) {
-    ui.allocate_exact_size(
+    let response = widget_ids::allocate_exact_rect_interact(
+        ui,
         editor_desired_size(
             ui,
             editor_desired_width(ui, galley, options.word_wrap, viewport),
             total_content_height,
         ),
+        ("native_editor", WidgetRole::TextEdit),
         egui::Sense::click_and_drag(),
-    )
+        "native_editor",
+    );
+    (response.rect, response)
 }
 
 fn galley_origin(rect: egui::Rect, logical_line_base: usize, row_height: f32) -> egui::Pos2 {

@@ -2,7 +2,6 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::chrome::phosphor_button;
 use crate::app::commands::AppCommand;
 use crate::app::theme::{BUTTON_SIZE, TAB_HEIGHT, action_bg, action_hover_bg};
-use crate::app::ui::widget_ids;
 use eframe::egui;
 
 const PRIMARY_ACTION_SPACING: f32 = 4.0;
@@ -53,17 +52,15 @@ fn primary_action_button(
     tooltip: &str,
     on_click: impl FnOnce(),
 ) {
-    if widget_ids::scope(ui, id_source, |ui| {
-        phosphor_button(
-            ui,
-            icon,
-            BUTTON_SIZE,
-            action_bg(ui),
-            action_hover_bg(ui),
-            tooltip,
-        )
-    })
-    .inner
+    if phosphor_button(
+        ui,
+        id_source,
+        icon,
+        BUTTON_SIZE,
+        action_bg(ui),
+        action_hover_bg(ui),
+        tooltip,
+    )
     .clicked()
     {
         on_click();

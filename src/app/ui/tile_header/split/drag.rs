@@ -1,4 +1,5 @@
-use super::{SplitHandleDragState, TileAction, ViewId};
+use super::{SplitHandleDragState, TileAction};
+use crate::app::domain::{SplitPath, ViewId};
 use crate::app::ui::widget_ids;
 use eframe::egui;
 
@@ -6,8 +7,8 @@ pub fn split_drag_active(ui: &egui::Ui, id: egui::Id) -> bool {
     split_drag_state(ui, id).is_some()
 }
 
-pub fn split_drag_state_id(ui: &egui::Ui, tab_index: usize, view_id: ViewId) -> egui::Id {
-    widget_ids::local(ui, ("split_handle_drag", tab_index, view_id))
+pub fn split_drag_state_id(pane_path: &SplitPath) -> egui::Id {
+    widget_ids::root_id(("split_handle_drag", pane_path))
 }
 
 pub fn handle_split_interaction(

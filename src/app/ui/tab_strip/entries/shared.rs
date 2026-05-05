@@ -94,8 +94,14 @@ fn render_tab_slot_cell(
 
     let is_active = context.showing_settings && context.active_slot_index == slot_index;
     let is_selected = app.tab_slot_selected(slot_index);
-    let (tab_response, close_response, _) =
-        tab_button_sized(ui, "Settings", is_active, is_selected, context.width);
+    let (tab_response, close_response, _) = tab_button_sized(
+        ui,
+        ("tab_strip.slot", slot_index),
+        "Settings",
+        is_active,
+        is_selected,
+        context.width,
+    );
     let dragged_slots = app.dragged_tab_slots(slot_index);
     tab_drag::begin_tab_drag_if_needed(
         ui,

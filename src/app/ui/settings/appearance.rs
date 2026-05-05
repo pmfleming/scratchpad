@@ -207,7 +207,7 @@ fn render_auto_hide_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         Some("Collapse the active tab list until the pointer nears it."),
         |ui| {
             let mut enabled = app.auto_hide_tab_list();
-            toggle_control(ui, &mut enabled);
+            toggle_control(ui, "settings.auto_hide_tab_list", &mut enabled);
             if enabled != app.auto_hide_tab_list() {
                 app.set_auto_hide_tab_list(enabled);
             }
@@ -225,14 +225,21 @@ fn render_auto_hide_delay_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 nearest_auto_hide_delay_index(app.tab_list_auto_hide_delay_seconds());
             let mut selected_index = current_index as u32;
             let control_width = SettingsUi::control_width(ui);
-            ui.add_sized(
-                egui::vec2(control_width, 0.0),
-                egui::Slider::new(
-                    &mut selected_index,
-                    0..=(AUTO_HIDE_DELAY_OPTIONS.len() - 1) as u32,
-                )
-                .step_by(1.0)
-                .show_value(false),
+            widget_ids::surface_response(
+                ui,
+                "settings.auto_hide_delay.slider",
+                widget_ids::WidgetRole::ActionButton,
+                |ui| {
+                    ui.add_sized(
+                        egui::vec2(control_width, 0.0),
+                        egui::Slider::new(
+                            &mut selected_index,
+                            0..=(AUTO_HIDE_DELAY_OPTIONS.len() - 1) as u32,
+                        )
+                        .step_by(1.0)
+                        .show_value(false),
+                    )
+                },
             );
             ui.add_space(8.0);
             ui.label(auto_hide_delay_label(
@@ -257,7 +264,7 @@ fn render_status_bar_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         ),
         |ui| {
             let mut visible = app.status_bar_visible();
-            toggle_control(ui, &mut visible);
+            toggle_control(ui, "settings.status_bar_visible", &mut visible);
             if visible != app.status_bar_visible() {
                 app.set_status_bar_visible(visible);
             }

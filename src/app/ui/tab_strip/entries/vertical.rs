@@ -50,17 +50,21 @@ fn show_vertical_tab_entries_above_new_tab(
 
 fn show_vertical_new_tab_action(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let width = ui.available_width().max(BUTTON_SIZE.x);
-    if widget_ids::scope(ui, "vertical_new_tab", |ui| {
-        ui.add_sized(
-            egui::vec2(width, BUTTON_SIZE.y),
-            egui::Button::new(format!("{} New tab", egui_phosphor::regular::PLUS))
-                .fill(action_bg(ui))
-                .stroke(Stroke::new(1.0, border(ui))),
-        )
-        .on_hover_text("New Tab")
-        .clicked()
-    })
-    .inner
+    if widget_ids::surface_response(
+        ui,
+        "vertical_new_tab",
+        widget_ids::WidgetRole::ActionButton,
+        |ui| {
+            ui.add_sized(
+                egui::vec2(width, BUTTON_SIZE.y),
+                egui::Button::new(format!("{} New tab", egui_phosphor::regular::PLUS))
+                    .fill(action_bg(ui))
+                    .stroke(Stroke::new(1.0, border(ui))),
+            )
+        },
+    )
+    .on_hover_text("New Tab")
+    .clicked()
     {
         app.handle_command(AppCommand::NewTab);
     }

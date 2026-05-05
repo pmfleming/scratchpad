@@ -68,14 +68,21 @@ fn render_font_size_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         let current_index = nearest_font_size_index(app.font_size());
         let mut selected_index = current_index as u32;
         let control_width = SettingsUi::control_width(ui);
-        ui.add_sized(
-            egui::vec2(control_width, 0.0),
-            egui::Slider::new(
-                &mut selected_index,
-                0..=(FONT_SIZE_OPTIONS.len() - 1) as u32,
-            )
-            .step_by(1.0)
-            .show_value(false),
+        widget_ids::surface_response(
+            ui,
+            "settings.font_size.slider",
+            widget_ids::WidgetRole::ActionButton,
+            |ui| {
+                ui.add_sized(
+                    egui::vec2(control_width, 0.0),
+                    egui::Slider::new(
+                        &mut selected_index,
+                        0..=(FONT_SIZE_OPTIONS.len() - 1) as u32,
+                    )
+                    .step_by(1.0)
+                    .show_value(false),
+                )
+            },
         );
         ui.add_space(8.0);
         ui.label(FONT_SIZE_OPTIONS[selected_index as usize].to_string());
@@ -95,11 +102,18 @@ fn render_gutter_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         |ui| {
             let mut selected_gutter = app.editor_gutter();
             let control_width = SettingsUi::control_width(ui);
-            ui.add_sized(
-                egui::vec2(control_width, 0.0),
-                egui::Slider::new(&mut selected_gutter, 0..=32)
-                    .step_by(1.0)
-                    .show_value(false),
+            widget_ids::surface_response(
+                ui,
+                "settings.gutter.slider",
+                widget_ids::WidgetRole::ActionButton,
+                |ui| {
+                    ui.add_sized(
+                        egui::vec2(control_width, 0.0),
+                        egui::Slider::new(&mut selected_gutter, 0..=32)
+                            .step_by(1.0)
+                            .show_value(false),
+                    )
+                },
             );
             ui.add_space(8.0);
             ui.label(format!("{selected_gutter} px"));

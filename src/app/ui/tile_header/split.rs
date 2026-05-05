@@ -2,7 +2,7 @@ mod drag;
 mod geometry;
 mod preview;
 
-use crate::app::domain::{SplitAxis, ViewId};
+use crate::app::domain::{SplitAxis, SplitPath, ViewId};
 use eframe::egui;
 
 pub const TILE_GAP: f32 = 6.0;
@@ -48,9 +48,9 @@ pub struct TileSplitHandler {
 }
 
 impl TileSplitHandler {
-    pub fn new(ui: &egui::Ui, tab_index: usize, view_id: ViewId, tile_rect: egui::Rect) -> Self {
+    pub fn new(pane_path: &SplitPath, view_id: ViewId, tile_rect: egui::Rect) -> Self {
         Self {
-            id: drag::split_drag_state_id(ui, tab_index, view_id),
+            id: drag::split_drag_state_id(pane_path),
             view_id,
             tile_rect,
         }

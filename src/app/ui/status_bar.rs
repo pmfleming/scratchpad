@@ -145,7 +145,7 @@ fn render_active_status(
 }
 
 fn show_copyable_path(ui: &mut egui::Ui, label: &str) {
-    let response = widget_ids::scope(ui, "status_path", |ui| {
+    let response = widget_ids::surface_response(ui, "status_path", "copyable_path", |ui| {
         ui.add(
             egui::Button::new(label)
                 .frame(false)
@@ -154,7 +154,6 @@ fn show_copyable_path(ui: &mut egui::Ui, label: &str) {
                 .min_size(egui::vec2(0.0, 22.0)),
         )
     })
-    .inner
     .on_hover_text("Double-click to copy path");
     if response.double_clicked() {
         let copied = label.strip_prefix("Path: ").unwrap_or(label);
@@ -164,9 +163,10 @@ fn show_copyable_path(ui: &mut egui::Ui, label: &str) {
 
 fn show_line_count(ui: &mut egui::Ui, count_label: &str, actions: &mut StatusBarActions) {
     let line_count_response =
-        widget_ids::scope(ui, "status_line_count", |ui| ui.label(count_label))
-            .inner
-            .on_hover_text("Double-click to toggle line numbers");
+        widget_ids::surface_response(ui, "status_line_count", "line_count_label", |ui| {
+            ui.label(count_label)
+        })
+        .on_hover_text("Double-click to toggle line numbers");
     if line_count_response.double_clicked() {
         actions.toggle_line_numbers = true;
     }
@@ -179,12 +179,11 @@ fn show_encoding(
     highlight: bool,
 ) -> egui::Response {
     ui.separator();
-    widget_ids::scope(ui, "status_encoding", |ui| {
+    widget_ids::surface_response(ui, "status_encoding", "encoding_label", |ui| {
         ui.add(
             egui::Label::new(status_format_text(encoding, highlight)).sense(egui::Sense::click()),
         )
     })
-    .inner
     .on_hover_text(format!("{tooltip}\nClick for encoding actions"))
 }
 
@@ -193,15 +192,27 @@ fn show_status_segment(ui: &mut egui::Ui, label: Option<&str>) {
         return;
     };
     ui.separator();
-    ui.label(label);
+    widget_ids::surface_response(
+        ui,
+        ("status_segment", label),
+        widget_ids::WidgetRole::Label,
+        |ui| ui.label(label),
+    );
 }
 
 fn show_line_endings(ui: &mut egui::Ui, line_endings_label: &str, highlight: bool) {
     ui.separator();
-    ui.label(status_format_text(
-        &format!("EOL: {line_endings_label}"),
-        highlight,
-    ));
+    widget_ids::surface_response(
+        ui,
+        "status_line_endings",
+        widget_ids::WidgetRole::Label,
+        |ui| {
+            ui.label(status_format_text(
+                &format!("EOL: {line_endings_label}"),
+                highlight,
+            ))
+        },
+    );
 }
 
 fn status_format_text(label: &str, highlight: bool) -> egui::RichText {
@@ -218,11 +229,8 @@ fn status_bar_encoding_is_non_default(format: &crate::app::domain::TextFormatMet
 
 fn show_settings_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
     ui.separator();
-    let response = widget_ids::scope(ui, "status_settings", |ui| {
-        status_bar_icon_button(ui, egui_phosphor::regular::GEAR)
-    })
-    .inner
-    .on_hover_text("Open settings");
+    let response = status_bar_icon_button(ui, "status_settings", egui_phosphor::regular::GEAR)
+        .on_hover_text("Open settings");
     if response.clicked() {
         actions.open_settings = true;
     }
@@ -230,27 +238,34 @@ fn show_settings_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
 
 fn show_text_history_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
     ui.separator();
-    let response = widget_ids::scope(ui, "status_text_history", |ui| {
-        status_bar_icon_button(ui, egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE)
-    })
-    .inner
+    let response = status_bar_icon_button(
+        ui,
+        "status_text_history",
+        egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE,
+    )
     .on_hover_text("Open text history");
     if response.clicked() {
         actions.open_text_history = true;
     }
 }
 
-fn status_bar_icon_button(ui: &mut egui::Ui, icon: &str) -> egui::Response {
-    ui.add(
-        egui::Button::new(
-            egui::RichText::new(icon)
-                .font(egui::FontId::proportional(16.0))
-                .color(TEXT_PRIMARY),
+fn status_bar_icon_button(
+    ui: &mut egui::Ui,
+    surface_key: &'static str,
+    icon: &str,
+) -> egui::Response {
+    widget_ids::surface_response(ui, surface_key, widget_ids::WidgetRole::IconButton, |ui| {
+        ui.add(
+            egui::Button::new(
+                egui::RichText::new(icon)
+                    .font(egui::FontId::proportional(16.0))
+                    .color(TEXT_PRIMARY),
+            )
+            .min_size(egui::vec2(22.0, 22.0))
+            .fill(egui::Color32::TRANSPARENT)
+            .stroke(egui::Stroke::NONE),
         )
-        .min_size(egui::vec2(22.0, 22.0))
-        .fill(egui::Color32::TRANSPARENT)
-        .stroke(egui::Stroke::NONE),
-    )
+    })
 }
 
 fn show_control_char_toggle(
@@ -259,15 +274,19 @@ fn show_control_char_toggle(
     actions: &mut StatusBarActions,
 ) {
     ui.separator();
-    let button_response = widget_ids::scope(ui, "status_control_chars", |ui| {
-        ui.add(
-            egui::Button::new("")
-                .min_size(egui::vec2(22.0, 22.0))
-                .fill(egui::Color32::TRANSPARENT)
-                .stroke(egui::Stroke::NONE),
-        )
-    })
-    .inner;
+    let button_response = widget_ids::surface_response(
+        ui,
+        "status_control_chars",
+        widget_ids::WidgetRole::IconButton,
+        |ui| {
+            ui.add(
+                egui::Button::new("")
+                    .min_size(egui::vec2(22.0, 22.0))
+                    .fill(egui::Color32::TRANSPARENT)
+                    .stroke(egui::Stroke::NONE),
+            )
+        },
+    );
     ui.painter().text(
         button_response.rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -286,12 +305,24 @@ fn show_control_char_toggle(
 fn show_status_warnings(ui: &mut egui::Ui, details: &ActiveStatusDetails) {
     if let Some(freshness_label) = &details.freshness_label {
         ui.separator();
-        ui.label(egui::RichText::new(freshness_label).color(egui::Color32::YELLOW));
+        widget_ids::surface_response(
+            ui,
+            "status_freshness_warning",
+            widget_ids::WidgetRole::Label,
+            |ui| ui.label(egui::RichText::new(freshness_label).color(egui::Color32::YELLOW)),
+        );
     }
 
     if details.has_non_compliant_characters {
         ui.separator();
-        ui.label(egui::RichText::new("Non compliant characters").color(egui::Color32::RED));
+        widget_ids::surface_response(
+            ui,
+            "status_non_compliant_warning",
+            widget_ids::WidgetRole::Label,
+            |ui| {
+                ui.label(egui::RichText::new("Non compliant characters").color(egui::Color32::RED))
+            },
+        );
     }
 }
 

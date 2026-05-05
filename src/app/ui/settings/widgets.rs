@@ -1,5 +1,6 @@
 use super::*;
 use crate::app::ui::widget_ids;
+use std::hash::Hash;
 
 pub(super) fn expandable_card(
     ui: &mut egui::Ui,
@@ -52,7 +53,7 @@ pub(super) fn toggle_card(
     let mut next_value = current_value;
     settings_card_frame(ui, |ui| {
         card_header(ui, icon, title, Some(description), |ui| {
-            toggle_control(ui, &mut next_value);
+            toggle_control(ui, ("settings.toggle_card", title), &mut next_value);
         });
     });
 
@@ -61,14 +62,14 @@ pub(super) fn toggle_card(
     }
 }
 
-pub(super) fn toggle_control(ui: &mut egui::Ui, value: &mut bool) {
+pub(super) fn toggle_control(ui: &mut egui::Ui, surface_key: impl Hash, value: &mut bool) {
     fixed_width_control(ui, |ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
                 egui::RichText::new(if *value { "On" } else { "Off" }).color(text_primary(ui)),
             );
             ui.add_space(12.0);
-            let response = toggle_switch(ui, value);
+            let response = toggle_switch(ui, surface_key, value);
             if response.changed() {
                 ui.ctx().request_repaint();
             }
@@ -101,6 +102,7 @@ pub(super) fn settings_file_card(
                     ui.add_space(SettingsUi::CONTROLS.gap);
                     clicked = phosphor_button(
                         ui,
+                        ("settings_file_card", title),
                         egui_phosphor::regular::FOLDER_OPEN,
                         egui::vec2(
                             SettingsUi::CONTROLS.icon_button_size,
@@ -135,6 +137,7 @@ pub(super) fn action_card(
         card_header(ui, icon, title, Some(description), |ui| {
             clicked = phosphor_button(
                 ui,
+                ("settings_action_card", title),
                 icon,
                 egui::vec2(
                     SettingsUi::CONTROLS.icon_button_size,
@@ -199,7 +202,7 @@ pub(super) fn inner_divider(ui: &mut egui::Ui) {
     let width = SettingsUi::divider_width(ui);
     ui.horizontal(|ui| {
         ui.add_space(40.0);
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 1.0), egui::Sense::hover());
+        let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(width, 1.0));
         ui.painter()
             .rect_filled(rect, 0.0, SettingsUi::card_border(ui).gamma_multiply(0.7));
     });
@@ -207,7 +210,12 @@ pub(super) fn inner_divider(ui: &mut egui::Ui) {
 
 pub(super) fn radio_option_row(ui: &mut egui::Ui, value: &mut bool, label: &str) -> egui::Response {
     ui.add_space(2.0);
-    ui.add(egui::RadioButton::new(*value, label))
+    widget_ids::surface_response(
+        ui,
+        ("settings.radio_option", label),
+        widget_ids::WidgetRole::RadioOption,
+        |ui| ui.add(egui::RadioButton::new(*value, label)),
+    )
 }
 
 pub(super) fn render_preview_panel(ui: &mut egui::Ui, app: &ScratchpadApp) {
@@ -288,7 +296,7 @@ pub(super) fn clickable_card_header(
     widget_ids::interact(
         ui,
         inner.response.rect,
-        id,
+        widget_ids::child(id, widget_ids::WidgetRole::SettingsCardHeader),
         egui::Sense::click(),
         "settings_card_header",
     )
@@ -349,9 +357,16 @@ fn icon_slot(ui: &mut egui::Ui, icon: &str) {
     });
 }
 
-fn toggle_switch(ui: &mut egui::Ui, value: &mut bool) -> egui::Response {
+fn toggle_switch(ui: &mut egui::Ui, surface_key: impl Hash, value: &mut bool) -> egui::Response {
     let desired_size = egui::vec2(42.0, 22.0);
-    let (rect, mut response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+    let mut response = widget_ids::allocate_exact_interact(
+        ui,
+        desired_size,
+        widget_ids::surface_role(surface_key, widget_ids::WidgetRole::ToggleSwitch),
+        egui::Sense::click(),
+        "settings_toggle_switch",
+    );
+    let rect = response.rect;
     if response.clicked() {
         *value = !*value;
         response.mark_changed();
@@ -412,14 +427,21 @@ fn value_pill(ui: &mut egui::Ui, text: &str, width: f32) {
             ui.set_max_width(content_width);
             ui.set_min_height(ui.spacing().interact_size.y);
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.add_sized(
-                    egui::vec2(content_width, 0.0),
-                    egui::Label::new(
-                        egui::RichText::new(text)
-                            .size(SettingsUi::TYPOGRAPHY.description)
-                            .color(text_muted(ui)),
-                    )
-                    .truncate(),
+                widget_ids::surface_response(
+                    ui,
+                    ("settings.value_pill", text),
+                    widget_ids::WidgetRole::Label,
+                    |ui| {
+                        ui.add_sized(
+                            egui::vec2(content_width, 0.0),
+                            egui::Label::new(
+                                egui::RichText::new(text)
+                                    .size(SettingsUi::TYPOGRAPHY.description)
+                                    .color(text_muted(ui)),
+                            )
+                            .truncate(),
+                        )
+                    },
                 );
             });
         });

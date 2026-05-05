@@ -37,7 +37,7 @@ fn divider_response(
     widget_ids::interact(
         ui,
         divider_hit_rect(rect, axis, ratio),
-        widget_ids::local(ui, ("split_divider", path)),
+        widget_ids::root_id(("split_divider", path)),
         egui::Sense::click_and_drag(),
         "split_divider",
     )

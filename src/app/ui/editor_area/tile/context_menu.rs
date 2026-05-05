@@ -4,6 +4,7 @@ use crate::app::commands::AppCommand;
 use crate::app::domain::SplitAxis;
 use crate::app::theme::*;
 use crate::app::ui::tile_header::TileAction;
+use crate::app::ui::widget_ids;
 use eframe::egui;
 use egui_phosphor::regular::{
     ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_LEFT, ARROW_LINE_UP, ARROW_RIGHT,
@@ -22,7 +23,7 @@ pub(super) fn attach_editor_context_menu(
     tile_response: &egui::Response,
     _ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
-    request: TileRenderRequest,
+    request: &TileRenderRequest,
     actions: &mut Vec<TileAction>,
 ) {
     activate_inactive_tile_on_secondary_click(app, tile_response, request);
@@ -46,7 +47,7 @@ pub(super) fn attach_editor_context_menu(
 pub(super) fn activate_inactive_tile_on_secondary_click(
     app: &mut ScratchpadApp,
     tile_response: &egui::Response,
-    request: TileRenderRequest,
+    request: &TileRenderRequest,
 ) {
     if tile_response.secondary_clicked() && !request.is_active {
         app.activate_view(request.view_id);
@@ -123,7 +124,7 @@ fn render_file_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp, save_existing: b
 fn render_tile_menu(
     ui: &mut egui::Ui,
     actions: &mut Vec<TileAction>,
-    request: TileRenderRequest,
+    request: &TileRenderRequest,
     can_promote: bool,
 ) {
     split_menu_row(ui, actions);
@@ -257,11 +258,18 @@ fn menu_action_button(ui: &mut egui::Ui, label: &str, icon: Option<&str>, enable
         None => label.to_owned(),
     };
     with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        ui.add_enabled(
-            enabled,
-            egui::Button::new(egui::RichText::new(text).color(text_primary(ui)))
-                .min_size(egui::vec2(EDITOR_CONTEXT_MENU_WIDTH, 28.0))
-                .stroke(egui::Stroke::NONE),
+        widget_ids::surface_response(
+            ui,
+            ("editor_context.menu_action", label),
+            widget_ids::WidgetRole::ActionButton,
+            |ui| {
+                ui.add_enabled(
+                    enabled,
+                    egui::Button::new(egui::RichText::new(text).color(text_primary(ui)))
+                        .min_size(egui::vec2(EDITOR_CONTEXT_MENU_WIDTH, 28.0))
+                        .stroke(egui::Stroke::NONE),
+                )
+            },
         )
         .clicked()
     })
@@ -282,12 +290,19 @@ fn split_menu_row(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
 
 fn split_menu_button(ui: &mut egui::Ui, label: &str, icon: &str) -> bool {
     with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        ui.add(
-            egui::Button::new(
-                egui::RichText::new(format!("{icon}  {label}")).color(text_primary(ui)),
-            )
-            .min_size(egui::vec2(EDITOR_CONTEXT_SUBMENU_WIDTH, 28.0))
-            .stroke(egui::Stroke::NONE),
+        widget_ids::surface_response(
+            ui,
+            ("editor_context.split_submenu", label),
+            widget_ids::WidgetRole::ActionButton,
+            |ui| {
+                ui.add(
+                    egui::Button::new(
+                        egui::RichText::new(format!("{icon}  {label}")).color(text_primary(ui)),
+                    )
+                    .min_size(egui::vec2(EDITOR_CONTEXT_SUBMENU_WIDTH, 28.0))
+                    .stroke(egui::Stroke::NONE),
+                )
+            },
         )
         .clicked()
     })
@@ -295,13 +310,20 @@ fn split_menu_button(ui: &mut egui::Ui, label: &str, icon: &str) -> bool {
 
 fn render_split_primary_button(ui: &mut egui::Ui) -> bool {
     with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let response = ui.add(
-            egui::Button::new("")
-                .min_size(egui::vec2(
-                    EDITOR_CONTEXT_MENU_WIDTH - EDITOR_CONTEXT_CARET_WIDTH,
-                    28.0,
-                ))
-                .stroke(egui::Stroke::NONE),
+        let response = widget_ids::surface_response(
+            ui,
+            "editor_context.split_primary",
+            widget_ids::WidgetRole::ActionButton,
+            |ui| {
+                ui.add(
+                    egui::Button::new("")
+                        .min_size(egui::vec2(
+                            EDITOR_CONTEXT_MENU_WIDTH - EDITOR_CONTEXT_CARET_WIDTH,
+                            28.0,
+                        ))
+                        .stroke(egui::Stroke::NONE),
+                )
+            },
         );
         ui.painter().text(
             response.rect.left_center() + egui::vec2(10.0, 0.0),
@@ -320,20 +342,22 @@ fn render_split_submenu(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
             .min_size(egui::vec2(EDITOR_CONTEXT_CARET_WIDTH, 28.0))
             .stroke(egui::Stroke::NONE);
 
-        egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
-            set_menu_width(ui, EDITOR_CONTEXT_SUBMENU_WIDTH);
+        widget_ids::surface_widget(ui, "editor_context.split_caret", "submenu", |ui| {
+            egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
+                set_menu_width(ui, EDITOR_CONTEXT_SUBMENU_WIDTH);
 
-            for (label, icon, direction) in [
-                ("Split Left", ARROW_LEFT, SplitDirection::Left),
-                ("Split Right", ARROW_RIGHT, SplitDirection::Right),
-                ("Split Up", ARROW_UP, SplitDirection::Up),
-                ("Split Down", ARROW_DOWN, SplitDirection::Down),
-            ] {
-                if split_menu_button(ui, label, icon) {
-                    queue_split_action(actions, direction);
-                    ui.close();
+                for (label, icon, direction) in [
+                    ("Split Left", ARROW_LEFT, SplitDirection::Left),
+                    ("Split Right", ARROW_RIGHT, SplitDirection::Right),
+                    ("Split Up", ARROW_UP, SplitDirection::Up),
+                    ("Split Down", ARROW_DOWN, SplitDirection::Down),
+                ] {
+                    if split_menu_button(ui, label, icon) {
+                        queue_split_action(actions, direction);
+                        ui.close();
+                    }
                 }
-            }
+            });
         });
     });
 }
@@ -388,7 +412,13 @@ fn icon_rail_button(ui: &mut egui::Ui, icon: &str, tooltip: &str, enabled: bool)
         .stroke(egui::Stroke::new(1.0, border(ui)))
         .corner_radius(egui::CornerRadius::same(8));
 
-        ui.add_enabled(enabled, button).on_hover_text(tooltip)
+        widget_ids::surface_response(
+            ui,
+            ("editor_context.icon_rail", tooltip),
+            widget_ids::WidgetRole::IconButton,
+            |ui| ui.add_enabled(enabled, button),
+        )
+        .on_hover_text(tooltip)
     })
 }
 

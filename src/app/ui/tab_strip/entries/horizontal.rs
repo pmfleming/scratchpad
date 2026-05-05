@@ -198,17 +198,15 @@ fn show_scrolling_tab_strip(
 
 fn render_new_tab_action(ui: &mut egui::Ui, app: &mut ScratchpadApp, spacing: f32) {
     ui.add_space(spacing);
-    if widget_ids::scope(ui, "horizontal_new_tab", |ui| {
-        crate::app::chrome::phosphor_button(
-            ui,
-            egui_phosphor::regular::PLUS,
-            BUTTON_SIZE,
-            action_bg(ui),
-            action_hover_bg(ui),
-            "New Tab",
-        )
-    })
-    .inner
+    if crate::app::chrome::phosphor_button(
+        ui,
+        "horizontal_new_tab",
+        egui_phosphor::regular::PLUS,
+        BUTTON_SIZE,
+        action_bg(ui),
+        action_hover_bg(ui),
+        "New Tab",
+    )
     .clicked()
     {
         app.handle_command(AppCommand::NewTab);

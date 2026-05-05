@@ -277,25 +277,30 @@ fn render_save_conflict_dialog(
 
     callout::apply_spacing(ui);
 
-    if callout::header_row(ui, "Close file change prompt", |ui| {
-        ui.label(
-            egui::RichText::new(WARNING)
-                .size(16.0)
-                .color(callout::muted_text(ui)),
-        );
-        ui.vertical(|ui| {
+    if callout::header_row(
+        ui,
+        "pending_file_change.header",
+        "Close file change prompt",
+        |ui| {
             ui.label(
-                egui::RichText::new(state.title)
-                    .size(15.0)
-                    .color(callout::text(ui)),
-            );
-            ui.label(
-                egui::RichText::new("Resolve the on-disk mismatch before continuing.")
-                    .size(11.5)
+                egui::RichText::new(WARNING)
+                    .size(16.0)
                     .color(callout::muted_text(ui)),
             );
-        });
-    }) {
+            ui.vertical(|ui| {
+                ui.label(
+                    egui::RichText::new(state.title)
+                        .size(15.0)
+                        .color(callout::text(ui)),
+                );
+                ui.label(
+                    egui::RichText::new("Resolve the on-disk mismatch before continuing.")
+                        .size(11.5)
+                        .color(callout::muted_text(ui)),
+                );
+            });
+        },
+    ) {
         *close_requested = true;
     }
 
@@ -310,6 +315,7 @@ fn render_save_conflict_dialog(
     ui.horizontal_wrapped(|ui| {
         if render_dialog_action_button(
             ui,
+            "save_conflict.overwrite",
             FLOPPY_DISK,
             state.primary_action_label(),
             "Write the current buffer back to disk",
@@ -322,6 +328,7 @@ fn render_save_conflict_dialog(
         if state.can_reload()
             && render_dialog_action_button(
                 ui,
+                "save_conflict.reload",
                 ARROW_CLOCKWISE,
                 "Reload",
                 "Discard local buffer state and reload from disk",
@@ -335,6 +342,7 @@ fn render_save_conflict_dialog(
 
         if render_dialog_action_button(
             ui,
+            "save_conflict.save_as_copy",
             COPY,
             "Save As Copy",
             "Keep this buffer by saving it to a new file",
@@ -343,7 +351,13 @@ fn render_save_conflict_dialog(
             clear_pending_action(app);
         }
 
-        if render_dialog_action_button(ui, X, "Cancel", "Dismiss this prompt") {
+        if render_dialog_action_button(
+            ui,
+            "save_conflict.cancel",
+            X,
+            "Cancel",
+            "Dismiss this prompt",
+        ) {
             *close_requested = true;
         }
     });

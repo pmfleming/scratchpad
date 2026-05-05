@@ -84,7 +84,14 @@ fn text_history_budget_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             );
             inner_select_row(ui, "Automatic defaults", Some(auto_label(&budget)), |ui| {
                 fixed_width_control(ui, |ui| {
-                    if ui.button("Reset to auto").clicked() {
+                    if widget_ids::surface_response(
+                        ui,
+                        "settings.history_budget.reset_auto",
+                        widget_ids::WidgetRole::ActionButton,
+                        |ui| ui.button("Reset to auto"),
+                    )
+                    .clicked()
+                    {
                         app.reset_history_budget_to_auto();
                     }
                 });
@@ -106,7 +113,12 @@ fn budget_row(
 ) {
     inner_select_row(ui, label, Some(&format!("Auto: {auto_value}")), |ui| {
         fixed_width_control(ui, |ui| {
-            ui.add(egui::DragValue::new(value).range(min..=max).speed(10));
+            widget_ids::surface_response(
+                ui,
+                ("settings.history_budget.drag", label),
+                widget_ids::WidgetRole::ActionButton,
+                |ui| ui.add(egui::DragValue::new(value).range(min..=max).speed(10)),
+            );
         });
     });
 }
@@ -127,7 +139,12 @@ fn byte_budget_row(
         |ui| {
             fixed_width_control(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut mib).range(min_mib..=max_mib));
+                    widget_ids::surface_response(
+                        ui,
+                        ("settings.history_budget.byte_drag", label),
+                        widget_ids::WidgetRole::ActionButton,
+                        |ui| ui.add(egui::DragValue::new(&mut mib).range(min_mib..=max_mib)),
+                    );
                     ui.label("MiB");
                 });
             });

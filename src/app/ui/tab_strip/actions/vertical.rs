@@ -138,6 +138,19 @@ enum VerticalAction {
     CloseWindow,
 }
 
+impl VerticalAction {
+    fn id_key(self) -> &'static str {
+        match self {
+            Self::OpenFile => "vertical_primary_open_file",
+            Self::SaveFile => "vertical_primary_save_file",
+            Self::Search => "vertical_primary_search",
+            Self::Minimize => "vertical_caption_minimize",
+            Self::ToggleMaximize => "vertical_caption_maximize",
+            Self::CloseWindow => "vertical_caption_close",
+        }
+    }
+}
+
 fn handle_vertical_action(ctx: &egui::Context, app: &mut ScratchpadApp, action: VerticalAction) {
     match action {
         VerticalAction::OpenFile => app.handle_command(AppCommand::OpenFile),
@@ -231,6 +244,7 @@ fn render_button(
     };
     if phosphor_button(
         ui,
+        button.action.id_key(),
         button.icon,
         button_size,
         background,

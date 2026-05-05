@@ -1,5 +1,6 @@
 use crate::app::domain::BufferState;
 use crate::app::ui::scrolling::{DisplayRow, DisplaySnapshot};
+use crate::app::ui::widget_ids::{self, WidgetRole};
 use eframe::egui;
 
 pub fn render_line_number_gutter(
@@ -97,7 +98,14 @@ fn render_gutter_rows(
     rows: impl Iterator<Item = (f32, usize)>,
 ) {
     let desired_size = egui::vec2(ui.available_width(), desired_height);
-    let (rect, _) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
+    let response = widget_ids::allocate_exact_rect_interact(
+        ui,
+        desired_size,
+        ("editor_gutter", WidgetRole::TextEdit),
+        egui::Sense::hover(),
+        "editor_gutter",
+    );
+    let rect = response.rect;
     let painter = ui.painter();
 
     for (row_top, line_number) in rows {

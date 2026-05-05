@@ -1,16 +1,19 @@
 use crate::app::theme::*;
 use crate::app::ui::transition;
-use crate::app::ui::widget_ids;
+use crate::app::ui::widget_ids::{self, WidgetRole};
 use eframe::egui::{self, Rect, Sense, Stroke, Vec2};
+use std::hash::Hash;
 
 struct TabButtonFrame {
     rect: Rect,
     response: egui::Response,
     drag_in_progress: bool,
+    surface_id: egui::Id,
 }
 
 pub fn tab_button(
     ui: &mut egui::Ui,
+    surface_key: impl Hash,
     label: &str,
     active: bool,
     selected: bool,
@@ -18,6 +21,7 @@ pub fn tab_button(
 ) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
     tab_button_with_actions(
         ui,
+        surface_key,
         label,
         active,
         selected,
@@ -28,13 +32,14 @@ pub fn tab_button(
 
 pub fn tab_button_with_actions(
     ui: &mut egui::Ui,
+    surface_key: impl Hash,
     label: &str,
     active: bool,
     selected: bool,
     show_promote_all: bool,
     width: f32,
 ) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
-    let frame = allocate_tab_button_frame(ui, width);
+    let frame = allocate_tab_button_frame(ui, width, surface_key);
     paint_tab_background(
         ui,
         frame.rect,
@@ -45,21 +50,24 @@ pub fn tab_button_with_actions(
     );
     let promote_rect = show_promote_all.then(|| tab_promote_rect(frame.rect));
     let truncated = paint_tab_label(ui, frame.rect, label, show_promote_all);
-    let promote_response = promote_rect
-        .map(|promote_rect| render_tab_promote_button(ui, promote_rect, frame.drag_in_progress));
-    let (_, close_response) = render_tab_close_button(ui, frame.rect, frame.drag_in_progress);
+    let promote_response = promote_rect.map(|promote_rect| {
+        render_tab_promote_button(ui, promote_rect, frame.surface_id, frame.drag_in_progress)
+    });
+    let (_, close_response) =
+        render_tab_close_button(ui, frame.rect, frame.surface_id, frame.drag_in_progress);
 
     (frame.response, promote_response, close_response, truncated)
 }
 
 pub fn tab_button_sized(
     ui: &mut egui::Ui,
+    surface_key: impl Hash,
     label: &str,
     active: bool,
     selected: bool,
     width: f32,
 ) -> (egui::Response, egui::Response, bool) {
-    let frame = allocate_tab_button_frame(ui, width);
+    let frame = allocate_tab_button_frame(ui, width, surface_key);
     paint_tab_background(
         ui,
         frame.rect,
@@ -69,31 +77,42 @@ pub fn tab_button_sized(
         frame.drag_in_progress,
     );
     let truncated = paint_tab_label(ui, frame.rect, label, false);
-    let (_, close_response) = render_tab_close_button(ui, frame.rect, frame.drag_in_progress);
+    let (_, close_response) =
+        render_tab_close_button(ui, frame.rect, frame.surface_id, frame.drag_in_progress);
 
     (frame.response, close_response, truncated)
 }
 
 pub fn tab_button_sized_with_actions(
     ui: &mut egui::Ui,
+    surface_key: impl Hash,
     label: &str,
     active: bool,
     selected: bool,
     show_promote_all: bool,
     width: f32,
 ) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
-    tab_button_with_actions(ui, label, active, selected, show_promote_all, width)
+    tab_button_with_actions(
+        ui,
+        surface_key,
+        label,
+        active,
+        selected,
+        show_promote_all,
+        width,
+    )
 }
 
 pub fn tab_rename_editor_sized(
     ui: &mut egui::Ui,
+    surface_key: impl Hash,
     text: &mut String,
     active: bool,
     selected: bool,
     width: f32,
     request_focus: bool,
 ) -> (egui::Rect, egui::Response) {
-    let frame = allocate_tab_button_frame(ui, width);
+    let frame = allocate_tab_button_frame(ui, width, surface_key);
     paint_tab_background(
         ui,
         frame.rect,
@@ -110,7 +129,10 @@ pub fn tab_rename_editor_sized(
     let response = ui.put(
         text_rect,
         egui::TextEdit::singleline(text)
-            .id(widget_ids::child(ui.id(), "rename_editor"))
+            .id(widget_ids::child(
+                frame.surface_id,
+                WidgetRole::TabRenameEditor,
+            ))
             .frame(egui::Frame::NONE)
             .desired_width(text_rect.width())
             .margin(egui::Margin::symmetric(4, 6))
@@ -161,13 +183,18 @@ fn paint_selected_tab_overlay(ui: &egui::Ui, rect: Rect) {
     );
 }
 
-fn allocate_tab_button_frame(ui: &mut egui::Ui, width: f32) -> TabButtonFrame {
+fn allocate_tab_button_frame(
+    ui: &mut egui::Ui,
+    width: f32,
+    surface_key: impl Hash,
+) -> TabButtonFrame {
     let size = Vec2::new(width, TAB_HEIGHT);
     let (_, rect) = ui.allocate_space(size);
+    let surface_id = widget_ids::surface_id(&surface_key);
     let response = widget_ids::interact(
         ui,
         rect,
-        widget_ids::child(ui.id(), "tab_button"),
+        widget_ids::rect_surface_id(rect, WidgetRole::TabButton),
         Sense::click_and_drag(),
         "tab_button",
     );
@@ -176,6 +203,7 @@ fn allocate_tab_button_frame(ui: &mut egui::Ui, width: f32) -> TabButtonFrame {
         rect,
         response,
         drag_in_progress: transition::suppress_interactive_chrome(ui.ctx()),
+        surface_id,
     }
 }
 
@@ -210,12 +238,13 @@ fn tab_promote_rect(tab_rect: Rect) -> Rect {
 fn render_tab_promote_button(
     ui: &mut egui::Ui,
     promote_rect: Rect,
+    _surface_id: egui::Id,
     drag_in_progress: bool,
 ) -> egui::Response {
     let promote_response = widget_ids::interact(
         ui,
         promote_rect,
-        widget_ids::child(ui.id(), "promote_all"),
+        widget_ids::rect_surface_id(promote_rect, WidgetRole::TabPromote),
         Sense::click(),
         "tab_promote",
     );
@@ -236,6 +265,7 @@ fn render_tab_promote_button(
 fn render_tab_close_button(
     ui: &mut egui::Ui,
     tab_rect: Rect,
+    _surface_id: egui::Id,
     drag_in_progress: bool,
 ) -> (Rect, egui::Response) {
     let close_rect = Rect::from_center_size(
@@ -246,7 +276,7 @@ fn render_tab_close_button(
     let close_response = widget_ids::interact(
         ui,
         close_rect,
-        widget_ids::child(ui.id(), "close"),
+        widget_ids::rect_surface_id(close_rect, WidgetRole::TabClose),
         Sense::click(),
         "tab_close",
     );

@@ -51,10 +51,16 @@ impl<'a> TileControl<'a> {
         self,
         ui: &mut egui::Ui,
         rect: egui::Rect,
-        id: egui::Id,
+        _id: egui::Id,
         sense: egui::Sense,
     ) -> egui::Response {
-        let response = widget_ids::interact(ui, rect, id, sense, "tile_header_control");
+        let response = widget_ids::interact(
+            ui,
+            rect,
+            widget_ids::rect_surface_id(rect, "tile_header_control"),
+            sense,
+            "tile_header_control",
+        );
         let drag_in_progress = transition::suppress_interactive_chrome(ui.ctx());
 
         if self.visibility > 0.0 {

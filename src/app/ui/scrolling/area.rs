@@ -1,4 +1,4 @@
-use eframe::egui::{self, Id, Rect, Sense, Ui, UiBuilder, Vec2, epaint::Shape, pos2, vec2};
+use eframe::egui::{self, Id, Rect, Sense, Ui, Vec2, epaint::Shape, pos2, vec2};
 
 use crate::app::ui::widget_ids;
 
@@ -20,6 +20,7 @@ pub struct ScrollAreaOutput<R> {
 /// Local replacement for `egui::ScrollArea` tailored to the editor.
 pub struct ScrollArea {
     id: Id,
+    interaction_id: Id,
     source: ScrollSource,
     scrollbar_x: ScrollbarPolicy,
     scrollbar_y: ScrollbarPolicy,
@@ -32,8 +33,10 @@ pub struct ScrollArea {
 
 impl ScrollArea {
     pub fn new(id: impl Into<Id>) -> Self {
+        let id = id.into();
         Self {
-            id: id.into(),
+            id,
+            interaction_id: id,
             source: ScrollSource::EDITOR,
             scrollbar_x: ScrollbarPolicy::VisibleWhenNeeded,
             scrollbar_y: ScrollbarPolicy::VisibleWhenNeeded,
@@ -46,6 +49,11 @@ impl ScrollArea {
 
     pub fn source(mut self, source: ScrollSource) -> Self {
         self.source = source;
+        self
+    }
+
+    pub fn interaction_id(mut self, id: impl Into<Id>) -> Self {
+        self.interaction_id = id.into();
         self
     }
 
@@ -91,6 +99,7 @@ impl ScrollArea {
         let mut state = ScrollState::load(ui, self.id);
         state.sanitize();
         state.content_size = content_size_with_minimum(state.content_size, self.min_content_size);
+        let layout_state = pass_stable_layout_state(ui, self.id, state);
 
         let outer_rect = scroll_area_outer_rect(ui, self.max_size);
 
@@ -101,7 +110,7 @@ impl ScrollArea {
             self.scrollbar_x,
             self.scrollbar_y,
             self.scrollbar_thickness,
-            &state,
+            &layout_state,
             outer_rect,
         );
         let inner_rect = inner_rect_for_bars(outer_rect, bars);
@@ -113,7 +122,7 @@ impl ScrollArea {
         let outer_response = widget_ids::interact(
             ui,
             outer_rect,
-            self.id.with("__outer"),
+            self.interaction_id.with("__outer"),
             Sense::hover(),
             "scroll_area_outer",
         );
@@ -141,12 +150,11 @@ impl ScrollArea {
 
         // Paint scrollbars and handle drag.
         let mut paint_scrollbar =
-            |axis: Axis, id_suffix: &str, cross_gap: f32, state: &mut ScrollState| {
+            |axis: Axis, _id_suffix: &str, cross_gap: f32, state: &mut ScrollState| {
                 paint_visible_scrollbar(
                     ui,
                     state,
                     ScrollbarPaintRequest {
-                        id: self.id.with(id_suffix),
                         outer_rect,
                         axis,
                         thickness: self.scrollbar_thickness,
@@ -179,6 +187,20 @@ impl ScrollArea {
             did_scroll,
         }
     }
+}
+
+fn pass_stable_layout_state(ui: &Ui, id: Id, state: ScrollState) -> ScrollState {
+    let snapshot_id = widget_ids::child(id, "__pass_layout_state");
+    if ui.ctx().current_pass_index() == 0 {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(snapshot_id, state);
+        });
+        return state;
+    }
+
+    ui.ctx()
+        .data(|data| data.get_temp::<ScrollState>(snapshot_id))
+        .unwrap_or(state)
 }
 
 #[derive(Clone, Copy)]
@@ -247,7 +269,6 @@ struct ScrollbarGeometry {
 }
 
 struct ScrollbarPaintRequest {
-    id: Id,
     outer_rect: Rect,
     axis: Axis,
     thickness: f32,
@@ -345,11 +366,9 @@ fn apply_mouse_wheel(ui: &Ui, hovered: bool, source: ScrollSource, state: &mut S
 }
 
 fn clipped_content_ui(ui: &mut Ui, inner_rect: Rect, offset: Vec2, child_size: Vec2) -> Ui {
-    let mut content_ui = ui.new_child(
-        UiBuilder::new()
-            .max_rect(Rect::from_min_size(inner_rect.min - offset, child_size))
-            .layout(*ui.layout()),
-    );
+    let content_rect = Rect::from_min_size(inner_rect.min - offset, child_size);
+    let mut content_ui =
+        widget_ids::rect_child_ui(ui, content_rect, "scroll_content", *ui.layout());
     content_ui.set_clip_rect(inner_rect);
     content_ui
 }
@@ -397,7 +416,6 @@ fn child_content_rect_size(content_size: Vec2, viewport_size: Vec2) -> Vec2 {
 
 fn paint_and_handle_scrollbar(
     ui: &mut Ui,
-    id: Id,
     bar_rect: Rect,
     axis: Axis,
     state: &mut ScrollState,
@@ -413,7 +431,13 @@ fn paint_and_handle_scrollbar(
     } else {
         Sense::hover()
     };
-    let response = widget_ids::interact(ui, bar_rect, id, sense, "scrollbar");
+    let response = widget_ids::interact(
+        ui,
+        bar_rect,
+        widget_ids::rect_surface_id(bar_rect, "scrollbar"),
+        sense,
+        "scrollbar",
+    );
 
     if interactive {
         handle_scrollbar_drag(ui, &response, bar_rect, axis, state, &geometry);
@@ -521,7 +545,6 @@ fn start_scrollbar_drag(
 fn paint_visible_scrollbar(ui: &mut Ui, state: &mut ScrollState, request: ScrollbarPaintRequest) {
     paint_and_handle_scrollbar(
         ui,
-        request.id,
         scrollbar_bar_rect(
             request.axis,
             request.outer_rect,

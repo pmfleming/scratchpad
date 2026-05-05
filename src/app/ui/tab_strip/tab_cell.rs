@@ -34,13 +34,14 @@ pub(crate) fn render_tab_cell_sized(
     index: usize,
     props: TabCellProps<'_>,
 ) -> TabCellOutcome {
-    widget_ids::scope(ui, ("tab_strip", index), |ui| {
+    widget_ids::surface_scope(ui, ("tab_strip.slot", index), |ui| {
         if app.tab_rename_matches_slot(index) {
             return render_tab_rename_cell(ui, app, index, props);
         }
 
         let (tab_response, promote_response, close_response, truncated) = tab_button_with_width(
             ui,
+            index,
             props.display_name,
             props.is_active,
             props.is_selected,
@@ -107,6 +108,7 @@ fn render_tab_rename_cell(
             .expect("rename draft should exist for matching tab slot");
         tab_rename_editor_sized(
             ui,
+            ("tab_strip.slot", index),
             draft,
             props.is_active,
             props.is_selected,
@@ -138,6 +140,7 @@ fn render_tab_rename_cell(
 
 fn tab_button_with_width(
     ui: &mut egui::Ui,
+    index: usize,
     display_name: &str,
     is_active: bool,
     is_selected: bool,
@@ -147,6 +150,7 @@ fn tab_button_with_width(
     if (width - crate::app::theme::TAB_BUTTON_WIDTH).abs() <= f32::EPSILON {
         tab_button(
             ui,
+            ("tab_strip.slot", index),
             display_name,
             is_active,
             is_selected,
@@ -155,6 +159,7 @@ fn tab_button_with_width(
     } else {
         crate::app::chrome::tab_button_sized_with_actions(
             ui,
+            ("tab_strip.slot", index),
             display_name,
             is_active,
             is_selected,

@@ -81,6 +81,9 @@ pub struct FileContent {
 impl FileService {
     pub fn read_disk_state(path: &Path) -> io::Result<DiskFileState> {
         let metadata = std::fs::metadata(path).inspect_err(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                return;
+            }
             diagnostics::record_io_error(
                 "read_disk_state",
                 Some(path),

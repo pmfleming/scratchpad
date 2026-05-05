@@ -1,7 +1,7 @@
 mod context_menu;
 
 use crate::app::app_state::ScratchpadApp;
-use crate::app::domain::{ViewId, WorkspaceTab};
+use crate::app::domain::{SplitPath, ViewId, WorkspaceTab};
 use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::theme::*;
 use crate::app::ui::autoscroll::{AutoScrollAxis, AutoScrollConfig, edge_auto_scroll_velocity};
@@ -43,10 +43,11 @@ struct TileBodyOutcome {
     interaction_response: Option<egui::Response>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct TileRenderRequest {
     pub(super) tab_index: usize,
     pub(super) view_id: ViewId,
+    pub(super) pane_path: SplitPath,
     pub(super) rect: egui::Rect,
     pub(super) is_active: bool,
     pub(super) can_close: bool,
@@ -60,6 +61,7 @@ pub(super) struct TileRenderState<'a> {
 
 struct TileScrollRequest<'a> {
     view_id: ViewId,
+    pane_path: &'a SplitPath,
     scroll_bar_visibility: egui::scroll_area::ScrollBarVisibility,
     content_style: EditorContentStyle<'a>,
 }
@@ -70,115 +72,123 @@ pub(super) fn render_tile(
     request: TileRenderRequest,
     state: &mut TileRenderState<'_>,
 ) {
-    ui.scope_builder(tile_ui_builder(request.rect), |ui| {
-        let tile_response = handle_tile_click(ui, app, request, state.actions);
-        paint_tile_frame(
-            ui,
-            request.rect,
-            request.is_active,
-            app.editor_background_color(),
-        );
+    widget_ids::rect_scope_with_layout(
+        ui,
+        request.rect,
+        "tile.root",
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| {
+            let tile_response = handle_tile_click(ui, app, &request, state.actions);
+            paint_tile_frame(
+                ui,
+                request.rect,
+                request.is_active,
+                app.editor_background_color(),
+            );
 
-        let body_outcome = render_tile_body(ui, app, request);
-        let context_menu_response = body_outcome
-            .interaction_response
-            .as_ref()
-            .unwrap_or(&tile_response);
-        *state.any_editor_changed |= body_outcome.changed;
-        apply_tile_body_focus(
-            body_outcome.focused,
-            request.is_active,
-            request.view_id,
-            state.actions,
-        );
-        tile_header::render_tile_header(
-            ui,
-            app,
-            TileHeaderRequest {
-                tab_index: request.tab_index,
-                view_id: request.view_id,
-                tile_rect: request.rect,
-                can_close: request.can_close,
-            },
-            &mut TileHeaderState {
-                actions: state.actions,
-                preview_overlay: state.preview_overlay,
-            },
-        );
-        context_menu::attach_editor_context_menu(
-            context_menu_response,
-            ui,
-            app,
-            request,
-            state.actions,
-        );
-    });
+            let body_outcome = render_tile_body(ui, app, &request);
+            let context_menu_response = body_outcome
+                .interaction_response
+                .as_ref()
+                .unwrap_or(&tile_response);
+            *state.any_editor_changed |= body_outcome.changed;
+            apply_tile_body_focus(
+                body_outcome.focused,
+                request.is_active,
+                request.view_id,
+                state.actions,
+            );
+            tile_header::render_tile_header(
+                ui,
+                app,
+                TileHeaderRequest {
+                    tab_index: request.tab_index,
+                    view_id: request.view_id,
+                    pane_path: request.pane_path.clone(),
+                    tile_rect: request.rect,
+                    can_close: request.can_close,
+                },
+                &mut TileHeaderState {
+                    actions: state.actions,
+                    preview_overlay: state.preview_overlay,
+                },
+            );
+            context_menu::attach_editor_context_menu(
+                context_menu_response,
+                ui,
+                app,
+                &request,
+                state.actions,
+            );
+        },
+    );
 }
 
 fn render_tile_body(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
-    request: TileRenderRequest,
+    request: &TileRenderRequest,
 ) -> TileBodyOutcome {
-    ui.scope_builder(tile_ui_builder(request.rect), |ui| {
-        let request_focus = app.should_focus_view(request.view_id);
-        let editor_font_id = editor_font_id(app.font_size());
-        let content_style =
-            editor_content_style(app, request.is_active, request_focus, &editor_font_id);
-        let tab = &mut app.tabs_mut()[request.tab_index];
-        let Some(_buffer) = tab.buffer_for_view(request.view_id) else {
-            return TileBodyOutcome {
-                changed: false,
-                focused: false,
-                interaction_response: None,
+    widget_ids::rect_scope_with_layout(
+        ui,
+        request.rect,
+        "tile.body",
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| {
+            let request_focus = app.should_focus_view(request.view_id);
+            let editor_font_id = editor_font_id(app.font_size());
+            let content_style =
+                editor_content_style(app, request.is_active, request_focus, &editor_font_id);
+            let tab = &mut app.tabs_mut()[request.tab_index];
+            let Some(_buffer) = tab.buffer_for_view(request.view_id) else {
+                return TileBodyOutcome {
+                    changed: false,
+                    focused: false,
+                    interaction_response: None,
+                };
             };
-        };
-        let previous_snapshot = take_previous_snapshot(tab, request.view_id);
-        let outcome = show_editor_scroll_area(
-            ui,
-            tab,
-            TileScrollRequest {
-                view_id: request.view_id,
-                scroll_bar_visibility: editor_scroll_bar_visibility(ui.ctx()),
-                content_style: EditorContentStyle {
-                    previous_snapshot: previous_snapshot.as_ref(),
-                    ..content_style
+            let previous_snapshot = take_previous_snapshot(tab, request.view_id);
+            let outcome = show_editor_scroll_area(
+                ui,
+                tab,
+                TileScrollRequest {
+                    view_id: request.view_id,
+                    pane_path: &request.pane_path,
+                    scroll_bar_visibility: editor_scroll_bar_visibility(ui.ctx()),
+                    content_style: EditorContentStyle {
+                        previous_snapshot: previous_snapshot.as_ref(),
+                        ..content_style
+                    },
                 },
-            },
-        );
-        restore_previous_snapshot_if_needed(tab, request.view_id, previous_snapshot);
-        apply_tile_focus_request(
-            app,
-            request.view_id,
-            request_focus,
-            outcome.request_editor_focus,
-        );
+            );
+            restore_previous_snapshot_if_needed(tab, request.view_id, previous_snapshot);
+            apply_tile_focus_request(
+                app,
+                request.view_id,
+                request_focus,
+                outcome.request_editor_focus,
+            );
 
-        TileBodyOutcome {
-            changed: outcome.changed,
-            focused: outcome.focused,
-            interaction_response: outcome.interaction_response,
-        }
-    })
+            TileBodyOutcome {
+                changed: outcome.changed,
+                focused: outcome.focused,
+                interaction_response: outcome.interaction_response,
+            }
+        },
+    )
     .inner
-}
-
-fn tile_ui_builder(rect: egui::Rect) -> egui::UiBuilder {
-    egui::UiBuilder::new()
-        .max_rect(rect)
-        .layout(egui::Layout::top_down(egui::Align::Min))
 }
 
 fn handle_tile_click(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
-    request: TileRenderRequest,
+    request: &TileRenderRequest,
     actions: &mut Vec<TileAction>,
 ) -> egui::Response {
     let tile_response = widget_ids::interact(
         ui,
         request.rect,
-        widget_ids::local(ui, ("tile", request.tab_index, request.view_id)),
+        widget_ids::rect_surface_id(request.rect, "editor_tile"),
         egui::Sense::click(),
         "editor_tile",
     );
@@ -297,6 +307,10 @@ fn show_editor_scroll_area(
 ) -> EditorContentOutcome {
     let frame = prepare_editor_scroll_frame(ui, tab, request.view_id, &request.content_style);
     let output = scrolling::ScrollArea::new(frame.scroll_id)
+        .interaction_id(widget_ids::root_id((
+            "editor_scroll.interaction",
+            request.pane_path,
+        )))
         .source(local_scroll_source(request.scroll_bar_visibility))
         .scrollbar_x(scrollbar_policy_from_egui(request.scroll_bar_visibility))
         .scrollbar_y(scrollbar_policy_from_egui(request.scroll_bar_visibility))
@@ -311,13 +325,7 @@ fn show_editor_scroll_area(
             content_style.viewport = Some(viewport);
             tab.buffer_and_view_mut(request.view_id)
                 .map(|(buffer, view)| {
-                    editor_content::render_editor_content(
-                        ui,
-                        buffer,
-                        view,
-                        request.view_id,
-                        content_style,
-                    )
+                    editor_content::render_editor_content(ui, buffer, view, content_style)
                 })
                 .unwrap_or_else(missing_editor_content_outcome)
         });
@@ -570,7 +578,7 @@ fn drain_pending_scroll_intents(
 }
 
 fn sync_editor_scroll_state(ui: &egui::Ui, scroll_id: egui::Id, offset: egui::Vec2) {
-    let persistent_id = widget_ids::local(ui, ("editor_scroll_state", scroll_id));
+    let persistent_id = widget_ids::root_id(("editor_scroll_state", scroll_id));
     let mut state = egui::scroll_area::State::load(ui.ctx(), persistent_id).unwrap_or_default();
     if state.offset != offset {
         state.offset = offset;

@@ -146,13 +146,18 @@ fn render_encoding_dialog(
 }
 
 fn render_dialog_header(ui: &mut egui::Ui) -> bool {
-    callout::header_row(ui, "Close encoding actions", |ui| {
-        ui.label(
-            egui::RichText::new("Encoding")
-                .size(ENCODING_TITLE_SIZE)
-                .color(callout::text(ui)),
-        );
-    })
+    callout::header_row(
+        ui,
+        "encoding_dialog.header",
+        "Close encoding actions",
+        |ui| {
+            ui.label(
+                egui::RichText::new("Encoding")
+                    .size(ENCODING_TITLE_SIZE)
+                    .color(callout::text(ui)),
+            );
+        },
+    )
 }
 
 fn encoding_action_specs(state: &EncodingDialogState) -> [EncodingActionSpec<'static>; 2] {

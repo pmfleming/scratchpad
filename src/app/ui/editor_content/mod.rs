@@ -2,7 +2,7 @@ pub mod artifact;
 pub mod gutter;
 pub mod native_editor;
 
-use crate::app::domain::{BufferState, EditorViewState, ViewId};
+use crate::app::domain::{BufferState, EditorViewState};
 use crate::app::ui::scrolling::DisplaySnapshot;
 use crate::app::ui::widget_ids;
 use eframe::egui;
@@ -33,11 +33,11 @@ pub(crate) fn render_editor_content(
     ui: &mut egui::Ui,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
-    view_id: ViewId,
     style: EditorContentStyle<'_>,
 ) -> EditorContentOutcome {
     let gutter = i8::try_from(style.editor_gutter).unwrap_or(i8::MAX);
-    widget_ids::scope(ui, ("editor_content", view_id), |ui| {
+    let content_rect = ui.available_rect_before_wrap();
+    widget_ids::rect_scope(ui, content_rect, "editor_content", |ui| {
         egui::Frame::NONE
             .fill(style.background_color)
             .inner_margin(egui::Margin::same(gutter))

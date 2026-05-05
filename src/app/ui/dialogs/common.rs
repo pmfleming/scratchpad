@@ -1,8 +1,10 @@
 use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::theme::CAPTION_BUTTON_SIZE;
 use crate::app::ui::callout;
+use crate::app::ui::widget_ids;
 use eframe::egui;
 use egui_phosphor::regular::FILE_TEXT;
+use std::hash::Hash;
 
 pub(super) const ICON_CHOICE_BUTTON_SIZE: egui::Vec2 = egui::vec2(72.0, 54.0);
 
@@ -62,20 +64,27 @@ pub(super) fn render_dialog_header(ui: &mut egui::Ui, title: &str) -> bool {
 
             let label_width = (ui.available_width() - CAPTION_BUTTON_SIZE.x - 6.0).max(0.0);
             let label = truncate_dialog_title(ui, title, label_width);
-            let label_response = ui.add_sized(
-                egui::vec2(label_width, 0.0),
-                egui::Label::new(
-                    egui::RichText::new(&label)
-                        .size(15.0)
-                        .monospace()
-                        .color(callout::text(ui)),
-                ),
+            let label_response = widget_ids::surface_response(
+                ui,
+                ("dialog_header.title", title),
+                widget_ids::WidgetRole::Label,
+                |ui| {
+                    ui.add_sized(
+                        egui::vec2(label_width, 0.0),
+                        egui::Label::new(
+                            egui::RichText::new(&label)
+                                .size(15.0)
+                                .monospace()
+                                .color(callout::text(ui)),
+                        ),
+                    )
+                },
             );
             if label != title {
                 label_response.on_hover_text(title);
             }
 
-            callout::close_button(ui, "Cancel").clicked()
+            callout::close_button(ui, ("dialog_header", title), "Cancel").clicked()
         },
     )
     .inner
@@ -151,6 +160,7 @@ pub(super) fn render_icon_choice_dialog<T: Copy, const N: usize>(
         for (icon, tooltip, action) in actions {
             if callout::icon_button(
                 ui,
+                ("icon_choice", title, tooltip),
                 icon,
                 26.0,
                 ICON_CHOICE_BUTTON_SIZE,
@@ -169,19 +179,27 @@ pub(super) fn render_icon_choice_dialog<T: Copy, const N: usize>(
 
 pub(super) fn render_dialog_action_button(
     ui: &mut egui::Ui,
+    surface_key: impl Hash,
     icon: &str,
     label: &str,
     tooltip: &str,
 ) -> bool {
-    ui.add(
-        egui::Button::new(
-            egui::RichText::new(format!("{icon} {label}"))
-                .size(12.0)
-                .color(callout::text(ui)),
-        )
-        .fill(callout::section_fill(ui))
-        .corner_radius(egui::CornerRadius::same(8))
-        .min_size(egui::vec2(98.0, 34.0)),
+    widget_ids::surface_response(
+        ui,
+        surface_key,
+        widget_ids::WidgetRole::ActionButton,
+        |ui| {
+            ui.add(
+                egui::Button::new(
+                    egui::RichText::new(format!("{icon} {label}"))
+                        .size(12.0)
+                        .color(callout::text(ui)),
+                )
+                .fill(callout::section_fill(ui))
+                .corner_radius(egui::CornerRadius::same(8))
+                .min_size(egui::vec2(98.0, 34.0)),
+            )
+        },
     )
     .on_hover_text(tooltip)
     .clicked()

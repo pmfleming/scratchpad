@@ -2,7 +2,7 @@ pub mod control;
 pub mod split;
 
 use crate::app::app_state::ScratchpadApp;
-use crate::app::domain::ViewId;
+use crate::app::domain::{SplitPath, ViewId};
 use crate::app::ui::transition;
 use crate::app::ui::widget_ids;
 use eframe::egui;
@@ -13,6 +13,7 @@ pub use split::{SplitPreviewOverlay, TILE_GAP, TileAction, TileSplitHandler, pai
 pub(crate) struct TileHeaderRequest {
     pub(crate) tab_index: usize,
     pub(crate) view_id: ViewId,
+    pub(crate) pane_path: SplitPath,
     pub(crate) tile_rect: egui::Rect,
     pub(crate) can_close: bool,
 }
@@ -34,7 +35,7 @@ pub(crate) fn render_tile_header(
         .unwrap_or_else(|| app.tabs()[request.tab_index].display_name());
     let preview_lines = preview_lines_for_view(&app.tabs()[request.tab_index], request.view_id);
     let split_handler =
-        TileSplitHandler::new(ui, request.tab_index, request.view_id, request.tile_rect);
+        TileSplitHandler::new(&request.pane_path, request.view_id, request.tile_rect);
     let controls_visible = control_visibility(ui, &split_handler, request.tile_rect);
     if controls_visible <= 0.0 {
         return;
@@ -44,15 +45,14 @@ pub(crate) fn render_tile_header(
     let metrics = tile_control_metrics(request.tile_rect, request.can_close);
     let rects = tile_header_rects(request.tile_rect, can_promote, request.can_close, &metrics);
     let control = TileControlContext {
-        tab_index: request.tab_index,
-        view_id: request.view_id,
         font_size: metrics.font_size,
         visibility: controls_visible,
+        pane_path: request.pane_path.clone(),
     };
     if can_promote
         && show_control(
             ui,
-            control,
+            &control,
             rects.promote_hit,
             TileControlSpec {
                 label: egui_phosphor::regular::ARROW_LINE_UP,
@@ -68,8 +68,7 @@ pub(crate) fn render_tile_header(
     }
     let split_response = show_split_control(
         ui,
-        request.tab_index,
-        request.view_id,
+        &request.pane_path,
         rects.split_hit,
         metrics.font_size,
         controls_visible,
@@ -87,7 +86,7 @@ pub(crate) fn render_tile_header(
     if request.can_close
         && show_control(
             ui,
-            control,
+            &control,
             rects.close_hit,
             TileControlSpec {
                 label: "×",
@@ -122,12 +121,11 @@ struct TileControlMetrics {
     font_size: f32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct TileControlContext {
-    tab_index: usize,
-    view_id: ViewId,
     font_size: f32,
     visibility: f32,
+    pane_path: SplitPath,
 }
 
 struct TileControlSpec {
@@ -165,8 +163,7 @@ fn pointer_hover_pos(ui: &egui::Ui) -> egui::Pos2 {
 
 fn show_split_control(
     ui: &mut egui::Ui,
-    tab_index: usize,
-    view_id: ViewId,
+    pane_path: &SplitPath,
     split_hit: egui::Rect,
     font_size: f32,
     controls_visible: f32,
@@ -178,14 +175,14 @@ fn show_split_control(
         .show(
             ui,
             split_hit,
-            widget_ids::local(ui, ("split_handle", tab_index, view_id)),
+            widget_ids::root_id(("split_handle", pane_path)),
             egui::Sense::click_and_drag(),
         )
 }
 
 fn show_control(
     ui: &mut egui::Ui,
-    control: TileControlContext,
+    control: &TileControlContext,
     hit_rect: egui::Rect,
     spec: TileControlSpec,
 ) -> egui::Response {
@@ -199,7 +196,7 @@ fn show_control(
     tile_control.show(
         ui,
         hit_rect,
-        widget_ids::local(ui, (spec.id_prefix, control.tab_index, control.view_id)),
+        widget_ids::root_id((spec.id_prefix, &control.pane_path)),
         spec.sense,
     )
 }
