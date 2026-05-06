@@ -8,6 +8,7 @@ use crate::app::domain::{
 use crate::app::ui::scrolling::{ScrollAlign, ScrollIntent};
 use eframe::egui;
 use std::ops::Range;
+use std::sync::Arc;
 
 impl ScratchpadApp {
     pub(super) fn active_buffer_identity(&self) -> Option<(usize, BufferId)> {
@@ -80,7 +81,7 @@ impl ScratchpadApp {
 
     fn sync_search_result_group_activity(&mut self) {
         let active_match_index = self.search_state.active_match_index;
-        for group in &mut self.search_state.result_groups {
+        for group in Arc::make_mut(&mut self.search_state.result_groups) {
             group.active = false;
             for entry in &mut group.entries {
                 entry.active = Some(entry.match_index) == active_match_index;

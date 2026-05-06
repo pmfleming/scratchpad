@@ -56,7 +56,10 @@ pub(crate) enum SearchFocusTarget {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SearchStatus {
     Idle,
-    Searching,
+    Searching {
+        scanned_targets: usize,
+        total_targets: usize,
+    },
     Ready,
     NoMatches,
     InvalidQuery(String),
@@ -127,7 +130,8 @@ pub(crate) struct SearchResultGroup {
 
 #[derive(Clone)]
 pub(crate) struct SearchProgress {
-    pub(crate) searching: bool,
+    pub(crate) scanned_targets: usize,
+    pub(crate) target_count: usize,
     pub(crate) displayed_match_count: usize,
     pub(crate) total_match_count: usize,
     pub(crate) status: SearchStatus,
@@ -211,7 +215,7 @@ pub(crate) struct SearchState {
     pub(crate) matches: Vec<SearchMatch>,
     pub(crate) total_match_count: usize,
     pub(crate) displayed_match_count: usize,
-    pub(crate) result_groups: Vec<SearchResultGroup>,
+    pub(crate) result_groups: Arc<[SearchResultGroup]>,
     pub(crate) focus_target: Option<SearchFocusTarget>,
     pub(crate) dirty: bool,
     pub(crate) requested_generation: u64,
@@ -244,7 +248,7 @@ impl Default for SearchState {
             matches: Vec::new(),
             total_match_count: 0,
             displayed_match_count: 0,
-            result_groups: Vec::new(),
+            result_groups: Arc::from(Vec::<SearchResultGroup>::new()),
             focus_target: None,
             dirty: false,
             requested_generation: 0,
@@ -291,7 +295,7 @@ impl SearchState {
         self.matches.clear();
         self.total_match_count = 0;
         self.displayed_match_count = 0;
-        self.result_groups.clear();
+        self.result_groups = Arc::from(Vec::<SearchResultGroup>::new());
     }
 
     fn clear_replace_all_confirmation(&mut self) {
@@ -310,7 +314,10 @@ impl SearchState {
         self.requested_generation = generation;
         self.latest_generation.store(generation, Ordering::Relaxed);
         self.searching = true;
-        self.status = SearchStatus::Searching;
+        self.status = SearchStatus::Searching {
+            scanned_targets: 0,
+            total_targets: 0,
+        };
         self.freshness = SearchFreshness::Stale;
         self.previous_active_match = self
             .active_match_index
@@ -528,7 +535,16 @@ impl ScratchpadApp {
 
     pub(crate) fn search_progress(&self) -> SearchProgress {
         SearchProgress {
-            searching: self.search_state.searching,
+            scanned_targets: match self.search_state.status {
+                SearchStatus::Searching {
+                    scanned_targets, ..
+                } => scanned_targets,
+                _ => 0,
+            },
+            target_count: match self.search_state.status {
+                SearchStatus::Searching { total_targets, .. } => total_targets,
+                _ => 0,
+            },
             displayed_match_count: self.search_state.displayed_match_count,
             total_match_count: self.search_state.total_match_count,
             status: self.search_state.status.clone(),
@@ -536,8 +552,8 @@ impl ScratchpadApp {
         }
     }
 
-    pub(crate) fn search_result_groups(&self) -> &[SearchResultGroup] {
-        &self.search_state.result_groups
+    pub(crate) fn search_result_groups_snapshot(&self) -> Arc<[SearchResultGroup]> {
+        self.search_state.result_groups.clone()
     }
 
     pub(crate) fn focus_search_result_file_at(&mut self, index: usize) -> bool {

@@ -1,7 +1,7 @@
 use crate::app::capacity_metrics;
 use crate::app::domain::DocumentSnapshot;
 use crate::app::domain::buffer::DocumentChunk;
-use crate::app::services::search::{self, SearchMode, SearchOptions};
+use crate::app::services::search::{self, SearchMode, SearchProgram};
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
@@ -13,8 +13,7 @@ const INTRA_BUFFER_PARALLELISM_MIN_CHUNKS: usize = 4;
 pub(super) fn search_target_ranges(
     snapshot: &DocumentSnapshot,
     search_range: Option<Range<usize>>,
-    query: &str,
-    options: SearchOptions,
+    program: &SearchProgram,
     generation: u64,
     latest_generation: &AtomicU64,
     intra_parallelism: usize,
@@ -24,7 +23,7 @@ pub(super) fn search_target_ranges(
         .unwrap_or(0..snapshot.document_length().chars);
 
     if let Some(text) = snapshot.piece_tree().borrow_range(normalized.clone()) {
-        let outcome = search::search_text_interruptible(text, query, options, || {
+        let outcome = search::search_program_interruptible(text, program, || {
             latest_generation.load(Ordering::Relaxed) == generation
         })?;
         debug_assert!(outcome.error.is_none());
@@ -37,26 +36,21 @@ pub(super) fn search_target_ranges(
         );
     }
 
-    if options.mode == SearchMode::PlainText {
+    if program.options().mode == SearchMode::PlainText {
         return search_fragmented_plain_text(
             snapshot,
             normalized,
-            query,
-            options,
+            program,
             generation,
             latest_generation,
             intra_parallelism,
         );
     }
 
-    let max_match_chars = search::regex_max_match_chars(query)
-        .expect("unbounded regex queries should be rejected during validation");
     search_fragmented_bounded_regex(
         snapshot,
         normalized,
-        query,
-        options,
-        max_match_chars,
+        program,
         generation,
         latest_generation,
         intra_parallelism,
@@ -67,12 +61,13 @@ pub(super) fn search_target_ranges(
 fn search_fragmented_plain_text(
     snapshot: &DocumentSnapshot,
     range: Range<usize>,
-    query: &str,
-    options: SearchOptions,
+    program: &SearchProgram,
     generation: u64,
     latest_generation: &AtomicU64,
     intra_parallelism: usize,
 ) -> Option<Vec<Range<usize>>> {
+    let query = program.query();
+    let options = program.options();
     if range.is_empty() || query.is_empty() {
         return Some(Vec::new());
     }
@@ -92,7 +87,7 @@ fn search_fragmented_plain_text(
             let (window_text, window_offset) =
                 snapshot.search_text_cow(Some(chunk.window_range.clone()));
             let outcome =
-                search::search_text_interruptible(window_text.as_ref(), query, options, || {
+                search::search_program_interruptible(window_text.as_ref(), program, || {
                     latest_generation.load(Ordering::Relaxed) == generation
                 })?;
             debug_assert!(outcome.error.is_none());
@@ -117,19 +112,19 @@ fn search_fragmented_plain_text(
 fn search_fragmented_bounded_regex(
     snapshot: &DocumentSnapshot,
     range: Range<usize>,
-    query: &str,
-    options: SearchOptions,
-    max_match_chars: usize,
+    program: &SearchProgram,
     generation: u64,
     latest_generation: &AtomicU64,
     intra_parallelism: usize,
 ) -> Option<Vec<Range<usize>>> {
+    let query = program.query();
+    let options = program.options();
     if range.is_empty() || query.is_empty() {
         return Some(Vec::new());
     }
 
     let context_chars = 1 + usize::from(options.whole_word);
-    let overlap_chars = max_match_chars.saturating_add(context_chars);
+    let overlap_chars = program.max_match_chars().saturating_add(context_chars);
     let chunk_chars = SEARCH_FRAGMENT_CHUNK_CHARS.max(overlap_chars.max(1));
     let range_end = range.end;
     let chunks = snapshot.chunks_for_range(range, chunk_chars, context_chars, overlap_chars);
@@ -144,7 +139,7 @@ fn search_fragmented_bounded_regex(
             let (window_text, window_offset) =
                 snapshot.search_text_cow(Some(chunk.window_range.clone()));
             let outcome =
-                search::search_text_interruptible(window_text.as_ref(), query, options, || {
+                search::search_program_interruptible(window_text.as_ref(), program, || {
                     latest_generation.load(Ordering::Relaxed) == generation
                 })?;
             debug_assert!(outcome.error.is_none());

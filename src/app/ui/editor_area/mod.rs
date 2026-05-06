@@ -2,6 +2,7 @@ pub mod divider;
 pub mod tile;
 
 use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::SearchStatus;
 use crate::app::domain::{PaneBranch, PaneNode, ViewId};
 use crate::app::ui::search_replace;
 use crate::app::ui::tile_header::{self, SplitPreviewOverlay, TileAction};
@@ -38,7 +39,10 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             let render_outcome = render_editor_workspace(ui, app, &editor_state, workspace_rect);
             finalize_editor_render(ui, app, &editor_state, render_outcome);
             app.refresh_search_state();
-            request_search_repaint(ui.ctx(), app.search_progress().searching);
+            request_search_repaint(
+                ui.ctx(),
+                matches!(app.search_progress().status, SearchStatus::Searching { .. }),
+            );
         });
     });
 }

@@ -4,6 +4,7 @@ use super::helpers::{
 };
 use super::{ReplacementPlan, ReplacementTargetPlan, ScratchpadApp, SearchScope};
 use crate::app::domain::{BufferId, CursorRevealMode, ViewId};
+use crate::app::services::search::SearchProgram;
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use std::ops::Range;
 
@@ -29,7 +30,10 @@ impl ScratchpadApp {
             return false;
         }
 
-        let replacement = self.search_state.replacement.clone();
+        let Some(replacement) = self.replacement_for_match(&search_match) else {
+            self.set_error_status("Search replace failed because the query is no longer valid.");
+            return false;
+        };
         let replacement_char_count = replacement.chars().count();
         let previous_selection = self
             .active_tab()
@@ -279,11 +283,17 @@ impl ScratchpadApp {
         Some(ReplacementPlan {
             scope: self.search_state.scope,
             total_match_count: self.search_state.matches.len(),
-            targets: build_replacement_targets(
-                &self.search_state.matches,
-                &self.search_state.replacement,
-            ),
+            targets: build_replacement_targets(&self.search_state.matches, |search_match| {
+                self.replacement_for_match(search_match).unwrap_or_default()
+            }),
         })
+    }
+
+    fn replacement_for_match(&self, search_match: &super::SearchMatch) -> Option<String> {
+        let program =
+            SearchProgram::compile(&self.search_state.query, self.search_state.search_options())
+                .ok()?;
+        Some(program.expand_replacement(&search_match.matched_text, &self.search_state.replacement))
     }
 
     fn apply_replacement_target(&mut self, target: &ReplacementTargetPlan) -> bool {

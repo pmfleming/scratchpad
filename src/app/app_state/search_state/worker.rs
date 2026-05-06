@@ -3,7 +3,7 @@ use super::helpers::SearchResultAccumulator;
 use super::{SearchMatch, SearchResultGroup, SearchStatus};
 use crate::app::capacity_metrics;
 use crate::app::domain::{BufferId, DocumentSnapshot, ViewId};
-use crate::app::services::search::{self, SearchOptions};
+use crate::app::services::search::{SearchOptions, SearchProgram};
 use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -100,15 +100,19 @@ pub(super) fn process_search_request_with_partials(
     mut partial_emit: Option<&mut dyn FnMut(SearchResult)>,
 ) -> Option<SearchResult> {
     let generation = request.generation;
-    if let Some(error) = search::validate_search_query(&request.query, request.options) {
-        return Some(SearchResult {
-            generation,
-            matches: Vec::new(),
-            result_groups: Vec::new(),
-            displayed_match_count: 0,
-            status: SearchStatus::InvalidQuery(error.message().to_owned()),
-        });
-    }
+    let total_targets = request.targets.len();
+    let program = match SearchProgram::compile(&request.query, request.options) {
+        Ok(program) => program,
+        Err(error) => {
+            return Some(SearchResult {
+                generation,
+                matches: Vec::new(),
+                result_groups: Vec::new(),
+                displayed_match_count: 0,
+                status: SearchStatus::InvalidQuery(error.message().to_owned()),
+            });
+        }
+    };
 
     let target_count = request.targets.len();
     let single_threaded = search_target_parallelism(target_count) <= 1;
@@ -119,11 +123,11 @@ pub(super) fn process_search_request_with_partials(
         // UI can show the first useful matches before the full scan completes.
         let SearchRequest {
             generation,
-            query,
-            options,
             targets,
+            ..
         } = request;
         let intra_parallelism = intra_buffer_parallelism();
+        let mut last_emitted_match_count = 0usize;
         for (index, target) in targets.into_iter().enumerate() {
             if latest_generation.load(Ordering::Relaxed) != generation {
                 return None;
@@ -131,8 +135,7 @@ pub(super) fn process_search_request_with_partials(
             let ranges = search_target_ranges(
                 &target.document_snapshot,
                 target.search_range.clone(),
-                &query,
-                options,
+                &program,
                 generation,
                 latest_generation,
                 intra_parallelism,
@@ -145,25 +148,27 @@ pub(super) fn process_search_request_with_partials(
             if let Some(emit) = partial_emit.as_deref_mut()
                 && index + 1 < target_count
                 && latest_generation.load(Ordering::Relaxed) == generation
+                && should_publish_partial(results.match_count(), last_emitted_match_count, index)
             {
-                emit(results.partial_snapshot(generation));
+                emit(results.partial_snapshot(generation, index + 1, total_targets));
+                last_emitted_match_count = results.match_count();
             }
         }
     } else {
         let SearchRequest {
             generation,
-            query,
-            options,
             targets,
+            ..
         } = request;
         let target_count = targets.len();
         let worker_count = search_target_parallelism(target_count);
         let indexed_targets = targets.into_iter().enumerate().collect::<Vec<_>>();
-        let query_arc = Arc::<str>::from(query);
+        let program = Arc::new(program);
         let chunk_size = indexed_targets.len().div_ceil(worker_count);
         let mut indexed_iter = indexed_targets.into_iter();
         let (outcome_tx, outcome_rx) = mpsc::channel::<TargetSearchOutcome>();
         let stale = std::sync::atomic::AtomicBool::new(false);
+        let mut last_emitted_match_count = 0usize;
 
         let stream_ok = thread::scope(|scope| -> Option<()> {
             for _ in 0..worker_count {
@@ -171,7 +176,7 @@ pub(super) fn process_search_request_with_partials(
                 if chunk.is_empty() {
                     break;
                 }
-                let query = query_arc.clone();
+                let program = program.clone();
                 let tx = outcome_tx.clone();
                 let stale_ref = &stale;
                 scope.spawn(move || {
@@ -186,8 +191,7 @@ pub(super) fn process_search_request_with_partials(
                         let Some(ranges) = search_target_ranges(
                             &target.document_snapshot,
                             target.search_range.clone(),
-                            &query,
-                            options,
+                            &program,
                             generation,
                             latest_generation,
                             1,
@@ -224,8 +228,14 @@ pub(super) fn process_search_request_with_partials(
                     if let Some(emit) = partial_emit.as_deref_mut()
                         && next_index < target_count
                         && latest_generation.load(Ordering::Relaxed) == generation
+                        && should_publish_partial(
+                            results.match_count(),
+                            last_emitted_match_count,
+                            next_index.saturating_sub(1),
+                        )
                     {
-                        emit(results.partial_snapshot(generation));
+                        emit(results.partial_snapshot(generation, next_index, total_targets));
+                        last_emitted_match_count = results.match_count();
                     }
                 }
             }
@@ -247,6 +257,16 @@ pub(super) fn process_search_request_with_partials(
         SearchStatus::Ready
     };
     Some(result)
+}
+
+fn should_publish_partial(
+    current_match_count: usize,
+    last_emitted_match_count: usize,
+    completed_target_index: usize,
+) -> bool {
+    const PARTIAL_MATCH_DELTA: usize = 64;
+    completed_target_index == 0
+        || current_match_count >= last_emitted_match_count.saturating_add(PARTIAL_MATCH_DELTA)
 }
 
 fn search_target_parallelism(target_count: usize) -> usize {

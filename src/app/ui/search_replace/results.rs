@@ -57,6 +57,16 @@ pub(super) fn show_search_results(
 
 pub(super) fn results_summary(state: &SearchStripState) -> String {
     if state.progress.searching || state.progress.freshness == SearchFreshness::Stale {
+        if state.progress.target_count > 0 {
+            return format!(
+                "Searching {} of {} targets...",
+                state
+                    .progress
+                    .scanned_targets
+                    .min(state.progress.target_count),
+                state.progress.target_count
+            );
+        }
         return "Searching\u{2026}".to_owned();
     }
 
@@ -68,7 +78,7 @@ pub(super) fn results_summary(state: &SearchStripState) -> String {
         SearchStatus::InvalidQuery(_) => return "Invalid query".to_owned(),
         SearchStatus::Error(message) => return message.clone(),
         SearchStatus::Idle
-        | SearchStatus::Searching
+        | SearchStatus::Searching { .. }
         | SearchStatus::Ready
         | SearchStatus::NoMatches => {}
     }

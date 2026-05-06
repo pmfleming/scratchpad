@@ -7,6 +7,7 @@ use super::{
 };
 use crate::app::domain::BufferId;
 use std::ops::Range;
+use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
 impl ScratchpadApp {
@@ -91,7 +92,7 @@ impl ScratchpadApp {
             result_groups,
             status,
         } = result;
-        let is_partial = matches!(status, SearchStatus::Searching);
+        let is_partial = matches!(status, SearchStatus::Searching { .. });
         self.search_state.active_match_index = self.preferred_active_match_index(
             &matches,
             self.search_state.previous_active_match.as_ref(),
@@ -99,7 +100,7 @@ impl ScratchpadApp {
         self.search_state.matches = matches;
         self.search_state.total_match_count = self.search_state.matches.len();
         self.search_state.displayed_match_count = displayed_match_count;
-        self.search_state.result_groups = result_groups;
+        self.search_state.result_groups = Arc::from(result_groups);
         self.search_state.searching = is_partial;
         if !is_partial {
             self.search_state.previous_active_match = None;
@@ -136,9 +137,22 @@ impl ScratchpadApp {
                 .collect(),
             SearchScope::ActiveBuffer => self.active_search_target(None).into_iter().collect(),
             SearchScope::ActiveWorkspaceTab => self.collect_active_tab_search_targets(),
-            SearchScope::AllOpenTabs => (0..self.tabs().len())
-                .flat_map(|tab_index| self.collect_search_targets_for_tab(tab_index, None, None))
-                .collect(),
+            SearchScope::AllOpenTabs => {
+                let active_tab_index = self.active_tab_index();
+                (0..self.tabs().len())
+                    .map(|offset| (active_tab_index + offset) % self.tabs().len().max(1))
+                    .flat_map(|tab_index| {
+                        let prioritized_buffer_id = (tab_index == active_tab_index)
+                            .then(|| {
+                                self.active_tab()
+                                    .and_then(|tab| tab.active_view())
+                                    .map(|view| view.buffer_id)
+                            })
+                            .flatten();
+                        self.collect_search_targets_for_tab(tab_index, prioritized_buffer_id, None)
+                    })
+                    .collect()
+            }
         }
     }
 

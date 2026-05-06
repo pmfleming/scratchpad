@@ -55,6 +55,61 @@ pub struct SearchOptions {
     pub whole_word: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct SearchProgram {
+    query: String,
+    options: SearchOptions,
+    regex: Option<regex::Regex>,
+    max_match_chars: usize,
+}
+
+impl SearchProgram {
+    pub fn compile(query: &str, options: SearchOptions) -> Result<Self, SearchError> {
+        let max_match_chars = match options.mode {
+            SearchMode::PlainText => query.chars().count(),
+            SearchMode::Regex => regex_max_match_chars(query).ok_or_else(|| {
+                SearchError::UnsupportedRegex(
+                    "Regex search requires a bounded maximum match length.".to_owned(),
+                )
+            })?,
+        };
+        let regex = match options.mode {
+            SearchMode::PlainText => None,
+            SearchMode::Regex => Some(compile_regex(query, options)?),
+        };
+        Ok(Self {
+            query: query.to_owned(),
+            options,
+            regex,
+            max_match_chars: max_match_chars.max(1),
+        })
+    }
+
+    pub fn query(&self) -> &str {
+        &self.query
+    }
+
+    pub fn options(&self) -> SearchOptions {
+        self.options
+    }
+
+    pub fn max_match_chars(&self) -> usize {
+        self.max_match_chars
+    }
+
+    pub fn expand_replacement(&self, matched_text: &str, replacement: &str) -> String {
+        let Some(regex) = &self.regex else {
+            return replacement.to_owned();
+        };
+        let Some(captures) = regex.captures(matched_text) else {
+            return replacement.to_owned();
+        };
+        let mut expanded = String::new();
+        captures.expand(replacement, &mut expanded);
+        expanded
+    }
+}
+
 pub fn find_matches(text: &str, query: &str, options: SearchOptions) -> Vec<Range<usize>> {
     search_text(text, query, options).matches
 }
@@ -66,7 +121,7 @@ pub fn validate_search_query(query: &str, options: SearchOptions) -> Option<Sear
 
     match options.mode {
         SearchMode::PlainText => None,
-        SearchMode::Regex => compile_supported_regex(query, options).err(),
+        SearchMode::Regex => SearchProgram::compile(query, options).err(),
     }
 }
 
@@ -75,9 +130,9 @@ pub fn search_text(text: &str, query: &str, options: SearchOptions) -> SearchOut
         return SearchOutcome::default();
     }
 
-    match options.mode {
-        SearchMode::PlainText => plain_text_search(text, query, options),
-        SearchMode::Regex => regex_search(text, query, options),
+    match SearchProgram::compile(query, options) {
+        Ok(program) => search_program(text, &program),
+        Err(error) => SearchOutcome::with_error(error),
     }
 }
 
@@ -106,11 +161,9 @@ where
         return Some(SearchOutcome::default());
     }
 
-    match options.mode {
-        SearchMode::PlainText => {
-            plain_text_search_interruptible(text, query, options, should_continue)
-        }
-        SearchMode::Regex => regex_search_interruptible(text, query, options, should_continue),
+    match SearchProgram::compile(query, options) {
+        Ok(program) => search_program_interruptible(text, &program, should_continue),
+        Err(error) => Some(SearchOutcome::with_error(error)),
     }
 }
 
@@ -118,74 +171,40 @@ pub fn regex_max_match_chars(query: &str) -> Option<usize> {
     parse(query).ok()?.properties().maximum_len()
 }
 
-fn compile_supported_regex(
-    query: &str,
-    options: SearchOptions,
-) -> Result<regex::Regex, SearchError> {
-    let regex = compile_regex(query, options)?;
-    if regex_max_match_chars(query).is_none() {
-        return Err(SearchError::UnsupportedRegex(
-            "Regex search requires a bounded maximum match length.".to_owned(),
-        ));
-    }
-    Ok(regex)
-}
-
-fn plain_text_search(text: &str, query: &str, options: SearchOptions) -> SearchOutcome {
+pub fn search_program(text: &str, program: &SearchProgram) -> SearchOutcome {
     let mut should_continue = || true;
-    SearchOutcome::with_matches(
-        plain_text_matches(text, query, options, false, &mut should_continue).unwrap_or_default(),
-    )
+    search_program_interruptible(text, program, &mut should_continue).unwrap_or_default()
 }
 
-fn plain_text_search_interruptible<F>(
+pub fn search_program_interruptible<F>(
     text: &str,
-    query: &str,
-    options: SearchOptions,
+    program: &SearchProgram,
     mut should_continue: F,
 ) -> Option<SearchOutcome>
 where
     F: FnMut() -> bool,
 {
-    plain_text_matches(text, query, options, true, &mut should_continue)
-        .map(SearchOutcome::with_matches)
-}
-
-fn regex_search(text: &str, query: &str, options: SearchOptions) -> SearchOutcome {
-    match compile_supported_regex(query, options) {
-        Ok(regex) => {
-            let mut should_continue = || true;
-            SearchOutcome::with_matches(
-                collect_regex_matches(
-                    text,
-                    &regex,
-                    options.whole_word,
-                    false,
-                    &mut should_continue,
-                )
-                .unwrap_or_default(),
-            )
-        }
-        Err(error) => SearchOutcome::with_error(error),
+    match program.options.mode {
+        SearchMode::PlainText => plain_text_matches(
+            text,
+            program.query(),
+            program.options,
+            true,
+            &mut should_continue,
+        )
+        .map(SearchOutcome::with_matches),
+        SearchMode::Regex => collect_regex_matches(
+            text,
+            program
+                .regex
+                .as_ref()
+                .expect("regex program requires regex"),
+            program.options.whole_word,
+            true,
+            &mut should_continue,
+        )
+        .map(SearchOutcome::with_matches),
     }
-}
-
-fn regex_search_interruptible<F>(
-    text: &str,
-    query: &str,
-    options: SearchOptions,
-    mut should_continue: F,
-) -> Option<SearchOutcome>
-where
-    F: FnMut() -> bool,
-{
-    let regex = match compile_supported_regex(query, options) {
-        Ok(regex) => regex,
-        Err(error) => return Some(SearchOutcome::with_error(error)),
-    };
-
-    collect_regex_matches(text, &regex, options.whole_word, true, &mut should_continue)
-        .map(SearchOutcome::with_matches)
 }
 
 fn compile_regex(query: &str, options: SearchOptions) -> Result<regex::Regex, SearchError> {
@@ -219,5 +238,101 @@ where
         None
     } else {
         Some(matches)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plain_options() -> SearchOptions {
+        SearchOptions {
+            mode: SearchMode::PlainText,
+            match_case: true,
+            whole_word: false,
+        }
+    }
+
+    fn regex_options() -> SearchOptions {
+        SearchOptions {
+            mode: SearchMode::Regex,
+            match_case: true,
+            whole_word: false,
+        }
+    }
+
+    #[test]
+    fn compiled_program_matches_plain_search() {
+        let options = plain_options();
+        let program = SearchProgram::compile("needle", options).unwrap();
+        let text = "needle hay needle";
+
+        assert_eq!(
+            search_text(text, "needle", options).matches,
+            search_program(text, &program).matches
+        );
+    }
+
+    #[test]
+    fn regex_program_rejects_unbounded_matches() {
+        let error = SearchProgram::compile("a*", regex_options()).unwrap_err();
+
+        assert!(matches!(error, SearchError::UnsupportedRegex(_)));
+    }
+
+    #[test]
+    fn regex_program_matches_bounded_query() {
+        let program = SearchProgram::compile(r"ab[0-9]{2}", regex_options()).unwrap();
+        let matches = search_program("ab12 xx ab99", &program).matches;
+
+        assert_eq!(matches, vec![0..4, 8..12]);
+    }
+
+    #[test]
+    fn regex_program_expands_capture_replacements() {
+        let program =
+            SearchProgram::compile(r"([a-z]{1,8})-([0-9]{1,4})", regex_options()).unwrap();
+
+        assert_eq!(program.expand_replacement("item-42", "$2:$1"), "42:item");
+    }
+
+    #[test]
+    fn whole_word_unicode_does_not_allocate_full_char_vector_contract() {
+        let options = SearchOptions {
+            mode: SearchMode::PlainText,
+            match_case: true,
+            whole_word: true,
+        };
+
+        assert_eq!(
+            find_matches("α beta αbeta α", "α", options),
+            vec![0..1, 13..14]
+        );
+    }
+
+    #[test]
+    fn ascii_case_insensitive_search_uses_same_ranges() {
+        let options = SearchOptions {
+            mode: SearchMode::PlainText,
+            match_case: false,
+            whole_word: false,
+        };
+
+        assert_eq!(
+            find_matches("Needle needle NEEDLE hay", "needle", options),
+            vec![0..6, 7..13, 14..20]
+        );
+    }
+
+    #[test]
+    fn interruptible_search_can_cancel_large_scan() {
+        let text = "a".repeat(128 * 1024);
+        let mut calls = 0usize;
+        let result = search_text_interruptible(&text, "a", plain_options(), || {
+            calls += 1;
+            calls < 2
+        });
+
+        assert!(result.is_none());
     }
 }

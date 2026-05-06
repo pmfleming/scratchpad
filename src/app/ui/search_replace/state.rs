@@ -4,6 +4,7 @@ use crate::app::app_state::{
 };
 use crate::app::services::search::SearchMode;
 use eframe::egui;
+use std::sync::Arc;
 
 #[derive(Default)]
 pub(super) struct SearchStripActions {
@@ -29,7 +30,7 @@ pub(super) struct SearchStripState {
     pub(super) whole_word: bool,
     pub(super) match_count: usize,
     pub(super) progress: SearchProgressSnapshot,
-    pub(super) result_groups: Vec<SearchResultGroup>,
+    pub(super) result_groups: Arc<[SearchResultGroup]>,
     pub(super) replace_availability: SearchReplaceAvailability,
     pub(super) can_undo_text_operation: bool,
     pub(super) can_redo_text_operation: bool,
@@ -39,6 +40,8 @@ pub(super) struct SearchStripState {
 
 pub(super) struct SearchProgressSnapshot {
     pub(super) searching: bool,
+    pub(super) scanned_targets: usize,
+    pub(super) target_count: usize,
     pub(super) displayed_match_count: usize,
     pub(super) total_match_count: usize,
     pub(super) status: SearchStatus,
@@ -62,7 +65,7 @@ impl SearchStripState {
             whole_word: app.search_whole_word(),
             match_count,
             progress: SearchProgressSnapshot::from_progress(progress),
-            result_groups: app.search_result_groups().to_vec(),
+            result_groups: app.search_result_groups_snapshot(),
             replace_availability: app.search_replace_availability(),
             can_undo_text_operation: app.active_buffer_can_undo_text_operation(),
             can_redo_text_operation: app.active_buffer_can_redo_text_operation(),
@@ -92,7 +95,9 @@ impl SearchStripState {
 impl SearchProgressSnapshot {
     fn from_progress(progress: SearchProgress) -> Self {
         Self {
-            searching: progress.searching,
+            searching: matches!(progress.status, SearchStatus::Searching { .. }),
+            scanned_targets: progress.scanned_targets,
+            target_count: progress.target_count,
             displayed_match_count: progress.displayed_match_count,
             total_match_count: progress.total_match_count,
             status: progress.status,

@@ -78,14 +78,26 @@ impl SearchResultAccumulator {
         }
     }
 
-    pub(super) fn partial_snapshot(&self, generation: u64) -> SearchResult {
+    pub(super) fn partial_snapshot(
+        &self,
+        generation: u64,
+        scanned_targets: usize,
+        total_targets: usize,
+    ) -> SearchResult {
         SearchResult {
             generation,
             matches: self.matches.clone(),
             result_groups: self.result_groups.clone(),
             displayed_match_count: self.displayed_match_count,
-            status: SearchStatus::Searching,
+            status: SearchStatus::Searching {
+                scanned_targets,
+                total_targets,
+            },
         }
+    }
+
+    pub(super) fn match_count(&self) -> usize {
+        self.matches.len()
     }
 
     fn build_entries(
@@ -156,7 +168,7 @@ pub(super) fn search_highlight_state_for_view(
 
 pub(super) fn build_replacement_targets(
     matches: &[SearchMatch],
-    replacement: &str,
+    mut replacement_for_match: impl FnMut(&SearchMatch) -> String,
 ) -> Vec<ReplacementTargetPlan> {
     let mut targets = Vec::new();
     let mut start = 0;
@@ -170,7 +182,12 @@ pub(super) fn build_replacement_targets(
         let replacements = matches[start..end]
             .iter()
             .rev()
-            .map(|search_match| (search_match.range.clone(), replacement.to_owned()))
+            .map(|search_match| {
+                (
+                    search_match.range.clone(),
+                    replacement_for_match(search_match),
+                )
+            })
             .collect();
         let expected_matches = matches[start..end]
             .iter()
