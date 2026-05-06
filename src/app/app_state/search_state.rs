@@ -13,6 +13,7 @@ mod fragments;
 mod helpers;
 mod replace;
 mod runtime;
+mod visual;
 mod worker;
 
 use helpers::selection_char_range;

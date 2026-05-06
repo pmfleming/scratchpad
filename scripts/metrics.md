@@ -7,14 +7,18 @@ These are the formulas currently used by the scripts and the overview viewer.
 
 - **Complexity score** (`hotspots.py`)
   ```python
+  cognitive_component = min(260.0, cognitive * 3.7)
+  cyclomatic_component = min(220.0, cyclomatic * 2.0)
+  maintainability_component = min(150.0, max(0.0, 65.0 - mi) * 1.2)
+  effort_component = min(60.0, log1p(max(0.0, halstead_effort)) * 4.0)
   complexity_score = (
-      (cognitive * 4.0)
-      + (cyclomatic * 2.5)
-      + (max(0.0, 70.0 - mi) * 1.5)
-      + min(30.0, effort / 1000.0)
-      + min(20.0, sloc / 10.0)
-  )
+      cognitive_component
+      + cyclomatic_component
+      + maintainability_component
+      + effort_component
+  ) * 1.12
   ```
+  Each component is capped so no single raw metric can dominate the composite indefinitely. SLOC is reported separately as size context, not folded into this score.
 
 - **Performance score** (`slowspots.py`)
   ```python
@@ -39,36 +43,76 @@ These are the formulas currently used by the scripts and the overview viewer.
 - **Code locality score** (`locality_bench.py`)
   ```python
   dependency_spread = min(
-      58.0,
+      48.0,
       far_dependencies * 9.0
       + layer_violations * 16.0
-      + max(0, outbound_dependencies - 4) * 4.0
-      + max(0, inbound_dependencies - 8) * 2.0,
+      + max(0, outbound_dependencies - 5) * 3.0
+      + max(0, inbound_dependencies - 12) * 0.75,
+  )
+  hidden_coupling = min(24.0, hidden_coupling_count * 8.0)
+  interface_penalty = (
+      10.0
+      if interface_explicitness_ratio < 0.25
+      and outbound_dependencies + inbound_dependencies >= 4
+      else 0.0
   )
   test_distance = 0.0 if has_inline_tests else 0.5 if has_tests else 1.0
-  change_spread = min(28.0, churn / 90.0 + max(0, contributor_count - 2) * 3.0)
-  locality_score = 100.0 - (dependency_spread + test_distance + change_spread)
+  change_spread = min(18.0, churn / 160.0 + max(0, contributor_count - 3) * 2.0)
+  non_locality_risk = min(100.0,
+      dependency_spread
+      + hidden_coupling
+      + interface_penalty
+      + test_distance
+      + change_spread
+  )
+  locality_score = 100.0 - non_locality_risk
   ```
-  Higher scores mean related code is more locally organized: dependencies stay nearby, architectural layers are respected, and the module has less change spread. Missing nearby tests is a low-severity hint, not a primary locality failure.
+  Higher scores mean related code is more locally organized: dependencies stay nearby, architectural layers are respected, state coupling is visible, and public interfaces are explicit. The JSON exposes both `locality_score` and `non_locality_risk` so tables can rank by risk while summaries can still show a positive score.
 
-- **Leverage score** (`leverage_ast.rs`)
-  ```rust
-  indirection_ratio = heap_allocating_type_count / (heap_allocating_type_count + inline_type_count) * 100.0
-  iterator_leverage_score = iterator_method_count / (iterator_method_count + for_loop_count) * 100.0
-  total_leverage_score =
-      ((100.0 - indirection_ratio) * 0.4)
-      + (iterator_leverage_score * 0.6)
-      - min(50.0, unsafe_blocks * 5.0)
+- **Leverage score** (`leverage_metrics.py`, with AST style counts from `leverage_ast.rs`)
+  ```python
+  pressure_scale = 0.35 + min(0.65, inbound_dependencies / 6.0 * 0.65)
+  reach_score = min(22.0, inbound_dependencies * 2.5 + caller_area_count * 4.0)
+  invariant_ratio = public_type_count / max(1, public_type_count + public_function_count)
+  invariant_score = min(18.0, public_type_count * 3.0 + invariant_ratio * 8.0)
+  leaf_fit_bonus = 14.0 if inbound_dependencies <= 1 and divergence_count == 0 and unsafe_blocks == 0 else 0.0
+  ripple_penalty = min(
+      24.0,
+      max(0.0, avg_cochanged_modules - 2.0) * 1.1
+      + max(0, cochanged_module_count - 12) * 0.35,
+  ) * pressure_scale
+  divergence_penalty = min(28.0, divergence_count * 9.0)
+  unsafe_penalty = min(20.0, unsafe_blocks * 4.0)
+  surface_penalty = 8.0 if inbound_dependencies >= 3 and public_type_count == 0 and public_function_count >= 6 else 0.0
+  leverage_score = clamp(
+      68.0
+      + reach_score
+      + invariant_score
+      + leaf_fit_bonus
+      - ripple_penalty
+      - divergence_penalty
+      - unsafe_penalty
+      - surface_penalty,
+      0.0,
+      100.0,
+  )
+  leverage_risk = 100.0 - leverage_score
   ```
-  Lower leverage scores are shown first in the overview because they are the triage targets. The JSON also preserves raw counts such as iterator method count, `for` loop count, heap-allocating type count, and unsafe surface counts.
+  Lower leverage scores mean a module has a poor tradeoff between shared value and the pressure it creates. Low reach is not itself a defect: self-contained leaf modules receive a fit bonus unless they also show divergence, unsafe surface area, or ripple pressure. The JSON keeps the old AST fields as secondary style evidence: iterator method count, `for` loop count, indirection ratio, heap-allocating type count, and unsafe surface counts.
+
+- **Rust escape hatch score** (`rust_escape_hatches.py`)
+  ```python
+  escape_hatch_score = sum(weight[kind] * count[kind])
+  ```
+  This is an audit score, not a general quality penalty. It tracks non-conventional Rust that should stay visible during review: `unsafe`, FFI, `static mut`, `union`, raw borrows, inline assembly, `transmute`, `MaybeUninit`, layout/linkage attributes, and lint suppressions including Clippy `allow`/`expect` attributes.
 
 - **Maintainability risk** (`map.py`)
   ```python
   maintainability_risk = (
       complexity_score
-      + min(120.0, sloc * 0.22)
-      + min(80.0, public_api_count * 7.0)
-      + min(90.0, outbound_dependencies * 12.0 + inbound_dependencies * 10.0)
+      + min(70.0, sloc * 0.12)
+      + min(30.0, public_api_count * 2.5)
+      + min(35.0, outbound_dependencies * 4.0 + inbound_dependencies * 1.0)
   )
   ```
 
@@ -182,9 +226,9 @@ Clone Alert identifies redundant code segments that have been copied and pasted,
 
 ## 10. Locality & Leverage
 Locality and leverage are static quality measurements surfaced in the Quality Review.
-- **Code Locality:** Estimates how locally organized each module is by combining dependency spread, layer violations, nearby test evidence, churn, and contributor spread.
-- **Leverage:** Static Rust AST analysis that highlights modules with low iterator use, high indirection pressure, or unsafe surface area.
-- **Triage Direction:** Locality and leverage scores are "higher is better"; the dashboard inverts them for risk distributions and ranks leverage tables by the lowest score first.
+- **Code Locality:** Estimates how locally organized each module is by combining dependency spread, layer violations, hidden coupling, interface explicitness, nearby test evidence, churn, and contributor spread.
+- **Leverage:** Architecture analysis that balances module reach and invariant surface against divergence pressure, co-change ripple, and unsafe surface area. AST iterator/indirection counts remain as secondary style evidence.
+- **Triage Direction:** Locality and leverage scores are "higher is better"; the dashboard exposes explicit `non_locality_risk` and `leverage_risk` values for worst-first triage.
 
 ---
 
@@ -193,9 +237,9 @@ Locality and leverage are static quality measurements surfaced in the Quality Re
 - **slowspots.py:** Analyzes dynamic execution performance and latency.
 - **search_speed.py:** Analyzes search scaling across Active, Current, and All scopes, with separate completion and first-response timings.
 - **clone_alert.py:** Detects structural and renamed code clones.
-- **locality_bench.py:** Emits static Code Locality metrics from dependency structure, test proximity, and git history.
-- **leverage_metrics.py / leverage_ast.rs:** Emit Rust AST leverage metrics with raw counts and derived scores.
-- **map.py:** Aggregates complexity, git history, benchmark, and dependency data into maintainability, change, performance, and architectural risk.
+- **locality_bench.py:** Emits Code Locality metrics from dependency structure, hidden coupling, interface explicitness, test proximity, and git history.
+- **leverage_metrics.py / leverage_ast.rs:** Emit architecture leverage metrics with AST style counts as supporting evidence.
+- **map.py:** Aggregates complexity, git history, benchmark, dependency, locality, and leverage data into maintainability, change, performance, architectural, locality, and leverage overlays.
 
 ### Overview Viewer
 The overview launcher supports fast mode plus explicit refresh scopes:

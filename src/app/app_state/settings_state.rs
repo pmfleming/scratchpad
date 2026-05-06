@@ -5,7 +5,8 @@ use crate::app::services::file_controller::FileController;
 use crate::app::services::settings_store::{
     AppSettings, AppThemeMode, DEFAULT_EDITOR_BACKGROUND_COLOR, DEFAULT_EDITOR_TEXT_COLOR,
     DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR, DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR,
-    DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, FileOpenDisposition, LIGHT_EDITOR_BACKGROUND_COLOR,
+    DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, FileOpenDisposition,
+    LEGACY_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR,
     LIGHT_EDITOR_TEXT_COLOR, MIN_WINDOW_INNER_SIZE, NewTabPlacement, StartupSessionBehavior,
     TabListPosition, TabOrderMode, WindowState, color_from_hex, color_to_hex,
 };
@@ -15,6 +16,7 @@ use std::time::Duration;
 
 mod display_tabs;
 mod mutators;
+mod tab_order;
 mod toml_refresh;
 
 impl ScratchpadApp {
@@ -68,12 +70,16 @@ impl ScratchpadApp {
     }
 
     pub fn editor_text_highlight_text_color(&self) -> egui::Color32 {
+        let generated =
+            crate::app::color_contrast::optimal_text_color(self.editor_text_highlight_color());
+        if uses_generated_highlight_text_color(&self.app_settings.editor_text_highlight_text_color)
+        {
+            return generated;
+        }
+
         color_from_hex(
             &self.app_settings.editor_text_highlight_text_color,
-            color_from_hex(
-                DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR,
-                egui::Color32::BLACK,
-            ),
+            generated,
         )
     }
 
@@ -318,6 +324,15 @@ mod tests {
         assert_eq!(next.position, Some([100.0, 100.0]));
         assert_eq!(next.inner_size, Some([980.0, 720.0]));
     }
+
+    #[test]
+    fn generated_highlight_text_detection_accepts_stock_and_legacy_defaults() {
+        assert!(uses_generated_highlight_text_color(
+            DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR
+        ));
+        assert!(uses_generated_highlight_text_color("000000"));
+        assert!(!uses_generated_highlight_text_color("#123456"));
+    }
 }
 
 impl ScratchpadApp {
@@ -432,6 +447,14 @@ pub(super) fn stock_editor_palette_for_selection(
         AppThemeMode::Light => (LIGHT_EDITOR_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR),
         AppThemeMode::Dark => (DEFAULT_EDITOR_TEXT_COLOR, DEFAULT_EDITOR_BACKGROUND_COLOR),
     }
+}
+
+fn uses_generated_highlight_text_color(hex: &str) -> bool {
+    let normalized = hex.trim().trim_start_matches('#');
+    normalized
+        .eq_ignore_ascii_case(DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR.trim_start_matches('#'))
+        || normalized
+            .eq_ignore_ascii_case(LEGACY_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR.trim_start_matches('#'))
 }
 
 fn sanitize_tab_list_auto_hide_delay_seconds(seconds: f32) -> f32 {

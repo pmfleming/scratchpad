@@ -10,6 +10,7 @@
         resourceProfiles: `../target/analysis/resource_profiles.json?v=${viewerVersion}`,
         speedReport: `../target/analysis/speed_efficiency_report.json?v=${viewerVersion}`,
         clones: `../target/analysis/clones.json?v=${viewerVersion}`,
+        escapeHatches: `../target/analysis/rust_escape_hatches.json?v=${viewerVersion}`,
         locality: `../target/analysis/locality_metrics.json?v=${viewerVersion}`,
         leverage: `../target/analysis/leverage_metrics.json?v=${viewerVersion}`,
         map: `../target/analysis/map.json?v=${viewerVersion}`,
@@ -28,6 +29,7 @@
         resourceProfiles: null,
         speedReport: null,
         clones: [],
+        escapeHatches: [],
         locality: [],
         leverage: [],
         map: null,
@@ -51,6 +53,7 @@
         expandedQualityKey: null,
         expandedCloneKey: null,
         qualityDatasetView: 'hotspots',
+        performanceDatasetView: 'search',
         appPackageView: 'diagnostics',
     };
 
@@ -194,6 +197,7 @@
         const clones = state.clones || [];
         const locality = state.locality || [];
         const leverage = state.leverage || [];
+        const escapeHatches = state.escapeHatches || [];
         const worstHotspot = hotspots.reduce((worst, item) => {
             if (!worst) return item;
             return qualityScore(item) > qualityScore(worst) ? item : worst;
@@ -205,12 +209,19 @@
         const crossFileClones = clones.filter((item) => (item.file_count || 0) >= 2).length;
         const astClones = clones.filter((item) => item.engine === "ast").length;
         const widestClone = clones.reduce((max, item) => Math.max(max, item.max_line_span || 0), 0);
+        const escapeHatchModules = escapeHatches.length;
+        const escapeHatchTotal = escapeHatches.reduce((sum, item) => sum + Number(item.total_count || 0), 0);
+        const unsafeModules = escapeHatches.filter((item) => Number(item.unsafe_count || 0) > 0).length;
+        const clippySuppressions = escapeHatches.reduce((sum, item) => sum + Number(item.clippy_suppression_count || 0), 0);
         const avgCodeLocality = mean(locality.map(i => i.locality_score)) || 0;
+        const avgNonLocalityRisk = mean(locality.map(localityRisk)) || 0;
         const farDependencyModules = locality.filter((item) => (item.far_dependencies || 0) > 0).length;
         const modulesWithoutNearbyTests = locality.filter((item) => item.test_locality === "none").length;
-        const avgIterator = mean(leverage.map(i => i.iterator_leverage_score)) || 0;
-        const avgIndirection = mean(leverage.map(i => i.indirection_ratio)) || 0;
-        const totalUnsafe = leverage.reduce((sum, item) => sum + (item.unsafe_blocks || 0), 0);
+        const hiddenCouplingModules = locality.filter((item) => (item.hidden_coupling_count || 0) > 0).length;
+        const avgLeverageScore = mean(leverage.map(i => i.leverage_score ?? i.total_leverage_score)) || 0;
+        const avgLeverageRisk = mean(leverage.map(leverageRisk)) || 0;
+        const broadReachModules = leverage.filter((item) => (item.reach || 0) >= 5).length;
+        const divergenceModules = leverage.filter((item) => (item.divergence_count || 0) > 0).length;
 
         const groups = [
             {
@@ -241,12 +252,25 @@
                 ],
             },
             {
+                cls: "escape-hatches",
+                title: "Escape Hatches",
+                summary: `${formatNumber.format(escapeHatchTotal)} uses`,
+                metrics: [
+                    ["Modules", escapeHatchModules],
+                    ["Total Uses", escapeHatchTotal],
+                    ["Unsafe Modules", unsafeModules],
+                    ["Clippy Allows", clippySuppressions],
+                ],
+            },
+            {
                 cls: "locality",
                 title: "Code Locality",
                 summary: `${formatNumber.format(locality.length)} module probes`,
                 metrics: [
                     ["Avg Score", formatNumber.format(avgCodeLocality)],
+                    ["Avg Risk", formatNumber.format(avgNonLocalityRisk)],
                     ["Far Dependencies", farDependencyModules],
+                    ["Hidden Coupling", hiddenCouplingModules],
                     ["No Nearby Tests", modulesWithoutNearbyTests],
                 ],
             },
@@ -255,9 +279,10 @@
                 title: "Leverage",
                 summary: `${formatNumber.format(leverage.length)} module probes`,
                 metrics: [
-                    ["Avg Iterator Use", `${formatNumber.format(avgIterator)}%`],
-                    ["Avg Indirection", `${formatNumber.format(avgIndirection)}%`],
-                    ["Total Unsafe Blocks", totalUnsafe],
+                    ["Avg Score", formatNumber.format(avgLeverageScore)],
+                    ["Avg Risk", formatNumber.format(avgLeverageRisk)],
+                    ["Broad Reach", broadReachModules],
+                    ["Divergence", divergenceModules],
                 ],
             },
         ];
@@ -318,6 +343,74 @@
                     <td>${item.token_count}</td>
                     <td>${renderPills(item.signals)}</td>
                     <td class="small-text">${locations}</td>
+                </tr>`;
+            })
+        );
+    }
+
+    function renderEscapeHatches() {
+        const query = byId("escape-hatches-filter")?.value || "";
+        const rows = state.escapeHatches || [];
+        const filtered = rows.filter((item) => matchesFilter(item, query));
+        const totalUses = rows.reduce((sum, item) => sum + Number(item.total_count || 0), 0);
+        const totals = {
+            unsafe: rows.reduce((sum, item) => sum + Number(item.unsafe_count || 0), 0),
+            ffi: rows.reduce((sum, item) => sum + Number(item.ffi_count || 0), 0),
+            globals: rows.reduce((sum, item) => sum + Number(item.global_mutability_count || 0), 0),
+            raw: rows.reduce((sum, item) => sum + Number(item.raw_memory_count || 0), 0),
+            layout: rows.reduce((sum, item) => sum + Number(item.layout_linkage_count || 0), 0),
+            clippy: rows.reduce((sum, item) => sum + Number(item.clippy_suppression_count || 0), 0),
+            lint: rows.reduce((sum, item) => sum + Number(item.lint_suppression_count || 0), 0),
+        };
+        const maxTotal = Math.max(1, ...Object.values(totals));
+        const bars = [
+            ["Unsafe", totals.unsafe],
+            ["FFI", totals.ffi],
+            ["Global mutability", totals.globals],
+            ["Raw memory", totals.raw],
+            ["Layout/linkage", totals.layout],
+            ["Clippy suppressions", totals.clippy],
+            ["All lint suppressions", totals.lint],
+        ];
+        const overview = byId("escape-hatches-overview");
+        if (overview) {
+            overview.innerHTML = `<div class="escape-hatch-cards">
+                ${metricCard("Modules", rows.length)}
+                ${metricCard("Total uses", totalUses)}
+                ${metricCard("Unsafe uses", totals.unsafe)}
+                ${metricCard("Clippy suppressions", totals.clippy)}
+            </div>
+            <div class="escape-hatch-bars">
+                ${bars.map(([label, value]) => `<div class="escape-hatch-bar">
+                    <span>${escapeHtml(label)}</span>
+                    <div><i style="width:${(value / maxTotal) * 100}%"></i></div>
+                    <strong>${formatNumber.format(value)}</strong>
+                </div>`).join("")}
+            </div>`;
+        }
+
+        renderTable(
+            "escape-hatches-table",
+            ["Rank", "Module", "Score", "Total", "Unsafe", "FFI", "Globals", "Raw", "Layout", "Clippy", "Locations", "Signals"],
+            filtered.map((item, index) => {
+                const locations = (item.locations || [])
+                    .slice(0, 8)
+                    .map((location) => `<code>${escapeHtml(location.label)}:${escapeHtml(location.line)}</code>`)
+                    .join(" ");
+                const score = Number(item.escape_hatch_score || 0);
+                return `<tr>
+                    <td>${index + 1}</td>
+                    <td><code>${escapeHtml(item.module_key || item.module_name)}</code><div class="muted">${escapeHtml(item.path || "")}</div></td>
+                    <td class="${riskClass(score, 20, 50)}">${formatNumber.format(score)}</td>
+                    <td>${formatNumber.format(item.total_count || 0)}</td>
+                    <td>${formatNumber.format(item.unsafe_count || 0)}</td>
+                    <td>${formatNumber.format(item.ffi_count || 0)}</td>
+                    <td>${formatNumber.format(item.global_mutability_count || 0)}</td>
+                    <td>${formatNumber.format(item.raw_memory_count || 0)}</td>
+                    <td>${formatNumber.format(item.layout_linkage_count || 0)}</td>
+                    <td>${formatNumber.format(item.clippy_suppression_count || 0)}</td>
+                    <td class="small-text">${locations || "-"}</td>
+                    <td>${renderPills(item.signals || [])}</td>
                 </tr>`;
             })
         );
@@ -1131,6 +1224,213 @@
                 <td class="${item.status === "ok" ? "risk-good" : "risk-bad"}">${escapeHtml(item.status || "-")}${item.note ? `<div class="muted">${escapeHtml(item.note)}</div>` : ""}</td>
             </tr>`)
         );
+    }
+
+    function renderPerformanceOverview() {
+        const target = byId("performance-overview");
+        if (!target) return;
+
+        const searchRows = state.searchSpeed || [];
+        const slowspots = state.slowspots || [];
+        const capacity = state.capacityReport?.scenarios || [];
+        const resources = state.resourceProfiles?.scenarios || [];
+        const triageSummary = state.speedReport?.triage_summary || {};
+        const reportSummary = state.speedReport?.summary || {};
+        const flamegraphs = state.flamegraphs || [];
+        const searchOverBudget = searchRows.filter((item) => (item.mean_ns || 0) / 1_000_000 > (item.threshold_ms || Infinity)).length;
+        const slowOverBudget = slowspots.filter((item) => (item.mean_ns || 0) / 1_000_000 > (item.threshold_ms || Infinity)).length;
+        const availableFlamegraphs = flamegraphs.filter((item) => item.available).length;
+        const peakWorkingSet = resources.reduce((max, item) => Math.max(max, item.max_working_set_bytes || 0), 0);
+        const capacityCeilings = state.capacityReport?.summary?.ceilings_reached ?? capacity.filter((item) => item.failure_mode && item.failure_mode !== "not_reached").length;
+
+        const groups = [
+            {
+                cls: "search",
+                title: "Search",
+                summary: `${formatNumber.format(searchOverBudget)} over budget`,
+                metrics: [
+                    ["Records", searchRows.length],
+                    ["Scenarios", new Set(searchRows.map((item) => item.benchmark_key)).size],
+                    ["First response", searchRows.filter((item) => item.latency_kind === "first_response").length],
+                    ["Best throughput", maxMetric(searchRows, "throughput_mb_s") ? `${formatNumber.format(maxMetric(searchRows, "throughput_mb_s"))} MB/s` : "-"],
+                ],
+            },
+            {
+                cls: "editor",
+                title: "Editor & Tabs",
+                summary: `${formatNumber.format(slowOverBudget)} threshold misses`,
+                metrics: [
+                    ["Benchmarks", slowspots.length],
+                    ["Mapped", slowspots.filter((item) => item.targets && item.targets.length).length],
+                    ["Families", new Set(slowspots.map((item) => item.workload_family || "unmapped")).size],
+                    ["Worst mean", maxMeanMs(slowspots) ? `${formatNumber.format(maxMeanMs(slowspots))} ms` : "-"],
+                ],
+            },
+            {
+                cls: "capacity",
+                title: "Capacity & Resources",
+                summary: `${formatNumber.format(capacityCeilings)} ceilings reached`,
+                metrics: [
+                    ["Capacity rows", capacity.length],
+                    ["Resource rows", resources.length],
+                    ["Memory bound", state.capacityReport?.summary?.memory_bound_scenarios ?? "-"],
+                    ["Peak working set", peakWorkingSet ? formatBytes(peakWorkingSet) : "-"],
+                ],
+            },
+            {
+                cls: "flamegraphs",
+                title: "Flamegraphs",
+                summary: `${formatNumber.format(availableFlamegraphs)}/${formatNumber.format(flamegraphs.length)} available`,
+                metrics: [
+                    ["Coverage gaps", reportSummary.coverage_gaps ?? "-"],
+                    ["Critical", triageSummary.critical ?? "-"],
+                    ["Watch", triageSummary.watch ?? "-"],
+                    ["Profiles", flamegraphs.length],
+                ],
+            },
+        ];
+
+        target.innerHTML = groups.map((group) => `<section class="performance-overview-card performance-overview-card--${group.cls}">
+            <div class="performance-overview-card__header">
+                <span class="performance-overview-card__marker"></span>
+                <div>
+                    <h3>${escapeHtml(group.title)}</h3>
+                    <p>${escapeHtml(group.summary)}</p>
+                </div>
+            </div>
+            <div class="performance-overview-card__metrics">
+                ${group.metrics.map(([label, value]) => `<div class="performance-overview-metric">
+                    <span>${escapeHtml(label)}</span>
+                    <strong>${escapeHtml(value)}</strong>
+                </div>`).join("")}
+            </div>
+        </section>`).join("");
+
+        renderPerformanceInsights();
+    }
+
+    function maxMetric(items, field) {
+        return (items || []).reduce((max, item) => Math.max(max, Number(item[field] || 0)), 0);
+    }
+
+    function maxMeanMs(items) {
+        return (items || []).reduce((max, item) => Math.max(max, Number(item.mean_ns || 0) / 1_000_000), 0);
+    }
+
+    function renderPerformanceInsights() {
+        const target = byId("performance-insights");
+        if (!target) return;
+        const searchRows = state.searchSpeed || [];
+        const slowspots = state.slowspots || [];
+        const capacitySummary = state.capacityReport?.summary || {};
+        const resourceSummary = state.resourceProfiles?.summary || {};
+        const flamegraphs = state.flamegraphs || [];
+        const searchOverBudget = searchRows.filter((item) => (item.mean_ns || 0) / 1_000_000 > (item.threshold_ms || Infinity)).length;
+        const slowOverBudget = slowspots.filter((item) => (item.mean_ns || 0) / 1_000_000 > (item.threshold_ms || Infinity)).length;
+        const availableFlamegraphs = flamegraphs.filter((item) => item.available).length;
+        const profilePct = flamegraphs.length ? availableFlamegraphs / flamegraphs.length : 0;
+
+        const cards = [
+            {
+                cls: "budget",
+                title: "Budget Pressure",
+                summary: `${formatNumber.format(searchOverBudget + slowOverBudget)} latency rows over budget`,
+                metrics: [
+                    ["Search misses", searchOverBudget],
+                    ["Editor misses", slowOverBudget],
+                    ["Total budgeted rows", searchRows.length + slowspots.length],
+                ],
+                chart: performanceMiniBars([
+                    ["Search", searchOverBudget, searchRows.length],
+                    ["Editor", slowOverBudget, slowspots.length],
+                ], "bad"),
+            },
+            {
+                cls: "coverage",
+                title: "Evidence Coverage",
+                summary: `${formatNumber.format(availableFlamegraphs)} available flamegraphs`,
+                metrics: [
+                    ["Profiles", flamegraphs.length],
+                    ["Available", availableFlamegraphs],
+                    ["Coverage", flamegraphs.length ? `${formatNumber.format(profilePct * 100)}%` : "-"],
+                ],
+                chart: performanceDonut(profilePct, "Profiles"),
+            },
+            {
+                cls: "capacity",
+                title: "Failure Surface",
+                summary: `${formatNumber.format(capacitySummary.ceilings_reached ?? 0)} reached ceilings`,
+                metrics: [
+                    ["Scenarios", capacitySummary.scenario_count ?? "-"],
+                    ["Memory bound", capacitySummary.memory_bound_scenarios ?? "-"],
+                    ["CPU bound", capacitySummary.cpu_bound_scenarios ?? "-"],
+                ],
+                chart: performanceMiniBars([
+                    ["Memory", capacitySummary.memory_bound_scenarios ?? 0, capacitySummary.scenario_count ?? 0],
+                    ["CPU", capacitySummary.cpu_bound_scenarios ?? 0, capacitySummary.scenario_count ?? 0],
+                ], "warn"),
+            },
+            {
+                cls: "resources",
+                title: "Resource Probes",
+                summary: `${formatNumber.format(resourceSummary.scenario_count ?? 0)} resource scenarios`,
+                metrics: [
+                    ["Allocation", resourceSummary.allocation_scenarios ?? "-"],
+                    ["Memory", resourceSummary.memory_scenarios ?? "-"],
+                    ["Session", resourceSummary.session_scenarios ?? "-"],
+                ],
+                chart: performanceMiniBars([
+                    ["Alloc", resourceSummary.allocation_scenarios ?? 0, resourceSummary.scenario_count ?? 0],
+                    ["Memory", resourceSummary.memory_scenarios ?? 0, resourceSummary.scenario_count ?? 0],
+                    ["Session", resourceSummary.session_scenarios ?? 0, resourceSummary.scenario_count ?? 0],
+                ], "resource"),
+            },
+        ];
+
+        target.innerHTML = cards.map((card) => `<section class="performance-insight-card performance-insight-card--${card.cls}">
+            <div class="performance-insight-card__header">
+                <span class="performance-insight-card__marker"></span>
+                <div>
+                    <h3>${escapeHtml(card.title)}</h3>
+                    <p>${escapeHtml(card.summary)}</p>
+                </div>
+            </div>
+            ${card.chart}
+            <div class="performance-insight-card__metrics">
+                ${card.metrics.map(([label, value]) => `<span><strong>${escapeHtml(value)}</strong> ${escapeHtml(label)}</span>`).join("")}
+            </div>
+        </section>`).join("");
+    }
+
+    function performanceMiniBars(rows, tone) {
+        const max = Math.max(1, ...rows.map(([, value, total]) => Number(total || value || 0)));
+        return `<div class="performance-mini-bars performance-mini-bars--${tone}">
+            ${rows.map(([label, value, total]) => {
+            const denom = Number(total || max || 1);
+            const pct = denom ? Math.min(100, (Number(value || 0) / denom) * 100) : 0;
+            return `<div class="performance-mini-bars__row">
+                    <span>${escapeHtml(label)}</span>
+                    <div><i style="width:${Math.max(value ? 4 : 0, pct)}%"></i></div>
+                    <strong>${formatNumber.format(value)}</strong>
+                </div>`;
+        }).join("")}
+        </div>`;
+    }
+
+    function performanceDonut(ratio, label) {
+        const safeRatio = Math.max(0, Math.min(1, Number(ratio || 0)));
+        const radius = 46;
+        const circumference = 2 * Math.PI * radius;
+        const dash = safeRatio * circumference;
+        return `<div class="performance-donut">
+            <svg viewBox="0 0 116 116" aria-hidden="true">
+                <circle class="performance-donut__track" cx="58" cy="58" r="${radius}"></circle>
+                <circle class="performance-donut__segment" cx="58" cy="58" r="${radius}"
+                    stroke-dasharray="${dash} ${circumference - dash}"></circle>
+                <text class="performance-donut__value" x="58" y="54">${formatNumber.format(safeRatio * 100)}%</text>
+                <text class="performance-donut__label" x="58" y="72">${escapeHtml(label)}</text>
+            </svg>
+        </div>`;
     }
 
     function renderChartLegend(series) {
@@ -2115,6 +2415,145 @@
         target.innerHTML = run ? renderRunProgress(run, "detail") : "";
     }
 
+    function localityRisk(item) {
+        return Number(item?.non_locality_risk ?? item?.locality_risk ?? (100 - Number(item?.locality_score || 0)));
+    }
+
+    function leverageRisk(item) {
+        return Number(item?.leverage_risk ?? (100 - Number(item?.leverage_score ?? item?.total_leverage_score ?? 0)));
+    }
+
+    function moduleRecord(rows, moduleName) {
+        return rows.find((item) => (item.module_key || item.module_name) === moduleName) || null;
+    }
+
+    function localityForModule(node) {
+        return node?.locality_metrics && Object.keys(node.locality_metrics).length
+            ? node.locality_metrics
+            : moduleRecord(state.locality, node?.id);
+    }
+
+    function leverageForModule(node) {
+        return node?.leverage_metrics && Object.keys(node.leverage_metrics).length
+            ? node.leverage_metrics
+            : moduleRecord(state.leverage, node?.id);
+    }
+
+    function renderLocalityLeverageQuadrants(localityRows, leverageRows) {
+        const target = byId("locality-leverage-quadrants");
+        if (!target) return;
+        const byModule = new Map();
+        localityRows.forEach((item) => {
+            byModule.set(item.module_key || item.module_name, { locality: item });
+        });
+        leverageRows.forEach((item) => {
+            const key = item.module_key || item.module_name;
+            const existing = byModule.get(key) || {};
+            existing.leverage = item;
+            byModule.set(key, existing);
+        });
+        const quadrants = {
+            "high-locality-high-leverage": { title: "Good Fit", rows: [] },
+            "high-locality-low-leverage": { title: "Local / Emerging", rows: [] },
+            "low-locality-high-leverage": { title: "Architecture Watch", rows: [] },
+            "low-locality-low-leverage": { title: "Triage First", rows: [] },
+        };
+        byModule.forEach((pair, moduleName) => {
+            if (!pair.locality || !pair.leverage) return;
+            const lowLocality = localityRisk(pair.locality) >= 30;
+            const lowLeverage = leverageRisk(pair.leverage) >= 40;
+            const key = lowLocality
+                ? lowLeverage ? "low-locality-low-leverage" : "low-locality-high-leverage"
+                : lowLeverage ? "high-locality-low-leverage" : "high-locality-high-leverage";
+            quadrants[key].rows.push({
+                moduleName,
+                localityRisk: localityRisk(pair.locality),
+                leverageRisk: leverageRisk(pair.leverage),
+            });
+        });
+        const points = Object.values(quadrants)
+            .flatMap((quadrant) => quadrant.rows.map((row) => ({ ...row, quadrant: quadrant.title })));
+        const highRisk = [...points]
+            .sort((left, right) => (right.localityRisk + right.leverageRisk) - (left.localityRisk + left.leverageRisk))
+            .slice(0, 8);
+        const labelSet = new Set(highRisk.slice(0, 6).map((item) => item.moduleName));
+        const width = 760;
+        const height = 360;
+        const margin = { left: 74, right: 28, top: 32, bottom: 58 };
+        const plotWidth = width - margin.left - margin.right;
+        const plotHeight = height - margin.top - margin.bottom;
+        const x = (value) => margin.left + (Math.max(0, Math.min(100, value)) / 100) * plotWidth;
+        const y = (value) => margin.top + ((100 - Math.max(0, Math.min(100, value))) / 100) * plotHeight;
+        const localityCut = x(30);
+        const leverageCut = y(40);
+        const quadrantCounts = Object.values(quadrants)
+            .map((quadrant) => `<span><b>${escapeHtml(quadrant.title)}</b>${formatNumber.format(quadrant.rows.length)}</span>`)
+            .join("");
+        const pointNodes = points.map((item) => {
+            const combined = item.localityRisk + item.leverageRisk;
+            const radius = Math.max(4, Math.min(10, combined / 16));
+            const className = item.quadrant === "Triage First"
+                ? "is-triage"
+                : item.quadrant === "Architecture Watch"
+                    ? "is-architecture"
+                    : item.quadrant === "Local / Emerging"
+                        ? "is-local"
+                        : "is-good";
+            const label = labelSet.has(item.moduleName)
+                ? `<text class="ll-point-label" x="${x(item.localityRisk) + 8}" y="${y(item.leverageRisk) - 8}">${escapeHtml(shortenLabel(item.moduleName))}</text>`
+                : "";
+            return `<g class="ll-point ${className}">
+                <circle cx="${x(item.localityRisk)}" cy="${y(item.leverageRisk)}" r="${radius}">
+                    <title>${escapeHtml(item.moduleName)} | Locality ${formatNumber.format(item.localityRisk)} | Leverage ${formatNumber.format(item.leverageRisk)}</title>
+                </circle>
+                ${label}
+            </g>`;
+        }).join("");
+
+        target.innerHTML = `<section class="panel-card ll-plot-card">
+            <div class="panel-card__header">
+                <div>
+                    <h2>Locality / Leverage Map</h2>
+                    <p>Each point is a module. Right means less local; up means weaker leverage tradeoff.</p>
+                </div>
+                <div class="ll-legend">${quadrantCounts}</div>
+            </div>
+            <div class="ll-plot-layout">
+                <svg class="ll-plot" viewBox="0 0 ${width} ${height}" role="img" aria-label="Locality and leverage quadrant scatter plot">
+                    <rect class="ll-quadrant ll-quadrant--local" x="${margin.left}" y="${margin.top}" width="${localityCut - margin.left}" height="${leverageCut - margin.top}"></rect>
+                    <rect class="ll-quadrant ll-quadrant--triage" x="${localityCut}" y="${margin.top}" width="${margin.left + plotWidth - localityCut}" height="${leverageCut - margin.top}"></rect>
+                    <rect class="ll-quadrant ll-quadrant--good" x="${margin.left}" y="${leverageCut}" width="${localityCut - margin.left}" height="${margin.top + plotHeight - leverageCut}"></rect>
+                    <rect class="ll-quadrant ll-quadrant--architecture" x="${localityCut}" y="${leverageCut}" width="${margin.left + plotWidth - localityCut}" height="${margin.top + plotHeight - leverageCut}"></rect>
+                    <line class="ll-threshold" x1="${localityCut}" x2="${localityCut}" y1="${margin.top}" y2="${margin.top + plotHeight}"></line>
+                    <line class="ll-threshold" x1="${margin.left}" x2="${margin.left + plotWidth}" y1="${leverageCut}" y2="${leverageCut}"></line>
+                    <line class="ll-axis" x1="${margin.left}" x2="${margin.left}" y1="${margin.top}" y2="${margin.top + plotHeight}"></line>
+                    <line class="ll-axis" x1="${margin.left}" x2="${margin.left + plotWidth}" y1="${margin.top + plotHeight}" y2="${margin.top + plotHeight}"></line>
+                    <text class="ll-quadrant-label" x="${margin.left + 14}" y="${margin.top + 22}">Local / Emerging</text>
+                    <text class="ll-quadrant-label" x="${localityCut + 14}" y="${margin.top + 22}">Triage First</text>
+                    <text class="ll-quadrant-label" x="${margin.left + 14}" y="${margin.top + plotHeight - 16}">Good Fit</text>
+                    <text class="ll-quadrant-label" x="${localityCut + 14}" y="${margin.top + plotHeight - 16}">Architecture Watch</text>
+                    <text class="ll-axis-label" x="${margin.left + plotWidth / 2}" y="${height - 16}">Non-locality risk</text>
+                    <text class="ll-axis-label ll-axis-label--y" x="20" y="${margin.top + plotHeight / 2}">Leverage risk</text>
+                    <text class="ll-tick" x="${x(0)}" y="${height - 38}">0</text>
+                    <text class="ll-tick" x="${x(30)}" y="${height - 38}">30</text>
+                    <text class="ll-tick" x="${x(100)}" y="${height - 38}">100</text>
+                    <text class="ll-tick" x="${margin.left - 28}" y="${y(100) + 4}">100</text>
+                    <text class="ll-tick" x="${margin.left - 22}" y="${y(40) + 4}">40</text>
+                    <text class="ll-tick" x="${margin.left - 14}" y="${y(0) + 4}">0</text>
+                    ${pointNodes}
+                </svg>
+                <div class="ll-ranked-list">
+                    <h3>Highest combined risk</h3>
+                    ${highRisk.map((item, index) => `<div class="ll-ranked-row" title="${escapeHtml(item.moduleName)}">
+                        <span>${index + 1}</span>
+                        <code>${escapeHtml(shortenLabel(item.moduleName))}</code>
+                        <strong>${formatNumber.format(item.localityRisk + item.leverageRisk)}</strong>
+                    </div>`).join("")}
+                </div>
+            </div>
+        </section>`;
+    }
+
     function renderLocalityLeverage() {
         const localityTarget = byId("locality-table");
         const leverageTarget = byId("leverage-table");
@@ -2125,15 +2564,16 @@
 
         const filteredLocality = state.locality.filter((item) => matchesFilter(item, localityQuery));
         const filteredLeverage = state.leverage.filter((item) => matchesFilter(item, leverageQuery));
+        renderLocalityLeverageQuadrants(state.locality, state.leverage);
 
         const localityDistItems = state.locality.map((item) => ({
             key: `locality:${item.module_key || item.module_name}`,
             kind: "locality",
             name: item.module_key || item.module_name,
-            score: 100 - (item.locality_score || 0), // Invert score so risk distribution treats higher as worse
+            score: localityRisk(item),
             signals: item.signals || [],
             signalWeights: item.signal_weights || null,
-            details: `Far deps ${formatNumber.format(item.far_dependencies || 0)}`,
+            details: `Far deps ${formatNumber.format(item.far_dependencies || 0)} · hidden ${formatNumber.format(item.hidden_coupling_count || 0)}`,
             raw: item,
             searchText: [item.module_key, item.module_name, item.path, item.test_locality, ...item.signals].join(" "),
         }));
@@ -2142,9 +2582,9 @@
             key: `leverage:${item.module_key || item.module_name}`,
             kind: "leverage",
             name: item.module_key || item.module_name,
-            score: 100 - (item.total_leverage_score || 0), // Invert score so risk distribution treats higher as worse
+            score: leverageRisk(item),
             signals: item.signals || [],
-            details: `Iter ${formatNumber.format(item.iterator_leverage_score)}%`,
+            details: `Reach ${formatNumber.format(item.reach || 0)} · ripple ${formatNumber.format(item.avg_cochanged_modules || 0)}`,
             raw: item,
             searchText: [item.module_key, item.module_name, item.path, ...item.signals].join(" "),
         }));
@@ -2169,18 +2609,21 @@
 
         renderTable(
             "locality-table",
-            ["Rank", "Module", "Path", "Code Locality", "Far Deps", "Out/In", "Layer Violations", "Churn", "Tests", "Signals"],
+            ["Rank", "Module", "Path", "Locality", "Risk", "Far Deps", "Hidden", "Explicit", "Out/In", "Churn", "Tests", "Signals"],
             filteredLocality.map((item, index) => {
-                const scoreClass = riskClass(100 - item.locality_score, 15, 30);
+                const risk = localityRisk(item);
+                const scoreClass = riskClass(risk, 15, 30);
                 const moduleName = item.module_key || item.module_name;
                 return `<tr>
                     <td>${index + 1}</td>
                     <td><code>${escapeHtml(moduleName)}</code></td>
                     <td><code>${escapeHtml(item.path || "")}</code></td>
                     <td class="${scoreClass}">${formatNumber.format(item.locality_score)}</td>
+                    <td class="${scoreClass}">${formatNumber.format(risk)}</td>
                     <td>${formatNumber.format(item.far_dependencies || 0)}</td>
+                    <td>${formatNumber.format(item.hidden_coupling_count || 0)}</td>
+                    <td>${formatNumber.format(item.interface_explicitness_ratio ?? 0)}</td>
                     <td>${formatNumber.format(item.outbound_dependencies || 0)} / ${formatNumber.format(item.inbound_dependencies || 0)}</td>
-                    <td>${formatNumber.format(item.layer_violations || 0)}</td>
                     <td>${formatNumber.format(item.churn || 0)}</td>
                     <td>${escapeHtml(item.test_locality || "-")}</td>
                     <td>${renderPills(item.signals)}</td>
@@ -2190,22 +2633,25 @@
 
         renderTable(
             "leverage-table",
-            ["Rank", "Module", "Path", "Leverage Score", "Iterator %", "Indirection %", "Loops", "Iterator Calls", "Indirect Types", "Unsafe", "Signals"],
+            ["Rank", "Module", "Path", "Leverage", "Risk", "Reach", "Areas", "Invariant", "Divergence", "Ripple", "Style", "Signals"],
             filteredLeverage.map((item, index) => {
-                const scoreClass = riskClass(100 - item.total_leverage_score, 20, 40);
+                const risk = leverageRisk(item);
+                const score = item.leverage_score ?? item.total_leverage_score ?? 0;
+                const scoreClass = riskClass(risk, 20, 40);
                 const moduleName = item.module_key || item.module_name;
                 const path = item.path || item.module_name;
                 return `<tr>
                     <td>${index + 1}</td>
                     <td><code>${escapeHtml(moduleName)}</code></td>
                     <td><code>${escapeHtml(path)}</code></td>
-                    <td class="${scoreClass}">${formatNumber.format(item.total_leverage_score)}</td>
-                    <td>${formatNumber.format(item.iterator_leverage_score)}%</td>
-                    <td>${formatNumber.format(item.indirection_ratio)}%</td>
-                    <td>${formatNumber.format(item.for_loop_count ?? 0)}</td>
-                    <td>${formatNumber.format(item.iterator_method_count ?? 0)}</td>
-                    <td>${formatNumber.format(item.heap_allocating_type_count ?? 0)}</td>
-                    <td>${item.unsafe_blocks}</td>
+                    <td class="${scoreClass}">${formatNumber.format(score)}</td>
+                    <td class="${scoreClass}">${formatNumber.format(risk)}</td>
+                    <td>${formatNumber.format(item.reach || 0)}</td>
+                    <td>${formatNumber.format(item.caller_area_count || 0)}</td>
+                    <td>${formatNumber.format(item.invariant_surface || 0)}</td>
+                    <td>${formatNumber.format(item.divergence_count || 0)}</td>
+                    <td>${formatNumber.format(item.avg_cochanged_modules || 0)}</td>
+                    <td>${formatNumber.format(item.style_leverage_score ?? item.iterator_leverage_score ?? 0)}</td>
                     <td>${renderPills(item.signals)}</td>
                 </tr>`;
             })
@@ -2570,6 +3016,8 @@
         const fill = scoreFill(metricValue || 0, state.mapMetric);
         const label = shortenLabel(node.id);
         const score = formatNumber.format(metricValue || 0);
+        const locality = localityForModule(node);
+        const leverage = leverageForModule(node);
         const chips = [
             `Q ${Math.round(node.quality_risk ?? node.maintainability_risk ?? 0)}`,
             `M ${Math.round(node.maintainability_risk || 0)}`,
@@ -2577,7 +3025,9 @@
             `C ${Math.round(node.change_risk || 0)}`,
             `P ${Math.round(node.performance_risk || 0)}`,
             `A ${Math.round(node.architectural_risk || 0)}`,
-        ].join(" · ");
+            locality ? `L ${Math.round(localityRisk(locality))}` : "",
+            leverage ? `V ${Math.round(leverageRisk(leverage))}` : "",
+        ].filter(Boolean).join(" · ");
 
         return `<g class="${className}" data-id="${escapeHtml(node.id)}" transform="translate(${position.x} ${position.y})">
             <title>${escapeHtml(node.id)}</title>
@@ -2610,6 +3060,14 @@
         if (state.mapMetric === 'change') return node.change_risk;
         if (state.mapMetric === 'performance') return node.performance_risk;
         if (state.mapMetric === 'architectural') return node.architectural_risk;
+        if (state.mapMetric === 'locality') {
+            const locality = localityForModule(node);
+            return locality ? localityRisk(locality) : node.non_locality_risk ?? node.locality_risk;
+        }
+        if (state.mapMetric === 'leverage') {
+            const leverage = leverageForModule(node);
+            return leverage ? leverageRisk(leverage) : node.leverage_risk;
+        }
         if (state.mapMetric === 'churn') return node.churn;
         return node.total_score;
     }
@@ -2622,6 +3080,8 @@
         else if (metric === 'correctness') { bad = 120; warn = 60; }
         else if (metric === 'change') { bad = 200; warn = 80; }
         else if (metric === 'performance') { bad = 100; warn = 30; }
+        else if (metric === 'locality') { bad = 30; warn = 15; }
+        else if (metric === 'leverage') { bad = 40; warn = 20; }
         else if (metric === 'churn') { bad = 500; warn = 150; }
 
         if (score >= bad) return "#6b2a35";
@@ -2657,6 +3117,8 @@
         const perf = selected.perf_benchmarks || [];
         const evidence = selected.evidence || {};
         const categorySignals = selected.category_signals || {};
+        const locality = localityForModule(selected);
+        const leverage = leverageForModule(selected);
 
         byId("map-detail").innerHTML = `<h2>${escapeHtml(selected.id)}</h2>
             <div class="detail-list">
@@ -2667,6 +3129,8 @@
                 <div class="detail-row"><strong>Change risk</strong>${formatNumber.format(selected.change_risk || 0)}</div>
                 <div class="detail-row"><strong>Performance risk</strong>${formatNumber.format(selected.performance_risk || 0)}</div>
                 <div class="detail-row"><strong>Architectural risk</strong>${formatNumber.format(selected.architectural_risk || 0)}</div>
+                <div class="detail-row"><strong>Locality risk</strong>${formatNumber.format(locality ? localityRisk(locality) : selected.non_locality_risk ?? selected.locality_risk ?? 0)}</div>
+                <div class="detail-row"><strong>Leverage risk</strong>${formatNumber.format(leverage ? leverageRisk(leverage) : selected.leverage_risk ?? 0)}</div>
                 <div class="detail-row"><strong>Lines of code</strong>${formatNumber.format(selected.sloc || 0)}</div>
                 <div class="detail-row"><strong>Maintainability signals</strong>${renderPills(categorySignals.maintainability || [])}</div>
                 <div class="detail-row"><strong>Change signals</strong>${renderPills(categorySignals.change || [])}</div>
@@ -2680,6 +3144,8 @@
                 <div class="detail-row"><strong>Failed / unknown tests</strong>${formatNumber.format(evidence.failed_tests || 0)} / ${formatNumber.format(evidence.unknown_tests || 0)}</div>
                 <div class="detail-row"><strong>Layer violations</strong>${formatNumber.format(evidence.layer_violations || 0)}</div>
                 <div class="detail-row"><strong>Cycle member</strong>${evidence.cycle_member ? "yes" : "no"}</div>
+                <div class="detail-row"><strong>Locality signals</strong>${renderPills(locality?.signals || [])}</div>
+                <div class="detail-row"><strong>Leverage signals</strong>${renderPills(leverage?.signals || [])}</div>
                 <div class="detail-row"><strong>Outbound dependencies</strong>${renderPills(outbound)}</div>
                 <div class="detail-row"><strong>Inbound dependencies</strong>${renderPills(inbound)}</div>
                 <div class="detail-row"><strong>Benchmarks</strong>${perf.length ? perf.map(renderBenchmark).join("") : '<span class="muted">-</span>'}</div>
@@ -2858,7 +3324,7 @@
     async function loadDefaults() {
         const status = byId("load-status");
         const detail = byId("load-detail");
-        const keys = ["catalog", "runs", "hotspots", "slowspots", "searchSpeed", "capacityReport", "resourceProfiles", "speedReport", "clones", "locality", "leverage", "map", "flamegraphs", "correctness", "appPackage"];
+        const keys = ["catalog", "runs", "hotspots", "slowspots", "searchSpeed", "capacityReport", "resourceProfiles", "speedReport", "clones", "escapeHatches", "locality", "leverage", "map", "flamegraphs", "correctness", "appPackage"];
         const fallbacks = {
             catalog: null,
             runs: [],
@@ -2869,6 +3335,7 @@
             resourceProfiles: null,
             speedReport: null,
             clones: [],
+            escapeHatches: [],
             locality: [],
             leverage: [],
             map: null,
@@ -2951,7 +3418,10 @@
         renderSpeedReport();
         renderCapacityReport();
         renderResourceProfiles();
+        renderPerformanceOverview();
+        renderPerformanceDatasetView();
         renderClones();
+        renderEscapeHatches();
         renderPerformanceScenarios();
         renderCorrectness();
         renderCorrectnessMatrix();
@@ -3696,6 +4166,20 @@
         });
     }
 
+    function renderPerformanceDatasetView() {
+        document.querySelectorAll("[data-performance-view]").forEach((button) => {
+            const active = button.dataset.performanceView === state.performanceDatasetView;
+            button.classList.toggle("is-active", active);
+            button.setAttribute("aria-pressed", active ? "true" : "false");
+        });
+        document.querySelectorAll("[data-performance-panel]").forEach((panel) => {
+            panel.classList.toggle("is-active", panel.dataset.performancePanel === state.performanceDatasetView);
+        });
+        if (state.performanceDatasetView === "flamegraphs") {
+            renderFlamegraphs();
+        }
+    }
+
     function renderCorrectnessMatrix() {
         const target = byId("correctness-matrix");
         if (!target) return;
@@ -3759,6 +4243,7 @@
     byId("search-speed-filter")?.addEventListener("input", renderSearchSpeed);
     byId("resource-profiles-filter")?.addEventListener("input", renderResourceProfiles);
     byId("clones-filter")?.addEventListener("input", renderClones);
+    byId("escape-hatches-filter")?.addEventListener("input", renderEscapeHatches);
     byId("correctness-filter")?.addEventListener("input", renderCorrectness);
     byId("locality-filter")?.addEventListener("input", renderLocalityLeverage);
     byId("leverage-filter")?.addEventListener("input", renderLocalityLeverage);
@@ -3792,6 +4277,13 @@
         });
     });
     renderQualityDatasetView();
+    document.querySelectorAll("[data-performance-view]").forEach((button) => {
+        button.addEventListener("click", () => {
+            state.performanceDatasetView = button.dataset.performanceView || "search";
+            renderPerformanceDatasetView();
+        });
+    });
+    renderPerformanceDatasetView();
     byId("app-package-refresh")?.addEventListener("click", refreshAppPackage);
     document.querySelectorAll("[data-app-package-view]").forEach((button) => {
         button.addEventListener("click", () => {

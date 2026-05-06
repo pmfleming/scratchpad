@@ -128,7 +128,12 @@ impl ScrollArea {
 
         // Mouse wheel.
         let prev_offset = state.offset;
-        apply_mouse_wheel(ui, outer_response.hovered(), self.source, &mut state);
+        apply_mouse_wheel(
+            ui,
+            outer_response.hovered() || outer_response.contains_pointer(),
+            self.source,
+            &mut state,
+        );
 
         state.clamp_offset(self.eof_overscroll);
 

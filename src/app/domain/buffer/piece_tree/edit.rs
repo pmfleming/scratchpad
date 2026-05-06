@@ -62,19 +62,11 @@ impl PieceTreeLite {
         self.replace_leaf_span(start_address, end_address, replacement_leaves);
     }
 
-    pub fn add_buffer_len(&self) -> usize {
-        self.add.len()
-    }
-
     pub fn append_history_text(&mut self, text: &str, source: PieceSource) -> ByteSpan {
         let start = self.add.len();
         self.add.push_str(text);
         self.record_add_provenance(start, text.len(), source);
-        ByteSpan {
-            buffer: PieceBuffer::Add,
-            start_byte: start.min(u32::MAX as usize) as u32,
-            byte_len: text.len().min(u32::MAX as usize) as u32,
-        }
+        add_byte_span(start, text.len())
     }
 
     pub fn text_for_span(&self, span: ByteSpan) -> &str {
@@ -106,16 +98,8 @@ impl PieceTreeLite {
                     let text = &old_add[old_start..old_end];
                     let new_start = new_add.len();
                     new_add.push_str(text);
-                    let old_span = ByteSpan {
-                        buffer: PieceBuffer::Add,
-                        start_byte: old_start.min(u32::MAX as usize) as u32,
-                        byte_len: piece.byte_len.min(u32::MAX as usize) as u32,
-                    };
-                    let new_span = ByteSpan {
-                        buffer: PieceBuffer::Add,
-                        start_byte: new_start.min(u32::MAX as usize) as u32,
-                        byte_len: piece.byte_len.min(u32::MAX as usize) as u32,
-                    };
+                    let old_span = add_byte_span(old_start, piece.byte_len);
+                    let new_span = add_byte_span(new_start, piece.byte_len);
                     relocated.insert(old_span, new_span);
                     piece.start_byte = new_start;
                 }
@@ -148,11 +132,7 @@ impl PieceTreeLite {
 
     fn record_add_provenance(&mut self, start_byte: usize, byte_len: usize, source: PieceSource) {
         self.provenance.record(
-            ByteSpan {
-                buffer: PieceBuffer::Add,
-                start_byte: start_byte.min(u32::MAX as usize) as u32,
-                byte_len: byte_len.min(u32::MAX as usize) as u32,
-            },
+            add_byte_span(start_byte, byte_len),
             PieceProvenance {
                 change_id: self.generation,
                 source,
@@ -379,5 +359,13 @@ impl PieceTreeLite {
             .nodes
             .splice(window_start..window_end, rebalanced_nodes);
         self.root.recalculate();
+    }
+}
+
+fn add_byte_span(start_byte: usize, byte_len: usize) -> ByteSpan {
+    ByteSpan {
+        buffer: PieceBuffer::Add,
+        start_byte: start_byte.min(u32::MAX as usize) as u32,
+        byte_len: byte_len.min(u32::MAX as usize) as u32,
     }
 }

@@ -31,7 +31,9 @@ impl ScratchpadApp {
     }
 
     pub(super) fn prepare_frame(&mut self, ctx: &egui::Context) {
-        self.record_window_state(ctx);
+        if self.window_shown_after_first_frame {
+            self.record_window_state(ctx);
+        }
         if handle_window_resize(ctx) && self.overflow_popup_open {
             // Rebuild the overflow popup lazily against the resized viewport.
             self.overflow_popup_open = false;
@@ -102,6 +104,11 @@ impl ScratchpadApp {
         }
         if self.painted_frames_before_window_show < 2 {
             self.painted_frames_before_window_show += 1;
+            if self.painted_frames_before_window_show == 2
+                && self.app_settings.window_state.maximized
+            {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+            }
             ctx.request_repaint();
             return;
         }

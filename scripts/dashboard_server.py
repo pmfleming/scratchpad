@@ -473,6 +473,19 @@ def collect_run_metrics() -> Dict[str, Any]:
     if isinstance(clones, list):
         metrics["clone_groups"] = len(clones)
 
+    escape_hatches = _load("rust_escape_hatches.json") or []
+    if isinstance(escape_hatches, list):
+        metrics["escape_hatch_modules"] = len(escape_hatches)
+        metrics["escape_hatch_uses"] = sum(
+            int(item.get("total_count", 0)) for item in escape_hatches
+        )
+        metrics["escape_hatch_unsafe_uses"] = sum(
+            int(item.get("unsafe_count", 0)) for item in escape_hatches
+        )
+        metrics["escape_hatch_clippy_suppressions"] = sum(
+            int(item.get("clippy_suppression_count", 0)) for item in escape_hatches
+        )
+
     speed = _load("speed_efficiency_report.json") or {}
     triage_summary = speed.get("triage_summary") if isinstance(speed, dict) else None
     if isinstance(triage_summary, dict):

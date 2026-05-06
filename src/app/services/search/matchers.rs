@@ -58,8 +58,7 @@ where
         .unwrap_or_else(|| WholeWordMatcher::new(text, whole_word));
     let mut matches = Vec::new();
 
-    for (step, search_match) in regex.find_iter(text).enumerate() {
-        let _ = step;
+    for search_match in regex.find_iter(text) {
         if interrupt_check.should_abort(should_continue) {
             return None;
         }
@@ -285,16 +284,36 @@ fn find_ascii_case_sensitive_matches<F>(
 where
     F: FnMut() -> bool,
 {
+    find_ascii_matches_by_start(
+        text_bytes,
+        query_bytes.len(),
+        whole_word,
+        interruptible,
+        should_continue,
+        |start, end| &text_bytes[start..end] == query_bytes,
+    )
+}
+
+fn find_ascii_matches_by_start<F, P>(
+    text_bytes: &[u8],
+    query_len: usize,
+    whole_word: bool,
+    interruptible: bool,
+    should_continue: &mut F,
+    mut matches_at: P,
+) -> Option<Vec<Range<usize>>>
+where
+    F: FnMut() -> bool,
+    P: FnMut(usize, usize) -> bool,
+{
     let mut interrupt_check = InterruptCheck::new(interruptible);
     let mut matches = Vec::new();
-    for start in 0..=text_bytes.len() - query_bytes.len() {
+    for start in 0..=text_bytes.len() - query_len {
         if interrupt_check.should_abort(should_continue) {
             return None;
         }
-        let end = start + query_bytes.len();
-        if &text_bytes[start..end] == query_bytes
-            && ascii_whole_word_allows(text_bytes, whole_word, start, end)
-        {
+        let end = start + query_len;
+        if matches_at(start, end) && ascii_whole_word_allows(text_bytes, whole_word, start, end) {
             matches.push(start..end);
         }
     }
@@ -340,30 +359,21 @@ where
     let first_query_byte = query_lower[0];
     let last_query_byte = query_lower[query_lower.len() - 1];
     let middle_query_bytes = &query_lower[1..query_lower.len().saturating_sub(1)];
-    let mut interrupt_check = InterruptCheck::new(interruptible);
-    let mut matches = Vec::new();
-
-    for start in 0..=text_bytes.len() - query_lower.len() {
-        if interrupt_check.should_abort(should_continue) {
-            return None;
-        }
-
-        let end = start + query_lower.len();
-        if text_bytes[start].to_ascii_lowercase() != first_query_byte
-            || text_bytes[end - 1].to_ascii_lowercase() != last_query_byte
-            || !ascii_case_insensitive_bytes_match(
-                &text_bytes[start + 1..end.saturating_sub(1)],
-                middle_query_bytes,
-            )
-            || !ascii_whole_word_allows(text_bytes, whole_word, start, end)
-        {
-            continue;
-        }
-
-        matches.push(start..end);
-    }
-
-    finalize_matches(matches, interruptible, should_continue)
+    find_ascii_matches_by_start(
+        text_bytes,
+        query_lower.len(),
+        whole_word,
+        interruptible,
+        should_continue,
+        |start, end| {
+            text_bytes[start].to_ascii_lowercase() == first_query_byte
+                && text_bytes[end - 1].to_ascii_lowercase() == last_query_byte
+                && ascii_case_insensitive_bytes_match(
+                    &text_bytes[start + 1..end.saturating_sub(1)],
+                    middle_query_bytes,
+                )
+        },
+    )
 }
 
 fn byte_to_char_map(text: &str) -> Vec<usize> {
@@ -386,10 +396,22 @@ fn char_to_byte_map(text: &str) -> Vec<usize> {
     offsets
 }
 
-fn is_whole_word_match(text_chars: &[char], start: usize, end: usize) -> bool {
-    let before_is_word = start > 0 && is_word_char(text_chars[start - 1]);
-    let after_is_word = end < text_chars.len() && is_word_char(text_chars[end]);
+fn whole_word_boundary_allows<T, F>(
+    items: &[T],
+    start: usize,
+    end: usize,
+    mut is_word_item: F,
+) -> bool
+where
+    F: FnMut(&T) -> bool,
+{
+    let before_is_word = start > 0 && is_word_item(&items[start - 1]);
+    let after_is_word = end < items.len() && is_word_item(&items[end]);
     !before_is_word && !after_is_word
+}
+
+fn is_whole_word_match(text_chars: &[char], start: usize, end: usize) -> bool {
+    whole_word_boundary_allows(text_chars, start, end, |ch| is_word_char(*ch))
 }
 
 fn is_word_char(ch: char) -> bool {
@@ -404,9 +426,7 @@ fn matches_unicode_case_insensitive(candidate: &str, query: &str) -> bool {
 }
 
 fn is_ascii_whole_word_match(text_bytes: &[u8], start: usize, end: usize) -> bool {
-    let before_is_word = start > 0 && is_ascii_word_char(text_bytes[start - 1]);
-    let after_is_word = end < text_bytes.len() && is_ascii_word_char(text_bytes[end]);
-    !before_is_word && !after_is_word
+    whole_word_boundary_allows(text_bytes, start, end, |byte| is_ascii_word_char(*byte))
 }
 
 fn ascii_whole_word_allows(text_bytes: &[u8], whole_word: bool, start: usize, end: usize) -> bool {

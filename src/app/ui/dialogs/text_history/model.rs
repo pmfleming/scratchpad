@@ -3,6 +3,7 @@ use crate::app::text_history::TextHistoryEntryView;
 use egui_phosphor::regular::{
     ARROWS_LEFT_RIGHT, BACKSPACE, CLIPBOARD, MAGNIFYING_GLASS, PENCIL_SIMPLE, SCISSORS, STACK,
 };
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
 pub(super) struct TextHistoryRow {
@@ -96,4 +97,33 @@ fn entry_icon(entry: &TextHistoryEntryView) -> &'static str {
             (true, _) => PENCIL_SIMPLE,
         },
     }
+}
+
+/// Each buffer with a mixed applied/undone state contributes one Now-line in
+/// the global Timeline, anchored to its newest applied entry. Rows are already
+/// newest-first, so the Now-line appears just above that row, separating the
+/// buffer's redo targets (newer, above) from its applied entries (older, below).
+pub(super) fn timeline_now_line_anchors(rows: &[TextHistoryRow]) -> HashSet<(BufferId, u64)> {
+    let mut newest_applied: HashMap<BufferId, u64> = HashMap::new();
+    let mut has_undone: HashSet<BufferId> = HashSet::new();
+    for row in rows {
+        if row.undone {
+            has_undone.insert(row.buffer_id);
+        } else {
+            newest_applied.entry(row.buffer_id).or_insert(row.entry_id);
+        }
+    }
+    newest_applied
+        .into_iter()
+        .filter(|(buffer_id, _)| has_undone.contains(buffer_id))
+        .collect()
+}
+
+pub(super) fn newest_applied_index(rows: &[TextHistoryRow]) -> Option<usize> {
+    rows.iter().position(|row| !row.undone)
+}
+
+pub(super) fn per_file_now_line_insert_index(rows: &[TextHistoryRow]) -> Option<usize> {
+    let insert_index = newest_applied_index(rows)?;
+    (insert_index > 0).then_some(insert_index)
 }

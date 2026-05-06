@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -89,9 +90,11 @@ class HotspotAnalyzer:
         return metrics
 
     def calculate_quality_score(self, m: CodeMetrics) -> float:
-        score = (m.cognitive * 4.0) + (m.cyclomatic * 2.5)
-        score += max(0.0, 70.0 - m.mi) * 1.5
-        score += min(30.0, m.effort / 1000.0)
+        cognitive = min(260.0, m.cognitive * 3.7)
+        cyclomatic = min(220.0, m.cyclomatic * 2.0)
+        maintainability = min(150.0, max(0.0, 65.0 - m.mi) * 1.2)
+        effort = min(60.0, math.log1p(max(0.0, m.effort)) * 4.0)
+        score = (cognitive + cyclomatic + maintainability + effort) * 1.12
         return round(score, 2)
 
     def calculate_size_score(self, m: CodeMetrics) -> float:

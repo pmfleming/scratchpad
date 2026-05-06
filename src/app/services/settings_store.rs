@@ -15,7 +15,8 @@ pub const DEFAULT_EDITOR_GUTTER: u8 = 0;
 pub const DEFAULT_EDITOR_TEXT_COLOR: &str = "#ffffff";
 pub const DEFAULT_EDITOR_BACKGROUND_COLOR: &str = "#15181d";
 pub const DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR: &str = "#fff36d";
-pub const DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR: &str = "#000000";
+pub const DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR: &str = "#0b0f3d";
+pub const LEGACY_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR: &str = "#000000";
 pub const LIGHT_EDITOR_TEXT_COLOR: &str = "#000000";
 pub const LIGHT_EDITOR_BACKGROUND_COLOR: &str = "#ffffff";
 pub const DEFAULT_TAB_LIST_WIDTH: f32 = 184.0;
@@ -322,7 +323,12 @@ pub(crate) fn default_editor_text_highlight_color() -> String {
 }
 
 pub(crate) fn default_editor_text_highlight_text_color() -> String {
-    DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR.to_owned()
+    color_to_hex(crate::app::color_contrast::optimal_text_color(
+        color_from_hex(
+            DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR,
+            egui::Color32::from_rgb(255, 243, 109),
+        ),
+    ))
 }
 
 default_fn!(default_tab_list_width, f32, DEFAULT_TAB_LIST_WIDTH);
@@ -341,4 +347,17 @@ default_fn!(default_status_bar_visible, bool, DEFAULT_STATUS_BAR_VISIBLE);
 
 fn invalid_data(error: impl std::error::Error + Send + Sync + 'static) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn highlight_text_default_matches_generated_contrast_color() {
+        assert_eq!(
+            default_editor_text_highlight_text_color(),
+            DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR
+        );
+    }
 }

@@ -1,21 +1,27 @@
 mod autoscroll;
 mod chrome;
 mod context_menu;
+mod scroll_frame;
 mod scroll_input;
 
 use self::autoscroll::apply_selection_edge_autoscroll_intent;
 use self::chrome::{apply_tile_body_focus, handle_tile_click, paint_tile_frame};
+use self::scroll_frame::{
+    drain_pending_scroll_intents, editor_scroll_content_size, publish_scroll_manager_metrics,
+    recover_unresolved_piece_anchor, resolved_scroll_offset_for_view, sync_local_scroll_state,
+    sync_programmatic_scroll_offset, virtual_editor_content_height,
+};
 use self::scroll_input::{
     local_scroll_source, resolve_editor_scroll_offset_override, scrollbar_policy_from_egui,
 };
 use crate::app::app_state::ScratchpadApp;
-use crate::app::domain::{SplitPath, ViewId, WorkspaceTab};
+use crate::app::domain::{EditorViewState, SplitPath, ViewId, WorkspaceTab};
 use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::ui::editor_content::{
     self, EditorContentOutcome, EditorContentStyle, EditorHighlightStyle, TextEditOptions,
 };
 use crate::app::ui::scrolling;
-use crate::app::ui::scrolling::{DisplaySnapshot, ScrollAnchor};
+use crate::app::ui::scrolling::DisplaySnapshot;
 use crate::app::ui::tab_drag;
 use crate::app::ui::tile_header::{
     self, SplitPreviewOverlay, TileAction, TileHeaderRequest, TileHeaderState,
@@ -271,13 +277,19 @@ fn show_editor_scroll_area(
     request: TileScrollRequest<'_>,
 ) -> EditorContentOutcome {
     let frame = prepare_editor_scroll_frame(ui, tab, request.view_id, &request.content_style);
+    let word_wrap = request.content_style.text_edit.word_wrap;
+    let scrollbar_x = if word_wrap {
+        scrolling::ScrollbarPolicy::Hidden
+    } else {
+        scrollbar_policy_from_egui(request.scroll_bar_visibility)
+    };
     let output = scrolling::ScrollArea::new(frame.scroll_id)
         .interaction_id(widget_ids::root_id((
             "editor_scroll.interaction",
             request.pane_path,
         )))
         .source(local_scroll_source(request.scroll_bar_visibility))
-        .scrollbar_x(scrollbar_policy_from_egui(request.scroll_bar_visibility))
+        .scrollbar_x(scrollbar_x)
         .scrollbar_y(scrollbar_policy_from_egui(request.scroll_bar_visibility))
         .min_content_size(egui::vec2(0.0, frame.virtual_content_height))
         // Match the no-overscroll clamp applied in `resolve_editor_scroll_offset_override`.
@@ -295,8 +307,11 @@ fn show_editor_scroll_area(
                 .unwrap_or_else(missing_editor_content_outcome)
         });
 
-    let content_size =
-        editor_scroll_content_size(output.content_size, frame.virtual_content_height);
+    let content_size = editor_scroll_content_size(
+        output.content_size,
+        frame.virtual_content_height,
+        word_wrap.then_some(output.inner_rect.width()),
+    );
     if selection_drag_active(
         ui,
         output.inner.interaction_response.as_ref(),
@@ -304,7 +319,7 @@ fn show_editor_scroll_area(
     ) {
         suppress_selection_drag_reveals(tab, request.view_id);
     }
-    finish_editor_scroll_frame(tab, request.view_id, &frame, &output, content_size);
+    finish_editor_scroll_frame(ui, tab, request.view_id, &frame, &output, content_size);
     apply_selection_edge_autoscroll_intent(
         ui,
         tab,
@@ -321,7 +336,6 @@ struct EditorScrollFrame<'a> {
     scroll_id: egui::Id,
     previous_snapshot: Option<&'a DisplaySnapshot>,
     layout_requested_scroll_offset: Option<egui::Vec2>,
-    wheel_requested_scroll_offset: Option<egui::Vec2>,
     row_height: f32,
     virtual_content_height: f32,
 }
@@ -342,7 +356,11 @@ fn prepare_editor_scroll_frame<'a>(
         layout_resize_scroll_offset(ui, tab, view_id, scroll_id, content_style);
     let scroll_offset = layout_requested_scroll_offset
         .unwrap_or_else(|| resolved_scroll_offset_for_view(tab, view_id, previous_snapshot));
-    let wheel_requested_scroll_offset = None;
+    let scroll_offset = if content_style.text_edit.word_wrap {
+        egui::vec2(0.0, scroll_offset.y)
+    } else {
+        scroll_offset
+    };
     sync_local_scroll_state(ui, scroll_id, scroll_offset);
     let row_height = ui.fonts_mut(|fonts| fonts.row_height(content_style.text_edit.editor_font_id));
     let viewport_height = ui.available_rect_before_wrap().height().max(0.0);
@@ -356,23 +374,9 @@ fn prepare_editor_scroll_frame<'a>(
         scroll_id,
         previous_snapshot,
         layout_requested_scroll_offset,
-        wheel_requested_scroll_offset,
         row_height,
         virtual_content_height,
     }
-}
-
-fn resolved_scroll_offset_for_view(
-    tab: &WorkspaceTab,
-    view_id: ViewId,
-    previous_snapshot: Option<&DisplaySnapshot>,
-) -> egui::Vec2 {
-    tab.view(view_id)
-        .and_then(|view| {
-            tab.buffer_for_view(view_id)
-                .map(|buffer| editor_pixel_offset_resolved(view, buffer, previous_snapshot))
-        })
-        .unwrap_or_default()
 }
 
 fn layout_resize_scroll_offset(
@@ -398,74 +402,8 @@ fn layout_resize_scroll_offset(
     Some(scrolling::ScrollState::load(ui, scroll_id).offset)
 }
 
-fn recover_unresolved_piece_anchor(
-    ui: &egui::Ui,
-    tab: &mut WorkspaceTab,
-    view_id: ViewId,
-    scroll_id: egui::Id,
-    snapshot_fallback: Option<&DisplaySnapshot>,
-) {
-    let preserved_offset = scrolling::ScrollState::load(ui, scroll_id).offset;
-    let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) else {
-        return;
-    };
-    let ScrollAnchor::Piece { anchor, .. } = view.scroll.anchor() else {
-        return;
-    };
-    let snapshot = view.latest_display_snapshot.as_ref().or(snapshot_fallback);
-    let resolved_char_offset = buffer.document().piece_tree().anchor_position(anchor);
-    let unresolved = match resolved_char_offset {
-        Some(char_offset) => snapshot
-            .is_some_and(|snapshot| snapshot.row_for_char_offset(char_offset as u32).is_none()),
-        None => true,
-    };
-    if !unresolved {
-        return;
-    }
-
-    let tracked_anchor = view.take_piece_anchor_for_release();
-    if tracked_anchor.is_none() {
-        view.scroll.replace_anchor(ScrollAnchor::TOP);
-    }
-    view.set_editor_pixel_offset(preserved_offset);
-    if let Some(anchor) = tracked_anchor {
-        buffer
-            .document_mut()
-            .piece_tree_mut()
-            .release_anchor(anchor);
-    }
-}
-
-fn sync_local_scroll_state(ui: &egui::Ui, scroll_id: egui::Id, offset: egui::Vec2) {
-    sync_editor_scroll_state(ui, scroll_id, offset);
-    let mut local_state = scrolling::ScrollState::load(ui, scroll_id);
-    local_state.offset = offset;
-    local_state.store(ui, scroll_id);
-}
-
-fn virtual_editor_content_height(
-    tab: &WorkspaceTab,
-    view_id: ViewId,
-    virtual_row_height: f32,
-    viewport_height: f32,
-) -> f32 {
-    tab.buffer_for_view(view_id)
-        .map(|buffer| {
-            buffer.line_count.max(1) as f32 * virtual_row_height
-                + editor_eof_tail_height(viewport_height, virtual_row_height)
-        })
-        .unwrap_or_default()
-}
-
-fn editor_eof_tail_height(viewport_height: f32, row_height: f32) -> f32 {
-    if viewport_height.is_finite() && row_height.is_finite() && row_height > 0.0 {
-        (viewport_height - row_height).max(0.0)
-    } else {
-        0.0
-    }
-}
-
 fn finish_editor_scroll_frame(
+    ui: &egui::Ui,
     tab: &mut WorkspaceTab,
     view_id: ViewId,
     frame: &EditorScrollFrame<'_>,
@@ -474,6 +412,7 @@ fn finish_editor_scroll_frame(
 ) {
     if let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) {
         publish_scroll_manager_metrics(view, output.inner_rect, frame.row_height, content_size);
+        let had_pending_intents = !view.pending_intents.is_empty();
         if output.did_scroll {
             view.clear_cursor_reveal();
         }
@@ -483,151 +422,23 @@ fn finish_editor_scroll_frame(
             frame.previous_snapshot,
             Some(output.state.offset),
         );
-        let scrollbar_requested_scroll_offset = output.did_scroll.then_some(output.state.offset);
-        if let Some(offset) = resolve_editor_scroll_offset_override(
-            content_size,
-            output.inner_rect.size(),
-            frame.layout_requested_scroll_offset,
-            frame.wheel_requested_scroll_offset,
-            scrollbar_requested_scroll_offset,
-        ) {
-            view.set_editor_pixel_offset_resolved(buffer, offset);
+        if had_pending_intents {
+            sync_programmatic_scroll_offset(ui, view, buffer, frame.scroll_id, output.inner_rect);
+        } else {
+            let scrollbar_requested_scroll_offset =
+                output.did_scroll.then_some(output.state.offset);
+            if let Some(offset) = resolve_editor_scroll_offset_override(
+                content_size,
+                output.inner_rect.size(),
+                frame.layout_requested_scroll_offset,
+                None,
+                scrollbar_requested_scroll_offset,
+            ) {
+                view.set_editor_pixel_offset_resolved(buffer, offset);
+            }
         }
         view.upgrade_scroll_anchor_to_piece(buffer);
     }
-}
-
-/// Publish the latest viewport rect, row height, and content extent to the
-/// per-view `ScrollManager` so subsequent `ScrollIntent::Pages` / `Reveal`
-/// resolution operates on real geometry rather than zeros.
-fn publish_scroll_manager_metrics(
-    view: &mut crate::app::domain::EditorViewState,
-    viewport_rect: egui::Rect,
-    row_height: f32,
-    content_size: egui::Vec2,
-) {
-    let visible_rows = if row_height > 0.0 {
-        (viewport_rect.height() / row_height).ceil().max(1.0) as u32
-    } else {
-        1
-    };
-    view.scroll.set_metrics(scrolling::ViewportMetrics {
-        viewport_rect,
-        row_height,
-        column_width: row_height * 0.5,
-        visible_rows,
-        visible_columns: 0,
-    });
-    let display_rows = if row_height > 0.0 {
-        (content_size.y / row_height).ceil().max(0.0) as u32
-    } else {
-        0
-    };
-    view.scroll.set_extent(scrolling::ContentExtent {
-        display_rows,
-        height: content_size.y,
-        max_line_width: content_size.x,
-    });
-}
-
-fn editor_pixel_offset_resolved(
-    view: &crate::app::domain::EditorViewState,
-    buffer: &crate::app::domain::BufferState,
-    snapshot_fallback: Option<&DisplaySnapshot>,
-) -> egui::Vec2 {
-    let snapshot = view.latest_display_snapshot.as_ref().or(snapshot_fallback);
-    let resolve = |id| buffer.document().piece_tree().anchor_position(id);
-    let anchor_to_row = scrolling::display_aware_anchor_to_row(snapshot, resolve);
-    let y = view.scroll.pixel_offset_y(anchor_to_row);
-    egui::vec2(view.scroll.horizontal_px(), y)
-}
-
-/// Drain any `ScrollIntent`s queued on the view through the per-view
-/// `ScrollManager`. This is the renderer-side half of Phase 4 wiring: input
-/// emitters push intents (search jumps, programmatic scrolls, future page/line
-/// nav), and the renderer consumes them once per frame before deriving the
-/// pixel offset that drives the egui-style `ScrollArea`.
-fn drain_pending_scroll_intents(
-    view: &mut crate::app::domain::EditorViewState,
-    buffer: &mut crate::app::domain::BufferState,
-    snapshot_fallback: Option<&DisplaySnapshot>,
-    fallback_pixel_offset: Option<egui::Vec2>,
-) {
-    if view.pending_intents.is_empty() {
-        return;
-    }
-    if pending_intents_include_reveal(view)
-        && let Some(offset) = fallback_pixel_offset
-        && current_scroll_anchor_unresolved(view, buffer, snapshot_fallback)
-    {
-        release_piece_anchor_and_restore_pixel_offset(view, buffer, offset);
-    }
-    let intents = std::mem::take(&mut view.pending_intents);
-    let snapshot = view
-        .latest_display_snapshot
-        .as_ref()
-        .or(snapshot_fallback)
-        .cloned();
-    let resolve = |id| buffer.document().piece_tree().anchor_position(id);
-    let anchor_to_row = scrolling::display_aware_anchor_to_row(snapshot.as_ref(), resolve);
-    for intent in intents {
-        view.scroll
-            .apply_intent(intent, &anchor_to_row, scrolling::naive_row_to_anchor);
-    }
-}
-
-fn pending_intents_include_reveal(view: &crate::app::domain::EditorViewState) -> bool {
-    view.pending_intents
-        .iter()
-        .any(|intent| matches!(intent, scrolling::ScrollIntent::Reveal { .. }))
-}
-
-fn current_scroll_anchor_unresolved(
-    view: &crate::app::domain::EditorViewState,
-    buffer: &crate::app::domain::BufferState,
-    snapshot_fallback: Option<&DisplaySnapshot>,
-) -> bool {
-    let Some(anchor) = view.scroll.anchor().piece_anchor() else {
-        return false;
-    };
-    let Some(snapshot) = view.latest_display_snapshot.as_ref().or(snapshot_fallback) else {
-        return false;
-    };
-    let Some(char_offset) = buffer.document().piece_tree().anchor_position(anchor) else {
-        return true;
-    };
-    snapshot.row_for_char_offset(char_offset as u32).is_none()
-}
-
-fn release_piece_anchor_and_restore_pixel_offset(
-    view: &mut crate::app::domain::EditorViewState,
-    buffer: &mut crate::app::domain::BufferState,
-    offset: egui::Vec2,
-) {
-    let tracked_anchor = view.take_piece_anchor_for_release();
-    view.set_editor_pixel_offset(offset);
-    if let Some(anchor) = tracked_anchor {
-        buffer
-            .document_mut()
-            .piece_tree_mut()
-            .release_anchor(anchor);
-    }
-}
-
-fn sync_editor_scroll_state(ui: &egui::Ui, scroll_id: egui::Id, offset: egui::Vec2) {
-    let persistent_id = widget_ids::local(ui, ("editor_scroll_state", scroll_id));
-    let mut state = egui::scroll_area::State::load(ui.ctx(), persistent_id).unwrap_or_default();
-    if state.offset != offset {
-        state.offset = offset;
-        state.store(ui.ctx(), persistent_id);
-    }
-}
-
-fn editor_scroll_content_size(content_size: egui::Vec2, virtual_content_height: f32) -> egui::Vec2 {
-    egui::vec2(
-        content_size.x,
-        content_size.y.max(virtual_content_height.max(0.0)),
-    )
 }
 
 fn selection_drag_active(
@@ -651,7 +462,7 @@ fn suppress_selection_drag_reveals(tab: &mut WorkspaceTab, view_id: ViewId) {
     }
 }
 
-fn suppress_view_reveals_for_selection_drag(view: &mut crate::app::domain::EditorViewState) {
+fn suppress_view_reveals_for_selection_drag(view: &mut EditorViewState) {
     view.clear_cursor_reveal();
     view.pending_intents
         .retain(|intent| !matches!(intent, scrolling::ScrollIntent::Reveal { .. }));

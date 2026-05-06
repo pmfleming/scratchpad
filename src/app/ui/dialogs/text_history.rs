@@ -3,12 +3,11 @@ mod persistence;
 
 use self::model::{
     TextHistoryAction, TextHistoryFileGroup, TextHistoryRow, file_groups_from_entries,
-    row_from_entry,
+    per_file_now_line_insert_index, row_from_entry, timeline_now_line_anchors,
 };
 use self::persistence::{read_active_tab, read_follow_focus, write_active_tab, write_follow_focus};
 use super::common::show_centered_callout;
 use crate::app::app_state::ScratchpadApp;
-use crate::app::domain::BufferId;
 use crate::app::theme::{action_bg, action_hover_bg, border, tab_selected_accent, tab_selected_bg};
 use crate::app::ui::settings::dialog_card_frame;
 use crate::app::ui::{callout, settings, widget_ids};
@@ -16,7 +15,6 @@ use eframe::egui;
 use egui_phosphor::regular::{
     CARET_DOWN, CARET_RIGHT, CLOCK_COUNTER_CLOCKWISE, CROSSHAIR, FILES, TRASH,
 };
-use std::collections::{HashMap, HashSet};
 
 const TEXT_HISTORY_SIZE: egui::Vec2 =
     egui::vec2(crate::app::ui::search_replace::SEARCH_DIALOG_WIDTH, 520.0);
@@ -317,30 +315,6 @@ fn render_timeline_rows(
     }
 }
 
-/// Each buffer with a mixed applied/undone state contributes one Now-line in
-/// the global Timeline, anchored to its newest applied entry. Rows are already
-/// newest-first, so the Now-line appears just above that row, separating the
-/// buffer's redo targets (newer, above) from its applied entries (older, below).
-fn timeline_now_line_anchors(rows: &[TextHistoryRow]) -> HashSet<(BufferId, u64)> {
-    let mut newest_applied: HashMap<BufferId, u64> = HashMap::new();
-    let mut has_undone: HashSet<BufferId> = HashSet::new();
-    for row in rows {
-        if row.undone {
-            has_undone.insert(row.buffer_id);
-        } else {
-            newest_applied.entry(row.buffer_id).or_insert(row.entry_id);
-        }
-    }
-    newest_applied
-        .into_iter()
-        .filter(|(buffer_id, _)| has_undone.contains(buffer_id))
-        .collect()
-}
-
-fn newest_applied_index(rows: &[TextHistoryRow]) -> Option<usize> {
-    rows.iter().position(|row| !row.undone)
-}
-
 fn render_by_file(
     ui: &mut egui::Ui,
     groups: &[TextHistoryFileGroup],
@@ -479,11 +453,6 @@ fn render_file_history_rows(
         }
         render_row(ui, row, action);
     }
-}
-
-fn per_file_now_line_insert_index(rows: &[TextHistoryRow]) -> Option<usize> {
-    let insert_index = newest_applied_index(rows)?;
-    (insert_index > 0).then_some(insert_index)
 }
 
 fn render_row(ui: &mut egui::Ui, row: &TextHistoryRow, action: &mut Option<TextHistoryAction>) {

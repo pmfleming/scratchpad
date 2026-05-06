@@ -66,9 +66,5 @@ fn viewport_builder_from_window_state(window_state: &WindowState) -> egui::Viewp
         viewport = viewport.with_position(egui::pos2(position[0], position[1]));
     }
 
-    if window_state.maximized {
-        viewport = viewport.with_maximized(true);
-    }
-
     viewport
 }

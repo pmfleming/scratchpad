@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::ui::editor_content::EditorHighlightStyle;
 use crate::app::ui::widget_ids;
 use std::hash::Hash;
 
@@ -257,12 +258,14 @@ fn render_preview_text(ui: &mut egui::Ui, app: &ScratchpadApp, preview_family: e
         color: app.editor_text_color(),
         ..Default::default()
     };
-    let highlight_format = egui::TextFormat {
-        font_id: egui::FontId::new(app.font_size(), preview_family),
-        color: app.editor_text_highlight_text_color(),
-        background: app.editor_text_highlight_color(),
-        ..Default::default()
-    };
+    let highlight_format = EditorHighlightStyle::new(
+        app.editor_text_highlight_color(),
+        app.editor_text_highlight_text_color(),
+    )
+    .active_text_format(
+        egui::FontId::new(app.font_size(), preview_family),
+        ui.visuals().dark_mode,
+    );
 
     let start = text.find(highlighted_text).unwrap_or(0);
     let end = start + highlighted_text.len();

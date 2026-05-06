@@ -62,6 +62,8 @@ class ArchitectureMapper:
         self.test_support: Dict[str, Dict[str, object]] = {}
         self.correctness: Dict[str, Dict[str, object]] = {}
         self.git_history: Dict[str, Dict[str, object]] = {}
+        self.locality_metrics: Dict[str, Dict[str, object]] = {}
+        self.leverage_metrics: Dict[str, Dict[str, object]] = {}
         self.cycle_members: Set[str] = set()
         self.risk_breakdown: Dict[str, Dict[str, object]] = {}
 
@@ -343,13 +345,32 @@ class ArchitectureMapper:
                 "churn": 0,
                 "contributors": set(),
                 "defect_commits": 0,
+                "cochange_commits": 0,
+                "cochange_total": 0,
+                "cochanged_modules": set(),
             }
         )
 
         current_author = ""
         current_subject = ""
+        current_modules: Set[str] = set()
+
+        def flush_commit_modules() -> None:
+            if not current_modules:
+                return
+            for mod_name in current_modules:
+                record = records[mod_name]
+                peer_count = max(0, len(current_modules) - 1)
+                record["cochange_commits"] = int(record["cochange_commits"]) + 1
+                record["cochange_total"] = int(record["cochange_total"]) + peer_count
+                cast_set = record["cochanged_modules"]
+                assert isinstance(cast_set, set)
+                cast_set.update(current_modules - {mod_name})
+
         for raw_line in result.stdout.splitlines():
             if raw_line.startswith("commit\t"):
+                flush_commit_modules()
+                current_modules = set()
                 parts = raw_line.split("\t", 3)
                 current_author = parts[2] if len(parts) > 2 else ""
                 current_subject = parts[3].lower() if len(parts) > 3 else ""
@@ -371,6 +392,7 @@ class ArchitectureMapper:
             if mod_name is None:
                 continue
 
+            current_modules.add(mod_name)
             added = int(added_text) if added_text.isdigit() else 0
             deleted = int(deleted_text) if deleted_text.isdigit() else 0
             record = records[mod_name]
@@ -382,6 +404,8 @@ class ArchitectureMapper:
             if any(keyword in current_subject for keyword in DEFECT_KEYWORDS):
                 record["defect_commits"] = int(record["defect_commits"]) + 1
 
+        flush_commit_modules()
+
         for mod_name in self.module_paths:
             record = records.get(
                 mod_name,
@@ -390,16 +414,61 @@ class ArchitectureMapper:
                     "churn": 0,
                     "contributors": set(),
                     "defect_commits": 0,
+                    "cochange_commits": 0,
+                    "cochange_total": 0,
+                    "cochanged_modules": set(),
                 },
             )
             contributors = sorted(record["contributors"]) if isinstance(record["contributors"], set) else []
+            cochanged_modules = (
+                sorted(record["cochanged_modules"])
+                if isinstance(record["cochanged_modules"], set)
+                else []
+            )
+            cochange_commits = int(record["cochange_commits"])
             self.git_history[mod_name] = {
                 "commits": int(record["commits"]),
                 "churn": int(record["churn"]),
                 "contributors": contributors,
                 "contributor_count": len(contributors),
                 "defect_commits": int(record["defect_commits"]),
+                "cochange_commits": cochange_commits,
+                "cochange_total": int(record["cochange_total"]),
+                "avg_cochanged_modules": (
+                    float(record["cochange_total"]) / cochange_commits
+                    if cochange_commits
+                    else 0.0
+                ),
+                "cochanged_modules": cochanged_modules,
+                "cochanged_module_count": len(cochanged_modules),
             }
+
+    def gather_locality_leverage_metrics(self) -> None:
+        self.locality_metrics = self._load_module_metric_artifact(
+            Path("target/analysis/locality_metrics.json")
+        )
+        self.leverage_metrics = self._load_module_metric_artifact(
+            Path("target/analysis/leverage_metrics.json")
+        )
+
+    def _load_module_metric_artifact(self, path: Path) -> Dict[str, Dict[str, object]]:
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        rows = payload if isinstance(payload, list) else payload.get("items", [])
+        metrics: Dict[str, Dict[str, object]] = {}
+        if not isinstance(rows, list):
+            return metrics
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("module_key") or item.get("module_name") or "")
+            if key:
+                metrics[key] = item
+        return metrics
 
     def _find_cycle_members(self) -> Set[str]:
         visited: Set[str] = set()
@@ -481,9 +550,9 @@ class ArchitectureMapper:
 
             maintainability = round(
                 complexity
-                + min(120.0, sloc * 0.22)
-                + min(80.0, public_api * 7.0)
-                + min(90.0, outbound * 12.0 + inbound * 10.0),
+                + min(70.0, sloc * 0.12)
+                + min(30.0, public_api * 2.5)
+                + min(35.0, outbound * 4.0 + inbound * 1.0),
                 2,
             )
             change_risk = round(
@@ -533,9 +602,9 @@ class ArchitectureMapper:
                 )
             if sloc >= 150:
                 signals["maintainability"].append(f"large module {int(sloc)} sloc")
-            if public_api >= 5:
+            if public_api >= 10:
                 signals["maintainability"].append(f"broad interface {public_api} public items")
-            if outbound + inbound >= 8:
+            if outbound >= 10 or inbound >= 20:
                 signals["maintainability"].append(
                     f"high coupling in={inbound} out={outbound}"
                 )
@@ -660,6 +729,8 @@ class ArchitectureMapper:
             risk = self.risk_breakdown.get(mod_name, {})
             evidence = risk.get("evidence", {})
             category_signals = risk.get("signals", {})
+            locality = self.locality_metrics.get(mod_name, {})
+            leverage = self.leverage_metrics.get(mod_name, {})
 
             nodes.append(
                 {
@@ -681,6 +752,37 @@ class ArchitectureMapper:
                         "architectural_risk": float(
                             risk.get("architectural_risk", 0.0)
                         ),
+                        "locality_score": float(locality.get("locality_score", 0.0)),
+                        "locality_risk": float(
+                            locality.get(
+                                "non_locality_risk",
+                                locality.get("locality_risk", 0.0),
+                            )
+                        ),
+                        "non_locality_risk": float(
+                            locality.get(
+                                "non_locality_risk",
+                                locality.get("locality_risk", 0.0),
+                            )
+                        ),
+                        "leverage_score": float(
+                            leverage.get(
+                                "leverage_score",
+                                leverage.get("total_leverage_score", 0.0),
+                            )
+                        ),
+                        "leverage_risk": float(
+                            leverage.get(
+                                "leverage_risk",
+                                100.0
+                                - float(
+                                    leverage.get(
+                                        "leverage_score",
+                                        leverage.get("total_leverage_score", 100.0),
+                                    )
+                                ),
+                            )
+                        ),
                         "total_score": float(risk.get("total_score", 0.0)),
                         "sloc": int(metric.get("sloc", 0)),
                         "signals": list(
@@ -693,6 +795,8 @@ class ArchitectureMapper:
                         "category_signals": category_signals,
                         "risk_colors": self.risk_colors(risk),
                         "evidence": evidence,
+                        "locality_metrics": locality,
+                        "leverage_metrics": leverage,
                         "is_slow": bool(perf_items),
                         "perf_benchmarks": [
                             {
@@ -838,6 +942,7 @@ def main() -> None:
     mapper.gather_test_support()
     mapper.gather_correctness()
     mapper.gather_git_history()
+    mapper.gather_locality_leverage_metrics()
     mapper.compute_risks()
 
     payload = mapper.viewer_payload()

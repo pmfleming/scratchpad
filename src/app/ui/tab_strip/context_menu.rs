@@ -1,23 +1,22 @@
 use crate::app::app_state::{PendingTabContextMenu, ScratchpadApp};
 use crate::app::commands::AppCommand;
 use crate::app::services::settings_store::{TabListPosition, TabOrderMode};
-use crate::app::theme::{action_hover_bg, text_primary};
 use crate::app::ui::widget_ids;
 use eframe::egui;
 use egui_phosphor::regular::{
-    ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT, ARROW_UP, CARET_RIGHT, CHECK, COPY, FLOPPY_DISK,
-    FOLDER_OPEN, MINUS, PENCIL_SIMPLE_LINE, PLUS, TABS, TRANSLATE, TRAY, X, X_SQUARE,
+    CHECK, COPY, FLOPPY_DISK, FOLDER_OPEN, MINUS, PENCIL_SIMPLE_LINE, PLUS, TABS, TRANSLATE, TRAY,
+    X, X_SQUARE,
 };
 use std::path::{Path, PathBuf};
 
 mod close;
+mod menu_ui;
 
-const TAB_CONTEXT_MENU_WIDTH: f32 = 220.0;
-const TAB_CONTEXT_SUBMENU_WIDTH: f32 = 176.0;
-const TAB_CONTEXT_MENU_ROW_HEIGHT: f32 = 28.0;
-const TAB_CONTEXT_MENU_CARET_WIDTH: f32 = 28.0;
-const TAB_CONTEXT_MENU_ICON_CENTER_X: f32 = 20.0;
-const TAB_CONTEXT_MENU_LABEL_X: f32 = 52.0;
+use self::menu_ui::{
+    SUBMENU_WIDTH as TAB_CONTEXT_SUBMENU_WIDTH, WIDTH as TAB_CONTEXT_MENU_WIDTH,
+    close_direction_icon, close_direction_label, menu_button, primary_menu_button, submenu_button,
+    tab_list_position_icon, tab_list_position_label, tab_order_mode_label,
+};
 
 struct TabContextMenuState {
     workspace_index: Option<usize>,
@@ -292,32 +291,6 @@ fn render_close_actions(
     )
 }
 
-fn menu_button(
-    ui: &mut egui::Ui,
-    width: f32,
-    label: &str,
-    icon: Option<&str>,
-    enabled: bool,
-) -> bool {
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let response = widget_ids::surface_response(
-            ui,
-            ("tab_context.menu_button", label),
-            widget_ids::WidgetRole::ActionButton,
-            |ui| {
-                ui.add_enabled(
-                    enabled,
-                    egui::Button::new("")
-                        .min_size(egui::vec2(width, TAB_CONTEXT_MENU_ROW_HEIGHT))
-                        .stroke(egui::Stroke::NONE),
-                )
-            },
-        );
-        paint_context_menu_row_label(ui, response.rect, icon, label, enabled);
-        response.clicked()
-    })
-}
-
 fn close_menu_row(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
@@ -392,171 +365,59 @@ fn render_tab_order_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 }
 
 fn render_close_primary_button(ui: &mut egui::Ui) -> bool {
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let response = widget_ids::surface_response(
-            ui,
-            "tab_context.close_primary",
-            widget_ids::WidgetRole::ActionButton,
-            |ui| {
-                ui.add(
-                    egui::Button::new("")
-                        .min_size(egui::vec2(
-                            TAB_CONTEXT_MENU_WIDTH - TAB_CONTEXT_MENU_CARET_WIDTH,
-                            TAB_CONTEXT_MENU_ROW_HEIGHT,
-                        ))
-                        .stroke(egui::Stroke::NONE),
-                )
-            },
-        );
-        paint_context_menu_row_label(ui, response.rect, Some(X), "Close", true);
-        response.clicked()
-    })
+    primary_menu_button(ui, "tab_context.close_primary", "Close", X)
 }
 
 fn render_tab_order_primary_button(ui: &mut egui::Ui) {
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let response = widget_ids::surface_response(
-            ui,
-            "tab_context.order_primary",
-            widget_ids::WidgetRole::ActionButton,
-            |ui| {
-                ui.add(
-                    egui::Button::new("")
-                        .min_size(egui::vec2(
-                            TAB_CONTEXT_MENU_WIDTH - TAB_CONTEXT_MENU_CARET_WIDTH,
-                            TAB_CONTEXT_MENU_ROW_HEIGHT,
-                        ))
-                        .stroke(egui::Stroke::NONE),
-                )
-            },
-        );
-        paint_context_menu_row_label(ui, response.rect, Some(TABS), "Order Tabs", true);
-    });
+    let _ = primary_menu_button(ui, "tab_context.order_primary", "Order Tabs", TABS);
 }
 
 fn render_tab_list_primary_button(ui: &mut egui::Ui, label: &str, icon: &str) -> bool {
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let response = widget_ids::surface_response(
-            ui,
-            ("tab_context.tab_list_primary", label),
-            widget_ids::WidgetRole::ActionButton,
-            |ui| {
-                ui.add(
-                    egui::Button::new("")
-                        .min_size(egui::vec2(
-                            TAB_CONTEXT_MENU_WIDTH - TAB_CONTEXT_MENU_CARET_WIDTH,
-                            TAB_CONTEXT_MENU_ROW_HEIGHT,
-                        ))
-                        .stroke(egui::Stroke::NONE),
-                )
-            },
-        );
-        paint_context_menu_row_label(ui, response.rect, Some(icon), label, true);
-        response.clicked()
-    })
-}
-
-fn paint_context_menu_row_label(
-    ui: &egui::Ui,
-    rect: egui::Rect,
-    icon: Option<&str>,
-    label: &str,
-    enabled: bool,
-) {
-    let font = egui::TextStyle::Button.resolve(ui.style());
-    let color = if enabled {
-        text_primary(ui)
-    } else {
-        text_primary(ui).gamma_multiply(0.45)
-    };
-    if let Some(icon) = icon {
-        ui.painter().text(
-            rect.left_center() + egui::vec2(TAB_CONTEXT_MENU_ICON_CENTER_X, 0.0),
-            egui::Align2::CENTER_CENTER,
-            icon,
-            font.clone(),
-            color,
-        );
-    }
-    ui.painter().text(
-        rect.left_center() + egui::vec2(TAB_CONTEXT_MENU_LABEL_X, 0.0),
-        egui::Align2::LEFT_CENTER,
-        label,
-        font,
-        color,
-    );
+    primary_menu_button(ui, ("tab_context.tab_list_primary", label), label, icon)
 }
 
 fn render_tab_order_caret(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let button = egui::Button::new(egui::RichText::new(CARET_RIGHT).color(text_primary(ui)))
-            .min_size(egui::vec2(
-                TAB_CONTEXT_MENU_CARET_WIDTH,
-                TAB_CONTEXT_MENU_ROW_HEIGHT,
-            ))
-            .stroke(egui::Stroke::NONE);
-
-        widget_ids::surface_widget(ui, "tab_context.order_caret", "submenu", |ui| {
-            egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
-                ui.set_min_width(TAB_CONTEXT_SUBMENU_WIDTH);
-                ui.set_max_width(TAB_CONTEXT_SUBMENU_WIDTH);
-
-                for mode in [
-                    TabOrderMode::Custom,
-                    TabOrderMode::FileName,
-                    TabOrderMode::FileAge,
-                    TabOrderMode::RecentEdit,
-                ] {
-                    let selected = app.tab_order_mode() == mode;
-                    if menu_button(
-                        ui,
-                        TAB_CONTEXT_SUBMENU_WIDTH,
-                        tab_order_mode_label(mode),
-                        selected.then_some(CHECK),
-                        true,
-                    ) {
-                        app.set_tab_order_mode(mode);
-                        ui.close();
-                    }
-                }
-            });
-        });
+    submenu_button(ui, "tab_context.order_caret", |ui| {
+        for mode in [
+            TabOrderMode::Custom,
+            TabOrderMode::FileName,
+            TabOrderMode::FileAge,
+            TabOrderMode::RecentEdit,
+        ] {
+            let selected = app.tab_order_mode() == mode;
+            if menu_button(
+                ui,
+                TAB_CONTEXT_SUBMENU_WIDTH,
+                tab_order_mode_label(mode),
+                selected.then_some(CHECK),
+                true,
+            ) {
+                app.set_tab_order_mode(mode);
+                ui.close();
+            }
+        }
     });
 }
 
 fn render_tab_list_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let button = egui::Button::new(egui::RichText::new(CARET_RIGHT).color(text_primary(ui)))
-            .min_size(egui::vec2(
-                TAB_CONTEXT_MENU_CARET_WIDTH,
-                TAB_CONTEXT_MENU_ROW_HEIGHT,
-            ))
-            .stroke(egui::Stroke::NONE);
-
-        widget_ids::surface_widget(ui, "tab_context.tab_list_caret", "submenu", |ui| {
-            egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
-                ui.set_min_width(TAB_CONTEXT_SUBMENU_WIDTH);
-                ui.set_max_width(TAB_CONTEXT_SUBMENU_WIDTH);
-
-                for position in [
-                    TabListPosition::Top,
-                    TabListPosition::Bottom,
-                    TabListPosition::Left,
-                    TabListPosition::Right,
-                ] {
-                    if menu_button(
-                        ui,
-                        TAB_CONTEXT_SUBMENU_WIDTH,
-                        tab_list_position_label(position),
-                        Some(tab_list_position_icon(position)),
-                        true,
-                    ) {
-                        app.set_tab_list_position(position);
-                        ui.close();
-                    }
-                }
-            });
-        });
+    submenu_button(ui, "tab_context.tab_list_caret", |ui| {
+        for position in [
+            TabListPosition::Top,
+            TabListPosition::Bottom,
+            TabListPosition::Left,
+            TabListPosition::Right,
+        ] {
+            if menu_button(
+                ui,
+                TAB_CONTEXT_SUBMENU_WIDTH,
+                tab_list_position_label(position),
+                Some(tab_list_position_icon(position)),
+                true,
+            ) {
+                app.set_tab_list_position(position);
+                ui.close();
+            }
+        }
     });
 }
 
@@ -567,71 +428,28 @@ fn render_close_submenu(
     close_direction_label: &str,
     close_direction_icon: &str,
 ) {
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let button = egui::Button::new(egui::RichText::new(CARET_RIGHT).color(text_primary(ui)))
-            .min_size(egui::vec2(
-                TAB_CONTEXT_MENU_CARET_WIDTH,
-                TAB_CONTEXT_MENU_ROW_HEIGHT,
-            ))
-            .stroke(egui::Stroke::NONE);
-
-        widget_ids::surface_widget(ui, "tab_context.close_caret", "submenu", |ui| {
-            egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
-                ui.set_min_width(TAB_CONTEXT_SUBMENU_WIDTH);
-                ui.set_max_width(TAB_CONTEXT_SUBMENU_WIDTH);
-
-                for (label, icon, action) in [
-                    ("Close Others", TABS, TabCloseAction::Others),
-                    (
-                        close_direction_label,
-                        close_direction_icon,
-                        TabCloseAction::After,
-                    ),
-                    ("Close Saved", FLOPPY_DISK, TabCloseAction::Saved),
-                    ("Close All", X_SQUARE, TabCloseAction::All),
-                ] {
-                    if menu_button(ui, TAB_CONTEXT_SUBMENU_WIDTH, label, Some(icon), true) {
-                        match action {
-                            TabCloseAction::Others => close::close_other_slots(app, slot_index),
-                            TabCloseAction::After => close::close_slots_after(app, slot_index),
-                            TabCloseAction::Saved => close::close_saved_slots(app),
-                            TabCloseAction::All => close::close_all_slots(app),
-                        }
-                        ui.close();
-                    }
+    submenu_button(ui, "tab_context.close_caret", |ui| {
+        for (label, icon, action) in [
+            ("Close Others", TABS, TabCloseAction::Others),
+            (
+                close_direction_label,
+                close_direction_icon,
+                TabCloseAction::After,
+            ),
+            ("Close Saved", FLOPPY_DISK, TabCloseAction::Saved),
+            ("Close All", X_SQUARE, TabCloseAction::All),
+        ] {
+            if menu_button(ui, TAB_CONTEXT_SUBMENU_WIDTH, label, Some(icon), true) {
+                match action {
+                    TabCloseAction::Others => close::close_other_slots(app, slot_index),
+                    TabCloseAction::After => close::close_slots_after(app, slot_index),
+                    TabCloseAction::Saved => close::close_saved_slots(app),
+                    TabCloseAction::All => close::close_all_slots(app),
                 }
-            });
-        });
+                ui.close();
+            }
+        }
     });
-}
-
-fn apply_context_menu_row_hover_style(ui: &mut egui::Ui) {
-    let hover_bg = action_hover_bg(ui);
-    let visuals = ui.visuals_mut();
-    visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
-    visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-    visuals.widgets.hovered.bg_fill = hover_bg;
-    visuals.widgets.hovered.weak_bg_fill = hover_bg;
-    visuals.widgets.active.bg_fill = hover_bg;
-    visuals.widgets.active.weak_bg_fill = hover_bg;
-    visuals.widgets.open.bg_fill = hover_bg;
-    visuals.widgets.open.weak_bg_fill = hover_bg;
-    visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
-    visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
-    visuals.widgets.active.bg_stroke = egui::Stroke::NONE;
-    visuals.widgets.open.bg_stroke = egui::Stroke::NONE;
-}
-
-fn with_visual_overrides<R>(
-    ui: &mut egui::Ui,
-    configure: impl FnOnce(&mut egui::Ui),
-    add_contents: impl FnOnce(&mut egui::Ui) -> R,
-) -> R {
-    let previous_visuals = ui.visuals().clone();
-    configure(ui);
-    let result = add_contents(ui);
-    *ui.visuals_mut() = previous_visuals;
-    result
 }
 
 fn activate_slot(app: &mut ScratchpadApp, slot_index: usize) {
@@ -652,49 +470,6 @@ fn tab_slot_path(app: &ScratchpadApp, slot_index: usize) -> Option<PathBuf> {
 
     app.tab_slot_is_settings(slot_index)
         .then(|| app.settings_path().to_path_buf())
-}
-
-fn close_direction_label(position: TabListPosition) -> &'static str {
-    if position.is_vertical() {
-        "Close Down"
-    } else {
-        "Close Right"
-    }
-}
-
-fn close_direction_icon(position: TabListPosition) -> &'static str {
-    if position.is_vertical() {
-        ARROW_DOWN
-    } else {
-        ARROW_RIGHT
-    }
-}
-
-fn tab_order_mode_label(mode: TabOrderMode) -> &'static str {
-    match mode {
-        TabOrderMode::Custom => "Custom Order",
-        TabOrderMode::FileName => "File Name",
-        TabOrderMode::FileAge => "File Age",
-        TabOrderMode::RecentEdit => "Recent Edit",
-    }
-}
-
-fn tab_list_position_label(position: TabListPosition) -> &'static str {
-    match position {
-        TabListPosition::Top => "Top",
-        TabListPosition::Bottom => "Bottom",
-        TabListPosition::Left => "Left",
-        TabListPosition::Right => "Right",
-    }
-}
-
-fn tab_list_position_icon(position: TabListPosition) -> &'static str {
-    match position {
-        TabListPosition::Top => ARROW_UP,
-        TabListPosition::Bottom => ARROW_DOWN,
-        TabListPosition::Left => ARROW_LEFT,
-        TabListPosition::Right => ARROW_RIGHT,
-    }
 }
 
 enum TabCloseAction {

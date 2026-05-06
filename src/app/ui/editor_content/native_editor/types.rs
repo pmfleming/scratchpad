@@ -31,6 +31,24 @@ impl EditorHighlightStyle {
     pub(super) fn text_color(self) -> egui::Color32 {
         self.text
     }
+
+    pub fn active_text_format(self, font_id: egui::FontId, dark_mode: bool) -> egui::TextFormat {
+        egui::TextFormat {
+            font_id,
+            color: self.text_color(),
+            background: self.active_background(dark_mode),
+            ..Default::default()
+        }
+    }
+
+    pub fn passive_text_format(self, font_id: egui::FontId) -> egui::TextFormat {
+        egui::TextFormat {
+            font_id,
+            color: self.text_color(),
+            background: self.passive_background(),
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Clone, Copy)]

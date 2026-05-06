@@ -23,6 +23,12 @@ const ICON_BUTTON_SIZE: egui::Vec2 = egui::vec2(36.0, CONTROL_BUTTON_HEIGHT);
 const SEARCH_CARD_CORNER_RADIUS: u8 = 12;
 const SEARCH_INPUT_CORNER_RADIUS: u8 = 8;
 
+#[derive(Clone, Copy)]
+enum PlainEnterAction {
+    NextMatch,
+    ReplaceCurrent,
+}
+
 pub(super) fn show_search_controls(
     ui: &mut egui::Ui,
     state: &mut SearchStripState,
@@ -32,63 +38,36 @@ pub(super) fn show_search_controls(
 ) {
     let (find_response, replace_response) = ui
         .vertical(|ui| {
-            let find_response = render_search_pill(ui, state, actions, find_input_id);
+            let find_response = render_search_pill(ui, state, find_input_id);
             let replace_response = render_replace_pill(ui, state, actions, replace_input_id);
             (find_response, replace_response)
         })
         .inner;
 
     if find_response.has_focus() {
-        consume_find_input_keys(ui, actions);
+        consume_text_input_keys(ui, actions, PlainEnterAction::NextMatch);
     }
     if let Some(replace_response) = replace_response
         && replace_response.has_focus()
     {
-        if ui.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Enter)) {
-            actions.replace_current_requested = true;
-        } else if ui.input_mut(|input| input.consume_key(egui::Modifiers::ALT, egui::Key::Enter)) {
-            actions.replace_all_requested = true;
-        } else if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
-            actions.replace_current_requested = true;
-        }
-        if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-            actions.close_requested = true;
-        }
+        consume_text_input_keys(ui, actions, PlainEnterAction::ReplaceCurrent);
     }
 }
 
 fn render_search_pill(
     ui: &mut egui::Ui,
     state: &mut SearchStripState,
-    _actions: &mut SearchStripActions,
     find_input_id: egui::Id,
 ) -> egui::Response {
     search_card(ui, |ui| {
         ui.vertical(|ui| {
-            // Icon + text field on the same row
-            let find_response = ui
-                .horizontal(|ui| {
-                    ui.allocate_ui(egui::vec2(28.0, INPUT_HEIGHT), |ui| {
-                        ui.with_layout(
-                            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                            |ui| {
-                                ui.label(
-                                    egui::RichText::new(MAGNIFYING_GLASS)
-                                        .font(egui::FontId::proportional(ICON_SIZE))
-                                        .color(text_muted(ui)),
-                                );
-                            },
-                        );
-                    });
-                    compact_text_field(
-                        ui,
-                        &mut state.query,
-                        find_input_id,
-                        "Search",
-                        ui.available_width(),
-                    )
-                })
-                .inner;
+            let find_response = icon_text_input(
+                ui,
+                MAGNIFYING_GLASS,
+                &mut state.query,
+                find_input_id,
+                "Search",
+            );
             state.sync_focus(&find_response, SearchFocusTarget::FindInput);
 
             ui.add_space(4.0);
@@ -154,30 +133,13 @@ fn render_replace_pill(
 
         ui.add_space(4.0);
 
-        // Icon + text field on the same row
-        let replace_response = ui
-            .horizontal(|ui| {
-                ui.allocate_ui(egui::vec2(28.0, INPUT_HEIGHT), |ui| {
-                    ui.with_layout(
-                        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                        |ui| {
-                            ui.label(
-                                egui::RichText::new(ARROWS_COUNTER_CLOCKWISE)
-                                    .font(egui::FontId::proportional(ICON_SIZE))
-                                    .color(text_muted(ui)),
-                            );
-                        },
-                    );
-                });
-                compact_text_field(
-                    ui,
-                    &mut state.replacement,
-                    replace_input_id,
-                    "Replace",
-                    ui.available_width(),
-                )
-            })
-            .inner;
+        let replace_response = icon_text_input(
+            ui,
+            ARROWS_COUNTER_CLOCKWISE,
+            &mut state.replacement,
+            replace_input_id,
+            "Replace",
+        );
         state.sync_focus(&replace_response, SearchFocusTarget::ReplaceInput);
 
         ui.add_space(4.0);
@@ -342,6 +304,35 @@ fn compact_text_field(
     inner.inner
 }
 
+fn icon_text_input(
+    ui: &mut egui::Ui,
+    icon: &str,
+    text: &mut String,
+    id: egui::Id,
+    hint: &str,
+) -> egui::Response {
+    ui.horizontal(|ui| {
+        input_leading_icon(ui, icon);
+        compact_text_field(ui, text, id, hint, ui.available_width())
+    })
+    .inner
+}
+
+fn input_leading_icon(ui: &mut egui::Ui, icon: &str) {
+    ui.allocate_ui(egui::vec2(28.0, INPUT_HEIGHT), |ui| {
+        ui.with_layout(
+            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+            |ui| {
+                ui.label(
+                    egui::RichText::new(icon)
+                        .font(egui::FontId::proportional(ICON_SIZE))
+                        .color(text_muted(ui)),
+                );
+            },
+        );
+    });
+}
+
 fn icon_toggle_chip(
     ui: &mut egui::Ui,
     selected: bool,
@@ -485,18 +476,31 @@ fn replace_tooltip<'a>(
     }
 }
 
-fn consume_find_input_keys(ui: &mut egui::Ui, actions: &mut SearchStripActions) {
-    if ui.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Enter)) {
+fn consume_text_input_keys(
+    ui: &mut egui::Ui,
+    actions: &mut SearchStripActions,
+    plain_enter: PlainEnterAction,
+) {
+    if consume_key(ui, egui::Modifiers::CTRL, egui::Key::Enter) {
         actions.replace_current_requested = true;
-    } else if ui.input_mut(|input| input.consume_key(egui::Modifiers::ALT, egui::Key::Enter)) {
+    } else if consume_key(ui, egui::Modifiers::ALT, egui::Key::Enter) {
         actions.replace_all_requested = true;
-    } else if ui.input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::Enter)) {
+    } else if matches!(plain_enter, PlainEnterAction::NextMatch)
+        && consume_key(ui, egui::Modifiers::SHIFT, egui::Key::Enter)
+    {
         actions.previous_requested = true;
-    } else if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
-        actions.next_requested = true;
+    } else if consume_key(ui, egui::Modifiers::NONE, egui::Key::Enter) {
+        match plain_enter {
+            PlainEnterAction::NextMatch => actions.next_requested = true,
+            PlainEnterAction::ReplaceCurrent => actions.replace_current_requested = true,
+        }
     }
 
-    if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+    if consume_key(ui, egui::Modifiers::NONE, egui::Key::Escape) {
         actions.close_requested = true;
     }
+}
+
+fn consume_key(ui: &mut egui::Ui, modifiers: egui::Modifiers, key: egui::Key) -> bool {
+    ui.input_mut(|input| input.consume_key(modifiers, key))
 }

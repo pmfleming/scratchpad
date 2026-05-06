@@ -314,6 +314,7 @@ function Get-RefreshTasks {
         (New-OverviewTask -Title "Generating code locality data" -Label "locality_dynamic" -Arguments @("scripts/locality_bench.py", "--mode", "visibility")),
         (New-OverviewTask -Title "Generating static leverage data" -Label "locality_leverage" -Arguments @("scripts/leverage_metrics.py", "--paths", "src", "--mode", "visibility") -ParallelGroup "static-analysis"),
         (New-OverviewTask -Title "Generating hotspots data" -Label "hotspots" -Arguments @("scripts/hotspots.py", "--mode", "visibility", "--paths", "src", "--scope", "all") -ParallelGroup "static-analysis"),
+        (New-OverviewTask -Title "Generating Rust escape hatch data" -Label "escape_hatches" -Arguments @("scripts/rust_escape_hatches.py", "--mode", "visibility", "--paths", "src") -ParallelGroup "static-analysis"),
         (New-OverviewTask -Title "Generating clone alert data" -Label "clone_alert" -Arguments @("scripts/clone_alert.py", "--mode", "visibility", "--paths", "src") -ParallelGroup "static-analysis"),
         (New-OverviewTask -Title "Generating correctness review data" -Label "test_catalog" -Arguments @("scripts/test_catalog.py", "--mode", "visibility") -ParallelGroup "static-analysis"),
         (New-OverviewTask -Title "Generating measurement catalog data" -Label "measurement_catalog" -Arguments @("scripts/measurement_catalog.py", "--mode", "visibility") -ParallelGroup "static-analysis"),

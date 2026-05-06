@@ -270,6 +270,12 @@ enum LaneOutcome {
     Skip,
 }
 
+impl LaneOutcome {
+    fn result(result: BackgroundIoResult) -> Self {
+        Self::Result(Box::new(result))
+    }
+}
+
 fn spawn_lane(
     lane: BackgroundIoLane,
     request_rx: Receiver<BackgroundIoRequest>,
@@ -318,11 +324,11 @@ fn spawn_path_lane(
                     request_id, requests, result_tx,
                 ))
             } else {
-                LaneOutcome::Result(Box::new(BackgroundIoResult::PathsLoaded {
+                LaneOutcome::result(BackgroundIoResult::PathsLoaded {
                     request_id,
                     results: load_paths(requests),
                     is_partial: false,
-                }))
+                })
             }
         },
     );
@@ -434,20 +440,20 @@ fn spawn_session_lane(
             BackgroundIoRequest::RestoreSession {
                 request_id,
                 session_store,
-            } => LaneOutcome::Result(Box::new(BackgroundIoResult::SessionRestored {
+            } => LaneOutcome::result(BackgroundIoResult::SessionRestored {
                 request_id,
                 result: session_store.load().map_err(|error| error.to_string()),
-            })),
+            }),
             BackgroundIoRequest::PersistSession {
                 request_id,
                 session_store,
                 request,
-            } => LaneOutcome::Result(Box::new(BackgroundIoResult::SessionPersisted {
+            } => LaneOutcome::result(BackgroundIoResult::SessionPersisted {
                 request_id,
                 result: session_store
                     .persist_request(request)
                     .map_err(|error| error.to_string()),
-            })),
+            }),
             _ => LaneOutcome::Skip,
         },
     );
@@ -470,19 +476,19 @@ fn spawn_analysis_lane(
                 revision,
                 snapshot,
                 format,
-            } => LaneOutcome::Result(Box::new(BackgroundIoResult::TextMetadataRefreshed {
+            } => LaneOutcome::result(BackgroundIoResult::TextMetadataRefreshed {
                 request_id,
                 buffer_id,
                 revision,
                 result: Ok(refresh_text_metadata(snapshot, format)),
-            })),
+            }),
             BackgroundIoRequest::RefreshEncodingCompliance {
                 request_id,
                 buffer_id,
                 revision,
                 snapshot,
                 format,
-            } => LaneOutcome::Result(Box::new(BackgroundIoResult::EncodingComplianceRefreshed {
+            } => LaneOutcome::result(BackgroundIoResult::EncodingComplianceRefreshed {
                 request_id,
                 buffer_id,
                 revision,
@@ -492,7 +498,7 @@ fn spawn_analysis_lane(
                         .spans_for_range(0..snapshot.document_length().chars)
                         .map(|span| span.text),
                 )),
-            })),
+            }),
             _ => LaneOutcome::Skip,
         },
     );

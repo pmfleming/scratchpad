@@ -1,5 +1,7 @@
 use super::{TextEditOptions, highlighting};
-use crate::app::domain::{BufferState, EditorViewState, LayoutCacheKey, SearchHighlightState};
+use crate::app::domain::{
+    BufferState, EditorViewState, LayoutCacheKey, SearchHighlightState, ViewId,
+};
 use crate::app::ui::widget_ids::{self, WidgetRole};
 use eframe::egui;
 use std::sync::Arc;
@@ -36,12 +38,18 @@ pub(super) fn build_editor_galley(
         slice.char_range.start,
         slice.char_range.end,
     );
+    let selection_highlight = view
+        .cursor_range
+        .as_ref()
+        .and_then(super::types::selection_char_range)
+        .and_then(|range| local_range(Some(range), slice.char_range.start, slice.char_range.end));
     let wrap_width = editor_wrap_width(ui, options.word_wrap, Some(effective_viewport));
     let cache_key = layout_cache_key(
         buffer.document_revision(),
         slice.char_range.clone(),
         options,
         &search_highlights,
+        selection_highlight.clone(),
         wrap_width,
         ui.visuals().dark_mode,
     );
@@ -58,7 +66,7 @@ pub(super) fn build_editor_galley(
             &slice.text,
             options,
             &search_highlights,
-            None,
+            selection_highlight,
             wrap_width,
         );
         view.layout_cache
@@ -87,6 +95,7 @@ fn layout_cache_key(
     char_range: std::ops::Range<usize>,
     options: TextEditOptions<'_>,
     search_highlights: &SearchHighlightState,
+    selection_highlight: Option<std::ops::Range<usize>>,
     wrap_width: f32,
     dark_mode: bool,
 ) -> LayoutCacheKey {
@@ -99,6 +108,7 @@ fn layout_cache_key(
         word_wrap: options.word_wrap,
         text_color: options.text_color,
         dark_mode,
+        selection_highlight,
         search_highlights: search_highlights.clone(),
     }
 }
@@ -192,6 +202,7 @@ fn warm_nearby_layout_slices(
             slice.char_range.clone(),
             options,
             &search_highlights,
+            None,
             wrap_width,
             ui.visuals().dark_mode,
         );
@@ -252,22 +263,27 @@ fn local_range(
 pub(super) fn allocate_editor_rect(
     ui: &mut egui::Ui,
     galley: &egui::Galley,
+    view_id: ViewId,
     options: TextEditOptions<'_>,
     total_content_height: f32,
     viewport: Option<egui::Rect>,
 ) -> (egui::Rect, egui::Response) {
-    let response = widget_ids::allocate_exact_rect_interact(
+    let response = widget_ids::allocate_exact_interact(
         ui,
         editor_desired_size(
             ui,
             editor_desired_width(ui, galley, options.word_wrap, viewport),
             total_content_height,
         ),
-        ("native_editor", WidgetRole::TextEdit),
+        editor_interaction_id(view_id),
         egui::Sense::click_and_drag(),
         "native_editor",
     );
     (response.rect, response)
+}
+
+fn editor_interaction_id(view_id: ViewId) -> egui::Id {
+    widget_ids::surface_role(("native_editor", view_id), WidgetRole::TextEdit)
 }
 
 pub(super) fn galley_origin(
@@ -345,4 +361,15 @@ fn viewport_width(ui: &egui::Ui, viewport: Option<egui::Rect>) -> f32 {
 
 pub(super) fn editor_row_height(ui: &egui::Ui, font_id: &egui::FontId) -> f32 {
     ui.fonts_mut(|fonts| fonts.row_height(font_id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::editor_interaction_id;
+
+    #[test]
+    fn editor_interaction_id_is_stable_per_view() {
+        assert_eq!(editor_interaction_id(7), editor_interaction_id(7));
+        assert_ne!(editor_interaction_id(7), editor_interaction_id(8));
+    }
 }

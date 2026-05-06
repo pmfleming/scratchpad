@@ -26,73 +26,11 @@ impl ScratchpadApp {
             .is_some_and(|tab| tab.active_buffer().document().operation_redo_depth() > 0)
     }
 
-    pub fn text_history_len(&self) -> usize {
-        self.text_history_entries()
-            .iter()
-            .filter(|entry| !entry.undone)
-            .count()
-    }
-
-    pub fn text_history_len_for_buffer(&self, buffer_id: BufferId) -> usize {
-        self.text_history_entries()
-            .iter()
-            .filter(|entry| entry.buffer_id == buffer_id && !entry.undone)
-            .count()
-    }
-
-    pub fn text_history_editor_len(&self) -> usize {
-        self.text_history_entries()
-            .iter()
-            .filter(|entry| entry.source == crate::app::domain::PieceSource::Edit && !entry.undone)
-            .count()
-    }
-
-    pub fn text_history_search_replace_len(&self) -> usize {
-        self.text_history_entries()
-            .iter()
-            .filter(|entry| {
-                entry.source == crate::app::domain::PieceSource::SearchReplace && !entry.undone
-            })
-            .count()
-    }
-
     pub fn text_history_redo_len(&self) -> usize {
         self.text_history_entries()
             .iter()
             .filter(|entry| entry.undone)
             .count()
-    }
-
-    pub fn latest_text_history_entry_id_for_buffer(&self, buffer_id: BufferId) -> Option<u64> {
-        self.text_history_entries()
-            .into_iter()
-            .filter(|entry| entry.buffer_id == buffer_id && !entry.undone)
-            .max_by_key(|entry| entry.global_seq)
-            .map(|entry| entry.id)
-    }
-
-    pub fn latest_text_history_summary(&self) -> Option<String> {
-        self.text_history_entries()
-            .into_iter()
-            .filter(|entry| !entry.undone)
-            .max_by_key(|entry| entry.global_seq)
-            .map(|entry| entry.summary)
-    }
-
-    pub fn latest_text_history_edit_count(&self) -> Option<usize> {
-        self.text_history_entries()
-            .into_iter()
-            .filter(|entry| !entry.undone)
-            .max_by_key(|entry| entry.global_seq)
-            .map(|entry| entry.edit_count)
-    }
-
-    pub fn latest_text_history_inserted_text(&self) -> Option<String> {
-        self.text_history_entries()
-            .into_iter()
-            .filter(|entry| !entry.undone)
-            .max_by_key(|entry| entry.global_seq)
-            .map(|entry| entry.first_inserted_text)
     }
 
     pub(crate) fn text_history_entries(&self) -> Vec<TextHistoryEntryView> {
@@ -179,7 +117,9 @@ impl ScratchpadApp {
         &mut self,
         buffer_ids: impl IntoIterator<Item = BufferId>,
     ) {
-        let _ = buffer_ids;
+        if buffer_ids.into_iter().next().is_some() {
+            self.text_history_cache = Default::default();
+        }
     }
 
     pub(crate) fn record_pending_text_history_event(
@@ -194,14 +134,6 @@ impl ScratchpadApp {
         {
             let _ = buffer.take_text_history_event();
         }
-    }
-
-    pub fn undo_text_history_entry(&mut self, buffer_id: BufferId, entry_id: u64) -> bool {
-        self.apply_text_history_entry_with_focus(buffer_id, entry_id, true, true)
-    }
-
-    pub fn redo_text_history_entry(&mut self, buffer_id: BufferId, entry_id: u64) -> bool {
-        self.apply_text_history_entry_with_focus(buffer_id, entry_id, false, true)
     }
 
     /// Undo or redo every entry between the current "Now" boundary and the

@@ -52,6 +52,161 @@ const PROFILE_QUERY: &str = "needle";
 const PROFILE_RESET_QUERY: &str = "zzzz-no-match";
 const SEARCH_VIEW_DUPLICATES_PER_TAB: usize = 4;
 
+macro_rules! profile_bin_entry {
+    ($entry:ident, $runner:ident($($run_arg:expr),+), $format:literal, $($print_arg:expr),+ $(,)?) => {
+        pub fn $entry() {
+            let total = black_box($runner($($run_arg),+));
+            println!($format, $($print_arg,)+ total);
+        }
+    };
+}
+
+profile_bin_entry!(
+    run_profile_document_snapshot_bin,
+    run_document_snapshot_profile(
+        RECOMMENDED_DOCUMENT_SNAPSHOT_BYTES,
+        RECOMMENDED_DOCUMENT_SNAPSHOT_ITERATIONS
+    ),
+    "document_snapshot_profile bytes={} iterations={} total={}",
+    RECOMMENDED_DOCUMENT_SNAPSHOT_BYTES,
+    RECOMMENDED_DOCUMENT_SNAPSHOT_ITERATIONS,
+);
+
+profile_bin_entry!(
+    run_profile_paste_stress_bin,
+    run_paste_stress_profile(
+        RECOMMENDED_PASTE_STRESS_BASE_BYTES,
+        RECOMMENDED_PASTE_STRESS_INSERT_BYTES,
+        RECOMMENDED_PASTE_STRESS_ITERATIONS
+    ),
+    "paste_stress_profile base_bytes={} insert_bytes={} iterations={} total_work={}",
+    RECOMMENDED_PASTE_STRESS_BASE_BYTES,
+    RECOMMENDED_PASTE_STRESS_INSERT_BYTES,
+    RECOMMENDED_PASTE_STRESS_ITERATIONS,
+);
+
+profile_bin_entry!(
+    run_profile_scroll_stress_bin,
+    run_scroll_stress_profile(
+        RECOMMENDED_SCROLL_STRESS_BYTES,
+        RECOMMENDED_SCROLL_STRESS_ITERATIONS
+    ),
+    "scroll_stress_profile bytes={} iterations={} total_rows={}",
+    RECOMMENDED_SCROLL_STRESS_BYTES,
+    RECOMMENDED_SCROLL_STRESS_ITERATIONS,
+);
+
+profile_bin_entry!(
+    run_profile_search_all_tabs_bin,
+    run_search_all_tabs_profile(
+        RECOMMENDED_SEARCH_ALL_TABS,
+        RECOMMENDED_SEARCH_ALL_BYTES_PER_TAB,
+        RECOMMENDED_SEARCH_ALL_ITERATIONS
+    ),
+    "search_all_tabs_profile tabs={} bytes_per_tab={} iterations={} total_matches={}",
+    RECOMMENDED_SEARCH_ALL_TABS,
+    RECOMMENDED_SEARCH_ALL_BYTES_PER_TAB,
+    RECOMMENDED_SEARCH_ALL_ITERATIONS,
+);
+
+profile_bin_entry!(
+    run_profile_search_current_app_state_bin,
+    run_search_current_app_state_profile(
+        RECOMMENDED_SEARCH_CURRENT_FILES,
+        RECOMMENDED_SEARCH_CURRENT_BYTES_PER_FILE,
+        RECOMMENDED_SEARCH_CURRENT_ITERATIONS
+    ),
+    "search_current_app_state_profile files={} bytes_per_file={} iterations={} total_matches={}",
+    RECOMMENDED_SEARCH_CURRENT_FILES,
+    RECOMMENDED_SEARCH_CURRENT_BYTES_PER_FILE,
+    RECOMMENDED_SEARCH_CURRENT_ITERATIONS,
+);
+
+profile_bin_entry!(
+    run_profile_split_stress_bin,
+    run_split_stress_profile(
+        RECOMMENDED_SPLIT_STRESS_TILES,
+        RECOMMENDED_SPLIT_STRESS_BYTES_PER_TILE,
+        RECOMMENDED_SPLIT_STRESS_ITERATIONS
+    ),
+    "split_stress_profile tiles={} bytes_per_tile={} iterations={} total_actions={}",
+    RECOMMENDED_SPLIT_STRESS_TILES,
+    RECOMMENDED_SPLIT_STRESS_BYTES_PER_TILE,
+    RECOMMENDED_SPLIT_STRESS_ITERATIONS,
+);
+
+profile_bin_entry!(
+    run_profile_tab_operations_bin,
+    run_tab_operations_profile(
+        RECOMMENDED_TAB_OPERATION_TABS,
+        RECOMMENDED_TAB_OPERATION_ITERATIONS
+    ),
+    "tab_operations_profile tabs={} views_per_tab={} bytes_per_buffer={} iterations={} total_actions={}",
+    RECOMMENDED_TAB_OPERATION_TABS,
+    RECOMMENDED_TAB_OPERATION_VIEWS_PER_TAB,
+    RECOMMENDED_TAB_OPERATION_BYTES_PER_BUFFER,
+    RECOMMENDED_TAB_OPERATION_ITERATIONS,
+);
+
+profile_bin_entry!(
+    run_profile_tab_tile_layout_bin,
+    run_tab_tile_layout_profile(
+        RECOMMENDED_TAB_TILE_COUNT,
+        RECOMMENDED_TAB_TILE_BYTES,
+        RECOMMENDED_TAB_TILE_ITERATIONS
+    ),
+    "tab_tile_layout_profile tiles={} bytes_per_tile={} iterations={} total_actions={}",
+    RECOMMENDED_TAB_TILE_COUNT,
+    RECOMMENDED_TAB_TILE_BYTES,
+    RECOMMENDED_TAB_TILE_ITERATIONS,
+);
+
+profile_bin_entry!(
+    run_profile_view_navigation_bin,
+    run_view_navigation_profile(
+        RECOMMENDED_VIEW_NAVIGATION_VIEWS,
+        RECOMMENDED_VIEW_NAVIGATION_BYTES_PER_BUFFER,
+        RECOMMENDED_VIEW_NAVIGATION_ITERATIONS
+    ),
+    "view_navigation_profile views={} bytes_per_buffer={} iterations={} total_activations={}",
+    RECOMMENDED_VIEW_NAVIGATION_VIEWS,
+    RECOMMENDED_VIEW_NAVIGATION_BYTES_PER_BUFFER,
+    RECOMMENDED_VIEW_NAVIGATION_ITERATIONS,
+);
+
+profile_bin_entry!(
+    run_profile_viewport_extraction_bin,
+    run_viewport_extraction_profile(
+        RECOMMENDED_VIEWPORT_EXTRACTION_BYTES,
+        RECOMMENDED_VIEWPORT_EXTRACTION_ITERATIONS
+    ),
+    "viewport_extraction_profile bytes={} iterations={} total={}",
+    RECOMMENDED_VIEWPORT_EXTRACTION_BYTES,
+    RECOMMENDED_VIEWPORT_EXTRACTION_ITERATIONS,
+);
+
+pub fn run_profile_search_dispatch_bin() {
+    let current_total = black_box(run_search_dispatch_current_profile(
+        RECOMMENDED_SEARCH_DISPATCH_CURRENT_FILES,
+        RECOMMENDED_SEARCH_DISPATCH_BYTES_PER_ITEM,
+        RECOMMENDED_SEARCH_DISPATCH_ITERATIONS,
+    ));
+    let all_total = black_box(run_search_dispatch_all_tabs_profile(
+        RECOMMENDED_SEARCH_DISPATCH_ALL_TABS,
+        RECOMMENDED_SEARCH_DISPATCH_BYTES_PER_ITEM,
+        RECOMMENDED_SEARCH_DISPATCH_ITERATIONS,
+    ));
+    println!(
+        "search_dispatch_profile current_files={} all_tabs={} bytes_per_item={} iterations={} current_total={} all_total={}",
+        RECOMMENDED_SEARCH_DISPATCH_CURRENT_FILES,
+        RECOMMENDED_SEARCH_DISPATCH_ALL_TABS,
+        RECOMMENDED_SEARCH_DISPATCH_BYTES_PER_ITEM,
+        RECOMMENDED_SEARCH_DISPATCH_ITERATIONS,
+        current_total,
+        all_total
+    );
+}
+
 pub fn run_tab_operations_profile(tab_count: usize, iterations: usize) -> usize {
     with_steady_state_app("tab-operations", |app| {
         install_navigation_workspace(
@@ -87,9 +242,11 @@ pub fn run_tab_tile_layout_profile(
     iterations: usize,
 ) -> usize {
     with_steady_state_app("tab-tile-layout", |app| {
-        let tab = build_balanced_tile_tab(0, tile_count, bytes_per_tile);
-        let split_paths = collect_split_paths(&tab.root_pane);
-        app.tabs_mut()[0] = tab;
+        let split_paths = install_profile_tab(
+            app,
+            build_balanced_tile_tab(0, tile_count, bytes_per_tile),
+            |tab| collect_split_paths(&tab.root_pane),
+        );
         let mut ratio_phase = false;
 
         sum_profile_iterations(iterations, || {
@@ -105,9 +262,11 @@ pub fn run_view_navigation_profile(
     iterations: usize,
 ) -> usize {
     with_steady_state_app("view-navigation", |app| {
-        let tab = build_view_dense_tab(0, view_count, bytes_per_buffer);
-        let view_ids = ordered_view_ids(&tab.root_pane);
-        app.tabs_mut()[0] = tab;
+        let view_ids = install_profile_tab(
+            app,
+            build_view_dense_tab(0, view_count, bytes_per_buffer),
+            |tab| ordered_view_ids(&tab.root_pane),
+        );
 
         sum_profile_iterations(iterations, || cycle_profile_views(app, &view_ids))
     })
@@ -119,9 +278,11 @@ pub fn run_search_current_app_state_profile(
     iterations: usize,
 ) -> usize {
     with_isolated_app("search-current-app-state", |app| {
-        let tab = build_search_current_scope_tab(file_count, bytes_per_file);
-        let expected_matches = expected_matches_for_tab(&tab);
-        app.tabs_mut()[0] = tab;
+        let expected_matches = install_profile_tab(
+            app,
+            build_search_current_scope_tab(file_count, bytes_per_file),
+            expected_matches_for_tab,
+        );
 
         run_search_profile_iterations(
             app,
@@ -138,19 +299,7 @@ pub fn run_search_all_tabs_profile(
     iterations: usize,
 ) -> usize {
     with_isolated_app("search-all-tabs", |app| {
-        let total_tabs = tab_count.max(1);
-        let first_tab = build_search_all_tab(0, bytes_per_tab);
-        let mut expected_matches = expected_matches_for_tab(&first_tab);
-        app.tabs_mut()[0] = first_tab;
-
-        for tab_index in 1..total_tabs {
-            let tab = build_search_all_tab(tab_index, bytes_per_tab);
-            expected_matches += expected_matches_for_tab(&tab);
-            app.append_tab(tab);
-        }
-
-        app.handle_command(AppCommand::ActivateTab { index: 0 });
-
+        let expected_matches = install_search_all_tabs(app, tab_count, bytes_per_tab);
         run_search_profile_iterations(app, SearchScope::AllOpenTabs, expected_matches, iterations)
     })
 }
@@ -176,11 +325,7 @@ pub fn run_search_dispatch_all_tabs_profile(
     iterations: usize,
 ) -> usize {
     with_isolated_app("search-dispatch-all", |app| {
-        let total_tabs = tab_count.max(1);
-        app.tabs_mut()[0] = build_search_all_tab(0, bytes_per_tab);
-        for tab_index in 1..total_tabs {
-            app.append_tab(build_search_all_tab(tab_index, bytes_per_tab));
-        }
+        let _ = install_search_all_tabs(app, tab_count, bytes_per_tab);
 
         sum_profile_iterations(iterations, || {
             black_box(app.profile_build_search_request(SearchScope::AllOpenTabs, PROFILE_QUERY))
@@ -464,6 +609,38 @@ fn install_navigation_workspace(
         ));
     }
     app.handle_command(AppCommand::ActivateTab { index: 0 });
+}
+
+fn install_profile_tab<T>(
+    app: &mut ScratchpadApp,
+    tab: WorkspaceTab,
+    inspect: impl FnOnce(&WorkspaceTab) -> T,
+) -> T {
+    let result = inspect(&tab);
+    app.tabs_mut()[0] = tab;
+    result
+}
+
+fn install_search_all_tabs(
+    app: &mut ScratchpadApp,
+    tab_count: usize,
+    bytes_per_tab: usize,
+) -> usize {
+    let total_tabs = tab_count.max(1);
+    let mut expected_matches = install_profile_tab(
+        app,
+        build_search_all_tab(0, bytes_per_tab),
+        expected_matches_for_tab,
+    );
+
+    for tab_index in 1..total_tabs {
+        let tab = build_search_all_tab(tab_index, bytes_per_tab);
+        expected_matches += expected_matches_for_tab(&tab);
+        app.append_tab(tab);
+    }
+
+    app.handle_command(AppCommand::ActivateTab { index: 0 });
+    expected_matches
 }
 
 fn build_search_current_scope_tab(file_count: usize, bytes_per_file: usize) -> WorkspaceTab {

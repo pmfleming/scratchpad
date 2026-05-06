@@ -14,6 +14,7 @@ pub struct LayoutCacheKey {
     pub word_wrap: bool,
     pub text_color: egui::Color32,
     pub dark_mode: bool,
+    pub selection_highlight: Option<Range<usize>>,
     pub search_highlights: SearchHighlightState,
 }
 

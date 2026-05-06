@@ -1,0 +1,335 @@
+import argparse
+import json
+import platform
+import re
+import sys
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Sequence
+
+from report_modes import add_mode_argument, emit_report
+
+DEFAULT_OUTPUT = Path("rust_escape_hatches.json")
+VISIBILITY_OUTPUT = Path("target/analysis/rust_escape_hatches.json")
+
+
+PATTERNS = {
+    "unsafe_block": (r"\bunsafe\s*\{", 10.0),
+    "unsafe_fn": (r"\bunsafe\s+fn\b", 10.0),
+    "unsafe_impl": (r"\bunsafe\s+impl\b", 10.0),
+    "unsafe_trait": (r"\bunsafe\s+trait\b", 10.0),
+    "extern_block": (r"\b(?:unsafe\s+)?extern\s*(?:\"[^\"]+\")?\s*\{", 8.0),
+    "extern_fn": (r"\b(?:unsafe\s+)?extern\s*(?:\"[^\"]+\")?\s+fn\b", 7.0),
+    "static_mut": (r"\bstatic\s+mut\b", 14.0),
+    "union": (r"\bunion\s+[A-Za-z_][A-Za-z0-9_]*", 12.0),
+    "raw_borrow": (r"&\s*raw\s+(?:const|mut)\b", 6.0),
+    "asm_macro": (r"\b(?:asm|global_asm)!\s*\(", 14.0),
+    "transmute": (r"\btransmute(?:_copy)?\s*(?:::<[^>]+>)?\s*\(", 12.0),
+    "maybe_uninit": (r"\bMaybeUninit\b", 5.0),
+    "repr_escape": (r"#\s*\[\s*repr\s*\(\s*(?:C|packed|transparent|align)", 5.0),
+    "linkage_escape": (r"#\s*\[\s*(?:no_mangle|export_name|link_name|link_section|used)\b", 8.0),
+    "clippy_suppression": (r"#\s*!\s*\[\s*(?:allow|expect)\s*\([^)]*clippy::|#\s*\[\s*(?:allow|expect)\s*\([^)]*clippy::", 3.0),
+    "lint_suppression": (r"#\s*!\s*\[\s*(?:allow|expect)\s*\(|#\s*\[\s*(?:allow|expect)\s*\(", 2.0),
+}
+
+SIGNAL_LABELS = {
+    "unsafe_block": "unsafe block",
+    "unsafe_fn": "unsafe fn",
+    "unsafe_impl": "unsafe impl",
+    "unsafe_trait": "unsafe trait",
+    "extern_block": "extern block",
+    "extern_fn": "extern fn",
+    "static_mut": "mutable static",
+    "union": "union",
+    "raw_borrow": "raw borrow",
+    "asm_macro": "inline assembly",
+    "transmute": "transmute",
+    "maybe_uninit": "MaybeUninit",
+    "repr_escape": "layout repr",
+    "linkage_escape": "linkage attribute",
+    "clippy_suppression": "Clippy suppression",
+    "lint_suppression": "lint suppression",
+}
+
+
+@dataclass
+class EscapeHatchRecord:
+    module_name: str
+    module_key: str
+    path: str
+    escape_hatch_score: float
+    total_count: int
+    unsafe_count: int
+    ffi_count: int
+    global_mutability_count: int
+    raw_memory_count: int
+    layout_linkage_count: int
+    clippy_suppression_count: int
+    lint_suppression_count: int
+    counts: Dict[str, int]
+    locations: List[Dict[str, object]]
+    signals: List[str]
+    measured_at: str
+    command: str
+    host: str
+    source: str = "static_rust_escape_hatches"
+    mock: bool = False
+
+
+class RustEscapeHatchAnalyzer:
+    def __init__(self, top: Optional[int] = None):
+        self.top = top
+
+    def run(self, paths: Sequence[str]) -> List[Dict]:
+        rows = [asdict(self._record_for_file(path)) for path in self._iter_rust_files(paths)]
+        rows = [row for row in rows if row["total_count"] > 0]
+        rows.sort(
+            key=lambda item: (
+                -float(item["escape_hatch_score"]),
+                -int(item["total_count"]),
+                item["module_key"],
+            )
+        )
+        if self.top is not None:
+            return rows[: self.top]
+        return rows
+
+    def _iter_rust_files(self, paths: Sequence[str]) -> Iterable[Path]:
+        seen = set()
+        for raw_path in paths:
+            path = Path(raw_path)
+            candidates: Iterable[Path]
+            if path.is_file() and path.suffix == ".rs":
+                candidates = [path]
+            elif path.is_dir():
+                candidates = path.rglob("*.rs")
+            else:
+                candidates = []
+            for candidate in candidates:
+                resolved = candidate.resolve()
+                if resolved not in seen:
+                    seen.add(resolved)
+                    yield candidate
+
+    def _record_for_file(self, path: Path) -> EscapeHatchRecord:
+        source = path.read_text(encoding="utf-8")
+        searchable = strip_comments_and_strings(source)
+        counts: Dict[str, int] = {}
+        locations: List[Dict[str, object]] = []
+        score = 0.0
+
+        for key, (pattern, weight) in PATTERNS.items():
+            matches = list(re.finditer(pattern, searchable, re.MULTILINE))
+            if not matches:
+                counts[key] = 0
+                continue
+            counts[key] = len(matches)
+            score += len(matches) * weight
+            for match in matches[:20]:
+                locations.append(
+                    {
+                        "kind": key,
+                        "label": SIGNAL_LABELS[key],
+                        "line": searchable.count("\n", 0, match.start()) + 1,
+                    }
+                )
+
+        unsafe_count = sum(
+            counts[key]
+            for key in ["unsafe_block", "unsafe_fn", "unsafe_impl", "unsafe_trait"]
+        )
+        ffi_count = counts["extern_block"] + counts["extern_fn"]
+        global_mutability_count = counts["static_mut"]
+        raw_memory_count = (
+            counts["union"]
+            + counts["raw_borrow"]
+            + counts["asm_macro"]
+            + counts["transmute"]
+            + counts["maybe_uninit"]
+        )
+        layout_linkage_count = counts["repr_escape"] + counts["linkage_escape"]
+        clippy_suppression_count = counts["clippy_suppression"]
+        lint_suppression_count = counts["lint_suppression"]
+        signals = [
+            f"{SIGNAL_LABELS[key]} {count}"
+            for key, count in counts.items()
+            if count > 0
+        ]
+        if not signals:
+            signals = ["stable"]
+
+        return EscapeHatchRecord(
+            module_name=module_key_for_path(path),
+            module_key=module_key_for_path(path),
+            path=path.as_posix(),
+            escape_hatch_score=round(score, 2),
+            total_count=sum(counts.values()),
+            unsafe_count=unsafe_count,
+            ffi_count=ffi_count,
+            global_mutability_count=global_mutability_count,
+            raw_memory_count=raw_memory_count,
+            layout_linkage_count=layout_linkage_count,
+            clippy_suppression_count=clippy_suppression_count,
+            lint_suppression_count=lint_suppression_count,
+            counts=counts,
+            locations=sorted(locations, key=lambda item: (int(item["line"]), str(item["kind"]))),
+            signals=signals,
+            measured_at=datetime.now(timezone.utc).isoformat(),
+            command=" ".join(sys.argv),
+            host=platform.node(),
+        )
+
+
+def strip_comments_and_strings(source: str) -> str:
+    result: List[str] = []
+    index = 0
+    length = len(source)
+    state = "code"
+    raw_hashes = 0
+
+    while index < length:
+        ch = source[index]
+        nxt = source[index + 1] if index + 1 < length else ""
+
+        if state == "code":
+            if ch == "/" and nxt == "/":
+                state = "line_comment"
+                result.extend("  ")
+                index += 2
+                continue
+            if ch == "/" and nxt == "*":
+                state = "block_comment"
+                result.extend("  ")
+                index += 2
+                continue
+            raw_match = re.match(r"r(#+)\"", source[index:])
+            if raw_match:
+                state = "raw_string"
+                raw_hashes = len(raw_match.group(1))
+                result.extend(" " * (raw_hashes + 2))
+                index += raw_hashes + 2
+                continue
+            if ch == '"':
+                state = "string"
+                result.append(" ")
+                index += 1
+                continue
+            if ch == "'":
+                state = "char"
+                result.append(" ")
+                index += 1
+                continue
+            result.append(ch)
+            index += 1
+            continue
+
+        if state == "line_comment":
+            if ch == "\n":
+                state = "code"
+                result.append("\n")
+            else:
+                result.append(" ")
+            index += 1
+            continue
+
+        if state == "block_comment":
+            if ch == "*" and nxt == "/":
+                state = "code"
+                result.extend("  ")
+                index += 2
+            else:
+                result.append("\n" if ch == "\n" else " ")
+                index += 1
+            continue
+
+        if state == "string":
+            if ch == "\\":
+                result.extend("  ")
+                index += 2
+                continue
+            if ch == '"':
+                state = "code"
+            result.append("\n" if ch == "\n" else " ")
+            index += 1
+            continue
+
+        if state == "raw_string":
+            terminator = '"' + ("#" * raw_hashes)
+            if source.startswith(terminator, index):
+                state = "code"
+                result.extend(" " * len(terminator))
+                index += len(terminator)
+            else:
+                result.append("\n" if ch == "\n" else " ")
+                index += 1
+            continue
+
+        if state == "char":
+            if ch == "\\":
+                result.extend("  ")
+                index += 2
+                continue
+            if ch == "'":
+                state = "code"
+            result.append("\n" if ch == "\n" else " ")
+            index += 1
+
+    return "".join(result)
+
+
+def module_key_for_path(path: Path) -> str:
+    try:
+        rel_path = path.relative_to("src")
+    except ValueError:
+        rel_path = path
+    module = rel_path.as_posix().replace("/", "::").removesuffix(".rs")
+    if module.endswith("::mod"):
+        module = module[:-5]
+    return module
+
+
+def render_cli(payload: object) -> str:
+    rows = payload if isinstance(payload, list) else []
+    lines = ["Rust Escape Hatches"]
+    if not rows:
+        lines.append("No escape hatch usage found.")
+        return "\n".join(lines)
+
+    for index, item in enumerate(rows[:10], start=1):
+        lines.append(
+            f"{index:>2}. {item['module_key']} | score={item['escape_hatch_score']:.1f} | total={item['total_count']} | unsafe={item['unsafe_count']} | raw={item['raw_memory_count']} | ffi={item['ffi_count']}"
+        )
+    if len(rows) > 10:
+        lines.append(f"... and {len(rows) - 10} more modules.")
+    return "\n".join(lines)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Emit Rust escape hatch usage as JSON"
+    )
+    parser.add_argument("--paths", nargs="+", default=["src"], help="Paths to analyze")
+    parser.add_argument(
+        "--top",
+        type=int,
+        default=None,
+        help="Limit ranked records. Defaults to all files with usage.",
+    )
+    parser.add_argument("--output", type=Path, default=None)
+    add_mode_argument(parser)
+    args = parser.parse_args()
+
+    payload = RustEscapeHatchAnalyzer(top=args.top).run(args.paths)
+    emit_report(
+        payload,
+        mode=args.mode,
+        output_path=args.output,
+        visibility_path=VISIBILITY_OUTPUT,
+        cli_renderer=render_cli,
+        label="rust escape hatches",
+    )
+
+
+if __name__ == "__main__":
+    main()

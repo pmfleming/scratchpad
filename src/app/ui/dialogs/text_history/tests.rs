@@ -1,7 +1,7 @@
+use super::model::newest_applied_index;
 use super::{
-    TextHistoryFileGroup, TextHistoryRow, file_groups_from_entries, newest_applied_index,
-    per_file_now_line_insert_index, read_follow_focus, timeline_now_line_anchors,
-    write_follow_focus,
+    TextHistoryFileGroup, TextHistoryRow, file_groups_from_entries, per_file_now_line_insert_index,
+    read_follow_focus, timeline_now_line_anchors, write_follow_focus,
 };
 use crate::app::domain::BufferId;
 use crate::app::domain::PieceSource;

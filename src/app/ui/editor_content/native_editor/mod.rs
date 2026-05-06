@@ -68,6 +68,7 @@ pub fn render_editor_text_edit(
     let (rect, response) = allocate_editor_rect(
         ui,
         &galley_context.galley,
+        view.id,
         options,
         total_content_height,
         viewport,
@@ -75,13 +76,11 @@ pub fn render_editor_text_edit(
     let mut galley_pos = galley_origin(rect, galley_context.logical_line_base, row_height);
     request_editor_focus(ui, &response, options.request_focus);
 
-    // The pre-input galley bakes `buffer.active_selection` into its layout.
-    // If `process_editor_input` changes either the document or that
-    // selection (mouse-drag, cursor move, focus gain), the painted
-    // highlight would otherwise lag one frame and flicker. Capture the
-    // exact value the pre-input galley used so we can rebuild only when
-    // the bake actually became stale.
+    // The pre-input galley bakes the active cursor selection into its text
+    // formats. If input changes the document or selection, rebuild before
+    // paint so highlighted text color does not lag by a frame.
     let pre_active_selection = buffer.active_selection.clone();
+    let pre_cursor_range = view.cursor_range;
     let input = process_editor_input(
         ui,
         buffer,
@@ -101,7 +100,13 @@ pub fn render_editor_text_edit(
     );
 
     let mut document_revision = buffer.document_revision();
-    if input.changed || pre_active_selection != buffer.active_selection {
+    if should_rebuild_galley_after_input(
+        input.changed,
+        pre_active_selection.as_ref(),
+        buffer.active_selection.as_ref(),
+        pre_cursor_range,
+        view.cursor_range,
+    ) {
         document_revision = buffer.document_revision();
         galley_context = build_editor_galley(ui, buffer, view, options, viewport);
         galley_pos = galley_origin(rect, galley_context.logical_line_base, row_height);
@@ -396,5 +401,41 @@ fn publish_active_selection(buffer: &mut BufferState, view: &EditorViewState, fo
             .cursor_range
             .as_ref()
             .and_then(types::selection_char_range);
+    }
+}
+
+fn should_rebuild_galley_after_input(
+    changed: bool,
+    pre_active_selection: Option<&std::ops::Range<usize>>,
+    post_active_selection: Option<&std::ops::Range<usize>>,
+    pre_cursor_range: Option<CursorRange>,
+    post_cursor_range: Option<CursorRange>,
+) -> bool {
+    changed
+        || pre_active_selection != post_active_selection
+        || pre_cursor_range != post_cursor_range
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CharCursor, CursorRange, should_rebuild_galley_after_input};
+
+    #[test]
+    fn cursor_only_movement_rebuilds_galley_for_reveal() {
+        let before = Some(CursorRange::one(CharCursor::new(5)));
+        let after = Some(CursorRange::one(CharCursor::new(500)));
+
+        assert!(should_rebuild_galley_after_input(
+            false, None, None, before, after
+        ));
+    }
+
+    #[test]
+    fn unchanged_input_keeps_existing_galley() {
+        let cursor = Some(CursorRange::one(CharCursor::new(5)));
+
+        assert!(!should_rebuild_galley_after_input(
+            false, None, None, cursor, cursor
+        ));
     }
 }

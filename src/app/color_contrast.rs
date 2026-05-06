@@ -1,21 +1,16 @@
 use eframe::egui::Color32;
 
 pub fn optimal_text_color(background: Color32) -> Color32 {
-    let mut best_color_candidate = None;
-    let mut best_color_ratio = 0.0;
-
     for candidate in complementary_text_color_candidates(background) {
         let ratio = contrast_ratio(background, candidate);
         let chroma_ok = is_chromatically_distinct(background, candidate);
 
-        if ratio >= WCAG_AA_CONTRAST && chroma_ok && ratio > best_color_ratio {
-            best_color_ratio = ratio;
-            best_color_candidate = Some(candidate);
+        if ratio >= WCAG_AA_CONTRAST && chroma_ok {
+            return candidate;
         }
     }
 
-    // Fallback to Black or White if no colorful candidate is distinct/readable enough
-    best_color_candidate.unwrap_or_else(|| best_grayscale_text_color(background))
+    readable_tinted_text_color(background)
 }
 
 fn complementary_text_color_candidates(background: Color32) -> [Color32; 6] {
@@ -47,10 +42,40 @@ fn complementary_text_color_candidates(background: Color32) -> [Color32; 6] {
 
 fn contrasting_lightnesses(lightness: f32) -> [f32; 2] {
     if lightness > 0.5 {
-        [0.20, 0.10]
+        [0.14, 0.08]
     } else {
-        [0.85, 0.93]
+        [0.90, 0.96]
     }
+}
+
+fn readable_tinted_text_color(background: Color32) -> Color32 {
+    let hsl = Hsl::from_color32(background);
+    let prefer_dark_text = relative_luminance(background) > 0.179;
+    let hue = if hsl.saturation < 0.08 {
+        if prefer_dark_text { 0.62 } else { 0.12 }
+    } else {
+        (hsl.hue + 0.5).rem_euclid(1.0)
+    };
+    let saturation = (hsl.saturation * 0.45).clamp(0.18, 0.48);
+    let lightness_steps: &[f32] = if prefer_dark_text {
+        &[0.14, 0.11, 0.08, 0.06, 0.04, 0.02]
+    } else {
+        &[0.90, 0.93, 0.96, 0.98]
+    };
+
+    lightness_steps
+        .iter()
+        .copied()
+        .map(|lightness| {
+            Hsl {
+                hue,
+                saturation,
+                lightness,
+            }
+            .to_color32()
+        })
+        .find(|candidate| contrast_ratio(background, *candidate) >= WCAG_AA_CONTRAST)
+        .unwrap_or_else(|| best_grayscale_text_color(background))
 }
 
 fn is_chromatically_distinct(a: Color32, b: Color32) -> bool {
@@ -183,3 +208,28 @@ impl Hsl {
 
 const WCAG_AA_CONTRAST: f32 = 4.5;
 const MIN_CHROMA_DISTANCE: f32 = 60.0;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optimal_text_color_keeps_bright_highlights_readable_without_plain_black() {
+        let background = Color32::from_rgb(255, 243, 109);
+        let text = optimal_text_color(background);
+
+        assert_ne!(text, Color32::BLACK);
+        assert_ne!(text, Color32::WHITE);
+        assert!(contrast_ratio(background, text) >= WCAG_AA_CONTRAST);
+    }
+
+    #[test]
+    fn optimal_text_color_keeps_dark_highlights_readable_without_plain_white() {
+        let background = Color32::from_rgb(21, 24, 29);
+        let text = optimal_text_color(background);
+
+        assert_ne!(text, Color32::BLACK);
+        assert_ne!(text, Color32::WHITE);
+        assert!(contrast_ratio(background, text) >= WCAG_AA_CONTRAST);
+    }
+}
