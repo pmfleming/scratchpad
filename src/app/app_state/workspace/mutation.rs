@@ -172,6 +172,7 @@ impl ScratchpadApp {
         self.mark_search_dirty();
         self.mark_session_dirty();
         self.note_settings_toml_edit(active_tab_index);
+        self.apply_current_tab_ordering();
     }
 
     pub(crate) fn prune_text_history_for_buffers(
@@ -285,6 +286,7 @@ impl ScratchpadApp {
         }
         self.mark_search_dirty();
         self.mark_session_dirty();
+        self.apply_current_tab_ordering();
         true
     }
 

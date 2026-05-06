@@ -50,6 +50,8 @@
         cloneDistributionMode: 'counts',
         expandedQualityKey: null,
         expandedCloneKey: null,
+        qualityDatasetView: 'hotspots',
+        appPackageView: 'diagnostics',
     };
 
     const formatNumber = new Intl.NumberFormat(undefined, {
@@ -2972,43 +2974,226 @@
                 metricCard("Diagnostics", "-"),
             ]);
             byId("app-package-root").innerHTML = `<p class="muted">No app package payload loaded.</p>`;
+            renderAppPackageInsights(null);
+            updateAppPackageCount("app-package-diagnostics-count", 0, 0, "events");
+            updateAppPackageCount("app-package-buffers-count", 0, 0, "buffers");
+            updateAppPackageCount("app-package-topology-count", 0, 0, "tabs");
+            updateAppPackageCount("app-package-files-count", 0, 0, "files");
             renderTable("app-package-buffers", ["Buffer", "Path", "Encoding", "Snapshot", "Dirty"], []);
             renderTable("app-package-topology", ["Tab", "Active View", "Views", "Root Pane"], []);
             renderTable("app-package-diagnostics", ["Line", "Kind", "Operation", "Source", "Message"], []);
+            renderTable("app-package-files", ["Kind", "Name", "Path", "Size", "Modified", "Status"], []);
+            byId("app-package-manifest").textContent = "No app package payload loaded.";
             byId("app-package-warnings").innerHTML = `<p class="muted">No loader warnings.</p>`;
+            renderAppPackageDataView();
             return;
         }
 
         const summary = payload.manifest_summary || {};
         renderSummary("app-package-summary", [
             metricCard("Status", payload.exists ? "Found" : "Missing"),
-            metricCard("Version", summary.version ?? "-"),
             metricCard("Tabs", summary.tab_count ?? 0),
             metricCard("Buffers", summary.buffer_count ?? 0),
-            metricCard("Dirty", summary.dirty_buffer_count ?? 0),
-            metricCard("Views", summary.view_count ?? 0),
-            metricCard("Snapshots", summary.snapshot_file_count ?? 0),
             metricCard("Diagnostics", summary.diagnostic_count ?? 0),
         ]);
 
         byId("app-package-root").innerHTML = `
             <div class="package-paths__row"><span>Session root</span><code>${escapeHtml(payload.session_root || "-")}</code></div>
             <div class="package-paths__row"><span>Manifest</span><code>${escapeHtml(payload.manifest_path || "-")}</code></div>
+            <div class="package-paths__row"><span>Manifest file</span>${appPackageFileMeta(payload.manifest_file)}</div>
             <div class="package-paths__row"><span>Error log</span><code>${escapeHtml(payload.error_log_path || "-")}</code></div>
+            <div class="package-paths__row"><span>Error log file</span>${appPackageFileMeta(payload.error_log_file)}</div>
         `;
 
+        renderAppPackageInsights(payload);
         renderAppPackageBuffers(payload.buffers || []);
         renderAppPackageTopology(payload.topology || []);
         renderAppPackageDiagnostics(payload.diagnostics || []);
+        renderAppPackageFiles(payload);
+        renderAppPackageManifest(payload.manifest);
+        renderAppPackageDataView();
         const warnings = payload.warnings || [];
         byId("app-package-warnings").innerHTML = warnings.length
             ? `<ul class="warning-list">${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>`
             : `<p class="muted">No loader warnings.</p>`;
     }
 
+    function renderAppPackageInsights(payload) {
+        const target = byId("app-package-insights");
+        if (!target) return;
+        if (!payload) {
+            target.innerHTML = `<section class="app-package-insight-card">
+                <div class="app-package-insight-card__header">
+                    <span class="app-package-insight-card__marker"></span>
+                    <div>
+                        <h3>Package health</h3>
+                        <p>No app package payload loaded.</p>
+                    </div>
+                </div>
+                <div class="app-package-empty-graph">Start with the dashboard API to inspect runtime state.</div>
+            </section>`;
+            return;
+        }
+
+        const buffers = payload.buffers || [];
+        const topology = payload.topology || [];
+        const diagnostics = payload.diagnostics || [];
+        const snapshotOk = buffers.filter((buffer) => buffer.snapshot?.exists).length;
+        const snapshotMissing = Math.max(0, buffers.length - snapshotOk);
+        const dirtyBuffers = buffers.filter((buffer) => buffer.is_dirty).length;
+        const cleanBuffers = Math.max(0, buffers.length - dirtyBuffers);
+        const totalSnapshotBytes = buffers.reduce((sum, buffer) => sum + Number(buffer.snapshot?.size_bytes || 0), 0);
+        const summary = payload.manifest_summary || {};
+        const manifestBytes = Number(payload.manifest_file?.size_bytes || 0);
+        const errorLogBytes = Number(payload.error_log_file?.size_bytes || 0);
+
+        target.innerHTML = `
+            <section class="app-package-insight-card app-package-insight-card--health">
+                <div class="app-package-insight-card__header">
+                    <span class="app-package-insight-card__marker"></span>
+                    <div>
+                        <h3>Snapshot health</h3>
+                        <p>${formatNumber.format(snapshotOk)} available / ${formatNumber.format(snapshotMissing)} missing</p>
+                    </div>
+                </div>
+                ${appPackageDonutChart([
+                    { label: "Available", value: snapshotOk, cls: "good" },
+                    { label: "Missing", value: snapshotMissing, cls: "bad" },
+                ], buffers.length, snapshotOk, "available")}
+                <div class="app-package-insight-card__metrics">
+                    <span><strong>${escapeHtml(formatBytes(totalSnapshotBytes))}</strong> snapshot bytes</span>
+                    <span><strong>${formatNumber.format(payload.buffer_files?.length || 0)}</strong> temp files</span>
+                </div>
+            </section>
+            <section class="app-package-insight-card app-package-insight-card--dirty">
+                <div class="app-package-insight-card__header">
+                    <span class="app-package-insight-card__marker"></span>
+                    <div>
+                        <h3>Buffer state</h3>
+                        <p>${formatNumber.format(dirtyBuffers)} dirty / ${formatNumber.format(cleanBuffers)} clean</p>
+                    </div>
+                </div>
+                ${appPackageDonutChart([
+                    { label: "Clean", value: cleanBuffers, cls: "good" },
+                    { label: "Dirty", value: dirtyBuffers, cls: "warn" },
+                ], buffers.length, cleanBuffers, "clean")}
+                <div class="app-package-insight-card__metrics">
+                    <span><strong>${formatNumber.format(buffers.length)}</strong> buffers</span>
+                    <span><strong>${formatNumber.format(topology.length)}</strong> tabs</span>
+                    <span><strong>${formatNumber.format(diagnostics.length)}</strong> diagnostics</span>
+                </div>
+            </section>
+            <section class="app-package-insight-card app-package-insight-card--shape">
+                <div class="app-package-insight-card__header">
+                    <span class="app-package-insight-card__marker"></span>
+                    <div>
+                        <h3>Runtime shape</h3>
+                        <p>Session object counts at a glance.</p>
+                    </div>
+                </div>
+                ${appPackageColumnChart([
+                    { label: "Tabs", value: summary.tab_count ?? topology.length },
+                    { label: "Buffers", value: summary.buffer_count ?? buffers.length },
+                    { label: "Views", value: summary.view_count ?? 0 },
+                    { label: "Events", value: summary.diagnostic_count ?? diagnostics.length },
+                ])}
+            </section>
+            <section class="app-package-insight-card app-package-insight-card--storage">
+                <div class="app-package-insight-card__header">
+                    <span class="app-package-insight-card__marker"></span>
+                    <div>
+                        <h3>Storage mix</h3>
+                        <p>Manifest, log, and snapshot bytes.</p>
+                    </div>
+                </div>
+                ${appPackageColumnChart([
+                    { label: "Manifest", value: manifestBytes, display: formatBytes(manifestBytes) },
+                    { label: "Log", value: errorLogBytes, display: formatBytes(errorLogBytes) },
+                    { label: "Snapshots", value: totalSnapshotBytes, display: formatBytes(totalSnapshotBytes) },
+                ])}
+                <div class="app-package-insight-card__metrics">
+                    <span><strong>${formatNumber.format(payload.buffer_files?.length || 0)}</strong> snapshot files</span>
+                    <span><strong>${escapeHtml(formatBytes(manifestBytes + errorLogBytes + totalSnapshotBytes))}</strong> total</span>
+                </div>
+            </section>
+        `;
+    }
+
+    function appPackageDonutChart(segments, total, centerValue, centerLabel) {
+        const denominator = Math.max(total, 1);
+        const radius = 42;
+        const circumference = 2 * Math.PI * radius;
+        let offset = 0;
+        const rings = segments.map((segment) => {
+            const length = (segment.value / denominator) * circumference;
+            const ring = `<circle class="app-package-donut__segment app-package-donut__segment--${segment.cls}" cx="58" cy="58" r="${radius}" stroke-dasharray="${length} ${Math.max(0, circumference - length)}" stroke-dashoffset="${-offset}"></circle>`;
+            offset += length;
+            return ring;
+        }).join("");
+        return `<div class="app-package-donut">
+            <svg viewBox="0 0 116 116" role="img" aria-label="${escapeHtml(centerLabel)} ${formatNumber.format(centerValue)} of ${formatNumber.format(total)}">
+                <circle class="app-package-donut__track" cx="58" cy="58" r="${radius}"></circle>
+                ${rings}
+                <text x="58" y="54" class="app-package-donut__value">${escapeHtml(centerValue)}</text>
+                <text x="58" y="72" class="app-package-donut__label">${escapeHtml(centerLabel)}</text>
+            </svg>
+        </div>
+        <div class="app-package-segment-legend">
+            ${segments.map((segment) => `<span><i class="app-package-legend-swatch app-package-legend-swatch--${segment.cls}"></i>${escapeHtml(segment.label)} ${formatNumber.format(segment.value)}</span>`).join("")}
+        </div>`;
+    }
+
+    function appPackageColumnChart(items) {
+        const maxValue = Math.max(...items.map((item) => Number(item.value || 0)), 1);
+        return `<div class="app-package-column-chart">
+            ${items.map((item) => {
+                const value = Number(item.value || 0);
+                const height = Math.max(4, (value / maxValue) * 100);
+                return `<div class="app-package-column-chart__item">
+                    <div class="app-package-column-chart__plot">
+                        <span style="height:${height}%"></span>
+                    </div>
+                    <strong>${escapeHtml(item.display ?? formatNumber.format(value))}</strong>
+                    <em>${escapeHtml(item.label)}</em>
+                </div>`;
+            }).join("")}
+        </div>`;
+    }
+
+    function renderAppPackageDataView() {
+        document.querySelectorAll("[data-app-package-view]").forEach((button) => {
+            const active = button.dataset.appPackageView === state.appPackageView;
+            button.classList.toggle("is-active", active);
+            button.setAttribute("aria-pressed", active ? "true" : "false");
+        });
+        document.querySelectorAll("[data-app-package-panel]").forEach((panel) => {
+            panel.classList.toggle("is-active", panel.dataset.appPackagePanel === state.appPackageView);
+        });
+    }
+
+    function updateAppPackageCount(targetId, visible, total, noun) {
+        const target = byId(targetId);
+        if (!target) return;
+        target.textContent = visible === total
+            ? `${formatNumber.format(total)} ${noun}`
+            : `${formatNumber.format(visible)} of ${formatNumber.format(total)} ${noun}`;
+    }
+
+    function appPackageFileMeta(file) {
+        if (!file || !file.exists) {
+            return `<span class="risk-bad">missing</span>`;
+        }
+        const size = formatBytes(file.size_bytes || 0);
+        const modified = file.modified_at == null
+            ? ""
+            : `<span class="muted">${escapeHtml(new Date(file.modified_at * 1000).toLocaleString())}</span>`;
+        return `<span class="package-file-meta"><span class="risk-good">${escapeHtml(size)}</span>${modified}</span>`;
+    }
+
     function renderAppPackageBuffers(buffers) {
         const query = byId("app-package-buffer-filter")?.value || "";
         const filtered = buffers.filter((buffer) => matchesFilter(buffer, query));
+        updateAppPackageCount("app-package-buffers-count", filtered.length, buffers.length, "buffers");
         renderTable(
             "app-package-buffers",
             ["Tab", "Buffer", "Path", "Encoding", "Snapshot", "History", "Dirty"],
@@ -3017,7 +3202,7 @@
                 const snapshotText = snapshot.exists
                     ? `${formatBytes(snapshot.size_bytes || 0)} / ${escapeHtml(snapshot.name || "-")}`
                     : "missing";
-                return `<tr>
+                return `<tr class="${buffer.is_dirty ? "app-package-row--dirty" : ""}">
                     <td>${Number(buffer.tab_index || 0) + 1}</td>
                     <td><code>${escapeHtml(buffer.name || "Untitled")}</code><div class="muted">id ${escapeHtml(buffer.id ?? "-")} / temp ${escapeHtml(buffer.temp_id || "-")}</div></td>
                     <td><code>${escapeHtml(buffer.path || "unsaved")}</code></td>
@@ -3031,6 +3216,7 @@
     }
 
     function renderAppPackageTopology(topology) {
+        updateAppPackageCount("app-package-topology-count", topology.length, topology.length, "tabs");
         renderTable(
             "app-package-topology",
             ["Tab", "Active View", "Views", "Root Pane"],
@@ -3038,7 +3224,7 @@
                 <td>${Number(tab.tab_index || 0) + 1}</td>
                 <td><code>${escapeHtml(tab.active_view_id ?? "-")}</code></td>
                 <td>${formatNumber.format(tab.view_count || 0)}<div class="muted">${escapeHtml((tab.view_ids || []).join(", ") || "-")}</div></td>
-                <td><span class="pill">${escapeHtml(tab.root_pane_kind || "unknown")}</span></td>
+                <td><span class="app-package-token">${escapeHtml(tab.root_pane_kind || "unknown")}</span></td>
             </tr>`)
         );
     }
@@ -3046,16 +3232,19 @@
     function renderAppPackageDiagnostics(diagnostics) {
         const query = byId("app-package-diagnostics-filter")?.value || "";
         const filtered = diagnostics.filter((item) => matchesFilter(item, query)).slice().reverse();
+        updateAppPackageCount("app-package-diagnostics-count", filtered.length, diagnostics.length, "events");
         renderTable(
             "app-package-diagnostics",
             ["Line", "Kind", "Operation", "Source", "Message", "Details"],
             filtered.map((item) => {
                 const details = item.details && typeof item.details === "object"
-                    ? Object.entries(item.details).map(([key, value]) => `${key}=${value}`).join("; ")
+                    ? Object.entries(item.details)
+                        .map(([key, value]) => `${key}=${typeof value === "object" ? JSON.stringify(value) : value}`)
+                        .join("; ")
                     : "";
                 return `<tr>
                     <td>${escapeHtml(item.line ?? "-")}</td>
-                    <td><span class="pill">${escapeHtml(item.kind || "-")}</span></td>
+                    <td><span class="app-package-token">${escapeHtml(item.kind || "-")}</span></td>
                     <td>${escapeHtml(item.operation || "-")}</td>
                     <td><code>${escapeHtml(item.source || "-")}</code></td>
                     <td>${escapeHtml(item.message || "-")}<div class="muted">${escapeHtml(item.path || "")}</div></td>
@@ -3063,6 +3252,33 @@
                 </tr>`;
             })
         );
+    }
+
+    function renderAppPackageFiles(payload) {
+        const files = [
+            { kind: "manifest", ...(payload.manifest_file || {}) },
+            { kind: "error log", ...(payload.error_log_file || {}) },
+            ...(payload.buffer_files || []).map((file) => ({ kind: "snapshot", ...file })),
+        ];
+        updateAppPackageCount("app-package-files-count", files.length, files.length, "files");
+        renderTable(
+            "app-package-files",
+            ["Kind", "Name", "Path", "Size", "Modified", "Status"],
+            files.map((file) => `<tr>
+                <td><span class="app-package-token">${escapeHtml(file.kind || "-")}</span></td>
+                <td><code>${escapeHtml(file.name || "-")}</code></td>
+                <td><code>${escapeHtml(file.path || "-")}</code></td>
+                <td>${escapeHtml(file.exists ? formatBytes(file.size_bytes || 0) : "-")}</td>
+                <td>${escapeHtml(file.modified_at == null ? "-" : new Date(file.modified_at * 1000).toLocaleString())}</td>
+                <td class="${file.exists ? "risk-good" : "risk-bad"}">${escapeHtml(file.exists ? "available" : file.error || "missing")}</td>
+            </tr>`)
+        );
+    }
+
+    function renderAppPackageManifest(manifest) {
+        const target = byId("app-package-manifest");
+        if (!target) return;
+        target.textContent = manifest ? JSON.stringify(manifest, null, 2) : "No manifest loaded.";
     }
 
     function renderQualityDistribution() {
@@ -3469,6 +3685,17 @@
         renderBudgetBars("editor-budget", state.slowspots || []);
     }
 
+    function renderQualityDatasetView() {
+        document.querySelectorAll("[data-quality-dataset-view]").forEach((button) => {
+            const active = button.dataset.qualityDatasetView === state.qualityDatasetView;
+            button.classList.toggle("is-active", active);
+            button.setAttribute("aria-pressed", active ? "true" : "false");
+        });
+        document.querySelectorAll("[data-quality-dataset-panel]").forEach((panel) => {
+            panel.classList.toggle("is-active", panel.dataset.qualityDatasetPanel === state.qualityDatasetView);
+        });
+    }
+
     function renderCorrectnessMatrix() {
         const target = byId("correctness-matrix");
         if (!target) return;
@@ -3558,10 +3785,18 @@
             renderCloneDistribution();
         });
     });
-    byId("app-package-refresh")?.addEventListener("click", refreshAppPackage);
-    document.querySelectorAll("[data-app-package-jump]").forEach((button) => {
+    document.querySelectorAll("[data-quality-dataset-view]").forEach((button) => {
         button.addEventListener("click", () => {
-            byId(button.dataset.appPackageJump)?.scrollIntoView({ behavior: "smooth", block: "start" });
+            state.qualityDatasetView = button.dataset.qualityDatasetView || "hotspots";
+            renderQualityDatasetView();
+        });
+    });
+    renderQualityDatasetView();
+    byId("app-package-refresh")?.addEventListener("click", refreshAppPackage);
+    document.querySelectorAll("[data-app-package-view]").forEach((button) => {
+        button.addEventListener("click", () => {
+            state.appPackageView = button.dataset.appPackageView || "diagnostics";
+            renderAppPackageDataView();
         });
     });
     byId("app-package-buffer-filter")?.addEventListener("input", renderAppPackage);

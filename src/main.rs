@@ -4,6 +4,10 @@
 use eframe::egui;
 use scratchpad::ScratchpadApp;
 use scratchpad::app::fonts;
+use scratchpad::app::services::session_store::SessionStore;
+use scratchpad::app::services::settings_store::{
+    DEFAULT_WINDOW_INNER_SIZE, MIN_WINDOW_INNER_SIZE, SettingsStore, WindowState,
+};
 use scratchpad::app::startup::StartupOptions;
 
 fn main() -> eframe::Result<()> {
@@ -20,11 +24,12 @@ fn main() -> eframe::Result<()> {
         _ => {}
     }
 
+    let session_store = SessionStore::default();
+    let settings_store = SettingsStore::new(session_store.root().to_path_buf());
+    let startup_settings = settings_store.load().ok().flatten().unwrap_or_default();
+
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_decorations(false)
-            .with_inner_size([960.0, 640.0])
-            .with_min_inner_size([400.0, 300.0]),
+        viewport: viewport_builder_from_window_state(&startup_settings.window_state),
         ..Default::default()
     };
 
@@ -37,11 +42,32 @@ fn main() -> eframe::Result<()> {
                 scratchpad::app::startup::StartupAction::Help
                 | scratchpad::app::startup::StartupAction::Version => StartupOptions::default(),
             };
-            let app = ScratchpadApp::with_runtime_startup_options(startup_options);
+            let app = ScratchpadApp::with_stores_and_runtime_startup(
+                session_store,
+                settings_store,
+                startup_options,
+            );
             let _ = fonts::apply_editor_fonts(&cc.egui_ctx, app.editor_font());
             app.apply_theme_to_context(&cc.egui_ctx);
             cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
             Ok(Box::new(app))
         }),
     )
+}
+
+fn viewport_builder_from_window_state(window_state: &WindowState) -> egui::ViewportBuilder {
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_decorations(false)
+        .with_inner_size(window_state.inner_size.unwrap_or(DEFAULT_WINDOW_INNER_SIZE))
+        .with_min_inner_size(MIN_WINDOW_INNER_SIZE);
+
+    if let Some(position) = window_state.position {
+        viewport = viewport.with_position(egui::pos2(position[0], position[1]));
+    }
+
+    if window_state.maximized {
+        viewport = viewport.with_maximized(true);
+    }
+
+    viewport
 }

@@ -31,6 +31,7 @@ impl ScratchpadApp {
     }
 
     pub(super) fn prepare_frame(&mut self, ctx: &egui::Context) {
+        self.record_window_state(ctx);
         if handle_window_resize(ctx) && self.overflow_popup_open {
             // Rebuild the overflow popup lazily against the resized viewport.
             self.overflow_popup_open = false;
@@ -142,9 +143,24 @@ impl ScratchpadApp {
             return;
         }
 
+        self.record_window_state(ctx);
+        if !self.persist_settings_with_error_status("Settings save failed") {
+            return;
+        }
+
         if self.persist_with_error_status("Session save failed") {
             self.close_in_progress = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+
+    fn persist_settings_with_error_status(&mut self, error_prefix: &str) -> bool {
+        match self.persist_settings_now() {
+            Ok(()) => true,
+            Err(error) => {
+                self.set_error_status(format!("{error_prefix}: {error}"));
+                false
+            }
         }
     }
 

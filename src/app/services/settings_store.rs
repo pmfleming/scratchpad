@@ -23,6 +23,8 @@ pub const DEFAULT_AUTO_HIDE_TAB_LIST: bool = false;
 pub const DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS: f32 = 3.0;
 pub const DEFAULT_RECENT_FILES_ENABLED: bool = true;
 pub const DEFAULT_STATUS_BAR_VISIBLE: bool = true;
+pub const DEFAULT_WINDOW_INNER_SIZE: [f32; 2] = [960.0, 640.0];
+pub const MIN_WINDOW_INNER_SIZE: [f32; 2] = [400.0, 300.0];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -85,6 +87,26 @@ impl TabListPosition {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TabOrderMode {
+    #[default]
+    Custom,
+    FileName,
+    FileAge,
+    RecentEdit,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct WindowState {
+    #[serde(default)]
+    pub position: Option<[f32; 2]>,
+    #[serde(default)]
+    pub inner_size: Option<[f32; 2]>,
+    #[serde(default)]
+    pub maximized: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AppSettings {
     pub font_size: f32,
@@ -106,6 +128,10 @@ pub struct AppSettings {
     #[serde(default)]
     pub tab_list_position: TabListPosition,
     #[serde(default)]
+    pub tab_order_mode: TabOrderMode,
+    #[serde(default)]
+    pub custom_tab_order: Vec<u64>,
+    #[serde(default)]
     pub file_open_disposition: FileOpenDisposition,
     #[serde(default)]
     pub new_tab_placement: NewTabPlacement,
@@ -121,6 +147,8 @@ pub struct AppSettings {
     pub recent_files_enabled: bool,
     #[serde(default = "default_status_bar_visible")]
     pub status_bar_visible: bool,
+    #[serde(default)]
+    pub window_state: WindowState,
     #[serde(default)]
     pub settings_tab_open: bool,
     #[serde(default)]
@@ -142,6 +170,8 @@ impl Default for AppSettings {
             editor_text_highlight_color: default_editor_text_highlight_color(),
             editor_text_highlight_text_color: default_editor_text_highlight_text_color(),
             tab_list_position: TabListPosition::default(),
+            tab_order_mode: TabOrderMode::default(),
+            custom_tab_order: Vec::new(),
             file_open_disposition: FileOpenDisposition::default(),
             new_tab_placement: NewTabPlacement::default(),
             startup_session_behavior: StartupSessionBehavior::default(),
@@ -150,6 +180,7 @@ impl Default for AppSettings {
             tab_list_auto_hide_delay_seconds: default_tab_list_auto_hide_delay_seconds(),
             recent_files_enabled: default_recent_files_enabled(),
             status_bar_visible: default_status_bar_visible(),
+            window_state: WindowState::default(),
             settings_tab_open: false,
             settings_tab_index: None,
             history_budget: TextHistoryBudget::default(),

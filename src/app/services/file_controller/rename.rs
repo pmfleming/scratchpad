@@ -111,6 +111,7 @@ impl FileController {
 
         app.set_info_status(format!("Renamed {current_name} to {normalized_name}."));
         app.mark_session_dirty();
+        app.apply_current_tab_ordering();
         let _ = app.persist_session_now();
         true
     }

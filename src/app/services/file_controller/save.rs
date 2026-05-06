@@ -344,6 +344,7 @@ impl FileController {
             .is_some_and(|path| crate::app::paths_match(path, &settings_path));
         app.clear_status_message();
         app.mark_session_dirty();
+        app.apply_current_tab_ordering();
         let _ = app.persist_session_now();
     }
 

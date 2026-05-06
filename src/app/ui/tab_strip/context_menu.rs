@@ -1,12 +1,12 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
-use crate::app::services::settings_store::TabListPosition;
+use crate::app::services::settings_store::{TabListPosition, TabOrderMode};
 use crate::app::theme::{action_hover_bg, text_primary};
 use crate::app::ui::widget_ids;
 use eframe::egui;
 use egui_phosphor::regular::{
-    ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT, ARROW_UP, CARET_RIGHT, COPY, FLOPPY_DISK, FOLDER_OPEN,
-    MINUS, PENCIL_SIMPLE_LINE, PLUS, TABS, TRANSLATE, TRAY, X, X_SQUARE,
+    ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT, ARROW_UP, CARET_RIGHT, CHECK, COPY, FLOPPY_DISK,
+    FOLDER_OPEN, MINUS, PENCIL_SIMPLE_LINE, PLUS, TABS, TRANSLATE, TRAY, X, X_SQUARE,
 };
 use std::path::{Path, PathBuf};
 
@@ -70,6 +70,7 @@ pub(crate) fn attach_tab_context_menu(
             app.set_auto_hide_tab_list(!app.auto_hide_tab_list());
             ui.close();
         }
+        render_tab_order_submenu(ui, app);
 
         ui.separator();
 
@@ -308,6 +309,15 @@ fn render_tab_list_actions(
     .inner
 }
 
+fn render_tab_order_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+
+        render_tab_order_primary_button(ui);
+        render_tab_order_caret(ui, app);
+    });
+}
+
 fn render_close_primary_button(ui: &mut egui::Ui) -> bool {
     with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
         let response = widget_ids::surface_response(
@@ -328,6 +338,27 @@ fn render_close_primary_button(ui: &mut egui::Ui) -> bool {
         paint_context_menu_row_label(ui, response.rect, Some(X), "Close", true);
         response.clicked()
     })
+}
+
+fn render_tab_order_primary_button(ui: &mut egui::Ui) {
+    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
+        let response = widget_ids::surface_response(
+            ui,
+            "tab_context.order_primary",
+            widget_ids::WidgetRole::ActionButton,
+            |ui| {
+                ui.add(
+                    egui::Button::new("")
+                        .min_size(egui::vec2(
+                            TAB_CONTEXT_MENU_WIDTH - TAB_CONTEXT_MENU_CARET_WIDTH,
+                            TAB_CONTEXT_MENU_ROW_HEIGHT,
+                        ))
+                        .stroke(egui::Stroke::NONE),
+                )
+            },
+        );
+        paint_context_menu_row_label(ui, response.rect, Some(TABS), "Order Tabs", true);
+    });
 }
 
 fn render_tab_list_primary_button(ui: &mut egui::Ui, label: &str, icon: &str) -> bool {
@@ -381,6 +412,43 @@ fn paint_context_menu_row_label(
         font,
         color,
     );
+}
+
+fn render_tab_order_caret(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
+        let button = egui::Button::new(egui::RichText::new(CARET_RIGHT).color(text_primary(ui)))
+            .min_size(egui::vec2(
+                TAB_CONTEXT_MENU_CARET_WIDTH,
+                TAB_CONTEXT_MENU_ROW_HEIGHT,
+            ))
+            .stroke(egui::Stroke::NONE);
+
+        widget_ids::surface_widget(ui, "tab_context.order_caret", "submenu", |ui| {
+            egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
+                ui.set_min_width(TAB_CONTEXT_SUBMENU_WIDTH);
+                ui.set_max_width(TAB_CONTEXT_SUBMENU_WIDTH);
+
+                for mode in [
+                    TabOrderMode::Custom,
+                    TabOrderMode::FileName,
+                    TabOrderMode::FileAge,
+                    TabOrderMode::RecentEdit,
+                ] {
+                    let selected = app.tab_order_mode() == mode;
+                    if menu_button(
+                        ui,
+                        TAB_CONTEXT_SUBMENU_WIDTH,
+                        tab_order_mode_label(mode),
+                        selected.then_some(CHECK),
+                        true,
+                    ) {
+                        app.set_tab_order_mode(mode);
+                        ui.close();
+                    }
+                }
+            });
+        });
+    });
 }
 
 fn render_tab_list_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
@@ -526,6 +594,15 @@ fn close_direction_icon(position: TabListPosition) -> &'static str {
         ARROW_DOWN
     } else {
         ARROW_RIGHT
+    }
+}
+
+fn tab_order_mode_label(mode: TabOrderMode) -> &'static str {
+    match mode {
+        TabOrderMode::Custom => "Custom Order",
+        TabOrderMode::FileName => "File Name",
+        TabOrderMode::FileAge => "File Age",
+        TabOrderMode::RecentEdit => "Recent Edit",
     }
 }
 

@@ -121,8 +121,9 @@ impl ScratchpadApp {
         self.begin_layout_transition();
         let index = self.new_tab_insert_index();
         self.tab_manager.insert_tab(index, tab);
+        self.apply_current_tab_ordering();
         self.activate_workspace_surface();
-        self.select_only_tab_slot(self.slot_for_workspace_index(index));
+        self.select_only_tab_slot(self.active_tab_slot_index());
         self.mark_search_dirty();
         self.request_focus_for_active_view();
     }

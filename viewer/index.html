@@ -167,66 +167,79 @@
                 </div>
             </div>
 
-            <details class="disclose">
-                <summary>Show full hotspots table</summary>
-                <div class="panel-card">
-                    <div class="panel-card__header">
+            <div class="panel-card quality-dataset-browser">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Quality datasets</h2>
+                        <p>Switch between the full quality tables without stacking four long lists.</p>
+                    </div>
+                    <div class="segmented-control" role="group" aria-label="Quality dataset">
+                        <button type="button" class="is-active" data-quality-dataset-view="hotspots"
+                            aria-pressed="true">Hotspots</button>
+                        <button type="button" data-quality-dataset-view="clones" aria-pressed="false">Clones</button>
+                        <button type="button" data-quality-dataset-view="locality"
+                            aria-pressed="false">Locality</button>
+                        <button type="button" data-quality-dataset-view="leverage"
+                            aria-pressed="false">Leverage</button>
+                    </div>
+                </div>
+                <div class="quality-dataset-view is-active" data-quality-dataset-panel="hotspots">
+                    <div class="quality-dataset-view__header">
                         <div>
-                            <h2>Hotspots</h2>
+                            <h3>Hotspots</h3>
                             <p>Ranked by cognitive, cyclomatic, maintainability index, and Halstead effort.</p>
                         </div>
-                        <button class="run-button" data-run-item="quality.hotspots">Refresh</button>
-                        <input id="hotspots-filter" class="filter-input" type="search"
-                            placeholder="Filter hotspots..." />
+                        <div class="quality-dataset-tools">
+                            <button class="run-button" data-run-item="quality.hotspots">Refresh</button>
+                            <input id="hotspots-filter" class="filter-input" type="search"
+                                placeholder="Filter hotspots..." />
+                        </div>
                     </div>
-                    <div id="hotspots-table" class="table-wrap"></div>
+                    <div id="hotspots-table" class="table-wrap quality-dataset-table"></div>
                 </div>
-            </details>
-
-            <details class="disclose">
-                <summary>Show full clones table</summary>
-                <div class="panel-card">
-                    <div class="panel-card__header">
+                <div class="quality-dataset-view" data-quality-dataset-panel="clones">
+                    <div class="quality-dataset-view__header">
                         <div>
-                            <h2>Clones</h2>
+                            <h3>Clones</h3>
                             <p>Repeated structures and cross-file duplication drift.</p>
                         </div>
-                        <button class="run-button" data-run-item="quality.clones">Refresh</button>
-                        <input id="clones-filter" class="filter-input" type="search" placeholder="Filter clones..." />
+                        <div class="quality-dataset-tools">
+                            <button class="run-button" data-run-item="quality.clones">Refresh</button>
+                            <input id="clones-filter" class="filter-input" type="search"
+                                placeholder="Filter clones..." />
+                        </div>
                     </div>
-                    <div id="clones-table" class="table-wrap"></div>
+                    <div id="clones-table" class="table-wrap quality-dataset-table"></div>
                 </div>
-            </details>
-
-            <details class="disclose">
-                <summary>Show full code locality breakdown</summary>
-                <div class="panel-card">
-                    <div class="panel-card__header">
+                <div class="quality-dataset-view" data-quality-dataset-panel="locality">
+                    <div class="quality-dataset-view__header">
                         <div>
-                            <h2>Code Locality Breakdown</h2>
+                            <h3>Code Locality Breakdown</h3>
                             <p>Ranked by lowest Code Locality score first.</p>
                         </div>
-                        <button class="run-button" data-run-item="quality.locality_dynamic">Refresh</button>
-                        <input id="locality-filter" class="filter-input" type="search" placeholder="Filter code locality..." />
+                        <div class="quality-dataset-tools">
+                            <button class="run-button" data-run-item="quality.locality_dynamic">Refresh</button>
+                            <input id="locality-filter" class="filter-input" type="search"
+                                placeholder="Filter code locality..." />
+                        </div>
                     </div>
-                    <div id="locality-table" class="table-wrap"></div>
+                    <div id="locality-table" class="table-wrap quality-dataset-table"></div>
                 </div>
-            </details>
-
-            <details class="disclose">
-                <summary>Show full leverage breakdown</summary>
-                <div class="panel-card">
-                    <div class="panel-card__header">
+                <div class="quality-dataset-view" data-quality-dataset-panel="leverage">
+                    <div class="quality-dataset-view__header">
                         <div>
-                            <h2>Leverage Breakdown</h2>
+                            <h3>Leverage Breakdown</h3>
                             <p>Ranked by lowest Leverage score first.</p>
                         </div>
-                        <button class="run-button" data-run-item="quality.locality_leverage">Refresh</button>
-                        <input id="leverage-filter" class="filter-input" type="search" placeholder="Filter leverage..." />
+                        <div class="quality-dataset-tools">
+                            <button class="run-button" data-run-item="quality.locality_leverage">Refresh</button>
+                            <input id="leverage-filter" class="filter-input" type="search"
+                                placeholder="Filter leverage..." />
+                        </div>
                     </div>
-                    <div id="leverage-table" class="table-wrap"></div>
+                    <div id="leverage-table" class="table-wrap quality-dataset-table"></div>
                 </div>
-            </details>
+            </div>
         </section>
 
         <section id="performance-review" class="tab-panel">
@@ -535,65 +548,121 @@
                     <p>Runtime session manifest, buffer snapshots, and structured diagnostics from the active app
                         session root.</p>
                 </div>
-                <div class="app-package-actions" aria-label="App package quick links">
-                    <button type="button" class="run-button"
-                        data-app-package-jump="app-package-diagnostics-panel">Diagnostics</button>
-                    <button type="button" class="run-button"
-                        data-app-package-jump="app-package-buffers-panel">Buffers</button>
-                    <button type="button" class="run-button"
-                        data-app-package-jump="app-package-topology-panel">Topology</button>
+                <div class="app-package-actions" aria-label="App package actions">
                     <button type="button" class="run-button" id="app-package-refresh">Refresh Package</button>
                 </div>
             </div>
             <div id="app-package-summary" class="summary-grid"></div>
-            <div class="panel-card" id="app-package-diagnostics-panel">
-                <div class="panel-card__header">
-                    <div>
-                        <h2>Diagnostics</h2>
-                        <p>Recent newline-delimited JSON events from error.log.</p>
+            <div id="app-package-insights" class="app-package-insights"></div>
+            <div class="app-package-dashboard">
+                <div class="app-package-main">
+                    <div class="panel-card app-package-browser">
+                        <div class="panel-card__header">
+                            <div>
+                                <h2>Package datasets</h2>
+                                <p>Switch between full runtime tables without stacking long lists vertically.</p>
+                            </div>
+                            <div class="segmented-control" role="group" aria-label="App package dataset">
+                                <button type="button" class="is-active" data-app-package-view="diagnostics"
+                                    aria-pressed="true">Diagnostics</button>
+                                <button type="button" data-app-package-view="buffers"
+                                    aria-pressed="false">Buffers</button>
+                                <button type="button" data-app-package-view="topology"
+                                    aria-pressed="false">Topology</button>
+                                <button type="button" data-app-package-view="files" aria-pressed="false">Files</button>
+                                <button type="button" data-app-package-view="manifest"
+                                    aria-pressed="false">Manifest</button>
+                            </div>
+                        </div>
+                        <div class="app-package-data-view is-active" id="app-package-diagnostics-panel"
+                            data-app-package-panel="diagnostics">
+                            <div class="app-package-data-view__header">
+                                <div>
+                                    <h3>Diagnostics</h3>
+                                    <p>Recent newline-delimited JSON events from error.log.</p>
+                                </div>
+                                <div class="app-package-panel-tools">
+                                    <span id="app-package-diagnostics-count" class="app-package-count">0 events</span>
+                                    <input id="app-package-diagnostics-filter" class="filter-input" type="search"
+                                        placeholder="Filter diagnostics..." />
+                                </div>
+                            </div>
+                            <div id="app-package-diagnostics"
+                                class="table-wrap app-package-table app-package-table--diagnostics"></div>
+                        </div>
+                        <div class="app-package-data-view" id="app-package-buffers-panel"
+                            data-app-package-panel="buffers">
+                            <div class="app-package-data-view__header">
+                                <div>
+                                    <h3>Buffers</h3>
+                                    <p>Manifest rows joined with snapshot file metadata.</p>
+                                </div>
+                                <div class="app-package-panel-tools">
+                                    <span id="app-package-buffers-count" class="app-package-count">0 buffers</span>
+                                    <input id="app-package-buffer-filter" class="filter-input" type="search"
+                                        placeholder="Filter buffers..." />
+                                </div>
+                            </div>
+                            <div id="app-package-buffers"
+                                class="table-wrap app-package-table app-package-table--buffers">
+                            </div>
+                        </div>
+                        <div class="app-package-data-view" id="app-package-topology-panel"
+                            data-app-package-panel="topology">
+                            <div class="app-package-data-view__header">
+                                <div>
+                                    <h3>Topology</h3>
+                                    <p>Tab and view layout summary from the persisted manifest.</p>
+                                </div>
+                                <span id="app-package-topology-count" class="app-package-count">0 tabs</span>
+                            </div>
+                            <div id="app-package-topology"
+                                class="table-wrap app-package-table app-package-table--topology">
+                            </div>
+                        </div>
+                        <div class="app-package-data-view" id="app-package-files-panel" data-app-package-panel="files">
+                            <div class="app-package-data-view__header">
+                                <div>
+                                    <h3>Package files</h3>
+                                    <p>Manifest, error log, and discovered temp snapshot files.</p>
+                                </div>
+                                <span id="app-package-files-count" class="app-package-count">0 files</span>
+                            </div>
+                            <div id="app-package-files" class="table-wrap app-package-table app-package-table--files">
+                            </div>
+                        </div>
+                        <div class="app-package-data-view" id="app-package-manifest-panel"
+                            data-app-package-panel="manifest">
+                            <div class="app-package-data-view__header">
+                                <div>
+                                    <h3>Raw manifest</h3>
+                                    <p>Complete persisted session manifest as loaded by the dashboard API.</p>
+                                </div>
+                            </div>
+                            <pre id="app-package-manifest" class="log-output app-package-json"></pre>
+                        </div>
                     </div>
-                    <input id="app-package-diagnostics-filter" class="filter-input" type="search"
-                        placeholder="Filter diagnostics..." />
                 </div>
-                <div id="app-package-diagnostics" class="table-wrap"></div>
-            </div>
-            <div class="panel-card" id="app-package-root-panel">
-                <div class="panel-card__header">
-                    <div>
-                        <h2>Session root</h2>
-                        <p>The server resolves this path from the same OS temp convention as the app.</p>
+                <div class="app-package-sidebar">
+                    <div class="panel-card" id="app-package-root-panel">
+                        <div class="panel-card__header">
+                            <div>
+                                <h2>Session root</h2>
+                                <p>The server resolves this path from the same OS temp convention as the app.</p>
+                            </div>
+                        </div>
+                        <div id="app-package-root" class="package-paths"></div>
+                    </div>
+                    <div class="panel-card">
+                        <div class="panel-card__header">
+                            <div>
+                                <h2>Warnings</h2>
+                                <p>Non-fatal loader issues while reading live app state.</p>
+                            </div>
+                        </div>
+                        <div id="app-package-warnings"></div>
                     </div>
                 </div>
-                <div id="app-package-root" class="package-paths"></div>
-            </div>
-            <div class="panel-card" id="app-package-buffers-panel">
-                <div class="panel-card__header">
-                    <div>
-                        <h2>Buffers</h2>
-                        <p>Manifest rows joined with snapshot file metadata.</p>
-                    </div>
-                    <input id="app-package-buffer-filter" class="filter-input" type="search"
-                        placeholder="Filter buffers..." />
-                </div>
-                <div id="app-package-buffers" class="table-wrap"></div>
-            </div>
-            <div class="panel-card" id="app-package-topology-panel">
-                <div class="panel-card__header">
-                    <div>
-                        <h2>Topology</h2>
-                        <p>Tab and view layout summary from the persisted manifest.</p>
-                    </div>
-                </div>
-                <div id="app-package-topology" class="table-wrap"></div>
-            </div>
-            <div class="panel-card">
-                <div class="panel-card__header">
-                    <div>
-                        <h2>Warnings</h2>
-                        <p>Non-fatal loader issues while reading live app state.</p>
-                    </div>
-                </div>
-                <div id="app-package-warnings"></div>
             </div>
         </section>
 
