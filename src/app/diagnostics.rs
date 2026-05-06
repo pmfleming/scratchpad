@@ -213,14 +213,15 @@ impl DiagnosticsState {
         let diagnostic = AppDiagnostic::new(
             AppDiagnosticKind::SessionStarted,
             format!(
-                "Scratchpad session started; version={}; profile={}; os={}; eframe=0.34.1",
+                "Scratchpad session started; version={}; profile={}; os={}; eframe={}",
                 env!("CARGO_PKG_VERSION"),
                 if cfg!(debug_assertions) {
                     "debug"
                 } else {
                     "release"
                 },
-                std::env::consts::OS
+                std::env::consts::OS,
+                option_env!("SCRATCHPAD_EFRAME_VERSION").unwrap_or("unknown")
             ),
         );
         self.append_diagnostic(&diagnostic);

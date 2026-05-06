@@ -10,7 +10,7 @@ use egui_phosphor::regular::{
     ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_LEFT, ARROW_LINE_UP, ARROW_RIGHT,
     ARROW_UP, ARROWS_COUNTER_CLOCKWISE, ARROWS_SPLIT, CARET_RIGHT, CLIPBOARD_TEXT,
     CLOCK_COUNTER_CLOCKWISE, COPY, FLOPPY_DISK, FOLDER_OPEN, MAGNIFYING_GLASS, SCISSORS,
-    SELECTION_ALL, X,
+    SELECTION_ALL, TRASH, X,
 };
 
 const DEFAULT_SPLIT_RATIO: f32 = 0.5;
@@ -37,13 +37,15 @@ pub(super) fn attach_editor_context_menu(
         .is_some_and(|buffer| buffer.path.is_some());
     tile_response.context_menu(|ui| {
         set_menu_width(ui, EDITOR_CONTEXT_MENU_WIDTH);
+        render_standard_edit_menu(ui, app);
+        ui.separator();
         render_history_menu(ui, app);
         ui.separator();
         render_file_menu(ui, app, save_existing);
         ui.separator();
         render_tile_menu(ui, actions, request, can_promote);
         ui.separator();
-        render_icon_rail_menu(ui, app);
+        render_edit_button_rail(ui, app);
     });
 }
 
@@ -63,7 +65,7 @@ fn set_menu_width(ui: &mut egui::Ui, width: f32) {
     ui.set_max_width(width);
 }
 
-fn render_history_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+fn render_standard_edit_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     run_menu_command(
         ui,
         app,
@@ -82,6 +84,17 @@ fn render_history_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         AppCommand::RedoActiveBufferTextOperation,
         true,
     );
+    run_context_menu_action(
+        ui,
+        "Delete",
+        Some(TRASH),
+        app.copy_selected_text_in_active_view().is_some(),
+        |_, app| app.delete_selected_text_in_active_view(),
+        app,
+    );
+}
+
+fn render_history_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     run_menu_command(
         ui,
         app,
@@ -141,7 +154,8 @@ fn render_tile_menu(
     }
 }
 
-fn render_icon_rail_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+fn render_edit_button_rail(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    let selection_available = app.copy_selected_text_in_active_view().is_some();
     let any_action = ui
         .horizontal(|ui| {
             let button_count = 4.0;
@@ -150,16 +164,16 @@ fn render_icon_rail_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 + button_spacing * (button_count - 1.0);
             ui.add_space(((ui.available_width() - rail_width) * 0.5).max(0.0));
 
-            run_icon_rail_action(ui, app, SCISSORS, "Cut", |ui, app| {
+            run_icon_rail_action(ui, app, SCISSORS, "Cut", selection_available, |ui, app| {
                 copy_icon_text(ui, app.cut_selected_text_in_active_view())
-            }) || run_icon_rail_action(ui, app, COPY, "Copy", |ui, app| {
+            }) || run_icon_rail_action(ui, app, COPY, "Copy", selection_available, |ui, app| {
                 copy_icon_text(ui, app.copy_selected_text_in_active_view())
-            }) || run_icon_rail_action(ui, app, CLIPBOARD_TEXT, "Paste", |ui, _| {
+            }) || run_icon_rail_action(ui, app, CLIPBOARD_TEXT, "Paste", true, |ui, _| {
                 ui.ctx()
                     .clone()
                     .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
                 true
-            }) || run_icon_rail_action(ui, app, SELECTION_ALL, "Select All", |_, app| {
+            }) || run_icon_rail_action(ui, app, SELECTION_ALL, "Select All", true, |_, app| {
                 app.select_all_in_active_view()
             })
         })
@@ -194,10 +208,6 @@ fn run_menu_command(
         },
         app,
     )
-}
-
-fn icon_action_clicked(ui: &mut egui::Ui, icon: &str, tooltip: &str) -> bool {
-    icon_rail_button(ui, icon, tooltip, true).clicked()
 }
 
 fn run_save_menu_action(ui: &mut egui::Ui, app: &mut ScratchpadApp, save_existing: bool) -> bool {
@@ -238,21 +248,22 @@ fn run_context_menu_action(
     handled
 }
 
-fn run_icon_rail_action(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    icon: &str,
-    tooltip: &str,
-    action: impl FnOnce(&mut egui::Ui, &mut ScratchpadApp) -> bool,
-) -> bool {
-    icon_action_clicked(ui, icon, tooltip) && action(ui, app)
-}
-
 fn copy_icon_text(ui: &mut egui::Ui, text: Option<String>) -> bool {
     text.is_some_and(|text| {
         ui.copy_text(text);
         true
     })
+}
+
+fn run_icon_rail_action(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    icon: &str,
+    tooltip: &str,
+    enabled: bool,
+    action: impl FnOnce(&mut egui::Ui, &mut ScratchpadApp) -> bool,
+) -> bool {
+    icon_rail_button(ui, icon, tooltip, enabled).clicked() && action(ui, app)
 }
 
 fn menu_action_button(ui: &mut egui::Ui, label: &str, icon: Option<&str>, enabled: bool) -> bool {
@@ -433,10 +444,15 @@ fn apply_context_menu_row_hover_style(ui: &mut egui::Ui) {
 
 fn icon_rail_button(ui: &mut egui::Ui, icon: &str, tooltip: &str, enabled: bool) -> egui::Response {
     with_visual_overrides(ui, apply_icon_rail_button_style, |ui| {
+        let color = if enabled {
+            text_primary(ui)
+        } else {
+            text_primary(ui).gamma_multiply(0.45)
+        };
         let button = egui::Button::new(
             egui::RichText::new(icon)
                 .font(egui::FontId::proportional(17.0))
-                .color(text_primary(ui)),
+                .color(color),
         )
         .min_size(EDITOR_CONTEXT_ICON_BUTTON_SIZE)
         .stroke(egui::Stroke::new(1.0, border(ui)))

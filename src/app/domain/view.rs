@@ -81,6 +81,7 @@ pub struct EditorViewState {
     pending_cursor_anchor_range: Option<AnchoredCursorRange>,
     search_highlight_anchors: Vec<AnchoredSearchRange>,
     published_ime_output: Option<PublishedImeOutput>,
+    pub ime_preedit: Option<String>,
     pub search_highlights: SearchHighlightState,
     pub search_replacement_preview: Option<String>,
 }
@@ -106,6 +107,7 @@ impl EditorViewState {
             pending_cursor_anchor_range: None,
             search_highlight_anchors: Vec::new(),
             published_ime_output: None,
+            ime_preedit: None,
             search_highlights: SearchHighlightState::default(),
             search_replacement_preview: None,
         }
@@ -137,6 +139,7 @@ impl EditorViewState {
             pending_cursor_anchor_range: None,
             search_highlight_anchors: Vec::new(),
             published_ime_output: None,
+            ime_preedit: None,
             search_highlights: SearchHighlightState::default(),
             search_replacement_preview: None,
         }
@@ -317,6 +320,9 @@ impl EditorViewState {
         buffer: &mut crate::app::domain::BufferState,
         highlights: SearchHighlightState,
     ) {
+        if self.search_highlights == highlights {
+            return;
+        }
         release_anchors(
             buffer,
             take_search_anchors(&mut self.search_highlight_anchors),
@@ -355,6 +361,9 @@ impl EditorViewState {
     }
 
     pub fn set_search_replacement_preview(&mut self, replacement: Option<String>) {
+        if self.search_replacement_preview == replacement {
+            return;
+        }
         self.search_replacement_preview = replacement;
     }
 

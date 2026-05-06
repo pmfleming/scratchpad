@@ -3,7 +3,6 @@
 
 use eframe::egui;
 use scratchpad::ScratchpadApp;
-use scratchpad::app::fonts;
 use scratchpad::app::services::session_store::SessionStore;
 use scratchpad::app::services::settings_store::{
     DEFAULT_WINDOW_INNER_SIZE, MIN_WINDOW_INNER_SIZE, SettingsStore, WindowState,
@@ -30,6 +29,8 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: viewport_builder_from_window_state(&startup_settings.window_state),
+        persist_window: false,
+        persistence_path: Some(session_store.root().join("eframe-state.ron")),
         ..Default::default()
     };
 
@@ -42,13 +43,12 @@ fn main() -> eframe::Result<()> {
                 scratchpad::app::startup::StartupAction::Help
                 | scratchpad::app::startup::StartupAction::Version => StartupOptions::default(),
             };
-            let app = ScratchpadApp::with_stores_and_runtime_startup(
+            let mut app = ScratchpadApp::with_stores_and_startup(
                 session_store,
                 settings_store,
                 startup_options,
             );
-            let _ = fonts::apply_editor_fonts(&cc.egui_ctx, app.editor_font());
-            app.apply_theme_to_context(&cc.egui_ctx);
+            app.prepare_context_before_first_frame(&cc.egui_ctx);
             cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
             Ok(Box::new(app))
         }),
@@ -58,6 +58,7 @@ fn main() -> eframe::Result<()> {
 fn viewport_builder_from_window_state(window_state: &WindowState) -> egui::ViewportBuilder {
     let mut viewport = egui::ViewportBuilder::default()
         .with_decorations(false)
+        .with_visible(false)
         .with_inner_size(window_state.inner_size.unwrap_or(DEFAULT_WINDOW_INNER_SIZE))
         .with_min_inner_size(MIN_WINDOW_INNER_SIZE);
 

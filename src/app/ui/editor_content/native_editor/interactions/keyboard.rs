@@ -11,6 +11,8 @@ struct PressedKeyEvent {
 #[derive(Debug)]
 enum RelevantInputEvent {
     Text(String),
+    ImePreedit(String),
+    ImeDisabled,
     Key(PressedKeyEvent),
     Copy,
     Cut,
@@ -87,7 +89,16 @@ fn handle_relevant_input_event(
 
     match event {
         RelevantInputEvent::Text(text) => insert_text(buffer, view, &cursor, &text),
+        RelevantInputEvent::ImePreedit(text) => {
+            view.ime_preedit = (!text.is_empty()).then_some(text);
+            false
+        }
+        RelevantInputEvent::ImeDisabled => {
+            view.ime_preedit = None;
+            false
+        }
         RelevantInputEvent::Key(key_event) => handle_key_event(
+            ui,
             key_event,
             buffer,
             view,
@@ -113,6 +124,7 @@ fn handle_relevant_input_event(
 }
 
 fn handle_key_event(
+    ui: &mut egui::Ui,
     key_event: PressedKeyEvent,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
@@ -125,7 +137,7 @@ fn handle_key_event(
     ) -> Option<CursorRange>,
 ) -> bool {
     if let Some(handled) =
-        handle_non_movement_key_event(key_event, buffer, view, cursor, total_chars)
+        handle_non_movement_key_event(ui, key_event, buffer, view, cursor, total_chars)
     {
         return handled;
     }
@@ -146,9 +158,16 @@ fn relevant_input_events(ui: &egui::Ui) -> Vec<RelevantInputEvent> {
 
 fn relevant_input_event(event: &egui::Event) -> Option<RelevantInputEvent> {
     match event {
-        egui::Event::Text(text) | egui::Event::Ime(egui::ImeEvent::Commit(text)) => {
+        egui::Event::Text(text) => {
             is_insertable_text(text).then(|| RelevantInputEvent::Text(text.clone()))
         }
+        egui::Event::Ime(egui::ImeEvent::Preedit(text)) => {
+            Some(RelevantInputEvent::ImePreedit(text.clone()))
+        }
+        egui::Event::Ime(egui::ImeEvent::Commit(text)) => {
+            is_insertable_text(text).then(|| RelevantInputEvent::Text(text.clone()))
+        }
+        egui::Event::Ime(egui::ImeEvent::Disabled) => Some(RelevantInputEvent::ImeDisabled),
         egui::Event::Key {
             key,
             pressed: true,
@@ -172,6 +191,7 @@ fn is_insertable_text(text: &str) -> bool {
 }
 
 fn handle_non_movement_key_event(
+    ui: &mut egui::Ui,
     key_event: PressedKeyEvent,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
@@ -181,10 +201,13 @@ fn handle_non_movement_key_event(
     if let Some(changed) = handle_text_key(key_event, buffer, view, cursor) {
         return Some(changed);
     }
-    if let Some(changed) = handle_delete_key(key_event, buffer, view, cursor) {
+    if let Some(changed) = handle_history_key(key_event, buffer, view) {
         return Some(changed);
     }
-    if let Some(changed) = handle_history_key(key_event, buffer, view) {
+    if let Some(changed) = handle_insert_key(ui, key_event, buffer, cursor) {
+        return Some(changed);
+    }
+    if let Some(changed) = handle_delete_key(key_event, buffer, view, cursor) {
         return Some(changed);
     }
     if key_event.key == egui::Key::A && key_event.modifiers.command {
@@ -245,6 +268,10 @@ fn handle_history_key(
     buffer: &mut BufferState,
     view: &mut EditorViewState,
 ) -> Option<bool> {
+    if key_event.key == egui::Key::Backspace && is_classic_undo_shortcut(key_event.modifiers) {
+        let selection = buffer.undo_last_text_operation();
+        return Some(apply_history(view, buffer, selection));
+    }
     if key_event.key == egui::Key::Z && is_undo_shortcut(key_event.modifiers) {
         let selection = buffer.undo_last_text_operation();
         return Some(apply_history(view, buffer, selection));
@@ -259,6 +286,32 @@ fn handle_history_key(
 
 fn is_undo_shortcut(modifiers: egui::Modifiers) -> bool {
     modifiers.command && !modifiers.shift
+}
+
+fn handle_insert_key(
+    ui: &mut egui::Ui,
+    key_event: PressedKeyEvent,
+    buffer: &BufferState,
+    cursor: &CursorRange,
+) -> Option<bool> {
+    if key_event.key != egui::Key::Insert {
+        return None;
+    }
+    if key_event.modifiers.ctrl && !key_event.modifiers.shift {
+        copy_selection(ui, buffer, cursor);
+        return Some(false);
+    }
+    if key_event.modifiers.shift && !key_event.modifiers.ctrl {
+        ui.ctx()
+            .clone()
+            .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+        return Some(false);
+    }
+    None
+}
+
+fn is_classic_undo_shortcut(modifiers: egui::Modifiers) -> bool {
+    modifiers.alt && !modifiers.shift && !modifiers.ctrl && !modifiers.command
 }
 
 fn is_redo_shortcut(modifiers: egui::Modifiers) -> bool {
@@ -281,6 +334,7 @@ fn insert_text_with_source(
     text: &str,
     source: PieceSource,
 ) -> bool {
+    view.ime_preedit = None;
     let new_cursor = editing::apply_text_insert_with_source(buffer, cursor, text, source);
     view.set_cursor_range_anchored(buffer, new_cursor);
     true
@@ -316,4 +370,30 @@ fn apply_cursor_update(
     }
 
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RelevantInputEvent, relevant_input_event};
+    use eframe::egui;
+
+    #[test]
+    fn ime_preedit_event_is_kept_separate_from_committed_text() {
+        let event = egui::Event::Ime(egui::ImeEvent::Preedit("kana".to_owned()));
+
+        assert!(matches!(
+            relevant_input_event(&event),
+            Some(RelevantInputEvent::ImePreedit(text)) if text == "kana"
+        ));
+    }
+
+    #[test]
+    fn ime_commit_event_becomes_insertable_text() {
+        let event = egui::Event::Ime(egui::ImeEvent::Commit("かな".to_owned()));
+
+        assert!(matches!(
+            relevant_input_event(&event),
+            Some(RelevantInputEvent::Text(text)) if text == "かな"
+        ));
+    }
 }

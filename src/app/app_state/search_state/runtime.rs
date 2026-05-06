@@ -344,7 +344,7 @@ impl ScratchpadApp {
         let highlights = self.search_highlights_for_tab(active_tab_index);
         let replacement_preview = self.search_replacement_preview();
 
-        self.clear_search_highlights();
+        self.clear_search_highlights_outside_tab(active_tab_index);
         let Some(tab) = self.tabs_mut().get_mut(active_tab_index) else {
             return;
         };
@@ -385,20 +385,35 @@ impl ScratchpadApp {
     }
 
     pub(super) fn clear_search_highlights(&mut self) {
-        for tab in self.tabs_mut() {
-            let mut anchors_to_release = Vec::new();
-            for view in &mut tab.views {
-                for anchor in view.clear_search_highlights_for_release() {
-                    anchors_to_release.push((view.buffer_id, anchor));
-                }
+        for tab_index in 0..self.tabs().len() {
+            self.clear_search_highlights_for_tab(tab_index);
+        }
+    }
+
+    fn clear_search_highlights_outside_tab(&mut self, active_tab_index: usize) {
+        for tab_index in 0..self.tabs().len() {
+            if tab_index != active_tab_index {
+                self.clear_search_highlights_for_tab(tab_index);
             }
-            for (buffer_id, anchor) in anchors_to_release {
-                if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
-                    buffer
-                        .document_mut()
-                        .piece_tree_mut()
-                        .release_anchor(anchor);
-                }
+        }
+    }
+
+    fn clear_search_highlights_for_tab(&mut self, tab_index: usize) {
+        let Some(tab) = self.tabs_mut().get_mut(tab_index) else {
+            return;
+        };
+        let mut anchors_to_release = Vec::new();
+        for view in &mut tab.views {
+            for anchor in view.clear_search_highlights_for_release() {
+                anchors_to_release.push((view.buffer_id, anchor));
+            }
+        }
+        for (buffer_id, anchor) in anchors_to_release {
+            if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
+                buffer
+                    .document_mut()
+                    .piece_tree_mut()
+                    .release_anchor(anchor);
             }
         }
     }

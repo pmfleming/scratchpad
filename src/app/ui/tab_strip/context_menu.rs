@@ -1,4 +1,4 @@
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{PendingTabContextMenu, ScratchpadApp};
 use crate::app::commands::AppCommand;
 use crate::app::services::settings_store::{TabListPosition, TabOrderMode};
 use crate::app::theme::{action_hover_bg, text_primary};
@@ -29,78 +29,93 @@ struct TabContextMenuState {
     close_direction_icon: &'static str,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TabContextClick {
+    None,
+    Secondary,
+}
+
+impl TabContextClick {
+    pub(crate) fn secondary_clicked(self) -> bool {
+        self == Self::Secondary
+    }
+}
+
 pub(crate) fn attach_tab_context_menu(
     response: &egui::Response,
     app: &mut ScratchpadApp,
     slot_index: usize,
-) {
-    if response.secondary_clicked() {
+) -> TabContextClick {
+    attach_tab_context_menu_impl(response, app, slot_index, true)
+}
+
+fn attach_tab_context_menu_impl(
+    response: &egui::Response,
+    app: &mut ScratchpadApp,
+    slot_index: usize,
+    allow_pending_tab_popup: bool,
+) -> TabContextClick {
+    let secondary_clicked = response.secondary_clicked();
+    if secondary_clicked {
         app.select_only_tab_slot(slot_index);
-        if let Some(index) = app.workspace_index_for_slot(slot_index) {
-            app.handle_command(AppCommand::ActivateTab { index });
-        } else if app.tab_slot_is_settings(slot_index) {
-            app.handle_command(AppCommand::OpenSettings);
+        if allow_pending_tab_popup {
+            app.pending_tab_context_menu = Some(PendingTabContextMenu {
+                slot_index,
+                click_x: response
+                    .interact_pointer_pos()
+                    .map_or(response.rect.left(), |pos| pos.x),
+                open: true,
+            });
         }
     }
 
     let menu_state = TabContextMenuState::new(app, slot_index);
+    let pending_menu = app
+        .pending_tab_context_menu
+        .filter(|pending| pending.slot_index == slot_index);
 
-    response.context_menu(|ui| {
-        ui.set_min_width(TAB_CONTEXT_MENU_WIDTH);
-        ui.set_max_width(TAB_CONTEXT_MENU_WIDTH);
+    if allow_pending_tab_popup && let Some(mut pending) = pending_menu {
+        egui::Popup::new(
+            widget_ids::root_id(("tab_context.popup", slot_index)),
+            response.ctx.clone(),
+            response.rect,
+            response.layer_id,
+        )
+        .kind(egui::PopupKind::Menu)
+        .layout(egui::Layout::top_down_justified(egui::Align::Min))
+        .width(TAB_CONTEXT_MENU_WIDTH)
+        .anchor(tab_context_menu_anchor(response, pending))
+        .align(egui::RectAlign::BOTTOM_START)
+        .align_alternatives(&[egui::RectAlign::BOTTOM_END])
+        .open_bool(&mut pending.open)
+        .show(|ui| render_tab_context_menu(ui, app, slot_index, &menu_state));
 
-        render_file_actions(
-            ui,
-            app,
-            slot_index,
-            menu_state.workspace_index,
-            menu_state.workspace_index.is_some(),
-            menu_state.workspace_index.is_some(),
-            menu_state.workspace_index.is_some(),
-        );
+        app.pending_tab_context_menu = pending.open.then_some(pending);
+        return if secondary_clicked {
+            TabContextClick::Secondary
+        } else {
+            TabContextClick::None
+        };
+    }
 
-        ui.separator();
+    response.context_menu(|ui| render_tab_context_menu(ui, app, slot_index, &menu_state));
 
-        if render_tab_list_actions(
-            ui,
-            app,
-            menu_state.toggle_tab_list_label,
-            menu_state.toggle_tab_list_icon,
-        ) {
-            app.set_auto_hide_tab_list(!app.auto_hide_tab_list());
-            ui.close();
-        }
-        render_tab_order_submenu(ui, app);
-
-        ui.separator();
-
-        render_location_actions(
-            ui,
-            app,
-            slot_index,
-            menu_state.workspace_index.is_some(),
-            menu_state.path.is_some(),
-            menu_state.path.is_some(),
-            menu_state.path.as_deref(),
-        );
-
-        ui.separator();
-
-        if render_close_actions(
-            ui,
-            app,
-            slot_index,
-            menu_state.is_settings,
-            menu_state.close_direction_label,
-            menu_state.close_direction_icon,
-        ) {
-            ui.close();
-        }
-    });
+    if secondary_clicked {
+        TabContextClick::Secondary
+    } else {
+        TabContextClick::None
+    }
 }
 
 pub(crate) fn attach_tab_list_context_menu(response: &egui::Response, app: &mut ScratchpadApp) {
-    attach_tab_context_menu(response, app, app.active_tab_slot_index());
+    let _ = attach_tab_context_menu_impl(response, app, app.active_tab_slot_index(), false);
+}
+
+fn tab_context_menu_anchor(
+    response: &egui::Response,
+    pending: PendingTabContextMenu,
+) -> egui::Pos2 {
+    egui::pos2(pending.click_x, response.rect.max.y)
 }
 
 fn render_file_actions(
@@ -149,6 +164,64 @@ fn render_file_actions(
         if let Some(index) = workspace_index {
             app.save_file_at(index);
         }
+        ui.close();
+    }
+}
+
+fn render_tab_context_menu(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    slot_index: usize,
+    menu_state: &TabContextMenuState,
+) {
+    ui.set_min_width(TAB_CONTEXT_MENU_WIDTH);
+    ui.set_max_width(TAB_CONTEXT_MENU_WIDTH);
+
+    render_file_actions(
+        ui,
+        app,
+        slot_index,
+        menu_state.workspace_index,
+        menu_state.workspace_index.is_some(),
+        menu_state.workspace_index.is_some(),
+        menu_state.workspace_index.is_some(),
+    );
+
+    ui.separator();
+
+    if render_tab_list_actions(
+        ui,
+        app,
+        menu_state.toggle_tab_list_label,
+        menu_state.toggle_tab_list_icon,
+    ) {
+        app.set_auto_hide_tab_list(!app.auto_hide_tab_list());
+        ui.close();
+    }
+    render_tab_order_submenu(ui, app);
+
+    ui.separator();
+
+    render_location_actions(
+        ui,
+        app,
+        slot_index,
+        menu_state.workspace_index.is_some(),
+        menu_state.path.is_some(),
+        menu_state.path.is_some(),
+        menu_state.path.as_deref(),
+    );
+
+    ui.separator();
+
+    if render_close_actions(
+        ui,
+        app,
+        slot_index,
+        menu_state.is_settings,
+        menu_state.close_direction_label,
+        menu_state.close_direction_icon,
+    ) {
         ui.close();
     }
 }

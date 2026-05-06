@@ -29,11 +29,7 @@ pub(super) fn build_editor_galley(
         buffer,
         effective_viewport,
         editor_row_height(ui, options.editor_font_id),
-    );
-    let selection = local_range(
-        buffer.active_selection.clone(),
-        slice.char_range.start,
-        slice.char_range.end,
+        cursor_line_index(buffer, view),
     );
     let search_highlights = local_search_highlights(
         &view.search_highlights,
@@ -46,7 +42,6 @@ pub(super) fn build_editor_galley(
         slice.char_range.clone(),
         options,
         &search_highlights,
-        selection.clone(),
         wrap_width,
         ui.visuals().dark_mode,
     );
@@ -63,12 +58,13 @@ pub(super) fn build_editor_galley(
             &slice.text,
             options,
             &search_highlights,
-            selection,
+            None,
             wrap_width,
         );
         view.layout_cache
             .insert(cache_key, galley.clone(), slice.text.len());
-        if cache_was_warm
+        if options.warm_layout_cache
+            && cache_was_warm
             && !crate::app::memory_budget::over_budget(
                 crate::app::memory_budget::BudgetCategory::Layout,
             )
@@ -91,7 +87,6 @@ fn layout_cache_key(
     char_range: std::ops::Range<usize>,
     options: TextEditOptions<'_>,
     search_highlights: &SearchHighlightState,
-    selection_range: Option<std::ops::Range<usize>>,
     wrap_width: f32,
     dark_mode: bool,
 ) -> LayoutCacheKey {
@@ -104,7 +99,6 @@ fn layout_cache_key(
         word_wrap: options.word_wrap,
         text_color: options.text_color,
         dark_mode,
-        selection_range,
         search_highlights: search_highlights.clone(),
     }
 }
@@ -113,6 +107,7 @@ fn viewport_text_slice(
     buffer: &BufferState,
     viewport: egui::Rect,
     row_height: f32,
+    cursor_line: Option<usize>,
 ) -> ViewportTextSlice {
     let line_count = buffer.line_count.max(1);
     let top_line = if row_height > 0.0 {
@@ -123,10 +118,19 @@ fn viewport_text_slice(
     let visible_lines =
         super::interactions::viewport_line_capacity(viewport, row_height).unwrap_or(1);
     let overscan_lines = visible_lines.clamp(4, 24);
-    let start_line = top_line
+    let mut start_line = top_line
         .saturating_sub(overscan_lines)
         .min(line_count.saturating_sub(1));
-    let end_line = (top_line + visible_lines + overscan_lines).min(line_count.saturating_sub(1));
+    let mut end_line =
+        (top_line + visible_lines + overscan_lines).min(line_count.saturating_sub(1));
+    if let Some(cursor_line) = cursor_line.filter(|line| *line < line_count) {
+        if cursor_line < start_line {
+            start_line = cursor_line.saturating_sub(overscan_lines);
+        } else if cursor_line > end_line {
+            start_line = cursor_line.saturating_sub(overscan_lines);
+            end_line = (cursor_line + overscan_lines).min(line_count.saturating_sub(1));
+        }
+    }
     let tree = buffer.document().piece_tree();
     let start_char = tree.line_info(start_line).start_char;
     let end_info = tree.line_info(end_line);
@@ -136,6 +140,16 @@ fn viewport_text_slice(
         char_range: start_char..end_char,
         start_line,
     }
+}
+
+fn cursor_line_index(buffer: &BufferState, view: &EditorViewState) -> Option<usize> {
+    let cursor = view.cursor_range?;
+    (cursor.primary.index <= buffer.current_file_length().chars).then(|| {
+        buffer
+            .document()
+            .piece_tree()
+            .line_index_at_offset(cursor.primary.index)
+    })
 }
 
 fn warm_nearby_layout_slices(
@@ -167,12 +181,7 @@ fn warm_nearby_layout_slices(
         {
             break;
         }
-        let slice = viewport_text_slice(buffer, adjacent, row_height);
-        let selection = local_range(
-            buffer.active_selection.clone(),
-            slice.char_range.start,
-            slice.char_range.end,
-        );
+        let slice = viewport_text_slice(buffer, adjacent, row_height, None);
         let search_highlights = local_search_highlights(
             &view.search_highlights,
             slice.char_range.start,
@@ -183,7 +192,6 @@ fn warm_nearby_layout_slices(
             slice.char_range.clone(),
             options,
             &search_highlights,
-            selection.clone(),
             wrap_width,
             ui.visuals().dark_mode,
         );
@@ -195,7 +203,7 @@ fn warm_nearby_layout_slices(
             &slice.text,
             options,
             &search_highlights,
-            selection,
+            None,
             wrap_width,
         );
         view.layout_cache

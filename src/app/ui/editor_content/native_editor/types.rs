@@ -40,6 +40,7 @@ pub struct TextEditOptions<'a> {
     pub editor_font_id: &'a egui::FontId,
     pub text_color: egui::Color32,
     pub highlight_style: EditorHighlightStyle,
+    pub warm_layout_cache: bool,
 }
 
 impl<'a> TextEditOptions<'a> {
@@ -56,7 +57,13 @@ impl<'a> TextEditOptions<'a> {
             editor_font_id,
             text_color,
             highlight_style,
+            warm_layout_cache: true,
         }
+    }
+
+    pub fn with_layout_cache_warming(mut self, enabled: bool) -> Self {
+        self.warm_layout_cache = enabled;
+        self
     }
 }
 

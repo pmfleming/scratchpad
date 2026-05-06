@@ -605,10 +605,8 @@ fn render_now_line(ui: &mut egui::Ui) {
     let muted = callout::muted_text(ui);
     let label_font = egui::FontId::proportional(11.0);
 
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), NOW_LINE_HEIGHT),
-        egui::Sense::hover(),
-    );
+    let rect =
+        widget_ids::allocate_exact_rect(ui, egui::vec2(ui.available_width(), NOW_LINE_HEIGHT));
     let painter = ui.painter_at(rect);
     let mid_y = rect.center().y;
     let label = "Now";

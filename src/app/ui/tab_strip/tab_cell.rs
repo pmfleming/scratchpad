@@ -62,8 +62,10 @@ pub(crate) fn render_tab_cell_sized(
             tab_response.scroll_to_me(Some(egui::Align::Center));
         }
 
-        let modifiers = ui.input(|input| input.modifiers);
-        let interaction = if promote_response.is_some_and(|response| response.clicked()) {
+        let context_click = attach_tab_context_menu(&tab_response, app, index);
+        let interaction = if context_click.secondary_clicked() {
+            TabInteraction::Activate(index)
+        } else if promote_response.is_some_and(|response| response.clicked()) {
             TabInteraction::PromoteAllFiles(index)
         } else if close_response.clicked() {
             TabInteraction::RequestClose(index)
@@ -71,21 +73,10 @@ pub(crate) fn render_tab_cell_sized(
             app.select_only_tab_slot(index);
             TabInteraction::BeginRename(index)
         } else if tab_response.clicked() {
-            if modifiers.shift {
-                app.select_tab_slot_range(index);
-                TabInteraction::Activate(index)
-            } else if modifiers.command || modifiers.ctrl {
-                app.toggle_tab_slot_selection(index);
-                TabInteraction::None
-            } else {
-                app.select_only_tab_slot(index);
-                TabInteraction::Activate(index)
-            }
+            primary_click_interaction(ui, app, index)
         } else {
             TabInteraction::None
         };
-
-        attach_tab_context_menu(&tab_response, app, index);
 
         TabCellOutcome {
             interaction,
@@ -93,6 +84,24 @@ pub(crate) fn render_tab_cell_sized(
         }
     })
     .inner
+}
+
+fn primary_click_interaction(
+    ui: &egui::Ui,
+    app: &mut crate::app::app_state::ScratchpadApp,
+    index: usize,
+) -> TabInteraction {
+    let modifiers = ui.input(|input| input.modifiers);
+    if modifiers.shift {
+        app.select_tab_slot_range(index);
+        TabInteraction::Activate(index)
+    } else if modifiers.command || modifiers.ctrl {
+        app.toggle_tab_slot_selection(index);
+        TabInteraction::None
+    } else {
+        app.select_only_tab_slot(index);
+        TabInteraction::Activate(index)
+    }
 }
 
 fn render_tab_rename_cell(

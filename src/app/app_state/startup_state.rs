@@ -28,7 +28,7 @@ impl ScratchpadApp {
     }
 
     pub fn with_startup_options(startup_options: StartupOptions) -> Self {
-        Self::with_runtime_startup_options(startup_options)
+        Self::with_session_store_and_startup(SessionStore::default(), startup_options)
     }
 
     pub fn with_runtime_startup_options(startup_options: StartupOptions) -> Self {
@@ -91,6 +91,9 @@ impl ScratchpadApp {
             persist_session_on_drop: true,
             last_session_persist: Instant::now(),
             close_in_progress: false,
+            window_shown_after_first_frame: false,
+            painted_frames_before_window_show: 0,
+            current_window_title: None,
             overflow_popup_open: false,
             applied_editor_font: None,
             active_surface: AppSurface::Workspace,
@@ -106,6 +109,7 @@ impl ScratchpadApp {
             selected_tab_slots: BTreeSet::new(),
             tab_selection_anchor: None,
             tab_rename_state: None,
+            pending_tab_context_menu: None,
             startup_restore_conflicts: Vec::new(),
             workspace_reflow_axis: crate::app::domain::SplitAxis::Vertical,
             settings_preview_quote_index: 2,
@@ -136,6 +140,7 @@ impl ScratchpadApp {
         }
 
         app.ensure_active_tab_slot_selected();
+        app.tab_manager.pending_scroll_to_active = false;
 
         app
     }

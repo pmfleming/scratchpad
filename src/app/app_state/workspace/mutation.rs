@@ -2,7 +2,7 @@ use super::super::ScratchpadApp;
 use crate::app::domain::{BufferId, CursorRevealMode};
 use crate::app::text_history::{TextHistoryEntryView, entries_for_buffer};
 use crate::app::ui::editor_content::native_editor::{
-    cut_selected_text, select_all_cursor, selected_text,
+    cut_selected_text, delete_selected_text, select_all_cursor, selected_text,
 };
 
 impl ScratchpadApp {
@@ -380,6 +380,39 @@ impl ScratchpadApp {
         self.refresh_search_state();
         self.select_next_active_buffer_match_from(next_selection.primary.index);
         Some(selected_text)
+    }
+
+    pub(crate) fn delete_selected_text_in_active_view(&mut self) -> bool {
+        let active_tab_index = self.active_tab_index();
+        let active_view_id = {
+            let Some(tab) = self.active_tab() else {
+                return false;
+            };
+            tab.active_view_id
+        };
+
+        let next_selection = {
+            let tab = &mut self.tabs_mut()[active_tab_index];
+            let Some((buffer, view)) = tab.buffer_and_view_mut(active_view_id) else {
+                return false;
+            };
+            let Some(current_selection) = view.cursor_range else {
+                return false;
+            };
+            let Some(next_selection) = delete_selected_text(buffer, current_selection) else {
+                return false;
+            };
+            view.set_cursor_range_anchored(buffer, next_selection);
+            view.set_pending_cursor_range_anchored(buffer, next_selection);
+            view.request_cursor_reveal(CursorRevealMode::KeepVisible);
+            buffer.active_selection = None;
+            next_selection
+        };
+
+        self.finalize_active_buffer_text_mutation(active_tab_index);
+        self.refresh_search_state();
+        self.select_next_active_buffer_match_from(next_selection.primary.index);
+        true
     }
 
     fn apply_active_buffer_text_operation(&mut self, undo: bool) -> bool {

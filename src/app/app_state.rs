@@ -41,6 +41,13 @@ pub(crate) struct TabRenameState {
     pub(crate) request_focus: bool,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct PendingTabContextMenu {
+    pub(crate) slot_index: usize,
+    pub(crate) click_x: f32,
+    pub(crate) open: bool,
+}
+
 #[derive(Clone)]
 pub(crate) struct StartupRestoreConflict {
     pub(crate) tab_index: usize,
@@ -129,6 +136,9 @@ pub struct ScratchpadApp {
     pub(crate) persist_session_on_drop: bool,
     pub(crate) last_session_persist: Instant,
     pub(crate) close_in_progress: bool,
+    pub(crate) window_shown_after_first_frame: bool,
+    pub(crate) painted_frames_before_window_show: u8,
+    pub(crate) current_window_title: Option<String>,
     pub(crate) overflow_popup_open: bool,
     pub(crate) applied_editor_font: Option<EditorFontPreset>,
     pub(crate) active_surface: AppSurface,
@@ -144,6 +154,7 @@ pub struct ScratchpadApp {
     pub(crate) selected_tab_slots: BTreeSet<usize>,
     pub(crate) tab_selection_anchor: Option<usize>,
     pub(crate) tab_rename_state: Option<TabRenameState>,
+    pub(crate) pending_tab_context_menu: Option<PendingTabContextMenu>,
     pub(crate) startup_restore_conflicts: Vec<StartupRestoreConflict>,
     pub(crate) workspace_reflow_axis: SplitAxis,
     pub(crate) settings_preview_quote_index: usize,
@@ -180,6 +191,10 @@ impl eframe::App for ScratchpadApp {
             f32::from(color.b()) / 255.0,
             f32::from(color.a()) / 255.0,
         ]
+    }
+
+    fn persist_egui_memory(&self) -> bool {
+        false
     }
 }
 

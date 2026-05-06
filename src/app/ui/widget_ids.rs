@@ -21,6 +21,7 @@ pub(crate) enum WidgetRole {
 
 pub(crate) fn configure_debug_options(ctx: &egui::Context) {
     ctx.options_mut(|options| options.warn_on_id_clash = cfg!(debug_assertions));
+    #[cfg(debug_assertions)]
     ctx.global_style_mut(|style| style.debug.warn_if_rect_changes_id = false);
     let registration_id = ctx_key("diagnostics_begin_pass_registered");
     let should_register = ctx.data_mut(|data| {
@@ -91,13 +92,23 @@ pub(crate) fn surface_widget<R>(
     surface_scope(ui, (key, role), add_contents)
 }
 
+#[track_caller]
 pub(crate) fn surface_response(
     ui: &mut egui::Ui,
     key: impl Hash,
     role: impl Hash,
     add_contents: impl FnOnce(&mut egui::Ui) -> Response,
 ) -> Response {
-    surface_widget(ui, key, role, add_contents).inner
+    let response = surface_widget(ui, key, role, add_contents).inner;
+    let location = std::panic::Location::caller();
+    crate::app::diagnostics::track_widget_id(
+        response.id,
+        response.rect,
+        "surface_response",
+        location,
+        Some(ui.id()),
+    );
+    response
 }
 
 pub(crate) fn layer_id(order: Order, key: impl Hash) -> LayerId {

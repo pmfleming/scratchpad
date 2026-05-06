@@ -1,6 +1,6 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
-use crate::app::domain::SplitAxis;
+use crate::app::domain::{SplitAxis, ViewId};
 use eframe::egui;
 
 const DEFAULT_SPLIT_RATIO: f32 = 0.5;
@@ -14,6 +14,10 @@ pub(crate) fn handle_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
 }
 
 fn handle_global_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
+    if !app.showing_settings() && handle_region_traversal_shortcut(app, ctx) {
+        return;
+    }
+
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F1)) {
         app.handle_command(AppCommand::OpenUserManual);
         return;
@@ -52,6 +56,70 @@ fn handle_global_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
     {
         app.handle_command(AppCommand::CloseSearch);
         ctx.request_repaint();
+    }
+}
+
+fn handle_region_traversal_shortcut(app: &mut ScratchpadApp, ctx: &egui::Context) -> bool {
+    let direction = ctx.input_mut(|input| {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::F6) {
+            Some(1)
+        } else if input.consume_key(egui::Modifiers::SHIFT, egui::Key::F6) {
+            Some(-1)
+        } else {
+            None
+        }
+    });
+    let Some(direction) = direction else {
+        return false;
+    };
+    let Some(next_view_id) = next_view_for_region_traversal(app, direction) else {
+        return true;
+    };
+
+    app.handle_command(AppCommand::ActivateView {
+        view_id: next_view_id,
+    });
+    true
+}
+
+fn next_view_for_region_traversal(app: &ScratchpadApp, direction: i32) -> Option<ViewId> {
+    let tab = app.active_tab()?;
+    let ordered = tab.ordered_view_ids_in_layout_order();
+    if ordered.len() <= 1 {
+        return None;
+    }
+
+    let current = ordered
+        .iter()
+        .position(|view_id| *view_id == tab.active_view_id)
+        .unwrap_or(0);
+    let next = next_region_index(current, ordered.len(), direction)?;
+    ordered.get(next).copied()
+}
+
+fn next_region_index(current: usize, len: usize, direction: i32) -> Option<usize> {
+    if len <= 1 {
+        return None;
+    }
+    Some(if direction < 0 {
+        current.checked_sub(1).unwrap_or(len - 1)
+    } else {
+        (current + 1) % len
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::next_region_index;
+
+    #[test]
+    fn f6_traversal_wraps_forward() {
+        assert_eq!(next_region_index(2, 3, 1), Some(0));
+    }
+
+    #[test]
+    fn shift_f6_traversal_wraps_backward() {
+        assert_eq!(next_region_index(0, 3, -1), Some(2));
     }
 }
 

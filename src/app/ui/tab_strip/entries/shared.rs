@@ -112,13 +112,13 @@ fn render_tab_slot_cell(
     );
     let tab_clicked = tab_response.clicked()
         && handle_settings_tab_click(app, slot_index, ui.input(|input| input.modifiers));
+    let tab_context_click = attach_tab_context_menu(&tab_response, app, slot_index);
     apply_settings_tab_interaction(
         outcome,
         app.showing_settings(),
         close_response.clicked(),
-        tab_clicked,
+        tab_clicked || tab_context_click.secondary_clicked(),
     );
-    attach_tab_context_menu(&tab_response, app, slot_index);
     maybe_scroll_to_active_tab(
         ui,
         slot_index,

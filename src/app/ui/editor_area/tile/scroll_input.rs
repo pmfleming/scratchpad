@@ -1,15 +1,15 @@
-use crate::app::ui::{callout, scrolling};
+use crate::app::ui::scrolling;
 use eframe::egui;
 
 pub(super) fn local_scroll_source(
     _egui_vis: egui::scroll_area::ScrollBarVisibility,
 ) -> scrolling::ScrollSource {
-    // Editor handles its own pointer wheel + drag (selection edges, cursor
-    // reveal suppression). Scrollbar drag and programmatic targets go through
-    // the local container.
+    // Wheel and scrollbar input should be handled by the local scroll
+    // container so hover gating, clipping, and same-frame content offsets stay
+    // in one path. Selection edge autoscroll remains editor-specific.
     scrolling::ScrollSource {
         scroll_bar: true,
-        mouse_wheel: false,
+        mouse_wheel: true,
         drag: false,
         programmatic: true,
     }
@@ -39,40 +39,6 @@ pub(super) fn resolve_editor_scroll_offset_override(
         .map(|offset| clamp_scroll_offset(offset, content_size, viewport_size))
 }
 
-pub(super) fn requested_scroll_offset_for_pointer_wheel(
-    ui: &egui::Ui,
-    current_offset: egui::Vec2,
-) -> Option<egui::Vec2> {
-    if callout::scroll_blocker_active(ui.ctx()) {
-        return None;
-    }
-    if !pointer_over_rect(ui, ui.max_rect()) {
-        return None;
-    }
-
-    scroll_offset_from_wheel_delta(current_offset, ui.input(|input| input.smooth_scroll_delta))
-}
-
-fn pointer_over_rect(ui: &egui::Ui, rect: egui::Rect) -> bool {
-    ui.input(|input| {
-        input
-            .pointer
-            .hover_pos()
-            .is_some_and(|pos| rect.contains(pos))
-    })
-}
-
-fn scroll_offset_from_wheel_delta(
-    current_offset: egui::Vec2,
-    scroll_delta: egui::Vec2,
-) -> Option<egui::Vec2> {
-    let desired = egui::vec2(
-        (current_offset.x - scroll_delta.x).max(0.0),
-        (current_offset.y - scroll_delta.y).max(0.0),
-    );
-    (desired != current_offset).then_some(desired)
-}
-
 fn clamp_scroll_offset(
     offset: egui::Vec2,
     content_size: egui::Vec2,
@@ -90,4 +56,44 @@ fn max_scroll_offset(content_size: egui::Vec2, viewport_size: egui::Vec2) -> egu
         (content_size.x - viewport_size.x).max(0.0),
         (content_size.y - viewport_size.y).max(0.0),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn editor_local_scroll_source_accepts_mouse_wheel() {
+        let source = local_scroll_source(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded);
+
+        assert!(source.mouse_wheel);
+        assert!(source.scroll_bar);
+        assert!(!source.drag);
+    }
+
+    #[test]
+    fn scrollbar_offset_wins_over_wheel_and_layout_requests() {
+        let result = resolve_editor_scroll_offset_override(
+            egui::vec2(1000.0, 1000.0),
+            egui::vec2(100.0, 100.0),
+            Some(egui::vec2(10.0, 10.0)),
+            Some(egui::vec2(20.0, 20.0)),
+            Some(egui::vec2(30.0, 30.0)),
+        );
+
+        assert_eq!(result, Some(egui::vec2(30.0, 30.0)));
+    }
+
+    #[test]
+    fn editor_scroll_override_clamps_to_content_bounds() {
+        let result = resolve_editor_scroll_offset_override(
+            egui::vec2(300.0, 200.0),
+            egui::vec2(100.0, 80.0),
+            Some(egui::vec2(500.0, 500.0)),
+            None,
+            None,
+        );
+
+        assert_eq!(result, Some(egui::vec2(200.0, 120.0)));
+    }
 }

@@ -5,7 +5,7 @@ edition = "2024"
 default-run = "scratchpad"
 
 [dependencies]
-eframe = "0.34.1"
+eframe = "0.34.2"
 egui-phosphor = "0.12.0"
 rfd = "0.14"
 regex = "1.11"
@@ -27,23 +27,6 @@ sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 [dev-dependencies]
 rand = "0.10.0"
 tempfile = "3.8"
-criterion = { version = "0.5", features = ["html_reports"] }
-
-[[bench]]
-name = "tab_stress"
-harness = false
-
-[[bench]]
-name = "search_speed"
-harness = false
-
-[[bench]]
-name = "parallelism_baselines"
-harness = false
-
-[[bench]]
-name = "anchor_storage"
-harness = false
 
 [[bin]]
 name = "ast_hasher"

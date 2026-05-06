@@ -44,7 +44,13 @@ impl ScratchpadApp {
         crate::app::services::session_manager::maybe_persist_session(self, ctx);
         callout::set_modal_scroll_blocker_active(ctx, self.modal_callout_open());
         transition::set_chrome_transition_active(ctx, self.chrome_transition_active());
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
+        self.sync_window_title(ctx);
+    }
+
+    pub fn prepare_context_before_first_frame(&mut self, ctx: &egui::Context) {
+        self.sync_editor_fonts(ctx);
+        self.apply_theme_to_context(ctx);
+        crate::app::ui::widget_ids::configure_debug_options(ctx);
     }
 
     pub(super) fn render_frame(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -57,6 +63,7 @@ impl ScratchpadApp {
         dialogs::show_encoding_window(ctx, self);
         dialogs::show_text_history_window(ctx, self);
         shortcuts::handle_shortcuts(self, ctx);
+        self.show_window_after_first_frame(ctx);
         self.finish_frame_transitions(ctx);
     }
 
@@ -78,6 +85,28 @@ impl ScratchpadApp {
             AppSurface::Workspace => editor_area::show_editor(ui, self),
             AppSurface::Settings => settings::show_page(ui, self),
         }
+    }
+
+    fn sync_window_title(&mut self, ctx: &egui::Context) {
+        let title = self.window_title();
+        if self.current_window_title.as_ref() == Some(&title) {
+            return;
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+        self.current_window_title = Some(title);
+    }
+
+    fn show_window_after_first_frame(&mut self, ctx: &egui::Context) {
+        if self.window_shown_after_first_frame {
+            return;
+        }
+        if self.painted_frames_before_window_show < 2 {
+            self.painted_frames_before_window_show += 1;
+            ctx.request_repaint();
+            return;
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        self.window_shown_after_first_frame = true;
     }
 
     fn persist_with_error_status(&mut self, error_prefix: &str) -> bool {

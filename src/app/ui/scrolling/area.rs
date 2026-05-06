@@ -382,6 +382,9 @@ fn apply_mouse_wheel(ui: &Ui, hovered: bool, source: ScrollSource, state: &mut S
     if !hovered || !source.mouse_wheel || callout::scroll_blocker_active(ui.ctx()) {
         return;
     }
+    if ui.input(|input| input.modifiers.shift) {
+        return;
+    }
     let scroll = ui.input(|i| i.smooth_scroll_delta);
     if scroll == Vec2::ZERO {
         return;

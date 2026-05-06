@@ -12,6 +12,8 @@ use std::time::Duration;
 pub use divider::{render_split_divider, split_rect};
 use tile::{TileRenderRequest, TileRenderState};
 
+const SHIFT_SCROLL_FONT_SIZE_PX_PER_POINT: f32 = 48.0;
+
 pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     egui::CentralPanel::default().show_inside(ui, |ui| {
         widget_ids::feature_scope(ui, "editor_area", |ui| {
@@ -203,6 +205,22 @@ fn handle_editor_zoom(ui: &egui::Ui, workspace_rect: egui::Rect, app: &mut Scrat
     if pointer_over_editor && zoom_factor != 1.0 {
         app.set_font_size(app.font_size() * zoom_factor);
     }
+    let shift_scroll_delta = ui.ctx().input(|input| {
+        font_size_delta_from_shift_scroll(input.modifiers, input.smooth_scroll_delta)
+    });
+    if pointer_over_editor && shift_scroll_delta != 0.0 {
+        app.set_font_size(app.font_size() + shift_scroll_delta);
+    }
+}
+
+fn font_size_delta_from_shift_scroll(modifiers: egui::Modifiers, scroll_delta: egui::Vec2) -> f32 {
+    if !modifiers.shift || modifiers.ctrl || modifiers.command || modifiers.alt {
+        return 0.0;
+    }
+    if scroll_delta.y.abs() < f32::EPSILON {
+        return 0.0;
+    }
+    scroll_delta.y / SHIFT_SCROLL_FONT_SIZE_PX_PER_POINT
 }
 
 fn render_pane_node(
@@ -300,4 +318,34 @@ fn branched_path(path: &[PaneBranch], branch: PaneBranch) -> Vec<PaneBranch> {
 
 fn apply_editor_change(app: &mut ScratchpadApp, state: &EditorRenderState) {
     app.finalize_active_buffer_text_mutation(state.active_tab_index);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shift_scroll_maps_to_font_size_delta() {
+        let delta =
+            font_size_delta_from_shift_scroll(egui::Modifiers::SHIFT, egui::vec2(0.0, 48.0));
+
+        assert_eq!(delta, 1.0);
+    }
+
+    #[test]
+    fn plain_scroll_does_not_change_font_size() {
+        let delta = font_size_delta_from_shift_scroll(egui::Modifiers::NONE, egui::vec2(0.0, 48.0));
+
+        assert_eq!(delta, 0.0);
+    }
+
+    #[test]
+    fn ctrl_shift_scroll_stays_reserved_for_zoom_handling() {
+        let delta = font_size_delta_from_shift_scroll(
+            egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+            egui::vec2(0.0, 48.0),
+        );
+
+        assert_eq!(delta, 0.0);
+    }
 }

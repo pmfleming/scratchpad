@@ -308,3 +308,94 @@ pub fn display_aware_anchor_to_row<'a>(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eframe::egui;
+
+    fn manager() -> ScrollManager {
+        let mut manager = ScrollManager::new();
+        manager.set_metrics(ViewportMetrics {
+            viewport_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0)),
+            row_height: 10.0,
+            column_width: 5.0,
+            visible_rows: 10,
+            visible_columns: 20,
+        });
+        manager.set_extent(ContentExtent {
+            display_rows: 100,
+            height: 1000.0,
+            max_line_width: 500.0,
+        });
+        manager
+    }
+
+    #[test]
+    fn reveal_nearest_keeps_visible_rect_stationary() {
+        let mut manager = manager();
+        manager.apply_intent(
+            ScrollIntent::ScrollbarTo {
+                axis: Axis::Y,
+                offset_pixels: 100.0,
+            },
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+
+        manager.apply_intent(
+            ScrollIntent::Reveal {
+                rect: egui::Rect::from_min_size(egui::pos2(0.0, 120.0), egui::vec2(1.0, 10.0)),
+                align_y: Some(ScrollAlign::NearestWithMargin(5.0)),
+                align_x: None,
+            },
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+
+        assert_eq!(manager.pixel_offset_y(naive_anchor_to_row), 100.0);
+    }
+
+    #[test]
+    fn reveal_nearest_scrolls_to_hidden_rect_with_margin() {
+        let mut manager = manager();
+
+        manager.apply_intent(
+            ScrollIntent::Reveal {
+                rect: egui::Rect::from_min_size(egui::pos2(0.0, 160.0), egui::vec2(1.0, 10.0)),
+                align_y: Some(ScrollAlign::NearestWithMargin(5.0)),
+                align_x: None,
+            },
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+
+        assert_eq!(manager.pixel_offset_y(naive_anchor_to_row), 75.0);
+    }
+
+    #[test]
+    fn scrollbar_scroll_marks_user_scrolled_but_reveal_clears_it() {
+        let mut manager = manager();
+        manager.apply_intent(
+            ScrollIntent::ScrollbarTo {
+                axis: Axis::Y,
+                offset_pixels: 100.0,
+            },
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+        assert!(manager.user_scrolled());
+
+        manager.apply_intent(
+            ScrollIntent::Reveal {
+                rect: egui::Rect::from_min_size(egui::pos2(0.0, 10.0), egui::vec2(1.0, 10.0)),
+                align_y: Some(ScrollAlign::Center),
+                align_x: None,
+            },
+            naive_anchor_to_row,
+            naive_row_to_anchor,
+        );
+
+        assert!(!manager.user_scrolled());
+    }
+}

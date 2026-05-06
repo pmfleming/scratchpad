@@ -15,10 +15,11 @@ pub use types::{
 
 use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
 use crate::app::ui::scrolling::DisplaySnapshot;
+use crate::app::ui::widget_ids;
 use eframe::egui;
 use interactions::{
     handle_keyboard_events, handle_mouse_interaction, page_jump_rows,
-    request_page_navigation_intent, sync_view_cursor_before_render,
+    sync_view_cursor_before_render,
 };
 use layout::{
     allocate_editor_rect, build_editor_galley, editor_desired_width, editor_row_height,
@@ -197,7 +198,6 @@ fn process_editor_input(
     );
     publish_active_selection(buffer, view, focused);
     view.sync_cursor_anchors_from_ranges(buffer);
-    request_page_navigation_intent(ui, view, focused);
     EditorInputOutcome { focused, changed }
 }
 
@@ -295,13 +295,18 @@ pub fn render_read_only_text_edit(
 
     let row_height = editor_row_height(ui, options.editor_font_id);
     let desired_height = desired_rows.max(1) as f32 * row_height;
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(
-            editor_desired_width(ui, &galley, options.word_wrap, None),
-            desired_height,
-        ),
-        egui::Sense::click(),
+    let size = egui::vec2(
+        editor_desired_width(ui, &galley, options.word_wrap, None),
+        desired_height,
     );
+    let response = widget_ids::allocate_exact_rect_interact(
+        ui,
+        size,
+        ("native_editor.empty", view.id),
+        egui::Sense::click(),
+        "native_editor.empty",
+    );
+    let rect = response.rect;
 
     if ui.is_rect_visible(rect) {
         paint_galley(ui, &galley, rect.min, options.text_color);
@@ -336,6 +341,10 @@ pub fn cut_selected_text(
     (!cursor.is_empty()).then(|| editing::apply_cut(buffer, &cursor))
 }
 
+pub fn delete_selected_text(buffer: &mut BufferState, cursor: CursorRange) -> Option<CursorRange> {
+    (!cursor.is_empty()).then(|| editing::apply_delete_selection(buffer, &cursor))
+}
+
 fn store_latest_snapshot(
     view: &mut EditorViewState,
     galley: &Arc<egui::Galley>,
@@ -368,6 +377,7 @@ fn store_latest_snapshot(
 fn sync_ime_output_focus(view: &mut EditorViewState, focused: bool) {
     if !focused {
         view.clear_ime_output();
+        view.ime_preedit = None;
     }
 }
 

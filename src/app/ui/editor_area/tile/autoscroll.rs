@@ -1,4 +1,4 @@
-use super::{editor_pixel_offset_resolved, selection_drag_active, sync_local_scroll_state};
+use super::{selection_drag_active, sync_local_scroll_state};
 use crate::app::domain::{ViewId, WorkspaceTab};
 use crate::app::ui::autoscroll::{AutoScrollAxis, AutoScrollConfig, edge_auto_scroll_velocity};
 use crate::app::ui::scrolling;
@@ -77,29 +77,30 @@ fn apply_edge_autoscroll_velocity(
     let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) else {
         return;
     };
-    let snapshot = view.latest_display_snapshot.clone();
-    let resolve = |id| buffer.document().piece_tree().anchor_position(id);
-    let anchor_to_row = scrolling::display_aware_anchor_to_row(snapshot.as_ref(), resolve);
-    apply_edge_autoscroll_axis(view, scrolling::Axis::X, velocity.x, &anchor_to_row);
-    apply_edge_autoscroll_axis(view, scrolling::Axis::Y, velocity.y, &anchor_to_row);
-    view.scroll
-        .tick_edge_autoscroll(dt, &anchor_to_row, scrolling::naive_row_to_anchor);
-    view.scroll.clear_edge_autoscroll();
-    let offset = editor_pixel_offset_resolved(view, buffer, snapshot.as_ref());
+    let state = scrolling::ScrollState::load(ui, scroll_id);
+    let offset = edge_autoscroll_offset(
+        state.offset,
+        velocity,
+        dt,
+        state.content_size,
+        state.viewport_size,
+    );
+    view.set_editor_pixel_offset_resolved(buffer, offset);
     sync_local_scroll_state(ui, scroll_id, offset);
 }
 
-fn apply_edge_autoscroll_axis(
-    view: &mut crate::app::domain::EditorViewState,
-    axis: scrolling::Axis,
-    velocity: f32,
-    anchor_to_row: &impl Fn(scrolling::ScrollAnchor) -> f32,
-) {
-    view.scroll.apply_intent(
-        scrolling::ScrollIntent::EdgeAutoscroll { axis, velocity },
-        anchor_to_row,
-        scrolling::naive_row_to_anchor,
-    );
+fn edge_autoscroll_offset(
+    current: egui::Vec2,
+    velocity: egui::Vec2,
+    dt: f32,
+    content_size: egui::Vec2,
+    viewport_size: egui::Vec2,
+) -> egui::Vec2 {
+    let max_offset = scrolling::ScrollState::max_offset(content_size, viewport_size, false);
+    egui::vec2(
+        (current.x + velocity.x * dt).clamp(0.0, max_offset.x),
+        (current.y + velocity.y * dt).clamp(0.0, max_offset.y),
+    )
 }
 
 fn selection_edge_drag_velocity(
@@ -117,4 +118,54 @@ fn selection_edge_drag_velocity(
         ),
         edge_auto_scroll_velocity(viewport_rect, pointer_pos, AutoScrollAxis::Vertical, config),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn viewport() -> egui::Rect {
+        egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 100.0))
+    }
+
+    #[test]
+    fn selection_autoscroll_moves_down_below_viewport() {
+        let velocity = selection_edge_drag_velocity(viewport(), egui::pos2(100.0, 120.0), 16.0);
+
+        assert!(velocity.y > 0.0);
+        assert_eq!(velocity.x, 0.0);
+    }
+
+    #[test]
+    fn selection_autoscroll_is_idle_near_center() {
+        let velocity = selection_edge_drag_velocity(viewport(), egui::pos2(100.0, 50.0), 16.0);
+
+        assert_eq!(velocity, egui::Vec2::ZERO);
+    }
+
+    #[test]
+    fn edge_autoscroll_offset_advances_without_snap_back() {
+        let offset = edge_autoscroll_offset(
+            egui::vec2(0.0, 40.0),
+            egui::vec2(0.0, 100.0),
+            0.5,
+            egui::vec2(200.0, 400.0),
+            egui::vec2(200.0, 100.0),
+        );
+
+        assert_eq!(offset, egui::vec2(0.0, 90.0));
+    }
+
+    #[test]
+    fn edge_autoscroll_offset_clamps_to_scroll_extent() {
+        let offset = edge_autoscroll_offset(
+            egui::vec2(0.0, 290.0),
+            egui::vec2(0.0, 100.0),
+            0.5,
+            egui::vec2(200.0, 400.0),
+            egui::vec2(200.0, 100.0),
+        );
+
+        assert_eq!(offset, egui::vec2(0.0, 300.0));
+    }
 }

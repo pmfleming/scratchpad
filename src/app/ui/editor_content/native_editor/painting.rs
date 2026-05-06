@@ -34,7 +34,7 @@ pub(super) fn paint_editor(
     view: &mut EditorViewState,
     options: TextEditOptions<'_>,
     focused: bool,
-    changed: bool,
+    _changed: bool,
     char_offset_base: usize,
     slice_chars: usize,
 ) -> CursorPaintOutcome {
@@ -61,19 +61,27 @@ pub(super) fn paint_editor(
         },
         view,
     );
+    paint_ime_preedit(
+        ui,
+        galley,
+        galley_pos,
+        rect,
+        view,
+        options,
+        focused,
+        char_offset_base,
+    );
 
     if !focused {
         return CursorPaintOutcome::default();
     }
 
-    if let Some(cursor_range) = &view.cursor_range
-        && !changed
-    {
+    if let Some(cursor_range) = &view.cursor_range {
         let galley_local_cursor_rect = cursor_rect_for_galley(
             ui,
             galley,
             options,
-            local_cursor(cursor_range.primary, char_offset_base),
+            local_cursor_for_slice(cursor_range.primary, char_offset_base, slice_chars),
         );
         let cursor_rect = galley_local_cursor_rect.translate(galley_pos.to_vec2());
         // Reveal targets must be in scroll-content coordinates. The editor rect
@@ -86,6 +94,59 @@ pub(super) fn paint_editor(
     }
 
     CursorPaintOutcome::default()
+}
+
+fn paint_ime_preedit(
+    ui: &egui::Ui,
+    galley: &Arc<egui::Galley>,
+    galley_pos: egui::Pos2,
+    rect: egui::Rect,
+    view: &EditorViewState,
+    options: TextEditOptions<'_>,
+    focused: bool,
+    char_offset_base: usize,
+) {
+    let Some(preedit) = view.ime_preedit.as_deref().filter(|text| !text.is_empty()) else {
+        return;
+    };
+    let Some(cursor_range) = &view.cursor_range else {
+        return;
+    };
+    if !focused {
+        return;
+    }
+
+    let cursor_rect = cursor_rect_for_galley(
+        ui,
+        galley,
+        options,
+        local_cursor(cursor_range.primary, char_offset_base),
+    )
+    .translate(galley_pos.to_vec2());
+    if !cursor_rect.intersects(rect) {
+        return;
+    }
+
+    let font_id = options.editor_font_id.clone();
+    let text_color = options.text_color;
+    let galley =
+        ui.fonts_mut(|fonts| fonts.layout_no_wrap(preedit.to_owned(), font_id.clone(), text_color));
+    let origin = egui::pos2(cursor_rect.center().x, cursor_rect.min.y);
+    let preedit_rect = egui::Rect::from_min_size(origin, galley.rect.size()).intersect(rect);
+    if preedit_rect.width() <= 0.0 || preedit_rect.height() <= 0.0 {
+        return;
+    }
+
+    let painter = ui.painter_at(rect.expand(1.0));
+    painter.galley(origin, galley, text_color);
+    let underline_y = (origin.y + preedit_rect.height()).min(rect.bottom());
+    painter.line_segment(
+        [
+            egui::pos2(origin.x, underline_y),
+            egui::pos2(preedit_rect.right(), underline_y),
+        ],
+        egui::Stroke::new(1.0, text_color),
+    );
 }
 
 fn cursor_rect_for_galley(
@@ -280,6 +341,20 @@ fn preview_label(replacement: &str) -> String {
 pub(super) fn local_cursor(cursor: CharCursor, char_offset_base: usize) -> CharCursor {
     CharCursor {
         index: cursor.index.saturating_sub(char_offset_base),
+        prefer_next_row: cursor.prefer_next_row,
+    }
+}
+
+fn local_cursor_for_slice(
+    cursor: CharCursor,
+    char_offset_base: usize,
+    slice_chars: usize,
+) -> CharCursor {
+    CharCursor {
+        index: cursor
+            .index
+            .saturating_sub(char_offset_base)
+            .min(slice_chars),
         prefer_next_row: cursor.prefer_next_row,
     }
 }

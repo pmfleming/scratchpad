@@ -77,6 +77,14 @@ pub(super) fn handle_mouse_interaction(
     let click_id = context.response.id.with("click_state");
     let mut click_state = load_click_state(ui, click_id);
 
+    if context.response.secondary_clicked() {
+        handle_secondary_click(view, selection.char_cursor);
+        click_state.was_primary_pointer_down = false;
+        store_click_state(ui, click_id, click_state);
+        context.response.request_focus();
+        return;
+    }
+
     if should_ignore_secondary_pointer(ui, context.response, context.rect) {
         click_state.was_primary_pointer_down = false;
         store_click_state(ui, click_id, click_state);
@@ -101,6 +109,20 @@ pub(super) fn handle_mouse_interaction(
     if primary_pointer_down {
         context.response.request_focus();
     }
+}
+
+fn handle_secondary_click(view: &mut EditorViewState, char_cursor: CharCursor) {
+    if !cursor_inside_existing_selection(view.cursor_range, char_cursor.index) {
+        view.cursor_range = Some(CursorRange::one(char_cursor));
+    }
+}
+
+fn cursor_inside_existing_selection(cursor_range: Option<CursorRange>, index: usize) -> bool {
+    let Some(cursor_range) = cursor_range.filter(|range| !range.is_empty()) else {
+        return false;
+    };
+    let (start, end) = cursor_range.sorted_indices();
+    (start..end).contains(&index)
 }
 
 fn extend_selection_to_cursor(view: &mut EditorViewState, char_cursor: CharCursor) {
@@ -315,4 +337,23 @@ fn primary_pointer_tracking_active(
     is_dragged: bool,
 ) -> bool {
     primary_button_down && (contains_pointer || is_dragged)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secondary_click_inside_selection_preserves_selection() {
+        let selection = CursorRange::two(2, 5);
+
+        assert!(cursor_inside_existing_selection(Some(selection), 3));
+    }
+
+    #[test]
+    fn secondary_click_at_selection_end_moves_caret() {
+        let selection = CursorRange::two(2, 5);
+
+        assert!(!cursor_inside_existing_selection(Some(selection), 5));
+    }
 }
