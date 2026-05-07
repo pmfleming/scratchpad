@@ -137,23 +137,29 @@ def cargo_manifest_rust_targets() -> List[Path]:
 def discover_tests() -> List[Dict[str, Any]]:
     overrides = load_descriptions()
     tests: List[Dict[str, Any]] = []
-    pattern = re.compile(r"^\s*#\[(?:test|tokio::test|async_std::test)\]\s*(?:\r?\n\s*#\[[^\]]+\]\s*)*\r?\n\s*(?:async\s+)?fn\s+([A-Za-z0-9_]+)", re.MULTILINE)
     for path in sorted(iter_rust_files([Path("tests"), Path("src"), *cargo_manifest_rust_targets()])):
         try:
-            text = path.read_text(encoding="utf-8")
+            lines = path.read_text(encoding="utf-8").splitlines()
         except OSError:
             continue
         kind = "integration" if path.as_posix().startswith("tests/") else "inline"
-        line_offsets = [0]
-        for match in re.finditer(r"\n", text):
-            line_offsets.append(match.end())
-        for match in pattern.finditer(text):
+        pending_test_line: Optional[int] = None
+        for line_index, raw_line in enumerate(lines, start=1):
+            stripped = raw_line.strip()
+            if re.match(r"#\[(?:test|tokio::test|async_std::test)\]", stripped):
+                pending_test_line = line_index
+                continue
+            if pending_test_line is None:
+                continue
+            if not stripped or stripped.startswith("//") or re.match(r"#\[[^\]]+\]", stripped):
+                continue
+            match = re.match(r"(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)", stripped)
+            if not match:
+                pending_test_line = None
+                continue
             name = match.group(1)
-            line = 1
-            for index, offset in enumerate(line_offsets, start=1):
-                if offset > match.start():
-                    break
-                line = index
+            line = pending_test_line
+            pending_test_line = None
             test_id = f"{path.as_posix()}::{name}"
             tests.append(
                 {

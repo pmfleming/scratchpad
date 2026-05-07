@@ -306,11 +306,8 @@ pub(super) fn editor_viewport_height(ui: &egui::Ui, viewport: Option<egui::Rect>
 }
 
 fn editor_eof_tail_height(viewport_height: f32, row_height: f32) -> f32 {
-    if viewport_height.is_finite() && row_height.is_finite() && row_height > 0.0 {
-        (viewport_height - row_height).max(0.0)
-    } else {
-        0.0
-    }
+    let _ = (viewport_height, row_height);
+    0.0
 }
 
 pub(super) fn total_editor_content_height(
@@ -365,11 +362,16 @@ pub(super) fn editor_row_height(ui: &egui::Ui, font_id: &egui::FontId) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::editor_interaction_id;
+    use super::{editor_eof_tail_height, editor_interaction_id};
 
     #[test]
     fn editor_interaction_id_is_stable_per_view() {
         assert_eq!(editor_interaction_id(7), editor_interaction_id(7));
         assert_ne!(editor_interaction_id(7), editor_interaction_id(8));
+    }
+
+    #[test]
+    fn eof_tail_does_not_create_blank_scroll_page() {
+        assert_eq!(editor_eof_tail_height(600.0, 20.0), 0.0);
     }
 }

@@ -82,11 +82,11 @@ impl ScratchpadApp {
     fn sync_search_result_group_activity(&mut self) {
         let active_match_index = self.search_state.active_match_index;
         for group in Arc::make_mut(&mut self.search_state.result_groups) {
-            group.active = false;
-            for entry in &mut group.entries {
-                entry.active = Some(entry.match_index) == active_match_index;
-                group.active |= entry.active;
-            }
+            group.active = active_match_index.is_some_and(|index| {
+                let start = group.first_match_index;
+                let end = start.saturating_add(group.total_match_count);
+                (start..end).contains(&index)
+            });
         }
     }
 

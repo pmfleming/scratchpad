@@ -3,6 +3,7 @@ use scratchpad::app::capacity_metrics::{
 };
 use scratchpad::app::domain::{BufferState, SearchHighlightState, SplitAxis, WorkspaceTab};
 use scratchpad::app::memory_budget::{self, MemoryBudgetSnapshot};
+use scratchpad::app::services::search::{SearchMode, SearchOptions, SearchProgram, search_program};
 use scratchpad::app::ui::editor_content::{EditorHighlightStyle, build_layouter};
 use serde::Serialize;
 use std::hint::black_box;
@@ -14,7 +15,9 @@ const KB: usize = 1024;
 const MB: usize = 1024 * KB;
 const GB: usize = 1024 * MB;
 const TAB_BYTES_PER_BUFFER: usize = 48 * KB;
-const SPLIT_BYTES_PER_TILE: usize = 256 * KB;
+const MANY_FILE_BYTES_PER_BUFFER: usize = KB;
+const SPLIT_BYTES_PER_TILE: usize = 128 * KB;
+const VIEW_COUNT_BUFFER_BYTES: usize = MB;
 const BASE_PASTE_BUFFER_BYTES: usize = MB;
 
 #[derive(Serialize)]
@@ -46,8 +49,12 @@ struct StepDescriptor {
 fn main() {
     emit_file_size_sweep();
     emit_layout_bytes_sweep();
+    emit_many_file_count_sweep();
+    emit_search_file_size_sweep();
+    emit_search_target_count_sweep();
     emit_tab_count_sweep();
     emit_split_count_sweep();
+    emit_view_count_sweep();
     emit_paste_size_sweep();
 }
 
@@ -99,7 +106,7 @@ fn emit_layout_bytes_sweep() {
 }
 
 fn emit_tab_count_sweep() {
-    for (step_index, tab_count) in [32usize, 512, 4_096, 32_768, 131_072, 512_000]
+    for (step_index, tab_count) in [32usize, 512, 4_096, 10_000, 20_000]
         .into_iter()
         .enumerate()
     {
@@ -118,8 +125,59 @@ fn emit_tab_count_sweep() {
     }
 }
 
+fn emit_many_file_count_sweep() {
+    for (step_index, file_count) in [1_000usize, 10_000, 50_000].into_iter().enumerate() {
+        emit_step(
+            StepDescriptor {
+                scenario: "many_file_count_ceiling",
+                scenario_label: "Many-file workspace ceiling sweep",
+                workload_family: "capacity-stress",
+                step_index,
+                workload_value: file_count,
+                workload_unit: "files",
+                workload_label: format!("{file_count} files"),
+            },
+            || black_box(run_many_file_capacity_cycle(file_count)),
+        );
+    }
+}
+
+fn emit_search_file_size_sweep() {
+    for (step_index, bytes) in [MB, 64 * MB, 256 * MB, GB].into_iter().enumerate() {
+        emit_step(
+            StepDescriptor {
+                scenario: "search_file_size_ceiling",
+                scenario_label: "Search file-size ceiling sweep",
+                workload_family: "capacity-stress",
+                step_index,
+                workload_value: bytes,
+                workload_unit: "bytes",
+                workload_label: human_bytes(bytes),
+            },
+            || black_box(run_search_file_size_cycle(bytes)),
+        );
+    }
+}
+
+fn emit_search_target_count_sweep() {
+    for (step_index, file_count) in [100usize, 1_000, 10_000].into_iter().enumerate() {
+        emit_step(
+            StepDescriptor {
+                scenario: "search_target_count_ceiling",
+                scenario_label: "Search target-count ceiling sweep",
+                workload_family: "capacity-stress",
+                step_index,
+                workload_value: file_count,
+                workload_unit: "files",
+                workload_label: format!("{file_count} files"),
+            },
+            || black_box(run_search_target_count_cycle(file_count)),
+        );
+    }
+}
+
 fn emit_split_count_sweep() {
-    for (step_index, split_count) in [4usize, 8, 16, 24, 32].into_iter().enumerate() {
+    for (step_index, split_count) in [4usize, 32, 128, 512, 1_000].into_iter().enumerate() {
         emit_step(
             StepDescriptor {
                 scenario: "split_count_ceiling",
@@ -131,6 +189,23 @@ fn emit_split_count_sweep() {
                 workload_label: format!("{split_count} splits"),
             },
             || black_box(run_split_capacity_cycle(split_count)),
+        );
+    }
+}
+
+fn emit_view_count_sweep() {
+    for (step_index, view_count) in [32usize, 128, 512, 1_000].into_iter().enumerate() {
+        emit_step(
+            StepDescriptor {
+                scenario: "view_count_ceiling",
+                scenario_label: "View count ceiling sweep",
+                workload_family: "capacity-stress",
+                step_index,
+                workload_value: view_count,
+                workload_unit: "views",
+                workload_label: format!("{view_count} views"),
+            },
+            || black_box(run_view_capacity_cycle(view_count)),
         );
     }
 }
@@ -238,6 +313,36 @@ fn run_tab_capacity_cycle(tab_count: usize) -> usize {
     activations + tabs.len()
 }
 
+fn run_many_file_capacity_cycle(file_count: usize) -> usize {
+    let buffers = (0..file_count)
+        .map(|index| {
+            BufferState::new(
+                format!("file_{index}.txt"),
+                plain_text_of_size(MANY_FILE_BYTES_PER_BUFFER),
+                Some(std::path::PathBuf::from(format!("file_{index}.txt"))),
+            )
+        })
+        .collect::<Vec<_>>();
+    buffers
+        .iter()
+        .map(|buffer| buffer.line_count + buffer.document().piece_tree().len_bytes())
+        .sum()
+}
+
+fn run_search_file_size_cycle(bytes: usize) -> usize {
+    let text = search_text_of_size(bytes);
+    let program = search_capacity_program();
+    search_program(black_box(&text), &program).matches.len()
+}
+
+fn run_search_target_count_cycle(file_count: usize) -> usize {
+    let program = search_capacity_program();
+    let target = search_text_of_size(4 * KB);
+    (0..file_count)
+        .map(|_| search_program(black_box(&target), &program).matches.len())
+        .sum()
+}
+
 fn run_split_capacity_cycle(split_count: usize) -> usize {
     let mut tab = build_tile_heavy_tab(split_count, SPLIT_BYTES_PER_TILE);
     let _ = tab.rebalance_views_equally();
@@ -247,6 +352,23 @@ fn run_split_capacity_cycle(split_count: usize) -> usize {
     {
         let _ = tab.close_view(view_id);
     }
+    tab.views.len()
+}
+
+fn run_view_capacity_cycle(view_count: usize) -> usize {
+    let mut tab = WorkspaceTab::new(BufferState::new(
+        "many_views.txt".to_owned(),
+        plain_text_of_size(VIEW_COUNT_BUFFER_BYTES),
+        None,
+    ));
+    while tab.views.len() < view_count {
+        let _ = tab.split_active_view(if tab.views.len().is_multiple_of(2) {
+            SplitAxis::Vertical
+        } else {
+            SplitAxis::Horizontal
+        });
+    }
+    let _ = tab.rebalance_views_equally();
     tab.views.len()
 }
 
@@ -314,6 +436,29 @@ fn plain_text_of_size(target_bytes: usize) -> String {
     for _ in 0..repeats {
         text.push_str(line);
     }
+    text
+}
+
+fn search_capacity_program() -> SearchProgram {
+    SearchProgram::compile(
+        "needle",
+        SearchOptions {
+            mode: SearchMode::PlainText,
+            match_case: true,
+            whole_word: false,
+        },
+    )
+    .expect("literal search program compiles")
+}
+
+fn search_text_of_size(target_bytes: usize) -> String {
+    let unit = "hay hay hay hay\n";
+    let repeats = (target_bytes / unit.len()).max(1);
+    let mut text = String::with_capacity(repeats * unit.len());
+    for _ in 0..repeats {
+        text.push_str(unit);
+    }
+    text.push_str("needle\n");
     text
 }
 

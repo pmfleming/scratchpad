@@ -56,7 +56,7 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                         find_input_id,
                         replace_input_id,
                     );
-                    results::show_search_results(ui, &state, &mut actions);
+                    results::show_search_results(ui, app, &state, &mut actions);
                 });
                 callout::mark_scroll_blocker_if_hovered(ui.ctx(), &inner.response);
             });

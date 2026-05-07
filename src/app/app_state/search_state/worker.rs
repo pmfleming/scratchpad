@@ -6,6 +6,7 @@ use crate::app::domain::{BufferId, DocumentSnapshot, ViewId};
 use crate::app::services::search::{SearchOptions, SearchProgram};
 use std::collections::HashMap;
 use std::ops::Range;
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{
     Arc,
@@ -34,6 +35,7 @@ pub(super) struct SearchResult {
 }
 
 pub(super) struct SearchTargetSnapshot {
+    pub(super) file_identity: SearchFileIdentity,
     pub(super) tab_index: usize,
     pub(super) view_id: ViewId,
     pub(super) buffer_id: BufferId,
@@ -41,6 +43,12 @@ pub(super) struct SearchTargetSnapshot {
     pub(super) buffer_label: String,
     pub(super) document_snapshot: DocumentSnapshot,
     pub(super) search_range: Option<Range<usize>>,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub(super) enum SearchFileIdentity {
+    Path(PathBuf),
+    Untitled(BufferId),
 }
 
 struct TargetSearchOutcome {

@@ -33,6 +33,7 @@
                 <code>target/analysis/speed_efficiency_report.json</code>
                 <code>target/analysis/correctness_review.json</code>
                 <code>target/analysis/map.json</code>
+                <code>target/analysis/project_code_metrics.json</code>
             </div>
         </header>
 
@@ -60,6 +61,27 @@
 
         <section id="overview" class="tab-panel is-active">
             <div id="overview-health" class="health-grid"></div>
+            <div class="overview-code-layout">
+                <div class="panel-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Project Rust code split</h2>
+                            <p>Application, test, and other tracked Rust code lines in the latest GitHub ref.</p>
+                        </div>
+                        <button class="run-button" data-run-item="map.project_code_metrics">Refresh</button>
+                    </div>
+                    <div id="overview-code-pie" class="code-pie"></div>
+                </div>
+                <div class="panel-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Rust lines over time</h2>
+                            <p>Date of push to total tracked Rust code lines.</p>
+                        </div>
+                    </div>
+                    <div id="overview-code-history" class="code-history"></div>
+                </div>
+            </div>
             <div class="panel-card">
                 <div class="panel-card__header">
                     <div>
@@ -276,6 +298,22 @@
 
             <div id="performance-overview" class="performance-overview"></div>
             <div id="performance-insights" class="app-package-insights performance-insights"></div>
+
+            <div class="panel-card performance-review-coverage">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Coverage Matrix</h2>
+                        <p>Scenario coverage for the app's speed promises, target scales, and next measurements.</p>
+                    </div>
+                    <button class="run-button" data-run-item="performance.report">Refresh Review</button>
+                </div>
+                <div id="performance-review-summary" class="summary-grid performance-summary-grid"></div>
+                <div id="performance-review-matrix" class="performance-coverage-grid"></div>
+                <details class="disclose" open>
+                    <summary>Implemented measurements</summary>
+                    <div id="performance-review-implementations" class="table-wrap"></div>
+                </details>
+            </div>
 
             <div class="panel-card performance-browser">
                 <div class="panel-card__header">

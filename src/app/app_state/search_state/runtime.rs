@@ -1,11 +1,14 @@
 use super::helpers::{
     build_search_target, collect_search_targets_for_views, first_match_index, matches_buffer,
 };
-use super::worker::{SearchRequest, SearchResult, SearchTargetSnapshot, process_search_request};
+use super::worker::{
+    SearchFileIdentity, SearchRequest, SearchResult, SearchTargetSnapshot, process_search_request,
+};
 use super::{
     ScratchpadApp, SearchFocusTarget, SearchFreshness, SearchMatch, SearchScope, SearchStatus,
 };
 use crate::app::domain::BufferId;
+use std::collections::HashSet;
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -139,6 +142,7 @@ impl ScratchpadApp {
             SearchScope::ActiveWorkspaceTab => self.collect_active_tab_search_targets(),
             SearchScope::AllOpenTabs => {
                 let active_tab_index = self.active_tab_index();
+                let mut seen_files = HashSet::<SearchFileIdentity>::new();
                 (0..self.tabs().len())
                     .map(|offset| (active_tab_index + offset) % self.tabs().len().max(1))
                     .flat_map(|tab_index| {
@@ -151,6 +155,7 @@ impl ScratchpadApp {
                             .flatten();
                         self.collect_search_targets_for_tab(tab_index, prioritized_buffer_id, None)
                     })
+                    .filter(|target| seen_files.insert(target.file_identity.clone()))
                     .collect()
             }
         }

@@ -129,9 +129,15 @@ def build_catalog() -> Dict[str, Any]:
             "performance",
             "review",
             "Performance Review",
-            "Combines speed, capacity, and profiles.",
-            [[py, "scripts/speed_efficiency_report.py", "--mode", "visibility"]],
-            ["target/analysis/speed_efficiency_report.json"],
+            "Combines speed, capacity, profiles, scale-target coverage, and scenario gaps.",
+            [
+                [py, "scripts/speed_efficiency_report.py", "--mode", "visibility"],
+                [py, "scripts/performance_review.py", "--mode", "visibility"],
+            ],
+            [
+                "target/analysis/speed_efficiency_report.json",
+                "target/analysis/performance_review.json",
+            ],
         ),
         item(
             "correctness.catalog",
@@ -160,6 +166,15 @@ def build_catalog() -> Dict[str, Any]:
             "Refreshes module health and dependency map.",
             [[py, "scripts/map.py", "--mode", "visibility"]],
             ["target/analysis/map.json"],
+        ),
+        item(
+            "map.project_code_metrics",
+            "map",
+            "code",
+            "Project Rust Code Metrics",
+            "Counts application, test, and other Rust code, then samples first-parent GitHub history for line progress.",
+            [[py, "scripts/project_code_metrics.py", "--mode", "visibility"]],
+            ["target/analysis/project_code_metrics.json"],
         ),
         item(
             "quality.locality_dynamic",

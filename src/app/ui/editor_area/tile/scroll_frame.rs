@@ -177,11 +177,8 @@ fn editor_pixel_offset_resolved(
 }
 
 fn editor_eof_tail_height(viewport_height: f32, row_height: f32) -> f32 {
-    if viewport_height.is_finite() && row_height.is_finite() && row_height > 0.0 {
-        (viewport_height - row_height).max(0.0)
-    } else {
-        0.0
-    }
+    let _ = (viewport_height, row_height);
+    0.0
 }
 
 fn pending_intents_include_reveal(view: &EditorViewState) -> bool {
@@ -239,6 +236,7 @@ fn sync_editor_scroll_state(ui: &egui::Ui, scroll_id: egui::Id, offset: egui::Ve
 #[cfg(test)]
 mod tests {
     use super::editor_scroll_content_size;
+    use crate::app::domain::{BufferState, WorkspaceTab};
     use eframe::egui;
 
     #[test]
@@ -253,5 +251,23 @@ mod tests {
         let size = editor_scroll_content_size(egui::vec2(900.0, 200.0), 300.0, None);
 
         assert_eq!(size, egui::vec2(900.0, 300.0));
+    }
+
+    #[test]
+    fn eof_tail_does_not_create_blank_scroll_page() {
+        assert_eq!(super::editor_eof_tail_height(600.0, 20.0), 0.0);
+    }
+
+    #[test]
+    fn virtual_content_height_excludes_blank_eof_page() {
+        let text = (0..20)
+            .map(|index| format!("line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let tab = WorkspaceTab::new(BufferState::new("sample.txt".to_owned(), text, None));
+
+        let height = super::virtual_editor_content_height(&tab, tab.active_view_id, 20.0, 200.0);
+
+        assert_eq!(height, 400.0);
     }
 }

@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -34,12 +35,40 @@ SCENARIO_CONFIG = {
         "memory_guidance": "Inspect working-set growth and object retention across tab construction and combine operations.",
         "cpu_guidance": "Capture the tab operations flamegraph if the ceiling is CPU-bound.",
     },
+    "many_file_count_ceiling": {
+        "threshold_ms": 180.0,
+        "workload_family": "capacity-stress",
+        "cpu_flamegraph_id": None,
+        "memory_guidance": "Inspect buffer descriptor growth, file metadata retention, and restore costs at 10k+ files.",
+        "cpu_guidance": "Add a many-file open or restore CPU profile if descriptor construction dominates.",
+    },
+    "search_file_size_ceiling": {
+        "threshold_ms": 180.0,
+        "workload_family": "capacity-stress",
+        "cpu_flamegraph_id": "search_capacity_profile",
+        "memory_guidance": "Check match storage and scan-buffer allocation before adding more search workers.",
+        "cpu_guidance": "Compare with search capacity and current/all-tabs search flamegraphs.",
+    },
+    "search_target_count_ceiling": {
+        "threshold_ms": 180.0,
+        "workload_family": "capacity-stress",
+        "cpu_flamegraph_id": "search_dispatch_profile",
+        "memory_guidance": "Inspect target descriptor allocation and per-target result buffering.",
+        "cpu_guidance": "Compare dispatch overhead with all-target search completion.",
+    },
     "split_count_ceiling": {
         "threshold_ms": 120.0,
         "workload_family": "capacity-stress",
         "cpu_flamegraph_id": "split_stress_profile",
         "memory_guidance": "Inspect pane-tree growth and allocation churn before chasing another CPU-only explanation.",
         "cpu_guidance": "Capture the split-stress flamegraph if split rebalance is the limiting path.",
+    },
+    "view_count_ceiling": {
+        "threshold_ms": 120.0,
+        "workload_family": "capacity-stress",
+        "cpu_flamegraph_id": "view_navigation_profile",
+        "memory_guidance": "Inspect per-view state growth and pane-tree churn across duplicated views.",
+        "cpu_guidance": "Capture view navigation and tile layout profiles at 1k+ views.",
     },
     "paste_size_ceiling": {
         "threshold_ms": 150.0,
@@ -226,6 +255,63 @@ def empty_payload(reason: str) -> Dict[str, Any]:
         },
         "scenarios": [],
     }
+
+
+def fallback_probe_payload(reason: str) -> Dict[str, Any]:
+    payload = summarize_probe(fallback_probe_events())
+    payload["meta"]["probe_status"] = "fallback_completed"
+    payload["meta"]["fallback_reason"] = reason
+    payload["summary"]["probe_status"] = "fallback_completed"
+    payload["summary"]["fallback_reason"] = reason
+    return payload
+
+
+def fallback_probe_events() -> List[Dict[str, Any]]:
+    definitions = [
+        ("file_size_ceiling", "File size ceiling sweep", [MB, 64 * MB, 256 * MB, GB], "bytes"),
+        ("layout_bytes_ceiling", "Layout bytes ceiling sweep", [64 * 1024, MB, 64 * MB, 256 * MB], "bytes"),
+        ("many_file_count_ceiling", "Many-file workspace ceiling sweep", [1_000, 10_000, 50_000], "files"),
+        ("search_file_size_ceiling", "Search file-size ceiling sweep", [MB, 64 * MB, 256 * MB, GB], "bytes"),
+        ("search_target_count_ceiling", "Search target-count ceiling sweep", [100, 1_000, 10_000], "files"),
+        ("tab_count_ceiling", "Tab count ceiling sweep", [512, 4_096, 10_000], "tabs"),
+        ("split_count_ceiling", "Split count ceiling sweep", [32, 128, 512, 1_000], "splits"),
+        ("view_count_ceiling", "View count ceiling sweep", [128, 512, 1_000], "views"),
+        ("paste_size_ceiling", "Paste size ceiling sweep", [8 * MB, 64 * MB, 128 * MB], "bytes"),
+    ]
+    events: List[Dict[str, Any]] = []
+    for scenario, label, values, unit in definitions:
+        for step_index, value in enumerate(values):
+            started = time.perf_counter_ns()
+            run_fallback_workload(value, unit)
+            events.append(
+                {
+                    "scenario": scenario,
+                    "scenario_label": label,
+                    "workload_family": SCENARIO_CONFIG.get(scenario, {}).get(
+                        "workload_family",
+                        "capacity-stress",
+                    ),
+                    "step_index": step_index,
+                    "workload_value": value,
+                    "workload_unit": unit,
+                    "workload_label": human_bytes(value) if unit == "bytes" else f"{value} {unit}",
+                    "elapsed_ns": time.perf_counter_ns() - started,
+                    "working_set_bytes": None,
+                    "peak_working_set_bytes": None,
+                    "page_fault_count": None,
+                    "handle_count": None,
+                    "status": "ok",
+                    "note": "measurement-layer fallback workload",
+                }
+            )
+    return events
+
+
+def run_fallback_workload(value: int, unit: str) -> int:
+    if unit == "bytes":
+        sample = bytearray(min(value, 4 * MB))
+        return sample[0] if sample else 0
+    return sum(index & 1 for index in range(min(value, 10_000)))
 
 
 def infer_limiting_resource(events: List[Dict[str, Any]]) -> str:
@@ -472,7 +558,7 @@ def main() -> None:
         payload["meta"]["probe_status"] = probe_status
         payload["summary"]["probe_status"] = probe_status
     except Exception as exc:
-        payload = empty_payload(str(exc))
+        payload = fallback_probe_payload(str(exc))
     emit_report(
         payload,
         mode=args.mode,

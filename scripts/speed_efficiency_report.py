@@ -18,8 +18,12 @@ FAMILY_PRIORITY = {
     "search-dispatch": 3,
     "edit-paste": 3,
     "scroll": 3,
+    "viewport": 3,
+    "snapshot": 2,
     "split-layout": 2,
     "tab-management": 2,
+    "session-persistence": 2,
+    "anchor-maintenance": 1,
     "file-load": 2,
     "control-char-encoding": 1,
     "capacity-stress": 2,
@@ -29,7 +33,10 @@ FAMILY_PRIORITY = {
 FAMILY_CEILING_SCENARIOS = {
     "file-load": "file_size_ceiling",
     "scroll": "file_size_ceiling",
+    "viewport": "file_size_ceiling",
+    "snapshot": "file_size_ceiling",
     "edit-paste": "paste_size_ceiling",
+    "anchor-maintenance": "paste_size_ceiling",
     "tab-management": "tab_count_ceiling",
     "split-layout": "split_count_ceiling",
 }
@@ -244,7 +251,16 @@ def main() -> None:
         normalize_latency_row(item, capacity_lookup)
         for item in slowspots
         if str(item.get("workload_family", "unmapped"))
-        in {"file-load", "scroll", "edit-paste", "control-char-encoding"}
+        in {
+            "file-load",
+            "scroll",
+            "viewport",
+            "snapshot",
+            "edit-paste",
+            "anchor-maintenance",
+            "session-persistence",
+            "control-char-encoding",
+        }
     ]
     tabs_rows = [
         normalize_latency_row(item, capacity_lookup)

@@ -12,6 +12,7 @@ This toolchain exists to document the performance, capacity, resource cost, and 
 - `scripts/capacity_report.py`: threshold sweeps for file size, tabs, splits, and paste ceilings with failure-mode and resource hints
 - `scripts/resource_profiles.py`: allocation-heavy, working-set, page-fault, and session-cost probes for large-file, paste, tab-count, and session workloads
 - `scripts/speed_efficiency_report.py`: coordinated performance triage that merges latency, flamegraph coverage, and capacity ceilings
+- `scripts/performance_review.py`: scenario-first performance coverage for GB files, 10,000+ files, 10,000+ tabs, many views, search, scroll, and text mutation
 - `scripts/clone_alert.py`: token-based clone and duplication analysis
 - `scripts/map.py`: architecture map output enriched with dependencies and analysis signals
 - `scripts/generate_flamegraphs.py`: flamegraph index generation for dedicated single-workload profile binaries
@@ -35,6 +36,7 @@ Expected artifacts:
 - `target/analysis/capacity_report.json`
 - `target/analysis/resource_profiles.json`
 - `target/analysis/speed_efficiency_report.json`
+- `target/analysis/performance_review.json`
 - `target/analysis/clones.json`
 - `target/analysis/map.json`
 - `target/analysis/flamegraphs.json`
@@ -58,6 +60,7 @@ Expected artifacts:
 .venv\Scripts\python.exe scripts\capacity_report.py --mode visibility
 .venv\Scripts\python.exe scripts\resource_profiles.py --mode visibility
 .venv\Scripts\python.exe scripts\speed_efficiency_report.py --mode visibility
+.venv\Scripts\python.exe scripts\performance_review.py --mode visibility
 .venv\Scripts\python.exe scripts\generate_flamegraphs.py --mode cli
 .venv\Scripts\python.exe scripts\generate_flamegraphs.py --mode visibility
 .venv\Scripts\python.exe scripts\test_catalog.py --mode visibility
@@ -158,6 +161,7 @@ powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1 -LegacyStatic
 - `scripts/capacity_report.py` keeps threshold sweeps out of the ordinary latency leaderboard and records the first unusable ceiling separately.
 - `scripts/resource_profiles.py` adds allocation profiling for real file-backed large-file open, large paste into a large buffer, working-set and page-fault tracking while scaling tab count, and session persist/restore cost with hundreds or thousands of tabs.
 - `scripts/speed_efficiency_report.py` consumes `slowspots`, `search_speed`, `flamegraphs`, `capacity_report`, and `resource_profiles` to emit a coordinated triage artifact.
+- `scripts/performance_review.py` consumes the same artifacts and emits the scenario coverage matrix used by Performance Review. It calls out missing evidence for GB-class files, 10,000+ files, 10,000+ tabs, 1,000+ views/splits, first-response search, and large text mutation.
 - Flamegraph generation now targets dedicated single-entry profile binaries instead of whole Criterion suites, which keeps traces narrower and easier to interpret.
 - Recommended single-entry profile series:
 	- `profile_tab_operations`: active-tab switching plus reversible tab reordering on a 64-tab, multi-view, loaded workspace

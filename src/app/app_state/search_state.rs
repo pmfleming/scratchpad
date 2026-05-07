@@ -19,6 +19,14 @@ mod worker;
 use helpers::selection_char_range;
 use worker::{SearchRequest, SearchResult, SearchTargetSnapshot, spawn_search_worker};
 
+const SEARCH_PREVIEW_CACHE_LIMIT: usize = 1024;
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+struct SearchPreviewCacheKey {
+    generation: u64,
+    match_index: usize,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SearchScope {
     SelectionOnly,
@@ -123,8 +131,8 @@ pub(crate) struct SearchResultGroup {
     pub(crate) buffer_id: BufferId,
     pub(crate) buffer_label: String,
     pub(crate) tab_label: String,
+    pub(crate) first_match_index: usize,
     pub(crate) total_match_count: usize,
-    pub(crate) entries: Vec<SearchResultEntry>,
     pub(crate) active: bool,
 }
 
@@ -225,6 +233,8 @@ pub(crate) struct SearchState {
     pub(crate) freshness: SearchFreshness,
     pub(crate) previous_active_match: Option<SearchMatch>,
     pub(crate) pending_replace_all_confirmation: Option<ReplaceAllConfirmation>,
+    preview_cache: std::collections::HashMap<SearchPreviewCacheKey, SearchResultEntry>,
+    preview_cache_order: std::collections::VecDeque<SearchPreviewCacheKey>,
     latest_generation: Arc<AtomicU64>,
     request_tx: Sender<SearchRequest>,
     result_rx: Receiver<SearchResult>,
@@ -258,6 +268,8 @@ impl Default for SearchState {
             freshness: SearchFreshness::Fresh,
             previous_active_match: None,
             pending_replace_all_confirmation: None,
+            preview_cache: std::collections::HashMap::new(),
+            preview_cache_order: std::collections::VecDeque::new(),
             latest_generation,
             request_tx,
             result_rx,
@@ -296,6 +308,8 @@ impl SearchState {
         self.total_match_count = 0;
         self.displayed_match_count = 0;
         self.result_groups = Arc::from(Vec::<SearchResultGroup>::new());
+        self.preview_cache.clear();
+        self.preview_cache_order.clear();
     }
 
     fn clear_replace_all_confirmation(&mut self) {
@@ -556,6 +570,42 @@ impl ScratchpadApp {
         self.search_state.result_groups.clone()
     }
 
+    pub(crate) fn search_result_entry_at(
+        &mut self,
+        match_index: usize,
+    ) -> Option<SearchResultEntry> {
+        let key = SearchPreviewCacheKey {
+            generation: self.search_state.applied_generation,
+            match_index,
+        };
+        if let Some(entry) = self.search_state.preview_cache.get(&key).cloned() {
+            self.touch_search_preview_cache_key(key);
+            return Some(entry_with_active_state(
+                entry,
+                match_index,
+                self.search_state.active_match_index,
+            ));
+        }
+
+        let search_match = self.search_state.matches.get(match_index)?.clone();
+        let (line_number, column_number, preview) = self
+            .tabs()
+            .get(search_match.tab_index)?
+            .buffer_by_id(search_match.buffer_id)?
+            .preview_for_match(&search_match.range);
+        let entry = SearchResultEntry {
+            match_index,
+            buffer_id: search_match.buffer_id,
+            buffer_label: search_match.buffer_label,
+            line_number,
+            column_number,
+            preview,
+            active: Some(match_index) == self.search_state.active_match_index,
+        };
+        self.store_search_preview_cache_entry(key, entry.clone());
+        Some(entry)
+    }
+
     pub(crate) fn focus_search_result_file_at(&mut self, index: usize) -> bool {
         let Some(search_match) = self.search_state.matches.get(index).cloned() else {
             return false;
@@ -565,6 +615,28 @@ impl ScratchpadApp {
 
     pub(crate) fn activate_search_match_at(&mut self, index: usize) -> bool {
         self.activate_search_match(index)
+    }
+
+    fn store_search_preview_cache_entry(
+        &mut self,
+        key: SearchPreviewCacheKey,
+        entry: SearchResultEntry,
+    ) {
+        self.touch_search_preview_cache_key(key.clone());
+        self.search_state.preview_cache.insert(key, entry);
+        while self.search_state.preview_cache_order.len() > SEARCH_PREVIEW_CACHE_LIMIT {
+            let Some(expired) = self.search_state.preview_cache_order.pop_front() else {
+                break;
+            };
+            self.search_state.preview_cache.remove(&expired);
+        }
+    }
+
+    fn touch_search_preview_cache_key(&mut self, key: SearchPreviewCacheKey) {
+        self.search_state
+            .preview_cache_order
+            .retain(|existing| existing != &key);
+        self.search_state.preview_cache_order.push_back(key);
     }
 
     pub fn select_next_search_match(&mut self) -> bool {
@@ -641,5 +713,126 @@ impl ScratchpadApp {
             .active_view()
             .and_then(|view| view.cursor_range)
             .and_then(selection_char_range)
+    }
+}
+
+fn entry_with_active_state(
+    mut entry: SearchResultEntry,
+    match_index: usize,
+    active_match_index: Option<usize>,
+) -> SearchResultEntry {
+    entry.active = Some(match_index) == active_match_index;
+    entry
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::domain::{BufferState, WorkspaceTab};
+    use std::ops::Range;
+
+    #[test]
+    fn lazy_preview_lookup_builds_and_reuses_cached_entry() {
+        let mut app = app_with_search_text("alpha\nplan beta\nomega");
+        seed_matches_for_plan_lines(&mut app, &[6..10]);
+        app.search_state.active_match_index = Some(0);
+
+        let entry = app.search_result_entry_at(0).expect("preview entry");
+
+        assert_eq!(entry.line_number, 2);
+        assert_eq!(entry.column_number, 1);
+        assert!(entry.preview.contains("plan beta"));
+        assert!(entry.active);
+        assert_eq!(app.search_state.preview_cache.len(), 1);
+
+        app.search_state.active_match_index = None;
+        let cached = app.search_result_entry_at(0).expect("cached preview entry");
+
+        assert_eq!(cached.line_number, entry.line_number);
+        assert_eq!(cached.preview, entry.preview);
+        assert!(!cached.active);
+        assert_eq!(app.search_state.preview_cache.len(), 1);
+    }
+
+    #[test]
+    fn lazy_preview_cache_evicts_least_recently_used_entry() {
+        let text = (0..=SEARCH_PREVIEW_CACHE_LIMIT)
+            .map(|_| "plan")
+            .collect::<Vec<_>>()
+            .join("\n");
+        let ranges = text
+            .match_indices("plan")
+            .map(|(start, value)| start..start + value.len())
+            .collect::<Vec<_>>();
+        let mut app = app_with_search_text(&text);
+        seed_matches_for_plan_lines(&mut app, &ranges);
+
+        for index in 0..SEARCH_PREVIEW_CACHE_LIMIT {
+            assert!(app.search_result_entry_at(index).is_some());
+        }
+        assert_eq!(
+            app.search_state.preview_cache.len(),
+            SEARCH_PREVIEW_CACHE_LIMIT
+        );
+
+        assert!(app.search_result_entry_at(0).is_some());
+        assert!(
+            app.search_result_entry_at(SEARCH_PREVIEW_CACHE_LIMIT)
+                .is_some()
+        );
+
+        let generation = app.search_state.applied_generation;
+        assert!(
+            app.search_state
+                .preview_cache
+                .contains_key(&SearchPreviewCacheKey {
+                    generation,
+                    match_index: 0,
+                })
+        );
+        assert!(
+            !app.search_state
+                .preview_cache
+                .contains_key(&SearchPreviewCacheKey {
+                    generation,
+                    match_index: 1,
+                })
+        );
+        assert_eq!(
+            app.search_state.preview_cache.len(),
+            SEARCH_PREVIEW_CACHE_LIMIT
+        );
+    }
+
+    fn app_with_search_text(text: &str) -> ScratchpadApp {
+        let mut app = ScratchpadApp::default();
+        let tab = WorkspaceTab::new(BufferState::new(
+            "search.md".to_owned(),
+            text.to_owned(),
+            None,
+        ));
+        app.tabs_mut()[0] = tab;
+        app.search_state.applied_generation = 42;
+        app
+    }
+
+    fn seed_matches_for_plan_lines(app: &mut ScratchpadApp, ranges: &[Range<usize>]) {
+        let tab = &app.tabs()[0];
+        let buffer = &tab.buffer;
+        app.search_state.matches = ranges
+            .iter()
+            .cloned()
+            .map(|range| SearchMatch {
+                tab_index: 0,
+                view_id: tab.active_view_id,
+                buffer_id: buffer.id,
+                buffer_label: buffer.display_name(),
+                target_revision: buffer.document_revision(),
+                matched_text: "plan".to_owned(),
+                range,
+            })
+            .collect();
+        app.search_state.total_match_count = app.search_state.matches.len();
+        app.search_state.displayed_match_count = app.search_state.matches.len();
     }
 }

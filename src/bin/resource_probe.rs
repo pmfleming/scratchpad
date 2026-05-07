@@ -1,5 +1,6 @@
 use scratchpad::app::domain::{BufferState, SplitAxis, WorkspaceTab};
 use scratchpad::app::services::file_service::FileService;
+use scratchpad::app::services::search::{SearchMode, SearchOptions, SearchProgram, search_program};
 use scratchpad::app::services::session_store::SessionStore;
 use serde::Serialize;
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -12,7 +13,9 @@ use std::time::Instant;
 const KB: usize = 1024;
 const MB: usize = 1024 * KB;
 const TAB_BYTES_PER_BUFFER: usize = 48 * KB;
-const SESSION_BYTES_PER_BUFFER: usize = 16 * KB;
+const MANY_FILE_BYTES_PER_BUFFER: usize = KB;
+const SESSION_BYTES_PER_BUFFER: usize = 4 * KB;
+const VIEW_COUNT_BUFFER_BYTES: usize = MB;
 const PASTE_RESOURCE_BASE_BYTES: usize = MB;
 
 static ALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
@@ -123,8 +126,11 @@ struct AllocationSnapshot {
 
 fn main() {
     emit_file_backed_open_allocations();
+    emit_many_file_resource_tracking();
+    emit_search_resource_tracking();
     emit_paste_allocations();
     emit_tab_count_resource_tracking();
+    emit_view_count_resource_tracking();
     emit_session_persist_restore_costs();
 }
 
@@ -153,8 +159,42 @@ fn emit_file_backed_open_allocations() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+fn emit_search_resource_tracking() {
+    for (step_index, bytes) in [64 * MB, 256 * MB].into_iter().enumerate() {
+        emit_step(
+            StepDescriptor {
+                scenario: "search_file_size_resource_tracking",
+                scenario_label: "Search file-size allocation tracking",
+                workload_family: "search",
+                focus: "allocation",
+                step_index,
+                workload_value: bytes,
+                workload_unit: "bytes",
+                workload_label: human_bytes(bytes),
+            },
+            || run_search_file_size_cycle(bytes),
+        );
+    }
+
+    for (step_index, file_count) in [1_000usize, 10_000].into_iter().enumerate() {
+        emit_step(
+            StepDescriptor {
+                scenario: "search_target_resource_tracking",
+                scenario_label: "Search target-count allocation tracking",
+                workload_family: "search",
+                focus: "allocation",
+                step_index,
+                workload_value: file_count,
+                workload_unit: "files",
+                workload_label: format!("{file_count} files"),
+            },
+            || run_search_target_count_cycle(file_count),
+        );
+    }
+}
+
 fn emit_paste_allocations() {
-    for (step_index, insert_bytes) in [8 * MB, 64 * MB].into_iter().enumerate() {
+    for (step_index, insert_bytes) in [8 * MB, 64 * MB, 128 * MB].into_iter().enumerate() {
         emit_step(
             StepDescriptor {
                 scenario: "paste_allocation",
@@ -171,8 +211,26 @@ fn emit_paste_allocations() {
     }
 }
 
+fn emit_many_file_resource_tracking() {
+    for (step_index, file_count) in [1_000usize, 10_000, 50_000].into_iter().enumerate() {
+        emit_step(
+            StepDescriptor {
+                scenario: "many_file_resource_tracking",
+                scenario_label: "Many-file allocation and workspace tracking",
+                workload_family: "many-files",
+                focus: "memory",
+                step_index,
+                workload_value: file_count,
+                workload_unit: "files",
+                workload_label: format!("{file_count} files"),
+            },
+            || run_many_file_count_cycle(file_count),
+        );
+    }
+}
+
 fn emit_tab_count_resource_tracking() {
-    for (step_index, tab_count) in [128usize, 512, 4_096].into_iter().enumerate() {
+    for (step_index, tab_count) in [128usize, 512, 4_096, 10_000].into_iter().enumerate() {
         emit_step(
             StepDescriptor {
                 scenario: "tab_count_resource_tracking",
@@ -189,11 +247,29 @@ fn emit_tab_count_resource_tracking() {
     }
 }
 
+fn emit_view_count_resource_tracking() {
+    for (step_index, view_count) in [128usize, 512, 1_000].into_iter().enumerate() {
+        emit_step(
+            StepDescriptor {
+                scenario: "view_count_resource_tracking",
+                scenario_label: "View count allocation and layout tracking",
+                workload_family: "split-layout",
+                focus: "memory",
+                step_index,
+                workload_value: view_count,
+                workload_unit: "views",
+                workload_label: format!("{view_count} views"),
+            },
+            || run_view_count_cycle(view_count),
+        );
+    }
+}
+
 fn emit_session_persist_restore_costs() {
     let root = unique_probe_root("session-cost");
     std::fs::create_dir_all(&root).expect("create session cost root");
 
-    for (step_index, tab_count) in [100usize, 1_000].into_iter().enumerate() {
+    for (step_index, tab_count) in [100usize, 1_000, 10_000].into_iter().enumerate() {
         let tabs = build_tabs(tab_count, SESSION_BYTES_PER_BUFFER);
         let store_root = root.join(format!("tabs_{tab_count}"));
         let store = SessionStore::new(store_root.clone());
@@ -290,6 +366,40 @@ fn run_paste_cycle(insert_bytes: usize) -> usize {
     black_box(buffer.line_count + buffer.document().piece_tree().len_bytes())
 }
 
+fn run_many_file_count_cycle(file_count: usize) -> usize {
+    let buffers = (0..file_count)
+        .map(|index| {
+            BufferState::new(
+                format!("file_{index}.txt"),
+                plain_text_of_size(MANY_FILE_BYTES_PER_BUFFER),
+                Some(PathBuf::from(format!("file_{index}.txt"))),
+            )
+        })
+        .collect::<Vec<_>>();
+    black_box(
+        buffers
+            .iter()
+            .map(|buffer| buffer.line_count + buffer.document().piece_tree().len_bytes())
+            .sum(),
+    )
+}
+
+fn run_search_file_size_cycle(bytes: usize) -> usize {
+    let text = search_text_of_size(bytes);
+    let program = search_capacity_program();
+    black_box(search_program(black_box(&text), &program).matches.len())
+}
+
+fn run_search_target_count_cycle(file_count: usize) -> usize {
+    let target = search_text_of_size(4 * KB);
+    let program = search_capacity_program();
+    black_box(
+        (0..file_count)
+            .map(|_| search_program(black_box(&target), &program).matches.len())
+            .sum(),
+    )
+}
+
 fn run_tab_count_cycle(tab_count: usize) -> usize {
     let mut tabs = build_tabs(tab_count, TAB_BYTES_PER_BUFFER);
     let mut activations = 0usize;
@@ -306,6 +416,23 @@ fn run_tab_count_cycle(tab_count: usize) -> usize {
         activations += 1;
     }
     black_box(activations + tabs.len())
+}
+
+fn run_view_count_cycle(view_count: usize) -> usize {
+    let mut tab = WorkspaceTab::new(BufferState::new(
+        "many_views.txt".to_owned(),
+        plain_text_of_size(VIEW_COUNT_BUFFER_BYTES),
+        None,
+    ));
+    while tab.views.len() < view_count {
+        let _ = tab.split_active_view(if tab.views.len().is_multiple_of(2) {
+            SplitAxis::Vertical
+        } else {
+            SplitAxis::Horizontal
+        });
+    }
+    let _ = tab.rebalance_views_equally();
+    black_box(tab.views.len())
 }
 
 fn run_session_persist_cycle(store: &SessionStore, tabs: &[WorkspaceTab]) -> usize {
@@ -366,6 +493,29 @@ fn plain_text_of_size(target_bytes: usize) -> String {
     for _ in 0..repeats {
         text.push_str(line);
     }
+    text
+}
+
+fn search_capacity_program() -> SearchProgram {
+    SearchProgram::compile(
+        "needle",
+        SearchOptions {
+            mode: SearchMode::PlainText,
+            match_case: true,
+            whole_word: false,
+        },
+    )
+    .expect("literal search program compiles")
+}
+
+fn search_text_of_size(target_bytes: usize) -> String {
+    let unit = "hay hay hay hay\n";
+    let repeats = (target_bytes / unit.len()).max(1);
+    let mut text = String::with_capacity(repeats * unit.len());
+    for _ in 0..repeats {
+        text.push_str(unit);
+    }
+    text.push_str("needle\n");
     text
 }
 

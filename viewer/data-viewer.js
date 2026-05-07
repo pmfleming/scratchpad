@@ -9,11 +9,13 @@
         capacityReport: `../target/analysis/capacity_report.json?v=${viewerVersion}`,
         resourceProfiles: `../target/analysis/resource_profiles.json?v=${viewerVersion}`,
         speedReport: `../target/analysis/speed_efficiency_report.json?v=${viewerVersion}`,
+        performanceReview: `../target/analysis/performance_review.json?v=${viewerVersion}`,
         clones: `../target/analysis/clones.json?v=${viewerVersion}`,
         escapeHatches: `../target/analysis/rust_escape_hatches.json?v=${viewerVersion}`,
         locality: `../target/analysis/locality_metrics.json?v=${viewerVersion}`,
         leverage: `../target/analysis/leverage_metrics.json?v=${viewerVersion}`,
         map: `../target/analysis/map.json?v=${viewerVersion}`,
+        projectCodeMetrics: `../target/analysis/project_code_metrics.json?v=${viewerVersion}`,
         flamegraphs: `../target/analysis/flamegraphs.json?v=${viewerVersion}`,
         correctness: `../target/analysis/correctness_review.json?v=${viewerVersion}`,
         appPackage: `/api/app-package?v=${viewerVersion}`,
@@ -28,11 +30,13 @@
         capacityReport: null,
         resourceProfiles: null,
         speedReport: null,
+        performanceReview: null,
         clones: [],
         escapeHatches: [],
         locality: [],
         leverage: [],
         map: null,
+        projectCodeMetrics: null,
         flamegraphs: [],
         correctness: null,
         appPackage: null,
@@ -1226,6 +1230,210 @@
         );
     }
 
+    function renderPerformanceReviewCoverage() {
+        const payload = state.performanceReview || {};
+        const summary = payload.summary || {};
+        const scenarios = payload.scenarios || [];
+        const notes = payload.presentation?.notes || [];
+        const implementations = scenarios.flatMap((scenario) =>
+            (scenario.implementations || []).map((item) => ({
+                scenarioTitle: scenario.title,
+                ...item,
+            }))
+        );
+
+        renderSummary("performance-review-summary", [
+            metricCard("Scenarios", summary.scenario_count ?? scenarios.length),
+            metricCard("Covered", summary.covered_scenarios ?? "-"),
+            metricCard("Thin", summary.thin_scenarios ?? "-"),
+            metricCard("Implementations", summary.implementation_count ?? implementations.length),
+            metricCard("Scale targets", summary.missing_scale_targets ?? "-"),
+            metricCard("Budget misses", summary.budget_misses ?? "-"),
+            metricCard("Failed sources", summary.failed_source_artifacts ?? "-"),
+        ]);
+
+        const matrix = byId("performance-review-matrix");
+        if (matrix) {
+            matrix.innerHTML = scenarios.length
+                ? scenarios.map(renderPerformanceCoverageCard).join("")
+                : '<p class="muted">No performance review coverage artifact loaded.</p>';
+        }
+
+        renderTable(
+            "performance-review-implementations",
+            ["Scenario", "Kind", "Measurement", "Status", "Detail"],
+            implementations.map((item) => `<tr>
+                <td><code>${escapeHtml(item.scenarioTitle || "-")}</code><div class="muted">${escapeHtml(item.label || "-")}</div></td>
+                <td>${escapeHtml(item.kind || "-")}</td>
+                <td>${escapeHtml(item.measurement || "-")}</td>
+                <td>${escapeHtml(item.status || "-")}</td>
+                <td>${escapeHtml(item.detail || "-")}</td>
+            </tr>`)
+        );
+
+        const notesTarget = byId("performance-review-presentation");
+        if (notesTarget) {
+            notesTarget.innerHTML = notes.length
+                ? `<ul class="chart-insights">${notes.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+                : '<p class="muted">No presentation notes loaded.</p>';
+        }
+    }
+
+    function renderPerformanceCoverageCard(scenario) {
+        const axes = scenario.axes || {};
+        const scaleChecks = scenario.scale_checks || [];
+        const implementations = scenario.implementations || [];
+        const status = scenario.coverage_status || "missing";
+        const badge = implementations.length ? "Measured" : "Pending";
+        const scaleRows = scaleChecks.map((check) => {
+            const met = Boolean(check.met);
+            return `<div class="coverage-scale coverage-scale--${met ? "met" : "miss"}">
+                <span>${escapeHtml(check.label)}</span>
+                <strong>${escapeHtml(formatScaleValue(check.observed, check.unit))}</strong>
+                <em>target ${escapeHtml(formatScaleValue(check.target, check.unit))}</em>
+            </div>`;
+        }).join("");
+        return `<article class="coverage-card coverage-card--${status}">
+            <div class="coverage-card__header">
+                <div>
+                    <h3>${escapeHtml(scenario.title)}</h3>
+                    <p>${escapeHtml(scenario.promise || "")}</p>
+                </div>
+                <span class="coverage-card__status">${escapeHtml(badge)}</span>
+            </div>
+            <div class="coverage-card__score">
+                <div><span style="width:${Math.max(3, Math.min(100, Number(scenario.coverage_score || 0) * 100))}%"></span></div>
+                <strong>${formatNumber.format((scenario.coverage_score || 0) * 100)}%</strong>
+            </div>
+            ${renderEvidenceGraph(axes)}
+            <div class="coverage-scale-grid">${scaleRows || '<p class="muted">No scale targets configured.</p>'}</div>
+            ${renderImplementationGraph(implementations)}
+        </article>`;
+    }
+
+    function renderEvidenceGraph(axes) {
+        const entries = Object.entries(axes || {}).map(([key, axis]) => ({
+            key,
+            label: axis.label || key,
+            value: Number(axis.count || 0),
+            covered: Boolean(axis.covered || axis.count > 0),
+        }));
+        if (!entries.length) {
+            return '<p class="muted">No evidence graph loaded.</p>';
+        }
+        const max = Math.max(1, ...entries.map((item) => item.value));
+        return `<div class="coverage-evidence-graph" aria-label="Evidence graph">
+            ${entries.map((item) => {
+            const pct = Math.max(item.value ? 5 : 0, Math.min(100, (item.value / max) * 100));
+            return `<div class="coverage-evidence-row coverage-evidence-row--${escapeHtml(item.key)} ${item.covered ? "is-covered" : "is-empty"}">
+                    <span>${escapeHtml(item.label)}</span>
+                    <div><i style="width:${pct}%"></i></div>
+                    <strong>${formatNumber.format(item.value)}</strong>
+                </div>`;
+        }).join("")}
+        </div>`;
+    }
+
+    function renderImplementationGraph(implementations) {
+        const rows = implementationGraphRows(implementations);
+        if (!rows.length) {
+            return '<p class="muted">No implemented measurement loaded.</p>';
+        }
+        const maxByUnit = rows.reduce((acc, row) => {
+            acc[row.unit] = Math.max(acc[row.unit] || 0, row.value);
+            return acc;
+        }, {});
+        return `<div class="implementation-graph" aria-label="Implemented measurement graph">
+            <div class="implementation-graph__header">
+                <span>Implemented measurements</span>
+                <strong>${formatNumber.format(implementations.length)}</strong>
+            </div>
+            ${rows.map((row) => {
+            const max = Math.max(1, maxByUnit[row.unit] || row.value || 0);
+            const pct = Math.max(row.value ? 5 : 0, Math.min(100, (row.value / max) * 100));
+            return `<div class="implementation-graph__row implementation-graph__row--${escapeHtml(row.kind)}">
+                    <div class="implementation-graph__label">
+                        <span>${escapeHtml(row.label)}</span>
+                        <strong>${escapeHtml(row.measurement)}</strong>
+                    </div>
+                    <div class="implementation-graph__track"><i style="width:${pct}%"></i></div>
+                    <div class="implementation-graph__caption">
+                        <span>${escapeHtml(row.detail || row.status)}</span>
+                        <em>${escapeHtml(row.kind)}</em>
+                    </div>
+                </div>`;
+        }).join("")}
+        </div>`;
+    }
+
+    function implementationGraphRows(implementations) {
+        return (implementations || [])
+            .map((item) => {
+                const parsed = parseMeasurementValue(item.measurement);
+                if (!parsed) return null;
+                return {
+                    kind: item.kind || "metric",
+                    label: item.label || "-",
+                    status: item.status || "-",
+                    detail: item.detail || "",
+                    measurement: item.measurement || "-",
+                    value: parsed.value,
+                    unit: parsed.unit,
+                };
+            })
+            .filter(Boolean);
+    }
+
+    function parseMeasurementValue(measurement) {
+        const text = String(measurement || "").trim();
+        let match = text.match(/^([\d,.]+)\s*\/\s*([\d,.]+)/);
+        if (match) {
+            const numerator = Number(match[1].replaceAll(",", ""));
+            const denominator = Number(match[2].replaceAll(",", ""));
+            if (Number.isFinite(numerator) && Number.isFinite(denominator) && denominator > 0) {
+                return { value: (numerator / denominator) * 100, unit: "ratio" };
+            }
+        }
+
+        match = text.match(/^([\d,.]+)\s*(GB|MB|KB|B)\b/i);
+        if (match) {
+            const value = Number(match[1].replaceAll(",", ""));
+            const unit = match[2].toUpperCase();
+            if (!Number.isFinite(value)) return null;
+            const mb = unit === "GB" ? value * 1024 : unit === "MB" ? value : unit === "KB" ? value / 1024 : value / (1024 * 1024);
+            return { value: mb, unit: "mb" };
+        }
+
+        match = text.match(/^([\d,.]+)\s*ms\b/i);
+        if (match) {
+            const value = Number(match[1].replaceAll(",", ""));
+            return Number.isFinite(value) ? { value, unit: "ms" } : null;
+        }
+
+        match = text.match(/^([\d,.]+)/);
+        if (match) {
+            const value = Number(match[1].replaceAll(",", ""));
+            return Number.isFinite(value) ? { value, unit: "count" } : null;
+        }
+        return null;
+    }
+
+    function formatScaleValue(value, unit) {
+        if (value == null || value === "") {
+            return "-";
+        }
+        if (unit === "bytes") {
+            return formatBytes(Number(value));
+        }
+        if (unit === "ms") {
+            return `${formatNumber.format(Number(value))} ms`;
+        }
+        if (unit === "rows") {
+            return `${formatNumber.format(Number(value))} rows`;
+        }
+        return formatNumber.format(Number(value));
+    }
+
     function renderPerformanceOverview() {
         const target = byId("performance-overview");
         if (!target) return;
@@ -1234,58 +1442,62 @@
         const slowspots = state.slowspots || [];
         const capacity = state.capacityReport?.scenarios || [];
         const resources = state.resourceProfiles?.scenarios || [];
-        const triageSummary = state.speedReport?.triage_summary || {};
-        const reportSummary = state.speedReport?.summary || {};
-        const flamegraphs = state.flamegraphs || [];
-        const searchOverBudget = searchRows.filter((item) => (item.mean_ns || 0) / 1_000_000 > (item.threshold_ms || Infinity)).length;
-        const slowOverBudget = slowspots.filter((item) => (item.mean_ns || 0) / 1_000_000 > (item.threshold_ms || Infinity)).length;
-        const availableFlamegraphs = flamegraphs.filter((item) => item.available).length;
-        const peakWorkingSet = resources.reduce((max, item) => Math.max(max, item.max_working_set_bytes || 0), 0);
+        const timedRows = uniquePerformanceRows([...searchRows, ...slowspots]);
+        const worstOverall = worstBudgetRow(timedRows);
+        const worstSearch = worstBudgetRow(searchRows);
+        const worstFirstResponse = worstBudgetRow(searchRows.filter((item) => item.latency_kind === "first_response"));
+        const bestThroughput = maxBy(searchRows.filter((item) => Number(item.throughput_mb_s || 0) > 0), (item) => Number(item.throughput_mb_s || 0));
+        const peakResource = maxBy(resources, (item) => Number(item.max_peak_live_bytes || 0));
+        const peakWorkingSet = Math.max(
+            maxMetric(resources, "max_working_set_bytes"),
+            maxMetric(capacity, "peak_working_set_bytes")
+        );
         const capacityCeilings = state.capacityReport?.summary?.ceilings_reached ?? capacity.filter((item) => item.failure_mode && item.failure_mode !== "not_reached").length;
+        const searchOverBudget = searchRows.filter((item) => (item.mean_ns || 0) / 1_000_000 > (item.threshold_ms || Infinity)).length;
 
         const groups = [
             {
                 cls: "search",
-                title: "Search",
-                summary: `${formatNumber.format(searchOverBudget)} over budget`,
+                title: "Search Result",
+                summary: worstSearch ? `${formatRatio(budgetRatio(worstSearch))} worst miss` : "No search miss",
                 metrics: [
-                    ["Records", searchRows.length],
-                    ["Scenarios", new Set(searchRows.map((item) => item.benchmark_key)).size],
-                    ["First response", searchRows.filter((item) => item.latency_kind === "first_response").length],
-                    ["Best throughput", maxMetric(searchRows, "throughput_mb_s") ? `${formatNumber.format(maxMetric(searchRows, "throughput_mb_s"))} MB/s` : "-"],
+                    ["Worst", worstSearch ? formatMs(latencyMs(worstSearch)) : "-"],
+                    ["Budget", worstSearch ? formatMs(worstSearch.threshold_ms) : "-"],
+                    ["First response", worstFirstResponse ? `${formatRatio(budgetRatio(worstFirstResponse))}` : "clear"],
+                    ["Best throughput", bestThroughput ? `${formatNumber.format(bestThroughput.throughput_mb_s)} MB/s` : "-"],
                 ],
             },
             {
                 cls: "editor",
-                title: "Editor & Tabs",
-                summary: `${formatNumber.format(slowOverBudget)} threshold misses`,
+                title: "Worst Latency",
+                summary: worstOverall ? `${formatRatio(budgetRatio(worstOverall))} budget` : "No miss",
                 metrics: [
-                    ["Benchmarks", slowspots.length],
-                    ["Mapped", slowspots.filter((item) => item.targets && item.targets.length).length],
-                    ["Families", new Set(slowspots.map((item) => item.workload_family || "unmapped")).size],
-                    ["Worst mean", maxMeanMs(slowspots) ? `${formatNumber.format(maxMeanMs(slowspots))} ms` : "-"],
+                    ["Mean", worstOverall ? formatMs(latencyMs(worstOverall)) : "-"],
+                    ["Budget", worstOverall ? formatMs(worstOverall.threshold_ms) : "-"],
+                    ["Workload", worstOverall ? compactBenchmarkLabel(worstOverall) : "-"],
+                    ["Resource", worstOverall ? titleCaseMetricName(worstOverall.suspected_limiting_resource || "cpu") : "-"],
                 ],
             },
             {
                 cls: "capacity",
-                title: "Capacity & Resources",
+                title: "Scale Result",
                 summary: `${formatNumber.format(capacityCeilings)} ceilings reached`,
                 metrics: [
-                    ["Capacity rows", capacity.length],
-                    ["Resource rows", resources.length],
-                    ["Memory bound", state.capacityReport?.summary?.memory_bound_scenarios ?? "-"],
-                    ["Peak working set", peakWorkingSet ? formatBytes(peakWorkingSet) : "-"],
+                    ["Files proven", capacityOutcome(capacity, "search_target_count_ceiling", "last")],
+                    ["Views proven", capacityOutcome(capacity, "view_count_ceiling", "last")],
+                    ["Tabs break", capacityOutcome(capacity, "tab_count_ceiling", "first")],
+                    ["Search file break", capacityOutcome(capacity, "search_file_size_ceiling", "first")],
                 ],
             },
             {
-                cls: "flamegraphs",
-                title: "Flamegraphs",
-                summary: `${formatNumber.format(availableFlamegraphs)}/${formatNumber.format(flamegraphs.length)} available`,
+                cls: "resources",
+                title: "Memory Result",
+                summary: peakResource ? `${formatBytes(peakResource.max_peak_live_bytes)} peak live` : "No resource peak",
                 metrics: [
-                    ["Coverage gaps", reportSummary.coverage_gaps ?? "-"],
-                    ["Critical", triageSummary.critical ?? "-"],
-                    ["Watch", triageSummary.watch ?? "-"],
-                    ["Profiles", flamegraphs.length],
+                    ["Peak live", peakResource ? formatBytes(peakResource.max_peak_live_bytes) : "-"],
+                    ["Peak working set", peakWorkingSet ? formatBytes(peakWorkingSet) : "-"],
+                    ["Worst live case", peakResource ? compactScenarioLabel(peakResource) : "-"],
+                    ["Search misses", searchOverBudget],
                 ],
             },
         ];
@@ -1309,12 +1521,76 @@
         renderPerformanceInsights();
     }
 
-    function maxMetric(items, field) {
-        return (items || []).reduce((max, item) => Math.max(max, Number(item[field] || 0)), 0);
+    function uniquePerformanceRows(rows) {
+        const seen = new Set();
+        return (rows || []).filter((item) => {
+            const key = `${item.benchmark_key || ""}:${item.name || ""}:${item.latency_kind || ""}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
     }
 
-    function maxMeanMs(items) {
-        return (items || []).reduce((max, item) => Math.max(max, Number(item.mean_ns || 0) / 1_000_000), 0);
+    function latencyMs(item) {
+        return Number(item?.mean_ns || 0) / 1_000_000;
+    }
+
+    function budgetRatio(item) {
+        const threshold = Number(item?.threshold_ms || 0);
+        if (!threshold) return 0;
+        return latencyMs(item) / threshold;
+    }
+
+    function worstBudgetRow(rows) {
+        return maxBy((rows || []).filter((item) => item.threshold_ms), budgetRatio);
+    }
+
+    function maxBy(items, valueFn) {
+        return (items || []).reduce((best, item) => {
+            if (!best) return item;
+            return Number(valueFn(item) || 0) > Number(valueFn(best) || 0) ? item : best;
+        }, null);
+    }
+
+    function formatMs(value) {
+        const ms = Number(value || 0);
+        if (!Number.isFinite(ms)) return "-";
+        return `${formatNumber.format(ms)} ms`;
+    }
+
+    function formatRatio(value) {
+        const ratio = Number(value || 0);
+        if (!Number.isFinite(ratio) || ratio <= 0) return "-";
+        return `${formatNumber.format(ratio)}x`;
+    }
+
+    function compactBenchmarkLabel(item) {
+        const raw = item?.scenario_label || item?.benchmark_key || item?.name || "-";
+        return titleCaseMetricName(String(raw).split("/")[0])
+            .replace(/\bLatency\b/g, "")
+            .replace(/\bCompletion\b/g, "")
+            .trim();
+    }
+
+    function compactScenarioLabel(item) {
+        return titleCaseMetricName(item?.scenario_label || item?.scenario || "-")
+            .replace(/\bSweep\b/g, "")
+            .replace(/\bTracking\b/g, "")
+            .replace(/\bProfile\b/g, "")
+            .trim();
+    }
+
+    function capacityOutcome(capacity, scenarioName, which) {
+        const scenario = (capacity || []).find((item) => item.scenario === scenarioName);
+        if (!scenario) return "-";
+        if (which === "first") {
+            return scenario.first_failure_label || `>${scenario.last_successful_label || "-"}`;
+        }
+        return scenario.last_successful_label || scenario.result_label || "-";
+    }
+
+    function maxMetric(items, field) {
+        return (items || []).reduce((max, item) => Math.max(max, Number(item[field] || 0)), 0);
     }
 
     function renderPerformanceInsights() {
@@ -1322,68 +1598,80 @@
         if (!target) return;
         const searchRows = state.searchSpeed || [];
         const slowspots = state.slowspots || [];
+        const capacity = state.capacityReport?.scenarios || [];
+        const resources = state.resourceProfiles?.scenarios || [];
+        const timedRows = uniquePerformanceRows([...searchRows, ...slowspots]);
         const capacitySummary = state.capacityReport?.summary || {};
-        const resourceSummary = state.resourceProfiles?.summary || {};
-        const flamegraphs = state.flamegraphs || [];
+        const triageSummary = state.speedReport?.triage_summary || {};
+        const topMisses = topBudgetRows(timedRows, 5);
+        const topSearchMisses = topBudgetRows(searchRows, 4);
+        const resourceRows = topResourceRows(resources, 5);
+        const capacityRows = capacityBreakpointRows(capacity);
+        const worstMiss = topMisses[0];
+        const worstSearch = topSearchMisses[0];
+        const peakResource = resourceRows[0];
+        const bestThroughput = maxBy(searchRows.filter((item) => Number(item.throughput_mb_s || 0) > 0), (item) => Number(item.throughput_mb_s || 0));
         const searchOverBudget = searchRows.filter((item) => (item.mean_ns || 0) / 1_000_000 > (item.threshold_ms || Infinity)).length;
         const slowOverBudget = slowspots.filter((item) => (item.mean_ns || 0) / 1_000_000 > (item.threshold_ms || Infinity)).length;
-        const availableFlamegraphs = flamegraphs.filter((item) => item.available).length;
-        const profilePct = flamegraphs.length ? availableFlamegraphs / flamegraphs.length : 0;
 
         const cards = [
             {
                 cls: "budget",
-                title: "Budget Pressure",
-                summary: `${formatNumber.format(searchOverBudget + slowOverBudget)} latency rows over budget`,
+                title: "Worst Budget Misses",
+                summary: worstMiss ? `${formatRatio(budgetRatio(worstMiss))} worst row` : "All rows within budget",
                 metrics: [
-                    ["Search misses", searchOverBudget],
-                    ["Editor misses", slowOverBudget],
-                    ["Total budgeted rows", searchRows.length + slowspots.length],
+                    ["Worst mean", worstMiss ? formatMs(latencyMs(worstMiss)) : "-"],
+                    ["Worst budget", worstMiss ? formatMs(worstMiss.threshold_ms) : "-"],
+                    ["Rows over budget", searchOverBudget + slowOverBudget],
+                    ["Critical rows", triageSummary.critical ?? "-"],
                 ],
-                chart: performanceMiniBars([
-                    ["Search", searchOverBudget, searchRows.length],
-                    ["Editor", slowOverBudget, slowspots.length],
-                ], "bad"),
+                chart: performanceResultBars(topMisses.map((item) => ({
+                    label: compactBenchmarkLabel(item),
+                    detail: `${formatMs(latencyMs(item))} / ${formatMs(item.threshold_ms)}`,
+                    value: budgetRatio(item),
+                    valueLabel: formatRatio(budgetRatio(item)),
+                })), "bad"),
             },
             {
                 cls: "coverage",
-                title: "Evidence Coverage",
-                summary: `${formatNumber.format(availableFlamegraphs)} available flamegraphs`,
+                title: "Search Outcomes",
+                summary: bestThroughput ? `${formatNumber.format(bestThroughput.throughput_mb_s)} MB/s best` : "No throughput",
                 metrics: [
-                    ["Profiles", flamegraphs.length],
-                    ["Available", availableFlamegraphs],
-                    ["Coverage", flamegraphs.length ? `${formatNumber.format(profilePct * 100)}%` : "-"],
+                    ["Worst search", worstSearch ? formatRatio(budgetRatio(worstSearch)) : "clear"],
+                    ["Worst mean", worstSearch ? formatMs(latencyMs(worstSearch)) : "-"],
+                    ["Best throughput", bestThroughput ? `${formatNumber.format(bestThroughput.throughput_mb_s)} MB/s` : "-"],
+                    ["Rows over budget", searchOverBudget],
                 ],
-                chart: performanceDonut(profilePct, "Profiles"),
+                chart: performanceResultBars(topSearchMisses.map((item) => ({
+                    label: compactBenchmarkLabel(item),
+                    detail: `${formatMs(latencyMs(item))} / ${formatMs(item.threshold_ms)}`,
+                    value: budgetRatio(item),
+                    valueLabel: formatRatio(budgetRatio(item)),
+                })), "search"),
             },
             {
                 cls: "capacity",
-                title: "Failure Surface",
-                summary: `${formatNumber.format(capacitySummary.ceilings_reached ?? 0)} reached ceilings`,
+                title: "Capacity Breakpoints",
+                summary: `${formatNumber.format(capacitySummary.ceilings_reached ?? 0)} ceilings hit`,
                 metrics: [
-                    ["Scenarios", capacitySummary.scenario_count ?? "-"],
                     ["Memory bound", capacitySummary.memory_bound_scenarios ?? "-"],
                     ["CPU bound", capacitySummary.cpu_bound_scenarios ?? "-"],
+                    ["Files proven", capacityOutcome(capacity, "search_target_count_ceiling", "last")],
+                    ["Views proven", capacityOutcome(capacity, "view_count_ceiling", "last")],
                 ],
-                chart: performanceMiniBars([
-                    ["Memory", capacitySummary.memory_bound_scenarios ?? 0, capacitySummary.scenario_count ?? 0],
-                    ["CPU", capacitySummary.cpu_bound_scenarios ?? 0, capacitySummary.scenario_count ?? 0],
-                ], "warn"),
+                chart: performanceResultBars(capacityRows, "warn"),
             },
             {
                 cls: "resources",
-                title: "Resource Probes",
-                summary: `${formatNumber.format(resourceSummary.scenario_count ?? 0)} resource scenarios`,
+                title: "Peak Resource Use",
+                summary: peakResource ? `${peakResource.valueLabel} worst live` : "No resource result",
                 metrics: [
-                    ["Allocation", resourceSummary.allocation_scenarios ?? "-"],
-                    ["Memory", resourceSummary.memory_scenarios ?? "-"],
-                    ["Session", resourceSummary.session_scenarios ?? "-"],
+                    ["Worst live", peakResource ? peakResource.valueLabel : "-"],
+                    ["Worst case", peakResource ? peakResource.label : "-"],
+                    ["Working set", peakResource ? peakResource.workingSetLabel : "-"],
+                    ["Page faults", peakResource ? peakResource.pageFaultsLabel : "-"],
                 ],
-                chart: performanceMiniBars([
-                    ["Alloc", resourceSummary.allocation_scenarios ?? 0, resourceSummary.scenario_count ?? 0],
-                    ["Memory", resourceSummary.memory_scenarios ?? 0, resourceSummary.scenario_count ?? 0],
-                    ["Session", resourceSummary.session_scenarios ?? 0, resourceSummary.scenario_count ?? 0],
-                ], "resource"),
+                chart: performanceResultBars(resourceRows, "resource"),
             },
         ];
 
@@ -1400,6 +1688,72 @@
                 ${card.metrics.map(([label, value]) => `<span><strong>${escapeHtml(value)}</strong> ${escapeHtml(label)}</span>`).join("")}
             </div>
         </section>`).join("");
+    }
+
+    function topBudgetRows(rows, limit) {
+        return uniquePerformanceRows(rows)
+            .filter((item) => item.threshold_ms && budgetRatio(item) > 1)
+            .sort((a, b) => budgetRatio(b) - budgetRatio(a))
+            .slice(0, limit);
+    }
+
+    function capacityBreakpointRows(capacity) {
+        return (capacity || [])
+            .map((item) => {
+                const failed = item.failure_mode && item.failure_mode !== "not_reached";
+                const label = compactScenarioLabel(item);
+                const valueLabel = failed ? item.first_failure_label || "failed" : `>${item.last_successful_label || "target"}`;
+                return {
+                    label,
+                    detail: failed
+                        ? `${item.last_successful_label || "-"} ok -> ${item.first_failure_label || "-"} breaks`
+                        : `no ceiling through ${item.last_successful_label || "-"}`,
+                    value: failed ? 1 : 0.45,
+                    valueLabel,
+                };
+            })
+            .sort((a, b) => b.value - a.value)
+            .slice(0, 6);
+    }
+
+    function topResourceRows(resources, limit) {
+        return (resources || [])
+            .map((item) => {
+                const peakLive = Number(item.max_peak_live_bytes || 0);
+                const workingSet = Number(item.max_working_set_bytes || 0);
+                const pageFaults = Number(item.page_fault_count || item.max_page_fault_count || 0);
+                return {
+                    label: compactScenarioLabel(item),
+                    detail: `working ${formatBytes(workingSet)}`,
+                    value: peakLive,
+                    valueLabel: formatBytes(peakLive),
+                    workingSetLabel: formatBytes(workingSet),
+                    pageFaultsLabel: pageFaults ? formatNumber.format(pageFaults) : "-",
+                };
+            })
+            .filter((item) => item.value > 0)
+            .sort((a, b) => b.value - a.value)
+            .slice(0, limit);
+    }
+
+    function performanceResultBars(rows, tone) {
+        if (!rows.length) {
+            return `<p class="performance-result-empty">No result rows loaded.</p>`;
+        }
+        const max = Math.max(1, ...rows.map((row) => Number(row.value || 0)));
+        return `<div class="performance-result-bars performance-result-bars--${tone}">
+            ${rows.map((row) => {
+            const pct = Math.max(row.value ? 5 : 0, Math.min(100, (Number(row.value || 0) / max) * 100));
+            return `<div class="performance-result-bars__row">
+                    <span class="performance-result-bars__label">
+                        <strong>${escapeHtml(row.label || "-")}</strong>
+                        <em>${escapeHtml(row.detail || "")}</em>
+                    </span>
+                    <div class="performance-result-bars__track"><i style="width:${pct}%"></i></div>
+                    <strong class="performance-result-bars__value">${escapeHtml(row.valueLabel || formatNumber.format(row.value || 0))}</strong>
+                </div>`;
+        }).join("")}
+        </div>`;
     }
 
     function performanceMiniBars(rows, tone) {
@@ -1525,6 +1879,9 @@
         if (value == null || !Number.isFinite(value)) {
             return "-";
         }
+        if (value >= 1024 * 1024 * 1024) {
+            return `${formatNumber.format(value / (1024 * 1024 * 1024))} GB`;
+        }
         if (value >= 1024 * 1024) {
             return `${formatNumber.format(value / (1024 * 1024))} MB`;
         }
@@ -1554,6 +1911,7 @@
     function renderOverview() {
         renderHealthGauges();
         renderRiskTreemap();
+        renderProjectCodeMetrics();
         renderTopConcerns();
         renderRunStrip();
     }
@@ -1656,9 +2014,10 @@
     function computeCapacityHealth() {
         const speed = state.speedReport || {};
         const summary = speed.summary || {};
+        const reviewSummary = state.performanceReview?.summary || {};
         const triageSummary = speed.triage_summary || null;
         const overBudget = summary.over_budget_latency ?? 0;
-        const coverageGaps = summary.coverage_gaps ?? 0;
+        const implementations = reviewSummary.implementation_count ?? 0;
         const ceilings = summary.near_failure_ceilings ?? 0;
         let status = "ok";
         let value = "0";
@@ -1674,7 +2033,7 @@
             value = String(total);
             if (overBudget > 0 || ceilings > 0) {
                 status = overBudget > 2 || ceilings > 0 ? "bad" : "watch";
-                driver = `${overBudget} over budget, ${ceilings} near ceiling, ${coverageGaps} coverage gaps`;
+                driver = `${overBudget} over budget, ${ceilings} near ceiling, ${implementations} measurements`;
             }
         }
         if (!state.speedReport) { status = "stale"; value = "—"; driver = "Run performance refresh"; }
@@ -1854,6 +2213,103 @@
         });
     }
 
+    function codeMetricParts() {
+        const current = state.projectCodeMetrics?.current || {};
+        return [
+            { key: "application", label: "Total Project Application Rust Code", value: Number(current.application || 0), color: "#6fd0ff" },
+            { key: "test", label: "Total Project Test Rust Code", value: Number(current.test || 0), color: "#7ddc9b" },
+            { key: "other", label: "Total Project Other Rust Code", value: Number(current.other || 0), color: "#f3c969" },
+        ];
+    }
+
+    function renderProjectCodeMetrics() {
+        renderCodePie();
+        renderCodeHistory();
+    }
+
+    function renderCodePie() {
+        const target = byId("overview-code-pie");
+        if (!target) return;
+        if (!state.projectCodeMetrics) {
+            target.innerHTML = `<p class="muted">No project code metrics loaded. Refresh Project Code Metrics.</p>`;
+            return;
+        }
+        const parts = codeMetricParts();
+        const total = parts.reduce((sum, item) => sum + item.value, 0);
+        const latest = state.projectCodeMetrics.latest_push || {};
+        let offset = 0;
+        const stops = parts.map((item) => {
+            const start = offset;
+            const span = total ? (item.value / total) * 100 : 0;
+            offset += span;
+            return `${item.color} ${start}% ${offset}%`;
+        }).join(", ");
+        const latestDate = latest.date ? new Date(latest.date).toLocaleDateString() : "-";
+        target.innerHTML = `<div class="code-pie__chart" style="background: conic-gradient(from -90deg, ${stops || "#344151 0 100%"})">
+                <div class="code-pie__center">
+                    <span>Total Rust</span>
+                    <strong>${formatNumber.format(total)}</strong>
+                </div>
+            </div>
+            <div class="code-pie__content">
+                <div class="code-pie__latest">
+                    <span>Latest GitHub Push</span>
+                    <strong>${escapeHtml(latest.short_sha || "-")}</strong>
+                    <p>${escapeHtml(latestDate)} · ${escapeHtml(latest.subject || "-")}</p>
+                </div>
+                <div class="code-pie__legend">
+                    ${parts.map((item) => `<div class="code-pie__legend-row">
+                        <span><i style="background:${item.color}"></i>${escapeHtml(item.label)}</span>
+                        <strong>${formatNumber.format(item.value)}</strong>
+                    </div>`).join("")}
+                </div>
+            </div>`;
+    }
+
+    function renderCodeHistory() {
+        const target = byId("overview-code-history");
+        if (!target) return;
+        const history = state.projectCodeMetrics?.history || [];
+        if (history.length < 2) {
+            target.innerHTML = `<p class="muted">No GitHub line history loaded yet.</p>`;
+            return;
+        }
+        const w = 720, h = 260, padLeft = 58, padRight = 18, padTop = 18, padBottom = 42;
+        const values = history.map((item) => Number(item.lines?.total || 0));
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const range = max - min || 1;
+        const xFor = (index) => padLeft + (index * (w - padLeft - padRight)) / Math.max(1, history.length - 1);
+        const yFor = (value) => h - padBottom - ((value - min) / range) * (h - padTop - padBottom);
+        const points = values.map((value, index) => `${xFor(index).toFixed(1)},${yFor(value).toFixed(1)}`).join(" ");
+        const areaPoints = `${padLeft},${h - padBottom} ${points} ${w - padRight},${h - padBottom}`;
+        const first = history[0];
+        const last = history[history.length - 1];
+        const ticks = [min, min + range / 2, max].map((value) => {
+            const y = yFor(value);
+            return `<g>
+                <line x1="${padLeft}" x2="${w - padRight}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" />
+                <text x="${padLeft - 10}" y="${(y + 4).toFixed(1)}">${escapeHtml(formatNumber.format(Math.round(value)))}</text>
+            </g>`;
+        }).join("");
+        const markers = history.map((item, index) => {
+            const date = item.date ? new Date(item.date).toLocaleDateString() : "-";
+            const title = `${date}: ${formatNumber.format(Number(item.lines?.total || 0))} lines\n${item.short_sha || ""} ${item.subject || ""}`;
+            return `<circle cx="${xFor(index).toFixed(1)}" cy="${yFor(values[index]).toFixed(1)}" r="3" title="${escapeHtml(title)}" />`;
+        }).join("");
+        target.innerHTML = `<div class="code-history__meta">
+                <span>${escapeHtml(first.date ? new Date(first.date).toLocaleDateString() : "-")}</span>
+                <strong>${formatNumber.format(values[values.length - 1])} Rust lines</strong>
+                <span>${escapeHtml(last.date ? new Date(last.date).toLocaleDateString() : "-")}</span>
+            </div>
+            <svg class="code-history__chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Rust code lines over time">
+                <g class="code-history__grid">${ticks}</g>
+                <polygon class="code-history__area" points="${areaPoints}" />
+                <polyline class="code-history__line" points="${points}" />
+                <g class="code-history__markers">${markers}</g>
+            </svg>`;
+    }
+
     function renderTopListCard({ title, subtitle, items, emptyText, tone = "neutral" }) {
         const list = items.length
             ? `<ol>${items.map((item, index) => `<li><span class="top-list-card__rank">${index + 1}</span><span class="top-list-card__label">${item.label}</span><span class="top-list-card__value">${item.value}</span></li>`).join("")}</ol>`
@@ -2001,44 +2457,62 @@
     }
 
     function renderPerformanceScenarios() {
+        const reviewScenarios = state.performanceReview?.scenarios || [];
+        if (reviewScenarios.length) {
+            const target = byId("performance-scenarios");
+            if (target) {
+                target.innerHTML = reviewScenarios.map(renderPerformanceCoverageCard).join("");
+            }
+            return;
+        }
         const scenarios = [
             {
-                title: "Large Files: Loading And Manipulating",
-                description: "Open, scroll, viewport, snapshot, and large-document edit evidence.",
-                families: ["large-file-load", "scroll"],
-                profiles: ["large_file_scroll", "viewport_extraction", "document_snapshot"],
+                title: "Large Files",
+                description: "Load, inspect, scroll, and edit very large text files quickly.",
+                families: ["file-load", "scroll", "viewport", "snapshot"],
+                profiles: ["scroll_stress_profile", "viewport_extraction_profile", "document_snapshot_profile"],
             },
             {
-                title: "Large Amount Of Tabs: Loading And Manipulating",
-                description: "Tab count, switching, reordering, and tab-strip manipulation.",
+                title: "Many Files",
+                description: "Keep workspace and file workflows responsive above 10,000 files.",
+                families: ["many-files", "file-load", "session-persistence", "search", "search-dispatch"],
+                profiles: ["search_all_tabs_profile", "search_dispatch_profile"],
+            },
+            {
+                title: "Search",
+                description: "Return first matches quickly and finish searches over huge files and many files.",
+                families: ["search", "search-dispatch"],
+                profiles: [
+                    "search_current_app_state_profile",
+                    "search_all_tabs_profile",
+                    "search_dispatch_profile",
+                    "search_capacity_profile",
+                ],
+            },
+            {
+                title: "Many Tabs",
+                description: "Open, switch, reorder, and manipulate huge tab sets quickly.",
                 families: ["tab-management"],
-                profiles: ["tab_operations", "tab_tile_layout"],
+                profiles: ["tab_operations_profile", "tab_tile_layout_profile"],
             },
             {
-                title: "Cutting/Pasting: Large Amounts Of Data",
-                description: "Large paste, cut, undo, redo, and metadata refresh costs.",
-                families: ["edit-paste"],
-                profiles: ["large_file_paste"],
-            },
-            {
-                title: "Splitting: Large Amount Of Tabs",
-                description: "Split creation, rebalance, close, promote, and restore costs.",
+                title: "Many Views",
+                description: "Keep many views into the same loaded files responsive.",
                 families: ["split-layout"],
-                profiles: ["large_file_split", "tab_tile_layout"],
+                profiles: ["split_stress_profile", "tab_tile_layout_profile", "view_navigation_profile", "viewport_extraction_profile"],
+            },
+            {
+                title: "Large Text Mutation",
+                description: "Paste, cut, undo, redo, and metadata refresh should stay fast on huge buffers.",
+                families: ["edit-paste", "anchor-maintenance"],
+                profiles: ["paste_stress_profile"],
             },
             {
                 title: "Session Persistence Restore",
                 description: "Persist and restore cost for large saved workspaces.",
-                families: ["session"],
+                families: ["session-persistence"],
                 profiles: [],
                 tests: ["tests/session_store_tests.rs", "tests/startup_tests.rs"],
-            },
-            {
-                title: "Searching: Large Files And Lots Of Files",
-                description: "Active, current, and all-tab search scaling.",
-                families: ["search", "search-dispatch"],
-                profiles: ["search_current_app_state", "search_all_tabs", "search_dispatch"],
-                tests: ["tests/search_tests.rs"],
             },
         ];
         const slowspots = state.slowspots || [];
@@ -2453,10 +2927,10 @@
             byModule.set(key, existing);
         });
         const quadrants = {
-            "high-locality-high-leverage": { title: "Good Fit", rows: [] },
-            "high-locality-low-leverage": { title: "Local / Emerging", rows: [] },
-            "low-locality-high-leverage": { title: "Architecture Watch", rows: [] },
-            "low-locality-low-leverage": { title: "Triage First", rows: [] },
+            "high-locality-high-leverage": { tone: "good", rows: [] },
+            "high-locality-low-leverage": { tone: "local", rows: [] },
+            "low-locality-high-leverage": { tone: "architecture", rows: [] },
+            "low-locality-low-leverage": { tone: "triage", rows: [] },
         };
         byModule.forEach((pair, moduleName) => {
             if (!pair.locality || !pair.leverage) return;
@@ -2469,14 +2943,17 @@
                 moduleName,
                 localityRisk: localityRisk(pair.locality),
                 leverageRisk: leverageRisk(pair.leverage),
+                localityScore: Number(pair.locality.locality_score ?? 0),
+                leverageScore: Number(pair.leverage.leverage_score ?? pair.leverage.total_leverage_score ?? 0),
             });
         });
         const points = Object.values(quadrants)
-            .flatMap((quadrant) => quadrant.rows.map((row) => ({ ...row, quadrant: quadrant.title })));
+            .flatMap((quadrant) => quadrant.rows.map((row) => ({ ...row, tone: quadrant.tone })));
         const highRisk = [...points]
+            .map((item, index) => ({ ...item, pointIndex: index }))
             .sort((left, right) => (right.localityRisk + right.leverageRisk) - (left.localityRisk + left.leverageRisk))
-            .slice(0, 8);
-        const labelSet = new Set(highRisk.slice(0, 6).map((item) => item.moduleName));
+            .slice(0, 10);
+        const highRiskSet = new Set(highRisk.map((item) => item.pointIndex));
         const width = 760;
         const height = 360;
         const margin = { left: 74, right: 28, top: 32, bottom: 58 };
@@ -2486,27 +2963,13 @@
         const y = (value) => margin.top + ((100 - Math.max(0, Math.min(100, value))) / 100) * plotHeight;
         const localityCut = x(30);
         const leverageCut = y(40);
-        const quadrantCounts = Object.values(quadrants)
-            .map((quadrant) => `<span><b>${escapeHtml(quadrant.title)}</b>${formatNumber.format(quadrant.rows.length)}</span>`)
-            .join("");
-        const pointNodes = points.map((item) => {
+        const pointNodes = points.map((item, index) => {
             const combined = item.localityRisk + item.leverageRisk;
             const radius = Math.max(4, Math.min(10, combined / 16));
-            const className = item.quadrant === "Triage First"
-                ? "is-triage"
-                : item.quadrant === "Architecture Watch"
-                    ? "is-architecture"
-                    : item.quadrant === "Local / Emerging"
-                        ? "is-local"
-                        : "is-good";
-            const label = labelSet.has(item.moduleName)
-                ? `<text class="ll-point-label" x="${x(item.localityRisk) + 8}" y="${y(item.leverageRisk) - 8}">${escapeHtml(shortenLabel(item.moduleName))}</text>`
-                : "";
-            return `<g class="ll-point ${className}">
-                <circle cx="${x(item.localityRisk)}" cy="${y(item.leverageRisk)}" r="${radius}">
-                    <title>${escapeHtml(item.moduleName)} | Locality ${formatNumber.format(item.localityRisk)} | Leverage ${formatNumber.format(item.leverageRisk)}</title>
-                </circle>
-                ${label}
+            const className = `is-${item.tone}`;
+            const topClass = highRiskSet.has(index) ? "is-top-risk" : "";
+            return `<g class="ll-point ${className} ${topClass}" tabindex="0" role="button" data-point-index="${index}" aria-label="${escapeHtml(item.moduleName)}">
+                <circle cx="${x(item.localityRisk)}" cy="${y(item.leverageRisk)}" r="${radius}"></circle>
             </g>`;
         }).join("");
 
@@ -2516,7 +2979,6 @@
                     <h2>Locality / Leverage Map</h2>
                     <p>Each point is a module. Right means less local; up means weaker leverage tradeoff.</p>
                 </div>
-                <div class="ll-legend">${quadrantCounts}</div>
             </div>
             <div class="ll-plot-layout">
                 <svg class="ll-plot" viewBox="0 0 ${width} ${height}" role="img" aria-label="Locality and leverage quadrant scatter plot">
@@ -2528,10 +2990,6 @@
                     <line class="ll-threshold" x1="${margin.left}" x2="${margin.left + plotWidth}" y1="${leverageCut}" y2="${leverageCut}"></line>
                     <line class="ll-axis" x1="${margin.left}" x2="${margin.left}" y1="${margin.top}" y2="${margin.top + plotHeight}"></line>
                     <line class="ll-axis" x1="${margin.left}" x2="${margin.left + plotWidth}" y1="${margin.top + plotHeight}" y2="${margin.top + plotHeight}"></line>
-                    <text class="ll-quadrant-label" x="${margin.left + 14}" y="${margin.top + 22}">Local / Emerging</text>
-                    <text class="ll-quadrant-label" x="${localityCut + 14}" y="${margin.top + 22}">Triage First</text>
-                    <text class="ll-quadrant-label" x="${margin.left + 14}" y="${margin.top + plotHeight - 16}">Good Fit</text>
-                    <text class="ll-quadrant-label" x="${localityCut + 14}" y="${margin.top + plotHeight - 16}">Architecture Watch</text>
                     <text class="ll-axis-label" x="${margin.left + plotWidth / 2}" y="${height - 16}">Non-locality risk</text>
                     <text class="ll-axis-label ll-axis-label--y" x="20" y="${margin.top + plotHeight / 2}">Leverage risk</text>
                     <text class="ll-tick" x="${x(0)}" y="${height - 38}">0</text>
@@ -2542,16 +3000,64 @@
                     <text class="ll-tick" x="${margin.left - 14}" y="${y(0) + 4}">0</text>
                     ${pointNodes}
                 </svg>
+                <div class="ll-popover" hidden></div>
                 <div class="ll-ranked-list">
-                    <h3>Highest combined risk</h3>
-                    ${highRisk.map((item, index) => `<div class="ll-ranked-row" title="${escapeHtml(item.moduleName)}">
+                    <h3>Worst combined risk</h3>
+                    ${highRisk.map((item, index) => `<button type="button" class="ll-ranked-row" data-point-index="${item.pointIndex}" title="${escapeHtml(item.moduleName)}">
                         <span>${index + 1}</span>
                         <code>${escapeHtml(shortenLabel(item.moduleName))}</code>
                         <strong>${formatNumber.format(item.localityRisk + item.leverageRisk)}</strong>
-                    </div>`).join("")}
+                    </button>`).join("")}
                 </div>
             </div>
         </section>`;
+
+        const popover = target.querySelector(".ll-popover");
+        const setActivePoint = (index) => {
+            target.querySelectorAll(".ll-point").forEach((point) => {
+                point.classList.toggle("is-active", Number(point.dataset.pointIndex) === index);
+            });
+            target.querySelectorAll(".ll-ranked-row").forEach((row) => {
+                row.classList.toggle("is-active", Number(row.dataset.pointIndex) === index);
+            });
+        };
+        const showPopover = (index) => {
+            const item = points[index];
+            if (!item || !popover) return;
+            setActivePoint(index);
+            const left = (x(item.localityRisk) / width) * 100;
+            const top = (y(item.leverageRisk) / height) * 100;
+            popover.hidden = false;
+            popover.style.left = `${left}%`;
+            popover.style.top = `${top}%`;
+            popover.innerHTML = `<strong>${escapeHtml(item.moduleName)}</strong>
+                <div><span>Locality risk</span><b>${formatNumber.format(item.localityRisk)}</b></div>
+                <div><span>Leverage risk</span><b>${formatNumber.format(item.leverageRisk)}</b></div>
+                <div><span>Locality score</span><b>${formatNumber.format(item.localityScore)}</b></div>
+                <div><span>Leverage score</span><b>${formatNumber.format(item.leverageScore)}</b></div>`;
+        };
+        target.querySelectorAll(".ll-point").forEach((point) => {
+            point.addEventListener("click", (event) => {
+                event.stopPropagation();
+                showPopover(Number(point.dataset.pointIndex));
+            });
+            point.addEventListener("keydown", (event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    showPopover(Number(point.dataset.pointIndex));
+                }
+            });
+        });
+        target.querySelectorAll(".ll-ranked-row").forEach((row) => {
+            row.addEventListener("click", (event) => {
+                event.stopPropagation();
+                showPopover(Number(row.dataset.pointIndex));
+            });
+        });
+        target.querySelector(".ll-plot-layout")?.addEventListener("click", () => {
+            if (popover) popover.hidden = true;
+            setActivePoint(-1);
+        });
     }
 
     function renderLocalityLeverage() {
@@ -3324,7 +3830,7 @@
     async function loadDefaults() {
         const status = byId("load-status");
         const detail = byId("load-detail");
-        const keys = ["catalog", "runs", "hotspots", "slowspots", "searchSpeed", "capacityReport", "resourceProfiles", "speedReport", "clones", "escapeHatches", "locality", "leverage", "map", "flamegraphs", "correctness", "appPackage"];
+        const keys = ["catalog", "runs", "hotspots", "slowspots", "searchSpeed", "capacityReport", "resourceProfiles", "speedReport", "performanceReview", "clones", "escapeHatches", "locality", "leverage", "map", "projectCodeMetrics", "flamegraphs", "correctness", "appPackage"];
         const fallbacks = {
             catalog: null,
             runs: [],
@@ -3334,11 +3840,13 @@
             capacityReport: null,
             resourceProfiles: null,
             speedReport: null,
+            performanceReview: null,
             clones: [],
             escapeHatches: [],
             locality: [],
             leverage: [],
             map: null,
+            projectCodeMetrics: null,
             flamegraphs: [],
             correctness: null,
             appPackage: null,
@@ -3418,6 +3926,7 @@
         renderSpeedReport();
         renderCapacityReport();
         renderResourceProfiles();
+        renderPerformanceReviewCoverage();
         renderPerformanceOverview();
         renderPerformanceDatasetView();
         renderClones();

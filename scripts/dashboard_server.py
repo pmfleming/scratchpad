@@ -502,6 +502,25 @@ def collect_run_metrics() -> Dict[str, Any]:
                 + (summary.get("near_failure_ceilings") or 0)
             )
 
+    performance_review = _load("performance_review.json") or {}
+    performance_summary = (
+        performance_review.get("summary") if isinstance(performance_review, dict) else None
+    )
+    if isinstance(performance_summary, dict):
+        metrics["performance_review_gaps"] = performance_summary.get("coverage_gaps", 0)
+        metrics["performance_missing_scale_targets"] = performance_summary.get(
+            "missing_scale_targets",
+            0,
+        )
+        metrics["performance_covered_scenarios"] = performance_summary.get(
+            "covered_scenarios",
+            0,
+        )
+        metrics["performance_failed_sources"] = performance_summary.get(
+            "failed_source_artifacts",
+            0,
+        )
+
     correctness = _load("correctness_review.json") or {}
     summary = correctness.get("summary") if isinstance(correctness, dict) else None
     if isinstance(summary, dict):
@@ -519,6 +538,14 @@ def collect_run_metrics() -> Dict[str, Any]:
         metrics["map_bad"] = map_summary.get("bad", 0)
         metrics["map_warn"] = map_summary.get("warn", 0)
         metrics["map_good"] = map_summary.get("good", 0)
+
+    project_code = _load("project_code_metrics.json") or {}
+    code_summary = project_code.get("current") if isinstance(project_code, dict) else None
+    if isinstance(code_summary, dict):
+        metrics["project_application_code_lines"] = code_summary.get("application", 0)
+        metrics["project_test_code_lines"] = code_summary.get("test", 0)
+        metrics["project_other_code_lines"] = code_summary.get("other", 0)
+        metrics["project_total_code_lines"] = code_summary.get("total", 0)
 
     return metrics
 

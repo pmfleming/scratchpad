@@ -1,20 +1,15 @@
-use super::worker::{SearchResult, SearchTargetSnapshot};
-use super::{
-    ReplacementTargetPlan, SearchMatch, SearchResultEntry, SearchResultGroup, SearchStatus,
-};
+use super::worker::{SearchFileIdentity, SearchResult, SearchTargetSnapshot};
+use super::{ReplacementTargetPlan, SearchMatch, SearchResultGroup, SearchStatus};
 use crate::app::domain::{BufferId, EditorViewState, SearchHighlightState, ViewId, WorkspaceTab};
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
-
-const SEARCH_RESULT_LIMIT: usize = 200;
 
 #[derive(Default, Clone)]
 pub(super) struct SearchResultAccumulator {
     matches: Vec<SearchMatch>,
     result_groups: Vec<SearchResultGroup>,
     group_lookup: HashMap<(usize, BufferId), usize>,
-    displayed_match_count: usize,
 }
 
 impl SearchResultAccumulator {
@@ -39,11 +34,6 @@ impl SearchResultAccumulator {
             }
         }));
 
-        let entries = self.build_entries(target, ranges, start_index);
-        if entries.is_empty() {
-            return;
-        }
-
         let group_index =
             if let Some(index) = self.group_lookup.get(&(target.tab_index, target.buffer_id)) {
                 *index
@@ -54,8 +44,8 @@ impl SearchResultAccumulator {
                     buffer_id: target.buffer_id,
                     buffer_label: target.buffer_label.clone(),
                     tab_label: target.tab_label.clone(),
+                    first_match_index: start_index,
                     total_match_count: 0,
-                    entries: Vec::new(),
                     active: false,
                 });
                 self.group_lookup
@@ -65,15 +55,15 @@ impl SearchResultAccumulator {
 
         let group = &mut self.result_groups[group_index];
         group.total_match_count += ranges.len();
-        group.entries.extend(entries);
     }
 
     pub(super) fn finish(self, generation: u64) -> SearchResult {
+        let displayed_match_count = self.match_count();
         SearchResult {
             generation,
             matches: self.matches,
             result_groups: self.result_groups,
-            displayed_match_count: self.displayed_match_count,
+            displayed_match_count,
             status: SearchStatus::NoMatches,
         }
     }
@@ -88,7 +78,7 @@ impl SearchResultAccumulator {
             generation,
             matches: self.matches.clone(),
             result_groups: self.result_groups.clone(),
-            displayed_match_count: self.displayed_match_count,
+            displayed_match_count: self.match_count(),
             status: SearchStatus::Searching {
                 scanned_targets,
                 total_targets,
@@ -98,37 +88,6 @@ impl SearchResultAccumulator {
 
     pub(super) fn match_count(&self) -> usize {
         self.matches.len()
-    }
-
-    fn build_entries(
-        &mut self,
-        target: &SearchTargetSnapshot,
-        ranges: &[Range<usize>],
-        start_index: usize,
-    ) -> Vec<SearchResultEntry> {
-        let remaining_capacity = SEARCH_RESULT_LIMIT.saturating_sub(self.displayed_match_count);
-        if remaining_capacity == 0 {
-            return Vec::new();
-        }
-
-        let preview_rows = target
-            .document_snapshot
-            .previews_for_matches(ranges, remaining_capacity);
-        let mut entries = Vec::with_capacity(preview_rows.len());
-        for (offset, (line_number, column_number, preview)) in preview_rows.into_iter().enumerate()
-        {
-            entries.push(SearchResultEntry {
-                match_index: start_index + offset,
-                buffer_id: target.buffer_id,
-                buffer_label: target.buffer_label.clone(),
-                line_number,
-                column_number,
-                preview,
-                active: false,
-            });
-        }
-        self.displayed_match_count += entries.len();
-        entries
     }
 }
 
@@ -222,23 +181,22 @@ pub(super) fn collect_search_targets_for_views<'a>(
     prioritized_buffer_id: Option<BufferId>,
     views: impl IntoIterator<Item = &'a EditorViewState>,
 ) -> Vec<SearchTargetSnapshot> {
-    let mut targets_by_buffer = HashMap::with_capacity(tab.views.len());
+    let mut targets_by_file = HashMap::with_capacity(tab.buffers().count());
     for view in views {
-        if targets_by_buffer.contains_key(&view.buffer_id) {
-            continue;
-        }
         if let Some(target) =
             build_search_target_from_view(tab_index, tab, view, tab_label, search_range.clone())
         {
-            targets_by_buffer.insert(view.buffer_id, target);
+            targets_by_file
+                .entry(target.file_identity.clone())
+                .or_insert(target);
         }
     }
 
-    let mut ordered_buffer_ids = ordered_unique_buffer_ids(tab);
-    rotate_prioritized_buffer_id(&mut ordered_buffer_ids, prioritized_buffer_id);
-    ordered_buffer_ids
+    let mut ordered_files = ordered_unique_file_identities(tab);
+    rotate_prioritized_file(&mut ordered_files, tab, prioritized_buffer_id);
+    ordered_files
         .into_iter()
-        .filter_map(|buffer_id| targets_by_buffer.remove(&buffer_id))
+        .filter_map(|file| targets_by_file.remove(&file))
         .collect()
 }
 
@@ -278,29 +236,38 @@ pub(super) fn matches_buffer(
     search_match.tab_index == tab_index && search_match.buffer_id == buffer_id
 }
 
-fn ordered_unique_buffer_ids(tab: &WorkspaceTab) -> Vec<BufferId> {
-    let mut seen_buffer_ids = HashSet::with_capacity(tab.views.len());
-    let mut ordered_buffer_ids = Vec::with_capacity(tab.views.len());
+fn ordered_unique_file_identities(tab: &WorkspaceTab) -> Vec<SearchFileIdentity> {
+    let mut seen_files = HashSet::with_capacity(tab.views.len());
+    let mut ordered_files = Vec::with_capacity(tab.views.len());
     for view in &tab.views {
-        if seen_buffer_ids.insert(view.buffer_id) {
-            ordered_buffer_ids.push(view.buffer_id);
+        let Some(buffer) = tab.buffer_by_id(view.buffer_id) else {
+            continue;
+        };
+        let identity = file_identity_for_buffer(buffer);
+        if seen_files.insert(identity.clone()) {
+            ordered_files.push(identity);
         }
     }
-    ordered_buffer_ids
+    ordered_files
 }
 
-fn rotate_prioritized_buffer_id(
-    ordered_buffer_ids: &mut [BufferId],
+fn rotate_prioritized_file(
+    ordered_files: &mut [SearchFileIdentity],
+    tab: &WorkspaceTab,
     prioritized_buffer_id: Option<BufferId>,
 ) {
     let Some(prioritized_buffer_id) = prioritized_buffer_id else {
         return;
     };
-    if let Some(index) = ordered_buffer_ids
+    let Some(buffer) = tab.buffer_by_id(prioritized_buffer_id) else {
+        return;
+    };
+    let prioritized_file = file_identity_for_buffer(buffer);
+    if let Some(index) = ordered_files
         .iter()
-        .position(|buffer_id| *buffer_id == prioritized_buffer_id)
+        .position(|identity| *identity == prioritized_file)
     {
-        ordered_buffer_ids.rotate_left(index);
+        ordered_files.rotate_left(index);
     }
 }
 
@@ -319,6 +286,7 @@ fn build_search_target_from_view(
     let document_snapshot = buffer.document_snapshot();
     let search_range = search_range.map(|range| document_snapshot.normalize_char_range(range));
     Some(SearchTargetSnapshot {
+        file_identity: file_identity_for_buffer(buffer),
         tab_index,
         view_id: view.id,
         buffer_id: view.buffer_id,
@@ -327,4 +295,80 @@ fn build_search_target_from_view(
         document_snapshot,
         search_range,
     })
+}
+
+fn file_identity_for_buffer(buffer: &crate::app::domain::BufferState) -> SearchFileIdentity {
+    buffer
+        .path
+        .clone()
+        .map(SearchFileIdentity::Path)
+        .unwrap_or(SearchFileIdentity::Untitled(buffer.id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::domain::{BufferState, SplitAxis, WorkspaceTab};
+    use std::path::PathBuf;
+
+    #[test]
+    fn accumulator_groups_all_matches_without_eager_preview_entries() {
+        let text = (0..280).map(|_| "plan").collect::<Vec<_>>().join("\n");
+        let ranges = text
+            .match_indices("plan")
+            .map(|(start, value)| start..start + value.len())
+            .collect::<Vec<_>>();
+        let tab = WorkspaceTab::new(BufferState::new("many.md".to_owned(), text, None));
+        let target =
+            build_search_target(0, &tab, tab.active_view_id, "many.md", None).expect("target");
+        let mut accumulator = SearchResultAccumulator::default();
+
+        accumulator.push_target_matches(&target, &ranges);
+        let result = accumulator.finish(1);
+
+        assert_eq!(result.matches.len(), 280);
+        assert_eq!(result.displayed_match_count, 280);
+        assert_eq!(result.result_groups.len(), 1);
+        assert_eq!(result.result_groups[0].first_match_index, 0);
+        assert_eq!(result.result_groups[0].total_match_count, 280);
+    }
+
+    #[test]
+    fn target_collection_searches_one_file_once_across_many_views() {
+        let mut tab = WorkspaceTab::new(BufferState::new(
+            "many.md".to_owned(),
+            "plan".to_owned(),
+            None,
+        ));
+        for _ in 0..8 {
+            assert!(tab.split_active_view(SplitAxis::Vertical).is_some());
+        }
+
+        let targets =
+            collect_search_targets_for_views(0, &tab, "tab", None, None, tab.views.iter());
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].buffer_id, tab.buffer.id);
+    }
+
+    #[test]
+    fn target_collection_searches_same_saved_path_once() {
+        let path = PathBuf::from("shared.md");
+        let first = BufferState::new(
+            "shared.md".to_owned(),
+            "plan".to_owned(),
+            Some(path.clone()),
+        );
+        let second = BufferState::new("shared.md".to_owned(), "plan".to_owned(), Some(path));
+        let mut tab = WorkspaceTab::new(first);
+        assert!(
+            tab.open_buffer_as_split(second, SplitAxis::Vertical, true, 0.5)
+                .is_some()
+        );
+
+        let targets =
+            collect_search_targets_for_views(0, &tab, "tab", None, None, tab.views.iter());
+
+        assert_eq!(targets.len(), 1);
+    }
 }

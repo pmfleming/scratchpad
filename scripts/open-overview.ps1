@@ -318,6 +318,7 @@ function Get-RefreshTasks {
         (New-OverviewTask -Title "Generating clone alert data" -Label "clone_alert" -Arguments @("scripts/clone_alert.py", "--mode", "visibility", "--paths", "src") -ParallelGroup "static-analysis"),
         (New-OverviewTask -Title "Generating correctness review data" -Label "test_catalog" -Arguments @("scripts/test_catalog.py", "--mode", "visibility") -ParallelGroup "static-analysis"),
         (New-OverviewTask -Title "Generating measurement catalog data" -Label "measurement_catalog" -Arguments @("scripts/measurement_catalog.py", "--mode", "visibility") -ParallelGroup "static-analysis"),
+        (New-OverviewTask -Title "Generating project code metrics" -Label "project_code_metrics" -Arguments @("scripts/project_code_metrics.py", "--mode", "visibility") -ParallelGroup "static-analysis"),
         (New-OverviewTask -Title "Generating architecture map data" -Label "map" -Arguments @("scripts/map.py", "--mode", "visibility") -ParallelGroup "static-analysis")
     )
 
@@ -326,6 +327,7 @@ function Get-RefreshTasks {
     }
 
     $tasks += New-OverviewTask -Title "Generating coordinated speed-efficiency report" -Label "speed_efficiency_report" -Arguments @("scripts/speed_efficiency_report.py", "--mode", "visibility")
+    $tasks += New-OverviewTask -Title "Generating performance review coverage" -Label "performance_review" -Arguments @("scripts/performance_review.py", "--mode", "visibility")
 
     return $tasks
 }
