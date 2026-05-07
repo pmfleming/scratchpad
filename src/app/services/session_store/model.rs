@@ -59,6 +59,10 @@ pub(crate) struct SessionBuffer {
     pub is_dirty: bool,
     #[serde(default)]
     pub is_settings_file: bool,
+    #[serde(default)]
+    pub show_control_chars: bool,
+    #[serde(default)]
+    pub right_to_left_reading_order: bool,
     pub temp_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<TextFormatMetadata>,
@@ -80,6 +84,8 @@ impl From<&crate::app::domain::BufferState> for SessionBuffer {
             path: buffer.path.clone(),
             is_dirty: buffer.is_dirty,
             is_settings_file: buffer.is_settings_file,
+            show_control_chars: buffer.show_control_chars,
+            right_to_left_reading_order: buffer.right_to_left_reading_order,
             temp_id: buffer.temp_id.clone(),
             format: Some(buffer.format.clone()),
             encoding: buffer.format.encoding_name.clone(),

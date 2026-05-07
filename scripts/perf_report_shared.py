@@ -1,8 +1,10 @@
 import json
 import os
 import subprocess
+import sys
+import threading
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 BENCHMARK_METADATA_PATHS = (
     Path("benches/benchmark_targets.json"),
@@ -461,6 +463,175 @@ def terminate_process_tree(process: subprocess.Popen[str]) -> None:
         )
         return
     process.kill()
+
+
+MB = 1024 * 1024
+GB = 1024 * MB
+EMPTY_PROCESS_SAMPLE: Dict[str, Optional[int]] = {
+    "working_set_bytes": None,
+    "peak_working_set_bytes": None,
+    "page_fault_count": None,
+    "handle_count": None,
+}
+
+
+def human_bytes(value: Optional[int]) -> str:
+    if value is None:
+        return "-"
+    if value >= GB:
+        return f"{value / GB:.1f} GB"
+    if value >= MB:
+        return f"{value / MB:.1f} MB"
+    if value >= 1024:
+        return f"{value / 1024:.0f} KB"
+    return f"{value} B"
+
+
+def workload_label(value: int, unit: str) -> str:
+    return human_bytes(value) if unit == "bytes" else f"{value} {unit}"
+
+
+def safe_delta(last: Optional[int], first: Optional[int]) -> Optional[int]:
+    if last is None or first is None:
+        return None
+    return last - first
+
+
+def run_fallback_workload(value: int, unit: str) -> int:
+    if unit == "bytes":
+        sample = bytearray(min(value, 4 * MB))
+        return sample[0] if sample else 0
+    return sum(index & 1 for index in range(min(value, 10_000)))
+
+
+def sample_process(pid: int) -> Dict[str, Optional[int]]:
+    if os.name == "nt":
+        return sample_windows_process(pid)
+    return sample_posix_process()
+
+
+def sample_windows_process(pid: int) -> Dict[str, Optional[int]]:
+    import ctypes
+    from ctypes import wintypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    PROCESS_VM_READ = 0x0010
+
+    class PROCESS_MEMORY_COUNTERS_EX(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD),
+            ("PageFaultCount", wintypes.DWORD),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+            ("PrivateUsage", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.windll.kernel32
+    process = kernel32.OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
+        False,
+        pid,
+    )
+    if not process:
+        return dict(EMPTY_PROCESS_SAMPLE)
+
+    try:
+        counters = PROCESS_MEMORY_COUNTERS_EX()
+        counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS_EX)
+        if not ctypes.windll.psapi.GetProcessMemoryInfo(
+            process,
+            ctypes.byref(counters),
+            counters.cb,
+        ):
+            return dict(EMPTY_PROCESS_SAMPLE)
+
+        handle_count = wintypes.DWORD()
+        kernel32.GetProcessHandleCount(process, ctypes.byref(handle_count))
+        return {
+            "working_set_bytes": int(counters.WorkingSetSize),
+            "peak_working_set_bytes": int(counters.PeakWorkingSetSize),
+            "page_fault_count": int(counters.PageFaultCount),
+            "handle_count": int(handle_count.value),
+        }
+    finally:
+        kernel32.CloseHandle(process)
+
+
+def sample_posix_process() -> Dict[str, Optional[int]]:
+    try:
+        import resource
+
+        usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+        rss = int(usage.ru_maxrss)
+        if sys.platform != "darwin":
+            rss *= 1024
+        return {
+            "working_set_bytes": rss,
+            "peak_working_set_bytes": rss,
+            "page_fault_count": None,
+            "handle_count": None,
+        }
+    except Exception:
+        return dict(EMPTY_PROCESS_SAMPLE)
+
+
+def run_json_probe(
+    *,
+    build_cmd: List[str],
+    probe_path: Path,
+    timeout_seconds: int,
+    label: str,
+) -> Tuple[List[Dict[str, Any]], str]:
+    subprocess.run(build_cmd, check=True, capture_output=True, text=True)
+    process = subprocess.Popen(
+        [str(probe_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    samples: List[Dict[str, Any]] = []
+
+    def read_stdout() -> None:
+        assert process.stdout is not None
+        for raw_line in process.stdout:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            event.update(sample_process(process.pid))
+            samples.append(event)
+
+    reader = threading.Thread(target=read_stdout, daemon=True)
+    reader.start()
+    probe_status = "completed"
+    try:
+        return_code = process.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        probe_status = "timed_out"
+        terminate_process_tree(process)
+        return_code = 124
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+    reader.join(timeout=5)
+
+    stderr = process.stderr.read().strip() if process.stderr is not None else ""
+    if return_code != 0 and probe_status != "timed_out":
+        raise RuntimeError(
+            f"{label} failed with exit code {return_code}: {stderr or 'no stderr'}"
+        )
+    return samples, probe_status
 
 
 def normalize_metadata_entry(

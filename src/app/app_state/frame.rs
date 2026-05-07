@@ -242,7 +242,16 @@ impl ScratchpadApp {
                 self.app_settings.editor_font.label()
             ));
         }
+        self.clear_editor_layout_caches();
         self.applied_editor_font = Some(self.app_settings.editor_font);
+    }
+
+    fn clear_editor_layout_caches(&mut self) {
+        for tab in self.tabs_mut() {
+            for view in &mut tab.views {
+                view.layout_cache.clear();
+            }
+        }
     }
 }
 

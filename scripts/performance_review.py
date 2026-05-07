@@ -35,7 +35,10 @@ SCENARIOS: List[Dict[str, Any]] = [
             "viewport_extraction_latency",
         ],
         "capacity_scenarios": ["file_size_ceiling", "layout_bytes_ceiling"],
-        "resource_scenarios": ["file_backed_open_allocation"],
+        "resource_scenarios": [
+            "file_backed_open_first_visible_paint",
+            "file_backed_open_allocation",
+        ],
         "profile_ids": [
             "scroll_stress_profile",
             "viewport_extraction_profile",
@@ -47,7 +50,12 @@ SCENARIOS: List[Dict[str, Any]] = [
                 "label": "GB-class file",
                 "kind": "bytes",
                 "minimum": GB,
-                "sources": ["file_size_ceiling", "layout_bytes_ceiling", "file_backed_open_allocation"],
+                "sources": [
+                    "file_size_ceiling",
+                    "layout_bytes_ceiling",
+                    "file_backed_open_first_visible_paint",
+                    "file_backed_open_allocation",
+                ],
             },
             {
                 "id": "visible_100ms",
@@ -56,7 +64,7 @@ SCENARIOS: List[Dict[str, Any]] = [
                 "maximum": 100.0,
             },
         ],
-        "next_measurement": "Add a real file-backed open and first-visible-paint sweep through 1 GB and beyond.",
+        "next_measurement": "Use the GB+ file-backed open and first-visible-paint sweep to set budgets, then capture a profile when first paint exceeds 100 ms.",
     },
     {
         "id": "many_files",
@@ -164,7 +172,12 @@ SCENARIOS: List[Dict[str, Any]] = [
         "families": ["tab-management"],
         "benchmark_keys": ["tab_stress_operations", "tab_count_scale"],
         "capacity_scenarios": ["tab_count_ceiling"],
-        "resource_scenarios": ["tab_count_resource_tracking", "session_persist_cost", "session_restore_cost"],
+        "resource_scenarios": [
+            "tab_count_resource_tracking",
+            "session_persist_cost",
+            "session_restore_cost",
+            "startup_visible_restore_cost",
+        ],
         "profile_ids": ["tab_operations_profile", "tab_tile_layout_profile"],
         "scale_checks": [
             {
@@ -172,7 +185,7 @@ SCENARIOS: List[Dict[str, Any]] = [
                 "label": "10,000+ tabs",
                 "kind": "tabs",
                 "minimum": 10_000,
-                "sources": ["tab_count_ceiling", "tab_count_resource_tracking"],
+                "sources": ["tab_count_ceiling", "tab_count_resource_tracking", "startup_visible_restore_cost"],
             },
         ],
         "next_measurement": "Extend tab-count latency, memory, and restore sweeps to 10,000+ tabs.",
@@ -229,7 +242,7 @@ SCENARIOS: List[Dict[str, Any]] = [
         "families": ["session-persistence"],
         "benchmark_keys": [],
         "capacity_scenarios": [],
-        "resource_scenarios": ["session_persist_cost", "session_restore_cost"],
+        "resource_scenarios": ["session_persist_cost", "session_restore_cost", "startup_visible_restore_cost"],
         "profile_ids": [],
         "scale_checks": [
             {
@@ -237,10 +250,9 @@ SCENARIOS: List[Dict[str, Any]] = [
                 "label": "10,000+ restored tabs",
                 "kind": "tabs",
                 "minimum": 10_000,
-                "sources": ["session_persist_cost", "session_restore_cost"],
+                "sources": ["session_persist_cost", "session_restore_cost", "startup_visible_restore_cost"],
             },
         ],
-        "next_measurement": "Add startup-visible restore timing and manifest-size tracking for 10,000+ tabs.",
     },
 ]
 
@@ -385,6 +397,42 @@ def max_latency_ms(rows: Iterable[Dict[str, Any]]) -> Optional[float]:
     return max(values) if values else None
 
 
+def numeric_field_values(row: Dict[str, Any], fields: Iterable[str]) -> List[float]:
+    return [
+        float(value)
+        for field in fields
+        if isinstance((value := row.get(field)), (int, float)) and value > 0
+    ]
+
+
+def numeric_parameter_value(row: Dict[str, Any], allowed_units: set[str]) -> List[float]:
+    value = row.get("parameter_value")
+    unit = str(row.get("parameter_unit") or "")
+    if unit in allowed_units and isinstance(value, (int, float)):
+        return [float(value)]
+    return []
+
+
+def sample_matches_kind(kind: str, label: str) -> bool:
+    label = label.lower()
+    return (
+        (kind == "bytes" and any(token in label for token in ("kb", "mb", "gb", "bytes")))
+        or (kind == "files" and "file" in label)
+        or (kind == "tabs" and "tab" in label)
+        or (kind == "views" and ("split" in label or "view" in label))
+    )
+
+
+def labeled_sample_values(row: Dict[str, Any], kind: str) -> List[float]:
+    values = []
+    for sample in row.get("samples", []) or []:
+        value = sample.get("workload_value")
+        label = str(sample.get("workload_label") or "")
+        if isinstance(value, (int, float)) and sample_matches_kind(kind, label):
+            values.append(float(value))
+    return values
+
+
 def sample_values(rows: Iterable[Dict[str, Any]], kind: str, sources: Optional[set[str]] = None) -> List[float]:
     values: List[float] = []
     for row in rows:
@@ -392,48 +440,16 @@ def sample_values(rows: Iterable[Dict[str, Any]], kind: str, sources: Optional[s
         if sources and row_name not in sources:
             continue
 
-        parameter_unit = str(row.get("parameter_unit") or "")
         if kind == "bytes":
-            for field in ("total_bytes", "bytes_per_item"):
-                value = row.get(field)
-                if isinstance(value, (int, float)) and value > 0:
-                    values.append(float(value))
-            if parameter_unit == "bytes" and isinstance(row.get("parameter_value"), (int, float)):
-                values.append(float(row["parameter_value"]))
+            values.extend(numeric_field_values(row, ("total_bytes", "bytes_per_item")))
+            values.extend(numeric_parameter_value(row, {"bytes"}))
         elif kind == "files":
-            for field in ("item_count", "fixed_item_count"):
-                value = row.get(field)
-                if isinstance(value, (int, float)) and value > 0:
-                    values.append(float(value))
-            if parameter_unit in {"files", "items", "tabs"} and isinstance(row.get("parameter_value"), (int, float)):
-                values.append(float(row["parameter_value"]))
+            values.extend(numeric_field_values(row, ("item_count", "fixed_item_count")))
+            values.extend(numeric_parameter_value(row, {"files", "items", "tabs"}))
         elif kind in {"tabs", "views"}:
-            label_hint = "tab" if kind == "tabs" else "split"
-            if parameter_unit in {kind, "tabs", "splits", "views"} and isinstance(row.get("parameter_value"), (int, float)):
-                values.append(float(row["parameter_value"]))
-            for sample in row.get("samples", []) or []:
-                label = str(sample.get("workload_label") or "").lower()
-                if label_hint in label or (kind == "views" and "view" in label):
-                    value = sample.get("workload_value")
-                    if isinstance(value, (int, float)):
-                        values.append(float(value))
+            values.extend(numeric_parameter_value(row, {kind, "tabs", "splits", "views"}))
 
-        for sample in row.get("samples", []) or []:
-            sample_name = str(row.get("scenario") or "")
-            if sources and sample_name not in sources:
-                continue
-            value = sample.get("workload_value")
-            label = str(sample.get("workload_label") or "").lower()
-            if not isinstance(value, (int, float)):
-                continue
-            if kind == "bytes" and any(token in label for token in ("kb", "mb", "gb", "bytes")):
-                values.append(float(value))
-            elif kind == "files" and "file" in label:
-                values.append(float(value))
-            elif kind == "tabs" and "tab" in label:
-                values.append(float(value))
-            elif kind == "views" and ("split" in label or "view" in label):
-                values.append(float(value))
+        values.extend(labeled_sample_values(row, kind))
     return values
 
 
@@ -559,7 +575,9 @@ def scenario_opportunities(
     capacity_rows: List[Dict[str, Any]],
     resource_rows: List[Dict[str, Any]],
 ) -> List[str]:
-    opportunities = [scenario["next_measurement"]]
+    opportunities = []
+    if scenario.get("next_measurement"):
+        opportunities.append(scenario["next_measurement"])
     if any(over_budget(row) for row in latency_rows):
         opportunities.append("Promote over-budget rows into focused profile runs before changing app code.")
     if any(row.get("ceiling_reached") for row in capacity_rows):
@@ -628,6 +646,7 @@ def compact_resource_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "max_working_set_bytes": row.get("max_working_set_bytes"),
         "page_fault_growth": row.get("page_fault_growth"),
         "handle_growth": row.get("handle_growth"),
+        "max_manifest_size_bytes": row.get("max_manifest_size_bytes"),
     }
 
 
@@ -797,7 +816,6 @@ def build_scenario(
         ),
         "implementations": implementations,
         "implementation_count": len(implementations),
-        "next_measurement": scenario["next_measurement"],
         "budget_misses": sum(1 for row in scenario_latency if over_budget(row)),
         "ceilings_reached": sum(1 for row in scenario_capacity if row.get("ceiling_reached")),
         "max_latency_ms": max_latency_ms(scenario_latency),
@@ -832,7 +850,7 @@ def build_opportunities(scenarios: List[Dict[str, Any]]) -> List[Dict[str, Any]]
                 "scenario_id": scenario["id"],
                 "scenario_title": scenario["title"],
                 "reason": scenario["gaps"][0] if scenario.get("gaps") else "Coverage is present; keep it fresh.",
-                "recommended_action": scenario["next_measurement"],
+                "recommended_action": (scenario.get("opportunities") or ["Keep coverage fresh."])[0],
                 "rank_score": round(severity, 2),
             }
         )
@@ -843,7 +861,7 @@ def presentation_notes() -> List[str]:
     return [
         "Lead with scenario coverage before raw dataset tables.",
         "Show target scale status for GB files, 10,000+ files, 10,000+ tabs, and 1,000+ views.",
-        "Render gaps and next measurements inline with each scenario card.",
+        "Render gaps inline with each scenario card.",
         "Keep latency, capacity, resources, and flamegraphs available as drill-down evidence.",
         "Track missing scale targets as a dashboard history metric.",
     ]

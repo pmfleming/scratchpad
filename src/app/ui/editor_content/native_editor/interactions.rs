@@ -2,53 +2,42 @@ mod keyboard;
 mod mouse;
 
 use super::{CharCursor, CursorRange};
+use crate::app::domain::buffer::PieceTreeLite;
 use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
 use eframe::egui;
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn handle_mouse_interaction(
-    ui: &mut egui::Ui,
-    response: &egui::Response,
-    galley: &egui::Galley,
-    rect: egui::Rect,
-    galley_pos: egui::Pos2,
-    view: &mut EditorViewState,
-    piece_tree: &crate::app::domain::buffer::PieceTreeLite,
-    char_offset_base: usize,
-) {
-    mouse::handle_mouse_interaction(
-        ui,
-        response,
-        galley,
-        rect,
-        galley_pos,
-        view,
-        piece_tree,
-        char_offset_base,
-    );
+pub(super) struct MouseInteractionRequest<'a> {
+    pub(super) response: &'a egui::Response,
+    pub(super) galley: &'a egui::Galley,
+    pub(super) rect: egui::Rect,
+    pub(super) galley_pos: egui::Pos2,
+    pub(super) piece_tree: &'a PieceTreeLite,
+    pub(super) char_offset_base: usize,
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(super) struct KeyboardInputRequest<'a> {
+    pub(super) galley: &'a egui::Galley,
+    pub(super) page_jump_rows: usize,
+    pub(super) total_chars: usize,
+    pub(super) char_offset_base: usize,
+    pub(super) slice_chars: usize,
+}
+
+pub(super) fn handle_mouse_interaction(
+    ui: &mut egui::Ui,
+    view: &mut EditorViewState,
+    request: MouseInteractionRequest<'_>,
+) {
+    mouse::handle_mouse_interaction(ui, view, request);
+}
+
 pub(super) fn handle_keyboard_events(
     ui: &mut egui::Ui,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
-    galley: &egui::Galley,
-    page_jump_rows: usize,
-    total_chars: usize,
-    char_offset_base: usize,
-    slice_chars: usize,
+    request: KeyboardInputRequest<'_>,
 ) -> bool {
-    keyboard::handle_keyboard_events(
-        ui,
-        buffer,
-        view,
-        galley,
-        page_jump_rows,
-        total_chars,
-        char_offset_base,
-        slice_chars,
-    )
+    keyboard::handle_keyboard_events(ui, buffer, view, request)
 }
 
 pub(super) fn sync_view_cursor_before_render(view: &mut EditorViewState, focused: bool) {

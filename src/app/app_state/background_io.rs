@@ -100,18 +100,13 @@ impl ScratchpadApp {
             requests: paths.into_iter().map(PathLoadRequest::Standard).collect(),
             streaming,
         };
-        if let Err(error) = self.background_io_tx.send(request) {
-            record_background_send_error(&error);
-            self.pending_background_actions.remove(&request_id);
-            self.apply_background_io_result(BackgroundIoResult::PathsLoaded {
+        self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
+            app.apply_background_io_result(BackgroundIoResult::PathsLoaded {
                 request_id,
-                results: error
-                    .into_request()
-                    .into_loaded_path_results()
-                    .unwrap_or_default(),
+                results: request.into_loaded_path_results().unwrap_or_default(),
                 is_partial: false,
             });
-        }
+        });
     }
 
     pub(crate) fn queue_background_path_load_with_encoding(
@@ -131,18 +126,13 @@ impl ScratchpadApp {
             }],
             streaming: false,
         };
-        if let Err(error) = self.background_io_tx.send(request) {
-            record_background_send_error(&error);
-            self.pending_background_actions.remove(&request_id);
-            self.apply_background_io_result(BackgroundIoResult::PathsLoaded {
+        self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
+            app.apply_background_io_result(BackgroundIoResult::PathsLoaded {
                 request_id,
-                results: error
-                    .into_request()
-                    .into_loaded_path_results()
-                    .unwrap_or_default(),
+                results: request.into_loaded_path_results().unwrap_or_default(),
                 is_partial: false,
             });
-        }
+        });
     }
 
     pub(crate) fn queue_background_session_restore(
@@ -163,14 +153,12 @@ impl ScratchpadApp {
             request_id,
             session_store: self.session_store.clone(),
         };
-        if let Err(error) = self.background_io_tx.send(request) {
-            record_background_send_error(&error);
-            self.pending_background_actions.remove(&request_id);
-            self.apply_background_io_result(BackgroundIoResult::SessionRestored {
+        self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
+            app.apply_background_io_result(BackgroundIoResult::SessionRestored {
                 request_id,
-                result: error.into_request().into_restore_result(),
+                result: request.into_restore_result(),
             });
-        }
+        });
     }
 
     pub(crate) fn queue_background_session_persist(&mut self, request: SessionPersistRequest) {
@@ -185,14 +173,12 @@ impl ScratchpadApp {
             session_store: self.session_store.clone(),
             request,
         };
-        if let Err(error) = self.background_io_tx.send(request) {
-            record_background_send_error(&error);
-            self.pending_background_actions.remove(&request_id);
-            self.apply_background_io_result(BackgroundIoResult::SessionPersisted {
+        self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
+            app.apply_background_io_result(BackgroundIoResult::SessionPersisted {
                 request_id,
-                result: error.into_request().into_persist_result(),
+                result: request.into_persist_result(),
             });
-        }
+        });
     }
 
     pub(crate) fn queue_background_text_metadata_refresh(
@@ -228,16 +214,14 @@ impl ScratchpadApp {
             snapshot,
             format,
         };
-        if let Err(error) = self.background_io_tx.send(request) {
-            record_background_send_error(&error);
-            self.pending_background_actions.remove(&request_id);
-            self.apply_background_io_result(BackgroundIoResult::TextMetadataRefreshed {
+        self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
+            app.apply_background_io_result(BackgroundIoResult::TextMetadataRefreshed {
                 request_id,
                 buffer_id,
                 revision,
-                result: error.into_request().into_text_metadata_result(),
+                result: request.into_text_metadata_result(),
             });
-        }
+        });
     }
 
     pub(crate) fn queue_background_encoding_compliance_refresh(
@@ -273,16 +257,14 @@ impl ScratchpadApp {
             snapshot,
             format,
         };
-        if let Err(error) = self.background_io_tx.send(request) {
-            record_background_send_error(&error);
-            self.pending_background_actions.remove(&request_id);
-            self.apply_background_io_result(BackgroundIoResult::EncodingComplianceRefreshed {
+        self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
+            app.apply_background_io_result(BackgroundIoResult::EncodingComplianceRefreshed {
                 request_id,
                 buffer_id,
                 revision,
-                result: error.into_request().into_encoding_compliance_result(),
+                result: request.into_encoding_compliance_result(),
             });
-        }
+        });
     }
 
     fn allocate_background_request_id(&mut self) -> u64 {
@@ -291,90 +273,31 @@ impl ScratchpadApp {
         request_id
     }
 
+    fn send_background_request_or_apply(
+        &mut self,
+        request_id: u64,
+        request: BackgroundIoRequest,
+        fallback: impl FnOnce(&mut Self, u64, BackgroundIoRequest),
+    ) {
+        if let Err(error) = self.background_io_tx.send(request) {
+            record_background_send_error(&error);
+            self.pending_background_actions.remove(&request_id);
+            fallback(self, request_id, error.into_request());
+        }
+    }
+
     fn apply_background_io_result(&mut self, result: BackgroundIoResult) {
         match result {
             BackgroundIoResult::PathsLoaded {
                 request_id,
                 results,
                 is_partial,
-            } => {
-                if is_partial {
-                    // Streaming partial: peek the action without removing,
-                    // dispatch per-path install. Only `OpenTabs` is wired for
-                    // streaming today; other actions never see partials.
-                    if let Some(PendingBackgroundAction::OpenTabs(action)) =
-                        self.pending_background_actions.get_mut(&request_id)
-                    {
-                        // Re-borrow split: take the accumulator out, install,
-                        // then put it back. This avoids holding a &mut on the
-                        // map while calling into FileController which needs
-                        // &mut ScratchpadApp.
-                        let mut summary = std::mem::take(&mut action.accumulator);
-                        for loaded in results {
-                            FileController::process_open_tab_result(self, &mut summary, loaded);
-                        }
-                        if let Some(PendingBackgroundAction::OpenTabs(action)) =
-                            self.pending_background_actions.get_mut(&request_id)
-                        {
-                            action.accumulator = summary;
-                        }
-                    }
-                    return;
-                }
-                match self.pending_background_actions.remove(&request_id) {
-                    Some(PendingBackgroundAction::OpenTabs(action)) => {
-                        FileController::apply_async_open_tabs_result(self, action, results);
-                    }
-                    Some(PendingBackgroundAction::OpenHere(action)) => {
-                        FileController::apply_async_open_here_result(self, action, results);
-                    }
-                    Some(PendingBackgroundAction::ReloadBuffer(action)) => {
-                        FileController::apply_async_reload_buffer_result(self, action, results);
-                    }
-                    Some(PendingBackgroundAction::ReopenWithEncoding(action)) => {
-                        FileController::apply_async_reopen_with_encoding_result(
-                            self, action, results,
-                        );
-                    }
-                    Some(PendingBackgroundAction::StartupRestoreCompare(action)) => {
-                        self.apply_async_startup_restore_compare_result(action, results);
-                    }
-                    Some(PendingBackgroundAction::StartupRestore(_))
-                    | Some(PendingBackgroundAction::PersistSession(_))
-                    | Some(PendingBackgroundAction::RefreshTextMetadata(_))
-                    | Some(PendingBackgroundAction::RefreshEncodingCompliance(_))
-                    | None => {}
-                }
-            }
+            } => self.apply_paths_loaded_result(request_id, results, is_partial),
             BackgroundIoResult::SessionRestored { request_id, result } => {
-                let Some(PendingBackgroundAction::StartupRestore(action)) =
-                    self.pending_background_actions.remove(&request_id)
-                else {
-                    return;
-                };
-                self.apply_runtime_startup_restore_result(action, result);
+                self.apply_session_restored_result(request_id, result);
             }
             BackgroundIoResult::SessionPersisted { request_id, result } => {
-                let Some(PendingBackgroundAction::PersistSession(_)) =
-                    self.pending_background_actions.remove(&request_id)
-                else {
-                    return;
-                };
-                match result {
-                    Ok(()) => {
-                        self.last_session_persist = Instant::now();
-                    }
-                    Err(error) => {
-                        diagnostics::record_background_failure(
-                            "session_persist_result",
-                            "app_state::background_io",
-                            &error,
-                            [("request_id", request_id.to_string())],
-                        );
-                        self.mark_session_dirty();
-                        self.set_error_status(format!("Session save failed: {error}"));
-                    }
-                }
+                self.apply_session_persisted_result(request_id, result);
             }
             BackgroundIoResult::TextMetadataRefreshed {
                 request_id,
@@ -382,24 +305,7 @@ impl ScratchpadApp {
                 revision,
                 result,
             } => {
-                let Some(PendingBackgroundAction::RefreshTextMetadata(_)) =
-                    self.pending_background_actions.remove(&request_id)
-                else {
-                    return;
-                };
-                if let Ok((line_count, artifact_summary, format)) = result
-                    && let Some(buffer) = self
-                        .tabs_mut()
-                        .iter_mut()
-                        .find_map(|tab| tab.buffer_by_id_mut(buffer_id))
-                {
-                    buffer.apply_text_metadata_refresh(
-                        revision,
-                        line_count,
-                        artifact_summary,
-                        format,
-                    );
-                }
+                self.apply_text_metadata_refreshed_result(request_id, buffer_id, revision, result);
             }
             BackgroundIoResult::EncodingComplianceRefreshed {
                 request_id,
@@ -407,21 +313,154 @@ impl ScratchpadApp {
                 revision,
                 result,
             } => {
-                let Some(PendingBackgroundAction::RefreshEncodingCompliance(_)) =
-                    self.pending_background_actions.remove(&request_id)
-                else {
-                    return;
-                };
-                if let Ok(has_non_compliant_characters) = result
-                    && let Some(buffer) = self
-                        .tabs_mut()
-                        .iter_mut()
-                        .find_map(|tab| tab.buffer_by_id_mut(buffer_id))
-                {
-                    buffer
-                        .apply_encoding_compliance_refresh(revision, has_non_compliant_characters);
-                }
+                self.apply_encoding_compliance_refreshed_result(
+                    request_id, buffer_id, revision, result,
+                );
             }
+        }
+    }
+
+    fn apply_paths_loaded_result(
+        &mut self,
+        request_id: u64,
+        results: Vec<LoadedPathResult>,
+        is_partial: bool,
+    ) {
+        if is_partial {
+            self.apply_partial_paths_loaded_result(request_id, results);
+            return;
+        }
+
+        match self.pending_background_actions.remove(&request_id) {
+            Some(PendingBackgroundAction::OpenTabs(action)) => {
+                FileController::apply_async_open_tabs_result(self, action, results);
+            }
+            Some(PendingBackgroundAction::OpenHere(action)) => {
+                FileController::apply_async_open_here_result(self, action, results);
+            }
+            Some(PendingBackgroundAction::ReloadBuffer(action)) => {
+                FileController::apply_async_reload_buffer_result(self, action, results);
+            }
+            Some(PendingBackgroundAction::ReopenWithEncoding(action)) => {
+                FileController::apply_async_reopen_with_encoding_result(self, action, results);
+            }
+            Some(PendingBackgroundAction::StartupRestoreCompare(action)) => {
+                self.apply_async_startup_restore_compare_result(action, results);
+            }
+            Some(PendingBackgroundAction::StartupRestore(_))
+            | Some(PendingBackgroundAction::PersistSession(_))
+            | Some(PendingBackgroundAction::RefreshTextMetadata(_))
+            | Some(PendingBackgroundAction::RefreshEncodingCompliance(_))
+            | None => {}
+        }
+    }
+
+    fn apply_partial_paths_loaded_result(
+        &mut self,
+        request_id: u64,
+        results: Vec<LoadedPathResult>,
+    ) {
+        let Some(PendingBackgroundAction::OpenTabs(action)) =
+            self.pending_background_actions.get_mut(&request_id)
+        else {
+            return;
+        };
+
+        let mut summary = std::mem::take(&mut action.accumulator);
+        for loaded in results {
+            FileController::process_open_tab_result(self, &mut summary, loaded);
+        }
+        if let Some(PendingBackgroundAction::OpenTabs(action)) =
+            self.pending_background_actions.get_mut(&request_id)
+        {
+            action.accumulator = summary;
+        }
+    }
+
+    fn apply_session_restored_result(
+        &mut self,
+        request_id: u64,
+        result: Result<Option<crate::app::services::session_store::RestoredSession>, String>,
+    ) {
+        let Some(PendingBackgroundAction::StartupRestore(action)) =
+            self.pending_background_actions.remove(&request_id)
+        else {
+            return;
+        };
+        self.apply_runtime_startup_restore_result(action, result);
+    }
+
+    fn apply_session_persisted_result(&mut self, request_id: u64, result: Result<(), String>) {
+        let Some(PendingBackgroundAction::PersistSession(_)) =
+            self.pending_background_actions.remove(&request_id)
+        else {
+            return;
+        };
+        match result {
+            Ok(()) => {
+                self.last_session_persist = Instant::now();
+            }
+            Err(error) => {
+                diagnostics::record_background_failure(
+                    "session_persist_result",
+                    "app_state::background_io",
+                    &error,
+                    [("request_id", request_id.to_string())],
+                );
+                self.mark_session_dirty();
+                self.set_error_status(format!("Session save failed: {error}"));
+            }
+        }
+    }
+
+    fn apply_text_metadata_refreshed_result(
+        &mut self,
+        request_id: u64,
+        buffer_id: u64,
+        revision: u64,
+        result: Result<
+            (
+                usize,
+                crate::app::domain::TextArtifactSummary,
+                crate::app::domain::TextFormatMetadata,
+            ),
+            String,
+        >,
+    ) {
+        let Some(PendingBackgroundAction::RefreshTextMetadata(_)) =
+            self.pending_background_actions.remove(&request_id)
+        else {
+            return;
+        };
+        if let Ok((line_count, artifact_summary, format)) = result
+            && let Some(buffer) = self
+                .tabs_mut()
+                .iter_mut()
+                .find_map(|tab| tab.buffer_by_id_mut(buffer_id))
+        {
+            buffer.apply_text_metadata_refresh(revision, line_count, artifact_summary, format);
+        }
+    }
+
+    fn apply_encoding_compliance_refreshed_result(
+        &mut self,
+        request_id: u64,
+        buffer_id: u64,
+        revision: u64,
+        result: Result<bool, String>,
+    ) {
+        let Some(PendingBackgroundAction::RefreshEncodingCompliance(_)) =
+            self.pending_background_actions.remove(&request_id)
+        else {
+            return;
+        };
+        if let Ok(has_non_compliant_characters) = result
+            && let Some(buffer) = self
+                .tabs_mut()
+                .iter_mut()
+                .find_map(|tab| tab.buffer_by_id_mut(buffer_id))
+        {
+            buffer.apply_encoding_compliance_refresh(revision, has_non_compliant_characters);
         }
     }
 
@@ -505,10 +544,7 @@ impl BackgroundIoFallback for BackgroundIoRequest {
                     })
                     .collect(),
             ),
-            BackgroundIoRequest::RestoreSession { .. }
-            | BackgroundIoRequest::PersistSession { .. }
-            | BackgroundIoRequest::RefreshTextMetadata { .. }
-            | BackgroundIoRequest::RefreshEncodingCompliance { .. } => None,
+            _ => None,
         }
     }
 
@@ -519,10 +555,7 @@ impl BackgroundIoFallback for BackgroundIoRequest {
             BackgroundIoRequest::RestoreSession { .. } => {
                 Err("Background session restore unavailable.".to_owned())
             }
-            BackgroundIoRequest::LoadPaths { .. }
-            | BackgroundIoRequest::PersistSession { .. }
-            | BackgroundIoRequest::RefreshTextMetadata { .. }
-            | BackgroundIoRequest::RefreshEncodingCompliance { .. } => Ok(None),
+            _ => Ok(None),
         }
     }
 
@@ -531,10 +564,7 @@ impl BackgroundIoFallback for BackgroundIoRequest {
             BackgroundIoRequest::PersistSession { .. } => {
                 Err("Background session save unavailable.".to_owned())
             }
-            BackgroundIoRequest::LoadPaths { .. }
-            | BackgroundIoRequest::RestoreSession { .. }
-            | BackgroundIoRequest::RefreshTextMetadata { .. }
-            | BackgroundIoRequest::RefreshEncodingCompliance { .. } => Ok(()),
+            _ => Ok(()),
         }
     }
 
@@ -552,12 +582,7 @@ impl BackgroundIoFallback for BackgroundIoRequest {
             BackgroundIoRequest::RefreshTextMetadata { .. } => {
                 Err("Background text metadata refresh unavailable.".to_owned())
             }
-            BackgroundIoRequest::LoadPaths { .. }
-            | BackgroundIoRequest::RestoreSession { .. }
-            | BackgroundIoRequest::PersistSession { .. }
-            | BackgroundIoRequest::RefreshEncodingCompliance { .. } => {
-                Err("Background I/O channel unavailable.".to_owned())
-            }
+            _ => Err("Background I/O channel unavailable.".to_owned()),
         }
     }
 
@@ -566,10 +591,7 @@ impl BackgroundIoFallback for BackgroundIoRequest {
             BackgroundIoRequest::RefreshEncodingCompliance { .. } => {
                 Err("Background encoding compliance refresh unavailable.".to_owned())
             }
-            BackgroundIoRequest::LoadPaths { .. }
-            | BackgroundIoRequest::RestoreSession { .. }
-            | BackgroundIoRequest::PersistSession { .. }
-            | BackgroundIoRequest::RefreshTextMetadata { .. } => Ok(false),
+            _ => Ok(false),
         }
     }
 }

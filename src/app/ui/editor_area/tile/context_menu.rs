@@ -8,14 +8,15 @@ use crate::app::ui::widget_ids;
 use eframe::egui;
 use egui_phosphor::regular::{
     ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_LEFT, ARROW_LINE_UP, ARROW_RIGHT,
-    ARROW_UP, ARROWS_COUNTER_CLOCKWISE, ARROWS_SPLIT, CARET_RIGHT, CLIPBOARD_TEXT,
-    CLOCK_COUNTER_CLOCKWISE, COPY, FLOPPY_DISK, FOLDER_OPEN, MAGNIFYING_GLASS, SCISSORS,
-    SELECTION_ALL, TRASH, X,
+    ARROW_U_UP_LEFT, ARROW_UP, ARROWS_COUNTER_CLOCKWISE, ARROWS_SPLIT, CARET_RIGHT, CHECK,
+    CLIPBOARD_TEXT, CLOCK_COUNTER_CLOCKWISE, COPY, FLOPPY_DISK, FOLDER_OPEN, MAGNIFYING_GLASS,
+    SCISSORS, SELECTION_ALL, TEXT_AA, TEXT_ALIGN_RIGHT, TRASH, X,
 };
 
 const DEFAULT_SPLIT_RATIO: f32 = 0.5;
-const EDITOR_CONTEXT_MENU_WIDTH: f32 = 192.0;
+const EDITOR_CONTEXT_MENU_WIDTH: f32 = 252.0;
 const EDITOR_CONTEXT_SUBMENU_WIDTH: f32 = 168.0;
+const EDITOR_UNICODE_INSERT_SUBMENU_WIDTH: f32 = 432.0;
 const EDITOR_CONTEXT_ROW_HEIGHT: f32 = 28.0;
 const EDITOR_CONTEXT_ICON_BUTTON_SIZE: egui::Vec2 = egui::vec2(38.0, 30.0);
 const EDITOR_CONTEXT_CARET_WIDTH: f32 = 28.0;
@@ -41,6 +42,8 @@ pub(super) fn attach_editor_context_menu(
         ui.separator();
         render_history_menu(ui, app);
         ui.separator();
+        render_display_unicode_menu(ui, app);
+        ui.separator();
         render_file_menu(ui, app, save_existing);
         ui.separator();
         render_tile_menu(ui, actions, request, can_promote);
@@ -48,6 +51,101 @@ pub(super) fn attach_editor_context_menu(
         render_edit_button_rail(ui, app);
     });
 }
+
+#[derive(Clone, Copy)]
+struct UnicodeControlChar {
+    short_label: &'static str,
+    description: &'static str,
+    value: &'static str,
+}
+
+const UNICODE_CONTROL_CHARS: &[UnicodeControlChar] = &[
+    UnicodeControlChar {
+        short_label: "LRM",
+        description: "Left-to-right mark",
+        value: "\u{200E}",
+    },
+    UnicodeControlChar {
+        short_label: "RLM",
+        description: "Right-to-left mark",
+        value: "\u{200F}",
+    },
+    UnicodeControlChar {
+        short_label: "ZWJ",
+        description: "Zero-width joiner",
+        value: "\u{200D}",
+    },
+    UnicodeControlChar {
+        short_label: "ZWNJ",
+        description: "Zero-width non-joiner",
+        value: "\u{200C}",
+    },
+    UnicodeControlChar {
+        short_label: "LRE",
+        description: "Start of left-to-right embedding",
+        value: "\u{202A}",
+    },
+    UnicodeControlChar {
+        short_label: "RLE",
+        description: "Start of right-to-left embedding",
+        value: "\u{202B}",
+    },
+    UnicodeControlChar {
+        short_label: "LRO",
+        description: "Start of left-to-right override",
+        value: "\u{202D}",
+    },
+    UnicodeControlChar {
+        short_label: "RLO",
+        description: "Start of right-to-left override",
+        value: "\u{202E}",
+    },
+    UnicodeControlChar {
+        short_label: "PDF",
+        description: "Pop directional formatting",
+        value: "\u{202C}",
+    },
+    UnicodeControlChar {
+        short_label: "NADS",
+        description: "National digit shapes substitution",
+        value: "\u{206E}",
+    },
+    UnicodeControlChar {
+        short_label: "NODS",
+        description: "Nominal (European) digit shapes",
+        value: "\u{206F}",
+    },
+    UnicodeControlChar {
+        short_label: "ASS",
+        description: "Activate symmetric swapping",
+        value: "\u{206B}",
+    },
+    UnicodeControlChar {
+        short_label: "ISS",
+        description: "Inhibit symmetric swapping",
+        value: "\u{206A}",
+    },
+    UnicodeControlChar {
+        short_label: "AAFS",
+        description: "Activate Arabic form shaping",
+        value: "\u{206D}",
+    },
+    UnicodeControlChar {
+        short_label: "IAFS",
+        description: "Inhibit Arabic form shaping",
+        value: "\u{206C}",
+    },
+    UnicodeControlChar {
+        short_label: "RS",
+        description: "Record separator (Block separator)",
+        value: "\u{001E}",
+    },
+    UnicodeControlChar {
+        short_label: "US",
+        description: "Unit separator (Segment separator)",
+        value: "\u{001F}",
+    },
+];
 
 pub(super) fn activate_inactive_tile_on_secondary_click(
     app: &mut ScratchpadApp,
@@ -152,6 +250,72 @@ fn render_tile_menu(
         actions.push(TileAction::Close(request.view_id));
         ui.close();
     }
+}
+
+fn render_display_unicode_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    unicode_submenu_row(ui, "Display and Unicode", TEXT_AA, |ui| {
+        set_menu_width(ui, EDITOR_CONTEXT_MENU_WIDTH);
+        let right_to_left = app
+            .active_tab()
+            .and_then(|tab| tab.buffer_for_view(tab.active_view_id))
+            .is_some_and(|buffer| buffer.right_to_left_reading_order);
+        let show_control_chars = app
+            .active_tab()
+            .and_then(|tab| tab.buffer_for_view(tab.active_view_id))
+            .is_some_and(|buffer| buffer.show_control_chars);
+
+        if menu_action_button(
+            ui,
+            "Right-to-left order",
+            right_to_left.then_some(CHECK).or(Some(TEXT_ALIGN_RIGHT)),
+            true,
+        ) {
+            if let Some(tab) = app.active_tab_mut()
+                && let Some(buffer_id) = tab.active_view().map(|view| view.buffer_id)
+            {
+                if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
+                    buffer.right_to_left_reading_order = !buffer.right_to_left_reading_order;
+                }
+                for view in &mut tab.views {
+                    if view.buffer_id == buffer_id {
+                        view.layout_cache.clear();
+                    }
+                }
+                app.mark_session_dirty();
+            }
+            ui.close();
+        }
+
+        if menu_action_button(
+            ui,
+            "Show control chars",
+            show_control_chars.then_some(CHECK),
+            true,
+        ) {
+            if let Some(tab) = app.active_tab_mut()
+                && let Some(buffer_id) = tab.active_view().map(|view| view.buffer_id)
+            {
+                if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
+                    buffer.show_control_chars = !buffer.show_control_chars;
+                }
+                app.mark_session_dirty();
+            }
+            ui.close();
+        }
+
+        unicode_submenu_row(ui, "Insert control char", TEXT_AA, |ui| {
+            set_menu_width(ui, EDITOR_UNICODE_INSERT_SUBMENU_WIDTH);
+            for control in UNICODE_CONTROL_CHARS {
+                if unicode_control_char_button(ui, control) {
+                    app.insert_text_in_active_view(control.value);
+                    app.request_focus_for_active_view();
+                    ui.close();
+                }
+            }
+        });
+
+        menu_action_button(ui, "Reconversion", Some(ARROW_U_UP_LEFT), false);
+    });
 }
 
 fn render_edit_button_rail(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
@@ -440,6 +604,80 @@ fn apply_context_menu_row_hover_style(ui: &mut egui::Ui) {
     visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
     visuals.widgets.active.bg_stroke = egui::Stroke::NONE;
     visuals.widgets.open.bg_stroke = egui::Stroke::NONE;
+}
+
+fn unicode_submenu_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    icon: &str,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
+        let button = egui::Button::new("")
+            .min_size(egui::vec2(
+                EDITOR_CONTEXT_MENU_WIDTH,
+                EDITOR_CONTEXT_ROW_HEIGHT,
+            ))
+            .stroke(egui::Stroke::NONE);
+
+        let (response, _) =
+            widget_ids::surface_widget(ui, ("editor_context.submenu", label), "submenu", |ui| {
+                egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
+                    add_contents(ui);
+                })
+            })
+            .inner;
+
+        let rect = response.rect;
+        paint_context_menu_row_label(ui, rect, Some(icon), label, true);
+        ui.painter().text(
+            rect.right_center() - egui::vec2(EDITOR_CONTEXT_CARET_WIDTH * 0.5, 0.0),
+            egui::Align2::CENTER_CENTER,
+            CARET_RIGHT,
+            egui::TextStyle::Button.resolve(ui.style()),
+            text_primary(ui),
+        );
+    });
+}
+
+fn unicode_control_char_button(ui: &mut egui::Ui, control: &UnicodeControlChar) -> bool {
+    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
+        let response = widget_ids::surface_response(
+            ui,
+            ("editor_context.unicode_control", control.short_label),
+            widget_ids::WidgetRole::ActionButton,
+            |ui| {
+                ui.add(
+                    egui::Button::new("")
+                        .min_size(egui::vec2(
+                            EDITOR_UNICODE_INSERT_SUBMENU_WIDTH,
+                            EDITOR_CONTEXT_ROW_HEIGHT,
+                        ))
+                        .stroke(egui::Stroke::NONE),
+                )
+            },
+        );
+        paint_unicode_control_char_row(ui, response.rect, control);
+        response.clicked()
+    })
+}
+
+fn paint_unicode_control_char_row(ui: &egui::Ui, rect: egui::Rect, control: &UnicodeControlChar) {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    ui.painter().text(
+        rect.left_center() + egui::vec2(20.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        control.short_label,
+        font.clone(),
+        text_primary(ui),
+    );
+    ui.painter().text(
+        rect.left_center() + egui::vec2(120.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        control.description,
+        font,
+        text_muted(ui),
+    );
 }
 
 fn icon_rail_button(ui: &mut egui::Ui, icon: &str, tooltip: &str, enabled: bool) -> egui::Response {

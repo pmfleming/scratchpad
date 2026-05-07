@@ -1,27 +1,24 @@
-use super::results::results_summary;
 use super::state::{SearchStripActions, SearchStripState};
-use crate::app::app_state::{
-    SearchFocusTarget, SearchReplaceAvailability, SearchScope, SearchScopeOrigin,
-};
-use crate::app::services::search::SearchMode;
-use crate::app::theme::{
-    action_hover_bg, border, tab_selected_accent, tab_selected_bg, text_muted, text_primary,
-};
+mod buttons;
+mod input;
+
+use crate::app::app_state::{SearchFocusTarget, SearchReplaceAvailability, SearchScope};
+use crate::app::theme::{action_hover_bg, text_muted, text_primary};
 use crate::app::ui::{callout, settings, widget_ids};
+use buttons::{
+    ICON_BUTTON_SIZE, icon_toggle_chip, replace_tooltip, scope_icon, scope_tooltip, toggle_flag,
+    toggle_mode, trigger_action,
+};
 use eframe::egui;
 use egui_phosphor::regular::{
-    ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE, ARROWS_COUNTER_CLOCKWISE, CARDS, CARET_DOWN,
-    CARET_UP, MAGNIFYING_GLASS, RECTANGLE, SWAP, TABS, TEXT_ALIGN_JUSTIFY, TEXTBOX,
+    ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE, ARROWS_COUNTER_CLOCKWISE, CARET_DOWN, CARET_UP,
+    MAGNIFYING_GLASS, SWAP, TEXTBOX,
 };
+use input::icon_text_input;
 
 const CASE_SENSITIVE_ICON: &str = "Aa";
-const REGEX_ICON: &str = ".*";
-const INPUT_HEIGHT: f32 = 36.0;
-const ICON_SIZE: f32 = 20.0;
 const CONTROL_BUTTON_HEIGHT: f32 = 34.0;
-const ICON_BUTTON_SIZE: egui::Vec2 = egui::vec2(36.0, CONTROL_BUTTON_HEIGHT);
 const SEARCH_CARD_CORNER_RADIUS: u8 = 12;
-const SEARCH_INPUT_CORNER_RADIUS: u8 = 8;
 
 #[derive(Clone, Copy)]
 enum PlainEnterAction {
@@ -72,7 +69,7 @@ fn render_search_pill(
 
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                let summary = results_summary(state);
+                let summary = state.results_summary();
                 if !summary.is_empty() {
                     ui.label(
                         egui::RichText::new(summary)
@@ -258,222 +255,6 @@ fn search_card<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) ->
         .corner_radius(egui::CornerRadius::same(SEARCH_CARD_CORNER_RADIUS))
         .show(ui, add_contents)
         .inner
-}
-
-fn compact_text_field(
-    ui: &mut egui::Ui,
-    text: &mut String,
-    id: egui::Id,
-    hint: &str,
-    width: f32,
-) -> egui::Response {
-    let inner = egui::Frame::NONE
-        .fill(ui.visuals().widgets.inactive.weak_bg_fill)
-        .stroke(egui::Stroke::NONE)
-        .corner_radius(egui::CornerRadius::same(SEARCH_INPUT_CORNER_RADIUS))
-        .inner_margin(egui::Margin::symmetric(2, 0))
-        .show(ui, |ui| {
-            ui.allocate_ui_with_layout(
-                egui::vec2(width, INPUT_HEIGHT),
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    ui.add(
-                        search_text_edit(text, id, hint)
-                            .frame(egui::Frame::NONE)
-                            .desired_width(width),
-                    )
-                },
-            )
-            .inner
-        });
-
-    let stroke = if inner.inner.has_focus() {
-        ui.visuals().widgets.active.bg_stroke
-    } else if inner.inner.hovered() {
-        ui.visuals().widgets.hovered.bg_stroke
-    } else {
-        ui.visuals().widgets.inactive.bg_stroke
-    };
-    ui.painter().rect_stroke(
-        inner.response.rect,
-        egui::CornerRadius::same(SEARCH_INPUT_CORNER_RADIUS),
-        stroke,
-        egui::StrokeKind::Inside,
-    );
-
-    inner.inner
-}
-
-fn icon_text_input(
-    ui: &mut egui::Ui,
-    icon: &str,
-    text: &mut String,
-    id: egui::Id,
-    hint: &str,
-) -> egui::Response {
-    ui.horizontal(|ui| {
-        input_leading_icon(ui, icon);
-        compact_text_field(ui, text, id, hint, ui.available_width())
-    })
-    .inner
-}
-
-fn input_leading_icon(ui: &mut egui::Ui, icon: &str) {
-    ui.allocate_ui(egui::vec2(28.0, INPUT_HEIGHT), |ui| {
-        ui.with_layout(
-            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-            |ui| {
-                ui.label(
-                    egui::RichText::new(icon)
-                        .font(egui::FontId::proportional(ICON_SIZE))
-                        .color(text_muted(ui)),
-                );
-            },
-        );
-    });
-}
-
-fn icon_toggle_chip(
-    ui: &mut egui::Ui,
-    selected: bool,
-    icon: &str,
-    tooltip: &str,
-) -> egui::Response {
-    chip_button(
-        ui,
-        egui::RichText::new(icon)
-            .font(egui::FontId::proportional(16.0))
-            .color(if selected {
-                text_primary(ui)
-            } else {
-                text_primary(ui).gamma_multiply(0.9)
-            }),
-        selected,
-        ICON_BUTTON_SIZE,
-        egui::vec2(0.0, 0.0),
-        tooltip,
-    )
-}
-
-fn icon_action_button(
-    ui: &mut egui::Ui,
-    icon: &str,
-    tooltip: &str,
-    enabled: bool,
-) -> egui::Response {
-    callout::icon_button(
-        ui,
-        ("search_replace.action", tooltip),
-        icon,
-        16.0,
-        ICON_BUTTON_SIZE,
-        action_hover_bg(ui),
-        tooltip,
-        enabled,
-    )
-}
-
-fn search_text_edit<'a>(text: &'a mut String, id: egui::Id, hint: &str) -> egui::TextEdit<'a> {
-    egui::TextEdit::singleline(text)
-        .id(id)
-        .hint_text(hint)
-        .margin(egui::Margin::symmetric(10, 6))
-        .vertical_align(egui::Align::Center)
-}
-
-fn toggle_flag(ui: &mut egui::Ui, value: &mut bool, icon: &str, tooltip: &str) {
-    if icon_toggle_chip(ui, *value, icon, tooltip).clicked() {
-        *value = !*value;
-    }
-}
-
-fn trigger_action(ui: &mut egui::Ui, enabled: bool, icon: &str, tooltip: &str, flag: &mut bool) {
-    if icon_action_button(ui, icon, tooltip, enabled).clicked() {
-        *flag = true;
-    }
-}
-
-fn chip_button(
-    ui: &mut egui::Ui,
-    text: egui::RichText,
-    selected: bool,
-    min_size: egui::Vec2,
-    padding: egui::Vec2,
-    tooltip: &str,
-) -> egui::Response {
-    let previous_padding = ui.spacing().button_padding;
-    ui.spacing_mut().button_padding = padding;
-    let response = widget_ids::surface_response(
-        ui,
-        ("search_replace.chip", tooltip),
-        widget_ids::WidgetRole::ToggleChip,
-        |ui| {
-            ui.add(
-                egui::Button::new(text)
-                    .min_size(min_size)
-                    .fill(if selected {
-                        tab_selected_bg(ui)
-                    } else {
-                        action_hover_bg(ui)
-                    })
-                    .stroke(egui::Stroke::new(
-                        1.0,
-                        if selected {
-                            tab_selected_accent(ui)
-                        } else {
-                            border(ui)
-                        },
-                    ))
-                    .corner_radius(egui::CornerRadius::same(8)),
-            )
-        },
-    )
-    .on_hover_text(tooltip);
-    ui.spacing_mut().button_padding = previous_padding;
-    response
-}
-
-fn scope_tooltip(scope: SearchScope, origin: SearchScopeOrigin) -> &'static str {
-    match scope {
-        SearchScope::ActiveBuffer => "Search the Current Focused File",
-        SearchScope::SelectionOnly if origin == SearchScopeOrigin::SelectionDefault => {
-            "Search Selected Text (auto-selected)"
-        }
-        SearchScope::SelectionOnly => "Search Selected Text",
-        SearchScope::ActiveWorkspaceTab => "Search All Files on This Tab",
-        SearchScope::AllOpenTabs => "Search All Open Files",
-    }
-}
-
-fn scope_icon(scope: SearchScope) -> &'static str {
-    match scope {
-        SearchScope::SelectionOnly => TEXT_ALIGN_JUSTIFY,
-        SearchScope::ActiveBuffer => RECTANGLE,
-        SearchScope::ActiveWorkspaceTab => CARDS,
-        SearchScope::AllOpenTabs => TABS,
-    }
-}
-
-fn toggle_mode(ui: &mut egui::Ui, mode: &mut SearchMode) {
-    let regex_enabled = *mode == SearchMode::Regex;
-    if icon_toggle_chip(ui, regex_enabled, REGEX_ICON, "Regex").clicked() {
-        *mode = if regex_enabled {
-            SearchMode::PlainText
-        } else {
-            SearchMode::Regex
-        };
-    }
-}
-
-fn replace_tooltip<'a>(
-    availability: &'a SearchReplaceAvailability,
-    allowed_tooltip: &'a str,
-) -> &'a str {
-    match availability {
-        SearchReplaceAvailability::Allowed => allowed_tooltip,
-        SearchReplaceAvailability::Disabled => "Replace is unavailable until results are ready.",
-        SearchReplaceAvailability::Blocked(message) => message.as_str(),
-    }
 }
 
 fn consume_text_input_keys(

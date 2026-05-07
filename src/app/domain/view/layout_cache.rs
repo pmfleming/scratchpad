@@ -12,6 +12,7 @@ pub struct LayoutCacheKey {
     pub font_size_bits: u32,
     pub wrap_width_bits: u32,
     pub word_wrap: bool,
+    pub right_to_left_reading_order: bool,
     pub text_color: egui::Color32,
     pub dark_mode: bool,
     pub selection_highlight: Option<Range<usize>>,
@@ -77,6 +78,18 @@ impl LayoutCache {
             }
         });
         self.bytes = self.entries.iter().map(|entry| entry.input_bytes).sum();
+        if freed > 0 {
+            crate::app::memory_budget::record_free(
+                crate::app::memory_budget::BudgetCategory::Layout,
+                freed,
+            );
+        }
+    }
+
+    pub fn clear(&mut self) {
+        let freed = self.bytes;
+        self.entries.clear();
+        self.bytes = 0;
         if freed > 0 {
             crate::app::memory_budget::record_free(
                 crate::app::memory_budget::BudgetCategory::Layout,

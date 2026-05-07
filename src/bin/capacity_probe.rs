@@ -46,6 +46,14 @@ struct StepDescriptor {
     workload_label: String,
 }
 
+struct SweepDescriptor {
+    scenario: &'static str,
+    scenario_label: &'static str,
+    workload_family: &'static str,
+    workload_unit: &'static str,
+    workload_label: fn(usize) -> String,
+}
+
 fn main() {
     emit_file_size_sweep();
     emit_layout_bytes_sweep();
@@ -59,173 +67,173 @@ fn main() {
 }
 
 fn emit_file_size_sweep() {
-    for (step_index, bytes) in [MB, 8 * MB, 32 * MB, 128 * MB, 512 * MB, GB]
-        .into_iter()
-        .enumerate()
-    {
-        emit_step(
-            StepDescriptor {
-                scenario: "file_size_ceiling",
-                scenario_label: "File size ceiling sweep",
-                workload_family: "capacity-stress",
-                step_index,
-                workload_value: bytes,
-                workload_unit: "bytes",
-                workload_label: human_bytes(bytes),
-            },
-            || {
-                let buffer = BufferState::new(
-                    format!("file_size_{bytes}.txt"),
-                    plain_text_of_size(bytes),
-                    None,
-                );
-                black_box(buffer.line_count + buffer.document().piece_tree().len_bytes())
-            },
-        );
-    }
+    emit_sweep(
+        SweepDescriptor::bytes(
+            "file_size_ceiling",
+            "File size ceiling sweep",
+            "capacity-stress",
+        ),
+        [MB, 8 * MB, 32 * MB, 128 * MB, 512 * MB, GB],
+        |bytes| {
+            let buffer = BufferState::new(
+                format!("file_size_{bytes}.txt"),
+                plain_text_of_size(bytes),
+                None,
+            );
+            buffer.line_count + buffer.document().piece_tree().len_bytes()
+        },
+    );
 }
 
 fn emit_layout_bytes_sweep() {
-    for (step_index, bytes) in [64 * KB, MB, 8 * MB, 32 * MB, 128 * MB]
-        .into_iter()
-        .enumerate()
-    {
-        emit_step(
-            StepDescriptor {
-                scenario: "layout_bytes_ceiling",
-                scenario_label: "Layout bytes ceiling sweep",
-                workload_family: "capacity-measurement",
-                step_index,
-                workload_value: bytes,
-                workload_unit: "bytes",
-                workload_label: human_bytes(bytes),
-            },
-            || black_box(run_layout_capacity_cycle(bytes)),
-        );
-    }
+    emit_sweep(
+        SweepDescriptor::bytes(
+            "layout_bytes_ceiling",
+            "Layout bytes ceiling sweep",
+            "capacity-measurement",
+        ),
+        [64 * KB, MB, 8 * MB, 32 * MB, 128 * MB],
+        run_layout_capacity_cycle,
+    );
 }
 
 fn emit_tab_count_sweep() {
-    for (step_index, tab_count) in [32usize, 512, 4_096, 10_000, 20_000]
-        .into_iter()
-        .enumerate()
-    {
-        emit_step(
-            StepDescriptor {
-                scenario: "tab_count_ceiling",
-                scenario_label: "Tab count ceiling sweep",
-                workload_family: "capacity-stress",
-                step_index,
-                workload_value: tab_count,
-                workload_unit: "tabs",
-                workload_label: format!("{tab_count} tabs"),
-            },
-            || black_box(run_tab_capacity_cycle(tab_count)),
-        );
-    }
+    emit_sweep(
+        SweepDescriptor::count(
+            "tab_count_ceiling",
+            "Tab count ceiling sweep",
+            "tabs",
+            tabs_label,
+        ),
+        [32usize, 512, 4_096, 10_000, 20_000],
+        run_tab_capacity_cycle,
+    );
 }
 
 fn emit_many_file_count_sweep() {
-    for (step_index, file_count) in [1_000usize, 10_000, 50_000].into_iter().enumerate() {
-        emit_step(
-            StepDescriptor {
-                scenario: "many_file_count_ceiling",
-                scenario_label: "Many-file workspace ceiling sweep",
-                workload_family: "capacity-stress",
-                step_index,
-                workload_value: file_count,
-                workload_unit: "files",
-                workload_label: format!("{file_count} files"),
-            },
-            || black_box(run_many_file_capacity_cycle(file_count)),
-        );
-    }
+    emit_sweep(
+        SweepDescriptor::count(
+            "many_file_count_ceiling",
+            "Many-file workspace ceiling sweep",
+            "files",
+            files_label,
+        ),
+        [1_000usize, 10_000, 50_000],
+        run_many_file_capacity_cycle,
+    );
 }
 
 fn emit_search_file_size_sweep() {
-    for (step_index, bytes) in [MB, 64 * MB, 256 * MB, GB].into_iter().enumerate() {
-        emit_step(
-            StepDescriptor {
-                scenario: "search_file_size_ceiling",
-                scenario_label: "Search file-size ceiling sweep",
-                workload_family: "capacity-stress",
-                step_index,
-                workload_value: bytes,
-                workload_unit: "bytes",
-                workload_label: human_bytes(bytes),
-            },
-            || black_box(run_search_file_size_cycle(bytes)),
-        );
-    }
+    emit_sweep(
+        SweepDescriptor::bytes(
+            "search_file_size_ceiling",
+            "Search file-size ceiling sweep",
+            "capacity-stress",
+        ),
+        [MB, 64 * MB, 256 * MB, GB],
+        run_search_file_size_cycle,
+    );
 }
 
 fn emit_search_target_count_sweep() {
-    for (step_index, file_count) in [100usize, 1_000, 10_000].into_iter().enumerate() {
-        emit_step(
-            StepDescriptor {
-                scenario: "search_target_count_ceiling",
-                scenario_label: "Search target-count ceiling sweep",
-                workload_family: "capacity-stress",
-                step_index,
-                workload_value: file_count,
-                workload_unit: "files",
-                workload_label: format!("{file_count} files"),
-            },
-            || black_box(run_search_target_count_cycle(file_count)),
-        );
-    }
+    emit_sweep(
+        SweepDescriptor::count(
+            "search_target_count_ceiling",
+            "Search target-count ceiling sweep",
+            "files",
+            files_label,
+        ),
+        [100usize, 1_000, 10_000],
+        run_search_target_count_cycle,
+    );
 }
 
 fn emit_split_count_sweep() {
-    for (step_index, split_count) in [4usize, 32, 128, 512, 1_000].into_iter().enumerate() {
-        emit_step(
-            StepDescriptor {
-                scenario: "split_count_ceiling",
-                scenario_label: "Split count ceiling sweep",
-                workload_family: "capacity-stress",
-                step_index,
-                workload_value: split_count,
-                workload_unit: "splits",
-                workload_label: format!("{split_count} splits"),
-            },
-            || black_box(run_split_capacity_cycle(split_count)),
-        );
-    }
+    emit_sweep(
+        SweepDescriptor::count(
+            "split_count_ceiling",
+            "Split count ceiling sweep",
+            "splits",
+            splits_label,
+        ),
+        [4usize, 32, 128, 512, 1_000],
+        run_split_capacity_cycle,
+    );
 }
 
 fn emit_view_count_sweep() {
-    for (step_index, view_count) in [32usize, 128, 512, 1_000].into_iter().enumerate() {
-        emit_step(
-            StepDescriptor {
-                scenario: "view_count_ceiling",
-                scenario_label: "View count ceiling sweep",
-                workload_family: "capacity-stress",
-                step_index,
-                workload_value: view_count,
-                workload_unit: "views",
-                workload_label: format!("{view_count} views"),
-            },
-            || black_box(run_view_capacity_cycle(view_count)),
-        );
-    }
+    emit_sweep(
+        SweepDescriptor::count(
+            "view_count_ceiling",
+            "View count ceiling sweep",
+            "views",
+            views_label,
+        ),
+        [32usize, 128, 512, 1_000],
+        run_view_capacity_cycle,
+    );
 }
 
 fn emit_paste_size_sweep() {
-    for (step_index, insert_bytes) in [64 * KB, MB, 8 * MB, 64 * MB, 256 * MB, 512 * MB]
-        .into_iter()
-        .enumerate()
-    {
+    emit_sweep(
+        SweepDescriptor::bytes(
+            "paste_size_ceiling",
+            "Paste size ceiling sweep",
+            "capacity-stress",
+        ),
+        [64 * KB, MB, 8 * MB, 64 * MB, 256 * MB, 512 * MB],
+        run_paste_capacity_cycle,
+    );
+}
+
+impl SweepDescriptor {
+    fn bytes(
+        scenario: &'static str,
+        scenario_label: &'static str,
+        workload_family: &'static str,
+    ) -> Self {
+        Self {
+            scenario,
+            scenario_label,
+            workload_family,
+            workload_unit: "bytes",
+            workload_label: human_bytes,
+        }
+    }
+
+    fn count(
+        scenario: &'static str,
+        scenario_label: &'static str,
+        workload_unit: &'static str,
+        workload_label: fn(usize) -> String,
+    ) -> Self {
+        Self {
+            scenario,
+            scenario_label,
+            workload_family: "capacity-stress",
+            workload_unit,
+            workload_label,
+        }
+    }
+}
+
+fn emit_sweep<const N: usize>(
+    descriptor: SweepDescriptor,
+    values: [usize; N],
+    run: impl Fn(usize) -> usize,
+) {
+    for (step_index, workload_value) in values.into_iter().enumerate() {
         emit_step(
             StepDescriptor {
-                scenario: "paste_size_ceiling",
-                scenario_label: "Paste size ceiling sweep",
-                workload_family: "capacity-stress",
+                scenario: descriptor.scenario,
+                scenario_label: descriptor.scenario_label,
+                workload_family: descriptor.workload_family,
                 step_index,
-                workload_value: insert_bytes,
-                workload_unit: "bytes",
-                workload_label: human_bytes(insert_bytes),
+                workload_value,
+                workload_unit: descriptor.workload_unit,
+                workload_label: (descriptor.workload_label)(workload_value),
             },
-            || black_box(run_paste_capacity_cycle(insert_bytes)),
+            || black_box(run(workload_value)),
         );
     }
 }
@@ -430,13 +438,10 @@ fn build_tile_heavy_tab(tile_count: usize, bytes_per_tile: usize) -> WorkspaceTa
 }
 
 fn plain_text_of_size(target_bytes: usize) -> String {
-    let line = "The quick brown fox jumps over the lazy dog 0123456789.\n";
-    let repeats = (target_bytes / line.len()).max(1);
-    let mut text = String::with_capacity(repeats * line.len());
-    for _ in 0..repeats {
-        text.push_str(line);
-    }
-    text
+    repeat_unit_to_target_size(
+        "The quick brown fox jumps over the lazy dog 0123456789.\n",
+        target_bytes,
+    )
 }
 
 fn search_capacity_program() -> SearchProgram {
@@ -452,14 +457,34 @@ fn search_capacity_program() -> SearchProgram {
 }
 
 fn search_text_of_size(target_bytes: usize) -> String {
-    let unit = "hay hay hay hay\n";
+    let mut text = repeat_unit_to_target_size("hay hay hay hay\n", target_bytes);
+    text.push_str("needle\n");
+    text
+}
+
+fn repeat_unit_to_target_size(unit: &str, target_bytes: usize) -> String {
     let repeats = (target_bytes / unit.len()).max(1);
     let mut text = String::with_capacity(repeats * unit.len());
     for _ in 0..repeats {
         text.push_str(unit);
     }
-    text.push_str("needle\n");
     text
+}
+
+fn tabs_label(value: usize) -> String {
+    format!("{value} tabs")
+}
+
+fn files_label(value: usize) -> String {
+    format!("{value} files")
+}
+
+fn splits_label(value: usize) -> String {
+    format!("{value} splits")
+}
+
+fn views_label(value: usize) -> String {
+    format!("{value} views")
 }
 
 fn human_bytes(value: usize) -> String {

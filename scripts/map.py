@@ -5,7 +5,7 @@ import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import DefaultDict, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, DefaultDict, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from report_modes import add_mode_argument, emit_report
 
@@ -264,53 +264,47 @@ class ArchitectureMapper:
 
         tests = payload.get("tests", []) if isinstance(payload, dict) else []
         for item in tests:
-            module = str(item.get("module", ""))
-            if not module:
-                continue
-            candidates = [
-                module,
-                module.replace("/", "::"),
-                module.replace("\\", "::"),
-            ]
-            matched = None
-            for candidate in candidates:
-                if candidate in self.module_paths:
-                    matched = candidate
-                    break
-            if matched is None:
-                matched = self._match_test_to_module(str(item.get("path", "")), module)
+            matched = self._correctness_module_for_item(item)
             if matched is None:
                 continue
-            entry = self.correctness.setdefault(
-                matched,
+            self._record_correctness_item(matched, item)
+
+    def _correctness_module_for_item(self, item: Dict[str, object]) -> Optional[str]:
+        module = str(item.get("module", ""))
+        if not module:
+            return None
+        for candidate in (module, module.replace("/", "::"), module.replace("\\", "::")):
+            if candidate in self.module_paths:
+                return candidate
+        return self._match_test_to_module(str(item.get("path", "")), module)
+
+    def _record_correctness_item(self, matched: str, item: Dict[str, object]) -> None:
+        entry = self.correctness.setdefault(
+            matched,
+            {
+                "test_count": 0,
+                "failed_tests": 0,
+                "unknown_tests": 0,
+                "skipped_tests": 0,
+                "tests": [],
+            },
+        )
+        entry["test_count"] = int(entry["test_count"]) + 1
+        status = str(item.get("last_status", "unknown"))
+        if status in {"failed", "unknown", "skipped"}:
+            entry[f"{status}_tests"] = int(entry[f"{status}_tests"]) + 1
+        tests_list = entry["tests"]
+        if isinstance(tests_list, list):
+            tests_list.append(
                 {
-                    "test_count": 0,
-                    "failed_tests": 0,
-                    "unknown_tests": 0,
-                    "skipped_tests": 0,
-                    "tests": [],
-                },
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                    "path": item.get("path"),
+                    "line": item.get("line"),
+                    "status": status,
+                    "description": item.get("description"),
+                }
             )
-            entry["test_count"] = int(entry["test_count"]) + 1
-            status = str(item.get("last_status", "unknown"))
-            if status == "failed":
-                entry["failed_tests"] = int(entry["failed_tests"]) + 1
-            elif status == "unknown":
-                entry["unknown_tests"] = int(entry["unknown_tests"]) + 1
-            elif status == "skipped":
-                entry["skipped_tests"] = int(entry["skipped_tests"]) + 1
-            tests_list = entry["tests"]
-            if isinstance(tests_list, list):
-                tests_list.append(
-                    {
-                        "id": item.get("id"),
-                        "name": item.get("name"),
-                        "path": item.get("path"),
-                        "line": item.get("line"),
-                        "status": status,
-                        "description": item.get("description"),
-                    }
-                )
 
     def _match_test_to_module(self, path_text: str, module: str) -> Optional[str]:
         stem = Path(path_text).stem
@@ -320,6 +314,92 @@ class ArchitectureMapper:
             if tail in hints or any(hint and hint in mod_name for hint in hints):
                 return mod_name
         return None
+
+    @staticmethod
+    def _empty_git_record() -> Dict[str, object]:
+        return {
+            "commits": 0,
+            "churn": 0,
+            "contributors": set(),
+            "defect_commits": 0,
+            "cochange_commits": 0,
+            "cochange_total": 0,
+            "cochanged_modules": set(),
+        }
+
+    @staticmethod
+    def _record_cochanges(
+        records: DefaultDict[str, Dict[str, object]],
+        current_modules: Set[str],
+    ) -> None:
+        if not current_modules:
+            return
+        peer_count = max(0, len(current_modules) - 1)
+        for mod_name in current_modules:
+            record = records[mod_name]
+            record["cochange_commits"] = int(record["cochange_commits"]) + 1
+            record["cochange_total"] = int(record["cochange_total"]) + peer_count
+            cast_set = record["cochanged_modules"]
+            assert isinstance(cast_set, set)
+            cast_set.update(current_modules - {mod_name})
+
+    def _git_module_for_numstat(self, raw_line: str) -> Optional[Tuple[str, int]]:
+        parts = raw_line.split("\t")
+        if len(parts) != 3:
+            return None
+        added_text, deleted_text, path_text = parts
+        if not path_text.endswith(".rs"):
+            return None
+        mod_name = self.file_to_mod.get(str(Path(path_text).resolve()))
+        if mod_name is None:
+            return None
+        added = int(added_text) if added_text.isdigit() else 0
+        deleted = int(deleted_text) if deleted_text.isdigit() else 0
+        return mod_name, added + deleted
+
+    @staticmethod
+    def _record_git_touch(
+        record: Dict[str, object],
+        *,
+        churn: int,
+        author: str,
+        subject: str,
+    ) -> None:
+        record["commits"] = int(record["commits"]) + 1
+        record["churn"] = int(record["churn"]) + churn
+        contributors = record["contributors"]
+        assert isinstance(contributors, set)
+        contributors.add(author)
+        if any(keyword in subject for keyword in DEFECT_KEYWORDS):
+            record["defect_commits"] = int(record["defect_commits"]) + 1
+
+    @staticmethod
+    def _finalize_git_record(record: Dict[str, object]) -> Dict[str, object]:
+        contributors = (
+            sorted(record["contributors"]) if isinstance(record["contributors"], set) else []
+        )
+        cochanged_modules = (
+            sorted(record["cochanged_modules"])
+            if isinstance(record["cochanged_modules"], set)
+            else []
+        )
+        cochange_commits = int(record["cochange_commits"])
+        return {
+            "commits": int(record["commits"]),
+            "churn": int(record["churn"]),
+            "contributors": contributors,
+            "contributor_count": len(contributors),
+            "defect_commits": int(record["defect_commits"]),
+            "cochange_commits": cochange_commits,
+            "cochange_total": int(record["cochange_total"]),
+            "avg_cochanged_modules": (
+                float(record["cochange_total"]) / cochange_commits
+                if cochange_commits
+                else 0.0
+            ),
+            "cochanged_modules": cochanged_modules,
+            "cochanged_module_count": len(cochanged_modules),
+        }
 
     def gather_git_history(self) -> None:
         cmd = [
@@ -339,37 +419,15 @@ class ArchitectureMapper:
             print(f"Warning: Could not gather git history: {exc}", file=sys.stderr)
             return
 
-        records: DefaultDict[str, Dict[str, object]] = defaultdict(
-            lambda: {
-                "commits": 0,
-                "churn": 0,
-                "contributors": set(),
-                "defect_commits": 0,
-                "cochange_commits": 0,
-                "cochange_total": 0,
-                "cochanged_modules": set(),
-            }
-        )
+        records: DefaultDict[str, Dict[str, object]] = defaultdict(self._empty_git_record)
 
         current_author = ""
         current_subject = ""
         current_modules: Set[str] = set()
 
-        def flush_commit_modules() -> None:
-            if not current_modules:
-                return
-            for mod_name in current_modules:
-                record = records[mod_name]
-                peer_count = max(0, len(current_modules) - 1)
-                record["cochange_commits"] = int(record["cochange_commits"]) + 1
-                record["cochange_total"] = int(record["cochange_total"]) + peer_count
-                cast_set = record["cochanged_modules"]
-                assert isinstance(cast_set, set)
-                cast_set.update(current_modules - {mod_name})
-
         for raw_line in result.stdout.splitlines():
             if raw_line.startswith("commit\t"):
-                flush_commit_modules()
+                self._record_cochanges(records, current_modules)
                 current_modules = set()
                 parts = raw_line.split("\t", 3)
                 current_author = parts[2] if len(parts) > 2 else ""
@@ -379,69 +437,25 @@ class ArchitectureMapper:
             if not raw_line.strip():
                 continue
 
-            parts = raw_line.split("\t")
-            if len(parts) != 3:
+            parsed = self._git_module_for_numstat(raw_line)
+            if parsed is None:
                 continue
 
-            added_text, deleted_text, path_text = parts
-            if not path_text.endswith(".rs"):
-                continue
-
-            resolved_path = str(Path(path_text).resolve())
-            mod_name = self.file_to_mod.get(resolved_path)
-            if mod_name is None:
-                continue
-
+            mod_name, churn = parsed
             current_modules.add(mod_name)
-            added = int(added_text) if added_text.isdigit() else 0
-            deleted = int(deleted_text) if deleted_text.isdigit() else 0
-            record = records[mod_name]
-            record["commits"] = int(record["commits"]) + 1
-            record["churn"] = int(record["churn"]) + added + deleted
-            cast_set = record["contributors"]
-            assert isinstance(cast_set, set)
-            cast_set.add(current_author)
-            if any(keyword in current_subject for keyword in DEFECT_KEYWORDS):
-                record["defect_commits"] = int(record["defect_commits"]) + 1
+            self._record_git_touch(
+                records[mod_name],
+                churn=churn,
+                author=current_author,
+                subject=current_subject,
+            )
 
-        flush_commit_modules()
+        self._record_cochanges(records, current_modules)
 
         for mod_name in self.module_paths:
-            record = records.get(
-                mod_name,
-                {
-                    "commits": 0,
-                    "churn": 0,
-                    "contributors": set(),
-                    "defect_commits": 0,
-                    "cochange_commits": 0,
-                    "cochange_total": 0,
-                    "cochanged_modules": set(),
-                },
+            self.git_history[mod_name] = self._finalize_git_record(
+                records.get(mod_name, self._empty_git_record())
             )
-            contributors = sorted(record["contributors"]) if isinstance(record["contributors"], set) else []
-            cochanged_modules = (
-                sorted(record["cochanged_modules"])
-                if isinstance(record["cochanged_modules"], set)
-                else []
-            )
-            cochange_commits = int(record["cochange_commits"])
-            self.git_history[mod_name] = {
-                "commits": int(record["commits"]),
-                "churn": int(record["churn"]),
-                "contributors": contributors,
-                "contributor_count": len(contributors),
-                "defect_commits": int(record["defect_commits"]),
-                "cochange_commits": cochange_commits,
-                "cochange_total": int(record["cochange_total"]),
-                "avg_cochanged_modules": (
-                    float(record["cochange_total"]) / cochange_commits
-                    if cochange_commits
-                    else 0.0
-                ),
-                "cochanged_modules": cochanged_modules,
-                "cochanged_module_count": len(cochanged_modules),
-            }
 
     def gather_locality_leverage_metrics(self) -> None:
         self.locality_metrics = self._load_module_metric_artifact(
@@ -521,164 +535,178 @@ class ArchitectureMapper:
         inbound = len(self.reverse_dependencies.get(mod_name, set()))
         return outbound, inbound
 
+    def _risk_inputs(self, mod_name: str) -> Dict[str, Any]:
+        metric = self.metrics.get(mod_name, {})
+        perf = self.performance.get(mod_name, {})
+        git = self.git_history.get(mod_name, {})
+        tests = self.test_support.get(mod_name, {})
+        correctness = self.correctness.get(mod_name, {})
+        outbound, inbound = self._dependency_density(mod_name)
+        test_count = int(correctness.get("test_count", 0))
+        return {
+            "metric": metric,
+            "perf": perf,
+            "git": git,
+            "tests": tests,
+            "correctness": correctness,
+            "outbound": outbound,
+            "inbound": inbound,
+            "public_api": self.public_api_counts.get(mod_name, 0),
+            "sloc": float(metric.get("sloc", 0.0)),
+            "complexity": float(metric.get("score", 0.0)),
+            "churn": float(git.get("churn", 0)),
+            "contributors": int(git.get("contributor_count", 0)),
+            "defect_commits": int(git.get("defect_commits", 0)),
+            "commit_count": int(git.get("commits", 0)),
+            "test_count": test_count,
+            "failed_tests": int(correctness.get("failed_tests", 0)),
+            "unknown_tests": int(correctness.get("unknown_tests", 0)),
+            "skipped_tests": int(correctness.get("skipped_tests", 0)),
+            "has_correctness_tests": bool(tests.get("coverage_hint", False)) or test_count > 0,
+            "perf_score": float(perf.get("score", 0.0)),
+            "perf_mean_ms": float(perf.get("mean_ms", 0.0)),
+            "perf_variance": float(perf.get("variance", 0.0)),
+            "layer_violations": self._count_layer_violations(mod_name),
+            "cycle_member": mod_name in self.cycle_members,
+        }
+
+    @staticmethod
+    def _risk_scores(values: Dict[str, Any]) -> Dict[str, float]:
+        maintainability = round(
+            values["complexity"]
+            + min(70.0, values["sloc"] * 0.12)
+            + min(30.0, values["public_api"] * 2.5)
+            + min(35.0, values["outbound"] * 4.0 + values["inbound"] * 1.0),
+            2,
+        )
+        change = round(
+            min(160.0, values["churn"] / 12.0)
+            + min(100.0, values["commit_count"] * 2.5)
+            + min(80.0, values["contributors"] * 14.0)
+            + min(90.0, values["defect_commits"] * 18.0)
+            + (90.0 if not values["has_correctness_tests"] else 0.0),
+            2,
+        )
+        correctness = round(
+            (140.0 if values["failed_tests"] else 0.0)
+            + min(120.0, values["failed_tests"] * 45.0)
+            + min(80.0, values["unknown_tests"] * 4.0)
+            + min(40.0, values["skipped_tests"] * 10.0)
+            + (90.0 if not values["has_correctness_tests"] else 0.0),
+            2,
+        )
+        performance = round(
+            values["perf_score"]
+            + min(120.0, values["perf_mean_ms"] * 2.5)
+            + min(90.0, values["perf_variance"] * 180.0),
+            2,
+        )
+        architectural = round(
+            min(120.0, values["outbound"] * 10.0)
+            + min(120.0, values["inbound"] * 8.0)
+            + min(120.0, values["layer_violations"] * 32.0)
+            + (110.0 if values["cycle_member"] else 0.0)
+            + (60.0 if values["sloc"] >= 250 else 0.0),
+            2,
+        )
+        return {
+            "maintainability_risk": maintainability,
+            "change_risk": change,
+            "performance_risk": performance,
+            "correctness_risk": correctness,
+            "quality_risk": maintainability,
+            "architectural_risk": architectural,
+            "total_score": round(
+                maintainability + change + performance + architectural + correctness, 2
+            ),
+        }
+
+    @staticmethod
+    def _add_signal(
+        signals: Dict[str, List[str]],
+        category: str,
+        condition: bool,
+        message: str,
+    ) -> None:
+        if condition:
+            signals[category].append(message)
+
+    def _risk_signals(self, values: Dict[str, Any]) -> Dict[str, List[str]]:
+        signals: Dict[str, List[str]] = {category: [] for category in RISK_CATEGORIES}
+        self._add_signal(
+            signals,
+            "maintainability",
+            values["complexity"] >= 300,
+            f"high internal complexity {values['complexity']:.0f}",
+        )
+        self._add_signal(
+            signals,
+            "maintainability",
+            values["sloc"] >= 150,
+            f"large module {int(values['sloc'])} sloc",
+        )
+        self._add_signal(
+            signals,
+            "maintainability",
+            values["public_api"] >= 10,
+            f"broad interface {values['public_api']} public items",
+        )
+        self._add_signal(
+            signals,
+            "maintainability",
+            values["outbound"] >= 10 or values["inbound"] >= 20,
+            f"high coupling in={values['inbound']} out={values['outbound']}",
+        )
+        self._add_signal(signals, "change", not values["has_correctness_tests"], "low test evidence")
+        self._add_signal(signals, "change", values["churn"] >= 200, f"high churn {int(values['churn'])} lines")
+        self._add_signal(signals, "change", values["contributors"] >= 3, f"many contributors {values['contributors']}")
+        self._add_signal(signals, "change", values["defect_commits"] >= 1, f"defect history {values['defect_commits']} fix commits")
+        self._add_signal(signals, "performance", values["perf_mean_ms"] > 0, f"runtime cost {values['perf_mean_ms']:.2f} ms")
+        self._add_signal(signals, "performance", values["perf_variance"] >= 0.15, f"instability variance {values['perf_variance']:.2f}")
+        self._add_signal(signals, "performance", not values["perf"].get("items"), "no benchmark mapping")
+        self._add_signal(signals, "correctness", bool(values["failed_tests"]), f"failing tests {values['failed_tests']}")
+        self._add_signal(signals, "correctness", bool(values["unknown_tests"]), f"unknown tests {values['unknown_tests']}")
+        self._add_signal(signals, "correctness", bool(values["skipped_tests"]), f"skipped tests {values['skipped_tests']}")
+        self._add_signal(signals, "correctness", not values["has_correctness_tests"], "no direct tests")
+        self._add_signal(signals, "architectural", values["layer_violations"] >= 1, f"layer violations {values['layer_violations']}")
+        self._add_signal(signals, "architectural", values["cycle_member"], "circular dependency")
+        self._add_signal(signals, "architectural", values["inbound"] >= 6, f"oversized hub inbound {values['inbound']}")
+        self._add_signal(signals, "architectural", values["sloc"] >= 250, "oversized module")
+        return {key: value or ["stable"] for key, value in signals.items()}
+
+    @staticmethod
+    def _risk_evidence(values: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "complexity_score": values["complexity"],
+            "sloc": int(values["sloc"]),
+            "public_api_count": values["public_api"],
+            "outbound_dependencies": values["outbound"],
+            "inbound_dependencies": values["inbound"],
+            "commit_count": values["commit_count"],
+            "churn": int(values["churn"]),
+            "contributors": values["git"].get("contributors", []),
+            "contributor_count": values["contributors"],
+            "defect_commits": values["defect_commits"],
+            "has_tests": values["has_correctness_tests"],
+            "test_refs": values["tests"].get("external_refs", []),
+            "test_count": values["test_count"],
+            "failed_tests": values["failed_tests"],
+            "unknown_tests": values["unknown_tests"],
+            "skipped_tests": values["skipped_tests"],
+            "correctness_tests": values["correctness"].get("tests", []),
+            "layer_violations": values["layer_violations"],
+            "cycle_member": values["cycle_member"],
+            "perf_mean_ms": values["perf_mean_ms"],
+            "perf_variance": values["perf_variance"],
+        }
+
     def compute_risks(self) -> None:
         for mod_name in sorted(self.module_paths):
-            metric = self.metrics.get(mod_name, {})
-            perf = self.performance.get(mod_name, {})
-            git = self.git_history.get(mod_name, {})
-            tests = self.test_support.get(mod_name, {})
-            correctness = self.correctness.get(mod_name, {})
-            outbound, inbound = self._dependency_density(mod_name)
-            public_api = self.public_api_counts.get(mod_name, 0)
-            sloc = float(metric.get("sloc", 0.0))
-            complexity = float(metric.get("score", 0.0))
-            churn = float(git.get("churn", 0))
-            contributors = int(git.get("contributor_count", 0))
-            defect_commits = int(git.get("defect_commits", 0))
-            commit_count = int(git.get("commits", 0))
-            has_tests = bool(tests.get("coverage_hint", False))
-            test_count = int(correctness.get("test_count", 0))
-            failed_tests = int(correctness.get("failed_tests", 0))
-            unknown_tests = int(correctness.get("unknown_tests", 0))
-            skipped_tests = int(correctness.get("skipped_tests", 0))
-            has_correctness_tests = has_tests or test_count > 0
-            perf_score = float(perf.get("score", 0.0))
-            perf_mean_ms = float(perf.get("mean_ms", 0.0))
-            perf_variance = float(perf.get("variance", 0.0))
-            layer_violations = self._count_layer_violations(mod_name)
-            cycle_member = mod_name in self.cycle_members
-
-            maintainability = round(
-                complexity
-                + min(70.0, sloc * 0.12)
-                + min(30.0, public_api * 2.5)
-                + min(35.0, outbound * 4.0 + inbound * 1.0),
-                2,
-            )
-            change_risk = round(
-                min(160.0, churn / 12.0)
-                + min(100.0, commit_count * 2.5)
-                + min(80.0, contributors * 14.0)
-                + min(90.0, defect_commits * 18.0)
-                + (90.0 if not has_correctness_tests else 0.0),
-                2,
-            )
-            correctness_risk = round(
-                (140.0 if failed_tests else 0.0)
-                + min(120.0, failed_tests * 45.0)
-                + min(80.0, unknown_tests * 4.0)
-                + min(40.0, skipped_tests * 10.0)
-                + (90.0 if not has_correctness_tests else 0.0),
-                2,
-            )
-            performance = round(
-                perf_score
-                + min(120.0, perf_mean_ms * 2.5)
-                + min(90.0, perf_variance * 180.0),
-                2,
-            )
-            architectural = round(
-                min(120.0, outbound * 10.0)
-                + min(120.0, inbound * 8.0)
-                + min(120.0, layer_violations * 32.0)
-                + (110.0 if cycle_member else 0.0)
-                + (60.0 if sloc >= 250 else 0.0),
-                2,
-            )
-            total = round(
-                maintainability + change_risk + performance + architectural + correctness_risk, 2
-            )
-
-            signals: Dict[str, List[str]] = {
-                "maintainability": [],
-                "change": [],
-                "performance": [],
-                "correctness": [],
-                "architectural": [],
-            }
-            if complexity >= 300:
-                signals["maintainability"].append(
-                    f"high internal complexity {complexity:.0f}"
-                )
-            if sloc >= 150:
-                signals["maintainability"].append(f"large module {int(sloc)} sloc")
-            if public_api >= 10:
-                signals["maintainability"].append(f"broad interface {public_api} public items")
-            if outbound >= 10 or inbound >= 20:
-                signals["maintainability"].append(
-                    f"high coupling in={inbound} out={outbound}"
-                )
-
-            if not has_correctness_tests:
-                signals["change"].append("low test evidence")
-            if churn >= 200:
-                signals["change"].append(f"high churn {int(churn)} lines")
-            if contributors >= 3:
-                signals["change"].append(f"many contributors {contributors}")
-            if defect_commits >= 1:
-                signals["change"].append(f"defect history {defect_commits} fix commits")
-
-            if perf_mean_ms > 0:
-                signals["performance"].append(f"runtime cost {perf_mean_ms:.2f} ms")
-            if perf_variance >= 0.15:
-                signals["performance"].append(
-                    f"instability variance {perf_variance:.2f}"
-                )
-            if not perf.get("items"):
-                signals["performance"].append("no benchmark mapping")
-
-            if failed_tests:
-                signals["correctness"].append(f"failing tests {failed_tests}")
-            if unknown_tests:
-                signals["correctness"].append(f"unknown tests {unknown_tests}")
-            if skipped_tests:
-                signals["correctness"].append(f"skipped tests {skipped_tests}")
-            if not has_correctness_tests:
-                signals["correctness"].append("no direct tests")
-
-            if layer_violations >= 1:
-                signals["architectural"].append(
-                    f"layer violations {layer_violations}"
-                )
-            if cycle_member:
-                signals["architectural"].append("circular dependency")
-            if inbound >= 6:
-                signals["architectural"].append(f"oversized hub inbound {inbound}")
-            if sloc >= 250:
-                signals["architectural"].append("oversized module")
-
+            values = self._risk_inputs(mod_name)
             self.risk_breakdown[mod_name] = {
-                "maintainability_risk": maintainability,
-                "change_risk": change_risk,
-                "performance_risk": performance,
-                "correctness_risk": correctness_risk,
-                "quality_risk": maintainability,
-                "architectural_risk": architectural,
-                "total_score": total,
-                "signals": {key: value or ["stable"] for key, value in signals.items()},
-                "evidence": {
-                    "complexity_score": complexity,
-                    "sloc": int(sloc),
-                    "public_api_count": public_api,
-                    "outbound_dependencies": outbound,
-                    "inbound_dependencies": inbound,
-                    "commit_count": commit_count,
-                    "churn": int(churn),
-                    "contributors": git.get("contributors", []),
-                    "contributor_count": contributors,
-                    "defect_commits": defect_commits,
-                    "has_tests": has_correctness_tests,
-                    "test_refs": tests.get("external_refs", []),
-                    "test_count": test_count,
-                    "failed_tests": failed_tests,
-                    "unknown_tests": unknown_tests,
-                    "skipped_tests": skipped_tests,
-                    "correctness_tests": correctness.get("tests", []),
-                    "layer_violations": layer_violations,
-                    "cycle_member": cycle_member,
-                    "perf_mean_ms": perf_mean_ms,
-                    "perf_variance": perf_variance,
-                },
+                **self._risk_scores(values),
+                "signals": self._risk_signals(values),
+                "evidence": self._risk_evidence(values),
             }
 
     def risk_color(self, score: float) -> str:
@@ -695,141 +723,122 @@ class ArchitectureMapper:
         opacity = max(0.1, 0.4 - (len(parts) * 0.08))
         return {"color": base_color, "opacity": opacity}
 
-    def build_graph_payload(self) -> Dict[str, List[Dict]]:
-        nodes: List[Dict] = []
-        edges: List[Dict] = []
+    def _graph_groups(self) -> Set[str]:
         groups: Set[str] = set()
-
         for mod_name in self.dependencies:
             parts = mod_name.split("::")
             for depth in range(1, len(parts)):
                 groups.add("::".join(parts[:depth]))
+        return groups
 
-        for group in sorted(groups):
-            style = self.get_group_style(group)
-            parent = group_id("::".join(group.split("::")[:-1]) or None)
-            nodes.append(
-                {
-                    "data": {
-                        "id": group_id(group),
-                        "module": group,
-                        "label": group.split("::")[-1],
-                        "parent": parent,
-                        "is_group": True,
-                        "bg_color": style["color"],
-                        "bg_opacity": style["opacity"],
-                    }
-                }
+    def _group_node(self, group: str) -> Dict[str, Dict[str, object]]:
+        style = self.get_group_style(group)
+        return {
+            "data": {
+                "id": group_id(group),
+                "module": group,
+                "label": group.split("::")[-1],
+                "parent": group_id("::".join(group.split("::")[:-1]) or None),
+                "is_group": True,
+                "bg_color": style["color"],
+                "bg_opacity": style["opacity"],
+            }
+        }
+
+    @staticmethod
+    def _perf_benchmark_rows(perf_items: List[Dict]) -> List[Dict[str, object]]:
+        return [
+            {
+                "name": item["name"],
+                "mean_ms": float(item["mean_ns"]) / 1_000_000.0,
+                "dispersion_ms": (
+                    float(item["dispersion_ns"]) / 1_000_000.0
+                    if item.get("dispersion_ns") is not None
+                    else None
+                ),
+                "dispersion_label": item.get("dispersion_label", "median_abs_dev"),
+                "kind": item.get("benchmark_kind", "unmapped"),
+                "threshold_ms": item.get("threshold_ms", 50.0),
+                "signals": item.get("signals", "nominal"),
+            }
+            for item in perf_items
+        ]
+
+    @staticmethod
+    def _flat_signals(category_signals: Dict[str, List[str]]) -> List[str]:
+        return list(
+            dict.fromkeys(
+                signal
+                for values in category_signals.values()
+                for signal in values
             )
+        )
 
-        for mod_name in sorted(self.dependencies):
-            perf_data = self.performance.get(mod_name, {})
-            perf_items = perf_data.get("items", [])
-            metric = self.metrics.get(mod_name, {})
-            risk = self.risk_breakdown.get(mod_name, {})
-            evidence = risk.get("evidence", {})
-            category_signals = risk.get("signals", {})
-            locality = self.locality_metrics.get(mod_name, {})
-            leverage = self.leverage_metrics.get(mod_name, {})
+    def _module_node(self, mod_name: str) -> Dict[str, Dict[str, object]]:
+        perf_data = self.performance.get(mod_name, {})
+        perf_items = perf_data.get("items", [])
+        metric = self.metrics.get(mod_name, {})
+        risk = self.risk_breakdown.get(mod_name, {})
+        evidence = risk.get("evidence", {})
+        category_signals = risk.get("signals", {})
+        locality = self.locality_metrics.get(mod_name, {})
+        leverage = self.leverage_metrics.get(mod_name, {})
+        leverage_score = float(
+            leverage.get("leverage_score", leverage.get("total_leverage_score", 0.0))
+        )
+        return {
+            "data": {
+                "id": mod_name,
+                "layer": self.layer_name(mod_name),
+                "churn": int(evidence.get("churn", 0)),
+                "label": mod_name.split("::")[-1],
+                "parent": group_id("::".join(mod_name.split("::")[:-1]) or None),
+                "comp_score": float(metric.get("score", 0.0)),
+                "perf_score": float(perf_data.get("score", 0.0)),
+                "quality_risk": float(
+                    risk.get("quality_risk", risk.get("maintainability_risk", 0.0))
+                ),
+                "maintainability_risk": float(risk.get("maintainability_risk", 0.0)),
+                "correctness_risk": float(risk.get("correctness_risk", 0.0)),
+                "change_risk": float(risk.get("change_risk", 0.0)),
+                "performance_risk": float(risk.get("performance_risk", 0.0)),
+                "architectural_risk": float(risk.get("architectural_risk", 0.0)),
+                "locality_score": float(locality.get("locality_score", 0.0)),
+                "locality_risk": float(
+                    locality.get("non_locality_risk", locality.get("locality_risk", 0.0))
+                ),
+                "non_locality_risk": float(
+                    locality.get("non_locality_risk", locality.get("locality_risk", 0.0))
+                ),
+                "leverage_score": leverage_score,
+                "leverage_risk": float(
+                    leverage.get("leverage_risk", 100.0 - leverage_score)
+                ),
+                "total_score": float(risk.get("total_score", 0.0)),
+                "sloc": int(metric.get("sloc", 0)),
+                "signals": self._flat_signals(category_signals),
+                "category_signals": category_signals,
+                "risk_colors": self.risk_colors(risk),
+                "evidence": evidence,
+                "locality_metrics": locality,
+                "leverage_metrics": leverage,
+                "is_slow": bool(perf_items),
+                "perf_benchmarks": self._perf_benchmark_rows(perf_items),
+                "perf_kind": ", ".join(
+                    sorted({item.get("benchmark_kind", "unmapped") for item in perf_items})
+                ),
+            }
+        }
 
-            nodes.append(
-                {
-                    "data": {
-                        "id": mod_name,
-                        "layer": self.layer_name(mod_name),
-                        "churn": int(evidence.get("churn", 0)),
-                        "label": mod_name.split("::")[-1],
-                        "parent": group_id("::".join(mod_name.split("::")[:-1]) or None),
-                        "comp_score": float(metric.get("score", 0.0)),
-                        "perf_score": float(perf_data.get("score", 0.0)),
-                        "quality_risk": float(risk.get("quality_risk", risk.get("maintainability_risk", 0.0))),
-                        "maintainability_risk": float(
-                            risk.get("maintainability_risk", 0.0)
-                        ),
-                        "correctness_risk": float(risk.get("correctness_risk", 0.0)),
-                        "change_risk": float(risk.get("change_risk", 0.0)),
-                        "performance_risk": float(risk.get("performance_risk", 0.0)),
-                        "architectural_risk": float(
-                            risk.get("architectural_risk", 0.0)
-                        ),
-                        "locality_score": float(locality.get("locality_score", 0.0)),
-                        "locality_risk": float(
-                            locality.get(
-                                "non_locality_risk",
-                                locality.get("locality_risk", 0.0),
-                            )
-                        ),
-                        "non_locality_risk": float(
-                            locality.get(
-                                "non_locality_risk",
-                                locality.get("locality_risk", 0.0),
-                            )
-                        ),
-                        "leverage_score": float(
-                            leverage.get(
-                                "leverage_score",
-                                leverage.get("total_leverage_score", 0.0),
-                            )
-                        ),
-                        "leverage_risk": float(
-                            leverage.get(
-                                "leverage_risk",
-                                100.0
-                                - float(
-                                    leverage.get(
-                                        "leverage_score",
-                                        leverage.get("total_leverage_score", 100.0),
-                                    )
-                                ),
-                            )
-                        ),
-                        "total_score": float(risk.get("total_score", 0.0)),
-                        "sloc": int(metric.get("sloc", 0)),
-                        "signals": list(
-                            dict.fromkeys(
-                                signal
-                                for values in category_signals.values()
-                                for signal in values
-                            )
-                        ),
-                        "category_signals": category_signals,
-                        "risk_colors": self.risk_colors(risk),
-                        "evidence": evidence,
-                        "locality_metrics": locality,
-                        "leverage_metrics": leverage,
-                        "is_slow": bool(perf_items),
-                        "perf_benchmarks": [
-                            {
-                                "name": item["name"],
-                                "mean_ms": float(item["mean_ns"]) / 1_000_000.0,
-                                "dispersion_ms": (
-                                    float(item["dispersion_ns"]) / 1_000_000.0
-                                    if item.get("dispersion_ns") is not None
-                                    else None
-                                ),
-                                "dispersion_label": item.get(
-                                    "dispersion_label", "median_abs_dev"
-                                ),
-                                "kind": item.get("benchmark_kind", "unmapped"),
-                                "threshold_ms": item.get("threshold_ms", 50.0),
-                                "signals": item.get("signals", "nominal"),
-                            }
-                            for item in perf_items
-                        ],
-                        "perf_kind": ", ".join(
-                            sorted(
-                                {item.get("benchmark_kind", "unmapped") for item in perf_items}
-                            )
-                        ),
-                    }
-                }
-            )
-
-        for source, targets in sorted(self.dependencies.items()):
-            for target in sorted(targets):
-                if source != target:
-                    edges.append({"data": {"source": source, "target": target}})
-
+    def build_graph_payload(self) -> Dict[str, List[Dict]]:
+        nodes = [self._group_node(group) for group in sorted(self._graph_groups())]
+        nodes.extend(self._module_node(mod_name) for mod_name in sorted(self.dependencies))
+        edges = [
+            {"data": {"source": source, "target": target}}
+            for source, targets in sorted(self.dependencies.items())
+            for target in sorted(targets)
+            if source != target
+        ]
         return {"nodes": nodes, "edges": edges}
 
     def risk_colors(self, risk: Dict[str, object]) -> Dict[str, str]:

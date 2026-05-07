@@ -181,100 +181,100 @@ class RustEscapeHatchAnalyzer:
         )
 
 
+def mask_char(result: List[str], ch: str) -> None:
+    result.append("\n" if ch == "\n" else " ")
+
+
+def consume_code(source: str, index: int, result: List[str]) -> Tuple[int, str, int]:
+    ch = source[index]
+    nxt = source[index + 1] if index + 1 < len(source) else ""
+    if ch == "/" and nxt == "/":
+        result.extend("  ")
+        return index + 2, "line_comment", 0
+    if ch == "/" and nxt == "*":
+        result.extend("  ")
+        return index + 2, "block_comment", 0
+
+    raw_match = re.match(r"r(#+)\"", source[index:])
+    if raw_match:
+        raw_hashes = len(raw_match.group(1))
+        result.extend(" " * (raw_hashes + 2))
+        return index + raw_hashes + 2, "raw_string", raw_hashes
+    if ch == '"':
+        result.append(" ")
+        return index + 1, "string", 0
+    if ch == "'":
+        result.append(" ")
+        return index + 1, "char", 0
+
+    result.append(ch)
+    return index + 1, "code", 0
+
+
+def consume_line_comment(source: str, index: int, result: List[str]) -> Tuple[int, str, int]:
+    ch = source[index]
+    if ch == "\n":
+        result.append("\n")
+        return index + 1, "code", 0
+    result.append(" ")
+    return index + 1, "line_comment", 0
+
+
+def consume_block_comment(source: str, index: int, result: List[str]) -> Tuple[int, str, int]:
+    ch = source[index]
+    nxt = source[index + 1] if index + 1 < len(source) else ""
+    if ch == "*" and nxt == "/":
+        result.extend("  ")
+        return index + 2, "code", 0
+    mask_char(result, ch)
+    return index + 1, "block_comment", 0
+
+
+def consume_quoted(source: str, index: int, result: List[str], quote: str) -> Tuple[int, str, int]:
+    ch = source[index]
+    if ch == "\\":
+        result.extend("  ")
+        return index + 2, quote, 0
+    mask_char(result, ch)
+    terminator = '"' if quote == "string" else "'"
+    return index + 1, "code" if ch == terminator else quote, 0
+
+
+def consume_raw_string(
+    source: str,
+    index: int,
+    result: List[str],
+    raw_hashes: int,
+) -> Tuple[int, str, int]:
+    terminator = '"' + ("#" * raw_hashes)
+    if source.startswith(terminator, index):
+        result.extend(" " * len(terminator))
+        return index + len(terminator), "code", 0
+    mask_char(result, source[index])
+    return index + 1, "raw_string", raw_hashes
+
+
 def strip_comments_and_strings(source: str) -> str:
     result: List[str] = []
     index = 0
-    length = len(source)
     state = "code"
     raw_hashes = 0
-
-    while index < length:
-        ch = source[index]
-        nxt = source[index + 1] if index + 1 < length else ""
-
+    while index < len(source):
         if state == "code":
-            if ch == "/" and nxt == "/":
-                state = "line_comment"
-                result.extend("  ")
-                index += 2
-                continue
-            if ch == "/" and nxt == "*":
-                state = "block_comment"
-                result.extend("  ")
-                index += 2
-                continue
-            raw_match = re.match(r"r(#+)\"", source[index:])
-            if raw_match:
-                state = "raw_string"
-                raw_hashes = len(raw_match.group(1))
-                result.extend(" " * (raw_hashes + 2))
-                index += raw_hashes + 2
-                continue
-            if ch == '"':
-                state = "string"
-                result.append(" ")
-                index += 1
-                continue
-            if ch == "'":
-                state = "char"
-                result.append(" ")
-                index += 1
-                continue
-            result.append(ch)
-            index += 1
-            continue
-
-        if state == "line_comment":
-            if ch == "\n":
-                state = "code"
-                result.append("\n")
-            else:
-                result.append(" ")
-            index += 1
-            continue
-
-        if state == "block_comment":
-            if ch == "*" and nxt == "/":
-                state = "code"
-                result.extend("  ")
-                index += 2
-            else:
-                result.append("\n" if ch == "\n" else " ")
-                index += 1
-            continue
-
-        if state == "string":
-            if ch == "\\":
-                result.extend("  ")
-                index += 2
-                continue
-            if ch == '"':
-                state = "code"
-            result.append("\n" if ch == "\n" else " ")
-            index += 1
-            continue
-
-        if state == "raw_string":
-            terminator = '"' + ("#" * raw_hashes)
-            if source.startswith(terminator, index):
-                state = "code"
-                result.extend(" " * len(terminator))
-                index += len(terminator)
-            else:
-                result.append("\n" if ch == "\n" else " ")
-                index += 1
-            continue
-
-        if state == "char":
-            if ch == "\\":
-                result.extend("  ")
-                index += 2
-                continue
-            if ch == "'":
-                state = "code"
-            result.append("\n" if ch == "\n" else " ")
-            index += 1
-
+            index, state, raw_hashes = consume_code(source, index, result)
+        elif state == "line_comment":
+            index, state, raw_hashes = consume_line_comment(source, index, result)
+        elif state == "block_comment":
+            index, state, raw_hashes = consume_block_comment(source, index, result)
+        elif state in {"string", "char"}:
+            index, state, raw_hashes = consume_quoted(source, index, result, state)
+        else:
+            index, state, raw_hashes = consume_raw_string(
+                source,
+                index,
+                result,
+                raw_hashes,
+            )
     return "".join(result)
 
 

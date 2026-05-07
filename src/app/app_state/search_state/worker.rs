@@ -1,23 +1,17 @@
-use super::fragments::search_target_ranges;
-use super::helpers::SearchResultAccumulator;
 use super::{SearchMatch, SearchResultGroup, SearchStatus};
 use crate::app::capacity_metrics;
 use crate::app::domain::{BufferId, DocumentSnapshot, ViewId};
-use crate::app::services::search::{SearchOptions, SearchProgram};
-use std::collections::HashMap;
+use crate::app::services::search::SearchOptions;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{
-    Arc,
-    atomic::{AtomicU64, Ordering},
-};
+use std::sync::{Arc, atomic::AtomicU64};
 use std::thread;
 use std::time::Instant;
 
-const SEARCH_TARGET_PARALLELISM_CAP: usize = 4;
-const SEARCH_TARGET_PARALLELISM_MIN_TARGETS: usize = 4;
-const INTRA_BUFFER_PARALLELISM_CAP: usize = 4;
+mod processing;
+
+pub(super) use processing::{process_search_request, process_search_request_with_partials};
 
 pub(super) struct SearchRequest {
     pub(super) generation: u64,
@@ -49,12 +43,6 @@ pub(super) struct SearchTargetSnapshot {
 pub(super) enum SearchFileIdentity {
     Path(PathBuf),
     Untitled(BufferId),
-}
-
-struct TargetSearchOutcome {
-    target_index: usize,
-    target: SearchTargetSnapshot,
-    ranges: Vec<Range<usize>>,
 }
 
 pub(super) fn spawn_search_worker(
@@ -93,204 +81,4 @@ pub(super) fn spawn_search_worker(
         }
     });
     (request_tx, result_rx)
-}
-
-pub(super) fn process_search_request(
-    request: SearchRequest,
-    latest_generation: &AtomicU64,
-) -> Option<SearchResult> {
-    process_search_request_with_partials(request, latest_generation, None)
-}
-
-pub(super) fn process_search_request_with_partials(
-    request: SearchRequest,
-    latest_generation: &AtomicU64,
-    mut partial_emit: Option<&mut dyn FnMut(SearchResult)>,
-) -> Option<SearchResult> {
-    let generation = request.generation;
-    let total_targets = request.targets.len();
-    let program = match SearchProgram::compile(&request.query, request.options) {
-        Ok(program) => program,
-        Err(error) => {
-            return Some(SearchResult {
-                generation,
-                matches: Vec::new(),
-                result_groups: Vec::new(),
-                displayed_match_count: 0,
-                status: SearchStatus::InvalidQuery(error.message().to_owned()),
-            });
-        }
-    };
-
-    let target_count = request.targets.len();
-    let single_threaded = search_target_parallelism(target_count) <= 1;
-    let mut results = SearchResultAccumulator::default();
-
-    if single_threaded {
-        // Stream partial cumulative results after each target finishes so the
-        // UI can show the first useful matches before the full scan completes.
-        let SearchRequest {
-            generation,
-            targets,
-            ..
-        } = request;
-        let intra_parallelism = intra_buffer_parallelism();
-        let mut last_emitted_match_count = 0usize;
-        for (index, target) in targets.into_iter().enumerate() {
-            if latest_generation.load(Ordering::Relaxed) != generation {
-                return None;
-            }
-            let ranges = search_target_ranges(
-                &target.document_snapshot,
-                target.search_range.clone(),
-                &program,
-                generation,
-                latest_generation,
-                intra_parallelism,
-            )?;
-            if !ranges.is_empty() {
-                results.push_target_matches(&target, &ranges);
-            }
-            // Skip partial after the very last target -- the caller will send
-            // the final result immediately afterwards.
-            if let Some(emit) = partial_emit.as_deref_mut()
-                && index + 1 < target_count
-                && latest_generation.load(Ordering::Relaxed) == generation
-                && should_publish_partial(results.match_count(), last_emitted_match_count, index)
-            {
-                emit(results.partial_snapshot(generation, index + 1, total_targets));
-                last_emitted_match_count = results.match_count();
-            }
-        }
-    } else {
-        let SearchRequest {
-            generation,
-            targets,
-            ..
-        } = request;
-        let target_count = targets.len();
-        let worker_count = search_target_parallelism(target_count);
-        let indexed_targets = targets.into_iter().enumerate().collect::<Vec<_>>();
-        let program = Arc::new(program);
-        let chunk_size = indexed_targets.len().div_ceil(worker_count);
-        let mut indexed_iter = indexed_targets.into_iter();
-        let (outcome_tx, outcome_rx) = mpsc::channel::<TargetSearchOutcome>();
-        let stale = std::sync::atomic::AtomicBool::new(false);
-        let mut last_emitted_match_count = 0usize;
-
-        let stream_ok = thread::scope(|scope| -> Option<()> {
-            for _ in 0..worker_count {
-                let chunk = indexed_iter.by_ref().take(chunk_size).collect::<Vec<_>>();
-                if chunk.is_empty() {
-                    break;
-                }
-                let program = program.clone();
-                let tx = outcome_tx.clone();
-                let stale_ref = &stale;
-                scope.spawn(move || {
-                    for (target_index, target) in chunk {
-                        if stale_ref.load(Ordering::Relaxed) {
-                            return;
-                        }
-                        if latest_generation.load(Ordering::Relaxed) != generation {
-                            stale_ref.store(true, Ordering::Relaxed);
-                            return;
-                        }
-                        let Some(ranges) = search_target_ranges(
-                            &target.document_snapshot,
-                            target.search_range.clone(),
-                            &program,
-                            generation,
-                            latest_generation,
-                            1,
-                        ) else {
-                            stale_ref.store(true, Ordering::Relaxed);
-                            return;
-                        };
-                        if tx
-                            .send(TargetSearchOutcome {
-                                target_index,
-                                target,
-                                ranges,
-                            })
-                            .is_err()
-                        {
-                            return;
-                        }
-                    }
-                });
-            }
-            // Drop the outer tx so the receiver terminates once all workers
-            // have finished.
-            drop(outcome_tx);
-
-            let mut next_index = 0usize;
-            let mut pending: HashMap<usize, TargetSearchOutcome> = HashMap::new();
-            while let Ok(outcome) = outcome_rx.recv() {
-                pending.insert(outcome.target_index, outcome);
-                while let Some(outcome) = pending.remove(&next_index) {
-                    if !outcome.ranges.is_empty() {
-                        results.push_target_matches(&outcome.target, &outcome.ranges);
-                    }
-                    next_index += 1;
-                    if let Some(emit) = partial_emit.as_deref_mut()
-                        && next_index < target_count
-                        && latest_generation.load(Ordering::Relaxed) == generation
-                        && should_publish_partial(
-                            results.match_count(),
-                            last_emitted_match_count,
-                            next_index.saturating_sub(1),
-                        )
-                    {
-                        emit(results.partial_snapshot(generation, next_index, total_targets));
-                        last_emitted_match_count = results.match_count();
-                    }
-                }
-            }
-
-            if stale.load(Ordering::Relaxed)
-                && latest_generation.load(Ordering::Relaxed) != generation
-            {
-                return None;
-            }
-            Some(())
-        });
-        stream_ok?;
-    }
-
-    let mut result = results.finish(generation);
-    result.status = if result.matches.is_empty() {
-        SearchStatus::NoMatches
-    } else {
-        SearchStatus::Ready
-    };
-    Some(result)
-}
-
-fn should_publish_partial(
-    current_match_count: usize,
-    last_emitted_match_count: usize,
-    completed_target_index: usize,
-) -> bool {
-    const PARTIAL_MATCH_DELTA: usize = 64;
-    completed_target_index == 0
-        || current_match_count >= last_emitted_match_count.saturating_add(PARTIAL_MATCH_DELTA)
-}
-
-fn search_target_parallelism(target_count: usize) -> usize {
-    if target_count < SEARCH_TARGET_PARALLELISM_MIN_TARGETS {
-        return 1;
-    }
-
-    thread::available_parallelism()
-        .map(|parallelism| parallelism.get().min(SEARCH_TARGET_PARALLELISM_CAP))
-        .unwrap_or(1)
-        .min(target_count)
-}
-
-fn intra_buffer_parallelism() -> usize {
-    thread::available_parallelism()
-        .map(|p| p.get().min(INTRA_BUFFER_PARALLELISM_CAP))
-        .unwrap_or(1)
-        .max(1)
 }

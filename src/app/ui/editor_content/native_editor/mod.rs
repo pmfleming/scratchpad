@@ -4,6 +4,7 @@ mod highlighting;
 mod interactions;
 mod layout;
 mod painting;
+mod read_only;
 mod types;
 mod word_boundary;
 
@@ -15,17 +16,17 @@ pub use types::{
 
 use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
 use crate::app::ui::scrolling::DisplaySnapshot;
-use crate::app::ui::widget_ids;
 use eframe::egui;
 use interactions::{
-    handle_keyboard_events, handle_mouse_interaction, page_jump_rows,
-    sync_view_cursor_before_render,
+    KeyboardInputRequest, MouseInteractionRequest, handle_keyboard_events,
+    handle_mouse_interaction, page_jump_rows, sync_view_cursor_before_render,
 };
 use layout::{
-    allocate_editor_rect, build_editor_galley, editor_desired_width, editor_row_height,
-    editor_viewport_height, galley_origin, total_editor_content_height,
+    allocate_editor_rect, build_editor_galley, editor_row_height, editor_viewport_height,
+    galley_origin, total_editor_content_height,
 };
-use painting::{CursorPaintOutcome, consume_cursor_reveal, paint_editor, paint_galley};
+use painting::{CursorPaintOutcome, EditorPaintRequest, consume_cursor_reveal, paint_editor};
+pub use read_only::render_read_only_text_edit;
 use std::sync::Arc;
 
 const EDITOR_FOCUS_LOCK_FILTER: egui::EventFilter = egui::EventFilter {
@@ -115,15 +116,17 @@ pub fn render_editor_text_edit(
     let paint_outcome = if ui.is_rect_visible(rect) {
         paint_editor(
             ui,
-            &galley_context.galley,
-            galley_pos,
-            rect,
             view,
-            options,
-            input.focused,
-            false,
-            galley_context.char_offset_base,
-            galley_context.slice_chars,
+            EditorPaintRequest {
+                galley: &galley_context.galley,
+                galley_pos,
+                rect,
+                options,
+                focused: input.focused,
+                char_offset_base: galley_context.char_offset_base,
+                slice_chars: galley_context.slice_chars,
+                active_selection: buffer.active_selection.clone(),
+            },
         )
     } else {
         CursorPaintOutcome::default()
@@ -179,13 +182,15 @@ fn process_editor_input(
     let prev_cursor_line = prev_cursor.and_then(|cursor| primary_line_index(buffer, cursor));
     handle_mouse_interaction(
         ui,
-        request.response,
-        request.galley,
-        request.rect,
-        request.galley_pos,
         view,
-        buffer.document().piece_tree(),
-        request.char_offset_base,
+        MouseInteractionRequest {
+            response: request.response,
+            galley: request.galley,
+            rect: request.rect,
+            galley_pos: request.galley_pos,
+            piece_tree: buffer.document().piece_tree(),
+            char_offset_base: request.char_offset_base,
+        },
     );
     let suppress_cursor_reveal = request.response.dragged_by(egui::PointerButton::Primary);
     let focused = request.response.has_focus()
@@ -201,7 +206,9 @@ fn process_editor_input(
         changed,
         suppress_cursor_reveal,
     );
-    publish_active_selection(buffer, view, focused);
+    if publish_active_selection(buffer, view, focused) {
+        ui.ctx().request_repaint();
+    }
     view.sync_cursor_anchors_from_ranges(buffer);
     EditorInputOutcome { focused, changed }
 }
@@ -264,70 +271,14 @@ fn handle_focused_keyboard_input(
             ui,
             buffer,
             view,
-            request.galley,
-            page_jump_rows(request.viewport, request.row_height),
-            request.total_chars,
-            request.char_offset_base,
-            request.slice_chars,
+            KeyboardInputRequest {
+                galley: request.galley,
+                page_jump_rows: page_jump_rows(request.viewport, request.row_height),
+                total_chars: request.total_chars,
+                char_offset_base: request.char_offset_base,
+                slice_chars: request.slice_chars,
+            },
         )
-}
-
-pub fn render_read_only_text_edit(
-    ui: &mut egui::Ui,
-    view: &mut EditorViewState,
-    text: String,
-    desired_rows: usize,
-    options: TextEditOptions<'_>,
-) -> EditorWidgetOutcome {
-    let selection_range = view
-        .cursor_range
-        .as_ref()
-        .and_then(types::selection_char_range);
-
-    let wrap_width = if options.word_wrap {
-        ui.available_width()
-    } else {
-        f32::INFINITY
-    };
-    let galley = highlighting::build_galley(
-        ui,
-        &text,
-        options,
-        &view.search_highlights,
-        selection_range,
-        wrap_width,
-    );
-
-    let row_height = editor_row_height(ui, options.editor_font_id);
-    let desired_height = desired_rows.max(1) as f32 * row_height;
-    let size = egui::vec2(
-        editor_desired_width(ui, &galley, options.word_wrap, None),
-        desired_height,
-    );
-    let response = widget_ids::allocate_exact_rect_interact(
-        ui,
-        size,
-        ("native_editor.empty", view.id),
-        egui::Sense::click(),
-        "native_editor.empty",
-    );
-    let rect = response.rect;
-
-    if ui.is_rect_visible(rect) {
-        paint_galley(ui, &galley, rect.min, options.text_color);
-    }
-
-    let focused = response.has_focus() || response.gained_focus();
-    sync_ime_output_focus(view, focused);
-    store_latest_snapshot(view, &galley, row_height, false, None, 0, 0);
-    view.cursor_range = None;
-    view.editor_has_focus = focused;
-    EditorWidgetOutcome {
-        changed: false,
-        focused,
-        request_editor_focus: false,
-        response,
-    }
 }
 
 pub fn select_all_cursor(total_chars: usize) -> CursorRange {
@@ -350,7 +301,7 @@ pub fn delete_selected_text(buffer: &mut BufferState, cursor: CursorRange) -> Op
     (!cursor.is_empty()).then(|| editing::apply_delete_selection(buffer, &cursor))
 }
 
-fn store_latest_snapshot(
+pub(super) fn store_latest_snapshot(
     view: &mut EditorViewState,
     galley: &Arc<egui::Galley>,
     row_height: f32,
@@ -379,7 +330,7 @@ fn store_latest_snapshot(
     }
 }
 
-fn sync_ime_output_focus(view: &mut EditorViewState, focused: bool) {
+pub(super) fn sync_ime_output_focus(view: &mut EditorViewState, focused: bool) {
     if !focused {
         view.clear_ime_output();
         view.ime_preedit = None;
@@ -395,13 +346,19 @@ fn request_editor_focus(ui: &mut egui::Ui, response: &egui::Response, request_fo
     }
 }
 
-fn publish_active_selection(buffer: &mut BufferState, view: &EditorViewState, focused: bool) {
+fn publish_active_selection(
+    buffer: &mut BufferState,
+    view: &EditorViewState,
+    focused: bool,
+) -> bool {
+    let previous = buffer.active_selection.clone();
     if focused {
         buffer.active_selection = view
             .cursor_range
             .as_ref()
             .and_then(types::selection_char_range);
     }
+    previous != buffer.active_selection
 }
 
 fn should_rebuild_galley_after_input(
@@ -418,7 +375,10 @@ fn should_rebuild_galley_after_input(
 
 #[cfg(test)]
 mod tests {
-    use super::{CharCursor, CursorRange, should_rebuild_galley_after_input};
+    use super::{
+        CharCursor, CursorRange, publish_active_selection, should_rebuild_galley_after_input,
+    };
+    use crate::app::domain::{BufferState, EditorViewState};
 
     #[test]
     fn cursor_only_movement_rebuilds_galley_for_reveal() {
@@ -437,5 +397,16 @@ mod tests {
         assert!(!should_rebuild_galley_after_input(
             false, None, None, cursor, cursor
         ));
+    }
+
+    #[test]
+    fn publishing_active_selection_reports_shared_selection_changes() {
+        let mut buffer = BufferState::new("sample.txt".to_owned(), "hello world".to_owned(), None);
+        let mut view = EditorViewState::new(buffer.id, false);
+        view.cursor_range = Some(CursorRange::two(0, 5));
+
+        assert!(publish_active_selection(&mut buffer, &view, true));
+        assert_eq!(buffer.active_selection, Some(0..5));
+        assert!(!publish_active_selection(&mut buffer, &view, true));
     }
 }

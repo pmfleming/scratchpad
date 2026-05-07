@@ -154,125 +154,112 @@ class CloneAnalyzer:
             if path.is_dir():
                 yield from path.rglob("*.rs")
 
-    def find_token_clones(self, paths: Sequence[str]) -> List[CloneGroup]:
-        windows: DefaultDict[str, List[Tuple[str, int, int, int]]] = defaultdict(list)
+    def _read_rust_inputs(
+        self,
+        paths: Sequence[str],
+    ) -> Tuple[Dict[str, List[str]], Dict[str, List[Tuple[str, str, int]]]]:
         file_contents: Dict[str, List[str]] = {}
+        file_tokens: Dict[str, List[Tuple[str, str, int]]] = {}
         seen_files: Set[str] = set()
-
         for rust_file in self._iter_rust_files(paths):
             file_key = str(rust_file)
             if file_key in seen_files:
                 continue
             seen_files.add(file_key)
-
             try:
                 content = rust_file.read_text(encoding="utf-8")
             except Exception as exc:
                 print(f"Warning: Could not read {rust_file}: {exc}", file=sys.stderr)
                 continue
-
-            lines = content.splitlines()
-            file_contents[file_key] = lines
             tokens = self.tokenize(content)
-            if len(tokens) < self.min_tokens:
-                continue
+            file_contents[file_key] = content.splitlines()
+            if len(tokens) >= self.min_tokens:
+                file_tokens[file_key] = tokens
+        return file_contents, file_tokens
 
+    def _token_windows(
+        self,
+        file_tokens: Dict[str, List[Tuple[str, str, int]]],
+    ) -> DefaultDict[str, List[Tuple[str, int, int, int]]]:
+        windows: DefaultDict[str, List[Tuple[str, int, int, int]]] = defaultdict(list)
+        for file_key, tokens in file_tokens.items():
             for start_idx in range(len(tokens) - self.min_tokens + 1):
                 window = tokens[start_idx : start_idx + self.min_tokens]
-                token_str = "|".join(f"{kind}:{value}" for kind, value, _ in window)
-                window_hash = hashlib.md5(token_str.encode("utf-8")).hexdigest()
                 start_line = window[0][2]
                 end_line = window[-1][2]
                 if (end_line - start_line + 1) < self.min_lines:
                     continue
+                token_str = "|".join(f"{kind}:{value}" for kind, value, _ in window)
+                window_hash = hashlib.md5(token_str.encode("utf-8")).hexdigest()
                 windows[window_hash].append((file_key, start_idx, start_line, end_line))
+        return windows
 
-        groups: List[CloneGroup] = []
-        globally_used: Dict[str, List[range]] = defaultdict(list)
-
-        for window_hash, matches in sorted(
-            windows.items(), key=lambda item: len(item[1]), reverse=True
-        ):
-            if len(matches) < 2:
+    def _accepted_token_instances(
+        self,
+        matches: Sequence[Tuple[str, int, int, int]],
+        file_contents: Dict[str, List[str]],
+        globally_used: Dict[str, List[range]],
+    ) -> Tuple[List[CloneInstance], List[Tuple[str, int]]]:
+        instances: List[CloneInstance] = []
+        accepted_matches: List[Tuple[str, int]] = []
+        for file_path, start_idx, start_line, end_line in matches:
+            candidate_range = range(start_idx, start_idx + self.min_tokens)
+            if self._overlaps_existing(globally_used[file_path], candidate_range):
                 continue
-
-            instances: List[CloneInstance] = []
-            accepted_matches: List[Tuple[str, int]] = []
-
-            for file_path, start_idx, start_line, end_line in matches:
-                candidate_range = range(start_idx, start_idx + self.min_tokens)
-                if self._overlaps_existing(globally_used[file_path], candidate_range):
-                    continue
-
-                snippet = "\n".join(file_contents[file_path][start_line - 1 : end_line])
-                instances.append(
-                    CloneInstance(
-                        file_path=file_path,
-                        start_line=start_line,
-                        end_line=end_line,
-                        snippet=snippet,
-                    )
-                )
-                accepted_matches.append((file_path, start_idx))
-
-            if len(instances) < 2:
-                continue
-
-            for file_path, start_idx in accepted_matches:
-                globally_used[file_path].append(range(start_idx, start_idx + self.min_tokens))
-
-            merged_instances = self._merge_instances(instances)
-            if len(merged_instances) < 2:
-                continue
-
-            instance_count = len(merged_instances)
-            file_count = len({instance.file_path for instance in merged_instances})
-            max_line_span = max(
-                instance.end_line - instance.start_line + 1 for instance in merged_instances
-            )
-            score = self.calculate_score(instance_count, self.min_tokens)
-            groups.append(
-                CloneGroup(
-                    engine="token",
-                    hash=window_hash,
-                    token_count=self.min_tokens,
-                    instance_count=instance_count,
-                    file_count=file_count,
-                    max_line_span=max_line_span,
-                    score=score,
-                    signals=self.generate_signals(
-                        instance_count, file_count, self.min_tokens, max_line_span
-                    ),
-                    instances=merged_instances,
+            instances.append(
+                CloneInstance(
+                    file_path=file_path,
+                    start_line=start_line,
+                    end_line=end_line,
+                    snippet="\n".join(file_contents[file_path][start_line - 1 : end_line]),
                 )
             )
+            accepted_matches.append((file_path, start_idx))
+        return instances, accepted_matches
 
-        return self._rank(groups)
+    def _token_clone_group(
+        self,
+        window_hash: str,
+        instances: Sequence[CloneInstance],
+    ) -> CloneGroup:
+        instance_count = len(instances)
+        file_count = len({instance.file_path for instance in instances})
+        max_line_span = max(
+            instance.end_line - instance.start_line + 1 for instance in instances
+        )
+        return CloneGroup(
+            engine="token",
+            hash=window_hash,
+            token_count=self.min_tokens,
+            instance_count=instance_count,
+            file_count=file_count,
+            max_line_span=max_line_span,
+            score=self.calculate_score(instance_count, self.min_tokens),
+            signals=self.generate_signals(
+                instance_count,
+                file_count,
+                self.min_tokens,
+                max_line_span,
+            ),
+            instances=list(instances),
+        )
 
-    def find_ast_clones(self, paths: Sequence[str]) -> List[CloneGroup]:
+    @staticmethod
+    def _write_file_list(files: Sequence[str]) -> str:
         import tempfile
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, encoding="utf-8") as handle:
+            for file_path in files:
+                handle.write(f"{file_path}\n")
+            return handle.name
+
+    @staticmethod
+    def _run_ast_hasher(temp_path: str) -> List[Dict[str, object]]:
         import os
-
-        all_files = [str(path) for path in self._iter_rust_files(paths)]
-        if not all_files:
-            return []
-        if not shutil.which("cargo"):
-            print("Warning: cargo not found; skipping AST clone analysis.", file=sys.stderr)
-            return []
-
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8') as f:
-            for file_path in all_files:
-                f.write(f"{file_path}\n")
-            temp_path = f.name
 
         cmd = ["cargo", "run", "--quiet", "--bin", "ast_hasher", "--", temp_path]
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         except Exception as exc:
             print(f"Warning: AST clone analysis failed: {exc}", file=sys.stderr)
             return []
@@ -287,7 +274,10 @@ class CloneAnalyzer:
         except json.JSONDecodeError as exc:
             print(f"Warning: AST clone output was malformed: {exc}", file=sys.stderr)
             return []
+        return records if isinstance(records, list) else []
 
+    @staticmethod
+    def _ast_instances_by_hash(records: Sequence[Dict[str, object]]) -> DefaultDict[str, List[CloneInstance]]:
         groups_by_hash: DefaultDict[str, List[CloneInstance]] = defaultdict(list)
         for record in records:
             start_line = int(record.get("start_line", 0))
@@ -302,34 +292,81 @@ class CloneAnalyzer:
                     snippet=f"fn {record['name']} (...)",
                 )
             )
+        return groups_by_hash
+
+    def _ast_clone_group(
+        self,
+        ast_hash: str,
+        instances: Sequence[CloneInstance],
+    ) -> CloneGroup:
+        file_count = len({instance.file_path for instance in instances})
+        max_line_span = max(
+            instance.end_line - instance.start_line + 1 for instance in instances
+        )
+        token_count = max(self.min_tokens, max_line_span * 8)
+        signals = [f"cross-file x{file_count}" if file_count >= 2 else "same-file repeat"]
+        signals.append("ast-normalized")
+        if len(instances) >= 4:
+            signals.append(f"high reuse x{len(instances)}")
+        return CloneGroup(
+            engine="ast",
+            hash=ast_hash,
+            token_count=token_count,
+            instance_count=len(instances),
+            file_count=file_count,
+            max_line_span=max_line_span,
+            score=self.calculate_score(len(instances), token_count),
+            signals=", ".join(signals),
+            instances=list(instances),
+        )
+
+    def find_token_clones(self, paths: Sequence[str]) -> List[CloneGroup]:
+        file_contents, file_tokens = self._read_rust_inputs(paths)
+        windows = self._token_windows(file_tokens)
+        groups: List[CloneGroup] = []
+        globally_used: Dict[str, List[range]] = defaultdict(list)
+
+        for window_hash, matches in sorted(
+            windows.items(), key=lambda item: len(item[1]), reverse=True
+        ):
+            if len(matches) < 2:
+                continue
+
+            instances, accepted_matches = self._accepted_token_instances(
+                matches,
+                file_contents,
+                globally_used,
+            )
+            if len(instances) < 2:
+                continue
+
+            for file_path, start_idx in accepted_matches:
+                globally_used[file_path].append(range(start_idx, start_idx + self.min_tokens))
+
+            merged_instances = self._merge_instances(instances)
+            if len(merged_instances) < 2:
+                continue
+
+            groups.append(self._token_clone_group(window_hash, merged_instances))
+
+        return self._rank(groups)
+
+    def find_ast_clones(self, paths: Sequence[str]) -> List[CloneGroup]:
+        all_files = [str(path) for path in self._iter_rust_files(paths)]
+        if not all_files:
+            return []
+        if not shutil.which("cargo"):
+            print("Warning: cargo not found; skipping AST clone analysis.", file=sys.stderr)
+            return []
+
+        records = self._run_ast_hasher(self._write_file_list(all_files))
+        groups_by_hash = self._ast_instances_by_hash(records)
 
         groups: List[CloneGroup] = []
         for ast_hash, instances in groups_by_hash.items():
             if len(instances) < 2:
                 continue
-            file_count = len({instance.file_path for instance in instances})
-            max_line_span = max(
-                instance.end_line - instance.start_line + 1 for instance in instances
-            )
-            token_count = max(self.min_tokens, max_line_span * 8)
-            score = self.calculate_score(len(instances), token_count)
-            signals = [f"cross-file x{file_count}" if file_count >= 2 else "same-file repeat"]
-            signals.append("ast-normalized")
-            if len(instances) >= 4:
-                signals.append(f"high reuse x{len(instances)}")
-            groups.append(
-                CloneGroup(
-                    engine="ast",
-                    hash=ast_hash,
-                    token_count=token_count,
-                    instance_count=len(instances),
-                    file_count=file_count,
-                    max_line_span=max_line_span,
-                    score=score,
-                    signals=", ".join(signals),
-                    instances=instances,
-                )
-            )
+            groups.append(self._ast_clone_group(ast_hash, instances))
 
         return self._rank(groups)
 

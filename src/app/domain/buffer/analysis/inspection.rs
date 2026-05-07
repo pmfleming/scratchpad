@@ -126,6 +126,9 @@ impl InspectionState {
             '\u{1B}' => self.artifact_summary.has_ansi_sequences = true,
             '\u{0008}' => self.artifact_summary.has_backspaces = true,
             '\t' => {}
+            _ if is_unicode_format_control(ch) => {
+                self.artifact_summary.has_unicode_format_controls = true
+            }
             _ if ch.is_control() => self.artifact_summary.other_control_count += 1,
             _ => {}
         }
@@ -164,6 +167,18 @@ impl InspectionState {
             is_ascii_subset: self.is_ascii_subset,
         }
     }
+}
+
+fn is_unicode_format_control(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{200C}'
+            | '\u{200D}'
+            | '\u{200E}'
+            | '\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{206A}'..='\u{206F}'
+    )
 }
 
 pub(super) fn line_ending_style(counts: LineEndingCounts) -> LineEndingStyle {

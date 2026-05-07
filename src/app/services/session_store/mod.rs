@@ -263,6 +263,17 @@ impl SessionStore {
         let control_chars_allowed = buffers
             .iter()
             .any(|buffer| buffer.artifact_summary.has_control_chars());
+        let visible_control_char_buffer_ids = tab
+            .views
+            .iter()
+            .filter(|view| view.show_control_chars)
+            .map(|view| view.buffer_id)
+            .collect::<HashSet<_>>();
+        for buffer in &mut buffers {
+            buffer.show_control_chars = buffer.artifact_summary.has_control_chars()
+                && (buffer.show_control_chars
+                    || visible_control_char_buffer_ids.contains(&buffer.id));
+        }
         let views = tab
             .views
             .into_iter()
@@ -317,6 +328,8 @@ impl SessionStore {
                             path: tab.path.clone(),
                             is_dirty,
                             is_settings_file: false,
+                            show_control_chars: false,
+                            right_to_left_reading_order: false,
                             temp_id,
                             format: None,
                             encoding,
@@ -355,6 +368,8 @@ impl SessionStore {
                         format: restored.format,
                         disk_state: restored.disk_state,
                         freshness: restored.freshness,
+                        show_control_chars: buffer.show_control_chars,
+                        right_to_left_reading_order: buffer.right_to_left_reading_order,
                     },
                     restored.document,
                     restored.text_metadata,

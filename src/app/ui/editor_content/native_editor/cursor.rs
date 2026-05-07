@@ -65,88 +65,120 @@ fn move_by_page_rows(
     cursor
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn apply_cursor_movement(
-    cursor: &CursorRange,
-    key: egui::Key,
-    modifiers: &egui::Modifiers,
-    galley: &egui::Galley,
-    page_jump_rows: usize,
-    total_chars: usize,
-    piece_tree: &PieceTreeLite,
-    char_offset_base: usize,
-    slice_chars: usize,
-) -> Option<CursorRange> {
-    let local_cursor = CharCursor {
-        index: cursor
-            .primary
-            .index
-            .saturating_sub(char_offset_base)
-            .min(slice_chars),
-        prefer_next_row: cursor.primary.prefer_next_row,
-    };
-    let egui_cursor = galley.clamp_cursor(&local_cursor.to_egui_ccursor());
-    let new_primary = horizontal_movement_target(
-        cursor.primary.index,
-        char_offset_base,
-        slice_chars,
-        key,
-        modifiers,
-        galley,
-        &egui_cursor,
-        piece_tree,
-    )
-    .map(|target| clamp_char_cursor(galley, total_chars, target, char_offset_base))
-    .or_else(|| {
-        full_document_movement_target(
-            cursor.primary.index,
-            key,
-            modifiers,
-            page_jump_rows,
-            total_chars,
-            piece_tree,
-        )
-    })
-    .or_else(|| {
-        page_movement_target(key, galley, egui_cursor, page_jump_rows)
-            .map(|target| clamp_char_cursor(galley, total_chars, target, char_offset_base))
-    })?;
-    Some(finalize_cursor_movement(
-        cursor,
-        key,
-        modifiers,
-        new_primary,
-    ))
+pub(super) struct CursorMovementRequest<'a> {
+    pub(super) cursor: &'a CursorRange,
+    pub(super) key: egui::Key,
+    pub(super) modifiers: &'a egui::Modifiers,
+    pub(super) galley: &'a egui::Galley,
+    pub(super) page_jump_rows: usize,
+    pub(super) total_chars: usize,
+    pub(super) piece_tree: &'a PieceTreeLite,
+    pub(super) char_offset_base: usize,
+    pub(super) slice_chars: usize,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn horizontal_movement_target(
+struct HorizontalMovementContext<'a> {
     current_index: usize,
     char_offset_base: usize,
     slice_chars: usize,
     key: egui::Key,
-    modifiers: &egui::Modifiers,
-    galley: &egui::Galley,
-    egui_cursor: &egui::text::CCursor,
-    piece_tree: &PieceTreeLite,
+    modifiers: &'a egui::Modifiers,
+    galley: &'a egui::Galley,
+    egui_cursor: &'a egui::text::CCursor,
+    piece_tree: &'a PieceTreeLite,
+}
+
+pub(super) fn apply_cursor_movement(request: CursorMovementRequest<'_>) -> Option<CursorRange> {
+    let local_cursor = CharCursor {
+        index: request
+            .cursor
+            .primary
+            .index
+            .saturating_sub(request.char_offset_base)
+            .min(request.slice_chars),
+        prefer_next_row: request.cursor.primary.prefer_next_row,
+    };
+    let egui_cursor = request.galley.clamp_cursor(&local_cursor.to_egui_ccursor());
+    let new_primary = horizontal_movement_target(HorizontalMovementContext {
+        current_index: request.cursor.primary.index,
+        char_offset_base: request.char_offset_base,
+        slice_chars: request.slice_chars,
+        key: request.key,
+        modifiers: request.modifiers,
+        galley: request.galley,
+        egui_cursor: &egui_cursor,
+        piece_tree: request.piece_tree,
+    })
+    .map(|target| {
+        clamp_char_cursor(
+            request.galley,
+            request.total_chars,
+            target,
+            request.char_offset_base,
+        )
+    })
+    .or_else(|| {
+        full_document_movement_target(
+            request.cursor.primary.index,
+            request.key,
+            request.modifiers,
+            request.page_jump_rows,
+            request.total_chars,
+            request.piece_tree,
+        )
+    })
+    .or_else(|| {
+        page_movement_target(
+            request.key,
+            request.galley,
+            egui_cursor,
+            request.page_jump_rows,
+        )
+        .map(|target| {
+            clamp_char_cursor(
+                request.galley,
+                request.total_chars,
+                target,
+                request.char_offset_base,
+            )
+        })
+    })?;
+    Some(finalize_cursor_movement(
+        request.cursor,
+        request.key,
+        request.modifiers,
+        new_primary,
+    ))
+}
+
+fn horizontal_movement_target(
+    context: HorizontalMovementContext<'_>,
 ) -> Option<egui::text::CCursor> {
-    match key {
-        egui::Key::ArrowLeft if is_wordwise_movement(modifiers) => {
+    match context.key {
+        egui::Key::ArrowLeft if is_wordwise_movement(context.modifiers) => {
             Some(local_cursor_for_document_index(
-                word_boundary::find_word_boundary_left(piece_tree, current_index),
-                char_offset_base,
-                slice_chars,
+                word_boundary::find_word_boundary_left(context.piece_tree, context.current_index),
+                context.char_offset_base,
+                context.slice_chars,
             ))
         }
-        egui::Key::ArrowLeft => Some(galley.cursor_left_one_character(egui_cursor)),
-        egui::Key::ArrowRight if is_wordwise_movement(modifiers) => {
+        egui::Key::ArrowLeft => Some(
+            context
+                .galley
+                .cursor_left_one_character(context.egui_cursor),
+        ),
+        egui::Key::ArrowRight if is_wordwise_movement(context.modifiers) => {
             Some(local_cursor_for_document_index(
-                word_boundary::find_word_boundary_right(piece_tree, current_index),
-                char_offset_base,
-                slice_chars,
+                word_boundary::find_word_boundary_right(context.piece_tree, context.current_index),
+                context.char_offset_base,
+                context.slice_chars,
             ))
         }
-        egui::Key::ArrowRight => Some(galley.cursor_right_one_character(egui_cursor)),
+        egui::Key::ArrowRight => Some(
+            context
+                .galley
+                .cursor_right_one_character(context.egui_cursor),
+        ),
         _ => None,
     }
 }

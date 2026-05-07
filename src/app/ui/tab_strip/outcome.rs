@@ -14,7 +14,7 @@ pub(crate) fn apply_tab_outcome(app: &mut ScratchpadApp, outcome: TabStripOutcom
         app.begin_tab_rename(index);
     }
     if outcome.activate_settings {
-        app.handle_command(AppCommand::OpenSettings);
+        app.open_settings_preserving_tab_selection();
     }
 
     apply_workspace_slot_command(app, outcome.close_requested_tab, |index| {

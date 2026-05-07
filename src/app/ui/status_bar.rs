@@ -7,6 +7,10 @@ use crate::app::theme::*;
 use crate::app::ui::widget_ids;
 use eframe::egui;
 
+const STATUS_ICON_CELL_SIZE: egui::Vec2 = egui::vec2(28.0, 22.0);
+const STATUS_ICON_FONT_SIZE: f32 = 16.0;
+const CONTROL_CHAR_ICON: &str = "¶";
+
 #[derive(Default)]
 struct StatusBarActions {
     toggle_line_numbers: bool,
@@ -73,24 +77,18 @@ fn collect_active_status_details(
     dark_mode: bool,
 ) -> Option<ActiveStatusDetails> {
     let tab = app.active_tab()?;
-    let file_length = tab.buffer.current_file_length();
+    let buffer = tab.active_buffer();
+    let file_length = buffer.current_file_length();
     let active_view = tab.active_view();
-    let show_control_chars = active_view
-        .map(|view| view.show_control_chars)
-        .unwrap_or(false);
     let view_status = active_view
-        .map(|view| {
-            tab.buffer
-                .view_status(view.pending_cursor_range.or(view.cursor_range))
-        })
+        .map(|view| buffer.view_status(status_cursor_range(view)))
         .unwrap_or_default();
-    let has_control_chars = tab.buffer.artifact_summary.has_control_chars();
+    let has_control_chars = buffer.artifact_summary.has_control_chars();
     let (icon, icon_tooltip, icon_color) =
-        artifact_icon(has_control_chars, show_control_chars, dark_mode);
+        artifact_icon(has_control_chars, buffer.show_control_chars, dark_mode);
 
     Some(ActiveStatusDetails {
-        path_label: tab
-            .buffer
+        path_label: buffer
             .path
             .as_ref()
             .map(|path| path.to_string_lossy().into_owned())
@@ -98,19 +96,25 @@ fn collect_active_status_details(
         count_label: line_count_label(file_length.lines),
         cursor_label: cursor_label(&view_status),
         selection_label: selection_label(&view_status),
-        encoding_label: tab.buffer.format.encoding_label(),
-        encoding_tooltip: tab.buffer.format.encoding_tooltip(),
-        encoding_is_non_default: status_bar_encoding_is_non_default(&tab.buffer.format),
-        has_non_compliant_characters: tab.buffer.has_non_compliant_characters,
-        line_endings_label: tab.buffer.format.line_endings_label().to_owned(),
-        line_endings_are_non_default: tab.buffer.format.preferred_line_ending_style()
+        encoding_label: buffer.format.encoding_label(),
+        encoding_tooltip: buffer.format.encoding_tooltip(),
+        encoding_is_non_default: status_bar_encoding_is_non_default(&buffer.format),
+        has_non_compliant_characters: buffer.has_non_compliant_characters,
+        line_endings_label: buffer.format.line_endings_label().to_owned(),
+        line_endings_are_non_default: buffer.format.preferred_line_ending_style()
             != platform_default_line_ending(),
         icon,
         icon_tooltip,
         icon_color,
-        freshness_label: visible_disk_status_label(&tab.buffer).map(str::to_owned),
+        freshness_label: visible_disk_status_label(buffer).map(str::to_owned),
         has_control_chars,
     })
+}
+
+fn status_cursor_range(
+    view: &crate::app::domain::EditorViewState,
+) -> Option<crate::app::ui::editor_content::native_editor::CursorRange> {
+    view.cursor_range.or(view.pending_cursor_range)
 }
 
 fn render_active_status(
@@ -181,7 +185,8 @@ fn show_encoding(
     ui.separator();
     widget_ids::surface_response(ui, "status_encoding", "encoding_label", |ui| {
         ui.add(
-            egui::Label::new(status_format_text(encoding, highlight)).sense(egui::Sense::click()),
+            egui::Label::new(status_format_text(ui, encoding, highlight))
+                .sense(egui::Sense::click()),
         )
     })
     .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -209,6 +214,7 @@ fn show_line_endings(ui: &mut egui::Ui, line_endings_label: &str, highlight: boo
         widget_ids::WidgetRole::Label,
         |ui| {
             ui.label(status_format_text(
+                ui,
                 &format!("EOL: {line_endings_label}"),
                 highlight,
             ))
@@ -216,12 +222,20 @@ fn show_line_endings(ui: &mut egui::Ui, line_endings_label: &str, highlight: boo
     );
 }
 
-fn status_format_text(label: &str, highlight: bool) -> egui::RichText {
+fn status_format_text(ui: &egui::Ui, label: &str, highlight: bool) -> egui::RichText {
     let mut text = egui::RichText::new(label);
     if highlight {
-        text = text.color(egui::Color32::YELLOW);
+        text = text.color(status_attention_color(ui.visuals().dark_mode));
     }
     text
+}
+
+fn status_attention_color(dark_mode: bool) -> egui::Color32 {
+    if dark_mode {
+        egui::Color32::from_rgb(245, 210, 92)
+    } else {
+        egui::Color32::from_rgb(154, 101, 0)
+    }
 }
 
 fn status_bar_encoding_is_non_default(format: &crate::app::domain::TextFormatMetadata) -> bool {
@@ -257,18 +271,7 @@ fn status_bar_icon_button(
     surface_key: &'static str,
     icon: &str,
 ) -> egui::Response {
-    widget_ids::surface_response(ui, surface_key, widget_ids::WidgetRole::IconButton, |ui| {
-        ui.add(
-            egui::Button::new(
-                egui::RichText::new(icon)
-                    .font(egui::FontId::proportional(16.0))
-                    .color(TEXT_PRIMARY),
-            )
-            .min_size(egui::vec2(22.0, 22.0))
-            .fill(egui::Color32::TRANSPARENT)
-            .stroke(egui::Stroke::NONE),
-        )
-    })
+    fixed_status_icon_cell(ui, surface_key, icon, status_icon_color(ui))
 }
 
 fn show_control_char_toggle(
@@ -277,32 +280,37 @@ fn show_control_char_toggle(
     actions: &mut StatusBarActions,
 ) {
     ui.separator();
-    let button_response = widget_ids::surface_response(
-        ui,
-        "status_control_chars",
-        widget_ids::WidgetRole::IconButton,
-        |ui| {
-            ui.add(
-                egui::Button::new("")
-                    .min_size(egui::vec2(22.0, 22.0))
-                    .fill(egui::Color32::TRANSPARENT)
-                    .stroke(egui::Stroke::NONE),
-            )
-        },
-    );
-    ui.painter().text(
-        button_response.rect.center(),
-        egui::Align2::CENTER_CENTER,
-        details.icon,
-        egui::FontId::proportional(16.0),
-        details.icon_color,
-    );
+    let button_response =
+        fixed_status_icon_cell(ui, "status_control_chars", details.icon, details.icon_color);
     if button_response.hovered() {
         button_response.clone().on_hover_text(details.icon_tooltip);
     }
     if details.has_control_chars && button_response.clicked() {
         actions.toggle_control_chars = true;
     }
+}
+
+fn fixed_status_icon_cell(
+    ui: &mut egui::Ui,
+    surface_key: &'static str,
+    icon: &str,
+    color: egui::Color32,
+) -> egui::Response {
+    widget_ids::surface_response(ui, surface_key, widget_ids::WidgetRole::IconButton, |ui| {
+        ui.add_sized(
+            STATUS_ICON_CELL_SIZE,
+            egui::Label::new(
+                egui::RichText::new(icon)
+                    .font(egui::FontId::proportional(STATUS_ICON_FONT_SIZE))
+                    .color(color),
+            )
+            .sense(egui::Sense::click()),
+        )
+    })
+}
+
+fn status_icon_color(ui: &egui::Ui) -> egui::Color32 {
+    text_primary(ui)
 }
 
 fn show_status_warnings(ui: &mut egui::Ui, details: &ActiveStatusDetails) {
@@ -341,10 +349,11 @@ fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {
     if actions.toggle_control_chars {
         let can_toggle = app
             .active_tab()
-            .map(|tab| tab.buffer.artifact_summary.has_control_chars())
+            .map(|tab| tab.active_buffer().artifact_summary.has_control_chars())
             .unwrap_or(false);
-        if can_toggle && let Some(view) = app.active_view_mut() {
-            view.show_control_chars = !view.show_control_chars;
+        if can_toggle && let Some(tab) = app.active_tab_mut() {
+            let buffer = tab.active_buffer_mut();
+            buffer.show_control_chars = !buffer.show_control_chars;
             app.mark_session_dirty();
         }
     }
@@ -395,13 +404,13 @@ fn artifact_icon(
     if has_control_chars {
         if show_control_chars {
             (
-                egui_phosphor::regular::TEXT_OUTDENT,
+                CONTROL_CHAR_ICON,
                 "Visible control-character inspection active; click to return to raw-text editing",
                 egui::Color32::YELLOW,
             )
         } else {
             (
-                egui_phosphor::regular::TEXT_ALIGN_JUSTIFY,
+                CONTROL_CHAR_ICON,
                 "Control characters detected; raw-text editing remains enabled; click to inspect them",
                 egui::Color32::LIGHT_GREEN,
             )
@@ -420,5 +429,58 @@ fn plain_text_icon_color(dark_mode: bool) -> egui::Color32 {
         TEXT_PRIMARY.gamma_multiply(0.8)
     } else {
         egui::Color32::from_rgb(28, 35, 45).gamma_multiply(0.8)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CONTROL_CHAR_ICON, artifact_icon, plain_text_icon_color, status_attention_color,
+        status_cursor_range,
+    };
+    use crate::app::domain::EditorViewState;
+    use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
+
+    #[test]
+    fn status_prefers_live_cursor_over_pending_cursor() {
+        let mut view = EditorViewState::new(1, false);
+        view.cursor_range = Some(CursorRange::two(0, 8));
+        view.pending_cursor_range = Some(CursorRange::one(CharCursor::new(3)));
+
+        assert_eq!(status_cursor_range(&view), Some(CursorRange::two(0, 8)));
+    }
+
+    #[test]
+    fn light_plain_text_icon_is_dark_enough_to_see() {
+        let color = plain_text_icon_color(false);
+
+        assert!(color.r() < 80);
+        assert!(color.g() < 90);
+        assert!(color.b() < 100);
+    }
+
+    #[test]
+    fn light_status_attention_color_is_readable_on_light_status_bar() {
+        let color = status_attention_color(false);
+
+        assert!(color.r() < 180);
+        assert!(color.g() < 130);
+        assert!(color.b() < 40);
+    }
+
+    #[test]
+    fn dark_status_attention_color_stays_warm_without_neon_yellow() {
+        let color = status_attention_color(true);
+
+        assert!(color.r() >= 220);
+        assert!(color.g() >= 170);
+        assert!(color.b() >= 60);
+        assert!(color.b() < 140);
+    }
+
+    #[test]
+    fn control_character_status_uses_conventional_marker() {
+        assert_eq!(artifact_icon(true, false, true).0, CONTROL_CHAR_ICON);
+        assert_eq!(artifact_icon(true, true, true).0, CONTROL_CHAR_ICON);
     }
 }

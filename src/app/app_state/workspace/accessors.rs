@@ -1,5 +1,5 @@
 use super::super::{ScratchpadApp, TabRenameState};
-use crate::app::domain::{EditorViewState, PendingAction, TabManager, ViewId, WorkspaceTab};
+use crate::app::domain::{PendingAction, TabManager, ViewId, WorkspaceTab};
 use crate::app::services::file_controller::FileController;
 use crate::app::services::session_manager;
 use crate::app::services::session_store::SessionStore;
@@ -16,11 +16,6 @@ impl ScratchpadApp {
 
     pub(crate) fn active_tab_mut(&mut self) -> Option<&mut WorkspaceTab> {
         self.tab_manager.active_tab_mut()
-    }
-
-    pub(crate) fn active_view_mut(&mut self) -> Option<&mut EditorViewState> {
-        self.active_tab_mut()
-            .and_then(WorkspaceTab::active_view_mut)
     }
 
     pub(crate) fn mark_session_dirty(&mut self) {

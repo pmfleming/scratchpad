@@ -126,6 +126,7 @@ fn show_overflow_popup(
     let popup_width = TAB_BUTTON_WIDTH;
     let popup_max_height = overflow_popup_max_height(ctx, request.anchor, request.pivot);
     let visible_row_count = overflow_row_count(request.app, request.visible_tab_indices);
+    let popup_target_height = overflow_popup_target_height(visible_row_count, popup_max_height);
     let area_response = widget_ids::area(request.overflow_popup_id)
         .order(egui::Order::Foreground)
         .constrain(true)
@@ -144,12 +145,9 @@ fn show_overflow_popup(
 
                 egui::ScrollArea::vertical()
                     .id_salt(request.overflow_popup_id.with("scroll"))
-                    .auto_shrink([false, false])
-                    .min_scrolled_height(overflow_popup_target_height(
-                        visible_row_count,
-                        popup_max_height,
-                    ))
-                    .max_height(popup_max_height)
+                    .auto_shrink([false, true])
+                    .min_scrolled_height(popup_target_height)
+                    .max_height(popup_target_height)
                     .show(ui, |ui| {
                         collect_overflow_row_rects(
                             ui,
@@ -396,4 +394,26 @@ fn render_drag_source_placeholder(ui: &mut egui::Ui, width: f32) -> egui::Rect {
         egui::StrokeKind::Outside,
     );
     rect
+}
+
+#[cfg(test)]
+mod tests {
+    use super::overflow_popup_target_height;
+    use crate::app::theme::TAB_HEIGHT;
+
+    #[test]
+    fn overflow_popup_height_tracks_visible_rows() {
+        assert_eq!(
+            overflow_popup_target_height(4, TAB_HEIGHT * 20.0),
+            TAB_HEIGHT * 4.0
+        );
+    }
+
+    #[test]
+    fn overflow_popup_height_caps_at_viewport_max() {
+        assert_eq!(
+            overflow_popup_target_height(20, TAB_HEIGHT * 4.5),
+            TAB_HEIGHT * 4.5
+        );
+    }
 }

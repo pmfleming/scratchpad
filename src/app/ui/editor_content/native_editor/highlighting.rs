@@ -22,6 +22,7 @@ struct TextHighlightRange {
 struct HighlightLayoutStyle<'a> {
     wrap_width: f32,
     word_wrap: bool,
+    right_to_left_reading_order: bool,
     font_id: &'a egui::FontId,
     text_color: egui::Color32,
     highlight: EditorHighlightStyle,
@@ -44,6 +45,7 @@ pub(super) fn build_galley(
         HighlightLayoutStyle {
             wrap_width,
             word_wrap: options.word_wrap,
+            right_to_left_reading_order: options.right_to_left_reading_order,
             font_id: options.editor_font_id,
             text_color: options.text_color,
             highlight: options.highlight_style,
@@ -72,6 +74,7 @@ pub fn build_layouter(
             HighlightLayoutStyle {
                 wrap_width,
                 word_wrap,
+                right_to_left_reading_order: false,
                 font_id: &font_id,
                 text_color,
                 highlight: highlight_style,
@@ -96,6 +99,9 @@ fn layout_job_with_highlights(
     } else {
         f32::INFINITY
     };
+    if style.right_to_left_reading_order {
+        job.halign = egui::Align::RIGHT;
+    }
 
     let char_to_byte = CharByteMap::build(text);
     let text_char_len = char_to_byte.char_len();

@@ -45,6 +45,7 @@
         selectedRun: null,
         selectedLayer: null,
         selectedCorrectnessCategory: null,
+        selectedPerformanceScenarioId: null,
         lastObservedFinishedRun: null,
         mapZoom: 0.65,
         mapLayout: 'folder',
@@ -57,7 +58,14 @@
         expandedQualityKey: null,
         expandedCloneKey: null,
         qualityDatasetView: 'hotspots',
-        performanceDatasetView: 'search',
+        performanceDatasetSearch: '',
+        performanceDistributionModes: {
+            budget: 'counts',
+            scaling: 'counts',
+            capacity: 'counts',
+            resources: 'counts',
+        },
+        searchChartScope: 'tabs',
         appPackageView: 'diagnostics',
     };
 
@@ -80,6 +88,8 @@
         completion: "",
         first_response: "8 6",
     };
+
+    const performancePromisePalette = ["#6fd0ff", "#f3c969", "#7ddc9b", "#c7a6ff", "#ff9f7a", "#ff8fb3", "#9ee6d4", "#8fc7ff"];
 
     const riskMetricLabels = [
         ["maintainability_risk", "Maintainability"],
@@ -138,11 +148,13 @@
     }
 
     function renderTable(targetId, headers, rows) {
+        const target = byId(targetId);
+        if (!target) return;
         const head = headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("");
         const body = rows.length
             ? rows.join("")
             : `<tr><td colspan="${headers.length}" class="muted">No data loaded.</td></tr>`;
-        byId(targetId).innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+        target.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
     }
 
     function matchesFilter(item, query) {
@@ -421,22 +433,13 @@
     }
 
     function renderSlowspots() {
-        const query = byId("slowspots-filter").value;
-        const filtered = state.slowspots.filter((item) => matchesFilter(item, query));
-        const worst = state.slowspots[0];
-        const slowCount = state.slowspots.filter((item) => item.mean_ns / 1_000_000 > item.threshold_ms).length;
-        const mappedCount = state.slowspots.filter((item) => item.targets && item.targets.length).length;
-
-        renderSummary("slowspots-summary", [
-            metricCard("Benchmarks", state.slowspots.length),
-            metricCard("Mapped", mappedCount),
-            metricCard("Over threshold", slowCount),
-            metricCard("Worst mean", worst ? `${formatNumber.format(worst.mean_ns / 1_000_000)} ms` : "-"),
-        ]);
+        const query = byId("slowspots-filter")?.value || "";
+        const selected = selectedPerformancePromise();
+        const filtered = filteredPerformanceRows(state.slowspots.filter((item) => rowBelongsToPerformancePromise(item, selected) && matchesFilter(item, query)));
 
         renderTable(
             "slowspots-table",
-            ["Benchmark", "Family", "Kind", "Mean", "Median", "Dispersion", "Threshold", "Profiles", "Targets", "Signals"],
+            ["Benchmark", "Family", "Kind", "Mean", "Median", "Spread", "Dispersion", "Threshold", "Profiles", "Targets", "Signals"],
             filtered.map((item) => {
                 const meanMs = item.mean_ns / 1_000_000;
                 const medianMs = item.median_ns / 1_000_000;
@@ -448,6 +451,7 @@
                     <td><span class="pill">${escapeHtml(item.benchmark_kind)}</span></td>
                     <td class="${scoreClass}">${formatNumber.format(meanMs)} ms</td>
                     <td>${formatNumber.format(medianMs)} ms</td>
+                    <td>${renderLatencyWhisker(item)}</td>
                     <td>${dispersionMs == null ? "-" : `${formatNumber.format(dispersionMs)} ms`}<div class="muted">${escapeHtml(item.dispersion_label || "median_abs_dev")}</div></td>
                     <td>${formatNumber.format(item.threshold_ms)} ms</td>
                     <td>${renderPills(item.matching_flamegraphs || [])}</td>
@@ -456,35 +460,19 @@
                 </tr>`;
             })
         );
+        renderPerformancePanelCaptions();
     }
 
     function renderSearchSpeed() {
-        const query = byId("search-speed-filter").value;
-        const filtered = state.searchSpeed.filter((item) => matchesFilter(item, query));
-        const benchmarkKeys = new Set(state.searchSpeed.map((item) => item.benchmark_key));
-        const modes = new Set(state.searchSpeed.map((item) => item.mode));
-        const firstResponseCount = state.searchSpeed.filter((item) => item.latency_kind === "first_response").length;
-        const worst = state.searchSpeed[0];
-        const overBudget = state.searchSpeed.filter((item) => item.mean_ns / 1_000_000 > item.threshold_ms).length;
-        const bestThroughput = state.searchSpeed.reduce((max, item) => {
-            return Math.max(max, item.throughput_mb_s || 0);
-        }, 0);
-
-        renderSummary("search-speed-summary", [
-            metricCard("Records", state.searchSpeed.length),
-            metricCard("Scenarios", benchmarkKeys.size),
-            metricCard("Modes", modes.size),
-            metricCard("First-response", firstResponseCount),
-            metricCard("Over budget", overBudget),
-            metricCard("Slowest mean", worst ? `${formatNumber.format(worst.mean_ns / 1_000_000)} ms` : "-"),
-            metricCard("Best throughput", bestThroughput ? `${formatNumber.format(bestThroughput)} MB/s` : "-"),
-        ]);
+        const query = byId("search-speed-filter")?.value || "";
+        const selected = selectedPerformancePromise();
+        const filtered = filteredPerformanceRows(state.searchSpeed.filter((item) => rowBelongsToPerformancePromise(item, selected) && matchesFilter(item, query)));
 
         renderSearchSpeedCharts(filtered);
 
         renderTable(
             "search-speed-table",
-            ["Scenario", "Family", "Mode", "Latency", "Axis", "Param", "Corpus", "Mean", "Median", "Profiles", "Efficiency", "Targets", "Signals"],
+            ["Scenario", "Family", "Mode", "Latency", "Axis", "Param", "Corpus", "Mean", "Median", "Spread", "Profiles", "Efficiency", "Targets", "Signals"],
             filtered.map((item) => {
                 const meanMs = item.mean_ns / 1_000_000;
                 const medianMs = item.median_ns / 1_000_000;
@@ -509,6 +497,7 @@
                     <td>${escapeHtml(corpus.join(" • ") || "-")}</td>
                     <td class="${meanClass}">${formatNumber.format(meanMs)} ms<div class="muted">budget ${formatNumber.format(item.threshold_ms)} ms</div></td>
                     <td>${formatNumber.format(medianMs)} ms</td>
+                    <td>${renderLatencyWhisker(item)}</td>
                     <td>${renderPills(item.matching_flamegraphs || [])}</td>
                     <td>${escapeHtml(nsPerKb)}</td>
                     <td>${renderPills(item.targets || [])}</td>
@@ -516,6 +505,7 @@
                 </tr>`;
             })
         );
+        renderPerformancePanelCaptions();
     }
 
     function renderSearchSpeedCharts(items) {
@@ -528,82 +518,511 @@
             return;
         }
 
-        const tabsSeries = buildSearchSpeedSeries(
-            items,
-            (item) => item.mode === "all" && item.scaling_axis === "aggregate_size",
-            (item) => item.latency_kind,
-            (key) => ({
-                label: latencyLabel(key),
-                shortLabel: latencyLabel(key),
-                latencyKind: key,
-                color: searchLatencyColors[key] || "#6fd0ff",
-                dasharray: searchLatencyDash[key] || "",
-                order: key === "completion" ? 0 : 1,
-            })
-        );
-
-        const filesSeries = buildSearchSpeedSeries(
-            items,
-            (item) => item.mode === "current" && item.scaling_axis === "aggregate_size",
-            (item) => item.latency_kind,
-            (key) => ({
-                label: latencyLabel(key),
-                shortLabel: latencyLabel(key),
-                latencyKind: key,
-                color: searchLatencyColors[key] || "#6fd0ff",
-                dasharray: searchLatencyDash[key] || "",
-                order: key === "completion" ? 0 : 1,
-            })
-        );
-
-        const fileSizeSeries = buildSearchSpeedSeries(
-            items,
-            (item) => item.scaling_axis === "file_size",
-            (item) => `${item.mode}:${item.latency_kind}`,
-            (key) => {
-                const [mode, latencyKind] = key.split(":");
-                const modeLabel = titleCase(mode);
-                const latencyText = latencyKind === "first_response" ? "First response" : "Completion";
-                const latencyOrder = latencyKind === "completion" ? 0 : 1;
-                const modeOrder = { active: 0, current: 1, all: 2 }[mode] ?? 9;
-                return {
-                    label: `${modeLabel} ${latencyText}`,
-                    shortLabel: modeLabel,
-                    mode,
-                    latencyKind,
-                    color: searchModeColors[mode] || "#6fd0ff",
-                    dasharray: searchLatencyDash[latencyKind] || "",
-                    order: modeOrder * 2 + latencyOrder,
-                };
-            }
-        );
-
-        const dependencyMetrics = buildSearchDependencyMetrics(items);
+        const scopeBuilders = {
+            tabs: () => ({
+                title: "Tabs Against Time",
+                subtitle: "All-open-tabs aggregate-size scenarios. Solid = completion, dashed = first response.",
+                hardLimitText: "No hard limit observed in the measured tab range.",
+                series: buildSearchSpeedSeries(
+                    items,
+                    (item) => item.mode === "all" && item.scaling_axis === "aggregate_size",
+                    (item) => item.latency_kind,
+                    (key) => ({
+                        label: latencyLabel(key),
+                        shortLabel: latencyLabel(key),
+                        latencyKind: key,
+                        color: searchLatencyColors[key] || "#6fd0ff",
+                        dasharray: searchLatencyDash[key] || "",
+                        order: key === "completion" ? 0 : 1,
+                    })
+                ),
+                insightsFor: buildAggregateScopeInsights,
+            }),
+            files: () => ({
+                title: "Files Against Time",
+                subtitle: "Current-workspace aggregate-size scenarios. Solid = completion, dashed = first response.",
+                hardLimitText: "No hard limit observed in the measured file-count range.",
+                series: buildSearchSpeedSeries(
+                    items,
+                    (item) => item.mode === "current" && item.scaling_axis === "aggregate_size",
+                    (item) => item.latency_kind,
+                    (key) => ({
+                        label: latencyLabel(key),
+                        shortLabel: latencyLabel(key),
+                        latencyKind: key,
+                        color: searchLatencyColors[key] || "#6fd0ff",
+                        dasharray: searchLatencyDash[key] || "",
+                        order: key === "completion" ? 0 : 1,
+                    })
+                ),
+                insightsFor: buildAggregateScopeInsights,
+            }),
+            fileSize: () => ({
+                title: "File Size Against Time",
+                subtitle: "Active, Current, and All file-size scenarios. Color = mode, dashed = first response.",
+                hardLimitText: "No hard limit observed; every file-size series completed its largest sampled input.",
+                series: buildSearchSpeedSeries(
+                    items,
+                    (item) => item.scaling_axis === "file_size",
+                    (item) => `${item.mode}:${item.latency_kind}`,
+                    (key) => {
+                        const [mode, latencyKind] = key.split(":");
+                        const modeLabel = titleCase(mode);
+                        const latencyText = latencyKind === "first_response" ? "First response" : "Completion";
+                        const latencyOrder = latencyKind === "completion" ? 0 : 1;
+                        const modeOrder = { active: 0, current: 1, all: 2 }[mode] ?? 9;
+                        return {
+                            label: `${modeLabel} ${latencyText}`,
+                            shortLabel: modeLabel,
+                            mode,
+                            latencyKind,
+                            color: searchModeColors[mode] || "#6fd0ff",
+                            dasharray: searchLatencyDash[latencyKind] || "",
+                            order: modeOrder * 2 + latencyOrder,
+                        };
+                    }
+                ),
+                insightsFor: buildFileSizeInsights,
+            }),
+        };
+        const scopeKey = scopeBuilders[state.searchChartScope] ? state.searchChartScope : "tabs";
+        const chart = scopeBuilders[scopeKey]();
+        const scopeToggle = `<div class="segmented-control segmented-control--compact" role="group" aria-label="Search chart scope">
+            ${[
+            ["tabs", "Tabs"],
+            ["files", "Files"],
+            ["fileSize", "File size"],
+        ].map(([key, label]) => `<button type="button" class="${scopeKey === key ? "is-active" : ""}" aria-pressed="${scopeKey === key ? "true" : "false"}" data-search-chart-scope="${key}">${label}</button>`).join("")}
+        </div>`;
 
         container.innerHTML = [
             buildSearchSpeedLineCard({
-                title: "Tabs Against Time",
-                subtitle: "All-open-tabs aggregate-size scenarios. Solid = completion, dashed = first response.",
-                series: tabsSeries,
-                insights: buildAggregateScopeInsights(tabsSeries),
-                hardLimitText: "No hard limit observed in the measured tab range.",
+                title: chart.title,
+                subtitle: chart.subtitle,
+                series: chart.series,
+                insights: chart.insightsFor(chart.series),
+                hardLimitText: chart.hardLimitText,
+                controls: scopeToggle,
             }),
-            buildSearchSpeedLineCard({
-                title: "Files Against Time",
-                subtitle: "Current-workspace aggregate-size scenarios. Solid = completion, dashed = first response.",
-                series: filesSeries,
-                insights: buildAggregateScopeInsights(filesSeries),
-                hardLimitText: "No hard limit observed in the measured file-count range.",
-            }),
-            buildSearchSpeedLineCard({
-                title: "File Size Against Time",
-                subtitle: "Active, Current, and All file-size scenarios. Color = mode, dashed = first response.",
-                series: fileSizeSeries,
-                insights: buildFileSizeInsights(fileSizeSeries),
-                hardLimitText: "No hard limit observed; every file-size series completed its largest sampled input.",
-            }),
-            buildSearchDependencyCard(dependencyMetrics),
         ].join("");
+        container.querySelectorAll("[data-search-chart-scope]").forEach((button) => {
+            button.addEventListener("click", () => {
+                state.searchChartScope = button.dataset.searchChartScope || "tabs";
+                renderSearchSpeedCharts(items);
+            });
+        });
+    }
+
+    function renderPerformanceHeadlineCharts() {
+        const target = byId("performance-headline-charts");
+        const data = buildPerformanceAnswerChainData();
+        if (target) {
+            target.innerHTML = [
+                renderPerformanceScatterPanel({
+                    id: "pressure-scaling",
+                    title: "Pressure × Scaling",
+                    caption: "Quadrants separate healthy rows from watch, fix-now, and redesign work.",
+                    points: data.pressureGrowth,
+                    empty: "No rows have both budget pressure and scaling growth.",
+                    x: { label: "Budget pressure", min: 0, max: 2, threshold: 1, valueLabel: formatRatio },
+                    y: { label: "Growth per 2x", min: 0.8, max: 4, threshold: 2, valueLabel: formatRatio },
+                    sideTitle: "Worst combined offenders",
+                    quadrants: [
+                        { x: "left", y: "bottom", tone: "good", title: "Healthy", detail: "under budget, stable" },
+                        { x: "right", y: "bottom", tone: "local", title: "Fix now", detail: "over budget" },
+                        { x: "left", y: "top", tone: "architecture", title: "Watch", detail: "growth risk" },
+                        { x: "right", y: "top", tone: "triage", title: "Redesign", detail: "over + nonlinear" },
+                    ],
+                }),
+                renderPerformanceScatterPanel({
+                    id: "memory-elapsed",
+                    title: "Memory × Elapsed",
+                    caption: "Resource frontier: high working set plus high elapsed time deserves the next profile.",
+                    points: data.memoryElapsed,
+                    empty: "No resource rows with working-set and elapsed values loaded.",
+                    x: { label: "Working set", min: data.memoryBounds.xMin, max: data.memoryBounds.xMax, threshold: data.memoryBounds.xThreshold, scale: "log", valueLabel: formatBytes },
+                    y: { label: "Elapsed", min: data.memoryBounds.yMin, max: data.memoryBounds.yMax, threshold: data.memoryBounds.yThreshold, scale: "log", valueLabel: formatMs },
+                    sideTitle: "Pareto-worst resources",
+                }),
+                renderPerformanceRiskRegisterPanel(),
+                renderPerformanceDistributionGlyph({
+                    id: "budget",
+                    title: "Budget Pressure",
+                    caption: "Mean latency divided by the row budget. Target is 1.0x.",
+                    items: data.budgetPressure,
+                    empty: "No latency rows with budgets loaded.",
+                    bounds: { min: 0, max: 2, scale: "linear" },
+                    markers: [
+                        { value: 0.7, kind: "warn", label: "watch" },
+                        { value: 1, kind: "bad", label: "over" },
+                    ],
+                    buckets: [
+                        { cls: "good", label: "< 0.7 healthy", test: (item) => item.value < 0.7 },
+                        { cls: "warn", label: "0.7-1.0 watch", test: (item) => item.value >= 0.7 && item.value < 1 },
+                        { cls: "bad", label: ">= 1.0 over", test: (item) => item.value >= 1 },
+                    ],
+                    driverFor: (item) => item.resource || "cpu",
+                    valueLabel: formatRatio,
+                    rowFor: renderPerformanceMetricRow,
+                }),
+                renderPerformanceDistributionGlyph({
+                    id: "scaling",
+                    title: "Scaling Growth",
+                    caption: "Time multiplier when the workload doubles. 2.0x is linear.",
+                    items: data.scalingGrowth,
+                    empty: "No scale series with at least two points loaded.",
+                    bounds: { min: 0.8, max: 4, scale: "log" },
+                    markers: [
+                        { value: 1.5, kind: "warn", label: "good" },
+                        { value: 2.2, kind: "bad", label: "super-linear" },
+                    ],
+                    buckets: [
+                        { cls: "good", label: "flat < 1.2", test: (item) => item.value < 1.2 },
+                        { cls: "good", label: "sub-linear 1.2-1.8", test: (item) => item.value >= 1.2 && item.value < 1.8 },
+                        { cls: "warn", label: "linear 1.8-2.2", test: (item) => item.value >= 1.8 && item.value < 2.2 },
+                        { cls: "bad", label: "super-linear >= 2.2", test: (item) => item.value >= 2.2 },
+                    ],
+                    driverFor: (item) => item.family || "unmapped",
+                    valueLabel: formatRatio,
+                    rowFor: renderPerformanceMetricRow,
+                }),
+                renderPerformanceDistributionGlyph({
+                    id: "capacity",
+                    title: "Capacity Headroom",
+                    caption: "Capacity ceiling against the matched promise target. Vertical guide is 1.0x.",
+                    items: data.capacityHeadroom,
+                    empty: "No capacity scenarios loaded.",
+                    bounds: { min: 0, max: Math.max(2, ...data.capacityHeadroom.map((item) => item.value || 0)), scale: "linear" },
+                    markers: [{ value: 1, kind: "target", label: "target" }],
+                    shape: "strip",
+                    buckets: [
+                        { cls: "bad", label: "failed below target", test: (item) => item.failed && item.value < 1 },
+                        { cls: "warn", label: "failed past target", test: (item) => item.failed && item.value >= 1 },
+                        { cls: "good", label: "proven without ceiling", test: (item) => !item.failed },
+                    ],
+                    driverFor: (item) => item.failureMode || "not_reached",
+                    valueLabel: formatRatio,
+                    rowFor: renderPerformanceMetricRow,
+                    worstSort: (left, right) => (right.failed ? 1 : 0) - (left.failed ? 1 : 0) || left.value - right.value,
+                }),
+                renderPerformanceDistributionGlyph({
+                    id: "resources",
+                    title: "Resource Intensity",
+                    caption: "Peak memory divided by workload size. Guide is a derived 2x-median budget.",
+                    items: data.resourceIntensity,
+                    empty: "No resource intensity rows loaded.",
+                    bounds: data.resourceBounds,
+                    markers: data.resourceThreshold ? [{ value: data.resourceThreshold, kind: "target", label: "2x median" }] : [],
+                    buckets: [
+                        { cls: "good", label: "< median", test: (item) => item.value < data.resourceMedian },
+                        { cls: "warn", label: "median-2x", test: (item) => item.value >= data.resourceMedian && item.value < data.resourceThreshold },
+                        { cls: "bad", label: ">= 2x median", test: (item) => item.value >= data.resourceThreshold },
+                    ],
+                    driverFor: (item) => item.family || item.resource || "resource",
+                    valueLabel: formatBytes,
+                    rowFor: renderPerformanceMetricRow,
+                }),
+            ].join("");
+            attachPerformanceScatterHandlers(target);
+        }
+        renderPerformanceFocusList(data.pressureGrowth);
+    }
+
+    function renderPerformanceRiskRegisterPanel() {
+        return `<aside class="panel-card performance-focus-panel">
+            <div class="panel-card__header">
+                <div>
+                    <h2>Risk register</h2>
+                    <p>Ranked by combined budget pressure and scaling growth.</p>
+                </div>
+            </div>
+            <div id="performance-focus-list" class="performance-focus-list"></div>
+        </aside>`;
+    }
+
+    function labeledPerformanceRows(rows, sourceLabel) {
+        return uniquePerformanceRows(rows).map((item) => ({ ...item, sourceLabel }));
+    }
+
+    function performancePromiseColor(key) {
+        const scenarios = state.performanceReview?.scenarios || [];
+        const index = scenarios.findIndex((scenario) => scenario.id === key);
+        if (index >= 0) return performancePromisePalette[index % performancePromisePalette.length];
+        const hash = String(key || "").split("").reduce((value, char) => ((value << 5) - value + char.charCodeAt(0)) | 0, 0);
+        return performancePromisePalette[Math.abs(hash) % performancePromisePalette.length];
+    }
+
+    function normalisePromiseToken(value) {
+        return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    }
+
+    function promiseEvidenceMatches(item, evidence) {
+        const itemValues = [
+            item?.id,
+            item?.name,
+            item?.label,
+            item?.benchmark_key,
+            item?.scenario_id,
+            item?.scenario,
+            item?.scenario_label,
+        ].map(normalisePromiseToken).filter(Boolean);
+        const evidenceValues = [
+            evidence?.id,
+            evidence?.label,
+            evidence?.benchmark_key,
+            evidence?.scenario,
+            evidence?.scenario_label,
+        ].map(normalisePromiseToken).filter(Boolean);
+        return itemValues.some((itemValue) => evidenceValues.some((evidenceValue) => {
+            return itemValue === evidenceValue || itemValue.startsWith(`${evidenceValue}_`) || evidenceValue.startsWith(`${itemValue}_`);
+        }));
+    }
+
+    function performancePromiseForItem(item) {
+        if (item?.promiseId) {
+            return { id: item.promiseId, title: item.promiseTitle || item.promiseId, color: performancePromiseColor(item.promiseId) };
+        }
+        const scenarios = state.performanceReview?.scenarios || [];
+        const family = item?.workload_family || item?.family;
+        const familyToken = normalisePromiseToken(family);
+        const itemTokens = [item?.id, item?.name, item?.label, item?.benchmark_key, item?.scenario, item?.scenario_label]
+            .map(normalisePromiseToken)
+            .filter(Boolean);
+        const scored = scenarios
+            .map((scenario) => {
+                const scenarioToken = normalisePromiseToken(`${scenario.id || ""} ${scenario.title || ""}`);
+                const exact = Object.values(scenario.evidence || {})
+                    .some((rows) => Array.isArray(rows) && rows.some((row) => promiseEvidenceMatches(item, row)));
+                const familyMatch = family && scenarioFamilies(scenario).includes(family);
+                const tokenMatch = itemTokens.some((token) => token.includes(normalisePromiseToken(scenario.id)) || scenarioToken.includes(token));
+                const familyScenarioMatch = familyToken && scenarioToken.includes(familyToken);
+                const score = (exact ? 100 : 0) + (familyMatch ? 20 : 0) + (tokenMatch ? 50 : 0) + (familyScenarioMatch ? 40 : 0);
+                return { scenario, score };
+            })
+            .filter((entry) => entry.score > 0)
+            .sort((left, right) => right.score - left.score);
+        if (scored.length) {
+            const match = scored[0].scenario;
+            return { id: match.id, title: match.title || match.id, color: performancePromiseColor(match.id) };
+        }
+        return { id: "unmapped", title: "Unmapped", color: performancePromiseColor("unmapped") };
+    }
+
+    function selectedPerformancePromise() {
+        const scenarios = state.performanceReview?.scenarios || [];
+        if (!scenarios.length) return null;
+        return scenarios.find((scenario) => scenario.id === state.selectedPerformanceScenarioId) || scenarios[0];
+    }
+
+    function rowBelongsToPerformancePromise(item, scenario = selectedPerformancePromise()) {
+        if (!scenario) return true;
+        return Object.values(scenario.evidence || {})
+            .some((rows) => Array.isArray(rows) && rows.some((row) => promiseEvidenceMatches(item, row)));
+    }
+
+    function promiseOverviewRow(scenario) {
+        const status = scenarioStatus(scenario);
+        const scale = bestScaleCheck(scenario);
+        const observed = scale ? Number(scale.observed || 0) : 0;
+        const target = scale ? Number(scale.target || 0) : 0;
+        const scaleRatio = target > 0 ? observed / target : 0;
+        return {
+            id: scenario.id,
+            title: scenario.title || scenario.id || "Scenario",
+            promise: scenario.promise || "",
+            status,
+            scale,
+            scaleRatio,
+            budgetMisses: Number(scenario.budget_misses || 0),
+            ceilingHits: Number(scenario.ceilings_reached || 0),
+            maxLatencyMs: Number(scenario.max_latency_ms || 0),
+            peakWorkingSet: Number(scenario.peak_working_set_bytes || 0),
+            families: scenarioFamilies(scenario),
+        };
+    }
+
+    function renderPromiseStatusGraph(rows) {
+        const buckets = [
+            { cls: "ok", label: "Met", rows: rows.filter((row) => row.status.cls === "ok") },
+            { cls: "watch", label: "Watch", rows: rows.filter((row) => row.status.cls === "watch") },
+            { cls: "bad", label: "Below target", rows: rows.filter((row) => row.status.cls === "bad") },
+            { cls: "stale", label: "Untested", rows: rows.filter((row) => row.status.cls === "stale") },
+        ];
+        const total = Math.max(1, rows.length);
+        return `<section class="panel-card promise-graph-card promise-graph-card--status">
+            <div class="promise-graph-card__header">
+                <h3>Promise Status</h3>
+                <p>${formatNumber.format(buckets[0].rows.length)}/${formatNumber.format(rows.length)} met, ${formatNumber.format(buckets[1].rows.length + buckets[2].rows.length)} need attention.</p>
+            </div>
+            <div class="promise-status-track" aria-label="Promise status distribution">
+                ${buckets.map((bucket) => bucket.rows.length ? `<span class="promise-status-track__${bucket.cls}" style="width:${(bucket.rows.length / total) * 100}%"></span>` : "").join("")}
+            </div>
+            <div class="promise-status-grid">
+                ${buckets.map((bucket) => `<div class="promise-status-cell promise-status-cell--${bucket.cls}">
+                    <span>${escapeHtml(bucket.label)}</span>
+                    <strong>${formatNumber.format(bucket.rows.length)}</strong>
+                </div>`).join("")}
+            </div>
+        </section>`;
+    }
+
+    function renderPromiseMetricGraph({ title, caption, rows, value, valueLabel, tone, maxValue, targetValue }) {
+        const measuredRows = rows.map((row) => ({ row, value: Number(value(row) || 0) }));
+        const max = Math.max(maxValue || 0, ...measuredRows.map((item) => item.value), 1);
+        return `<section class="panel-card promise-graph-card">
+            <div class="promise-graph-card__header">
+                <h3>${escapeHtml(title)}</h3>
+                <p>${escapeHtml(caption)}</p>
+            </div>
+            <div class="promise-graph-bars">
+                ${measuredRows.map(({ row, value: rawValue }) => {
+            const pct = Math.max(rawValue ? 4 : 0, Math.min(100, (rawValue / max) * 100));
+            const marker = targetValue ? `<b style="left:${Math.min(100, (targetValue / max) * 100)}%"></b>` : "";
+            const cls = tone(row);
+            return `<button type="button" class="promise-graph-row promise-graph-row--${cls}" data-promise-focus="${escapeHtml(row.id)}" title="${escapeHtml(row.title)}" style="--promise-color:${escapeHtml(performancePromiseColor(row.id))}">
+                    <span><strong>${escapeHtml(row.title)}</strong><em>${escapeHtml(row.status.label)}</em></span>
+                    <div><i style="width:${pct}%"></i>${marker}</div>
+                    <strong>${escapeHtml(valueLabel(row))}</strong>
+                </button>`;
+        }).join("")}
+            </div>
+        </section>`;
+    }
+
+    function renderPerformanceFocusList(rows) {
+        const target = byId("performance-focus-list");
+        if (!target) return;
+        if (!rows.length) {
+            target.innerHTML = `<p class="muted">No pressure/growth pairs loaded.</p>`;
+            return;
+        }
+        const sorted = [...rows]
+            .sort((left, right) => Number(right.score || 0) - Number(left.score || 0))
+            .slice(0, 15);
+        target.innerHTML = sorted.map((row, index) => {
+            const cls = row.x >= 1 && row.y >= 2 ? "bad" : row.x >= 1 || row.y >= 2 ? "watch" : "ok";
+            return `<div class="performance-focus-row" style="--promise-color:${escapeHtml(row.color || performancePromiseColor(row.promiseId || row.label))}" aria-label="${escapeHtml(row.label)} risk register row">
+                <span class="rank-pill">${index + 1}</span>
+                <span class="performance-focus-row__main">
+                    <strong>${escapeHtml(row.label)}</strong>
+                    <em>${escapeHtml(`${row.promiseTitle || "Unmapped"} - ${formatRatio(row.x)} budget - ${formatRatio(row.y)} growth`)}</em>
+                </span>
+                <span class="status-pill status-pill--${cls}">${escapeHtml(formatNumber.format(row.score || 0))}</span>
+            </div>`;
+        }).join("");
+    }
+
+    function promiseFocusScore(row) {
+        const statusWeight = { bad: 600, stale: 450, watch: 300, ok: 0 }[row.status.cls] || 0;
+        const scaleGap = row.scale && row.scale.met === false ? 250 : 0;
+        const latencyWeight = row.maxLatencyMs ? Math.min(180, row.maxLatencyMs / 4) : 0;
+        const memoryWeight = row.peakWorkingSet ? Math.min(120, row.peakWorkingSet / 32_000_000) : 0;
+        return statusWeight + scaleGap + row.budgetMisses * 40 + row.ceilingHits * 45 + latencyWeight + memoryWeight;
+    }
+
+    function budgetLabelParts(item) {
+        const raw = item.scenario_label || item.benchmark_key || item.name || "Scenario";
+        const parameter = item.parameter_label || item.parameter_value || "";
+        const details = [
+            item.sourceLabel,
+            parameter ? String(parameter) : "",
+            titleCaseMetricName(item.workload_family || item.family || ""),
+        ].filter(Boolean);
+        return {
+            title: titleCaseMetricName(String(raw).replace(/[_/]+/g, " ")).slice(0, 58),
+            subtitle: [...new Set(details)].join(" · "),
+        };
+    }
+
+    function buildCombinedBudgetPressureCard(rows) {
+        const ratios = rows
+            .filter((item) => item.threshold_ms)
+            .map((item) => ({ item, ratio: budgetRatio(item) }))
+            .filter((entry) => Number.isFinite(entry.ratio) && entry.ratio > 0)
+            .sort((a, b) => b.ratio - a.ratio);
+        if (!ratios.length) return emptyChartCard("Budget Pressure", "No budget thresholds available.");
+        const visible = ratios.filter((entry) => entry.ratio >= 0.4).slice(0, 14);
+        const rowsToRender = visible.length ? visible : ratios.slice(0, 14);
+        const maxRatio = Math.max(2, ...rowsToRender.map((entry) => entry.ratio));
+        const rowsMarkup = rowsToRender.map(({ item, ratio }) => {
+            const parts = budgetLabelParts(item);
+            const pct = Math.min(100, (ratio / maxRatio) * 100);
+            const cls = ratio > 1 ? "bad" : ratio > 0.85 ? "watch" : "ok";
+            return `<div class="headroom-row">
+                <span><strong>${escapeHtml(parts.title)}</strong><em>${escapeHtml(parts.subtitle)}</em></span>
+                <div><i class="headroom-row__fill headroom-row__fill--${cls}" style="width:${pct}%"></i><b style="left:${(1 / maxRatio) * 100}%"></b></div>
+                <strong>${formatRatio(ratio)}</strong>
+            </div>`;
+        }).join("");
+        const over = ratios.filter((entry) => entry.ratio > 1).length;
+        const watch = ratios.filter((entry) => entry.ratio >= 0.85 && entry.ratio <= 1).length;
+        return `<section class="panel-card chart-panel" id="budget-pressure">
+            <div><h3>Budget Pressure</h3><p class="chart-caption">${formatNumber.format(over)} over budget · ${formatNumber.format(watch)} near budget · full rows stay in the dataset tables.</p></div>
+            <figure class="chart-frame chart-frame--list" aria-label="Budget pressure">${rowsMarkup}</figure>
+        </section>`;
+    }
+
+    function buildCombinedLatencyDistributionCard(rows) {
+        const items = rows
+            .filter((item) => item.threshold_ms && item.median_ns)
+            .map((item) => ({
+                item,
+                mean: latencyMs(item),
+                median: Number(item.median_ns || 0) / 1_000_000,
+                dispersion: Number(item.dispersion_ns || 0) / 1_000_000,
+                budget: Number(item.threshold_ms || 0),
+            }))
+            .sort((a, b) => (b.mean / b.budget) - (a.mean / a.budget))
+            .slice(0, 14);
+        if (!items.length) return emptyChartCard("Latency Spread", "No median and dispersion rows available.");
+        const max = Math.max(...items.flatMap((item) => [item.mean + item.dispersion, item.budget]), 1);
+        const rowsMarkup = items.map((row) => {
+            const parts = budgetLabelParts(row.item);
+            const start = Math.max(0, row.median - row.dispersion);
+            const end = row.median + row.dispersion;
+            return `<div class="distribution-row">
+                <span><strong>${escapeHtml(parts.title)}</strong><em>${escapeHtml(parts.subtitle)}</em></span>
+                <div>
+                    <i style="left:${(start / max) * 100}%;width:${Math.max(1, ((end - start) / max) * 100)}%"></i>
+                    <b class="distribution-row__median" style="left:${(row.median / max) * 100}%"></b>
+                    <b class="distribution-row__mean" style="left:${(row.mean / max) * 100}%"></b>
+                    <b class="distribution-row__budget" style="left:${(row.budget / max) * 100}%"></b>
+                </div>
+                <strong>${formatMs(row.mean)}</strong>
+            </div>`;
+        }).join("");
+        return `<section class="panel-card chart-panel" id="latency-spread">
+            <div><h3>Latency Spread</h3><p class="chart-caption">Search and editor distributions share one view. Whisker is median ± dispersion, dot is mean, guide is budget.</p></div>
+            <figure class="chart-frame chart-frame--list" aria-label="Latency spread">${rowsMarkup}</figure>
+        </section>`;
+    }
+
+    function buildCapacityResourceCard(capacityRows, resourceRows) {
+        const capacityMarkup = capacityRows.slice(0, 6).map((item) => {
+            const samples = item.samples || [];
+            const maxValue = Math.max(...samples.map((sample) => Number(sample.workload_value || 0)), Number(item.first_failure_workload || 0), 1);
+            const rungs = samples.map((sample) => {
+                const failed = item.first_failure_workload != null && Number(sample.workload_value || 0) >= Number(item.first_failure_workload || Infinity);
+                return `<i class="capacity-ladder__rung capacity-ladder__rung--${failed ? "bad" : "ok"}" style="left:${Math.min(100, (Number(sample.workload_value || 0) / maxValue) * 100)}%" title="${escapeHtml(sample.workload_label || "")}"></i>`;
+            }).join("");
+            return `<div class="capacity-ladder__row">
+                <span><strong>${escapeHtml(item.scenario_label || item.scenario)}</strong><em>${escapeHtml(item.failure_mode || "not_reached")}</em></span>
+                <div>${rungs}</div>
+                <strong>${escapeHtml(item.first_failure_label || `>${item.last_successful_label || "-"}`)}</strong>
+            </div>`;
+        }).join("");
+        const resourceMarkup = performanceResultBars(topResourceRows(resourceRows, 5), "resource");
+        return `<section class="panel-card chart-panel chart-panel--wide" id="capacity-memory">
+            <div><h3>Capacity &amp; Memory</h3><p class="chart-caption">Capacity ladders and peak live memory are paired because they explain the same scaling risk from two angles.</p></div>
+            <div class="capacity-resource-grid">
+                <figure class="chart-frame chart-frame--list" aria-label="Capacity ladder">${capacityMarkup || `<p class="muted">No capacity samples loaded.</p>`}</figure>
+                <figure class="chart-frame chart-frame--list" aria-label="Peak resource use">${resourceMarkup}</figure>
+            </div>
+        </section>`;
+    }
+
+    function emptyChartCard(title, message) {
+        return `<section class="panel-card chart-panel"><div><h3>${escapeHtml(title)}</h3></div><div class="chart-empty">${escapeHtml(message)}</div></section>`;
     }
 
     function buildSearchSpeedSeries(items, predicate, keyFn, describeFn) {
@@ -635,9 +1054,12 @@
             .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
     }
 
-    function buildSearchSpeedLineCard({ title, subtitle, series, insights, hardLimitText }) {
+    function buildSearchSpeedLineCard({ title, subtitle, series, insights, hardLimitText, controls = "" }) {
         if (!series.length) {
-            return `<section class="panel-card chart-panel"><div><h3>${escapeHtml(title)}</h3><p class="chart-caption">${escapeHtml(subtitle)}</p></div><div class="chart-empty">No matching records for this chart.</div></section>`;
+            return `<section class="panel-card chart-panel">
+                <div class="chart-panel__header"><div><h3>${escapeHtml(title)}</h3><p class="chart-caption">${escapeHtml(subtitle)}</p></div>${controls}</div>
+                <div class="chart-empty">No matching records for this chart.</div>
+            </section>`;
         }
 
         const orderedX = Array.from(
@@ -722,9 +1144,12 @@
             .join("");
 
         return `<section class="panel-card chart-panel">
-            <div>
-                <h3>${escapeHtml(title)}</h3>
-                <p class="chart-caption">${escapeHtml(subtitle)}</p>
+            <div class="chart-panel__header">
+                <div>
+                    <h3>${escapeHtml(title)}</h3>
+                    <p class="chart-caption">${escapeHtml(subtitle)}</p>
+                </div>
+                ${controls}
             </div>
             <div class="chart-frame">
                 <svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(title)}">
@@ -994,26 +1419,19 @@
 
     function renderSpeedReport() {
         const payload = state.speedReport || {};
-        const summary = payload.summary || {};
         const triage = payload.triage || [];
         const sections = payload.sections || {};
-
-        renderSummary("speed-report-summary", [
-            metricCard("Search rows", summary.search_scenarios ?? "-"),
-            metricCard("Editor rows", summary.editor_scenarios ?? "-"),
-            metricCard("Tabs / splits", summary.tabs_and_splits_scenarios ?? "-"),
-            metricCard("Capacity scenarios", summary.capacity_scenarios ?? "-"),
-            metricCard("Over budget", summary.over_budget_latency ?? "-"),
-            metricCard("Coverage gaps", summary.coverage_gaps ?? "-"),
-            metricCard("Near ceilings", summary.near_failure_ceilings ?? "-"),
-        ]);
-
-        byId("speed-report-triage").innerHTML = renderSpeedTriageVisual(triage, payload.triage_summary || {});
+        const selected = selectedPerformancePromise();
+        const inPromise = (item) => !selected || rowBelongsToPerformancePromise(item, selected);
+        const triageTarget = byId("speed-report-triage");
+        if (triageTarget) {
+            triageTarget.innerHTML = renderSpeedTriageVisual(triage.filter(inPromise), payload.triage_summary || {});
+        }
 
         renderTable(
             "speed-report-search",
             ["Scenario", "Family", "Mean", "Budget", "Profiles", "Stability", "Ceiling", "Resource"],
-            (sections.search || []).map((item) => `<tr>
+            (sections.search || []).filter(inPromise).map((item) => `<tr>
                 <td><code>${escapeHtml(item.scenario_label || item.scenario_id)}</code></td>
                 <td><span class="pill">${escapeHtml(item.family || "search")}</span></td>
                 <td>${formatNumber.format(item.mean_ms || 0)} ms</td>
@@ -1028,7 +1446,7 @@
         renderTable(
             "speed-report-editor",
             ["Scenario", "Family", "Mean", "Budget", "Profiles", "Signals", "Ceiling", "Resource"],
-            [...(sections.editor_file_size || []), ...(sections.tabs_and_splits || [])].map((item) => `<tr>
+            [...(sections.editor_file_size || []), ...(sections.tabs_and_splits || [])].filter(inPromise).map((item) => `<tr>
                 <td><code>${escapeHtml(item.scenario_label || item.scenario_id)}</code></td>
                 <td><span class="pill">${escapeHtml(item.family || "unmapped")}</span></td>
                 <td>${formatNumber.format(item.mean_ms || 0)} ms</td>
@@ -1043,7 +1461,7 @@
         renderTable(
             "speed-report-flamegraphs",
             ["Profile", "Role", "Available", "Families", "Benchmarks", "Covered scenarios", "Issue"],
-            (sections.flamegraph_coverage || []).map((item) => `<tr>
+            (sections.flamegraph_coverage || []).filter((item) => !selected || (item.covered_scenarios || []).includes(selected.id)).map((item) => `<tr>
                 <td><code>${escapeHtml(item.name || item.id)}</code></td>
                 <td><span class="pill">${escapeHtml(item.coverage_role || "report-driven")}</span></td>
                 <td>${item.available ? "yes" : "no"}</td>
@@ -1053,11 +1471,6 @@
                 <td>${escapeHtml(item.issue || "-")}</td>
             </tr>`)
         );
-
-        const methodology = sections.methodology || [];
-        byId("speed-report-methodology").innerHTML = methodology.length
-            ? `<ul class="chart-insights">${methodology.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
-            : '<p class="muted">No methodology notes loaded.</p>';
     }
 
     function renderSpeedTriageVisual(triage, triageSummary = {}) {
@@ -1115,41 +1528,35 @@
 
     function renderSpeedTriageCard(item, index, maxScore) {
         const scorePct = Math.max(6, Math.min(100, (item.rankScore / maxScore) * 100));
-        const reasons = [...item.reasons].slice(0, 4);
-        const profile = (item.action.match(/Inspect\s+([^\s]+)_profile/i) || [])[1];
+        const reasons = [...item.reasons]
+            .filter((reason) => /over budget|slow\s*>|ceiling|failure|near/i.test(reason))
+            .slice(0, 3);
+        const profile = (item.action.match(/Inspect\s+([^\s,]+_profile)\b/i) || [])[1];
         return `<article class="triage-card">
             <div class="triage-card__rank">${index + 1}</div>
             <div class="triage-card__body">
-                <div class="triage-card__header">
+                <div class="triage-card__header" title="Rank score ${escapeHtml(formatNumber.format(item.rankScore))}">
                     <h3>${escapeHtml(item.label)}</h3>
-                    <strong>${formatNumber.format(item.rankScore)}</strong>
                 </div>
                 <div class="triage-card__bar"><span style="width:${scorePct}%"></span></div>
                 <div class="triage-card__chips">
                     <span class="pill">${escapeHtml(item.family)}</span>
                     <span class="pill">${escapeHtml(item.resource)}</span>
-                    ${item.count > 1 ? `<span class="pill">${item.count} scale points</span>` : ""}
-                    ${profile ? `<span class="pill">${escapeHtml(profile)}</span>` : ""}
                 </div>
-                <div class="triage-card__signals">
+                ${reasons.length ? `<div class="triage-card__signals">
                     ${reasons.map((reason) => `<span>${escapeHtml(reason)}</span>`).join("")}
-                </div>
+                </div>` : ""}
+                ${profile ? `<div class="triage-card__actions"><button type="button" class="link-button" data-open-flamegraph="${escapeHtml(profile)}">Open profile</button></div>` : ""}
             </div>
         </article>`;
     }
 
     function renderCapacityReport() {
         const payload = state.capacityReport || {};
-        const summary = payload.summary || {};
-        const scenarios = payload.scenarios || [];
+        const selected = selectedPerformancePromise();
+        const scenarios = filterPerformanceScenarioRows((payload.scenarios || []).filter((item) => rowBelongsToPerformancePromise(item, selected)));
 
-        renderSummary("capacity-report-summary", [
-            metricCard("Scenarios", summary.scenario_count ?? "-"),
-            metricCard("Ceilings reached", summary.ceilings_reached ?? "-"),
-            metricCard("Memory bound", summary.memory_bound_scenarios ?? "-"),
-            metricCard("CPU bound", summary.cpu_bound_scenarios ?? "-"),
-        ]);
-
+        renderCapacityDatasetLadder(scenarios);
         renderTable(
             "capacity-report-table",
             ["Scenario", "Failure mode", "Last OK", "First failure", "Resource", "Peak working set", "Growth", "Profiles", "Guidance"],
@@ -1165,257 +1572,700 @@
                 <td>${escapeHtml((item.diagnosis_guidance || []).join(" • ") || "-")}</td>
             </tr>`)
         );
+        renderPerformancePanelCaptions();
+    }
+
+    function renderCapacityDatasetLadder(rows) {
+        const target = byId("capacity-ladder-visual");
+        if (!target) return;
+        if (!rows.length) {
+            target.innerHTML = `<p class="muted">No capacity scenarios match the current search.</p>`;
+            return;
+        }
+        const numeric = (value) => {
+            const number = Number(value);
+            return Number.isFinite(number) && number > 0 ? number : null;
+        };
+        const ordered = [...rows].sort((left, right) => {
+            const leftFailure = numeric(left.first_failure_workload);
+            const rightFailure = numeric(right.first_failure_workload);
+            if (leftFailure && rightFailure) return leftFailure - rightFailure;
+            if (leftFailure) return -1;
+            if (rightFailure) return 1;
+            return (numeric(right.last_successful_workload) || 0) - (numeric(left.last_successful_workload) || 0);
+        });
+        const failedCount = ordered.filter((item) => numeric(item.first_failure_workload)).length;
+        const provenCount = ordered.length - failedCount;
+        const rowsMarkup = ordered.map((item) => {
+            const firstFailure = numeric(item.first_failure_workload);
+            const lastOk = numeric(item.last_successful_workload);
+            const pointMap = new Map();
+            const addPoint = (value, label, failed, endpoint = "") => {
+                const number = numeric(value);
+                if (!number) return;
+                const key = `${number}:${failed ? "fail" : "ok"}`;
+                const existing = pointMap.get(key) || {};
+                pointMap.set(key, {
+                    value: number,
+                    label: label || existing.label || formatNumber.format(number),
+                    failed,
+                    endpoint: endpoint || existing.endpoint || "",
+                });
+            };
+            (item.samples || []).forEach((sample) => {
+                const value = numeric(sample.workload_value);
+                const sampleFailed = sample.status && sample.status !== "ok";
+                addPoint(value, sample.workload_label, sampleFailed || (firstFailure != null && value >= firstFailure));
+            });
+            addPoint(lastOk, item.last_successful_label, false, "last-ok");
+            addPoint(firstFailure, item.first_failure_label, true, "first-failure");
+            const points = [...pointMap.values()].sort((left, right) => left.value - right.value);
+            const maxValue = Math.max(...points.map((point) => point.value), firstFailure || 0, lastOk || 0, 1);
+            const rungs = points.map((point) => {
+                const pct = Math.max(0, Math.min(100, (point.value / maxValue) * 100));
+                const endpointClass = point.endpoint ? ` capacity-ladder__rung--${point.endpoint}` : "";
+                return `<i class="capacity-ladder__rung capacity-ladder__rung--${point.failed ? "bad" : "ok"}${endpointClass}" style="left:${pct}%" title="${escapeHtml(point.label)}"></i>`;
+            }).join("");
+            const failureText = firstFailure ? item.first_failure_label || formatNumber.format(firstFailure) : "No failure";
+            const okText = item.last_successful_label || (lastOk ? formatNumber.format(lastOk) : "-");
+            const cls = firstFailure ? "watch" : "ok";
+            return `<div class="capacity-ladder__row capacity-ladder__row--dataset">
+                <span><strong>${escapeHtml(item.scenario_label || item.scenario || "Capacity scenario")}</strong><em>${escapeHtml(item.failure_mode || "not_reached")}</em></span>
+                <div>${rungs}</div>
+                <strong><span class="status-pill status-pill--${cls}">${escapeHtml(firstFailure ? `${okText} -> ${failureText}` : `proven to ${okText}`)}</span></strong>
+            </div>`;
+        }).join("");
+        target.innerHTML = `<section class="capacity-dataset-ladder__frame" aria-label="Capacity ladder">
+            <div class="capacity-dataset-ladder__header">
+                <div>
+                    <h4>Capacity Ladder</h4>
+                    <p>Green rungs are proven workloads; red marks first failure or later samples.</p>
+                </div>
+                <span>${formatNumber.format(provenCount)} proven · ${formatNumber.format(failedCount)} first failures</span>
+            </div>
+            <div class="capacity-dataset-ladder__rows">${rowsMarkup}</div>
+        </section>`;
     }
 
     function renderResourceProfiles() {
         const payload = state.resourceProfiles || {};
-        const summary = payload.summary || {};
         const scenarios = payload.scenarios || [];
         const query = byId("resource-profiles-filter")?.value || "";
-        const filteredScenarios = scenarios.filter((item) => matchesFilter(item, query));
-        const sampleRows = filteredScenarios.flatMap((scenario) =>
-            (scenario.samples || []).map((sample) => ({
-                scenarioLabel: scenario.scenario_label || scenario.scenario,
-                workloadFamily: scenario.workload_family || "unmapped",
-                focus: scenario.focus || "resource",
-                ...sample,
-            }))
-        );
-        const worstElapsed = scenarios.reduce((max, item) => Math.max(max, item.max_elapsed_ms || 0), 0);
-        const maxAllocated = scenarios.reduce((max, item) => Math.max(max, item.max_allocated_bytes || 0), 0);
-        const maxWorkingSet = scenarios.reduce((max, item) => Math.max(max, item.max_working_set_bytes || 0), 0);
-
-        renderSummary("resource-profiles-summary", [
-            metricCard("Scenarios", summary.scenario_count ?? scenarios.length),
-            metricCard("Allocation probes", summary.allocation_scenarios ?? "-"),
-            metricCard("Memory probes", summary.memory_scenarios ?? "-"),
-            metricCard("Session probes", summary.session_scenarios ?? "-"),
-            metricCard("Worst elapsed", worstElapsed ? `${formatNumber.format(worstElapsed)} ms` : "-"),
-            metricCard("Peak allocation", maxAllocated ? formatBytes(maxAllocated) : "-"),
-            metricCard("Peak working set", maxWorkingSet ? formatBytes(maxWorkingSet) : "-"),
-        ]);
+        const selected = selectedPerformancePromise();
+        const filteredScenarios = filterPerformanceScenarioRows(scenarios.filter((item) => rowBelongsToPerformancePromise(item, selected) && matchesFilter(item, query)));
 
         renderTable(
             "resource-profiles-table",
-            ["Scenario", "Focus", "Family", "Samples", "Max elapsed", "Allocated", "Peak live", "Working set", "PF growth", "Handle growth"],
+            ["Scenario", "Focus", "Family", "Max elapsed", "Allocated", "Peak live", "Working set", "Manifest", "PF growth", "Handle growth", "Samples"],
             filteredScenarios.map((item) => `<tr>
                 <td><code>${escapeHtml(item.scenario_label || item.scenario)}</code></td>
                 <td><span class="pill">${escapeHtml(item.focus || "resource")}</span></td>
                 <td><span class="pill">${escapeHtml(item.workload_family || "unmapped")}</span></td>
-                <td>${escapeHtml(item.sample_count ?? "-")}</td>
                 <td>${formatNumber.format(item.max_elapsed_ms || 0)} ms</td>
                 <td>${escapeHtml(formatBytes(item.max_allocated_bytes))}</td>
                 <td>${escapeHtml(formatBytes(item.max_peak_live_bytes))}</td>
                 <td>${escapeHtml(formatBytes(item.max_working_set_bytes))}</td>
+                <td>${escapeHtml(formatBytes(item.max_manifest_size_bytes))}</td>
                 <td>${item.page_fault_growth == null ? "-" : formatNumber.format(item.page_fault_growth)}</td>
                 <td>${item.handle_growth == null ? "-" : formatNumber.format(item.handle_growth)}</td>
+                <td>${renderResourceSampleDetails(item.samples || [])}</td>
             </tr>`)
         );
+        renderPerformancePanelCaptions();
+    }
 
-        renderTable(
-            "resource-profiles-samples",
-            ["Scenario", "Workload", "Elapsed", "Allocated", "Peak live", "Working set", "Page faults", "Handles", "Result", "Status"],
-            sampleRows.map((item) => `<tr>
-                <td><code>${escapeHtml(item.scenarioLabel)}</code><div class="muted">${escapeHtml(item.focus)} • ${escapeHtml(item.workloadFamily)}</div></td>
-                <td>${escapeHtml(item.workload_label || "-")}</td>
-                <td>${formatNumber.format(item.elapsed_ms || 0)} ms</td>
-                <td>${escapeHtml(formatBytes(item.allocated_bytes))}<div class="muted">${formatNumber.format(item.allocation_count || 0)} allocs / ${formatNumber.format(item.reallocation_count || 0)} reallocs</div></td>
-                <td>${escapeHtml(formatBytes(item.peak_live_bytes))}</td>
-                <td>${escapeHtml(formatBytes(item.working_set_bytes))}</td>
-                <td>${item.page_fault_count == null ? "-" : formatNumber.format(item.page_fault_count)}</td>
-                <td>${item.handle_count == null ? "-" : formatNumber.format(item.handle_count)}</td>
-                <td>${escapeHtml(item.result_label || "-")}</td>
-                <td class="${item.status === "ok" ? "risk-good" : "risk-bad"}">${escapeHtml(item.status || "-")}${item.note ? `<div class="muted">${escapeHtml(item.note)}</div>` : ""}</td>
-            </tr>`)
-        );
+    function renderResourceSampleDetails(samples) {
+        if (!samples.length) {
+            return '<span class="muted">No samples</span>';
+        }
+        const rows = samples.map((sample) => `<tr>
+            <td>${escapeHtml(sample.workload_label || "-")}</td>
+            <td>${formatNumber.format(sample.elapsed_ms || 0)} ms</td>
+            <td>${escapeHtml(formatBytes(sample.allocated_bytes))}<div class="muted">${formatNumber.format(sample.allocation_count || 0)} allocs / ${formatNumber.format(sample.reallocation_count || 0)} reallocs</div></td>
+            <td>${escapeHtml(formatBytes(sample.peak_live_bytes))}</td>
+            <td>${escapeHtml(formatBytes(sample.working_set_bytes))}</td>
+            <td>${escapeHtml(formatBytes(sample.manifest_size_bytes))}</td>
+            <td>${sample.page_fault_count == null ? "-" : formatNumber.format(sample.page_fault_count)}</td>
+            <td>${sample.handle_count == null ? "-" : formatNumber.format(sample.handle_count)}</td>
+            <td>${escapeHtml(sample.result_label || "-")}</td>
+            <td class="${sample.status === "ok" ? "risk-good" : "risk-bad"}">${escapeHtml(sample.status || "-")}${sample.note ? `<div class="muted">${escapeHtml(sample.note)}</div>` : ""}</td>
+        </tr>`).join("");
+        return `<details class="inline-samples">
+            <summary>${formatNumber.format(samples.length)} samples</summary>
+            <div class="inline-samples__table">
+                <table>
+                    <thead><tr><th>Workload</th><th>Elapsed</th><th>Allocated</th><th>Peak live</th><th>Working set</th><th>Manifest</th><th>Page faults</th><th>Handles</th><th>Result</th><th>Status</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        </details>`;
     }
 
     function renderPerformanceReviewCoverage() {
         const payload = state.performanceReview || {};
-        const summary = payload.summary || {};
         const scenarios = payload.scenarios || [];
-        const notes = payload.presentation?.notes || [];
-        const implementations = scenarios.flatMap((scenario) =>
-            (scenario.implementations || []).map((item) => ({
-                scenarioTitle: scenario.title,
-                ...item,
-            }))
-        );
 
-        renderSummary("performance-review-summary", [
-            metricCard("Scenarios", summary.scenario_count ?? scenarios.length),
-            metricCard("Covered", summary.covered_scenarios ?? "-"),
-            metricCard("Thin", summary.thin_scenarios ?? "-"),
-            metricCard("Implementations", summary.implementation_count ?? implementations.length),
-            metricCard("Scale targets", summary.missing_scale_targets ?? "-"),
-            metricCard("Budget misses", summary.budget_misses ?? "-"),
-            metricCard("Failed sources", summary.failed_source_artifacts ?? "-"),
-        ]);
-
-        const matrix = byId("performance-review-matrix");
-        if (matrix) {
-            matrix.innerHTML = scenarios.length
-                ? scenarios.map(renderPerformanceCoverageCard).join("")
-                : '<p class="muted">No performance review coverage artifact loaded.</p>';
-        }
-
-        renderTable(
-            "performance-review-implementations",
-            ["Scenario", "Kind", "Measurement", "Status", "Detail"],
-            implementations.map((item) => `<tr>
-                <td><code>${escapeHtml(item.scenarioTitle || "-")}</code><div class="muted">${escapeHtml(item.label || "-")}</div></td>
-                <td>${escapeHtml(item.kind || "-")}</td>
-                <td>${escapeHtml(item.measurement || "-")}</td>
-                <td>${escapeHtml(item.status || "-")}</td>
-                <td>${escapeHtml(item.detail || "-")}</td>
-            </tr>`)
-        );
-
-        const notesTarget = byId("performance-review-presentation");
-        if (notesTarget) {
-            notesTarget.innerHTML = notes.length
-                ? `<ul class="chart-insights">${notes.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
-                : '<p class="muted">No presentation notes loaded.</p>';
-        }
+        renderPerformanceStaleState(payload);
+        renderPerformancePromiseBoard(scenarios);
     }
 
-    function renderPerformanceCoverageCard(scenario) {
-        const axes = scenario.axes || {};
-        const scaleChecks = scenario.scale_checks || [];
-        const implementations = scenario.implementations || [];
-        const status = scenario.coverage_status || "missing";
-        const badge = implementations.length ? "Measured" : "Pending";
-        const scaleRows = scaleChecks.map((check) => {
-            const met = Boolean(check.met);
-            return `<div class="coverage-scale coverage-scale--${met ? "met" : "miss"}">
-                <span>${escapeHtml(check.label)}</span>
-                <strong>${escapeHtml(formatScaleValue(check.observed, check.unit))}</strong>
-                <em>target ${escapeHtml(formatScaleValue(check.target, check.unit))}</em>
-            </div>`;
+    function renderPerformanceStaleState(payload) {
+        const target = byId("performance-stale-state");
+        if (!target) return;
+        const sources = payload?.meta?.source_artifacts || [];
+        const missing = sources.filter((item) => !item.available || item.status === "failed");
+        if (!missing.length) {
+            target.innerHTML = "";
+            return;
+        }
+        target.innerHTML = `<div class="performance-stale-state__banner performance-stale-state__banner--warn">
+            <strong>Performance verdict is partial.</strong>
+            <span>${escapeHtml(missing.map((item) => `${item.id}: ${item.error || item.status || "missing"}`).join(" • "))}</span>
+        </div>`;
+    }
+
+    function renderPerformancePromiseBoard(scenarios) {
+        const target = byId("performance-promise-board");
+        if (!target) return;
+        if (!scenarios.length) {
+            target.innerHTML = `<p class="muted">No performance promise artifact loaded.</p>`;
+            return;
+        }
+        if (!scenarios.some((scenario) => scenario.id === state.selectedPerformanceScenarioId)) {
+            state.selectedPerformanceScenarioId = scenarios[0].id;
+        }
+        const selected = scenarios.find((scenario) => scenario.id === state.selectedPerformanceScenarioId) || scenarios[0];
+        target.innerHTML = `<div class="promise-tabs" role="tablist" aria-label="Performance promises">
+            ${scenarios.map((scenario) => {
+            const status = scenarioStatus(scenario);
+            const missCount = Number(scenario.budget_misses || 0);
+            const ceilingCount = Number(scenario.ceilings_reached || 0);
+            const active = scenario.id === selected.id;
+            const color = performancePromiseColor(scenario.id);
+            const pressure = [
+                missCount ? `${formatNumber.format(missCount)} over` : "",
+                ceilingCount ? `${formatNumber.format(ceilingCount)} ceilings` : "",
+            ].filter(Boolean).join(" - ");
+            return `<button type="button" class="promise-tab promise-tab--${status.cls} ${active ? "is-active" : ""}" role="tab" aria-selected="${active ? "true" : "false"}" title="${escapeHtml(scenario.title || scenario.id || "Scenario")}" data-promise-tab="${escapeHtml(scenario.id)}" style="--promise-color:${escapeHtml(color)}">
+                    <strong>${escapeHtml(scenario.title || scenario.id || "Scenario")}</strong>
+                    <span>${escapeHtml(pressure || status.label)}</span>
+                </button>`;
+        }).join("")}
+        </div>
+        ${renderScenarioPromisePanel(selected)}`;
+    }
+
+    function renderScenarioPromisePanel(scenario) {
+        const status = scenarioStatus(scenario);
+        const scale = bestScaleCheck(scenario);
+        const observed = scale ? formatScaleValue(scale.observed, scale.unit) : "-";
+        const targetValue = scale ? formatScaleValue(scale.target, scale.unit) : "-";
+        const missCount = Number(scenario.budget_misses || 0);
+        const ceilingCount = Number(scenario.ceilings_reached || 0);
+        const progress = [
+            ["Status", status.label, status.cls],
+            ["Observed", observed, scale?.met === false ? "bad" : "ok"],
+            ["Target", targetValue, "neutral"],
+            ["Budget misses", formatNumber.format(missCount), missCount ? "bad" : "ok"],
+            ["Ceilings hit", formatNumber.format(ceilingCount), ceilingCount ? "watch" : "ok"],
+            ["Worst latency", scenario.max_latency_ms ? formatMs(scenario.max_latency_ms) : "-", missCount ? "watch" : "neutral"],
+            ["Peak working set", scenario.peak_working_set_bytes ? formatBytes(scenario.peak_working_set_bytes) : "-", "neutral"],
+        ];
+        return `<section class="promise-tab-panel" role="tabpanel" aria-label="${escapeHtml(scenario.title || scenario.id || "Scenario")} progress">
+            <p class="promise-tab-promise">${escapeHtml(scenario.promise || "No promise text loaded.")}</p>
+            <div class="promise-tab-progress">
+                ${progress.map(([label, value, cls]) => `<div class="promise-progress-cell promise-progress-cell--${cls}">
+                    <span>${escapeHtml(label)}</span>
+                    <strong>${escapeHtml(value)}</strong>
+                </div>`).join("")}
+            </div>
+            ${renderScenarioScaleChecks(scenario)}
+            ${renderScenarioEvidenceSections(scenario)}
+        </section>`;
+    }
+
+    function renderScenarioScaleChecks(scenario) {
+        const checks = scenario.scale_checks || [];
+        if (!checks.length) return "";
+        return `<section class="promise-subsection">
+            <h3>Progress Toward Promise</h3>
+            <div class="promise-scale-grid">
+                ${checks.map((check) => `<div class="promise-scale-cell promise-scale-cell--${check.met ? "ok" : "bad"}">
+                    <span>${escapeHtml(check.label || check.id || "Scale target")}</span>
+                    <strong>${escapeHtml(formatScaleValue(check.observed, check.unit))}</strong>
+                    <em>target ${escapeHtml(formatScaleValue(check.target, check.unit))}</em>
+                </div>`).join("")}
+            </div>
+        </section>`;
+    }
+
+    function renderScenarioEvidenceSections(scenario) {
+        const evidence = scenario.evidence || {};
+        const latencyRows = evidence.latency || [];
+        const capacityRows = evidence.capacity || [];
+        return `<div class="promise-evidence-grid">
+            ${renderScenarioEvidenceChartPair(scenario, latencyRows, capacityRows)}
+            ${renderScenarioLatencyEvidence(latencyRows, { includeChart: false })}
+            ${renderScenarioCapacityEvidence(capacityRows, { includeChart: false })}
+            ${renderScenarioResourceEvidence(evidence.resources || [])}
+            ${renderScenarioProfileEvidence(evidence.profiles || [])}
+            ${renderScenarioImplementationEvidence(scenario.implementations || [])}
+        </div>`;
+    }
+
+    function renderScenarioEvidenceChartPair(scenario, latencyRows, capacityRows) {
+        const charts = [
+            renderScenarioLatencyChart(latencyRows, scenario),
+            renderScenarioCapacityChart(capacityRows, scenario),
+        ].filter(Boolean);
+        if (!charts.length) return "";
+        return `<div class="promise-evidence-chart-pair">${charts.join("")}</div>`;
+    }
+
+    function renderScenarioLatencyEvidence(rows, options = {}) {
+        const over = rows.filter((item) => item.over_budget).length;
+        const body = rows.map((item) => {
+            const ratio = item.budget_ms ? Number(item.mean_ms || 0) / Number(item.budget_ms || 1) : 0;
+            return `<tr>
+                <td><code>${escapeHtml(item.label || item.id || "-")}</code></td>
+                <td><span class="pill">${escapeHtml(item.family || "unmapped")}</span></td>
+                <td class="${item.over_budget ? "risk-bad" : "risk-good"}">${formatMs(item.mean_ms)}</td>
+                <td>${formatMs(item.budget_ms)}</td>
+                <td><span class="status-pill status-pill--${item.over_budget ? "bad" : ratio >= 0.85 ? "watch" : "ok"}">${escapeHtml(ratio ? formatRatio(ratio) : "-")}</span></td>
+                <td>${renderPills(item.signals || [])}</td>
+                <td>${renderScenarioProfileLinks(item.matching_flamegraphs || [])}</td>
+            </tr>`;
+        });
+        return renderScenarioEvidenceTable({
+            title: "Latency Tests",
+            caption: `${formatNumber.format(rows.length)} rows - ${formatNumber.format(over)} over budget`,
+            open: true,
+            headers: ["Test", "Family", "Mean", "Budget", "Ratio", "Signals", "Profiles"],
+            rows: body,
+            lead: options.includeChart === false ? "" : renderScenarioLatencyChart(rows),
+        });
+    }
+
+    function renderScenarioLatencyChart(rows, scenario = null) {
+        const series = buildScenarioLatencySeries(rows);
+        if (!series.length) return "";
+        const targetValues = [...new Set(rows.map((row) => Number(row.budget_ms || 0)).filter((value) => Number.isFinite(value) && value > 0))]
+            .sort((left, right) => left - right)
+            .slice(0, 4);
+        const points = series.flatMap((entry) => entry.points);
+        const xValues = points.map((point) => point.x).filter((value) => value > 0);
+        const yValues = points.map((point) => point.meanMs).concat(targetValues).filter((value) => value > 0);
+        const width = 760;
+        const height = 300;
+        const left = 62;
+        const right = 34;
+        const top = 24;
+        const bottom = 52;
+        const plotWidth = width - left - right;
+        const plotHeight = height - top - bottom;
+        const xMin = Math.min(...xValues);
+        const xMax = Math.max(...xValues);
+        const logXMin = Math.log10(Math.max(xMin, 1));
+        const logXMax = Math.log10(Math.max(xMax, xMin + 1));
+        const xPosition = (value) => {
+            if (xMin === xMax) return left + plotWidth / 2;
+            const ratio = (Math.log10(Math.max(value, 1)) - logXMin) / Math.max(logXMax - logXMin, 0.0001);
+            return left + ratio * plotWidth;
+        };
+        const yTicks = buildLogTicks(Math.min(...yValues), Math.max(...yValues));
+        const yMin = yTicks[0];
+        const yMax = yTicks[yTicks.length - 1];
+        const logYMin = Math.log10(yMin);
+        const logYMax = Math.log10(yMax);
+        const yPosition = (value) => {
+            const ratio = (Math.log10(Math.max(value, yMin)) - logYMin) / Math.max(logYMax - logYMin, 0.0001);
+            return top + plotHeight - ratio * plotHeight;
+        };
+        const xTicks = selectAxisTicks([...new Set(xValues)].sort((leftValue, rightValue) => leftValue - rightValue), 6)
+            .map((value) => {
+                const x = xPosition(value);
+                return `<g>
+                    <line class="chart-axis-line" x1="${x}" y1="${height - bottom}" x2="${x}" y2="${height - bottom + 6}"></line>
+                    <text class="chart-tick-label" x="${x}" y="${height - bottom + 22}" text-anchor="middle">${escapeHtml(formatStressLabel(value))}</text>
+                </g>`;
+            }).join("");
+        const yGrid = yTicks.map((tick) => {
+            const y = yPosition(tick);
+            return `<g>
+                <line class="chart-grid-line" x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"></line>
+                <text class="chart-tick-label" x="${left - 10}" y="${y + 4}" text-anchor="end">${escapeHtml(formatAxisMs(tick))}</text>
+            </g>`;
         }).join("");
-        return `<article class="coverage-card coverage-card--${status}">
-            <div class="coverage-card__header">
-                <div>
-                    <h3>${escapeHtml(scenario.title)}</h3>
-                    <p>${escapeHtml(scenario.promise || "")}</p>
-                </div>
-                <span class="coverage-card__status">${escapeHtml(badge)}</span>
+        const targets = targetValues.map((target) => {
+            const y = yPosition(target);
+            return `<g>
+                <line class="scenario-latency-target" x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"></line>
+                <text class="chart-tick-label scenario-latency-target-label" x="${width - right + 4}" y="${y + 4}">${escapeHtml(formatMs(target))}</text>
+            </g>`;
+        }).join("");
+        const promiseColor = performancePromiseColor(scenario?.id || performancePromiseForItem(rows[0] || {}).id);
+        const seriesMarkup = series.map((entry, index) => {
+            const color = promiseColor;
+            const path = entry.points.map((point, pointIndex) => `${pointIndex ? "L" : "M"} ${xPosition(point.x).toFixed(1)} ${yPosition(point.meanMs).toFixed(1)}`).join(" ");
+            const markers = entry.points.map((point) => {
+                const x = xPosition(point.x);
+                const y = yPosition(point.meanMs);
+                const over = point.budgetMs && point.meanMs > point.budgetMs;
+                return `<circle class="scenario-latency-point ${over ? "is-over" : ""}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.5" stroke="${color}"><title>${escapeHtml(entry.label)} ${escapeHtml(formatStressLabel(point.x))}: ${escapeHtml(formatMs(point.meanMs))}</title></circle>`;
+            }).join("");
+            return `<g>
+                <path class="scenario-latency-line" d="${path}" stroke="${color}"></path>
+                ${markers}
+            </g>`;
+        }).join("");
+        const legend = series.map((entry, index) => {
+            const color = promiseColor;
+            return `<span class="scenario-latency-legend__item"><i style="background:${color}"></i>${escapeHtml(entry.label)}</span>`;
+        }).join("");
+        return `<div class="scenario-latency-chart">
+            <div class="scenario-latency-chart__header">
+                <strong>Latency Under Stress</strong>
+                <span>Each line is a test family. Dashed guide${targetValues.length > 1 ? "s are" : " is"} target latency.</span>
             </div>
-            <div class="coverage-card__score">
-                <div><span style="width:${Math.max(3, Math.min(100, Number(scenario.coverage_score || 0) * 100))}%"></span></div>
-                <strong>${formatNumber.format((scenario.coverage_score || 0) * 100)}%</strong>
+            <div class="scenario-latency-chart__frame">
+                <svg class="scenario-latency-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Latency degradation under stress">
+                    ${yGrid}
+                    ${targets}
+                    <line class="chart-axis-line" x1="${left}" y1="${top}" x2="${left}" y2="${height - bottom}"></line>
+                    <line class="chart-axis-line" x1="${left}" y1="${height - bottom}" x2="${width - right}" y2="${height - bottom}"></line>
+                    ${xTicks}
+                    ${seriesMarkup}
+                    <text class="chart-axis-label" x="${width / 2}" y="${height - 12}" text-anchor="middle">Stress</text>
+                    <text class="chart-axis-label" x="18" y="${top + plotHeight / 2}" text-anchor="middle" transform="rotate(-90 18 ${top + plotHeight / 2})">Time (ms, log scale)</text>
+                </svg>
             </div>
-            ${renderEvidenceGraph(axes)}
-            <div class="coverage-scale-grid">${scaleRows || '<p class="muted">No scale targets configured.</p>'}</div>
-            ${renderImplementationGraph(implementations)}
-        </article>`;
-    }
-
-    function renderEvidenceGraph(axes) {
-        const entries = Object.entries(axes || {}).map(([key, axis]) => ({
-            key,
-            label: axis.label || key,
-            value: Number(axis.count || 0),
-            covered: Boolean(axis.covered || axis.count > 0),
-        }));
-        if (!entries.length) {
-            return '<p class="muted">No evidence graph loaded.</p>';
-        }
-        const max = Math.max(1, ...entries.map((item) => item.value));
-        return `<div class="coverage-evidence-graph" aria-label="Evidence graph">
-            ${entries.map((item) => {
-            const pct = Math.max(item.value ? 5 : 0, Math.min(100, (item.value / max) * 100));
-            return `<div class="coverage-evidence-row coverage-evidence-row--${escapeHtml(item.key)} ${item.covered ? "is-covered" : "is-empty"}">
-                    <span>${escapeHtml(item.label)}</span>
-                    <div><i style="width:${pct}%"></i></div>
-                    <strong>${formatNumber.format(item.value)}</strong>
-                </div>`;
-        }).join("")}
+            <div class="scenario-latency-legend">${legend}</div>
         </div>`;
     }
 
-    function renderImplementationGraph(implementations) {
-        const rows = implementationGraphRows(implementations);
-        if (!rows.length) {
-            return '<p class="muted">No implemented measurement loaded.</p>';
-        }
-        const maxByUnit = rows.reduce((acc, row) => {
-            acc[row.unit] = Math.max(acc[row.unit] || 0, row.value);
-            return acc;
-        }, {});
-        return `<div class="implementation-graph" aria-label="Implemented measurement graph">
-            <div class="implementation-graph__header">
-                <span>Implemented measurements</span>
-                <strong>${formatNumber.format(implementations.length)}</strong>
+    function buildScenarioLatencySeries(rows) {
+        const seen = new Set();
+        const groups = new Map();
+        rows.forEach((row) => {
+            const point = parseLatencyStressPoint(row);
+            if (!point) return;
+            const key = `${point.base}:${point.x}:${Number(row.mean_ms || 0).toFixed(6)}:${Number(row.budget_ms || 0).toFixed(3)}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            if (!groups.has(point.base)) {
+                groups.set(point.base, []);
+            }
+            groups.get(point.base).push({
+                x: point.x,
+                meanMs: Number(row.mean_ms || 0),
+                budgetMs: Number(row.budget_ms || 0),
+            });
+        });
+        return [...groups.entries()]
+            .map(([base, points]) => ({
+                key: base,
+                label: latencySeriesLabel(base),
+                points: points.sort((left, right) => left.x - right.x),
+            }))
+            .filter((entry) => entry.points.length >= 2)
+            .sort((left, right) => right.points[right.points.length - 1].meanMs - left.points[left.points.length - 1].meanMs)
+            .slice(0, 8);
+    }
+
+    function parseLatencyStressPoint(row) {
+        const raw = String(row.id || row.label || "");
+        const match = raw.match(/^(.+)\/([^/]+)$/);
+        if (!match) return null;
+        const x = Number(match[2]);
+        if (!Number.isFinite(x) || x <= 0) return null;
+        return { base: match[1], x };
+    }
+
+    function latencySeriesLabel(value) {
+        return titleCaseMetricName(value)
+            .replace(/\bLatency\b/g, "")
+            .replace(/\bAggregate Size\b/g, "")
+            .replace(/\bCompletion\b/g, "")
+            .replace(/\bCurrent App State\b/g, "App State")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
+    function selectAxisTicks(values, limit) {
+        if (values.length <= limit) return values;
+        const step = (values.length - 1) / (limit - 1);
+        return Array.from({ length: limit }, (_, index) => values[Math.round(index * step)]);
+    }
+
+    function formatStressLabel(value) {
+        const numeric = Number(value || 0);
+        if (numeric >= 1_000_000) return `${formatNumber.format(numeric / 1_000_000)}M`;
+        if (numeric >= 1_000) return `${formatNumber.format(numeric / 1_000)}K`;
+        return formatNumber.format(numeric);
+    }
+
+    function renderScenarioCapacityEvidence(rows, options = {}) {
+        const ceilings = rows.filter((item) => item.ceiling_reached).length;
+        const body = rows.map((item) => `<tr>
+            <td><code>${escapeHtml(item.label || item.id || "-")}</code></td>
+            <td><span class="pill">${escapeHtml(item.failure_mode || "not_reached")}</span></td>
+            <td>${escapeHtml(item.last_successful_label || "-")}</td>
+            <td>${escapeHtml(item.first_failure_label || "-")}</td>
+            <td><span class="pill">${escapeHtml(item.suspected_limiting_resource || "cpu")}</span></td>
+            <td>${escapeHtml(formatBytes(item.peak_working_set_bytes))}</td>
+            <td>${renderScenarioProfileLinks(item.matching_flamegraphs || [])}</td>
+        </tr>`);
+        return renderScenarioEvidenceTable({
+            title: "Capacity Checks",
+            caption: `${formatNumber.format(rows.length)} rows - ${formatNumber.format(ceilings)} ceilings reached`,
+            open: rows.length > 0,
+            headers: ["Check", "Failure mode", "Last OK", "First failure", "Resource", "Peak working set", "Profiles"],
+            rows: body,
+            lead: options.includeChart === false ? "" : renderScenarioCapacityChart(rows),
+        });
+    }
+
+    function renderScenarioCapacityChart(rows, scenario = null) {
+        const series = buildScenarioCapacitySeries(rows);
+        if (!series.length) return "";
+        const points = series.flatMap((entry) => entry.points);
+        const xValues = points.map((point) => point.x).filter((value) => value > 0);
+        const yValues = points.map((point) => point.elapsedMs)
+            .concat(series.map((entry) => entry.thresholdMs).filter((value) => value > 0))
+            .filter((value) => value > 0);
+        if (!xValues.length || !yValues.length) return "";
+        const width = 760;
+        const height = 300;
+        const left = 62;
+        const right = 34;
+        const top = 24;
+        const bottom = 52;
+        const plotWidth = width - left - right;
+        const plotHeight = height - top - bottom;
+        const xMin = Math.min(...xValues);
+        const xMax = Math.max(...xValues);
+        const logXMin = Math.log10(Math.max(xMin, 1));
+        const logXMax = Math.log10(Math.max(xMax, xMin + 1));
+        const xPosition = (value) => {
+            if (xMin === xMax) return left + plotWidth / 2;
+            const ratio = (Math.log10(Math.max(value, 1)) - logXMin) / Math.max(logXMax - logXMin, 0.0001);
+            return left + ratio * plotWidth;
+        };
+        const yTicks = buildLogTicks(Math.min(...yValues), Math.max(...yValues));
+        const yMin = yTicks[0];
+        const yMax = yTicks[yTicks.length - 1];
+        const logYMin = Math.log10(yMin);
+        const logYMax = Math.log10(yMax);
+        const yPosition = (value) => {
+            const ratio = (Math.log10(Math.max(value, yMin)) - logYMin) / Math.max(logYMax - logYMin, 0.0001);
+            return top + plotHeight - ratio * plotHeight;
+        };
+        const xLabelByValue = new Map(points.map((point) => [point.x, point.xLabel || formatStressLabel(point.x)]));
+        const xTicks = selectAxisTicks([...new Set(xValues)].sort((leftValue, rightValue) => leftValue - rightValue), 6)
+            .map((value) => {
+                const x = xPosition(value);
+                return `<g>
+                    <line class="chart-axis-line" x1="${x}" y1="${height - bottom}" x2="${x}" y2="${height - bottom + 6}"></line>
+                    <text class="chart-tick-label" x="${x}" y="${height - bottom + 22}" text-anchor="middle">${escapeHtml(xLabelByValue.get(value) || formatStressLabel(value))}</text>
+                </g>`;
+            }).join("");
+        const yGrid = yTicks.map((tick) => {
+            const y = yPosition(tick);
+            return `<g>
+                <line class="chart-grid-line" x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"></line>
+                <text class="chart-tick-label" x="${left - 10}" y="${y + 4}" text-anchor="end">${escapeHtml(formatAxisMs(tick))}</text>
+            </g>`;
+        }).join("");
+        const targetValues = [...new Set(series.map((entry) => entry.thresholdMs).filter((value) => value > 0))]
+            .sort((leftValue, rightValue) => leftValue - rightValue)
+            .slice(0, 4);
+        const targets = targetValues.map((target) => {
+            const y = yPosition(target);
+            return `<g>
+                <line class="scenario-latency-target scenario-capacity-target" x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"></line>
+                <text class="chart-tick-label scenario-latency-target-label" x="${width - right + 4}" y="${y + 4}">${escapeHtml(formatMs(target))}</text>
+            </g>`;
+        }).join("");
+        const promiseColor = performancePromiseColor(scenario?.id || performancePromiseForItem(rows[0] || {}).id);
+        const seriesMarkup = series.map((entry, index) => {
+            const color = promiseColor;
+            const path = entry.points.map((point, pointIndex) => `${pointIndex ? "L" : "M"} ${xPosition(point.x).toFixed(1)} ${yPosition(point.elapsedMs).toFixed(1)}`).join(" ");
+            const markers = entry.points.map((point) => {
+                const x = xPosition(point.x);
+                const y = yPosition(point.elapsedMs);
+                const over = entry.thresholdMs && point.elapsedMs > entry.thresholdMs;
+                return `<circle class="scenario-latency-point scenario-capacity-point ${over ? "is-over" : ""}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.5" stroke="${color}"><title>${escapeHtml(entry.label)} ${escapeHtml(point.xLabel)}: ${escapeHtml(formatMs(point.elapsedMs))}</title></circle>`;
+            }).join("");
+            return `<g>
+                <path class="scenario-latency-line scenario-capacity-line" d="${path}" stroke="${color}"></path>
+                ${markers}
+            </g>`;
+        }).join("");
+        const legend = series.map((entry, index) => {
+            const color = promiseColor;
+            return `<span class="scenario-latency-legend__item"><i style="background:${color}"></i>${escapeHtml(entry.label)}</span>`;
+        }).join("");
+        return `<div class="scenario-latency-chart scenario-capacity-chart">
+            <div class="scenario-latency-chart__header">
+                <strong>Performance Against Size</strong>
+                <span>Elapsed time as workload size grows. Dotted guide${targetValues.length > 1 ? "s are" : " is"} target time.</span>
             </div>
-            ${rows.map((row) => {
-            const max = Math.max(1, maxByUnit[row.unit] || row.value || 0);
-            const pct = Math.max(row.value ? 5 : 0, Math.min(100, (row.value / max) * 100));
-            return `<div class="implementation-graph__row implementation-graph__row--${escapeHtml(row.kind)}">
-                    <div class="implementation-graph__label">
-                        <span>${escapeHtml(row.label)}</span>
-                        <strong>${escapeHtml(row.measurement)}</strong>
-                    </div>
-                    <div class="implementation-graph__track"><i style="width:${pct}%"></i></div>
-                    <div class="implementation-graph__caption">
-                        <span>${escapeHtml(row.detail || row.status)}</span>
-                        <em>${escapeHtml(row.kind)}</em>
-                    </div>
-                </div>`;
-        }).join("")}
+            <div class="scenario-latency-chart__frame">
+                <svg class="scenario-latency-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Capacity performance against workload size">
+                    ${yGrid}
+                    ${targets}
+                    <line class="chart-axis-line" x1="${left}" y1="${top}" x2="${left}" y2="${height - bottom}"></line>
+                    <line class="chart-axis-line" x1="${left}" y1="${height - bottom}" x2="${width - right}" y2="${height - bottom}"></line>
+                    ${xTicks}
+                    ${seriesMarkup}
+                    <text class="chart-axis-label" x="${width / 2}" y="${height - 12}" text-anchor="middle">Size</text>
+                    <text class="chart-axis-label" x="18" y="${top + plotHeight / 2}" text-anchor="middle" transform="rotate(-90 18 ${top + plotHeight / 2})">Elapsed (ms, log scale)</text>
+                </svg>
+            </div>
+            <div class="scenario-latency-legend">${legend}</div>
         </div>`;
     }
 
-    function implementationGraphRows(implementations) {
-        return (implementations || [])
-            .map((item) => {
-                const parsed = parseMeasurementValue(item.measurement);
-                if (!parsed) return null;
+    function buildScenarioCapacitySeries(rows) {
+        return rows
+            .map((row) => {
+                const detail = capacityScenarioDetail(row);
+                const samples = (detail?.samples || [])
+                    .map((sample) => ({
+                        x: Number(sample.workload_value || 0),
+                        xLabel: sample.workload_label || formatStressLabel(sample.workload_value),
+                        elapsedMs: Number(sample.elapsed_ms || 0),
+                    }))
+                    .filter((sample) => Number.isFinite(sample.x) && sample.x > 0 && Number.isFinite(sample.elapsedMs) && sample.elapsedMs > 0)
+                    .sort((left, right) => left.x - right.x);
+                if (samples.length < 2) return null;
                 return {
-                    kind: item.kind || "metric",
-                    label: item.label || "-",
-                    status: item.status || "-",
-                    detail: item.detail || "",
-                    measurement: item.measurement || "-",
-                    value: parsed.value,
-                    unit: parsed.unit,
+                    key: row.id || detail?.scenario || row.label,
+                    label: compactScenarioLabel(detail || row),
+                    thresholdMs: Number(detail?.threshold_ms || row.threshold_ms || 0),
+                    points: samples,
                 };
             })
-            .filter(Boolean);
+            .filter(Boolean)
+            .sort((left, right) => right.points[right.points.length - 1].elapsedMs - left.points[left.points.length - 1].elapsedMs)
+            .slice(0, 8);
     }
 
-    function parseMeasurementValue(measurement) {
-        const text = String(measurement || "").trim();
-        let match = text.match(/^([\d,.]+)\s*\/\s*([\d,.]+)/);
-        if (match) {
-            const numerator = Number(match[1].replaceAll(",", ""));
-            const denominator = Number(match[2].replaceAll(",", ""));
-            if (Number.isFinite(numerator) && Number.isFinite(denominator) && denominator > 0) {
-                return { value: (numerator / denominator) * 100, unit: "ratio" };
-            }
-        }
+    function capacityScenarioDetail(row) {
+        const scenarios = state.capacityReport?.scenarios || [];
+        return scenarios.find((item) => item.scenario === row.id)
+            || scenarios.find((item) => item.scenario_label === row.label)
+            || scenarios.find((item) => item.scenario === row.scenario);
+    }
 
-        match = text.match(/^([\d,.]+)\s*(GB|MB|KB|B)\b/i);
-        if (match) {
-            const value = Number(match[1].replaceAll(",", ""));
-            const unit = match[2].toUpperCase();
-            if (!Number.isFinite(value)) return null;
-            const mb = unit === "GB" ? value * 1024 : unit === "MB" ? value : unit === "KB" ? value / 1024 : value / (1024 * 1024);
-            return { value: mb, unit: "mb" };
-        }
+    function renderScenarioResourceEvidence(rows) {
+        const worstElapsed = maxMetric(rows, "max_elapsed_ms");
+        const body = rows.map((item) => `<tr>
+            <td><code>${escapeHtml(item.label || item.id || "-")}</code></td>
+            <td><span class="pill">${escapeHtml(item.focus || "resource")}</span></td>
+            <td>${formatNumber.format(item.sample_count || 0)}</td>
+            <td>${formatMs(item.max_elapsed_ms)}</td>
+            <td>${escapeHtml(formatBytes(item.max_peak_live_bytes))}</td>
+            <td>${escapeHtml(formatBytes(item.max_working_set_bytes))}</td>
+            <td>${item.page_fault_growth == null ? "-" : formatNumber.format(item.page_fault_growth)}</td>
+            <td>${item.handle_growth == null ? "-" : formatNumber.format(item.handle_growth)}</td>
+        </tr>`);
+        return renderScenarioEvidenceTable({
+            title: "Resource Probes",
+            caption: `${formatNumber.format(rows.length)} probes - worst elapsed ${worstElapsed ? formatMs(worstElapsed) : "-"}`,
+            open: rows.length > 0,
+            headers: ["Probe", "Focus", "Samples", "Max elapsed", "Peak live", "Working set", "PF growth", "Handle growth"],
+            rows: body,
+        });
+    }
 
-        match = text.match(/^([\d,.]+)\s*ms\b/i);
-        if (match) {
-            const value = Number(match[1].replaceAll(",", ""));
-            return Number.isFinite(value) ? { value, unit: "ms" } : null;
-        }
+    function renderScenarioProfileEvidence(rows) {
+        const available = rows.filter((item) => item.available).length;
+        const body = rows.map((item) => `<tr>
+            <td><code>${escapeHtml(item.name || item.id || "-")}</code></td>
+            <td class="${item.available ? "risk-good" : "risk-bad"}">${escapeHtml(item.available ? "available" : "missing")}</td>
+            <td>${renderPills(item.families || [])}</td>
+            <td>${renderPills(item.benchmark_keys || [])}</td>
+            <td>${item.available ? `<button type="button" class="link-button" data-open-flamegraph="${escapeHtml(item.id || "")}">Open profile</button>` : escapeHtml(item.issue || "-")}</td>
+        </tr>`);
+        return renderScenarioEvidenceTable({
+            title: "Profiles",
+            caption: `${formatNumber.format(available)}/${formatNumber.format(rows.length)} available`,
+            open: rows.length > 0,
+            headers: ["Profile", "Status", "Families", "Benchmarks", "Action"],
+            rows: body,
+        });
+    }
 
-        match = text.match(/^([\d,.]+)/);
-        if (match) {
-            const value = Number(match[1].replaceAll(",", ""));
-            return Number.isFinite(value) ? { value, unit: "count" } : null;
+    function renderScenarioImplementationEvidence(rows) {
+        const body = rows.map((item) => `<tr>
+            <td><span class="pill">${escapeHtml(item.kind || "-")}</span></td>
+            <td><code>${escapeHtml(item.label || "-")}</code></td>
+            <td>${escapeHtml(item.measurement || "-")}</td>
+            <td>${escapeHtml(item.status || "-")}</td>
+            <td>${escapeHtml(item.detail || "-")}</td>
+        </tr>`);
+        return renderScenarioEvidenceTable({
+            title: "Implementation Audit",
+            caption: `${formatNumber.format(rows.length)} measurements`,
+            open: false,
+            headers: ["Kind", "Label", "Measurement", "Status", "Detail"],
+            rows: body,
+        });
+    }
+
+    function renderScenarioEvidenceTable({ title, caption, open, headers, rows, lead = "" }) {
+        return `<details class="promise-evidence" ${open ? "open" : ""}>
+            <summary><span>${escapeHtml(title)}</span><em>${escapeHtml(caption)}</em></summary>
+            ${lead}
+            <div class="promise-evidence__table">
+                ${renderInlineTable(headers, rows, "No evidence rows loaded.")}
+            </div>
+        </details>`;
+    }
+
+    function renderInlineTable(headers, rows, emptyMessage) {
+        return `<table>
+            <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
+            <tbody>${rows.length ? rows.join("") : `<tr><td colspan="${headers.length}" class="muted">${escapeHtml(emptyMessage)}</td></tr>`}</tbody>
+        </table>`;
+    }
+
+    function renderScenarioProfileLinks(values) {
+        const profiles = pillValues(values);
+        if (!profiles.length) return '<span class="muted">-</span>';
+        return profiles.map((profile) => `<button type="button" class="link-button" data-open-flamegraph="${escapeHtml(profile)}">${escapeHtml(profile)}</button>`).join(" ");
+    }
+
+    function scenarioFamilies(scenario) {
+        const families = (scenario.implementations || [])
+            .flatMap((item) => [item.family, item.workload_family, ...(item.families || [])])
+            .concat(Object.values(scenario.evidence || {})
+                .flatMap((rows) => Array.isArray(rows) ? rows : [])
+                .flatMap((item) => [item.family, item.workload_family, ...(item.families || [])]))
+            .filter(Boolean);
+        return [...new Set(families)].sort();
+    }
+
+    function scenarioStatus(scenario) {
+        const checks = scenario.scale_checks || [];
+        const missingScale = checks.some((check) => !check.met);
+        const misses = Number(scenario.budget_misses || 0);
+        if (!scenario.implementation_count && scenario.coverage_status !== "covered") {
+            return { label: "Untested", cls: "stale" };
         }
-        return null;
+        if (missingScale) {
+            return { label: "Below target", cls: "bad" };
+        }
+        if (misses > 0) {
+            return { label: "Watch", cls: "watch" };
+        }
+        return { label: "Met", cls: "ok" };
+    }
+
+    function bestScaleCheck(scenario) {
+        const checks = scenario.scale_checks || [];
+        return checks.find((check) => !check.met) || checks[0] || null;
     }
 
     function formatScaleValue(value, unit) {
@@ -1435,90 +2285,130 @@
     }
 
     function renderPerformanceOverview() {
-        const target = byId("performance-overview");
+        const target = byId("performance-verdict");
         if (!target) return;
+        const digest = computePerformanceDigest();
+        const worst = digest.worstOverBudgetRow;
+        const worstRatio = worst ? budgetRatio(worst) : 0;
+        const scenarioCls = digest.scenarioTotal && digest.scenariosMet === digest.scenarioTotal ? "ok" : "watch";
+        const cells = [
+            { label: "Verdict", value: `${formatNumber.format(digest.scenariosMet)} of ${formatNumber.format(digest.scenarioTotal)} promises met`, cls: scenarioCls, sentence: true },
+            { label: "Budget misses", value: formatNumber.format(digest.summaryBudgetMisses), cls: digest.summaryBudgetMisses ? "bad" : "ok" },
+            { label: "Near ceilings", value: formatNumber.format(digest.nearCeilings), cls: digest.nearCeilings ? "watch" : "ok" },
+            {
+                label: "Worst latency",
+                value: worst && worstRatio > 1 ? `${formatMs(latencyMs(worst))} (${formatRatio(worstRatio)} budget)` : "All within budget",
+                cls: worst && worstRatio > 1 ? "bad" : "ok",
+            },
+            { label: "Peak working set", value: digest.peakWorkingSet ? formatBytes(digest.peakWorkingSet) : "-", cls: "neutral" },
+        ];
+        target.innerHTML = `<section class="performance-headline-strip" aria-label="Performance headline results" data-jump-target="performance-headline-charts">
+            ${cells.map((cell) => `<div class="performance-headline-cell performance-headline-cell--${cell.cls}${cell.sentence ? " performance-headline-cell--sentence" : ""}">
+                <span>${escapeHtml(cell.label)}</span>
+                <strong>${escapeHtml(cell.value)}</strong>
+            </div>`).join("")}
+        </section>`;
+    }
 
+    function computePerformanceDigest() {
         const searchRows = state.searchSpeed || [];
         const slowspots = state.slowspots || [];
-        const capacity = state.capacityReport?.scenarios || [];
-        const resources = state.resourceProfiles?.scenarios || [];
-        const timedRows = uniquePerformanceRows([...searchRows, ...slowspots]);
-        const worstOverall = worstBudgetRow(timedRows);
-        const worstSearch = worstBudgetRow(searchRows);
-        const worstFirstResponse = worstBudgetRow(searchRows.filter((item) => item.latency_kind === "first_response"));
-        const bestThroughput = maxBy(searchRows.filter((item) => Number(item.throughput_mb_s || 0) > 0), (item) => Number(item.throughput_mb_s || 0));
-        const peakResource = maxBy(resources, (item) => Number(item.max_peak_live_bytes || 0));
-        const peakWorkingSet = Math.max(
-            maxMetric(resources, "max_working_set_bytes"),
-            maxMetric(capacity, "peak_working_set_bytes")
-        );
-        const capacityCeilings = state.capacityReport?.summary?.ceilings_reached ?? capacity.filter((item) => item.failure_mode && item.failure_mode !== "not_reached").length;
-        const searchOverBudget = searchRows.filter((item) => (item.mean_ns || 0) / 1_000_000 > (item.threshold_ms || Infinity)).length;
+        const capacityRows = state.capacityReport?.scenarios || [];
+        const resourceRows = state.resourceProfiles?.scenarios || [];
+        const reviewScenarios = state.performanceReview?.scenarios || [];
+        const summary = state.performanceReview?.summary || {};
+        const budgetedRows = filteredPerformanceRows(uniquePerformanceRows([...searchRows, ...slowspots]).filter((item) => item.threshold_ms));
+        const ratios = budgetedRows.map((item) => ({ item, ratio: budgetRatio(item) })).filter((entry) => Number.isFinite(entry.ratio) && entry.ratio > 0);
+        const overBudget = ratios.filter((entry) => entry.ratio > 1).length;
+        const watchCount = ratios.filter((entry) => entry.ratio >= 0.85 && entry.ratio <= 1).length;
+        const withinBudget = ratios.length - overBudget;
+        const sortedRatios = [...ratios].sort((a, b) => b.ratio - a.ratio);
+        const healthyRatios = [...ratios].sort((a, b) => a.ratio - b.ratio);
+        const scenarioStatuses = reviewScenarios.map(scenarioStatus);
+        const scenariosMet = scenarioStatuses.filter((status) => status.cls === "ok").length;
+        const memoryBound = capacityRows.filter((item) => (item.suspected_limiting_resource || item.first_saturated_resource) === "memory").length;
+        const cpuBound = capacityRows.filter((item) => (item.suspected_limiting_resource || item.first_saturated_resource) === "cpu").length;
+        const capacityCeilings = state.capacityReport?.summary?.ceilings_reached ?? capacityRows.filter((item) => item.failure_mode && item.failure_mode !== "not_reached").length;
+        const nearCeilings = state.speedReport?.summary?.near_failure_ceilings ?? capacityCeilings;
+        const peakLive = maxBy(resourceRows, (item) => Number(item.max_peak_live_bytes || 0));
+        const resourceGrowthRows = topResourceRows(resourceRows, 20).map((row) => ({
+            ...row,
+            detail: `${row.detail} · ${row.pageFaultsLabel} faults`,
+        }));
+        return {
+            searchRows,
+            slowspots,
+            capacityRows,
+            resourceRows,
+            reviewScenarios,
+            budgetedRows,
+            overBudget,
+            watchCount,
+            withinBudget,
+            worstRow: sortedRatios[0]?.item || null,
+            worstOverBudgetRow: sortedRatios.find((entry) => entry.ratio > 1)?.item || null,
+            bestRow: healthyRatios[0]?.item || null,
+            scenarioTotal: reviewScenarios.length,
+            scenariosMet,
+            summaryBudgetMisses: summary.budget_misses ?? overBudget,
+            nearCeilings,
+            capacityCeilings,
+            capacityOk: capacityRows.length - capacityCeilings,
+            memoryBound,
+            cpuBound,
+            peakLive,
+            peakWorkingSet: Math.max(maxMetric(resourceRows, "max_working_set_bytes"), maxMetric(capacityRows, "peak_working_set_bytes")),
+            resourceGrowthRows,
+            coveredScenarios: summary.covered_scenarios ?? reviewScenarios.filter((item) => item.coverage_status === "covered").length,
+            thinScenarios: summary.thin_scenarios ?? reviewScenarios.filter((item) => item.coverage_status === "thin").length,
+            untestedScenarios: reviewScenarios.filter((item) => !item.implementation_count && item.coverage_status !== "covered").length,
+            implementationCount: summary.implementation_count ?? reviewScenarios.reduce((sum, item) => sum + Number(item.implementation_count || 0), 0),
+            missingScaleTargets: summary.missing_scale_targets ?? reviewScenarios.flatMap((item) => item.scale_checks || []).filter((item) => !item.met).length,
+        };
+    }
 
-        const groups = [
-            {
-                cls: "search",
-                title: "Search Result",
-                summary: worstSearch ? `${formatRatio(budgetRatio(worstSearch))} worst miss` : "No search miss",
-                metrics: [
-                    ["Worst", worstSearch ? formatMs(latencyMs(worstSearch)) : "-"],
-                    ["Budget", worstSearch ? formatMs(worstSearch.threshold_ms) : "-"],
-                    ["First response", worstFirstResponse ? `${formatRatio(budgetRatio(worstFirstResponse))}` : "clear"],
-                    ["Best throughput", bestThroughput ? `${formatNumber.format(bestThroughput.throughput_mb_s)} MB/s` : "-"],
-                ],
-            },
-            {
-                cls: "editor",
-                title: "Worst Latency",
-                summary: worstOverall ? `${formatRatio(budgetRatio(worstOverall))} budget` : "No miss",
-                metrics: [
-                    ["Mean", worstOverall ? formatMs(latencyMs(worstOverall)) : "-"],
-                    ["Budget", worstOverall ? formatMs(worstOverall.threshold_ms) : "-"],
-                    ["Workload", worstOverall ? compactBenchmarkLabel(worstOverall) : "-"],
-                    ["Resource", worstOverall ? titleCaseMetricName(worstOverall.suspected_limiting_resource || "cpu") : "-"],
-                ],
-            },
-            {
-                cls: "capacity",
-                title: "Scale Result",
-                summary: `${formatNumber.format(capacityCeilings)} ceilings reached`,
-                metrics: [
-                    ["Files proven", capacityOutcome(capacity, "search_target_count_ceiling", "last")],
-                    ["Views proven", capacityOutcome(capacity, "view_count_ceiling", "last")],
-                    ["Tabs break", capacityOutcome(capacity, "tab_count_ceiling", "first")],
-                    ["Search file break", capacityOutcome(capacity, "search_file_size_ceiling", "first")],
-                ],
-            },
-            {
-                cls: "resources",
-                title: "Memory Result",
-                summary: peakResource ? `${formatBytes(peakResource.max_peak_live_bytes)} peak live` : "No resource peak",
-                metrics: [
-                    ["Peak live", peakResource ? formatBytes(peakResource.max_peak_live_bytes) : "-"],
-                    ["Peak working set", peakWorkingSet ? formatBytes(peakWorkingSet) : "-"],
-                    ["Worst live case", peakResource ? compactScenarioLabel(peakResource) : "-"],
-                    ["Search misses", searchOverBudget],
-                ],
-            },
-        ];
+    function renderPerformancePanelCaptions() {
+        const setCaption = (id, text) => {
+            const target = byId(id);
+            if (target) target.textContent = text;
+        };
+        const searchQuery = byId("search-speed-filter")?.value || "";
+        const editorQuery = byId("slowspots-filter")?.value || "";
+        const resourceQuery = byId("resource-profiles-filter")?.value || "";
+        const selected = selectedPerformancePromise();
+        const searchRows = filteredPerformanceRows((state.searchSpeed || []).filter((item) => rowBelongsToPerformancePromise(item, selected) && matchesFilter(item, searchQuery)));
+        const editorRows = filteredPerformanceRows((state.slowspots || []).filter((item) => rowBelongsToPerformancePromise(item, selected) && matchesFilter(item, editorQuery)));
+        const capacityRows = filterPerformanceScenarioRows((state.capacityReport?.scenarios || []).filter((item) => rowBelongsToPerformancePromise(item, selected)));
+        const resourceRows = filterPerformanceScenarioRows((state.resourceProfiles?.scenarios || []).filter((item) => rowBelongsToPerformancePromise(item, selected) && matchesFilter(item, resourceQuery)));
+        const searchOver = searchRows.filter((item) => budgetRatio(item) > 1).length;
+        const editorOver = editorRows.filter((item) => budgetRatio(item) > 1).length;
+        const bestThroughput = maxMetric(searchRows, "throughput_mb_s");
+        const slowestEditor = Math.max(0, ...editorRows.map(latencyMs).filter(Number.isFinite));
+        const capacityCeilings = capacityRows.filter((item) => item.failure_mode && item.failure_mode !== "not_reached").length;
+        const memoryBound = capacityRows.filter((item) => (item.suspected_limiting_resource || item.first_saturated_resource) === "memory").length;
+        const peakWorkingSet = maxMetric(resourceRows, "max_working_set_bytes");
+        const worstElapsed = maxMetric(resourceRows, "max_elapsed_ms");
 
-        target.innerHTML = groups.map((group) => `<section class="performance-overview-card performance-overview-card--${group.cls}">
-            <div class="performance-overview-card__header">
-                <span class="performance-overview-card__marker"></span>
-                <div>
-                    <h3>${escapeHtml(group.title)}</h3>
-                    <p>${escapeHtml(group.summary)}</p>
-                </div>
-            </div>
-            <div class="performance-overview-card__metrics">
-                ${group.metrics.map(([label, value]) => `<div class="performance-overview-metric">
-                    <span>${escapeHtml(label)}</span>
-                    <strong>${escapeHtml(value)}</strong>
-                </div>`).join("")}
-            </div>
-        </section>`).join("");
+        setCaption("search-panel-caption", `${formatNumber.format(searchRows.length)} rows - ${formatNumber.format(searchOver)} over budget - best ${bestThroughput ? `${formatNumber.format(bestThroughput)} MB/s` : "-"}`);
+        setCaption("editor-panel-caption", `${formatNumber.format(editorRows.length)} rows - ${formatNumber.format(editorOver)} over budget - slowest ${slowestEditor ? formatMs(slowestEditor) : "-"}`);
+        setCaption("capacity-panel-caption", `${formatNumber.format(capacityRows.length)} scenarios - ${formatNumber.format(capacityCeilings)} ceilings reached - ${formatNumber.format(memoryBound)} memory-bound`);
+        setCaption("resource-panel-caption", `peak working set ${peakWorkingSet ? formatBytes(peakWorkingSet) : "-"} - worst elapsed ${worstElapsed ? formatMs(worstElapsed) : "-"}`);
+    }
 
-        renderPerformanceInsights();
+    function filterPerformanceScenarioRows(rows) {
+        return (rows || []).filter((item) => {
+            return matchesPerformanceDatasetSearch(item);
+        });
+    }
+
+    function filteredPerformanceRows(rows) {
+        return (rows || []).filter((item) => {
+            return matchesPerformanceDatasetSearch(item);
+        });
+    }
+
+    function matchesPerformanceDatasetSearch(item) {
+        return matchesFilter(item, state.performanceDatasetSearch || "");
     }
 
     function uniquePerformanceRows(rows) {
@@ -1541,8 +2431,663 @@
         return latencyMs(item) / threshold;
     }
 
-    function worstBudgetRow(rows) {
-        return maxBy((rows || []).filter((item) => item.threshold_ms), budgetRatio);
+    function buildPerformanceAnswerChainData() {
+        const budgetRows = [
+            ...(state.searchSpeed || []).map((item) => ({ ...item, sourceLabel: "Search" })),
+            ...(state.slowspots || []).map((item) => ({ ...item, sourceLabel: "Editor & Tabs" })),
+        ];
+        const filteredBudgetRows = filteredPerformanceRows(budgetRows.filter((item) => item.threshold_ms));
+        const budgetPressure = filteredBudgetRows
+            .map((item) => {
+                const value = budgetRatio(item);
+                if (!Number.isFinite(value) || value <= 0) return null;
+                const promise = performancePromiseForItem(item);
+                return {
+                    key: `budget:${item.name || item.benchmark_key || Math.random()}`,
+                    label: performanceRowLabel(item),
+                    detail: `${item.sourceLabel || "Performance"} - ${formatMs(latencyMs(item))} / ${formatMs(item.threshold_ms)}`,
+                    value,
+                    valueLabel: formatRatio(value),
+                    family: item.workload_family || item.family || "unmapped",
+                    resource: item.suspected_limiting_resource || "cpu",
+                    profile: (item.matching_flamegraphs || [])[0],
+                    promiseId: promise.id,
+                    promiseTitle: promise.title,
+                    color: promise.color,
+                    row: item,
+                };
+            })
+            .filter(Boolean);
+        const scalingGrowth = buildPerformanceScalingItems(filteredBudgetRows);
+        const capacityHeadroom = buildCapacityHeadroomItems();
+        const resourceIntensity = buildResourceIntensityItems();
+        const resourceValues = resourceIntensity.map((item) => item.value).filter((value) => Number.isFinite(value) && value > 0).sort((left, right) => left - right);
+        const resourceMedian = percentileValue(resourceValues, 0.5) || 1;
+        const resourceThreshold = resourceMedian * 2;
+        const resourceBounds = {
+            min: Math.max(0.000001, Math.min(...resourceValues, resourceMedian) / 1.4),
+            max: Math.max(resourceThreshold * 1.3, ...resourceValues, 1),
+            scale: "log",
+        };
+        const pressureGrowth = buildPressureGrowthPoints(scalingGrowth);
+        const memoryElapsed = buildMemoryElapsedPoints();
+        return {
+            budgetPressure,
+            scalingGrowth,
+            capacityHeadroom,
+            resourceIntensity,
+            resourceMedian,
+            resourceThreshold,
+            resourceBounds,
+            pressureGrowth,
+            memoryElapsed,
+            memoryBounds: buildMemoryElapsedBounds(memoryElapsed),
+        };
+    }
+
+    function performanceRowLabel(item) {
+        const raw = item?.scenario_label || item?.benchmark_key || item?.name || item?.scenario || "Scenario";
+        return titleCaseMetricName(String(raw).replace(/\/\d+$/, ""));
+    }
+
+    function performanceRowParameter(item) {
+        const direct = Number(item?.parameter_value || 0);
+        if (direct > 0) return direct;
+        const match = String(item?.name || "").match(/\/(\d+(?:\.\d+)?)$/);
+        return match ? Number(match[1]) : 0;
+    }
+
+    function performanceRowParameterLabel(item) {
+        return item?.parameter_label || (performanceRowParameter(item) ? formatStressLabel(performanceRowParameter(item)) : "-");
+    }
+
+    function buildPerformanceScalingItems(rows) {
+        const groups = new Map();
+        rows.forEach((item) => {
+            const x = performanceRowParameter(item);
+            if (!x || !item.benchmark_key) return;
+            const key = `${item.sourceLabel || "rows"}:${item.benchmark_key}:${item.mode || ""}:${item.latency_kind || ""}`;
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(item);
+        });
+        return [...groups.entries()]
+            .map(([key, group]) => {
+                const ordered = [...group]
+                    .sort((left, right) => performanceRowParameter(left) - performanceRowParameter(right));
+                const points = ordered.map((item) => ({
+                    xValue: performanceRowParameter(item),
+                    xLabel: performanceRowParameterLabel(item),
+                    meanMs: latencyMs(item),
+                    thresholdMs: Number(item.threshold_ms || 0),
+                    row: item,
+                })).filter((point) => point.xValue > 0 && point.meanMs > 0);
+                if (points.length < 2) return null;
+                const value = calculateDoublingMultiplier(points);
+                if (!Number.isFinite(value) || value <= 0) return null;
+                const first = points[0];
+                const last = points[points.length - 1];
+                const worstPoint = [...points].sort((left, right) => (right.meanMs / Math.max(right.thresholdMs, 1)) - (left.meanMs / Math.max(left.thresholdMs, 1)))[0];
+                const row = worstPoint?.row || ordered[0];
+                const promise = performancePromiseForItem(row);
+                return {
+                    key: `scaling:${key}`,
+                    label: performanceRowLabel(row),
+                    detail: `${first.xLabel} -> ${last.xLabel} - ${describeGrowth(value)}`,
+                    value,
+                    valueLabel: formatRatio(value),
+                    family: row.workload_family || row.family || "unmapped",
+                    resource: row.suspected_limiting_resource || "cpu",
+                    profile: (row.matching_flamegraphs || [])[0],
+                    promiseId: promise.id,
+                    promiseTitle: promise.title,
+                    color: promise.color,
+                    sourceRows: ordered,
+                    row,
+                };
+            })
+            .filter(Boolean);
+    }
+
+    function buildCapacityHeadroomItems() {
+        return filterPerformanceScenarioRows(state.capacityReport?.scenarios || [])
+            .map((item) => {
+                const target = capacityTargetForScenario(item);
+                const lastOk = Number(item.last_successful_workload || 0);
+                const firstFailure = Number(item.first_failure_workload || 0);
+                const failed = Boolean(item.ceiling_reached || firstFailure);
+                const observed = failed && firstFailure ? firstFailure : lastOk;
+                const value = target.value > 0 && observed > 0 ? observed / target.value : 0;
+                if (!Number.isFinite(value) || value <= 0) return null;
+                const failureMode = item.failure_mode || "not_reached";
+                const promise = performancePromiseForItem(item);
+                return {
+                    key: `capacity:${item.scenario || item.scenario_label}`,
+                    label: compactScenarioLabel(item),
+                    detail: `${item.last_successful_label || "-"} -> ${item.first_failure_label || "no ceiling"} - target ${target.label}`,
+                    value,
+                    valueLabel: formatRatio(value),
+                    failed,
+                    failureMode,
+                    family: item.workload_family || "capacity",
+                    resource: item.suspected_limiting_resource || item.first_saturated_resource || "cpu",
+                    profile: (item.matching_flamegraphs || [])[0],
+                    promiseId: promise.id,
+                    promiseTitle: promise.title,
+                    color: promise.color,
+                    row: item,
+                };
+            })
+            .filter(Boolean);
+    }
+
+    function capacityTargetForScenario(item) {
+        const reviewScenarios = state.performanceReview?.scenarios || [];
+        const match = reviewScenarios.find((scenario) => (scenario.evidence?.capacity || []).some((row) => {
+            return row.id === item.scenario || row.label === item.scenario_label || row.id === item.id;
+        }));
+        const checks = match?.scale_checks || [];
+        const label = `${item.scenario || ""} ${item.scenario_label || ""}`.toLowerCase();
+        const desiredUnit = label.includes("tab") ? "tabs"
+            : label.includes("view") || label.includes("split") ? "views"
+                : label.includes("file count") || label.includes("target-count") || label.includes("workspace") ? "files"
+                    : label.includes("byte") || label.includes("size") || label.includes("paste") ? "bytes"
+                        : "";
+        const check = checks.find((candidate) => candidate.unit === desiredUnit)
+            || checks.find((candidate) => candidate.unit !== "ms")
+            || checks[0];
+        if (check) {
+            return {
+                value: Number(check.target || 0),
+                label: formatScaleValue(check.target, check.unit),
+            };
+        }
+        const fallback = Number(item.first_failure_workload || item.last_successful_workload || 0);
+        return {
+            value: fallback,
+            label: item.first_failure_label || item.last_successful_label || "-",
+        };
+    }
+
+    function buildResourceIntensityItems() {
+        const resourceRows = filterPerformanceScenarioRows(state.resourceProfiles?.scenarios || []);
+        const capacityRows = filterPerformanceScenarioRows(state.capacityReport?.scenarios || []);
+        const resourceItems = resourceRows.map((item) => {
+            const samples = item.samples || [];
+            const largest = maxBy(samples, (sample) => Number(sample.workload_value || 0));
+            const scale = Number(largest?.workload_value || item.parameter_value || 0);
+            const peak = Number(item.max_peak_live_bytes || item.max_working_set_bytes || 0);
+            if (!scale || !peak) return null;
+            const value = peak / scale;
+            const promise = performancePromiseForItem(item);
+            return {
+                key: `resource:${item.scenario || item.scenario_label}`,
+                label: compactScenarioLabel(item),
+                detail: `${formatBytes(peak)} / ${largest?.workload_label || formatStressLabel(scale)}`,
+                value,
+                valueLabel: formatBytes(value),
+                family: item.workload_family || "resource",
+                resource: item.focus || "resource",
+                promiseId: promise.id,
+                promiseTitle: promise.title,
+                color: promise.color,
+                row: item,
+            };
+        }).filter(Boolean);
+        const capacityItems = capacityRows.map((item) => {
+            const scale = Number(item.first_failure_workload || item.last_successful_workload || 0);
+            const peak = Number(item.peak_working_set_bytes || 0);
+            if (!scale || !peak) return null;
+            const value = peak / scale;
+            const promise = performancePromiseForItem(item);
+            return {
+                key: `capacity-resource:${item.scenario || item.scenario_label}`,
+                label: compactScenarioLabel(item),
+                detail: `${formatBytes(peak)} / ${item.first_failure_label || item.last_successful_label || formatStressLabel(scale)}`,
+                value,
+                valueLabel: formatBytes(value),
+                family: item.workload_family || "capacity",
+                resource: item.suspected_limiting_resource || "memory",
+                profile: (item.matching_flamegraphs || [])[0],
+                promiseId: promise.id,
+                promiseTitle: promise.title,
+                color: promise.color,
+                row: item,
+            };
+        }).filter(Boolean);
+        return [...resourceItems, ...capacityItems]
+            .filter((item) => Number.isFinite(item.value) && item.value > 0)
+            .sort((left, right) => right.value - left.value);
+    }
+
+    function buildPressureGrowthPoints(scalingItems) {
+        return scalingItems.flatMap((item) => (item.sourceRows || []).map((row, index) => {
+            const pressure = budgetRatio(row);
+            if (!pressure || !Number.isFinite(pressure) || !Number.isFinite(item.value)) return null;
+            const score = pressure + item.value / 2;
+            const promise = performancePromiseForItem(row);
+            return {
+                key: `pressure-growth:${item.key}:${row.name || row.scenario_label || index}`,
+                label: performanceRowLabel(row),
+                detail: `${performanceRowParameterLabel(row)} - ${formatMs(latencyMs(row))} / ${formatMs(row.threshold_ms)} - ${item.detail}`,
+                x: pressure,
+                y: item.value,
+                score,
+                profile: (row.matching_flamegraphs || [])[0] || item.profile,
+                promiseId: promise.id,
+                promiseTitle: promise.title,
+                color: promise.color,
+                tone: pressure >= 1 && item.value >= 2 ? "triage" : pressure >= 1 ? "local" : item.value >= 2 ? "architecture" : "good",
+            };
+        })).filter(Boolean);
+    }
+
+    function buildMemoryElapsedPoints() {
+        return filterPerformanceScenarioRows(state.resourceProfiles?.scenarios || [])
+            .flatMap((item) => {
+                const promise = performancePromiseForItem(item);
+                const samples = (item.samples || [])
+                    .map((sample, index) => {
+                        const x = Number(sample.working_set_bytes || 0);
+                        const y = Number(sample.elapsed_ms || 0);
+                        if (!x || !y) return null;
+                        const workload = sample.workload_label || formatStressLabel(sample.workload_value || index + 1);
+                        return {
+                            key: `memory-elapsed:${item.scenario || item.scenario_label}:sample:${index}`,
+                            label: `${compactScenarioLabel(item)} ${workload}`,
+                            detail: `${workload} - ${formatBytes(x)} working - ${formatMs(y)}`,
+                            x,
+                            y,
+                            score: Math.log10(Math.max(x, 1)) + Math.log10(Math.max(y, 1)),
+                            promiseId: promise.id,
+                            promiseTitle: promise.title,
+                            color: promise.color,
+                            tone: "good",
+                        };
+                    })
+                    .filter(Boolean);
+                if (samples.length) return samples;
+                const x = Number(item.max_working_set_bytes || 0);
+                const y = Number(item.max_elapsed_ms || 0);
+                if (!x || !y) return null;
+                return [{
+                    key: `memory-elapsed:${item.scenario || item.scenario_label}`,
+                    label: compactScenarioLabel(item),
+                    detail: `${formatBytes(x)} working - ${formatMs(y)}`,
+                    x,
+                    y,
+                    score: Math.log10(Math.max(x, 1)) + Math.log10(Math.max(y, 1)),
+                    promiseId: promise.id,
+                    promiseTitle: promise.title,
+                    color: promise.color,
+                    tone: "good",
+                }];
+            })
+            .filter(Boolean);
+    }
+
+    function buildMemoryElapsedBounds(points) {
+        const xValues = points.map((point) => point.x).filter((value) => value > 0).sort((left, right) => left - right);
+        const yValues = points.map((point) => point.y).filter((value) => value > 0).sort((left, right) => left - right);
+        const xMedian = percentileValue(xValues, 0.5) || 1;
+        const yMedian = percentileValue(yValues, 0.5) || 1;
+        const xThreshold = xMedian * 2;
+        const yThreshold = yMedian * 2;
+        return {
+            xMin: Math.max(1, Math.min(...xValues, xMedian) / 1.5),
+            xMax: Math.max(xThreshold * 1.4, ...xValues, 1),
+            xThreshold,
+            yMin: Math.max(0.1, Math.min(...yValues, yMedian) / 1.5),
+            yMax: Math.max(yThreshold * 1.4, ...yValues, 1),
+            yThreshold,
+        };
+    }
+
+    function percentileValue(values, percentile) {
+        if (!values.length) return null;
+        const index = (values.length - 1) * percentile;
+        const lower = Math.floor(index);
+        const upper = Math.ceil(index);
+        if (lower === upper) return values[lower];
+        return values[lower] + (values[upper] - values[lower]) * (index - lower);
+    }
+
+    function renderPerformanceDistributionGlyph(options) {
+        const items = (options.items || []).filter((item) => Number.isFinite(item.value) && item.value > 0);
+        const mode = state.performanceDistributionModes?.[options.id] || "counts";
+        const controls = renderPerformanceDistributionControls(options.id, mode);
+        if (!items.length) {
+            return `<section class="panel-card performance-dist-card">
+                <div class="chart-panel__header"><div><h3>${escapeHtml(options.title)}</h3><p class="chart-caption">${escapeHtml(options.caption)}</p></div>${controls}</div>
+                <div class="chart-empty">${escapeHtml(options.empty || "No rows loaded.")}</div>
+            </section>`;
+        }
+        const chart = options.shape === "strip"
+            ? renderPerformanceStripPlot(items, options)
+            : renderPerformanceDistributionCurve(items, options);
+        const body = mode === "counts"
+            ? renderPerformanceDistributionCounts(items, options)
+            : renderPerformanceWorstItems(items, options);
+        return `<section class="panel-card performance-dist-card" data-performance-dist="${escapeHtml(options.id)}">
+            <div class="chart-panel__header">
+                <div>
+                    <h3>${escapeHtml(options.title)}</h3>
+                    <p class="chart-caption">${escapeHtml(options.caption)}</p>
+                </div>
+                ${controls}
+            </div>
+            ${chart}
+            ${body}
+        </section>`;
+    }
+
+    function renderPerformanceDistributionControls(id, mode) {
+        return `<div class="segmented-control segmented-control--compact" role="group" aria-label="${escapeHtml(id)} distribution mode">
+            ${[["counts", "Counts"], ["worst", "Worst"]].map(([key, label]) => `<button type="button" class="${mode === key ? "is-active" : ""}" aria-pressed="${mode === key ? "true" : "false"}" data-performance-distribution="${escapeHtml(id)}" data-performance-distribution-mode="${key}">${label}</button>`).join("")}
+        </div>`;
+    }
+
+    function renderPerformanceDistributionCurve(items, options) {
+        const values = items.map((item) => item.value).filter((value) => Number.isFinite(value) && value > 0);
+        const bounds = normalisePerformanceBounds(values, options.bounds);
+        const transform = (value) => performanceScaleTransform(value, bounds);
+        const transformed = values.map(transform);
+        const total = values.length;
+        const meanRaw = mean(values) || 0;
+        const meanTransformed = mean(transformed) || 0;
+        const variance = transformed.reduce((sum, value) => sum + Math.pow(value - meanTransformed, 2), 0) / Math.max(total, 1);
+        const stdDevTransformed = Math.max(Math.sqrt(variance), 0.045);
+        const stdDevRaw = Math.sqrt(values.reduce((sum, value) => sum + Math.pow(value - meanRaw, 2), 0) / Math.max(total, 1));
+        const width = 640;
+        const height = 190;
+        const left = 30;
+        const right = 610;
+        const baseline = 148;
+        const top = 24;
+        const bucketCount = 22;
+        const bins = Array.from({ length: bucketCount }, () => 0);
+        transformed.forEach((value) => {
+            const index = Math.max(0, Math.min(bucketCount - 1, Math.floor(value * bucketCount)));
+            bins[index] += 1;
+        });
+        const maxBin = Math.max(...bins, 1);
+        const bars = bins.map((count, index) => {
+            const x = left + (index / bucketCount) * (right - left);
+            const barWidth = ((right - left) / bucketCount) - 3;
+            const barHeight = (count / maxBin) * 76;
+            return `<rect x="${x.toFixed(1)}" y="${(baseline - barHeight).toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barHeight.toFixed(1)}" rx="3" class="risk-curve__bar"></rect>`;
+        }).join("");
+        const density = (value) => Math.exp(-0.5 * Math.pow((value - meanTransformed) / stdDevTransformed, 2));
+        const maxDensity = Math.max(...Array.from({ length: 80 }, (_, index) => density(index / 79)), 1);
+        const points = Array.from({ length: 80 }, (_, index) => {
+            const t = index / 79;
+            const x = left + t * (right - left);
+            const y = baseline - ((density(t) / maxDensity) * (baseline - top));
+            return `${x.toFixed(1)},${y.toFixed(1)}`;
+        });
+        const marker = (entry) => {
+            const x = left + transform(entry.value) * (right - left);
+            return `<g>
+                <line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${top}" y2="${baseline}" class="risk-curve__marker risk-curve__marker--${entry.kind}"></line>
+                <text class="chart-tick-label performance-dist-marker-label" x="${x.toFixed(1)}" y="${top - 7}" text-anchor="middle">${escapeHtml(entry.label || options.valueLabel(entry.value))}</text>
+            </g>`;
+        };
+        const meanX = left + transform(meanRaw) * (right - left);
+        return `<div class="risk-curve-card performance-dist-curve">
+            <svg class="risk-curve" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(options.title)} distribution">
+                <line x1="${left}" x2="${right}" y1="${baseline}" y2="${baseline}" class="risk-curve__axis"></line>
+                ${bars}
+                ${(options.markers || []).map(marker).join("")}
+                <path d="M ${points.join(" L ")}" class="risk-curve__line"></path>
+                <circle cx="${meanX.toFixed(1)}" cy="${baseline - 6}" r="4" class="risk-curve__mean"></circle>
+            </svg>
+            <div class="risk-curve-card__stats">
+                <span><strong>${formatNumber.format(total)}</strong> items</span>
+                <span><strong>${escapeHtml(options.valueLabel(meanRaw))}</strong> mean</span>
+                <span><strong>${escapeHtml(options.valueLabel(stdDevRaw))}</strong> std dev</span>
+            </div>
+        </div>`;
+    }
+
+    function renderPerformanceStripPlot(items, options) {
+        const sorted = [...items].sort(options.worstSort || ((left, right) => right.value - left.value)).slice(0, 12);
+        const bounds = normalisePerformanceBounds(items.map((item) => item.value), options.bounds);
+        const x = (value) => performanceScaleTransform(value, bounds) * 100;
+        const target = (options.markers || [])[0]?.value ?? 1;
+        return `<div class="performance-strip" role="img" aria-label="${escapeHtml(options.title)} strip">
+            <div class="performance-strip__target" style="left:${x(target)}%"></div>
+            ${sorted.map((item) => {
+            const pct = x(item.value);
+            const cls = item.failed && item.value < 1 ? "bad" : item.failed ? "watch" : "ok";
+            return `<div class="performance-strip-row performance-strip-row--${cls}">
+                    <span><strong>${escapeHtml(item.label)}</strong><em>${escapeHtml(item.detail)}</em></span>
+                    <div><i style="width:${pct}%"></i><b style="left:${pct}%"></b></div>
+                    <strong>${escapeHtml(options.valueLabel(item.value))}</strong>
+                </div>`;
+        }).join("")}
+        </div>`;
+    }
+
+    function renderPerformanceDistributionCounts(items, options) {
+        const buckets = (options.buckets || []).map((bucket) => ({
+            ...bucket,
+            value: items.filter(bucket.test).length,
+        }));
+        const driverCounts = new Map();
+        items.forEach((item) => {
+            const driver = options.driverFor ? options.driverFor(item) : item.family || item.resource || "other";
+            driverCounts.set(driver, (driverCounts.get(driver) || 0) + 1);
+        });
+        const drivers = [...driverCounts.entries()].sort((left, right) => right[1] - left[1]).slice(0, 6);
+        const maxDriver = drivers[0]?.[1] || 1;
+        return `<div class="risk-count-grid performance-dist-counts">
+            <div class="risk-bucket-list">
+                ${buckets.map((bucket) => `<div class="risk-bucket-list__item">
+                    <span class="quality-pie__swatch quality-pie__swatch--${bucket.cls}"></span>
+                    <span>${escapeHtml(bucket.label)}</span>
+                    <strong>${formatNumber.format(bucket.value)}</strong>
+                </div>`).join("")}
+            </div>
+            ${drivers.length ? `<div class="signal-bars">${drivers.map(([driver, count]) => `
+                <div class="signal-bars__row">
+                    <span>${escapeHtml(driver)}</span>
+                    <div class="signal-bars__track"><span class="signal-bars__fill" style="width:${(count / maxDriver) * 100}%"></span></div>
+                    <span class="signal-bars__count">${formatNumber.format(count)}</span>
+                </div>`).join("")}</div>` : `<p class="muted">No driver data.</p>`}
+        </div>`;
+    }
+
+    function renderPerformanceWorstItems(items, options) {
+        const sorted = [...items].sort(options.worstSort || ((left, right) => right.value - left.value)).slice(0, 10);
+        return `<div class="quality-feed performance-worst-feed">
+            ${sorted.map((item, index) => options.rowFor(item, index, options)).join("")}
+        </div>`;
+    }
+
+    function renderPerformanceMetricRow(item, index, options) {
+        const cls = item.value >= 1 ? "risk-bad" : item.value >= 0.7 ? "risk-warn" : "risk-good";
+        const profile = item.profile ? `<button type="button" class="link-button" data-open-flamegraph="${escapeHtml(item.profile)}">Open profile</button>` : `<span class="muted">-</span>`;
+        return `<div class="quality-feed__row performance-metric-row" style="--promise-color:${escapeHtml(item.color || performancePromiseColor(item.promiseId || item.label))}">
+            <span class="rank-pill">${index + 1}</span>
+            <span class="quality-feed__name"><code>${escapeHtml(item.label)}</code><span class="muted quality-feed__detail">${escapeHtml([item.promiseTitle, item.detail].filter(Boolean).join(" - "))}</span></span>
+            <span class="${cls}">${escapeHtml(item.valueLabel || options.valueLabel(item.value))}</span>
+            ${profile}
+        </div>`;
+    }
+
+    function normalisePerformanceBounds(values, bounds = {}) {
+        const finite = values.filter((value) => Number.isFinite(value) && value > 0);
+        const scale = bounds.scale || "linear";
+        const min = bounds.min ?? (scale === "log" ? Math.max(0.000001, Math.min(...finite, 1) / 1.2) : 0);
+        const max = Math.max(bounds.max ?? 0, ...finite, min + 0.0001, 1);
+        return { min, max, scale };
+    }
+
+    function performanceScaleTransform(value, bounds) {
+        if (bounds.scale === "log") {
+            const min = Math.max(bounds.min, 0.000001);
+            const max = Math.max(bounds.max, min * 1.01);
+            return Math.max(0, Math.min(1, (Math.log10(Math.max(value, min)) - Math.log10(min)) / (Math.log10(max) - Math.log10(min))));
+        }
+        return Math.max(0, Math.min(1, (value - bounds.min) / Math.max(bounds.max - bounds.min, 0.0001)));
+    }
+
+    function renderPerformanceScatterPanel(options) {
+        const points = (options.points || []).filter((point) => Number.isFinite(point.x) && point.x > 0 && Number.isFinite(point.y) && point.y > 0);
+        if (!points.length) {
+            return `<section class="panel-card ll-plot-card performance-scatter-card">
+                <div class="panel-card__header"><div><h3>${escapeHtml(options.title)}</h3><p>${escapeHtml(options.caption)}</p></div></div>
+                <div class="chart-empty">${escapeHtml(options.empty || "No points loaded.")}</div>
+            </section>`;
+        }
+        const width = 760;
+        const height = 360;
+        const margin = { left: 74, right: 28, top: 32, bottom: 58 };
+        const plotWidth = width - margin.left - margin.right;
+        const plotHeight = height - margin.top - margin.bottom;
+        const xBounds = normalisePerformanceBounds(points.map((point) => point.x).concat(options.x.threshold || []), options.x);
+        const yBounds = normalisePerformanceBounds(points.map((point) => point.y).concat(options.y.threshold || []), options.y);
+        const x = (value) => margin.left + performanceScaleTransform(value, xBounds) * plotWidth;
+        const y = (value) => margin.top + (1 - performanceScaleTransform(value, yBounds)) * plotHeight;
+        const xCut = x(options.x.threshold);
+        const yCut = y(options.y.threshold);
+        const ranked = [...points].sort((left, right) => Number(right.score || 0) - Number(left.score || 0)).slice(0, 10);
+        const rankedKeys = new Set(ranked.map((point) => point.key));
+        const quadrantLabels = (options.quadrants || []).map((quadrant) => {
+            const labelX = quadrant.x === "right" ? xCut + 12 : margin.left + 12;
+            const labelY = quadrant.y === "top" ? margin.top + 22 : yCut + 22;
+            return `<g class="ll-quadrant-label ll-quadrant-label--${escapeHtml(quadrant.tone || "good")}" transform="translate(${labelX.toFixed(1)} ${labelY.toFixed(1)})">
+                <text class="ll-quadrant-label__title">${escapeHtml(quadrant.title || "")}</text>
+                <text class="ll-quadrant-label__detail" y="16">${escapeHtml(quadrant.detail || "")}</text>
+            </g>`;
+        }).join("");
+        const pointNodes = points.map((point, index) => {
+            const radius = Math.max(4, Math.min(11, 3 + Number(point.score || 0)));
+            const tone = point.tone || (point.x >= options.x.threshold && point.y >= options.y.threshold ? "triage" : point.x >= options.x.threshold ? "local" : point.y >= options.y.threshold ? "architecture" : "good");
+            const left = (x(point.x) / width) * 100;
+            const top = (y(point.y) / height) * 100;
+            return `<g class="ll-point is-${tone} ${rankedKeys.has(point.key) ? "is-top-risk" : ""}" tabindex="0" role="button" style="--point-color:${escapeHtml(point.color || performancePromiseColor(point.promiseId || point.label))}" data-scatter-point-index="${index}" data-point-left="${left.toFixed(2)}" data-point-top="${top.toFixed(2)}" data-point-label="${escapeHtml(point.label)}" data-point-detail="${escapeHtml(point.detail || "")}" data-point-x-label="${escapeHtml(options.x.valueLabel(point.x))}" data-point-y-label="${escapeHtml(options.y.valueLabel(point.y))}" data-point-score="${escapeHtml(formatNumber.format(point.score || 0))}" data-point-profile="${escapeHtml(point.profile || "")}" data-point-promise="${escapeHtml(point.promiseTitle || point.promiseId || "Unmapped")}" aria-label="${escapeHtml(point.label)}">
+                <circle cx="${x(point.x).toFixed(1)}" cy="${y(point.y).toFixed(1)}" r="${radius.toFixed(1)}"><title>${escapeHtml(`${point.label}: ${options.x.valueLabel(point.x)} x ${options.y.valueLabel(point.y)}`)}</title></circle>
+            </g>`;
+        }).join("");
+        const rankedRows = ranked.map((point, index) => {
+            const pointIndex = points.indexOf(point);
+            const content = `<span>${index + 1}</span><code>${escapeHtml(shortenLabel(point.label))}</code><strong>${escapeHtml(formatNumber.format(point.score || 0))}</strong>`;
+            return `<button type="button" class="ll-ranked-row" data-scatter-point-index="${pointIndex}">${content}</button>`;
+        }).join("");
+        return `<section class="panel-card ll-plot-card performance-scatter-card" id="${escapeHtml(options.id)}">
+            <div class="panel-card__header">
+                <div>
+                    <h3>${escapeHtml(options.title)}</h3>
+                    <p>${escapeHtml(options.caption)}</p>
+                </div>
+            </div>
+            <div class="ll-plot-layout">
+                <svg class="ll-plot" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(options.title)} scatter plot">
+                    <rect class="ll-quadrant ll-quadrant--good" x="${margin.left}" y="${yCut}" width="${xCut - margin.left}" height="${margin.top + plotHeight - yCut}"></rect>
+                    <rect class="ll-quadrant ll-quadrant--architecture" x="${margin.left}" y="${margin.top}" width="${xCut - margin.left}" height="${yCut - margin.top}"></rect>
+                    <rect class="ll-quadrant ll-quadrant--local" x="${xCut}" y="${yCut}" width="${margin.left + plotWidth - xCut}" height="${margin.top + plotHeight - yCut}"></rect>
+                    <rect class="ll-quadrant ll-quadrant--triage" x="${xCut}" y="${margin.top}" width="${margin.left + plotWidth - xCut}" height="${yCut - margin.top}"></rect>
+                    ${quadrantLabels}
+                    <line class="ll-threshold" x1="${xCut}" x2="${xCut}" y1="${margin.top}" y2="${margin.top + plotHeight}"></line>
+                    <line class="ll-threshold" x1="${margin.left}" x2="${margin.left + plotWidth}" y1="${yCut}" y2="${yCut}"></line>
+                    <line class="ll-axis" x1="${margin.left}" x2="${margin.left}" y1="${margin.top}" y2="${margin.top + plotHeight}"></line>
+                    <line class="ll-axis" x1="${margin.left}" x2="${margin.left + plotWidth}" y1="${margin.top + plotHeight}" y2="${margin.top + plotHeight}"></line>
+                    <text class="ll-axis-label" x="${margin.left + plotWidth / 2}" y="${height - 16}">${escapeHtml(options.x.label)}</text>
+                    <text class="ll-axis-label ll-axis-label--y" x="20" y="${margin.top + plotHeight / 2}">${escapeHtml(options.y.label)}</text>
+                    <text class="ll-tick" x="${x(xBounds.min)}" y="${height - 38}">${escapeHtml(options.x.valueLabel(xBounds.min))}</text>
+                    <text class="ll-tick" x="${x(options.x.threshold)}" y="${height - 38}">${escapeHtml(options.x.valueLabel(options.x.threshold))}</text>
+                    <text class="ll-tick" x="${x(xBounds.max)}" y="${height - 38}">${escapeHtml(options.x.valueLabel(xBounds.max))}</text>
+                    <text class="ll-tick" x="${margin.left - 28}" y="${y(yBounds.max) + 4}">${escapeHtml(options.y.valueLabel(yBounds.max))}</text>
+                    <text class="ll-tick" x="${margin.left - 28}" y="${y(options.y.threshold) + 4}">${escapeHtml(options.y.valueLabel(options.y.threshold))}</text>
+                    <text class="ll-tick" x="${margin.left - 28}" y="${y(yBounds.min) + 4}">${escapeHtml(options.y.valueLabel(yBounds.min))}</text>
+                    ${pointNodes}
+                </svg>
+                <div class="ll-popover" hidden></div>
+                <div class="ll-ranked-list">
+                    <h3>${escapeHtml(options.sideTitle || "Worst rows")}</h3>
+                    ${rankedRows}
+                </div>
+            </div>
+        </section>`;
+    }
+
+    function attachPerformanceScatterHandlers(root) {
+        root?.querySelectorAll(".performance-scatter-card").forEach((card) => {
+            const popover = card.querySelector(".ll-popover");
+            const setActivePoint = (index) => {
+                card.querySelectorAll(".ll-point").forEach((point) => {
+                    point.classList.toggle("is-active", Number(point.dataset.scatterPointIndex) === index);
+                });
+                card.querySelectorAll(".ll-ranked-row").forEach((row) => {
+                    row.classList.toggle("is-active", Number(row.dataset.scatterPointIndex) === index);
+                });
+            };
+            const showPopover = (index) => {
+                const point = card.querySelector(`.ll-point[data-scatter-point-index="${index}"]`);
+                if (!point || !popover) return;
+                setActivePoint(index);
+                popover.hidden = false;
+                const left = Number(point.dataset.pointLeft || 50);
+                const top = Number(point.dataset.pointTop || 50);
+                popover.classList.toggle("ll-popover--left", left > 68);
+                popover.classList.toggle("ll-popover--top", top < 24);
+                popover.classList.toggle("ll-popover--bottom", top > 76);
+                popover.style.left = `${left}%`;
+                popover.style.top = `${top}%`;
+                const profile = point.dataset.pointProfile
+                    ? `<button type="button" class="link-button" data-open-flamegraph="${escapeHtml(point.dataset.pointProfile)}">Open profile</button>`
+                    : "";
+                popover.innerHTML = `<strong title="${escapeHtml(point.dataset.pointLabel || "")}">${escapeHtml(point.dataset.pointLabel || "")}</strong>
+                    ${point.dataset.pointDetail ? `<p>${escapeHtml(point.dataset.pointDetail)}</p>` : ""}
+                    <div><span>Promise</span><b>${escapeHtml(point.dataset.pointPromise || "Unmapped")}</b></div>
+                    <div><span>X</span><b>${escapeHtml(point.dataset.pointXLabel || "-")}</b></div>
+                    <div><span>Y</span><b>${escapeHtml(point.dataset.pointYLabel || "-")}</b></div>
+                    <div><span>Score</span><b>${escapeHtml(point.dataset.pointScore || "-")}</b></div>
+                    ${profile}`;
+            };
+            card.querySelectorAll(".ll-point").forEach((point) => {
+                point.addEventListener("click", (event) => {
+                    event.stopPropagation();
+                    showPopover(Number(point.dataset.scatterPointIndex));
+                });
+                point.addEventListener("keydown", (event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        showPopover(Number(point.dataset.scatterPointIndex));
+                    }
+                });
+            });
+            card.querySelectorAll(".ll-ranked-row").forEach((row) => {
+                row.addEventListener("click", (event) => {
+                    event.stopPropagation();
+                    showPopover(Number(row.dataset.scatterPointIndex));
+                });
+            });
+            card.querySelector(".ll-plot-layout")?.addEventListener("click", () => {
+                if (popover) popover.hidden = true;
+                setActivePoint(-1);
+            });
+        });
+    }
+
+    function renderLatencyWhisker(item) {
+        const mean = latencyMs(item);
+        const median = item?.median_ns == null ? mean : Number(item.median_ns || 0) / 1_000_000;
+        const dispersion = item?.dispersion_ns == null ? 0 : Number(item.dispersion_ns || 0) / 1_000_000;
+        const budget = Number(item?.threshold_ms || 0);
+        if (!Number.isFinite(mean) || !Number.isFinite(median) || (!mean && !median)) {
+            return '<span class="muted">-</span>';
+        }
+        const start = Math.max(0, median - dispersion);
+        const end = median + dispersion;
+        const max = Math.max(mean, end, budget, 1);
+        const pct = (value) => Math.max(0, Math.min(100, (value / max) * 100));
+        return `<div class="latency-whisker" title="median ${escapeHtml(formatMs(median))}, mean ${escapeHtml(formatMs(mean))}, budget ${escapeHtml(formatMs(budget))}">
+            <span style="left:${pct(start)}%;width:${Math.max(2, pct(end) - pct(start))}%"></span>
+            <i class="latency-whisker__median" style="left:${pct(median)}%"></i>
+            <i class="latency-whisker__mean" style="left:${pct(mean)}%"></i>
+            ${budget ? `<i class="latency-whisker__budget" style="left:${pct(budget)}%"></i>` : ""}
+        </div>`;
     }
 
     function maxBy(items, valueFn) {
@@ -1561,15 +3106,8 @@
     function formatRatio(value) {
         const ratio = Number(value || 0);
         if (!Number.isFinite(ratio) || ratio <= 0) return "-";
+        if (ratio < 0.01) return "<0.01x";
         return `${formatNumber.format(ratio)}x`;
-    }
-
-    function compactBenchmarkLabel(item) {
-        const raw = item?.scenario_label || item?.benchmark_key || item?.name || "-";
-        return titleCaseMetricName(String(raw).split("/")[0])
-            .replace(/\bLatency\b/g, "")
-            .replace(/\bCompletion\b/g, "")
-            .trim();
     }
 
     function compactScenarioLabel(item) {
@@ -1580,140 +3118,129 @@
             .trim();
     }
 
-    function capacityOutcome(capacity, scenarioName, which) {
-        const scenario = (capacity || []).find((item) => item.scenario === scenarioName);
-        if (!scenario) return "-";
-        if (which === "first") {
-            return scenario.first_failure_label || `>${scenario.last_successful_label || "-"}`;
-        }
-        return scenario.last_successful_label || scenario.result_label || "-";
-    }
-
     function maxMetric(items, field) {
         return (items || []).reduce((max, item) => Math.max(max, Number(item[field] || 0)), 0);
     }
 
-    function renderPerformanceInsights() {
-        const target = byId("performance-insights");
+    function renderPerformanceCuratedLists() {
+        const target = byId("performance-curated-lists");
         if (!target) return;
-        const searchRows = state.searchSpeed || [];
-        const slowspots = state.slowspots || [];
-        const capacity = state.capacityReport?.scenarios || [];
-        const resources = state.resourceProfiles?.scenarios || [];
-        const timedRows = uniquePerformanceRows([...searchRows, ...slowspots]);
-        const capacitySummary = state.capacityReport?.summary || {};
-        const triageSummary = state.speedReport?.triage_summary || {};
-        const topMisses = topBudgetRows(timedRows, 5);
-        const topSearchMisses = topBudgetRows(searchRows, 4);
-        const resourceRows = topResourceRows(resources, 5);
-        const capacityRows = capacityBreakpointRows(capacity);
-        const worstMiss = topMisses[0];
-        const worstSearch = topSearchMisses[0];
-        const peakResource = resourceRows[0];
-        const bestThroughput = maxBy(searchRows.filter((item) => Number(item.throughput_mb_s || 0) > 0), (item) => Number(item.throughput_mb_s || 0));
-        const searchOverBudget = searchRows.filter((item) => (item.mean_ns || 0) / 1_000_000 > (item.threshold_ms || Infinity)).length;
-        const slowOverBudget = slowspots.filter((item) => (item.mean_ns || 0) / 1_000_000 > (item.threshold_ms || Infinity)).length;
-
-        const cards = [
-            {
-                cls: "budget",
-                title: "Worst Budget Misses",
-                summary: worstMiss ? `${formatRatio(budgetRatio(worstMiss))} worst row` : "All rows within budget",
-                metrics: [
-                    ["Worst mean", worstMiss ? formatMs(latencyMs(worstMiss)) : "-"],
-                    ["Worst budget", worstMiss ? formatMs(worstMiss.threshold_ms) : "-"],
-                    ["Rows over budget", searchOverBudget + slowOverBudget],
-                    ["Critical rows", triageSummary.critical ?? "-"],
-                ],
-                chart: performanceResultBars(topMisses.map((item) => ({
-                    label: compactBenchmarkLabel(item),
-                    detail: `${formatMs(latencyMs(item))} / ${formatMs(item.threshold_ms)}`,
-                    value: budgetRatio(item),
-                    valueLabel: formatRatio(budgetRatio(item)),
-                })), "bad"),
-            },
-            {
-                cls: "coverage",
-                title: "Search Outcomes",
-                summary: bestThroughput ? `${formatNumber.format(bestThroughput.throughput_mb_s)} MB/s best` : "No throughput",
-                metrics: [
-                    ["Worst search", worstSearch ? formatRatio(budgetRatio(worstSearch)) : "clear"],
-                    ["Worst mean", worstSearch ? formatMs(latencyMs(worstSearch)) : "-"],
-                    ["Best throughput", bestThroughput ? `${formatNumber.format(bestThroughput.throughput_mb_s)} MB/s` : "-"],
-                    ["Rows over budget", searchOverBudget],
-                ],
-                chart: performanceResultBars(topSearchMisses.map((item) => ({
-                    label: compactBenchmarkLabel(item),
-                    detail: `${formatMs(latencyMs(item))} / ${formatMs(item.threshold_ms)}`,
-                    value: budgetRatio(item),
-                    valueLabel: formatRatio(budgetRatio(item)),
-                })), "search"),
-            },
-            {
-                cls: "capacity",
-                title: "Capacity Breakpoints",
-                summary: `${formatNumber.format(capacitySummary.ceilings_reached ?? 0)} ceilings hit`,
-                metrics: [
-                    ["Memory bound", capacitySummary.memory_bound_scenarios ?? "-"],
-                    ["CPU bound", capacitySummary.cpu_bound_scenarios ?? "-"],
-                    ["Files proven", capacityOutcome(capacity, "search_target_count_ceiling", "last")],
-                    ["Views proven", capacityOutcome(capacity, "view_count_ceiling", "last")],
-                ],
-                chart: performanceResultBars(capacityRows, "warn"),
-            },
-            {
-                cls: "resources",
-                title: "Peak Resource Use",
-                summary: peakResource ? `${peakResource.valueLabel} worst live` : "No resource result",
-                metrics: [
-                    ["Worst live", peakResource ? peakResource.valueLabel : "-"],
-                    ["Worst case", peakResource ? peakResource.label : "-"],
-                    ["Working set", peakResource ? peakResource.workingSetLabel : "-"],
-                    ["Page faults", peakResource ? peakResource.pageFaultsLabel : "-"],
-                ],
-                chart: performanceResultBars(resourceRows, "resource"),
-            },
-        ];
-
-        target.innerHTML = cards.map((card) => `<section class="performance-insight-card performance-insight-card--${card.cls}">
-            <div class="performance-insight-card__header">
-                <span class="performance-insight-card__marker"></span>
-                <div>
-                    <h3>${escapeHtml(card.title)}</h3>
-                    <p>${escapeHtml(card.summary)}</p>
-                </div>
-            </div>
-            ${card.chart}
-            <div class="performance-insight-card__metrics">
-                ${card.metrics.map(([label, value]) => `<span><strong>${escapeHtml(value)}</strong> ${escapeHtml(label)}</span>`).join("")}
-            </div>
-        </section>`).join("");
+        const digest = computePerformanceDigest();
+        target.innerHTML = [
+            renderRiskList(digest),
+            renderHeadroomList(digest),
+            renderCoverageGapList(digest),
+            renderCapacityList(digest),
+        ].join("");
     }
 
-    function topBudgetRows(rows, limit) {
-        return uniquePerformanceRows(rows)
-            .filter((item) => item.threshold_ms && budgetRatio(item) > 1)
-            .sort((a, b) => budgetRatio(b) - budgetRatio(a))
-            .slice(0, limit);
+    function renderRiskList(digest) {
+        const rows = digest.budgetedRows
+            .map((item) => ({ item, ratio: budgetRatio(item) }))
+            .filter((row) => row.ratio >= 0.85)
+            .sort((a, b) => b.ratio - a.ratio)
+            .slice(0, 12);
+        return renderCuratedTable({
+            title: "Risk List",
+            open: true,
+            headers: ["Scenario", "Family", "Mean", "Budget", "Ratio", "Resource", "Primary action"],
+            rows: rows.map(({ item, ratio }) => `<tr>
+                <td><code>${escapeHtml(item.scenario_label || item.name || item.benchmark_key)}</code></td>
+                <td><span class="pill">${escapeHtml(item.workload_family || item.family || "unmapped")}</span></td>
+                <td>${formatMs(latencyMs(item))}</td>
+                <td>${formatMs(item.threshold_ms)}</td>
+                <td><span class="status-pill status-pill--${ratio > 1 ? "bad" : "watch"}">${formatRatio(ratio)}</span></td>
+                <td><span class="pill">${escapeHtml(item.suspected_limiting_resource || "cpu")}</span></td>
+                <td>${renderPrimaryAction(item)}</td>
+            </tr>`),
+        });
     }
 
-    function capacityBreakpointRows(capacity) {
-        return (capacity || [])
+    function renderHeadroomList(digest) {
+        const rows = digest.budgetedRows
+            .map((item) => ({ item, ratio: budgetRatio(item) }))
+            .filter((row) => row.ratio > 0 && row.ratio <= 0.4)
+            .sort((a, b) => a.ratio - b.ratio)
+            .slice(0, 12);
+        return renderCuratedTable({
+            title: "Headroom List",
+            open: false,
+            headers: ["Scenario", "Family", "Mean", "Budget", "Headroom", "Resource"],
+            rows: rows.map(({ item, ratio }) => `<tr>
+                <td><code>${escapeHtml(item.scenario_label || item.name || item.benchmark_key)}</code></td>
+                <td><span class="pill">${escapeHtml(item.workload_family || item.family || "unmapped")}</span></td>
+                <td>${formatMs(latencyMs(item))}</td>
+                <td>${formatMs(item.threshold_ms)}</td>
+                <td><span class="status-pill status-pill--ok">${formatRatio(1 / ratio)}</span></td>
+                <td><span class="pill">${escapeHtml(item.suspected_limiting_resource || "cpu")}</span></td>
+            </tr>`),
+        });
+    }
+
+    function renderCoverageGapList(digest) {
+        const rows = digest.reviewScenarios
+            .map((scenario) => ({ scenario, status: scenarioStatus(scenario), scale: bestScaleCheck(scenario) }))
+            .sort((a, b) => statusRank(a.status.cls) - statusRank(b.status.cls) || (b.scenario.budget_misses || 0) - (a.scenario.budget_misses || 0));
+        return renderCuratedTable({
+            title: "Contract Status List",
+            open: false,
+            headers: ["Scenario", "Promise", "Scale target", "Observed", "Status"],
+            rows: rows.map(({ scenario, status, scale }) => `<tr>
+                <td><code>${escapeHtml(scenario.title || scenario.id)}</code></td>
+                <td>${escapeHtml(scenario.promise || "-")}</td>
+                <td>${scale ? escapeHtml(formatScaleValue(scale.target, scale.unit)) : "-"}</td>
+                <td>${scale ? escapeHtml(formatScaleValue(scale.observed, scale.unit)) : "-"}</td>
+                <td><span class="status-pill status-pill--${status.cls}">${escapeHtml(status.label)}</span></td>
+            </tr>`),
+        });
+    }
+
+    function renderCapacityList(digest) {
+        const rows = digest.capacityRows
             .map((item) => {
-                const failed = item.failure_mode && item.failure_mode !== "not_reached";
-                const label = compactScenarioLabel(item);
-                const valueLabel = failed ? item.first_failure_label || "failed" : `>${item.last_successful_label || "target"}`;
-                return {
-                    label,
-                    detail: failed
-                        ? `${item.last_successful_label || "-"} ok -> ${item.first_failure_label || "-"} breaks`
-                        : `no ceiling through ${item.last_successful_label || "-"}`,
-                    value: failed ? 1 : 0.45,
-                    valueLabel,
-                };
+                const target = Number(item.first_failure_workload || item.last_successful_workload || 0);
+                const ok = Number(item.last_successful_workload || 0);
+                const headroom = target ? ok / target : 1;
+                return { item, headroom };
             })
-            .sort((a, b) => b.value - a.value)
-            .slice(0, 6);
+            .sort((a, b) => a.headroom - b.headroom);
+        return renderCuratedTable({
+            title: "Capacity Headroom List",
+            open: false,
+            headers: ["Scenario", "Last OK", "First failure", "Failure mode", "Resource", "Headroom"],
+            rows: rows.map(({ item, headroom }) => `<tr>
+                <td><code>${escapeHtml(item.scenario_label || item.scenario)}</code></td>
+                <td>${escapeHtml(item.last_successful_label || "-")}</td>
+                <td>${escapeHtml(item.first_failure_label || "-")}</td>
+                <td><span class="pill">${escapeHtml(item.failure_mode || "not_reached")}</span></td>
+                <td><span class="pill">${escapeHtml(item.suspected_limiting_resource || "cpu")}</span></td>
+                <td><span class="status-pill status-pill--${headroom < 0.8 ? "watch" : "ok"}">${formatRatio(headroom)}</span></td>
+            </tr>`),
+        });
+    }
+
+    function renderCuratedTable({ title, open, headers, rows }) {
+        return `<details class="disclose curated-list" ${open ? "open" : ""}>
+            <summary>${escapeHtml(title)}</summary>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
+                    <tbody>${rows.length ? rows.join("") : `<tr><td colspan="${headers.length}" class="muted">No rows match.</td></tr>`}</tbody>
+                </table>
+            </div>
+        </details>`;
+    }
+
+    function renderPrimaryAction(item) {
+        const profiles = item.matching_flamegraphs || [];
+        if (profiles.length) {
+            return `<button type="button" class="link-button" data-open-flamegraph="${escapeHtml(profiles[0])}">Open ${escapeHtml(profiles[0])}</button>`;
+        }
+        return `<span class="muted">Add profile</span>`;
+    }
+
+    function statusRank(cls) {
+        return { bad: 0, stale: 1, watch: 2, ok: 3 }[cls] ?? 4;
     }
 
     function topResourceRows(resources, limit) {
@@ -1753,37 +3280,6 @@
                     <strong class="performance-result-bars__value">${escapeHtml(row.valueLabel || formatNumber.format(row.value || 0))}</strong>
                 </div>`;
         }).join("")}
-        </div>`;
-    }
-
-    function performanceMiniBars(rows, tone) {
-        const max = Math.max(1, ...rows.map(([, value, total]) => Number(total || value || 0)));
-        return `<div class="performance-mini-bars performance-mini-bars--${tone}">
-            ${rows.map(([label, value, total]) => {
-            const denom = Number(total || max || 1);
-            const pct = denom ? Math.min(100, (Number(value || 0) / denom) * 100) : 0;
-            return `<div class="performance-mini-bars__row">
-                    <span>${escapeHtml(label)}</span>
-                    <div><i style="width:${Math.max(value ? 4 : 0, pct)}%"></i></div>
-                    <strong>${formatNumber.format(value)}</strong>
-                </div>`;
-        }).join("")}
-        </div>`;
-    }
-
-    function performanceDonut(ratio, label) {
-        const safeRatio = Math.max(0, Math.min(1, Number(ratio || 0)));
-        const radius = 46;
-        const circumference = 2 * Math.PI * radius;
-        const dash = safeRatio * circumference;
-        return `<div class="performance-donut">
-            <svg viewBox="0 0 116 116" aria-hidden="true">
-                <circle class="performance-donut__track" cx="58" cy="58" r="${radius}"></circle>
-                <circle class="performance-donut__segment" cx="58" cy="58" r="${radius}"
-                    stroke-dasharray="${dash} ${circumference - dash}"></circle>
-                <text class="performance-donut__value" x="58" y="54">${formatNumber.format(safeRatio * 100)}%</text>
-                <text class="performance-donut__label" x="58" y="72">${escapeHtml(label)}</text>
-            </svg>
         </div>`;
     }
 
@@ -2456,123 +3952,6 @@
         });
     }
 
-    function renderPerformanceScenarios() {
-        const reviewScenarios = state.performanceReview?.scenarios || [];
-        if (reviewScenarios.length) {
-            const target = byId("performance-scenarios");
-            if (target) {
-                target.innerHTML = reviewScenarios.map(renderPerformanceCoverageCard).join("");
-            }
-            return;
-        }
-        const scenarios = [
-            {
-                title: "Large Files",
-                description: "Load, inspect, scroll, and edit very large text files quickly.",
-                families: ["file-load", "scroll", "viewport", "snapshot"],
-                profiles: ["scroll_stress_profile", "viewport_extraction_profile", "document_snapshot_profile"],
-            },
-            {
-                title: "Many Files",
-                description: "Keep workspace and file workflows responsive above 10,000 files.",
-                families: ["many-files", "file-load", "session-persistence", "search", "search-dispatch"],
-                profiles: ["search_all_tabs_profile", "search_dispatch_profile"],
-            },
-            {
-                title: "Search",
-                description: "Return first matches quickly and finish searches over huge files and many files.",
-                families: ["search", "search-dispatch"],
-                profiles: [
-                    "search_current_app_state_profile",
-                    "search_all_tabs_profile",
-                    "search_dispatch_profile",
-                    "search_capacity_profile",
-                ],
-            },
-            {
-                title: "Many Tabs",
-                description: "Open, switch, reorder, and manipulate huge tab sets quickly.",
-                families: ["tab-management"],
-                profiles: ["tab_operations_profile", "tab_tile_layout_profile"],
-            },
-            {
-                title: "Many Views",
-                description: "Keep many views into the same loaded files responsive.",
-                families: ["split-layout"],
-                profiles: ["split_stress_profile", "tab_tile_layout_profile", "view_navigation_profile", "viewport_extraction_profile"],
-            },
-            {
-                title: "Large Text Mutation",
-                description: "Paste, cut, undo, redo, and metadata refresh should stay fast on huge buffers.",
-                families: ["edit-paste", "anchor-maintenance"],
-                profiles: ["paste_stress_profile"],
-            },
-            {
-                title: "Session Persistence Restore",
-                description: "Persist and restore cost for large saved workspaces.",
-                families: ["session-persistence"],
-                profiles: [],
-                tests: ["tests/session_store_tests.rs", "tests/startup_tests.rs"],
-            },
-        ];
-        const slowspots = state.slowspots || [];
-        const capacity = state.capacityReport?.scenarios || [];
-        const resources = state.resourceProfiles?.scenarios || [];
-        const flamegraphs = state.flamegraphs || [];
-        const scenarioStats = scenarios.map((scenario) => {
-            const familySet = new Set(scenario.families);
-            const speedCount = slowspots.filter((item) => familySet.has(item.workload_family)).length;
-            const capacityCount = capacity.filter((item) => familySet.has(item.workload_family)).length;
-            const resourceCount = resources.filter((item) => familySet.has(item.workload_family)).length;
-            const profileMatches = flamegraphs.filter((item) => scenario.profiles.includes(item.id) || (item.workload_families || []).some((family) => familySet.has(family)));
-            return {
-                ...scenario,
-                speedCount,
-                capacityCount,
-                resourceCount,
-                profileAvailable: profileMatches.filter((item) => item.available).length,
-                profileTotal: profileMatches.length,
-            };
-        });
-        const maxEvidence = Math.max(1, ...scenarioStats.flatMap((scenario) => [
-            scenario.speedCount,
-            scenario.capacityCount,
-            scenario.resourceCount,
-        ]));
-        byId("performance-scenarios").innerHTML = scenarioStats.map((scenario) => {
-            const rows = [
-                { label: "Speed", value: scenario.speedCount, cls: "speed" },
-                { label: "Capacity", value: scenario.capacityCount, cls: "capacity" },
-                { label: "Resource", value: scenario.resourceCount, cls: "resource" },
-            ];
-            const profilePct = scenario.profileTotal ? (scenario.profileAvailable / scenario.profileTotal) * 100 : 0;
-            return `<article class="scenario-card">
-                <h3>${escapeHtml(scenario.title)}</h3>
-                <div class="scenario-graphs">
-                    <div class="scenario-bars">
-                        ${rows.map((row) => `<div class="scenario-bars__row">
-                            <span>${escapeHtml(row.label)}</span>
-                            <div class="scenario-bars__track">
-                                <span class="scenario-bars__fill scenario-bars__fill--${row.cls}" style="width:${Math.max(row.value ? 4 : 0, (row.value / maxEvidence) * 100)}%"></span>
-                            </div>
-                            <strong>${formatNumber.format(row.value)}</strong>
-                        </div>`).join("")}
-                    </div>
-                    <div class="scenario-coverage">
-                        <div class="scenario-coverage__top">
-                            <span>Flamegraphs</span>
-                            <strong>${formatNumber.format(scenario.profileAvailable)}/${formatNumber.format(scenario.profileTotal)}</strong>
-                        </div>
-                        <div class="scenario-coverage__track">
-                            <span style="width:${profilePct}%"></span>
-                        </div>
-                        ${scenario.tests?.length ? `<div class="scenario-tests">${renderPills(scenario.tests)}</div>` : ""}
-                    </div>
-                </div>
-            </article>`;
-        }).join("");
-    }
-
     function renderCorrectness() {
         const payload = state.correctness || {};
         const summary = payload.summary || {};
@@ -3028,6 +4407,9 @@
             const left = (x(item.localityRisk) / width) * 100;
             const top = (y(item.leverageRisk) / height) * 100;
             popover.hidden = false;
+            popover.classList.toggle("ll-popover--left", left > 68);
+            popover.classList.toggle("ll-popover--top", top < 24);
+            popover.classList.toggle("ll-popover--bottom", top > 76);
             popover.style.left = `${left}%`;
             popover.style.top = `${top}%`;
             popover.innerHTML = `<strong>${escapeHtml(item.moduleName)}</strong>
@@ -3674,7 +5056,22 @@
             return;
         }
 
-        container.innerHTML = state.flamegraphs.map(item => {
+        const selectedPromise = selectedPerformancePromise();
+        const profileIds = new Set((selectedPromise?.evidence?.profiles || []).map((item) => item.id).filter(Boolean));
+        const flamegraphs = selectedPromise && profileIds.size
+            ? state.flamegraphs.filter((item) => profileIds.has(item.id))
+            : state.flamegraphs;
+        if (!flamegraphs.length) {
+            container.innerHTML = '<p class="muted">No flamegraphs match this promise.</p>';
+            byId("flamegraph-content").innerHTML = '<p class="muted">No matching profile SVG is listed for the selected promise.</p>';
+            return;
+        }
+        if (!flamegraphs.some((item) => item.id === state.selectedFlamegraph)) {
+            state.selectedFlamegraph = flamegraphs[0].id;
+            loadSelectedFlamegraph();
+        }
+
+        container.innerHTML = flamegraphs.map(item => {
             const isActive = state.selectedFlamegraph === item.id;
             const isMissing = !item.available;
             return `<div class="flamegraph-item ${isActive ? 'is-active' : ''} ${isMissing ? 'is-error' : ''}" data-id="${escapeHtml(item.id)}">
@@ -3692,8 +5089,8 @@
             });
         });
 
-        if (state.selectedFlamegraph === null && state.flamegraphs.length > 0) {
-            state.selectedFlamegraph = state.flamegraphs[0].id;
+        if (state.selectedFlamegraph === null && flamegraphs.length > 0) {
+            state.selectedFlamegraph = flamegraphs[0].id;
             renderFlamegraphs();
             loadSelectedFlamegraph();
         }
@@ -3921,17 +5318,18 @@
         renderCloneDistribution();
         renderSlowspots();
         renderSearchSpeed();
-        renderSearchBudget();
-        renderEditorBudget();
         renderSpeedReport();
         renderCapacityReport();
         renderResourceProfiles();
         renderPerformanceReviewCoverage();
         renderPerformanceOverview();
+        renderPerformanceFilterOptions();
+        renderPerformanceHeadlineCharts();
+        renderPerformanceCuratedLists();
+        renderPerformancePanelCaptions();
         renderPerformanceDatasetView();
         renderClones();
         renderEscapeHatches();
-        renderPerformanceScenarios();
         renderCorrectness();
         renderCorrectnessMatrix();
         renderLocalityLeverage();
@@ -4583,87 +5981,6 @@
             .replace(/\b\w/g, (letter) => letter.toUpperCase());
     }
 
-    function budgetParameterLabel(item) {
-        if (item.parameter_label) return item.parameter_label;
-        const rawValue = String(item.name || "").split("/").pop();
-        const numericValue = Number(rawValue);
-        const key = item.benchmark_key || item.name || "";
-        if (!rawValue || rawValue === String(item.name || "")) return "";
-        if (Number.isFinite(numericValue)) {
-            if (key.includes("file_size") || key.includes("bytes")) return formatBytes(numericValue);
-            if (key.includes("aggregate_size")) return `${formatNumber.format(numericValue)} tabs`;
-            if (key.includes("tab_count")) return `${formatNumber.format(numericValue)} tabs`;
-            if (key.includes("split")) return `${formatNumber.format(numericValue)} splits`;
-        }
-        return rawValue;
-    }
-
-    function budgetLabelParts(item) {
-        const key = item.benchmark_key || String(item.name || "").split("/")[0];
-        const title = item.scenario_label || titleCaseMetricName(key);
-        const details = [
-            budgetParameterLabel(item),
-            item.workload_family || item.mode,
-            item.latency_kind,
-        ].filter(Boolean);
-        return { title, subtitle: [...new Set(details)].join(" - ") };
-    }
-
-    function renderBudgetBars(targetId, items) {
-        const target = byId(targetId);
-        if (!target) return;
-        if (!items.length) {
-            target.innerHTML = `<div class="budget-bars__empty">No data. Run the relevant refresh.</div>`;
-            return;
-        }
-        const ratios = items
-            .map((it) => {
-                const meanMs = (it.mean_ns || 0) / 1_000_000;
-                const budget = it.threshold_ms || 0;
-                if (!budget) return null;
-                return {
-                    label: it.scenario_label || it.name,
-                    labelParts: budgetLabelParts(it),
-                    meanMs,
-                    budget,
-                    ratio: meanMs / budget,
-                };
-            })
-            .filter(Boolean)
-            .sort((a, b) => b.ratio - a.ratio)
-            .slice(0, 30);
-        if (!ratios.length) {
-            target.innerHTML = `<div class="budget-bars__empty">No budget thresholds available.</div>`;
-            return;
-        }
-        const maxRatio = Math.max(1.2, ...ratios.map((r) => r.ratio));
-        target.innerHTML = ratios.map((r) => {
-            const fillPct = (r.ratio / maxRatio) * 100;
-            const thresholdPct = (1 / maxRatio) * 100;
-            const cls = r.ratio > 1 ? "bad" : r.ratio > 0.85 ? "warn" : "good";
-            const fillClass = cls === "good" ? "" : `budget-bars__fill--${cls}`;
-            return `<div class="budget-bars__row" title="${escapeHtml(r.label)}">
-                <span class="budget-bars__label">
-                    <strong>${escapeHtml(r.labelParts.title)}</strong>
-                    ${r.labelParts.subtitle ? `<span>${escapeHtml(r.labelParts.subtitle)}</span>` : ""}
-                </span>
-                <div class="budget-bars__track">
-                    <div class="budget-bars__fill ${fillClass}" style="width:${Math.min(100, fillPct)}%"></div>
-                    <div class="budget-bars__threshold" style="left:${thresholdPct}%"></div>
-                </div>
-                <span class="budget-bars__value">${formatNumber.format(r.ratio * 100)}%</span>
-            </div>`;
-        }).join("");
-    }
-
-    function renderSearchBudget() {
-        renderBudgetBars("search-budget", state.searchSpeed || []);
-    }
-
-    function renderEditorBudget() {
-        renderBudgetBars("editor-budget", state.slowspots || []);
-    }
-
     function renderQualityDatasetView() {
         document.querySelectorAll("[data-quality-dataset-view]").forEach((button) => {
             const active = button.dataset.qualityDatasetView === state.qualityDatasetView;
@@ -4676,17 +5993,51 @@
     }
 
     function renderPerformanceDatasetView() {
-        document.querySelectorAll("[data-performance-view]").forEach((button) => {
-            const active = button.dataset.performanceView === state.performanceDatasetView;
-            button.classList.toggle("is-active", active);
-            button.setAttribute("aria-pressed", active ? "true" : "false");
-        });
-        document.querySelectorAll("[data-performance-panel]").forEach((panel) => {
-            panel.classList.toggle("is-active", panel.dataset.performancePanel === state.performanceDatasetView);
-        });
-        if (state.performanceDatasetView === "flamegraphs") {
-            renderFlamegraphs();
+        renderFlamegraphs();
+    }
+
+    function rerenderPerformanceEvidence() {
+        renderSearchSpeed();
+        renderSlowspots();
+        renderCapacityReport();
+        renderResourceProfiles();
+        renderSpeedReport();
+        renderPerformanceOverview();
+        renderPerformanceHeadlineCharts();
+        renderPerformanceCuratedLists();
+        renderPerformancePanelCaptions();
+        renderPerformanceDatasetView();
+    }
+
+    function selectPerformanceScenarioTab(scenarioId, { scroll = false } = {}) {
+        const scenarios = state.performanceReview?.scenarios || [];
+        const scenario = scenarios.find((item) => item.id === scenarioId);
+        if (!scenario) return;
+        state.selectedPerformanceScenarioId = scenario.id;
+        renderPerformancePromiseBoard(scenarios);
+        rerenderPerformanceEvidence();
+        if (scroll) {
+            byId("performance-promise-board")?.scrollIntoView({ behavior: "smooth", block: "start" });
         }
+    }
+
+    function renderPerformanceFilterOptions() {
+        const search = byId("performance-dataset-search");
+        if (search && search.value !== state.performanceDatasetSearch) {
+            search.value = state.performanceDatasetSearch;
+        }
+    }
+
+    function updateFilterOptions(id, values, selected, allLabel) {
+        const target = byId(id);
+        if (!target) return;
+        const unique = [...new Set(values.filter(Boolean).map(String))].sort();
+        const previous = target.value || selected || "all";
+        target.innerHTML = [
+            `<option value="all">${escapeHtml(allLabel)}</option>`,
+            ...unique.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(titleCaseMetricName(value))}</option>`),
+        ].join("");
+        target.value = unique.includes(previous) ? previous : "all";
     }
 
     function renderCorrectnessMatrix() {
@@ -4786,11 +6137,38 @@
         });
     });
     renderQualityDatasetView();
-    document.querySelectorAll("[data-performance-view]").forEach((button) => {
-        button.addEventListener("click", () => {
-            state.performanceDatasetView = button.dataset.performanceView || "search";
+    byId("performance-dataset-search")?.addEventListener("input", (event) => {
+        state.performanceDatasetSearch = event.target.value || "";
+        rerenderPerformanceEvidence();
+    });
+    byId("performance-review")?.addEventListener("click", (event) => {
+        const promiseTab = event.target.closest("[data-promise-tab]");
+        if (promiseTab?.dataset.promiseTab) {
+            selectPerformanceScenarioTab(promiseTab.dataset.promiseTab);
+            return;
+        }
+        const promiseFocus = event.target.closest("[data-promise-focus]");
+        if (promiseFocus?.dataset.promiseFocus) {
+            selectPerformanceScenarioTab(promiseFocus.dataset.promiseFocus, { scroll: true });
+            return;
+        }
+        const distributionMode = event.target.closest("[data-performance-distribution-mode]");
+        if (distributionMode?.dataset.performanceDistributionMode && distributionMode?.dataset.performanceDistribution) {
+            state.performanceDistributionModes[distributionMode.dataset.performanceDistribution] = distributionMode.dataset.performanceDistributionMode;
+            renderPerformanceHeadlineCharts();
+            return;
+        }
+        const jump = event.target.closest("[data-jump-target]");
+        if (jump?.dataset.jumpTarget) {
+            byId(jump.dataset.jumpTarget)?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        const flamegraph = event.target.closest("[data-open-flamegraph]");
+        if (flamegraph?.dataset.openFlamegraph) {
+            state.selectedFlamegraph = flamegraph.dataset.openFlamegraph;
             renderPerformanceDatasetView();
-        });
+            renderFlamegraphs();
+            byId("speed-report-flamegraphs")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
     });
     renderPerformanceDatasetView();
     byId("app-package-refresh")?.addEventListener("click", refreshAppPackage);

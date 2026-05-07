@@ -130,7 +130,9 @@ impl ScrollArea {
         let prev_offset = state.offset;
         apply_mouse_wheel(
             ui,
-            outer_response.hovered() || outer_response.contains_pointer(),
+            scroll_area_contains_pointer(ui, outer_rect)
+                || outer_response.hovered()
+                || outer_response.contains_pointer(),
             self.source,
             &mut state,
         );
@@ -165,6 +167,7 @@ impl ScrollArea {
                     ui,
                     state,
                     ScrollbarPaintRequest {
+                        id: self.id.with(_id_suffix),
                         outer_rect,
                         axis,
                         thickness: self.scrollbar_thickness,
@@ -272,6 +275,7 @@ struct ScrollbarGeometry {
 }
 
 struct ScrollbarPaintRequest {
+    id: Id,
     outer_rect: Rect,
     axis: Axis,
     thickness: f32,
@@ -399,6 +403,15 @@ fn apply_mouse_wheel(ui: &Ui, hovered: bool, source: ScrollSource, state: &mut S
     state.user_scrolled = true;
 }
 
+fn scroll_area_contains_pointer(ui: &Ui, rect: Rect) -> bool {
+    ui.input(|input| {
+        input
+            .pointer
+            .latest_pos()
+            .is_some_and(|pos| rect.contains(pos))
+    })
+}
+
 fn clipped_content_ui(ui: &mut Ui, id: Id, inner_rect: Rect, offset: Vec2, child_size: Vec2) -> Ui {
     let content_rect = Rect::from_min_size(inner_rect.min - offset, child_size);
     let mut content_ui =
@@ -450,6 +463,7 @@ fn child_content_rect_size(content_size: Vec2, viewport_size: Vec2) -> Vec2 {
 
 fn paint_and_handle_scrollbar(
     ui: &mut Ui,
+    id: Id,
     bar_rect: Rect,
     axis: Axis,
     state: &mut ScrollState,
@@ -465,13 +479,7 @@ fn paint_and_handle_scrollbar(
     } else {
         Sense::hover()
     };
-    let response = widget_ids::interact(
-        ui,
-        bar_rect,
-        widget_ids::rect_surface_id(bar_rect, "scrollbar"),
-        sense,
-        "scrollbar",
-    );
+    let response = widget_ids::interact(ui, bar_rect, id, sense, "scrollbar");
 
     if interactive {
         handle_scrollbar_drag(ui, &response, bar_rect, axis, state, &geometry);
@@ -579,6 +587,7 @@ fn start_scrollbar_drag(
 fn paint_visible_scrollbar(ui: &mut Ui, state: &mut ScrollState, request: ScrollbarPaintRequest) {
     paint_and_handle_scrollbar(
         ui,
+        request.id,
         scrollbar_bar_rect(
             request.axis,
             request.outer_rect,

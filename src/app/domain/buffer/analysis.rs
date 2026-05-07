@@ -62,6 +62,7 @@ pub struct TextArtifactSummary {
     pub has_ansi_sequences: bool,
     pub has_carriage_returns: bool,
     pub has_backspaces: bool,
+    pub has_unicode_format_controls: bool,
     pub other_control_count: usize,
 }
 
@@ -290,6 +291,7 @@ impl TextArtifactSummary {
         self.has_ansi_sequences
             || self.has_carriage_returns
             || self.has_backspaces
+            || self.has_unicode_format_controls
             || self.other_control_count > 0
     }
 
@@ -308,6 +310,9 @@ impl TextArtifactSummary {
         }
         if self.has_backspaces {
             parts.push("BS");
+        }
+        if self.has_unicode_format_controls {
+            parts.push("Unicode controls");
         }
         if self.other_control_count > 0 {
             parts.push("CTL");

@@ -1,4 +1,5 @@
 use super::super::{CursorRange, cursor, editing, select_all_cursor};
+use super::KeyboardInputRequest;
 use crate::app::domain::{BufferState, EditorViewState, PieceSource};
 use eframe::egui;
 
@@ -19,29 +20,24 @@ enum RelevantInputEvent {
     Paste(String),
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_keyboard_events(
     ui: &mut egui::Ui,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
-    galley: &egui::Galley,
-    page_jump_rows: usize,
-    total_chars: usize,
-    char_offset_base: usize,
-    slice_chars: usize,
+    request: KeyboardInputRequest<'_>,
 ) -> bool {
     handle_keyboard_events_with(ui, buffer, view, |key_event, buffer, cursor| {
-        cursor::apply_cursor_movement(
+        cursor::apply_cursor_movement(cursor::CursorMovementRequest {
             cursor,
-            key_event.key,
-            &key_event.modifiers,
-            galley,
-            page_jump_rows,
-            total_chars,
-            buffer.document().piece_tree(),
-            char_offset_base,
-            slice_chars,
-        )
+            key: key_event.key,
+            modifiers: &key_event.modifiers,
+            galley: request.galley,
+            page_jump_rows: request.page_jump_rows,
+            total_chars: request.total_chars,
+            piece_tree: buffer.document().piece_tree(),
+            char_offset_base: request.char_offset_base,
+            slice_chars: request.slice_chars,
+        })
     })
 }
 

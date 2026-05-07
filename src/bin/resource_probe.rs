@@ -1,7 +1,8 @@
-use scratchpad::app::domain::{BufferState, SplitAxis, WorkspaceTab};
+use scratchpad::app::domain::{BufferState, SearchHighlightState, SplitAxis, WorkspaceTab};
 use scratchpad::app::services::file_service::FileService;
 use scratchpad::app::services::search::{SearchMode, SearchOptions, SearchProgram, search_program};
 use scratchpad::app::services::session_store::SessionStore;
+use scratchpad::app::ui::editor_content::{EditorHighlightStyle, build_layouter};
 use serde::Serialize;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
@@ -12,11 +13,13 @@ use std::time::Instant;
 
 const KB: usize = 1024;
 const MB: usize = 1024 * KB;
+const GB: usize = 1024 * MB;
 const TAB_BYTES_PER_BUFFER: usize = 48 * KB;
 const MANY_FILE_BYTES_PER_BUFFER: usize = KB;
 const SESSION_BYTES_PER_BUFFER: usize = 4 * KB;
 const VIEW_COUNT_BUFFER_BYTES: usize = MB;
 const PASTE_RESOURCE_BASE_BYTES: usize = MB;
+const FIRST_VISIBLE_PAINT_MAX_CHARS: usize = 192 * KB;
 
 static ALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
 static DEALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
@@ -98,8 +101,16 @@ struct ResourceEvent {
     result_value: usize,
     result_unit: &'static str,
     result_label: String,
+    manifest_size_bytes: Option<u64>,
     status: &'static str,
     note: Option<String>,
+}
+
+struct StepOutcome {
+    result_value: usize,
+    result_unit: &'static str,
+    result_label: String,
+    manifest_size_bytes: Option<u64>,
 }
 
 struct StepDescriptor {
@@ -137,22 +148,27 @@ fn main() {
 fn emit_file_backed_open_allocations() {
     let root = unique_probe_root("file-backed-open");
     std::fs::create_dir_all(&root).expect("create file-backed open root");
+    let max_bytes = file_backed_open_max_bytes();
 
-    for (step_index, bytes) in [32 * MB, 128 * MB].into_iter().enumerate() {
+    for (step_index, bytes) in [32 * MB, 128 * MB, 512 * MB, GB, 2 * GB]
+        .into_iter()
+        .filter(|bytes| *bytes <= max_bytes)
+        .enumerate()
+    {
         let path = root.join(format!("file_open_{bytes}.txt"));
         write_plain_text_file(&path, bytes).expect("write probe file");
         emit_step(
             StepDescriptor {
-                scenario: "file_backed_open_allocation",
-                scenario_label: "File-backed open allocation",
+                scenario: "file_backed_open_first_visible_paint",
+                scenario_label: "File-backed open and first visible paint",
                 workload_family: "file-load",
-                focus: "allocation",
+                focus: "first-paint",
                 step_index,
                 workload_value: bytes,
                 workload_unit: "bytes",
                 workload_label: human_bytes(bytes),
             },
-            || run_file_backed_open_cycle(&path),
+            || run_file_backed_open_first_visible_paint_cycle(&path),
         );
     }
 
@@ -301,20 +317,38 @@ fn emit_session_persist_restore_costs() {
             },
             || run_session_restore_cycle(&store),
         );
+
+        emit_step(
+            StepDescriptor {
+                scenario: "startup_visible_restore_cost",
+                scenario_label: "Startup-visible session restore",
+                workload_family: "session-persistence",
+                focus: "startup-visible",
+                step_index,
+                workload_value: tab_count,
+                workload_unit: "tabs",
+                workload_label: format!("{tab_count} tabs"),
+            },
+            || run_startup_visible_restore_cycle(&store),
+        );
     }
 
     let _ = std::fs::remove_dir_all(root);
 }
 
-fn emit_step(step: StepDescriptor, run: impl FnOnce() -> usize) {
+fn emit_step(step: StepDescriptor, run: impl FnOnce() -> StepOutcome) {
     reset_allocation_counters();
     let start = Instant::now();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));
     let elapsed_ns = start.elapsed().as_nanos();
     let metrics = allocation_snapshot();
-    let (status, result_value, note) = match result {
-        Ok(value) => ("ok", value, None),
-        Err(payload) => ("panic", 0, Some(panic_message(payload))),
+    let (status, outcome, note) = match result {
+        Ok(outcome) => ("ok", outcome, None),
+        Err(payload) => (
+            "panic",
+            StepOutcome::items(0),
+            Some(panic_message(payload)),
+        ),
     };
 
     let event = ResourceEvent {
@@ -334,9 +368,10 @@ fn emit_step(step: StepDescriptor, run: impl FnOnce() -> usize) {
         allocation_count: metrics.allocation_count,
         deallocation_count: metrics.deallocation_count,
         reallocation_count: metrics.reallocation_count,
-        result_value,
-        result_unit: "items",
-        result_label: format!("{result_value} items"),
+        result_value: outcome.result_value,
+        result_unit: outcome.result_unit,
+        result_label: outcome.result_label,
+        manifest_size_bytes: outcome.manifest_size_bytes,
         status,
         note,
     };
@@ -348,12 +383,69 @@ fn emit_step(step: StepDescriptor, run: impl FnOnce() -> usize) {
     let _ = std::io::stdout().flush();
 }
 
-fn run_file_backed_open_cycle(path: &Path) -> usize {
-    let file = FileService::read_file(path).expect("open file through file service");
-    black_box(file.document.piece_tree().len_bytes() + file.artifact_summary.other_control_count)
+impl StepOutcome {
+    fn items(value: usize) -> Self {
+        Self {
+            result_value: value,
+            result_unit: "items",
+            result_label: format!("{value} items"),
+            manifest_size_bytes: None,
+        }
+    }
+
+    fn items_with_manifest(value: usize, manifest_size_bytes: Option<u64>) -> Self {
+        Self {
+            manifest_size_bytes,
+            ..Self::items(value)
+        }
+    }
 }
 
-fn run_paste_cycle(insert_bytes: usize) -> usize {
+fn run_file_backed_open_first_visible_paint_cycle(path: &Path) -> StepOutcome {
+    let file = FileService::read_file(path).expect("open file through file service");
+    let disk_state = FileService::read_disk_state(path).ok();
+    let buffer = FileService::build_buffer_from_file_content(path, file, disk_state);
+    let painted_rows = render_first_visible_text_paint(&buffer);
+    StepOutcome::items(black_box(
+        buffer.document().piece_tree().len_bytes() + buffer.line_count + painted_rows,
+    ))
+}
+
+fn render_first_visible_text_paint(buffer: &BufferState) -> usize {
+    let snapshot = buffer.document_snapshot();
+    let visible_text = snapshot
+        .extract_range_bounded(
+            0..snapshot.len_chars().min(FIRST_VISIBLE_PAINT_MAX_CHARS),
+            FIRST_VISIBLE_PAINT_MAX_CHARS,
+        )
+        .0;
+    let ctx = eframe::egui::Context::default();
+    let font_id = eframe::egui::FontId::monospace(15.0);
+    let highlight_style = EditorHighlightStyle::new(
+        eframe::egui::Color32::from_rgb(90, 146, 214),
+        eframe::egui::Color32::WHITE,
+    );
+    let mut rows = 0usize;
+
+    let _ = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+        eframe::egui::CentralPanel::default().show_inside(ui, |ui| {
+            let mut layouter = build_layouter(
+                font_id.clone(),
+                false,
+                eframe::egui::Color32::WHITE,
+                highlight_style,
+                SearchHighlightState::default(),
+                None,
+            );
+            let galley = layouter(ui, &visible_text, 980.0);
+            rows = galley.rows.len().max(1);
+        });
+    });
+
+    rows
+}
+
+fn run_paste_cycle(insert_bytes: usize) -> StepOutcome {
     let mut buffer = BufferState::new(
         "paste_resource.txt".to_owned(),
         plain_text_of_size(PASTE_RESOURCE_BASE_BYTES),
@@ -363,10 +455,12 @@ fn run_paste_cycle(insert_bytes: usize) -> usize {
     let midpoint = buffer.document().piece_tree().len_chars() / 2;
     buffer.document_mut().insert_direct(midpoint, &inserted);
     buffer.refresh_text_metadata();
-    black_box(buffer.line_count + buffer.document().piece_tree().len_bytes())
+    StepOutcome::items(black_box(
+        buffer.line_count + buffer.document().piece_tree().len_bytes(),
+    ))
 }
 
-fn run_many_file_count_cycle(file_count: usize) -> usize {
+fn run_many_file_count_cycle(file_count: usize) -> StepOutcome {
     let buffers = (0..file_count)
         .map(|index| {
             BufferState::new(
@@ -376,31 +470,33 @@ fn run_many_file_count_cycle(file_count: usize) -> usize {
             )
         })
         .collect::<Vec<_>>();
-    black_box(
+    StepOutcome::items(black_box(
         buffers
             .iter()
             .map(|buffer| buffer.line_count + buffer.document().piece_tree().len_bytes())
             .sum(),
-    )
+    ))
 }
 
-fn run_search_file_size_cycle(bytes: usize) -> usize {
+fn run_search_file_size_cycle(bytes: usize) -> StepOutcome {
     let text = search_text_of_size(bytes);
     let program = search_capacity_program();
-    black_box(search_program(black_box(&text), &program).matches.len())
+    StepOutcome::items(black_box(
+        search_program(black_box(&text), &program).matches.len(),
+    ))
 }
 
-fn run_search_target_count_cycle(file_count: usize) -> usize {
+fn run_search_target_count_cycle(file_count: usize) -> StepOutcome {
     let target = search_text_of_size(4 * KB);
     let program = search_capacity_program();
-    black_box(
+    StepOutcome::items(black_box(
         (0..file_count)
             .map(|_| search_program(black_box(&target), &program).matches.len())
             .sum(),
-    )
+    ))
 }
 
-fn run_tab_count_cycle(tab_count: usize) -> usize {
+fn run_tab_count_cycle(tab_count: usize) -> StepOutcome {
     let mut tabs = build_tabs(tab_count, TAB_BYTES_PER_BUFFER);
     let mut activations = 0usize;
     for (index, tab) in tabs.iter_mut().enumerate() {
@@ -415,10 +511,10 @@ fn run_tab_count_cycle(tab_count: usize) -> usize {
         combine_tabs(&mut tabs, 0, 1);
         activations += 1;
     }
-    black_box(activations + tabs.len())
+    StepOutcome::items(black_box(activations + tabs.len()))
 }
 
-fn run_view_count_cycle(view_count: usize) -> usize {
+fn run_view_count_cycle(view_count: usize) -> StepOutcome {
     let mut tab = WorkspaceTab::new(BufferState::new(
         "many_views.txt".to_owned(),
         plain_text_of_size(VIEW_COUNT_BUFFER_BYTES),
@@ -432,20 +528,45 @@ fn run_view_count_cycle(view_count: usize) -> usize {
         });
     }
     let _ = tab.rebalance_views_equally();
-    black_box(tab.views.len())
+    StepOutcome::items(black_box(tab.views.len()))
 }
 
-fn run_session_persist_cycle(store: &SessionStore, tabs: &[WorkspaceTab]) -> usize {
+fn run_session_persist_cycle(store: &SessionStore, tabs: &[WorkspaceTab]) -> StepOutcome {
     store.persist(tabs, 0, 14.0, true).expect("persist session");
-    black_box(tabs.len())
+    StepOutcome::items_with_manifest(black_box(tabs.len()), session_manifest_size(store))
 }
 
-fn run_session_restore_cycle(store: &SessionStore) -> usize {
+fn run_session_restore_cycle(store: &SessionStore) -> StepOutcome {
     let restored = store
         .load()
         .expect("load persisted session")
         .expect("restored session present");
-    black_box(restored.tabs.len())
+    StepOutcome::items_with_manifest(black_box(restored.tabs.len()), session_manifest_size(store))
+}
+
+fn run_startup_visible_restore_cycle(store: &SessionStore) -> StepOutcome {
+    let restored = store
+        .load()
+        .expect("load startup session")
+        .expect("restored startup session present");
+    let active_index = restored
+        .active_tab_index
+        .min(restored.tabs.len().saturating_sub(1));
+    let painted_rows = restored
+        .tabs
+        .get(active_index)
+        .map(|tab| render_first_visible_text_paint(&tab.buffer))
+        .unwrap_or_default();
+    StepOutcome::items_with_manifest(
+        black_box(restored.tabs.len() + painted_rows),
+        session_manifest_size(store),
+    )
+}
+
+fn session_manifest_size(store: &SessionStore) -> Option<u64> {
+    std::fs::metadata(store.root().join("session.json"))
+        .ok()
+        .map(|metadata| metadata.len())
 }
 
 fn build_tabs(tab_count: usize, bytes_per_buffer: usize) -> Vec<WorkspaceTab> {
@@ -478,12 +599,23 @@ fn combine_tabs(tabs: &mut Vec<WorkspaceTab>, source_idx: usize, target_idx: usi
 
 fn write_plain_text_file(path: &Path, target_bytes: usize) -> std::io::Result<()> {
     let line = b"The quick brown fox jumps over the lazy dog 0123456789.\n";
-    let repeats = (target_bytes / line.len()).max(1);
     let mut file = std::fs::File::create(path)?;
+    let repeats = target_bytes / line.len();
     for _ in 0..repeats {
         file.write_all(line)?;
     }
+    let remaining = target_bytes % line.len();
+    if remaining > 0 {
+        file.write_all(&line[..remaining])?;
+    }
     file.flush()
+}
+
+fn file_backed_open_max_bytes() -> usize {
+    std::env::var("SCRATCHPAD_FILE_BACKED_OPEN_MAX_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(2 * GB)
 }
 
 fn plain_text_of_size(target_bytes: usize) -> String {
@@ -531,6 +663,9 @@ fn unique_probe_root(label: &str) -> PathBuf {
 }
 
 fn human_bytes(value: usize) -> String {
+    if value >= GB {
+        return format!("{:.1} GB", value as f64 / GB as f64);
+    }
     if value >= MB {
         return format!("{:.1} MB", value as f64 / MB as f64);
     }
@@ -543,14 +678,36 @@ fn human_bytes(value: usize) -> String {
 fn record_allocation(bytes: u64) {
     ALLOCATED_BYTES.fetch_add(bytes, Ordering::Relaxed);
     ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
-    let live = LIVE_BYTES.fetch_add(bytes, Ordering::Relaxed) + bytes;
+    let live = add_live_bytes(bytes);
     update_peak_live(live);
 }
 
 fn record_deallocation(bytes: u64) {
     DEALLOCATED_BYTES.fetch_add(bytes, Ordering::Relaxed);
     DEALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
-    LIVE_BYTES.fetch_sub(bytes, Ordering::Relaxed);
+    subtract_live_bytes(bytes);
+}
+
+fn add_live_bytes(bytes: u64) -> u64 {
+    let mut current = LIVE_BYTES.load(Ordering::Relaxed);
+    loop {
+        let next = current.saturating_add(bytes);
+        match LIVE_BYTES.compare_exchange(current, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return next,
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+fn subtract_live_bytes(bytes: u64) {
+    let mut current = LIVE_BYTES.load(Ordering::Relaxed);
+    loop {
+        let next = current.saturating_sub(bytes);
+        match LIVE_BYTES.compare_exchange(current, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return,
+            Err(observed) => current = observed,
+        }
+    }
 }
 
 fn update_peak_live(candidate: u64) {

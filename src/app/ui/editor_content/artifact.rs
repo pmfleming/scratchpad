@@ -7,7 +7,7 @@ pub fn render_artifact_view(
     view: &mut EditorViewState,
     options: TextEditOptions<'_>,
 ) -> EditorWidgetOutcome {
-    let transform: fn(&str) -> String = if view.show_control_chars {
+    let transform: fn(&str) -> String = if buffer.show_control_chars {
         make_control_chars_visible
     } else {
         make_control_chars_clean
@@ -30,6 +30,7 @@ pub fn make_control_chars_visible(text: &str) -> String {
 fn push_visible_char(visible: &mut String, ch: char, next: Option<char>) {
     match visible_control_char(ch, next) {
         Some(ControlCharDisplay::Literal(replacement)) => visible.push(replacement),
+        Some(ControlCharDisplay::Label(label)) => visible.push_str(label),
         Some(ControlCharDisplay::Hex) => {
             use std::fmt::Write;
             let _ = write!(visible, "\\x{:02X}", ch as u32);
@@ -40,6 +41,7 @@ fn push_visible_char(visible: &mut String, ch: char, next: Option<char>) {
 
 enum ControlCharDisplay {
     Literal(char),
+    Label(&'static str),
     Hex,
 }
 
@@ -48,9 +50,26 @@ fn visible_control_char(ch: char, next: Option<char>) -> Option<ControlCharDispl
         '\u{1B}' => Some(ControlCharDisplay::Literal('␛')),
         '\u{0008}' => Some(ControlCharDisplay::Literal('␈')),
         '\t' => Some(ControlCharDisplay::Literal('→')),
+        '\u{001E}' => Some(ControlCharDisplay::Label("<RS>")),
+        '\u{001F}' => Some(ControlCharDisplay::Label("<US>")),
         '\r' if next == Some('\n') => Some(ControlCharDisplay::Literal('␍')),
         '\r' => Some(ControlCharDisplay::Literal('␍')),
         '\n' => None,
+        '\u{200E}' => Some(ControlCharDisplay::Label("<LRM>")),
+        '\u{200F}' => Some(ControlCharDisplay::Label("<RLM>")),
+        '\u{200D}' => Some(ControlCharDisplay::Label("<ZWJ>")),
+        '\u{200C}' => Some(ControlCharDisplay::Label("<ZWNJ>")),
+        '\u{202A}' => Some(ControlCharDisplay::Label("<LRE>")),
+        '\u{202B}' => Some(ControlCharDisplay::Label("<RLE>")),
+        '\u{202D}' => Some(ControlCharDisplay::Label("<LRO>")),
+        '\u{202E}' => Some(ControlCharDisplay::Label("<RLO>")),
+        '\u{202C}' => Some(ControlCharDisplay::Label("<PDF>")),
+        '\u{206E}' => Some(ControlCharDisplay::Label("<NADS>")),
+        '\u{206F}' => Some(ControlCharDisplay::Label("<NODS>")),
+        '\u{206B}' => Some(ControlCharDisplay::Label("<ASS>")),
+        '\u{206A}' => Some(ControlCharDisplay::Label("<ISS>")),
+        '\u{206D}' => Some(ControlCharDisplay::Label("<AAFS>")),
+        '\u{206C}' => Some(ControlCharDisplay::Label("<IAFS>")),
         _ if ch.is_control() => Some(ControlCharDisplay::Hex),
         _ => None,
     }

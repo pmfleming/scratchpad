@@ -73,7 +73,7 @@ fn render_editor_body(
     view: &mut EditorViewState,
     style: &EditorContentStyle<'_>,
 ) -> native_editor::EditorWidgetOutcome {
-    if buffer.artifact_summary.has_control_chars() && view.show_control_chars {
+    if buffer.artifact_summary.has_control_chars() && buffer.show_control_chars {
         return render_artifact_view(ui, buffer, view, style.text_edit);
     }
 

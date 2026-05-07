@@ -7,17 +7,19 @@ use crate::app::services::settings_store::{
     DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR, DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR,
     DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, FileOpenDisposition,
     LEGACY_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR,
-    LIGHT_EDITOR_TEXT_COLOR, MIN_WINDOW_INNER_SIZE, NewTabPlacement, StartupSessionBehavior,
-    TabListPosition, TabOrderMode, WindowState, color_from_hex, color_to_hex,
+    LIGHT_EDITOR_TEXT_COLOR, NewTabPlacement, StartupSessionBehavior, TabListPosition,
+    TabOrderMode, WindowState, color_from_hex, color_to_hex,
 };
 use eframe::egui;
 use std::path::Path;
 use std::time::Duration;
 
 mod display_tabs;
+mod history_budget;
 mod mutators;
 mod tab_order;
 mod toml_refresh;
+mod window;
 
 impl ScratchpadApp {
     pub(crate) const VERTICAL_TAB_LIST_MIN_WIDTH: f32 = 96.0;
@@ -222,176 +224,10 @@ impl ScratchpadApp {
         self.settings_store.save(&self.app_settings)
     }
 
-    pub(crate) fn record_window_state(&mut self, ctx: &egui::Context) {
-        let previous = self.app_settings.window_state.clone();
-        let next = ctx.input(|input| window_state_from_viewport(input.viewport(), previous));
-        self.app_settings.window_state = next;
-    }
-
     pub fn apply_theme_to_context(&self, ctx: &egui::Context) {
         ctx.set_theme(self.app_settings.theme_mode.theme_preference());
         ctx.set_visuals_of(egui::Theme::Dark, egui::Visuals::dark());
         ctx.set_visuals_of(egui::Theme::Light, egui::Visuals::light());
-    }
-}
-
-fn window_state_from_viewport(viewport: &egui::ViewportInfo, previous: WindowState) -> WindowState {
-    let maximized = viewport.maximized.unwrap_or(previous.maximized);
-    let minimized = viewport.minimized.unwrap_or(false);
-    let fullscreen = viewport.fullscreen.unwrap_or(false);
-    let mut next = WindowState {
-        maximized,
-        ..previous
-    };
-
-    if maximized || minimized || fullscreen {
-        return next;
-    }
-
-    if let Some(inner_rect) = viewport.inner_rect {
-        let size = inner_rect.size();
-        if valid_window_size(size) {
-            next.inner_size = Some([size.x, size.y]);
-        }
-    }
-
-    if let Some(outer_rect) = viewport.outer_rect {
-        let pos = outer_rect.min;
-        if pos.x.is_finite() && pos.y.is_finite() {
-            next.position = Some([pos.x, pos.y]);
-        }
-    }
-
-    next
-}
-
-fn valid_window_size(size: egui::Vec2) -> bool {
-    size.x.is_finite()
-        && size.y.is_finite()
-        && size.x >= MIN_WINDOW_INNER_SIZE[0]
-        && size.y >= MIN_WINDOW_INNER_SIZE[1]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn window_state_capture_keeps_normal_geometry_while_maximized() {
-        let previous = WindowState {
-            position: Some([32.0, 48.0]),
-            inner_size: Some([900.0, 700.0]),
-            maximized: false,
-        };
-        let viewport = egui::ViewportInfo {
-            inner_rect: Some(egui::Rect::from_min_size(
-                egui::pos2(0.0, 0.0),
-                egui::vec2(1920.0, 1080.0),
-            )),
-            outer_rect: Some(egui::Rect::from_min_size(
-                egui::pos2(0.0, 0.0),
-                egui::vec2(1920.0, 1080.0),
-            )),
-            maximized: Some(true),
-            ..Default::default()
-        };
-
-        let next = window_state_from_viewport(&viewport, previous);
-
-        assert!(next.maximized);
-        assert_eq!(next.position, Some([32.0, 48.0]));
-        assert_eq!(next.inner_size, Some([900.0, 700.0]));
-    }
-
-    #[test]
-    fn window_state_capture_records_normal_geometry() {
-        let viewport = egui::ViewportInfo {
-            inner_rect: Some(egui::Rect::from_min_size(
-                egui::pos2(108.0, 124.0),
-                egui::vec2(980.0, 720.0),
-            )),
-            outer_rect: Some(egui::Rect::from_min_size(
-                egui::pos2(100.0, 100.0),
-                egui::vec2(996.0, 760.0),
-            )),
-            maximized: Some(false),
-            ..Default::default()
-        };
-
-        let next = window_state_from_viewport(&viewport, WindowState::default());
-
-        assert!(!next.maximized);
-        assert_eq!(next.position, Some([100.0, 100.0]));
-        assert_eq!(next.inner_size, Some([980.0, 720.0]));
-    }
-
-    #[test]
-    fn generated_highlight_text_detection_accepts_stock_and_legacy_defaults() {
-        assert!(uses_generated_highlight_text_color(
-            DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR
-        ));
-        assert!(uses_generated_highlight_text_color("000000"));
-        assert!(!uses_generated_highlight_text_color("#123456"));
-    }
-}
-
-impl ScratchpadApp {
-    pub(crate) fn apply_history_budget_to_open_buffers(&mut self) {
-        let budget = self.app_settings.history_budget;
-        for tab in self.tabs_mut() {
-            for buffer in tab.buffers_mut() {
-                buffer.document_mut().set_history_budget(budget);
-            }
-        }
-        self.enforce_aggregate_text_history_budget();
-    }
-
-    pub(crate) fn enforce_aggregate_text_history_budget(&mut self) {
-        let aggregate_budget = self.app_settings.history_budget.aggregate_byte_budget;
-        while self.aggregate_text_history_usage() > aggregate_budget {
-            let Some((tab_index, buffer_id)) = self.oldest_history_buffer() else {
-                break;
-            };
-            if let Some(buffer) = self
-                .tabs_mut()
-                .get_mut(tab_index)
-                .and_then(|tab| tab.buffer_by_id_mut(buffer_id))
-            {
-                if let Some(removed) = buffer.document_mut().drop_oldest_history_entry() {
-                    crate::app::capacity_metrics::record_history_eviction_aggregate(
-                        removed.byte_cost(),
-                    );
-                } else {
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-    }
-
-    fn aggregate_text_history_usage(&self) -> u64 {
-        self.tabs()
-            .iter()
-            .flat_map(|tab| tab.buffers())
-            .map(|buffer| buffer.document().history_byte_usage() as u64)
-            .sum()
-    }
-
-    fn oldest_history_buffer(&self) -> Option<(usize, crate::app::domain::BufferId)> {
-        self.tabs()
-            .iter()
-            .enumerate()
-            .flat_map(|(tab_index, tab)| {
-                tab.buffers().filter_map(move |buffer| {
-                    buffer
-                        .document()
-                        .oldest_history_global_seq()
-                        .map(|global_seq| (global_seq, tab_index, buffer.id))
-                })
-            })
-            .min_by_key(|(global_seq, _, buffer_id)| (*global_seq, *buffer_id))
-            .map(|(_, tab_index, buffer_id)| (tab_index, buffer_id))
     }
 }
 

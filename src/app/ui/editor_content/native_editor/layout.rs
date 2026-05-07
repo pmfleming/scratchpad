@@ -31,17 +31,16 @@ pub(super) fn build_editor_galley(
         buffer,
         effective_viewport,
         editor_row_height(ui, options.editor_font_id),
-        cursor_line_index(buffer, view),
+        cursor_line_for_viewport_slice(buffer, view),
     );
     let search_highlights = local_search_highlights(
         &view.search_highlights,
         slice.char_range.start,
         slice.char_range.end,
     );
-    let selection_highlight = view
-        .cursor_range
-        .as_ref()
-        .and_then(super::types::selection_char_range)
+    let selection_highlight = buffer
+        .active_selection
+        .clone()
         .and_then(|range| local_range(Some(range), slice.char_range.start, slice.char_range.end));
     let wrap_width = editor_wrap_width(ui, options.word_wrap, Some(effective_viewport));
     let cache_key = layout_cache_key(
@@ -106,6 +105,7 @@ fn layout_cache_key(
         font_size_bits: options.editor_font_id.size.to_bits(),
         wrap_width_bits: wrap_width.to_bits(),
         word_wrap: options.word_wrap,
+        right_to_left_reading_order: options.right_to_left_reading_order,
         text_color: options.text_color,
         dark_mode,
         selection_highlight,
@@ -160,6 +160,11 @@ fn cursor_line_index(buffer: &BufferState, view: &EditorViewState) -> Option<usi
             .piece_tree()
             .line_index_at_offset(cursor.primary.index)
     })
+}
+
+fn cursor_line_for_viewport_slice(buffer: &BufferState, view: &EditorViewState) -> Option<usize> {
+    view.cursor_reveal_mode()
+        .and_then(|_| cursor_line_index(buffer, view))
 }
 
 fn warm_nearby_layout_slices(
@@ -362,7 +367,9 @@ pub(super) fn editor_row_height(ui: &egui::Ui, font_id: &egui::FontId) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{editor_eof_tail_height, editor_interaction_id};
+    use super::{cursor_line_for_viewport_slice, editor_eof_tail_height, editor_interaction_id};
+    use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
+    use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
 
     #[test]
     fn editor_interaction_id_is_stable_per_view() {
@@ -373,5 +380,35 @@ mod tests {
     #[test]
     fn eof_tail_does_not_create_blank_scroll_page() {
         assert_eq!(editor_eof_tail_height(600.0, 20.0), 0.0);
+    }
+
+    #[test]
+    fn viewport_slice_ignores_offscreen_cursor_without_pending_reveal() {
+        let buffer = BufferState::new("sample.txt".to_owned(), numbered_lines(200), None);
+        let mut view = EditorViewState::new(buffer.id, false);
+        view.cursor_range = Some(CursorRange::one(CharCursor::new(
+            buffer.document().piece_tree().line_info(120).start_char,
+        )));
+
+        assert_eq!(cursor_line_for_viewport_slice(&buffer, &view), None);
+    }
+
+    #[test]
+    fn viewport_slice_can_follow_cursor_for_pending_reveal() {
+        let buffer = BufferState::new("sample.txt".to_owned(), numbered_lines(200), None);
+        let mut view = EditorViewState::new(buffer.id, false);
+        view.cursor_range = Some(CursorRange::one(CharCursor::new(
+            buffer.document().piece_tree().line_info(120).start_char,
+        )));
+        view.request_cursor_reveal(CursorRevealMode::KeepVisible);
+
+        assert_eq!(cursor_line_for_viewport_slice(&buffer, &view), Some(120));
+    }
+
+    fn numbered_lines(count: usize) -> String {
+        (0..count)
+            .map(|index| format!("line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }

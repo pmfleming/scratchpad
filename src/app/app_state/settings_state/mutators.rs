@@ -267,6 +267,14 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn open_settings(&mut self) {
+        self.open_settings_with_tab_selection(false);
+    }
+
+    pub(crate) fn open_settings_preserving_tab_selection(&mut self) {
+        self.open_settings_with_tab_selection(true);
+    }
+
+    fn open_settings_with_tab_selection(&mut self, preserve_tab_selection: bool) {
         self.reload_settings_before_workspace_change();
         self.begin_layout_transition();
         if !self.settings_tab_open() {
@@ -275,6 +283,9 @@ impl ScratchpadApp {
         }
         if self.set_settings_surface(AppSurface::Settings, true) {
             self.persist_settings_or_error();
+        }
+        if !preserve_tab_selection {
+            self.select_only_tab_slot(self.active_tab_slot_index());
         }
     }
 
@@ -289,6 +300,7 @@ impl ScratchpadApp {
         if self.set_settings_surface(AppSurface::Workspace, false) {
             self.persist_settings_or_error();
         }
+        self.select_only_tab_slot(self.active_tab_slot_index());
         self.request_focus_for_active_view();
     }
 
@@ -321,5 +333,83 @@ impl ScratchpadApp {
 
     pub(crate) fn close_tab_list(&mut self) {
         self.reset_tab_list_visibility_state(false);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::domain::{BufferState, TabManager, WorkspaceTab};
+    use crate::app::services::session_store::SessionStore;
+    use crate::app::services::settings_store::SettingsStore;
+    use crate::app::startup::StartupOptions;
+
+    #[test]
+    fn command_open_settings_selects_only_settings_slot() {
+        let mut app = test_app(["one.txt", "two.txt"]);
+        app.select_only_tab_slot(0);
+        app.toggle_tab_slot_selection(1);
+
+        app.open_settings();
+
+        assert!(app.showing_settings());
+        assert_eq!(selected_slots(&app), vec![app.active_tab_slot_index()]);
+        assert!(app.tab_slot_is_settings(app.active_tab_slot_index()));
+    }
+
+    #[test]
+    fn tab_strip_open_settings_can_preserve_existing_selection() {
+        let mut app = test_app(["one.txt", "two.txt"]);
+        app.select_only_tab_slot(0);
+        app.toggle_tab_slot_selection(1);
+
+        app.open_settings_preserving_tab_selection();
+
+        assert!(app.showing_settings());
+        assert_eq!(
+            selected_slots(&app),
+            vec![0, 1, app.active_tab_slot_index()]
+        );
+    }
+
+    #[test]
+    fn close_settings_selects_only_active_workspace_slot() {
+        let mut app = test_app(["one.txt", "two.txt"]);
+        app.open_settings_preserving_tab_selection();
+        app.toggle_tab_slot_selection(0);
+
+        app.close_settings();
+
+        assert!(!app.showing_settings());
+        assert_eq!(selected_slots(&app), vec![app.active_tab_slot_index()]);
+        assert!(!app.tab_slot_is_settings(app.active_tab_slot_index()));
+    }
+
+    fn test_app<const N: usize>(names: [&str; N]) -> ScratchpadApp {
+        let temp_dir = tempfile::tempdir().expect("create temp app root");
+        let root = temp_dir.keep();
+        let mut app = ScratchpadApp::with_stores_and_startup(
+            SessionStore::new(root.clone()),
+            SettingsStore::new(root),
+            StartupOptions::default(),
+        );
+        app.set_session_persist_on_drop(false);
+        app.tab_manager = TabManager {
+            tabs: names.into_iter().map(test_tab).collect(),
+            active_tab_index: 0,
+            pending_action: None,
+            session_dirty: false,
+            pending_scroll_to_active: false,
+        };
+        app.clear_tab_selection();
+        app
+    }
+
+    fn test_tab(name: &str) -> WorkspaceTab {
+        WorkspaceTab::new(BufferState::new(name.to_owned(), String::new(), None))
+    }
+
+    fn selected_slots(app: &ScratchpadApp) -> Vec<usize> {
+        app.selected_tab_slots.iter().copied().collect()
     }
 }

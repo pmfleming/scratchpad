@@ -9,7 +9,14 @@ use std::thread;
 pub(super) const SEARCH_FRAGMENT_CHUNK_CHARS: usize = 64 * 1024;
 const INTRA_BUFFER_PARALLELISM_MIN_CHUNKS: usize = 4;
 
-#[allow(clippy::too_many_arguments)]
+struct FragmentSearchContext<'a> {
+    snapshot: &'a DocumentSnapshot,
+    program: &'a SearchProgram,
+    generation: u64,
+    latest_generation: &'a AtomicU64,
+    intra_parallelism: usize,
+}
+
 pub(super) fn search_target_ranges(
     snapshot: &DocumentSnapshot,
     search_range: Option<Range<usize>>,
@@ -36,38 +43,26 @@ pub(super) fn search_target_ranges(
         );
     }
 
-    if program.options().mode == SearchMode::PlainText {
-        return search_fragmented_plain_text(
-            snapshot,
-            normalized,
-            program,
-            generation,
-            latest_generation,
-            intra_parallelism,
-        );
-    }
-
-    search_fragmented_bounded_regex(
+    let context = FragmentSearchContext {
         snapshot,
-        normalized,
         program,
         generation,
         latest_generation,
         intra_parallelism,
-    )
+    };
+    if program.options().mode == SearchMode::PlainText {
+        return search_fragmented_plain_text(context, normalized);
+    }
+
+    search_fragmented_bounded_regex(context, normalized)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn search_fragmented_plain_text(
-    snapshot: &DocumentSnapshot,
+    context: FragmentSearchContext<'_>,
     range: Range<usize>,
-    program: &SearchProgram,
-    generation: u64,
-    latest_generation: &AtomicU64,
-    intra_parallelism: usize,
 ) -> Option<Vec<Range<usize>>> {
-    let query = program.query();
-    let options = program.options();
+    let query = context.program.query();
+    let options = context.program.options();
     if range.is_empty() || query.is_empty() {
         return Some(Vec::new());
     }
@@ -75,21 +70,26 @@ fn search_fragmented_plain_text(
     let query_chars = query.chars().count().max(1);
     let overlap_chars = query_chars + usize::from(options.whole_word);
     let chunk_chars = SEARCH_FRAGMENT_CHUNK_CHARS.max(query_chars.saturating_mul(4));
-    let chunks = snapshot.chunks_for_range(range, chunk_chars, overlap_chars, overlap_chars);
+    let chunks =
+        context
+            .snapshot
+            .chunks_for_range(range, chunk_chars, overlap_chars, overlap_chars);
     capacity_metrics::record_search_chunks(chunks.len());
 
     process_chunks_concurrent(
         chunks,
-        intra_parallelism,
-        generation,
-        latest_generation,
+        context.intra_parallelism,
+        context.generation,
+        context.latest_generation,
         |chunk| {
-            let (window_text, window_offset) =
-                snapshot.search_text_cow(Some(chunk.window_range.clone()));
-            let outcome =
-                search::search_program_interruptible(window_text.as_ref(), program, || {
-                    latest_generation.load(Ordering::Relaxed) == generation
-                })?;
+            let (window_text, window_offset) = context
+                .snapshot
+                .search_text_cow(Some(chunk.window_range.clone()));
+            let outcome = search::search_program_interruptible(
+                window_text.as_ref(),
+                context.program,
+                || context.latest_generation.load(Ordering::Relaxed) == context.generation,
+            )?;
             debug_assert!(outcome.error.is_none());
             Some(
                 outcome
@@ -108,40 +108,43 @@ fn search_fragmented_plain_text(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn search_fragmented_bounded_regex(
-    snapshot: &DocumentSnapshot,
+    context: FragmentSearchContext<'_>,
     range: Range<usize>,
-    program: &SearchProgram,
-    generation: u64,
-    latest_generation: &AtomicU64,
-    intra_parallelism: usize,
 ) -> Option<Vec<Range<usize>>> {
-    let query = program.query();
-    let options = program.options();
+    let query = context.program.query();
+    let options = context.program.options();
     if range.is_empty() || query.is_empty() {
         return Some(Vec::new());
     }
 
     let context_chars = 1 + usize::from(options.whole_word);
-    let overlap_chars = program.max_match_chars().saturating_add(context_chars);
+    let overlap_chars = context
+        .program
+        .max_match_chars()
+        .saturating_add(context_chars);
     let chunk_chars = SEARCH_FRAGMENT_CHUNK_CHARS.max(overlap_chars.max(1));
     let range_end = range.end;
-    let chunks = snapshot.chunks_for_range(range, chunk_chars, context_chars, overlap_chars);
+    let chunks =
+        context
+            .snapshot
+            .chunks_for_range(range, chunk_chars, context_chars, overlap_chars);
     capacity_metrics::record_search_chunks(chunks.len());
 
     process_chunks_concurrent(
         chunks,
-        intra_parallelism,
-        generation,
-        latest_generation,
+        context.intra_parallelism,
+        context.generation,
+        context.latest_generation,
         |chunk| {
-            let (window_text, window_offset) =
-                snapshot.search_text_cow(Some(chunk.window_range.clone()));
-            let outcome =
-                search::search_program_interruptible(window_text.as_ref(), program, || {
-                    latest_generation.load(Ordering::Relaxed) == generation
-                })?;
+            let (window_text, window_offset) = context
+                .snapshot
+                .search_text_cow(Some(chunk.window_range.clone()));
+            let outcome = search::search_program_interruptible(
+                window_text.as_ref(),
+                context.program,
+                || context.latest_generation.load(Ordering::Relaxed) == context.generation,
+            )?;
             debug_assert!(outcome.error.is_none());
             Some(
                 outcome

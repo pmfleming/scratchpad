@@ -55,6 +55,7 @@ impl EditorHighlightStyle {
 pub struct TextEditOptions<'a> {
     pub request_focus: bool,
     pub word_wrap: bool,
+    pub right_to_left_reading_order: bool,
     pub editor_font_id: &'a egui::FontId,
     pub text_color: egui::Color32,
     pub highlight_style: EditorHighlightStyle,
@@ -72,6 +73,7 @@ impl<'a> TextEditOptions<'a> {
         Self {
             request_focus,
             word_wrap,
+            right_to_left_reading_order: false,
             editor_font_id,
             text_color,
             highlight_style,

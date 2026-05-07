@@ -3,7 +3,6 @@ use crate::app::text_history::TextHistoryEntryView;
 use egui_phosphor::regular::{
     ARROWS_LEFT_RIGHT, BACKSPACE, CLIPBOARD, MAGNIFYING_GLASS, PENCIL_SIMPLE, SCISSORS, STACK,
 };
-use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
 pub(super) struct TextHistoryRow {
@@ -41,6 +40,14 @@ pub(super) fn row_from_entry(entry: &TextHistoryEntryView) -> TextHistoryRow {
     }
 }
 
+pub(super) fn timeline_rows_from_entries<'a>(
+    entries: impl Iterator<Item = &'a TextHistoryEntryView>,
+) -> Vec<TextHistoryRow> {
+    let mut rows = entries.map(row_from_entry).collect::<Vec<_>>();
+    sort_now_line_rows(&mut rows);
+    rows
+}
+
 pub(super) fn file_groups_from_entries<'a>(
     entries: impl Iterator<Item = &'a TextHistoryEntryView>,
 ) -> Vec<TextHistoryFileGroup> {
@@ -61,7 +68,7 @@ pub(super) fn file_groups_from_entries<'a>(
         }
     }
     for group in &mut groups {
-        group.rows.reverse();
+        sort_now_line_rows(&mut group.rows);
     }
     groups.sort_by(|left, right| {
         let left_seq = left
@@ -82,6 +89,17 @@ pub(super) fn file_groups_from_entries<'a>(
     groups
 }
 
+fn sort_now_line_rows(rows: &mut [TextHistoryRow]) {
+    rows.sort_by(|left, right| {
+        right
+            .undone
+            .cmp(&left.undone)
+            .then_with(|| right.global_seq.cmp(&left.global_seq))
+            .then_with(|| left.buffer_id.cmp(&right.buffer_id))
+            .then_with(|| left.entry_id.cmp(&right.entry_id))
+    });
+}
+
 fn entry_icon(entry: &TextHistoryEntryView) -> &'static str {
     match entry.source {
         PieceSource::SearchReplace => MAGNIFYING_GLASS,
@@ -99,31 +117,19 @@ fn entry_icon(entry: &TextHistoryEntryView) -> &'static str {
     }
 }
 
-/// Each buffer with a mixed applied/undone state contributes one Now-line in
-/// the global Timeline, anchored to its newest applied entry. Rows are already
-/// newest-first, so the Now-line appears just above that row, separating the
-/// buffer's redo targets (newer, above) from its applied entries (older, below).
-pub(super) fn timeline_now_line_anchors(rows: &[TextHistoryRow]) -> HashSet<(BufferId, u64)> {
-    let mut newest_applied: HashMap<BufferId, u64> = HashMap::new();
-    let mut has_undone: HashSet<BufferId> = HashSet::new();
-    for row in rows {
-        if row.undone {
-            has_undone.insert(row.buffer_id);
-        } else {
-            newest_applied.entry(row.buffer_id).or_insert(row.entry_id);
-        }
-    }
-    newest_applied
-        .into_iter()
-        .filter(|(buffer_id, _)| has_undone.contains(buffer_id))
-        .collect()
-}
-
 pub(super) fn newest_applied_index(rows: &[TextHistoryRow]) -> Option<usize> {
     rows.iter().position(|row| !row.undone)
 }
 
+pub(super) fn timeline_now_line_insert_index(rows: &[TextHistoryRow]) -> Option<usize> {
+    now_line_insert_index(rows)
+}
+
 pub(super) fn per_file_now_line_insert_index(rows: &[TextHistoryRow]) -> Option<usize> {
+    now_line_insert_index(rows)
+}
+
+fn now_line_insert_index(rows: &[TextHistoryRow]) -> Option<usize> {
     let insert_index = newest_applied_index(rows)?;
     (insert_index > 0).then_some(insert_index)
 }

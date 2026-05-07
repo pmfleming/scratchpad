@@ -331,10 +331,8 @@ impl ScratchpadApp {
             .unwrap_or(false);
         if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
             buffer.is_dirty = true;
-        }
-        for view in &mut tab.views {
-            if view.buffer_id == buffer_id && !has_control_chars {
-                view.show_control_chars = false;
+            if !has_control_chars {
+                buffer.show_control_chars = false;
             }
         }
         let _ = tab;

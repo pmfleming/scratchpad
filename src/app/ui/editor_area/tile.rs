@@ -3,6 +3,7 @@ mod chrome;
 mod context_menu;
 mod scroll_frame;
 mod scroll_input;
+mod style;
 
 use self::autoscroll::apply_selection_edge_autoscroll_intent;
 use self::chrome::{apply_tile_body_focus, handle_tile_click, paint_tile_frame};
@@ -14,12 +15,10 @@ use self::scroll_frame::{
 use self::scroll_input::{
     local_scroll_source, resolve_editor_scroll_offset_override, scrollbar_policy_from_egui,
 };
+use self::style::{editor_content_style, editor_font_id};
 use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::{EditorViewState, SplitPath, ViewId, WorkspaceTab};
-use crate::app::fonts::EDITOR_FONT_FAMILY;
-use crate::app::ui::editor_content::{
-    self, EditorContentOutcome, EditorContentStyle, EditorHighlightStyle, TextEditOptions,
-};
+use crate::app::ui::editor_content::{self, EditorContentOutcome, EditorContentStyle};
 use crate::app::ui::scrolling;
 use crate::app::ui::scrolling::DisplaySnapshot;
 use crate::app::ui::tab_drag;
@@ -162,8 +161,13 @@ fn render_tile_body_contents(
 ) -> TileBodyOutcome {
     let request_focus = app.should_focus_view(request.view_id);
     let editor_font_id = editor_font_id(app.font_size());
-    let content_style =
+    let mut content_style =
         editor_content_style(app, request.is_active, request_focus, &editor_font_id);
+    content_style.text_edit.right_to_left_reading_order = app
+        .tabs()
+        .get(request.tab_index)
+        .and_then(|tab| tab.buffer_for_view(request.view_id))
+        .is_some_and(|buffer| buffer.right_to_left_reading_order);
     let tab = &mut app.tabs_mut()[request.tab_index];
     let Some(_buffer) = tab.buffer_for_view(request.view_id) else {
         return TileBodyOutcome {
@@ -199,35 +203,6 @@ fn render_tile_body_contents(
         changed: outcome.changed,
         focused: outcome.focused,
         interaction_response: outcome.interaction_response,
-    }
-}
-
-fn editor_font_id(font_size: f32) -> egui::FontId {
-    egui::FontId::new(font_size, egui::FontFamily::Name(EDITOR_FONT_FAMILY.into()))
-}
-
-fn editor_content_style<'a>(
-    app: &ScratchpadApp,
-    is_active: bool,
-    request_focus: bool,
-    editor_font_id: &'a egui::FontId,
-) -> EditorContentStyle<'a> {
-    EditorContentStyle {
-        editor_gutter: app.editor_gutter(),
-        viewport: None,
-        previous_snapshot: None,
-        text_edit: TextEditOptions::new(
-            request_focus,
-            app.word_wrap(),
-            editor_font_id,
-            app.editor_text_color(),
-            EditorHighlightStyle::new(
-                app.editor_text_highlight_color(),
-                app.editor_text_highlight_text_color(),
-            ),
-        )
-        .with_layout_cache_warming(is_active || request_focus),
-        background_color: app.editor_background_color(),
     }
 }
 

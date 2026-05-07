@@ -52,6 +52,7 @@ pub struct EditorViewState {
     pub buffer_id: BufferId,
     pub show_line_numbers: bool,
     pub show_control_chars: bool,
+    pub right_to_left_reading_order: bool,
     pub editor_has_focus: bool,
     /// Wrap-aware display-row snapshot derived from the most recently painted
     /// galley. Single source of truth for wrap-aware row data on the view.
@@ -93,6 +94,7 @@ impl EditorViewState {
             buffer_id,
             show_line_numbers: false,
             show_control_chars,
+            right_to_left_reading_order: false,
             editor_has_focus: false,
             latest_display_snapshot: None,
             latest_display_snapshot_revision: None,
@@ -125,6 +127,7 @@ impl EditorViewState {
             buffer_id,
             show_line_numbers,
             show_control_chars,
+            right_to_left_reading_order: false,
             editor_has_focus: false,
             latest_display_snapshot: None,
             latest_display_snapshot_revision: None,

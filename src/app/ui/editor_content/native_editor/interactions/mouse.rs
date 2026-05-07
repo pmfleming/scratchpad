@@ -1,4 +1,5 @@
 use super::super::{CharCursor, CursorRange, word_boundary};
+use super::MouseInteractionRequest;
 use crate::app::domain::EditorViewState;
 use eframe::egui;
 
@@ -37,24 +38,18 @@ struct PointerSelection {
     click_count: u32,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_mouse_interaction(
     ui: &mut egui::Ui,
-    response: &egui::Response,
-    galley: &egui::Galley,
-    rect: egui::Rect,
-    galley_pos: egui::Pos2,
     view: &mut EditorViewState,
-    piece_tree: &crate::app::domain::buffer::PieceTreeLite,
-    char_offset_base: usize,
+    request: MouseInteractionRequest<'_>,
 ) {
     let context = MouseInteractionContext {
-        response,
-        galley,
-        rect,
-        galley_pos,
-        piece_tree,
-        char_offset_base,
+        response: request.response,
+        galley: request.galley,
+        rect: request.rect,
+        galley_pos: request.galley_pos,
+        piece_tree: request.piece_tree,
+        char_offset_base: request.char_offset_base,
     };
     update_hover_cursor(ui, context.rect);
 
@@ -95,12 +90,14 @@ pub(super) fn handle_mouse_interaction(
     handle_primary_pointer(
         ui,
         view,
-        context.response,
-        selection_context,
+        PrimaryPointerContext {
+            response: context.response,
+            selection_context,
+            pointer_pos,
+            primary_pointer_down,
+        },
         selection,
-        pointer_pos,
         &mut click_state,
-        primary_pointer_down,
     );
 
     click_state.was_primary_pointer_down = primary_pointer_down;
@@ -254,22 +251,25 @@ fn char_cursor_with_offset(cursor: egui::text::CCursor, char_offset_base: usize)
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+struct PrimaryPointerContext<'a> {
+    response: &'a egui::Response,
+    selection_context: ClickSelectionContext<'a>,
+    pointer_pos: egui::Pos2,
+    primary_pointer_down: bool,
+}
+
 fn handle_primary_pointer(
     ui: &egui::Ui,
     view: &mut EditorViewState,
-    response: &egui::Response,
-    selection_context: ClickSelectionContext<'_>,
+    context: PrimaryPointerContext<'_>,
     mut selection: PointerSelection,
-    pointer_pos: egui::Pos2,
     click_state: &mut ClickState,
-    primary_pointer_down: bool,
 ) {
-    if !primary_pointer_down {
+    if !context.primary_pointer_down {
         return;
     }
 
-    if response.dragged() {
+    if context.response.dragged() {
         extend_selection_to_cursor(view, selection.char_cursor);
         return;
     }
@@ -278,9 +278,9 @@ fn handle_primary_pointer(
         return;
     }
 
-    update_click_count(ui, pointer_pos, click_state);
+    update_click_count(ui, context.pointer_pos, click_state);
     selection.click_count = click_state.click_count;
-    apply_click_selection(ui, view, selection_context, selection);
+    apply_click_selection(ui, view, context.selection_context, selection);
 }
 
 fn update_hover_cursor(ui: &mut egui::Ui, rect: egui::Rect) {

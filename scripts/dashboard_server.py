@@ -140,6 +140,39 @@ def progress_detail(line: str, limit: int = 160) -> str:
     return detail[: limit - 3] + "..."
 
 
+def append_output(
+    item: str,
+    stdout_chunks: List[str],
+    on_output: Callable[[str], None] | None,
+) -> None:
+    stdout_chunks.append(item)
+    if on_output is not None:
+        on_output(item)
+
+
+def drain_output_queue(
+    output_queue: Queue[str | None],
+    stdout_chunks: List[str],
+    on_output: Callable[[str], None] | None,
+    *,
+    timeout: float | None = None,
+    process: subprocess.Popen[str] | None = None,
+) -> bool:
+    reader_finished = False
+    while True:
+        try:
+            item = (
+                output_queue.get(timeout=timeout)
+                if timeout is not None
+                else output_queue.get_nowait()
+            )
+        except Empty:
+            return reader_finished or (process is not None and process.poll() is not None)
+        if item is None:
+            return True
+        append_output(item, stdout_chunks, on_output)
+
+
 def run_command(
     command: List[str],
     *,
@@ -189,20 +222,9 @@ def run_command(
                 if process.poll() is not None:
                     break
                 continue
-            stdout_chunks.append(item)
-            if on_output is not None:
-                on_output(item)
+            append_output(item, stdout_chunks, on_output)
 
-        while True:
-            try:
-                item = output_queue.get_nowait()
-            except Empty:
-                break
-            if item is None:
-                break
-            stdout_chunks.append(item)
-            if on_output is not None:
-                on_output(item)
+        drain_output_queue(output_queue, stdout_chunks, on_output)
 
         reader.join(timeout=1)
         return subprocess.CompletedProcess(
@@ -217,18 +239,13 @@ def run_command(
             process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             pass
-        while True:
-            try:
-                item = output_queue.get(timeout=0.2)
-            except Empty:
-                if process.poll() is not None:
-                    break
-                continue
-            if item is None:
-                break
-            stdout_chunks.append(item)
-            if on_output is not None:
-                on_output(item)
+        drain_output_queue(
+            output_queue,
+            stdout_chunks,
+            on_output,
+            timeout=0.2,
+            process=process,
+        )
         reader.join(timeout=1)
         stderr = (
             f"\nCommand timed out after {COMMAND_TIMEOUT_SECONDS} seconds and was stopped.\n"
@@ -440,113 +457,140 @@ def run_task_batch(run_id: str, selector: str, tasks: List[Dict[str, Any]]) -> N
         STORE.update(run_id, **changes)
 
 
+def load_analysis_artifact(name: str) -> Any:
+    path = Path("target/analysis") / name
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def collect_hotspot_metrics(metrics: Dict[str, Any], hotspots: Any) -> None:
+    if not isinstance(hotspots, list) or not hotspots:
+        return
+    scores = [item.get("quality_score") or item.get("score") or 0 for item in hotspots]
+    metrics["quality_risk_count"] = sum(1 for score in scores if score >= 300)
+    metrics["quality_worst_score"] = max(scores, default=0)
+
+
+def collect_escape_hatch_metrics(metrics: Dict[str, Any], rows: Any) -> None:
+    if not isinstance(rows, list):
+        return
+    metrics["escape_hatch_modules"] = len(rows)
+    for output_key, source_key in (
+        ("escape_hatch_uses", "total_count"),
+        ("escape_hatch_unsafe_uses", "unsafe_count"),
+        ("escape_hatch_clippy_suppressions", "clippy_suppression_count"),
+    ):
+        metrics[output_key] = sum(int(item.get(source_key, 0)) for item in rows)
+
+
+def collect_capacity_metrics(metrics: Dict[str, Any], speed: Any) -> None:
+    if not isinstance(speed, dict):
+        return
+    triage_summary = speed.get("triage_summary")
+    if isinstance(triage_summary, dict):
+        critical = triage_summary.get("critical", 0)
+        watch = triage_summary.get("watch", 0)
+        metrics.update(
+            {
+                "capacity_critical": critical,
+                "capacity_watch": watch,
+                "capacity_risk_count": critical + watch,
+            }
+        )
+        return
+
+    summary = speed.get("summary")
+    if isinstance(summary, dict):
+        metrics["capacity_risk_count"] = (
+            (summary.get("over_budget_latency") or 0)
+            + (summary.get("near_failure_ceilings") or 0)
+        )
+
+
+def collect_summary_metrics(
+    metrics: Dict[str, Any],
+    summary: Any,
+    mappings: Dict[str, str],
+) -> None:
+    if not isinstance(summary, dict):
+        return
+    for output_key, source_key in mappings.items():
+        metrics[output_key] = summary.get(source_key, 0)
+
+
+def collect_correctness_metrics(metrics: Dict[str, Any], correctness: Any) -> None:
+    summary = correctness.get("summary") if isinstance(correctness, dict) else None
+    if not isinstance(summary, dict):
+        return
+    total = summary.get("test_count") or 0
+    failed = summary.get("failed") or 0
+    unknown = summary.get("unknown") or 0
+    metrics.update(
+        {
+            "tests_total": total,
+            "tests_failed": failed,
+            "tests_unknown": unknown,
+            "tests_passed": max(0, total - failed - unknown),
+        }
+    )
+
+
 def collect_run_metrics() -> Dict[str, Any]:
-    """Read headline summary fields from key artifacts so the dashboard
-    can plot sparklines and deltas without re-fetching old artifacts."""
-    base = Path("target/analysis")
+    """Read headline summary fields from key artifacts for dashboard trends."""
     metrics: Dict[str, Any] = {}
-
-    def _load(name: str) -> Any:
-        path = base / name
-        if not path.exists():
-            return None
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return None
-
-    hotspots = _load("hotspots.json") or []
-    if isinstance(hotspots, list) and hotspots:
-        bad = sum(1 for h in hotspots if (h.get("quality_score") or h.get("score") or 0) >= 600)
-        warn = sum(
-            1
-            for h in hotspots
-            if 300 <= (h.get("quality_score") or h.get("score") or 0) < 600
+    artifacts = {
+        name: load_analysis_artifact(name)
+        for name in (
+            "hotspots.json",
+            "clones.json",
+            "rust_escape_hatches.json",
+            "speed_efficiency_report.json",
+            "performance_review.json",
+            "correctness_review.json",
+            "map.json",
+            "project_code_metrics.json",
         )
-        metrics["quality_risk_count"] = bad + warn
-        metrics["quality_worst_score"] = max(
-            (h.get("quality_score") or h.get("score") or 0 for h in hotspots),
-            default=0,
-        )
+    }
 
-    clones = _load("clones.json") or []
+    collect_hotspot_metrics(metrics, artifacts["hotspots.json"])
+    clones = artifacts["clones.json"]
     if isinstance(clones, list):
         metrics["clone_groups"] = len(clones)
-
-    escape_hatches = _load("rust_escape_hatches.json") or []
-    if isinstance(escape_hatches, list):
-        metrics["escape_hatch_modules"] = len(escape_hatches)
-        metrics["escape_hatch_uses"] = sum(
-            int(item.get("total_count", 0)) for item in escape_hatches
-        )
-        metrics["escape_hatch_unsafe_uses"] = sum(
-            int(item.get("unsafe_count", 0)) for item in escape_hatches
-        )
-        metrics["escape_hatch_clippy_suppressions"] = sum(
-            int(item.get("clippy_suppression_count", 0)) for item in escape_hatches
-        )
-
-    speed = _load("speed_efficiency_report.json") or {}
-    triage_summary = speed.get("triage_summary") if isinstance(speed, dict) else None
-    if isinstance(triage_summary, dict):
-        metrics["capacity_critical"] = triage_summary.get("critical", 0)
-        metrics["capacity_watch"] = triage_summary.get("watch", 0)
-        metrics["capacity_risk_count"] = (
-            triage_summary.get("critical", 0) + triage_summary.get("watch", 0)
-        )
-    else:
-        summary = speed.get("summary") if isinstance(speed, dict) else None
-        if isinstance(summary, dict):
-            metrics["capacity_risk_count"] = (
-                (summary.get("over_budget_latency") or 0)
-                + (summary.get("near_failure_ceilings") or 0)
-            )
-
-    performance_review = _load("performance_review.json") or {}
-    performance_summary = (
-        performance_review.get("summary") if isinstance(performance_review, dict) else None
+    collect_escape_hatch_metrics(metrics, artifacts["rust_escape_hatches.json"])
+    collect_capacity_metrics(metrics, artifacts["speed_efficiency_report.json"])
+    performance_review = artifacts["performance_review.json"]
+    collect_summary_metrics(
+        metrics,
+        performance_review.get("summary") if isinstance(performance_review, dict) else None,
+        {
+            "performance_review_gaps": "coverage_gaps",
+            "performance_missing_scale_targets": "missing_scale_targets",
+            "performance_covered_scenarios": "covered_scenarios",
+            "performance_failed_sources": "failed_source_artifacts",
+        },
     )
-    if isinstance(performance_summary, dict):
-        metrics["performance_review_gaps"] = performance_summary.get("coverage_gaps", 0)
-        metrics["performance_missing_scale_targets"] = performance_summary.get(
-            "missing_scale_targets",
-            0,
-        )
-        metrics["performance_covered_scenarios"] = performance_summary.get(
-            "covered_scenarios",
-            0,
-        )
-        metrics["performance_failed_sources"] = performance_summary.get(
-            "failed_source_artifacts",
-            0,
-        )
-
-    correctness = _load("correctness_review.json") or {}
-    summary = correctness.get("summary") if isinstance(correctness, dict) else None
-    if isinstance(summary, dict):
-        total = summary.get("test_count") or 0
-        failed = summary.get("failed") or 0
-        unknown = summary.get("unknown") or 0
-        metrics["tests_total"] = total
-        metrics["tests_failed"] = failed
-        metrics["tests_unknown"] = unknown
-        metrics["tests_passed"] = max(0, total - failed - unknown)
-
-    map_doc = _load("map.json") or {}
-    map_summary = (map_doc.get("meta") or {}).get("summary") if isinstance(map_doc, dict) else None
-    if isinstance(map_summary, dict):
-        metrics["map_bad"] = map_summary.get("bad", 0)
-        metrics["map_warn"] = map_summary.get("warn", 0)
-        metrics["map_good"] = map_summary.get("good", 0)
-
-    project_code = _load("project_code_metrics.json") or {}
-    code_summary = project_code.get("current") if isinstance(project_code, dict) else None
-    if isinstance(code_summary, dict):
-        metrics["project_application_code_lines"] = code_summary.get("application", 0)
-        metrics["project_test_code_lines"] = code_summary.get("test", 0)
-        metrics["project_other_code_lines"] = code_summary.get("other", 0)
-        metrics["project_total_code_lines"] = code_summary.get("total", 0)
-
+    collect_correctness_metrics(metrics, artifacts["correctness_review.json"])
+    map_doc = artifacts["map.json"]
+    collect_summary_metrics(
+        metrics,
+        (map_doc.get("meta") or {}).get("summary") if isinstance(map_doc, dict) else None,
+        {"map_bad": "bad", "map_warn": "warn", "map_good": "good"},
+    )
+    project_code = artifacts["project_code_metrics.json"]
+    collect_summary_metrics(
+        metrics,
+        project_code.get("current") if isinstance(project_code, dict) else None,
+        {
+            "project_application_code_lines": "application",
+            "project_test_code_lines": "test",
+            "project_other_code_lines": "other",
+            "project_total_code_lines": "total",
+        },
+    )
     return metrics
 
 

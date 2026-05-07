@@ -2,12 +2,15 @@ use super::shared::{collect_slot_entries, slot_cell_context};
 use super::{DuplicateNameCounts, apply_tab_drag_feedback};
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
-use crate::app::theme::{BUTTON_SIZE, TAB_BUTTON_WIDTH, action_bg, border};
+use crate::app::theme::{
+    BUTTON_SIZE, TAB_BUTTON_WIDTH, action_bg, action_hover_bg, border, text_primary,
+};
 use crate::app::ui::tab_drag::{self, TabDropAxis, TabDropZone};
 use crate::app::ui::tab_strip::TabStripOutcome;
 use crate::app::ui::tab_strip::context_menu::attach_tab_list_context_menu;
+use crate::app::ui::transition;
 use crate::app::ui::widget_ids;
-use eframe::egui::{self, Stroke};
+use eframe::egui::{self, Sense, Stroke};
 
 pub(super) fn show_vertical_tab_region(
     ui: &mut egui::Ui,
@@ -76,24 +79,45 @@ fn attach_tab_list_background_context_menu(
 
 fn show_vertical_new_tab_action(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let width = ui.available_width().max(BUTTON_SIZE.x);
-    if widget_ids::surface_response(
-        ui,
-        "vertical_new_tab",
-        widget_ids::WidgetRole::ActionButton,
-        |ui| {
-            ui.add_sized(
-                egui::vec2(width, BUTTON_SIZE.y),
-                egui::Button::new(format!("{} New tab", egui_phosphor::regular::PLUS))
-                    .fill(action_bg(ui))
-                    .stroke(Stroke::new(1.0, border(ui))),
-            )
-        },
-    )
-    .on_hover_text("New Tab")
-    .clicked()
+    if vertical_new_tab_button(ui, width)
+        .on_hover_text("New Tab")
+        .clicked()
     {
         app.handle_command(AppCommand::NewTab);
     }
+}
+
+fn vertical_new_tab_button(ui: &mut egui::Ui, width: f32) -> egui::Response {
+    let response = widget_ids::allocate_exact_interact(
+        ui,
+        egui::vec2(width, BUTTON_SIZE.y),
+        widget_ids::surface_role("vertical_new_tab", widget_ids::WidgetRole::ActionButton),
+        Sense::click(),
+        "vertical_new_tab",
+    );
+    let hovered = response.hovered() && !transition::suppress_interactive_chrome(ui.ctx());
+    let fill = if hovered {
+        action_hover_bg(ui)
+    } else {
+        action_bg(ui)
+    };
+
+    ui.painter().rect_filled(response.rect, 4.0, fill);
+    ui.painter().rect_stroke(
+        response.rect,
+        4.0,
+        Stroke::new(1.0, border(ui)),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(
+        response.rect.center(),
+        egui::Align2::CENTER_CENTER,
+        format!("{} New tab", egui_phosphor::regular::PLUS),
+        egui::TextStyle::Button.resolve(ui.style()),
+        text_primary(ui),
+    );
+
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 fn show_scrolling_vertical_tab_list(

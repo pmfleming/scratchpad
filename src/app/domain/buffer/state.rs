@@ -24,6 +24,8 @@ pub struct BufferState {
     pub path: Option<PathBuf>,
     pub is_dirty: bool,
     pub is_settings_file: bool,
+    pub show_control_chars: bool,
+    pub right_to_left_reading_order: bool,
     pub temp_id: String,
     pub line_count: usize,
     pub artifact_summary: TextArtifactSummary,
@@ -51,6 +53,8 @@ struct BufferBuildState {
     format: TextFormatMetadata,
     disk_state: Option<DiskFileState>,
     freshness: BufferFreshness,
+    show_control_chars: bool,
+    right_to_left_reading_order: bool,
     text_metadata_refresh_stale: bool,
 }
 
@@ -79,6 +83,8 @@ pub struct RestoredBufferState {
     pub format: TextFormatMetadata,
     pub disk_state: Option<DiskFileState>,
     pub freshness: BufferFreshness,
+    pub show_control_chars: bool,
+    pub right_to_left_reading_order: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -132,6 +138,8 @@ impl BufferState {
                 format,
                 disk_state: None,
                 freshness: BufferFreshness::InSync,
+                show_control_chars: false,
+                right_to_left_reading_order: false,
                 text_metadata_refresh_stale: false,
             },
         )
@@ -157,6 +165,8 @@ impl BufferState {
                 format,
                 disk_state: None,
                 freshness: BufferFreshness::InSync,
+                show_control_chars: false,
+                right_to_left_reading_order: false,
                 text_metadata_refresh_stale,
             },
         )
@@ -206,6 +216,8 @@ impl BufferState {
                 format: restored.format,
                 disk_state: restored.disk_state,
                 freshness: restored.freshness,
+                show_control_chars: restored.show_control_chars,
+                right_to_left_reading_order: restored.right_to_left_reading_order,
                 text_metadata_refresh_stale: false,
             },
         )
@@ -278,6 +290,8 @@ impl BufferState {
         self.format = loaded.format;
         self.disk_state = loaded.disk_state;
         self.freshness = loaded.freshness;
+        self.show_control_chars = loaded.show_control_chars;
+        self.right_to_left_reading_order = loaded.right_to_left_reading_order;
         self.active_selection = None;
         self.has_non_compliant_characters = loaded.has_non_compliant_characters;
         self.text_metadata_refresh_stale = loaded.text_metadata_refresh_stale;
@@ -506,6 +520,8 @@ impl BufferState {
             path: state.path,
             is_dirty: state.is_dirty,
             is_settings_file: false,
+            show_control_chars: state.show_control_chars,
+            right_to_left_reading_order: state.right_to_left_reading_order,
             temp_id: state.temp_id,
             line_count: text_metadata.line_count,
             artifact_summary: text_metadata.artifact_summary,

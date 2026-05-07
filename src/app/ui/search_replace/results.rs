@@ -1,7 +1,7 @@
-use super::state::{SearchStripActions, SearchStripState};
-use crate::app::app_state::{
-    ScratchpadApp, SearchFreshness, SearchResultEntry, SearchResultGroup, SearchStatus,
+use super::state::{
+    SearchStripActions, SearchStripState, row_top, virtual_rows_for_clip, virtual_total_height,
 };
+use crate::app::app_state::{ScratchpadApp, SearchResultEntry, SearchResultGroup};
 use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::theme::{
     action_bg, border, tab_selected_accent, tab_selected_bg, text_muted, text_primary,
@@ -59,49 +59,6 @@ pub(super) fn show_search_results(
         });
 }
 
-pub(super) fn results_summary(state: &SearchStripState) -> String {
-    if state.progress.searching || state.progress.freshness == SearchFreshness::Stale {
-        if state.progress.target_count > 0 {
-            return format!(
-                "Searching {} of {} files...",
-                state
-                    .progress
-                    .scanned_targets
-                    .min(state.progress.target_count),
-                state.progress.target_count
-            );
-        }
-        return "Searching\u{2026}".to_owned();
-    }
-
-    if state.query.is_empty() {
-        return String::new();
-    }
-
-    match &state.progress.status {
-        SearchStatus::InvalidQuery(_) => return "Invalid query".to_owned(),
-        SearchStatus::Error(message) => return message.clone(),
-        SearchStatus::Idle
-        | SearchStatus::Searching { .. }
-        | SearchStatus::Ready
-        | SearchStatus::NoMatches => {}
-    }
-
-    if state.progress.displayed_match_count < state.progress.total_match_count {
-        return format!(
-            "{} previews of {} matches",
-            state.progress.displayed_match_count, state.progress.total_match_count
-        );
-    }
-
-    let file_count = state.result_groups.len();
-    let file_label = if file_count == 1 { "file" } else { "files" };
-    format!(
-        "{} matches in {} {}",
-        state.match_count, file_count, file_label
-    )
-}
-
 fn show_result_group(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
@@ -152,12 +109,14 @@ fn show_virtual_match_rows(
     }
 
     let start_y = ui.cursor().min.y;
-    let total_height = virtual_total_height(total_rows);
+    let total_height = result_rows_height(total_rows);
     maybe_scroll_active_match_into_view(ui, group, active_match_index, start_y);
     let visible_rows = virtual_rows_for_clip(
         total_rows,
         start_y,
         ui.clip_rect(),
+        SEARCH_RESULT_LINE_PILL_HEIGHT,
+        SEARCH_RESULT_LINE_SPACING,
         SEARCH_RESULT_ROW_OVERSCAN,
     );
 
@@ -184,64 +143,20 @@ fn show_virtual_match_rows(
     ui.add_space(visible_rows.trailing_space);
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct VirtualRows {
-    first: usize,
-    last: usize,
-    leading_space: f32,
-    trailing_space: f32,
+fn result_row_top(row_index: usize) -> f32 {
+    row_top(
+        row_index,
+        SEARCH_RESULT_LINE_PILL_HEIGHT,
+        SEARCH_RESULT_LINE_SPACING,
+    )
 }
 
-fn virtual_rows_for_clip(
-    row_count: usize,
-    start_y: f32,
-    clip: egui::Rect,
-    overscan: usize,
-) -> VirtualRows {
-    if row_count == 0 {
-        return VirtualRows {
-            first: 0,
-            last: 0,
-            leading_space: 0.0,
-            trailing_space: 0.0,
-        };
-    }
-
-    let row_step = virtual_row_step();
-    let first_visible = ((clip.top() - start_y) / row_step).floor().max(0.0) as usize;
-    let last_visible = ((clip.bottom() - start_y) / row_step).ceil().max(0.0) as usize + 1;
-    let first = first_visible.saturating_sub(overscan).min(row_count);
-    let last = last_visible.saturating_add(overscan).min(row_count);
-    let rendered_end = if first >= last {
-        row_top(first)
-    } else {
-        row_top(last - 1) + SEARCH_RESULT_LINE_PILL_HEIGHT
-    };
-
-    let total_height = virtual_total_height(row_count);
-    VirtualRows {
-        first,
-        last,
-        leading_space: row_top(first).min(total_height),
-        trailing_space: (total_height - rendered_end).max(0.0),
-    }
-}
-
-fn virtual_total_height(row_count: usize) -> f32 {
-    if row_count == 0 {
-        0.0
-    } else {
-        row_count as f32 * SEARCH_RESULT_LINE_PILL_HEIGHT
-            + row_count.saturating_sub(1) as f32 * SEARCH_RESULT_LINE_SPACING
-    }
-}
-
-fn row_top(row_index: usize) -> f32 {
-    row_index as f32 * virtual_row_step()
-}
-
-fn virtual_row_step() -> f32 {
-    SEARCH_RESULT_LINE_PILL_HEIGHT + SEARCH_RESULT_LINE_SPACING
+fn result_rows_height(row_count: usize) -> f32 {
+    virtual_total_height(
+        row_count,
+        SEARCH_RESULT_LINE_PILL_HEIGHT,
+        SEARCH_RESULT_LINE_SPACING,
+    )
 }
 
 fn maybe_scroll_active_match_into_view(
@@ -271,7 +186,7 @@ fn maybe_scroll_active_match_into_view(
     let rect = egui::Rect::from_min_size(
         egui::pos2(
             ui.available_rect_before_wrap().left(),
-            start_y + row_top(local_row),
+            start_y + result_row_top(local_row),
         ),
         egui::vec2(
             ui.available_width().max(1.0),
@@ -325,72 +240,79 @@ fn show_group_pill(
         ))
         .inner_margin(egui::Margin::symmetric(10, 8))
         .show(ui, |ui| {
-            let mut toggle_requested = false;
-
             let group_response = ui
                 .horizontal(|ui| {
-                    let caret = widget_ids::surface_scope(
-                        ui,
-                        ("search_result_group.caret", group_index),
-                        |ui| {
-                            ui.add_sized(
-                                egui::vec2(26.0, 26.0),
-                                egui::Button::new(
-                                    egui::RichText::new(if expanded {
-                                        CARET_DOWN
-                                    } else {
-                                        CARET_RIGHT
-                                    })
-                                    .size(14.0)
-                                    .color(text_muted(ui)),
-                                )
-                                .fill(egui::Color32::TRANSPARENT)
-                                .stroke(egui::Stroke::NONE),
-                            )
-                        },
-                    )
-                    .inner
-                    .on_hover_text(if expanded {
-                        "Collapse results for this file"
-                    } else {
-                        "Expand results for this file"
-                    });
-                    if caret.clicked() {
-                        toggle_requested = true;
-                    }
-
-                    let label_width = (ui.available_width() - 110.0).max(120.0);
-                    let mut response = widget_ids::surface_scope(
-                        ui,
-                        ("search_result_group.body", group_index),
-                        |ui| {
-                            ui.add_sized(
-                                egui::vec2(label_width, SEARCH_RESULT_FILE_PILL_HEIGHT),
-                                egui::Button::new(group_body(ui, group))
-                                    .fill(egui::Color32::TRANSPARENT)
-                                    .stroke(egui::Stroke::NONE),
-                            )
-                        },
-                    )
-                    .inner;
-                    if group.tab_label != group.buffer_label {
-                        response = response.on_hover_text(format!("Tab: {}", group.tab_label));
-                    }
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            egui::RichText::new(file_match_count_label(group.total_match_count))
-                                .size(12.0)
-                                .color(text_muted(ui)),
-                        );
-                    });
-                    response
+                    let caret_clicked = show_group_caret(ui, group_index, expanded).clicked();
+                    let response = show_group_body(ui, group_index, group);
+                    show_group_match_count(ui, group.total_match_count);
+                    (response, caret_clicked)
                 })
                 .inner;
 
-            (group_response, toggle_requested)
+            group_response
         })
         .inner
+}
+
+fn show_group_caret(ui: &mut egui::Ui, group_index: usize, expanded: bool) -> egui::Response {
+    widget_ids::surface_scope(ui, ("search_result_group.caret", group_index), |ui| {
+        ui.add_sized(
+            egui::vec2(26.0, 26.0),
+            egui::Button::new(
+                egui::RichText::new(group_caret_icon(expanded))
+                    .size(14.0)
+                    .color(text_muted(ui)),
+            )
+            .fill(egui::Color32::TRANSPARENT)
+            .stroke(egui::Stroke::NONE),
+        )
+    })
+    .inner
+    .on_hover_text(group_caret_tooltip(expanded))
+}
+
+fn group_caret_icon(expanded: bool) -> &'static str {
+    if expanded { CARET_DOWN } else { CARET_RIGHT }
+}
+
+fn group_caret_tooltip(expanded: bool) -> &'static str {
+    if expanded {
+        "Collapse results for this file"
+    } else {
+        "Expand results for this file"
+    }
+}
+
+fn show_group_body(
+    ui: &mut egui::Ui,
+    group_index: usize,
+    group: &SearchResultGroup,
+) -> egui::Response {
+    let label_width = (ui.available_width() - 110.0).max(120.0);
+    let response = widget_ids::surface_scope(ui, ("search_result_group.body", group_index), |ui| {
+        ui.add_sized(
+            egui::vec2(label_width, SEARCH_RESULT_FILE_PILL_HEIGHT),
+            egui::Button::new(group_body(ui, group))
+                .fill(egui::Color32::TRANSPARENT)
+                .stroke(egui::Stroke::NONE),
+        )
+    })
+    .inner;
+    if group.tab_label == group.buffer_label {
+        response
+    } else {
+        response.on_hover_text(format!("Tab: {}", group.tab_label))
+    }
+}
+
+fn show_group_match_count(ui: &mut egui::Ui, match_count: usize) {
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.label(
+            egui::RichText::new(file_match_count_label(match_count))
+                .size(12.0)
+                .color(text_muted(ui)),
+        );
+    });
 }
 
 fn show_match_pill(ui: &mut egui::Ui, entry: &SearchResultEntry) -> egui::Response {
@@ -522,45 +444,5 @@ fn match_border(ui: &egui::Ui, active: bool) -> egui::Color32 {
         tab_selected_accent(ui).gamma_multiply(0.95)
     } else {
         border(ui)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn virtual_total_height_counts_rows_without_trailing_gap() {
-        assert_eq!(virtual_total_height(0), 0.0);
-        assert_eq!(virtual_total_height(1), SEARCH_RESULT_LINE_PILL_HEIGHT);
-        assert_eq!(
-            virtual_total_height(3),
-            SEARCH_RESULT_LINE_PILL_HEIGHT * 3.0 + SEARCH_RESULT_LINE_SPACING * 2.0
-        );
-    }
-
-    #[test]
-    fn virtual_rows_for_clip_adds_bounded_overscan() {
-        let clip = egui::Rect::from_min_max(egui::pos2(0.0, 92.0), egui::pos2(100.0, 184.0));
-        let rows = virtual_rows_for_clip(20, 0.0, clip, 1);
-
-        assert_eq!(rows.first, 1);
-        assert_eq!(rows.last, 8);
-        assert_eq!(rows.leading_space, row_top(1));
-        assert_eq!(
-            rows.trailing_space,
-            virtual_total_height(20) - (row_top(7) + SEARCH_RESULT_LINE_PILL_HEIGHT)
-        );
-    }
-
-    #[test]
-    fn virtual_rows_for_clip_clamps_outside_content() {
-        let clip = egui::Rect::from_min_max(egui::pos2(0.0, 10_000.0), egui::pos2(100.0, 10_100.0));
-        let rows = virtual_rows_for_clip(5, 0.0, clip, 2);
-
-        assert_eq!(rows.first, 5);
-        assert_eq!(rows.last, 5);
-        assert_eq!(rows.leading_space, virtual_total_height(5));
-        assert_eq!(rows.trailing_space, 0.0);
     }
 }

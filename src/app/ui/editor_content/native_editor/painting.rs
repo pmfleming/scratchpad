@@ -20,126 +20,157 @@ struct ReplacementPreviewContext<'a> {
     slice_end: usize,
 }
 
+pub(super) struct EditorPaintRequest<'a> {
+    pub(super) galley: &'a Arc<egui::Galley>,
+    pub(super) galley_pos: egui::Pos2,
+    pub(super) rect: egui::Rect,
+    pub(super) options: TextEditOptions<'a>,
+    pub(super) focused: bool,
+    pub(super) char_offset_base: usize,
+    pub(super) slice_chars: usize,
+    pub(super) active_selection: Option<Range<usize>>,
+}
+
+#[derive(Clone, Copy)]
+struct SelectionPaintContext<'a> {
+    ui: &'a egui::Ui,
+    galley: &'a egui::Galley,
+    galley_pos: egui::Pos2,
+    rect: egui::Rect,
+    options: TextEditOptions<'a>,
+    char_offset_base: usize,
+    slice_chars: usize,
+}
+
+#[derive(Clone, Copy)]
+struct ImePreeditPaintContext<'a> {
+    ui: &'a egui::Ui,
+    galley: &'a Arc<egui::Galley>,
+    galley_pos: egui::Pos2,
+    rect: egui::Rect,
+    options: TextEditOptions<'a>,
+    focused: bool,
+    char_offset_base: usize,
+}
+
 #[derive(Default)]
 pub(super) struct CursorPaintOutcome {
     pub(super) reveal_attempted: bool,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn paint_editor(
     ui: &mut egui::Ui,
-    galley: &Arc<egui::Galley>,
-    galley_pos: egui::Pos2,
-    rect: egui::Rect,
     view: &mut EditorViewState,
-    options: TextEditOptions<'_>,
-    focused: bool,
-    _changed: bool,
-    char_offset_base: usize,
-    slice_chars: usize,
+    request: EditorPaintRequest<'_>,
 ) -> CursorPaintOutcome {
     paint_contiguous_selection_background(
-        ui,
-        galley,
-        galley_pos,
-        rect,
-        view,
-        options,
-        char_offset_base,
-        slice_chars,
+        SelectionPaintContext {
+            ui,
+            galley: request.galley,
+            galley_pos: request.galley_pos,
+            rect: request.rect,
+            options: request.options,
+            char_offset_base: request.char_offset_base,
+            slice_chars: request.slice_chars,
+        },
+        request.active_selection.as_ref(),
     );
-    paint_galley(ui, galley, galley_pos, options.text_color);
+    paint_galley(
+        ui,
+        request.galley,
+        request.galley_pos,
+        request.options.text_color,
+    );
     paint_replacement_previews(
         ReplacementPreviewContext {
             ui,
-            galley,
-            galley_pos,
-            rect,
-            options,
-            char_offset_base,
-            slice_end: char_offset_base.saturating_add(slice_chars),
+            galley: request.galley,
+            galley_pos: request.galley_pos,
+            rect: request.rect,
+            options: request.options,
+            char_offset_base: request.char_offset_base,
+            slice_end: request.char_offset_base.saturating_add(request.slice_chars),
         },
         view,
     );
     paint_ime_preedit(
-        ui,
-        galley,
-        galley_pos,
-        rect,
+        ImePreeditPaintContext {
+            ui,
+            galley: request.galley,
+            galley_pos: request.galley_pos,
+            rect: request.rect,
+            options: request.options,
+            focused: request.focused,
+            char_offset_base: request.char_offset_base,
+        },
         view,
-        options,
-        focused,
-        char_offset_base,
     );
 
-    if !focused {
+    if !request.focused {
         return CursorPaintOutcome::default();
     }
 
     if let Some(cursor_range) = &view.cursor_range {
         let galley_local_cursor_rect = cursor_rect_for_galley(
             ui,
-            galley,
-            options,
-            local_cursor_for_slice(cursor_range.primary, char_offset_base, slice_chars),
+            request.galley,
+            request.options,
+            local_cursor_for_slice(
+                cursor_range.primary,
+                request.char_offset_base,
+                request.slice_chars,
+            ),
         );
-        let cursor_rect = galley_local_cursor_rect.translate(galley_pos.to_vec2());
+        let cursor_rect = galley_local_cursor_rect.translate(request.galley_pos.to_vec2());
         // Reveal targets must be in scroll-content coordinates. The editor rect
         // spans the full document and starts at the content origin, so subtract
         // `rect.min` to translate the screen-space cursor rect into content space.
         // (The slice galley is offset by `start_line * row_height` within the
         // rect, so galley-local coords are NOT content coords.)
-        let cursor_rect_content = cursor_rect.translate(-rect.min.to_vec2());
-        return paint_cursor_effects(ui, rect, cursor_rect, cursor_rect_content, view);
+        let cursor_rect_content = cursor_rect.translate(-request.rect.min.to_vec2());
+        return paint_cursor_effects(ui, request.rect, cursor_rect, cursor_rect_content, view);
     }
 
     CursorPaintOutcome::default()
 }
 
-fn paint_ime_preedit(
-    ui: &egui::Ui,
-    galley: &Arc<egui::Galley>,
-    galley_pos: egui::Pos2,
-    rect: egui::Rect,
-    view: &EditorViewState,
-    options: TextEditOptions<'_>,
-    focused: bool,
-    char_offset_base: usize,
-) {
+fn paint_ime_preedit(context: ImePreeditPaintContext<'_>, view: &EditorViewState) {
     let Some(preedit) = view.ime_preedit.as_deref().filter(|text| !text.is_empty()) else {
         return;
     };
     let Some(cursor_range) = &view.cursor_range else {
         return;
     };
-    if !focused {
+    if !context.focused {
         return;
     }
 
     let cursor_rect = cursor_rect_for_galley(
-        ui,
-        galley,
-        options,
-        local_cursor(cursor_range.primary, char_offset_base),
+        context.ui,
+        context.galley,
+        context.options,
+        local_cursor(cursor_range.primary, context.char_offset_base),
     )
-    .translate(galley_pos.to_vec2());
-    if !cursor_rect.intersects(rect) {
+    .translate(context.galley_pos.to_vec2());
+    if !cursor_rect.intersects(context.rect) {
         return;
     }
 
-    let font_id = options.editor_font_id.clone();
-    let text_color = options.text_color;
-    let galley =
-        ui.fonts_mut(|fonts| fonts.layout_no_wrap(preedit.to_owned(), font_id.clone(), text_color));
+    let font_id = context.options.editor_font_id.clone();
+    let text_color = context.options.text_color;
+    let galley = context
+        .ui
+        .fonts_mut(|fonts| fonts.layout_no_wrap(preedit.to_owned(), font_id.clone(), text_color));
     let origin = egui::pos2(cursor_rect.center().x, cursor_rect.min.y);
-    let preedit_rect = egui::Rect::from_min_size(origin, galley.rect.size()).intersect(rect);
+    let preedit_rect =
+        egui::Rect::from_min_size(origin, galley.rect.size()).intersect(context.rect);
     if preedit_rect.width() <= 0.0 || preedit_rect.height() <= 0.0 {
         return;
     }
 
-    let painter = ui.painter_at(rect.expand(1.0));
+    let painter = context.ui.painter_at(context.rect.expand(1.0));
     painter.galley(origin, galley, text_color);
-    let underline_y = (origin.y + preedit_rect.height()).min(rect.bottom());
+    let underline_y = (origin.y + preedit_rect.height()).min(context.rect.bottom());
     painter.line_segment(
         [
             egui::pos2(origin.x, underline_y),
@@ -176,35 +207,28 @@ fn cursor_rect_for_galley(
     .expand(1.5)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn paint_contiguous_selection_background(
-    ui: &egui::Ui,
-    galley: &egui::Galley,
-    galley_pos: egui::Pos2,
-    rect: egui::Rect,
-    view: &EditorViewState,
-    options: TextEditOptions<'_>,
-    char_offset_base: usize,
-    slice_chars: usize,
+    context: SelectionPaintContext<'_>,
+    active_selection: Option<&Range<usize>>,
 ) {
-    let Some(cursor_range) = view.cursor_range.as_ref().filter(|range| !range.is_empty()) else {
+    let Some(selection) = active_selection.filter(|range| range.start < range.end) else {
         return;
     };
-    let slice_start = char_offset_base;
-    let slice_end = char_offset_base.saturating_add(slice_chars);
-    let selection = cursor_range.as_sorted_char_range();
+    let slice_start = context.char_offset_base;
+    let slice_end = context.char_offset_base.saturating_add(context.slice_chars);
     let local_start = selection.start.max(slice_start).saturating_sub(slice_start);
     let local_end = selection.end.min(slice_end).saturating_sub(slice_start);
     if local_start >= local_end {
         return;
     }
 
-    let fill = options
+    let fill = context
+        .options
         .highlight_style
-        .active_background(ui.visuals().dark_mode);
-    let painter = ui.painter_at(rect.expand(1.0));
+        .active_background(context.ui.visuals().dark_mode);
+    let painter = context.ui.painter_at(context.rect.expand(1.0));
     let mut row_start = 0usize;
-    for row in &galley.rows {
+    for row in &context.galley.rows {
         let row_text_chars = row.char_count_excluding_newline();
         let row_end = row_start.saturating_add(row.char_count_including_newline());
         if local_start < row_end && local_end > row_start {
@@ -213,17 +237,27 @@ fn paint_contiguous_selection_background(
             let selection_reaches_line_end =
                 row.ends_with_newline && local_end > row_start + row_text_chars;
             let selection_covers_whole_row = local_start <= row_start && local_end >= row_end;
-            let left = row_screen_x(galley, galley_pos, row.pos.x, row.x_offset(start_col));
+            let left = row_screen_x(
+                context.galley,
+                context.galley_pos,
+                row.pos.x,
+                row.x_offset(start_col),
+            );
             let right = if selection_reaches_line_end || selection_covers_whole_row {
-                rect.right()
+                context.rect.right()
             } else {
-                row_screen_x(galley, galley_pos, row.pos.x, row.x_offset(end_col))
+                row_screen_x(
+                    context.galley,
+                    context.galley_pos,
+                    row.pos.x,
+                    row.x_offset(end_col),
+                )
             };
             let highlight_rect = egui::Rect::from_min_max(
-                egui::pos2(left.min(right), galley_pos.y + row.min_y()),
-                egui::pos2(left.max(right), galley_pos.y + row.max_y()),
+                egui::pos2(left.min(right), context.galley_pos.y + row.min_y()),
+                egui::pos2(left.max(right), context.galley_pos.y + row.max_y()),
             )
-            .intersect(rect.expand(1.0));
+            .intersect(context.rect.expand(1.0));
             if highlight_rect.width() > 0.0 && highlight_rect.height() > 0.0 {
                 painter.rect_filled(highlight_rect, egui::CornerRadius::ZERO, fill);
             }
@@ -272,8 +306,6 @@ fn paint_replacement_preview(
     let row_height = context
         .ui
         .fonts_mut(|fonts| fonts.row_height(context.options.editor_font_id));
-    let top = start_pos.min.y.min(end_pos.min.y);
-    let base_left = start_pos.min.x.min(end_pos.min.x);
     let replacement_label = preview_label(replacement);
     let label_width = context.ui.fonts_mut(|fonts| {
         fonts
@@ -285,11 +317,14 @@ fn paint_replacement_preview(
             .rect
             .width()
     });
-    let preview_rect = egui::Rect::from_min_size(
-        context.galley_pos + egui::vec2(base_left, top),
-        egui::vec2(label_width.max(8.0) + 8.0, row_height.max(1.0)),
-    )
-    .intersect(context.rect.expand(1.0));
+    let preview_rect = replacement_preview_rect(
+        context.galley_pos,
+        start_pos,
+        end_pos,
+        row_height,
+        label_width,
+        context.rect.expand(1.0),
+    );
     if preview_rect.width() <= 0.0 || preview_rect.height() <= 0.0 {
         return;
     }
@@ -298,8 +333,7 @@ fn paint_replacement_preview(
     let fill = context
         .options
         .highlight_style
-        .active_background(context.ui.visuals().dark_mode)
-        .gamma_multiply(0.82);
+        .active_background(context.ui.visuals().dark_mode);
     let stroke = egui::Stroke::new(
         1.0,
         context
@@ -324,6 +358,25 @@ fn paint_replacement_preview(
             context.options.highlight_style.text_color(),
         );
     }
+}
+
+fn replacement_preview_rect(
+    galley_pos: egui::Pos2,
+    start_pos: egui::Rect,
+    end_pos: egui::Rect,
+    row_height: f32,
+    label_width: f32,
+    clip_rect: egui::Rect,
+) -> egui::Rect {
+    let top = start_pos.min.y.min(end_pos.min.y);
+    let left = start_pos.min.x.min(end_pos.min.x);
+    let match_right = start_pos.min.x.max(end_pos.min.x);
+    let label_right = left + label_width.max(8.0) + 8.0;
+    egui::Rect::from_min_max(
+        galley_pos + egui::vec2(left, top),
+        galley_pos + egui::vec2(match_right.max(label_right), top + row_height.max(1.0)),
+    )
+    .intersect(clip_rect)
 }
 
 fn preview_label(replacement: &str) -> String {
@@ -443,5 +496,41 @@ pub(super) fn consume_cursor_reveal(
 ) {
     if !changed && (view.cursor_reveal_mode().is_none() || reveal_attempted) {
         view.clear_cursor_reveal();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::replacement_preview_rect;
+    use eframe::egui;
+
+    #[test]
+    fn replacement_preview_rect_covers_original_match_when_label_is_shorter() {
+        let rect = replacement_preview_rect(
+            egui::pos2(10.0, 20.0),
+            egui::Rect::from_min_size(egui::pos2(5.0, 7.0), egui::vec2(1.0, 16.0)),
+            egui::Rect::from_min_size(egui::pos2(40.0, 7.0), egui::vec2(1.0, 16.0)),
+            16.0,
+            8.0,
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 200.0)),
+        );
+
+        assert_eq!(rect.min, egui::pos2(15.0, 27.0));
+        assert_eq!(rect.max, egui::pos2(50.0, 43.0));
+    }
+
+    #[test]
+    fn replacement_preview_rect_expands_for_longer_label() {
+        let rect = replacement_preview_rect(
+            egui::pos2(0.0, 0.0),
+            egui::Rect::from_min_size(egui::pos2(5.0, 7.0), egui::vec2(1.0, 16.0)),
+            egui::Rect::from_min_size(egui::pos2(15.0, 7.0), egui::vec2(1.0, 16.0)),
+            16.0,
+            40.0,
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 200.0)),
+        );
+
+        assert_eq!(rect.min, egui::pos2(5.0, 7.0));
+        assert_eq!(rect.max, egui::pos2(53.0, 23.0));
     }
 }

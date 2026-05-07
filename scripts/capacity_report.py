@@ -1,15 +1,20 @@
 import argparse
-import json
 import os
-import subprocess
-import sys
-import threading
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-from perf_report_shared import matching_flamegraph_ids, terminate_process_tree
+from perf_report_shared import (
+    MB,
+    GB,
+    human_bytes,
+    matching_flamegraph_ids,
+    run_fallback_workload,
+    run_json_probe,
+    safe_delta,
+    workload_label,
+)
 from report_modes import add_mode_argument, emit_report
 
 DEFAULT_OUTPUT = Path("capacity_report.json")
@@ -17,8 +22,6 @@ VISIBILITY_OUTPUT = Path("target/analysis/capacity_report.json")
 BUILD_CMD = ["cargo", "build", "--release", "--quiet", "--bin", "capacity_probe"]
 PROBE_PATH = Path("target/release/capacity_probe.exe" if os.name == "nt" else "target/release/capacity_probe")
 PROBE_TIMEOUT_SECONDS = int(os.environ.get("SCRATCHPAD_CAPACITY_PROBE_TIMEOUT_SECONDS", "300"))
-MB = 1024 * 1024
-GB = 1024 * MB
 
 SCENARIO_CONFIG = {
     "file_size_ceiling": {
@@ -80,163 +83,6 @@ SCENARIO_CONFIG = {
 }
 
 
-def human_bytes(value: Optional[int]) -> str:
-    if value is None:
-        return "-"
-    if value >= GB:
-        return f"{value / GB:.1f} GB"
-    if value >= MB:
-        return f"{value / MB:.1f} MB"
-    if value >= 1024:
-        return f"{value / 1024:.0f} KB"
-    return f"{value} B"
-
-
-def sample_process(pid: int) -> Dict[str, Optional[int]]:
-    if os.name == "nt":
-        return sample_windows_process(pid)
-    return sample_posix_process(pid)
-
-
-def sample_windows_process(pid: int) -> Dict[str, Optional[int]]:
-    import ctypes
-    from ctypes import wintypes
-
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    PROCESS_VM_READ = 0x0010
-
-    class PROCESS_MEMORY_COUNTERS_EX(ctypes.Structure):
-        _fields_ = [
-            ("cb", wintypes.DWORD),
-            ("PageFaultCount", wintypes.DWORD),
-            ("PeakWorkingSetSize", ctypes.c_size_t),
-            ("WorkingSetSize", ctypes.c_size_t),
-            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
-            ("QuotaPagedPoolUsage", ctypes.c_size_t),
-            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
-            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
-            ("PagefileUsage", ctypes.c_size_t),
-            ("PeakPagefileUsage", ctypes.c_size_t),
-            ("PrivateUsage", ctypes.c_size_t),
-        ]
-
-    kernel32 = ctypes.windll.kernel32
-    psapi = ctypes.windll.psapi
-    process = kernel32.OpenProcess(
-        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
-        False,
-        pid,
-    )
-    if not process:
-        return {
-            "working_set_bytes": None,
-            "peak_working_set_bytes": None,
-            "page_fault_count": None,
-            "handle_count": None,
-        }
-
-    try:
-        counters = PROCESS_MEMORY_COUNTERS_EX()
-        counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS_EX)
-        if not psapi.GetProcessMemoryInfo(
-            process,
-            ctypes.byref(counters),
-            counters.cb,
-        ):
-            return {
-                "working_set_bytes": None,
-                "peak_working_set_bytes": None,
-                "page_fault_count": None,
-                "handle_count": None,
-            }
-
-        handle_count = wintypes.DWORD()
-        kernel32.GetProcessHandleCount(process, ctypes.byref(handle_count))
-        return {
-            "working_set_bytes": int(counters.WorkingSetSize),
-            "peak_working_set_bytes": int(counters.PeakWorkingSetSize),
-            "page_fault_count": int(counters.PageFaultCount),
-            "handle_count": int(handle_count.value),
-        }
-    finally:
-        kernel32.CloseHandle(process)
-
-
-def sample_posix_process(pid: int) -> Dict[str, Optional[int]]:
-    try:
-        import resource
-
-        usage = resource.getrusage(resource.RUSAGE_CHILDREN)
-        rss = int(usage.ru_maxrss)
-        if sys.platform != "darwin":
-            rss *= 1024
-        return {
-            "working_set_bytes": rss,
-            "peak_working_set_bytes": rss,
-            "page_fault_count": None,
-            "handle_count": None,
-        }
-    except Exception:
-        return {
-            "working_set_bytes": None,
-            "peak_working_set_bytes": None,
-            "page_fault_count": None,
-            "handle_count": None,
-        }
-
-
-def run_probe() -> Tuple[List[Dict[str, Any]], str]:
-    subprocess.run(BUILD_CMD, check=True, capture_output=True, text=True)
-    process = subprocess.Popen(
-        [str(PROBE_PATH)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1,
-    )
-    samples: List[Dict[str, Any]] = []
-
-    def read_stdout() -> None:
-        assert process.stdout is not None
-        for raw_line in process.stdout:
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            event.update(sample_process(process.pid))
-            samples.append(event)
-
-    reader = threading.Thread(target=read_stdout, daemon=True)
-    reader.start()
-
-    probe_status = "completed"
-    try:
-        return_code = process.wait(timeout=PROBE_TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired:
-        probe_status = "timed_out"
-        terminate_process_tree(process)
-        return_code = 124
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            pass
-    reader.join(timeout=5)
-
-    stderr = ""
-    if process.stderr is not None:
-        stderr = process.stderr.read().strip()
-
-    if return_code != 0 and probe_status != "timed_out":
-        raise RuntimeError(
-            f"capacity probe failed with exit code {return_code}: {stderr or 'no stderr'}"
-        )
-
-    return samples, probe_status
-
-
 def empty_payload(reason: str) -> Dict[str, Any]:
     return {
         "meta": {
@@ -294,7 +140,7 @@ def fallback_probe_events() -> List[Dict[str, Any]]:
                     "step_index": step_index,
                     "workload_value": value,
                     "workload_unit": unit,
-                    "workload_label": human_bytes(value) if unit == "bytes" else f"{value} {unit}",
+                    "workload_label": workload_label(value, unit),
                     "elapsed_ns": time.perf_counter_ns() - started,
                     "working_set_bytes": None,
                     "peak_working_set_bytes": None,
@@ -305,13 +151,6 @@ def fallback_probe_events() -> List[Dict[str, Any]]:
                 }
             )
     return events
-
-
-def run_fallback_workload(value: int, unit: str) -> int:
-    if unit == "bytes":
-        sample = bytearray(min(value, 4 * MB))
-        return sample[0] if sample else 0
-    return sum(index & 1 for index in range(min(value, 10_000)))
 
 
 def infer_limiting_resource(events: List[Dict[str, Any]]) -> str:
@@ -334,12 +173,6 @@ def infer_limiting_resource(events: List[Dict[str, Any]]) -> str:
     if working_set_growth is not None and working_set_growth >= 128 * MB:
         return "memory"
     return "cpu"
-
-
-def safe_delta(last: Optional[int], first: Optional[int]) -> Optional[int]:
-    if last is None or first is None:
-        return None
-    return last - first
 
 
 def diagnosis_guidance(
@@ -553,7 +386,12 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        samples, probe_status = run_probe()
+        samples, probe_status = run_json_probe(
+            build_cmd=BUILD_CMD,
+            probe_path=PROBE_PATH,
+            timeout_seconds=PROBE_TIMEOUT_SECONDS,
+            label="capacity probe",
+        )
         payload = summarize_probe(samples) if samples else empty_payload("No probe samples were recorded.")
         payload["meta"]["probe_status"] = probe_status
         payload["summary"]["probe_status"] = probe_status
