@@ -6,7 +6,6 @@ use std::collections::HashSet;
 
 struct ViewPresentationState {
     show_line_numbers: bool,
-    show_control_chars: bool,
 }
 
 impl WorkspaceTab {
@@ -133,17 +132,10 @@ impl WorkspaceTab {
         new_view_first: bool,
         ratio: f32,
     ) -> Option<ViewId> {
-        let (active_buffer_id, has_control_chars) = {
-            let active_buffer = self.active_buffer();
-            (
-                active_buffer.id,
-                active_buffer.artifact_summary.has_control_chars(),
-            )
-        };
+        let active_buffer_id = self.active_buffer().id;
         self.split_view_for_buffer(
             self.active_view_id,
             active_buffer_id,
-            has_control_chars,
             axis,
             new_view_first,
             ratio,
@@ -179,14 +171,8 @@ impl WorkspaceTab {
         new_view_first: bool,
         ratio: f32,
     ) -> Option<ViewId> {
-        let new_view_id = self.split_view_for_buffer(
-            target_view_id,
-            buffer.id,
-            buffer.artifact_summary.has_control_chars(),
-            axis,
-            new_view_first,
-            ratio,
-        )?;
+        let new_view_id =
+            self.split_view_for_buffer(target_view_id, buffer.id, axis, new_view_first, ratio)?;
         self.extra_buffers.push(buffer);
         self.sync_active_buffer_to_active_view();
         Some(new_view_id)
@@ -255,19 +241,16 @@ impl WorkspaceTab {
         let source_view = self.view(view_id)?;
         Some(ViewPresentationState {
             show_line_numbers: source_view.show_line_numbers,
-            show_control_chars: source_view.show_control_chars,
         })
     }
 
     fn build_split_view(
         buffer_id: BufferId,
-        has_control_chars: bool,
         source_view: &EditorViewState,
         presentation: ViewPresentationState,
     ) -> EditorViewState {
-        let mut new_view = EditorViewState::new(buffer_id, false);
+        let mut new_view = EditorViewState::new(buffer_id);
         new_view.show_line_numbers = presentation.show_line_numbers;
-        new_view.show_control_chars = presentation.show_control_chars && has_control_chars;
         new_view.cursor_range = source_view.cursor_range;
         new_view.pending_cursor_range = source_view.pending_cursor_range;
         new_view.scroll = source_view.scroll.clone();
@@ -283,15 +266,13 @@ impl WorkspaceTab {
         &mut self,
         target_view_id: ViewId,
         buffer_id: BufferId,
-        has_control_chars: bool,
         axis: SplitAxis,
         new_view_first: bool,
         ratio: f32,
     ) -> Option<ViewId> {
         let presentation = self.view_presentation_state(target_view_id)?;
         let source_view = self.view(target_view_id)?;
-        let new_view =
-            Self::build_split_view(buffer_id, has_control_chars, source_view, presentation);
+        let new_view = Self::build_split_view(buffer_id, source_view, presentation);
         self.insert_split_view(target_view_id, axis, new_view, new_view_first, ratio)
     }
 

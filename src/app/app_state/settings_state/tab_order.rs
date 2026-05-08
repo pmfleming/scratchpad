@@ -357,6 +357,7 @@ mod tests {
     }
 
     fn record_edit(buffer: &mut BufferState, text: &str) {
+        buffer.document_mut().insert_direct(0, text);
         buffer.push_text_edit_operation_with_source(
             OperationRecord {
                 previous_cursor: CursorRange::one(CharCursor::new(0)),

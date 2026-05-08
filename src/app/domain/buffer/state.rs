@@ -251,6 +251,16 @@ impl BufferState {
         BufferLength::from_metrics(self.document.piece_tree().metrics(), self.line_count)
     }
 
+    pub(crate) fn has_visible_control_substitutions(&self) -> bool {
+        self.line_count > 1
+            || self.artifact_summary.has_control_chars()
+            || self
+                .document
+                .piece_tree()
+                .spans_for_range(0..self.document.piece_tree().len_chars())
+                .any(|span| span.text.contains('\t'))
+    }
+
     pub fn view_status(&self, cursor_range: Option<CursorRange>) -> BufferViewStatus {
         let (cursor_line, cursor_column, selection_chars) = cursor_range
             .map(|range| {
@@ -562,6 +572,9 @@ impl BufferState {
         self.artifact_summary = artifact_summary;
         self.document
             .set_preferred_line_ending(preferred_line_ending);
+        if self.show_control_chars && !self.has_visible_control_substitutions() {
+            self.show_control_chars = false;
+        }
         self.text_metadata_refresh_stale = false;
         self.encoding_compliance_stale = true;
     }
@@ -649,4 +662,47 @@ fn next_temp_id() -> String {
         .unwrap_or_default();
     let sequence = NEXT_TEMP_BUFFER_ID.fetch_add(1, Ordering::Relaxed);
     format!("buffer-{timestamp}-{sequence}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BufferState;
+
+    #[test]
+    fn visible_control_availability_includes_line_breaks_tabs_and_format_controls() {
+        assert!(
+            BufferState::new("sample.txt".to_owned(), "a\nb".to_owned(), None)
+                .has_visible_control_substitutions()
+        );
+        assert!(
+            BufferState::new("sample.txt".to_owned(), "a\tb".to_owned(), None)
+                .has_visible_control_substitutions()
+        );
+        assert!(
+            BufferState::new("sample.txt".to_owned(), "a\u{200E}b".to_owned(), None)
+                .has_visible_control_substitutions()
+        );
+        assert!(
+            BufferState::new(
+                "sample.txt".to_owned(),
+                "a\u{200B}\u{2060}\u{FEFF}b".to_owned(),
+                None
+            )
+            .has_visible_control_substitutions()
+        );
+        assert!(
+            !BufferState::new("sample.txt".to_owned(), "plain".to_owned(), None)
+                .has_visible_control_substitutions()
+        );
+    }
+
+    #[test]
+    fn visible_control_mode_auto_clears_when_last_substitution_disappears() {
+        let mut buffer = BufferState::new("sample.txt".to_owned(), "a\u{200E}b".to_owned(), None);
+        buffer.show_control_chars = true;
+
+        buffer.replace_text("plain".to_owned());
+
+        assert!(!buffer.show_control_chars);
+    }
 }

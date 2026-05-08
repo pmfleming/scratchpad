@@ -1153,6 +1153,17 @@ h2 {
     width: min(260px, 100%);
 }
 
+.app-package-clear-button {
+    border-color: rgba(240, 113, 120, 0.5);
+    color: #ffc1c1;
+    background: rgba(240, 113, 120, 0.12);
+}
+
+.app-package-clear-button:hover {
+    border-color: rgba(240, 113, 120, 0.82);
+    background: rgba(240, 113, 120, 0.2);
+}
+
 .app-package-count {
     display: inline-flex;
     align-items: center;
@@ -2353,11 +2364,20 @@ tr:hover td {
     white-space: nowrap;
 }
 
+.top-list-card__label--end {
+    direction: rtl;
+    text-align: left;
+}
+
 .top-list-card__label code {
     display: block;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.top-list-card__label--end code {
+    direction: rtl;
 }
 
 .top-list-card__value {

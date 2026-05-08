@@ -1,4 +1,6 @@
-use super::shared::{collect_slot_entries, slot_cell_context};
+use super::shared::{
+    attach_tab_list_background_context_menu, collect_slot_entries, slot_cell_context,
+};
 use super::{DuplicateNameCounts, apply_tab_drag_feedback};
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
@@ -72,7 +74,6 @@ fn allocate_tab_strip_entries(
         |ui| {
             configure_tab_strip_viewport(ui, layout.visible_strip_width);
             let viewport_rect = ui.max_rect();
-            maybe_auto_scroll_tab_strip(ui, app, layout, scroll_area_id, viewport_rect);
             let mut context = TabStripEntriesContext {
                 app,
                 duplicate_name_counts,
@@ -98,15 +99,23 @@ fn render_tab_strip_entries(
     scroll_area_id: egui::Id,
     context: &mut TabStripEntriesContext<'_>,
 ) -> Vec<TabRectEntry> {
-    egui::ScrollArea::horizontal()
+    let output = egui::ScrollArea::horizontal()
         .id_salt(scroll_area_id)
         .auto_shrink([false, false])
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.x = layout.spacing;
             ui.horizontal(|ui| collect_tab_entries(ui, context)).inner
-        })
-        .inner
+        });
+    maybe_auto_scroll_tab_strip(
+        ui,
+        context.app,
+        layout,
+        output.id,
+        output.inner_rect,
+        &output.state,
+    );
+    output.inner
 }
 
 fn collect_tab_entries(
@@ -190,34 +199,18 @@ fn show_scrolling_tab_strip(
         visible_tab_indices,
         outcome,
     );
-    attach_tab_list_background_context_menu(ui, background_rect, app, &entries);
+    attach_tab_list_background_context_menu(
+        ui,
+        background_rect,
+        app,
+        &entries,
+        "tab_strip_background_context",
+    );
 
     (!entries.is_empty()).then_some(TabDropZone {
         axis: TabDropAxis::Horizontal,
         entries,
     })
-}
-
-fn attach_tab_list_background_context_menu(
-    ui: &mut egui::Ui,
-    rect: egui::Rect,
-    app: &mut ScratchpadApp,
-    entries: &[TabRectEntry],
-) {
-    let pointer_pos = ui.input(|input| input.pointer.interact_pos());
-    let pointer_over_tab =
-        pointer_pos.is_some_and(|pos| entries.iter().any(|entry| entry.rect.contains(pos)));
-    if pointer_over_tab {
-        return;
-    }
-    let response = widget_ids::interact(
-        ui,
-        rect,
-        widget_ids::local(ui, "tab_strip_background_context"),
-        Sense::click(),
-        "tab_strip_background_context",
-    );
-    attach_tab_list_context_menu(&response, app);
 }
 
 fn render_new_tab_action(ui: &mut egui::Ui, app: &mut ScratchpadApp, spacing: f32) {
@@ -292,12 +285,16 @@ fn show_drag_region(
         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
     }
     if drag_response.double_clicked() {
-        let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+        toggle_viewport_maximized(ctx);
     }
     // The open strip doubles as window drag space, but a secondary click there
     // should still expose the tab-list commands.
     attach_tab_list_context_menu(&drag_response, app);
     ui.painter()
         .rect_filled(rect, 0.0, crate::app::theme::header_bg(ui));
+}
+
+fn toggle_viewport_maximized(ctx: &egui::Context) {
+    let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
+    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
 }

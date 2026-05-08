@@ -1,6 +1,4 @@
-use crate::app::domain::{
-    EditorViewState, PaneNode, PersistedHistoryEntry, SplitAxis, TextFormatMetadata,
-};
+use crate::app::domain::{PaneNode, PersistedHistoryEntry, SplitAxis, TextFormatMetadata};
 use crate::app::services::settings_store::{AppSettings, default_font_size, default_word_wrap};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -105,16 +103,17 @@ pub(crate) struct SessionView {
     pub id: u64,
     pub buffer_id: u64,
     pub show_line_numbers: bool,
+    #[serde(default, skip_serializing)]
     pub show_control_chars: bool,
 }
 
-impl From<&EditorViewState> for SessionView {
-    fn from(view: &EditorViewState) -> Self {
+impl From<&crate::app::domain::EditorViewState> for SessionView {
+    fn from(view: &crate::app::domain::EditorViewState) -> Self {
         Self {
             id: view.id,
             buffer_id: view.buffer_id,
             show_line_numbers: view.show_line_numbers,
-            show_control_chars: view.show_control_chars,
+            show_control_chars: false,
         }
     }
 }

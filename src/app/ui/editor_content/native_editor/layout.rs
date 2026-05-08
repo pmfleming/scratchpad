@@ -49,6 +49,9 @@ impl DisplayTextMap {
         &self,
         range: std::ops::Range<usize>,
     ) -> Option<std::ops::Range<usize>> {
+        // Search and selection painting use this for visible spans only:
+        // `None` means the range has no drawable extent for those callers.
+        // Cursor code should use the cursor mapping helpers instead.
         let start = self.doc_to_display_cursor(range.start);
         let end = self.doc_to_display_cursor(range.end);
         (start < end).then_some(start..end)
@@ -58,6 +61,16 @@ impl DisplayTextMap {
 struct DisplayTextSlice {
     text: String,
     map: Option<DisplayTextMap>,
+}
+
+enum CursorSubstitutionPolicy {
+    SingleCell,
+    LineEndingMarker,
+}
+
+struct VisibleControlSubstitution {
+    text: &'static str,
+    cursor_policy: CursorSubstitutionPolicy,
 }
 
 pub(super) fn build_editor_galley(
@@ -184,19 +197,24 @@ fn display_text_slice(text: &str, show_control_chars: bool) -> DisplayTextSlice 
     for doc_index in 0..doc_len {
         let ch = chars.next().unwrap_or_default();
         doc_to_display.push(display_chars);
-        let display =
-            visible_control_char(ch, chars.peek().copied()).unwrap_or_else(|| ch.to_string());
-        visible.push_str(&display);
-        let len = display.chars().count();
-        for boundary in 1..=len {
-            let doc_cursor = if boundary < len && boundary < len.div_ceil(2) {
-                doc_index
-            } else {
-                doc_index + 1
-            };
-            display_to_doc.push(doc_cursor);
+        match visible_control_char(ch, chars.peek().copied()) {
+            Some(display) => {
+                visible.push_str(display.text);
+                let len = display.text.chars().count();
+                push_display_cursor_boundaries(
+                    &mut display_to_doc,
+                    doc_index,
+                    len,
+                    display.cursor_policy,
+                );
+                display_chars += len;
+            }
+            None => {
+                visible.push(ch);
+                display_to_doc.push(doc_index + 1);
+                display_chars += 1;
+            }
         }
-        display_chars += len;
     }
     doc_to_display.push(display_chars);
 
@@ -209,47 +227,111 @@ fn display_text_slice(text: &str, show_control_chars: bool) -> DisplayTextSlice 
     }
 }
 
-fn visible_control_char(ch: char, next: Option<char>) -> Option<String> {
-    let label = match ch {
-        '\u{1B}' => return Some("␛".to_owned()),
-        '\u{0008}' => return Some("␈".to_owned()),
-        '\t' => return Some("→".to_owned()),
-        '\r' if next == Some('\n') => return Some("␍".to_owned()),
-        '\r' => return Some("␍".to_owned()),
-        '\n' => return Some("¶\n".to_owned()),
-        '\u{001E}' => "RS",
-        '\u{001F}' => "US",
-        '\u{200B}' => "ZWSP",
-        '\u{200C}' => "ZWNJ",
-        '\u{200D}' => "ZWJ",
-        '\u{200E}' => "LRM",
-        '\u{200F}' => "RLM",
-        '\u{202A}' => "LRE",
-        '\u{202B}' => "RLE",
-        '\u{202C}' => "PDF",
-        '\u{202D}' => "LRO",
-        '\u{202E}' => "RLO",
-        '\u{2060}' => "WJ",
-        '\u{2061}' => "FA",
-        '\u{2062}' => "IT",
-        '\u{2063}' => "IS",
-        '\u{2064}' => "IP",
-        '\u{2066}' => "LRI",
-        '\u{2067}' => "RLI",
-        '\u{2068}' => "FSI",
-        '\u{2069}' => "PDI",
-        '\u{206A}' => "ISS",
-        '\u{206B}' => "ASS",
-        '\u{206C}' => "IAFS",
-        '\u{206D}' => "AAFS",
-        '\u{206E}' => "NADS",
-        '\u{206F}' => "NODS",
-        '\u{FEFF}' => "BOM",
-        '\u{061C}' => "ALM",
-        _ if ch.is_control() => return Some(format!("\\x{:02X}", ch as u32)),
+fn push_display_cursor_boundaries(
+    display_to_doc: &mut Vec<usize>,
+    doc_index: usize,
+    display_len: usize,
+    policy: CursorSubstitutionPolicy,
+) {
+    for boundary in 1..=display_len {
+        let doc_cursor = match policy {
+            CursorSubstitutionPolicy::SingleCell => {
+                if boundary < display_len && boundary < display_len.div_ceil(2) {
+                    doc_index
+                } else {
+                    doc_index + 1
+                }
+            }
+            CursorSubstitutionPolicy::LineEndingMarker => {
+                if boundary < display_len {
+                    doc_index
+                } else {
+                    doc_index + 1
+                }
+            }
+        };
+        display_to_doc.push(doc_cursor);
+    }
+}
+
+fn visible_control_char(ch: char, next: Option<char>) -> Option<VisibleControlSubstitution> {
+    let (text, cursor_policy) = match ch {
+        '\t' => ("\u{2409}", CursorSubstitutionPolicy::SingleCell),
+        '\n' => ("\u{240A}\n", CursorSubstitutionPolicy::LineEndingMarker),
+        '\r' if next == Some('\n') => ("\u{240D}", CursorSubstitutionPolicy::SingleCell),
+        '\r' => ("\u{240D}\n", CursorSubstitutionPolicy::LineEndingMarker),
+        '\u{007F}' => ("\u{2421}", CursorSubstitutionPolicy::SingleCell),
+        '\u{200B}' => ("\u{F000}", CursorSubstitutionPolicy::SingleCell),
+        '\u{200C}' => ("\u{F001}", CursorSubstitutionPolicy::SingleCell),
+        '\u{200D}' => ("\u{F002}", CursorSubstitutionPolicy::SingleCell),
+        '\u{200E}' => ("\u{F003}", CursorSubstitutionPolicy::SingleCell),
+        '\u{200F}' => ("\u{F004}", CursorSubstitutionPolicy::SingleCell),
+        '\u{202A}' => ("\u{F005}", CursorSubstitutionPolicy::SingleCell),
+        '\u{202B}' => ("\u{F006}", CursorSubstitutionPolicy::SingleCell),
+        '\u{202C}' => ("\u{F007}", CursorSubstitutionPolicy::SingleCell),
+        '\u{202D}' => ("\u{F008}", CursorSubstitutionPolicy::SingleCell),
+        '\u{202E}' => ("\u{F009}", CursorSubstitutionPolicy::SingleCell),
+        '\u{2060}' => ("\u{F00A}", CursorSubstitutionPolicy::SingleCell),
+        '\u{2061}' => ("\u{F00B}", CursorSubstitutionPolicy::SingleCell),
+        '\u{2062}' => ("\u{F00C}", CursorSubstitutionPolicy::SingleCell),
+        '\u{2063}' => ("\u{F00D}", CursorSubstitutionPolicy::SingleCell),
+        '\u{2064}' => ("\u{F00E}", CursorSubstitutionPolicy::SingleCell),
+        '\u{2066}' => ("\u{F00F}", CursorSubstitutionPolicy::SingleCell),
+        '\u{2067}' => ("\u{F010}", CursorSubstitutionPolicy::SingleCell),
+        '\u{2068}' => ("\u{F011}", CursorSubstitutionPolicy::SingleCell),
+        '\u{2069}' => ("\u{F012}", CursorSubstitutionPolicy::SingleCell),
+        '\u{206A}' => ("\u{F015}", CursorSubstitutionPolicy::SingleCell),
+        '\u{206B}' => ("\u{F016}", CursorSubstitutionPolicy::SingleCell),
+        '\u{206C}' => ("\u{F017}", CursorSubstitutionPolicy::SingleCell),
+        '\u{206D}' => ("\u{F018}", CursorSubstitutionPolicy::SingleCell),
+        '\u{206E}' => ("\u{F019}", CursorSubstitutionPolicy::SingleCell),
+        '\u{206F}' => ("\u{F01A}", CursorSubstitutionPolicy::SingleCell),
+        '\u{FEFF}' => ("\u{F013}", CursorSubstitutionPolicy::SingleCell),
+        '\u{061C}' => ("\u{F014}", CursorSubstitutionPolicy::SingleCell),
+        _ if ch.is_control() && (ch as u32) <= 0x1F => {
+            (control_picture(ch), CursorSubstitutionPolicy::SingleCell)
+        }
         _ => return None,
     };
-    Some(format!("<{label}>"))
+    Some(VisibleControlSubstitution {
+        text,
+        cursor_policy,
+    })
+}
+
+fn control_picture(ch: char) -> &'static str {
+    match ch as u32 {
+        0x00 => "\u{2400}",
+        0x01 => "\u{2401}",
+        0x02 => "\u{2402}",
+        0x03 => "\u{2403}",
+        0x04 => "\u{2404}",
+        0x05 => "\u{2405}",
+        0x06 => "\u{2406}",
+        0x07 => "\u{2407}",
+        0x08 => "\u{2408}",
+        0x0B => "\u{240B}",
+        0x0C => "\u{240C}",
+        0x0E => "\u{240E}",
+        0x0F => "\u{240F}",
+        0x10 => "\u{2410}",
+        0x11 => "\u{2411}",
+        0x12 => "\u{2412}",
+        0x13 => "\u{2413}",
+        0x14 => "\u{2414}",
+        0x15 => "\u{2415}",
+        0x16 => "\u{2416}",
+        0x17 => "\u{2417}",
+        0x18 => "\u{2418}",
+        0x19 => "\u{2419}",
+        0x1A => "\u{241A}",
+        0x1B => "\u{241B}",
+        0x1C => "\u{241C}",
+        0x1D => "\u{241D}",
+        0x1E => "\u{241E}",
+        0x1F => "\u{241F}",
+        _ => "\u{2426}",
+    }
 }
 
 fn display_search_highlights(
@@ -556,7 +638,7 @@ mod tests {
     #[test]
     fn viewport_slice_ignores_offscreen_cursor_without_pending_reveal() {
         let buffer = BufferState::new("sample.txt".to_owned(), numbered_lines(200), None);
-        let mut view = EditorViewState::new(buffer.id, false);
+        let mut view = EditorViewState::new(buffer.id);
         view.cursor_range = Some(CursorRange::one(CharCursor::new(
             buffer.document().piece_tree().line_info(120).start_char,
         )));
@@ -567,7 +649,7 @@ mod tests {
     #[test]
     fn viewport_slice_can_follow_cursor_for_pending_reveal() {
         let buffer = BufferState::new("sample.txt".to_owned(), numbered_lines(200), None);
-        let mut view = EditorViewState::new(buffer.id, false);
+        let mut view = EditorViewState::new(buffer.id);
         view.cursor_range = Some(CursorRange::one(CharCursor::new(
             buffer.document().piece_tree().line_info(120).start_char,
         )));
@@ -581,23 +663,56 @@ mod tests {
         let display = display_text_slice("a\nb", true);
         let map = display.map.as_ref().unwrap();
 
-        assert_eq!(display.text, "a¶\nb");
+        assert_eq!(display.text, "a\u{240A}\nb");
         assert_eq!(map.doc_to_display_cursor(1), 1);
         assert_eq!(map.doc_to_display_cursor(2), 3);
         assert_eq!(map.display_to_doc_cursor(1), 1);
-        assert_eq!(map.display_to_doc_cursor(2), 2);
+        assert_eq!(map.display_to_doc_cursor(2), 1);
         assert_eq!(map.display_to_doc_cursor(3), 2);
     }
 
     #[test]
-    fn visible_unicode_controls_expand_but_select_one_document_char() {
+    fn visible_unicode_controls_use_private_use_glyphs() {
         let display = display_text_slice("a\u{200E}b", true);
         let map = display.map.as_ref().unwrap();
 
-        assert_eq!(display.text, "a<LRM>b");
-        assert_eq!(map.doc_range_to_display(1..2), Some(1..6));
-        assert_eq!(map.display_to_doc_cursor(3), 1);
-        assert_eq!(map.display_to_doc_cursor(4), 2);
+        assert_eq!(display.text, "a\u{F003}b");
+        assert_eq!(map.doc_range_to_display(1..2), Some(1..2));
+        assert_eq!(map.display_to_doc_cursor(1), 1);
+        assert_eq!(map.display_to_doc_cursor(2), 2);
+    }
+
+    #[test]
+    fn visible_c0_and_del_controls_use_control_pictures() {
+        let display = display_text_slice("\u{0000}\u{001B}\u{007F}", true);
+
+        assert_eq!(display.text, "\u{2400}\u{241B}\u{2421}");
+    }
+
+    #[test]
+    fn visible_bare_cr_creates_display_row_break() {
+        let display = display_text_slice("a\rb", true);
+        let map = display.map.as_ref().unwrap();
+
+        assert_eq!(display.text, "a\u{240D}\nb");
+        assert_eq!(map.doc_to_display_cursor(1), 1);
+        assert_eq!(map.doc_to_display_cursor(2), 3);
+        assert_eq!(map.display_to_doc_cursor(2), 1);
+        assert_eq!(map.display_to_doc_cursor(3), 2);
+    }
+
+    #[test]
+    fn visible_crlf_pins_each_line_ending_char() {
+        let display = display_text_slice("a\r\nb", true);
+        let map = display.map.as_ref().unwrap();
+
+        assert_eq!(display.text, "a\u{240D}\u{240A}\nb");
+        assert_eq!(map.doc_to_display_cursor(1), 1);
+        assert_eq!(map.doc_to_display_cursor(2), 2);
+        assert_eq!(map.doc_to_display_cursor(3), 4);
+        assert_eq!(map.display_to_doc_cursor(2), 2);
+        assert_eq!(map.display_to_doc_cursor(3), 2);
+        assert_eq!(map.display_to_doc_cursor(4), 3);
     }
 
     fn numbered_lines(count: usize) -> String {

@@ -106,20 +106,32 @@ pub(crate) fn header_row(
     close_tooltip: &str,
     add_leading: impl FnOnce(&mut egui::Ui),
 ) -> bool {
-    ui.allocate_ui_with_layout(
-        egui::vec2(ui.available_width(), CAPTION_BUTTON_SIZE.y),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            add_leading(ui);
+    let row_width = ui.available_width();
+    let row_height = CAPTION_BUTTON_SIZE.y;
+    let (row_rect, _) =
+        ui.allocate_exact_size(egui::vec2(row_width, row_height), egui::Sense::hover());
+    let close_rect = egui::Rect::from_min_size(
+        egui::pos2(row_rect.right() - CAPTION_BUTTON_SIZE.x, row_rect.top()),
+        CAPTION_BUTTON_SIZE,
+    );
+    let leading_rect = egui::Rect::from_min_max(
+        row_rect.min,
+        egui::pos2(
+            (close_rect.left() - 6.0).max(row_rect.left()),
+            row_rect.bottom(),
+        ),
+    );
 
-            let trailing_space = (ui.available_width() - CAPTION_BUTTON_SIZE.x).max(0.0);
-            if trailing_space > 0.0 {
-                ui.add_space(trailing_space);
-            }
+    ui.scope_builder(egui::UiBuilder::new().max_rect(leading_rect), |ui| {
+        ui.with_layout(
+            egui::Layout::left_to_right(egui::Align::Center),
+            add_leading,
+        );
+    });
 
-            close_button(ui, (surface_key, "close"), close_tooltip).clicked()
-        },
-    )
+    ui.scope_builder(egui::UiBuilder::new().max_rect(close_rect), |ui| {
+        close_button(ui, (surface_key, "close"), close_tooltip).clicked()
+    })
     .inner
 }
 

@@ -32,8 +32,8 @@ fn coalescable_edit_text(edit: &TextDocumentEditOperation) -> bool {
 }
 
 /// Decide whether the latest entry has been "sealed" by a divider in its
-/// inserted text. Hard dividers always seal; soft dividers seal only if the
-/// user paused after typing them.
+/// edit text. Hard dividers always seal insert and delete bursts; soft dividers
+/// seal insert bursts only if the user paused after typing them.
 pub(crate) fn entry_sealed_by_divider(
     latest: &TextDocumentOperationRecord,
     elapsed: Option<std::time::Duration>,
@@ -41,15 +41,20 @@ pub(crate) fn entry_sealed_by_divider(
     let Some(edit) = latest.edits.last() else {
         return false;
     };
-    let Some(last_char) = edit.inserted_text.chars().next_back() else {
-        return false;
-    };
-    if is_hard_divider(last_char) {
-        return true;
+
+    if edit.inserted_text.is_empty() && !edit.deleted_text.is_empty() {
+        return edit.deleted_text.chars().any(is_hard_divider);
     }
-    if is_soft_divider(last_char) {
-        return elapsed.is_none_or(|d| d >= TEXT_HISTORY_SOFT_DIVIDER_PAUSE);
+
+    if let Some(last_char) = edit.inserted_text.chars().next_back() {
+        if is_hard_divider(last_char) {
+            return true;
+        }
+        if is_soft_divider(last_char) {
+            return elapsed.is_none_or(|d| d >= TEXT_HISTORY_SOFT_DIVIDER_PAUSE);
+        }
     }
+
     false
 }
 
@@ -95,6 +100,22 @@ fn coalesce_into_inserted_text(
     let inserted_start = latest_edit.start_char;
     let incoming_end = incoming_edit.start_char.checked_add(deleted_len)?;
     let inserted_end = inserted_start.checked_add(inserted_len)?;
+    // This preserves scripted/local-correction batches where the editor keeps
+    // cursor continuity while deleting the character immediately before the
+    // burst. Natural click/arrow movement still starts a new history entry.
+    if incoming_edit.inserted_text.is_empty()
+        && deleted_len == 1
+        && incoming_end == inserted_start
+        && !incoming_edit.deleted_text.chars().any(is_hard_divider)
+    {
+        latest_edit.start_char = incoming_edit.start_char;
+        latest_edit.deleted_text =
+            format!("{}{}", incoming_edit.deleted_text, latest_edit.deleted_text);
+        latest_edit.deleted_spans = incoming_edit.deleted_spans.clone();
+        latest.next_selection = incoming.next_selection;
+        return Some(CoalescedEdit::Record(latest));
+    }
+
     if incoming_edit.start_char < inserted_start || incoming_end > inserted_end {
         return None;
     }
@@ -123,6 +144,9 @@ fn coalesce_after_delete(
     let incoming_edit = incoming.edits.first()?;
     let latest_start = latest_edit.start_char;
     let incoming_deleted_len = incoming_edit.deleted_text.chars().count();
+    if incoming_edit.deleted_text.chars().any(is_hard_divider) {
+        return None;
+    }
     let merged = match (
         incoming_edit.deleted_text.is_empty(),
         incoming_edit.inserted_text.is_empty(),

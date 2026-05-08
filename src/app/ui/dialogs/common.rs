@@ -1,5 +1,4 @@
 use crate::app::fonts::EDITOR_FONT_FAMILY;
-use crate::app::theme::CAPTION_BUTTON_SIZE;
 use crate::app::ui::callout;
 use crate::app::ui::widget_ids;
 use eframe::egui;
@@ -51,43 +50,36 @@ pub(super) fn apply_editor_dialog_typography(ui: &mut egui::Ui) {
 }
 
 pub(super) fn render_dialog_header(ui: &mut egui::Ui, title: &str) -> bool {
-    ui.allocate_ui_with_layout(
-        egui::vec2(ui.available_width(), CAPTION_BUTTON_SIZE.y),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            ui.label(
-                egui::RichText::new(FILE_TEXT)
-                    .size(16.0)
-                    .color(callout::muted_text(ui)),
-            );
-            ui.add_space(6.0);
+    callout::header_row(ui, ("dialog_header", title), "Cancel", |ui| {
+        ui.label(
+            egui::RichText::new(FILE_TEXT)
+                .size(16.0)
+                .color(callout::muted_text(ui)),
+        );
+        ui.add_space(6.0);
 
-            let label_width = (ui.available_width() - CAPTION_BUTTON_SIZE.x - 6.0).max(0.0);
-            let label = truncate_dialog_title(ui, title, label_width);
-            let label_response = widget_ids::surface_response(
-                ui,
-                ("dialog_header.title", title),
-                widget_ids::WidgetRole::Label,
-                |ui| {
-                    ui.add_sized(
-                        egui::vec2(label_width, 0.0),
-                        egui::Label::new(
-                            egui::RichText::new(&label)
-                                .size(15.0)
-                                .monospace()
-                                .color(callout::text(ui)),
-                        ),
-                    )
-                },
-            );
-            if label != title {
-                label_response.on_hover_text(title);
-            }
-
-            callout::close_button(ui, ("dialog_header", title), "Cancel").clicked()
-        },
-    )
-    .inner
+        let label_width = (ui.available_width() - 6.0).max(0.0);
+        let label = truncate_dialog_title(ui, title, label_width);
+        let label_response = widget_ids::surface_response(
+            ui,
+            ("dialog_header.title", title),
+            widget_ids::WidgetRole::Label,
+            |ui| {
+                ui.add_sized(
+                    egui::vec2(label_width, 0.0),
+                    egui::Label::new(
+                        egui::RichText::new(&label)
+                            .size(15.0)
+                            .monospace()
+                            .color(callout::text(ui)),
+                    ),
+                )
+            },
+        );
+        if label != title {
+            label_response.on_hover_text(title);
+        }
+    })
 }
 
 fn truncate_dialog_title(ui: &egui::Ui, title: &str, max_width: f32) -> String {

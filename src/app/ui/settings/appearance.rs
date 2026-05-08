@@ -25,6 +25,18 @@ enum ThemeModeSelection {
     Custom,
 }
 
+const THEME_MODE_OPTIONS: [ThemeModeSelection; 3] = [
+    ThemeModeSelection::System,
+    ThemeModeSelection::Light,
+    ThemeModeSelection::Dark,
+];
+const THEME_MODE_OPTIONS_WITH_CUSTOM: [ThemeModeSelection; 4] = [
+    ThemeModeSelection::System,
+    ThemeModeSelection::Light,
+    ThemeModeSelection::Dark,
+    ThemeModeSelection::Custom,
+];
+
 impl ThemeModeSelection {
     fn label(self) -> &'static str {
         match self {
@@ -46,20 +58,20 @@ impl ThemeModeSelection {
 }
 
 pub(super) fn render_appearance_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    category_heading(ui, "Appearance");
-    expandable_card(
+    category_card(
         ui,
+        "Appearance",
         "settings_appearance_card",
         egui_phosphor::regular::SUN,
         "Theme",
-        "Choose the app mode and editor colors.",
+        "Mode and editor colors.",
         true,
         |ui| {
             render_theme_mode_row(ui, app);
             render_color_row(
                 ui,
                 "Text color",
-                "Defaults follow the selected mode until you override it here.",
+                "Overrides mode defaults.",
                 app.editor_text_color(),
                 |app, color| app.set_editor_text_color(color),
                 app,
@@ -67,7 +79,7 @@ pub(super) fn render_appearance_category(ui: &mut egui::Ui, app: &mut Scratchpad
             render_color_row(
                 ui,
                 "Background",
-                "Defaults follow the selected mode until you override it here.",
+                "Overrides mode defaults.",
                 app.editor_background_color(),
                 |app, color| app.set_editor_background_color(color),
                 app,
@@ -75,7 +87,7 @@ pub(super) fn render_appearance_category(ui: &mut egui::Ui, app: &mut Scratchpad
             render_color_row(
                 ui,
                 "Highlight",
-                "Used for search match highlighting in the editor.",
+                "Search match color.",
                 app.editor_text_highlight_color(),
                 |app, color| app.set_editor_text_highlight_color(color),
                 app,
@@ -87,13 +99,13 @@ pub(super) fn render_appearance_category(ui: &mut egui::Ui, app: &mut Scratchpad
 }
 
 pub(super) fn render_tab_position_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    category_heading(ui, "Tab Position");
-    expandable_card(
+    category_card(
         ui,
+        "Tab Position",
         "settings_tab_position_card",
         egui_phosphor::regular::TEXT_OUTDENT,
         "Tab list",
-        "Choose where tabs live and how long auto-hidden lists stay visible.",
+        "Tab placement and visibility.",
         true,
         |ui| {
             render_tab_list_row(ui, app);
@@ -110,46 +122,24 @@ pub(super) fn render_tab_position_category(ui: &mut egui::Ui, app: &mut Scratchp
 }
 
 fn render_theme_mode_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    inner_select_row(
+    let description = format!("App mode. Detected: {}.", detected_system_theme_label(ui));
+    let options = if app.has_custom_editor_palette() {
+        &THEME_MODE_OPTIONS_WITH_CUSTOM[..]
+    } else {
+        &THEME_MODE_OPTIONS[..]
+    };
+    let system_theme = ui.ctx().system_theme();
+    combo_select_row(
         ui,
         "Mode",
-        Some("Follow Windows, force a mode, or show Custom while colors are overridden."),
-        |ui| {
-            let has_custom_palette = app.has_custom_editor_palette();
-            let initial_selection = selected_theme_mode(app);
-            let mut selected_mode = initial_selection;
-            fixed_width_control(ui, |ui| {
-                let control_width = SettingsUi::control_width(ui);
-                widget_ids::combo_box(ui, "settings_theme_mode")
-                    .selected_text(selected_mode.pill_label())
-                    .width(control_width)
-                    .show_ui(ui, |ui| {
-                        for mode in [
-                            ThemeModeSelection::System,
-                            ThemeModeSelection::Light,
-                            ThemeModeSelection::Dark,
-                        ] {
-                            ui.selectable_value(&mut selected_mode, mode, mode.label());
-                        }
-                        if has_custom_palette {
-                            ui.selectable_value(
-                                &mut selected_mode,
-                                ThemeModeSelection::Custom,
-                                ThemeModeSelection::Custom.label(),
-                            );
-                        }
-                    });
-            });
-            if selected_mode != initial_selection {
-                apply_theme_mode_selection(app, selected_mode, ui.ctx().system_theme());
-            }
-            ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new(format!("Detected: {}", detected_system_theme_label(ui)))
-                    .size(SettingsUi::TYPOGRAPHY.description)
-                    .color(text_muted(ui)),
-            );
-        },
+        Some(&description),
+        "settings_theme_mode",
+        "combo.Theme mode",
+        selected_theme_mode(app),
+        options,
+        ThemeModeSelection::pill_label,
+        ThemeModeSelection::label,
+        |mode| apply_theme_mode_selection(app, mode, system_theme),
     );
     inner_divider(ui);
 }
@@ -164,7 +154,9 @@ fn render_color_row(
 ) {
     inner_select_row(ui, label, Some(description), |ui| {
         let mut color = initial_color;
-        if ui.color_edit_button_srgba(&mut color).changed() {
+        let response = ui.color_edit_button_srgba(&mut color);
+        record_settings_control_box(format!("color.{label}"), response.rect);
+        if response.changed() {
             on_change(app, color);
         }
     });
@@ -172,60 +164,32 @@ fn render_color_row(
 }
 
 fn render_tab_list_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    inner_select_row(
+    combo_select_row(
         ui,
         "Tab list",
-        Some("Use a horizontal strip or a vertical list on either side."),
-        |ui| {
-            let mut selected_position = app.tab_list_position();
-            fixed_width_control(ui, |ui| {
-                let control_width = SettingsUi::control_width(ui);
-                widget_ids::combo_box(ui, "settings_tab_list_position")
-                    .selected_text(tab_list_position_label(selected_position))
-                    .width(control_width)
-                    .show_ui(ui, |ui| {
-                        for position in TAB_LIST_POSITIONS {
-                            ui.selectable_value(
-                                &mut selected_position,
-                                position,
-                                tab_list_position_label(position),
-                            );
-                        }
-                    });
-            });
-            if selected_position != app.tab_list_position() {
-                app.set_tab_list_position(selected_position);
-            }
-        },
+        Some("Strip or side list."),
+        "settings_tab_list_position",
+        "combo.Tab list",
+        app.tab_list_position(),
+        &TAB_LIST_POSITIONS,
+        tab_list_position_label,
+        tab_list_position_label,
+        |position| app.set_tab_list_position(position),
     );
 }
 
 fn render_new_tab_placement_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    inner_select_row(
+    combo_select_row(
         ui,
         "New tabs",
-        Some("Choose where newly opened tabs are placed."),
-        |ui| {
-            let mut selected = app.new_tab_placement();
-            fixed_width_control(ui, |ui| {
-                let control_width = SettingsUi::control_width(ui);
-                widget_ids::combo_box(ui, "settings_new_tab_placement")
-                    .selected_text(new_tab_placement_pill_label(selected))
-                    .width(control_width)
-                    .show_ui(ui, |ui| {
-                        for placement in NEW_TAB_PLACEMENT_OPTIONS {
-                            ui.selectable_value(
-                                &mut selected,
-                                placement,
-                                new_tab_placement_label(placement),
-                            );
-                        }
-                    });
-            });
-            if selected != app.new_tab_placement() {
-                app.set_new_tab_placement(selected);
-            }
-        },
+        Some("Placement for new tabs."),
+        "settings_new_tab_placement",
+        "combo.New tabs",
+        app.new_tab_placement(),
+        &NEW_TAB_PLACEMENT_OPTIONS,
+        new_tab_placement_pill_label,
+        new_tab_placement_label,
+        |placement| app.set_new_tab_placement(placement),
     );
 }
 
@@ -257,17 +221,13 @@ fn new_tab_placement_pill_label(placement: NewTabPlacement) -> &'static str {
 }
 
 fn render_auto_hide_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    inner_select_row(
+    toggle_select_row(
         ui,
         "Auto-hide tab list",
-        Some("Collapse the active tab list until the pointer nears it."),
-        |ui| {
-            let mut enabled = app.auto_hide_tab_list();
-            toggle_control(ui, "settings.auto_hide_tab_list", &mut enabled);
-            if enabled != app.auto_hide_tab_list() {
-                app.set_auto_hide_tab_list(enabled);
-            }
-        },
+        Some("Collapse until pointer is near."),
+        "settings.auto_hide_tab_list",
+        app.auto_hide_tab_list(),
+        |enabled| app.set_auto_hide_tab_list(enabled),
     );
 }
 
@@ -275,32 +235,25 @@ fn render_auto_hide_delay_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     inner_select_row(
         ui,
         "Auto-hide delay",
-        Some("Keep the active tab list open for a short grace period after it loses context."),
+        Some("Grace period before collapse."),
         |ui| {
-            let current_index =
-                nearest_auto_hide_delay_index(app.tab_list_auto_hide_delay_seconds());
+            let current_index = nearest_option_index(
+                app.tab_list_auto_hide_delay_seconds(),
+                &AUTO_HIDE_DELAY_OPTIONS,
+                |seconds| seconds,
+            );
             let mut selected_index = current_index as u32;
-            let control_width = SettingsUi::control_width(ui);
-            widget_ids::surface_response(
+            let delay_label =
+                auto_hide_delay_label(AUTO_HIDE_DELAY_OPTIONS[selected_index as usize]);
+            u32_slider_value_control(
                 ui,
                 "settings.auto_hide_delay.slider",
-                widget_ids::WidgetRole::ActionButton,
-                |ui| {
-                    ui.add_sized(
-                        egui::vec2(control_width, 0.0),
-                        egui::Slider::new(
-                            &mut selected_index,
-                            0..=(AUTO_HIDE_DELAY_OPTIONS.len() - 1) as u32,
-                        )
-                        .step_by(1.0)
-                        .show_value(false),
-                    )
-                },
+                "slider.Auto-hide delay",
+                &mut selected_index,
+                0..=(AUTO_HIDE_DELAY_OPTIONS.len() - 1) as u32,
+                52.0,
+                delay_label,
             );
-            ui.add_space(8.0);
-            ui.label(auto_hide_delay_label(
-                AUTO_HIDE_DELAY_OPTIONS[selected_index as usize],
-            ));
 
             if selected_index as usize != current_index {
                 app.set_tab_list_auto_hide_delay_seconds(
@@ -312,33 +265,15 @@ fn render_auto_hide_delay_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 }
 
 fn render_status_bar_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    inner_select_row(
+    let ctx = ui.ctx().clone();
+    toggle_select_row(
         ui,
         "Status bar",
-        Some(
-            "Show or hide the bottom status strip with file, line, encoding, and utility controls.",
-        ),
-        |ui| {
-            let mut visible = app.status_bar_visible();
-            toggle_control(ui, "settings.status_bar_visible", &mut visible);
-            if visible != app.status_bar_visible() {
-                app.defer_status_bar_visible(visible, ui.ctx());
-            }
-        },
+        Some("Show the bottom status strip."),
+        "settings.status_bar_visible",
+        app.status_bar_visible(),
+        |visible| app.defer_status_bar_visible(visible, &ctx),
     );
-}
-
-fn nearest_auto_hide_delay_index(seconds: f32) -> usize {
-    AUTO_HIDE_DELAY_OPTIONS
-        .iter()
-        .enumerate()
-        .min_by(|(_, left), (_, right)| {
-            let left_distance = (seconds - **left).abs();
-            let right_distance = (seconds - **right).abs();
-            left_distance.total_cmp(&right_distance)
-        })
-        .map(|(index, _)| index)
-        .unwrap_or(0)
 }
 
 fn auto_hide_delay_label(seconds: f32) -> String {

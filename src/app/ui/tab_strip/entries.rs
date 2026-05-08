@@ -54,23 +54,27 @@ fn update_reordered_tabs(
     outcome: &mut TabStripOutcome,
 ) {
     if let Some(commit) = tab_drag::update_tab_drag(ui, drop_zones, tab_count) {
-        match commit {
-            tab_drag::TabDragCommit::Reorder {
-                from_index,
-                to_index,
-            } => outcome.reordered_tabs = Some((from_index, to_index)),
-            tab_drag::TabDragCommit::ReorderGroup {
-                from_indices,
-                to_index,
-            } => outcome.reordered_tab_group = Some((from_indices, to_index)),
-            tab_drag::TabDragCommit::Combine {
-                source_index,
-                target_index,
-            } => outcome.combined_tabs = Some((source_index, target_index)),
-            tab_drag::TabDragCommit::CombineGroup {
-                source_indices,
-                target_index,
-            } => outcome.combined_tab_group = Some((source_indices, target_index)),
-        }
+        apply_tab_drag_commit(outcome, commit);
+    }
+}
+
+fn apply_tab_drag_commit(outcome: &mut TabStripOutcome, commit: tab_drag::TabDragCommit) {
+    match commit {
+        tab_drag::TabDragCommit::Reorder {
+            from_index,
+            to_index,
+        } => outcome.reordered_tabs = Some((from_index, to_index)),
+        tab_drag::TabDragCommit::ReorderGroup {
+            from_indices,
+            to_index,
+        } => outcome.reordered_tab_group = Some((from_indices, to_index)),
+        tab_drag::TabDragCommit::Combine {
+            source_index,
+            target_index,
+        } => outcome.combined_tabs = Some((source_index, target_index)),
+        tab_drag::TabDragCommit::CombineGroup {
+            source_indices,
+            target_index,
+        } => outcome.combined_tab_group = Some((source_indices, target_index)),
     }
 }

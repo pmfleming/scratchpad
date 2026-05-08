@@ -51,17 +51,51 @@ pub(crate) fn maybe_auto_scroll_tab_strip(
     layout: &HeaderLayout,
     scroll_area_id: egui::Id,
     viewport_rect: egui::Rect,
+    scroll_state: &egui::scroll_area::State,
 ) {
-    if let Some(scroll_state) = egui::scroll_area::State::load(ui.ctx(), scroll_area_id) {
-        crate::app::ui::tab_drag::auto_scroll_tab_list(
-            ui.ctx(),
-            scroll_area_id,
-            viewport_rect,
-            app.estimated_tab_strip_width(layout.spacing),
-            &scroll_state,
-            crate::app::ui::tab_drag::TabDropAxis::Horizontal,
-        );
-    }
+    maybe_auto_scroll_tab_list(
+        ui,
+        scroll_area_id,
+        viewport_rect,
+        app.estimated_tab_strip_width(layout.spacing),
+        scroll_state,
+        crate::app::ui::tab_drag::TabDropAxis::Horizontal,
+    );
+}
+
+pub(crate) fn maybe_auto_scroll_vertical_tab_list(
+    ui: &mut egui::Ui,
+    scroll_area_id: egui::Id,
+    viewport_rect: egui::Rect,
+    estimated_content_height: f32,
+    scroll_state: &egui::scroll_area::State,
+) {
+    maybe_auto_scroll_tab_list(
+        ui,
+        scroll_area_id,
+        viewport_rect,
+        estimated_content_height,
+        scroll_state,
+        crate::app::ui::tab_drag::TabDropAxis::Vertical,
+    );
+}
+
+fn maybe_auto_scroll_tab_list(
+    ui: &mut egui::Ui,
+    scroll_area_id: egui::Id,
+    viewport_rect: egui::Rect,
+    estimated_content_extent: f32,
+    scroll_state: &egui::scroll_area::State,
+    axis: crate::app::ui::tab_drag::TabDropAxis,
+) {
+    crate::app::ui::tab_drag::auto_scroll_tab_list(
+        ui.ctx(),
+        scroll_area_id,
+        viewport_rect,
+        estimated_content_extent,
+        scroll_state,
+        axis,
+    );
 }
 
 pub(crate) fn maybe_scroll_to_active_tab(

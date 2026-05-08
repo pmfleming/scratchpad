@@ -2,11 +2,14 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::chrome::tab_button_sized;
 use crate::app::domain::WorkspaceTab;
 use crate::app::ui::tab_drag::{self, TabRectEntry};
-use crate::app::ui::tab_strip::context_menu::attach_tab_context_menu;
+use crate::app::ui::tab_strip::context_menu::{
+    attach_tab_context_menu, attach_tab_list_context_menu,
+};
 use crate::app::ui::tab_strip::tab_cell::{TabCellOutcome, TabCellProps};
 use crate::app::ui::tab_strip::{
     TabStripOutcome, apply_tab_interaction, maybe_scroll_to_active_tab, render_tab_cell_sized,
 };
+use crate::app::ui::widget_ids;
 use eframe::egui;
 use std::collections::HashMap;
 
@@ -53,6 +56,31 @@ pub(super) fn collect_slot_entries(
     }
 
     entries
+}
+
+pub(super) fn attach_tab_list_background_context_menu(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    app: &mut ScratchpadApp,
+    entries: &[TabRectEntry],
+    id: &'static str,
+) {
+    if pointer_over_tab_entry(ui, entries) {
+        return;
+    }
+    let response = widget_ids::interact(
+        ui,
+        rect,
+        widget_ids::local(ui, id),
+        egui::Sense::click(),
+        id,
+    );
+    attach_tab_list_context_menu(&response, app);
+}
+
+fn pointer_over_tab_entry(ui: &egui::Ui, entries: &[TabRectEntry]) -> bool {
+    ui.input(|input| input.pointer.interact_pos())
+        .is_some_and(|pos| entries.iter().any(|entry| entry.rect.contains(pos)))
 }
 
 fn render_tab_slot_cell(

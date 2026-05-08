@@ -32,6 +32,7 @@ pub struct TextDocument {
     history_budget: TextHistoryBudget,
     latest_operation_record: Option<TextDocumentOperationRecord>,
     latest_history_update_at: Option<Instant>,
+    pending_history_generation_before: Option<u32>,
     preferred_line_ending: LineEndingStyle,
 }
 
@@ -53,6 +54,7 @@ impl TextDocument {
             history_budget: TextHistoryBudget::default(),
             latest_operation_record: None,
             latest_history_update_at: None,
+            pending_history_generation_before: None,
             preferred_line_ending,
         }
     }
@@ -114,6 +116,7 @@ impl TextDocument {
         self.history.clear();
         self.latest_operation_record = None;
         self.latest_history_update_at = None;
+        self.pending_history_generation_before = None;
         self.revision_counter = self.revision_counter.wrapping_add(1);
     }
 
@@ -178,6 +181,7 @@ impl TextDocument {
             let entry = self.import_history_entry(persisted);
             self.history.push(entry);
         }
+        self.normalize_imported_redo_state();
         self.next_history_id = max_id.saturating_add(1).max(1);
         self.revision_counter = self.revision_counter.wrapping_add(1);
         self.enforce_history_budget();
@@ -226,6 +230,7 @@ impl TextDocument {
         }
 
         validate_replacements(replacements, self.piece_tree.len_chars())?;
+        self.capture_pending_history_generation_before();
 
         let mut operation_record = TextDocumentOperationRecord {
             previous_selection,
@@ -288,6 +293,7 @@ impl TextDocument {
 
     /// Insert text directly via piece tree.
     pub fn insert_direct(&mut self, char_index: usize, text: &str) {
+        self.capture_pending_history_generation_before();
         self.insert_raw_text_with_source(text, char_index, PieceSource::Edit);
     }
 
@@ -297,6 +303,7 @@ impl TextDocument {
         text: &str,
         source: PieceSource,
     ) {
+        self.capture_pending_history_generation_before();
         self.insert_raw_text_with_source(text, char_index, source);
     }
 
@@ -309,6 +316,7 @@ impl TextDocument {
 
     /// Delete a char range directly via piece tree.
     pub fn delete_char_range_direct(&mut self, char_range: Range<usize>) {
+        self.capture_pending_history_generation_before();
         self.delete_char_range_internal(char_range);
     }
 
@@ -373,6 +381,16 @@ impl TextDocument {
                 .flat_map(PieceHistoryEdit::spans)
                 .map(|span| self.piece_tree.text_for_span(span)),
         )
+    }
+
+    fn visible_generation(&self) -> u32 {
+        self.piece_tree.generation().min(u32::MAX as u64) as u32
+    }
+
+    fn capture_pending_history_generation_before(&mut self) {
+        if self.pending_history_generation_before.is_none() {
+            self.pending_history_generation_before = Some(self.visible_generation());
+        }
     }
 }
 

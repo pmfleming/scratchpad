@@ -172,12 +172,12 @@ impl InspectionState {
 fn is_unicode_format_control(ch: char) -> bool {
     matches!(
         ch,
-        '\u{200C}'
-            | '\u{200D}'
-            | '\u{200E}'
-            | '\u{200F}'
+        '\u{061C}'
+            | '\u{200B}'..='\u{200F}'
             | '\u{202A}'..='\u{202E}'
-            | '\u{206A}'..='\u{206F}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}'
+            | '\u{FEFF}'
     )
 }
 

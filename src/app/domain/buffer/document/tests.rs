@@ -296,6 +296,233 @@ fn target_history_undo_replays_clicked_entry_and_later_entries() {
     assert_eq!(document.operation_redo_depth(), 2);
 }
 
+#[test]
+fn undo_then_typing_clears_redo_without_coalescing_into_survivor() {
+    let mut document = empty_document!();
+    insert_isolated_sequence!(&mut document, "abc");
+
+    document.undo_last_operation();
+    insert_edit(&mut document, 2, "x");
+
+    assert_eq!(document.extract_text(), "abx");
+    assert_eq!(document.operation_undo_depth(), 3);
+    assert_eq!(document.operation_redo_depth(), 0);
+    assert_entry_inserted_text!(&document, 1, "b");
+    assert_entry_inserted_text!(&document, 2, "x");
+}
+
+#[test]
+fn redo_then_typing_starts_a_new_coalescing_boundary() {
+    let mut document = empty_document!();
+    insert_isolated_sequence!(&mut document, "ab");
+
+    document.undo_last_operation();
+    document.redo_last_operation();
+    insert_edit(&mut document, 2, "c");
+
+    assert_eq!(document.extract_text(), "abc");
+    assert_eq!(document.operation_undo_depth(), 3);
+    assert_entry_inserted_text!(&document, 1, "b");
+    assert_entry_inserted_text!(&document, 2, "c");
+}
+
+#[test]
+fn empty_replacement_does_not_enter_history_or_clear_redo() {
+    let mut document = empty_document!();
+    insert_isolated_sequence!(&mut document, "ab");
+    document.undo_last_operation();
+    let revision_before = document.history_revision_counter();
+
+    document
+        .replace_char_ranges_with_undo(&[(1..1, String::new())], cursor(1), cursor(1))
+        .unwrap();
+
+    assert_eq!(document.extract_text(), "a");
+    assert_eq!(document.history_revision_counter(), revision_before);
+    assert_eq!(document.operation_undo_depth(), 1);
+    assert_eq!(document.operation_redo_depth(), 1);
+    assert!(document.latest_operation_record().is_some());
+}
+
+#[test]
+fn no_op_edits_are_dropped_from_multi_edit_records() {
+    let mut document = TextDocument::new("ab".to_owned());
+    let before = document.visible_generation();
+    document.capture_pending_history_generation_before();
+    document.delete_char_range_direct(1..2);
+    document.push_operation_record(
+        TextDocumentOperationRecord {
+            previous_selection: cursor(2),
+            next_selection: cursor(1),
+            edits: vec![
+                TextDocumentEditOperation {
+                    start_char: 0,
+                    deleted_text: String::new(),
+                    inserted_text: String::new(),
+                    deleted_spans: Vec::new(),
+                },
+                TextDocumentEditOperation {
+                    start_char: 1,
+                    deleted_text: "b".to_owned(),
+                    inserted_text: String::new(),
+                    deleted_spans: Vec::new(),
+                },
+            ],
+        },
+        PieceSource::SearchReplace,
+    );
+
+    assert_eq!(document.extract_text(), "a");
+    assert_eq!(document.operation_undo_depth(), 1);
+    let record = history_record(&document);
+    assert_eq!(record.edits.len(), 1);
+    assert_eq!(record.edits[0].deleted_text, "b");
+    assert_eq!(
+        document.history_entries()[0].visible_generation_before,
+        before
+    );
+}
+
+#[test]
+fn per_file_entry_limit_evicts_oldest_entries() {
+    let mut document = empty_document!();
+    document.set_history_budget(TextHistoryBudget {
+        per_file_entry_limit: 100,
+        per_file_byte_budget: 64 * 1024 * 1024,
+        aggregate_byte_budget: 64 * 1024 * 1024,
+        persisted_payload_budget: 64 * 1024 * 1024,
+        derived_from_memory: false,
+    });
+
+    for index in 0..105 {
+        document.latest_history_update_at = None;
+        insert_edit(&mut document, index, "x");
+    }
+
+    assert_eq!(document.history_entries().len(), 100);
+    assert_eq!(document.operation_undo_depth(), 100);
+    assert_eq!(document.extract_text(), "x".repeat(105));
+    let first_record = entry_record(&document, 0);
+    assert_eq!(first_record.edits[0].start_char, 5);
+}
+
+#[test]
+fn budget_shrink_eviction_bumps_history_revision() {
+    let mut document = empty_document!();
+    insert_isolated_sequence!(&mut document, &"x".repeat(105));
+    let revision_before = document.history_revision_counter();
+
+    document.set_history_budget(TextHistoryBudget {
+        per_file_entry_limit: 100,
+        per_file_byte_budget: 64 * 1024 * 1024,
+        aggregate_byte_budget: 64 * 1024 * 1024,
+        persisted_payload_budget: 64 * 1024 * 1024,
+        derived_from_memory: false,
+    });
+
+    assert_eq!(document.history_entries().len(), 100);
+    assert_ne!(document.history_revision_counter(), revision_before);
+}
+
+#[test]
+fn compaction_keeps_retained_history_replayable() {
+    let mut document = empty_document!();
+    insert_isolated_sequence!(&mut document, "abc");
+
+    document.drop_oldest_history_entry();
+
+    assert_eq!(document.extract_text(), "abc");
+    document.undo_last_operation();
+    assert_eq!(document.extract_text(), "ab");
+    document.redo_last_operation();
+    assert_eq!(document.extract_text(), "abc");
+}
+
+#[test]
+fn backspace_across_hard_dividers_starts_new_entries() {
+    let mut document = TextDocument::new("a.b".to_owned());
+
+    delete_edit(&mut document, 2..3, 3, 2);
+    delete_edit(&mut document, 1..2, 2, 1);
+    delete_edit(&mut document, 0..1, 1, 0);
+
+    assert_eq!(document.extract_text(), "");
+    assert_eq!(document.operation_undo_depth(), 3);
+    assert_eq!(entry_record(&document, 0).edits[0].deleted_text, "b");
+    assert_eq!(entry_record(&document, 1).edits[0].deleted_text, ".");
+    assert_eq!(entry_record(&document, 2).edits[0].deleted_text, "a");
+}
+
+#[test]
+fn forward_delete_across_hard_divider_starts_new_entries() {
+    let mut document = TextDocument::new("a.b".to_owned());
+
+    delete_edit(&mut document, 0..1, 0, 0);
+    delete_edit(&mut document, 0..1, 0, 0);
+    delete_edit(&mut document, 0..1, 0, 0);
+
+    assert_eq!(document.extract_text(), "");
+    assert_eq!(document.operation_undo_depth(), 3);
+    assert_eq!(entry_record(&document, 0).edits[0].deleted_text, "a");
+    assert_eq!(entry_record(&document, 1).edits[0].deleted_text, ".");
+    assert_eq!(entry_record(&document, 2).edits[0].deleted_text, "b");
+}
+
+#[test]
+fn adjacent_pre_burst_backspace_coalesces_as_replacement() {
+    let mut document = TextDocument::new("z".to_owned());
+
+    insert_edit(&mut document, 1, "a");
+    delete_edit(&mut document, 0..1, 2, 0);
+
+    assert_eq!(document.extract_text(), "a");
+    assert_eq!(document.operation_undo_depth(), 1);
+    let record = history_record(&document);
+    assert_eq!(record.edits[0].start_char, 0);
+    assert_eq!(record.edits[0].deleted_text, "z");
+    assert_eq!(record.edits[0].inserted_text, "a");
+
+    document.undo_last_operation();
+    assert_eq!(document.extract_text(), "z");
+    document.redo_last_operation();
+    assert_eq!(document.extract_text(), "a");
+}
+
+#[test]
+fn imported_history_keeps_only_contiguous_undone_suffix_redoable() {
+    let mut source = empty_document!();
+    insert_isolated_sequence!(&mut source, "abc");
+    source.history[0].flags.undone = true;
+    source.history[1].flags.undone = false;
+    source.history[2].flags.undone = true;
+    let exported = source.exported_history();
+
+    let mut restored = TextDocument::new("abc".to_owned());
+    restored.restore_exported_history(exported);
+
+    assert!(!restored.history_entries()[0].is_undone());
+    assert!(!restored.history_entries()[0].flags.replayable);
+    assert!(!restored.history_entries()[1].is_undone());
+    assert!(restored.history_entries()[2].is_undone());
+    assert_eq!(restored.operation_redo_depth(), 1);
+}
+
+#[test]
+fn generation_before_is_captured_before_direct_edit_mutation() {
+    let mut document = empty_document!();
+    let before = document.visible_generation();
+
+    insert_edit(&mut document, 0, "a");
+
+    let entry = &document.history_entries()[0];
+    assert_eq!(entry.visible_generation_before, before);
+    assert_eq!(
+        entry.visible_generation_after,
+        document.visible_generation()
+    );
+    assert!(entry.visible_generation_after > entry.visible_generation_before);
+}
+
 fn insert_edit(document: &mut TextDocument, start: usize, text: &str) {
     insert_edit_with_cursor(document, start, text, start, start + text.chars().count());
 }

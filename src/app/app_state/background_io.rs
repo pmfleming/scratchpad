@@ -469,8 +469,12 @@ impl ScratchpadApp {
         action: PendingStartupRestoreAction,
         result: Result<Option<crate::app::services::session_store::RestoredSession>, String>,
     ) {
+        let mut restored_session = false;
         let legacy_settings = match result {
-            Ok(Some(restored)) => Some(session_manager::apply_restored_session(self, restored)),
+            Ok(Some(restored)) => {
+                restored_session = true;
+                Some(session_manager::apply_restored_session(self, restored))
+            }
             Ok(None) => None,
             Err(error) => {
                 diagnostics::record_background_failure(
@@ -489,6 +493,9 @@ impl ScratchpadApp {
         {
             self.apply_settings(legacy_settings);
             let _ = self.persist_settings_now();
+        }
+        if !restored_session && action.startup_options.files.is_empty() {
+            self.initialize_default_workspace_tabs();
         }
         self.request_focus_for_active_view();
         self.apply_startup_options_async(action.startup_options);

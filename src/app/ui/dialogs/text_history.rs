@@ -15,8 +15,10 @@ use crate::app::ui::{callout, settings, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{CLOCK_COUNTER_CLOCKWISE, CROSSHAIR, FILES, TRASH};
 
-const TEXT_HISTORY_SIZE: egui::Vec2 =
-    egui::vec2(crate::app::ui::search_replace::SEARCH_DIALOG_WIDTH, 520.0);
+const TEXT_HISTORY_SIZE: egui::Vec2 = egui::vec2(
+    crate::app::ui::search_replace::SEARCH_DIALOG_WIDTH - 20.0,
+    520.0,
+);
 const TEXT_HISTORY_TITLE_SIZE: f32 = 24.0;
 pub(super) const TEXT_HISTORY_LIST_MIN_HEIGHT: f32 = 330.0;
 pub(super) const HISTORY_PILL_CORNER_RADIUS: u8 = 8;
@@ -66,9 +68,6 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
 
     show_centered_callout(ctx, "text_history_window", TEXT_HISTORY_SIZE, |ui| {
         widget_ids::feature_scope(ui, "text_history_dialog", |ui| {
-            ui.set_width(TEXT_HISTORY_SIZE.x);
-            ui.set_min_width(TEXT_HISTORY_SIZE.x);
-            ui.set_max_width(TEXT_HISTORY_SIZE.x);
             render_text_history_window(
                 ui,
                 TextHistoryWindowInputs {

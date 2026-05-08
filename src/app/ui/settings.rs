@@ -114,3 +114,65 @@ pub(crate) fn dialog_card_frame(ui: &egui::Ui) -> egui::Frame {
 pub(crate) fn dialog_card_border(ui: &egui::Ui) -> egui::Color32 {
     SettingsUi::card_border(ui)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::services::session_store::SessionStore;
+    use crate::app::services::settings_store::SettingsStore;
+    use crate::app::startup::StartupOptions;
+
+    #[test]
+    fn settings_cards_render_at_exact_card_width() {
+        let mut app = test_app();
+        reset_settings_layout_measurements();
+
+        let ctx = egui::Context::default();
+        crate::app::fonts::apply_editor_fonts(&ctx, app.editor_font())
+            .expect("install editor fonts for settings layout test");
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_min_size(egui::vec2(1600.0, 4200.0));
+            ui.set_width(1600.0);
+            render_page_body(ui, &mut app, false);
+        });
+
+        let card_measurements = settings_card_measurements();
+        assert!(
+            !card_measurements.is_empty(),
+            "settings card width test did not collect any cards"
+        );
+
+        let card_width = SettingsUi::LAYOUT.card_max_width;
+        let card_offenders: Vec<String> = card_measurements
+            .iter()
+            .filter(|measurement| (measurement.width - card_width).abs() > f32::EPSILON)
+            .map(|measurement| format!("{} = {:.1}px", measurement.label, measurement.width))
+            .collect();
+
+        assert!(
+            card_offenders.is_empty(),
+            "settings cards must be exactly {:.1}px wide:\n{}",
+            card_width,
+            card_offenders.join("\n")
+        );
+    }
+
+    fn test_app() -> ScratchpadApp {
+        const MIB: u64 = 1024 * 1024;
+        let temp_dir = tempfile::tempdir().expect("create temp app root");
+        let root = temp_dir.keep();
+        let mut app = ScratchpadApp::with_stores_and_startup(
+            SessionStore::new(root.clone()),
+            SettingsStore::new(root),
+            StartupOptions::default(),
+        );
+        app.set_session_persist_on_drop(false);
+        app.app_settings.font_size = 32.0;
+        app.app_settings.editor_gutter = 32;
+        app.app_settings.tab_list_auto_hide_delay_seconds = 10.0;
+        app.app_settings.history_budget.per_file_byte_budget = 1024 * MIB;
+        app.app_settings.history_budget.aggregate_byte_budget = 4096 * MIB;
+        app.app_settings.history_budget.persisted_payload_budget = 1024 * MIB;
+        app
+    }
+}

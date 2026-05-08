@@ -1,5 +1,6 @@
 use eframe::egui::{Id, Pos2, Ui, Vec2};
 
+use super::acceleration::ScrollAccelerationState;
 use super::target::ScrollTarget;
 
 /// Persistent scroll state stored in `egui::Memory` keyed by a stable `Id`.
@@ -23,6 +24,8 @@ pub struct ScrollState {
     /// True if the user has interacted with the scrollbar/wheel since the last
     /// programmatic scroll. Used to suppress automatic snap-back behaviors.
     pub user_scrolled: bool,
+    pub(super) wheel_acceleration: [ScrollAccelerationState; 2],
+    pub(super) scrollbar_button_acceleration: [ScrollAccelerationState; 2],
 }
 
 #[derive(Clone, Copy, Debug)]

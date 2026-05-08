@@ -379,7 +379,8 @@ fn should_rebuild_galley_after_input(
 #[cfg(test)]
 mod tests {
     use super::{
-        CharCursor, CursorRange, publish_active_selection, should_rebuild_galley_after_input,
+        CharCursor, CursorRange, cut_selected_text, publish_active_selection, selected_text,
+        should_rebuild_galley_after_input,
     };
     use crate::app::domain::{BufferState, EditorViewState};
 
@@ -405,11 +406,54 @@ mod tests {
     #[test]
     fn publishing_active_selection_reports_shared_selection_changes() {
         let mut buffer = BufferState::new("sample.txt".to_owned(), "hello world".to_owned(), None);
-        let mut view = EditorViewState::new(buffer.id, false);
+        let mut view = EditorViewState::new(buffer.id);
         view.cursor_range = Some(CursorRange::two(0, 5));
 
         assert!(publish_active_selection(&mut buffer, &view, true));
         assert_eq!(buffer.active_selection, Some(0..5));
         assert!(!publish_active_selection(&mut buffer, &view, true));
+    }
+
+    #[test]
+    fn selection_copy_returns_document_controls_not_display_glyphs() {
+        let text = "a\u{200E}\n\tb";
+        let buffer = BufferState::new("sample.txt".to_owned(), text.to_owned(), None);
+        let selection = CursorRange::two(0, buffer.current_file_length().chars);
+
+        let copied = selected_text(&buffer, selection).unwrap();
+
+        assert_eq!(copied, text);
+        assert!(!copied.contains('\u{F003}'));
+        assert!(!copied.contains('\u{240A}'));
+        assert!(!copied.contains('\u{2409}'));
+    }
+
+    #[test]
+    fn cut_returns_document_controls_not_display_glyphs() {
+        let mut buffer =
+            BufferState::new("sample.txt".to_owned(), "a\u{200E}\n\tb".to_owned(), None);
+        let selection = CursorRange::two(1, 4);
+
+        let (_, cut) = cut_selected_text(&mut buffer, selection).unwrap();
+
+        assert_eq!(cut, "\u{200E}\n\t");
+        assert_eq!(buffer.text(), "ab");
+    }
+
+    #[test]
+    fn undo_after_control_char_edit_restores_document_text() {
+        let mut buffer = BufferState::new("sample.txt".to_owned(), "ab".to_owned(), None);
+        let previous = CursorRange::one(CharCursor::new(1));
+        let next = CursorRange::one(CharCursor::new(2));
+
+        buffer
+            .replace_char_ranges_with_undo(&[(1..1, "\u{200E}".to_owned())], previous, next)
+            .unwrap();
+        assert_eq!(buffer.text(), "a\u{200E}b");
+
+        let undo_selection = buffer.undo_last_text_operation().unwrap();
+
+        assert_eq!(buffer.text(), "ab");
+        assert_eq!(undo_selection, previous);
     }
 }

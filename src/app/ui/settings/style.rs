@@ -25,7 +25,7 @@ pub(super) struct SettingsLayout {
 }
 
 pub(super) struct ControlMetrics {
-    pub width: f32,
+    pub column_width: f32,
     pub gap: f32,
     pub icon_button_size: f32,
 }
@@ -51,7 +51,7 @@ impl SettingsUi {
         page_min_viewport_width: 1180.0,
         page_min_viewport_height: 720.0,
         page_side_padding: 24.0,
-        card_max_width: 760.0,
+        card_max_width: 720.0,
         preview_max_width: 420.0,
         card_radius: 10,
         card_min_height: 72.0,
@@ -63,8 +63,8 @@ impl SettingsUi {
         preview_top_margin: 14.0,
     };
     pub(super) const CONTROLS: ControlMetrics = ControlMetrics {
-        width: 190.0,
-        gap: 8.0,
+        column_width: 360.0,
+        gap: 16.0,
         icon_button_size: 34.0,
     };
     pub(super) const MARGINS: SettingsMargins = SettingsMargins {
@@ -97,22 +97,19 @@ impl SettingsUi {
     const CARD_BORDER_LIGHT: egui::Color32 = egui::Color32::from_rgb(204, 213, 226);
     const CONTROL_BG_LIGHT: egui::Color32 = egui::Color32::from_rgb(238, 243, 249);
     const ICON_LIGHT: egui::Color32 = egui::Color32::from_rgba_premultiplied(28, 35, 45, 170);
+    pub(super) const CARD_STROKE_WIDTH: f32 = 1.0;
 
     pub(super) fn apply_typography(ui: &mut egui::Ui) {
         let style = ui.style_mut();
-        style.override_font_id = Some(egui::FontId::proportional(Self::TYPOGRAPHY.body));
-        style.text_styles.insert(
+        let font_id = egui::FontId::proportional(Self::TYPOGRAPHY.body);
+        style.override_font_id = Some(font_id.clone());
+        for text_style in [
             egui::TextStyle::Body,
-            egui::FontId::proportional(Self::TYPOGRAPHY.body),
-        );
-        style.text_styles.insert(
             egui::TextStyle::Button,
-            egui::FontId::proportional(Self::TYPOGRAPHY.body),
-        );
-        style.text_styles.insert(
             egui::TextStyle::Small,
-            egui::FontId::proportional(Self::TYPOGRAPHY.body),
-        );
+        ] {
+            style.text_styles.insert(text_style, font_id.clone());
+        }
     }
 
     pub(super) fn page_viewport_size(ui: &egui::Ui) -> egui::Vec2 {
@@ -136,7 +133,7 @@ impl SettingsUi {
     }
 
     pub(super) fn control_width(ui: &egui::Ui) -> f32 {
-        ui.available_width().clamp(0.0, Self::CONTROLS.width)
+        ui.available_width().clamp(0.0, Self::CONTROLS.column_width)
     }
 
     pub(super) fn preview_width(ui: &egui::Ui) -> f32 {
@@ -155,18 +152,21 @@ impl SettingsUi {
         )
     }
 
-    pub(super) fn header_text_width(ui: &egui::Ui) -> f32 {
+    pub(super) fn header_text_width_for_trailing(ui: &egui::Ui, trailing_width: f32) -> f32 {
         let available_width = ui.available_width().max(0.0);
-        let preferred_width =
-            (available_width - Self::CONTROLS.width - Self::CONTROLS.gap - 42.0).max(220.0);
-        preferred_width.min(available_width)
+        (available_width - trailing_width - Self::CONTROLS.gap).max(0.0)
     }
 
-    pub(super) fn row_label_width(ui: &egui::Ui) -> f32 {
-        let available_width = ui.available_width().max(0.0);
-        let preferred_width =
-            (available_width - Self::CONTROLS.width - Self::CONTROLS.gap - 52.0).max(180.0);
-        preferred_width.min(available_width)
+    pub(super) fn header_trailing_width(ui: &egui::Ui) -> f32 {
+        Self::control_width(ui)
+    }
+
+    pub(super) fn row_label_width(row_width: f32) -> f32 {
+        (row_width - Self::row_control_width(row_width) - Self::CONTROLS.gap).max(0.0)
+    }
+
+    pub(super) fn row_control_width(row_width: f32) -> f32 {
+        row_width.clamp(0.0, Self::CONTROLS.column_width)
     }
 
     pub(super) fn divider_width(ui: &egui::Ui) -> f32 {
@@ -212,7 +212,7 @@ impl SettingsUi {
     ) -> egui::Frame {
         egui::Frame::new()
             .fill(fill)
-            .stroke(egui::Stroke::new(1.0, border))
+            .stroke(egui::Stroke::new(Self::CARD_STROKE_WIDTH, border))
             .corner_radius(egui::CornerRadius::same(Self::LAYOUT.card_radius))
             .inner_margin(inner_margin)
     }
@@ -243,15 +243,5 @@ impl SettingsUi {
         } else {
             ((surface_width - content_width) * 0.5).max(Self::LAYOUT.page_side_padding)
         }
-    }
-
-    pub(super) fn pill_outer_width(control_width: f32) -> f32 {
-        (control_width - Self::CONTROLS.icon_button_size - Self::CONTROLS.gap).max(0.0)
-    }
-
-    pub(super) fn pill_content_width(outer_width: f32) -> f32 {
-        let horizontal_padding =
-            (Self::MARGINS.value_pill_inner.left + Self::MARGINS.value_pill_inner.right) as f32;
-        (outer_width - horizontal_padding).max(0.0)
     }
 }

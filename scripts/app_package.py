@@ -1,5 +1,8 @@
 import json
+import subprocess
+import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -7,6 +10,7 @@ SESSION_DIR_NAME = "scratchpad"
 SESSION_MANIFEST_NAME = "session.json"
 SESSION_ERROR_LOG_NAME = "error.log"
 SESSION_BUFFER_EXTENSION = ".tmp"
+SESSION_CLEAR_VERIFY_DELAY_SECONDS = 1.5
 
 
 def app_session_root() -> Path:
@@ -144,6 +148,92 @@ def root_pane_kind(node: Any) -> str:
     if "Split" in node or "split" in node or "axis" in node:
         return "split"
     return next(iter(node.keys()), "unknown")
+
+
+def app_process_running() -> bool:
+    try:
+        if sys.platform == "win32":
+            output = subprocess.run(
+                ["tasklist", "/FI", "IMAGENAME eq scratchpad.exe", "/FO", "CSV", "/NH"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ).stdout
+            return "scratchpad.exe" in output.lower()
+        result = subprocess.run(
+            ["pgrep", "-x", "scratchpad"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def clear_app_package_buffers() -> Dict[str, Any]:
+    root = app_session_root()
+    manifest_path = root / SESSION_MANIFEST_NAME
+    warnings: List[str] = []
+    if app_process_running():
+        payload = app_package_payload()
+        payload["clear_result"] = {
+            "blocked": True,
+            "message": "Scratchpad appears to be running. Close the app before clearing persisted buffers.",
+            "warnings": [],
+        }
+        return payload
+
+    manifest = load_json_file(manifest_path, warnings)
+    buffers = flatten_session_buffers(manifest, root)
+    buffers_removed = len(buffers)
+    dirty_buffers_removed = sum(1 for buffer in buffers if buffer.get("is_dirty"))
+    tabs_removed = len(manifest.get("tabs") or []) if isinstance(manifest, dict) else 0
+    snapshot_files_removed = 0
+
+    if isinstance(manifest, dict):
+        manifest["tabs"] = []
+        manifest["active_tab_index"] = 0
+        try:
+            manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        except OSError as exc:
+            warnings.append(f"Could not write {manifest_path.name}: {exc}")
+    elif root.exists():
+        warnings.append("No readable session manifest; removed snapshot files only.")
+
+    if root.exists():
+        for path in sorted(root.glob(f"*{SESSION_BUFFER_EXTENSION}")):
+            try:
+                path.unlink()
+                snapshot_files_removed += 1
+            except OSError as exc:
+                warnings.append(f"Could not remove {path.name}: {exc}")
+
+    time.sleep(SESSION_CLEAR_VERIFY_DELAY_SECONDS)
+    payload = app_package_payload()
+    current_summary = payload.get("manifest_summary") or {}
+    if current_summary.get("tab_count") or current_summary.get("buffer_count"):
+        payload["clear_result"] = {
+            "blocked": True,
+            "message": "Scratchpad rewrote the session after clearing. Close the app and run Clear buffers again.",
+            "tabs_removed": tabs_removed,
+            "buffers_removed": buffers_removed,
+            "dirty_buffers_removed": dirty_buffers_removed,
+            "snapshot_files_removed": snapshot_files_removed,
+            "warnings": warnings,
+        }
+        return payload
+
+    payload["clear_result"] = {
+        "tabs_removed": tabs_removed,
+        "buffers_removed": buffers_removed,
+        "dirty_buffers_removed": dirty_buffers_removed,
+        "snapshot_files_removed": snapshot_files_removed,
+        "warnings": warnings,
+    }
+    return payload
 
 
 def app_package_payload() -> Dict[str, Any]:

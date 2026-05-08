@@ -1,79 +1,156 @@
 # Scratchpad
 
-Scratchpad is a Rust-based text editor for Windows environments. 
+Scratchpad is a Windows-first Rust text editor for everyday text work. It is
+intended to be a safer, more resilient Notepad replacement: small enough to
+trust, explicit about file-format risk, and measured continuously so
+performance and complexity stay visible while the editor evolves.
 
-It should be a crash-resistant, safe-by-design replacement for the standard Notepad application.
-With the main goal of this project being: using performance & complexity metrics to guide development.
+The project is deliberately focused on plain text instead of software
+development workflows. It does not try to be an IDE, language server host, or
+plugin platform. Its center of gravity is notes, logs, exports, copied terminal
+output, reports, encoded files, and temporary scratch work.
 
-It is 100% focused on general text processing rather than software development.
-This helps it be safer; there are no components/updates etc.
+## What Scratchpad Does
 
-## Features
+- Opens text files into separate tabs or into multi-pane workspace tabs.
+- Lets one workspace tab contain multiple editor tiles, including multiple views
+  of the same buffer.
+- Supports split creation, split resizing, tile promotion, tab combining,
+  drag/drop tab ordering, and tab overflow.
+- Searches and replaces across the current selection, current file, current
+  workspace tab, or all open tabs.
+- Provides plain-text and regex search, case-sensitive matching, whole-word
+  matching, replace current, and replace-all where the active scope permits it.
+- Detects common encodings and BOMs, preserves supported BOM state, tracks line
+  endings, and warns before unsafe saves.
+- Surfaces artifact-heavy text such as control characters, ANSI escape
+  sequences, carriage-return output, and overprint patterns.
+- Maintains document-local undo/redo plus a text history and transaction-log
+  surface for reviewing recent edits and workspace operations.
+- Restores sessions, settings, tab layout, pane layout, and open-buffer
+  metadata.
+- Ships with local measurement tooling for complexity, clone analysis,
+  performance, search speed, capacity, resource usage, architecture maps, and
+  correctness coverage.
 
-- Shared tab order across the tab strip, overflow list, Settings surface, and drag/drop flows
-- Multi-pane workspace tabs with split creation, split resizing, Open Here, tile promotion, and tab combining
-- Search and search/replace across selections, buffers, workspace tabs, and all open tabs, with plain-text and regex modes
-- Native open/save/save-as flows with dirty confirmation, duplicate-path checks, encoding detection, and BOM preservation
-- Artifact-heavy text detection with cleaned and raw inspection modes
-- Document-local undo/redo plus a separate transaction log for text edits and workspace operations
-- Status bar with path, line count, encoding, artifact state, runtime logging, and transaction-log access
-- TOML-backed settings plus session persistence for tabs, views, pane layout, and metadata
+## Design Goals
 
-Gaps: command palette actions and installer packaging.
+- Keep general text editing fast and predictable, including large buffers and
+  many open tabs.
+- Make risky file-format decisions visible before bytes are written.
+- Prefer durable local state over cloud sync, update systems, or plugin
+  execution.
+- Use performance, capacity, resource, and complexity measurements as normal
+  development inputs.
+- Keep the product useful for non-code text instead of drifting into a
+  coding-first editor.
 
-## Docs
+## Current Status
 
-- [User manual](docs/user-manual.md)
-- [Encoding review report](docs/encoding-review-report.md)
-- [Measurement tools](docs/measurement-tools.md)
-- [Project plan](PLAN.md)
+Scratchpad is active and usable, but still evolving. Current known gaps include
+a planned command palette, narrower context-menu command coverage than a mature
+editor, no folder-wide search for unopened files, and zip-based Windows
+packaging instead of a full installer.
 
-## Build and Test
+## Screenshots
 
-Prerequisites: Rust via `rustup` on Windows. Some optional analysis scripts also expect the local `.venv` Python environment.
+![Scratchpad search dialog](assets/Search%20Dialog.png)
 
-```bash
+![Scratchpad transaction log](assets/Transaction%20Log.png)
+
+## Build, Test, and Run
+
+Prerequisites:
+
+- Rust via `rustup`
+- Windows for the primary desktop target and packaging flow
+- Python 3.11+ for the optional analysis scripts; `scripts\ci.ps1` can create
+  the local `.venv` when needed
+
+Common commands:
+
+```powershell
 cargo run --release
 cargo test
 powershell -ExecutionPolicy Bypass -File scripts\ci.ps1
 powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1
 ```
 
-Release flow: push a tag like `v0.2.0` or run the `Release` workflow manually. GitHub Actions builds, checks, packages, and attaches the Windows `.zip` and checksum.
+Useful runtime switches:
 
-## Project Structure
+```powershell
+scratchpad.exe /help
+scratchpad.exe /version
+scratchpad.exe /clean "C:\notes\a.txt"
+scratchpad.exe /addto:active /files:"C:\notes\a.txt","C:\notes\b.txt"
+```
+
+## Packaging and Releases
+
+Local packaging creates `dist\scratchpad-v<version>-windows-x64.zip` plus a
+SHA-256 checksum:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 -Profile release
+```
+
+The GitHub release workflow runs formatting, clippy, tests, validates that the
+tag version matches `Cargo.toml`, builds the Windows archive, uploads it as a
+workflow artifact, and publishes the release asset. Push a tag such as `v0.3.0`
+or run the `Release` workflow manually.
+
+## Measurement Workflow
+
+Scratchpad treats measurement as part of the product. The Python and Rust tools
+under `scripts/` and `src/bin/` produce JSON artifacts under `target/analysis/`.
+The local dashboard in `viewer/` reads those artifacts and gives a single place
+to inspect quality, performance, correctness, architecture, and run-log data.
+
+Start the dashboard with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1
+```
+
+The detailed measurement catalog lives in
+[docs/measurement-tools.md](docs/measurement-tools.md).
+
+## Repository Map
 
 ```text
 src/
-├── main.rs
-├── lib.rs
-└── app/
-    ├── app_state.rs
-    ├── transactions.rs
-    ├── chrome/
-    ├── startup/
-    ├── commands.rs
-    ├── domain/
-    ├── services/
-    └── ui/
+  main.rs                 Desktop entry point and native window setup
+  lib.rs                  Public crate surface
+  app/
+    app_state/            Frame loop, workspace state, settings state, search state
+    chrome/               Custom window chrome and caption buttons
+    commands/             Command dispatch and tab/view transfer operations
+    domain/               Buffers, piece-tree storage, panes, tabs, views
+    services/             File IO, search, session persistence, settings persistence
+    startup/              Command-line parsing and startup options
+    ui/                   Editor, dialogs, search/replace, settings, tabs, scrolling
+  bin/                    Profiling and capacity probe entry points
+scripts/                  CI, packaging, analysis, dashboard, and reporting tools
+viewer/                   Local static dashboard for analysis artifacts
+docs/                     User, design, architecture, performance, and review notes
+assets/                   README and product screenshots
+fonts/                    Bundled editor and control-symbol fonts
 ```
 
-Key areas:
+## Key Documentation
 
-- `src/app/app_state/`: settings state, display-tab ordering, startup state, and settings TOML refresh logic
-- `src/app/chrome/`: custom caption buttons, resize logic, and top-level chrome behavior
-- `src/app/commands/`: command dispatch and tab/view transfer operations
-- `src/app/domain/`: buffers, views, panes, tabs, layout/promotion helpers, and shared tab manager
-- `src/app/services/`: file IO, file controller flows, session persistence, settings persistence, and store helpers
-- `src/app/startup/`: CLI/startup parsing
-- `src/app/ui/`: dialogs, editor area/content, settings pages, status bar, tab strip, overflow, tile header, and tab drag state
-- `viewer/`: static analysis viewer
-- `tests/`: integration tests for app, buffers, files, session storage, startup, tab manager, and tab behavior
+- [User manual](docs/user-manual.md)
+- [Measurement tools](docs/measurement-tools.md)
+- [Encoding review report](docs/encoding-review-report.md)
+- [Project plan](PLAN.md)
 
-## Notes
+## Technical Notes
 
-- Stack: Rust 2024, `eframe` / `egui`, `egui-phosphor`, `rfd`, `serde`, `encoding_rs`
+- Stack: Rust 2024, `eframe`/`egui`, `egui-phosphor`, `rfd`, `serde`,
+  `encoding_rs`, `chardetng`, `regex`, `smallvec`, and `sysinfo`.
+- Unsafe Rust is forbidden at the crate level.
+- Text storage uses a piece-tree-backed document model with undo/redo history
+  and cheap snapshots for save/session flows.
 - Runtime logs go under `log/`.
-- Session state and `settings.toml` use the OS temp directory.
-- End-user usage details live in the [user manual](docs/user-manual.md).
-- Analysis workflow details live in [measurement-tools.md](docs/measurement-tools.md).
+- Session state and `settings.toml` are stored under the Scratchpad directory in
+  the OS temp location.

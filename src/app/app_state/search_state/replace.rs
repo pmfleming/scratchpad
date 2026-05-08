@@ -1,10 +1,10 @@
 use super::helpers::{
     build_replacement_targets, cursor_range_from_char_range, fallback_selection_for_target,
-    next_selection_for_target,
+    first_document_order_replacement, next_selection_for_target,
 };
 use super::{ReplacementPlan, ReplacementTargetPlan, ScratchpadApp, SearchScope};
 use crate::app::domain::{BufferId, CursorRevealMode, ViewId};
-use crate::app::services::search::SearchProgram;
+use crate::app::services::search::{SearchError, SearchProgram, search_program};
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use std::ops::Range;
 
@@ -30,9 +30,12 @@ impl ScratchpadApp {
             return false;
         }
 
-        let Some(replacement) = self.replacement_for_match(&search_match) else {
-            self.set_error_status("Search replace failed because the query is no longer valid.");
-            return false;
+        let replacement = match self.replacement_for_match(&search_match) {
+            Ok(replacement) => replacement,
+            Err(error) => {
+                self.set_error_status(error.message());
+                return false;
+            }
         };
         let replacement_char_count = replacement.chars().count();
         let previous_selection = self
@@ -59,8 +62,15 @@ impl ScratchpadApp {
             return false;
         }
 
+        if let Err(error) = self.rebuild_active_buffer_search_matches() {
+            self.set_error_status(error.message());
+            self.mark_search_dirty();
+            self.refresh_search_state();
+            return false;
+        }
+        self.select_next_active_buffer_match_from(replacement_range.end);
+        self.mark_search_dirty();
         self.refresh_search_state();
-        self.select_next_active_buffer_match_from(replacement_range.start);
         true
     }
 
@@ -113,8 +123,13 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn replace_all_search_matches_in_scope(&mut self) -> bool {
-        let Some(plan) = self.build_replace_all_plan() else {
-            return false;
+        let plan = match self.build_replace_all_plan() {
+            Ok(Some(plan)) => plan,
+            Ok(None) => return false,
+            Err(error) => {
+                self.set_error_status(error.message());
+                return false;
+            }
         };
         if plan.total_match_count == 0 {
             return false;
@@ -152,11 +167,12 @@ impl ScratchpadApp {
         let previous_selection = self
             .active_tab()
             .and_then(|tab| tab.view(target.view_id))
-            .and_then(|view| view.cursor_range)
-            .unwrap_or_else(|| cursor_range_from_char_range(target.replacements[0].0.clone()));
+            .and_then(|view| view.cursor_range);
+        let (first_range, first_replacement) = first_document_order_replacement(target);
+        let previous_selection =
+            previous_selection.unwrap_or_else(|| cursor_range_from_char_range(first_range.clone()));
         let next_selection = cursor_range_from_char_range(
-            target.replacements[0].0.start
-                ..target.replacements[0].0.start + target.replacements[0].1.chars().count(),
+            first_range.start..first_range.start + first_replacement.chars().count(),
         );
         let Some(buffer_label) = self.replace_ranges_in_active_buffer(
             target.view_id,
@@ -168,8 +184,15 @@ impl ScratchpadApp {
         ) else {
             return false;
         };
-        self.refresh_search_state();
+        if let Err(error) = self.rebuild_active_buffer_search_matches() {
+            self.set_error_status(error.message());
+            self.mark_search_dirty();
+            self.refresh_search_state();
+            return false;
+        }
         self.select_first_match_in_active_buffer();
+        self.mark_search_dirty();
+        self.refresh_search_state();
         self.set_info_status(format!(
             "Replaced {} matches in {}.",
             plan.total_match_count, buffer_label
@@ -185,9 +208,14 @@ impl ScratchpadApp {
         }
 
         for target in &plan.targets {
+            if !self.validate_replacement_target(target) {
+                self.search_state.pending_replace_all_confirmation = None;
+                self.set_error_status("Search replace-all was blocked because results are stale.");
+                return false;
+            }
             if !self.apply_replacement_target(target) {
                 self.set_error_status(
-                    "Search replace-all failed before all targets could be updated.",
+                    "Search replace-all stopped after some targets may already have been updated.",
                 );
                 return false;
             }
@@ -275,25 +303,83 @@ impl ScratchpadApp {
                 == search_match.matched_text
     }
 
-    fn build_replace_all_plan(&self) -> Option<ReplacementPlan> {
+    fn build_replace_all_plan(&self) -> Result<Option<ReplacementPlan>, SearchError> {
         if self.search_state.matches.is_empty() {
-            return None;
+            return Ok(None);
         }
+        let program =
+            SearchProgram::compile(&self.search_state.query, self.search_state.search_options())?;
+        let replacement = self.search_state.replacement.clone();
 
-        Some(ReplacementPlan {
+        Ok(Some(ReplacementPlan {
             scope: self.search_state.scope,
             total_match_count: self.search_state.matches.len(),
             targets: build_replacement_targets(&self.search_state.matches, |search_match| {
-                self.replacement_for_match(search_match).unwrap_or_default()
-            }),
-        })
+                program.expand_replacement(&search_match.matched_text, &replacement)
+            })?,
+        }))
     }
 
-    fn replacement_for_match(&self, search_match: &super::SearchMatch) -> Option<String> {
+    fn replacement_for_match(
+        &self,
+        search_match: &super::SearchMatch,
+    ) -> Result<String, SearchError> {
         let program =
-            SearchProgram::compile(&self.search_state.query, self.search_state.search_options())
-                .ok()?;
-        Some(program.expand_replacement(&search_match.matched_text, &self.search_state.replacement))
+            SearchProgram::compile(&self.search_state.query, self.search_state.search_options())?;
+        program.expand_replacement(&search_match.matched_text, &self.search_state.replacement)
+    }
+
+    fn rebuild_active_buffer_search_matches(&mut self) -> Result<(), SearchError> {
+        let active_tab_index = self.active_tab_index();
+        let Some(tab) = self.tabs().get(active_tab_index) else {
+            return Ok(());
+        };
+        let active_view_id = tab.active_view_id;
+        let Some(buffer) = tab
+            .active_view()
+            .and_then(|view| tab.buffer_by_id(view.buffer_id))
+        else {
+            return Ok(());
+        };
+        let buffer_id = buffer.id;
+        let buffer_label = buffer.display_name();
+        let target_revision = buffer.document_revision();
+        let text = buffer.text();
+        let program =
+            SearchProgram::compile(&self.search_state.query, self.search_state.search_options())?;
+        let ranges = search_program(&text, &program).matches;
+
+        let insertion_index = self
+            .search_state
+            .matches
+            .iter()
+            .position(|search_match| {
+                search_match.tab_index == active_tab_index && search_match.buffer_id == buffer_id
+            })
+            .unwrap_or(self.search_state.matches.len());
+        self.search_state.matches.retain(|search_match| {
+            search_match.tab_index != active_tab_index || search_match.buffer_id != buffer_id
+        });
+
+        let new_matches = ranges.into_iter().map(|range| super::SearchMatch {
+            tab_index: active_tab_index,
+            view_id: active_view_id,
+            buffer_id,
+            buffer_label: buffer_label.clone(),
+            target_revision,
+            matched_text: text
+                .chars()
+                .skip(range.start)
+                .take(range.end.saturating_sub(range.start))
+                .collect(),
+            range,
+        });
+        self.search_state
+            .matches
+            .splice(insertion_index..insertion_index, new_matches);
+        self.search_state.total_match_count = self.search_state.matches.len();
+        self.search_state.displayed_match_count = self.search_state.matches.len();
+        Ok(())
     }
 
     fn apply_replacement_target(&mut self, target: &ReplacementTargetPlan) -> bool {

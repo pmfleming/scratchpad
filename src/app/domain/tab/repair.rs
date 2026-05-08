@@ -95,7 +95,7 @@ impl WorkspaceTab {
     }
 
     fn reset_to_single_view(&mut self) {
-        let initial_view = EditorViewState::new(self.buffer.id, false);
+        let initial_view = EditorViewState::new(self.buffer.id);
         self.active_view_id = initial_view.id;
         self.root_pane = PaneNode::leaf(initial_view.id);
         self.extra_buffers.clear();

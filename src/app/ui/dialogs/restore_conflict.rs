@@ -1,7 +1,7 @@
 use super::common::{render_icon_choice_dialog, show_centered_callout};
 use crate::app::app_state::{ScratchpadApp, StartupRestoreConflict};
 use eframe::egui;
-use egui_phosphor::regular::{COPY, FILE_TEXT, X};
+use egui_phosphor::regular::{FILE_TEXT, FLOPPY_DISK, X};
 
 const RESTORE_CONFLICT_DIALOG_SIZE: egui::Vec2 = egui::vec2(272.0, 154.0);
 
@@ -63,7 +63,11 @@ fn render_restore_conflict_body(
                 "Keep Session Version",
                 RestoreConflictChoice::KeepSession,
             ),
-            (COPY, "Load Disk Version", RestoreConflictChoice::OpenDisk),
+            (
+                FLOPPY_DISK,
+                "Use Disk Version",
+                RestoreConflictChoice::OpenDisk,
+            ),
             (X, "Dismiss", RestoreConflictChoice::Dismiss),
         ],
     )

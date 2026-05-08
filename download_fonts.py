@@ -6,6 +6,7 @@ FONT_URLS = {
     "NotoSans-VF.ttf": "https://raw.githubusercontent.com/notofonts/noto-fonts/main/unhinted/variable-ttf/NotoSans-VF.ttf",
     "NotoSansMono-Regular.ttf": "https://raw.githubusercontent.com/notofonts/noto-fonts/main/hinted/ttf/NotoSansMono/NotoSansMono-Regular.ttf",
     "NotoSerifDisplay-Regular.ttf": "https://raw.githubusercontent.com/notofonts/noto-fonts/main/hinted/ttf/NotoSerifDisplay/NotoSerifDisplay-Regular.ttf",
+    "NotoSansSymbols2-Regular.ttf": "https://notofonts.github.io/symbols/fonts/NotoSansSymbols2/googlefonts/ttf/NotoSansSymbols2-Regular.ttf",
     "NotoSansCJKjp-Regular.otf": "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf",
     "NotoSansCJKkr-Regular.otf": "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Korean/NotoSansCJKkr-Regular.otf",
     "NotoSansCJKsc-Regular.otf": "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf",

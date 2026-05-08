@@ -5,6 +5,9 @@ use super::metrics::{ContentExtent, ViewportMetrics};
 use super::target::ScrollAlign;
 use crate::app::domain::buffer::AnchorId;
 
+#[cfg(test)]
+mod tests;
+
 /// Per-view scroll state. One instance per editor view. Owns the single source
 /// of truth for scroll position, all input arbitration, and reveal requests.
 ///
@@ -93,47 +96,16 @@ impl ScrollManager {
     ) {
         match intent {
             ScrollIntent::Wheel { delta_x, delta_y } => {
-                self.scroll_pixels(-delta_x, -delta_y, &anchor_to_row, &row_to_anchor);
-                self.user_scrolled = true;
+                self.apply_wheel(delta_x, delta_y, &anchor_to_row, &row_to_anchor)
             }
             ScrollIntent::ScrollbarTo {
                 axis,
                 offset_pixels,
-            } => match axis {
-                Axis::X => {
-                    self.horizontal_px = offset_pixels.max(0.0);
-                    self.user_scrolled = true;
-                }
-                Axis::Y => {
-                    self.set_pixel_offset_y(offset_pixels, &row_to_anchor);
-                    self.user_scrolled = true;
-                }
-            },
-            ScrollIntent::Lines(n) => {
-                let delta_rows = n as f32;
-                let new_row =
-                    (anchor_to_row(self.anchor) + self.anchor.display_row_offset() + delta_rows)
-                        .max(0.0);
-                self.anchor = row_to_anchor(new_row);
-                self.user_scrolled = true;
-            }
-            ScrollIntent::Pages(n) => {
-                let delta_rows = (n as f32) * self.metrics.visible_rows.max(1) as f32;
-                let new_row =
-                    (anchor_to_row(self.anchor) + self.anchor.display_row_offset() + delta_rows)
-                        .max(0.0);
-                self.anchor = row_to_anchor(new_row);
-                self.user_scrolled = true;
-            }
-            ScrollIntent::Top => {
-                self.anchor = ScrollAnchor::TOP;
-                self.user_scrolled = false;
-            }
-            ScrollIntent::Bottom => {
-                let last_row = self.extent.display_rows.saturating_sub(1) as f32;
-                self.anchor = row_to_anchor(last_row);
-                self.user_scrolled = false;
-            }
+            } => self.apply_scrollbar(axis, offset_pixels, &row_to_anchor),
+            ScrollIntent::Lines(n) => self.scroll_rows(n as f32, &anchor_to_row, &row_to_anchor),
+            ScrollIntent::Pages(n) => self.scroll_pages(n, &anchor_to_row, &row_to_anchor),
+            ScrollIntent::Top => self.jump_to_top(),
+            ScrollIntent::Bottom => self.jump_to_bottom(&row_to_anchor),
             ScrollIntent::Reveal {
                 rect,
                 align_y,
@@ -178,6 +150,65 @@ impl ScrollManager {
         self.edge_autoscroll_x = 0.0;
     }
 
+    fn apply_wheel(
+        &mut self,
+        delta_x: f32,
+        delta_y: f32,
+        anchor_to_row: &dyn Fn(ScrollAnchor) -> f32,
+        row_to_anchor: &dyn Fn(f32) -> ScrollAnchor,
+    ) {
+        self.scroll_pixels(-delta_x, -delta_y, anchor_to_row, row_to_anchor);
+        self.user_scrolled = true;
+    }
+
+    fn apply_scrollbar(
+        &mut self,
+        axis: Axis,
+        offset_pixels: f32,
+        row_to_anchor: &dyn Fn(f32) -> ScrollAnchor,
+    ) {
+        match axis {
+            Axis::X => self.horizontal_px = offset_pixels.max(0.0),
+            Axis::Y => self.set_pixel_offset_y(offset_pixels, row_to_anchor),
+        }
+        self.user_scrolled = true;
+    }
+
+    fn scroll_rows(
+        &mut self,
+        delta_rows: f32,
+        anchor_to_row: &dyn Fn(ScrollAnchor) -> f32,
+        row_to_anchor: &dyn Fn(f32) -> ScrollAnchor,
+    ) {
+        self.anchor = row_to_anchor(self.offset_row(anchor_to_row, delta_rows));
+        self.user_scrolled = true;
+    }
+
+    fn scroll_pages(
+        &mut self,
+        page_count: i32,
+        anchor_to_row: &dyn Fn(ScrollAnchor) -> f32,
+        row_to_anchor: &dyn Fn(f32) -> ScrollAnchor,
+    ) {
+        let visible_rows = self.metrics.visible_rows.max(1) as f32;
+        self.scroll_rows(
+            page_count as f32 * visible_rows,
+            anchor_to_row,
+            row_to_anchor,
+        );
+    }
+
+    fn jump_to_top(&mut self) {
+        self.anchor = ScrollAnchor::TOP;
+        self.user_scrolled = false;
+    }
+
+    fn jump_to_bottom(&mut self, row_to_anchor: &dyn Fn(f32) -> ScrollAnchor) {
+        let last_row = self.extent.display_rows.saturating_sub(1) as f32;
+        self.anchor = row_to_anchor(last_row);
+        self.user_scrolled = false;
+    }
+
     fn scroll_pixels(
         &mut self,
         dx: f32,
@@ -190,10 +221,12 @@ impl ScrollManager {
         }
         if dy != 0.0 && self.metrics.row_height > 0.0 {
             let drows = dy / self.metrics.row_height;
-            let cur = anchor_to_row(self.anchor) + self.anchor.display_row_offset();
-            let next = (cur + drows).max(0.0);
-            self.anchor = row_to_anchor(next);
+            self.anchor = row_to_anchor(self.offset_row(anchor_to_row, drows));
         }
+    }
+
+    fn offset_row(&self, anchor_to_row: &dyn Fn(ScrollAnchor) -> f32, delta_rows: f32) -> f32 {
+        (anchor_to_row(self.anchor) + self.anchor.display_row_offset() + delta_rows).max(0.0)
     }
 
     fn set_pixel_offset_y(&mut self, pixels: f32, row_to_anchor: &dyn Fn(f32) -> ScrollAnchor) {
@@ -306,96 +339,5 @@ pub fn display_aware_anchor_to_row<'a>(
             };
             row
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use eframe::egui;
-
-    fn manager() -> ScrollManager {
-        let mut manager = ScrollManager::new();
-        manager.set_metrics(ViewportMetrics {
-            viewport_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0)),
-            row_height: 10.0,
-            column_width: 5.0,
-            visible_rows: 10,
-            visible_columns: 20,
-        });
-        manager.set_extent(ContentExtent {
-            display_rows: 100,
-            height: 1000.0,
-            max_line_width: 500.0,
-        });
-        manager
-    }
-
-    #[test]
-    fn reveal_nearest_keeps_visible_rect_stationary() {
-        let mut manager = manager();
-        manager.apply_intent(
-            ScrollIntent::ScrollbarTo {
-                axis: Axis::Y,
-                offset_pixels: 100.0,
-            },
-            naive_anchor_to_row,
-            naive_row_to_anchor,
-        );
-
-        manager.apply_intent(
-            ScrollIntent::Reveal {
-                rect: egui::Rect::from_min_size(egui::pos2(0.0, 120.0), egui::vec2(1.0, 10.0)),
-                align_y: Some(ScrollAlign::NearestWithMargin(5.0)),
-                align_x: None,
-            },
-            naive_anchor_to_row,
-            naive_row_to_anchor,
-        );
-
-        assert_eq!(manager.pixel_offset_y(naive_anchor_to_row), 100.0);
-    }
-
-    #[test]
-    fn reveal_nearest_scrolls_to_hidden_rect_with_margin() {
-        let mut manager = manager();
-
-        manager.apply_intent(
-            ScrollIntent::Reveal {
-                rect: egui::Rect::from_min_size(egui::pos2(0.0, 160.0), egui::vec2(1.0, 10.0)),
-                align_y: Some(ScrollAlign::NearestWithMargin(5.0)),
-                align_x: None,
-            },
-            naive_anchor_to_row,
-            naive_row_to_anchor,
-        );
-
-        assert_eq!(manager.pixel_offset_y(naive_anchor_to_row), 75.0);
-    }
-
-    #[test]
-    fn scrollbar_scroll_marks_user_scrolled_but_reveal_clears_it() {
-        let mut manager = manager();
-        manager.apply_intent(
-            ScrollIntent::ScrollbarTo {
-                axis: Axis::Y,
-                offset_pixels: 100.0,
-            },
-            naive_anchor_to_row,
-            naive_row_to_anchor,
-        );
-        assert!(manager.user_scrolled());
-
-        manager.apply_intent(
-            ScrollIntent::Reveal {
-                rect: egui::Rect::from_min_size(egui::pos2(0.0, 10.0), egui::vec2(1.0, 10.0)),
-                align_y: Some(ScrollAlign::Center),
-                align_x: None,
-            },
-            naive_anchor_to_row,
-            naive_row_to_anchor,
-        );
-
-        assert!(!manager.user_scrolled());
     }
 }

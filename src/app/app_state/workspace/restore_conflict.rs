@@ -87,15 +87,23 @@ impl ScratchpadApp {
         };
         let conflict = action.conflict;
 
-        let mut compare_buffer = match result.result {
+        let loaded_buffer = match result.result {
             Ok(buffer) => buffer,
             Err(error) => {
                 self.set_warning_status(format!(
-                    "Could not open disk version of {} for comparison: {error}",
+                    "Could not load disk version of {}: {error}",
                     conflict.buffer_name
                 ));
                 return;
             }
+        };
+
+        let Some(buffer_id) = conflicted_buffer_id(self, &conflict) else {
+            self.set_warning_status(format!(
+                "Could not find the conflicted tab for {}.",
+                conflict.buffer_name
+            ));
+            return;
         };
 
         if conflict.tab_index < self.tabs().len() {
@@ -107,16 +115,42 @@ impl ScratchpadApp {
             });
         }
 
-        compare_buffer.name = format!("{} (Disk)", conflict.buffer_name);
-        compare_buffer.path = None;
-        compare_buffer.is_settings_file = false;
-        compare_buffer.sync_to_disk_state(result.disk_state);
-        self.append_tab(WorkspaceTab::new(compare_buffer));
-        self.set_info_status(format!(
-            "Opened disk version of {} for comparison.",
-            conflict.buffer_name
-        ));
+        let settings_path = self.settings_path().to_path_buf();
+        if let Some(tab) = self.tabs_mut().get_mut(conflict.tab_index) {
+            tab.clear_view_state_for_buffer_replacement(buffer_id);
+            for view in &mut tab.views {
+                if view.buffer_id == buffer_id {
+                    view.layout_cache.clear();
+                }
+            }
+            if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
+                buffer.replace_from_loaded_buffer(loaded_buffer);
+                buffer.is_dirty = false;
+                buffer.sync_to_disk_state(result.disk_state);
+                buffer.is_settings_file = buffer
+                    .path
+                    .as_ref()
+                    .is_some_and(|path| crate::app::paths_match(path, &settings_path));
+            }
+        }
+
+        self.mark_search_dirty();
+        self.mark_session_dirty();
+        let _ = self.persist_session_now();
+        self.set_info_status(format!("Loaded disk version of {}.", conflict.buffer_name));
     }
+}
+
+fn conflicted_buffer_id(
+    app: &ScratchpadApp,
+    conflict: &StartupRestoreConflict,
+) -> Option<BufferId> {
+    let tab = app.tabs().get(conflict.tab_index)?;
+    let buffer = tab.buffer_for_view(conflict.view_id)?;
+    buffer
+        .path
+        .as_ref()
+        .and_then(|path| crate::app::paths_match(path, &conflict.path).then_some(buffer.id))
 }
 
 fn collect_tab_restore_conflicts(
@@ -156,5 +190,75 @@ fn take_current_startup_restore_conflict(
         None
     } else {
         Some(app.startup_restore_conflicts.remove(0))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::domain::{BufferState, DiskFileState, TabManager, WorkspaceTab};
+    use crate::app::services::session_store::SessionStore;
+    use crate::app::services::settings_store::SettingsStore;
+    use crate::app::startup::StartupOptions;
+
+    #[test]
+    fn disk_version_replaces_conflicted_buffer_without_opening_duplicate_tab() {
+        let temp_dir = tempfile::tempdir().expect("create temp app root");
+        let root = temp_dir.keep();
+        let path = root.join("note.txt");
+        let disk_state = DiskFileState {
+            modified_millis: Some(12),
+            len: 4,
+        };
+
+        let mut app = ScratchpadApp::with_stores_and_startup(
+            SessionStore::new(root.clone()),
+            SettingsStore::new(root),
+            StartupOptions::default(),
+        );
+        app.set_session_persist_on_drop(false);
+
+        let mut restored_buffer = BufferState::new(
+            "note.txt".to_owned(),
+            "session".to_owned(),
+            Some(path.clone()),
+        );
+        restored_buffer.is_dirty = true;
+        restored_buffer.mark_conflict_on_disk(Some(disk_state.clone()));
+        let tab = WorkspaceTab::new(restored_buffer);
+        let view_id = tab.active_view_id;
+        let buffer_id = tab.buffer.id;
+        app.tab_manager = TabManager {
+            tabs: vec![tab],
+            active_tab_index: 0,
+            pending_action: None,
+            session_dirty: false,
+            pending_scroll_to_active: false,
+        };
+
+        let conflict = StartupRestoreConflict {
+            tab_index: 0,
+            view_id,
+            buffer_name: "note.txt".to_owned(),
+            path: path.clone(),
+        };
+        let loaded_buffer =
+            BufferState::new("note.txt".to_owned(), "disk".to_owned(), Some(path.clone()));
+
+        app.apply_async_startup_restore_compare_result(
+            PendingStartupRestoreCompareAction { conflict },
+            vec![LoadedPathResult {
+                path,
+                disk_state: Some(disk_state),
+                result: Ok(loaded_buffer),
+            }],
+        );
+
+        assert_eq!(app.tabs().len(), 1);
+        let buffer = app.tabs()[0].active_buffer();
+        assert_eq!(buffer.id, buffer_id);
+        assert_eq!(buffer.text(), "disk");
+        assert!(!buffer.is_dirty);
+        assert_eq!(buffer.freshness, BufferFreshness::InSync);
     }
 }

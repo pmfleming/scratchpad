@@ -1,4 +1,6 @@
-use super::shared::{collect_slot_entries, slot_cell_context};
+use super::shared::{
+    attach_tab_list_background_context_menu, collect_slot_entries, slot_cell_context,
+};
 use super::{DuplicateNameCounts, apply_tab_drag_feedback};
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
@@ -6,8 +8,9 @@ use crate::app::theme::{
     BUTTON_SIZE, TAB_BUTTON_WIDTH, action_bg, action_hover_bg, border, text_primary,
 };
 use crate::app::ui::tab_drag::{self, TabDropAxis, TabDropZone};
-use crate::app::ui::tab_strip::TabStripOutcome;
-use crate::app::ui::tab_strip::context_menu::attach_tab_list_context_menu;
+use crate::app::ui::tab_strip::{
+    TabStripOutcome, maybe_auto_scroll_vertical_tab_list as auto_scroll_vertical_tab_list,
+};
 use crate::app::ui::transition;
 use crate::app::ui::widget_ids;
 use eframe::egui::{self, Sense, Stroke};
@@ -48,33 +51,17 @@ fn show_vertical_tab_entries_above_new_tab(
         .flat_map(|zone| zone.entries.iter())
         .copied()
         .collect::<Vec<_>>();
-    attach_tab_list_background_context_menu(ui, output.response.rect, app, &entries);
+    attach_tab_list_background_context_menu(
+        ui,
+        output.response.rect,
+        app,
+        &entries,
+        "vertical_tab_list_background_context",
+    );
 
     ui.add_space(8.0);
     show_vertical_new_tab_action(ui, app);
     drop_zones
-}
-
-fn attach_tab_list_background_context_menu(
-    ui: &mut egui::Ui,
-    rect: egui::Rect,
-    app: &mut ScratchpadApp,
-    entries: &[crate::app::ui::tab_drag::TabRectEntry],
-) {
-    let pointer_over_tab = ui
-        .input(|input| input.pointer.interact_pos())
-        .is_some_and(|pos| entries.iter().any(|entry| entry.rect.contains(pos)));
-    if pointer_over_tab {
-        return;
-    }
-    let response = widget_ids::interact(
-        ui,
-        rect,
-        widget_ids::local(ui, "vertical_tab_list_background_context"),
-        egui::Sense::click(),
-        "vertical_tab_list_background_context",
-    );
-    attach_tab_list_context_menu(&response, app);
 }
 
 fn show_vertical_new_tab_action(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
@@ -127,16 +114,16 @@ fn show_scrolling_vertical_tab_list(
     outcome: &mut TabStripOutcome,
 ) -> Option<TabDropZone> {
     let scroll_area_id = widget_ids::scroll_id(ui, "vertical_tab_list");
-    let entries = egui::ScrollArea::vertical()
+    let output = egui::ScrollArea::vertical()
         .id_salt(scroll_area_id)
         .auto_shrink([false, false])
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 4.0;
-            let viewport_rect = ui.max_rect();
-            maybe_auto_scroll_vertical_tab_list(ui, app, scroll_area_id, viewport_rect);
             collect_vertical_tab_entries(ui, app, duplicate_name_counts, outcome)
-        })
-        .inner;
+        });
+    maybe_auto_scroll_vertical_entries(ui, app, output.id, output.inner_rect, &output.state);
+    let entries = output.inner;
 
     (!entries.is_empty()).then_some(TabDropZone {
         axis: TabDropAxis::Vertical,
@@ -158,22 +145,20 @@ fn collect_vertical_tab_entries(
     collect_slot_entries(ui, app, &context, outcome, |_, _| {})
 }
 
-fn maybe_auto_scroll_vertical_tab_list(
+fn maybe_auto_scroll_vertical_entries(
     ui: &mut egui::Ui,
     app: &ScratchpadApp,
     scroll_area_id: egui::Id,
     viewport_rect: egui::Rect,
+    scroll_state: &egui::scroll_area::State,
 ) {
-    if let Some(scroll_state) = egui::scroll_area::State::load(ui.ctx(), scroll_area_id) {
-        crate::app::ui::tab_drag::auto_scroll_tab_list(
-            ui.ctx(),
-            scroll_area_id,
-            viewport_rect,
-            estimated_vertical_tab_list_height(app, 4.0),
-            &scroll_state,
-            crate::app::ui::tab_drag::TabDropAxis::Vertical,
-        );
-    }
+    auto_scroll_vertical_tab_list(
+        ui,
+        scroll_area_id,
+        viewport_rect,
+        estimated_vertical_tab_list_height(app, 4.0),
+        scroll_state,
+    );
 }
 
 fn estimated_vertical_tab_list_height(app: &ScratchpadApp, spacing: f32) -> f32 {

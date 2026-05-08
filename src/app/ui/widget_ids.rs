@@ -242,7 +242,7 @@ pub(crate) fn allocate_exact_interact(
     sense: Sense,
     kind: &'static str,
 ) -> Response {
-    let rect = Rect::from_min_size(ui.available_rect_before_wrap().min, size);
+    let rect = exact_rect_for_layout(ui, size);
     let response = interact(ui, rect, id, sense, kind);
     ui.advance_cursor_after_rect(rect);
     response
@@ -256,16 +256,26 @@ pub(crate) fn allocate_exact_rect_interact(
     sense: Sense,
     kind: &'static str,
 ) -> Response {
-    let rect = Rect::from_min_size(ui.available_rect_before_wrap().min, size);
+    let rect = exact_rect_for_layout(ui, size);
     let response = interact(ui, rect, rect_surface_id(rect, role), sense, kind);
     ui.advance_cursor_after_rect(rect);
     response
 }
 
 pub(crate) fn allocate_exact_rect(ui: &mut egui::Ui, size: egui::Vec2) -> Rect {
-    let rect = Rect::from_min_size(ui.available_rect_before_wrap().min, size);
+    let rect = exact_rect_for_layout(ui, size);
     ui.advance_cursor_after_rect(rect);
     rect
+}
+
+fn exact_rect_for_layout(ui: &egui::Ui, size: egui::Vec2) -> Rect {
+    let available = ui.available_rect_before_wrap();
+    let min = if ui.layout().main_dir() == egui::Direction::RightToLeft {
+        egui::pos2(available.right() - size.x, available.top())
+    } else {
+        available.min
+    };
+    Rect::from_min_size(min, size)
 }
 
 #[cfg(test)]

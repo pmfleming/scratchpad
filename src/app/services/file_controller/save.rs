@@ -231,8 +231,10 @@ impl FileController {
         _action_name: &str,
         format_override: Option<TextFormatMetadata>,
     ) -> bool {
+        let file_name = default_save_as_file_name(&app.tabs()[index].active_buffer().name);
         if let Some(path) = rfd::FileDialog::new()
-            .set_file_name(&app.tabs()[index].active_buffer().name)
+            .add_filter("Text", &["txt"])
+            .set_file_name(&file_name)
             .save_file()
         {
             Self::save_buffer_to_path(app, index, path, true, format_override)
@@ -598,4 +600,19 @@ impl FileController {
             }
         }
     }
+}
+
+fn default_save_as_file_name(buffer_name: &str) -> String {
+    let trimmed = buffer_name.trim();
+    let mut file_name = if trimmed.is_empty() {
+        "untitled".to_owned()
+    } else {
+        trimmed.to_owned()
+    };
+
+    if Path::new(&file_name).extension().is_none() {
+        file_name.push_str(".txt");
+    }
+
+    file_name
 }

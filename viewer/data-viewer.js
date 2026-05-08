@@ -2419,6 +2419,23 @@
         });
     }
 
+    function richerPerformanceRow(left, right) {
+        const score = (item) =>
+            (item?.scenario_label ? 4 : 0) +
+            (item?.parameter_label ? 2 : 0) +
+            (item?.sourceLabel ? 1 : 0);
+        return score(right) > score(left) ? right : left;
+    }
+
+    function distinctPerformanceRows(rows) {
+        const byKey = new Map();
+        (rows || []).forEach((item) => {
+            const key = `${item.benchmark_key || item.name || ""}:${performanceRowParameter(item) || item.name || ""}:${item.latency_kind || ""}`;
+            byKey.set(key, byKey.has(key) ? richerPerformanceRow(byKey.get(key), item) : item);
+        });
+        return [...byKey.values()];
+    }
+
     function latencyMs(item) {
         return Number(item?.mean_ns || 0) / 1_000_000;
     }
@@ -3704,9 +3721,9 @@
     function codeMetricParts() {
         const current = state.projectCodeMetrics?.current || {};
         return [
-            { key: "application", label: "Total Project Application Rust Code", value: Number(current.application || 0), color: "#6fd0ff" },
-            { key: "test", label: "Total Project Test Rust Code", value: Number(current.test || 0), color: "#7ddc9b" },
-            { key: "other", label: "Total Project Other Rust Code", value: Number(current.other || 0), color: "#f3c969" },
+            { key: "application", label: "Application", value: Number(current.application || 0), color: "#6fd0ff" },
+            { key: "test", label: "Test", value: Number(current.test || 0), color: "#7ddc9b" },
+            { key: "other", label: "Other", value: Number(current.other || 0), color: "#f3c969" },
         ];
     }
 
@@ -3800,7 +3817,11 @@
 
     function renderTopListCard({ title, subtitle, items, emptyText, tone = "neutral" }) {
         const list = items.length
-            ? `<ol>${items.map((item, index) => `<li><span class="top-list-card__rank">${index + 1}</span><span class="top-list-card__label">${item.label}</span><span class="top-list-card__value">${item.value}</span></li>`).join("")}</ol>`
+            ? `<ol>${items.map((item, index) => {
+                const labelClass = `top-list-card__label${item.preserveEnd ? " top-list-card__label--end" : ""}`;
+                const titleAttr = item.tooltip ? ` title="${escapeHtml(item.tooltip)}"` : "";
+                return `<li><span class="top-list-card__rank">${index + 1}</span><span class="${labelClass}"${titleAttr}>${item.label}</span><span class="top-list-card__value">${item.value}</span></li>`;
+            }).join("")}</ol>`
             : `<p class="muted">${escapeHtml(emptyText)}</p>`;
         return `<div class="top-list-card top-list-card--${escapeHtml(tone)}">
             <div class="top-list-card__header">
@@ -3826,16 +3847,18 @@
                 value: `<span class="${riskClass(qualityScore(item), 300, 600)}">${formatNumber.format(qualityScore(item))}</span>`,
             }));
 
-        const slowItems = [...(state.slowspots || []), ...(state.searchSpeed || [])]
+        const slowItems = distinctPerformanceRows([...(state.slowspots || []), ...(state.searchSpeed || [])])
             .map((item) => ({
-                name: item.scenario_label || item.name,
+                name: performanceRowLabel(item),
                 ratio: item.threshold_ms ? (item.mean_ns / 1_000_000) / item.threshold_ms : 0,
             }))
             .filter((it) => it.ratio > 0)
             .sort((a, b) => b.ratio - a.ratio)
             .slice(0, 5)
             .map((it) => ({
-                label: `<code>${escapeHtml((it.name || "").split(/[\\/]/).pop() || it.name)}</code>`,
+                label: `<code>${escapeHtml(it.name)}</code>`,
+                tooltip: it.name,
+                preserveEnd: true,
                 value: `<span class="${it.ratio > 1 ? "risk-bad" : it.ratio > 0.85 ? "risk-warn" : "risk-good"}">${formatNumber.format(it.ratio * 100)}%</span>`,
             }));
 
@@ -5160,6 +5183,36 @@
         }
     }
 
+    async function clearAppPackageBuffers() {
+        const button = byId("app-package-clear-buffers");
+        if (!window.confirm("Delete all persisted session tabs and buffer snapshot data, including dirty unsaved buffers?")) {
+            return;
+        }
+        if (button) button.disabled = true;
+        try {
+            const response = await fetch("/api/app-package/clear-buffers", { method: "POST", cache: "no-store" });
+            const payload = await response.json();
+            state.appPackage = payload;
+            const result = state.appPackage?.clear_result || {};
+            byId("load-status").textContent = result.blocked
+                ? (result.message || "Close Scratchpad before clearing buffers.")
+                : `Cleared ${formatNumber.format(result.buffers_removed || 0)} buffers across ${formatNumber.format(result.tabs_removed || 0)} tabs.`;
+            byId("load-detail").textContent = `Session root: ${state.appPackage.session_root || "unknown"}`;
+            if (!result.blocked && result.dirty_buffers_removed) {
+                byId("load-detail").textContent += ` Dirty buffers cleared: ${formatNumber.format(result.dirty_buffers_removed)}.`;
+            }
+            if (!response.ok && !result.blocked) {
+                throw new Error(result.message || `Clear buffers returned ${response.status}`);
+            }
+        } catch (error) {
+            byId("load-status").textContent = "Could not clear app package buffers.";
+            byId("load-detail").textContent = error.message;
+        } finally {
+            if (button) button.disabled = false;
+            renderAppPackage();
+        }
+    }
+
     async function refreshRuns() {
         try {
             const previousFinished = state.lastObservedFinishedRun;
@@ -5208,8 +5261,8 @@
         }
     }
 
-    async function loadJson(url) {
-        const response = await fetch(url, { cache: "no-store" });
+    async function loadJson(url, options = {}) {
+        const response = await fetch(url, { cache: "no-store", ...options });
         if (!response.ok) {
             throw new Error(`${url} returned ${response.status}`);
         }
@@ -6157,6 +6210,7 @@
     });
     renderPerformanceDatasetView();
     byId("app-package-refresh")?.addEventListener("click", refreshAppPackage);
+    byId("app-package-clear-buffers")?.addEventListener("click", clearAppPackageBuffers);
     document.querySelectorAll("[data-app-package-view]").forEach((button) => {
         button.addEventListener("click", () => {
             state.appPackageView = button.dataset.appPackageView || "diagnostics";

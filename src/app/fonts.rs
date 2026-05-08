@@ -49,7 +49,15 @@ impl EditorFontPreset {
     }
 }
 
-const CJK_FONT_ASSETS: [(&str, &[u8]); 4] = [
+const FALLBACK_FONT_ASSETS: [(&str, &[u8]); 6] = [
+    (
+        "editor-scratchpad-control-symbols",
+        include_bytes!("../../fonts/ScratchpadControlSymbols-Regular.ttf"),
+    ),
+    (
+        "editor-noto-symbols2",
+        include_bytes!("../../fonts/NotoSansSymbols2-Regular.ttf"),
+    ),
     (
         "editor-noto-cjk-jp",
         include_bytes!("../../fonts/NotoSansCJKjp-Regular.otf"),
@@ -85,12 +93,14 @@ pub fn apply_editor_fonts(ctx: &egui::Context, preset: EditorFontPreset) -> Resu
 
     let (font_name, font_bytes) = preset.font_asset();
     insert_font(&mut fonts, font_name, font_bytes);
-    for (fallback_name, fallback_bytes) in CJK_FONT_ASSETS {
+    for (fallback_name, fallback_bytes) in FALLBACK_FONT_ASSETS {
         insert_font(&mut fonts, fallback_name, fallback_bytes);
     }
 
     let editor_family = egui::FontFamily::Name(EDITOR_FONT_FAMILY.into());
-    let fallback_names = CJK_FONT_ASSETS.iter().map(|(name, _)| (*name).to_owned());
+    let fallback_names = FALLBACK_FONT_ASSETS
+        .iter()
+        .map(|(name, _)| (*name).to_owned());
     let proportional_candidates: Vec<String> = std::iter::once(font_name.to_owned())
         .chain(fallback_names.clone())
         .chain(std::iter::once("phosphor".to_owned()))

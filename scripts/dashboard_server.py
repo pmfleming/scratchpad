@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List
 from urllib.parse import unquote, urlparse
 
-from app_package import app_package_payload
+from app_package import app_package_payload, clear_app_package_buffers
 from measurement_catalog import build_catalog
 from perf_report_shared import terminate_process_tree
 
@@ -641,6 +641,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         selector = ""
+        if path == "/api/app-package/clear-buffers":
+            payload = clear_app_package_buffers()
+            status = 409 if (payload.get("clear_result") or {}).get("blocked") else 200
+            json_response(self, status, payload)
+            return
         if path == "/api/run/all":
             selector = "all"
         elif path.startswith("/api/run/category/"):

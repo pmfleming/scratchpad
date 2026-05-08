@@ -55,11 +55,15 @@ impl TextDocument {
                 return Err(TextHistoryApplyError::Conflict);
             }
             let record = self.operation_from_history_entry(&self.history[idx]);
-            self.validate_text_history_record(&record, direction)?;
+            self.validate_text_history_record(idx, &record, direction)?;
             self.apply_operation_record(&record, direction);
             self.history[idx].flags.undone = matches!(direction, OperationDirection::Undo);
             self.latest_operation_record = Some(record.clone());
             applied_selection = Some(direction.selection(&record));
+        }
+        if applied_selection.is_some() {
+            self.latest_history_update_at = None;
+            self.pending_history_generation_before = None;
         }
         self.revision_counter = self.revision_counter.wrapping_add(1);
         applied_selection.ok_or(TextHistoryApplyError::Conflict)
@@ -91,13 +95,26 @@ impl TextDocument {
 
     pub(super) fn push_operation_record(
         &mut self,
-        record: TextDocumentOperationRecord,
+        mut record: TextDocumentOperationRecord,
         source: PieceSource,
     ) {
+        record
+            .edits
+            .retain(|edit| !edit.deleted_text.is_empty() || !edit.inserted_text.is_empty());
+        if record.edits.is_empty() {
+            self.pending_history_generation_before = None;
+            return;
+        }
+
         self.latest_operation_record = Some(record.clone());
+        let old_len = self.history.len();
         self.history.retain(|entry| !entry.is_undone());
+        if self.history.len() != old_len {
+            self.latest_history_update_at = None;
+        }
         if self.try_coalesce_history(&record, source) {
             self.revision_counter = self.revision_counter.wrapping_add(1);
+            self.pending_history_generation_before = None;
             return;
         }
 
@@ -105,6 +122,7 @@ impl TextDocument {
         self.history.push(entry);
         self.revision_counter = self.revision_counter.wrapping_add(1);
         self.enforce_history_budget();
+        self.pending_history_generation_before = None;
     }
 
     fn apply_operation_record(
@@ -146,18 +164,15 @@ impl TextDocument {
 
     fn validate_text_history_record(
         &self,
+        index: usize,
         record: &TextDocumentOperationRecord,
         direction: OperationDirection,
     ) -> Result<(), TextHistoryApplyError> {
-        let expected_generation = self
-            .history
-            .iter()
-            .find(|entry| self.operation_from_history_entry(entry) == *record)
-            .map(|entry| match direction {
-                OperationDirection::Undo => entry.visible_generation_after,
-                OperationDirection::Redo => entry.visible_generation_before,
-            });
-        if expected_generation == Some(self.piece_tree.generation().min(u32::MAX as u64) as u32) {
+        let expected_generation = self.history.get(index).map(|entry| match direction {
+            OperationDirection::Undo => entry.visible_generation_after,
+            OperationDirection::Redo => entry.visible_generation_before,
+        });
+        if expected_generation == Some(self.visible_generation()) {
             return Ok(());
         }
 
@@ -249,7 +264,9 @@ impl TextDocument {
             .map(PieceHistoryEntry::byte_cost)
             .sum::<usize>();
         let mut evicted = false;
-        while bytes as u64 > self.history_budget.per_file_byte_budget {
+        while self.history.len() > self.history_budget.per_file_entry_limit
+            || bytes as u64 > self.history_budget.per_file_byte_budget
+        {
             let removed = self.history.remove(0);
             let cost = removed.byte_cost();
             bytes = bytes.saturating_sub(cost);
@@ -257,6 +274,7 @@ impl TextDocument {
             evicted = true;
         }
         if evicted {
+            self.revision_counter = self.revision_counter.wrapping_add(1);
             self.compact_history_storage();
         }
     }
@@ -285,16 +303,14 @@ impl TextDocument {
         record: TextDocumentOperationRecord,
         source: PieceSource,
     ) -> PieceHistoryEntry {
-        let generation_after = self.piece_tree.generation().min(u32::MAX as u64) as u32;
-        let mutation_count = record
-            .edits
-            .iter()
-            .map(|edit| {
-                u32::from(!edit.deleted_text.is_empty()) + u32::from(!edit.inserted_text.is_empty())
-            })
-            .sum::<u32>()
-            .max(1);
-        let generation_before = generation_after.saturating_sub(mutation_count);
+        let generation_after = self.visible_generation();
+        debug_assert!(
+            self.pending_history_generation_before.is_some(),
+            "history generation_before should be captured before pushing text history"
+        );
+        let generation_before = self
+            .pending_history_generation_before
+            .unwrap_or(generation_after);
         let edits = record
             .edits
             .iter()
@@ -344,14 +360,20 @@ impl TextDocument {
                 deleted: deleted_spans_or_payload(tree, edit, source),
                 inserted: tree.append_history_text(&edit.inserted_text, source),
             },
-            (true, true) => PieceHistoryEdit::Inserted {
-                start_char,
-                span: ByteSpan {
-                    buffer: super::super::piece_tree::PieceBuffer::Add,
-                    start_byte: 0,
-                    byte_len: 0,
-                },
-            },
+            (true, true) => {
+                debug_assert!(
+                    false,
+                    "no-op text records should be filtered before history entry creation"
+                );
+                PieceHistoryEdit::Inserted {
+                    start_char,
+                    span: ByteSpan {
+                        buffer: super::super::piece_tree::PieceBuffer::Add,
+                        start_byte: 0,
+                        byte_len: 0,
+                    },
+                }
+            }
         }
     }
 
@@ -410,10 +432,11 @@ impl TextDocument {
             .map(|edit| self.history_edit_from_operation_edit(edit, source))
             .collect::<PieceHistoryEdits>();
         let fingerprint = self.fingerprint_for_history_edits(&edits);
+        let visible_generation_after = self.visible_generation();
         let latest = &mut self.history[latest_index];
         latest.edits = edits;
         latest.next_selection = merged_record.next_selection;
-        latest.visible_generation_after = self.piece_tree.generation().min(u32::MAX as u64) as u32;
+        latest.visible_generation_after = visible_generation_after;
         latest.global_seq = next_text_history_global_seq();
         latest.fingerprint = fingerprint;
         latest.summary = operation_summary(latest.source, merged_record);
@@ -429,14 +452,44 @@ impl TextDocument {
     }
 
     fn replace_history_spans(&mut self, spans: Vec<ByteSpan>) {
+        let expected = self.history_spans().len();
+        debug_assert_eq!(
+            expected,
+            spans.len(),
+            "history span replacement count mismatch"
+        );
         let mut spans = spans.into_iter();
         for entry in &mut self.history {
             for edit in &mut entry.edits {
                 edit.each_span_mut(|slot| {
                     if let Some(next) = spans.next() {
                         *slot = next;
+                    } else {
+                        debug_assert!(false, "history span replacement iterator ran short");
                     }
                 });
+            }
+        }
+        debug_assert!(
+            spans.next().is_none(),
+            "history span replacement iterator had extra spans"
+        );
+    }
+
+    pub(super) fn normalize_imported_redo_state(&mut self) {
+        let mut in_undone_suffix = true;
+        for entry in self.history.iter_mut().rev() {
+            if in_undone_suffix && entry.is_undone() {
+                continue;
+            }
+            in_undone_suffix = false;
+            if entry.is_undone() {
+                // The runtime model is linear: redoable entries are exactly the
+                // newest contiguous undone suffix. Older imported undone flags
+                // cannot be trusted, so keep the row as historical but disable
+                // replay rather than allowing redo to skip newer applied edits.
+                entry.flags.undone = false;
+                entry.flags.replayable = false;
             }
         }
     }

@@ -3,6 +3,7 @@ use crate::app::diagnostics;
 use crate::app::domain::TabManager;
 use crate::app::services::background_io::spawn_background_io_worker;
 use crate::app::services::file_controller::FileController;
+use crate::app::services::file_service::FileService;
 use crate::app::services::manual_files;
 use crate::app::services::session_manager;
 use crate::app::services::session_store::SessionStore;
@@ -120,20 +121,29 @@ impl ScratchpadApp {
         };
 
         let loaded_from_settings = app.load_settings_from_store();
+        let has_startup_files = !startup_options.files.is_empty();
         if runtime_background_startup {
             if app.should_restore_session(&startup_options) {
                 app.queue_background_session_restore(startup_options, loaded_from_settings);
             } else {
+                if !has_startup_files {
+                    app.initialize_default_workspace_tabs();
+                }
                 app.request_focus_for_active_view();
                 app.apply_startup_options_async(startup_options);
             }
         } else {
+            let mut restored_session = false;
             if app.should_restore_session(&startup_options) {
                 let legacy_settings = session_manager::restore_session_state(&mut app);
+                restored_session = legacy_settings.is_some();
                 if !loaded_from_settings && let Some(legacy_settings) = legacy_settings {
                     app.apply_settings(legacy_settings);
                     let _ = app.persist_settings_now();
                 }
+            }
+            if !restored_session && !has_startup_files {
+                app.initialize_default_workspace_tabs();
             }
             app.request_focus_for_active_view();
             app.apply_startup_options(startup_options);
@@ -223,5 +233,25 @@ impl ScratchpadApp {
                 FileOpenDisposition::CurrentTab => StartupOpenTarget::ActiveTab,
             }
         }
+    }
+
+    pub(super) fn initialize_default_workspace_tabs(&mut self) {
+        let user_manual_path = manual_files::resolve_user_manual_path();
+        let default_tab = if user_manual_path.is_file() {
+            (|| {
+                let path = user_manual_path;
+                let file_content = FileService::read_file(&path).ok()?;
+                let disk_state = FileService::read_disk_state(&path).ok();
+                let buffer =
+                    FileService::build_buffer_from_file_content(&path, file_content, disk_state);
+                Some(crate::app::domain::WorkspaceTab::new(buffer))
+            })()
+            .unwrap_or_else(crate::app::domain::WorkspaceTab::untitled)
+        } else {
+            crate::app::domain::WorkspaceTab::untitled()
+        };
+        self.tab_manager_mut().tabs = vec![default_tab];
+        self.tab_manager_mut().active_tab_index = 0;
+        self.mark_search_dirty();
     }
 }

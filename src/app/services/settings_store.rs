@@ -183,7 +183,7 @@ impl Default for AppSettings {
             recent_files_enabled: default_recent_files_enabled(),
             status_bar_visible: default_status_bar_visible(),
             window_state: WindowState::default(),
-            settings_tab_open: false,
+            settings_tab_open: true,
             settings_tab_index: None,
             history_budget: TextHistoryBudget::default(),
         }

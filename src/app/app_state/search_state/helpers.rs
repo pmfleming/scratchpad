@@ -1,6 +1,7 @@
 use super::worker::{SearchFileIdentity, SearchResult, SearchTargetSnapshot};
 use super::{ReplacementTargetPlan, SearchMatch, SearchResultGroup, SearchStatus};
 use crate::app::domain::{BufferId, EditorViewState, SearchHighlightState, ViewId, WorkspaceTab};
+use crate::app::services::search::SearchError;
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -127,8 +128,8 @@ pub(super) fn search_highlight_state_for_view(
 
 pub(super) fn build_replacement_targets(
     matches: &[SearchMatch],
-    mut replacement_for_match: impl FnMut(&SearchMatch) -> String,
-) -> Vec<ReplacementTargetPlan> {
+    mut replacement_for_match: impl FnMut(&SearchMatch) -> Result<String, SearchError>,
+) -> Result<Vec<ReplacementTargetPlan>, SearchError> {
     let mut targets = Vec::new();
     let mut start = 0;
     while start < matches.len() {
@@ -142,12 +143,12 @@ pub(super) fn build_replacement_targets(
             .iter()
             .rev()
             .map(|search_match| {
-                (
+                Ok((
                     search_match.range.clone(),
-                    replacement_for_match(search_match),
-                )
+                    replacement_for_match(search_match)?,
+                ))
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         let expected_matches = matches[start..end]
             .iter()
             .rev()
@@ -170,7 +171,7 @@ pub(super) fn build_replacement_targets(
         });
         start = end;
     }
-    targets
+    Ok(targets)
 }
 
 pub(super) fn collect_search_targets_for_views<'a>(
@@ -201,13 +202,22 @@ pub(super) fn collect_search_targets_for_views<'a>(
 }
 
 pub(super) fn fallback_selection_for_target(target: &ReplacementTargetPlan) -> CursorRange {
-    cursor_range_from_char_range(target.replacements[0].0.clone())
+    cursor_range_from_char_range(first_document_order_replacement(target).0.clone())
 }
 
 pub(super) fn next_selection_for_target(target: &ReplacementTargetPlan) -> CursorRange {
-    let range = &target.replacements[0].0;
-    let replacement_len = target.replacements[0].1.chars().count();
+    let (range, replacement) = first_document_order_replacement(target);
+    let replacement_len = replacement.chars().count();
     cursor_range_from_char_range(range.start..range.start + replacement_len)
+}
+
+pub(super) fn first_document_order_replacement(
+    target: &ReplacementTargetPlan,
+) -> &(Range<usize>, String) {
+    target
+        .replacements
+        .last()
+        .expect("replacement target requires at least one replacement")
 }
 
 pub(super) fn build_search_target(

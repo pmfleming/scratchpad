@@ -1,22 +1,9 @@
 use super::*;
 
-fn nearest_font_size_index(font_size: f32) -> usize {
-    FONT_SIZE_OPTIONS
-        .iter()
-        .enumerate()
-        .min_by(|(_, left), (_, right)| {
-            let left_distance = (font_size - **left as f32).abs();
-            let right_distance = (font_size - **right as f32).abs();
-            left_distance.total_cmp(&right_distance)
-        })
-        .map(|(index, _)| index)
-        .unwrap_or(0)
-}
-
 pub(super) fn render_text_formatting_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    category_heading(ui, "Text Formatting");
-    expandable_card(
+    category_card(
         ui,
+        "Text Formatting",
         "settings_font_card",
         egui_phosphor::regular::TEXT_ALIGN_JUSTIFY,
         "Font",
@@ -44,48 +31,35 @@ pub(super) fn render_text_formatting_category(ui: &mut egui::Ui, app: &mut Scrat
 }
 
 fn render_font_family_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    inner_select_row(ui, "Family", Some("Pick the bundled editor font."), |ui| {
-        let mut selected_font = app.editor_font();
-        fixed_width_control(ui, |ui| {
-            let control_width = SettingsUi::control_width(ui);
-            widget_ids::combo_box(ui, "settings_editor_font")
-                .selected_text(selected_font.label())
-                .width(control_width)
-                .show_ui(ui, |ui| {
-                    for preset in EditorFontPreset::ALL {
-                        ui.selectable_value(&mut selected_font, preset, preset.label());
-                    }
-                });
-        });
-        if selected_font != app.editor_font() {
-            app.set_editor_font(selected_font);
-        }
-    });
+    combo_select_row(
+        ui,
+        "Family",
+        Some("Bundled editor font."),
+        "settings_editor_font",
+        "combo.Font family",
+        app.editor_font(),
+        &EditorFontPreset::ALL,
+        EditorFontPreset::label,
+        EditorFontPreset::label,
+        |font| app.set_editor_font(font),
+    );
 }
 
 fn render_font_size_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    inner_select_row(ui, "Size", Some("Adjust the editor text size."), |ui| {
-        let current_index = nearest_font_size_index(app.font_size());
+    inner_select_row(ui, "Size", Some("Editor text size."), |ui| {
+        let current_index =
+            nearest_option_index(app.font_size(), &FONT_SIZE_OPTIONS, |size| size as f32);
         let mut selected_index = current_index as u32;
-        let control_width = SettingsUi::control_width(ui);
-        widget_ids::surface_response(
+        let selected_size = FONT_SIZE_OPTIONS[selected_index as usize];
+        u32_slider_value_control(
             ui,
             "settings.font_size.slider",
-            widget_ids::WidgetRole::ActionButton,
-            |ui| {
-                ui.add_sized(
-                    egui::vec2(control_width, 0.0),
-                    egui::Slider::new(
-                        &mut selected_index,
-                        0..=(FONT_SIZE_OPTIONS.len() - 1) as u32,
-                    )
-                    .step_by(1.0)
-                    .show_value(false),
-                )
-            },
+            "slider.Font size",
+            &mut selected_index,
+            0..=(FONT_SIZE_OPTIONS.len() - 1) as u32,
+            40.0,
+            selected_size.to_string(),
         );
-        ui.add_space(8.0);
-        ui.label(FONT_SIZE_OPTIONS[selected_index as usize].to_string());
 
         let selected_size = FONT_SIZE_OPTIONS[selected_index as usize] as f32;
         if selected_index as usize != current_index {
@@ -95,32 +69,21 @@ fn render_font_size_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 }
 
 fn render_gutter_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    inner_select_row(
-        ui,
-        "Gutter",
-        Some("Add space around the editor text area."),
-        |ui| {
-            let mut selected_gutter = app.editor_gutter();
-            let control_width = SettingsUi::control_width(ui);
-            widget_ids::surface_response(
-                ui,
-                "settings.gutter.slider",
-                widget_ids::WidgetRole::ActionButton,
-                |ui| {
-                    ui.add_sized(
-                        egui::vec2(control_width, 0.0),
-                        egui::Slider::new(&mut selected_gutter, 0..=32)
-                            .step_by(1.0)
-                            .show_value(false),
-                    )
-                },
-            );
-            ui.add_space(8.0);
-            ui.label(format!("{selected_gutter} px"));
+    inner_select_row(ui, "Gutter", Some("Editor padding."), |ui| {
+        let mut selected_gutter = u32::from(app.editor_gutter());
+        let gutter_label = format!("{selected_gutter} px");
+        u32_slider_value_control(
+            ui,
+            "settings.gutter.slider",
+            "slider.Gutter",
+            &mut selected_gutter,
+            0..=32,
+            64.0,
+            gutter_label,
+        );
 
-            if selected_gutter != app.editor_gutter() {
-                app.set_editor_gutter(selected_gutter);
-            }
-        },
-    );
+        if selected_gutter != u32::from(app.editor_gutter()) {
+            app.set_editor_gutter(selected_gutter as u8);
+        }
+    });
 }

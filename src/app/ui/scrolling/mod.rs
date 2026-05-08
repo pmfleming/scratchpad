@@ -8,12 +8,14 @@
 //! gating. Higher-level concepts (display rows, scroll anchors, cursor reveal,
 //! intents) live in Phase 2's `ScrollManager`.
 
+mod acceleration;
 mod anchor;
 mod area;
 mod display;
 mod intent;
 mod manager;
 mod metrics;
+mod scrollbar;
 mod source;
 mod state;
 mod target;

@@ -8,6 +8,7 @@ use crate::app::ui::tab_strip::context_menu::attach_tab_list_context_menu;
 use crate::app::ui::widget_ids;
 use eframe::egui::{self, Stroke};
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OverflowListMode {
@@ -39,6 +40,14 @@ struct OverflowRowState {
     can_promote_all_files: bool,
 }
 
+#[derive(Clone, Copy)]
+enum OverflowRowAction {
+    None,
+    Promote,
+    Activate,
+    Close,
+}
+
 struct OverflowPopupRequest<'a> {
     app: &'a ScratchpadApp,
     visible_tab_indices: &'a HashSet<usize>,
@@ -49,6 +58,7 @@ struct OverflowPopupRequest<'a> {
 
 const BOTTOM_OVERFLOW_GAP: f32 = 6.0;
 const OVERFLOW_POPUP_VIEWPORT_MARGIN: f32 = 8.0;
+const OVERFLOW_DRAG_HOVER_OPEN_DELAY_SECONDS: f64 = 0.4;
 
 pub(crate) fn show_overflow_button(
     ctx: &egui::Context,
@@ -63,6 +73,7 @@ pub(crate) fn show_overflow_button(
     let overflow_button_response = overflow_button(ui);
     attach_tab_list_context_menu(&overflow_button_response, app);
     toggle_overflow_popup(overflow_popup_open, &overflow_button_response);
+    maybe_open_overflow_popup_for_tab_drag(ctx, &overflow_button_response, overflow_popup_open);
 
     let (anchor, pivot) = overflow_popup_anchor(app, overflow_button_response.rect);
     let popup_request = OverflowPopupRequest {
@@ -143,8 +154,8 @@ fn show_overflow_popup(
                     overflow_popup_open,
                 };
 
-                egui::ScrollArea::vertical()
-                    .id_salt(request.overflow_popup_id.with("scroll"))
+                let scroll_output = egui::ScrollArea::vertical()
+                    .id_salt(overflow_popup_scroll_id(request.overflow_popup_id))
                     .auto_shrink([false, true])
                     .min_scrolled_height(popup_target_height)
                     .max_height(popup_target_height)
@@ -156,13 +167,121 @@ fn show_overflow_popup(
                             request.visible_tab_indices,
                             &mut menu,
                         )
-                    })
-                    .inner
+                    });
+                maybe_auto_scroll_overflow_popup(
+                    ui,
+                    scroll_output.id,
+                    request.app,
+                    request.visible_tab_indices,
+                    scroll_output.inner_rect,
+                    &scroll_output.state,
+                );
+                scroll_output.inner
             })
         });
 
     outcome.drop_zone = build_overflow_drop_zone(&area_response.inner.inner);
     Some(area_response.response)
+}
+
+fn maybe_open_overflow_popup_for_tab_drag(
+    ctx: &egui::Context,
+    button_response: &egui::Response,
+    overflow_popup_open: &mut bool,
+) {
+    if !should_track_overflow_drag_hover(ctx, button_response, *overflow_popup_open) {
+        clear_overflow_drag_hover_start(ctx);
+        return;
+    }
+
+    let now = ctx.input(|input| input.time);
+    let hover_started_at = overflow_drag_hover_started_at(ctx).unwrap_or_else(|| {
+        store_overflow_drag_hover_start(ctx, now);
+        now
+    });
+
+    if overflow_drag_hover_ready(hover_started_at, now) {
+        *overflow_popup_open = true;
+        clear_overflow_drag_hover_start(ctx);
+    } else {
+        ctx.request_repaint_after(overflow_drag_hover_remaining(hover_started_at, now));
+    }
+}
+
+fn should_track_overflow_drag_hover(
+    ctx: &egui::Context,
+    button_response: &egui::Response,
+    overflow_popup_open: bool,
+) -> bool {
+    !overflow_popup_open
+        && tab_drag::is_drag_active_for_context(ctx)
+        && pointer_over_response_rect(ctx, button_response)
+}
+
+fn pointer_over_response_rect(ctx: &egui::Context, response: &egui::Response) -> bool {
+    ctx.input(|input| {
+        input
+            .pointer
+            .latest_pos()
+            .is_some_and(|pos| response.rect.contains(pos))
+    })
+}
+
+fn maybe_auto_scroll_overflow_popup(
+    ui: &mut egui::Ui,
+    scroll_area_id: egui::Id,
+    app: &ScratchpadApp,
+    visible_tab_indices: &HashSet<usize>,
+    viewport_rect: egui::Rect,
+    scroll_state: &egui::scroll_area::State,
+) {
+    tab_drag::auto_scroll_tab_list(
+        ui.ctx(),
+        scroll_area_id,
+        viewport_rect,
+        estimated_overflow_popup_content_height(app, visible_tab_indices),
+        scroll_state,
+        tab_drag::TabDropAxis::Vertical,
+    );
+}
+
+fn estimated_overflow_popup_content_height(
+    app: &ScratchpadApp,
+    visible_tab_indices: &HashSet<usize>,
+) -> f32 {
+    overflow_row_count(app, visible_tab_indices) as f32 * TAB_HEIGHT
+}
+
+fn overflow_popup_scroll_id(overflow_popup_id: egui::Id) -> egui::Id {
+    overflow_popup_id.with("scroll")
+}
+
+fn overflow_drag_hover_ready(started_at: f64, now: f64) -> bool {
+    now - started_at >= OVERFLOW_DRAG_HOVER_OPEN_DELAY_SECONDS
+}
+
+fn overflow_drag_hover_remaining(started_at: f64, now: f64) -> Duration {
+    Duration::from_secs_f64((OVERFLOW_DRAG_HOVER_OPEN_DELAY_SECONDS - (now - started_at)).max(0.0))
+}
+
+fn overflow_drag_hover_started_at(ctx: &egui::Context) -> Option<f64> {
+    ctx.data(|data| data.get_temp::<f64>(overflow_drag_hover_start_id()))
+}
+
+fn store_overflow_drag_hover_start(ctx: &egui::Context, started_at: f64) {
+    ctx.data_mut(|data| {
+        data.insert_temp(overflow_drag_hover_start_id(), started_at);
+    });
+}
+
+fn clear_overflow_drag_hover_start(ctx: &egui::Context) {
+    ctx.data_mut(|data| {
+        data.remove::<f64>(overflow_drag_hover_start_id());
+    });
+}
+
+fn overflow_drag_hover_start_id() -> egui::Id {
+    widget_ids::ctx_key("tab_overflow_drag_hover_start")
 }
 
 fn overflow_popup_anchor(
@@ -346,21 +465,36 @@ fn apply_overflow_row_actions(
     close_response: &egui::Response,
     menu: &mut OverflowMenuContext<'_>,
 ) {
+    match overflow_row_action(app, slot_index, response, promote_response, close_response) {
+        OverflowRowAction::None => {}
+        OverflowRowAction::Promote => {
+            menu.outcome.promote_all_files_tab = Some(slot_index);
+            *menu.overflow_popup_open = false;
+        }
+        OverflowRowAction::Activate => handle_overflow_slot_action(app, slot_index, menu, false),
+        OverflowRowAction::Close => handle_overflow_slot_action(app, slot_index, menu, true),
+    }
+}
+
+fn overflow_row_action(
+    app: &ScratchpadApp,
+    slot_index: usize,
+    response: &egui::Response,
+    promote_response: Option<&egui::Response>,
+    close_response: &egui::Response,
+) -> OverflowRowAction {
     if promote_response.is_some_and(|promote| promote.clicked())
         && app.workspace_index_for_slot(slot_index).is_some()
     {
-        menu.outcome.promote_all_files_tab = Some(slot_index);
-        *menu.overflow_popup_open = false;
-        return;
+        return OverflowRowAction::Promote;
     }
-
-    if response.clicked() {
-        handle_overflow_slot_action(app, slot_index, menu, false);
-    }
-
     if close_response.clicked() {
-        handle_overflow_slot_action(app, slot_index, menu, true);
+        return OverflowRowAction::Close;
     }
+    if response.clicked() {
+        return OverflowRowAction::Activate;
+    }
+    OverflowRowAction::None
 }
 
 fn handle_overflow_slot_action(
@@ -369,16 +503,11 @@ fn handle_overflow_slot_action(
     menu: &mut OverflowMenuContext<'_>,
     is_close: bool,
 ) {
-    if app.tab_slot_is_settings(slot_index) {
-        if is_close {
-            menu.outcome.close_settings = true;
-        } else {
-            menu.outcome.activate_settings = true;
-        }
-    } else if is_close {
-        menu.outcome.close_requested_tab = Some(slot_index);
-    } else {
-        menu.outcome.activated_tab = Some(slot_index);
+    match (app.tab_slot_is_settings(slot_index), is_close) {
+        (true, true) => menu.outcome.close_settings = true,
+        (true, false) => menu.outcome.activate_settings = true,
+        (false, true) => menu.outcome.close_requested_tab = Some(slot_index),
+        (false, false) => menu.outcome.activated_tab = Some(slot_index),
     }
     *menu.overflow_popup_open = false;
 }
@@ -398,7 +527,9 @@ fn render_drag_source_placeholder(ui: &mut egui::Ui, width: f32) -> egui::Rect {
 
 #[cfg(test)]
 mod tests {
-    use super::overflow_popup_target_height;
+    use super::{
+        overflow_drag_hover_ready, overflow_drag_hover_remaining, overflow_popup_target_height,
+    };
     use crate::app::theme::TAB_HEIGHT;
 
     #[test]
@@ -414,6 +545,20 @@ mod tests {
         assert_eq!(
             overflow_popup_target_height(20, TAB_HEIGHT * 4.5),
             TAB_HEIGHT * 4.5
+        );
+    }
+
+    #[test]
+    fn drag_hover_open_waits_for_dwell_delay() {
+        assert!(!overflow_drag_hover_ready(10.0, 10.39));
+        assert!(overflow_drag_hover_ready(10.0, 10.4));
+    }
+
+    #[test]
+    fn drag_hover_repaint_uses_remaining_delay() {
+        assert_eq!(
+            overflow_drag_hover_remaining(10.0, 10.25),
+            std::time::Duration::from_millis(150)
         );
     }
 }

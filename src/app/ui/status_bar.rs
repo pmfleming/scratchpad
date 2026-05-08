@@ -35,6 +35,7 @@ struct ActiveStatusDetails {
     icon: &'static str,
     icon_tooltip: &'static str,
     icon_color: egui::Color32,
+    control_chars_available: bool,
     freshness_label: Option<String>,
 }
 
@@ -104,6 +105,7 @@ fn collect_active_status_details(
         icon,
         icon_tooltip,
         icon_color,
+        control_chars_available: buffer.has_visible_control_substitutions(),
         freshness_label: visible_disk_status_label(buffer).map(str::to_owned),
     })
 }
@@ -280,9 +282,16 @@ fn show_control_char_toggle(
     let button_response =
         fixed_status_icon_cell(ui, "status_control_chars", details.icon, details.icon_color);
     if button_response.hovered() {
-        button_response.clone().on_hover_text(details.icon_tooltip);
+        let tooltip = if details.control_chars_available || details.icon == CONTROL_CHAR_ICON {
+            details.icon_tooltip
+        } else {
+            "No control characters to show"
+        };
+        button_response.clone().on_hover_text(tooltip);
     }
-    if button_response.clicked() {
+    if button_response.clicked()
+        && (details.control_chars_available || details.icon == CONTROL_CHAR_ICON)
+    {
         actions.toggle_control_chars = true;
     }
 }
@@ -348,12 +357,6 @@ fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {
     {
         let buffer = tab.active_buffer_mut();
         buffer.show_control_chars = !buffer.show_control_chars;
-        let buffer_id = buffer.id;
-        for view in &mut tab.views {
-            if view.buffer_id == buffer_id {
-                view.layout_cache.clear();
-            }
-        }
         app.mark_session_dirty();
     }
 
@@ -402,13 +405,13 @@ fn artifact_icon(
     if show_control_chars {
         (
             CONTROL_CHAR_ICON,
-            "Control and Unicode characters are visible and editable; click to hide them",
+            "Hide Control Chars",
             egui::Color32::YELLOW,
         )
     } else {
         (
             HIDDEN_CONTROL_CHAR_ICON,
-            "Control and Unicode characters are hidden but retained; click to show them",
+            "Show Control Chars",
             plain_text_icon_color(dark_mode),
         )
     }
@@ -433,7 +436,7 @@ mod tests {
 
     #[test]
     fn status_prefers_live_cursor_over_pending_cursor() {
-        let mut view = EditorViewState::new(1, false);
+        let mut view = EditorViewState::new(1);
         view.cursor_range = Some(CursorRange::two(0, 8));
         view.pending_cursor_range = Some(CursorRange::one(CharCursor::new(3)));
 

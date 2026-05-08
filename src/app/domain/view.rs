@@ -51,7 +51,6 @@ pub struct EditorViewState {
     pub id: ViewId,
     pub buffer_id: BufferId,
     pub show_line_numbers: bool,
-    pub show_control_chars: bool,
     pub right_to_left_reading_order: bool,
     pub editor_has_focus: bool,
     /// Wrap-aware display-row snapshot derived from the most recently painted
@@ -88,12 +87,11 @@ pub struct EditorViewState {
 }
 
 impl EditorViewState {
-    pub fn new(buffer_id: BufferId, show_control_chars: bool) -> Self {
+    pub fn new(buffer_id: BufferId) -> Self {
         Self {
             id: next_view_id(),
             buffer_id,
             show_line_numbers: false,
-            show_control_chars,
             right_to_left_reading_order: false,
             editor_has_focus: false,
             latest_display_snapshot: None,
@@ -115,18 +113,12 @@ impl EditorViewState {
         }
     }
 
-    pub fn restored(
-        id: ViewId,
-        buffer_id: BufferId,
-        show_line_numbers: bool,
-        show_control_chars: bool,
-    ) -> Self {
+    pub fn restored(id: ViewId, buffer_id: BufferId, show_line_numbers: bool) -> Self {
         register_existing_view_id(id);
         Self {
             id,
             buffer_id,
             show_line_numbers,
-            show_control_chars,
             right_to_left_reading_order: false,
             editor_has_focus: false,
             latest_display_snapshot: None,

@@ -178,12 +178,14 @@ impl ScratchpadApp {
             return;
         }
         self.begin_layout_transition();
+        self.mark_search_dirty();
         self.mark_session_dirty();
     }
 
     fn reorder_display_tab_command(&mut self, from_index: usize, to_index: usize) {
         if self.reorder_display_tab(from_index, to_index) {
             self.begin_layout_transition();
+            self.mark_search_dirty();
         }
     }
 

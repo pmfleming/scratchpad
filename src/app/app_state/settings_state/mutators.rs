@@ -305,13 +305,11 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn reset_settings_to_defaults(&mut self) {
-        let defaults = AppSettings {
-            settings_tab_open: self.settings_tab_open(),
-            settings_tab_index: Some(self.settings_tab_index.min(self.tabs().len())),
-            ..AppSettings::default()
-        };
-        self.apply_settings(defaults);
+        self.initialize_default_workspace_tabs();
+        self.apply_settings(AppSettings::default());
         self.applied_editor_font = None;
+        self.select_only_tab_slot(self.active_tab_slot_index());
+        let _ = self.persist_session_now();
         match self.persist_settings_now() {
             Ok(()) => self.set_info_status("Settings reset to defaults."),
             Err(error) => self.set_error_status(format!("Settings save failed: {error}")),
@@ -383,6 +381,30 @@ mod tests {
         assert!(!app.showing_settings());
         assert_eq!(selected_slots(&app), vec![app.active_tab_slot_index()]);
         assert!(!app.tab_slot_is_settings(app.active_tab_slot_index()));
+    }
+
+    #[test]
+    fn reset_settings_to_defaults_restores_startup_default_state() {
+        let mut app = test_app(["custom.txt"]);
+        app.close_settings();
+
+        app.reset_settings_to_defaults();
+
+        assert!(app.showing_settings());
+        assert_eq!(
+            app.tab_list_position(),
+            crate::app::services::settings_store::TabListPosition::Top
+        );
+        assert_eq!(
+            app.theme_mode(),
+            crate::app::services::settings_store::AppThemeMode::System
+        );
+        assert_eq!(app.tabs().len(), 1);
+        assert_eq!(
+            app.tabs()[0].buffer.name,
+            crate::app::services::manual_files::USER_MANUAL_FILE_NAME
+        );
+        assert!(app.tab_slot_is_settings(app.active_tab_slot_index()));
     }
 
     fn test_app<const N: usize>(names: [&str; N]) -> ScratchpadApp {

@@ -16,12 +16,15 @@ pub enum SearchMode {
 pub enum SearchError {
     InvalidRegex(String),
     UnsupportedRegex(String),
+    ReplacementMismatch(String),
 }
 
 impl SearchError {
     pub fn message(&self) -> &str {
         match self {
-            Self::InvalidRegex(message) | Self::UnsupportedRegex(message) => message,
+            Self::InvalidRegex(message)
+            | Self::UnsupportedRegex(message)
+            | Self::ReplacementMismatch(message) => message,
         }
     }
 }
@@ -97,16 +100,22 @@ impl SearchProgram {
         self.max_match_chars
     }
 
-    pub fn expand_replacement(&self, matched_text: &str, replacement: &str) -> String {
+    pub fn expand_replacement(
+        &self,
+        matched_text: &str,
+        replacement: &str,
+    ) -> Result<String, SearchError> {
         let Some(regex) = &self.regex else {
-            return replacement.to_owned();
+            return Ok(replacement.to_owned());
         };
         let Some(captures) = regex.captures(matched_text) else {
-            return replacement.to_owned();
+            return Err(SearchError::ReplacementMismatch(
+                "Regex replacement could not be expanded for stale search results.".to_owned(),
+            ));
         };
         let mut expanded = String::new();
         captures.expand(replacement, &mut expanded);
-        expanded
+        Ok(expanded)
     }
 }
 
@@ -293,7 +302,21 @@ mod tests {
         let program =
             SearchProgram::compile(r"([a-z]{1,8})-([0-9]{1,4})", regex_options()).unwrap();
 
-        assert_eq!(program.expand_replacement("item-42", "$2:$1"), "42:item");
+        assert_eq!(
+            program.expand_replacement("item-42", "$2:$1").unwrap(),
+            "42:item"
+        );
+    }
+
+    #[test]
+    fn regex_program_rejects_replacement_for_non_matching_text() {
+        let program =
+            SearchProgram::compile(r"([a-z]{1,8})-([0-9]{1,4})", regex_options()).unwrap();
+
+        assert!(matches!(
+            program.expand_replacement("stale", "$2:$1"),
+            Err(SearchError::ReplacementMismatch(_))
+        ));
     }
 
     #[test]
