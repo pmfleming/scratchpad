@@ -1,4 +1,4 @@
-use crate::app::chrome::phosphor_button_with_hover_icon_color;
+use crate::app::chrome::{PhosphorButtonColors, phosphor_button_with_hover_icon_color};
 use crate::app::theme::{
     CAPTION_BUTTON_SIZE, CLOSE_HOVER_BG, action_hover_bg, border, text_muted, text_primary,
 };
@@ -59,9 +59,13 @@ pub(crate) fn scroll_blocker_hovered(ctx: &egui::Context) -> bool {
 }
 
 pub(crate) fn set_modal_scroll_blocker_active(ctx: &egui::Context, active: bool) {
-    if active {
-        ctx.data_mut(|data| data.insert_temp(modal_scroll_blocker_id(), true));
-    }
+    ctx.data_mut(|data| {
+        if active {
+            data.insert_temp(modal_scroll_blocker_id(), true);
+        } else {
+            data.remove::<bool>(modal_scroll_blocker_id());
+        }
+    });
 }
 
 pub(crate) fn scroll_blocker_active(ctx: &egui::Context) -> bool {
@@ -129,31 +133,38 @@ pub(crate) fn close_button(
         surface_key,
         egui_phosphor::regular::X,
         CAPTION_BUTTON_SIZE,
-        action_hover_bg(ui),
-        CLOSE_HOVER_BG,
-        text_primary(ui),
-        egui::Color32::WHITE,
+        PhosphorButtonColors::with_hover_icon(
+            action_hover_bg(ui),
+            CLOSE_HOVER_BG,
+            text_primary(ui),
+            egui::Color32::WHITE,
+        ),
         tooltip,
     )
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct IconButtonStyle {
+    pub(crate) icon_size: f32,
+    pub(crate) size: egui::Vec2,
+    pub(crate) fill: egui::Color32,
 }
 
 pub(crate) fn icon_button(
     ui: &mut egui::Ui,
     surface_key: impl Hash,
     icon: &str,
-    icon_size: f32,
-    size: egui::Vec2,
-    fill: egui::Color32,
+    style: IconButtonStyle,
     tooltip: &str,
     enabled: bool,
 ) -> egui::Response {
     let button = egui::Button::new(
         egui::RichText::new(icon)
-            .font(egui::FontId::proportional(icon_size))
+            .font(egui::FontId::proportional(style.icon_size))
             .color(text(ui)),
     )
-    .min_size(size)
-    .fill(fill)
+    .min_size(style.size)
+    .fill(style.fill)
     .stroke(egui::Stroke::new(1.0, border(ui)))
     .corner_radius(egui::CornerRadius::same(8));
 

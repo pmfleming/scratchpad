@@ -240,16 +240,13 @@ fn show_group_pill(
         ))
         .inner_margin(egui::Margin::symmetric(10, 8))
         .show(ui, |ui| {
-            let group_response = ui
-                .horizontal(|ui| {
-                    let caret_clicked = show_group_caret(ui, group_index, expanded).clicked();
-                    let response = show_group_body(ui, group_index, group);
-                    show_group_match_count(ui, group.total_match_count);
-                    (response, caret_clicked)
-                })
-                .inner;
-
-            group_response
+            ui.horizontal(|ui| {
+                let caret_clicked = show_group_caret(ui, group_index, expanded).clicked();
+                let response = show_group_body(ui, group_index, group);
+                show_group_match_count(ui, group.total_match_count);
+                (response, caret_clicked)
+            })
+            .inner
         })
         .inner
 }

@@ -1,3 +1,4 @@
+use super::layout::DisplayTextMap;
 use super::types::CharCursor;
 use crate::app::domain::{CursorRevealMode, EditorViewState};
 use crate::app::ui::editor_content::native_editor::TextEditOptions;
@@ -18,6 +19,7 @@ struct ReplacementPreviewContext<'a> {
     options: TextEditOptions<'a>,
     char_offset_base: usize,
     slice_end: usize,
+    display_map: Option<&'a DisplayTextMap>,
 }
 
 pub(super) struct EditorPaintRequest<'a> {
@@ -28,6 +30,7 @@ pub(super) struct EditorPaintRequest<'a> {
     pub(super) focused: bool,
     pub(super) char_offset_base: usize,
     pub(super) slice_chars: usize,
+    pub(super) display_map: Option<&'a DisplayTextMap>,
     pub(super) active_selection: Option<Range<usize>>,
 }
 
@@ -40,6 +43,7 @@ struct SelectionPaintContext<'a> {
     options: TextEditOptions<'a>,
     char_offset_base: usize,
     slice_chars: usize,
+    display_map: Option<&'a DisplayTextMap>,
 }
 
 #[derive(Clone, Copy)]
@@ -51,6 +55,7 @@ struct ImePreeditPaintContext<'a> {
     options: TextEditOptions<'a>,
     focused: bool,
     char_offset_base: usize,
+    display_map: Option<&'a DisplayTextMap>,
 }
 
 #[derive(Default)]
@@ -72,6 +77,7 @@ pub(super) fn paint_editor(
             options: request.options,
             char_offset_base: request.char_offset_base,
             slice_chars: request.slice_chars,
+            display_map: request.display_map,
         },
         request.active_selection.as_ref(),
     );
@@ -89,6 +95,7 @@ pub(super) fn paint_editor(
             rect: request.rect,
             options: request.options,
             char_offset_base: request.char_offset_base,
+            display_map: request.display_map,
             slice_end: request.char_offset_base.saturating_add(request.slice_chars),
         },
         view,
@@ -102,6 +109,7 @@ pub(super) fn paint_editor(
             options: request.options,
             focused: request.focused,
             char_offset_base: request.char_offset_base,
+            display_map: request.display_map,
         },
         view,
     );
@@ -119,9 +127,11 @@ pub(super) fn paint_editor(
                 cursor_range.primary,
                 request.char_offset_base,
                 request.slice_chars,
+                request.display_map,
             ),
         );
-        let cursor_rect = galley_local_cursor_rect.translate(request.galley_pos.to_vec2());
+        let cursor_rect = galley_local_cursor_rect
+            .translate(galley_screen_offset(request.galley, request.galley_pos).to_vec2());
         // Reveal targets must be in scroll-content coordinates. The editor rect
         // spans the full document and starts at the content origin, so subtract
         // `rect.min` to translate the screen-space cursor rect into content space.
@@ -149,9 +159,13 @@ fn paint_ime_preedit(context: ImePreeditPaintContext<'_>, view: &EditorViewState
         context.ui,
         context.galley,
         context.options,
-        local_cursor(cursor_range.primary, context.char_offset_base),
+        local_cursor(
+            cursor_range.primary,
+            context.char_offset_base,
+            context.display_map,
+        ),
     )
-    .translate(context.galley_pos.to_vec2());
+    .translate(galley_screen_offset(context.galley, context.galley_pos).to_vec2());
     if !cursor_rect.intersects(context.rect) {
         return;
     }
@@ -216,8 +230,16 @@ fn paint_contiguous_selection_background(
     };
     let slice_start = context.char_offset_base;
     let slice_end = context.char_offset_base.saturating_add(context.slice_chars);
-    let local_start = selection.start.max(slice_start).saturating_sub(slice_start);
-    let local_end = selection.end.min(slice_end).saturating_sub(slice_start);
+    let doc_local_start = selection.start.max(slice_start).saturating_sub(slice_start);
+    let doc_local_end = selection.end.min(slice_end).saturating_sub(slice_start);
+    let local_start = context
+        .display_map
+        .map(|map| map.doc_to_display_cursor(doc_local_start))
+        .unwrap_or(doc_local_start);
+    let local_end = context
+        .display_map
+        .map(|map| map.doc_to_display_cursor(doc_local_end))
+        .unwrap_or(doc_local_end);
     if local_start >= local_end {
         return;
     }
@@ -288,11 +310,19 @@ fn paint_replacement_preview(
     range: Range<usize>,
     replacement: &str,
 ) {
-    let local_start = range.start.saturating_sub(context.char_offset_base);
-    let local_end = range
+    let doc_local_start = range.start.saturating_sub(context.char_offset_base);
+    let doc_local_end = range
         .end
         .min(context.slice_end)
         .saturating_sub(context.char_offset_base);
+    let local_start = context
+        .display_map
+        .map(|map| map.doc_to_display_cursor(doc_local_start))
+        .unwrap_or(doc_local_start);
+    let local_end = context
+        .display_map
+        .map(|map| map.doc_to_display_cursor(doc_local_end))
+        .unwrap_or(doc_local_end);
     if local_start >= local_end {
         return;
     }
@@ -318,7 +348,7 @@ fn paint_replacement_preview(
             .width()
     });
     let preview_rect = replacement_preview_rect(
-        context.galley_pos,
+        galley_screen_offset(context.galley, context.galley_pos),
         start_pos,
         end_pos,
         row_height,
@@ -391,9 +421,16 @@ fn preview_label(replacement: &str) -> String {
     label
 }
 
-pub(super) fn local_cursor(cursor: CharCursor, char_offset_base: usize) -> CharCursor {
+pub(super) fn local_cursor(
+    cursor: CharCursor,
+    char_offset_base: usize,
+    display_map: Option<&DisplayTextMap>,
+) -> CharCursor {
+    let doc_local = cursor.index.saturating_sub(char_offset_base);
     CharCursor {
-        index: cursor.index.saturating_sub(char_offset_base),
+        index: display_map
+            .map(|map| map.doc_to_display_cursor(doc_local))
+            .unwrap_or(doc_local),
         prefer_next_row: cursor.prefer_next_row,
     }
 }
@@ -402,12 +439,16 @@ fn local_cursor_for_slice(
     cursor: CharCursor,
     char_offset_base: usize,
     slice_chars: usize,
+    display_map: Option<&DisplayTextMap>,
 ) -> CharCursor {
+    let doc_local = cursor
+        .index
+        .saturating_sub(char_offset_base)
+        .min(slice_chars);
     CharCursor {
-        index: cursor
-            .index
-            .saturating_sub(char_offset_base)
-            .min(slice_chars),
+        index: display_map
+            .map(|map| map.doc_to_display_cursor(doc_local).min(map.display_len()))
+            .unwrap_or(doc_local),
         prefer_next_row: cursor.prefer_next_row,
     }
 }
@@ -418,8 +459,12 @@ pub(super) fn paint_galley(
     galley_pos: egui::Pos2,
     text_color: egui::Color32,
 ) {
-    let offset = galley_pos - egui::vec2(galley.rect.left(), 0.0);
+    let offset = galley_screen_offset(galley, galley_pos);
     ui.painter().galley(offset, galley.clone(), text_color);
+}
+
+pub(super) fn galley_screen_offset(galley: &egui::Galley, galley_pos: egui::Pos2) -> egui::Pos2 {
+    galley_pos - egui::vec2(galley.rect.left(), 0.0)
 }
 
 fn paint_cursor_effects(

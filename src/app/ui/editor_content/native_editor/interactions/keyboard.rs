@@ -37,6 +37,7 @@ pub(super) fn handle_keyboard_events(
             piece_tree: buffer.document().piece_tree(),
             char_offset_base: request.char_offset_base,
             slice_chars: request.slice_chars,
+            display_map: request.display_map,
         })
     })
 }

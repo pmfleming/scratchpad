@@ -1,6 +1,7 @@
 mod keyboard;
 mod mouse;
 
+use super::layout::DisplayTextMap;
 use super::{CharCursor, CursorRange};
 use crate::app::domain::buffer::PieceTreeLite;
 use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
@@ -13,6 +14,7 @@ pub(super) struct MouseInteractionRequest<'a> {
     pub(super) galley_pos: egui::Pos2,
     pub(super) piece_tree: &'a PieceTreeLite,
     pub(super) char_offset_base: usize,
+    pub(super) display_map: Option<&'a DisplayTextMap>,
 }
 
 pub(super) struct KeyboardInputRequest<'a> {
@@ -21,6 +23,7 @@ pub(super) struct KeyboardInputRequest<'a> {
     pub(super) total_chars: usize,
     pub(super) char_offset_base: usize,
     pub(super) slice_chars: usize,
+    pub(super) display_map: Option<&'a DisplayTextMap>,
 }
 
 pub(super) fn handle_mouse_interaction(

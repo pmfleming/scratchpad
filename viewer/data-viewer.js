@@ -1531,7 +1531,6 @@
         const reasons = [...item.reasons]
             .filter((reason) => /over budget|slow\s*>|ceiling|failure|near/i.test(reason))
             .slice(0, 3);
-        const profile = (item.action.match(/Inspect\s+([^\s,]+_profile)\b/i) || [])[1];
         return `<article class="triage-card">
             <div class="triage-card__rank">${index + 1}</div>
             <div class="triage-card__body">
@@ -1546,7 +1545,6 @@
                 ${reasons.length ? `<div class="triage-card__signals">
                     ${reasons.map((reason) => `<span>${escapeHtml(reason)}</span>`).join("")}
                 </div>` : ""}
-                ${profile ? `<div class="triage-card__actions"><button type="button" class="link-button" data-open-flamegraph="${escapeHtml(profile)}">Open profile</button></div>` : ""}
             </div>
         </article>`;
     }
@@ -2186,7 +2184,7 @@
             <td class="${item.available ? "risk-good" : "risk-bad"}">${escapeHtml(item.available ? "available" : "missing")}</td>
             <td>${renderPills(item.families || [])}</td>
             <td>${renderPills(item.benchmark_keys || [])}</td>
-            <td>${item.available ? `<button type="button" class="link-button" data-open-flamegraph="${escapeHtml(item.id || "")}">Open profile</button>` : escapeHtml(item.issue || "-")}</td>
+            <td>${item.available ? '<span class="muted">available</span>' : escapeHtml(item.issue || "-")}</td>
         </tr>`);
         return renderScenarioEvidenceTable({
             title: "Profiles",
@@ -2234,7 +2232,7 @@
     function renderScenarioProfileLinks(values) {
         const profiles = pillValues(values);
         if (!profiles.length) return '<span class="muted">-</span>';
-        return profiles.map((profile) => `<button type="button" class="link-button" data-open-flamegraph="${escapeHtml(profile)}">${escapeHtml(profile)}</button>`).join(" ");
+        return renderPills(profiles);
     }
 
     function scenarioFamilies(scenario) {
@@ -2905,12 +2903,10 @@
 
     function renderPerformanceMetricRow(item, index, options) {
         const cls = item.value >= 1 ? "risk-bad" : item.value >= 0.7 ? "risk-warn" : "risk-good";
-        const profile = item.profile ? `<button type="button" class="link-button" data-open-flamegraph="${escapeHtml(item.profile)}">Open profile</button>` : `<span class="muted">-</span>`;
         return `<div class="quality-feed__row performance-metric-row" style="--promise-color:${escapeHtml(item.color || performancePromiseColor(item.promiseId || item.label))}">
             <span class="rank-pill">${index + 1}</span>
             <span class="quality-feed__name"><code>${escapeHtml(item.label)}</code><span class="muted quality-feed__detail">${escapeHtml([item.promiseTitle, item.detail].filter(Boolean).join(" - "))}</span></span>
             <span class="${cls}">${escapeHtml(item.valueLabel || options.valueLabel(item.value))}</span>
-            ${profile}
         </div>`;
     }
 
@@ -3034,16 +3030,12 @@
                 popover.classList.toggle("ll-popover--bottom", top > 76);
                 popover.style.left = `${left}%`;
                 popover.style.top = `${top}%`;
-                const profile = point.dataset.pointProfile
-                    ? `<button type="button" class="link-button" data-open-flamegraph="${escapeHtml(point.dataset.pointProfile)}">Open profile</button>`
-                    : "";
                 popover.innerHTML = `<strong title="${escapeHtml(point.dataset.pointLabel || "")}">${escapeHtml(point.dataset.pointLabel || "")}</strong>
                     ${point.dataset.pointDetail ? `<p>${escapeHtml(point.dataset.pointDetail)}</p>` : ""}
                     <div><span>Promise</span><b>${escapeHtml(point.dataset.pointPromise || "Unmapped")}</b></div>
                     <div><span>X</span><b>${escapeHtml(point.dataset.pointXLabel || "-")}</b></div>
                     <div><span>Y</span><b>${escapeHtml(point.dataset.pointYLabel || "-")}</b></div>
-                    <div><span>Score</span><b>${escapeHtml(point.dataset.pointScore || "-")}</b></div>
-                    ${profile}`;
+                    <div><span>Score</span><b>${escapeHtml(point.dataset.pointScore || "-")}</b></div>`;
             };
             card.querySelectorAll(".ll-point").forEach((point) => {
                 point.addEventListener("click", (event) => {
@@ -3234,7 +3226,7 @@
     function renderPrimaryAction(item) {
         const profiles = item.matching_flamegraphs || [];
         if (profiles.length) {
-            return `<button type="button" class="link-button" data-open-flamegraph="${escapeHtml(profiles[0])}">Open ${escapeHtml(profiles[0])}</button>`;
+            return renderPills([profiles[0]]);
         }
         return `<span class="muted">Add profile</span>`;
     }
@@ -6161,13 +6153,6 @@
         const jump = event.target.closest("[data-jump-target]");
         if (jump?.dataset.jumpTarget) {
             byId(jump.dataset.jumpTarget)?.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
-        const flamegraph = event.target.closest("[data-open-flamegraph]");
-        if (flamegraph?.dataset.openFlamegraph) {
-            state.selectedFlamegraph = flamegraph.dataset.openFlamegraph;
-            renderPerformanceDatasetView();
-            renderFlamegraphs();
-            byId("speed-report-flamegraphs")?.scrollIntoView({ behavior: "smooth", block: "start" });
         }
     });
     renderPerformanceDatasetView();

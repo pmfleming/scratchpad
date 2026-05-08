@@ -1,6 +1,8 @@
 use super::super::{CharCursor, CursorRange, word_boundary};
 use super::MouseInteractionRequest;
 use crate::app::domain::EditorViewState;
+use crate::app::ui::editor_content::native_editor::layout::DisplayTextMap;
+use crate::app::ui::editor_content::native_editor::painting::galley_screen_offset;
 use eframe::egui;
 
 const MULTI_CLICK_MAX_DELAY: f64 = 0.4;
@@ -22,6 +24,7 @@ struct MouseInteractionContext<'a> {
     galley_pos: egui::Pos2,
     piece_tree: &'a crate::app::domain::buffer::PieceTreeLite,
     char_offset_base: usize,
+    display_map: Option<&'a DisplayTextMap>,
 }
 
 #[derive(Clone, Copy)]
@@ -29,6 +32,7 @@ struct ClickSelectionContext<'a> {
     piece_tree: &'a crate::app::domain::buffer::PieceTreeLite,
     galley: &'a egui::Galley,
     char_offset_base: usize,
+    display_map: Option<&'a DisplayTextMap>,
 }
 
 #[derive(Clone, Copy)]
@@ -50,6 +54,7 @@ pub(super) fn handle_mouse_interaction(
         galley_pos: request.galley_pos,
         piece_tree: request.piece_tree,
         char_offset_base: request.char_offset_base,
+        display_map: request.display_map,
     };
     update_hover_cursor(ui, context.rect);
 
@@ -68,6 +73,7 @@ pub(super) fn handle_mouse_interaction(
         piece_tree: context.piece_tree,
         galley: context.galley,
         char_offset_base: context.char_offset_base,
+        display_map: context.display_map,
     };
     let click_id = context.response.id.with("click_state");
     let mut click_state = load_click_state(ui, click_id);
@@ -86,7 +92,7 @@ pub(super) fn handle_mouse_interaction(
         return;
     }
 
-    let primary_pointer_down = is_primary_pointer_down(ui, context.response, context.rect);
+    let primary_pointer_down = is_primary_pointer_down(ui, context.response);
     handle_primary_pointer(
         ui,
         view,
@@ -175,8 +181,12 @@ fn line_selection_range(
     let row_start = context.galley.cursor_begin_of_row(&cursor_at_pointer);
     let row_end = context.galley.cursor_end_of_row(&cursor_at_pointer);
     CursorRange {
-        primary: char_cursor_with_offset(row_end, context.char_offset_base),
-        secondary: char_cursor_with_offset(row_start, context.char_offset_base),
+        primary: char_cursor_with_offset(row_end, context.char_offset_base, context.display_map),
+        secondary: char_cursor_with_offset(
+            row_start,
+            context.char_offset_base,
+            context.display_map,
+        ),
     }
 }
 
@@ -216,13 +226,16 @@ fn pointer_selection(
     let pointer_pos = tracked_pointer_pos(
         context.response.interact_pointer_pos(),
         ui.input(|input| input.pointer.latest_pos()),
-        context.rect,
         context.response.dragged_by(egui::PointerButton::Primary),
     )?;
     let cursor_at_pointer = context
         .galley
-        .cursor_from_pos(pointer_pos - context.galley_pos);
-    let char_cursor = char_cursor_with_offset(cursor_at_pointer, context.char_offset_base);
+        .cursor_from_pos(pointer_pos - galley_screen_offset(context.galley, context.galley_pos));
+    let char_cursor = char_cursor_with_offset(
+        cursor_at_pointer,
+        context.char_offset_base,
+        context.display_map,
+    );
 
     Some((
         pointer_pos,
@@ -237,16 +250,21 @@ fn pointer_selection(
 fn tracked_pointer_pos(
     interact_pointer_pos: Option<egui::Pos2>,
     latest_pointer_pos: Option<egui::Pos2>,
-    rect: egui::Rect,
     is_dragged: bool,
 ) -> Option<egui::Pos2> {
-    interact_pointer_pos
-        .or_else(|| latest_pointer_pos.filter(|pos| is_dragged || rect.contains(*pos)))
+    interact_pointer_pos.or_else(|| latest_pointer_pos.filter(|_| is_dragged))
 }
 
-fn char_cursor_with_offset(cursor: egui::text::CCursor, char_offset_base: usize) -> CharCursor {
+fn char_cursor_with_offset(
+    cursor: egui::text::CCursor,
+    char_offset_base: usize,
+    display_map: Option<&DisplayTextMap>,
+) -> CharCursor {
+    let local_index = display_map
+        .map(|map| map.display_to_doc_cursor(cursor.index))
+        .unwrap_or(cursor.index);
     CharCursor {
-        index: char_offset_base + cursor.index,
+        index: char_offset_base + local_index,
         prefer_next_row: cursor.prefer_next_row,
     }
 }
@@ -318,15 +336,10 @@ fn should_ignore_secondary_pointer(
         }) && ui.input(|input| input.pointer.button_down(egui::PointerButton::Secondary)))
 }
 
-fn is_primary_pointer_down(ui: &egui::Ui, response: &egui::Response, rect: egui::Rect) -> bool {
+fn is_primary_pointer_down(ui: &egui::Ui, response: &egui::Response) -> bool {
     primary_pointer_tracking_active(
         ui.input(|input| input.pointer.button_down(egui::PointerButton::Primary)),
-        ui.input(|input| {
-            input
-                .pointer
-                .latest_pos()
-                .is_some_and(|pos| rect.contains(pos))
-        }),
+        response.interact_pointer_pos().is_some(),
         response.dragged_by(egui::PointerButton::Primary),
     )
 }
@@ -355,5 +368,21 @@ mod tests {
         let selection = CursorRange::two(2, 5);
 
         assert!(!cursor_inside_existing_selection(Some(selection), 5));
+    }
+
+    #[test]
+    fn pointer_tracking_requires_owned_interaction_before_drag() {
+        assert_eq!(
+            tracked_pointer_pos(None, Some(egui::pos2(12.0, 24.0)), false),
+            None
+        );
+    }
+
+    #[test]
+    fn pointer_tracking_uses_latest_position_during_drag() {
+        assert_eq!(
+            tracked_pointer_pos(None, Some(egui::pos2(12.0, 24.0)), true),
+            Some(egui::pos2(12.0, 24.0))
+        );
     }
 }

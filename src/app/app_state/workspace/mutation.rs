@@ -63,10 +63,6 @@ impl ScratchpadApp {
         let latest_edit = tab.buffer.document().latest_operation_record().cloned();
         tab.buffer
             .refresh_text_metadata_after_operation(latest_edit.as_ref());
-        let has_control_chars = tab.buffer.artifact_summary.has_control_chars();
-        if !has_control_chars {
-            tab.buffer.show_control_chars = false;
-        }
         tab.buffer.is_dirty = true;
         let warning_message = tab
             .buffer

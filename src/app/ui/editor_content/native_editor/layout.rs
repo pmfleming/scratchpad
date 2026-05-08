@@ -11,12 +11,53 @@ pub(super) struct EditorGalleyContext {
     pub(super) char_offset_base: usize,
     pub(super) logical_line_base: usize,
     pub(super) slice_chars: usize,
+    pub(super) display_map: Option<DisplayTextMap>,
 }
 
 struct ViewportTextSlice {
     text: String,
     char_range: std::ops::Range<usize>,
     start_line: usize,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct DisplayTextMap {
+    doc_to_display: Vec<usize>,
+    display_to_doc: Vec<usize>,
+}
+
+impl DisplayTextMap {
+    pub(super) fn doc_to_display_cursor(&self, cursor: usize) -> usize {
+        self.doc_to_display
+            .get(cursor)
+            .copied()
+            .unwrap_or_else(|| *self.doc_to_display.last().unwrap_or(&0))
+    }
+
+    pub(super) fn display_to_doc_cursor(&self, cursor: usize) -> usize {
+        self.display_to_doc
+            .get(cursor)
+            .copied()
+            .unwrap_or_else(|| *self.display_to_doc.last().unwrap_or(&0))
+    }
+
+    pub(super) fn display_len(&self) -> usize {
+        self.display_to_doc.len().saturating_sub(1)
+    }
+
+    pub(super) fn doc_range_to_display(
+        &self,
+        range: std::ops::Range<usize>,
+    ) -> Option<std::ops::Range<usize>> {
+        let start = self.doc_to_display_cursor(range.start);
+        let end = self.doc_to_display_cursor(range.end);
+        (start < end).then_some(start..end)
+    }
+}
+
+struct DisplayTextSlice {
+    text: String,
+    map: Option<DisplayTextMap>,
 }
 
 pub(super) fn build_editor_galley(
@@ -33,6 +74,7 @@ pub(super) fn build_editor_galley(
         editor_row_height(ui, options.editor_font_id),
         cursor_line_for_viewport_slice(buffer, view),
     );
+    let display_slice = display_text_slice(&slice.text, buffer.show_control_chars);
     let search_highlights = local_search_highlights(
         &view.search_highlights,
         slice.char_range.start,
@@ -42,16 +84,21 @@ pub(super) fn build_editor_galley(
         .active_selection
         .clone()
         .and_then(|range| local_range(Some(range), slice.char_range.start, slice.char_range.end));
+    let display_search_highlights =
+        display_search_highlights(&search_highlights, display_slice.map.as_ref());
+    let display_selection_highlight =
+        display_selection_highlight(selection_highlight.clone(), display_slice.map.as_ref());
     let wrap_width = editor_wrap_width(ui, options.word_wrap, Some(effective_viewport));
-    let cache_key = layout_cache_key(
-        buffer.document_revision(),
-        slice.char_range.clone(),
+    let cache_key = layout_cache_key(LayoutCacheKeyInput {
+        revision: buffer.document_revision(),
+        char_range: slice.char_range.clone(),
+        show_control_chars: buffer.show_control_chars,
         options,
-        &search_highlights,
-        selection_highlight.clone(),
+        search_highlights: &display_search_highlights,
+        selection_highlight: display_selection_highlight.clone(),
         wrap_width,
-        ui.visuals().dark_mode,
-    );
+        dark_mode: ui.visuals().dark_mode,
+    });
     view.layout_cache
         .retain_revision(buffer.document_revision());
     let cache_was_warm = !view.layout_cache.is_empty();
@@ -62,16 +109,17 @@ pub(super) fn build_editor_galley(
         crate::app::capacity_metrics::record_layout_cache_miss();
         let galley = highlighting::build_galley(
             ui,
-            &slice.text,
+            &display_slice.text,
             options,
-            &search_highlights,
-            selection_highlight,
+            &display_search_highlights,
+            display_selection_highlight,
             wrap_width,
         );
         view.layout_cache
-            .insert(cache_key, galley.clone(), slice.text.len());
+            .insert(cache_key, galley.clone(), display_slice.text.len());
         if options.warm_layout_cache
             && cache_was_warm
+            && !buffer.show_control_chars
             && !crate::app::memory_budget::over_budget(
                 crate::app::memory_budget::BudgetCategory::Layout,
             )
@@ -86,30 +134,149 @@ pub(super) fn build_editor_galley(
         char_offset_base: slice.char_range.start,
         logical_line_base: slice.start_line,
         slice_chars,
+        display_map: display_slice.map,
     }
 }
 
-fn layout_cache_key(
+struct LayoutCacheKeyInput<'a> {
     revision: u64,
     char_range: std::ops::Range<usize>,
-    options: TextEditOptions<'_>,
-    search_highlights: &SearchHighlightState,
+    show_control_chars: bool,
+    options: TextEditOptions<'a>,
+    search_highlights: &'a SearchHighlightState,
     selection_highlight: Option<std::ops::Range<usize>>,
     wrap_width: f32,
     dark_mode: bool,
-) -> LayoutCacheKey {
+}
+
+fn layout_cache_key(input: LayoutCacheKeyInput<'_>) -> LayoutCacheKey {
     LayoutCacheKey {
-        revision,
-        char_range,
-        font_family: format!("{:?}", options.editor_font_id.family),
-        font_size_bits: options.editor_font_id.size.to_bits(),
-        wrap_width_bits: wrap_width.to_bits(),
-        word_wrap: options.word_wrap,
-        right_to_left_reading_order: options.right_to_left_reading_order,
-        text_color: options.text_color,
-        dark_mode,
-        selection_highlight,
-        search_highlights: search_highlights.clone(),
+        revision: input.revision,
+        char_range: input.char_range,
+        font_family: format!("{:?}", input.options.editor_font_id.family),
+        font_size_bits: input.options.editor_font_id.size.to_bits(),
+        wrap_width_bits: input.wrap_width.to_bits(),
+        word_wrap: input.options.word_wrap,
+        show_control_chars: input.show_control_chars,
+        right_to_left_reading_order: input.options.right_to_left_reading_order,
+        text_color: input.options.text_color,
+        dark_mode: input.dark_mode,
+        selection_highlight: input.selection_highlight,
+        search_highlights: input.search_highlights.clone(),
+    }
+}
+
+fn display_text_slice(text: &str, show_control_chars: bool) -> DisplayTextSlice {
+    if !show_control_chars {
+        return DisplayTextSlice {
+            text: text.to_owned(),
+            map: None,
+        };
+    }
+
+    let doc_len = text.chars().count();
+    let mut visible = String::with_capacity(text.len());
+    let mut doc_to_display = Vec::with_capacity(doc_len + 1);
+    let mut display_to_doc = vec![0];
+    let mut display_chars = 0usize;
+    let mut chars = text.chars().peekable();
+
+    for doc_index in 0..doc_len {
+        let ch = chars.next().unwrap_or_default();
+        doc_to_display.push(display_chars);
+        let display =
+            visible_control_char(ch, chars.peek().copied()).unwrap_or_else(|| ch.to_string());
+        visible.push_str(&display);
+        let len = display.chars().count();
+        for boundary in 1..=len {
+            let doc_cursor = if boundary < len && boundary < len.div_ceil(2) {
+                doc_index
+            } else {
+                doc_index + 1
+            };
+            display_to_doc.push(doc_cursor);
+        }
+        display_chars += len;
+    }
+    doc_to_display.push(display_chars);
+
+    DisplayTextSlice {
+        text: visible,
+        map: Some(DisplayTextMap {
+            doc_to_display,
+            display_to_doc,
+        }),
+    }
+}
+
+fn visible_control_char(ch: char, next: Option<char>) -> Option<String> {
+    let label = match ch {
+        '\u{1B}' => return Some("␛".to_owned()),
+        '\u{0008}' => return Some("␈".to_owned()),
+        '\t' => return Some("→".to_owned()),
+        '\r' if next == Some('\n') => return Some("␍".to_owned()),
+        '\r' => return Some("␍".to_owned()),
+        '\n' => return Some("¶\n".to_owned()),
+        '\u{001E}' => "RS",
+        '\u{001F}' => "US",
+        '\u{200B}' => "ZWSP",
+        '\u{200C}' => "ZWNJ",
+        '\u{200D}' => "ZWJ",
+        '\u{200E}' => "LRM",
+        '\u{200F}' => "RLM",
+        '\u{202A}' => "LRE",
+        '\u{202B}' => "RLE",
+        '\u{202C}' => "PDF",
+        '\u{202D}' => "LRO",
+        '\u{202E}' => "RLO",
+        '\u{2060}' => "WJ",
+        '\u{2061}' => "FA",
+        '\u{2062}' => "IT",
+        '\u{2063}' => "IS",
+        '\u{2064}' => "IP",
+        '\u{2066}' => "LRI",
+        '\u{2067}' => "RLI",
+        '\u{2068}' => "FSI",
+        '\u{2069}' => "PDI",
+        '\u{206A}' => "ISS",
+        '\u{206B}' => "ASS",
+        '\u{206C}' => "IAFS",
+        '\u{206D}' => "AAFS",
+        '\u{206E}' => "NADS",
+        '\u{206F}' => "NODS",
+        '\u{FEFF}' => "BOM",
+        '\u{061C}' => "ALM",
+        _ if ch.is_control() => return Some(format!("\\x{:02X}", ch as u32)),
+        _ => return None,
+    };
+    Some(format!("<{label}>"))
+}
+
+fn display_search_highlights(
+    highlights: &SearchHighlightState,
+    map: Option<&DisplayTextMap>,
+) -> SearchHighlightState {
+    let Some(map) = map else {
+        return highlights.clone();
+    };
+    SearchHighlightState {
+        ranges: highlights
+            .ranges
+            .iter()
+            .filter_map(|range| map.doc_range_to_display(range.clone()))
+            .collect(),
+        active_range_index: highlights.active_range_index,
+    }
+}
+
+fn display_selection_highlight(
+    selection: Option<std::ops::Range<usize>>,
+    map: Option<&DisplayTextMap>,
+) -> Option<std::ops::Range<usize>> {
+    match (selection, map) {
+        (Some(range), Some(map)) => map.doc_range_to_display(range),
+        (selection, None) => selection,
+        (None, Some(_)) => None,
     }
 }
 
@@ -202,15 +369,16 @@ fn warm_nearby_layout_slices(
             slice.char_range.start,
             slice.char_range.end,
         );
-        let cache_key = layout_cache_key(
-            buffer.document_revision(),
-            slice.char_range.clone(),
+        let cache_key = layout_cache_key(LayoutCacheKeyInput {
+            revision: buffer.document_revision(),
+            char_range: slice.char_range.clone(),
+            show_control_chars: false,
             options,
-            &search_highlights,
-            None,
+            search_highlights: &search_highlights,
+            selection_highlight: None,
             wrap_width,
-            ui.visuals().dark_mode,
-        );
+            dark_mode: ui.visuals().dark_mode,
+        });
         if view.layout_cache.get(&cache_key).is_some() {
             continue;
         }
@@ -367,7 +535,10 @@ pub(super) fn editor_row_height(ui: &egui::Ui, font_id: &egui::FontId) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{cursor_line_for_viewport_slice, editor_eof_tail_height, editor_interaction_id};
+    use super::{
+        cursor_line_for_viewport_slice, display_text_slice, editor_eof_tail_height,
+        editor_interaction_id,
+    };
     use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
     use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
 
@@ -403,6 +574,30 @@ mod tests {
         view.request_cursor_reveal(CursorRevealMode::KeepVisible);
 
         assert_eq!(cursor_line_for_viewport_slice(&buffer, &view), Some(120));
+    }
+
+    #[test]
+    fn visible_control_text_maps_newline_marker_to_single_document_char() {
+        let display = display_text_slice("a\nb", true);
+        let map = display.map.as_ref().unwrap();
+
+        assert_eq!(display.text, "a¶\nb");
+        assert_eq!(map.doc_to_display_cursor(1), 1);
+        assert_eq!(map.doc_to_display_cursor(2), 3);
+        assert_eq!(map.display_to_doc_cursor(1), 1);
+        assert_eq!(map.display_to_doc_cursor(2), 2);
+        assert_eq!(map.display_to_doc_cursor(3), 2);
+    }
+
+    #[test]
+    fn visible_unicode_controls_expand_but_select_one_document_char() {
+        let display = display_text_slice("a\u{200E}b", true);
+        let map = display.map.as_ref().unwrap();
+
+        assert_eq!(display.text, "a<LRM>b");
+        assert_eq!(map.doc_range_to_display(1..2), Some(1..6));
+        assert_eq!(map.display_to_doc_cursor(3), 1);
+        assert_eq!(map.display_to_doc_cursor(4), 2);
     }
 
     fn numbered_lines(count: usize) -> String {

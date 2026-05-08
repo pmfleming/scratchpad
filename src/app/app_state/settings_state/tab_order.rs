@@ -114,6 +114,17 @@ fn workspace_tab_order_for_mode(app: &ScratchpadApp, mode: TabOrderMode) -> Opti
             });
             Some(order)
         }
+        TabOrderMode::FileSize => {
+            order.sort_by_key(|index| {
+                let tab = &app.tabs()[*index];
+                (
+                    tab_total_size(tab),
+                    tab.buffer.name.to_ascii_lowercase(),
+                    custom_rank[*index],
+                )
+            });
+            Some(order)
+        }
         TabOrderMode::FileAge => {
             order.sort_by_key(|index| {
                 let millis = app.tabs()[*index]
@@ -184,6 +195,18 @@ fn tab_path_label(tab: &crate::app::domain::WorkspaceTab) -> String {
         .unwrap_or_default()
 }
 
+fn tab_total_size(tab: &crate::app::domain::WorkspaceTab) -> u64 {
+    tab.buffers()
+        .map(|buffer| {
+            buffer
+                .disk_state
+                .as_ref()
+                .map(|state| state.len)
+                .unwrap_or_else(|| buffer.text().len() as u64)
+        })
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,6 +244,26 @@ mod tests {
         app.set_tab_order_mode(TabOrderMode::FileAge);
 
         assert_eq!(tab_names(&app), ["older.txt", "newer.txt", "untitled"]);
+    }
+
+    #[test]
+    fn file_size_order_uses_disk_size_and_falls_back_to_buffer_text() {
+        let mut app = test_app(["large.txt", "small.txt", "draft.txt"]);
+        app.tab_manager.tabs[0].buffer.disk_state = Some(DiskFileState {
+            modified_millis: None,
+            len: 300,
+        });
+        app.tab_manager.tabs[1].buffer.disk_state = Some(DiskFileState {
+            modified_millis: None,
+            len: 10,
+        });
+        app.tab_manager.tabs[2]
+            .buffer
+            .replace_text("medium sized draft".to_owned());
+
+        app.set_tab_order_mode(TabOrderMode::FileSize);
+
+        assert_eq!(tab_names(&app), ["small.txt", "draft.txt", "large.txt"]);
     }
 
     #[test]

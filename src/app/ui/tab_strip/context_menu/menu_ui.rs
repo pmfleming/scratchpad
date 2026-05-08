@@ -45,20 +45,31 @@ pub(super) fn primary_menu_button(
     label: &str,
     icon: &str,
 ) -> bool {
+    primary_menu_button_enabled(ui, id_source, label, icon, true)
+}
+
+pub(super) fn primary_menu_button_enabled(
+    ui: &mut egui::Ui,
+    id_source: impl Hash,
+    label: &str,
+    icon: &str,
+    enabled: bool,
+) -> bool {
     with_row_visuals(ui, |ui| {
         let response = widget_ids::surface_response(
             ui,
             id_source,
             widget_ids::WidgetRole::ActionButton,
             |ui| {
-                ui.add(
+                ui.add_enabled(
+                    enabled,
                     egui::Button::new("")
                         .min_size(egui::vec2(WIDTH - CARET_WIDTH, ROW_HEIGHT))
                         .stroke(egui::Stroke::NONE),
                 )
             },
         );
-        paint_row_label(ui, response.rect, Some(icon), label, true);
+        paint_row_label(ui, response.rect, Some(icon), label, enabled);
         response.clicked()
     })
 }
@@ -103,6 +114,7 @@ pub(super) fn tab_order_mode_label(mode: TabOrderMode) -> &'static str {
     match mode {
         TabOrderMode::Custom => "Custom Order",
         TabOrderMode::FileName => "File Name",
+        TabOrderMode::FileSize => "File Size",
         TabOrderMode::FileAge => "File Age",
         TabOrderMode::RecentEdit => "Recent Edit",
     }

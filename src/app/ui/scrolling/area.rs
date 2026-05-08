@@ -134,6 +134,7 @@ impl ScrollArea {
                 || outer_response.hovered()
                 || outer_response.contains_pointer(),
             self.source,
+            self.eof_overscroll,
             &mut state,
         );
 
@@ -387,7 +388,13 @@ fn apply_pending_target(state: &mut ScrollState, source: ScrollSource, inner_rec
     state.user_scrolled = false;
 }
 
-fn apply_mouse_wheel(ui: &Ui, hovered: bool, source: ScrollSource, state: &mut ScrollState) {
+fn apply_mouse_wheel(
+    ui: &Ui,
+    hovered: bool,
+    source: ScrollSource,
+    eof_overscroll: bool,
+    state: &mut ScrollState,
+) {
     if !hovered || !source.mouse_wheel || callout::scroll_blocker_active(ui.ctx()) {
         return;
     }
@@ -398,8 +405,23 @@ fn apply_mouse_wheel(ui: &Ui, hovered: bool, source: ScrollSource, state: &mut S
     if scroll == Vec2::ZERO {
         return;
     }
-    state.offset.x -= scroll.x;
-    state.offset.y -= scroll.y;
+    let max_offset =
+        ScrollState::max_offset(state.content_size, state.viewport_size, eof_overscroll);
+    let previous = state.offset;
+    state.offset.x = (state.offset.x - scroll.x).clamp(0.0, max_offset.x);
+    state.offset.y = (state.offset.y - scroll.y).clamp(0.0, max_offset.y);
+    let consumed = previous != state.offset;
+    if !consumed {
+        return;
+    }
+    ui.input_mut(|input| {
+        if (previous.x - state.offset.x).abs() > f32::EPSILON {
+            input.smooth_scroll_delta.x = 0.0;
+        }
+        if (previous.y - state.offset.y).abs() > f32::EPSILON {
+            input.smooth_scroll_delta.y = 0.0;
+        }
+    });
     state.user_scrolled = true;
 }
 

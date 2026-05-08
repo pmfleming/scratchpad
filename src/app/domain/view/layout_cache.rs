@@ -12,6 +12,7 @@ pub struct LayoutCacheKey {
     pub font_size_bits: u32,
     pub wrap_width_bits: u32,
     pub word_wrap: bool,
+    pub show_control_chars: bool,
     pub right_to_left_reading_order: bool,
     pub text_color: egui::Color32,
     pub dark_mode: bool,

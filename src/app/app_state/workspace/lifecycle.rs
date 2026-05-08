@@ -1,7 +1,7 @@
 use super::super::ScratchpadApp;
 use crate::app::commands::AppCommand;
 use crate::app::diagnostics;
-use crate::app::domain::{SplitAxis, SplitPath, ViewId, WorkspaceTab};
+use crate::app::domain::{BufferId, SplitAxis, SplitPath, ViewId, WorkspaceTab};
 use crate::app::services::file_controller::FileController;
 use crate::app::services::settings_store::{FileOpenDisposition, NewTabPlacement};
 
@@ -45,6 +45,39 @@ impl ScratchpadApp {
 
     pub fn save_file(&mut self) {
         FileController::save_file(self);
+    }
+
+    pub fn save_all_files(&mut self) {
+        let active_tab_index = self.active_tab_index();
+        let active_view_ids = self
+            .tabs()
+            .iter()
+            .map(|tab| tab.active_view_id)
+            .collect::<Vec<_>>();
+        let targets = save_all_targets(self);
+        let had_targets = !targets.is_empty();
+
+        for (tab_index, view_id) in targets {
+            self.tab_manager_mut().active_tab_index = tab_index;
+            if let Some(tab) = self.tabs_mut().get_mut(tab_index) {
+                tab.activate_view(view_id);
+            }
+            FileController::save_file_at(self, tab_index);
+            if self.pending_action().is_some() {
+                break;
+            }
+        }
+
+        self.tab_manager_mut().active_tab_index =
+            active_tab_index.min(self.tabs().len().saturating_sub(1));
+        for (tab, view_id) in self.tabs_mut().iter_mut().zip(active_view_ids) {
+            tab.activate_view(view_id);
+        }
+        self.request_focus_for_active_view();
+        if had_targets {
+            self.mark_session_dirty();
+            let _ = self.persist_session_now();
+        }
     }
 
     pub fn save_file_at(&mut self, index: usize) -> bool {
@@ -174,4 +207,25 @@ impl ScratchpadApp {
         self.apply_settings_toml_refresh(settings_refresh);
         tab_description
     }
+}
+
+fn save_all_targets(app: &ScratchpadApp) -> Vec<(usize, ViewId)> {
+    app.tabs()
+        .iter()
+        .enumerate()
+        .flat_map(|(tab_index, tab)| {
+            let mut seen = Vec::<BufferId>::new();
+            tab.views.iter().filter_map(move |view| {
+                if seen.contains(&view.buffer_id) {
+                    return None;
+                }
+                let buffer = tab.buffer_by_id(view.buffer_id)?;
+                if !buffer.is_dirty {
+                    return None;
+                }
+                seen.push(view.buffer_id);
+                Some((tab_index, view.id))
+            })
+        })
+        .collect()
 }

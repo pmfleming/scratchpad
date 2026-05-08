@@ -4,6 +4,39 @@ use crate::app::ui::widget_ids::{self, WidgetRole};
 use eframe::egui::{self, Color32, Rect, Sense, Vec2};
 use std::hash::Hash;
 
+#[derive(Clone, Copy)]
+pub struct PhosphorButtonColors {
+    pub background: Color32,
+    pub hover_background: Color32,
+    pub icon: Color32,
+    pub hover_icon: Color32,
+}
+
+impl PhosphorButtonColors {
+    pub fn new(background: Color32, hover_background: Color32, icon: Color32) -> Self {
+        Self {
+            background,
+            hover_background,
+            icon,
+            hover_icon: icon,
+        }
+    }
+
+    pub fn with_hover_icon(
+        background: Color32,
+        hover_background: Color32,
+        icon: Color32,
+        hover_icon: Color32,
+    ) -> Self {
+        Self {
+            background,
+            hover_background,
+            icon,
+            hover_icon,
+        }
+    }
+}
+
 pub fn phosphor_button(
     ui: &mut egui::Ui,
     surface_key: impl Hash,
@@ -18,9 +51,7 @@ pub fn phosphor_button(
         surface_key,
         icon,
         size,
-        background,
-        hover_background,
-        text_primary(ui),
+        PhosphorButtonColors::new(background, hover_background, text_primary(ui)),
         tooltip,
     )
 }
@@ -30,9 +61,7 @@ pub fn phosphor_button_with_icon_color(
     surface_key: impl Hash,
     icon: &str,
     size: Vec2,
-    background: Color32,
-    hover_background: Color32,
-    icon_color: Color32,
+    colors: PhosphorButtonColors,
     tooltip: &str,
 ) -> egui::Response {
     let response = widget_ids::allocate_exact_interact(
@@ -43,16 +72,14 @@ pub fn phosphor_button_with_icon_color(
         "phosphor_button",
     );
     let rect = response.rect;
-    paint_phosphor_button(
+    paint_phosphor_button(PhosphorButtonPaint {
         ui,
         rect,
         icon,
-        response.hovered(),
-        transition::suppress_interactive_chrome(ui.ctx()),
-        background,
-        hover_background,
-        icon_color,
-    );
+        hovered: response.hovered(),
+        drag_in_progress: transition::suppress_interactive_chrome(ui.ctx()),
+        colors,
+    });
 
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -64,10 +91,7 @@ pub fn phosphor_button_with_hover_icon_color(
     surface_key: impl Hash,
     icon: &str,
     size: Vec2,
-    background: Color32,
-    hover_background: Color32,
-    icon_color: Color32,
-    hover_icon_color: Color32,
+    colors: PhosphorButtonColors,
     tooltip: &str,
 ) -> egui::Response {
     let response = widget_ids::allocate_exact_interact(
@@ -80,21 +104,14 @@ pub fn phosphor_button_with_hover_icon_color(
     let rect = response.rect;
     let hovered = response.hovered();
     let drag_in_progress = transition::suppress_interactive_chrome(ui.ctx());
-    let icon_color = if hovered && !drag_in_progress {
-        hover_icon_color
-    } else {
-        icon_color
-    };
-    paint_phosphor_button(
+    paint_phosphor_button(PhosphorButtonPaint {
         ui,
         rect,
         icon,
         hovered,
         drag_in_progress,
-        background,
-        hover_background,
-        icon_color,
-    );
+        colors,
+    });
 
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -175,10 +192,12 @@ fn render_close_button(ui: &mut egui::Ui) -> bool {
             "caption_close",
             egui_phosphor::regular::X,
             CAPTION_BUTTON_SIZE,
-            action_bg(ui),
-            CLOSE_HOVER_BG,
-            text_primary(ui),
-            Color32::WHITE,
+            PhosphorButtonColors::with_hover_icon(
+                action_bg(ui),
+                CLOSE_HOVER_BG,
+                text_primary(ui),
+                Color32::WHITE,
+            ),
             "Close",
         )
         .clicked()
@@ -186,22 +205,32 @@ fn render_close_button(ui: &mut egui::Ui) -> bool {
     .inner
 }
 
-fn paint_phosphor_button(
-    ui: &egui::Ui,
+struct PhosphorButtonPaint<'a> {
+    ui: &'a egui::Ui,
     rect: Rect,
-    icon: &str,
+    icon: &'a str,
     hovered: bool,
     drag_in_progress: bool,
-    background: Color32,
-    hover_background: Color32,
-    icon_color: Color32,
-) {
-    let fill = button_fill(hovered, drag_in_progress, background, hover_background);
-    ui.painter().rect_filled(rect, 4.0, fill);
-    ui.painter().text(
-        rect.center(),
+    colors: PhosphorButtonColors,
+}
+
+fn paint_phosphor_button(request: PhosphorButtonPaint<'_>) {
+    let fill = button_fill(
+        request.hovered,
+        request.drag_in_progress,
+        request.colors.background,
+        request.colors.hover_background,
+    );
+    let icon_color = if request.hovered && !request.drag_in_progress {
+        request.colors.hover_icon
+    } else {
+        request.colors.icon
+    };
+    request.ui.painter().rect_filled(request.rect, 4.0, fill);
+    request.ui.painter().text(
+        request.rect.center(),
         egui::Align2::CENTER_CENTER,
-        icon,
+        request.icon,
         egui::FontId::proportional(16.0),
         icon_color,
     );

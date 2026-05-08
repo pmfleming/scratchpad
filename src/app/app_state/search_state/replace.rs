@@ -325,15 +325,8 @@ impl ScratchpadApp {
 
     fn finalize_tab_buffer_mutation(&mut self, tab_index: usize, buffer_id: BufferId) {
         let tab = &mut self.tabs_mut()[tab_index];
-        let has_control_chars = tab
-            .buffer_by_id(buffer_id)
-            .map(|buffer| buffer.artifact_summary.has_control_chars())
-            .unwrap_or(false);
         if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
             buffer.is_dirty = true;
-            if !has_control_chars {
-                buffer.show_control_chars = false;
-            }
         }
         let _ = tab;
         self.record_pending_text_history_event(tab_index, buffer_id);

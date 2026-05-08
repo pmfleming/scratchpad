@@ -4,7 +4,6 @@ mod highlighting;
 mod interactions;
 mod layout;
 mod painting;
-mod read_only;
 mod types;
 mod word_boundary;
 
@@ -26,7 +25,6 @@ use layout::{
     galley_origin, total_editor_content_height,
 };
 use painting::{CursorPaintOutcome, EditorPaintRequest, consume_cursor_reveal, paint_editor};
-pub use read_only::render_read_only_text_edit;
 use std::sync::Arc;
 
 const EDITOR_FOCUS_LOCK_FILTER: egui::EventFilter = egui::EventFilter {
@@ -97,6 +95,7 @@ pub fn render_editor_text_edit(
             total_chars,
             char_offset_base: galley_context.char_offset_base,
             slice_chars: galley_context.slice_chars,
+            display_map: galley_context.display_map.as_ref(),
         },
     );
 
@@ -125,6 +124,7 @@ pub fn render_editor_text_edit(
                 focused: input.focused,
                 char_offset_base: galley_context.char_offset_base,
                 slice_chars: galley_context.slice_chars,
+                display_map: galley_context.display_map.as_ref(),
                 active_selection: buffer.active_selection.clone(),
             },
         )
@@ -170,6 +170,7 @@ struct EditorInputRequest<'a> {
     total_chars: usize,
     char_offset_base: usize,
     slice_chars: usize,
+    display_map: Option<&'a layout::DisplayTextMap>,
 }
 
 fn process_editor_input(
@@ -190,6 +191,7 @@ fn process_editor_input(
             galley_pos: request.galley_pos,
             piece_tree: buffer.document().piece_tree(),
             char_offset_base: request.char_offset_base,
+            display_map: request.display_map,
         },
     );
     let suppress_cursor_reveal = request.response.dragged_by(egui::PointerButton::Primary);
@@ -277,6 +279,7 @@ fn handle_focused_keyboard_input(
                 total_chars: request.total_chars,
                 char_offset_base: request.char_offset_base,
                 slice_chars: request.slice_chars,
+                display_map: request.display_map,
             },
         )
 }

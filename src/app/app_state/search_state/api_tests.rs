@@ -8,7 +8,8 @@ use std::ops::Range;
 #[test]
 fn lazy_preview_lookup_builds_and_reuses_cached_entry() {
     let mut app = app_with_search_text("alpha\nplan beta\nomega");
-    seed_matches_for_plan_lines(&mut app, &[6..10]);
+    let plan_range = 6..10;
+    seed_matches_for_plan_lines(&mut app, std::slice::from_ref(&plan_range));
     app.search_state.active_match_index = Some(0);
 
     let entry = app.search_result_entry_at(0).expect("preview entry");

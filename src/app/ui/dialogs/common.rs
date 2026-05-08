@@ -162,9 +162,11 @@ pub(super) fn render_icon_choice_dialog<T: Copy, const N: usize>(
                 ui,
                 ("icon_choice", title, tooltip),
                 icon,
-                26.0,
-                ICON_CHOICE_BUTTON_SIZE,
-                callout::section_fill(ui),
+                callout::IconButtonStyle {
+                    icon_size: 26.0,
+                    size: ICON_CHOICE_BUTTON_SIZE,
+                    fill: callout::section_fill(ui),
+                },
                 tooltip,
                 true,
             )

@@ -107,9 +107,10 @@ impl DisplaySnapshot {
         let mut current_logical = saturating_u32(logical_line_base);
         let mut current_char = saturating_u32(char_offset_base);
         let mut wrap_index: u16 = 0;
+        let y_base = logical_line_base as f32 * row_height;
 
         for row in galley.rows.iter() {
-            row_tops.push(row.pos.y);
+            row_tops.push(y_base + row.pos.y);
             row_logical_lines.push(Some(current_logical));
             let row_start = current_char;
             current_char = current_char.saturating_add(row.char_count_including_newline() as u32);
@@ -124,7 +125,7 @@ impl DisplaySnapshot {
             row_records.push(DisplayRowRecord {
                 logical_line: current_logical,
                 char_range,
-                y_top: row.pos.y,
+                y_top: y_base + row.pos.y,
                 height: row_height,
                 wrap_index,
                 flags: DisplayRowFlags {
@@ -145,8 +146,8 @@ impl DisplaySnapshot {
                 wrap_index = wrap_index.saturating_add(1);
             }
         }
-        row_tops.push(galley.rect.height());
-        let content_height = galley.rect.height();
+        row_tops.push(y_base + galley.rect.height());
+        let content_height = y_base + galley.rect.height();
 
         Self {
             row_height,

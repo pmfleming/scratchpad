@@ -10,6 +10,7 @@ use eframe::egui;
 const STATUS_ICON_CELL_SIZE: egui::Vec2 = egui::vec2(28.0, 22.0);
 const STATUS_ICON_FONT_SIZE: f32 = 16.0;
 const CONTROL_CHAR_ICON: &str = "¶";
+const HIDDEN_CONTROL_CHAR_ICON: &str = egui_phosphor::regular::TEXT_ALIGN_JUSTIFY;
 
 #[derive(Default)]
 struct StatusBarActions {
@@ -35,7 +36,6 @@ struct ActiveStatusDetails {
     icon_tooltip: &'static str,
     icon_color: egui::Color32,
     freshness_label: Option<String>,
-    has_control_chars: bool,
 }
 
 pub(crate) fn show_status_bar(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
@@ -83,9 +83,7 @@ fn collect_active_status_details(
     let view_status = active_view
         .map(|view| buffer.view_status(status_cursor_range(view)))
         .unwrap_or_default();
-    let has_control_chars = buffer.artifact_summary.has_control_chars();
-    let (icon, icon_tooltip, icon_color) =
-        artifact_icon(has_control_chars, buffer.show_control_chars, dark_mode);
+    let (icon, icon_tooltip, icon_color) = artifact_icon(buffer.show_control_chars, dark_mode);
 
     Some(ActiveStatusDetails {
         path_label: buffer
@@ -107,7 +105,6 @@ fn collect_active_status_details(
         icon_tooltip,
         icon_color,
         freshness_label: visible_disk_status_label(buffer).map(str::to_owned),
-        has_control_chars,
     })
 }
 
@@ -285,7 +282,7 @@ fn show_control_char_toggle(
     if button_response.hovered() {
         button_response.clone().on_hover_text(details.icon_tooltip);
     }
-    if details.has_control_chars && button_response.clicked() {
+    if button_response.clicked() {
         actions.toggle_control_chars = true;
     }
 }
@@ -346,16 +343,18 @@ fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {
         app.mark_session_dirty();
     }
 
-    if actions.toggle_control_chars {
-        let can_toggle = app
-            .active_tab()
-            .map(|tab| tab.active_buffer().artifact_summary.has_control_chars())
-            .unwrap_or(false);
-        if can_toggle && let Some(tab) = app.active_tab_mut() {
-            let buffer = tab.active_buffer_mut();
-            buffer.show_control_chars = !buffer.show_control_chars;
-            app.mark_session_dirty();
+    if actions.toggle_control_chars
+        && let Some(tab) = app.active_tab_mut()
+    {
+        let buffer = tab.active_buffer_mut();
+        buffer.show_control_chars = !buffer.show_control_chars;
+        let buffer_id = buffer.id;
+        for view in &mut tab.views {
+            if view.buffer_id == buffer_id {
+                view.layout_cache.clear();
+            }
         }
+        app.mark_session_dirty();
     }
 
     if actions.open_encoding_dialog {
@@ -397,28 +396,19 @@ fn visible_disk_status_label(buffer: &BufferState) -> Option<&'static str> {
 }
 
 fn artifact_icon(
-    has_control_chars: bool,
     show_control_chars: bool,
     dark_mode: bool,
 ) -> (&'static str, &'static str, egui::Color32) {
-    if has_control_chars {
-        if show_control_chars {
-            (
-                CONTROL_CHAR_ICON,
-                "Visible control-character inspection active; click to return to raw-text editing",
-                egui::Color32::YELLOW,
-            )
-        } else {
-            (
-                CONTROL_CHAR_ICON,
-                "Control characters detected; raw-text editing remains enabled; click to inspect them",
-                egui::Color32::LIGHT_GREEN,
-            )
-        }
+    if show_control_chars {
+        (
+            CONTROL_CHAR_ICON,
+            "Control and Unicode characters are visible and editable; click to hide them",
+            egui::Color32::YELLOW,
+        )
     } else {
         (
-            egui_phosphor::regular::TEXT_ALIGN_JUSTIFY,
-            "Plain text",
+            HIDDEN_CONTROL_CHAR_ICON,
+            "Control and Unicode characters are hidden but retained; click to show them",
             plain_text_icon_color(dark_mode),
         )
     }
@@ -435,8 +425,8 @@ fn plain_text_icon_color(dark_mode: bool) -> egui::Color32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        CONTROL_CHAR_ICON, artifact_icon, plain_text_icon_color, status_attention_color,
-        status_cursor_range,
+        CONTROL_CHAR_ICON, HIDDEN_CONTROL_CHAR_ICON, artifact_icon, plain_text_icon_color,
+        status_attention_color, status_cursor_range,
     };
     use crate::app::domain::EditorViewState;
     use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
@@ -480,7 +470,7 @@ mod tests {
 
     #[test]
     fn control_character_status_uses_conventional_marker() {
-        assert_eq!(artifact_icon(true, false, true).0, CONTROL_CHAR_ICON);
-        assert_eq!(artifact_icon(true, true, true).0, CONTROL_CHAR_ICON);
+        assert_eq!(artifact_icon(false, true).0, HIDDEN_CONTROL_CHAR_ICON);
+        assert_eq!(artifact_icon(true, true).0, CONTROL_CHAR_ICON);
     }
 }

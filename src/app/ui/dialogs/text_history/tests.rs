@@ -146,7 +146,7 @@ fn timeline_row(buffer_id: BufferId, entry_id: u64, undone: bool) -> TextHistory
 
 #[test]
 fn timeline_rows_put_redoable_aggregate_above_undoable_aggregate() {
-    let rows = vec![
+    let rows = [
         timeline_row(3, 7, true),
         timeline_row(3, 6, true),
         timeline_row(2, 5, false),
@@ -171,7 +171,7 @@ fn timeline_rows_put_redoable_aggregate_above_undoable_aggregate() {
 
 #[test]
 fn timeline_now_line_has_one_global_boundary_for_multiple_buffers() {
-    let rows = vec![
+    let rows = [
         timeline_row(1, 2, true),
         timeline_row(1, 1, false),
         timeline_row(2, 5, true),

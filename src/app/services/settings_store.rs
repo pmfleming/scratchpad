@@ -94,6 +94,7 @@ pub enum TabOrderMode {
     #[default]
     Custom,
     FileName,
+    FileSize,
     FileAge,
     RecentEdit,
 }

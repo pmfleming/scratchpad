@@ -9,19 +9,22 @@ use eframe::egui;
 use egui_phosphor::regular::{
     ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_LEFT, ARROW_LINE_UP, ARROW_RIGHT,
     ARROW_U_UP_LEFT, ARROW_UP, ARROWS_COUNTER_CLOCKWISE, ARROWS_SPLIT, CARET_RIGHT, CHECK,
-    CLIPBOARD_TEXT, CLOCK_COUNTER_CLOCKWISE, COPY, FLOPPY_DISK, FOLDER_OPEN, MAGNIFYING_GLASS,
-    SCISSORS, SELECTION_ALL, TEXT_AA, TEXT_ALIGN_RIGHT, TRASH, X,
+    CLIPBOARD_TEXT, CLOCK_COUNTER_CLOCKWISE, COPY, FOLDER_OPEN, MAGNIFYING_GLASS, SCISSORS,
+    SELECTION_ALL, TEXT_AA, TEXT_ALIGN_JUSTIFY, TEXT_ALIGN_RIGHT, TRASH, X,
 };
 
 const DEFAULT_SPLIT_RATIO: f32 = 0.5;
-const EDITOR_CONTEXT_MENU_WIDTH: f32 = 252.0;
+const EDITOR_CONTEXT_MENU_WIDTH: f32 = 220.0;
 const EDITOR_CONTEXT_SUBMENU_WIDTH: f32 = 168.0;
-const EDITOR_UNICODE_INSERT_SUBMENU_WIDTH: f32 = 432.0;
+const EDITOR_UNICODE_INSERT_SUBMENU_WIDTH: f32 = 380.0;
 const EDITOR_CONTEXT_ROW_HEIGHT: f32 = 28.0;
 const EDITOR_CONTEXT_ICON_BUTTON_SIZE: egui::Vec2 = egui::vec2(38.0, 30.0);
 const EDITOR_CONTEXT_CARET_WIDTH: f32 = 28.0;
 const EDITOR_CONTEXT_ICON_CENTER_X: f32 = 20.0;
 const EDITOR_CONTEXT_LABEL_X: f32 = 52.0;
+const EDITOR_UNICODE_LABEL_X: f32 = 20.0;
+const EDITOR_UNICODE_DIVIDER_X: f32 = 76.0;
+const EDITOR_UNICODE_DESCRIPTION_X: f32 = 94.0;
 
 pub(super) fn attach_editor_context_menu(
     tile_response: &egui::Response,
@@ -33,9 +36,6 @@ pub(super) fn attach_editor_context_menu(
     activate_inactive_tile_on_secondary_click(app, tile_response, request);
 
     let can_promote = app.tabs()[request.tab_index].can_promote_view(request.view_id);
-    let save_existing = app.tabs()[request.tab_index]
-        .buffer_for_view(request.view_id)
-        .is_some_and(|buffer| buffer.path.is_some());
     tile_response.context_menu(|ui| {
         set_menu_width(ui, EDITOR_CONTEXT_MENU_WIDTH);
         render_standard_edit_menu(ui, app);
@@ -44,7 +44,7 @@ pub(super) fn attach_editor_context_menu(
         ui.separator();
         render_display_unicode_menu(ui, app);
         ui.separator();
-        render_file_menu(ui, app, save_existing);
+        render_file_menu(ui, app);
         ui.separator();
         render_tile_menu(ui, actions, request, can_promote);
         ui.separator();
@@ -204,7 +204,7 @@ fn render_history_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     );
 }
 
-fn render_file_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp, save_existing: bool) {
+fn render_file_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     run_menu_command(
         ui,
         app,
@@ -232,7 +232,6 @@ fn render_file_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp, save_existing: b
         AppCommand::OpenFileHere,
         true,
     );
-    run_save_menu_action(ui, app, save_existing);
 }
 
 fn render_tile_menu(
@@ -253,7 +252,7 @@ fn render_tile_menu(
 }
 
 fn render_display_unicode_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    unicode_submenu_row(ui, "Display and Unicode", TEXT_AA, |ui| {
+    unicode_submenu_row(ui, "Unicode", TEXT_AA, |ui| {
         set_menu_width(ui, EDITOR_CONTEXT_MENU_WIDTH);
         let right_to_left = app
             .active_tab()
@@ -288,8 +287,12 @@ fn render_display_unicode_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 
         if menu_action_button(
             ui,
-            "Show control chars",
-            show_control_chars.then_some(CHECK),
+            "Control Chars",
+            Some(if show_control_chars {
+                "¶"
+            } else {
+                TEXT_ALIGN_JUSTIFY
+            }),
             true,
         ) {
             if let Some(tab) = app.active_tab_mut()
@@ -297,6 +300,11 @@ fn render_display_unicode_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             {
                 if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
                     buffer.show_control_chars = !buffer.show_control_chars;
+                }
+                for view in &mut tab.views {
+                    if view.buffer_id == buffer_id {
+                        view.layout_cache.clear();
+                    }
                 }
                 app.mark_session_dirty();
             }
@@ -367,25 +375,6 @@ fn run_menu_command(
             app.handle_command(command);
             if request_focus {
                 app.request_focus_for_active_view();
-            }
-            true
-        },
-        app,
-    )
-}
-
-fn run_save_menu_action(ui: &mut egui::Ui, app: &mut ScratchpadApp, save_existing: bool) -> bool {
-    run_context_menu_action(
-        ui,
-        if save_existing { "Save" } else { "Save As" },
-        Some(FLOPPY_DISK),
-        true,
-        |_, app| {
-            app.request_focus_for_active_view();
-            if save_existing {
-                app.save_file();
-            } else {
-                app.save_file_as();
             }
             true
         },
@@ -665,14 +654,22 @@ fn unicode_control_char_button(ui: &mut egui::Ui, control: &UnicodeControlChar) 
 fn paint_unicode_control_char_row(ui: &egui::Ui, rect: egui::Rect, control: &UnicodeControlChar) {
     let font = egui::TextStyle::Button.resolve(ui.style());
     ui.painter().text(
-        rect.left_center() + egui::vec2(20.0, 0.0),
+        rect.left_center() + egui::vec2(EDITOR_UNICODE_LABEL_X, 0.0),
         egui::Align2::LEFT_CENTER,
         control.short_label,
         font.clone(),
         text_primary(ui),
     );
+    let divider_x = rect.left() + EDITOR_UNICODE_DIVIDER_X;
+    ui.painter().line_segment(
+        [
+            egui::pos2(divider_x, rect.top() + 5.0),
+            egui::pos2(divider_x, rect.bottom() - 5.0),
+        ],
+        egui::Stroke::new(1.0, border(ui).gamma_multiply(0.65)),
+    );
     ui.painter().text(
-        rect.left_center() + egui::vec2(120.0, 0.0),
+        rect.left_center() + egui::vec2(EDITOR_UNICODE_DESCRIPTION_X, 0.0),
         egui::Align2::LEFT_CENTER,
         control.description,
         font,

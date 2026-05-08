@@ -1,5 +1,7 @@
 use crate::app::app_state::ScratchpadApp;
-use crate::app::chrome::{phosphor_button, phosphor_button_with_hover_icon_color};
+use crate::app::chrome::{
+    PhosphorButtonColors, phosphor_button, phosphor_button_with_hover_icon_color,
+};
 use crate::app::commands::AppCommand;
 use crate::app::theme::{CAPTION_BUTTON_SIZE, CLOSE_HOVER_BG, action_bg, action_hover_bg};
 use eframe::egui;
@@ -247,10 +249,12 @@ fn render_button(
             button.action.id_key(),
             button.icon,
             button_size,
-            background,
-            hover_background,
-            crate::app::theme::text_primary(ui),
-            egui::Color32::WHITE,
+            PhosphorButtonColors::with_hover_icon(
+                background,
+                hover_background,
+                crate::app::theme::text_primary(ui),
+                egui::Color32::WHITE,
+            ),
             button.tooltip,
         )
     } else {

@@ -108,21 +108,6 @@ fn next_region_index(current: usize, len: usize, direction: i32) -> Option<usize
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::next_region_index;
-
-    #[test]
-    fn f6_traversal_wraps_forward() {
-        assert_eq!(next_region_index(2, 3, 1), Some(0));
-    }
-
-    #[test]
-    fn shift_f6_traversal_wraps_backward() {
-        assert_eq!(next_region_index(0, 3, -1), Some(2));
-    }
-}
-
 fn handle_file_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
     let tile_file_modifiers = egui::Modifiers {
         ctrl: true,
@@ -233,5 +218,20 @@ fn handle_tile_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
             new_view_first,
             ratio: DEFAULT_SPLIT_RATIO,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::next_region_index;
+
+    #[test]
+    fn f6_traversal_wraps_forward() {
+        assert_eq!(next_region_index(2, 3, 1), Some(0));
+    }
+
+    #[test]
+    fn shift_f6_traversal_wraps_backward() {
+        assert_eq!(next_region_index(0, 3, -1), Some(2));
     }
 }

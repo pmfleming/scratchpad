@@ -64,6 +64,7 @@ pub enum AppCommand {
         ratio: f32,
     },
     SaveFile,
+    SaveAllFiles,
     SaveFileAs,
     SplitActiveView {
         axis: SplitAxis,

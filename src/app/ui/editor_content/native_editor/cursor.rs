@@ -1,6 +1,7 @@
 use super::types::{CharCursor, CursorRange};
 use super::word_boundary;
 use crate::app::domain::buffer::PieceTreeLite;
+use crate::app::ui::editor_content::native_editor::layout::DisplayTextMap;
 use eframe::egui;
 
 fn is_wordwise_movement(modifiers: &egui::Modifiers) -> bool {
@@ -75,6 +76,7 @@ pub(super) struct CursorMovementRequest<'a> {
     pub(super) piece_tree: &'a PieceTreeLite,
     pub(super) char_offset_base: usize,
     pub(super) slice_chars: usize,
+    pub(super) display_map: Option<&'a DisplayTextMap>,
 }
 
 struct HorizontalMovementContext<'a> {
@@ -86,16 +88,21 @@ struct HorizontalMovementContext<'a> {
     galley: &'a egui::Galley,
     egui_cursor: &'a egui::text::CCursor,
     piece_tree: &'a PieceTreeLite,
+    display_map: Option<&'a DisplayTextMap>,
 }
 
 pub(super) fn apply_cursor_movement(request: CursorMovementRequest<'_>) -> Option<CursorRange> {
+    let doc_local_cursor = request
+        .cursor
+        .primary
+        .index
+        .saturating_sub(request.char_offset_base)
+        .min(request.slice_chars);
     let local_cursor = CharCursor {
         index: request
-            .cursor
-            .primary
-            .index
-            .saturating_sub(request.char_offset_base)
-            .min(request.slice_chars),
+            .display_map
+            .map(|map| map.doc_to_display_cursor(doc_local_cursor))
+            .unwrap_or(doc_local_cursor),
         prefer_next_row: request.cursor.primary.prefer_next_row,
     };
     let egui_cursor = request.galley.clamp_cursor(&local_cursor.to_egui_ccursor());
@@ -108,6 +115,7 @@ pub(super) fn apply_cursor_movement(request: CursorMovementRequest<'_>) -> Optio
         galley: request.galley,
         egui_cursor: &egui_cursor,
         piece_tree: request.piece_tree,
+        display_map: request.display_map,
     })
     .map(|target| {
         clamp_char_cursor(
@@ -115,6 +123,7 @@ pub(super) fn apply_cursor_movement(request: CursorMovementRequest<'_>) -> Optio
             request.total_chars,
             target,
             request.char_offset_base,
+            request.display_map,
         )
     })
     .or_else(|| {
@@ -140,6 +149,7 @@ pub(super) fn apply_cursor_movement(request: CursorMovementRequest<'_>) -> Optio
                 request.total_chars,
                 target,
                 request.char_offset_base,
+                request.display_map,
             )
         })
     })?;
@@ -160,6 +170,7 @@ fn horizontal_movement_target(
                 word_boundary::find_word_boundary_left(context.piece_tree, context.current_index),
                 context.char_offset_base,
                 context.slice_chars,
+                context.display_map,
             ))
         }
         egui::Key::ArrowLeft => Some(
@@ -172,6 +183,7 @@ fn horizontal_movement_target(
                 word_boundary::find_word_boundary_right(context.piece_tree, context.current_index),
                 context.char_offset_base,
                 context.slice_chars,
+                context.display_map,
             ))
         }
         egui::Key::ArrowRight => Some(
@@ -187,8 +199,14 @@ fn local_cursor_for_document_index(
     index: usize,
     char_offset_base: usize,
     slice_chars: usize,
+    display_map: Option<&DisplayTextMap>,
 ) -> egui::text::CCursor {
-    egui::text::CCursor::new(index.saturating_sub(char_offset_base).min(slice_chars))
+    let local = index.saturating_sub(char_offset_base).min(slice_chars);
+    egui::text::CCursor::new(
+        display_map
+            .map(|map| map.doc_to_display_cursor(local))
+            .unwrap_or(local),
+    )
 }
 
 fn full_document_movement_target(
@@ -317,11 +335,15 @@ fn clamp_char_cursor(
     total_chars: usize,
     cursor: egui::text::CCursor,
     char_offset_base: usize,
+    display_map: Option<&DisplayTextMap>,
 ) -> CharCursor {
     let clamped = galley.clamp_cursor(&cursor);
+    let local_index = display_map
+        .map(|map| map.display_to_doc_cursor(clamped.index))
+        .unwrap_or(clamped.index);
     CharCursor {
         index: char_offset_base
-            .saturating_add(clamped.index)
+            .saturating_add(local_index)
             .min(total_chars),
         prefer_next_row: clamped.prefer_next_row,
     }

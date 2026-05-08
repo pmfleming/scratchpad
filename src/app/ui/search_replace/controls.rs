@@ -217,9 +217,11 @@ fn render_replace_heading(ui: &mut egui::Ui, replace_open: &mut bool) {
                 ui,
                 "search_replace.replace_heading",
                 if *replace_open { CARET_UP } else { CARET_DOWN },
-                16.0,
-                ICON_BUTTON_SIZE,
-                action_hover_bg(ui),
+                callout::IconButtonStyle {
+                    icon_size: 16.0,
+                    size: ICON_BUTTON_SIZE,
+                    fill: action_hover_bg(ui),
+                },
                 tooltip,
                 true,
             )

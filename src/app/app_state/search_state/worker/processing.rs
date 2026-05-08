@@ -129,7 +129,7 @@ fn process_search_targets_parallel(
     let stale = AtomicBool::new(false);
     let mut last_emitted_match_count = 0usize;
 
-    let stream_ok = thread::scope(|scope| -> Option<()> {
+    thread::scope(|scope| -> Option<()> {
         for _ in 0..worker_count {
             let chunk = indexed_iter.by_ref().take(chunk_size).collect::<Vec<_>>();
             if chunk.is_empty() {
@@ -159,8 +159,7 @@ fn process_search_targets_parallel(
             return None;
         }
         Some(())
-    });
-    stream_ok
+    })
 }
 
 fn search_target_chunk(

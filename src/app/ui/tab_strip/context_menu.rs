@@ -14,8 +14,9 @@ mod menu_ui;
 
 use self::menu_ui::{
     SUBMENU_WIDTH as TAB_CONTEXT_SUBMENU_WIDTH, WIDTH as TAB_CONTEXT_MENU_WIDTH,
-    close_direction_icon, close_direction_label, menu_button, primary_menu_button, submenu_button,
-    tab_list_position_icon, tab_list_position_label, tab_order_mode_label,
+    close_direction_icon, close_direction_label, menu_button, primary_menu_button,
+    primary_menu_button_enabled, submenu_button, tab_list_position_icon, tab_list_position_label,
+    tab_order_mode_label,
 };
 
 struct TabContextMenuState {
@@ -153,18 +154,7 @@ fn render_file_actions(
         }
         ui.close();
     }
-    if menu_button(
-        ui,
-        TAB_CONTEXT_MENU_WIDTH,
-        "Save",
-        Some(FLOPPY_DISK),
-        save_enabled,
-    ) {
-        if let Some(index) = workspace_index {
-            app.save_file_at(index);
-        }
-        ui.close();
-    }
+    render_save_actions(ui, app, workspace_index, save_enabled);
 }
 
 fn render_tab_context_menu(
@@ -291,6 +281,46 @@ fn render_close_actions(
     )
 }
 
+fn render_save_actions(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    workspace_index: Option<usize>,
+    save_enabled: bool,
+) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+
+        if primary_menu_button_enabled(
+            ui,
+            "tab_context.save_primary",
+            "Save",
+            FLOPPY_DISK,
+            save_enabled,
+        ) {
+            if let Some(index) = workspace_index {
+                app.save_file_at(index);
+            }
+            ui.close();
+        }
+        render_save_submenu(ui, app, save_enabled);
+    });
+}
+
+fn render_save_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp, save_enabled: bool) {
+    submenu_button(ui, "tab_context.save_caret", |ui| {
+        if menu_button(
+            ui,
+            TAB_CONTEXT_SUBMENU_WIDTH,
+            "Save All",
+            Some(FLOPPY_DISK),
+            save_enabled,
+        ) {
+            app.handle_command(AppCommand::SaveAllFiles);
+            ui.close();
+        }
+    });
+}
+
 fn close_menu_row(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
@@ -359,7 +389,7 @@ fn render_tab_order_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
 
-        render_tab_order_primary_button(ui);
+        render_tab_order_primary_button(ui, app);
         render_tab_order_caret(ui, app);
     });
 }
@@ -368,8 +398,11 @@ fn render_close_primary_button(ui: &mut egui::Ui) -> bool {
     primary_menu_button(ui, "tab_context.close_primary", "Close", X)
 }
 
-fn render_tab_order_primary_button(ui: &mut egui::Ui) {
-    let _ = primary_menu_button(ui, "tab_context.order_primary", "Order Tabs", TABS);
+fn render_tab_order_primary_button(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    if primary_menu_button(ui, "tab_context.order_primary", "Order Tabs", TABS) {
+        app.set_tab_order_mode(TabOrderMode::FileName);
+        ui.close();
+    }
 }
 
 fn render_tab_list_primary_button(ui: &mut egui::Ui, label: &str, icon: &str) -> bool {
@@ -381,6 +414,7 @@ fn render_tab_order_caret(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         for mode in [
             TabOrderMode::Custom,
             TabOrderMode::FileName,
+            TabOrderMode::FileSize,
             TabOrderMode::FileAge,
             TabOrderMode::RecentEdit,
         ] {

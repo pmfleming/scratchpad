@@ -105,9 +105,11 @@ fn icon_action_button(
         ui,
         ("search_replace.action", tooltip),
         icon,
-        16.0,
-        ICON_BUTTON_SIZE,
-        action_hover_bg(ui),
+        callout::IconButtonStyle {
+            icon_size: 16.0,
+            size: ICON_BUTTON_SIZE,
+            fill: action_hover_bg(ui),
+        },
         tooltip,
         enabled,
     )

@@ -59,6 +59,7 @@ impl ScratchpadApp {
             AppCommand::RequestCloseTab { index } => self.request_close_tab(index),
             AppCommand::ResizeSplit { path, ratio } => self.resize_split_command(path, ratio),
             AppCommand::SaveFile => self.save_file(),
+            AppCommand::SaveAllFiles => self.save_all_files(),
             AppCommand::SaveFileAs => self.save_file_as(),
             AppCommand::SplitActiveView {
                 axis,

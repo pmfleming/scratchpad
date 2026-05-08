@@ -22,6 +22,7 @@ pub(super) fn handle_tile_click(
     context_menu::activate_inactive_tile_on_secondary_click(app, &tile_response, request);
     if tile_response.clicked() {
         actions.push(TileAction::Activate(request.view_id));
+        app.request_focus_for_view(request.view_id);
     }
     tile_response
 }

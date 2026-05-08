@@ -1,4 +1,3 @@
-pub mod artifact;
 pub mod gutter;
 pub mod native_editor;
 
@@ -7,11 +6,9 @@ use crate::app::ui::scrolling::DisplaySnapshot;
 use crate::app::ui::widget_ids;
 use eframe::egui;
 
-pub use artifact::{make_control_chars_clean, make_control_chars_visible, render_artifact_view};
 pub use gutter::render_line_number_gutter;
 pub use native_editor::{
     CursorRange, EditorHighlightStyle, TextEditOptions, build_layouter, render_editor_text_edit,
-    render_read_only_text_edit,
 };
 
 pub(crate) struct EditorContentOutcome {
@@ -73,10 +70,6 @@ fn render_editor_body(
     view: &mut EditorViewState,
     style: &EditorContentStyle<'_>,
 ) -> native_editor::EditorWidgetOutcome {
-    if buffer.artifact_summary.has_control_chars() && buffer.show_control_chars {
-        return render_artifact_view(ui, buffer, view, style.text_edit);
-    }
-
     render_editor_text_edit(ui, buffer, view, style.text_edit, style.viewport)
 }
 
