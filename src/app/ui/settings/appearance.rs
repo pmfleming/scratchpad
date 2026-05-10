@@ -153,12 +153,16 @@ fn render_color_row(
     app: &mut ScratchpadApp,
 ) {
     inner_select_row(ui, label, Some(description), |ui| {
-        let mut color = initial_color;
-        let response = ui.color_edit_button_srgba(&mut color);
-        record_settings_control_box(format!("color.{label}"), response.rect);
-        if response.changed() {
-            on_change(app, color);
-        }
+        available_width_control(ui, |ui| {
+            let mut color = initial_color;
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let response = ui.color_edit_button_srgba(&mut color);
+                record_settings_control_box(format!("color.{label}"), response.rect);
+                if response.changed() {
+                    on_change(app, color);
+                }
+            });
+        });
     });
     inner_divider(ui);
 }

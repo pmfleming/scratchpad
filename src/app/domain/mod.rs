@@ -15,4 +15,7 @@ pub use buffer::{
 pub use panes::{PaneBranch, PaneNode, SplitAxis, SplitPath};
 pub use tab::WorkspaceTab;
 pub use tab_manager::{PendingAction, TabManager};
-pub use view::{CursorRevealMode, EditorViewState, LayoutCacheKey, SearchHighlightState, ViewId};
+pub use view::{
+    CursorRevealMode, EditorViewState, LayoutCacheKey, SearchHighlightState,
+    SearchReplacementPreview, SearchReplacementPreviewEntry, ViewId,
+};

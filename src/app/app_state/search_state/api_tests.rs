@@ -188,6 +188,39 @@ fn tab_reorder_marks_open_search_dirty() {
     assert_eq!(app.search_state.freshness, super::SearchFreshness::Stale);
 }
 
+#[test]
+fn replacement_typing_updates_preview_without_mutating_buffer() {
+    let mut app = app_with_search_text("foo foo");
+    seed_search_matches(&mut app, "foo");
+    app.search_state.replace_open = true;
+    let before_revision = active_buffer_revision(&app);
+
+    app.set_search_replacement("bar");
+
+    assert_eq!(active_buffer_text(&app), "foo foo");
+    assert_eq!(active_buffer_revision(&app), before_revision);
+    let preview = active_view_replacement_preview(&app).expect("replacement preview");
+    assert_eq!(preview.entries.len(), 2);
+    assert_eq!(preview.entries[0].range, 0..3);
+    assert_eq!(preview.entries[0].replacement, "bar");
+    assert_eq!(preview.entries[1].range, 4..7);
+    assert_eq!(preview.entries[1].replacement, "bar");
+}
+
+#[test]
+fn closing_replace_mode_clears_replacement_preview() {
+    let mut app = app_with_search_text("foo");
+    seed_search_matches(&mut app, "foo");
+    app.search_state.replace_open = true;
+    app.set_search_replacement("bar");
+    assert!(active_view_replacement_preview(&app).is_some());
+
+    app.set_search_replace_open(false);
+
+    assert!(active_view_replacement_preview(&app).is_none());
+    assert_eq!(active_buffer_text(&app), "foo");
+}
+
 fn app_with_search_text(text: &str) -> ScratchpadApp {
     let temp_dir = tempfile::tempdir().expect("create temp app root");
     let root = temp_dir.keep();
@@ -268,6 +301,25 @@ fn active_buffer_text(app: &ScratchpadApp) -> String {
         })
         .map(|buffer| buffer.text())
         .expect("active buffer text")
+}
+
+fn active_buffer_revision(app: &ScratchpadApp) -> u64 {
+    app.active_tab()
+        .and_then(|tab| tab.active_view())
+        .and_then(|view| {
+            app.active_tab()
+                .and_then(|tab| tab.buffer_by_id(view.buffer_id))
+        })
+        .map(|buffer| buffer.document_revision())
+        .expect("active buffer revision")
+}
+
+fn active_view_replacement_preview(
+    app: &ScratchpadApp,
+) -> Option<&crate::app::domain::SearchReplacementPreview> {
+    app.active_tab()
+        .and_then(|tab| tab.active_view())
+        .and_then(|view| view.search_replacement_preview.as_ref())
 }
 
 fn active_search_match(app: &ScratchpadApp) -> Option<&SearchMatch> {

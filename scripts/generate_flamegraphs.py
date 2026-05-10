@@ -89,7 +89,7 @@ class FlamegraphGenerator:
     ) -> dict:
         svg_path = self.output_dir / f"{config['id']}.svg"
         relative_path = f"flamegraphs/{config['id']}.svg"
-        existing_available = bool(existing and existing.get("available")) or svg_path.exists()
+        existing_available = svg_path.exists()
         resolved_available = existing_available if available is None else available
         item = {
             "id": config["id"],
@@ -103,7 +103,7 @@ class FlamegraphGenerator:
             "resource_focus": config.get("resource_focus", "cpu"),
             "description": config.get("description", ""),
         }
-        if issue:
+        if issue and not resolved_available:
             item["issue"] = issue
         return item
 
@@ -140,9 +140,13 @@ class FlamegraphGenerator:
         self,
         skip_if_missing: bool = True,
         existing_index_path: Optional[Path] = None,
+        index_only: bool = False,
     ) -> List[dict]:
         existing_results = self.load_existing_results(existing_index_path)
         results_by_id: dict[str, dict] = {}
+
+        if index_only:
+            return self.materialize_index(existing_results)
 
         if not self.check_tool():
             print("Warning: `cargo-flamegraph` not found.", file=sys.stderr)
@@ -250,6 +254,11 @@ class FlamegraphGenerator:
 def main():
     parser = argparse.ArgumentParser(description="Generate flamegraphs for benchmarks.")
     parser.add_argument("--output", type=Path, help="Path to write the index JSON.")
+    parser.add_argument(
+        "--index-only",
+        action="store_true",
+        help="Refresh flamegraphs.json from existing SVGs without running cargo-flamegraph.",
+    )
     add_mode_argument(parser, default="visibility")
 
     args = parser.parse_args()
@@ -261,6 +270,7 @@ def main():
     results = generator.generate(
         skip_if_missing=(args.mode != "cli"),
         existing_index_path=resolved_output,
+        index_only=args.index_only,
     )
 
     def cli_renderer(data):

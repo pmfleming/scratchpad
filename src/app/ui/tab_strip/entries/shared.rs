@@ -1,7 +1,7 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::chrome::tab_button_sized;
 use crate::app::domain::WorkspaceTab;
-use crate::app::ui::tab_drag::{self, TabRectEntry};
+use crate::app::ui::tab_drag::TabRectEntry;
 use crate::app::ui::tab_strip::context_menu::{
     attach_tab_context_menu, attach_tab_list_context_menu,
 };
@@ -129,14 +129,6 @@ fn render_tab_slot_cell(
         is_active,
         is_selected,
         context.width,
-    );
-    let dragged_slots = app.dragged_tab_slots(slot_index);
-    tab_drag::begin_tab_drag_if_needed(
-        ui,
-        slot_index,
-        &dragged_slots,
-        &tab_response,
-        &close_response,
     );
     let tab_clicked = tab_response.clicked()
         && handle_settings_tab_click(app, slot_index, ui.input(|input| input.modifiers));

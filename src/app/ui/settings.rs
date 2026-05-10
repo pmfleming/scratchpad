@@ -51,6 +51,10 @@ fn with_settings_page(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui
         let horizontal_overflow = SettingsUi::page_overflows_horizontally(viewport_size);
         egui::ScrollArea::both()
             .id_salt(widget_ids::scroll_id(ui, "settings_page_scroll"))
+            .scroll_source(egui::scroll_area::ScrollSource {
+                drag: false,
+                ..Default::default()
+            })
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.set_min_size(surface_size);
@@ -94,12 +98,16 @@ fn render_page_heading(ui: &mut egui::Ui) {
 }
 
 fn category_heading(ui: &mut egui::Ui, heading: &str) {
-    ui.label(
-        egui::RichText::new(heading)
-            .size(SettingsUi::TYPOGRAPHY.category)
-            .strong()
-            .color(text_primary(ui)),
-    );
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.add_space(SettingsUi::card_leading_inset(ui));
+        ui.label(
+            egui::RichText::new(heading)
+                .size(SettingsUi::TYPOGRAPHY.category)
+                .strong()
+                .color(text_primary(ui)),
+        );
+    });
     ui.add_space(12.0);
 }
 
@@ -155,6 +163,121 @@ mod tests {
             card_width,
             card_offenders.join("\n")
         );
+    }
+
+    #[test]
+    fn settings_cards_are_centered_in_editor_window() {
+        let mut app = test_app();
+        reset_settings_layout_measurements();
+
+        let ctx = egui::Context::default();
+        crate::app::fonts::apply_editor_fonts(&ctx, app.editor_font())
+            .expect("install editor fonts for settings layout test");
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_min_size(egui::vec2(1600.0, 4200.0));
+            ui.set_width(1600.0);
+            render_page_body(ui, &mut app, false);
+        });
+
+        let card_measurements = settings_card_measurements();
+        assert!(
+            !card_measurements.is_empty(),
+            "settings card centering test did not collect any cards"
+        );
+
+        let expected_center = 800.0;
+        let card_offenders: Vec<String> = card_measurements
+            .iter()
+            .filter(|measurement| (measurement.center_x - expected_center).abs() > f32::EPSILON)
+            .map(|measurement| {
+                format!(
+                    "{} center = {:.1}px",
+                    measurement.label, measurement.center_x
+                )
+            })
+            .collect();
+
+        assert!(
+            card_offenders.is_empty(),
+            "settings cards must be centered at {:.1}px:\n{}",
+            expected_center,
+            card_offenders.join("\n")
+        );
+    }
+
+    #[test]
+    fn settings_font_card_controls_align_to_row_right_edge() {
+        let mut app = test_app();
+        reset_settings_layout_measurements();
+
+        let ctx = egui::Context::default();
+        crate::app::fonts::apply_editor_fonts(&ctx, app.editor_font())
+            .expect("install editor fonts for settings layout test");
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_min_size(egui::vec2(1600.0, 4200.0));
+            ui.set_width(1600.0);
+            render_page_body(ui, &mut app, false);
+        });
+
+        let control_measurements = settings_control_measurements();
+        assert!(
+            !control_measurements.is_empty(),
+            "settings control alignment test did not collect any controls"
+        );
+
+        for (row_label, control_label) in [
+            ("inner_select_row.Family", "combo.Font family"),
+            ("inner_select_row.Size", "slider.Font size"),
+            ("inner_select_row.Gutter", "slider.Gutter"),
+        ] {
+            let row = measurement_for(&control_measurements, row_label);
+            let control = measurement_for(&control_measurements, control_label);
+            assert!(
+                (control.right_x - row.right_x).abs() <= f32::EPSILON,
+                "{control_label} right edge = {:.1}px, expected {:.1}px from {row_label}; row width {:.1}px center {:.1}px, control width {:.1}px center {:.1}px",
+                control.right_x,
+                row.right_x,
+                row.width,
+                row.center_x,
+                control.width,
+                control.center_x,
+            );
+        }
+    }
+
+    #[test]
+    fn settings_toggle_labels_align_with_switch_centers() {
+        let mut app = test_app();
+        reset_settings_layout_measurements();
+
+        let ctx = egui::Context::default();
+        crate::app::fonts::apply_editor_fonts(&ctx, app.editor_font())
+            .expect("install editor fonts for settings layout test");
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_min_size(egui::vec2(1600.0, 4200.0));
+            ui.set_width(1600.0);
+            render_page_body(ui, &mut app, false);
+        });
+
+        let control_measurements = settings_control_measurements();
+        let label = measurement_for(&control_measurements, "toggle_control.label");
+        let switch = measurement_for(&control_measurements, "toggle_control.switch");
+        assert!(
+            (label.center_y - switch.center_y).abs() <= 0.5,
+            "toggle label center y = {:.1}px, expected switch center y {:.1}px",
+            label.center_y,
+            switch.center_y,
+        );
+    }
+
+    fn measurement_for<'a>(
+        measurements: &'a [widgets::SettingsControlMeasurement],
+        label: &str,
+    ) -> &'a widgets::SettingsControlMeasurement {
+        measurements
+            .iter()
+            .find(|measurement| measurement.label == label)
+            .unwrap_or_else(|| panic!("missing settings measurement for {label}"))
     }
 
     fn test_app() -> ScratchpadApp {

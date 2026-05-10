@@ -3,8 +3,10 @@ use super::helpers::{
 };
 use super::{ScratchpadApp, SearchStatus};
 use crate::app::domain::{
-    BufferId, CursorRevealMode, EditorViewState, SearchHighlightState, ViewId,
+    BufferId, CursorRevealMode, EditorViewState, SearchHighlightState, SearchReplacementPreview,
+    SearchReplacementPreviewEntry, ViewId,
 };
+use crate::app::services::search::SearchProgram;
 use crate::app::ui::scrolling::{ScrollAlign, ScrollIntent};
 use eframe::egui;
 use std::ops::Range;
@@ -106,7 +108,7 @@ impl ScratchpadApp {
 
         let active_tab_index = self.active_tab_index();
         let highlights = self.search_highlights_for_tab(active_tab_index);
-        let replacement_preview = self.search_replacement_preview();
+        let replacement_previews = self.search_replacement_previews_for_tab(active_tab_index);
 
         self.clear_search_highlights_outside_tab(active_tab_index);
         let Some(tab) = self.tabs_mut().get_mut(active_tab_index) else {
@@ -116,14 +118,62 @@ impl ScratchpadApp {
         for (view_id, highlights) in highlights {
             if let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) {
                 view.set_search_highlights_anchored(buffer, highlights);
-                view.set_search_replacement_preview(replacement_preview.clone());
+                let preview = replacement_previews
+                    .iter()
+                    .find(|(preview_view_id, _)| *preview_view_id == view_id)
+                    .map(|(_, preview)| preview.clone());
+                view.set_search_replacement_preview(preview);
             }
         }
     }
 
-    fn search_replacement_preview(&self) -> Option<String> {
-        (self.search_state.replace_open && self.search_state.status == SearchStatus::Ready)
-            .then(|| self.search_state.replacement.clone())
+    fn search_replacement_previews_for_tab(
+        &self,
+        tab_index: usize,
+    ) -> Vec<(ViewId, SearchReplacementPreview)> {
+        if !self.search_state.replace_open || self.search_state.status != SearchStatus::Ready {
+            return Vec::new();
+        }
+        let Ok(program) =
+            SearchProgram::compile(&self.search_state.query, self.search_state.search_options())
+        else {
+            return Vec::new();
+        };
+
+        self.tabs()
+            .get(tab_index)
+            .map(|tab| {
+                tab.views
+                    .iter()
+                    .filter_map(|view| {
+                        let buffer = tab.buffer_by_id(view.buffer_id)?;
+                        let entries = self
+                            .search_state
+                            .matches
+                            .iter()
+                            .filter(|search_match| {
+                                matches_buffer(search_match, tab_index, view.buffer_id)
+                                    && search_match.target_revision == buffer.document_revision()
+                            })
+                            .map(|search_match| {
+                                program
+                                    .expand_replacement(
+                                        &search_match.matched_text,
+                                        &self.search_state.replacement,
+                                    )
+                                    .map(|replacement| SearchReplacementPreviewEntry {
+                                        range: search_match.range.clone(),
+                                        replacement,
+                                    })
+                            })
+                            .collect::<Result<Vec<_>, _>>()
+                            .ok()?;
+                        (!entries.is_empty())
+                            .then_some((view.id, SearchReplacementPreview { entries }))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn search_highlights_for_tab(&self, tab_index: usize) -> Vec<(ViewId, SearchHighlightState)> {

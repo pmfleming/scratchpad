@@ -1,9 +1,12 @@
 use super::{TextEditOptions, highlighting};
 use crate::app::domain::{
-    BufferState, EditorViewState, LayoutCacheKey, SearchHighlightState, ViewId,
+    BufferState, EditorViewState, LayoutCacheKey, SearchHighlightState, SearchReplacementPreview,
+    ViewId,
 };
 use crate::app::ui::widget_ids::{self, WidgetRole};
 use eframe::egui;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 pub(super) struct EditorGalleyContext {
@@ -63,6 +66,11 @@ struct DisplayTextSlice {
     map: Option<DisplayTextMap>,
 }
 
+struct PreviewTextSlice {
+    text: String,
+    map: Option<DisplayTextMap>,
+}
+
 enum CursorSubstitutionPolicy {
     SingleCell,
     LineEndingMarker,
@@ -87,7 +95,13 @@ pub(super) fn build_editor_galley(
         editor_row_height(ui, options.editor_font_id),
         cursor_line_for_viewport_slice(buffer, view),
     );
-    let display_slice = display_text_slice(&slice.text, buffer.show_control_chars);
+    let preview_slice = preview_text_slice(
+        &slice.text,
+        slice.char_range.clone(),
+        view.search_replacement_preview.as_ref(),
+    );
+    let display_slice = display_text_slice(&preview_slice.text, buffer.show_control_chars);
+    let display_map = compose_display_maps(preview_slice.map.as_ref(), display_slice.map.as_ref());
     let search_highlights = local_search_highlights(
         &view.search_highlights,
         slice.char_range.start,
@@ -98,9 +112,9 @@ pub(super) fn build_editor_galley(
         .clone()
         .and_then(|range| local_range(Some(range), slice.char_range.start, slice.char_range.end));
     let display_search_highlights =
-        display_search_highlights(&search_highlights, display_slice.map.as_ref());
+        display_search_highlights(&search_highlights, display_map.as_ref());
     let display_selection_highlight =
-        display_selection_highlight(selection_highlight.clone(), display_slice.map.as_ref());
+        display_selection_highlight(selection_highlight.clone(), display_map.as_ref());
     let wrap_width = editor_wrap_width(ui, options.word_wrap, Some(effective_viewport));
     let cache_key = layout_cache_key(LayoutCacheKeyInput {
         revision: buffer.document_revision(),
@@ -109,6 +123,9 @@ pub(super) fn build_editor_galley(
         options,
         search_highlights: &display_search_highlights,
         selection_highlight: display_selection_highlight.clone(),
+        replacement_preview_signature: replacement_preview_signature(
+            view.search_replacement_preview.as_ref(),
+        ),
         wrap_width,
         dark_mode: ui.visuals().dark_mode,
     });
@@ -147,7 +164,7 @@ pub(super) fn build_editor_galley(
         char_offset_base: slice.char_range.start,
         logical_line_base: slice.start_line,
         slice_chars,
-        display_map: display_slice.map,
+        display_map,
     }
 }
 
@@ -158,6 +175,7 @@ struct LayoutCacheKeyInput<'a> {
     options: TextEditOptions<'a>,
     search_highlights: &'a SearchHighlightState,
     selection_highlight: Option<std::ops::Range<usize>>,
+    replacement_preview_signature: u64,
     wrap_width: f32,
     dark_mode: bool,
 }
@@ -176,7 +194,17 @@ fn layout_cache_key(input: LayoutCacheKeyInput<'_>) -> LayoutCacheKey {
         dark_mode: input.dark_mode,
         selection_highlight: input.selection_highlight,
         search_highlights: input.search_highlights.clone(),
+        replacement_preview_signature: input.replacement_preview_signature,
     }
+}
+
+fn replacement_preview_signature(preview: Option<&SearchReplacementPreview>) -> u64 {
+    let Some(preview) = preview else {
+        return 0;
+    };
+    let mut hasher = DefaultHasher::new();
+    preview.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn display_text_slice(text: &str, show_control_chars: bool) -> DisplayTextSlice {
@@ -224,6 +252,135 @@ fn display_text_slice(text: &str, show_control_chars: bool) -> DisplayTextSlice 
             doc_to_display,
             display_to_doc,
         }),
+    }
+}
+
+fn preview_text_slice(
+    text: &str,
+    slice_range: std::ops::Range<usize>,
+    preview: Option<&SearchReplacementPreview>,
+) -> PreviewTextSlice {
+    let Some(preview) = preview.filter(|preview| !preview.entries.is_empty()) else {
+        return PreviewTextSlice {
+            text: text.to_owned(),
+            map: None,
+        };
+    };
+
+    let original_chars = text.chars().collect::<Vec<_>>();
+    let original_len = original_chars.len();
+    let mut projected = String::with_capacity(text.len());
+    let mut doc_to_display = vec![0; original_len + 1];
+    let mut display_to_doc = vec![0];
+    let mut original_cursor = 0usize;
+    let mut projected_cursor = 0usize;
+
+    let mut entries = preview
+        .entries
+        .iter()
+        .filter_map(|entry| {
+            let start = entry.range.start.max(slice_range.start);
+            let end = entry.range.end.min(slice_range.end);
+            (start < end).then_some((
+                start.saturating_sub(slice_range.start),
+                end.saturating_sub(slice_range.start),
+                entry.replacement.as_str(),
+            ))
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|(start, _, _)| *start);
+
+    for (start, end, replacement) in entries {
+        if start < original_cursor {
+            continue;
+        }
+        copy_original_chars(
+            &original_chars,
+            original_cursor,
+            start,
+            &mut projected,
+            &mut doc_to_display,
+            &mut display_to_doc,
+            &mut projected_cursor,
+        );
+
+        doc_to_display[start] = projected_cursor;
+        projected.push_str(replacement);
+        let replacement_len = replacement.chars().count();
+        for boundary in 1..=replacement_len {
+            projected_cursor += 1;
+            if boundary == replacement_len {
+                display_to_doc.push(end);
+            } else {
+                display_to_doc.push(start);
+            }
+        }
+        for cursor in (start + 1)..=end.min(original_len) {
+            doc_to_display[cursor] = projected_cursor;
+        }
+        original_cursor = end;
+    }
+
+    copy_original_chars(
+        &original_chars,
+        original_cursor,
+        original_len,
+        &mut projected,
+        &mut doc_to_display,
+        &mut display_to_doc,
+        &mut projected_cursor,
+    );
+    doc_to_display[original_len] = projected_cursor;
+
+    PreviewTextSlice {
+        text: projected,
+        map: Some(DisplayTextMap {
+            doc_to_display,
+            display_to_doc,
+        }),
+    }
+}
+
+fn copy_original_chars(
+    original_chars: &[char],
+    start: usize,
+    end: usize,
+    projected: &mut String,
+    doc_to_display: &mut [usize],
+    display_to_doc: &mut Vec<usize>,
+    projected_cursor: &mut usize,
+) {
+    for index in start..end {
+        doc_to_display[index] = *projected_cursor;
+        projected.push(original_chars[index]);
+        *projected_cursor += 1;
+        display_to_doc.push(index + 1);
+    }
+}
+
+fn compose_display_maps(
+    preview_map: Option<&DisplayTextMap>,
+    display_map: Option<&DisplayTextMap>,
+) -> Option<DisplayTextMap> {
+    match (preview_map, display_map) {
+        (None, None) => None,
+        (Some(map), None) | (None, Some(map)) => Some(map.clone()),
+        (Some(preview), Some(display)) => {
+            let doc_to_display = preview
+                .doc_to_display
+                .iter()
+                .map(|projected_cursor| display.doc_to_display_cursor(*projected_cursor))
+                .collect();
+            let display_to_doc = display
+                .display_to_doc
+                .iter()
+                .map(|projected_cursor| preview.display_to_doc_cursor(*projected_cursor))
+                .collect();
+            Some(DisplayTextMap {
+                doc_to_display,
+                display_to_doc,
+            })
+        }
     }
 }
 
@@ -458,6 +615,7 @@ fn warm_nearby_layout_slices(
             options,
             search_highlights: &search_highlights,
             selection_highlight: None,
+            replacement_preview_signature: 0,
             wrap_width,
             dark_mode: ui.visuals().dark_mode,
         });
@@ -620,9 +778,12 @@ pub(super) fn editor_row_height(ui: &egui::Ui, font_id: &egui::FontId) -> f32 {
 mod tests {
     use super::{
         cursor_line_for_viewport_slice, display_text_slice, editor_eof_tail_height,
-        editor_interaction_id,
+        editor_interaction_id, preview_text_slice,
     };
-    use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
+    use crate::app::domain::{
+        BufferState, CursorRevealMode, EditorViewState, SearchReplacementPreview,
+        SearchReplacementPreviewEntry,
+    };
     use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
 
     #[test]
@@ -700,6 +861,43 @@ mod tests {
         assert_eq!(map.doc_to_display_cursor(2), 3);
         assert_eq!(map.display_to_doc_cursor(2), 1);
         assert_eq!(map.display_to_doc_cursor(3), 2);
+    }
+
+    #[test]
+    fn preview_text_slice_projects_replacements_without_changing_original_coordinates() {
+        let preview = SearchReplacementPreview {
+            entries: vec![SearchReplacementPreviewEntry {
+                range: 4..7,
+                replacement: "barley".to_owned(),
+            }],
+        };
+
+        let slice = preview_text_slice("foo foo baz", 0..11, Some(&preview));
+        let map = slice.map.as_ref().expect("preview map");
+
+        assert_eq!(slice.text, "foo barley baz");
+        assert_eq!(map.doc_to_display_cursor(4), 4);
+        assert_eq!(map.doc_to_display_cursor(7), 10);
+        assert_eq!(map.display_to_doc_cursor(10), 7);
+        assert_eq!(map.doc_range_to_display(4..7), Some(4..10));
+    }
+
+    #[test]
+    fn preview_text_slice_can_project_deletion() {
+        let preview = SearchReplacementPreview {
+            entries: vec![SearchReplacementPreviewEntry {
+                range: 4..7,
+                replacement: String::new(),
+            }],
+        };
+
+        let slice = preview_text_slice("foo foo baz", 0..11, Some(&preview));
+        let map = slice.map.as_ref().expect("preview map");
+
+        assert_eq!(slice.text, "foo  baz");
+        assert_eq!(map.doc_to_display_cursor(4), 4);
+        assert_eq!(map.doc_to_display_cursor(7), 4);
+        assert_eq!(map.doc_range_to_display(4..7), None);
     }
 
     #[test]

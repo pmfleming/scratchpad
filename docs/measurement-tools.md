@@ -74,6 +74,15 @@ Start only the dashboard API server:
 
 Then open `http://localhost:8000/viewer/`.
 
+## Firebase Snapshot Publishing
+
+The Firebase publish path is planned as a static snapshot of the current
+`viewer/` pages and current `target/analysis/` artifacts. Firebase Hosting
+should not refresh measurements or call the local dashboard API. See
+[Firebase Overview Publish Plan](firebase-overview-publish-plan.md) for the
+implementation plan, including hosted-mode refresh disabling and credential
+`.gitignore` reminders.
+
 ## Dashboard API
 
 The dashboard server binds to `127.0.0.1` and serves both static files and local
@@ -284,7 +293,24 @@ Preferred command:
 The script writes `target/analysis/flamegraphs.json` and SVGs under
 `target/analysis/flamegraphs/`. If `cargo-flamegraph` is missing, privileges are
 insufficient, disk space is low, or a profile fails, the index still records the
-coverage config and issue so the dashboard can show what is missing.
+coverage config. Existing SVGs are treated as usable baseline evidence; transient
+refresh failures are only attached as row issues when no SVG is available.
+
+To rebuild the flamegraph index from already-generated SVGs without invoking
+`cargo-flamegraph`, use:
+
+```powershell
+.venv\Scripts\python.exe scripts\generate_flamegraphs.py --mode visibility --index-only
+```
+
+This is the preferred cleanup step after an interrupted or untrusted flamegraph
+refresh, such as a run from a dirty working tree or a run stopped by low disk
+space. Follow it by regenerating the coordinated reports:
+
+```powershell
+.venv\Scripts\python.exe scripts\speed_efficiency_report.py --mode visibility
+.venv\Scripts\python.exe scripts\performance_review.py --mode visibility
+```
 
 ## Direct Commands
 

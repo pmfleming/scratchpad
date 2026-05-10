@@ -5,22 +5,33 @@ use std::hash::Hash;
 use std::ops::RangeInclusive;
 use std::path::Path;
 
+thread_local! {
+    static SETTINGS_CONTROL_LANE: std::cell::Cell<Option<egui::Rect>> =
+        const { std::cell::Cell::new(None) };
+}
+
 #[cfg(test)]
 #[derive(Clone, Debug)]
 pub(super) struct SettingsControlMeasurement {
     pub label: String,
     pub width: f32,
+    pub center_x: f32,
+    pub center_y: f32,
+    pub right_x: f32,
 }
 
 #[cfg(test)]
 thread_local! {
     static SETTINGS_CARD_MEASUREMENTS: std::cell::RefCell<Vec<SettingsControlMeasurement>> =
         const { std::cell::RefCell::new(Vec::new()) };
+    static SETTINGS_CONTROL_MEASUREMENTS: std::cell::RefCell<Vec<SettingsControlMeasurement>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 #[cfg(test)]
 pub(super) fn reset_settings_layout_measurements() {
     SETTINGS_CARD_MEASUREMENTS.with(|measurements| measurements.borrow_mut().clear());
+    SETTINGS_CONTROL_MEASUREMENTS.with(|measurements| measurements.borrow_mut().clear());
 }
 
 #[cfg(test)]
@@ -28,7 +39,24 @@ pub(super) fn settings_card_measurements() -> Vec<SettingsControlMeasurement> {
     SETTINGS_CARD_MEASUREMENTS.with(|measurements| measurements.borrow().clone())
 }
 
+#[cfg(test)]
+pub(super) fn settings_control_measurements() -> Vec<SettingsControlMeasurement> {
+    SETTINGS_CONTROL_MEASUREMENTS.with(|measurements| measurements.borrow().clone())
+}
+
 pub(super) fn record_settings_control_box(label: impl Into<String>, rect: egui::Rect) {
+    #[cfg(test)]
+    SETTINGS_CONTROL_MEASUREMENTS.with(|measurements| {
+        measurements.borrow_mut().push(SettingsControlMeasurement {
+            label: label.into(),
+            width: rect.width(),
+            center_x: rect.center().x,
+            center_y: rect.center().y,
+            right_x: rect.right(),
+        });
+    });
+
+    #[cfg(not(test))]
     let _ = (label, rect);
 }
 
@@ -38,11 +66,44 @@ fn record_settings_card_box(label: impl Into<String>, rect: egui::Rect) {
         measurements.borrow_mut().push(SettingsControlMeasurement {
             label: label.into(),
             width: rect.width(),
+            center_x: rect.center().x,
+            center_y: rect.center().y,
+            right_x: rect.right(),
         });
     });
 
     #[cfg(not(test))]
     let _ = (label, rect);
+}
+
+fn active_settings_control_lane() -> Option<egui::Rect> {
+    SETTINGS_CONTROL_LANE.with(|lane| lane.get())
+}
+
+struct SettingsControlLaneGuard {
+    previous: Option<egui::Rect>,
+}
+
+impl SettingsControlLaneGuard {
+    fn push(rect: egui::Rect) -> Self {
+        let previous = SETTINGS_CONTROL_LANE.with(|lane| {
+            let previous = lane.get();
+            lane.set(Some(rect));
+            previous
+        });
+        Self { previous }
+    }
+}
+
+impl Drop for SettingsControlLaneGuard {
+    fn drop(&mut self) {
+        SETTINGS_CONTROL_LANE.with(|lane| lane.set(self.previous));
+    }
+}
+
+fn with_settings_control_lane<R>(rect: egui::Rect, add_contents: impl FnOnce() -> R) -> R {
+    let _guard = SettingsControlLaneGuard::push(rect);
+    add_contents()
 }
 
 pub(super) fn expandable_card(
@@ -133,14 +194,49 @@ pub(super) fn category_card(
 }
 
 pub(super) fn toggle_control(ui: &mut egui::Ui, surface_key: impl Hash, value: &mut bool) {
-    let response = toggle_switch(ui, surface_key, value);
-    if response.changed() {
-        ui.ctx().request_repaint();
-    }
-    ui.add_space(12.0);
-    let label_response =
-        ui.label(egui::RichText::new(if *value { "On" } else { "Off" }).color(text_primary(ui)));
-    record_settings_control_box("toggle_control", response.rect.union(label_response.rect));
+    available_width_control(ui, |ui| {
+        let label_text = if *value { "On" } else { "Off" };
+        let label_width = ui
+            .painter()
+            .layout_no_wrap(
+                label_text.to_owned(),
+                egui::FontId::proportional(SettingsUi::TYPOGRAPHY.body),
+                text_primary(ui),
+            )
+            .rect
+            .width();
+        let switch_size = egui::vec2(42.0, 22.0);
+        let group_width = label_width + SettingsUi::CONTROLS.gap + switch_size.x;
+        let available = ui.available_rect_before_wrap();
+        let group_rect = egui::Rect::from_min_size(
+            egui::pos2(available.right() - group_width, available.top()),
+            egui::vec2(group_width, ui.available_height()),
+        );
+
+        widget_ids::rect_scope_with_layout(
+            ui,
+            group_rect,
+            ("settings.toggle_control.group", label_text),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_width(group_width);
+                ui.set_max_width(group_width);
+                let label_response =
+                    ui.label(egui::RichText::new(label_text).color(text_primary(ui)));
+                ui.add_space(SettingsUi::CONTROLS.gap);
+                let response = toggle_switch(ui, surface_key, value);
+                if response.changed() {
+                    ui.ctx().request_repaint();
+                }
+                record_settings_control_box("toggle_control.label", label_response.rect);
+                record_settings_control_box("toggle_control.switch", response.rect);
+                record_settings_control_box(
+                    "toggle_control",
+                    response.rect.union(label_response.rect),
+                );
+            },
+        );
+    });
 }
 
 pub(super) fn combo_control<T>(
@@ -155,18 +251,20 @@ pub(super) fn combo_control<T>(
     T: Copy + PartialEq,
 {
     available_width_control(ui, |ui| {
-        let control_width = SettingsUi::control_width(ui);
-        let response = widget_ids::combo_box(ui, id_source)
-            .selected_text(selected_label(*selected))
-            .truncate()
-            .width(control_width)
-            .show_ui(ui, |ui| {
-                for &option in options {
-                    ui.selectable_value(selected, option, option_label(option));
-                }
-            })
-            .response;
-        record_settings_control_box(record_label, response.rect);
+        let dropdown_width = SettingsUi::dropdown_width(ui);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let response = widget_ids::combo_box(ui, id_source)
+                .selected_text(selected_label(*selected))
+                .truncate()
+                .width(dropdown_width)
+                .show_ui(ui, |ui| {
+                    for &option in options {
+                        ui.selectable_value(selected, option, option_label(option));
+                    }
+                })
+                .response;
+            record_settings_control_box(record_label, response.rect);
+        });
     });
 }
 
@@ -225,20 +323,43 @@ pub(super) fn slider_value_control(
     value_text: impl Into<egui::WidgetText>,
     add_slider: impl FnOnce(&mut egui::Ui, f32) -> egui::Response,
 ) {
-    available_width_control(ui, |ui| {
-        let control_width = SettingsUi::control_width(ui);
-        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            let slider_width = (control_width - SettingsUi::CONTROLS.gap - value_width).max(0.0);
-            let slider_response = add_slider(ui, slider_width);
-            ui.add_space(SettingsUi::CONTROLS.gap);
+    let lane_bounds = active_settings_control_lane().unwrap_or_else(|| ui.max_rect());
+    let lane_width = lane_bounds
+        .width()
+        .clamp(0.0, SettingsUi::CONTROLS.column_width);
+    let lane_rect = egui::Rect::from_min_size(
+        egui::pos2(lane_bounds.right() - lane_width, lane_bounds.top()),
+        egui::vec2(lane_width, SettingsUi::LAYOUT.inner_row_height),
+    );
+    let slider_width = lane_width
+        .clamp(0.0, SettingsUi::LAYOUT.card_max_width / 3.0)
+        .min((lane_width - SettingsUi::CONTROLS.gap - value_width).max(0.0));
+    let group_width = (value_width + SettingsUi::CONTROLS.gap + slider_width).min(lane_width);
+    let group_rect = egui::Rect::from_min_size(
+        egui::pos2(lane_rect.right() - group_width, lane_rect.top()),
+        egui::vec2(group_width, SettingsUi::LAYOUT.inner_row_height),
+    );
+    ui.advance_cursor_after_rect(lane_rect);
+
+    widget_ids::rect_scope_with_layout(
+        ui,
+        group_rect,
+        ("settings.slider_value_control.group", group_width.to_bits()),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_width(group_width);
+            ui.set_max_width(group_width);
+            ui.spacing_mut().slider_width = slider_width;
             let value_response =
                 ui.add_sized(egui::vec2(value_width, 0.0), egui::Label::new(value_text));
+            ui.add_space(SettingsUi::CONTROLS.gap);
+            let slider_response = add_slider(ui, slider_width);
             record_settings_control_box(
                 record_label,
                 slider_response.rect.union(value_response.rect),
             );
-        });
-    });
+        },
+    );
 }
 
 pub(super) fn u32_slider_value_control(
@@ -430,25 +551,36 @@ pub(super) fn inner_select_row(
             |ui| {
                 ui.set_width(control_width);
                 ui.set_max_width(control_width);
-                add_control(ui);
+                with_settings_control_lane(control_rect, || add_control(ui));
             },
         );
     });
 }
 
 pub(super) fn available_width_control(ui: &mut egui::Ui, add_control: impl FnOnce(&mut egui::Ui)) {
-    let width = SettingsUi::control_width(ui);
+    let width = active_settings_control_lane()
+        .map(|lane| lane.width().clamp(0.0, SettingsUi::CONTROLS.column_width))
+        .unwrap_or_else(|| SettingsUi::control_width(ui));
     let height = ui
         .available_height()
         .max(ui.spacing().interact_size.y)
         .min(SettingsUi::LAYOUT.inner_row_height);
-    let rect = widget_ids::allocate_exact_rect(ui, egui::vec2(width, height));
+    let rect = active_settings_control_lane()
+        .map(|lane| {
+            let rect = egui::Rect::from_min_size(
+                egui::pos2(lane.right() - width, lane.top()),
+                egui::vec2(width, height),
+            );
+            ui.advance_cursor_after_rect(rect);
+            rect
+        })
+        .unwrap_or_else(|| widget_ids::allocate_exact_rect(ui, egui::vec2(width, height)));
     record_settings_control_box("available_width_control", rect);
     widget_ids::rect_scope_with_layout(
         ui,
         rect,
         ("settings.available_width_control", width.to_bits()),
-        *ui.layout(),
+        egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             ui.set_width(width);
             ui.set_max_width(width);
@@ -520,7 +652,7 @@ pub(super) fn radio_option_row(ui: &mut egui::Ui, value: &mut bool, label: &str)
 pub(super) fn render_preview_panel(ui: &mut egui::Ui, app: &ScratchpadApp) {
     let preview_width = SettingsUi::preview_width(ui);
     ui.horizontal(|ui| {
-        let leading_space = ((ui.available_width() - preview_width) * 0.5).max(0.0);
+        let leading_space = (ui.available_width() - preview_width).max(0.0);
         ui.add_space(leading_space);
         ui.allocate_ui_with_layout(
             egui::vec2(preview_width, 0.0),
@@ -578,54 +710,60 @@ fn render_preview_text(ui: &mut egui::Ui, app: &ScratchpadApp, preview_family: e
 
 pub(super) fn settings_card_frame(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
     let card_width = SettingsUi::card_width(ui);
+    let leading_inset = SettingsUi::card_leading_inset(ui);
     let stroke_width = SettingsUi::CARD_STROKE_WIDTH;
     let margin = SettingsUi::MARGINS.card_inner;
     let horizontal_inset = f32::from(margin.left + margin.right) + stroke_width * 2.0;
     let vertical_inset = f32::from(margin.top + margin.bottom) + stroke_width * 2.0;
     let card_content_width = (card_width - horizontal_inset).max(0.0);
-    let background_shape = ui.painter().add(egui::Shape::Noop);
 
-    let response = ui.allocate_ui_with_layout(
-        egui::vec2(card_width, 0.0),
-        egui::Layout::top_down(egui::Align::LEFT),
-        |ui| {
-            ui.set_width(card_width);
-            ui.set_max_width(card_width);
-            ui.add_space(f32::from(margin.top) + stroke_width);
-            ui.horizontal(|ui| {
-                ui.add_space(f32::from(margin.left) + stroke_width);
-                ui.allocate_ui_with_layout(
-                    egui::vec2(card_content_width, 0.0),
-                    egui::Layout::top_down(egui::Align::LEFT),
-                    |ui| {
-                        ui.set_width(card_content_width);
-                        ui.set_max_width(card_content_width);
-                        add_contents(ui);
-                    },
-                );
-            });
-            ui.add_space(f32::from(margin.bottom) + stroke_width);
-        },
-    );
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.add_space(leading_inset);
+        let background_shape = ui.painter().add(egui::Shape::Noop);
 
-    let outer_rect = egui::Rect::from_min_size(
-        response.response.rect.min,
-        egui::vec2(
-            card_width,
-            response.response.rect.height().max(vertical_inset),
-        ),
-    );
-    ui.painter().set(
-        background_shape,
-        egui::Shape::Rect(egui::epaint::RectShape::new(
-            outer_rect,
-            egui::CornerRadius::same(SettingsUi::LAYOUT.card_radius),
-            SettingsUi::card_bg(ui),
-            egui::Stroke::new(stroke_width, SettingsUi::card_border(ui)),
-            egui::StrokeKind::Inside,
-        )),
-    );
-    record_settings_card_box("settings_card_frame", outer_rect);
+        let response = ui.allocate_ui_with_layout(
+            egui::vec2(card_width, 0.0),
+            egui::Layout::top_down(egui::Align::LEFT),
+            |ui| {
+                ui.set_width(card_width);
+                ui.set_max_width(card_width);
+                ui.add_space(f32::from(margin.top) + stroke_width);
+                ui.horizontal(|ui| {
+                    ui.add_space(f32::from(margin.left) + stroke_width);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(card_content_width, 0.0),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            ui.set_width(card_content_width);
+                            ui.set_max_width(card_content_width);
+                            add_contents(ui);
+                        },
+                    );
+                });
+                ui.add_space(f32::from(margin.bottom) + stroke_width);
+            },
+        );
+
+        let outer_rect = egui::Rect::from_min_size(
+            response.response.rect.min,
+            egui::vec2(
+                card_width,
+                response.response.rect.height().max(vertical_inset),
+            ),
+        );
+        ui.painter().set(
+            background_shape,
+            egui::Shape::Rect(egui::epaint::RectShape::new(
+                outer_rect,
+                egui::CornerRadius::same(SettingsUi::LAYOUT.card_radius),
+                SettingsUi::card_bg(ui),
+                egui::Stroke::new(stroke_width, SettingsUi::card_border(ui)),
+                egui::StrokeKind::Inside,
+            )),
+        );
+        record_settings_card_box("settings_card_frame", outer_rect);
+    });
 }
 
 pub(super) fn clickable_card_header(
@@ -741,13 +879,11 @@ fn label_stack(ui: &mut egui::Ui, width: f32, title: egui::RichText, description
 fn toggle_switch(ui: &mut egui::Ui, surface_key: impl Hash, value: &mut bool) -> egui::Response {
     let desired_size = egui::vec2(42.0, 22.0);
     let available_rect = ui.available_rect_before_wrap();
+    let top = available_rect.center().y - desired_size.y * 0.5;
     let min = if ui.layout().main_dir() == egui::Direction::RightToLeft {
-        egui::pos2(
-            available_rect.right() - desired_size.x,
-            available_rect.top(),
-        )
+        egui::pos2(available_rect.right() - desired_size.x, top)
     } else {
-        available_rect.min
+        egui::pos2(available_rect.left(), top)
     };
     let rect = egui::Rect::from_min_size(min, desired_size);
     let mut response = widget_ids::interact(
