@@ -213,6 +213,10 @@ impl ScratchpadApp {
         }) else {
             return;
         };
+        self.activate_workspace_surface();
+        self.tab_manager_mut().active_tab_index = tab_index;
+        self.ensure_active_tab_slot_selected();
+        self.tab_manager_mut().pending_scroll_to_active = true;
         let tab = &mut self.tabs_mut()[tab_index];
         let _ = tab.activate_view(view_id);
         if let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) {
@@ -220,6 +224,8 @@ impl ScratchpadApp {
             view.set_pending_cursor_range_anchored(buffer, selection);
             view.request_cursor_reveal(CursorRevealMode::Center);
         }
+        self.refresh_search_view_state();
+        self.request_focus_for_view(view_id);
     }
 }
 
@@ -229,9 +235,14 @@ fn sort_text_history_entries(entries: &mut [TextHistoryEntryView]) {
 
 #[cfg(test)]
 mod tests {
+    use super::ScratchpadApp;
     use super::sort_text_history_entries;
-    use crate::app::domain::{BufferId, PieceSource};
+    use crate::app::domain::{BufferId, BufferState, PieceSource, SplitAxis, WorkspaceTab};
+    use crate::app::services::session_store::SessionStore;
+    use crate::app::services::settings_store::SettingsStore;
     use crate::app::text_history::TextHistoryEntryView;
+    use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
+    use crate::app::{domain::TabManager, startup::StartupOptions};
 
     #[test]
     fn text_history_sort_uses_global_sequence_before_entry_id() {
@@ -263,5 +274,89 @@ mod tests {
             first_deleted_text: String::new(),
             first_inserted_text: String::new(),
         }
+    }
+
+    #[test]
+    fn follow_history_undo_activates_containing_tab_and_moves_one_view() {
+        let mut app = test_app_with_tabs(["first.txt", "second.txt"]);
+        let target_tab_index = 1;
+        let target_buffer_id = app.tabs()[target_tab_index].buffer.id;
+        let previous_selection = CursorRange::one(CharCursor::new(0));
+        let next_selection = CursorRange::one(CharCursor::new(5));
+        app.tabs_mut()[target_tab_index]
+            .buffer
+            .replace_char_ranges_with_undo(
+                &[(0..0, "hello".to_owned())],
+                previous_selection,
+                next_selection,
+            )
+            .expect("record text history");
+        let entry_id = app.tabs()[target_tab_index]
+            .buffer
+            .document()
+            .history_entries()
+            .last()
+            .expect("history entry")
+            .id;
+
+        app.tab_manager.active_tab_index = target_tab_index;
+        let original_view_id = app.tabs()[target_tab_index].active_view_id;
+        let split_view_id = app.tabs_mut()[target_tab_index]
+            .split_active_view(SplitAxis::Vertical)
+            .expect("split target view");
+        {
+            let tab = &mut app.tabs_mut()[target_tab_index];
+            let original_view = tab.view_mut(original_view_id).expect("original view");
+            original_view.cursor_range = Some(CursorRange::one(CharCursor::new(1)));
+            original_view.pending_cursor_range = None;
+            let split_view = tab.view_mut(split_view_id).expect("split view");
+            split_view.cursor_range = Some(CursorRange::one(CharCursor::new(2)));
+            split_view.pending_cursor_range = None;
+        }
+        app.tab_manager.active_tab_index = 0;
+
+        assert!(app.apply_text_history_to_entry(target_buffer_id, entry_id, true));
+
+        let tab = &app.tabs()[app.active_tab_index()];
+        let original_view = tab.view(original_view_id).expect("original view");
+        let split_view = tab.view(split_view_id).expect("split view");
+        assert_eq!(app.active_tab_index(), target_tab_index);
+        assert_eq!(tab.active_view_id, original_view_id);
+        assert_eq!(original_view.cursor_range, Some(previous_selection));
+        assert_eq!(original_view.pending_cursor_range, Some(previous_selection));
+        assert_eq!(
+            original_view.cursor_reveal_mode(),
+            Some(crate::app::domain::CursorRevealMode::Center)
+        );
+        assert_eq!(
+            split_view.cursor_range,
+            Some(CursorRange::one(CharCursor::new(2)))
+        );
+        assert_eq!(split_view.pending_cursor_range, None);
+        assert_eq!(split_view.cursor_reveal_mode(), None);
+    }
+
+    fn test_app_with_tabs<const N: usize>(names: [&str; N]) -> ScratchpadApp {
+        let temp_dir = tempfile::tempdir().expect("create temp app root");
+        let root = temp_dir.keep();
+        let mut app = ScratchpadApp::with_stores_and_startup(
+            SessionStore::new(root.clone()),
+            SettingsStore::new(root),
+            StartupOptions::default(),
+        );
+        app.set_session_persist_on_drop(false);
+        app.tab_manager = TabManager {
+            tabs: names.into_iter().map(test_tab).collect(),
+            active_tab_index: 0,
+            pending_action: None,
+            session_dirty: false,
+            pending_scroll_to_active: false,
+        };
+        app.clear_tab_selection();
+        app
+    }
+
+    fn test_tab(name: &str) -> WorkspaceTab {
+        WorkspaceTab::new(BufferState::new(name.to_owned(), String::new(), None))
     }
 }

@@ -76,7 +76,7 @@ fn text_history_budget_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             inner_select_row(
                 ui,
                 "Automatic defaults",
-                Some("Use memory-based defaults."),
+                Some("Checks available memory."),
                 |ui| {
                     available_width_control(ui, |ui| {
                         let button_width = SettingsUi::control_width(ui);

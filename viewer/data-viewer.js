@@ -46,6 +46,7 @@
         selectedLayer: null,
         selectedCorrectnessCategory: null,
         selectedPerformanceScenarioId: null,
+        selectedFlamegraphsByScenario: {},
         lastObservedFinishedRun: null,
         mapZoom: 0.65,
         mapLayout: 'folder',
@@ -59,6 +60,7 @@
         expandedCloneKey: null,
         qualityDatasetView: 'hotspots',
         performanceDatasetSearch: '',
+        performanceBucketFilters: {},
         performanceDistributionModes: {
             budget: 'counts',
             scaling: 'counts',
@@ -432,84 +434,7 @@
         );
     }
 
-    function renderSlowspots() {
-        const query = byId("slowspots-filter")?.value || "";
-        const selected = selectedPerformancePromise();
-        const filtered = filteredPerformanceRows(state.slowspots.filter((item) => rowBelongsToPerformancePromise(item, selected) && matchesFilter(item, query)));
-
-        renderTable(
-            "slowspots-table",
-            ["Benchmark", "Family", "Kind", "Mean", "Median", "Spread", "Dispersion", "Threshold", "Profiles", "Targets", "Signals"],
-            filtered.map((item) => {
-                const meanMs = item.mean_ns / 1_000_000;
-                const medianMs = item.median_ns / 1_000_000;
-                const dispersionMs = item.dispersion_ns == null ? null : item.dispersion_ns / 1_000_000;
-                const scoreClass = meanMs > item.threshold_ms ? "risk-bad" : "risk-good";
-                return `<tr>
-                    <td><code>${escapeHtml(item.name)}</code></td>
-                    <td><span class="pill">${escapeHtml(item.workload_family || "unmapped")}</span></td>
-                    <td><span class="pill">${escapeHtml(item.benchmark_kind)}</span></td>
-                    <td class="${scoreClass}">${formatNumber.format(meanMs)} ms</td>
-                    <td>${formatNumber.format(medianMs)} ms</td>
-                    <td>${renderLatencyWhisker(item)}</td>
-                    <td>${dispersionMs == null ? "-" : `${formatNumber.format(dispersionMs)} ms`}<div class="muted">${escapeHtml(item.dispersion_label || "median_abs_dev")}</div></td>
-                    <td>${formatNumber.format(item.threshold_ms)} ms</td>
-                    <td>${renderPills(item.matching_flamegraphs || [])}</td>
-                    <td>${renderPills(item.targets || [])}</td>
-                    <td>${renderPills(item.signals)}</td>
-                </tr>`;
-            })
-        );
-        renderPerformancePanelCaptions();
-    }
-
-    function renderSearchSpeed() {
-        const query = byId("search-speed-filter")?.value || "";
-        const selected = selectedPerformancePromise();
-        const filtered = filteredPerformanceRows(state.searchSpeed.filter((item) => rowBelongsToPerformancePromise(item, selected) && matchesFilter(item, query)));
-
-        renderSearchSpeedCharts(filtered);
-
-        renderTable(
-            "search-speed-table",
-            ["Scenario", "Family", "Mode", "Latency", "Axis", "Param", "Corpus", "Mean", "Median", "Spread", "Profiles", "Efficiency", "Targets", "Signals"],
-            filtered.map((item) => {
-                const meanMs = item.mean_ns / 1_000_000;
-                const medianMs = item.median_ns / 1_000_000;
-                const meanClass = meanMs > item.threshold_ms ? "risk-bad" : "risk-good";
-                const nsPerKb = item.ns_per_kb == null ? "-" : `${formatNumber.format(item.ns_per_kb)} ns/KB`;
-                const detailBits = [];
-                if (item.description) detailBits.push(item.description);
-                if (item.response_match_limit != null) detailBits.push(`preview limit ${item.response_match_limit} matches`);
-                const detail = detailBits.length ? `<div class="muted">${escapeHtml(detailBits.join(" • "))}</div>` : "";
-                const corpus = [];
-                if (item.item_count != null) corpus.push(`${item.item_count} items`);
-                if (item.bytes_per_item != null) corpus.push(`${formatNumber.format(item.bytes_per_item / 1024)} KB/item`);
-                if (item.total_bytes != null) corpus.push(`${formatNumber.format(item.total_bytes / (1024 * 1024))} MB total`);
-
-                return `<tr>
-                    <td><code>${escapeHtml(item.scenario_label || item.name)}</code>${detail}</td>
-                    <td><span class="pill">${escapeHtml(item.workload_family || "search")}</span></td>
-                    <td><span class="pill">${escapeHtml(item.mode || "unknown")}</span></td>
-                    <td><span class="pill">${escapeHtml(item.latency_kind || "completion")}</span></td>
-                    <td><span class="pill">${escapeHtml(item.scaling_axis || "aggregate_size")}</span></td>
-                    <td>${escapeHtml(item.parameter_label || "-")}</td>
-                    <td>${escapeHtml(corpus.join(" • ") || "-")}</td>
-                    <td class="${meanClass}">${formatNumber.format(meanMs)} ms<div class="muted">budget ${formatNumber.format(item.threshold_ms)} ms</div></td>
-                    <td>${formatNumber.format(medianMs)} ms</td>
-                    <td>${renderLatencyWhisker(item)}</td>
-                    <td>${renderPills(item.matching_flamegraphs || [])}</td>
-                    <td>${escapeHtml(nsPerKb)}</td>
-                    <td>${renderPills(item.targets || [])}</td>
-                    <td>${renderPills(item.signals)}</td>
-                </tr>`;
-            })
-        );
-        renderPerformancePanelCaptions();
-    }
-
-    function renderSearchSpeedCharts(items) {
-        const container = byId("search-speed-charts");
+    function renderSearchSpeedCharts(items, container = null) {
         if (!container) {
             return;
         }
@@ -620,29 +545,29 @@
             target.innerHTML = [
                 renderPerformanceScatterPanel({
                     id: "pressure-scaling",
-                    title: "Pressure × Scaling",
-                    caption: "Quadrants separate healthy rows from watch, fix-now, and redesign work.",
+                    title: "Latency Cost × Load",
+                    caption: "Each dot is a measured load point. X is normalized load; Y is latency per unit compared with that series' first point.",
                     points: data.pressureGrowth,
-                    empty: "No rows have both budget pressure and scaling growth.",
-                    x: { label: "Budget pressure", min: 0, max: 2, threshold: 1, valueLabel: formatRatio },
-                    y: { label: "Growth per 2x", min: 0.8, max: 4, threshold: 2, valueLabel: formatRatio },
-                    sideTitle: "Worst combined offenders",
+                    empty: "No rows have comparable budget-pressure load steps.",
+                    x: { label: "Load / max measured load", min: 0, max: data.pressureBounds.xMax, threshold: 1, valueLabel: formatRatio },
+                    y: { label: "Latency per unit vs baseline", min: 0, max: data.pressureBounds.yMax, threshold: 1, valueLabel: formatRatio },
+                    sideTitle: "Worst latency cost points",
                     quadrants: [
-                        { x: "left", y: "bottom", tone: "good", title: "Healthy", detail: "under budget, stable" },
-                        { x: "right", y: "bottom", tone: "local", title: "Fix now", detail: "over budget" },
-                        { x: "left", y: "top", tone: "architecture", title: "Watch", detail: "growth risk" },
-                        { x: "right", y: "top", tone: "triage", title: "Redesign", detail: "over + nonlinear" },
+                        { x: "left", y: "bottom", tone: "good", title: "Small + linear", detail: "low load, stable cost" },
+                        { x: "right", y: "bottom", tone: "local", title: "Large + linear", detail: "high load, stable cost" },
+                        { x: "left", y: "top", tone: "architecture", title: "Early drift", detail: "cost per unit rising" },
+                        { x: "right", y: "top", tone: "triage", title: "Falloff", detail: "large + nonlinear" },
                     ],
                 }),
                 renderPerformanceScatterPanel({
                     id: "memory-elapsed",
-                    title: "Memory × Elapsed",
-                    caption: "Resource frontier: high working set plus high elapsed time deserves the next profile.",
+                    title: "Resource Cost × Load",
+                    caption: "Each dot is a measured load point. X is normalized load; Y is resource cost per unit compared with that series' first point.",
                     points: data.memoryElapsed,
-                    empty: "No resource rows with working-set and elapsed values loaded.",
-                    x: { label: "Working set", min: data.memoryBounds.xMin, max: data.memoryBounds.xMax, threshold: data.memoryBounds.xThreshold, scale: "log", valueLabel: formatBytes },
-                    y: { label: "Elapsed", min: data.memoryBounds.yMin, max: data.memoryBounds.yMax, threshold: data.memoryBounds.yThreshold, scale: "log", valueLabel: formatMs },
-                    sideTitle: "Pareto-worst resources",
+                    empty: "No resource rows with comparable load steps loaded.",
+                    x: { label: "Load / max measured load", min: 0, max: data.memoryBounds.xMax, threshold: 1, valueLabel: formatRatio },
+                    y: { label: "Resource cost per unit vs baseline", min: 0, max: data.memoryBounds.yMax, threshold: 1, valueLabel: formatRatio },
+                    sideTitle: "Worst resource cost points",
                 }),
                 renderPerformanceRiskRegisterPanel(),
                 renderPerformanceDistributionGlyph({
@@ -724,6 +649,7 @@
                 }),
             ].join("");
             attachPerformanceScatterHandlers(target);
+            attachPerformanceDistributionHandlers(target);
         }
         renderPerformanceFocusList(data.pressureGrowth);
     }
@@ -900,14 +826,14 @@
             .sort((left, right) => Number(right.score || 0) - Number(left.score || 0))
             .slice(0, 15);
         target.innerHTML = sorted.map((row, index) => {
-            const cls = row.x >= 1 && row.y >= 2 ? "bad" : row.x >= 1 || row.y >= 2 ? "watch" : "ok";
+            const cls = row.x >= 1 && row.y >= 1 ? "bad" : row.x >= 1 || row.y >= 1 ? "watch" : "ok";
             return `<div class="performance-focus-row" style="--promise-color:${escapeHtml(row.color || performancePromiseColor(row.promiseId || row.label))}" aria-label="${escapeHtml(row.label)} risk register row">
                 <span class="rank-pill">${index + 1}</span>
                 <span class="performance-focus-row__main">
                     <strong>${escapeHtml(row.label)}</strong>
-                    <em>${escapeHtml(`${row.promiseTitle || "Unmapped"} - ${formatRatio(row.x)} budget - ${formatRatio(row.y)} growth`)}</em>
+                    <em>${escapeHtml(`${row.promiseTitle || "Unmapped"} - ${formatRatio(row.x)} load - ${formatRatio(row.y)} latency/unit`)}</em>
                 </span>
-                <span class="status-pill status-pill--${cls}">${escapeHtml(formatNumber.format(row.score || 0))}</span>
+                <span class="status-pill status-pill--${cls}">${escapeHtml(formatRatio(row.score || 0))}</span>
             </div>`;
         }).join("");
     }
@@ -1417,62 +1343,6 @@
         return insights;
     }
 
-    function renderSpeedReport() {
-        const payload = state.speedReport || {};
-        const triage = payload.triage || [];
-        const sections = payload.sections || {};
-        const selected = selectedPerformancePromise();
-        const inPromise = (item) => !selected || rowBelongsToPerformancePromise(item, selected);
-        const triageTarget = byId("speed-report-triage");
-        if (triageTarget) {
-            triageTarget.innerHTML = renderSpeedTriageVisual(triage.filter(inPromise), payload.triage_summary || {});
-        }
-
-        renderTable(
-            "speed-report-search",
-            ["Scenario", "Family", "Mean", "Budget", "Profiles", "Stability", "Ceiling", "Resource"],
-            (sections.search || []).filter(inPromise).map((item) => `<tr>
-                <td><code>${escapeHtml(item.scenario_label || item.scenario_id)}</code></td>
-                <td><span class="pill">${escapeHtml(item.family || "search")}</span></td>
-                <td>${formatNumber.format(item.mean_ms || 0)} ms</td>
-                <td>${formatNumber.format(item.budget_ms || 0)} ms</td>
-                <td>${renderPills(item.matching_flamegraphs || [])}</td>
-                <td><span class="pill">${escapeHtml(item.stability || "stable")}</span></td>
-                <td>${escapeHtml(item.last_known_failure_ceiling || "-")}</td>
-                <td><span class="pill">${escapeHtml(item.suspected_limiting_resource || "cpu")}</span></td>
-            </tr>`)
-        );
-
-        renderTable(
-            "speed-report-editor",
-            ["Scenario", "Family", "Mean", "Budget", "Profiles", "Signals", "Ceiling", "Resource"],
-            [...(sections.editor_file_size || []), ...(sections.tabs_and_splits || [])].filter(inPromise).map((item) => `<tr>
-                <td><code>${escapeHtml(item.scenario_label || item.scenario_id)}</code></td>
-                <td><span class="pill">${escapeHtml(item.family || "unmapped")}</span></td>
-                <td>${formatNumber.format(item.mean_ms || 0)} ms</td>
-                <td>${formatNumber.format(item.budget_ms || 0)} ms</td>
-                <td>${renderPills(item.matching_flamegraphs || [])}</td>
-                <td>${renderPills(item.signals || [])}</td>
-                <td>${escapeHtml(item.last_known_failure_ceiling || "-")}</td>
-                <td><span class="pill">${escapeHtml(item.suspected_limiting_resource || "cpu")}</span></td>
-            </tr>`)
-        );
-
-        renderTable(
-            "speed-report-flamegraphs",
-            ["Profile", "Role", "Available", "Families", "Benchmarks", "Covered scenarios", "Issue"],
-            (sections.flamegraph_coverage || []).filter((item) => !selected || (item.covered_scenarios || []).includes(selected.id)).map((item) => `<tr>
-                <td><code>${escapeHtml(item.name || item.id)}</code></td>
-                <td><span class="pill">${escapeHtml(item.coverage_role || "report-driven")}</span></td>
-                <td>${item.available ? "yes" : "no"}</td>
-                <td>${renderPills(item.workload_families || [])}</td>
-                <td>${renderPills(item.benchmark_keys || [])}</td>
-                <td>${renderPills(item.covered_scenarios || [])}</td>
-                <td>${escapeHtml(item.issue || "-")}</td>
-            </tr>`)
-        );
-    }
-
     function renderSpeedTriageVisual(triage, triageSummary = {}) {
         if (!triage.length) {
             return '<p class="muted">No coordinated triage data loaded.</p>';
@@ -1549,129 +1419,6 @@
         </article>`;
     }
 
-    function renderCapacityReport() {
-        const payload = state.capacityReport || {};
-        const selected = selectedPerformancePromise();
-        const scenarios = filterPerformanceScenarioRows((payload.scenarios || []).filter((item) => rowBelongsToPerformancePromise(item, selected)));
-
-        renderCapacityDatasetLadder(scenarios);
-        renderTable(
-            "capacity-report-table",
-            ["Scenario", "Failure mode", "Last OK", "First failure", "Resource", "Peak working set", "Growth", "Profiles", "Guidance"],
-            scenarios.map((item) => `<tr>
-                <td><code>${escapeHtml(item.scenario_label || item.scenario)}</code></td>
-                <td><span class="pill">${escapeHtml(item.failure_mode || "not_reached")}</span></td>
-                <td>${escapeHtml(item.last_successful_label || "-")}</td>
-                <td>${escapeHtml(item.first_failure_label || "-")}</td>
-                <td><span class="pill">${escapeHtml(item.suspected_limiting_resource || "cpu")}</span></td>
-                <td>${escapeHtml(formatBytes(item.peak_working_set_bytes))}</td>
-                <td>${escapeHtml(formatBytes(item.working_set_growth_bytes))}</td>
-                <td>${renderPills(item.matching_flamegraphs || [])}</td>
-                <td>${escapeHtml((item.diagnosis_guidance || []).join(" • ") || "-")}</td>
-            </tr>`)
-        );
-        renderPerformancePanelCaptions();
-    }
-
-    function renderCapacityDatasetLadder(rows) {
-        const target = byId("capacity-ladder-visual");
-        if (!target) return;
-        if (!rows.length) {
-            target.innerHTML = `<p class="muted">No capacity scenarios match the current search.</p>`;
-            return;
-        }
-        const numeric = (value) => {
-            const number = Number(value);
-            return Number.isFinite(number) && number > 0 ? number : null;
-        };
-        const ordered = [...rows].sort((left, right) => {
-            const leftFailure = numeric(left.first_failure_workload);
-            const rightFailure = numeric(right.first_failure_workload);
-            if (leftFailure && rightFailure) return leftFailure - rightFailure;
-            if (leftFailure) return -1;
-            if (rightFailure) return 1;
-            return (numeric(right.last_successful_workload) || 0) - (numeric(left.last_successful_workload) || 0);
-        });
-        const failedCount = ordered.filter((item) => numeric(item.first_failure_workload)).length;
-        const provenCount = ordered.length - failedCount;
-        const rowsMarkup = ordered.map((item) => {
-            const firstFailure = numeric(item.first_failure_workload);
-            const lastOk = numeric(item.last_successful_workload);
-            const pointMap = new Map();
-            const addPoint = (value, label, failed, endpoint = "") => {
-                const number = numeric(value);
-                if (!number) return;
-                const key = `${number}:${failed ? "fail" : "ok"}`;
-                const existing = pointMap.get(key) || {};
-                pointMap.set(key, {
-                    value: number,
-                    label: label || existing.label || formatNumber.format(number),
-                    failed,
-                    endpoint: endpoint || existing.endpoint || "",
-                });
-            };
-            (item.samples || []).forEach((sample) => {
-                const value = numeric(sample.workload_value);
-                const sampleFailed = sample.status && sample.status !== "ok";
-                addPoint(value, sample.workload_label, sampleFailed || (firstFailure != null && value >= firstFailure));
-            });
-            addPoint(lastOk, item.last_successful_label, false, "last-ok");
-            addPoint(firstFailure, item.first_failure_label, true, "first-failure");
-            const points = [...pointMap.values()].sort((left, right) => left.value - right.value);
-            const maxValue = Math.max(...points.map((point) => point.value), firstFailure || 0, lastOk || 0, 1);
-            const rungs = points.map((point) => {
-                const pct = Math.max(0, Math.min(100, (point.value / maxValue) * 100));
-                const endpointClass = point.endpoint ? ` capacity-ladder__rung--${point.endpoint}` : "";
-                return `<i class="capacity-ladder__rung capacity-ladder__rung--${point.failed ? "bad" : "ok"}${endpointClass}" style="left:${pct}%" title="${escapeHtml(point.label)}"></i>`;
-            }).join("");
-            const failureText = firstFailure ? item.first_failure_label || formatNumber.format(firstFailure) : "No failure";
-            const okText = item.last_successful_label || (lastOk ? formatNumber.format(lastOk) : "-");
-            const cls = firstFailure ? "watch" : "ok";
-            return `<div class="capacity-ladder__row capacity-ladder__row--dataset">
-                <span><strong>${escapeHtml(item.scenario_label || item.scenario || "Capacity scenario")}</strong><em>${escapeHtml(item.failure_mode || "not_reached")}</em></span>
-                <div>${rungs}</div>
-                <strong><span class="status-pill status-pill--${cls}">${escapeHtml(firstFailure ? `${okText} -> ${failureText}` : `proven to ${okText}`)}</span></strong>
-            </div>`;
-        }).join("");
-        target.innerHTML = `<section class="capacity-dataset-ladder__frame" aria-label="Capacity ladder">
-            <div class="capacity-dataset-ladder__header">
-                <div>
-                    <h4>Capacity Ladder</h4>
-                    <p>Green rungs are proven workloads; red marks first failure or later samples.</p>
-                </div>
-                <span>${formatNumber.format(provenCount)} proven · ${formatNumber.format(failedCount)} first failures</span>
-            </div>
-            <div class="capacity-dataset-ladder__rows">${rowsMarkup}</div>
-        </section>`;
-    }
-
-    function renderResourceProfiles() {
-        const payload = state.resourceProfiles || {};
-        const scenarios = payload.scenarios || [];
-        const query = byId("resource-profiles-filter")?.value || "";
-        const selected = selectedPerformancePromise();
-        const filteredScenarios = filterPerformanceScenarioRows(scenarios.filter((item) => rowBelongsToPerformancePromise(item, selected) && matchesFilter(item, query)));
-
-        renderTable(
-            "resource-profiles-table",
-            ["Scenario", "Focus", "Family", "Max elapsed", "Allocated", "Peak live", "Working set", "Manifest", "PF growth", "Handle growth", "Samples"],
-            filteredScenarios.map((item) => `<tr>
-                <td><code>${escapeHtml(item.scenario_label || item.scenario)}</code></td>
-                <td><span class="pill">${escapeHtml(item.focus || "resource")}</span></td>
-                <td><span class="pill">${escapeHtml(item.workload_family || "unmapped")}</span></td>
-                <td>${formatNumber.format(item.max_elapsed_ms || 0)} ms</td>
-                <td>${escapeHtml(formatBytes(item.max_allocated_bytes))}</td>
-                <td>${escapeHtml(formatBytes(item.max_peak_live_bytes))}</td>
-                <td>${escapeHtml(formatBytes(item.max_working_set_bytes))}</td>
-                <td>${escapeHtml(formatBytes(item.max_manifest_size_bytes))}</td>
-                <td>${item.page_fault_growth == null ? "-" : formatNumber.format(item.page_fault_growth)}</td>
-                <td>${item.handle_growth == null ? "-" : formatNumber.format(item.handle_growth)}</td>
-                <td>${renderResourceSampleDetails(item.samples || [])}</td>
-            </tr>`)
-        );
-        renderPerformancePanelCaptions();
-    }
-
     function renderResourceSampleDetails(samples) {
         if (!samples.length) {
             return '<span class="muted">No samples</span>';
@@ -1705,6 +1452,7 @@
 
         renderPerformanceStaleState(payload);
         renderPerformancePromiseBoard(scenarios);
+        renderPerformancePromiseDetail(selectedPerformancePromise());
     }
 
     function renderPerformanceStaleState(payload) {
@@ -1754,6 +1502,12 @@
     }
 
     function renderScenarioPromisePanel(scenario) {
+        return `<section class="promise-tab-panel promise-tab-panel--summary" role="tabpanel" aria-label="${escapeHtml(scenario.title || scenario.id || "Scenario")} promise">
+            <p class="promise-tab-promise">${escapeHtml(scenario.promise || "No promise text loaded.")}</p>
+        </section>`;
+    }
+
+    function renderScenarioProgressCells(scenario) {
         const status = scenarioStatus(scenario);
         const scale = bestScaleCheck(scenario);
         const observed = scale ? formatScaleValue(scale.observed, scale.unit) : "-";
@@ -1769,17 +1523,12 @@
             ["Worst latency", scenario.max_latency_ms ? formatMs(scenario.max_latency_ms) : "-", missCount ? "watch" : "neutral"],
             ["Peak working set", scenario.peak_working_set_bytes ? formatBytes(scenario.peak_working_set_bytes) : "-", "neutral"],
         ];
-        return `<section class="promise-tab-panel" role="tabpanel" aria-label="${escapeHtml(scenario.title || scenario.id || "Scenario")} progress">
-            <p class="promise-tab-promise">${escapeHtml(scenario.promise || "No promise text loaded.")}</p>
-            <div class="promise-tab-progress">
-                ${progress.map(([label, value, cls]) => `<div class="promise-progress-cell promise-progress-cell--${cls}">
-                    <span>${escapeHtml(label)}</span>
-                    <strong>${escapeHtml(value)}</strong>
-                </div>`).join("")}
-            </div>
-            ${renderScenarioScaleChecks(scenario)}
-            ${renderScenarioEvidenceSections(scenario)}
-        </section>`;
+        return `<div class="promise-tab-progress">
+            ${progress.map(([label, value, cls]) => `<div class="promise-progress-cell promise-progress-cell--${cls}">
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(value)}</strong>
+            </div>`).join("")}
+        </div>`;
     }
 
     function renderScenarioScaleChecks(scenario) {
@@ -1797,27 +1546,108 @@
         </section>`;
     }
 
-    function renderScenarioEvidenceSections(scenario) {
+    function renderPerformancePromiseDetail(scenario) {
+        const target = byId("performance-promise-detail");
+        if (!target) return;
+        if (!scenario) {
+            target.innerHTML = `<p class="muted">No performance promise artifact loaded.</p>`;
+            return;
+        }
+        const status = scenarioStatus(scenario);
+        const filters = performanceBucketFilters(scenario.id);
+        target.innerHTML = `<section class="performance-promise-detail-panel performance-promise-detail-panel--${status.cls}" style="--promise-color:${escapeHtml(performancePromiseColor(scenario.id))}" aria-label="${escapeHtml(scenario.title || scenario.id || "Scenario")} evidence">
+            <div class="performance-promise-detail__header">
+                <span class="performance-dataset-summary">
+                    <i aria-hidden="true"></i>
+                    <strong>${escapeHtml(scenario.title || scenario.id || "Scenario")}</strong>
+                    <span class="status-pill status-pill--${escapeHtml(status.cls)}">${escapeHtml(status.label)}</span>
+                </span>
+                <span class="performance-dataset-pressure">${escapeHtml(formatScenarioPressure(scenario))}</span>
+            </div>
+            ${renderScenarioProgressCells(scenario)}
+            ${renderScenarioScaleChecks(scenario)}
+            ${renderScenarioEvidenceSections(scenario, { filters })}
+        </section>`;
+        renderScenarioFlamegraphs(scenario);
+    }
+
+    function performanceBucketFilters(scenarioId) {
+        state.performanceBucketFilters[scenarioId] = {
+            latency: "",
+            capacity: "",
+            resources: "",
+            profiles: "",
+            implementations: "",
+            ...(state.performanceBucketFilters[scenarioId] || {}),
+        };
+        return state.performanceBucketFilters[scenarioId];
+    }
+
+    function formatScenarioPressure(scenario) {
+        const missCount = Number(scenario.budget_misses || 0);
+        const ceilingCount = Number(scenario.ceilings_reached || 0);
+        return [
+            missCount ? `${formatNumber.format(missCount)} over budget` : "0 over budget",
+            ceilingCount ? `${formatNumber.format(ceilingCount)} ceilings` : "0 ceilings",
+        ].join(" - ");
+    }
+
+    function renderScenarioEvidenceSections(scenario, options = {}) {
         const evidence = scenario.evidence || {};
-        const latencyRows = evidence.latency || [];
-        const capacityRows = evidence.capacity || [];
+        const filters = options.filters || {};
+        const latencyRows = filterScenarioEvidenceRows(evidence.latency || [], filters.latency);
+        const capacityRows = filterScenarioEvidenceRows(evidence.capacity || [], filters.capacity);
+        const resourceRows = filterScenarioEvidenceRows(evidence.resources || [], filters.resources);
+        const profileRows = filterScenarioEvidenceRows(evidence.profiles || [], filters.profiles);
+        const implementationRows = filterScenarioEvidenceRows(scenario.implementations || [], filters.implementations);
         return `<div class="promise-evidence-grid">
-            ${renderScenarioEvidenceChartPair(scenario, latencyRows, capacityRows)}
-            ${renderScenarioLatencyEvidence(latencyRows, { includeChart: false })}
-            ${renderScenarioCapacityEvidence(capacityRows, { includeChart: false })}
-            ${renderScenarioResourceEvidence(evidence.resources || [])}
-            ${renderScenarioProfileEvidence(evidence.profiles || [])}
-            ${renderScenarioImplementationEvidence(scenario.implementations || [])}
+            ${renderPerformanceSectionWithFilter(scenario.id, "latency", filters.latency, "Filter latency tests...", renderScenarioLatencyEvidence(latencyRows, { scenario }))}
+            ${renderPerformanceSectionWithFilter(scenario.id, "capacity", filters.capacity, "Filter capacity checks...", renderScenarioCapacityEvidence(capacityRows, { scenario }))}
+            ${renderPerformanceSectionWithFilter(scenario.id, "resources", filters.resources, "Filter resource profiles...", renderScenarioResourceEvidence(resourceRows, { open: false }))}
+            ${renderPerformanceSectionWithFilter(scenario.id, "profiles", filters.profiles, "Filter flamegraph profiles...", renderScenarioProfileEvidence(profileRows, { open: false, title: "Flamegraph Profiles", tail: renderScenarioFlamegraphBrowser(scenario, filters) }))}
+            ${renderPerformanceSectionWithFilter(scenario.id, "implementations", filters.implementations, "Filter implementation audit...", renderScenarioImplementationEvidence(implementationRows, { open: false }))}
         </div>`;
     }
 
-    function renderScenarioEvidenceChartPair(scenario, latencyRows, capacityRows) {
-        const charts = [
-            renderScenarioLatencyChart(latencyRows, scenario),
-            renderScenarioCapacityChart(capacityRows, scenario),
-        ].filter(Boolean);
-        if (!charts.length) return "";
-        return `<div class="promise-evidence-chart-pair">${charts.join("")}</div>`;
+    function renderPerformanceSectionWithFilter(scenarioId, sectionId, value, placeholder, content) {
+        return `<section class="performance-evidence-section">
+            <div class="performance-section-toolbar">
+                <input class="filter-input" type="search" data-performance-section-filter="${escapeHtml(sectionId)}" data-performance-scenario-id="${escapeHtml(scenarioId)}" value="${escapeHtml(value || "")}" placeholder="${escapeHtml(placeholder)}" />
+            </div>
+            ${content}
+        </section>`;
+    }
+
+    function filterScenarioEvidenceRows(rows, query = "") {
+        return (rows || []).filter((item) => {
+            return matchesPerformanceDatasetSearch(item) && matchesFilter(item, query || "");
+        });
+    }
+
+    function renderScenarioFlamegraphBrowser(scenario, filters = {}) {
+        const profileRows = filterScenarioEvidenceRows(scenario.evidence?.profiles || [], filters.profiles);
+        const profiles = profileRows;
+        const available = profiles.filter((item) => item.available).length;
+        return `<section class="performance-evidence-section performance-flamegraph-section">
+            <h3>Flamegraphs</h3>
+            <p class="performance-panel-caption">${formatNumber.format(available)}/${formatNumber.format(profiles.length)} profiles available for this promise.</p>
+            <div class="flamegraph-layout" data-flamegraph-scenario="${escapeHtml(scenario.id)}">
+                <aside class="panel-card flamegraph-sidebar">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Profiles</h2>
+                            <p>Select a profile to view its flamegraph.</p>
+                        </div>
+                    </div>
+                    <div class="flamegraph-list" data-flamegraph-list="${escapeHtml(scenario.id)}"></div>
+                </aside>
+                <div class="panel-card flamegraph-main">
+                    <div class="flamegraph-content" data-flamegraph-content="${escapeHtml(scenario.id)}">
+                        <p class="muted">Select a profile from the sidebar to view the flamegraph.</p>
+                    </div>
+                </div>
+            </div>
+        </section>`;
     }
 
     function renderScenarioLatencyEvidence(rows, options = {}) {
@@ -1840,7 +1670,7 @@
             open: true,
             headers: ["Test", "Family", "Mean", "Budget", "Ratio", "Signals", "Profiles"],
             rows: body,
-            lead: options.includeChart === false ? "" : renderScenarioLatencyChart(rows),
+            lead: options.includeChart === false ? "" : renderScenarioLatencyChart(rows, options.scenario),
         });
     }
 
@@ -2014,12 +1844,12 @@
             <td>${renderScenarioProfileLinks(item.matching_flamegraphs || [])}</td>
         </tr>`);
         return renderScenarioEvidenceTable({
-            title: "Capacity Checks",
+            title: "Capacity & Failure Ceilings",
             caption: `${formatNumber.format(rows.length)} rows - ${formatNumber.format(ceilings)} ceilings reached`,
             open: rows.length > 0,
             headers: ["Check", "Failure mode", "Last OK", "First failure", "Resource", "Peak working set", "Profiles"],
             rows: body,
-            lead: options.includeChart === false ? "" : renderScenarioCapacityChart(rows),
+            lead: options.includeChart === false ? "" : renderScenarioCapacityChart(rows, options.scenario),
         });
     }
 
@@ -2156,7 +1986,7 @@
             || scenarios.find((item) => item.scenario === row.scenario);
     }
 
-    function renderScenarioResourceEvidence(rows) {
+    function renderScenarioResourceEvidence(rows, options = {}) {
         const worstElapsed = maxMetric(rows, "max_elapsed_ms");
         const body = rows.map((item) => `<tr>
             <td><code>${escapeHtml(item.label || item.id || "-")}</code></td>
@@ -2169,15 +1999,15 @@
             <td>${item.handle_growth == null ? "-" : formatNumber.format(item.handle_growth)}</td>
         </tr>`);
         return renderScenarioEvidenceTable({
-            title: "Resource Probes",
+            title: "Resource Profile Scenarios",
             caption: `${formatNumber.format(rows.length)} probes - worst elapsed ${worstElapsed ? formatMs(worstElapsed) : "-"}`,
-            open: rows.length > 0,
+            open: options.open ?? (rows.length > 0),
             headers: ["Probe", "Focus", "Samples", "Max elapsed", "Peak live", "Working set", "PF growth", "Handle growth"],
             rows: body,
         });
     }
 
-    function renderScenarioProfileEvidence(rows) {
+    function renderScenarioProfileEvidence(rows, options = {}) {
         const available = rows.filter((item) => item.available).length;
         const body = rows.map((item) => `<tr>
             <td><code>${escapeHtml(item.name || item.id || "-")}</code></td>
@@ -2187,15 +2017,16 @@
             <td>${item.available ? '<span class="muted">available</span>' : escapeHtml(item.issue || "-")}</td>
         </tr>`);
         return renderScenarioEvidenceTable({
-            title: "Profiles",
+            title: options.title || "Profiles",
             caption: `${formatNumber.format(available)}/${formatNumber.format(rows.length)} available`,
-            open: rows.length > 0,
+            open: options.open ?? (rows.length > 0),
             headers: ["Profile", "Status", "Families", "Benchmarks", "Action"],
             rows: body,
+            tail: options.tail || "",
         });
     }
 
-    function renderScenarioImplementationEvidence(rows) {
+    function renderScenarioImplementationEvidence(rows, options = {}) {
         const body = rows.map((item) => `<tr>
             <td><span class="pill">${escapeHtml(item.kind || "-")}</span></td>
             <td><code>${escapeHtml(item.label || "-")}</code></td>
@@ -2204,21 +2035,22 @@
             <td>${escapeHtml(item.detail || "-")}</td>
         </tr>`);
         return renderScenarioEvidenceTable({
-            title: "Implementation Audit",
+            title: "Implementations Audit",
             caption: `${formatNumber.format(rows.length)} measurements`,
-            open: false,
+            open: options.open ?? false,
             headers: ["Kind", "Label", "Measurement", "Status", "Detail"],
             rows: body,
         });
     }
 
-    function renderScenarioEvidenceTable({ title, caption, open, headers, rows, lead = "" }) {
+    function renderScenarioEvidenceTable({ title, caption, open, headers, rows, lead = "", tail = "" }) {
         return `<details class="promise-evidence" ${open ? "open" : ""}>
             <summary><span>${escapeHtml(title)}</span><em>${escapeHtml(caption)}</em></summary>
             ${lead}
             <div class="promise-evidence__table">
                 ${renderInlineTable(headers, rows, "No evidence rows loaded.")}
             </div>
+            ${tail}
         </details>`;
     }
 
@@ -2365,34 +2197,6 @@
         };
     }
 
-    function renderPerformancePanelCaptions() {
-        const setCaption = (id, text) => {
-            const target = byId(id);
-            if (target) target.textContent = text;
-        };
-        const searchQuery = byId("search-speed-filter")?.value || "";
-        const editorQuery = byId("slowspots-filter")?.value || "";
-        const resourceQuery = byId("resource-profiles-filter")?.value || "";
-        const selected = selectedPerformancePromise();
-        const searchRows = filteredPerformanceRows((state.searchSpeed || []).filter((item) => rowBelongsToPerformancePromise(item, selected) && matchesFilter(item, searchQuery)));
-        const editorRows = filteredPerformanceRows((state.slowspots || []).filter((item) => rowBelongsToPerformancePromise(item, selected) && matchesFilter(item, editorQuery)));
-        const capacityRows = filterPerformanceScenarioRows((state.capacityReport?.scenarios || []).filter((item) => rowBelongsToPerformancePromise(item, selected)));
-        const resourceRows = filterPerformanceScenarioRows((state.resourceProfiles?.scenarios || []).filter((item) => rowBelongsToPerformancePromise(item, selected) && matchesFilter(item, resourceQuery)));
-        const searchOver = searchRows.filter((item) => budgetRatio(item) > 1).length;
-        const editorOver = editorRows.filter((item) => budgetRatio(item) > 1).length;
-        const bestThroughput = maxMetric(searchRows, "throughput_mb_s");
-        const slowestEditor = Math.max(0, ...editorRows.map(latencyMs).filter(Number.isFinite));
-        const capacityCeilings = capacityRows.filter((item) => item.failure_mode && item.failure_mode !== "not_reached").length;
-        const memoryBound = capacityRows.filter((item) => (item.suspected_limiting_resource || item.first_saturated_resource) === "memory").length;
-        const peakWorkingSet = maxMetric(resourceRows, "max_working_set_bytes");
-        const worstElapsed = maxMetric(resourceRows, "max_elapsed_ms");
-
-        setCaption("search-panel-caption", `${formatNumber.format(searchRows.length)} rows - ${formatNumber.format(searchOver)} over budget - best ${bestThroughput ? `${formatNumber.format(bestThroughput)} MB/s` : "-"}`);
-        setCaption("editor-panel-caption", `${formatNumber.format(editorRows.length)} rows - ${formatNumber.format(editorOver)} over budget - slowest ${slowestEditor ? formatMs(slowestEditor) : "-"}`);
-        setCaption("capacity-panel-caption", `${formatNumber.format(capacityRows.length)} scenarios - ${formatNumber.format(capacityCeilings)} ceilings reached - ${formatNumber.format(memoryBound)} memory-bound`);
-        setCaption("resource-panel-caption", `peak working set ${peakWorkingSet ? formatBytes(peakWorkingSet) : "-"} - worst elapsed ${worstElapsed ? formatMs(worstElapsed) : "-"}`);
-    }
-
     function filterPerformanceScenarioRows(rows) {
         return (rows || []).filter((item) => {
             return matchesPerformanceDatasetSearch(item);
@@ -2495,8 +2299,9 @@
             resourceThreshold,
             resourceBounds,
             pressureGrowth,
+            pressureBounds: buildGrowthScatterBounds(pressureGrowth),
             memoryElapsed,
-            memoryBounds: buildMemoryElapsedBounds(memoryElapsed),
+            memoryBounds: buildGrowthScatterBounds(memoryElapsed),
         };
     }
 
@@ -2675,25 +2480,48 @@
     }
 
     function buildPressureGrowthPoints(scalingItems) {
-        return scalingItems.flatMap((item) => (item.sourceRows || []).map((row, index) => {
-            const pressure = budgetRatio(row);
-            if (!pressure || !Number.isFinite(pressure) || !Number.isFinite(item.value)) return null;
-            const score = pressure + item.value / 2;
-            const promise = performancePromiseForItem(row);
-            return {
-                key: `pressure-growth:${item.key}:${row.name || row.scenario_label || index}`,
-                label: performanceRowLabel(row),
-                detail: `${performanceRowParameterLabel(row)} - ${formatMs(latencyMs(row))} / ${formatMs(row.threshold_ms)} - ${item.detail}`,
-                x: pressure,
-                y: item.value,
-                score,
-                profile: (row.matching_flamegraphs || [])[0] || item.profile,
-                promiseId: promise.id,
-                promiseTitle: promise.title,
-                color: promise.color,
-                tone: pressure >= 1 && item.value >= 2 ? "triage" : pressure >= 1 ? "local" : item.value >= 2 ? "architecture" : "good",
-            };
-        })).filter(Boolean);
+        return scalingItems.flatMap((item) => {
+            const rows = [...(item.sourceRows || [])]
+                .map((row) => ({
+                    row,
+                    workloadValue: performanceRowParameter(row),
+                    workloadLabel: performanceRowParameterLabel(row),
+                    pressure: budgetRatio(row),
+                    elapsedMs: latencyMs(row),
+                    thresholdMs: Number(row.threshold_ms || 0),
+                }))
+                .filter((point) => point.workloadValue > 0 && point.pressure > 0 && point.elapsedMs > 0)
+                .sort((left, right) => left.workloadValue - right.workloadValue);
+            if (rows.length < 2) return [];
+            const baseline = rows[0];
+            const maxLoad = Math.max(...rows.map((point) => point.workloadValue), baseline.workloadValue);
+            const baselineLatencyPerUnit = baseline.elapsedMs / baseline.workloadValue;
+            return rows.map((current, index) => {
+                const loadRatio = current.workloadValue / maxLoad;
+                const latencyPerUnit = current.elapsedMs / current.workloadValue;
+                const y = latencyPerUnit / baselineLatencyPerUnit;
+                const x = loadRatio;
+                if (!Number.isFinite(x) || !Number.isFinite(y) || x <= 0 || y <= 0) return null;
+                const promise = performancePromiseForItem(current.row);
+                return {
+                    key: `pressure-growth:${item.key}:point:${index}`,
+                    label: `${performanceRowLabel(current.row)} ${current.workloadLabel}`,
+                    detail: `${current.workloadLabel} - ${formatMs(current.elapsedMs)} / ${formatMs(current.thresholdMs)} - ${formatRatio(current.pressure)} budget`,
+                    x,
+                    y,
+                    score: x + y,
+                    rawXLabel: `${current.workloadLabel} of ${formatStressLabel(maxLoad)}`,
+                    rawYLabel: `${formatMs(latencyPerUnit)} per unit vs ${formatMs(baselineLatencyPerUnit)} baseline`,
+                    rawXName: "Load point",
+                    rawYName: "Latency/unit",
+                    profile: (current.row.matching_flamegraphs || [])[0] || item.profile,
+                    promiseId: promise.id,
+                    promiseTitle: promise.title,
+                    color: promise.color,
+                    tone: x >= 0.8 && y >= 1 ? "triage" : x >= 0.8 ? "local" : y >= 1 ? "architecture" : "good",
+                };
+            }).filter(Boolean);
+        });
     }
 
     function buildMemoryElapsedPoints() {
@@ -2701,36 +2529,63 @@
             .flatMap((item) => {
                 const promise = performancePromiseForItem(item);
                 const samples = (item.samples || [])
-                    .map((sample, index) => {
-                        const x = Number(sample.working_set_bytes || 0);
-                        const y = Number(sample.elapsed_ms || 0);
-                        if (!x || !y) return null;
-                        const workload = sample.workload_label || formatStressLabel(sample.workload_value || index + 1);
+                    .map((sample, index) => ({
+                        sample,
+                        index,
+                        workloadValue: Number(sample.workload_value || 0),
+                        workingSet: Number(sample.working_set_bytes || 0),
+                        elapsedMs: Number(sample.elapsed_ms || 0),
+                    }))
+                    .filter((point) => point.workloadValue > 0 && point.workingSet > 0 && point.elapsedMs > 0)
+                    .sort((left, right) => left.workloadValue - right.workloadValue);
+                if (samples.length >= 2) {
+                    const baseline = samples[0];
+                    const maxLoad = Math.max(...samples.map((point) => point.workloadValue), baseline.workloadValue);
+                    const baselineMemoryPerUnit = baseline.workingSet / baseline.workloadValue;
+                    const baselineElapsedPerUnit = baseline.elapsedMs / baseline.workloadValue;
+                    return samples.map((current, index) => {
+                        const x = current.workloadValue / maxLoad;
+                        const memoryPerUnit = current.workingSet / current.workloadValue;
+                        const elapsedPerUnit = current.elapsedMs / current.workloadValue;
+                        const memoryCost = memoryPerUnit / baselineMemoryPerUnit;
+                        const timeCost = elapsedPerUnit / baselineElapsedPerUnit;
+                        const y = Math.max(memoryCost, timeCost);
+                        if (!Number.isFinite(x) || !Number.isFinite(y) || x <= 0 || y <= 0) return null;
+                        const to = current.sample.workload_label || formatStressLabel(current.workloadValue);
+                        const limitingCost = timeCost >= memoryCost ? `time ${formatRatio(timeCost)}` : `memory ${formatRatio(memoryCost)}`;
                         return {
-                            key: `memory-elapsed:${item.scenario || item.scenario_label}:sample:${index}`,
-                            label: `${compactScenarioLabel(item)} ${workload}`,
-                            detail: `${workload} - ${formatBytes(x)} working - ${formatMs(y)}`,
+                            key: `memory-elapsed:${item.scenario || item.scenario_label}:point:${index}`,
+                            label: `${compactScenarioLabel(item)} ${to}`,
+                            detail: `${to} - ${formatMs(current.elapsedMs)} - ${formatBytes(current.workingSet)} working - limiting ${limitingCost}`,
                             x,
                             y,
-                            score: Math.log10(Math.max(x, 1)) + Math.log10(Math.max(y, 1)),
+                            score: x + y,
+                            rawXLabel: `${to} of ${formatStressLabel(maxLoad)}`,
+                            rawYLabel: `${formatRatio(memoryCost)} memory/unit; ${formatRatio(timeCost)} time/unit`,
+                            rawXName: "Load point",
+                            rawYName: "Resource/unit",
                             promiseId: promise.id,
                             promiseTitle: promise.title,
                             color: promise.color,
-                            tone: "good",
+                            tone: x >= 0.8 && y >= 1 ? "triage" : x >= 0.8 ? "local" : y >= 1 ? "architecture" : "good",
                         };
                     })
-                    .filter(Boolean);
-                if (samples.length) return samples;
+                        .filter(Boolean);
+                }
                 const x = Number(item.max_working_set_bytes || 0);
                 const y = Number(item.max_elapsed_ms || 0);
                 if (!x || !y) return null;
                 return [{
                     key: `memory-elapsed:${item.scenario || item.scenario_label}`,
                     label: compactScenarioLabel(item),
-                    detail: `${formatBytes(x)} working - ${formatMs(y)}`,
-                    x,
-                    y,
-                    score: Math.log10(Math.max(x, 1)) + Math.log10(Math.max(y, 1)),
+                    detail: `${formatBytes(x)} working - ${formatMs(y)}; no comparable load step`,
+                    x: 1,
+                    y: 1,
+                    score: 2,
+                    rawXLabel: formatBytes(x),
+                    rawYLabel: formatMs(y),
+                    rawXName: "Working set",
+                    rawYName: "Elapsed",
                     promiseId: promise.id,
                     promiseTitle: promise.title,
                     color: promise.color,
@@ -2740,20 +2595,12 @@
             .filter(Boolean);
     }
 
-    function buildMemoryElapsedBounds(points) {
-        const xValues = points.map((point) => point.x).filter((value) => value > 0).sort((left, right) => left - right);
-        const yValues = points.map((point) => point.y).filter((value) => value > 0).sort((left, right) => left - right);
-        const xMedian = percentileValue(xValues, 0.5) || 1;
-        const yMedian = percentileValue(yValues, 0.5) || 1;
-        const xThreshold = xMedian * 2;
-        const yThreshold = yMedian * 2;
+    function buildGrowthScatterBounds(points) {
+        const xValues = points.map((point) => point.x).filter((value) => value > 0);
+        const yValues = points.map((point) => point.y).filter((value) => value > 0);
         return {
-            xMin: Math.max(1, Math.min(...xValues, xMedian) / 1.5),
-            xMax: Math.max(xThreshold * 1.4, ...xValues, 1),
-            xThreshold,
-            yMin: Math.max(0.1, Math.min(...yValues, yMedian) / 1.5),
-            yMax: Math.max(yThreshold * 1.4, ...yValues, 1),
-            yThreshold,
+            xMax: Math.max(1, ...xValues, 1) * 1.08,
+            yMax: Math.max(2, ...yValues, 1) * 1.08,
         };
     }
 
@@ -2819,17 +2666,27 @@
         const baseline = 148;
         const top = 24;
         const bucketCount = 22;
-        const bins = Array.from({ length: bucketCount }, () => 0);
-        transformed.forEach((value) => {
-            const index = Math.max(0, Math.min(bucketCount - 1, Math.floor(value * bucketCount)));
-            bins[index] += 1;
+        const bins = Array.from({ length: bucketCount }, () => []);
+        items.forEach((item) => {
+            const index = Math.max(0, Math.min(bucketCount - 1, Math.floor(transform(item.value) * bucketCount)));
+            bins[index].push(item);
         });
-        const maxBin = Math.max(...bins, 1);
-        const bars = bins.map((count, index) => {
+        const maxBin = Math.max(...bins.map((bin) => bin.length), 1);
+        const binPanels = bins.map((bin, index) => renderPerformanceDistributionBinPanel(bin, index, options)).join("");
+        const bars = bins.map((bin, index) => {
+            const count = bin.length;
             const x = left + (index / bucketCount) * (right - left);
             const barWidth = ((right - left) / bucketCount) - 3;
             const barHeight = (count / maxBin) * 76;
-            return `<rect x="${x.toFixed(1)}" y="${(baseline - barHeight).toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barHeight.toFixed(1)}" rx="3" class="risk-curve__bar"></rect>`;
+            const low = performanceScaleInverse(index / bucketCount, bounds);
+            const high = performanceScaleInverse((index + 1) / bucketCount, bounds);
+            const detail = [
+                `${formatNumber.format(count)} ${count === 1 ? "item" : "items"}`,
+                `${options.valueLabel(low)} to ${options.valueLabel(high)}`,
+            ].filter(Boolean).join(" - ");
+            const leftPct = ((x + barWidth / 2) / width) * 100;
+            const topPct = ((baseline - Math.max(barHeight, 10)) / height) * 100;
+            return `<rect x="${x.toFixed(1)}" y="${(baseline - barHeight).toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barHeight.toFixed(1)}" rx="3" class="risk-curve__bar" tabindex="0" role="button" aria-label="${escapeHtml(detail)}" data-performance-bin-index="${index}" data-performance-bin-left="${leftPct.toFixed(2)}" data-performance-bin-top="${topPct.toFixed(2)}"></rect>`;
         }).join("");
         const density = (value) => Math.exp(-0.5 * Math.pow((value - meanTransformed) / stdDevTransformed, 2));
         const maxDensity = Math.max(...Array.from({ length: 80 }, (_, index) => density(index / 79)), 1);
@@ -2855,11 +2712,36 @@
                 <path d="M ${points.join(" L ")}" class="risk-curve__line"></path>
                 <circle cx="${meanX.toFixed(1)}" cy="${baseline - 6}" r="4" class="risk-curve__mean"></circle>
             </svg>
+            <div class="performance-bin-popover" hidden></div>
+            <div class="performance-bin-panels" hidden>${binPanels}</div>
             <div class="risk-curve-card__stats">
                 <span><strong>${formatNumber.format(total)}</strong> items</span>
                 <span><strong>${escapeHtml(options.valueLabel(meanRaw))}</strong> mean</span>
                 <span><strong>${escapeHtml(options.valueLabel(stdDevRaw))}</strong> std dev</span>
             </div>
+        </div>`;
+    }
+
+    function renderPerformanceDistributionBinPanel(bin, index, options) {
+        const ordered = [...bin].sort((left, right) => right.value - left.value);
+        const rows = ordered.map((item) => {
+            const color = item.color || performancePromiseColor(item.promiseId || item.label);
+            const promise = item.promiseTitle || item.promiseId || "Unmapped";
+            return `<div class="performance-bin-row">
+                <span class="performance-bin-row__main">
+                    <strong title="${escapeHtml(item.label)}">${escapeHtml(shortenLabel(item.label || "Item", 42))}</strong>
+                    <em>${escapeHtml([item.detail, item.resource || item.family].filter(Boolean).join(" - "))}</em>
+                </span>
+                <span class="performance-bin-row__value">${escapeHtml(item.valueLabel || options.valueLabel(item.value))}</span>
+                <i class="performance-bin-row__promise" style="--promise-color:${escapeHtml(color)}" title="${escapeHtml(promise)}"></i>
+            </div>`;
+        }).join("");
+        return `<div data-performance-bin-panel="${index}">
+            <div class="performance-bin-popover__header">
+                <strong>${formatNumber.format(bin.length)} ${bin.length === 1 ? "item" : "items"}</strong>
+                <span>${escapeHtml(options.title)}</span>
+            </div>
+            <div class="performance-bin-popover__list">${rows || `<p>No items in this bucket.</p>`}</div>
         </div>`;
     }
 
@@ -2903,7 +2785,7 @@
                 </div>`).join("")}
             </div>
             ${drivers.length ? `<div class="signal-bars">${drivers.map(([driver, count]) => `
-                <div class="signal-bars__row">
+                <div class="signal-bars__row" title="${escapeHtml(`${driver}: ${formatNumber.format(count)} ${count === 1 ? "item" : "items"}`)}">
                     <span>${escapeHtml(driver)}</span>
                     <div class="signal-bars__track"><span class="signal-bars__fill" style="width:${(count / maxDriver) * 100}%"></span></div>
                     <span class="signal-bars__count">${formatNumber.format(count)}</span>
@@ -2927,6 +2809,76 @@
         </div>`;
     }
 
+    function attachPerformanceDistributionHandlers(root) {
+        root?.querySelectorAll(".performance-dist-curve").forEach((card) => {
+            const popover = card.querySelector(".performance-bin-popover");
+            const showPopover = (bar) => {
+                if (!bar || !popover) return;
+                const index = bar.dataset.performanceBinIndex;
+                const panel = card.querySelector(`[data-performance-bin-panel="${CSS.escape(index)}"]`);
+                if (!panel) return;
+                card.querySelectorAll(".risk-curve__bar").forEach((item) => {
+                    item.classList.toggle("is-active", item === bar);
+                });
+                popover.innerHTML = panel.innerHTML;
+                popover.hidden = false;
+                const left = Number(bar.dataset.performanceBinLeft || 50);
+                const top = Number(bar.dataset.performanceBinTop || 50);
+                popover.style.left = `${left}%`;
+                popover.style.top = `${top}%`;
+                popover.classList.remove(
+                    "performance-bin-popover--left",
+                    "performance-bin-popover--top",
+                    "performance-bin-popover--bottom"
+                );
+                const cardRect = card.getBoundingClientRect();
+                const anchorX = cardRect.left + (cardRect.width * left) / 100;
+                const rightEdge = Math.min(window.innerWidth, cardRect.right);
+                const leftEdge = Math.max(0, cardRect.left);
+                const spaceRight = rightEdge - anchorX;
+                const spaceLeft = anchorX - leftEdge;
+                if (spaceRight < popover.offsetWidth + 16 && spaceLeft > spaceRight) {
+                    popover.classList.add("performance-bin-popover--left");
+                }
+                if (top < 22) {
+                    popover.classList.add("performance-bin-popover--top");
+                } else if (top > 70) {
+                    popover.classList.add("performance-bin-popover--bottom");
+                }
+            };
+            const hidePopover = () => {
+                if (popover) popover.hidden = true;
+                card.querySelectorAll(".risk-curve__bar").forEach((item) => item.classList.remove("is-active"));
+            };
+            card.querySelectorAll(".risk-curve__bar[data-performance-bin-index]").forEach((bar) => {
+                bar.addEventListener("click", (event) => {
+                    event.stopPropagation();
+                    const isOpen = !popover?.hidden && bar.classList.contains("is-active");
+                    if (isOpen) {
+                        hidePopover();
+                    } else {
+                        showPopover(bar);
+                    }
+                });
+                bar.addEventListener("keydown", (event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        showPopover(bar);
+                    }
+                    if (event.key === "Escape") {
+                        hidePopover();
+                        bar.blur();
+                    }
+                });
+            });
+            card.addEventListener("click", (event) => {
+                if (!event.target.closest(".risk-curve__bar") && !event.target.closest(".performance-bin-popover")) {
+                    hidePopover();
+                }
+            });
+        });
+    }
+
     function normalisePerformanceBounds(values, bounds = {}) {
         const finite = values.filter((value) => Number.isFinite(value) && value > 0);
         const scale = bounds.scale || "linear";
@@ -2944,8 +2896,42 @@
         return Math.max(0, Math.min(1, (value - bounds.min) / Math.max(bounds.max - bounds.min, 0.0001)));
     }
 
+    function performanceScaleInverse(value, bounds) {
+        const t = Math.max(0, Math.min(1, value));
+        if (bounds.scale === "log") {
+            const min = Math.max(bounds.min, 0.000001);
+            const max = Math.max(bounds.max, min * 1.01);
+            return Math.pow(10, Math.log10(min) + t * (Math.log10(max) - Math.log10(min)));
+        }
+        return bounds.min + t * Math.max(bounds.max - bounds.min, 0.0001);
+    }
+
     function renderPerformanceScatterPanel(options) {
-        const points = (options.points || []).filter((point) => Number.isFinite(point.x) && point.x > 0 && Number.isFinite(point.y) && point.y > 0);
+        const rawPoints = (options.points || []).filter((point) => Number.isFinite(point.x) && point.x > 0 && Number.isFinite(point.y) && point.y > 0);
+        const normalized = options.normalized === true;
+        const normalizeAxisValue = (value, axis) => {
+            if (!normalized) return value;
+            const threshold = Number(axis.threshold || 0);
+            return threshold > 0 ? value / threshold : value;
+        };
+        const xOptions = normalized ? normalizedScatterAxis(options.x) : options.x;
+        const yOptions = normalized ? normalizedScatterAxis(options.y) : options.y;
+        const points = rawPoints.map((point) => {
+            const xValue = normalizeAxisValue(point.x, options.x);
+            const yValue = normalizeAxisValue(point.y, options.y);
+            return {
+                ...point,
+                rawX: point.x,
+                rawY: point.y,
+                rawXLabel: point.rawXLabel || options.x.valueLabel(point.x),
+                rawYLabel: point.rawYLabel || options.y.valueLabel(point.y),
+                rawXName: point.rawXName || options.x.rawLabel || options.x.label || "Raw X",
+                rawYName: point.rawYName || options.y.rawLabel || options.y.label || "Raw Y",
+                x: xValue,
+                y: yValue,
+                score: normalized ? xValue + yValue : point.score,
+            };
+        });
         if (!points.length) {
             return `<section class="panel-card ll-plot-card performance-scatter-card">
                 <div class="panel-card__header"><div><h3>${escapeHtml(options.title)}</h3><p>${escapeHtml(options.caption)}</p></div></div>
@@ -2957,12 +2943,12 @@
         const margin = { left: 74, right: 28, top: 32, bottom: 58 };
         const plotWidth = width - margin.left - margin.right;
         const plotHeight = height - margin.top - margin.bottom;
-        const xBounds = normalisePerformanceBounds(points.map((point) => point.x).concat(options.x.threshold || []), options.x);
-        const yBounds = normalisePerformanceBounds(points.map((point) => point.y).concat(options.y.threshold || []), options.y);
+        const xBounds = normalisePerformanceBounds(points.map((point) => point.x).concat(xOptions.threshold || []), xOptions);
+        const yBounds = normalisePerformanceBounds(points.map((point) => point.y).concat(yOptions.threshold || []), yOptions);
         const x = (value) => margin.left + performanceScaleTransform(value, xBounds) * plotWidth;
         const y = (value) => margin.top + (1 - performanceScaleTransform(value, yBounds)) * plotHeight;
-        const xCut = x(options.x.threshold);
-        const yCut = y(options.y.threshold);
+        const xCut = x(xOptions.threshold);
+        const yCut = y(yOptions.threshold);
         const ranked = [...points].sort((left, right) => Number(right.score || 0) - Number(left.score || 0)).slice(0, 10);
         const rankedKeys = new Set(ranked.map((point) => point.key));
         const quadrantLabels = (options.quadrants || []).map((quadrant) => {
@@ -2975,16 +2961,16 @@
         }).join("");
         const pointNodes = points.map((point, index) => {
             const radius = Math.max(4, Math.min(11, 3 + Number(point.score || 0)));
-            const tone = point.tone || (point.x >= options.x.threshold && point.y >= options.y.threshold ? "triage" : point.x >= options.x.threshold ? "local" : point.y >= options.y.threshold ? "architecture" : "good");
+            const tone = point.tone || (point.x >= xOptions.threshold && point.y >= yOptions.threshold ? "triage" : point.x >= xOptions.threshold ? "local" : point.y >= yOptions.threshold ? "architecture" : "good");
             const left = (x(point.x) / width) * 100;
             const top = (y(point.y) / height) * 100;
-            return `<g class="ll-point is-${tone} ${rankedKeys.has(point.key) ? "is-top-risk" : ""}" tabindex="0" role="button" style="--point-color:${escapeHtml(point.color || performancePromiseColor(point.promiseId || point.label))}" data-scatter-point-index="${index}" data-point-left="${left.toFixed(2)}" data-point-top="${top.toFixed(2)}" data-point-label="${escapeHtml(point.label)}" data-point-detail="${escapeHtml(point.detail || "")}" data-point-x-label="${escapeHtml(options.x.valueLabel(point.x))}" data-point-y-label="${escapeHtml(options.y.valueLabel(point.y))}" data-point-score="${escapeHtml(formatNumber.format(point.score || 0))}" data-point-profile="${escapeHtml(point.profile || "")}" data-point-promise="${escapeHtml(point.promiseTitle || point.promiseId || "Unmapped")}" aria-label="${escapeHtml(point.label)}">
-                <circle cx="${x(point.x).toFixed(1)}" cy="${y(point.y).toFixed(1)}" r="${radius.toFixed(1)}"><title>${escapeHtml(`${point.label}: ${options.x.valueLabel(point.x)} x ${options.y.valueLabel(point.y)}`)}</title></circle>
+            return `<g class="ll-point is-${tone} ${rankedKeys.has(point.key) ? "is-top-risk" : ""}" tabindex="0" role="button" style="--point-color:${escapeHtml(point.color || performancePromiseColor(point.promiseId || point.label))}" data-scatter-point-index="${index}" data-point-left="${left.toFixed(2)}" data-point-top="${top.toFixed(2)}" data-point-label="${escapeHtml(point.label)}" data-point-detail="${escapeHtml(point.detail || "")}" data-point-x-label="${escapeHtml(xOptions.valueLabel(point.x))}" data-point-y-label="${escapeHtml(yOptions.valueLabel(point.y))}" data-point-x-raw-label="${escapeHtml(point.rawXLabel || "")}" data-point-y-raw-label="${escapeHtml(point.rawYLabel || "")}" data-point-x-name="${escapeHtml(xOptions.label || "X")}" data-point-y-name="${escapeHtml(yOptions.label || "Y")}" data-point-x-raw-name="${escapeHtml(point.rawXName || "Raw X")}" data-point-y-raw-name="${escapeHtml(point.rawYName || "Raw Y")}" data-point-score="${escapeHtml(formatRatio(point.score || 0))}" data-point-profile="${escapeHtml(point.profile || "")}" data-point-promise="${escapeHtml(point.promiseTitle || point.promiseId || "Unmapped")}" aria-label="${escapeHtml(point.label)}">
+                <circle cx="${x(point.x).toFixed(1)}" cy="${y(point.y).toFixed(1)}" r="${radius.toFixed(1)}"><title>${escapeHtml(`${point.label}: ${xOptions.valueLabel(point.x)} x ${yOptions.valueLabel(point.y)}`)}</title></circle>
             </g>`;
         }).join("");
         const rankedRows = ranked.map((point, index) => {
             const pointIndex = points.indexOf(point);
-            const content = `<span>${index + 1}</span><code>${escapeHtml(shortenLabel(point.label))}</code><strong>${escapeHtml(formatNumber.format(point.score || 0))}</strong>`;
+            const content = `<span>${index + 1}</span><code>${escapeHtml(shortenLabel(point.label))}</code><strong>${escapeHtml(formatRatio(point.score || 0))}</strong>`;
             return `<button type="button" class="ll-ranked-row" data-scatter-point-index="${pointIndex}">${content}</button>`;
         }).join("");
         return `<section class="panel-card ll-plot-card performance-scatter-card" id="${escapeHtml(options.id)}">
@@ -3005,14 +2991,14 @@
                     <line class="ll-threshold" x1="${margin.left}" x2="${margin.left + plotWidth}" y1="${yCut}" y2="${yCut}"></line>
                     <line class="ll-axis" x1="${margin.left}" x2="${margin.left}" y1="${margin.top}" y2="${margin.top + plotHeight}"></line>
                     <line class="ll-axis" x1="${margin.left}" x2="${margin.left + plotWidth}" y1="${margin.top + plotHeight}" y2="${margin.top + plotHeight}"></line>
-                    <text class="ll-axis-label" x="${margin.left + plotWidth / 2}" y="${height - 16}">${escapeHtml(options.x.label)}</text>
-                    <text class="ll-axis-label ll-axis-label--y" x="20" y="${margin.top + plotHeight / 2}">${escapeHtml(options.y.label)}</text>
-                    <text class="ll-tick" x="${x(xBounds.min)}" y="${height - 38}">${escapeHtml(options.x.valueLabel(xBounds.min))}</text>
-                    <text class="ll-tick" x="${x(options.x.threshold)}" y="${height - 38}">${escapeHtml(options.x.valueLabel(options.x.threshold))}</text>
-                    <text class="ll-tick" x="${x(xBounds.max)}" y="${height - 38}">${escapeHtml(options.x.valueLabel(xBounds.max))}</text>
-                    <text class="ll-tick" x="${margin.left - 28}" y="${y(yBounds.max) + 4}">${escapeHtml(options.y.valueLabel(yBounds.max))}</text>
-                    <text class="ll-tick" x="${margin.left - 28}" y="${y(options.y.threshold) + 4}">${escapeHtml(options.y.valueLabel(options.y.threshold))}</text>
-                    <text class="ll-tick" x="${margin.left - 28}" y="${y(yBounds.min) + 4}">${escapeHtml(options.y.valueLabel(yBounds.min))}</text>
+                    <text class="ll-axis-label" x="${margin.left + plotWidth / 2}" y="${height - 16}">${escapeHtml(xOptions.label)}</text>
+                    <text class="ll-axis-label ll-axis-label--y" x="20" y="${margin.top + plotHeight / 2}">${escapeHtml(yOptions.label)}</text>
+                    <text class="ll-tick" x="${x(xBounds.min)}" y="${height - 38}">${escapeHtml(xOptions.valueLabel(xBounds.min))}</text>
+                    <text class="ll-tick" x="${x(xOptions.threshold)}" y="${height - 38}">${escapeHtml(xOptions.valueLabel(xOptions.threshold))}</text>
+                    <text class="ll-tick" x="${x(xBounds.max)}" y="${height - 38}">${escapeHtml(xOptions.valueLabel(xBounds.max))}</text>
+                    <text class="ll-tick" x="${margin.left - 28}" y="${y(yBounds.max) + 4}">${escapeHtml(yOptions.valueLabel(yBounds.max))}</text>
+                    <text class="ll-tick" x="${margin.left - 28}" y="${y(yOptions.threshold) + 4}">${escapeHtml(yOptions.valueLabel(yOptions.threshold))}</text>
+                    <text class="ll-tick" x="${margin.left - 28}" y="${y(yBounds.min) + 4}">${escapeHtml(yOptions.valueLabel(yBounds.min))}</text>
                     ${pointNodes}
                 </svg>
                 <div class="ll-popover" hidden></div>
@@ -3022,6 +3008,19 @@
                 </div>
             </div>
         </section>`;
+    }
+
+    function normalizedScatterAxis(axis) {
+        const threshold = Number(axis.threshold || 0);
+        const normalise = (value) => threshold > 0 ? value / threshold : value;
+        return {
+            ...axis,
+            min: axis.min == null ? axis.min : normalise(axis.min),
+            max: axis.max == null ? axis.max : normalise(axis.max),
+            threshold: 1,
+            scale: "linear",
+            valueLabel: formatRatio,
+        };
     }
 
     function attachPerformanceScatterHandlers(root) {
@@ -3050,8 +3049,10 @@
                 popover.innerHTML = `<strong title="${escapeHtml(point.dataset.pointLabel || "")}">${escapeHtml(point.dataset.pointLabel || "")}</strong>
                     ${point.dataset.pointDetail ? `<p>${escapeHtml(point.dataset.pointDetail)}</p>` : ""}
                     <div><span>Promise</span><b>${escapeHtml(point.dataset.pointPromise || "Unmapped")}</b></div>
-                    <div><span>X</span><b>${escapeHtml(point.dataset.pointXLabel || "-")}</b></div>
-                    <div><span>Y</span><b>${escapeHtml(point.dataset.pointYLabel || "-")}</b></div>
+                    <div><span>${escapeHtml(point.dataset.pointXName || "X")}</span><b>${escapeHtml(point.dataset.pointXLabel || "-")}</b></div>
+                    <div><span>${escapeHtml(point.dataset.pointYName || "Y")}</span><b>${escapeHtml(point.dataset.pointYLabel || "-")}</b></div>
+                    ${point.dataset.pointXRawLabel ? `<div><span>${escapeHtml(point.dataset.pointXRawName || "Raw X")}</span><b>${escapeHtml(point.dataset.pointXRawLabel)}</b></div>` : ""}
+                    ${point.dataset.pointYRawLabel ? `<div><span>${escapeHtml(point.dataset.pointYRawName || "Raw Y")}</span><b>${escapeHtml(point.dataset.pointYRawLabel)}</b></div>` : ""}
                     <div><span>Score</span><b>${escapeHtml(point.dataset.pointScore || "-")}</b></div>`;
             };
             card.querySelectorAll(".ll-point").forEach((point) => {
@@ -5061,62 +5062,51 @@
         return `<div class="pill">${escapeHtml(item.name)}: ${formatNumber.format(item.mean_ms)} ms mean, ${dispersion}</div>`;
     }
 
-    function renderFlamegraphs() {
-        const container = byId("flamegraph-list");
-        if (!container) return;
-
-        if (!state.flamegraphs || !state.flamegraphs.length) {
-            container.innerHTML = '<p class="muted">No flamegraphs loaded.</p>';
-            byId("flamegraph-content").innerHTML = '<p class="muted">Generate flamegraphs using <code>open-overview.ps1 -Flamegraph</code> in an Administrator terminal.</p>';
-            return;
-        }
-
-        const selectedPromise = selectedPerformancePromise();
-        const profileIds = new Set((selectedPromise?.evidence?.profiles || []).map((item) => item.id).filter(Boolean));
-        const flamegraphs = selectedPromise && profileIds.size
-            ? state.flamegraphs.filter((item) => profileIds.has(item.id))
-            : state.flamegraphs;
-        if (!flamegraphs.length) {
-            container.innerHTML = '<p class="muted">No flamegraphs match this promise.</p>';
-            byId("flamegraph-content").innerHTML = '<p class="muted">No matching profile SVG is listed for the selected promise.</p>';
-            return;
-        }
-        if (!flamegraphs.some((item) => item.id === state.selectedFlamegraph)) {
-            state.selectedFlamegraph = flamegraphs[0].id;
-            loadSelectedFlamegraph();
-        }
-
-        container.innerHTML = flamegraphs.map(item => {
-            const isActive = state.selectedFlamegraph === item.id;
-            const isMissing = !item.available;
-            return `<div class="flamegraph-item ${isActive ? 'is-active' : ''} ${isMissing ? 'is-error' : ''}" data-id="${escapeHtml(item.id)}">
-                <h3>${escapeHtml(item.name)}</h3>
-                <p>${escapeHtml(isMissing ? (item.issue || "Not generated") : item.id)}</p>
-            </div>`;
-        }).join("");
-
-        container.querySelectorAll(".flamegraph-item").forEach(el => {
-            el.addEventListener("click", () => {
-                const id = el.dataset.id;
-                state.selectedFlamegraph = id;
-                renderFlamegraphs();
-                loadSelectedFlamegraph();
-            });
-        });
-
-        if (state.selectedFlamegraph === null && flamegraphs.length > 0) {
-            state.selectedFlamegraph = flamegraphs[0].id;
-            renderFlamegraphs();
-            loadSelectedFlamegraph();
-        }
+    function scenarioFlamegraphs(scenario) {
+        const filters = performanceBucketFilters(scenario.id);
+        const profileRows = filterScenarioEvidenceRows(scenario.evidence?.profiles || [], filters.profiles);
+        const profileIds = new Set(profileRows.flatMap((item) => [item.id, item.name]).filter(Boolean));
+        if (!profileIds.size) return [];
+        return (state.flamegraphs || []).filter((item) => profileIds.has(item.id) || profileIds.has(item.name));
     }
 
-    async function loadSelectedFlamegraph() {
-        const content = byId("flamegraph-content");
-        const selected = state.flamegraphs.find(f => f.id === state.selectedFlamegraph);
+    function renderScenarioFlamegraphs(scenario) {
+        const list = document.querySelector(`[data-flamegraph-list="${CSS.escape(scenario.id)}"]`);
+        const content = document.querySelector(`[data-flamegraph-content="${CSS.escape(scenario.id)}"]`);
+        if (!list || !content) return;
 
-        if (!selected) return;
+        if (!state.flamegraphs || !state.flamegraphs.length) {
+            list.innerHTML = '<p class="muted">No flamegraphs loaded.</p>';
+            content.innerHTML = '<p class="muted">Generate flamegraphs using <code>open-overview.ps1 -Flamegraph</code> in an Administrator terminal.</p>';
+            return;
+        }
 
+        const flamegraphs = scenarioFlamegraphs(scenario);
+        if (!flamegraphs.length) {
+            list.innerHTML = '<p class="muted">No flamegraphs match this promise.</p>';
+            content.innerHTML = '<p class="muted">No matching profile SVG is listed for this promise.</p>';
+            return;
+        }
+
+        if (!flamegraphs.some((item) => item.id === state.selectedFlamegraphsByScenario[scenario.id])) {
+            state.selectedFlamegraphsByScenario[scenario.id] = flamegraphs[0].id;
+        }
+        const selectedId = state.selectedFlamegraphsByScenario[scenario.id];
+        const selected = flamegraphs.find((item) => item.id === selectedId) || flamegraphs[0];
+
+        list.innerHTML = flamegraphs.map((item) => {
+            const isActive = selected.id === item.id;
+            const isMissing = !item.available;
+            return `<button type="button" class="flamegraph-item ${isActive ? 'is-active' : ''} ${isMissing ? 'is-error' : ''}" data-flamegraph-id="${escapeHtml(item.id)}">
+                <h3>${escapeHtml(item.name)}</h3>
+                <p>${escapeHtml(isMissing ? (item.issue || "Not generated") : item.id)}</p>
+            </button>`;
+        }).join("");
+
+        loadFlamegraphInto(content, selected);
+    }
+
+    async function loadFlamegraphInto(content, selected) {
         if (!selected.available) {
             content.innerHTML = `<div class="flamegraph-error">
                 <h3>${escapeHtml(selected.name)}</h3>
@@ -5341,9 +5331,6 @@
         document.querySelectorAll(".tab-panel").forEach((item) => item.classList.remove("is-active"));
         button.classList.add("is-active");
         panel.classList.add("is-active");
-        if (tabId === "performance-review") {
-            renderFlamegraphs();
-        }
         if (tabId === "app-package") {
             renderAppPackage();
         }
@@ -5361,25 +5348,17 @@
         renderQualityOverview();
         renderQualityDistribution();
         renderCloneDistribution();
-        renderSlowspots();
-        renderSearchSpeed();
-        renderSpeedReport();
-        renderCapacityReport();
-        renderResourceProfiles();
         renderPerformanceReviewCoverage();
         renderPerformanceOverview();
         renderPerformanceFilterOptions();
         renderPerformanceHeadlineCharts();
         renderPerformanceCuratedLists();
-        renderPerformancePanelCaptions();
-        renderPerformanceDatasetView();
         renderClones();
         renderEscapeHatches();
         renderCorrectness();
         renderCorrectnessMatrix();
         renderLocalityLeverage();
         renderMap();
-        renderFlamegraphs();
         renderAppPackage();
         renderRunLog();
     }
@@ -6038,19 +6017,13 @@
     }
 
     function renderPerformanceDatasetView() {
-        renderFlamegraphs();
+        renderPerformancePromiseDetail(selectedPerformancePromise());
     }
 
     function rerenderPerformanceEvidence() {
-        renderSearchSpeed();
-        renderSlowspots();
-        renderCapacityReport();
-        renderResourceProfiles();
-        renderSpeedReport();
         renderPerformanceOverview();
         renderPerformanceHeadlineCharts();
         renderPerformanceCuratedLists();
-        renderPerformancePanelCaptions();
         renderPerformanceDatasetView();
     }
 
@@ -6062,7 +6035,7 @@
         renderPerformancePromiseBoard(scenarios);
         rerenderPerformanceEvidence();
         if (scroll) {
-            byId("performance-promise-board")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            byId("performance-promise-detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
         }
     }
 
@@ -6144,9 +6117,6 @@
     byId("viewer-version").textContent = viewerVersion;
     setupTabs();
     byId("hotspots-filter")?.addEventListener("input", renderHotspots);
-    byId("slowspots-filter")?.addEventListener("input", renderSlowspots);
-    byId("search-speed-filter")?.addEventListener("input", renderSearchSpeed);
-    byId("resource-profiles-filter")?.addEventListener("input", renderResourceProfiles);
     byId("clones-filter")?.addEventListener("input", renderClones);
     byId("escape-hatches-filter")?.addEventListener("input", renderEscapeHatches);
     byId("correctness-filter")?.addEventListener("input", renderCorrectness);
@@ -6186,7 +6156,30 @@
         state.performanceDatasetSearch = event.target.value || "";
         rerenderPerformanceEvidence();
     });
+    byId("performance-review")?.addEventListener("input", (event) => {
+        const input = event.target.closest("[data-performance-section-filter]");
+        if (!input) return;
+        const scenarioId = input.dataset.performanceScenarioId;
+        const filterKey = input.dataset.performanceSectionFilter;
+        if (!scenarioId || !filterKey) return;
+        state.selectedPerformanceScenarioId = scenarioId;
+        performanceBucketFilters(scenarioId)[filterKey] = input.value || "";
+        renderPerformancePromiseDetail(selectedPerformancePromise());
+        const replacement = document.querySelector(`[data-performance-scenario-id="${CSS.escape(scenarioId)}"][data-performance-section-filter="${CSS.escape(filterKey)}"]`);
+        if (replacement) {
+            replacement.focus();
+            replacement.setSelectionRange(replacement.value.length, replacement.value.length);
+        }
+    });
     byId("performance-review")?.addEventListener("click", (event) => {
+        const flamegraphItem = event.target.closest("[data-flamegraph-id]");
+        if (flamegraphItem?.dataset.flamegraphId) {
+            const scenario = selectedPerformancePromise();
+            if (!scenario) return;
+            state.selectedFlamegraphsByScenario[scenario.id] = flamegraphItem.dataset.flamegraphId;
+            renderPerformancePromiseDetail(scenario);
+            return;
+        }
         const promiseTab = event.target.closest("[data-promise-tab]");
         if (promiseTab?.dataset.promiseTab) {
             selectPerformanceScenarioTab(promiseTab.dataset.promiseTab);

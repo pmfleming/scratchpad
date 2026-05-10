@@ -27,6 +27,17 @@ pub struct SearchHighlightState {
     pub active_range_index: Option<usize>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct SearchReplacementPreview {
+    pub entries: Vec<SearchReplacementPreviewEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SearchReplacementPreviewEntry {
+    pub range: Range<usize>,
+    pub replacement: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct PublishedImeOutput {
     rect: egui::Rect,
@@ -83,7 +94,7 @@ pub struct EditorViewState {
     published_ime_output: Option<PublishedImeOutput>,
     pub ime_preedit: Option<String>,
     pub search_highlights: SearchHighlightState,
-    pub search_replacement_preview: Option<String>,
+    pub search_replacement_preview: Option<SearchReplacementPreview>,
 }
 
 impl EditorViewState {
@@ -355,11 +366,11 @@ impl EditorViewState {
         take_search_anchors(&mut self.search_highlight_anchors)
     }
 
-    pub fn set_search_replacement_preview(&mut self, replacement: Option<String>) {
-        if self.search_replacement_preview == replacement {
+    pub fn set_search_replacement_preview(&mut self, preview: Option<SearchReplacementPreview>) {
+        if self.search_replacement_preview == preview {
             return;
         }
-        self.search_replacement_preview = replacement;
+        self.search_replacement_preview = preview;
     }
 
     /// Pixel-space scroll offset derived from the per-view `ScrollManager`.

@@ -1,6 +1,6 @@
 use super::layout::DisplayTextMap;
 use super::types::CharCursor;
-use crate::app::domain::{CursorRevealMode, EditorViewState};
+use crate::app::domain::{CursorRevealMode, EditorViewState, SearchReplacementPreview};
 use crate::app::ui::editor_content::native_editor::TextEditOptions;
 use crate::app::ui::scrolling::{ScrollAlign, ScrollIntent};
 use eframe::egui;
@@ -293,16 +293,26 @@ fn row_screen_x(galley: &egui::Galley, galley_pos: egui::Pos2, row_x: f32, colum
 }
 
 fn paint_replacement_previews(context: ReplacementPreviewContext<'_>, view: &EditorViewState) {
-    let Some(replacement) = view.search_replacement_preview.as_deref() else {
+    let Some(preview) = view.search_replacement_preview.as_ref() else {
         return;
     };
     let slice_range = context.char_offset_base..context.slice_end;
-    for range in &view.search_highlights.ranges {
-        if !slice_range.contains(&range.start) {
+    for entry in visible_preview_entries(preview, &slice_range) {
+        if !slice_range.contains(&entry.range.start) {
             continue;
         }
-        paint_replacement_preview(context, range.clone(), replacement);
+        paint_replacement_preview(context, entry.range.clone(), &entry.replacement);
     }
+}
+
+fn visible_preview_entries<'a>(
+    preview: &'a SearchReplacementPreview,
+    slice_range: &Range<usize>,
+) -> impl Iterator<Item = &'a crate::app::domain::SearchReplacementPreviewEntry> {
+    preview
+        .entries
+        .iter()
+        .filter(|entry| entry.range.start < slice_range.end && entry.range.end > slice_range.start)
 }
 
 fn paint_replacement_preview(
@@ -323,7 +333,7 @@ fn paint_replacement_preview(
         .display_map
         .map(|map| map.doc_to_display_cursor(doc_local_end))
         .unwrap_or(doc_local_end);
-    if local_start >= local_end {
+    if local_start > local_end {
         return;
     }
 

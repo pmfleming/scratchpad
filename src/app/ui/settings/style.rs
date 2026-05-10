@@ -132,8 +132,17 @@ impl SettingsUi {
         ui.available_width().min(Self::LAYOUT.card_max_width)
     }
 
+    pub(super) fn card_leading_inset(ui: &egui::Ui) -> f32 {
+        ((ui.available_width() - Self::card_width(ui)) * 0.5).max(0.0)
+    }
+
     pub(super) fn control_width(ui: &egui::Ui) -> f32 {
         ui.available_width().clamp(0.0, Self::CONTROLS.column_width)
+    }
+
+    pub(super) fn dropdown_width(ui: &egui::Ui) -> f32 {
+        ui.available_width()
+            .clamp(0.0, Self::LAYOUT.card_max_width / 3.0)
     }
 
     pub(super) fn preview_width(ui: &egui::Ui) -> f32 {

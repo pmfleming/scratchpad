@@ -18,6 +18,7 @@ pub struct LayoutCacheKey {
     pub dark_mode: bool,
     pub selection_highlight: Option<Range<usize>>,
     pub search_highlights: SearchHighlightState,
+    pub replacement_preview_signature: u64,
 }
 
 #[derive(Clone)]
