@@ -1,10 +1,12 @@
 use super::worker::{SearchFileIdentity, SearchResult, SearchTargetSnapshot};
 use super::{ReplacementTargetPlan, SearchMatch, SearchResultGroup, SearchStatus};
+use crate::app::capacity_metrics;
 use crate::app::domain::{BufferId, EditorViewState, SearchHighlightState, ViewId, WorkspaceTab};
 use crate::app::services::search::SearchError;
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+use std::time::Instant;
 
 #[derive(Default, Clone)]
 pub(super) struct SearchResultAccumulator {
@@ -21,16 +23,18 @@ impl SearchResultAccumulator {
     ) {
         let start_index = self.matches.len();
         self.matches.extend(ranges.iter().cloned().map(|range| {
+            let matched_text = target
+                .document_snapshot
+                .piece_tree()
+                .extract_range(range.clone());
+            capacity_metrics::record_search_eager_matched_text(matched_text.len());
             SearchMatch {
                 tab_index: target.tab_index,
                 view_id: target.view_id,
                 buffer_id: target.buffer_id,
                 buffer_label: target.buffer_label.clone(),
                 target_revision: target.document_snapshot.revision(),
-                matched_text: target
-                    .document_snapshot
-                    .piece_tree()
-                    .extract_range(range.clone()),
+                matched_text,
                 range,
             }
         }));
@@ -75,10 +79,27 @@ impl SearchResultAccumulator {
         scanned_targets: usize,
         total_targets: usize,
     ) -> SearchResult {
+        let started = Instant::now();
+        let matches = self.matches.clone();
+        let result_groups = self.result_groups.clone();
+        let estimated_bytes = matches
+            .iter()
+            .map(|search_match| search_match.buffer_label.len() + search_match.matched_text.len())
+            .sum::<usize>()
+            + result_groups
+                .iter()
+                .map(|group| group.buffer_label.len() + group.tab_label.len())
+                .sum::<usize>();
+        capacity_metrics::record_search_partial_snapshot(
+            started.elapsed(),
+            matches.len(),
+            result_groups.len(),
+            estimated_bytes,
+        );
         SearchResult {
             generation,
-            matches: self.matches.clone(),
-            result_groups: self.result_groups.clone(),
+            matches,
+            result_groups,
             displayed_match_count: self.match_count(),
             status: SearchStatus::Searching {
                 scanned_targets,
@@ -182,22 +203,60 @@ pub(super) fn collect_search_targets_for_views<'a>(
     prioritized_buffer_id: Option<BufferId>,
     views: impl IntoIterator<Item = &'a EditorViewState>,
 ) -> Vec<SearchTargetSnapshot> {
-    let mut targets_by_file = HashMap::with_capacity(tab.buffers().count());
+    let mut seen_files = HashSet::new();
+    collect_search_targets_for_views_with_seen(
+        tab_index,
+        tab,
+        tab_label,
+        search_range,
+        prioritized_buffer_id,
+        views,
+        &mut seen_files,
+    )
+}
+
+pub(super) fn collect_search_targets_for_views_with_seen<'a>(
+    tab_index: usize,
+    tab: &WorkspaceTab,
+    tab_label: &str,
+    search_range: Option<Range<usize>>,
+    prioritized_buffer_id: Option<BufferId>,
+    views: impl IntoIterator<Item = &'a EditorViewState>,
+    seen_files: &mut HashSet<SearchFileIdentity>,
+) -> Vec<SearchTargetSnapshot> {
+    let mut view_by_file =
+        HashMap::<SearchFileIdentity, ViewId>::with_capacity(tab.buffers().count());
+    let mut ordered_files = Vec::<SearchFileIdentity>::with_capacity(tab.views.len());
+    let mut seen_view_ids = HashSet::<ViewId>::with_capacity(tab.views.len());
     for view in views {
-        if let Some(target) =
-            build_search_target_from_view(tab_index, tab, view, tab_label, search_range.clone())
-        {
-            targets_by_file
-                .entry(target.file_identity.clone())
-                .or_insert(target);
+        capacity_metrics::record_search_candidate_view();
+        if !seen_view_ids.insert(view.id) {
+            capacity_metrics::record_search_ordered_view_duplicate();
+            continue;
+        }
+        let Some(buffer) = tab.buffer_by_id(view.buffer_id) else {
+            continue;
+        };
+        let identity = file_identity_for_buffer(buffer);
+        if seen_files.contains(&identity) {
+            continue;
+        }
+        if view_by_file.insert(identity.clone(), view.id).is_none() {
+            ordered_files.push(identity);
         }
     }
 
-    let mut ordered_files = ordered_unique_file_identities(tab);
     rotate_prioritized_file(&mut ordered_files, tab, prioritized_buffer_id);
     ordered_files
         .into_iter()
-        .filter_map(|file| targets_by_file.remove(&file))
+        .filter_map(|file| {
+            let view_id = view_by_file.remove(&file)?;
+            if !seen_files.insert(file) {
+                return None;
+            }
+            capacity_metrics::record_search_deduplicated_file();
+            build_search_target(tab_index, tab, view_id, tab_label, search_range.clone())
+        })
         .collect()
 }
 
@@ -246,21 +305,6 @@ pub(super) fn matches_buffer(
     search_match.tab_index == tab_index && search_match.buffer_id == buffer_id
 }
 
-fn ordered_unique_file_identities(tab: &WorkspaceTab) -> Vec<SearchFileIdentity> {
-    let mut seen_files = HashSet::with_capacity(tab.views.len());
-    let mut ordered_files = Vec::with_capacity(tab.views.len());
-    for view in &tab.views {
-        let Some(buffer) = tab.buffer_by_id(view.buffer_id) else {
-            continue;
-        };
-        let identity = file_identity_for_buffer(buffer);
-        if seen_files.insert(identity.clone()) {
-            ordered_files.push(identity);
-        }
-    }
-    ordered_files
-}
-
 fn rotate_prioritized_file(
     ordered_files: &mut [SearchFileIdentity],
     tab: &WorkspaceTab,
@@ -293,10 +337,11 @@ fn build_search_target_from_view(
     search_range: Option<Range<usize>>,
 ) -> Option<SearchTargetSnapshot> {
     let buffer = tab.buffer_by_id(view.buffer_id)?;
+    let snapshot_started = Instant::now();
     let document_snapshot = buffer.document_snapshot();
+    capacity_metrics::record_search_target_snapshot(snapshot_started.elapsed());
     let search_range = search_range.map(|range| document_snapshot.normalize_char_range(range));
     Some(SearchTargetSnapshot {
-        file_identity: file_identity_for_buffer(buffer),
         tab_index,
         view_id: view.id,
         buffer_id: view.buffer_id,

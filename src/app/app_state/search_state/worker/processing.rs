@@ -9,8 +9,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread;
 
-const SEARCH_TARGET_PARALLELISM_CAP: usize = 4;
+const SEARCH_TARGET_PARALLELISM_CAP: usize = 8;
 const SEARCH_TARGET_PARALLELISM_MIN_TARGETS: usize = 4;
+const SEARCH_TARGET_PARALLELISM_MIN_CHARS: usize = 8 * 1024 * 1024;
 const INTRA_BUFFER_PARALLELISM_CAP: usize = 4;
 
 struct TargetSearchOutcome {
@@ -39,8 +40,13 @@ pub(crate) fn process_search_request_with_partials(
     };
 
     let target_count = request.targets.len();
+    let total_target_chars = request
+        .targets
+        .iter()
+        .map(|target| target.document_snapshot.len_chars())
+        .sum::<usize>();
     let mut results = SearchResultAccumulator::default();
-    if search_target_parallelism(target_count) <= 1 {
+    if search_target_parallelism(target_count, total_target_chars) <= 1 {
         process_search_targets_serial(
             request,
             &program,
@@ -120,7 +126,11 @@ fn process_search_targets_parallel(
         ..
     } = request;
     let target_count = targets.len();
-    let worker_count = search_target_parallelism(target_count);
+    let total_target_chars = targets
+        .iter()
+        .map(|target| target.document_snapshot.len_chars())
+        .sum::<usize>();
+    let worker_count = search_target_parallelism(target_count, total_target_chars);
     let indexed_targets = targets.into_iter().enumerate().collect::<Vec<_>>();
     let program = Arc::new(program);
     let chunk_size = indexed_targets.len().div_ceil(worker_count);
@@ -268,13 +278,15 @@ fn should_publish_partial(
     last_emitted_match_count: usize,
     completed_target_index: usize,
 ) -> bool {
-    const PARTIAL_MATCH_DELTA: usize = 64;
+    const PARTIAL_MATCH_DELTA: usize = 256;
     completed_target_index == 0
         || current_match_count >= last_emitted_match_count.saturating_add(PARTIAL_MATCH_DELTA)
 }
 
-fn search_target_parallelism(target_count: usize) -> usize {
-    if target_count < SEARCH_TARGET_PARALLELISM_MIN_TARGETS {
+fn search_target_parallelism(target_count: usize, total_target_chars: usize) -> usize {
+    if target_count < SEARCH_TARGET_PARALLELISM_MIN_TARGETS
+        || total_target_chars < SEARCH_TARGET_PARALLELISM_MIN_CHARS
+    {
         return 1;
     }
 

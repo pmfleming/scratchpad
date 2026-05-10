@@ -94,6 +94,10 @@ impl TextDocument {
         DocumentSnapshot::from_shared(self.piece_tree.clone())
     }
 
+    pub fn snapshot_with_line_count(&self, line_count: usize) -> DocumentSnapshot {
+        DocumentSnapshot::from_shared_with_line_count(self.piece_tree.clone(), line_count)
+    }
+
     pub fn operation_undo_depth(&self) -> usize {
         self.history
             .iter()

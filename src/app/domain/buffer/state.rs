@@ -5,10 +5,12 @@ use super::{
     TextFormatMetadata, TextHistoryApplyError, TextReplacementError, TextReplacements,
     buffer_text_metadata, buffer_text_metadata_from_piece_tree,
 };
+use crate::app::capacity_metrics;
 use crate::app::ui::editor_content::native_editor::{CursorRange, OperationRecord};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(1);
@@ -240,7 +242,7 @@ impl BufferState {
     }
 
     pub fn document_snapshot(&self) -> DocumentSnapshot {
-        self.document.snapshot()
+        self.document.snapshot_with_line_count(self.line_count)
     }
 
     pub fn document_revision(&self) -> u64 {
@@ -336,6 +338,14 @@ impl BufferState {
         record: OperationRecord,
         source: PieceSource,
     ) {
+        if source == PieceSource::Paste {
+            let inserted_bytes = record
+                .edits
+                .iter()
+                .map(|edit| edit.inserted_text.len())
+                .sum();
+            capacity_metrics::record_paste_shape(record.edits.len(), inserted_bytes);
+        }
         self.document
             .push_edit_operation_with_source(record, source);
         self.pending_text_history_event = Some(TextHistoryEvent::Edit);
@@ -387,6 +397,7 @@ impl BufferState {
     }
 
     pub fn refresh_text_metadata(&mut self) {
+        capacity_metrics::record_metadata_full_scan(self.document.piece_tree().len_bytes());
         let metadata =
             buffer_text_metadata_from_piece_tree(self.document.piece_tree(), &mut self.format);
         self.apply_text_metadata(metadata);
@@ -402,12 +413,14 @@ impl BufferState {
         }
 
         if operation.is_some_and(|operation| self.can_skip_metadata_rescan(operation)) {
+            capacity_metrics::record_metadata_skip();
             return;
         }
 
         if let Some(metadata) = operation
             .and_then(|operation| self.incremental_text_metadata_after_operation(operation))
         {
+            capacity_metrics::record_metadata_incremental();
             self.apply_text_metadata(metadata);
             return;
         }
@@ -419,10 +432,12 @@ impl BufferState {
         if !self.encoding_compliance_stale {
             return;
         }
+        let started = Instant::now();
         let tree = self.document.piece_tree();
         self.has_non_compliant_characters = self.format.has_non_compliant_characters_spans(
             tree.spans_for_range(0..tree.len_chars()).map(|s| s.text),
         );
+        capacity_metrics::record_encoding_compliance_scan(tree.len_bytes(), started.elapsed());
         self.encoding_compliance_stale = false;
     }
 
@@ -597,30 +612,36 @@ impl BufferState {
         &mut self,
         operation: &TextDocumentOperationRecord,
     ) -> Option<BufferTextMetadata> {
-        if operation.edits.len() != 1 {
-            return None;
+        let tree = self.document.piece_tree();
+        let mut line_count = self.line_count;
+        let mut artifact_summary = self.artifact_summary.clone();
+        let mut last_metadata = None;
+
+        for edit in &operation.edits {
+            let start_char = edit.start_char.min(tree.len_chars());
+            let inserted_char_len = edit.inserted_text.chars().count();
+            let previous_char = start_char
+                .checked_sub(1)
+                .and_then(|index| tree.char_at(index));
+            let next_char = tree.char_at(start_char.saturating_add(inserted_char_len));
+
+            let metadata = buffer_text_metadata_from_edit(
+                line_count,
+                &artifact_summary,
+                &mut self.format,
+                IncrementalMetadataEdit {
+                    previous_char,
+                    deleted_text: &edit.deleted_text,
+                    inserted_text: &edit.inserted_text,
+                    next_char,
+                },
+            )?;
+            line_count = metadata.line_count;
+            artifact_summary = metadata.artifact_summary.clone();
+            last_metadata = Some(metadata);
         }
 
-        let edit = operation.edits.first()?;
-        let tree = self.document.piece_tree();
-        let start_char = edit.start_char.min(tree.len_chars());
-        let inserted_char_len = edit.inserted_text.chars().count();
-        let previous_char = start_char
-            .checked_sub(1)
-            .and_then(|index| tree.char_at(index));
-        let next_char = tree.char_at(start_char.saturating_add(inserted_char_len));
-
-        buffer_text_metadata_from_edit(
-            self.line_count,
-            &self.artifact_summary,
-            &mut self.format,
-            IncrementalMetadataEdit {
-                previous_char,
-                deleted_text: &edit.deleted_text,
-                inserted_text: &edit.inserted_text,
-                next_char,
-            },
-        )
+        last_metadata
     }
 
     fn set_disk_state(&mut self, disk_state: Option<DiskFileState>, freshness: BufferFreshness) {

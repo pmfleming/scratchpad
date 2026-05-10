@@ -464,6 +464,7 @@ fn warm_nearby_layout_slices(
         if view.layout_cache.get(&cache_key).is_some() {
             continue;
         }
+        crate::app::capacity_metrics::record_layout_cache_warmup();
         let galley = highlighting::build_galley(
             ui,
             &slice.text,

@@ -22,16 +22,23 @@ pub struct DocumentSnapshot {
 
 impl DocumentSnapshot {
     pub(crate) fn from_shared(piece_tree: Arc<PieceTreeLite>) -> Self {
+        capacity_metrics::record_snapshot_slow_line_count();
+        let display_line_count = display_line_count_from_piece_tree(piece_tree.as_ref());
+        Self::from_shared_with_line_count(piece_tree, display_line_count)
+    }
+
+    pub(crate) fn from_shared_with_line_count(
+        piece_tree: Arc<PieceTreeLite>,
+        display_line_count: usize,
+    ) -> Self {
+        capacity_metrics::record_snapshot_metadata_line_count();
         let piece_tree = if piece_tree.has_live_anchors() {
             Arc::new(piece_tree.clone_without_anchors())
         } else {
             piece_tree
         };
         let revision = piece_tree.generation();
-        let length = BufferLength::from_metrics(
-            piece_tree.metrics(),
-            display_line_count_from_piece_tree(piece_tree.as_ref()),
-        );
+        let length = BufferLength::from_metrics(piece_tree.metrics(), display_line_count);
         Self {
             length,
             revision,

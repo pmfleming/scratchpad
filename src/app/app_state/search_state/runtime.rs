@@ -1,5 +1,6 @@
 use super::helpers::{
-    build_search_target, collect_search_targets_for_views, first_match_index, matches_buffer,
+    build_search_target, collect_search_targets_for_views,
+    collect_search_targets_for_views_with_seen, first_match_index, matches_buffer,
 };
 use super::worker::{
     SearchFileIdentity, SearchRequest, SearchResult, SearchTargetSnapshot, process_search_request,
@@ -153,9 +154,13 @@ impl ScratchpadApp {
                                     .map(|view| view.buffer_id)
                             })
                             .flatten();
-                        self.collect_search_targets_for_tab(tab_index, prioritized_buffer_id, None)
+                        self.collect_search_targets_for_tab_with_seen(
+                            tab_index,
+                            prioritized_buffer_id,
+                            None,
+                            &mut seen_files,
+                        )
                     })
-                    .filter(|target| seen_files.insert(target.file_identity.clone()))
                     .collect()
             }
         }
@@ -218,6 +223,31 @@ impl ScratchpadApp {
                 .into_iter()
                 .filter_map(|view_id| tab.view(view_id))
                 .chain(tab.views.iter()),
+        )
+    }
+
+    fn collect_search_targets_for_tab_with_seen(
+        &self,
+        tab_index: usize,
+        prioritized_buffer_id: Option<BufferId>,
+        search_range: Option<Range<usize>>,
+        seen_files: &mut HashSet<SearchFileIdentity>,
+    ) -> Vec<SearchTargetSnapshot> {
+        let Some(tab) = self.tabs().get(tab_index) else {
+            return Vec::new();
+        };
+        let tab_label = self.search_tab_label(tab_index);
+        collect_search_targets_for_views_with_seen(
+            tab_index,
+            tab,
+            &tab_label,
+            search_range,
+            prioritized_buffer_id,
+            tab.ordered_view_ids_in_layout_order()
+                .into_iter()
+                .filter_map(|view_id| tab.view(view_id))
+                .chain(tab.views.iter()),
+            seen_files,
         )
     }
 

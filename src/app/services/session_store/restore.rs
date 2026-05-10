@@ -144,6 +144,7 @@ impl SessionStore {
         let session_path = self.buffer_path(&buffer.temp_id);
         let session_text = match fs::read_to_string(&session_path) {
             Ok(content) => Some(content),
+            Err(_) if buffer.path.is_some() && !buffer.is_dirty => None,
             Err(error) => {
                 diagnostics::record_io_error_with_details(
                     "session_read_buffer_snapshot",

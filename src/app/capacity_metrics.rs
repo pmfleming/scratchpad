@@ -9,11 +9,38 @@ pub struct CapacityMetricsSnapshot {
     pub full_text_flatten_bytes: u64,
     pub range_flatten_count: u64,
     pub range_flatten_bytes: u64,
+    pub snapshot_slow_line_count_count: u64,
+    pub snapshot_metadata_line_count_count: u64,
+    pub search_candidate_view_count: u64,
+    pub search_ordered_view_duplicate_count: u64,
+    pub search_deduplicated_file_count: u64,
+    pub search_target_snapshot_count: u64,
+    pub search_target_snapshot_time_ns: u64,
+    pub search_eager_matched_text_bytes: u64,
+    pub search_partial_snapshot_count: u64,
+    pub search_partial_snapshot_time_ns: u64,
+    pub search_partial_snapshot_match_count: u64,
+    pub search_partial_snapshot_group_count: u64,
+    pub search_partial_snapshot_bytes: u64,
+    pub paste_operation_count: u64,
+    pub paste_edit_count: u64,
+    pub paste_inserted_bytes: u64,
+    pub metadata_skip_count: u64,
+    pub metadata_incremental_count: u64,
+    pub metadata_full_scan_count: u64,
+    pub metadata_full_scan_bytes: u64,
+    pub encoding_compliance_scan_count: u64,
+    pub encoding_compliance_scan_bytes: u64,
+    pub encoding_compliance_scan_time_ns: u64,
     pub layout_job_count: u64,
     pub layout_input_bytes: u64,
     pub layout_time_ns: u64,
     pub layout_cache_hit_count: u64,
     pub layout_cache_miss_count: u64,
+    pub layout_cache_eviction_count: u64,
+    pub layout_cache_evicted_bytes: u64,
+    pub layout_cache_warmup_count: u64,
+    pub layout_plain_fast_path_count: u64,
     pub search_request_count: u64,
     pub search_target_count: u64,
     pub search_chunk_count: u64,
@@ -44,6 +71,29 @@ static FULL_TEXT_FLATTEN_COUNT: AtomicU64 = AtomicU64::new(0);
 static FULL_TEXT_FLATTEN_BYTES: AtomicU64 = AtomicU64::new(0);
 static RANGE_FLATTEN_COUNT: AtomicU64 = AtomicU64::new(0);
 static RANGE_FLATTEN_BYTES: AtomicU64 = AtomicU64::new(0);
+static SNAPSHOT_SLOW_LINE_COUNT_COUNT: AtomicU64 = AtomicU64::new(0);
+static SNAPSHOT_METADATA_LINE_COUNT_COUNT: AtomicU64 = AtomicU64::new(0);
+static SEARCH_CANDIDATE_VIEW_COUNT: AtomicU64 = AtomicU64::new(0);
+static SEARCH_ORDERED_VIEW_DUPLICATE_COUNT: AtomicU64 = AtomicU64::new(0);
+static SEARCH_DEDUPLICATED_FILE_COUNT: AtomicU64 = AtomicU64::new(0);
+static SEARCH_TARGET_SNAPSHOT_COUNT: AtomicU64 = AtomicU64::new(0);
+static SEARCH_TARGET_SNAPSHOT_TIME_NS: AtomicU64 = AtomicU64::new(0);
+static SEARCH_EAGER_MATCHED_TEXT_BYTES: AtomicU64 = AtomicU64::new(0);
+static SEARCH_PARTIAL_SNAPSHOT_COUNT: AtomicU64 = AtomicU64::new(0);
+static SEARCH_PARTIAL_SNAPSHOT_TIME_NS: AtomicU64 = AtomicU64::new(0);
+static SEARCH_PARTIAL_SNAPSHOT_MATCH_COUNT: AtomicU64 = AtomicU64::new(0);
+static SEARCH_PARTIAL_SNAPSHOT_GROUP_COUNT: AtomicU64 = AtomicU64::new(0);
+static SEARCH_PARTIAL_SNAPSHOT_BYTES: AtomicU64 = AtomicU64::new(0);
+static PASTE_OPERATION_COUNT: AtomicU64 = AtomicU64::new(0);
+static PASTE_EDIT_COUNT: AtomicU64 = AtomicU64::new(0);
+static PASTE_INSERTED_BYTES: AtomicU64 = AtomicU64::new(0);
+static METADATA_SKIP_COUNT: AtomicU64 = AtomicU64::new(0);
+static METADATA_INCREMENTAL_COUNT: AtomicU64 = AtomicU64::new(0);
+static METADATA_FULL_SCAN_COUNT: AtomicU64 = AtomicU64::new(0);
+static METADATA_FULL_SCAN_BYTES: AtomicU64 = AtomicU64::new(0);
+static ENCODING_COMPLIANCE_SCAN_COUNT: AtomicU64 = AtomicU64::new(0);
+static ENCODING_COMPLIANCE_SCAN_BYTES: AtomicU64 = AtomicU64::new(0);
+static ENCODING_COMPLIANCE_SCAN_TIME_NS: AtomicU64 = AtomicU64::new(0);
 static LAYOUT_JOB_COUNT: AtomicU64 = AtomicU64::new(0);
 static LAYOUT_INPUT_BYTES: AtomicU64 = AtomicU64::new(0);
 static LAYOUT_TIME_NS: AtomicU64 = AtomicU64::new(0);
@@ -67,6 +117,10 @@ static BACKGROUND_IO_SESSION_SATURATION_COUNT: AtomicU64 = AtomicU64::new(0);
 static BACKGROUND_IO_ANALYSIS_SATURATION_COUNT: AtomicU64 = AtomicU64::new(0);
 static LAYOUT_CACHE_HIT_COUNT: AtomicU64 = AtomicU64::new(0);
 static LAYOUT_CACHE_MISS_COUNT: AtomicU64 = AtomicU64::new(0);
+static LAYOUT_CACHE_EVICTION_COUNT: AtomicU64 = AtomicU64::new(0);
+static LAYOUT_CACHE_EVICTED_BYTES: AtomicU64 = AtomicU64::new(0);
+static LAYOUT_CACHE_WARMUP_COUNT: AtomicU64 = AtomicU64::new(0);
+static LAYOUT_PLAIN_FAST_PATH_COUNT: AtomicU64 = AtomicU64::new(0);
 static FRAME_COUNT: AtomicU64 = AtomicU64::new(0);
 static FRAME_TIME_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
 static FRAME_TIME_MAX_NS: AtomicU64 = AtomicU64::new(0);
@@ -86,6 +140,29 @@ pub fn reset_capacity_metrics() {
     FULL_TEXT_FLATTEN_BYTES.store(0, Ordering::Relaxed);
     RANGE_FLATTEN_COUNT.store(0, Ordering::Relaxed);
     RANGE_FLATTEN_BYTES.store(0, Ordering::Relaxed);
+    SNAPSHOT_SLOW_LINE_COUNT_COUNT.store(0, Ordering::Relaxed);
+    SNAPSHOT_METADATA_LINE_COUNT_COUNT.store(0, Ordering::Relaxed);
+    SEARCH_CANDIDATE_VIEW_COUNT.store(0, Ordering::Relaxed);
+    SEARCH_ORDERED_VIEW_DUPLICATE_COUNT.store(0, Ordering::Relaxed);
+    SEARCH_DEDUPLICATED_FILE_COUNT.store(0, Ordering::Relaxed);
+    SEARCH_TARGET_SNAPSHOT_COUNT.store(0, Ordering::Relaxed);
+    SEARCH_TARGET_SNAPSHOT_TIME_NS.store(0, Ordering::Relaxed);
+    SEARCH_EAGER_MATCHED_TEXT_BYTES.store(0, Ordering::Relaxed);
+    SEARCH_PARTIAL_SNAPSHOT_COUNT.store(0, Ordering::Relaxed);
+    SEARCH_PARTIAL_SNAPSHOT_TIME_NS.store(0, Ordering::Relaxed);
+    SEARCH_PARTIAL_SNAPSHOT_MATCH_COUNT.store(0, Ordering::Relaxed);
+    SEARCH_PARTIAL_SNAPSHOT_GROUP_COUNT.store(0, Ordering::Relaxed);
+    SEARCH_PARTIAL_SNAPSHOT_BYTES.store(0, Ordering::Relaxed);
+    PASTE_OPERATION_COUNT.store(0, Ordering::Relaxed);
+    PASTE_EDIT_COUNT.store(0, Ordering::Relaxed);
+    PASTE_INSERTED_BYTES.store(0, Ordering::Relaxed);
+    METADATA_SKIP_COUNT.store(0, Ordering::Relaxed);
+    METADATA_INCREMENTAL_COUNT.store(0, Ordering::Relaxed);
+    METADATA_FULL_SCAN_COUNT.store(0, Ordering::Relaxed);
+    METADATA_FULL_SCAN_BYTES.store(0, Ordering::Relaxed);
+    ENCODING_COMPLIANCE_SCAN_COUNT.store(0, Ordering::Relaxed);
+    ENCODING_COMPLIANCE_SCAN_BYTES.store(0, Ordering::Relaxed);
+    ENCODING_COMPLIANCE_SCAN_TIME_NS.store(0, Ordering::Relaxed);
     LAYOUT_JOB_COUNT.store(0, Ordering::Relaxed);
     LAYOUT_INPUT_BYTES.store(0, Ordering::Relaxed);
     LAYOUT_TIME_NS.store(0, Ordering::Relaxed);
@@ -109,6 +186,10 @@ pub fn reset_capacity_metrics() {
     BACKGROUND_IO_ANALYSIS_SATURATION_COUNT.store(0, Ordering::Relaxed);
     LAYOUT_CACHE_HIT_COUNT.store(0, Ordering::Relaxed);
     LAYOUT_CACHE_MISS_COUNT.store(0, Ordering::Relaxed);
+    LAYOUT_CACHE_EVICTION_COUNT.store(0, Ordering::Relaxed);
+    LAYOUT_CACHE_EVICTED_BYTES.store(0, Ordering::Relaxed);
+    LAYOUT_CACHE_WARMUP_COUNT.store(0, Ordering::Relaxed);
+    LAYOUT_PLAIN_FAST_PATH_COUNT.store(0, Ordering::Relaxed);
     FRAME_COUNT.store(0, Ordering::Relaxed);
     FRAME_TIME_TOTAL_NS.store(0, Ordering::Relaxed);
     FRAME_TIME_MAX_NS.store(0, Ordering::Relaxed);
@@ -123,6 +204,33 @@ pub fn capacity_metrics_snapshot() -> CapacityMetricsSnapshot {
         full_text_flatten_bytes: FULL_TEXT_FLATTEN_BYTES.load(Ordering::Relaxed),
         range_flatten_count: RANGE_FLATTEN_COUNT.load(Ordering::Relaxed),
         range_flatten_bytes: RANGE_FLATTEN_BYTES.load(Ordering::Relaxed),
+        snapshot_slow_line_count_count: SNAPSHOT_SLOW_LINE_COUNT_COUNT.load(Ordering::Relaxed),
+        snapshot_metadata_line_count_count: SNAPSHOT_METADATA_LINE_COUNT_COUNT
+            .load(Ordering::Relaxed),
+        search_candidate_view_count: SEARCH_CANDIDATE_VIEW_COUNT.load(Ordering::Relaxed),
+        search_ordered_view_duplicate_count: SEARCH_ORDERED_VIEW_DUPLICATE_COUNT
+            .load(Ordering::Relaxed),
+        search_deduplicated_file_count: SEARCH_DEDUPLICATED_FILE_COUNT.load(Ordering::Relaxed),
+        search_target_snapshot_count: SEARCH_TARGET_SNAPSHOT_COUNT.load(Ordering::Relaxed),
+        search_target_snapshot_time_ns: SEARCH_TARGET_SNAPSHOT_TIME_NS.load(Ordering::Relaxed),
+        search_eager_matched_text_bytes: SEARCH_EAGER_MATCHED_TEXT_BYTES.load(Ordering::Relaxed),
+        search_partial_snapshot_count: SEARCH_PARTIAL_SNAPSHOT_COUNT.load(Ordering::Relaxed),
+        search_partial_snapshot_time_ns: SEARCH_PARTIAL_SNAPSHOT_TIME_NS.load(Ordering::Relaxed),
+        search_partial_snapshot_match_count: SEARCH_PARTIAL_SNAPSHOT_MATCH_COUNT
+            .load(Ordering::Relaxed),
+        search_partial_snapshot_group_count: SEARCH_PARTIAL_SNAPSHOT_GROUP_COUNT
+            .load(Ordering::Relaxed),
+        search_partial_snapshot_bytes: SEARCH_PARTIAL_SNAPSHOT_BYTES.load(Ordering::Relaxed),
+        paste_operation_count: PASTE_OPERATION_COUNT.load(Ordering::Relaxed),
+        paste_edit_count: PASTE_EDIT_COUNT.load(Ordering::Relaxed),
+        paste_inserted_bytes: PASTE_INSERTED_BYTES.load(Ordering::Relaxed),
+        metadata_skip_count: METADATA_SKIP_COUNT.load(Ordering::Relaxed),
+        metadata_incremental_count: METADATA_INCREMENTAL_COUNT.load(Ordering::Relaxed),
+        metadata_full_scan_count: METADATA_FULL_SCAN_COUNT.load(Ordering::Relaxed),
+        metadata_full_scan_bytes: METADATA_FULL_SCAN_BYTES.load(Ordering::Relaxed),
+        encoding_compliance_scan_count: ENCODING_COMPLIANCE_SCAN_COUNT.load(Ordering::Relaxed),
+        encoding_compliance_scan_bytes: ENCODING_COMPLIANCE_SCAN_BYTES.load(Ordering::Relaxed),
+        encoding_compliance_scan_time_ns: ENCODING_COMPLIANCE_SCAN_TIME_NS.load(Ordering::Relaxed),
         layout_job_count: LAYOUT_JOB_COUNT.load(Ordering::Relaxed),
         layout_input_bytes: LAYOUT_INPUT_BYTES.load(Ordering::Relaxed),
         layout_time_ns: LAYOUT_TIME_NS.load(Ordering::Relaxed),
@@ -152,6 +260,10 @@ pub fn capacity_metrics_snapshot() -> CapacityMetricsSnapshot {
             .load(Ordering::Relaxed),
         layout_cache_hit_count: LAYOUT_CACHE_HIT_COUNT.load(Ordering::Relaxed),
         layout_cache_miss_count: LAYOUT_CACHE_MISS_COUNT.load(Ordering::Relaxed),
+        layout_cache_eviction_count: LAYOUT_CACHE_EVICTION_COUNT.load(Ordering::Relaxed),
+        layout_cache_evicted_bytes: LAYOUT_CACHE_EVICTED_BYTES.load(Ordering::Relaxed),
+        layout_cache_warmup_count: LAYOUT_CACHE_WARMUP_COUNT.load(Ordering::Relaxed),
+        layout_plain_fast_path_count: LAYOUT_PLAIN_FAST_PATH_COUNT.load(Ordering::Relaxed),
         frame_count: FRAME_COUNT.load(Ordering::Relaxed),
         frame_time_total_ns: FRAME_TIME_TOTAL_NS.load(Ordering::Relaxed),
         frame_time_max_ns: FRAME_TIME_MAX_NS.load(Ordering::Relaxed),
@@ -179,6 +291,75 @@ pub fn record_full_text_flatten(bytes: usize) {
 pub fn record_range_flatten(bytes: usize) {
     RANGE_FLATTEN_COUNT.fetch_add(1, Ordering::Relaxed);
     RANGE_FLATTEN_BYTES.fetch_add(saturating_u64(bytes), Ordering::Relaxed);
+}
+
+pub fn record_snapshot_slow_line_count() {
+    SNAPSHOT_SLOW_LINE_COUNT_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_snapshot_metadata_line_count() {
+    SNAPSHOT_METADATA_LINE_COUNT_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_search_candidate_view() {
+    SEARCH_CANDIDATE_VIEW_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_search_ordered_view_duplicate() {
+    SEARCH_ORDERED_VIEW_DUPLICATE_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_search_deduplicated_file() {
+    SEARCH_DEDUPLICATED_FILE_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_search_target_snapshot(elapsed: Duration) {
+    SEARCH_TARGET_SNAPSHOT_COUNT.fetch_add(1, Ordering::Relaxed);
+    SEARCH_TARGET_SNAPSHOT_TIME_NS.fetch_add(saturating_u64(elapsed.as_nanos()), Ordering::Relaxed);
+}
+
+pub fn record_search_eager_matched_text(bytes: usize) {
+    SEARCH_EAGER_MATCHED_TEXT_BYTES.fetch_add(saturating_u64(bytes), Ordering::Relaxed);
+}
+
+pub fn record_search_partial_snapshot(
+    elapsed: Duration,
+    match_count: usize,
+    group_count: usize,
+    estimated_bytes: usize,
+) {
+    SEARCH_PARTIAL_SNAPSHOT_COUNT.fetch_add(1, Ordering::Relaxed);
+    SEARCH_PARTIAL_SNAPSHOT_TIME_NS
+        .fetch_add(saturating_u64(elapsed.as_nanos()), Ordering::Relaxed);
+    SEARCH_PARTIAL_SNAPSHOT_MATCH_COUNT.fetch_add(saturating_u64(match_count), Ordering::Relaxed);
+    SEARCH_PARTIAL_SNAPSHOT_GROUP_COUNT.fetch_add(saturating_u64(group_count), Ordering::Relaxed);
+    SEARCH_PARTIAL_SNAPSHOT_BYTES.fetch_add(saturating_u64(estimated_bytes), Ordering::Relaxed);
+}
+
+pub fn record_paste_shape(edit_count: usize, inserted_bytes: usize) {
+    PASTE_OPERATION_COUNT.fetch_add(1, Ordering::Relaxed);
+    PASTE_EDIT_COUNT.fetch_add(saturating_u64(edit_count), Ordering::Relaxed);
+    PASTE_INSERTED_BYTES.fetch_add(saturating_u64(inserted_bytes), Ordering::Relaxed);
+}
+
+pub fn record_metadata_skip() {
+    METADATA_SKIP_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_metadata_incremental() {
+    METADATA_INCREMENTAL_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_metadata_full_scan(bytes: usize) {
+    METADATA_FULL_SCAN_COUNT.fetch_add(1, Ordering::Relaxed);
+    METADATA_FULL_SCAN_BYTES.fetch_add(saturating_u64(bytes), Ordering::Relaxed);
+}
+
+pub fn record_encoding_compliance_scan(bytes: usize, elapsed: Duration) {
+    ENCODING_COMPLIANCE_SCAN_COUNT.fetch_add(1, Ordering::Relaxed);
+    ENCODING_COMPLIANCE_SCAN_BYTES.fetch_add(saturating_u64(bytes), Ordering::Relaxed);
+    ENCODING_COMPLIANCE_SCAN_TIME_NS
+        .fetch_add(saturating_u64(elapsed.as_nanos()), Ordering::Relaxed);
 }
 
 pub fn record_layout_job(input_bytes: usize, elapsed: Duration) {
@@ -251,6 +432,19 @@ pub fn record_layout_cache_hit() {
 
 pub fn record_layout_cache_miss() {
     LAYOUT_CACHE_MISS_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_layout_cache_eviction(bytes: usize) {
+    LAYOUT_CACHE_EVICTION_COUNT.fetch_add(1, Ordering::Relaxed);
+    LAYOUT_CACHE_EVICTED_BYTES.fetch_add(saturating_u64(bytes), Ordering::Relaxed);
+}
+
+pub fn record_layout_cache_warmup() {
+    LAYOUT_CACHE_WARMUP_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_layout_plain_fast_path() {
+    LAYOUT_PLAIN_FAST_PATH_COUNT.fetch_add(1, Ordering::Relaxed);
 }
 
 pub fn record_frame(elapsed: Duration) {

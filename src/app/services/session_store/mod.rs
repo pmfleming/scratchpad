@@ -289,6 +289,7 @@ impl CapturedSessionTab {
             },
             buffer_snapshots: tab
                 .buffers()
+                .filter(|buffer| buffer.is_dirty || buffer.path.is_none())
                 .map(|buffer| CapturedSessionBuffer {
                     temp_id: buffer.temp_id.clone(),
                     snapshot: buffer.document_snapshot(),

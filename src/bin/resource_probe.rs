@@ -387,7 +387,20 @@ fn render_first_visible_text_paint(buffer: &BufferState) -> usize {
                 SearchHighlightState::default(),
                 None,
             );
-            let galley = layouter(ui, &visible_text, 980.0);
+            let mut probe_cache: std::collections::HashMap<
+                u32,
+                std::sync::Arc<eframe::egui::Galley>,
+            > = std::collections::HashMap::new();
+            let cache_key = 980.0f32.to_bits();
+            let galley = if let Some(galley) = probe_cache.get(&cache_key) {
+                scratchpad::app::capacity_metrics::record_layout_cache_hit();
+                galley.clone()
+            } else {
+                scratchpad::app::capacity_metrics::record_layout_cache_miss();
+                let galley = layouter(ui, &visible_text, 980.0);
+                probe_cache.insert(cache_key, galley.clone());
+                galley
+            };
             rows = galley.rows.len().max(1);
         });
     });

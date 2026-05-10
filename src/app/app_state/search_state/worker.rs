@@ -29,7 +29,6 @@ pub(super) struct SearchResult {
 }
 
 pub(super) struct SearchTargetSnapshot {
-    pub(super) file_identity: SearchFileIdentity,
     pub(super) tab_index: usize,
     pub(super) view_id: ViewId,
     pub(super) buffer_id: BufferId,

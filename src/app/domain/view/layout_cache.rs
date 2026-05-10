@@ -34,8 +34,8 @@ pub struct LayoutCache {
 }
 
 impl LayoutCache {
-    const MAX_ENTRIES: usize = 8;
-    const MAX_BYTES: usize = 4 * 1024 * 1024;
+    const MAX_ENTRIES: usize = 32;
+    const MAX_BYTES: usize = 16 * 1024 * 1024;
 
     pub fn get(&mut self, key: &LayoutCacheKey) -> Option<Arc<egui::Galley>> {
         let index = self.entries.iter().position(|entry| &entry.key == key)?;
@@ -80,6 +80,7 @@ impl LayoutCache {
         });
         self.bytes = self.entries.iter().map(|entry| entry.input_bytes).sum();
         if freed > 0 {
+            crate::app::capacity_metrics::record_layout_cache_eviction(freed);
             crate::app::memory_budget::record_free(
                 crate::app::memory_budget::BudgetCategory::Layout,
                 freed,

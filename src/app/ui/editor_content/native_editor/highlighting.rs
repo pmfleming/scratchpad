@@ -103,6 +103,12 @@ fn layout_job_with_highlights(
         job.halign = egui::Align::RIGHT;
     }
 
+    if selection_range.is_none() && search_highlights.ranges.is_empty() {
+        capacity_metrics::record_layout_plain_fast_path();
+        append_plain_text_segment(&mut job, text, &style);
+        return job;
+    }
+
     let char_to_byte = CharByteMap::build(text);
     let text_char_len = char_to_byte.char_len();
     let highlights = merged_highlight_ranges(search_highlights, selection_range, text_char_len);

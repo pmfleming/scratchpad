@@ -293,8 +293,21 @@ fn run_layout_capacity_cycle(bytes: usize) -> usize {
                 None,
             );
 
-            for wrap_width in [980.0, 720.0, 520.0, 980.0] {
-                let galley = layouter(ui, &text, wrap_width);
+            let mut probe_cache: std::collections::HashMap<
+                u32,
+                std::sync::Arc<eframe::egui::Galley>,
+            > = std::collections::HashMap::new();
+            for wrap_width in [980.0f32, 720.0, 520.0, 980.0] {
+                let cache_key = wrap_width.to_bits();
+                let galley = if let Some(galley) = probe_cache.get(&cache_key) {
+                    scratchpad::app::capacity_metrics::record_layout_cache_hit();
+                    galley.clone()
+                } else {
+                    scratchpad::app::capacity_metrics::record_layout_cache_miss();
+                    let galley = layouter(ui, &text, wrap_width);
+                    probe_cache.insert(cache_key, galley.clone());
+                    galley
+                };
                 total_rows += galley.rows.len().max(1);
             }
         });

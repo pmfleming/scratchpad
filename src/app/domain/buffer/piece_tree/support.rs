@@ -287,11 +287,11 @@ fn scan_piece_for_line_lookup(
 ) -> Option<(usize, usize)> {
     for ch in piece_text.chars() {
         if cursor.current_line == safe_line {
-            if ch == '\n' {
+            if matches!(ch, '\n' | '\r') {
                 return Some(cursor.line_info());
             }
             cursor.current_len += 1;
-        } else if ch == '\n' {
+        } else if matches!(ch, '\n' | '\r') {
             cursor.current_line += 1;
             cursor.line_start = cursor.current_char + 1;
             cursor.current_len = 0;
