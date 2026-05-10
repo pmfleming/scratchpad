@@ -376,6 +376,8 @@ fn render_first_visible_text_paint(buffer: &BufferState) -> usize {
         eframe::egui::Color32::WHITE,
     );
     let mut rows = 0usize;
+    let mut probe_cache: std::collections::HashMap<u32, std::sync::Arc<eframe::egui::Galley>> =
+        std::collections::HashMap::new();
 
     let _ = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
         eframe::egui::CentralPanel::default().show_inside(ui, |ui| {
@@ -387,10 +389,6 @@ fn render_first_visible_text_paint(buffer: &BufferState) -> usize {
                 SearchHighlightState::default(),
                 None,
             );
-            let mut probe_cache: std::collections::HashMap<
-                u32,
-                std::sync::Arc<eframe::egui::Galley>,
-            > = std::collections::HashMap::new();
             let cache_key = 980.0f32.to_bits();
             let galley = if let Some(galley) = probe_cache.get(&cache_key) {
                 scratchpad::app::capacity_metrics::record_layout_cache_hit();

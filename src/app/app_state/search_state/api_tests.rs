@@ -119,6 +119,59 @@ fn replace_current_advances_after_empty_replacement() {
 }
 
 #[test]
+fn replacement_preview_is_visual_and_reversible_without_document_mutation() {
+    let mut app = app_with_search_text("foo bar foo");
+    seed_search_matches(&mut app, "foo");
+    app.search_state.replace_open = true;
+    app.search_state.active_match_index = Some(0);
+    app.clear_session_dirty();
+
+    app.set_search_replacement("baz");
+
+    let tab = app.active_tab().expect("active tab");
+    let buffer = &tab.buffer;
+    let view = tab.active_view().expect("active view");
+    assert_eq!(view.search_replacement_preview.as_deref(), Some("baz"));
+    assert_eq!(buffer.text(), "foo bar foo");
+    assert!(!buffer.is_dirty);
+    assert_eq!(buffer.document().operation_undo_depth(), 0);
+    assert!(!app.session_dirty());
+
+    app.set_search_replace_open(false);
+
+    let tab = app.active_tab().expect("active tab after closing replace");
+    let buffer = &tab.buffer;
+    let view = tab
+        .active_view()
+        .expect("active view after closing replace");
+    assert_eq!(view.search_replacement_preview, None);
+    assert_eq!(buffer.text(), "foo bar foo");
+    assert!(!buffer.is_dirty);
+    assert_eq!(buffer.document().operation_undo_depth(), 0);
+    assert!(!app.session_dirty());
+
+    app.set_search_replace_open(true);
+    app.set_search_replacement("qux");
+    assert_eq!(
+        app.active_tab()
+            .and_then(|tab| tab.active_view())
+            .and_then(|view| view.search_replacement_preview.as_deref()),
+        Some("qux")
+    );
+
+    app.close_search();
+
+    let tab = app.active_tab().expect("active tab after closing search");
+    let buffer = &tab.buffer;
+    let view = tab.active_view().expect("active view after closing search");
+    assert_eq!(view.search_replacement_preview, None);
+    assert_eq!(buffer.text(), "foo bar foo");
+    assert!(!buffer.is_dirty);
+    assert_eq!(buffer.document().operation_undo_depth(), 0);
+    assert!(!app.session_dirty());
+}
+
+#[test]
 fn tab_reorder_marks_open_search_dirty() {
     let mut app = app_with_search_text("first");
     app.append_tab(WorkspaceTab::new(BufferState::new(

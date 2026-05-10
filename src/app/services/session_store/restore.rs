@@ -12,6 +12,7 @@ use crate::app::services::file_service::{FileContent, FileService};
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
+use std::thread;
 
 #[derive(Default)]
 pub(super) struct RestoreSummary {
@@ -104,10 +105,10 @@ impl SessionStore {
     }
 
     fn restore_buffers(&self, tab: &SessionTab, summary: &mut RestoreSummary) -> Vec<BufferState> {
-        session_buffers_for_tab(tab)
+        let buffers = session_buffers_for_tab(tab);
+        self.restore_buffer_contents_parallel(buffers)
             .into_iter()
-            .map(|buffer| {
-                let restored = self.restore_buffer_content(&buffer);
+            .map(|(buffer, restored)| {
                 if !buffer.is_dirty
                     && restored.freshness == BufferFreshness::InSync
                     && restored.disk_state.is_some()
@@ -137,6 +138,48 @@ impl SessionStore {
                 restored_buffer
             })
             .collect()
+    }
+
+    fn restore_buffer_contents_parallel(
+        &self,
+        buffers: Vec<SessionBuffer>,
+    ) -> Vec<(SessionBuffer, RestoredBufferContent)> {
+        let worker_count = restore_worker_count(buffers.len());
+        if worker_count <= 1 {
+            return buffers
+                .into_iter()
+                .map(|buffer| {
+                    let restored = self.restore_buffer_content(&buffer);
+                    (buffer, restored)
+                })
+                .collect();
+        }
+
+        let chunk_size = buffers.len().div_ceil(worker_count);
+        let mut chunks = buffers
+            .chunks(chunk_size)
+            .map(|chunk| chunk.to_vec())
+            .collect::<Vec<_>>();
+
+        thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(chunks.len());
+            for chunk in chunks.drain(..) {
+                handles.push(scope.spawn(move || {
+                    chunk
+                        .into_iter()
+                        .map(|buffer| {
+                            let restored = self.restore_buffer_content(&buffer);
+                            (buffer, restored)
+                        })
+                        .collect::<Vec<_>>()
+                }));
+            }
+
+            handles
+                .into_iter()
+                .flat_map(|handle| handle.join().unwrap_or_default())
+                .collect()
+        })
     }
 
     fn restore_buffer_content(&self, buffer: &SessionBuffer) -> RestoredBufferContent {
@@ -290,6 +333,16 @@ impl SessionStore {
             Err(_) => RestoredBufferContent::empty(buffer, BufferFreshness::MissingOnDisk),
         }
     }
+}
+
+fn restore_worker_count(buffer_count: usize) -> usize {
+    if buffer_count < 2 {
+        return 1;
+    }
+    thread::available_parallelism()
+        .map(|parallelism| parallelism.get().min(buffer_count).min(8))
+        .unwrap_or(1)
+        .max(1)
 }
 
 struct RestoredBufferContent {

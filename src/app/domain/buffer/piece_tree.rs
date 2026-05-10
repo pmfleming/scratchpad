@@ -489,3 +489,20 @@ impl PieceTreeLite {
         Some((piece, offset_in_piece))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::PieceTreeLite;
+
+    #[test]
+    fn line_lookup_treats_crlf_as_one_display_break() {
+        let tree = PieceTreeLite::from_string("foo\r\nbar".to_owned());
+        let line = tree.line_info(1);
+        assert_eq!(line.start_char, 5);
+        assert_eq!(line.char_len, 3);
+        assert_eq!(
+            tree.extract_range(line.start_char..line.start_char + line.char_len),
+            "bar"
+        );
+    }
+}

@@ -285,17 +285,34 @@ fn scan_piece_for_line_lookup(
     safe_line: usize,
     cursor: &mut LineLookupCursor,
 ) -> Option<(usize, usize)> {
-    for ch in piece_text.chars() {
+    let mut chars = piece_text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        let break_len = match ch {
+            '\r' if chars.peek() == Some(&'\n') => 2,
+            '\r' | '\n' => 1,
+            _ => 0,
+        };
+
         if cursor.current_line == safe_line {
-            if matches!(ch, '\n' | '\r') {
+            if break_len > 0 {
                 return Some(cursor.line_info());
             }
             cursor.current_len += 1;
-        } else if matches!(ch, '\n' | '\r') {
-            cursor.current_line += 1;
-            cursor.line_start = cursor.current_char + 1;
-            cursor.current_len = 0;
+            cursor.current_char += 1;
+            continue;
         }
+
+        if break_len > 0 {
+            if break_len == 2 {
+                let _ = chars.next();
+            }
+            cursor.current_line += 1;
+            cursor.current_char += break_len;
+            cursor.line_start = cursor.current_char;
+            cursor.current_len = 0;
+            continue;
+        }
+
         cursor.current_char += 1;
     }
     None

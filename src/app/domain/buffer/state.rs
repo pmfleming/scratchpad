@@ -687,6 +687,7 @@ fn next_temp_id() -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::super::display_line_count_from_piece_tree;
     use super::BufferState;
 
     #[test]
@@ -725,5 +726,21 @@ mod tests {
         buffer.replace_text("plain".to_owned());
 
         assert!(!buffer.show_control_chars);
+    }
+
+    #[test]
+    fn snapshot_line_count_matches_display_scan_for_mixed_line_endings() {
+        for text in [
+            "one\ntwo\r\nthree\rfour",
+            "one\r\ntwo\nthree",
+            "one\rtwo\r\nthree\nfour",
+            "one\r\n\r\ntwo",
+        ] {
+            let buffer = BufferState::new("mixed.txt".to_owned(), text.to_owned(), None);
+            let snapshot = buffer.document_snapshot();
+            let slow_count = display_line_count_from_piece_tree(buffer.document().piece_tree());
+            assert_eq!(snapshot.line_count(), slow_count, "{text:?}");
+            assert_eq!(buffer.line_count, slow_count, "{text:?}");
+        }
     }
 }

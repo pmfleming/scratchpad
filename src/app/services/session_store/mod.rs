@@ -14,6 +14,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
+use std::thread;
 
 const SESSION_DIR_NAME: &str = "scratchpad";
 const SESSION_MANIFEST_NAME: &str = "session.json";
@@ -266,9 +267,52 @@ impl SessionPersistRequest {
             active_tab_index,
             font_size,
             word_wrap,
-            tabs: tabs.iter().map(CapturedSessionTab::capture).collect(),
+            tabs: capture_session_tabs_parallel(tabs),
         }
     }
+}
+
+fn capture_session_tabs_parallel(tabs: &[WorkspaceTab]) -> Vec<CapturedSessionTab> {
+    let worker_count = capture_worker_count(tabs.len());
+    if worker_count <= 1 {
+        return tabs.iter().map(CapturedSessionTab::capture).collect();
+    }
+
+    let chunk_size = tabs.len().div_ceil(worker_count);
+    thread::scope(|scope| {
+        let mut handles = Vec::new();
+        for (chunk_index, chunk) in tabs.chunks(chunk_size).enumerate() {
+            handles.push(scope.spawn(move || {
+                chunk
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, tab)| {
+                        (
+                            chunk_index * chunk_size + offset,
+                            CapturedSessionTab::capture(tab),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            }));
+        }
+
+        let mut captured = handles
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap_or_default())
+            .collect::<Vec<_>>();
+        captured.sort_by_key(|(index, _)| *index);
+        captured.into_iter().map(|(_, tab)| tab).collect()
+    })
+}
+
+fn capture_worker_count(tab_count: usize) -> usize {
+    if tab_count < 2 {
+        return 1;
+    }
+    thread::available_parallelism()
+        .map(|parallelism| parallelism.get().min(tab_count).min(8))
+        .unwrap_or(1)
+        .max(1)
 }
 
 impl CapturedSessionTab {

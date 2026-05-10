@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread;
 
-const SEARCH_TARGET_PARALLELISM_CAP: usize = 8;
+const SEARCH_TARGET_PARALLELISM_CAP: usize = 4;
 const SEARCH_TARGET_PARALLELISM_MIN_TARGETS: usize = 4;
 const SEARCH_TARGET_PARALLELISM_MIN_CHARS: usize = 8 * 1024 * 1024;
 const INTRA_BUFFER_PARALLELISM_CAP: usize = 4;
