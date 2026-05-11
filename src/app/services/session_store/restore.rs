@@ -478,9 +478,11 @@ mod tests {
 
     #[test]
     fn restore_status_pluralizes_counts() {
-        let mut summary = RestoreSummary::default();
-        summary.conflicted_buffers = 1;
-        summary.missing_buffers = 2;
+        let summary = RestoreSummary {
+            conflicted_buffers: 1,
+            missing_buffers: 2,
+            ..RestoreSummary::default()
+        };
 
         assert_eq!(
             summary.into_status().map(|status| status.message),

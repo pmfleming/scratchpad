@@ -12,7 +12,7 @@ use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::fmt::Display;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 mod background_io;
 mod file_watch;
@@ -40,16 +40,13 @@ pub(crate) const SESSION_SNAPSHOT_INTERVAL: Duration = Duration::from_secs(1);
 const CHROME_TRANSITION_FRAMES: u8 = 2;
 const STATUS_HISTORY_LIMIT: usize = 100;
 
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) struct StatusMessage {
     pub(crate) id: u64,
-    pub(crate) created_at: SystemTime,
     pub(crate) severity: StatusSeverity,
     pub(crate) domain: StatusDomain,
     pub(crate) text: String,
     pub(crate) detail: Option<String>,
-    pub(crate) action: Option<StatusAction>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,7 +56,6 @@ pub(crate) enum StatusSeverity {
     Error,
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StatusDomain {
     File,
@@ -70,21 +66,44 @@ pub(crate) enum StatusDomain {
     Encoding,
     History,
     Layout,
-    App,
 }
 
-#[allow(dead_code)]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum StatusAction {
-    OpenSettings,
+#[derive(Default)]
+pub(crate) struct StatusState {
+    pub(crate) current: Option<StatusMessage>,
+    pub(crate) history: VecDeque<StatusMessage>,
+    pub(crate) next_id: u64,
+}
+
+pub(crate) struct RuntimeIoState {
+    pub(crate) background_io_tx: BackgroundIoDispatcher,
+    pub(crate) background_io_rx: Receiver<BackgroundIoResult>,
+    pub(crate) next_background_request_id: u64,
+    pub(crate) pending_background_actions: HashMap<u64, PendingBackgroundAction>,
+    pub(crate) file_watch_service: FileWatchService,
+    pub(crate) pending_file_watch_rescans: HashMap<PathBuf, Instant>,
+}
+
+impl RuntimeIoState {
+    fn new(
+        background_io_tx: BackgroundIoDispatcher,
+        background_io_rx: Receiver<BackgroundIoResult>,
+    ) -> Self {
+        Self {
+            background_io_tx,
+            background_io_rx,
+            next_background_request_id: 1,
+            pending_background_actions: HashMap::new(),
+            file_watch_service: FileWatchService::new(),
+            pending_file_watch_rescans: HashMap::new(),
+        }
+    }
 }
 
 pub struct ScratchpadApp {
     pub(crate) tab_manager: TabManager,
     pub(crate) app_settings: AppSettings,
-    pub(crate) current_status: Option<StatusMessage>,
-    pub(crate) status_history: VecDeque<StatusMessage>,
-    pub(crate) next_status_message_id: u64,
+    pub(crate) status: StatusState,
     pub(crate) pending_editor_focus: Option<ViewId>,
     pub(crate) encoding_dialog_open: bool,
     pub(crate) encoding_dialog_choice: String,
@@ -117,12 +136,7 @@ pub struct ScratchpadApp {
     pub(crate) startup_restore_conflicts: Vec<StartupRestoreConflict>,
     pub(crate) workspace_reflow_axis: SplitAxis,
     pub(crate) settings_preview_quote_index: usize,
-    pub(crate) background_io_tx: BackgroundIoDispatcher,
-    pub(crate) background_io_rx: Receiver<BackgroundIoResult>,
-    pub(crate) next_background_request_id: u64,
-    pub(crate) pending_background_actions: HashMap<u64, PendingBackgroundAction>,
-    pub(crate) file_watch_service: FileWatchService,
-    pub(crate) pending_file_watch_rescans: HashMap<PathBuf, Instant>,
+    pub(crate) io: RuntimeIoState,
 }
 
 impl Default for ScratchpadApp {
@@ -178,7 +192,6 @@ impl ScratchpadApp {
             domain,
             message,
             Option::<String>::None,
-            None,
         );
     }
 
@@ -192,7 +205,6 @@ impl ScratchpadApp {
             domain,
             message,
             Option::<String>::None,
-            None,
         );
     }
 
@@ -206,7 +218,6 @@ impl ScratchpadApp {
             domain,
             message,
             Option::<String>::None,
-            None,
         );
     }
 
@@ -221,7 +232,6 @@ impl ScratchpadApp {
             domain,
             message,
             Some(detail.into()),
-            None,
         );
     }
 
@@ -231,13 +241,7 @@ impl ScratchpadApp {
         message: impl Into<String>,
         detail: impl Into<String>,
     ) {
-        self.set_status(
-            StatusSeverity::Error,
-            domain,
-            message,
-            Some(detail.into()),
-            None,
-        );
+        self.set_status(StatusSeverity::Error, domain, message, Some(detail.into()));
     }
 
     pub(crate) fn report_session_save_failed(&mut self, error: impl Display) {
@@ -309,35 +313,30 @@ impl ScratchpadApp {
         domain: StatusDomain,
         message: impl Into<String>,
         detail: Option<String>,
-        action: Option<StatusAction>,
     ) {
         let status = StatusMessage {
-            id: self.next_status_message_id,
-            created_at: SystemTime::now(),
+            id: self.status.next_id,
             severity,
             domain,
             text: message.into(),
             detail,
-            action,
         };
-        self.next_status_message_id = self.next_status_message_id.saturating_add(1);
-        self.current_status = Some(status.clone());
-        self.status_history.push_back(status);
-        while self.status_history.len() > STATUS_HISTORY_LIMIT {
-            self.status_history.pop_front();
+        self.status.next_id = self.status.next_id.saturating_add(1);
+        self.status.current = Some(status.clone());
+        self.status.history.push_back(status);
+        while self.status.history.len() > STATUS_HISTORY_LIMIT {
+            self.status.history.pop_front();
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{STATUS_HISTORY_LIMIT, ScratchpadApp, StatusSeverity};
+    use super::{STATUS_HISTORY_LIMIT, ScratchpadApp, StatusSeverity, StatusState};
 
     fn app_without_startup_status() -> ScratchpadApp {
         let mut app = ScratchpadApp::default();
-        app.current_status = None;
-        app.status_history.clear();
-        app.next_status_message_id = 0;
+        app.status = StatusState::default();
         app
     }
 
@@ -360,21 +359,21 @@ mod tests {
     fn status_setters_preserve_severity() {
         let mut app = app_without_startup_status();
 
-        app.set_info_status_in_domain(super::StatusDomain::App, "Saved.");
+        app.set_info_status_in_domain(super::StatusDomain::Disk, "Saved.");
         assert_eq!(
-            app.current_status.as_ref().map(|status| status.severity),
+            app.status.current.as_ref().map(|status| status.severity),
             Some(StatusSeverity::Info)
         );
 
         app.set_warning_status_in_domain(super::StatusDomain::Disk, "Changed on disk.");
         assert_eq!(
-            app.current_status.as_ref().map(|status| status.severity),
+            app.status.current.as_ref().map(|status| status.severity),
             Some(StatusSeverity::Warning)
         );
 
         app.set_error_status_in_domain(super::StatusDomain::Disk, "Could not save.");
         assert_eq!(
-            app.current_status.as_ref().map(|status| status.severity),
+            app.status.current.as_ref().map(|status| status.severity),
             Some(StatusSeverity::Error)
         );
     }
@@ -386,11 +385,12 @@ mod tests {
         app.set_info_status_in_domain(super::StatusDomain::Disk, "Saved.");
         app.set_warning_status_in_domain(super::StatusDomain::Disk, "Changed on disk.");
 
-        assert_eq!(app.status_history.len(), 2);
-        assert_eq!(app.status_history[0].text, "Saved.");
-        assert_eq!(app.status_history[1].text, "Changed on disk.");
+        assert_eq!(app.status.history.len(), 2);
+        assert_eq!(app.status.history[0].text, "Saved.");
+        assert_eq!(app.status.history[1].text, "Changed on disk.");
         assert_eq!(
-            app.current_status
+            app.status
+                .current
                 .as_ref()
                 .map(|status| status.text.as_str()),
             Some("Changed on disk.")
@@ -402,13 +402,13 @@ mod tests {
         let mut app = app_without_startup_status();
 
         for index in 0..(STATUS_HISTORY_LIMIT + 5) {
-            app.set_info_status_in_domain(super::StatusDomain::App, format!("Message {index}."));
+            app.set_info_status_in_domain(super::StatusDomain::Disk, format!("Message {index}."));
         }
 
-        assert_eq!(app.status_history.len(), STATUS_HISTORY_LIMIT);
-        assert_eq!(app.status_history.front().map(|status| status.id), Some(5));
+        assert_eq!(app.status.history.len(), STATUS_HISTORY_LIMIT);
+        assert_eq!(app.status.history.front().map(|status| status.id), Some(5));
         assert_eq!(
-            app.status_history.back().map(|status| status.id),
+            app.status.history.back().map(|status| status.id),
             Some((STATUS_HISTORY_LIMIT + 4) as u64)
         );
     }
@@ -420,9 +420,9 @@ mod tests {
 
         app.clear_status_message();
 
-        assert!(app.current_status.is_none());
-        assert_eq!(app.status_history.len(), 1);
-        assert_eq!(app.status_history[0].text, "Could not save.");
+        assert!(app.status.current.is_none());
+        assert_eq!(app.status.history.len(), 1);
+        assert_eq!(app.status.history[0].text, "Could not save.");
     }
 
     #[test]
@@ -431,13 +431,15 @@ mod tests {
 
         app.report_session_save_failed("access denied");
         assert_eq!(
-            app.current_status
+            app.status
+                .current
                 .as_ref()
                 .map(|status| status.text.as_str()),
             Some("Could not save your session.")
         );
         assert_eq!(
-            app.current_status
+            app.status
+                .current
                 .as_ref()
                 .and_then(|status| status.detail.as_deref()),
             Some("access denied")
@@ -445,13 +447,15 @@ mod tests {
 
         app.report_settings_toml_parse_failed("expected key");
         assert_eq!(
-            app.current_status
+            app.status
+                .current
                 .as_ref()
                 .map(|status| status.text.as_str()),
             Some("Could not apply settings.toml.")
         );
         assert_eq!(
-            app.current_status
+            app.status
+                .current
                 .as_ref()
                 .and_then(|status| status.detail.as_deref()),
             Some("expected key")
@@ -463,11 +467,11 @@ mod tests {
         let mut app = app_without_startup_status();
 
         app.report_session_save_failed("disk full");
-        let session_save = app.current_status.as_ref().unwrap().text.clone();
+        let session_save = app.status.current.as_ref().unwrap().text.clone();
         app.report_settings_toml_parse_failed("bad toml");
-        let settings_toml = app.current_status.as_ref().unwrap().text.clone();
+        let settings_toml = app.status.current.as_ref().unwrap().text.clone();
         app.report_search_results_stale_for_replace();
-        let stale_search = app.current_status.as_ref().unwrap().text.clone();
+        let stale_search = app.status.current.as_ref().unwrap().text.clone();
 
         primary_texts_are_clean(&[&session_save, &settings_toml, &stale_search]);
     }

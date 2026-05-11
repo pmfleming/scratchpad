@@ -114,7 +114,7 @@ pub(crate) enum BackgroundIoResult {
     },
     SessionTabRestored {
         request_id: u64,
-        tab: WorkspaceTab,
+        tab: Box<WorkspaceTab>,
     },
     SessionPersisted {
         request_id: u64,

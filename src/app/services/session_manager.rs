@@ -15,7 +15,7 @@ pub(crate) fn maybe_persist_session(app: &mut ScratchpadApp, ctx: &egui::Context
     if app.last_session_persist.elapsed() < crate::app::app_state::SESSION_SNAPSHOT_INTERVAL {
         return;
     }
-    if app.pending_background_actions.values().any(|action| {
+    if app.io.pending_background_actions.values().any(|action| {
         matches!(
             action,
             crate::app::app_state::PendingBackgroundAction::PersistSession(_)

@@ -1,10 +1,9 @@
-use super::{AppSurface, ScratchpadApp, SearchState, StatusDomain};
+use super::{AppSurface, RuntimeIoState, ScratchpadApp, SearchState, StatusDomain};
 use crate::app::diagnostics;
 use crate::app::domain::TabManager;
 use crate::app::services::background_io::spawn_background_io_worker;
 use crate::app::services::file_controller::FileController;
 use crate::app::services::file_service::FileService;
-use crate::app::services::file_watch::FileWatchService;
 use crate::app::services::manual_files;
 use crate::app::services::session_manager;
 use crate::app::services::session_store::SessionStore;
@@ -83,9 +82,7 @@ impl ScratchpadApp {
         let mut app = Self {
             tab_manager: TabManager::default(),
             app_settings: AppSettings::default(),
-            current_status: None,
-            status_history: std::collections::VecDeque::new(),
-            next_status_message_id: 0,
+            status: super::StatusState::default(),
             pending_editor_focus: None,
             encoding_dialog_open: false,
             encoding_dialog_choice: "UTF-8".to_owned(),
@@ -118,12 +115,7 @@ impl ScratchpadApp {
             startup_restore_conflicts: Vec::new(),
             workspace_reflow_axis: crate::app::domain::SplitAxis::Vertical,
             settings_preview_quote_index: 2,
-            background_io_tx,
-            background_io_rx,
-            next_background_request_id: 1,
-            pending_background_actions: std::collections::HashMap::new(),
-            file_watch_service: FileWatchService::new(),
-            pending_file_watch_rescans: std::collections::HashMap::new(),
+            io: RuntimeIoState::new(background_io_tx, background_io_rx),
         };
 
         let loaded_from_settings = app.load_settings_from_store();

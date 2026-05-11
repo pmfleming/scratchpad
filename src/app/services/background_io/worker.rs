@@ -342,7 +342,10 @@ fn stream_restore_session(
         },
         |tab| {
             if result_tx
-                .send(BackgroundIoResult::SessionTabRestored { request_id, tab })
+                .send(BackgroundIoResult::SessionTabRestored {
+                    request_id,
+                    tab: Box::new(tab),
+                })
                 .is_err()
             {
                 send_failed.set(true);

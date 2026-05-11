@@ -77,7 +77,7 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn clear_status_message(&mut self) {
-        self.current_status = None;
+        self.status.current = None;
     }
 
     pub(crate) fn open_status_history(&mut self) {

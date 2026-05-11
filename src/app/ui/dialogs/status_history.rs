@@ -49,7 +49,7 @@ pub(crate) fn show_status_history_window(ctx: &egui::Context, app: &mut Scratchp
         return;
     }
 
-    let rows = status_history_rows(app.status_history.iter());
+    let rows = status_history_rows(app.status.history.iter());
     let filter = read_filter(ctx);
     let mut next_filter = filter;
     let mut close_requested = false;
@@ -302,7 +302,6 @@ fn domain_label(domain: StatusDomain) -> &'static str {
         StatusDomain::Encoding => "Encoding",
         StatusDomain::History => "History",
         StatusDomain::Layout => "Layout",
-        StatusDomain::App => "App",
     }
 }
 
@@ -336,8 +335,6 @@ fn filter_id() -> egui::Id {
 mod tests {
     use super::*;
     use crate::app::app_state::StatusMessage;
-    use std::time::SystemTime;
-
     #[test]
     fn status_history_rows_are_newest_first() {
         let older = message(1, "Older");
@@ -373,12 +370,10 @@ mod tests {
     fn message(id: u64, text: &str) -> StatusMessage {
         StatusMessage {
             id,
-            created_at: SystemTime::UNIX_EPOCH,
             severity: StatusSeverity::Info,
-            domain: StatusDomain::App,
+            domain: StatusDomain::Disk,
             text: text.to_owned(),
             detail: None,
-            action: None,
         }
     }
 }

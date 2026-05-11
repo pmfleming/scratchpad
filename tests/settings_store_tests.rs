@@ -15,13 +15,15 @@ fn missing_settings_file_returns_none() {
 fn save_and_load_round_trip_toml_settings() {
     let directory = tempfile::tempdir().unwrap();
     let store = SettingsStore::new(directory.path().to_path_buf());
-    let mut settings = AppSettings::default();
-    settings.font_size = 18.0;
-    settings.word_wrap = false;
-    settings.editor_font = EditorFontPreset::Mono;
-    settings.tab_list_position = TabListPosition::Left;
-    settings.file_open_disposition = FileOpenDisposition::CurrentTab;
-    settings.startup_session_behavior = StartupSessionBehavior::StartFreshSession;
+    let settings = AppSettings {
+        font_size: 18.0,
+        word_wrap: false,
+        editor_font: EditorFontPreset::Mono,
+        tab_list_position: TabListPosition::Left,
+        file_open_disposition: FileOpenDisposition::CurrentTab,
+        startup_session_behavior: StartupSessionBehavior::StartFreshSession,
+        ..AppSettings::default()
+    };
 
     store.save(&settings).unwrap();
     let loaded = store.load().unwrap().unwrap();

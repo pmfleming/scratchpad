@@ -15,7 +15,7 @@ impl ScratchpadApp {
         self.collect_file_watch_events();
         self.apply_due_file_watch_rescans();
 
-        if !self.pending_file_watch_rescans.is_empty() {
+        if !self.io.pending_file_watch_rescans.is_empty() {
             ctx.request_repaint_after(FILE_WATCH_DEBOUNCE);
         }
     }
@@ -25,15 +25,15 @@ impl ScratchpadApp {
             .open_file_parent_directories()
             .into_iter()
             .collect::<BTreeSet<_>>();
-        self.file_watch_service.set_watched_directories(dirs);
+        self.io.file_watch_service.set_watched_directories(dirs);
     }
 
     fn collect_file_watch_events(&mut self) {
         let due_at = Instant::now() + FILE_WATCH_DEBOUNCE;
-        for event in self.file_watch_service.drain_events() {
+        for event in self.io.file_watch_service.drain_events() {
             match event {
                 FileWatchEvent::DirectoryChanged(dir) => {
-                    self.pending_file_watch_rescans.insert(dir, due_at);
+                    self.io.pending_file_watch_rescans.insert(dir, due_at);
                 }
             }
         }
@@ -42,13 +42,14 @@ impl ScratchpadApp {
     fn apply_due_file_watch_rescans(&mut self) {
         let now = Instant::now();
         let due_dirs = self
+            .io
             .pending_file_watch_rescans
             .iter()
             .filter_map(|(dir, due_at)| (*due_at <= now).then_some(dir.clone()))
             .collect::<Vec<_>>();
 
         for dir in &due_dirs {
-            self.pending_file_watch_rescans.remove(dir);
+            self.io.pending_file_watch_rescans.remove(dir);
         }
 
         if due_dirs.is_empty() {
