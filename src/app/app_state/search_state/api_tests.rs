@@ -131,7 +131,7 @@ fn replacement_preview_is_visual_and_reversible_without_document_mutation() {
     let tab = app.active_tab().expect("active tab");
     let buffer = &tab.buffer;
     let view = tab.active_view().expect("active view");
-    assert_eq!(view.search_replacement_preview.as_deref(), Some("baz"));
+    assert_eq!(replacement_preview_values(view), Some(vec!["baz", "baz"]));
     assert_eq!(buffer.text(), "foo bar foo");
     assert!(!buffer.is_dirty);
     assert_eq!(buffer.document().operation_undo_depth(), 0);
@@ -155,8 +155,8 @@ fn replacement_preview_is_visual_and_reversible_without_document_mutation() {
     assert_eq!(
         app.active_tab()
             .and_then(|tab| tab.active_view())
-            .and_then(|view| view.search_replacement_preview.as_deref()),
-        Some("qux")
+            .and_then(replacement_preview_values),
+        Some(vec!["qux", "qux"])
     );
 
     app.close_search();
@@ -320,6 +320,16 @@ fn active_view_replacement_preview(
     app.active_tab()
         .and_then(|tab| tab.active_view())
         .and_then(|view| view.search_replacement_preview.as_ref())
+}
+
+fn replacement_preview_values(view: &crate::app::domain::EditorViewState) -> Option<Vec<&str>> {
+    view.search_replacement_preview.as_ref().map(|preview| {
+        preview
+            .entries
+            .iter()
+            .map(|entry| entry.replacement.as_str())
+            .collect()
+    })
 }
 
 fn active_search_match(app: &ScratchpadApp) -> Option<&SearchMatch> {

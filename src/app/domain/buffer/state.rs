@@ -1,20 +1,17 @@
-use super::analysis::{IncrementalMetadataEdit, buffer_text_metadata_from_edit};
 use super::{
-    BufferLength, BufferTextMetadata, DocumentSnapshot, EncodingSource, LineEndingStyle,
-    PieceSource, TextArtifactSummary, TextDocument, TextDocumentOperationRecord,
-    TextFormatMetadata, TextHistoryApplyError, TextReplacementError, TextReplacements,
-    buffer_text_metadata, buffer_text_metadata_from_piece_tree,
+    BufferLength, BufferTextMetadata, DocumentSnapshot, EncodingSource, PieceSource,
+    TextArtifactSummary, TextDocument, TextFormatMetadata, TextHistoryApplyError,
+    TextReplacementError, TextReplacements, buffer_text_metadata,
 };
 use crate::app::capacity_metrics;
 use crate::app::ui::editor_content::native_editor::{CursorRange, OperationRecord};
 use std::ops::Range;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(1);
-static NEXT_TEMP_BUFFER_ID: AtomicU64 = AtomicU64::new(1);
+mod identity;
+mod metadata;
+
+use identity::{next_buffer_id, next_temp_id, register_existing_buffer_id};
 
 pub type BufferId = u64;
 
@@ -396,88 +393,6 @@ impl BufferState {
         Ok(selection)
     }
 
-    pub fn refresh_text_metadata(&mut self) {
-        capacity_metrics::record_metadata_full_scan(self.document.piece_tree().len_bytes());
-        let metadata =
-            buffer_text_metadata_from_piece_tree(self.document.piece_tree(), &mut self.format);
-        self.apply_text_metadata(metadata);
-    }
-
-    pub fn refresh_text_metadata_after_operation(
-        &mut self,
-        operation: Option<&TextDocumentOperationRecord>,
-    ) {
-        if self.text_metadata_refresh_stale {
-            self.refresh_text_metadata();
-            return;
-        }
-
-        if operation.is_some_and(|operation| self.can_skip_metadata_rescan(operation)) {
-            capacity_metrics::record_metadata_skip();
-            return;
-        }
-
-        if let Some(metadata) = operation
-            .and_then(|operation| self.incremental_text_metadata_after_operation(operation))
-        {
-            capacity_metrics::record_metadata_incremental();
-            self.apply_text_metadata(metadata);
-            return;
-        }
-
-        self.refresh_text_metadata();
-    }
-
-    pub fn recheck_encoding_compliance(&mut self) {
-        if !self.encoding_compliance_stale {
-            return;
-        }
-        let started = Instant::now();
-        let tree = self.document.piece_tree();
-        self.has_non_compliant_characters = self.format.has_non_compliant_characters_spans(
-            tree.spans_for_range(0..tree.len_chars()).map(|s| s.text),
-        );
-        capacity_metrics::record_encoding_compliance_scan(tree.len_bytes(), started.elapsed());
-        self.encoding_compliance_stale = false;
-    }
-
-    pub fn encoding_compliance_refresh_needed(&self) -> bool {
-        self.encoding_compliance_stale
-    }
-
-    pub fn text_metadata_refresh_needed(&self) -> bool {
-        self.text_metadata_refresh_stale
-    }
-
-    pub fn apply_encoding_compliance_refresh(&mut self, revision: u64, has_non_compliant: bool) {
-        if self.document_revision() != revision {
-            return;
-        }
-        self.has_non_compliant_characters = has_non_compliant;
-        self.encoding_compliance_stale = false;
-    }
-
-    pub fn apply_text_metadata_refresh(
-        &mut self,
-        revision: u64,
-        line_count: usize,
-        artifact_summary: TextArtifactSummary,
-        format: TextFormatMetadata,
-    ) {
-        if self.document_revision() != revision {
-            return;
-        }
-
-        self.line_count = line_count;
-        self.artifact_summary = artifact_summary;
-        self.format = format;
-        self.apply_text_metadata_fields(
-            line_count,
-            self.artifact_summary.clone(),
-            self.format.preferred_line_ending_style(),
-        );
-    }
-
     pub fn sync_to_disk_state(&mut self, disk_state: Option<DiskFileState>) {
         self.set_disk_state(disk_state, BufferFreshness::InSync);
     }
@@ -569,120 +484,10 @@ impl BufferState {
         self.refresh_text_metadata();
     }
 
-    fn apply_text_metadata(&mut self, metadata: BufferTextMetadata) {
-        self.apply_text_metadata_fields(
-            metadata.line_count,
-            metadata.artifact_summary,
-            metadata.preferred_line_ending,
-        );
-    }
-
-    fn apply_text_metadata_fields(
-        &mut self,
-        line_count: usize,
-        artifact_summary: TextArtifactSummary,
-        preferred_line_ending: LineEndingStyle,
-    ) {
-        self.line_count = line_count;
-        self.artifact_summary = artifact_summary;
-        self.document
-            .set_preferred_line_ending(preferred_line_ending);
-        if self.show_control_chars && !self.has_visible_control_substitutions() {
-            self.show_control_chars = false;
-        }
-        self.text_metadata_refresh_stale = false;
-        self.encoding_compliance_stale = true;
-    }
-
-    fn sync_document_preferred_line_ending(&mut self) {
-        self.document
-            .set_preferred_line_ending(self.format.preferred_line_ending_style());
-    }
-
-    fn can_skip_metadata_rescan(&self, operation: &TextDocumentOperationRecord) -> bool {
-        self.format.is_ascii_subset
-            && !self.artifact_summary.has_control_chars()
-            && operation.edits.iter().all(|edit| {
-                metadata_neutral_ascii_text(&edit.deleted_text)
-                    && metadata_neutral_ascii_text(&edit.inserted_text)
-            })
-    }
-
-    fn incremental_text_metadata_after_operation(
-        &mut self,
-        operation: &TextDocumentOperationRecord,
-    ) -> Option<BufferTextMetadata> {
-        let tree = self.document.piece_tree();
-        let mut line_count = self.line_count;
-        let mut artifact_summary = self.artifact_summary.clone();
-        let mut last_metadata = None;
-
-        for edit in &operation.edits {
-            let start_char = edit.start_char.min(tree.len_chars());
-            let inserted_char_len = edit.inserted_text.chars().count();
-            let previous_char = start_char
-                .checked_sub(1)
-                .and_then(|index| tree.char_at(index));
-            let next_char = tree.char_at(start_char.saturating_add(inserted_char_len));
-
-            let metadata = buffer_text_metadata_from_edit(
-                line_count,
-                &artifact_summary,
-                &mut self.format,
-                IncrementalMetadataEdit {
-                    previous_char,
-                    deleted_text: &edit.deleted_text,
-                    inserted_text: &edit.inserted_text,
-                    next_char,
-                },
-            )?;
-            line_count = metadata.line_count;
-            artifact_summary = metadata.artifact_summary.clone();
-            last_metadata = Some(metadata);
-        }
-
-        last_metadata
-    }
-
     fn set_disk_state(&mut self, disk_state: Option<DiskFileState>, freshness: BufferFreshness) {
         self.disk_state = disk_state;
         self.freshness = freshness;
     }
-}
-
-fn metadata_neutral_ascii_text(text: &str) -> bool {
-    text.bytes()
-        .all(|byte| byte.is_ascii() && !matches!(byte, b'\n' | b'\r' | 0x00..=0x1F))
-}
-
-fn next_buffer_id() -> BufferId {
-    NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed)
-}
-
-fn register_existing_buffer_id(id: BufferId) {
-    let next_id = id.saturating_add(1);
-    let mut current = NEXT_BUFFER_ID.load(Ordering::Relaxed);
-
-    while current < next_id {
-        match NEXT_BUFFER_ID.compare_exchange(
-            current,
-            next_id,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        ) {
-            Ok(_) => break,
-            Err(observed) => current = observed,
-        }
-    }
-}
-
-fn next_temp_id() -> String {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    let sequence = NEXT_TEMP_BUFFER_ID.fetch_add(1, Ordering::Relaxed);
-    format!("buffer-{timestamp}-{sequence}")
 }
 
 #[cfg(test)]
