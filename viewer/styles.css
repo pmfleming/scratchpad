@@ -684,9 +684,12 @@ h2 {
 }
 
 .run-button {
+    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: 8px;
+    min-width: 92px;
     padding: 9px 13px;
     color: var(--text);
     border: 1px solid rgba(111, 208, 255, 0.42);
@@ -706,6 +709,55 @@ h2 {
 .run-button[disabled] {
     cursor: wait;
     opacity: 0.65;
+}
+
+.run-button.is-progress {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 148px;
+    gap: 5px;
+    padding-block: 7px;
+    text-align: left;
+    opacity: 1;
+}
+
+.run-button__content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-width: 0;
+    gap: 10px;
+}
+
+.run-button__label,
+.run-button__task {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.run-button__meta,
+.run-button__task {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.run-button__progress {
+    overflow: hidden;
+    width: 100%;
+    height: 6px;
+    border: 1px solid rgba(159, 176, 195, 0.24);
+    border-radius: 999px;
+    background: rgba(11, 15, 20, 0.88);
+}
+
+.run-button__progress span {
+    display: block;
+    min-width: 2px;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    transition: width 180ms ease;
 }
 
 .performance-review-coverage {

@@ -10,18 +10,23 @@ impl PieceTreeLite {
         self.insert_with_source(offset_chars, text, PieceSource::Edit);
     }
 
-    pub fn insert_with_source(&mut self, offset_chars: usize, text: &str, source: PieceSource) {
+    pub fn insert_with_source(
+        &mut self,
+        offset_chars: usize,
+        text: &str,
+        source: PieceSource,
+    ) -> usize {
         assert!(offset_chars <= self.len_chars());
         if text.is_empty() {
-            return;
+            return 0;
         }
         self.generation = self.generation.wrapping_add(1);
-        let inserted_chars = text.chars().count();
 
         let add_start = self.add.len();
         self.add.push_str(text);
         self.record_add_provenance(add_start, text.len(), source);
         let inserted_pieces = build_chunked_pieces(PieceBuffer::Add, add_start, text);
+        let inserted_chars = inserted_pieces.iter().map(|piece| piece.char_len).sum();
 
         let address = self.find_leaf_for_char_offset(offset_chars);
         let replacement = {
@@ -36,6 +41,7 @@ impl PieceTreeLite {
         let anchors = self.reposition_inserted_leaf_anchors(address, offset_chars, inserted_chars);
         self.redistribute_anchors_into_leaves(&mut replacement_leaves, anchors);
         self.replace_leaf_span(address, address, replacement_leaves);
+        inserted_chars
     }
 
     pub fn remove_range(&mut self, range_chars: Range<usize>) {

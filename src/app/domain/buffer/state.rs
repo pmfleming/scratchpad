@@ -7,6 +7,7 @@ use super::{
 };
 use crate::app::ui::editor_content::native_editor::{CursorRange, OperationRecord};
 use std::ops::Range;
+use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -19,8 +20,14 @@ pub type BufferId = u64;
 #[derive(Clone)]
 pub struct BufferState {
     pub id: BufferId,
-    pub name: String,
     document: TextDocument,
+    state: BufferStateFields,
+    refresh: BufferRefreshState,
+}
+
+#[derive(Clone)]
+pub struct BufferStateFields {
+    pub name: String,
     pub path: Option<PathBuf>,
     pub is_dirty: bool,
     pub is_settings_file: bool,
@@ -34,9 +41,27 @@ pub struct BufferState {
     pub freshness: BufferFreshness,
     pub active_selection: Option<Range<usize>>,
     pub has_non_compliant_characters: bool,
+}
+
+#[derive(Clone)]
+struct BufferRefreshState {
     text_metadata_refresh_stale: bool,
     encoding_compliance_stale: bool,
     pending_text_history_event: Option<TextHistoryEvent>,
+}
+
+impl Deref for BufferState {
+    type Target = BufferStateFields;
+
+    fn deref(&self) -> &Self::Target {
+        &self.state
+    }
+}
+
+impl DerefMut for BufferState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
+    }
 }
 
 #[derive(Clone)]
@@ -293,27 +318,21 @@ impl BufferState {
     }
 
     pub fn replace_from_loaded_buffer(&mut self, loaded: BufferState) {
-        self.name = loaded.name;
         self.document = loaded.document;
-        self.path = loaded.path;
-        self.line_count = loaded.line_count;
-        self.artifact_summary = loaded.artifact_summary;
-        self.format = loaded.format;
-        self.disk_state = loaded.disk_state;
-        self.freshness = loaded.freshness;
-        self.show_control_chars = loaded.show_control_chars;
-        self.right_to_left_reading_order = loaded.right_to_left_reading_order;
-        self.active_selection = None;
-        self.has_non_compliant_characters = loaded.has_non_compliant_characters;
-        self.text_metadata_refresh_stale = loaded.text_metadata_refresh_stale;
-        self.encoding_compliance_stale = loaded.encoding_compliance_stale;
-        self.pending_text_history_event = None;
+        self.state = BufferStateFields {
+            active_selection: None,
+            ..loaded.state
+        };
+        self.refresh = BufferRefreshState {
+            pending_text_history_event: None,
+            ..loaded.refresh
+        };
     }
 
     pub fn replace_format_without_text_change(&mut self, format: TextFormatMetadata) {
         self.format = format;
         self.sync_document_preferred_line_ending();
-        self.encoding_compliance_stale = true;
+        self.refresh.encoding_compliance_stale = true;
     }
 
     pub(crate) fn replace_char_ranges_with_undo(
@@ -327,7 +346,7 @@ impl BufferState {
             previous_selection,
             next_selection,
         )?;
-        self.pending_text_history_event = Some(TextHistoryEvent::Edit);
+        self.refresh.pending_text_history_event = Some(TextHistoryEvent::Edit);
         self.refresh_text_metadata();
         Ok(())
     }
@@ -339,11 +358,11 @@ impl BufferState {
     ) {
         self.document
             .push_edit_operation_with_source(record, source);
-        self.pending_text_history_event = Some(TextHistoryEvent::Edit);
+        self.refresh.pending_text_history_event = Some(TextHistoryEvent::Edit);
     }
 
     pub(crate) fn take_text_history_event(&mut self) -> Option<TextHistoryEvent> {
-        self.pending_text_history_event.take()
+        self.refresh.pending_text_history_event.take()
     }
 
     pub(crate) fn validate_char_replacements(
@@ -355,14 +374,14 @@ impl BufferState {
 
     pub fn undo_last_text_operation(&mut self) -> Option<CursorRange> {
         let selection = self.document.undo_last_operation()?;
-        self.pending_text_history_event = Some(TextHistoryEvent::Replay);
+        self.refresh.pending_text_history_event = Some(TextHistoryEvent::Replay);
         self.refresh_text_metadata();
         Some(selection)
     }
 
     pub fn redo_last_text_operation(&mut self) -> Option<CursorRange> {
         let selection = self.document.redo_last_operation()?;
-        self.pending_text_history_event = Some(TextHistoryEvent::Replay);
+        self.refresh.pending_text_history_event = Some(TextHistoryEvent::Replay);
         self.refresh_text_metadata();
         Some(selection)
     }
@@ -372,7 +391,7 @@ impl BufferState {
         entry_id: u64,
     ) -> Result<CursorRange, TextHistoryApplyError> {
         let selection = self.document.apply_text_history_undo(entry_id)?;
-        self.pending_text_history_event = Some(TextHistoryEvent::Replay);
+        self.refresh.pending_text_history_event = Some(TextHistoryEvent::Replay);
         self.refresh_text_metadata();
         Ok(selection)
     }
@@ -382,14 +401,16 @@ impl BufferState {
         entry_id: u64,
     ) -> Result<CursorRange, TextHistoryApplyError> {
         let selection = self.document.apply_text_history_redo(entry_id)?;
-        self.pending_text_history_event = Some(TextHistoryEvent::Replay);
+        self.refresh.pending_text_history_event = Some(TextHistoryEvent::Replay);
         self.refresh_text_metadata();
         Ok(selection)
     }
 
     pub fn refresh_text_metadata(&mut self) {
-        let metadata =
-            buffer_text_metadata_from_piece_tree(self.document.piece_tree(), &mut self.format);
+        let metadata = buffer_text_metadata_from_piece_tree(
+            self.document.piece_tree(),
+            &mut self.state.format,
+        );
         self.apply_text_metadata(metadata);
     }
 
@@ -397,7 +418,7 @@ impl BufferState {
         &mut self,
         operation: Option<&TextDocumentOperationRecord>,
     ) {
-        if self.text_metadata_refresh_stale {
+        if self.refresh.text_metadata_refresh_stale {
             self.refresh_text_metadata();
             return;
         }
@@ -417,22 +438,22 @@ impl BufferState {
     }
 
     pub fn recheck_encoding_compliance(&mut self) {
-        if !self.encoding_compliance_stale {
+        if !self.refresh.encoding_compliance_stale {
             return;
         }
         let tree = self.document.piece_tree();
         self.has_non_compliant_characters = self.format.has_non_compliant_characters_spans(
             tree.spans_for_range(0..tree.len_chars()).map(|s| s.text),
         );
-        self.encoding_compliance_stale = false;
+        self.refresh.encoding_compliance_stale = false;
     }
 
     pub fn encoding_compliance_refresh_needed(&self) -> bool {
-        self.encoding_compliance_stale
+        self.refresh.encoding_compliance_stale
     }
 
     pub fn text_metadata_refresh_needed(&self) -> bool {
-        self.text_metadata_refresh_stale
+        self.refresh.text_metadata_refresh_stale
     }
 
     pub fn apply_encoding_compliance_refresh(&mut self, revision: u64, has_non_compliant: bool) {
@@ -440,7 +461,7 @@ impl BufferState {
             return;
         }
         self.has_non_compliant_characters = has_non_compliant;
-        self.encoding_compliance_stale = false;
+        self.refresh.encoding_compliance_stale = false;
     }
 
     pub fn apply_text_metadata_refresh(
@@ -454,14 +475,9 @@ impl BufferState {
             return;
         }
 
-        self.line_count = line_count;
-        self.artifact_summary = artifact_summary;
+        let preferred_line_ending = format.preferred_line_ending_style();
         self.format = format;
-        self.apply_text_metadata_fields(
-            line_count,
-            self.artifact_summary.clone(),
-            self.format.preferred_line_ending_style(),
-        );
+        self.apply_text_metadata_fields(line_count, artifact_summary, preferred_line_ending);
     }
 
     pub fn sync_to_disk_state(&mut self, disk_state: Option<DiskFileState>) {
@@ -537,24 +553,28 @@ impl BufferState {
     ) -> Self {
         Self {
             id,
-            name: state.name,
             document,
-            path: state.path,
-            is_dirty: state.is_dirty,
-            is_settings_file: false,
-            show_control_chars: state.show_control_chars,
-            right_to_left_reading_order: state.right_to_left_reading_order,
-            temp_id: state.temp_id,
-            line_count: text_metadata.line_count,
-            artifact_summary: text_metadata.artifact_summary,
-            format: state.format,
-            disk_state: state.disk_state,
-            freshness: state.freshness,
-            active_selection: None,
-            has_non_compliant_characters: text_metadata.has_non_compliant_characters,
-            text_metadata_refresh_stale: state.text_metadata_refresh_stale,
-            encoding_compliance_stale: false,
-            pending_text_history_event: None,
+            state: BufferStateFields {
+                name: state.name,
+                path: state.path,
+                is_dirty: state.is_dirty,
+                is_settings_file: false,
+                show_control_chars: state.show_control_chars,
+                right_to_left_reading_order: state.right_to_left_reading_order,
+                temp_id: state.temp_id,
+                line_count: text_metadata.line_count,
+                artifact_summary: text_metadata.artifact_summary,
+                format: state.format,
+                disk_state: state.disk_state,
+                freshness: state.freshness,
+                active_selection: None,
+                has_non_compliant_characters: text_metadata.has_non_compliant_characters,
+            },
+            refresh: BufferRefreshState {
+                text_metadata_refresh_stale: state.text_metadata_refresh_stale,
+                encoding_compliance_stale: false,
+                pending_text_history_event: None,
+            },
         }
     }
 
@@ -587,8 +607,8 @@ impl BufferState {
         if self.show_control_chars && !self.has_visible_control_substitutions() {
             self.show_control_chars = false;
         }
-        self.text_metadata_refresh_stale = false;
-        self.encoding_compliance_stale = true;
+        self.refresh.text_metadata_refresh_stale = false;
+        self.refresh.encoding_compliance_stale = true;
     }
 
     fn sync_document_preferred_line_ending(&mut self) {
@@ -623,9 +643,9 @@ impl BufferState {
         let next_char = tree.char_at(start_char.saturating_add(inserted_char_len));
 
         buffer_text_metadata_from_edit(
-            self.line_count,
-            &self.artifact_summary,
-            &mut self.format,
+            self.state.line_count,
+            &self.state.artifact_summary,
+            &mut self.state.format,
             IncrementalMetadataEdit {
                 previous_char,
                 deleted_text: &edit.deleted_text,

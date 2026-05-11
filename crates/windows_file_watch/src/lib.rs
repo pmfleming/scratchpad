@@ -205,12 +205,7 @@ fn windows_watch_loop(command_rx: Receiver<WatchCommand>, event_tx: Sender<FileW
         for (chunk_index, chunk) in watches.chunks(MAXIMUM_WAIT_OBJECTS).enumerate() {
             let handles = chunk.iter().map(|watch| watch.handle).collect::<Vec<_>>();
             let wait_result = unsafe {
-                WaitForMultipleObjects(
-                    handles.len() as u32,
-                    handles.as_ptr(),
-                    FALSE,
-                    chunk_timeout,
-                )
+                WaitForMultipleObjects(handles.len() as u32, handles.as_ptr(), FALSE, chunk_timeout)
             };
             if wait_result == WAIT_TIMEOUT || wait_result == WAIT_FAILED {
                 continue;

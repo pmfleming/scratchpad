@@ -3,6 +3,41 @@ use super::{
     PREVIEW_MAX_CHARS, Piece, PieceBuffer, PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLite,
     PieceTreeMetrics, PieceTreeRoot,
 };
+use memchr::memchr_iter;
+
+pub(super) struct PieceTextMetrics {
+    pub byte_len: usize,
+    pub char_len: usize,
+    pub newline_count: usize,
+    pub is_ascii: bool,
+}
+
+pub(super) fn measure_text(text: &str) -> PieceTextMetrics {
+    let bytes = text.as_bytes();
+    let byte_len = bytes.len();
+    if bytes.is_ascii() {
+        return PieceTextMetrics {
+            byte_len,
+            char_len: byte_len,
+            newline_count: memchr_iter(b'\n', bytes).count(),
+            is_ascii: true,
+        };
+    }
+
+    let mut char_len = 0usize;
+    let mut newline_count = 0usize;
+    for &byte in bytes {
+        char_len += usize::from((byte & 0b1100_0000) != 0b1000_0000);
+        newline_count += usize::from(byte == b'\n');
+    }
+
+    PieceTextMetrics {
+        byte_len,
+        char_len,
+        newline_count,
+        is_ascii: false,
+    }
+}
 
 pub(super) fn recalculate_prefix_metrics<T>(
     items: &[T],
@@ -49,12 +84,10 @@ fn build_root_from_leaves(mut leaves: Vec<PieceTreeLeaf>) -> PieceTreeRoot {
     root
 }
 
-pub(super) fn pack_leaves_into_nodes(leaves: Vec<PieceTreeLeaf>) -> Vec<PieceTreeInternalNode> {
-    let mut nodes = Vec::new();
-    let mut index = 0usize;
-    let total = leaves.len();
-    while index < total {
-        let remaining = total - index;
+pub(super) fn pack_leaves_into_nodes(mut leaves: Vec<PieceTreeLeaf>) -> Vec<PieceTreeInternalNode> {
+    let mut nodes = Vec::with_capacity(leaves.len().div_ceil(MAX_LEAVES_PER_INTERNAL));
+    while !leaves.is_empty() {
+        let remaining = leaves.len();
         let chunk_size = if remaining > MAX_LEAVES_PER_INTERNAL
             && remaining - MAX_LEAVES_PER_INTERNAL < MIN_LEAVES_PER_INTERNAL
         {
@@ -62,9 +95,8 @@ pub(super) fn pack_leaves_into_nodes(leaves: Vec<PieceTreeLeaf>) -> Vec<PieceTre
         } else {
             MAX_LEAVES_PER_INTERNAL.min(remaining)
         };
-        let end = index + chunk_size;
         let mut node = PieceTreeInternalNode {
-            leaves: leaves[index..end].to_vec(),
+            leaves: leaves.drain(..chunk_size).collect(),
             metrics: PieceTreeMetrics::default(),
             leaf_start_chars: Vec::new(),
             leaf_start_newlines: Vec::new(),
@@ -72,7 +104,6 @@ pub(super) fn pack_leaves_into_nodes(leaves: Vec<PieceTreeLeaf>) -> Vec<PieceTre
         };
         node.recalculate();
         nodes.push(node);
-        index = end;
     }
     nodes
 }
@@ -98,7 +129,7 @@ pub(super) fn build_chunked_pieces(
 }
 
 pub(super) fn pack_pieces_into_leaves(pieces: Vec<Piece>) -> Vec<PieceTreeLeaf> {
-    let mut leaves = Vec::new();
+    let mut leaves = Vec::with_capacity(pieces.len() / MAX_LEAF_PIECES + 1);
     let mut current = PieceTreeLeaf::default();
 
     for piece in pieces {
@@ -145,10 +176,6 @@ fn next_chunk_len(text: &str, offset: usize, max_len: usize) -> usize {
     end - offset
 }
 
-pub(super) fn count_newlines(text: &str) -> usize {
-    text.bytes().filter(|byte| *byte == b'\n').count()
-}
-
 pub(super) fn byte_range_for_char_range(
     text: &str,
     start_char: usize,
@@ -175,16 +202,10 @@ pub(super) fn byte_index_for_char_offset(text: &str, char_offset: usize) -> usiz
 
 pub(super) fn compact_preview(line_text: &str) -> String {
     let trimmed = line_text.trim();
-    let trimmed_chars = trimmed.chars().collect::<Vec<_>>();
-    if trimmed_chars.len() <= PREVIEW_MAX_CHARS {
+    let Some((end_byte, _)) = trimmed.char_indices().nth(PREVIEW_MAX_CHARS) else {
         return trimmed.to_owned();
-    }
-
-    let mut preview = trimmed_chars[..PREVIEW_MAX_CHARS]
-        .iter()
-        .collect::<String>();
-    preview.push_str("...");
-    preview
+    };
+    format!("{}...", &trimmed[..end_byte])
 }
 
 pub(super) fn line_lookup_in_leaves(

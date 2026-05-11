@@ -10,6 +10,7 @@ use eframe::egui;
 use search_state::SearchState;
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::fmt::Display;
+use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
@@ -102,6 +103,10 @@ impl RuntimeIoState {
 
 pub struct ScratchpadApp {
     pub(crate) tab_manager: TabManager,
+    state: ScratchpadAppState,
+}
+
+pub struct ScratchpadAppState {
     pub(crate) app_settings: AppSettings,
     pub(crate) status: StatusState,
     pub(crate) pending_editor_focus: Option<ViewId>,
@@ -137,6 +142,20 @@ pub struct ScratchpadApp {
     pub(crate) workspace_reflow_axis: SplitAxis,
     pub(crate) settings_preview_quote_index: usize,
     pub(crate) io: RuntimeIoState,
+}
+
+impl Deref for ScratchpadApp {
+    type Target = ScratchpadAppState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.state
+    }
+}
+
+impl DerefMut for ScratchpadApp {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
+    }
 }
 
 impl Default for ScratchpadApp {

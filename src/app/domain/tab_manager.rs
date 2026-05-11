@@ -72,16 +72,22 @@ impl TabManager {
     pub fn append_tab(&mut self, tab: WorkspaceTab) {
         self.tabs.push(tab);
         self.active_tab_index = self.tabs.len() - 1;
-        self.rebuild_buffer_tab_index();
+        self.index_tab_buffers(self.active_tab_index);
         self.pending_scroll_to_active = true;
         self.mark_session_dirty();
+    }
+
+    pub(crate) fn append_restored_tab(&mut self, tab: WorkspaceTab) {
+        self.tabs.push(tab);
+        self.index_tab_buffers(self.tabs.len() - 1);
     }
 
     pub fn insert_tab(&mut self, index: usize, tab: WorkspaceTab) {
         let index = index.min(self.tabs.len());
         self.tabs.insert(index, tab);
         self.active_tab_index = index;
-        self.rebuild_buffer_tab_index();
+        self.shift_buffer_tab_indices(index, 1);
+        self.index_tab_buffers(index);
         self.pending_scroll_to_active = true;
         self.mark_session_dirty();
     }
@@ -91,10 +97,14 @@ impl TabManager {
     }
 
     pub fn close_tab_internal(&mut self, index: usize) {
-        self.tabs.remove(index);
+        let removed = self.tabs.remove(index);
+        self.remove_tab_buffers(&removed);
         if self.tabs.is_empty() {
             self.tabs.push(WorkspaceTab::untitled());
             self.active_tab_index = 0;
+            self.index_tab_buffers(0);
+        } else {
+            self.shift_buffer_tab_indices(index, -1);
         }
 
         if self.active_tab_index > index {
@@ -102,7 +112,6 @@ impl TabManager {
         }
 
         self.active_tab_index = self.active_tab_index.min(self.tabs.len() - 1);
-        self.rebuild_buffer_tab_index();
         self.pending_scroll_to_active = true;
         self.mark_session_dirty();
     }
@@ -115,6 +124,8 @@ impl TabManager {
 
         let moved_tab = self.tabs.remove(from_index);
         self.tabs.insert(to_index, moved_tab);
+        let changed_start = from_index.min(to_index);
+        let changed_end = from_index.max(to_index);
 
         if self.active_tab_index == from_index {
             self.active_tab_index = to_index;
@@ -124,7 +135,7 @@ impl TabManager {
             self.active_tab_index += 1;
         }
 
-        self.rebuild_buffer_tab_index();
+        self.refresh_buffer_tab_index_range(changed_start..=changed_end);
         self.pending_scroll_to_active = true;
         self.mark_session_dirty();
         true
@@ -142,6 +153,38 @@ impl TabManager {
             for buffer in tab.buffers() {
                 self.buffer_tab_index.insert(buffer.id, tab_index);
             }
+        }
+    }
+
+    fn index_tab_buffers(&mut self, tab_index: usize) {
+        if let Some(tab) = self.tabs.get(tab_index) {
+            for buffer in tab.buffers() {
+                self.buffer_tab_index.insert(buffer.id, tab_index);
+            }
+        }
+    }
+
+    fn remove_tab_buffers(&mut self, tab: &WorkspaceTab) {
+        for buffer in tab.buffers() {
+            self.buffer_tab_index.remove(&buffer.id);
+        }
+    }
+
+    fn shift_buffer_tab_indices(&mut self, start_index: usize, delta: isize) {
+        for tab_index in self.buffer_tab_index.values_mut() {
+            if *tab_index >= start_index {
+                if delta.is_positive() {
+                    *tab_index += delta as usize;
+                } else {
+                    *tab_index = tab_index.saturating_sub(delta.unsigned_abs());
+                }
+            }
+        }
+    }
+
+    fn refresh_buffer_tab_index_range(&mut self, range: std::ops::RangeInclusive<usize>) {
+        for tab_index in range {
+            self.index_tab_buffers(tab_index);
         }
     }
 
@@ -201,14 +244,49 @@ mod tests {
         assert_eq!(manager.tab_index_for_buffer(second_id), Some(1));
         assert_eq!(manager.tab_index_for_buffer(split_id), Some(1));
 
-        assert!(manager.reorder_tab(1, 0));
+        let restored = tab("restored.txt");
+        let restored_id = restored.active_buffer().id;
+        manager.append_restored_tab(restored);
+        assert_eq!(manager.active_tab_index, 0);
+        assert_eq!(manager.tab_index_for_buffer(first_id), Some(0));
+        assert_eq!(manager.tab_index_for_buffer(second_id), Some(1));
+        assert_eq!(manager.tab_index_for_buffer(split_id), Some(1));
+        assert_eq!(manager.tab_index_for_buffer(restored_id), Some(2));
+
+        let appended = tab("appended.txt");
+        let appended_id = appended.active_buffer().id;
+        manager.append_tab(appended);
+        assert_eq!(manager.active_tab_index, 3);
+        assert_eq!(manager.tab_index_for_buffer(first_id), Some(0));
+        assert_eq!(manager.tab_index_for_buffer(second_id), Some(1));
+        assert_eq!(manager.tab_index_for_buffer(split_id), Some(1));
+        assert_eq!(manager.tab_index_for_buffer(restored_id), Some(2));
+        assert_eq!(manager.tab_index_for_buffer(appended_id), Some(3));
+
+        let inserted = tab("inserted.txt");
+        let inserted_id = inserted.active_buffer().id;
+        manager.insert_tab(1, inserted);
+        assert_eq!(manager.tab_index_for_buffer(first_id), Some(0));
+        assert_eq!(manager.tab_index_for_buffer(inserted_id), Some(1));
+        assert_eq!(manager.tab_index_for_buffer(second_id), Some(2));
+        assert_eq!(manager.tab_index_for_buffer(split_id), Some(2));
+        assert_eq!(manager.tab_index_for_buffer(restored_id), Some(3));
+        assert_eq!(manager.tab_index_for_buffer(appended_id), Some(4));
+
+        assert!(manager.reorder_tab(2, 0));
         assert_eq!(manager.tab_index_for_buffer(second_id), Some(0));
         assert_eq!(manager.tab_index_for_buffer(split_id), Some(0));
         assert_eq!(manager.tab_index_for_buffer(first_id), Some(1));
+        assert_eq!(manager.tab_index_for_buffer(inserted_id), Some(2));
+        assert_eq!(manager.tab_index_for_buffer(restored_id), Some(3));
+        assert_eq!(manager.tab_index_for_buffer(appended_id), Some(4));
 
         manager.close_tab_internal(0);
         assert_eq!(manager.tab_index_for_buffer(second_id), None);
         assert_eq!(manager.tab_index_for_buffer(split_id), None);
         assert_eq!(manager.tab_index_for_buffer(first_id), Some(0));
+        assert_eq!(manager.tab_index_for_buffer(inserted_id), Some(1));
+        assert_eq!(manager.tab_index_for_buffer(restored_id), Some(2));
+        assert_eq!(manager.tab_index_for_buffer(appended_id), Some(3));
     }
 }

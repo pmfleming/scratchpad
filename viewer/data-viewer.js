@@ -73,6 +73,8 @@
         appPackageView: 'diagnostics',
     };
 
+    const activeRunStatuses = new Set(["queued", "running"]);
+
     const formatNumber = new Intl.NumberFormat(undefined, {
         maximumFractionDigits: 2,
     });
@@ -143,6 +145,81 @@
             <code>${escapeHtml(task)}</code>
             ${detail}
         </div>`;
+    }
+
+    function runButtonSelector(button) {
+        if (!button) return "";
+        if (button.dataset.run != null) return "all";
+        if (button.dataset.runCategory) return `category/${button.dataset.runCategory}`;
+        if (button.dataset.runItem) return `item/${button.dataset.runItem}`;
+        return "";
+    }
+
+    function activeRunForSelector(selector) {
+        if (!selector) return null;
+        return [...state.runs].reverse().find((run) => {
+            return run.selector === selector && activeRunStatuses.has(run.status);
+        }) || null;
+    }
+
+    function renderRunButtonProgress(button, run) {
+        if (!button) return;
+        const label = button.dataset.runLabel || button.textContent.trim() || "Refresh";
+        button.dataset.runLabel = label;
+        if (!run) {
+            clearButtonProgress(button, label);
+            return;
+        }
+
+        const progress = runProgress(run);
+        const current = run.current_task_id || (run.status === "queued" ? "Queued" : "Running");
+        const percentLabel = progress.total ? `${progress.percent}%` : "Working";
+        const description = progress.total
+            ? `${progress.done} of ${progress.total} tasks complete`
+            : "Refresh in progress";
+        setButtonProgress(button, {
+            label,
+            meta: percentLabel,
+            percent: progress.percent,
+            task: current,
+            description,
+        });
+    }
+
+    function renderRunButtonsProgress() {
+        document.querySelectorAll(".run-button[data-run], .run-button[data-run-category], .run-button[data-run-item]").forEach((button) => {
+            const selector = button.dataset.runSelector || runButtonSelector(button);
+            button.dataset.runSelector = selector;
+            renderRunButtonProgress(button, activeRunForSelector(selector));
+        });
+    }
+
+    function setButtonProgress(button, { label, meta, percent, task, description }) {
+        if (!button) return;
+        const normalizedPercent = Math.max(0, Math.min(100, Number(percent || 0)));
+        button.dataset.runLabel = label;
+        button.disabled = true;
+        button.classList.add("is-progress");
+        button.setAttribute("aria-busy", "true");
+        button.setAttribute("aria-label", `${label}: ${description}`);
+        button.innerHTML = `<span class="run-button__content">
+                <span class="run-button__label">${escapeHtml(label)}</span>
+                <span class="run-button__meta">${escapeHtml(meta)}</span>
+            </span>
+            <span class="run-button__progress" role="progressbar" aria-valuenow="${normalizedPercent}" aria-valuemin="0" aria-valuemax="100" aria-label="${escapeHtml(description)}">
+                <span style="width:${normalizedPercent}%"></span>
+            </span>
+            ${task ? `<span class="run-button__task">${escapeHtml(task)}</span>` : ""}`;
+    }
+
+    function clearButtonProgress(button, label) {
+        if (!button) return;
+        button.disabled = false;
+        button.classList.remove("is-progress");
+        button.removeAttribute("aria-busy");
+        button.removeAttribute("aria-describedby");
+        button.removeAttribute("aria-label");
+        button.innerHTML = escapeHtml(label);
     }
 
     function renderSummary(targetId, cards) {
@@ -4286,7 +4363,8 @@
     function runProgress(run) {
         const taskIds = run.task_ids || [];
         const total = Number(run.total_tasks ?? taskIds.length ?? 0);
-        let done = Number(run.completed_tasks ?? 0);
+        const failed = Array.isArray(run.failed_task_ids) ? run.failed_task_ids.length : 0;
+        let done = Number(run.completed_tasks ?? 0) + failed;
         if (!Number.isFinite(done)) done = 0;
         if (run.status === "completed" && total > 0) done = total;
         done = Math.max(0, Math.min(done, total));
@@ -5214,9 +5292,27 @@
 
     async function refreshAppPackage() {
         const button = byId("app-package-refresh");
-        if (button) button.disabled = true;
+        const label = button?.dataset.runLabel || button?.textContent.trim() || "Refresh Package";
+        if (button) {
+            setButtonProgress(button, {
+                label,
+                meta: "Working",
+                percent: 35,
+                task: "app package",
+                description: "Refreshing app package data",
+            });
+        }
         try {
             state.appPackage = await loadJson(`/api/app-package?v=${Date.now()}`);
+            if (button) {
+                setButtonProgress(button, {
+                    label,
+                    meta: "100%",
+                    percent: 100,
+                    task: "app package",
+                    description: "App package data refreshed",
+                });
+            }
             byId("load-status").textContent = "Loaded app package.";
             byId("load-detail").textContent = `Session root: ${state.appPackage.session_root || "unknown"}`;
         } catch (error) {
@@ -5224,7 +5320,7 @@
             byId("load-status").textContent = "App package unavailable.";
             byId("load-detail").textContent = `Start with scripts/open-overview.ps1 to enable the local dashboard API. ${error.message}`;
         } finally {
-            if (button) button.disabled = false;
+            if (button) clearButtonProgress(button, label);
             renderAppPackage();
         }
     }
@@ -5263,6 +5359,7 @@
         try {
             const previousFinished = state.lastObservedFinishedRun;
             state.runs = await loadJson(`/api/runs?v=${Date.now()}`);
+            renderRunButtonsProgress();
             const latestFinished = [...state.runs].reverse().find((item) => item.finished_at);
             if (latestFinished && latestFinished.id !== previousFinished) {
                 state.lastObservedFinishedRun = latestFinished.id;
@@ -5277,9 +5374,15 @@
     }
 
     async function triggerRun(endpoint, button) {
-        const original = button.textContent;
-        button.disabled = true;
-        button.textContent = "Queued...";
+        const label = button.dataset.runLabel || button.textContent.trim() || "Refresh";
+        button.dataset.runLabel = label;
+        setButtonProgress(button, {
+            label,
+            meta: "Queued",
+            percent: 0,
+            task: "",
+            description: "Refresh queued",
+        });
         try {
             const response = await fetch(endpoint, { method: "POST" });
             if (!response.ok) {
@@ -5302,8 +5405,7 @@
             byId("load-status").textContent = "Dashboard refresh unavailable.";
             byId("load-detail").textContent = `Start with scripts/open-overview.ps1 to enable refresh controls. ${error.message}`;
         } finally {
-            button.disabled = false;
-            button.textContent = original;
+            renderRunButtonsProgress();
         }
     }
 
@@ -5421,6 +5523,7 @@
         renderMap();
         renderAppPackage();
         renderRunLog();
+        renderRunButtonsProgress();
     }
 
     function renderAppPackage() {

@@ -61,13 +61,18 @@ where
     let mut interrupt_check = InterruptCheck::new(interruptible);
     let ascii = text.is_ascii();
     let whole_word_matcher = WholeWordMatcher::new(text, whole_word);
+    let mut char_cursor = RegexMatchCharCursor::default();
     let mut matches = Vec::new();
 
     for search_match in regex.find_iter(text) {
         if interrupt_check.should_abort(should_continue) {
             return None;
         }
-        let (start, end) = regex_match_range(ascii, text, &search_match);
+        let (start, end) = if ascii {
+            (search_match.start(), search_match.end())
+        } else {
+            char_cursor.match_range(text, &search_match)
+        };
         if whole_word_allows(
             ascii,
             text.as_bytes(),
@@ -81,6 +86,27 @@ where
     }
 
     finalize_matches(matches, interruptible, should_continue)
+}
+
+#[derive(Default)]
+struct RegexMatchCharCursor {
+    byte_pos: usize,
+    char_pos: usize,
+}
+
+impl RegexMatchCharCursor {
+    fn match_range(&mut self, text: &str, search_match: &regex::Match<'_>) -> (usize, usize) {
+        let start = self.advance_to(text, search_match.start());
+        let end = self.advance_to(text, search_match.end());
+        (start, end)
+    }
+
+    fn advance_to(&mut self, text: &str, byte_index: usize) -> usize {
+        debug_assert!(self.byte_pos <= byte_index);
+        self.char_pos += text[self.byte_pos..byte_index].chars().count();
+        self.byte_pos = byte_index;
+        self.char_pos
+    }
 }
 
 struct InterruptCheck {
@@ -244,21 +270,6 @@ where
     }
 
     finalize_matches(matches, interruptible, &mut should_continue)
-}
-
-fn regex_match_range(ascii: bool, text: &str, search_match: &regex::Match<'_>) -> (usize, usize) {
-    if ascii {
-        return (search_match.start(), search_match.end());
-    }
-
-    (
-        byte_to_char_index(text, search_match.start()),
-        byte_to_char_index(text, search_match.end()),
-    )
-}
-
-fn byte_to_char_index(text: &str, byte_index: usize) -> usize {
-    text[..byte_index].chars().count()
 }
 
 fn char_to_byte_map(text: &str) -> Vec<usize> {

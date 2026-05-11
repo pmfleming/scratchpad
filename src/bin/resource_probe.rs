@@ -22,6 +22,9 @@ const SESSION_BYTES_PER_BUFFER: usize = 4 * KB;
 const VIEW_COUNT_BUFFER_BYTES: usize = MB;
 const PASTE_RESOURCE_BASE_BYTES: usize = MB;
 const FIRST_VISIBLE_PAINT_MAX_CHARS: usize = 192 * KB;
+const UTF8_SAMPLE_LINE: &str =
+    "Scratchpad edits UTF-8: café résumé 東京 Привет مرحبا 0123456789.\n";
+const UTF8_SEARCH_UNIT: &str = "hay café 東京 Привет مرحبا hay\n";
 
 #[derive(Serialize)]
 struct ResourceEvent {
@@ -97,7 +100,7 @@ fn emit_file_backed_open_allocations() {
         .enumerate()
     {
         let path = root.join(format!("file_open_{bytes}.txt"));
-        write_plain_text_file(&path, bytes).expect("write probe file");
+        write_utf8_text_file(&path, bytes).expect("write probe file");
         emit_step(
             StepDescriptor {
                 scenario: "file_backed_open_first_visible_paint",
@@ -398,10 +401,10 @@ fn render_first_visible_text_paint(buffer: &BufferState) -> usize {
 fn run_paste_cycle(insert_bytes: usize) -> StepOutcome {
     let mut buffer = BufferState::new(
         "paste_resource.txt".to_owned(),
-        plain_text_of_size(PASTE_RESOURCE_BASE_BYTES),
+        utf8_text_of_size(PASTE_RESOURCE_BASE_BYTES),
         None,
     );
-    let inserted = plain_text_of_size(insert_bytes);
+    let inserted = utf8_text_of_size(insert_bytes);
     let midpoint = buffer.document().piece_tree().len_chars() / 2;
     buffer.document_mut().insert_direct(midpoint, &inserted);
     buffer.refresh_text_metadata();
@@ -415,7 +418,7 @@ fn run_many_file_count_cycle(file_count: usize) -> StepOutcome {
         .map(|index| {
             BufferState::new(
                 format!("file_{index}.txt"),
-                plain_text_of_size(MANY_FILE_BYTES_PER_BUFFER),
+                utf8_text_of_size(MANY_FILE_BYTES_PER_BUFFER),
                 Some(PathBuf::from(format!("file_{index}.txt"))),
             )
         })
@@ -467,7 +470,7 @@ fn run_tab_count_cycle(tab_count: usize) -> StepOutcome {
 fn run_view_count_cycle(view_count: usize) -> StepOutcome {
     let mut tab = WorkspaceTab::new(BufferState::new(
         "many_views.txt".to_owned(),
-        plain_text_of_size(VIEW_COUNT_BUFFER_BYTES),
+        utf8_text_of_size(VIEW_COUNT_BUFFER_BYTES),
         None,
     ));
     while tab.views.len() < view_count {
@@ -524,7 +527,7 @@ fn build_tabs(tab_count: usize, bytes_per_buffer: usize) -> Vec<WorkspaceTab> {
         .map(|index| {
             let buffer = BufferState::new(
                 format!("tab_{index}.txt"),
-                plain_text_of_size(bytes_per_buffer),
+                utf8_text_of_size(bytes_per_buffer),
                 None,
             );
             WorkspaceTab::new(buffer)
@@ -547,8 +550,8 @@ fn combine_tabs(tabs: &mut Vec<WorkspaceTab>, source_idx: usize, target_idx: usi
     let _ = target_tab.combine_with_tab(source_tab, SplitAxis::Horizontal, false, 0.5);
 }
 
-fn write_plain_text_file(path: &Path, target_bytes: usize) -> std::io::Result<()> {
-    let line = b"The quick brown fox jumps over the lazy dog 0123456789.\n";
+fn write_utf8_text_file(path: &Path, target_bytes: usize) -> std::io::Result<()> {
+    let line = UTF8_SAMPLE_LINE.as_bytes();
     let mut file = std::fs::File::create(path)?;
     let repeats = target_bytes / line.len();
     for _ in 0..repeats {
@@ -556,7 +559,8 @@ fn write_plain_text_file(path: &Path, target_bytes: usize) -> std::io::Result<()
     }
     let remaining = target_bytes % line.len();
     if remaining > 0 {
-        file.write_all(&line[..remaining])?;
+        let end = utf8_prefix_len(UTF8_SAMPLE_LINE, remaining);
+        file.write_all(&line[..end])?;
     }
     file.flush()
 }
@@ -568,12 +572,11 @@ fn file_backed_open_max_bytes() -> usize {
         .unwrap_or(2 * GB)
 }
 
-fn plain_text_of_size(target_bytes: usize) -> String {
-    let line = "The quick brown fox jumps over the lazy dog 0123456789.\n";
-    let repeats = (target_bytes / line.len()).max(1);
-    let mut text = String::with_capacity(repeats * line.len());
+fn utf8_text_of_size(target_bytes: usize) -> String {
+    let repeats = (target_bytes / UTF8_SAMPLE_LINE.len()).max(1);
+    let mut text = String::with_capacity(repeats * UTF8_SAMPLE_LINE.len());
     for _ in 0..repeats {
-        text.push_str(line);
+        text.push_str(UTF8_SAMPLE_LINE);
     }
     text
 }
@@ -591,14 +594,24 @@ fn search_capacity_program() -> SearchProgram {
 }
 
 fn search_text_of_size(target_bytes: usize) -> String {
-    let unit = "hay hay hay hay\n";
-    let repeats = (target_bytes / unit.len()).max(1);
-    let mut text = String::with_capacity(repeats * unit.len());
+    let repeats = (target_bytes / UTF8_SEARCH_UNIT.len()).max(1);
+    let mut text = String::with_capacity(repeats * UTF8_SEARCH_UNIT.len());
     for _ in 0..repeats {
-        text.push_str(unit);
+        text.push_str(UTF8_SEARCH_UNIT);
     }
-    text.push_str("needle\n");
+    text.push_str("needle café 東京\n");
     text
+}
+
+fn utf8_prefix_len(text: &str, max_bytes: usize) -> usize {
+    if max_bytes >= text.len() {
+        return text.len();
+    }
+    let mut end = max_bytes;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    end
 }
 
 fn unique_probe_root(label: &str) -> PathBuf {

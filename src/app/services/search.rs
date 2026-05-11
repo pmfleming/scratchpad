@@ -298,6 +298,14 @@ mod tests {
     }
 
     #[test]
+    fn regex_program_reports_utf8_char_ranges() {
+        let program = SearchProgram::compile(r"café[0-9]{2}|東京[0-9]", regex_options()).unwrap();
+        let matches = search_program("α café42 東京9 café", &program).matches;
+
+        assert_eq!(matches, vec![2..8, 9..12]);
+    }
+
+    #[test]
     fn regex_program_expands_capture_replacements() {
         let program =
             SearchProgram::compile(r"([a-z]{1,8})-([0-9]{1,4})", regex_options()).unwrap();

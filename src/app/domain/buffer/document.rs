@@ -347,18 +347,12 @@ impl TextDocument {
         self.push_operation_record(converted, source);
     }
 
-    fn insert_raw_text(&mut self, text: &str, char_index: usize) -> usize {
-        self.insert_raw_text_with_source(text, char_index, PieceSource::Edit)
+    fn insert_raw_text(&mut self, text: &str, char_index: usize) {
+        self.insert_raw_text_with_source(text, char_index, PieceSource::Edit);
     }
 
-    fn insert_raw_text_with_source(
-        &mut self,
-        text: &str,
-        char_index: usize,
-        source: PieceSource,
-    ) -> usize {
+    fn insert_raw_text_with_source(&mut self, text: &str, char_index: usize, source: PieceSource) {
         Arc::make_mut(&mut self.piece_tree).insert_with_source(char_index, text, source);
-        text.chars().count()
     }
 
     fn delete_char_range_internal(&mut self, char_range: Range<usize>) {

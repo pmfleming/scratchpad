@@ -19,6 +19,9 @@ const MANY_FILE_BYTES_PER_BUFFER: usize = KB;
 const SPLIT_BYTES_PER_TILE: usize = 128 * KB;
 const VIEW_COUNT_BUFFER_BYTES: usize = MB;
 const BASE_PASTE_BUFFER_BYTES: usize = MB;
+const UTF8_SAMPLE_LINE: &str =
+    "Scratchpad edits UTF-8: café résumé 東京 Привет مرحبا 0123456789.\n";
+const UTF8_SEARCH_UNIT: &str = "hay café 東京 Привет مرحبا hay\n";
 
 #[derive(Serialize)]
 struct CapacityEvent {
@@ -77,7 +80,7 @@ fn emit_file_size_sweep() {
         |bytes| {
             let buffer = BufferState::new(
                 format!("file_size_{bytes}.txt"),
-                plain_text_of_size(bytes),
+                utf8_text_of_size(bytes),
                 None,
             );
             buffer.line_count + buffer.document().piece_tree().len_bytes()
@@ -273,7 +276,7 @@ fn emit_step(step: StepDescriptor, run: impl FnOnce() -> usize) {
 }
 
 fn run_layout_capacity_cycle(bytes: usize) -> usize {
-    let text = plain_text_of_size(bytes);
+    let text = utf8_text_of_size(bytes);
     let ctx = eframe::egui::Context::default();
     let font_id = eframe::egui::FontId::monospace(15.0);
     let highlight_style = EditorHighlightStyle::new(
@@ -326,7 +329,7 @@ fn run_many_file_capacity_cycle(file_count: usize) -> usize {
         .map(|index| {
             BufferState::new(
                 format!("file_{index}.txt"),
-                plain_text_of_size(MANY_FILE_BYTES_PER_BUFFER),
+                utf8_text_of_size(MANY_FILE_BYTES_PER_BUFFER),
                 Some(std::path::PathBuf::from(format!("file_{index}.txt"))),
             )
         })
@@ -366,7 +369,7 @@ fn run_split_capacity_cycle(split_count: usize) -> usize {
 fn run_view_capacity_cycle(view_count: usize) -> usize {
     let mut tab = WorkspaceTab::new(BufferState::new(
         "many_views.txt".to_owned(),
-        plain_text_of_size(VIEW_COUNT_BUFFER_BYTES),
+        utf8_text_of_size(VIEW_COUNT_BUFFER_BYTES),
         None,
     ));
     while tab.views.len() < view_count {
@@ -383,10 +386,10 @@ fn run_view_capacity_cycle(view_count: usize) -> usize {
 fn run_paste_capacity_cycle(insert_bytes: usize) -> usize {
     let mut buffer = BufferState::new(
         "paste_capacity.txt".to_owned(),
-        plain_text_of_size(BASE_PASTE_BUFFER_BYTES),
+        utf8_text_of_size(BASE_PASTE_BUFFER_BYTES),
         None,
     );
-    let inserted = plain_text_of_size(insert_bytes);
+    let inserted = utf8_text_of_size(insert_bytes);
     let midpoint = buffer.document().piece_tree().len_chars() / 2;
     buffer.document_mut().insert_direct(midpoint, &inserted);
     buffer.refresh_text_metadata();
@@ -398,7 +401,7 @@ fn build_tabs(tab_count: usize, bytes_per_buffer: usize) -> Vec<WorkspaceTab> {
         .map(|index| {
             let buffer = BufferState::new(
                 format!("tab_{index}.txt"),
-                plain_text_of_size(bytes_per_buffer),
+                utf8_text_of_size(bytes_per_buffer),
                 None,
             );
             WorkspaceTab::new(buffer)
@@ -424,24 +427,21 @@ fn combine_tabs(tabs: &mut Vec<WorkspaceTab>, source_idx: usize, target_idx: usi
 fn build_tile_heavy_tab(tile_count: usize, bytes_per_tile: usize) -> WorkspaceTab {
     let mut tab = WorkspaceTab::new(BufferState::new(
         "tile_0.txt".to_owned(),
-        plain_text_of_size(bytes_per_tile),
+        utf8_text_of_size(bytes_per_tile),
         None,
     ));
     for tile_index in 1..tile_count.max(1) {
         let _ = tab.open_buffer_with_balanced_layout(BufferState::new(
             format!("tile_{tile_index}.txt"),
-            plain_text_of_size(bytes_per_tile),
+            utf8_text_of_size(bytes_per_tile),
             None,
         ));
     }
     tab
 }
 
-fn plain_text_of_size(target_bytes: usize) -> String {
-    repeat_unit_to_target_size(
-        "The quick brown fox jumps over the lazy dog 0123456789.\n",
-        target_bytes,
-    )
+fn utf8_text_of_size(target_bytes: usize) -> String {
+    repeat_unit_to_target_size(UTF8_SAMPLE_LINE, target_bytes)
 }
 
 fn search_capacity_program() -> SearchProgram {
@@ -457,8 +457,8 @@ fn search_capacity_program() -> SearchProgram {
 }
 
 fn search_text_of_size(target_bytes: usize) -> String {
-    let mut text = repeat_unit_to_target_size("hay hay hay hay\n", target_bytes);
-    text.push_str("needle\n");
+    let mut text = repeat_unit_to_target_size(UTF8_SEARCH_UNIT, target_bytes);
+    text.push_str("needle café 東京\n");
     text
 }
 

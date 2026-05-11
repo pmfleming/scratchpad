@@ -6,7 +6,10 @@ use std::ops::Range;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 
-pub(super) const SEARCH_FRAGMENT_CHUNK_CHARS: usize = 64 * 1024;
+// Keep fragment windows near the piece-tree leaf target so edited buffers are
+// more likely to expose each chunk as a borrowed span instead of a flattened
+// range allocation.
+pub(super) const SEARCH_FRAGMENT_CHUNK_CHARS: usize = 256 * 1024;
 const INTRA_BUFFER_PARALLELISM_MIN_CHUNKS: usize = 4;
 
 struct FragmentSearchContext<'a> {

@@ -232,8 +232,7 @@ impl ScratchpadApp {
         if first_streamed_tab {
             self.tab_manager_mut().set_tabs(vec![tab], 0);
         } else {
-            self.tab_manager_mut().tabs.push(tab);
-            self.rebuild_buffer_tab_index();
+            self.tab_manager_mut().append_restored_tab(tab);
         }
         self.ensure_active_tab_slot_selected();
         self.refresh_startup_restore_conflicts();
@@ -328,6 +327,7 @@ impl ScratchpadApp {
                         .active_tab_index
                         .min(self.tabs().len().saturating_sub(1));
                 }
+                self.tab_manager_mut().evict_inactive_tab_state();
                 if let Some(status) = restored.restore_status.as_ref() {
                     match status.level {
                         crate::app::services::session_store::RestoreStatusLevel::Info => self

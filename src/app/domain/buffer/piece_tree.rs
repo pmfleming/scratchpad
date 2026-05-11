@@ -15,7 +15,7 @@ use self::slice::previews_for_matches_in_contiguous_text;
 use anchor::{LeafAnchor, LeafId};
 use support::{
     build_chunked_pieces, build_root_from_pieces, byte_index_for_char_offset,
-    byte_range_for_char_range, compact_preview, count_newlines, line_lookup_in_leaves,
+    byte_range_for_char_range, compact_preview, line_lookup_in_leaves, measure_text,
     pack_pieces_into_leaves, recalculate_prefix_metrics,
 };
 
@@ -83,13 +83,14 @@ struct Piece {
 
 impl Piece {
     fn from_slice(buffer: PieceBuffer, start_byte: usize, text: &str) -> Self {
+        let metrics = measure_text(text);
         Self {
             buffer,
             start_byte,
-            byte_len: text.len(),
-            char_len: text.chars().count(),
-            newline_count: count_newlines(text),
-            is_ascii: text.is_ascii(),
+            byte_len: metrics.byte_len,
+            char_len: metrics.char_len,
+            newline_count: metrics.newline_count,
+            is_ascii: metrics.is_ascii,
         }
     }
 

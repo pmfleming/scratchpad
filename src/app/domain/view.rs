@@ -15,6 +15,7 @@ use eframe::egui;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
+use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_VIEW_ID: AtomicU64 = AtomicU64::new(1);
@@ -61,6 +62,13 @@ pub enum CursorRevealMode {
 pub struct EditorViewState {
     pub id: ViewId,
     pub buffer_id: BufferId,
+    hot: EditorViewHotState,
+    anchors: EditorViewAnchorState,
+    published_ime_output: Option<PublishedImeOutput>,
+}
+
+#[derive(Clone)]
+pub struct EditorViewHotState {
     pub show_line_numbers: bool,
     pub right_to_left_reading_order: bool,
     pub editor_has_focus: bool,
@@ -83,6 +91,13 @@ pub struct EditorViewState {
     /// Pending cursor-reveal mode. Resolved into a `ScrollIntent::Reveal` by
     /// the renderer once the cursor's display rect is known.
     pending_cursor_reveal: Option<CursorRevealMode>,
+    pub ime_preedit: Option<String>,
+    pub search_highlights: SearchHighlightState,
+    pub search_replacement_preview: Option<SearchReplacementPreview>,
+}
+
+#[derive(Clone, Default)]
+struct EditorViewAnchorState {
     /// Most recently allocated piece-tree anchor backing the scroll anchor
     /// (when one exists). Released by `upgrade_scroll_anchor_to_piece` before
     /// allocating a replacement so the piece tree's anchor registry does not
@@ -91,44 +106,25 @@ pub struct EditorViewState {
     cursor_anchor_range: Option<AnchoredCursorRange>,
     pending_cursor_anchor_range: Option<AnchoredCursorRange>,
     search_highlight_anchors: Vec<AnchoredSearchRange>,
-    published_ime_output: Option<PublishedImeOutput>,
-    pub ime_preedit: Option<String>,
-    pub search_highlights: SearchHighlightState,
-    pub search_replacement_preview: Option<SearchReplacementPreview>,
 }
 
-impl EditorViewState {
-    pub fn new(buffer_id: BufferId) -> Self {
-        Self {
-            id: next_view_id(),
-            buffer_id,
-            show_line_numbers: false,
-            right_to_left_reading_order: false,
-            editor_has_focus: false,
-            latest_display_snapshot: None,
-            latest_display_snapshot_revision: None,
-            layout_cache: LayoutCache::default(),
-            cursor_range: None,
-            pending_cursor_range: None,
-            scroll: ScrollManager::new(),
-            pending_intents: Vec::new(),
-            pending_cursor_reveal: None,
-            last_piece_anchor: None,
-            cursor_anchor_range: None,
-            pending_cursor_anchor_range: None,
-            search_highlight_anchors: Vec::new(),
-            published_ime_output: None,
-            ime_preedit: None,
-            search_highlights: SearchHighlightState::default(),
-            search_replacement_preview: None,
-        }
-    }
+impl Deref for EditorViewState {
+    type Target = EditorViewHotState;
 
-    pub fn restored(id: ViewId, buffer_id: BufferId, show_line_numbers: bool) -> Self {
-        register_existing_view_id(id);
+    fn deref(&self) -> &Self::Target {
+        &self.hot
+    }
+}
+
+impl DerefMut for EditorViewState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.hot
+    }
+}
+
+impl EditorViewHotState {
+    fn new(show_line_numbers: bool) -> Self {
         Self {
-            id,
-            buffer_id,
             show_line_numbers,
             right_to_left_reading_order: false,
             editor_has_focus: false,
@@ -140,14 +136,32 @@ impl EditorViewState {
             scroll: ScrollManager::new(),
             pending_intents: Vec::new(),
             pending_cursor_reveal: None,
-            last_piece_anchor: None,
-            cursor_anchor_range: None,
-            pending_cursor_anchor_range: None,
-            search_highlight_anchors: Vec::new(),
-            published_ime_output: None,
             ime_preedit: None,
             search_highlights: SearchHighlightState::default(),
             search_replacement_preview: None,
+        }
+    }
+}
+
+impl EditorViewState {
+    pub fn new(buffer_id: BufferId) -> Self {
+        Self {
+            id: next_view_id(),
+            buffer_id,
+            hot: EditorViewHotState::new(false),
+            anchors: EditorViewAnchorState::default(),
+            published_ime_output: None,
+        }
+    }
+
+    pub fn restored(id: ViewId, buffer_id: BufferId, show_line_numbers: bool) -> Self {
+        register_existing_view_id(id);
+        Self {
+            id,
+            buffer_id,
+            hot: EditorViewHotState::new(show_line_numbers),
+            anchors: EditorViewAnchorState::default(),
+            published_ime_output: None,
         }
     }
 
@@ -190,7 +204,7 @@ impl EditorViewState {
         let char_offset = range.start as usize;
         // Release the previous piece anchor (if any) before allocating a
         // fresh one. See doc-comment above for why this is needed.
-        if let Some(previous) = self.last_piece_anchor.take() {
+        if let Some(previous) = self.anchors.last_piece_anchor.take() {
             buffer
                 .document_mut()
                 .piece_tree_mut()
@@ -204,7 +218,7 @@ impl EditorViewState {
                 AnchorBias::Left,
                 AnchorOwner::view_scroll(self.id),
             );
-        self.last_piece_anchor = Some(anchor_id);
+        self.anchors.last_piece_anchor = Some(anchor_id);
         let frac = self.scroll.anchor().display_row_offset();
         self.scroll.replace_anchor(ScrollAnchor::Piece {
             anchor: anchor_id,
@@ -242,7 +256,7 @@ impl EditorViewState {
     /// Take the view-owned piece anchor so its buffer can release it before
     /// this view is cleared, closed, or detached from the buffer context.
     pub fn take_piece_anchor_for_release(&mut self) -> Option<AnchorId> {
-        let anchor = self.last_piece_anchor.take()?;
+        let anchor = self.anchors.last_piece_anchor.take()?;
         if self.scroll.anchor().piece_anchor() == Some(anchor) {
             self.scroll.replace_anchor(ScrollAnchor::TOP);
         }
@@ -254,9 +268,13 @@ impl EditorViewState {
         if let Some(anchor) = self.take_piece_anchor_for_release() {
             anchors.push(anchor);
         }
-        anchors.extend(take_cursor_anchors(&mut self.cursor_anchor_range));
-        anchors.extend(take_cursor_anchors(&mut self.pending_cursor_anchor_range));
-        anchors.extend(take_search_anchors(&mut self.search_highlight_anchors));
+        anchors.extend(take_cursor_anchors(&mut self.anchors.cursor_anchor_range));
+        anchors.extend(take_cursor_anchors(
+            &mut self.anchors.pending_cursor_anchor_range,
+        ));
+        anchors.extend(take_search_anchors(
+            &mut self.anchors.search_highlight_anchors,
+        ));
         self.search_highlights.ranges.clear();
         self.search_highlights.active_range_index = None;
         self.search_replacement_preview = None;
@@ -264,11 +282,13 @@ impl EditorViewState {
     }
 
     pub fn resolve_anchored_ranges(&mut self, buffer: &crate::app::domain::BufferState) {
-        if let Some(cursor_range) = resolve_cursor_anchor_range(self.cursor_anchor_range, buffer) {
+        if let Some(cursor_range) =
+            resolve_cursor_anchor_range(self.anchors.cursor_anchor_range, buffer)
+        {
             self.cursor_range = Some(cursor_range);
         }
         if let Some(cursor_range) =
-            resolve_cursor_anchor_range(self.pending_cursor_anchor_range, buffer)
+            resolve_cursor_anchor_range(self.anchors.pending_cursor_anchor_range, buffer)
         {
             self.pending_cursor_range = Some(cursor_range);
         }
@@ -283,13 +303,13 @@ impl EditorViewState {
             self.id,
             buffer,
             self.cursor_range,
-            &mut self.cursor_anchor_range,
+            &mut self.anchors.cursor_anchor_range,
         );
         sync_optional_cursor_anchor_range(
             self.id,
             buffer,
             self.pending_cursor_range,
-            &mut self.pending_cursor_anchor_range,
+            &mut self.anchors.pending_cursor_anchor_range,
         );
     }
 
@@ -303,7 +323,7 @@ impl EditorViewState {
             self.id,
             buffer,
             self.cursor_range,
-            &mut self.cursor_anchor_range,
+            &mut self.anchors.cursor_anchor_range,
         );
     }
 
@@ -317,7 +337,7 @@ impl EditorViewState {
             self.id,
             buffer,
             self.pending_cursor_range,
-            &mut self.pending_cursor_anchor_range,
+            &mut self.anchors.pending_cursor_anchor_range,
         );
     }
 
@@ -331,10 +351,10 @@ impl EditorViewState {
         }
         release_anchors(
             buffer,
-            take_search_anchors(&mut self.search_highlight_anchors),
+            take_search_anchors(&mut self.anchors.search_highlight_anchors),
         );
-        self.search_highlights = highlights;
-        for range in &self.search_highlights.ranges {
+        let mut highlight_anchors = Vec::with_capacity(highlights.ranges.len());
+        for range in &highlights.ranges {
             if range.start >= range.end {
                 continue;
             }
@@ -354,16 +374,17 @@ impl EditorViewState {
                     AnchorBias::Right,
                     AnchorOwner::search_endpoint(self.id),
                 );
-            self.search_highlight_anchors
-                .push(AnchoredSearchRange { start, end });
+            highlight_anchors.push(AnchoredSearchRange { start, end });
         }
+        self.search_highlights = highlights;
+        self.anchors.search_highlight_anchors = highlight_anchors;
     }
 
     pub fn clear_search_highlights_for_release(&mut self) -> Vec<AnchorId> {
         self.search_highlights.ranges.clear();
         self.search_highlights.active_range_index = None;
         self.search_replacement_preview = None;
-        take_search_anchors(&mut self.search_highlight_anchors)
+        take_search_anchors(&mut self.anchors.search_highlight_anchors)
     }
 
     pub fn set_search_replacement_preview(&mut self, preview: Option<SearchReplacementPreview>) {
@@ -463,21 +484,27 @@ impl EditorViewState {
         offset: egui::Vec2,
     ) -> Option<ScrollAnchor> {
         use crate::app::domain::AnchorBias;
-        let snapshot = self.latest_display_snapshot.as_ref()?;
-        let metrics = self.scroll.metrics();
-        if metrics.row_height <= 0.0 || snapshot.row_count() == 0 {
-            return None;
-        }
+        let (row_start, display_row_offset) = {
+            let snapshot = self.hot.latest_display_snapshot.as_ref()?;
+            let metrics = self.hot.scroll.metrics();
+            if metrics.row_height <= 0.0 || snapshot.row_count() == 0 {
+                return None;
+            }
 
-        let row = (offset.y / metrics.row_height).max(0.0);
-        // The display snapshot only covers the rendered slice (visible rows +
-        // overscan). If the requested row is outside that window, fall back
-        // to the naive logical mapping in `set_editor_pixel_offset` — the
-        // piece anchor would otherwise be capped to the slice's last row,
-        // which silently bounds vertical scroll to the slice end.
-        let snapshot_row = snapshot.row_for_document_row(row)?;
-        let row_range = snapshot.row_char_range(snapshot_row)?;
-        if let Some(previous) = self.last_piece_anchor.take() {
+            let row = (offset.y / metrics.row_height).max(0.0);
+            // The display snapshot only covers the rendered slice (visible rows +
+            // overscan). If the requested row is outside that window, fall back
+            // to the naive logical mapping in `set_editor_pixel_offset` — the
+            // piece anchor would otherwise be capped to the slice's last row,
+            // which silently bounds vertical scroll to the slice end.
+            let snapshot_row = snapshot.row_for_document_row(row)?;
+            let row_range = snapshot.row_char_range(snapshot_row)?;
+            let document_row = snapshot
+                .document_row_for_snapshot_row(snapshot_row)
+                .unwrap_or_else(|| row.floor());
+            (row_range.start as usize, (row - document_row).max(0.0))
+        };
+        if let Some(previous) = self.anchors.last_piece_anchor.take() {
             buffer
                 .document_mut()
                 .piece_tree_mut()
@@ -487,17 +514,14 @@ impl EditorViewState {
             .document_mut()
             .piece_tree_mut()
             .create_anchor_with_owner(
-                row_range.start as usize,
+                row_start,
                 AnchorBias::Left,
                 AnchorOwner::view_scroll(self.id),
             );
-        self.last_piece_anchor = Some(anchor_id);
-        let document_row = snapshot
-            .document_row_for_snapshot_row(snapshot_row)
-            .unwrap_or_else(|| row.floor());
+        self.anchors.last_piece_anchor = Some(anchor_id);
         Some(ScrollAnchor::Piece {
             anchor: anchor_id,
-            display_row_offset: (row - document_row).max(0.0),
+            display_row_offset,
         })
     }
 
@@ -537,13 +561,13 @@ impl SearchHighlightState {
 
 impl EditorViewState {
     fn resolve_search_highlight_anchors(&mut self, buffer: &crate::app::domain::BufferState) {
-        if self.search_highlight_anchors.is_empty() {
+        if self.anchors.search_highlight_anchors.is_empty() {
             return;
         }
         let piece_tree = buffer.document().piece_tree();
-        let mut ranges = Vec::with_capacity(self.search_highlight_anchors.len());
+        let mut ranges = Vec::with_capacity(self.anchors.search_highlight_anchors.len());
         let mut active_range_index = None;
-        for (index, anchored) in self.search_highlight_anchors.iter().enumerate() {
+        for (index, anchored) in self.anchors.search_highlight_anchors.iter().enumerate() {
             let Some(start) = piece_tree.anchor_position(anchored.start) else {
                 continue;
             };

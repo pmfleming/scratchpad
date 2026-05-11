@@ -106,6 +106,8 @@ pub fn render_editor_text_edit(
         buffer.active_selection.as_ref(),
         pre_cursor_range,
         view.cursor_range,
+        galley_context.char_offset_base,
+        galley_context.slice_chars,
     ) {
         document_revision = buffer.document_revision();
         galley_context = build_editor_galley(ui, buffer, view, options, viewport);
@@ -370,10 +372,25 @@ fn should_rebuild_galley_after_input(
     post_active_selection: Option<&std::ops::Range<usize>>,
     pre_cursor_range: Option<CursorRange>,
     post_cursor_range: Option<CursorRange>,
+    char_offset_base: usize,
+    slice_chars: usize,
 ) -> bool {
     changed
         || pre_active_selection != post_active_selection
-        || pre_cursor_range != post_cursor_range
+        || (pre_cursor_range != post_cursor_range
+            && !cursor_primary_in_slice(post_cursor_range, char_offset_base, slice_chars))
+}
+
+fn cursor_primary_in_slice(
+    cursor_range: Option<CursorRange>,
+    char_offset_base: usize,
+    slice_chars: usize,
+) -> bool {
+    let Some(cursor_range) = cursor_range else {
+        return true;
+    };
+    let slice_end = char_offset_base.saturating_add(slice_chars);
+    (char_offset_base..=slice_end).contains(&cursor_range.primary.index)
 }
 
 #[cfg(test)]
@@ -386,12 +403,22 @@ mod tests {
     use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
 
     #[test]
-    fn cursor_only_movement_rebuilds_galley_for_reveal() {
+    fn cursor_only_movement_inside_existing_slice_keeps_galley() {
+        let before = Some(CursorRange::one(CharCursor::new(5)));
+        let after = Some(CursorRange::one(CharCursor::new(50)));
+
+        assert!(!should_rebuild_galley_after_input(
+            false, None, None, before, after, 0, 100
+        ));
+    }
+
+    #[test]
+    fn cursor_only_movement_outside_existing_slice_rebuilds_for_reveal() {
         let before = Some(CursorRange::one(CharCursor::new(5)));
         let after = Some(CursorRange::one(CharCursor::new(500)));
 
         assert!(should_rebuild_galley_after_input(
-            false, None, None, before, after
+            false, None, None, before, after, 0, 100
         ));
     }
 
@@ -400,7 +427,7 @@ mod tests {
         let cursor = Some(CursorRange::one(CharCursor::new(5)));
 
         assert!(!should_rebuild_galley_after_input(
-            false, None, None, cursor, cursor
+            false, None, None, cursor, cursor, 0, 100
         ));
     }
 

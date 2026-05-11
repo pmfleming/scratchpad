@@ -1,0 +1,11 @@
+this project makes seven promises:
+
+Large Files: Load, inspect, scroll, and edit very large text files quickly.
+Many Files: Keep workspace and file workflows responsive above 10,000 files.
+Search: Return first matches quickly and finish searches over huge files and many files.
+Many Tabs: Open, switch, reorder, and manipulate huge tab sets quickly.
+Many Views: Keep many views into the same loaded files responsive.
+Large Text Mutation: Paste, cut, undo, redo, and metadata refresh should stay fast on huge buffers.
+Session Persistence Restore: Persist and restore very large workspaces without startup stalls.
+
+review code & look at performance data - look for an oppertunity for quick improvements towards these promises - write a plan in docs.

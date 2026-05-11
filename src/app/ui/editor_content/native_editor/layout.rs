@@ -5,6 +5,7 @@ use crate::app::domain::{
 };
 use crate::app::ui::widget_ids::{self, WidgetRole};
 use eframe::egui;
+use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -24,8 +25,8 @@ pub(super) struct EditorGalleyContext {
     pub(super) display_map: Option<DisplayTextMap>,
 }
 
-struct ViewportTextSlice {
-    text: String,
+struct ViewportTextSlice<'a> {
+    text: Cow<'a, str>,
     char_range: std::ops::Range<usize>,
     start_line: usize,
 }
@@ -133,7 +134,7 @@ fn layout_cache_key(input: LayoutCacheKeyInput<'_>) -> LayoutCacheKey {
     LayoutCacheKey {
         revision: input.revision,
         char_range: input.char_range,
-        font_family: format!("{:?}", input.options.editor_font_id.family),
+        font_family: input.options.editor_font_id.family.clone(),
         font_size_bits: input.options.editor_font_id.size.to_bits(),
         wrap_width_bits: input.wrap_width.to_bits(),
         word_wrap: input.options.word_wrap,
@@ -156,12 +157,12 @@ fn replacement_preview_signature(preview: Option<&SearchReplacementPreview>) -> 
     hasher.finish()
 }
 
-fn viewport_text_slice(
-    buffer: &BufferState,
+fn viewport_text_slice<'a>(
+    buffer: &'a BufferState,
     viewport: egui::Rect,
     row_height: f32,
     cursor_line: Option<usize>,
-) -> ViewportTextSlice {
+) -> ViewportTextSlice<'a> {
     let line_count = buffer.line_count.max(1);
     let top_line = if row_height > 0.0 {
         (viewport.min.y.max(0.0) / row_height).floor() as usize
@@ -188,9 +189,14 @@ fn viewport_text_slice(
     let start_char = tree.line_info(start_line).start_char;
     let end_info = tree.line_info(end_line);
     let end_char = (end_info.start_char + end_info.char_len).min(tree.len_chars());
+    let char_range = start_char..end_char;
+    let text = tree
+        .borrow_range(char_range.clone())
+        .map(Cow::Borrowed)
+        .unwrap_or_else(|| Cow::Owned(tree.extract_range(char_range.clone())));
     ViewportTextSlice {
-        text: tree.extract_range(start_char..end_char),
-        char_range: start_char..end_char,
+        text,
+        char_range,
         start_line,
     }
 }

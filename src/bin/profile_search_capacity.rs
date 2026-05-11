@@ -4,6 +4,7 @@ use std::time::Instant;
 
 const MB: usize = 1024 * 1024;
 const CAPACITY_SIZES: [usize; 3] = [MB, 50 * MB, 250 * MB];
+const UTF8_SEARCH_UNIT: &str = "hay café 東京 needle Привет مرحبا\n";
 
 fn main() {
     let options = SearchOptions {
@@ -26,11 +27,21 @@ fn main() {
 }
 
 fn capacity_text(bytes: usize) -> String {
-    let unit = "hay hay hay needle\n";
-    let mut text = String::with_capacity(bytes + unit.len());
+    let mut text = String::with_capacity(bytes + UTF8_SEARCH_UNIT.len());
     while text.len() < bytes {
-        text.push_str(unit);
+        text.push_str(UTF8_SEARCH_UNIT);
     }
-    text.truncate(bytes);
+    truncate_to_char_boundary(&mut text, bytes);
     text
+}
+
+fn truncate_to_char_boundary(text: &mut String, max_bytes: usize) {
+    if max_bytes >= text.len() {
+        return;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.truncate(end);
 }

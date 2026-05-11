@@ -8,7 +8,7 @@ use std::sync::Arc;
 pub struct LayoutCacheKey {
     pub revision: u64,
     pub char_range: Range<usize>,
-    pub font_family: String,
+    pub font_family: egui::FontFamily,
     pub font_size_bits: u32,
     pub wrap_width_bits: u32,
     pub word_wrap: bool,

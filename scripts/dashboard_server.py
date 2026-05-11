@@ -353,6 +353,7 @@ def run_task_batch(run_id: str, selector: str, tasks: List[Dict[str, Any]]) -> N
         error_message = None
         artifacts: List[str] = []
         completed_task_ids: List[str] = []
+        failed_task_ids: List[str] = []
         total_tasks = len(tasks)
         try:
             with log_path.open("w", encoding="utf-8") as log:
@@ -369,6 +370,7 @@ def run_task_batch(run_id: str, selector: str, tasks: List[Dict[str, Any]]) -> N
                             "completed_tasks": len(completed_task_ids),
                             "total_tasks": total_tasks,
                             "completed_task_ids": list(completed_task_ids),
+                            "failed_task_ids": list(failed_task_ids),
                             "last_update_at": time.time(),
                         }
                         if detail is not None:
@@ -385,10 +387,12 @@ def run_task_batch(run_id: str, selector: str, tasks: List[Dict[str, Any]]) -> N
                         completed_tasks=len(completed_task_ids),
                         total_tasks=total_tasks,
                         completed_task_ids=list(completed_task_ids),
+                        failed_task_ids=list(failed_task_ids),
                         last_update_at=time.time(),
                     )
                     log.write(f"## {task['id']} - {task['title']}\n")
                     log.flush()
+                    task_exit_code = 0
                     for raw_command in task["commands"]:
                         command = normalize_command(list(raw_command))
                         log.write(f"$ {' '.join(command)}\n")
@@ -406,6 +410,7 @@ def run_task_batch(run_id: str, selector: str, tasks: List[Dict[str, Any]]) -> N
                                     completed_tasks=len(completed_task_ids),
                                     total_tasks=total_tasks,
                                     completed_task_ids=list(completed_task_ids),
+                                    failed_task_ids=list(failed_task_ids),
                                     last_update_at=time.time(),
                                 )
 
@@ -419,17 +424,25 @@ def run_task_batch(run_id: str, selector: str, tasks: List[Dict[str, Any]]) -> N
                         log.write(f"\nexit={process.returncode}\n\n")
                         log.flush()
                         if process.returncode != 0:
-                            exit_code = process.returncode
+                            task_exit_code = process.returncode
+                            if exit_code == 0:
+                                exit_code = process.returncode
                             break
                     artifacts.extend(task.get("output_artifacts", []))
-                    if exit_code != 0:
-                        break
-                    completed_task_ids.append(task["id"])
+                    if task_exit_code != 0:
+                        failed_task_ids.append(task["id"])
+                        log.write(
+                            f"Task {task['id']} failed with exit={task_exit_code}; continuing remaining tasks.\n\n"
+                        )
+                        log.flush()
+                    else:
+                        completed_task_ids.append(task["id"])
                     STORE.update(
                         run_id,
                         completed_tasks=len(completed_task_ids),
                         total_tasks=total_tasks,
                         completed_task_ids=list(completed_task_ids),
+                        failed_task_ids=list(failed_task_ids),
                     )
         except Exception as exc:
             exit_code = 1
@@ -450,6 +463,7 @@ def run_task_batch(run_id: str, selector: str, tasks: List[Dict[str, Any]]) -> N
             "completed_tasks": len(completed_task_ids),
             "total_tasks": total_tasks,
             "completed_task_ids": completed_task_ids,
+            "failed_task_ids": failed_task_ids,
             "last_update_at": finished,
         }
         if error_message:

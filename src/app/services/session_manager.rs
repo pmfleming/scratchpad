@@ -74,6 +74,7 @@ pub(crate) fn apply_restored_session(
     }
     app.tab_manager_mut()
         .set_tabs(restored.tabs, restored.active_tab_index);
+    app.tab_manager_mut().evict_inactive_tab_state();
     app.ensure_active_tab_slot_selected();
     app.refresh_startup_restore_conflicts();
     restored.legacy_settings
