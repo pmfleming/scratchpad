@@ -29,6 +29,7 @@
                 <code>target/analysis/measurement_catalog.json</code>
                 <code>target/analysis/measurement_runs.json</code>
                 <code>target/analysis/hotspots.json</code>
+                <code>target/analysis/type_health.json</code>
                 <code>target/analysis/clones.json</code>
                 <code>target/analysis/speed_efficiency_report.json</code>
                 <code>target/analysis/correctness_review.json</code>
@@ -168,6 +169,27 @@
                 </div>
             </div>
 
+            <div class="quality-layout quality-layout--structural">
+                <div class="panel-card structural-scatter-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Type width / method surface</h2>
+                            <p>Wide state plus broad impls are highlighted before they can disappear into module averages.</p>
+                        </div>
+                    </div>
+                    <div id="type-health-scatter" class="type-health-scatter"></div>
+                </div>
+                <div class="panel-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Structural risk distribution</h2>
+                            <p>Tail view for wide structs, large enums, method surface, and impl spread.</p>
+                        </div>
+                    </div>
+                    <div id="type-health-distribution" class="quality-distribution"></div>
+                </div>
+            </div>
+
             <div class="quality-layout">
                 <div class="panel-card">
                     <div class="panel-card__header">
@@ -201,6 +223,7 @@
                         <button type="button" class="is-active" data-quality-dataset-view="hotspots"
                             aria-pressed="true">Hotspots</button>
                         <button type="button" data-quality-dataset-view="clones" aria-pressed="false">Clones</button>
+                        <button type="button" data-quality-dataset-view="typeHealth" aria-pressed="false">Structural</button>
                         <button type="button" data-quality-dataset-view="escapeHatches" aria-pressed="false">Escape
                             Hatches</button>
                         <button type="button" data-quality-dataset-view="locality"
@@ -236,6 +259,20 @@
                         </div>
                     </div>
                     <div id="clones-table" class="table-wrap quality-dataset-table"></div>
+                </div>
+                <div class="quality-dataset-view" data-quality-dataset-panel="typeHealth">
+                    <div class="quality-dataset-view__header">
+                        <div>
+                            <h3>Structural Type Health</h3>
+                            <p>Ranked by type-level width, method surface, enum size, declaration span, and impl spread.</p>
+                        </div>
+                        <div class="quality-dataset-tools">
+                            <button class="run-button" data-run-item="quality.type_health">Refresh</button>
+                            <input id="type-health-filter" class="filter-input" type="search"
+                                placeholder="Filter structural health..." />
+                        </div>
+                    </div>
+                    <div id="type-health-table" class="table-wrap quality-dataset-table"></div>
                 </div>
                 <div class="quality-dataset-view" data-quality-dataset-panel="escapeHatches">
                     <div class="quality-dataset-view__header">

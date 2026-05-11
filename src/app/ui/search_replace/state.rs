@@ -3,6 +3,7 @@ use crate::app::app_state::{
     SearchResultGroup, SearchScope, SearchScopeOrigin, SearchStatus,
 };
 use crate::app::services::search::SearchMode;
+use crate::app::utils::pluralize;
 use eframe::egui;
 use std::sync::Arc;
 
@@ -121,11 +122,10 @@ impl SearchStripState {
             );
         }
 
-        let file_count = self.result_groups.len();
-        let file_label = if file_count == 1 { "file" } else { "files" };
         format!(
-            "{} matches in {} {}",
-            self.match_count, file_count, file_label
+            "{} matches in {}",
+            self.match_count,
+            pluralize(self.result_groups.len(), "file")
         )
     }
 }
@@ -147,9 +147,9 @@ impl SearchProgressSnapshot {
 fn searching_summary(progress: &SearchProgressSnapshot) -> String {
     if progress.target_count > 0 {
         format!(
-            "Searching {} of {} files...",
+            "Searching {} of {}...",
             progress.scanned_targets.min(progress.target_count),
-            progress.target_count
+            pluralize(progress.target_count, "file")
         )
     } else {
         "Searching\u{2026}".to_owned()

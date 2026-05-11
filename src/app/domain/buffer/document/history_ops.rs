@@ -49,6 +49,17 @@ impl TextDocument {
             .ok_or(TextHistoryApplyError::OutOfBounds)?;
         let indices = self.replayable_indices_at(index, direction)?;
 
+        let mut candidate = self.clone();
+        let selection = candidate.apply_text_history_indices(indices, direction)?;
+        *self = candidate;
+        Ok(selection)
+    }
+
+    fn apply_text_history_indices(
+        &mut self,
+        indices: Vec<usize>,
+        direction: OperationDirection,
+    ) -> Result<CursorRange, TextHistoryApplyError> {
         let mut applied_selection = None;
         for idx in indices {
             if !self.history[idx].flags.replayable {

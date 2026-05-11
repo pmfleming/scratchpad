@@ -226,6 +226,10 @@ h2 {
     --category: #f3c969;
 }
 
+.quality-overview-card--structure {
+    --category: #7ddc9b;
+}
+
 .quality-overview-card--escape-hatches {
     --category: #f07178;
 }
@@ -2454,6 +2458,103 @@ tr:hover td {
     margin-bottom: 18px;
 }
 
+.quality-layout--structural {
+    align-items: stretch;
+}
+
+.structural-scatter-card {
+    min-width: 0;
+}
+
+.type-health-scatter {
+    min-width: 0;
+}
+
+.type-health-scatter__layout {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(190px, 0.35fr);
+    gap: 14px;
+    align-items: stretch;
+    min-width: 0;
+}
+
+.type-health-scatter__plot {
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    min-height: 260px;
+}
+
+.type-health-zone {
+    opacity: 0.16;
+}
+
+.type-health-zone--watch {
+    fill: var(--bad);
+}
+
+.type-health-point {
+    cursor: pointer;
+    opacity: 0.62;
+    stroke: rgba(16, 21, 28, 0.92);
+    stroke-width: 2;
+}
+
+.type-health-point:hover,
+.type-health-point:focus,
+.type-health-point.is-active {
+    opacity: 1;
+    outline: none;
+    stroke: rgba(255, 255, 255, 0.88);
+}
+
+.type-health-point--good {
+    fill: var(--good);
+}
+
+.type-health-point--warn {
+    fill: var(--warn);
+}
+
+.type-health-point--bad {
+    fill: var(--bad);
+}
+
+.type-health-point.is-top-risk {
+    opacity: 0.96;
+    stroke: rgba(255, 255, 255, 0.82);
+}
+
+.type-health-ranked-row {
+    cursor: pointer;
+}
+
+.type-health-ranked-row.is-active {
+    border-color: var(--accent);
+    background: rgba(111, 208, 255, 0.12);
+}
+
+.type-health-popover {
+    gap: 8px;
+}
+
+.type-health-popover code {
+    display: block;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.type-health-popover__signals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    padding-top: 4px;
+}
+
 .quality-distribution {
     display: grid;
     gap: 16px;
@@ -2750,6 +2851,12 @@ tr:hover td {
     grid-template-columns: minmax(120px, 0.45fr) minmax(0, 1fr);
     gap: 16px;
     align-items: start;
+}
+
+.tail-filter-note {
+    margin: -4px 0 0;
+    color: var(--muted);
+    font-size: 12px;
 }
 
 .risk-bucket-list {
@@ -4863,6 +4970,10 @@ button.status-pill:hover {
     }
 
     .risk-count-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .type-health-scatter__layout {
         grid-template-columns: 1fr;
     }
 }

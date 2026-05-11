@@ -4,6 +4,7 @@ use crate::app::diagnostics;
 use crate::app::domain::{BufferId, SplitAxis, SplitPath, ViewId, WorkspaceTab};
 use crate::app::services::file_controller::FileController;
 use crate::app::services::settings_store::{FileOpenDisposition, NewTabPlacement};
+use crate::app::utils::pluralize;
 
 impl ScratchpadApp {
     pub fn new_tab(&mut self) {
@@ -60,13 +61,16 @@ impl ScratchpadApp {
             .collect::<Vec<_>>();
         let targets = save_all_targets(self);
         let had_targets = !targets.is_empty();
+        let mut queued_count = 0usize;
 
         for (tab_index, view_id) in targets {
             self.tab_manager_mut().active_tab_index = tab_index;
             if let Some(tab) = self.tabs_mut().get_mut(tab_index) {
                 tab.activate_view(view_id);
             }
-            FileController::save_file_at(self, tab_index);
+            if FileController::save_file_at(self, tab_index) {
+                queued_count += 1;
+            }
             if self.pending_action().is_some() {
                 break;
             }
@@ -79,6 +83,12 @@ impl ScratchpadApp {
         }
         self.request_focus_for_active_view();
         if had_targets {
+            if queued_count > 0 && self.pending_action().is_none() {
+                self.set_info_status_in_domain(
+                    StatusDomain::File,
+                    format!("Saving {}.", pluralize(queued_count, "file")),
+                );
+            }
             self.mark_session_dirty();
             let _ = self.persist_session_now();
         }

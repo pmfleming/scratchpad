@@ -1,8 +1,10 @@
 use crate::app::capacity_metrics::BackgroundIoLane;
 use crate::app::domain::{
     BufferState, DiskFileState, DocumentSnapshot, TextArtifactSummary, TextFormatMetadata,
+    WorkspaceTab,
 };
 use crate::app::services::session_store::{RestoredSession, SessionPersistRequest, SessionStore};
+use crate::app::services::settings_store::AppSettings;
 use std::path::PathBuf;
 
 pub(crate) enum PathLoadRequest {
@@ -31,6 +33,12 @@ pub(crate) enum BackgroundIoRequest {
         /// path is delivered with `is_partial: false`. When false, all
         /// results are batched into one terminal `PathsLoaded` message.
         streaming: bool,
+    },
+    SavePath {
+        request_id: u64,
+        path: PathBuf,
+        snapshot: DocumentSnapshot,
+        format: TextFormatMetadata,
     },
     RestoreSession {
         request_id: u64,
@@ -61,6 +69,7 @@ impl BackgroundIoRequest {
     pub(super) fn kind(&self) -> &'static str {
         match self {
             Self::LoadPaths { .. } => "load_paths",
+            Self::SavePath { .. } => "save_path",
             Self::RestoreSession { .. } => "restore_session",
             Self::PersistSession { .. } => "persist_session",
             Self::RefreshTextMetadata { .. } => "refresh_text_metadata",
@@ -70,7 +79,7 @@ impl BackgroundIoRequest {
 
     pub(super) fn lane(&self) -> BackgroundIoLane {
         match self {
-            Self::LoadPaths { .. } => BackgroundIoLane::Path,
+            Self::LoadPaths { .. } | Self::SavePath { .. } => BackgroundIoLane::Path,
             Self::RestoreSession { .. } | Self::PersistSession { .. } => BackgroundIoLane::Session,
             Self::RefreshTextMetadata { .. } | Self::RefreshEncodingCompliance { .. } => {
                 BackgroundIoLane::Analysis
@@ -88,9 +97,24 @@ pub(crate) enum BackgroundIoResult {
         /// When false (terminal), the action is removed and finalized.
         is_partial: bool,
     },
+    PathSaved {
+        request_id: u64,
+        path: PathBuf,
+        disk_state: Option<DiskFileState>,
+        result: Result<(), String>,
+    },
     SessionRestored {
         request_id: u64,
         result: Result<Option<RestoredSession>, String>,
+    },
+    SessionRestoreStarted {
+        request_id: u64,
+        active_tab_index: usize,
+        legacy_settings: AppSettings,
+    },
+    SessionTabRestored {
+        request_id: u64,
+        tab: WorkspaceTab,
     },
     SessionPersisted {
         request_id: u64,

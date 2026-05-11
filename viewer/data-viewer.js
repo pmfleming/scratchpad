@@ -11,6 +11,7 @@
         speedReport: `../target/analysis/speed_efficiency_report.json?v=${viewerVersion}`,
         performanceReview: `../target/analysis/performance_review.json?v=${viewerVersion}`,
         clones: `../target/analysis/clones.json?v=${viewerVersion}`,
+        typeHealth: `../target/analysis/type_health.json?v=${viewerVersion}`,
         escapeHatches: `../target/analysis/rust_escape_hatches.json?v=${viewerVersion}`,
         locality: `../target/analysis/locality_metrics.json?v=${viewerVersion}`,
         leverage: `../target/analysis/leverage_metrics.json?v=${viewerVersion}`,
@@ -32,6 +33,7 @@
         speedReport: null,
         performanceReview: null,
         clones: [],
+        typeHealth: [],
         escapeHatches: [],
         locality: [],
         leverage: [],
@@ -207,12 +209,17 @@
         return Number(item.quality_score ?? item.score ?? 0);
     }
 
+    function typeHealthRisk(item) {
+        return Number(item?.structural_risk ?? 0);
+    }
+
     function renderQualityOverview() {
         const target = byId("quality-overview");
         if (!target) return;
 
         const hotspots = state.hotspots || [];
         const clones = state.clones || [];
+        const typeHealth = state.typeHealth || [];
         const locality = state.locality || [];
         const leverage = state.leverage || [];
         const escapeHatches = state.escapeHatches || [];
@@ -227,6 +234,13 @@
         const crossFileClones = clones.filter((item) => (item.file_count || 0) >= 2).length;
         const astClones = clones.filter((item) => item.engine === "ast").length;
         const widestClone = clones.reduce((max, item) => Math.max(max, item.max_line_span || 0), 0);
+        const worstType = typeHealth.reduce((worst, item) => {
+            if (!worst) return item;
+            return typeHealthRisk(item) > typeHealthRisk(worst) ? item : worst;
+        }, null);
+        const structuralRiskTypes = typeHealth.filter((item) => typeHealthRisk(item) >= 40).length;
+        const wideStructs = typeHealth.filter((item) => (item.field_count || 0) >= 16).length;
+        const implSpreadTypes = typeHealth.filter((item) => (item.impl_file_count || 0) >= 4).length;
         const escapeHatchModules = escapeHatches.length;
         const escapeHatchTotal = escapeHatches.reduce((sum, item) => sum + Number(item.total_count || 0), 0);
         const unsafeModules = escapeHatches.filter((item) => Number(item.unsafe_count || 0) > 0).length;
@@ -254,6 +268,20 @@
                     ["Worst quality", worstHotspot ? formatNumber.format(qualityScore(worstHotspot)) : "-"],
                     ["Large items", largeHotspots],
                     ["Worst item", worstHotspot ? worstHotspot.name.split(/[\\/]/).pop() : "-"],
+                ],
+            },
+            {
+                cls: "structure",
+                title: "Structure",
+                summary: worstType
+                    ? `${formatNumber.format(typeHealthRisk(worstType))} worst type`
+                    : "No type data",
+                metrics: [
+                    ["Types", typeHealth.length],
+                    ["High risk", structuralRiskTypes],
+                    ["Wide structs", wideStructs],
+                    ["Impl spread", implSpreadTypes],
+                    ["Worst type", worstType ? worstType.type_name : "-"],
                 ],
             },
             {
@@ -361,6 +389,34 @@
                     <td>${item.token_count}</td>
                     <td>${renderPills(item.signals)}</td>
                     <td class="small-text">${locations}</td>
+                </tr>`;
+            })
+        );
+    }
+
+    function renderTypeHealth() {
+        const query = byId("type-health-filter")?.value || "";
+        const rows = state.typeHealth || [];
+        const filtered = rows.filter((item) => matchesFilter(item, query));
+        renderTable(
+            "type-health-table",
+            ["Rank", "Kind", "Type", "Path", "Risk", "Width", "Methods", "Impls", "Impl Files", "Span", "Signals"],
+            filtered.map((item, index) => {
+                const risk = typeHealthRisk(item);
+                const scoreClass = riskClass(risk, 25, 40);
+                const width = Math.max(Number(item.field_count || 0), Number(item.variant_count || 0));
+                return `<tr>
+                    <td>${index + 1}</td>
+                    <td><span class="pill">${escapeHtml(item.kind || "type")}</span></td>
+                    <td><code>${escapeHtml(item.qualified_name || item.type_name)}</code><div class="muted">line ${escapeHtml(item.line || "-")}</div></td>
+                    <td><code>${escapeHtml(item.path || "")}</code></td>
+                    <td class="${scoreClass}">${formatNumber.format(risk)}</td>
+                    <td>${formatNumber.format(width)}</td>
+                    <td>${formatNumber.format(item.method_count || 0)}</td>
+                    <td>${formatNumber.format(item.impl_block_count || 0)}</td>
+                    <td>${formatNumber.format(item.impl_file_count || 0)}</td>
+                    <td>${formatNumber.format(item.declaration_span || 0)}</td>
+                    <td>${renderPills(item.signals)}</td>
                 </tr>`;
             })
         );
@@ -5262,7 +5318,7 @@
     async function loadDefaults() {
         const status = byId("load-status");
         const detail = byId("load-detail");
-        const keys = ["catalog", "runs", "hotspots", "slowspots", "searchSpeed", "capacityReport", "resourceProfiles", "speedReport", "performanceReview", "clones", "escapeHatches", "locality", "leverage", "map", "projectCodeMetrics", "flamegraphs", "correctness", "appPackage"];
+        const keys = ["catalog", "runs", "hotspots", "slowspots", "searchSpeed", "capacityReport", "resourceProfiles", "speedReport", "performanceReview", "clones", "typeHealth", "escapeHatches", "locality", "leverage", "map", "projectCodeMetrics", "flamegraphs", "correctness", "appPackage"];
         const fallbacks = {
             catalog: null,
             runs: [],
@@ -5274,6 +5330,7 @@
             speedReport: null,
             performanceReview: null,
             clones: [],
+            typeHealth: [],
             escapeHatches: [],
             locality: [],
             leverage: [],
@@ -5346,7 +5403,9 @@
         renderOverview();
         renderHotspots();
         renderQualityOverview();
+        renderTypeHealthScatter();
         renderQualityDistribution();
+        renderTypeHealthDistribution();
         renderCloneDistribution();
         renderPerformanceReviewCoverage();
         renderPerformanceOverview();
@@ -5354,6 +5413,7 @@
         renderPerformanceHeadlineCharts();
         renderPerformanceCuratedLists();
         renderClones();
+        renderTypeHealth();
         renderEscapeHatches();
         renderCorrectness();
         renderCorrectnessMatrix();
@@ -5708,6 +5768,21 @@
         });
     }
 
+    function renderTypeHealthDistribution() {
+        const target = byId("type-health-distribution");
+        if (!target) return;
+        renderRiskDistribution(target, typeHealthDistributionItems(), {
+            empty: "No type health data.",
+            modeKey: "qualityDistributionMode",
+            expandedKey: "expandedTypeHealthKey",
+            warn: 25,
+            bad: 40,
+            scoreLabel: "structural risk",
+            minScore: 8,
+            filteredOutLabel: "stable low-risk types",
+        });
+    }
+
     function qualityDistributionItems() {
         return (state.hotspots || []).map((h) => ({
             key: `hotspot:${h.name}:${h.start_line || ""}`,
@@ -5738,9 +5813,183 @@
         });
     }
 
+    function typeHealthDistributionItems() {
+        return (state.typeHealth || []).map((item) => ({
+            key: `type:${item.qualified_name || item.type_name}`,
+            kind: item.kind || "type",
+            name: item.qualified_name || item.type_name,
+            score: typeHealthRisk(item),
+            signals: item.signals || [],
+            details: `${formatNumber.format(item.field_count || item.variant_count || 0)} width · ${formatNumber.format(item.method_count || 0)} methods · ${formatNumber.format(item.impl_file_count || 0)} files`,
+            raw: item,
+            searchText: [
+                item.kind,
+                item.type_name,
+                item.qualified_name,
+                item.path,
+                item.module_key,
+                item.signals,
+                item.field_count,
+                item.variant_count,
+                item.method_count,
+                item.impl_file_count,
+            ].join(" "),
+        }));
+    }
+
+    function renderTypeHealthScatter() {
+        const target = byId("type-health-scatter");
+        if (!target) return;
+        const rows = (state.typeHealth || []).filter((item) => {
+            const width = Math.max(Number(item.field_count || 0), Number(item.variant_count || 0));
+            return typeHealthRisk(item) >= 8
+                || width >= 8
+                || Number(item.method_count || 0) >= 12
+                || Number(item.impl_file_count || 0) >= 2;
+        });
+        if (!rows.length) {
+            target.innerHTML = `<p class="muted">No type health data.</p>`;
+            return;
+        }
+        const width = 760;
+        const height = 380;
+        const margin = { left: 70, right: 28, top: 28, bottom: 60 };
+        const plotWidth = width - margin.left - margin.right;
+        const plotHeight = height - margin.top - margin.bottom;
+        const typeWidth = (item) => Math.max(Number(item.field_count || 0), Number(item.variant_count || 0));
+        const maxWidth = Math.max(20, ...rows.map(typeWidth));
+        const maxMethods = Math.max(20, ...rows.map((item) => Number(item.method_count || 0)));
+        const maxY = Math.log1p(maxMethods);
+        const x = (value) => margin.left + (Math.max(0, Math.min(maxWidth, value)) / maxWidth) * plotWidth;
+        const y = (value) => margin.top + (1 - (Math.log1p(Math.max(0, value)) / maxY)) * plotHeight;
+        const widthCut = x(16);
+        const methodCut = y(20);
+        const highRisk = [...rows].sort((a, b) => typeHealthRisk(b) - typeHealthRisk(a)).slice(0, 8);
+        const highRiskKeys = new Set(highRisk.map((item) => item.qualified_name || item.type_name));
+        const points = rows.map((item, index) => {
+            const risk = typeHealthRisk(item);
+            const cls = risk >= 40 ? "bad" : risk >= 25 ? "warn" : "good";
+            const radius = Math.max(4, Math.min(13, 4 + Math.sqrt(Number(item.impl_file_count || 0) + 1) * 2));
+            const key = item.qualified_name || item.type_name;
+            const topClass = highRiskKeys.has(key) ? "is-top-risk" : "";
+            const label = `${key}: risk ${formatNumber.format(risk)}, width ${formatNumber.format(typeWidth(item))}, methods ${formatNumber.format(item.method_count || 0)}, impl files ${formatNumber.format(item.impl_file_count || 0)}`;
+            return `<circle class="type-health-point type-health-point--${cls} ${topClass}" cx="${x(typeWidth(item)).toFixed(1)}" cy="${y(item.method_count || 0).toFixed(1)}" r="${radius.toFixed(1)}" tabindex="0" role="button" data-type-health-index="${index}" aria-label="${escapeHtml(label)}">
+                <title>${escapeHtml(label)}</title>
+            </circle>`;
+        }).join("");
+        target.innerHTML = `<div class="type-health-scatter__layout">
+            <svg class="type-health-scatter__plot" viewBox="0 0 ${width} ${height}" role="img" aria-label="Type width versus method surface scatter plot">
+                <rect class="type-health-zone type-health-zone--watch" x="${widthCut}" y="${margin.top}" width="${margin.left + plotWidth - widthCut}" height="${methodCut - margin.top}"></rect>
+                <line class="ll-threshold" x1="${widthCut}" x2="${widthCut}" y1="${margin.top}" y2="${margin.top + plotHeight}"></line>
+                <line class="ll-threshold" x1="${margin.left}" x2="${margin.left + plotWidth}" y1="${methodCut}" y2="${methodCut}"></line>
+                <line class="ll-axis" x1="${margin.left}" x2="${margin.left}" y1="${margin.top}" y2="${margin.top + plotHeight}"></line>
+                <line class="ll-axis" x1="${margin.left}" x2="${margin.left + plotWidth}" y1="${margin.top + plotHeight}" y2="${margin.top + plotHeight}"></line>
+                <text class="ll-axis-label" x="${margin.left + plotWidth / 2}" y="${height - 16}">Fields or enum variants</text>
+                <text class="ll-axis-label ll-axis-label--y" x="20" y="${margin.top + plotHeight / 2}">Method surface (log)</text>
+                <text class="ll-tick" x="${x(0)}" y="${height - 38}">0</text>
+                <text class="ll-tick" x="${x(16)}" y="${height - 38}">16</text>
+                <text class="ll-tick" x="${x(maxWidth)}" y="${height - 38}">${formatNumber.format(maxWidth)}</text>
+                <text class="ll-tick" x="${margin.left - 28}" y="${y(maxMethods) + 4}">${formatNumber.format(maxMethods)}</text>
+                <text class="ll-tick" x="${margin.left - 22}" y="${y(20) + 4}">20</text>
+                <text class="ll-tick" x="${margin.left - 14}" y="${y(0) + 4}">0</text>
+                ${points}
+            </svg>
+            <div class="ll-popover type-health-popover" hidden></div>
+            <div class="ll-ranked-list">
+                <h3>Structural tail</h3>
+                ${highRisk.map((item, index) => `<button type="button" class="ll-ranked-row type-health-ranked-row" data-type-health-index="${rows.indexOf(item)}" title="${escapeHtml(item.qualified_name || item.type_name)}">
+                    <span>${index + 1}</span>
+                    <code>${escapeHtml(shortenLabel(item.qualified_name || item.type_name))}</code>
+                    <strong>${formatNumber.format(typeHealthRisk(item))}</strong>
+                </button>`).join("")}
+            </div>
+        </div>`;
+        const popover = target.querySelector(".type-health-popover");
+        const setActiveTypePoint = (index) => {
+            target.querySelectorAll("[data-type-health-index]").forEach((element) => {
+                element.classList.toggle("is-active", Number(element.dataset.typeHealthIndex) === index);
+            });
+        };
+        const closeTypePopover = () => {
+            if (popover) popover.hidden = true;
+            setActiveTypePoint(-1);
+        };
+        const showTypePopover = (index) => {
+            const item = rows[index];
+            if (!item || !popover) return;
+            setActiveTypePoint(index);
+            const dotX = x(typeWidth(item));
+            const dotY = y(item.method_count || 0);
+            const left = (dotX / width) * 100;
+            const top = (dotY / height) * 100;
+            const risk = typeHealthRisk(item);
+            const riskLabel = risk >= 40 ? "high" : risk >= 25 ? "watch" : "lower";
+            popover.hidden = false;
+            popover.classList.toggle("ll-popover--left", left > 68);
+            popover.classList.toggle("ll-popover--top", top < 24);
+            popover.classList.toggle("ll-popover--bottom", top > 76);
+            popover.style.left = `${left}%`;
+            popover.style.top = `${top}%`;
+            popover.innerHTML = `<strong>${escapeHtml(item.qualified_name || item.type_name)}</strong>
+                <code>${escapeHtml(item.path || "")}:${escapeHtml(item.line || "-")}</code>
+                <div><span>Dot X</span><b>${formatNumber.format(typeWidth(item))} fields/variants</b></div>
+                <div><span>Dot Y</span><b>${formatNumber.format(item.method_count || 0)} methods</b></div>
+                <div><span>Dot size</span><b>${formatNumber.format(item.impl_file_count || 0)} impl files</b></div>
+                <div><span>Dot color</span><b>${escapeHtml(riskLabel)} structural risk</b></div>
+                <div><span>Risk</span><b>${formatNumber.format(risk)}</b></div>
+                <div class="type-health-popover__signals">${renderPills(item.signals)}</div>`;
+        };
+        target.querySelectorAll(".type-health-point").forEach((point) => {
+            point.addEventListener("click", (event) => {
+                event.stopPropagation();
+                showTypePopover(Number(point.dataset.typeHealthIndex));
+            });
+            point.addEventListener("keydown", (event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    showTypePopover(Number(point.dataset.typeHealthIndex));
+                }
+            });
+        });
+        target.querySelectorAll(".type-health-ranked-row").forEach((row) => {
+            row.addEventListener("click", (event) => {
+                event.stopPropagation();
+                showTypePopover(Number(row.dataset.typeHealthIndex));
+            });
+        });
+        target.querySelector(".type-health-scatter__layout")?.addEventListener("click", () => {
+            closeTypePopover();
+        });
+        popover?.addEventListener("click", (event) => {
+            event.stopPropagation();
+        });
+        if (!window.__scratchpadTypeHealthOutsideClickBound) {
+            window.__scratchpadTypeHealthOutsideClickBound = true;
+            document.addEventListener("click", (event) => {
+                const activeScatter = document.querySelector("#type-health-scatter .type-health-scatter__layout");
+                const activePopover = document.querySelector("#type-health-scatter .type-health-popover");
+                if (!activeScatter || !activePopover || activePopover.hidden) return;
+                if (activeScatter.contains(event.target)) return;
+                activePopover.hidden = true;
+                document.querySelectorAll("#type-health-scatter [data-type-health-index]").forEach((element) => {
+                    element.classList.remove("is-active");
+                });
+            });
+        }
+    }
+
     function renderRiskDistribution(target, items, options) {
+        const filteredOutCount = Number(options.minScore || 0) > 0
+            ? items.filter((item) => Number(item.score || 0) < Number(options.minScore)).length
+            : 0;
+        if (Number(options.minScore || 0) > 0) {
+            items = items.filter((item) => Number(item.score || 0) >= Number(options.minScore));
+        }
         if (!items.length) {
-            target.innerHTML = `<p class="muted">${escapeHtml(options.empty)}</p>`;
+            const filteredNote = filteredOutCount
+                ? `<p class="muted">${formatNumber.format(filteredOutCount)} ${escapeHtml(options.filteredOutLabel || "low-risk items")} filtered from this tail view.</p>`
+                : "";
+            target.innerHTML = `<p class="muted">${escapeHtml(options.empty)}</p>${filteredNote}`;
             return;
         }
         const sorted = items.slice().sort((a, b) => b.score - a.score);
@@ -5749,7 +5998,10 @@
         const body = mode === "counts"
             ? renderRiskDistributionCounts(sorted, options)
             : renderDistributionRows(sorted.slice(0, 10), options, { ranked: true });
-        target.innerHTML = curve + body;
+        const filteredNote = filteredOutCount
+            ? `<p class="tail-filter-note">${formatNumber.format(filteredOutCount)} ${escapeHtml(options.filteredOutLabel || "low-risk items")} hidden from this tail view.</p>`
+            : "";
+        target.innerHTML = curve + filteredNote + body;
         attachPerformanceDistributionHandlers(target);
         target.querySelectorAll("[data-risk-key]").forEach((button) => {
             button.addEventListener("click", () => {
@@ -5984,6 +6236,10 @@
     }
 
     function renderQualityFeedDetail(item) {
+        if (String(item.key || "").startsWith("type:")) {
+            return `<div class="quality-detail">${renderTypeHealthDetail(item.raw || {})}</div>`;
+        }
+
         if (item.kind === "clone") {
             const clone = item.raw || {};
             const relatedHotspots = (state.hotspots || [])
@@ -6010,6 +6266,29 @@
                 <h4>Clone metrics for this file</h4>
                 ${matchingClones.length ? matchingClones.map((clone) => renderCloneDetail(clone, { compact: true })).join("") : `<p class="muted">No clone groups found for this file.</p>`}
             </div>
+        </div>`;
+    }
+
+    function renderTypeHealthDetail(item, options = {}) {
+        const risk = typeHealthRisk(item);
+        const width = Math.max(Number(item.field_count || 0), Number(item.variant_count || 0));
+        const metrics = [
+            { label: "Risk", value: formatNumber.format(risk), cls: riskClass(risk, 25, 40) },
+            { label: "Kind", value: escapeHtml(item.kind || "type") },
+            { label: "Width", value: formatNumber.format(width) },
+            { label: "Fields", value: formatNumber.format(item.field_count || 0) },
+            { label: "Variants", value: formatNumber.format(item.variant_count || 0) },
+            { label: "Methods", value: formatNumber.format(item.method_count || 0) },
+            { label: "Impl Blocks", value: formatNumber.format(item.impl_block_count || 0) },
+            { label: "Impl Files", value: formatNumber.format(item.impl_file_count || 0) },
+            { label: "Declaration", value: `${formatNumber.format(item.declaration_span || 0)} lines` },
+        ];
+        const implFiles = (item.impl_files || []).slice(0, options.compact ? 4 : 12);
+        return `<div class="quality-detail__section ${options.compact ? "quality-detail__section--compact" : ""}">
+            <h4>${escapeHtml(item.qualified_name || item.type_name || "Type health")}</h4>
+            ${renderMetricGrid(metrics)}
+            <div class="quality-detail__signals">${renderPills(item.signals)}</div>
+            ${implFiles.length ? `<div class="quality-detail__locations">${implFiles.map((path) => `<code>${escapeHtml(path)}</code>`).join("")}</div>` : `<p class="muted">No impl files recorded.</p>`}
         </div>`;
     }
 
@@ -6177,6 +6456,7 @@
     setupTabs();
     byId("hotspots-filter")?.addEventListener("input", renderHotspots);
     byId("clones-filter")?.addEventListener("input", renderClones);
+    byId("type-health-filter")?.addEventListener("input", renderTypeHealth);
     byId("escape-hatches-filter")?.addEventListener("input", renderEscapeHatches);
     byId("correctness-filter")?.addEventListener("input", renderCorrectness);
     byId("locality-filter")?.addEventListener("input", renderLocalityLeverage);
@@ -6191,6 +6471,7 @@
                 item.setAttribute("aria-pressed", active ? "true" : "false");
             });
             renderQualityDistribution();
+            renderTypeHealthDistribution();
         });
     });
     document.querySelectorAll("[data-clone-distribution-mode]").forEach((button) => {

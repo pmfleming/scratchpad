@@ -41,9 +41,10 @@ fn equals_switch(left: &str, right: &str) -> bool {
 }
 
 fn strip_switch_prefix<'a>(arg: &'a str, prefix: &str) -> Option<&'a str> {
-    arg.get(..prefix.len())
+    let prefix_end = prefix.len();
+    arg.get(..prefix_end)
         .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
-        .then_some(&arg[prefix.len()..])
+        .then(|| &arg[prefix_end..])
 }
 
 #[derive(Default)]

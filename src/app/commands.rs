@@ -160,6 +160,7 @@ impl ScratchpadApp {
             let closed_buffer_ids =
                 removed_buffer_ids(open_buffer_ids_before, &open_buffer_ids_after);
             self.prune_text_history_for_buffers(closed_buffer_ids);
+            self.rebuild_buffer_tab_index();
             self.begin_layout_transition();
             self.mark_search_dirty();
             self.request_focus_for_view(next_active_view);

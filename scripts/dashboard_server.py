@@ -487,6 +487,15 @@ def collect_escape_hatch_metrics(metrics: Dict[str, Any], rows: Any) -> None:
         metrics[output_key] = sum(int(item.get(source_key, 0)) for item in rows)
 
 
+def collect_type_health_metrics(metrics: Dict[str, Any], rows: Any) -> None:
+    if not isinstance(rows, list):
+        return
+    metrics["type_health_records"] = len(rows)
+    risks = [float(item.get("structural_risk") or 0) for item in rows]
+    metrics["type_health_worst_score"] = max(risks, default=0)
+    metrics["type_health_risk_count"] = sum(1 for risk in risks if risk >= 40)
+
+
 def collect_capacity_metrics(metrics: Dict[str, Any], speed: Any) -> None:
     if not isinstance(speed, dict):
         return
@@ -548,6 +557,7 @@ def collect_run_metrics() -> Dict[str, Any]:
             "hotspots.json",
             "clones.json",
             "rust_escape_hatches.json",
+            "type_health.json",
             "speed_efficiency_report.json",
             "performance_review.json",
             "correctness_review.json",
@@ -561,6 +571,7 @@ def collect_run_metrics() -> Dict[str, Any]:
     if isinstance(clones, list):
         metrics["clone_groups"] = len(clones)
     collect_escape_hatch_metrics(metrics, artifacts["rust_escape_hatches.json"])
+    collect_type_health_metrics(metrics, artifacts["type_health.json"])
     collect_capacity_metrics(metrics, artifacts["speed_efficiency_report.json"])
     performance_review = artifacts["performance_review.json"]
     collect_summary_metrics(

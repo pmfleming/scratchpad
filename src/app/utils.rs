@@ -45,9 +45,25 @@ pub fn summarize_open_results(
 }
 
 pub fn file_count_label(count: usize) -> String {
+    pluralize(count, "file")
+}
+
+pub fn pluralize(count: usize, singular: &str) -> String {
     if count == 1 {
-        "1 file".to_owned()
+        format!("1 {singular}")
     } else {
-        format!("{count} files")
+        format!("{count} {singular}s")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pluralize_uses_singular_only_for_one() {
+        assert_eq!(pluralize(0, "file"), "0 files");
+        assert_eq!(pluralize(1, "file"), "1 file");
+        assert_eq!(pluralize(2, "file"), "2 files");
     }
 }

@@ -2,6 +2,8 @@ mod anchor;
 mod edit;
 mod slice;
 mod support;
+#[cfg(test)]
+mod tests;
 
 use super::history::PieceProvenanceStore;
 pub(crate) use super::history::{ByteSpan, PieceProvenance, PieceSource};

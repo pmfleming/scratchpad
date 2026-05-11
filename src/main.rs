@@ -43,7 +43,7 @@ fn main() -> eframe::Result<()> {
                 scratchpad::app::startup::StartupAction::Help
                 | scratchpad::app::startup::StartupAction::Version => StartupOptions::default(),
             };
-            let mut app = ScratchpadApp::with_stores_and_startup(
+            let mut app = ScratchpadApp::with_stores_and_runtime_startup(
                 session_store,
                 settings_store,
                 startup_options,

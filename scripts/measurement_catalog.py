@@ -71,6 +71,15 @@ def build_catalog() -> Dict[str, Any]:
             ["target/analysis/rust_escape_hatches.json"],
         ),
         item(
+            "quality.type_health",
+            "quality",
+            "structure",
+            "Type Health",
+            "Ranks wide structs, large enums, broad method surfaces, and impl spread.",
+            [[py, "scripts/type_health.py", "--mode", "visibility", "--paths", "src"]],
+            ["target/analysis/type_health.json"],
+        ),
+        item(
             "performance.slowspots",
             "performance",
             "speed",

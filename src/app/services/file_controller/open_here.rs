@@ -315,6 +315,7 @@ impl FileController {
         };
 
         if opened {
+            app.rebuild_buffer_tab_index();
             true
         } else {
             app.set_error_status_in_domain(
@@ -374,5 +375,135 @@ impl FileController {
         }
 
         Self::apply_open_here_summary(app, summary);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::domain::{BufferState, TabManager};
+    use crate::app::services::file_service::FileService;
+    use crate::app::services::session_store::SessionStore;
+    use crate::app::services::settings_store::SettingsStore;
+    use crate::app::startup::StartupOptions;
+
+    fn test_app(root: &std::path::Path, tabs: Vec<WorkspaceTab>) -> ScratchpadApp {
+        let mut app = ScratchpadApp::with_stores_and_startup(
+            SessionStore::new(root.join("session")),
+            SettingsStore::new(root.join("settings")),
+            StartupOptions::default(),
+        );
+        app.set_session_persist_on_drop(false);
+        app.tab_manager = TabManager {
+            tabs,
+            active_tab_index: 0,
+            pending_action: None,
+            session_dirty: false,
+            pending_scroll_to_active: false,
+            buffer_tab_index: Default::default(),
+        };
+        app.rebuild_buffer_tab_index();
+        app.clear_tab_selection();
+        app
+    }
+
+    fn disk_buffer(path: &std::path::Path, text: &str) -> BufferState {
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let mut buffer = BufferState::new(name, text.to_owned(), Some(path.to_path_buf()));
+        buffer.sync_to_disk_state(FileService::read_disk_state(path).ok());
+        buffer
+    }
+
+    #[test]
+    fn open_loaded_files_here_adds_each_loaded_file_to_active_workspace() {
+        let directory = tempfile::tempdir().unwrap();
+        let one = directory.path().join("one.txt");
+        let two = directory.path().join("two.txt");
+        std::fs::write(&one, "one").unwrap();
+        std::fs::write(&two, "two").unwrap();
+        let mut app = test_app(
+            directory.path(),
+            vec![WorkspaceTab::new(BufferState::new(
+                "base.txt".to_owned(),
+                "base".to_owned(),
+                None,
+            ))],
+        );
+        let anchor_view_id = app.tabs()[0].active_view_id;
+
+        let outcomes = FileController::open_loaded_files_here(
+            &mut app,
+            Some(anchor_view_id),
+            vec![
+                LoadedPathResult {
+                    path: one.clone(),
+                    disk_state: FileService::read_disk_state(&one).ok(),
+                    result: Ok(disk_buffer(&one, "one")),
+                },
+                LoadedPathResult {
+                    path: two.clone(),
+                    disk_state: FileService::read_disk_state(&two).ok(),
+                    result: Ok(disk_buffer(&two, "two")),
+                },
+            ],
+        );
+
+        assert_eq!(outcomes.len(), 2);
+        assert!(matches!(outcomes[0], OpenHerePathOutcome::Opened { .. }));
+        assert!(matches!(outcomes[1], OpenHerePathOutcome::Opened { .. }));
+        assert_eq!(app.tabs().len(), 1);
+        assert_eq!(app.tabs()[0].file_group_count(), 3);
+        assert!(app.find_tab_by_path(&one).is_some());
+        assert!(app.find_tab_by_path(&two).is_some());
+    }
+
+    #[test]
+    fn open_selected_paths_here_reuses_path_already_in_current_workspace() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("first.txt");
+        let second = directory.path().join("second.txt");
+        std::fs::write(&first, "first").unwrap();
+        std::fs::write(&second, "second").unwrap();
+        let mut tab = WorkspaceTab::new(disk_buffer(&first, "first"));
+        let second_view = tab
+            .open_buffer_as_split(
+                disk_buffer(&second, "second"),
+                SplitAxis::Vertical,
+                true,
+                0.5,
+            )
+            .unwrap();
+        let mut app = test_app(directory.path(), vec![tab]);
+
+        FileController::open_selected_paths_here_async(&mut app, vec![second.clone()]);
+
+        assert_eq!(app.tabs().len(), 1);
+        assert_eq!(app.tabs()[0].file_group_count(), 2);
+        assert_eq!(app.tabs()[0].active_view_id, second_view);
+    }
+
+    #[test]
+    fn open_selected_paths_here_migrates_existing_path_from_another_tab() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("first.txt");
+        let second = directory.path().join("second.txt");
+        std::fs::write(&first, "first").unwrap();
+        std::fs::write(&second, "second").unwrap();
+        let mut app = test_app(
+            directory.path(),
+            vec![
+                WorkspaceTab::new(disk_buffer(&first, "first")),
+                WorkspaceTab::new(disk_buffer(&second, "second")),
+            ],
+        );
+
+        FileController::open_selected_paths_here_async(&mut app, vec![second.clone()]);
+
+        assert_eq!(app.tabs().len(), 1);
+        assert_eq!(app.tabs()[0].file_group_count(), 2);
+        assert_eq!(
+            app.find_tab_by_path(&second).map(|(index, _)| index),
+            Some(0)
+        );
     }
 }

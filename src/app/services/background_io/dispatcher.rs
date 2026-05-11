@@ -153,3 +153,109 @@ fn lane_name(lane: BackgroundIoLane) -> &'static str {
         BackgroundIoLane::Analysis => "analysis",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::domain::{TextDocument, TextFormatMetadata};
+    use crate::app::services::session_store::SessionStore;
+
+    fn dispatcher_with_bounds(
+        path_bound: usize,
+        session_bound: usize,
+        analysis_bound: usize,
+    ) -> (
+        BackgroundIoDispatcher,
+        Receiver<BackgroundIoRequest>,
+        Receiver<BackgroundIoRequest>,
+        Receiver<BackgroundIoRequest>,
+    ) {
+        let (path_tx, path_rx) = mpsc::sync_channel(path_bound);
+        let (session_tx, session_rx) = mpsc::sync_channel(session_bound);
+        let (analysis_tx, analysis_rx) = mpsc::sync_channel(analysis_bound);
+        (
+            BackgroundIoDispatcher {
+                path_tx,
+                session_tx,
+                analysis_tx,
+                lane_depths: Arc::new(LaneDepths::default()),
+            },
+            path_rx,
+            session_rx,
+            analysis_rx,
+        )
+    }
+
+    #[test]
+    fn send_reports_full_lane_without_losing_request() {
+        let (dispatcher, _path_rx, _session_rx, _analysis_rx) = dispatcher_with_bounds(0, 1, 1);
+        let request = BackgroundIoRequest::LoadPaths {
+            request_id: 7,
+            requests: Vec::new(),
+            streaming: false,
+        };
+
+        let error = dispatcher.send(request).unwrap_err();
+
+        assert_eq!(error.lane_name(), "path");
+        assert_eq!(error.reason(), "full");
+        assert_eq!(error.request_kind(), "load_paths");
+        assert!(matches!(
+            error.into_request(),
+            BackgroundIoRequest::LoadPaths { request_id: 7, .. }
+        ));
+    }
+
+    #[test]
+    fn send_reports_disconnected_lane_without_losing_request() {
+        let directory = tempfile::tempdir().unwrap();
+        let (dispatcher, _path_rx, session_rx, _analysis_rx) = dispatcher_with_bounds(1, 1, 1);
+        drop(session_rx);
+        let request = BackgroundIoRequest::RestoreSession {
+            request_id: 9,
+            session_store: SessionStore::new(directory.path().to_path_buf()),
+        };
+
+        let error = dispatcher.send(request).unwrap_err();
+
+        assert_eq!(error.lane_name(), "session");
+        assert_eq!(error.reason(), "disconnected");
+        assert_eq!(error.request_kind(), "restore_session");
+        assert!(matches!(
+            error.into_request(),
+            BackgroundIoRequest::RestoreSession { request_id: 9, .. }
+        ));
+    }
+
+    #[test]
+    fn analysis_requests_route_to_analysis_lane() {
+        let (dispatcher, path_rx, session_rx, analysis_rx) = dispatcher_with_bounds(1, 1, 1);
+        let document = TextDocument::new("alpha".to_owned());
+        let snapshot = document.snapshot();
+        let format = TextFormatMetadata::utf8_for_new_file("alpha");
+
+        assert!(
+            dispatcher
+                .send(BackgroundIoRequest::RefreshTextMetadata {
+                    request_id: 11,
+                    buffer_id: 3,
+                    revision: 4,
+                    snapshot,
+                    format,
+                })
+                .is_ok()
+        );
+
+        assert!(path_rx.try_recv().is_err());
+        assert!(session_rx.try_recv().is_err());
+        assert!(matches!(
+            analysis_rx.try_recv().unwrap(),
+            BackgroundIoRequest::RefreshTextMetadata {
+                request_id: 11,
+                buffer_id: 3,
+                revision: 4,
+                ..
+            }
+        ));
+    }
+}

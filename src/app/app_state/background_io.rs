@@ -1,6 +1,7 @@
 use super::{
-    PendingBackgroundAction, PendingEncodingComplianceAction, PendingSessionPersistAction,
-    PendingStartupRestoreAction, PendingTextMetadataAction, ScratchpadApp,
+    PendingBackgroundAction, PendingEncodingComplianceAction, PendingSavePathAction,
+    PendingSessionPersistAction, PendingStartupRestoreAction, PendingTextMetadataAction,
+    ScratchpadApp,
 };
 use crate::app::diagnostics;
 use crate::app::services::background_io::{
@@ -135,6 +136,32 @@ impl ScratchpadApp {
         });
     }
 
+    pub(crate) fn queue_background_path_save(
+        &mut self,
+        path: PathBuf,
+        snapshot: crate::app::domain::DocumentSnapshot,
+        format: crate::app::domain::TextFormatMetadata,
+        action: PendingSavePathAction,
+    ) -> bool {
+        let request_id = self.allocate_background_request_id();
+        self.pending_background_actions
+            .insert(request_id, PendingBackgroundAction::SavePath(action));
+
+        let request = BackgroundIoRequest::SavePath {
+            request_id,
+            path,
+            snapshot,
+            format,
+        };
+        if let Err(error) = self.background_io_tx.send(request) {
+            record_background_send_error(&error);
+            self.apply_background_io_result(error.into_request().into_path_saved_result());
+            return false;
+        }
+
+        true
+    }
+
     pub(crate) fn queue_background_session_restore(
         &mut self,
         startup_options: StartupOptions,
@@ -146,6 +173,8 @@ impl ScratchpadApp {
             PendingBackgroundAction::StartupRestore(PendingStartupRestoreAction {
                 startup_options,
                 loaded_from_settings,
+                restore_started: false,
+                streamed_tab_count: 0,
             }),
         );
 
@@ -293,8 +322,28 @@ impl ScratchpadApp {
                 results,
                 is_partial,
             } => self.apply_paths_loaded_result(request_id, results, is_partial),
+            BackgroundIoResult::PathSaved {
+                request_id,
+                path,
+                disk_state,
+                result,
+            } => self.apply_path_saved_result(request_id, path, disk_state, result),
             BackgroundIoResult::SessionRestored { request_id, result } => {
                 self.apply_session_restored_result(request_id, result);
+            }
+            BackgroundIoResult::SessionRestoreStarted {
+                request_id,
+                active_tab_index,
+                legacy_settings,
+            } => {
+                self.apply_session_restore_started_result(
+                    request_id,
+                    active_tab_index,
+                    legacy_settings,
+                );
+            }
+            BackgroundIoResult::SessionTabRestored { request_id, tab } => {
+                self.apply_session_tab_restored_result(request_id, tab);
             }
             BackgroundIoResult::SessionPersisted { request_id, result } => {
                 self.apply_session_persisted_result(request_id, result);
@@ -344,6 +393,7 @@ impl ScratchpadApp {
             Some(PendingBackgroundAction::ReopenWithEncoding(action)) => {
                 FileController::apply_async_reopen_with_encoding_result(self, action, results);
             }
+            Some(PendingBackgroundAction::SavePath(_)) => {}
             Some(PendingBackgroundAction::StartupRestoreCompare(action)) => {
                 self.apply_async_startup_restore_compare_result(action, results);
             }
@@ -353,6 +403,21 @@ impl ScratchpadApp {
             | Some(PendingBackgroundAction::RefreshEncodingCompliance(_))
             | None => {}
         }
+    }
+
+    fn apply_path_saved_result(
+        &mut self,
+        request_id: u64,
+        path: PathBuf,
+        disk_state: Option<crate::app::domain::DiskFileState>,
+        result: Result<(), String>,
+    ) {
+        let Some(PendingBackgroundAction::SavePath(action)) =
+            self.pending_background_actions.remove(&request_id)
+        else {
+            return;
+        };
+        FileController::apply_async_save_result(self, action, path, disk_state, result);
     }
 
     fn apply_partial_paths_loaded_result(
@@ -388,6 +453,58 @@ impl ScratchpadApp {
             return;
         };
         self.apply_runtime_startup_restore_result(action, result);
+    }
+
+    fn apply_session_restore_started_result(
+        &mut self,
+        request_id: u64,
+        active_tab_index: usize,
+        legacy_settings: crate::app::services::settings_store::AppSettings,
+    ) {
+        let apply_legacy_settings = {
+            let Some(PendingBackgroundAction::StartupRestore(action)) =
+                self.pending_background_actions.get_mut(&request_id)
+            else {
+                return;
+            };
+            action.restore_started = true;
+            !action.loaded_from_settings
+        };
+        if apply_legacy_settings {
+            self.apply_settings(legacy_settings);
+            let _ = self.persist_settings_now();
+        }
+        if !self.tabs().is_empty() {
+            self.tab_manager_mut().active_tab_index =
+                active_tab_index.min(self.tabs().len().saturating_sub(1));
+        }
+    }
+
+    fn apply_session_tab_restored_result(
+        &mut self,
+        request_id: u64,
+        tab: crate::app::domain::WorkspaceTab,
+    ) {
+        let first_streamed_tab = {
+            let Some(PendingBackgroundAction::StartupRestore(action)) =
+                self.pending_background_actions.get_mut(&request_id)
+            else {
+                return;
+            };
+            let first_streamed_tab = action.streamed_tab_count == 0;
+            action.streamed_tab_count += 1;
+            first_streamed_tab
+        };
+
+        if first_streamed_tab {
+            self.tab_manager_mut().set_tabs(vec![tab], 0);
+        } else {
+            self.tab_manager_mut().tabs.push(tab);
+            self.rebuild_buffer_tab_index();
+        }
+        self.ensure_active_tab_slot_selected();
+        self.refresh_startup_restore_conflicts();
+        self.mark_search_dirty();
     }
 
     fn apply_session_persisted_result(&mut self, request_id: u64, result: Result<(), String>) {
@@ -471,6 +588,30 @@ impl ScratchpadApp {
     ) {
         let mut restored_session = false;
         let legacy_settings = match result {
+            Ok(Some(restored)) if action.streamed_tab_count > 0 => {
+                restored_session = true;
+                if !self.tabs().is_empty() {
+                    self.tab_manager_mut().active_tab_index = restored
+                        .active_tab_index
+                        .min(self.tabs().len().saturating_sub(1));
+                }
+                if let Some(status) = restored.restore_status.as_ref() {
+                    match status.level {
+                        crate::app::services::session_store::RestoreStatusLevel::Info => self
+                            .set_info_status_in_domain(
+                                crate::app::app_state::StatusDomain::Session,
+                                status.message.clone(),
+                            ),
+                        crate::app::services::session_store::RestoreStatusLevel::Warning => self
+                            .set_warning_status_in_domain(
+                                crate::app::app_state::StatusDomain::Session,
+                                status.message.clone(),
+                            ),
+                    }
+                }
+                (!action.loaded_from_settings && !action.restore_started)
+                    .then_some(restored.legacy_settings)
+            }
             Ok(Some(restored)) => {
                 restored_session = true;
                 Some(session_manager::apply_restored_session(self, restored))
@@ -519,8 +660,138 @@ fn record_background_send_error(error: &BackgroundIoSendError) {
     );
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::app_state::PendingOpenTabsAction;
+    use crate::app::domain::{BufferState, TabManager, TextFormatMetadata, WorkspaceTab};
+    use crate::app::services::session_store::SessionStore;
+    use crate::app::services::settings_store::SettingsStore;
+
+    fn test_app() -> ScratchpadApp {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.keep();
+        let mut app = ScratchpadApp::with_stores_and_startup(
+            SessionStore::new(root.join("session")),
+            SettingsStore::new(root.join("settings")),
+            StartupOptions::default(),
+        );
+        app.set_session_persist_on_drop(false);
+        app
+    }
+
+    fn app_with_buffer(buffer: BufferState) -> ScratchpadApp {
+        let mut app = test_app();
+        app.tab_manager = TabManager {
+            tabs: vec![WorkspaceTab::new(buffer)],
+            active_tab_index: 0,
+            pending_action: None,
+            session_dirty: false,
+            pending_scroll_to_active: false,
+            buffer_tab_index: Default::default(),
+        };
+        app.rebuild_buffer_tab_index();
+        app
+    }
+
+    #[test]
+    fn text_metadata_result_updates_matching_buffer_and_clears_pending_action() {
+        let buffer = BufferState::new("sample.txt".to_owned(), "one".to_owned(), None);
+        let buffer_id = buffer.id;
+        let revision = buffer.document_revision();
+        let mut app = app_with_buffer(buffer);
+        app.pending_background_actions.insert(
+            42,
+            PendingBackgroundAction::RefreshTextMetadata(PendingTextMetadataAction {
+                buffer_id,
+                revision,
+            }),
+        );
+        let mut format = TextFormatMetadata::utf8_for_new_file("one\ntwo");
+        format.refresh_from_text("one\ntwo");
+
+        app.apply_text_metadata_refreshed_result(
+            42,
+            buffer_id,
+            revision,
+            Ok((
+                2,
+                crate::app::domain::TextArtifactSummary::default(),
+                format,
+            )),
+        );
+
+        assert!(!app.pending_background_actions.contains_key(&42));
+        assert_eq!(app.tabs()[0].active_buffer().line_count, 2);
+    }
+
+    #[test]
+    fn stale_encoding_compliance_result_clears_action_without_mutating_buffer() {
+        let buffer = BufferState::new("sample.txt".to_owned(), "plain".to_owned(), None);
+        let buffer_id = buffer.id;
+        let stale_revision = buffer.document_revision().saturating_add(1);
+        let mut app = app_with_buffer(buffer);
+        app.pending_background_actions.insert(
+            7,
+            PendingBackgroundAction::RefreshEncodingCompliance(PendingEncodingComplianceAction {
+                buffer_id,
+                revision: stale_revision,
+            }),
+        );
+
+        app.apply_encoding_compliance_refreshed_result(7, buffer_id, stale_revision, Ok(true));
+
+        assert!(!app.pending_background_actions.contains_key(&7));
+        assert!(!app.tabs()[0].active_buffer().has_non_compliant_characters);
+    }
+
+    #[test]
+    fn partial_open_tabs_result_keeps_action_until_terminal_result() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("opened.txt");
+        let buffer = BufferState::new(
+            "opened.txt".to_owned(),
+            "opened".to_owned(),
+            Some(path.clone()),
+        );
+        let mut app = test_app();
+        app.pending_background_actions.insert(
+            3,
+            PendingBackgroundAction::OpenTabs(PendingOpenTabsAction {
+                accumulator: crate::app::services::file_controller::OpenBatchSummary::default(),
+            }),
+        );
+
+        app.apply_paths_loaded_result(
+            3,
+            vec![LoadedPathResult {
+                path,
+                disk_state: None,
+                result: Ok(buffer),
+            }],
+            true,
+        );
+
+        assert!(app.pending_background_actions.contains_key(&3));
+        assert_eq!(app.tabs().len(), 2);
+    }
+
+    #[test]
+    fn unknown_background_result_is_ignored() {
+        let mut app = test_app();
+        let original_tabs = app.tabs().len();
+
+        app.apply_paths_loaded_result(999, Vec::new(), false);
+        app.apply_session_persisted_result(999, Err("ignored".to_owned()));
+
+        assert_eq!(app.tabs().len(), original_tabs);
+        assert!(app.current_status.is_none());
+    }
+}
+
 trait BackgroundIoFallback {
     fn into_loaded_path_results(self) -> Option<Vec<LoadedPathResult>>;
+    fn into_path_saved_result(self) -> BackgroundIoResult;
     fn into_restore_result(
         self,
     ) -> Result<Option<crate::app::services::session_store::RestoredSession>, String>;
@@ -552,6 +823,25 @@ impl BackgroundIoFallback for BackgroundIoRequest {
                     .collect(),
             ),
             _ => None,
+        }
+    }
+
+    fn into_path_saved_result(self) -> BackgroundIoResult {
+        match self {
+            BackgroundIoRequest::SavePath {
+                request_id, path, ..
+            } => BackgroundIoResult::PathSaved {
+                request_id,
+                path,
+                disk_state: None,
+                result: Err("Background file saver unavailable.".to_owned()),
+            },
+            _ => BackgroundIoResult::PathSaved {
+                request_id: 0,
+                path: PathBuf::new(),
+                disk_state: None,
+                result: Err("Background file saver unavailable.".to_owned()),
+            },
         }
     }
 

@@ -9,6 +9,7 @@ use crate::app::domain::{
     RestoredBufferState, TextDocument, TextFormatMetadata, WorkspaceTab,
 };
 use crate::app::services::file_service::{FileContent, FileService};
+use crate::app::utils::pluralize;
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
@@ -36,8 +37,9 @@ impl RestoreSummary {
             return Some(RestoreStatus {
                 level: RestoreStatusLevel::Warning,
                 message: format!(
-                    "Session restore found {} disk conflicts and {} missing files.",
-                    self.conflicted_buffers, self.missing_buffers
+                    "Session restore found {} and {}.",
+                    pluralize(self.conflicted_buffers, "disk conflict"),
+                    pluralize(self.missing_buffers, "missing file")
                 ),
             });
         }
@@ -46,8 +48,8 @@ impl RestoreSummary {
             return Some(RestoreStatus {
                 level: RestoreStatusLevel::Info,
                 message: format!(
-                    "Reloaded {} clean files from disk during session restore.",
-                    self.reloaded_clean_buffers
+                    "Reloaded {} from disk during session restore.",
+                    pluralize(self.reloaded_clean_buffers, "clean file")
                 ),
             });
         }
@@ -437,6 +439,7 @@ fn session_disk_state(buffer: &SessionBuffer) -> Option<DiskFileState> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::domain::WorkspaceTab;
     use crate::app::services::session_store::ops::BUFFER_FILE_EXTENSION;
     use std::fs;
 
@@ -471,6 +474,60 @@ mod tests {
 
         assert!(restored.is_dirty);
         assert_eq!(restored.freshness, BufferFreshness::ConflictOnDisk);
+    }
+
+    #[test]
+    fn restore_status_pluralizes_counts() {
+        let mut summary = RestoreSummary::default();
+        summary.conflicted_buffers = 1;
+        summary.missing_buffers = 2;
+
+        assert_eq!(
+            summary.into_status().map(|status| status.message),
+            Some("Session restore found 1 disk conflict and 2 missing files.".to_owned())
+        );
+
+        let summary = RestoreSummary {
+            reloaded_clean_buffers: 1,
+            ..RestoreSummary::default()
+        };
+
+        assert_eq!(
+            summary.into_status().map(|status| status.message),
+            Some("Reloaded 1 clean file from disk during session restore.".to_owned())
+        );
+    }
+
+    #[test]
+    fn load_streaming_delivers_tabs_before_final_metadata() {
+        let temp_dir = tempfile::tempdir().expect("create temp session root");
+        let root = temp_dir.keep();
+        let store = SessionStore::new(root);
+        let tab = WorkspaceTab::untitled();
+        let expected_name = tab.active_buffer().name.clone();
+        store.persist(&[tab], 0, 16.0, false).unwrap();
+
+        let mut started = false;
+        let mut streamed_tabs = Vec::new();
+        let restored = store
+            .load_streaming(
+                |active_tab_index, _| {
+                    started = active_tab_index == 0;
+                    true
+                },
+                |tab| {
+                    streamed_tabs.push(tab);
+                    true
+                },
+            )
+            .unwrap()
+            .unwrap();
+
+        assert!(started);
+        assert_eq!(streamed_tabs.len(), 1);
+        assert_eq!(streamed_tabs[0].active_buffer().name, expected_name);
+        assert_eq!(restored.active_tab_index, 0);
+        assert!(restored.tabs.is_empty());
     }
 
     fn restore_fixture(

@@ -206,10 +206,18 @@ impl ScratchpadApp {
         true
     }
 
-    fn tab_index_for_buffer(&self, buffer_id: BufferId) -> Option<usize> {
-        self.tabs()
-            .iter()
-            .position(|tab| tab.buffers().any(|buffer| buffer.id == buffer_id))
+    pub(crate) fn tab_index_for_buffer(&mut self, buffer_id: BufferId) -> Option<usize> {
+        if let Some(index) = self.tab_manager.tab_index_for_buffer(buffer_id)
+            && self
+                .tabs()
+                .get(index)
+                .is_some_and(|tab| tab.buffer_by_id(buffer_id).is_some())
+        {
+            return Some(index);
+        }
+
+        self.rebuild_buffer_tab_index();
+        self.tab_manager.tab_index_for_buffer(buffer_id)
     }
 
     fn restore_text_history_selection(
@@ -364,7 +372,9 @@ mod tests {
             pending_action: None,
             session_dirty: false,
             pending_scroll_to_active: false,
+            buffer_tab_index: Default::default(),
         };
+        app.rebuild_buffer_tab_index();
         app.clear_tab_selection();
         app
     }

@@ -68,3 +68,51 @@ fn is_word_char(ch: char) -> bool {
 fn is_ascii_word_char(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ascii_whole_word_treats_underscore_as_word_character() {
+        let text = b"foo _foo foo_ foo";
+
+        assert!(ascii_whole_word_allows(text, true, 0, 3));
+        assert!(!ascii_whole_word_allows(text, true, 5, 8));
+        assert!(!ascii_whole_word_allows(text, true, 9, 12));
+        assert!(ascii_whole_word_allows(text, true, 14, 17));
+    }
+
+    #[test]
+    fn unicode_whole_word_treats_letters_digits_and_underscore_as_word_characters() {
+        let matcher = WholeWordMatcher::new("α β42 α_beta α", true);
+
+        assert!(matcher.allows(0, 1));
+        assert!(!matcher.allows(2, 3));
+        assert!(!matcher.allows(6, 7));
+        assert!(matcher.allows(13, 14));
+    }
+
+    #[test]
+    fn disabled_whole_word_matcher_allows_embedded_matches() {
+        let matcher = WholeWordMatcher::new("prefixneedle", false);
+
+        assert!(matcher.allows(6, 12));
+        assert!(ascii_whole_word_allows(b"prefixneedle", false, 6, 12));
+    }
+
+    #[test]
+    fn dispatcher_uses_ascii_fast_path_when_text_is_ascii() {
+        let matcher = WholeWordMatcher::new("ignored", true);
+
+        assert!(whole_word_allows(true, b"a foo b", &matcher, true, 2, 5));
+        assert!(!whole_word_allows(
+            true,
+            b"a foobar b",
+            &matcher,
+            true,
+            2,
+            5
+        ));
+    }
+}

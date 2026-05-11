@@ -425,7 +425,9 @@ mod tests {
             pending_action: None,
             session_dirty: false,
             pending_scroll_to_active: false,
+            buffer_tab_index: Default::default(),
         };
+        app.rebuild_buffer_tab_index();
         app.clear_tab_selection();
         app
     }

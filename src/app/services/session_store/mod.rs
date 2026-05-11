@@ -105,6 +105,47 @@ impl SessionStore {
         }))
     }
 
+    pub(crate) fn load_streaming(
+        &self,
+        mut on_started: impl FnMut(usize, AppSettings) -> bool,
+        mut on_tab: impl FnMut(WorkspaceTab) -> bool,
+    ) -> io::Result<Option<RestoredSession>> {
+        let Some(manifest) = self.load_manifest()? else {
+            return Ok(None);
+        };
+        let legacy_settings = manifest.legacy_settings();
+        if !on_started(manifest.active_tab_index, legacy_settings.clone()) {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "session restore receiver closed",
+            ));
+        }
+
+        let mut restore_summary = RestoreSummary::default();
+        let mut tab_count = 0usize;
+        for tab in manifest.tabs {
+            let restored_tab = self.restore_tab(tab, &mut restore_summary);
+            tab_count += 1;
+            if !on_tab(restored_tab) {
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "session restore receiver closed",
+                ));
+            }
+        }
+
+        if tab_count == 0 {
+            return Ok(None);
+        }
+
+        Ok(Some(RestoredSession {
+            active_tab_index: manifest.active_tab_index.min(tab_count - 1),
+            tabs: Vec::new(),
+            legacy_settings,
+            restore_status: restore_summary.into_status(),
+        }))
+    }
+
     pub fn persist(
         &self,
         tabs: &[WorkspaceTab],
@@ -178,7 +219,7 @@ impl SessionStore {
                 "session_write_manifest",
                 &self.manifest_path,
                 "session_store::persist_request",
-                &error,
+                error,
             );
         })
     }
@@ -223,7 +264,7 @@ impl SessionStore {
                 "session_read_manifest",
                 &self.manifest_path,
                 "session_store::load_manifest",
-                &error,
+                error,
             );
         })?;
         let manifest: SessionManifest = serde_json::from_str(&raw).map_err(|error| {

@@ -117,3 +117,76 @@ fn ascii_case_insensitive_bytes_match(text_bytes: &[u8], query_lower_bytes: &[u8
     }
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn case_sensitive_matches_report_byte_ranges() {
+        let mut should_continue = || true;
+
+        let matches = find_ascii_case_sensitive_matches(
+            b"abc ABC abc",
+            b"abc",
+            false,
+            false,
+            &mut should_continue,
+        )
+        .unwrap();
+
+        assert_eq!(matches, vec![0..3, 8..11]);
+    }
+
+    #[test]
+    fn case_insensitive_single_byte_matches_upper_and_lower_forms() {
+        let mut should_continue = || true;
+
+        let matches = find_ascii_case_insensitive_single_byte_matches(
+            b"aA_aa",
+            b'a',
+            false,
+            false,
+            &mut should_continue,
+        )
+        .unwrap();
+
+        assert_eq!(matches, vec![0..1, 1..2, 3..4, 4..5]);
+    }
+
+    #[test]
+    fn case_insensitive_multi_byte_whole_word_filters_embedded_hits() {
+        let mut should_continue = || true;
+
+        let matches = find_ascii_case_insensitive_multi_byte_matches(
+            b"foo FOO food _foo foo_",
+            b"foo",
+            true,
+            false,
+            &mut should_continue,
+        )
+        .unwrap();
+
+        assert_eq!(matches, vec![0..3, 4..7]);
+    }
+
+    #[test]
+    fn interruptible_ascii_scan_can_abort() {
+        let mut calls = 0usize;
+        let mut should_continue = || {
+            calls += 1;
+            false
+        };
+
+        let matches = find_ascii_case_insensitive_single_byte_matches(
+            b"aaaa",
+            b'a',
+            false,
+            true,
+            &mut should_continue,
+        );
+
+        assert!(matches.is_none());
+        assert_eq!(calls, 1);
+    }
+}

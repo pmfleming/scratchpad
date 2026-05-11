@@ -67,6 +67,7 @@ impl ScratchpadApp {
             .iter()
             .position(|&index| index == active_workspace_index)
             .unwrap_or(0);
+        self.rebuild_buffer_tab_index();
         self.ensure_active_tab_slot_selected();
         self.tab_manager.pending_scroll_to_active = true;
         self.mark_session_dirty();
@@ -340,7 +341,9 @@ mod tests {
             pending_action: None,
             session_dirty: false,
             pending_scroll_to_active: false,
+            buffer_tab_index: Default::default(),
         };
+        app.rebuild_buffer_tab_index();
         app.clear_tab_selection();
         app
     }

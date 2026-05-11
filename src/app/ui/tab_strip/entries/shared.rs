@@ -209,6 +209,19 @@ fn tab_rect_entry(index: usize, rect: egui::Rect, combine_enabled: bool) -> TabR
     }
 }
 
+pub(crate) fn apply_settings_tab_interaction(
+    outcome: &mut TabStripOutcome,
+    _showing_settings: bool,
+    close_clicked: bool,
+    tab_clicked: bool,
+) {
+    if close_clicked {
+        outcome.close_settings = true;
+    } else if tab_clicked {
+        outcome.activate_settings = true;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::workspace_tab_tooltip;
@@ -222,18 +235,5 @@ mod tests {
             workspace_tab_tooltip(display_name, Some(TabAttentionState::DiskProblem)),
             display_name
         );
-    }
-}
-
-pub(crate) fn apply_settings_tab_interaction(
-    outcome: &mut TabStripOutcome,
-    _showing_settings: bool,
-    close_clicked: bool,
-    tab_clicked: bool,
-) {
-    if close_clicked {
-        outcome.close_settings = true;
-    } else if tab_clicked {
-        outcome.activate_settings = true;
     }
 }

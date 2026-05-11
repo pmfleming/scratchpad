@@ -297,6 +297,40 @@ fn target_history_undo_replays_clicked_entry_and_later_entries() {
 }
 
 #[test]
+fn multi_edit_history_undo_and_redo_apply_in_safe_order() {
+    let mut document = TextDocument::new("one two one".to_owned());
+
+    document
+        .replace_char_ranges_with_undo(
+            &[(8..11, "1".to_owned()), (0..3, "1".to_owned())],
+            cursor(0),
+            cursor(9),
+        )
+        .unwrap();
+
+    assert_eq!(document.extract_text(), "1 two 1");
+    document.undo_last_operation();
+    assert_eq!(document.extract_text(), "one two one");
+    document.redo_last_operation();
+    assert_eq!(document.extract_text(), "1 two 1");
+}
+
+#[test]
+fn target_history_undo_rejects_when_current_text_no_longer_matches_entry() {
+    let mut document = empty_document!();
+    insert_isolated_sequence!(&mut document, "abc");
+    let entry_id = document.history_entries()[1].id;
+    document.delete_char_range_internal(1..2);
+    document.insert_raw_text("x", 1);
+
+    let result = document.apply_text_history_undo(entry_id);
+
+    assert_eq!(result, Err(TextHistoryApplyError::Conflict));
+    assert_eq!(document.extract_text(), "axc");
+    assert_eq!(document.operation_undo_depth(), 3);
+}
+
+#[test]
 fn undo_then_typing_clears_redo_without_coalescing_into_survivor() {
     let mut document = empty_document!();
     insert_isolated_sequence!(&mut document, "abc");

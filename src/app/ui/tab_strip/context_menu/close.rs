@@ -1,5 +1,6 @@
 use crate::app::app_state::{ScratchpadApp, StatusDomain};
 use crate::app::commands::AppCommand;
+use crate::app::utils::pluralize;
 
 #[derive(Clone, Copy)]
 enum CloseDisplayTabs {
@@ -71,10 +72,12 @@ fn close_display_slots(
     }
 
     if skipped_dirty > 0 {
-        let tab_label = if skipped_dirty == 1 { "tab" } else { "tabs" };
         app.set_warning_status_in_domain(
             StatusDomain::File,
-            format!("{action_name} skipped {skipped_dirty} {tab_label} with unsaved changes."),
+            format!(
+                "{action_name} skipped {} with unsaved changes.",
+                pluralize(skipped_dirty, "tab")
+            ),
         );
     }
 }

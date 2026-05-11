@@ -62,26 +62,31 @@ pub(super) fn spawn_path_lane(endpoints: LaneEndpoints) {
         endpoints.request_rx,
         endpoints.result_tx,
         endpoints.lane_depths,
-        |request, result_tx| {
-            let BackgroundIoRequest::LoadPaths {
+        |request, result_tx| match request {
+            BackgroundIoRequest::LoadPaths {
                 request_id,
                 requests,
                 streaming,
-            } = request
-            else {
-                return LaneOutcome::Skip;
-            };
-            if streaming && requests.len() > 1 {
-                LaneOutcome::HandledWithSendFailure(stream_load_paths(
-                    request_id, requests, result_tx,
-                ))
-            } else {
-                LaneOutcome::result(BackgroundIoResult::PathsLoaded {
-                    request_id,
-                    results: load_paths(requests),
-                    is_partial: false,
-                })
+            } => {
+                if streaming && requests.len() > 1 {
+                    LaneOutcome::HandledWithSendFailure(stream_load_paths(
+                        request_id, requests, result_tx,
+                    ))
+                } else {
+                    LaneOutcome::result(BackgroundIoResult::PathsLoaded {
+                        request_id,
+                        results: load_paths(requests),
+                        is_partial: false,
+                    })
+                }
             }
+            BackgroundIoRequest::SavePath {
+                request_id,
+                path,
+                snapshot,
+                format,
+            } => LaneOutcome::result(save_path(request_id, path, snapshot, format)),
+            _ => LaneOutcome::Skip,
         },
     );
 }
@@ -92,14 +97,15 @@ pub(super) fn spawn_session_lane(endpoints: LaneEndpoints) {
         endpoints.request_rx,
         endpoints.result_tx,
         endpoints.lane_depths,
-        |request, _| match request {
+        |request, result_tx| match request {
             BackgroundIoRequest::RestoreSession {
                 request_id,
                 session_store,
-            } => LaneOutcome::result(BackgroundIoResult::SessionRestored {
+            } => LaneOutcome::HandledWithSendFailure(stream_restore_session(
                 request_id,
-                result: session_store.load().map_err(|error| error.to_string()),
-            }),
+                session_store,
+                result_tx,
+            )),
             BackgroundIoRequest::PersistSession {
                 request_id,
                 session_store,
@@ -293,6 +299,71 @@ fn load_path_result(
     }
 }
 
+fn save_path(
+    request_id: u64,
+    path: PathBuf,
+    snapshot: DocumentSnapshot,
+    format: TextFormatMetadata,
+) -> BackgroundIoResult {
+    let result = FileService::write_snapshot_with_format(&path, &snapshot, &format)
+        .map_err(|error| error.to_string());
+    let disk_state = result
+        .as_ref()
+        .ok()
+        .and_then(|_| FileService::read_disk_state(&path).ok());
+    BackgroundIoResult::PathSaved {
+        request_id,
+        path,
+        disk_state,
+        result,
+    }
+}
+
+fn stream_restore_session(
+    request_id: u64,
+    session_store: crate::app::services::session_store::SessionStore,
+    result_tx: &Sender<BackgroundIoResult>,
+) -> bool {
+    let send_failed = std::cell::Cell::new(false);
+    let result = session_store.load_streaming(
+        |active_tab_index, legacy_settings| {
+            if result_tx
+                .send(BackgroundIoResult::SessionRestoreStarted {
+                    request_id,
+                    active_tab_index,
+                    legacy_settings,
+                })
+                .is_err()
+            {
+                send_failed.set(true);
+                return false;
+            }
+            true
+        },
+        |tab| {
+            if result_tx
+                .send(BackgroundIoResult::SessionTabRestored { request_id, tab })
+                .is_err()
+            {
+                send_failed.set(true);
+                return false;
+            }
+            true
+        },
+    );
+
+    if send_failed.get() {
+        return true;
+    }
+
+    result_tx
+        .send(BackgroundIoResult::SessionRestored {
+            request_id,
+            result: result.map_err(|error| error.to_string()),
+        })
+        .is_err()
+}
+
 fn refresh_text_metadata(
     snapshot: DocumentSnapshot,
     mut format: TextFormatMetadata,
@@ -302,4 +373,91 @@ fn refresh_text_metadata(
         &mut format,
     );
     (metadata.line_count, metadata.artifact_summary, format)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::domain::{BufferState, TextDocument};
+
+    #[test]
+    fn load_paths_preserves_input_order_for_parallel_reads() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = ["one.txt", "two.txt", "three.txt", "four.txt", "five.txt"]
+            .into_iter()
+            .map(|name| {
+                let path = directory.path().join(name);
+                std::fs::write(&path, name).unwrap();
+                path
+            })
+            .collect::<Vec<_>>();
+        let requests = paths
+            .iter()
+            .cloned()
+            .map(PathLoadRequest::Standard)
+            .collect::<Vec<_>>();
+
+        let results = load_paths(requests);
+
+        assert_eq!(
+            results
+                .iter()
+                .map(|result| &result.path)
+                .collect::<Vec<_>>(),
+            paths.iter().collect::<Vec<_>>()
+        );
+        assert!(results.into_iter().all(|result| result.result.is_ok()));
+    }
+
+    #[test]
+    fn load_one_with_explicit_encoding_marks_loaded_buffer_format() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("ansi.txt");
+        std::fs::write(&path, [0x63, 0x61, 0x66, 0xe9]).unwrap();
+
+        let result = load_one(PathLoadRequest::WithEncoding {
+            path,
+            encoding_name: "windows-1252".to_owned(),
+        });
+
+        let buffer = result.result.unwrap();
+        assert_eq!(buffer.text(), "café");
+        assert_eq!(buffer.format.encoding_name, "windows-1252");
+    }
+
+    #[test]
+    fn refresh_text_metadata_reports_lines_and_control_artifacts() {
+        let buffer = BufferState::new("sample.txt".to_owned(), "one\n\u{200e}two".to_owned(), None);
+        let snapshot = buffer.document_snapshot();
+        let format = buffer.format.clone();
+
+        let (line_count, artifact_summary, refreshed_format) =
+            refresh_text_metadata(snapshot, format);
+
+        assert_eq!(line_count, 2);
+        assert!(artifact_summary.has_control_chars());
+        assert_eq!(refreshed_format.preferred_line_ending.as_str(), "\n");
+    }
+
+    #[test]
+    fn refresh_encoding_compliance_detects_unencodable_snapshot_text() {
+        let document = TextDocument::new("plain 😀".to_owned());
+        let snapshot = document.snapshot();
+        let format = TextFormatMetadata::detected(
+            "plain",
+            "windows-1252".to_owned(),
+            false,
+            crate::app::domain::EncodingSource::Heuristic,
+            false,
+        );
+
+        assert!(
+            format.has_non_compliant_characters_spans(
+                snapshot
+                    .piece_tree()
+                    .spans_for_range(0..snapshot.document_length().chars)
+                    .map(|span| span.text)
+            )
+        );
+    }
 }

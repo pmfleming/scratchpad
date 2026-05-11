@@ -315,8 +315,12 @@ fn preview_text_slice(
                 display_to_doc.push(start);
             }
         }
-        for cursor in (start + 1)..=end.min(original_len) {
-            doc_to_display[cursor] = projected_cursor;
+        for display_cursor in doc_to_display
+            .iter_mut()
+            .take(end.min(original_len) + 1)
+            .skip(start + 1)
+        {
+            *display_cursor = projected_cursor;
         }
         original_cursor = end;
     }
@@ -897,6 +901,78 @@ mod tests {
         assert_eq!(map.doc_to_display_cursor(4), 4);
         assert_eq!(map.doc_to_display_cursor(7), 4);
         assert_eq!(map.doc_range_to_display(4..7), None);
+    }
+
+    #[test]
+    fn preview_text_slice_projects_adjacent_replacements() {
+        let preview = SearchReplacementPreview {
+            entries: vec![
+                SearchReplacementPreviewEntry {
+                    range: 0..3,
+                    replacement: "bar".to_owned(),
+                },
+                SearchReplacementPreviewEntry {
+                    range: 3..6,
+                    replacement: "bazooka".to_owned(),
+                },
+            ],
+        };
+
+        let slice = preview_text_slice("fooqux!", 0..7, Some(&preview));
+        let map = slice.map.as_ref().expect("preview map");
+
+        assert_eq!(slice.text, "barbazooka!");
+        assert_eq!(map.doc_to_display_cursor(0), 0);
+        assert_eq!(map.doc_to_display_cursor(3), 3);
+        assert_eq!(map.doc_to_display_cursor(6), 10);
+        assert_eq!(map.display_to_doc_cursor(10), 6);
+    }
+
+    #[test]
+    fn preview_text_slice_projects_replacement_at_eof() {
+        let preview = SearchReplacementPreview {
+            entries: vec![SearchReplacementPreviewEntry {
+                range: 4..7,
+                replacement: "barley".to_owned(),
+            }],
+        };
+
+        let slice = preview_text_slice("foo foo", 0..7, Some(&preview));
+        let map = slice.map.as_ref().expect("preview map");
+
+        assert_eq!(slice.text, "foo barley");
+        assert_eq!(map.doc_to_display_cursor(7), 10);
+        assert_eq!(map.display_to_doc_cursor(10), 7);
+    }
+
+    #[test]
+    fn preview_text_slice_projects_deletion_at_eof() {
+        let preview = SearchReplacementPreview {
+            entries: vec![SearchReplacementPreviewEntry {
+                range: 4..7,
+                replacement: String::new(),
+            }],
+        };
+
+        let slice = preview_text_slice("foo foo", 0..7, Some(&preview));
+        let map = slice.map.as_ref().expect("preview map");
+
+        assert_eq!(slice.text, "foo ");
+        assert_eq!(map.doc_to_display_cursor(7), 4);
+    }
+
+    #[test]
+    fn preview_text_slice_ignores_replacement_outside_slice() {
+        let preview = SearchReplacementPreview {
+            entries: vec![SearchReplacementPreviewEntry {
+                range: 10..13,
+                replacement: "BAR".to_owned(),
+            }],
+        };
+
+        let slice = preview_text_slice("01234", 0..5, Some(&preview));
+
+        assert_eq!(slice.text, "01234");
     }
 
     #[test]

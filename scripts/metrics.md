@@ -100,6 +100,19 @@ These are the formulas currently used by the scripts and the overview viewer.
   ```
   Lower leverage scores mean a module has a poor tradeoff between shared value and the pressure it creates. Low reach is not itself a defect: self-contained leaf modules receive a fit bonus unless they also show divergence, unsafe surface area, or ripple pressure. The JSON keeps the old AST fields as secondary style evidence: iterator method count, `for` loop count, indirection ratio, heap-allocating type count, and unsafe surface counts.
 
+- **Type structural risk** (`type_health.py`)
+  ```python
+  structural_risk = min(
+      100.0,
+      field_pressure
+      + variant_pressure
+      + method_pressure
+      + impl_spread_pressure
+      + declaration_pressure,
+  )
+  ```
+  Higher scores mean a type has moved toward god-struct or dispatch-funnel territory: many stored fields, many enum variants, a broad method surface, impls spread across many files, or a large declaration. The Quality Review scatter plots width against method surface and sizes points by impl-file spread so type-level problems do not disappear into file/module averages.
+
 - **Rust escape hatch score** (`rust_escape_hatches.py`)
   ```python
   escape_hatch_score = sum(weight[kind] * count[kind])
@@ -237,6 +250,7 @@ Locality and leverage are static quality measurements surfaced in the Quality Re
 - **slowspots.py:** Analyzes dynamic execution performance and latency.
 - **search_speed.py:** Analyzes search scaling across Active, Current, and All scopes, with separate completion and first-response timings.
 - **clone_alert.py:** Detects structural and renamed code clones.
+- **type_health.py:** Emits type-level structural health for wide structs, large enums, broad method surfaces, and impl spread.
 - **locality_bench.py:** Emits Code Locality metrics from dependency structure, hidden coupling, interface explicitness, test proximity, and git history.
 - **leverage_metrics.py / leverage_ast.rs:** Emit architecture leverage metrics with AST style counts as supporting evidence.
 - **map.py:** Aggregates complexity, git history, benchmark, dependency, locality, and leverage data into maintainability, change, performance, architectural, locality, and leverage overlays.
@@ -276,6 +290,7 @@ The rebuild modes refresh:
 - `target/analysis/capacity_report.json`
 - `target/analysis/speed_efficiency_report.json`
 - `target/analysis/clones.json`
+- `target/analysis/type_health.json`
 - `target/analysis/locality_metrics.json`
 - `target/analysis/leverage_metrics.json`
 - `target/analysis/map.json`

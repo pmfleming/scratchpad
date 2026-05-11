@@ -62,6 +62,7 @@ impl ScratchpadApp {
         let source_tab = self.tab_manager_mut().tabs.remove(index);
         if !source_tab.can_promote_all_files() {
             self.tab_manager_mut().tabs.insert(index, source_tab);
+            self.rebuild_buffer_tab_index();
             return;
         }
 
@@ -75,6 +76,7 @@ impl ScratchpadApp {
                     .next()
                     .unwrap_or_else(WorkspaceTab::untitled),
             );
+            self.rebuild_buffer_tab_index();
             return;
         }
 
@@ -87,6 +89,7 @@ impl ScratchpadApp {
             self.tab_manager_mut().tabs.insert(index + offset, tab);
         }
         self.tab_manager_mut().active_tab_index = index + active_tab_offset;
+        self.rebuild_buffer_tab_index();
         self.ensure_active_tab_slot_selected();
         self.tab_manager_mut().pending_scroll_to_active = true;
         self.request_focus_for_active_view();
@@ -139,6 +142,7 @@ impl ScratchpadApp {
         {
             let Some(target_tab) = self.tab_manager_mut().tabs.get_mut(adjusted_target_index)
             else {
+                self.rebuild_buffer_tab_index();
                 return;
             };
 
@@ -149,6 +153,7 @@ impl ScratchpadApp {
 
         self.begin_layout_transition();
         self.tab_manager_mut().active_tab_index = adjusted_target_index;
+        self.rebuild_buffer_tab_index();
         self.ensure_active_tab_slot_selected();
         self.tab_manager_mut().pending_scroll_to_active = true;
         self.request_focus_for_active_view();
@@ -207,6 +212,7 @@ impl ScratchpadApp {
         self.tab_manager_mut()
             .tabs
             .insert(reinsertion_index, source_tab);
+        self.rebuild_buffer_tab_index();
     }
 
     fn rebalance_combined_workspace_layout(
@@ -228,6 +234,7 @@ impl ScratchpadApp {
         context: TabCombineContext,
     ) {
         self.tab_manager_mut().active_tab_index = context.adjusted_target_index;
+        self.rebuild_buffer_tab_index();
         self.ensure_active_tab_slot_selected();
         self.tab_manager_mut().pending_scroll_to_active = true;
         self.request_focus_for_active_view();

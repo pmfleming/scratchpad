@@ -4,6 +4,7 @@ param(
     [switch]$SkipSlowspots,
     [switch]$SkipSearchSpeed,
     [switch]$SkipClones,
+    [switch]$SkipTypeHealth,
     [switch]$SkipLocality,
     [switch]$SkipLeverage
 )
@@ -84,7 +85,7 @@ try {
     Invoke-NativeCommand -Label "cargo clippy" -Command { cargo clippy --all-targets --all-features -- -D warnings }
     Invoke-NativeCommand -Label "cargo test" -Command { cargo test }
 
-    $needsPythonTooling = (-not $SkipComplexity) -or (-not $SkipSlowspots) -or (-not $SkipSearchSpeed) -or (-not $SkipClones) -or (-not $SkipLocality) -or (-not $SkipLeverage)
+    $needsPythonTooling = (-not $SkipComplexity) -or (-not $SkipSlowspots) -or (-not $SkipSearchSpeed) -or (-not $SkipClones) -or (-not $SkipTypeHealth) -or (-not $SkipLocality) -or (-not $SkipLeverage)
     if ($needsPythonTooling) {
         $python = Initialize-PythonTooling -RepoRoot $repoRoot -ScriptRoot $PSScriptRoot
         $analysisDir = Join-Path $repoRoot "target\analysis"
@@ -112,6 +113,12 @@ try {
     if (-not $SkipClones) {
         Invoke-NativeCommand -Label "clone_alert.py" -Command {
             & $python (Join-Path $PSScriptRoot "clone_alert.py") --paths src --output (Join-Path $analysisDir "clones.json")
+        }
+    }
+
+    if (-not $SkipTypeHealth) {
+        Invoke-NativeCommand -Label "type_health.py" -Command {
+            & $python (Join-Path $PSScriptRoot "type_health.py") --paths src --output (Join-Path $analysisDir "type_health.json")
         }
     }
 

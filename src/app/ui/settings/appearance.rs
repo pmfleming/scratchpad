@@ -60,12 +60,14 @@ impl ThemeModeSelection {
 pub(super) fn render_appearance_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     category_card(
         ui,
-        "Appearance",
-        "settings_appearance_card",
-        egui_phosphor::regular::SUN,
-        "Theme",
-        "Mode and editor colors.",
-        true,
+        CategoryCard {
+            heading: "Appearance",
+            id_source: "settings_appearance_card",
+            icon: egui_phosphor::regular::SUN,
+            title: "Theme",
+            description: "Mode and editor colors.",
+            default_open: true,
+        },
         |ui| {
             render_theme_mode_row(ui, app);
             render_color_row(
@@ -101,12 +103,14 @@ pub(super) fn render_appearance_category(ui: &mut egui::Ui, app: &mut Scratchpad
 pub(super) fn render_tab_position_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     category_card(
         ui,
-        "Tab Position",
-        "settings_tab_position_card",
-        egui_phosphor::regular::TEXT_OUTDENT,
-        "Tab list",
-        "Tab placement and visibility.",
-        true,
+        CategoryCard {
+            heading: "Tab Position",
+            id_source: "settings_tab_position_card",
+            icon: egui_phosphor::regular::TEXT_OUTDENT,
+            title: "Tab list",
+            description: "Tab placement and visibility.",
+            default_open: true,
+        },
         |ui| {
             render_tab_list_row(ui, app);
             inner_divider(ui);
@@ -131,15 +135,17 @@ fn render_theme_mode_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let system_theme = ui.ctx().system_theme();
     combo_select_row(
         ui,
-        "Mode",
-        Some(&description),
-        "settings_theme_mode",
-        "combo.Theme mode",
-        selected_theme_mode(app),
-        options,
-        ThemeModeSelection::pill_label,
-        ThemeModeSelection::label,
-        |mode| apply_theme_mode_selection(app, mode, system_theme),
+        ComboSelectRow {
+            label: "Mode",
+            description: Some(&description),
+            combo_id: "settings_theme_mode",
+            record_label: "combo.Theme mode",
+            current: selected_theme_mode(app),
+            options,
+            selected_label: ThemeModeSelection::pill_label,
+            option_label: ThemeModeSelection::label,
+            on_change: |mode| apply_theme_mode_selection(app, mode, system_theme),
+        },
     );
     inner_divider(ui);
 }
@@ -170,30 +176,34 @@ fn render_color_row(
 fn render_tab_list_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     combo_select_row(
         ui,
-        "Tab list",
-        Some("Strip or side list."),
-        "settings_tab_list_position",
-        "combo.Tab list",
-        app.tab_list_position(),
-        &TAB_LIST_POSITIONS,
-        tab_list_position_label,
-        tab_list_position_label,
-        |position| app.set_tab_list_position(position),
+        ComboSelectRow {
+            label: "Tab list",
+            description: Some("Strip or side list."),
+            combo_id: "settings_tab_list_position",
+            record_label: "combo.Tab list",
+            current: app.tab_list_position(),
+            options: &TAB_LIST_POSITIONS,
+            selected_label: tab_list_position_label,
+            option_label: tab_list_position_label,
+            on_change: |position| app.set_tab_list_position(position),
+        },
     );
 }
 
 fn render_new_tab_placement_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     combo_select_row(
         ui,
-        "New tabs",
-        Some("Placement for new tabs."),
-        "settings_new_tab_placement",
-        "combo.New tabs",
-        app.new_tab_placement(),
-        &NEW_TAB_PLACEMENT_OPTIONS,
-        new_tab_placement_pill_label,
-        new_tab_placement_label,
-        |placement| app.set_new_tab_placement(placement),
+        ComboSelectRow {
+            label: "New tabs",
+            description: Some("Placement for new tabs."),
+            combo_id: "settings_new_tab_placement",
+            record_label: "combo.New tabs",
+            current: app.new_tab_placement(),
+            options: &NEW_TAB_PLACEMENT_OPTIONS,
+            selected_label: new_tab_placement_pill_label,
+            option_label: new_tab_placement_label,
+            on_change: |placement| app.set_new_tab_placement(placement),
+        },
     );
 }
 

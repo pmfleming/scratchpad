@@ -256,8 +256,7 @@ impl ScratchpadApp {
         } else {
             crate::app::domain::WorkspaceTab::untitled()
         };
-        self.tab_manager_mut().tabs = vec![default_tab];
-        self.tab_manager_mut().active_tab_index = 0;
+        self.tab_manager_mut().set_tabs(vec![default_tab], 0);
         self.mark_search_dirty();
     }
 }

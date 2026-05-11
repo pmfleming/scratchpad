@@ -11,12 +11,7 @@ pub(crate) fn write_atomic_with<F>(path: &Path, write: F) -> io::Result<()>
 where
     F: FnOnce(&mut fs::File) -> io::Result<()>,
 {
-    let temp_path = path.with_extension(format!(
-        "{}.write",
-        path.extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("tmp")
-    ));
+    let temp_path = temp_path_for(path);
     let mut file = fs::File::create(&temp_path).inspect_err(|error| {
         diagnostics::record_io_error_with_details(
             "atomic_write_create_temp",
@@ -44,10 +39,18 @@ where
             [("temp_path", temp_path.display().to_string())],
         );
     })?;
+    file.sync_all().inspect_err(|error| {
+        diagnostics::record_io_error_with_details(
+            "atomic_write_sync",
+            Some(path),
+            "store_io::write_atomic_with",
+            &error,
+            [("temp_path", temp_path.display().to_string())],
+        );
+    })?;
     drop(file);
 
-    remove_file_if_exists(path)?;
-    fs::rename(&temp_path, path).inspect_err(|error| {
+    replace_file(&temp_path, path).inspect_err(|error| {
         diagnostics::record_io_error_with_details(
             "atomic_write_replace",
             Some(path),
@@ -56,6 +59,23 @@ where
             [("temp_path", temp_path.display().to_string())],
         );
     })
+}
+
+fn temp_path_for(path: &Path) -> std::path::PathBuf {
+    path.with_extension(format!(
+        "{}.write",
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("tmp")
+    ))
+}
+
+fn replace_file(from: &Path, to: &Path) -> io::Result<()> {
+    // On Windows, `std::fs::rename` uses MoveFileExW with replace semantics.
+    // Do not delete `to` first: if replacement fails, the user's file must
+    // remain intact, and there must not be a brief destination-missing window
+    // where another process with the user's filesystem rights can substitute it.
+    fs::rename(from, to)
 }
 
 pub(crate) fn remove_file_if_exists(path: &Path) -> io::Result<()> {
@@ -71,5 +91,39 @@ pub(crate) fn remove_file_if_exists(path: &Path) -> io::Result<()> {
             );
             Err(error)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_atomic_with_leaves_existing_target_when_replace_fails() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("session.json");
+        fs::write(&path, b"old").unwrap();
+        let temp_path = temp_path_for(&path);
+
+        let error = write_atomic_with(&path, |file| {
+            file.write_all(b"new")?;
+            fs::rename(&temp_path, directory.path().join("moved-temp"))?;
+            Ok(())
+        })
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert_eq!(fs::read(&path).unwrap(), b"old");
+    }
+
+    #[test]
+    fn write_atomic_with_replaces_existing_target() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.toml");
+        fs::write(&path, b"old").unwrap();
+
+        write_atomic_with(&path, |file| file.write_all(b"new")).unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), b"new");
     }
 }

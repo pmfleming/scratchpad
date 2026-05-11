@@ -1,7 +1,7 @@
 use super::FileController;
 use crate::app::app_state::{
     PendingBackgroundAction, PendingReloadBufferAction, PendingReloadMode,
-    PendingReopenWithEncodingAction, ScratchpadApp, StatusDomain,
+    PendingReopenWithEncodingAction, PendingSavePathAction, ScratchpadApp, StatusDomain,
 };
 use crate::app::diagnostics;
 use crate::app::domain::{
@@ -13,7 +13,11 @@ use crate::app::services::file_service::FileService;
 use std::path::{Path, PathBuf};
 
 struct SaveWriteRequest {
+    buffer_id: BufferId,
     path: PathBuf,
+    previous_path: Option<PathBuf>,
+    buffer_name: String,
+    revision: u64,
     snapshot: DocumentSnapshot,
     format: TextFormatMetadata,
 }
@@ -329,58 +333,57 @@ impl FileController {
         let request = {
             let buffer = app.tabs()[index].active_buffer();
             SaveWriteRequest {
+                buffer_id: buffer.id,
                 path: path.clone(),
+                previous_path: buffer.path.clone(),
+                buffer_name: buffer.name.clone(),
+                revision: buffer.document_revision(),
                 snapshot: buffer.document_snapshot(),
                 format: format_override
                     .clone()
                     .unwrap_or_else(|| buffer.format.clone()),
             }
         };
-        let save_result = FileService::write_snapshot_with_format(
-            &request.path,
-            &request.snapshot,
-            &request.format,
-        );
-
-        match save_result {
-            Ok(()) => {
-                Self::finalize_save(app, index, path, update_buffer_path, format_override);
-                true
-            }
-            Err(error) => {
-                diagnostics::record_io_error(
-                    if update_buffer_path {
-                        "save_as"
-                    } else {
-                        "save_file"
-                    },
-                    Some(&request.path),
-                    "file_controller::save",
-                    &error,
-                );
-                app.report_save_failed(error);
-                false
-            }
-        }
+        app.queue_background_path_save(
+            request.path.clone(),
+            request.snapshot,
+            request.format.clone(),
+            PendingSavePathAction {
+                buffer_id: request.buffer_id,
+                expected_path: request.path,
+                previous_path: request.previous_path,
+                buffer_name: request.buffer_name,
+                saved_revision: request.revision,
+                update_buffer_path,
+                format_override,
+            },
+        )
     }
 
     fn finalize_save(
         app: &mut ScratchpadApp,
         index: usize,
+        buffer_id: BufferId,
         path: PathBuf,
         update_buffer_path: bool,
         format_override: Option<TextFormatMetadata>,
+        saved_revision: u64,
+        disk_state: Option<DiskFileState>,
     ) {
         let settings_path = app.settings_path().to_path_buf();
-        let buffer = app.tabs_mut()[index].active_buffer_mut();
+        let buffer = app.tabs_mut()[index]
+            .buffer_by_id_mut(buffer_id)
+            .expect("buffer location validated");
         if let Some(format) = format_override {
             buffer.replace_format_without_text_change(format);
         }
         if update_buffer_path {
             Self::assign_saved_path(buffer, &path);
         }
-        buffer.is_dirty = false;
-        buffer.sync_to_disk_state(FileService::read_disk_state(&path).ok());
+        if buffer.document_revision() == saved_revision {
+            buffer.is_dirty = false;
+        }
+        buffer.sync_to_disk_state(disk_state);
         buffer.is_settings_file = buffer
             .path
             .as_ref()
@@ -389,6 +392,59 @@ impl FileController {
         app.mark_session_dirty();
         app.apply_current_tab_ordering();
         let _ = app.persist_session_now();
+    }
+
+    pub(crate) fn apply_async_save_result(
+        app: &mut ScratchpadApp,
+        action: PendingSavePathAction,
+        path: PathBuf,
+        disk_state: Option<DiskFileState>,
+        result: Result<(), String>,
+    ) {
+        if !crate::app::paths_match(&path, &action.expected_path) {
+            return;
+        }
+
+        let Some((index, current_path)) =
+            Self::find_buffer_location_for_save(app, action.buffer_id)
+        else {
+            return;
+        };
+
+        if !paths_match_optional(current_path.as_deref(), action.previous_path.as_deref()) {
+            return;
+        }
+
+        match result {
+            Ok(()) => {
+                Self::finalize_save(
+                    app,
+                    index,
+                    action.buffer_id,
+                    path,
+                    action.update_buffer_path,
+                    action.format_override,
+                    action.saved_revision,
+                    disk_state,
+                );
+            }
+            Err(error) => {
+                diagnostics::record_background_failure(
+                    if action.update_buffer_path {
+                        "save_as_result"
+                    } else {
+                        "save_file_result"
+                    },
+                    "file_controller::save",
+                    &error,
+                    [
+                        ("path", action.expected_path.display().to_string()),
+                        ("buffer", action.buffer_name),
+                    ],
+                );
+                app.report_save_failed(error);
+            }
+        }
     }
 
     fn format_with_selected_encoding(
@@ -557,12 +613,27 @@ impl FileController {
         }
     }
 
-    fn find_buffer_location(app: &ScratchpadApp, buffer_id: BufferId) -> Option<(usize, PathBuf)> {
-        app.tabs().iter().enumerate().find_map(|(tab_index, tab)| {
-            tab.buffer_by_id(buffer_id)
-                .and_then(|buffer| buffer.path.clone())
-                .map(|path| (tab_index, path))
-        })
+    fn find_buffer_location(
+        app: &mut ScratchpadApp,
+        buffer_id: BufferId,
+    ) -> Option<(usize, PathBuf)> {
+        let tab_index = app.tab_index_for_buffer(buffer_id)?;
+        app.tabs()
+            .get(tab_index)?
+            .buffer_by_id(buffer_id)
+            .and_then(|buffer| buffer.path.clone())
+            .map(|path| (tab_index, path))
+    }
+
+    fn find_buffer_location_for_save(
+        app: &mut ScratchpadApp,
+        buffer_id: BufferId,
+    ) -> Option<(usize, Option<PathBuf>)> {
+        let tab_index = app.tab_index_for_buffer(buffer_id)?;
+        app.tabs()
+            .get(tab_index)?
+            .buffer_by_id(buffer_id)
+            .map(|buffer| (tab_index, buffer.path.clone()))
     }
 
     fn handle_refreshed_disk_state(
@@ -702,4 +773,226 @@ fn default_save_as_file_name(buffer_name: &str) -> String {
     }
 
     file_name
+}
+
+fn paths_match_optional(left: Option<&Path>, right: Option<&Path>) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => crate::app::paths_match(left, right),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::app_state::{PendingReloadBufferAction, PendingReloadMode};
+    use crate::app::domain::{
+        BufferFreshness, BufferState, PendingAction, TabManager, WorkspaceTab,
+    };
+    use crate::app::services::session_store::SessionStore;
+    use crate::app::services::settings_store::SettingsStore;
+    use crate::app::startup::StartupOptions;
+
+    fn test_app(root: &std::path::Path) -> ScratchpadApp {
+        let mut app = ScratchpadApp::with_stores_and_startup(
+            SessionStore::new(root.join("session")),
+            SettingsStore::new(root.join("settings")),
+            StartupOptions::default(),
+        );
+        app.set_session_persist_on_drop(false);
+        app
+    }
+
+    fn app_with_buffer(root: &std::path::Path, buffer: BufferState) -> ScratchpadApp {
+        let mut app = test_app(root);
+        app.tab_manager = TabManager {
+            tabs: vec![WorkspaceTab::new(buffer)],
+            active_tab_index: 0,
+            pending_action: None,
+            session_dirty: false,
+            pending_scroll_to_active: false,
+            buffer_tab_index: Default::default(),
+        };
+        app.rebuild_buffer_tab_index();
+        app
+    }
+
+    fn saved_buffer(name: &str, text: &str, path: PathBuf) -> BufferState {
+        let mut buffer = BufferState::new(name.to_owned(), text.to_owned(), Some(path.clone()));
+        buffer.sync_to_disk_state(FileService::read_disk_state(&path).ok());
+        buffer
+    }
+
+    #[test]
+    fn save_existing_path_writes_snapshot_and_clears_dirty_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("tracked.txt");
+        std::fs::write(&path, "old").unwrap();
+        let mut buffer = saved_buffer("tracked.txt", "new", path.clone());
+        buffer.is_dirty = true;
+        let mut app = app_with_buffer(directory.path(), buffer);
+
+        assert!(FileController::save_file_at(&mut app, 0));
+        assert!(app.tabs()[0].active_buffer().is_dirty);
+        app.wait_for_background_io_idle();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+        let buffer = app.tabs()[0].active_buffer();
+        assert!(!buffer.is_dirty);
+        assert_eq!(buffer.freshness, BufferFreshness::InSync);
+        assert!(buffer.disk_state.is_some());
+    }
+
+    #[test]
+    fn save_existing_path_stops_when_dirty_buffer_conflicts_with_disk() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("tracked.txt");
+        std::fs::write(&path, "original").unwrap();
+        let mut buffer = saved_buffer("tracked.txt", "ours", path.clone());
+        buffer.is_dirty = true;
+        let mut app = app_with_buffer(directory.path(), buffer);
+        let view_id = app.tabs()[0].active_view_id;
+        std::fs::write(&path, "theirs").unwrap();
+
+        assert!(!FileController::save_file_at(&mut app, 0));
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "theirs");
+        assert_eq!(
+            app.tabs()[0].active_buffer().freshness,
+            BufferFreshness::ConflictOnDisk
+        );
+        assert_eq!(
+            app.pending_action(),
+            Some(PendingAction::SaveConflict {
+                tab_index: 0,
+                view_id
+            })
+        );
+    }
+
+    #[test]
+    fn save_conflict_overwrite_writes_buffer_text_after_confirmation() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("tracked.txt");
+        std::fs::write(&path, "original").unwrap();
+        let mut buffer = saved_buffer("tracked.txt", "ours", path.clone());
+        buffer.is_dirty = true;
+        buffer.mark_conflict_on_disk(FileService::read_disk_state(&path).ok());
+        let mut app = app_with_buffer(directory.path(), buffer);
+
+        assert!(FileController::save_conflict_overwrite(&mut app, 0));
+        app.wait_for_background_io_idle();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "ours");
+        let buffer = app.tabs()[0].active_buffer();
+        assert!(!buffer.is_dirty);
+        assert_eq!(buffer.freshness, BufferFreshness::InSync);
+    }
+
+    #[test]
+    fn save_with_encoding_failure_leaves_file_and_buffer_state_unchanged() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("ansi.txt");
+        std::fs::write(&path, "old").unwrap();
+        let mut buffer = saved_buffer("ansi.txt", "plain 😀", path.clone());
+        buffer.is_dirty = true;
+        let mut app = app_with_buffer(directory.path(), buffer);
+
+        assert!(FileController::save_file_with_encoding_at(
+            &mut app,
+            0,
+            "windows-1252"
+        ));
+        app.wait_for_background_io_idle();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "old");
+        assert!(app.tabs()[0].active_buffer().is_dirty);
+        assert_eq!(app.tabs()[0].active_buffer().format.encoding_name, "UTF-8");
+    }
+
+    #[test]
+    fn save_as_path_assignment_uses_written_disk_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("new-name.txt");
+        let buffer = BufferState::new("Untitled".to_owned(), "content".to_owned(), None);
+        let mut app = app_with_buffer(directory.path(), buffer);
+
+        assert!(FileController::save_buffer_to_path(
+            &mut app,
+            0,
+            path.clone(),
+            true,
+            None
+        ));
+        app.wait_for_background_io_idle();
+
+        let buffer = app.tabs()[0].active_buffer();
+        assert_eq!(buffer.path.as_deref(), Some(path.as_path()));
+        assert_eq!(buffer.name, "new-name.txt");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "content");
+        assert!(buffer.disk_state.is_some());
+    }
+
+    #[test]
+    fn save_completion_keeps_dirty_state_when_buffer_changed_while_write_was_pending() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("tracked.txt");
+        std::fs::write(&path, "old").unwrap();
+        let mut buffer = saved_buffer("tracked.txt", "saved", path.clone());
+        buffer.is_dirty = true;
+        let mut app = app_with_buffer(directory.path(), buffer);
+
+        assert!(FileController::save_file_at(&mut app, 0));
+        assert!(app.insert_text_in_active_view("er"));
+        app.wait_for_background_io_idle();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "saved");
+        let buffer = app.tabs()[0].active_buffer();
+        assert_eq!(buffer.text(), "saveder");
+        assert!(buffer.is_dirty);
+        assert_eq!(buffer.freshness, BufferFreshness::InSync);
+    }
+
+    #[test]
+    fn explicit_reload_replaces_buffer_from_loaded_disk_result() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("tracked.txt");
+        std::fs::write(&path, "disk").unwrap();
+        let buffer = saved_buffer("tracked.txt", "memory", path.clone());
+        let buffer_id = buffer.id;
+        let mut app = app_with_buffer(directory.path(), buffer);
+        let disk_state = FileService::read_disk_state(&path).ok();
+        let loaded = BufferState::new(
+            "tracked.txt".to_owned(),
+            "disk".to_owned(),
+            Some(path.clone()),
+        );
+
+        FileController::apply_async_reload_buffer_result(
+            &mut app,
+            PendingReloadBufferAction {
+                buffer_id,
+                expected_path: path.clone(),
+                buffer_name: "tracked.txt".to_owned(),
+                previous_disk_state: disk_state.clone(),
+                mode: PendingReloadMode::ExplicitReload,
+            },
+            vec![LoadedPathResult {
+                path,
+                disk_state,
+                result: Ok(loaded),
+            }],
+        );
+
+        assert_eq!(app.tabs()[0].active_buffer().text(), "disk");
+        assert!(!app.tabs()[0].active_buffer().is_dirty);
+    }
+
+    #[test]
+    fn default_save_as_file_name_adds_txt_only_when_missing_extension() {
+        assert_eq!(default_save_as_file_name(""), "untitled.txt");
+        assert_eq!(default_save_as_file_name("notes"), "notes.txt");
+        assert_eq!(default_save_as_file_name("notes.md"), "notes.md");
+    }
 }

@@ -11,6 +11,34 @@ struct TabButtonFrame {
     surface_id: egui::Id,
 }
 
+pub struct TabButtonOptions {
+    pub show_promote_all: bool,
+    pub attention_color: Option<egui::Color32>,
+    pub width: f32,
+}
+
+impl TabButtonOptions {
+    pub fn new(width: f32) -> Self {
+        Self {
+            show_promote_all: false,
+            attention_color: None,
+            width,
+        }
+    }
+
+    pub fn with_actions(
+        width: f32,
+        show_promote_all: bool,
+        attention_color: Option<egui::Color32>,
+    ) -> Self {
+        Self {
+            show_promote_all,
+            attention_color,
+            width,
+        }
+    }
+}
+
 pub fn tab_button(
     ui: &mut egui::Ui,
     surface_key: impl Hash,
@@ -26,9 +54,7 @@ pub fn tab_button(
         label,
         active,
         selected,
-        show_promote_all,
-        attention_color,
-        TAB_BUTTON_WIDTH,
+        TabButtonOptions::with_actions(TAB_BUTTON_WIDTH, show_promote_all, attention_color),
     )
 }
 
@@ -38,11 +64,9 @@ pub fn tab_button_with_actions(
     label: &str,
     active: bool,
     selected: bool,
-    show_promote_all: bool,
-    attention_color: Option<egui::Color32>,
-    width: f32,
+    options: TabButtonOptions,
 ) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
-    let frame = allocate_tab_button_frame(ui, width, surface_key);
+    let frame = allocate_tab_button_frame(ui, options.width, surface_key);
     paint_tab_background(
         ui,
         frame.rect,
@@ -51,8 +75,16 @@ pub fn tab_button_with_actions(
         selected,
         frame.drag_in_progress,
     );
-    let promote_rect = show_promote_all.then(|| tab_promote_rect(frame.rect));
-    let truncated = paint_tab_label(ui, frame.rect, label, show_promote_all, attention_color);
+    let promote_rect = options
+        .show_promote_all
+        .then(|| tab_promote_rect(frame.rect));
+    let truncated = paint_tab_label(
+        ui,
+        frame.rect,
+        label,
+        options.show_promote_all,
+        options.attention_color,
+    );
     let promote_response = promote_rect.map(|promote_rect| {
         render_tab_promote_button(ui, promote_rect, frame.surface_id, frame.drag_in_progress)
     });
@@ -70,42 +102,15 @@ pub fn tab_button_sized(
     selected: bool,
     width: f32,
 ) -> (egui::Response, egui::Response, bool) {
-    let frame = allocate_tab_button_frame(ui, width, surface_key);
-    paint_tab_background(
-        ui,
-        frame.rect,
-        &frame.response,
-        active,
-        selected,
-        frame.drag_in_progress,
-    );
-    let truncated = paint_tab_label(ui, frame.rect, label, false, None);
-    let (_, close_response) =
-        render_tab_close_button(ui, frame.rect, frame.surface_id, frame.drag_in_progress);
-
-    (frame.response, close_response, truncated)
-}
-
-pub fn tab_button_sized_with_actions(
-    ui: &mut egui::Ui,
-    surface_key: impl Hash,
-    label: &str,
-    active: bool,
-    selected: bool,
-    show_promote_all: bool,
-    attention_color: Option<egui::Color32>,
-    width: f32,
-) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
-    tab_button_with_actions(
+    let (response, _, close_response, truncated) = tab_button_with_actions(
         ui,
         surface_key,
         label,
         active,
         selected,
-        show_promote_all,
-        attention_color,
-        width,
-    )
+        TabButtonOptions::new(width),
+    );
+    (response, close_response, truncated)
 }
 
 pub fn tab_rename_editor_sized(

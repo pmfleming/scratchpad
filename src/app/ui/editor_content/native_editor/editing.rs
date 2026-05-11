@@ -295,3 +295,163 @@ fn consume_lf_after_cr(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
         chars.next();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::domain::PieceSource;
+    use eframe::egui;
+
+    fn buffer(text: &str) -> BufferState {
+        BufferState::new("sample.txt".to_owned(), text.to_owned(), None)
+    }
+
+    fn cursor(index: usize) -> CursorRange {
+        CursorRange::one(CharCursor::new(index))
+    }
+
+    fn selection(start: usize, end: usize) -> CursorRange {
+        CursorRange::two(start, end)
+    }
+
+    fn modifiers(mut set: impl FnMut(&mut egui::Modifiers)) -> egui::Modifiers {
+        let mut modifiers = egui::Modifiers::default();
+        set(&mut modifiers);
+        modifiers
+    }
+
+    #[test]
+    fn insert_replaces_selection_and_records_deleted_text() {
+        let mut buffer = buffer("hello world");
+        let next = apply_text_insert_with_source(
+            &mut buffer,
+            &selection(6, 11),
+            "there",
+            PieceSource::Edit,
+        );
+
+        assert_eq!(buffer.text(), "hello there");
+        assert_eq!(next, cursor(11));
+        let record = buffer.document().latest_operation_record().unwrap();
+        assert_eq!(record.previous_selection, selection(6, 11));
+        assert_eq!(record.next_selection, cursor(11));
+        assert_eq!(record.edits[0].start_char, 6);
+        assert_eq!(record.edits[0].deleted_text, "world");
+        assert_eq!(record.edits[0].inserted_text, "there");
+    }
+
+    #[test]
+    fn pasted_newlines_follow_buffer_preferred_line_ending() {
+        let mut buffer = buffer("alpha\r\nomega");
+
+        apply_text_insert_with_source(&mut buffer, &cursor(7), "beta\ngamma", PieceSource::Paste);
+
+        assert_eq!(buffer.text(), "alpha\r\nbeta\r\ngammaomega");
+        assert_eq!(
+            buffer.document().history_entries().last().unwrap().source,
+            PieceSource::Paste
+        );
+    }
+
+    #[test]
+    fn backspace_deletes_previous_scalar_value() {
+        let mut buffer = buffer("a😀b");
+
+        let next = apply_backspace(&mut buffer, &cursor(2), &egui::Modifiers::default());
+
+        assert_eq!(buffer.text(), "ab");
+        assert_eq!(next, cursor(1));
+        assert_eq!(
+            buffer.document().latest_operation_record().unwrap().edits[0].deleted_text,
+            "😀"
+        );
+    }
+
+    #[test]
+    fn delete_removes_next_scalar_value() {
+        let mut buffer = buffer("a😀b");
+
+        let next = apply_delete(&mut buffer, &cursor(1), &egui::Modifiers::default());
+
+        assert_eq!(buffer.text(), "ab");
+        assert_eq!(next.primary.index, 1);
+        assert!(next.primary.prefer_next_row);
+    }
+
+    #[test]
+    fn wordwise_backspace_removes_previous_word_after_whitespace() {
+        let mut buffer = buffer("alpha  beta");
+        let wordwise = modifiers(|modifiers| modifiers.ctrl = true);
+
+        let next = apply_backspace(&mut buffer, &cursor(11), &wordwise);
+
+        assert_eq!(buffer.text(), "alpha  ");
+        assert_eq!(next, cursor(7));
+    }
+
+    #[test]
+    fn wordwise_delete_removes_current_word_and_following_whitespace() {
+        let mut buffer = buffer("alpha  beta");
+        let wordwise = modifiers(|modifiers| modifiers.ctrl = true);
+
+        let next = apply_delete(&mut buffer, &cursor(0), &wordwise);
+
+        assert_eq!(buffer.text(), "beta");
+        assert_eq!(next.primary.index, 0);
+    }
+
+    #[test]
+    fn delete_selection_collapses_to_start_with_next_row_preference() {
+        let mut buffer = buffer("alpha beta");
+
+        let next = apply_delete_selection(&mut buffer, &selection(5, 10));
+
+        assert_eq!(buffer.text(), "alpha");
+        assert_eq!(next.primary.index, 5);
+        assert!(next.primary.prefer_next_row);
+    }
+
+    #[test]
+    fn cut_records_cut_source_and_returns_document_text() {
+        let mut buffer = buffer("a\u{200e}\n\tb");
+
+        let (next, cut) = apply_cut(&mut buffer, &selection(1, 4));
+
+        assert_eq!(cut, "\u{200e}\n\t");
+        assert_eq!(buffer.text(), "ab");
+        assert_eq!(next.primary.index, 1);
+        assert_eq!(
+            buffer.document().history_entries().last().unwrap().source,
+            PieceSource::Cut
+        );
+    }
+
+    #[test]
+    fn outdent_removes_leading_tab_on_current_line() {
+        let mut buffer = buffer("one\n\tword");
+
+        let next = apply_outdent(&mut buffer, &cursor(4)).unwrap();
+
+        assert_eq!(buffer.text(), "one\nword");
+        assert_eq!(next, cursor(3));
+    }
+
+    #[test]
+    fn outdent_removes_up_to_four_leading_spaces() {
+        let mut buffer = buffer("    indented");
+
+        let next = apply_outdent(&mut buffer, &cursor(6)).unwrap();
+
+        assert_eq!(buffer.text(), "indented");
+        assert_eq!(next, cursor(2));
+    }
+
+    #[test]
+    fn outdent_without_indent_is_noop() {
+        let mut buffer = buffer("plain");
+
+        assert_eq!(apply_outdent(&mut buffer, &cursor(2)), None);
+        assert_eq!(buffer.text(), "plain");
+        assert_eq!(buffer.document().operation_undo_depth(), 0);
+    }
+}

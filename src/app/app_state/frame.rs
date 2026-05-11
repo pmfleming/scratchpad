@@ -2,10 +2,12 @@ use super::{AppSurface, CHROME_TRANSITION_FRAMES, ScratchpadApp};
 use crate::app::chrome::handle_window_resize;
 use crate::app::diagnostics;
 use crate::app::fonts;
+use crate::app::services::file_controller::FileController;
 use crate::app::services::settings_store::TabListPosition;
 use crate::app::shortcuts;
 use crate::app::ui::{callout, dialogs, editor_area, settings, status_bar, tab_strip, transition};
 use eframe::egui;
+use std::path::PathBuf;
 
 impl ScratchpadApp {
     pub(crate) fn open_encoding_dialog(&mut self) {
@@ -41,6 +43,7 @@ impl ScratchpadApp {
         self.tab_manager.evict_inactive_tab_state();
         self.poll_file_watcher(ctx);
         self.poll_background_io(ctx);
+        self.handle_dropped_files(ctx);
         self.apply_theme_to_context(ctx);
         crate::app::ui::widget_ids::configure_debug_options(ctx);
         self.sync_editor_fonts(ctx);
@@ -98,6 +101,15 @@ impl ScratchpadApp {
         }
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
         self.current_window_title = Some(title);
+    }
+
+    fn handle_dropped_files(&mut self, ctx: &egui::Context) {
+        let paths = ctx.input(|input| dropped_file_paths(&input.raw.dropped_files));
+        if paths.is_empty() {
+            return;
+        }
+
+        FileController::open_paths_async(self, paths);
     }
 
     fn show_window_after_first_frame(&mut self, ctx: &egui::Context) {
@@ -259,4 +271,39 @@ impl ScratchpadApp {
 
 fn paint_root_background(ui: &egui::Ui, fill: egui::Color32) {
     ui.painter().rect_filled(ui.max_rect(), 0.0, fill);
+}
+
+fn dropped_file_paths(dropped_files: &[egui::DroppedFile]) -> Vec<PathBuf> {
+    dropped_files
+        .iter()
+        .filter_map(|file| file.path.clone())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dropped_file_paths_uses_only_files_with_paths() {
+        let first = PathBuf::from(r"C:\notes\one.txt");
+        let second = PathBuf::from(r"C:\notes\two.txt");
+        let dropped_files = vec![
+            egui::DroppedFile {
+                path: Some(first.clone()),
+                ..Default::default()
+            },
+            egui::DroppedFile {
+                name: "virtual.txt".to_owned(),
+                bytes: Some(std::sync::Arc::new([1, 2, 3])),
+                ..Default::default()
+            },
+            egui::DroppedFile {
+                path: Some(second.clone()),
+                ..Default::default()
+            },
+        ];
+
+        assert_eq!(dropped_file_paths(&dropped_files), vec![first, second]);
+    }
 }

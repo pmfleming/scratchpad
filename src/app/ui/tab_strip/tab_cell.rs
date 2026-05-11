@@ -1,4 +1,6 @@
-use crate::app::chrome::{tab_button, tab_rename_editor_sized};
+use crate::app::chrome::{
+    TabButtonOptions, tab_button, tab_button_with_actions, tab_rename_editor_sized,
+};
 use crate::app::domain::TabAttentionState;
 use crate::app::ui::tab_drag;
 use crate::app::ui::tab_strip::context_menu::attach_tab_context_menu;
@@ -41,16 +43,8 @@ pub(crate) fn render_tab_cell_sized(
             return render_tab_rename_cell(ui, app, index, props);
         }
 
-        let (tab_response, promote_response, close_response, truncated) = tab_button_with_width(
-            ui,
-            index,
-            props.display_name,
-            props.is_active,
-            props.is_selected,
-            props.can_promote_all_files,
-            props.attention_state.map(attention_color),
-            props.width,
-        );
+        let (tab_response, promote_response, close_response, truncated) =
+            tab_button_with_width(ui, index, &props);
         let tab_response = maybe_attach_tab_tooltip(tab_response, props.tooltip, truncated);
         let dragged_slots = app.dragged_tab_slots(index);
         tab_drag::begin_tab_drag_if_needed(
@@ -153,33 +147,31 @@ fn render_tab_rename_cell(
 fn tab_button_with_width(
     ui: &mut egui::Ui,
     index: usize,
-    display_name: &str,
-    is_active: bool,
-    is_selected: bool,
-    can_promote_all_files: bool,
-    attention_color: Option<egui::Color32>,
-    width: f32,
+    props: &TabCellProps<'_>,
 ) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
-    if (width - crate::app::theme::TAB_BUTTON_WIDTH).abs() <= f32::EPSILON {
+    let attention_color = props.attention_state.map(attention_color);
+    if (props.width - crate::app::theme::TAB_BUTTON_WIDTH).abs() <= f32::EPSILON {
         tab_button(
             ui,
             ("tab_strip.slot", index),
-            display_name,
-            is_active,
-            is_selected,
-            can_promote_all_files,
+            props.display_name,
+            props.is_active,
+            props.is_selected,
+            props.can_promote_all_files,
             attention_color,
         )
     } else {
-        crate::app::chrome::tab_button_sized_with_actions(
+        tab_button_with_actions(
             ui,
             ("tab_strip.slot", index),
-            display_name,
-            is_active,
-            is_selected,
-            can_promote_all_files,
-            attention_color,
-            width,
+            props.display_name,
+            props.is_active,
+            props.is_selected,
+            TabButtonOptions::with_actions(
+                props.width,
+                props.can_promote_all_files,
+                attention_color,
+            ),
         )
     }
 }

@@ -101,6 +101,27 @@ impl Drop for SettingsControlLaneGuard {
     }
 }
 
+pub(super) struct CategoryCard<'a> {
+    pub heading: &'a str,
+    pub id_source: &'a str,
+    pub icon: &'a str,
+    pub title: &'a str,
+    pub description: &'a str,
+    pub default_open: bool,
+}
+
+pub(super) struct ComboSelectRow<'a, T, SelectedLabel, OptionLabel, OnChange> {
+    pub label: &'a str,
+    pub description: Option<&'a str>,
+    pub combo_id: &'a str,
+    pub record_label: &'a str,
+    pub current: T,
+    pub options: &'a [T],
+    pub selected_label: SelectedLabel,
+    pub option_label: OptionLabel,
+    pub on_change: OnChange,
+}
+
 fn with_settings_control_lane<R>(rect: egui::Rect, add_contents: impl FnOnce() -> R) -> R {
     let _guard = SettingsControlLaneGuard::push(rect);
     add_contents()
@@ -173,22 +194,17 @@ pub(super) fn toggle_card(
 
 pub(super) fn category_card(
     ui: &mut egui::Ui,
-    heading: &str,
-    id_source: &str,
-    icon: &str,
-    title: &str,
-    description: &str,
-    default_open: bool,
+    card: CategoryCard<'_>,
     add_body: impl FnOnce(&mut egui::Ui),
 ) {
-    category_heading(ui, heading);
+    category_heading(ui, card.heading);
     expandable_card(
         ui,
-        id_source,
-        icon,
-        title,
-        description,
-        default_open,
+        card.id_source,
+        card.icon,
+        card.title,
+        card.description,
+        card.default_open,
         add_body,
     );
 }
@@ -268,34 +284,29 @@ pub(super) fn combo_control<T>(
     });
 }
 
-pub(super) fn combo_select_row<T>(
+pub(super) fn combo_select_row<T, SelectedLabel, OptionLabel, OnChange>(
     ui: &mut egui::Ui,
-    label: &str,
-    description: Option<&str>,
-    combo_id: impl Hash,
-    record_label: impl Into<String>,
-    current: T,
-    options: &[T],
-    selected_label: impl Fn(T) -> &'static str,
-    option_label: impl Fn(T) -> &'static str,
-    on_change: impl FnOnce(T),
+    row: ComboSelectRow<'_, T, SelectedLabel, OptionLabel, OnChange>,
 ) where
     T: Copy + PartialEq,
+    SelectedLabel: Fn(T) -> &'static str,
+    OptionLabel: Fn(T) -> &'static str,
+    OnChange: FnOnce(T),
 {
-    let mut selected = current;
-    inner_select_row(ui, label, description, |ui| {
+    let mut selected = row.current;
+    inner_select_row(ui, row.label, row.description, |ui| {
         combo_control(
             ui,
-            combo_id,
-            record_label,
+            row.combo_id,
+            row.record_label,
             &mut selected,
-            options,
-            selected_label,
-            option_label,
+            row.options,
+            row.selected_label,
+            row.option_label,
         );
     });
-    if selected != current {
-        on_change(selected);
+    if selected != row.current {
+        (row.on_change)(selected);
     }
 }
 

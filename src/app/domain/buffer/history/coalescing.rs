@@ -198,3 +198,110 @@ fn byte_index_for_char(text: &str, char_index: usize) -> usize {
 fn is_single_line(text: &str) -> bool {
     !text.contains('\n') && !text.contains('\r')
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
+    use std::time::Duration;
+
+    fn cursor(index: usize) -> CursorRange {
+        CursorRange::one(CharCursor::new(index))
+    }
+
+    fn record(
+        start_char: usize,
+        deleted_text: &str,
+        inserted_text: &str,
+        previous: usize,
+        next: usize,
+    ) -> TextDocumentOperationRecord {
+        TextDocumentOperationRecord {
+            previous_selection: cursor(previous),
+            next_selection: cursor(next),
+            edits: vec![TextDocumentEditOperation {
+                start_char,
+                deleted_text: deleted_text.to_owned(),
+                inserted_text: inserted_text.to_owned(),
+                deleted_spans: Vec::new(),
+            }],
+        }
+    }
+
+    #[test]
+    fn soft_dividers_seal_only_after_pause() {
+        for divider in [",", ";", ":", "-"] {
+            let latest = record(0, "", &format!("word{divider}"), 0, 5);
+
+            assert!(!entry_sealed_by_divider(
+                &latest,
+                Some(TEXT_HISTORY_SOFT_DIVIDER_PAUSE - Duration::from_millis(1))
+            ));
+            assert!(entry_sealed_by_divider(
+                &latest,
+                Some(TEXT_HISTORY_SOFT_DIVIDER_PAUSE)
+            ));
+            assert!(entry_sealed_by_divider(&latest, None));
+        }
+    }
+
+    #[test]
+    fn hard_dividers_seal_immediately_for_insert_and_delete() {
+        for divider in [".", "?", "!", "\n", "\r"] {
+            let insert = record(0, "", &format!("word{divider}"), 0, 5);
+            let delete = record(4, divider, "", 5, 4);
+
+            assert!(entry_sealed_by_divider(
+                &insert,
+                Some(Duration::from_millis(0))
+            ));
+            assert!(entry_sealed_by_divider(
+                &delete,
+                Some(Duration::from_millis(0))
+            ));
+        }
+    }
+
+    #[test]
+    fn continuous_insert_records_merge_in_place() {
+        let latest = record(0, "", "ab", 0, 2);
+        let incoming = record(2, "", "c", 2, 3);
+
+        let merged = coalesced_local_edit_record(latest, &incoming);
+
+        match merged {
+            Some(CoalescedEdit::Record(record)) => {
+                assert_eq!(record.edits[0].inserted_text, "abc");
+                assert_eq!(record.next_selection, cursor(3));
+            }
+            _ => panic!("expected merged insert record"),
+        }
+    }
+
+    #[test]
+    fn deleting_the_only_inserted_char_removes_transient_entry() {
+        let latest = record(0, "", "x", 0, 1);
+        let incoming = record(0, "x", "", 1, 0);
+
+        assert!(matches!(
+            coalesced_local_edit_record(latest, &incoming),
+            Some(CoalescedEdit::Noop)
+        ));
+    }
+
+    #[test]
+    fn delete_records_do_not_merge_across_newline() {
+        let latest = record(2, "b", "", 3, 2);
+        let incoming = record(1, "\n", "", 2, 1);
+
+        assert!(coalesced_local_edit_record(latest, &incoming).is_none());
+    }
+
+    #[test]
+    fn cursor_jump_prevents_coalescing() {
+        let latest = record(0, "", "a", 0, 1);
+        let incoming = record(0, "", "b", 0, 1);
+
+        assert!(coalesced_local_edit_record(latest, &incoming).is_none());
+    }
+}

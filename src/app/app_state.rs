@@ -31,9 +31,9 @@ pub(crate) use search_state::{
 pub(crate) use types::{
     AppSurface, PendingBackgroundAction, PendingEncodingComplianceAction, PendingOpenHereAction,
     PendingOpenTabsAction, PendingReloadBufferAction, PendingReloadMode,
-    PendingReopenWithEncodingAction, PendingSessionPersistAction, PendingStartupRestoreAction,
-    PendingStartupRestoreCompareAction, PendingTabContextMenu, PendingTextMetadataAction,
-    StartupRestoreConflict, TabRenameState,
+    PendingReopenWithEncodingAction, PendingSavePathAction, PendingSessionPersistAction,
+    PendingStartupRestoreAction, PendingStartupRestoreCompareAction, PendingTabContextMenu,
+    PendingTextMetadataAction, StartupRestoreConflict, TabRenameState,
 };
 
 pub(crate) const SESSION_SNAPSHOT_INTERVAL: Duration = Duration::from_secs(1);
@@ -346,6 +346,9 @@ mod tests {
             assert!(!message.contains("file(s)"), "{message}");
             assert!(!message.contains("tab(s)"), "{message}");
             assert!(!message.contains("conflict(s)"), "{message}");
+            assert!(!message.contains("1 files"), "{message}");
+            assert!(!message.contains("1 tabs"), "{message}");
+            assert!(!message.contains("1 conflicts"), "{message}");
             assert!(
                 !message.contains("Control characters detected: Control characters detected"),
                 "{message}"

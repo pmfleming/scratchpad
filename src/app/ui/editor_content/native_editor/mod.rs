@@ -379,10 +379,11 @@ fn should_rebuild_galley_after_input(
 #[cfg(test)]
 mod tests {
     use super::{
-        CharCursor, CursorRange, cut_selected_text, publish_active_selection, selected_text,
-        should_rebuild_galley_after_input,
+        CharCursor, CursorRange, cut_selected_text, publish_active_selection,
+        request_cursor_reveal_after_input, selected_text, should_rebuild_galley_after_input,
+        sync_ime_output_focus,
     };
-    use crate::app::domain::{BufferState, EditorViewState};
+    use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
 
     #[test]
     fn cursor_only_movement_rebuilds_galley_for_reveal() {
@@ -455,5 +456,87 @@ mod tests {
 
         assert_eq!(buffer.text(), "ab");
         assert_eq!(undo_selection, previous);
+    }
+
+    #[test]
+    fn same_line_edit_requests_horizontal_cursor_reveal() {
+        let buffer = BufferState::new("sample.txt".to_owned(), "alpha beta".to_owned(), None);
+        let mut view = EditorViewState::new(buffer.id);
+        let previous = Some(CursorRange::one(CharCursor::new(1)));
+        view.cursor_range = Some(CursorRange::one(CharCursor::new(2)));
+
+        request_cursor_reveal_after_input(&buffer, &mut view, previous, Some(0), true, false);
+
+        assert_eq!(
+            view.cursor_reveal_mode(),
+            Some(CursorRevealMode::KeepHorizontalVisible)
+        );
+    }
+
+    #[test]
+    fn newline_edit_requests_vertical_cursor_reveal() {
+        let buffer = BufferState::new("sample.txt".to_owned(), "alpha\nbeta".to_owned(), None);
+        let mut view = EditorViewState::new(buffer.id);
+        let previous = Some(CursorRange::one(CharCursor::new(4)));
+        view.cursor_range = Some(CursorRange::one(CharCursor::new(7)));
+
+        request_cursor_reveal_after_input(&buffer, &mut view, previous, Some(0), true, false);
+
+        assert_eq!(
+            view.cursor_reveal_mode(),
+            Some(CursorRevealMode::KeepVisible)
+        );
+    }
+
+    #[test]
+    fn cursor_movement_without_edit_requests_keep_visible_reveal() {
+        let buffer = BufferState::new("sample.txt".to_owned(), "alpha\nbeta".to_owned(), None);
+        let mut view = EditorViewState::new(buffer.id);
+        let previous = Some(CursorRange::one(CharCursor::new(1)));
+        view.cursor_range = Some(CursorRange::one(CharCursor::new(3)));
+
+        request_cursor_reveal_after_input(&buffer, &mut view, previous, Some(0), false, false);
+
+        assert_eq!(
+            view.cursor_reveal_mode(),
+            Some(CursorRevealMode::KeepVisible)
+        );
+    }
+
+    #[test]
+    fn unchanged_cursor_does_not_request_reveal() {
+        let buffer = BufferState::new("sample.txt".to_owned(), "alpha".to_owned(), None);
+        let cursor = Some(CursorRange::one(CharCursor::new(1)));
+        let mut view = EditorViewState::new(buffer.id);
+        view.cursor_range = cursor;
+
+        request_cursor_reveal_after_input(&buffer, &mut view, cursor, Some(0), true, false);
+
+        assert_eq!(view.cursor_reveal_mode(), None);
+    }
+
+    #[test]
+    fn selection_drag_suppresses_cursor_reveal() {
+        let buffer = BufferState::new("sample.txt".to_owned(), "alpha".to_owned(), None);
+        let mut view = EditorViewState::new(buffer.id);
+        view.request_cursor_reveal(CursorRevealMode::Center);
+        let previous = Some(CursorRange::one(CharCursor::new(1)));
+        view.cursor_range = Some(CursorRange::one(CharCursor::new(2)));
+
+        request_cursor_reveal_after_input(&buffer, &mut view, previous, Some(0), true, true);
+
+        assert_eq!(view.cursor_reveal_mode(), None);
+    }
+
+    #[test]
+    fn losing_focus_clears_ime_state() {
+        let mut view = EditorViewState::new(1);
+        view.ime_preedit = Some("kana".to_owned());
+        assert!(view.mark_ime_output(eframe::egui::Rect::EVERYTHING, eframe::egui::Rect::ZERO));
+
+        sync_ime_output_focus(&mut view, false);
+
+        assert_eq!(view.ime_preedit, None);
+        assert!(view.mark_ime_output(eframe::egui::Rect::EVERYTHING, eframe::egui::Rect::ZERO));
     }
 }

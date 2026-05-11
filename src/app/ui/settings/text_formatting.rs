@@ -3,12 +3,14 @@ use super::*;
 pub(super) fn render_text_formatting_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     category_card(
         ui,
-        "Text Formatting",
-        "settings_font_card",
-        egui_phosphor::regular::TEXT_ALIGN_JUSTIFY,
-        "Font",
-        "Choose the text appearance for editor content.",
-        true,
+        CategoryCard {
+            heading: "Text Formatting",
+            id_source: "settings_font_card",
+            icon: egui_phosphor::regular::TEXT_ALIGN_JUSTIFY,
+            title: "Font",
+            description: "Choose the text appearance for editor content.",
+            default_open: true,
+        },
         |ui| {
             render_font_family_row(ui, app);
             inner_divider(ui);
@@ -33,15 +35,17 @@ pub(super) fn render_text_formatting_category(ui: &mut egui::Ui, app: &mut Scrat
 fn render_font_family_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     combo_select_row(
         ui,
-        "Family",
-        Some("Bundled editor font."),
-        "settings_editor_font",
-        "combo.Font family",
-        app.editor_font(),
-        &EditorFontPreset::ALL,
-        EditorFontPreset::label,
-        EditorFontPreset::label,
-        |font| app.set_editor_font(font),
+        ComboSelectRow {
+            label: "Family",
+            description: Some("Bundled editor font."),
+            combo_id: "settings_editor_font",
+            record_label: "combo.Font family",
+            current: app.editor_font(),
+            options: &EditorFontPreset::ALL,
+            selected_label: EditorFontPreset::label,
+            option_label: EditorFontPreset::label,
+            on_change: |font| app.set_editor_font(font),
+        },
     );
 }
 

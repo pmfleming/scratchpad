@@ -62,6 +62,10 @@ impl ScratchpadApp {
         &mut self.tab_manager
     }
 
+    pub(crate) fn rebuild_buffer_tab_index(&mut self) {
+        self.tab_manager.rebuild_buffer_tab_index();
+    }
+
     pub fn pending_action(&self) -> Option<PendingAction> {
         self.tab_manager.pending_action
     }
