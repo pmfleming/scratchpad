@@ -25,7 +25,6 @@ pub struct ScrollState {
     /// programmatic scroll. Used to suppress automatic snap-back behaviors.
     pub user_scrolled: bool,
     pub(super) wheel_acceleration: [ScrollAccelerationState; 2],
-    pub(super) scrollbar_button_acceleration: [ScrollAccelerationState; 2],
 }
 
 #[derive(Clone, Copy, Debug)]

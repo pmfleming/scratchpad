@@ -1,9 +1,10 @@
-use super::{AppSurface, ScratchpadApp, SearchState};
+use super::{AppSurface, ScratchpadApp, SearchState, StatusDomain};
 use crate::app::diagnostics;
 use crate::app::domain::TabManager;
 use crate::app::services::background_io::spawn_background_io_worker;
 use crate::app::services::file_controller::FileController;
 use crate::app::services::file_service::FileService;
+use crate::app::services::file_watch::FileWatchService;
 use crate::app::services::manual_files;
 use crate::app::services::session_manager;
 use crate::app::services::session_store::SessionStore;
@@ -82,7 +83,9 @@ impl ScratchpadApp {
         let mut app = Self {
             tab_manager: TabManager::default(),
             app_settings: AppSettings::default(),
-            status_message: None,
+            current_status: None,
+            status_history: std::collections::VecDeque::new(),
+            next_status_message_id: 0,
             pending_editor_focus: None,
             encoding_dialog_open: false,
             encoding_dialog_choice: "UTF-8".to_owned(),
@@ -105,6 +108,7 @@ impl ScratchpadApp {
             vertical_tab_list_hide_deadline: None,
             text_history_cache: crate::app::text_history::TextHistoryCache::default(),
             text_history_open: false,
+            status_history_open: false,
             search_state: SearchState::default(),
             chrome_transition_frames_remaining: 0,
             selected_tab_slots: BTreeSet::new(),
@@ -118,6 +122,8 @@ impl ScratchpadApp {
             background_io_rx,
             next_background_request_id: 1,
             pending_background_actions: std::collections::HashMap::new(),
+            file_watch_service: FileWatchService::new(),
+            pending_file_watch_rescans: std::collections::HashMap::new(),
         };
 
         let loaded_from_settings = app.load_settings_from_store();
@@ -158,7 +164,7 @@ impl ScratchpadApp {
     fn apply_startup_options(&mut self, startup_options: StartupOptions) {
         if startup_options.files.is_empty() {
             if let Some(message) = startup_options.startup_notice {
-                self.set_warning_status(message);
+                self.set_warning_status_in_domain(StatusDomain::Session, message);
             }
             return;
         }
@@ -178,14 +184,14 @@ impl ScratchpadApp {
         }
 
         if let Some(message) = startup_options.startup_notice {
-            self.set_warning_status(message);
+            self.set_warning_status_in_domain(StatusDomain::Session, message);
         }
     }
 
     pub(crate) fn apply_startup_options_async(&mut self, startup_options: StartupOptions) {
         if startup_options.files.is_empty() {
             if let Some(message) = startup_options.startup_notice {
-                self.set_warning_status(message);
+                self.set_warning_status_in_domain(StatusDomain::Session, message);
             }
             return;
         }
@@ -209,7 +215,7 @@ impl ScratchpadApp {
         }
 
         if let Some(message) = startup_options.startup_notice {
-            self.set_warning_status(message);
+            self.set_warning_status_in_domain(StatusDomain::Session, message);
         }
     }
 

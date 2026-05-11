@@ -1,4 +1,4 @@
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{ScratchpadApp, StatusDomain};
 use crate::app::services::session_store::{
     RestoreStatusLevel, RestoredSession, SessionPersistRequest,
 };
@@ -52,7 +52,7 @@ pub(crate) fn restore_session_state(app: &mut ScratchpadApp) -> Option<AppSettin
         Ok(Some(restored)) => Some(apply_restored_session(app, restored)),
         Ok(None) => None,
         Err(error) => {
-            app.set_error_status(format!("Session restore failed: {error}"));
+            app.report_session_restore_failed(error);
             None
         }
     }
@@ -64,8 +64,12 @@ pub(crate) fn apply_restored_session(
 ) -> AppSettings {
     if let Some(status) = restored.restore_status.as_ref() {
         match status.level {
-            RestoreStatusLevel::Info => app.set_info_status(status.message.clone()),
-            RestoreStatusLevel::Warning => app.set_warning_status(status.message.clone()),
+            RestoreStatusLevel::Info => {
+                app.set_info_status_in_domain(StatusDomain::Session, status.message.clone())
+            }
+            RestoreStatusLevel::Warning => {
+                app.set_warning_status_in_domain(StatusDomain::Session, status.message.clone())
+            }
         }
     }
     app.tab_manager_mut().tabs = restored.tabs;

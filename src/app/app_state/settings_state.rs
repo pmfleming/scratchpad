@@ -187,7 +187,7 @@ impl ScratchpadApp {
             }
             Err(error) => {
                 self.apply_settings(AppSettings::default());
-                self.set_warning_status(format!("Settings load failed; using defaults: {error}"));
+                self.report_settings_load_failed(error);
                 false
             }
         }

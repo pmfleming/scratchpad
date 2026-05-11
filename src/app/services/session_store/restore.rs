@@ -23,7 +23,9 @@ pub(super) struct RestoreSummary {
 impl RestoreSummary {
     pub(super) fn record(&mut self, freshness: BufferFreshness) {
         match freshness {
-            BufferFreshness::InSync | BufferFreshness::StaleOnDisk => {}
+            BufferFreshness::InSync
+            | BufferFreshness::AutoReloaded
+            | BufferFreshness::StaleOnDisk => {}
             BufferFreshness::ConflictOnDisk => self.conflicted_buffers += 1,
             BufferFreshness::MissingOnDisk => self.missing_buffers += 1,
         }
@@ -34,7 +36,7 @@ impl RestoreSummary {
             return Some(RestoreStatus {
                 level: RestoreStatusLevel::Warning,
                 message: format!(
-                    "Session restored with {} disk conflict(s) and {} missing file(s).",
+                    "Session restore found {} disk conflicts and {} missing files.",
                     self.conflicted_buffers, self.missing_buffers
                 ),
             });
@@ -44,7 +46,7 @@ impl RestoreSummary {
             return Some(RestoreStatus {
                 level: RestoreStatusLevel::Info,
                 message: format!(
-                    "Reloaded {} clean file(s) from disk during session restore.",
+                    "Reloaded {} clean files from disk during session restore.",
                     self.reloaded_clean_buffers
                 ),
             });

@@ -13,7 +13,7 @@ pub use buffer::{
     display_line_count, platform_default_line_ending, source_label,
 };
 pub use panes::{PaneBranch, PaneNode, SplitAxis, SplitPath};
-pub use tab::WorkspaceTab;
+pub use tab::{TabAttentionState, WorkspaceTab};
 pub use tab_manager::{PendingAction, TabManager};
 pub use view::{
     CursorRevealMode, EditorViewState, LayoutCacheKey, SearchHighlightState,

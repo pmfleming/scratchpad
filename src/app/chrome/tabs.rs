@@ -18,6 +18,7 @@ pub fn tab_button(
     active: bool,
     selected: bool,
     show_promote_all: bool,
+    attention_color: Option<egui::Color32>,
 ) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
     tab_button_with_actions(
         ui,
@@ -26,6 +27,7 @@ pub fn tab_button(
         active,
         selected,
         show_promote_all,
+        attention_color,
         TAB_BUTTON_WIDTH,
     )
 }
@@ -37,6 +39,7 @@ pub fn tab_button_with_actions(
     active: bool,
     selected: bool,
     show_promote_all: bool,
+    attention_color: Option<egui::Color32>,
     width: f32,
 ) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
     let frame = allocate_tab_button_frame(ui, width, surface_key);
@@ -49,7 +52,7 @@ pub fn tab_button_with_actions(
         frame.drag_in_progress,
     );
     let promote_rect = show_promote_all.then(|| tab_promote_rect(frame.rect));
-    let truncated = paint_tab_label(ui, frame.rect, label, show_promote_all);
+    let truncated = paint_tab_label(ui, frame.rect, label, show_promote_all, attention_color);
     let promote_response = promote_rect.map(|promote_rect| {
         render_tab_promote_button(ui, promote_rect, frame.surface_id, frame.drag_in_progress)
     });
@@ -76,7 +79,7 @@ pub fn tab_button_sized(
         selected,
         frame.drag_in_progress,
     );
-    let truncated = paint_tab_label(ui, frame.rect, label, false);
+    let truncated = paint_tab_label(ui, frame.rect, label, false, None);
     let (_, close_response) =
         render_tab_close_button(ui, frame.rect, frame.surface_id, frame.drag_in_progress);
 
@@ -90,6 +93,7 @@ pub fn tab_button_sized_with_actions(
     active: bool,
     selected: bool,
     show_promote_all: bool,
+    attention_color: Option<egui::Color32>,
     width: f32,
 ) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
     tab_button_with_actions(
@@ -99,6 +103,7 @@ pub fn tab_button_sized_with_actions(
         active,
         selected,
         show_promote_all,
+        attention_color,
         width,
     )
 }
@@ -207,10 +212,22 @@ fn allocate_tab_button_frame(
     }
 }
 
-fn paint_tab_label(ui: &egui::Ui, rect: Rect, label: &str, show_promote_all: bool) -> bool {
+fn paint_tab_label(
+    ui: &egui::Ui,
+    rect: Rect,
+    label: &str,
+    show_promote_all: bool,
+    attention_color: Option<egui::Color32>,
+) -> bool {
     let right_padding = label_right_padding(show_promote_all);
+    let left_padding = if let Some(color) = attention_color {
+        paint_attention_square(ui, rect, color);
+        22.0
+    } else {
+        8.0
+    };
     let text_rect = Rect::from_min_max(
-        rect.min + Vec2::new(8.0, 0.0),
+        rect.min + Vec2::new(left_padding, 0.0),
         rect.max - Vec2::new(right_padding, 0.0),
     );
     let (visible_label, truncated) = truncate_label(ui, label, text_rect.width().max(0.0));
@@ -222,6 +239,12 @@ fn paint_tab_label(ui: &egui::Ui, rect: Rect, label: &str, show_promote_all: boo
         text_primary(ui),
     );
     truncated
+}
+
+fn paint_attention_square(ui: &egui::Ui, rect: Rect, color: egui::Color32) {
+    let square =
+        Rect::from_center_size(rect.left_center() + Vec2::new(11.0, 0.0), Vec2::splat(8.0));
+    ui.painter().rect_filled(square, 2.0, color);
 }
 
 fn label_right_padding(show_promote_all: bool) -> f32 {

@@ -1,6 +1,6 @@
 use super::super::{
     PendingBackgroundAction, PendingStartupRestoreCompareAction, ScratchpadApp,
-    StartupRestoreConflict,
+    StartupRestoreConflict, StatusDomain,
 };
 use crate::app::commands::AppCommand;
 use crate::app::domain::{BufferFreshness, BufferId, ViewId, WorkspaceTab};
@@ -90,19 +90,23 @@ impl ScratchpadApp {
         let loaded_buffer = match result.result {
             Ok(buffer) => buffer,
             Err(error) => {
-                self.set_warning_status(format!(
-                    "Could not load disk version of {}: {error}",
-                    conflict.buffer_name
-                ));
+                self.set_warning_status_with_detail(
+                    StatusDomain::Disk,
+                    format!("Could not load disk version of {}.", conflict.buffer_name),
+                    error,
+                );
                 return;
             }
         };
 
         let Some(buffer_id) = conflicted_buffer_id(self, &conflict) else {
-            self.set_warning_status(format!(
-                "Could not find the conflicted tab for {}.",
-                conflict.buffer_name
-            ));
+            self.set_warning_status_in_domain(
+                StatusDomain::Layout,
+                format!(
+                    "Could not find the conflicted tab for {}.",
+                    conflict.buffer_name
+                ),
+            );
             return;
         };
 
@@ -137,7 +141,10 @@ impl ScratchpadApp {
         self.mark_search_dirty();
         self.mark_session_dirty();
         let _ = self.persist_session_now();
-        self.set_info_status(format!("Loaded disk version of {}.", conflict.buffer_name));
+        self.set_info_status_in_domain(
+            StatusDomain::Disk,
+            format!("Loaded disk version of {}.", conflict.buffer_name),
+        );
     }
 }
 

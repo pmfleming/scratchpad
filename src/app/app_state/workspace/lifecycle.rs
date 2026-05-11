@@ -1,4 +1,4 @@
-use super::super::ScratchpadApp;
+use super::super::{ScratchpadApp, StatusDomain};
 use crate::app::commands::AppCommand;
 use crate::app::diagnostics;
 use crate::app::domain::{BufferId, SplitAxis, SplitPath, ViewId, WorkspaceTab};
@@ -35,7 +35,11 @@ impl ScratchpadApp {
                 "workspace::lifecycle",
                 &"User manual not found",
             );
-            self.set_error_status(format!("User manual not found: {}", path.display()));
+            self.set_error_status_with_detail(
+                StatusDomain::File,
+                "Could not open the user manual.",
+                path.display().to_string(),
+            );
             return;
         }
 

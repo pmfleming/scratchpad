@@ -11,7 +11,7 @@ use std::time::Instant;
 impl ScratchpadApp {
     pub(super) fn persist_settings_or_error(&mut self) {
         if let Err(error) = self.persist_settings_now() {
-            self.set_error_status(format!("Settings save failed: {error}"));
+            self.report_settings_save_failed(error);
         }
     }
 
@@ -311,8 +311,11 @@ impl ScratchpadApp {
         self.select_only_tab_slot(self.active_tab_slot_index());
         let _ = self.persist_session_now();
         match self.persist_settings_now() {
-            Ok(()) => self.set_info_status("Settings reset to defaults."),
-            Err(error) => self.set_error_status(format!("Settings save failed: {error}")),
+            Ok(()) => self.set_info_status_in_domain(
+                crate::app::app_state::StatusDomain::Settings,
+                "Settings reset to defaults.",
+            ),
+            Err(error) => self.report_settings_save_failed(error),
         }
     }
 

@@ -1,4 +1,6 @@
-use crate::app::domain::{BufferId, BufferState, EditorViewState, PaneNode, ViewId, tab_support};
+use crate::app::domain::{
+    BufferFreshness, BufferId, BufferState, EditorViewState, PaneNode, ViewId, tab_support,
+};
 use std::collections::HashSet;
 
 mod layout;
@@ -12,6 +14,13 @@ pub struct WorkspaceTab {
     pub views: Vec<EditorViewState>,
     pub root_pane: PaneNode,
     pub active_view_id: ViewId,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabAttentionState {
+    AutoEdit,
+    Dirty,
+    DiskProblem,
 }
 
 impl WorkspaceTab {
@@ -64,7 +73,6 @@ impl WorkspaceTab {
         }
 
         let names = self.distinct_buffer_names_in_view_order();
-        let marker = if self.workspace_dirty() { "*" } else { "" };
         let first = names
             .first()
             .cloned()
@@ -73,7 +81,7 @@ impl WorkspaceTab {
             .get(1)
             .cloned()
             .unwrap_or_else(|| self.buffer.name.clone());
-        format!("{marker}[{}] {} & {}", names.len(), first, second)
+        format!("[{}] {} & {}", names.len(), first, second)
     }
 
     pub fn full_display_name(&self, has_duplicate: bool) -> String {
@@ -126,6 +134,30 @@ impl WorkspaceTab {
         )
     }
 
+    pub fn attention_state(&self) -> Option<TabAttentionState> {
+        let mut has_auto_edit = false;
+        let mut has_dirty = false;
+
+        for buffer in self.buffers() {
+            match buffer.freshness {
+                BufferFreshness::ConflictOnDisk
+                | BufferFreshness::MissingOnDisk
+                | BufferFreshness::StaleOnDisk => return Some(TabAttentionState::DiskProblem),
+                BufferFreshness::AutoReloaded => has_auto_edit = true,
+                BufferFreshness::InSync => {}
+            }
+            has_dirty |= buffer.is_dirty;
+        }
+
+        if has_dirty {
+            Some(TabAttentionState::Dirty)
+        } else if has_auto_edit {
+            Some(TabAttentionState::AutoEdit)
+        } else {
+            None
+        }
+    }
+
     fn push_buffer_if_missing(&mut self, buffer: BufferState) {
         if self.buffer_by_id(buffer.id).is_some() {
             return;
@@ -163,10 +195,6 @@ impl WorkspaceTab {
         }
 
         names
-    }
-
-    fn workspace_dirty(&self) -> bool {
-        self.buffers().any(|buffer| buffer.is_dirty)
     }
 
     fn sync_active_buffer_to_active_view(&mut self) -> bool {

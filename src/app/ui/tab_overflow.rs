@@ -1,6 +1,6 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::chrome::tab_button_sized_with_actions;
-use crate::app::domain::WorkspaceTab;
+use crate::app::domain::{TabAttentionState, WorkspaceTab};
 use crate::app::services::settings_store::TabListPosition;
 use crate::app::theme::*;
 use crate::app::ui::tab_drag;
@@ -29,7 +29,7 @@ pub(crate) struct OverflowMenuOutcome {
 }
 
 struct OverflowMenuContext<'a> {
-    popup_width: f32,
+    row_width: f32,
     outcome: &'a mut OverflowMenuOutcome,
     overflow_popup_open: &'a mut bool,
 }
@@ -38,6 +38,7 @@ struct OverflowRowState {
     selected: bool,
     display_name: String,
     can_promote_all_files: bool,
+    attention_state: Option<TabAttentionState>,
 }
 
 #[derive(Clone, Copy)]
@@ -134,7 +135,8 @@ fn show_overflow_popup(
     }
 
     let active_drag_sources = tab_drag::active_drag_sources_for_context(ctx);
-    let popup_width = TAB_BUTTON_WIDTH;
+    let row_width = TAB_BUTTON_WIDTH;
+    let popup_width = row_width + TAB_LIST_SCROLLBAR_GUTTER;
     let popup_max_height = overflow_popup_max_height(ctx, request.anchor, request.pivot);
     let visible_row_count = overflow_row_count(request.app, request.visible_tab_indices);
     let popup_target_height = overflow_popup_target_height(visible_row_count, popup_max_height);
@@ -149,25 +151,30 @@ fn show_overflow_popup(
                 ui.set_min_width(popup_width);
 
                 let mut menu = OverflowMenuContext {
-                    popup_width,
+                    row_width,
                     outcome,
                     overflow_popup_open,
                 };
 
-                let scroll_output = egui::ScrollArea::vertical()
-                    .id_salt(overflow_popup_scroll_id(request.overflow_popup_id))
-                    .auto_shrink([false, true])
-                    .min_scrolled_height(popup_target_height)
-                    .max_height(popup_target_height)
-                    .show(ui, |ui| {
-                        collect_overflow_row_rects(
-                            ui,
-                            request.app,
-                            &active_drag_sources,
-                            request.visible_tab_indices,
-                            &mut menu,
-                        )
-                    });
+                let scroll_output = ui
+                    .scope(|ui| {
+                        ui.spacing_mut().scroll = tab_list_scroll_style();
+                        egui::ScrollArea::vertical()
+                            .id_salt(overflow_popup_scroll_id(request.overflow_popup_id))
+                            .auto_shrink([false, true])
+                            .min_scrolled_height(popup_target_height)
+                            .max_height(popup_target_height)
+                            .show(ui, |ui| {
+                                collect_overflow_row_rects(
+                                    ui,
+                                    request.app,
+                                    &active_drag_sources,
+                                    request.visible_tab_indices,
+                                    &mut menu,
+                                )
+                            })
+                    })
+                    .inner;
                 maybe_auto_scroll_overflow_popup(
                     ui,
                     scroll_output.id,
@@ -408,23 +415,24 @@ fn show_overflow_row(
 ) -> egui::Rect {
     widget_ids::surface_scope(ui, ("tab_overflow.slot", slot_index), |ui| {
         if is_drag_source {
-            return render_drag_source_placeholder(ui, menu.popup_width);
+            return render_drag_source_placeholder(ui, menu.row_width);
         }
 
         let Some(row_state) = overflow_row_state(app, slot_index) else {
-            return render_drag_source_placeholder(ui, menu.popup_width);
+            return render_drag_source_placeholder(ui, menu.row_width);
         };
 
-        let (response, promote_response, close_response, _truncated) =
-            tab_button_sized_with_actions(
-                ui,
-                ("tab_overflow.slot", slot_index),
-                &row_state.display_name,
-                row_state.selected,
-                row_state.selected,
-                row_state.can_promote_all_files,
-                menu.popup_width,
-            );
+        let (response, promote_response, close_response, truncated) = tab_button_sized_with_actions(
+            ui,
+            ("tab_overflow.slot", slot_index),
+            &row_state.display_name,
+            row_state.selected,
+            row_state.selected,
+            row_state.can_promote_all_files,
+            row_state.attention_state.map(attention_color),
+            menu.row_width,
+        );
+        let response = maybe_attach_overflow_row_tooltip(response, &row_state, truncated);
         tab_drag::begin_tab_drag_if_needed(
             ui,
             slot_index,
@@ -446,6 +454,18 @@ fn show_overflow_row(
     .inner
 }
 
+fn maybe_attach_overflow_row_tooltip(
+    response: egui::Response,
+    row_state: &OverflowRowState,
+    truncated: bool,
+) -> egui::Response {
+    if truncated || !row_state.display_name.is_empty() {
+        response.on_hover_text(row_state.display_name.clone())
+    } else {
+        response
+    }
+}
+
 fn overflow_row_state(app: &ScratchpadApp, slot_index: usize) -> Option<OverflowRowState> {
     Some(OverflowRowState {
         selected: app.tab_slot_selected(slot_index) || app.active_tab_slot_index() == slot_index,
@@ -454,7 +474,19 @@ fn overflow_row_state(app: &ScratchpadApp, slot_index: usize) -> Option<Overflow
             .workspace_index_for_slot(slot_index)
             .and_then(|index| app.tabs().get(index))
             .is_some_and(WorkspaceTab::can_promote_all_files),
+        attention_state: app
+            .workspace_index_for_slot(slot_index)
+            .and_then(|index| app.tabs().get(index))
+            .and_then(WorkspaceTab::attention_state),
     })
+}
+
+fn attention_color(state: TabAttentionState) -> egui::Color32 {
+    match state {
+        TabAttentionState::AutoEdit => egui::Color32::from_rgb(230, 132, 46),
+        TabAttentionState::Dirty => egui::Color32::from_rgb(70, 176, 96),
+        TabAttentionState::DiskProblem => egui::Color32::from_rgb(220, 64, 64),
+    }
 }
 
 fn apply_overflow_row_actions(

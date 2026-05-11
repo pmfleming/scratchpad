@@ -408,7 +408,7 @@ impl ScratchpadApp {
                     [("request_id", request_id.to_string())],
                 );
                 self.mark_session_dirty();
-                self.set_error_status(format!("Session save failed: {error}"));
+                self.report_session_save_failed(error);
             }
         }
     }
@@ -483,7 +483,7 @@ impl ScratchpadApp {
                     &error,
                     std::iter::empty(),
                 );
-                self.set_error_status(format!("Session restore failed: {error}"));
+                self.report_session_restore_failed(error);
                 None
             }
         };

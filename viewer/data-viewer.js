@@ -5750,6 +5750,7 @@
             ? renderRiskDistributionCounts(sorted, options)
             : renderDistributionRows(sorted.slice(0, 10), options, { ranked: true });
         target.innerHTML = curve + body;
+        attachPerformanceDistributionHandlers(target);
         target.querySelectorAll("[data-risk-key]").forEach((button) => {
             button.addEventListener("click", () => {
                 state[options.expandedKey] = state[options.expandedKey] === button.dataset.riskKey ? null : button.dataset.riskKey;
@@ -5818,6 +5819,50 @@
         ];
     }
 
+    function riskCategory(score, warn, bad) {
+        if (score >= bad) return { cls: "bad", label: "High risk" };
+        if (score >= warn) return { cls: "warn", label: "Watch" };
+        return { cls: "good", label: "Healthy" };
+    }
+
+    function riskRangeCategory(low, high, warn, bad) {
+        if (low >= bad) return { cls: "bad", label: "High risk" };
+        if (low >= warn && high < bad) return { cls: "warn", label: "Watch" };
+        if (high < warn) return { cls: "good", label: "Healthy" };
+        return { cls: "mixed", label: "Mixed risk" };
+    }
+
+    function renderRiskDistributionBinPanel(bin, index, options, maxScore, bucketCount) {
+        const ordered = [...bin].sort((left, right) => right.score - left.score);
+        const low = (index / bucketCount) * maxScore;
+        const high = ((index + 1) / bucketCount) * maxScore;
+        const bucketCategory = riskRangeCategory(low, high, options.warn, options.bad);
+        const rows = ordered.slice(0, 14).map((item) => {
+            const title = shortenLabel(String(item.name || "Item"));
+            const detail = [item.kind, item.details].filter(Boolean).join(" - ");
+            const cls = riskClass(item.score, options.warn, options.bad);
+            const category = riskCategory(item.score, options.warn, options.bad);
+            return `<div class="performance-bin-row">
+                <span class="performance-bin-row__main">
+                    <strong title="${escapeHtml(item.name || title)}">${escapeHtml(title)}</strong>
+                    <em>${escapeHtml(detail)}</em>
+                </span>
+                <span class="performance-bin-row__value ${cls}">${formatNumber.format(item.score)}</span>
+                <i class="performance-bin-row__category performance-bin-row__category--${category.cls}" title="${escapeHtml(category.label)}"></i>
+            </div>`;
+        }).join("");
+        const overflow = ordered.length > 14
+            ? `<p>${formatNumber.format(ordered.length - 14)} more in this bucket. Use the dataset tables for the full list.</p>`
+            : "";
+        return `<div data-performance-bin-panel="${index}">
+            <div class="performance-bin-popover__header">
+                <strong><i class="performance-bin-row__category performance-bin-row__category--${bucketCategory.cls}"></i>${formatNumber.format(bin.length)} ${bin.length === 1 ? "item" : "items"} · ${escapeHtml(bucketCategory.label)}</strong>
+                <span>${escapeHtml(formatNumber.format(low))}-${escapeHtml(formatNumber.format(high))} ${escapeHtml(options.scoreLabel || "score")}</span>
+            </div>
+            <div class="performance-bin-popover__list">${rows || `<p>No items in this bucket.</p>`}${overflow}</div>
+        </div>`;
+    }
+
     function riskDistributionCurve(items, options) {
         const scores = items.map((item) => Number(item.score || 0)).filter(Number.isFinite);
         const total = scores.length;
@@ -5832,17 +5877,29 @@
         const baseline = 148;
         const top = 24;
         const bucketCount = 22;
-        const bins = Array.from({ length: bucketCount }, () => 0);
-        scores.forEach((score) => {
+        const bins = Array.from({ length: bucketCount }, () => []);
+        items.forEach((item) => {
+            const score = Number(item.score || 0);
+            if (!Number.isFinite(score)) return;
             const index = Math.min(bucketCount - 1, Math.floor((score / maxScore) * bucketCount));
-            bins[index]++;
+            bins[index].push(item);
         });
-        const maxBin = Math.max(...bins, 1);
-        const bars = bins.map((count, index) => {
+        const maxBin = Math.max(...bins.map((bin) => bin.length), 1);
+        const binPanels = bins.map((bin, index) => renderRiskDistributionBinPanel(bin, index, options, maxScore, bucketCount)).join("");
+        const bars = bins.map((bin, index) => {
+            const count = bin.length;
             const x = left + (index / bucketCount) * (right - left);
             const barWidth = ((right - left) / bucketCount) - 3;
             const barHeight = (count / maxBin) * 76;
-            return `<rect x="${x.toFixed(1)}" y="${(baseline - barHeight).toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barHeight.toFixed(1)}" rx="3" class="risk-curve__bar"></rect>`;
+            const low = (index / bucketCount) * maxScore;
+            const high = ((index + 1) / bucketCount) * maxScore;
+            const detail = [
+                `${formatNumber.format(count)} ${count === 1 ? "item" : "items"}`,
+                `${formatNumber.format(low)} to ${formatNumber.format(high)} ${options.scoreLabel || "score"}`,
+            ].join(" - ");
+            const leftPct = ((x + barWidth / 2) / width) * 100;
+            const topPct = ((baseline - Math.max(barHeight, 10)) / height) * 100;
+            return `<rect x="${x.toFixed(1)}" y="${(baseline - barHeight).toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barHeight.toFixed(1)}" rx="3" class="risk-curve__bar" tabindex="0" role="button" aria-label="${escapeHtml(detail)}" data-performance-bin-index="${index}" data-performance-bin-left="${leftPct.toFixed(2)}" data-performance-bin-top="${topPct.toFixed(2)}"></rect>`;
         }).join("");
         const density = (score) => Math.exp(-0.5 * Math.pow((score - mean) / stdDev, 2));
         const maxDensity = Math.max(...Array.from({ length: 80 }, (_, index) => density((index / 79) * maxScore)), 1);
@@ -5858,7 +5915,7 @@
             return `<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${top}" y2="${baseline}" class="risk-curve__marker risk-curve__marker--${cls}"></line>`;
         };
         const meanX = left + (mean / maxScore) * (right - left);
-        return `<div class="risk-curve-card">
+        return `<div class="risk-curve-card performance-dist-curve">
             <svg class="risk-curve" viewBox="0 0 ${width} ${height}" role="img" aria-label="Normal distribution curve for ${escapeHtml(options.scoreLabel)}">
                 <line x1="${left}" x2="${right}" y1="${baseline}" y2="${baseline}" class="risk-curve__axis"></line>
                 ${bars}
@@ -5867,6 +5924,8 @@
                 <path d="${path}" class="risk-curve__line"></path>
                 <circle cx="${meanX.toFixed(1)}" cy="${baseline - 6}" r="4" class="risk-curve__mean"></circle>
             </svg>
+            <div class="performance-bin-popover" hidden></div>
+            <div class="performance-bin-panels" hidden>${binPanels}</div>
             <div class="risk-curve-card__stats">
                 <span><strong>${formatNumber.format(total)}</strong> items</span>
                 <span><strong>${formatNumber.format(mean)}</strong> mean</span>

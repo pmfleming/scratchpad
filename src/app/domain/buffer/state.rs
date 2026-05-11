@@ -68,6 +68,7 @@ pub struct DiskFileState {
 pub enum BufferFreshness {
     #[default]
     InSync,
+    AutoReloaded,
     StaleOnDisk,
     ConflictOnDisk,
     MissingOnDisk,
@@ -467,6 +468,10 @@ impl BufferState {
         self.set_disk_state(disk_state, BufferFreshness::InSync);
     }
 
+    pub fn mark_auto_reloaded_from_disk(&mut self, disk_state: Option<DiskFileState>) {
+        self.set_disk_state(disk_state, BufferFreshness::AutoReloaded);
+    }
+
     pub fn mark_stale_on_disk(&mut self, disk_state: Option<DiskFileState>) {
         self.set_disk_state(disk_state, BufferFreshness::StaleOnDisk);
     }
@@ -479,9 +484,17 @@ impl BufferState {
         self.freshness = BufferFreshness::MissingOnDisk;
     }
 
+    pub fn mark_dirty_after_local_edit(&mut self) {
+        self.is_dirty = true;
+        if self.freshness == BufferFreshness::AutoReloaded {
+            self.freshness = BufferFreshness::InSync;
+        }
+    }
+
     pub fn disk_status_label(&self) -> Option<&'static str> {
         match self.freshness {
             BufferFreshness::InSync => None,
+            BufferFreshness::AutoReloaded => Some("Auto reloaded"),
             BufferFreshness::StaleOnDisk => Some("On disk changed"),
             BufferFreshness::ConflictOnDisk => Some("Disk conflict"),
             BufferFreshness::MissingOnDisk => Some("File missing"),
@@ -497,6 +510,9 @@ impl BufferState {
 
         match self.freshness {
             BufferFreshness::InSync => None,
+            BufferFreshness::AutoReloaded => Some(format!(
+                "{path_label} was reloaded after it changed on disk."
+            )),
             BufferFreshness::StaleOnDisk => Some(format!("{path_label} changed on disk.")),
             BufferFreshness::ConflictOnDisk => Some(format!(
                 "{path_label} changed on disk. Your tab has unsaved edits."
@@ -506,11 +522,7 @@ impl BufferState {
     }
 
     pub fn display_name(&self) -> String {
-        if self.is_dirty {
-            format!("*{}", self.name)
-        } else {
-            self.name.clone()
-        }
+        self.name.clone()
     }
 
     pub fn overflow_context_label(&self) -> Option<String> {

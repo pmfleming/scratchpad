@@ -5,7 +5,8 @@ use super::{DuplicateNameCounts, apply_tab_drag_feedback};
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
 use crate::app::theme::{
-    BUTTON_SIZE, TAB_BUTTON_WIDTH, action_bg, action_hover_bg, border, text_primary,
+    BUTTON_SIZE, TAB_BUTTON_WIDTH, action_bg, action_hover_bg, border, tab_list_scroll_style,
+    text_primary,
 };
 use crate::app::ui::tab_drag::{self, TabDropAxis, TabDropZone};
 use crate::app::ui::tab_strip::{
@@ -114,14 +115,19 @@ fn show_scrolling_vertical_tab_list(
     outcome: &mut TabStripOutcome,
 ) -> Option<TabDropZone> {
     let scroll_area_id = widget_ids::scroll_id(ui, "vertical_tab_list");
-    let output = egui::ScrollArea::vertical()
-        .id_salt(scroll_area_id)
-        .auto_shrink([false, false])
-        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 4.0;
-            collect_vertical_tab_entries(ui, app, duplicate_name_counts, outcome)
-        });
+    let output = ui
+        .scope(|ui| {
+            ui.spacing_mut().scroll = tab_list_scroll_style();
+            egui::ScrollArea::vertical()
+                .id_salt(scroll_area_id)
+                .auto_shrink([false, false])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    collect_vertical_tab_entries(ui, app, duplicate_name_counts, outcome)
+                })
+        })
+        .inner;
     maybe_auto_scroll_vertical_entries(ui, app, output.id, output.inner_rect, &output.state);
     let entries = output.inner;
 

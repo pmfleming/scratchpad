@@ -24,6 +24,7 @@ proc-macro2 = { version = "1.0", features = ["span-locations"] }
 rustc-hash = "2.0"
 smallvec = { version = "1.13", features = ["serde"] }
 sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+windows_file_watch = { path = "crates/windows_file_watch" }
 
 [dev-dependencies]
 rand = "0.10.0"

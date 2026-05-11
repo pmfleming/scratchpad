@@ -102,14 +102,13 @@ pub(crate) fn section_frame(ui: &egui::Ui) -> egui::Frame {
 
 pub(crate) fn header_row(
     ui: &mut egui::Ui,
-    surface_key: impl Hash,
+    surface_key: impl Hash + Clone,
     close_tooltip: &str,
     add_leading: impl FnOnce(&mut egui::Ui),
 ) -> bool {
     let row_width = ui.available_width();
     let row_height = CAPTION_BUTTON_SIZE.y;
-    let (row_rect, _) =
-        ui.allocate_exact_size(egui::vec2(row_width, row_height), egui::Sense::hover());
+    let row_rect = widget_ids::allocate_exact_rect(ui, egui::vec2(row_width, row_height));
     let close_rect = egui::Rect::from_min_size(
         egui::pos2(row_rect.right() - CAPTION_BUTTON_SIZE.x, row_rect.top()),
         CAPTION_BUTTON_SIZE,
@@ -122,16 +121,23 @@ pub(crate) fn header_row(
         ),
     );
 
-    ui.scope_builder(egui::UiBuilder::new().max_rect(leading_rect), |ui| {
-        ui.with_layout(
-            egui::Layout::left_to_right(egui::Align::Center),
-            add_leading,
-        );
-    });
+    widget_ids::rect_scope_with_layout(
+        ui,
+        leading_rect,
+        (surface_key.clone(), "leading"),
+        egui::Layout::left_to_right(egui::Align::Center),
+        add_leading,
+    );
 
-    ui.scope_builder(egui::UiBuilder::new().max_rect(close_rect), |ui| {
-        close_button(ui, (surface_key, "close"), close_tooltip).clicked()
-    })
+    let close_button_key = (surface_key.clone(), "close");
+
+    widget_ids::rect_scope_with_layout(
+        ui,
+        close_rect,
+        (surface_key, "close_cell"),
+        *ui.layout(),
+        |ui| close_button(ui, close_button_key, close_tooltip).clicked(),
+    )
     .inner
 }
 

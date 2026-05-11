@@ -1,6 +1,6 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::chrome::tab_button_sized;
-use crate::app::domain::WorkspaceTab;
+use crate::app::domain::{TabAttentionState, WorkspaceTab};
 use crate::app::ui::tab_drag::TabRectEntry;
 use crate::app::ui::tab_strip::context_menu::{
     attach_tab_context_menu, attach_tab_list_context_menu,
@@ -98,7 +98,7 @@ fn render_tab_slot_cell(
             .unwrap_or(0)
             > 1;
         let display_name = tab.full_display_name(has_duplicate);
-        let tooltip = display_name.clone();
+        let attention_state = tab.attention_state();
         let can_promote_all_files = tab.can_promote_all_files();
         let is_active = !context.showing_settings && context.active_slot_index == slot_index;
         let is_selected = app.tab_slot_selected(slot_index);
@@ -108,8 +108,9 @@ fn render_tab_slot_cell(
             slot_index,
             TabCellProps {
                 display_name: &display_name,
-                tooltip: Some(tooltip),
+                tooltip: Some(workspace_tab_tooltip(&display_name, attention_state)),
                 can_promote_all_files,
+                attention_state,
                 is_active,
                 is_selected,
                 pending_scroll_to_active: context.pending_scroll_to_active,
@@ -193,11 +194,34 @@ fn workspace_tab_for_slot(app: &ScratchpadApp, slot_index: usize) -> Option<&Wor
     app.tabs().get(workspace_index)
 }
 
+fn workspace_tab_tooltip(
+    display_name: &str,
+    _attention_state: Option<TabAttentionState>,
+) -> String {
+    display_name.to_owned()
+}
+
 fn tab_rect_entry(index: usize, rect: egui::Rect, combine_enabled: bool) -> TabRectEntry {
     TabRectEntry {
         index,
         rect,
         combine_enabled,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::workspace_tab_tooltip;
+    use crate::app::domain::TabAttentionState;
+
+    #[test]
+    fn tab_attention_dot_does_not_change_the_tab_tooltip() {
+        let display_name = "notes.txt (C:\\notes)";
+
+        assert_eq!(
+            workspace_tab_tooltip(display_name, Some(TabAttentionState::DiskProblem)),
+            display_name
+        );
     }
 }
 

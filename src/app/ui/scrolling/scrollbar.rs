@@ -1,21 +1,12 @@
-use eframe::egui::{self, Id, Rect, Sense, Stroke, Ui, epaint::Shape, pos2, vec2};
+use eframe::egui::{self, Id, Rect, Sense, Ui, epaint::Shape, pos2, vec2};
 
-use super::acceleration::{ScrollAccelerationConfig, accelerated_scroll_delta};
 use super::state::{ScrollState, ScrollbarDragState};
 use super::target::ScrollbarPolicy;
 use crate::app::ui::widget_ids;
 
-const SCROLLBAR_BUTTON_EXTENT: f32 = 18.0;
-const SCROLLBAR_BUTTON_MIN_TRACK_EXTENT: f32 = 48.0;
-const SCROLLBAR_BUTTON_BASE_VIEWPORTS_PER_SECOND: f32 = 2.4;
-const SCROLLBAR_BUTTON_MIN_PIXELS_PER_SECOND: f32 = 520.0;
-const SCROLLBAR_BUTTON_MAX_PIXELS_PER_SECOND: f32 = 2200.0;
-const SCROLLBAR_BUTTON_ACCELERATION_CONFIG: ScrollAccelerationConfig = ScrollAccelerationConfig {
-    reset_after_seconds: 0.24,
-    ramp_per_second: 2.4,
-    ramp_per_pixel: 0.001,
-    max_multiplier: 4.0,
-};
+const SCROLLBAR_DORMANT_THICKNESS: f32 = 2.0;
+const SCROLLBAR_ACTIVE_BACKGROUND_OPACITY: f32 = 0.7;
+const SCROLLBAR_DORMANT_HANDLE_OPACITY: f32 = 0.6;
 
 #[derive(Clone, Copy)]
 pub(super) struct VisibleScrollbars {
@@ -73,30 +64,15 @@ impl ScrollbarAxis {
         }
     }
 
-    fn button_rect(self, bar_rect: Rect, direction: f32, extent: f32) -> Rect {
-        match (self, direction.is_sign_negative()) {
-            (Self::X, true) => Rect::from_min_size(bar_rect.min, vec2(extent, bar_rect.height())),
-            (Self::X, false) => Rect::from_min_size(
-                pos2(bar_rect.max.x - extent, bar_rect.min.y),
-                vec2(extent, bar_rect.height()),
-            ),
-            (Self::Y, true) => Rect::from_min_size(bar_rect.min, vec2(bar_rect.width(), extent)),
-            (Self::Y, false) => Rect::from_min_size(
-                pos2(bar_rect.min.x, bar_rect.max.y - extent),
-                vec2(bar_rect.width(), extent),
-            ),
-        }
-    }
-
-    fn track_rect_between_buttons(self, bar_rect: Rect, button_extent: f32) -> Rect {
+    fn thin_thumb_rect(self, thumb_rect: Rect, thickness: f32) -> Rect {
         match self {
-            Self::X => Rect::from_min_max(
-                pos2(bar_rect.min.x + button_extent, bar_rect.min.y),
-                pos2(bar_rect.max.x - button_extent, bar_rect.max.y),
+            Self::X => Rect::from_center_size(
+                thumb_rect.center(),
+                vec2(thumb_rect.width(), thickness.min(thumb_rect.height())),
             ),
-            Self::Y => Rect::from_min_max(
-                pos2(bar_rect.min.x, bar_rect.min.y + button_extent),
-                pos2(bar_rect.max.x, bar_rect.max.y - button_extent),
+            Self::Y => Rect::from_center_size(
+                thumb_rect.center(),
+                vec2(thickness.min(thumb_rect.width()), thumb_rect.height()),
             ),
         }
     }
@@ -108,13 +84,6 @@ struct ScrollbarGeometry {
     track_extent: f32,
     thumb_extent: f32,
     thumb_rect: Rect,
-}
-
-#[derive(Clone, Copy)]
-struct ScrollbarTrackRects {
-    leading_button: Option<Rect>,
-    trailing_button: Option<Rect>,
-    track: Rect,
 }
 
 pub(super) struct ScrollbarPaintRequest {
@@ -209,32 +178,6 @@ fn scrollbar_bar_rect(
     }
 }
 
-fn scrollbar_track_rects(bar_rect: Rect, axis: ScrollbarAxis) -> ScrollbarTrackRects {
-    let button_extent = scrollbar_button_extent(bar_rect, axis);
-    if button_extent <= 0.0 {
-        return ScrollbarTrackRects {
-            leading_button: None,
-            trailing_button: None,
-            track: bar_rect,
-        };
-    }
-
-    ScrollbarTrackRects {
-        leading_button: Some(axis.button_rect(bar_rect, -1.0, button_extent)),
-        trailing_button: Some(axis.button_rect(bar_rect, 1.0, button_extent)),
-        track: axis.track_rect_between_buttons(bar_rect, button_extent),
-    }
-}
-
-fn scrollbar_button_extent(bar_rect: Rect, axis: ScrollbarAxis) -> f32 {
-    let required = SCROLLBAR_BUTTON_EXTENT * 2.0 + SCROLLBAR_BUTTON_MIN_TRACK_EXTENT;
-    if axis.extent(bar_rect) >= required {
-        SCROLLBAR_BUTTON_EXTENT
-    } else {
-        0.0
-    }
-}
-
 fn paint_and_handle_scrollbar(
     ui: &mut Ui,
     id: Id,
@@ -244,8 +187,7 @@ fn paint_and_handle_scrollbar(
     eof_overscroll: bool,
     interactive: bool,
 ) {
-    let rects = scrollbar_track_rects(bar_rect, axis);
-    let Some(geometry) = scrollbar_geometry(rects.track, axis, state, eof_overscroll) else {
+    let Some(geometry) = scrollbar_geometry(bar_rect, axis, state, eof_overscroll) else {
         return;
     };
 
@@ -254,40 +196,13 @@ fn paint_and_handle_scrollbar(
     } else {
         Sense::hover()
     };
-    let response = widget_ids::interact(ui, rects.track, id, sense, "scrollbar");
+    let response = widget_ids::interact(ui, bar_rect, id, sense, "scrollbar");
 
-    let mut leading_response = None;
-    let mut trailing_response = None;
     if interactive {
-        leading_response = handle_scrollbar_step_button(
-            ui,
-            id.with("__leading_button"),
-            rects.leading_button,
-            -1.0,
-            state,
-            &geometry,
-        );
-        trailing_response = handle_scrollbar_step_button(
-            ui,
-            id.with("__trailing_button"),
-            rects.trailing_button,
-            1.0,
-            state,
-            &geometry,
-        );
-        handle_scrollbar_drag(ui, &response, rects.track, axis, state, &geometry);
+        handle_scrollbar_drag(ui, &response, bar_rect, axis, state, &geometry);
     }
 
-    paint_scrollbar(
-        ui,
-        axis,
-        bar_rect,
-        geometry.thumb_rect,
-        &response,
-        leading_response.as_ref(),
-        trailing_response.as_ref(),
-        rects,
-    );
+    paint_scrollbar(ui, axis, bar_rect, geometry.thumb_rect, &response);
 }
 
 fn paint_scrollbar(
@@ -296,74 +211,44 @@ fn paint_scrollbar(
     bar_rect: Rect,
     thumb_rect: Rect,
     response: &egui::Response,
-    leading_response: Option<&egui::Response>,
-    trailing_response: Option<&egui::Response>,
-    rects: ScrollbarTrackRects,
 ) {
     let visuals = ui.visuals();
-    let track_color = visuals.extreme_bg_color.linear_multiply(0.5);
-    let thumb_color = if response.hovered() || response.dragged() {
-        visuals.widgets.hovered.bg_fill
+    let interactive = response.hovered() || response.dragged();
+    let widget_visuals = if response.is_pointer_button_down_on() {
+        &visuals.widgets.active
+    } else if interactive {
+        &visuals.widgets.hovered
     } else {
-        visuals.widgets.inactive.bg_fill
+        &visuals.widgets.inactive
     };
-    ui.painter()
-        .add(Shape::rect_filled(bar_rect, 0.0, track_color));
-    if let (Some(rect), Some(response)) = (rects.leading_button, leading_response) {
-        paint_scrollbar_button(ui, axis, rect, -1.0, response);
-    }
-    if let (Some(rect), Some(response)) = (rects.trailing_button, trailing_response) {
-        paint_scrollbar_button(ui, axis, rect, 1.0, response);
-    }
-    ui.painter()
-        .add(Shape::rect_filled(thumb_rect, 2.0, thumb_color));
-}
-
-fn paint_scrollbar_button(
-    ui: &Ui,
-    axis: ScrollbarAxis,
-    rect: Rect,
-    direction: f32,
-    response: &egui::Response,
-) {
-    let visuals = ui.visuals();
-    let fill = if response.is_pointer_button_down_on() {
-        visuals.widgets.active.bg_fill
-    } else if response.hovered() {
-        visuals.widgets.hovered.bg_fill
+    let track_color = visuals.extreme_bg_color.gamma_multiply(if interactive {
+        SCROLLBAR_ACTIVE_BACKGROUND_OPACITY
     } else {
-        visuals.extreme_bg_color.linear_multiply(0.55)
+        0.0
+    });
+    let thumb_color = widget_visuals
+        .fg_stroke
+        .color
+        .gamma_multiply(if interactive {
+            1.0
+        } else {
+            SCROLLBAR_DORMANT_HANDLE_OPACITY
+        });
+    let visual_thumb_rect = if interactive {
+        thumb_rect
+    } else {
+        axis.thin_thumb_rect(thumb_rect, SCROLLBAR_DORMANT_THICKNESS)
     };
-    ui.painter().add(Shape::rect_filled(rect, 0.0, fill));
 
-    let center = rect.center();
-    let size = (axis.extent(rect) * 0.28).clamp(3.0, 5.0);
-    let points = match (axis, direction.is_sign_negative()) {
-        (ScrollbarAxis::Y, true) => [
-            pos2(center.x, center.y - size),
-            pos2(center.x - size, center.y + size * 0.6),
-            pos2(center.x + size, center.y + size * 0.6),
-        ],
-        (ScrollbarAxis::Y, false) => [
-            pos2(center.x, center.y + size),
-            pos2(center.x - size, center.y - size * 0.6),
-            pos2(center.x + size, center.y - size * 0.6),
-        ],
-        (ScrollbarAxis::X, true) => [
-            pos2(center.x - size, center.y),
-            pos2(center.x + size * 0.6, center.y - size),
-            pos2(center.x + size * 0.6, center.y + size),
-        ],
-        (ScrollbarAxis::X, false) => [
-            pos2(center.x + size, center.y),
-            pos2(center.x - size * 0.6, center.y - size),
-            pos2(center.x - size * 0.6, center.y + size),
-        ],
-    };
-    ui.painter().add(Shape::convex_polygon(
-        points.to_vec(),
-        visuals.widgets.inactive.fg_stroke.color,
-        Stroke::NONE,
+    ui.painter().add(Shape::rect_filled(
+        bar_rect,
+        widget_visuals.corner_radius,
+        track_color,
+    ));
+    ui.painter().add(Shape::rect_filled(
+        visual_thumb_rect,
+        widget_visuals.corner_radius,
+        thumb_color,
     ));
 }
 
@@ -428,46 +313,6 @@ fn handle_scrollbar_drag(
     } else {
         state.scrollbar_drag[geometry.axis_index] = None;
     }
-}
-
-fn handle_scrollbar_step_button(
-    ui: &Ui,
-    id: Id,
-    rect: Option<Rect>,
-    direction: f32,
-    state: &mut ScrollState,
-    geometry: &ScrollbarGeometry,
-) -> Option<egui::Response> {
-    let rect = rect?;
-    let response = widget_ids::interact(ui, rect, id, Sense::click(), "scrollbar_button");
-    if !response.is_pointer_button_down_on() {
-        return Some(response);
-    }
-
-    let (now, dt) = ui.input(|input| (input.time, input.stable_dt.clamp(1.0 / 120.0, 0.05)));
-    let base_delta = scrollbar_button_base_delta(state, geometry.axis_index, dt) * direction;
-    let delta = accelerated_scroll_delta(
-        &mut state.scrollbar_button_acceleration[geometry.axis_index],
-        now,
-        base_delta,
-        SCROLLBAR_BUTTON_ACCELERATION_CONFIG,
-    );
-    let previous = state.offset[geometry.axis_index];
-    state.offset[geometry.axis_index] =
-        (state.offset[geometry.axis_index] + delta).clamp(0.0, geometry.max_offset);
-    if (state.offset[geometry.axis_index] - previous).abs() > f32::EPSILON {
-        state.user_scrolled = true;
-        ui.ctx().request_repaint();
-    }
-
-    Some(response)
-}
-
-fn scrollbar_button_base_delta(state: &ScrollState, axis_index: usize, dt: f32) -> f32 {
-    (state.viewport_size[axis_index] * SCROLLBAR_BUTTON_BASE_VIEWPORTS_PER_SECOND).clamp(
-        SCROLLBAR_BUTTON_MIN_PIXELS_PER_SECOND,
-        SCROLLBAR_BUTTON_MAX_PIXELS_PER_SECOND,
-    ) * dt
 }
 
 fn start_scrollbar_drag(

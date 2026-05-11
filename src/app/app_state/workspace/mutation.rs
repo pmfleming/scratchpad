@@ -1,4 +1,4 @@
-use super::super::ScratchpadApp;
+use super::super::{ScratchpadApp, StatusDomain};
 use crate::app::domain::{BufferId, CursorRevealMode};
 use crate::app::text_history::{TextHistoryEntryView, entries_for_buffer};
 
@@ -52,7 +52,7 @@ impl ScratchpadApp {
         if cleared {
             self.text_history_cache = Default::default();
             self.mark_session_dirty();
-            self.set_info_status("Cleared text history.");
+            self.set_info_status_in_domain(StatusDomain::History, "Cleared text history.");
         }
         cleared
     }
@@ -63,7 +63,7 @@ impl ScratchpadApp {
         let latest_edit = tab.buffer.document().latest_operation_record().cloned();
         tab.buffer
             .refresh_text_metadata_after_operation(latest_edit.as_ref());
-        tab.buffer.is_dirty = true;
+        tab.buffer.mark_dirty_after_local_edit();
         let warning_message = tab
             .buffer
             .artifact_summary
@@ -72,7 +72,7 @@ impl ScratchpadApp {
         let _ = tab;
 
         if let Some(message) = warning_message {
-            self.set_warning_status(message);
+            self.set_warning_status_in_domain(StatusDomain::Encoding, message);
         } else {
             self.clear_status_message();
         }
@@ -128,7 +128,10 @@ impl ScratchpadApp {
         {
             Some(target) => target,
             None => {
-                self.set_error_status("Text history entry is no longer available.".to_owned());
+                self.set_error_status_in_domain(
+                    StatusDomain::History,
+                    "Text history entry is no longer available.",
+                );
                 return false;
             }
         };
@@ -148,15 +151,24 @@ impl ScratchpadApp {
             .into_iter()
             .find(|entry| entry.buffer_id == buffer_id && entry.id == entry_id)
         else {
-            self.set_error_status("Text history entry is no longer available.".to_owned());
+            self.set_error_status_in_domain(
+                StatusDomain::History,
+                "Text history entry is no longer available.",
+            );
             return false;
         };
         if undo && action.undone || !undo && !action.undone || !action.replayable {
-            self.set_error_status("Text history entry is not replayable in that direction.");
+            self.set_error_status_in_domain(
+                StatusDomain::History,
+                "Text history entry is not replayable in that direction.",
+            );
             return false;
         }
         let Some(tab_index) = self.tab_index_for_buffer(action.buffer_id) else {
-            self.set_error_status("Text history entry belongs to a closed file.".to_owned());
+            self.set_error_status_in_domain(
+                StatusDomain::History,
+                "Text history entry belongs to a closed file.",
+            );
             return false;
         };
 
@@ -172,12 +184,13 @@ impl ScratchpadApp {
             };
             match result {
                 Ok(selection) => {
-                    buffer.is_dirty = true;
+                    buffer.mark_dirty_after_local_edit();
                     selection
                 }
                 Err(_) => {
-                    self.set_error_status(
-                        "Text history entry conflicts with the current file contents.".to_owned(),
+                    self.set_error_status_in_domain(
+                        StatusDomain::History,
+                        "Text history entry conflicts with the current file contents.",
                     );
                     return false;
                 }

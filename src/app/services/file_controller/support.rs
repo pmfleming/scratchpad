@@ -1,5 +1,5 @@
 use super::FileController;
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{ScratchpadApp, StatusDomain};
 use crate::app::domain::BufferState;
 use std::path::{Path, PathBuf};
 
@@ -68,7 +68,7 @@ impl FileController {
         if let Some(paths) = rfd::FileDialog::new().pick_files() {
             open_action(app, paths);
         } else {
-            app.set_info_status(format!("{action_name} cancelled."));
+            app.set_info_status_in_domain(StatusDomain::File, format!("{action_name} cancelled."));
         }
     }
 
@@ -93,8 +93,10 @@ impl FileController {
         _log_message: String,
     ) {
         match status_message {
-            Some(message) if should_warn => app.set_warning_status(message),
-            Some(message) => app.set_info_status(message),
+            Some(message) if should_warn => {
+                app.set_warning_status_in_domain(StatusDomain::File, message)
+            }
+            Some(message) => app.set_info_status_in_domain(StatusDomain::File, message),
             None => app.clear_status_message(),
         }
     }

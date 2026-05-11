@@ -42,7 +42,7 @@ impl SaveConflictDialogState {
                 "File Changed on Disk",
                 format!("{path_label} changed on disk."),
             ),
-            BufferFreshness::InSync => return None,
+            BufferFreshness::InSync | BufferFreshness::AutoReloaded => return None,
         };
 
         Some(Self {

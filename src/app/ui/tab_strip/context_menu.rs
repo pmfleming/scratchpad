@@ -1,4 +1,4 @@
-use crate::app::app_state::{PendingTabContextMenu, ScratchpadApp};
+use crate::app::app_state::{PendingTabContextMenu, ScratchpadApp, StatusDomain};
 use crate::app::commands::AppCommand;
 use crate::app::services::settings_store::{TabListPosition, TabOrderMode};
 use crate::app::ui::widget_ids;
@@ -257,7 +257,11 @@ fn render_location_actions(
         if let Some(path) = path
             && let Err(error) = reveal_in_explorer(path)
         {
-            app.set_warning_status(format!("Reveal in Explorer failed: {error}"));
+            app.set_warning_status_with_detail(
+                StatusDomain::File,
+                "Could not reveal this file in Explorer.",
+                error.to_string(),
+            );
         }
         ui.close();
     }

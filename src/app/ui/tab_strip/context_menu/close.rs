@@ -1,4 +1,4 @@
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{ScratchpadApp, StatusDomain};
 use crate::app::commands::AppCommand;
 
 #[derive(Clone, Copy)]
@@ -71,9 +71,11 @@ fn close_display_slots(
     }
 
     if skipped_dirty > 0 {
-        app.set_warning_status(format!(
-            "{action_name} skipped {skipped_dirty} tab(s) with unsaved changes."
-        ));
+        let tab_label = if skipped_dirty == 1 { "tab" } else { "tabs" };
+        app.set_warning_status_in_domain(
+            StatusDomain::File,
+            format!("{action_name} skipped {skipped_dirty} {tab_label} with unsaved changes."),
+        );
     }
 }
 

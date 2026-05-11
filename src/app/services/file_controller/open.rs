@@ -1,6 +1,8 @@
 use super::FileController;
 use super::support::LoadedFile;
-use crate::app::app_state::{PendingBackgroundAction, PendingOpenTabsAction, ScratchpadApp};
+use crate::app::app_state::{
+    PendingBackgroundAction, PendingOpenTabsAction, ScratchpadApp, StatusDomain,
+};
 use crate::app::commands::AppCommand;
 use crate::app::diagnostics;
 use crate::app::domain::WorkspaceTab;
@@ -118,10 +120,14 @@ impl FileController {
         }
 
         if target_index >= app.tabs().len() {
-            app.set_error_status(format!(
-                "Startup /addto:index:{} target does not exist.",
-                target_index + 1
-            ));
+            app.set_error_status_with_detail(
+                StatusDomain::Session,
+                "Could not add startup files to that tab.",
+                format!(
+                    "Startup /addto:index:{} target does not exist.",
+                    target_index + 1
+                ),
+            );
             return;
         }
 
@@ -141,10 +147,14 @@ impl FileController {
         }
 
         if target_index >= app.tabs().len() {
-            app.set_error_status(format!(
-                "Startup /addto:index:{} target does not exist.",
-                target_index + 1
-            ));
+            app.set_error_status_with_detail(
+                StatusDomain::Session,
+                "Could not add startup files to that tab.",
+                format!(
+                    "Startup /addto:index:{} target does not exist.",
+                    target_index + 1
+                ),
+            );
             return;
         }
 

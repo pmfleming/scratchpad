@@ -2538,8 +2538,10 @@ tr:hover td {
     position: absolute;
     z-index: 5;
     display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
     width: min(420px, calc(100% - 24px));
     max-height: min(360px, 68vh);
+    overflow: hidden;
     gap: 10px;
     padding: 12px;
     border: 1px solid rgba(219, 234, 254, 0.28);
@@ -2583,6 +2585,9 @@ tr:hover td {
 }
 
 .performance-bin-popover__header strong {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     color: var(--text);
     font-size: 13px;
 }
@@ -2598,8 +2603,10 @@ tr:hover td {
 .performance-bin-popover__list {
     display: grid;
     gap: 1px;
+    min-height: 0;
     overflow: auto;
     padding-right: 2px;
+    overscroll-behavior: contain;
 }
 
 .performance-bin-popover__list p {
@@ -2655,6 +2662,29 @@ tr:hover td {
     border-radius: 999px;
     background: var(--promise-color, var(--accent));
     box-shadow: 0 0 0 2px rgba(16, 21, 28, 0.95), 0 0 0 3px rgba(255, 255, 255, 0.18);
+}
+
+.performance-bin-row__category {
+    width: 11px;
+    height: 11px;
+    border-radius: 999px;
+    box-shadow: 0 0 0 2px rgba(16, 21, 28, 0.95), 0 0 0 3px rgba(255, 255, 255, 0.18);
+}
+
+.performance-bin-row__category--good {
+    background: var(--good);
+}
+
+.performance-bin-row__category--warn {
+    background: var(--warn);
+}
+
+.performance-bin-row__category--bad {
+    background: var(--bad);
+}
+
+.performance-bin-row__category--mixed {
+    background: linear-gradient(135deg, var(--good) 0 32%, var(--warn) 32% 66%, var(--bad) 66% 100%);
 }
 
 .risk-curve__line {

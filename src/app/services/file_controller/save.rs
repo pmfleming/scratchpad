@@ -1,7 +1,7 @@
 use super::FileController;
 use crate::app::app_state::{
     PendingBackgroundAction, PendingReloadBufferAction, PendingReloadMode,
-    PendingReopenWithEncodingAction, ScratchpadApp,
+    PendingReopenWithEncodingAction, ScratchpadApp, StatusDomain,
 };
 use crate::app::diagnostics;
 use crate::app::domain::{
@@ -63,7 +63,11 @@ impl FileController {
                     &error,
                     [("encoding", encoding_name.to_owned())],
                 );
-                app.set_error_status(format!("Save with encoding failed: {error}"));
+                app.set_error_status_with_detail(
+                    StatusDomain::Encoding,
+                    "Could not save this file with that encoding.",
+                    error.to_string(),
+                );
                 return false;
             }
         };
@@ -86,6 +90,17 @@ impl FileController {
     pub(crate) fn refresh_active_buffer_disk_state(app: &mut ScratchpadApp) -> bool {
         let index = app.active_tab_index();
         Self::refresh_buffer_disk_state(app, index)
+    }
+
+    pub(crate) fn refresh_buffer_disk_state_by_id(
+        app: &mut ScratchpadApp,
+        buffer_id: BufferId,
+    ) -> bool {
+        let Some((index, path)) = Self::find_buffer_location(app, buffer_id) else {
+            return false;
+        };
+
+        Self::refresh_buffer_disk_state_for_path(app, index, buffer_id, path)
     }
 
     pub(crate) fn reload_buffer_from_disk(app: &mut ScratchpadApp, index: usize) -> bool {
@@ -124,14 +139,18 @@ impl FileController {
         }
 
         if app.tabs()[index].active_buffer().is_dirty {
-            app.set_warning_status(
+            app.set_warning_status_in_domain(
+                StatusDomain::Encoding,
                 "Save or discard changes before reopening with a different encoding.",
             );
             return false;
         }
 
         let Some(path) = Self::buffer_path(app, index) else {
-            app.set_warning_status("Reopen With Encoding is available only for files on disk.");
+            app.set_warning_status_in_domain(
+                StatusDomain::Encoding,
+                "Save this file before reopening it with another encoding.",
+            );
             return false;
         };
 
@@ -172,11 +191,23 @@ impl FileController {
         let Some(path) = Self::buffer_path(app, index) else {
             return false;
         };
+        let buffer_id = app.tabs()[index].active_buffer().id;
 
+        Self::refresh_buffer_disk_state_for_path(app, index, buffer_id, path)
+    }
+
+    fn refresh_buffer_disk_state_for_path(
+        app: &mut ScratchpadApp,
+        index: usize,
+        buffer_id: BufferId,
+        path: PathBuf,
+    ) -> bool {
         match FileService::read_disk_state(&path) {
-            Ok(disk_state) => Self::handle_refreshed_disk_state(app, index, path, disk_state),
+            Ok(disk_state) => {
+                Self::handle_refreshed_disk_state(app, index, buffer_id, path, disk_state)
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Self::mark_buffer_missing_on_disk(app, index)
+                Self::mark_buffer_missing_on_disk(app, index, buffer_id)
             }
             Err(error) => {
                 diagnostics::record_io_error(
@@ -217,7 +248,7 @@ impl FileController {
                 view_id: app.tabs()[index].active_view_id,
             }));
             if let Some(message) = status_message {
-                app.set_warning_status(message);
+                app.set_warning_status_in_domain(StatusDomain::Disk, message);
             }
             return false;
         }
@@ -239,7 +270,7 @@ impl FileController {
         {
             Self::save_buffer_to_path(app, index, path, true, format_override)
         } else {
-            app.set_info_status("Save cancelled.");
+            app.set_info_status_in_domain(StatusDomain::File, "Save cancelled.");
             false
         }
     }
@@ -251,25 +282,35 @@ impl FileController {
     fn sync_buffer_disk_state(
         app: &mut ScratchpadApp,
         index: usize,
+        buffer_id: BufferId,
         disk_state: Option<DiskFileState>,
     ) {
-        let buffer = app.tabs_mut()[index].active_buffer_mut();
+        let buffer = app.tabs_mut()[index]
+            .buffer_by_id_mut(buffer_id)
+            .expect("buffer location validated");
         buffer.sync_to_disk_state(disk_state);
     }
 
     fn replace_buffer_from_loaded_buffer(
         app: &mut ScratchpadApp,
         index: usize,
+        buffer_id: BufferId,
         loaded: crate::app::domain::BufferState,
         disk_state: Option<DiskFileState>,
+        mark_auto_reloaded: bool,
     ) -> String {
-        let buffer_id = app.tabs()[index].active_buffer().id;
         app.tabs_mut()[index].clear_view_state_for_buffer_replacement(buffer_id);
         let (buffer_name, deferred_refresh) = {
-            let buffer = app.tabs_mut()[index].active_buffer_mut();
+            let buffer = app.tabs_mut()[index]
+                .buffer_by_id_mut(buffer_id)
+                .expect("buffer location validated");
             buffer.replace_from_loaded_buffer(loaded);
             buffer.is_dirty = false;
-            buffer.sync_to_disk_state(disk_state);
+            if mark_auto_reloaded {
+                buffer.mark_auto_reloaded_from_disk(disk_state);
+            } else {
+                buffer.sync_to_disk_state(disk_state);
+            }
             (buffer.name.clone(), Self::deferred_buffer_refresh(buffer))
         };
         app.mark_search_dirty();
@@ -317,7 +358,7 @@ impl FileController {
                     "file_controller::save",
                     &error,
                 );
-                app.set_error_status(format!("Save failed: {error}"));
+                app.report_save_failed(error);
                 false
             }
         }
@@ -410,10 +451,13 @@ impl FileController {
                 .buffer_by_id_mut(action.buffer_id)
                 .expect("buffer location validated");
             buffer.mark_conflict_on_disk(result.disk_state);
-            app.set_warning_status(format!(
-                "{} changed on disk. Your tab has unsaved edits.",
-                action.buffer_name
-            ));
+            app.set_warning_status_in_domain(
+                StatusDomain::Disk,
+                format!(
+                    "{} changed on disk. Your tab has unsaved edits.",
+                    action.buffer_name
+                ),
+            );
             app.mark_session_dirty();
             return;
         }
@@ -429,16 +473,20 @@ impl FileController {
                 let buffer_name = Self::replace_buffer_from_loaded_buffer(
                     app,
                     tab_index,
+                    action.buffer_id,
                     loaded,
                     result.disk_state,
+                    action.mode == PendingReloadMode::AutoRefreshCleanBuffer,
                 );
                 match action.mode {
-                    PendingReloadMode::AutoRefreshCleanBuffer => app.set_info_status(format!(
-                        "Reloaded {buffer_name} because it changed on disk."
-                    )),
-                    PendingReloadMode::ExplicitReload => {
-                        app.set_info_status(format!("Reloaded {buffer_name} from disk."))
-                    }
+                    PendingReloadMode::AutoRefreshCleanBuffer => app.set_info_status_in_domain(
+                        StatusDomain::Disk,
+                        format!("Reloaded {buffer_name} because it changed on disk."),
+                    ),
+                    PendingReloadMode::ExplicitReload => app.set_info_status_in_domain(
+                        StatusDomain::Disk,
+                        format!("Reloaded {buffer_name} from disk."),
+                    ),
                 }
             }
             Err(error) => {
@@ -480,10 +528,15 @@ impl FileController {
                 let buffer_name = Self::replace_buffer_from_loaded_buffer(
                     app,
                     tab_index,
+                    action.buffer_id,
                     loaded,
                     result.disk_state,
+                    false,
                 );
-                app.set_info_status(format!("Reopened {buffer_name} with {encoding_label}."));
+                app.set_info_status_in_domain(
+                    StatusDomain::Encoding,
+                    format!("Reopened {buffer_name} with {encoding_label}."),
+                );
             }
             Err(error) => {
                 diagnostics::record_io_error(
@@ -492,10 +545,14 @@ impl FileController {
                     "file_controller::save",
                     &error,
                 );
-                app.set_error_status(format!(
-                    "Reopen with encoding failed for {}: {error}",
-                    action.buffer_name
-                ));
+                app.set_error_status_with_detail(
+                    StatusDomain::Encoding,
+                    format!(
+                        "Could not reopen {} with that encoding.",
+                        action.buffer_name
+                    ),
+                    error,
+                );
             }
         }
     }
@@ -511,30 +568,42 @@ impl FileController {
     fn handle_refreshed_disk_state(
         app: &mut ScratchpadApp,
         index: usize,
+        buffer_id: BufferId,
         path: PathBuf,
         disk_state: DiskFileState,
     ) -> bool {
-        let (buffer_id, is_dirty, known_disk_state, buffer_name) = {
-            let buffer = app.tabs()[index].active_buffer();
+        let (buffer_id, is_dirty, known_disk_state, freshness, buffer_name) = {
+            let Some(buffer) = app.tabs()[index].buffer_by_id(buffer_id) else {
+                return false;
+            };
             (
                 buffer.id,
                 buffer.is_dirty,
                 buffer.disk_state.clone(),
+                buffer.freshness,
                 buffer.name.clone(),
             )
         };
 
         if known_disk_state.as_ref() == Some(&disk_state) || known_disk_state.is_none() {
-            Self::sync_buffer_disk_state(app, index, Some(disk_state));
+            if freshness == BufferFreshness::AutoReloaded {
+                return false;
+            }
+            Self::sync_buffer_disk_state(app, index, buffer_id, Some(disk_state));
             return false;
         }
         if is_dirty {
-            let buffer = app.tabs_mut()[index].active_buffer_mut();
+            let buffer = app.tabs_mut()[index]
+                .buffer_by_id_mut(buffer_id)
+                .expect("buffer location validated");
             buffer.mark_conflict_on_disk(Some(disk_state));
-            app.set_warning_status(format!(
-                "{} changed on disk. Your tab has unsaved edits.",
-                buffer_name
-            ));
+            app.set_warning_status_in_domain(
+                StatusDomain::Disk,
+                format!(
+                    "{} changed on disk. Your tab has unsaved edits.",
+                    buffer_name
+                ),
+            );
             app.mark_session_dirty();
             return true;
         }
@@ -555,12 +624,26 @@ impl FileController {
         true
     }
 
-    fn mark_buffer_missing_on_disk(app: &mut ScratchpadApp, index: usize) -> bool {
-        let buffer_name = app.tabs()[index].active_buffer().name.clone();
-        let buffer = app.tabs_mut()[index].active_buffer_mut();
+    fn mark_buffer_missing_on_disk(
+        app: &mut ScratchpadApp,
+        index: usize,
+        buffer_id: BufferId,
+    ) -> bool {
+        let Some(buffer_name) = app.tabs()[index]
+            .buffer_by_id(buffer_id)
+            .map(|buffer| buffer.name.clone())
+        else {
+            return false;
+        };
+        let buffer = app.tabs_mut()[index]
+            .buffer_by_id_mut(buffer_id)
+            .expect("buffer location validated");
         buffer.disk_state = None;
         buffer.mark_missing_on_disk();
-        app.set_warning_status(format!("{buffer_name} is missing on disk."));
+        app.set_warning_status_in_domain(
+            StatusDomain::Disk,
+            format!("{buffer_name} is missing on disk."),
+        );
         app.mark_session_dirty();
         true
     }
@@ -589,14 +672,18 @@ impl FileController {
                     .buffer_by_id_mut(action.buffer_id)
                     .expect("buffer location validated");
                 buffer.mark_stale_on_disk(disk_state);
-                app.set_warning_status(format!(
-                    "Detected a newer on-disk version of {} but could not reload it: {error}",
-                    action.buffer_name
-                ));
+                app.set_warning_status_with_detail(
+                    StatusDomain::Disk,
+                    format!(
+                        "Detected a newer on-disk version of {} but could not reload it.",
+                        action.buffer_name
+                    ),
+                    error,
+                );
                 app.mark_session_dirty();
             }
             PendingReloadMode::ExplicitReload => {
-                app.set_error_status(format!("Reload failed: {error}"));
+                app.report_reload_failed(error);
             }
         }
     }

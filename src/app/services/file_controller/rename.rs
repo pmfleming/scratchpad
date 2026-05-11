@@ -1,5 +1,5 @@
 use super::FileController;
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{ScratchpadApp, StatusDomain};
 use crate::app::diagnostics;
 use crate::app::domain::BufferFreshness;
 use crate::app::services::file_service::FileService;
@@ -21,7 +21,11 @@ impl FileController {
                     "file_controller::rename",
                     error.to_string(),
                 );
-                app.set_warning_status(format!("Rename failed: {error}"));
+                app.set_warning_status_with_detail(
+                    StatusDomain::File,
+                    "Could not rename this file.",
+                    error.to_string(),
+                );
                 return false;
             }
         };
@@ -42,7 +46,10 @@ impl FileController {
         }
 
         if is_settings_file {
-            app.set_warning_status("Rename is unavailable for the settings file.");
+            app.set_warning_status_in_domain(
+                StatusDomain::Settings,
+                "Rename is unavailable for the settings file.",
+            );
             return false;
         }
 
@@ -60,7 +67,7 @@ impl FileController {
                 .unwrap_or_else(|| {
                     "Resolve the on-disk state before renaming this file.".to_owned()
                 });
-            app.set_warning_status(message);
+            app.set_warning_status_in_domain(StatusDomain::Disk, message);
             return false;
         }
 
@@ -74,7 +81,11 @@ impl FileController {
                         "file_controller::rename",
                         &error,
                     );
-                    app.set_error_status(format!("Rename failed: {error}"));
+                    app.set_error_status_with_detail(
+                        StatusDomain::File,
+                        "Could not rename this file.",
+                        error.to_string(),
+                    );
                     return false;
                 }
             },
@@ -93,7 +104,11 @@ impl FileController {
                 &error,
                 [("target_path", target_path.display().to_string())],
             );
-            app.set_error_status(format!("Rename failed: {error}"));
+            app.set_error_status_with_detail(
+                StatusDomain::File,
+                "Could not rename this file.",
+                error.to_string(),
+            );
             return false;
         }
 
@@ -109,7 +124,10 @@ impl FileController {
             }
         }
 
-        app.set_info_status(format!("Renamed {current_name} to {normalized_name}."));
+        app.set_info_status_in_domain(
+            StatusDomain::File,
+            format!("Renamed {current_name} to {normalized_name}."),
+        );
         app.mark_session_dirty();
         app.apply_current_tab_ordering();
         let _ = app.persist_session_now();

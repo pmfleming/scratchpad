@@ -15,7 +15,7 @@ use crate::app::ui::{callout, settings, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{CLOCK_COUNTER_CLOCKWISE, CROSSHAIR, FILES, TRASH};
 
-const TEXT_HISTORY_SIZE: egui::Vec2 = egui::vec2(
+pub(super) const TEXT_HISTORY_SIZE: egui::Vec2 = egui::vec2(
     crate::app::ui::search_replace::SEARCH_DIALOG_WIDTH - 20.0,
     520.0,
 );

@@ -1,4 +1,4 @@
-use super::super::ScratchpadApp;
+use super::super::{ScratchpadApp, StatusDomain};
 use crate::app::domain::CursorRevealMode;
 use crate::app::ui::editor_content::native_editor::{
     CharCursor, CursorRange, cut_selected_text, delete_selected_text, select_all_cursor,
@@ -200,9 +200,10 @@ impl ScratchpadApp {
         self.refresh_search_state();
         self.select_next_active_buffer_match_from(selection.primary.index);
         let action = if undo { "Undid" } else { "Redid" };
-        self.set_info_status(format!(
-            "{action} last text operation in {active_buffer_label}."
-        ));
+        self.set_info_status_in_domain(
+            StatusDomain::History,
+            format!("{action} last text operation in {active_buffer_label}."),
+        );
         true
     }
 }

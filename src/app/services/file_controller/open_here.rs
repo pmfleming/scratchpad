@@ -1,6 +1,8 @@
 use super::FileController;
 use super::support::{DeferredBufferRefresh, LoadedFile};
-use crate::app::app_state::{PendingBackgroundAction, PendingOpenHereAction, ScratchpadApp};
+use crate::app::app_state::{
+    PendingBackgroundAction, PendingOpenHereAction, ScratchpadApp, StatusDomain,
+};
 use crate::app::commands::AppCommand;
 use crate::app::diagnostics;
 use crate::app::domain::{SplitAxis, ViewId, WorkspaceTab};
@@ -289,7 +291,10 @@ impl FileController {
         {
             true
         } else {
-            app.set_error_status("Open Here failed to create a balanced tile layout.");
+            app.set_error_status_in_domain(
+                StatusDomain::Layout,
+                "Could not add those files to this tab layout.",
+            );
             false
         }
     }
@@ -312,7 +317,10 @@ impl FileController {
         if opened {
             true
         } else {
-            app.set_error_status("Open Here failed to create a new tile layout.");
+            app.set_error_status_in_domain(
+                StatusDomain::Layout,
+                "Could not add those files to this tab layout.",
+            );
             false
         }
     }

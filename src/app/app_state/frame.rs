@@ -39,6 +39,7 @@ impl ScratchpadApp {
             self.overflow_popup_open = false;
         }
         self.tab_manager.evict_inactive_tab_state();
+        self.poll_file_watcher(ctx);
         self.poll_background_io(ctx);
         self.apply_theme_to_context(ctx);
         crate::app::ui::widget_ids::configure_debug_options(ctx);
@@ -64,6 +65,7 @@ impl ScratchpadApp {
         dialogs::show_pending_action_modal(ctx, self);
         dialogs::show_encoding_window(ctx, self);
         dialogs::show_text_history_window(ctx, self);
+        dialogs::show_status_history_window(ctx, self);
         shortcuts::handle_shortcuts(self, ctx);
         self.show_window_after_first_frame(ctx);
         self.finish_frame_transitions(ctx);
@@ -116,11 +118,11 @@ impl ScratchpadApp {
         self.window_shown_after_first_frame = true;
     }
 
-    fn persist_with_error_status(&mut self, error_prefix: &str) -> bool {
+    fn persist_with_error_status(&mut self) -> bool {
         match self.persist_session_now() {
             Ok(()) => true,
             Err(error) => {
-                self.set_error_status(format!("{error_prefix}: {error}"));
+                self.report_session_save_failed(error);
                 false
             }
         }
@@ -141,6 +143,7 @@ impl ScratchpadApp {
     fn modal_callout_open(&self) -> bool {
         self.encoding_dialog_open
             || self.text_history_open
+            || self.status_history_open
             || self.pending_action().is_some()
             || self.current_startup_restore_conflict().is_some()
     }
@@ -180,21 +183,21 @@ impl ScratchpadApp {
         }
 
         self.record_window_state(ctx);
-        if !self.persist_settings_with_error_status("Settings save failed") {
+        if !self.persist_settings_with_error_status() {
             return;
         }
 
-        if self.persist_with_error_status("Session save failed") {
+        if self.persist_with_error_status() {
             self.close_in_progress = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
 
-    fn persist_settings_with_error_status(&mut self, error_prefix: &str) -> bool {
+    fn persist_settings_with_error_status(&mut self) -> bool {
         match self.persist_settings_now() {
             Ok(()) => true,
             Err(error) => {
-                self.set_error_status(format!("{error_prefix}: {error}"));
+                self.report_settings_save_failed(error);
                 false
             }
         }
@@ -214,12 +217,7 @@ impl ScratchpadApp {
             .active_tab_index
             .min(self.tab_manager.tabs.len() - 1);
         let tab = &self.tab_manager.tabs[index];
-        let marker = if tab.active_buffer().is_dirty {
-            "*"
-        } else {
-            ""
-        };
-        format!("{}{} - Scratchpad", marker, tab.active_buffer().name)
+        format!("{} - Scratchpad", tab.active_buffer().name)
     }
 
     fn sync_editor_fonts(&mut self, ctx: &egui::Context) {
@@ -237,10 +235,14 @@ impl ScratchpadApp {
                     self.app_settings.editor_font.label()
                 ),
             );
-            self.set_warning_status(format!(
-                "Editor font '{}' unavailable; using default fallback: {error}",
-                self.app_settings.editor_font.label()
-            ));
+            self.set_warning_status_with_detail(
+                crate::app::app_state::StatusDomain::Settings,
+                format!(
+                    "Could not use editor font '{}'. The default font is in use.",
+                    self.app_settings.editor_font.label()
+                ),
+                error.to_string(),
+            );
         }
         self.clear_editor_layout_caches();
         self.applied_editor_font = Some(self.app_settings.editor_font);

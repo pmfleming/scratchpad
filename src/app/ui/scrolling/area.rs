@@ -53,7 +53,7 @@ impl ScrollArea {
             scrollbar_x: ScrollbarPolicy::VisibleWhenNeeded,
             scrollbar_y: ScrollbarPolicy::VisibleWhenNeeded,
             eof_overscroll: true,
-            scrollbar_thickness: 8.0,
+            scrollbar_thickness: 7.0,
             min_content_size: Vec2::ZERO,
             max_size: None,
         }

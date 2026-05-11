@@ -73,7 +73,15 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn clear_status_message(&mut self) {
-        self.status_message = None;
+        self.current_status = None;
+    }
+
+    pub(crate) fn open_status_history(&mut self) {
+        self.status_history_open = true;
+    }
+
+    pub(crate) fn close_status_history(&mut self) {
+        self.status_history_open = false;
     }
 
     pub(crate) fn request_focus_for_view(&mut self, view_id: ViewId) {

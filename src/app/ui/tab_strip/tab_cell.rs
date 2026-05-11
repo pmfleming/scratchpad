@@ -1,4 +1,5 @@
 use crate::app::chrome::{tab_button, tab_rename_editor_sized};
+use crate::app::domain::TabAttentionState;
 use crate::app::ui::tab_drag;
 use crate::app::ui::tab_strip::context_menu::attach_tab_context_menu;
 use crate::app::ui::widget_ids;
@@ -8,6 +9,7 @@ pub(crate) struct TabCellProps<'a> {
     pub display_name: &'a str,
     pub tooltip: Option<String>,
     pub can_promote_all_files: bool,
+    pub attention_state: Option<TabAttentionState>,
     pub is_active: bool,
     pub is_selected: bool,
     pub pending_scroll_to_active: bool,
@@ -46,6 +48,7 @@ pub(crate) fn render_tab_cell_sized(
             props.is_active,
             props.is_selected,
             props.can_promote_all_files,
+            props.attention_state.map(attention_color),
             props.width,
         );
         let tab_response = maybe_attach_tab_tooltip(tab_response, props.tooltip, truncated);
@@ -154,6 +157,7 @@ fn tab_button_with_width(
     is_active: bool,
     is_selected: bool,
     can_promote_all_files: bool,
+    attention_color: Option<egui::Color32>,
     width: f32,
 ) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
     if (width - crate::app::theme::TAB_BUTTON_WIDTH).abs() <= f32::EPSILON {
@@ -164,6 +168,7 @@ fn tab_button_with_width(
             is_active,
             is_selected,
             can_promote_all_files,
+            attention_color,
         )
     } else {
         crate::app::chrome::tab_button_sized_with_actions(
@@ -173,8 +178,17 @@ fn tab_button_with_width(
             is_active,
             is_selected,
             can_promote_all_files,
+            attention_color,
             width,
         )
+    }
+}
+
+fn attention_color(state: TabAttentionState) -> egui::Color32 {
+    match state {
+        TabAttentionState::AutoEdit => egui::Color32::from_rgb(230, 132, 46),
+        TabAttentionState::Dirty => egui::Color32::from_rgb(70, 176, 96),
+        TabAttentionState::DiskProblem => egui::Color32::from_rgb(220, 64, 64),
     }
 }
 
@@ -183,7 +197,7 @@ fn maybe_attach_tab_tooltip(
     tooltip: Option<String>,
     truncated: bool,
 ) -> egui::Response {
-    if truncated {
+    if tooltip.is_some() || truncated {
         tab_response.on_hover_text(tooltip.unwrap_or_default())
     } else {
         tab_response

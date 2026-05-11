@@ -1,4 +1,4 @@
-# Scratchpad Measurement Tools
+# Scratchpad Measurement Tools (2)
 
 As of May 8, 2026, Scratchpad's measurement tool is a local, dashboard-first
 measurement suite. The Python and Rust producers emit JSON artifacts under

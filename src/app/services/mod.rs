@@ -1,6 +1,7 @@
 pub mod background_io;
 pub mod file_controller;
 pub mod file_service;
+pub mod file_watch;
 pub mod manual_files;
 pub mod search;
 pub mod session_manager;

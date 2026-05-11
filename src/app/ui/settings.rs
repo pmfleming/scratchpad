@@ -83,18 +83,28 @@ fn render_page_body(ui: &mut egui::Ui, app: &mut ScratchpadApp, horizontal_overf
 }
 
 fn render_page_heading(ui: &mut egui::Ui) {
-    ui.label(
-        egui::RichText::new("Settings")
-            .size(SettingsUi::TYPOGRAPHY.title)
-            .strong()
-            .color(text_primary(ui)),
-    );
-    ui.add_space(4.0);
-    ui.label(
-        egui::RichText::new("Editor appearance, runtime behavior, and stored configuration.")
-            .size(SettingsUi::TYPOGRAPHY.description)
-            .color(text_muted(ui)),
-    );
+    let heading_width = SettingsUi::card_width(ui);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.add_space(SettingsUi::card_leading_inset(ui));
+        ui.vertical(|ui| {
+            ui.set_width(heading_width);
+            ui.label(
+                egui::RichText::new("Settings")
+                    .size(SettingsUi::TYPOGRAPHY.title)
+                    .strong()
+                    .color(text_primary(ui)),
+            );
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(
+                    "Editor appearance, runtime behavior, and stored configuration.",
+                )
+                .size(SettingsUi::TYPOGRAPHY.description)
+                .color(text_muted(ui)),
+            );
+        });
+    });
 }
 
 fn category_heading(ui: &mut egui::Ui, heading: &str) {

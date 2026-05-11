@@ -77,10 +77,13 @@ impl ScratchpadApp {
                 Ok(settings) => {
                     self.apply_settings(settings);
                     self.applied_editor_font = None;
-                    self.set_info_status("Settings reloaded from settings.toml.");
+                    self.set_info_status_in_domain(
+                        crate::app::app_state::StatusDomain::Settings,
+                        "Settings reloaded from settings.toml.",
+                    );
                 }
                 Err(error) => {
-                    self.set_warning_status(format!("Settings TOML parse failed: {error}"));
+                    self.report_settings_toml_parse_failed(error);
                 }
             },
         }
