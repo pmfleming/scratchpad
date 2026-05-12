@@ -471,6 +471,10 @@ fn read_document_with_encoding(
 fn read_utf8_document_fast_path(path: &Path, has_bom: bool) -> io::Result<Option<LoadedDocument>> {
     const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
 
+    // Keep this as a single full-buffer UTF-8 path until we have a peak-memory
+    // probe that proves a better tradeoff. A direct read_to_string avoids the
+    // byte Vec, but measured slower on 2GB opens; a chunk-fed piece builder was
+    // slower still because it lost the established parallel piece build.
     let bytes = std::fs::read(path)?;
     let bom_len = if has_bom && bytes.starts_with(UTF8_BOM) {
         UTF8_BOM.len()

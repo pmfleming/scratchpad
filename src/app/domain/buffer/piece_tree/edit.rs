@@ -92,6 +92,7 @@ impl PieceTreeLite {
         let old_add = std::mem::take(&mut self.add);
         let mut new_add = String::with_capacity(old_add.len());
         let mut relocated = std::collections::HashMap::<ByteSpan, ByteSpan>::new();
+        let mut provenance_moves = Vec::<(ByteSpan, ByteSpan)>::new();
 
         for node in &mut self.root.nodes {
             for leaf in &mut node.leaves {
@@ -107,6 +108,7 @@ impl PieceTreeLite {
                     let old_span = add_byte_span(old_start, piece.byte_len);
                     let new_span = add_byte_span(new_start, piece.byte_len);
                     relocated.insert(old_span, new_span);
+                    provenance_moves.push((old_span, new_span));
                     piece.start_byte = new_start;
                 }
             }
@@ -116,8 +118,10 @@ impl PieceTreeLite {
             if span.buffer != PieceBuffer::Add || span.byte_len == 0 {
                 continue;
             }
+            let old_span = *span;
             if let Some(new_span) = relocated.get(span) {
                 *span = *new_span;
+                provenance_moves.push((old_span, *new_span));
                 continue;
             }
             let old_start = span.start_byte as usize;
@@ -126,8 +130,10 @@ impl PieceTreeLite {
             let new_start = new_add.len();
             new_add.push_str(text);
             span.start_byte = new_start.min(u32::MAX as usize) as u32;
+            provenance_moves.push((old_span, *span));
         }
 
+        self.provenance.rewrite_add_spans(provenance_moves);
         self.add = new_add;
         self.root.recalculate();
     }
@@ -314,25 +320,48 @@ impl PieceTreeLite {
         end: LeafAddress,
         replacement_leaves: Vec<PieceTreeLeaf>,
     ) {
-        let mut combined_leaves = Vec::new();
-        combined_leaves.extend(
-            self.root.nodes[start.node_index].leaves[..start.leaf_index]
-                .iter()
-                .cloned(),
-        );
-        combined_leaves.extend(replacement_leaves);
-        combined_leaves.extend(
-            self.root.nodes[end.node_index].leaves[end.leaf_index + 1..]
-                .iter()
-                .cloned(),
-        );
+        let combined_leaves = self.take_leaf_replacement_window(start, end, replacement_leaves);
 
         let replacement_nodes = pack_leaves_into_nodes(combined_leaves);
         let inserted_nodes = replacement_nodes.len();
         self.root
-            .nodes
-            .splice(start.node_index..=end.node_index, replacement_nodes);
+            .replace_recalculated_nodes(start.node_index..end.node_index + 1, replacement_nodes);
         self.rebalance_node_window(start.node_index, inserted_nodes);
+        self.rebuild_leaf_index();
+    }
+
+    fn take_leaf_replacement_window(
+        &mut self,
+        start: LeafAddress,
+        end: LeafAddress,
+        replacement_leaves: Vec<PieceTreeLeaf>,
+    ) -> Vec<PieceTreeLeaf> {
+        let kept_prefix = start.leaf_index;
+        let kept_suffix = self.root.nodes[end.node_index]
+            .leaves
+            .len()
+            .saturating_sub(end.leaf_index + 1);
+        let mut combined_leaves =
+            Vec::with_capacity(kept_prefix + replacement_leaves.len() + kept_suffix);
+
+        if start.node_index == end.node_index {
+            let mut leaves = std::mem::take(&mut self.root.nodes[start.node_index].leaves);
+            let suffix = leaves.split_off(end.leaf_index + 1);
+            leaves.truncate(start.leaf_index);
+            combined_leaves.extend(leaves);
+            combined_leaves.extend(replacement_leaves);
+            combined_leaves.extend(suffix);
+            return combined_leaves;
+        }
+
+        let mut prefix = std::mem::take(&mut self.root.nodes[start.node_index].leaves);
+        prefix.truncate(start.leaf_index);
+        combined_leaves.extend(prefix);
+        combined_leaves.extend(replacement_leaves);
+
+        let mut suffix = std::mem::take(&mut self.root.nodes[end.node_index].leaves);
+        combined_leaves.extend(suffix.split_off(end.leaf_index + 1));
+        combined_leaves
     }
 
     fn rebalance_node_window(&mut self, inserted_at: usize, inserted_nodes: usize) {
@@ -341,8 +370,14 @@ impl PieceTreeLite {
             return;
         }
 
-        let mut window_start = inserted_at.saturating_sub(1);
-        let mut window_end = (inserted_at + inserted_nodes + 1).min(self.root.nodes.len());
+        let touched_start = inserted_at.saturating_sub(1);
+        let touched_end = (inserted_at + inserted_nodes + 1).min(self.root.nodes.len());
+        if self.node_window_is_balanced(touched_start..touched_end) {
+            return;
+        }
+
+        let mut window_start = touched_start;
+        let mut window_end = touched_end;
 
         if window_start > 0
             && self.root.nodes[window_start].leaves.len() < super::MIN_LEAVES_PER_INTERNAL
@@ -362,9 +397,18 @@ impl PieceTreeLite {
 
         let rebalanced_nodes = pack_leaves_into_nodes(window_leaves);
         self.root
-            .nodes
-            .splice(window_start..window_end, rebalanced_nodes);
-        self.root.recalculate();
+            .replace_recalculated_nodes(window_start..window_end, rebalanced_nodes);
+    }
+
+    fn node_window_is_balanced(&self, range: Range<usize>) -> bool {
+        if self.root.nodes.len() <= 1 {
+            return true;
+        }
+
+        self.root.nodes[range].iter().all(|node| {
+            (super::MIN_LEAVES_PER_INTERNAL..=super::MAX_LEAVES_PER_INTERNAL)
+                .contains(&node.leaves.len())
+        })
     }
 }
 

@@ -1,4 +1,7 @@
-use super::{AnchorBias, AnchorOwner, AnchorOwnerKind, PieceSource, PieceTreeLite};
+use super::{
+    AnchorBias, AnchorOwner, AnchorOwnerKind, PIECE_PROVENANCE_ENTRY_LIMIT, PieceSource,
+    PieceTreeLite,
+};
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 
@@ -114,6 +117,24 @@ fn line_lookup_handles_lines_spanning_many_leaves() {
 }
 
 #[test]
+fn batched_previews_match_single_preview_on_edited_tree() {
+    let mut tree =
+        PieceTreeLite::from_string("alpha target\nbeta target beta\nfinal target".to_owned());
+    tree.insert(6, "inserted ");
+    tree.insert(31, "wide ");
+    tree.remove_char_range(0..1);
+
+    assert!(tree.borrow_range(0..tree.len_chars()).is_none());
+    let ranges = match_char_ranges(&tree.extract_text(), "target");
+    let expected = ranges
+        .iter()
+        .map(|range| tree.preview_for_match(range))
+        .collect::<Vec<_>>();
+
+    assert_eq!(tree.previews_for_matches(&ranges, ranges.len()), expected);
+}
+
+#[test]
 fn provenance_tracks_insert_source() {
     let mut tree = PieceTreeLite::from_string("ab".to_owned());
 
@@ -140,6 +161,42 @@ fn compact_add_buffer_preserves_visible_text_and_history_spans() {
     assert_eq!(
         tree.provenance_for_span(spans[0]).source,
         PieceSource::SearchReplace
+    );
+}
+
+#[test]
+fn compact_add_buffer_rewrites_provenance_for_relocated_history_spans() {
+    let mut tree = PieceTreeLite::from_string("ab".to_owned());
+    tree.insert_with_source(1, "XX", PieceSource::Paste);
+    let mut spans = vec![tree.append_history_text("history", PieceSource::SearchReplace)];
+
+    tree.remove_char_range(1..3);
+    tree.compact_add_buffer(&mut spans);
+
+    assert_eq!(tree.extract_text(), "ab");
+    assert_eq!(tree.text_for_span(spans[0]), "history");
+    assert_eq!(
+        tree.provenance_for_span(spans[0]).source,
+        PieceSource::SearchReplace
+    );
+    assert_eq!(tree.provenance_entry_count(), 1);
+}
+
+#[test]
+fn provenance_store_caps_cold_entries() {
+    let mut tree = PieceTreeLite::from_string(String::new());
+    let mut spans = Vec::new();
+
+    for _ in 0..PIECE_PROVENANCE_ENTRY_LIMIT + 4 {
+        spans.push(tree.append_history_text("x", PieceSource::Edit));
+    }
+
+    assert_eq!(tree.provenance_entry_count(), PIECE_PROVENANCE_ENTRY_LIMIT);
+    assert_eq!(tree.provenance_for_span(spans[0]).source, PieceSource::Load);
+    assert_eq!(
+        tree.provenance_for_span(*spans.last().expect("latest span"))
+            .source,
+        PieceSource::Edit
     );
 }
 
@@ -193,4 +250,17 @@ fn byte_index_for_char(text: &str, char_offset: usize) -> usize {
         .nth(char_offset)
         .map(|(index, _)| index)
         .unwrap_or(text.len())
+}
+
+fn match_char_ranges(text: &str, needle: &str) -> Vec<std::ops::Range<usize>> {
+    let mut ranges = Vec::new();
+    let mut search_start = 0usize;
+    while let Some(relative_start) = text[search_start..].find(needle) {
+        let start_byte = search_start + relative_start;
+        let start_char = text[..start_byte].chars().count();
+        let char_len = needle.chars().count();
+        ranges.push(start_char..start_char + char_len);
+        search_start = start_byte + needle.len();
+    }
+    ranges
 }

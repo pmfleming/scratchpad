@@ -9,7 +9,7 @@ pub(crate) use coalescing::{CoalescedEdit, coalesced_local_edit_record, entry_se
 use super::piece_tree::{PieceBuffer, PieceTreeLite};
 use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
 use smallvec::SmallVec;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -55,9 +55,33 @@ impl ByteSpan {
     }
 }
 
+pub(crate) const PIECE_PROVENANCE_ENTRY_LIMIT: usize = 16 * 1024;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct PieceProvenanceKey {
+    buffer: PieceBuffer,
+    start_byte: u32,
+}
+
+impl From<ByteSpan> for PieceProvenanceKey {
+    fn from(span: ByteSpan) -> Self {
+        Self {
+            buffer: span.buffer,
+            start_byte: span.start_byte,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PieceProvenanceEntry {
+    byte_len: u32,
+    provenance: PieceProvenance,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct PieceProvenanceStore {
-    sparse: HashMap<ByteSpan, PieceProvenance>,
+    sparse: HashMap<PieceProvenanceKey, PieceProvenanceEntry>,
+    insertion_order: VecDeque<PieceProvenanceKey>,
 }
 
 impl PieceProvenanceStore {
@@ -65,11 +89,57 @@ impl PieceProvenanceStore {
         if provenance.source == PieceSource::Load || span.byte_len == 0 {
             return;
         }
-        self.sparse.insert(span, provenance);
+        let key = PieceProvenanceKey::from(span);
+        if !self.sparse.contains_key(&key) {
+            self.insertion_order.push_back(key);
+        }
+        self.sparse.insert(
+            key,
+            PieceProvenanceEntry {
+                byte_len: span.byte_len,
+                provenance,
+            },
+        );
+        self.evict_over_limit();
     }
 
     pub fn provenance_for(&self, span: ByteSpan) -> PieceProvenance {
-        self.sparse.get(&span).copied().unwrap_or_default()
+        self.sparse
+            .get(&PieceProvenanceKey::from(span))
+            .filter(|entry| entry.byte_len == span.byte_len)
+            .map(|entry| entry.provenance)
+            .unwrap_or_default()
+    }
+
+    pub fn rewrite_add_spans(&mut self, spans: impl IntoIterator<Item = (ByteSpan, ByteSpan)>) {
+        let mut rewritten = Self::default();
+        for (old_span, new_span) in spans {
+            if old_span.buffer != PieceBuffer::Add
+                || new_span.buffer != PieceBuffer::Add
+                || new_span.byte_len == 0
+            {
+                continue;
+            }
+            let provenance = self.provenance_for(old_span);
+            if provenance.source != PieceSource::Load {
+                rewritten.record(new_span, provenance);
+            }
+        }
+        *self = rewritten;
+    }
+
+    fn evict_over_limit(&mut self) {
+        while self.sparse.len() > PIECE_PROVENANCE_ENTRY_LIMIT {
+            let Some(key) = self.insertion_order.pop_front() else {
+                break;
+            };
+            self.sparse.remove(&key);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.sparse.len()
     }
 }
 

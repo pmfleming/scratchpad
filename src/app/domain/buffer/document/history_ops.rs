@@ -119,8 +119,16 @@ impl TextDocument {
 
         self.latest_operation_record = Some(record.clone());
         let old_len = self.history.len();
-        self.history.retain(|entry| !entry.is_undone());
+        let mut removed_bytes = 0usize;
+        self.history.retain(|entry| {
+            let keep = !entry.is_undone();
+            if !keep {
+                removed_bytes += entry.byte_cost();
+            }
+            keep
+        });
         if self.history.len() != old_len {
+            self.history_byte_usage = self.history_byte_usage.saturating_sub(removed_bytes);
             self.latest_history_update_at = None;
         }
         if self.try_coalesce_history(&record, source) {
@@ -130,6 +138,7 @@ impl TextDocument {
         }
 
         let entry = self.history_entry_from_operation(record, source);
+        self.history_byte_usage += entry.byte_cost();
         self.history.push(entry);
         self.revision_counter = self.revision_counter.wrapping_add(1);
         self.enforce_history_budget();
@@ -269,18 +278,13 @@ impl TextDocument {
     }
 
     pub(super) fn enforce_history_budget(&mut self) {
-        let mut bytes = self
-            .history
-            .iter()
-            .map(PieceHistoryEntry::byte_cost)
-            .sum::<usize>();
         let mut evicted = false;
         while self.history.len() > self.history_budget.per_file_entry_limit
-            || bytes as u64 > self.history_budget.per_file_byte_budget
+            || self.history_byte_usage as u64 > self.history_budget.per_file_byte_budget
         {
             let removed = self.history.remove(0);
             let cost = removed.byte_cost();
-            bytes = bytes.saturating_sub(cost);
+            self.history_byte_usage = self.history_byte_usage.saturating_sub(cost);
             capacity_metrics::record_history_eviction_per_file(cost);
             evicted = true;
         }
@@ -423,7 +427,9 @@ impl TextDocument {
                 self.latest_operation_record = Some(merged_record);
             }
             CoalescedEdit::Noop => {
-                self.history.remove(latest_index);
+                let removed = self.history.remove(latest_index);
+                self.history_byte_usage =
+                    self.history_byte_usage.saturating_sub(removed.byte_cost());
                 self.latest_history_update_at = None;
             }
         }
@@ -444,6 +450,7 @@ impl TextDocument {
             .collect::<PieceHistoryEdits>();
         let fingerprint = self.fingerprint_for_history_edits(&edits);
         let visible_generation_after = self.visible_generation();
+        let old_cost = self.history[latest_index].byte_cost();
         let latest = &mut self.history[latest_index];
         latest.edits = edits;
         latest.next_selection = merged_record.next_selection;
@@ -451,6 +458,11 @@ impl TextDocument {
         latest.global_seq = next_text_history_global_seq();
         latest.fingerprint = fingerprint;
         latest.summary = operation_summary(latest.source, merged_record);
+        let new_cost = latest.byte_cost();
+        self.history_byte_usage = self
+            .history_byte_usage
+            .saturating_sub(old_cost)
+            .saturating_add(new_cost);
         self.latest_history_update_at = Some(now);
     }
 

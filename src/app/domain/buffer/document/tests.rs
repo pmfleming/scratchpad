@@ -473,6 +473,42 @@ fn compaction_keeps_retained_history_replayable() {
 }
 
 #[test]
+fn cached_history_byte_usage_tracks_history_mutations() {
+    let mut document = empty_document!();
+    assert_history_byte_usage_consistent(&document);
+
+    insert_sequence!(&mut document, "abc");
+    assert_history_byte_usage_consistent(&document);
+
+    delete_edit(&mut document, 2..3, 3, 2);
+    assert_history_byte_usage_consistent(&document);
+
+    document.undo_last_operation();
+    insert_isolated_edit(&mut document, 0, "z");
+    assert_history_byte_usage_consistent(&document);
+
+    document.set_history_budget(TextHistoryBudget {
+        per_file_entry_limit: 1,
+        per_file_byte_budget: 64 * 1024 * 1024,
+        aggregate_byte_budget: 64 * 1024 * 1024,
+        persisted_payload_budget: 64 * 1024 * 1024,
+        derived_from_memory: false,
+    });
+    assert_history_byte_usage_consistent(&document);
+
+    let exported = document.exported_history();
+    let mut restored = TextDocument::new(document.extract_text());
+    restored.restore_exported_history(exported);
+    assert_history_byte_usage_consistent(&restored);
+
+    restored.drop_oldest_history_entry();
+    assert_history_byte_usage_consistent(&restored);
+
+    restored.clear_operation_history();
+    assert_history_byte_usage_consistent(&restored);
+}
+
+#[test]
 fn backspace_across_hard_dividers_starts_new_entries() {
     let mut document = TextDocument::new("a.b".to_owned());
 
@@ -613,6 +649,15 @@ fn history_record(document: &TextDocument) -> TextDocumentOperationRecord {
 
 fn entry_record(document: &TextDocument, index: usize) -> TextDocumentOperationRecord {
     document.operation_from_history_entry(&document.history_entries()[index])
+}
+
+fn assert_history_byte_usage_consistent(document: &TextDocument) {
+    let expected = document
+        .history
+        .iter()
+        .map(PieceHistoryEntry::byte_cost)
+        .sum::<usize>();
+    assert_eq!(document.history_byte_usage(), expected);
 }
 
 fn cursor(index: usize) -> CursorRange {

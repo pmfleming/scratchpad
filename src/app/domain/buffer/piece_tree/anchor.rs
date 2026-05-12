@@ -185,7 +185,8 @@ impl PieceTreeLite {
                 id,
                 local_offset: safe.saturating_sub(address.leaf_start_char),
             });
-        self.root.recalculate();
+        self.root.nodes[address.node_index].anchor_count += 1;
+        self.root.anchor_count += 1;
         id
     }
 
@@ -194,10 +195,16 @@ impl PieceTreeLite {
             return;
         };
         if let Some((node_index, leaf_index)) = self.find_leaf_indices_by_id(entry.leaf_id) {
+            let before = self.root.nodes[node_index].leaves[leaf_index].anchors.len();
             self.root.nodes[node_index].leaves[leaf_index]
                 .anchors
                 .retain(|anchor| anchor.id != id);
-            self.root.recalculate();
+            let removed =
+                before.saturating_sub(self.root.nodes[node_index].leaves[leaf_index].anchors.len());
+            self.root.nodes[node_index].anchor_count = self.root.nodes[node_index]
+                .anchor_count
+                .saturating_sub(removed);
+            self.root.anchor_count = self.root.anchor_count.saturating_sub(removed);
         }
     }
 
@@ -232,8 +239,9 @@ impl PieceTreeLite {
             for leaf in &mut node.leaves {
                 leaf.anchors.clear();
             }
+            node.anchor_count = 0;
         }
-        self.root.recalculate();
+        self.root.anchor_count = 0;
     }
 
     fn ensure_anchorable_leaf(&mut self) {
@@ -244,14 +252,18 @@ impl PieceTreeLite {
     }
 
     pub(super) fn assign_missing_leaf_ids(&mut self) {
+        let mut assigned = false;
         for node in &mut self.root.nodes {
             for leaf in &mut node.leaves {
                 if leaf.leaf_id.is_unassigned() {
                     leaf.leaf_id = LeafId::next(&mut self.next_leaf_id);
+                    assigned = true;
                 }
             }
         }
-        self.root.recalculate();
+        if assigned || self.leaf_indices_by_id.is_empty() {
+            self.rebuild_leaf_index();
+        }
     }
 
     fn find_leaf_by_id(&self, leaf_id: LeafId) -> Option<(LeafAddress, &PieceTreeLeaf)> {
@@ -262,14 +274,9 @@ impl PieceTreeLite {
     }
 
     fn find_leaf_indices_by_id(&self, leaf_id: LeafId) -> Option<(usize, usize)> {
-        for (node_index, node) in self.root.nodes.iter().enumerate() {
-            for (leaf_index, leaf) in node.leaves.iter().enumerate() {
-                if leaf.leaf_id == leaf_id {
-                    return Some((node_index, leaf_index));
-                }
-            }
-        }
-        None
+        let (node_index, leaf_index) = self.leaf_indices_by_id.get(&leaf_id).copied()?;
+        let leaf = self.root.nodes.get(node_index)?.leaves.get(leaf_index)?;
+        (leaf.leaf_id == leaf_id).then_some((node_index, leaf_index))
     }
 
     pub(super) fn address_for_leaf_indices(

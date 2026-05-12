@@ -331,8 +331,12 @@ pub fn display_line_count(text: &str) -> usize {
 }
 
 pub(crate) fn display_line_count_from_piece_tree(tree: &PieceTreeLite) -> usize {
-    let spans = tree.spans_for_range(0..tree.len_chars());
-    TextInspection::inspect_spans(spans.map(|span| span.text)).line_count
+    let metrics = tree.metrics();
+    if metrics.chars == 0 {
+        return 0;
+    }
+
+    metrics.newlines + usize::from(tree.char_at(metrics.chars - 1) != Some('\n'))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -521,4 +525,32 @@ fn apply_line_ending_delta(
         .checked_sub(deleted_counts.cr)?
         .checked_add(inserted_counts.cr)?;
     Some(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_line_count_from_piece_tree_uses_metrics_and_last_char() {
+        let empty = PieceTreeLite::from_string(String::new());
+        assert_eq!(display_line_count_from_piece_tree(&empty), 0);
+
+        let no_trailing_newline = PieceTreeLite::from_string("one\ntwo".to_owned());
+        assert_eq!(display_line_count_from_piece_tree(&no_trailing_newline), 2);
+
+        let trailing_newline = PieceTreeLite::from_string("one\ntwo\n".to_owned());
+        assert_eq!(display_line_count_from_piece_tree(&trailing_newline), 2);
+    }
+
+    #[test]
+    fn display_line_count_from_piece_tree_tracks_edited_buffers() {
+        let mut tree = PieceTreeLite::from_string("one\nthree".to_owned());
+
+        tree.insert(4, "two\n");
+        tree.remove_char_range(0..4);
+
+        assert_eq!(tree.extract_text(), "two\nthree");
+        assert_eq!(display_line_count_from_piece_tree(&tree), 2);
+    }
 }

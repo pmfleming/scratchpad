@@ -85,7 +85,7 @@ fn build_root_from_leaves(mut leaves: Vec<PieceTreeLeaf>) -> PieceTreeRoot {
         node_start_newlines: Vec::new(),
         anchor_count: 0,
     };
-    root.recalculate();
+    root.recalculate_from_node_metrics();
     root
 }
 
@@ -107,7 +107,7 @@ pub(super) fn pack_leaves_into_nodes(mut leaves: Vec<PieceTreeLeaf>) -> Vec<Piec
             leaf_start_newlines: Vec::new(),
             anchor_count: 0,
         };
-        node.recalculate();
+        node.recalculate_from_leaf_metrics();
         nodes.push(node);
     }
     nodes
@@ -228,7 +228,7 @@ pub(super) fn pack_pieces_into_leaves(pieces: Vec<Piece>) -> Vec<PieceTreeLeaf> 
             current = PieceTreeLeaf::default();
         }
 
-        current.push_piece(piece);
+        current.push_piece_for_pack(piece);
     }
 
     if !current.pieces.is_empty() || leaves.is_empty() {

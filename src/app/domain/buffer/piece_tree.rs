@@ -5,13 +5,16 @@ mod support;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+pub(crate) use super::history::PIECE_PROVENANCE_ENTRY_LIMIT;
 use super::history::PieceProvenanceStore;
 pub(crate) use super::history::{ByteSpan, PieceProvenance, PieceSource};
 pub use anchor::{AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind};
 
+use std::collections::HashMap;
 use std::ops::Range;
 
-use self::slice::previews_for_matches_in_contiguous_text;
+use self::slice::{previews_for_matches_in_contiguous_text, previews_for_matches_in_piece_spans};
 use anchor::{LeafAnchor, LeafId};
 use support::{
     build_chunked_pieces, build_root_from_pieces, byte_index_for_char_offset,
@@ -61,6 +64,13 @@ impl PieceTreeMetrics {
         self.chars += other.chars;
         self.newlines += other.newlines;
         self.pieces += other.pieces;
+    }
+
+    fn saturating_sub_assign(&mut self, other: Self) {
+        self.bytes = self.bytes.saturating_sub(other.bytes);
+        self.chars = self.chars.saturating_sub(other.chars);
+        self.newlines = self.newlines.saturating_sub(other.newlines);
+        self.pieces = self.pieces.saturating_sub(other.pieces);
     }
 }
 
@@ -115,7 +125,7 @@ pub struct PieceTreeLeaf {
 }
 
 impl PieceTreeLeaf {
-    fn push_piece(&mut self, piece: Piece) {
+    fn push_piece_for_pack(&mut self, piece: Piece) {
         if piece.byte_len == 0 {
             return;
         }
@@ -128,11 +138,13 @@ impl PieceTreeLeaf {
             last.char_len += piece.char_len;
             last.newline_count += piece.newline_count;
             last.is_ascii &= piece.is_ascii;
+            self.metrics.bytes += piece.byte_len;
+            self.metrics.chars += piece.char_len;
+            self.metrics.newlines += piece.newline_count;
         } else {
+            self.metrics.add_assign(piece.metrics());
             self.pieces.push(piece);
         }
-
-        self.recalculate();
     }
 
     fn recalculate(&mut self) {
@@ -163,6 +175,10 @@ impl PieceTreeInternalNode {
         for leaf in &mut self.leaves {
             leaf.recalculate();
         }
+        self.recalculate_from_leaf_metrics();
+    }
+
+    fn recalculate_from_leaf_metrics(&mut self) {
         self.metrics = recalculate_prefix_metrics(
             &self.leaves,
             &mut self.leaf_start_chars,
@@ -191,6 +207,10 @@ impl PieceTreeRoot {
         for node in &mut self.nodes {
             node.recalculate();
         }
+        self.recalculate_from_node_metrics();
+    }
+
+    fn recalculate_from_node_metrics(&mut self) {
         self.metrics = recalculate_prefix_metrics(
             &self.nodes,
             &mut self.node_start_chars,
@@ -199,6 +219,59 @@ impl PieceTreeRoot {
         );
         self.anchor_count = self.nodes.iter().map(|node| node.anchor_count).sum();
     }
+
+    fn replace_recalculated_nodes(
+        &mut self,
+        range: Range<usize>,
+        replacement_nodes: Vec<PieceTreeInternalNode>,
+    ) {
+        let old_metrics = sum_node_metrics(&self.nodes[range.clone()]);
+        let old_anchor_count = self.nodes[range.clone()]
+            .iter()
+            .map(|node| node.anchor_count)
+            .sum::<usize>();
+        let new_metrics = sum_node_metrics(&replacement_nodes);
+        let new_anchor_count = replacement_nodes
+            .iter()
+            .map(|node| node.anchor_count)
+            .sum::<usize>();
+
+        self.nodes.splice(range, replacement_nodes);
+        if self.nodes.is_empty() {
+            self.nodes.push(PieceTreeInternalNode::default());
+            self.nodes[0].recalculate();
+        }
+
+        self.metrics.saturating_sub_assign(old_metrics);
+        self.metrics.add_assign(new_metrics);
+        self.anchor_count = self
+            .anchor_count
+            .saturating_sub(old_anchor_count)
+            .saturating_add(new_anchor_count);
+        self.refresh_node_prefixes();
+    }
+
+    fn refresh_node_prefixes(&mut self) {
+        self.node_start_chars.clear();
+        self.node_start_newlines.clear();
+
+        let mut current_chars = 0usize;
+        let mut current_newlines = 0usize;
+        for node in &self.nodes {
+            self.node_start_chars.push(current_chars);
+            self.node_start_newlines.push(current_newlines);
+            current_chars += node.metrics.chars;
+            current_newlines += node.metrics.newlines;
+        }
+    }
+}
+
+fn sum_node_metrics(nodes: &[PieceTreeInternalNode]) -> PieceTreeMetrics {
+    let mut metrics = PieceTreeMetrics::default();
+    for node in nodes {
+        metrics.add_assign(node.metrics);
+    }
+    metrics
 }
 
 #[derive(Clone, Debug)]
@@ -208,6 +281,7 @@ pub struct PieceTreeLite {
     root: PieceTreeRoot,
     generation: u64,
     anchors: anchor::AnchorRegistry,
+    leaf_indices_by_id: HashMap<LeafId, (usize, usize)>,
     provenance: PieceProvenanceStore,
     next_leaf_id: u64,
 }
@@ -239,6 +313,7 @@ impl PieceTreeLite {
             root: build_root_from_pieces(pieces),
             generation: 0,
             anchors: anchor::AnchorRegistry::default(),
+            leaf_indices_by_id: HashMap::new(),
             provenance: PieceProvenanceStore::default(),
             next_leaf_id: 1,
         };
@@ -246,8 +321,25 @@ impl PieceTreeLite {
         tree
     }
 
+    fn rebuild_leaf_index(&mut self) {
+        self.leaf_indices_by_id.clear();
+        for (node_index, node) in self.root.nodes.iter().enumerate() {
+            for (leaf_index, leaf) in node.leaves.iter().enumerate() {
+                if !leaf.leaf_id.is_unassigned() {
+                    self.leaf_indices_by_id
+                        .insert(leaf.leaf_id, (node_index, leaf_index));
+                }
+            }
+        }
+    }
+
     pub fn metrics(&self) -> PieceTreeMetrics {
         self.root.metrics
+    }
+
+    #[cfg(test)]
+    pub(crate) fn provenance_entry_count(&self) -> usize {
+        self.provenance.len()
     }
 
     pub fn generation(&self) -> u64 {
@@ -337,10 +429,7 @@ impl PieceTreeLite {
             return previews_for_matches_in_contiguous_text(text, limited_ranges);
         }
 
-        limited_ranges
-            .iter()
-            .map(|range| self.preview_for_match(range))
-            .collect()
+        previews_for_matches_in_piece_spans(self, limited_ranges)
     }
 
     pub fn line_lookup(&self, target_line: usize) -> (usize, usize) {

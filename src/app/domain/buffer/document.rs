@@ -27,6 +27,7 @@ pub(crate) enum TextReplacementError {
 pub struct TextDocument {
     piece_tree: Arc<PieceTreeLite>,
     history: Vec<PieceHistoryEntry>,
+    history_byte_usage: usize,
     next_history_id: u64,
     revision_counter: u64,
     history_budget: TextHistoryBudget,
@@ -49,6 +50,7 @@ impl TextDocument {
         Self {
             piece_tree,
             history: Vec::new(),
+            history_byte_usage: 0,
             next_history_id: 1,
             revision_counter: 0,
             history_budget: TextHistoryBudget::default(),
@@ -114,6 +116,7 @@ impl TextDocument {
 
     pub fn clear_operation_history(&mut self) {
         self.history.clear();
+        self.history_byte_usage = 0;
         self.latest_operation_record = None;
         self.latest_history_update_at = None;
         self.pending_history_generation_before = None;
@@ -129,7 +132,7 @@ impl TextDocument {
     }
 
     pub fn history_byte_usage(&self) -> usize {
-        self.history.iter().map(PieceHistoryEntry::byte_cost).sum()
+        self.history_byte_usage
     }
 
     pub fn oldest_history_global_seq(&self) -> Option<u64> {
@@ -142,6 +145,7 @@ impl TextDocument {
         } else {
             self.revision_counter = self.revision_counter.wrapping_add(1);
             let removed = self.history.remove(0);
+            self.history_byte_usage = self.history_byte_usage.saturating_sub(removed.byte_cost());
             self.compact_history_storage();
             Some(removed)
         }
@@ -175,10 +179,12 @@ impl TextDocument {
 
     pub fn restore_exported_history(&mut self, entries: Vec<PersistedHistoryEntry>) {
         self.history.clear();
+        self.history_byte_usage = 0;
         let mut max_id = 0_u64;
         for persisted in entries {
             max_id = max_id.max(persisted.id);
             let entry = self.import_history_entry(persisted);
+            self.history_byte_usage += entry.byte_cost();
             self.history.push(entry);
         }
         self.normalize_imported_redo_state();
