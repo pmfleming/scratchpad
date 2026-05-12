@@ -3,6 +3,7 @@ use crate::app::domain::{
     BufferState, EditorViewState, LayoutCacheKey, SearchHighlightState, SearchReplacementPreview,
     ViewId,
 };
+use crate::app::ui::editor_content::extent;
 use crate::app::ui::widget_ids::{self, WidgetRole};
 use eframe::egui;
 use std::borrow::Cow;
@@ -361,21 +362,24 @@ pub(super) fn editor_viewport_height(ui: &egui::Ui, viewport: Option<egui::Rect>
         .unwrap_or_else(|| ui.available_height().max(0.0))
 }
 
-fn editor_eof_tail_height(viewport_height: f32, row_height: f32) -> f32 {
-    let _ = (viewport_height, row_height);
-    0.0
-}
-
 pub(super) fn total_editor_content_height(
     line_count: usize,
     row_height: f32,
     galley: &egui::Galley,
+    logical_line_base: usize,
     viewport_height: f32,
 ) -> f32 {
-    let by_lines = (line_count as f32 * row_height).max(row_height);
-    (by_lines.max(editor_content_height(galley, row_height))
-        + editor_eof_tail_height(viewport_height, row_height))
-    .ceil()
+    let measured_display_height = extent::based_slice_height(
+        logical_line_base,
+        row_height,
+        editor_content_height(galley, row_height),
+    );
+    extent::content_height(
+        line_count,
+        row_height,
+        measured_display_height,
+        viewport_height,
+    )
 }
 
 fn editor_wrap_width(ui: &egui::Ui, word_wrap: bool, viewport: Option<egui::Rect>) -> f32 {

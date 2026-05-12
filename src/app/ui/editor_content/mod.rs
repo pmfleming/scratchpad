@@ -1,3 +1,4 @@
+pub(crate) mod extent;
 pub mod gutter;
 pub mod native_editor;
 

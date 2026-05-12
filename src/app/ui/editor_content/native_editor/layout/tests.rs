@@ -1,11 +1,11 @@
 use super::{
-    cursor_line_for_viewport_slice, display_text_slice, editor_eof_tail_height,
-    editor_interaction_id, preview_text_slice,
+    cursor_line_for_viewport_slice, display_text_slice, editor_interaction_id, preview_text_slice,
 };
 use crate::app::domain::{
     BufferState, CursorRevealMode, EditorViewState, SearchReplacementPreview,
     SearchReplacementPreviewEntry,
 };
+use crate::app::ui::editor_content::extent;
 use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
 
 #[test]
@@ -16,7 +16,7 @@ fn editor_interaction_id_is_stable_per_view() {
 
 #[test]
 fn eof_tail_does_not_create_blank_scroll_page() {
-    assert_eq!(editor_eof_tail_height(600.0, 20.0), 0.0);
+    assert_eq!(extent::eof_tail_height(600.0, 20.0), 0.0);
 }
 
 #[test]

@@ -62,6 +62,7 @@ pub fn render_editor_text_edit(
         buffer.line_count.max(1),
         row_height,
         &galley_context.galley,
+        galley_context.logical_line_base,
         viewport_height,
     );
     let (rect, response) = allocate_editor_rect(

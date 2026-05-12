@@ -1,4 +1,5 @@
 use crate::app::domain::{BufferState, EditorViewState, ViewId, WorkspaceTab};
+use crate::app::ui::editor_content::extent;
 use crate::app::ui::scrolling::{DisplaySnapshot, ScrollAnchor};
 use crate::app::ui::{scrolling, widget_ids};
 use eframe::egui;
@@ -46,11 +47,16 @@ pub(super) fn virtual_editor_content_height(
     view_id: ViewId,
     virtual_row_height: f32,
     viewport_height: f32,
+    previous_snapshot: Option<&DisplaySnapshot>,
 ) -> f32 {
     tab.buffer_for_view(view_id)
         .map(|buffer| {
-            buffer.line_count.max(1) as f32 * virtual_row_height
-                + editor_eof_tail_height(viewport_height, virtual_row_height)
+            extent::scroll_content_height(
+                buffer.line_count.max(1),
+                virtual_row_height,
+                viewport_height,
+                previous_snapshot,
+            )
         })
         .unwrap_or_default()
 }
@@ -176,11 +182,6 @@ fn editor_pixel_offset_resolved(
     egui::vec2(view.scroll.horizontal_px(), y)
 }
 
-fn editor_eof_tail_height(viewport_height: f32, row_height: f32) -> f32 {
-    let _ = (viewport_height, row_height);
-    0.0
-}
-
 fn pending_intents_include_reveal(view: &EditorViewState) -> bool {
     view.pending_intents
         .iter()
@@ -237,6 +238,7 @@ fn sync_editor_scroll_state(ui: &egui::Ui, scroll_id: egui::Id, offset: egui::Ve
 mod tests {
     use super::editor_scroll_content_size;
     use crate::app::domain::{BufferState, WorkspaceTab};
+    use crate::app::ui::editor_content::extent;
     use eframe::egui;
 
     #[test]
@@ -255,7 +257,7 @@ mod tests {
 
     #[test]
     fn eof_tail_does_not_create_blank_scroll_page() {
-        assert_eq!(super::editor_eof_tail_height(600.0, 20.0), 0.0);
+        assert_eq!(extent::eof_tail_height(600.0, 20.0), 0.0);
     }
 
     #[test]
@@ -266,7 +268,8 @@ mod tests {
             .join("\n");
         let tab = WorkspaceTab::new(BufferState::new("sample.txt".to_owned(), text, None));
 
-        let height = super::virtual_editor_content_height(&tab, tab.active_view_id, 20.0, 200.0);
+        let height =
+            super::virtual_editor_content_height(&tab, tab.active_view_id, 20.0, 200.0, None);
 
         assert_eq!(height, 400.0);
     }

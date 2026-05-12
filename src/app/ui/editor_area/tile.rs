@@ -344,6 +344,7 @@ fn prepare_editor_scroll_frame<'a>(
         view_id,
         row_height.max(content_style.text_edit.editor_font_id.size),
         viewport_height,
+        previous_snapshot,
     );
     EditorScrollFrame {
         scroll_id,
