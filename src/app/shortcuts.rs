@@ -51,7 +51,7 @@ fn handle_global_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         return;
     }
 
-    if app.search_open()
+    if app.state.search_state.open()
         && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
         app.handle_command(AppCommand::CloseSearch);
@@ -83,7 +83,7 @@ fn handle_region_traversal_shortcut(app: &mut ScratchpadApp, ctx: &egui::Context
 }
 
 fn next_view_for_region_traversal(app: &ScratchpadApp, direction: i32) -> Option<ViewId> {
-    let tab = app.active_tab()?;
+    let tab = app.tab_manager.active_tab()?;
     let ordered = tab.ordered_view_ids_in_layout_order();
     if ordered.len() <= 1 {
         return None;
@@ -135,17 +135,23 @@ fn handle_view_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         input.consume_key(egui::Modifiers::CTRL, egui::Key::Equals)
             || input.consume_key(egui::Modifiers::CTRL, egui::Key::Plus)
     }) {
-        app.set_font_size(app.font_size() + 1.0);
+        crate::app::app_state::settings_controller::set_font_size(
+            app,
+            app.state.app_settings.font_size() + 1.0,
+        );
     }
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Minus)) {
-        app.set_font_size(app.font_size() - 1.0);
+        crate::app::app_state::settings_controller::set_font_size(
+            app,
+            app.state.app_settings.font_size() - 1.0,
+        );
     }
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Num0))
-        && let Some(tab) = app.active_tab_mut()
+        && let Some(tab) = app.tab_manager.active_tab_mut()
     {
         let next_visible = !tab.line_numbers_visible();
         tab.set_line_numbers_visible(next_visible);
-        app.mark_session_dirty();
+        app.tab_manager.mark_session_dirty();
     }
 }
 
@@ -153,9 +159,9 @@ fn handle_tab_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::W)) {
         if app.showing_settings() {
             app.handle_command(AppCommand::CloseSettings);
-        } else if !app.tabs().is_empty() {
+        } else if !app.tab_manager.tabs.as_slice().is_empty() {
             app.handle_command(AppCommand::RequestCloseTab {
-                index: app.active_tab_index(),
+                index: app.tab_manager.active_tab_index,
             });
         }
     }
@@ -169,8 +175,8 @@ fn handle_tile_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
     };
 
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::T))
-        && let Some(tab) = app.active_tab()
-        && tab.can_promote_view(tab.active_view_id)
+        && let Some(tab) = app.tab_manager.active_tab()
+        && crate::app::domain::tab::summary::can_promote_view(tab, tab.active_view_id)
     {
         app.handle_command(AppCommand::PromoteViewToTab {
             view_id: tab.active_view_id,
@@ -179,17 +185,17 @@ fn handle_tile_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
     }
 
     if ctx.input_mut(|input| input.consume_key(modifiers, egui::Key::T))
-        && let Some(tab) = app.active_tab()
-        && tab.can_promote_all_files()
+        && let Some(tab) = app.tab_manager.active_tab()
+        && crate::app::domain::tab::summary::can_promote_all_files(tab)
     {
         app.handle_command(AppCommand::PromoteTabFilesToTabs {
-            index: app.active_tab_index(),
+            index: app.tab_manager.active_tab_index,
         });
         return;
     }
 
     if ctx.input_mut(|input| input.consume_key(modifiers, egui::Key::W))
-        && let Some(tab) = app.active_tab()
+        && let Some(tab) = app.tab_manager.active_tab()
         && tab.root_pane.leaf_count() > 1
     {
         app.handle_command(AppCommand::CloseView {

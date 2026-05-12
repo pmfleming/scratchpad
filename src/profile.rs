@@ -211,7 +211,7 @@ pub fn run_tab_operations_profile(tab_count: usize, iterations: usize) -> usize 
             RECOMMENDED_TAB_OPERATION_VIEWS_PER_TAB,
             RECOMMENDED_TAB_OPERATION_BYTES_PER_BUFFER,
         );
-        let tab_order = bouncing_indices(app.tabs().len());
+        let tab_order = bouncing_indices(app.tab_manager.tabs.as_slice().len());
 
         sum_profile_iterations(iterations, || {
             let mut operations = 0;
@@ -220,10 +220,16 @@ pub fn run_tab_operations_profile(tab_count: usize, iterations: usize) -> usize 
                 operations += 1;
             }
 
-            if app.tabs().len() > 2 {
-                let last_index = app.tabs().len() - 1;
-                app.reorder_tab(1, last_index);
-                app.reorder_tab(last_index, 1);
+            if app.tab_manager.tabs.as_slice().len() > 2 {
+                let last_index = app.tab_manager.tabs.as_slice().len() - 1;
+                app.handle_command(AppCommand::ReorderTab {
+                    from_index: 1,
+                    to_index: last_index,
+                });
+                app.handle_command(AppCommand::ReorderTab {
+                    from_index: last_index,
+                    to_index: 1,
+                });
                 operations += 2;
             }
 
@@ -306,7 +312,8 @@ pub fn run_search_dispatch_current_profile(
     iterations: usize,
 ) -> usize {
     with_isolated_app("search-dispatch-current", |app| {
-        app.tabs_mut()[0] = build_search_current_scope_tab(file_count, bytes_per_file);
+        app.tab_manager.tabs.as_mut_slice()[0] =
+            build_search_current_scope_tab(file_count, bytes_per_file);
         sum_profile_iterations(iterations, || {
             black_box(
                 app.profile_build_search_request(SearchScope::ActiveWorkspaceTab, PROFILE_QUERY),
@@ -447,12 +454,13 @@ pub fn run_split_stress_profile(
     iterations: usize,
 ) -> usize {
     with_steady_state_app("split-stress", |app| {
-        app.tabs_mut()[0] = build_balanced_tile_tab(0, tile_count, bytes_per_tile);
+        app.tab_manager.tabs.as_mut_slice()[0] =
+            build_balanced_tile_tab(0, tile_count, bytes_per_tile);
         let mut axis_seed = 0usize;
 
         sum_profile_iterations(iterations, || {
             let mut operations = 0usize;
-            if let Some(tab) = app.tabs_mut().first_mut() {
+            if let Some(tab) = app.tab_manager.tabs.as_mut_slice().first_mut() {
                 let _ = tab.split_active_view(alternating_axis(axis_seed));
                 axis_seed = axis_seed.saturating_add(1);
                 operations += 1;
@@ -477,17 +485,23 @@ fn run_search_profile_iterations(
     expected_matches: usize,
     iterations: usize,
 ) -> usize {
-    app.open_search();
-    app.set_search_scope(scope);
-    app.set_search_query(PROFILE_RESET_QUERY);
+    app.handle_command(AppCommand::OpenSearch);
+    app.handle_command(AppCommand::SetSearchScope { scope });
+    app.handle_command(AppCommand::SetSearchQuery {
+        query: PROFILE_RESET_QUERY.to_owned(),
+    });
     wait_for_app_state_search_matches(app, 0);
 
     sum_profile_iterations(iterations, || {
-        app.set_search_query(PROFILE_QUERY);
+        app.handle_command(AppCommand::SetSearchQuery {
+            query: PROFILE_QUERY.to_owned(),
+        });
         wait_for_app_state_search_matches(app, expected_matches);
-        let match_count = app.search_match_count();
+        let match_count = app.state.search_state.match_count();
 
-        app.set_search_query(PROFILE_RESET_QUERY);
+        app.handle_command(AppCommand::SetSearchQuery {
+            query: PROFILE_RESET_QUERY.to_owned(),
+        });
         wait_for_app_state_search_matches(app, 0);
 
         match_count

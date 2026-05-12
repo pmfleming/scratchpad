@@ -17,7 +17,7 @@ pub(crate) fn show_header(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 }
 
 pub(crate) fn show_vertical_tab_list(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    if let Some(side) = vertical_tab_side(app.tab_list_position()) {
+    if let Some(side) = vertical_tab_side(app.state.app_settings.tab_list_position()) {
         show_vertical_tab_panel(ui, app, side);
     }
 }
@@ -27,7 +27,7 @@ pub(crate) fn show_bottom_tab_list(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 }
 
 fn show_vertical_tab_panel(ui: &mut egui::Ui, app: &mut ScratchpadApp, side: TabListPosition) {
-    app.overflow_popup_open = false;
+    app.state.overflow_popup_open = false;
     let now = Instant::now();
     let panel_visible = vertical_panel_visible(ui, app, side, now);
     let panel_width = auto_hide_panel_extent(panel_visible, app.vertical_tab_list_width());
@@ -70,7 +70,10 @@ fn finalize_vertical_tab_panel(
         return;
     }
 
-    app.set_tab_list_width_from_layout(response.rect.width());
+    crate::app::app_state::settings_controller::set_tab_list_width_from_layout(
+        app,
+        response.rect.width(),
+    );
 }
 
 fn show_horizontal_tab_list(
@@ -79,7 +82,7 @@ fn show_horizontal_tab_list(
     position: TabListPosition,
     panel_id: &'static str,
 ) {
-    if app.tab_list_position() != position {
+    if app.state.app_settings.tab_list_position() != position {
         return;
     }
 

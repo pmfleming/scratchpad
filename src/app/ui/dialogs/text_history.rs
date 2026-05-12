@@ -50,7 +50,7 @@ struct TextHistoryWindowState<'a> {
 }
 
 pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    if !app.text_history_open {
+    if !app.state.text_history_open {
         return;
     }
 
@@ -94,7 +94,7 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
         write_follow_focus(ctx, next_follow_focus);
     }
     if close_requested {
-        app.close_text_history();
+        crate::app::commands::close_text_history(app);
     }
     if clear_requested {
         let _ = app.clear_text_history();

@@ -36,6 +36,7 @@ SCENARIOS: List[Dict[str, Any]] = [
         ],
         "capacity_scenarios": ["file_size_ceiling", "layout_bytes_ceiling"],
         "resource_scenarios": [
+            "large_utf8_load_peak_memory",
             "file_backed_open_first_visible_paint",
             "file_backed_open_allocation",
         ],
@@ -53,6 +54,7 @@ SCENARIOS: List[Dict[str, Any]] = [
                 "sources": [
                     "file_size_ceiling",
                     "layout_bytes_ceiling",
+                    "large_utf8_load_peak_memory",
                     "file_backed_open_first_visible_paint",
                     "file_backed_open_allocation",
                 ],
@@ -134,6 +136,7 @@ SCENARIOS: List[Dict[str, Any]] = [
         "resource_scenarios": [
             "search_file_size_resource_tracking",
             "search_target_resource_tracking",
+            "edited_buffer_search_preview_rendering",
         ],
         "profile_ids": [
             "search_current_app_state_profile",
@@ -147,7 +150,11 @@ SCENARIOS: List[Dict[str, Any]] = [
                 "label": "GB-class single-file search",
                 "kind": "bytes",
                 "minimum": GB,
-                "sources": ["search_file_size_ceiling", "search_file_size_resource_tracking"],
+                "sources": [
+                    "search_file_size_ceiling",
+                    "search_file_size_resource_tracking",
+                    "edited_buffer_search_preview_rendering",
+                ],
             },
             {
                 "id": "ten_k_search_targets",
@@ -197,7 +204,7 @@ SCENARIOS: List[Dict[str, Any]] = [
         "families": ["split-layout", "viewport"],
         "benchmark_keys": ["split_stress_latency", "tile_count_scale", "viewport_extraction_latency"],
         "capacity_scenarios": ["split_count_ceiling", "view_count_ceiling"],
-        "resource_scenarios": ["view_count_resource_tracking"],
+        "resource_scenarios": ["view_count_resource_tracking", "anchor_heavy_view_editing"],
         "profile_ids": [
             "split_stress_profile",
             "tab_tile_layout_profile",
@@ -210,7 +217,12 @@ SCENARIOS: List[Dict[str, Any]] = [
                 "label": "1,000+ views/splits",
                 "kind": "views",
                 "minimum": 1_000,
-                "sources": ["view_count_ceiling", "view_count_resource_tracking", "split_count_ceiling"],
+                "sources": [
+                    "view_count_ceiling",
+                    "view_count_resource_tracking",
+                    "anchor_heavy_view_editing",
+                    "split_count_ceiling",
+                ],
             },
         ],
         "next_measurement": "Add a 1,000+ view stress profile with navigation, close, promote, and redraw steps.",
@@ -222,7 +234,11 @@ SCENARIOS: List[Dict[str, Any]] = [
         "families": ["edit-paste", "anchor-maintenance"],
         "benchmark_keys": ["paste_stress_latency", "piece_tree_anchor_remove"],
         "capacity_scenarios": ["paste_size_ceiling"],
-        "resource_scenarios": ["paste_allocation"],
+        "resource_scenarios": [
+            "paste_allocation",
+            "provenance_retained_memory",
+            "fragmented_long_session_mutation",
+        ],
         "profile_ids": ["paste_stress_profile"],
         "scale_checks": [
             {
@@ -230,7 +246,11 @@ SCENARIOS: List[Dict[str, Any]] = [
                 "label": "100 MB+ mutation",
                 "kind": "bytes",
                 "minimum": 100 * MB,
-                "sources": ["paste_size_ceiling", "paste_allocation"],
+                "sources": [
+                    "paste_size_ceiling",
+                    "paste_allocation",
+                    "fragmented_long_session_mutation",
+                ],
             },
         ],
         "next_measurement": "Split paste, cut, undo, redo, and metadata refresh into separate large-buffer probes.",

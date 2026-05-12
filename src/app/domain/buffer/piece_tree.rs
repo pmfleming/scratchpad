@@ -1,5 +1,7 @@
 mod anchor;
 mod edit;
+pub(super) mod preview;
+pub(crate) mod query;
 mod slice;
 mod support;
 #[cfg(test)]
@@ -14,12 +16,11 @@ pub use anchor::{AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind};
 use std::collections::HashMap;
 use std::ops::Range;
 
-use self::slice::{previews_for_matches_in_contiguous_text, previews_for_matches_in_piece_spans};
 use anchor::{LeafAnchor, LeafId};
 use support::{
     build_chunked_pieces, build_root_from_pieces, byte_index_for_char_offset,
-    byte_range_for_char_range, compact_preview, line_lookup_in_leaves, measure_text,
-    pack_pieces_into_leaves, recalculate_prefix_metrics,
+    byte_range_for_char_range, line_lookup_in_leaves, measure_text, pack_pieces_into_leaves,
+    recalculate_prefix_metrics,
 };
 
 const MAX_LEAF_BYTES: usize = 256 * 1024;
@@ -337,9 +338,16 @@ impl PieceTreeLite {
         self.root.metrics
     }
 
-    #[cfg(test)]
-    pub(crate) fn provenance_entry_count(&self) -> usize {
+    pub fn provenance_entry_count(&self) -> usize {
         self.provenance.len()
+    }
+
+    pub fn previews_for_matches(
+        &self,
+        ranges: &[Range<usize>],
+        limit: usize,
+    ) -> Vec<(usize, usize, String)> {
+        preview::previews_for_matches(self, ranges, limit)
     }
 
     pub fn generation(&self) -> u64 {
@@ -358,17 +366,6 @@ impl PieceTreeLite {
         let start = range_chars.start.min(self.len_chars());
         let end = range_chars.end.min(self.len_chars());
         if start <= end { start..end } else { end..start }
-    }
-
-    pub fn char_position(&self, offset_chars: usize) -> PieceTreeCharPosition {
-        let safe_offset = offset_chars.min(self.len_chars());
-        let line_index = self.line_index_at_offset(safe_offset);
-        let line_info = self.line_info(line_index);
-        PieceTreeCharPosition {
-            offset_chars: safe_offset,
-            line_index,
-            column_index: safe_offset.saturating_sub(line_info.start_char),
-        }
     }
 
     pub fn char_at(&self, offset_chars: usize) -> Option<char> {
@@ -397,39 +394,6 @@ impl PieceTreeLite {
             start_char,
             char_len,
         }
-    }
-
-    pub fn preview_for_match(&self, range_chars: &Range<usize>) -> (usize, usize, String) {
-        let normalized = self.normalize_char_range(range_chars.clone());
-        let line_index = self.line_index_at_offset(normalized.start);
-        let info = self.line_info(line_index);
-        let column = normalized.start.saturating_sub(info.start_char);
-        let (line_text, truncated) = self.extract_range_bounded(
-            info.start_char..info.start_char + info.char_len,
-            PREVIEW_MAX_CHARS,
-        );
-        let mut preview = compact_preview(&line_text);
-        if truncated && !preview.ends_with("...") {
-            preview.push_str("...");
-        }
-        (line_index + 1, column + 1, preview)
-    }
-
-    pub fn previews_for_matches(
-        &self,
-        ranges: &[Range<usize>],
-        limit: usize,
-    ) -> Vec<(usize, usize, String)> {
-        let limited_ranges = &ranges[..ranges.len().min(limit)];
-        if limited_ranges.is_empty() {
-            return Vec::new();
-        }
-
-        if let Some(text) = self.borrow_range(0..self.len_chars()) {
-            return previews_for_matches_in_contiguous_text(text, limited_ranges);
-        }
-
-        previews_for_matches_in_piece_spans(self, limited_ranges)
     }
 
     pub fn line_lookup(&self, target_line: usize) -> (usize, usize) {
@@ -550,14 +514,6 @@ impl PieceTreeLite {
         }
 
         (result, truncated)
-    }
-
-    pub fn collect_line_bounded(&self, target_line: usize, max_chars: usize) -> (String, bool) {
-        let line_info = self.line_info(target_line);
-        self.extract_range_bounded(
-            line_info.start_char..line_info.start_char + line_info.char_len,
-            max_chars,
-        )
     }
 
     fn piece_at_char_offset(

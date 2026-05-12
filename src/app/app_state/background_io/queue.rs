@@ -3,17 +3,19 @@ use super::*;
 
 impl ScratchpadApp {
     pub(crate) fn queue_active_buffer_encoding_compliance_refresh(&mut self) {
-        let Some((buffer_id, revision, snapshot, format)) = self.active_tab().and_then(|tab| {
-            let buffer = tab.active_buffer();
-            buffer.encoding_compliance_refresh_needed().then(|| {
-                (
-                    buffer.id,
-                    buffer.document_revision(),
-                    buffer.document_snapshot(),
-                    buffer.format.clone(),
-                )
+        let Some((buffer_id, revision, snapshot, format)) =
+            self.tab_manager.active_tab().and_then(|tab| {
+                let buffer = tab.active_buffer();
+                buffer.encoding_compliance_refresh_needed().then(|| {
+                    (
+                        buffer.id,
+                        buffer.document_revision(),
+                        buffer.document_snapshot(),
+                        buffer.format.clone(),
+                    )
+                })
             })
-        }) else {
+        else {
             return;
         };
 
@@ -50,10 +52,10 @@ impl ScratchpadApp {
             return;
         }
 
-        let request_id = self.allocate_background_request_id();
-        self.io
-            .pending_background_actions
-            .insert(request_id, action);
+        let request_id = self.state.io.allocate_background_request_id();
+        self.state
+            .io
+            .insert_pending_background_action(request_id, action);
 
         let request = BackgroundIoRequest::LoadPaths {
             request_id,
@@ -75,10 +77,10 @@ impl ScratchpadApp {
         encoding_name: String,
         action: PendingBackgroundAction,
     ) {
-        let request_id = self.allocate_background_request_id();
-        self.io
-            .pending_background_actions
-            .insert(request_id, action);
+        let request_id = self.state.io.allocate_background_request_id();
+        self.state
+            .io
+            .insert_pending_background_action(request_id, action);
 
         let request = BackgroundIoRequest::LoadPaths {
             request_id,
@@ -104,10 +106,11 @@ impl ScratchpadApp {
         format: crate::app::domain::TextFormatMetadata,
         action: PendingSavePathAction,
     ) -> bool {
-        let request_id = self.allocate_background_request_id();
-        self.io
-            .pending_background_actions
-            .insert(request_id, PendingBackgroundAction::SavePath(action));
+        let request_id = self.state.io.allocate_background_request_id();
+        self.state.io.insert_pending_background_action(
+            request_id,
+            PendingBackgroundAction::SavePath(action),
+        );
 
         let request = BackgroundIoRequest::SavePath {
             request_id,
@@ -115,7 +118,7 @@ impl ScratchpadApp {
             snapshot,
             format,
         };
-        if let Err(error) = self.io.background_io_tx.send(request) {
+        if let Err(error) = self.state.io.background_io_tx.send(request) {
             record_background_send_error(&error);
             self.apply_background_io_result(error.into_request().into_path_saved_result());
             return false;
@@ -129,8 +132,8 @@ impl ScratchpadApp {
         startup_options: StartupOptions,
         loaded_from_settings: bool,
     ) {
-        let request_id = self.allocate_background_request_id();
-        self.io.pending_background_actions.insert(
+        let request_id = self.state.io.allocate_background_request_id();
+        self.state.io.insert_pending_background_action(
             request_id,
             PendingBackgroundAction::StartupRestore(PendingStartupRestoreAction {
                 startup_options,
@@ -142,7 +145,7 @@ impl ScratchpadApp {
 
         let request = BackgroundIoRequest::RestoreSession {
             request_id,
-            session_store: self.session_store.clone(),
+            session_store: self.state.session_store.clone(),
         };
         self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
             app.apply_background_io_result(BackgroundIoResult::SessionRestored {
@@ -153,15 +156,15 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn queue_background_session_persist(&mut self, request: SessionPersistRequest) {
-        let request_id = self.allocate_background_request_id();
-        self.io.pending_background_actions.insert(
+        let request_id = self.state.io.allocate_background_request_id();
+        self.state.io.insert_pending_background_action(
             request_id,
             PendingBackgroundAction::PersistSession(PendingSessionPersistAction),
         );
 
         let request = BackgroundIoRequest::PersistSession {
             request_id,
-            session_store: self.session_store.clone(),
+            session_store: self.state.session_store.clone(),
             request,
         };
         self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
@@ -179,18 +182,24 @@ impl ScratchpadApp {
         snapshot: crate::app::domain::DocumentSnapshot,
         format: crate::app::domain::TextFormatMetadata,
     ) {
-        if self.io.pending_background_actions.values().any(|action| {
-            matches!(
-                action,
-                PendingBackgroundAction::RefreshTextMetadata(pending)
-                    if pending.buffer_id == buffer_id && pending.revision == revision
-            )
-        }) {
+        if self
+            .state
+            .io
+            .pending_background_actions
+            .values()
+            .any(|action| {
+                matches!(
+                    action,
+                    PendingBackgroundAction::RefreshTextMetadata(pending)
+                        if pending.buffer_id == buffer_id && pending.revision == revision
+                )
+            })
+        {
             return;
         }
 
-        let request_id = self.allocate_background_request_id();
-        self.io.pending_background_actions.insert(
+        let request_id = self.state.io.allocate_background_request_id();
+        self.state.io.insert_pending_background_action(
             request_id,
             PendingBackgroundAction::RefreshTextMetadata(PendingTextMetadataAction {
                 buffer_id,
@@ -222,18 +231,24 @@ impl ScratchpadApp {
         snapshot: crate::app::domain::DocumentSnapshot,
         format: crate::app::domain::TextFormatMetadata,
     ) {
-        if self.io.pending_background_actions.values().any(|action| {
-            matches!(
-                action,
-                PendingBackgroundAction::RefreshEncodingCompliance(pending)
-                    if pending.buffer_id == buffer_id && pending.revision == revision
-            )
-        }) {
+        if self
+            .state
+            .io
+            .pending_background_actions
+            .values()
+            .any(|action| {
+                matches!(
+                    action,
+                    PendingBackgroundAction::RefreshEncodingCompliance(pending)
+                        if pending.buffer_id == buffer_id && pending.revision == revision
+                )
+            })
+        {
             return;
         }
 
-        let request_id = self.allocate_background_request_id();
-        self.io.pending_background_actions.insert(
+        let request_id = self.state.io.allocate_background_request_id();
+        self.state.io.insert_pending_background_action(
             request_id,
             PendingBackgroundAction::RefreshEncodingCompliance(PendingEncodingComplianceAction {
                 buffer_id,
@@ -258,21 +273,15 @@ impl ScratchpadApp {
         });
     }
 
-    fn allocate_background_request_id(&mut self) -> u64 {
-        let request_id = self.io.next_background_request_id;
-        self.io.next_background_request_id = self.io.next_background_request_id.saturating_add(1);
-        request_id
-    }
-
     fn send_background_request_or_apply(
         &mut self,
         request_id: u64,
         request: BackgroundIoRequest,
         fallback: impl FnOnce(&mut Self, u64, BackgroundIoRequest),
     ) {
-        if let Err(error) = self.io.background_io_tx.send(request) {
+        if let Err(error) = self.state.io.background_io_tx.send(request) {
             record_background_send_error(&error);
-            self.io.pending_background_actions.remove(&request_id);
+            self.state.io.drop_pending_background_action(request_id);
             fallback(self, request_id, error.into_request());
         }
     }

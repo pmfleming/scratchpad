@@ -3,6 +3,7 @@ pub mod tile;
 
 use crate::app::app_state::ScratchpadApp;
 use crate::app::app_state::SearchStatus;
+use crate::app::commands::AppCommand;
 use crate::app::domain::{PaneBranch, PaneNode, ViewId};
 use crate::app::ui::search_replace;
 use crate::app::ui::tile_header::{self, SplitPreviewOverlay, TileAction};
@@ -18,7 +19,7 @@ const SHIFT_SCROLL_FONT_SIZE_PX_PER_POINT: f32 = 48.0;
 pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     egui::CentralPanel::default().show_inside(ui, |ui| {
         widget_ids::feature_scope(ui, "editor_area", |ui| {
-            if app.tabs().is_empty() {
+            if app.tab_manager.tabs.as_slice().is_empty() {
                 return;
             }
 
@@ -31,9 +32,13 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 return;
             }
 
-            paint_workspace_background(ui, workspace_rect, app.editor_background_color());
+            paint_workspace_background(
+                ui,
+                workspace_rect,
+                app.state.app_settings.editor_background_color(),
+            );
 
-            app.workspace_reflow_axis = preferred_workspace_reflow_axis(workspace_rect);
+            app.state.workspace_reflow_axis = preferred_workspace_reflow_axis(workspace_rect);
             handle_editor_zoom(ui, workspace_rect, app);
             let editor_state = prepare_editor_state(app);
             let render_outcome = render_editor_workspace(ui, app, &editor_state, workspace_rect);
@@ -41,7 +46,10 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             app.refresh_search_state();
             request_search_repaint(
                 ui.ctx(),
-                matches!(app.search_progress().status, SearchStatus::Searching { .. }),
+                matches!(
+                    app.state.search_state.progress().status,
+                    SearchStatus::Searching { .. }
+                ),
             );
         });
     });
@@ -73,12 +81,18 @@ struct EditorRenderOutcome {
 }
 
 fn prepare_editor_state(app: &mut ScratchpadApp) -> EditorRenderState {
-    let active_tab_index = app.active_tab_index().min(app.tabs().len() - 1);
-    app.tab_manager_mut().active_tab_index = active_tab_index;
+    let active_tab_index = app
+        .tab_manager
+        .active_tab_index
+        .min(app.tab_manager.tabs.as_slice().len() - 1);
+    app.tab_manager
+        .set_active_tab_index_clamped(active_tab_index);
     app.ensure_active_tab_slot_selected();
 
-    let pane_tree = app.tabs()[active_tab_index].root_pane.clone();
-    let active_view_id = app.tabs()[active_tab_index].active_view_id;
+    let pane_tree = app.tab_manager.tabs.as_slice()[active_tab_index]
+        .root_pane
+        .clone();
+    let active_view_id = app.tab_manager.tabs.as_slice()[active_tab_index].active_view_id;
     let leaf_count = pane_tree.leaf_count();
 
     EditorRenderState {
@@ -183,17 +197,22 @@ fn defer_tile_actions(ctx: &egui::Context, actions: Vec<TileAction>) {
 
 fn apply_tile_actions(app: &mut ScratchpadApp, actions: Vec<TileAction>) {
     for action in actions {
-        match action {
-            TileAction::Activate(view_id) => app.activate_view(view_id),
-            TileAction::Close(view_id) => app.close_view(view_id),
-            TileAction::Promote(view_id) => app.promote_view_to_tab(view_id),
-            TileAction::ResizeSplit { path, ratio } => app.resize_split(path, ratio),
+        let command = match action {
+            TileAction::Activate(view_id) => AppCommand::ActivateView { view_id },
+            TileAction::Close(view_id) => AppCommand::CloseView { view_id },
+            TileAction::Promote(view_id) => AppCommand::PromoteViewToTab { view_id },
+            TileAction::ResizeSplit { path, ratio } => AppCommand::ResizeSplit { path, ratio },
             TileAction::Split {
                 axis,
                 new_view_first,
                 ratio,
-            } => app.split_active_view_with_placement(axis, new_view_first, ratio),
-        }
+            } => AppCommand::SplitActiveView {
+                axis,
+                new_view_first,
+                ratio,
+            },
+        };
+        app.handle_command(command);
     }
 }
 
@@ -207,13 +226,19 @@ fn handle_editor_zoom(ui: &egui::Ui, workspace_rect: egui::Rect, app: &mut Scrat
     let pointer_over_editor = ui.rect_contains_pointer(workspace_rect);
     let zoom_factor = ui.ctx().input(|input| input.zoom_delta());
     if pointer_over_editor && zoom_factor != 1.0 {
-        app.set_font_size(app.font_size() * zoom_factor);
+        crate::app::app_state::settings_controller::set_font_size(
+            app,
+            app.state.app_settings.font_size() * zoom_factor,
+        );
     }
     let shift_scroll_delta = ui.ctx().input(|input| {
         font_size_delta_from_shift_scroll(input.modifiers, input.smooth_scroll_delta)
     });
     if pointer_over_editor && shift_scroll_delta != 0.0 {
-        app.set_font_size(app.font_size() + shift_scroll_delta);
+        crate::app::app_state::settings_controller::set_font_size(
+            app,
+            app.state.app_settings.font_size() + shift_scroll_delta,
+        );
     }
 }
 

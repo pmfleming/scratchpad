@@ -74,10 +74,6 @@ impl TextInspection {
         TextScanSummary::scan_text(text).into_inspection(line_endings)
     }
 
-    pub(super) fn inspect_spans<'a>(spans: impl Iterator<Item = &'a str>) -> Self {
-        TextScanSummary::scan_spans(spans).into_inspection(None)
-    }
-
     pub(super) fn inspect_span_refs<'a>(spans: impl Iterator<Item = &'a str>) -> Self {
         let spans = spans.collect::<Vec<_>>();
         Self::inspect_span_slice(&spans)
@@ -433,7 +429,7 @@ mod tests {
 
     #[test]
     fn byte_inspection_preserves_crlf_across_spans() {
-        let inspection = TextInspection::inspect_spans(["a\r", "\nb\rc\n"].into_iter());
+        let inspection = TextInspection::inspect_span_refs(["a\r", "\nb\rc\n"].into_iter());
 
         assert_eq!(inspection.line_count, 4);
         assert_eq!(inspection.line_ending_counts.crlf, 1);

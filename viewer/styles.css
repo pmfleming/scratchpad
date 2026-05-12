@@ -2286,6 +2286,7 @@ tr:hover td {
 .code-history__meta strong {
     color: var(--text);
     font-size: 18px;
+    white-space: nowrap;
 }
 
 .code-history__meta span:last-child {
@@ -2311,22 +2312,46 @@ tr:hover td {
     text-anchor: end;
 }
 
-.code-history__area {
-    fill: rgba(111, 208, 255, 0.14);
-}
-
 .code-history__line {
     fill: none;
-    stroke: var(--accent);
+    stroke: var(--series-color, var(--accent));
     stroke-width: 3;
     stroke-linejoin: round;
     stroke-linecap: round;
 }
 
 .code-history__markers circle {
-    fill: var(--accent-2);
+    fill: var(--series-color, var(--accent-2));
     stroke: #10151c;
     stroke-width: 1.5;
+}
+
+.code-history__legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 18px;
+    margin-top: 10px;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.code-history__legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.code-history__legend-item i {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    flex: 0 0 auto;
+}
+
+.code-history__legend-item strong {
+    color: var(--text);
+    font-weight: 700;
 }
 
 .top-concerns-grid {
@@ -3669,6 +3694,139 @@ tr:hover td {
 .performance-focus-row__main em {
     color: var(--muted);
     font-size: 12px;
+    font-style: normal;
+}
+
+.performance-gap-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    min-width: 0;
+}
+
+.performance-gap-card {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid rgba(159, 176, 195, 0.16);
+    border-radius: 8px;
+    background: rgba(16, 21, 28, 0.44);
+    box-shadow: inset 4px 0 0 var(--promise-color, var(--accent));
+}
+
+.performance-gap-card__header {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: start;
+    min-width: 0;
+}
+
+.performance-gap-card__header h3,
+.performance-gap-card__header p {
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.performance-gap-card__header h3 {
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.25;
+}
+
+.performance-gap-card__header p {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.performance-gap-chart {
+    display: block;
+    width: 100%;
+    height: auto;
+    min-height: 118px;
+    border-radius: 8px;
+    background:
+        linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+        rgba(8, 12, 18, 0.54);
+    background-size: 28px 28px;
+}
+
+.performance-gap-chart--empty {
+    display: grid;
+    place-items: center;
+    min-height: 118px;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.performance-gap-chart__grid line {
+    stroke: rgba(159, 176, 195, 0.14);
+    stroke-width: 1;
+}
+
+.performance-gap-chart__bars rect {
+    fill: color-mix(in srgb, var(--promise-color, var(--accent)) 74%, rgba(255, 255, 255, 0.12));
+    opacity: 0.82;
+}
+
+.performance-gap-chart__memory-line {
+    fill: none;
+    stroke: #f3c969;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2.4;
+}
+
+.performance-gap-chart__memory-points circle {
+    fill: #f3c969;
+    stroke: #10151c;
+    stroke-width: 1.4;
+}
+
+.performance-gap-chart__labels text,
+.performance-gap-chart__axis {
+    fill: var(--muted);
+    font-size: 10px;
+}
+
+.performance-gap-chart__axis--right {
+    fill: #f3c969;
+}
+
+.performance-gap-card__metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.performance-gap-card__metrics span {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    padding: 7px 8px;
+    border-radius: 8px;
+    background: rgba(159, 176, 195, 0.08);
+}
+
+.performance-gap-card__metrics strong,
+.performance-gap-card__metrics em {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.performance-gap-card__metrics strong {
+    color: var(--text);
+    font-size: 12px;
+}
+
+.performance-gap-card__metrics em {
+    color: var(--muted);
+    font-size: 10px;
     font-style: normal;
 }
 
@@ -5176,6 +5334,16 @@ button.status-pill:hover {
 }
 
 @media (max-width: 720px) {
+    .code-history__meta {
+        grid-template-columns: 1fr;
+        justify-items: center;
+        text-align: center;
+    }
+
+    .code-history__meta span:last-child {
+        text-align: center;
+    }
+
     .promise-status-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }

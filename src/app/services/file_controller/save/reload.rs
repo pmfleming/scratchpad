@@ -31,12 +31,15 @@ impl FileController {
         index: usize,
         encoding_name: &str,
     ) -> bool {
-        if index >= app.tabs().len() {
+        if index >= app.tab_manager.tabs.as_slice().len() {
             return false;
         }
 
-        if app.tabs()[index].active_buffer().is_dirty {
-            app.set_warning_status_in_domain(
+        if app.tab_manager.tabs.as_slice()[index]
+            .active_buffer()
+            .is_dirty
+        {
+            app.state.status.set_warning_status_in_domain(
                 StatusDomain::Encoding,
                 "Save or discard changes before reopening with a different encoding.",
             );
@@ -44,14 +47,14 @@ impl FileController {
         }
 
         let Some(path) = Self::buffer_path(app, index) else {
-            app.set_warning_status_in_domain(
+            app.state.status.set_warning_status_in_domain(
                 StatusDomain::Encoding,
                 "Save this file before reopening it with another encoding.",
             );
             return false;
         };
 
-        let buffer = app.tabs()[index].active_buffer();
+        let buffer = app.tab_manager.tabs.as_slice()[index].active_buffer();
         if Self::has_pending_reopen_with_encoding_for_buffer(app, buffer.id) {
             return true;
         }
@@ -82,22 +85,22 @@ impl FileController {
             return;
         };
 
-        let current_buffer = app.tabs()[tab_index]
+        let current_buffer = app.tab_manager.tabs.as_slice()[tab_index]
             .buffer_by_id(action.buffer_id)
             .expect("buffer location validated");
         if current_buffer.is_dirty && action.mode == PendingReloadMode::AutoRefreshCleanBuffer {
-            let buffer = app.tabs_mut()[tab_index]
+            let buffer = app.tab_manager.tabs.as_mut_slice()[tab_index]
                 .buffer_by_id_mut(action.buffer_id)
                 .expect("buffer location validated");
             buffer.mark_conflict_on_disk(result.disk_state);
-            app.set_warning_status_in_domain(
+            app.state.status.set_warning_status_in_domain(
                 StatusDomain::Disk,
                 format!(
                     "{} changed on disk. Your tab has unsaved edits.",
                     action.buffer_name
                 ),
             );
-            app.mark_session_dirty();
+            app.tab_manager.mark_session_dirty();
             return;
         }
 
@@ -118,14 +121,18 @@ impl FileController {
                     action.mode == PendingReloadMode::AutoRefreshCleanBuffer,
                 );
                 match action.mode {
-                    PendingReloadMode::AutoRefreshCleanBuffer => app.set_info_status_in_domain(
-                        StatusDomain::Disk,
-                        format!("Reloaded {buffer_name} because it changed on disk."),
-                    ),
-                    PendingReloadMode::ExplicitReload => app.set_info_status_in_domain(
-                        StatusDomain::Disk,
-                        format!("Reloaded {buffer_name} from disk."),
-                    ),
+                    PendingReloadMode::AutoRefreshCleanBuffer => {
+                        app.state.status.set_info_status_in_domain(
+                            StatusDomain::Disk,
+                            format!("Reloaded {buffer_name} because it changed on disk."),
+                        )
+                    }
+                    PendingReloadMode::ExplicitReload => {
+                        app.state.status.set_info_status_in_domain(
+                            StatusDomain::Disk,
+                            format!("Reloaded {buffer_name} from disk."),
+                        )
+                    }
                 }
             }
             Err(error) => {
@@ -154,7 +161,7 @@ impl FileController {
             return;
         };
 
-        if app.tabs()[tab_index]
+        if app.tab_manager.tabs.as_slice()[tab_index]
             .buffer_by_id(action.buffer_id)
             .is_some_and(|buffer| buffer.is_dirty)
         {
@@ -172,7 +179,7 @@ impl FileController {
                     result.disk_state,
                     false,
                 );
-                app.set_info_status_in_domain(
+                app.state.status.set_info_status_in_domain(
                     StatusDomain::Encoding,
                     format!("Reopened {buffer_name} with {encoding_label}."),
                 );
@@ -184,7 +191,7 @@ impl FileController {
                     "file_controller::save",
                     &error,
                 );
-                app.set_error_status_with_detail(
+                app.state.status.set_error_status_with_detail(
                     StatusDomain::Encoding,
                     format!(
                         "Could not reopen {} with that encoding.",
@@ -204,9 +211,10 @@ impl FileController {
         disk_state: Option<DiskFileState>,
         mark_auto_reloaded: bool,
     ) -> String {
-        app.tabs_mut()[index].clear_view_state_for_buffer_replacement(buffer_id);
+        app.tab_manager.tabs.as_mut_slice()[index]
+            .clear_view_state_for_buffer_replacement(buffer_id);
         let (buffer_name, deferred_refresh) = {
-            let buffer = app.tabs_mut()[index]
+            let buffer = app.tab_manager.tabs.as_mut_slice()[index]
                 .buffer_by_id_mut(buffer_id)
                 .expect("buffer location validated");
             buffer.replace_from_loaded_buffer(loaded);
@@ -219,7 +227,7 @@ impl FileController {
             (buffer.name.clone(), Self::deferred_buffer_refresh(buffer))
         };
         app.mark_search_dirty();
-        app.mark_session_dirty();
+        app.tab_manager.mark_session_dirty();
         Self::queue_deferred_buffer_refreshes(app, deferred_refresh);
         buffer_name
     }
@@ -244,11 +252,11 @@ impl FileController {
     ) {
         match action.mode {
             PendingReloadMode::AutoRefreshCleanBuffer => {
-                let buffer = app.tabs_mut()[tab_index]
+                let buffer = app.tab_manager.tabs.as_mut_slice()[tab_index]
                     .buffer_by_id_mut(action.buffer_id)
                     .expect("buffer location validated");
                 buffer.mark_stale_on_disk(disk_state);
-                app.set_warning_status_with_detail(
+                app.state.status.set_warning_status_with_detail(
                     StatusDomain::Disk,
                     format!(
                         "Detected a newer on-disk version of {} but could not reload it.",
@@ -256,10 +264,10 @@ impl FileController {
                     ),
                     error,
                 );
-                app.mark_session_dirty();
+                app.tab_manager.mark_session_dirty();
             }
             PendingReloadMode::ExplicitReload => {
-                app.report_reload_failed(error);
+                app.state.status.report_reload_failed(error);
             }
         }
     }

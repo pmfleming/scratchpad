@@ -7,7 +7,7 @@ use eframe::egui;
 
 pub(super) fn show_top_drag_bar(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     if !matches!(
-        app.tab_list_position(),
+        app.state.app_settings.tab_list_position(),
         TabListPosition::Left | TabListPosition::Right
     ) {
         return;

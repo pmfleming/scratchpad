@@ -8,9 +8,8 @@ use crate::app::startup::StartupOptions;
 use crate::app::text_history::TextHistoryCache;
 use eframe::egui;
 use search_state::SearchState;
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::fmt::Display;
-use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
@@ -19,16 +18,18 @@ mod background_io;
 mod file_watch;
 mod frame;
 mod search_state;
-mod settings_state;
+pub(crate) mod settings_state;
 mod startup_state;
 mod types;
-mod workspace;
+pub(crate) mod workspace;
 
 pub use search_state::SearchScope;
+pub(crate) use search_state::api as search_controller;
 pub(crate) use search_state::{
     SearchFocusTarget, SearchFreshness, SearchProgress, SearchReplaceAvailability,
     SearchResultEntry, SearchResultGroup, SearchScopeOrigin, SearchStatus,
 };
+pub(crate) use settings_state::mutators as settings_controller;
 pub(crate) use types::{
     AppSurface, PendingBackgroundAction, PendingEncodingComplianceAction, PendingOpenHereAction,
     PendingOpenTabsAction, PendingReloadBufferAction, PendingReloadMode,
@@ -36,6 +37,8 @@ pub(crate) use types::{
     PendingStartupRestoreAction, PendingStartupRestoreCompareAction, PendingTabContextMenu,
     PendingTextMetadataAction, StartupRestoreConflict, TabRenameState,
 };
+use workspace::display_tabs::WorkspaceSelectionState;
+pub(crate) use workspace::lifecycle as workspace_controller;
 
 pub(crate) const SESSION_SNAPSHOT_INTERVAL: Duration = Duration::from_secs(1);
 const CHROME_TRANSITION_FRAMES: u8 = 2;
@@ -99,13 +102,44 @@ impl RuntimeIoState {
             pending_file_watch_rescans: HashMap::new(),
         }
     }
+
+    pub(crate) fn has_pending_background_actions(&self) -> bool {
+        !self.pending_background_actions.is_empty()
+    }
+
+    pub(crate) fn allocate_background_request_id(&mut self) -> u64 {
+        let request_id = self.next_background_request_id;
+        self.next_background_request_id = self.next_background_request_id.saturating_add(1);
+        request_id
+    }
+
+    pub(crate) fn insert_pending_background_action(
+        &mut self,
+        request_id: u64,
+        action: PendingBackgroundAction,
+    ) {
+        self.pending_background_actions.insert(request_id, action);
+    }
+
+    pub(crate) fn remove_pending_background_action(
+        &mut self,
+        request_id: u64,
+    ) -> Option<PendingBackgroundAction> {
+        self.pending_background_actions.remove(&request_id)
+    }
+
+    pub(crate) fn drop_pending_background_action(&mut self, request_id: u64) {
+        self.pending_background_actions.remove(&request_id);
+    }
 }
 
 pub struct ScratchpadApp {
     pub(crate) tab_manager: TabManager,
-    state: ScratchpadAppState,
+    pub(crate) state: ScratchpadAppState,
 }
 
+// Stop adding new impl ScratchpadApp blocks except for top-level orchestration.
+// New feature code should take the narrow dependency it needs, not &mut ScratchpadApp.
 pub struct ScratchpadAppState {
     pub(crate) app_settings: AppSettings,
     pub(crate) status: StatusState,
@@ -134,28 +168,13 @@ pub struct ScratchpadAppState {
     pub(crate) status_history_open: bool,
     pub(crate) search_state: SearchState,
     pub(crate) chrome_transition_frames_remaining: u8,
-    pub(crate) selected_tab_slots: BTreeSet<usize>,
-    pub(crate) tab_selection_anchor: Option<usize>,
+    pub(crate) workspace_selection: WorkspaceSelectionState,
     pub(crate) tab_rename_state: Option<TabRenameState>,
     pub(crate) pending_tab_context_menu: Option<PendingTabContextMenu>,
     pub(crate) startup_restore_conflicts: Vec<StartupRestoreConflict>,
     pub(crate) workspace_reflow_axis: SplitAxis,
     pub(crate) settings_preview_quote_index: usize,
     pub(crate) io: RuntimeIoState,
-}
-
-impl Deref for ScratchpadApp {
-    type Target = ScratchpadAppState;
-
-    fn deref(&self) -> &Self::Target {
-        &self.state
-    }
-}
-
-impl DerefMut for ScratchpadApp {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.state
-    }
 }
 
 impl Default for ScratchpadApp {
@@ -178,7 +197,7 @@ impl eframe::App for ScratchpadApp {
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        let color = self.editor_background_color();
+        let color = self.state.app_settings.editor_background_color();
         [
             f32::from(color.r()) / 255.0,
             f32::from(color.g()) / 255.0,
@@ -194,13 +213,13 @@ impl eframe::App for ScratchpadApp {
 
 impl Drop for ScratchpadApp {
     fn drop(&mut self) {
-        if self.persist_session_on_drop {
+        if self.state.persist_session_on_drop {
             let _ = self.persist_session_now();
         }
     }
 }
 
-impl ScratchpadApp {
+impl StatusState {
     pub(crate) fn set_info_status_in_domain(
         &mut self,
         domain: StatusDomain,
@@ -326,6 +345,10 @@ impl ScratchpadApp {
         );
     }
 
+    pub(crate) fn clear_current(&mut self) {
+        self.current = None;
+    }
+
     fn set_status(
         &mut self,
         severity: StatusSeverity,
@@ -334,17 +357,17 @@ impl ScratchpadApp {
         detail: Option<String>,
     ) {
         let status = StatusMessage {
-            id: self.status.next_id,
+            id: self.next_id,
             severity,
             domain,
             text: message.into(),
             detail,
         };
-        self.status.next_id = self.status.next_id.saturating_add(1);
-        self.status.current = Some(status.clone());
-        self.status.history.push_back(status);
-        while self.status.history.len() > STATUS_HISTORY_LIMIT {
-            self.status.history.pop_front();
+        self.next_id = self.next_id.saturating_add(1);
+        self.current = Some(status.clone());
+        self.history.push_back(status);
+        while self.history.len() > STATUS_HISTORY_LIMIT {
+            self.history.pop_front();
         }
     }
 }
@@ -355,7 +378,7 @@ mod tests {
 
     fn app_without_startup_status() -> ScratchpadApp {
         let mut app = ScratchpadApp::default();
-        app.status = StatusState::default();
+        app.state.status = StatusState::default();
         app
     }
 
@@ -378,21 +401,39 @@ mod tests {
     fn status_setters_preserve_severity() {
         let mut app = app_without_startup_status();
 
-        app.set_info_status_in_domain(super::StatusDomain::Disk, "Saved.");
+        app.state
+            .status
+            .set_info_status_in_domain(super::StatusDomain::Disk, "Saved.");
         assert_eq!(
-            app.status.current.as_ref().map(|status| status.severity),
+            app.state
+                .status
+                .current
+                .as_ref()
+                .map(|status| status.severity),
             Some(StatusSeverity::Info)
         );
 
-        app.set_warning_status_in_domain(super::StatusDomain::Disk, "Changed on disk.");
+        app.state
+            .status
+            .set_warning_status_in_domain(super::StatusDomain::Disk, "Changed on disk.");
         assert_eq!(
-            app.status.current.as_ref().map(|status| status.severity),
+            app.state
+                .status
+                .current
+                .as_ref()
+                .map(|status| status.severity),
             Some(StatusSeverity::Warning)
         );
 
-        app.set_error_status_in_domain(super::StatusDomain::Disk, "Could not save.");
+        app.state
+            .status
+            .set_error_status_in_domain(super::StatusDomain::Disk, "Could not save.");
         assert_eq!(
-            app.status.current.as_ref().map(|status| status.severity),
+            app.state
+                .status
+                .current
+                .as_ref()
+                .map(|status| status.severity),
             Some(StatusSeverity::Error)
         );
     }
@@ -401,14 +442,19 @@ mod tests {
     fn setting_status_pushes_to_history() {
         let mut app = app_without_startup_status();
 
-        app.set_info_status_in_domain(super::StatusDomain::Disk, "Saved.");
-        app.set_warning_status_in_domain(super::StatusDomain::Disk, "Changed on disk.");
+        app.state
+            .status
+            .set_info_status_in_domain(super::StatusDomain::Disk, "Saved.");
+        app.state
+            .status
+            .set_warning_status_in_domain(super::StatusDomain::Disk, "Changed on disk.");
 
-        assert_eq!(app.status.history.len(), 2);
-        assert_eq!(app.status.history[0].text, "Saved.");
-        assert_eq!(app.status.history[1].text, "Changed on disk.");
+        assert_eq!(app.state.status.history.len(), 2);
+        assert_eq!(app.state.status.history[0].text, "Saved.");
+        assert_eq!(app.state.status.history[1].text, "Changed on disk.");
         assert_eq!(
-            app.status
+            app.state
+                .status
                 .current
                 .as_ref()
                 .map(|status| status.text.as_str()),
@@ -421,13 +467,18 @@ mod tests {
         let mut app = app_without_startup_status();
 
         for index in 0..(STATUS_HISTORY_LIMIT + 5) {
-            app.set_info_status_in_domain(super::StatusDomain::Disk, format!("Message {index}."));
+            app.state
+                .status
+                .set_info_status_in_domain(super::StatusDomain::Disk, format!("Message {index}."));
         }
 
-        assert_eq!(app.status.history.len(), STATUS_HISTORY_LIMIT);
-        assert_eq!(app.status.history.front().map(|status| status.id), Some(5));
+        assert_eq!(app.state.status.history.len(), STATUS_HISTORY_LIMIT);
         assert_eq!(
-            app.status.history.back().map(|status| status.id),
+            app.state.status.history.front().map(|status| status.id),
+            Some(5)
+        );
+        assert_eq!(
+            app.state.status.history.back().map(|status| status.id),
             Some((STATUS_HISTORY_LIMIT + 4) as u64)
         );
     }
@@ -435,45 +486,53 @@ mod tests {
     #[test]
     fn clearing_current_status_keeps_history() {
         let mut app = app_without_startup_status();
-        app.set_error_status_in_domain(super::StatusDomain::Disk, "Could not save.");
+        app.state
+            .status
+            .set_error_status_in_domain(super::StatusDomain::Disk, "Could not save.");
 
         app.clear_status_message();
 
-        assert!(app.status.current.is_none());
-        assert_eq!(app.status.history.len(), 1);
-        assert_eq!(app.status.history[0].text, "Could not save.");
+        assert!(app.state.status.current.is_none());
+        assert_eq!(app.state.status.history.len(), 1);
+        assert_eq!(app.state.status.history[0].text, "Could not save.");
     }
 
     #[test]
     fn common_status_helpers_keep_raw_errors_in_detail() {
         let mut app = app_without_startup_status();
 
-        app.report_session_save_failed("access denied");
+        app.state.status.report_session_save_failed("access denied");
         assert_eq!(
-            app.status
+            app.state
+                .status
                 .current
                 .as_ref()
                 .map(|status| status.text.as_str()),
             Some("Could not save your session.")
         );
         assert_eq!(
-            app.status
+            app.state
+                .status
                 .current
                 .as_ref()
                 .and_then(|status| status.detail.as_deref()),
             Some("access denied")
         );
 
-        app.report_settings_toml_parse_failed("expected key");
+        app.state
+            .status
+            .report_settings_toml_parse_failed("expected key");
         assert_eq!(
-            app.status
+            app.state
+                .status
                 .current
                 .as_ref()
                 .map(|status| status.text.as_str()),
             Some("Could not apply settings.toml.")
         );
         assert_eq!(
-            app.status
+            app.state
+                .status
                 .current
                 .as_ref()
                 .and_then(|status| status.detail.as_deref()),
@@ -485,12 +544,14 @@ mod tests {
     fn common_status_helpers_avoid_fragile_vocabulary() {
         let mut app = app_without_startup_status();
 
-        app.report_session_save_failed("disk full");
-        let session_save = app.status.current.as_ref().unwrap().text.clone();
-        app.report_settings_toml_parse_failed("bad toml");
-        let settings_toml = app.status.current.as_ref().unwrap().text.clone();
-        app.report_search_results_stale_for_replace();
-        let stale_search = app.status.current.as_ref().unwrap().text.clone();
+        app.state.status.report_session_save_failed("disk full");
+        let session_save = app.state.status.current.as_ref().unwrap().text.clone();
+        app.state
+            .status
+            .report_settings_toml_parse_failed("bad toml");
+        let settings_toml = app.state.status.current.as_ref().unwrap().text.clone();
+        app.state.status.report_search_results_stale_for_replace();
+        let stale_search = app.state.status.current.as_ref().unwrap().text.clone();
 
         primary_texts_are_clean(&[&session_save, &settings_toml, &stale_search]);
     }

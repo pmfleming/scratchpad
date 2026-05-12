@@ -77,7 +77,7 @@
                     <div class="panel-card__header">
                         <div>
                             <h2>Rust lines over time</h2>
-                            <p>Date of push to total tracked Rust code lines.</p>
+                            <p>Date of push to application, test, and other tracked Rust code lines.</p>
                         </div>
                     </div>
                     <div id="overview-code-history" class="code-history"></div>
@@ -344,6 +344,17 @@
             </div>
             <div class="performance-speed-layout">
                 <div id="performance-headline-charts" class="performance-promise-graphs"></div>
+            </div>
+
+            <div class="panel-card performance-gap-panel">
+                <div class="panel-card__header">
+                    <div>
+                        <h2>Capacity Probes</h2>
+                        <p>Application Capacity Targets Not Directly Targeted By Overall Capacity Goals</p>
+                    </div>
+                    <button class="run-button" data-run-item="performance.resources">Refresh Resources</button>
+                </div>
+                <div id="performance-measurement-gaps" class="performance-gap-grid"></div>
             </div>
 
             <div class="panel-card performance-review-coverage">

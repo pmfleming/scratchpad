@@ -1,3 +1,4 @@
+use super::api::activate_search_match;
 use super::helpers::{
     build_replacement_targets, cursor_range_from_char_range, fallback_selection_for_target,
     first_document_order_replacement, next_selection_for_target,
@@ -11,35 +12,43 @@ use std::ops::Range;
 
 impl ScratchpadApp {
     pub fn replace_current_search_match(&mut self) -> bool {
-        if !self.search_replace_availability().allows_actions() {
+        if !self
+            .state
+            .search_state
+            .replace_availability()
+            .allows_actions()
+        {
             return false;
         }
-        let Some(index) = self.search_state.active_match_index else {
+        let Some(index) = self.state.search_state.active_match_index else {
             return false;
         };
-        let Some(search_match) = self.search_state.matches.get(index).cloned() else {
+        let Some(search_match) = self.state.search_state.matches.get(index).cloned() else {
             return false;
         };
         if !self.validate_search_match_for_replace(&search_match) {
-            self.search_state.clear_replace_all_confirmation();
-            self.report_search_results_stale_for_replace();
+            self.state.search_state.clear_replace_all_confirmation();
+            self.state.status.report_search_results_stale_for_replace();
             self.mark_search_dirty();
             self.refresh_search_state();
             return false;
         }
-        if !self.activate_search_match(index) {
+        if !activate_search_match(self, index) {
             return false;
         }
 
         let replacement = match self.replacement_for_match(&search_match) {
             Ok(replacement) => replacement,
             Err(error) => {
-                self.set_error_status_in_domain(StatusDomain::Search, error.message());
+                self.state
+                    .status
+                    .set_error_status_in_domain(StatusDomain::Search, error.message());
                 return false;
             }
         };
         let replacement_char_count = replacement.chars().count();
         let previous_selection = self
+            .tab_manager
             .active_tab()
             .and_then(|tab| tab.view(search_match.view_id))
             .and_then(|view| view.cursor_range)
@@ -64,7 +73,9 @@ impl ScratchpadApp {
         }
 
         if let Err(error) = self.rebuild_active_buffer_search_matches() {
-            self.set_error_status_in_domain(StatusDomain::Search, error.message());
+            self.state
+                .status
+                .set_error_status_in_domain(StatusDomain::Search, error.message());
             self.mark_search_dirty();
             self.refresh_search_state();
             return false;
@@ -84,9 +95,11 @@ impl ScratchpadApp {
         next_selection: CursorRange,
         error_message: &str,
     ) -> Option<String> {
-        let active_tab_index = self.active_tab_index();
+        let active_tab_index = self.tab_manager.active_tab_index;
         let buffer_label = self
-            .tabs()
+            .tab_manager
+            .tabs
+            .as_slice()
             .get(active_tab_index)
             .and_then(|tab| tab.buffer_by_id(buffer_id))
             .map(|buffer| {
@@ -98,7 +111,7 @@ impl ScratchpadApp {
             })?;
 
         let replaced = {
-            let tab = &mut self.tabs_mut()[active_tab_index];
+            let tab = &mut self.tab_manager.tabs.as_mut_slice()[active_tab_index];
             let buffer = tab.buffer_by_id_mut(buffer_id)?;
             if buffer
                 .replace_char_ranges_with_undo(replacements, previous_selection, next_selection)
@@ -115,7 +128,9 @@ impl ScratchpadApp {
             }
         };
         if !replaced {
-            self.set_error_status_in_domain(StatusDomain::Search, error_message);
+            self.state
+                .status
+                .set_error_status_in_domain(StatusDomain::Search, error_message);
             return None;
         }
 
@@ -128,7 +143,9 @@ impl ScratchpadApp {
             Ok(Some(plan)) => plan,
             Ok(None) => return false,
             Err(error) => {
-                self.set_error_status_in_domain(StatusDomain::Search, error.message());
+                self.state
+                    .status
+                    .set_error_status_in_domain(StatusDomain::Search, error.message());
                 return false;
             }
         };
@@ -146,7 +163,7 @@ impl ScratchpadApp {
 
         let replaced = self.replace_all_in_multiple_buffers(&plan);
         if replaced {
-            self.set_info_status_in_domain(
+            self.state.status.set_info_status_in_domain(
                 StatusDomain::Search,
                 format!(
                     "Replaced {} matches across {} buffers.",
@@ -160,8 +177,8 @@ impl ScratchpadApp {
 
     fn replace_all_in_active_buffer(&mut self, plan: &ReplacementPlan) -> bool {
         if !self.validate_replacement_plan(plan) {
-            self.search_state.pending_replace_all_confirmation = None;
-            self.report_search_results_stale_for_replace();
+            self.state.search_state.pending_replace_all_confirmation = None;
+            self.state.status.report_search_results_stale_for_replace();
             self.mark_search_dirty();
             self.refresh_search_state();
             return false;
@@ -169,6 +186,7 @@ impl ScratchpadApp {
 
         let target = &plan.targets[0];
         let previous_selection = self
+            .tab_manager
             .active_tab()
             .and_then(|tab| tab.view(target.view_id))
             .and_then(|view| view.cursor_range);
@@ -189,7 +207,9 @@ impl ScratchpadApp {
             return false;
         };
         if let Err(error) = self.rebuild_active_buffer_search_matches() {
-            self.set_error_status_in_domain(StatusDomain::Search, error.message());
+            self.state
+                .status
+                .set_error_status_in_domain(StatusDomain::Search, error.message());
             self.mark_search_dirty();
             self.refresh_search_state();
             return false;
@@ -197,7 +217,7 @@ impl ScratchpadApp {
         self.select_first_match_in_active_buffer();
         self.mark_search_dirty();
         self.refresh_search_state();
-        self.set_info_status_in_domain(
+        self.state.status.set_info_status_in_domain(
             StatusDomain::Search,
             format!(
                 "Replaced {} matches in {}.",
@@ -209,19 +229,19 @@ impl ScratchpadApp {
 
     fn replace_all_in_multiple_buffers(&mut self, plan: &ReplacementPlan) -> bool {
         if !self.validate_replacement_plan(plan) {
-            self.search_state.pending_replace_all_confirmation = None;
-            self.report_search_results_stale_for_replace();
+            self.state.search_state.pending_replace_all_confirmation = None;
+            self.state.status.report_search_results_stale_for_replace();
             return false;
         }
 
         for target in &plan.targets {
             if !self.validate_replacement_target(target) {
-                self.search_state.pending_replace_all_confirmation = None;
-                self.report_search_results_stale_for_replace();
+                self.state.search_state.pending_replace_all_confirmation = None;
+                self.state.status.report_search_results_stale_for_replace();
                 return false;
             }
             if !self.apply_replacement_target(target) {
-                self.set_error_status_in_domain(
+                self.state.status.set_error_status_in_domain(
                     StatusDomain::Search,
                     "Search replace-all stopped after some targets may already have been updated.",
                 );
@@ -229,16 +249,17 @@ impl ScratchpadApp {
             }
         }
         self.mark_search_dirty();
-        self.mark_session_dirty();
-        self.search_state.pending_replace_all_confirmation = None;
+        self.tab_manager.mark_session_dirty();
+        self.state.search_state.pending_replace_all_confirmation = None;
         self.refresh_search_state();
         true
     }
 
     fn confirm_replace_all_plan(&mut self, plan: &ReplacementPlan) -> bool {
-        let replacement = self.search_state.replacement.clone();
-        let requested_generation = self.search_state.requested_generation;
+        let replacement = self.state.search_state.replacement.clone();
+        let requested_generation = self.state.search_state.requested_generation;
         if self
+            .state
             .search_state
             .pending_replace_all_confirmation
             .as_ref()
@@ -246,7 +267,7 @@ impl ScratchpadApp {
                 confirmation.matches_plan(plan, &replacement, requested_generation)
             })
         {
-            self.search_state.pending_replace_all_confirmation = None;
+            self.state.search_state.pending_replace_all_confirmation = None;
             return true;
         }
 
@@ -257,8 +278,8 @@ impl ScratchpadApp {
         } else {
             format!("\"{}\"", replacement)
         };
-        self.search_state.pending_replace_all_confirmation = Some(confirmation);
-        self.set_info_status_in_domain(StatusDomain::Search, format!(
+        self.state.search_state.pending_replace_all_confirmation = Some(confirmation);
+        self.state.status.set_info_status_in_domain(StatusDomain::Search, format!(
             "Replace all will change {} matches across {} buffers with {replacement_preview}. Run Replace All again to confirm.",
             plan.total_match_count,
             plan.affected_buffer_count()
@@ -273,7 +294,7 @@ impl ScratchpadApp {
     }
 
     fn validate_replacement_target(&self, target: &ReplacementTargetPlan) -> bool {
-        let Some(tab) = self.tabs().get(target.tab_index) else {
+        let Some(tab) = self.tab_manager.tabs.as_slice().get(target.tab_index) else {
             return false;
         };
         let Some(buffer) = tab.buffer_by_id(target.buffer_id) else {
@@ -294,7 +315,7 @@ impl ScratchpadApp {
     }
 
     fn validate_search_match_for_replace(&self, search_match: &super::SearchMatch) -> bool {
-        let Some(tab) = self.tabs().get(search_match.tab_index) else {
+        let Some(tab) = self.tab_manager.tabs.as_slice().get(search_match.tab_index) else {
             return false;
         };
         let Some(buffer) = tab.buffer_by_id(search_match.buffer_id) else {
@@ -312,17 +333,19 @@ impl ScratchpadApp {
     }
 
     fn build_replace_all_plan(&self) -> Result<Option<ReplacementPlan>, SearchError> {
-        if self.search_state.matches.is_empty() {
+        if self.state.search_state.matches.is_empty() {
             return Ok(None);
         }
-        let program =
-            SearchProgram::compile(&self.search_state.query, self.search_state.search_options())?;
-        let replacement = self.search_state.replacement.clone();
+        let program = SearchProgram::compile(
+            &self.state.search_state.query,
+            self.state.search_state.search_options(),
+        )?;
+        let replacement = self.state.search_state.replacement.clone();
 
         Ok(Some(ReplacementPlan {
-            scope: self.search_state.scope,
-            total_match_count: self.search_state.matches.len(),
-            targets: build_replacement_targets(&self.search_state.matches, |search_match| {
+            scope: self.state.search_state.scope,
+            total_match_count: self.state.search_state.matches.len(),
+            targets: build_replacement_targets(&self.state.search_state.matches, |search_match| {
                 program.expand_replacement(&search_match.matched_text, &replacement)
             })?,
         }))
@@ -332,14 +355,19 @@ impl ScratchpadApp {
         &self,
         search_match: &super::SearchMatch,
     ) -> Result<String, SearchError> {
-        let program =
-            SearchProgram::compile(&self.search_state.query, self.search_state.search_options())?;
-        program.expand_replacement(&search_match.matched_text, &self.search_state.replacement)
+        let program = SearchProgram::compile(
+            &self.state.search_state.query,
+            self.state.search_state.search_options(),
+        )?;
+        program.expand_replacement(
+            &search_match.matched_text,
+            &self.state.search_state.replacement,
+        )
     }
 
     fn rebuild_active_buffer_search_matches(&mut self) -> Result<(), SearchError> {
-        let active_tab_index = self.active_tab_index();
-        let Some(tab) = self.tabs().get(active_tab_index) else {
+        let active_tab_index = self.tab_manager.active_tab_index;
+        let Some(tab) = self.tab_manager.tabs.as_slice().get(active_tab_index) else {
             return Ok(());
         };
         let active_view_id = tab.active_view_id;
@@ -353,19 +381,22 @@ impl ScratchpadApp {
         let buffer_label = buffer.display_name();
         let target_revision = buffer.document_revision();
         let text = buffer.text();
-        let program =
-            SearchProgram::compile(&self.search_state.query, self.search_state.search_options())?;
+        let program = SearchProgram::compile(
+            &self.state.search_state.query,
+            self.state.search_state.search_options(),
+        )?;
         let ranges = search_program(&text, &program).matches;
 
         let insertion_index = self
+            .state
             .search_state
             .matches
             .iter()
             .position(|search_match| {
                 search_match.tab_index == active_tab_index && search_match.buffer_id == buffer_id
             })
-            .unwrap_or(self.search_state.matches.len());
-        self.search_state.matches.retain(|search_match| {
+            .unwrap_or(self.state.search_state.matches.len());
+        self.state.search_state.matches.retain(|search_match| {
             search_match.tab_index != active_tab_index || search_match.buffer_id != buffer_id
         });
 
@@ -382,16 +413,22 @@ impl ScratchpadApp {
                 .collect(),
             range,
         });
-        self.search_state
+        self.state
+            .search_state
             .matches
             .splice(insertion_index..insertion_index, new_matches);
-        self.search_state.total_match_count = self.search_state.matches.len();
-        self.search_state.displayed_match_count = self.search_state.matches.len();
+        self.state.search_state.total_match_count = self.state.search_state.matches.len();
+        self.state.search_state.displayed_match_count = self.state.search_state.matches.len();
         Ok(())
     }
 
     fn apply_replacement_target(&mut self, target: &ReplacementTargetPlan) -> bool {
-        let Some(tab) = self.tabs_mut().get_mut(target.tab_index) else {
+        let Some(tab) = self
+            .tab_manager
+            .tabs
+            .as_mut_slice()
+            .get_mut(target.tab_index)
+        else {
             return false;
         };
         let previous_selection = tab
@@ -418,7 +455,7 @@ impl ScratchpadApp {
     }
 
     fn finalize_tab_buffer_mutation(&mut self, tab_index: usize, buffer_id: BufferId) {
-        let tab = &mut self.tabs_mut()[tab_index];
+        let tab = &mut self.tab_manager.tabs.as_mut_slice()[tab_index];
         if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
             buffer.mark_dirty_after_local_edit();
         }

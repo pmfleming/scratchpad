@@ -107,6 +107,6 @@ fn apply_workspace_slot_command(
 
 fn clear_consumed_scroll_request(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
     if outcome.consumed_scroll_request {
-        app.tab_manager_mut().pending_scroll_to_active = false;
+        app.tab_manager.pending_scroll_to_active = false;
     }
 }

@@ -48,7 +48,7 @@ fn text_history_budget_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         "Undo history limits.",
         false,
         |ui| {
-            let mut budget = app.app_settings.history_budget;
+            let mut budget = app.state.app_settings.history_budget;
             byte_budget_row(
                 ui,
                 "Per-file",
@@ -93,13 +93,15 @@ fn text_history_budget_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                         );
                         record_settings_control_box("button.Reset to auto", response.rect);
                         if response.clicked() {
-                            app.reset_history_budget_to_auto();
+                            crate::app::app_state::settings_controller::reset_history_budget_to_auto(
+                                app,
+                            );
                         }
                     });
                 },
             );
-            if budget != app.app_settings.history_budget {
-                app.set_history_budget(budget);
+            if budget != app.state.app_settings.history_budget {
+                crate::app::app_state::settings_controller::set_history_budget(app, budget);
             }
         },
     );

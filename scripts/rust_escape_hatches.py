@@ -27,6 +27,10 @@ PATTERNS = {
     "asm_macro": (r"\b(?:asm|global_asm)!\s*\(", 14.0),
     "transmute": (r"\btransmute(?:_copy)?\s*(?:::<[^>]+>)?\s*\(", 12.0),
     "maybe_uninit": (r"\bMaybeUninit\b", 5.0),
+    "deref_impl": (r"\bimpl\b(?:\s*<[^{};]*>)?\s+(?:(?:::)?(?:std|core)::ops::)?Deref\s+for\b", 4.0),
+    "deref_mut_impl": (r"\bimpl\b(?:\s*<[^{};]*>)?\s+(?:(?:::)?(?:std|core)::ops::)?DerefMut\s+for\b", 5.0),
+    "glob_import": (r"::\s*\*", 2.0),
+    "container_ref_return": (r"->\s*&\s*(?!mut\b)(?:'[A-Za-z_][A-Za-z0-9_]*\s+)?(?:(?:::)?[A-Za-z_][A-Za-z0-9_]*::)*(?:Vec|HashMap|BTreeMap|HashSet|BTreeSet|Option|Box|Rc|Arc|String)\s*(?:<|\b)", 3.0),
     "repr_escape": (r"#\s*\[\s*repr\s*\(\s*(?:C|packed|transparent|align)", 5.0),
     "linkage_escape": (r"#\s*\[\s*(?:no_mangle|export_name|link_name|link_section|used)\b", 8.0),
     "clippy_suppression": (r"#\s*!\s*\[\s*(?:allow|expect)\s*\([^)]*clippy::|#\s*\[\s*(?:allow|expect)\s*\([^)]*clippy::", 3.0),
@@ -46,6 +50,10 @@ SIGNAL_LABELS = {
     "asm_macro": "inline assembly",
     "transmute": "transmute",
     "maybe_uninit": "MaybeUninit",
+    "deref_impl": "Deref impl",
+    "deref_mut_impl": "DerefMut impl",
+    "glob_import": "glob import",
+    "container_ref_return": "container ref return",
     "repr_escape": "layout repr",
     "linkage_escape": "linkage attribute",
     "clippy_suppression": "Clippy suppression",
@@ -64,6 +72,9 @@ class EscapeHatchRecord:
     ffi_count: int
     global_mutability_count: int
     raw_memory_count: int
+    deref_coercion_count: int
+    glob_import_count: int
+    container_ref_return_count: int
     layout_linkage_count: int
     clippy_suppression_count: int
     lint_suppression_count: int
@@ -148,6 +159,9 @@ class RustEscapeHatchAnalyzer:
             + counts["transmute"]
             + counts["maybe_uninit"]
         )
+        deref_coercion_count = counts["deref_impl"] + counts["deref_mut_impl"]
+        glob_import_count = counts["glob_import"]
+        container_ref_return_count = counts["container_ref_return"]
         layout_linkage_count = counts["repr_escape"] + counts["linkage_escape"]
         clippy_suppression_count = counts["clippy_suppression"]
         lint_suppression_count = counts["lint_suppression"]
@@ -169,6 +183,9 @@ class RustEscapeHatchAnalyzer:
             ffi_count=ffi_count,
             global_mutability_count=global_mutability_count,
             raw_memory_count=raw_memory_count,
+            deref_coercion_count=deref_coercion_count,
+            glob_import_count=glob_import_count,
+            container_ref_return_count=container_ref_return_count,
             layout_linkage_count=layout_linkage_count,
             clippy_suppression_count=clippy_suppression_count,
             lint_suppression_count=lint_suppression_count,
@@ -298,7 +315,7 @@ def render_cli(payload: object) -> str:
 
     for index, item in enumerate(rows[:10], start=1):
         lines.append(
-            f"{index:>2}. {item['module_key']} | score={item['escape_hatch_score']:.1f} | total={item['total_count']} | unsafe={item['unsafe_count']} | raw={item['raw_memory_count']} | ffi={item['ffi_count']}"
+            f"{index:>2}. {item['module_key']} | score={item['escape_hatch_score']:.1f} | total={item['total_count']} | unsafe={item['unsafe_count']} | raw={item['raw_memory_count']} | deref={item['deref_coercion_count']} | glob={item['glob_import_count']} | container_refs={item['container_ref_return_count']} | ffi={item['ffi_count']}"
         )
     if len(rows) > 10:
         lines.append(f"... and {len(rows) - 10} more modules.")

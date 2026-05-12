@@ -191,7 +191,8 @@ Quality producers:
 - `scripts/clone_alert.py` detects token-based clones and can use token, AST,
   MIR, or combined engines.
 - `scripts/rust_escape_hatches.py` audits unsafe blocks, FFI, raw memory,
-  layout/linkage attributes, mutable globals, and lint suppressions.
+  `Deref`/`DerefMut` impls, glob imports, immutable container-reference return
+  types, layout/linkage attributes, mutable globals, and lint suppressions.
 - `scripts/locality_bench.py` measures dependency spread, hidden coupling,
   interface explicitness, test proximity, and change locality.
 - `scripts/leverage_metrics.py` measures module reach, invariant surface,

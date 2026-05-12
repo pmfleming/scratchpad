@@ -16,7 +16,7 @@ fn auto_hide_visible(
     has_context: bool,
     now: Instant,
 ) -> bool {
-    if !app.auto_hide_tab_list() {
+    if !app.state.app_settings.auto_hide_tab_list() {
         return true;
     }
 
@@ -25,7 +25,7 @@ fn auto_hide_visible(
         return true;
     }
 
-    if let Some(deadline) = app.vertical_tab_list_hide_deadline {
+    if let Some(deadline) = app.state.vertical_tab_list_hide_deadline {
         if deadline > now {
             ctx.request_repaint_after(deadline.saturating_duration_since(now));
             return true;
@@ -35,9 +35,9 @@ fn auto_hide_visible(
         return false;
     }
 
-    if app.vertical_tab_list_open {
+    if app.state.vertical_tab_list_open {
         app.delay_tab_list_hide(now);
-        ctx.request_repaint_after(app.tab_list_auto_hide_delay());
+        ctx.request_repaint_after(app.state.app_settings.tab_list_auto_hide_delay());
         return true;
     }
 
@@ -268,7 +268,7 @@ pub(crate) fn vertical_panel_visible(
     side: TabListPosition,
     now: Instant,
 ) -> bool {
-    let reveal_width = if app.vertical_tab_list_open {
+    let reveal_width = if app.state.vertical_tab_list_open {
         app.vertical_tab_list_width()
     } else {
         HEADER_HEIGHT

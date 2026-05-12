@@ -23,11 +23,12 @@ pub(super) fn top_drag_button_position(app: &ScratchpadApp, viewport: egui::Rect
 fn top_drag_button_center_x(app: &ScratchpadApp, viewport: egui::Rect) -> f32 {
     let bounds = drag_button_center_bounds(viewport);
     let default_center = viewport.center().x.clamp(bounds.0, bounds.1);
-    let Some(tab) = app.active_tab() else {
+    let Some(tab) = app.tab_manager.active_tab() else {
         return default_center;
     };
 
-    let workspace_rect = top_drag_workspace_rect(viewport, app.tab_list_position(), app);
+    let workspace_rect =
+        top_drag_workspace_rect(viewport, app.state.app_settings.tab_list_position(), app);
     let preferred_center = preferred_top_split_center_x(&tab.root_pane, workspace_rect)
         .unwrap_or(default_center)
         .clamp(bounds.0, bounds.1);
@@ -122,7 +123,11 @@ fn top_tile_control_exclusion_rects(tab: &WorkspaceTab, rect: egui::Rect) -> Vec
     top_leaf_rects
         .into_iter()
         .filter_map(|(view_id, tile_rect)| {
-            top_tile_controls_rect(tile_rect, tab.can_promote_view(view_id), can_close)
+            top_tile_controls_rect(
+                tile_rect,
+                crate::app::domain::tab::summary::can_promote_view(tab, view_id),
+                can_close,
+            )
         })
         .collect()
 }

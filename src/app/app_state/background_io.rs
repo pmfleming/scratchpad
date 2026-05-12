@@ -25,13 +25,13 @@ impl ScratchpadApp {
     pub(crate) fn poll_background_io(&mut self, ctx: &egui::Context) {
         self.drain_background_io_results();
 
-        if !self.io.pending_background_actions.is_empty() {
+        if self.state.io.has_pending_background_actions() {
             ctx.request_repaint_after(BACKGROUND_IO_POLL_INTERVAL);
         }
     }
 
     pub fn drain_background_io_results(&mut self) {
-        while let Ok(result) = self.io.background_io_rx.try_recv() {
+        while let Ok(result) = self.state.io.background_io_rx.try_recv() {
             self.apply_background_io_result(result);
         }
     }
@@ -40,7 +40,7 @@ impl ScratchpadApp {
         let deadline = Instant::now() + Duration::from_secs(1);
         while Instant::now() < deadline {
             self.drain_background_io_results();
-            if self.io.pending_background_actions.is_empty() {
+            if !self.state.io.has_pending_background_actions() {
                 return;
             }
             std::thread::sleep(Duration::from_millis(5));
@@ -113,7 +113,7 @@ impl ScratchpadApp {
             return;
         }
 
-        match self.io.pending_background_actions.remove(&request_id) {
+        match self.state.io.remove_pending_background_action(request_id) {
             Some(PendingBackgroundAction::OpenTabs(action)) => {
                 FileController::apply_async_open_tabs_result(self, action, results);
             }
@@ -146,7 +146,7 @@ impl ScratchpadApp {
         result: Result<(), String>,
     ) {
         let Some(PendingBackgroundAction::SavePath(action)) =
-            self.io.pending_background_actions.remove(&request_id)
+            self.state.io.remove_pending_background_action(request_id)
         else {
             return;
         };
@@ -158,8 +158,11 @@ impl ScratchpadApp {
         request_id: u64,
         results: Vec<LoadedPathResult>,
     ) {
-        let Some(PendingBackgroundAction::OpenTabs(action)) =
-            self.io.pending_background_actions.get_mut(&request_id)
+        let Some(PendingBackgroundAction::OpenTabs(action)) = self
+            .state
+            .io
+            .pending_background_actions
+            .get_mut(&request_id)
         else {
             return;
         };
@@ -168,8 +171,11 @@ impl ScratchpadApp {
         for loaded in results {
             FileController::process_open_tab_result(self, &mut summary, loaded);
         }
-        if let Some(PendingBackgroundAction::OpenTabs(action)) =
-            self.io.pending_background_actions.get_mut(&request_id)
+        if let Some(PendingBackgroundAction::OpenTabs(action)) = self
+            .state
+            .io
+            .pending_background_actions
+            .get_mut(&request_id)
         {
             action.accumulator = summary;
         }
@@ -181,7 +187,7 @@ impl ScratchpadApp {
         result: Result<Option<crate::app::services::session_store::RestoredSession>, String>,
     ) {
         let Some(PendingBackgroundAction::StartupRestore(action)) =
-            self.io.pending_background_actions.remove(&request_id)
+            self.state.io.remove_pending_background_action(request_id)
         else {
             return;
         };
@@ -195,8 +201,11 @@ impl ScratchpadApp {
         legacy_settings: crate::app::services::settings_store::AppSettings,
     ) {
         let apply_legacy_settings = {
-            let Some(PendingBackgroundAction::StartupRestore(action)) =
-                self.io.pending_background_actions.get_mut(&request_id)
+            let Some(PendingBackgroundAction::StartupRestore(action)) = self
+                .state
+                .io
+                .pending_background_actions
+                .get_mut(&request_id)
             else {
                 return;
             };
@@ -207,9 +216,9 @@ impl ScratchpadApp {
             self.apply_settings(legacy_settings);
             let _ = self.persist_settings_now();
         }
-        if !self.tabs().is_empty() {
-            self.tab_manager_mut().active_tab_index =
-                active_tab_index.min(self.tabs().len().saturating_sub(1));
+        if !self.tab_manager.tabs.as_slice().is_empty() {
+            self.tab_manager
+                .set_active_tab_index_clamped(active_tab_index);
         }
     }
 
@@ -219,8 +228,11 @@ impl ScratchpadApp {
         tab: crate::app::domain::WorkspaceTab,
     ) {
         let first_streamed_tab = {
-            let Some(PendingBackgroundAction::StartupRestore(action)) =
-                self.io.pending_background_actions.get_mut(&request_id)
+            let Some(PendingBackgroundAction::StartupRestore(action)) = self
+                .state
+                .io
+                .pending_background_actions
+                .get_mut(&request_id)
             else {
                 return;
             };
@@ -230,9 +242,9 @@ impl ScratchpadApp {
         };
 
         if first_streamed_tab {
-            self.tab_manager_mut().set_tabs(vec![tab], 0);
+            self.tab_manager.set_tabs(vec![tab], 0);
         } else {
-            self.tab_manager_mut().append_restored_tab(tab);
+            self.tab_manager.append_restored_tab(tab);
         }
         self.ensure_active_tab_slot_selected();
         self.refresh_startup_restore_conflicts();
@@ -241,13 +253,13 @@ impl ScratchpadApp {
 
     fn apply_session_persisted_result(&mut self, request_id: u64, result: Result<(), String>) {
         let Some(PendingBackgroundAction::PersistSession(_)) =
-            self.io.pending_background_actions.remove(&request_id)
+            self.state.io.remove_pending_background_action(request_id)
         else {
             return;
         };
         match result {
             Ok(()) => {
-                self.last_session_persist = Instant::now();
+                self.state.last_session_persist = Instant::now();
             }
             Err(error) => {
                 diagnostics::record_background_failure(
@@ -256,8 +268,8 @@ impl ScratchpadApp {
                     &error,
                     [("request_id", request_id.to_string())],
                 );
-                self.mark_session_dirty();
-                self.report_session_save_failed(error);
+                self.tab_manager.mark_session_dirty();
+                self.state.status.report_session_save_failed(error);
             }
         }
     }
@@ -277,13 +289,15 @@ impl ScratchpadApp {
         >,
     ) {
         let Some(PendingBackgroundAction::RefreshTextMetadata(_)) =
-            self.io.pending_background_actions.remove(&request_id)
+            self.state.io.remove_pending_background_action(request_id)
         else {
             return;
         };
         if let Ok((line_count, artifact_summary, format)) = result
             && let Some(buffer) = self
-                .tabs_mut()
+                .tab_manager
+                .tabs
+                .as_mut_slice()
                 .iter_mut()
                 .find_map(|tab| tab.buffer_by_id_mut(buffer_id))
         {
@@ -299,13 +313,15 @@ impl ScratchpadApp {
         result: Result<bool, String>,
     ) {
         let Some(PendingBackgroundAction::RefreshEncodingCompliance(_)) =
-            self.io.pending_background_actions.remove(&request_id)
+            self.state.io.remove_pending_background_action(request_id)
         else {
             return;
         };
         if let Ok(has_non_compliant_characters) = result
             && let Some(buffer) = self
-                .tabs_mut()
+                .tab_manager
+                .tabs
+                .as_mut_slice()
                 .iter_mut()
                 .find_map(|tab| tab.buffer_by_id_mut(buffer_id))
         {
@@ -322,24 +338,25 @@ impl ScratchpadApp {
         let legacy_settings = match result {
             Ok(Some(restored)) if action.streamed_tab_count > 0 => {
                 restored_session = true;
-                if !self.tabs().is_empty() {
-                    self.tab_manager_mut().active_tab_index = restored
-                        .active_tab_index
-                        .min(self.tabs().len().saturating_sub(1));
+                if !self.tab_manager.tabs.as_slice().is_empty() {
+                    self.tab_manager
+                        .set_active_tab_index_clamped(restored.active_tab_index);
                 }
-                self.tab_manager_mut().evict_inactive_tab_state();
+                self.tab_manager.evict_inactive_tab_state();
                 if let Some(status) = restored.restore_status.as_ref() {
                     match status.level {
-                        crate::app::services::session_store::RestoreStatusLevel::Info => self
-                            .set_info_status_in_domain(
+                        crate::app::services::session_store::RestoreStatusLevel::Info => {
+                            self.state.status.set_info_status_in_domain(
                                 crate::app::app_state::StatusDomain::Session,
                                 status.message.clone(),
-                            ),
-                        crate::app::services::session_store::RestoreStatusLevel::Warning => self
-                            .set_warning_status_in_domain(
+                            )
+                        }
+                        crate::app::services::session_store::RestoreStatusLevel::Warning => {
+                            self.state.status.set_warning_status_in_domain(
                                 crate::app::app_state::StatusDomain::Session,
                                 status.message.clone(),
-                            ),
+                            )
+                        }
                     }
                 }
                 (!action.loaded_from_settings && !action.restore_started)
@@ -357,7 +374,7 @@ impl ScratchpadApp {
                     &error,
                     std::iter::empty(),
                 );
-                self.report_session_restore_failed(error);
+                self.state.status.report_session_restore_failed(error);
                 None
             }
         };

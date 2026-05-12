@@ -14,56 +14,50 @@ use eframe::egui;
 use std::path::Path;
 use std::time::Duration;
 
-mod display_tabs;
 mod history_budget;
-mod mutators;
+pub(crate) mod mutators;
 mod tab_order;
 mod toml_refresh;
 mod window;
 
-impl ScratchpadApp {
-    pub(crate) const VERTICAL_TAB_LIST_MIN_WIDTH: f32 = 96.0;
-    pub(crate) const VERTICAL_TAB_LIST_MAX_WIDTH: f32 = 360.0;
-    pub(crate) const TAB_LIST_AUTO_HIDE_DELAY_MIN_SECONDS: f32 = 0.0;
-    pub(crate) const TAB_LIST_AUTO_HIDE_DELAY_MAX_SECONDS: f32 = 10.0;
-
+impl AppSettings {
     pub fn font_size(&self) -> f32 {
-        self.app_settings.font_size
+        self.font_size
     }
 
     pub fn editor_font(&self) -> EditorFontPreset {
-        self.app_settings.editor_font
+        self.editor_font
     }
 
     pub fn editor_gutter(&self) -> u8 {
-        self.app_settings.editor_gutter
+        self.editor_gutter
     }
 
     pub fn theme_mode(&self) -> AppThemeMode {
-        self.app_settings.theme_mode
+        self.theme_mode
     }
 
     pub(crate) fn has_custom_editor_palette(&self) -> bool {
-        !uses_stock_editor_palette(&self.app_settings)
+        !uses_stock_editor_palette(self)
     }
 
     pub fn editor_text_color(&self) -> egui::Color32 {
         color_from_hex(
-            &self.app_settings.editor_text_color,
+            &self.editor_text_color,
             color_from_hex(DEFAULT_EDITOR_TEXT_COLOR, egui::Color32::WHITE),
         )
     }
 
     pub fn editor_background_color(&self) -> egui::Color32 {
         color_from_hex(
-            &self.app_settings.editor_background_color,
+            &self.editor_background_color,
             color_from_hex(DEFAULT_EDITOR_BACKGROUND_COLOR, egui::Color32::BLACK),
         )
     }
 
     pub fn editor_text_highlight_color(&self) -> egui::Color32 {
         color_from_hex(
-            &self.app_settings.editor_text_highlight_color,
+            &self.editor_text_highlight_color,
             color_from_hex(
                 DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR,
                 egui::Color32::from_rgb(255, 243, 109),
@@ -74,84 +68,87 @@ impl ScratchpadApp {
     pub fn editor_text_highlight_text_color(&self) -> egui::Color32 {
         let generated =
             crate::app::color_contrast::optimal_text_color(self.editor_text_highlight_color());
-        if uses_generated_highlight_text_color(&self.app_settings.editor_text_highlight_text_color)
-        {
+        if uses_generated_highlight_text_color(&self.editor_text_highlight_text_color) {
             return generated;
         }
 
-        color_from_hex(
-            &self.app_settings.editor_text_highlight_text_color,
-            generated,
-        )
-    }
-
-    pub fn showing_settings(&self) -> bool {
-        self.active_surface == AppSurface::Settings
-    }
-
-    pub(crate) fn settings_tab_open(&self) -> bool {
-        self.app_settings.settings_tab_open
+        color_from_hex(&self.editor_text_highlight_text_color, generated)
     }
 
     pub fn word_wrap(&self) -> bool {
-        self.app_settings.word_wrap
+        self.word_wrap
     }
 
     pub fn tab_list_position(&self) -> TabListPosition {
-        self.app_settings.tab_list_position
+        self.tab_list_position
     }
 
     pub fn tab_order_mode(&self) -> TabOrderMode {
-        self.app_settings.tab_order_mode
+        self.tab_order_mode
     }
 
     pub fn file_open_disposition(&self) -> FileOpenDisposition {
-        self.app_settings.file_open_disposition
+        self.file_open_disposition
     }
 
     pub fn new_tab_placement(&self) -> NewTabPlacement {
-        self.app_settings.new_tab_placement
+        self.new_tab_placement
     }
 
     pub fn startup_session_behavior(&self) -> StartupSessionBehavior {
-        self.app_settings.startup_session_behavior
+        self.startup_session_behavior
     }
 
     pub fn tab_list_width(&self) -> f32 {
-        self.app_settings.tab_list_width
+        self.tab_list_width
+    }
+
+    pub fn auto_hide_tab_list(&self) -> bool {
+        self.auto_hide_tab_list
+    }
+
+    pub fn tab_list_auto_hide_delay_seconds(&self) -> f32 {
+        self.tab_list_auto_hide_delay_seconds
+    }
+
+    pub fn recent_files_enabled(&self) -> bool {
+        self.recent_files_enabled
+    }
+
+    pub fn status_bar_visible(&self) -> bool {
+        self.status_bar_visible
+    }
+
+    pub(crate) fn tab_list_auto_hide_delay(&self) -> Duration {
+        Duration::from_secs_f32(sanitize_tab_list_auto_hide_delay_seconds(
+            self.tab_list_auto_hide_delay_seconds,
+        ))
+    }
+}
+
+impl ScratchpadApp {
+    pub(crate) const VERTICAL_TAB_LIST_MIN_WIDTH: f32 = 96.0;
+    pub(crate) const VERTICAL_TAB_LIST_MAX_WIDTH: f32 = 360.0;
+    pub(crate) const TAB_LIST_AUTO_HIDE_DELAY_MIN_SECONDS: f32 = 0.0;
+    pub(crate) const TAB_LIST_AUTO_HIDE_DELAY_MAX_SECONDS: f32 = 10.0;
+
+    pub fn showing_settings(&self) -> bool {
+        self.state.active_surface == AppSurface::Settings
+    }
+
+    pub(crate) fn settings_tab_open(&self) -> bool {
+        self.state.app_settings.settings_tab_open
     }
 
     pub(crate) fn vertical_tab_list_width(&self) -> f32 {
-        self.app_settings.tab_list_width.clamp(
+        self.state.app_settings.tab_list_width.clamp(
             Self::VERTICAL_TAB_LIST_MIN_WIDTH,
             Self::VERTICAL_TAB_LIST_MAX_WIDTH,
         )
     }
 
-    pub fn auto_hide_tab_list(&self) -> bool {
-        self.app_settings.auto_hide_tab_list
-    }
-
-    pub fn tab_list_auto_hide_delay_seconds(&self) -> f32 {
-        self.app_settings.tab_list_auto_hide_delay_seconds
-    }
-
-    pub fn recent_files_enabled(&self) -> bool {
-        self.app_settings.recent_files_enabled
-    }
-
-    pub fn status_bar_visible(&self) -> bool {
-        self.app_settings.status_bar_visible
-    }
-
-    pub(crate) fn tab_list_auto_hide_delay(&self) -> Duration {
-        Duration::from_secs_f32(sanitize_tab_list_auto_hide_delay_seconds(
-            self.app_settings.tab_list_auto_hide_delay_seconds,
-        ))
-    }
-
     pub fn settings_path(&self) -> &Path {
-        self.settings_store.path()
+        self.state.settings_store.path()
     }
 
     pub(crate) fn is_settings_file_path(&self, path: &Path) -> bool {
@@ -160,7 +157,7 @@ impl ScratchpadApp {
 
     pub(crate) fn mark_active_buffer_as_settings_file(&mut self) {
         let settings_path = self.settings_path().to_path_buf();
-        let Some(tab) = self.active_tab_mut() else {
+        let Some(tab) = self.tab_manager.active_tab_mut() else {
             return;
         };
         let buffer = tab.active_buffer_mut();
@@ -171,7 +168,7 @@ impl ScratchpadApp {
             && !buffer.is_settings_file
         {
             buffer.is_settings_file = true;
-            self.mark_session_dirty();
+            self.tab_manager.mark_session_dirty();
         }
     }
 
@@ -187,14 +184,14 @@ impl ScratchpadApp {
             }
             Err(error) => {
                 self.apply_settings(AppSettings::default());
-                self.report_settings_load_failed(error);
+                self.state.status.report_settings_load_failed(error);
                 false
             }
         }
     }
 
     fn load_settings_snapshot(&self) -> std::io::Result<Option<AppSettings>> {
-        self.settings_store.load()
+        self.state.settings_store.load()
     }
 
     pub(super) fn apply_settings(&mut self, settings: AppSettings) {
@@ -203,29 +200,33 @@ impl ScratchpadApp {
         settings.history_budget = settings.history_budget.sanitized();
         settings.tab_list_auto_hide_delay_seconds =
             sanitize_tab_list_auto_hide_delay_seconds(settings.tab_list_auto_hide_delay_seconds);
-        self.active_surface = if settings.settings_tab_open {
+        self.state.active_surface = if settings.settings_tab_open {
             AppSurface::Settings
         } else {
             AppSurface::Workspace
         };
-        self.settings_tab_index = settings.settings_tab_index.unwrap_or(usize::MAX);
-        self.app_settings = settings;
+        self.state.settings_tab_index = settings.settings_tab_index.unwrap_or(usize::MAX);
+        self.state.app_settings = settings;
         self.apply_history_budget_to_open_buffers();
     }
 
     fn refresh_settings_snapshot(&mut self) {
-        self.app_settings.settings_tab_open = self.settings_tab_open();
-        self.app_settings.settings_tab_index = (self.settings_tab_index != usize::MAX)
-            .then_some(self.settings_tab_index.min(self.tabs().len()));
+        self.state.app_settings.settings_tab_open = self.settings_tab_open();
+        self.state.app_settings.settings_tab_index = (self.state.settings_tab_index != usize::MAX)
+            .then_some(
+                self.state
+                    .settings_tab_index
+                    .min(self.tab_manager.tabs.as_slice().len()),
+            );
     }
 
     pub(crate) fn persist_settings_now(&mut self) -> std::io::Result<()> {
         self.refresh_settings_snapshot();
-        self.settings_store.save(&self.app_settings)
+        self.state.settings_store.save(&self.state.app_settings)
     }
 
     pub fn apply_theme_to_context(&self, ctx: &egui::Context) {
-        ctx.set_theme(self.app_settings.theme_mode.theme_preference());
+        ctx.set_theme(self.state.app_settings.theme_mode.theme_preference());
         ctx.set_visuals_of(egui::Theme::Dark, egui::Visuals::dark());
         ctx.set_visuals_of(egui::Theme::Light, egui::Visuals::light());
     }

@@ -68,7 +68,7 @@ fn unicode_insert_delete_and_extract_use_char_offsets() {
     tree.remove_char_range(1..2);
 
     assert_eq!(tree.extract_text(), "aβc");
-    assert_eq!(tree.char_position(2).column_index, 2);
+    assert_eq!(super::query::char_position(&tree, 2).column_index, 2);
     assert_eq!(tree.extract_range(1..3), "βc");
 }
 
@@ -128,10 +128,13 @@ fn batched_previews_match_single_preview_on_edited_tree() {
     let ranges = match_char_ranges(&tree.extract_text(), "target");
     let expected = ranges
         .iter()
-        .map(|range| tree.preview_for_match(range))
+        .map(|range| super::preview::preview_for_match(&tree, range))
         .collect::<Vec<_>>();
 
-    assert_eq!(tree.previews_for_matches(&ranges, ranges.len()), expected);
+    assert_eq!(
+        super::preview::previews_for_matches(&tree, &ranges, ranges.len()),
+        expected
+    );
 }
 
 #[test]

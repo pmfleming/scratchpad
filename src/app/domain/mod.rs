@@ -14,6 +14,7 @@ pub use buffer::{
 };
 pub use panes::{PaneBranch, PaneNode, SplitAxis, SplitPath};
 pub use tab::{TabAttentionState, WorkspaceTab};
+pub(crate) use tab_manager::DisplayTabSlot;
 pub use tab_manager::{PendingAction, TabManager};
 pub use view::{
     CursorRevealMode, EditorViewState, LayoutCacheKey, SearchHighlightState,

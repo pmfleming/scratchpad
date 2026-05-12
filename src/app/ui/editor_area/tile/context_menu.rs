@@ -37,7 +37,10 @@ pub(super) fn attach_editor_context_menu(
 ) {
     activate_inactive_tile_on_secondary_click(app, tile_response, request);
 
-    let can_promote = app.tabs()[request.tab_index].can_promote_view(request.view_id);
+    let can_promote = crate::app::domain::tab::summary::can_promote_view(
+        &app.tab_manager.tabs.as_slice()[request.tab_index],
+        request.view_id,
+    );
     tile_response.context_menu(|ui| {
         set_menu_width(ui, EDITOR_CONTEXT_MENU_WIDTH);
         render_standard_edit_menu(ui, app);
@@ -60,7 +63,9 @@ pub(super) fn activate_inactive_tile_on_secondary_click(
     request: &TileRenderRequest,
 ) {
     if tile_response.secondary_clicked() && !request.is_active {
-        app.activate_view(request.view_id);
+        app.handle_command(AppCommand::ActivateView {
+            view_id: request.view_id,
+        });
         app.request_focus_for_view(request.view_id);
     }
 }

@@ -59,7 +59,7 @@ fn attach_tab_context_menu_impl(
     if secondary_clicked {
         app.select_only_tab_slot(slot_index);
         if allow_pending_tab_popup {
-            app.pending_tab_context_menu = Some(PendingTabContextMenu {
+            app.state.pending_tab_context_menu = Some(PendingTabContextMenu {
                 slot_index,
                 click_x: response
                     .interact_pointer_pos()
@@ -71,6 +71,7 @@ fn attach_tab_context_menu_impl(
 
     let menu_state = TabContextMenuState::new(app, slot_index);
     let pending_menu = app
+        .state
         .pending_tab_context_menu
         .filter(|pending| pending.slot_index == slot_index);
 
@@ -90,7 +91,7 @@ fn attach_tab_context_menu_impl(
         .open_bool(&mut pending.open)
         .show(|ui| render_tab_context_menu(ui, app, slot_index, &menu_state));
 
-        app.pending_tab_context_menu = pending.open.then_some(pending);
+        app.state.pending_tab_context_menu = pending.open.then_some(pending);
         return if secondary_clicked {
             TabContextClick::Secondary
         } else {
@@ -184,7 +185,10 @@ fn render_tab_context_menu(
         menu_state.toggle_tab_list_label,
         menu_state.toggle_tab_list_icon,
     ) {
-        app.set_auto_hide_tab_list(!app.auto_hide_tab_list());
+        crate::app::app_state::settings_controller::set_auto_hide_tab_list(
+            app,
+            !app.state.app_settings.auto_hide_tab_list(),
+        );
         ui.close();
     }
     render_tab_order_submenu(ui, app);
@@ -257,7 +261,7 @@ fn render_location_actions(
         if let Some(path) = path
             && let Err(error) = reveal_in_explorer(path)
         {
-            app.set_warning_status_with_detail(
+            app.state.status.set_warning_status_with_detail(
                 StatusDomain::File,
                 "Could not reveal this file in Explorer.",
                 error.to_string(),
@@ -302,7 +306,7 @@ fn render_save_actions(
             save_enabled,
         ) {
             if let Some(index) = workspace_index {
-                app.save_file_at(index);
+                crate::app::app_state::workspace_controller::save_file_at(app, index);
             }
             ui.close();
         }
@@ -355,7 +359,7 @@ fn close_menu_row(
 impl TabContextMenuState {
     fn new(app: &ScratchpadApp, slot_index: usize) -> Self {
         let workspace_index = app.workspace_index_for_slot(slot_index);
-        let auto_hide = app.auto_hide_tab_list();
+        let auto_hide = app.state.app_settings.auto_hide_tab_list();
         Self {
             workspace_index,
             is_settings: app.tab_slot_is_settings(slot_index),
@@ -366,8 +370,10 @@ impl TabContextMenuState {
                 "Hide Tab List"
             },
             toggle_tab_list_icon: if auto_hide { TRAY } else { MINUS },
-            close_direction_label: close_direction_label(app.tab_list_position()),
-            close_direction_icon: close_direction_icon(app.tab_list_position()),
+            close_direction_label: close_direction_label(
+                app.state.app_settings.tab_list_position(),
+            ),
+            close_direction_icon: close_direction_icon(app.state.app_settings.tab_list_position()),
         }
     }
 }
@@ -422,7 +428,7 @@ fn render_tab_order_caret(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             TabOrderMode::FileAge,
             TabOrderMode::RecentEdit,
         ] {
-            let selected = app.tab_order_mode() == mode;
+            let selected = app.state.app_settings.tab_order_mode() == mode;
             if menu_button(
                 ui,
                 TAB_CONTEXT_SUBMENU_WIDTH,
@@ -452,7 +458,7 @@ fn render_tab_list_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 Some(tab_list_position_icon(position)),
                 true,
             ) {
-                app.set_tab_list_position(position);
+                crate::app::app_state::settings_controller::set_tab_list_position(app, position);
                 ui.close();
             }
         }
@@ -501,7 +507,9 @@ fn activate_slot(app: &mut ScratchpadApp, slot_index: usize) {
 fn tab_slot_path(app: &ScratchpadApp, slot_index: usize) -> Option<PathBuf> {
     if let Some(index) = app.workspace_index_for_slot(slot_index) {
         return app
-            .tabs()
+            .tab_manager
+            .tabs
+            .as_slice()
             .get(index)
             .and_then(|tab| tab.active_buffer().path.clone());
     }

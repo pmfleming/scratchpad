@@ -83,7 +83,7 @@ fn render_tile_contents(
         ui,
         request.rect,
         request.is_active,
-        app.editor_background_color(),
+        app.state.app_settings.editor_background_color(),
     );
 
     let body_outcome = render_tile_body(ui, app, &request);
@@ -160,15 +160,17 @@ fn render_tile_body_contents(
     request: &TileRenderRequest,
 ) -> TileBodyOutcome {
     let request_focus = app.should_focus_view(request.view_id);
-    let editor_font_id = editor_font_id(app.font_size());
+    let editor_font_id = editor_font_id(app.state.app_settings.font_size());
     let mut content_style =
         editor_content_style(app, request.is_active, request_focus, &editor_font_id);
     content_style.text_edit.right_to_left_reading_order = app
-        .tabs()
+        .tab_manager
+        .tabs
+        .as_slice()
         .get(request.tab_index)
         .and_then(|tab| tab.buffer_for_view(request.view_id))
         .is_some_and(|buffer| buffer.right_to_left_reading_order);
-    let tab = &mut app.tabs_mut()[request.tab_index];
+    let tab = &mut app.tab_manager.tabs.as_mut_slice()[request.tab_index];
     let Some(_buffer) = tab.buffer_for_view(request.view_id) else {
         return TileBodyOutcome {
             changed: false,

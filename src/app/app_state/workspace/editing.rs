@@ -7,7 +7,7 @@ use crate::app::ui::editor_content::native_editor::{
 
 impl ScratchpadApp {
     pub(crate) fn active_buffer_transaction_label(&self) -> Option<String> {
-        self.active_tab().map(|tab| {
+        self.tab_manager.active_tab().map(|tab| {
             tab.active_buffer()
                 .path
                 .as_ref()
@@ -17,12 +17,14 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn active_buffer_can_undo_text_operation(&self) -> bool {
-        self.active_tab()
+        self.tab_manager
+            .active_tab()
             .is_some_and(|tab| tab.active_buffer().document().operation_undo_depth() > 0)
     }
 
     pub(crate) fn active_buffer_can_redo_text_operation(&self) -> bool {
-        self.active_tab()
+        self.tab_manager
+            .active_tab()
             .is_some_and(|tab| tab.active_buffer().document().operation_redo_depth() > 0)
     }
 
@@ -35,8 +37,8 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn select_all_in_active_view(&mut self) -> bool {
-        let active_tab_index = self.active_tab_index();
-        let (total_chars, active_view_id) = match self.active_tab() {
+        let active_tab_index = self.tab_manager.active_tab_index;
+        let (total_chars, active_view_id) = match self.tab_manager.active_tab() {
             Some(tab) => (
                 tab.active_buffer().current_file_length().chars,
                 tab.active_view_id,
@@ -45,7 +47,7 @@ impl ScratchpadApp {
         };
         let selection = select_all_cursor(total_chars);
 
-        let tab = &mut self.tabs_mut()[active_tab_index];
+        let tab = &mut self.tab_manager.tabs.as_mut_slice()[active_tab_index];
         let Some((buffer, view)) = tab.buffer_and_view_mut(active_view_id) else {
             return false;
         };
@@ -58,15 +60,15 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn copy_selected_text_in_active_view(&self) -> Option<String> {
-        let tab = self.active_tab()?;
+        let tab = self.tab_manager.active_tab()?;
         let view = tab.active_view()?;
         let buffer = tab.buffer_for_view(view.id)?;
         selected_text(buffer, view.cursor_range?)
     }
 
     pub(crate) fn cut_selected_text_in_active_view(&mut self) -> Option<String> {
-        let active_tab_index = self.active_tab_index();
-        let active_view_id = self.active_tab()?.active_view_id;
+        let active_tab_index = self.tab_manager.active_tab_index;
+        let active_view_id = self.tab_manager.active_tab()?.active_view_id;
         let (next_selection, selected_text) =
             self.cut_active_view_selection(active_tab_index, active_view_id)?;
 
@@ -77,8 +79,8 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn delete_selected_text_in_active_view(&mut self) -> bool {
-        let active_tab_index = self.active_tab_index();
-        let active_view_id = match self.active_tab() {
+        let active_tab_index = self.tab_manager.active_tab_index;
+        let active_view_id = match self.tab_manager.active_tab() {
             Some(tab) => tab.active_view_id,
             None => return false,
         };
@@ -95,14 +97,14 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn insert_text_in_active_view(&mut self, text: &str) -> bool {
-        let active_tab_index = self.active_tab_index();
-        let active_view_id = match self.active_tab() {
+        let active_tab_index = self.tab_manager.active_tab_index;
+        let active_view_id = match self.tab_manager.active_tab() {
             Some(tab) => tab.active_view_id,
             None => return false,
         };
         let inserted_chars = text.chars().count();
         let next_selection = {
-            let tab = &mut self.tabs_mut()[active_tab_index];
+            let tab = &mut self.tab_manager.tabs.as_mut_slice()[active_tab_index];
             let Some((buffer, view)) = tab.buffer_and_view_mut(active_view_id) else {
                 return false;
             };
@@ -140,7 +142,7 @@ impl ScratchpadApp {
         crate::app::ui::editor_content::native_editor::CursorRange,
         String,
     )> {
-        let tab = &mut self.tabs_mut()[active_tab_index];
+        let tab = &mut self.tab_manager.tabs.as_mut_slice()[active_tab_index];
         let (buffer, view) = tab.buffer_and_view_mut(active_view_id)?;
         let current_selection = view.cursor_range?;
         let (next_selection, selected_text) = cut_selected_text(buffer, current_selection)?;
@@ -156,7 +158,7 @@ impl ScratchpadApp {
         active_tab_index: usize,
         active_view_id: crate::app::domain::ViewId,
     ) -> Option<crate::app::ui::editor_content::native_editor::CursorRange> {
-        let tab = &mut self.tabs_mut()[active_tab_index];
+        let tab = &mut self.tab_manager.tabs.as_mut_slice()[active_tab_index];
         let (buffer, view) = tab.buffer_and_view_mut(active_view_id)?;
         let current_selection = view.cursor_range?;
         let next_selection = delete_selected_text(buffer, current_selection)?;
@@ -168,14 +170,14 @@ impl ScratchpadApp {
     }
 
     fn apply_active_buffer_text_operation(&mut self, undo: bool) -> bool {
-        let active_tab_index = self.active_tab_index();
+        let active_tab_index = self.tab_manager.active_tab_index;
         let active_buffer_label = match self.active_buffer_transaction_label() {
             Some(label) => label,
             None => return false,
         };
 
         let selection = {
-            let tab = &mut self.tabs_mut()[active_tab_index];
+            let tab = &mut self.tab_manager.tabs.as_mut_slice()[active_tab_index];
             let Some(selection) = ({
                 let buffer = &mut tab.buffer;
                 if undo {
@@ -200,7 +202,7 @@ impl ScratchpadApp {
         self.refresh_search_state();
         self.select_next_active_buffer_match_from(selection.primary.index);
         let action = if undo { "Undid" } else { "Redid" };
-        self.set_info_status_in_domain(
+        self.state.status.set_info_status_in_domain(
             StatusDomain::History,
             format!("{action} last text operation in {active_buffer_label}."),
         );

@@ -1,10 +1,11 @@
 use super::WorkspaceTab;
+use crate::app::domain::tab::summary;
 use crate::app::domain::{BufferId, BufferState, EditorViewState, PaneNode, ViewId, tab_support};
 use std::collections::{HashMap, HashSet};
 
 impl WorkspaceTab {
     pub fn promote_view_to_new_tab(&mut self, view_id: ViewId) -> Option<WorkspaceTab> {
-        if !self.can_promote_view(view_id) {
+        if !summary::can_promote_view(self, view_id) {
             return None;
         }
 

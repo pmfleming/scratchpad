@@ -8,7 +8,7 @@ use std::path::{Component, Path, PathBuf};
 
 impl FileController {
     pub(crate) fn rename_tab(app: &mut ScratchpadApp, index: usize, requested_name: &str) -> bool {
-        if index >= app.tabs().len() {
+        if index >= app.tab_manager.tabs.as_slice().len() {
             return false;
         }
 
@@ -21,7 +21,7 @@ impl FileController {
                     "file_controller::rename",
                     error.to_string(),
                 );
-                app.set_warning_status_with_detail(
+                app.state.status.set_warning_status_with_detail(
                     StatusDomain::File,
                     "Could not rename this file.",
                     error.to_string(),
@@ -31,7 +31,7 @@ impl FileController {
         };
 
         let (current_name, current_path, freshness, is_settings_file) = {
-            let buffer = app.tabs()[index].active_buffer();
+            let buffer = app.tab_manager.tabs.as_slice()[index].active_buffer();
             (
                 buffer.name.clone(),
                 buffer.path.clone(),
@@ -46,7 +46,7 @@ impl FileController {
         }
 
         if is_settings_file {
-            app.set_warning_status_in_domain(
+            app.state.status.set_warning_status_in_domain(
                 StatusDomain::Settings,
                 "Rename is unavailable for the settings file.",
             );
@@ -61,13 +61,15 @@ impl FileController {
                     | BufferFreshness::StaleOnDisk
             )
         {
-            let message = app.tabs()[index]
+            let message = app.tab_manager.tabs.as_slice()[index]
                 .active_buffer()
                 .disk_status_message()
                 .unwrap_or_else(|| {
                     "Resolve the on-disk state before renaming this file.".to_owned()
                 });
-            app.set_warning_status_in_domain(StatusDomain::Disk, message);
+            app.state
+                .status
+                .set_warning_status_in_domain(StatusDomain::Disk, message);
             return false;
         }
 
@@ -81,7 +83,7 @@ impl FileController {
                         "file_controller::rename",
                         &error,
                     );
-                    app.set_error_status_with_detail(
+                    app.state.status.set_error_status_with_detail(
                         StatusDomain::File,
                         "Could not rename this file.",
                         error.to_string(),
@@ -104,7 +106,7 @@ impl FileController {
                 &error,
                 [("target_path", target_path.display().to_string())],
             );
-            app.set_error_status_with_detail(
+            app.state.status.set_error_status_with_detail(
                 StatusDomain::File,
                 "Could not rename this file.",
                 error.to_string(),
@@ -115,7 +117,7 @@ impl FileController {
         let settings_path = app.settings_path().to_path_buf();
 
         {
-            let buffer = app.tabs_mut()[index].active_buffer_mut();
+            let buffer = app.tab_manager.tabs.as_mut_slice()[index].active_buffer_mut();
             buffer.name = normalized_name.clone();
             if let Some(target_path) = target_path {
                 buffer.path = Some(target_path.clone());
@@ -124,11 +126,11 @@ impl FileController {
             }
         }
 
-        app.set_info_status_in_domain(
+        app.state.status.set_info_status_in_domain(
             StatusDomain::File,
             format!("Renamed {current_name} to {normalized_name}."),
         );
-        app.mark_session_dirty();
+        app.tab_manager.mark_session_dirty();
         app.apply_current_tab_ordering();
         let _ = app.persist_session_now();
         true

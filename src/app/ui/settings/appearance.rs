@@ -74,24 +74,34 @@ pub(super) fn render_appearance_category(ui: &mut egui::Ui, app: &mut Scratchpad
                 ui,
                 "Text color",
                 "Overrides mode defaults.",
-                app.editor_text_color(),
-                |app, color| app.set_editor_text_color(color),
+                app.state.app_settings.editor_text_color(),
+                |app, color| {
+                    crate::app::app_state::settings_controller::set_editor_text_color(app, color)
+                },
                 app,
             );
             render_color_row(
                 ui,
                 "Background",
                 "Overrides mode defaults.",
-                app.editor_background_color(),
-                |app, color| app.set_editor_background_color(color),
+                app.state.app_settings.editor_background_color(),
+                |app, color| {
+                    crate::app::app_state::settings_controller::set_editor_background_color(
+                        app, color,
+                    )
+                },
                 app,
             );
             render_color_row(
                 ui,
                 "Highlight",
                 "Search match color.",
-                app.editor_text_highlight_color(),
-                |app, color| app.set_editor_text_highlight_color(color),
+                app.state.app_settings.editor_text_highlight_color(),
+                |app, color| {
+                    crate::app::app_state::settings_controller::set_editor_text_highlight_color(
+                        app, color,
+                    )
+                },
                 app,
             );
             ui.add_space(SettingsUi::LAYOUT.preview_top_margin);
@@ -127,7 +137,7 @@ pub(super) fn render_tab_position_category(ui: &mut egui::Ui, app: &mut Scratchp
 
 fn render_theme_mode_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let description = format!("App mode. Detected: {}.", detected_system_theme_label(ui));
-    let options = if app.has_custom_editor_palette() {
+    let options = if app.state.app_settings.has_custom_editor_palette() {
         &THEME_MODE_OPTIONS_WITH_CUSTOM[..]
     } else {
         &THEME_MODE_OPTIONS[..]
@@ -181,11 +191,13 @@ fn render_tab_list_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             description: Some("Strip or side list."),
             combo_id: "settings_tab_list_position",
             record_label: "combo.Tab list",
-            current: app.tab_list_position(),
+            current: app.state.app_settings.tab_list_position(),
             options: &TAB_LIST_POSITIONS,
             selected_label: tab_list_position_label,
             option_label: tab_list_position_label,
-            on_change: |position| app.set_tab_list_position(position),
+            on_change: |position| {
+                crate::app::app_state::settings_controller::set_tab_list_position(app, position)
+            },
         },
     );
 }
@@ -198,11 +210,13 @@ fn render_new_tab_placement_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             description: Some("Placement for new tabs."),
             combo_id: "settings_new_tab_placement",
             record_label: "combo.New tabs",
-            current: app.new_tab_placement(),
+            current: app.state.app_settings.new_tab_placement(),
             options: &NEW_TAB_PLACEMENT_OPTIONS,
             selected_label: new_tab_placement_pill_label,
             option_label: new_tab_placement_label,
-            on_change: |placement| app.set_new_tab_placement(placement),
+            on_change: |placement| {
+                crate::app::app_state::settings_controller::set_new_tab_placement(app, placement)
+            },
         },
     );
 }
@@ -240,8 +254,8 @@ fn render_auto_hide_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         "Auto-hide tab list",
         Some("Collapse until pointer is near."),
         "settings.auto_hide_tab_list",
-        app.auto_hide_tab_list(),
-        |enabled| app.set_auto_hide_tab_list(enabled),
+        app.state.app_settings.auto_hide_tab_list(),
+        |enabled| crate::app::app_state::settings_controller::set_auto_hide_tab_list(app, enabled),
     );
 }
 
@@ -252,7 +266,7 @@ fn render_auto_hide_delay_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         Some("Grace period before collapse."),
         |ui| {
             let current_index = nearest_option_index(
-                app.tab_list_auto_hide_delay_seconds(),
+                app.state.app_settings.tab_list_auto_hide_delay_seconds(),
                 &AUTO_HIDE_DELAY_OPTIONS,
                 |seconds| seconds,
             );
@@ -270,7 +284,8 @@ fn render_auto_hide_delay_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             );
 
             if selected_index as usize != current_index {
-                app.set_tab_list_auto_hide_delay_seconds(
+                crate::app::app_state::settings_controller::set_tab_list_auto_hide_delay_seconds(
+                    app,
                     AUTO_HIDE_DELAY_OPTIONS[selected_index as usize],
                 );
             }
@@ -285,8 +300,10 @@ fn render_status_bar_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         "Status bar",
         Some("Show the bottom status strip."),
         "settings.status_bar_visible",
-        app.status_bar_visible(),
-        |visible| app.defer_status_bar_visible(visible, &ctx),
+        app.state.app_settings.status_bar_visible(),
+        |visible| {
+            crate::app::app_state::settings_controller::defer_status_bar_visible(app, visible, &ctx)
+        },
     );
 }
 
@@ -307,10 +324,10 @@ fn detected_system_theme_label(ui: &egui::Ui) -> &'static str {
 }
 
 fn selected_theme_mode(app: &ScratchpadApp) -> ThemeModeSelection {
-    if app.has_custom_editor_palette() {
+    if app.state.app_settings.has_custom_editor_palette() {
         ThemeModeSelection::Custom
     } else {
-        match app.theme_mode() {
+        match app.state.app_settings.theme_mode() {
             AppThemeMode::System => ThemeModeSelection::System,
             AppThemeMode::Light => ThemeModeSelection::Light,
             AppThemeMode::Dark => ThemeModeSelection::Dark,
@@ -325,10 +342,26 @@ fn apply_theme_mode_selection(
 ) {
     match selection {
         ThemeModeSelection::System => {
-            app.apply_theme_mode_preset(AppThemeMode::System, system_theme)
+            crate::app::app_state::settings_controller::apply_theme_mode_preset(
+                app,
+                AppThemeMode::System,
+                system_theme,
+            )
         }
-        ThemeModeSelection::Light => app.apply_theme_mode_preset(AppThemeMode::Light, system_theme),
-        ThemeModeSelection::Dark => app.apply_theme_mode_preset(AppThemeMode::Dark, system_theme),
+        ThemeModeSelection::Light => {
+            crate::app::app_state::settings_controller::apply_theme_mode_preset(
+                app,
+                AppThemeMode::Light,
+                system_theme,
+            )
+        }
+        ThemeModeSelection::Dark => {
+            crate::app::app_state::settings_controller::apply_theme_mode_preset(
+                app,
+                AppThemeMode::Dark,
+                system_theme,
+            )
+        }
         ThemeModeSelection::Custom => {}
     }
 }

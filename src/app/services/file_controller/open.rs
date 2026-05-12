@@ -119,8 +119,8 @@ impl FileController {
             return;
         }
 
-        if target_index >= app.tabs().len() {
-            app.set_error_status_with_detail(
+        if target_index >= app.tab_manager.tabs.as_slice().len() {
+            app.state.status.set_error_status_with_detail(
                 StatusDomain::Session,
                 "Could not add startup files to that tab.",
                 format!(
@@ -146,8 +146,8 @@ impl FileController {
             return;
         }
 
-        if target_index >= app.tabs().len() {
-            app.set_error_status_with_detail(
+        if target_index >= app.tab_manager.tabs.as_slice().len() {
+            app.state.status.set_error_status_with_detail(
                 StatusDomain::Session,
                 "Could not add startup files to that tab.",
                 format!(
@@ -205,7 +205,7 @@ impl FileController {
     }
 
     fn activate_existing_path(app: &mut ScratchpadApp, path: &Path) -> Option<String> {
-        if let Some((index, view_id)) = app.find_tab_by_path(path) {
+        if let Some((index, view_id)) = app.tab_manager.find_tab_by_path(path) {
             app.handle_command(AppCommand::ActivateTab { index });
             app.handle_command(AppCommand::ActivateView { view_id });
             if app.is_settings_file_path(path) {
@@ -277,7 +277,10 @@ impl FileController {
                     ..
                 } = LoadedFile::from_buffer(buffer);
                 Self::mark_settings_buffer(app, &mut buffer);
-                app.insert_new_tab_from_settings(WorkspaceTab::new(buffer));
+                crate::app::app_state::workspace_controller::insert_new_tab_from_settings(
+                    app,
+                    WorkspaceTab::new(buffer),
+                );
                 app.ensure_active_tab_slot_selected();
                 Self::queue_deferred_buffer_refreshes(app, deferred_refresh);
                 app.mark_search_dirty();
@@ -333,7 +336,7 @@ mod tests {
             pending_scroll_to_active: false,
             buffer_tab_index: Default::default(),
         };
-        app.rebuild_buffer_tab_index();
+        app.tab_manager.rebuild_buffer_tab_index();
         app.clear_tab_selection();
         app
     }
@@ -372,10 +375,13 @@ mod tests {
 
         assert_eq!(summary.opened_count, 1);
         assert_eq!(summary.duplicate_count, 0);
-        assert_eq!(app.tabs().len(), 2);
-        assert_eq!(app.active_tab_index(), 1);
+        assert_eq!(app.tab_manager.tabs.as_slice().len(), 2);
+        assert_eq!(app.tab_manager.active_tab_index, 1);
         assert_eq!(
-            app.tabs()[1].active_buffer().path.as_deref(),
+            app.tab_manager.tabs.as_slice()[1]
+                .active_buffer()
+                .path
+                .as_deref(),
             Some(path.as_path())
         );
     }
@@ -394,7 +400,7 @@ mod tests {
                 WorkspaceTab::new(disk_buffer(&second_path, "second")),
             ],
         );
-        let target_view = app.tabs()[1].active_view_id;
+        let target_view = app.tab_manager.tabs.as_slice()[1].active_view_id;
         let mut summary = OpenBatchSummary::default();
 
         FileController::process_open_tab_result(
@@ -408,9 +414,12 @@ mod tests {
         );
 
         assert_eq!(summary.duplicate_count, 1);
-        assert_eq!(app.tabs().len(), 2);
-        assert_eq!(app.active_tab_index(), 1);
-        assert_eq!(app.tabs()[1].active_view_id, target_view);
+        assert_eq!(app.tab_manager.tabs.as_slice().len(), 2);
+        assert_eq!(app.tab_manager.active_tab_index, 1);
+        assert_eq!(
+            app.tab_manager.tabs.as_slice()[1].active_view_id,
+            target_view
+        );
     }
 
     #[test]
@@ -438,6 +447,6 @@ mod tests {
         );
 
         assert_eq!(summary.failure_count, 1);
-        assert_eq!(app.tabs().len(), 1);
+        assert_eq!(app.tab_manager.tabs.as_slice().len(), 1);
     }
 }

@@ -4,7 +4,7 @@ Date: 2026-05-12
 
 This report summarizes what we learned during the recent seven-promises performance pass. The work focused most heavily on `Large Files`, `Large Text Mutation`, and cross-cutting concurrency/responsiveness, while checking the other promises for regressions after each change.
 
-## Executive Summary
+## Performance Refactor
 
 The biggest measured gain landed in file-backed large-file startup: the 2 GB first visible paint probe improved from `7807.05 ms` to `3645.77 ms`, a `53.3%` reduction and `2.14x` speedup.
 

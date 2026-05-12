@@ -29,7 +29,7 @@ pub(super) fn slot_cell_context<'a>(
     SlotCellContext {
         active_slot_index: app.active_tab_slot_index(),
         duplicate_name_counts,
-        pending_scroll_to_active: app.tab_manager().pending_scroll_to_active,
+        pending_scroll_to_active: app.tab_manager.pending_scroll_to_active,
         showing_settings: app.showing_settings(),
         width,
     }
@@ -97,9 +97,9 @@ fn render_tab_slot_cell(
             .copied()
             .unwrap_or(0)
             > 1;
-        let display_name = tab.full_display_name(has_duplicate);
-        let attention_state = tab.attention_state();
-        let can_promote_all_files = tab.can_promote_all_files();
+        let display_name = crate::app::domain::tab::summary::full_display_name(tab, has_duplicate);
+        let attention_state = crate::app::domain::tab::summary::attention_state(tab);
+        let can_promote_all_files = crate::app::domain::tab::summary::can_promote_all_files(tab);
         let is_active = !context.showing_settings && context.active_slot_index == slot_index;
         let is_selected = app.tab_slot_selected(slot_index);
         let cell_outcome = render_tab_cell_sized(
@@ -191,7 +191,7 @@ fn finish_tab_slot_cell(
 
 fn workspace_tab_for_slot(app: &ScratchpadApp, slot_index: usize) -> Option<&WorkspaceTab> {
     let workspace_index = app.workspace_index_for_slot(slot_index)?;
-    app.tabs().get(workspace_index)
+    app.tab_manager.tabs.as_slice().get(workspace_index)
 }
 
 fn workspace_tab_tooltip(

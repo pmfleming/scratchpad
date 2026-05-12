@@ -32,12 +32,14 @@ struct ActiveBufferPath {
 
 impl FileController {
     pub fn save_file(app: &mut ScratchpadApp) {
-        let index = app.active_tab_index();
+        let index = app.tab_manager.active_tab_index;
         let _ = Self::save_file_at(app, index);
     }
 
     pub fn save_file_at(app: &mut ScratchpadApp, index: usize) -> bool {
-        if app.tabs().is_empty() || index >= app.tabs().len() {
+        if app.tab_manager.tabs.as_slice().is_empty()
+            || index >= app.tab_manager.tabs.as_slice().len()
+        {
             return false;
         }
 
@@ -51,7 +53,7 @@ impl FileController {
     }
 
     pub fn save_file_as(app: &mut ScratchpadApp) {
-        let index = app.active_tab_index();
+        let index = app.tab_manager.active_tab_index;
         let _ = Self::save_file_as_at(app, index);
     }
 
@@ -60,7 +62,9 @@ impl FileController {
         index: usize,
         encoding_name: &str,
     ) -> bool {
-        if app.tabs().is_empty() || index >= app.tabs().len() {
+        if app.tab_manager.tabs.as_slice().is_empty()
+            || index >= app.tab_manager.tabs.as_slice().len()
+        {
             return false;
         }
 
@@ -75,7 +79,7 @@ impl FileController {
                     &error,
                     [("encoding", encoding_name.to_owned())],
                 );
-                app.set_error_status_with_detail(
+                app.state.status.set_error_status_with_detail(
                     StatusDomain::Encoding,
                     "Could not save this file with that encoding.",
                     error.to_string(),
@@ -92,7 +96,9 @@ impl FileController {
     }
 
     pub fn save_file_as_at(app: &mut ScratchpadApp, index: usize) -> bool {
-        if app.tabs().is_empty() || index >= app.tabs().len() {
+        if app.tab_manager.tabs.as_slice().is_empty()
+            || index >= app.tab_manager.tabs.as_slice().len()
+        {
             return false;
         }
 
@@ -121,20 +127,26 @@ impl FileController {
     }
 
     fn can_save_existing_path(app: &mut ScratchpadApp, index: usize) -> bool {
-        let freshness = app.tabs()[index].active_buffer().freshness;
+        let freshness = app.tab_manager.tabs.as_slice()[index]
+            .active_buffer()
+            .freshness;
         if matches!(
             freshness,
             BufferFreshness::ConflictOnDisk
                 | BufferFreshness::MissingOnDisk
                 | BufferFreshness::StaleOnDisk
         ) {
-            let status_message = app.tabs()[index].active_buffer().disk_status_message();
+            let status_message = app.tab_manager.tabs.as_slice()[index]
+                .active_buffer()
+                .disk_status_message();
             app.set_pending_action(Some(PendingAction::SaveConflict {
                 tab_index: index,
-                view_id: app.tabs()[index].active_view_id,
+                view_id: app.tab_manager.tabs.as_slice()[index].active_view_id,
             }));
             if let Some(message) = status_message {
-                app.set_warning_status_in_domain(StatusDomain::Disk, message);
+                app.state
+                    .status
+                    .set_warning_status_in_domain(StatusDomain::Disk, message);
             }
             return false;
         }
@@ -148,7 +160,8 @@ impl FileController {
         _action_name: &str,
         format_override: Option<TextFormatMetadata>,
     ) -> bool {
-        let file_name = default_save_as_file_name(&app.tabs()[index].active_buffer().name);
+        let file_name =
+            default_save_as_file_name(&app.tab_manager.tabs.as_slice()[index].active_buffer().name);
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("Text", &["txt"])
             .set_file_name(&file_name)
@@ -156,17 +169,25 @@ impl FileController {
         {
             Self::save_buffer_to_path(app, index, path, true, format_override)
         } else {
-            app.set_info_status_in_domain(StatusDomain::File, "Save cancelled.");
+            app.state
+                .status
+                .set_info_status_in_domain(StatusDomain::File, "Save cancelled.");
             false
         }
     }
 
     fn buffer_path(app: &ScratchpadApp, index: usize) -> Option<PathBuf> {
-        app.tabs().get(index)?.active_buffer().path.clone()
+        app.tab_manager
+            .tabs
+            .as_slice()
+            .get(index)?
+            .active_buffer()
+            .path
+            .clone()
     }
 
     fn active_buffer_path(app: &ScratchpadApp, index: usize) -> Option<ActiveBufferPath> {
-        let buffer = app.tabs().get(index)?.active_buffer();
+        let buffer = app.tab_manager.tabs.as_slice().get(index)?.active_buffer();
         Some(ActiveBufferPath {
             buffer_id: buffer.id,
             path: buffer.path.clone()?,
@@ -181,7 +202,7 @@ impl FileController {
         buffer_id: BufferId,
         disk_state: Option<DiskFileState>,
     ) {
-        let buffer = app.tabs_mut()[index]
+        let buffer = app.tab_manager.tabs.as_mut_slice()[index]
             .buffer_by_id_mut(buffer_id)
             .expect("buffer location validated");
         buffer.sync_to_disk_state(disk_state);
@@ -195,7 +216,7 @@ impl FileController {
         format_override: Option<TextFormatMetadata>,
     ) -> bool {
         let request = {
-            let buffer = app.tabs()[index].active_buffer();
+            let buffer = app.tab_manager.tabs.as_slice()[index].active_buffer();
             SaveWriteRequest {
                 buffer_id: buffer.id,
                 path: path.clone(),
@@ -232,7 +253,7 @@ impl FileController {
         action: PendingSavePathAction,
     ) {
         let settings_path = app.settings_path().to_path_buf();
-        let buffer = app.tabs_mut()[index]
+        let buffer = app.tab_manager.tabs.as_mut_slice()[index]
             .buffer_by_id_mut(action.buffer_id)
             .expect("buffer location validated");
         if let Some(format) = action.format_override {
@@ -250,7 +271,7 @@ impl FileController {
             .as_ref()
             .is_some_and(|path| crate::app::paths_match(path, &settings_path));
         app.clear_status_message();
-        app.mark_session_dirty();
+        app.tab_manager.mark_session_dirty();
         app.apply_current_tab_ordering();
         let _ = app.persist_session_now();
     }
@@ -294,7 +315,7 @@ impl FileController {
                         ("buffer", action.buffer_name),
                     ],
                 );
-                app.report_save_failed(error);
+                app.state.status.report_save_failed(error);
             }
         }
     }
@@ -305,7 +326,10 @@ impl FileController {
         encoding_name: &str,
     ) -> std::io::Result<TextFormatMetadata> {
         let canonical = FileService::canonical_encoding_name(encoding_name)?;
-        let mut format = app.tabs()[index].active_buffer().format.clone();
+        let mut format = app.tab_manager.tabs.as_slice()[index]
+            .active_buffer()
+            .format
+            .clone();
         format.encoding_name = canonical;
         format.encoding_source = EncodingSource::ExplicitUserChoice;
         if !FileService::encoding_supports_bom(&format.encoding_name)? {
@@ -315,26 +339,34 @@ impl FileController {
     }
 
     fn has_pending_reload_for_buffer(app: &ScratchpadApp, buffer_id: BufferId) -> bool {
-        app.io.pending_background_actions.values().any(|action| {
-            matches!(
-                action,
-                PendingBackgroundAction::ReloadBuffer(reload)
-                    if reload.buffer_id == buffer_id
-            )
-        })
+        app.state
+            .io
+            .pending_background_actions
+            .values()
+            .any(|action| {
+                matches!(
+                    action,
+                    PendingBackgroundAction::ReloadBuffer(reload)
+                        if reload.buffer_id == buffer_id
+                )
+            })
     }
 
     fn has_pending_reopen_with_encoding_for_buffer(
         app: &ScratchpadApp,
         buffer_id: BufferId,
     ) -> bool {
-        app.io.pending_background_actions.values().any(|action| {
-            matches!(
-                action,
-                PendingBackgroundAction::ReopenWithEncoding(reopen)
-                    if reopen.buffer_id == buffer_id
-            )
-        })
+        app.state
+            .io
+            .pending_background_actions
+            .values()
+            .any(|action| {
+                matches!(
+                    action,
+                    PendingBackgroundAction::ReopenWithEncoding(reopen)
+                        if reopen.buffer_id == buffer_id
+                )
+            })
     }
 
     fn find_buffer_location(
@@ -342,7 +374,9 @@ impl FileController {
         buffer_id: BufferId,
     ) -> Option<(usize, PathBuf)> {
         let tab_index = app.tab_index_for_buffer(buffer_id)?;
-        app.tabs()
+        app.tab_manager
+            .tabs
+            .as_slice()
             .get(tab_index)?
             .buffer_by_id(buffer_id)
             .and_then(|buffer| buffer.path.clone())
@@ -354,7 +388,9 @@ impl FileController {
         buffer_id: BufferId,
     ) -> Option<(usize, Option<PathBuf>)> {
         let tab_index = app.tab_index_for_buffer(buffer_id)?;
-        app.tabs()
+        app.tab_manager
+            .tabs
+            .as_slice()
             .get(tab_index)?
             .buffer_by_id(buffer_id)
             .map(|buffer| (tab_index, buffer.path.clone()))

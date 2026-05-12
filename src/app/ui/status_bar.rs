@@ -226,6 +226,7 @@ fn show_status_history_button(
     actions: &mut StatusBarActions,
 ) {
     let has_errors = app
+        .state
         .status
         .history
         .iter()
@@ -339,19 +340,19 @@ fn show_non_compliant_warning(ui: &mut egui::Ui, details: &ActiveStatusDetails) 
 
 fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {
     if actions.toggle_line_numbers
-        && let Some(tab) = app.active_tab_mut()
+        && let Some(tab) = app.tab_manager.active_tab_mut()
     {
         let next_visible = !tab.line_numbers_visible();
         tab.set_line_numbers_visible(next_visible);
-        app.mark_session_dirty();
+        app.tab_manager.mark_session_dirty();
     }
 
     if actions.toggle_control_chars
-        && let Some(tab) = app.active_tab_mut()
+        && let Some(tab) = app.tab_manager.active_tab_mut()
     {
         let buffer = tab.active_buffer_mut();
         buffer.show_control_chars = !buffer.show_control_chars;
-        app.mark_session_dirty();
+        app.tab_manager.mark_session_dirty();
     }
 
     if actions.open_encoding_dialog {

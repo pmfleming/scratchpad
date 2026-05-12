@@ -31,7 +31,9 @@ impl SavedBufferFixture {
 
     fn dirty(file_name: &str, disk_text: &str, buffer_text: &str) -> Self {
         let mut fixture = Self::new(file_name, disk_text, buffer_text);
-        fixture.app.tabs_mut()[0].active_buffer_mut().is_dirty = true;
+        fixture.app.tab_manager.tabs.as_mut_slice()[0]
+            .active_buffer_mut()
+            .is_dirty = true;
         fixture
     }
 }
@@ -56,7 +58,7 @@ fn app_with_buffer(root: &std::path::Path, buffer: BufferState) -> ScratchpadApp
         pending_scroll_to_active: false,
         buffer_tab_index: Default::default(),
     };
-    app.rebuild_buffer_tab_index();
+    app.tab_manager.rebuild_buffer_tab_index();
     app
 }
 
@@ -71,11 +73,15 @@ fn save_existing_path_writes_snapshot_and_clears_dirty_state() {
     let mut fixture = SavedBufferFixture::dirty("tracked.txt", "old", "new");
 
     assert!(FileController::save_file_at(&mut fixture.app, 0));
-    assert!(fixture.app.tabs()[0].active_buffer().is_dirty);
+    assert!(
+        fixture.app.tab_manager.tabs.as_slice()[0]
+            .active_buffer()
+            .is_dirty
+    );
     fixture.app.wait_for_background_io_idle();
 
     assert_eq!(std::fs::read_to_string(&fixture.path).unwrap(), "new");
-    let buffer = fixture.app.tabs()[0].active_buffer();
+    let buffer = fixture.app.tab_manager.tabs.as_slice()[0].active_buffer();
     assert!(!buffer.is_dirty);
     assert_eq!(buffer.freshness, BufferFreshness::InSync);
     assert!(buffer.disk_state.is_some());
@@ -84,14 +90,16 @@ fn save_existing_path_writes_snapshot_and_clears_dirty_state() {
 #[test]
 fn save_existing_path_stops_when_dirty_buffer_conflicts_with_disk() {
     let mut fixture = SavedBufferFixture::dirty("tracked.txt", "original", "ours");
-    let view_id = fixture.app.tabs()[0].active_view_id;
+    let view_id = fixture.app.tab_manager.tabs.as_slice()[0].active_view_id;
     std::fs::write(&fixture.path, "theirs").unwrap();
 
     assert!(!FileController::save_file_at(&mut fixture.app, 0));
 
     assert_eq!(std::fs::read_to_string(&fixture.path).unwrap(), "theirs");
     assert_eq!(
-        fixture.app.tabs()[0].active_buffer().freshness,
+        fixture.app.tab_manager.tabs.as_slice()[0]
+            .active_buffer()
+            .freshness,
         BufferFreshness::ConflictOnDisk
     );
     assert_eq!(
@@ -106,7 +114,7 @@ fn save_existing_path_stops_when_dirty_buffer_conflicts_with_disk() {
 #[test]
 fn save_conflict_overwrite_writes_buffer_text_after_confirmation() {
     let mut fixture = SavedBufferFixture::dirty("tracked.txt", "original", "ours");
-    fixture.app.tabs_mut()[0]
+    fixture.app.tab_manager.tabs.as_mut_slice()[0]
         .active_buffer_mut()
         .mark_conflict_on_disk(FileService::read_disk_state(&fixture.path).ok());
 
@@ -114,7 +122,7 @@ fn save_conflict_overwrite_writes_buffer_text_after_confirmation() {
     fixture.app.wait_for_background_io_idle();
 
     assert_eq!(std::fs::read_to_string(&fixture.path).unwrap(), "ours");
-    let buffer = fixture.app.tabs()[0].active_buffer();
+    let buffer = fixture.app.tab_manager.tabs.as_slice()[0].active_buffer();
     assert!(!buffer.is_dirty);
     assert_eq!(buffer.freshness, BufferFreshness::InSync);
 }
@@ -131,9 +139,16 @@ fn save_with_encoding_failure_leaves_file_and_buffer_state_unchanged() {
     fixture.app.wait_for_background_io_idle();
 
     assert_eq!(std::fs::read_to_string(&fixture.path).unwrap(), "old");
-    assert!(fixture.app.tabs()[0].active_buffer().is_dirty);
+    assert!(
+        fixture.app.tab_manager.tabs.as_slice()[0]
+            .active_buffer()
+            .is_dirty
+    );
     assert_eq!(
-        fixture.app.tabs()[0].active_buffer().format.encoding_name,
+        fixture.app.tab_manager.tabs.as_slice()[0]
+            .active_buffer()
+            .format
+            .encoding_name,
         "UTF-8"
     );
 }
@@ -154,7 +169,7 @@ fn save_as_path_assignment_uses_written_disk_state() {
     ));
     app.wait_for_background_io_idle();
 
-    let buffer = app.tabs()[0].active_buffer();
+    let buffer = app.tab_manager.tabs.as_slice()[0].active_buffer();
     assert_eq!(buffer.path.as_deref(), Some(path.as_path()));
     assert_eq!(buffer.name, "new-name.txt");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "content");
@@ -170,7 +185,7 @@ fn save_completion_keeps_dirty_state_when_buffer_changed_while_write_was_pending
     fixture.app.wait_for_background_io_idle();
 
     assert_eq!(std::fs::read_to_string(&fixture.path).unwrap(), "saved");
-    let buffer = fixture.app.tabs()[0].active_buffer();
+    let buffer = fixture.app.tab_manager.tabs.as_slice()[0].active_buffer();
     assert_eq!(buffer.text(), "saveder");
     assert!(buffer.is_dirty);
     assert_eq!(buffer.freshness, BufferFreshness::InSync);
@@ -179,7 +194,9 @@ fn save_completion_keeps_dirty_state_when_buffer_changed_while_write_was_pending
 #[test]
 fn explicit_reload_replaces_buffer_from_loaded_disk_result() {
     let mut fixture = SavedBufferFixture::new("tracked.txt", "disk", "memory");
-    let buffer_id = fixture.app.tabs()[0].active_buffer().id;
+    let buffer_id = fixture.app.tab_manager.tabs.as_slice()[0]
+        .active_buffer()
+        .id;
     let disk_state = FileService::read_disk_state(&fixture.path).ok();
     let loaded = BufferState::new(
         "tracked.txt".to_owned(),
@@ -203,8 +220,17 @@ fn explicit_reload_replaces_buffer_from_loaded_disk_result() {
         }],
     );
 
-    assert_eq!(fixture.app.tabs()[0].active_buffer().text(), "disk");
-    assert!(!fixture.app.tabs()[0].active_buffer().is_dirty);
+    assert_eq!(
+        fixture.app.tab_manager.tabs.as_slice()[0]
+            .active_buffer()
+            .text(),
+        "disk"
+    );
+    assert!(
+        !fixture.app.tab_manager.tabs.as_slice()[0]
+            .active_buffer()
+            .is_dirty
+    );
 }
 
 #[test]

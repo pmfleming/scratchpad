@@ -496,6 +496,9 @@ def collect_escape_hatch_metrics(metrics: Dict[str, Any], rows: Any) -> None:
     for output_key, source_key in (
         ("escape_hatch_uses", "total_count"),
         ("escape_hatch_unsafe_uses", "unsafe_count"),
+        ("escape_hatch_deref_coercions", "deref_coercion_count"),
+        ("escape_hatch_glob_imports", "glob_import_count"),
+        ("escape_hatch_container_ref_returns", "container_ref_return_count"),
         ("escape_hatch_clippy_suppressions", "clippy_suppression_count"),
     ):
         metrics[output_key] = sum(int(item.get(source_key, 0)) for item in rows)

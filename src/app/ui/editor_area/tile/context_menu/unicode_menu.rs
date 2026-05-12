@@ -111,14 +111,17 @@ pub(super) fn render_display_unicode_menu(ui: &mut egui::Ui, app: &mut Scratchpa
     unicode_submenu_row(ui, "Unicode", TEXT_AA, |ui| {
         set_menu_width(ui, EDITOR_CONTEXT_MENU_WIDTH);
         let right_to_left = app
+            .tab_manager
             .active_tab()
             .and_then(|tab| tab.buffer_for_view(tab.active_view_id))
             .is_some_and(|buffer| buffer.right_to_left_reading_order);
         let show_control_chars = app
+            .tab_manager
             .active_tab()
             .and_then(|tab| tab.buffer_for_view(tab.active_view_id))
             .is_some_and(|buffer| buffer.show_control_chars);
         let control_chars_available = app
+            .tab_manager
             .active_tab()
             .and_then(|tab| tab.buffer_for_view(tab.active_view_id))
             .is_some_and(|buffer| buffer.has_visible_control_substitutions());
@@ -171,25 +174,25 @@ pub(super) fn render_display_unicode_menu(ui: &mut egui::Ui, app: &mut Scratchpa
 }
 
 fn toggle_active_buffer_reading_order(app: &mut ScratchpadApp) {
-    if let Some(tab) = app.active_tab_mut()
+    if let Some(tab) = app.tab_manager.active_tab_mut()
         && let Some(buffer_id) = tab.active_view().map(|view| view.buffer_id)
     {
         if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
             buffer.right_to_left_reading_order = !buffer.right_to_left_reading_order;
         }
         clear_layout_cache_for_buffer(tab, buffer_id);
-        app.mark_session_dirty();
+        app.tab_manager.mark_session_dirty();
     }
 }
 
 fn toggle_active_buffer_control_chars(app: &mut ScratchpadApp) {
-    if let Some(tab) = app.active_tab_mut()
+    if let Some(tab) = app.tab_manager.active_tab_mut()
         && let Some(buffer_id) = tab.active_view().map(|view| view.buffer_id)
     {
         if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
             buffer.show_control_chars = !buffer.show_control_chars;
         }
-        app.mark_session_dirty();
+        app.tab_manager.mark_session_dirty();
     }
 }
 

@@ -146,7 +146,7 @@ mod tests {
         reset_settings_layout_measurements();
 
         let ctx = egui::Context::default();
-        crate::app::fonts::apply_editor_fonts(&ctx, app.editor_font())
+        crate::app::fonts::apply_editor_fonts(&ctx, app.state.app_settings.editor_font())
             .expect("install editor fonts for settings layout test");
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.set_min_size(egui::vec2(1600.0, 4200.0));
@@ -181,7 +181,7 @@ mod tests {
         reset_settings_layout_measurements();
 
         let ctx = egui::Context::default();
-        crate::app::fonts::apply_editor_fonts(&ctx, app.editor_font())
+        crate::app::fonts::apply_editor_fonts(&ctx, app.state.app_settings.editor_font())
             .expect("install editor fonts for settings layout test");
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.set_min_size(egui::vec2(1600.0, 4200.0));
@@ -221,7 +221,7 @@ mod tests {
         reset_settings_layout_measurements();
 
         let ctx = egui::Context::default();
-        crate::app::fonts::apply_editor_fonts(&ctx, app.editor_font())
+        crate::app::fonts::apply_editor_fonts(&ctx, app.state.app_settings.editor_font())
             .expect("install editor fonts for settings layout test");
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.set_min_size(egui::vec2(1600.0, 4200.0));
@@ -261,7 +261,7 @@ mod tests {
         reset_settings_layout_measurements();
 
         let ctx = egui::Context::default();
-        crate::app::fonts::apply_editor_fonts(&ctx, app.editor_font())
+        crate::app::fonts::apply_editor_fonts(&ctx, app.state.app_settings.editor_font())
             .expect("install editor fonts for settings layout test");
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.set_min_size(egui::vec2(1600.0, 4200.0));
@@ -300,12 +300,15 @@ mod tests {
             StartupOptions::default(),
         );
         app.set_session_persist_on_drop(false);
-        app.app_settings.font_size = 32.0;
-        app.app_settings.editor_gutter = 32;
-        app.app_settings.tab_list_auto_hide_delay_seconds = 10.0;
-        app.app_settings.history_budget.per_file_byte_budget = 1024 * MIB;
-        app.app_settings.history_budget.aggregate_byte_budget = 4096 * MIB;
-        app.app_settings.history_budget.persisted_payload_budget = 1024 * MIB;
+        app.state.app_settings.font_size = 32.0;
+        app.state.app_settings.editor_gutter = 32;
+        app.state.app_settings.tab_list_auto_hide_delay_seconds = 10.0;
+        app.state.app_settings.history_budget.per_file_byte_budget = 1024 * MIB;
+        app.state.app_settings.history_budget.aggregate_byte_budget = 4096 * MIB;
+        app.state
+            .app_settings
+            .history_budget
+            .persisted_payload_budget = 1024 * MIB;
         app
     }
 }

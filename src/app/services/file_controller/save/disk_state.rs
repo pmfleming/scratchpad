@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 impl FileController {
     pub(crate) fn refresh_active_buffer_disk_state(app: &mut ScratchpadApp) -> bool {
-        let index = app.active_tab_index();
+        let index = app.tab_manager.active_tab_index;
         Self::refresh_buffer_disk_state(app, index)
     }
 
@@ -66,7 +66,8 @@ impl FileController {
         disk_state: DiskFileState,
     ) -> bool {
         let (is_dirty, known_disk_state, freshness, buffer_name) = {
-            let Some(buffer) = app.tabs()[index].buffer_by_id(buffer_id) else {
+            let Some(buffer) = app.tab_manager.tabs.as_slice()[index].buffer_by_id(buffer_id)
+            else {
                 return false;
             };
             (
@@ -100,15 +101,15 @@ impl FileController {
         buffer_name: String,
         disk_state: DiskFileState,
     ) {
-        let buffer = app.tabs_mut()[index]
+        let buffer = app.tab_manager.tabs.as_mut_slice()[index]
             .buffer_by_id_mut(buffer_id)
             .expect("buffer location validated");
         buffer.mark_conflict_on_disk(Some(disk_state));
-        app.set_warning_status_in_domain(
+        app.state.status.set_warning_status_in_domain(
             StatusDomain::Disk,
             format!("{buffer_name} changed on disk. Your tab has unsaved edits."),
         );
-        app.mark_session_dirty();
+        app.tab_manager.mark_session_dirty();
     }
 
     fn queue_clean_buffer_auto_reload(
@@ -140,22 +141,22 @@ impl FileController {
         index: usize,
         buffer_id: BufferId,
     ) -> bool {
-        let Some(buffer_name) = app.tabs()[index]
+        let Some(buffer_name) = app.tab_manager.tabs.as_slice()[index]
             .buffer_by_id(buffer_id)
             .map(|buffer| buffer.name.clone())
         else {
             return false;
         };
-        let buffer = app.tabs_mut()[index]
+        let buffer = app.tab_manager.tabs.as_mut_slice()[index]
             .buffer_by_id_mut(buffer_id)
             .expect("buffer location validated");
         buffer.disk_state = None;
         buffer.mark_missing_on_disk();
-        app.set_warning_status_in_domain(
+        app.state.status.set_warning_status_in_domain(
             StatusDomain::Disk,
             format!("{buffer_name} is missing on disk."),
         );
-        app.mark_session_dirty();
+        app.tab_manager.mark_session_dirty();
         true
     }
 }

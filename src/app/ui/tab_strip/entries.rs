@@ -23,7 +23,7 @@ pub(crate) fn show_vertical_tab_region(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
 ) -> TabStripOutcome {
-    let duplicate_name_counts = duplicate_name_counts(app.tabs());
+    let duplicate_name_counts = duplicate_name_counts(app.tab_manager.tabs.as_slice());
     vertical::show_vertical_tab_region(ui, app, &duplicate_name_counts)
 }
 
@@ -33,7 +33,7 @@ pub(crate) fn show_tab_region(
     app: &mut ScratchpadApp,
     layout: &HeaderLayout,
 ) -> TabStripOutcome {
-    let duplicate_name_counts = duplicate_name_counts(app.tabs());
+    let duplicate_name_counts = duplicate_name_counts(app.tab_manager.tabs.as_slice());
     horizontal::show_tab_region(ctx, ui, app, layout, &duplicate_name_counts)
 }
 

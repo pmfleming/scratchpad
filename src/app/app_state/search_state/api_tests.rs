@@ -1,4 +1,6 @@
 use super::{SEARCH_PREVIEW_CACHE_LIMIT, ScratchpadApp, SearchMatch, SearchPreviewCacheKey};
+use crate::app::app_state::search_controller::{set_search_replace_open, set_search_replacement};
+use crate::app::commands::AppCommand;
 use crate::app::domain::{BufferState, WorkspaceTab};
 use crate::app::services::search::find_matches;
 use crate::app::services::session_store::SessionStore;
@@ -12,7 +14,7 @@ fn lazy_preview_lookup_builds_and_reuses_cached_entry() {
     let mut app = app_with_search_text("alpha\nplan beta\nomega");
     let plan_range = 6..10;
     seed_matches_for_plan_lines(&mut app, std::slice::from_ref(&plan_range));
-    app.search_state.active_match_index = Some(0);
+    app.state.search_state.active_match_index = Some(0);
 
     let entry = app.search_result_entry_at(0).expect("preview entry");
 
@@ -20,15 +22,15 @@ fn lazy_preview_lookup_builds_and_reuses_cached_entry() {
     assert_eq!(entry.column_number, 1);
     assert!(entry.preview.contains("plan beta"));
     assert!(entry.active);
-    assert_eq!(app.search_state.preview_cache.len(), 1);
+    assert_eq!(app.state.search_state.preview_cache.len(), 1);
 
-    app.search_state.active_match_index = None;
+    app.state.search_state.active_match_index = None;
     let cached = app.search_result_entry_at(0).expect("cached preview entry");
 
     assert_eq!(cached.line_number, entry.line_number);
     assert_eq!(cached.preview, entry.preview);
     assert!(!cached.active);
-    assert_eq!(app.search_state.preview_cache.len(), 1);
+    assert_eq!(app.state.search_state.preview_cache.len(), 1);
 }
 
 #[test]
@@ -48,7 +50,7 @@ fn lazy_preview_cache_evicts_least_recently_used_entry() {
         assert!(app.search_result_entry_at(index).is_some());
     }
     assert_eq!(
-        app.search_state.preview_cache.len(),
+        app.state.search_state.preview_cache.len(),
         SEARCH_PREVIEW_CACHE_LIMIT
     );
 
@@ -58,9 +60,10 @@ fn lazy_preview_cache_evicts_least_recently_used_entry() {
             .is_some()
     );
 
-    let generation = app.search_state.applied_generation;
+    let generation = app.state.search_state.applied_generation;
     assert!(
-        app.search_state
+        app.state
+            .search_state
             .preview_cache
             .contains_key(&SearchPreviewCacheKey {
                 generation,
@@ -68,7 +71,8 @@ fn lazy_preview_cache_evicts_least_recently_used_entry() {
             })
     );
     assert!(
-        !app.search_state
+        !app.state
+            .search_state
             .preview_cache
             .contains_key(&SearchPreviewCacheKey {
                 generation,
@@ -76,7 +80,7 @@ fn lazy_preview_cache_evicts_least_recently_used_entry() {
             })
     );
     assert_eq!(
-        app.search_state.preview_cache.len(),
+        app.state.search_state.preview_cache.len(),
         SEARCH_PREVIEW_CACHE_LIMIT
     );
 }
@@ -85,9 +89,9 @@ fn lazy_preview_cache_evicts_least_recently_used_entry() {
 fn replace_current_advances_past_self_matching_replacement() {
     let mut app = app_with_search_text("foo foo");
     seed_search_matches(&mut app, "foo");
-    app.set_search_replacement("foobar");
-    app.search_state.replace_open = true;
-    app.search_state.active_match_index = Some(0);
+    set_search_replacement(&mut app, "foobar");
+    app.state.search_state.replace_open = true;
+    app.state.search_state.active_match_index = Some(0);
 
     assert!(app.replace_current_search_match());
     wait_for_search_results(&mut app);
@@ -106,9 +110,9 @@ fn replace_current_advances_past_self_matching_replacement() {
 fn replace_current_advances_after_empty_replacement() {
     let mut app = app_with_search_text("foo foo");
     seed_search_matches(&mut app, "foo");
-    app.set_search_replacement("");
-    app.search_state.replace_open = true;
-    app.search_state.active_match_index = Some(0);
+    set_search_replacement(&mut app, "");
+    app.state.search_state.replace_open = true;
+    app.state.search_state.active_match_index = Some(0);
 
     assert!(app.replace_current_search_match());
     wait_for_search_results(&mut app);
@@ -121,28 +125,37 @@ fn replace_current_advances_after_empty_replacement() {
 #[test]
 fn tab_reorder_marks_open_search_dirty() {
     let mut app = app_with_search_text("first");
-    app.append_tab(WorkspaceTab::new(BufferState::new(
-        "second.md".to_owned(),
-        "second".to_owned(),
-        None,
-    )));
+    crate::app::app_state::workspace_controller::append_tab(
+        &mut app,
+        WorkspaceTab::new(BufferState::new(
+            "second.md".to_owned(),
+            "second".to_owned(),
+            None,
+        )),
+    );
     seed_search_matches(&mut app, "first");
-    app.search_state.dirty = false;
+    app.state.search_state.dirty = false;
 
-    app.reorder_tab(0, 1);
+    app.handle_command(AppCommand::ReorderTab {
+        from_index: 0,
+        to_index: 1,
+    });
 
-    assert!(app.search_state.dirty);
-    assert_eq!(app.search_state.freshness, super::SearchFreshness::Stale);
+    assert!(app.state.search_state.dirty);
+    assert_eq!(
+        app.state.search_state.freshness,
+        super::SearchFreshness::Stale
+    );
 }
 
 #[test]
 fn replacement_typing_updates_preview_without_mutating_buffer() {
     let mut app = app_with_search_text("foo foo");
     seed_search_matches(&mut app, "foo");
-    app.search_state.replace_open = true;
+    app.state.search_state.replace_open = true;
     let before_revision = active_buffer_revision(&app);
 
-    app.set_search_replacement("bar");
+    set_search_replacement(&mut app, "bar");
 
     assert_eq!(active_buffer_text(&app), "foo foo");
     assert_eq!(active_buffer_revision(&app), before_revision);
@@ -158,11 +171,11 @@ fn replacement_typing_updates_preview_without_mutating_buffer() {
 fn closing_replace_mode_clears_replacement_preview() {
     let mut app = app_with_search_text("foo");
     seed_search_matches(&mut app, "foo");
-    app.search_state.replace_open = true;
-    app.set_search_replacement("bar");
+    app.state.search_state.replace_open = true;
+    set_search_replacement(&mut app, "bar");
     assert!(active_view_replacement_preview(&app).is_some());
 
-    app.set_search_replace_open(false);
+    set_search_replace_open(&mut app, false);
 
     assert!(active_view_replacement_preview(&app).is_none());
     assert_eq!(active_buffer_text(&app), "foo");
@@ -182,15 +195,15 @@ fn app_with_search_text(text: &str) -> ScratchpadApp {
         text.to_owned(),
         None,
     ));
-    app.tabs_mut()[0] = tab;
-    app.search_state.applied_generation = 42;
+    app.tab_manager.tabs.as_mut_slice()[0] = tab;
+    app.state.search_state.applied_generation = 42;
     app
 }
 
 fn seed_matches_for_plan_lines(app: &mut ScratchpadApp, ranges: &[Range<usize>]) {
-    let tab = &app.tabs()[0];
+    let tab = &app.tab_manager.tabs.as_slice()[0];
     let buffer = &tab.buffer;
-    app.search_state.matches = ranges
+    app.state.search_state.matches = ranges
         .iter()
         .cloned()
         .map(|range| SearchMatch {
@@ -203,26 +216,26 @@ fn seed_matches_for_plan_lines(app: &mut ScratchpadApp, ranges: &[Range<usize>])
             range,
         })
         .collect();
-    app.search_state.total_match_count = app.search_state.matches.len();
-    app.search_state.displayed_match_count = app.search_state.matches.len();
+    app.state.search_state.total_match_count = app.state.search_state.matches.len();
+    app.state.search_state.displayed_match_count = app.state.search_state.matches.len();
 }
 
 fn seed_search_matches(app: &mut ScratchpadApp, query: &str) {
-    app.search_state.open = true;
-    app.search_state.query = query.to_owned();
-    app.search_state.status = super::SearchStatus::Ready;
-    app.search_state.freshness = super::SearchFreshness::Fresh;
-    app.search_state.searching = false;
-    app.search_state.dirty = false;
+    app.state.search_state.open = true;
+    app.state.search_state.query = query.to_owned();
+    app.state.search_state.status = super::SearchStatus::Ready;
+    app.state.search_state.freshness = super::SearchFreshness::Fresh;
+    app.state.search_state.searching = false;
+    app.state.search_state.dirty = false;
 
     let text = active_buffer_text(app);
-    let ranges = find_matches(&text, query, app.search_state.search_options());
-    let tab = &app.tabs()[app.active_tab_index()];
+    let ranges = find_matches(&text, query, app.state.search_state.search_options());
+    let tab = &app.tab_manager.tabs.as_slice()[app.tab_manager.active_tab_index];
     let buffer = &tab.buffer;
-    app.search_state.matches = ranges
+    app.state.search_state.matches = ranges
         .into_iter()
         .map(|range| SearchMatch {
-            tab_index: app.active_tab_index(),
+            tab_index: app.tab_manager.active_tab_index,
             view_id: tab.active_view_id,
             buffer_id: buffer.id,
             buffer_label: buffer.display_name(),
@@ -235,15 +248,17 @@ fn seed_search_matches(app: &mut ScratchpadApp, query: &str) {
             range,
         })
         .collect();
-    app.search_state.total_match_count = app.search_state.matches.len();
-    app.search_state.displayed_match_count = app.search_state.matches.len();
+    app.state.search_state.total_match_count = app.state.search_state.matches.len();
+    app.state.search_state.displayed_match_count = app.state.search_state.matches.len();
 }
 
 fn active_buffer_text(app: &ScratchpadApp) -> String {
-    app.active_tab()
+    app.tab_manager
+        .active_tab()
         .and_then(|tab| tab.active_view())
         .and_then(|view| {
-            app.active_tab()
+            app.tab_manager
+                .active_tab()
                 .and_then(|tab| tab.buffer_by_id(view.buffer_id))
         })
         .map(|buffer| buffer.text())
@@ -251,10 +266,12 @@ fn active_buffer_text(app: &ScratchpadApp) -> String {
 }
 
 fn active_buffer_revision(app: &ScratchpadApp) -> u64 {
-    app.active_tab()
+    app.tab_manager
+        .active_tab()
         .and_then(|tab| tab.active_view())
         .and_then(|view| {
-            app.active_tab()
+            app.tab_manager
+                .active_tab()
                 .and_then(|tab| tab.buffer_by_id(view.buffer_id))
         })
         .map(|buffer| buffer.document_revision())
@@ -264,22 +281,24 @@ fn active_buffer_revision(app: &ScratchpadApp) -> u64 {
 fn active_view_replacement_preview(
     app: &ScratchpadApp,
 ) -> Option<&crate::app::domain::SearchReplacementPreview> {
-    app.active_tab()
+    app.tab_manager
+        .active_tab()
         .and_then(|tab| tab.active_view())
         .and_then(|view| view.search_replacement_preview.as_ref())
 }
 
 fn active_search_match(app: &ScratchpadApp) -> Option<&SearchMatch> {
-    app.search_state
+    app.state
+        .search_state
         .active_match_index
-        .and_then(|index| app.search_state.matches.get(index))
+        .and_then(|index| app.state.search_state.matches.get(index))
 }
 
 fn wait_for_search_results(app: &mut ScratchpadApp) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < deadline {
         app.poll_search();
-        if !app.search_state.searching && !app.search_state.dirty {
+        if !app.state.search_state.searching && !app.state.search_state.dirty {
             return;
         }
         std::thread::sleep(Duration::from_millis(5));

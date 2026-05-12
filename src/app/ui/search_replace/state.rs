@@ -60,24 +60,25 @@ pub(super) struct VirtualRows {
 
 impl SearchStripState {
     pub(super) fn from_app(app: &mut ScratchpadApp) -> Self {
-        let match_count = app.search_match_count();
-        let progress = app.search_progress();
         let requested_focus = app.take_search_focus_target();
+        let search_state = &app.state.search_state;
+        let match_count = search_state.match_count();
+        let progress = search_state.progress();
 
         Self {
-            query: app.search_query().to_owned(),
-            replacement: app.search_replacement().to_owned(),
-            replace_open: app.search_replace_open(),
-            scope: app.search_scope(),
-            scope_origin: app.search_scope_origin(),
-            mode: app.search_mode(),
-            match_case: app.search_match_case(),
-            whole_word: app.search_whole_word(),
+            query: search_state.query().to_owned(),
+            replacement: search_state.replacement().to_owned(),
+            replace_open: search_state.replace_open(),
+            scope: search_state.scope(),
+            scope_origin: search_state.scope_origin(),
+            mode: search_state.mode(),
+            match_case: search_state.match_case(),
+            whole_word: search_state.whole_word(),
             match_count,
-            active_match_index: app.search_active_match_index(),
+            active_match_index: search_state.active_match_index(),
             progress: SearchProgressSnapshot::from_progress(progress),
-            result_groups: app.search_result_groups_snapshot(),
-            replace_availability: app.search_replace_availability(),
+            result_groups: search_state.result_groups_snapshot(),
+            replace_availability: search_state.replace_availability(),
             can_undo_text_operation: app.active_buffer_can_undo_text_operation(),
             can_redo_text_operation: app.active_buffer_can_redo_text_operation(),
             requested_focus,

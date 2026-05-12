@@ -117,7 +117,7 @@ These are the formulas currently used by the scripts and the overview viewer.
   ```python
   escape_hatch_score = sum(weight[kind] * count[kind])
   ```
-  This is an audit score, not a general quality penalty. It tracks non-conventional Rust that should stay visible during review: `unsafe`, FFI, `static mut`, `union`, raw borrows, inline assembly, `transmute`, `MaybeUninit`, layout/linkage attributes, and lint suppressions including Clippy `allow`/`expect` attributes.
+  This is an audit score, not a general quality penalty. It tracks non-conventional Rust that should stay visible during review: `unsafe`, FFI, `static mut`, `union`, raw borrows, inline assembly, `transmute`, `MaybeUninit`, `Deref`/`DerefMut` impls, glob imports, immutable container-reference return types, layout/linkage attributes, and lint suppressions including Clippy `allow`/`expect` attributes.
 
 - **Maintainability risk** (`map.py`)
   ```python

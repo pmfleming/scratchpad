@@ -32,7 +32,10 @@ pub(crate) fn render_tile_header(
     let split_handler =
         TileSplitHandler::new(&request.pane_path, request.view_id, request.tile_rect);
     let controls_visible = control_visibility(ui, &split_handler, request.tile_rect);
-    let can_promote = app.tabs()[request.tab_index].can_promote_view(request.view_id);
+    let can_promote = crate::app::domain::tab::summary::can_promote_view(
+        &app.tab_manager.tabs.as_slice()[request.tab_index],
+        request.view_id,
+    );
     let layout = pass_stable_header_layout(
         ui,
         request.tab_index,
@@ -86,11 +89,11 @@ pub(crate) fn render_tile_header(
     if let Some(preview_state) =
         split_handler.handle_interaction(ui, &split_response, state.actions)
     {
-        let tab = &app.tabs()[request.tab_index];
+        let tab = &app.tab_manager.tabs.as_slice()[request.tab_index];
         let title = tab
             .buffer_for_view(request.view_id)
             .map(|buffer| buffer.display_name())
-            .unwrap_or_else(|| tab.display_name());
+            .unwrap_or_else(|| crate::app::domain::tab::summary::display_name(tab));
         let preview_lines = preview_lines_for_view(tab, request.view_id);
         *state.preview_overlay = Some(split_handler.make_preview(
             preview_state,

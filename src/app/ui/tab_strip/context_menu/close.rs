@@ -10,7 +10,7 @@ enum CloseDisplayTabs {
 
 pub(super) fn close_current_slot(app: &mut ScratchpadApp, slot_index: usize, is_settings: bool) {
     if is_settings {
-        app.close_settings();
+        app.handle_command(AppCommand::CloseSettings);
     } else if let Some(index) = app.workspace_index_for_slot(slot_index) {
         app.handle_command(AppCommand::RequestCloseTab { index });
     }
@@ -57,14 +57,14 @@ fn close_display_slots(
 
     let mut closed_count = 0usize;
     for index in workspace_indices.into_iter().rev() {
-        if index < app.tabs().len() {
-            app.perform_close_tab_no_persist(index);
+        if index < app.tab_manager.tabs.as_slice().len() {
+            crate::app::app_state::workspace_controller::perform_close_tab_no_persist(app, index);
             closed_count += 1;
         }
     }
 
     if close_settings {
-        app.close_settings();
+        app.handle_command(AppCommand::CloseSettings);
     }
 
     if closed_count > 0 || close_settings {
@@ -72,7 +72,7 @@ fn close_display_slots(
     }
 
     if skipped_dirty > 0 {
-        app.set_warning_status_in_domain(
+        app.state.status.set_warning_status_in_domain(
             StatusDomain::File,
             format!(
                 "{action_name} skipped {} with unsaved changes.",
@@ -101,7 +101,9 @@ fn collect_close_targets(
             continue;
         };
         let is_dirty = app
-            .tabs()
+            .tab_manager
+            .tabs
+            .as_slice()
             .get(index)
             .is_some_and(|tab| tab.buffers().any(|buffer| buffer.is_dirty));
         if !is_dirty {

@@ -8,8 +8,10 @@ use crate::app::services::background_io::LoadedPathResult;
 
 impl ScratchpadApp {
     pub(crate) fn refresh_startup_restore_conflicts(&mut self) {
-        self.startup_restore_conflicts = self
-            .tabs()
+        self.state.startup_restore_conflicts = self
+            .tab_manager
+            .tabs
+            .as_slice()
             .iter()
             .enumerate()
             .flat_map(|(tab_index, tab)| collect_tab_restore_conflicts(tab_index, tab))
@@ -17,12 +19,12 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn current_startup_restore_conflict(&self) -> Option<&StartupRestoreConflict> {
-        self.startup_restore_conflicts.first()
+        self.state.startup_restore_conflicts.first()
     }
 
     pub(crate) fn dismiss_current_startup_restore_conflict(&mut self) {
-        if !self.startup_restore_conflicts.is_empty() {
-            self.startup_restore_conflicts.remove(0);
+        if !self.state.startup_restore_conflicts.is_empty() {
+            self.state.startup_restore_conflicts.remove(0);
         }
     }
 
@@ -31,14 +33,18 @@ impl ScratchpadApp {
             return;
         };
         if let Some(buffer) = self
-            .tabs_mut()
+            .tab_manager
+            .tabs
+            .as_mut_slice()
             .get_mut(conflict.tab_index)
             .and_then(|tab| {
                 tab.buffer_for_view(conflict.view_id)
                     .map(|buffer| buffer.id)
             })
             .and_then(|buffer_id| {
-                self.tabs_mut()
+                self.tab_manager
+                    .tabs
+                    .as_mut_slice()
                     .get_mut(conflict.tab_index)
                     .and_then(|tab| tab.buffer_by_id_mut(buffer_id))
             })
@@ -53,14 +59,18 @@ impl ScratchpadApp {
             return false;
         };
         if let Some(buffer) = self
-            .tabs_mut()
+            .tab_manager
+            .tabs
+            .as_mut_slice()
             .get_mut(conflict.tab_index)
             .and_then(|tab| {
                 tab.buffer_for_view(conflict.view_id)
                     .map(|buffer| buffer.id)
             })
             .and_then(|buffer_id| {
-                self.tabs_mut()
+                self.tab_manager
+                    .tabs
+                    .as_mut_slice()
                     .get_mut(conflict.tab_index)
                     .and_then(|tab| tab.buffer_by_id_mut(buffer_id))
             })
@@ -90,7 +100,7 @@ impl ScratchpadApp {
         let loaded_buffer = match result.result {
             Ok(buffer) => buffer,
             Err(error) => {
-                self.set_warning_status_with_detail(
+                self.state.status.set_warning_status_with_detail(
                     StatusDomain::Disk,
                     format!("Could not load disk version of {}.", conflict.buffer_name),
                     error,
@@ -100,7 +110,7 @@ impl ScratchpadApp {
         };
 
         let Some(buffer_id) = conflicted_buffer_id(self, &conflict) else {
-            self.set_warning_status_in_domain(
+            self.state.status.set_warning_status_in_domain(
                 StatusDomain::Layout,
                 format!(
                     "Could not find the conflicted tab for {}.",
@@ -110,7 +120,7 @@ impl ScratchpadApp {
             return;
         };
 
-        if conflict.tab_index < self.tabs().len() {
+        if conflict.tab_index < self.tab_manager.tabs.as_slice().len() {
             self.handle_command(AppCommand::ActivateTab {
                 index: conflict.tab_index,
             });
@@ -120,7 +130,12 @@ impl ScratchpadApp {
         }
 
         let settings_path = self.settings_path().to_path_buf();
-        if let Some(tab) = self.tabs_mut().get_mut(conflict.tab_index) {
+        if let Some(tab) = self
+            .tab_manager
+            .tabs
+            .as_mut_slice()
+            .get_mut(conflict.tab_index)
+        {
             tab.clear_view_state_for_buffer_replacement(buffer_id);
             for view in &mut tab.views {
                 if view.buffer_id == buffer_id {
@@ -139,9 +154,9 @@ impl ScratchpadApp {
         }
 
         self.mark_search_dirty();
-        self.mark_session_dirty();
+        self.tab_manager.mark_session_dirty();
         let _ = self.persist_session_now();
-        self.set_info_status_in_domain(
+        self.state.status.set_info_status_in_domain(
             StatusDomain::Disk,
             format!("Loaded disk version of {}.", conflict.buffer_name),
         );
@@ -152,7 +167,7 @@ fn conflicted_buffer_id(
     app: &ScratchpadApp,
     conflict: &StartupRestoreConflict,
 ) -> Option<BufferId> {
-    let tab = app.tabs().get(conflict.tab_index)?;
+    let tab = app.tab_manager.tabs.as_slice().get(conflict.tab_index)?;
     let buffer = tab.buffer_for_view(conflict.view_id)?;
     buffer
         .path
@@ -193,10 +208,10 @@ fn representative_view_id(tab: &WorkspaceTab, buffer_id: BufferId) -> Option<Vie
 fn take_current_startup_restore_conflict(
     app: &mut ScratchpadApp,
 ) -> Option<StartupRestoreConflict> {
-    if app.startup_restore_conflicts.is_empty() {
+    if app.state.startup_restore_conflicts.is_empty() {
         None
     } else {
-        Some(app.startup_restore_conflicts.remove(0))
+        Some(app.state.startup_restore_conflicts.remove(0))
     }
 }
 
@@ -243,7 +258,7 @@ mod tests {
             pending_scroll_to_active: false,
             buffer_tab_index: Default::default(),
         };
-        app.rebuild_buffer_tab_index();
+        app.tab_manager.rebuild_buffer_tab_index();
 
         let conflict = StartupRestoreConflict {
             tab_index: 0,
@@ -263,8 +278,8 @@ mod tests {
             }],
         );
 
-        assert_eq!(app.tabs().len(), 1);
-        let buffer = app.tabs()[0].active_buffer();
+        assert_eq!(app.tab_manager.tabs.as_slice().len(), 1);
+        let buffer = app.tab_manager.tabs.as_slice()[0].active_buffer();
         assert_eq!(buffer.id, buffer_id);
         assert_eq!(buffer.text(), "disk");
         assert!(!buffer.is_dirty);

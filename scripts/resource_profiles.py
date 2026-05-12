@@ -22,6 +22,17 @@ PROBE_PATH = Path("target/release/resource_probe.exe" if os.name == "nt" else "t
 PROBE_TIMEOUT_SECONDS = int(os.environ.get("SCRATCHPAD_RESOURCE_PROBE_TIMEOUT_SECONDS", "900"))
 GB = 1024 * MB
 
+MEASUREMENT_GAP_SCENARIOS = {
+    "large_utf8_load_peak_memory": "peak RSS / allocator high-water mark during very large UTF-8 load",
+    "edited_buffer_search_preview_rendering": "edited-buffer search preview rendering with many matches and many pieces",
+    "provenance_retained_memory": "provenance-store retained memory after hundreds of thousands of edits and history-budget eviction",
+    "anchor_heavy_view_editing": "anchor-heavy editing with many views, selections, search results, and scroll anchors",
+    "fragmented_long_session_mutation": "fragmented-buffer paste/cut/undo/redo after long sessions",
+    "session_persist_cost": "session persistence broken down into snapshot cost, serialization cost, file I/O, and restore reconstruction",
+    "session_restore_cost": "session persistence broken down into snapshot cost, serialization cost, file I/O, and restore reconstruction",
+    "startup_visible_restore_cost": "session persistence broken down into snapshot cost, serialization cost, file I/O, and restore reconstruction",
+}
+
 
 def empty_payload(reason: str) -> Dict[str, Any]:
     return {
@@ -55,6 +66,14 @@ def fallback_probe_payload(reason: str) -> Dict[str, Any]:
 def fallback_probe_events() -> List[Dict[str, Any]]:
     definitions = [
         (
+            "large_utf8_load_peak_memory",
+            "Large UTF-8 load peak memory",
+            "file-load",
+            "peak-memory",
+            [64 * MB, 256 * MB, GB, 2 * GB],
+            "bytes",
+        ),
+        (
             "file_backed_open_first_visible_paint",
             "File-backed open and first visible paint",
             "file-load",
@@ -65,9 +84,13 @@ def fallback_probe_events() -> List[Dict[str, Any]]:
         ("many_file_resource_tracking", "Many-file allocation and workspace tracking", "many-files", "memory", [1_000, 10_000, 50_000], "files"),
         ("search_file_size_resource_tracking", "Search file-size allocation tracking", "search", "allocation", [64 * MB, 256 * MB], "bytes"),
         ("search_target_resource_tracking", "Search target-count allocation tracking", "search", "allocation", [1_000, 10_000], "files"),
+        ("edited_buffer_search_preview_rendering", "Edited-buffer search preview rendering", "search", "preview-rendering", [256, 2_048, 8_192], "pieces"),
         ("paste_allocation", "Paste allocation profile", "edit-paste", "allocation", [8 * MB, 64 * MB, 128 * MB], "bytes"),
+        ("provenance_retained_memory", "Provenance retained memory after long edit session", "edit-history", "bounded-memory", [10_000, 100_000], "edits"),
+        ("fragmented_long_session_mutation", "Fragmented long-session paste/cut/undo/redo", "edit-paste", "fragmented-mutation", [1_000, 5_000, 20_000], "fragments"),
         ("tab_count_resource_tracking", "Tab count working-set and page-fault tracking", "tab-management", "memory", [128, 512, 4_096, 10_000], "tabs"),
         ("view_count_resource_tracking", "View count allocation and layout tracking", "split-layout", "memory", [128, 512, 1_000], "views"),
+        ("anchor_heavy_view_editing", "Anchor-heavy many-view editing", "split-layout", "anchors", [1_000, 10_000, 40_000], "anchors"),
         ("session_persist_cost", "Session persist cost", "session-persistence", "session", [100, 1_000, 10_000], "tabs"),
         ("session_restore_cost", "Session restore cost", "session-persistence", "session", [100, 1_000, 10_000], "tabs"),
         ("startup_visible_restore_cost", "Startup-visible session restore", "session-persistence", "startup-visible", [100, 1_000, 10_000], "tabs"),
@@ -131,6 +154,8 @@ def summarize_probe(events: List[Dict[str, Any]]) -> Dict[str, Any]:
             "scenario_label": first.get("scenario_label", scenario),
             "workload_family": first.get("workload_family", "unmapped"),
             "focus": first.get("focus", "resource"),
+            "measurement_gap": MEASUREMENT_GAP_SCENARIOS.get(scenario),
+            "closes_measurement_gap": scenario in MEASUREMENT_GAP_SCENARIOS,
             "sample_count": len(scenario_events),
             "max_elapsed_ms": max(float(item.get("elapsed_ns", 0)) / 1_000_000.0 for item in scenario_events),
             "max_allocated_bytes": max(int(item.get("allocated_bytes", 0)) for item in scenario_events),
@@ -175,6 +200,14 @@ def summarize_probe(events: List[Dict[str, Any]]) -> Dict[str, Any]:
             "allocation_scenarios": sum(1 for item in scenarios if item.get("focus") == "allocation"),
             "memory_scenarios": sum(1 for item in scenarios if item.get("focus") == "memory"),
             "session_scenarios": sum(1 for item in scenarios if item.get("focus") == "session"),
+            "measurement_gap_scenarios": sum(1 for item in scenarios if item.get("closes_measurement_gap")),
+            "measurement_gaps_closed": len(
+                {
+                    item.get("measurement_gap")
+                    for item in scenarios
+                    if item.get("measurement_gap")
+                }
+            ),
         },
         "scenarios": scenarios,
     }

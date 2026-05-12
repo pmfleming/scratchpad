@@ -157,7 +157,7 @@ impl DocumentSnapshot {
     }
 
     pub fn preview_for_match(&self, range_chars: &Range<usize>) -> (usize, usize, String) {
-        self.piece_tree.preview_for_match(range_chars)
+        super::piece_tree::preview::preview_for_match(&self.piece_tree, range_chars)
     }
 
     pub fn previews_for_matches(
@@ -165,7 +165,7 @@ impl DocumentSnapshot {
         ranges: &[Range<usize>],
         limit: usize,
     ) -> Vec<(usize, usize, String)> {
-        self.piece_tree.previews_for_matches(ranges, limit)
+        super::piece_tree::preview::previews_for_matches(&self.piece_tree, ranges, limit)
     }
 
     pub fn search_text(&self, range_chars: Option<Range<usize>>) -> (String, usize) {

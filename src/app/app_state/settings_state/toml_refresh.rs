@@ -21,6 +21,7 @@ impl ScratchpadApp {
 
     pub(crate) fn reload_settings_if_switching_views(&mut self, next_view_id: ViewId) {
         if self
+            .tab_manager
             .active_tab()
             .is_some_and(|tab| tab.active_view_id != next_view_id)
         {
@@ -30,6 +31,7 @@ impl ScratchpadApp {
 
     pub(crate) fn reload_settings_if_closing_view(&mut self, view_id: ViewId) {
         if self
+            .tab_manager
             .active_tab()
             .is_some_and(|tab| tab.active_view_id == view_id)
         {
@@ -42,7 +44,7 @@ impl ScratchpadApp {
             return;
         };
 
-        self.pending_settings_toml_refresh = Some(buffer_id);
+        self.state.pending_settings_toml_refresh = Some(buffer_id);
     }
 
     pub(in crate::app::app_state) fn settings_toml_refresh_on_tab_close(
@@ -50,7 +52,7 @@ impl ScratchpadApp {
         index: usize,
     ) -> SettingsTomlRefresh {
         let (buffer_id, raw, is_dirty) = self.settings_file_buffer_snapshot(index)?;
-        let action = if is_dirty || self.pending_settings_toml_refresh == Some(buffer_id) {
+        let action = if is_dirty || self.state.pending_settings_toml_refresh == Some(buffer_id) {
             SettingsTomlRefreshAction::ApplyBuffer(raw)
         } else {
             return None;
@@ -76,29 +78,29 @@ impl ScratchpadApp {
             SettingsTomlRefreshAction::ApplyBuffer(raw) => match parse_toml_settings(&raw) {
                 Ok(settings) => {
                     self.apply_settings(settings);
-                    self.applied_editor_font = None;
-                    self.set_info_status_in_domain(
+                    self.state.applied_editor_font = None;
+                    self.state.status.set_info_status_in_domain(
                         crate::app::app_state::StatusDomain::Settings,
                         "Settings reloaded from settings.toml.",
                     );
                 }
                 Err(error) => {
-                    self.report_settings_toml_parse_failed(error);
+                    self.state.status.report_settings_toml_parse_failed(error);
                 }
             },
         }
     }
 
     fn clear_pending_settings_toml_refresh(&mut self, buffer_id: BufferId) {
-        if self.pending_settings_toml_refresh == Some(buffer_id) {
-            self.pending_settings_toml_refresh = None;
+        if self.state.pending_settings_toml_refresh == Some(buffer_id) {
+            self.state.pending_settings_toml_refresh = None;
         }
     }
 
     fn active_settings_toml_refresh_action(&self) -> SettingsTomlRefresh {
         let (buffer_id, raw, is_dirty) =
-            self.active_settings_file_buffer_snapshot(self.active_tab_index())?;
-        if !is_dirty && self.pending_settings_toml_refresh != Some(buffer_id) {
+            self.active_settings_file_buffer_snapshot(self.tab_manager.active_tab_index)?;
+        if !is_dirty && self.state.pending_settings_toml_refresh != Some(buffer_id) {
             return None;
         }
 
@@ -109,14 +111,14 @@ impl ScratchpadApp {
         &self,
         index: usize,
     ) -> Option<(BufferId, String, bool)> {
-        let buffer = self.tabs().get(index)?.active_buffer();
+        let buffer = self.tab_manager.tabs.as_slice().get(index)?.active_buffer();
         buffer
             .is_settings_file
             .then(|| settings_buffer_snapshot(buffer))
     }
 
     fn settings_file_buffer_snapshot(&self, index: usize) -> Option<(BufferId, String, bool)> {
-        let tab = self.tabs().get(index)?;
+        let tab = self.tab_manager.tabs.as_slice().get(index)?;
         let buffer = tab.buffers().find(|buffer| buffer.is_settings_file)?;
 
         Some(settings_buffer_snapshot(buffer))

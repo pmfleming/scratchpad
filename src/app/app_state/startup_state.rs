@@ -13,12 +13,11 @@ use crate::app::services::settings_store::{
     AppSettings, FileOpenDisposition, SettingsStore, StartupSessionBehavior,
 };
 use crate::app::startup::{StartupOpenTarget, StartupOptions};
-use std::collections::BTreeSet;
 use std::time::Instant;
 
 impl ScratchpadApp {
     pub(crate) fn set_session_persist_on_drop(&mut self, enabled: bool) {
-        self.persist_session_on_drop = enabled;
+        self.state.persist_session_on_drop = enabled;
     }
 
     pub fn with_session_store(session_store: SessionStore) -> Self {
@@ -111,8 +110,7 @@ impl ScratchpadApp {
                 status_history_open: false,
                 search_state: SearchState::default(),
                 chrome_transition_frames_remaining: 0,
-                selected_tab_slots: BTreeSet::new(),
-                tab_selection_anchor: None,
+                workspace_selection: Default::default(),
                 tab_rename_state: None,
                 pending_tab_context_menu: None,
                 startup_restore_conflicts: Vec::new(),
@@ -160,7 +158,9 @@ impl ScratchpadApp {
     fn apply_startup_options(&mut self, startup_options: StartupOptions) {
         if startup_options.files.is_empty() {
             if let Some(message) = startup_options.startup_notice {
-                self.set_warning_status_in_domain(StatusDomain::Session, message);
+                self.state
+                    .status
+                    .set_warning_status_in_domain(StatusDomain::Session, message);
             }
             return;
         }
@@ -180,14 +180,18 @@ impl ScratchpadApp {
         }
 
         if let Some(message) = startup_options.startup_notice {
-            self.set_warning_status_in_domain(StatusDomain::Session, message);
+            self.state
+                .status
+                .set_warning_status_in_domain(StatusDomain::Session, message);
         }
     }
 
     pub(crate) fn apply_startup_options_async(&mut self, startup_options: StartupOptions) {
         if startup_options.files.is_empty() {
             if let Some(message) = startup_options.startup_notice {
-                self.set_warning_status_in_domain(StatusDomain::Session, message);
+                self.state
+                    .status
+                    .set_warning_status_in_domain(StatusDomain::Session, message);
             }
             return;
         }
@@ -211,7 +215,9 @@ impl ScratchpadApp {
         }
 
         if let Some(message) = startup_options.startup_notice {
-            self.set_warning_status_in_domain(StatusDomain::Session, message);
+            self.state
+                .status
+                .set_warning_status_in_domain(StatusDomain::Session, message);
         }
     }
 
@@ -220,7 +226,7 @@ impl ScratchpadApp {
             startup_options.restore_session
         } else {
             matches!(
-                self.app_settings.startup_session_behavior,
+                self.state.app_settings.startup_session_behavior,
                 StartupSessionBehavior::ContinuePreviousSession
             )
         }
@@ -230,7 +236,7 @@ impl ScratchpadApp {
         if startup_options.open_target_explicit {
             startup_options.open_target
         } else {
-            match self.app_settings.file_open_disposition {
+            match self.state.app_settings.file_open_disposition {
                 FileOpenDisposition::NewTab => StartupOpenTarget::SeparateTabs,
                 FileOpenDisposition::CurrentTab => StartupOpenTarget::ActiveTab,
             }
@@ -252,7 +258,7 @@ impl ScratchpadApp {
         } else {
             crate::app::domain::WorkspaceTab::untitled()
         };
-        self.tab_manager_mut().set_tabs(vec![default_tab], 0);
+        self.tab_manager.set_tabs(vec![default_tab], 0);
         self.mark_search_dirty();
     }
 }

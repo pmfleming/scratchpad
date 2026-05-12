@@ -68,7 +68,9 @@ impl FileController {
         if let Some(paths) = rfd::FileDialog::new().pick_files() {
             open_action(app, paths);
         } else {
-            app.set_info_status_in_domain(StatusDomain::File, format!("{action_name} cancelled."));
+            app.state
+                .status
+                .set_info_status_in_domain(StatusDomain::File, format!("{action_name} cancelled."));
         }
     }
 
@@ -93,10 +95,14 @@ impl FileController {
         _log_message: String,
     ) {
         match status_message {
-            Some(message) if should_warn => {
-                app.set_warning_status_in_domain(StatusDomain::File, message)
-            }
-            Some(message) => app.set_info_status_in_domain(StatusDomain::File, message),
+            Some(message) if should_warn => app
+                .state
+                .status
+                .set_warning_status_in_domain(StatusDomain::File, message),
+            Some(message) => app
+                .state
+                .status
+                .set_info_status_in_domain(StatusDomain::File, message),
             None => app.clear_status_message(),
         }
     }

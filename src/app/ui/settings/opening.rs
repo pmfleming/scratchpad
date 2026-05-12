@@ -19,13 +19,15 @@ pub(super) fn render_opening_category(ui: &mut egui::Ui, app: &mut ScratchpadApp
         egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE,
         "Recent files",
         "Enable recent-file UI.",
-        app.recent_files_enabled(),
-        |enabled| app.set_recent_files_enabled(enabled),
+        app.state.app_settings.recent_files_enabled(),
+        |enabled| {
+            crate::app::app_state::settings_controller::set_recent_files_enabled(app, enabled)
+        },
     );
 }
 
 fn render_opening_files_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    let mut selected = app.file_open_disposition();
+    let mut selected = app.state.app_settings.file_open_disposition();
     settings_card_frame(ui, |ui| {
         card_header(
             ui,
@@ -46,13 +48,13 @@ fn render_opening_files_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         );
     });
 
-    if selected != app.file_open_disposition() {
-        app.set_file_open_disposition(selected);
+    if selected != app.state.app_settings.file_open_disposition() {
+        crate::app::app_state::settings_controller::set_file_open_disposition(app, selected);
     }
 }
 
 fn render_startup_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    let mut selected = app.startup_session_behavior();
+    let mut selected = app.state.app_settings.startup_session_behavior();
     expandable_card(
         ui,
         "settings_startup_behavior_card",
@@ -79,8 +81,8 @@ fn render_startup_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         },
     );
 
-    if selected != app.startup_session_behavior() {
-        app.set_startup_session_behavior(selected);
+    if selected != app.state.app_settings.startup_session_behavior() {
+        crate::app::app_state::settings_controller::set_startup_session_behavior(app, selected);
     }
 }
 

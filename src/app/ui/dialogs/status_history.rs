@@ -45,11 +45,11 @@ impl StatusHistoryRow {
 }
 
 pub(crate) fn show_status_history_window(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    if !app.status_history_open {
+    if !app.state.status_history_open {
         return;
     }
 
-    let rows = status_history_rows(app.status.history.iter());
+    let rows = status_history_rows(app.state.status.history.iter());
     let filter = read_filter(ctx);
     let mut next_filter = filter;
     let mut close_requested = false;

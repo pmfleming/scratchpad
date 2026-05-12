@@ -3,15 +3,15 @@ use crate::app::services::settings_store::TabOrderMode;
 
 impl ScratchpadApp {
     pub(crate) fn set_tab_order_mode(&mut self, mode: TabOrderMode) {
-        if self.app_settings.tab_order_mode == mode {
+        if self.state.app_settings.tab_order_mode == mode {
             return;
         }
 
-        if self.app_settings.tab_order_mode == TabOrderMode::Custom {
+        if self.state.app_settings.tab_order_mode == TabOrderMode::Custom {
             self.remember_current_custom_tab_order();
         }
 
-        self.app_settings.tab_order_mode = mode;
+        self.state.app_settings.tab_order_mode = mode;
         if mode == TabOrderMode::Custom {
             self.restore_custom_tab_order();
         } else {
@@ -22,17 +22,18 @@ impl ScratchpadApp {
 
     pub(crate) fn apply_workspace_tab_order(&mut self, workspace_order: Vec<usize>) {
         if self.apply_workspace_tab_order_internal(workspace_order, false) {
-            self.app_settings.tab_order_mode = TabOrderMode::Custom;
+            self.state.app_settings.tab_order_mode = TabOrderMode::Custom;
             self.remember_current_custom_tab_order();
             self.persist_settings_or_error();
         }
     }
 
     pub(crate) fn apply_current_tab_ordering(&mut self) -> bool {
-        let workspace_order = match workspace_tab_order_for_mode(self, self.tab_order_mode()) {
-            Some(order) => order,
-            None => return false,
-        };
+        let workspace_order =
+            match workspace_tab_order_for_mode(self, self.state.app_settings.tab_order_mode()) {
+                Some(order) => order,
+                None => return false,
+            };
         let reordered = self.apply_workspace_tab_order_internal(workspace_order, false);
         if reordered {
             self.begin_layout_transition();
@@ -63,14 +64,16 @@ impl ScratchpadApp {
             .iter()
             .filter_map(|&index| tabs.get_mut(index).and_then(Option::take))
             .collect();
-        self.tab_manager.active_tab_index = workspace_order
+        let reordered_active_tab_index = workspace_order
             .iter()
             .position(|&index| index == active_workspace_index)
             .unwrap_or(0);
-        self.rebuild_buffer_tab_index();
+        self.tab_manager
+            .set_active_tab_index_clamped(reordered_active_tab_index);
+        self.tab_manager.rebuild_buffer_tab_index();
         self.ensure_active_tab_slot_selected();
         self.tab_manager.pending_scroll_to_active = true;
-        self.mark_session_dirty();
+        self.tab_manager.mark_session_dirty();
         if persist_settings {
             self.persist_settings_or_error();
         }
@@ -78,7 +81,13 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn remember_current_custom_tab_order(&mut self) {
-        self.app_settings.custom_tab_order = self.tabs().iter().map(|tab| tab.buffer.id).collect();
+        self.state.app_settings.custom_tab_order = self
+            .tab_manager
+            .tabs
+            .as_slice()
+            .iter()
+            .map(|tab| tab.buffer.id)
+            .collect();
     }
 
     fn restore_custom_tab_order(&mut self) -> bool {
@@ -96,14 +105,14 @@ fn workspace_tab_order_for_mode(app: &ScratchpadApp, mode: TabOrderMode) -> Opti
         return None;
     }
 
-    let mut order = (0..app.tabs().len()).collect::<Vec<_>>();
+    let mut order = (0..app.tab_manager.tabs.as_slice().len()).collect::<Vec<_>>();
     let custom_rank = custom_order_ranks(app);
     match mode {
         TabOrderMode::Custom => None,
         TabOrderMode::FileName => {
             order.sort_by(|left, right| {
-                let left_tab = &app.tabs()[*left];
-                let right_tab = &app.tabs()[*right];
+                let left_tab = &app.tab_manager.tabs.as_slice()[*left];
+                let right_tab = &app.tab_manager.tabs.as_slice()[*right];
                 left_tab
                     .buffer
                     .name
@@ -117,7 +126,7 @@ fn workspace_tab_order_for_mode(app: &ScratchpadApp, mode: TabOrderMode) -> Opti
         }
         TabOrderMode::FileSize => {
             order.sort_by_key(|index| {
-                let tab = &app.tabs()[*index];
+                let tab = &app.tab_manager.tabs.as_slice()[*index];
                 (
                     tab_total_size(tab),
                     tab.buffer.name.to_ascii_lowercase(),
@@ -128,7 +137,7 @@ fn workspace_tab_order_for_mode(app: &ScratchpadApp, mode: TabOrderMode) -> Opti
         }
         TabOrderMode::FileAge => {
             order.sort_by_key(|index| {
-                let millis = app.tabs()[*index]
+                let millis = app.tab_manager.tabs.as_slice()[*index]
                     .buffer
                     .disk_state
                     .as_ref()
@@ -143,7 +152,7 @@ fn workspace_tab_order_for_mode(app: &ScratchpadApp, mode: TabOrderMode) -> Opti
         }
         TabOrderMode::RecentEdit => {
             order.sort_by_key(|index| {
-                let latest = app.tabs()[*index]
+                let latest = app.tab_manager.tabs.as_slice()[*index]
                     .buffers()
                     .flat_map(|buffer| buffer.document().history_entries())
                     .map(|entry| entry.global_seq)
@@ -160,10 +169,12 @@ fn workspace_tab_order_for_mode(app: &ScratchpadApp, mode: TabOrderMode) -> Opti
 }
 
 fn workspace_tab_order_from_saved_custom_order(app: &ScratchpadApp) -> Vec<usize> {
-    let mut order = Vec::with_capacity(app.tabs().len());
-    for buffer_id in &app.app_settings.custom_tab_order {
+    let mut order = Vec::with_capacity(app.tab_manager.tabs.as_slice().len());
+    for buffer_id in &app.state.app_settings.custom_tab_order {
         if let Some(index) = app
-            .tabs()
+            .tab_manager
+            .tabs
+            .as_slice()
             .iter()
             .position(|tab| tab.buffer.id == *buffer_id)
             && !order.contains(&index)
@@ -171,7 +182,7 @@ fn workspace_tab_order_from_saved_custom_order(app: &ScratchpadApp) -> Vec<usize
             order.push(index);
         }
     }
-    for index in 0..app.tabs().len() {
+    for index in 0..app.tab_manager.tabs.as_slice().len() {
         if !order.contains(&index) {
             order.push(index);
         }
@@ -181,7 +192,7 @@ fn workspace_tab_order_from_saved_custom_order(app: &ScratchpadApp) -> Vec<usize
 
 fn custom_order_ranks(app: &ScratchpadApp) -> Vec<usize> {
     let saved_order = workspace_tab_order_from_saved_custom_order(app);
-    let mut ranks = vec![usize::MAX; app.tabs().len()];
+    let mut ranks = vec![usize::MAX; app.tab_manager.tabs.as_slice().len()];
     for (rank, index) in saved_order.into_iter().enumerate() {
         ranks[index] = rank;
     }
@@ -227,7 +238,10 @@ mod tests {
         app.set_tab_order_mode(TabOrderMode::FileName);
 
         assert_eq!(tab_names(&app), ["Alpha.txt", "beta.txt", "zeta.txt"]);
-        assert_eq!(app.active_tab().unwrap().buffer.name, "zeta.txt");
+        assert_eq!(
+            app.tab_manager.active_tab().unwrap().buffer.name,
+            "zeta.txt"
+        );
     }
 
     #[test]
@@ -285,7 +299,10 @@ mod tests {
 
         assert!(app.reorder_display_tab(0, 2));
 
-        assert_eq!(app.tab_order_mode(), TabOrderMode::Custom);
+        assert_eq!(
+            app.state.app_settings.tab_order_mode(),
+            TabOrderMode::Custom
+        );
         assert_eq!(tab_names(&app), ["beta.txt", "gamma.txt", "alpha.txt"]);
     }
 
@@ -343,7 +360,7 @@ mod tests {
             pending_scroll_to_active: false,
             buffer_tab_index: Default::default(),
         };
-        app.rebuild_buffer_tab_index();
+        app.tab_manager.rebuild_buffer_tab_index();
         app.clear_tab_selection();
         app
     }
@@ -353,7 +370,9 @@ mod tests {
     }
 
     fn tab_names(app: &ScratchpadApp) -> Vec<String> {
-        app.tabs()
+        app.tab_manager
+            .tabs
+            .as_slice()
             .iter()
             .map(|tab| tab.buffer.name.clone())
             .collect()

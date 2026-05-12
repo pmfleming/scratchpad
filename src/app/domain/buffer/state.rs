@@ -278,7 +278,7 @@ impl BufferState {
     }
 
     pub fn preview_for_match(&self, range: &Range<usize>) -> (usize, usize, String) {
-        self.document.piece_tree().preview_for_match(range)
+        super::piece_tree::preview::preview_for_match(self.document.piece_tree(), range)
     }
 
     pub fn document_snapshot(&self) -> DocumentSnapshot {
@@ -306,10 +306,10 @@ impl BufferState {
     pub fn view_status(&self, cursor_range: Option<CursorRange>) -> BufferViewStatus {
         let (cursor_line, cursor_column, selection_chars) = cursor_range
             .map(|range| {
-                let position = self
-                    .document
-                    .piece_tree()
-                    .char_position(range.primary.index);
+                let position = super::piece_tree::query::char_position(
+                    self.document.piece_tree(),
+                    range.primary.index,
+                );
                 (
                     Some(position.line_index + 1),
                     Some(position.column_index + 1),

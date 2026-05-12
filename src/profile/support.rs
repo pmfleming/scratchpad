@@ -37,7 +37,7 @@ pub(super) fn wait_for_app_state_search_matches(app: &mut ScratchpadApp, expecte
     let deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < deadline {
         app.poll_search();
-        if app.search_match_count() == expected {
+        if app.state.search_state.match_count() == expected {
             return;
         }
         thread::yield_now();
@@ -45,7 +45,7 @@ pub(super) fn wait_for_app_state_search_matches(app: &mut ScratchpadApp, expecte
 
     panic!(
         "timed out waiting for {expected} search matches; got {}",
-        app.search_match_count()
+        app.state.search_state.match_count()
     );
 }
 
@@ -63,13 +63,13 @@ pub(super) fn install_navigation_workspace(
     bytes_per_buffer: usize,
 ) {
     let total_tabs = tab_count.max(1);
-    app.tabs_mut()[0] = build_view_dense_tab(0, views_per_tab, bytes_per_buffer);
+    app.tab_manager.tabs.as_mut_slice()[0] =
+        build_view_dense_tab(0, views_per_tab, bytes_per_buffer);
     for tab_index in 1..total_tabs {
-        app.append_tab(build_view_dense_tab(
-            tab_index,
-            views_per_tab,
-            bytes_per_buffer,
-        ));
+        crate::app::app_state::workspace_controller::append_tab(
+            app,
+            build_view_dense_tab(tab_index, views_per_tab, bytes_per_buffer),
+        );
     }
     app.handle_command(AppCommand::ActivateTab { index: 0 });
 }
@@ -80,7 +80,7 @@ pub(super) fn install_profile_tab<T>(
     inspect: impl FnOnce(&WorkspaceTab) -> T,
 ) -> T {
     let result = inspect(&tab);
-    app.tabs_mut()[0] = tab;
+    app.tab_manager.tabs.as_mut_slice()[0] = tab;
     result
 }
 
@@ -99,7 +99,7 @@ pub(super) fn install_search_all_tabs(
     for tab_index in 1..total_tabs {
         let tab = build_search_all_tab(tab_index, bytes_per_tab);
         expected_matches += expected_matches_for_tab(&tab);
-        app.append_tab(tab);
+        crate::app::app_state::workspace_controller::append_tab(app, tab);
     }
 
     app.handle_command(AppCommand::ActivateTab { index: 0 });
@@ -200,13 +200,18 @@ pub(super) fn resize_profile_splits(
         } else {
             0.65
         };
-        app.resize_split(path.clone(), ratio);
+        app.handle_command(AppCommand::ResizeSplit {
+            path: path.clone(),
+            ratio,
+        });
     }
     split_paths.len()
 }
 
 pub(super) fn rebalance_profile_tab(app: &mut ScratchpadApp) -> usize {
-    app.tabs_mut()
+    app.tab_manager
+        .tabs
+        .as_mut_slice()
         .first_mut()
         .map(rebalance_profile_tab_views)
         .unwrap_or(0)
@@ -221,11 +226,11 @@ pub(super) fn rebalance_profile_tab_views(tab: &mut WorkspaceTab) -> usize {
 pub(super) fn cycle_profile_views(app: &mut ScratchpadApp, view_ids: &[ViewId]) -> usize {
     let mut activations = 0;
     for &view_id in view_ids.iter().skip(1) {
-        app.activate_view(view_id);
+        app.handle_command(AppCommand::ActivateView { view_id });
         activations += 1;
     }
     for &view_id in view_ids.iter().rev().skip(1) {
-        app.activate_view(view_id);
+        app.handle_command(AppCommand::ActivateView { view_id });
         activations += 1;
     }
     activations

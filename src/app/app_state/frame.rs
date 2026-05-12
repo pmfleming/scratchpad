@@ -11,19 +11,20 @@ use std::path::PathBuf;
 
 impl ScratchpadApp {
     pub(crate) fn open_encoding_dialog(&mut self) {
-        self.encoding_dialog_choice = self
+        self.state.encoding_dialog_choice = self
+            .tab_manager
             .active_tab()
             .map(|tab| tab.active_buffer().format.encoding_name.clone())
             .unwrap_or_else(|| "UTF-8".to_owned());
-        self.encoding_dialog_open = true;
+        self.state.encoding_dialog_open = true;
     }
 
     pub(crate) fn close_encoding_dialog(&mut self) {
-        self.encoding_dialog_open = false;
+        self.state.encoding_dialog_open = false;
     }
 
     pub(super) fn handle_pending_close_request(&mut self, ctx: &egui::Context) -> bool {
-        if !ctx.input(|input| input.viewport().close_requested()) || self.close_in_progress {
+        if !ctx.input(|input| input.viewport().close_requested()) || self.state.close_in_progress {
             return false;
         }
 
@@ -33,12 +34,12 @@ impl ScratchpadApp {
     }
 
     pub(super) fn prepare_frame(&mut self, ctx: &egui::Context) {
-        if self.window_shown_after_first_frame {
+        if self.state.window_shown_after_first_frame {
             self.record_window_state(ctx);
         }
-        if handle_window_resize(ctx) && self.overflow_popup_open {
+        if handle_window_resize(ctx) && self.state.overflow_popup_open {
             // Rebuild the overflow popup lazily against the resized viewport.
-            self.overflow_popup_open = false;
+            self.state.overflow_popup_open = false;
         }
         self.tab_manager.evict_inactive_tab_state();
         self.poll_file_watcher(ctx);
@@ -61,7 +62,7 @@ impl ScratchpadApp {
 
     pub(super) fn render_frame(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         self.apply_deferred_layout_settings(ctx);
-        paint_root_background(ui, self.editor_background_color());
+        paint_root_background(ui, self.state.app_settings.editor_background_color());
         self.render_tab_chrome(ui);
         self.render_active_surface(ui);
         dialogs::show_startup_restore_conflict_modal(ctx, self);
@@ -75,12 +76,12 @@ impl ScratchpadApp {
     }
 
     fn render_tab_chrome(&mut self, ui: &mut egui::Ui) {
-        if self.tab_list_position() == TabListPosition::Top {
+        if self.state.app_settings.tab_list_position() == TabListPosition::Top {
             tab_strip::show_header(ui, self);
         } else {
             tab_strip::show_top_drag_bar(ui, self);
         }
-        if self.status_bar_visible() {
+        if self.state.app_settings.status_bar_visible() {
             status_bar::show_status_bar(ui, self);
         }
         tab_strip::show_bottom_tab_list(ui, self);
@@ -88,7 +89,7 @@ impl ScratchpadApp {
     }
 
     fn render_active_surface(&mut self, ui: &mut egui::Ui) {
-        match self.active_surface {
+        match self.state.active_surface {
             AppSurface::Workspace => editor_area::show_editor(ui, self),
             AppSurface::Settings => settings::show_page(ui, self),
         }
@@ -96,11 +97,11 @@ impl ScratchpadApp {
 
     fn sync_window_title(&mut self, ctx: &egui::Context) {
         let title = self.window_title();
-        if self.current_window_title.as_ref() == Some(&title) {
+        if self.state.current_window_title.as_ref() == Some(&title) {
             return;
         }
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
-        self.current_window_title = Some(title);
+        self.state.current_window_title = Some(title);
     }
 
     fn handle_dropped_files(&mut self, ctx: &egui::Context) {
@@ -113,13 +114,13 @@ impl ScratchpadApp {
     }
 
     fn show_window_after_first_frame(&mut self, ctx: &egui::Context) {
-        if self.window_shown_after_first_frame {
+        if self.state.window_shown_after_first_frame {
             return;
         }
-        if self.painted_frames_before_window_show < 2 {
-            self.painted_frames_before_window_show += 1;
-            if self.painted_frames_before_window_show == 2
-                && self.app_settings.window_state.maximized
+        if self.state.painted_frames_before_window_show < 2 {
+            self.state.painted_frames_before_window_show += 1;
+            if self.state.painted_frames_before_window_show == 2
+                && self.state.app_settings.window_state.maximized
             {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
             }
@@ -127,21 +128,21 @@ impl ScratchpadApp {
             return;
         }
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-        self.window_shown_after_first_frame = true;
+        self.state.window_shown_after_first_frame = true;
     }
 
     fn persist_with_error_status(&mut self) -> bool {
         match self.persist_session_now() {
             Ok(()) => true,
             Err(error) => {
-                self.report_session_save_failed(error);
+                self.state.status.report_session_save_failed(error);
                 false
             }
         }
     }
 
     pub(crate) fn begin_chrome_transition(&mut self) {
-        self.chrome_transition_frames_remaining = CHROME_TRANSITION_FRAMES;
+        self.state.chrome_transition_frames_remaining = CHROME_TRANSITION_FRAMES;
     }
 
     pub(crate) fn begin_layout_transition(&mut self) {
@@ -149,20 +150,20 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn chrome_transition_active(&self) -> bool {
-        self.chrome_transition_frames_remaining > 0
+        self.state.chrome_transition_frames_remaining > 0
     }
 
     fn modal_callout_open(&self) -> bool {
-        self.encoding_dialog_open
-            || self.text_history_open
-            || self.status_history_open
+        self.state.encoding_dialog_open
+            || self.state.text_history_open
+            || self.state.status_history_open
             || self.pending_action().is_some()
             || self.current_startup_restore_conflict().is_some()
     }
 
     fn finish_frame_transitions(&mut self, ctx: &egui::Context) {
-        if self.chrome_transition_frames_remaining > 0 {
-            self.chrome_transition_frames_remaining -= 1;
+        if self.state.chrome_transition_frames_remaining > 0 {
+            self.state.chrome_transition_frames_remaining -= 1;
         }
         transition::set_chrome_transition_active(ctx, self.chrome_transition_active());
         if self.chrome_transition_active() {
@@ -174,8 +175,8 @@ impl ScratchpadApp {
         if ctx.current_pass_index() != 0 {
             return;
         }
-        if let Some(visible) = self.pending_status_bar_visible.take() {
-            self.set_status_bar_visible(visible);
+        if let Some(visible) = self.state.pending_status_bar_visible.take() {
+            crate::app::app_state::settings_controller::set_status_bar_visible(self, visible);
         }
     }
 
@@ -190,7 +191,7 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn request_exit(&mut self, ctx: &egui::Context) {
-        if self.close_in_progress {
+        if self.state.close_in_progress {
             return;
         }
 
@@ -200,7 +201,7 @@ impl ScratchpadApp {
         }
 
         if self.persist_with_error_status() {
-            self.close_in_progress = true;
+            self.state.close_in_progress = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
@@ -209,7 +210,7 @@ impl ScratchpadApp {
         match self.persist_settings_now() {
             Ok(()) => true,
             Err(error) => {
-                self.report_settings_save_failed(error);
+                self.state.status.report_settings_save_failed(error);
                 false
             }
         }
@@ -233,35 +234,35 @@ impl ScratchpadApp {
     }
 
     fn sync_editor_fonts(&mut self, ctx: &egui::Context) {
-        if self.applied_editor_font == Some(self.app_settings.editor_font) {
+        if self.state.applied_editor_font == Some(self.state.app_settings.editor_font) {
             return;
         }
 
-        if let Err(error) = fonts::apply_editor_fonts(ctx, self.app_settings.editor_font) {
+        if let Err(error) = fonts::apply_editor_fonts(ctx, self.state.app_settings.editor_font) {
             diagnostics::record_warning(
                 "apply_editor_font",
                 None,
                 "app_state::frame",
                 format!(
                     "Editor font '{}' unavailable; using default fallback: {error}",
-                    self.app_settings.editor_font.label()
+                    self.state.app_settings.editor_font.label()
                 ),
             );
-            self.set_warning_status_with_detail(
+            self.state.status.set_warning_status_with_detail(
                 crate::app::app_state::StatusDomain::Settings,
                 format!(
                     "Could not use editor font '{}'. The default font is in use.",
-                    self.app_settings.editor_font.label()
+                    self.state.app_settings.editor_font.label()
                 ),
                 error.to_string(),
             );
         }
         self.clear_editor_layout_caches();
-        self.applied_editor_font = Some(self.app_settings.editor_font);
+        self.state.applied_editor_font = Some(self.state.app_settings.editor_font);
     }
 
     fn clear_editor_layout_caches(&mut self) {
-        for tab in self.tabs_mut() {
+        for tab in self.tab_manager.tabs.as_mut_slice() {
             for view in &mut tab.views {
                 view.layout_cache.clear();
             }

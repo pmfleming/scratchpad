@@ -47,8 +47,10 @@ impl FileController {
     pub(super) fn open_selected_paths_here_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
         Self::prepare_to_open_paths(app);
         let anchor_view_id = app
-            .tabs()
-            .get(app.active_tab_index())
+            .tab_manager
+            .tabs
+            .as_slice()
+            .get(app.tab_manager.active_tab_index)
             .map(|tab| tab.active_view_id);
         let mut pending_paths = Vec::new();
         let mut summary = OpenHereBatchSummary::default();
@@ -163,8 +165,8 @@ impl FileController {
     }
 
     fn rebalance_open_here_layout(app: &mut ScratchpadApp) {
-        let reflow_axis = app.workspace_reflow_axis;
-        let rebalanced = if let Some(tab) = app.active_tab_mut() {
+        let reflow_axis = app.state.workspace_reflow_axis;
+        let rebalanced = if let Some(tab) = app.tab_manager.active_tab_mut() {
             tab.rebalance_views_equally_for_axis(reflow_axis)
         } else {
             false
@@ -174,7 +176,7 @@ impl FileController {
             return;
         }
 
-        app.mark_session_dirty();
+        app.tab_manager.mark_session_dirty();
         let _ = app.persist_session_now();
     }
 
@@ -182,8 +184,9 @@ impl FileController {
         app: &ScratchpadApp,
         path: &Path,
     ) -> Option<ExistingOpenHerePath> {
-        let target_index = app.active_tab_index();
-        app.find_tab_by_path(path)
+        let target_index = app.tab_manager.active_tab_index;
+        app.tab_manager
+            .find_tab_by_path(path)
             .map(|(existing_tab_index, view_id)| {
                 if existing_tab_index == target_index {
                     ExistingOpenHerePath::AlreadyInCurrentTab { view_id }
@@ -219,14 +222,14 @@ impl FileController {
         path: PathBuf,
         source_index: usize,
     ) -> OpenHerePathOutcome {
-        let target_index = app.active_tab_index();
+        let target_index = app.tab_manager.active_tab_index;
         app.handle_command(AppCommand::CombineTabIntoTab {
             source_index,
             target_index,
         });
 
-        if let Some((current_index, current_view_id)) = app.find_tab_by_path(&path)
-            && current_index == app.active_tab_index()
+        if let Some((current_index, current_view_id)) = app.tab_manager.find_tab_by_path(&path)
+            && current_index == app.tab_manager.active_tab_index
         {
             app.handle_command(AppCommand::ActivateView {
                 view_id: current_view_id,
@@ -291,7 +294,7 @@ impl FileController {
         {
             true
         } else {
-            app.set_error_status_in_domain(
+            app.state.status.set_error_status_in_domain(
                 StatusDomain::Layout,
                 "Could not add those files to this tab layout.",
             );
@@ -304,7 +307,7 @@ impl FileController {
         anchor_view_id: Option<ViewId>,
         pending_workspace: WorkspaceTab,
     ) -> bool {
-        let opened = if let Some(tab) = app.active_tab_mut() {
+        let opened = if let Some(tab) = app.tab_manager.active_tab_mut() {
             if let Some(anchor_view_id) = anchor_view_id {
                 let _ = tab.activate_view(anchor_view_id);
             }
@@ -315,10 +318,10 @@ impl FileController {
         };
 
         if opened {
-            app.rebuild_buffer_tab_index();
+            app.tab_manager.rebuild_buffer_tab_index();
             true
         } else {
-            app.set_error_status_in_domain(
+            app.state.status.set_error_status_in_domain(
                 StatusDomain::Layout,
                 "Could not add those files to this tab layout.",
             );
@@ -402,7 +405,7 @@ mod tests {
             pending_scroll_to_active: false,
             buffer_tab_index: Default::default(),
         };
-        app.rebuild_buffer_tab_index();
+        app.tab_manager.rebuild_buffer_tab_index();
         app.clear_tab_selection();
         app
     }
@@ -429,7 +432,7 @@ mod tests {
                 None,
             ))],
         );
-        let anchor_view_id = app.tabs()[0].active_view_id;
+        let anchor_view_id = app.tab_manager.tabs.as_slice()[0].active_view_id;
 
         let outcomes = FileController::open_loaded_files_here(
             &mut app,
@@ -451,10 +454,10 @@ mod tests {
         assert_eq!(outcomes.len(), 2);
         assert!(matches!(outcomes[0], OpenHerePathOutcome::Opened { .. }));
         assert!(matches!(outcomes[1], OpenHerePathOutcome::Opened { .. }));
-        assert_eq!(app.tabs().len(), 1);
-        assert_eq!(app.tabs()[0].file_group_count(), 3);
-        assert!(app.find_tab_by_path(&one).is_some());
-        assert!(app.find_tab_by_path(&two).is_some());
+        assert_eq!(app.tab_manager.tabs.as_slice().len(), 1);
+        assert_eq!(app.tab_manager.tabs.as_slice()[0].buffers().count(), 3);
+        assert!(app.tab_manager.find_tab_by_path(&one).is_some());
+        assert!(app.tab_manager.find_tab_by_path(&two).is_some());
     }
 
     #[test]
@@ -477,9 +480,12 @@ mod tests {
 
         FileController::open_selected_paths_here_async(&mut app, vec![second.clone()]);
 
-        assert_eq!(app.tabs().len(), 1);
-        assert_eq!(app.tabs()[0].file_group_count(), 2);
-        assert_eq!(app.tabs()[0].active_view_id, second_view);
+        assert_eq!(app.tab_manager.tabs.as_slice().len(), 1);
+        assert_eq!(app.tab_manager.tabs.as_slice()[0].buffers().count(), 2);
+        assert_eq!(
+            app.tab_manager.tabs.as_slice()[0].active_view_id,
+            second_view
+        );
     }
 
     #[test]
@@ -499,10 +505,12 @@ mod tests {
 
         FileController::open_selected_paths_here_async(&mut app, vec![second.clone()]);
 
-        assert_eq!(app.tabs().len(), 1);
-        assert_eq!(app.tabs()[0].file_group_count(), 2);
+        assert_eq!(app.tab_manager.tabs.as_slice().len(), 1);
+        assert_eq!(app.tab_manager.tabs.as_slice()[0].buffers().count(), 2);
         assert_eq!(
-            app.find_tab_by_path(&second).map(|(index, _)| index),
+            app.tab_manager
+                .find_tab_by_path(&second)
+                .map(|(index, _)| index),
             Some(0)
         );
     }

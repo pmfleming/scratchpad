@@ -15,6 +15,7 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 use std::thread;
+use std::time::Instant;
 
 const SESSION_DIR_NAME: &str = "scratchpad";
 const SESSION_MANIFEST_NAME: &str = "session.json";
@@ -59,6 +60,33 @@ pub struct RestoredSession {
     pub restore_status: Option<RestoreStatus>,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SessionPersistProfile {
+    pub total_ns: u128,
+    pub snapshot_capture_ns: u128,
+    pub snapshot_write_ns: u128,
+    pub stale_cleanup_ns: u128,
+    pub manifest_serialize_ns: u128,
+    pub manifest_write_ns: u128,
+    pub tab_count: usize,
+    pub buffer_count: usize,
+    pub manifest_size_bytes: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SessionRestoreProfile {
+    pub total_ns: u128,
+    pub manifest_read_parse_ns: u128,
+    pub restore_reconstruction_ns: u128,
+    pub tab_count: usize,
+    pub buffer_count: usize,
+}
+
+pub struct ProfiledRestoredSession {
+    pub restored: Option<RestoredSession>,
+    pub profile: SessionRestoreProfile,
+}
+
 #[derive(Clone)]
 pub struct RestoreStatus {
     pub level: RestoreStatusLevel,
@@ -91,28 +119,74 @@ impl SessionStore {
     }
 
     pub fn load(&self) -> io::Result<Option<RestoredSession>> {
+        self.load_profiled().map(|profiled| profiled.restored)
+    }
+
+    pub fn load_profiled(&self) -> io::Result<ProfiledRestoredSession> {
+        let total_start = Instant::now();
+        let manifest_start = Instant::now();
         let Some(manifest) = self.load_manifest()? else {
-            return Ok(None);
+            return Ok(ProfiledRestoredSession {
+                restored: None,
+                profile: SessionRestoreProfile {
+                    total_ns: total_start.elapsed().as_nanos(),
+                    manifest_read_parse_ns: manifest_start.elapsed().as_nanos(),
+                    ..SessionRestoreProfile::default()
+                },
+            });
         };
+        let manifest_read_parse_ns = manifest_start.elapsed().as_nanos();
+        let buffer_count = manifest
+            .tabs
+            .iter()
+            .map(|tab| {
+                if tab.buffers.is_empty() {
+                    usize::from(tab.buffer_id.is_some())
+                } else {
+                    tab.buffers.len()
+                }
+            })
+            .sum();
         let legacy_settings = manifest.legacy_settings();
 
+        let restore_start = Instant::now();
         let mut restore_summary = RestoreSummary::default();
         let mut tabs = Vec::with_capacity(manifest.tabs.len());
         for (tab, summary) in self.restore_tabs_ordered(manifest.tabs) {
             restore_summary.merge(summary);
             tabs.push(tab);
         }
+        let restore_reconstruction_ns = restore_start.elapsed().as_nanos();
 
         if tabs.is_empty() {
-            return Ok(None);
+            return Ok(ProfiledRestoredSession {
+                restored: None,
+                profile: SessionRestoreProfile {
+                    total_ns: total_start.elapsed().as_nanos(),
+                    manifest_read_parse_ns,
+                    restore_reconstruction_ns,
+                    buffer_count,
+                    ..SessionRestoreProfile::default()
+                },
+            });
         }
 
-        Ok(Some(RestoredSession {
-            active_tab_index: manifest.active_tab_index.min(tabs.len() - 1),
-            tabs,
-            legacy_settings,
-            restore_status: restore_summary.into_status(),
-        }))
+        let tab_count = tabs.len();
+        Ok(ProfiledRestoredSession {
+            restored: Some(RestoredSession {
+                active_tab_index: manifest.active_tab_index.min(tabs.len() - 1),
+                tabs,
+                legacy_settings,
+                restore_status: restore_summary.into_status(),
+            }),
+            profile: SessionRestoreProfile {
+                total_ns: total_start.elapsed().as_nanos(),
+                manifest_read_parse_ns,
+                restore_reconstruction_ns,
+                tab_count,
+                buffer_count,
+            },
+        })
     }
 
     pub(crate) fn load_streaming(
@@ -163,15 +237,45 @@ impl SessionStore {
         font_size: f32,
         word_wrap: bool,
     ) -> io::Result<()> {
-        self.persist_request(SessionPersistRequest::capture(
-            tabs,
-            active_tab_index,
-            font_size,
-            word_wrap,
-        ))
+        self.persist_profiled(tabs, active_tab_index, font_size, word_wrap)
+            .map(|_| ())
+    }
+
+    pub fn persist_profiled(
+        &self,
+        tabs: &[WorkspaceTab],
+        active_tab_index: usize,
+        font_size: f32,
+        word_wrap: bool,
+    ) -> io::Result<SessionPersistProfile> {
+        let total_start = Instant::now();
+        let capture_start = Instant::now();
+        let request = SessionPersistRequest::capture(tabs, active_tab_index, font_size, word_wrap);
+        let mut profile = SessionPersistProfile {
+            snapshot_capture_ns: capture_start.elapsed().as_nanos(),
+            tab_count: request.tabs.len(),
+            buffer_count: request
+                .tabs
+                .iter()
+                .map(|tab| tab.buffer_snapshots.len())
+                .sum(),
+            ..SessionPersistProfile::default()
+        };
+        self.persist_request_profiled(request, &mut profile)?;
+        profile.total_ns = total_start.elapsed().as_nanos();
+        Ok(profile)
     }
 
     pub(crate) fn persist_request(&self, request: SessionPersistRequest) -> io::Result<()> {
+        let mut profile = SessionPersistProfile::default();
+        self.persist_request_profiled(request, &mut profile)
+    }
+
+    fn persist_request_profiled(
+        &self,
+        request: SessionPersistRequest,
+        profile: &mut SessionPersistProfile,
+    ) -> io::Result<()> {
         fs::create_dir_all(&self.root).inspect_err(|error| {
             diagnostics::record_io_error(
                 "session_create_root",
@@ -196,8 +300,13 @@ impl SessionStore {
             session_tabs.push(captured_tab.session_tab);
         }
 
+        let snapshot_write_start = Instant::now();
         let active_temp_paths = write_session_snapshots(snapshot_writes)?;
+        profile.snapshot_write_ns = snapshot_write_start.elapsed().as_nanos();
+
+        let stale_cleanup_start = Instant::now();
         self.remove_stale_buffer_files(&active_temp_paths)?;
+        profile.stale_cleanup_ns = stale_cleanup_start.elapsed().as_nanos();
 
         let manifest = SessionManifest {
             version: SESSION_VERSION,
@@ -208,6 +317,7 @@ impl SessionStore {
             word_wrap: request.word_wrap,
             tabs: session_tabs,
         };
+        let serialize_start = Instant::now();
         let json = serde_json::to_vec_pretty(&manifest).map_err(|error| {
             let error = invalid_data(error);
             record_session_io_error(
@@ -218,6 +328,10 @@ impl SessionStore {
             );
             error
         })?;
+        profile.manifest_serialize_ns = serialize_start.elapsed().as_nanos();
+        profile.manifest_size_bytes = json.len() as u64;
+
+        let manifest_write_start = Instant::now();
         write_atomic(&self.manifest_path, &json).inspect_err(|error| {
             record_session_io_error(
                 "session_write_manifest",
@@ -225,7 +339,9 @@ impl SessionStore {
                 "session_store::persist_request",
                 error,
             );
-        })
+        })?;
+        profile.manifest_write_ns = manifest_write_start.elapsed().as_nanos();
+        Ok(())
     }
 
     fn remove_stale_buffer_files(&self, active_temp_paths: &HashSet<PathBuf>) -> io::Result<()> {

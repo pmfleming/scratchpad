@@ -26,7 +26,7 @@ fn app_with_buffer(buffer: BufferState) -> ScratchpadApp {
         pending_scroll_to_active: false,
         buffer_tab_index: Default::default(),
     };
-    app.rebuild_buffer_tab_index();
+    app.tab_manager.rebuild_buffer_tab_index();
     app
 }
 
@@ -36,7 +36,7 @@ fn text_metadata_result_updates_matching_buffer_and_clears_pending_action() {
     let buffer_id = buffer.id;
     let revision = buffer.document_revision();
     let mut app = app_with_buffer(buffer);
-    app.io.pending_background_actions.insert(
+    app.state.io.pending_background_actions.insert(
         42,
         PendingBackgroundAction::RefreshTextMetadata(PendingTextMetadataAction {
             buffer_id,
@@ -57,8 +57,13 @@ fn text_metadata_result_updates_matching_buffer_and_clears_pending_action() {
         )),
     );
 
-    assert!(!app.io.pending_background_actions.contains_key(&42));
-    assert_eq!(app.tabs()[0].active_buffer().line_count, 2);
+    assert!(!app.state.io.pending_background_actions.contains_key(&42));
+    assert_eq!(
+        app.tab_manager.tabs.as_slice()[0]
+            .active_buffer()
+            .line_count,
+        2
+    );
 }
 
 #[test]
@@ -67,7 +72,7 @@ fn stale_encoding_compliance_result_clears_action_without_mutating_buffer() {
     let buffer_id = buffer.id;
     let stale_revision = buffer.document_revision().saturating_add(1);
     let mut app = app_with_buffer(buffer);
-    app.io.pending_background_actions.insert(
+    app.state.io.pending_background_actions.insert(
         7,
         PendingBackgroundAction::RefreshEncodingCompliance(PendingEncodingComplianceAction {
             buffer_id,
@@ -77,8 +82,12 @@ fn stale_encoding_compliance_result_clears_action_without_mutating_buffer() {
 
     app.apply_encoding_compliance_refreshed_result(7, buffer_id, stale_revision, Ok(true));
 
-    assert!(!app.io.pending_background_actions.contains_key(&7));
-    assert!(!app.tabs()[0].active_buffer().has_non_compliant_characters);
+    assert!(!app.state.io.pending_background_actions.contains_key(&7));
+    assert!(
+        !app.tab_manager.tabs.as_slice()[0]
+            .active_buffer()
+            .has_non_compliant_characters
+    );
 }
 
 #[test]
@@ -91,7 +100,7 @@ fn partial_open_tabs_result_keeps_action_until_terminal_result() {
         Some(path.clone()),
     );
     let mut app = test_app();
-    app.io.pending_background_actions.insert(
+    app.state.io.pending_background_actions.insert(
         3,
         PendingBackgroundAction::OpenTabs(PendingOpenTabsAction {
             accumulator: crate::app::services::file_controller::OpenBatchSummary::default(),
@@ -108,18 +117,18 @@ fn partial_open_tabs_result_keeps_action_until_terminal_result() {
         true,
     );
 
-    assert!(app.io.pending_background_actions.contains_key(&3));
-    assert_eq!(app.tabs().len(), 2);
+    assert!(app.state.io.pending_background_actions.contains_key(&3));
+    assert_eq!(app.tab_manager.tabs.as_slice().len(), 2);
 }
 
 #[test]
 fn unknown_background_result_is_ignored() {
     let mut app = test_app();
-    let original_tabs = app.tabs().len();
+    let original_tabs = app.tab_manager.tabs.as_slice().len();
 
     app.apply_paths_loaded_result(999, Vec::new(), false);
     app.apply_session_persisted_result(999, Err("ignored".to_owned()));
 
-    assert_eq!(app.tabs().len(), original_tabs);
-    assert!(app.status.current.is_none());
+    assert_eq!(app.tab_manager.tabs.as_slice().len(), original_tabs);
+    assert!(app.state.status.current.is_none());
 }

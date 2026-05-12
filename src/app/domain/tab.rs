@@ -1,11 +1,10 @@
-use crate::app::domain::{
-    BufferFreshness, BufferId, BufferState, EditorViewState, PaneNode, ViewId, tab_support,
-};
+use crate::app::domain::{BufferId, BufferState, EditorViewState, PaneNode, ViewId, tab_support};
 use std::collections::HashSet;
 
 mod layout;
 mod promotion;
 mod repair;
+pub(crate) mod summary;
 
 #[derive(Clone)]
 pub struct WorkspaceTab {
@@ -67,47 +66,6 @@ impl WorkspaceTab {
         Self::new(BufferState::new("Untitled".to_owned(), String::new(), None))
     }
 
-    pub fn display_name(&self) -> String {
-        if self.distinct_buffer_count() < 2 {
-            return self.buffer.display_name();
-        }
-
-        let names = self.distinct_buffer_names_in_view_order();
-        let first = names
-            .first()
-            .cloned()
-            .unwrap_or_else(|| self.buffer.name.clone());
-        let second = names
-            .get(1)
-            .cloned()
-            .unwrap_or_else(|| self.buffer.name.clone());
-        format!("[{}] {} & {}", names.len(), first, second)
-    }
-
-    pub fn full_display_name(&self, has_duplicate: bool) -> String {
-        let name = self.display_name();
-        if has_duplicate && let Some(context) = self.overflow_context_label() {
-            return format!("{} ({})", name, context);
-        }
-        name
-    }
-
-    pub fn overflow_context_label(&self) -> Option<String> {
-        self.buffer.overflow_context_label()
-    }
-
-    pub fn can_promote_view(&self, view_id: ViewId) -> bool {
-        self.view(view_id).is_some() && self.distinct_buffer_count() > 1
-    }
-
-    pub fn can_promote_all_files(&self) -> bool {
-        self.distinct_buffer_count() >= 3
-    }
-
-    pub fn file_group_count(&self) -> usize {
-        self.distinct_buffer_count()
-    }
-
     pub fn activate_view(&mut self, view_id: ViewId) -> bool {
         if !self.root_pane.contains_view(view_id) {
             return false;
@@ -134,30 +92,6 @@ impl WorkspaceTab {
         )
     }
 
-    pub fn attention_state(&self) -> Option<TabAttentionState> {
-        let mut has_auto_edit = false;
-        let mut has_dirty = false;
-
-        for buffer in self.buffers() {
-            match buffer.freshness {
-                BufferFreshness::ConflictOnDisk
-                | BufferFreshness::MissingOnDisk
-                | BufferFreshness::StaleOnDisk => return Some(TabAttentionState::DiskProblem),
-                BufferFreshness::AutoReloaded => has_auto_edit = true,
-                BufferFreshness::InSync => {}
-            }
-            has_dirty |= buffer.is_dirty;
-        }
-
-        if has_dirty {
-            Some(TabAttentionState::Dirty)
-        } else if has_auto_edit {
-            Some(TabAttentionState::AutoEdit)
-        } else {
-            None
-        }
-    }
-
     fn push_buffer_if_missing(&mut self, buffer: BufferState) {
         if self.buffer_by_id(buffer.id).is_some() {
             return;
@@ -166,7 +100,7 @@ impl WorkspaceTab {
         self.extra_buffers.push(buffer);
     }
 
-    fn distinct_buffer_count(&self) -> usize {
+    pub(super) fn distinct_buffer_count(&self) -> usize {
         let mut count = 0;
         for (i, view) in self.views.iter().enumerate() {
             if self.views[..i]
@@ -179,7 +113,7 @@ impl WorkspaceTab {
         count
     }
 
-    fn distinct_buffer_names_in_view_order(&self) -> Vec<String> {
+    pub(super) fn distinct_buffer_names_in_view_order(&self) -> Vec<String> {
         let ordered_view_ids = self.ordered_view_ids_in_layout_order();
         let mut names =
             tab_support::ordered_buffer_ids_with_fallback(&self.views, &ordered_view_ids)

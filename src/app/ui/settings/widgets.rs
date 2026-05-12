@@ -671,20 +671,24 @@ pub(super) fn render_preview_panel(ui: &mut egui::Ui, app: &ScratchpadApp) {
             |ui| {
                 ui.set_width(preview_width);
                 ui.set_max_width(preview_width);
-                SettingsUi::preview_frame(ui, app.editor_background_color()).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.add_space(4.0);
-                    let preview_family = egui::FontFamily::Name(EDITOR_FONT_FAMILY.into());
-                    render_preview_text(ui, app, preview_family);
-                    ui.add_space(16.0);
-                    ui.horizontal_wrapped(|ui| {
-                        info_chip(ui, app.editor_font().label());
-                        ui.add_space(8.0);
-                        info_chip(ui, &format!("{:.0} pt", app.font_size()));
-                        ui.add_space(8.0);
-                        info_chip(ui, &format!("{} px gutter", app.editor_gutter()));
+                SettingsUi::preview_frame(ui, app.state.app_settings.editor_background_color())
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.add_space(4.0);
+                        let preview_family = egui::FontFamily::Name(EDITOR_FONT_FAMILY.into());
+                        render_preview_text(ui, app, preview_family);
+                        ui.add_space(16.0);
+                        ui.horizontal_wrapped(|ui| {
+                            info_chip(ui, app.state.app_settings.editor_font().label());
+                            ui.add_space(8.0);
+                            info_chip(ui, &format!("{:.0} pt", app.state.app_settings.font_size()));
+                            ui.add_space(8.0);
+                            info_chip(
+                                ui,
+                                &format!("{} px gutter", app.state.app_settings.editor_gutter()),
+                            );
+                        });
                     });
-                });
             },
         );
     });
@@ -692,21 +696,21 @@ pub(super) fn render_preview_panel(ui: &mut egui::Ui, app: &ScratchpadApp) {
 
 fn render_preview_text(ui: &mut egui::Ui, app: &ScratchpadApp, preview_family: egui::FontFamily) {
     let (text, highlighted_text) =
-        crate::app::ui::settings::PREVIEW_QUOTES[app.settings_preview_quote_index];
+        crate::app::ui::settings::PREVIEW_QUOTES[app.state.settings_preview_quote_index];
     let mut job = egui::text::LayoutJob::default();
     job.wrap.max_width = ui.available_width();
 
     let base_format = egui::TextFormat {
-        font_id: egui::FontId::new(app.font_size(), preview_family.clone()),
-        color: app.editor_text_color(),
+        font_id: egui::FontId::new(app.state.app_settings.font_size(), preview_family.clone()),
+        color: app.state.app_settings.editor_text_color(),
         ..Default::default()
     };
     let highlight_format = EditorHighlightStyle::new(
-        app.editor_text_highlight_color(),
-        app.editor_text_highlight_text_color(),
+        app.state.app_settings.editor_text_highlight_color(),
+        app.state.app_settings.editor_text_highlight_text_color(),
     )
     .active_text_format(
-        egui::FontId::new(app.font_size(), preview_family),
+        egui::FontId::new(app.state.app_settings.font_size(), preview_family),
         ui.visuals().dark_mode,
     );
 

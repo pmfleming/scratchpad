@@ -12,7 +12,9 @@ impl ScratchpadApp {
 
     pub(crate) fn text_history_entries(&self) -> Vec<TextHistoryEntryView> {
         let mut entries = self
-            .tabs()
+            .tab_manager
+            .tabs
+            .as_slice()
             .iter()
             .flat_map(|tab| tab.buffers().flat_map(entries_for_buffer))
             .collect::<Vec<_>>();
@@ -22,15 +24,17 @@ impl ScratchpadApp {
 
     pub(crate) fn cached_text_history_entries(&mut self) -> Vec<TextHistoryEntryView> {
         let revisions = self.text_history_revisions();
-        if self.text_history_cache.revisions != revisions {
-            self.text_history_cache.entries = self.text_history_entries();
-            self.text_history_cache.revisions = revisions;
+        if self.state.text_history_cache.revisions != revisions {
+            self.state.text_history_cache.entries = self.text_history_entries();
+            self.state.text_history_cache.revisions = revisions;
         }
-        self.text_history_cache.entries.clone()
+        self.state.text_history_cache.entries.clone()
     }
 
     fn text_history_revisions(&self) -> Vec<(BufferId, u64)> {
-        self.tabs()
+        self.tab_manager
+            .tabs
+            .as_slice()
             .iter()
             .flat_map(|tab| {
                 tab.buffers()
@@ -41,7 +45,7 @@ impl ScratchpadApp {
 
     pub(crate) fn clear_text_history(&mut self) -> bool {
         let mut cleared = false;
-        for tab in self.tabs_mut() {
+        for tab in self.tab_manager.tabs.as_mut_slice() {
             for buffer in tab.buffers_mut() {
                 if !buffer.document().history_entries().is_empty() {
                     buffer.document_mut().clear_operation_history();
@@ -50,15 +54,17 @@ impl ScratchpadApp {
             }
         }
         if cleared {
-            self.text_history_cache = Default::default();
-            self.mark_session_dirty();
-            self.set_info_status_in_domain(StatusDomain::History, "Cleared text history.");
+            self.state.text_history_cache = Default::default();
+            self.tab_manager.mark_session_dirty();
+            self.state
+                .status
+                .set_info_status_in_domain(StatusDomain::History, "Cleared text history.");
         }
         cleared
     }
 
     pub(crate) fn finalize_active_buffer_text_mutation(&mut self, active_tab_index: usize) {
-        let tab = &mut self.tabs_mut()[active_tab_index];
+        let tab = &mut self.tab_manager.tabs.as_mut_slice()[active_tab_index];
         let buffer_id = tab.buffer.id;
         let latest_edit = tab.buffer.document().latest_operation_record().cloned();
         tab.buffer
@@ -72,14 +78,16 @@ impl ScratchpadApp {
         let _ = tab;
 
         if let Some(message) = warning_message {
-            self.set_warning_status_in_domain(StatusDomain::Encoding, message);
+            self.state
+                .status
+                .set_warning_status_in_domain(StatusDomain::Encoding, message);
         } else {
             self.clear_status_message();
         }
         self.record_pending_text_history_event(active_tab_index, buffer_id);
         self.enforce_aggregate_text_history_budget();
         self.mark_search_dirty();
-        self.mark_session_dirty();
+        self.tab_manager.mark_session_dirty();
         self.note_settings_toml_edit(active_tab_index);
         self.apply_current_tab_ordering();
     }
@@ -89,7 +97,7 @@ impl ScratchpadApp {
         buffer_ids: impl IntoIterator<Item = BufferId>,
     ) {
         if buffer_ids.into_iter().next().is_some() {
-            self.text_history_cache = Default::default();
+            self.state.text_history_cache = Default::default();
         }
     }
 
@@ -99,7 +107,9 @@ impl ScratchpadApp {
         buffer_id: BufferId,
     ) {
         if let Some(buffer) = self
-            .tabs_mut()
+            .tab_manager
+            .tabs
+            .as_mut_slice()
             .get_mut(tab_index)
             .and_then(|tab| tab.buffer_by_id_mut(buffer_id))
         {
@@ -128,7 +138,7 @@ impl ScratchpadApp {
         {
             Some(target) => target,
             None => {
-                self.set_error_status_in_domain(
+                self.state.status.set_error_status_in_domain(
                     StatusDomain::History,
                     "Text history entry is no longer available.",
                 );
@@ -151,21 +161,21 @@ impl ScratchpadApp {
             .into_iter()
             .find(|entry| entry.buffer_id == buffer_id && entry.id == entry_id)
         else {
-            self.set_error_status_in_domain(
+            self.state.status.set_error_status_in_domain(
                 StatusDomain::History,
                 "Text history entry is no longer available.",
             );
             return false;
         };
         if undo && action.undone || !undo && !action.undone || !action.replayable {
-            self.set_error_status_in_domain(
+            self.state.status.set_error_status_in_domain(
                 StatusDomain::History,
                 "Text history entry is not replayable in that direction.",
             );
             return false;
         }
         let Some(tab_index) = self.tab_index_for_buffer(action.buffer_id) else {
-            self.set_error_status_in_domain(
+            self.state.status.set_error_status_in_domain(
                 StatusDomain::History,
                 "Text history entry belongs to a closed file.",
             );
@@ -173,7 +183,7 @@ impl ScratchpadApp {
         };
 
         let selection = {
-            let tab = &mut self.tabs_mut()[tab_index];
+            let tab = &mut self.tab_manager.tabs.as_mut_slice()[tab_index];
             let Some(buffer) = tab.buffer_by_id_mut(action.buffer_id) else {
                 return false;
             };
@@ -188,7 +198,7 @@ impl ScratchpadApp {
                     selection
                 }
                 Err(_) => {
-                    self.set_error_status_in_domain(
+                    self.state.status.set_error_status_in_domain(
                         StatusDomain::History,
                         "Text history entry conflicts with the current file contents.",
                     );
@@ -201,7 +211,7 @@ impl ScratchpadApp {
             self.restore_text_history_selection(tab_index, action.buffer_id, selection);
         }
         self.mark_search_dirty();
-        self.mark_session_dirty();
+        self.tab_manager.mark_session_dirty();
         self.apply_current_tab_ordering();
         true
     }
@@ -209,14 +219,16 @@ impl ScratchpadApp {
     pub(crate) fn tab_index_for_buffer(&mut self, buffer_id: BufferId) -> Option<usize> {
         if let Some(index) = self.tab_manager.tab_index_for_buffer(buffer_id)
             && self
-                .tabs()
+                .tab_manager
+                .tabs
+                .as_slice()
                 .get(index)
                 .is_some_and(|tab| tab.buffer_by_id(buffer_id).is_some())
         {
             return Some(index);
         }
 
-        self.rebuild_buffer_tab_index();
+        self.tab_manager.rebuild_buffer_tab_index();
         self.tab_manager.tab_index_for_buffer(buffer_id)
     }
 
@@ -226,19 +238,25 @@ impl ScratchpadApp {
         buffer_id: BufferId,
         selection: crate::app::ui::editor_content::native_editor::CursorRange,
     ) {
-        let Some(view_id) = self.tabs().get(tab_index).and_then(|tab| {
-            tab.views
-                .iter()
-                .find(|view| view.buffer_id == buffer_id)
-                .map(|view| view.id)
-        }) else {
+        let Some(view_id) = self
+            .tab_manager
+            .tabs
+            .as_slice()
+            .get(tab_index)
+            .and_then(|tab| {
+                tab.views
+                    .iter()
+                    .find(|view| view.buffer_id == buffer_id)
+                    .map(|view| view.id)
+            })
+        else {
             return;
         };
         self.activate_workspace_surface();
-        self.tab_manager_mut().active_tab_index = tab_index;
+        self.tab_manager.set_active_tab_index_clamped(tab_index);
         self.ensure_active_tab_slot_selected();
-        self.tab_manager_mut().pending_scroll_to_active = true;
-        let tab = &mut self.tabs_mut()[tab_index];
+        self.tab_manager.pending_scroll_to_active = true;
+        let tab = &mut self.tab_manager.tabs.as_mut_slice()[tab_index];
         let _ = tab.activate_view(view_id);
         if let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) {
             view.set_cursor_range_anchored(buffer, selection);
@@ -301,10 +319,10 @@ mod tests {
     fn follow_history_undo_activates_containing_tab_and_moves_one_view() {
         let mut app = test_app_with_tabs(["first.txt", "second.txt"]);
         let target_tab_index = 1;
-        let target_buffer_id = app.tabs()[target_tab_index].buffer.id;
+        let target_buffer_id = app.tab_manager.tabs.as_slice()[target_tab_index].buffer.id;
         let previous_selection = CursorRange::one(CharCursor::new(0));
         let next_selection = CursorRange::one(CharCursor::new(5));
-        app.tabs_mut()[target_tab_index]
+        app.tab_manager.tabs.as_mut_slice()[target_tab_index]
             .buffer
             .replace_char_ranges_with_undo(
                 &[(0..0, "hello".to_owned())],
@@ -312,7 +330,7 @@ mod tests {
                 next_selection,
             )
             .expect("record text history");
-        let entry_id = app.tabs()[target_tab_index]
+        let entry_id = app.tab_manager.tabs.as_slice()[target_tab_index]
             .buffer
             .document()
             .history_entries()
@@ -321,12 +339,12 @@ mod tests {
             .id;
 
         app.tab_manager.active_tab_index = target_tab_index;
-        let original_view_id = app.tabs()[target_tab_index].active_view_id;
-        let split_view_id = app.tabs_mut()[target_tab_index]
+        let original_view_id = app.tab_manager.tabs.as_slice()[target_tab_index].active_view_id;
+        let split_view_id = app.tab_manager.tabs.as_mut_slice()[target_tab_index]
             .split_active_view(SplitAxis::Vertical)
             .expect("split target view");
         {
-            let tab = &mut app.tabs_mut()[target_tab_index];
+            let tab = &mut app.tab_manager.tabs.as_mut_slice()[target_tab_index];
             let original_view = tab.view_mut(original_view_id).expect("original view");
             original_view.cursor_range = Some(CursorRange::one(CharCursor::new(1)));
             original_view.pending_cursor_range = None;
@@ -338,10 +356,10 @@ mod tests {
 
         assert!(app.apply_text_history_to_entry(target_buffer_id, entry_id, true));
 
-        let tab = &app.tabs()[app.active_tab_index()];
+        let tab = &app.tab_manager.tabs.as_slice()[app.tab_manager.active_tab_index];
         let original_view = tab.view(original_view_id).expect("original view");
         let split_view = tab.view(split_view_id).expect("split view");
-        assert_eq!(app.active_tab_index(), target_tab_index);
+        assert_eq!(app.tab_manager.active_tab_index, target_tab_index);
         assert_eq!(tab.active_view_id, original_view_id);
         assert_eq!(original_view.cursor_range, Some(previous_selection));
         assert_eq!(original_view.pending_cursor_range, Some(previous_selection));
@@ -374,7 +392,7 @@ mod tests {
             pending_scroll_to_active: false,
             buffer_tab_index: Default::default(),
         };
-        app.rebuild_buffer_tab_index();
+        app.tab_manager.rebuild_buffer_tab_index();
         app.clear_tab_selection();
         app
     }

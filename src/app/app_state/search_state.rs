@@ -6,7 +6,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
-mod api;
+pub(crate) mod api;
 #[cfg(test)]
 mod api_tests;
 mod fragments;
@@ -115,6 +115,156 @@ impl SearchState {
             self.scope = default_scope;
             self.scope_origin = scope_origin;
         }
+    }
+
+    pub(crate) fn open(&self) -> bool {
+        self.open
+    }
+
+    pub(crate) fn query(&self) -> &str {
+        &self.query
+    }
+
+    pub(crate) fn replacement(&self) -> &str {
+        &self.replacement
+    }
+
+    pub(crate) fn replace_open(&self) -> bool {
+        self.replace_open
+    }
+
+    fn set_replace_open(&mut self, open: bool) {
+        self.replace_open = open;
+        self.focus_target = Some(if open {
+            SearchFocusTarget::ReplaceInput
+        } else {
+            SearchFocusTarget::FindInput
+        });
+        self.clear_replace_all_confirmation();
+    }
+
+    fn set_query(&mut self, query: impl Into<String>) -> bool {
+        let query = query.into();
+        if self.query == query {
+            return false;
+        }
+        self.query = query;
+        self.clear_replace_all_confirmation();
+        true
+    }
+
+    fn set_replacement(&mut self, replacement: impl Into<String>) -> bool {
+        let replacement = replacement.into();
+        if self.replacement == replacement {
+            return false;
+        }
+        self.replacement = replacement;
+        self.clear_replace_all_confirmation();
+        true
+    }
+
+    pub(crate) fn scope(&self) -> SearchScope {
+        self.scope
+    }
+
+    pub(crate) fn scope_origin(&self) -> SearchScopeOrigin {
+        self.scope_origin
+    }
+
+    pub(crate) fn mode(&self) -> SearchMode {
+        self.mode
+    }
+
+    pub(crate) fn match_case(&self) -> bool {
+        self.match_case
+    }
+
+    pub(crate) fn whole_word(&self) -> bool {
+        self.whole_word
+    }
+
+    pub(crate) fn match_count(&self) -> usize {
+        self.total_match_count
+    }
+
+    pub(crate) fn active_match_index(&self) -> Option<usize> {
+        self.active_match_index
+    }
+
+    pub(crate) fn result_groups_snapshot(&self) -> Arc<[SearchResultGroup]> {
+        self.result_groups.clone()
+    }
+
+    pub(crate) fn replace_availability(&self) -> SearchReplaceAvailability {
+        if !self.open || self.query.is_empty() {
+            return SearchReplaceAvailability::Disabled;
+        }
+        if self.searching || self.freshness == SearchFreshness::Stale {
+            return SearchReplaceAvailability::Disabled;
+        }
+        match &self.status {
+            SearchStatus::InvalidQuery(message) | SearchStatus::Error(message) => {
+                SearchReplaceAvailability::Blocked(message.clone())
+            }
+            SearchStatus::Ready if self.total_match_count > 0 => SearchReplaceAvailability::Allowed,
+            _ => SearchReplaceAvailability::Disabled,
+        }
+    }
+
+    pub(crate) fn progress(&self) -> SearchProgress {
+        SearchProgress {
+            scanned_targets: match self.status {
+                SearchStatus::Searching {
+                    scanned_targets, ..
+                } => scanned_targets,
+                _ => 0,
+            },
+            target_count: match self.status {
+                SearchStatus::Searching { total_targets, .. } => total_targets,
+                _ => 0,
+            },
+            displayed_match_count: self.displayed_match_count,
+            total_match_count: self.total_match_count,
+            status: self.status.clone(),
+            freshness: self.freshness,
+        }
+    }
+
+    fn set_scope_with_origin(&mut self, scope: SearchScope, origin: SearchScopeOrigin) -> bool {
+        if self.scope == scope && self.scope_origin == origin {
+            return false;
+        }
+        self.scope = scope;
+        self.scope_origin = origin;
+        self.clear_replace_all_confirmation();
+        true
+    }
+
+    fn set_mode(&mut self, mode: SearchMode) -> bool {
+        if self.mode == mode {
+            return false;
+        }
+        self.mode = mode;
+        self.clear_replace_all_confirmation();
+        true
+    }
+
+    fn set_match_case(&mut self, enabled: bool) -> bool {
+        if self.match_case == enabled {
+            return false;
+        }
+        self.match_case = enabled;
+        self.clear_replace_all_confirmation();
+        true
+    }
+
+    fn set_whole_word(&mut self, enabled: bool) -> bool {
+        if self.whole_word == enabled {
+            return false;
+        }
+        self.whole_word = enabled;
+        self.clear_replace_all_confirmation();
+        true
     }
 
     fn close(&mut self) {

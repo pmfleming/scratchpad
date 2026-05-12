@@ -1,6 +1,7 @@
+use super::support::compact_preview;
 use super::{
     ByteSpan, PREVIEW_MAX_CHARS, PieceTreeLite, PieceTreeSlice, PieceTreeSpan,
-    byte_range_for_char_range, compact_preview,
+    byte_range_for_char_range, preview,
 };
 use std::ops::Range;
 
@@ -183,7 +184,7 @@ pub(super) fn previews_for_matches_in_piece_spans(
     if !match_starts.windows(2).all(|pair| pair[0] <= pair[1]) {
         return ranges
             .iter()
-            .map(|range| tree.preview_for_match(range))
+            .map(|range| preview::preview_for_match(tree, range))
             .collect();
     }
 
@@ -365,7 +366,9 @@ fn collect_piece_previews(
     previews
         .into_iter()
         .enumerate()
-        .map(|(index, preview)| preview.unwrap_or_else(|| tree.preview_for_match(&ranges[index])))
+        .map(|(index, preview)| {
+            preview.unwrap_or_else(|| preview::preview_for_match(tree, &ranges[index]))
+        })
         .collect()
 }
 

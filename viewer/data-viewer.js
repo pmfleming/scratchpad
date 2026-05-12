@@ -322,6 +322,9 @@
         const escapeHatchTotal = escapeHatches.reduce((sum, item) => sum + Number(item.total_count || 0), 0);
         const unsafeModules = escapeHatches.filter((item) => Number(item.unsafe_count || 0) > 0).length;
         const clippySuppressions = escapeHatches.reduce((sum, item) => sum + Number(item.clippy_suppression_count || 0), 0);
+        const derefCoercions = escapeHatches.reduce((sum, item) => sum + Number(item.deref_coercion_count || 0), 0);
+        const globImports = escapeHatches.reduce((sum, item) => sum + Number(item.glob_import_count || 0), 0);
+        const containerRefs = escapeHatches.reduce((sum, item) => sum + Number(item.container_ref_return_count || 0), 0);
         const avgCodeLocality = mean(locality.map(i => i.locality_score)) || 0;
         const avgNonLocalityRisk = mean(locality.map(localityRisk)) || 0;
         const farDependencyModules = locality.filter((item) => (item.far_dependencies || 0) > 0).length;
@@ -382,6 +385,9 @@
                     ["Modules", escapeHatchModules],
                     ["Total Uses", escapeHatchTotal],
                     ["Unsafe Modules", unsafeModules],
+                    ["Deref/DerefMut", derefCoercions],
+                    ["Glob Imports", globImports],
+                    ["Container Refs", containerRefs],
                     ["Clippy Allows", clippySuppressions],
                 ],
             },
@@ -509,6 +515,9 @@
             ffi: rows.reduce((sum, item) => sum + Number(item.ffi_count || 0), 0),
             globals: rows.reduce((sum, item) => sum + Number(item.global_mutability_count || 0), 0),
             raw: rows.reduce((sum, item) => sum + Number(item.raw_memory_count || 0), 0),
+            deref: rows.reduce((sum, item) => sum + Number(item.deref_coercion_count || 0), 0),
+            glob: rows.reduce((sum, item) => sum + Number(item.glob_import_count || 0), 0),
+            containerRefs: rows.reduce((sum, item) => sum + Number(item.container_ref_return_count || 0), 0),
             layout: rows.reduce((sum, item) => sum + Number(item.layout_linkage_count || 0), 0),
             clippy: rows.reduce((sum, item) => sum + Number(item.clippy_suppression_count || 0), 0),
             lint: rows.reduce((sum, item) => sum + Number(item.lint_suppression_count || 0), 0),
@@ -519,6 +528,9 @@
             ["FFI", totals.ffi],
             ["Global mutability", totals.globals],
             ["Raw memory", totals.raw],
+            ["Deref/DerefMut", totals.deref],
+            ["Glob imports", totals.glob],
+            ["Container refs", totals.containerRefs],
             ["Layout/linkage", totals.layout],
             ["Clippy suppressions", totals.clippy],
             ["All lint suppressions", totals.lint],
@@ -529,6 +541,9 @@
                 ${metricCard("Modules", rows.length)}
                 ${metricCard("Total uses", totalUses)}
                 ${metricCard("Unsafe uses", totals.unsafe)}
+                ${metricCard("Deref/DerefMut", totals.deref)}
+                ${metricCard("Glob imports", totals.glob)}
+                ${metricCard("Container refs", totals.containerRefs)}
                 ${metricCard("Clippy suppressions", totals.clippy)}
             </div>
             <div class="escape-hatch-bars">
@@ -542,7 +557,7 @@
 
         renderTable(
             "escape-hatches-table",
-            ["Rank", "Module", "Score", "Total", "Unsafe", "FFI", "Globals", "Raw", "Layout", "Clippy", "Locations", "Signals"],
+            ["Rank", "Module", "Score", "Total", "Unsafe", "FFI", "Globals", "Raw", "Deref", "Glob", "Container Refs", "Layout", "Clippy", "Locations", "Signals"],
             filtered.map((item, index) => {
                 const locations = (item.locations || [])
                     .slice(0, 8)
@@ -558,6 +573,9 @@
                     <td>${formatNumber.format(item.ffi_count || 0)}</td>
                     <td>${formatNumber.format(item.global_mutability_count || 0)}</td>
                     <td>${formatNumber.format(item.raw_memory_count || 0)}</td>
+                    <td>${formatNumber.format(item.deref_coercion_count || 0)}</td>
+                    <td>${formatNumber.format(item.glob_import_count || 0)}</td>
+                    <td>${formatNumber.format(item.container_ref_return_count || 0)}</td>
                     <td>${formatNumber.format(item.layout_linkage_count || 0)}</td>
                     <td>${formatNumber.format(item.clippy_suppression_count || 0)}</td>
                     <td class="small-text">${locations || "-"}</td>
@@ -2259,6 +2277,11 @@
             { label: "Budget misses", value: formatNumber.format(digest.summaryBudgetMisses), cls: digest.summaryBudgetMisses ? "bad" : "ok" },
             { label: "Near ceilings", value: formatNumber.format(digest.nearCeilings), cls: digest.nearCeilings ? "watch" : "ok" },
             {
+                label: "Measured gaps",
+                value: `${formatNumber.format(digest.measurementGapsClosed)} of 6 closed`,
+                cls: digest.measurementGapsClosed >= 6 ? "ok" : "watch",
+            },
+            {
                 label: "Worst latency",
                 value: worst && worstRatio > 1 ? `${formatMs(latencyMs(worst))} (${formatRatio(worstRatio)} budget)` : "All within budget",
                 cls: worst && worstRatio > 1 ? "bad" : "ok",
@@ -2271,6 +2294,160 @@
                 <strong>${escapeHtml(cell.value)}</strong>
             </div>`).join("")}
         </section>`;
+    }
+
+    function renderPerformanceMeasurementGaps() {
+        const target = byId("performance-measurement-gaps");
+        if (!target) return;
+        const rows = measurementGapRows();
+        if (!rows.length) {
+            target.innerHTML = `<p class="muted">No measurement-gap resource probes loaded.</p>`;
+            return;
+        }
+        target.innerHTML = rows.map((row, index) => {
+            return `<article class="performance-gap-card" style="--promise-color:${escapeHtml(row.color)}" aria-label="${escapeHtml(row.title)} measurement graph">
+                <div class="performance-gap-card__header">
+                    <span class="rank-pill">${index + 1}</span>
+                    <div>
+                        <h3>${escapeHtml(row.title)}</h3>
+                        <p>${escapeHtml(row.subtitle)}</p>
+                    </div>
+                    <span class="status-pill status-pill--ok" title="Focused probe samples loaded">${escapeHtml(row.badge)}</span>
+                </div>
+                ${renderMeasurementGapChart(row)}
+                <div class="performance-gap-card__metrics">
+                    <span><strong>${escapeHtml(formatMs(row.maxElapsedMs))}</strong><em>max elapsed</em></span>
+                    <span><strong>${escapeHtml(formatBytes(row.maxPeakBytes))}</strong><em>peak allocation</em></span>
+                    <span><strong>${escapeHtml(row.maxWorkloadLabel)}</strong><em>largest run</em></span>
+                </div>
+            </article>`;
+        }).join("");
+    }
+
+    function measurementGapRows() {
+        const order = [
+            "peak RSS / allocator high-water mark during very large UTF-8 load",
+            "edited-buffer search preview rendering with many matches and many pieces",
+            "provenance-store retained memory after hundreds of thousands of edits and history-budget eviction",
+            "anchor-heavy editing with many views, selections, search results, and scroll anchors",
+            "fragmented-buffer paste/cut/undo/redo after long sessions",
+            "session persistence broken down into snapshot cost, serialization cost, file I/O, and restore reconstruction",
+        ];
+        const grouped = new Map();
+        (state.resourceProfiles?.scenarios || [])
+            .filter((item) => item.measurement_gap)
+            .forEach((item) => {
+                const key = item.measurement_gap;
+                if (!grouped.has(key)) grouped.set(key, []);
+                grouped.get(key).push(item);
+            });
+
+        return order.map((gap) => {
+            const rows = grouped.get(gap) || [];
+            if (!rows.length) return null;
+            const representative = maxBy(rows, (row) => Number(row.max_elapsed_ms || 0)) || rows[0];
+            const samples = rows.flatMap((row) => row.samples || []);
+            const largestSample = maxBy(samples, (sample) => Number(sample.workload_value || 0));
+            const elapsed = Math.max(...rows.map((row) => Number(row.max_elapsed_ms || 0)), 0);
+            const peak = Math.max(...rows.map((row) => Number(row.max_peak_live_bytes || row.max_working_set_bytes || 0)), 0);
+            const promise = performancePromiseForItem(representative);
+            const series = samples
+                .map((sample, index) => ({
+                    index,
+                    workloadValue: Number(sample.workload_value || index + 1),
+                    workloadLabel: sample.workload_label || `sample ${index + 1}`,
+                    elapsedMs: Number(sample.elapsed_ms || 0),
+                    peakBytes: Number(sample.peak_live_bytes || sample.working_set_bytes || 0),
+                    resultLabel: sample.result_label || "",
+                }))
+                .filter((sample) => sample.elapsedMs > 0 || sample.peakBytes > 0)
+                .sort((left, right) => left.workloadValue - right.workloadValue || left.index - right.index);
+            return {
+                gap,
+                title: measurementGapTitle(gap),
+                subtitle: compactScenarioLabel(representative),
+                color: promise.color,
+                badge: `${series.length || rows.length} samples`,
+                maxElapsedMs: elapsed,
+                maxPeakBytes: peak,
+                maxWorkloadLabel: largestSample?.workload_label || "-",
+                series,
+            };
+        }).filter(Boolean);
+    }
+
+    function measurementGapTitle(gap) {
+        const titles = {
+            "peak RSS / allocator high-water mark during very large UTF-8 load": "Large UTF-8 Load Memory",
+            "edited-buffer search preview rendering with many matches and many pieces": "Edited Search Previews",
+            "provenance-store retained memory after hundreds of thousands of edits and history-budget eviction": "Provenance Retention",
+            "anchor-heavy editing with many views, selections, search results, and scroll anchors": "Anchor-Heavy Editing",
+            "fragmented-buffer paste/cut/undo/redo after long sessions": "Fragmented Mutation",
+            "session persistence broken down into snapshot cost, serialization cost, file I/O, and restore reconstruction": "Session Stage Costs",
+        };
+        return titles[gap] || titleCaseMetricName(gap);
+    }
+
+    function renderMeasurementGapChart(row) {
+        const width = 460;
+        const height = 170;
+        const left = 42;
+        const right = 16;
+        const top = 18;
+        const bottom = 34;
+        const plotWidth = width - left - right;
+        const plotHeight = height - top - bottom;
+        const samples = row.series || [];
+        if (!samples.length) {
+            return `<div class="performance-gap-chart performance-gap-chart--empty">No probe samples loaded.</div>`;
+        }
+        const maxElapsed = Math.max(...samples.map((sample) => sample.elapsedMs), 1);
+        const maxPeak = Math.max(...samples.map((sample) => sample.peakBytes), 1);
+        const xFor = (index) => left + (plotWidth * (index + 0.5)) / samples.length;
+        const elapsedY = (value) => top + plotHeight - (value / maxElapsed) * plotHeight;
+        const peakY = (value) => top + plotHeight - (value / maxPeak) * plotHeight;
+        const barWidth = Math.max(10, Math.min(36, plotWidth / samples.length * 0.48));
+        const bars = samples.map((sample, index) => {
+            const x = xFor(index) - barWidth / 2;
+            const y = elapsedY(sample.elapsedMs);
+            const h = top + plotHeight - y;
+            const title = `${sample.workloadLabel}: ${formatMs(sample.elapsedMs)}, ${formatBytes(sample.peakBytes)} peak`;
+            return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${Math.max(2, h).toFixed(1)}"><title>${escapeHtml(title)}</title></rect>`;
+        }).join("");
+        const linePoints = samples
+            .map((sample, index) => `${xFor(index).toFixed(1)},${peakY(sample.peakBytes).toFixed(1)}`)
+            .join(" ");
+        const markers = samples.map((sample, index) => {
+            const title = `${sample.workloadLabel}: ${formatBytes(sample.peakBytes)} peak`;
+            return `<circle cx="${xFor(index).toFixed(1)}" cy="${peakY(sample.peakBytes).toFixed(1)}" r="3.5"><title>${escapeHtml(title)}</title></circle>`;
+        }).join("");
+        const labels = samples.map((sample, index) => {
+            if (samples.length > 4 && index % Math.ceil(samples.length / 4) !== 0 && index !== samples.length - 1) return "";
+            return `<text x="${xFor(index).toFixed(1)}" y="${height - 10}" text-anchor="middle">${escapeHtml(shortWorkloadLabel(sample.workloadLabel))}</text>`;
+        }).join("");
+        return `<svg class="performance-gap-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(row.title)} elapsed and peak memory chart">
+            <g class="performance-gap-chart__grid">
+                <line x1="${left}" x2="${width - right}" y1="${top}" y2="${top}"></line>
+                <line x1="${left}" x2="${width - right}" y1="${top + plotHeight / 2}" y2="${top + plotHeight / 2}"></line>
+                <line x1="${left}" x2="${width - right}" y1="${top + plotHeight}" y2="${top + plotHeight}"></line>
+            </g>
+            <g class="performance-gap-chart__bars">${bars}</g>
+            <polyline class="performance-gap-chart__memory-line" points="${linePoints}"></polyline>
+            <g class="performance-gap-chart__memory-points">${markers}</g>
+            <g class="performance-gap-chart__labels">${labels}</g>
+            <text class="performance-gap-chart__axis" x="${left}" y="12">${escapeHtml(formatMs(maxElapsed))}</text>
+            <text class="performance-gap-chart__axis performance-gap-chart__axis--right" x="${width - right}" y="12" text-anchor="end">${escapeHtml(formatBytes(maxPeak))}</text>
+        </svg>`;
+    }
+
+    function shortWorkloadLabel(label) {
+        return String(label || "")
+            .replace(".0 ", " ")
+            .replace("bytes", "B")
+            .replace("pieces", "pc")
+            .replace("fragments", "frag")
+            .replace("anchors", "anc")
+            .replace("tabs", "tabs");
     }
 
     function computePerformanceDigest() {
@@ -2293,6 +2470,8 @@
         const cpuBound = capacityRows.filter((item) => (item.suspected_limiting_resource || item.first_saturated_resource) === "cpu").length;
         const capacityCeilings = state.capacityReport?.summary?.ceilings_reached ?? capacityRows.filter((item) => item.failure_mode && item.failure_mode !== "not_reached").length;
         const nearCeilings = state.speedReport?.summary?.near_failure_ceilings ?? capacityCeilings;
+        const measurementGapsClosed = state.resourceProfiles?.summary?.measurement_gaps_closed
+            ?? new Set(resourceRows.filter((item) => item.measurement_gap).map((item) => item.measurement_gap)).size;
         const peakLive = maxBy(resourceRows, (item) => Number(item.max_peak_live_bytes || 0));
         const resourceGrowthRows = topResourceRows(resourceRows, 20).map((row) => ({
             ...row,
@@ -2315,6 +2494,7 @@
             scenariosMet,
             summaryBudgetMisses: summary.budget_misses ?? overBudget,
             nearCeilings,
+            measurementGapsClosed,
             capacityCeilings,
             capacityOk: capacityRows.length - capacityCeilings,
             memoryBound,
@@ -3914,16 +4094,23 @@
             return;
         }
         const w = 720, h = 260, padLeft = 58, padRight = 18, padTop = 18, padBottom = 42;
-        const values = history.map((item) => Number(item.lines?.total || 0));
-        const min = Math.min(...values);
-        const max = Math.max(...values);
+        const series = codeMetricParts().map((part) => ({
+            ...part,
+            values: history.map((item) => Number(item.lines?.[part.key] || 0)),
+        }));
+        const allValues = series.flatMap((item) => item.values);
+        const min = Math.min(...allValues);
+        const max = Math.max(...allValues);
         const range = max - min || 1;
         const xFor = (index) => padLeft + (index * (w - padLeft - padRight)) / Math.max(1, history.length - 1);
         const yFor = (value) => h - padBottom - ((value - min) / range) * (h - padTop - padBottom);
-        const points = values.map((value, index) => `${xFor(index).toFixed(1)},${yFor(value).toFixed(1)}`).join(" ");
-        const areaPoints = `${padLeft},${h - padBottom} ${points} ${w - padRight},${h - padBottom}`;
+        const lineSeries = series.map((item) => {
+            const points = item.values.map((value, index) => `${xFor(index).toFixed(1)},${yFor(value).toFixed(1)}`).join(" ");
+            return `<polyline class="code-history__line" style="--series-color:${item.color}" points="${points}" />`;
+        }).join("");
         const first = history[0];
         const last = history[history.length - 1];
+        const latestApplication = Number(last.lines?.application || state.projectCodeMetrics?.current?.application || 0);
         const ticks = [min, min + range / 2, max].map((value) => {
             const y = yFor(value);
             return `<g>
@@ -3931,22 +4118,31 @@
                 <text x="${padLeft - 10}" y="${(y + 4).toFixed(1)}">${escapeHtml(formatNumber.format(Math.round(value)))}</text>
             </g>`;
         }).join("");
-        const markers = history.map((item, index) => {
+        const markers = series.map((seriesItem) => history.map((item, index) => {
             const date = item.date ? new Date(item.date).toLocaleDateString() : "-";
-            const title = `${date}: ${formatNumber.format(Number(item.lines?.total || 0))} lines\n${item.short_sha || ""} ${item.subject || ""}`;
-            return `<circle cx="${xFor(index).toFixed(1)}" cy="${yFor(values[index]).toFixed(1)}" r="3" title="${escapeHtml(title)}" />`;
+            const value = seriesItem.values[index];
+            const title = `${date}: ${seriesItem.label} ${formatNumber.format(value)} lines\n${item.short_sha || ""} ${item.subject || ""}`;
+            return `<circle style="--series-color:${seriesItem.color}" cx="${xFor(index).toFixed(1)}" cy="${yFor(value).toFixed(1)}" r="2.7"><title>${escapeHtml(title)}</title></circle>`;
+        }).join("")).join("");
+        const legend = series.map((item) => {
+            const latest = item.values[item.values.length - 1] || 0;
+            return `<span class="code-history__legend-item">
+                <i style="background:${item.color}"></i>
+                ${escapeHtml(item.label)}
+                <strong>${formatNumber.format(latest)}</strong>
+            </span>`;
         }).join("");
         target.innerHTML = `<div class="code-history__meta">
                 <span>${escapeHtml(first.date ? new Date(first.date).toLocaleDateString() : "-")}</span>
-                <strong>${formatNumber.format(values[values.length - 1])} Rust lines</strong>
+                <strong>Application Code: ${formatNumber.format(latestApplication)}</strong>
                 <span>${escapeHtml(last.date ? new Date(last.date).toLocaleDateString() : "-")}</span>
             </div>
-            <svg class="code-history__chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Rust code lines over time">
+            <svg class="code-history__chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Application, test, and other Rust code lines over time">
                 <g class="code-history__grid">${ticks}</g>
-                <polygon class="code-history__area" points="${areaPoints}" />
-                <polyline class="code-history__line" points="${points}" />
+                <g class="code-history__series">${lineSeries}</g>
                 <g class="code-history__markers">${markers}</g>
-            </svg>`;
+            </svg>
+            <div class="code-history__legend">${legend}</div>`;
     }
 
     function renderTopListCard({ title, subtitle, items, emptyText, tone = "neutral" }) {
@@ -5514,6 +5710,7 @@
         renderPerformanceFilterOptions();
         renderPerformanceHeadlineCharts();
         renderPerformanceCuratedLists();
+        renderPerformanceMeasurementGaps();
         renderClones();
         renderTypeHealth();
         renderEscapeHatches();
@@ -6465,6 +6662,7 @@
         renderPerformanceOverview();
         renderPerformanceHeadlineCharts();
         renderPerformanceCuratedLists();
+        renderPerformanceMeasurementGaps();
         renderPerformanceDatasetView();
     }
 

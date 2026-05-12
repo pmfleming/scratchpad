@@ -1,6 +1,6 @@
 use super::common::{apply_editor_dialog_typography, show_centered_callout};
 use crate::app::app_state::ScratchpadApp;
-use crate::app::services::file_controller::FileController;
+use crate::app::commands::AppCommand;
 use crate::app::services::file_service::COMMON_TEXT_ENCODINGS;
 use crate::app::theme::{action_hover_bg, border, text_muted, text_primary};
 use crate::app::ui::search_replace::SEARCH_DIALOG_WIDTH;
@@ -38,13 +38,20 @@ struct EncodingActionSpec<'a> {
     subtitle: &'a str,
     tooltip: &'a str,
     enabled: bool,
-    action: fn(&mut ScratchpadApp, usize, &str) -> bool,
+    action: EncodingAction,
+}
+
+#[derive(Clone, Copy)]
+enum EncodingAction {
+    Reopen,
+    Save,
 }
 
 impl EncodingDialogState {
     fn from_app(app: &ScratchpadApp) -> Self {
-        let active_index = app.active_tab_index();
+        let active_index = app.tab_manager.active_tab_index;
         let (buffer_label, has_saved_path, is_dirty) = app
+            .tab_manager
             .active_tab()
             .map(|tab| {
                 (
@@ -97,7 +104,7 @@ impl EncodingActionSpec<'_> {
 }
 
 pub(crate) fn show_encoding_window(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    if !app.encoding_dialog_open {
+    if !app.state.encoding_dialog_open {
         return;
     }
 
@@ -169,7 +176,7 @@ fn encoding_action_specs(state: &EncodingDialogState) -> [EncodingActionSpec<'st
             subtitle: state.reopen_subtitle(),
             tooltip: "Reopen active file with selected encoding",
             enabled: state.reopen_enabled(),
-            action: FileController::reopen_buffer_with_encoding,
+            action: EncodingAction::Reopen,
         },
         EncodingActionSpec {
             icon: FLOPPY_DISK,
@@ -177,7 +184,7 @@ fn encoding_action_specs(state: &EncodingDialogState) -> [EncodingActionSpec<'st
             subtitle: state.save_subtitle(),
             tooltip: "Save active file using selected encoding",
             enabled: true,
-            action: FileController::save_file_with_encoding_at,
+            action: EncodingAction::Save,
         },
     ]
 }
@@ -189,9 +196,19 @@ fn trigger_encoding_action(
     spec: EncodingActionSpec<'_>,
 ) -> bool {
     render_encoding_action_card(ui, spec) && {
-        let encoding_name = std::mem::take(&mut app.encoding_dialog_choice);
-        let result = (spec.action)(app, active_index, &encoding_name);
-        app.encoding_dialog_choice = encoding_name;
+        let encoding_name = std::mem::take(&mut app.state.encoding_dialog_choice);
+        let command = match spec.action {
+            EncodingAction::Reopen => AppCommand::ReopenBufferWithEncoding {
+                tab_index: active_index,
+                encoding_name: encoding_name.clone(),
+            },
+            EncodingAction::Save => AppCommand::SaveFileWithEncoding {
+                tab_index: active_index,
+                encoding_name: encoding_name.clone(),
+            },
+        };
+        let result = app.handle_command(command);
+        app.state.encoding_dialog_choice = encoding_name;
         result
     }
 }
@@ -235,7 +252,7 @@ fn render_encoding_protocol_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 ui.allocate_ui(egui::vec2(ENCODING_CONTROL_WIDTH, 0.0), |ui| {
                     ui.set_width(ENCODING_CONTROL_WIDTH);
                     ui.set_max_width(ENCODING_CONTROL_WIDTH);
-                    render_encoding_combo(ui, &mut app.encoding_dialog_choice);
+                    render_encoding_combo(ui, &mut app.state.encoding_dialog_choice);
                 });
             },
         );

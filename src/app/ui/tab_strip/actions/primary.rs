@@ -8,7 +8,7 @@ const PRIMARY_ACTION_SPACING: f32 = 4.0;
 
 pub(super) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let width = BUTTON_SIZE.x * 3.0 + PRIMARY_ACTION_SPACING * 2.0;
-    let search_tooltip = if app.search_open() {
+    let search_tooltip = if app.state.search_state.open() {
         "Close Search"
     } else {
         "Search"
@@ -23,7 +23,9 @@ pub(super) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 "primary_open_file",
                 egui_phosphor::regular::FOLDER_OPEN,
                 "Open File",
-                || app.handle_command(AppCommand::OpenFile),
+                || {
+                    app.handle_command(AppCommand::OpenFile);
+                },
             );
             ui.add_space(PRIMARY_ACTION_SPACING);
             primary_action_button(
@@ -31,7 +33,9 @@ pub(super) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 "primary_save_as",
                 egui_phosphor::regular::FLOPPY_DISK,
                 "Save As",
-                || app.handle_command(AppCommand::SaveFileAs),
+                || {
+                    app.handle_command(AppCommand::SaveFileAs);
+                },
             );
             ui.add_space(PRIMARY_ACTION_SPACING);
             primary_action_button(
@@ -39,7 +43,9 @@ pub(super) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 "primary_search",
                 egui_phosphor::regular::MAGNIFYING_GLASS,
                 search_tooltip,
-                || app.toggle_search(),
+                || {
+                    app.handle_command(AppCommand::ToggleSearch);
+                },
             );
         },
     );

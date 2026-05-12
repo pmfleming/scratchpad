@@ -137,7 +137,6 @@ impl PieceProvenanceStore {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.sparse.len()
     }

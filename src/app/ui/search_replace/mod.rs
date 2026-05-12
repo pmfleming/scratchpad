@@ -15,7 +15,7 @@ const SEARCH_DIALOG_HEIGHT: f32 = 520.0;
 const SEARCH_TITLE_SIZE: f32 = 24.0;
 
 pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    if !app.search_open() {
+    if !app.state.search_state.open() {
         return;
     }
 
@@ -72,26 +72,36 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 }
 
 fn apply_search_inputs(app: &mut ScratchpadApp, state: &SearchStripState) {
-    if state.query != app.search_query() {
-        app.set_search_query(state.query.clone());
+    if state.query != app.state.search_state.query() {
+        app.handle_command(AppCommand::SetSearchQuery {
+            query: state.query.clone(),
+        });
     }
-    if state.replacement != app.search_replacement() {
-        app.set_search_replacement(state.replacement.clone());
+    if state.replacement != app.state.search_state.replacement() {
+        app.handle_command(AppCommand::SetSearchReplacement {
+            replacement: state.replacement.clone(),
+        });
     }
-    if state.replace_open != app.search_replace_open() {
-        app.set_search_replace_open(state.replace_open);
+    if state.replace_open != app.state.search_state.replace_open() {
+        app.handle_command(AppCommand::SetSearchReplaceOpen {
+            open: state.replace_open,
+        });
     }
-    if state.scope != app.search_scope() {
-        app.set_search_scope(state.scope);
+    if state.scope != app.state.search_state.scope() {
+        app.handle_command(AppCommand::SetSearchScope { scope: state.scope });
     }
-    if state.mode != app.search_mode() {
-        app.set_search_mode(state.mode);
+    if state.mode != app.state.search_state.mode() {
+        app.handle_command(AppCommand::SetSearchMode { mode: state.mode });
     }
-    if state.match_case != app.search_match_case() {
-        app.set_search_match_case(state.match_case);
+    if state.match_case != app.state.search_state.match_case() {
+        app.handle_command(AppCommand::SetSearchMatchCase {
+            enabled: state.match_case,
+        });
     }
-    if state.whole_word != app.search_whole_word() {
-        app.set_search_whole_word(state.whole_word);
+    if state.whole_word != app.state.search_state.whole_word() {
+        app.handle_command(AppCommand::SetSearchWholeWord {
+            enabled: state.whole_word,
+        });
     }
 }
 
@@ -120,15 +130,11 @@ fn dispatch_search_actions(
         dispatch_requested_command(app, target_focus, requested, command);
     }
 
-    if let Some(match_index) = actions.focused_file_match_index
-        && app.focus_search_result_file_at(match_index)
-    {
-        app.request_focus_for_active_view();
+    if let Some(match_index) = actions.focused_file_match_index {
+        app.handle_command(AppCommand::FocusSearchResultFile { match_index });
     }
-    if let Some(match_index) = actions.selected_match_index
-        && app.activate_search_match_at(match_index)
-    {
-        app.request_focus_for_active_view();
+    if let Some(match_index) = actions.selected_match_index {
+        app.handle_command(AppCommand::ActivateSearchMatch { match_index });
     }
 }
 

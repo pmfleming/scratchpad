@@ -14,20 +14,20 @@ pub(super) fn editor_content_style<'a>(
     editor_font_id: &'a egui::FontId,
 ) -> EditorContentStyle<'a> {
     EditorContentStyle {
-        editor_gutter: app.editor_gutter(),
+        editor_gutter: app.state.app_settings.editor_gutter(),
         viewport: None,
         previous_snapshot: None,
         text_edit: TextEditOptions::new(
             request_focus,
-            app.word_wrap(),
+            app.state.app_settings.word_wrap(),
             editor_font_id,
-            app.editor_text_color(),
+            app.state.app_settings.editor_text_color(),
             EditorHighlightStyle::new(
-                app.editor_text_highlight_color(),
-                app.editor_text_highlight_text_color(),
+                app.state.app_settings.editor_text_highlight_color(),
+                app.state.app_settings.editor_text_highlight_text_color(),
             ),
         )
         .with_layout_cache_warming(is_active || request_focus),
-        background_color: app.editor_background_color(),
+        background_color: app.state.app_settings.editor_background_color(),
     }
 }

@@ -73,7 +73,7 @@ pub(super) fn collect_active_status_details(
     app: &ScratchpadApp,
     dark_mode: bool,
 ) -> Option<ActiveStatusDetails> {
-    let tab = app.active_tab()?;
+    let tab = app.tab_manager.active_tab()?;
     let buffer = tab.active_buffer();
     let file_length = buffer.current_file_length();
     let view_status = tab
@@ -179,7 +179,7 @@ pub(super) fn active_status_items(
 }
 
 pub(super) fn status_path_min_width(ui: &egui::Ui, app: &ScratchpadApp) -> f32 {
-    if app.tab_list_position() != TabListPosition::Left {
+    if app.state.app_settings.tab_list_position() != TabListPosition::Left {
         return STATUS_PATH_MIN_WIDTH;
     }
 

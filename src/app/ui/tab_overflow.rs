@@ -1,6 +1,7 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::chrome::{TabButtonOptions, tab_button_with_actions};
-use crate::app::domain::{TabAttentionState, WorkspaceTab};
+use crate::app::domain::TabAttentionState;
+use crate::app::domain::tab::summary;
 use crate::app::services::settings_store::TabListPosition;
 use crate::app::theme::*;
 use crate::app::ui::tab_drag;
@@ -295,7 +296,7 @@ fn overflow_popup_anchor(
     app: &ScratchpadApp,
     button_rect: egui::Rect,
 ) -> (egui::Pos2, egui::Align2) {
-    match app.tab_list_position() {
+    match app.state.app_settings.tab_list_position() {
         TabListPosition::Bottom => (
             egui::pos2(button_rect.right(), button_rect.top() - BOTTOM_OVERFLOW_GAP),
             egui::Align2::RIGHT_BOTTOM,
@@ -474,12 +475,12 @@ fn overflow_row_state(app: &ScratchpadApp, slot_index: usize) -> Option<Overflow
         display_name: app.display_tab_name_at_slot(slot_index)?,
         can_promote_all_files: app
             .workspace_index_for_slot(slot_index)
-            .and_then(|index| app.tabs().get(index))
-            .is_some_and(WorkspaceTab::can_promote_all_files),
+            .and_then(|index| app.tab_manager.tabs.as_slice().get(index))
+            .is_some_and(summary::can_promote_all_files),
         attention_state: app
             .workspace_index_for_slot(slot_index)
-            .and_then(|index| app.tabs().get(index))
-            .and_then(WorkspaceTab::attention_state),
+            .and_then(|index| app.tab_manager.tabs.as_slice().get(index))
+            .and_then(summary::attention_state),
     })
 }
 

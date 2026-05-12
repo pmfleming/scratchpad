@@ -4,7 +4,6 @@ use super::common::{
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
 use crate::app::domain::{BufferFreshness, PendingAction, ViewId};
-use crate::app::services::file_controller::FileController;
 use crate::app::ui::callout;
 use eframe::egui;
 use egui_phosphor::regular::{ARROW_CLOCKWISE, COPY, FLOPPY_DISK, TRASH, WARNING, X};
@@ -86,7 +85,7 @@ pub(crate) fn show_pending_action_modal(ctx: &egui::Context, app: &mut Scratchpa
 }
 
 fn handle_pending_close_tab(ctx: &egui::Context, app: &mut ScratchpadApp, index: usize) {
-    match app.tabs().get(index) {
+    match app.tab_manager.tabs.as_slice().get(index) {
         None => clear_pending_action(app),
         Some(tab) if !tab.buffer.is_dirty => close_pending_tab(app, index),
         Some(_) => show_close_tab_confirmation(ctx, app, index),
@@ -99,7 +98,7 @@ fn handle_pending_close_view(
     tab_index: usize,
     view_id: ViewId,
 ) {
-    let Some(tab) = app.tabs().get(tab_index) else {
+    let Some(tab) = app.tab_manager.tabs.as_slice().get(tab_index) else {
         clear_pending_action(app);
         return;
     };
@@ -117,7 +116,7 @@ fn handle_pending_close_view(
 }
 
 fn show_close_tab_confirmation(ctx: &egui::Context, app: &mut ScratchpadApp, index: usize) {
-    let tab_name = app.tabs()[index].buffer.name.clone();
+    let tab_name = app.tab_manager.tabs.as_slice()[index].buffer.name.clone();
     let mut close_requested = false;
 
     show_centered_callout(
@@ -139,7 +138,9 @@ fn show_close_view_confirmation(
     view_id: ViewId,
 ) {
     let Some(tab_name) = app
-        .tabs()
+        .tab_manager
+        .tabs
+        .as_slice()
         .get(tab_index)
         .and_then(|tab| tab.buffer_for_view(view_id))
         .map(|buffer| buffer.name.clone())
@@ -246,7 +247,7 @@ fn render_unsaved_changes_body(
 }
 
 fn save_and_close_pending_tab(app: &mut ScratchpadApp, index: usize) {
-    if app.save_file_at(index) {
+    if crate::app::app_state::workspace_controller::save_file_at(app, index) {
         close_pending_tab(app, index);
     }
 }
@@ -257,7 +258,7 @@ fn save_and_close_pending_view(app: &mut ScratchpadApp, tab_index: usize, view_i
         return;
     }
 
-    if app.save_file_at(tab_index) {
+    if crate::app::app_state::workspace_controller::save_file_at(app, tab_index) {
         close_pending_view(app, tab_index, view_id);
     }
 }
@@ -319,10 +320,8 @@ fn render_save_conflict_dialog(
             FLOPPY_DISK,
             state.primary_action_label(),
             "Write the current buffer back to disk",
-        ) && run_save_conflict_action(app, tab_index, view_id, |app, tab_index| {
-            FileController::save_conflict_overwrite(app, tab_index)
-        }) {
-            clear_pending_action(app);
+        ) {
+            app.handle_command(AppCommand::SaveConflictOverwrite { tab_index, view_id });
         }
 
         if state.can_reload()
@@ -333,11 +332,8 @@ fn render_save_conflict_dialog(
                 "Reload",
                 "Discard local buffer state and reload from disk",
             )
-            && run_save_conflict_action(app, tab_index, view_id, |app, tab_index| {
-                FileController::reload_buffer_from_disk(app, tab_index)
-            })
         {
-            clear_pending_action(app);
+            app.handle_command(AppCommand::ReloadBufferFromDisk { tab_index, view_id });
         }
 
         if render_dialog_action_button(
@@ -346,9 +342,8 @@ fn render_save_conflict_dialog(
             COPY,
             "Save As Copy",
             "Keep this buffer by saving it to a new file",
-        ) && run_save_conflict_action(app, tab_index, view_id, ScratchpadApp::save_file_as_at)
-        {
-            clear_pending_action(app);
+        ) {
+            app.handle_command(AppCommand::SaveConflictAsCopy { tab_index, view_id });
         }
 
         if render_dialog_action_button(
@@ -391,11 +386,7 @@ fn render_missing_file_dialog(
     ) {
         match action {
             MissingFileChoice::Save => {
-                if run_save_conflict_action(app, tab_index, view_id, |app, tab_index| {
-                    FileController::save_conflict_overwrite(app, tab_index)
-                }) {
-                    clear_pending_action(app);
-                }
+                app.handle_command(AppCommand::SaveConflictOverwrite { tab_index, view_id });
             }
             MissingFileChoice::Discard => close_pending_view(app, tab_index, view_id),
         }
@@ -416,42 +407,12 @@ fn close_pending_tab(app: &mut ScratchpadApp, index: usize) {
 fn close_pending_view(app: &mut ScratchpadApp, tab_index: usize, view_id: ViewId) {
     clear_pending_action(app);
     if activate_pending_view(app, tab_index, view_id) {
-        app.perform_close_view(view_id);
+        crate::app::commands::perform_close_view(app, view_id);
     }
-}
-
-fn run_save_conflict_action(
-    app: &mut ScratchpadApp,
-    tab_index: usize,
-    view_id: ViewId,
-    action: impl FnOnce(&mut ScratchpadApp, usize) -> bool,
-) -> bool {
-    activate_pending_view(app, tab_index, view_id) && action(app, tab_index)
 }
 
 fn activate_pending_view(app: &mut ScratchpadApp, tab_index: usize, view_id: ViewId) -> bool {
-    if tab_index >= app.tabs().len() {
-        return false;
-    }
-
-    if app.active_tab_index() != tab_index {
-        app.handle_command(AppCommand::ActivateTab { index: tab_index });
-    }
-
-    let Some(tab) = app.tabs().get(tab_index) else {
-        return false;
-    };
-    if tab.view(view_id).is_none() {
-        return false;
-    }
-
-    if tab.active_view_id != view_id {
-        app.handle_command(AppCommand::ActivateView { view_id });
-    }
-
-    app.tabs()
-        .get(tab_index)
-        .is_some_and(|tab| tab.active_view_id == view_id)
+    crate::app::commands::activate_pending_view_command(app, tab_index, view_id)
 }
 
 fn clear_pending_action(app: &mut ScratchpadApp) {
@@ -463,7 +424,12 @@ fn save_conflict_dialog_state(
     tab_index: usize,
     view_id: ViewId,
 ) -> Option<SaveConflictDialogState> {
-    let buffer = app.tabs().get(tab_index)?.buffer_for_view(view_id)?;
+    let buffer = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .get(tab_index)?
+        .buffer_for_view(view_id)?;
     let path_label = buffer
         .path
         .as_ref()
