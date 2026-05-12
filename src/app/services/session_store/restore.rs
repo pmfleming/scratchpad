@@ -1,5 +1,8 @@
 use super::model::{SessionBuffer, SessionTab};
-use super::{RestoreStatus, RestoreStatusLevel, SessionStore};
+use super::{
+    RestoreStatus, RestoreStatusLevel, SESSION_IO_PARALLEL_MAX_WORKERS,
+    SESSION_IO_PARALLEL_MIN_ITEMS, SessionStore,
+};
 use crate::app::diagnostics;
 use crate::app::domain::buffer::{
     BufferTextMetadata, buffer_text_metadata, detected_text_format_and_metadata,
@@ -13,6 +16,7 @@ use crate::app::utils::pluralize;
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
+use std::thread;
 
 #[derive(Default)]
 pub(super) struct RestoreSummary {
@@ -22,6 +26,12 @@ pub(super) struct RestoreSummary {
 }
 
 impl RestoreSummary {
+    pub(super) fn merge(&mut self, other: Self) {
+        self.reloaded_clean_buffers += other.reloaded_clean_buffers;
+        self.conflicted_buffers += other.conflicted_buffers;
+        self.missing_buffers += other.missing_buffers;
+    }
+
     pub(super) fn record(&mut self, freshness: BufferFreshness) {
         match freshness {
             BufferFreshness::InSync
@@ -59,6 +69,58 @@ impl RestoreSummary {
 }
 
 impl SessionStore {
+    pub(super) fn restore_tabs_ordered(
+        &self,
+        tabs: Vec<SessionTab>,
+    ) -> Vec<(WorkspaceTab, RestoreSummary)> {
+        let total = tabs.len();
+        if total < SESSION_IO_PARALLEL_MIN_ITEMS || restore_worker_count(total) <= 1 {
+            return tabs
+                .into_iter()
+                .map(|tab| self.restore_tab_with_summary(tab))
+                .collect();
+        }
+
+        let workers = restore_worker_count(total);
+        let chunk_size = total.div_ceil(workers);
+        let mut iter = tabs.into_iter().enumerate();
+        let mut restored = Vec::with_capacity(total);
+
+        thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(workers);
+            for _ in 0..workers {
+                let chunk = iter.by_ref().take(chunk_size).collect::<Vec<_>>();
+                if chunk.is_empty() {
+                    break;
+                }
+                handles.push(scope.spawn(move || {
+                    let mut restored = Vec::with_capacity(chunk.len());
+                    for (index, tab) in chunk {
+                        let (restored_tab, summary) = self.restore_tab_with_summary(tab);
+                        restored.push((index, restored_tab, summary));
+                    }
+                    restored
+                }));
+            }
+
+            for handle in handles {
+                restored.extend(handle.join().expect("session restore worker panicked"));
+            }
+        });
+
+        restored.sort_by_key(|(index, _, _)| *index);
+        restored
+            .into_iter()
+            .map(|(_, tab, summary)| (tab, summary))
+            .collect()
+    }
+
+    fn restore_tab_with_summary(&self, tab: SessionTab) -> (WorkspaceTab, RestoreSummary) {
+        let mut summary = RestoreSummary::default();
+        let tab = self.restore_tab(tab, &mut summary);
+        (tab, summary)
+    }
+
     pub(super) fn restore_tab(
         &self,
         tab: SessionTab,
@@ -293,6 +355,18 @@ impl SessionStore {
             Err(_) => RestoredBufferContent::empty(buffer, BufferFreshness::MissingOnDisk),
         }
     }
+}
+
+fn restore_worker_count(item_count: usize) -> usize {
+    thread::available_parallelism()
+        .map(|parallelism| {
+            parallelism
+                .get()
+                .min(SESSION_IO_PARALLEL_MAX_WORKERS)
+                .min(item_count)
+        })
+        .unwrap_or(1)
+        .max(1)
 }
 
 struct RestoredBufferContent {

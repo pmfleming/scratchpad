@@ -187,6 +187,10 @@ impl TextFormatMetadata {
             return true;
         };
 
+        if encoding == encoding_rs::UTF_8 {
+            return false;
+        }
+
         let (_, _, had_replacements) = encoding.encode(text);
         had_replacements
     }
@@ -365,14 +369,17 @@ pub(crate) fn buffer_text_metadata_from_edit(
     format: &mut TextFormatMetadata,
     edit: IncrementalMetadataEdit<'_>,
 ) -> Option<BufferTextMetadata> {
-    if !can_update_metadata_incrementally(format, edit.deleted_text, edit.inserted_text) {
-        return None;
-    }
-
     let deleted_window = boundary_window(edit.previous_char, edit.deleted_text, edit.next_char);
     let inserted_window = boundary_window(edit.previous_char, edit.inserted_text, edit.next_char);
     let deleted_inspection = TextInspection::inspect(&deleted_window);
     let inserted_inspection = TextInspection::inspect(&inserted_window);
+    if !can_update_metadata_incrementally(
+        artifact_summary,
+        &deleted_inspection,
+        &inserted_inspection,
+    ) {
+        return None;
+    }
 
     let deleted_breaks = deleted_inspection.line_count.saturating_sub(1);
     let inserted_breaks = inserted_inspection.line_count.saturating_sub(1);
@@ -389,7 +396,7 @@ pub(crate) fn buffer_text_metadata_from_edit(
 
     format.line_ending_counts = line_ending_counts;
     format.line_endings = line_ending_style(line_ending_counts);
-    format.is_ascii_subset &= edit.inserted_text.is_ascii();
+    format.is_ascii_subset &= inserted_inspection.is_ascii_subset;
 
     let mut artifact_summary = artifact_summary.clone();
     artifact_summary.has_carriage_returns =
@@ -431,7 +438,7 @@ pub(crate) fn buffer_text_metadata_from_piece_tree(
     format: &mut TextFormatMetadata,
 ) -> BufferTextMetadata {
     let spans = tree.spans_for_range(0..tree.len_chars());
-    let inspection = TextInspection::inspect_spans(spans.map(|s| s.text));
+    let inspection = TextInspection::inspect_span_refs(spans.map(|s| s.text));
     format.apply_inspection(&inspection);
     build_buffer_text_metadata(inspection, format, false)
 }
@@ -464,18 +471,20 @@ fn buffer_text_metadata_parts(
 }
 
 fn can_update_metadata_incrementally(
-    format: &TextFormatMetadata,
-    deleted_text: &str,
-    inserted_text: &str,
+    current_summary: &TextArtifactSummary,
+    deleted_inspection: &TextInspection,
+    inserted_inspection: &TextInspection,
 ) -> bool {
-    !contains_non_line_ending_control_chars(deleted_text)
-        && !contains_non_line_ending_control_chars(inserted_text)
-        && (format.is_ascii_subset || (deleted_text.is_ascii() && inserted_text.is_ascii()))
+    !has_non_line_ending_artifacts(current_summary)
+        && !has_non_line_ending_artifacts(&deleted_inspection.artifact_summary)
+        && !has_non_line_ending_artifacts(&inserted_inspection.artifact_summary)
 }
 
-fn contains_non_line_ending_control_chars(text: &str) -> bool {
-    text.chars()
-        .any(|ch| ch.is_control() && !matches!(ch, '\r' | '\n' | '\t'))
+fn has_non_line_ending_artifacts(summary: &TextArtifactSummary) -> bool {
+    summary.has_ansi_sequences
+        || summary.has_backspaces
+        || summary.has_unicode_format_controls
+        || summary.other_control_count > 0
 }
 
 fn boundary_window(previous_char: Option<char>, text: &str, next_char: Option<char>) -> String {

@@ -50,6 +50,12 @@ fn control_character_status_uses_conventional_marker() {
 }
 
 #[test]
+fn visible_control_character_status_uses_readable_attention_color() {
+    assert_eq!(artifact_icon(true, false).2, status_attention_color(false));
+    assert_eq!(artifact_icon(true, true).2, status_attention_color(true));
+}
+
+#[test]
 fn narrow_status_bar_drops_items_from_the_left() {
     let items = [
         status_item(StatusBarItemKind::LineCount, 40.0),

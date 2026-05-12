@@ -165,7 +165,7 @@ pub(super) fn spawn_analysis_lane(endpoints: LaneEndpoints) {
 // Open multiple files concurrently to exploit SSD throughput while keeping
 // memory pressure bounded. Modern NVMe SSDs benefit from a handful of
 // concurrent reads; we cap the fanout to keep the bursts predictable.
-const MAX_CONCURRENT_READS: usize = 4;
+const MAX_CONCURRENT_READS: usize = 8;
 
 /// Fan `requests` out across up to `MAX_CONCURRENT_READS` scoped workers,
 /// invoking `consume` on each `(index, result)` tuple as it arrives. The

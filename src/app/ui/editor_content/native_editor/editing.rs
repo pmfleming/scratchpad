@@ -265,6 +265,9 @@ fn normalize_line_endings(text: &str, preferred: &str) -> String {
     if !text.contains('\n') && !text.contains('\r') {
         return text.to_owned();
     }
+    if preferred == "\n" && !text.contains('\r') {
+        return text.to_owned();
+    }
 
     let mut result = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();

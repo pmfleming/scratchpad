@@ -14,9 +14,12 @@ use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
+use std::thread;
 
 const SESSION_DIR_NAME: &str = "scratchpad";
 const SESSION_MANIFEST_NAME: &str = "session.json";
+const SESSION_IO_PARALLEL_MIN_ITEMS: usize = 512;
+const SESSION_IO_PARALLEL_MAX_WORKERS: usize = 8;
 
 pub use model::SESSION_VERSION;
 
@@ -40,6 +43,12 @@ struct CapturedSessionTab {
 
 struct CapturedSessionBuffer {
     temp_id: String,
+    snapshot: DocumentSnapshot,
+}
+
+struct SessionSnapshotWrite {
+    temp_id: String,
+    path: PathBuf,
     snapshot: DocumentSnapshot,
 }
 
@@ -87,10 +96,11 @@ impl SessionStore {
         };
         let legacy_settings = manifest.legacy_settings();
 
-        let mut tabs = Vec::with_capacity(manifest.tabs.len());
         let mut restore_summary = RestoreSummary::default();
-        for tab in manifest.tabs {
-            tabs.push(self.restore_tab(tab, &mut restore_summary));
+        let mut tabs = Vec::with_capacity(manifest.tabs.len());
+        for (tab, summary) in self.restore_tabs_ordered(manifest.tabs) {
+            restore_summary.merge(summary);
+            tabs.push(tab);
         }
 
         if tabs.is_empty() {
@@ -123,8 +133,8 @@ impl SessionStore {
 
         let mut restore_summary = RestoreSummary::default();
         let mut tab_count = 0usize;
-        for tab in manifest.tabs {
-            let restored_tab = self.restore_tab(tab, &mut restore_summary);
+        for (restored_tab, summary) in self.restore_tabs_ordered(manifest.tabs) {
+            restore_summary.merge(summary);
             tab_count += 1;
             if !on_tab(restored_tab) {
                 return Err(io::Error::new(
@@ -171,28 +181,22 @@ impl SessionStore {
             );
         })?;
 
-        let mut active_temp_paths = HashSet::new();
         let mut session_tabs = Vec::with_capacity(request.tabs.len());
+        let mut snapshot_writes = Vec::new();
 
         for captured_tab in request.tabs {
             for buffer in captured_tab.buffer_snapshots {
                 let temp_path = self.buffer_path(&buffer.temp_id);
-                FileService::write_snapshot_utf8(&temp_path, &buffer.snapshot).inspect_err(
-                    |error| {
-                        diagnostics::record_io_error_with_details(
-                            "session_write_buffer_snapshot",
-                            Some(&temp_path),
-                            "session_store::persist_request",
-                            &error,
-                            [("temp_id", buffer.temp_id.clone())],
-                        );
-                    },
-                )?;
-                active_temp_paths.insert(temp_path);
+                snapshot_writes.push(SessionSnapshotWrite {
+                    temp_id: buffer.temp_id,
+                    path: temp_path,
+                    snapshot: buffer.snapshot,
+                });
             }
             session_tabs.push(captured_tab.session_tab);
         }
 
+        let active_temp_paths = write_session_snapshots(snapshot_writes)?;
         self.remove_stale_buffer_files(&active_temp_paths)?;
 
         let manifest = SessionManifest {
@@ -294,6 +298,93 @@ impl SessionStore {
 
         Ok(Some(manifest))
     }
+}
+
+fn write_session_snapshots(writes: Vec<SessionSnapshotWrite>) -> io::Result<HashSet<PathBuf>> {
+    let total = writes.len();
+    if total == 0 {
+        return Ok(HashSet::new());
+    }
+
+    if total < SESSION_IO_PARALLEL_MIN_ITEMS || session_io_worker_count(total) <= 1 {
+        let mut active_temp_paths = HashSet::with_capacity(total);
+        for write in writes {
+            active_temp_paths.insert(write_one_session_snapshot(write)?);
+        }
+        return Ok(active_temp_paths);
+    }
+
+    let workers = session_io_worker_count(total);
+    if workers <= 1 {
+        return write_session_snapshot_chunk(writes).map(|paths| paths.into_iter().collect());
+    }
+
+    let chunk_size = total.div_ceil(workers);
+    let mut iter = writes.into_iter();
+    thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(workers);
+        for _ in 0..workers {
+            let chunk = iter.by_ref().take(chunk_size).collect::<Vec<_>>();
+            if chunk.is_empty() {
+                break;
+            }
+            handles.push(scope.spawn(move || write_session_snapshot_chunk(chunk)));
+        }
+
+        let mut active_temp_paths = HashSet::with_capacity(total);
+        let mut first_error = None;
+        for handle in handles {
+            match handle.join() {
+                Ok(Ok(paths)) => active_temp_paths.extend(paths),
+                Err(_) if first_error.is_none() => {
+                    first_error = Some(io::Error::other("session snapshot writer panicked"));
+                }
+                Ok(Err(error)) if first_error.is_none() => {
+                    first_error = Some(error);
+                }
+                Err(_) => {}
+                Ok(Err(_)) => {}
+            }
+        }
+
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(active_temp_paths),
+        }
+    })
+}
+
+fn write_session_snapshot_chunk(writes: Vec<SessionSnapshotWrite>) -> io::Result<Vec<PathBuf>> {
+    let mut paths = Vec::with_capacity(writes.len());
+    for write in writes {
+        paths.push(write_one_session_snapshot(write)?);
+    }
+    Ok(paths)
+}
+
+fn write_one_session_snapshot(write: SessionSnapshotWrite) -> io::Result<PathBuf> {
+    FileService::write_snapshot_utf8(&write.path, &write.snapshot).inspect_err(|error| {
+        diagnostics::record_io_error_with_details(
+            "session_write_buffer_snapshot",
+            Some(&write.path),
+            "session_store::persist_request",
+            error,
+            [("temp_id", write.temp_id.clone())],
+        );
+    })?;
+    Ok(write.path)
+}
+
+fn session_io_worker_count(item_count: usize) -> usize {
+    thread::available_parallelism()
+        .map(|parallelism| {
+            parallelism
+                .get()
+                .min(SESSION_IO_PARALLEL_MAX_WORKERS)
+                .min(item_count)
+        })
+        .unwrap_or(1)
+        .max(1)
 }
 
 impl SessionPersistRequest {

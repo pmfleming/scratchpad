@@ -4,6 +4,11 @@ use super::{
     PieceTreeMetrics, PieceTreeRoot,
 };
 use memchr::memchr_iter;
+use std::ops::Range;
+use std::thread;
+
+const PARALLEL_PIECE_BUILD_MIN_BYTES: usize = 4 * 1024 * 1024;
+const PARALLEL_PIECE_BUILD_MAX_WORKERS: usize = 8;
 
 pub(super) struct PieceTextMetrics {
     pub byte_len: usize,
@@ -117,6 +122,14 @@ pub(super) fn build_chunked_pieces(
         return Vec::new();
     }
 
+    if let Some(pieces) = build_chunked_pieces_parallel(buffer, start_byte, text) {
+        return pieces;
+    }
+
+    build_chunked_pieces_serial(buffer, start_byte, text)
+}
+
+fn build_chunked_pieces_serial(buffer: PieceBuffer, start_byte: usize, text: &str) -> Vec<Piece> {
     let mut pieces = Vec::new();
     let mut offset = 0usize;
     while offset < text.len() {
@@ -126,6 +139,78 @@ pub(super) fn build_chunked_pieces(
         offset += len;
     }
     pieces
+}
+
+fn build_chunked_pieces_parallel(
+    buffer: PieceBuffer,
+    start_byte: usize,
+    text: &str,
+) -> Option<Vec<Piece>> {
+    if text.len() < PARALLEL_PIECE_BUILD_MIN_BYTES {
+        return None;
+    }
+
+    let ranges = piece_chunk_ranges(text);
+    let workers = piece_build_worker_count(text.len()).min(ranges.len());
+    if workers <= 1 || ranges.len() < workers * 2 {
+        return None;
+    }
+
+    let chunk_size = ranges.len().div_ceil(workers);
+    let mut per_worker = Vec::with_capacity(workers);
+    thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(workers);
+        for range_chunk in ranges.chunks(chunk_size) {
+            handles.push(scope.spawn(move || {
+                range_chunk
+                    .iter()
+                    .map(|range| {
+                        Piece::from_slice(
+                            buffer,
+                            start_byte + range.start,
+                            &text[range.start..range.end],
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            }));
+        }
+        for handle in handles {
+            if let Ok(pieces) = handle.join() {
+                per_worker.push(pieces);
+            }
+        }
+    });
+
+    let total = per_worker.iter().map(Vec::len).sum();
+    let mut pieces = Vec::with_capacity(total);
+    for mut worker_pieces in per_worker {
+        pieces.append(&mut worker_pieces);
+    }
+    Some(pieces)
+}
+
+fn piece_chunk_ranges(text: &str) -> Vec<Range<usize>> {
+    let mut ranges = Vec::new();
+    let mut offset = 0usize;
+    while offset < text.len() {
+        let len = next_chunk_len(text, offset, MAX_LEAF_BYTES);
+        ranges.push(offset..offset + len);
+        offset += len;
+    }
+    ranges
+}
+
+fn piece_build_worker_count(total_bytes: usize) -> usize {
+    let by_size = (total_bytes / PARALLEL_PIECE_BUILD_MIN_BYTES).max(1);
+    thread::available_parallelism()
+        .map(|parallelism| {
+            parallelism
+                .get()
+                .min(PARALLEL_PIECE_BUILD_MAX_WORKERS)
+                .min(by_size)
+        })
+        .unwrap_or(1)
+        .max(1)
 }
 
 pub(super) fn pack_pieces_into_leaves(pieces: Vec<Piece>) -> Vec<PieceTreeLeaf> {
@@ -222,7 +307,22 @@ pub(super) fn line_lookup_in_leaves(
             0
         };
 
+        if leaf_start == 0 {
+            if skip_node_before_line(node, safe_line, &mut cursor) {
+                continue;
+            }
+            if append_node_to_target_line(node, safe_line, &mut cursor) {
+                continue;
+            }
+        }
+
         for leaf in node.leaves.iter().skip(leaf_start) {
+            if skip_leaf_before_line(leaf, safe_line, &mut cursor) {
+                continue;
+            }
+            if append_leaf_to_target_line(leaf, safe_line, &mut cursor) {
+                continue;
+            }
             if let Some(line_info) = scan_leaf_for_line_lookup(tree, leaf, safe_line, &mut cursor) {
                 return line_info;
             }
@@ -251,6 +351,62 @@ impl LineLookupCursor {
 
     fn line_info(&self) -> (usize, usize) {
         (self.line_start, self.current_len)
+    }
+}
+
+fn skip_node_before_line(
+    node: &PieceTreeInternalNode,
+    safe_line: usize,
+    cursor: &mut LineLookupCursor,
+) -> bool {
+    if cursor.current_line < safe_line && cursor.current_line + node.metrics.newlines < safe_line {
+        cursor.current_line += node.metrics.newlines;
+        cursor.current_char += node.metrics.chars;
+        true
+    } else {
+        false
+    }
+}
+
+fn append_node_to_target_line(
+    node: &PieceTreeInternalNode,
+    safe_line: usize,
+    cursor: &mut LineLookupCursor,
+) -> bool {
+    if cursor.current_line == safe_line && node.metrics.newlines == 0 {
+        cursor.current_len += node.metrics.chars;
+        cursor.current_char += node.metrics.chars;
+        true
+    } else {
+        false
+    }
+}
+
+fn skip_leaf_before_line(
+    leaf: &PieceTreeLeaf,
+    safe_line: usize,
+    cursor: &mut LineLookupCursor,
+) -> bool {
+    if cursor.current_line < safe_line && cursor.current_line + leaf.metrics.newlines < safe_line {
+        cursor.current_line += leaf.metrics.newlines;
+        cursor.current_char += leaf.metrics.chars;
+        true
+    } else {
+        false
+    }
+}
+
+fn append_leaf_to_target_line(
+    leaf: &PieceTreeLeaf,
+    safe_line: usize,
+    cursor: &mut LineLookupCursor,
+) -> bool {
+    if cursor.current_line == safe_line && leaf.metrics.newlines == 0 {
+        cursor.current_len += leaf.metrics.chars;
+        cursor.current_char += leaf.metrics.chars;
+        true
+    } else {
+        false
     }
 }
 

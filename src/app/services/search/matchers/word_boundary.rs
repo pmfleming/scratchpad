@@ -11,6 +11,10 @@ impl<'a> WholeWordMatcher<'a> {
     pub(super) fn allows(&self, start: usize, end: usize) -> bool {
         !self.enabled || is_whole_word_match(self.text, start, end)
     }
+
+    pub(super) fn allows_byte_range(&self, start_byte: usize, end_byte: usize) -> bool {
+        !self.enabled || is_whole_word_byte_match(self.text, start_byte, end_byte)
+    }
 }
 
 pub(super) fn whole_word_allows(
@@ -44,6 +48,21 @@ fn is_ascii_whole_word_match(text_bytes: &[u8], start: usize, end: usize) -> boo
 fn is_whole_word_match(text: &str, start: usize, end: usize) -> bool {
     let before_is_word = start > 0 && text.chars().nth(start - 1).is_some_and(is_word_char);
     let after_is_word = text.chars().nth(end).is_some_and(is_word_char);
+    !before_is_word && !after_is_word
+}
+
+fn is_whole_word_byte_match(text: &str, start_byte: usize, end_byte: usize) -> bool {
+    if !text.is_char_boundary(start_byte) || !text.is_char_boundary(end_byte) {
+        return false;
+    }
+
+    let before_is_word = start_byte > 0
+        && text[..start_byte]
+            .chars()
+            .next_back()
+            .is_some_and(is_word_char);
+    let after_is_word =
+        end_byte < text.len() && text[end_byte..].chars().next().is_some_and(is_word_char);
     !before_is_word && !after_is_word
 }
 
@@ -98,7 +117,18 @@ mod tests {
         let matcher = WholeWordMatcher::new("prefixneedle", false);
 
         assert!(matcher.allows(6, 12));
+        assert!(matcher.allows_byte_range(6, 12));
         assert!(ascii_whole_word_allows(b"prefixneedle", false, 6, 12));
+    }
+
+    #[test]
+    fn unicode_byte_range_whole_word_checks_adjacent_scalars() {
+        let matcher = WholeWordMatcher::new("α β βx xβ β", true);
+
+        assert!(matcher.allows_byte_range("α ".len(), "α β".len()));
+        assert!(!matcher.allows_byte_range("α β ".len(), "α β β".len()));
+        assert!(!matcher.allows_byte_range("α β βx x".len(), "α β βx xβ".len()));
+        assert!(matcher.allows_byte_range("α β βx xβ ".len(), "α β βx xβ β".len()));
     }
 
     #[test]

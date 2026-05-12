@@ -139,12 +139,7 @@ fn show_line_count(ui: &mut egui::Ui, count_label: &str, actions: &mut StatusBar
     }
 }
 
-fn show_encoding(
-    ui: &mut egui::Ui,
-    encoding: &str,
-    tooltip: &str,
-    highlight: bool,
-) -> egui::Response {
+fn show_encoding(ui: &mut egui::Ui, encoding: &str, highlight: bool) -> egui::Response {
     ui.separator();
     widget_ids::surface_response(ui, "status_encoding", "encoding_label", |ui| {
         ui.add(
@@ -153,7 +148,7 @@ fn show_encoding(
         )
     })
     .on_hover_cursor(egui::CursorIcon::PointingHand)
-    .on_hover_text(format!("{tooltip}\nClick for encoding actions"))
+    .on_hover_text("Text Encoding")
 }
 
 fn show_status_segment(ui: &mut egui::Ui, label: Option<&str>) {
@@ -388,13 +383,7 @@ fn render_status_item(
         StatusBarItemKind::Selection => show_status_segment(ui, details.selection_label.as_deref()),
         StatusBarItemKind::DiskState => show_disk_state(ui, details),
         StatusBarItemKind::Encoding => {
-            if show_encoding(
-                ui,
-                &details.encoding.label,
-                &details.encoding.tooltip,
-                details.encoding.is_non_default,
-            )
-            .clicked()
+            if show_encoding(ui, &details.encoding.label, details.encoding.is_non_default).clicked()
             {
                 actions.open_encoding_dialog = true;
             }

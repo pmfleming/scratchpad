@@ -93,6 +93,27 @@ fn line_lookup_tracks_mixed_edits() {
 }
 
 #[test]
+fn line_lookup_handles_lines_spanning_many_leaves() {
+    let first = "a".repeat(300_000);
+    let second = "β".repeat(150_000);
+    let text = format!("{first}\n{second}\ntail");
+    let tree = PieceTreeLite::from_string(text);
+
+    let first_line = tree.line_info(0);
+    assert_eq!(first_line.start_char, 0);
+    assert_eq!(first_line.char_len, 300_000);
+
+    let second_line = tree.line_info(1);
+    assert_eq!(second_line.start_char, 300_001);
+    assert_eq!(second_line.char_len, 150_000);
+
+    let tail_line = tree.line_info(2);
+    assert_eq!(tail_line.start_char, 450_002);
+    assert_eq!(tail_line.char_len, 4);
+    assert_eq!(tree.line_index_at_offset(450_003), 2);
+}
+
+#[test]
 fn provenance_tracks_insert_source() {
     let mut tree = PieceTreeLite::from_string("ab".to_owned());
 

@@ -15,6 +15,20 @@ fn read_write_utf8_round_trips_text() {
 }
 
 #[test]
+fn read_large_utf8_file_round_trips_across_decode_chunks() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("large-utf8.txt");
+    let mut text = "header café 東京\n".repeat(12_000);
+    text.push_str("tail 😀");
+    std::fs::write(&path, &text).unwrap();
+
+    let loaded = FileService::read_file(&path).unwrap();
+
+    assert_eq!(loaded.document.extract_text(), text);
+    assert_eq!(loaded.document.snapshot().line_count(), 12_001);
+}
+
+#[test]
 fn read_write_utf16le_round_trips_text_with_bom() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("utf16le.txt");

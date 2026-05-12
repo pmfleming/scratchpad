@@ -342,6 +342,38 @@ mod tests {
     }
 
     #[test]
+    fn case_sensitive_search_reports_char_ranges_in_utf8_text() {
+        let options = SearchOptions {
+            mode: SearchMode::PlainText,
+            match_case: true,
+            whole_word: false,
+        };
+
+        assert_eq!(
+            find_matches("café needle 東京 needle", "needle", options),
+            vec![5..11, 15..21]
+        );
+        assert_eq!(
+            find_matches("a café café", "café", options),
+            vec![2..6, 7..11]
+        );
+    }
+
+    #[test]
+    fn whole_word_case_sensitive_search_checks_unicode_boundaries() {
+        let options = SearchOptions {
+            mode: SearchMode::PlainText,
+            match_case: true,
+            whole_word: true,
+        };
+
+        assert_eq!(
+            find_matches("α β βx xβ β", "β", options),
+            vec![2..3, 10..11]
+        );
+    }
+
+    #[test]
     fn ascii_case_insensitive_search_uses_same_ranges() {
         let options = SearchOptions {
             mode: SearchMode::PlainText,

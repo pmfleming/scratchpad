@@ -122,8 +122,14 @@ pub struct BufferViewStatus {
 
 impl BufferState {
     pub fn new(name: String, content: String, path: Option<PathBuf>) -> Self {
-        let format = TextFormatMetadata::utf8_for_new_file(&content);
-        Self::with_format(name, content, path, format)
+        let (format, text_metadata) = super::detected_text_format_and_metadata(
+            &content,
+            "UTF-8".to_owned(),
+            false,
+            EncodingSource::DefaultForNewFile,
+            false,
+        );
+        Self::with_format_and_metadata(name, content, path, format, text_metadata)
     }
 
     pub fn with_encoding(
@@ -133,14 +139,14 @@ impl BufferState {
         encoding: String,
         has_bom: bool,
     ) -> Self {
-        let format = TextFormatMetadata::detected(
+        let (format, text_metadata) = super::detected_text_format_and_metadata(
             &content,
             encoding,
             has_bom,
             EncodingSource::Heuristic,
             false,
         );
-        Self::with_format(name, content, path, format)
+        Self::with_format_and_metadata(name, content, path, format, text_metadata)
     }
 
     pub fn with_format(
@@ -150,6 +156,16 @@ impl BufferState {
         mut format: TextFormatMetadata,
     ) -> Self {
         let text_metadata = buffer_text_metadata(&content, &mut format);
+        Self::with_format_and_metadata(name, content, path, format, text_metadata)
+    }
+
+    fn with_format_and_metadata(
+        name: String,
+        content: String,
+        path: Option<PathBuf>,
+        format: TextFormatMetadata,
+        text_metadata: BufferTextMetadata,
+    ) -> Self {
         let document =
             TextDocument::with_preferred_line_ending(content, text_metadata.preferred_line_ending);
         Self::build(
@@ -636,7 +652,7 @@ impl BufferState {
         let edit = operation.edits.first()?;
         let tree = self.document.piece_tree();
         let start_char = edit.start_char.min(tree.len_chars());
-        let inserted_char_len = edit.inserted_text.chars().count();
+        let inserted_char_len = utf8_char_count(&edit.inserted_text);
         let previous_char = start_char
             .checked_sub(1)
             .and_then(|index| tree.char_at(index));
@@ -664,6 +680,17 @@ impl BufferState {
 fn metadata_neutral_ascii_text(text: &str) -> bool {
     text.bytes()
         .all(|byte| byte.is_ascii() && !matches!(byte, b'\n' | b'\r' | 0x00..=0x1F))
+}
+
+fn utf8_char_count(text: &str) -> usize {
+    let bytes = text.as_bytes();
+    if bytes.is_ascii() {
+        return bytes.len();
+    }
+    bytes
+        .iter()
+        .filter(|byte| (*byte & 0b1100_0000) != 0b1000_0000)
+        .count()
 }
 
 fn next_buffer_id() -> BufferId {

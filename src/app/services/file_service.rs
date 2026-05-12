@@ -387,13 +387,24 @@ fn read_document_with_encoding(
     const RAW_READ_BYTES: usize = 16 * 1024;
     const DECODED_CHUNK_BYTES: usize = 32 * 1024;
 
+    if encoding == encoding_rs::UTF_8
+        && let Some(loaded) = read_utf8_document_fast_path(path, has_bom)?
+    {
+        return Ok(loaded);
+    }
+
     let mut file = File::open(path)?;
+    let decoded_capacity = file
+        .metadata()
+        .ok()
+        .and_then(|metadata| usize::try_from(metadata.len()).ok())
+        .unwrap_or(0);
     let mut decoder = if has_bom {
         encoding.new_decoder_with_bom_removal()
     } else {
         encoding.new_decoder_without_bom_handling()
     };
-    let mut document = TextDocument::new(String::new());
+    let mut content = String::with_capacity(decoded_capacity);
     let mut sample = String::new();
     let mut line_count = 1usize;
     let mut line_count_pending_cr = false;
@@ -428,8 +439,7 @@ fn read_document_with_encoding(
                 ));
             }
             if !text.is_empty() {
-                let end = document.piece_tree().len_chars();
-                document.insert_direct(end, text);
+                content.push_str(text);
                 append_staged_metadata_sample(&mut sample, text);
                 line_count =
                     accumulate_staged_line_count(text, line_count, &mut line_count_pending_cr);
@@ -451,12 +461,49 @@ fn read_document_with_encoding(
     }
 
     Ok(LoadedDocument {
-        document,
+        document: TextDocument::new(content),
         sample,
         line_count,
         has_decoding_warnings,
     })
 }
+
+fn read_utf8_document_fast_path(path: &Path, has_bom: bool) -> io::Result<Option<LoadedDocument>> {
+    const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
+
+    let bytes = std::fs::read(path)?;
+    let bom_len = if has_bom && bytes.starts_with(UTF8_BOM) {
+        UTF8_BOM.len()
+    } else {
+        0
+    };
+    if bytes[bom_len..].contains(&0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Binary files are not supported",
+        ));
+    }
+
+    let Ok(mut content) = String::from_utf8(bytes) else {
+        return Ok(None);
+    };
+    if bom_len > 0 {
+        content.drain(..bom_len);
+    }
+
+    let mut sample = String::new();
+    append_staged_metadata_sample(&mut sample, &content);
+    let mut line_count_pending_cr = false;
+    let line_count = accumulate_staged_line_count(&content, 1, &mut line_count_pending_cr);
+
+    Ok(Some(LoadedDocument {
+        document: TextDocument::new(content),
+        sample,
+        line_count,
+        has_decoding_warnings: false,
+    }))
+}
+
 fn append_staged_metadata_sample(sample: &mut String, chunk: &str) {
     if sample.len() >= STAGED_METADATA_SAMPLE_BYTES {
         return;

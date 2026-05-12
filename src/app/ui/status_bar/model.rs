@@ -1,6 +1,6 @@
 use super::{
     CONTROL_CHAR_ICON, HIDDEN_CONTROL_CHAR_ICON, STATUS_ICON_CELL_SIZE, STATUS_PATH_MIN_WIDTH,
-    STATUS_SEPARATOR_VISUAL_WIDTH,
+    STATUS_SEPARATOR_VISUAL_WIDTH, status_attention_color,
 };
 use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::{
@@ -24,7 +24,6 @@ pub(super) struct ActiveStatusDetails {
 
 pub(super) struct EncodingStatus {
     pub(super) label: String,
-    pub(super) tooltip: String,
     pub(super) is_non_default: bool,
 }
 
@@ -94,7 +93,6 @@ pub(super) fn collect_active_status_details(
         selection_label: selection_label(&view_status),
         encoding: EncodingStatus {
             label: buffer.format.encoding_label(),
-            tooltip: buffer.format.encoding_tooltip(),
             is_non_default: status_bar_encoding_is_non_default(&buffer.format),
         },
         has_non_compliant_characters: buffer.has_non_compliant_characters,
@@ -335,7 +333,7 @@ pub(super) fn artifact_icon(
         (
             CONTROL_CHAR_ICON,
             "Control characters",
-            egui::Color32::YELLOW,
+            status_attention_color(dark_mode),
         )
     } else {
         (
