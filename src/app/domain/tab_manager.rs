@@ -4,6 +4,11 @@ use crate::app::services::session_store::ColdSessionTab;
 use crate::app::theme;
 use std::collections::HashMap;
 
+mod display;
+mod index;
+#[cfg(test)]
+mod tests;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DisplayTabSlot {
     Workspace(usize),
@@ -59,30 +64,6 @@ impl TabManager {
 
     pub(crate) fn set_active_tab_index_clamped(&mut self, index: usize) {
         self.active_tab_index = index.min(self.tabs.len().saturating_sub(1));
-    }
-
-    pub(crate) fn set_cold_session_tab(&mut self, index: usize, tab: ColdSessionTab) {
-        if index < self.tabs.len() {
-            self.cold_session_tabs.insert(index, tab);
-        }
-    }
-
-    pub(crate) fn take_cold_session_tab(&mut self, index: usize) -> Option<ColdSessionTab> {
-        self.cold_session_tabs.remove(&index)
-    }
-
-    pub(crate) fn cold_session_tabs(&self) -> &HashMap<usize, ColdSessionTab> {
-        &self.cold_session_tabs
-    }
-
-    pub(crate) fn replace_restored_tab(&mut self, index: usize, tab: WorkspaceTab) -> bool {
-        let Some(slot) = self.tabs.get_mut(index) else {
-            return false;
-        };
-        let removed = std::mem::replace(slot, tab);
-        self.remove_tab_buffers(&removed);
-        self.index_tab_buffers(index);
-        true
     }
 
     pub fn mark_session_dirty(&mut self) {
@@ -230,83 +211,6 @@ impl TabManager {
         self.rebuild_buffer_tab_index();
     }
 
-    pub fn rebuild_buffer_tab_index(&mut self) {
-        self.buffer_tab_index.clear();
-        for (tab_index, tab) in self.tabs.iter().enumerate() {
-            for buffer in tab.buffers() {
-                self.buffer_tab_index.insert(buffer.id, tab_index);
-            }
-        }
-    }
-
-    fn index_tab_buffers(&mut self, tab_index: usize) {
-        if let Some(tab) = self.tabs.get(tab_index) {
-            for buffer in tab.buffers() {
-                self.buffer_tab_index.insert(buffer.id, tab_index);
-            }
-        }
-    }
-
-    fn remove_tab_buffers(&mut self, tab: &WorkspaceTab) {
-        for buffer in tab.buffers() {
-            self.buffer_tab_index.remove(&buffer.id);
-        }
-    }
-
-    fn shift_buffer_tab_indices(&mut self, start_index: usize, delta: isize) {
-        for tab_index in self.buffer_tab_index.values_mut() {
-            if *tab_index >= start_index {
-                if delta.is_positive() {
-                    *tab_index += delta as usize;
-                } else {
-                    *tab_index = tab_index.saturating_sub(delta.unsigned_abs());
-                }
-            }
-        }
-    }
-
-    fn shift_cold_tab_indices(&mut self, start_index: usize, delta: isize) {
-        let old = std::mem::take(&mut self.cold_session_tabs);
-        for (tab_index, cold_tab) in old {
-            let next_index = if tab_index >= start_index {
-                if delta.is_positive() {
-                    tab_index + delta as usize
-                } else {
-                    tab_index.saturating_sub(delta.unsigned_abs())
-                }
-            } else {
-                tab_index
-            };
-            self.cold_session_tabs.insert(next_index, cold_tab);
-        }
-    }
-
-    fn shift_cold_tab_range(&mut self, range: std::ops::RangeInclusive<usize>, delta: isize) {
-        let old = std::mem::take(&mut self.cold_session_tabs);
-        for (tab_index, cold_tab) in old {
-            let next_index = if range.contains(&tab_index) {
-                if delta.is_positive() {
-                    tab_index + delta as usize
-                } else {
-                    tab_index.saturating_sub(delta.unsigned_abs())
-                }
-            } else {
-                tab_index
-            };
-            self.cold_session_tabs.insert(next_index, cold_tab);
-        }
-    }
-
-    fn refresh_buffer_tab_index_range(&mut self, range: std::ops::RangeInclusive<usize>) {
-        for tab_index in range {
-            self.index_tab_buffers(tab_index);
-        }
-    }
-
-    pub fn tab_index_for_buffer(&self, buffer_id: BufferId) -> Option<usize> {
-        self.buffer_tab_index.get(&buffer_id).copied()
-    }
-
     pub fn find_tab_by_path(&self, candidate: &std::path::Path) -> Option<(usize, ViewId)> {
         self.tabs.iter().enumerate().find_map(|(tab_index, tab)| {
             tab.views.iter().find_map(|view| {
@@ -325,174 +229,7 @@ impl TabManager {
             .unwrap_or_else(|| format!("tab#{index}<missing>"))
     }
 
-    pub(crate) fn total_tab_slots(&self, settings_open: bool) -> usize {
-        self.tabs.len() + usize::from(settings_open)
-    }
-
-    pub(crate) fn settings_slot_index(
-        &self,
-        settings_open: bool,
-        settings_tab_index: usize,
-    ) -> Option<usize> {
-        settings_open.then_some(settings_tab_index.min(self.tabs.len()))
-    }
-
-    pub(crate) fn tab_slot_is_settings(
-        &self,
-        slot_index: usize,
-        settings_open: bool,
-        settings_tab_index: usize,
-    ) -> bool {
-        self.display_tab_slot(slot_index, settings_open, settings_tab_index)
-            == Some(DisplayTabSlot::Settings)
-    }
-
-    pub(crate) fn workspace_index_for_slot(
-        &self,
-        slot_index: usize,
-        settings_open: bool,
-        settings_tab_index: usize,
-    ) -> Option<usize> {
-        match self.display_tab_slot(slot_index, settings_open, settings_tab_index)? {
-            DisplayTabSlot::Workspace(index) => Some(index),
-            DisplayTabSlot::Settings => None,
-        }
-    }
-
-    pub(crate) fn slot_for_workspace_index(
-        &self,
-        workspace_index: usize,
-        settings_open: bool,
-        settings_tab_index: usize,
-    ) -> usize {
-        match self.settings_slot_index(settings_open, settings_tab_index) {
-            Some(settings_index) if workspace_index >= settings_index => workspace_index + 1,
-            _ => workspace_index,
-        }
-    }
-
-    pub(crate) fn active_tab_slot_index(
-        &self,
-        showing_settings: bool,
-        settings_open: bool,
-        settings_tab_index: usize,
-    ) -> usize {
-        if showing_settings {
-            self.settings_slot_index(settings_open, settings_tab_index)
-                .unwrap_or(self.tabs.len())
-        } else {
-            self.slot_for_workspace_index(self.active_tab_index, settings_open, settings_tab_index)
-        }
-    }
-
-    pub(crate) fn display_tab_slot(
-        &self,
-        slot_index: usize,
-        settings_open: bool,
-        settings_tab_index: usize,
-    ) -> Option<DisplayTabSlot> {
-        if slot_index >= self.total_tab_slots(settings_open) {
-            return None;
-        }
-
-        match self.settings_slot_index(settings_open, settings_tab_index) {
-            Some(settings_index) if slot_index == settings_index => Some(DisplayTabSlot::Settings),
-            Some(settings_index) if slot_index > settings_index => {
-                Some(DisplayTabSlot::Workspace(slot_index - 1))
-            }
-            _ => Some(DisplayTabSlot::Workspace(slot_index)),
-        }
-    }
-
-    pub(crate) fn display_tab_slots(
-        &self,
-        settings_open: bool,
-        settings_tab_index: usize,
-    ) -> Vec<DisplayTabSlot> {
-        (0..self.total_tab_slots(settings_open))
-            .filter_map(|slot_index| {
-                self.display_tab_slot(slot_index, settings_open, settings_tab_index)
-            })
-            .collect()
-    }
-
     pub fn describe_active_tab(&self) -> String {
         self.describe_tab_at(self.active_tab_index)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{TabManager, WorkspaceTab};
-    use crate::app::domain::{BufferState, SplitAxis};
-
-    fn tab(name: &str) -> WorkspaceTab {
-        WorkspaceTab::new(BufferState::new(name.to_owned(), String::new(), None))
-    }
-
-    #[test]
-    fn buffer_tab_index_tracks_tab_mutations() {
-        let first = tab("first.txt");
-        let first_id = first.active_buffer().id;
-
-        let mut second = tab("second.txt");
-        let second_id = second.active_buffer().id;
-        let split_buffer = BufferState::new("split.txt".to_owned(), String::new(), None);
-        let split_id = split_buffer.id;
-        second
-            .open_buffer_as_split(split_buffer, SplitAxis::Vertical, true, 0.5)
-            .unwrap();
-
-        let mut manager = TabManager::new();
-        manager.set_tabs(vec![first, second], 0);
-
-        assert_eq!(manager.tab_index_for_buffer(first_id), Some(0));
-        assert_eq!(manager.tab_index_for_buffer(second_id), Some(1));
-        assert_eq!(manager.tab_index_for_buffer(split_id), Some(1));
-
-        let restored = tab("restored.txt");
-        let restored_id = restored.active_buffer().id;
-        manager.append_restored_tab(restored);
-        assert_eq!(manager.active_tab_index, 0);
-        assert_eq!(manager.tab_index_for_buffer(first_id), Some(0));
-        assert_eq!(manager.tab_index_for_buffer(second_id), Some(1));
-        assert_eq!(manager.tab_index_for_buffer(split_id), Some(1));
-        assert_eq!(manager.tab_index_for_buffer(restored_id), Some(2));
-
-        let appended = tab("appended.txt");
-        let appended_id = appended.active_buffer().id;
-        manager.append_tab(appended);
-        assert_eq!(manager.active_tab_index, 3);
-        assert_eq!(manager.tab_index_for_buffer(first_id), Some(0));
-        assert_eq!(manager.tab_index_for_buffer(second_id), Some(1));
-        assert_eq!(manager.tab_index_for_buffer(split_id), Some(1));
-        assert_eq!(manager.tab_index_for_buffer(restored_id), Some(2));
-        assert_eq!(manager.tab_index_for_buffer(appended_id), Some(3));
-
-        let inserted = tab("inserted.txt");
-        let inserted_id = inserted.active_buffer().id;
-        manager.insert_tab(1, inserted);
-        assert_eq!(manager.tab_index_for_buffer(first_id), Some(0));
-        assert_eq!(manager.tab_index_for_buffer(inserted_id), Some(1));
-        assert_eq!(manager.tab_index_for_buffer(second_id), Some(2));
-        assert_eq!(manager.tab_index_for_buffer(split_id), Some(2));
-        assert_eq!(manager.tab_index_for_buffer(restored_id), Some(3));
-        assert_eq!(manager.tab_index_for_buffer(appended_id), Some(4));
-
-        assert!(manager.reorder_tab(2, 0));
-        assert_eq!(manager.tab_index_for_buffer(second_id), Some(0));
-        assert_eq!(manager.tab_index_for_buffer(split_id), Some(0));
-        assert_eq!(manager.tab_index_for_buffer(first_id), Some(1));
-        assert_eq!(manager.tab_index_for_buffer(inserted_id), Some(2));
-        assert_eq!(manager.tab_index_for_buffer(restored_id), Some(3));
-        assert_eq!(manager.tab_index_for_buffer(appended_id), Some(4));
-
-        manager.close_tab_internal(0);
-        assert_eq!(manager.tab_index_for_buffer(second_id), None);
-        assert_eq!(manager.tab_index_for_buffer(split_id), None);
-        assert_eq!(manager.tab_index_for_buffer(first_id), Some(0));
-        assert_eq!(manager.tab_index_for_buffer(inserted_id), Some(1));
-        assert_eq!(manager.tab_index_for_buffer(restored_id), Some(2));
-        assert_eq!(manager.tab_index_for_buffer(appended_id), Some(3));
     }
 }

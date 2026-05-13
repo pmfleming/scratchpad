@@ -1,7 +1,9 @@
+mod add_buffer;
+mod rebalance;
+
 use super::{
-    ByteSpan, LeafAddress, Piece, PieceBuffer, PieceProvenance, PieceSource, PieceTreeInternalNode,
-    PieceTreeLeaf, PieceTreeLite, build_chunked_pieces, byte_range_for_char_range,
-    pack_pieces_into_leaves, support::pack_leaves_into_nodes,
+    ByteSpan, LeafAddress, Piece, PieceBuffer, PieceSource, PieceTreeInternalNode, PieceTreeLeaf,
+    PieceTreeLite, build_chunked_pieces, byte_range_for_char_range, pack_pieces_into_leaves,
 };
 use std::ops::Range;
 
@@ -68,13 +70,6 @@ impl PieceTreeLite {
         self.replace_leaf_span(start_address, end_address, replacement_leaves);
     }
 
-    pub fn append_history_text(&mut self, text: &str, source: PieceSource) -> ByteSpan {
-        let start = self.add.len();
-        self.add.push_str(text);
-        self.record_add_provenance(start, text.len(), source);
-        add_byte_span(start, text.len())
-    }
-
     pub fn text_for_span(&self, span: ByteSpan) -> &str {
         let start = span.start_byte as usize;
         let end = start.saturating_add(span.byte_len as usize);
@@ -82,75 +77,6 @@ impl PieceTreeLite {
             PieceBuffer::Original => &self.original[start..end],
             PieceBuffer::Add => &self.add[start..end],
         }
-    }
-
-    pub fn compact_add_buffer(&mut self, history_spans: &mut [ByteSpan]) {
-        if self.add.is_empty() {
-            return;
-        }
-
-        let old_add = std::mem::take(&mut self.add);
-        let mut new_add = String::with_capacity(old_add.len());
-        let mut relocated = std::collections::HashMap::<ByteSpan, ByteSpan>::new();
-        let mut provenance_moves = Vec::<(ByteSpan, ByteSpan)>::new();
-
-        for node in &mut self.root.nodes {
-            for leaf in &mut node.leaves {
-                for piece in &mut leaf.pieces {
-                    if piece.buffer != PieceBuffer::Add || piece.byte_len == 0 {
-                        continue;
-                    }
-                    let old_start = piece.start_byte;
-                    let old_end = old_start.saturating_add(piece.byte_len);
-                    let text = &old_add[old_start..old_end];
-                    let new_start = new_add.len();
-                    new_add.push_str(text);
-                    let old_span = add_byte_span(old_start, piece.byte_len);
-                    let new_span = add_byte_span(new_start, piece.byte_len);
-                    relocated.insert(old_span, new_span);
-                    provenance_moves.push((old_span, new_span));
-                    piece.start_byte = new_start;
-                }
-            }
-        }
-
-        for span in history_spans {
-            if span.buffer != PieceBuffer::Add || span.byte_len == 0 {
-                continue;
-            }
-            let old_span = *span;
-            if let Some(new_span) = relocated.get(span) {
-                *span = *new_span;
-                provenance_moves.push((old_span, *new_span));
-                continue;
-            }
-            let old_start = span.start_byte as usize;
-            let old_end = old_start.saturating_add(span.byte_len as usize);
-            let text = &old_add[old_start..old_end];
-            let new_start = new_add.len();
-            new_add.push_str(text);
-            span.start_byte = new_start.min(u32::MAX as usize) as u32;
-            provenance_moves.push((old_span, *span));
-        }
-
-        self.provenance.rewrite_add_spans(provenance_moves);
-        self.add = new_add;
-        self.root.recalculate();
-    }
-
-    pub fn provenance_for_span(&self, span: ByteSpan) -> PieceProvenance {
-        self.provenance.provenance_for(span)
-    }
-
-    fn record_add_provenance(&mut self, start_byte: usize, byte_len: usize, source: PieceSource) {
-        self.provenance.record(
-            add_byte_span(start_byte, byte_len),
-            PieceProvenance {
-                change_id: self.generation,
-                source,
-                session_generation: 0,
-            },
-        );
     }
 
     fn leaf_with_inserted_pieces(
@@ -312,110 +238,5 @@ impl PieceTreeLite {
         }
 
         affected_pieces
-    }
-
-    fn replace_leaf_span(
-        &mut self,
-        start: LeafAddress,
-        end: LeafAddress,
-        replacement_leaves: Vec<PieceTreeLeaf>,
-    ) {
-        let combined_leaves = self.take_leaf_replacement_window(start, end, replacement_leaves);
-
-        let replacement_nodes = pack_leaves_into_nodes(combined_leaves);
-        let inserted_nodes = replacement_nodes.len();
-        self.root
-            .replace_recalculated_nodes(start.node_index..end.node_index + 1, replacement_nodes);
-        self.rebalance_node_window(start.node_index, inserted_nodes);
-        self.refresh_leaf_index_after_structure_change();
-    }
-
-    fn take_leaf_replacement_window(
-        &mut self,
-        start: LeafAddress,
-        end: LeafAddress,
-        replacement_leaves: Vec<PieceTreeLeaf>,
-    ) -> Vec<PieceTreeLeaf> {
-        let kept_prefix = start.leaf_index;
-        let kept_suffix = self.root.nodes[end.node_index]
-            .leaves
-            .len()
-            .saturating_sub(end.leaf_index + 1);
-        let mut combined_leaves =
-            Vec::with_capacity(kept_prefix + replacement_leaves.len() + kept_suffix);
-
-        if start.node_index == end.node_index {
-            let mut leaves = std::mem::take(&mut self.root.nodes[start.node_index].leaves);
-            let suffix = leaves.split_off(end.leaf_index + 1);
-            leaves.truncate(start.leaf_index);
-            combined_leaves.extend(leaves);
-            combined_leaves.extend(replacement_leaves);
-            combined_leaves.extend(suffix);
-            return combined_leaves;
-        }
-
-        let mut prefix = std::mem::take(&mut self.root.nodes[start.node_index].leaves);
-        prefix.truncate(start.leaf_index);
-        combined_leaves.extend(prefix);
-        combined_leaves.extend(replacement_leaves);
-
-        let mut suffix = std::mem::take(&mut self.root.nodes[end.node_index].leaves);
-        combined_leaves.extend(suffix.split_off(end.leaf_index + 1));
-        combined_leaves
-    }
-
-    fn rebalance_node_window(&mut self, inserted_at: usize, inserted_nodes: usize) {
-        if self.root.nodes.is_empty() {
-            self.root.recalculate();
-            return;
-        }
-
-        let touched_start = inserted_at.saturating_sub(1);
-        let touched_end = (inserted_at + inserted_nodes + 1).min(self.root.nodes.len());
-        if self.node_window_is_balanced(touched_start..touched_end) {
-            return;
-        }
-
-        let mut window_start = touched_start;
-        let mut window_end = touched_end;
-
-        if window_start > 0
-            && self.root.nodes[window_start].leaves.len() < super::MIN_LEAVES_PER_INTERNAL
-        {
-            window_start -= 1;
-        }
-        if window_end < self.root.nodes.len()
-            && self.root.nodes[window_end - 1].leaves.len() < super::MIN_LEAVES_PER_INTERNAL
-        {
-            window_end = (window_end + 1).min(self.root.nodes.len());
-        }
-
-        let mut window_leaves = Vec::new();
-        for node in &self.root.nodes[window_start..window_end] {
-            window_leaves.extend(node.leaves.iter().cloned());
-        }
-
-        let rebalanced_nodes = pack_leaves_into_nodes(window_leaves);
-        self.root
-            .replace_recalculated_nodes(window_start..window_end, rebalanced_nodes);
-    }
-
-    fn node_window_is_balanced(&self, range: Range<usize>) -> bool {
-        if self.root.nodes.len() <= 1 {
-            return true;
-        }
-
-        self.root.nodes[range].iter().all(|node| {
-            (super::MIN_LEAVES_PER_INTERNAL..=super::MAX_LEAVES_PER_INTERNAL)
-                .contains(&node.leaves.len())
-        })
-    }
-}
-
-fn add_byte_span(start_byte: usize, byte_len: usize) -> ByteSpan {
-    ByteSpan {
-        buffer: PieceBuffer::Add,
-        start_byte: start_byte.min(u32::MAX as usize) as u32,
-        byte_len: byte_len.min(u32::MAX as usize) as u32,
     }
 }

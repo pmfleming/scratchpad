@@ -8,7 +8,7 @@ use crate::app::services::settings_store::{
     DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, FileOpenDisposition,
     LEGACY_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR,
     LIGHT_EDITOR_TEXT_COLOR, NewTabPlacement, StartupSessionBehavior, TabListPosition,
-    TabOrderMode, WindowState, color_from_hex, color_to_hex,
+    TabOrderDirection, TabOrderMode, WindowState, color_from_hex, color_to_hex,
 };
 use eframe::egui;
 use std::path::Path;
@@ -94,6 +94,10 @@ impl AppSettings {
 
     pub fn tab_order_mode(&self) -> TabOrderMode {
         self.workspace.tab_order_mode
+    }
+
+    pub fn tab_order_direction(&self) -> TabOrderDirection {
+        self.workspace.tab_order_direction
     }
 
     pub fn file_open_disposition(&self) -> FileOpenDisposition {
@@ -206,6 +210,10 @@ pub(super) fn apply_settings(app: &mut ScratchpadApp, settings: AppSettings) {
     let mut settings = settings;
     sync_stock_editor_palette_with_theme_mode(&mut settings);
     settings.history.budget = settings.history.budget.sanitized();
+    settings
+        .workspace
+        .recently_closed_files
+        .truncate(crate::app::app_state::RECENTLY_CLOSED_FILE_LIMIT);
     settings.workspace.tab_list_auto_hide_delay_seconds = sanitize_tab_list_auto_hide_delay_seconds(
         settings.workspace.tab_list_auto_hide_delay_seconds,
     );
@@ -213,6 +221,13 @@ pub(super) fn apply_settings(app: &mut ScratchpadApp, settings: AppSettings) {
         app.state.active_surface = AppSurface::Workspace;
     }
     app.state.settings_tab_index = settings.ui.settings_tab_index.unwrap_or(usize::MAX);
+    app.state.recently_closed_files = settings
+        .workspace
+        .recently_closed_files
+        .iter()
+        .take(crate::app::app_state::RECENTLY_CLOSED_FILE_LIMIT)
+        .cloned()
+        .collect();
     app.state.app_settings = settings;
     app.apply_history_budget_to_open_buffers();
 }

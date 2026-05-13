@@ -97,8 +97,12 @@ impl FileController {
             return Self::resolve_existing_open_here_path(app, path, existing_path);
         }
 
-        pending_paths.push(path);
-        OpenHerePathOutcome::Queued
+        if Self::reserve_pending_open_path(app, &path) {
+            pending_paths.push(path);
+            OpenHerePathOutcome::Queued
+        } else {
+            OpenHerePathOutcome::AlreadyInCurrentTab
+        }
     }
 
     fn open_pending_files_here(
@@ -129,6 +133,7 @@ impl FileController {
         let mut outcomes = Vec::new();
 
         for loaded in loaded_paths {
+            Self::release_pending_open_path(app, &loaded.path);
             if let Some(existing_path) = Self::find_existing_open_here_path(app, &loaded.path) {
                 outcomes.push(Self::resolve_existing_open_here_path(
                     app,

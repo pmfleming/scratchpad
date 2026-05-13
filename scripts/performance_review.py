@@ -41,7 +41,7 @@ SCENARIOS: List[Dict[str, Any]] = [
         "id": "large_files",
         "title": "Large Files",
         "promise": "Load, inspect, scroll, and edit very large text files quickly.",
-        "families": ["file-load", "scroll", "viewport", "snapshot"],
+        "families": ["file-load", "scroll", "viewport", "snapshot", "text-layout"],
         "benchmark_keys": [
             "file_load",
             "file_open_latency",
@@ -49,7 +49,7 @@ SCENARIOS: List[Dict[str, Any]] = [
             "document_snapshot_creation_latency",
             "viewport_extraction_latency",
         ],
-        "capacity_scenarios": ["file_size_ceiling", "layout_bytes_ceiling"],
+        "capacity_scenarios": ["file_size_ceiling", "text_layout_ceiling"],
         "resource_scenarios": [
             "large_utf8_load_peak_memory",
             "file_backed_open_first_visible_paint",
@@ -68,11 +68,17 @@ SCENARIOS: List[Dict[str, Any]] = [
                 "minimum": GB,
                 "sources": [
                     "file_size_ceiling",
-                    "layout_bytes_ceiling",
                     "large_utf8_load_peak_memory",
                     "file_backed_open_first_visible_paint",
                     "file_backed_open_allocation",
                 ],
+            },
+            {
+                "id": "text_layout_batch",
+                "label": "Text layout batch",
+                "kind": "bytes",
+                "minimum": 8 * MB,
+                "sources": ["text_layout_ceiling"],
             },
             {
                 "id": "visible_100ms",
@@ -81,7 +87,7 @@ SCENARIOS: List[Dict[str, Any]] = [
                 "maximum": 100.0,
             },
         ],
-        "next_measurement": "Use the GB+ file-backed open and first-visible-paint sweep to set budgets, then capture a profile when first paint exceeds 100 ms.",
+        "next_measurement": "Use the GB+ file-backed open and first-visible-paint sweep for user-visible file goals; keep Text Layout as the raw egui layout boundary canary.",
     },
     {
         "id": "many_files",
@@ -309,6 +315,16 @@ def load_json(path: Path, default: Any) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return default
+
+
+def normalize_capacity_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    if row.get("scenario") != "layout_bytes_ceiling":
+        return row
+    normalized = dict(row)
+    normalized["scenario"] = "text_layout_ceiling"
+    normalized["scenario_label"] = "Text Layout"
+    normalized["workload_family"] = "text-layout"
+    return normalized
 
 
 def source_status() -> List[Dict[str, Any]]:
@@ -958,7 +974,15 @@ def build_payload() -> Dict[str, Any]:
     speed_report = load_json(SOURCE_PATHS["speed_report"], {})
 
     latency_rows = unique_rows([*slowspots, *search_speed])
-    capacity_rows = capacity_report.get("scenarios", []) if isinstance(capacity_report, dict) else []
+    capacity_rows = (
+        [
+            normalize_capacity_row(row)
+            for row in capacity_report.get("scenarios", [])
+            if isinstance(row, dict)
+        ]
+        if isinstance(capacity_report, dict)
+        else []
+    )
     resource_rows = resource_profiles.get("scenarios", []) if isinstance(resource_profiles, dict) else []
     scenario_rows_payload = [
         build_scenario(scenario, latency_rows, capacity_rows, resource_rows, flamegraphs)

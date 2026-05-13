@@ -108,10 +108,11 @@ def build_catalog() -> Dict[str, Any]:
             "performance",
             "capacity",
             "Capacity Reports",
-            "Finds first unusable ceilings for promise-health checks.",
+            "Finds first unusable ceilings for promise-health checks, including the Text Layout boundary.",
             [[py, "scripts/capacity_report.py", "--mode", "visibility"]],
             ["target/analysis/capacity_report.json"],
             expensive=True,
+            related_tests=["scripts/measurement_pipeline_tests.py"],
         ),
         item(
             "performance.resources",
@@ -140,6 +141,7 @@ def build_catalog() -> Dict[str, Any]:
             "Performance Review",
             "Combines targeted path probes, ceiling promise-health probes, profiles, scale-target coverage, and scenario gaps.",
             [
+                [py, "scripts/capacity_report.py", "--mode", "visibility"],
                 [py, "scripts/speed_efficiency_report.py", "--mode", "visibility"],
                 [py, "scripts/performance_review.py", "--mode", "visibility"],
             ],
@@ -147,6 +149,8 @@ def build_catalog() -> Dict[str, Any]:
                 "target/analysis/speed_efficiency_report.json",
                 "target/analysis/performance_review.json",
             ],
+            expensive=True,
+            related_tests=["scripts/measurement_pipeline_tests.py"],
         ),
         item(
             "correctness.catalog",

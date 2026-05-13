@@ -2114,9 +2114,7 @@
                 <text class="chart-tick-label" x="${left - 10}" y="${y + 4}" text-anchor="end">${escapeHtml(formatAxisMs(tick))}</text>
             </g>`;
         }).join("");
-        const targetValues = [...new Set(series.map((entry) => entry.thresholdMs).filter((value) => value > 0))]
-            .sort((leftValue, rightValue) => leftValue - rightValue)
-            .slice(0, 4);
+        const targetValues = capacityChartTargetValues(series);
         const targets = targetValues.map((target) => {
             const y = yPosition(target);
             return `<g>
@@ -2163,6 +2161,19 @@
             </div>
             <div class="scenario-latency-legend">${legend}</div>
         </div>`;
+    }
+
+    function capacityChartTargetValues(series) {
+        const values = [...new Set(series.map((entry) => entry.thresholdMs).filter((value) => value > 0))]
+            .sort((leftValue, rightValue) => leftValue - rightValue);
+        if (values.length <= 1) return values;
+
+        const lowest = values[0];
+        const highest = values[values.length - 1];
+        if (lowest > 0 && highest / lowest <= 1.15) {
+            return [highest];
+        }
+        return values.slice(0, 4);
     }
 
     function buildScenarioCapacitySeries(rows) {

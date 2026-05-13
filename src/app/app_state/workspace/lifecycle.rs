@@ -1,10 +1,12 @@
 use super::super::{ScratchpadApp, StatusDomain};
+use crate::app::app_state::RECENTLY_CLOSED_FILE_LIMIT;
 use crate::app::diagnostics;
 use crate::app::domain::{BufferId, ViewId, WorkspaceTab};
 use crate::app::services::file_controller::FileController;
 use crate::app::services::settings_store::{FileOpenDisposition, NewTabPlacement};
 use crate::app::utils::pluralize;
 use std::collections::HashSet;
+use std::path::PathBuf;
 
 pub(crate) fn new_tab(app: &mut ScratchpadApp) {
     create_workspace_tab(app, WorkspaceTab::untitled());
@@ -178,6 +180,7 @@ fn selected_workspace_tab_range(app: &ScratchpadApp) -> (usize, usize) {
 }
 
 fn close_tab_internal(app: &mut ScratchpadApp, index: usize) -> String {
+    let closed_file_paths = tab_file_paths(app, index);
     let closed_buffer_ids = app
         .tab_manager
         .tabs
@@ -189,12 +192,49 @@ fn close_tab_internal(app: &mut ScratchpadApp, index: usize) -> String {
     let settings_refresh = app.settings_toml_refresh_on_tab_close(index);
     app.begin_layout_transition();
     app.tab_manager.close_tab_internal(index);
+    record_recently_closed_file_paths(app, closed_file_paths);
     app.prune_text_history_for_buffers(closed_buffer_ids);
     app.ensure_active_tab_slot_selected();
     app.mark_search_dirty();
     app.request_focus_for_active_view();
     app.apply_settings_toml_refresh(settings_refresh);
     tab_description
+}
+
+pub(crate) fn record_recently_closed_file_paths(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+    if !app.state.app_settings.recent_files_enabled() {
+        return;
+    }
+
+    for path in paths {
+        app.state
+            .recently_closed_files
+            .retain(|existing| !crate::app::paths_match(existing, &path));
+        app.state.recently_closed_files.push_front(path);
+    }
+
+    while app.state.recently_closed_files.len() > RECENTLY_CLOSED_FILE_LIMIT {
+        app.state.recently_closed_files.pop_back();
+    }
+
+    app.state.app_settings.workspace.recently_closed_files =
+        app.state.recently_closed_files.iter().cloned().collect();
+    if let Err(error) = app.persist_settings_now() {
+        app.state.status.report_settings_save_failed(error);
+    }
+}
+
+fn tab_file_paths(app: &ScratchpadApp, index: usize) -> Vec<PathBuf> {
+    app.tab_manager
+        .tabs
+        .as_slice()
+        .get(index)
+        .map(|tab| {
+            tab.buffers()
+                .filter_map(|buffer| buffer.path.clone())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn save_all_targets(app: &ScratchpadApp) -> Vec<(usize, ViewId)> {

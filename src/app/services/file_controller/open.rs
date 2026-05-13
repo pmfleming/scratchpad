@@ -177,8 +177,10 @@ impl FileController {
         for path in paths {
             if Self::activate_existing_path(app, &path).is_some() {
                 duplicate_count += 1;
-            } else {
+            } else if Self::reserve_pending_open_path(app, &path) {
                 pending_paths.push(path);
+            } else {
+                duplicate_count += 1;
             }
         }
 
@@ -263,6 +265,7 @@ impl FileController {
         summary: &mut OpenBatchSummary,
         loaded: LoadedPathResult,
     ) {
+        Self::release_pending_open_path(app, &loaded.path);
         if Self::activate_existing_path(app, &loaded.path).is_some() {
             summary.record_outcome(OpenPathOutcome::AlreadyOpen);
             return;
@@ -349,6 +352,21 @@ mod tests {
         buffer
     }
 
+    fn open_path_count(app: &ScratchpadApp, path: &std::path::Path) -> usize {
+        app.tab_manager
+            .tabs
+            .as_slice()
+            .iter()
+            .flat_map(|tab| tab.buffers())
+            .filter(|buffer| {
+                buffer
+                    .path
+                    .as_deref()
+                    .is_some_and(|candidate| crate::app::paths_match(candidate, path))
+            })
+            .count()
+    }
+
     #[test]
     fn process_open_tab_result_adds_loaded_file_as_active_tab() {
         let directory = tempfile::tempdir().unwrap();
@@ -385,6 +403,28 @@ mod tests {
                 .as_deref(),
             Some(path.as_path())
         );
+    }
+
+    #[test]
+    fn open_selected_paths_async_deduplicates_pending_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("opened.txt");
+        std::fs::write(&path, "opened").unwrap();
+        let mut app = test_app(
+            directory.path(),
+            vec![WorkspaceTab::new(BufferState::new(
+                "start.txt".to_owned(),
+                String::new(),
+                None,
+            ))],
+        );
+
+        FileController::open_selected_paths_async(&mut app, vec![path.clone()]);
+        FileController::open_selected_paths_async(&mut app, vec![path.clone()]);
+        app.wait_for_background_io_idle();
+
+        assert_eq!(open_path_count(&app, &path), 1);
+        assert!(app.state.pending_open_file_paths.is_empty());
     }
 
     #[test]

@@ -59,7 +59,7 @@ struct SweepDescriptor {
 
 fn main() {
     emit_file_size_sweep();
-    emit_layout_bytes_sweep();
+    emit_text_layout_sweep();
     emit_many_file_count_sweep();
     emit_search_file_size_sweep();
     emit_search_target_count_sweep();
@@ -88,15 +88,20 @@ fn emit_file_size_sweep() {
     );
 }
 
-fn emit_layout_bytes_sweep() {
+fn emit_text_layout_sweep() {
     emit_sweep(
-        SweepDescriptor::bytes(
-            "layout_bytes_ceiling",
-            "Layout bytes ceiling sweep",
-            "capacity-measurement",
-        ),
-        [64 * KB, MB, 8 * MB, 32 * MB, 128 * MB],
-        run_layout_capacity_cycle,
+        SweepDescriptor::bytes("text_layout_ceiling", "Text Layout", "text-layout"),
+        [
+            64 * KB,
+            MB,
+            4 * MB,
+            8 * MB,
+            16 * MB,
+            32 * MB,
+            64 * MB,
+            128 * MB,
+        ],
+        run_text_layout_capacity_cycle,
     );
 }
 
@@ -289,7 +294,7 @@ fn emit_step(step: StepDescriptor, run: impl FnOnce() -> usize) {
     let _ = std::io::stdout().flush();
 }
 
-fn run_layout_capacity_cycle(bytes: usize) -> usize {
+fn run_text_layout_capacity_cycle(bytes: usize) -> usize {
     let text = utf8_text_of_size(bytes);
     let ctx = eframe::egui::Context::default();
     let font_id = eframe::egui::FontId::monospace(15.0);

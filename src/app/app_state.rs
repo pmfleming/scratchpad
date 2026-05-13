@@ -43,6 +43,7 @@ pub(crate) use workspace::lifecycle as workspace_controller;
 pub(crate) const SESSION_SNAPSHOT_INTERVAL: Duration = Duration::from_secs(1);
 const CHROME_TRANSITION_FRAMES: u8 = 2;
 const STATUS_HISTORY_LIMIT: usize = 100;
+pub(crate) const RECENTLY_CLOSED_FILE_LIMIT: usize = 10;
 
 #[derive(Clone, Debug)]
 pub(crate) struct StatusMessage {
@@ -171,6 +172,8 @@ pub struct ScratchpadAppState {
     pub(crate) workspace_selection: WorkspaceSelectionState,
     pub(crate) tab_rename_state: Option<TabRenameState>,
     pub(crate) pending_tab_context_menu: Option<PendingTabContextMenu>,
+    pub(crate) pending_open_file_paths: Vec<PathBuf>,
+    pub(crate) recently_closed_files: VecDeque<PathBuf>,
     pub(crate) startup_restore_conflicts: Vec<StartupRestoreConflict>,
     pub(crate) workspace_reflow_axis: SplitAxis,
     pub(crate) settings_preview_quote_index: usize,

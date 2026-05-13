@@ -2,6 +2,7 @@ use crate::app::domain::TextHistoryBudget;
 use crate::app::fonts::EditorFontPreset;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 pub const DEFAULT_FONT_SIZE: f32 = 14.0;
 pub const DEFAULT_WORD_WRAP: bool = true;
@@ -93,6 +94,14 @@ pub enum TabOrderMode {
     RecentEdit,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TabOrderDirection {
+    #[default]
+    Ascending,
+    Descending,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WindowState {
     #[serde(skip)]
@@ -147,6 +156,8 @@ pub struct WorkspaceSettings {
     pub tab_list_position: TabListPosition,
     #[serde(default)]
     pub tab_order_mode: TabOrderMode,
+    #[serde(default)]
+    pub tab_order_direction: TabOrderDirection,
     #[serde(skip)]
     pub custom_tab_order: Vec<u64>,
     #[serde(default)]
@@ -163,6 +174,8 @@ pub struct WorkspaceSettings {
     pub tab_list_auto_hide_delay_seconds: f32,
     #[serde(default = "default_recent_files_enabled")]
     pub recent_files_enabled: bool,
+    #[serde(default)]
+    pub recently_closed_files: Vec<PathBuf>,
 }
 
 impl Default for WorkspaceSettings {
@@ -170,6 +183,7 @@ impl Default for WorkspaceSettings {
         Self {
             tab_list_position: TabListPosition::default(),
             tab_order_mode: TabOrderMode::default(),
+            tab_order_direction: TabOrderDirection::default(),
             custom_tab_order: Vec::new(),
             file_open_disposition: FileOpenDisposition::default(),
             new_tab_placement: NewTabPlacement::default(),
@@ -178,6 +192,7 @@ impl Default for WorkspaceSettings {
             auto_hide_tab_list: default_auto_hide_tab_list(),
             tab_list_auto_hide_delay_seconds: default_tab_list_auto_hide_delay_seconds(),
             recent_files_enabled: default_recent_files_enabled(),
+            recently_closed_files: Vec::new(),
         }
     }
 }

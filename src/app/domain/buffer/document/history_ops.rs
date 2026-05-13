@@ -1,17 +1,16 @@
+mod persistence;
+
 use super::super::history::{
     CoalescedEdit, OperationDirection, TextDocumentEditOperation, TextHistoryApplyError,
     coalesced_local_edit_record, deleted_spans_or_payload, entry_sealed_by_divider,
-    operation_summary, persist_cursor_range, record_current_parts, record_expected_parts,
-    restore_cursor_range,
+    operation_summary, record_current_parts, record_expected_parts,
 };
 use super::super::{
-    ByteSpan, PersistedHistoryEdit, PersistedHistoryEntry, PieceHistoryEdit, PieceHistoryEdits,
-    PieceHistoryEntry, PieceHistoryFlags, PieceSource, TEXT_HISTORY_COALESCE_WINDOW,
-    TextDocumentOperationRecord, fingerprint_parts, next_text_history_global_seq,
-    register_text_history_global_seq,
+    ByteSpan, PieceHistoryEdit, PieceHistoryEdits, PieceHistoryEntry, PieceHistoryFlags,
+    PieceSource, TEXT_HISTORY_COALESCE_WINDOW, TextDocumentOperationRecord, fingerprint_parts,
+    next_text_history_global_seq,
 };
 use super::TextDocument;
-use crate::app::capacity_metrics;
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use std::sync::Arc;
 use std::time::Instant;
@@ -239,92 +238,6 @@ impl TextDocument {
         text
     }
 
-    pub(super) fn export_history_entry(&self, entry: &PieceHistoryEntry) -> PersistedHistoryEntry {
-        PersistedHistoryEntry {
-            id: entry.id,
-            global_seq: entry.global_seq,
-            source: entry.source,
-            visible_generation_before: entry.visible_generation_before,
-            visible_generation_after: entry.visible_generation_after,
-            fingerprint: entry.fingerprint,
-            summary: entry.summary.clone(),
-            flags: entry.flags,
-            previous_selection: persist_cursor_range(entry.previous_selection),
-            next_selection: persist_cursor_range(entry.next_selection),
-            edits: entry
-                .edits
-                .iter()
-                .map(|edit| self.export_history_edit(edit))
-                .collect(),
-        }
-    }
-
-    pub(super) fn import_history_entry(
-        &mut self,
-        persisted: PersistedHistoryEntry,
-    ) -> PieceHistoryEntry {
-        let all_payloads = persisted.has_all_payloads();
-        let edits = persisted
-            .edits
-            .into_iter()
-            .map(|edit| self.import_history_edit(edit, persisted.source))
-            .collect::<PieceHistoryEdits>();
-        let restored_fingerprint = self.fingerprint_for_history_edits(&edits);
-        let mut flags = persisted.flags;
-        flags.replayable &= all_payloads && restored_fingerprint == persisted.fingerprint;
-        register_text_history_global_seq(persisted.global_seq);
-        PieceHistoryEntry {
-            id: persisted.id,
-            global_seq: persisted.global_seq,
-            source: persisted.source,
-            visible_generation_before: persisted.visible_generation_before,
-            visible_generation_after: persisted.visible_generation_after,
-            fingerprint: persisted.fingerprint,
-            summary: persisted.summary,
-            edits,
-            flags,
-            previous_selection: restore_cursor_range(persisted.previous_selection),
-            next_selection: restore_cursor_range(persisted.next_selection),
-        }
-    }
-
-    pub(super) fn enforce_history_budget(&mut self) {
-        let mut evicted = false;
-        while self.history.entries.len() > self.history.budget.per_file_entry_limit
-            || self.history.byte_usage as u64 > self.history.budget.per_file_byte_budget
-        {
-            let removed = self.history.entries.remove(0);
-            let cost = removed.byte_cost();
-            self.history.byte_usage = self.history.byte_usage.saturating_sub(cost);
-            self.remove_history_depth(&removed);
-            capacity_metrics::record_history_eviction_per_file(cost);
-            evicted = true;
-        }
-        if evicted {
-            self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
-            self.compact_history_storage();
-        }
-    }
-
-    pub(super) fn compact_history_storage(&mut self) {
-        let mut spans = self.history_spans();
-        Arc::make_mut(&mut self.content.piece_tree).compact_add_buffer(&mut spans);
-        self.replace_history_spans(spans);
-    }
-
-    fn export_history_edit(&self, edit: &PieceHistoryEdit) -> PersistedHistoryEdit {
-        edit.to_persisted(|span| self.content.piece_tree.text_for_span(span).to_owned())
-    }
-
-    fn import_history_edit(
-        &mut self,
-        edit: PersistedHistoryEdit,
-        source: PieceSource,
-    ) -> PieceHistoryEdit {
-        let tree = Arc::make_mut(&mut self.content.piece_tree);
-        edit.into_piece(|text| tree.append_history_text(text, source))
-    }
-
     fn history_entry_from_operation(
         &mut self,
         record: TextDocumentOperationRecord,
@@ -480,57 +393,5 @@ impl TextDocument {
             .saturating_sub(old_cost)
             .saturating_add(new_cost);
         self.history.latest_update_at = Some(now);
-    }
-
-    fn history_spans(&self) -> Vec<ByteSpan> {
-        self.history
-            .entries
-            .iter()
-            .flat_map(|entry| entry.edits.iter())
-            .flat_map(PieceHistoryEdit::spans)
-            .collect()
-    }
-
-    fn replace_history_spans(&mut self, spans: Vec<ByteSpan>) {
-        let expected = self.history_spans().len();
-        debug_assert_eq!(
-            expected,
-            spans.len(),
-            "history span replacement count mismatch"
-        );
-        let mut spans = spans.into_iter();
-        for entry in &mut self.history.entries {
-            for edit in &mut entry.edits {
-                edit.each_span_mut(|slot| {
-                    if let Some(next) = spans.next() {
-                        *slot = next;
-                    } else {
-                        debug_assert!(false, "history span replacement iterator ran short");
-                    }
-                });
-            }
-        }
-        debug_assert!(
-            spans.next().is_none(),
-            "history span replacement iterator had extra spans"
-        );
-    }
-
-    pub(super) fn normalize_imported_redo_state(&mut self) {
-        let mut in_undone_suffix = true;
-        for entry in self.history.entries.iter_mut().rev() {
-            if in_undone_suffix && entry.is_undone() {
-                continue;
-            }
-            in_undone_suffix = false;
-            if entry.is_undone() {
-                // The runtime model is linear: redoable entries are exactly the
-                // newest contiguous undone suffix. Older imported undone flags
-                // cannot be trusted, so keep the row as historical but disable
-                // replay rather than allowing redo to skip newer applied edits.
-                entry.flags.undone = false;
-                entry.flags.replayable = false;
-            }
-        }
     }
 }

@@ -61,6 +61,30 @@ impl FileController {
         app.reload_settings_before_workspace_change();
     }
 
+    pub(super) fn reserve_pending_open_path(app: &mut ScratchpadApp, path: &Path) -> bool {
+        if Self::is_open_or_pending_path(app, path) {
+            return false;
+        }
+
+        app.state.pending_open_file_paths.push(path.to_path_buf());
+        true
+    }
+
+    pub(super) fn release_pending_open_path(app: &mut ScratchpadApp, path: &Path) {
+        app.state
+            .pending_open_file_paths
+            .retain(|pending| !crate::app::paths_match(pending, path));
+    }
+
+    fn is_open_or_pending_path(app: &ScratchpadApp, path: &Path) -> bool {
+        app.tab_manager.find_tab_by_path(path).is_some()
+            || app
+                .state
+                .pending_open_file_paths
+                .iter()
+                .any(|pending| crate::app::paths_match(pending, path))
+    }
+
     pub(super) fn handle_open_dialog<F>(app: &mut ScratchpadApp, action_name: &str, open_action: F)
     where
         F: FnOnce(&mut ScratchpadApp, Vec<PathBuf>),

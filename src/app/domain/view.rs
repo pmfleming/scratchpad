@@ -1,5 +1,6 @@
 mod anchors;
 mod layout_cache;
+mod search;
 
 use self::anchors::{
     AnchoredCursorRange, AnchoredSearchRange, release_anchors, resolve_cursor_anchor_range,
@@ -12,8 +13,6 @@ use crate::app::domain::buffer::{AnchorBias, AnchorId, AnchorOwner};
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use crate::app::ui::scrolling::{DisplaySnapshot, ScrollAnchor, ScrollIntent, ScrollManager};
 use eframe::egui;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -551,42 +550,6 @@ impl EditorViewState {
         self.published_ime_output = None;
     }
 }
-impl SearchHighlightState {
-    pub fn layout_signature(&self) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        self.hash(&mut hasher);
-        hasher.finish()
-    }
-}
-
-impl EditorViewState {
-    fn resolve_search_highlight_anchors(&mut self, buffer: &crate::app::domain::BufferState) {
-        if self.anchors.search_highlight_anchors.is_empty() {
-            return;
-        }
-        let piece_tree = buffer.document().piece_tree();
-        let mut ranges = Vec::with_capacity(self.anchors.search_highlight_anchors.len());
-        let mut active_range_index = None;
-        for (index, anchored) in self.anchors.search_highlight_anchors.iter().enumerate() {
-            let Some(start) = piece_tree.anchor_position(anchored.start) else {
-                continue;
-            };
-            let Some(end) = piece_tree.anchor_position(anchored.end) else {
-                continue;
-            };
-            if start >= end {
-                continue;
-            }
-            if self.search_highlights.active_range_index == Some(index) {
-                active_range_index = Some(ranges.len());
-            }
-            ranges.push(start..end);
-        }
-        self.search_highlights.ranges = ranges;
-        self.search_highlights.active_range_index = active_range_index;
-    }
-}
-
 pub fn next_view_id() -> ViewId {
     NEXT_VIEW_ID.fetch_add(1, Ordering::Relaxed)
 }

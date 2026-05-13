@@ -19,6 +19,7 @@ pub(crate) struct TabRenameState {
 pub(crate) struct PendingTabContextMenu {
     pub(crate) slot_index: usize,
     pub(crate) click_x: f32,
+    pub(crate) click_y: f32,
     pub(crate) open: bool,
 }
 

@@ -1,75 +1,0 @@
-Title:
-This is my new name - make sure it is not the same as my last name.
-
-this app has a system of global ids to apply to egui widgets.
-This is to avoid id conflicts tha can cause red flashes.
-read only: widget_ids.txt for a first run assessment. (do not read any other files in 
-docs)
-
-for a sanity check that EGUI itself offers not function to avoid id conflict.
-then update widget_ids for a more complete plan to ensure evey widget gains a unique id.
-
-plan mode only:
-EGUI offer some error codes to capture issues - specifically those associated with id conflicts etc. (which can cause red flashes).
-
-Make a plan to add error handling to this app to capture those codes.
-This app should create an error.log file which captures error data.
-
--- 
-
-I want to make a plna to improve the coverage of the performance review.
-
-This app is meant to load fast/search fast/scroll fast/manipulate text fast.
-It should do this for enormous text files (100ms to Gbs). it shoudl do this for a lot of files. (>10,000)
-
-It shoudl allow an enormous amout of views in to those files & an enormous amout of tabs 
-
-look at the current performance view/look for gaps/look for oppertunities to improve/look for ways to improve the presentation of this data.
-
-write a plan. and once the plan is completet full implement the plan.
-move fast/break things.
-p
-don't stop untill your done. You are working on the measurement code/don't touch the project code.
-
--- 
-
-on the overview page in open_overview:
-
-As a Pie Chart with numbers.
-Total Project Application Code
-Total Project Test Code
-Total Project Other Code.
-
-Latest Guthub Push.
-Can we should the lines of code progress over time from github as a graph?
-Date of Push - Number of lines.
-
----
-
-we should only be searching (open) file - where those are titled or untitled files.
-multple views into a single file should not effect the result.
-
-ie. if a file has 100 tiles. if the world plan exists once the search find one.
-Even if the highlighting highlights that 1 in all 100 tiles.
-
-so it should always be files & never targets.
-
-
---
-
-make a plan:
-Have two modes - control chars are not visible in the editor but reatained & acted up.
-chontrol chars are visible in the editor & actable on. ie. removing a newline char  - removes the newline. (this includes all unicode chars)
-
-this removes read only mode.
-
-short plan - 3 or 4 paragraphs. whether or not control chars are visible is either set in status bar or from right click.
-
-only plan - no code.
-
-
-
-
-
-
-

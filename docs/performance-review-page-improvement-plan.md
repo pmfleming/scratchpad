@@ -20,7 +20,7 @@ The page renders, top to bottom:
 
 1. **Performance Overview cards** (4): "Search Result", "Worst Latency", "Scale Result", "Memory Result". Mixed units inside each card, all framed pessimistically.
 2. **Performance Insights cards** (4): "Worst Budget Misses", "Search Outcomes", "Capacity Breakpoints", "Peak Resource Use". Re-renders most of the values from row 1 with different titles.
-3. **Coverage Matrix** with a 7-tile summary grid (`Scenarios 7`, `Covered 7`, `Thin 0`, `Implementations 46`, `Scale targets 0`, `Budget misses 26`, `Failed sources 0`) and a wall of scenario coverage cards. The cards include an `implementation-graph` panel with one bar per measurement (e.g. `File size ceiling sweep 128.0 MB`, `Layout bytes ceiling sweep 32.0 MB`, `document_snapshot_creation_latency/4194304 31.2 ms`, `Profile coverage 3/3 SVGs`) all rendered on per-row normalised tracks — the bar lengths are not comparable.
+3. **Coverage Matrix** with a 7-tile summary grid (`Scenarios 7`, `Covered 7`, `Thin 0`, `Implementations 46`, `Scale targets 0`, `Budget misses 26`, `Failed sources 0`) and a wall of scenario coverage cards. The cards include an `implementation-graph` panel with one bar per measurement (e.g. `File size ceiling sweep 128.0 MB`, `Text Layout 32.0 MB`, `document_snapshot_creation_latency/4194304 31.2 ms`, `Profile coverage 3/3 SVGs`) all rendered on per-row normalised tracks — the bar lengths are not comparable.
 4. **Promise Board / scenario list** with 7 rows, each ending in a Met/Watch badge and a caption like `7 measurements · 4 misses · 2 ceilings`.
 5. **Performance Datasets** segmented control with four panels:
    - **Search**: per-panel summary grid (7 cells), budget bars, three line charts ("Tabs Against Time", "Files Against Time", "File Size Against Time"), dependency multipliers, full table.
@@ -38,7 +38,7 @@ Each item here is justified by the operating principle: it does not report a cap
 
 ### C1. Implementation-graph (`renderImplementationGraph`)
 
-In your first screenshot the rows include `File size ceiling sweep 128.0 MB`, `Layout bytes ceiling sweep 32.0 MB`, `File-backed open allocation 128.0 MB peak=128.9 MB elapsed=578.7 ms`, `document_snapshot_creation_latency/4194304 31.2 ms (budget=40.0 ms)`, `scroll_stress_latency/4194304 26.4 ms (budget=16.7 ms)`, `Profile coverage 3/3 SVGs`. The bar lengths are normalised per unit (`maxByUnit`), so a 32 MB sweep and a 128 MB sweep look proportional, while a 31.2 ms latency and a 128 MB capacity do not relate to each other at all. The longest bars are usually the *least pressured* metrics. The whole component should go: the underlying data lives in the implementations table, which can stay behind a collapsed `<details>` for auditors.
+In your first screenshot the rows include `File size ceiling sweep 128.0 MB`, `Text Layout 32.0 MB`, `File-backed open allocation 128.0 MB peak=128.9 MB elapsed=578.7 ms`, `document_snapshot_creation_latency/4194304 31.2 ms (budget=40.0 ms)`, `scroll_stress_latency/4194304 26.4 ms (budget=16.7 ms)`, `Profile coverage 3/3 SVGs`. The bar lengths are normalised per unit (`maxByUnit`), so a 32 MB sweep and a 128 MB sweep look proportional, while a 31.2 ms latency and a 128 MB capacity do not relate to each other at all. The longest bars are usually the *least pressured* metrics. The whole component should go: the underlying data lives in the implementations table, which can stay behind a collapsed `<details>` for auditors.
 
 ### C2. Both top-level "overview/insights" rows
 

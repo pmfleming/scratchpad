@@ -2,10 +2,14 @@ use encoding_rs::Encoding;
 use serde::{Deserialize, Serialize};
 
 use super::{BufferLength, piece_tree::PieceTreeLite};
+pub(crate) use incremental::{IncrementalMetadataEdit, buffer_text_metadata_from_edit};
 pub(crate) use inspection::normalize_inserted_text_line_endings;
 use inspection::{TextInspection, line_ending_style};
 
+mod incremental;
 mod inspection;
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -353,13 +357,6 @@ pub(crate) struct PieceTreeTextAnalysis {
     pub(crate) length: BufferLength,
 }
 
-pub(crate) struct IncrementalMetadataEdit<'a> {
-    pub(crate) previous_char: Option<char>,
-    pub(crate) deleted_text: &'a str,
-    pub(crate) inserted_text: &'a str,
-    pub(crate) next_char: Option<char>,
-}
-
 pub(crate) fn buffer_text_metadata(
     text: &str,
     format: &mut TextFormatMetadata,
@@ -371,53 +368,6 @@ pub(crate) fn buffer_text_metadata(
         format,
         format.has_non_compliant_characters(text),
     )
-}
-
-pub(crate) fn buffer_text_metadata_from_edit(
-    line_count: usize,
-    artifact_summary: &TextArtifactSummary,
-    format: &mut TextFormatMetadata,
-    edit: IncrementalMetadataEdit<'_>,
-) -> Option<BufferTextMetadata> {
-    let deleted_window = boundary_window(edit.previous_char, edit.deleted_text, edit.next_char);
-    let inserted_window = boundary_window(edit.previous_char, edit.inserted_text, edit.next_char);
-    let deleted_inspection = TextInspection::inspect(&deleted_window);
-    let inserted_inspection = TextInspection::inspect(&inserted_window);
-    if !can_update_metadata_incrementally(
-        artifact_summary,
-        &deleted_inspection,
-        &inserted_inspection,
-    ) {
-        return None;
-    }
-
-    let deleted_breaks = deleted_inspection.line_count.saturating_sub(1);
-    let inserted_breaks = inserted_inspection.line_count.saturating_sub(1);
-    let line_count = line_count
-        .checked_sub(deleted_breaks)?
-        .checked_add(inserted_breaks)?;
-
-    let mut line_ending_counts = format.line_ending_counts;
-    apply_line_ending_delta(
-        &mut line_ending_counts,
-        deleted_inspection.line_ending_counts,
-        inserted_inspection.line_ending_counts,
-    )?;
-
-    format.line_ending_counts = line_ending_counts;
-    format.line_endings = line_ending_style(line_ending_counts);
-    format.is_ascii_subset &= inserted_inspection.is_ascii_subset;
-
-    let mut artifact_summary = artifact_summary.clone();
-    artifact_summary.has_carriage_returns =
-        format.line_endings != LineEndingStyle::Cr && line_ending_counts.cr > 0;
-
-    Some(buffer_text_metadata_parts(
-        line_count,
-        artifact_summary,
-        format.preferred_line_ending_style(),
-        false,
-    ))
 }
 
 pub(crate) fn detected_text_format_and_metadata(
@@ -504,105 +454,9 @@ fn display_line_count_from_piece_tree_inspection(
     newline_count + usize::from(!inspection.ends_with_lf)
 }
 
-fn can_update_metadata_incrementally(
-    current_summary: &TextArtifactSummary,
-    deleted_inspection: &TextInspection,
-    inserted_inspection: &TextInspection,
-) -> bool {
-    !has_non_line_ending_artifacts(current_summary)
-        && !has_non_line_ending_artifacts(&deleted_inspection.artifact_summary)
-        && !has_non_line_ending_artifacts(&inserted_inspection.artifact_summary)
-}
-
-fn has_non_line_ending_artifacts(summary: &TextArtifactSummary) -> bool {
+pub(super) fn has_non_line_ending_artifacts(summary: &TextArtifactSummary) -> bool {
     summary.has_ansi_sequences
         || summary.has_backspaces
         || summary.has_unicode_format_controls
         || summary.other_control_count > 0
-}
-
-fn boundary_window(previous_char: Option<char>, text: &str, next_char: Option<char>) -> String {
-    let mut window = String::with_capacity(
-        text.len()
-            + usize::from(previous_char.is_some()) * 4
-            + usize::from(next_char.is_some()) * 4,
-    );
-    if let Some(previous_char) = previous_char {
-        window.push(previous_char);
-    }
-    window.push_str(text);
-    if let Some(next_char) = next_char {
-        window.push(next_char);
-    }
-    window
-}
-
-fn apply_line_ending_delta(
-    line_ending_counts: &mut LineEndingCounts,
-    deleted_counts: LineEndingCounts,
-    inserted_counts: LineEndingCounts,
-) -> Option<()> {
-    line_ending_counts.lf = line_ending_counts
-        .lf
-        .checked_sub(deleted_counts.lf)?
-        .checked_add(inserted_counts.lf)?;
-    line_ending_counts.crlf = line_ending_counts
-        .crlf
-        .checked_sub(deleted_counts.crlf)?
-        .checked_add(inserted_counts.crlf)?;
-    line_ending_counts.cr = line_ending_counts
-        .cr
-        .checked_sub(deleted_counts.cr)?
-        .checked_add(inserted_counts.cr)?;
-    Some(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        BufferLength, PieceTreeLite, TextFormatMetadata, analyze_piece_tree_text,
-        display_line_count_from_piece_tree,
-    };
-
-    #[test]
-    fn display_line_count_from_piece_tree_uses_metrics_and_last_char() {
-        let empty = PieceTreeLite::from_string(String::new());
-        assert_eq!(display_line_count_from_piece_tree(&empty), 0);
-
-        let no_trailing_newline = PieceTreeLite::from_string("one\ntwo".to_owned());
-        assert_eq!(display_line_count_from_piece_tree(&no_trailing_newline), 2);
-
-        let trailing_newline = PieceTreeLite::from_string("one\ntwo\n".to_owned());
-        assert_eq!(display_line_count_from_piece_tree(&trailing_newline), 2);
-    }
-
-    #[test]
-    fn display_line_count_from_piece_tree_tracks_edited_buffers() {
-        let mut tree = PieceTreeLite::from_string("one\nthree".to_owned());
-
-        tree.insert(4, "two\n");
-        tree.remove_char_range(0..4);
-
-        assert_eq!(tree.extract_text(), "two\nthree");
-        assert_eq!(display_line_count_from_piece_tree(&tree), 2);
-    }
-
-    #[test]
-    fn analyze_piece_tree_text_returns_metadata_and_cached_length() {
-        let tree = PieceTreeLite::from_string("one\ntwo\n".to_owned());
-        let mut format = TextFormatMetadata::utf8_for_new_file("");
-
-        let analysis = analyze_piece_tree_text(&tree, &mut format);
-
-        assert_eq!(analysis.metadata.line_count, 3);
-        assert_eq!(
-            analysis.length,
-            BufferLength {
-                bytes: 8,
-                chars: 8,
-                lines: 2,
-            }
-        );
-        assert_eq!(format.line_ending_counts.lf, 2);
-    }
 }

@@ -1,22 +1,25 @@
 use crate::app::app_state::{PendingTabContextMenu, ScratchpadApp, StatusDomain};
 use crate::app::commands::AppCommand;
-use crate::app::services::settings_store::{TabListPosition, TabOrderMode};
+use crate::app::services::file_controller::FileController;
+use crate::app::services::settings_store::FileOpenDisposition;
 use crate::app::ui::widget_ids;
 use eframe::egui;
 use egui_phosphor::regular::{
-    CHECK, COPY, FLOPPY_DISK, FOLDER_OPEN, MINUS, PENCIL_SIMPLE_LINE, PLUS, TABS, TRANSLATE, TRAY,
-    X, X_SQUARE,
+    ARROW_SQUARE_IN, COPY, FILE_PLUS, FLOPPY_DISK, FOLDER_OPEN, MINUS, PENCIL_SIMPLE_LINE, PLUS,
+    TABS, TRANSLATE, TRAY, X, X_SQUARE,
 };
 use std::path::{Path, PathBuf};
 
 mod close;
 mod menu_ui;
+mod order;
 
 use self::menu_ui::{
+    OPEN_DISPOSITION_BUTTON_SIZE, OPEN_FILE_SUBMENU_WIDTH as TAB_CONTEXT_OPEN_FILE_SUBMENU_WIDTH,
     SUBMENU_WIDTH as TAB_CONTEXT_SUBMENU_WIDTH, WIDTH as TAB_CONTEXT_MENU_WIDTH,
-    close_direction_icon, close_direction_label, menu_button, primary_menu_button,
-    primary_menu_button_enabled, submenu_button, tab_list_position_icon, tab_list_position_label,
-    tab_order_mode_label,
+    close_direction_icon, close_direction_label, menu_button, open_disposition_button,
+    primary_menu_button, primary_menu_button_enabled, recent_file_button, submenu_button,
+    submenu_button_sized,
 };
 
 struct TabContextMenuState {
@@ -64,6 +67,7 @@ fn attach_tab_context_menu_impl(
                 click_x: response
                     .interact_pointer_pos()
                     .map_or(response.rect.left(), |pos| pos.x),
+                click_y: response.rect.max.y,
                 open: true,
             });
         }
@@ -113,10 +117,10 @@ pub(crate) fn attach_tab_list_context_menu(response: &egui::Response, app: &mut 
 }
 
 fn tab_context_menu_anchor(
-    response: &egui::Response,
+    _response: &egui::Response,
     pending: PendingTabContextMenu,
 ) -> egui::Pos2 {
-    egui::pos2(pending.click_x, response.rect.max.y)
+    egui::pos2(pending.click_x, pending.click_y)
 }
 
 fn render_file_actions(
@@ -132,7 +136,9 @@ fn render_file_actions(
         app.handle_command(AppCommand::NewTab);
         ui.close();
     }
-    if menu_button(
+    if app.state.app_settings.recent_files_enabled() {
+        render_open_file_actions(ui, app, slot_index, open_here_enabled);
+    } else if menu_button(
         ui,
         TAB_CONTEXT_MENU_WIDTH,
         "Open File Here",
@@ -158,6 +164,121 @@ fn render_file_actions(
     render_save_actions(ui, app, workspace_index, save_enabled);
 }
 
+fn render_open_file_actions(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    slot_index: usize,
+    open_enabled: bool,
+) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+
+        if primary_menu_button_enabled(
+            ui,
+            "tab_context.open_file_primary",
+            "Open File",
+            FOLDER_OPEN,
+            open_enabled,
+        ) {
+            activate_slot(app, slot_index);
+            app.handle_command(AppCommand::OpenFile);
+            ui.close();
+        }
+        render_open_file_submenu(ui, app, slot_index);
+    });
+}
+
+fn render_open_file_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp, slot_index: usize) {
+    submenu_button_sized(
+        ui,
+        "tab_context.open_file_caret",
+        TAB_CONTEXT_OPEN_FILE_SUBMENU_WIDTH,
+        |ui| {
+            render_open_file_disposition_buttons(ui, app);
+            ui.separator();
+            render_recently_closed_files(ui, app, slot_index);
+        },
+    );
+}
+
+fn render_open_file_disposition_buttons(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    let current = app.state.app_settings.file_open_disposition();
+    let spacing = 6.0;
+    let group_width = OPEN_DISPOSITION_BUTTON_SIZE.x * 2.0 + spacing;
+    let leading_space = (TAB_CONTEXT_OPEN_FILE_SUBMENU_WIDTH - group_width).max(0.0) * 0.5;
+    ui.horizontal(|ui| {
+        ui.add_space(leading_space);
+        ui.spacing_mut().item_spacing.x = spacing;
+        if open_disposition_button(
+            ui,
+            "tab_context.open_file.new_tab",
+            FILE_PLUS,
+            "Open in new tab",
+            matches!(current, FileOpenDisposition::NewTab),
+        ) {
+            crate::app::app_state::settings_controller::set_file_open_disposition(
+                app,
+                FileOpenDisposition::NewTab,
+            );
+        }
+        if open_disposition_button(
+            ui,
+            "tab_context.open_file.current_tab",
+            ARROW_SQUARE_IN,
+            "Open in current tab",
+            matches!(current, FileOpenDisposition::CurrentTab),
+        ) {
+            crate::app::app_state::settings_controller::set_file_open_disposition(
+                app,
+                FileOpenDisposition::CurrentTab,
+            );
+        }
+    });
+}
+
+fn render_recently_closed_files(ui: &mut egui::Ui, app: &mut ScratchpadApp, slot_index: usize) {
+    let paths = app
+        .state
+        .recently_closed_files
+        .iter()
+        .take(crate::app::app_state::RECENTLY_CLOSED_FILE_LIMIT)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if paths.is_empty() {
+        let _ = menu_button(
+            ui,
+            TAB_CONTEXT_OPEN_FILE_SUBMENU_WIDTH,
+            "No Recent Files",
+            None,
+            false,
+        );
+        return;
+    }
+
+    for path in paths {
+        if recent_file_button(
+            ui,
+            ("tab_context.recently_closed_file", path.clone()),
+            TAB_CONTEXT_OPEN_FILE_SUBMENU_WIDTH,
+            &path,
+        ) {
+            activate_slot(app, slot_index);
+            open_recent_file(app, path);
+            ui.close();
+        }
+    }
+}
+
+fn open_recent_file(app: &mut ScratchpadApp, path: PathBuf) {
+    match app.state.app_settings.file_open_disposition() {
+        FileOpenDisposition::NewTab => FileController::open_paths_async(app, vec![path]),
+        FileOpenDisposition::CurrentTab => {
+            FileController::open_external_paths_here_async(app, vec![path])
+        }
+    }
+}
+
 fn render_tab_context_menu(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
@@ -179,7 +300,7 @@ fn render_tab_context_menu(
 
     ui.separator();
 
-    if render_tab_list_actions(
+    if order::render_tab_list_actions(
         ui,
         app,
         menu_state.toggle_tab_list_label,
@@ -191,7 +312,7 @@ fn render_tab_context_menu(
         );
         ui.close();
     }
-    render_tab_order_submenu(ui, app);
+    order::render_tab_order_submenu(ui, app);
 
     ui.separator();
 
@@ -378,91 +499,8 @@ impl TabContextMenuState {
     }
 }
 
-fn render_tab_list_actions(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    toggle_label: &str,
-    toggle_icon: &str,
-) -> bool {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-
-        let toggle_clicked = render_tab_list_primary_button(ui, toggle_label, toggle_icon);
-        render_tab_list_submenu(ui, app);
-
-        toggle_clicked
-    })
-    .inner
-}
-
-fn render_tab_order_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-
-        render_tab_order_primary_button(ui, app);
-        render_tab_order_caret(ui, app);
-    });
-}
-
 fn render_close_primary_button(ui: &mut egui::Ui) -> bool {
     primary_menu_button(ui, "tab_context.close_primary", "Close", X)
-}
-
-fn render_tab_order_primary_button(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    if primary_menu_button(ui, "tab_context.order_primary", "Order Tabs", TABS) {
-        app.set_tab_order_mode(TabOrderMode::FileName);
-        ui.close();
-    }
-}
-
-fn render_tab_list_primary_button(ui: &mut egui::Ui, label: &str, icon: &str) -> bool {
-    primary_menu_button(ui, ("tab_context.tab_list_primary", label), label, icon)
-}
-
-fn render_tab_order_caret(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    submenu_button(ui, "tab_context.order_caret", |ui| {
-        for mode in [
-            TabOrderMode::Custom,
-            TabOrderMode::FileName,
-            TabOrderMode::FileSize,
-            TabOrderMode::FileAge,
-            TabOrderMode::RecentEdit,
-        ] {
-            let selected = app.state.app_settings.tab_order_mode() == mode;
-            if menu_button(
-                ui,
-                TAB_CONTEXT_SUBMENU_WIDTH,
-                tab_order_mode_label(mode),
-                selected.then_some(CHECK),
-                true,
-            ) {
-                app.set_tab_order_mode(mode);
-                ui.close();
-            }
-        }
-    });
-}
-
-fn render_tab_list_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    submenu_button(ui, "tab_context.tab_list_caret", |ui| {
-        for position in [
-            TabListPosition::Top,
-            TabListPosition::Bottom,
-            TabListPosition::Left,
-            TabListPosition::Right,
-        ] {
-            if menu_button(
-                ui,
-                TAB_CONTEXT_SUBMENU_WIDTH,
-                tab_list_position_label(position),
-                Some(tab_list_position_icon(position)),
-                true,
-            ) {
-                crate::app::app_state::settings_controller::set_tab_list_position(app, position);
-                ui.close();
-            }
-        }
-    });
 }
 
 fn render_close_submenu(

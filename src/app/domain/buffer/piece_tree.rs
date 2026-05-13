@@ -1,5 +1,6 @@
 mod anchor;
 mod edit;
+mod metrics;
 pub(super) mod preview;
 pub(crate) mod query;
 mod slice;
@@ -17,6 +18,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use anchor::{LeafAnchor, LeafId};
+use metrics::sum_node_metrics;
 use support::{
     build_chunked_pieces, build_root_from_pieces, byte_index_for_char_offset,
     byte_range_for_char_range, line_lookup_in_leaves, measure_text, pack_pieces_into_leaves,
@@ -57,22 +59,6 @@ pub struct PieceTreeMetrics {
     pub chars: usize,
     pub newlines: usize,
     pub pieces: usize,
-}
-
-impl PieceTreeMetrics {
-    fn add_assign(&mut self, other: Self) {
-        self.bytes += other.bytes;
-        self.chars += other.chars;
-        self.newlines += other.newlines;
-        self.pieces += other.pieces;
-    }
-
-    fn saturating_sub_assign(&mut self, other: Self) {
-        self.bytes = self.bytes.saturating_sub(other.bytes);
-        self.chars = self.chars.saturating_sub(other.chars);
-        self.newlines = self.newlines.saturating_sub(other.newlines);
-        self.pieces = self.pieces.saturating_sub(other.pieces);
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -265,14 +251,6 @@ impl PieceTreeRoot {
             current_newlines += node.metrics.newlines;
         }
     }
-}
-
-fn sum_node_metrics(nodes: &[PieceTreeInternalNode]) -> PieceTreeMetrics {
-    let mut metrics = PieceTreeMetrics::default();
-    for node in nodes {
-        metrics.add_assign(node.metrics);
-    }
-    metrics
 }
 
 #[derive(Clone, Debug)]

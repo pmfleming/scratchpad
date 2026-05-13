@@ -22,14 +22,23 @@ VISIBILITY_OUTPUT = Path("target/analysis/capacity_report.json")
 BUILD_CMD = ["cargo", "build", "--release", "--quiet", "--bin", "capacity_probe"]
 PROBE_PATH = Path("target/release/capacity_probe.exe" if os.name == "nt" else "target/release/capacity_probe")
 PROBE_TIMEOUT_SECONDS = int(os.environ.get("SCRATCHPAD_CAPACITY_PROBE_TIMEOUT_SECONDS", "300"))
+LARGE_FILE_CAPACITY_THRESHOLD_MS = 180.0
 
 SCENARIO_CONFIG = {
     "file_size_ceiling": {
-        "threshold_ms": 160.0,
+        "threshold_ms": LARGE_FILE_CAPACITY_THRESHOLD_MS,
         "workload_family": "capacity-stress",
         "cpu_flamegraph_id": None,
         "memory_guidance": "Use allocation or working-set profiling before adding another CPU flamegraph.",
         "cpu_guidance": "If load or redraw dominates, compare against the file-load and scroll latency rows before adding a dedicated load profile.",
+    },
+    "text_layout_ceiling": {
+        "threshold_ms": LARGE_FILE_CAPACITY_THRESHOLD_MS,
+        "workload_family": "text-layout",
+        "cpu_flamegraph_id": None,
+        "measurement_question": "Can raw text layout stay bounded as submitted text grows?",
+        "memory_guidance": "Inspect egui galley allocation and page-fault pressure before widening layout caches.",
+        "cpu_guidance": "Compare against viewport extraction and scroll latency before adding another full-document layout profile.",
     },
     "tab_count_ceiling": {
         "threshold_ms": 140.0,
@@ -115,7 +124,7 @@ def fallback_probe_payload(reason: str) -> Dict[str, Any]:
 def fallback_probe_events() -> List[Dict[str, Any]]:
     definitions = [
         ("file_size_ceiling", "File size ceiling sweep", [MB, 64 * MB, 256 * MB, GB], "bytes"),
-        ("layout_bytes_ceiling", "Layout bytes ceiling sweep", [64 * 1024, MB, 64 * MB, 256 * MB], "bytes"),
+        ("text_layout_ceiling", "Text Layout", [64 * 1024, MB, 4 * MB, 8 * MB, 16 * MB, 32 * MB, 64 * MB, 128 * MB], "bytes"),
         ("many_file_count_ceiling", "Many-file workspace ceiling sweep", [1_000, 10_000, 50_000], "files"),
         ("search_file_size_ceiling", "Search file-size ceiling sweep", [MB, 64 * MB, 256 * MB, GB], "bytes"),
         ("search_target_count_ceiling", "Search target-count ceiling sweep", [100, 1_000, 10_000], "files"),
@@ -248,9 +257,21 @@ def resource_checklist(
     ]
 
 
+def normalize_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep old artifacts readable after renaming layout bytes to Text Layout."""
+    if event.get("scenario") != "layout_bytes_ceiling":
+        return event
+    normalized = dict(event)
+    normalized["scenario"] = "text_layout_ceiling"
+    normalized["scenario_label"] = "Text Layout"
+    normalized["workload_family"] = "text-layout"
+    return normalized
+
+
 def summarize_probe(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for event in events:
+        event = normalize_event(event)
         grouped[str(event["scenario"])].append(event)
 
     scenarios = []
@@ -289,7 +310,10 @@ def summarize_probe(events: List[Dict[str, Any]]) -> Dict[str, Any]:
             "scenario": scenario,
             "probe_class": "ceiling_health",
             "measurement_role": "promise_health",
-            "measurement_question": "Does this promise still pass as workload size increases?",
+            "measurement_question": config.get(
+                "measurement_question",
+                "Does this promise still pass as workload size increases?",
+            ),
             "scenario_label": first.get("scenario_label", scenario),
             "workload_family": first.get("workload_family", config.get("workload_family", "capacity-stress")),
             "threshold_ms": threshold_ms,

@@ -113,6 +113,8 @@ impl ScratchpadApp {
                 workspace_selection: Default::default(),
                 tab_rename_state: None,
                 pending_tab_context_menu: None,
+                pending_open_file_paths: Vec::new(),
+                recently_closed_files: Default::default(),
                 startup_restore_conflicts: Vec::new(),
                 workspace_reflow_axis: crate::app::domain::SplitAxis::Vertical,
                 settings_preview_quote_index: 2,

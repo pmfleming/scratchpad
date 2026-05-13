@@ -5,6 +5,7 @@ use crate::app::app_state::{ScratchpadApp, SearchScope};
 use crate::app::domain::{BufferId, PendingAction, SplitAxis, SplitPath, ViewId};
 use crate::app::services::file_controller::FileController;
 use crate::app::services::search::SearchMode;
+use std::path::PathBuf;
 
 mod dispatch;
 mod tab_transfer;
@@ -203,6 +204,17 @@ pub(crate) fn perform_close_view(app: &mut ScratchpadApp, view_id: ViewId) {
         .get(index)
         .map(|tab| tab.buffers().map(|buffer| buffer.id).collect::<Vec<_>>())
         .unwrap_or_default();
+    let open_file_paths_before = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .get(index)
+        .map(|tab| {
+            tab.buffers()
+                .filter_map(|buffer| buffer.path.clone().map(|path| (buffer.id, path)))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let mut next_active_view = None;
     if let Some(tab) = app.tab_manager.tabs.as_mut_slice().get_mut(index)
         && tab.close_view(view_id)
@@ -218,6 +230,11 @@ pub(crate) fn perform_close_view(app: &mut ScratchpadApp, view_id: ViewId) {
             .map(|tab| tab.buffers().map(|buffer| buffer.id).collect::<Vec<_>>())
             .unwrap_or_default();
         let closed_buffer_ids = removed_buffer_ids(open_buffer_ids_before, &open_buffer_ids_after);
+        let closed_file_paths = removed_buffer_paths(&open_file_paths_before, &closed_buffer_ids);
+        crate::app::app_state::workspace_controller::record_recently_closed_file_paths(
+            app,
+            closed_file_paths,
+        );
         app.prune_text_history_for_buffers(closed_buffer_ids);
         app.tab_manager.rebuild_buffer_tab_index();
         app.begin_layout_transition();
@@ -405,6 +422,17 @@ pub(crate) fn activate_pending_view_command(
         .as_slice()
         .get(tab_index)
         .is_some_and(|tab| tab.active_view_id == view_id)
+}
+
+fn removed_buffer_paths(
+    open_file_paths_before: &[(BufferId, PathBuf)],
+    closed_buffer_ids: &[BufferId],
+) -> Vec<PathBuf> {
+    open_file_paths_before
+        .iter()
+        .filter(|(buffer_id, _)| closed_buffer_ids.contains(buffer_id))
+        .map(|(_, path)| path.clone())
+        .collect()
 }
 
 fn removed_buffer_ids(before: Vec<BufferId>, after: &[BufferId]) -> Vec<BufferId> {

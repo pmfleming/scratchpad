@@ -1,5 +1,6 @@
 use crate::app::app_state::ScratchpadApp;
-use crate::app::services::settings_store::TabOrderMode;
+use crate::app::services::settings_store::{TabOrderDirection, TabOrderMode};
+use std::cmp::Ordering;
 
 impl ScratchpadApp {
     pub(crate) fn set_tab_order_mode(&mut self, mode: TabOrderMode) {
@@ -17,6 +18,16 @@ impl ScratchpadApp {
         } else {
             self.apply_current_tab_ordering();
         }
+        self.persist_settings_or_error();
+    }
+
+    pub(crate) fn set_tab_order_direction(&mut self, direction: TabOrderDirection) {
+        if self.state.app_settings.workspace.tab_order_direction == direction {
+            return;
+        }
+
+        self.state.app_settings.workspace.tab_order_direction = direction;
+        self.apply_current_tab_ordering();
         self.persist_settings_or_error();
     }
 
@@ -107,65 +118,109 @@ fn workspace_tab_order_for_mode(app: &ScratchpadApp, mode: TabOrderMode) -> Opti
 
     let mut order = (0..app.tab_manager.tabs.as_slice().len()).collect::<Vec<_>>();
     let custom_rank = custom_order_ranks(app);
+    let direction = app.state.app_settings.tab_order_direction();
     match mode {
         TabOrderMode::Custom => None,
         TabOrderMode::FileName => {
             order.sort_by(|left, right| {
                 let left_tab = &app.tab_manager.tabs.as_slice()[*left];
                 let right_tab = &app.tab_manager.tabs.as_slice()[*right];
-                left_tab
-                    .buffer
-                    .name
-                    .to_ascii_lowercase()
-                    .cmp(&right_tab.buffer.name.to_ascii_lowercase())
-                    .then_with(|| left_tab.buffer.name.cmp(&right_tab.buffer.name))
-                    .then_with(|| tab_path_label(left_tab).cmp(&tab_path_label(right_tab)))
-                    .then_with(|| custom_rank[*left].cmp(&custom_rank[*right]))
+                order_direction_cmp(
+                    direction,
+                    left_tab.buffer.name.to_ascii_lowercase(),
+                    right_tab.buffer.name.to_ascii_lowercase(),
+                )
+                .then_with(|| {
+                    order_direction_cmp(
+                        direction,
+                        left_tab.buffer.name.as_str(),
+                        right_tab.buffer.name.as_str(),
+                    )
+                })
+                .then_with(|| {
+                    order_direction_cmp(
+                        direction,
+                        tab_path_label(left_tab),
+                        tab_path_label(right_tab),
+                    )
+                })
+                .then_with(|| custom_rank[*left].cmp(&custom_rank[*right]))
             });
             Some(order)
         }
         TabOrderMode::FileSize => {
-            order.sort_by_key(|index| {
-                let tab = &app.tab_manager.tabs.as_slice()[*index];
-                (
-                    tab_total_size(tab),
-                    tab.buffer.name.to_ascii_lowercase(),
-                    custom_rank[*index],
+            order.sort_by(|left, right| {
+                let left_tab = &app.tab_manager.tabs.as_slice()[*left];
+                let right_tab = &app.tab_manager.tabs.as_slice()[*right];
+                order_direction_cmp(
+                    direction,
+                    tab_total_size(left_tab),
+                    tab_total_size(right_tab),
                 )
+                .then_with(|| {
+                    order_direction_cmp(
+                        direction,
+                        left_tab.buffer.name.to_ascii_lowercase(),
+                        right_tab.buffer.name.to_ascii_lowercase(),
+                    )
+                })
+                .then_with(|| custom_rank[*left].cmp(&custom_rank[*right]))
             });
             Some(order)
         }
         TabOrderMode::FileAge => {
-            order.sort_by_key(|index| {
-                let millis = app.tab_manager.tabs.as_slice()[*index]
-                    .buffer
-                    .disk_state
-                    .as_ref()
-                    .and_then(|state| state.modified_millis);
-                (
-                    millis.is_none(),
-                    millis.unwrap_or(u64::MAX),
-                    custom_rank[*index],
-                )
+            order.sort_by(|left, right| {
+                let left_saved = tab_saved_millis(&app.tab_manager.tabs.as_slice()[*left]);
+                let right_saved = tab_saved_millis(&app.tab_manager.tabs.as_slice()[*right]);
+                order_direction_cmp(direction, left_saved, right_saved)
+                    .then_with(|| custom_rank[*left].cmp(&custom_rank[*right]))
             });
             Some(order)
         }
         TabOrderMode::RecentEdit => {
-            order.sort_by_key(|index| {
-                let latest = app.tab_manager.tabs.as_slice()[*index]
-                    .buffers()
-                    .flat_map(|buffer| buffer.document().history_entries())
-                    .map(|entry| entry.global_seq)
-                    .max();
-                (
-                    latest.is_none(),
-                    std::cmp::Reverse(latest.unwrap_or(0)),
-                    custom_rank[*index],
+            order.sort_by(|left, right| {
+                let left_tab = &app.tab_manager.tabs.as_slice()[*left];
+                let right_tab = &app.tab_manager.tabs.as_slice()[*right];
+                order_direction_cmp(
+                    direction,
+                    tab_latest_edit_sequence(left_tab),
+                    tab_latest_edit_sequence(right_tab),
                 )
+                .then_with(|| {
+                    order_direction_cmp(
+                        direction,
+                        tab_saved_millis(left_tab),
+                        tab_saved_millis(right_tab),
+                    )
+                })
+                .then_with(|| custom_rank[*left].cmp(&custom_rank[*right]))
             });
             Some(order)
         }
     }
+}
+
+fn order_direction_cmp<T: Ord>(direction: TabOrderDirection, left: T, right: T) -> Ordering {
+    match direction {
+        TabOrderDirection::Ascending => left.cmp(&right),
+        TabOrderDirection::Descending => right.cmp(&left),
+    }
+}
+
+fn tab_latest_edit_sequence(tab: &crate::app::domain::WorkspaceTab) -> u64 {
+    tab.buffers()
+        .flat_map(|buffer| buffer.document().history_entries())
+        .map(|entry| entry.global_seq)
+        .max()
+        .unwrap_or(0)
+}
+
+fn tab_saved_millis(tab: &crate::app::domain::WorkspaceTab) -> u64 {
+    tab.buffer
+        .disk_state
+        .as_ref()
+        .and_then(|state| state.modified_millis)
+        .unwrap_or(u64::MAX)
 }
 
 fn workspace_tab_order_from_saved_custom_order(app: &ScratchpadApp) -> Vec<usize> {
@@ -224,7 +279,7 @@ mod tests {
     use super::{ScratchpadApp, TabOrderMode};
     use crate::app::domain::{BufferState, DiskFileState, PieceSource, TabManager, WorkspaceTab};
     use crate::app::services::session_store::SessionStore;
-    use crate::app::services::settings_store::SettingsStore;
+    use crate::app::services::settings_store::{SettingsStore, TabOrderDirection};
     use crate::app::startup::StartupOptions;
     use crate::app::ui::editor_content::native_editor::{
         CharCursor, CursorRange, EditOperation, OperationRecord,
@@ -245,7 +300,7 @@ mod tests {
     }
 
     #[test]
-    fn file_age_order_uses_disk_modified_time_and_places_unsaved_tabs_last() {
+    fn file_age_order_uses_disk_modified_time_and_treats_unsaved_tabs_as_newest() {
         let mut app = test_app(["newer.txt", "untitled", "older.txt"]);
         app.tab_manager.tabs[0].buffer.disk_state = Some(DiskFileState {
             modified_millis: Some(300),
@@ -259,6 +314,10 @@ mod tests {
         app.set_tab_order_mode(TabOrderMode::FileAge);
 
         assert_eq!(tab_names(&app), ["older.txt", "newer.txt", "untitled"]);
+
+        app.set_tab_order_direction(TabOrderDirection::Descending);
+
+        assert_eq!(tab_names(&app), ["untitled", "newer.txt", "older.txt"]);
     }
 
     #[test]
@@ -282,12 +341,28 @@ mod tests {
     }
 
     #[test]
-    fn recent_edit_order_uses_latest_text_history_sequence() {
+    fn recent_edit_order_uses_latest_text_history_sequence_then_save_date() {
         let mut app = test_app(["alpha.txt", "beta.txt", "gamma.txt"]);
+        app.tab_manager.tabs[0].buffer.disk_state = Some(DiskFileState {
+            modified_millis: Some(300),
+            len: 0,
+        });
+        app.tab_manager.tabs[1].buffer.disk_state = Some(DiskFileState {
+            modified_millis: Some(100),
+            len: 0,
+        });
+        app.tab_manager.tabs[2].buffer.disk_state = Some(DiskFileState {
+            modified_millis: Some(200),
+            len: 0,
+        });
         record_edit(&mut app.tab_manager.tabs[1].buffer, "b");
         record_edit(&mut app.tab_manager.tabs[2].buffer, "g");
 
         app.set_tab_order_mode(TabOrderMode::RecentEdit);
+
+        assert_eq!(tab_names(&app), ["alpha.txt", "beta.txt", "gamma.txt"]);
+
+        app.set_tab_order_direction(TabOrderDirection::Descending);
 
         assert_eq!(tab_names(&app), ["gamma.txt", "beta.txt", "alpha.txt"]);
     }
