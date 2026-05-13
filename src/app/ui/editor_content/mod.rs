@@ -71,7 +71,20 @@ fn render_editor_body(
     view: &mut EditorViewState,
     style: &EditorContentStyle<'_>,
 ) -> native_editor::EditorWidgetOutcome {
-    render_editor_text_edit(ui, buffer, view, style.text_edit, style.viewport)
+    render_editor_text_edit(
+        ui,
+        buffer,
+        view,
+        style.text_edit,
+        body_viewport(style.viewport, ui.available_width()),
+    )
+}
+
+fn body_viewport(viewport: Option<egui::Rect>, body_width: f32) -> Option<egui::Rect> {
+    let body_width = body_width.max(1.0);
+    viewport.map(|viewport| {
+        egui::Rect::from_min_size(viewport.min, egui::vec2(body_width, viewport.height()))
+    })
 }
 
 impl From<native_editor::EditorWidgetOutcome> for EditorContentOutcome {
@@ -82,5 +95,22 @@ impl From<native_editor::EditorWidgetOutcome> for EditorContentOutcome {
             request_editor_focus: outcome.request_editor_focus,
             interaction_response: Some(outcome.response),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::body_viewport;
+    use eframe::egui;
+
+    #[test]
+    fn body_viewport_uses_text_lane_width_after_gutter() {
+        let viewport = egui::Rect::from_min_size(egui::pos2(0.0, 40.0), egui::vec2(900.0, 300.0));
+
+        let narrowed = body_viewport(Some(viewport), 840.0).unwrap();
+
+        assert_eq!(narrowed.min, viewport.min);
+        assert_eq!(narrowed.height(), 300.0);
+        assert_eq!(narrowed.width(), 840.0);
     }
 }

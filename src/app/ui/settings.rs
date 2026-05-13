@@ -310,14 +310,18 @@ mod tests {
             StartupOptions::default(),
         );
         app.set_session_persist_on_drop(false);
-        app.state.app_settings.font_size = 32.0;
-        app.state.app_settings.editor_gutter = 32;
-        app.state.app_settings.tab_list_auto_hide_delay_seconds = 10.0;
-        app.state.app_settings.history_budget.per_file_byte_budget = 1024 * MIB;
-        app.state.app_settings.history_budget.aggregate_byte_budget = 4096 * MIB;
+        app.state.app_settings.editor.font_size = 32.0;
+        app.state.app_settings.editor.editor_gutter = 32;
         app.state
             .app_settings
-            .history_budget
+            .workspace
+            .tab_list_auto_hide_delay_seconds = 10.0;
+        app.state.app_settings.history.budget.per_file_byte_budget = 1024 * MIB;
+        app.state.app_settings.history.budget.aggregate_byte_budget = 4096 * MIB;
+        app.state
+            .app_settings
+            .history
+            .budget
             .persisted_payload_budget = 1024 * MIB;
         app
     }

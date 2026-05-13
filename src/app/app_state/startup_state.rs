@@ -226,7 +226,7 @@ impl ScratchpadApp {
             startup_options.restore_session
         } else {
             matches!(
-                self.state.app_settings.startup_session_behavior,
+                self.state.app_settings.workspace.startup_session_behavior,
                 StartupSessionBehavior::ContinuePreviousSession
             )
         }
@@ -236,7 +236,7 @@ impl ScratchpadApp {
         if startup_options.open_target_explicit {
             startup_options.open_target
         } else {
-            match self.state.app_settings.file_open_disposition {
+            match self.state.app_settings.workspace.file_open_disposition {
                 FileOpenDisposition::NewTab => StartupOpenTarget::SeparateTabs,
                 FileOpenDisposition::CurrentTab => StartupOpenTarget::ActiveTab,
             }

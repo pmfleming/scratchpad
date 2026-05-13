@@ -274,6 +274,7 @@ pub(super) fn truncated_label(
         egui::vec2(width, 0.0),
         egui::Label::new(egui::RichText::new(text).size(size).color(color))
             .truncate()
+            .show_tooltip_when_elided(false)
             .sense(sense),
     )
 }

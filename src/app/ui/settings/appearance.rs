@@ -258,7 +258,7 @@ fn render_auto_hide_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         ui,
         "Auto-hide tab list",
         Some("Collapse until pointer is near."),
-        "settings.auto_hide_tab_list",
+        "settings.workspace.auto_hide_tab_list",
         app.state.app_settings.auto_hide_tab_list(),
         |enabled| crate::app::app_state::settings_controller::set_auto_hide_tab_list(app, enabled),
     );
@@ -304,7 +304,7 @@ fn render_status_bar_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         ui,
         "Status bar",
         Some("Show the bottom status strip."),
-        "settings.status_bar_visible",
+        "settings.ui.status_bar_visible",
         app.state.app_settings.status_bar_visible(),
         |visible| {
             crate::app::app_state::settings_controller::defer_status_bar_visible(app, visible, &ctx)

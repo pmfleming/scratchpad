@@ -338,11 +338,12 @@ fn stream_restore_session(
 ) -> bool {
     let send_failed = std::cell::Cell::new(false);
     let result = session_store.load_streaming(
-        |active_tab_index, legacy_settings| {
+        |active_tab_index, active_surface, legacy_settings| {
             if result_tx
                 .send(BackgroundIoResult::SessionRestoreStarted {
                     request_id,
                     active_tab_index,
+                    active_surface,
                     legacy_settings,
                 })
                 .is_err()

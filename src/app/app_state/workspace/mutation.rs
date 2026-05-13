@@ -2,275 +2,323 @@ use super::super::{ScratchpadApp, StatusDomain};
 use crate::app::domain::{BufferId, CursorRevealMode};
 use crate::app::text_history::{TextHistoryEntryView, entries_for_buffer};
 
-impl ScratchpadApp {
-    pub fn text_history_redo_len(&self) -> usize {
-        self.text_history_entries()
-            .iter()
-            .filter(|entry| entry.undone)
-            .count()
-    }
+pub fn text_history_redo_len(app: &ScratchpadApp) -> usize {
+    text_history_entries(app)
+        .iter()
+        .filter(|entry| entry.undone)
+        .count()
+}
 
-    pub(crate) fn text_history_entries(&self) -> Vec<TextHistoryEntryView> {
-        let mut entries = self
-            .tab_manager
-            .tabs
-            .as_slice()
-            .iter()
-            .flat_map(|tab| tab.buffers().flat_map(entries_for_buffer))
-            .collect::<Vec<_>>();
-        sort_text_history_entries(&mut entries);
-        entries
-    }
+pub(crate) fn text_history_entries(app: &ScratchpadApp) -> Vec<TextHistoryEntryView> {
+    let mut entries = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .flat_map(|tab| tab.buffers().flat_map(entries_for_buffer))
+        .collect::<Vec<_>>();
+    sort_text_history_entries(&mut entries);
+    entries
+}
 
-    pub(crate) fn cached_text_history_entries(&mut self) -> Vec<TextHistoryEntryView> {
-        let revisions = self.text_history_revisions();
-        if self.state.text_history_cache.revisions != revisions {
-            self.state.text_history_cache.entries = self.text_history_entries();
-            self.state.text_history_cache.revisions = revisions;
-        }
-        self.state.text_history_cache.entries.clone()
+pub(crate) fn cached_text_history_entries(app: &mut ScratchpadApp) -> Vec<TextHistoryEntryView> {
+    let revisions = text_history_revisions(app);
+    if app.state.text_history_cache.revisions != revisions {
+        app.state.text_history_cache.entries = text_history_entries(app);
+        app.state.text_history_cache.revisions = revisions;
     }
+    app.state.text_history_cache.entries.clone()
+}
 
-    fn text_history_revisions(&self) -> Vec<(BufferId, u64)> {
-        self.tab_manager
-            .tabs
-            .as_slice()
-            .iter()
-            .flat_map(|tab| {
-                tab.buffers()
-                    .map(|buffer| (buffer.id, buffer.document().history_revision_counter()))
-            })
-            .collect()
-    }
+fn text_history_revisions(app: &ScratchpadApp) -> Vec<(BufferId, u64)> {
+    app.tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .flat_map(|tab| {
+            tab.buffers()
+                .map(|buffer| (buffer.id, buffer.document().history_revision_counter()))
+        })
+        .collect()
+}
 
-    pub(crate) fn clear_text_history(&mut self) -> bool {
-        let mut cleared = false;
-        for tab in self.tab_manager.tabs.as_mut_slice() {
-            for buffer in tab.buffers_mut() {
-                if !buffer.document().history_entries().is_empty() {
-                    buffer.document_mut().clear_operation_history();
-                    cleared = true;
-                }
+pub(crate) fn clear_text_history(app: &mut ScratchpadApp) -> bool {
+    let mut cleared = false;
+    for tab in app.tab_manager.tabs.as_mut_slice() {
+        for buffer in tab.buffers_mut() {
+            if !buffer.document().history_entries().is_empty() {
+                buffer.document_mut().clear_operation_history();
+                cleared = true;
             }
         }
-        if cleared {
-            self.state.text_history_cache = Default::default();
-            self.tab_manager.mark_session_dirty();
-            self.state
-                .status
-                .set_info_status_in_domain(StatusDomain::History, "Cleared text history.");
-        }
-        cleared
     }
-
-    pub(crate) fn finalize_active_buffer_text_mutation(&mut self, active_tab_index: usize) {
-        let tab = &mut self.tab_manager.tabs.as_mut_slice()[active_tab_index];
-        let buffer_id = tab.buffer.id;
-        let latest_edit = tab.buffer.document().latest_operation_record().cloned();
-        tab.buffer
-            .refresh_text_metadata_after_operation(latest_edit.as_ref());
-        tab.buffer.mark_dirty_after_local_edit();
-        let warning_message = tab
-            .buffer
-            .artifact_summary
-            .status_text()
-            .map(|message| format!("{message}; raw-text editing remains enabled"));
-        let _ = tab;
-
-        if let Some(message) = warning_message {
-            self.state
-                .status
-                .set_warning_status_in_domain(StatusDomain::Encoding, message);
-        } else {
-            self.clear_status_message();
-        }
-        self.record_pending_text_history_event(active_tab_index, buffer_id);
-        self.enforce_aggregate_text_history_budget();
-        self.mark_search_dirty();
-        self.tab_manager.mark_session_dirty();
-        self.note_settings_toml_edit(active_tab_index);
-        self.apply_current_tab_ordering();
+    if cleared {
+        app.state.text_history_cache = Default::default();
+        app.tab_manager.mark_session_dirty();
+        app.state
+            .status
+            .set_info_status_in_domain(StatusDomain::History, "Cleared text history.");
     }
+    cleared
+}
 
-    pub(crate) fn prune_text_history_for_buffers(
-        &mut self,
-        buffer_ids: impl IntoIterator<Item = BufferId>,
-    ) {
-        if buffer_ids.into_iter().next().is_some() {
-            self.state.text_history_cache = Default::default();
-        }
+pub(crate) fn finalize_active_buffer_text_mutation(
+    app: &mut ScratchpadApp,
+    active_tab_index: usize,
+) {
+    let tab = &mut app.tab_manager.tabs.as_mut_slice()[active_tab_index];
+    let buffer_id = tab.buffer.id;
+    let latest_edit = tab.buffer.document().latest_operation_record().cloned();
+    tab.buffer
+        .refresh_text_metadata_after_operation(latest_edit.as_ref());
+    tab.buffer.mark_dirty_after_local_edit();
+    let warning_message = tab
+        .buffer
+        .artifact_summary
+        .status_text()
+        .map(|message| format!("{message}; raw-text editing remains enabled"));
+    let _ = tab;
+
+    if let Some(message) = warning_message {
+        app.state
+            .status
+            .set_warning_status_in_domain(StatusDomain::Encoding, message);
+    } else {
+        app.clear_status_message();
     }
+    record_pending_text_history_event(app, active_tab_index, buffer_id);
+    app.enforce_aggregate_text_history_budget();
+    app.mark_search_dirty();
+    app.tab_manager.mark_session_dirty();
+    app.note_settings_toml_edit(active_tab_index);
+    app.apply_current_tab_ordering();
+}
 
-    pub(crate) fn record_pending_text_history_event(
-        &mut self,
-        tab_index: usize,
-        buffer_id: BufferId,
-    ) {
-        if let Some(buffer) = self
-            .tab_manager
-            .tabs
-            .as_mut_slice()
-            .get_mut(tab_index)
-            .and_then(|tab| tab.buffer_by_id_mut(buffer_id))
-        {
-            let _ = buffer.take_text_history_event();
-        }
+pub(crate) fn prune_text_history_for_buffers(
+    app: &mut ScratchpadApp,
+    buffer_ids: impl IntoIterator<Item = BufferId>,
+) {
+    if buffer_ids.into_iter().next().is_some() {
+        app.state.text_history_cache = Default::default();
     }
+}
 
-    /// Undo or redo every entry between the current "Now" boundary and the
-    /// clicked entry, inclusive — but only within the clicked entry's own
-    /// buffer. The direction is inferred from the clicked entry's current
-    /// state (an applied entry is undone, an undone entry is redone). The
-    /// per-buffer document already replays a contiguous batch internally when
-    /// given any single entry id, so a single call is enough. Other buffers'
-    /// histories are left alone even when their seqs fall between Now and the
-    /// click target.
-    pub fn apply_text_history_to_entry(
-        &mut self,
-        buffer_id: BufferId,
-        entry_id: u64,
-        follow_focus: bool,
-    ) -> bool {
-        let target = match self
-            .text_history_entries()
-            .into_iter()
-            .find(|entry| entry.buffer_id == buffer_id && entry.id == entry_id)
-        {
-            Some(target) => target,
-            None => {
-                self.state.status.set_error_status_in_domain(
-                    StatusDomain::History,
-                    "Text history entry is no longer available.",
-                );
-                return false;
-            }
-        };
-        let undo = !target.undone;
-        self.apply_text_history_entry_with_focus(buffer_id, entry_id, undo, follow_focus)
+pub(crate) fn record_pending_text_history_event(
+    app: &mut ScratchpadApp,
+    tab_index: usize,
+    buffer_id: BufferId,
+) {
+    if let Some(buffer) = app
+        .tab_manager
+        .tabs
+        .as_mut_slice()
+        .get_mut(tab_index)
+        .and_then(|tab| tab.buffer_by_id_mut(buffer_id))
+    {
+        let _ = buffer.take_text_history_event();
     }
+}
 
-    fn apply_text_history_entry_with_focus(
-        &mut self,
-        buffer_id: BufferId,
-        entry_id: u64,
-        undo: bool,
-        follow_focus: bool,
-    ) -> bool {
-        let Some(action) = self
-            .text_history_entries()
-            .into_iter()
-            .find(|entry| entry.buffer_id == buffer_id && entry.id == entry_id)
-        else {
-            self.state.status.set_error_status_in_domain(
+/// Undo or redo every entry between the current "Now" boundary and the
+/// clicked entry, inclusive — but only within the clicked entry's own
+/// buffer. The direction is inferred from the clicked entry's current
+/// state (an applied entry is undone, an undone entry is redone). The
+/// per-buffer document already replays a contiguous batch internally when
+/// given any single entry id, so a single call is enough. Other buffers'
+/// histories are left alone even when their seqs fall between Now and the
+/// click target.
+pub fn apply_text_history_to_entry(
+    app: &mut ScratchpadApp,
+    buffer_id: BufferId,
+    entry_id: u64,
+    follow_focus: bool,
+) -> bool {
+    let target = match app
+        .text_history_entries()
+        .into_iter()
+        .find(|entry| entry.buffer_id == buffer_id && entry.id == entry_id)
+    {
+        Some(target) => target,
+        None => {
+            app.state.status.set_error_status_in_domain(
                 StatusDomain::History,
                 "Text history entry is no longer available.",
             );
             return false;
-        };
-        if undo && action.undone || !undo && !action.undone || !action.replayable {
-            self.state.status.set_error_status_in_domain(
-                StatusDomain::History,
-                "Text history entry is not replayable in that direction.",
-            );
-            return false;
         }
-        let Some(tab_index) = self.tab_index_for_buffer(action.buffer_id) else {
-            self.state.status.set_error_status_in_domain(
-                StatusDomain::History,
-                "Text history entry belongs to a closed file.",
-            );
+    };
+    let undo = !target.undone;
+    apply_text_history_entry_with_focus(app, buffer_id, entry_id, undo, follow_focus)
+}
+
+fn apply_text_history_entry_with_focus(
+    app: &mut ScratchpadApp,
+    buffer_id: BufferId,
+    entry_id: u64,
+    undo: bool,
+    follow_focus: bool,
+) -> bool {
+    let Some(action) = app
+        .text_history_entries()
+        .into_iter()
+        .find(|entry| entry.buffer_id == buffer_id && entry.id == entry_id)
+    else {
+        app.state.status.set_error_status_in_domain(
+            StatusDomain::History,
+            "Text history entry is no longer available.",
+        );
+        return false;
+    };
+    if undo && action.undone || !undo && !action.undone || !action.replayable {
+        app.state.status.set_error_status_in_domain(
+            StatusDomain::History,
+            "Text history entry is not replayable in that direction.",
+        );
+        return false;
+    }
+    let Some(tab_index) = tab_index_for_buffer(app, action.buffer_id) else {
+        app.state.status.set_error_status_in_domain(
+            StatusDomain::History,
+            "Text history entry belongs to a closed file.",
+        );
+        return false;
+    };
+
+    let selection = {
+        let tab = &mut app.tab_manager.tabs.as_mut_slice()[tab_index];
+        let Some(buffer) = tab.buffer_by_id_mut(action.buffer_id) else {
             return false;
         };
-
-        let selection = {
-            let tab = &mut self.tab_manager.tabs.as_mut_slice()[tab_index];
-            let Some(buffer) = tab.buffer_by_id_mut(action.buffer_id) else {
-                return false;
-            };
-            let result = if undo {
-                buffer.apply_text_history_undo(action.id)
-            } else {
-                buffer.apply_text_history_redo(action.id)
-            };
-            match result {
-                Ok(selection) => {
-                    buffer.mark_dirty_after_local_edit();
-                    selection
-                }
-                Err(_) => {
-                    self.state.status.set_error_status_in_domain(
-                        StatusDomain::History,
-                        "Text history entry conflicts with the current file contents.",
-                    );
-                    return false;
-                }
+        let result = if undo {
+            buffer.apply_text_history_undo(action.id)
+        } else {
+            buffer.apply_text_history_redo(action.id)
+        };
+        match result {
+            Ok(selection) => {
+                buffer.mark_dirty_after_local_edit();
+                selection
             }
-        };
-
-        if follow_focus {
-            self.restore_text_history_selection(tab_index, action.buffer_id, selection);
+            Err(_) => {
+                app.state.status.set_error_status_in_domain(
+                    StatusDomain::History,
+                    "Text history entry conflicts with the current file contents.",
+                );
+                return false;
+            }
         }
-        self.mark_search_dirty();
-        self.tab_manager.mark_session_dirty();
-        self.apply_current_tab_ordering();
-        true
+    };
+
+    if follow_focus {
+        restore_text_history_selection(app, tab_index, action.buffer_id, selection);
     }
+    app.mark_search_dirty();
+    app.tab_manager.mark_session_dirty();
+    app.apply_current_tab_ordering();
+    true
+}
 
-    pub(crate) fn tab_index_for_buffer(&mut self, buffer_id: BufferId) -> Option<usize> {
-        if let Some(index) = self.tab_manager.tab_index_for_buffer(buffer_id)
-            && self
-                .tab_manager
-                .tabs
-                .as_slice()
-                .get(index)
-                .is_some_and(|tab| tab.buffer_by_id(buffer_id).is_some())
-        {
-            return Some(index);
-        }
-
-        self.tab_manager.rebuild_buffer_tab_index();
-        self.tab_manager.tab_index_for_buffer(buffer_id)
-    }
-
-    fn restore_text_history_selection(
-        &mut self,
-        tab_index: usize,
-        buffer_id: BufferId,
-        selection: crate::app::ui::editor_content::native_editor::CursorRange,
-    ) {
-        let Some(view_id) = self
+pub(crate) fn tab_index_for_buffer(app: &mut ScratchpadApp, buffer_id: BufferId) -> Option<usize> {
+    if let Some(index) = app.tab_manager.tab_index_for_buffer(buffer_id)
+        && app
             .tab_manager
             .tabs
             .as_slice()
-            .get(tab_index)
-            .and_then(|tab| {
-                tab.views
-                    .iter()
-                    .find(|view| view.buffer_id == buffer_id)
-                    .map(|view| view.id)
-            })
-        else {
-            return;
-        };
-        self.activate_workspace_surface();
-        self.tab_manager.set_active_tab_index_clamped(tab_index);
-        self.ensure_active_tab_slot_selected();
-        self.tab_manager.pending_scroll_to_active = true;
-        let tab = &mut self.tab_manager.tabs.as_mut_slice()[tab_index];
-        let _ = tab.activate_view(view_id);
-        if let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) {
-            view.set_cursor_range_anchored(buffer, selection);
-            view.set_pending_cursor_range_anchored(buffer, selection);
-            view.request_cursor_reveal(CursorRevealMode::Center);
-        }
-        self.refresh_search_view_state();
-        self.request_focus_for_view(view_id);
+            .get(index)
+            .is_some_and(|tab| tab.buffer_by_id(buffer_id).is_some())
+    {
+        return Some(index);
     }
+
+    app.tab_manager.rebuild_buffer_tab_index();
+    app.tab_manager.tab_index_for_buffer(buffer_id)
+}
+
+fn restore_text_history_selection(
+    app: &mut ScratchpadApp,
+    tab_index: usize,
+    buffer_id: BufferId,
+    selection: crate::app::ui::editor_content::native_editor::CursorRange,
+) {
+    let Some(view_id) = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .get(tab_index)
+        .and_then(|tab| {
+            tab.views
+                .iter()
+                .find(|view| view.buffer_id == buffer_id)
+                .map(|view| view.id)
+        })
+    else {
+        return;
+    };
+    app.activate_workspace_surface();
+    app.tab_manager.set_active_tab_index_clamped(tab_index);
+    app.ensure_active_tab_slot_selected();
+    app.tab_manager.pending_scroll_to_active = true;
+    let tab = &mut app.tab_manager.tabs.as_mut_slice()[tab_index];
+    let _ = tab.activate_view(view_id);
+    if let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) {
+        view.set_cursor_range_anchored(buffer, selection);
+        view.set_pending_cursor_range_anchored(buffer, selection);
+        view.request_cursor_reveal(CursorRevealMode::Center);
+    }
+    app.refresh_search_view_state();
+    app.request_focus_for_view(view_id);
 }
 
 fn sort_text_history_entries(entries: &mut [TextHistoryEntryView]) {
     entries.sort_by_key(|entry| (entry.global_seq, entry.buffer_id, entry.id));
 }
+
+macro_rules! compat_scratchpad_app_methods {
+    ($type:ty { $($item:item)* }) => {
+        #[allow(dead_code)]
+        impl $type {
+            $($item)*
+        }
+    };
+}
+
+compat_scratchpad_app_methods!(ScratchpadApp {
+    pub fn text_history_redo_len(&self) -> usize {
+        text_history_redo_len(self)
+    }
+
+    pub(crate) fn text_history_entries(&self) -> Vec<TextHistoryEntryView> {
+        text_history_entries(self)
+    }
+
+    pub(crate) fn cached_text_history_entries(&mut self) -> Vec<TextHistoryEntryView> {
+        cached_text_history_entries(self)
+    }
+
+    pub(crate) fn clear_text_history(&mut self) -> bool {
+        clear_text_history(self)
+    }
+
+    pub(crate) fn finalize_active_buffer_text_mutation(&mut self, active_tab_index: usize) {
+        finalize_active_buffer_text_mutation(self, active_tab_index)
+    }
+
+    pub(crate) fn prune_text_history_for_buffers(&mut self, buffer_ids: impl IntoIterator<Item = BufferId>) {
+        prune_text_history_for_buffers(self, buffer_ids)
+    }
+
+    pub(crate) fn record_pending_text_history_event(&mut self, tab_index: usize, buffer_id: BufferId) {
+        record_pending_text_history_event(self, tab_index, buffer_id)
+    }
+
+    pub fn apply_text_history_to_entry(&mut self, buffer_id: BufferId, entry_id: u64, follow_focus: bool) -> bool {
+        apply_text_history_to_entry(self, buffer_id, entry_id, follow_focus)
+    }
+
+    pub(crate) fn tab_index_for_buffer(&mut self, buffer_id: BufferId) -> Option<usize> {
+        tab_index_for_buffer(self, buffer_id)
+    }
+});
 
 #[cfg(test)]
 mod tests {

@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 mod background_io;
 mod file_watch;
-mod frame;
+pub(crate) mod frame;
 mod search_state;
 pub(crate) mod settings_state;
 mod startup_state;

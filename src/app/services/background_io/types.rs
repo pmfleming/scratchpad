@@ -5,7 +5,8 @@ use crate::app::domain::{
     WorkspaceTab,
 };
 use crate::app::services::session_store::{
-    ColdSessionTab, RestoreStatus, RestoredSession, SessionPersistRequest, SessionStore,
+    ColdSessionTab, RestoreStatus, RestoredSession, SessionActiveSurface, SessionPersistRequest,
+    SessionStore,
 };
 use crate::app::services::settings_store::AppSettings;
 use std::path::PathBuf;
@@ -122,6 +123,7 @@ pub(crate) enum BackgroundIoResult {
     SessionRestoreStarted {
         request_id: u64,
         active_tab_index: usize,
+        active_surface: SessionActiveSurface,
         legacy_settings: AppSettings,
     },
     SessionTabRestored {

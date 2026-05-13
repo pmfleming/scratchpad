@@ -54,7 +54,7 @@ pub(crate) fn toggle_search(app: &mut ScratchpadApp) {
 
 pub(crate) fn set_search_replace_open(app: &mut ScratchpadApp, open: bool) {
     app.state.search_state.set_replace_open(open);
-    if app.state.search_state.open && !app.state.search_state.query.is_empty() {
+    if app.state.search_state.panel.open && !app.state.search_state.query.query.is_empty() {
         app.refresh_search_visual_state();
     }
 }
@@ -73,7 +73,7 @@ pub(crate) fn set_search_query(app: &mut ScratchpadApp, query: impl Into<String>
 
 pub(crate) fn set_search_replacement(app: &mut ScratchpadApp, replacement: impl Into<String>) {
     if app.state.search_state.set_replacement(replacement) {
-        if app.state.search_state.open && !app.state.search_state.query.is_empty() {
+        if app.state.search_state.panel.open && !app.state.search_state.query.query.is_empty() {
             app.refresh_search_visual_state();
         }
     }
@@ -112,7 +112,7 @@ pub(crate) fn set_search_whole_word(app: &mut ScratchpadApp, enabled: bool) {
 }
 
 pub(crate) fn focus_search_result_file_at(app: &mut ScratchpadApp, index: usize) -> bool {
-    let Some(search_match) = app.state.search_state.matches.get(index).cloned() else {
+    let Some(search_match) = app.state.search_state.results.matches.get(index).cloned() else {
         return false;
     };
     focus_search_match(app, search_match)
@@ -143,8 +143,8 @@ fn select_search_match_via(
         return false;
     }
     let Some(index) = pick(
-        app.state.search_state.matches.len(),
-        app.state.search_state.active_match_index,
+        app.state.search_state.results.matches.len(),
+        app.state.search_state.results.active_match_index,
     ) else {
         return false;
     };
@@ -152,7 +152,7 @@ fn select_search_match_via(
 }
 
 pub(super) fn activate_search_match(app: &mut ScratchpadApp, index: usize) -> bool {
-    let Some(search_match) = app.state.search_state.matches.get(index).cloned() else {
+    let Some(search_match) = app.state.search_state.results.matches.get(index).cloned() else {
         return false;
     };
     if !focus_search_match(app, search_match) {
@@ -236,19 +236,25 @@ impl ScratchpadApp {
         match_index: usize,
     ) -> Option<SearchResultEntry> {
         let key = SearchPreviewCacheKey {
-            generation: self.state.search_state.applied_generation,
+            generation: self.state.search_state.runtime.applied_generation,
             match_index,
         };
-        if let Some(entry) = self.state.search_state.preview_cache.get(&key).cloned() {
+        if let Some(entry) = self.state.search_state.preview.entries.get(&key).cloned() {
             self.touch_search_preview_cache_key(key);
             return Some(entry_with_active_state(
                 entry,
                 match_index,
-                self.state.search_state.active_match_index,
+                self.state.search_state.results.active_match_index,
             ));
         }
 
-        let search_match = self.state.search_state.matches.get(match_index)?.clone();
+        let search_match = self
+            .state
+            .search_state
+            .results
+            .matches
+            .get(match_index)?
+            .clone();
         let (line_number, column_number, preview) = self
             .tab_manager
             .tabs
@@ -263,7 +269,7 @@ impl ScratchpadApp {
             line_number,
             column_number,
             preview,
-            active: Some(match_index) == self.state.search_state.active_match_index,
+            active: Some(match_index) == self.state.search_state.results.active_match_index,
         };
         self.store_search_preview_cache_entry(key, entry.clone());
         Some(entry)
@@ -275,21 +281,22 @@ impl ScratchpadApp {
         entry: SearchResultEntry,
     ) {
         self.touch_search_preview_cache_key(key.clone());
-        self.state.search_state.preview_cache.insert(key, entry);
-        while self.state.search_state.preview_cache_order.len() > SEARCH_PREVIEW_CACHE_LIMIT {
-            let Some(expired) = self.state.search_state.preview_cache_order.pop_front() else {
+        self.state.search_state.preview.entries.insert(key, entry);
+        while self.state.search_state.preview.order.len() > SEARCH_PREVIEW_CACHE_LIMIT {
+            let Some(expired) = self.state.search_state.preview.order.pop_front() else {
                 break;
             };
-            self.state.search_state.preview_cache.remove(&expired);
+            self.state.search_state.preview.entries.remove(&expired);
         }
     }
 
     fn touch_search_preview_cache_key(&mut self, key: SearchPreviewCacheKey) {
         self.state
             .search_state
-            .preview_cache_order
+            .preview
+            .order
             .retain(|existing| existing != &key);
-        self.state.search_state.preview_cache_order.push_back(key);
+        self.state.search_state.preview.order.push_back(key);
     }
 
     pub fn replace_all_search_matches(&mut self) -> bool {

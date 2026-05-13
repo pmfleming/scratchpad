@@ -98,242 +98,318 @@ impl WorkspaceSelectionState {
     }
 }
 
-impl ScratchpadApp {
+pub(crate) fn tab_slot_selected(app: &ScratchpadApp, slot_index: usize) -> bool {
+    app.state.workspace_selection.contains(slot_index)
+}
+
+pub(crate) fn ensure_active_tab_slot_selected(app: &mut ScratchpadApp) {
+    if total_tab_slots(app) == 0 {
+        app.state.workspace_selection.reset();
+        return;
+    }
+
+    let active_slot = active_tab_slot_index(app);
+    let existing_slots = display_tab_slots(app);
+    app.state
+        .workspace_selection
+        .ensure_active_slot(active_slot, |slot_index| {
+            existing_slots.get(slot_index).is_some()
+        });
+}
+
+fn tab_slot_exists(app: &ScratchpadApp, slot_index: usize) -> bool {
+    display_tab_slot(app, slot_index).is_some()
+}
+
+fn reset_tab_selection(app: &mut ScratchpadApp) {
+    app.state.workspace_selection.reset();
+}
+
+pub(crate) fn clear_tab_selection(app: &mut ScratchpadApp) {
+    reset_tab_selection(app);
+    ensure_active_tab_slot_selected(app);
+}
+
+pub(crate) fn select_only_tab_slot(app: &mut ScratchpadApp, slot_index: usize) {
+    reset_tab_selection(app);
+    if tab_slot_exists(app, slot_index) {
+        app.state.workspace_selection.select_only(slot_index);
+    }
+}
+
+pub(crate) fn toggle_tab_slot_selection(app: &mut ScratchpadApp, slot_index: usize) {
+    if !tab_slot_exists(app, slot_index) {
+        clear_tab_selection(app);
+        return;
+    }
+
+    app.state.workspace_selection.toggle(slot_index);
+    ensure_active_tab_slot_selected(app);
+}
+
+pub(crate) fn select_tab_slot_range(app: &mut ScratchpadApp, slot_index: usize) {
+    if !tab_slot_exists(app, slot_index) {
+        reset_tab_selection(app);
+        ensure_active_tab_slot_selected(app);
+        return;
+    }
+
+    let anchor = app
+        .state
+        .workspace_selection
+        .anchor()
+        .or_else(|| {
+            tab_slot_exists(app, active_tab_slot_index(app)).then_some(active_tab_slot_index(app))
+        })
+        .unwrap_or(slot_index);
+    let existing_slots = display_tab_slots(app);
+    app.state
+        .workspace_selection
+        .select_range(anchor, slot_index, |candidate| {
+            existing_slots.get(candidate).is_some()
+        });
+}
+
+pub(crate) fn dragged_tab_slots(app: &ScratchpadApp, source_slot: usize) -> Vec<usize> {
+    app.state.workspace_selection.dragged_slots(source_slot)
+}
+
+pub(crate) fn total_tab_slots(app: &ScratchpadApp) -> usize {
+    app.tab_manager.total_tab_slots(app.settings_tab_open())
+}
+
+pub(crate) fn tab_slot_is_settings(app: &ScratchpadApp, slot_index: usize) -> bool {
+    app.tab_manager.tab_slot_is_settings(
+        slot_index,
+        app.settings_tab_open(),
+        app.state.settings_tab_index,
+    )
+}
+
+pub(crate) fn workspace_index_for_slot(app: &ScratchpadApp, slot_index: usize) -> Option<usize> {
+    app.tab_manager.workspace_index_for_slot(
+        slot_index,
+        app.settings_tab_open(),
+        app.state.settings_tab_index,
+    )
+}
+
+pub(crate) fn slot_for_workspace_index(app: &ScratchpadApp, workspace_index: usize) -> usize {
+    app.tab_manager.slot_for_workspace_index(
+        workspace_index,
+        app.settings_tab_open(),
+        app.state.settings_tab_index,
+    )
+}
+
+pub(crate) fn active_tab_slot_index(app: &ScratchpadApp) -> usize {
+    app.tab_manager.active_tab_slot_index(
+        app.showing_settings(),
+        app.settings_tab_open(),
+        app.state.settings_tab_index,
+    )
+}
+
+fn display_tab_slot(app: &ScratchpadApp, slot_index: usize) -> Option<DisplayTabSlot> {
+    app.tab_manager.display_tab_slot(
+        slot_index,
+        app.settings_tab_open(),
+        app.state.settings_tab_index,
+    )
+}
+
+fn display_tab_slots(app: &ScratchpadApp) -> Vec<DisplayTabSlot> {
+    app.tab_manager
+        .display_tab_slots(app.settings_tab_open(), app.state.settings_tab_index)
+}
+
+pub(crate) fn display_tab_name_at_slot(app: &ScratchpadApp, slot_index: usize) -> Option<String> {
+    match display_tab_slot(app, slot_index)? {
+        DisplayTabSlot::Settings => Some("Settings".to_owned()),
+        DisplayTabSlot::Workspace(workspace_index) => {
+            let tabs = app.tab_manager.tabs.as_slice();
+            let tab = tabs.get(workspace_index)?;
+            let has_duplicate = tabs.iter().enumerate().any(|(candidate_index, candidate)| {
+                candidate_index != workspace_index && candidate.buffer.name == tab.buffer.name
+            });
+            Some(crate::app::domain::tab::summary::full_display_name(
+                tab,
+                has_duplicate,
+            ))
+        }
+    }
+}
+
+pub(crate) fn display_tab_name_at_slot_with_counts(
+    app: &ScratchpadApp,
+    slot_index: usize,
+    duplicate_name_counts: &HashMap<String, usize>,
+) -> Option<String> {
+    match display_tab_slot(app, slot_index)? {
+        DisplayTabSlot::Settings => Some("Settings".to_owned()),
+        DisplayTabSlot::Workspace(workspace_index) => {
+            let tab = app.tab_manager.tabs.as_slice().get(workspace_index)?;
+            let has_duplicate = duplicate_name_counts
+                .get(&tab.buffer.name)
+                .is_some_and(|count| *count > 1);
+            Some(crate::app::domain::tab::summary::full_display_name(
+                tab,
+                has_duplicate,
+            ))
+        }
+    }
+}
+
+pub(crate) fn reorder_display_tab(
+    app: &mut ScratchpadApp,
+    from_slot: usize,
+    to_slot: usize,
+) -> bool {
+    let total_slots = total_tab_slots(app);
+    if from_slot >= total_slots || to_slot >= total_slots || from_slot == to_slot {
+        return false;
+    }
+
+    let mut display_slots = display_tab_slots(app);
+    let moved_slot = display_slots.remove(from_slot);
+    display_slots.insert(to_slot, moved_slot);
+    apply_display_tab_order(app, display_slots);
+    true
+}
+
+pub(crate) fn reorder_display_tab_group(
+    app: &mut ScratchpadApp,
+    mut from_slots: Vec<usize>,
+    to_slot: usize,
+) -> bool {
+    let total_slots = total_tab_slots(app);
+    if from_slots.is_empty() || to_slot > total_slots {
+        return false;
+    }
+
+    from_slots.sort_unstable();
+    from_slots.dedup();
+    if from_slots.iter().any(|slot| *slot >= total_slots) {
+        return false;
+    }
+
+    let display_slots = display_tab_slots(app);
+    let adjusted_to_slot =
+        to_slot.saturating_sub(from_slots.iter().filter(|slot| **slot < to_slot).count());
+    let mut moved_slots = Vec::with_capacity(from_slots.len());
+    let mut remaining_slots = Vec::with_capacity(display_slots.len() - from_slots.len());
+    let mut next_moved_slot = from_slots.iter().copied().peekable();
+    for (slot_index, slot) in display_slots.iter().copied().enumerate() {
+        if next_moved_slot.peek() == Some(&slot_index) {
+            moved_slots.push(slot);
+            next_moved_slot.next();
+        } else {
+            remaining_slots.push(slot);
+        }
+    }
+
+    let mut next_slots = remaining_slots;
+    let insert_index = adjusted_to_slot.min(next_slots.len());
+    next_slots.splice(insert_index..insert_index, moved_slots);
+
+    if next_slots == display_slots {
+        return false;
+    }
+
+    apply_display_tab_order(app, next_slots);
+    true
+}
+
+fn apply_display_tab_order(app: &mut ScratchpadApp, display_slots: Vec<DisplayTabSlot>) {
+    if let Some(settings_index) = display_slots
+        .iter()
+        .position(|slot| *slot == DisplayTabSlot::Settings)
+    {
+        app.state.settings_tab_index = settings_index;
+    }
+
+    let workspace_order = display_slots
+        .into_iter()
+        .filter_map(|slot| match slot {
+            DisplayTabSlot::Workspace(index) => Some(index),
+            DisplayTabSlot::Settings => None,
+        })
+        .collect::<Vec<_>>();
+
+    app.apply_workspace_tab_order(workspace_order);
+}
+
+macro_rules! compat_scratchpad_app_methods {
+    ($type:ty { $($item:item)* }) => {
+        #[allow(dead_code)]
+        impl $type {
+            $($item)*
+        }
+    };
+}
+
+compat_scratchpad_app_methods!(ScratchpadApp {
     pub(crate) fn tab_slot_selected(&self, slot_index: usize) -> bool {
-        self.state.workspace_selection.contains(slot_index)
+        tab_slot_selected(self, slot_index)
     }
 
     pub(crate) fn ensure_active_tab_slot_selected(&mut self) {
-        if self.total_tab_slots() == 0 {
-            self.state.workspace_selection.reset();
-            return;
-        }
-
-        let active_slot = self.active_tab_slot_index();
-        let existing_slots = self.display_tab_slots();
-        self.state
-            .workspace_selection
-            .ensure_active_slot(active_slot, |slot_index| {
-                existing_slots.get(slot_index).is_some()
-            });
-    }
-
-    fn tab_slot_exists(&self, slot_index: usize) -> bool {
-        self.display_tab_slot(slot_index).is_some()
-    }
-
-    fn reset_tab_selection(&mut self) {
-        self.state.workspace_selection.reset();
+        ensure_active_tab_slot_selected(self)
     }
 
     pub(crate) fn clear_tab_selection(&mut self) {
-        self.reset_tab_selection();
-        self.ensure_active_tab_slot_selected();
+        clear_tab_selection(self)
     }
 
     pub(crate) fn select_only_tab_slot(&mut self, slot_index: usize) {
-        self.reset_tab_selection();
-        if self.tab_slot_exists(slot_index) {
-            self.state.workspace_selection.select_only(slot_index);
-        }
+        select_only_tab_slot(self, slot_index)
     }
 
     pub(crate) fn toggle_tab_slot_selection(&mut self, slot_index: usize) {
-        if !self.tab_slot_exists(slot_index) {
-            self.clear_tab_selection();
-            return;
-        }
-
-        self.state.workspace_selection.toggle(slot_index);
-        self.ensure_active_tab_slot_selected();
+        toggle_tab_slot_selection(self, slot_index)
     }
 
     pub(crate) fn select_tab_slot_range(&mut self, slot_index: usize) {
-        if !self.tab_slot_exists(slot_index) {
-            self.reset_tab_selection();
-            self.ensure_active_tab_slot_selected();
-            return;
-        }
-
-        let anchor = self
-            .state
-            .workspace_selection
-            .anchor()
-            .or_else(|| {
-                self.tab_slot_exists(self.active_tab_slot_index())
-                    .then_some(self.active_tab_slot_index())
-            })
-            .unwrap_or(slot_index);
-        let existing_slots = self.display_tab_slots();
-        self.state
-            .workspace_selection
-            .select_range(anchor, slot_index, |candidate| {
-                existing_slots.get(candidate).is_some()
-            });
+        select_tab_slot_range(self, slot_index)
     }
 
     pub(crate) fn dragged_tab_slots(&self, source_slot: usize) -> Vec<usize> {
-        self.state.workspace_selection.dragged_slots(source_slot)
+        dragged_tab_slots(self, source_slot)
     }
 
     pub(crate) fn total_tab_slots(&self) -> usize {
-        self.tab_manager.total_tab_slots(self.settings_tab_open())
+        total_tab_slots(self)
     }
 
     pub(crate) fn tab_slot_is_settings(&self, slot_index: usize) -> bool {
-        self.tab_manager.tab_slot_is_settings(
-            slot_index,
-            self.settings_tab_open(),
-            self.state.settings_tab_index,
-        )
+        tab_slot_is_settings(self, slot_index)
     }
 
     pub(crate) fn workspace_index_for_slot(&self, slot_index: usize) -> Option<usize> {
-        self.tab_manager.workspace_index_for_slot(
-            slot_index,
-            self.settings_tab_open(),
-            self.state.settings_tab_index,
-        )
+        workspace_index_for_slot(self, slot_index)
     }
 
     pub(crate) fn slot_for_workspace_index(&self, workspace_index: usize) -> usize {
-        self.tab_manager.slot_for_workspace_index(
-            workspace_index,
-            self.settings_tab_open(),
-            self.state.settings_tab_index,
-        )
+        slot_for_workspace_index(self, workspace_index)
     }
 
     pub(crate) fn active_tab_slot_index(&self) -> usize {
-        self.tab_manager.active_tab_slot_index(
-            self.showing_settings(),
-            self.settings_tab_open(),
-            self.state.settings_tab_index,
-        )
-    }
-
-    fn display_tab_slot(&self, slot_index: usize) -> Option<DisplayTabSlot> {
-        self.tab_manager.display_tab_slot(
-            slot_index,
-            self.settings_tab_open(),
-            self.state.settings_tab_index,
-        )
-    }
-
-    fn display_tab_slots(&self) -> Vec<DisplayTabSlot> {
-        self.tab_manager
-            .display_tab_slots(self.settings_tab_open(), self.state.settings_tab_index)
+        active_tab_slot_index(self)
     }
 
     pub(crate) fn display_tab_name_at_slot(&self, slot_index: usize) -> Option<String> {
-        match self.display_tab_slot(slot_index)? {
-            DisplayTabSlot::Settings => Some("Settings".to_owned()),
-            DisplayTabSlot::Workspace(workspace_index) => {
-                let tabs = self.tab_manager.tabs.as_slice();
-                let tab = tabs.get(workspace_index)?;
-                let has_duplicate = tabs.iter().enumerate().any(|(candidate_index, candidate)| {
-                    candidate_index != workspace_index && candidate.buffer.name == tab.buffer.name
-                });
-                Some(crate::app::domain::tab::summary::full_display_name(
-                    tab,
-                    has_duplicate,
-                ))
-            }
-        }
+        display_tab_name_at_slot(self, slot_index)
     }
 
-    pub(crate) fn display_tab_name_at_slot_with_counts(
-        &self,
-        slot_index: usize,
-        duplicate_name_counts: &HashMap<String, usize>,
-    ) -> Option<String> {
-        match self.display_tab_slot(slot_index)? {
-            DisplayTabSlot::Settings => Some("Settings".to_owned()),
-            DisplayTabSlot::Workspace(workspace_index) => {
-                let tab = self.tab_manager.tabs.as_slice().get(workspace_index)?;
-                let has_duplicate = duplicate_name_counts
-                    .get(&tab.buffer.name)
-                    .is_some_and(|count| *count > 1);
-                Some(crate::app::domain::tab::summary::full_display_name(
-                    tab,
-                    has_duplicate,
-                ))
-            }
-        }
+    pub(crate) fn display_tab_name_at_slot_with_counts(&self, slot_index: usize, duplicate_name_counts: &HashMap<String, usize>) -> Option<String> {
+        display_tab_name_at_slot_with_counts(self, slot_index, duplicate_name_counts)
     }
 
     pub(crate) fn reorder_display_tab(&mut self, from_slot: usize, to_slot: usize) -> bool {
-        let total_slots = self.total_tab_slots();
-        if from_slot >= total_slots || to_slot >= total_slots || from_slot == to_slot {
-            return false;
-        }
-
-        let mut display_slots = self.display_tab_slots();
-        let moved_slot = display_slots.remove(from_slot);
-        display_slots.insert(to_slot, moved_slot);
-        self.apply_display_tab_order(display_slots);
-        true
+        reorder_display_tab(self, from_slot, to_slot)
     }
 
-    pub(crate) fn reorder_display_tab_group(
-        &mut self,
-        mut from_slots: Vec<usize>,
-        to_slot: usize,
-    ) -> bool {
-        let total_slots = self.total_tab_slots();
-        if from_slots.is_empty() || to_slot > total_slots {
-            return false;
-        }
-
-        from_slots.sort_unstable();
-        from_slots.dedup();
-        if from_slots.iter().any(|slot| *slot >= total_slots) {
-            return false;
-        }
-
-        let display_slots = self.display_tab_slots();
-        let adjusted_to_slot =
-            to_slot.saturating_sub(from_slots.iter().filter(|slot| **slot < to_slot).count());
-        let mut moved_slots = Vec::with_capacity(from_slots.len());
-        let mut remaining_slots = Vec::with_capacity(display_slots.len() - from_slots.len());
-        let mut next_moved_slot = from_slots.iter().copied().peekable();
-        for (slot_index, slot) in display_slots.iter().copied().enumerate() {
-            if next_moved_slot.peek() == Some(&slot_index) {
-                moved_slots.push(slot);
-                next_moved_slot.next();
-            } else {
-                remaining_slots.push(slot);
-            }
-        }
-
-        let mut next_slots = remaining_slots;
-        let insert_index = adjusted_to_slot.min(next_slots.len());
-        next_slots.splice(insert_index..insert_index, moved_slots);
-
-        if next_slots == display_slots {
-            return false;
-        }
-
-        self.apply_display_tab_order(next_slots);
-        true
+    pub(crate) fn reorder_display_tab_group(&mut self, from_slots: Vec<usize>, to_slot: usize) -> bool {
+        reorder_display_tab_group(self, from_slots, to_slot)
     }
-
-    fn apply_display_tab_order(&mut self, display_slots: Vec<DisplayTabSlot>) {
-        if let Some(settings_index) = display_slots
-            .iter()
-            .position(|slot| *slot == DisplayTabSlot::Settings)
-        {
-            self.state.settings_tab_index = settings_index;
-        }
-
-        let workspace_order = display_slots
-            .into_iter()
-            .filter_map(|slot| match slot {
-                DisplayTabSlot::Workspace(index) => Some(index),
-                DisplayTabSlot::Settings => None,
-            })
-            .collect::<Vec<_>>();
-
-        self.apply_workspace_tab_order(workspace_order);
-    }
-}
+});

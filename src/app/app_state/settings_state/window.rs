@@ -4,9 +4,9 @@ use eframe::egui;
 
 impl ScratchpadApp {
     pub(crate) fn record_window_state(&mut self, ctx: &egui::Context) {
-        let previous = self.state.app_settings.window_state.clone();
+        let previous = self.state.app_settings.ui.window_state.clone();
         let next = ctx.input(|input| window_state_from_viewport(input.viewport(), previous));
-        self.state.app_settings.window_state = next;
+        self.state.app_settings.ui.window_state = next;
     }
 }
 

@@ -6,161 +6,163 @@ use crate::app::commands::AppCommand;
 use crate::app::domain::{BufferFreshness, BufferId, ViewId, WorkspaceTab};
 use crate::app::services::background_io::LoadedPathResult;
 
-impl ScratchpadApp {
-    pub(crate) fn refresh_startup_restore_conflicts(&mut self) {
-        self.state.startup_restore_conflicts = self
-            .tab_manager
-            .tabs
-            .as_slice()
-            .iter()
-            .enumerate()
-            .flat_map(|(tab_index, tab)| collect_tab_restore_conflicts(tab_index, tab))
-            .collect();
+pub(crate) fn refresh_startup_restore_conflicts(app: &mut ScratchpadApp) {
+    app.state.startup_restore_conflicts = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .enumerate()
+        .flat_map(|(tab_index, tab)| collect_tab_restore_conflicts(tab_index, tab))
+        .collect();
+}
+
+pub(crate) fn current_startup_restore_conflict(
+    app: &ScratchpadApp,
+) -> Option<&StartupRestoreConflict> {
+    app.state.startup_restore_conflicts.first()
+}
+
+pub(crate) fn dismiss_current_startup_restore_conflict(app: &mut ScratchpadApp) {
+    if !app.state.startup_restore_conflicts.is_empty() {
+        app.state.startup_restore_conflicts.remove(0);
+    }
+}
+
+pub(crate) fn keep_session_version_for_current_startup_restore_conflict(app: &mut ScratchpadApp) {
+    let Some(conflict) = current_startup_restore_conflict(app).cloned() else {
+        return;
+    };
+    if let Some(buffer) = app
+        .tab_manager
+        .tabs
+        .as_mut_slice()
+        .get_mut(conflict.tab_index)
+        .and_then(|tab| {
+            tab.buffer_for_view(conflict.view_id)
+                .map(|buffer| buffer.id)
+        })
+        .and_then(|buffer_id| {
+            app.tab_manager
+                .tabs
+                .as_mut_slice()
+                .get_mut(conflict.tab_index)
+                .and_then(|tab| tab.buffer_by_id_mut(buffer_id))
+        })
+    {
+        buffer.document_mut().revalidate_history_for_current_text();
+    }
+    dismiss_current_startup_restore_conflict(app);
+}
+
+pub(crate) fn open_disk_version_for_current_startup_restore_conflict(
+    app: &mut ScratchpadApp,
+) -> bool {
+    let Some(conflict) = take_current_startup_restore_conflict(app) else {
+        return false;
+    };
+    if let Some(buffer) = app
+        .tab_manager
+        .tabs
+        .as_mut_slice()
+        .get_mut(conflict.tab_index)
+        .and_then(|tab| {
+            tab.buffer_for_view(conflict.view_id)
+                .map(|buffer| buffer.id)
+        })
+        .and_then(|buffer_id| {
+            app.tab_manager
+                .tabs
+                .as_mut_slice()
+                .get_mut(conflict.tab_index)
+                .and_then(|tab| tab.buffer_by_id_mut(buffer_id))
+        })
+    {
+        buffer.document_mut().clear_operation_history();
     }
 
-    pub(crate) fn current_startup_restore_conflict(&self) -> Option<&StartupRestoreConflict> {
-        self.state.startup_restore_conflicts.first()
-    }
+    app.queue_background_path_loads(
+        vec![conflict.path.clone()],
+        PendingBackgroundAction::StartupRestoreCompare(PendingStartupRestoreCompareAction {
+            conflict,
+        }),
+    );
+    true
+}
 
-    pub(crate) fn dismiss_current_startup_restore_conflict(&mut self) {
-        if !self.state.startup_restore_conflicts.is_empty() {
-            self.state.startup_restore_conflicts.remove(0);
-        }
-    }
+pub(crate) fn apply_async_startup_restore_compare_result(
+    app: &mut ScratchpadApp,
+    action: PendingStartupRestoreCompareAction,
+    mut results: Vec<LoadedPathResult>,
+) {
+    let Some(result) = results.pop() else {
+        return;
+    };
+    let conflict = action.conflict;
 
-    pub(crate) fn keep_session_version_for_current_startup_restore_conflict(&mut self) {
-        let Some(conflict) = self.current_startup_restore_conflict().cloned() else {
-            return;
-        };
-        if let Some(buffer) = self
-            .tab_manager
-            .tabs
-            .as_mut_slice()
-            .get_mut(conflict.tab_index)
-            .and_then(|tab| {
-                tab.buffer_for_view(conflict.view_id)
-                    .map(|buffer| buffer.id)
-            })
-            .and_then(|buffer_id| {
-                self.tab_manager
-                    .tabs
-                    .as_mut_slice()
-                    .get_mut(conflict.tab_index)
-                    .and_then(|tab| tab.buffer_by_id_mut(buffer_id))
-            })
-        {
-            buffer.document_mut().revalidate_history_for_current_text();
-        }
-        self.dismiss_current_startup_restore_conflict();
-    }
-
-    pub(crate) fn open_disk_version_for_current_startup_restore_conflict(&mut self) -> bool {
-        let Some(conflict) = take_current_startup_restore_conflict(self) else {
-            return false;
-        };
-        if let Some(buffer) = self
-            .tab_manager
-            .tabs
-            .as_mut_slice()
-            .get_mut(conflict.tab_index)
-            .and_then(|tab| {
-                tab.buffer_for_view(conflict.view_id)
-                    .map(|buffer| buffer.id)
-            })
-            .and_then(|buffer_id| {
-                self.tab_manager
-                    .tabs
-                    .as_mut_slice()
-                    .get_mut(conflict.tab_index)
-                    .and_then(|tab| tab.buffer_by_id_mut(buffer_id))
-            })
-        {
-            buffer.document_mut().clear_operation_history();
-        }
-
-        self.queue_background_path_loads(
-            vec![conflict.path.clone()],
-            PendingBackgroundAction::StartupRestoreCompare(PendingStartupRestoreCompareAction {
-                conflict,
-            }),
-        );
-        true
-    }
-
-    pub(crate) fn apply_async_startup_restore_compare_result(
-        &mut self,
-        action: PendingStartupRestoreCompareAction,
-        mut results: Vec<LoadedPathResult>,
-    ) {
-        let Some(result) = results.pop() else {
-            return;
-        };
-        let conflict = action.conflict;
-
-        let loaded_buffer = match result.result {
-            Ok(buffer) => buffer,
-            Err(error) => {
-                self.state.status.set_warning_status_with_detail(
-                    StatusDomain::Disk,
-                    format!("Could not load disk version of {}.", conflict.buffer_name),
-                    error,
-                );
-                return;
-            }
-        };
-
-        let Some(buffer_id) = conflicted_buffer_id(self, &conflict) else {
-            self.state.status.set_warning_status_in_domain(
-                StatusDomain::Layout,
-                format!(
-                    "Could not find the conflicted tab for {}.",
-                    conflict.buffer_name
-                ),
+    let loaded_buffer = match result.result {
+        Ok(buffer) => buffer,
+        Err(error) => {
+            app.state.status.set_warning_status_with_detail(
+                StatusDomain::Disk,
+                format!("Could not load disk version of {}.", conflict.buffer_name),
+                error,
             );
             return;
-        };
-
-        if conflict.tab_index < self.tab_manager.tabs.as_slice().len() {
-            self.handle_command(AppCommand::ActivateTab {
-                index: conflict.tab_index,
-            });
-            self.handle_command(AppCommand::ActivateView {
-                view_id: conflict.view_id,
-            });
         }
+    };
 
-        let settings_path = self.settings_path().to_path_buf();
-        if let Some(tab) = self
-            .tab_manager
-            .tabs
-            .as_mut_slice()
-            .get_mut(conflict.tab_index)
-        {
-            tab.clear_view_state_for_buffer_replacement(buffer_id);
-            for view in &mut tab.views {
-                if view.buffer_id == buffer_id {
-                    view.layout_cache.clear();
-                }
-            }
-            if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
-                buffer.replace_from_loaded_buffer(loaded_buffer);
-                buffer.is_dirty = false;
-                buffer.sync_to_disk_state(result.disk_state);
-                buffer.is_settings_file = buffer
-                    .path
-                    .as_ref()
-                    .is_some_and(|path| crate::app::paths_match(path, &settings_path));
-            }
-        }
-
-        self.mark_search_dirty();
-        self.tab_manager.mark_session_dirty();
-        let _ = self.persist_session_now();
-        self.state.status.set_info_status_in_domain(
-            StatusDomain::Disk,
-            format!("Loaded disk version of {}.", conflict.buffer_name),
+    let Some(buffer_id) = conflicted_buffer_id(app, &conflict) else {
+        app.state.status.set_warning_status_in_domain(
+            StatusDomain::Layout,
+            format!(
+                "Could not find the conflicted tab for {}.",
+                conflict.buffer_name
+            ),
         );
+        return;
+    };
+
+    if conflict.tab_index < app.tab_manager.tabs.as_slice().len() {
+        app.handle_command(AppCommand::ActivateTab {
+            index: conflict.tab_index,
+        });
+        app.handle_command(AppCommand::ActivateView {
+            view_id: conflict.view_id,
+        });
     }
+
+    let settings_path = app.settings_path().to_path_buf();
+    if let Some(tab) = app
+        .tab_manager
+        .tabs
+        .as_mut_slice()
+        .get_mut(conflict.tab_index)
+    {
+        tab.clear_view_state_for_buffer_replacement(buffer_id);
+        for view in &mut tab.views {
+            if view.buffer_id == buffer_id {
+                view.layout_cache.clear();
+            }
+        }
+        if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
+            buffer.replace_from_loaded_buffer(loaded_buffer);
+            buffer.is_dirty = false;
+            buffer.sync_to_disk_state(result.disk_state);
+            buffer.is_settings_file = buffer
+                .path
+                .as_ref()
+                .is_some_and(|path| crate::app::paths_match(path, &settings_path));
+        }
+    }
+
+    app.mark_search_dirty();
+    app.tab_manager.mark_session_dirty();
+    let _ = app.persist_session_now();
+    app.state.status.set_info_status_in_domain(
+        StatusDomain::Disk,
+        format!("Loaded disk version of {}.", conflict.buffer_name),
+    );
 }
 
 fn conflicted_buffer_id(
@@ -214,6 +216,41 @@ fn take_current_startup_restore_conflict(
         Some(app.state.startup_restore_conflicts.remove(0))
     }
 }
+
+macro_rules! compat_scratchpad_app_methods {
+    ($type:ty { $($item:item)* }) => {
+        #[allow(dead_code)]
+        impl $type {
+            $($item)*
+        }
+    };
+}
+
+compat_scratchpad_app_methods!(ScratchpadApp {
+    pub(crate) fn refresh_startup_restore_conflicts(&mut self) {
+        refresh_startup_restore_conflicts(self)
+    }
+
+    pub(crate) fn current_startup_restore_conflict(&self) -> Option<&StartupRestoreConflict> {
+        current_startup_restore_conflict(self)
+    }
+
+    pub(crate) fn dismiss_current_startup_restore_conflict(&mut self) {
+        dismiss_current_startup_restore_conflict(self)
+    }
+
+    pub(crate) fn keep_session_version_for_current_startup_restore_conflict(&mut self) {
+        keep_session_version_for_current_startup_restore_conflict(self)
+    }
+
+    pub(crate) fn open_disk_version_for_current_startup_restore_conflict(&mut self) -> bool {
+        open_disk_version_for_current_startup_restore_conflict(self)
+    }
+
+    pub(crate) fn apply_async_startup_restore_compare_result(&mut self, action: PendingStartupRestoreCompareAction, results: Vec<LoadedPathResult>) {
+        apply_async_startup_restore_compare_result(self, action, results)
+    }
+});
 
 #[cfg(test)]
 mod tests {

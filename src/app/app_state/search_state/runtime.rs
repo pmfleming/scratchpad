@@ -13,261 +13,307 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-impl ScratchpadApp {
-    pub(crate) fn refresh_search_view_state(&mut self) {
-        if !self.search_is_active() {
-            self.clear_search_highlights();
-            return;
+pub(crate) fn refresh_search_view_state(app: &mut ScratchpadApp) {
+    if !search_is_active(app) {
+        app.clear_search_highlights();
+        return;
+    }
+    app.refresh_search_visual_state();
+}
+
+pub(crate) fn take_search_focus_target(app: &mut ScratchpadApp) -> Option<SearchFocusTarget> {
+    app.state.search_state.panel.focus_target.take()
+}
+
+pub(crate) fn request_search_focus(app: &mut ScratchpadApp, target: SearchFocusTarget) {
+    app.state.search_state.panel.focus_target = Some(target);
+}
+
+pub(crate) fn refresh_search_state(app: &mut ScratchpadApp) {
+    poll_search_results(app);
+    if !search_is_active(app) {
+        clear_inactive_search_state(app);
+        return;
+    }
+    if !app.state.search_state.runtime.dirty {
+        return;
+    }
+
+    if app.state.search_state.query.scope == SearchScope::SelectionOnly
+        && app.active_search_selection_range().is_none()
+    {
+        set_selection_only_search_error(app);
+        return;
+    }
+
+    submit_search_request(app);
+    app.state.search_state.runtime.dirty = false;
+}
+
+pub(crate) fn mark_search_dirty(app: &mut ScratchpadApp) {
+    if app.state.search_state.panel.open {
+        app.state.search_state.runtime.dirty = true;
+        if !matches!(app.state.search_state.runtime.status, SearchStatus::Idle) {
+            app.state.search_state.runtime.freshness = SearchFreshness::Stale;
         }
-        self.refresh_search_visual_state();
+    }
+}
+
+fn submit_search_request(app: &mut ScratchpadApp) {
+    let generation = app
+        .state
+        .search_state
+        .runtime
+        .requested_generation
+        .saturating_add(1);
+    let targets = collect_search_targets(app, app.state.search_state.query.scope);
+    let request = app.state.search_state.build_request(generation, targets);
+    app.state.search_state.begin_request(generation);
+    app.clear_search_highlights();
+
+    if let Err(error) = app.state.search_state.runtime.request_tx.send(request) {
+        let latest_generation = AtomicU64::new(generation);
+        if let Some(result) = process_search_request(error.0, &latest_generation) {
+            apply_search_result(app, result);
+        }
+    }
+}
+
+fn poll_search_results(app: &mut ScratchpadApp) {
+    let mut latest_result = None;
+    while let Ok(result) = app.state.search_state.runtime.result_rx.try_recv() {
+        if result.generation == app.state.search_state.runtime.requested_generation {
+            latest_result = Some(result);
+        }
+    }
+    if let Some(result) = latest_result {
+        apply_search_result(app, result);
+    }
+}
+
+fn apply_search_result(app: &mut ScratchpadApp, result: SearchResult) {
+    let SearchResult {
+        generation,
+        matches,
+        displayed_match_count,
+        result_groups,
+        status,
+    } = result;
+    let is_partial = matches!(status, SearchStatus::Searching { .. });
+    app.state.search_state.results.active_match_index = preferred_active_match_index(
+        app,
+        &matches,
+        app.state
+            .search_state
+            .results
+            .previous_active_match
+            .as_ref(),
+    );
+    app.state.search_state.results.matches = matches;
+    app.state.search_state.results.total_match_count = app.state.search_state.results.matches.len();
+    app.state.search_state.results.displayed_match_count = displayed_match_count;
+    app.state.search_state.results.result_groups = Arc::from(result_groups);
+    app.state.search_state.runtime.searching = is_partial;
+    if !is_partial {
+        app.state.search_state.results.previous_active_match = None;
+    }
+    app.state.search_state.runtime.applied_generation = generation;
+    app.state.search_state.runtime.status = status;
+    app.state.search_state.runtime.freshness = SearchFreshness::Fresh;
+    app.refresh_search_visual_state();
+}
+
+#[doc(hidden)]
+pub fn profile_build_search_request(app: &ScratchpadApp, scope: SearchScope, query: &str) -> usize {
+    let generation = app
+        .state
+        .search_state
+        .runtime
+        .requested_generation
+        .saturating_add(1);
+    let targets = collect_search_targets(app, scope);
+    let request = SearchRequest {
+        generation,
+        query: query.to_owned(),
+        options: app.state.search_state.search_options(),
+        targets,
+    };
+    request
+        .targets
+        .iter()
+        .map(|target| target.document_snapshot.document_length().chars)
+        .sum::<usize>()
+        + request.query.len()
+}
+
+fn collect_search_targets(app: &ScratchpadApp, scope: SearchScope) -> Vec<SearchTargetSnapshot> {
+    match scope {
+        SearchScope::SelectionOnly => {
+            active_search_target(app, app.active_search_selection_range())
+                .into_iter()
+                .collect()
+        }
+        SearchScope::ActiveBuffer => active_search_target(app, None).into_iter().collect(),
+        SearchScope::ActiveWorkspaceTab => collect_active_tab_search_targets(app),
+        SearchScope::AllOpenTabs => {
+            let active_tab_index = app.tab_manager.active_tab_index;
+            let mut seen_files = HashSet::<SearchFileIdentity>::new();
+            (0..app.tab_manager.tabs.as_slice().len())
+                .map(|offset| {
+                    (active_tab_index + offset) % app.tab_manager.tabs.as_slice().len().max(1)
+                })
+                .flat_map(|tab_index| {
+                    let prioritized_buffer_id = (tab_index == active_tab_index)
+                        .then(|| {
+                            app.tab_manager
+                                .active_tab()
+                                .and_then(|tab| tab.active_view())
+                                .map(|view| view.buffer_id)
+                        })
+                        .flatten();
+                    collect_search_targets_for_tab(app, tab_index, prioritized_buffer_id, None)
+                })
+                .filter(|target| seen_files.insert(target.file_identity.clone()))
+                .collect()
+        }
+    }
+}
+
+fn clear_inactive_search_state(app: &mut ScratchpadApp) {
+    app.state.search_state.clear_inactive_results();
+    app.state.search_state.runtime.status = SearchStatus::Idle;
+    app.state.search_state.runtime.freshness = SearchFreshness::Fresh;
+    app.clear_search_highlights();
+}
+
+fn set_selection_only_search_error(app: &mut ScratchpadApp) {
+    app.state.search_state.runtime.searching = false;
+    app.state.search_state.runtime.status =
+        SearchStatus::Error("Selection-only search requires an active selection.".to_owned());
+    app.state.search_state.runtime.freshness = SearchFreshness::Fresh;
+    app.state.search_state.clear_match_results();
+    app.state.search_state.runtime.dirty = false;
+    app.clear_search_highlights();
+}
+
+fn collect_active_tab_search_targets(app: &ScratchpadApp) -> Vec<SearchTargetSnapshot> {
+    collect_search_targets_for_tab(
+        app,
+        app.tab_manager.active_tab_index,
+        app.tab_manager
+            .active_tab()
+            .and_then(|tab| tab.active_view())
+            .map(|view| view.buffer_id),
+        None,
+    )
+}
+
+fn active_search_target(
+    app: &ScratchpadApp,
+    search_range: Option<Range<usize>>,
+) -> Option<SearchTargetSnapshot> {
+    let tab_index = app.tab_manager.active_tab_index;
+    let tab_label = search_tab_label(app, tab_index);
+    let tab = app.tab_manager.active_tab()?;
+    build_search_target(tab_index, tab, tab.active_view_id, &tab_label, search_range)
+}
+
+fn collect_search_targets_for_tab(
+    app: &ScratchpadApp,
+    tab_index: usize,
+    prioritized_buffer_id: Option<BufferId>,
+    search_range: Option<Range<usize>>,
+) -> Vec<SearchTargetSnapshot> {
+    let Some(tab) = app.tab_manager.tabs.as_slice().get(tab_index) else {
+        return Vec::new();
+    };
+    let tab_label = search_tab_label(app, tab_index);
+    collect_search_targets_for_views(
+        tab_index,
+        tab,
+        &tab_label,
+        search_range,
+        prioritized_buffer_id,
+        tab.ordered_view_ids_in_layout_order()
+            .into_iter()
+            .filter_map(|view_id| tab.view(view_id))
+            .chain(tab.views.iter()),
+    )
+}
+
+fn search_tab_label(app: &ScratchpadApp, tab_index: usize) -> String {
+    app.display_tab_name_at_slot(app.slot_for_workspace_index(tab_index))
+        .unwrap_or_else(|| format!("Tab {}", tab_index + 1))
+}
+
+fn preferred_active_match_index(
+    app: &ScratchpadApp,
+    matches: &[SearchMatch],
+    previous_active: Option<&SearchMatch>,
+) -> Option<usize> {
+    if matches.is_empty() {
+        return None;
+    }
+    if let Some(previous_active) = previous_active
+        && let Some(index) =
+            first_match_index(matches, |search_match| search_match == previous_active)
+    {
+        return Some(index);
+    }
+
+    if let Some((active_tab_index, active_buffer_id)) = app.active_buffer_identity()
+        && let Some(index) = first_match_index(matches, |search_match| {
+            matches_buffer(search_match, active_tab_index, active_buffer_id)
+        })
+    {
+        return Some(index);
+    }
+
+    first_match_index(matches, |search_match| {
+        search_match.tab_index == app.tab_manager.active_tab_index
+    })
+    .or(Some(0))
+}
+
+pub(super) fn search_is_active(app: &ScratchpadApp) -> bool {
+    app.state.search_state.panel.open && !app.state.search_state.query.query.is_empty()
+}
+
+macro_rules! compat_scratchpad_app_methods {
+    ($type:ty { $($item:item)* }) => {
+        #[allow(dead_code)]
+        impl $type {
+            $($item)*
+        }
+    };
+}
+
+compat_scratchpad_app_methods!(ScratchpadApp {
+    pub(crate) fn refresh_search_view_state(&mut self) {
+        refresh_search_view_state(self)
     }
 
     pub(crate) fn take_search_focus_target(&mut self) -> Option<SearchFocusTarget> {
-        self.state.search_state.focus_target.take()
+        take_search_focus_target(self)
     }
 
     pub(crate) fn request_search_focus(&mut self, target: SearchFocusTarget) {
-        self.state.search_state.focus_target = Some(target);
+        request_search_focus(self, target)
     }
 
     pub(crate) fn refresh_search_state(&mut self) {
-        self.poll_search_results();
-        if !self.search_is_active() {
-            self.clear_inactive_search_state();
-            return;
-        }
-        if !self.state.search_state.dirty {
-            return;
-        }
-
-        if self.state.search_state.scope == SearchScope::SelectionOnly
-            && self.active_search_selection_range().is_none()
-        {
-            self.set_selection_only_search_error();
-            return;
-        }
-
-        self.submit_search_request();
-        self.state.search_state.dirty = false;
+        refresh_search_state(self)
     }
 
     pub(crate) fn mark_search_dirty(&mut self) {
-        if self.state.search_state.open {
-            self.state.search_state.dirty = true;
-            if !matches!(self.state.search_state.status, SearchStatus::Idle) {
-                self.state.search_state.freshness = SearchFreshness::Stale;
-            }
-        }
+        mark_search_dirty(self)
     }
 
-    fn submit_search_request(&mut self) {
-        let generation = self
-            .state
-            .search_state
-            .requested_generation
-            .saturating_add(1);
-        let targets = self.collect_search_targets(self.state.search_state.scope);
-        let request = self.state.search_state.build_request(generation, targets);
-        self.state.search_state.begin_request(generation);
-        self.clear_search_highlights();
-
-        if let Err(error) = self.state.search_state.request_tx.send(request) {
-            let latest_generation = AtomicU64::new(generation);
-            if let Some(result) = process_search_request(error.0, &latest_generation) {
-                self.apply_search_result(result);
-            }
-        }
-    }
-
-    fn poll_search_results(&mut self) {
-        let mut latest_result = None;
-        while let Ok(result) = self.state.search_state.result_rx.try_recv() {
-            if result.generation == self.state.search_state.requested_generation {
-                latest_result = Some(result);
-            }
-        }
-        if let Some(result) = latest_result {
-            self.apply_search_result(result);
-        }
-    }
-
-    fn apply_search_result(&mut self, result: SearchResult) {
-        let SearchResult {
-            generation,
-            matches,
-            displayed_match_count,
-            result_groups,
-            status,
-        } = result;
-        let is_partial = matches!(status, SearchStatus::Searching { .. });
-        self.state.search_state.active_match_index = self.preferred_active_match_index(
-            &matches,
-            self.state.search_state.previous_active_match.as_ref(),
-        );
-        self.state.search_state.matches = matches;
-        self.state.search_state.total_match_count = self.state.search_state.matches.len();
-        self.state.search_state.displayed_match_count = displayed_match_count;
-        self.state.search_state.result_groups = Arc::from(result_groups);
-        self.state.search_state.searching = is_partial;
-        if !is_partial {
-            self.state.search_state.previous_active_match = None;
-        }
-        self.state.search_state.applied_generation = generation;
-        self.state.search_state.status = status;
-        self.state.search_state.freshness = SearchFreshness::Fresh;
-        self.refresh_search_visual_state();
-    }
-
-    #[doc(hidden)]
     pub fn profile_build_search_request(&self, scope: SearchScope, query: &str) -> usize {
-        let generation = self
-            .state
-            .search_state
-            .requested_generation
-            .saturating_add(1);
-        let targets = self.collect_search_targets(scope);
-        let request = SearchRequest {
-            generation,
-            query: query.to_owned(),
-            options: self.state.search_state.search_options(),
-            targets,
-        };
-        request
-            .targets
-            .iter()
-            .map(|target| target.document_snapshot.document_length().chars)
-            .sum::<usize>()
-            + request.query.len()
-    }
-
-    fn collect_search_targets(&self, scope: SearchScope) -> Vec<SearchTargetSnapshot> {
-        match scope {
-            SearchScope::SelectionOnly => self
-                .active_search_target(self.active_search_selection_range())
-                .into_iter()
-                .collect(),
-            SearchScope::ActiveBuffer => self.active_search_target(None).into_iter().collect(),
-            SearchScope::ActiveWorkspaceTab => self.collect_active_tab_search_targets(),
-            SearchScope::AllOpenTabs => {
-                let active_tab_index = self.tab_manager.active_tab_index;
-                let mut seen_files = HashSet::<SearchFileIdentity>::new();
-                (0..self.tab_manager.tabs.as_slice().len())
-                    .map(|offset| {
-                        (active_tab_index + offset) % self.tab_manager.tabs.as_slice().len().max(1)
-                    })
-                    .flat_map(|tab_index| {
-                        let prioritized_buffer_id = (tab_index == active_tab_index)
-                            .then(|| {
-                                self.tab_manager
-                                    .active_tab()
-                                    .and_then(|tab| tab.active_view())
-                                    .map(|view| view.buffer_id)
-                            })
-                            .flatten();
-                        self.collect_search_targets_for_tab(tab_index, prioritized_buffer_id, None)
-                    })
-                    .filter(|target| seen_files.insert(target.file_identity.clone()))
-                    .collect()
-            }
-        }
-    }
-
-    fn clear_inactive_search_state(&mut self) {
-        self.state.search_state.clear_inactive_results();
-        self.state.search_state.status = SearchStatus::Idle;
-        self.state.search_state.freshness = SearchFreshness::Fresh;
-        self.clear_search_highlights();
-    }
-
-    fn set_selection_only_search_error(&mut self) {
-        self.state.search_state.searching = false;
-        self.state.search_state.status =
-            SearchStatus::Error("Selection-only search requires an active selection.".to_owned());
-        self.state.search_state.freshness = SearchFreshness::Fresh;
-        self.state.search_state.clear_match_results();
-        self.state.search_state.dirty = false;
-        self.clear_search_highlights();
-    }
-
-    fn collect_active_tab_search_targets(&self) -> Vec<SearchTargetSnapshot> {
-        self.collect_search_targets_for_tab(
-            self.tab_manager.active_tab_index,
-            self.tab_manager
-                .active_tab()
-                .and_then(|tab| tab.active_view())
-                .map(|view| view.buffer_id),
-            None,
-        )
-    }
-
-    fn active_search_target(
-        &self,
-        search_range: Option<Range<usize>>,
-    ) -> Option<SearchTargetSnapshot> {
-        let tab_index = self.tab_manager.active_tab_index;
-        let tab_label = self.search_tab_label(tab_index);
-        let tab = self.tab_manager.active_tab()?;
-        build_search_target(tab_index, tab, tab.active_view_id, &tab_label, search_range)
-    }
-
-    fn collect_search_targets_for_tab(
-        &self,
-        tab_index: usize,
-        prioritized_buffer_id: Option<BufferId>,
-        search_range: Option<Range<usize>>,
-    ) -> Vec<SearchTargetSnapshot> {
-        let Some(tab) = self.tab_manager.tabs.as_slice().get(tab_index) else {
-            return Vec::new();
-        };
-        let tab_label = self.search_tab_label(tab_index);
-        collect_search_targets_for_views(
-            tab_index,
-            tab,
-            &tab_label,
-            search_range,
-            prioritized_buffer_id,
-            tab.ordered_view_ids_in_layout_order()
-                .into_iter()
-                .filter_map(|view_id| tab.view(view_id))
-                .chain(tab.views.iter()),
-        )
-    }
-
-    fn search_tab_label(&self, tab_index: usize) -> String {
-        self.display_tab_name_at_slot(self.slot_for_workspace_index(tab_index))
-            .unwrap_or_else(|| format!("Tab {}", tab_index + 1))
-    }
-
-    fn preferred_active_match_index(
-        &self,
-        matches: &[SearchMatch],
-        previous_active: Option<&SearchMatch>,
-    ) -> Option<usize> {
-        if matches.is_empty() {
-            return None;
-        }
-        if let Some(previous_active) = previous_active
-            && let Some(index) =
-                first_match_index(matches, |search_match| search_match == previous_active)
-        {
-            return Some(index);
-        }
-
-        if let Some((active_tab_index, active_buffer_id)) = self.active_buffer_identity()
-            && let Some(index) = first_match_index(matches, |search_match| {
-                matches_buffer(search_match, active_tab_index, active_buffer_id)
-            })
-        {
-            return Some(index);
-        }
-
-        first_match_index(matches, |search_match| {
-            search_match.tab_index == self.tab_manager.active_tab_index
-        })
-        .or(Some(0))
+        profile_build_search_request(self, scope, query)
     }
 
     pub(super) fn search_is_active(&self) -> bool {
-        self.state.search_state.open && !self.state.search_state.query.is_empty()
+        search_is_active(self)
     }
-}
+});

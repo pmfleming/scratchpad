@@ -66,7 +66,7 @@ fn render_font_size_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         let selected_size = FONT_SIZE_OPTIONS[selected_index as usize];
         u32_slider_value_control(
             ui,
-            "settings.font_size.slider",
+            "settings.editor.font_size.slider",
             "slider.Font size",
             &mut selected_index,
             0..=(FONT_SIZE_OPTIONS.len() - 1) as u32,

@@ -667,7 +667,7 @@ mod tests {
         let mut streamed_tabs = Vec::new();
         let restored = store
             .load_streaming(
-                |active_tab_index, _| {
+                |active_tab_index, _, _| {
                     started = active_tab_index == 1;
                     true
                 },
@@ -736,7 +736,7 @@ mod tests {
         let mut cold_tabs = std::collections::HashMap::new();
         store
             .load_streaming(
-                |_, _| true,
+                |_, _, _| true,
                 |tab_index, tab, cold_session_tab| {
                     if let Some(cold_session_tab) = cold_session_tab {
                         cold_tabs.insert(tab_index, cold_session_tab);
@@ -758,6 +758,7 @@ mod tests {
                 &streamed_tabs,
                 &cold_tabs,
                 1,
+                crate::app::services::session_store::SessionActiveSurface::Workspace,
                 16.0,
                 false,
             );

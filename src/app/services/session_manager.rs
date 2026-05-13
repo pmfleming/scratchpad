@@ -1,6 +1,6 @@
-use crate::app::app_state::{ScratchpadApp, StatusDomain};
+use crate::app::app_state::{AppSurface, ScratchpadApp, StatusDomain};
 use crate::app::services::session_store::{
-    RestoreStatusLevel, RestoredSession, SessionPersistRequest,
+    RestoreStatusLevel, RestoredSession, SessionActiveSurface, SessionPersistRequest,
 };
 use crate::app::services::settings_store::AppSettings;
 use eframe::egui;
@@ -34,6 +34,7 @@ pub(crate) fn maybe_persist_session(app: &mut ScratchpadApp, ctx: &egui::Context
         app.tab_manager.tabs.as_slice(),
         app.tab_manager.cold_session_tabs(),
         app.tab_manager.active_tab_index,
+        session_active_surface(app),
         app.state.app_settings.font_size(),
         app.state.app_settings.word_wrap(),
     );
@@ -46,6 +47,7 @@ pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> std::io::Result<()
         app.tab_manager.tabs.as_slice(),
         app.tab_manager.cold_session_tabs(),
         app.tab_manager.active_tab_index,
+        session_active_surface(app),
         app.state.app_settings.font_size(),
         app.state.app_settings.word_wrap(),
     );
@@ -85,7 +87,26 @@ pub(crate) fn apply_restored_session(
     app.tab_manager
         .set_tabs(restored.tabs, restored.active_tab_index);
     app.tab_manager.evict_inactive_tab_state();
-    app.ensure_active_tab_slot_selected();
+    apply_restored_active_surface(app, restored.active_surface);
     app.refresh_startup_restore_conflicts();
     restored.legacy_settings
+}
+
+pub(crate) fn session_active_surface(app: &ScratchpadApp) -> SessionActiveSurface {
+    if app.showing_settings() {
+        SessionActiveSurface::Settings
+    } else {
+        SessionActiveSurface::Workspace
+    }
+}
+
+pub(crate) fn apply_restored_active_surface(
+    app: &mut ScratchpadApp,
+    active_surface: SessionActiveSurface,
+) {
+    app.state.active_surface = match active_surface {
+        SessionActiveSurface::Settings if app.settings_tab_open() => AppSurface::Settings,
+        SessionActiveSurface::Settings | SessionActiveSurface::Workspace => AppSurface::Workspace,
+    };
+    app.select_only_tab_slot(app.active_tab_slot_index());
 }

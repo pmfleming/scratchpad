@@ -5,10 +5,20 @@ use std::path::PathBuf;
 
 pub const SESSION_VERSION: u32 = 7;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionActiveSurface {
+    #[default]
+    Workspace,
+    Settings,
+}
+
 #[derive(Serialize, Deserialize)]
 pub(crate) struct SessionManifest {
     pub version: u32,
     pub active_tab_index: usize,
+    #[serde(default)]
+    pub active_surface: SessionActiveSurface,
     #[serde(default = "default_font_size")]
     pub font_size: f32,
     #[serde(default = "default_word_wrap")]
@@ -18,11 +28,10 @@ pub(crate) struct SessionManifest {
 
 impl SessionManifest {
     pub fn legacy_settings(&self) -> AppSettings {
-        AppSettings {
-            font_size: self.font_size,
-            word_wrap: self.word_wrap,
-            ..AppSettings::default()
-        }
+        let mut settings = AppSettings::default();
+        settings.editor.font_size = self.font_size;
+        settings.editor.word_wrap = self.word_wrap;
+        settings
     }
 }
 

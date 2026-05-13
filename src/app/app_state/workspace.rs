@@ -1,6 +1,6 @@
-mod accessors;
+pub(crate) mod accessors;
 pub(crate) mod display_tabs;
-mod editing;
+pub(crate) mod editing;
 pub(crate) mod lifecycle;
-mod mutation;
-mod restore_conflict;
+pub(crate) mod mutation;
+pub(crate) mod restore_conflict;

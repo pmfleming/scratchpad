@@ -23,6 +23,7 @@ const SESSION_IO_PARALLEL_MIN_ITEMS: usize = 512;
 const SESSION_IO_PARALLEL_MAX_WORKERS: usize = 8;
 
 pub use model::SESSION_VERSION;
+pub use model::SessionActiveSurface;
 pub(crate) use model::SessionTabParts as ColdSessionTab;
 
 #[derive(Clone)]
@@ -33,6 +34,7 @@ pub struct SessionStore {
 
 pub(crate) struct SessionPersistRequest {
     active_tab_index: usize,
+    active_surface: SessionActiveSurface,
     font_size: f32,
     word_wrap: bool,
     tabs: Vec<CapturedSessionTab>,
@@ -57,6 +59,7 @@ struct SessionSnapshotWrite {
 pub struct RestoredSession {
     pub tabs: Vec<WorkspaceTab>,
     pub active_tab_index: usize,
+    pub active_surface: SessionActiveSurface,
     pub legacy_settings: AppSettings,
     pub restore_status: Option<RestoreStatus>,
 }
@@ -166,6 +169,7 @@ impl SessionStore {
         Ok(ProfiledRestoredSession {
             restored: Some(RestoredSession {
                 active_tab_index: manifest.active_tab_index.min(tabs.len() - 1),
+                active_surface: manifest.active_surface,
                 tabs,
                 legacy_settings,
                 restore_status: restore_summary.into_status(),
@@ -182,7 +186,7 @@ impl SessionStore {
 
     pub(crate) fn load_streaming(
         &self,
-        mut on_started: impl FnMut(usize, AppSettings) -> bool,
+        mut on_started: impl FnMut(usize, SessionActiveSurface, AppSettings) -> bool,
         mut on_tab: impl FnMut(usize, WorkspaceTab, Option<ColdSessionTab>) -> bool,
     ) -> io::Result<Option<RestoredSession>> {
         let Some(manifest) = self.load_manifest()? else {
@@ -192,7 +196,8 @@ impl SessionStore {
             .active_tab_index
             .min(manifest.tabs.len().saturating_sub(1));
         let legacy_settings = manifest.legacy_settings();
-        if !on_started(active_tab_index, legacy_settings.clone()) {
+        let active_surface = manifest.active_surface;
+        if !on_started(active_tab_index, active_surface, legacy_settings.clone()) {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "session restore receiver closed",
@@ -220,6 +225,7 @@ impl SessionStore {
 
         Ok(Some(RestoredSession {
             active_tab_index: active_tab_index.min(tab_count - 1),
+            active_surface,
             tabs: Vec::new(),
             legacy_settings,
             restore_status: restore_summary.into_status(),
@@ -243,6 +249,7 @@ impl SessionStore {
         Ok(Some(RestoredSession {
             tabs: vec![tab],
             active_tab_index: 0,
+            active_surface: manifest.active_surface,
             legacy_settings,
             restore_status: summary.into_status(),
         }))
@@ -336,6 +343,7 @@ impl SessionStore {
             active_tab_index: request
                 .active_tab_index
                 .min(session_tabs.len().saturating_sub(1)),
+            active_surface: request.active_surface,
             font_size: request.font_size,
             word_wrap: request.word_wrap,
             tabs: session_tabs,
@@ -546,6 +554,7 @@ impl SessionPersistRequest {
     ) -> Self {
         Self {
             active_tab_index,
+            active_surface: SessionActiveSurface::Workspace,
             font_size,
             word_wrap,
             tabs: tabs.iter().map(CapturedSessionTab::capture).collect(),
@@ -556,11 +565,13 @@ impl SessionPersistRequest {
         tabs: &[WorkspaceTab],
         cold_tabs: &std::collections::HashMap<usize, ColdSessionTab>,
         active_tab_index: usize,
+        active_surface: SessionActiveSurface,
         font_size: f32,
         word_wrap: bool,
     ) -> Self {
         Self {
             active_tab_index,
+            active_surface,
             font_size,
             word_wrap,
             tabs: tabs

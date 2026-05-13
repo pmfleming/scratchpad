@@ -1,0 +1,32 @@
+font_size = 19.0
+word_wrap = true
+editor_gutter = 2
+editor_font = "mono"
+theme_mode = "system"
+editor_text_color = "#ffffff"
+editor_background_color = "#15181d"
+editor_text_highlight_color = "#fff36d"
+editor_text_highlight_text_color = "#000000"
+tab_list_position = "left"
+tab_order_mode = "custom"
+
+file_open_disposition = "new_tab"
+new_tab_placement = "end"
+startup_session_behavior = "continue_previous_session"
+tab_list_width = 271.34375
+auto_hide_tab_list = false
+tab_list_auto_hide_delay_seconds = 1.0
+recent_files_enabled = true
+status_bar_visible = true
+settings_tab_open = true
+settings_tab_index = 1
+
+[window_state]
+maximized = true
+
+[history_budget]
+per_file_entry_limit = 8192
+per_file_byte_budget = 67108864
+aggregate_byte_budget = 536870912
+persisted_payload_budget = 16777216
+derived_from_memory = true

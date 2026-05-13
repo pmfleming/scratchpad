@@ -67,11 +67,13 @@ impl ScratchpadApp {
             BackgroundIoResult::SessionRestoreStarted {
                 request_id,
                 active_tab_index,
+                active_surface,
                 legacy_settings,
             } => {
                 self.apply_session_restore_started_result(
                     request_id,
                     active_tab_index,
+                    active_surface,
                     legacy_settings,
                 );
             }
@@ -217,6 +219,7 @@ impl ScratchpadApp {
         &mut self,
         request_id: u64,
         active_tab_index: usize,
+        active_surface: crate::app::services::session_store::SessionActiveSurface,
         legacy_settings: crate::app::services::settings_store::AppSettings,
     ) {
         let apply_legacy_settings = {
@@ -239,6 +242,7 @@ impl ScratchpadApp {
             self.tab_manager
                 .set_active_tab_index_clamped(active_tab_index);
         }
+        session_manager::apply_restored_active_surface(self, active_surface);
     }
 
     fn apply_session_tab_restored_result(
@@ -405,6 +409,7 @@ impl ScratchpadApp {
                     self.tab_manager
                         .set_active_tab_index_clamped(restored.active_tab_index);
                 }
+                session_manager::apply_restored_active_surface(self, restored.active_surface);
                 self.tab_manager.evict_inactive_tab_state();
                 if let Some(status) = restored.restore_status.as_ref() {
                     self.apply_session_restore_status(status.clone());

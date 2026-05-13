@@ -24,12 +24,14 @@ impl TextDocument {
         let entry_id = match direction {
             OperationDirection::Undo => self
                 .history
+                .entries
                 .iter()
                 .rev()
                 .find(|entry| !entry.is_undone() && entry.flags.replayable)
                 .map(|entry| entry.id)?,
             OperationDirection::Redo => self
                 .history
+                .entries
                 .iter()
                 .find(|entry| entry.is_undone() && entry.flags.replayable)
                 .map(|entry| entry.id)?,
@@ -44,6 +46,7 @@ impl TextDocument {
     ) -> Result<CursorRange, TextHistoryApplyError> {
         let index = self
             .history
+            .entries
             .iter()
             .position(|entry| entry.id == entry_id)
             .ok_or(TextHistoryApplyError::OutOfBounds)?;
@@ -62,21 +65,21 @@ impl TextDocument {
     ) -> Result<CursorRange, TextHistoryApplyError> {
         let mut applied_selection = None;
         for idx in indices {
-            if !self.history[idx].flags.replayable {
+            if !self.history.entries[idx].flags.replayable {
                 return Err(TextHistoryApplyError::Conflict);
             }
-            let record = self.operation_from_history_entry(&self.history[idx]);
+            let record = self.operation_from_history_entry(&self.history.entries[idx]);
             self.validate_text_history_record(idx, &record, direction)?;
             self.apply_operation_record(&record, direction);
             self.mark_history_entry_undone(idx, matches!(direction, OperationDirection::Undo));
-            self.latest_operation_record = Some(record.clone());
+            self.history.latest_operation_record = Some(record.clone());
             applied_selection = Some(direction.selection(&record));
         }
         if applied_selection.is_some() {
-            self.latest_history_update_at = None;
-            self.pending_history_generation_before = None;
+            self.history.latest_update_at = None;
+            self.history.pending_generation_before = None;
         }
-        self.revision_counter = self.revision_counter.wrapping_add(1);
+        self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
         applied_selection.ok_or(TextHistoryApplyError::Conflict)
     }
 
@@ -92,7 +95,7 @@ impl TextDocument {
                 deleted_text: self.text_for_spans(edit.deleted_spans()),
                 inserted_text: edit
                     .inserted_span()
-                    .map(|span| self.piece_tree.text_for_span(span).to_owned())
+                    .map(|span| self.content.piece_tree.text_for_span(span).to_owned())
                     .unwrap_or_default(),
                 deleted_spans: edit.deleted_spans().to_vec(),
             })
@@ -113,15 +116,15 @@ impl TextDocument {
             .edits
             .retain(|edit| !edit.deleted_text.is_empty() || !edit.inserted_text.is_empty());
         if record.edits.is_empty() {
-            self.pending_history_generation_before = None;
+            self.history.pending_generation_before = None;
             return;
         }
 
-        self.latest_operation_record = Some(record.clone());
-        let old_len = self.history.len();
+        self.history.latest_operation_record = Some(record.clone());
+        let old_len = self.history.entries.len();
         let mut removed_bytes = 0usize;
         let mut removed_redo_depth = 0usize;
-        self.history.retain(|entry| {
+        self.history.entries.retain(|entry| {
             let keep = !entry.is_undone();
             if !keep {
                 removed_bytes += entry.byte_cost();
@@ -129,24 +132,24 @@ impl TextDocument {
             }
             keep
         });
-        if self.history.len() != old_len {
-            self.history_byte_usage = self.history_byte_usage.saturating_sub(removed_bytes);
-            self.history_redo_depth = self.history_redo_depth.saturating_sub(removed_redo_depth);
-            self.latest_history_update_at = None;
+        if self.history.entries.len() != old_len {
+            self.history.byte_usage = self.history.byte_usage.saturating_sub(removed_bytes);
+            self.history.redo_depth = self.history.redo_depth.saturating_sub(removed_redo_depth);
+            self.history.latest_update_at = None;
         }
         if self.try_coalesce_history(&record, source) {
-            self.revision_counter = self.revision_counter.wrapping_add(1);
-            self.pending_history_generation_before = None;
+            self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
+            self.history.pending_generation_before = None;
             return;
         }
 
         let entry = self.history_entry_from_operation(record, source);
-        self.history_byte_usage += entry.byte_cost();
+        self.history.byte_usage += entry.byte_cost();
         self.add_history_depth(&entry);
-        self.history.push(entry);
-        self.revision_counter = self.revision_counter.wrapping_add(1);
+        self.history.entries.push(entry);
+        self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
         self.enforce_history_budget();
-        self.pending_history_generation_before = None;
+        self.history.pending_generation_before = None;
     }
 
     fn apply_operation_record(
@@ -172,16 +175,16 @@ impl TextDocument {
         index: usize,
         direction: OperationDirection,
     ) -> Result<Vec<usize>, TextHistoryApplyError> {
-        let entry_undone = self.history[index].is_undone();
+        let entry_undone = self.history.entries[index].is_undone();
         match direction {
             OperationDirection::Undo if entry_undone => Err(TextHistoryApplyError::Conflict),
             OperationDirection::Redo if !entry_undone => Err(TextHistoryApplyError::Conflict),
-            OperationDirection::Undo => Ok((index..self.history.len())
+            OperationDirection::Undo => Ok((index..self.history.entries.len())
                 .rev()
-                .filter(|i| !self.history[*i].is_undone())
+                .filter(|i| !self.history.entries[*i].is_undone())
                 .collect()),
             OperationDirection::Redo => Ok((0..=index)
-                .filter(|i| self.history[*i].is_undone())
+                .filter(|i| self.history.entries[*i].is_undone())
                 .collect()),
         }
     }
@@ -192,10 +195,14 @@ impl TextDocument {
         record: &TextDocumentOperationRecord,
         direction: OperationDirection,
     ) -> Result<(), TextHistoryApplyError> {
-        let expected_generation = self.history.get(index).map(|entry| match direction {
-            OperationDirection::Undo => entry.visible_generation_after,
-            OperationDirection::Redo => entry.visible_generation_before,
-        });
+        let expected_generation = self
+            .history
+            .entries
+            .get(index)
+            .map(|entry| match direction {
+                OperationDirection::Undo => entry.visible_generation_after,
+                OperationDirection::Redo => entry.visible_generation_before,
+            });
         if expected_generation == Some(self.visible_generation()) {
             return Ok(());
         }
@@ -203,7 +210,7 @@ impl TextDocument {
         let expected_parts = record_expected_parts(record, direction);
         let expected_fingerprint = fingerprint_parts(expected_parts.iter().copied());
         let current_fingerprint = fingerprint_parts(
-            record_current_parts(self.piece_tree.as_ref(), record, direction)?
+            record_current_parts(self.content.piece_tree.as_ref(), record, direction)?
                 .iter()
                 .map(String::as_str),
         );
@@ -214,10 +221,10 @@ impl TextDocument {
         record.edits.iter().try_for_each(|edit| {
             let expected = edit.expected_text(direction);
             let range = edit.start_char..edit.start_char + expected.chars().count();
-            if range.end > self.piece_tree.len_chars() {
+            if range.end > self.content.piece_tree.len_chars() {
                 return Err(TextHistoryApplyError::OutOfBounds);
             }
-            if !expected.is_empty() && self.piece_tree.extract_range(range) != expected {
+            if !expected.is_empty() && self.content.piece_tree.extract_range(range) != expected {
                 return Err(TextHistoryApplyError::Conflict);
             }
             Ok(())
@@ -227,7 +234,7 @@ impl TextDocument {
     fn text_for_spans(&self, spans: &[ByteSpan]) -> String {
         let mut text = String::new();
         for span in spans {
-            text.push_str(self.piece_tree.text_for_span(*span));
+            text.push_str(self.content.piece_tree.text_for_span(*span));
         }
         text
     }
@@ -283,30 +290,30 @@ impl TextDocument {
 
     pub(super) fn enforce_history_budget(&mut self) {
         let mut evicted = false;
-        while self.history.len() > self.history_budget.per_file_entry_limit
-            || self.history_byte_usage as u64 > self.history_budget.per_file_byte_budget
+        while self.history.entries.len() > self.history.budget.per_file_entry_limit
+            || self.history.byte_usage as u64 > self.history.budget.per_file_byte_budget
         {
-            let removed = self.history.remove(0);
+            let removed = self.history.entries.remove(0);
             let cost = removed.byte_cost();
-            self.history_byte_usage = self.history_byte_usage.saturating_sub(cost);
+            self.history.byte_usage = self.history.byte_usage.saturating_sub(cost);
             self.remove_history_depth(&removed);
             capacity_metrics::record_history_eviction_per_file(cost);
             evicted = true;
         }
         if evicted {
-            self.revision_counter = self.revision_counter.wrapping_add(1);
+            self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
             self.compact_history_storage();
         }
     }
 
     pub(super) fn compact_history_storage(&mut self) {
         let mut spans = self.history_spans();
-        Arc::make_mut(&mut self.piece_tree).compact_add_buffer(&mut spans);
+        Arc::make_mut(&mut self.content.piece_tree).compact_add_buffer(&mut spans);
         self.replace_history_spans(spans);
     }
 
     fn export_history_edit(&self, edit: &PieceHistoryEdit) -> PersistedHistoryEdit {
-        edit.to_persisted(|span| self.piece_tree.text_for_span(span).to_owned())
+        edit.to_persisted(|span| self.content.piece_tree.text_for_span(span).to_owned())
     }
 
     fn import_history_edit(
@@ -314,7 +321,7 @@ impl TextDocument {
         edit: PersistedHistoryEdit,
         source: PieceSource,
     ) -> PieceHistoryEdit {
-        let tree = Arc::make_mut(&mut self.piece_tree);
+        let tree = Arc::make_mut(&mut self.content.piece_tree);
         edit.into_piece(|text| tree.append_history_text(text, source))
     }
 
@@ -325,11 +332,12 @@ impl TextDocument {
     ) -> PieceHistoryEntry {
         let generation_after = self.visible_generation();
         debug_assert!(
-            self.pending_history_generation_before.is_some(),
+            self.history.pending_generation_before.is_some(),
             "history generation_before should be captured before pushing text history"
         );
         let generation_before = self
-            .pending_history_generation_before
+            .history
+            .pending_generation_before
             .unwrap_or(generation_after);
         let edits = record
             .edits
@@ -337,9 +345,9 @@ impl TextDocument {
             .map(|edit| self.history_edit_from_operation_edit(edit, source))
             .collect::<PieceHistoryEdits>();
         let fingerprint = self.fingerprint_for_history_edits(&edits);
-        self.latest_history_update_at = Some(Instant::now());
+        self.history.latest_update_at = Some(Instant::now());
         let entry = PieceHistoryEntry {
-            id: self.next_history_id,
+            id: self.history.next_id,
             global_seq: next_text_history_global_seq(),
             source,
             visible_generation_before: generation_before,
@@ -355,7 +363,7 @@ impl TextDocument {
             previous_selection: record.previous_selection,
             next_selection: record.next_selection,
         };
-        self.next_history_id = self.next_history_id.saturating_add(1);
+        self.history.next_id = self.history.next_id.saturating_add(1);
         entry
     }
 
@@ -364,7 +372,7 @@ impl TextDocument {
         edit: &TextDocumentEditOperation,
         source: PieceSource,
     ) -> PieceHistoryEdit {
-        let tree = Arc::make_mut(&mut self.piece_tree);
+        let tree = Arc::make_mut(&mut self.content.piece_tree);
         let start_char = edit.start_char.min(u32::MAX as usize) as u32;
         match (edit.deleted_text.is_empty(), edit.inserted_text.is_empty()) {
             (true, false) => PieceHistoryEdit::Inserted {
@@ -405,13 +413,14 @@ impl TextDocument {
         if source != PieceSource::Edit {
             return false;
         }
-        let Some(latest_index) = self.history.len().checked_sub(1) else {
+        let Some(latest_index) = self.history.entries.len().checked_sub(1) else {
             return false;
         };
-        let latest = &self.history[latest_index];
+        let latest = &self.history.entries[latest_index];
         let now = Instant::now();
         let elapsed = self
-            .latest_history_update_at
+            .history
+            .latest_update_at
             .map(|updated_at| now.duration_since(updated_at));
         if latest.source != PieceSource::Edit
             || latest.is_undone()
@@ -429,14 +438,14 @@ impl TextDocument {
         match coalesced {
             CoalescedEdit::Record(merged_record) => {
                 self.replace_coalesced_history_entry(latest_index, &merged_record, now);
-                self.latest_operation_record = Some(merged_record);
+                self.history.latest_operation_record = Some(merged_record);
             }
             CoalescedEdit::Noop => {
-                let removed = self.history.remove(latest_index);
-                self.history_byte_usage =
-                    self.history_byte_usage.saturating_sub(removed.byte_cost());
+                let removed = self.history.entries.remove(latest_index);
+                self.history.byte_usage =
+                    self.history.byte_usage.saturating_sub(removed.byte_cost());
                 self.remove_history_depth(&removed);
-                self.latest_history_update_at = None;
+                self.history.latest_update_at = None;
             }
         }
         true
@@ -448,7 +457,7 @@ impl TextDocument {
         merged_record: &TextDocumentOperationRecord,
         now: Instant,
     ) {
-        let source = self.history[latest_index].source;
+        let source = self.history.entries[latest_index].source;
         let edits = merged_record
             .edits
             .iter()
@@ -456,8 +465,8 @@ impl TextDocument {
             .collect::<PieceHistoryEdits>();
         let fingerprint = self.fingerprint_for_history_edits(&edits);
         let visible_generation_after = self.visible_generation();
-        let old_cost = self.history[latest_index].byte_cost();
-        let latest = &mut self.history[latest_index];
+        let old_cost = self.history.entries[latest_index].byte_cost();
+        let latest = &mut self.history.entries[latest_index];
         latest.edits = edits;
         latest.next_selection = merged_record.next_selection;
         latest.visible_generation_after = visible_generation_after;
@@ -465,15 +474,17 @@ impl TextDocument {
         latest.fingerprint = fingerprint;
         latest.summary = operation_summary(latest.source, merged_record);
         let new_cost = latest.byte_cost();
-        self.history_byte_usage = self
-            .history_byte_usage
+        self.history.byte_usage = self
+            .history
+            .byte_usage
             .saturating_sub(old_cost)
             .saturating_add(new_cost);
-        self.latest_history_update_at = Some(now);
+        self.history.latest_update_at = Some(now);
     }
 
     fn history_spans(&self) -> Vec<ByteSpan> {
         self.history
+            .entries
             .iter()
             .flat_map(|entry| entry.edits.iter())
             .flat_map(PieceHistoryEdit::spans)
@@ -488,7 +499,7 @@ impl TextDocument {
             "history span replacement count mismatch"
         );
         let mut spans = spans.into_iter();
-        for entry in &mut self.history {
+        for entry in &mut self.history.entries {
             for edit in &mut entry.edits {
                 edit.each_span_mut(|slot| {
                     if let Some(next) = spans.next() {
@@ -507,7 +518,7 @@ impl TextDocument {
 
     pub(super) fn normalize_imported_redo_state(&mut self) {
         let mut in_undone_suffix = true;
-        for entry in self.history.iter_mut().rev() {
+        for entry in self.history.entries.iter_mut().rev() {
             if in_undone_suffix && entry.is_undone() {
                 continue;
             }

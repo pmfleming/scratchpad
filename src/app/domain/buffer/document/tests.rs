@@ -94,7 +94,7 @@ fn removed_transient_edit_does_not_reopen_previous_coalescing_window() {
     let mut document = empty_document!();
 
     insert_edit(&mut document, 0, "a");
-    document.latest_history_update_at = None;
+    document.history.latest_update_at = None;
     insert_edit(&mut document, 1, "x");
     delete_edit(&mut document, 1..2, 2, 1);
     insert_edit(&mut document, 1, "y");
@@ -172,7 +172,7 @@ fn soft_divider_seals_after_a_pause() {
 
     insert_sequence!(&mut document, "Hi,");
     // Simulate the user pausing past the soft-divider seal threshold.
-    document.latest_history_update_at =
+    document.history.latest_update_at =
         Some(Instant::now() - TEXT_HISTORY_SOFT_DIVIDER_PAUSE - Duration::from_millis(50));
     insert_edit(&mut document, 3, " ");
 
@@ -232,7 +232,7 @@ fn dash_is_a_soft_divider() {
     // A burst that ends on a dash, then a pause, seals the entry.
     let mut other = empty_document!();
     insert_sequence!(&mut other, "well-");
-    other.latest_history_update_at =
+    other.history.latest_update_at =
         Some(Instant::now() - TEXT_HISTORY_SOFT_DIVIDER_PAUSE - Duration::from_millis(50));
     insert_edit(&mut other, 5, "k");
     assert_eq!(other.operation_undo_depth(), 2);
@@ -435,7 +435,7 @@ fn per_file_entry_limit_evicts_oldest_entries() {
     });
 
     for index in 0..105 {
-        document.latest_history_update_at = None;
+        document.history.latest_update_at = None;
         insert_edit(&mut document, index, "x");
     }
 
@@ -568,9 +568,9 @@ fn adjacent_pre_burst_backspace_coalesces_as_replacement() {
 fn imported_history_keeps_only_contiguous_undone_suffix_redoable() {
     let mut source = empty_document!();
     insert_isolated_sequence!(&mut source, "abc");
-    source.history[0].flags.undone = true;
-    source.history[1].flags.undone = false;
-    source.history[2].flags.undone = true;
+    source.history.entries[0].flags.undone = true;
+    source.history.entries[1].flags.undone = false;
+    source.history.entries[2].flags.undone = true;
     let exported = source.exported_history();
 
     let mut restored = TextDocument::new("abc".to_owned());
@@ -604,7 +604,7 @@ fn insert_edit(document: &mut TextDocument, start: usize, text: &str) {
 }
 
 fn insert_isolated_edit(document: &mut TextDocument, start: usize, text: &str) {
-    document.latest_history_update_at = None;
+    document.history.latest_update_at = None;
     insert_edit(document, start, text);
 }
 
@@ -660,6 +660,7 @@ fn entry_record(document: &TextDocument, index: usize) -> TextDocumentOperationR
 fn assert_history_byte_usage_consistent(document: &TextDocument) {
     let expected = document
         .history
+        .entries
         .iter()
         .map(PieceHistoryEntry::byte_cost)
         .sum::<usize>();

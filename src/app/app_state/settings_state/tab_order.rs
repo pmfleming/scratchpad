@@ -3,15 +3,15 @@ use crate::app::services::settings_store::TabOrderMode;
 
 impl ScratchpadApp {
     pub(crate) fn set_tab_order_mode(&mut self, mode: TabOrderMode) {
-        if self.state.app_settings.tab_order_mode == mode {
+        if self.state.app_settings.workspace.tab_order_mode == mode {
             return;
         }
 
-        if self.state.app_settings.tab_order_mode == TabOrderMode::Custom {
+        if self.state.app_settings.workspace.tab_order_mode == TabOrderMode::Custom {
             self.remember_current_custom_tab_order();
         }
 
-        self.state.app_settings.tab_order_mode = mode;
+        self.state.app_settings.workspace.tab_order_mode = mode;
         if mode == TabOrderMode::Custom {
             self.restore_custom_tab_order();
         } else {
@@ -22,7 +22,7 @@ impl ScratchpadApp {
 
     pub(crate) fn apply_workspace_tab_order(&mut self, workspace_order: Vec<usize>) {
         if self.apply_workspace_tab_order_internal(workspace_order, false) {
-            self.state.app_settings.tab_order_mode = TabOrderMode::Custom;
+            self.state.app_settings.workspace.tab_order_mode = TabOrderMode::Custom;
             self.remember_current_custom_tab_order();
             self.persist_settings_or_error();
         }
@@ -81,7 +81,7 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn remember_current_custom_tab_order(&mut self) {
-        self.state.app_settings.custom_tab_order = self
+        self.state.app_settings.workspace.custom_tab_order = self
             .tab_manager
             .tabs
             .as_slice()
@@ -170,7 +170,7 @@ fn workspace_tab_order_for_mode(app: &ScratchpadApp, mode: TabOrderMode) -> Opti
 
 fn workspace_tab_order_from_saved_custom_order(app: &ScratchpadApp) -> Vec<usize> {
     let mut order = Vec::with_capacity(app.tab_manager.tabs.as_slice().len());
-    for buffer_id in &app.state.app_settings.custom_tab_order {
+    for buffer_id in &app.state.app_settings.workspace.custom_tab_order {
         if let Some(index) = app
             .tab_manager
             .tabs

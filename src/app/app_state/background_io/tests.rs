@@ -151,7 +151,7 @@ fn progressive_session_hydration_replaces_matching_cold_shell_after_index_shift(
     let mut cold_payload = None;
     store
         .load_streaming(
-            |_, _| true,
+            |_, _, _| true,
             |tab_index, tab, cold_session_tab| {
                 if let Some(tab) = cold_session_tab {
                     cold_payload = Some(tab.clone());

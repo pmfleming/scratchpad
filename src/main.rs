@@ -28,7 +28,7 @@ fn main() -> eframe::Result<()> {
     let startup_settings = settings_store.load().ok().flatten().unwrap_or_default();
 
     let options = eframe::NativeOptions {
-        viewport: viewport_builder_from_window_state(&startup_settings.window_state),
+        viewport: viewport_builder_from_window_state(&startup_settings.ui.window_state),
         persist_window: false,
         persistence_path: Some(session_store.root().join("eframe-state.ron")),
         ..Default::default()

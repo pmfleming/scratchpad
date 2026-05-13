@@ -3,7 +3,7 @@ use crate::app::domain::BufferId;
 
 impl ScratchpadApp {
     pub(crate) fn apply_history_budget_to_open_buffers(&mut self) {
-        let budget = self.state.app_settings.history_budget;
+        let budget = self.state.app_settings.history.budget;
         for tab in self.tab_manager.tabs.as_mut_slice() {
             for buffer in tab.buffers_mut() {
                 buffer.document_mut().set_history_budget(budget);
@@ -13,7 +13,7 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn enforce_aggregate_text_history_budget(&mut self) {
-        let aggregate_budget = self.state.app_settings.history_budget.aggregate_byte_budget;
+        let aggregate_budget = self.state.app_settings.history.budget.aggregate_byte_budget;
         while self.aggregate_text_history_usage() > aggregate_budget {
             let Some((tab_index, buffer_id)) = self.oldest_history_buffer() else {
                 break;
