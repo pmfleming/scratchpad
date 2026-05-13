@@ -7,7 +7,14 @@ use crate::app::domain::{BufferState, SearchHighlightState};
 use crate::app::ui::editor_content::{EditorHighlightStyle, build_layouter};
 use eframe::egui;
 use std::hint::black_box;
-use support::*;
+use support::{
+    alternating_axis, bouncing_indices, build_balanced_tile_tab, build_search_current_scope_tab,
+    build_view_dense_tab, collect_split_paths, cycle_profile_views, expected_matches_for_tab,
+    install_navigation_workspace, install_profile_tab, install_search_all_tabs, ordered_view_ids,
+    plain_text_of_size, rebalance_profile_tab, rebalance_profile_tab_views, resize_profile_splits,
+    sum_profile_iterations, wait_for_app_state_search_matches, with_isolated_app,
+    with_steady_state_app,
+};
 
 pub const KB: usize = 1024;
 pub const MB: usize = 1024 * KB;

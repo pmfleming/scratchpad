@@ -1,6 +1,10 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::services::settings_store::TabListPosition;
-use crate::app::theme::*;
+use crate::app::theme::{
+    BUTTON_SIZE, CAPTION_BUTTON_SIZE, CAPTION_BUTTON_SPACING, CAPTION_TRAILING_PADDING,
+    HEADER_HEIGHT, HEADER_LEFT_PADDING, HEADER_RIGHT_PADDING, HEADER_VERTICAL_PADDING, border,
+    header_bg,
+};
 use eframe::egui::{self, Stroke};
 use std::time::Instant;
 

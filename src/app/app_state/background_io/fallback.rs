@@ -9,11 +9,13 @@ pub(super) trait BackgroundIoFallback {
     fn into_restore_result(
         self,
     ) -> Result<Option<crate::app::services::session_store::RestoredSession>, String>;
+    fn into_hydrated_session_tab_result(self) -> BackgroundIoResult;
     fn into_persist_result(self) -> Result<(), String>;
     fn into_text_metadata_result(
         self,
     ) -> Result<
         (
+            crate::app::domain::buffer::BufferLength,
             usize,
             crate::app::domain::TextArtifactSummary,
             crate::app::domain::TextFormatMetadata,
@@ -70,6 +72,32 @@ impl BackgroundIoFallback for BackgroundIoRequest {
         }
     }
 
+    fn into_hydrated_session_tab_result(self) -> BackgroundIoResult {
+        match self {
+            BackgroundIoRequest::HydrateSessionTab {
+                request_id,
+                session_store,
+                tab_index,
+                cold_session_tab,
+            } => {
+                let (tab, restore_status) =
+                    session_store.restore_cold_session_tab(cold_session_tab);
+                BackgroundIoResult::SessionTabHydrated {
+                    request_id,
+                    tab_index,
+                    restore_status,
+                    tab: Box::new(tab),
+                }
+            }
+            _ => BackgroundIoResult::SessionTabHydrated {
+                request_id: 0,
+                tab_index: 0,
+                restore_status: None,
+                tab: Box::new(crate::app::domain::WorkspaceTab::untitled()),
+            },
+        }
+    }
+
     fn into_persist_result(self) -> Result<(), String> {
         match self {
             BackgroundIoRequest::PersistSession { .. } => {
@@ -83,6 +111,7 @@ impl BackgroundIoFallback for BackgroundIoRequest {
         self,
     ) -> Result<
         (
+            crate::app::domain::buffer::BufferLength,
             usize,
             crate::app::domain::TextArtifactSummary,
             crate::app::domain::TextFormatMetadata,

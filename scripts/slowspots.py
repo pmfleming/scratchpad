@@ -41,6 +41,9 @@ class PerfMetrics:
     has_profile_coverage: bool = False
     stability: str = "stable"
     suspected_limiting_resource: str = "cpu"
+    probe_class: str = "targeted_path"
+    measurement_role: str = "change_validation"
+    measurement_question: str = "Did this implementation path stay inside its latency budget?"
 
     @property
     def mean_ms(self) -> float:

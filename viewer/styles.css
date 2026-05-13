@@ -1952,7 +1952,7 @@ tr:hover td {
 /* Overview monitor components */
 .health-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 18px;
     margin-bottom: 18px;
 }
@@ -2894,12 +2894,32 @@ tr:hover td {
 }
 
 .risk-curve-card__stats {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    overflow: hidden;
+    border: 1px solid rgba(159, 176, 195, 0.14);
+    border-radius: 8px;
+    background: rgba(159, 176, 195, 0.06);
 }
 
-.risk-curve-card__stats span,
+.risk-curve-card__stats span {
+    display: inline-flex;
+    align-items: baseline;
+    justify-content: center;
+    min-width: 0;
+    min-height: 34px;
+    padding: 6px 10px;
+    border-right: 1px solid rgba(159, 176, 195, 0.12);
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.risk-curve-card__stats span:last-child {
+    border-right: 0;
+}
+
 .rank-pill {
     display: inline-flex;
     align-items: center;
@@ -2912,8 +2932,9 @@ tr:hover td {
 }
 
 .risk-curve-card__stats strong {
-    margin-right: 4px;
+    margin-right: 5px;
     color: var(--text);
+    font-size: 13px;
 }
 
 .rank-pill {
@@ -3785,6 +3806,39 @@ tr:hover td {
     fill: #f3c969;
     stroke: #10151c;
     stroke-width: 1.4;
+}
+
+.performance-gap-chart__phase-line {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2.4;
+}
+
+.performance-gap-chart--phase circle {
+    fill: #10151c;
+    stroke-width: 1.6;
+}
+
+.performance-gap-chart__legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.performance-gap-chart__legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.performance-gap-chart__legend i {
+    width: 16px;
+    height: 3px;
+    border-radius: 999px;
 }
 
 .performance-gap-chart__labels text,

@@ -58,6 +58,8 @@ def normalize_latency_row(item: Dict[str, Any], capacity_lookup: Dict[str, Dict[
     threshold_ms = float(item.get("threshold_ms", 0.0))
     return {
         "scenario_id": item.get("name"),
+        "probe_class": item.get("probe_class", "targeted_path"),
+        "measurement_role": item.get("measurement_role", "change_validation"),
         "scenario_label": item.get("scenario_label", item.get("name")),
         "family": family,
         "mean_ms": mean_ms,
@@ -76,6 +78,8 @@ def normalize_latency_row(item: Dict[str, Any], capacity_lookup: Dict[str, Dict[
 def normalize_capacity_row(item: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "scenario_id": item.get("scenario"),
+        "probe_class": item.get("probe_class", "ceiling_health"),
+        "measurement_role": item.get("measurement_role", "promise_health"),
         "scenario_label": item.get("scenario_label", item.get("scenario")),
         "family": item.get("workload_family", "capacity-stress"),
         "failure_mode": item.get("failure_mode", "not_reached"),
@@ -197,6 +201,7 @@ def methodology_notes() -> List[str]:
         "The dedicated search report remains the authoritative scaling view for search latency.",
         "Flamegraphs explain CPU hot paths; they do not replace benchmark budgets or capacity ceilings.",
         "Capacity sweeps stay out of the latency leaderboard and record the first unusable ceiling separately.",
+        "Ceiling probes answer promise-health questions; targeted path probes validate whether a specific change worked.",
         "Resource profiles capture allocation-heavy, working-set, and session-cost scenarios that are not visible in CPU flamegraphs alone.",
         "The old slowspots p95 field is now treated as median absolute deviation dispersion, not a percentile.",
     ]

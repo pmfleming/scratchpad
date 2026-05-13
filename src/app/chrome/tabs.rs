@@ -1,4 +1,7 @@
-use crate::app::theme::*;
+use crate::app::theme::{
+    CLOSE_HOVER_BG, TAB_BUTTON_WIDTH, TAB_HEIGHT, action_hover_bg, border, tab_active_bg,
+    tab_hover_bg, tab_selected_accent, text_primary,
+};
 use crate::app::ui::transition;
 use crate::app::ui::widget_ids::{self, WidgetRole};
 use eframe::egui::{self, Rect, Sense, Stroke, Vec2};

@@ -351,7 +351,7 @@ fn apply_editor_change(app: &mut ScratchpadApp, state: &EditorRenderState) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{egui, font_size_delta_from_shift_scroll};
 
     #[test]
     fn shift_scroll_maps_to_font_size_delta() {

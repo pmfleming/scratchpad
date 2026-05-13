@@ -1,8 +1,12 @@
 use super::state::{TabDragState, TabDropAxis, TabDropZone};
 use crate::app::app_state::ScratchpadApp;
-use crate::app::theme::*;
+use crate::app::theme::{
+    TAB_BUTTON_WIDTH, TAB_HEIGHT, border_for_visuals, tab_active_bg_for_visuals,
+    text_primary_for_visuals,
+};
 use crate::app::ui::widget_ids;
 use eframe::egui;
+use std::collections::HashMap;
 
 const TAB_REORDER_MARKER_COLOR: egui::Color32 = egui::Color32::from_rgb(104, 154, 232);
 
@@ -10,9 +14,12 @@ pub(super) fn paint_dragged_tab_ghost(
     ctx: &egui::Context,
     app: &ScratchpadApp,
     drag_state: TabDragState,
+    duplicate_name_counts: &HashMap<String, usize>,
 ) {
     let dragged_slots = drag_state.dragged_indices.as_slice();
-    let Some(first_label) = app.display_tab_name_at_slot(drag_state.source_index) else {
+    let Some(first_label) =
+        app.display_tab_name_at_slot_with_counts(drag_state.source_index, duplicate_name_counts)
+    else {
         return;
     };
     let display_name = if dragged_slots.len() > 1 {

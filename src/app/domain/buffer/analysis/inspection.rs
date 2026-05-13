@@ -48,6 +48,8 @@ pub(super) struct TextInspection {
     pub(super) line_ending_counts: LineEndingCounts,
     pub(super) artifact_summary: TextArtifactSummary,
     pub(super) is_ascii_subset: bool,
+    pub(super) has_bytes: bool,
+    pub(super) ends_with_lf: bool,
 }
 
 #[derive(Default)]
@@ -59,6 +61,7 @@ struct InspectionState {
     pending_cr: bool,
     starts_with_lf: bool,
     ends_with_cr: bool,
+    ends_with_lf: bool,
     seen_any: bool,
 }
 
@@ -101,6 +104,7 @@ impl InspectionState {
                 self.seen_any = true;
             }
             self.ends_with_cr = bytes.last() == Some(&b'\r');
+            self.ends_with_lf = bytes.last() == Some(&b'\n');
         }
 
         let mut index = 0usize;
@@ -169,6 +173,7 @@ impl InspectionState {
             is_ascii_subset: self.is_ascii_subset,
             starts_with_lf: self.starts_with_lf,
             ends_with_cr: self.ends_with_cr,
+            ends_with_lf: self.ends_with_lf,
             has_bytes: self.seen_any,
         }
     }
@@ -181,6 +186,7 @@ struct TextScanSummary {
     is_ascii_subset: bool,
     starts_with_lf: bool,
     ends_with_cr: bool,
+    ends_with_lf: bool,
     has_bytes: bool,
 }
 
@@ -293,6 +299,7 @@ impl TextScanSummary {
                 combined.has_bytes = true;
             }
             combined.ends_with_cr = summary.ends_with_cr;
+            combined.ends_with_lf = summary.ends_with_lf;
             combined.is_ascii_subset &= summary.is_ascii_subset;
             combined.artifact_summary.merge(summary.artifact_summary);
             combined
@@ -325,6 +332,8 @@ impl TextScanSummary {
             line_ending_counts: self.line_ending_counts,
             artifact_summary,
             is_ascii_subset: self.is_ascii_subset,
+            has_bytes: self.has_bytes,
+            ends_with_lf: self.ends_with_lf,
         }
     }
 }
@@ -425,7 +434,7 @@ pub(super) fn line_ending_style(counts: LineEndingCounts) -> LineEndingStyle {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{LineEndingStyle, TextInspection, TextScanSummary};
 
     #[test]
     fn byte_inspection_preserves_crlf_across_spans() {

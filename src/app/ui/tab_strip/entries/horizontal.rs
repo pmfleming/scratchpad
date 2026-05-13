@@ -49,7 +49,7 @@ pub(super) fn show_tab_region(
                     &mut visible_tab_indices,
                     &mut outcome,
                 );
-                apply_tab_drag_feedback(ui, app, &drop_zones, &mut outcome);
+                apply_tab_drag_feedback(ui, app, duplicate_name_counts, &drop_zones, &mut outcome);
                 render_new_tab_action(ui, app, layout.spacing);
                 show_drag_region(ctx, ui, app, layout.drag_width);
             },

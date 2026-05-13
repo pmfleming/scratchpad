@@ -1,5 +1,6 @@
 use crate::app::domain::tab::summary;
 use crate::app::domain::{BufferId, ViewId, WorkspaceTab};
+use crate::app::services::session_store::ColdSessionTab;
 use crate::app::theme;
 use std::collections::HashMap;
 
@@ -24,6 +25,7 @@ pub struct TabManager {
     pub(crate) session_dirty: bool,
     pub(crate) pending_scroll_to_active: bool,
     pub(crate) buffer_tab_index: HashMap<BufferId, usize>,
+    pub(crate) cold_session_tabs: HashMap<usize, ColdSessionTab>,
 }
 
 impl Default for TabManager {
@@ -35,6 +37,7 @@ impl Default for TabManager {
             session_dirty: false,
             pending_scroll_to_active: true,
             buffer_tab_index: HashMap::new(),
+            cold_session_tabs: HashMap::new(),
         };
         manager.rebuild_buffer_tab_index();
         manager
@@ -56,6 +59,30 @@ impl TabManager {
 
     pub(crate) fn set_active_tab_index_clamped(&mut self, index: usize) {
         self.active_tab_index = index.min(self.tabs.len().saturating_sub(1));
+    }
+
+    pub(crate) fn set_cold_session_tab(&mut self, index: usize, tab: ColdSessionTab) {
+        if index < self.tabs.len() {
+            self.cold_session_tabs.insert(index, tab);
+        }
+    }
+
+    pub(crate) fn take_cold_session_tab(&mut self, index: usize) -> Option<ColdSessionTab> {
+        self.cold_session_tabs.remove(&index)
+    }
+
+    pub(crate) fn cold_session_tabs(&self) -> &HashMap<usize, ColdSessionTab> {
+        &self.cold_session_tabs
+    }
+
+    pub(crate) fn replace_restored_tab(&mut self, index: usize, tab: WorkspaceTab) -> bool {
+        let Some(slot) = self.tabs.get_mut(index) else {
+            return false;
+        };
+        let removed = std::mem::replace(slot, tab);
+        self.remove_tab_buffers(&removed);
+        self.index_tab_buffers(index);
+        true
     }
 
     pub fn mark_session_dirty(&mut self) {
@@ -102,6 +129,7 @@ impl TabManager {
         self.tabs.insert(index, tab);
         self.active_tab_index = index;
         self.shift_buffer_tab_indices(index, 1);
+        self.shift_cold_tab_indices(index, 1);
         self.index_tab_buffers(index);
         self.pending_scroll_to_active = true;
         self.mark_session_dirty();
@@ -114,12 +142,14 @@ impl TabManager {
     pub fn close_tab_internal(&mut self, index: usize) {
         let removed = self.tabs.remove(index);
         self.remove_tab_buffers(&removed);
+        self.cold_session_tabs.remove(&index);
         if self.tabs.is_empty() {
             self.tabs.push(WorkspaceTab::untitled());
             self.active_tab_index = 0;
             self.index_tab_buffers(0);
         } else {
             self.shift_buffer_tab_indices(index, -1);
+            self.shift_cold_tab_indices(index, -1);
         }
 
         if self.active_tab_index > index {
@@ -139,6 +169,15 @@ impl TabManager {
 
         let moved_tab = self.tabs.remove(from_index);
         self.tabs.insert(to_index, moved_tab);
+        let moved_cold_tab = self.cold_session_tabs.remove(&from_index);
+        if from_index < to_index {
+            self.shift_cold_tab_range((from_index + 1)..=to_index, -1);
+        } else {
+            self.shift_cold_tab_range(to_index..=(from_index - 1), 1);
+        }
+        if let Some(cold_tab) = moved_cold_tab {
+            self.cold_session_tabs.insert(to_index, cold_tab);
+        }
         let changed_start = from_index.min(to_index);
         let changed_end = from_index.max(to_index);
 
@@ -158,7 +197,36 @@ impl TabManager {
 
     pub fn set_tabs(&mut self, tabs: Vec<WorkspaceTab>, active_tab_index: usize) {
         self.tabs = tabs;
+        self.cold_session_tabs.clear();
         self.active_tab_index = active_tab_index.min(self.tabs.len().saturating_sub(1));
+        self.rebuild_buffer_tab_index();
+    }
+
+    pub(crate) fn reorder_tabs_by_original_indices(&mut self, original_indices: &[usize]) {
+        if self.tabs.len() != original_indices.len() {
+            return;
+        }
+
+        let old_cold_tabs = std::mem::take(&mut self.cold_session_tabs);
+        let mut indexed_tabs = std::mem::take(&mut self.tabs)
+            .into_iter()
+            .enumerate()
+            .map(|(position, tab)| {
+                let original_index = original_indices[position];
+                (original_index, position, tab)
+            })
+            .collect::<Vec<_>>();
+        indexed_tabs.sort_by_key(|(original_index, _, _)| *original_index);
+        self.tabs = indexed_tabs
+            .into_iter()
+            .enumerate()
+            .map(|(new_index, (_, old_position, tab))| {
+                if let Some(cold_tab) = old_cold_tabs.get(&old_position).cloned() {
+                    self.cold_session_tabs.insert(new_index, cold_tab);
+                }
+                tab
+            })
+            .collect();
         self.rebuild_buffer_tab_index();
     }
 
@@ -194,6 +262,38 @@ impl TabManager {
                     *tab_index = tab_index.saturating_sub(delta.unsigned_abs());
                 }
             }
+        }
+    }
+
+    fn shift_cold_tab_indices(&mut self, start_index: usize, delta: isize) {
+        let old = std::mem::take(&mut self.cold_session_tabs);
+        for (tab_index, cold_tab) in old {
+            let next_index = if tab_index >= start_index {
+                if delta.is_positive() {
+                    tab_index + delta as usize
+                } else {
+                    tab_index.saturating_sub(delta.unsigned_abs())
+                }
+            } else {
+                tab_index
+            };
+            self.cold_session_tabs.insert(next_index, cold_tab);
+        }
+    }
+
+    fn shift_cold_tab_range(&mut self, range: std::ops::RangeInclusive<usize>, delta: isize) {
+        let old = std::mem::take(&mut self.cold_session_tabs);
+        for (tab_index, cold_tab) in old {
+            let next_index = if range.contains(&tab_index) {
+                if delta.is_positive() {
+                    tab_index + delta as usize
+                } else {
+                    tab_index.saturating_sub(delta.unsigned_abs())
+                }
+            } else {
+                tab_index
+            };
+            self.cold_session_tabs.insert(next_index, cold_tab);
         }
     }
 
@@ -323,7 +423,7 @@ impl TabManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{TabManager, WorkspaceTab};
     use crate::app::domain::{BufferState, SplitAxis};
 
     fn tab(name: &str) -> WorkspaceTab {

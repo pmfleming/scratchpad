@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    LoadedPathResult, PendingBackgroundAction, PendingEncodingComplianceAction,
+    PendingSessionHydrationAction, PendingTextMetadataAction, ScratchpadApp, StartupOptions,
+    cold_session_tab_buffer_ids,
+};
 use crate::app::app_state::PendingOpenTabsAction;
 use crate::app::domain::{BufferState, TabManager, TextFormatMetadata, WorkspaceTab};
 use crate::app::services::session_store::SessionStore;
@@ -25,6 +29,7 @@ fn app_with_buffer(buffer: BufferState) -> ScratchpadApp {
         session_dirty: false,
         pending_scroll_to_active: false,
         buffer_tab_index: Default::default(),
+        cold_session_tabs: Default::default(),
     };
     app.tab_manager.rebuild_buffer_tab_index();
     app
@@ -51,6 +56,11 @@ fn text_metadata_result_updates_matching_buffer_and_clears_pending_action() {
         buffer_id,
         revision,
         Ok((
+            crate::app::domain::buffer::BufferLength {
+                bytes: 7,
+                chars: 7,
+                lines: 2,
+            },
             2,
             crate::app::domain::TextArtifactSummary::default(),
             format,
@@ -119,6 +129,71 @@ fn partial_open_tabs_result_keeps_action_until_terminal_result() {
 
     assert!(app.state.io.pending_background_actions.contains_key(&3));
     assert_eq!(app.tab_manager.tabs.as_slice().len(), 2);
+}
+
+#[test]
+fn progressive_session_hydration_replaces_matching_cold_shell_after_index_shift() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = SessionStore::new(directory.path().join("session"));
+    let visible = WorkspaceTab::new(BufferState::new(
+        "visible.txt".to_owned(),
+        "visible".to_owned(),
+        None,
+    ));
+    let hidden = WorkspaceTab::new(BufferState::new(
+        "hidden.txt".to_owned(),
+        "hidden body".to_owned(),
+        None,
+    ));
+    store.persist(&[visible, hidden], 0, 16.0, false).unwrap();
+
+    let mut streamed_tabs = Vec::new();
+    let mut cold_payload = None;
+    store
+        .load_streaming(
+            |_, _| true,
+            |tab_index, tab, cold_session_tab| {
+                if let Some(tab) = cold_session_tab {
+                    cold_payload = Some(tab.clone());
+                }
+                streamed_tabs.push((tab_index, tab));
+                true
+            },
+        )
+        .unwrap();
+    streamed_tabs.sort_by_key(|(tab_index, _)| *tab_index);
+
+    let mut app = test_app();
+    app.state.session_store = store.clone();
+    app.tab_manager
+        .set_tabs(streamed_tabs.into_iter().map(|(_, tab)| tab).collect(), 0);
+    let cold_payload = cold_payload.unwrap();
+    app.tab_manager
+        .set_cold_session_tab(1, cold_payload.clone());
+    app.state.io.pending_background_actions.insert(
+        77,
+        PendingBackgroundAction::HydrateSessionTab(PendingSessionHydrationAction {
+            expected_buffer_ids: cold_session_tab_buffer_ids(&cold_payload),
+        }),
+    );
+
+    app.tab_manager.insert_tab(
+        0,
+        WorkspaceTab::new(BufferState::new(
+            "new.txt".to_owned(),
+            "new".to_owned(),
+            None,
+        )),
+    );
+    let (hydrated_tab, restore_status) = store.restore_cold_session_tab(cold_payload);
+    app.apply_session_tab_hydrated_result(77, 1, restore_status, hydrated_tab);
+
+    assert!(!app.state.io.pending_background_actions.contains_key(&77));
+    assert!(app.tab_manager.cold_session_tabs().is_empty());
+    assert_eq!(
+        app.tab_manager.tabs.as_slice()[2].active_buffer().text(),
+        "hidden body"
+    );
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::DisplayTabSlot;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 #[derive(Default)]
 pub(crate) struct WorkspaceSelectionState {
@@ -229,17 +229,34 @@ impl ScratchpadApp {
         match self.display_tab_slot(slot_index)? {
             DisplayTabSlot::Settings => Some("Settings".to_owned()),
             DisplayTabSlot::Workspace(workspace_index) => {
-                let tab = self.tab_manager.tabs.as_slice().get(workspace_index)?;
-                let duplicate_count = self
-                    .tab_manager
-                    .tabs
-                    .as_slice()
-                    .iter()
-                    .filter(|candidate| candidate.buffer.name == tab.buffer.name)
-                    .count();
+                let tabs = self.tab_manager.tabs.as_slice();
+                let tab = tabs.get(workspace_index)?;
+                let has_duplicate = tabs.iter().enumerate().any(|(candidate_index, candidate)| {
+                    candidate_index != workspace_index && candidate.buffer.name == tab.buffer.name
+                });
                 Some(crate::app::domain::tab::summary::full_display_name(
                     tab,
-                    duplicate_count > 1,
+                    has_duplicate,
+                ))
+            }
+        }
+    }
+
+    pub(crate) fn display_tab_name_at_slot_with_counts(
+        &self,
+        slot_index: usize,
+        duplicate_name_counts: &HashMap<String, usize>,
+    ) -> Option<String> {
+        match self.display_tab_slot(slot_index)? {
+            DisplayTabSlot::Settings => Some("Settings".to_owned()),
+            DisplayTabSlot::Workspace(workspace_index) => {
+                let tab = self.tab_manager.tabs.as_slice().get(workspace_index)?;
+                let has_duplicate = duplicate_name_counts
+                    .get(&tab.buffer.name)
+                    .is_some_and(|count| *count > 1);
+                Some(crate::app::domain::tab::summary::full_display_name(
+                    tab,
+                    has_duplicate,
                 ))
             }
         }
@@ -275,23 +292,25 @@ impl ScratchpadApp {
         }
 
         let display_slots = self.display_tab_slots();
-        let moved_slots = from_slots
-            .iter()
-            .map(|slot| display_slots[*slot])
-            .collect::<Vec<_>>();
         let adjusted_to_slot =
             to_slot.saturating_sub(from_slots.iter().filter(|slot| **slot < to_slot).count());
-        let remaining_slots = display_slots
-            .into_iter()
-            .enumerate()
-            .filter_map(|(slot_index, slot)| (!from_slots.contains(&slot_index)).then_some(slot))
-            .collect::<Vec<_>>();
+        let mut moved_slots = Vec::with_capacity(from_slots.len());
+        let mut remaining_slots = Vec::with_capacity(display_slots.len() - from_slots.len());
+        let mut next_moved_slot = from_slots.iter().copied().peekable();
+        for (slot_index, slot) in display_slots.iter().copied().enumerate() {
+            if next_moved_slot.peek() == Some(&slot_index) {
+                moved_slots.push(slot);
+                next_moved_slot.next();
+            } else {
+                remaining_slots.push(slot);
+            }
+        }
 
         let mut next_slots = remaining_slots;
         let insert_index = adjusted_to_slot.min(next_slots.len());
         next_slots.splice(insert_index..insert_index, moved_slots);
 
-        if next_slots == self.display_tab_slots() {
+        if next_slots == display_slots {
             return false;
         }
 

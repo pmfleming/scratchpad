@@ -58,7 +58,7 @@ pub fn pluralize(count: usize, singular: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::pluralize;
 
     #[test]
     fn pluralize_uses_singular_only_for_one() {

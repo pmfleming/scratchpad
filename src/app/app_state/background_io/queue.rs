@@ -1,5 +1,11 @@
 use super::fallback::BackgroundIoFallback;
-use super::*;
+use super::{
+    BackgroundIoRequest, BackgroundIoResult, PathBuf, PathLoadRequest, PendingBackgroundAction,
+    PendingEncodingComplianceAction, PendingSavePathAction, PendingSessionHydrationAction,
+    PendingSessionPersistAction, PendingStartupRestoreAction, PendingTextMetadataAction,
+    ScratchpadApp, SessionPersistRequest, StartupOptions, cold_session_tab_buffer_ids,
+    record_background_send_error,
+};
 
 impl ScratchpadApp {
     pub(crate) fn queue_active_buffer_encoding_compliance_refresh(&mut self) {
@@ -140,6 +146,7 @@ impl ScratchpadApp {
                 loaded_from_settings,
                 restore_started: false,
                 streamed_tab_count: 0,
+                streamed_tab_indices: Vec::new(),
             }),
         );
 
@@ -153,6 +160,51 @@ impl ScratchpadApp {
                 result: request.into_restore_result(),
             });
         });
+    }
+
+    pub(crate) fn queue_next_progressive_session_hydration(&mut self) {
+        if self
+            .state
+            .io
+            .pending_background_actions
+            .values()
+            .any(|action| matches!(action, PendingBackgroundAction::HydrateSessionTab(_)))
+        {
+            return;
+        }
+
+        let active_tab_index = self.tab_manager.active_tab_index;
+        let Some((tab_index, cold_session_tab)) = self
+            .tab_manager
+            .cold_session_tabs()
+            .iter()
+            .min_by_key(|(index, _)| index.abs_diff(active_tab_index))
+            .map(|(index, tab)| (*index, tab.clone()))
+        else {
+            return;
+        };
+
+        let expected_buffer_ids = cold_session_tab_buffer_ids(&cold_session_tab);
+        let request_id = self.state.io.allocate_background_request_id();
+        self.state.io.insert_pending_background_action(
+            request_id,
+            PendingBackgroundAction::HydrateSessionTab(PendingSessionHydrationAction {
+                expected_buffer_ids,
+            }),
+        );
+
+        let request = BackgroundIoRequest::HydrateSessionTab {
+            request_id,
+            session_store: self.state.session_store.clone(),
+            tab_index,
+            cold_session_tab,
+        };
+        if let Err(error) = self.state.io.background_io_tx.send(request) {
+            record_background_send_error(&error);
+            self.apply_background_io_result(
+                error.into_request().into_hydrated_session_tab_result(),
+            );
+        }
     }
 
     pub(crate) fn queue_background_session_persist(&mut self, request: SessionPersistRequest) {

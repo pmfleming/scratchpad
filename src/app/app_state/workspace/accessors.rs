@@ -1,4 +1,5 @@
 use super::super::{ScratchpadApp, TabRenameState};
+use crate::app::domain::WorkspaceTab;
 use crate::app::domain::{PendingAction, ViewId};
 use crate::app::services::file_controller::FileController;
 use crate::app::services::session_manager;
@@ -6,6 +7,18 @@ use crate::app::services::session_store::SessionStore;
 use std::path::Path;
 
 impl ScratchpadApp {
+    pub fn tabs(&self) -> &[WorkspaceTab] {
+        self.tab_manager.tabs.as_slice()
+    }
+
+    pub fn tabs_mut(&mut self) -> &mut [WorkspaceTab] {
+        self.tab_manager.tabs.as_mut_slice()
+    }
+
+    pub fn append_tab(&mut self, tab: WorkspaceTab) {
+        self.tab_manager.append_tab(tab);
+    }
+
     pub fn user_manual_path(&self) -> &Path {
         &self.state.user_manual_path
     }

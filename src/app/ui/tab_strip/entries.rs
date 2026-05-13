@@ -40,11 +40,12 @@ pub(crate) fn show_tab_region(
 fn apply_tab_drag_feedback(
     ui: &mut egui::Ui,
     app: &ScratchpadApp,
+    duplicate_name_counts: &DuplicateNameCounts,
     drop_zones: &[TabDropZone],
     outcome: &mut TabStripOutcome,
 ) {
     update_reordered_tabs(ui, app.total_tab_slots(), drop_zones, outcome);
-    tab_drag::paint_dragged_tab_ghost(ui.ctx(), app);
+    tab_drag::paint_dragged_tab_ghost(ui.ctx(), app, duplicate_name_counts);
 }
 
 fn update_reordered_tabs(

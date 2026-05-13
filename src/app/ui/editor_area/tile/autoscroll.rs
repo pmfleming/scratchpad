@@ -122,7 +122,7 @@ fn selection_edge_drag_velocity(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{edge_autoscroll_offset, egui, selection_edge_drag_velocity};
 
     fn viewport() -> egui::Rect {
         egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 100.0))

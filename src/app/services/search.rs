@@ -252,7 +252,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        SearchError, SearchMode, SearchOptions, SearchProgram, find_matches, search_program,
+        search_text, search_text_interruptible,
+    };
 
     fn plain_options() -> SearchOptions {
         SearchOptions {

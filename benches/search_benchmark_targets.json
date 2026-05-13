@@ -1,0 +1,88 @@
+{
+  "search_active_file_size": {
+    "description": "Plain-text search completion in the active buffer as file size grows.",
+    "mode": "active",
+    "latency_kind": "completion",
+    "scaling_axis": "file_size",
+    "kind": "workflow",
+    "workload_family": "search",
+    "parameter_unit": "bytes",
+    "fixed_item_count": 1,
+    "query": "needle",
+    "threshold_ms": 50.0,
+    "targets": [
+      "src/app/services/search.rs"
+    ],
+    "limiting_resource_hint": "cpu"
+  },
+  "search_current_files_completion": {
+    "description": "Plain-text search completion across the current workspace file set.",
+    "mode": "current",
+    "latency_kind": "completion",
+    "scaling_axis": "aggregate_size",
+    "kind": "workflow",
+    "workload_family": "search",
+    "parameter_unit": "files",
+    "bytes_per_item": 16384,
+    "query": "needle",
+    "threshold_ms": 80.0,
+    "targets": [
+      "src/app/services/search.rs",
+      "src/app/app_state/search_state"
+    ],
+    "limiting_resource_hint": "cpu"
+  },
+  "search_current_files_first_response": {
+    "description": "First target search result for the current workspace file set.",
+    "mode": "current",
+    "latency_kind": "first_response",
+    "scaling_axis": "aggregate_size",
+    "kind": "workflow",
+    "workload_family": "search",
+    "parameter_unit": "files",
+    "bytes_per_item": 16384,
+    "response_match_limit": 1,
+    "query": "needle",
+    "threshold_ms": 25.0,
+    "targets": [
+      "src/app/services/search.rs",
+      "src/app/app_state/search_state"
+    ],
+    "limiting_resource_hint": "cpu"
+  },
+  "search_all_tabs_completion": {
+    "description": "Plain-text search completion across all open tabs.",
+    "mode": "all",
+    "latency_kind": "completion",
+    "scaling_axis": "aggregate_size",
+    "kind": "workflow",
+    "workload_family": "search",
+    "parameter_unit": "tabs",
+    "bytes_per_item": 16384,
+    "query": "needle",
+    "threshold_ms": 100.0,
+    "targets": [
+      "src/app/services/search.rs",
+      "src/app/app_state/search_state"
+    ],
+    "limiting_resource_hint": "cpu"
+  },
+  "search_all_tabs_first_response": {
+    "description": "First target search result across all open tabs.",
+    "mode": "all",
+    "latency_kind": "first_response",
+    "scaling_axis": "aggregate_size",
+    "kind": "workflow",
+    "workload_family": "search",
+    "parameter_unit": "tabs",
+    "bytes_per_item": 16384,
+    "response_match_limit": 1,
+    "query": "needle",
+    "threshold_ms": 25.0,
+    "targets": [
+      "src/app/services/search.rs",
+      "src/app/app_state/search_state"
+    ],
+    "limiting_resource_hint": "cpu"
+  }
+}

@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    ScratchpadApp, SettingsUi, card_header, category_heading, combo_control, egui, expandable_card,
+    radio_option_row, settings_card_frame, toggle_card,
+};
 use crate::app::services::settings_store::{FileOpenDisposition, StartupSessionBehavior};
 
 const FILE_OPEN_OPTIONS: [FileOpenDisposition; 2] =

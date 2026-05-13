@@ -99,6 +99,7 @@ fn main() {
     emit_search_resource_tracking();
     emit_paste_allocations();
     emit_tab_count_resource_tracking();
+    emit_targeted_tab_phase_probes();
     emit_view_count_resource_tracking();
     emit_session_persist_restore_costs();
 }
@@ -285,6 +286,55 @@ fn emit_tab_count_resource_tracking() {
         },
         run_tab_count_cycle,
     );
+}
+
+fn emit_targeted_tab_phase_probes() {
+    for (step_index, tab_count) in [128usize, 512, 4_096, 10_000].into_iter().enumerate() {
+        emit_step(
+            StepDescriptor {
+                scenario: "tab_build_targeted",
+                scenario_label: "Tab build targeted path",
+                workload_family: "tab-management",
+                focus: "tab-build",
+                step_index,
+                workload_value: tab_count,
+                workload_unit: "tabs",
+                workload_label: format!("{tab_count} tabs"),
+            },
+            || StepOutcome::items(black_box(build_tabs(tab_count, TAB_BYTES_PER_BUFFER).len())),
+        );
+
+        let mut split_tabs = build_tabs(tab_count, TAB_BYTES_PER_BUFFER);
+        emit_step(
+            StepDescriptor {
+                scenario: "tab_split_targeted",
+                scenario_label: "Tab split targeted path",
+                workload_family: "tab-management",
+                focus: "tab-split",
+                step_index,
+                workload_value: tab_count,
+                workload_unit: "tabs",
+                workload_label: format!("{tab_count} tabs"),
+            },
+            || StepOutcome::items(black_box(split_tabs_once(&mut split_tabs))),
+        );
+
+        let mut combine_tabs_set = build_tabs(tab_count, TAB_BYTES_PER_BUFFER);
+        split_tabs_once(&mut combine_tabs_set);
+        emit_step(
+            StepDescriptor {
+                scenario: "tab_combine_targeted",
+                scenario_label: "Tab combine targeted path",
+                workload_family: "tab-management",
+                focus: "tab-combine",
+                step_index,
+                workload_value: tab_count,
+                workload_unit: "tabs",
+                workload_label: format!("{tab_count} tabs"),
+            },
+            || StepOutcome::items(black_box(combine_first_tabs(&mut combine_tabs_set))),
+        );
+    }
 }
 
 fn emit_view_count_resource_tracking() {
@@ -713,19 +763,7 @@ fn run_fragmented_long_session_mutation_cycle(fragment_count: usize) -> StepOutc
 
 fn run_tab_count_cycle(tab_count: usize) -> StepOutcome {
     let mut tabs = build_tabs(tab_count, TAB_BYTES_PER_BUFFER);
-    let mut activations = 0usize;
-    for (index, tab) in tabs.iter_mut().enumerate() {
-        let _ = tab.split_active_view(if index.is_multiple_of(2) {
-            SplitAxis::Vertical
-        } else {
-            SplitAxis::Horizontal
-        });
-        activations += 1;
-    }
-    if tabs.len() > 2 {
-        combine_tabs(&mut tabs, 0, 1);
-        activations += 1;
-    }
+    let activations = split_tabs_once(&mut tabs) + combine_first_tabs(&mut tabs);
     StepOutcome::items(black_box(activations + tabs.len()))
 }
 
@@ -783,15 +821,12 @@ fn run_session_restore_cycle(store: &SessionStore) -> StepOutcome {
 
 fn run_startup_visible_restore_cycle(store: &SessionStore) -> StepOutcome {
     let restored = store
-        .load()
+        .load_startup_visible()
         .expect("load startup session")
-        .expect("restored startup session present");
-    let active_index = restored
-        .active_tab_index
-        .min(restored.tabs.len().saturating_sub(1));
+        .expect("visible startup session present");
     let painted_rows = restored
         .tabs
-        .get(active_index)
+        .get(restored.active_tab_index)
         .map(|tab| render_first_visible_text_paint(&tab.buffer))
         .unwrap_or_default();
     StepOutcome::items_with_manifest(
@@ -827,6 +862,28 @@ fn build_tabs(tab_count: usize, bytes_per_buffer: usize) -> Vec<WorkspaceTab> {
             WorkspaceTab::new(buffer)
         })
         .collect()
+}
+
+fn split_tabs_once(tabs: &mut [WorkspaceTab]) -> usize {
+    let mut activations = 0usize;
+    for (index, tab) in tabs.iter_mut().enumerate() {
+        let _ = tab.split_active_view(if index.is_multiple_of(2) {
+            SplitAxis::Vertical
+        } else {
+            SplitAxis::Horizontal
+        });
+        activations += 1;
+    }
+    activations
+}
+
+fn combine_first_tabs(tabs: &mut Vec<WorkspaceTab>) -> usize {
+    if tabs.len() > 2 {
+        combine_tabs(tabs, 0, 1);
+        1
+    } else {
+        0
+    }
 }
 
 fn combine_tabs(tabs: &mut Vec<WorkspaceTab>, source_idx: usize, target_idx: usize) {

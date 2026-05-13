@@ -96,6 +96,15 @@
     };
 
     const performancePromisePalette = ["#6fd0ff", "#f3c969", "#7ddc9b", "#c7a6ff", "#ff9f7a", "#ff8fb3", "#9ee6d4", "#8fc7ff"];
+    const seriesShadeSteps = {
+        2: [0.18, -0.16],
+        3: [0.22, 0, -0.18],
+        4: [0.26, 0.08, -0.12, -0.28],
+        5: [0.3, 0.14, 0, -0.16, -0.32],
+        6: [0.34, 0.2, 0.06, -0.08, -0.22, -0.36],
+        7: [0.36, 0.24, 0.12, 0, -0.12, -0.24, -0.36],
+        8: [0.38, 0.27, 0.16, 0.05, -0.07, -0.18, -0.29, -0.4],
+    };
 
     const riskMetricLabels = [
         ["maintainability_risk", "Maintainability"],
@@ -829,6 +838,54 @@
         return performancePromisePalette[Math.abs(hash) % performancePromisePalette.length];
     }
 
+    function parseHexColor(color) {
+        const match = String(color || "").trim().match(/^#([0-9a-f]{6})$/i);
+        if (!match) return null;
+        const numeric = Number.parseInt(match[1], 16);
+        return {
+            r: (numeric >> 16) & 255,
+            g: (numeric >> 8) & 255,
+            b: numeric & 255,
+        };
+    }
+
+    function rgbToHex({ r, g, b }) {
+        return `#${[r, g, b].map((value) => Math.round(Math.max(0, Math.min(255, value))).toString(16).padStart(2, "0")).join("")}`;
+    }
+
+    function shadeSeriesColor(baseColor, index, total) {
+        if (total <= 1) return baseColor;
+        const steps = seriesShadeSteps[Math.min(total, 8)] || seriesShadeSteps[8];
+        const step = steps[index % steps.length] || 0;
+        const base = parseHexColor(baseColor);
+        if (!base) return baseColor;
+        const target = step >= 0 ? { r: 255, g: 255, b: 255 } : { r: 0, g: 0, b: 0 };
+        const amount = Math.abs(step);
+        return rgbToHex({
+            r: base.r + (target.r - base.r) * amount,
+            g: base.g + (target.g - base.g) * amount,
+            b: base.b + (target.b - base.b) * amount,
+        });
+    }
+
+    function withDistinctSeriesColors(series) {
+        const groups = new Map();
+        (series || []).forEach((entry, index) => {
+            const key = String(entry.color || "").toLowerCase();
+            if (!key) return;
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(index);
+        });
+        return (series || []).map((entry, index) => {
+            const group = groups.get(String(entry.color || "").toLowerCase()) || [];
+            if (group.length <= 1) return entry;
+            return {
+                ...entry,
+                color: shadeSeriesColor(entry.color, group.indexOf(index), group.length),
+            };
+        });
+    }
+
     function normalisePromiseToken(value) {
         return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
     }
@@ -1138,6 +1195,7 @@
                 <div class="chart-empty">No matching records for this chart.</div>
             </section>`;
         }
+        series = withDistinctSeriesColors(series);
 
         const orderedX = Array.from(
             new Map(
@@ -1752,9 +1810,9 @@
         const profileRows = filterScenarioEvidenceRows(evidence.profiles || [], filters.profiles);
         const implementationRows = filterScenarioEvidenceRows(scenario.implementations || [], filters.implementations);
         return `<div class="promise-evidence-grid">
-            ${renderPerformanceSectionWithFilter(scenario.id, "latency", filters.latency, "Filter latency tests...", renderScenarioLatencyEvidence(latencyRows, { scenario }))}
-            ${renderPerformanceSectionWithFilter(scenario.id, "capacity", filters.capacity, "Filter capacity checks...", renderScenarioCapacityEvidence(capacityRows, { scenario }))}
-            ${renderPerformanceSectionWithFilter(scenario.id, "resources", filters.resources, "Filter resource profiles...", renderScenarioResourceEvidence(resourceRows, { open: false }))}
+            ${renderPerformanceSectionWithFilter(scenario.id, "capacity", filters.capacity, "Filter ceiling health checks...", renderScenarioCapacityEvidence(capacityRows, { scenario }))}
+            ${renderPerformanceSectionWithFilter(scenario.id, "latency", filters.latency, "Filter targeted latency paths...", renderScenarioLatencyEvidence(latencyRows, { scenario }))}
+            ${renderPerformanceSectionWithFilter(scenario.id, "resources", filters.resources, "Filter targeted resource paths...", renderScenarioResourceEvidence(resourceRows, { open: false }))}
             ${renderPerformanceSectionWithFilter(scenario.id, "profiles", filters.profiles, "Filter flamegraph profiles...", renderScenarioProfileEvidence(profileRows, { open: false, title: "Flamegraph Profiles", tail: renderScenarioFlamegraphBrowser(scenario, filters) }))}
             ${renderPerformanceSectionWithFilter(scenario.id, "implementations", filters.implementations, "Filter implementation audit...", renderScenarioImplementationEvidence(implementationRows, { open: false }))}
         </div>`;
@@ -1816,8 +1874,8 @@
             </tr>`;
         });
         return renderScenarioEvidenceTable({
-            title: "Latency Tests",
-            caption: `${formatNumber.format(rows.length)} rows - ${formatNumber.format(over)} over budget`,
+            title: "Targeted Latency Paths",
+            caption: `${formatNumber.format(rows.length)} change-validation rows - ${formatNumber.format(over)} over budget`,
             open: true,
             headers: ["Test", "Family", "Mean", "Budget", "Ratio", "Signals", "Profiles"],
             rows: body,
@@ -1883,8 +1941,9 @@
             </g>`;
         }).join("");
         const promiseColor = performancePromiseColor(scenario?.id || performancePromiseForItem(rows[0] || {}).id);
-        const seriesMarkup = series.map((entry, index) => {
-            const color = promiseColor;
+        const coloredSeries = withDistinctSeriesColors(series.map((entry) => ({ ...entry, color: promiseColor })));
+        const seriesMarkup = coloredSeries.map((entry) => {
+            const color = entry.color;
             const path = entry.points.map((point, pointIndex) => `${pointIndex ? "L" : "M"} ${xPosition(point.x).toFixed(1)} ${yPosition(point.meanMs).toFixed(1)}`).join(" ");
             const markers = entry.points.map((point) => {
                 const x = xPosition(point.x);
@@ -1897,8 +1956,8 @@
                 ${markers}
             </g>`;
         }).join("");
-        const legend = series.map((entry, index) => {
-            const color = promiseColor;
+        const legend = coloredSeries.map((entry) => {
+            const color = entry.color;
             return `<span class="scenario-latency-legend__item"><i style="background:${color}"></i>${escapeHtml(entry.label)}</span>`;
         }).join("");
         return `<div class="scenario-latency-chart">
@@ -1995,8 +2054,8 @@
             <td>${renderScenarioProfileLinks(item.matching_flamegraphs || [])}</td>
         </tr>`);
         return renderScenarioEvidenceTable({
-            title: "Capacity & Failure Ceilings",
-            caption: `${formatNumber.format(rows.length)} rows - ${formatNumber.format(ceilings)} ceilings reached`,
+            title: "Ceiling Promise Health",
+            caption: `${formatNumber.format(rows.length)} health checks - ${formatNumber.format(ceilings)} ceilings reached`,
             open: rows.length > 0,
             headers: ["Check", "Failure mode", "Last OK", "First failure", "Resource", "Peak working set", "Profiles"],
             rows: body,
@@ -2066,8 +2125,9 @@
             </g>`;
         }).join("");
         const promiseColor = performancePromiseColor(scenario?.id || performancePromiseForItem(rows[0] || {}).id);
-        const seriesMarkup = series.map((entry, index) => {
-            const color = promiseColor;
+        const coloredSeries = withDistinctSeriesColors(series.map((entry) => ({ ...entry, color: promiseColor })));
+        const seriesMarkup = coloredSeries.map((entry) => {
+            const color = entry.color;
             const path = entry.points.map((point, pointIndex) => `${pointIndex ? "L" : "M"} ${xPosition(point.x).toFixed(1)} ${yPosition(point.elapsedMs).toFixed(1)}`).join(" ");
             const markers = entry.points.map((point) => {
                 const x = xPosition(point.x);
@@ -2080,8 +2140,8 @@
                 ${markers}
             </g>`;
         }).join("");
-        const legend = series.map((entry, index) => {
-            const color = promiseColor;
+        const legend = coloredSeries.map((entry) => {
+            const color = entry.color;
             return `<span class="scenario-latency-legend__item"><i style="background:${color}"></i>${escapeHtml(entry.label)}</span>`;
         }).join("");
         return `<div class="scenario-latency-chart scenario-capacity-chart">
@@ -2150,8 +2210,8 @@
             <td>${item.handle_growth == null ? "-" : formatNumber.format(item.handle_growth)}</td>
         </tr>`);
         return renderScenarioEvidenceTable({
-            title: "Resource Profile Scenarios",
-            caption: `${formatNumber.format(rows.length)} probes - worst elapsed ${worstElapsed ? formatMs(worstElapsed) : "-"}`,
+            title: "Targeted Resource Paths",
+            caption: `${formatNumber.format(rows.length)} change-validation probes - worst elapsed ${worstElapsed ? formatMs(worstElapsed) : "-"}`,
             open: options.open ?? (rows.length > 0),
             headers: ["Probe", "Focus", "Samples", "Max elapsed", "Peak live", "Working set", "PF growth", "Handle growth"],
             rows: body,
@@ -2300,6 +2360,8 @@
         const target = byId("performance-measurement-gaps");
         if (!target) return;
         const rows = measurementGapRows();
+        const tabPhaseRow = targetedTabPhaseRow();
+        if (tabPhaseRow) rows.push(tabPhaseRow);
         if (!rows.length) {
             target.innerHTML = `<p class="muted">No measurement-gap resource probes loaded.</p>`;
             return;
@@ -2314,7 +2376,7 @@
                     </div>
                     <span class="status-pill status-pill--ok" title="Focused probe samples loaded">${escapeHtml(row.badge)}</span>
                 </div>
-                ${renderMeasurementGapChart(row)}
+                ${row.chartKind === "tab-phase" ? renderTargetedTabPhaseChart(row) : renderMeasurementGapChart(row)}
                 <div class="performance-gap-card__metrics">
                     <span><strong>${escapeHtml(formatMs(row.maxElapsedMs))}</strong><em>max elapsed</em></span>
                     <span><strong>${escapeHtml(formatBytes(row.maxPeakBytes))}</strong><em>peak allocation</em></span>
@@ -2374,6 +2436,58 @@
                 series,
             };
         }).filter(Boolean);
+    }
+
+    function targetedTabPhaseRow() {
+        const phaseSpecs = [
+            { id: "tab_build_targeted", label: "Build", color: "#6fd0ff" },
+            { id: "tab_split_targeted", label: "Split", color: "#f3c969" },
+            { id: "tab_combine_targeted", label: "Combine", color: "#7ddc9b" },
+            { id: "startup_visible_restore_cost", label: "Visible", color: "#ff9f7a" },
+            { id: "session_restore_cost", label: "Hydrate all", color: "#c7a6ff" },
+        ];
+        const scenarios = state.resourceProfiles?.scenarios || [];
+        const seriesGroups = phaseSpecs
+            .map((phase) => {
+                const scenario = scenarios.find((item) => item.scenario === phase.id);
+                const points = (scenario?.samples || [])
+                    .map((sample, index) => ({
+                        index,
+                        workloadValue: Number(sample.workload_value || index + 1),
+                        workloadLabel: sample.workload_label || `sample ${index + 1}`,
+                        elapsedMs: Number(sample.elapsed_ms || 0),
+                        peakBytes: Number(sample.peak_live_bytes || sample.working_set_bytes || 0),
+                        resultLabel: sample.result_label || "",
+                    }))
+                    .filter((sample) => sample.elapsedMs > 0 || sample.peakBytes > 0)
+                    .sort((left, right) => left.workloadValue - right.workloadValue || left.index - right.index);
+                if (!points.length) return null;
+                return {
+                    ...phase,
+                    scenario,
+                    points,
+                };
+            })
+            .filter(Boolean);
+        if (!seriesGroups.length) return null;
+        const allPoints = seriesGroups.flatMap((group) => group.points);
+        const allScenarios = seriesGroups.map((group) => group.scenario).filter(Boolean);
+        const largestSample = maxBy(allPoints, (sample) => Number(sample.workloadValue || 0));
+        return {
+            chartKind: "tab-phase",
+            title: "Tab Count Phase Breakdown",
+            subtitle: "Build, manipulate, time-to-visible, and full hydration probes share one graph.",
+            color: performancePromiseForItem({ workload_family: "tab-management" }).color,
+            badge: `${seriesGroups.length} phases`,
+            maxElapsedMs: Math.max(...allPoints.map((point) => point.elapsedMs), 0),
+            maxPeakBytes: Math.max(
+                ...allScenarios.map((scenario) => Number(scenario.max_peak_live_bytes || scenario.max_working_set_bytes || 0)),
+                ...allPoints.map((point) => point.peakBytes || 0),
+                0
+            ),
+            maxWorkloadLabel: largestSample?.workloadLabel || "-",
+            seriesGroups,
+        };
     }
 
     function measurementGapTitle(gap) {
@@ -2438,6 +2552,79 @@
             <text class="performance-gap-chart__axis" x="${left}" y="12">${escapeHtml(formatMs(maxElapsed))}</text>
             <text class="performance-gap-chart__axis performance-gap-chart__axis--right" x="${width - right}" y="12" text-anchor="end">${escapeHtml(formatBytes(maxPeak))}</text>
         </svg>`;
+    }
+
+    function renderTargetedTabPhaseChart(row) {
+        const width = 460;
+        const height = 190;
+        const left = 46;
+        const right = 18;
+        const top = 18;
+        const bottom = 42;
+        const plotWidth = width - left - right;
+        const plotHeight = height - top - bottom;
+        const groups = row.seriesGroups || [];
+        const points = groups.flatMap((group) => group.points || []);
+        if (!points.length) {
+            return `<div class="performance-gap-chart performance-gap-chart--empty">No tab phase samples loaded.</div>`;
+        }
+        const xValues = [...new Set(points.map((point) => Number(point.workloadValue || 0)).filter((value) => value > 0))]
+            .sort((leftValue, rightValue) => leftValue - rightValue);
+        const yValues = points.map((point) => Number(point.elapsedMs || 0)).filter((value) => value > 0);
+        const xMin = Math.min(...xValues);
+        const xMax = Math.max(...xValues);
+        const xLogMin = Math.log10(Math.max(xMin, 1));
+        const xLogMax = Math.log10(Math.max(xMax, xMin + 1));
+        const xFor = (value) => {
+            if (xMin === xMax) return left + plotWidth / 2;
+            const ratio = (Math.log10(Math.max(value, 1)) - xLogMin) / Math.max(xLogMax - xLogMin, 0.0001);
+            return left + ratio * plotWidth;
+        };
+        const yTicks = buildLogTicks(Math.min(...yValues), Math.max(...yValues));
+        const yMin = yTicks[0];
+        const yMax = yTicks[yTicks.length - 1];
+        const yLogMin = Math.log10(yMin);
+        const yLogMax = Math.log10(yMax);
+        const yFor = (value) => {
+            const ratio = (Math.log10(Math.max(value, yMin)) - yLogMin) / Math.max(yLogMax - yLogMin, 0.0001);
+            return top + plotHeight - ratio * plotHeight;
+        };
+        const yGrid = yTicks.map((tick) => {
+            const y = yFor(tick);
+            return `<g>
+                <line x1="${left}" x2="${width - right}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}"></line>
+                <text x="${left - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end">${escapeHtml(formatAxisMs(tick))}</text>
+            </g>`;
+        }).join("");
+        const xTicks = selectAxisTicks(xValues, 4).map((value) => {
+            const label = points.find((point) => point.workloadValue === value)?.workloadLabel || `${value}`;
+            const x = xFor(value);
+            return `<text x="${x.toFixed(1)}" y="${height - 12}" text-anchor="middle">${escapeHtml(shortWorkloadLabel(label))}</text>`;
+        }).join("");
+        const series = groups.map((group) => {
+            const path = group.points
+                .map((point, index) => `${index ? "L" : "M"} ${xFor(point.workloadValue).toFixed(1)} ${yFor(point.elapsedMs).toFixed(1)}`)
+                .join(" ");
+            const markers = group.points.map((point) => {
+                const title = `${group.label} ${point.workloadLabel}: ${formatMs(point.elapsedMs)}`;
+                return `<circle cx="${xFor(point.workloadValue).toFixed(1)}" cy="${yFor(point.elapsedMs).toFixed(1)}" r="3.8" stroke="${group.color}"><title>${escapeHtml(title)}</title></circle>`;
+            }).join("");
+            return `<g>
+                <path class="performance-gap-chart__phase-line" d="${path}" stroke="${group.color}"></path>
+                ${markers}
+            </g>`;
+        }).join("");
+        const legend = groups.map((group) => `<span><i style="background:${group.color}"></i>${escapeHtml(group.label)}</span>`).join("");
+        return `<div>
+            <svg class="performance-gap-chart performance-gap-chart--phase" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(row.title)} elapsed phase chart">
+                <g class="performance-gap-chart__grid">${yGrid}</g>
+                <line class="chart-axis-line" x1="${left}" x2="${left}" y1="${top}" y2="${top + plotHeight}"></line>
+                <line class="chart-axis-line" x1="${left}" x2="${width - right}" y1="${top + plotHeight}" y2="${top + plotHeight}"></line>
+                ${series}
+                <g class="performance-gap-chart__labels">${xTicks}</g>
+            </svg>
+            <div class="performance-gap-chart__legend">${legend}</div>
+        </div>`;
     }
 
     function shortWorkloadLabel(label) {
@@ -3864,6 +4051,46 @@
         };
     }
 
+    function speedReportScenarios() {
+        const sections = state.speedReport?.sections;
+        if (!sections || typeof sections !== "object") {
+            return [];
+        }
+        return Object.values(sections).flatMap((items) => Array.isArray(items) ? items : []);
+    }
+
+    function currentFrameScenario() {
+        return speedReportScenarios().find((item) =>
+            item?.scenario_id === "ui_render_frame"
+            || item?.scenario_label === "ui_render_frame"
+            || item?.benchmark_key === "ui_render_frame"
+        );
+    }
+
+    function computeFpsHealth() {
+        const scenario = currentFrameScenario();
+        const meanMs = Number(scenario?.mean_ms);
+        const goalFps = 60;
+        const goalFrameMs = 1000 / goalFps;
+        if (!scenario || !Number.isFinite(meanMs) || meanMs <= 0) {
+            return {
+                status: "stale",
+                value: "—",
+                driver: "Run performance refresh",
+                series: runMetricSeries("app_fps"),
+            };
+        }
+
+        const fps = 1000 / meanMs;
+        const status = fps >= goalFps && !scenario.over_budget ? "ok" : "bad";
+        return {
+            status,
+            value: `${formatNumber.format(fps)} FPS`,
+            driver: `${formatNumber.format(meanMs)} ms avg, ${goalFps} FPS goal (${formatNumber.format(goalFrameMs)} ms)`,
+            series: runMetricSeries("app_fps"),
+        };
+    }
+
     function computeCorrectnessHealth() {
         const c = state.correctness || {};
         const summary = c.summary || {};
@@ -3889,6 +4116,7 @@
         if (!target) return;
         const quality = computeQualityHealth();
         const capacity = computeCapacityHealth();
+        const fps = computeFpsHealth();
         const correctness = computeCorrectnessHealth();
         target.innerHTML = [
             renderGaugeCard({
@@ -3908,6 +4136,15 @@
                 driver: capacity.driver,
                 sparkline: capacity.series,
                 deltaInfo: describeDelta(capacity.series),
+            }),
+            renderGaugeCard({
+                id: "gauge-fps",
+                title: "FPS",
+                value: fps.value,
+                status: fps.status,
+                driver: fps.driver,
+                sparkline: fps.series,
+                deltaInfo: describeDelta(fps.series, { higherIsBetter: true }),
             }),
             renderGaugeCard({
                 id: "gauge-correctness",

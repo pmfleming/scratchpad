@@ -217,7 +217,10 @@ fn take_current_startup_restore_conflict(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        BufferFreshness, LoadedPathResult, PendingStartupRestoreCompareAction, ScratchpadApp,
+        StartupRestoreConflict,
+    };
     use crate::app::domain::{BufferState, DiskFileState, TabManager, WorkspaceTab};
     use crate::app::services::session_store::SessionStore;
     use crate::app::services::settings_store::SettingsStore;
@@ -257,6 +260,7 @@ mod tests {
             session_dirty: false,
             pending_scroll_to_active: false,
             buffer_tab_index: Default::default(),
+            cold_session_tabs: Default::default(),
         };
         app.tab_manager.rebuild_buffer_tab_index();
 

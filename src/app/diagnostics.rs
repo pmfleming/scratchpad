@@ -465,7 +465,12 @@ impl Log for AppDiagnosticsLogger {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        AppDiagnostic, AppDiagnosticKind, DiagnosticsState, ERROR_LOG_NAME,
+        append_diagnostic_to_path, build_io_diagnostic, extract_hexes, should_capture_log_record,
+    };
+    use log::{Level, Metadata};
+    use std::fs;
 
     #[test]
     fn append_creates_error_log() {

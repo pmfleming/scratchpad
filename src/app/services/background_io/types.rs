@@ -1,9 +1,12 @@
 use crate::app::capacity_metrics::BackgroundIoLane;
+use crate::app::domain::buffer::BufferLength;
 use crate::app::domain::{
     BufferState, DiskFileState, DocumentSnapshot, TextArtifactSummary, TextFormatMetadata,
     WorkspaceTab,
 };
-use crate::app::services::session_store::{RestoredSession, SessionPersistRequest, SessionStore};
+use crate::app::services::session_store::{
+    ColdSessionTab, RestoreStatus, RestoredSession, SessionPersistRequest, SessionStore,
+};
 use crate::app::services::settings_store::AppSettings;
 use std::path::PathBuf;
 
@@ -44,6 +47,12 @@ pub(crate) enum BackgroundIoRequest {
         request_id: u64,
         session_store: SessionStore,
     },
+    HydrateSessionTab {
+        request_id: u64,
+        session_store: SessionStore,
+        tab_index: usize,
+        cold_session_tab: ColdSessionTab,
+    },
     PersistSession {
         request_id: u64,
         session_store: SessionStore,
@@ -71,6 +80,7 @@ impl BackgroundIoRequest {
             Self::LoadPaths { .. } => "load_paths",
             Self::SavePath { .. } => "save_path",
             Self::RestoreSession { .. } => "restore_session",
+            Self::HydrateSessionTab { .. } => "hydrate_session_tab",
             Self::PersistSession { .. } => "persist_session",
             Self::RefreshTextMetadata { .. } => "refresh_text_metadata",
             Self::RefreshEncodingCompliance { .. } => "refresh_encoding_compliance",
@@ -80,7 +90,9 @@ impl BackgroundIoRequest {
     pub(super) fn lane(&self) -> BackgroundIoLane {
         match self {
             Self::LoadPaths { .. } | Self::SavePath { .. } => BackgroundIoLane::Path,
-            Self::RestoreSession { .. } | Self::PersistSession { .. } => BackgroundIoLane::Session,
+            Self::RestoreSession { .. }
+            | Self::HydrateSessionTab { .. }
+            | Self::PersistSession { .. } => BackgroundIoLane::Session,
             Self::RefreshTextMetadata { .. } | Self::RefreshEncodingCompliance { .. } => {
                 BackgroundIoLane::Analysis
             }
@@ -114,6 +126,14 @@ pub(crate) enum BackgroundIoResult {
     },
     SessionTabRestored {
         request_id: u64,
+        tab_index: usize,
+        cold_session_tab: Option<crate::app::services::session_store::ColdSessionTab>,
+        tab: Box<WorkspaceTab>,
+    },
+    SessionTabHydrated {
+        request_id: u64,
+        tab_index: usize,
+        restore_status: Option<RestoreStatus>,
         tab: Box<WorkspaceTab>,
     },
     SessionPersisted {
@@ -124,7 +144,7 @@ pub(crate) enum BackgroundIoResult {
         request_id: u64,
         buffer_id: u64,
         revision: u64,
-        result: Result<(usize, TextArtifactSummary, TextFormatMetadata), String>,
+        result: Result<(BufferLength, usize, TextArtifactSummary, TextFormatMetadata), String>,
     },
     EncodingComplianceRefreshed {
         request_id: u64,

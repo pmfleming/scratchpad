@@ -49,6 +49,11 @@ pub(crate) struct PendingStartupRestoreAction {
     pub(crate) loaded_from_settings: bool,
     pub(crate) restore_started: bool,
     pub(crate) streamed_tab_count: usize,
+    pub(crate) streamed_tab_indices: Vec<usize>,
+}
+
+pub(crate) struct PendingSessionHydrationAction {
+    pub(crate) expected_buffer_ids: Vec<BufferId>,
 }
 
 pub(crate) struct PendingReloadBufferAction {
@@ -101,6 +106,7 @@ pub(crate) enum PendingBackgroundAction {
     OpenTabs(PendingOpenTabsAction),
     OpenHere(PendingOpenHereAction),
     StartupRestore(PendingStartupRestoreAction),
+    HydrateSessionTab(PendingSessionHydrationAction),
     ReloadBuffer(PendingReloadBufferAction),
     ReopenWithEncoding(PendingReopenWithEncodingAction),
     SavePath(PendingSavePathAction),

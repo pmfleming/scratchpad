@@ -301,7 +301,8 @@ fn module_key_for_path(path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{LeverageCounts, LeverageVisitor, score_leverage};
+    use syn::visit::Visit;
 
     fn counts_for(source: &str) -> LeverageCounts {
         let file = syn::parse_file(source).expect("test source should parse");

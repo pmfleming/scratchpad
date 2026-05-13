@@ -191,6 +191,42 @@ fn focus_search_match(app: &mut ScratchpadApp, search_match: SearchMatch) -> boo
 }
 
 impl ScratchpadApp {
+    pub fn open_search(&mut self) {
+        open_search(self);
+    }
+
+    pub fn open_search_and_replace(&mut self) {
+        open_search_and_replace(self);
+    }
+
+    pub fn toggle_search(&mut self) {
+        toggle_search(self);
+    }
+
+    pub fn search_open(&self) -> bool {
+        self.state.search_state.open()
+    }
+
+    pub fn set_search_query(&mut self, query: impl Into<String>) {
+        set_search_query(self, query);
+    }
+
+    pub fn set_search_replacement(&mut self, replacement: impl Into<String>) {
+        set_search_replacement(self, replacement);
+    }
+
+    pub fn set_search_scope(&mut self, scope: SearchScope) {
+        set_search_scope(self, scope);
+    }
+
+    pub fn search_match_count(&self) -> usize {
+        self.state.search_state.match_count()
+    }
+
+    pub fn search_active_match_index(&self) -> Option<usize> {
+        self.state.search_state.active_match_index()
+    }
+
     pub fn poll_search(&mut self) {
         self.refresh_search_state();
     }

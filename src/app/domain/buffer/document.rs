@@ -28,6 +28,8 @@ pub struct TextDocument {
     piece_tree: Arc<PieceTreeLite>,
     history: Vec<PieceHistoryEntry>,
     history_byte_usage: usize,
+    history_undo_depth: usize,
+    history_redo_depth: usize,
     next_history_id: u64,
     revision_counter: u64,
     history_budget: TextHistoryBudget,
@@ -51,6 +53,8 @@ impl TextDocument {
             piece_tree,
             history: Vec::new(),
             history_byte_usage: 0,
+            history_undo_depth: 0,
+            history_redo_depth: 0,
             next_history_id: 1,
             revision_counter: 0,
             history_budget: TextHistoryBudget::default(),
@@ -97,17 +101,11 @@ impl TextDocument {
     }
 
     pub fn operation_undo_depth(&self) -> usize {
-        self.history
-            .iter()
-            .filter(|entry| !entry.is_undone())
-            .count()
+        self.history_undo_depth
     }
 
     pub fn operation_redo_depth(&self) -> usize {
-        self.history
-            .iter()
-            .filter(|entry| entry.is_undone())
-            .count()
+        self.history_redo_depth
     }
 
     pub fn latest_operation_record(&self) -> Option<&TextDocumentOperationRecord> {
@@ -117,6 +115,8 @@ impl TextDocument {
     pub fn clear_operation_history(&mut self) {
         self.history.clear();
         self.history_byte_usage = 0;
+        self.history_undo_depth = 0;
+        self.history_redo_depth = 0;
         self.latest_operation_record = None;
         self.latest_history_update_at = None;
         self.pending_history_generation_before = None;
@@ -146,6 +146,7 @@ impl TextDocument {
             self.revision_counter = self.revision_counter.wrapping_add(1);
             let removed = self.history.remove(0);
             self.history_byte_usage = self.history_byte_usage.saturating_sub(removed.byte_cost());
+            self.remove_history_depth(&removed);
             self.compact_history_storage();
             Some(removed)
         }
@@ -180,6 +181,8 @@ impl TextDocument {
     pub fn restore_exported_history(&mut self, entries: Vec<PersistedHistoryEntry>) {
         self.history.clear();
         self.history_byte_usage = 0;
+        self.history_undo_depth = 0;
+        self.history_redo_depth = 0;
         let mut max_id = 0_u64;
         for persisted in entries {
             max_id = max_id.max(persisted.id);
@@ -188,6 +191,7 @@ impl TextDocument {
             self.history.push(entry);
         }
         self.normalize_imported_redo_state();
+        self.refresh_history_depths();
         self.next_history_id = max_id.saturating_add(1).max(1);
         self.revision_counter = self.revision_counter.wrapping_add(1);
         self.enforce_history_budget();
@@ -390,6 +394,49 @@ impl TextDocument {
     fn capture_pending_history_generation_before(&mut self) {
         if self.pending_history_generation_before.is_none() {
             self.pending_history_generation_before = Some(self.visible_generation());
+        }
+    }
+
+    fn add_history_depth(&mut self, entry: &PieceHistoryEntry) {
+        if entry.is_undone() {
+            self.history_redo_depth = self.history_redo_depth.saturating_add(1);
+        } else {
+            self.history_undo_depth = self.history_undo_depth.saturating_add(1);
+        }
+    }
+
+    fn remove_history_depth(&mut self, entry: &PieceHistoryEntry) {
+        if entry.is_undone() {
+            self.history_redo_depth = self.history_redo_depth.saturating_sub(1);
+        } else {
+            self.history_undo_depth = self.history_undo_depth.saturating_sub(1);
+        }
+    }
+
+    fn mark_history_entry_undone(&mut self, index: usize, undone: bool) {
+        let was_undone = self.history[index].is_undone();
+        if was_undone == undone {
+            return;
+        }
+        if undone {
+            self.history_undo_depth = self.history_undo_depth.saturating_sub(1);
+            self.history_redo_depth = self.history_redo_depth.saturating_add(1);
+        } else {
+            self.history_redo_depth = self.history_redo_depth.saturating_sub(1);
+            self.history_undo_depth = self.history_undo_depth.saturating_add(1);
+        }
+        self.history[index].flags.undone = undone;
+    }
+
+    fn refresh_history_depths(&mut self) {
+        self.history_undo_depth = 0;
+        self.history_redo_depth = 0;
+        for entry in &self.history {
+            if entry.is_undone() {
+                self.history_redo_depth += 1;
+            } else {
+                self.history_undo_depth += 1;
+            }
         }
     }
 }

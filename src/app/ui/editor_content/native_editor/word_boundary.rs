@@ -98,7 +98,9 @@ pub(super) fn word_end(piece_tree: &PieceTreeLite, index: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        PieceTreeLite, find_word_boundary_left, find_word_boundary_right, word_end, word_start,
+    };
 
     fn tree(text: &str) -> PieceTreeLite {
         PieceTreeLite::from_string(text.to_owned())

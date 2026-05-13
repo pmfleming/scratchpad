@@ -68,7 +68,7 @@ impl TextDocument {
             let record = self.operation_from_history_entry(&self.history[idx]);
             self.validate_text_history_record(idx, &record, direction)?;
             self.apply_operation_record(&record, direction);
-            self.history[idx].flags.undone = matches!(direction, OperationDirection::Undo);
+            self.mark_history_entry_undone(idx, matches!(direction, OperationDirection::Undo));
             self.latest_operation_record = Some(record.clone());
             applied_selection = Some(direction.selection(&record));
         }
@@ -120,15 +120,18 @@ impl TextDocument {
         self.latest_operation_record = Some(record.clone());
         let old_len = self.history.len();
         let mut removed_bytes = 0usize;
+        let mut removed_redo_depth = 0usize;
         self.history.retain(|entry| {
             let keep = !entry.is_undone();
             if !keep {
                 removed_bytes += entry.byte_cost();
+                removed_redo_depth += 1;
             }
             keep
         });
         if self.history.len() != old_len {
             self.history_byte_usage = self.history_byte_usage.saturating_sub(removed_bytes);
+            self.history_redo_depth = self.history_redo_depth.saturating_sub(removed_redo_depth);
             self.latest_history_update_at = None;
         }
         if self.try_coalesce_history(&record, source) {
@@ -139,6 +142,7 @@ impl TextDocument {
 
         let entry = self.history_entry_from_operation(record, source);
         self.history_byte_usage += entry.byte_cost();
+        self.add_history_depth(&entry);
         self.history.push(entry);
         self.revision_counter = self.revision_counter.wrapping_add(1);
         self.enforce_history_budget();
@@ -285,6 +289,7 @@ impl TextDocument {
             let removed = self.history.remove(0);
             let cost = removed.byte_cost();
             self.history_byte_usage = self.history_byte_usage.saturating_sub(cost);
+            self.remove_history_depth(&removed);
             capacity_metrics::record_history_eviction_per_file(cost);
             evicted = true;
         }
@@ -430,6 +435,7 @@ impl TextDocument {
                 let removed = self.history.remove(latest_index);
                 self.history_byte_usage =
                     self.history_byte_usage.saturating_sub(removed.byte_cost());
+                self.remove_history_depth(&removed);
                 self.latest_history_update_at = None;
             }
         }

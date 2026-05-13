@@ -1,7 +1,13 @@
 use super::super::history::TEXT_HISTORY_SOFT_DIVIDER_PAUSE;
-use super::*;
-use crate::app::ui::editor_content::native_editor::{CharCursor, EditOperation};
-use std::time::Duration;
+use super::{
+    PieceHistoryEntry, PieceSource, TextDocument, TextDocumentEditOperation,
+    TextDocumentOperationRecord, TextHistoryApplyError, TextHistoryBudget,
+};
+use crate::app::ui::editor_content::native_editor::{
+    CharCursor, CursorRange, EditOperation, OperationRecord,
+};
+use std::ops::Range;
+use std::time::{Duration, Instant};
 
 macro_rules! empty_document {
     () => {

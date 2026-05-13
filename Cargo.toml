@@ -27,6 +27,7 @@ sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 windows_file_watch = { path = "crates/windows_file_watch" }
 
 [dev-dependencies]
+criterion = "0.5"
 rand = "0.10.0"
 tempfile = "3.8"
 
@@ -41,3 +42,8 @@ path = "scripts/count_lines.rs"
 [[bin]]
 name = "leverage_ast"
 path = "scripts/leverage_ast.rs"
+
+[[bench]]
+name = "search_speed"
+path = "benches/search_speed.rs"
+harness = false

@@ -46,7 +46,7 @@ fn acceleration_multiplier(level: f32, max_multiplier: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{ScrollAccelerationConfig, ScrollAccelerationState, accelerated_scroll_delta};
 
     const CONFIG: ScrollAccelerationConfig = ScrollAccelerationConfig {
         reset_after_seconds: 0.20,

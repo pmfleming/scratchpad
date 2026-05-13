@@ -1,4 +1,4 @@
-use crate::app::theme::*;
+use crate::app::theme::{CLOSE_HOVER_BG, action_bg, border, text_primary};
 use crate::app::ui::transition;
 use crate::app::ui::widget_ids;
 use eframe::egui;

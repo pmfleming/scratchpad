@@ -141,6 +141,7 @@ fn activate_tab(app: &mut ScratchpadApp, index: usize) -> bool {
     app.reload_settings_before_workspace_change();
     app.activate_workspace_surface();
     app.tab_manager.set_active_tab_index_clamped(index);
+    app.hydrate_tab_if_needed(index);
     app.ensure_active_tab_slot_selected();
     app.tab_manager.pending_scroll_to_active = true;
     app.refresh_search_view_state();

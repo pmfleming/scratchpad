@@ -23,6 +23,7 @@ const SESSION_IO_PARALLEL_MIN_ITEMS: usize = 512;
 const SESSION_IO_PARALLEL_MAX_WORKERS: usize = 8;
 
 pub use model::SESSION_VERSION;
+pub(crate) use model::SessionTabParts as ColdSessionTab;
 
 #[derive(Clone)]
 pub struct SessionStore {
@@ -136,17 +137,7 @@ impl SessionStore {
             });
         };
         let manifest_read_parse_ns = manifest_start.elapsed().as_nanos();
-        let buffer_count = manifest
-            .tabs
-            .iter()
-            .map(|tab| {
-                if tab.buffers.is_empty() {
-                    usize::from(tab.buffer_id.is_some())
-                } else {
-                    tab.buffers.len()
-                }
-            })
-            .sum();
+        let buffer_count = manifest.tabs.iter().map(SessionTab::buffer_count).sum();
         let legacy_settings = manifest.legacy_settings();
 
         let restore_start = Instant::now();
@@ -192,13 +183,16 @@ impl SessionStore {
     pub(crate) fn load_streaming(
         &self,
         mut on_started: impl FnMut(usize, AppSettings) -> bool,
-        mut on_tab: impl FnMut(WorkspaceTab) -> bool,
+        mut on_tab: impl FnMut(usize, WorkspaceTab, Option<ColdSessionTab>) -> bool,
     ) -> io::Result<Option<RestoredSession>> {
         let Some(manifest) = self.load_manifest()? else {
             return Ok(None);
         };
+        let active_tab_index = manifest
+            .active_tab_index
+            .min(manifest.tabs.len().saturating_sub(1));
         let legacy_settings = manifest.legacy_settings();
-        if !on_started(manifest.active_tab_index, legacy_settings.clone()) {
+        if !on_started(active_tab_index, legacy_settings.clone()) {
             return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 "session restore receiver closed",
@@ -207,10 +201,12 @@ impl SessionStore {
 
         let mut restore_summary = RestoreSummary::default();
         let mut tab_count = 0usize;
-        for (restored_tab, summary) in self.restore_tabs_ordered(manifest.tabs) {
+        for (tab_index, restored_tab, cold_tab, summary) in
+            self.restore_tabs_active_first(manifest.tabs, active_tab_index)
+        {
             restore_summary.merge(summary);
             tab_count += 1;
-            if !on_tab(restored_tab) {
+            if !on_tab(tab_index, restored_tab, cold_tab) {
                 return Err(io::Error::new(
                     io::ErrorKind::BrokenPipe,
                     "session restore receiver closed",
@@ -223,10 +219,32 @@ impl SessionStore {
         }
 
         Ok(Some(RestoredSession {
-            active_tab_index: manifest.active_tab_index.min(tab_count - 1),
+            active_tab_index: active_tab_index.min(tab_count - 1),
             tabs: Vec::new(),
             legacy_settings,
             restore_status: restore_summary.into_status(),
+        }))
+    }
+
+    pub fn load_startup_visible(&self) -> io::Result<Option<RestoredSession>> {
+        let Some(mut manifest) = self.load_manifest()? else {
+            return Ok(None);
+        };
+        if manifest.tabs.is_empty() {
+            return Ok(None);
+        }
+
+        let active_tab_index = manifest
+            .active_tab_index
+            .min(manifest.tabs.len().saturating_sub(1));
+        let active_tab = manifest.tabs.remove(active_tab_index);
+        let legacy_settings = manifest.legacy_settings();
+        let (tab, summary) = self.restore_tab_with_summary(active_tab);
+        Ok(Some(RestoredSession {
+            tabs: vec![tab],
+            active_tab_index: 0,
+            legacy_settings,
+            restore_status: summary.into_status(),
         }))
     }
 
@@ -287,8 +305,12 @@ impl SessionStore {
 
         let mut session_tabs = Vec::with_capacity(request.tabs.len());
         let mut snapshot_writes = Vec::new();
+        let mut preserved_snapshot_paths = HashSet::new();
 
         for captured_tab in request.tabs {
+            for temp_id in session_tab_temp_ids(&captured_tab.session_tab) {
+                preserved_snapshot_paths.insert(self.buffer_path(temp_id));
+            }
             for buffer in captured_tab.buffer_snapshots {
                 let temp_path = self.buffer_path(&buffer.temp_id);
                 snapshot_writes.push(SessionSnapshotWrite {
@@ -301,7 +323,8 @@ impl SessionStore {
         }
 
         let snapshot_write_start = Instant::now();
-        let active_temp_paths = write_session_snapshots(snapshot_writes)?;
+        let mut active_temp_paths = write_session_snapshots(snapshot_writes)?;
+        active_temp_paths.extend(preserved_snapshot_paths);
         profile.snapshot_write_ns = snapshot_write_start.elapsed().as_nanos();
 
         let stale_cleanup_start = Instant::now();
@@ -491,6 +514,17 @@ fn write_one_session_snapshot(write: SessionSnapshotWrite) -> io::Result<PathBuf
     Ok(write.path)
 }
 
+fn session_tab_temp_ids(tab: &SessionTab) -> Vec<&str> {
+    if !tab.buffers.is_empty() {
+        return tab
+            .buffers
+            .iter()
+            .map(|buffer| buffer.temp_id.as_str())
+            .collect();
+    }
+    tab.temp_id.as_deref().into_iter().collect()
+}
+
 fn session_io_worker_count(item_count: usize) -> usize {
     thread::available_parallelism()
         .map(|parallelism| {
@@ -517,13 +551,55 @@ impl SessionPersistRequest {
             tabs: tabs.iter().map(CapturedSessionTab::capture).collect(),
         }
     }
+
+    pub(crate) fn capture_with_cold_tabs(
+        tabs: &[WorkspaceTab],
+        cold_tabs: &std::collections::HashMap<usize, ColdSessionTab>,
+        active_tab_index: usize,
+        font_size: f32,
+        word_wrap: bool,
+    ) -> Self {
+        Self {
+            active_tab_index,
+            font_size,
+            word_wrap,
+            tabs: tabs
+                .iter()
+                .enumerate()
+                .map(|(index, tab)| {
+                    cold_tabs
+                        .get(&index)
+                        .cloned()
+                        .map(CapturedSessionTab::capture_cold)
+                        .unwrap_or_else(|| CapturedSessionTab::capture(tab))
+                })
+                .collect(),
+        }
+    }
 }
 
 impl CapturedSessionTab {
+    fn capture_cold(session_tab: ColdSessionTab) -> Self {
+        Self {
+            session_tab: SessionTab::from(session_tab),
+            buffer_snapshots: Vec::new(),
+        }
+    }
+
     fn capture(tab: &WorkspaceTab) -> Self {
+        let mut buffers = Vec::new();
+        let mut buffer_snapshots = Vec::new();
+        for buffer in tab.buffers() {
+            buffers.push(SessionBuffer::from(buffer));
+            buffer_snapshots.push(CapturedSessionBuffer {
+                temp_id: buffer.temp_id.clone(),
+                snapshot: buffer.document_snapshot(),
+            });
+        }
+
         Self {
             session_tab: SessionTab {
-                buffers: tab.buffers().map(SessionBuffer::from).collect(),
+                buffers,
                 buffer_id: None,
                 name: None,
                 path: None,
@@ -535,13 +611,7 @@ impl CapturedSessionTab {
                 views: tab.views.iter().map(SessionView::from).collect(),
                 root_pane: SessionPaneNode::from(&tab.root_pane),
             },
-            buffer_snapshots: tab
-                .buffers()
-                .map(|buffer| CapturedSessionBuffer {
-                    temp_id: buffer.temp_id.clone(),
-                    snapshot: buffer.document_snapshot(),
-                })
-                .collect(),
+            buffer_snapshots,
         }
     }
 }

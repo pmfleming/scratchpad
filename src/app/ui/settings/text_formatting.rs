@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    CategoryCard, ComboSelectRow, EditorFontPreset, FONT_SIZE_OPTIONS, ScratchpadApp, SettingsUi,
+    category_card, combo_select_row, egui, inner_divider, inner_select_row, nearest_option_index,
+    render_preview_panel, toggle_card, u32_slider_value_control,
+};
 
 pub(super) fn render_text_formatting_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     category_card(

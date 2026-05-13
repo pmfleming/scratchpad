@@ -287,6 +287,9 @@ def summarize_probe(events: List[Dict[str, Any]]) -> Dict[str, Any]:
         ) or None
         scenario_row = {
             "scenario": scenario,
+            "probe_class": "ceiling_health",
+            "measurement_role": "promise_health",
+            "measurement_question": "Does this promise still pass as workload size increases?",
             "scenario_label": first.get("scenario_label", scenario),
             "workload_family": first.get("workload_family", config.get("workload_family", "capacity-stress")),
             "threshold_ms": threshold_ms,

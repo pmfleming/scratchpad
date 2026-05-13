@@ -1,4 +1,9 @@
-use super::*;
+use super::{
+    AppThemeMode, CategoryCard, ComboSelectRow, ScratchpadApp, SettingsUi, TabListPosition,
+    available_width_control, category_card, combo_select_row, egui, inner_divider,
+    inner_select_row, nearest_option_index, record_settings_control_box, render_preview_panel,
+    toggle_select_row, u32_slider_value_control,
+};
 use crate::app::services::settings_store::NewTabPlacement;
 
 const AUTO_HIDE_DELAY_OPTIONS: [f32; 13] = [

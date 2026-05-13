@@ -120,7 +120,10 @@ fn ascii_case_insensitive_bytes_match(text_bytes: &[u8], query_lower_bytes: &[u8
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        find_ascii_case_insensitive_multi_byte_matches,
+        find_ascii_case_insensitive_single_byte_matches, find_ascii_case_sensitive_matches,
+    };
 
     #[test]
     fn case_sensitive_matches_report_byte_ranges() {

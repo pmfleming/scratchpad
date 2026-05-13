@@ -1,6 +1,7 @@
 use super::dispatcher::LaneDepths;
 use super::types::{BackgroundIoRequest, BackgroundIoResult, LoadedPathResult, PathLoadRequest};
 use crate::app::capacity_metrics::{self, BackgroundIoLane};
+use crate::app::domain::buffer::BufferLength;
 use crate::app::domain::{DocumentSnapshot, TextArtifactSummary, TextFormatMetadata};
 use crate::app::services::file_service::{FileContent, FileService};
 use std::io;
@@ -105,6 +106,17 @@ pub(super) fn spawn_session_lane(endpoints: LaneEndpoints) {
                 request_id,
                 session_store,
                 result_tx,
+            )),
+            BackgroundIoRequest::HydrateSessionTab {
+                request_id,
+                session_store,
+                tab_index,
+                cold_session_tab,
+            } => LaneOutcome::result(hydrate_session_tab(
+                request_id,
+                session_store,
+                tab_index,
+                cold_session_tab,
             )),
             BackgroundIoRequest::PersistSession {
                 request_id,
@@ -340,10 +352,12 @@ fn stream_restore_session(
             }
             true
         },
-        |tab| {
+        |tab_index, tab, cold_session_tab| {
             if result_tx
                 .send(BackgroundIoResult::SessionTabRestored {
                     request_id,
+                    tab_index,
+                    cold_session_tab,
                     tab: Box::new(tab),
                 })
                 .is_err()
@@ -367,21 +381,39 @@ fn stream_restore_session(
         .is_err()
 }
 
+fn hydrate_session_tab(
+    request_id: u64,
+    session_store: crate::app::services::session_store::SessionStore,
+    tab_index: usize,
+    cold_session_tab: crate::app::services::session_store::ColdSessionTab,
+) -> BackgroundIoResult {
+    let (tab, restore_status) = session_store.restore_cold_session_tab(cold_session_tab);
+    BackgroundIoResult::SessionTabHydrated {
+        request_id,
+        tab_index,
+        restore_status,
+        tab: Box::new(tab),
+    }
+}
+
 fn refresh_text_metadata(
     snapshot: DocumentSnapshot,
     mut format: TextFormatMetadata,
-) -> (usize, TextArtifactSummary, TextFormatMetadata) {
-    let metadata = crate::app::domain::buffer::buffer_text_metadata_from_piece_tree(
-        snapshot.piece_tree(),
-        &mut format,
-    );
-    (metadata.line_count, metadata.artifact_summary, format)
+) -> (BufferLength, usize, TextArtifactSummary, TextFormatMetadata) {
+    let analysis =
+        crate::app::domain::buffer::analyze_piece_tree_text(snapshot.piece_tree(), &mut format);
+    (
+        analysis.length,
+        analysis.metadata.line_count,
+        analysis.metadata.artifact_summary,
+        format,
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::app::domain::{BufferState, TextDocument};
+    use super::{PathLoadRequest, load_one, load_paths, refresh_text_metadata};
+    use crate::app::domain::{BufferState, TextDocument, TextFormatMetadata};
 
     #[test]
     fn load_paths_preserves_input_order_for_parallel_reads() {
@@ -434,9 +466,11 @@ mod tests {
         let snapshot = buffer.document_snapshot();
         let format = buffer.format.clone();
 
-        let (line_count, artifact_summary, refreshed_format) =
+        let (length, line_count, artifact_summary, refreshed_format) =
             refresh_text_metadata(snapshot, format);
 
+        assert_eq!(length.lines, 2);
+        assert_eq!(length.chars, "one\n\u{200e}two".chars().count());
         assert_eq!(line_count, 2);
         assert!(artifact_summary.has_control_chars());
         assert_eq!(refreshed_format.preferred_line_ending.as_str(), "\n");

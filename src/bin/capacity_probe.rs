@@ -101,16 +101,30 @@ fn emit_layout_bytes_sweep() {
 }
 
 fn emit_tab_count_sweep() {
-    emit_sweep(
-        SweepDescriptor::count(
-            "tab_count_ceiling",
-            "Tab count ceiling sweep",
-            "tabs",
-            tabs_label,
-        ),
-        [32usize, 512, 4_096, 10_000, 20_000],
-        run_tab_capacity_cycle,
+    let descriptor = SweepDescriptor::count(
+        "tab_count_ceiling",
+        "Tab manipulation ceiling sweep",
+        "tabs",
+        tabs_label,
     );
+    for (step_index, tab_count) in [32usize, 512, 4_096, 10_000, 20_000]
+        .into_iter()
+        .enumerate()
+    {
+        let mut tabs = build_tabs(tab_count, TAB_BYTES_PER_BUFFER);
+        emit_step(
+            StepDescriptor {
+                scenario: descriptor.scenario,
+                scenario_label: descriptor.scenario_label,
+                workload_family: descriptor.workload_family,
+                step_index,
+                workload_value: tab_count,
+                workload_unit: descriptor.workload_unit,
+                workload_label: (descriptor.workload_label)(tab_count),
+            },
+            || black_box(run_tab_capacity_cycle(&mut tabs)),
+        );
+    }
 }
 
 fn emit_many_file_count_sweep() {
@@ -306,21 +320,8 @@ fn run_layout_capacity_cycle(bytes: usize) -> usize {
     total_rows
 }
 
-fn run_tab_capacity_cycle(tab_count: usize) -> usize {
-    let mut tabs = build_tabs(tab_count, TAB_BYTES_PER_BUFFER);
-    let mut activations = 0usize;
-    for (index, tab) in tabs.iter_mut().enumerate() {
-        tab.split_active_view(if index.is_multiple_of(2) {
-            SplitAxis::Vertical
-        } else {
-            SplitAxis::Horizontal
-        });
-        activations += 1;
-    }
-    if tabs.len() > 2 {
-        combine_tabs(&mut tabs, 0, 1);
-        activations += 1;
-    }
+fn run_tab_capacity_cycle(tabs: &mut Vec<WorkspaceTab>) -> usize {
+    let activations = split_tabs_once(tabs) + combine_first_tabs(tabs);
     activations + tabs.len()
 }
 
@@ -407,6 +408,28 @@ fn build_tabs(tab_count: usize, bytes_per_buffer: usize) -> Vec<WorkspaceTab> {
             WorkspaceTab::new(buffer)
         })
         .collect()
+}
+
+fn split_tabs_once(tabs: &mut [WorkspaceTab]) -> usize {
+    let mut activations = 0usize;
+    for (index, tab) in tabs.iter_mut().enumerate() {
+        let _ = tab.split_active_view(if index.is_multiple_of(2) {
+            SplitAxis::Vertical
+        } else {
+            SplitAxis::Horizontal
+        });
+        activations += 1;
+    }
+    activations
+}
+
+fn combine_first_tabs(tabs: &mut Vec<WorkspaceTab>) -> usize {
+    if tabs.len() > 2 {
+        combine_tabs(tabs, 0, 1);
+        1
+    } else {
+        0
+    }
 }
 
 fn combine_tabs(tabs: &mut Vec<WorkspaceTab>, source_idx: usize, target_idx: usize) {

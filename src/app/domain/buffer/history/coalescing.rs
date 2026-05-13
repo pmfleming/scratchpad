@@ -201,7 +201,10 @@ fn is_single_line(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        CoalescedEdit, TEXT_HISTORY_SOFT_DIVIDER_PAUSE, TextDocumentEditOperation,
+        TextDocumentOperationRecord, coalesced_local_edit_record, entry_sealed_by_divider,
+    };
     use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
     use std::time::Duration;
 

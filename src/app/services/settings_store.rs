@@ -352,7 +352,9 @@ fn invalid_data(error: impl std::error::Error + Send + Sync + 'static) -> io::Er
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR, default_editor_text_highlight_text_color,
+    };
 
     #[test]
     fn highlight_text_default_matches_generated_contrast_color() {

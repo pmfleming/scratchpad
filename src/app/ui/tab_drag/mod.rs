@@ -1,5 +1,6 @@
 use crate::app::app_state::ScratchpadApp;
 use eframe::egui;
+use std::collections::HashMap;
 
 mod paint;
 mod state;
@@ -124,14 +125,18 @@ fn drag_sources_allow_combine(
     source_can_combine || selected_workspace_can_combine
 }
 
-pub(crate) fn paint_dragged_tab_ghost(ctx: &egui::Context, app: &ScratchpadApp) {
+pub(crate) fn paint_dragged_tab_ghost(
+    ctx: &egui::Context,
+    app: &ScratchpadApp,
+    duplicate_name_counts: &HashMap<String, usize>,
+) {
     let Some(drag_state) = state::current_tab_drag_state_for_context(ctx) else {
         return;
     };
     if !state::drag_is_active(&drag_state) {
         return;
     }
-    paint::paint_dragged_tab_ghost(ctx, app, drag_state);
+    paint::paint_dragged_tab_ghost(ctx, app, drag_state, duplicate_name_counts);
 }
 
 pub(crate) fn auto_scroll_tab_list(

@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    Axis, ContentExtent, ScrollAlign, ScrollIntent, ScrollManager, ViewportMetrics,
+    naive_anchor_to_row, naive_row_to_anchor,
+};
 use eframe::egui;
 
 fn manager() -> ScrollManager {

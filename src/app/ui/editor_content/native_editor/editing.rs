@@ -301,7 +301,10 @@ fn consume_lf_after_cr(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        BufferState, CharCursor, CursorRange, apply_backspace, apply_cut, apply_delete,
+        apply_delete_selection, apply_outdent, apply_text_insert_with_source,
+    };
     use crate::app::domain::PieceSource;
     use eframe::egui;
 

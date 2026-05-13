@@ -3,7 +3,10 @@ use crate::app::chrome::{TabButtonOptions, tab_button_with_actions};
 use crate::app::domain::TabAttentionState;
 use crate::app::domain::tab::summary;
 use crate::app::services::settings_store::TabListPosition;
-use crate::app::theme::*;
+use crate::app::theme::{
+    BUTTON_SIZE, TAB_BUTTON_WIDTH, TAB_HEIGHT, TAB_LIST_SCROLLBAR_GUTTER, action_bg, border,
+    tab_active_bg, tab_list_scroll_style, text_primary,
+};
 use crate::app::ui::tab_drag;
 use crate::app::ui::tab_strip::context_menu::attach_tab_list_context_menu;
 use crate::app::ui::widget_ids;
@@ -53,6 +56,7 @@ enum OverflowRowAction {
 struct OverflowPopupRequest<'a> {
     app: &'a ScratchpadApp,
     visible_tab_indices: &'a HashSet<usize>,
+    duplicate_name_counts: &'a HashMap<String, usize>,
     overflow_popup_id: egui::Id,
     anchor: egui::Pos2,
     pivot: egui::Align2,
@@ -68,7 +72,7 @@ pub(crate) fn show_overflow_button(
     app: &mut ScratchpadApp,
     overflow_popup_open: &mut bool,
     visible_tab_indices: &HashSet<usize>,
-    _duplicate_name_counts: &HashMap<String, usize>,
+    duplicate_name_counts: &HashMap<String, usize>,
 ) -> OverflowMenuOutcome {
     let mut outcome = OverflowMenuOutcome::default();
     let overflow_popup_id = widget_ids::root_id("tab_overflow_popup");
@@ -81,6 +85,7 @@ pub(crate) fn show_overflow_button(
     let popup_request = OverflowPopupRequest {
         app,
         visible_tab_indices,
+        duplicate_name_counts,
         overflow_popup_id,
         anchor,
         pivot,
@@ -169,6 +174,7 @@ fn show_overflow_popup(
                                 collect_overflow_row_rects(
                                     ui,
                                     request.app,
+                                    request.duplicate_name_counts,
                                     &active_drag_sources,
                                     request.visible_tab_indices,
                                     &mut menu,
@@ -333,6 +339,7 @@ fn overflow_row_count(app: &ScratchpadApp, visible_tab_indices: &HashSet<usize>)
 fn collect_overflow_row_rects(
     ui: &mut egui::Ui,
     app: &ScratchpadApp,
+    duplicate_name_counts: &HashMap<String, usize>,
     active_drag_sources: &[usize],
     visible_tab_indices: &HashSet<usize>,
     menu: &mut OverflowMenuContext<'_>,
@@ -348,6 +355,7 @@ fn collect_overflow_row_rects(
             ui,
             app,
             slot_index,
+            duplicate_name_counts,
             active_drag_sources.contains(&slot_index),
             menu,
         );
@@ -411,6 +419,7 @@ fn show_overflow_row(
     ui: &mut egui::Ui,
     app: &ScratchpadApp,
     slot_index: usize,
+    duplicate_name_counts: &HashMap<String, usize>,
     is_drag_source: bool,
     menu: &mut OverflowMenuContext<'_>,
 ) -> egui::Rect {
@@ -419,7 +428,7 @@ fn show_overflow_row(
             return render_drag_source_placeholder(ui, menu.row_width);
         }
 
-        let Some(row_state) = overflow_row_state(app, slot_index) else {
+        let Some(row_state) = overflow_row_state(app, slot_index, duplicate_name_counts) else {
             return render_drag_source_placeholder(ui, menu.row_width);
         };
 
@@ -469,10 +478,14 @@ fn maybe_attach_overflow_row_tooltip(
     }
 }
 
-fn overflow_row_state(app: &ScratchpadApp, slot_index: usize) -> Option<OverflowRowState> {
+fn overflow_row_state(
+    app: &ScratchpadApp,
+    slot_index: usize,
+    duplicate_name_counts: &HashMap<String, usize>,
+) -> Option<OverflowRowState> {
     Some(OverflowRowState {
         selected: app.tab_slot_selected(slot_index) || app.active_tab_slot_index() == slot_index,
-        display_name: app.display_tab_name_at_slot(slot_index)?,
+        display_name: overflow_display_name(app, slot_index, duplicate_name_counts)?,
         can_promote_all_files: app
             .workspace_index_for_slot(slot_index)
             .and_then(|index| app.tab_manager.tabs.as_slice().get(index))
@@ -482,6 +495,25 @@ fn overflow_row_state(app: &ScratchpadApp, slot_index: usize) -> Option<Overflow
             .and_then(|index| app.tab_manager.tabs.as_slice().get(index))
             .and_then(summary::attention_state),
     })
+}
+
+fn overflow_display_name(
+    app: &ScratchpadApp,
+    slot_index: usize,
+    duplicate_name_counts: &HashMap<String, usize>,
+) -> Option<String> {
+    if app.tab_slot_is_settings(slot_index) {
+        return Some("Settings".to_owned());
+    }
+
+    let workspace_index = app.workspace_index_for_slot(slot_index)?;
+    let tab = app.tab_manager.tabs.as_slice().get(workspace_index)?;
+    let has_duplicate = duplicate_name_counts
+        .get(&tab.buffer.name)
+        .copied()
+        .unwrap_or(0)
+        > 1;
+    Some(summary::full_display_name(tab, has_duplicate))
 }
 
 fn attention_color(state: TabAttentionState) -> egui::Color32 {

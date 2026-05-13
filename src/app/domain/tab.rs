@@ -66,6 +66,14 @@ impl WorkspaceTab {
         Self::new(BufferState::new("Untitled".to_owned(), String::new(), None))
     }
 
+    pub fn display_name(&self) -> String {
+        summary::display_name(self)
+    }
+
+    pub fn file_group_count(&self) -> usize {
+        self.distinct_buffer_count()
+    }
+
     pub fn activate_view(&mut self, view_id: ViewId) -> bool {
         if !self.root_pane.contains_view(view_id) {
             return false;
@@ -101,16 +109,11 @@ impl WorkspaceTab {
     }
 
     pub(super) fn distinct_buffer_count(&self) -> usize {
-        let mut count = 0;
-        for (i, view) in self.views.iter().enumerate() {
-            if self.views[..i]
-                .iter()
-                .all(|v| v.buffer_id != view.buffer_id)
-            {
-                count += 1;
-            }
-        }
-        count
+        self.views
+            .iter()
+            .map(|view| view.buffer_id)
+            .collect::<HashSet<_>>()
+            .len()
     }
 
     pub(super) fn distinct_buffer_names_in_view_order(&self) -> Vec<String> {

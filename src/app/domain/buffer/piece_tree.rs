@@ -334,6 +334,14 @@ impl PieceTreeLite {
         }
     }
 
+    fn refresh_leaf_index_after_structure_change(&mut self) {
+        if self.has_live_anchors() {
+            self.rebuild_leaf_index();
+        } else {
+            self.leaf_indices_by_id.clear();
+        }
+    }
+
     pub fn metrics(&self) -> PieceTreeMetrics {
         self.root.metrics
     }

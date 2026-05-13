@@ -96,7 +96,9 @@ pub(crate) fn remove_file_if_exists(path: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{temp_path_for, write_atomic_with};
+    use std::fs;
+    use std::io::{self, Write};
 
     #[test]
     fn write_atomic_with_leaves_existing_target_when_replace_fails() {

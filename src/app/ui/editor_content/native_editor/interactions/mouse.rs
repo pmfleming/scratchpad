@@ -354,7 +354,7 @@ fn primary_pointer_tracking_active(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{CursorRange, cursor_inside_existing_selection, egui, tracked_pointer_pos};
 
     #[test]
     fn secondary_click_inside_selection_preserves_selection() {

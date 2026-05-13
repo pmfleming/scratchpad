@@ -90,7 +90,7 @@ fn is_ascii_word_char(byte: u8) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{WholeWordMatcher, ascii_whole_word_allows, whole_word_allows};
 
     #[test]
     fn ascii_whole_word_treats_underscore_as_word_character() {

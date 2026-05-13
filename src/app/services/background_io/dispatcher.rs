@@ -156,9 +156,11 @@ fn lane_name(lane: BackgroundIoLane) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{BackgroundIoDispatcher, BackgroundIoRequest, LaneDepths};
     use crate::app::domain::{TextDocument, TextFormatMetadata};
     use crate::app::services::session_store::SessionStore;
+    use std::sync::mpsc::Receiver;
+    use std::sync::{Arc, mpsc};
 
     fn dispatcher_with_bounds(
         path_bound: usize,

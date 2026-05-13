@@ -49,7 +49,7 @@ fn valid_window_size(size: egui::Vec2) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{WindowState, egui, window_state_from_viewport};
 
     #[test]
     fn window_state_capture_keeps_normal_geometry_while_maximized() {

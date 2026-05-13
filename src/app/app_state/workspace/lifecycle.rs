@@ -4,6 +4,7 @@ use crate::app::domain::{BufferId, ViewId, WorkspaceTab};
 use crate::app::services::file_controller::FileController;
 use crate::app::services::settings_store::{FileOpenDisposition, NewTabPlacement};
 use crate::app::utils::pluralize;
+use std::collections::HashSet;
 
 pub(crate) fn new_tab(app: &mut ScratchpadApp) {
     create_workspace_tab(app, WorkspaceTab::untitled());
@@ -152,14 +153,18 @@ fn new_tab_insert_index(app: &ScratchpadApp) -> usize {
 }
 
 fn selected_workspace_tab_range(app: &ScratchpadApp) -> (usize, usize) {
-    let selected = app
+    let mut first = None::<usize>;
+    let mut last = None::<usize>;
+    for workspace_index in app
         .state
         .workspace_selection
         .selected_slots()
         .filter_map(|slot_index| app.workspace_index_for_slot(slot_index))
-        .collect::<Vec<_>>();
-    let first = selected.iter().min().copied();
-    let last = selected.iter().max().copied();
+    {
+        first = Some(first.map_or(workspace_index, |first| first.min(workspace_index)));
+        last = Some(last.map_or(workspace_index, |last| last.max(workspace_index)));
+    }
+
     match (first, last) {
         (Some(first), Some(last)) => (first, last),
         _ => {
@@ -199,16 +204,15 @@ fn save_all_targets(app: &ScratchpadApp) -> Vec<(usize, ViewId)> {
         .iter()
         .enumerate()
         .flat_map(|(tab_index, tab)| {
-            let mut seen = Vec::<BufferId>::new();
+            let mut seen = HashSet::<BufferId>::new();
             tab.views.iter().filter_map(move |view| {
-                if seen.contains(&view.buffer_id) {
+                if !seen.insert(view.buffer_id) {
                     return None;
                 }
                 let buffer = tab.buffer_by_id(view.buffer_id)?;
                 if !buffer.is_dirty {
                     return None;
                 }
-                seen.push(view.buffer_id);
                 Some((tab_index, view.id))
             })
         })

@@ -211,7 +211,8 @@ const MIN_CHROMA_DISTANCE: f32 = 60.0;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{WCAG_AA_CONTRAST, contrast_ratio, optimal_text_color};
+    use eframe::egui::Color32;
 
     #[test]
     fn optimal_text_color_keeps_bright_highlights_readable_without_plain_black() {

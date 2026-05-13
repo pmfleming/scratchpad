@@ -1,7 +1,7 @@
 use encoding_rs::Encoding;
 use serde::{Deserialize, Serialize};
 
-use super::piece_tree::PieceTreeLite;
+use super::{BufferLength, piece_tree::PieceTreeLite};
 pub(crate) use inspection::normalize_inserted_text_line_endings;
 use inspection::{TextInspection, line_ending_style};
 
@@ -347,6 +347,12 @@ pub(crate) struct BufferTextMetadata {
     pub(crate) has_non_compliant_characters: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PieceTreeTextAnalysis {
+    pub(crate) metadata: BufferTextMetadata,
+    pub(crate) length: BufferLength,
+}
+
 pub(crate) struct IncrementalMetadataEdit<'a> {
     pub(crate) previous_char: Option<char>,
     pub(crate) deleted_text: &'a str,
@@ -441,10 +447,23 @@ pub(crate) fn buffer_text_metadata_from_piece_tree(
     tree: &PieceTreeLite,
     format: &mut TextFormatMetadata,
 ) -> BufferTextMetadata {
-    let spans = tree.spans_for_range(0..tree.len_chars());
+    analyze_piece_tree_text(tree, format).metadata
+}
+
+pub(crate) fn analyze_piece_tree_text(
+    tree: &PieceTreeLite,
+    format: &mut TextFormatMetadata,
+) -> PieceTreeTextAnalysis {
+    let metrics = tree.metrics();
+    let spans = tree.spans_for_range(0..metrics.chars);
     let inspection = TextInspection::inspect_span_refs(spans.map(|s| s.text));
+    let length = BufferLength::from_metrics(
+        metrics,
+        display_line_count_from_piece_tree_inspection(&inspection, metrics.newlines),
+    );
     format.apply_inspection(&inspection);
-    build_buffer_text_metadata(inspection, format, false)
+    let metadata = build_buffer_text_metadata(inspection, format, false);
+    PieceTreeTextAnalysis { metadata, length }
 }
 
 fn build_buffer_text_metadata(
@@ -472,6 +491,17 @@ fn buffer_text_metadata_parts(
         preferred_line_ending,
         has_non_compliant_characters,
     }
+}
+
+fn display_line_count_from_piece_tree_inspection(
+    inspection: &TextInspection,
+    newline_count: usize,
+) -> usize {
+    if !inspection.has_bytes {
+        return 0;
+    }
+
+    newline_count + usize::from(!inspection.ends_with_lf)
 }
 
 fn can_update_metadata_incrementally(
@@ -529,7 +559,10 @@ fn apply_line_ending_delta(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        BufferLength, PieceTreeLite, TextFormatMetadata, analyze_piece_tree_text,
+        display_line_count_from_piece_tree,
+    };
 
     #[test]
     fn display_line_count_from_piece_tree_uses_metrics_and_last_char() {
@@ -552,5 +585,24 @@ mod tests {
 
         assert_eq!(tree.extract_text(), "two\nthree");
         assert_eq!(display_line_count_from_piece_tree(&tree), 2);
+    }
+
+    #[test]
+    fn analyze_piece_tree_text_returns_metadata_and_cached_length() {
+        let tree = PieceTreeLite::from_string("one\ntwo\n".to_owned());
+        let mut format = TextFormatMetadata::utf8_for_new_file("");
+
+        let analysis = analyze_piece_tree_text(&tree, &mut format);
+
+        assert_eq!(analysis.metadata.line_count, 3);
+        assert_eq!(
+            analysis.length,
+            BufferLength {
+                bytes: 8,
+                chars: 8,
+                lines: 2,
+            }
+        );
+        assert_eq!(format.line_ending_counts.lf, 2);
     }
 }

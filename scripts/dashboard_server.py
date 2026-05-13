@@ -537,6 +537,32 @@ def collect_capacity_metrics(metrics: Dict[str, Any], speed: Any) -> None:
         )
 
 
+def collect_frame_metrics(metrics: Dict[str, Any], speed: Any) -> None:
+    if not isinstance(speed, dict):
+        return
+    sections = speed.get("sections")
+    if not isinstance(sections, dict):
+        return
+
+    for rows in sections.values():
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if (
+                row.get("scenario_id") != "ui_render_frame"
+                and row.get("scenario_label") != "ui_render_frame"
+                and row.get("benchmark_key") != "ui_render_frame"
+            ):
+                continue
+            mean_ms = row.get("mean_ms")
+            if isinstance(mean_ms, (int, float)) and mean_ms > 0:
+                metrics["app_frame_ms"] = mean_ms
+                metrics["app_fps"] = 1000.0 / mean_ms
+            return
+
+
 def collect_summary_metrics(
     metrics: Dict[str, Any],
     summary: Any,
@@ -590,6 +616,7 @@ def collect_run_metrics() -> Dict[str, Any]:
     collect_escape_hatch_metrics(metrics, artifacts["rust_escape_hatches.json"])
     collect_type_health_metrics(metrics, artifacts["type_health.json"])
     collect_capacity_metrics(metrics, artifacts["speed_efficiency_report.json"])
+    collect_frame_metrics(metrics, artifacts["speed_efficiency_report.json"])
     performance_review = artifacts["performance_review.json"]
     collect_summary_metrics(
         metrics,

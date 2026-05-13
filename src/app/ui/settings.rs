@@ -2,7 +2,7 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::chrome::phosphor_button;
 use crate::app::fonts::{EDITOR_FONT_FAMILY, EditorFontPreset};
 use crate::app::services::settings_store::{AppThemeMode, TabListPosition};
-use crate::app::theme::*;
+use crate::app::theme::{action_bg, action_hover_bg, border, text_muted, text_primary};
 use crate::app::ui::widget_ids;
 use eframe::egui;
 
@@ -15,7 +15,13 @@ mod widgets;
 
 use sections::render_settings_categories;
 use style::SettingsUi;
-use widgets::*;
+use widgets::{
+    CategoryCard, ComboSelectRow, action_card, available_width_control, card_header, category_card,
+    combo_control, combo_select_row, expandable_card, inner_divider, inner_select_row,
+    nearest_option_index, radio_option_row, record_settings_control_box, render_preview_panel,
+    settings_card_frame, settings_file_card, slider_value_control, toggle_card, toggle_select_row,
+    u32_slider_value_control,
+};
 
 const FONT_SIZE_OPTIONS: [u32; 9] = [11, 12, 14, 16, 18, 20, 24, 28, 32];
 pub(crate) const PREVIEW_QUOTES: [(&str, &str); 3] = [
@@ -135,7 +141,11 @@ pub(crate) fn dialog_card_border(ui: &egui::Ui) -> egui::Color32 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::widgets::{
+        reset_settings_layout_measurements, settings_card_measurements,
+        settings_control_measurements,
+    };
+    use super::{ScratchpadApp, SettingsUi, egui, render_page_body, widgets};
     use crate::app::services::session_store::SessionStore;
     use crate::app::services::settings_store::SettingsStore;
     use crate::app::startup::StartupOptions;

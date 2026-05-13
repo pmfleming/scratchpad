@@ -21,6 +21,21 @@ SOURCE_PATHS = {
     "speed_report": ANALYSIS_DIR / "speed_efficiency_report.json",
 }
 
+PROBE_CLASSES = {
+    "ceiling_health": {
+        "label": "Ceiling / Promise Health",
+        "purpose": "Shows whether a seven-promise scale boundary still passes.",
+    },
+    "targeted_path": {
+        "label": "Targeted Path",
+        "purpose": "Shows whether a specific implementation path or recent change is working.",
+    },
+    "diagnostic_profile": {
+        "label": "Diagnostic Profile",
+        "purpose": "Explains where time goes after a targeted or ceiling probe finds pressure.",
+    },
+}
+
 SCENARIOS: List[Dict[str, Any]] = [
     {
         "id": "large_files",
@@ -181,6 +196,9 @@ SCENARIOS: List[Dict[str, Any]] = [
         "capacity_scenarios": ["tab_count_ceiling"],
         "resource_scenarios": [
             "tab_count_resource_tracking",
+            "tab_build_targeted",
+            "tab_split_targeted",
+            "tab_combine_targeted",
             "session_persist_cost",
             "session_restore_cost",
             "startup_visible_restore_cost",
@@ -192,7 +210,14 @@ SCENARIOS: List[Dict[str, Any]] = [
                 "label": "10,000+ tabs",
                 "kind": "tabs",
                 "minimum": 10_000,
-                "sources": ["tab_count_ceiling", "tab_count_resource_tracking", "startup_visible_restore_cost"],
+                "sources": [
+                    "tab_count_ceiling",
+                    "tab_count_resource_tracking",
+                    "tab_build_targeted",
+                    "tab_split_targeted",
+                    "tab_combine_targeted",
+                    "startup_visible_restore_cost",
+                ],
             },
         ],
         "next_measurement": "Extend tab-count latency, memory, and restore sweeps to 10,000+ tabs.",
@@ -623,6 +648,9 @@ def unique_strings(values: Iterable[str]) -> List[str]:
 def compact_latency_row(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": row.get("name") or row.get("scenario_id") or row_key(row),
+        "probe_class": "targeted_path",
+        "measurement_role": "change_validation",
+        "measurement_question": "Did this implementation path stay inside its latency budget?",
         "benchmark_key": row_key(row),
         "label": row.get("scenario_label") or row.get("name") or row_key(row),
         "family": row_family(row),
@@ -641,6 +669,9 @@ def compact_latency_row(row: Dict[str, Any]) -> Dict[str, Any]:
 def compact_capacity_row(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": row.get("scenario"),
+        "probe_class": "ceiling_health",
+        "measurement_role": "promise_health",
+        "measurement_question": "Does this promise still pass as workload size increases?",
         "label": row.get("scenario_label") or row.get("scenario"),
         "failure_mode": row.get("failure_mode", "not_reached"),
         "ceiling_reached": bool(row.get("ceiling_reached")),
@@ -656,6 +687,9 @@ def compact_capacity_row(row: Dict[str, Any]) -> Dict[str, Any]:
 def compact_resource_row(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": row.get("scenario"),
+        "probe_class": "targeted_path",
+        "measurement_role": "change_validation",
+        "measurement_question": "Did this targeted path keep resource growth bounded?",
         "label": row.get("scenario_label") or row.get("scenario"),
         "family": row_family(row),
         "focus": row.get("focus"),
@@ -673,6 +707,9 @@ def compact_resource_row(row: Dict[str, Any]) -> Dict[str, Any]:
 def compact_profile_row(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": row.get("id"),
+        "probe_class": "diagnostic_profile",
+        "measurement_role": "diagnosis",
+        "measurement_question": "Which hot path should explain a failing or noisy measurement?",
         "name": row.get("name") or row.get("id"),
         "available": bool(row.get("available")),
         "families": row.get("workload_families", []),
@@ -703,11 +740,12 @@ def build_implementation_rows(
     for row in capacity_rows:
         implementations.append(
             {
-                "kind": "capacity",
+                "kind": "ceiling",
+                "probe_class": "ceiling_health",
                 "label": row.get("scenario_label") or row.get("scenario"),
                 "measurement": best_workload_label(row),
                 "status": row.get("failure_mode", "measured"),
-                "detail": f"resource={row.get('suspected_limiting_resource', '-')}",
+                "detail": f"promise health; resource={row.get('suspected_limiting_resource', '-')}",
             }
         )
 
@@ -715,10 +753,11 @@ def build_implementation_rows(
         implementations.append(
             {
                 "kind": "resource",
+                "probe_class": "targeted_path",
                 "label": row.get("scenario_label") or row.get("scenario"),
                 "measurement": best_workload_label(row),
                 "status": row.get("focus", "resource"),
-                "detail": f"peak={format_target(row.get('max_peak_live_bytes'), 'bytes')} elapsed={format_target(row.get('max_elapsed_ms'), 'ms')}",
+                "detail": f"targeted path; peak={format_target(row.get('max_peak_live_bytes'), 'bytes')} elapsed={format_target(row.get('max_elapsed_ms'), 'ms')}",
             }
         )
 
@@ -731,10 +770,11 @@ def build_implementation_rows(
         implementations.append(
             {
                 "kind": "speed",
+                "probe_class": "targeted_path",
                 "label": row.get("scenario_label") or row.get("name") or row_key(row),
                 "measurement": format_target(mean_ms(row), "ms"),
                 "status": "over budget" if over_budget(row) else "measured",
-                "detail": f"budget={format_target(threshold_ms(row), 'ms')}",
+                "detail": f"targeted path; budget={format_target(threshold_ms(row), 'ms')}",
             }
         )
 
@@ -743,6 +783,7 @@ def build_implementation_rows(
         implementations.append(
             {
                 "kind": "profile",
+                "probe_class": "diagnostic_profile",
                 "label": "Profile coverage",
                 "measurement": f"{len(available_profiles)}/{len(profile_rows)} SVGs",
                 "status": "available" if available_profiles else "indexed",
@@ -817,6 +858,9 @@ def build_scenario(
         scenario_resources,
         scenario_profile_rows,
     )
+    ceiling_probe_count = len(scenario_capacity)
+    targeted_probe_count = len(scenario_latency) + len(scenario_resources)
+    diagnostic_profile_count = len(scenario_profile_rows)
 
     return {
         "id": scenario["id"],
@@ -836,6 +880,23 @@ def build_scenario(
         ),
         "implementations": implementations,
         "implementation_count": len(implementations),
+        "measurement_split": {
+            "ceiling_health": {
+                **PROBE_CLASSES["ceiling_health"],
+                "count": ceiling_probe_count,
+                "ceilings_reached": sum(1 for row in scenario_capacity if row.get("ceiling_reached")),
+            },
+            "targeted_path": {
+                **PROBE_CLASSES["targeted_path"],
+                "count": targeted_probe_count,
+                "budget_misses": sum(1 for row in scenario_latency if over_budget(row)),
+            },
+            "diagnostic_profile": {
+                **PROBE_CLASSES["diagnostic_profile"],
+                "count": diagnostic_profile_count,
+                "available": sum(1 for row in scenario_profile_rows if row.get("available")),
+            },
+        },
         "budget_misses": sum(1 for row in scenario_latency if over_budget(row)),
         "ceilings_reached": sum(1 for row in scenario_capacity if row.get("ceiling_reached")),
         "max_latency_ms": max_latency_ms(scenario_latency),
@@ -880,6 +941,7 @@ def build_opportunities(scenarios: List[Dict[str, Any]]) -> List[Dict[str, Any]]
 def presentation_notes() -> List[str]:
     return [
         "Lead with scenario coverage before raw dataset tables.",
+        "Keep ceiling probes and targeted path probes visually separate: ceilings prove promise health; targeted paths validate changes.",
         "Show target scale status for GB files, 10,000+ files, 10,000+ tabs, and 1,000+ views.",
         "Render gaps inline with each scenario card.",
         "Keep latency, capacity, resources, and flamegraphs available as drill-down evidence.",
@@ -915,6 +977,14 @@ def build_payload() -> Dict[str, Any]:
     budget_misses = sum(scenario.get("budget_misses", 0) for scenario in scenario_rows_payload)
     ceilings_reached = sum(scenario.get("ceilings_reached", 0) for scenario in scenario_rows_payload)
     implementation_count = sum(scenario.get("implementation_count", 0) for scenario in scenario_rows_payload)
+    scenario_ceiling_health_evidence = sum(
+        scenario.get("measurement_split", {}).get("ceiling_health", {}).get("count", 0)
+        for scenario in scenario_rows_payload
+    )
+    scenario_targeted_path_evidence = sum(
+        scenario.get("measurement_split", {}).get("targeted_path", {}).get("count", 0)
+        for scenario in scenario_rows_payload
+    )
 
     sources = source_status()
     return {
@@ -922,6 +992,7 @@ def build_payload() -> Dict[str, Any]:
             "generated_from": "scripts/performance_review.py",
             "source_artifacts": sources,
             "scenario_model": "scenario-first performance coverage",
+            "probe_classes": PROBE_CLASSES,
         },
         "summary": {
             "scenario_count": len(scenario_rows_payload),
@@ -933,6 +1004,10 @@ def build_payload() -> Dict[str, Any]:
             "budget_misses": budget_misses,
             "ceilings_reached": ceilings_reached,
             "implementation_count": implementation_count,
+            "ceiling_health_probes": len(capacity_rows),
+            "targeted_path_probes": len(latency_rows) + len(resource_rows),
+            "scenario_ceiling_health_evidence": scenario_ceiling_health_evidence,
+            "scenario_targeted_path_evidence": scenario_targeted_path_evidence,
             "latency_rows": len(latency_rows),
             "capacity_rows": len(capacity_rows),
             "resource_rows": len(resource_rows),

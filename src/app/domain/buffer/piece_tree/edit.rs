@@ -327,7 +327,7 @@ impl PieceTreeLite {
         self.root
             .replace_recalculated_nodes(start.node_index..end.node_index + 1, replacement_nodes);
         self.rebalance_node_window(start.node_index, inserted_nodes);
-        self.rebuild_leaf_index();
+        self.refresh_leaf_index_after_structure_change();
     }
 
     fn take_leaf_replacement_window(

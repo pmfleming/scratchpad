@@ -26,7 +26,7 @@ impl SessionManifest {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct SessionTab {
     #[serde(default)]
     pub buffers: Vec<SessionBuffer>,
@@ -47,6 +47,134 @@ pub(crate) struct SessionTab {
     pub active_view_id: u64,
     pub views: Vec<SessionView>,
     pub root_pane: SessionPaneNode,
+}
+
+#[derive(Clone)]
+pub(crate) struct SessionTabShell {
+    pub active_view_id: u64,
+    pub views: Vec<SessionView>,
+    pub root_pane: SessionPaneNode,
+}
+
+#[derive(Clone)]
+pub(crate) struct SessionBufferPayload {
+    pub buffers: Vec<SessionBuffer>,
+}
+
+#[derive(Clone)]
+pub(crate) struct SessionTabParts {
+    pub shell: SessionTabShell,
+    pub payload: SessionBufferPayload,
+}
+
+impl SessionTab {
+    pub(crate) fn buffer_count(&self) -> usize {
+        if self.buffers.is_empty() {
+            usize::from(self.buffer_id.is_some())
+        } else {
+            self.buffers.len()
+        }
+    }
+
+    pub(crate) fn into_parts(self) -> SessionTabParts {
+        let SessionTab {
+            buffers,
+            buffer_id,
+            name,
+            path,
+            is_dirty,
+            temp_id,
+            encoding,
+            has_bom,
+            active_view_id,
+            views,
+            root_pane,
+        } = self;
+        SessionTabParts {
+            shell: SessionTabShell {
+                active_view_id,
+                views,
+                root_pane,
+            },
+            payload: SessionBufferPayload::from_session_fields(
+                buffers, buffer_id, name, path, is_dirty, temp_id, encoding, has_bom,
+            ),
+        }
+    }
+}
+
+impl From<SessionTabParts> for SessionTab {
+    fn from(parts: SessionTabParts) -> Self {
+        Self {
+            buffers: parts.payload.buffers,
+            buffer_id: None,
+            name: None,
+            path: None,
+            is_dirty: None,
+            temp_id: None,
+            encoding: None,
+            has_bom: None,
+            active_view_id: parts.shell.active_view_id,
+            views: parts.shell.views,
+            root_pane: parts.shell.root_pane,
+        }
+    }
+}
+
+impl SessionBufferPayload {
+    fn from_session_fields(
+        buffers: Vec<SessionBuffer>,
+        buffer_id: Option<u64>,
+        name: Option<String>,
+        path: Option<PathBuf>,
+        is_dirty: Option<bool>,
+        temp_id: Option<String>,
+        encoding: Option<String>,
+        has_bom: Option<bool>,
+    ) -> Self {
+        if !buffers.is_empty() {
+            return Self { buffers };
+        }
+
+        let buffers = buffer_id
+            .zip(name)
+            .zip(is_dirty)
+            .zip(temp_id)
+            .zip(encoding)
+            .zip(has_bom)
+            .map(
+                |(((((buffer_id, name), is_dirty), temp_id), encoding), has_bom)| {
+                    vec![SessionBuffer {
+                        id: buffer_id,
+                        name,
+                        path,
+                        is_dirty,
+                        is_settings_file: false,
+                        show_control_chars: false,
+                        right_to_left_reading_order: false,
+                        temp_id,
+                        format: None,
+                        encoding,
+                        has_bom,
+                        disk_modified_millis: None,
+                        disk_len: None,
+                        text_history: Vec::new(),
+                    }]
+                },
+            )
+            .unwrap_or_default();
+        Self { buffers }
+    }
+
+    pub(crate) fn buffer_ids(&self) -> impl Iterator<Item = u64> + '_ {
+        self.buffers.iter().map(|buffer| buffer.id)
+    }
+}
+
+impl SessionTabParts {
+    pub(crate) fn buffer_ids(&self) -> impl Iterator<Item = u64> + '_ {
+        self.payload.buffer_ids()
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -98,7 +226,7 @@ impl From<&crate::app::domain::BufferState> for SessionBuffer {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct SessionView {
     pub id: u64,
     pub buffer_id: u64,
@@ -118,7 +246,7 @@ impl From<&crate::app::domain::EditorViewState> for SessionView {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum SessionPaneNode {
     Leaf {
         view_id: u64,

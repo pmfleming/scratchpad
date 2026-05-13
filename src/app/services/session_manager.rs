@@ -30,8 +30,9 @@ pub(crate) fn maybe_persist_session(app: &mut ScratchpadApp, ctx: &egui::Context
         return;
     }
 
-    let request = SessionPersistRequest::capture(
+    let request = SessionPersistRequest::capture_with_cold_tabs(
         app.tab_manager.tabs.as_slice(),
+        app.tab_manager.cold_session_tabs(),
         app.tab_manager.active_tab_index,
         app.state.app_settings.font_size(),
         app.state.app_settings.word_wrap(),
@@ -41,8 +42,9 @@ pub(crate) fn maybe_persist_session(app: &mut ScratchpadApp, ctx: &egui::Context
 }
 
 pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> std::io::Result<()> {
-    let request = SessionPersistRequest::capture(
+    let request = SessionPersistRequest::capture_with_cold_tabs(
         app.tab_manager.tabs.as_slice(),
+        app.tab_manager.cold_session_tabs(),
         app.tab_manager.active_tab_index,
         app.state.app_settings.font_size(),
         app.state.app_settings.word_wrap(),

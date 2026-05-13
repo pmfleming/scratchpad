@@ -383,7 +383,10 @@ impl FileController {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        FileController, LoadedPathResult, OpenHerePathOutcome, ScratchpadApp, SplitAxis,
+        WorkspaceTab,
+    };
     use crate::app::domain::{BufferState, TabManager};
     use crate::app::services::file_service::FileService;
     use crate::app::services::session_store::SessionStore;
@@ -404,6 +407,7 @@ mod tests {
             session_dirty: false,
             pending_scroll_to_active: false,
             buffer_tab_index: Default::default(),
+            cold_session_tabs: Default::default(),
         };
         app.tab_manager.rebuild_buffer_tab_index();
         app.clear_tab_selection();

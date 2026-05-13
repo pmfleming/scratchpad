@@ -283,7 +283,8 @@ fn dropped_file_paths(dropped_files: &[egui::DroppedFile]) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{dropped_file_paths, egui};
+    use std::path::PathBuf;
 
     #[test]
     fn dropped_file_paths_uses_only_files_with_paths() {

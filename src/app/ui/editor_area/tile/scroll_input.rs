@@ -60,7 +60,7 @@ fn max_scroll_offset(content_size: egui::Vec2, viewport_size: egui::Vec2) -> egu
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{egui, local_scroll_source, resolve_editor_scroll_offset_override};
 
     #[test]
     fn editor_local_scroll_source_accepts_mouse_wheel() {

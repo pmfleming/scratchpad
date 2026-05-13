@@ -53,6 +53,9 @@ class SearchSpeedMetric:
     has_profile_coverage: bool = False
     stability: str = "stable"
     suspected_limiting_resource: str = "cpu"
+    probe_class: str = "targeted_path"
+    measurement_role: str = "change_validation"
+    measurement_question: str = "Did this search path stay inside its latency budget?"
 
     @property
     def mean_ms(self) -> float:
@@ -77,7 +80,10 @@ class SearchSpeedAnalyzer:
                     print(exc.output, file=sys.stderr)
                 print("Falling back to existing Criterion search results.", file=sys.stderr)
 
-        return self.load_criterion_results(Path("target") / "criterion")
+        return self.load_criterion_results(self.criterion_results_dir())
+
+    def criterion_results_dir(self) -> Path:
+        return Path(os.environ.get("CARGO_TARGET_DIR", "target")) / "criterion"
 
     def run_bench_command(self, cmd: List[str]) -> None:
         process = subprocess.Popen(

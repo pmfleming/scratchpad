@@ -317,7 +317,7 @@ fn file_identity_for_buffer(buffer: &crate::app::domain::BufferState) -> SearchF
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{SearchResultAccumulator, build_search_target, collect_search_targets_for_views};
     use crate::app::domain::{BufferState, SplitAxis, WorkspaceTab};
     use std::path::PathBuf;
 

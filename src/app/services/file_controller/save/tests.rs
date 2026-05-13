@@ -1,4 +1,4 @@
-use super::*;
+use super::{FileController, FileService, PathBuf, ScratchpadApp, default_save_as_file_name};
 use crate::app::app_state::{PendingReloadBufferAction, PendingReloadMode};
 use crate::app::domain::{BufferFreshness, BufferState, PendingAction, TabManager, WorkspaceTab};
 use crate::app::services::background_io::LoadedPathResult;
@@ -57,6 +57,7 @@ fn app_with_buffer(root: &std::path::Path, buffer: BufferState) -> ScratchpadApp
         session_dirty: false,
         pending_scroll_to_active: false,
         buffer_tab_index: Default::default(),
+        cold_session_tabs: Default::default(),
     };
     app.tab_manager.rebuild_buffer_tab_index();
     app

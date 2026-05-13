@@ -1,5 +1,5 @@
 use crate::app::domain::{SplitAxis, SplitPath};
-use crate::app::theme::*;
+use crate::app::theme::{border, header_bg, text_primary};
 use crate::app::ui::tile_header::{TILE_GAP, TileAction};
 use crate::app::ui::widget_ids;
 use eframe::egui;

@@ -333,8 +333,8 @@ fn filter_id() -> egui::Id {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::app::app_state::StatusMessage;
+    use super::{StatusFilter, StatusHistoryRow, status_history_rows};
+    use crate::app::app_state::{StatusDomain, StatusMessage, StatusSeverity};
     #[test]
     fn status_history_rows_are_newest_first() {
         let older = message(1, "Older");

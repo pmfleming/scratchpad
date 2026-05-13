@@ -58,7 +58,7 @@ fn snapshot_height(snapshot: &DisplaySnapshot, row_height: f32) -> Option<f32> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{based_slice_height, content_height, eof_tail_height};
 
     #[test]
     fn eof_tail_does_not_create_blank_scroll_page() {

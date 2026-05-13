@@ -221,7 +221,7 @@ fn tab_total_size(tab: &crate::app::domain::WorkspaceTab) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{ScratchpadApp, TabOrderMode};
     use crate::app::domain::{BufferState, DiskFileState, PieceSource, TabManager, WorkspaceTab};
     use crate::app::services::session_store::SessionStore;
     use crate::app::services::settings_store::SettingsStore;
@@ -359,6 +359,7 @@ mod tests {
             session_dirty: false,
             pending_scroll_to_active: false,
             buffer_tab_index: Default::default(),
+            cold_session_tabs: Default::default(),
         };
         app.tab_manager.rebuild_buffer_tab_index();
         app.clear_tab_selection();

@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    EDITOR_FONT_FAMILY, ScratchpadApp, SettingsUi, action_bg, action_hover_bg, border,
+    category_heading, egui, phosphor_button, text_muted, text_primary,
+};
 use crate::app::ui::editor_content::EditorHighlightStyle;
 use crate::app::ui::widget_ids;
 use std::hash::Hash;

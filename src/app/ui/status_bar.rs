@@ -1,6 +1,6 @@
 use crate::app::app_state::{ScratchpadApp, StatusSeverity};
 use crate::app::commands::AppCommand;
-use crate::app::theme::*;
+use crate::app::theme::text_primary;
 use crate::app::ui::widget_ids;
 use eframe::egui;
 

@@ -223,7 +223,7 @@ fn virtual_row_step(row_height: f32, row_spacing: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{egui, row_top, virtual_rows_for_clip, virtual_total_height};
 
     const ROW_HEIGHT: f32 = 34.0;
     const ROW_SPACING: f32 = 2.0;

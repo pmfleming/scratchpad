@@ -1,7 +1,7 @@
 use super::{TileRenderRequest, context_menu};
 use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::ViewId;
-use crate::app::theme::*;
+use crate::app::theme::{border, header_bg};
 use crate::app::ui::tile_header::TileAction;
 use crate::app::ui::widget_ids;
 use eframe::egui;

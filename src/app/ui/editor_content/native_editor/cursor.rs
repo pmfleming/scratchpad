@@ -351,7 +351,10 @@ fn clamp_char_cursor(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        CharCursor, CursorRange, PieceTreeLite, egui, finalize_cursor_movement,
+        full_document_movement_target, logical_line_movement_target,
+    };
 
     fn tree(text: &str) -> PieceTreeLite {
         PieceTreeLite::from_string(text.to_owned())

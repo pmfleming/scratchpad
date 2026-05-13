@@ -4,7 +4,7 @@ use super::TileRenderRequest;
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::AppCommand;
 use crate::app::domain::SplitAxis;
-use crate::app::theme::*;
+use crate::app::theme::{action_bg, action_hover_bg, border, text_primary};
 use crate::app::ui::tile_header::TileAction;
 use crate::app::ui::widget_ids;
 use eframe::egui;

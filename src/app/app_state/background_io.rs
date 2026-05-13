@@ -1,7 +1,7 @@
 use super::{
     PendingBackgroundAction, PendingEncodingComplianceAction, PendingSavePathAction,
-    PendingSessionPersistAction, PendingStartupRestoreAction, PendingTextMetadataAction,
-    ScratchpadApp,
+    PendingSessionHydrationAction, PendingSessionPersistAction, PendingStartupRestoreAction,
+    PendingTextMetadataAction, ScratchpadApp,
 };
 use crate::app::diagnostics;
 use crate::app::services::background_io::{
@@ -75,8 +75,26 @@ impl ScratchpadApp {
                     legacy_settings,
                 );
             }
-            BackgroundIoResult::SessionTabRestored { request_id, tab } => {
-                self.apply_session_tab_restored_result(request_id, *tab);
+            BackgroundIoResult::SessionTabRestored {
+                request_id,
+                tab_index,
+                cold_session_tab,
+                tab,
+            } => {
+                self.apply_session_tab_restored_result(
+                    request_id,
+                    tab_index,
+                    cold_session_tab,
+                    *tab,
+                );
+            }
+            BackgroundIoResult::SessionTabHydrated {
+                request_id,
+                tab_index,
+                restore_status,
+                tab,
+            } => {
+                self.apply_session_tab_hydrated_result(request_id, tab_index, restore_status, *tab);
             }
             BackgroundIoResult::SessionPersisted { request_id, result } => {
                 self.apply_session_persisted_result(request_id, result);
@@ -131,6 +149,7 @@ impl ScratchpadApp {
                 self.apply_async_startup_restore_compare_result(action, results);
             }
             Some(PendingBackgroundAction::StartupRestore(_))
+            | Some(PendingBackgroundAction::HydrateSessionTab(_))
             | Some(PendingBackgroundAction::PersistSession(_))
             | Some(PendingBackgroundAction::RefreshTextMetadata(_))
             | Some(PendingBackgroundAction::RefreshEncodingCompliance(_))
@@ -225,6 +244,8 @@ impl ScratchpadApp {
     fn apply_session_tab_restored_result(
         &mut self,
         request_id: u64,
+        tab_index: usize,
+        cold_session_tab: Option<crate::app::services::session_store::ColdSessionTab>,
         tab: crate::app::domain::WorkspaceTab,
     ) {
         let first_streamed_tab = {
@@ -238,6 +259,7 @@ impl ScratchpadApp {
             };
             let first_streamed_tab = action.streamed_tab_count == 0;
             action.streamed_tab_count += 1;
+            action.streamed_tab_indices.push(tab_index);
             first_streamed_tab
         };
 
@@ -246,9 +268,47 @@ impl ScratchpadApp {
         } else {
             self.tab_manager.append_restored_tab(tab);
         }
+        if let Some(cold_session_tab) = cold_session_tab {
+            let restored_index = self.tab_manager.tabs.as_slice().len().saturating_sub(1);
+            self.tab_manager
+                .set_cold_session_tab(restored_index, cold_session_tab);
+        }
         self.ensure_active_tab_slot_selected();
         self.refresh_startup_restore_conflicts();
         self.mark_search_dirty();
+    }
+
+    fn apply_session_tab_hydrated_result(
+        &mut self,
+        request_id: u64,
+        _tab_index: usize,
+        restore_status: Option<crate::app::services::session_store::RestoreStatus>,
+        tab: crate::app::domain::WorkspaceTab,
+    ) {
+        let Some(PendingBackgroundAction::HydrateSessionTab(action)) =
+            self.state.io.remove_pending_background_action(request_id)
+        else {
+            return;
+        };
+
+        let Some(current_tab_index) = self.find_cold_session_tab_index(&action.expected_buffer_ids)
+        else {
+            self.queue_next_progressive_session_hydration();
+            return;
+        };
+
+        if self
+            .tab_manager
+            .replace_restored_tab(current_tab_index, tab)
+        {
+            let _ = self.tab_manager.take_cold_session_tab(current_tab_index);
+            if let Some(status) = restore_status {
+                self.apply_session_restore_status(status);
+            }
+            self.refresh_startup_restore_conflicts();
+            self.mark_search_dirty();
+        }
+        self.queue_next_progressive_session_hydration();
     }
 
     fn apply_session_persisted_result(&mut self, request_id: u64, result: Result<(), String>) {
@@ -281,6 +341,7 @@ impl ScratchpadApp {
         revision: u64,
         result: Result<
             (
+                crate::app::domain::buffer::BufferLength,
                 usize,
                 crate::app::domain::TextArtifactSummary,
                 crate::app::domain::TextFormatMetadata,
@@ -293,7 +354,7 @@ impl ScratchpadApp {
         else {
             return;
         };
-        if let Ok((line_count, artifact_summary, format)) = result
+        if let Ok((_length, line_count, artifact_summary, format)) = result
             && let Some(buffer) = self
                 .tab_manager
                 .tabs
@@ -338,26 +399,15 @@ impl ScratchpadApp {
         let legacy_settings = match result {
             Ok(Some(restored)) if action.streamed_tab_count > 0 => {
                 restored_session = true;
+                self.tab_manager
+                    .reorder_tabs_by_original_indices(&action.streamed_tab_indices);
                 if !self.tab_manager.tabs.as_slice().is_empty() {
                     self.tab_manager
                         .set_active_tab_index_clamped(restored.active_tab_index);
                 }
                 self.tab_manager.evict_inactive_tab_state();
                 if let Some(status) = restored.restore_status.as_ref() {
-                    match status.level {
-                        crate::app::services::session_store::RestoreStatusLevel::Info => {
-                            self.state.status.set_info_status_in_domain(
-                                crate::app::app_state::StatusDomain::Session,
-                                status.message.clone(),
-                            )
-                        }
-                        crate::app::services::session_store::RestoreStatusLevel::Warning => {
-                            self.state.status.set_warning_status_in_domain(
-                                crate::app::app_state::StatusDomain::Session,
-                                status.message.clone(),
-                            )
-                        }
-                    }
+                    self.apply_session_restore_status(status.clone());
                 }
                 (!action.loaded_from_settings && !action.restore_started)
                     .then_some(restored.legacy_settings)
@@ -390,7 +440,66 @@ impl ScratchpadApp {
         }
         self.request_focus_for_active_view();
         self.apply_startup_options_async(action.startup_options);
+        if restored_session {
+            self.queue_next_progressive_session_hydration();
+        }
     }
+
+    pub(crate) fn hydrate_tab_if_needed(&mut self, index: usize) -> bool {
+        let Some(cold_tab) = self.tab_manager.take_cold_session_tab(index) else {
+            return false;
+        };
+
+        let (restored_tab, restore_status) =
+            self.state.session_store.restore_cold_session_tab(cold_tab);
+        if !self.tab_manager.replace_restored_tab(index, restored_tab) {
+            return false;
+        }
+        if let Some(status) = restore_status {
+            self.apply_session_restore_status(status);
+        }
+        self.mark_search_dirty();
+        true
+    }
+
+    fn find_cold_session_tab_index(
+        &self,
+        expected_buffer_ids: &[crate::app::domain::BufferId],
+    ) -> Option<usize> {
+        self.tab_manager
+            .cold_session_tabs()
+            .iter()
+            .find_map(|(index, cold_session_tab)| {
+                (cold_session_tab_buffer_ids(cold_session_tab) == expected_buffer_ids)
+                    .then_some(*index)
+            })
+    }
+
+    fn apply_session_restore_status(
+        &mut self,
+        status: crate::app::services::session_store::RestoreStatus,
+    ) {
+        match status.level {
+            crate::app::services::session_store::RestoreStatusLevel::Info => {
+                self.state.status.set_info_status_in_domain(
+                    crate::app::app_state::StatusDomain::Session,
+                    status.message,
+                );
+            }
+            crate::app::services::session_store::RestoreStatusLevel::Warning => {
+                self.state.status.set_warning_status_in_domain(
+                    crate::app::app_state::StatusDomain::Session,
+                    status.message,
+                );
+            }
+        }
+    }
+}
+
+fn cold_session_tab_buffer_ids(
+    tab: &crate::app::services::session_store::ColdSessionTab,
+) -> Vec<crate::app::domain::BufferId> {
+    tab.buffer_ids().collect()
 }
 
 fn record_background_send_error(error: &BackgroundIoSendError) {

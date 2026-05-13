@@ -89,6 +89,9 @@ def fallback_probe_events() -> List[Dict[str, Any]]:
         ("provenance_retained_memory", "Provenance retained memory after long edit session", "edit-history", "bounded-memory", [10_000, 100_000], "edits"),
         ("fragmented_long_session_mutation", "Fragmented long-session paste/cut/undo/redo", "edit-paste", "fragmented-mutation", [1_000, 5_000, 20_000], "fragments"),
         ("tab_count_resource_tracking", "Tab count working-set and page-fault tracking", "tab-management", "memory", [128, 512, 4_096, 10_000], "tabs"),
+        ("tab_build_targeted", "Tab build targeted path", "tab-management", "tab-build", [128, 512, 4_096, 10_000], "tabs"),
+        ("tab_split_targeted", "Tab split targeted path", "tab-management", "tab-split", [128, 512, 4_096, 10_000], "tabs"),
+        ("tab_combine_targeted", "Tab combine targeted path", "tab-management", "tab-combine", [128, 512, 4_096, 10_000], "tabs"),
         ("view_count_resource_tracking", "View count allocation and layout tracking", "split-layout", "memory", [128, 512, 1_000], "views"),
         ("anchor_heavy_view_editing", "Anchor-heavy many-view editing", "split-layout", "anchors", [1_000, 10_000, 40_000], "anchors"),
         ("session_persist_cost", "Session persist cost", "session-persistence", "session", [100, 1_000, 10_000], "tabs"),
@@ -151,6 +154,9 @@ def summarize_probe(events: List[Dict[str, Any]]) -> Dict[str, Any]:
         last = scenario_events[-1]
         scenario_row = {
             "scenario": scenario,
+            "probe_class": "targeted_path",
+            "measurement_role": "change_validation",
+            "measurement_question": "Did this targeted path keep resource growth bounded?",
             "scenario_label": first.get("scenario_label", scenario),
             "workload_family": first.get("workload_family", "unmapped"),
             "focus": first.get("focus", "resource"),

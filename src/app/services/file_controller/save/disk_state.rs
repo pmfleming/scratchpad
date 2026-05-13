@@ -1,4 +1,4 @@
-use super::*;
+use super::FileController;
 use crate::app::app_state::{
     PendingBackgroundAction, PendingReloadBufferAction, PendingReloadMode, ScratchpadApp,
     StatusDomain,

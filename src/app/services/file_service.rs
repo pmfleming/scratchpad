@@ -564,8 +564,9 @@ fn is_probably_binary(prefix: &[u8], has_bom: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::app::domain::{EncodingSource, LineEndingStyle, TextDocument};
+    use super::FileService;
+    use crate::app::domain::{EncodingSource, LineEndingStyle, TextDocument, TextFormatMetadata};
+    use std::io;
 
     #[test]
     fn snapshot_save_applies_crlf_policy_for_utf8() {
