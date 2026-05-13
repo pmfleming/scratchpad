@@ -1,4 +1,5 @@
 use super::{AppSurface, CHROME_TRANSITION_FRAMES, ScratchpadApp};
+use crate::app::capacity_metrics::{FramePhase, record_frame_phase};
 use crate::app::chrome::handle_window_resize;
 use crate::app::diagnostics;
 use crate::app::fonts;
@@ -8,6 +9,7 @@ use crate::app::shortcuts;
 use crate::app::ui::{callout, dialogs, editor_area, settings, status_bar, tab_strip, transition};
 use eframe::egui;
 use std::path::PathBuf;
+use std::time::Instant;
 
 pub(crate) fn open_encoding_dialog(app: &mut ScratchpadApp) {
     app.state.encoding_dialog_choice = app
@@ -33,6 +35,7 @@ pub(super) fn handle_pending_close_request(app: &mut ScratchpadApp, ctx: &egui::
 }
 
 pub(super) fn prepare_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
+    let started_at = Instant::now();
     if app.state.window_shown_after_first_frame {
         app.record_window_state(ctx);
     }
@@ -42,7 +45,12 @@ pub(super) fn prepare_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
     }
     app.tab_manager.evict_inactive_tab_state();
     app.poll_file_watcher(ctx);
+    let background_poll_started_at = Instant::now();
     app.poll_background_io(ctx);
+    record_frame_phase(
+        FramePhase::BackgroundPoll,
+        background_poll_started_at.elapsed(),
+    );
     handle_dropped_files(app, ctx);
     app.apply_theme_to_context(ctx);
     crate::app::ui::widget_ids::configure_debug_options(ctx);
@@ -51,6 +59,7 @@ pub(super) fn prepare_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
     callout::set_modal_scroll_blocker_active(ctx, modal_callout_open(app));
     transition::set_chrome_transition_active(ctx, chrome_transition_active(app));
     sync_window_title(app, ctx);
+    record_frame_phase(FramePhase::Prepare, started_at.elapsed());
 }
 
 pub fn prepare_context_before_first_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
@@ -61,17 +70,32 @@ pub fn prepare_context_before_first_frame(app: &mut ScratchpadApp, ctx: &egui::C
 
 pub(super) fn render_frame(app: &mut ScratchpadApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     apply_deferred_layout_settings(app, ctx);
+    let paint_started_at = Instant::now();
     paint_root_background(ui, app.state.app_settings.editor_background_color());
+    record_frame_phase(FramePhase::Paint, paint_started_at.elapsed());
+    let chrome_started_at = Instant::now();
     render_tab_chrome(app, ui);
+    record_frame_phase(FramePhase::Chrome, chrome_started_at.elapsed());
+    let active_surface_started_at = Instant::now();
     render_active_surface(app, ui);
+    record_frame_phase(
+        FramePhase::ActiveSurface,
+        active_surface_started_at.elapsed(),
+    );
+    let dialogs_started_at = Instant::now();
     dialogs::show_startup_restore_conflict_modal(ctx, app);
     dialogs::show_pending_action_modal(ctx, app);
     dialogs::show_encoding_window(ctx, app);
     dialogs::show_text_history_window(ctx, app);
     dialogs::show_status_history_window(ctx, app);
+    record_frame_phase(FramePhase::Dialogs, dialogs_started_at.elapsed());
+    let shortcuts_started_at = Instant::now();
     shortcuts::handle_shortcuts(app, ctx);
+    record_frame_phase(FramePhase::Shortcuts, shortcuts_started_at.elapsed());
+    let finish_started_at = Instant::now();
     show_window_after_first_frame(app, ctx);
     finish_frame_transitions(app, ctx);
+    record_frame_phase(FramePhase::Finish, finish_started_at.elapsed());
 }
 
 fn render_tab_chrome(app: &mut ScratchpadApp, ui: &mut egui::Ui) {

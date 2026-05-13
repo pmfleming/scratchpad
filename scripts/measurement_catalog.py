@@ -89,6 +89,17 @@ def build_catalog() -> Dict[str, Any]:
             ["target/analysis/slowspots.json"],
         ),
         item(
+            "performance.frame_metrics",
+            "performance",
+            "speed",
+            "120 Hz Frame Metrics",
+            "Measures headless editor frame p50/p95/p99 and phase ownership against the 120 Hz budget.",
+            [[py, "scripts/frame_metrics.py", "--mode", "visibility"]],
+            ["target/analysis/frame_metrics.json"],
+            related_profiles=["ui_render_frame_profile"],
+            related_modules=["src/app/app_state/frame.rs", "src/app/capacity_metrics.rs"],
+        ),
+        item(
             "performance.search",
             "performance",
             "searching",
@@ -141,11 +152,13 @@ def build_catalog() -> Dict[str, Any]:
             "Performance Review",
             "Combines targeted path probes, ceiling promise-health probes, profiles, scale-target coverage, and scenario gaps.",
             [
+                [py, "scripts/frame_metrics.py", "--mode", "visibility"],
                 [py, "scripts/capacity_report.py", "--mode", "visibility"],
                 [py, "scripts/speed_efficiency_report.py", "--mode", "visibility"],
                 [py, "scripts/performance_review.py", "--mode", "visibility"],
             ],
             [
+                "target/analysis/frame_metrics.json",
                 "target/analysis/speed_efficiency_report.json",
                 "target/analysis/performance_review.json",
             ],

@@ -4071,19 +4071,29 @@
     }
 
     function currentFrameScenario() {
-        return speedReportScenarios().find((item) =>
-            item?.scenario_id === "ui_render_frame"
-            || item?.scenario_label === "ui_render_frame"
-            || item?.benchmark_key === "ui_render_frame"
-        );
+        const scenarios = speedReportScenarios();
+        const preferredIds = [
+            "editor_scroll_frame_120hz/4194304",
+            "editor_scroll_frame_120hz/1048576",
+            "ui_render_frame_120hz",
+            "ui_render_frame",
+        ];
+        return preferredIds
+            .map((id) => scenarios.find((item) =>
+                item?.scenario_id === id
+                || item?.scenario_label === id
+                || item?.benchmark_key === id
+            ))
+            .find(Boolean);
     }
 
     function computeFpsHealth() {
         const scenario = currentFrameScenario();
-        const meanMs = Number(scenario?.mean_ms);
-        const goalFps = 60;
+        const scenarioId = scenario?.scenario_id || scenario?.benchmark_key || scenario?.scenario_label || "";
+        const frameMs = Number(scenario?.p99_ms ?? scenario?.p95_ms ?? scenario?.mean_ms);
+        const goalFps = scenarioId.includes("120hz") ? 120 : 60;
         const goalFrameMs = 1000 / goalFps;
-        if (!scenario || !Number.isFinite(meanMs) || meanMs <= 0) {
+        if (!scenario || !Number.isFinite(frameMs) || frameMs <= 0) {
             return {
                 status: "stale",
                 value: "—",
@@ -4092,12 +4102,22 @@
             };
         }
 
-        const fps = 1000 / meanMs;
-        const status = fps >= goalFps && !scenario.over_budget ? "ok" : "bad";
+        const fps = 1000 / frameMs;
+        const status = frameMs <= goalFrameMs && !scenario.over_budget ? "ok" : "bad";
+        const frameLabel = scenario?.p99_ms ? "p99" : scenario?.p95_ms ? "p95" : "avg";
+        const loadLabel = scenarioId.includes("4194304")
+            ? "4 MiB wheel scroll"
+            : scenarioId.includes("1048576")
+                ? "1 MiB wheel scroll"
+                : "steady repaint";
+        const supporting = [
+            scenario?.p95_ms ? `p95 ${formatNumber.format(scenario.p95_ms)} ms` : null,
+            scenario?.mean_ms ? `mean ${formatNumber.format(scenario.mean_ms)} ms` : null,
+        ].filter(Boolean).join(", ");
         return {
             status,
             value: `${formatNumber.format(fps)} FPS`,
-            driver: `${formatNumber.format(meanMs)} ms avg, ${goalFps} FPS goal (${formatNumber.format(goalFrameMs)} ms)`,
+            driver: `${frameLabel} ${formatNumber.format(frameMs)} ms, ${loadLabel}, ${goalFps} FPS goal (${formatNumber.format(goalFrameMs)} ms)${supporting ? `; ${supporting}` : ""}`,
             series: runMetricSeries("app_fps"),
         };
     }

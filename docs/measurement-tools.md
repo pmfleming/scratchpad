@@ -143,6 +143,7 @@ today.
 | `quality.locality_dynamic` | quality | `scripts/locality_bench.py` | `target/analysis/locality_metrics.json` |
 | `quality.locality_leverage` | quality | `scripts/leverage_metrics.py` | `target/analysis/leverage_metrics.json` |
 | `performance.slowspots` | performance | `scripts/slowspots.py` | `target/analysis/slowspots.json` |
+| `performance.frame_metrics` | performance | `scripts/frame_metrics.py` | `target/analysis/frame_metrics.json` |
 | `performance.search` | performance | `scripts/search_speed.py` | `target/analysis/search_speed.json` |
 | `performance.capacity` | performance | `scripts/capacity_report.py` | `target/analysis/capacity_report.json` |
 | `performance.resources` | performance | `scripts/resource_profiles.py` | `target/analysis/resource_profiles.json` |
@@ -161,6 +162,7 @@ The viewer currently attempts to load:
 - `target/analysis/measurement_runs.json`
 - `target/analysis/hotspots.json`
 - `target/analysis/slowspots.json`
+- `target/analysis/frame_metrics.json`
 - `target/analysis/search_speed.json`
 - `target/analysis/capacity_report.json`
 - `target/analysis/resource_profiles.json`
@@ -204,6 +206,9 @@ Performance producers:
 - `scripts/slowspots.py` reads or refreshes broad Criterion benchmark results and
   ranks latency rows by score, stability, workload family, budget, and matching
   profile coverage.
+- `scripts/frame_metrics.py` runs the headless editor frame probe and reports
+  120 Hz p50/p95/p99 frame timing plus prepare, chrome, active-surface, gutter,
+  scroll, paint, background-poll, dialog, shortcut, and finish phase ownership.
 - `scripts/search_speed.py` owns the dedicated search dataset for Active,
   Current, and All scopes. It separates full completion, first response, single
   file growth, aggregate corpus growth, and dispatch overhead.

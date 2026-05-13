@@ -211,3 +211,10 @@ Expected impact:
 ## Immediate Next Step
 
 Implement Phase 1 only: add the 120 FPS measurement lane and phase timing. Once the report identifies the dominant owner of the current 12 ms frame, take Phase 2 changes in small patches and verify each one against the new p95/p99 metrics.
+
+## Experiment Notes
+
+- Attempted gating `evict_inactive_tab_state` out of steady single-tab frames after adding the 120 Hz frame probe. It did not improve `ui_render_frame_120hz` and made the measured prepare spike worse in that workload. Revisit inactive-tab eviction only with a many-tab activation benchmark that can validate the intended O(tab count) win.
+- Replaced the old `scroll_stress_latency` profile shape that laid out the full synthetic file at four wrap widths. That measured raw egui layout capacity rather than Scratchpad's viewport-first scroll path and kept 4 MiB scroll permanently over budget for the wrong reason. Use `text_layout_ceiling` for full-document layout pressure; keep `scroll_stress_latency` production-shaped.
+- Tried removing synthetic search-highlight and selection overlays from `scroll_stress_latency`; the 4 MiB row got slower, so the change was reverted. Add separate selection/search-overlay 120 Hz lanes before making another attempt to split those concerns.
+- Before overlays were split out of `scroll_stress_latency`, tried using byte length instead of `chars().count()` when placing synthetic highlight ranges. It made the 4 MiB scroll row slower and higher variance; do not revive that shortcut for future overlay benchmarks without fresh evidence.

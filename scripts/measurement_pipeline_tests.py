@@ -3,6 +3,7 @@ import unittest
 import capacity_report
 import measurement_catalog
 import performance_review
+import speed_efficiency_report
 
 
 MB = 1024 * 1024
@@ -117,6 +118,38 @@ class PerformanceReviewTests(unittest.TestCase):
         self.assertEqual(row["scenario_label"], "Text Layout")
         self.assertEqual(row["workload_family"], "text-layout")
 
+    def test_large_files_tracks_120hz_frame_budget(self) -> None:
+        large_files = next(
+            scenario
+            for scenario in performance_review.SCENARIOS
+            if scenario["id"] == "large_files"
+        )
+
+        self.assertIn("ui_render_frame_120hz", large_files["benchmark_keys"])
+        self.assertIn("editor_scroll_frame_120hz", large_files["benchmark_keys"])
+
+
+class SpeedEfficiencyReportTests(unittest.TestCase):
+    def test_frame_metrics_normalize_with_p95_budget_signal(self) -> None:
+        row = speed_efficiency_report.normalize_frame_row(
+            {
+                "scenario_id": "ui_render_frame_120hz",
+                "scenario_label": "UI render frame 120 Hz",
+                "mean_ms": 5.0,
+                "p95_ms": 9.0,
+                "p99_ms": 11.0,
+                "budget_ms": 8.33,
+                "p99_budget_ms": 12.0,
+                "phases": [{"phase": "active-surface", "mean_ms": 4.0}],
+            }
+        )
+
+        self.assertTrue(row["over_budget"])
+        self.assertEqual(row["p95_ms"], 9.0)
+        self.assertIn("p99 11.00 ms", row["signals"])
+        self.assertIn("active-surface", row["signals"])
+        self.assertEqual(row["matching_flamegraphs"], ["ui_render_frame_profile"])
+
 
 class MeasurementCatalogTests(unittest.TestCase):
     def test_performance_review_refresh_regenerates_capacity_before_review(self) -> None:
@@ -124,11 +157,23 @@ class MeasurementCatalogTests(unittest.TestCase):
         review = next(task for task in tasks if task["id"] == "performance.report")
         command_names = [command[1] for command in review["commands"]]
 
+        self.assertIn("scripts/frame_metrics.py", command_names)
         self.assertIn("scripts/capacity_report.py", command_names)
+        self.assertLess(
+            command_names.index("scripts/frame_metrics.py"),
+            command_names.index("scripts/speed_efficiency_report.py"),
+        )
         self.assertLess(
             command_names.index("scripts/capacity_report.py"),
             command_names.index("scripts/performance_review.py"),
         )
+
+    def test_frame_metrics_has_individual_dashboard_task(self) -> None:
+        tasks = measurement_catalog.build_catalog()["tasks"]
+        frame_task = next(task for task in tasks if task["id"] == "performance.frame_metrics")
+
+        self.assertEqual(frame_task["output_artifacts"], ["target/analysis/frame_metrics.json"])
+        self.assertIn("ui_render_frame_profile", frame_task["related_profiles"])
 
 
 if __name__ == "__main__":

@@ -3,6 +3,9 @@ use std::time::Duration;
 
 use serde::Serialize;
 
+const FRAME_HISTOGRAM_BUCKETS: usize = 32;
+const FRAME_HISTOGRAM_BUCKET_WIDTH_NS: u64 = 1_000_000;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct CapacityMetricsSnapshot {
     pub full_text_flatten_count: u64,
@@ -35,6 +38,28 @@ pub struct CapacityMetricsSnapshot {
     pub frame_count: u64,
     pub frame_time_total_ns: u64,
     pub frame_time_max_ns: u64,
+    pub frame_time_bucket_width_ns: u64,
+    pub frame_time_bucket_counts: [u64; FRAME_HISTOGRAM_BUCKETS],
+    pub frame_prepare_total_ns: u64,
+    pub frame_prepare_max_ns: u64,
+    pub frame_background_poll_total_ns: u64,
+    pub frame_background_poll_max_ns: u64,
+    pub frame_paint_total_ns: u64,
+    pub frame_paint_max_ns: u64,
+    pub frame_chrome_total_ns: u64,
+    pub frame_chrome_max_ns: u64,
+    pub frame_active_surface_total_ns: u64,
+    pub frame_active_surface_max_ns: u64,
+    pub frame_gutter_total_ns: u64,
+    pub frame_gutter_max_ns: u64,
+    pub frame_scroll_total_ns: u64,
+    pub frame_scroll_max_ns: u64,
+    pub frame_dialogs_total_ns: u64,
+    pub frame_dialogs_max_ns: u64,
+    pub frame_shortcuts_total_ns: u64,
+    pub frame_shortcuts_max_ns: u64,
+    pub frame_finish_total_ns: u64,
+    pub frame_finish_max_ns: u64,
     pub history_evictions_per_file: u64,
     pub history_evictions_aggregate: u64,
     pub history_evicted_bytes: u64,
@@ -70,6 +95,28 @@ static LAYOUT_CACHE_MISS_COUNT: AtomicU64 = AtomicU64::new(0);
 static FRAME_COUNT: AtomicU64 = AtomicU64::new(0);
 static FRAME_TIME_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
 static FRAME_TIME_MAX_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_TIME_BUCKET_COUNTS: [AtomicU64; FRAME_HISTOGRAM_BUCKETS] =
+    [const { AtomicU64::new(0) }; FRAME_HISTOGRAM_BUCKETS];
+static FRAME_PREPARE_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_PREPARE_MAX_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_BACKGROUND_POLL_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_BACKGROUND_POLL_MAX_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_PAINT_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_PAINT_MAX_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_CHROME_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_CHROME_MAX_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_ACTIVE_SURFACE_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_ACTIVE_SURFACE_MAX_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_GUTTER_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_GUTTER_MAX_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_SCROLL_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_SCROLL_MAX_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_DIALOGS_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_DIALOGS_MAX_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_SHORTCUTS_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_SHORTCUTS_MAX_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_FINISH_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
+static FRAME_FINISH_MAX_NS: AtomicU64 = AtomicU64::new(0);
 static HISTORY_EVICTIONS_PER_FILE: AtomicU64 = AtomicU64::new(0);
 static HISTORY_EVICTIONS_AGGREGATE: AtomicU64 = AtomicU64::new(0);
 static HISTORY_EVICTED_BYTES: AtomicU64 = AtomicU64::new(0);
@@ -79,6 +126,20 @@ pub enum BackgroundIoLane {
     Path,
     Session,
     Analysis,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FramePhase {
+    Prepare,
+    BackgroundPoll,
+    Paint,
+    Chrome,
+    ActiveSurface,
+    Gutter,
+    Scroll,
+    Dialogs,
+    Shortcuts,
+    Finish,
 }
 
 pub fn reset_capacity_metrics() {
@@ -112,6 +173,29 @@ pub fn reset_capacity_metrics() {
     FRAME_COUNT.store(0, Ordering::Relaxed);
     FRAME_TIME_TOTAL_NS.store(0, Ordering::Relaxed);
     FRAME_TIME_MAX_NS.store(0, Ordering::Relaxed);
+    for bucket in &FRAME_TIME_BUCKET_COUNTS {
+        bucket.store(0, Ordering::Relaxed);
+    }
+    FRAME_PREPARE_TOTAL_NS.store(0, Ordering::Relaxed);
+    FRAME_PREPARE_MAX_NS.store(0, Ordering::Relaxed);
+    FRAME_BACKGROUND_POLL_TOTAL_NS.store(0, Ordering::Relaxed);
+    FRAME_BACKGROUND_POLL_MAX_NS.store(0, Ordering::Relaxed);
+    FRAME_PAINT_TOTAL_NS.store(0, Ordering::Relaxed);
+    FRAME_PAINT_MAX_NS.store(0, Ordering::Relaxed);
+    FRAME_CHROME_TOTAL_NS.store(0, Ordering::Relaxed);
+    FRAME_CHROME_MAX_NS.store(0, Ordering::Relaxed);
+    FRAME_ACTIVE_SURFACE_TOTAL_NS.store(0, Ordering::Relaxed);
+    FRAME_ACTIVE_SURFACE_MAX_NS.store(0, Ordering::Relaxed);
+    FRAME_GUTTER_TOTAL_NS.store(0, Ordering::Relaxed);
+    FRAME_GUTTER_MAX_NS.store(0, Ordering::Relaxed);
+    FRAME_SCROLL_TOTAL_NS.store(0, Ordering::Relaxed);
+    FRAME_SCROLL_MAX_NS.store(0, Ordering::Relaxed);
+    FRAME_DIALOGS_TOTAL_NS.store(0, Ordering::Relaxed);
+    FRAME_DIALOGS_MAX_NS.store(0, Ordering::Relaxed);
+    FRAME_SHORTCUTS_TOTAL_NS.store(0, Ordering::Relaxed);
+    FRAME_SHORTCUTS_MAX_NS.store(0, Ordering::Relaxed);
+    FRAME_FINISH_TOTAL_NS.store(0, Ordering::Relaxed);
+    FRAME_FINISH_MAX_NS.store(0, Ordering::Relaxed);
     HISTORY_EVICTIONS_PER_FILE.store(0, Ordering::Relaxed);
     HISTORY_EVICTIONS_AGGREGATE.store(0, Ordering::Relaxed);
     HISTORY_EVICTED_BYTES.store(0, Ordering::Relaxed);
@@ -155,6 +239,28 @@ pub fn capacity_metrics_snapshot() -> CapacityMetricsSnapshot {
         frame_count: FRAME_COUNT.load(Ordering::Relaxed),
         frame_time_total_ns: FRAME_TIME_TOTAL_NS.load(Ordering::Relaxed),
         frame_time_max_ns: FRAME_TIME_MAX_NS.load(Ordering::Relaxed),
+        frame_time_bucket_width_ns: FRAME_HISTOGRAM_BUCKET_WIDTH_NS,
+        frame_time_bucket_counts: frame_bucket_counts(),
+        frame_prepare_total_ns: FRAME_PREPARE_TOTAL_NS.load(Ordering::Relaxed),
+        frame_prepare_max_ns: FRAME_PREPARE_MAX_NS.load(Ordering::Relaxed),
+        frame_background_poll_total_ns: FRAME_BACKGROUND_POLL_TOTAL_NS.load(Ordering::Relaxed),
+        frame_background_poll_max_ns: FRAME_BACKGROUND_POLL_MAX_NS.load(Ordering::Relaxed),
+        frame_paint_total_ns: FRAME_PAINT_TOTAL_NS.load(Ordering::Relaxed),
+        frame_paint_max_ns: FRAME_PAINT_MAX_NS.load(Ordering::Relaxed),
+        frame_chrome_total_ns: FRAME_CHROME_TOTAL_NS.load(Ordering::Relaxed),
+        frame_chrome_max_ns: FRAME_CHROME_MAX_NS.load(Ordering::Relaxed),
+        frame_active_surface_total_ns: FRAME_ACTIVE_SURFACE_TOTAL_NS.load(Ordering::Relaxed),
+        frame_active_surface_max_ns: FRAME_ACTIVE_SURFACE_MAX_NS.load(Ordering::Relaxed),
+        frame_gutter_total_ns: FRAME_GUTTER_TOTAL_NS.load(Ordering::Relaxed),
+        frame_gutter_max_ns: FRAME_GUTTER_MAX_NS.load(Ordering::Relaxed),
+        frame_scroll_total_ns: FRAME_SCROLL_TOTAL_NS.load(Ordering::Relaxed),
+        frame_scroll_max_ns: FRAME_SCROLL_MAX_NS.load(Ordering::Relaxed),
+        frame_dialogs_total_ns: FRAME_DIALOGS_TOTAL_NS.load(Ordering::Relaxed),
+        frame_dialogs_max_ns: FRAME_DIALOGS_MAX_NS.load(Ordering::Relaxed),
+        frame_shortcuts_total_ns: FRAME_SHORTCUTS_TOTAL_NS.load(Ordering::Relaxed),
+        frame_shortcuts_max_ns: FRAME_SHORTCUTS_MAX_NS.load(Ordering::Relaxed),
+        frame_finish_total_ns: FRAME_FINISH_TOTAL_NS.load(Ordering::Relaxed),
+        frame_finish_max_ns: FRAME_FINISH_MAX_NS.load(Ordering::Relaxed),
         history_evictions_per_file: HISTORY_EVICTIONS_PER_FILE.load(Ordering::Relaxed),
         history_evictions_aggregate: HISTORY_EVICTIONS_AGGREGATE.load(Ordering::Relaxed),
         history_evicted_bytes: HISTORY_EVICTED_BYTES.load(Ordering::Relaxed),
@@ -257,7 +363,41 @@ pub fn record_frame(elapsed: Duration) {
     let elapsed_ns = saturating_u64(elapsed.as_nanos());
     FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
     FRAME_TIME_TOTAL_NS.fetch_add(elapsed_ns, Ordering::Relaxed);
+    FRAME_TIME_BUCKET_COUNTS[frame_bucket_index(elapsed_ns)].fetch_add(1, Ordering::Relaxed);
     update_max(&FRAME_TIME_MAX_NS, elapsed_ns);
+}
+
+pub fn record_frame_phase(phase: FramePhase, elapsed: Duration) {
+    let elapsed_ns = saturating_u64(elapsed.as_nanos());
+    let (total, max) = match phase {
+        FramePhase::Prepare => (&FRAME_PREPARE_TOTAL_NS, &FRAME_PREPARE_MAX_NS),
+        FramePhase::BackgroundPoll => (
+            &FRAME_BACKGROUND_POLL_TOTAL_NS,
+            &FRAME_BACKGROUND_POLL_MAX_NS,
+        ),
+        FramePhase::Paint => (&FRAME_PAINT_TOTAL_NS, &FRAME_PAINT_MAX_NS),
+        FramePhase::Chrome => (&FRAME_CHROME_TOTAL_NS, &FRAME_CHROME_MAX_NS),
+        FramePhase::ActiveSurface => (&FRAME_ACTIVE_SURFACE_TOTAL_NS, &FRAME_ACTIVE_SURFACE_MAX_NS),
+        FramePhase::Gutter => (&FRAME_GUTTER_TOTAL_NS, &FRAME_GUTTER_MAX_NS),
+        FramePhase::Scroll => (&FRAME_SCROLL_TOTAL_NS, &FRAME_SCROLL_MAX_NS),
+        FramePhase::Dialogs => (&FRAME_DIALOGS_TOTAL_NS, &FRAME_DIALOGS_MAX_NS),
+        FramePhase::Shortcuts => (&FRAME_SHORTCUTS_TOTAL_NS, &FRAME_SHORTCUTS_MAX_NS),
+        FramePhase::Finish => (&FRAME_FINISH_TOTAL_NS, &FRAME_FINISH_MAX_NS),
+    };
+    total.fetch_add(elapsed_ns, Ordering::Relaxed);
+    update_max(max, elapsed_ns);
+}
+
+fn frame_bucket_counts() -> [u64; FRAME_HISTOGRAM_BUCKETS] {
+    let mut counts = [0; FRAME_HISTOGRAM_BUCKETS];
+    for (index, bucket) in FRAME_TIME_BUCKET_COUNTS.iter().enumerate() {
+        counts[index] = bucket.load(Ordering::Relaxed);
+    }
+    counts
+}
+
+fn frame_bucket_index(elapsed_ns: u64) -> usize {
+    ((elapsed_ns / FRAME_HISTOGRAM_BUCKET_WIDTH_NS) as usize).min(FRAME_HISTOGRAM_BUCKETS - 1)
 }
 
 fn update_max(counter: &AtomicU64, value: u64) {

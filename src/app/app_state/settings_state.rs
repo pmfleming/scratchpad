@@ -247,10 +247,16 @@ pub(crate) fn persist_settings_now(app: &mut ScratchpadApp) -> std::io::Result<(
     app.state.settings_store.save(&app.state.app_settings)
 }
 
-pub fn apply_theme_to_context(app: &ScratchpadApp, ctx: &egui::Context) {
-    ctx.set_theme(app.state.app_settings.editor.theme_mode.theme_preference());
+pub fn apply_theme_to_context(app: &mut ScratchpadApp, ctx: &egui::Context) {
+    let theme_mode = app.state.app_settings.editor.theme_mode;
+    if app.state.applied_theme_mode == Some(theme_mode) {
+        return;
+    }
+
+    ctx.set_theme(theme_mode.theme_preference());
     ctx.set_visuals_of(egui::Theme::Dark, egui::Visuals::dark());
     ctx.set_visuals_of(egui::Theme::Light, egui::Visuals::light());
+    app.state.applied_theme_mode = Some(theme_mode);
 }
 
 pub(super) fn sync_stock_editor_palette_with_theme_mode(settings: &mut AppSettings) {
@@ -373,7 +379,7 @@ compat_scratchpad_app_methods!(ScratchpadApp {
         persist_settings_now(self)
     }
 
-    pub fn apply_theme_to_context(&self, ctx: &egui::Context) {
+    pub fn apply_theme_to_context(&mut self, ctx: &egui::Context) {
         apply_theme_to_context(self, ctx)
     }
 });
