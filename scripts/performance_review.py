@@ -45,6 +45,9 @@ SCENARIOS: List[Dict[str, Any]] = [
         "benchmark_keys": [
             "file_load",
             "file_open_latency",
+            "ui_render_frame_120hz",
+            "ui_render_frame",
+            "editor_scroll_frame_120hz",
             "scroll_stress_latency",
             "document_snapshot_creation_latency",
             "viewport_extraction_latency",

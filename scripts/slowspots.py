@@ -65,10 +65,12 @@ class SlowspotAnalyzer:
         if not skip_bench:
             print("Running benchmarks via cargo bench...", file=sys.stderr)
             try:
-                self.run_bench_command(["cargo", "bench"])
+                self.run_bench_command(
+                    ["cargo", "bench", "--bench", "search_speed", "--bench", "frame_budget"]
+                )
             except Exception as exc:
                 print(f"Benchmarking failed: {exc}", file=sys.stderr)
-                return self.get_mock_data()
+                return []
 
         results = self.load_criterion_results(os.path.join("target", "criterion"))
         if not results:
@@ -77,7 +79,7 @@ class SlowspotAnalyzer:
                     "Error: No Criterion benchmark results were discovered.",
                     file=sys.stderr,
                 )
-            return self.get_mock_data()
+            return []
 
         return sorted(results, key=lambda item: -item.score)
 
@@ -157,6 +159,13 @@ class SlowspotAnalyzer:
             benchmark_name = self.benchmark_name_from_estimate_path(
                 criterion_dir, estimates_path
             )
+            benchmark_key = self.benchmark_key(benchmark_name)
+            if benchmark_key not in self.benchmark_metadata:
+                print(
+                    f"Skipping stale or unmapped Criterion result: {benchmark_name}",
+                    file=sys.stderr,
+                )
+                continue
             metadata = self.metadata_for_benchmark(benchmark_name)
             mean = data.get("mean", {}).get("point_estimate", 0.0)
             std_dev = data.get("std_dev", {}).get("point_estimate", 0.0)
@@ -172,7 +181,7 @@ class SlowspotAnalyzer:
                 max_ns=mean + (2 * std_dev),
                 min_ns=max(0, mean - (2 * std_dev)),
                 dispersion_ns=dispersion,
-                benchmark_key=self.benchmark_key(benchmark_name),
+                benchmark_key=benchmark_key,
                 targets=metadata["targets"],
                 benchmark_kind=metadata["kind"],
                 workload_family=str(metadata.get("workload_family", "unmapped")),

@@ -99,6 +99,7 @@ impl ScratchpadApp {
                 current_window_title: None,
                 overflow_popup_open: false,
                 applied_editor_font: None,
+                applied_theme_mode: None,
                 active_surface: AppSurface::Workspace,
                 settings_tab_index: usize::MAX,
                 pending_settings_toml_refresh: None,

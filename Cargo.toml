@@ -47,3 +47,8 @@ path = "scripts/leverage_ast.rs"
 name = "search_speed"
 path = "benches/search_speed.rs"
 harness = false
+
+[[bench]]
+name = "frame_budget"
+path = "benches/frame_budget.rs"
+harness = false

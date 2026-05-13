@@ -278,7 +278,7 @@ fn with_profile_app<T>(
     result
 }
 
-fn unique_profile_session_root(label: &str) -> std::path::PathBuf {
+pub(super) fn unique_profile_session_root(label: &str) -> std::path::PathBuf {
     let unique_suffix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock before unix epoch")

@@ -47,6 +47,7 @@ pub(crate) fn render_editor_content(
                         render_line_number_gutter(
                             ui,
                             buffer,
+                            style.viewport,
                             style.previous_snapshot,
                             style.text_edit.editor_font_id,
                             style.text_edit.text_color,

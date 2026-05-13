@@ -12,6 +12,7 @@ SEARCH_SPEED_PATH = Path("target/analysis/search_speed.json")
 FLAMEGRAPHS_PATH = Path("target/analysis/flamegraphs.json")
 CAPACITY_PATH = Path("target/analysis/capacity_report.json")
 RESOURCE_PROFILES_PATH = Path("target/analysis/resource_profiles.json")
+FRAME_METRICS_PATH = Path("target/analysis/frame_metrics.json")
 
 FAMILY_PRIORITY = {
     "search": 3,
@@ -91,6 +92,53 @@ def normalize_capacity_row(item: Dict[str, Any]) -> Dict[str, Any]:
         "peak_working_set_bytes": item.get("peak_working_set_bytes"),
         "working_set_growth_bytes": item.get("working_set_growth_bytes"),
         "diagnosis_guidance": item.get("diagnosis_guidance", []),
+    }
+
+
+def normalize_frame_row(item: Dict[str, Any]) -> Dict[str, Any]:
+    scenario_id = str(item.get("scenario_id", "ui_render_frame_120hz"))
+    budget_ms = float(item.get("budget_ms", 8.33))
+    p99_budget_ms = float(item.get("p99_budget_ms", 12.0))
+    mean_ms = float(item.get("mean_ms", 0.0))
+    p95_ms = float(item.get("p95_ms", 0.0))
+    p99_ms = float(item.get("p99_ms", 0.0))
+    matching = ["ui_render_frame_profile"]
+    phases = item.get("phases", [])
+    top_phase = None
+    if isinstance(phases, list) and phases:
+        top_phase = max(phases, key=lambda phase: float(phase.get("mean_ms") or 0))
+    signals = (
+        f"p95 {p95_ms:.2f} ms vs {budget_ms:.2f} ms budget; "
+        f"p99 {p99_ms:.2f} ms vs {p99_budget_ms:.2f} ms budget"
+        if p95_ms
+        else "frame metrics unavailable"
+    )
+    if top_phase:
+        signals += (
+            f"; top phase {top_phase.get('phase')} "
+            f"{float(top_phase.get('mean_ms') or 0):.2f} ms mean"
+        )
+    return {
+        "scenario_id": scenario_id,
+        "probe_class": "targeted_path",
+        "measurement_role": "change_validation",
+        "scenario_label": item.get("scenario_label", scenario_id),
+        "family": item.get("workload_family", "scroll"),
+        "mean_ms": mean_ms,
+        "p50_ms": item.get("p50_ms"),
+        "p95_ms": p95_ms,
+        "p99_ms": p99_ms,
+        "max_ms": item.get("max_ms"),
+        "budget_ms": budget_ms,
+        "p99_budget_ms": p99_budget_ms,
+        "stability": "stable",
+        "targets": ["src/app/app_state/frame.rs", "src/app/ui"],
+        "matching_flamegraphs": matching,
+        "has_profile_coverage": True,
+        "suspected_limiting_resource": "cpu",
+        "signals": signals,
+        "over_budget": bool(item.get("over_budget", p95_ms > budget_ms or p99_ms > p99_budget_ms)),
+        "phases": phases,
     }
 
 
@@ -238,6 +286,7 @@ def main() -> None:
     flamegraphs = load_json(FLAMEGRAPHS_PATH, [])
     capacity_report = load_json(CAPACITY_PATH, {"scenarios": []})
     resource_profiles = load_json(RESOURCE_PROFILES_PATH, {"scenarios": []})
+    frame_metrics = load_json(FRAME_METRICS_PATH, {"scenarios": []})
     capacity_lookup = {
         item.get("scenario"): item for item in capacity_report.get("scenarios", [])
     }
@@ -267,6 +316,9 @@ def main() -> None:
             "control-char-encoding",
         }
     ]
+    editor_rows.extend(
+        normalize_frame_row(item) for item in frame_metrics.get("scenarios", [])
+    )
     tabs_rows = [
         normalize_latency_row(item, capacity_lookup)
         for item in slowspots
@@ -315,6 +367,7 @@ def main() -> None:
                 str(FLAMEGRAPHS_PATH),
                 str(CAPACITY_PATH),
                 str(RESOURCE_PROFILES_PATH),
+                str(FRAME_METRICS_PATH),
             ],
         },
         "summary": {

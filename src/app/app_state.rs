@@ -3,7 +3,7 @@ use crate::app::fonts::EditorFontPreset;
 use crate::app::services::background_io::{BackgroundIoDispatcher, BackgroundIoResult};
 use crate::app::services::file_watch::FileWatchService;
 use crate::app::services::session_store::SessionStore;
-use crate::app::services::settings_store::{AppSettings, SettingsStore};
+use crate::app::services::settings_store::{AppSettings, AppThemeMode, SettingsStore};
 use crate::app::startup::StartupOptions;
 use crate::app::text_history::TextHistoryCache;
 use eframe::egui;
@@ -158,6 +158,7 @@ pub struct ScratchpadAppState {
     pub(crate) current_window_title: Option<String>,
     pub(crate) overflow_popup_open: bool,
     pub(crate) applied_editor_font: Option<EditorFontPreset>,
+    pub(crate) applied_theme_mode: Option<AppThemeMode>,
     pub(crate) active_surface: AppSurface,
     pub(crate) settings_tab_index: usize,
     pub(crate) pending_settings_toml_refresh: Option<BufferId>,

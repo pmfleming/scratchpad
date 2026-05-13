@@ -1,5 +1,7 @@
 use eframe::egui::{self, Id, Rect, Sense, Ui, Vec2, pos2};
+use std::time::Instant;
 
+use crate::app::capacity_metrics::{FramePhase, record_frame_phase};
 use crate::app::ui::{callout, widget_ids};
 
 use super::acceleration::{ScrollAccelerationConfig, accelerated_scroll_delta};
@@ -108,6 +110,7 @@ impl ScrollArea {
         ui: &mut Ui,
         add_contents: impl FnOnce(&mut Ui, Vec2, Rect) -> R,
     ) -> ScrollAreaOutput<R> {
+        let mut scroll_phase_started_at = Instant::now();
         let mut state = ScrollState::load(ui, self.id);
         state.sanitize();
         state.content_size = content_size_with_minimum(state.content_size, self.min_content_size);
@@ -163,8 +166,10 @@ impl ScrollArea {
             state.offset,
             child_size,
         );
+        record_frame_phase(FramePhase::Scroll, scroll_phase_started_at.elapsed());
 
         let inner_value = add_contents(&mut content_ui, state.offset, visible_rect);
+        scroll_phase_started_at = Instant::now();
         // Content size derived from the inner Ui's min_rect, translated back
         // out of the offset space so it represents the absolute extent.
         state.content_size =
@@ -203,6 +208,7 @@ impl ScrollArea {
         let did_scroll = prev_offset != state.offset;
         state.store(ui, self.id);
         let content_size = state.content_size;
+        record_frame_phase(FramePhase::Scroll, scroll_phase_started_at.elapsed());
 
         ScrollAreaOutput {
             inner: inner_value,

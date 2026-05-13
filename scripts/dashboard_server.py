@@ -544,23 +544,32 @@ def collect_frame_metrics(metrics: Dict[str, Any], speed: Any) -> None:
     if not isinstance(sections, dict):
         return
 
+    rows_by_id: Dict[str, Dict[str, Any]] = {}
     for rows in sections.values():
         if not isinstance(rows, list):
             continue
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            if (
-                row.get("scenario_id") != "ui_render_frame"
-                and row.get("scenario_label") != "ui_render_frame"
-                and row.get("benchmark_key") != "ui_render_frame"
-            ):
-                continue
-            mean_ms = row.get("mean_ms")
-            if isinstance(mean_ms, (int, float)) and mean_ms > 0:
-                metrics["app_frame_ms"] = mean_ms
-                metrics["app_fps"] = 1000.0 / mean_ms
-            return
+            for key in ("scenario_id", "scenario_label", "benchmark_key"):
+                value = row.get(key)
+                if isinstance(value, str):
+                    rows_by_id[value] = row
+
+    for scenario_id in (
+        "editor_scroll_frame_120hz/4194304",
+        "editor_scroll_frame_120hz/1048576",
+        "ui_render_frame_120hz",
+        "ui_render_frame",
+    ):
+        row = rows_by_id.get(scenario_id)
+        if not row:
+            continue
+        frame_ms = row.get("p99_ms") or row.get("p95_ms") or row.get("mean_ms")
+        if isinstance(frame_ms, (int, float)) and frame_ms > 0:
+            metrics["app_frame_ms"] = frame_ms
+            metrics["app_fps"] = 1000.0 / frame_ms
+        return
 
 
 def collect_summary_metrics(

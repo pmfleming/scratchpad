@@ -1,16 +1,20 @@
+use crate::app::capacity_metrics::{FramePhase, record_frame_phase};
 use crate::app::domain::BufferState;
 use crate::app::ui::scrolling::{DisplayRow, DisplaySnapshot};
 use crate::app::ui::widget_ids::{self, WidgetRole};
 use eframe::egui;
+use std::time::Instant;
 
 pub fn render_line_number_gutter(
     ui: &mut egui::Ui,
     buffer: &BufferState,
+    viewport: Option<egui::Rect>,
     previous_snapshot: Option<&DisplaySnapshot>,
     font_id: &egui::FontId,
     text_color: egui::Color32,
     background_color: egui::Color32,
 ) {
+    let started_at = Instant::now();
     let line_count = buffer.line_count;
     let gutter_width = gutter_width(ui, font_id, text_color, previous_snapshot, line_count);
 
@@ -26,12 +30,14 @@ pub fn render_line_number_gutter(
                 ui,
                 previous_snapshot,
                 line_count,
+                viewport,
                 row_height,
                 font_id,
                 text_color,
             );
         },
     );
+    record_frame_phase(FramePhase::Gutter, started_at.elapsed());
 }
 
 fn gutter_width(
@@ -59,6 +65,7 @@ fn render_gutter_body(
     ui: &mut egui::Ui,
     previous_snapshot: Option<&DisplaySnapshot>,
     line_count: usize,
+    viewport: Option<egui::Rect>,
     row_height: f32,
     font_id: &egui::FontId,
     text_color: egui::Color32,
@@ -79,7 +86,7 @@ fn render_gutter_body(
         row_height * line_count.max(1) as f32,
         font_id,
         text_color,
-        fallback_gutter_rows(line_count, row_height),
+        fallback_gutter_rows(line_count, row_height, viewport),
     );
 }
 
@@ -132,9 +139,33 @@ fn snapshot_gutter_rows(snapshot: &DisplaySnapshot) -> impl Iterator<Item = (f32
     })
 }
 
-fn fallback_gutter_rows(line_count: usize, row_height: f32) -> impl Iterator<Item = (f32, usize)> {
+fn fallback_gutter_rows(
+    line_count: usize,
+    row_height: f32,
+    viewport: Option<egui::Rect>,
+) -> impl Iterator<Item = (f32, usize)> {
     let row_count = line_count.max(1);
-    (0..row_count).map(move |row_index| (row_height * row_index as f32, row_index + 1))
+    let range = fallback_gutter_row_range(row_count, row_height, viewport);
+    range.map(move |row_index| (row_height * row_index as f32, row_index + 1))
+}
+
+fn fallback_gutter_row_range(
+    row_count: usize,
+    row_height: f32,
+    viewport: Option<egui::Rect>,
+) -> std::ops::Range<usize> {
+    if row_height <= 0.0 {
+        return 0..row_count.min(1);
+    }
+
+    let Some(viewport) = viewport else {
+        return 0..row_count;
+    };
+
+    let overscan_rows = 2usize;
+    let first = (viewport.min.y / row_height).floor().max(0.0) as usize;
+    let last = (viewport.max.y / row_height).ceil().max(1.0) as usize;
+    first.saturating_sub(overscan_rows)..(last + overscan_rows).min(row_count)
 }
 
 fn max_gutter_line_number(
@@ -152,4 +183,24 @@ fn max_gutter_line_number(
         })
         .unwrap_or(fallback_line_count)
         .max(fallback_line_count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fallback_gutter_row_range;
+    use eframe::egui;
+
+    #[test]
+    fn fallback_gutter_rows_are_limited_to_visible_viewport() {
+        let viewport = egui::Rect::from_min_max(egui::pos2(0.0, 200.0), egui::pos2(400.0, 260.0));
+
+        let rows = fallback_gutter_row_range(10_000, 20.0, Some(viewport));
+
+        assert_eq!(rows, 8..15);
+    }
+
+    #[test]
+    fn fallback_gutter_rows_keep_legacy_full_range_without_viewport() {
+        assert_eq!(fallback_gutter_row_range(12, 20.0, None), 0..12);
+    }
 }
