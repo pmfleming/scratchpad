@@ -1,9 +1,11 @@
 use super::{
-    CharCursor, CursorRange, cut_selected_text, publish_active_selection,
+    CharCursor, CursorRange, cut_selected_text, publish_active_selection, render_editor_text_edit,
     request_cursor_reveal_after_input, selected_text, should_rebuild_galley_after_input,
     sync_ime_output_focus,
 };
 use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
+use crate::app::ui::editor_content::native_editor::{EditorHighlightStyle, TextEditOptions};
+use eframe::egui;
 
 #[test]
 fn cursor_only_movement_inside_existing_slice_keeps_galley() {
@@ -182,4 +184,56 @@ fn losing_focus_clears_ime_state() {
 
     assert_eq!(view.ime_preedit, None);
     assert!(view.mark_ime_output(eframe::egui::Rect::EVERYTHING, eframe::egui::Rect::ZERO));
+}
+
+#[test]
+fn wrapped_layout_rebuilds_when_viewport_width_changes() {
+    let mut buffer = BufferState::new(
+        "sample.txt".to_owned(),
+        "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda".to_owned(),
+        None,
+    );
+    let mut view = EditorViewState::new(buffer.id);
+    let font_id = egui::FontId::monospace(18.0);
+    let ctx = egui::Context::default();
+
+    let wide_rows = render_wrapped_width(&ctx, &mut buffer, &mut view, &font_id, 360.0);
+    let narrow_rows = render_wrapped_width(&ctx, &mut buffer, &mut view, &font_id, 120.0);
+
+    assert!(
+        narrow_rows > wide_rows,
+        "wrapped layout should gain rows after narrowing: wide={wide_rows}, narrow={narrow_rows}"
+    );
+}
+
+fn render_wrapped_width(
+    ctx: &egui::Context,
+    buffer: &mut BufferState,
+    view: &mut EditorViewState,
+    font_id: &egui::FontId,
+    width: f32,
+) -> u32 {
+    let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 420.0));
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        ui.set_min_size(viewport.size());
+        ui.set_width(width);
+        render_editor_text_edit(
+            ui,
+            buffer,
+            view,
+            TextEditOptions::new(
+                false,
+                true,
+                font_id,
+                egui::Color32::WHITE,
+                EditorHighlightStyle::new(egui::Color32::YELLOW, egui::Color32::BLACK),
+            ),
+            Some(viewport),
+        );
+    });
+
+    view.latest_display_snapshot
+        .as_ref()
+        .expect("wrapped render should publish a display snapshot")
+        .row_count()
 }

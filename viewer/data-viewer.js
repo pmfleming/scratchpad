@@ -4128,18 +4128,45 @@
         const failed = summary.failed ?? 0;
         const unknown = summary.unknown ?? 0;
         const total = summary.test_count ?? 0;
+        const lastRun = correctnessLastRun(summary);
+        const runFailed = correctnessRunFailed(summary);
         let status = "ok";
         let driver = `${total} tests, all passing`;
-        if (failed > 0) { status = "bad"; driver = `${failed} failed, ${unknown} unknown`; }
+        if (runFailed) { status = "bad"; driver = compactCorrectnessRunMessage(lastRun); }
+        else if (failed > 0) { status = "bad"; driver = `${failed} failed, ${unknown} unknown`; }
         else if (unknown > 0) { status = "watch"; driver = `${unknown} tests have not been run`; }
         if (!state.correctness) { status = "stale"; driver = "Run correctness refresh"; }
-        const value = state.correctness ? `${total - failed - unknown}/${total}` : "—";
+        const value = state.correctness ? (runFailed ? "run failed" : `${total - failed - unknown}/${total}`) : "—";
         return {
             status,
             value,
             driver,
             series: runMetricSeries("tests_passed"),
         };
+    }
+
+    function correctnessLastRun(summary) {
+        const lastRun = summary?.last_run;
+        return lastRun && typeof lastRun === "object" ? lastRun : null;
+    }
+
+    function correctnessRunFailed(summary) {
+        return correctnessLastRun(summary)?.status === "failed";
+    }
+
+    function compactCorrectnessRunMessage(lastRun) {
+        const raw = [lastRun?.stderr_tail, lastRun?.stdout_tail]
+            .filter(Boolean)
+            .join("\n")
+            .trim();
+        if (!raw) return "cargo test did not complete";
+        const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        const errorLine = lines.find((line) => line.startsWith("error:"));
+        const accessLine = lines.find((line) => /access is denied|os error/i.test(line));
+        if (errorLine && accessLine && errorLine !== accessLine) {
+            return `${errorLine}; ${accessLine}`;
+        }
+        return errorLine || accessLine || lines[lines.length - 1] || "cargo test failed";
     }
 
     function renderHealthGauges() {
@@ -4633,6 +4660,8 @@
         const lastRunDuration = Number.isFinite(lastRun?.duration)
             ? `${formatNumber.format(lastRun.duration)}s`
             : "-";
+        const runFailed = correctnessRunFailed(summary);
+        const lastRunMessage = compactCorrectnessRunMessage(lastRun);
         const filterLabel = [
             filters.layerFilter ? `layer: ${filters.layerFilter}` : "all layers",
             filters.categoryFilter ? `category: ${filters.categoryFilter}` : "all categories",
@@ -4654,10 +4683,14 @@
                 ["Unknown", statusCounts.unknown || 0],
             ]),
             correctnessCategoryCard("Inline Coverage", categoryEntries.length ? "ok" : "stale", categoryEntries, filters.categoryFilter),
-            correctnessOverviewCard("Current View", visibleTests.length ? "ok" : "stale", [
-                ["Visible rows", visibleTests.length],
+            correctnessOverviewCard("Last Run", runFailed ? "bad" : lastRun?.status === "passed" ? "ok" : "stale", [
                 ["Last run", lastRunStatus],
                 ["Duration", lastRunDuration],
+                ["Issue", runFailed ? lastRunMessage : "none"],
+            ]),
+            correctnessOverviewCard("Current View", visibleTests.length ? "ok" : "stale", [
+                ["Visible rows", visibleTests.length],
+                ["Filter", filters.showAll ? "all statuses" : "attention only"],
             ]),
         ].join("");
 
@@ -4684,9 +4717,12 @@
         const categoryCounts = countBy(tests, inlineTestCategory);
         const categoryEntries = sortedCountEntries(categoryCounts);
         const layerCount = summary.layers ?? layers.length;
-        const outcome = failed > 0 ? "failing" : unknown > 0 ? "needs review" : "passing";
+        const runFailed = correctnessRunFailed(summary);
+        const lastRunMessage = compactCorrectnessRunMessage(correctnessLastRun(summary));
+        const outcome = runFailed ? "run failed" : failed > 0 ? "failing" : unknown > 0 ? "needs review" : "passing";
+        const heroTone = runFailed || failed > 0 ? "bad" : unknown > 0 ? "warn" : "ok";
 
-        target.innerHTML = `<section class="correctness-summary-card correctness-summary-card--hero">
+        target.innerHTML = `<section class="correctness-summary-card correctness-summary-card--hero correctness-summary-card--${heroTone}">
                 <span class="correctness-summary-card__label">Health</span>
                 <strong>${escapeHtml(outcome)}</strong>
                 <div class="correctness-pass-meter" aria-label="${passRate}% pass rate">
@@ -4700,7 +4736,12 @@
             ${correctnessSummaryCard("Tests", total, "Total cataloged test entries")}
             ${correctnessSummaryCard("Coverage Areas", categoryEntries.length, categoryEntries.slice(0, 2).map(([label, count]) => `${label} ${formatNumber.format(count)}`).join(" · ") || "No categories")}
             ${correctnessSummaryCard("Layers", layerCount, "Architectural groups represented")}
-            ${correctnessSummaryCard("Attention", `${formatNumber.format(failed)} failed`, `${formatNumber.format(unknown)} unknown`, failed || unknown ? "warn" : "ok")}`;
+            ${correctnessSummaryCard(
+                "Attention",
+                runFailed ? "Run failed" : `${formatNumber.format(failed)} failed`,
+                runFailed ? lastRunMessage : `${formatNumber.format(unknown)} unknown`,
+                runFailed || failed ? "bad" : unknown ? "warn" : "ok"
+            )}`;
     }
 
     function correctnessSummaryCard(label, value, detail, tone = "neutral") {

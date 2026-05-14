@@ -70,6 +70,16 @@ pub(crate) struct SessionBufferPayload {
     pub buffers: Vec<SessionBuffer>,
 }
 
+struct LegacySessionBufferFields {
+    buffer_id: Option<u64>,
+    name: Option<String>,
+    path: Option<PathBuf>,
+    is_dirty: Option<bool>,
+    temp_id: Option<String>,
+    encoding: Option<String>,
+    has_bom: Option<bool>,
+}
+
 #[derive(Clone)]
 pub(crate) struct SessionTabParts {
     pub shell: SessionTabShell,
@@ -106,7 +116,16 @@ impl SessionTab {
                 root_pane,
             },
             payload: SessionBufferPayload::from_session_fields(
-                buffers, buffer_id, name, path, is_dirty, temp_id, encoding, has_bom,
+                buffers,
+                LegacySessionBufferFields {
+                    buffer_id,
+                    name,
+                    path,
+                    is_dirty,
+                    temp_id,
+                    encoding,
+                    has_bom,
+                },
             ),
         }
     }
@@ -133,18 +152,21 @@ impl From<SessionTabParts> for SessionTab {
 impl SessionBufferPayload {
     fn from_session_fields(
         buffers: Vec<SessionBuffer>,
-        buffer_id: Option<u64>,
-        name: Option<String>,
-        path: Option<PathBuf>,
-        is_dirty: Option<bool>,
-        temp_id: Option<String>,
-        encoding: Option<String>,
-        has_bom: Option<bool>,
+        legacy_buffer: LegacySessionBufferFields,
     ) -> Self {
         if !buffers.is_empty() {
             return Self { buffers };
         }
 
+        let LegacySessionBufferFields {
+            buffer_id,
+            name,
+            path,
+            is_dirty,
+            temp_id,
+            encoding,
+            has_bom,
+        } = legacy_buffer;
         let buffers = buffer_id
             .zip(name)
             .zip(is_dirty)

@@ -4784,6 +4784,10 @@ button.status-pill:hover {
     border-color: color-mix(in srgb, var(--warn) 42%, var(--line));
 }
 
+.correctness-summary-card--bad {
+    border-color: color-mix(in srgb, var(--bad) 48%, var(--line));
+}
+
 .correctness-summary-card--ok {
     border-color: color-mix(in srgb, var(--good) 42%, var(--line));
 }
@@ -4794,7 +4798,6 @@ button.status-pill:hover {
     color: var(--muted);
     font-size: 12px;
     text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .correctness-summary-card__label {
@@ -5082,7 +5085,7 @@ button.status-pill:hover {
     color: var(--text);
     font-size: 16px;
     text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
 }
 
 .correctness-category-grid {

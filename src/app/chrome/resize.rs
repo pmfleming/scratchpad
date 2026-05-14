@@ -1,24 +1,41 @@
 use crate::app::ui::widget_ids;
-use eframe::egui::{self, CursorIcon, Rect, Sense, Vec2, pos2, viewport::ResizeDirection};
+use eframe::egui::{self, CursorIcon, Rect, Vec2, pos2, viewport::ResizeDirection};
 
 const RESIZE_BORDER: f32 = 6.0;
 const RESIZE_CORNER: f32 = 18.0;
 
 pub fn handle_window_resize(ctx: &egui::Context) -> bool {
-    let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
-    if maximized {
+    if !window_resize_enabled(ctx) {
         return false;
     }
 
     let screen_rect = ctx.input(|input| input.content_rect());
     let content_rect_changed = request_repaint_after_content_rect_change(ctx, screen_rect);
-    widget_ids::area("window_resize_handles")
-        .fixed_pos(screen_rect.min)
-        .order(egui::Order::Foreground)
-        .interactable(false)
-        .show(ctx, |ui| render_resize_handles(ui, ctx, screen_rect.size()));
+    maybe_begin_resize(ctx, screen_rect);
 
     content_rect_changed
+}
+
+pub fn show_window_resize_cursor(ctx: &egui::Context) {
+    if !window_resize_enabled(ctx) {
+        return;
+    }
+
+    let Some(pointer_pos) = ctx.input(|input| input.pointer.hover_pos()) else {
+        return;
+    };
+
+    let screen_rect = ctx.input(|input| input.content_rect());
+    if let Some(grip) = resize_grips(screen_rect)
+        .into_iter()
+        .find(|grip| grip.rect.contains(pointer_pos))
+    {
+        ctx.output_mut(|output| output.cursor_icon = grip.cursor);
+    }
+}
+
+fn window_resize_enabled(ctx: &egui::Context) -> bool {
+    !ctx.input(|input| input.viewport().maximized.unwrap_or(false))
 }
 
 fn request_repaint_after_content_rect_change(ctx: &egui::Context, screen_rect: Rect) -> bool {
@@ -36,40 +53,44 @@ fn request_repaint_after_content_rect_change(ctx: &egui::Context, screen_rect: R
     changed
 }
 
-fn render_resize_handles(ui: &mut egui::Ui, ctx: &egui::Context, size: Vec2) {
-    for grip in resize_grips(size) {
-        let response = widget_ids::interact(
-            ui,
-            grip.rect,
-            widget_ids::root_id(("resize_grip", grip.id)),
-            Sense::click_and_drag(),
-            "resize_grip",
-        )
-        .on_hover_cursor(grip.cursor);
+fn maybe_begin_resize(ctx: &egui::Context, screen_rect: Rect) {
+    let Some(pointer_pos) = ctx.input(|input| {
+        input
+            .pointer
+            .primary_pressed()
+            .then(|| input.pointer.press_origin())
+            .flatten()
+    }) else {
+        return;
+    };
 
-        if response.drag_started() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(grip.direction));
-        }
-        if response.dragged() {
-            ctx.request_repaint();
-        }
+    if let Some(grip) = resize_grips(screen_rect)
+        .into_iter()
+        .find(|grip| grip.rect.contains(pointer_pos))
+    {
+        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(grip.direction));
+        ctx.request_repaint();
     }
 }
 
 #[derive(Clone)]
 struct ResizeGrip {
-    id: &'static str,
     rect: Rect,
     direction: ResizeDirection,
     cursor: CursorIcon,
 }
 
-fn resize_grips(size: Vec2) -> [ResizeGrip; 8] {
-    let width = size.x.max(RESIZE_CORNER * 2.0);
-    let height = size.y.max(RESIZE_CORNER * 2.0);
+fn resize_grips(screen_rect: Rect) -> [ResizeGrip; 8] {
+    let rect = Rect::from_min_size(
+        screen_rect.min,
+        Vec2::new(
+            screen_rect.width().max(RESIZE_CORNER * 2.0),
+            screen_rect.height().max(RESIZE_CORNER * 2.0),
+        ),
+    );
 
-    let corners = resize_corners(width, height);
-    let edges = resize_edges(width, height);
+    let corners = resize_corners(rect);
+    let edges = resize_edges(rect);
 
     [
         corners[0].clone(),
@@ -83,34 +104,36 @@ fn resize_grips(size: Vec2) -> [ResizeGrip; 8] {
     ]
 }
 
-fn resize_corners(width: f32, height: f32) -> [ResizeGrip; 4] {
+fn resize_corners(rect: Rect) -> [ResizeGrip; 4] {
     [
         ResizeGrip {
-            id: "north-west",
-            rect: Rect::from_min_max(pos2(0.0, 0.0), pos2(RESIZE_CORNER, RESIZE_CORNER)),
+            rect: Rect::from_min_max(
+                rect.min,
+                pos2(rect.min.x + RESIZE_CORNER, rect.min.y + RESIZE_CORNER),
+            ),
             direction: ResizeDirection::NorthWest,
             cursor: CursorIcon::ResizeNwSe,
         },
         ResizeGrip {
-            id: "north-east",
-            rect: Rect::from_min_max(pos2(width - RESIZE_CORNER, 0.0), pos2(width, RESIZE_CORNER)),
+            rect: Rect::from_min_max(
+                pos2(rect.max.x - RESIZE_CORNER, rect.min.y),
+                pos2(rect.max.x, rect.min.y + RESIZE_CORNER),
+            ),
             direction: ResizeDirection::NorthEast,
             cursor: CursorIcon::ResizeNeSw,
         },
         ResizeGrip {
-            id: "south-east",
             rect: Rect::from_min_max(
-                pos2(width - RESIZE_CORNER, height - RESIZE_CORNER),
-                pos2(width, height),
+                pos2(rect.max.x - RESIZE_CORNER, rect.max.y - RESIZE_CORNER),
+                rect.max,
             ),
             direction: ResizeDirection::SouthEast,
             cursor: CursorIcon::ResizeNwSe,
         },
         ResizeGrip {
-            id: "south-west",
             rect: Rect::from_min_max(
-                pos2(0.0, height - RESIZE_CORNER),
-                pos2(RESIZE_CORNER, height),
+                pos2(rect.min.x, rect.max.y - RESIZE_CORNER),
+                pos2(rect.min.x + RESIZE_CORNER, rect.max.y),
             ),
             direction: ResizeDirection::SouthWest,
             cursor: CursorIcon::ResizeNeSw,
@@ -118,43 +141,87 @@ fn resize_corners(width: f32, height: f32) -> [ResizeGrip; 4] {
     ]
 }
 
-fn resize_edges(width: f32, height: f32) -> [ResizeGrip; 4] {
+fn resize_edges(rect: Rect) -> [ResizeGrip; 4] {
     [
         ResizeGrip {
-            id: "north",
             rect: Rect::from_min_max(
-                pos2(RESIZE_CORNER, 0.0),
-                pos2(width - RESIZE_CORNER, RESIZE_BORDER),
+                pos2(rect.min.x + RESIZE_CORNER, rect.min.y),
+                pos2(rect.max.x - RESIZE_CORNER, rect.min.y + RESIZE_BORDER),
             ),
             direction: ResizeDirection::North,
             cursor: CursorIcon::ResizeVertical,
         },
         ResizeGrip {
-            id: "east",
             rect: Rect::from_min_max(
-                pos2(width - RESIZE_BORDER, RESIZE_CORNER),
-                pos2(width, height - RESIZE_CORNER),
+                pos2(rect.max.x - RESIZE_BORDER, rect.min.y + RESIZE_CORNER),
+                pos2(rect.max.x, rect.max.y - RESIZE_CORNER),
             ),
             direction: ResizeDirection::East,
             cursor: CursorIcon::ResizeHorizontal,
         },
         ResizeGrip {
-            id: "south",
             rect: Rect::from_min_max(
-                pos2(RESIZE_CORNER, height - RESIZE_BORDER),
-                pos2(width - RESIZE_CORNER, height),
+                pos2(rect.min.x + RESIZE_CORNER, rect.max.y - RESIZE_BORDER),
+                pos2(rect.max.x - RESIZE_CORNER, rect.max.y),
             ),
             direction: ResizeDirection::South,
             cursor: CursorIcon::ResizeVertical,
         },
         ResizeGrip {
-            id: "west",
             rect: Rect::from_min_max(
-                pos2(0.0, RESIZE_CORNER),
-                pos2(RESIZE_BORDER, height - RESIZE_CORNER),
+                pos2(rect.min.x, rect.min.y + RESIZE_CORNER),
+                pos2(rect.min.x + RESIZE_BORDER, rect.max.y - RESIZE_CORNER),
             ),
             direction: ResizeDirection::West,
             cursor: CursorIcon::ResizeHorizontal,
         },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RESIZE_BORDER, RESIZE_CORNER, resize_grips};
+    use eframe::egui;
+    use eframe::egui::viewport::ResizeDirection;
+
+    #[test]
+    fn east_resize_grip_tracks_screen_rect_right_edge() {
+        let screen_rect =
+            egui::Rect::from_min_size(egui::pos2(12.0, 8.0), egui::vec2(960.0, 640.0));
+
+        let east = resize_grips(screen_rect)
+            .into_iter()
+            .find(|grip| grip.direction == ResizeDirection::East)
+            .unwrap();
+
+        assert_eq!(east.rect.right(), screen_rect.right());
+        assert_eq!(east.rect.left(), screen_rect.right() - RESIZE_BORDER);
+        assert_eq!(east.rect.top(), screen_rect.top() + RESIZE_CORNER);
+        assert_eq!(east.rect.bottom(), screen_rect.bottom() - RESIZE_CORNER);
+    }
+
+    #[test]
+    fn vertical_resize_grips_track_screen_rect_top_and_bottom_edges() {
+        let screen_rect =
+            egui::Rect::from_min_size(egui::pos2(12.0, 8.0), egui::vec2(960.0, 640.0));
+
+        let north = resize_grips(screen_rect)
+            .into_iter()
+            .find(|grip| grip.direction == ResizeDirection::North)
+            .unwrap();
+        let south = resize_grips(screen_rect)
+            .into_iter()
+            .find(|grip| grip.direction == ResizeDirection::South)
+            .unwrap();
+
+        assert_eq!(north.rect.top(), screen_rect.top());
+        assert_eq!(north.rect.bottom(), screen_rect.top() + RESIZE_BORDER);
+        assert_eq!(north.rect.left(), screen_rect.left() + RESIZE_CORNER);
+        assert_eq!(north.rect.right(), screen_rect.right() - RESIZE_CORNER);
+
+        assert_eq!(south.rect.top(), screen_rect.bottom() - RESIZE_BORDER);
+        assert_eq!(south.rect.bottom(), screen_rect.bottom());
+        assert_eq!(south.rect.left(), screen_rect.left() + RESIZE_CORNER);
+        assert_eq!(south.rect.right(), screen_rect.right() - RESIZE_CORNER);
+    }
 }

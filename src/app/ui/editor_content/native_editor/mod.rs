@@ -115,6 +115,17 @@ pub fn render_editor_text_edit(
         document_revision = buffer.document_revision();
         galley_context = build_editor_galley(ui, buffer, view, options, viewport);
         galley_pos = galley_origin(rect, galley_context.logical_line_base, row_height);
+        request_repaint_if_wrapped_content_height_changed(WrappedContentHeightRepaint {
+            ui,
+            changed: input.changed,
+            word_wrap: options.word_wrap,
+            previous_content_height: total_content_height,
+            line_count: buffer.line_count.max(1),
+            row_height,
+            galley: &galley_context.galley,
+            logical_line_base: galley_context.logical_line_base,
+            viewport_height,
+        });
     }
 
     let paint_outcome = if ui.is_rect_visible(rect) {
@@ -385,6 +396,35 @@ fn should_rebuild_galley_after_input(
         || pre_active_selection != post_active_selection
         || (pre_cursor_range != post_cursor_range
             && !cursor_primary_in_slice(post_cursor_range, char_offset_base, slice_chars))
+}
+
+struct WrappedContentHeightRepaint<'a> {
+    ui: &'a egui::Ui,
+    changed: bool,
+    word_wrap: bool,
+    previous_content_height: f32,
+    line_count: usize,
+    row_height: f32,
+    galley: &'a egui::Galley,
+    logical_line_base: usize,
+    viewport_height: f32,
+}
+
+fn request_repaint_if_wrapped_content_height_changed(input: WrappedContentHeightRepaint<'_>) {
+    if !input.changed || !input.word_wrap {
+        return;
+    }
+
+    let next_content_height = total_editor_content_height(
+        input.line_count,
+        input.row_height,
+        input.galley,
+        input.logical_line_base,
+        input.viewport_height,
+    );
+    if (next_content_height - input.previous_content_height).abs() >= 1.0 {
+        input.ui.ctx().request_repaint();
+    }
 }
 
 fn cursor_primary_in_slice(

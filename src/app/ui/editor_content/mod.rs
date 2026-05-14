@@ -72,18 +72,25 @@ fn render_editor_body(
     view: &mut EditorViewState,
     style: &EditorContentStyle<'_>,
 ) -> native_editor::EditorWidgetOutcome {
+    let body_rect = ui.available_rect_before_wrap();
     render_editor_text_edit(
         ui,
         buffer,
         view,
         style.text_edit,
-        body_viewport(style.viewport, ui.available_width()),
+        body_viewport(style.viewport, ui.clip_rect(), body_rect),
     )
 }
 
-fn body_viewport(viewport: Option<egui::Rect>, body_width: f32) -> Option<egui::Rect> {
-    let body_width = body_width.max(1.0);
+fn body_viewport(
+    viewport: Option<egui::Rect>,
+    clip_rect: egui::Rect,
+    body_rect: egui::Rect,
+) -> Option<egui::Rect> {
     viewport.map(|viewport| {
+        let leading_content_width =
+            (body_rect.left() - clip_rect.left()).clamp(0.0, viewport.width());
+        let body_width = (viewport.width() - leading_content_width).max(1.0);
         egui::Rect::from_min_size(viewport.min, egui::vec2(body_width, viewport.height()))
     })
 }
@@ -107,11 +114,26 @@ mod tests {
     #[test]
     fn body_viewport_uses_text_lane_width_after_gutter() {
         let viewport = egui::Rect::from_min_size(egui::pos2(0.0, 40.0), egui::vec2(900.0, 300.0));
+        let clip_rect = egui::Rect::from_min_size(egui::pos2(10.0, 40.0), egui::vec2(900.0, 300.0));
+        let body_rect =
+            egui::Rect::from_min_size(egui::pos2(70.0, 40.0), egui::vec2(1200.0, 300.0));
 
-        let narrowed = body_viewport(Some(viewport), 840.0).unwrap();
+        let narrowed = body_viewport(Some(viewport), clip_rect, body_rect).unwrap();
 
         assert_eq!(narrowed.min, viewport.min);
         assert_eq!(narrowed.height(), 300.0);
         assert_eq!(narrowed.width(), 840.0);
+    }
+
+    #[test]
+    fn body_viewport_uses_visible_viewport_instead_of_stale_available_width() {
+        let viewport = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 240.0));
+        let clip_rect = egui::Rect::from_min_size(egui::pos2(100.0, 0.0), viewport.size());
+        let body_rect =
+            egui::Rect::from_min_size(egui::pos2(124.0, 0.0), egui::vec2(1200.0, 240.0));
+
+        let narrowed = body_viewport(Some(viewport), clip_rect, body_rect).unwrap();
+
+        assert_eq!(narrowed.width(), 576.0);
     }
 }

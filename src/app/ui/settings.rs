@@ -42,19 +42,18 @@ pub(crate) const PREVIEW_QUOTES: [(&str, &str); 3] = [
 pub(crate) fn show_page(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     egui::CentralPanel::default().show_inside(ui, |ui| {
         widget_ids::feature_scope(ui, "settings", |ui| {
-            with_settings_page(ui, |ui, horizontal_overflow| {
-                render_page_body(ui, app, horizontal_overflow)
+            with_settings_page(ui, |ui, viewport_width| {
+                render_page_body(ui, app, viewport_width)
             })
         });
     });
 }
 
-fn with_settings_page(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui, bool)) {
+fn with_settings_page(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui, f32)) {
     widget_ids::scope(ui, "settings_page", |ui| {
         SettingsUi::apply_typography(ui);
         let viewport_size = SettingsUi::page_viewport_size(ui);
         let surface_size = SettingsUi::page_surface_size(ui);
-        let horizontal_overflow = SettingsUi::page_overflows_horizontally(viewport_size);
         egui::ScrollArea::both()
             .id_salt(widget_ids::scroll_id(ui, "settings_page_scroll"))
             .scroll_source(egui::scroll_area::ScrollSource {
@@ -66,15 +65,15 @@ fn with_settings_page(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui
                 ui.set_min_size(surface_size);
                 ui.set_width(surface_size.x);
                 ui.set_max_width(surface_size.x);
-                add_contents(ui, horizontal_overflow);
+                add_contents(ui, viewport_size.x);
             });
     });
 }
 
-fn render_page_body(ui: &mut egui::Ui, app: &mut ScratchpadApp, horizontal_overflow: bool) {
-    let content_width = SettingsUi::page_content_width(ui);
+fn render_page_body(ui: &mut egui::Ui, app: &mut ScratchpadApp, viewport_width: f32) {
+    let content_width = SettingsUi::page_content_width();
     let horizontal_margin =
-        SettingsUi::page_horizontal_margin(ui, content_width, horizontal_overflow);
+        SettingsUi::page_horizontal_margin_for_viewport(viewport_width, content_width);
 
     ui.add_space(SettingsUi::LAYOUT.body_top_space);
     ui.horizontal(|ui| {
@@ -161,7 +160,7 @@ mod tests {
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.set_min_size(egui::vec2(1600.0, 4200.0));
             ui.set_width(1600.0);
-            render_page_body(ui, &mut app, false);
+            render_page_body(ui, &mut app, 1600.0);
         });
 
         let card_measurements = settings_card_measurements();
@@ -196,7 +195,7 @@ mod tests {
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.set_min_size(egui::vec2(1600.0, 4200.0));
             ui.set_width(1600.0);
-            render_page_body(ui, &mut app, false);
+            render_page_body(ui, &mut app, 1600.0);
         });
 
         let card_measurements = settings_card_measurements();
@@ -226,6 +225,92 @@ mod tests {
     }
 
     #[test]
+    fn settings_cards_center_on_resized_visible_window() {
+        let mut app = test_app();
+        reset_settings_layout_measurements();
+
+        let ctx = egui::Context::default();
+        crate::app::fonts::apply_editor_fonts(&ctx, app.state.app_settings.editor_font())
+            .expect("install editor fonts for settings layout test");
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_min_size(egui::vec2(1180.0, 4200.0));
+            ui.set_width(1180.0);
+            render_page_body(ui, &mut app, 900.0);
+        });
+
+        let card_measurements = settings_card_measurements();
+        assert!(
+            !card_measurements.is_empty(),
+            "resized settings centering test did not collect any cards"
+        );
+
+        let expected_center = 450.0;
+        let card_offenders: Vec<String> = card_measurements
+            .iter()
+            .filter(|measurement| (measurement.center_x - expected_center).abs() > f32::EPSILON)
+            .map(|measurement| {
+                format!(
+                    "{} center = {:.1}px",
+                    measurement.label, measurement.center_x
+                )
+            })
+            .collect();
+
+        assert!(
+            card_offenders.is_empty(),
+            "settings cards must stay centered in the visible 900px viewport at {:.1}px:\n{}",
+            expected_center,
+            card_offenders.join("\n")
+        );
+    }
+
+    #[test]
+    fn settings_cards_keep_width_when_visible_window_is_narrow() {
+        let mut app = test_app();
+        reset_settings_layout_measurements();
+
+        let ctx = egui::Context::default();
+        crate::app::fonts::apply_editor_fonts(&ctx, app.state.app_settings.editor_font())
+            .expect("install editor fonts for settings layout test");
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_min_size(egui::vec2(1180.0, 4200.0));
+            ui.set_width(1180.0);
+            render_page_body(ui, &mut app, 500.0);
+        });
+
+        let card_measurements = settings_card_measurements();
+        assert!(
+            !card_measurements.is_empty(),
+            "narrow settings width test did not collect any cards"
+        );
+
+        let expected_width = SettingsUi::LAYOUT.card_max_width;
+        let expected_left = SettingsUi::LAYOUT.page_resize_gutter;
+        let card_offenders: Vec<String> = card_measurements
+            .iter()
+            .filter(|measurement| {
+                let left = measurement.center_x - measurement.width * 0.5;
+                (measurement.width - expected_width).abs() > f32::EPSILON
+                    || (left - expected_left).abs() > f32::EPSILON
+            })
+            .map(|measurement| {
+                format!(
+                    "{} width = {:.1}px left = {:.1}px",
+                    measurement.label,
+                    measurement.width,
+                    measurement.center_x - measurement.width * 0.5
+                )
+            })
+            .collect();
+
+        assert!(
+            card_offenders.is_empty(),
+            "settings cards must keep their width and clamp to the resize gutter:\n{}",
+            card_offenders.join("\n")
+        );
+    }
+
+    #[test]
     fn settings_font_card_controls_align_to_row_right_edge() {
         let mut app = test_app();
         reset_settings_layout_measurements();
@@ -236,7 +321,7 @@ mod tests {
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.set_min_size(egui::vec2(1600.0, 4200.0));
             ui.set_width(1600.0);
-            render_page_body(ui, &mut app, false);
+            render_page_body(ui, &mut app, 1600.0);
         });
 
         let control_measurements = settings_control_measurements();
@@ -276,7 +361,7 @@ mod tests {
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.set_min_size(egui::vec2(1600.0, 4200.0));
             ui.set_width(1600.0);
-            render_page_body(ui, &mut app, false);
+            render_page_body(ui, &mut app, 1600.0);
         });
 
         let control_measurements = settings_control_measurements();

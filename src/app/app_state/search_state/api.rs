@@ -72,10 +72,11 @@ pub(crate) fn set_search_query(app: &mut ScratchpadApp, query: impl Into<String>
 }
 
 pub(crate) fn set_search_replacement(app: &mut ScratchpadApp, replacement: impl Into<String>) {
-    if app.state.search_state.set_replacement(replacement) {
-        if app.state.search_state.panel.open && !app.state.search_state.query.query.is_empty() {
-            app.refresh_search_visual_state();
-        }
+    if app.state.search_state.set_replacement(replacement)
+        && app.state.search_state.panel.open
+        && !app.state.search_state.query.query.is_empty()
+    {
+        app.refresh_search_visual_state();
     }
 }
 

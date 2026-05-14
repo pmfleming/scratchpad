@@ -28,6 +28,8 @@ use crate::app::ui::tile_header::{
 use crate::app::ui::widget_ids;
 use eframe::egui;
 
+const EDITOR_SCROLLBAR_THICKNESS: f32 = 7.0;
+
 struct TileBodyOutcome {
     changed: bool,
     focused: bool,
@@ -254,6 +256,7 @@ fn show_editor_scroll_area(
     request: TileScrollRequest<'_>,
 ) -> EditorContentOutcome {
     let frame = prepare_editor_scroll_frame(ui, tab, request.view_id, &request.content_style);
+    let previous_snapshot = frame.previous_snapshot;
     let word_wrap = request.content_style.text_edit.word_wrap;
     let scrollbar_x = if word_wrap {
         scrolling::ScrollbarPolicy::Hidden
@@ -277,6 +280,7 @@ fn show_editor_scroll_area(
         .show_viewport(ui, |ui, _offset, viewport| {
             let mut content_style = request.content_style;
             content_style.viewport = Some(viewport);
+            content_style.previous_snapshot = previous_snapshot;
             tab.buffer_and_view_mut(request.view_id)
                 .map(|(buffer, view)| {
                     editor_content::render_editor_content(ui, buffer, view, content_style)
@@ -324,7 +328,8 @@ fn prepare_editor_scroll_frame<'a>(
     content_style: &EditorContentStyle<'a>,
 ) -> EditorScrollFrame<'a> {
     let scroll_id = editor_scroll_id(view_id);
-    let previous_snapshot = content_style.previous_snapshot;
+    let previous_snapshot =
+        previous_snapshot_for_current_layout(ui, tab, view_id, scroll_id, content_style);
     recover_unresolved_piece_anchor(ui, tab, view_id, scroll_id, previous_snapshot);
     if let Some((buffer, view)) = tab.buffer_and_view_mut(view_id) {
         drain_pending_scroll_intents(view, buffer, previous_snapshot, None);
@@ -364,20 +369,72 @@ fn layout_resize_scroll_offset(
     scroll_id: egui::Id,
     content_style: &EditorContentStyle<'_>,
 ) -> Option<egui::Vec2> {
-    if !content_style.text_edit.word_wrap {
-        return None;
-    }
-
-    let previous_width = tab
-        .view(view_id)
-        .map(|view| view.scroll.metrics().viewport_rect.width())
-        .filter(|width| width.is_finite() && *width > 0.0)?;
-    let current_width = ui.available_rect_before_wrap().width();
-    if !current_width.is_finite() || (previous_width - current_width).abs() < 1.0 {
+    if !wrapped_viewport_width_changed(
+        content_style.text_edit.word_wrap,
+        previous_wrapped_viewport_width(tab, view_id)?,
+        current_wrapped_viewport_width(ui, scroll_id)?,
+    ) {
         return None;
     }
 
     Some(scrolling::ScrollState::load(ui, scroll_id).offset)
+}
+
+fn previous_snapshot_for_current_layout<'a>(
+    ui: &egui::Ui,
+    tab: &WorkspaceTab,
+    view_id: ViewId,
+    scroll_id: egui::Id,
+    content_style: &EditorContentStyle<'a>,
+) -> Option<&'a DisplaySnapshot> {
+    let previous_snapshot = content_style.previous_snapshot?;
+    let Some(previous_width) = previous_wrapped_viewport_width(tab, view_id) else {
+        return Some(previous_snapshot);
+    };
+    let Some(current_width) = current_wrapped_viewport_width(ui, scroll_id) else {
+        return Some(previous_snapshot);
+    };
+
+    (!wrapped_viewport_width_changed(
+        content_style.text_edit.word_wrap,
+        previous_width,
+        current_width,
+    ))
+    .then_some(previous_snapshot)
+}
+
+fn previous_wrapped_viewport_width(tab: &WorkspaceTab, view_id: ViewId) -> Option<f32> {
+    tab.view(view_id)
+        .map(|view| view.scroll.metrics().viewport_rect.width())
+        .filter(|width| width.is_finite() && *width > 0.0)
+}
+
+fn current_wrapped_viewport_width(ui: &egui::Ui, scroll_id: egui::Id) -> Option<f32> {
+    let outer_rect = ui.available_rect_before_wrap();
+    let width = outer_rect.width() - current_vertical_scrollbar_width(ui, scroll_id, outer_rect);
+    (width.is_finite() && width > 0.0).then_some(width)
+}
+
+fn current_vertical_scrollbar_width(
+    ui: &egui::Ui,
+    scroll_id: egui::Id,
+    outer_rect: egui::Rect,
+) -> f32 {
+    let state = scrolling::ScrollState::load(ui, scroll_id);
+    let viewport_height = state.viewport_size.y.max(outer_rect.height());
+    if state.content_size.y > viewport_height + 0.5 {
+        EDITOR_SCROLLBAR_THICKNESS
+    } else {
+        0.0
+    }
+}
+
+fn wrapped_viewport_width_changed(
+    word_wrap: bool,
+    previous_width: f32,
+    current_width: f32,
+) -> bool {
+    word_wrap && (previous_width - current_width).abs() >= 1.0
 }
 
 fn finish_editor_scroll_frame(
@@ -466,5 +523,17 @@ fn missing_editor_content_outcome() -> EditorContentOutcome {
         focused: false,
         request_editor_focus: false,
         interaction_response: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wrapped_viewport_width_changed;
+
+    #[test]
+    fn wrapped_width_change_is_only_significant_for_word_wrap() {
+        assert!(wrapped_viewport_width_changed(true, 640.0, 520.0));
+        assert!(!wrapped_viewport_width_changed(false, 640.0, 520.0));
+        assert!(!wrapped_viewport_width_changed(true, 640.0, 639.5));
     }
 }

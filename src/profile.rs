@@ -262,7 +262,7 @@ impl UiRenderFrameHarness {
     }
 
     pub fn run_scroll_frame(&mut self) -> u128 {
-        let direction = if (self.frame_index / 30) % 2 == 0 {
+        let direction = if (self.frame_index / 30).is_multiple_of(2) {
             -1.0
         } else {
             1.0

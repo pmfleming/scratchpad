@@ -1,6 +1,6 @@
 use super::{AppSurface, CHROME_TRANSITION_FRAMES, ScratchpadApp};
 use crate::app::capacity_metrics::{FramePhase, record_frame_phase};
-use crate::app::chrome::handle_window_resize;
+use crate::app::chrome::{handle_window_resize, show_window_resize_cursor};
 use crate::app::diagnostics;
 use crate::app::fonts;
 use crate::app::services::file_controller::FileController;
@@ -95,6 +95,7 @@ pub(super) fn render_frame(app: &mut ScratchpadApp, ui: &mut egui::Ui, ctx: &egu
     let finish_started_at = Instant::now();
     show_window_after_first_frame(app, ctx);
     finish_frame_transitions(app, ctx);
+    show_window_resize_cursor(ctx);
     record_frame_phase(FramePhase::Finish, finish_started_at.elapsed());
 }
 

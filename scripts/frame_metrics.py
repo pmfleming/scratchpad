@@ -71,19 +71,29 @@ def render_cli(payload: object) -> str:
     return "\n".join(lines)
 
 
+def probe_failed(payload: object) -> bool:
+    if not isinstance(payload, dict):
+        return True
+    meta = payload.get("meta")
+    return isinstance(meta, dict) and meta.get("probe_status") == "failed"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Emit 120 Hz frame metrics")
     parser.add_argument("--output", type=Path, default=None)
     add_mode_argument(parser)
     args = parser.parse_args()
+    payload = build_report()
     emit_report(
-        build_report(),
+        payload,
         mode=args.mode,
         output_path=args.output,
         visibility_path=VISIBILITY_OUTPUT,
         cli_renderer=render_cli,
         label="frame metrics",
     )
+    if probe_failed(payload):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

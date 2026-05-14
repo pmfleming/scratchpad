@@ -226,7 +226,7 @@ pub struct HistorySettings {
     pub budget: TextHistoryBudget,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default)]
     pub editor: EditorSettings,
@@ -236,17 +236,6 @@ pub struct AppSettings {
     pub ui: UiSettings,
     #[serde(default)]
     pub history: HistorySettings,
-}
-
-impl Default for AppSettings {
-    fn default() -> Self {
-        Self {
-            editor: EditorSettings::default(),
-            workspace: WorkspaceSettings::default(),
-            ui: UiSettings::default(),
-            history: HistorySettings::default(),
-        }
-    }
 }
 
 pub(crate) fn color_from_hex(hex: &str, fallback: egui::Color32) -> egui::Color32 {

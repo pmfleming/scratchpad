@@ -33,6 +33,7 @@ struct SearchPreviewCacheKey {
     match_index: usize,
 }
 
+#[derive(Default)]
 pub(crate) struct SearchState {
     pub(crate) panel: SearchPanelState,
     pub(crate) query: SearchQueryState,
@@ -42,20 +43,11 @@ pub(crate) struct SearchState {
     preview: SearchPreviewCacheState,
 }
 
+#[derive(Default)]
 pub(crate) struct SearchPanelState {
     pub(crate) open: bool,
     pub(crate) replace_open: bool,
     pub(crate) focus_target: Option<SearchFocusTarget>,
-}
-
-impl Default for SearchPanelState {
-    fn default() -> Self {
-        Self {
-            open: false,
-            replace_open: false,
-            focus_target: None,
-        }
-    }
 }
 
 pub(crate) struct SearchQueryState {
@@ -143,19 +135,6 @@ pub(crate) struct SearchReplaceState {
 struct SearchPreviewCacheState {
     entries: std::collections::HashMap<SearchPreviewCacheKey, SearchResultEntry>,
     order: std::collections::VecDeque<SearchPreviewCacheKey>,
-}
-
-impl Default for SearchState {
-    fn default() -> Self {
-        Self {
-            panel: SearchPanelState::default(),
-            query: SearchQueryState::default(),
-            results: SearchResultsState::default(),
-            runtime: SearchRuntimeState::default(),
-            replace: SearchReplaceState::default(),
-            preview: SearchPreviewCacheState::default(),
-        }
-    }
 }
 
 impl SearchState {

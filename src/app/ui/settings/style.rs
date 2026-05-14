@@ -8,10 +8,9 @@ pub(super) struct SettingsTypography {
 }
 
 pub(super) struct SettingsLayout {
-    pub page_max_width: f32,
     pub page_min_viewport_width: f32,
     pub page_min_viewport_height: f32,
-    pub page_side_padding: f32,
+    pub page_resize_gutter: f32,
     pub card_max_width: f32,
     pub preview_max_width: f32,
     pub card_radius: u8,
@@ -47,10 +46,9 @@ impl SettingsUi {
         description: 12.5,
     };
     pub(super) const LAYOUT: SettingsLayout = SettingsLayout {
-        page_max_width: 980.0,
         page_min_viewport_width: 1180.0,
         page_min_viewport_height: 720.0,
-        page_side_padding: 24.0,
+        page_resize_gutter: 10.0,
         card_max_width: 720.0,
         preview_max_width: 420.0,
         card_radius: 10,
@@ -120,14 +118,6 @@ impl SettingsUi {
         Self::page_surface_size_for_viewport(Self::page_viewport_size(ui))
     }
 
-    pub(super) fn page_overflows_horizontally(viewport_size: egui::Vec2) -> bool {
-        Self::page_surface_size_for_viewport(viewport_size).x > viewport_size.x
-    }
-
-    pub(super) fn page_content_width(ui: &egui::Ui) -> f32 {
-        Self::page_content_width_for_surface(ui.available_width())
-    }
-
     pub(super) fn card_width(ui: &egui::Ui) -> f32 {
         ui.available_width().min(Self::LAYOUT.card_max_width)
     }
@@ -147,18 +137,6 @@ impl SettingsUi {
 
     pub(super) fn preview_width(ui: &egui::Ui) -> f32 {
         ui.available_width().min(Self::LAYOUT.preview_max_width)
-    }
-
-    pub(super) fn page_horizontal_margin(
-        ui: &egui::Ui,
-        content_width: f32,
-        align_to_viewport_start: bool,
-    ) -> f32 {
-        Self::page_horizontal_margin_for_surface(
-            ui.available_width(),
-            content_width,
-            align_to_viewport_start,
-        )
     }
 
     pub(super) fn header_text_width_for_trailing(ui: &egui::Ui, trailing_width: f32) -> f32 {
@@ -237,20 +215,14 @@ impl SettingsUi {
         )
     }
 
-    fn page_content_width_for_surface(surface_width: f32) -> f32 {
-        (surface_width - Self::LAYOUT.page_side_padding * 2.0)
-            .clamp(0.0, Self::LAYOUT.page_max_width)
+    pub(super) fn page_content_width() -> f32 {
+        Self::LAYOUT.card_max_width
     }
 
-    fn page_horizontal_margin_for_surface(
-        surface_width: f32,
+    pub(super) fn page_horizontal_margin_for_viewport(
+        viewport_width: f32,
         content_width: f32,
-        align_to_viewport_start: bool,
     ) -> f32 {
-        if align_to_viewport_start {
-            Self::LAYOUT.page_side_padding
-        } else {
-            ((surface_width - content_width) * 0.5).max(Self::LAYOUT.page_side_padding)
-        }
+        ((viewport_width - content_width) * 0.5).max(Self::LAYOUT.page_resize_gutter)
     }
 }

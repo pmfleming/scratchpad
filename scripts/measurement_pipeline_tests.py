@@ -1,9 +1,11 @@
 import unittest
 
 import capacity_report
+import frame_metrics
 import measurement_catalog
 import performance_review
 import speed_efficiency_report
+import test_catalog
 
 
 MB = 1024 * 1024
@@ -149,6 +151,65 @@ class SpeedEfficiencyReportTests(unittest.TestCase):
         self.assertIn("p99 11.00 ms", row["signals"])
         self.assertIn("active-surface", row["signals"])
         self.assertEqual(row["matching_flamegraphs"], ["ui_render_frame_profile"])
+
+
+class FrameMetricsTests(unittest.TestCase):
+    def test_failed_probe_payload_requests_nonzero_exit(self) -> None:
+        payload = {
+            "meta": {
+                "generated_from": "scripts/frame_metrics.py",
+                "probe_status": "failed",
+                "error": "build failed",
+            },
+            "scenarios": [],
+        }
+
+        self.assertTrue(frame_metrics.probe_failed(payload))
+
+    def test_completed_probe_payload_is_successful(self) -> None:
+        payload = {
+            "meta": {
+                "generated_from": "scripts/frame_metrics.py",
+                "probe_status": "completed",
+            },
+            "scenarios": [{"scenario_id": "ui_render_frame_120hz"}],
+        }
+
+        self.assertFalse(frame_metrics.probe_failed(payload))
+
+
+class TestCatalogTests(unittest.TestCase):
+    def test_failed_requested_correctness_run_requests_nonzero_exit(self) -> None:
+        payload = {
+            "summary": {
+                "last_run": {
+                    "status": "failed",
+                    "stderr_tail": "cargo test failed",
+                },
+            },
+        }
+
+        self.assertTrue(test_catalog.requested_run_failed(payload, run=True))
+
+    def test_catalog_only_payload_does_not_fail_without_run(self) -> None:
+        payload = {
+            "summary": {
+                "last_run": None,
+            },
+        }
+
+        self.assertFalse(test_catalog.requested_run_failed(payload, run=False))
+
+    def test_passed_requested_correctness_run_is_successful(self) -> None:
+        payload = {
+            "summary": {
+                "last_run": {
+                    "status": "passed",
+                },
+            },
+        }
+
+        self.assertFalse(test_catalog.requested_run_failed(payload, run=True))
 
 
 class MeasurementCatalogTests(unittest.TestCase):

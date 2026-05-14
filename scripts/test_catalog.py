@@ -250,13 +250,29 @@ def build_payload(run: bool = False) -> Dict[str, Any]:
 def render_cli(payload: object) -> str:
     data = payload if isinstance(payload, dict) else {}
     summary = data.get("summary", {})
+    last_run = summary.get("last_run")
+    last_run_status = last_run.get("status") if isinstance(last_run, dict) else None
     lines = [
         "Correctness Review",
         f"Tests: {summary.get('test_count', 0)}",
         f"Layers: {summary.get('layers', 0)}",
         f"Failed: {summary.get('failed', 0)}",
     ]
+    if last_run_status:
+        lines.append(f"Last run: {last_run_status}")
     return "\n".join(lines)
+
+
+def requested_run_failed(payload: object, *, run: bool) -> bool:
+    if not run:
+        return False
+    if not isinstance(payload, dict):
+        return True
+    summary = payload.get("summary")
+    if not isinstance(summary, dict):
+        return True
+    last_run = summary.get("last_run")
+    return not isinstance(last_run, dict) or last_run.get("status") != "passed"
 
 
 def main() -> None:
@@ -277,6 +293,8 @@ def main() -> None:
         cli_renderer=render_cli,
         label="correctness review",
     )
+    if requested_run_failed(payload, run=args.run):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

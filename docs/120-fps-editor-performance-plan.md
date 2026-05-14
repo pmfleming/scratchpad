@@ -218,3 +218,78 @@ Implement Phase 1 only: add the 120 FPS measurement lane and phase timing. Once 
 - Replaced the old `scroll_stress_latency` profile shape that laid out the full synthetic file at four wrap widths. That measured raw egui layout capacity rather than Scratchpad's viewport-first scroll path and kept 4 MiB scroll permanently over budget for the wrong reason. Use `text_layout_ceiling` for full-document layout pressure; keep `scroll_stress_latency` production-shaped.
 - Tried removing synthetic search-highlight and selection overlays from `scroll_stress_latency`; the 4 MiB row got slower, so the change was reverted. Add separate selection/search-overlay 120 Hz lanes before making another attempt to split those concerns.
 - Before overlays were split out of `scroll_stress_latency`, tried using byte length instead of `chars().count()` when placing synthetic highlight ranges. It made the 4 MiB scroll row slower and higher variance; do not revive that shortcut for future overlay benchmarks without fresh evidence.
+
+## Augmentations (added after a code and measurement re-review)
+
+These do not replace anything above; they add extra findings, concrete code references, and ideas that surfaced from reading the cited files. The original plan stands.
+
+### Measurement setup is weaker than the table suggests
+
+- The 12 ms `ui_render_frame` baseline is not produced by a real benchmark. `Cargo.toml` declares only one `[[bench]]` (`search_speed`), and there is no `benches/*.rs` source for `ui_render_frame`. The criterion directory still contains `scroll_stress_latency`, `large_file_scroll_latency`, `viewport_extraction_latency`, and `document_snapshot_creation_latency` estimates, but the source files that produced them are gone — `cargo bench` will not regenerate them.
+- `scripts/slowspots.py:236-243` hardcodes `ui_render_frame` in `get_mock_data` at exactly `12_000_000.0` ns. The 12 ms current mean in the table almost certainly comes from this mock, not a measurement.
+- `dashboard_server.py:553-562` pulls `app_frame_ms` from a row whose source no longer produces it.
+- The live counters that *are* real — `record_frame` in `capacity_metrics.rs:256-261`, populated from `ScratchpadApp::ui` in `app_state.rs:196-199` — are never exported to a JSON artifact, so no script reads `frame_time_total_ns` or `frame_time_max_ns`.
+- `large_file_scroll_latency` is referenced only inside this plan doc; no script registers it.
+
+Phase 1 should therefore be widened before the new 120 Hz lanes are added:
+
+- Wire `capacity_metrics_snapshot` to `target/analysis/capacity_metrics.json` so the dashboard has a non-mock `ui_render_frame` source, or add a real `[[bench]]` driving `ScratchpadApp::ui` headlessly.
+- Delete or regenerate stale `target/criterion/*` directories so the dashboard cannot quietly serve old numbers.
+- Remove the mock fallback in `slowspots.py` so a missing benchmark is loud, not silent.
+- Register `large_file_scroll_latency` in `perf_report_shared.py` if it is still wanted, otherwise stop citing it.
+
+### Background IO polls at 60 FPS
+
+`src/app/app_state/background_io.rs:19` sets `BACKGROUND_IO_POLL_INTERVAL = Duration::from_millis(16)`. Any frame with a pending background action schedules the next repaint 16 ms out — two frames late at 120 FPS. Either drop this to 8 ms or, better, drive repaints from the IO completion side via `ctx.request_repaint()` so the poll interval stops being a frame-cadence assumption.
+
+### `record_frame` excludes paint and GPU
+
+`ScratchpadApp::ui` times `prepare_frame + render_frame`. egui's paint submission and the GPU-bound work after `ui` returns are invisible to the counter. Add a "wall-clock between frame starts" measurement from `ctx.input(|i| i.time)` deltas — closer to what users see, and it catches repaint-storm or paint-bound regressions the current counter hides.
+
+### Mean and max cannot deliver p95/p99
+
+`FRAME_TIME_MAX_NS` plus the running sum gives mean and max only. The plan asks for p95/p99 but the existing accumulator cannot produce them. Add either a small reservoir sample (1024 frame durations per minute) or an HdrHistogram-style log-bucket histogram to `CapacityMetricsSnapshot`. Without this the dashboard cannot answer Phase 1's exit criteria.
+
+### Extra ideas by phase
+
+Phase 1 (measurement):
+
+- Add a `RepaintAudit` counter that attributes calls to `ctx.request_repaint*` by caller (transition, IO, file watch, callout, settings). Without this, the plan's "no avoidable repaint loop" target is unverifiable.
+- Split `run_scroll_stress_profile` (`src/profile.rs:396`) into two modes — *warm cache, single wrap-width* (steady-state production) and *cold cache, four wrap widths* (current behavior, capacity guard). Currently production-shaped wins look smaller than they are because the profile is mostly worst-case.
+- Add `tests/frame_budget.rs` that drives `ScratchpadApp::ui` headlessly with a synthetic typing/scroll script and asserts p95 stays under budget. Otherwise every claim here is one-shot.
+
+Phase 2 (fixed per-frame work):
+
+- Make `callout::set_modal_scroll_blocker_active` and `transition::set_chrome_transition_active` dirty-driven the same way theme application is. Both go through `ctx.data_mut` and write every frame even when the value is unchanged.
+- Wrap the frame counter in a `scopeguard`-style RAII timer so a panic between `prepare_frame` and `record_frame` does not silently skip accounting.
+
+Phase 3 (viewport layout) — concrete forms of the doc's items:
+
+- The owned-string churn is in `src/app/ui/editor_content/native_editor/layout/display_text.rs:104-110` and `:152-162`. Return `Cow<'a, str>` from both. `LayoutJob::append` takes `&str`, so the borrowed path goes through with zero copies in the common no-preview / no-control-character case.
+- `local_search_highlights` (`layout.rs:292-307`) scans every range twice per frame (once for the cache key, once for display mapping). If `SearchHighlightState.ranges` is kept sorted by `start`, `partition_point` reduces visible-window selection to O(log N + visible). Enforce as a type invariant.
+- `replacement_preview_signature` (`layout.rs:152-159`) rebuilds a `DefaultHasher` and hashes the full preview every frame. Cache the signature on the `SearchReplacementPreview` itself, invalidate on mutation.
+- `LayoutCacheKey` carries `text_color`, `dark_mode`, `selection_highlight`, and `search_highlights`. The first two affect paint only, not shaping. Split into `(ShapingKey → Galley, paint overlays applied at draw)` so selection and search-state changes skip shaping. The four fields above are the concrete candidates.
+- `LayoutCache::MAX_ENTRIES = 8` (`layout_cache.rs:38`) is per-view. With split panes and warming (visible + 2 adjacent each), 3 tiles can fully evict each other. Scale the cap with active tile count or move to bytes-only eviction.
+- Gate `warm_nearby_layout_slices` (`layout.rs:220-280`) by row count as well as `over_budget`. On a 4K tall viewport, one above + one below speculatively lays out 200+ rows.
+- Selection in the cache key (currently the case) means each mouse-move during a selection drag is a layout miss. The shaping/paint split above is what removes this hidden 120 FPS blocker.
+
+Phase 4 (gutter):
+
+- `gutter.rs:46-55` runs `fonts.layout_no_wrap("000...")` every frame. Cache by `(font_id, digit_count, gamma)` — 120 font-mutex acquisitions per second for a digit string is avoidable.
+- The fallback path allocates an exact rect for the full document height before painting (`gutter.rs:79-82`). For a 10M-line file egui clips on its end, but the allocation still hits the widget interaction map. The viewport-derived rewrite the plan calls for resolves this incidentally.
+
+Phase 5 (snapshot / metadata):
+
+- Snapshots are currently one-size-fits-all. Each consumer reads only a slice — search wants piece-tree chunks, session save wants `name + dirty + revision`, metadata refresh wants encoding/control-char counts. Build *per-consumer minimal* snapshots so paste and metadata refresh do not materialize a full document snapshot.
+- After a paste, defer metadata refresh and text-format inspection to a background task. The next interactive frame draws against the previous metadata; the new one installs when ready.
+
+Phase 6 (4 MiB+):
+
+- `viewport_text_slice` (`layout.rs:189-203`) calls `tree.line_info` twice per frame. On continuous scroll the new top line is typically `prev_top ± visible_lines`. Cache `(line_index → start_char)` for the most recent pair per view and resolve adjacent scrolls by delta. This matches the flamegraph hint about `PieceTreeLite::line_info`.
+- Introduce a `FrameBudget` primitive started at frame begin, with `remaining()` and `should_yield()` based on the 8.33 ms target. Layout warming, search highlight indexing, snapshot refresh, and adjacent gutter prefetch consult it and bail out below ~2 ms remaining. This is the structural piece that lets every "progressive refinement" idea in the plan compose safely.
+
+### Extra risks not yet in the Risks section
+
+- Cache thrash on selection drag. Selection drag changes `selection_highlight` every mouse move; with selection in the cache key, every drag frame is a layout miss. The shaping/paint split above removes this; without it, selection-drag latency is a hidden 120 FPS blocker.
+- Background work resurrecting at 60 FPS. Even with theme and eviction dirty-driven, IO repaints alone gate scroll smoothness to 16 ms while pending work exists.
+- Phase 1's exit criterion is unreachable until the measurement is real. While `ui_render_frame` comes from a hardcoded mock, "a single report identifies which phase owns the 12 ms" cannot be satisfied.
