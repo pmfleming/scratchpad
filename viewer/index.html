@@ -169,24 +169,65 @@
                 </div>
             </div>
 
-            <div class="quality-layout quality-layout--structural">
+            <div class="quality-layout quality-layout--full">
                 <div class="panel-card structural-scatter-card">
                     <div class="panel-card__header">
                         <div>
                             <h2>Type width / method surface</h2>
                             <p>Wide state plus broad impls are highlighted before they can disappear into module averages.</p>
                         </div>
+                        <div class="segmented-control" role="group" aria-label="Type health Y axis">
+                            <button type="button" class="is-active" data-type-health-y="methods"
+                                aria-pressed="true">Methods</button>
+                            <button type="button" data-type-health-y="risk" aria-pressed="false">Risk</button>
+                        </div>
                     </div>
                     <div id="type-health-scatter" class="type-health-scatter"></div>
                 </div>
+            </div>
+
+            <div class="quality-layout">
                 <div class="panel-card">
                     <div class="panel-card__header">
                         <div>
                             <h2>Structural risk distribution</h2>
                             <p>Tail view for wide structs, large enums, method surface, and impl spread.</p>
                         </div>
+                        <div class="segmented-control" role="group" aria-label="Structural distribution mode">
+                            <button type="button" class="is-active" data-quality-panel-mode="typeHealthDistributionMode"
+                                data-quality-panel-value="counts" aria-pressed="true">Counts</button>
+                            <button type="button" data-quality-panel-mode="typeHealthDistributionMode"
+                                data-quality-panel-value="worst" aria-pressed="false">Worst items</button>
+                        </div>
                     </div>
                     <div id="type-health-distribution" class="quality-distribution"></div>
+                </div>
+                <div class="panel-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Escape-hatch distribution</h2>
+                            <p>Weighted risk score tail for unsafe, FFI, raw memory, suppressions, and API escape hatches.</p>
+                        </div>
+                        <div class="segmented-control" role="group" aria-label="Escape hatch distribution mode">
+                            <button type="button" class="is-active" data-quality-panel-mode="escapeHatchDistributionMode"
+                                data-quality-panel-value="counts" aria-pressed="true">Counts</button>
+                            <button type="button" data-quality-panel-mode="escapeHatchDistributionMode"
+                                data-quality-panel-value="worst" aria-pressed="false">Worst items</button>
+                        </div>
+                    </div>
+                    <div id="escape-hatches-distribution" class="quality-distribution"></div>
+                </div>
+            </div>
+
+            <div class="quality-layout quality-layout--full">
+                <div class="panel-card churn-complexity-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Churn / complexity map</h2>
+                            <p>Files that are both frequently changed and structurally risky rise to the top.</p>
+                        </div>
+                    </div>
+                    <div id="churn-complexity-scatter" class="type-health-scatter"></div>
                 </div>
             </div>
 
@@ -197,6 +238,12 @@
                             <h2>Code locality distribution</h2>
                             <p>Risk curve for dependency spread, hidden coupling, interface clarity, and change spread.</p>
                         </div>
+                        <div class="segmented-control" role="group" aria-label="Locality distribution mode">
+                            <button type="button" class="is-active" data-quality-panel-mode="localityDistributionMode"
+                                data-quality-panel-value="counts" aria-pressed="true">Counts</button>
+                            <button type="button" data-quality-panel-mode="localityDistributionMode"
+                                data-quality-panel-value="worst" aria-pressed="false">Worst items</button>
+                        </div>
                     </div>
                     <div id="locality-distribution" class="quality-distribution"></div>
                 </div>
@@ -206,6 +253,12 @@
                             <h2>Leverage distribution</h2>
                             <p>Risk curve for reach, divergence pressure, invariant surface, and co-change ripple.</p>
                         </div>
+                        <div class="segmented-control" role="group" aria-label="Leverage distribution mode">
+                            <button type="button" class="is-active" data-quality-panel-mode="leverageDistributionMode"
+                                data-quality-panel-value="counts" aria-pressed="true">Counts</button>
+                            <button type="button" data-quality-panel-mode="leverageDistributionMode"
+                                data-quality-panel-value="worst" aria-pressed="false">Worst items</button>
+                        </div>
                     </div>
                     <div id="leverage-distribution" class="quality-distribution"></div>
                 </div>
@@ -213,7 +266,19 @@
 
             <div id="locality-leverage-quadrants" class="quality-overview quality-overview--quadrants"></div>
 
-            <div class="panel-card quality-dataset-browser">
+            <div class="quality-layout quality-layout--rollup">
+                <div class="panel-card module-rollup-card">
+                    <div class="panel-card__header">
+                        <div>
+                            <h2>Module quality rollup</h2>
+                            <p>Per-module triage across hotspots, clones, structures, escape hatches, locality, and leverage.</p>
+                        </div>
+                    </div>
+                    <div id="quality-module-pivot" class="table-wrap quality-dataset-table module-rollup-table"></div>
+                </div>
+            </div>
+
+            <div id="quality-datasets" class="panel-card quality-dataset-browser">
                 <div class="panel-card__header">
                     <div>
                         <h2>Quality datasets</h2>
@@ -242,6 +307,7 @@
                             <button class="run-button" data-run-item="quality.hotspots">Refresh</button>
                             <input id="hotspots-filter" class="filter-input" type="search"
                                 placeholder="Filter hotspots..." />
+                            <button type="button" class="filter-clear-button" data-clear-quality-filter="hotspots">Clear filter</button>
                         </div>
                     </div>
                     <div id="hotspots-table" class="table-wrap quality-dataset-table"></div>
@@ -256,6 +322,7 @@
                             <button class="run-button" data-run-item="quality.clones">Refresh</button>
                             <input id="clones-filter" class="filter-input" type="search"
                                 placeholder="Filter clones..." />
+                            <button type="button" class="filter-clear-button" data-clear-quality-filter="clones">Clear filter</button>
                         </div>
                     </div>
                     <div id="clones-table" class="table-wrap quality-dataset-table"></div>
@@ -270,6 +337,7 @@
                             <button class="run-button" data-run-item="quality.type_health">Refresh</button>
                             <input id="type-health-filter" class="filter-input" type="search"
                                 placeholder="Filter structural health..." />
+                            <button type="button" class="filter-clear-button" data-clear-quality-filter="typeHealth">Clear filter</button>
                         </div>
                     </div>
                     <div id="type-health-table" class="table-wrap quality-dataset-table"></div>
@@ -285,6 +353,7 @@
                             <button class="run-button" data-run-item="quality.escape_hatches">Refresh</button>
                             <input id="escape-hatches-filter" class="filter-input" type="search"
                                 placeholder="Filter escape hatches..." />
+                            <button type="button" class="filter-clear-button" data-clear-quality-filter="escapeHatches">Clear filter</button>
                         </div>
                     </div>
                     <div id="escape-hatches-overview" class="escape-hatches-overview"></div>
@@ -300,6 +369,7 @@
                             <button class="run-button" data-run-item="quality.locality_dynamic">Refresh</button>
                             <input id="locality-filter" class="filter-input" type="search"
                                 placeholder="Filter code locality..." />
+                            <button type="button" class="filter-clear-button" data-clear-quality-filter="locality">Clear filter</button>
                         </div>
                     </div>
                     <div id="locality-table" class="table-wrap quality-dataset-table"></div>
@@ -314,8 +384,10 @@
                             <button class="run-button" data-run-item="quality.locality_leverage">Refresh</button>
                             <input id="leverage-filter" class="filter-input" type="search"
                                 placeholder="Filter leverage..." />
+                            <button type="button" class="filter-clear-button" data-clear-quality-filter="leverage">Clear filter</button>
                         </div>
                     </div>
+                    <div id="leverage-status"></div>
                     <div id="leverage-table" class="table-wrap quality-dataset-table"></div>
                 </div>
             </div>

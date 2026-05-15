@@ -336,21 +336,19 @@ fn render_split_submenu(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
         widget_ids::surface_widget(ui, "editor_context.split_caret", "submenu", |ui| {
             egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
                 set_menu_width(ui, EDITOR_CONTEXT_SUBMENU_WIDTH);
-
-                for (label, icon, direction) in [
-                    ("Split Left", ARROW_LEFT, SplitDirection::Left),
-                    ("Split Right", ARROW_RIGHT, SplitDirection::Right),
-                    ("Split Up", ARROW_UP, SplitDirection::Up),
-                    ("Split Down", ARROW_DOWN, SplitDirection::Down),
-                ] {
-                    if split_menu_button(ui, label, icon) {
-                        queue_split_action(actions, direction);
-                        ui.close();
-                    }
-                }
+                render_split_submenu_items(ui, actions);
             });
         });
     });
+}
+
+fn render_split_submenu_items(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
+    for item in SPLIT_MENU_ITEMS {
+        if split_menu_button(ui, item.label, item.icon) {
+            queue_split_action(actions, item.direction);
+            ui.close();
+        }
+    }
 }
 
 fn paint_context_menu_row_label(
@@ -391,6 +389,36 @@ enum SplitDirection {
     Up,
     Down,
 }
+
+#[derive(Clone, Copy)]
+struct SplitMenuItem {
+    label: &'static str,
+    icon: &'static str,
+    direction: SplitDirection,
+}
+
+const SPLIT_MENU_ITEMS: &[SplitMenuItem] = &[
+    SplitMenuItem {
+        label: "Split Left",
+        icon: ARROW_LEFT,
+        direction: SplitDirection::Left,
+    },
+    SplitMenuItem {
+        label: "Split Right",
+        icon: ARROW_RIGHT,
+        direction: SplitDirection::Right,
+    },
+    SplitMenuItem {
+        label: "Split Up",
+        icon: ARROW_UP,
+        direction: SplitDirection::Up,
+    },
+    SplitMenuItem {
+        label: "Split Down",
+        icon: ARROW_DOWN,
+        direction: SplitDirection::Down,
+    },
+];
 
 fn queue_split_action(actions: &mut Vec<TileAction>, direction: SplitDirection) {
     let (axis, new_view_first) = match direction {

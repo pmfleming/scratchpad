@@ -66,10 +66,10 @@ fn submit_search_request(app: &mut ScratchpadApp) {
         .runtime
         .requested_generation
         .saturating_add(1);
+    app.clear_search_highlights();
     let targets = collect_search_targets(app, app.state.search_state.query.scope);
     let request = app.state.search_state.build_request(generation, targets);
     app.state.search_state.begin_request(generation);
-    app.clear_search_highlights();
 
     if let Err(error) = app.state.search_state.runtime.request_tx.send(request) {
         let latest_generation = AtomicU64::new(generation);
