@@ -471,6 +471,10 @@
         </div>`;
     }
 
+    function escapeHatchFieldCount(item, key) {
+        return Number(item?.[key] ?? item?.counts?.[key] ?? 0);
+    }
+
     function renderQualityOverview() {
         const target = byId("quality-overview");
         if (!target) return;
@@ -502,7 +506,8 @@
         const escapeHatchModules = escapeHatches.length;
         const escapeHatchTotal = escapeHatches.reduce((sum, item) => sum + Number(item.total_count || 0), 0);
         const unsafeModules = escapeHatches.filter((item) => Number(item.unsafe_count || 0) > 0).length;
-        const clippySuppressions = escapeHatches.reduce((sum, item) => sum + Number(item.clippy_suppression_count || 0), 0);
+        const allowAttributes = escapeHatches.reduce((sum, item) => sum + escapeHatchFieldCount(item, "allow_attribute_count"), 0);
+        const clippyAllows = escapeHatches.reduce((sum, item) => sum + escapeHatchFieldCount(item, "clippy_allow_count"), 0);
         const derefCoercions = escapeHatches.reduce((sum, item) => sum + Number(item.deref_coercion_count || 0), 0);
         const globImports = escapeHatches.reduce((sum, item) => sum + Number(item.glob_import_count || 0), 0);
         const containerRefs = escapeHatches.reduce((sum, item) => sum + Number(item.container_ref_return_count || 0), 0);
@@ -577,7 +582,8 @@
                     { label: "Deref/DerefMut", value: derefCoercions },
                     { label: "Glob Imports", value: globImports },
                     { label: "Container Refs", value: containerRefs },
-                    { label: "Clippy Allows", value: clippySuppressions },
+                    { label: "Allow/Expect", value: allowAttributes, action: { dataset: "escapeHatches", filter: "allow_attribute_count:>0" } },
+                    { label: "Clippy Allow/Expect", value: clippyAllows, action: { dataset: "escapeHatches", filter: "clippy_allow_count:>0" } },
                 ],
             },
             {
@@ -729,6 +735,8 @@
             layout: rows.reduce((sum, item) => sum + Number(item.layout_linkage_count || 0), 0),
             clippy: rows.reduce((sum, item) => sum + Number(item.clippy_suppression_count || 0), 0),
             lint: rows.reduce((sum, item) => sum + Number(item.lint_suppression_count || 0), 0),
+            allows: rows.reduce((sum, item) => sum + escapeHatchFieldCount(item, "allow_attribute_count"), 0),
+            clippyAllows: rows.reduce((sum, item) => sum + escapeHatchFieldCount(item, "clippy_allow_count"), 0),
         };
         const weightedTotals = {
             unsafe: rows.reduce((sum, item) => sum + escapeWeight(item, ["unsafe_block", "unsafe_fn", "unsafe_impl", "unsafe_trait"], "unsafe_count", 10), 0),
@@ -741,6 +749,8 @@
             layout: rows.reduce((sum, item) => sum + escapeWeight(item, ["repr_escape", "linkage_escape"], "layout_linkage_count", 6.5), 0),
             clippy: rows.reduce((sum, item) => sum + escapeWeight(item, ["clippy_suppression"], "clippy_suppression_count", 3), 0),
             lint: rows.reduce((sum, item) => sum + escapeWeight(item, ["lint_suppression"], "lint_suppression_count", 2), 0),
+            allows: totals.allows * 2,
+            clippyAllows: totals.clippyAllows * 3,
         };
         const maxTotal = Math.max(1, ...Object.values(weightedTotals));
         const bars = [
@@ -752,6 +762,8 @@
             ["Glob imports", totals.glob, weightedTotals.glob],
             ["Container refs", totals.containerRefs, weightedTotals.containerRefs],
             ["Layout/linkage", totals.layout, weightedTotals.layout],
+            ["Allow/expect attributes", totals.allows, weightedTotals.allows],
+            ["Clippy allow/expect", totals.clippyAllows, weightedTotals.clippyAllows],
             ["Clippy suppressions", totals.clippy, weightedTotals.clippy],
             ["All lint suppressions", totals.lint, weightedTotals.lint],
         ];
@@ -764,6 +776,8 @@
                 ${metricCard("Deref/DerefMut", totals.deref)}
                 ${metricCard("Glob imports", totals.glob)}
                 ${metricCard("Container refs", totals.containerRefs)}
+                ${metricCard("Allow/expect", totals.allows)}
+                ${metricCard("Clippy allow/expect", totals.clippyAllows)}
                 ${metricCard("Clippy suppressions", totals.clippy)}
             </div>
             <div class="escape-hatch-bars">
@@ -777,11 +791,15 @@
 
         renderTable(
             "escape-hatches-table",
-            ["Rank", "Module", "Score", "Total", "Unsafe", "FFI", "Globals", "Raw", "Deref", "Glob", "Container Refs", "Layout", "Clippy", "Locations", "Signals"],
+            ["Rank", "Module", "Score", "Total", "Unsafe", "FFI", "Globals", "Raw", "Deref", "Glob", "Container Refs", "Layout", "Allow/Expect", "Clippy Allow/Expect", "Clippy Supp.", "Allow/Expect Lines", "Locations", "Signals"],
             filtered.map((item, index) => {
                 const locations = (item.locations || [])
                     .slice(0, 8)
                     .map((location) => `<code>${escapeHtml(location.label)}:${escapeHtml(location.line)}</code>`)
+                    .join(" ");
+                const allowLocations = (item.allow_locations || [])
+                    .slice(0, 8)
+                    .map((location) => `<code title="${escapeHtml(location.snippet || "")}">allow/expect:${escapeHtml(location.line)}</code>`)
                     .join(" ");
                 const score = Number(item.escape_hatch_score || 0);
                 return `<tr>
@@ -797,7 +815,10 @@
                     <td>${formatNumber.format(item.glob_import_count || 0)}</td>
                     <td>${formatNumber.format(item.container_ref_return_count || 0)}</td>
                     <td>${formatNumber.format(item.layout_linkage_count || 0)}</td>
+                    <td>${formatNumber.format(escapeHatchFieldCount(item, "allow_attribute_count"))}</td>
+                    <td>${formatNumber.format(escapeHatchFieldCount(item, "clippy_allow_count"))}</td>
                     <td>${formatNumber.format(item.clippy_suppression_count || 0)}</td>
+                    <td class="small-text">${allowLocations || "-"}</td>
                     <td class="small-text">${locations || "-"}</td>
                     <td>${renderPills(item.signals || [])}</td>
                 </tr>`;
