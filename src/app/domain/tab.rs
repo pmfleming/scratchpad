@@ -1,18 +1,20 @@
 use crate::app::domain::{BufferId, BufferState, EditorViewState, PaneNode, ViewId, tab_support};
 use std::collections::HashSet;
 
+mod buffers;
 mod layout;
+mod layout_state;
 mod promotion;
 mod repair;
 pub(crate) mod summary;
 
+pub use buffers::WorkspaceTabBuffers;
+pub use layout_state::WorkspaceTabLayout;
+
 #[derive(Clone)]
 pub struct WorkspaceTab {
-    pub buffer: BufferState,
-    pub extra_buffers: Vec<BufferState>,
-    pub views: Vec<EditorViewState>,
-    pub root_pane: PaneNode,
-    pub active_view_id: ViewId,
+    pub buffers: WorkspaceTabBuffers,
+    pub layout: WorkspaceTabLayout,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,14 +26,10 @@ pub enum TabAttentionState {
 
 impl WorkspaceTab {
     pub fn new(buffer: BufferState) -> Self {
-        let initial_view = EditorViewState::new(buffer.id);
-        let active_view_id = initial_view.id;
+        let layout = WorkspaceTabLayout::new(buffer.id);
         Self {
-            buffer,
-            extra_buffers: Vec::new(),
-            views: vec![initial_view],
-            root_pane: PaneNode::leaf(active_view_id),
-            active_view_id,
+            buffers: WorkspaceTabBuffers::new(buffer),
+            layout,
         }
     }
 
@@ -52,11 +50,8 @@ impl WorkspaceTab {
         active_view_id: ViewId,
     ) -> Self {
         let mut tab = Self {
-            buffer,
-            extra_buffers,
-            views,
-            root_pane,
-            active_view_id,
+            buffers: WorkspaceTabBuffers::restored(buffer, extra_buffers),
+            layout: WorkspaceTabLayout::restored(views, root_pane, active_view_id),
         };
         tab.repair_restored_state();
         tab
@@ -75,41 +70,40 @@ impl WorkspaceTab {
     }
 
     pub fn activate_view(&mut self, view_id: ViewId) -> bool {
-        if !self.root_pane.contains_view(view_id) {
+        if !self.layout.contains_view(view_id) {
             return false;
         }
 
-        self.active_view_id = view_id;
+        self.layout.set_active_view_id(view_id);
         self.sync_active_buffer_to_active_view()
     }
 
     pub fn describe(&self) -> String {
         let path = self
-            .buffer
+            .buffers
+            .active()
             .path
             .as_ref()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "<unsaved>".to_owned());
+        let active_buffer = self.buffers.active();
         format!(
             "{} [path={}, dirty={}, views={}, active_view={}]",
-            self.buffer.name,
+            active_buffer.name,
             path,
-            self.buffer.is_dirty,
-            self.views.len(),
-            self.active_view_id
+            active_buffer.is_dirty,
+            self.layout.view_count(),
+            self.layout.active_view_id()
         )
     }
 
     fn push_buffer_if_missing(&mut self, buffer: BufferState) {
-        if self.buffer_by_id(buffer.id).is_some() {
-            return;
-        }
-
-        self.extra_buffers.push(buffer);
+        self.buffers.push_if_missing(buffer);
     }
 
     pub(super) fn distinct_buffer_count(&self) -> usize {
-        self.views
+        self.layout
+            .views()
             .iter()
             .map(|view| view.buffer_id)
             .collect::<HashSet<_>>()
@@ -119,7 +113,7 @@ impl WorkspaceTab {
     pub(super) fn distinct_buffer_names_in_view_order(&self) -> Vec<String> {
         let ordered_view_ids = self.ordered_view_ids_in_layout_order();
         let mut names =
-            tab_support::ordered_buffer_ids_with_fallback(&self.views, &ordered_view_ids)
+            tab_support::ordered_buffer_ids_with_fallback(self.layout.views(), &ordered_view_ids)
                 .into_iter()
                 .filter_map(|buffer_id| {
                     self.buffer_by_id(buffer_id)
@@ -128,7 +122,7 @@ impl WorkspaceTab {
                 .collect::<Vec<_>>();
 
         if names.is_empty() {
-            names.push(self.buffer.name.clone());
+            names.push(self.buffers.active().name.clone());
         }
 
         names
@@ -139,32 +133,22 @@ impl WorkspaceTab {
             return false;
         };
 
-        if self.buffer.id == active_buffer_id {
-            return true;
-        }
-
-        let Some(buffer_index) = Self::extra_buffer_index(&self.extra_buffers, active_buffer_id)
-        else {
-            return false;
-        };
-
-        std::mem::swap(&mut self.buffer, &mut self.extra_buffers[buffer_index]);
-        true
+        self.buffers.sync_active_buffer_to(active_buffer_id)
     }
 
     fn prune_unused_buffers(&mut self) {
         let referenced_buffer_ids = self
-            .views
+            .layout
+            .views()
             .iter()
             .map(|view| view.buffer_id)
             .collect::<HashSet<_>>();
 
-        if !referenced_buffer_ids.contains(&self.buffer.id) {
+        if !referenced_buffer_ids.contains(&self.buffers.active().id) {
             self.sync_active_buffer_to_active_view();
         }
 
-        self.extra_buffers
-            .retain(|buffer| referenced_buffer_ids.contains(&buffer.id));
+        self.buffers.prune_to_buffer_ids(&referenced_buffer_ids);
     }
 
     fn active_buffer_id_for_view(

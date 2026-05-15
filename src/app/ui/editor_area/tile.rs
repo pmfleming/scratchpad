@@ -16,7 +16,7 @@ use self::scroll_input::{
     local_scroll_source, resolve_editor_scroll_offset_override, scrollbar_policy_from_egui,
 };
 use self::style::{editor_content_style, editor_font_id};
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{ScratchpadApp, workspace::accessors as workspace_accessors};
 use crate::app::domain::{EditorViewState, SplitPath, ViewId, WorkspaceTab};
 use crate::app::ui::editor_content::{self, EditorContentOutcome, EditorContentStyle};
 use crate::app::ui::scrolling;
@@ -161,7 +161,7 @@ fn render_tile_body_contents(
     app: &mut ScratchpadApp,
     request: &TileRenderRequest,
 ) -> TileBodyOutcome {
-    let request_focus = app.should_focus_view(request.view_id);
+    let request_focus = workspace_accessors::should_focus_view(app, request.view_id);
     let editor_font_id = editor_font_id(app.state.app_settings.font_size());
     let mut content_style =
         editor_content_style(app, request.is_active, request_focus, &editor_font_id);
@@ -217,9 +217,9 @@ fn apply_tile_focus_request(
     request_editor_focus: bool,
 ) {
     if request_focus {
-        app.consume_focus_request(view_id);
+        workspace_accessors::consume_focus_request(app, view_id);
     } else if request_editor_focus {
-        app.request_focus_for_view(view_id);
+        workspace_accessors::request_focus_for_view(app, view_id);
     }
 }
 

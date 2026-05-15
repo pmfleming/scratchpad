@@ -1,4 +1,6 @@
-use crate::app::app_state::{ScratchpadApp, workspace_controller};
+use crate::app::app_state::{
+    ScratchpadApp, workspace::accessors as workspace_accessors, workspace_controller,
+};
 use crate::app::domain::{SplitAxis, ViewId, WorkspaceTab};
 
 struct TabCombineContext {
@@ -35,7 +37,7 @@ pub(super) fn combine_tab_into_tab_command(
         return;
     }
 
-    app.begin_layout_transition();
+    crate::app::app_state::frame::begin_layout_transition(app);
     rebalance_combined_workspace_layout(app, context.adjusted_target_index, target_index);
     finish_combined_tab(app, source_index, target_index, context);
 }
@@ -54,9 +56,9 @@ pub(super) fn promote_view_to_tab_command(app: &mut ScratchpadApp, view_id: View
         return;
     };
 
-    app.begin_layout_transition();
+    crate::app::app_state::frame::begin_layout_transition(app);
     workspace_controller::append_tab(app, promoted_tab);
-    let _ = app.persist_session_now();
+    let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
 }
 
 pub(super) fn promote_tab_files_to_tabs_command(app: &mut ScratchpadApp, index: usize) {
@@ -88,7 +90,7 @@ pub(super) fn promote_tab_files_to_tabs_command(app: &mut ScratchpadApp, index: 
         return;
     }
 
-    app.begin_layout_transition();
+    crate::app::app_state::frame::begin_layout_transition(app);
     let active_tab_offset = promoted_tabs
         .iter()
         .position(|tab| tab.active_buffer().id == active_buffer_id)
@@ -99,11 +101,11 @@ pub(super) fn promote_tab_files_to_tabs_command(app: &mut ScratchpadApp, index: 
     app.tab_manager
         .set_active_tab_index_clamped(index + active_tab_offset);
     app.tab_manager.rebuild_buffer_tab_index();
-    app.ensure_active_tab_slot_selected();
+    crate::app::app_state::workspace::display_tabs::ensure_active_tab_slot_selected(app);
     app.tab_manager.pending_scroll_to_active = true;
-    app.request_focus_for_active_view();
+    workspace_accessors::request_focus_for_active_view(app);
     app.tab_manager.mark_session_dirty();
-    let _ = app.persist_session_now();
+    let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
 }
 
 fn can_combine_tabs(tab_count: usize, source_index: usize, target_index: usize) -> bool {
@@ -159,16 +161,16 @@ pub(super) fn combine_tabs_into_tab_command(
         }
     }
 
-    app.begin_layout_transition();
+    crate::app::app_state::frame::begin_layout_transition(app);
     app.tab_manager
         .set_active_tab_index_clamped(adjusted_target_index);
     app.tab_manager.rebuild_buffer_tab_index();
-    app.ensure_active_tab_slot_selected();
+    crate::app::app_state::workspace::display_tabs::ensure_active_tab_slot_selected(app);
     app.tab_manager.pending_scroll_to_active = true;
-    app.request_focus_for_active_view();
+    workspace_accessors::request_focus_for_active_view(app);
     app.tab_manager.mark_session_dirty();
     rebalance_combined_workspace_layout(app, adjusted_target_index, target_index);
-    let _ = app.persist_session_now();
+    let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
 }
 
 fn remove_source_tab_for_combine(
@@ -243,8 +245,8 @@ fn finish_combined_tab(
     app.tab_manager
         .set_active_tab_index_clamped(context.adjusted_target_index);
     app.tab_manager.rebuild_buffer_tab_index();
-    app.ensure_active_tab_slot_selected();
+    crate::app::app_state::workspace::display_tabs::ensure_active_tab_slot_selected(app);
     app.tab_manager.pending_scroll_to_active = true;
-    app.request_focus_for_active_view();
+    workspace_accessors::request_focus_for_active_view(app);
     app.tab_manager.mark_session_dirty();
 }

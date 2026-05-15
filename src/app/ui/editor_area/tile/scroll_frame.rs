@@ -268,8 +268,13 @@ mod tests {
             .join("\n");
         let tab = WorkspaceTab::new(BufferState::new("sample.txt".to_owned(), text, None));
 
-        let height =
-            super::virtual_editor_content_height(&tab, tab.active_view_id, 20.0, 200.0, None);
+        let height = super::virtual_editor_content_height(
+            &tab,
+            tab.layout.active_view_id,
+            20.0,
+            200.0,
+            None,
+        );
 
         assert_eq!(height, 400.0);
     }

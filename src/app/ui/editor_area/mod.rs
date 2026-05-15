@@ -3,7 +3,7 @@ pub mod tile;
 
 use crate::app::app_state::ScratchpadApp;
 use crate::app::app_state::SearchStatus;
-use crate::app::commands::AppCommand;
+use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::domain::{PaneBranch, PaneNode, ViewId};
 use crate::app::ui::search_replace;
 use crate::app::ui::tile_header::{self, SplitPreviewOverlay, TileAction};
@@ -25,7 +25,7 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 
             apply_deferred_tile_actions(ui.ctx(), app);
 
-            app.refresh_search_state();
+            crate::app::app_state::search_runtime::refresh_search_state(app);
             search_replace::show_search_strip(ui, app);
             let workspace_rect = ui.available_rect_before_wrap();
             if workspace_rect.width() <= 0.0 || workspace_rect.height() <= 0.0 {
@@ -43,7 +43,7 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             let editor_state = prepare_editor_state(app);
             let render_outcome = render_editor_workspace(ui, app, &editor_state, workspace_rect);
             finalize_editor_render(ui, app, &editor_state, render_outcome);
-            app.refresh_search_state();
+            crate::app::app_state::search_runtime::refresh_search_state(app);
             request_search_repaint(
                 ui.ctx(),
                 matches!(
@@ -87,12 +87,15 @@ fn prepare_editor_state(app: &mut ScratchpadApp) -> EditorRenderState {
         .min(app.tab_manager.tabs.as_slice().len() - 1);
     app.tab_manager
         .set_active_tab_index_clamped(active_tab_index);
-    app.ensure_active_tab_slot_selected();
+    crate::app::app_state::workspace::display_tabs::ensure_active_tab_slot_selected(app);
 
     let pane_tree = app.tab_manager.tabs.as_slice()[active_tab_index]
+        .layout
         .root_pane
         .clone();
-    let active_view_id = app.tab_manager.tabs.as_slice()[active_tab_index].active_view_id;
+    let active_view_id = app.tab_manager.tabs.as_slice()[active_tab_index]
+        .layout
+        .active_view_id;
     let leaf_count = pane_tree.leaf_count();
 
     EditorRenderState {
@@ -198,19 +201,27 @@ fn defer_tile_actions(ctx: &egui::Context, actions: Vec<TileAction>) {
 fn apply_tile_actions(app: &mut ScratchpadApp, actions: Vec<TileAction>) {
     for action in actions {
         let command = match action {
-            TileAction::Activate(view_id) => AppCommand::ActivateView { view_id },
-            TileAction::Close(view_id) => AppCommand::CloseView { view_id },
-            TileAction::Promote(view_id) => AppCommand::PromoteViewToTab { view_id },
-            TileAction::ResizeSplit { path, ratio } => AppCommand::ResizeSplit { path, ratio },
+            TileAction::Activate(view_id) => {
+                AppCommand::Workspace(WorkspaceCommand::ActivateView { view_id })
+            }
+            TileAction::Close(view_id) => {
+                AppCommand::Workspace(WorkspaceCommand::CloseView { view_id })
+            }
+            TileAction::Promote(view_id) => {
+                AppCommand::Workspace(WorkspaceCommand::PromoteViewToTab { view_id })
+            }
+            TileAction::ResizeSplit { path, ratio } => {
+                AppCommand::Workspace(WorkspaceCommand::ResizeSplit { path, ratio })
+            }
             TileAction::Split {
                 axis,
                 new_view_first,
                 ratio,
-            } => AppCommand::SplitActiveView {
+            } => AppCommand::Workspace(WorkspaceCommand::SplitActiveView {
                 axis,
                 new_view_first,
                 ratio,
-            },
+            }),
         };
         app.handle_command(command);
     }
@@ -346,7 +357,10 @@ fn branched_path(path: &[PaneBranch], branch: PaneBranch) -> Vec<PaneBranch> {
 }
 
 fn apply_editor_change(app: &mut ScratchpadApp, state: &EditorRenderState) {
-    app.finalize_active_buffer_text_mutation(state.active_tab_index);
+    crate::app::app_state::workspace::mutation::finalize_active_buffer_text_mutation(
+        app,
+        state.active_tab_index,
+    );
 }
 
 #[cfg(test)]

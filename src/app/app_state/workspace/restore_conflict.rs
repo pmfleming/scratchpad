@@ -2,12 +2,12 @@ use super::super::{
     PendingBackgroundAction, PendingStartupRestoreCompareAction, ScratchpadApp,
     StartupRestoreConflict, StatusDomain,
 };
-use crate::app::commands::AppCommand;
+use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::domain::{BufferFreshness, BufferId, ViewId, WorkspaceTab};
 use crate::app::services::background_io::LoadedPathResult;
 
 pub(crate) fn refresh_startup_restore_conflicts(app: &mut ScratchpadApp) {
-    app.state.startup_restore_conflicts = app
+    let conflicts = app
         .tab_manager
         .tabs
         .as_slice()
@@ -15,18 +15,17 @@ pub(crate) fn refresh_startup_restore_conflicts(app: &mut ScratchpadApp) {
         .enumerate()
         .flat_map(|(tab_index, tab)| collect_tab_restore_conflicts(tab_index, tab))
         .collect();
+    app.state.dialogs.set_startup_restore_conflicts(conflicts);
 }
 
 pub(crate) fn current_startup_restore_conflict(
     app: &ScratchpadApp,
 ) -> Option<&StartupRestoreConflict> {
-    app.state.startup_restore_conflicts.first()
+    app.state.dialogs.current_startup_restore_conflict()
 }
 
 pub(crate) fn dismiss_current_startup_restore_conflict(app: &mut ScratchpadApp) {
-    if !app.state.startup_restore_conflicts.is_empty() {
-        app.state.startup_restore_conflicts.remove(0);
-    }
+    app.state.dialogs.dismiss_current_startup_restore_conflict();
 }
 
 pub(crate) fn keep_session_version_for_current_startup_restore_conflict(app: &mut ScratchpadApp) {
@@ -124,15 +123,15 @@ pub(crate) fn apply_async_startup_restore_compare_result(
     };
 
     if conflict.tab_index < app.tab_manager.tabs.as_slice().len() {
-        app.handle_command(AppCommand::ActivateTab {
+        app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateTab {
             index: conflict.tab_index,
-        });
-        app.handle_command(AppCommand::ActivateView {
+        }));
+        app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateView {
             view_id: conflict.view_id,
-        });
+        }));
     }
 
-    let settings_path = app.settings_path().to_path_buf();
+    let settings_path = crate::app::app_state::settings_state::settings_path(app).to_path_buf();
     if let Some(tab) = app
         .tab_manager
         .tabs
@@ -140,7 +139,7 @@ pub(crate) fn apply_async_startup_restore_compare_result(
         .get_mut(conflict.tab_index)
     {
         tab.clear_view_state_for_buffer_replacement(buffer_id);
-        for view in &mut tab.views {
+        for view in &mut tab.layout.views {
             if view.buffer_id == buffer_id {
                 view.layout_cache.clear();
             }
@@ -156,9 +155,9 @@ pub(crate) fn apply_async_startup_restore_compare_result(
         }
     }
 
-    app.mark_search_dirty();
+    crate::app::app_state::search_runtime::mark_search_dirty(app);
     app.tab_manager.mark_session_dirty();
-    let _ = app.persist_session_now();
+    let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
     app.state.status.set_info_status_in_domain(
         StatusDomain::Disk,
         format!("Loaded disk version of {}.", conflict.buffer_name),
@@ -200,7 +199,8 @@ fn representative_view_id(tab: &WorkspaceTab, buffer_id: BufferId) -> Option<Vie
         .filter(|view| view.buffer_id == buffer_id)
         .map(|view| view.id)
         .or_else(|| {
-            tab.views
+            tab.layout
+                .views
                 .iter()
                 .find(|view| view.buffer_id == buffer_id)
                 .map(|view| view.id)
@@ -210,53 +210,14 @@ fn representative_view_id(tab: &WorkspaceTab, buffer_id: BufferId) -> Option<Vie
 fn take_current_startup_restore_conflict(
     app: &mut ScratchpadApp,
 ) -> Option<StartupRestoreConflict> {
-    if app.state.startup_restore_conflicts.is_empty() {
-        None
-    } else {
-        Some(app.state.startup_restore_conflicts.remove(0))
-    }
+    app.state.dialogs.take_current_startup_restore_conflict()
 }
-
-macro_rules! compat_scratchpad_app_methods {
-    ($type:ty { $($item:item)* }) => {
-        #[allow(dead_code)]
-        impl $type {
-            $($item)*
-        }
-    };
-}
-
-compat_scratchpad_app_methods!(ScratchpadApp {
-    pub(crate) fn refresh_startup_restore_conflicts(&mut self) {
-        refresh_startup_restore_conflicts(self)
-    }
-
-    pub(crate) fn current_startup_restore_conflict(&self) -> Option<&StartupRestoreConflict> {
-        current_startup_restore_conflict(self)
-    }
-
-    pub(crate) fn dismiss_current_startup_restore_conflict(&mut self) {
-        dismiss_current_startup_restore_conflict(self)
-    }
-
-    pub(crate) fn keep_session_version_for_current_startup_restore_conflict(&mut self) {
-        keep_session_version_for_current_startup_restore_conflict(self)
-    }
-
-    pub(crate) fn open_disk_version_for_current_startup_restore_conflict(&mut self) -> bool {
-        open_disk_version_for_current_startup_restore_conflict(self)
-    }
-
-    pub(crate) fn apply_async_startup_restore_compare_result(&mut self, action: PendingStartupRestoreCompareAction, results: Vec<LoadedPathResult>) {
-        apply_async_startup_restore_compare_result(self, action, results)
-    }
-});
 
 #[cfg(test)]
 mod tests {
     use super::{
         BufferFreshness, LoadedPathResult, PendingStartupRestoreCompareAction, ScratchpadApp,
-        StartupRestoreConflict,
+        StartupRestoreConflict, apply_async_startup_restore_compare_result,
     };
     use crate::app::domain::{BufferState, DiskFileState, TabManager, WorkspaceTab};
     use crate::app::services::session_store::SessionStore;
@@ -288,8 +249,8 @@ mod tests {
         restored_buffer.is_dirty = true;
         restored_buffer.mark_conflict_on_disk(Some(disk_state.clone()));
         let tab = WorkspaceTab::new(restored_buffer);
-        let view_id = tab.active_view_id;
-        let buffer_id = tab.buffer.id;
+        let view_id = tab.layout.active_view_id;
+        let buffer_id = tab.buffers.buffer.id;
         app.tab_manager = TabManager {
             tabs: vec![tab],
             active_tab_index: 0,
@@ -310,7 +271,8 @@ mod tests {
         let loaded_buffer =
             BufferState::new("note.txt".to_owned(), "disk".to_owned(), Some(path.clone()));
 
-        app.apply_async_startup_restore_compare_result(
+        apply_async_startup_restore_compare_result(
+            &mut app,
             PendingStartupRestoreCompareAction { conflict },
             vec![LoadedPathResult {
                 path,

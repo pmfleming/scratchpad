@@ -90,8 +90,8 @@ fn replace_all_changes_every_buffer_in_scope() {
     assert!(app.replace_all_search_matches());
     wait_for_search(&mut app);
 
-    assert_eq!(app.tabs()[0].buffer.text(), "bar one");
-    assert_eq!(app.tabs()[1].buffer.text(), "bar two bar");
+    assert_eq!(app.tabs()[0].buffers.buffer.text(), "bar one");
+    assert_eq!(app.tabs()[1].buffers.buffer.text(), "bar two bar");
 }
 
 #[test]

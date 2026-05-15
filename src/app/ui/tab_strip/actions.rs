@@ -2,7 +2,7 @@ mod primary;
 mod vertical;
 
 use super::layout::HeaderLayout;
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{ScratchpadApp, frame};
 use crate::app::chrome::caption_controls;
 use eframe::egui;
 
@@ -21,6 +21,6 @@ pub(crate) fn show_caption_controls(
     layout: &HeaderLayout,
 ) {
     if caption_controls(ui, ctx, layout.caption_controls_width) {
-        app.request_exit(ctx);
+        frame::request_exit(app, ctx);
     }
 }

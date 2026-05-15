@@ -65,6 +65,20 @@ pub struct CapacityMetricsSnapshot {
     pub history_evicted_bytes: u64,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct BackgroundIoLaneMetricsSnapshot {
+    pub requests: u64,
+    pub active_ns: u64,
+    pub max_queue_depth: u64,
+    pub saturation_count: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct FramePhaseMetricsSnapshot {
+    pub total_ns: u64,
+    pub max_ns: u64,
+}
+
 static FULL_TEXT_FLATTEN_COUNT: AtomicU64 = AtomicU64::new(0);
 static FULL_TEXT_FLATTEN_BYTES: AtomicU64 = AtomicU64::new(0);
 static RANGE_FLATTEN_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -140,6 +154,95 @@ pub enum FramePhase {
     Dialogs,
     Shortcuts,
     Finish,
+}
+
+impl CapacityMetricsSnapshot {
+    pub fn background_io_lane(&self, lane: BackgroundIoLane) -> BackgroundIoLaneMetricsSnapshot {
+        match lane {
+            BackgroundIoLane::Path => BackgroundIoLaneMetricsSnapshot {
+                requests: self.background_io_path_requests,
+                active_ns: self.background_io_path_active_ns,
+                max_queue_depth: self.background_io_path_max_queue_depth,
+                saturation_count: self.background_io_path_saturation_count,
+            },
+            BackgroundIoLane::Session => BackgroundIoLaneMetricsSnapshot {
+                requests: self.background_io_session_requests,
+                active_ns: self.background_io_session_active_ns,
+                max_queue_depth: self.background_io_session_max_queue_depth,
+                saturation_count: self.background_io_session_saturation_count,
+            },
+            BackgroundIoLane::Analysis => BackgroundIoLaneMetricsSnapshot {
+                requests: self.background_io_analysis_requests,
+                active_ns: self.background_io_analysis_active_ns,
+                max_queue_depth: self.background_io_analysis_max_queue_depth,
+                saturation_count: self.background_io_analysis_saturation_count,
+            },
+        }
+    }
+
+    pub fn frame_phase(&self, phase: FramePhase) -> FramePhaseMetricsSnapshot {
+        match phase {
+            FramePhase::Prepare => FramePhaseMetricsSnapshot {
+                total_ns: self.frame_prepare_total_ns,
+                max_ns: self.frame_prepare_max_ns,
+            },
+            FramePhase::BackgroundPoll => FramePhaseMetricsSnapshot {
+                total_ns: self.frame_background_poll_total_ns,
+                max_ns: self.frame_background_poll_max_ns,
+            },
+            FramePhase::Paint => FramePhaseMetricsSnapshot {
+                total_ns: self.frame_paint_total_ns,
+                max_ns: self.frame_paint_max_ns,
+            },
+            FramePhase::Chrome => FramePhaseMetricsSnapshot {
+                total_ns: self.frame_chrome_total_ns,
+                max_ns: self.frame_chrome_max_ns,
+            },
+            FramePhase::ActiveSurface => FramePhaseMetricsSnapshot {
+                total_ns: self.frame_active_surface_total_ns,
+                max_ns: self.frame_active_surface_max_ns,
+            },
+            FramePhase::Gutter => FramePhaseMetricsSnapshot {
+                total_ns: self.frame_gutter_total_ns,
+                max_ns: self.frame_gutter_max_ns,
+            },
+            FramePhase::Scroll => FramePhaseMetricsSnapshot {
+                total_ns: self.frame_scroll_total_ns,
+                max_ns: self.frame_scroll_max_ns,
+            },
+            FramePhase::Dialogs => FramePhaseMetricsSnapshot {
+                total_ns: self.frame_dialogs_total_ns,
+                max_ns: self.frame_dialogs_max_ns,
+            },
+            FramePhase::Shortcuts => FramePhaseMetricsSnapshot {
+                total_ns: self.frame_shortcuts_total_ns,
+                max_ns: self.frame_shortcuts_max_ns,
+            },
+            FramePhase::Finish => FramePhaseMetricsSnapshot {
+                total_ns: self.frame_finish_total_ns,
+                max_ns: self.frame_finish_max_ns,
+            },
+        }
+    }
+
+    pub fn frame_time_mean_ns(&self) -> f64 {
+        divide_u64(self.frame_time_total_ns, self.frame_count)
+    }
+
+    pub fn frame_time_percentile_ns(&self, percentile: f64) -> f64 {
+        if self.frame_count == 0 {
+            return 0.0;
+        }
+        let target = ((self.frame_count as f64) * percentile).ceil() as u64;
+        let mut cumulative = 0;
+        for (index, count) in self.frame_time_bucket_counts.iter().enumerate() {
+            cumulative += count;
+            if cumulative >= target {
+                return (((index as u64) + 1) * self.frame_time_bucket_width_ns) as f64;
+            }
+        }
+        self.frame_time_max_ns as f64
+    }
 }
 
 pub fn reset_capacity_metrics() {
@@ -410,6 +513,64 @@ fn update_max(counter: &AtomicU64, value: u64) {
     }
 }
 
+fn divide_u64(total: u64, count: u64) -> f64 {
+    if count == 0 {
+        0.0
+    } else {
+        (total as f64) / (count as f64)
+    }
+}
+
 fn saturating_u64(value: impl TryInto<u64>) -> u64 {
     value.try_into().unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        BackgroundIoLane, CapacityMetricsSnapshot, FramePhase, capacity_metrics_snapshot,
+        record_background_io_lane, record_background_io_queue_depth,
+        record_background_io_saturation, record_frame, record_frame_phase, reset_capacity_metrics,
+    };
+    use std::time::Duration;
+
+    #[test]
+    fn snapshot_groups_background_io_lane_metrics() {
+        reset_capacity_metrics();
+        record_background_io_lane(BackgroundIoLane::Path, Duration::from_millis(2));
+        record_background_io_queue_depth(BackgroundIoLane::Path, 7);
+        record_background_io_saturation(BackgroundIoLane::Path);
+
+        let lane = capacity_metrics_snapshot().background_io_lane(BackgroundIoLane::Path);
+        assert_eq!(lane.requests, 1);
+        assert_eq!(lane.active_ns, 2_000_000);
+        assert_eq!(lane.max_queue_depth, 7);
+        assert_eq!(lane.saturation_count, 1);
+    }
+
+    #[test]
+    fn snapshot_groups_frame_phase_metrics() {
+        reset_capacity_metrics();
+        record_frame_phase(FramePhase::Prepare, Duration::from_millis(10));
+        record_frame_phase(FramePhase::Prepare, Duration::from_millis(3));
+
+        let phase = capacity_metrics_snapshot().frame_phase(FramePhase::Prepare);
+        assert_eq!(phase.total_ns, 13_000_000);
+        assert_eq!(phase.max_ns, 10_000_000);
+    }
+
+    #[test]
+    fn snapshot_reports_frame_time_summary_metrics() {
+        reset_capacity_metrics();
+        record_frame(Duration::from_millis(1));
+        record_frame(Duration::from_millis(3));
+
+        let snapshot = capacity_metrics_snapshot();
+        assert_eq!(snapshot.frame_time_mean_ns(), 2_000_000.0);
+        assert_eq!(snapshot.frame_time_percentile_ns(0.50), 2_000_000.0);
+        assert_eq!(
+            CapacityMetricsSnapshot::default().frame_time_percentile_ns(0.95),
+            0.0
+        );
+    }
 }

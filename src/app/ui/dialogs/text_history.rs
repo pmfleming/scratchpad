@@ -8,7 +8,7 @@ use self::model::{
 };
 use self::persistence::{read_active_tab, read_follow_focus, write_active_tab, write_follow_focus};
 use super::common::show_centered_callout;
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{ScratchpadApp, workspace::mutation as workspace_mutation};
 use crate::app::theme::{action_bg, border, tab_selected_accent, tab_selected_bg};
 use crate::app::ui::settings::dialog_card_frame;
 use crate::app::ui::{callout, settings, widget_ids};
@@ -50,11 +50,11 @@ struct TextHistoryWindowState<'a> {
 }
 
 pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    if !app.state.text_history_open {
+    if !app.state.dialogs.text_history.is_open() {
         return;
     }
 
-    let entries = app.cached_text_history_entries();
+    let entries = workspace_mutation::cached_text_history_entries(app);
     let timeline_rows = timeline_rows_from_entries(entries.iter());
     let file_groups = file_groups_from_entries(entries.iter());
 
@@ -94,14 +94,18 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
         write_follow_focus(ctx, next_follow_focus);
     }
     if close_requested {
-        crate::app::commands::close_text_history(app);
+        crate::app::commands::close_text_history(&mut app.state.dialogs);
     }
     if clear_requested {
-        let _ = app.clear_text_history();
+        let _ = workspace_mutation::clear_text_history(app);
     }
     if let Some(action) = action {
-        let _ =
-            app.apply_text_history_to_entry(action.buffer_id, action.entry_id, next_follow_focus);
+        let _ = workspace_mutation::apply_text_history_to_entry(
+            app,
+            action.buffer_id,
+            action.entry_id,
+            next_follow_focus,
+        );
     }
 }
 

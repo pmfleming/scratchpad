@@ -2,7 +2,7 @@ use super::common::{
     render_dialog_action_button, render_icon_choice_dialog, show_centered_callout,
 };
 use crate::app::app_state::ScratchpadApp;
-use crate::app::commands::AppCommand;
+use crate::app::commands::{AppCommand, FileCommand, WorkspaceCommand};
 use crate::app::domain::{BufferFreshness, PendingAction, ViewId};
 use crate::app::ui::callout;
 use eframe::egui;
@@ -66,7 +66,7 @@ impl SaveConflictDialogState {
 }
 
 pub(crate) fn show_pending_action_modal(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    let Some(action) = app.pending_action() else {
+    let Some(action) = crate::app::app_state::workspace::accessors::pending_action(app) else {
         return;
     };
 
@@ -87,7 +87,7 @@ pub(crate) fn show_pending_action_modal(ctx: &egui::Context, app: &mut Scratchpa
 fn handle_pending_close_tab(ctx: &egui::Context, app: &mut ScratchpadApp, index: usize) {
     match app.tab_manager.tabs.as_slice().get(index) {
         None => clear_pending_action(app),
-        Some(tab) if !tab.buffer.is_dirty => close_pending_tab(app, index),
+        Some(tab) if !tab.buffers.buffer.is_dirty => close_pending_tab(app, index),
         Some(_) => show_close_tab_confirmation(ctx, app, index),
     }
 }
@@ -116,7 +116,11 @@ fn handle_pending_close_view(
 }
 
 fn show_close_tab_confirmation(ctx: &egui::Context, app: &mut ScratchpadApp, index: usize) {
-    let tab_name = app.tab_manager.tabs.as_slice()[index].buffer.name.clone();
+    let tab_name = app.tab_manager.tabs.as_slice()[index]
+        .buffers
+        .buffer
+        .name
+        .clone();
     let mut close_requested = false;
 
     show_centered_callout(
@@ -321,7 +325,10 @@ fn render_save_conflict_dialog(
             state.primary_action_label(),
             "Write the current buffer back to disk",
         ) {
-            app.handle_command(AppCommand::SaveConflictOverwrite { tab_index, view_id });
+            app.handle_command(AppCommand::File(FileCommand::SaveConflictOverwrite {
+                tab_index,
+                view_id,
+            }));
         }
 
         if state.can_reload()
@@ -333,7 +340,10 @@ fn render_save_conflict_dialog(
                 "Discard local buffer state and reload from disk",
             )
         {
-            app.handle_command(AppCommand::ReloadBufferFromDisk { tab_index, view_id });
+            app.handle_command(AppCommand::File(FileCommand::ReloadBufferFromDisk {
+                tab_index,
+                view_id,
+            }));
         }
 
         if render_dialog_action_button(
@@ -343,7 +353,10 @@ fn render_save_conflict_dialog(
             "Save As Copy",
             "Keep this buffer by saving it to a new file",
         ) {
-            app.handle_command(AppCommand::SaveConflictAsCopy { tab_index, view_id });
+            app.handle_command(AppCommand::File(FileCommand::SaveConflictAsCopy {
+                tab_index,
+                view_id,
+            }));
         }
 
         if render_dialog_action_button(
@@ -386,7 +399,10 @@ fn render_missing_file_dialog(
     ) {
         match action {
             MissingFileChoice::Save => {
-                app.handle_command(AppCommand::SaveConflictOverwrite { tab_index, view_id });
+                app.handle_command(AppCommand::File(FileCommand::SaveConflictOverwrite {
+                    tab_index,
+                    view_id,
+                }));
             }
             MissingFileChoice::Discard => close_pending_view(app, tab_index, view_id),
         }
@@ -401,7 +417,7 @@ enum MissingFileChoice {
 
 fn close_pending_tab(app: &mut ScratchpadApp, index: usize) {
     clear_pending_action(app);
-    app.handle_command(AppCommand::CloseTab { index });
+    app.handle_command(AppCommand::Workspace(WorkspaceCommand::CloseTab { index }));
 }
 
 fn close_pending_view(app: &mut ScratchpadApp, tab_index: usize, view_id: ViewId) {
@@ -416,7 +432,7 @@ fn activate_pending_view(app: &mut ScratchpadApp, tab_index: usize, view_id: Vie
 }
 
 fn clear_pending_action(app: &mut ScratchpadApp) {
-    app.set_pending_action(None);
+    crate::app::app_state::workspace::accessors::set_pending_action(app, None);
 }
 
 fn save_conflict_dialog_state(

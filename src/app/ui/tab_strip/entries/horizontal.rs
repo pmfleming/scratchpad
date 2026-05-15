@@ -3,7 +3,7 @@ use super::shared::{
 };
 use super::{DuplicateNameCounts, apply_tab_drag_feedback};
 use crate::app::app_state::ScratchpadApp;
-use crate::app::commands::AppCommand;
+use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::theme::{BUTTON_SIZE, TAB_BUTTON_WIDTH, TAB_HEIGHT, action_bg, action_hover_bg};
 use crate::app::ui::tab_drag::{self, TabDropAxis, TabDropZone, TabRectEntry};
 use crate::app::ui::tab_overflow;
@@ -226,7 +226,7 @@ fn render_new_tab_action(ui: &mut egui::Ui, app: &mut ScratchpadApp, spacing: f3
     )
     .clicked()
     {
-        app.handle_command(AppCommand::NewTab);
+        app.handle_command(AppCommand::Workspace(WorkspaceCommand::NewTab));
     }
 }
 

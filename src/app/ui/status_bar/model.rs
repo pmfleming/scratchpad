@@ -184,7 +184,8 @@ pub(super) fn status_path_min_width(ui: &egui::Ui, app: &ScratchpadApp) -> f32 {
     }
 
     let path_start_x = ui.available_rect_before_wrap().min.x;
-    let tab_border_x = ui.max_rect().left() + app.vertical_tab_list_width();
+    let tab_border_x =
+        ui.max_rect().left() + crate::app::app_state::settings_state::vertical_tab_list_width(app);
     STATUS_PATH_MIN_WIDTH.max(tab_border_x - path_start_x)
 }
 

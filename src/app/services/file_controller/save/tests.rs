@@ -91,7 +91,9 @@ fn save_existing_path_writes_snapshot_and_clears_dirty_state() {
 #[test]
 fn save_existing_path_stops_when_dirty_buffer_conflicts_with_disk() {
     let mut fixture = SavedBufferFixture::dirty("tracked.txt", "original", "ours");
-    let view_id = fixture.app.tab_manager.tabs.as_slice()[0].active_view_id;
+    let view_id = fixture.app.tab_manager.tabs.as_slice()[0]
+        .layout
+        .active_view_id;
     std::fs::write(&fixture.path, "theirs").unwrap();
 
     assert!(!FileController::save_file_at(&mut fixture.app, 0));
@@ -104,7 +106,7 @@ fn save_existing_path_stops_when_dirty_buffer_conflicts_with_disk() {
         BufferFreshness::ConflictOnDisk
     );
     assert_eq!(
-        fixture.app.pending_action(),
+        fixture.crate::app::app_state::workspace::accessors::pending_action(app),
         Some(PendingAction::SaveConflict {
             tab_index: 0,
             view_id
@@ -182,7 +184,12 @@ fn save_completion_keeps_dirty_state_when_buffer_changed_while_write_was_pending
     let mut fixture = SavedBufferFixture::dirty("tracked.txt", "old", "saved");
 
     assert!(FileController::save_file_at(&mut fixture.app, 0));
-    assert!(fixture.app.insert_text_in_active_view("er"));
+    assert!(
+        crate::app::app_state::workspace::editing::insert_text_in_active_view(
+            &mut fixture.app,
+            "er"
+        )
+    );
     fixture.app.wait_for_background_io_idle();
 
     assert_eq!(std::fs::read_to_string(&fixture.path).unwrap(), "saved");

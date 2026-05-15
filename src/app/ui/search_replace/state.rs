@@ -1,6 +1,7 @@
+use crate::app::app_state::workspace::editing as workspace_editing;
 use crate::app::app_state::{
     ScratchpadApp, SearchFocusTarget, SearchFreshness, SearchProgress, SearchReplaceAvailability,
-    SearchResultGroup, SearchScope, SearchScopeOrigin, SearchStatus,
+    SearchResultGroup, SearchScope, SearchScopeOrigin, SearchStatus, search_runtime,
 };
 use crate::app::services::search::SearchMode;
 use crate::app::utils::pluralize;
@@ -60,7 +61,7 @@ pub(super) struct VirtualRows {
 
 impl SearchStripState {
     pub(super) fn from_app(app: &mut ScratchpadApp) -> Self {
-        let requested_focus = app.take_search_focus_target();
+        let requested_focus = search_runtime::take_search_focus_target(app);
         let search_state = &app.state.search_state;
         let match_count = search_state.match_count();
         let progress = search_state.progress();
@@ -79,8 +80,8 @@ impl SearchStripState {
             progress: SearchProgressSnapshot::from_progress(progress),
             result_groups: search_state.result_groups_snapshot(),
             replace_availability: search_state.replace_availability(),
-            can_undo_text_operation: app.active_buffer_can_undo_text_operation(),
-            can_redo_text_operation: app.active_buffer_can_redo_text_operation(),
+            can_undo_text_operation: workspace_editing::active_buffer_can_undo_text_operation(app),
+            can_redo_text_operation: workspace_editing::active_buffer_can_redo_text_operation(app),
             requested_focus,
             retained_focus: requested_focus,
         }

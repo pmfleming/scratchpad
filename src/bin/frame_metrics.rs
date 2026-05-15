@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use scratchpad::app::capacity_metrics::CapacityMetricsSnapshot;
+use scratchpad::app::capacity_metrics::{CapacityMetricsSnapshot, FramePhase};
 use scratchpad::profile::{
     MB, RECOMMENDED_UI_RENDER_FRAME_BYTES, RECOMMENDED_UI_RENDER_FRAME_ITERATIONS,
     ui_render_frame_metrics, ui_scroll_frame_metrics,
@@ -9,6 +9,18 @@ use serde::Serialize;
 
 const UI_RENDER_FRAME_BUDGET_MS: f64 = 8.33;
 const UI_RENDER_FRAME_P99_BUDGET_MS: f64 = 12.0;
+const FRAME_PHASES: [(FramePhase, &str); 10] = [
+    (FramePhase::Prepare, "prepare"),
+    (FramePhase::BackgroundPoll, "background-poll"),
+    (FramePhase::Paint, "paint"),
+    (FramePhase::Chrome, "chrome"),
+    (FramePhase::ActiveSurface, "active-surface"),
+    (FramePhase::Gutter, "gutter"),
+    (FramePhase::Scroll, "scroll"),
+    (FramePhase::Dialogs, "dialogs"),
+    (FramePhase::Shortcuts, "shortcuts"),
+    (FramePhase::Finish, "finish"),
+];
 
 #[derive(Serialize)]
 struct FrameMetricsReport {
@@ -90,10 +102,10 @@ fn frame_scenario(
     bytes: usize,
     workload_family: &'static str,
 ) -> FrameScenario {
-    let mean_ms = ns_to_ms(divide(metrics.frame_time_total_ns, metrics.frame_count));
-    let p50_ms = frame_percentile_ms(metrics, 0.50);
-    let p95_ms = frame_percentile_ms(metrics, 0.95);
-    let p99_ms = frame_percentile_ms(metrics, 0.99);
+    let mean_ms = ns_to_ms(metrics.frame_time_mean_ns());
+    let p50_ms = ns_to_ms(metrics.frame_time_percentile_ns(0.50));
+    let p95_ms = ns_to_ms(metrics.frame_time_percentile_ns(0.95));
+    let p99_ms = ns_to_ms(metrics.frame_time_percentile_ns(0.99));
     FrameScenario {
         scenario_id: scenario_id.to_owned(),
         scenario_label: format!("Editor frame 120 Hz ({})", human_bytes(bytes)),
@@ -107,68 +119,10 @@ fn frame_scenario(
         p99_ms,
         max_ms: ns_to_ms(metrics.frame_time_max_ns as f64),
         over_budget: p95_ms > UI_RENDER_FRAME_BUDGET_MS || p99_ms > UI_RENDER_FRAME_P99_BUDGET_MS,
-        phases: vec![
-            phase(
-                "prepare",
-                metrics.frame_prepare_total_ns,
-                metrics.frame_prepare_max_ns,
-                metrics.frame_count,
-            ),
-            phase(
-                "background-poll",
-                metrics.frame_background_poll_total_ns,
-                metrics.frame_background_poll_max_ns,
-                metrics.frame_count,
-            ),
-            phase(
-                "paint",
-                metrics.frame_paint_total_ns,
-                metrics.frame_paint_max_ns,
-                metrics.frame_count,
-            ),
-            phase(
-                "chrome",
-                metrics.frame_chrome_total_ns,
-                metrics.frame_chrome_max_ns,
-                metrics.frame_count,
-            ),
-            phase(
-                "active-surface",
-                metrics.frame_active_surface_total_ns,
-                metrics.frame_active_surface_max_ns,
-                metrics.frame_count,
-            ),
-            phase(
-                "gutter",
-                metrics.frame_gutter_total_ns,
-                metrics.frame_gutter_max_ns,
-                metrics.frame_count,
-            ),
-            phase(
-                "scroll",
-                metrics.frame_scroll_total_ns,
-                metrics.frame_scroll_max_ns,
-                metrics.frame_count,
-            ),
-            phase(
-                "dialogs",
-                metrics.frame_dialogs_total_ns,
-                metrics.frame_dialogs_max_ns,
-                metrics.frame_count,
-            ),
-            phase(
-                "shortcuts",
-                metrics.frame_shortcuts_total_ns,
-                metrics.frame_shortcuts_max_ns,
-                metrics.frame_count,
-            ),
-            phase(
-                "finish",
-                metrics.frame_finish_total_ns,
-                metrics.frame_finish_max_ns,
-                metrics.frame_count,
-            ),
-        ],
+        phases: FRAME_PHASES
+            .iter()
+            .map(|&(phase, label)| frame_phase_metric(metrics, phase, label))
+            .collect(),
     }
 }
 
@@ -181,35 +135,20 @@ fn human_bytes(bytes: usize) -> String {
     }
 }
 
-fn phase(phase: &'static str, total_ns: u64, max_ns: u64, frame_count: u64) -> FramePhaseMetric {
+fn frame_phase_metric(
+    metrics: &CapacityMetricsSnapshot,
+    phase: FramePhase,
+    label: &'static str,
+) -> FramePhaseMetric {
+    let phase_metrics = metrics.frame_phase(phase);
     FramePhaseMetric {
-        phase,
-        mean_ms: ns_to_ms(divide(total_ns, frame_count)),
-        max_ms: ns_to_ms(max_ns as f64),
-    }
-}
-
-fn frame_percentile_ms(metrics: &CapacityMetricsSnapshot, percentile: f64) -> f64 {
-    if metrics.frame_count == 0 {
-        return 0.0;
-    }
-    let target = ((metrics.frame_count as f64) * percentile).ceil() as u64;
-    let mut cumulative = 0;
-    for (index, count) in metrics.frame_time_bucket_counts.iter().enumerate() {
-        cumulative += count;
-        if cumulative >= target {
-            let bucket_upper_ns = ((index as u64) + 1) * metrics.frame_time_bucket_width_ns;
-            return ns_to_ms(bucket_upper_ns as f64);
-        }
-    }
-    ns_to_ms(metrics.frame_time_max_ns as f64)
-}
-
-fn divide(total_ns: u64, count: u64) -> f64 {
-    if count == 0 {
-        0.0
-    } else {
-        (total_ns as f64) / (count as f64)
+        phase: label,
+        mean_ms: ns_to_ms(if metrics.frame_count == 0 {
+            0.0
+        } else {
+            phase_metrics.total_ns as f64 / metrics.frame_count as f64
+        }),
+        max_ms: ns_to_ms(phase_metrics.max_ns as f64),
     }
 }
 

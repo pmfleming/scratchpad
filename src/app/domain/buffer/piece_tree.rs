@@ -3,23 +3,24 @@ mod edit;
 mod metrics;
 pub(super) mod preview;
 pub(crate) mod query;
+mod runtime;
 mod slice;
+mod storage;
 mod support;
 #[cfg(test)]
 mod tests;
 
 #[cfg(test)]
 pub(crate) use super::history::PIECE_PROVENANCE_ENTRY_LIMIT;
-use super::history::PieceProvenanceStore;
 pub(crate) use super::history::{ByteSpan, PieceProvenance, PieceSource};
 pub use anchor::{AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind};
 
-use std::collections::HashMap;
 use std::ops::Range;
-use std::sync::Arc;
 
-use anchor::{LeafAnchor, LeafId};
+use anchor::{LeafAnchor, LeafId, PieceTreeAnchorState};
 use metrics::sum_node_metrics;
+use runtime::PieceTreeRuntime;
+use storage::PieceTreeStorage;
 use support::{
     build_chunked_pieces, build_root_from_pieces, byte_index_for_char_offset,
     byte_range_for_char_range, line_lookup_in_leaves, measure_text, pack_pieces_into_leaves,
@@ -256,14 +257,10 @@ impl PieceTreeRoot {
 
 #[derive(Clone, Debug)]
 pub struct PieceTreeLite {
-    original: Arc<str>,
-    add: String,
+    storage: PieceTreeStorage,
     root: PieceTreeRoot,
-    generation: u64,
-    anchors: anchor::AnchorRegistry,
-    leaf_indices_by_id: HashMap<LeafId, (usize, usize)>,
-    provenance: PieceProvenanceStore,
-    next_leaf_id: u64,
+    runtime: PieceTreeRuntime,
+    anchor_state: PieceTreeAnchorState,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -288,29 +285,13 @@ impl PieceTreeLite {
     pub fn from_string(text: String) -> Self {
         let pieces = build_chunked_pieces(PieceBuffer::Original, 0, &text);
         let mut tree = Self {
-            original: Arc::from(text.into_boxed_str()),
-            add: String::new(),
+            storage: PieceTreeStorage::from_original(text),
             root: build_root_from_pieces(pieces),
-            generation: 0,
-            anchors: anchor::AnchorRegistry::default(),
-            leaf_indices_by_id: HashMap::new(),
-            provenance: PieceProvenanceStore::default(),
-            next_leaf_id: 1,
+            runtime: PieceTreeRuntime::default(),
+            anchor_state: PieceTreeAnchorState::default(),
         };
         tree.assign_missing_leaf_ids();
         tree
-    }
-
-    fn rebuild_leaf_index(&mut self) {
-        self.leaf_indices_by_id.clear();
-        for (node_index, node) in self.root.nodes.iter().enumerate() {
-            for (leaf_index, leaf) in node.leaves.iter().enumerate() {
-                if !leaf.leaf_id.is_unassigned() {
-                    self.leaf_indices_by_id
-                        .insert(leaf.leaf_id, (node_index, leaf_index));
-                }
-            }
-        }
     }
 
     fn line_scan_start_for_leaf(
@@ -335,11 +316,8 @@ impl PieceTreeLite {
     }
 
     fn refresh_leaf_index_after_structure_change(&mut self) {
-        if self.has_live_anchors() {
-            self.rebuild_leaf_index();
-        } else {
-            self.leaf_indices_by_id.clear();
-        }
+        self.anchor_state
+            .refresh_leaf_index_after_structure_change(&self.root);
     }
 
     pub fn metrics(&self) -> PieceTreeMetrics {
@@ -347,7 +325,7 @@ impl PieceTreeLite {
     }
 
     pub fn provenance_entry_count(&self) -> usize {
-        self.provenance.len()
+        self.storage.provenance_entry_count()
     }
 
     pub fn previews_for_matches(
@@ -359,7 +337,7 @@ impl PieceTreeLite {
     }
 
     pub fn generation(&self) -> u64 {
-        self.generation
+        self.runtime.generation()
     }
 
     pub fn len_bytes(&self) -> usize {
@@ -453,8 +431,8 @@ impl PieceTreeLite {
 
     pub fn extract_text(&self) -> String {
         // Fast path: no edits have been made, original covers the whole buffer.
-        if self.add.is_empty() && self.root.metrics.bytes == self.original.len() {
-            return self.original.to_string();
+        if self.storage.add_is_empty() && self.root.metrics.bytes == self.storage.original_len() {
+            return self.storage.original_text().to_owned();
         }
         self.extract_range(0..self.len_chars())
     }

@@ -7,7 +7,7 @@ mod panels;
 pub mod tab_cell;
 mod top_drag;
 
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{ScratchpadApp, frame};
 use eframe::egui;
 use std::collections::HashSet;
 
@@ -57,7 +57,7 @@ pub(crate) fn maybe_auto_scroll_tab_strip(
         ui,
         scroll_area_id,
         viewport_rect,
-        app.estimated_tab_strip_width(layout.spacing),
+        frame::estimated_tab_strip_width(app, layout.spacing),
         scroll_state,
         crate::app::ui::tab_drag::TabDropAxis::Horizontal,
     );

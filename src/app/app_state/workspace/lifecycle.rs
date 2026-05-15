@@ -1,5 +1,8 @@
 use super::super::{ScratchpadApp, StatusDomain};
 use crate::app::app_state::RECENTLY_CLOSED_FILE_LIMIT;
+use crate::app::app_state::settings_controller;
+use crate::app::app_state::workspace::accessors as workspace_accessors;
+use crate::app::app_state::workspace::mutation as workspace_mutation;
 use crate::app::diagnostics;
 use crate::app::domain::{BufferId, ViewId, WorkspaceTab};
 use crate::app::services::file_controller::FileController;
@@ -10,7 +13,7 @@ use std::path::PathBuf;
 
 pub(crate) fn new_tab(app: &mut ScratchpadApp) {
     create_workspace_tab(app, WorkspaceTab::untitled());
-    let _ = app.persist_session_now();
+    let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
 }
 
 pub(crate) fn open_file(app: &mut ScratchpadApp) {
@@ -29,7 +32,7 @@ pub(crate) fn open_file_here(app: &mut ScratchpadApp) {
 }
 
 pub(crate) fn open_user_manual(app: &mut ScratchpadApp) {
-    let path = app.user_manual_path().to_path_buf();
+    let path = workspace_accessors::user_manual_path(app).to_path_buf();
     if !path.is_file() {
         diagnostics::record_io_error(
             "open_user_manual",
@@ -45,7 +48,7 @@ pub(crate) fn open_user_manual(app: &mut ScratchpadApp) {
         return;
     }
 
-    app.activate_workspace_surface();
+    settings_controller::activate_workspace_surface(app);
     FileController::open_paths_async(app, vec![path]);
 }
 
@@ -60,7 +63,7 @@ pub(crate) fn save_all_files(app: &mut ScratchpadApp) {
         .tabs
         .as_slice()
         .iter()
-        .map(|tab| tab.active_view_id)
+        .map(|tab| tab.layout.active_view_id)
         .collect::<Vec<_>>();
     let targets = save_all_targets(app);
     let had_targets = !targets.is_empty();
@@ -74,7 +77,7 @@ pub(crate) fn save_all_files(app: &mut ScratchpadApp) {
         if FileController::save_file_at(app, tab_index) {
             queued_count += 1;
         }
-        if app.pending_action().is_some() {
+        if crate::app::app_state::workspace::accessors::pending_action(app).is_some() {
             break;
         }
     }
@@ -90,16 +93,18 @@ pub(crate) fn save_all_files(app: &mut ScratchpadApp) {
     {
         tab.activate_view(view_id);
     }
-    app.request_focus_for_active_view();
+    workspace_accessors::request_focus_for_active_view(app);
     if had_targets {
-        if queued_count > 0 && app.pending_action().is_none() {
+        if queued_count > 0
+            && crate::app::app_state::workspace::accessors::pending_action(app).is_none()
+        {
             app.state.status.set_info_status_in_domain(
                 StatusDomain::File,
                 format!("Saving {}.", pluralize(queued_count, "file")),
             );
         }
         app.tab_manager.mark_session_dirty();
-        let _ = app.persist_session_now();
+        let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
     }
 }
 
@@ -117,7 +122,7 @@ pub(crate) fn save_file_as_at(app: &mut ScratchpadApp, index: usize) -> bool {
 
 pub(crate) fn perform_close_tab(app: &mut ScratchpadApp, index: usize) {
     close_tab_internal(app, index);
-    let _ = app.persist_session_now();
+    let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
 }
 
 pub(crate) fn perform_close_tab_no_persist(app: &mut ScratchpadApp, index: usize) {
@@ -134,14 +139,17 @@ pub(crate) fn insert_new_tab_from_settings(app: &mut ScratchpadApp, tab: Workspa
 
 fn create_workspace_tab(app: &mut ScratchpadApp, tab: WorkspaceTab) {
     app.reload_settings_before_workspace_change();
-    app.begin_layout_transition();
+    crate::app::app_state::frame::begin_layout_transition(app);
     let index = new_tab_insert_index(app);
     app.tab_manager.insert_tab(index, tab);
     app.apply_current_tab_ordering();
-    app.activate_workspace_surface();
-    app.select_only_tab_slot(app.active_tab_slot_index());
-    app.mark_search_dirty();
-    app.request_focus_for_active_view();
+    settings_controller::activate_workspace_surface(app);
+    crate::app::app_state::workspace::display_tabs::select_only_tab_slot(
+        app,
+        crate::app::app_state::workspace::display_tabs::active_tab_slot_index(app),
+    );
+    crate::app::app_state::search_runtime::mark_search_dirty(app);
+    workspace_accessors::request_focus_for_active_view(app);
 }
 
 fn new_tab_insert_index(app: &ScratchpadApp) -> usize {
@@ -161,7 +169,11 @@ fn selected_workspace_tab_range(app: &ScratchpadApp) -> (usize, usize) {
         .state
         .workspace_selection
         .selected_slots()
-        .filter_map(|slot_index| app.workspace_index_for_slot(slot_index))
+        .filter_map(|slot_index| {
+            crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(
+                app, slot_index,
+            )
+        })
     {
         first = Some(first.map_or(workspace_index, |first| first.min(workspace_index)));
         last = Some(last.map_or(workspace_index, |last| last.max(workspace_index)));
@@ -190,13 +202,13 @@ fn close_tab_internal(app: &mut ScratchpadApp, index: usize) -> String {
         .unwrap_or_default();
     let tab_description = app.tab_manager.describe_tab_at(index);
     let settings_refresh = app.settings_toml_refresh_on_tab_close(index);
-    app.begin_layout_transition();
+    crate::app::app_state::frame::begin_layout_transition(app);
     app.tab_manager.close_tab_internal(index);
     record_recently_closed_file_paths(app, closed_file_paths);
-    app.prune_text_history_for_buffers(closed_buffer_ids);
-    app.ensure_active_tab_slot_selected();
-    app.mark_search_dirty();
-    app.request_focus_for_active_view();
+    workspace_mutation::prune_text_history_for_buffers(app, closed_buffer_ids);
+    crate::app::app_state::workspace::display_tabs::ensure_active_tab_slot_selected(app);
+    crate::app::app_state::search_runtime::mark_search_dirty(app);
+    workspace_accessors::request_focus_for_active_view(app);
     app.apply_settings_toml_refresh(settings_refresh);
     tab_description
 }
@@ -219,7 +231,7 @@ pub(crate) fn record_recently_closed_file_paths(app: &mut ScratchpadApp, paths: 
 
     app.state.app_settings.workspace.recently_closed_files =
         app.state.recently_closed_files.iter().cloned().collect();
-    if let Err(error) = app.persist_settings_now() {
+    if let Err(error) = crate::app::app_state::settings_state::persist_settings_now(app) {
         app.state.status.report_settings_save_failed(error);
     }
 }
@@ -245,7 +257,7 @@ fn save_all_targets(app: &ScratchpadApp) -> Vec<(usize, ViewId)> {
         .enumerate()
         .flat_map(|(tab_index, tab)| {
             let mut seen = HashSet::<BufferId>::new();
-            tab.views.iter().filter_map(move |view| {
+            tab.layout.views.iter().filter_map(move |view| {
                 if !seen.insert(view.buffer_id) {
                     return None;
                 }

@@ -1,6 +1,6 @@
 use super::WorkspaceTab;
 use crate::app::domain::tab::summary;
-use crate::app::domain::{BufferId, BufferState, EditorViewState, PaneNode, ViewId, tab_support};
+use crate::app::domain::{BufferId, EditorViewState, PaneNode, ViewId, tab_support};
 use std::collections::{HashMap, HashSet};
 
 impl WorkspaceTab {
@@ -15,8 +15,8 @@ impl WorkspaceTab {
         let promoted_buffer =
             self.take_buffer_by_id(plan.promoted_buffer_id, plan.replacement_buffer_id)?;
 
-        self.views = remaining_views;
-        self.active_view_id = plan.remaining_active_view_id;
+        self.layout.views = remaining_views;
+        self.layout.active_view_id = plan.remaining_active_view_id;
         self.sync_active_buffer_to_active_view();
         self.prune_unused_buffers();
 
@@ -29,13 +29,9 @@ impl WorkspaceTab {
     }
 
     pub fn into_tabs_per_file(self) -> Vec<WorkspaceTab> {
-        let WorkspaceTab {
-            buffer,
-            extra_buffers,
-            views,
-            root_pane,
-            active_view_id,
-        } = self;
+        let WorkspaceTab { buffers, layout } = self;
+        let (buffer, extra_buffers) = buffers.into_parts();
+        let (views, root_pane, active_view_id) = layout.into_parts();
 
         let ordered_view_ids = Self::ordered_view_ids(&root_pane);
         let active_buffer_id = Self::active_buffer_id_for_view(&views, active_view_id);
@@ -82,15 +78,15 @@ impl WorkspaceTab {
         let tab_support::ViewIdPartition {
             selected_view_ids: promoted_view_ids,
             remaining_view_ids,
-        } = tab_support::partition_view_ids_by_buffer(&self.views, promoted_buffer_id);
+        } = tab_support::partition_view_ids_by_buffer(&self.layout.views, promoted_buffer_id);
 
         let promoted_root = self.prepare_view_partition(&promoted_view_ids, &remaining_view_ids)?;
         let promoted_active_view_id =
             tab_support::resolve_active_view_id(&promoted_view_ids, view_id, &promoted_root);
         let remaining_active_view_id = tab_support::resolve_active_view_id(
             &remaining_view_ids,
-            self.active_view_id,
-            &self.root_pane,
+            self.layout.active_view_id,
+            &self.layout.root_pane,
         );
         let replacement_buffer_id = self.view(remaining_active_view_id)?.buffer_id;
 
@@ -114,8 +110,9 @@ impl WorkspaceTab {
         }
 
         let promoted_root =
-            tab_support::retained_root_for_views(&self.root_pane, promoted_view_ids)?;
-        self.root_pane
+            tab_support::retained_root_for_views(&self.layout.root_pane, promoted_view_ids)?;
+        self.layout
+            .root_pane
             .retain_views(remaining_view_ids)
             .then_some(promoted_root)
     }
@@ -124,9 +121,10 @@ impl WorkspaceTab {
         &mut self,
         promoted_view_ids: &HashSet<ViewId>,
     ) -> (Vec<EditorViewState>, Vec<EditorViewState>) {
-        let mut remaining_views = Vec::with_capacity(self.views.len() - promoted_view_ids.len());
+        let mut remaining_views =
+            Vec::with_capacity(self.layout.views.len() - promoted_view_ids.len());
         let mut promoted_views = Vec::with_capacity(promoted_view_ids.len());
-        for view in std::mem::take(&mut self.views) {
+        for view in std::mem::take(&mut self.layout.views) {
             if promoted_view_ids.contains(&view.id) {
                 promoted_views.push(view);
             } else {
@@ -140,20 +138,7 @@ impl WorkspaceTab {
         &mut self,
         buffer_id: BufferId,
         replacement_buffer_id: BufferId,
-    ) -> Option<BufferState> {
-        if self.buffer.id == buffer_id {
-            let replacement_index = self
-                .extra_buffers
-                .iter()
-                .position(|buffer| buffer.id == replacement_buffer_id)?;
-            let replacement = self.extra_buffers.swap_remove(replacement_index);
-            Some(std::mem::replace(&mut self.buffer, replacement))
-        } else {
-            let buffer_index = self
-                .extra_buffers
-                .iter()
-                .position(|buffer| buffer.id == buffer_id)?;
-            Some(self.extra_buffers.swap_remove(buffer_index))
-        }
+    ) -> Option<crate::app::domain::BufferState> {
+        self.buffers.take_by_id(buffer_id, replacement_buffer_id)
     }
 }

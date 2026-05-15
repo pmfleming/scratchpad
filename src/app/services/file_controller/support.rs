@@ -127,15 +127,14 @@ impl FileController {
                 .state
                 .status
                 .set_info_status_in_domain(StatusDomain::File, message),
-            None => app.clear_status_message(),
+            None => crate::app::app_state::workspace::accessors::clear_status_message(app),
         }
     }
 
     pub(super) fn mark_settings_buffer(app: &ScratchpadApp, buffer: &mut BufferState) {
-        buffer.is_settings_file = buffer
-            .path
-            .as_ref()
-            .is_some_and(|path| app.is_settings_file_path(path));
+        buffer.is_settings_file = buffer.path.as_ref().is_some_and(|path| {
+            crate::app::app_state::settings_state::is_settings_file_path(app, path)
+        });
     }
 
     pub(super) fn assign_saved_path(buffer: &mut BufferState, path: &Path) {

@@ -22,17 +22,17 @@ fn collect_leaf_area_fractions(node: &PaneNode, area_fraction: f32, output: &mut
 #[test]
 fn splitting_and_closing_views_updates_pane_tree() {
     let mut tab = WorkspaceTab::new(buffer("one.txt", "one"));
-    let original_view = tab.active_view_id;
+    let original_view = tab.layout.active_view_id;
     let split_view = tab.split_active_view(SplitAxis::Vertical).unwrap();
 
-    assert_eq!(tab.views.len(), 2);
-    assert!(tab.root_pane.contains_view(original_view));
-    assert!(tab.root_pane.contains_view(split_view));
+    assert_eq!(tab.layout.views.len(), 2);
+    assert!(tab.layout.root_pane.contains_view(original_view));
+    assert!(tab.layout.root_pane.contains_view(split_view));
 
     assert!(tab.close_view(split_view));
 
-    assert_eq!(tab.views.len(), 1);
-    assert!(tab.root_pane.contains_view(original_view));
+    assert_eq!(tab.layout.views.len(), 1);
+    assert!(tab.layout.root_pane.contains_view(original_view));
 }
 
 #[test]
@@ -44,7 +44,7 @@ fn open_buffer_as_split_tracks_distinct_file_group() {
         .unwrap();
 
     assert_eq!(tab.file_group_count(), 2);
-    assert_eq!(tab.active_view_id, view_id);
+    assert_eq!(tab.layout.active_view_id, view_id);
     assert_eq!(tab.active_buffer().name, "two.txt");
     assert!(tab.display_name().contains("one.txt"));
     assert!(tab.display_name().contains("two.txt"));
@@ -54,14 +54,14 @@ fn open_buffer_as_split_tracks_distinct_file_group() {
 fn combining_tabs_merges_buffers_and_focuses_source_workspace() {
     let mut target = WorkspaceTab::new(buffer("target.txt", "target"));
     let source = WorkspaceTab::new(buffer("source.txt", "source"));
-    let source_active = source.active_view_id;
+    let source_active = source.layout.active_view_id;
 
     let active = target
         .combine_with_tab(source, SplitAxis::Vertical, false, 0.5)
         .unwrap();
 
     assert_eq!(active, source_active);
-    assert_eq!(target.active_view_id, source_active);
+    assert_eq!(target.layout.active_view_id, source_active);
     assert_eq!(target.file_group_count(), 2);
     assert_eq!(target.active_buffer().text(), "source");
 }
@@ -75,7 +75,7 @@ fn rebalancing_views_shares_space_equally() {
     tab.rebalance_views_equally_for_axis(SplitAxis::Vertical);
 
     let mut fractions = Vec::new();
-    collect_leaf_area_fractions(&tab.root_pane, 1.0, &mut fractions);
+    collect_leaf_area_fractions(&tab.layout.root_pane, 1.0, &mut fractions);
     fractions.sort_by(f32::total_cmp);
 
     assert_eq!(fractions.len(), 3);

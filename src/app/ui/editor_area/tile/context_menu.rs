@@ -1,8 +1,13 @@
 mod unicode_menu;
 
 use super::TileRenderRequest;
-use crate::app::app_state::ScratchpadApp;
-use crate::app::commands::AppCommand;
+use crate::app::app_state::{
+    ScratchpadApp,
+    workspace::{accessors as workspace_accessors, editing as workspace_editing},
+};
+use crate::app::commands::{
+    AppCommand, DialogCommand, EditCommand, SearchCommand, WorkspaceCommand,
+};
 use crate::app::domain::SplitAxis;
 use crate::app::theme::{action_bg, action_hover_bg, border, text_primary};
 use crate::app::ui::tile_header::TileAction;
@@ -63,10 +68,10 @@ pub(super) fn activate_inactive_tile_on_secondary_click(
     request: &TileRenderRequest,
 ) {
     if tile_response.secondary_clicked() && !request.is_active {
-        app.handle_command(AppCommand::ActivateView {
+        app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateView {
             view_id: request.view_id,
-        });
-        app.request_focus_for_view(request.view_id);
+        }));
+        workspace_accessors::request_focus_for_view(app, request.view_id);
     }
 }
 
@@ -81,8 +86,8 @@ fn render_standard_edit_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         app,
         "Undo",
         Some(ARROW_COUNTER_CLOCKWISE),
-        app.active_buffer_can_undo_text_operation(),
-        AppCommand::UndoActiveBufferTextOperation,
+        workspace_editing::active_buffer_can_undo_text_operation(app),
+        AppCommand::Edit(EditCommand::UndoActiveBufferTextOperation),
         true,
     );
     run_menu_command(
@@ -90,16 +95,16 @@ fn render_standard_edit_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         app,
         "Redo",
         Some(ARROW_CLOCKWISE),
-        app.active_buffer_can_redo_text_operation(),
-        AppCommand::RedoActiveBufferTextOperation,
+        workspace_editing::active_buffer_can_redo_text_operation(app),
+        AppCommand::Edit(EditCommand::RedoActiveBufferTextOperation),
         true,
     );
     run_context_menu_action(
         ui,
         "Delete",
         Some(TRASH),
-        app.copy_selected_text_in_active_view().is_some(),
-        |_, app| app.delete_selected_text_in_active_view(),
+        workspace_editing::copy_selected_text_in_active_view(app).is_some(),
+        |_, app| workspace_editing::delete_selected_text_in_active_view(app),
         app,
     );
 }
@@ -111,7 +116,7 @@ fn render_history_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         "History",
         Some(CLOCK_COUNTER_CLOCKWISE),
         true,
-        AppCommand::OpenTextHistory,
+        AppCommand::Dialog(DialogCommand::OpenTextHistory),
         false,
     );
 }
@@ -123,7 +128,7 @@ fn render_file_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         "Find",
         Some(MAGNIFYING_GLASS),
         true,
-        AppCommand::OpenSearch,
+        AppCommand::Search(SearchCommand::Open),
         false,
     );
     run_menu_command(
@@ -132,7 +137,7 @@ fn render_file_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         "Replace",
         Some(ARROWS_COUNTER_CLOCKWISE),
         true,
-        AppCommand::OpenSearchAndReplace,
+        AppCommand::Search(SearchCommand::OpenAndReplace),
         false,
     );
 }
@@ -155,7 +160,7 @@ fn render_tile_menu(
 }
 
 fn render_edit_button_rail(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    let selection_available = app.copy_selected_text_in_active_view().is_some();
+    let selection_available = workspace_editing::copy_selected_text_in_active_view(app).is_some();
     let any_action = ui
         .horizontal(|ui| {
             let button_count = 4.0;
@@ -165,22 +170,25 @@ fn render_edit_button_rail(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             ui.add_space(((ui.available_width() - rail_width) * 0.5).max(0.0));
 
             run_icon_rail_action(ui, app, SCISSORS, "Cut", selection_available, |ui, app| {
-                copy_icon_text(ui, app.cut_selected_text_in_active_view())
+                copy_icon_text(ui, workspace_editing::cut_selected_text_in_active_view(app))
             }) || run_icon_rail_action(ui, app, COPY, "Copy", selection_available, |ui, app| {
-                copy_icon_text(ui, app.copy_selected_text_in_active_view())
+                copy_icon_text(
+                    ui,
+                    workspace_editing::copy_selected_text_in_active_view(app),
+                )
             }) || run_icon_rail_action(ui, app, CLIPBOARD_TEXT, "Paste", true, |ui, _| {
                 ui.ctx()
                     .clone()
                     .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
                 true
             }) || run_icon_rail_action(ui, app, SELECTION_ALL, "Select All", true, |_, app| {
-                app.select_all_in_active_view()
+                workspace_editing::select_all_in_active_view(app)
             })
         })
         .inner;
 
     if any_action {
-        app.request_focus_for_active_view();
+        workspace_accessors::request_focus_for_active_view(app);
         ui.close();
     }
 }
@@ -202,7 +210,7 @@ fn run_menu_command(
         |_, app| {
             app.handle_command(command);
             if request_focus {
-                app.request_focus_for_active_view();
+                workspace_accessors::request_focus_for_active_view(app);
             }
             true
         },

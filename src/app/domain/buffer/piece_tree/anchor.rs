@@ -19,7 +19,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use super::{LeafAddress, PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLite};
+use super::{LeafAddress, PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLite, PieceTreeRoot};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AnchorBias {
@@ -120,6 +120,103 @@ pub(super) struct AnchorRegistry {
     entries: HashMap<AnchorId, AnchorEntry>,
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct PieceTreeAnchorState {
+    registry: AnchorRegistry,
+    leaf_indices_by_id: HashMap<LeafId, (usize, usize)>,
+    next_leaf_id: u64,
+}
+
+impl Default for PieceTreeAnchorState {
+    fn default() -> Self {
+        Self {
+            registry: AnchorRegistry::default(),
+            leaf_indices_by_id: HashMap::new(),
+            next_leaf_id: 1,
+        }
+    }
+}
+
+impl PieceTreeAnchorState {
+    pub(super) fn create(
+        &mut self,
+        leaf_id: LeafId,
+        bias: AnchorBias,
+        owner: AnchorOwner,
+    ) -> AnchorId {
+        self.registry.create(leaf_id, bias, owner)
+    }
+
+    pub(super) fn release(&mut self, id: AnchorId) -> Option<AnchorEntry> {
+        self.registry.release(id)
+    }
+
+    pub(super) fn entry(&self, id: AnchorId) -> Option<&AnchorEntry> {
+        self.registry.entry(id)
+    }
+
+    pub(super) fn set_leaf(&mut self, id: AnchorId, leaf_id: LeafId) {
+        self.registry.set_leaf(id, leaf_id);
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.registry.clear();
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.registry.is_empty()
+    }
+
+    pub(super) fn next_leaf_id(&mut self) -> LeafId {
+        LeafId::next(&mut self.next_leaf_id)
+    }
+
+    pub(super) fn rebuild_leaf_index(&mut self, root: &PieceTreeRoot) {
+        self.leaf_indices_by_id.clear();
+        for (node_index, node) in root.nodes.iter().enumerate() {
+            for (leaf_index, leaf) in node.leaves.iter().enumerate() {
+                if !leaf.leaf_id.is_unassigned() {
+                    self.leaf_indices_by_id
+                        .insert(leaf.leaf_id, (node_index, leaf_index));
+                }
+            }
+        }
+    }
+
+    pub(super) fn refresh_leaf_index_after_structure_change(&mut self, root: &PieceTreeRoot) {
+        if self.is_empty() {
+            self.leaf_indices_by_id.clear();
+        } else {
+            self.rebuild_leaf_index(root);
+        }
+    }
+
+    pub(super) fn assign_missing_leaf_ids(&mut self, root: &mut PieceTreeRoot) {
+        let mut assigned = false;
+        for node in &mut root.nodes {
+            for leaf in &mut node.leaves {
+                if leaf.leaf_id.is_unassigned() {
+                    leaf.leaf_id = self.next_leaf_id();
+                    assigned = true;
+                }
+            }
+        }
+        if assigned || self.leaf_indices_by_id.is_empty() {
+            self.rebuild_leaf_index(root);
+        }
+    }
+
+    pub(super) fn find_leaf_indices_by_id(
+        &self,
+        root: &PieceTreeRoot,
+        leaf_id: LeafId,
+    ) -> Option<(usize, usize)> {
+        let (node_index, leaf_index) = self.leaf_indices_by_id.get(&leaf_id).copied()?;
+        let leaf = root.nodes.get(node_index)?.leaves.get(leaf_index)?;
+        (leaf.leaf_id == leaf_id).then_some((node_index, leaf_index))
+    }
+}
+
 impl AnchorRegistry {
     pub(super) fn create(
         &mut self,
@@ -178,7 +275,7 @@ impl PieceTreeLite {
         self.ensure_anchorable_leaf();
         let address = self.find_leaf_for_char_offset(safe);
         let leaf_id = self.root.nodes[address.node_index].leaves[address.leaf_index].leaf_id;
-        let id = self.anchors.create(leaf_id, bias, owner);
+        let id = self.anchor_state.create(leaf_id, bias, owner);
         self.root.nodes[address.node_index].leaves[address.leaf_index]
             .anchors
             .push(LeafAnchor {
@@ -191,7 +288,7 @@ impl PieceTreeLite {
     }
 
     pub fn release_anchor(&mut self, id: AnchorId) {
-        let Some(entry) = self.anchors.release(id) else {
+        let Some(entry) = self.anchor_state.release(id) else {
             return;
         };
         if let Some((node_index, leaf_index)) = self.find_leaf_indices_by_id(entry.leaf_id) {
@@ -209,18 +306,18 @@ impl PieceTreeLite {
     }
 
     pub fn anchor_position(&self, id: AnchorId) -> Option<usize> {
-        let entry = self.anchors.entry(id)?;
+        let entry = self.anchor_state.entry(id)?;
         let (address, leaf) = self.find_leaf_by_id(entry.leaf_id)?;
         let leaf_anchor = leaf.anchors.iter().find(|anchor| anchor.id == id)?;
         Some(address.leaf_start_char + leaf_anchor.local_offset.min(leaf.metrics.chars))
     }
 
     pub fn anchor_bias(&self, id: AnchorId) -> Option<AnchorBias> {
-        self.anchors.entry(id).map(|entry| entry.bias)
+        self.anchor_state.entry(id).map(|entry| entry.bias)
     }
 
     pub fn anchor_owner(&self, id: AnchorId) -> Option<AnchorOwner> {
-        self.anchors.entry(id).map(|entry| entry.owner)
+        self.anchor_state.entry(id).map(|entry| entry.owner)
     }
 
     pub(crate) fn clone_without_anchors(&self) -> Self {
@@ -230,11 +327,11 @@ impl PieceTreeLite {
     }
 
     pub(crate) fn has_live_anchors(&self) -> bool {
-        !self.anchors.is_empty()
+        !self.anchor_state.is_empty()
     }
 
     pub(crate) fn clear_anchors(&mut self) {
-        self.anchors.clear();
+        self.anchor_state.clear();
         for node in &mut self.root.nodes {
             for leaf in &mut node.leaves {
                 leaf.anchors.clear();
@@ -252,18 +349,7 @@ impl PieceTreeLite {
     }
 
     pub(super) fn assign_missing_leaf_ids(&mut self) {
-        let mut assigned = false;
-        for node in &mut self.root.nodes {
-            for leaf in &mut node.leaves {
-                if leaf.leaf_id.is_unassigned() {
-                    leaf.leaf_id = LeafId::next(&mut self.next_leaf_id);
-                    assigned = true;
-                }
-            }
-        }
-        if assigned || self.leaf_indices_by_id.is_empty() {
-            self.rebuild_leaf_index();
-        }
+        self.anchor_state.assign_missing_leaf_ids(&mut self.root);
     }
 
     fn find_leaf_by_id(&self, leaf_id: LeafId) -> Option<(LeafAddress, &PieceTreeLeaf)> {
@@ -274,9 +360,8 @@ impl PieceTreeLite {
     }
 
     fn find_leaf_indices_by_id(&self, leaf_id: LeafId) -> Option<(usize, usize)> {
-        let (node_index, leaf_index) = self.leaf_indices_by_id.get(&leaf_id).copied()?;
-        let leaf = self.root.nodes.get(node_index)?.leaves.get(leaf_index)?;
-        (leaf.leaf_id == leaf_id).then_some((node_index, leaf_index))
+        self.anchor_state
+            .find_leaf_indices_by_id(&self.root, leaf_id)
     }
 
     pub(super) fn address_for_leaf_indices(
@@ -308,7 +393,7 @@ impl PieceTreeLite {
         leaf.anchors
             .iter()
             .filter_map(|anchor| {
-                let entry = self.anchors.entry(anchor.id)?;
+                let entry = self.anchor_state.entry(anchor.id)?;
                 let mut local_offset = anchor.local_offset;
                 if local_offset > insert_local_offset
                     || (local_offset == insert_local_offset
@@ -383,7 +468,7 @@ impl PieceTreeLite {
         let mut current_offset = 0usize;
         for leaf in leaves.iter_mut() {
             if leaf.leaf_id.is_unassigned() {
-                leaf.leaf_id = LeafId::next(&mut self.next_leaf_id);
+                leaf.leaf_id = self.anchor_state.next_leaf_id();
             }
             leaf.anchors.clear();
             leaf_starts.push(current_offset);
@@ -398,7 +483,7 @@ impl PieceTreeLite {
                 .min(leaves.len() - 1);
             let leaf_local_offset = bounded_offset.saturating_sub(leaf_starts[leaf_index]);
             let leaf_id = leaves[leaf_index].leaf_id;
-            self.anchors.set_leaf(anchor.id, leaf_id);
+            self.anchor_state.set_leaf(anchor.id, leaf_id);
             leaves[leaf_index].anchors.push(LeafAnchor {
                 id: anchor.id,
                 local_offset: leaf_local_offset.min(leaves[leaf_index].metrics.chars),

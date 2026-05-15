@@ -76,9 +76,9 @@ impl CapturedSessionTab {
                 temp_id: None,
                 encoding: None,
                 has_bom: None,
-                active_view_id: tab.active_view_id,
-                views: tab.views.iter().map(SessionView::from).collect(),
-                root_pane: SessionPaneNode::from(&tab.root_pane),
+                active_view_id: tab.layout.active_view_id(),
+                views: tab.layout.views().iter().map(SessionView::from).collect(),
+                root_pane: SessionPaneNode::from(tab.layout.root_pane()),
             },
             buffer_snapshots,
         }

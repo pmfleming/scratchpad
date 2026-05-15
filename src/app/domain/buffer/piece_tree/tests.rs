@@ -4,7 +4,6 @@ use super::{
 };
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
-use std::sync::Arc;
 
 #[test]
 fn anchor_left_bias_stays_before_insertion_at_same_offset() {
@@ -68,7 +67,7 @@ fn anchor_stripped_clone_shares_original_text_storage() {
 
     let clone = tree.clone_without_anchors();
 
-    assert!(Arc::ptr_eq(&tree.original, &clone.original));
+    assert!(tree.storage.shares_original_storage_with(&clone.storage));
     assert_eq!(tree.anchor_position(anchor), Some(3));
     assert_eq!(clone.anchor_position(anchor), None);
     assert_eq!(clone.extract_text(), tree.extract_text());

@@ -10,28 +10,24 @@ struct ViewPresentationState {
 
 impl WorkspaceTab {
     pub fn active_view(&self) -> Option<&EditorViewState> {
-        self.view(self.active_view_id)
+        self.layout.active_view()
     }
 
     pub fn active_view_mut(&mut self) -> Option<&mut EditorViewState> {
-        self.view_mut(self.active_view_id)
+        self.layout.active_view_mut()
     }
 
     pub fn line_numbers_visible(&self) -> bool {
-        self.active_view()
-            .map(|view| view.show_line_numbers)
-            .unwrap_or(false)
+        self.layout.line_numbers_visible()
     }
 
     pub fn set_line_numbers_visible(&mut self, visible: bool) {
-        for view in &mut self.views {
-            view.show_line_numbers = visible;
-        }
+        self.layout.set_line_numbers_visible(visible);
     }
 
     pub fn clear_transient_view_state(&mut self) {
         let mut anchors_to_release = Vec::new();
-        for view in &mut self.views {
+        for view in self.layout.views_mut() {
             view.editor_has_focus = false;
             view.latest_display_snapshot = None;
             view.latest_display_snapshot_revision = None;
@@ -52,7 +48,7 @@ impl WorkspaceTab {
 
     pub fn clear_view_state_for_buffer_replacement(&mut self, buffer_id: BufferId) {
         let mut anchors_to_release = Vec::new();
-        for view in &mut self.views {
+        for view in self.layout.views_mut() {
             if view.buffer_id != buffer_id {
                 continue;
             }
@@ -74,19 +70,19 @@ impl WorkspaceTab {
     }
 
     pub fn view(&self, view_id: ViewId) -> Option<&EditorViewState> {
-        self.views.iter().find(|view| view.id == view_id)
+        self.layout.view(view_id)
     }
 
     pub fn view_mut(&mut self, view_id: ViewId) -> Option<&mut EditorViewState> {
-        self.views.iter_mut().find(|view| view.id == view_id)
+        self.layout.view_mut(view_id)
     }
 
     pub fn close_view(&mut self, view_id: ViewId) -> bool {
-        if self.root_pane.leaf_count() <= 1 {
+        if self.layout.leaf_count() <= 1 {
             return false;
         }
 
-        if !self.root_pane.contains_view(view_id) {
+        if !self.layout.contains_view(view_id) {
             return false;
         }
 
@@ -99,21 +95,17 @@ impl WorkspaceTab {
             }
         }
 
-        if !self.root_pane.remove_view(view_id) {
+        if !self.layout.remove_view(view_id) {
             return false;
         }
 
-        self.views.retain(|view| view.id != view_id);
-        if self.active_view_id == view_id {
-            self.active_view_id = self.root_pane.first_view_id();
-        }
         self.sync_active_buffer_to_active_view();
         self.prune_unused_buffers();
         true
     }
 
     pub(crate) fn ordered_view_ids_in_layout_order(&self) -> Vec<ViewId> {
-        Self::ordered_view_ids(&self.root_pane)
+        self.layout.ordered_view_ids()
     }
 
     pub(super) fn ordered_view_ids(root_pane: &PaneNode) -> Vec<ViewId> {
@@ -134,7 +126,7 @@ impl WorkspaceTab {
     ) -> Option<ViewId> {
         let active_buffer_id = self.active_buffer().id;
         self.split_view_for_buffer(
-            self.active_view_id,
+            self.layout.active_view_id(),
             active_buffer_id,
             axis,
             new_view_first,
@@ -149,11 +141,17 @@ impl WorkspaceTab {
         place_after: bool,
         ratio: f32,
     ) -> Option<ViewId> {
-        self.open_buffer_in_view(self.active_view_id, buffer, axis, place_after, ratio)
+        self.open_buffer_in_view(
+            self.layout.active_view_id(),
+            buffer,
+            axis,
+            place_after,
+            ratio,
+        )
     }
 
     pub fn open_buffer_with_balanced_layout(&mut self, buffer: BufferState) -> Option<ViewId> {
-        let (target_view_id, target_depth) = self.root_pane.shallowest_leaf();
+        let (target_view_id, target_depth) = self.layout.root_pane.shallowest_leaf();
         let axis = if target_depth % 2 == 0 {
             SplitAxis::Vertical
         } else {
@@ -173,7 +171,7 @@ impl WorkspaceTab {
     ) -> Option<ViewId> {
         let new_view_id =
             self.split_view_for_buffer(target_view_id, buffer.id, axis, new_view_first, ratio)?;
-        self.extra_buffers.push(buffer);
+        self.buffers.push_extra(buffer);
         self.sync_active_buffer_to_active_view();
         Some(new_view_id)
     }
@@ -185,16 +183,12 @@ impl WorkspaceTab {
         new_view_first: bool,
         ratio: f32,
     ) -> Option<ViewId> {
-        let target_view_id = self.active_view_id;
-        let WorkspaceTab {
-            buffer,
-            extra_buffers,
-            views,
-            root_pane,
-            active_view_id,
-        } = source;
+        let target_view_id = self.layout.active_view_id();
+        let WorkspaceTab { buffers, layout } = source;
+        let (buffer, extra_buffers) = buffers.into_parts();
+        let (views, root_pane, active_view_id) = layout.into_parts();
 
-        if !self.root_pane.split_view_with_node(
+        if !self.layout.root_pane.split_view_with_node(
             target_view_id,
             axis,
             root_pane,
@@ -208,14 +202,14 @@ impl WorkspaceTab {
         for extra_buffer in extra_buffers {
             self.push_buffer_if_missing(extra_buffer);
         }
-        self.views.extend(views);
-        self.active_view_id = active_view_id;
+        self.layout.views.extend(views);
+        self.layout.active_view_id = active_view_id;
         self.sync_active_buffer_to_active_view();
         Some(active_view_id)
     }
 
     pub fn resize_split(&mut self, path: SplitPath, ratio: f32) -> bool {
-        self.root_pane.resize_split(&path, ratio)
+        self.layout.root_pane.resize_split(&path, ratio)
     }
 
     pub fn rebalance_views_equally(&mut self) -> bool {
@@ -223,7 +217,7 @@ impl WorkspaceTab {
     }
 
     pub fn rebalance_views_equally_for_axis(&mut self, root_axis: SplitAxis) -> bool {
-        if self.views.is_empty() {
+        if self.layout.views.is_empty() {
             return false;
         }
 
@@ -233,7 +227,7 @@ impl WorkspaceTab {
             return false;
         };
 
-        self.root_pane = root_pane;
+        self.layout.root_pane = root_pane;
         self.sync_active_buffer_to_active_view()
     }
 
@@ -273,28 +267,8 @@ impl WorkspaceTab {
         let presentation = self.view_presentation_state(target_view_id)?;
         let source_view = self.view(target_view_id)?;
         let new_view = Self::build_split_view(buffer_id, source_view, presentation);
-        self.insert_split_view(target_view_id, axis, new_view, new_view_first, ratio)
-    }
-
-    fn insert_split_view(
-        &mut self,
-        target_view_id: ViewId,
-        axis: SplitAxis,
-        new_view: EditorViewState,
-        new_view_first: bool,
-        ratio: f32,
-    ) -> Option<ViewId> {
-        let new_view_id = new_view.id;
-        if !self
-            .root_pane
-            .split_view(target_view_id, axis, new_view_id, new_view_first, ratio)
-        {
-            return None;
-        }
-
-        self.views.push(new_view);
-        self.active_view_id = new_view_id;
-        Some(new_view_id)
+        self.layout
+            .insert_split_view(target_view_id, axis, new_view, new_view_first, ratio)
     }
 
     fn rebalanced_view_order(&self) -> Vec<ViewId> {
@@ -304,19 +278,20 @@ impl WorkspaceTab {
     }
 
     fn ordered_view_ids_from_layout(&self) -> Vec<ViewId> {
-        let mut ordered_view_ids = Vec::with_capacity(self.views.len());
-        self.root_pane
+        let mut ordered_view_ids = Vec::with_capacity(self.layout.views.len());
+        self.layout
+            .root_pane
             .collect_view_ids_in_order(&mut ordered_view_ids);
         ordered_view_ids
     }
 
     fn append_missing_view_ids(&self, ordered_view_ids: &mut Vec<ViewId>) {
-        if ordered_view_ids.len() >= self.views.len() {
+        if ordered_view_ids.len() >= self.layout.views.len() {
             return;
         }
 
         let mut seen_view_ids = ordered_view_ids.iter().copied().collect::<HashSet<_>>();
-        for view in &self.views {
+        for view in &self.layout.views {
             if seen_view_ids.insert(view.id) {
                 ordered_view_ids.push(view.id);
             }

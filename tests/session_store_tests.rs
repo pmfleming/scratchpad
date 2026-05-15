@@ -25,8 +25,8 @@ fn persists_and_restores_open_tabs() {
 
     assert_eq!(restored.active_tab_index, 1);
     assert_eq!(restored.tabs.len(), 2);
-    assert_eq!(restored.tabs[0].buffer.text(), "one");
-    assert_eq!(restored.tabs[1].buffer.text(), "two");
+    assert_eq!(restored.tabs[0].buffers.buffer.text(), "one");
+    assert_eq!(restored.tabs[1].buffers.buffer.text(), "two");
     assert_eq!(restored.legacy_settings.editor.font_size, 17.0);
     assert!(!restored.legacy_settings.editor.word_wrap);
 }
@@ -40,7 +40,7 @@ fn persists_split_views_and_active_view() {
         "content".to_owned(),
         None,
     ));
-    let first_view = tab.active_view_id;
+    let first_view = tab.layout.active_view_id;
     let second_view = tab.split_active_view(SplitAxis::Vertical).unwrap();
     assert!(tab.activate_view(second_view));
 
@@ -48,9 +48,13 @@ fn persists_split_views_and_active_view() {
     let restored = store.load().unwrap().unwrap();
     let restored_tab = &restored.tabs[0];
 
-    assert_eq!(restored_tab.views.len(), 2);
-    assert_ne!(restored_tab.active_view_id, first_view);
-    assert!(restored_tab.view(restored_tab.active_view_id).is_some());
+    assert_eq!(restored_tab.layout.views.len(), 2);
+    assert_ne!(restored_tab.layout.active_view_id, first_view);
+    assert!(
+        restored_tab
+            .view(restored_tab.layout.active_view_id)
+            .is_some()
+    );
 }
 
 #[test]
@@ -75,8 +79,11 @@ fn restored_clean_buffer_reloads_newer_disk_content() {
     std::fs::write(&file_path, "disk").unwrap();
     let restored = store.load().unwrap().unwrap();
 
-    assert_eq!(restored.tabs[0].buffer.text(), "disk");
-    assert_eq!(restored.tabs[0].buffer.freshness, BufferFreshness::InSync);
+    assert_eq!(restored.tabs[0].buffers.buffer.text(), "disk");
+    assert_eq!(
+        restored.tabs[0].buffers.buffer.freshness,
+        BufferFreshness::InSync
+    );
 }
 
 #[test]
@@ -102,9 +109,9 @@ fn restored_dirty_buffer_keeps_session_text_and_marks_conflict() {
     std::fs::write(&file_path, "disk").unwrap();
     let restored = store.load().unwrap().unwrap();
 
-    assert_eq!(restored.tabs[0].buffer.text(), "session");
+    assert_eq!(restored.tabs[0].buffers.buffer.text(), "session");
     assert_eq!(
-        restored.tabs[0].buffer.freshness,
+        restored.tabs[0].buffers.buffer.freshness,
         BufferFreshness::ConflictOnDisk
     );
 }

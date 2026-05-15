@@ -2,6 +2,7 @@ use super::{
     ScratchpadApp, SettingsUi, action_bg, action_hover_bg, border, category_heading, egui,
     phosphor_button, text_muted, text_primary,
 };
+use crate::app::app_state::settings_controller;
 use crate::app::ui::widget_ids;
 mod card;
 mod layout_state;
@@ -349,7 +350,7 @@ pub(super) fn settings_file_card(
     app: &mut ScratchpadApp,
 ) {
     let mut clicked = false;
-    let settings_path = app.settings_path();
+    let settings_path = crate::app::app_state::settings_state::settings_path(app);
     let settings_path_text = settings_path.display().to_string();
     let settings_path_tail = path_tail_text(settings_path, 3);
 
@@ -399,7 +400,7 @@ pub(super) fn settings_file_card(
     });
 
     if clicked {
-        app.open_settings_file_tab();
+        settings_controller::open_settings_file_tab(app);
     }
 }
 

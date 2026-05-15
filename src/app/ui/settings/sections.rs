@@ -38,7 +38,7 @@ fn render_advanced_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         "Reset to defaults",
         "Restore app defaults.",
         "Reset to defaults",
-        ScratchpadApp::reset_settings_to_defaults,
+        crate::app::app_state::settings_controller::reset_settings_to_defaults,
         app,
     );
 }

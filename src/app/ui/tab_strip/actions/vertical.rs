@@ -1,8 +1,8 @@
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{ScratchpadApp, frame};
 use crate::app::chrome::{
     PhosphorButtonColors, phosphor_button, phosphor_button_with_hover_icon_color,
 };
-use crate::app::commands::AppCommand;
+use crate::app::commands::{AppCommand, FileCommand, SearchCommand};
 use crate::app::theme::{CAPTION_BUTTON_SIZE, CLOSE_HOVER_BG, action_bg, action_hover_bg};
 use eframe::egui;
 
@@ -154,13 +154,13 @@ impl VerticalAction {
 fn handle_vertical_action(ctx: &egui::Context, app: &mut ScratchpadApp, action: VerticalAction) {
     match action {
         VerticalAction::OpenFile => {
-            app.handle_command(AppCommand::OpenFile);
+            app.handle_command(AppCommand::File(FileCommand::OpenFile));
         }
         VerticalAction::SaveFile => {
-            app.handle_command(AppCommand::SaveFile);
+            app.handle_command(AppCommand::File(FileCommand::SaveFile));
         }
         VerticalAction::Search => {
-            app.handle_command(AppCommand::ToggleSearch);
+            app.handle_command(AppCommand::Search(SearchCommand::Toggle));
         }
         VerticalAction::Minimize => {
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
@@ -169,7 +169,7 @@ fn handle_vertical_action(ctx: &egui::Context, app: &mut ScratchpadApp, action: 
             let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
         }
-        VerticalAction::CloseWindow => app.request_exit(ctx),
+        VerticalAction::CloseWindow => frame::request_exit(app, ctx),
     }
 }
 

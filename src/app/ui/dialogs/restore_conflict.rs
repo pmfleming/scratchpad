@@ -1,5 +1,5 @@
 use super::common::{render_icon_choice_dialog, show_centered_callout};
-use crate::app::app_state::{ScratchpadApp, StartupRestoreConflict};
+use crate::app::app_state::{ScratchpadApp, StartupRestoreConflict, workspace::restore_conflict};
 use eframe::egui;
 use egui_phosphor::regular::{FILE_TEXT, FLOPPY_DISK, X};
 
@@ -13,7 +13,7 @@ enum RestoreConflictChoice {
 }
 
 pub(crate) fn show_startup_restore_conflict_modal(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    let Some(conflict) = app.current_startup_restore_conflict().cloned() else {
+    let Some(conflict) = restore_conflict::current_startup_restore_conflict(app).cloned() else {
         return;
     };
 
@@ -31,17 +31,17 @@ pub(crate) fn show_startup_restore_conflict_modal(ctx: &egui::Context, app: &mut
 
     match choice {
         Some(RestoreConflictChoice::OpenDisk) => {
-            let _ = app.open_disk_version_for_current_startup_restore_conflict();
+            let _ = restore_conflict::open_disk_version_for_current_startup_restore_conflict(app);
         }
         Some(RestoreConflictChoice::KeepSession) => {
-            app.keep_session_version_for_current_startup_restore_conflict();
+            restore_conflict::keep_session_version_for_current_startup_restore_conflict(app);
         }
         Some(RestoreConflictChoice::Dismiss) => {
-            app.dismiss_current_startup_restore_conflict();
+            restore_conflict::dismiss_current_startup_restore_conflict(app);
         }
         None => {
             if close_requested {
-                app.dismiss_current_startup_restore_conflict();
+                restore_conflict::dismiss_current_startup_restore_conflict(app);
             }
         }
     }

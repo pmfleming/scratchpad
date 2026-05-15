@@ -1,4 +1,6 @@
-use super::{AppSurface, CHROME_TRANSITION_FRAMES, ScratchpadApp};
+use super::{AppSurface, ScratchpadApp};
+use crate::app::app_state::settings_state;
+use crate::app::app_state::workspace::restore_conflict;
 use crate::app::capacity_metrics::{FramePhase, record_frame_phase};
 use crate::app::chrome::{handle_window_resize, show_window_resize_cursor};
 use crate::app::diagnostics;
@@ -12,16 +14,16 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 pub(crate) fn open_encoding_dialog(app: &mut ScratchpadApp) {
-    app.state.encoding_dialog_choice = app
+    let choice = app
         .tab_manager
         .active_tab()
         .map(|tab| tab.active_buffer().format.encoding_name.clone())
         .unwrap_or_else(|| "UTF-8".to_owned());
-    app.state.encoding_dialog_open = true;
+    app.state.dialogs.encoding.open_with_choice(choice);
 }
 
 pub(crate) fn close_encoding_dialog(app: &mut ScratchpadApp) {
-    app.state.encoding_dialog_open = false;
+    app.state.dialogs.encoding.close();
 }
 
 pub(super) fn handle_pending_close_request(app: &mut ScratchpadApp, ctx: &egui::Context) -> bool {
@@ -52,7 +54,7 @@ pub(super) fn prepare_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
         background_poll_started_at.elapsed(),
     );
     handle_dropped_files(app, ctx);
-    app.apply_theme_to_context(ctx);
+    settings_state::apply_theme_to_context(app, ctx);
     crate::app::ui::widget_ids::configure_debug_options(ctx);
     sync_editor_fonts(app, ctx);
     crate::app::services::session_manager::maybe_persist_session(app, ctx);
@@ -64,7 +66,7 @@ pub(super) fn prepare_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
 
 pub fn prepare_context_before_first_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
     sync_editor_fonts(app, ctx);
-    app.apply_theme_to_context(ctx);
+    settings_state::apply_theme_to_context(app, ctx);
     crate::app::ui::widget_ids::configure_debug_options(ctx);
 }
 
@@ -87,7 +89,7 @@ pub(super) fn render_frame(app: &mut ScratchpadApp, ui: &mut egui::Ui, ctx: &egu
     dialogs::show_pending_action_modal(ctx, app);
     dialogs::show_encoding_window(ctx, app);
     dialogs::show_text_history_window(ctx, app);
-    dialogs::show_status_history_window(ctx, app);
+    dialogs::show_status_history_window(ctx, &mut app.state.dialogs, &app.state.status);
     record_frame_phase(FramePhase::Dialogs, dialogs_started_at.elapsed());
     let shortcuts_started_at = Instant::now();
     shortcuts::handle_shortcuts(app, ctx);
@@ -113,7 +115,7 @@ fn render_tab_chrome(app: &mut ScratchpadApp, ui: &mut egui::Ui) {
 }
 
 fn render_active_surface(app: &mut ScratchpadApp, ui: &mut egui::Ui) {
-    match app.state.active_surface {
+    match app.state.chrome.active_surface() {
         AppSurface::Workspace => editor_area::show_editor(ui, app),
         AppSurface::Settings => settings::show_page(ui, app),
     }
@@ -156,7 +158,7 @@ fn show_window_after_first_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
 }
 
 fn persist_with_error_status(app: &mut ScratchpadApp) -> bool {
-    match app.persist_session_now() {
+    match crate::app::app_state::workspace::accessors::persist_session_now(app) {
         Ok(()) => true,
         Err(error) => {
             app.state.status.report_session_save_failed(error);
@@ -166,7 +168,7 @@ fn persist_with_error_status(app: &mut ScratchpadApp) -> bool {
 }
 
 pub(crate) fn begin_chrome_transition(app: &mut ScratchpadApp) {
-    app.state.chrome_transition_frames_remaining = CHROME_TRANSITION_FRAMES;
+    app.state.chrome.transition.begin();
 }
 
 pub(crate) fn begin_layout_transition(app: &mut ScratchpadApp) {
@@ -174,21 +176,17 @@ pub(crate) fn begin_layout_transition(app: &mut ScratchpadApp) {
 }
 
 pub(crate) fn chrome_transition_active(app: &ScratchpadApp) -> bool {
-    app.state.chrome_transition_frames_remaining > 0
+    app.state.chrome.transition.is_active()
 }
 
 fn modal_callout_open(app: &ScratchpadApp) -> bool {
-    app.state.encoding_dialog_open
-        || app.state.text_history_open
-        || app.state.status_history_open
-        || app.pending_action().is_some()
-        || app.current_startup_restore_conflict().is_some()
+    app.state.dialogs.any_modal_open()
+        || crate::app::app_state::workspace::accessors::pending_action(app).is_some()
+        || restore_conflict::current_startup_restore_conflict(app).is_some()
 }
 
 fn finish_frame_transitions(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    if app.state.chrome_transition_frames_remaining > 0 {
-        app.state.chrome_transition_frames_remaining -= 1;
-    }
+    app.state.chrome.transition.finish_frame();
     transition::set_chrome_transition_active(ctx, chrome_transition_active(app));
     if chrome_transition_active(app) {
         ctx.request_repaint();
@@ -199,13 +197,13 @@ fn apply_deferred_layout_settings(app: &mut ScratchpadApp, ctx: &egui::Context) 
     if ctx.current_pass_index() != 0 {
         return;
     }
-    if let Some(visible) = app.state.pending_status_bar_visible.take() {
+    if let Some(visible) = app.state.chrome.take_pending_status_bar_visible() {
         crate::app::app_state::settings_controller::set_status_bar_visible(app, visible);
     }
 }
 
 pub(crate) fn estimated_tab_strip_width(app: &ScratchpadApp, spacing: f32) -> f32 {
-    let tab_count = app.total_tab_slots();
+    let tab_count = crate::app::app_state::workspace::display_tabs::total_tab_slots(app);
     if tab_count > 0 {
         (tab_count as f32 * crate::app::theme::TAB_BUTTON_WIDTH)
             + ((tab_count.saturating_sub(1)) as f32 * spacing)
@@ -231,7 +229,7 @@ pub(crate) fn request_exit(app: &mut ScratchpadApp, ctx: &egui::Context) {
 }
 
 fn persist_settings_with_error_status(app: &mut ScratchpadApp) -> bool {
-    match app.persist_settings_now() {
+    match crate::app::app_state::settings_state::persist_settings_now(app) {
         Ok(()) => true,
         Err(error) => {
             app.state.status.report_settings_save_failed(error);
@@ -241,7 +239,7 @@ fn persist_settings_with_error_status(app: &mut ScratchpadApp) -> bool {
 }
 
 pub(crate) fn window_title(app: &ScratchpadApp) -> String {
-    if app.showing_settings() {
+    if crate::app::app_state::settings_state::showing_settings(app) {
         return "Settings - Scratchpad".to_owned();
     }
 
@@ -287,7 +285,7 @@ fn sync_editor_fonts(app: &mut ScratchpadApp, ctx: &egui::Context) {
 
 fn clear_editor_layout_caches(app: &mut ScratchpadApp) {
     for tab in app.tab_manager.tabs.as_mut_slice() {
-        for view in &mut tab.views {
+        for view in tab.layout.views_mut() {
             view.layout_cache.clear();
         }
     }
@@ -303,65 +301,6 @@ fn dropped_file_paths(dropped_files: &[egui::DroppedFile]) -> Vec<PathBuf> {
         .filter_map(|file| file.path.clone())
         .collect()
 }
-
-macro_rules! compat_scratchpad_app_methods {
-    ($type:ty { $($item:item)* }) => {
-        #[allow(dead_code)]
-        impl $type {
-            $($item)*
-        }
-    };
-}
-
-compat_scratchpad_app_methods!(ScratchpadApp {
-    pub(crate) fn open_encoding_dialog(&mut self) {
-        open_encoding_dialog(self)
-    }
-
-    pub(crate) fn close_encoding_dialog(&mut self) {
-        close_encoding_dialog(self)
-    }
-
-    pub(super) fn handle_pending_close_request(&mut self, ctx: &egui::Context) -> bool {
-        handle_pending_close_request(self, ctx)
-    }
-
-    pub(super) fn prepare_frame(&mut self, ctx: &egui::Context) {
-        prepare_frame(self, ctx)
-    }
-
-    pub fn prepare_context_before_first_frame(&mut self, ctx: &egui::Context) {
-        prepare_context_before_first_frame(self, ctx)
-    }
-
-    pub(super) fn render_frame(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        render_frame(self, ui, ctx)
-    }
-
-    pub(crate) fn begin_chrome_transition(&mut self) {
-        begin_chrome_transition(self)
-    }
-
-    pub(crate) fn begin_layout_transition(&mut self) {
-        begin_layout_transition(self)
-    }
-
-    pub(crate) fn chrome_transition_active(&self) -> bool {
-        chrome_transition_active(self)
-    }
-
-    pub(crate) fn estimated_tab_strip_width(&self, spacing: f32) -> f32 {
-        estimated_tab_strip_width(self, spacing)
-    }
-
-    pub(crate) fn request_exit(&mut self, ctx: &egui::Context) {
-        request_exit(self, ctx)
-    }
-
-    pub(crate) fn window_title(&self) -> String {
-        window_title(self)
-    }
-});
 
 #[cfg(test)]
 mod tests {

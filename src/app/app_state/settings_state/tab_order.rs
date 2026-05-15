@@ -19,7 +19,7 @@ impl ScratchpadApp {
         } else {
             self.apply_current_tab_ordering();
         }
-        self.persist_settings_or_error();
+        super::mutators::persist_settings_or_error(self);
     }
 
     pub(crate) fn set_tab_order_direction(&mut self, direction: TabOrderDirection) {
@@ -29,14 +29,14 @@ impl ScratchpadApp {
 
         self.state.app_settings.workspace.tab_order_direction = direction;
         self.apply_current_tab_ordering();
-        self.persist_settings_or_error();
+        super::mutators::persist_settings_or_error(self);
     }
 
     pub(crate) fn apply_workspace_tab_order(&mut self, workspace_order: Vec<usize>) {
         if self.apply_workspace_tab_order_internal(workspace_order, false) {
             self.state.app_settings.workspace.tab_order_mode = TabOrderMode::Custom;
             self.remember_current_custom_tab_order();
-            self.persist_settings_or_error();
+            super::mutators::persist_settings_or_error(self);
         }
     }
 
@@ -48,7 +48,7 @@ impl ScratchpadApp {
             };
         let reordered = self.apply_workspace_tab_order_internal(workspace_order, false);
         if reordered {
-            self.begin_layout_transition();
+            crate::app::app_state::frame::begin_layout_transition(self);
         }
         reordered
     }
@@ -83,11 +83,11 @@ impl ScratchpadApp {
         self.tab_manager
             .set_active_tab_index_clamped(reordered_active_tab_index);
         self.tab_manager.rebuild_buffer_tab_index();
-        self.ensure_active_tab_slot_selected();
+        crate::app::app_state::workspace::display_tabs::ensure_active_tab_slot_selected(self);
         self.tab_manager.pending_scroll_to_active = true;
         self.tab_manager.mark_session_dirty();
         if persist_settings {
-            self.persist_settings_or_error();
+            super::mutators::persist_settings_or_error(self);
         }
         true
     }
@@ -98,7 +98,7 @@ impl ScratchpadApp {
             .tabs
             .as_slice()
             .iter()
-            .map(|tab| tab.buffer.id)
+            .map(|tab| tab.buffers.buffer.id)
             .collect();
     }
 
@@ -106,7 +106,7 @@ impl ScratchpadApp {
         let workspace_order = workspace_tab_order_from_saved_custom_order(self);
         let reordered = self.apply_workspace_tab_order_internal(workspace_order, false);
         if reordered {
-            self.begin_layout_transition();
+            crate::app::app_state::frame::begin_layout_transition(self);
         }
         reordered
     }
@@ -174,14 +174,14 @@ fn compare_file_name_tabs(context: &TabOrderContext<'_>, left: usize, right: usi
     let right_tab = context.tab(right);
     order_direction_cmp(
         context.direction,
-        left_tab.buffer.name.to_ascii_lowercase(),
-        right_tab.buffer.name.to_ascii_lowercase(),
+        left_tab.buffers.buffer.name.to_ascii_lowercase(),
+        right_tab.buffers.buffer.name.to_ascii_lowercase(),
     )
     .then_with(|| {
         order_direction_cmp(
             context.direction,
-            left_tab.buffer.name.as_str(),
-            right_tab.buffer.name.as_str(),
+            left_tab.buffers.buffer.name.as_str(),
+            right_tab.buffers.buffer.name.as_str(),
         )
     })
     .then_with(|| {
@@ -205,8 +205,8 @@ fn compare_file_size_tabs(context: &TabOrderContext<'_>, left: usize, right: usi
     .then_with(|| {
         order_direction_cmp(
             context.direction,
-            left_tab.buffer.name.to_ascii_lowercase(),
-            right_tab.buffer.name.to_ascii_lowercase(),
+            left_tab.buffers.buffer.name.to_ascii_lowercase(),
+            right_tab.buffers.buffer.name.to_ascii_lowercase(),
         )
     })
     .then_with(|| context.custom_rank_cmp(left, right))
@@ -255,7 +255,8 @@ fn tab_latest_edit_sequence(tab: &WorkspaceTab) -> u64 {
 }
 
 fn tab_saved_millis(tab: &WorkspaceTab) -> u64 {
-    tab.buffer
+    tab.buffers
+        .buffer
         .disk_state
         .as_ref()
         .and_then(|state| state.modified_millis)
@@ -270,7 +271,7 @@ fn workspace_tab_order_from_saved_custom_order(app: &ScratchpadApp) -> Vec<usize
             .tabs
             .as_slice()
             .iter()
-            .position(|tab| tab.buffer.id == *buffer_id)
+            .position(|tab| tab.buffers.buffer.id == *buffer_id)
             && !order.contains(&index)
         {
             order.push(index);
@@ -294,7 +295,8 @@ fn custom_order_ranks(app: &ScratchpadApp) -> Vec<usize> {
 }
 
 fn tab_path_label(tab: &WorkspaceTab) -> String {
-    tab.buffer
+    tab.buffers
+        .buffer
         .path
         .as_ref()
         .map(|path| path.display().to_string())
@@ -333,7 +335,7 @@ mod tests {
 
         assert_eq!(tab_names(&app), ["Alpha.txt", "beta.txt", "zeta.txt"]);
         assert_eq!(
-            app.tab_manager.active_tab().unwrap().buffer.name,
+            app.tab_manager.active_tab().unwrap().buffers.buffer.name,
             "zeta.txt"
         );
     }
@@ -341,11 +343,11 @@ mod tests {
     #[test]
     fn file_age_order_uses_disk_modified_time_and_treats_unsaved_tabs_as_newest() {
         let mut app = test_app(["newer.txt", "untitled", "older.txt"]);
-        app.tab_manager.tabs[0].buffer.disk_state = Some(DiskFileState {
+        app.tab_manager.tabs[0].buffers.buffer.disk_state = Some(DiskFileState {
             modified_millis: Some(300),
             len: 0,
         });
-        app.tab_manager.tabs[2].buffer.disk_state = Some(DiskFileState {
+        app.tab_manager.tabs[2].buffers.buffer.disk_state = Some(DiskFileState {
             modified_millis: Some(100),
             len: 0,
         });
@@ -362,15 +364,16 @@ mod tests {
     #[test]
     fn file_size_order_uses_disk_size_and_falls_back_to_buffer_text() {
         let mut app = test_app(["large.txt", "small.txt", "draft.txt"]);
-        app.tab_manager.tabs[0].buffer.disk_state = Some(DiskFileState {
+        app.tab_manager.tabs[0].buffers.buffer.disk_state = Some(DiskFileState {
             modified_millis: None,
             len: 300,
         });
-        app.tab_manager.tabs[1].buffer.disk_state = Some(DiskFileState {
+        app.tab_manager.tabs[1].buffers.buffer.disk_state = Some(DiskFileState {
             modified_millis: None,
             len: 10,
         });
         app.tab_manager.tabs[2]
+            .buffers
             .buffer
             .replace_text("medium sized draft".to_owned());
 
@@ -382,20 +385,20 @@ mod tests {
     #[test]
     fn recent_edit_order_uses_latest_text_history_sequence_then_save_date() {
         let mut app = test_app(["alpha.txt", "beta.txt", "gamma.txt"]);
-        app.tab_manager.tabs[0].buffer.disk_state = Some(DiskFileState {
+        app.tab_manager.tabs[0].buffers.buffer.disk_state = Some(DiskFileState {
             modified_millis: Some(300),
             len: 0,
         });
-        app.tab_manager.tabs[1].buffer.disk_state = Some(DiskFileState {
+        app.tab_manager.tabs[1].buffers.buffer.disk_state = Some(DiskFileState {
             modified_millis: Some(100),
             len: 0,
         });
-        app.tab_manager.tabs[2].buffer.disk_state = Some(DiskFileState {
+        app.tab_manager.tabs[2].buffers.buffer.disk_state = Some(DiskFileState {
             modified_millis: Some(200),
             len: 0,
         });
-        record_edit(&mut app.tab_manager.tabs[1].buffer, "b");
-        record_edit(&mut app.tab_manager.tabs[2].buffer, "g");
+        record_edit(&mut app.tab_manager.tabs[1].buffers.buffer, "b");
+        record_edit(&mut app.tab_manager.tabs[2].buffers.buffer, "g");
 
         app.set_tab_order_mode(TabOrderMode::RecentEdit);
 
@@ -411,7 +414,9 @@ mod tests {
         let mut app = test_app(["alpha.txt", "beta.txt", "gamma.txt"]);
         app.set_tab_order_mode(TabOrderMode::FileName);
 
-        assert!(app.reorder_display_tab(0, 2));
+        assert!(
+            crate::app::app_state::workspace::display_tabs::reorder_display_tab(&mut app, 0, 2)
+        );
 
         assert_eq!(
             app.state.app_settings.tab_order_mode(),
@@ -435,15 +440,15 @@ mod tests {
     #[test]
     fn custom_order_survives_switching_between_automatic_modes() {
         let mut app = test_app(["zeta.txt", "Alpha.txt", "beta.txt"]);
-        app.tab_manager.tabs[0].buffer.disk_state = Some(DiskFileState {
+        app.tab_manager.tabs[0].buffers.buffer.disk_state = Some(DiskFileState {
             modified_millis: Some(300),
             len: 0,
         });
-        app.tab_manager.tabs[1].buffer.disk_state = Some(DiskFileState {
+        app.tab_manager.tabs[1].buffers.buffer.disk_state = Some(DiskFileState {
             modified_millis: Some(100),
             len: 0,
         });
-        app.tab_manager.tabs[2].buffer.disk_state = Some(DiskFileState {
+        app.tab_manager.tabs[2].buffers.buffer.disk_state = Some(DiskFileState {
             modified_millis: Some(200),
             len: 0,
         });
@@ -476,7 +481,7 @@ mod tests {
             cold_session_tabs: Default::default(),
         };
         app.tab_manager.rebuild_buffer_tab_index();
-        app.clear_tab_selection();
+        crate::app::app_state::workspace::display_tabs::clear_tab_selection(app);
         app
     }
 
@@ -489,7 +494,7 @@ mod tests {
             .tabs
             .as_slice()
             .iter()
-            .map(|tab| tab.buffer.name.clone())
+            .map(|tab| tab.buffers.buffer.name.clone())
             .collect()
     }
 

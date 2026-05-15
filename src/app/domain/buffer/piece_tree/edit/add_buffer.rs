@@ -1,20 +1,19 @@
-use super::super::{ByteSpan, PieceBuffer, PieceProvenance, PieceSource, PieceTreeLite};
+use super::super::{
+    ByteSpan, PieceBuffer, PieceProvenance, PieceSource, PieceTreeLite, storage::add_byte_span,
+};
 use std::collections::HashMap;
 
 impl PieceTreeLite {
     pub fn append_history_text(&mut self, text: &str, source: PieceSource) -> ByteSpan {
-        let start = self.add.len();
-        self.add.push_str(text);
-        self.record_add_provenance(start, text.len(), source);
-        add_byte_span(start, text.len())
+        self.storage
+            .append_add_text(text, source, self.runtime.generation())
+            .byte_span()
     }
 
     pub fn compact_add_buffer(&mut self, history_spans: &mut [ByteSpan]) {
-        if self.add.is_empty() {
+        let Some(old_add) = self.storage.take_add_if_nonempty() else {
             return;
-        }
-
-        let old_add = std::mem::take(&mut self.add);
+        };
         let mut new_add = String::with_capacity(old_add.len());
         let mut relocated = HashMap::<ByteSpan, ByteSpan>::new();
         let mut provenance_moves = Vec::<(ByteSpan, ByteSpan)>::new();
@@ -33,29 +32,13 @@ impl PieceTreeLite {
             &mut provenance_moves,
         );
 
-        self.provenance.rewrite_add_spans(provenance_moves);
-        self.add = new_add;
+        self.storage.rewrite_add_spans(provenance_moves);
+        self.storage.replace_add(new_add);
         self.root.recalculate();
     }
 
     pub fn provenance_for_span(&self, span: ByteSpan) -> PieceProvenance {
-        self.provenance.provenance_for(span)
-    }
-
-    pub(super) fn record_add_provenance(
-        &mut self,
-        start_byte: usize,
-        byte_len: usize,
-        source: PieceSource,
-    ) {
-        self.provenance.record(
-            add_byte_span(start_byte, byte_len),
-            PieceProvenance {
-                change_id: self.generation,
-                source,
-                session_generation: 0,
-            },
-        );
+        self.storage.provenance_for_span(span)
     }
 
     fn relocate_visible_add_pieces(
@@ -110,12 +93,4 @@ fn move_add_text(old_add: &str, new_add: &mut String, old_span: ByteSpan) -> Byt
     let new_start = new_add.len();
     new_add.push_str(&old_add[old_start..old_end]);
     add_byte_span(new_start, old_span.byte_len as usize)
-}
-
-fn add_byte_span(start_byte: usize, byte_len: usize) -> ByteSpan {
-    ByteSpan {
-        buffer: PieceBuffer::Add,
-        start_byte: start_byte.min(u32::MAX as usize) as u32,
-        byte_len: byte_len.min(u32::MAX as usize) as u32,
-    }
 }

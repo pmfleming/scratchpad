@@ -1,3 +1,4 @@
+use crate::app::app_state::workspace::{accessors as workspace_accessors, display_tabs};
 use crate::app::chrome::{
     TabButtonOptions, tab_button, tab_button_with_actions, tab_rename_editor_sized,
 };
@@ -39,14 +40,14 @@ pub(crate) fn render_tab_cell_sized(
     props: TabCellProps<'_>,
 ) -> TabCellOutcome {
     widget_ids::surface_scope(ui, ("tab_strip.slot", index), |ui| {
-        if app.tab_rename_matches_slot(index) {
+        if workspace_accessors::tab_rename_matches_slot(app, index) {
             return render_tab_rename_cell(ui, app, index, props);
         }
 
         let (tab_response, promote_response, close_response, truncated) =
             tab_button_with_width(ui, index, &props);
         let tab_response = maybe_attach_tab_tooltip(tab_response, props.tooltip, truncated);
-        let dragged_slots = app.dragged_tab_slots(index);
+        let dragged_slots = display_tabs::dragged_tab_slots(app, index);
         tab_drag::begin_tab_drag_if_needed(
             ui,
             index,
@@ -67,7 +68,7 @@ pub(crate) fn render_tab_cell_sized(
         } else if close_response.clicked() {
             TabInteraction::RequestClose(index)
         } else if tab_response.double_clicked() {
-            app.select_only_tab_slot(index);
+            display_tabs::select_only_tab_slot(app, index);
             TabInteraction::BeginRename(index)
         } else if tab_response.clicked() {
             primary_click_interaction(ui, app, index)
@@ -90,13 +91,13 @@ fn primary_click_interaction(
 ) -> TabInteraction {
     let modifiers = ui.input(|input| input.modifiers);
     if modifiers.shift {
-        app.select_tab_slot_range(index);
+        display_tabs::select_tab_slot_range(app, index);
         TabInteraction::Activate(index)
     } else if modifiers.command || modifiers.ctrl {
-        app.toggle_tab_slot_selection(index);
+        display_tabs::toggle_tab_slot_selection(app, index);
         TabInteraction::None
     } else {
-        app.select_only_tab_slot(index);
+        display_tabs::select_only_tab_slot(app, index);
         TabInteraction::Activate(index)
     }
 }
@@ -107,10 +108,9 @@ fn render_tab_rename_cell(
     index: usize,
     props: TabCellProps<'_>,
 ) -> TabCellOutcome {
-    let request_focus = app.take_tab_rename_focus_request_for_slot(index);
+    let request_focus = workspace_accessors::take_tab_rename_focus_request_for_slot(app, index);
     let (rect, response) = {
-        let draft = app
-            .tab_rename_draft_mut()
+        let draft = workspace_accessors::tab_rename_draft_mut(app)
             .expect("rename draft should exist for matching tab slot");
         tab_rename_editor_sized(
             ui,
@@ -133,9 +133,11 @@ fn render_tab_rename_cell(
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
 
     if pressed_escape {
-        app.cancel_tab_rename();
-    } else if (pressed_enter || response.lost_focus()) && !app.commit_tab_rename() {
-        app.request_tab_rename_focus();
+        workspace_accessors::cancel_tab_rename(app);
+    } else if (pressed_enter || response.lost_focus())
+        && !workspace_accessors::commit_tab_rename(app)
+    {
+        workspace_accessors::request_tab_rename_focus(app);
     }
 
     TabCellOutcome {

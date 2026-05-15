@@ -40,7 +40,7 @@ pub(crate) fn select_all_in_active_view(app: &mut ScratchpadApp) -> bool {
     let (total_chars, active_view_id) = match app.tab_manager.active_tab() {
         Some(tab) => (
             tab.active_buffer().current_file_length().chars,
-            tab.active_view_id,
+            tab.layout.active_view_id,
         ),
         None => return false,
     };
@@ -67,20 +67,26 @@ pub(crate) fn copy_selected_text_in_active_view(app: &ScratchpadApp) -> Option<S
 
 pub(crate) fn cut_selected_text_in_active_view(app: &mut ScratchpadApp) -> Option<String> {
     let active_tab_index = app.tab_manager.active_tab_index;
-    let active_view_id = app.tab_manager.active_tab()?.active_view_id;
+    let active_view_id = app.tab_manager.active_tab()?.layout.active_view_id;
     let (next_selection, selected_text) =
         cut_active_view_selection(app, active_tab_index, active_view_id)?;
 
-    app.finalize_active_buffer_text_mutation(active_tab_index);
-    app.refresh_search_state();
-    app.select_next_active_buffer_match_from(next_selection.primary.index);
+    crate::app::app_state::workspace::mutation::finalize_active_buffer_text_mutation(
+        app,
+        active_tab_index,
+    );
+    crate::app::app_state::search_runtime::refresh_search_state(app);
+    crate::app::app_state::search_visual::select_next_active_buffer_match_from(
+        app,
+        next_selection.primary.index,
+    );
     Some(selected_text)
 }
 
 pub(crate) fn delete_selected_text_in_active_view(app: &mut ScratchpadApp) -> bool {
     let active_tab_index = app.tab_manager.active_tab_index;
     let active_view_id = match app.tab_manager.active_tab() {
-        Some(tab) => tab.active_view_id,
+        Some(tab) => tab.layout.active_view_id,
         None => return false,
     };
     let Some(next_selection) = delete_active_view_selection(app, active_tab_index, active_view_id)
@@ -88,16 +94,22 @@ pub(crate) fn delete_selected_text_in_active_view(app: &mut ScratchpadApp) -> bo
         return false;
     };
 
-    app.finalize_active_buffer_text_mutation(active_tab_index);
-    app.refresh_search_state();
-    app.select_next_active_buffer_match_from(next_selection.primary.index);
+    crate::app::app_state::workspace::mutation::finalize_active_buffer_text_mutation(
+        app,
+        active_tab_index,
+    );
+    crate::app::app_state::search_runtime::refresh_search_state(app);
+    crate::app::app_state::search_visual::select_next_active_buffer_match_from(
+        app,
+        next_selection.primary.index,
+    );
     true
 }
 
 pub(crate) fn insert_text_in_active_view(app: &mut ScratchpadApp, text: &str) -> bool {
     let active_tab_index = app.tab_manager.active_tab_index;
     let active_view_id = match app.tab_manager.active_tab() {
-        Some(tab) => tab.active_view_id,
+        Some(tab) => tab.layout.active_view_id,
         None => return false,
     };
     let inserted_chars = text.chars().count();
@@ -126,9 +138,15 @@ pub(crate) fn insert_text_in_active_view(app: &mut ScratchpadApp, text: &str) ->
         next_selection
     };
 
-    app.finalize_active_buffer_text_mutation(active_tab_index);
-    app.refresh_search_state();
-    app.select_next_active_buffer_match_from(next_selection.primary.index);
+    crate::app::app_state::workspace::mutation::finalize_active_buffer_text_mutation(
+        app,
+        active_tab_index,
+    );
+    crate::app::app_state::search_runtime::refresh_search_state(app);
+    crate::app::app_state::search_visual::select_next_active_buffer_match_from(
+        app,
+        next_selection.primary.index,
+    );
     true
 }
 
@@ -177,7 +195,7 @@ fn apply_active_buffer_text_operation(app: &mut ScratchpadApp, undo: bool) -> bo
     let selection = {
         let tab = &mut app.tab_manager.tabs.as_mut_slice()[active_tab_index];
         let Some(selection) = ({
-            let buffer = &mut tab.buffer;
+            let buffer = &mut tab.buffers.buffer;
             if undo {
                 buffer.undo_last_text_operation()
             } else {
@@ -187,7 +205,7 @@ fn apply_active_buffer_text_operation(app: &mut ScratchpadApp, undo: bool) -> bo
             return false;
         };
 
-        let active_view_id = tab.active_view_id;
+        let active_view_id = tab.layout.active_view_id;
         if let Some((buffer, view)) = tab.buffer_and_view_mut(active_view_id) {
             view.set_cursor_range_anchored(buffer, selection);
             view.set_pending_cursor_range_anchored(buffer, selection);
@@ -196,9 +214,15 @@ fn apply_active_buffer_text_operation(app: &mut ScratchpadApp, undo: bool) -> bo
         selection
     };
 
-    app.finalize_active_buffer_text_mutation(active_tab_index);
-    app.refresh_search_state();
-    app.select_next_active_buffer_match_from(selection.primary.index);
+    crate::app::app_state::workspace::mutation::finalize_active_buffer_text_mutation(
+        app,
+        active_tab_index,
+    );
+    crate::app::app_state::search_runtime::refresh_search_state(app);
+    crate::app::app_state::search_visual::select_next_active_buffer_match_from(
+        app,
+        selection.primary.index,
+    );
     let action = if undo { "Undid" } else { "Redid" };
     app.state.status.set_info_status_in_domain(
         StatusDomain::History,
@@ -206,54 +230,3 @@ fn apply_active_buffer_text_operation(app: &mut ScratchpadApp, undo: bool) -> bo
     );
     true
 }
-
-macro_rules! compat_scratchpad_app_methods {
-    ($type:ty { $($item:item)* }) => {
-        #[allow(dead_code)]
-        impl $type {
-            $($item)*
-        }
-    };
-}
-
-compat_scratchpad_app_methods!(ScratchpadApp {
-    pub(crate) fn active_buffer_transaction_label(&self) -> Option<String> {
-        active_buffer_transaction_label(self)
-    }
-
-    pub(crate) fn active_buffer_can_undo_text_operation(&self) -> bool {
-        active_buffer_can_undo_text_operation(self)
-    }
-
-    pub(crate) fn active_buffer_can_redo_text_operation(&self) -> bool {
-        active_buffer_can_redo_text_operation(self)
-    }
-
-    pub(crate) fn undo_active_buffer_text_operation(&mut self) -> bool {
-        undo_active_buffer_text_operation(self)
-    }
-
-    pub(crate) fn redo_active_buffer_text_operation(&mut self) -> bool {
-        redo_active_buffer_text_operation(self)
-    }
-
-    pub(crate) fn select_all_in_active_view(&mut self) -> bool {
-        select_all_in_active_view(self)
-    }
-
-    pub(crate) fn copy_selected_text_in_active_view(&self) -> Option<String> {
-        copy_selected_text_in_active_view(self)
-    }
-
-    pub(crate) fn cut_selected_text_in_active_view(&mut self) -> Option<String> {
-        cut_selected_text_in_active_view(self)
-    }
-
-    pub(crate) fn delete_selected_text_in_active_view(&mut self) -> bool {
-        delete_selected_text_in_active_view(self)
-    }
-
-    pub(crate) fn insert_text_in_active_view(&mut self, text: &str) -> bool {
-        insert_text_in_active_view(self, text)
-    }
-});

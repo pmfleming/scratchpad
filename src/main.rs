@@ -3,6 +3,7 @@
 
 use eframe::egui;
 use scratchpad::ScratchpadApp;
+use scratchpad::app::app_state::prepare_context_before_first_frame;
 use scratchpad::app::services::session_store::SessionStore;
 use scratchpad::app::services::settings_store::{
     DEFAULT_WINDOW_INNER_SIZE, MIN_WINDOW_INNER_SIZE, SettingsStore, WindowState,
@@ -48,7 +49,7 @@ fn main() -> eframe::Result<()> {
                 settings_store,
                 startup_options,
             );
-            app.prepare_context_before_first_frame(&cc.egui_ctx);
+            prepare_context_before_first_frame(&mut app, &cc.egui_ctx);
             cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
             Ok(Box::new(app))
         }),
@@ -62,9 +63,62 @@ fn viewport_builder_from_window_state(window_state: &WindowState) -> egui::Viewp
         .with_inner_size(window_state.inner_size.unwrap_or(DEFAULT_WINDOW_INNER_SIZE))
         .with_min_inner_size(MIN_WINDOW_INNER_SIZE);
 
+    if let Some(icon) = scratchpad_window_icon() {
+        viewport = viewport.with_icon(icon);
+    }
+
     if let Some(position) = window_state.position {
         viewport = viewport.with_position(egui::pos2(position[0], position[1]));
     }
 
     viewport
+}
+
+fn scratchpad_window_icon() -> Option<egui::IconData> {
+    let png_bytes = best_png_from_ico(include_bytes!("assets/Scratchpad.ico"))?;
+    eframe::icon_data::from_png_bytes(png_bytes).ok()
+}
+
+fn best_png_from_ico(ico: &[u8]) -> Option<&[u8]> {
+    const ICO_HEADER_LEN: usize = 6;
+    const ICO_DIRECTORY_ENTRY_LEN: usize = 16;
+    const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
+
+    if ico.len() < ICO_HEADER_LEN
+        || u16::from_le_bytes([ico[0], ico[1]]) != 0
+        || u16::from_le_bytes([ico[2], ico[3]]) != 1
+    {
+        return None;
+    }
+
+    let image_count = u16::from_le_bytes([ico[4], ico[5]]) as usize;
+    let directory_len =
+        ICO_HEADER_LEN.checked_add(image_count.checked_mul(ICO_DIRECTORY_ENTRY_LEN)?)?;
+    if ico.len() < directory_len {
+        return None;
+    }
+
+    let mut best_image: Option<(u32, &[u8])> = None;
+    for index in 0..image_count {
+        let entry_start = ICO_HEADER_LEN + index * ICO_DIRECTORY_ENTRY_LEN;
+        let entry = &ico[entry_start..entry_start + ICO_DIRECTORY_ENTRY_LEN];
+        let width = if entry[0] == 0 { 256 } else { entry[0] as u32 };
+        let height = if entry[1] == 0 { 256 } else { entry[1] as u32 };
+        let image_size = u32::from_le_bytes([entry[8], entry[9], entry[10], entry[11]]) as usize;
+        let image_offset =
+            u32::from_le_bytes([entry[12], entry[13], entry[14], entry[15]]) as usize;
+        let image_end = image_offset.checked_add(image_size)?;
+        let image = ico.get(image_offset..image_end)?;
+
+        if !image.starts_with(PNG_SIGNATURE) {
+            continue;
+        }
+
+        let area = width * height;
+        if best_image.is_none_or(|(best_area, _)| area > best_area) {
+            best_image = Some((area, image));
+        }
+    }
+
+    best_image.map(|(_, image)| image)
 }

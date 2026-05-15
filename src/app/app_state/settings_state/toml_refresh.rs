@@ -23,7 +23,7 @@ impl ScratchpadApp {
         if self
             .tab_manager
             .active_tab()
-            .is_some_and(|tab| tab.active_view_id != next_view_id)
+            .is_some_and(|tab| tab.layout.active_view_id != next_view_id)
         {
             self.reload_settings_from_active_settings_tab();
         }
@@ -33,7 +33,7 @@ impl ScratchpadApp {
         if self
             .tab_manager
             .active_tab()
-            .is_some_and(|tab| tab.active_view_id == view_id)
+            .is_some_and(|tab| tab.layout.active_view_id == view_id)
         {
             self.reload_settings_from_active_settings_tab();
         }
@@ -77,7 +77,7 @@ impl ScratchpadApp {
         match action {
             SettingsTomlRefreshAction::ApplyBuffer(raw) => match parse_toml_settings(&raw) {
                 Ok(settings) => {
-                    self.apply_settings(settings);
+                    crate::app::app_state::settings_state::apply_settings(self, settings);
                     self.state.applied_editor_font = None;
                     self.state.status.set_info_status_in_domain(
                         crate::app::app_state::StatusDomain::Settings,
