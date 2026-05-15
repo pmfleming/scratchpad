@@ -49,6 +49,7 @@
         selectedCorrectnessCategory: null,
         selectedPerformanceScenarioId: null,
         selectedFlamegraphsByScenario: {},
+        moduleRollupSort: { key: "combined", direction: "desc" },
         lastObservedFinishedRun: null,
         mapZoom: 0.65,
         mapLayout: 'folder',
@@ -58,8 +59,17 @@
         overviewRiskFilter: 'all',
         qualityDistributionMode: 'counts',
         cloneDistributionMode: 'counts',
+        typeHealthDistributionMode: 'counts',
+        escapeHatchDistributionMode: 'counts',
+        localityDistributionMode: 'counts',
+        leverageDistributionMode: 'counts',
+        typeHealthScatterY: 'methods',
         expandedQualityKey: null,
         expandedCloneKey: null,
+        expandedTypeHealthKey: null,
+        expandedEscapeHatchKey: null,
+        expandedLocalityKey: null,
+        expandedLeverageKey: null,
         qualityDatasetView: 'hotspots',
         performanceDatasetSearch: '',
         performanceBucketFilters: {},
@@ -114,6 +124,29 @@
         ["architectural_risk", "Architecture"],
     ];
 
+    const escapeHatchPatternWeights = {
+        unsafe_block: 10,
+        unsafe_fn: 10,
+        unsafe_impl: 10,
+        unsafe_trait: 10,
+        extern_block: 8,
+        extern_fn: 7,
+        static_mut: 14,
+        union: 12,
+        raw_borrow: 6,
+        asm_macro: 14,
+        transmute: 12,
+        maybe_uninit: 5,
+        deref_impl: 4,
+        deref_mut_impl: 5,
+        glob_import: 2,
+        container_ref_return: 3,
+        repr_escape: 5,
+        linkage_escape: 8,
+        clippy_suppression: 3,
+        lint_suppression: 2,
+    };
+
     function byId(id) {
         return document.getElementById(id);
     }
@@ -135,6 +168,20 @@
             return "risk-warn";
         }
         return "risk-good";
+    }
+
+    function inverseRiskClass(value, warn, bad) {
+        if (value <= bad) {
+            return "risk-bad";
+        }
+        if (value <= warn) {
+            return "risk-warn";
+        }
+        return "risk-good";
+    }
+
+    function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     function metricCard(label, value) {
@@ -251,7 +298,59 @@
         if (!query) {
             return true;
         }
-        return JSON.stringify(item).toLowerCase().includes(query.toLowerCase());
+        const text = JSON.stringify(item).toLowerCase();
+        const tokens = String(query)
+            .trim()
+            .match(/"[^"]+"|\S+/g) || [];
+        return tokens.every((rawToken) => {
+            const token = rawToken.replace(/^"|"$/g, "");
+            const scoped = token.match(/^([a-zA-Z_][\w.-]*):(>=|<=|>|<|=)?(.+)$/);
+            if (!scoped) {
+                return text.includes(token.toLowerCase()) || normalizeFilterText(text).includes(normalizeFilterText(token));
+            }
+            const [, rawField, rawOperator, rawExpected] = scoped;
+            const field = rawField.toLowerCase();
+            const operator = rawOperator || "=";
+            const expected = rawExpected.replace(/^"|"$/g, "");
+            const value = filterFieldValue(item, field);
+            const numericValue = Number(value);
+            const numericExpected = Number(expected);
+            if (Number.isFinite(numericValue) && Number.isFinite(numericExpected) && operator !== "=") {
+                if (operator === ">") return numericValue > numericExpected;
+                if (operator === ">=") return numericValue >= numericExpected;
+                if (operator === "<") return numericValue < numericExpected;
+                if (operator === "<=") return numericValue <= numericExpected;
+            }
+            if (Number.isFinite(numericValue) && Number.isFinite(numericExpected) && operator === "=") {
+                return numericValue === numericExpected;
+            }
+            const haystack = String(value ?? "").toLowerCase();
+            return haystack.includes(expected.toLowerCase()) || normalizeFilterText(haystack).includes(normalizeFilterText(expected));
+        });
+    }
+
+    function normalizeFilterText(value) {
+        return String(value ?? "")
+            .toLowerCase()
+            .replaceAll("\\\\", "/")
+            .replaceAll("\\", "/");
+    }
+
+    function filterFieldValue(item, field) {
+        const aliases = {
+            score: item.quality_score ?? item.score ?? item.escape_hatch_score ?? item.structural_risk ?? item.non_locality_risk ?? item.leverage_risk,
+            risk: item.structural_risk ?? item.escape_hatch_score ?? item.non_locality_risk ?? item.locality_risk ?? item.leverage_risk ?? item.quality_score ?? item.score,
+            quality: item.quality_score ?? item.score,
+            fields: item.field_count,
+            variants: item.variant_count,
+            width: Math.max(Number(item.field_count || 0), Number(item.variant_count || 0)),
+            module: item.module_key ?? item.module_name,
+            file: item.path ?? item.name ?? item.file_path,
+        };
+        if (Object.prototype.hasOwnProperty.call(aliases, field)) {
+            return aliases[field];
+        }
+        return field.split(".").reduce((value, part) => value?.[part], item);
     }
 
     function renderHotspots() {
@@ -271,19 +370,23 @@
 
         renderTable(
             "hotspots-table",
-            ["Rank", "Kind", "Name", "Quality", "Cog", "Cyc", "MI", "Halstead Effort", "SLOC", "Signals"],
+            ["Rank", "Kind", "Name", "Quality", "Score Drivers", "Cog", "Cyc", "MI", "Effort", "Density", "Bugs", "SLOC", "Signals"],
             filtered.map((item, index) => {
                 const score = qualityScore(item);
                 const scoreClass = riskClass(score, 300, 600);
+                const miClass = inverseRiskClass(Number(item.mi || 0), 60, 40);
                 return `<tr>
                     <td>${index + 1}</td>
                     <td><span class="pill">${escapeHtml(item.kind)}</span></td>
                     <td><code>${escapeHtml(item.name)}</code><div class="muted">line ${escapeHtml(item.start_line)}</div></td>
                     <td class="${scoreClass}">${formatNumber.format(score)}</td>
+                    <td>${renderQualityComponentBar(item)}</td>
                     <td>${formatNumber.format(item.cognitive)}</td>
                     <td>${formatNumber.format(item.cyclomatic)}</td>
-                    <td>${formatNumber.format(item.mi)}</td>
+                    <td class="${miClass}">${formatNumber.format(item.mi)}</td>
                     <td>${formatNumber.format(item.effort || 0)}</td>
+                    <td>${formatNumber.format(item.complexity_density || 0)}<div class="muted">ABC ${formatNumber.format(item.abc_density || 0)}</div></td>
+                    <td>${formatNumber.format(item.bugs || 0)}</td>
                     <td>${formatNumber.format(item.sloc)}</td>
                     <td>${renderPills(item.signals)}</td>
                 </tr>`;
@@ -295,8 +398,77 @@
         return Number(item.quality_score ?? item.score ?? 0);
     }
 
+    function qualityComponentScores(item) {
+        const cognitive = Number(item.cognitive_score ?? Math.min(260, Number(item.cognitive || 0) * 3.7));
+        const cyclomatic = Number(item.cyclomatic_score ?? Math.min(220, Number(item.cyclomatic || 0) * 2));
+        const maintainability = Number(item.maintainability_score ?? Math.min(150, Math.max(0, 65 - Number(item.mi || 0)) * 1.2));
+        const effort = Number(item.effort_score ?? Math.min(60, Math.log1p(Math.max(0, Number(item.effort || 0))) * 4));
+        return { cognitive, cyclomatic, maintainability, effort };
+    }
+
+    function renderQualityComponentBar(item) {
+        const components = qualityComponentScores(item);
+        const max = Math.max(1, components.cognitive + components.cyclomatic + components.maintainability + components.effort);
+        const parts = [
+            ["cognitive", "Cog", components.cognitive],
+            ["cyclomatic", "Cyc", components.cyclomatic],
+            ["maintainability", "MI", components.maintainability],
+            ["effort", "Effort", components.effort],
+        ];
+        return `<div class="quality-component-bar" title="${escapeHtml(parts.map(([, label, value]) => `${label} ${formatNumber.format(value)}`).join(" · "))}">
+            <div class="quality-component-bar__track">
+                ${parts.map(([key, label, value]) => `<i class="quality-component-bar__part quality-component-bar__part--${key}" style="width:${(value / max) * 100}%" aria-label="${escapeHtml(label)} ${formatNumber.format(value)}"></i>`).join("")}
+            </div>
+            <span>${parts.map(([, label, value]) => `${label} ${formatNumber.format(value)}`).join(" · ")}</span>
+        </div>`;
+    }
+
     function typeHealthRisk(item) {
         return Number(item?.structural_risk ?? 0);
+    }
+
+    function normalizedRisk(value, warn, bad) {
+        const score = Number(value || 0);
+        if (score <= 0) return 0;
+        if (score <= warn) return clamp((score / Math.max(warn, 1)) * 40, 0, 40);
+        if (score <= bad) return 40 + ((score - warn) / Math.max(bad - warn, 1)) * 40;
+        return clamp(80 + ((score - bad) / Math.max(bad, 1)) * 20, 80, 100);
+    }
+
+    function categoryRisk(items, scoreFn, warn, bad) {
+        if (!items.length) return 0;
+        const scores = items.map((item) => normalizedRisk(scoreFn(item), warn, bad));
+        const top = [...scores].sort((a, b) => b - a).slice(0, Math.min(5, scores.length));
+        return mean(top) || 0;
+    }
+
+    function empiricalThresholds(values, fallbackWarn, fallbackBad) {
+        const scores = values.map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+        if (scores.length < 8) {
+            return { warn: fallbackWarn, bad: fallbackBad };
+        }
+        const warn = Math.max(1, percentileValue(scores, 0.9) || fallbackWarn);
+        const bad = Math.max(warn + 1, percentileValue(scores, 0.98) || fallbackBad);
+        return { warn: Math.round(warn * 100) / 100, bad: Math.round(bad * 100) / 100 };
+    }
+
+    function runMetricDelta(metricKey, currentValue) {
+        const series = runMetricSeries(metricKey);
+        if (series.length < 2) return "";
+        const previous = Number(series[series.length - 2] || 0);
+        const delta = Number(currentValue || 0) - previous;
+        if (!delta) return "0 since last run";
+        return `${delta > 0 ? "+" : ""}${formatNumber.format(delta)} since last run`;
+    }
+
+    function qualityOverviewMetric(label, value, action = null) {
+        const data = action
+            ? ` role="button" tabindex="0" data-quality-drill-dataset="${escapeHtml(action.dataset)}" data-quality-drill-filter="${escapeHtml(action.filter || "")}"`
+            : "";
+        return `<div class="quality-overview-metric ${action ? "quality-overview-metric--action" : ""}"${data}>
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+        </div>`;
     }
 
     function renderQualityOverview() {
@@ -343,84 +515,94 @@
         const avgLeverageRisk = mean(leverage.map(leverageRisk)) || 0;
         const broadReachModules = leverage.filter((item) => (item.reach || 0) >= 5).length;
         const divergenceModules = leverage.filter((item) => (item.divergence_count || 0) > 0).length;
+        const risks = {
+            maintainability: categoryRisk(hotspots, qualityScore, 300, 600),
+            structure: categoryRisk(typeHealth, typeHealthRisk, 40, 70),
+            duplication: categoryRisk(clones, (item) => Number(item.score || 0), 20, 40),
+            escapeHatches: categoryRisk(escapeHatches, (item) => Number(item.escape_hatch_score || 0), 20, 50),
+            locality: categoryRisk(locality, localityRisk, 15, 30),
+            leverage: categoryRisk(leverage, leverageRisk, 20, 40),
+        };
 
         const groups = [
             {
                 cls: "maintainability",
                 title: "Maintainability",
-                summary: worstHotspot
-                    ? `${formatNumber.format(qualityScore(worstHotspot))} worst score`
-                    : "No hotspot score",
+                risk: risks.maintainability,
+                summary: `${formatNumber.format(risks.maintainability)} category risk${runMetricDelta("quality_risk_count", hotspots.filter((item) => qualityScore(item) >= 300).length) ? ` · ${runMetricDelta("quality_risk_count", hotspots.filter((item) => qualityScore(item) >= 300).length)}` : ""}`,
                 metrics: [
-                    ["Records", hotspots.length],
-                    ["Files", hotspotFiles.size],
-                    ["Worst quality", worstHotspot ? formatNumber.format(qualityScore(worstHotspot)) : "-"],
-                    ["Large items", largeHotspots],
-                    ["Worst item", worstHotspot ? worstHotspot.name.split(/[\\/]/).pop() : "-"],
+                    { label: "Records", value: hotspots.length },
+                    { label: "Files", value: hotspotFiles.size },
+                    { label: "Worst quality", value: worstHotspot ? formatNumber.format(qualityScore(worstHotspot)) : "-" },
+                    { label: "Large items", value: largeHotspots, action: { dataset: "hotspots", filter: "sloc:>=150" } },
+                    { label: "Worst item", value: worstHotspot ? worstHotspot.name.split(/[\\/]/).pop() : "-" },
                 ],
             },
             {
                 cls: "structure",
                 title: "Structure",
-                summary: worstType
-                    ? `${formatNumber.format(typeHealthRisk(worstType))} worst type`
-                    : "No type data",
+                risk: risks.structure,
+                summary: `${formatNumber.format(risks.structure)} category risk`,
                 metrics: [
-                    ["Types", typeHealth.length],
-                    ["High risk", structuralRiskTypes],
-                    ["Wide structs", wideStructs],
-                    ["Impl spread", implSpreadTypes],
-                    ["Worst type", worstType ? worstType.type_name : "-"],
+                    { label: "Types", value: typeHealth.length },
+                    { label: "High risk", value: structuralRiskTypes, action: { dataset: "typeHealth", filter: "risk:>=40" } },
+                    { label: "Wide structs", value: wideStructs, action: { dataset: "typeHealth", filter: "fields:>=16" } },
+                    { label: "Impl spread", value: implSpreadTypes, action: { dataset: "typeHealth", filter: "impl_file_count:>=4" } },
+                    { label: "Worst type", value: worstType ? worstType.type_name : "-" },
                 ],
             },
             {
                 cls: "duplication",
                 title: "Duplication",
-                summary: `${formatNumber.format(cloneGroups)} clone groups`,
+                risk: risks.duplication,
+                summary: `${formatNumber.format(risks.duplication)} category risk`,
                 metrics: [
-                    ["Clone Groups", cloneGroups],
-                    ["Total Instances", cloneInstances],
-                    ["Avg Instances", cloneGroups ? (cloneInstances / cloneGroups).toFixed(1) : "-"],
-                    ["Cross-file Groups", crossFileClones],
-                    ["AST Groups", astClones],
-                    ["Widest Span", widestClone ? `${widestClone} lines` : "-"],
+                    { label: "Clone Groups", value: cloneGroups },
+                    { label: "Total Instances", value: cloneInstances },
+                    { label: "Avg Instances", value: cloneGroups ? (cloneInstances / cloneGroups).toFixed(1) : "-" },
+                    { label: "Cross-file Groups", value: crossFileClones, action: { dataset: "clones", filter: "file_count:>=2" } },
+                    { label: "AST Groups", value: astClones, action: { dataset: "clones", filter: "engine:ast" } },
+                    { label: "Widest Span", value: widestClone ? `${widestClone} lines` : "-" },
                 ],
             },
             {
                 cls: "escape-hatches",
                 title: "Escape Hatches",
-                summary: `${formatNumber.format(escapeHatchTotal)} uses`,
+                risk: risks.escapeHatches,
+                summary: `${formatNumber.format(risks.escapeHatches)} category risk`,
                 metrics: [
-                    ["Modules", escapeHatchModules],
-                    ["Total Uses", escapeHatchTotal],
-                    ["Unsafe Modules", unsafeModules],
-                    ["Deref/DerefMut", derefCoercions],
-                    ["Glob Imports", globImports],
-                    ["Container Refs", containerRefs],
-                    ["Clippy Allows", clippySuppressions],
+                    { label: "Modules", value: escapeHatchModules },
+                    { label: "Total Uses", value: escapeHatchTotal },
+                    { label: "Unsafe Modules", value: unsafeModules, action: { dataset: "escapeHatches", filter: "unsafe_count:>0" } },
+                    { label: "Deref/DerefMut", value: derefCoercions },
+                    { label: "Glob Imports", value: globImports },
+                    { label: "Container Refs", value: containerRefs },
+                    { label: "Clippy Allows", value: clippySuppressions },
                 ],
             },
             {
                 cls: "locality",
                 title: "Code Locality",
-                summary: `${formatNumber.format(locality.length)} module probes`,
+                risk: risks.locality,
+                summary: `${formatNumber.format(risks.locality)} category risk`,
                 metrics: [
-                    ["Avg Score", formatNumber.format(avgCodeLocality)],
-                    ["Avg Risk", formatNumber.format(avgNonLocalityRisk)],
-                    ["Far Dependencies", farDependencyModules],
-                    ["Hidden Coupling", hiddenCouplingModules],
-                    ["No Nearby Tests", modulesWithoutNearbyTests],
+                    { label: "Avg Score", value: formatNumber.format(avgCodeLocality) },
+                    { label: "Avg Risk", value: formatNumber.format(avgNonLocalityRisk) },
+                    { label: "Far Dependencies", value: farDependencyModules, action: { dataset: "locality", filter: "far_dependencies:>0" } },
+                    { label: "Hidden Coupling", value: hiddenCouplingModules, action: { dataset: "locality", filter: "hidden_coupling_count:>0" } },
+                    { label: "No Nearby Tests", value: modulesWithoutNearbyTests, action: { dataset: "locality", filter: "test_locality:none" } },
                 ],
             },
             {
                 cls: "leverage",
                 title: "Leverage",
-                summary: `${formatNumber.format(leverage.length)} module probes`,
+                risk: risks.leverage,
+                summary: `${formatNumber.format(risks.leverage)} category risk`,
                 metrics: [
-                    ["Avg Score", formatNumber.format(avgLeverageScore)],
-                    ["Avg Risk", formatNumber.format(avgLeverageRisk)],
-                    ["Broad Reach", broadReachModules],
-                    ["Divergence", divergenceModules],
+                    { label: "Avg Score", value: formatNumber.format(avgLeverageScore) },
+                    { label: "Avg Risk", value: formatNumber.format(avgLeverageRisk) },
+                    { label: "Broad Reach", value: broadReachModules, action: { dataset: "leverage", filter: "reach:>=5" } },
+                    { label: "Divergence", value: divergenceModules, action: { dataset: "leverage", filter: "divergence_count:>0" } },
                 ],
             },
         ];
@@ -432,14 +614,21 @@
                     <h3>${escapeHtml(group.title)}</h3>
                     <p>${escapeHtml(group.summary)}</p>
                 </div>
+                <strong class="${riskClass(group.risk, 40, 80)}">${formatNumber.format(group.risk)}</strong>
             </div>
             <div class="quality-overview-card__metrics">
-                ${group.metrics.map(([label, value]) => `<div class="quality-overview-metric">
-                    <span>${escapeHtml(label)}</span>
-                    <strong>${escapeHtml(value)}</strong>
-                </div>`).join("")}
+                ${group.metrics.map((metric) => qualityOverviewMetric(metric.label, metric.value, metric.action)).join("")}
             </div>
         </section>`).join("");
+        target.querySelectorAll("[data-quality-drill-dataset]").forEach((metric) => {
+            metric.addEventListener("click", () => drillToQualityDataset(metric.dataset.qualityDrillDataset, metric.dataset.qualityDrillFilter || ""));
+            metric.addEventListener("keydown", (event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    drillToQualityDataset(metric.dataset.qualityDrillDataset, metric.dataset.qualityDrillFilter || "");
+                }
+            });
+        });
     }
 
     function normalizePath(value) {
@@ -449,7 +638,7 @@
     function renderClones() {
         const query = byId("clones-filter").value;
         const filtered = state.clones.filter((item) => matchesFilter(item, query));
-        const totalInstances = state.clones.reduce((sum, item) => sum + item.instances.length, 0);
+        const totalInstances = state.clones.reduce((sum, item) => sum + (item.instances || []).length, 0);
         const crossFileCount = state.clones.filter((item) => (item.file_count || 0) >= 2).length;
         const widest = state.clones.reduce((max, item) => Math.max(max, item.max_line_span || 0), 0);
         const astCount = state.clones.filter((item) => item.engine === "ast").length;
@@ -465,22 +654,27 @@
 
         renderTable(
             "clones-table",
-            ["Engine", "Group Hash", "Instances", "Files", "Score", "Token Count", "Signals", "Locations"],
+            ["Engine", "Group Hash", "Instances", "Files", "Score", "Density", "Token Count", "Signals", "Locations", "Preview"],
             filtered.map((item) => {
-                const locations = item.instances.map((inst) =>
+                const hash = item.hash || item.group_hash || "";
+                const instances = item.instances || [];
+                const locations = instances.map((inst) =>
                     `<div><code>${escapeHtml(inst.file_path)}:${inst.start_line}-${inst.end_line}</code></div>`
                 ).join("");
                 const scoreClass = riskClass(item.score || 0, 20, 40);
+                const preview = instances.find((inst) => inst.snippet)?.snippet || "";
 
                 return `<tr>
                     <td><span class="pill">${escapeHtml(item.engine || "token")}</span></td>
-                    <td><code>${escapeHtml(item.hash.substring(0, 8))}</code></td>
-                    <td>${item.instances.length}</td>
+                    <td><code>${escapeHtml(hash.substring(0, 8))}</code></td>
+                    <td>${instances.length}</td>
                     <td>${item.file_count ?? "-"}</td>
                     <td class="${scoreClass}">${formatNumber.format(item.score)}</td>
+                    <td>${formatNumber.format(cloneDensity(item))}</td>
                     <td>${item.token_count}</td>
                     <td>${renderPills(item.signals)}</td>
                     <td class="small-text">${locations}</td>
+                    <td class="small-text">${preview ? `<details class="clone-snippet-details"><summary>Snippet</summary><pre>${escapeHtml(preview)}</pre></details>` : "-"}</td>
                 </tr>`;
             })
         );
@@ -495,7 +689,7 @@
             ["Rank", "Kind", "Type", "Path", "Risk", "Width", "Methods", "Impls", "Impl Files", "Span", "Signals"],
             filtered.map((item, index) => {
                 const risk = typeHealthRisk(item);
-                const scoreClass = riskClass(risk, 25, 40);
+                const scoreClass = riskClass(risk, 40, 70);
                 const width = Math.max(Number(item.field_count || 0), Number(item.variant_count || 0));
                 return `<tr>
                     <td>${index + 1}</td>
@@ -519,6 +713,11 @@
         const rows = state.escapeHatches || [];
         const filtered = rows.filter((item) => matchesFilter(item, query));
         const totalUses = rows.reduce((sum, item) => sum + Number(item.total_count || 0), 0);
+        const escapeWeight = (item, keys, fallbackCountKey, fallbackWeight) => {
+            const counts = item.counts || {};
+            const weighted = keys.reduce((sum, key) => sum + Number(counts[key] || 0) * escapeHatchPatternWeights[key], 0);
+            return weighted || Number(item[fallbackCountKey] || 0) * fallbackWeight;
+        };
         const totals = {
             unsafe: rows.reduce((sum, item) => sum + Number(item.unsafe_count || 0), 0),
             ffi: rows.reduce((sum, item) => sum + Number(item.ffi_count || 0), 0),
@@ -531,18 +730,30 @@
             clippy: rows.reduce((sum, item) => sum + Number(item.clippy_suppression_count || 0), 0),
             lint: rows.reduce((sum, item) => sum + Number(item.lint_suppression_count || 0), 0),
         };
-        const maxTotal = Math.max(1, ...Object.values(totals));
+        const weightedTotals = {
+            unsafe: rows.reduce((sum, item) => sum + escapeWeight(item, ["unsafe_block", "unsafe_fn", "unsafe_impl", "unsafe_trait"], "unsafe_count", 10), 0),
+            ffi: rows.reduce((sum, item) => sum + escapeWeight(item, ["extern_block", "extern_fn"], "ffi_count", 8), 0),
+            globals: rows.reduce((sum, item) => sum + escapeWeight(item, ["static_mut"], "global_mutability_count", 14), 0),
+            raw: rows.reduce((sum, item) => sum + escapeWeight(item, ["raw_borrow", "asm_macro", "transmute", "maybe_uninit", "union"], "raw_memory_count", 8), 0),
+            deref: rows.reduce((sum, item) => sum + escapeWeight(item, ["deref_impl", "deref_mut_impl"], "deref_coercion_count", 4.5), 0),
+            glob: rows.reduce((sum, item) => sum + escapeWeight(item, ["glob_import"], "glob_import_count", 2), 0),
+            containerRefs: rows.reduce((sum, item) => sum + escapeWeight(item, ["container_ref_return"], "container_ref_return_count", 3), 0),
+            layout: rows.reduce((sum, item) => sum + escapeWeight(item, ["repr_escape", "linkage_escape"], "layout_linkage_count", 6.5), 0),
+            clippy: rows.reduce((sum, item) => sum + escapeWeight(item, ["clippy_suppression"], "clippy_suppression_count", 3), 0),
+            lint: rows.reduce((sum, item) => sum + escapeWeight(item, ["lint_suppression"], "lint_suppression_count", 2), 0),
+        };
+        const maxTotal = Math.max(1, ...Object.values(weightedTotals));
         const bars = [
-            ["Unsafe", totals.unsafe],
-            ["FFI", totals.ffi],
-            ["Global mutability", totals.globals],
-            ["Raw memory", totals.raw],
-            ["Deref/DerefMut", totals.deref],
-            ["Glob imports", totals.glob],
-            ["Container refs", totals.containerRefs],
-            ["Layout/linkage", totals.layout],
-            ["Clippy suppressions", totals.clippy],
-            ["All lint suppressions", totals.lint],
+            ["Unsafe", totals.unsafe, weightedTotals.unsafe],
+            ["FFI", totals.ffi, weightedTotals.ffi],
+            ["Global mutability", totals.globals, weightedTotals.globals],
+            ["Raw memory", totals.raw, weightedTotals.raw],
+            ["Deref/DerefMut", totals.deref, weightedTotals.deref],
+            ["Glob imports", totals.glob, weightedTotals.glob],
+            ["Container refs", totals.containerRefs, weightedTotals.containerRefs],
+            ["Layout/linkage", totals.layout, weightedTotals.layout],
+            ["Clippy suppressions", totals.clippy, weightedTotals.clippy],
+            ["All lint suppressions", totals.lint, weightedTotals.lint],
         ];
         const overview = byId("escape-hatches-overview");
         if (overview) {
@@ -556,10 +767,10 @@
                 ${metricCard("Clippy suppressions", totals.clippy)}
             </div>
             <div class="escape-hatch-bars">
-                ${bars.map(([label, value]) => `<div class="escape-hatch-bar">
+                ${bars.map(([label, count, value]) => `<div class="escape-hatch-bar">
                     <span>${escapeHtml(label)}</span>
                     <div><i style="width:${(value / maxTotal) * 100}%"></i></div>
-                    <strong>${formatNumber.format(value)}</strong>
+                    <strong>${formatNumber.format(value)}<small>${formatNumber.format(count)} uses</small></strong>
                 </div>`).join("")}
             </div>`;
         }
@@ -3383,6 +3594,13 @@
                 });
             });
             card.addEventListener("click", (event) => {
+                const qualityBin = event.target.closest("[data-quality-bin-dataset]");
+                if (qualityBin) {
+                    event.stopPropagation();
+                    drillToQualityDataset(qualityBin.dataset.qualityBinDataset, qualityBin.dataset.qualityBinFilter || "");
+                    hidePopover();
+                    return;
+                }
                 if (!event.target.closest(".risk-curve__bar") && !event.target.closest(".performance-bin-popover")) {
                     hidePopover();
                 }
@@ -4900,18 +5118,18 @@
             byModule.set(key, existing);
         });
         const quadrants = {
-            "high-locality-high-leverage": { tone: "good", rows: [] },
-            "high-locality-low-leverage": { tone: "local", rows: [] },
-            "low-locality-high-leverage": { tone: "architecture", rows: [] },
-            "low-locality-low-leverage": { tone: "triage", rows: [] },
+            "low-risk-low-risk": { tone: "good", rows: [] },
+            "low-locality-risk-high-leverage-risk": { tone: "local", rows: [] },
+            "high-locality-risk-low-leverage-risk": { tone: "architecture", rows: [] },
+            "high-risk-high-risk": { tone: "triage", rows: [] },
         };
         byModule.forEach((pair, moduleName) => {
             if (!pair.locality || !pair.leverage) return;
-            const lowLocality = localityRisk(pair.locality) >= 30;
-            const lowLeverage = leverageRisk(pair.leverage) >= 40;
-            const key = lowLocality
-                ? lowLeverage ? "low-locality-low-leverage" : "low-locality-high-leverage"
-                : lowLeverage ? "high-locality-low-leverage" : "high-locality-high-leverage";
+            const highLocalityRisk = localityRisk(pair.locality) >= 30;
+            const highLeverageRisk = leverageRisk(pair.leverage) >= 40;
+            const key = highLocalityRisk
+                ? highLeverageRisk ? "high-risk-high-risk" : "high-locality-risk-low-leverage-risk"
+                : highLeverageRisk ? "low-locality-risk-high-leverage-risk" : "low-risk-low-risk";
             quadrants[key].rows.push({
                 moduleName,
                 localityRisk: localityRisk(pair.locality),
@@ -5047,6 +5265,15 @@
         const filteredLocality = state.locality.filter((item) => matchesFilter(item, localityQuery));
         const filteredLeverage = state.leverage.filter((item) => matchesFilter(item, leverageQuery));
         renderLocalityLeverageQuadrants(state.locality, state.leverage);
+        renderChurnComplexityScatter();
+        renderModuleQualityPivot();
+        const unavailableStyleRows = state.leverage.filter((item) => (item.parse_status || "ok") !== "ok");
+        const leverageStatus = byId("leverage-status");
+        if (leverageStatus) {
+            leverageStatus.innerHTML = unavailableStyleRows.length
+                ? `<div class="quality-status-banner quality-status-banner--warn"><strong>Style data unavailable for ${formatNumber.format(unavailableStyleRows.length)} modules</strong><span>${escapeHtml([...new Set(unavailableStyleRows.map((item) => item.parse_status || "not_measured"))].join(", "))}</span></div>`
+                : "";
+        }
 
         const localityDistItems = state.locality.map((item) => ({
             key: `locality:${item.module_key || item.module_name}`,
@@ -5054,7 +5281,6 @@
             name: item.module_key || item.module_name,
             score: localityRisk(item),
             signals: item.signals || [],
-            signalWeights: item.signal_weights || null,
             details: `Far deps ${formatNumber.format(item.far_dependencies || 0)} · hidden ${formatNumber.format(item.hidden_coupling_count || 0)}`,
             raw: item,
             searchText: [item.module_key, item.module_name, item.path, item.test_locality, ...item.signals].join(" "),
@@ -5073,20 +5299,24 @@
 
         renderRiskDistribution(byId("locality-distribution"), localityDistItems, {
             empty: "No locality data.",
-            modeKey: "qualityDistributionMode", // re-use count mode
+            modeKey: "localityDistributionMode",
             expandedKey: "expandedLocalityKey",
             warn: 15,
             bad: 30,
             scoreLabel: "locality risk",
+            dataset: "locality",
+            filterField: "risk",
         });
 
         renderRiskDistribution(byId("leverage-distribution"), leverageDistItems, {
             empty: "No leverage data.",
-            modeKey: "qualityDistributionMode", // re-use count mode
+            modeKey: "leverageDistributionMode",
             expandedKey: "expandedLeverageKey",
             warn: 20,
             bad: 40,
             scoreLabel: "leverage risk",
+            dataset: "leverage",
+            filterField: "risk",
         });
 
         renderTable(
@@ -5138,6 +5368,236 @@
                 </tr>`;
             })
         );
+    }
+
+    function moduleKeyFromPath(value) {
+        const normalized = normalizePath(value).replace(/^.*?src\//, "").replace(/\.rs$/, "");
+        if (!normalized) return "";
+        return normalized.endsWith("/mod") ? normalized.slice(0, -4).replaceAll("/", "::") : normalized.replaceAll("/", "::");
+    }
+
+    function moduleKeyForRecord(item) {
+        return item.module_key || item.module_name || moduleKeyFromPath(item.path || item.name || item.file_path || "");
+    }
+
+    function renderChurnComplexityScatter() {
+        const target = byId("churn-complexity-scatter");
+        if (!target) return;
+        const localityByModule = new Map((state.locality || []).map((item) => [moduleKeyForRecord(item), item]));
+        const points = (state.hotspots || [])
+            .filter((item) => item.kind === "unit")
+            .map((item) => {
+                const moduleKey = moduleKeyFromPath(item.name);
+                const locality = localityByModule.get(moduleKey);
+                return {
+                    name: item.name,
+                    moduleKey,
+                    x: Number(locality?.churn || 0),
+                    y: qualityScore(item),
+                    sloc: Number(item.sloc || 0),
+                };
+            })
+            .filter((item) => item.x > 0 || item.y > 0);
+        if (!points.length) {
+            target.innerHTML = `<p class="muted">No joined churn and hotspot data.</p>`;
+            return;
+        }
+        const width = 940;
+        const height = 430;
+        const margin = { left: 58, right: 28, top: 30, bottom: 64 };
+        const plotWidth = width - margin.left - margin.right;
+        const plotHeight = height - margin.top - margin.bottom;
+        const maxChurn = Math.max(1, ...points.map((item) => item.x));
+        const minQuality = Math.max(0, Math.min(...points.map((item) => item.y), 300) - 40);
+        const maxQuality = Math.max(1, 600, ...points.map((item) => item.y)) * 1.05;
+        const x = (value) => margin.left + (Math.log1p(Math.max(0, value)) / Math.log1p(maxChurn)) * plotWidth;
+        const y = (value) => margin.top + (1 - ((clamp(value, minQuality, maxQuality) - minQuality) / Math.max(maxQuality - minQuality, 1))) * plotHeight;
+        const plotPoints = points.map((item, index) => ({ ...item, pointIndex: index }));
+        const highRisk = [...plotPoints].sort((a, b) => (b.x * b.y) - (a.x * a.y)).slice(0, 8);
+        const highRiskKeys = new Set(highRisk.map((item) => item.name));
+        const churnTicks = [0, Math.round(maxChurn / 4), Math.round(maxChurn / 2), maxChurn]
+            .filter((value, index, values) => values.indexOf(value) === index);
+        const qualityTicks = [Math.ceil(minQuality / 100) * 100, 300, 450, 600, Math.floor(maxQuality / 100) * 100]
+            .filter((value, index, values) => value >= minQuality && value <= maxQuality && values.indexOf(value) === index);
+        const gridLines = [
+            ...churnTicks.map((value) => `<line class="ll-grid" x1="${x(value).toFixed(1)}" x2="${x(value).toFixed(1)}" y1="${margin.top}" y2="${margin.top + plotHeight}"></line>
+                <text class="ll-tick" x="${x(value).toFixed(1)}" y="${height - 38}" text-anchor="middle">${formatNumber.format(value)}</text>`),
+            ...qualityTicks.map((value) => `<line class="ll-grid" x1="${margin.left}" x2="${margin.left + plotWidth}" y1="${y(value).toFixed(1)}" y2="${y(value).toFixed(1)}"></line>
+                <text class="ll-tick ll-tick--y" x="${margin.left - 16}" y="${y(value).toFixed(1)}">${formatNumber.format(value)}</text>`),
+        ].join("");
+        const dots = plotPoints.map((item) => {
+            const cls = item.y >= 600 ? "bad" : item.y >= 300 ? "warn" : "good";
+            const radius = Math.max(4, Math.min(12, 3 + Math.sqrt(item.sloc || 1) / 4));
+            const topClass = highRiskKeys.has(item.name) ? "is-top-risk" : "";
+            const label = `${item.moduleKey || item.name}: churn ${formatNumber.format(item.x)}, quality ${formatNumber.format(item.y)}`;
+            return `<circle class="type-health-point churn-complexity-point type-health-point--${cls} ${topClass}" cx="${x(item.x).toFixed(1)}" cy="${y(item.y).toFixed(1)}" r="${radius.toFixed(1)}" tabindex="0" role="button" data-churn-point-index="${item.pointIndex}" aria-label="${escapeHtml(label)}">
+                <title>${escapeHtml(label)}</title>
+            </circle>`;
+        }).join("");
+        target.innerHTML = `<div class="churn-scatter-layout">
+            <svg class="type-health-scatter__plot" viewBox="0 0 ${width} ${height}" role="img" aria-label="Churn versus complexity hotspot scatter plot">
+                ${gridLines}
+                <line class="ll-axis" x1="${margin.left}" x2="${margin.left}" y1="${margin.top}" y2="${margin.top + plotHeight}"></line>
+                <line class="ll-axis" x1="${margin.left}" x2="${margin.left + plotWidth}" y1="${margin.top + plotHeight}" y2="${margin.top + plotHeight}"></line>
+                <line class="ll-threshold" x1="${margin.left}" x2="${margin.left + plotWidth}" y1="${y(300)}" y2="${y(300)}"></line>
+                <text class="ll-axis-label" x="${margin.left + plotWidth / 2}" y="${height - 16}">Churn (log)</text>
+                <text class="ll-axis-label ll-axis-label--y" x="20" y="${margin.top + plotHeight / 2}">Quality score</text>
+                ${dots}
+            </svg>
+            <div class="ll-popover churn-popover" hidden></div>
+            <div class="ll-ranked-list churn-ranked-list">
+                <h3>Refactor targets</h3>
+                ${highRisk.map((item, index) => `<button type="button" class="ll-ranked-row" data-churn-point-index="${item.pointIndex}" title="${escapeHtml(item.name)}">
+                    <span>${index + 1}</span>
+                    <code>${escapeHtml(shortenLabel(item.moduleKey || item.name))}</code>
+                    <strong>${formatNumber.format(item.y)}</strong>
+                </button>`).join("")}
+            </div>
+        </div>`;
+        const popover = target.querySelector(".churn-popover");
+        const setActivePoint = (index) => {
+            target.querySelectorAll("[data-churn-point-index]").forEach((element) => {
+                element.classList.toggle("is-active", Number(element.dataset.churnPointIndex) === index);
+            });
+        };
+        const hidePopover = () => {
+            if (popover) popover.hidden = true;
+            setActivePoint(-1);
+        };
+        const showPopover = (index) => {
+            const item = plotPoints[index];
+            if (!item || !popover) return;
+            const dotX = x(item.x);
+            const dotY = y(item.y);
+            const left = (dotX / width) * 100;
+            const top = (dotY / height) * 100;
+            const cls = riskClass(item.y, 300, 600);
+            setActivePoint(index);
+            popover.hidden = false;
+            popover.classList.toggle("ll-popover--left", left > 68);
+            popover.classList.toggle("ll-popover--top", top < 24);
+            popover.classList.toggle("ll-popover--bottom", top > 76);
+            popover.style.left = `${left}%`;
+            popover.style.top = `${top}%`;
+            popover.innerHTML = `<strong>${escapeHtml(item.moduleKey || item.name)}</strong>
+                <code>${escapeHtml(item.name)}</code>
+                <div><span>Quality score</span><b class="${cls}">${formatNumber.format(item.y)}</b></div>
+                <div><span>Churn</span><b>${formatNumber.format(item.x)}</b></div>
+                <div><span>SLOC</span><b>${formatNumber.format(item.sloc)}</b></div>
+                <button type="button" class="performance-bin-popover__action" data-quality-bin-dataset="hotspots" data-quality-bin-filter="${escapeHtml(item.name)}">Show in Hotspots</button>`;
+        };
+        target.querySelectorAll("[data-churn-point-index]").forEach((element) => {
+            element.addEventListener("click", (event) => {
+                event.stopPropagation();
+                showPopover(Number(element.dataset.churnPointIndex));
+            });
+            element.addEventListener("keydown", (event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    showPopover(Number(element.dataset.churnPointIndex));
+                }
+                if (event.key === "Escape") {
+                    hidePopover();
+                }
+            });
+        });
+        popover?.addEventListener("click", (event) => {
+            const action = event.target.closest("[data-quality-bin-dataset]");
+            if (action) {
+                event.stopPropagation();
+                drillToQualityDataset(action.dataset.qualityBinDataset, action.dataset.qualityBinFilter || "");
+            }
+        });
+        target.querySelector(".churn-scatter-layout")?.addEventListener("click", () => {
+            hidePopover();
+        });
+    }
+
+    function renderModuleQualityPivot() {
+        const target = byId("quality-module-pivot");
+        if (!target) return;
+        const modules = new Map();
+        const rowFor = (moduleKey) => {
+            const key = moduleKey || "unknown";
+            const row = modules.get(key) || { moduleKey: key, hotspots: 0, worstQuality: 0, clones: 0, typeRisk: 0, escapeScore: 0, localityRisk: 0, leverageRisk: 0 };
+            modules.set(key, row);
+            return row;
+        };
+        (state.hotspots || []).filter((item) => item.kind === "unit").forEach((item) => {
+            const row = rowFor(moduleKeyFromPath(item.name));
+            row.hotspots += 1;
+            row.worstQuality = Math.max(row.worstQuality, qualityScore(item));
+        });
+        (state.clones || []).forEach((clone) => {
+            const seen = new Set((clone.instances || []).map((inst) => moduleKeyFromPath(inst.file_path)).filter(Boolean));
+            seen.forEach((moduleKey) => { rowFor(moduleKey).clones += 1; });
+        });
+        (state.typeHealth || []).forEach((item) => {
+            const row = rowFor(moduleKeyForRecord(item));
+            row.typeRisk = Math.max(row.typeRisk, typeHealthRisk(item));
+        });
+        (state.escapeHatches || []).forEach((item) => {
+            const row = rowFor(moduleKeyForRecord(item));
+            row.escapeScore = Math.max(row.escapeScore, Number(item.escape_hatch_score || 0));
+        });
+        (state.locality || []).forEach((item) => { rowFor(moduleKeyForRecord(item)).localityRisk = localityRisk(item); });
+        (state.leverage || []).forEach((item) => { rowFor(moduleKeyForRecord(item)).leverageRisk = leverageRisk(item); });
+        const sort = state.moduleRollupSort || { key: "combined", direction: "desc" };
+        const sortSign = sort.direction === "asc" ? 1 : -1;
+        const rows = [...modules.values()]
+            .map((row) => ({ ...row, combined: normalizedRisk(row.worstQuality, 300, 600) + normalizedRisk(row.clones, 2, 6) + normalizedRisk(row.typeRisk, 40, 70) + normalizedRisk(row.escapeScore, 20, 50) + normalizedRisk(row.localityRisk, 15, 30) + normalizedRisk(row.leverageRisk, 20, 40) }))
+            .sort((a, b) => {
+                if (sort.key === "moduleKey") {
+                    return a.moduleKey.localeCompare(b.moduleKey) * sortSign;
+                }
+                return (Number(a[sort.key] || 0) - Number(b[sort.key] || 0)) * sortSign;
+            })
+            .slice(0, 32);
+        const columns = [
+            ["moduleKey", "Module"],
+            ["combined", "Combined"],
+            ["hotspots", "Hotspots"],
+            ["worstQuality", "Worst Quality"],
+            ["clones", "Clone Touches"],
+            ["typeRisk", "Type Risk"],
+            ["escapeScore", "Escape"],
+            ["localityRisk", "Locality"],
+            ["leverageRisk", "Leverage"],
+        ];
+        const header = columns.map(([key, label]) => {
+            const active = sort.key === key;
+            const nextDirection = active && sort.direction === "desc" ? "asc" : "desc";
+            const ariaSort = active ? (sort.direction === "desc" ? "descending" : "ascending") : "none";
+            const indicator = active ? (sort.direction === "desc" ? "v" : "^") : "";
+            return `<th aria-sort="${ariaSort}">
+                <button type="button" class="table-sort-button ${active ? "is-active" : ""}" data-module-rollup-sort="${escapeHtml(key)}" data-module-rollup-direction="${escapeHtml(nextDirection)}">
+                    <span>${escapeHtml(label)}</span><i>${escapeHtml(indicator)}</i>
+                </button>
+            </th>`;
+        }).join("");
+        const body = rows.length
+            ? rows.map((row) => `<tr>
+                <td><code>${escapeHtml(row.moduleKey)}</code></td>
+                <td class="${riskClass(row.combined, 180, 300)}">${formatNumber.format(row.combined)}</td>
+                <td>${formatNumber.format(row.hotspots)}</td>
+                <td class="${riskClass(row.worstQuality, 300, 600)}">${formatNumber.format(row.worstQuality)}</td>
+                <td>${formatNumber.format(row.clones)}</td>
+                <td class="${riskClass(row.typeRisk, 40, 70)}">${formatNumber.format(row.typeRisk)}</td>
+                <td class="${riskClass(row.escapeScore, 20, 50)}">${formatNumber.format(row.escapeScore)}</td>
+                <td class="${riskClass(row.localityRisk, 15, 30)}">${formatNumber.format(row.localityRisk)}</td>
+                <td class="${riskClass(row.leverageRisk, 20, 40)}">${formatNumber.format(row.leverageRisk)}</td>
+            </tr>`).join("")
+            : `<tr><td colspan="${columns.length}" class="muted">No data loaded.</td></tr>`;
+        target.innerHTML = `<table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>`;
+        target.querySelectorAll("[data-module-rollup-sort]").forEach((button) => {
+            button.addEventListener("click", () => {
+                state.moduleRollupSort = {
+                    key: button.dataset.moduleRollupSort || "combined",
+                    direction: button.dataset.moduleRollupDirection || "desc",
+                };
+                renderModuleQualityPivot();
+            });
+        });
     }
 
     function renderMap() {
@@ -5941,8 +6401,55 @@
 
     function initialTabFromLocation() {
         const params = new URLSearchParams(window.location.search);
-        const requested = params.get("tab") || window.location.hash.replace(/^#/, "");
+        const hash = window.location.hash.replace(/^#/, "");
+        const requested = params.get("tab") || hash.split("?")[0];
         return requested || "overview";
+    }
+
+    function applyQualityHashState() {
+        const hash = window.location.hash.replace(/^#/, "");
+        const [, query = ""] = hash.split("?");
+        if (!query) return;
+        const params = new URLSearchParams(query);
+        const dataset = params.get("qualityDataset");
+        if (dataset) {
+            state.qualityDatasetView = dataset;
+        }
+        [
+            ["hotspots", "hotspots-filter"],
+            ["clones", "clones-filter"],
+            ["typeHealth", "type-health-filter"],
+            ["escapeHatches", "escape-hatches-filter"],
+            ["locality", "locality-filter"],
+            ["leverage", "leverage-filter"],
+        ].forEach(([key, id]) => {
+            const value = params.get(`${key}Filter`);
+            const input = byId(id);
+            if (value != null && input) {
+                input.value = value;
+            }
+        });
+    }
+
+    function updateQualityHash() {
+        if (!byId("quality-review")?.classList.contains("is-active")) return;
+        const params = new URLSearchParams();
+        params.set("qualityDataset", state.qualityDatasetView);
+        [
+            ["hotspots", "hotspots-filter"],
+            ["clones", "clones-filter"],
+            ["typeHealth", "type-health-filter"],
+            ["escapeHatches", "escape-hatches-filter"],
+            ["locality", "locality-filter"],
+            ["leverage", "leverage-filter"],
+        ].forEach(([key, id]) => {
+            const value = byId(id)?.value || "";
+            if (value) params.set(`${key}Filter`, value);
+        });
+        const next = `#quality-review?${params.toString()}`;
+        if (window.location.hash !== next) {
+            history.replaceState(null, "", next);
+        }
     }
 
     function renderAll() {
@@ -5952,6 +6459,7 @@
         renderTypeHealthScatter();
         renderQualityDistribution();
         renderTypeHealthDistribution();
+        renderEscapeHatchDistribution();
         renderCloneDistribution();
         renderPerformanceReviewCoverage();
         renderPerformanceOverview();
@@ -6293,13 +6801,16 @@
     function renderQualityDistribution() {
         const target = byId("quality-distribution");
         if (!target) return;
+        const thresholds = empiricalThresholds(qualityDistributionItems().map((item) => item.score), 300, 600);
         renderRiskDistribution(target, qualityDistributionItems(), {
             empty: "No hotspot data.",
             modeKey: "qualityDistributionMode",
             expandedKey: "expandedQualityKey",
-            warn: 300,
-            bad: 600,
+            warn: thresholds.warn,
+            bad: thresholds.bad,
             scoreLabel: "quality score",
+            dataset: "hotspots",
+            filterField: "quality",
         });
     }
 
@@ -6313,6 +6824,8 @@
             warn: 20,
             bad: 40,
             scoreLabel: "clone score",
+            dataset: "clones",
+            filterField: "score",
         });
     }
 
@@ -6321,13 +6834,30 @@
         if (!target) return;
         renderRiskDistribution(target, typeHealthDistributionItems(), {
             empty: "No type health data.",
-            modeKey: "qualityDistributionMode",
+            modeKey: "typeHealthDistributionMode",
             expandedKey: "expandedTypeHealthKey",
-            warn: 25,
-            bad: 40,
+            warn: 40,
+            bad: 70,
             scoreLabel: "structural risk",
             minScore: 8,
             filteredOutLabel: "stable low-risk types",
+            dataset: "typeHealth",
+            filterField: "risk",
+        });
+    }
+
+    function renderEscapeHatchDistribution() {
+        const target = byId("escape-hatches-distribution");
+        if (!target) return;
+        renderRiskDistribution(target, escapeHatchDistributionItems(), {
+            empty: "No escape hatch data.",
+            modeKey: "escapeHatchDistributionMode",
+            expandedKey: "expandedEscapeHatchKey",
+            warn: 20,
+            bad: 50,
+            scoreLabel: "escape hatch score",
+            dataset: "escapeHatches",
+            filterField: "score",
         });
     }
 
@@ -6385,6 +6915,19 @@
         }));
     }
 
+    function escapeHatchDistributionItems() {
+        return (state.escapeHatches || []).map((item) => ({
+            key: `escape:${item.module_key || item.module_name}`,
+            kind: "escape hatch",
+            name: item.module_key || item.module_name,
+            score: Number(item.escape_hatch_score || 0),
+            signals: item.signals || [],
+            details: `${formatNumber.format(item.total_count || 0)} uses · unsafe ${formatNumber.format(item.unsafe_count || 0)}`,
+            raw: item,
+            searchText: [item.module_key, item.module_name, item.path, item.signals, item.escape_hatch_score].join(" "),
+        }));
+    }
+
     function renderTypeHealthScatter() {
         const target = byId("type-health-scatter");
         if (!target) return;
@@ -6407,11 +6950,16 @@
         const typeWidth = (item) => Math.max(Number(item.field_count || 0), Number(item.variant_count || 0));
         const maxWidth = Math.max(20, ...rows.map(typeWidth));
         const maxMethods = Math.max(20, ...rows.map((item) => Number(item.method_count || 0)));
-        const maxY = Math.log1p(maxMethods);
+        const useRiskY = state.typeHealthScatterY === "risk";
+        const maxY = useRiskY ? 100 : Math.log1p(maxMethods);
         const x = (value) => margin.left + (Math.max(0, Math.min(maxWidth, value)) / maxWidth) * plotWidth;
-        const y = (value) => margin.top + (1 - (Math.log1p(Math.max(0, value)) / maxY)) * plotHeight;
+        const y = (value) => {
+            if (useRiskY) return margin.top + (1 - (Math.max(0, Math.min(100, value)) / 100)) * plotHeight;
+            return margin.top + (1 - (Math.log1p(Math.max(0, value)) / maxY)) * plotHeight;
+        };
+        const yValue = (item) => useRiskY ? typeHealthRisk(item) : Number(item.method_count || 0);
         const widthCut = x(16);
-        const methodCut = y(20);
+        const methodCut = y(useRiskY ? 40 : 20);
         const highRisk = [...rows].sort((a, b) => typeHealthRisk(b) - typeHealthRisk(a)).slice(0, 8);
         const highRiskKeys = new Set(highRisk.map((item) => item.qualified_name || item.type_name));
         const points = rows.map((item, index) => {
@@ -6421,7 +6969,7 @@
             const key = item.qualified_name || item.type_name;
             const topClass = highRiskKeys.has(key) ? "is-top-risk" : "";
             const label = `${key}: risk ${formatNumber.format(risk)}, width ${formatNumber.format(typeWidth(item))}, methods ${formatNumber.format(item.method_count || 0)}, impl files ${formatNumber.format(item.impl_file_count || 0)}`;
-            return `<circle class="type-health-point type-health-point--${cls} ${topClass}" cx="${x(typeWidth(item)).toFixed(1)}" cy="${y(item.method_count || 0).toFixed(1)}" r="${radius.toFixed(1)}" tabindex="0" role="button" data-type-health-index="${index}" aria-label="${escapeHtml(label)}">
+            return `<circle class="type-health-point type-health-point--${cls} ${topClass}" cx="${x(typeWidth(item)).toFixed(1)}" cy="${y(yValue(item)).toFixed(1)}" r="${radius.toFixed(1)}" tabindex="0" role="button" data-type-health-index="${index}" aria-label="${escapeHtml(label)}">
                 <title>${escapeHtml(label)}</title>
             </circle>`;
         }).join("");
@@ -6433,12 +6981,12 @@
                 <line class="ll-axis" x1="${margin.left}" x2="${margin.left}" y1="${margin.top}" y2="${margin.top + plotHeight}"></line>
                 <line class="ll-axis" x1="${margin.left}" x2="${margin.left + plotWidth}" y1="${margin.top + plotHeight}" y2="${margin.top + plotHeight}"></line>
                 <text class="ll-axis-label" x="${margin.left + plotWidth / 2}" y="${height - 16}">Fields or enum variants</text>
-                <text class="ll-axis-label ll-axis-label--y" x="20" y="${margin.top + plotHeight / 2}">Method surface (log)</text>
+                <text class="ll-axis-label ll-axis-label--y" x="20" y="${margin.top + plotHeight / 2}">${useRiskY ? "Structural risk" : "Method surface (log)"}</text>
                 <text class="ll-tick" x="${x(0)}" y="${height - 38}">0</text>
                 <text class="ll-tick" x="${x(16)}" y="${height - 38}">16</text>
                 <text class="ll-tick" x="${x(maxWidth)}" y="${height - 38}">${formatNumber.format(maxWidth)}</text>
-                <text class="ll-tick" x="${margin.left - 28}" y="${y(maxMethods) + 4}">${formatNumber.format(maxMethods)}</text>
-                <text class="ll-tick" x="${margin.left - 22}" y="${y(20) + 4}">20</text>
+                <text class="ll-tick" x="${margin.left - 28}" y="${y(useRiskY ? 100 : maxMethods) + 4}">${formatNumber.format(useRiskY ? 100 : maxMethods)}</text>
+                <text class="ll-tick" x="${margin.left - 22}" y="${y(useRiskY ? 40 : 20) + 4}">${useRiskY ? "40" : "20"}</text>
                 <text class="ll-tick" x="${margin.left - 14}" y="${y(0) + 4}">0</text>
                 ${points}
             </svg>
@@ -6467,7 +7015,7 @@
             if (!item || !popover) return;
             setActiveTypePoint(index);
             const dotX = x(typeWidth(item));
-            const dotY = y(item.method_count || 0);
+            const dotY = y(yValue(item));
             const left = (dotX / width) * 100;
             const top = (dotY / height) * 100;
             const risk = typeHealthRisk(item);
@@ -6481,7 +7029,7 @@
             popover.innerHTML = `<strong>${escapeHtml(item.qualified_name || item.type_name)}</strong>
                 <code>${escapeHtml(item.path || "")}:${escapeHtml(item.line || "-")}</code>
                 <div><span>Dot X</span><b>${formatNumber.format(typeWidth(item))} fields/variants</b></div>
-                <div><span>Dot Y</span><b>${formatNumber.format(item.method_count || 0)} methods</b></div>
+                <div><span>Dot Y</span><b>${useRiskY ? `${formatNumber.format(risk)} risk` : `${formatNumber.format(item.method_count || 0)} methods`}</b></div>
                 <div><span>Dot size</span><b>${formatNumber.format(item.impl_file_count || 0)} impl files</b></div>
                 <div><span>Dot color</span><b>${escapeHtml(riskLabel)} structural risk</b></div>
                 <div><span>Risk</span><b>${formatNumber.format(risk)}</b></div>
@@ -6562,11 +7110,9 @@
     function renderRiskDistributionCounts(items, options) {
         const buckets = riskBuckets(items, options.warn, options.bad);
         const signalCounts = new Map();
-        const usesWeightedSignals = items.some((item) => item.signalWeights);
         items.forEach((item) => {
             pillValues(item.signals).forEach((sig) => {
-                const weight = item.signalWeights?.[sig] ?? 1;
-                signalCounts.set(sig, (signalCounts.get(sig) || 0) + weight);
+                signalCounts.set(sig, (signalCounts.get(sig) || 0) + 1);
             });
         });
         const sigSorted = [...signalCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
@@ -6583,7 +7129,7 @@
                 <div class="signal-bars__row">
                     <span>${escapeHtml(sig)}</span>
                     <div class="signal-bars__track"><span class="signal-bars__fill" style="width:${(count / sigMax) * 100}%"></span></div>
-                    <span class="signal-bars__count">${formatNumber.format(count)}${usesWeightedSignals ? " impact" : ""}</span>
+                    <span class="signal-bars__count">${formatNumber.format(count)}</span>
                 </div>`).join("")}</div>` : `<p class="muted">No signal data.</p>`}
         </div>`;
     }
@@ -6613,9 +7159,9 @@
             else good++;
         });
         return [
-            { cls: "good", label: `< ${warn}`, value: good },
-            { cls: "warn", label: `${warn}-${bad - 1}`, value: medium },
-            { cls: "bad", label: `>= ${bad}`, value: high },
+            { cls: "good", label: `< ${formatNumber.format(warn)}`, value: good },
+            { cls: "warn", label: `${formatNumber.format(warn)}-${formatNumber.format(bad)}`, value: medium },
+            { cls: "bad", label: `>= ${formatNumber.format(bad)}`, value: high },
         ];
     }
 
@@ -6654,12 +7200,16 @@
         const overflow = ordered.length > 14
             ? `<p>${formatNumber.format(ordered.length - 14)} more in this bucket. Use the dataset tables for the full list.</p>`
             : "";
+        const filterField = options.filterField || "score";
+        const datasetButton = options.dataset
+            ? `<button type="button" class="performance-bin-popover__action" data-quality-bin-dataset="${escapeHtml(options.dataset)}" data-quality-bin-filter="${escapeHtml(`${filterField}:>=${low.toFixed(2)} ${filterField}:<${high.toFixed(2)}`)}">Show all in dataset</button>`
+            : "";
         return `<div data-performance-bin-panel="${index}">
             <div class="performance-bin-popover__header">
                 <strong><i class="performance-bin-row__category performance-bin-row__category--${bucketCategory.cls}"></i>${formatNumber.format(bin.length)} ${bin.length === 1 ? "item" : "items"} · ${escapeHtml(bucketCategory.label)}</strong>
                 <span>${escapeHtml(formatNumber.format(low))}-${escapeHtml(formatNumber.format(high))} ${escapeHtml(options.scoreLabel || "score")}</span>
             </div>
-            <div class="performance-bin-popover__list">${rows || `<p>No items in this bucket.</p>`}${overflow}</div>
+            <div class="performance-bin-popover__list">${rows || `<p>No items in this bucket.</p>`}${overflow}${datasetButton}</div>
         </div>`;
     }
 
@@ -6668,8 +7218,8 @@
         const total = scores.length;
         const maxScore = Math.max(options.bad * 1.2, ...scores, 1);
         const mean = scores.reduce((sum, score) => sum + score, 0) / total;
-        const variance = scores.reduce((sum, score) => sum + Math.pow(score - mean, 2), 0) / Math.max(total, 1);
-        const stdDev = Math.max(Math.sqrt(variance), maxScore * 0.045);
+        const sortedScores = [...scores].sort((a, b) => a - b);
+        const p90 = percentileValue(sortedScores, 0.9) || 0;
         const width = 640;
         const height = 190;
         const left = 30;
@@ -6701,12 +7251,11 @@
             const topPct = ((baseline - Math.max(barHeight, 10)) / height) * 100;
             return `<rect x="${x.toFixed(1)}" y="${(baseline - barHeight).toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barHeight.toFixed(1)}" rx="3" class="risk-curve__bar" tabindex="0" role="button" aria-label="${escapeHtml(detail)}" data-performance-bin-index="${index}" data-performance-bin-left="${leftPct.toFixed(2)}" data-performance-bin-top="${topPct.toFixed(2)}"></rect>`;
         }).join("");
-        const density = (score) => Math.exp(-0.5 * Math.pow((score - mean) / stdDev, 2));
-        const maxDensity = Math.max(...Array.from({ length: 80 }, (_, index) => density((index / 79) * maxScore)), 1);
         const points = Array.from({ length: 80 }, (_, index) => {
             const score = (index / 79) * maxScore;
+            const above = sortedScores.filter((value) => value >= score).length / Math.max(total, 1);
             const x = left + (score / maxScore) * (right - left);
-            const y = baseline - ((density(score) / maxDensity) * (baseline - top));
+            const y = baseline - (above * (baseline - top));
             return `${x.toFixed(1)},${y.toFixed(1)}`;
         });
         const path = `M ${points.join(" L ")}`;
@@ -6716,7 +7265,7 @@
         };
         const meanX = left + (mean / maxScore) * (right - left);
         return `<div class="risk-curve-card performance-dist-curve">
-            <svg class="risk-curve" viewBox="0 0 ${width} ${height}" role="img" aria-label="Normal distribution curve for ${escapeHtml(options.scoreLabel)}">
+            <svg class="risk-curve" viewBox="0 0 ${width} ${height}" role="img" aria-label="Empirical tail distribution for ${escapeHtml(options.scoreLabel)}">
                 <line x1="${left}" x2="${right}" y1="${baseline}" y2="${baseline}" class="risk-curve__axis"></line>
                 ${bars}
                 ${marker(options.warn, "warn")}
@@ -6729,7 +7278,7 @@
             <div class="risk-curve-card__stats">
                 <span><strong>${formatNumber.format(total)}</strong> items</span>
                 <span><strong>${formatNumber.format(mean)}</strong> mean</span>
-                <span><strong>${formatNumber.format(stdDev)}</strong> std dev</span>
+                <span><strong>${formatNumber.format(p90)}</strong> p90</span>
             </div>
         </div>`;
     }
@@ -6778,6 +7327,18 @@
         return (clone.instances || []).some((inst) => normalizePath(inst.file_path) === needle);
     }
 
+    function slocForFile(fileName) {
+        const needle = normalizePath(fileName);
+        const hotspot = (state.hotspots || []).find((item) => item.kind === "unit" && normalizePath(item.name) === needle);
+        return Number(hotspot?.sloc || 0);
+    }
+
+    function cloneDensity(clone) {
+        const files = new Set((clone.instances || []).map((inst) => normalizePath(inst.file_path)));
+        const sloc = [...files].reduce((sum, file) => sum + slocForFile(file), 0);
+        return sloc > 0 ? (Number(clone.max_line_span || 0) * (clone.instances || []).length) / sloc : 0;
+    }
+
     function hotspotTouchesClone(hotspot, clone) {
         const files = new Set((clone.instances || []).map((inst) => normalizePath(inst.file_path)));
         return files.has(normalizePath(hotspot.name));
@@ -6821,7 +7382,7 @@
         const risk = typeHealthRisk(item);
         const width = Math.max(Number(item.field_count || 0), Number(item.variant_count || 0));
         const metrics = [
-            { label: "Risk", value: formatNumber.format(risk), cls: riskClass(risk, 25, 40) },
+            { label: "Risk", value: formatNumber.format(risk), cls: riskClass(risk, 40, 70) },
             { label: "Kind", value: escapeHtml(item.kind || "type") },
             { label: "Width", value: formatNumber.format(width) },
             { label: "Fields", value: formatNumber.format(item.field_count || 0) },
@@ -6846,13 +7407,16 @@
             { label: "Quality", value: formatNumber.format(score), cls: riskClass(score, 300, 600) },
             { label: "Cog", value: formatNumber.format(hotspot.cognitive || 0) },
             { label: "Cyc", value: formatNumber.format(hotspot.cyclomatic || 0) },
-            { label: "MI", value: formatNumber.format(hotspot.mi || 0) },
+            { label: "MI", value: formatNumber.format(hotspot.mi || 0), cls: inverseRiskClass(Number(hotspot.mi || 0), 60, 40) },
             { label: "Halstead Effort", value: formatNumber.format(hotspot.effort || 0) },
+            { label: "Density", value: formatNumber.format(hotspot.complexity_density || 0) },
+            { label: "Bugs", value: formatNumber.format(hotspot.bugs || 0) },
             { label: "SLOC", value: formatNumber.format(hotspot.sloc || 0) },
             { label: "Start Line", value: escapeHtml(hotspot.start_line || "-") },
         ];
         return `<div class="quality-detail__section ${options.compact ? "quality-detail__section--compact" : ""}">
             <h4>${escapeHtml(hotspot.name || "Quality metrics")}</h4>
+            ${renderQualityComponentBar(hotspot)}
             ${renderMetricGrid(metrics)}
             <div class="quality-detail__signals">${renderPills(hotspot.signals)}</div>
         </div>`;
@@ -6869,6 +7433,7 @@
             { label: "Instances", value: formatNumber.format(clone.instance_count || instances.length || 0) },
             { label: "Files", value: formatNumber.format(fileCount) },
             { label: "Score", value: formatNumber.format(score), cls: riskClass(score, 20, 40) },
+            { label: "Density", value: formatNumber.format(cloneDensity(clone)) },
             { label: "Token Count", value: formatNumber.format(clone.token_count || 0) },
             { label: "Max Line Span", value: formatNumber.format(clone.max_line_span || 0) },
         ];
@@ -6876,11 +7441,18 @@
             ? `<div class="quality-detail__locations">${instances.slice(0, options.compact ? 4 : 12).map((inst) => `
                 <code>${escapeHtml(inst.file_path)}:${escapeHtml(inst.start_line)}-${escapeHtml(inst.end_line)}</code>`).join("")}</div>`
             : `<p class="muted">No clone locations recorded.</p>`;
+        const snippets = instances
+            .filter((inst) => inst.snippet)
+            .slice(0, options.compact ? 2 : 4);
         return `<div class="quality-detail__section ${options.compact ? "quality-detail__section--compact" : ""}">
             <h4>${escapeHtml(options.compact ? `Clone ${hash.substring(0, 8)}` : "Clone metrics")}</h4>
             ${renderMetricGrid(metrics)}
             <div class="quality-detail__signals">${renderPills(clone.signals)}</div>
             ${locations}
+            ${snippets.length ? `<div class="clone-snippet-grid">${snippets.map((inst) => `<figure class="clone-snippet">
+                <figcaption>${escapeHtml(inst.file_path)}:${escapeHtml(inst.start_line)}-${escapeHtml(inst.end_line)}</figcaption>
+                <pre>${escapeHtml(inst.snippet)}</pre>
+            </figure>`).join("")}</div>` : ""}
         </div>`;
     }
 
@@ -6900,6 +7472,47 @@
         document.querySelectorAll("[data-quality-dataset-panel]").forEach((panel) => {
             panel.classList.toggle("is-active", panel.dataset.qualityDatasetPanel === state.qualityDatasetView);
         });
+        updateQualityHash();
+    }
+
+    function qualityFilterInputForDataset(dataset) {
+        return {
+            hotspots: byId("hotspots-filter"),
+            clones: byId("clones-filter"),
+            typeHealth: byId("type-health-filter"),
+            escapeHatches: byId("escape-hatches-filter"),
+            locality: byId("locality-filter"),
+            leverage: byId("leverage-filter"),
+        }[dataset] || null;
+    }
+
+    function renderQualityDataset(dataset) {
+        if (dataset === "hotspots") renderHotspots();
+        else if (dataset === "clones") renderClones();
+        else if (dataset === "typeHealth") renderTypeHealth();
+        else if (dataset === "escapeHatches") renderEscapeHatches();
+        else if (dataset === "locality" || dataset === "leverage") renderLocalityLeverage();
+    }
+
+    function drillToQualityDataset(dataset, filter = "") {
+        if (!dataset) return;
+        state.qualityDatasetView = dataset;
+        const input = qualityFilterInputForDataset(dataset);
+        if (input && filter) {
+            input.value = filter;
+        }
+        renderQualityDataset(dataset);
+        renderQualityDatasetView();
+        byId("quality-datasets")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    function clearQualityDatasetFilter(dataset) {
+        const input = qualityFilterInputForDataset(dataset);
+        if (input) {
+            input.value = "";
+        }
+        renderQualityDataset(dataset);
+        renderQualityDatasetView();
     }
 
     function renderPerformanceDatasetView() {
@@ -7003,13 +7616,13 @@
 
     byId("viewer-version").textContent = viewerVersion;
     setupTabs();
-    byId("hotspots-filter")?.addEventListener("input", renderHotspots);
-    byId("clones-filter")?.addEventListener("input", renderClones);
-    byId("type-health-filter")?.addEventListener("input", renderTypeHealth);
-    byId("escape-hatches-filter")?.addEventListener("input", renderEscapeHatches);
+    byId("hotspots-filter")?.addEventListener("input", () => { renderHotspots(); updateQualityHash(); });
+    byId("clones-filter")?.addEventListener("input", () => { renderClones(); updateQualityHash(); });
+    byId("type-health-filter")?.addEventListener("input", () => { renderTypeHealth(); updateQualityHash(); });
+    byId("escape-hatches-filter")?.addEventListener("input", () => { renderEscapeHatches(); updateQualityHash(); });
     byId("correctness-filter")?.addEventListener("input", renderCorrectness);
-    byId("locality-filter")?.addEventListener("input", renderLocalityLeverage);
-    byId("leverage-filter")?.addEventListener("input", renderLocalityLeverage);
+    byId("locality-filter")?.addEventListener("input", () => { renderLocalityLeverage(); updateQualityHash(); });
+    byId("leverage-filter")?.addEventListener("input", () => { renderLocalityLeverage(); updateQualityHash(); });
     byId("correctness-show-all")?.addEventListener("change", renderCorrectness);
     document.querySelectorAll("[data-quality-distribution-mode]").forEach((button) => {
         button.addEventListener("click", () => {
@@ -7020,7 +7633,6 @@
                 item.setAttribute("aria-pressed", active ? "true" : "false");
             });
             renderQualityDistribution();
-            renderTypeHealthDistribution();
         });
     });
     document.querySelectorAll("[data-clone-distribution-mode]").forEach((button) => {
@@ -7038,6 +7650,37 @@
         button.addEventListener("click", () => {
             state.qualityDatasetView = button.dataset.qualityDatasetView || "hotspots";
             renderQualityDatasetView();
+        });
+    });
+    document.querySelectorAll("[data-clear-quality-filter]").forEach((button) => {
+        button.addEventListener("click", () => {
+            clearQualityDatasetFilter(button.dataset.clearQualityFilter || state.qualityDatasetView);
+        });
+    });
+    document.querySelectorAll("[data-quality-panel-mode]").forEach((button) => {
+        button.addEventListener("click", () => {
+            const key = button.dataset.qualityPanelMode;
+            if (!key) return;
+            state[key] = button.dataset.qualityPanelValue || "counts";
+            document.querySelectorAll(`[data-quality-panel-mode="${CSS.escape(key)}"]`).forEach((item) => {
+                const active = item === button;
+                item.classList.toggle("is-active", active);
+                item.setAttribute("aria-pressed", active ? "true" : "false");
+            });
+            renderTypeHealthDistribution();
+            renderEscapeHatchDistribution();
+            renderLocalityLeverage();
+        });
+    });
+    document.querySelectorAll("[data-type-health-y]").forEach((button) => {
+        button.addEventListener("click", () => {
+            state.typeHealthScatterY = button.dataset.typeHealthY || "methods";
+            document.querySelectorAll("[data-type-health-y]").forEach((item) => {
+                const active = item === button;
+                item.classList.toggle("is-active", active);
+                item.setAttribute("aria-pressed", active ? "true" : "false");
+            });
+            renderTypeHealthScatter();
         });
     });
     renderQualityDatasetView();
@@ -7144,5 +7787,9 @@
         button.addEventListener("click", () => triggerRun(`/api/run/item/${encodeURIComponent(button.dataset.runItem)}`, button));
     });
     window.setInterval(refreshRuns, 5000);
-    loadDefaults().then(() => activateTab(initialTabFromLocation()));
+    applyQualityHashState();
+    loadDefaults().then(() => {
+        activateTab(initialTabFromLocation());
+        renderQualityDatasetView();
+    });
 })();

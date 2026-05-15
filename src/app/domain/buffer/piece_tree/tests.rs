@@ -4,6 +4,7 @@ use super::{
 };
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
+use std::sync::Arc;
 
 #[test]
 fn anchor_left_bias_stays_before_insertion_at_same_offset() {
@@ -58,6 +59,19 @@ fn owner_metadata_survives_edits() {
     tree.remove_char_range(5..6);
 
     assert_eq!(tree.anchor_owner(anchor), Some(owner));
+}
+
+#[test]
+fn anchor_stripped_clone_shares_original_text_storage() {
+    let mut tree = PieceTreeLite::from_string("needle\n".repeat(1024));
+    let anchor = tree.create_anchor(3, AnchorBias::Right);
+
+    let clone = tree.clone_without_anchors();
+
+    assert!(Arc::ptr_eq(&tree.original, &clone.original));
+    assert_eq!(tree.anchor_position(anchor), Some(3));
+    assert_eq!(clone.anchor_position(anchor), None);
+    assert_eq!(clone.extract_text(), tree.extract_text());
 }
 
 #[test]

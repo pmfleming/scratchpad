@@ -57,6 +57,22 @@ struct SessionSnapshotWrite {
     snapshot: DocumentSnapshot,
 }
 
+struct PreparedSessionPersist {
+    session_tabs: Vec<SessionTab>,
+    snapshot_writes: Vec<SessionSnapshotWrite>,
+    preserved_snapshot_paths: HashSet<PathBuf>,
+}
+
+struct RestoredTabs {
+    tabs: Vec<WorkspaceTab>,
+    summary: RestoreSummary,
+}
+
+struct StreamedTabs {
+    tab_count: usize,
+    summary: RestoreSummary,
+}
+
 pub struct RestoredSession {
     pub tabs: Vec<WorkspaceTab>,
     pub active_tab_index: usize,
@@ -131,46 +147,40 @@ impl SessionStore {
         let total_start = Instant::now();
         let manifest_start = Instant::now();
         let Some(manifest) = self.load_manifest()? else {
-            return Ok(ProfiledRestoredSession {
-                restored: None,
-                profile: SessionRestoreProfile {
-                    total_ns: total_start.elapsed().as_nanos(),
-                    manifest_read_parse_ns: manifest_start.elapsed().as_nanos(),
-                    ..SessionRestoreProfile::default()
-                },
-            });
+            return Ok(profiled_restore_none(
+                total_start,
+                manifest_start.elapsed().as_nanos(),
+                0,
+                0,
+            ));
         };
         let manifest_read_parse_ns = manifest_start.elapsed().as_nanos();
         let buffer_count = manifest.tabs.iter().map(SessionTab::buffer_count).sum();
         let legacy_settings = manifest.legacy_settings();
+        let active_tab_index = manifest.active_tab_index;
+        let active_surface = manifest.active_surface;
 
         let restore_start = Instant::now();
-        let mut restore_summary = RestoreSummary::default();
-        let mut tabs = Vec::with_capacity(manifest.tabs.len());
-        for (tab, summary) in self.restore_tabs_ordered(manifest.tabs) {
-            restore_summary.merge(summary);
-            tabs.push(tab);
-        }
+        let RestoredTabs {
+            tabs,
+            summary: restore_summary,
+        } = self.restore_tabs_with_summary(manifest.tabs);
         let restore_reconstruction_ns = restore_start.elapsed().as_nanos();
 
         if tabs.is_empty() {
-            return Ok(ProfiledRestoredSession {
-                restored: None,
-                profile: SessionRestoreProfile {
-                    total_ns: total_start.elapsed().as_nanos(),
-                    manifest_read_parse_ns,
-                    restore_reconstruction_ns,
-                    buffer_count,
-                    ..SessionRestoreProfile::default()
-                },
-            });
+            return Ok(profiled_restore_none(
+                total_start,
+                manifest_read_parse_ns,
+                restore_reconstruction_ns,
+                buffer_count,
+            ));
         }
 
         let tab_count = tabs.len();
         Ok(ProfiledRestoredSession {
             restored: Some(RestoredSession {
-                active_tab_index: manifest.active_tab_index.min(tabs.len() - 1),
-                active_surface: manifest.active_surface,
+                active_tab_index: active_tab_index.min(tabs.len() - 1),
+                active_surface,
                 tabs,
                 legacy_settings,
                 restore_status: restore_summary.into_status(),
@@ -183,6 +193,16 @@ impl SessionStore {
                 buffer_count,
             },
         })
+    }
+
+    fn restore_tabs_with_summary(&self, session_tabs: Vec<SessionTab>) -> RestoredTabs {
+        let mut summary = RestoreSummary::default();
+        let mut tabs = Vec::with_capacity(session_tabs.len());
+        for (tab, tab_summary) in self.restore_tabs_ordered(session_tabs) {
+            summary.merge(tab_summary);
+            tabs.push(tab);
+        }
+        RestoredTabs { tabs, summary }
     }
 
     pub(crate) fn load_streaming(
@@ -198,27 +218,17 @@ impl SessionStore {
             .min(manifest.tabs.len().saturating_sub(1));
         let legacy_settings = manifest.legacy_settings();
         let active_surface = manifest.active_surface;
-        if !on_started(active_tab_index, active_surface, legacy_settings.clone()) {
-            return Err(io::Error::new(
-                io::ErrorKind::BrokenPipe,
-                "session restore receiver closed",
-            ));
-        }
+        notify_session_restore_started(
+            &mut on_started,
+            active_tab_index,
+            active_surface,
+            legacy_settings.clone(),
+        )?;
 
-        let mut restore_summary = RestoreSummary::default();
-        let mut tab_count = 0usize;
-        for (tab_index, restored_tab, cold_tab, summary) in
-            self.restore_tabs_active_first(manifest.tabs, active_tab_index)
-        {
-            restore_summary.merge(summary);
-            tab_count += 1;
-            if !on_tab(tab_index, restored_tab, cold_tab) {
-                return Err(io::Error::new(
-                    io::ErrorKind::BrokenPipe,
-                    "session restore receiver closed",
-                ));
-            }
-        }
+        let StreamedTabs {
+            tab_count,
+            summary: restore_summary,
+        } = self.stream_tabs_active_first(manifest.tabs, active_tab_index, &mut on_tab)?;
 
         if tab_count == 0 {
             return Ok(None);
@@ -231,6 +241,26 @@ impl SessionStore {
             legacy_settings,
             restore_status: restore_summary.into_status(),
         }))
+    }
+
+    fn stream_tabs_active_first(
+        &self,
+        session_tabs: Vec<SessionTab>,
+        active_tab_index: usize,
+        on_tab: &mut impl FnMut(usize, WorkspaceTab, Option<ColdSessionTab>) -> bool,
+    ) -> io::Result<StreamedTabs> {
+        let mut summary = RestoreSummary::default();
+        let mut tab_count = 0usize;
+        for (tab_index, restored_tab, cold_tab, tab_summary) in
+            self.restore_tabs_active_first(session_tabs, active_tab_index)
+        {
+            summary.merge(tab_summary);
+            tab_count += 1;
+            if !on_tab(tab_index, restored_tab, cold_tab) {
+                return Err(session_restore_receiver_closed());
+            }
+        }
+        Ok(StreamedTabs { tab_count, summary })
     }
 
     pub fn load_startup_visible(&self) -> io::Result<Option<RestoredSession>> {
@@ -302,6 +332,14 @@ impl SessionStore {
         request: SessionPersistRequest,
         profile: &mut SessionPersistProfile,
     ) -> io::Result<()> {
+        let SessionPersistRequest {
+            active_tab_index,
+            active_surface,
+            font_size,
+            word_wrap,
+            tabs,
+        } = request;
+
         fs::create_dir_all(&self.root).inspect_err(|error| {
             diagnostics::record_io_error(
                 "session_create_root",
@@ -311,55 +349,96 @@ impl SessionStore {
             );
         })?;
 
-        let mut session_tabs = Vec::with_capacity(request.tabs.len());
+        let PreparedSessionPersist {
+            session_tabs,
+            snapshot_writes,
+            preserved_snapshot_paths,
+        } = self.prepare_session_persist(tabs);
+
+        let active_temp_paths = self.write_active_session_snapshots(
+            snapshot_writes,
+            preserved_snapshot_paths,
+            profile,
+        )?;
+        self.remove_stale_buffer_files_profiled(&active_temp_paths, profile)?;
+
+        let manifest = session_manifest(
+            active_tab_index,
+            active_surface,
+            font_size,
+            word_wrap,
+            session_tabs,
+        );
+        self.write_manifest_profiled(&manifest, profile)?;
+        Ok(())
+    }
+
+    fn prepare_session_persist(&self, tabs: Vec<CapturedSessionTab>) -> PreparedSessionPersist {
+        let mut session_tabs = Vec::with_capacity(tabs.len());
         let mut snapshot_writes = Vec::new();
         let mut preserved_snapshot_paths = HashSet::new();
 
-        for captured_tab in request.tabs {
-            for temp_id in session_tab_temp_ids(&captured_tab.session_tab) {
-                preserved_snapshot_paths.insert(self.buffer_path(temp_id));
-            }
-            for buffer in captured_tab.buffer_snapshots {
-                let temp_path = self.buffer_path(&buffer.temp_id);
-                snapshot_writes.push(SessionSnapshotWrite {
-                    temp_id: buffer.temp_id,
-                    path: temp_path,
-                    snapshot: buffer.snapshot,
-                });
-            }
+        for captured_tab in tabs {
+            preserved_snapshot_paths.extend(
+                session_tab_temp_ids(&captured_tab.session_tab)
+                    .into_iter()
+                    .map(|id| self.buffer_path(id)),
+            );
+            snapshot_writes.extend(
+                captured_tab
+                    .buffer_snapshots
+                    .into_iter()
+                    .map(|buffer| self.session_snapshot_write(buffer)),
+            );
             session_tabs.push(captured_tab.session_tab);
         }
 
+        PreparedSessionPersist {
+            session_tabs,
+            snapshot_writes,
+            preserved_snapshot_paths,
+        }
+    }
+
+    fn session_snapshot_write(&self, buffer: CapturedSessionBuffer) -> SessionSnapshotWrite {
+        SessionSnapshotWrite {
+            path: self.buffer_path(&buffer.temp_id),
+            temp_id: buffer.temp_id,
+            snapshot: buffer.snapshot,
+        }
+    }
+
+    fn write_active_session_snapshots(
+        &self,
+        snapshot_writes: Vec<SessionSnapshotWrite>,
+        preserved_snapshot_paths: HashSet<PathBuf>,
+        profile: &mut SessionPersistProfile,
+    ) -> io::Result<HashSet<PathBuf>> {
         let snapshot_write_start = Instant::now();
         let mut active_temp_paths = write_session_snapshots(snapshot_writes)?;
         active_temp_paths.extend(preserved_snapshot_paths);
         profile.snapshot_write_ns = snapshot_write_start.elapsed().as_nanos();
+        Ok(active_temp_paths)
+    }
 
+    fn remove_stale_buffer_files_profiled(
+        &self,
+        active_temp_paths: &HashSet<PathBuf>,
+        profile: &mut SessionPersistProfile,
+    ) -> io::Result<()> {
         let stale_cleanup_start = Instant::now();
-        self.remove_stale_buffer_files(&active_temp_paths)?;
+        self.remove_stale_buffer_files(active_temp_paths)?;
         profile.stale_cleanup_ns = stale_cleanup_start.elapsed().as_nanos();
+        Ok(())
+    }
 
-        let manifest = SessionManifest {
-            version: SESSION_VERSION,
-            active_tab_index: request
-                .active_tab_index
-                .min(session_tabs.len().saturating_sub(1)),
-            active_surface: request.active_surface,
-            font_size: request.font_size,
-            word_wrap: request.word_wrap,
-            tabs: session_tabs,
-        };
+    fn write_manifest_profiled(
+        &self,
+        manifest: &SessionManifest,
+        profile: &mut SessionPersistProfile,
+    ) -> io::Result<()> {
         let serialize_start = Instant::now();
-        let json = serde_json::to_vec_pretty(&manifest).map_err(|error| {
-            let error = invalid_data(error);
-            record_session_io_error(
-                "session_serialize_manifest",
-                &self.manifest_path,
-                "session_store::persist_request",
-                &error,
-            );
-            error
-        })?;
+        let json = self.serialize_manifest(manifest)?;
         profile.manifest_serialize_ns = serialize_start.elapsed().as_nanos();
         profile.manifest_size_bytes = json.len() as u64;
 
@@ -374,6 +453,19 @@ impl SessionStore {
         })?;
         profile.manifest_write_ns = manifest_write_start.elapsed().as_nanos();
         Ok(())
+    }
+
+    fn serialize_manifest(&self, manifest: &SessionManifest) -> io::Result<Vec<u8>> {
+        serde_json::to_vec_pretty(manifest).map_err(|error| {
+            let error = invalid_data(error);
+            record_session_io_error(
+                "session_serialize_manifest",
+                &self.manifest_path,
+                "session_store::persist_request",
+                &error,
+            );
+            error
+        })
     }
 
     fn remove_stale_buffer_files(&self, active_temp_paths: &HashSet<PathBuf>) -> io::Result<()> {
@@ -411,6 +503,15 @@ impl SessionStore {
             return Ok(None);
         }
 
+        let manifest = self.read_session_manifest()?;
+        if !self.is_supported_session_manifest(&manifest) {
+            return Ok(None);
+        }
+
+        Ok(Some(manifest))
+    }
+
+    fn read_session_manifest(&self) -> io::Result<SessionManifest> {
         let raw = fs::read_to_string(&self.manifest_path).inspect_err(|error| {
             record_session_io_error(
                 "session_read_manifest",
@@ -419,7 +520,11 @@ impl SessionStore {
                 error,
             );
         })?;
-        let manifest: SessionManifest = serde_json::from_str(&raw).map_err(|error| {
+        self.parse_session_manifest(&raw)
+    }
+
+    fn parse_session_manifest(&self, raw: &str) -> io::Result<SessionManifest> {
+        serde_json::from_str(raw).map_err(|error| {
             let error = invalid_data(error);
             record_session_io_error(
                 "session_parse_manifest",
@@ -428,8 +533,10 @@ impl SessionStore {
                 &error,
             );
             error
-        })?;
+        })
+    }
 
+    fn is_supported_session_manifest(&self, manifest: &SessionManifest) -> bool {
         if manifest.version != model::SESSION_VERSION {
             diagnostics::record_warning(
                 "session_version_mismatch",
@@ -441,10 +548,60 @@ impl SessionStore {
                     model::SESSION_VERSION
                 ),
             );
-            return Ok(None);
+            return false;
         }
 
-        Ok(Some(manifest))
+        true
+    }
+}
+
+fn notify_session_restore_started(
+    on_started: &mut impl FnMut(usize, SessionActiveSurface, AppSettings) -> bool,
+    active_tab_index: usize,
+    active_surface: SessionActiveSurface,
+    legacy_settings: AppSettings,
+) -> io::Result<()> {
+    on_started(active_tab_index, active_surface, legacy_settings)
+        .then_some(())
+        .ok_or_else(session_restore_receiver_closed)
+}
+
+fn session_restore_receiver_closed() -> io::Error {
+    io::Error::new(io::ErrorKind::BrokenPipe, "session restore receiver closed")
+}
+
+fn profiled_restore_none(
+    total_start: Instant,
+    manifest_read_parse_ns: u128,
+    restore_reconstruction_ns: u128,
+    buffer_count: usize,
+) -> ProfiledRestoredSession {
+    ProfiledRestoredSession {
+        restored: None,
+        profile: SessionRestoreProfile {
+            total_ns: total_start.elapsed().as_nanos(),
+            manifest_read_parse_ns,
+            restore_reconstruction_ns,
+            buffer_count,
+            ..SessionRestoreProfile::default()
+        },
+    }
+}
+
+fn session_manifest(
+    active_tab_index: usize,
+    active_surface: SessionActiveSurface,
+    font_size: f32,
+    word_wrap: bool,
+    tabs: Vec<SessionTab>,
+) -> SessionManifest {
+    SessionManifest {
+        version: SESSION_VERSION,
+        active_tab_index: active_tab_index.min(tabs.len().saturating_sub(1)),
+        active_surface,
+        font_size,
+        word_wrap,
+        tabs,
     }
 }
 
@@ -454,52 +611,84 @@ fn write_session_snapshots(writes: Vec<SessionSnapshotWrite>) -> io::Result<Hash
         return Ok(HashSet::new());
     }
 
-    if total < SESSION_IO_PARALLEL_MIN_ITEMS || session_io_worker_count(total) <= 1 {
-        let mut active_temp_paths = HashSet::with_capacity(total);
-        for write in writes {
-            active_temp_paths.insert(write_one_session_snapshot(write)?);
-        }
-        return Ok(active_temp_paths);
-    }
-
     let workers = session_io_worker_count(total);
-    if workers <= 1 {
+    if should_write_session_snapshots_serially(total, workers) {
         return write_session_snapshot_chunk(writes).map(|paths| paths.into_iter().collect());
     }
 
+    write_session_snapshots_parallel(writes, total, workers)
+}
+
+fn should_write_session_snapshots_serially(total: usize, workers: usize) -> bool {
+    total < SESSION_IO_PARALLEL_MIN_ITEMS || workers <= 1
+}
+
+fn write_session_snapshots_parallel(
+    writes: Vec<SessionSnapshotWrite>,
+    total: usize,
+    workers: usize,
+) -> io::Result<HashSet<PathBuf>> {
+    let chunks = session_snapshot_chunks(writes, total, workers);
+    thread::scope(|scope| {
+        let handles = chunks
+            .into_iter()
+            .map(|chunk| scope.spawn(move || write_session_snapshot_chunk(chunk)))
+            .collect::<Vec<_>>();
+
+        collect_session_snapshot_results(handles, total)
+    })
+}
+
+fn session_snapshot_chunks(
+    writes: Vec<SessionSnapshotWrite>,
+    total: usize,
+    workers: usize,
+) -> Vec<Vec<SessionSnapshotWrite>> {
     let chunk_size = total.div_ceil(workers);
     let mut iter = writes.into_iter();
-    thread::scope(|scope| {
-        let mut handles = Vec::with_capacity(workers);
-        for _ in 0..workers {
-            let chunk = iter.by_ref().take(chunk_size).collect::<Vec<_>>();
-            if chunk.is_empty() {
-                break;
-            }
-            handles.push(scope.spawn(move || write_session_snapshot_chunk(chunk)));
+    let mut chunks = Vec::with_capacity(workers);
+    for _ in 0..workers {
+        let chunk = iter.by_ref().take(chunk_size).collect::<Vec<_>>();
+        if chunk.is_empty() {
+            break;
         }
+        chunks.push(chunk);
+    }
+    chunks
+}
 
-        let mut active_temp_paths = HashSet::with_capacity(total);
-        let mut first_error = None;
-        for handle in handles {
-            match handle.join() {
-                Ok(Ok(paths)) => active_temp_paths.extend(paths),
-                Err(_) if first_error.is_none() => {
-                    first_error = Some(io::Error::other("session snapshot writer panicked"));
-                }
-                Ok(Err(error)) if first_error.is_none() => {
-                    first_error = Some(error);
-                }
-                Err(_) => {}
-                Ok(Err(_)) => {}
-            }
+fn collect_session_snapshot_results(
+    handles: Vec<thread::ScopedJoinHandle<'_, io::Result<Vec<PathBuf>>>>,
+    total: usize,
+) -> io::Result<HashSet<PathBuf>> {
+    let mut active_temp_paths = HashSet::with_capacity(total);
+    let mut first_error = None;
+    for handle in handles {
+        match session_snapshot_join_result(handle) {
+            Ok(paths) => active_temp_paths.extend(paths),
+            Err(error) => remember_first_session_snapshot_error(&mut first_error, error),
         }
+    }
 
-        match first_error {
-            Some(error) => Err(error),
-            None => Ok(active_temp_paths),
-        }
-    })
+    match first_error {
+        Some(error) => Err(error),
+        None => Ok(active_temp_paths),
+    }
+}
+
+fn session_snapshot_join_result(
+    handle: thread::ScopedJoinHandle<'_, io::Result<Vec<PathBuf>>>,
+) -> io::Result<Vec<PathBuf>> {
+    match handle.join() {
+        Ok(result) => result,
+        Err(_) => Err(io::Error::other("session snapshot writer panicked")),
+    }
+}
+
+fn remember_first_session_snapshot_error(first_error: &mut Option<io::Error>, error: io::Error) {
+    if first_error.is_none() {
+        *first_error = Some(error);
+    }
 }
 
 fn write_session_snapshot_chunk(writes: Vec<SessionSnapshotWrite>) -> io::Result<Vec<PathBuf>> {

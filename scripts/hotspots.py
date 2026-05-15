@@ -33,6 +33,10 @@ class CodeMetrics:
     nom_fn: int
     nom_cl: int
     quality_score: float = 0.0
+    cognitive_score: float = 0.0
+    cyclomatic_score: float = 0.0
+    maintainability_score: float = 0.0
+    effort_score: float = 0.0
     size_score: float = 0.0
     score: float = 0.0
     signals: str = ""
@@ -78,6 +82,11 @@ class HotspotAnalyzer:
             nom_fn=int(self._extract_metric(m, "nom", "functions")),
             nom_cl=int(self._extract_metric(m, "nom", "closures")),
         )
+        components = self.calculate_quality_components(metrics)
+        metrics.cognitive_score = components["cognitive_score"]
+        metrics.cyclomatic_score = components["cyclomatic_score"]
+        metrics.maintainability_score = components["maintainability_score"]
+        metrics.effort_score = components["effort_score"]
         metrics.quality_score = self.calculate_quality_score(metrics)
         metrics.size_score = self.calculate_size_score(metrics)
         metrics.score = metrics.quality_score
@@ -90,12 +99,21 @@ class HotspotAnalyzer:
         return metrics
 
     def calculate_quality_score(self, m: CodeMetrics) -> float:
+        components = self.calculate_quality_components(m)
+        score = sum(components.values()) * 1.12
+        return round(score, 2)
+
+    def calculate_quality_components(self, m: CodeMetrics) -> Dict[str, float]:
         cognitive = min(260.0, m.cognitive * 3.7)
         cyclomatic = min(220.0, m.cyclomatic * 2.0)
         maintainability = min(150.0, max(0.0, 65.0 - m.mi) * 1.2)
         effort = min(60.0, math.log1p(max(0.0, m.effort)) * 4.0)
-        score = (cognitive + cyclomatic + maintainability + effort) * 1.12
-        return round(score, 2)
+        return {
+            "cognitive_score": round(cognitive, 2),
+            "cyclomatic_score": round(cyclomatic, 2),
+            "maintainability_score": round(maintainability, 2),
+            "effort_score": round(effort, 2),
+        }
 
     def calculate_size_score(self, m: CodeMetrics) -> float:
         return round(min(20.0, m.sloc / 10.0), 2)

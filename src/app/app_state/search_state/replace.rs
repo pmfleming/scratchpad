@@ -11,25 +11,11 @@ use crate::app::ui::editor_content::native_editor::CursorRange;
 use std::ops::Range;
 
 pub fn replace_current_search_match(app: &mut ScratchpadApp) -> bool {
-    if !app
-        .state
-        .search_state
-        .replace_availability()
-        .allows_actions()
-    {
-        return false;
-    }
-    let Some(index) = app.state.search_state.results.active_match_index else {
-        return false;
-    };
-    let Some(search_match) = app.state.search_state.results.matches.get(index).cloned() else {
+    let Some((index, search_match)) = active_search_match_for_replace(app) else {
         return false;
     };
     if !validate_search_match_for_replace(app, &search_match) {
-        app.state.search_state.clear_replace_all_confirmation();
-        app.state.status.report_search_results_stale_for_replace();
-        app.mark_search_dirty();
-        app.refresh_search_state();
+        invalidate_stale_replace_target(app);
         return false;
     }
     if !activate_search_match(app, index) {
@@ -39,22 +25,12 @@ pub fn replace_current_search_match(app: &mut ScratchpadApp) -> bool {
     let replacement = match replacement_for_match(app, &search_match) {
         Ok(replacement) => replacement,
         Err(error) => {
-            app.state
-                .status
-                .set_error_status_in_domain(StatusDomain::Search, error.message());
+            report_search_error(app, error);
             return false;
         }
     };
-    let replacement_char_count = replacement.chars().count();
-    let previous_selection = app
-        .tab_manager
-        .active_tab()
-        .and_then(|tab| tab.view(search_match.view_id))
-        .and_then(|view| view.cursor_range)
-        .unwrap_or_else(|| cursor_range_from_char_range(search_match.range.clone()));
-    let replacement_range =
-        search_match.range.start..search_match.range.start + replacement_char_count;
-    let next_selection = cursor_range_from_char_range(replacement_range.clone());
+    let (previous_selection, next_selection, replacement_range) =
+        active_match_replacement_selection(app, &search_match, replacement.chars().count());
     let replacements = vec![(search_match.range.clone(), replacement)];
 
     if app
@@ -71,18 +47,67 @@ pub fn replace_current_search_match(app: &mut ScratchpadApp) -> bool {
         return false;
     }
 
-    if let Err(error) = rebuild_active_buffer_search_matches(app) {
-        app.state
-            .status
-            .set_error_status_in_domain(StatusDomain::Search, error.message());
-        app.mark_search_dirty();
-        app.refresh_search_state();
+    if !rebuild_active_buffer_search_matches_or_report(app) {
         return false;
     }
     app.select_next_active_buffer_match_from(replacement_range.end);
     app.mark_search_dirty();
     app.refresh_search_state();
     true
+}
+
+fn active_search_match_for_replace(app: &ScratchpadApp) -> Option<(usize, super::SearchMatch)> {
+    if !app
+        .state
+        .search_state
+        .replace_availability()
+        .allows_actions()
+    {
+        return None;
+    }
+    let index = app.state.search_state.results.active_match_index?;
+    let search_match = app.state.search_state.results.matches.get(index)?.clone();
+    Some((index, search_match))
+}
+
+fn invalidate_stale_replace_target(app: &mut ScratchpadApp) {
+    app.state.search_state.clear_replace_all_confirmation();
+    app.state.status.report_search_results_stale_for_replace();
+    app.mark_search_dirty();
+    app.refresh_search_state();
+}
+
+fn active_match_replacement_selection(
+    app: &ScratchpadApp,
+    search_match: &super::SearchMatch,
+    replacement_char_count: usize,
+) -> (CursorRange, CursorRange, Range<usize>) {
+    let previous_selection = app
+        .tab_manager
+        .active_tab()
+        .and_then(|tab| tab.view(search_match.view_id))
+        .and_then(|view| view.cursor_range)
+        .unwrap_or_else(|| cursor_range_from_char_range(search_match.range.clone()));
+    let replacement_range =
+        search_match.range.start..search_match.range.start + replacement_char_count;
+    let next_selection = cursor_range_from_char_range(replacement_range.clone());
+    (previous_selection, next_selection, replacement_range)
+}
+
+fn rebuild_active_buffer_search_matches_or_report(app: &mut ScratchpadApp) -> bool {
+    if let Err(error) = rebuild_active_buffer_search_matches(app) {
+        report_search_error(app, error);
+        app.mark_search_dirty();
+        app.refresh_search_state();
+        return false;
+    }
+    true
+}
+
+fn report_search_error(app: &mut ScratchpadApp, error: SearchError) {
+    app.state
+        .status
+        .set_error_status_in_domain(StatusDomain::Search, error.message());
 }
 
 pub(super) fn replace_ranges_in_active_buffer(

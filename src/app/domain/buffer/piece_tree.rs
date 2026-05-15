@@ -16,6 +16,7 @@ pub use anchor::{AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind};
 
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::Arc;
 
 use anchor::{LeafAnchor, LeafId};
 use metrics::sum_node_metrics;
@@ -255,7 +256,7 @@ impl PieceTreeRoot {
 
 #[derive(Clone, Debug)]
 pub struct PieceTreeLite {
-    original: String,
+    original: Arc<str>,
     add: String,
     root: PieceTreeRoot,
     generation: u64,
@@ -287,7 +288,7 @@ impl PieceTreeLite {
     pub fn from_string(text: String) -> Self {
         let pieces = build_chunked_pieces(PieceBuffer::Original, 0, &text);
         let mut tree = Self {
-            original: text,
+            original: Arc::from(text.into_boxed_str()),
             add: String::new(),
             root: build_root_from_pieces(pieces),
             generation: 0,
@@ -310,6 +311,27 @@ impl PieceTreeLite {
                 }
             }
         }
+    }
+
+    fn line_scan_start_for_leaf(
+        leaf: &PieceTreeLeaf,
+        address: LeafAddress,
+        safe_offset: usize,
+    ) -> (usize, usize, usize) {
+        if leaf.piece_start_chars.is_empty() {
+            return (0, address.leaf_start_newline, address.leaf_start_char);
+        }
+
+        let offset_in_leaf = safe_offset - address.leaf_start_char;
+        let piece_index = leaf
+            .piece_start_chars
+            .partition_point(|&char_start| char_start <= offset_in_leaf)
+            .saturating_sub(1);
+        (
+            piece_index,
+            address.leaf_start_newline + leaf.piece_start_newlines[piece_index],
+            address.leaf_start_char + leaf.piece_start_chars[piece_index],
+        )
     }
 
     fn refresh_leaf_index_after_structure_change(&mut self) {
@@ -399,23 +421,21 @@ impl PieceTreeLite {
 
         let safe_offset = offset_chars.min(self.len_chars());
         let address = self.find_leaf_for_char_offset(safe_offset);
-        let mut current_line = address.leaf_start_newline;
-        let mut current_char = address.leaf_start_char;
-
         let leaf = &self.root.nodes[address.node_index].leaves[address.leaf_index];
-        let piece_skip = if !leaf.piece_start_chars.is_empty() {
-            let offset_in_leaf = safe_offset - address.leaf_start_char;
-            let pi = leaf
-                .piece_start_chars
-                .partition_point(|&c| c <= offset_in_leaf)
-                .saturating_sub(1);
-            current_line += leaf.piece_start_newlines[pi];
-            current_char += leaf.piece_start_chars[pi];
-            pi
-        } else {
-            0
-        };
+        let (piece_skip, current_line, current_char) =
+            Self::line_scan_start_for_leaf(leaf, address, safe_offset);
 
+        self.line_index_from_piece_scan(leaf, piece_skip, current_line, current_char, safe_offset)
+    }
+
+    fn line_index_from_piece_scan(
+        &self,
+        leaf: &PieceTreeLeaf,
+        piece_skip: usize,
+        mut current_line: usize,
+        mut current_char: usize,
+        safe_offset: usize,
+    ) -> usize {
         for piece in leaf.pieces.iter().skip(piece_skip) {
             for ch in self.piece_text(piece).chars() {
                 if current_char >= safe_offset {
@@ -434,7 +454,7 @@ impl PieceTreeLite {
     pub fn extract_text(&self) -> String {
         // Fast path: no edits have been made, original covers the whole buffer.
         if self.add.is_empty() && self.root.metrics.bytes == self.original.len() {
-            return self.original.clone();
+            return self.original.to_string();
         }
         self.extract_range(0..self.len_chars())
     }

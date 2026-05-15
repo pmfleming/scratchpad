@@ -1,4 +1,5 @@
 use crate::app::app_state::ScratchpadApp;
+use crate::app::domain::WorkspaceTab;
 use crate::app::services::settings_store::{TabOrderDirection, TabOrderMode};
 use std::cmp::Ordering;
 
@@ -117,87 +118,125 @@ fn workspace_tab_order_for_mode(app: &ScratchpadApp, mode: TabOrderMode) -> Opti
     }
 
     let mut order = (0..app.tab_manager.tabs.as_slice().len()).collect::<Vec<_>>();
-    let custom_rank = custom_order_ranks(app);
-    let direction = app.state.app_settings.tab_order_direction();
-    match mode {
-        TabOrderMode::Custom => None,
-        TabOrderMode::FileName => {
-            order.sort_by(|left, right| {
-                let left_tab = &app.tab_manager.tabs.as_slice()[*left];
-                let right_tab = &app.tab_manager.tabs.as_slice()[*right];
-                order_direction_cmp(
-                    direction,
-                    left_tab.buffer.name.to_ascii_lowercase(),
-                    right_tab.buffer.name.to_ascii_lowercase(),
-                )
-                .then_with(|| {
-                    order_direction_cmp(
-                        direction,
-                        left_tab.buffer.name.as_str(),
-                        right_tab.buffer.name.as_str(),
-                    )
-                })
-                .then_with(|| {
-                    order_direction_cmp(
-                        direction,
-                        tab_path_label(left_tab),
-                        tab_path_label(right_tab),
-                    )
-                })
-                .then_with(|| custom_rank[*left].cmp(&custom_rank[*right]))
-            });
-            Some(order)
-        }
-        TabOrderMode::FileSize => {
-            order.sort_by(|left, right| {
-                let left_tab = &app.tab_manager.tabs.as_slice()[*left];
-                let right_tab = &app.tab_manager.tabs.as_slice()[*right];
-                order_direction_cmp(
-                    direction,
-                    tab_total_size(left_tab),
-                    tab_total_size(right_tab),
-                )
-                .then_with(|| {
-                    order_direction_cmp(
-                        direction,
-                        left_tab.buffer.name.to_ascii_lowercase(),
-                        right_tab.buffer.name.to_ascii_lowercase(),
-                    )
-                })
-                .then_with(|| custom_rank[*left].cmp(&custom_rank[*right]))
-            });
-            Some(order)
-        }
-        TabOrderMode::FileAge => {
-            order.sort_by(|left, right| {
-                let left_saved = tab_saved_millis(&app.tab_manager.tabs.as_slice()[*left]);
-                let right_saved = tab_saved_millis(&app.tab_manager.tabs.as_slice()[*right]);
-                order_direction_cmp(direction, left_saved, right_saved)
-                    .then_with(|| custom_rank[*left].cmp(&custom_rank[*right]))
-            });
-            Some(order)
-        }
-        TabOrderMode::RecentEdit => {
-            order.sort_by(|left, right| {
-                let left_tab = &app.tab_manager.tabs.as_slice()[*left];
-                let right_tab = &app.tab_manager.tabs.as_slice()[*right];
-                order_direction_cmp(
-                    direction,
-                    tab_latest_edit_sequence(left_tab),
-                    tab_latest_edit_sequence(right_tab),
-                )
-                .then_with(|| {
-                    order_direction_cmp(
-                        direction,
-                        tab_saved_millis(left_tab),
-                        tab_saved_millis(right_tab),
-                    )
-                })
-                .then_with(|| custom_rank[*left].cmp(&custom_rank[*right]))
-            });
-            Some(order)
+    let context = TabOrderContext::new(app);
+    sort_workspace_tab_order(&mut order, mode, &context);
+    Some(order)
+}
+
+struct TabOrderContext<'a> {
+    app: &'a ScratchpadApp,
+    custom_rank: Vec<usize>,
+    direction: TabOrderDirection,
+}
+
+impl<'a> TabOrderContext<'a> {
+    fn new(app: &'a ScratchpadApp) -> Self {
+        Self {
+            app,
+            custom_rank: custom_order_ranks(app),
+            direction: app.state.app_settings.tab_order_direction(),
         }
     }
+
+    fn tab(&self, index: usize) -> &WorkspaceTab {
+        &self.app.tab_manager.tabs.as_slice()[index]
+    }
+
+    fn custom_rank_cmp(&self, left: usize, right: usize) -> Ordering {
+        self.custom_rank[left].cmp(&self.custom_rank[right])
+    }
+}
+
+fn sort_workspace_tab_order(
+    order: &mut [usize],
+    mode: TabOrderMode,
+    context: &TabOrderContext<'_>,
+) {
+    match mode {
+        TabOrderMode::Custom => {}
+        TabOrderMode::FileName => {
+            order.sort_by(|left, right| compare_file_name_tabs(context, *left, *right))
+        }
+        TabOrderMode::FileSize => {
+            order.sort_by(|left, right| compare_file_size_tabs(context, *left, *right))
+        }
+        TabOrderMode::FileAge => {
+            order.sort_by(|left, right| compare_file_age_tabs(context, *left, *right))
+        }
+        TabOrderMode::RecentEdit => {
+            order.sort_by(|left, right| compare_recent_edit_tabs(context, *left, *right))
+        }
+    }
+}
+
+fn compare_file_name_tabs(context: &TabOrderContext<'_>, left: usize, right: usize) -> Ordering {
+    let left_tab = context.tab(left);
+    let right_tab = context.tab(right);
+    order_direction_cmp(
+        context.direction,
+        left_tab.buffer.name.to_ascii_lowercase(),
+        right_tab.buffer.name.to_ascii_lowercase(),
+    )
+    .then_with(|| {
+        order_direction_cmp(
+            context.direction,
+            left_tab.buffer.name.as_str(),
+            right_tab.buffer.name.as_str(),
+        )
+    })
+    .then_with(|| {
+        order_direction_cmp(
+            context.direction,
+            tab_path_label(left_tab),
+            tab_path_label(right_tab),
+        )
+    })
+    .then_with(|| context.custom_rank_cmp(left, right))
+}
+
+fn compare_file_size_tabs(context: &TabOrderContext<'_>, left: usize, right: usize) -> Ordering {
+    let left_tab = context.tab(left);
+    let right_tab = context.tab(right);
+    order_direction_cmp(
+        context.direction,
+        tab_total_size(left_tab),
+        tab_total_size(right_tab),
+    )
+    .then_with(|| {
+        order_direction_cmp(
+            context.direction,
+            left_tab.buffer.name.to_ascii_lowercase(),
+            right_tab.buffer.name.to_ascii_lowercase(),
+        )
+    })
+    .then_with(|| context.custom_rank_cmp(left, right))
+}
+
+fn compare_file_age_tabs(context: &TabOrderContext<'_>, left: usize, right: usize) -> Ordering {
+    order_direction_cmp(
+        context.direction,
+        tab_saved_millis(context.tab(left)),
+        tab_saved_millis(context.tab(right)),
+    )
+    .then_with(|| context.custom_rank_cmp(left, right))
+}
+
+fn compare_recent_edit_tabs(context: &TabOrderContext<'_>, left: usize, right: usize) -> Ordering {
+    let left_tab = context.tab(left);
+    let right_tab = context.tab(right);
+    order_direction_cmp(
+        context.direction,
+        tab_latest_edit_sequence(left_tab),
+        tab_latest_edit_sequence(right_tab),
+    )
+    .then_with(|| {
+        order_direction_cmp(
+            context.direction,
+            tab_saved_millis(left_tab),
+            tab_saved_millis(right_tab),
+        )
+    })
+    .then_with(|| context.custom_rank_cmp(left, right))
 }
 
 fn order_direction_cmp<T: Ord>(direction: TabOrderDirection, left: T, right: T) -> Ordering {
@@ -207,7 +246,7 @@ fn order_direction_cmp<T: Ord>(direction: TabOrderDirection, left: T, right: T) 
     }
 }
 
-fn tab_latest_edit_sequence(tab: &crate::app::domain::WorkspaceTab) -> u64 {
+fn tab_latest_edit_sequence(tab: &WorkspaceTab) -> u64 {
     tab.buffers()
         .flat_map(|buffer| buffer.document().history_entries())
         .map(|entry| entry.global_seq)
@@ -215,7 +254,7 @@ fn tab_latest_edit_sequence(tab: &crate::app::domain::WorkspaceTab) -> u64 {
         .unwrap_or(0)
 }
 
-fn tab_saved_millis(tab: &crate::app::domain::WorkspaceTab) -> u64 {
+fn tab_saved_millis(tab: &WorkspaceTab) -> u64 {
     tab.buffer
         .disk_state
         .as_ref()
@@ -254,7 +293,7 @@ fn custom_order_ranks(app: &ScratchpadApp) -> Vec<usize> {
     ranks
 }
 
-fn tab_path_label(tab: &crate::app::domain::WorkspaceTab) -> String {
+fn tab_path_label(tab: &WorkspaceTab) -> String {
     tab.buffer
         .path
         .as_ref()
@@ -262,7 +301,7 @@ fn tab_path_label(tab: &crate::app::domain::WorkspaceTab) -> String {
         .unwrap_or_default()
 }
 
-fn tab_total_size(tab: &crate::app::domain::WorkspaceTab) -> u64 {
+fn tab_total_size(tab: &WorkspaceTab) -> u64 {
     tab.buffers()
         .map(|buffer| {
             buffer
