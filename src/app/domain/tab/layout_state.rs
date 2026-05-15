@@ -9,6 +9,7 @@ pub struct WorkspaceTabLayout {
 }
 
 impl WorkspaceTabLayout {
+    #[must_use]
     pub fn new(buffer_id: BufferId) -> Self {
         let initial_view = EditorViewState::new(buffer_id);
         let active_view_id = initial_view.id;
@@ -19,6 +20,7 @@ impl WorkspaceTabLayout {
         }
     }
 
+    #[must_use]
     pub fn restored(
         views: Vec<EditorViewState>,
         root_pane: PaneNode,
@@ -31,6 +33,7 @@ impl WorkspaceTabLayout {
         }
     }
 
+    #[must_use]
     pub fn active_view_id(&self) -> ViewId {
         self.active_view_id
     }
@@ -39,6 +42,7 @@ impl WorkspaceTabLayout {
         self.active_view_id = view_id;
     }
 
+    #[must_use]
     pub fn views(&self) -> &[EditorViewState] {
         &self.views
     }
@@ -47,10 +51,12 @@ impl WorkspaceTabLayout {
         &mut self.views
     }
 
+    #[must_use]
     pub fn view_count(&self) -> usize {
         self.views.len()
     }
 
+    #[must_use]
     pub fn root_pane(&self) -> &PaneNode {
         &self.root_pane
     }
@@ -59,18 +65,20 @@ impl WorkspaceTabLayout {
         &mut self.root_pane
     }
 
+    #[must_use]
     pub fn contains_view(&self, view_id: ViewId) -> bool {
         self.root_pane.contains_view(view_id)
     }
 
+    #[must_use]
     pub fn leaf_count(&self) -> usize {
         self.root_pane.leaf_count()
     }
 
+    #[must_use]
     pub fn line_numbers_visible(&self) -> bool {
         self.active_view()
-            .map(|view| view.show_line_numbers)
-            .unwrap_or(false)
+            .is_some_and(|view| view.show_line_numbers)
     }
 
     pub fn set_line_numbers_visible(&mut self, visible: bool) {
@@ -79,6 +87,7 @@ impl WorkspaceTabLayout {
         }
     }
 
+    #[must_use]
     pub fn view_count_for_buffer(&self, buffer_id: BufferId) -> usize {
         self.views
             .iter()
@@ -86,6 +95,7 @@ impl WorkspaceTabLayout {
             .count()
     }
 
+    #[must_use]
     pub fn active_view(&self) -> Option<&EditorViewState> {
         self.view(self.active_view_id)
     }
@@ -94,6 +104,7 @@ impl WorkspaceTabLayout {
         self.view_mut(self.active_view_id)
     }
 
+    #[must_use]
     pub fn view(&self, view_id: ViewId) -> Option<&EditorViewState> {
         self.views.iter().find(|view| view.id == view_id)
     }
@@ -102,6 +113,7 @@ impl WorkspaceTabLayout {
         self.views.iter_mut().find(|view| view.id == view_id)
     }
 
+    #[must_use]
     pub fn ordered_view_ids(&self) -> Vec<ViewId> {
         let mut ordered = Vec::new();
         self.root_pane.collect_view_ids_in_order(&mut ordered);
@@ -181,6 +193,7 @@ impl WorkspaceTabLayout {
         pane_view_ids
     }
 
+    #[must_use]
     pub fn into_parts(self) -> (Vec<EditorViewState>, PaneNode, ViewId) {
         (self.views, self.root_pane, self.active_view_id)
     }

@@ -26,8 +26,7 @@ pub(crate) fn entries_for_buffer(buffer: &BufferState) -> Vec<TextHistoryEntryVi
     let label = buffer
         .path
         .as_ref()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| buffer.name.clone());
+        .map_or_else(|| buffer.name.clone(), |path| path.display().to_string());
     buffer
         .document()
         .history_entries()

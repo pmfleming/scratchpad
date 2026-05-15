@@ -218,12 +218,11 @@ fn process_chunks_concurrent(
                         stale_ref.store(true, Ordering::Relaxed);
                         return local;
                     }
-                    match process_ref(chunk) {
-                        Some(matches) => local.push(matches),
-                        None => {
-                            stale_ref.store(true, Ordering::Relaxed);
-                            return local;
-                        }
+                    if let Some(matches) = process_ref(chunk) {
+                        local.push(matches);
+                    } else {
+                        stale_ref.store(true, Ordering::Relaxed);
+                        return local;
                     }
                 }
                 local

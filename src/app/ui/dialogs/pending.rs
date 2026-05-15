@@ -73,12 +73,12 @@ pub(crate) fn show_pending_action_modal(ctx: &egui::Context, app: &mut Scratchpa
     match action {
         PendingAction::CloseTab(index) => handle_pending_close_tab(ctx, app, index),
         PendingAction::CloseView { tab_index, view_id } => {
-            handle_pending_close_view(ctx, app, tab_index, view_id)
+            handle_pending_close_view(ctx, app, tab_index, view_id);
         }
         PendingAction::SaveConflict { tab_index, view_id }
             if save_conflict_dialog_state(app, tab_index, view_id).is_some() =>
         {
-            show_save_conflict_confirmation(ctx, app, tab_index, view_id)
+            show_save_conflict_confirmation(ctx, app, tab_index, view_id);
         }
         PendingAction::SaveConflict { .. } => clear_pending_action(app),
     }
@@ -166,7 +166,7 @@ fn show_close_view_confirmation(
                 tab_index,
                 view_id,
                 &mut close_requested,
-            )
+            );
         },
     );
 
@@ -193,7 +193,7 @@ fn show_save_conflict_confirmation(
     };
 
     show_centered_callout(ctx, "file_change_overlay_v1", dialog_size, |ui| {
-        render_save_conflict_dialog(ui, app, tab_index, view_id, &state, &mut close_requested)
+        render_save_conflict_dialog(ui, app, tab_index, view_id, &state, &mut close_requested);
     });
 
     if close_requested {
@@ -325,10 +325,10 @@ fn render_save_conflict_dialog(
             state.primary_action_label(),
             "Write the current buffer back to disk",
         ) {
-            app.handle_command(AppCommand::File(FileCommand::SaveConflictOverwrite {
-                tab_index,
-                view_id,
-            }));
+            crate::app::commands::handle_command(
+                app,
+                AppCommand::File(FileCommand::SaveConflictOverwrite { tab_index, view_id }),
+            );
         }
 
         if state.can_reload()
@@ -340,10 +340,10 @@ fn render_save_conflict_dialog(
                 "Discard local buffer state and reload from disk",
             )
         {
-            app.handle_command(AppCommand::File(FileCommand::ReloadBufferFromDisk {
-                tab_index,
-                view_id,
-            }));
+            crate::app::commands::handle_command(
+                app,
+                AppCommand::File(FileCommand::ReloadBufferFromDisk { tab_index, view_id }),
+            );
         }
 
         if render_dialog_action_button(
@@ -353,10 +353,10 @@ fn render_save_conflict_dialog(
             "Save As Copy",
             "Keep this buffer by saving it to a new file",
         ) {
-            app.handle_command(AppCommand::File(FileCommand::SaveConflictAsCopy {
-                tab_index,
-                view_id,
-            }));
+            crate::app::commands::handle_command(
+                app,
+                AppCommand::File(FileCommand::SaveConflictAsCopy { tab_index, view_id }),
+            );
         }
 
         if render_dialog_action_button(
@@ -399,10 +399,10 @@ fn render_missing_file_dialog(
     ) {
         match action {
             MissingFileChoice::Save => {
-                app.handle_command(AppCommand::File(FileCommand::SaveConflictOverwrite {
-                    tab_index,
-                    view_id,
-                }));
+                crate::app::commands::handle_command(
+                    app,
+                    AppCommand::File(FileCommand::SaveConflictOverwrite { tab_index, view_id }),
+                );
             }
             MissingFileChoice::Discard => close_pending_view(app, tab_index, view_id),
         }
@@ -417,7 +417,10 @@ enum MissingFileChoice {
 
 fn close_pending_tab(app: &mut ScratchpadApp, index: usize) {
     clear_pending_action(app);
-    app.handle_command(AppCommand::Workspace(WorkspaceCommand::CloseTab { index }));
+    crate::app::commands::handle_command(
+        app,
+        AppCommand::Workspace(WorkspaceCommand::CloseTab { index }),
+    );
 }
 
 fn close_pending_view(app: &mut ScratchpadApp, tab_index: usize, view_id: ViewId) {
@@ -449,7 +452,6 @@ fn save_conflict_dialog_state(
     let path_label = buffer
         .path
         .as_ref()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| buffer.name.clone());
+        .map_or_else(|| buffer.name.clone(), |path| path.display().to_string());
     SaveConflictDialogState::from_freshness(path_label, buffer.freshness)
 }

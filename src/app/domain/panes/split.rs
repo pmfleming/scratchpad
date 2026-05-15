@@ -53,6 +53,7 @@ impl PaneNode {
         }
     }
 
+    #[must_use]
     pub fn balanced_from_view_ids(view_ids: &[ViewId], axis: SplitAxis) -> Option<Self> {
         match view_ids {
             [] => None,

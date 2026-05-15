@@ -415,7 +415,6 @@ fn should_show_overflow_row(
 
 fn overflow_list_mode() -> OverflowListMode {
     match OVERFLOW_LIST_MODE_TOKEN {
-        "all-tabs" => OverflowListMode::AllTabs,
         "overflow-only" => OverflowListMode::HiddenTabsOnly,
         _ => OverflowListMode::AllTabs,
     }

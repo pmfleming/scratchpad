@@ -143,6 +143,7 @@ impl EditorViewHotState {
 }
 
 impl EditorViewState {
+    #[must_use]
     pub fn new(buffer_id: BufferId) -> Self {
         Self {
             id: next_view_id(),
@@ -153,6 +154,7 @@ impl EditorViewState {
         }
     }
 
+    #[must_use]
     pub fn restored(id: ViewId, buffer_id: BufferId, show_line_numbers: bool) -> Self {
         register_existing_view_id(id);
         Self {
@@ -244,6 +246,7 @@ impl EditorViewState {
         });
     }
 
+    #[must_use]
     pub fn cursor_reveal_mode(&self) -> Option<CursorRevealMode> {
         self.pending_cursor_reveal
     }
@@ -400,6 +403,7 @@ impl EditorViewState {
     /// row offset (≈ 0) because resolving the piece anchor requires the
     /// owning buffer. Use [`Self::editor_pixel_offset_resolved`] from a
     /// renderer that has buffer access for correct piece-anchor results.
+    #[must_use]
     pub fn editor_pixel_offset(&self) -> egui::Vec2 {
         let metrics = self.scroll.metrics();
         let anchor = self.scroll.anchor();
@@ -425,6 +429,7 @@ impl EditorViewState {
     /// the given buffer + the view's latest `DisplaySnapshot`. Use this at
     /// renderer boundaries where the buffer is available so anchor stickiness
     /// is preserved across edits above the viewport.
+    #[must_use]
     pub fn editor_pixel_offset_resolved(
         &self,
         buffer: &crate::app::domain::BufferState,

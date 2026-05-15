@@ -210,9 +210,10 @@ impl FileController {
     ) -> OpenHerePathOutcome {
         match existing_path {
             ExistingOpenHerePath::AlreadyInCurrentTab { view_id } => {
-                app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateView {
-                    view_id,
-                }));
+                crate::app::commands::handle_command(
+                    app,
+                    AppCommand::Workspace(WorkspaceCommand::ActivateView { view_id }),
+                );
                 if crate::app::app_state::settings_state::is_settings_file_path(app, &path) {
                     crate::app::app_state::settings_state::mark_active_buffer_as_settings_file(app);
                 }
@@ -230,17 +231,23 @@ impl FileController {
         source_index: usize,
     ) -> OpenHerePathOutcome {
         let target_index = app.tab_manager.active_tab_index;
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::CombineTabIntoTab {
-            source_index,
-            target_index,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::CombineTabIntoTab {
+                source_index,
+                target_index,
+            }),
+        );
 
         if let Some((current_index, current_view_id)) = app.tab_manager.find_tab_by_path(&path)
             && current_index == app.tab_manager.active_tab_index
         {
-            app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateView {
-                view_id: current_view_id,
-            }));
+            crate::app::commands::handle_command(
+                app,
+                AppCommand::Workspace(WorkspaceCommand::ActivateView {
+                    view_id: current_view_id,
+                }),
+            );
             if crate::app::app_state::settings_state::is_settings_file_path(app, &path) {
                 crate::app::app_state::settings_state::mark_active_buffer_as_settings_file(app);
             }
@@ -417,7 +424,7 @@ mod tests {
             cold_session_tabs: Default::default(),
         };
         app.tab_manager.rebuild_buffer_tab_index();
-        crate::app::app_state::workspace::display_tabs::clear_tab_selection(app);
+        crate::app::app_state::workspace::display_tabs::clear_tab_selection(&mut app);
         app
     }
 

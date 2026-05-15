@@ -76,10 +76,12 @@ impl Default for TextDocumentHistoryState {
 }
 
 impl TextDocument {
+    #[must_use]
     pub fn new(text: String) -> Self {
         Self::with_preferred_line_ending(text, platform_default_line_ending())
     }
 
+    #[must_use]
     pub fn with_preferred_line_ending(
         text: String,
         preferred_line_ending: LineEndingStyle,
@@ -91,6 +93,7 @@ impl TextDocument {
     }
 
     /// Extract the full text content as a new String from the piece tree.
+    #[must_use]
     pub fn extract_text(&self) -> String {
         let text = self.content.piece_tree.extract_text();
         capacity_metrics::record_full_text_flatten(text.len());
@@ -101,14 +104,17 @@ impl TextDocument {
         self.content
             .piece_tree
             .borrow_range(0..self.content.piece_tree.len_chars())
-            .map(Cow::Borrowed)
-            .unwrap_or_else(|| {
-                let text = self.content.piece_tree.extract_text();
-                capacity_metrics::record_full_text_flatten(text.len());
-                Cow::Owned(text)
-            })
+            .map_or_else(
+                || {
+                    let text = self.content.piece_tree.extract_text();
+                    capacity_metrics::record_full_text_flatten(text.len());
+                    Cow::Owned(text)
+                },
+                Cow::Borrowed,
+            )
     }
 
+    #[must_use]
     pub fn piece_tree(&self) -> &PieceTreeLite {
         self.content.piece_tree.as_ref()
     }
@@ -122,18 +128,22 @@ impl TextDocument {
         Arc::make_mut(&mut self.content.piece_tree)
     }
 
+    #[must_use]
     pub fn snapshot(&self) -> DocumentSnapshot {
         DocumentSnapshot::from_shared(self.content.piece_tree.clone())
     }
 
+    #[must_use]
     pub fn operation_undo_depth(&self) -> usize {
         self.history.undo_depth
     }
 
+    #[must_use]
     pub fn operation_redo_depth(&self) -> usize {
         self.history.redo_depth
     }
 
+    #[must_use]
     pub fn latest_operation_record(&self) -> Option<&TextDocumentOperationRecord> {
         self.history.latest_operation_record.as_ref()
     }
@@ -149,18 +159,22 @@ impl TextDocument {
         self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
     }
 
+    #[must_use]
     pub fn history_entries(&self) -> &[PieceHistoryEntry] {
         &self.history.entries
     }
 
+    #[must_use]
     pub fn history_revision_counter(&self) -> u64 {
         self.history.revision_counter
     }
 
+    #[must_use]
     pub fn history_byte_usage(&self) -> usize {
         self.history.byte_usage
     }
 
+    #[must_use]
     pub fn oldest_history_global_seq(&self) -> Option<u64> {
         self.history.entries.first().map(|entry| entry.global_seq)
     }
@@ -328,6 +342,7 @@ impl TextDocument {
 
     // --- Native editor direct mutation API ---
 
+    #[must_use]
     pub fn preferred_line_ending_str(&self) -> &str {
         self.content.preferred_line_ending.as_str()
     }
@@ -348,6 +363,7 @@ impl TextDocument {
         self.insert_raw_text_with_source(text, char_index, source);
     }
 
+    #[must_use]
     pub fn byte_spans_for_range(&self, char_range: Range<usize>) -> Vec<ByteSpan> {
         self.content
             .piece_tree
@@ -420,7 +436,10 @@ impl TextDocument {
     }
 
     fn visible_generation(&self) -> u32 {
-        self.content.piece_tree.generation().min(u32::MAX as u64) as u32
+        self.content
+            .piece_tree
+            .generation()
+            .min(u64::from(u32::MAX)) as u32
     }
 
     fn capture_pending_history_generation_before(&mut self) {

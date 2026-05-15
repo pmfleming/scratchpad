@@ -119,23 +119,20 @@ pub(super) fn display_text_slice(text: &str, show_control_chars: bool) -> Displa
     for doc_index in 0..doc_len {
         let ch = chars.next().unwrap_or_default();
         doc_to_display.push(display_chars);
-        match visible_control_char(ch, chars.peek().copied()) {
-            Some(display) => {
-                visible.push_str(display.text);
-                let len = display.text.chars().count();
-                push_display_cursor_boundaries(
-                    &mut display_to_doc,
-                    doc_index,
-                    len,
-                    display.cursor_policy,
-                );
-                display_chars += len;
-            }
-            None => {
-                visible.push(ch);
-                display_to_doc.push(doc_index + 1);
-                display_chars += 1;
-            }
+        if let Some(display) = visible_control_char(ch, chars.peek().copied()) {
+            visible.push_str(display.text);
+            let len = display.text.chars().count();
+            push_display_cursor_boundaries(
+                &mut display_to_doc,
+                doc_index,
+                len,
+                display.cursor_policy,
+            );
+            display_chars += len;
+        } else {
+            visible.push(ch);
+            display_to_doc.push(doc_index + 1);
+            display_chars += 1;
         }
     }
     doc_to_display.push(display_chars);

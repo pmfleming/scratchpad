@@ -111,7 +111,9 @@ fn coalesce_into_inserted_text(
         latest_edit.start_char = incoming_edit.start_char;
         latest_edit.deleted_text =
             format!("{}{}", incoming_edit.deleted_text, latest_edit.deleted_text);
-        latest_edit.deleted_spans = incoming_edit.deleted_spans.clone();
+        latest_edit
+            .deleted_spans
+            .clone_from(&incoming_edit.deleted_spans);
         latest.next_selection = incoming.next_selection;
         return Some(CoalescedEdit::Record(latest));
     }
@@ -152,7 +154,9 @@ fn coalesce_after_delete(
         incoming_edit.inserted_text.is_empty(),
     ) {
         (true, false) if incoming_edit.start_char == latest_start => {
-            latest_edit.inserted_text = incoming_edit.inserted_text.clone();
+            latest_edit
+                .inserted_text
+                .clone_from(&incoming_edit.inserted_text);
             true
         }
         (false, true) if incoming_edit.start_char == latest_start => {

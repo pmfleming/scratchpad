@@ -23,6 +23,7 @@ pub enum LineEndingStyle {
 }
 
 impl LineEndingStyle {
+    #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             Self::None => "None",
@@ -33,6 +34,7 @@ impl LineEndingStyle {
         }
     }
 
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::None | Self::Lf | Self::Mixed => "\n",
@@ -94,6 +96,7 @@ pub struct TextFormatMetadata {
 }
 
 impl TextFormatMetadata {
+    #[must_use]
     pub fn utf8_for_new_file(text: &str) -> Self {
         Self::from_inspection(
             TextInspection::inspect(text),
@@ -104,6 +107,7 @@ impl TextFormatMetadata {
         )
     }
 
+    #[must_use]
     pub fn detected(
         text: &str,
         encoding_name: String,
@@ -124,6 +128,7 @@ impl TextFormatMetadata {
         self.apply_inspection(&TextInspection::inspect(text));
     }
 
+    #[must_use]
     pub fn encoding_label(&self) -> String {
         let base = match self.encoding_name.as_str() {
             "windows-1252" => "Windows-1252 (ANSI)".to_owned(),
@@ -140,6 +145,7 @@ impl TextFormatMetadata {
         }
     }
 
+    #[must_use]
     pub fn encoding_tooltip(&self) -> String {
         let source = match self.encoding_source {
             EncodingSource::Bom => "Detected from BOM",
@@ -152,13 +158,15 @@ impl TextFormatMetadata {
         } else {
             ""
         };
-        format!("{}{}", source, ascii)
+        format!("{source}{ascii}")
     }
 
+    #[must_use]
     pub fn line_endings_label(&self) -> &'static str {
         self.line_endings.label()
     }
 
+    #[must_use]
     pub fn format_warning_text(&self) -> Option<String> {
         let mut warnings = Vec::new();
         if self.line_endings == LineEndingStyle::Mixed {
@@ -175,6 +183,7 @@ impl TextFormatMetadata {
         }
     }
 
+    #[must_use]
     pub fn preferred_line_ending_style(&self) -> LineEndingStyle {
         match self.preferred_line_ending {
             LineEndingStyle::Lf | LineEndingStyle::Crlf | LineEndingStyle::Cr => {
@@ -186,6 +195,7 @@ impl TextFormatMetadata {
         }
     }
 
+    #[must_use]
     pub fn has_non_compliant_characters(&self, text: &str) -> bool {
         let Some(encoding) = Encoding::for_label(self.encoding_name.as_bytes()) else {
             return true;
@@ -273,6 +283,7 @@ fn resolve_preferred_line_ending(
     }
 }
 
+#[must_use]
 pub fn platform_default_line_ending() -> LineEndingStyle {
     if cfg!(windows) {
         LineEndingStyle::Crlf
@@ -281,20 +292,24 @@ pub fn platform_default_line_ending() -> LineEndingStyle {
     }
 }
 
+#[must_use]
 pub fn analyze_line_endings(text: &str) -> (LineEndingCounts, LineEndingStyle) {
     let inspection = TextInspection::inspect(text);
     (inspection.line_ending_counts, inspection.line_endings)
 }
 
 impl TextArtifactSummary {
+    #[must_use]
     pub fn from_text(text: &str) -> Self {
         TextInspection::inspect(text).artifact_summary
     }
 
+    #[must_use]
     pub fn from_text_with_line_endings(text: &str, line_endings: LineEndingStyle) -> Self {
         TextInspection::inspect_with_line_endings(text, Some(line_endings)).artifact_summary
     }
 
+    #[must_use]
     pub fn has_control_chars(&self) -> bool {
         self.has_ansi_sequences
             || self.has_carriage_returns
@@ -303,6 +318,7 @@ impl TextArtifactSummary {
             || self.other_control_count > 0
     }
 
+    #[must_use]
     pub fn status_text(&self) -> Option<String> {
         if !self.has_control_chars() {
             return None;
@@ -330,6 +346,7 @@ impl TextArtifactSummary {
     }
 }
 
+#[must_use]
 pub fn display_line_count(text: &str) -> usize {
     TextInspection::inspect(text).line_count
 }

@@ -153,18 +153,20 @@ impl ScratchpadApp {
             Some(PendingBackgroundAction::ReopenWithEncoding(action)) => {
                 FileController::apply_async_reopen_with_encoding_result(self, action, results);
             }
-            Some(PendingBackgroundAction::SavePath(_)) => {}
+            Some(
+                PendingBackgroundAction::SavePath(_)
+                | PendingBackgroundAction::StartupRestore(_)
+                | PendingBackgroundAction::HydrateSessionTab(_)
+                | PendingBackgroundAction::PersistSession(_)
+                | PendingBackgroundAction::RefreshTextMetadata(_)
+                | PendingBackgroundAction::RefreshEncodingCompliance(_),
+            )
+            | None => {}
             Some(PendingBackgroundAction::StartupRestoreCompare(action)) => {
                 workspace_restore_conflict::apply_async_startup_restore_compare_result(
                     self, action, results,
                 );
             }
-            Some(PendingBackgroundAction::StartupRestore(_))
-            | Some(PendingBackgroundAction::HydrateSessionTab(_))
-            | Some(PendingBackgroundAction::PersistSession(_))
-            | Some(PendingBackgroundAction::RefreshTextMetadata(_))
-            | Some(PendingBackgroundAction::RefreshEncodingCompliance(_))
-            | None => {}
         }
     }
 

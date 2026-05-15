@@ -179,15 +179,14 @@ fn selected_workspace_tab_range(app: &ScratchpadApp) -> (usize, usize) {
         last = Some(last.map_or(workspace_index, |last| last.max(workspace_index)));
     }
 
-    match (first, last) {
-        (Some(first), Some(last)) => (first, last),
-        _ => {
-            let active = app
-                .tab_manager
-                .active_tab_index
-                .min(app.tab_manager.tabs.as_slice().len().saturating_sub(1));
-            (active, active)
-        }
+    if let (Some(first), Some(last)) = (first, last) {
+        (first, last)
+    } else {
+        let active = app
+            .tab_manager
+            .active_tab_index
+            .min(app.tab_manager.tabs.as_slice().len().saturating_sub(1));
+        (active, active)
     }
 }
 

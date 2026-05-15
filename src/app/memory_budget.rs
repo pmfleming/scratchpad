@@ -38,6 +38,7 @@ pub struct MemoryBudgetSnapshot {
 }
 
 impl MemoryBudgetSnapshot {
+    #[must_use]
     pub fn total_bytes(&self) -> u64 {
         self.layout_bytes
             .saturating_add(self.display_metadata_bytes)
@@ -106,11 +107,13 @@ pub fn record_free(category: BudgetCategory, bytes: usize) {
     }
 }
 
+#[must_use]
 pub fn over_budget(category: BudgetCategory) -> bool {
     let (current, _peak, cap) = counters(category);
     current.load(Ordering::Relaxed) > cap
 }
 
+#[must_use]
 pub fn current_bytes(category: BudgetCategory) -> u64 {
     counters(category).0.load(Ordering::Relaxed)
 }

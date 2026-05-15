@@ -440,7 +440,7 @@ mod tests {
             .status
             .set_error_status_in_domain(super::StatusDomain::Disk, "Could not save.");
 
-        crate::app::app_state::workspace::accessors::clear_status_message(app);
+        crate::app::app_state::workspace::accessors::clear_status_message(&mut app);
 
         assert!(app.state.status.current.is_none());
         assert_eq!(app.state.status.history.len(), 1);

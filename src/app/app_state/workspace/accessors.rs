@@ -1,21 +1,8 @@
 use super::super::{ScratchpadApp, TabRenameState};
-use crate::app::domain::WorkspaceTab;
 use crate::app::domain::{PendingAction, ViewId};
 use crate::app::services::file_controller::FileController;
 use crate::app::services::session_manager;
 use std::path::Path;
-
-pub fn tabs(app: &ScratchpadApp) -> &[WorkspaceTab] {
-    app.tab_manager.tabs.as_slice()
-}
-
-pub fn tabs_mut(app: &mut ScratchpadApp) -> &mut [WorkspaceTab] {
-    app.tab_manager.tabs.as_mut_slice()
-}
-
-pub fn append_tab(app: &mut ScratchpadApp, tab: WorkspaceTab) {
-    app.tab_manager.append_tab(tab);
-}
 
 pub fn user_manual_path(app: &ScratchpadApp) -> &Path {
     &app.state.user_manual_path
@@ -138,27 +125,3 @@ pub(crate) fn commit_tab_rename(app: &mut ScratchpadApp) -> bool {
         false
     }
 }
-
-macro_rules! compat_scratchpad_app_methods {
-    ($type:ty { $($item:item)* }) => {
-        #[allow(dead_code)]
-        impl $type {
-            $($item)*
-        }
-    };
-}
-
-compat_scratchpad_app_methods!(ScratchpadApp {
-    pub fn tabs(&self) -> &[WorkspaceTab] {
-        tabs(self)
-    }
-
-    pub fn tabs_mut(&mut self) -> &mut [WorkspaceTab] {
-        tabs_mut(self)
-    }
-
-    pub fn append_tab(&mut self, tab: WorkspaceTab) {
-        append_tab(self, tab)
-    }
-
-});

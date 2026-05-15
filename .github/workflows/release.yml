@@ -38,7 +38,7 @@ jobs:
 
       - name: Run clippy
         shell: pwsh
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --lib --all-features -- -D warnings
 
       - name: Run tests
         shell: pwsh

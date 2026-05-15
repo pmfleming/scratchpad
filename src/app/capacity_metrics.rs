@@ -157,6 +157,7 @@ pub enum FramePhase {
 }
 
 impl CapacityMetricsSnapshot {
+    #[must_use]
     pub fn background_io_lane(&self, lane: BackgroundIoLane) -> BackgroundIoLaneMetricsSnapshot {
         match lane {
             BackgroundIoLane::Path => BackgroundIoLaneMetricsSnapshot {
@@ -180,6 +181,7 @@ impl CapacityMetricsSnapshot {
         }
     }
 
+    #[must_use]
     pub fn frame_phase(&self, phase: FramePhase) -> FramePhaseMetricsSnapshot {
         match phase {
             FramePhase::Prepare => FramePhaseMetricsSnapshot {
@@ -225,10 +227,12 @@ impl CapacityMetricsSnapshot {
         }
     }
 
+    #[must_use]
     pub fn frame_time_mean_ns(&self) -> f64 {
         divide_u64(self.frame_time_total_ns, self.frame_count)
     }
 
+    #[must_use]
     pub fn frame_time_percentile_ns(&self, percentile: f64) -> f64 {
         if self.frame_count == 0 {
             return 0.0;

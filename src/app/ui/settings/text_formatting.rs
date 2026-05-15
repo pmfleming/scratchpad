@@ -49,7 +49,7 @@ fn render_font_family_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             selected_label: EditorFontPreset::label,
             option_label: EditorFontPreset::label,
             on_change: |font| {
-                crate::app::app_state::settings_controller::set_editor_font(app, font)
+                crate::app::app_state::settings_controller::set_editor_font(app, font);
             },
         },
     );

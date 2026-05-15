@@ -245,8 +245,7 @@ fn history_pill(ui: &mut egui::Ui, row: &TextHistoryRow) -> egui::Response {
     let hovered = ui
         .ctx()
         .read_response(frame_id)
-        .map(|r| r.hovered() || r.contains_pointer())
-        .unwrap_or(false);
+        .is_some_and(|r| r.hovered() || r.contains_pointer());
 
     let base_fill = if hovered {
         action_hover_bg(ui)
@@ -264,7 +263,7 @@ fn history_pill(ui: &mut egui::Ui, row: &TextHistoryRow) -> egui::Response {
         .corner_radius(egui::CornerRadius::same(HISTORY_PILL_CORNER_RADIUS))
         .inner_margin(egui::Margin::same(HISTORY_PILL_INNER_MARGIN))
         .show(ui, |ui| {
-            render_row_pill_contents(ui, row, title_color, muted_color)
+            render_row_pill_contents(ui, row, title_color, muted_color);
         });
 
     widget_ids::interact(

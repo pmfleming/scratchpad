@@ -338,8 +338,7 @@ where
             let right_distance = (target - option_value(**right)).abs();
             left_distance.total_cmp(&right_distance)
         })
-        .map(|(index, _)| index)
-        .unwrap_or(0)
+        .map_or(0, |(index, _)| index)
 }
 
 pub(super) fn settings_file_card(
@@ -486,23 +485,24 @@ pub(super) fn inner_select_row(
 }
 
 pub(super) fn available_width_control(ui: &mut egui::Ui, add_control: impl FnOnce(&mut egui::Ui)) {
-    let width = active_settings_control_lane()
-        .map(|lane| lane.width().clamp(0.0, SettingsUi::CONTROLS.column_width))
-        .unwrap_or_else(|| SettingsUi::control_width(ui));
+    let width = active_settings_control_lane().map_or_else(
+        || SettingsUi::control_width(ui),
+        |lane| lane.width().clamp(0.0, SettingsUi::CONTROLS.column_width),
+    );
     let height = ui
         .available_height()
         .max(ui.spacing().interact_size.y)
         .min(SettingsUi::LAYOUT.inner_row_height);
-    let rect = active_settings_control_lane()
-        .map(|lane| {
-            let rect = egui::Rect::from_min_size(
-                egui::pos2(lane.right() - width, lane.top()),
-                egui::vec2(width, height),
-            );
-            ui.advance_cursor_after_rect(rect);
-            rect
-        })
-        .unwrap_or_else(|| widget_ids::allocate_exact_rect(ui, egui::vec2(width, height)));
+    let rect = if let Some(lane) = active_settings_control_lane() {
+        let rect = egui::Rect::from_min_size(
+            egui::pos2(lane.right() - width, lane.top()),
+            egui::vec2(width, height),
+        );
+        ui.advance_cursor_after_rect(rect);
+        rect
+    } else {
+        widget_ids::allocate_exact_rect(ui, egui::vec2(width, height))
+    };
     record_settings_control_box("available_width_control", rect);
     widget_ids::rect_scope_with_layout(
         ui,

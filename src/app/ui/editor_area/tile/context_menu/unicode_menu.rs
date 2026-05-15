@@ -178,7 +178,7 @@ pub(super) fn render_display_unicode_menu(ui: &mut egui::Ui, app: &mut Scratchpa
 
 fn toggle_active_buffer_reading_order(app: &mut ScratchpadApp) {
     if let Some(tab) = app.tab_manager.active_tab_mut()
-        && let Some(buffer_id) = tab.active_view().map(|view| view.buffer_id)
+        && let Some(buffer_id) = tab.layout.active_view().map(|view| view.buffer_id)
     {
         if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
             buffer.right_to_left_reading_order = !buffer.right_to_left_reading_order;
@@ -190,7 +190,7 @@ fn toggle_active_buffer_reading_order(app: &mut ScratchpadApp) {
 
 fn toggle_active_buffer_control_chars(app: &mut ScratchpadApp) {
     if let Some(tab) = app.tab_manager.active_tab_mut()
-        && let Some(buffer_id) = tab.active_view().map(|view| view.buffer_id)
+        && let Some(buffer_id) = tab.layout.active_view().map(|view| view.buffer_id)
     {
         if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
             buffer.show_control_chars = !buffer.show_control_chars;

@@ -143,7 +143,7 @@ fn render_file_actions(
     save_enabled: bool,
 ) {
     if menu_button(ui, TAB_CONTEXT_MENU_WIDTH, "New Tab", Some(PLUS), true) {
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::NewTab));
+        crate::app::commands::handle_command(app, AppCommand::Workspace(WorkspaceCommand::NewTab));
         ui.close();
     }
     if app.state.app_settings.recent_files_enabled() {
@@ -156,7 +156,7 @@ fn render_file_actions(
         open_here_enabled,
     ) {
         activate_slot(app, slot_index);
-        app.handle_command(AppCommand::File(FileCommand::OpenFileHere));
+        crate::app::commands::handle_command(app, AppCommand::File(FileCommand::OpenFileHere));
         ui.close();
     }
     if menu_button(
@@ -191,7 +191,7 @@ fn render_open_file_actions(
             open_enabled,
         ) {
             activate_slot(app, slot_index);
-            app.handle_command(AppCommand::File(FileCommand::OpenFile));
+            crate::app::commands::handle_command(app, AppCommand::File(FileCommand::OpenFile));
             ui.close();
         }
         render_open_file_submenu(ui, app, slot_index);
@@ -284,7 +284,7 @@ fn open_recent_file(app: &mut ScratchpadApp, path: PathBuf) {
     match app.state.app_settings.file_open_disposition() {
         FileOpenDisposition::NewTab => FileController::open_paths_async(app, vec![path]),
         FileOpenDisposition::CurrentTab => {
-            FileController::open_external_paths_here_async(app, vec![path])
+            FileController::open_external_paths_here_async(app, vec![path]);
         }
     }
 }
@@ -454,7 +454,7 @@ fn render_save_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp, save_enabled:
             Some(FLOPPY_DISK),
             save_enabled,
         ) {
-            app.handle_command(AppCommand::File(FileCommand::SaveAllFiles));
+            crate::app::commands::handle_command(app, AppCommand::File(FileCommand::SaveAllFiles));
             ui.close();
         }
     });
@@ -553,12 +553,16 @@ fn activate_slot(app: &mut ScratchpadApp, slot_index: usize) {
     if let Some(index) =
         crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(app, slot_index)
     {
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateTab {
-            index,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ActivateTab { index }),
+        );
     } else if crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(app, slot_index)
     {
-        app.handle_command(AppCommand::Settings(SettingsCommand::OpenSettings));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Settings(SettingsCommand::OpenSettings),
+        );
     }
 }
 

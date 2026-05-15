@@ -16,6 +16,7 @@ impl Default for TextHistoryBudget {
 }
 
 impl TextHistoryBudget {
+    #[must_use]
     pub fn derive_from_available_memory() -> Self {
         let available = available_memory_bytes().unwrap_or(2 * 1024 * MIB);
         let aggregate = clamp_u64(available / 50, 16 * MIB, 512 * MIB);
@@ -31,6 +32,7 @@ impl TextHistoryBudget {
         }
     }
 
+    #[must_use]
     pub fn sanitized(mut self) -> Self {
         self.per_file_entry_limit = self.per_file_entry_limit.clamp(100, 100_000);
         self.per_file_byte_budget = self.per_file_byte_budget.clamp(MIB, 1024 * MIB);

@@ -123,12 +123,18 @@ pub(crate) fn apply_async_startup_restore_compare_result(
     };
 
     if conflict.tab_index < app.tab_manager.tabs.as_slice().len() {
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateTab {
-            index: conflict.tab_index,
-        }));
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateView {
-            view_id: conflict.view_id,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ActivateTab {
+                index: conflict.tab_index,
+            }),
+        );
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ActivateView {
+                view_id: conflict.view_id,
+            }),
+        );
     }
 
     let settings_path = crate::app::app_state::settings_state::settings_path(app).to_path_buf();
@@ -195,7 +201,8 @@ fn collect_tab_restore_conflicts(
 }
 
 fn representative_view_id(tab: &WorkspaceTab, buffer_id: BufferId) -> Option<ViewId> {
-    tab.active_view()
+    tab.layout
+        .active_view()
         .filter(|view| view.buffer_id == buffer_id)
         .map(|view| view.id)
         .or_else(|| {

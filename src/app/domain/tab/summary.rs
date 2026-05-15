@@ -21,7 +21,7 @@ pub(crate) fn display_name(tab: &WorkspaceTab) -> String {
 pub(crate) fn full_display_name(tab: &WorkspaceTab, has_duplicate: bool) -> String {
     let name = display_name(tab);
     if has_duplicate && let Some(context) = overflow_context_label(tab) {
-        return format!("{} ({})", name, context);
+        return format!("{name} ({context})");
     }
     name
 }
@@ -31,7 +31,7 @@ pub(crate) fn overflow_context_label(tab: &WorkspaceTab) -> Option<String> {
 }
 
 pub(crate) fn can_promote_view(tab: &WorkspaceTab, view_id: ViewId) -> bool {
-    tab.view(view_id).is_some() && tab.distinct_buffer_count() > 1
+    tab.layout.view(view_id).is_some() && tab.distinct_buffer_count() > 1
 }
 
 pub(crate) fn can_promote_all_files(tab: &WorkspaceTab) -> bool {

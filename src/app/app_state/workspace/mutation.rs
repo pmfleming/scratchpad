@@ -2,7 +2,7 @@ use super::super::{ScratchpadApp, StatusDomain};
 use crate::app::app_state::settings_controller;
 use crate::app::app_state::workspace::accessors as workspace_accessors;
 use crate::app::domain::{BufferId, CursorRevealMode};
-use crate::app::text_history::{TextHistoryEntryView, entries_for_buffer};
+use crate::app::text_history::{TextHistoryCache, TextHistoryEntryView, entries_for_buffer};
 
 pub(crate) fn text_history_entries(app: &ScratchpadApp) -> Vec<TextHistoryEntryView> {
     let mut entries = app
@@ -48,7 +48,7 @@ pub(crate) fn clear_text_history(app: &mut ScratchpadApp) -> bool {
         }
     }
     if cleared {
-        app.state.text_history_cache = Default::default();
+        app.state.text_history_cache = TextHistoryCache::default();
         app.tab_manager.mark_session_dirty();
         app.state
             .status
@@ -101,7 +101,7 @@ pub(crate) fn prune_text_history_for_buffers(
     buffer_ids: impl IntoIterator<Item = BufferId>,
 ) {
     if buffer_ids.into_iter().next().is_some() {
-        app.state.text_history_cache = Default::default();
+        app.state.text_history_cache = TextHistoryCache::default();
     }
 }
 
@@ -135,18 +135,15 @@ pub fn apply_text_history_to_entry(
     entry_id: u64,
     follow_focus: bool,
 ) -> bool {
-    let target = match text_history_entries(app)
+    let Some(target) = text_history_entries(app)
         .into_iter()
         .find(|entry| entry.buffer_id == buffer_id && entry.id == entry_id)
-    {
-        Some(target) => target,
-        None => {
-            app.state.status.set_error_status_in_domain(
-                StatusDomain::History,
-                "Text history entry is no longer available.",
-            );
-            return false;
-        }
+    else {
+        app.state.status.set_error_status_in_domain(
+            StatusDomain::History,
+            "Text history entry is no longer available.",
+        );
+        return false;
     };
     let undo = !target.undone;
     apply_text_history_entry_with_focus(app, buffer_id, entry_id, undo, follow_focus)
@@ -194,18 +191,15 @@ fn apply_text_history_entry_with_focus(
         } else {
             buffer.apply_text_history_redo(action.id)
         };
-        match result {
-            Ok(selection) => {
-                buffer.mark_dirty_after_local_edit();
-                selection
-            }
-            Err(_) => {
-                app.state.status.set_error_status_in_domain(
-                    StatusDomain::History,
-                    "Text history entry conflicts with the current file contents.",
-                );
-                return false;
-            }
+        if let Ok(selection) = result {
+            buffer.mark_dirty_after_local_edit();
+            selection
+        } else {
+            app.state.status.set_error_status_in_domain(
+                StatusDomain::History,
+                "Text history entry conflicts with the current file contents.",
+            );
+            return false;
         }
     };
 
@@ -355,10 +349,13 @@ mod tests {
             .expect("split target view");
         {
             let tab = &mut app.tab_manager.tabs.as_mut_slice()[target_tab_index];
-            let original_view = tab.view_mut(original_view_id).expect("original view");
+            let original_view = tab
+                .layout
+                .view_mut(original_view_id)
+                .expect("original view");
             original_view.cursor_range = Some(CursorRange::one(CharCursor::new(1)));
             original_view.pending_cursor_range = None;
-            let split_view = tab.view_mut(split_view_id).expect("split view");
+            let split_view = tab.layout.view_mut(split_view_id).expect("split view");
             split_view.cursor_range = Some(CursorRange::one(CharCursor::new(2)));
             split_view.pending_cursor_range = None;
         }
@@ -372,8 +369,8 @@ mod tests {
         ));
 
         let tab = &app.tab_manager.tabs.as_slice()[app.tab_manager.active_tab_index];
-        let original_view = tab.view(original_view_id).expect("original view");
-        let split_view = tab.view(split_view_id).expect("split view");
+        let original_view = tab.layout.view(original_view_id).expect("original view");
+        let split_view = tab.layout.view(split_view_id).expect("split view");
         assert_eq!(app.tab_manager.active_tab_index, target_tab_index);
         assert_eq!(tab.layout.active_view_id, original_view_id);
         assert_eq!(original_view.cursor_range, Some(previous_selection));
@@ -409,7 +406,7 @@ mod tests {
             cold_session_tabs: Default::default(),
         };
         app.tab_manager.rebuild_buffer_tab_index();
-        crate::app::app_state::workspace::display_tabs::clear_tab_selection(app);
+        crate::app::app_state::workspace::display_tabs::clear_tab_selection(&mut app);
         app
     }
 

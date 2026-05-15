@@ -226,7 +226,7 @@ fn render_new_tab_action(ui: &mut egui::Ui, app: &mut ScratchpadApp, spacing: f3
     )
     .clicked()
     {
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::NewTab));
+        crate::app::commands::handle_command(app, AppCommand::Workspace(WorkspaceCommand::NewTab));
     }
 }
 

@@ -49,8 +49,8 @@ impl AppSettings {
         }
 
         self.editor.theme_mode = theme_mode;
-        self.editor.editor_text_color = text_color.to_owned();
-        self.editor.editor_background_color = background_color.to_owned();
+        text_color.clone_into(&mut self.editor.editor_text_color);
+        background_color.clone_into(&mut self.editor.editor_background_color);
         true
     }
 

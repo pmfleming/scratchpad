@@ -57,6 +57,7 @@ pub(super) fn build_galley(
     galley
 }
 
+#[must_use]
 pub fn build_layouter(
     font_id: egui::FontId,
     word_wrap: bool,

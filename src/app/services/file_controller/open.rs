@@ -132,9 +132,12 @@ impl FileController {
             return;
         }
 
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateTab {
-            index: target_index,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ActivateTab {
+                index: target_index,
+            }),
+        );
         Self::open_external_paths_here(app, paths);
     }
 
@@ -159,9 +162,12 @@ impl FileController {
             return;
         }
 
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateTab {
-            index: target_index,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ActivateTab {
+                index: target_index,
+            }),
+        );
         Self::open_external_paths_here_async(app, paths);
     }
 
@@ -209,20 +215,21 @@ impl FileController {
 
     fn activate_existing_path(app: &mut ScratchpadApp, path: &Path) -> Option<String> {
         if let Some((index, view_id)) = app.tab_manager.find_tab_by_path(path) {
-            app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateTab {
-                index,
-            }));
-            app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateView {
-                view_id,
-            }));
+            crate::app::commands::handle_command(
+                app,
+                AppCommand::Workspace(WorkspaceCommand::ActivateTab { index }),
+            );
+            crate::app::commands::handle_command(
+                app,
+                AppCommand::Workspace(WorkspaceCommand::ActivateView { view_id }),
+            );
             if crate::app::app_state::settings_state::is_settings_file_path(app, path) {
                 crate::app::app_state::settings_state::mark_active_buffer_as_settings_file(app);
             }
-            Some(
-                path.file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.display().to_string()),
-            )
+            Some(path.file_name().map_or_else(
+                || path.display().to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            ))
         } else {
             None
         }
@@ -348,7 +355,7 @@ mod tests {
             cold_session_tabs: Default::default(),
         };
         app.tab_manager.rebuild_buffer_tab_index();
-        crate::app::app_state::workspace::display_tabs::clear_tab_selection(app);
+        crate::app::app_state::workspace::display_tabs::clear_tab_selection(&mut app);
         app
     }
 

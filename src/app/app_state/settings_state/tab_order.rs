@@ -41,11 +41,11 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn apply_current_tab_ordering(&mut self) -> bool {
-        let workspace_order =
-            match workspace_tab_order_for_mode(self, self.state.app_settings.tab_order_mode()) {
-                Some(order) => order,
-                None => return false,
-            };
+        let Some(workspace_order) =
+            workspace_tab_order_for_mode(self, self.state.app_settings.tab_order_mode())
+        else {
+            return false;
+        };
         let reordered = self.apply_workspace_tab_order_internal(workspace_order, false);
         if reordered {
             crate::app::app_state::frame::begin_layout_transition(self);
@@ -155,16 +155,16 @@ fn sort_workspace_tab_order(
     match mode {
         TabOrderMode::Custom => {}
         TabOrderMode::FileName => {
-            order.sort_by(|left, right| compare_file_name_tabs(context, *left, *right))
+            order.sort_by(|left, right| compare_file_name_tabs(context, *left, *right));
         }
         TabOrderMode::FileSize => {
-            order.sort_by(|left, right| compare_file_size_tabs(context, *left, *right))
+            order.sort_by(|left, right| compare_file_size_tabs(context, *left, *right));
         }
         TabOrderMode::FileAge => {
-            order.sort_by(|left, right| compare_file_age_tabs(context, *left, *right))
+            order.sort_by(|left, right| compare_file_age_tabs(context, *left, *right));
         }
         TabOrderMode::RecentEdit => {
-            order.sort_by(|left, right| compare_recent_edit_tabs(context, *left, *right))
+            order.sort_by(|left, right| compare_recent_edit_tabs(context, *left, *right));
         }
     }
 }
@@ -309,8 +309,7 @@ fn tab_total_size(tab: &WorkspaceTab) -> u64 {
             buffer
                 .disk_state
                 .as_ref()
-                .map(|state| state.len)
-                .unwrap_or_else(|| buffer.text().len() as u64)
+                .map_or_else(|| buffer.text().len() as u64, |state| state.len)
         })
         .sum()
 }
@@ -481,7 +480,7 @@ mod tests {
             cold_session_tabs: Default::default(),
         };
         app.tab_manager.rebuild_buffer_tab_index();
-        crate::app::app_state::workspace::display_tabs::clear_tab_selection(app);
+        crate::app::app_state::workspace::display_tabs::clear_tab_selection(&mut app);
         app
     }
 

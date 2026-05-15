@@ -30,18 +30,22 @@ impl ScratchpadApp {
 }
 
 impl AppSettings {
+    #[must_use]
     pub fn font_size(&self) -> f32 {
         self.editor.font_size
     }
 
+    #[must_use]
     pub fn editor_font(&self) -> EditorFontPreset {
         self.editor.editor_font
     }
 
+    #[must_use]
     pub fn editor_gutter(&self) -> u8 {
         self.editor.editor_gutter
     }
 
+    #[must_use]
     pub fn theme_mode(&self) -> AppThemeMode {
         self.editor.theme_mode
     }
@@ -50,6 +54,7 @@ impl AppSettings {
         !uses_stock_editor_palette(self)
     }
 
+    #[must_use]
     pub fn editor_text_color(&self) -> egui::Color32 {
         color_from_hex(
             &self.editor.editor_text_color,
@@ -57,6 +62,7 @@ impl AppSettings {
         )
     }
 
+    #[must_use]
     pub fn editor_background_color(&self) -> egui::Color32 {
         color_from_hex(
             &self.editor.editor_background_color,
@@ -64,6 +70,7 @@ impl AppSettings {
         )
     }
 
+    #[must_use]
     pub fn editor_text_highlight_color(&self) -> egui::Color32 {
         color_from_hex(
             &self.editor.editor_text_highlight_color,
@@ -74,6 +81,7 @@ impl AppSettings {
         )
     }
 
+    #[must_use]
     pub fn editor_text_highlight_text_color(&self) -> egui::Color32 {
         let generated =
             crate::app::color_contrast::optimal_text_color(self.editor_text_highlight_color());
@@ -84,50 +92,62 @@ impl AppSettings {
         color_from_hex(&self.editor.editor_text_highlight_text_color, generated)
     }
 
+    #[must_use]
     pub fn word_wrap(&self) -> bool {
         self.editor.word_wrap
     }
 
+    #[must_use]
     pub fn tab_list_position(&self) -> TabListPosition {
         self.workspace.tab_list_position
     }
 
+    #[must_use]
     pub fn tab_order_mode(&self) -> TabOrderMode {
         self.workspace.tab_order_mode
     }
 
+    #[must_use]
     pub fn tab_order_direction(&self) -> TabOrderDirection {
         self.workspace.tab_order_direction
     }
 
+    #[must_use]
     pub fn file_open_disposition(&self) -> FileOpenDisposition {
         self.workspace.file_open_disposition
     }
 
+    #[must_use]
     pub fn new_tab_placement(&self) -> NewTabPlacement {
         self.workspace.new_tab_placement
     }
 
+    #[must_use]
     pub fn startup_session_behavior(&self) -> StartupSessionBehavior {
         self.workspace.startup_session_behavior
     }
 
+    #[must_use]
     pub fn tab_list_width(&self) -> f32 {
         self.workspace.tab_list_width
     }
 
+    #[must_use]
     pub fn auto_hide_tab_list(&self) -> bool {
         self.workspace.auto_hide_tab_list
     }
 
+    #[must_use]
     pub fn tab_list_auto_hide_delay_seconds(&self) -> f32 {
         self.workspace.tab_list_auto_hide_delay_seconds
     }
 
+    #[must_use]
     pub fn recent_files_enabled(&self) -> bool {
         self.workspace.recent_files_enabled
     }
 
+    #[must_use]
     pub fn status_bar_visible(&self) -> bool {
         self.ui.status_bar_visible
     }
@@ -275,8 +295,8 @@ pub(super) fn sync_stock_editor_palette_with_theme_mode(settings: &mut AppSettin
         return;
     }
 
-    settings.editor.editor_text_color = text_color.to_owned();
-    settings.editor.editor_background_color = background_color.to_owned();
+    text_color.clone_into(&mut settings.editor.editor_text_color);
+    background_color.clone_into(&mut settings.editor.editor_background_color);
 }
 
 pub(super) fn uses_stock_editor_palette(settings: &AppSettings) -> bool {

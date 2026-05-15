@@ -158,12 +158,12 @@ fn replacement_preview_signature(preview: Option<&SearchReplacementPreview>) -> 
     hasher.finish()
 }
 
-fn viewport_text_slice<'a>(
-    buffer: &'a BufferState,
+fn viewport_text_slice(
+    buffer: &BufferState,
     viewport: egui::Rect,
     row_height: f32,
     cursor_line: Option<usize>,
-) -> ViewportTextSlice<'a> {
+) -> ViewportTextSlice<'_> {
     let line_count = buffer.line_count.max(1);
     let top_line = if row_height > 0.0 {
         (viewport.min.y.max(0.0) / row_height).floor() as usize
@@ -191,10 +191,10 @@ fn viewport_text_slice<'a>(
     let end_info = tree.line_info(end_line);
     let end_char = (end_info.start_char + end_info.char_len).min(tree.len_chars());
     let char_range = start_char..end_char;
-    let text = tree
-        .borrow_range(char_range.clone())
-        .map(Cow::Borrowed)
-        .unwrap_or_else(|| Cow::Owned(tree.extract_range(char_range.clone())));
+    let text = tree.borrow_range(char_range.clone()).map_or_else(
+        || Cow::Owned(tree.extract_range(char_range.clone())),
+        Cow::Borrowed,
+    );
     ViewportTextSlice {
         text,
         char_range,

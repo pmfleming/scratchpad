@@ -1,3 +1,4 @@
+#[must_use]
 pub fn summarize_open_results(
     opened_count: usize,
     duplicate_count: usize,
@@ -44,10 +45,12 @@ pub fn summarize_open_results(
     }
 }
 
+#[must_use]
 pub fn file_count_label(count: usize) -> String {
     pluralize(count, "file")
 }
 
+#[must_use]
 pub fn pluralize(count: usize, singular: &str) -> String {
     if count == 1 {
         format!("1 {singular}")

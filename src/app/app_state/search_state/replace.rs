@@ -87,7 +87,7 @@ fn active_match_replacement_selection(
     let previous_selection = app
         .tab_manager
         .active_tab()
-        .and_then(|tab| tab.view(search_match.view_id))
+        .and_then(|tab| tab.layout.view(search_match.view_id))
         .and_then(|view| view.cursor_range)
         .unwrap_or_else(|| cursor_range_from_char_range(search_match.range.clone()));
     let replacement_range =
@@ -132,8 +132,7 @@ pub(super) fn replace_ranges_in_active_buffer(
             buffer
                 .path
                 .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| buffer.name.clone())
+                .map_or_else(|| buffer.name.clone(), |path| path.display().to_string())
         })?;
 
     let replaced = {
@@ -217,7 +216,7 @@ fn replace_all_in_active_buffer(app: &mut ScratchpadApp, plan: &ReplacementPlan)
     let previous_selection = app
         .tab_manager
         .active_tab()
-        .and_then(|tab| tab.view(target.view_id))
+        .and_then(|tab| tab.layout.view(target.view_id))
         .and_then(|view| view.cursor_range);
     let (first_range, first_replacement) = first_document_order_replacement(target);
     let previous_selection =
@@ -319,7 +318,7 @@ fn confirm_replace_all_plan(app: &mut ScratchpadApp, plan: &ReplacementPlan) -> 
     let replacement_preview = if replacement.is_empty() {
         "empty text".to_owned()
     } else {
-        format!("\"{}\"", replacement)
+        format!("\"{replacement}\"")
     };
     app.state
         .search_state
@@ -422,6 +421,7 @@ fn rebuild_active_buffer_search_matches(app: &mut ScratchpadApp) -> Result<(), S
     };
     let active_view_id = tab.layout.active_view_id;
     let Some(buffer) = tab
+        .layout
         .active_view()
         .and_then(|view| tab.buffer_by_id(view.buffer_id))
     else {
@@ -489,6 +489,7 @@ fn apply_replacement_target(app: &mut ScratchpadApp, target: &ReplacementTargetP
         return false;
     };
     let previous_selection = tab
+        .layout
         .view(target.view_id)
         .and_then(|view| view.cursor_range)
         .unwrap_or_else(|| fallback_selection_for_target(target));

@@ -8,10 +8,6 @@ use super::{
 use std::ops::Range;
 
 impl PieceTreeLite {
-    pub fn insert(&mut self, offset_chars: usize, text: &str) {
-        self.insert_with_source(offset_chars, text, PieceSource::Edit);
-    }
-
     pub fn insert_with_source(
         &mut self,
         offset_chars: usize,
@@ -45,10 +41,6 @@ impl PieceTreeLite {
         inserted_chars
     }
 
-    pub fn remove_range(&mut self, range_chars: Range<usize>) {
-        self.remove_char_range(range_chars);
-    }
-
     pub fn remove_char_range(&mut self, range_chars: Range<usize>) {
         assert!(range_chars.start <= range_chars.end);
         assert!(range_chars.end <= self.len_chars());
@@ -69,6 +61,7 @@ impl PieceTreeLite {
         self.replace_leaf_span(start_address, end_address, replacement_leaves);
     }
 
+    #[must_use]
     pub fn text_for_span(&self, span: ByteSpan) -> &str {
         self.storage.text_for_span(span)
     }

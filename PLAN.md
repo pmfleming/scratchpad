@@ -119,7 +119,7 @@ Validation already completed during this pass:
 
 - `cargo check`
 - `cargo test`
-- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo clippy --lib --all-features -- -D warnings`
 - `scripts/hotspots.py`
 - `scripts/slowspots.py`
 

@@ -8,20 +8,22 @@ use crate::app::startup::StartupOptions;
 #[test]
 fn command_open_settings_selects_only_settings_slot() {
     let mut app = test_app(["one.txt", "two.txt"]);
-    crate::app::app_state::workspace::display_tabs::select_only_tab_slot(app, 0);
-    crate::app::app_state::workspace::display_tabs::toggle_tab_slot_selection(app, 1);
+    crate::app::app_state::workspace::display_tabs::select_only_tab_slot(&mut app, 0);
+    crate::app::app_state::workspace::display_tabs::toggle_tab_slot_selection(&mut app, 1);
 
     settings_controller::open_settings(&mut app);
 
-    assert!(crate::app::app_state::settings_state::showing_settings(app));
+    assert!(crate::app::app_state::settings_state::showing_settings(
+        &app
+    ));
     assert_eq!(
         selected_slots(&app),
-        vec![crate::app::app_state::workspace::display_tabs::active_tab_slot_index(app)]
+        vec![crate::app::app_state::workspace::display_tabs::active_tab_slot_index(&app)]
     );
     assert!(
         crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(
-            app,
-            crate::app::app_state::workspace::display_tabs::active_tab_slot_index(app)
+            &app,
+            crate::app::app_state::workspace::display_tabs::active_tab_slot_index(&app)
         )
     );
 }
@@ -29,18 +31,20 @@ fn command_open_settings_selects_only_settings_slot() {
 #[test]
 fn tab_strip_open_settings_can_preserve_existing_selection() {
     let mut app = test_app(["one.txt", "two.txt"]);
-    crate::app::app_state::workspace::display_tabs::select_only_tab_slot(app, 0);
-    crate::app::app_state::workspace::display_tabs::toggle_tab_slot_selection(app, 1);
+    crate::app::app_state::workspace::display_tabs::select_only_tab_slot(&mut app, 0);
+    crate::app::app_state::workspace::display_tabs::toggle_tab_slot_selection(&mut app, 1);
 
     settings_controller::open_settings_preserving_tab_selection(&mut app);
 
-    assert!(crate::app::app_state::settings_state::showing_settings(app));
+    assert!(crate::app::app_state::settings_state::showing_settings(
+        &app
+    ));
     assert_eq!(
         selected_slots(&app),
         vec![
             0,
             1,
-            crate::app::app_state::workspace::display_tabs::active_tab_slot_index(app)
+            crate::app::app_state::workspace::display_tabs::active_tab_slot_index(&app)
         ]
     );
 }
@@ -49,21 +53,21 @@ fn tab_strip_open_settings_can_preserve_existing_selection() {
 fn close_settings_selects_only_active_workspace_slot() {
     let mut app = test_app(["one.txt", "two.txt"]);
     settings_controller::open_settings_preserving_tab_selection(&mut app);
-    crate::app::app_state::workspace::display_tabs::toggle_tab_slot_selection(app, 0);
+    crate::app::app_state::workspace::display_tabs::toggle_tab_slot_selection(&mut app, 0);
 
     settings_controller::close_settings(&mut app);
 
     assert!(!crate::app::app_state::settings_state::showing_settings(
-        app
+        &app
     ));
     assert_eq!(
         selected_slots(&app),
-        vec![crate::app::app_state::workspace::display_tabs::active_tab_slot_index(app)]
+        vec![crate::app::app_state::workspace::display_tabs::active_tab_slot_index(&app)]
     );
     assert!(
         !crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(
-            app,
-            crate::app::app_state::workspace::display_tabs::active_tab_slot_index(app)
+            &app,
+            crate::app::app_state::workspace::display_tabs::active_tab_slot_index(&app)
         )
     );
 }
@@ -74,12 +78,12 @@ fn startup_keeps_workspace_active_when_settings_tab_is_open() {
     let mut app = app_with_root(&root);
 
     assert!(crate::app::app_state::settings_state::settings_tab_open(
-        app
+        &app
     ));
     assert!(!crate::app::app_state::settings_state::showing_settings(
-        app
+        &app
     ));
-    crate::app::app_state::workspace::accessors::persist_session_now(app).unwrap();
+    crate::app::app_state::workspace::accessors::persist_session_now(&mut app).unwrap();
 
     let mut restored = app_with_root(&root);
     restored.set_session_persist_on_drop(false);
@@ -108,8 +112,10 @@ fn startup_restores_settings_as_active_surface_from_session() {
     let mut app = app_with_root(&root);
 
     settings_controller::open_settings(&mut app);
-    assert!(crate::app::app_state::settings_state::showing_settings(app));
-    crate::app::app_state::workspace::accessors::persist_session_now(app).unwrap();
+    assert!(crate::app::app_state::settings_state::showing_settings(
+        &app
+    ));
+    crate::app::app_state::workspace::accessors::persist_session_now(&mut app).unwrap();
 
     let mut restored = app_with_root(&root);
     restored.set_session_persist_on_drop(false);
@@ -136,7 +142,9 @@ fn reset_settings_to_defaults_restores_startup_default_state() {
 
     settings_controller::reset_settings_to_defaults(&mut app);
 
-    assert!(crate::app::app_state::settings_state::showing_settings(app));
+    assert!(crate::app::app_state::settings_state::showing_settings(
+        &app
+    ));
     assert_eq!(
         app.state.app_settings.tab_list_position(),
         crate::app::services::settings_store::TabListPosition::Top
@@ -152,8 +160,8 @@ fn reset_settings_to_defaults_restores_startup_default_state() {
     );
     assert!(
         crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(
-            app,
-            crate::app::app_state::workspace::display_tabs::active_tab_slot_index(app)
+            &app,
+            crate::app::app_state::workspace::display_tabs::active_tab_slot_index(&app)
         )
     );
 }
@@ -177,7 +185,7 @@ fn test_app<const N: usize>(names: [&str; N]) -> ScratchpadApp {
         cold_session_tabs: Default::default(),
     };
     app.tab_manager.rebuild_buffer_tab_index();
-    crate::app::app_state::workspace::display_tabs::clear_tab_selection(app);
+    crate::app::app_state::workspace::display_tabs::clear_tab_selection(&mut app);
     app
 }
 

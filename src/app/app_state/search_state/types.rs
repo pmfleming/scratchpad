@@ -11,6 +11,7 @@ pub enum SearchScope {
 }
 
 impl SearchScope {
+    #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             Self::SelectionOnly => "Selection",

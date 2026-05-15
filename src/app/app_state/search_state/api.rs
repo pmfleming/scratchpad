@@ -171,9 +171,12 @@ fn focus_search_match(app: &mut ScratchpadApp, search_match: SearchMatch) -> boo
     let preserve_session_clean = !app.tab_manager.session_dirty;
 
     if search_match.tab_index != app.tab_manager.active_tab_index {
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateTab {
-            index: search_match.tab_index,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ActivateTab {
+                index: search_match.tab_index,
+            }),
+        );
         app.state.focus.clear();
     }
     let destination_slot = crate::app::app_state::workspace::display_tabs::slot_for_workspace_index(
@@ -186,9 +189,12 @@ fn focus_search_match(app: &mut ScratchpadApp, search_match: SearchMatch) -> boo
         .active_tab()
         .is_some_and(|tab| tab.layout.active_view_id != search_match.view_id)
     {
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateView {
-            view_id: search_match.view_id,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ActivateView {
+                view_id: search_match.view_id,
+            }),
+        );
         app.state.focus.clear();
     }
     if preserve_session_clean {
@@ -210,6 +216,7 @@ impl ScratchpadApp {
         toggle_search(self);
     }
 
+    #[must_use]
     pub fn search_open(&self) -> bool {
         self.state.search_state.open()
     }
@@ -226,10 +233,12 @@ impl ScratchpadApp {
         set_search_scope(self, scope);
     }
 
+    #[must_use]
     pub fn search_match_count(&self) -> usize {
         self.state.search_state.match_count()
     }
 
+    #[must_use]
     pub fn search_active_match_index(&self) -> Option<usize> {
         self.state.search_state.active_match_index()
     }
@@ -321,6 +330,7 @@ impl ScratchpadApp {
     pub(crate) fn active_search_selection_range(&self) -> Option<Range<usize>> {
         self.tab_manager
             .active_tab()?
+            .layout
             .active_view()
             .and_then(|view| view.cursor_range)
             .and_then(super::helpers::selection_char_range)

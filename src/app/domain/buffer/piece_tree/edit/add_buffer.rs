@@ -37,6 +37,7 @@ impl PieceTreeLite {
         self.root.recalculate();
     }
 
+    #[must_use]
     pub fn provenance_for_span(&self, span: ByteSpan) -> PieceProvenance {
         self.storage.provenance_for_span(span)
     }

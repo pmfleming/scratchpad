@@ -161,10 +161,10 @@ fn sort_views_by_layout_order(views: &mut [EditorViewState], view_order: &HashMa
 fn file_root_pane(root_pane: &PaneNode, views: &[EditorViewState]) -> PaneNode {
     let file_view_ids = views.iter().map(|view| view.id).collect::<HashSet<_>>();
     let mut file_root = root_pane.clone();
-    if !file_root.retain_views(&file_view_ids) {
-        PaneNode::leaf(views[0].id)
-    } else {
+    if file_root.retain_views(&file_view_ids) {
         file_root
+    } else {
+        PaneNode::leaf(views[0].id)
     }
 }
 

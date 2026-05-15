@@ -52,6 +52,7 @@ fn persists_split_views_and_active_view() {
     assert_ne!(restored_tab.layout.active_view_id, first_view);
     assert!(
         restored_tab
+            .layout
             .view(restored_tab.layout.active_view_id)
             .is_some()
     );

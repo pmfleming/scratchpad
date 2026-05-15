@@ -25,6 +25,7 @@ pub enum TabAttentionState {
 }
 
 impl WorkspaceTab {
+    #[must_use]
     pub fn new(buffer: BufferState) -> Self {
         let layout = WorkspaceTabLayout::new(buffer.id);
         Self {
@@ -33,6 +34,7 @@ impl WorkspaceTab {
         }
     }
 
+    #[must_use]
     pub fn restored(
         buffer: BufferState,
         views: Vec<EditorViewState>,
@@ -42,6 +44,7 @@ impl WorkspaceTab {
         Self::restored_with_buffers(buffer, Vec::new(), views, root_pane, active_view_id)
     }
 
+    #[must_use]
     pub fn restored_with_buffers(
         buffer: BufferState,
         extra_buffers: Vec<BufferState>,
@@ -57,14 +60,17 @@ impl WorkspaceTab {
         tab
     }
 
+    #[must_use]
     pub fn untitled() -> Self {
         Self::new(BufferState::new("Untitled".to_owned(), String::new(), None))
     }
 
+    #[must_use]
     pub fn display_name(&self) -> String {
         summary::display_name(self)
     }
 
+    #[must_use]
     pub fn file_group_count(&self) -> usize {
         self.distinct_buffer_count()
     }
@@ -78,14 +84,14 @@ impl WorkspaceTab {
         self.sync_active_buffer_to_active_view()
     }
 
+    #[must_use]
     pub fn describe(&self) -> String {
         let path = self
             .buffers
             .active()
             .path
             .as_ref()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "<unsaved>".to_owned());
+            .map_or_else(|| "<unsaved>".to_owned(), |path| path.display().to_string());
         let active_buffer = self.buffers.active();
         format!(
             "{} [path={}, dirty={}, views={}, active_view={}]",
@@ -129,7 +135,7 @@ impl WorkspaceTab {
     }
 
     fn sync_active_buffer_to_active_view(&mut self) -> bool {
-        let Some(active_buffer_id) = self.active_view().map(|view| view.buffer_id) else {
+        let Some(active_buffer_id) = self.layout.active_view().map(|view| view.buffer_id) else {
             return false;
         };
 

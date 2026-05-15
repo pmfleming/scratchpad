@@ -99,10 +99,9 @@ pub(super) fn apply_cursor_movement(request: CursorMovementRequest<'_>) -> Optio
         .saturating_sub(request.char_offset_base)
         .min(request.slice_chars);
     let local_cursor = CharCursor {
-        index: request
-            .display_map
-            .map(|map| map.doc_to_display_cursor(doc_local_cursor))
-            .unwrap_or(doc_local_cursor),
+        index: request.display_map.map_or(doc_local_cursor, |map| {
+            map.doc_to_display_cursor(doc_local_cursor)
+        }),
         prefer_next_row: request.cursor.primary.prefer_next_row,
     };
     let egui_cursor = request.galley.clamp_cursor(&local_cursor.to_egui_ccursor());
@@ -202,11 +201,7 @@ fn local_cursor_for_document_index(
     display_map: Option<&DisplayTextMap>,
 ) -> egui::text::CCursor {
     let local = index.saturating_sub(char_offset_base).min(slice_chars);
-    egui::text::CCursor::new(
-        display_map
-            .map(|map| map.doc_to_display_cursor(local))
-            .unwrap_or(local),
-    )
+    egui::text::CCursor::new(display_map.map_or(local, |map| map.doc_to_display_cursor(local)))
 }
 
 fn full_document_movement_target(
@@ -218,11 +213,10 @@ fn full_document_movement_target(
     piece_tree: &PieceTreeLite,
 ) -> Option<CharCursor> {
     match key {
-        egui::Key::ArrowUp if modifiers.command => None,
+        egui::Key::ArrowUp | egui::Key::ArrowDown if modifiers.command => None,
         egui::Key::ArrowUp => {
             logical_line_movement_target(current_index, -1, total_chars, piece_tree)
         }
-        egui::Key::ArrowDown if modifiers.command => None,
         egui::Key::ArrowDown => {
             logical_line_movement_target(current_index, 1, total_chars, piece_tree)
         }
@@ -338,9 +332,9 @@ fn clamp_char_cursor(
     display_map: Option<&DisplayTextMap>,
 ) -> CharCursor {
     let clamped = galley.clamp_cursor(&cursor);
-    let local_index = display_map
-        .map(|map| map.display_to_doc_cursor(clamped.index))
-        .unwrap_or(clamped.index);
+    let local_index = display_map.map_or(clamped.index, |map| {
+        map.display_to_doc_cursor(clamped.index)
+    });
     CharCursor {
         index: char_offset_base
             .saturating_add(local_index)
