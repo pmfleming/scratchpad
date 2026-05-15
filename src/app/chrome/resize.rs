@@ -4,6 +4,7 @@ use eframe::egui::{self, CursorIcon, Rect, Vec2, pos2, viewport::ResizeDirection
 const RESIZE_BORDER: f32 = 6.0;
 const RESIZE_CORNER: f32 = 18.0;
 
+#[must_use]
 pub fn handle_window_resize(ctx: &egui::Context) -> bool {
     if !window_resize_enabled(ctx) {
         return false;

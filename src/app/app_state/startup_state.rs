@@ -1,6 +1,9 @@
 use super::{
-    AppSurface, RuntimeIoState, ScratchpadApp, ScratchpadAppState, SearchState, StatusDomain,
+    BackgroundIoState, ChromeState, DialogState, FileWatchState, FocusState, ScratchpadApp,
+    ScratchpadAppState, SearchState, StatusDomain,
 };
+use crate::app::app_state::settings_state;
+use crate::app::app_state::workspace::accessors as workspace_accessors;
 use crate::app::diagnostics;
 use crate::app::domain::TabManager;
 use crate::app::services::background_io::spawn_background_io_worker;
@@ -13,6 +16,7 @@ use crate::app::services::settings_store::{
     AppSettings, FileOpenDisposition, SettingsStore, StartupSessionBehavior,
 };
 use crate::app::startup::{StartupOpenTarget, StartupOptions};
+use std::collections::VecDeque;
 use std::time::Instant;
 
 impl ScratchpadApp {
@@ -20,6 +24,7 @@ impl ScratchpadApp {
         self.state.persist_session_on_drop = enabled;
     }
 
+    #[must_use]
     pub fn with_session_store(session_store: SessionStore) -> Self {
         let settings_root = session_store.root().to_path_buf();
         Self::with_stores_and_startup(
@@ -29,10 +34,12 @@ impl ScratchpadApp {
         )
     }
 
+    #[must_use]
     pub fn with_startup_options(startup_options: StartupOptions) -> Self {
         Self::with_session_store_and_startup(SessionStore::default(), startup_options)
     }
 
+    #[must_use]
     pub fn with_runtime_startup_options(startup_options: StartupOptions) -> Self {
         let session_store = SessionStore::default();
         let settings_root = session_store.root().to_path_buf();
@@ -43,6 +50,7 @@ impl ScratchpadApp {
         )
     }
 
+    #[must_use]
     pub fn with_session_store_and_startup(
         session_store: SessionStore,
         startup_options: StartupOptions,
@@ -55,6 +63,7 @@ impl ScratchpadApp {
         )
     }
 
+    #[must_use]
     pub fn with_stores_and_startup(
         session_store: SessionStore,
         settings_store: SettingsStore,
@@ -63,6 +72,7 @@ impl ScratchpadApp {
         Self::build_app(session_store, settings_store, startup_options, false)
     }
 
+    #[must_use]
     pub fn with_stores_and_runtime_startup(
         session_store: SessionStore,
         settings_store: SettingsStore,
@@ -85,9 +95,8 @@ impl ScratchpadApp {
             state: ScratchpadAppState {
                 app_settings: AppSettings::default(),
                 status: super::StatusState::default(),
-                pending_editor_focus: None,
-                encoding_dialog_open: false,
-                encoding_dialog_choice: "UTF-8".to_owned(),
+                focus: FocusState::default(),
+                dialogs: DialogState::new(),
                 settings_store,
                 user_manual_path: manual_files::resolve_user_manual_path(),
                 session_store,
@@ -100,30 +109,24 @@ impl ScratchpadApp {
                 overflow_popup_open: false,
                 applied_editor_font: None,
                 applied_theme_mode: None,
-                active_surface: AppSurface::Workspace,
+                chrome: ChromeState::default(),
                 settings_tab_index: usize::MAX,
                 pending_settings_toml_refresh: None,
-                pending_status_bar_visible: None,
-                vertical_tab_list_open: false,
-                vertical_tab_list_hide_deadline: None,
                 text_history_cache: crate::app::text_history::TextHistoryCache::default(),
-                text_history_open: false,
-                status_history_open: false,
                 search_state: SearchState::default(),
-                chrome_transition_frames_remaining: 0,
-                workspace_selection: Default::default(),
-                tab_rename_state: None,
-                pending_tab_context_menu: None,
+                workspace_selection:
+                    crate::app::app_state::workspace::display_tabs::WorkspaceSelectionState::default(
+                    ),
                 pending_open_file_paths: Vec::new(),
-                recently_closed_files: Default::default(),
-                startup_restore_conflicts: Vec::new(),
+                recently_closed_files: VecDeque::default(),
                 workspace_reflow_axis: crate::app::domain::SplitAxis::Vertical,
                 settings_preview_quote_index: 2,
-                io: RuntimeIoState::new(background_io_tx, background_io_rx),
+                background_io: BackgroundIoState::new(background_io_tx, background_io_rx),
+                file_watch: FileWatchState::default(),
             },
         };
 
-        let loaded_from_settings = app.load_settings_from_store();
+        let loaded_from_settings = settings_state::load_settings_from_store(&mut app);
         let has_startup_files = !startup_options.files.is_empty();
         if runtime_background_startup {
             if app.should_restore_session(&startup_options) {
@@ -132,7 +135,7 @@ impl ScratchpadApp {
                 if !has_startup_files {
                     app.initialize_default_workspace_tabs();
                 }
-                app.request_focus_for_active_view();
+                workspace_accessors::request_focus_for_active_view(&mut app);
                 app.apply_startup_options_async(startup_options);
             }
         } else {
@@ -141,18 +144,21 @@ impl ScratchpadApp {
                 let legacy_settings = session_manager::restore_session_state(&mut app);
                 restored_session = legacy_settings.is_some();
                 if !loaded_from_settings && let Some(legacy_settings) = legacy_settings {
-                    app.apply_settings(legacy_settings);
-                    let _ = app.persist_settings_now();
+                    crate::app::app_state::settings_state::apply_settings(
+                        &mut app,
+                        legacy_settings,
+                    );
+                    let _ = crate::app::app_state::settings_state::persist_settings_now(&mut app);
                 }
             }
             if !restored_session && !has_startup_files {
                 app.initialize_default_workspace_tabs();
             }
-            app.request_focus_for_active_view();
+            workspace_accessors::request_focus_for_active_view(&mut app);
             app.apply_startup_options(startup_options);
         }
 
-        app.ensure_active_tab_slot_selected();
+        crate::app::app_state::workspace::display_tabs::ensure_active_tab_slot_selected(&mut app);
         app.tab_manager.pending_scroll_to_active = false;
 
         app
@@ -172,13 +178,13 @@ impl ScratchpadApp {
 
         match open_target {
             StartupOpenTarget::SeparateTabs => {
-                FileController::open_external_paths(self, startup_options.files)
+                FileController::open_external_paths(self, startup_options.files);
             }
             StartupOpenTarget::ActiveTab => {
-                FileController::open_external_paths_here(self, startup_options.files)
+                FileController::open_external_paths_here(self, startup_options.files);
             }
             StartupOpenTarget::TabIndex(index) => {
-                FileController::open_external_paths_into_tab(self, index, startup_options.files)
+                FileController::open_external_paths_into_tab(self, index, startup_options.files);
             }
         }
 
@@ -203,17 +209,17 @@ impl ScratchpadApp {
 
         match open_target {
             StartupOpenTarget::SeparateTabs => {
-                FileController::open_external_paths_async(self, startup_options.files)
+                FileController::open_external_paths_async(self, startup_options.files);
             }
             StartupOpenTarget::ActiveTab => {
-                FileController::open_external_paths_here_async(self, startup_options.files)
+                FileController::open_external_paths_here_async(self, startup_options.files);
             }
             StartupOpenTarget::TabIndex(index) => {
                 FileController::open_external_paths_into_tab_async(
                     self,
                     index,
                     startup_options.files,
-                )
+                );
             }
         }
 
@@ -262,6 +268,6 @@ impl ScratchpadApp {
             crate::app::domain::WorkspaceTab::untitled()
         };
         self.tab_manager.set_tabs(vec![default_tab], 0);
-        self.mark_search_dirty();
+        crate::app::app_state::search_runtime::mark_search_dirty(self);
     }
 }

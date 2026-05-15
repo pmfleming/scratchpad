@@ -50,10 +50,12 @@ impl Default for TabManager {
 }
 
 impl TabManager {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn active_tab(&self) -> Option<&WorkspaceTab> {
         self.tabs.get(self.active_tab_index)
     }
@@ -83,6 +85,7 @@ impl TabManager {
         }
     }
 
+    #[must_use]
     pub fn estimated_tab_strip_width(&self, spacing: f32) -> f32 {
         if self.tabs.is_empty() {
             return 0.0;
@@ -211,9 +214,10 @@ impl TabManager {
         self.rebuild_buffer_tab_index();
     }
 
+    #[must_use]
     pub fn find_tab_by_path(&self, candidate: &std::path::Path) -> Option<(usize, ViewId)> {
         self.tabs.iter().enumerate().find_map(|(tab_index, tab)| {
-            tab.views.iter().find_map(|view| {
+            tab.layout.views().iter().find_map(|view| {
                 tab.buffer_by_id(view.buffer_id)
                     .and_then(|buffer| buffer.path.as_ref())
                     .is_some_and(|path| crate::app::paths_match(path, candidate))
@@ -225,10 +229,10 @@ impl TabManager {
     pub fn describe_tab_at(&self, index: usize) -> String {
         self.tabs
             .get(index)
-            .map(summary::display_name)
-            .unwrap_or_else(|| format!("tab#{index}<missing>"))
+            .map_or_else(|| format!("tab#{index}<missing>"), summary::display_name)
     }
 
+    #[must_use]
     pub fn describe_active_tab(&self) -> String {
         self.describe_tab_at(self.active_tab_index)
     }

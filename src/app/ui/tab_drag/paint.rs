@@ -1,5 +1,5 @@
 use super::state::{TabDragState, TabDropAxis, TabDropZone};
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{ScratchpadApp, workspace::display_tabs};
 use crate::app::theme::{
     TAB_BUTTON_WIDTH, TAB_HEIGHT, border_for_visuals, tab_active_bg_for_visuals,
     text_primary_for_visuals,
@@ -17,9 +17,11 @@ pub(super) fn paint_dragged_tab_ghost(
     duplicate_name_counts: &HashMap<String, usize>,
 ) {
     let dragged_slots = drag_state.dragged_indices.as_slice();
-    let Some(first_label) =
-        app.display_tab_name_at_slot_with_counts(drag_state.source_index, duplicate_name_counts)
-    else {
+    let Some(first_label) = display_tabs::display_tab_name_at_slot_with_counts(
+        app,
+        drag_state.source_index,
+        duplicate_name_counts,
+    ) else {
         return;
     };
     let display_name = if dragged_slots.len() > 1 {

@@ -3,7 +3,7 @@ use super::support::{DeferredBufferRefresh, LoadedFile};
 use crate::app::app_state::{
     PendingBackgroundAction, PendingOpenHereAction, ScratchpadApp, StatusDomain,
 };
-use crate::app::commands::AppCommand;
+use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::diagnostics;
 use crate::app::domain::{SplitAxis, ViewId, WorkspaceTab};
 use crate::app::services::background_io::LoadedPathResult;
@@ -51,7 +51,7 @@ impl FileController {
             .tabs
             .as_slice()
             .get(app.tab_manager.active_tab_index)
-            .map(|tab| tab.active_view_id);
+            .map(|tab| tab.layout.active_view_id());
         let mut pending_paths = Vec::new();
         let mut summary = OpenHereBatchSummary::default();
         let mut already_here_count = 0;
@@ -182,7 +182,7 @@ impl FileController {
         }
 
         app.tab_manager.mark_session_dirty();
-        let _ = app.persist_session_now();
+        let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
     }
 
     fn find_existing_open_here_path(
@@ -210,9 +210,12 @@ impl FileController {
     ) -> OpenHerePathOutcome {
         match existing_path {
             ExistingOpenHerePath::AlreadyInCurrentTab { view_id } => {
-                app.handle_command(AppCommand::ActivateView { view_id });
-                if app.is_settings_file_path(&path) {
-                    app.mark_active_buffer_as_settings_file();
+                crate::app::commands::handle_command(
+                    app,
+                    AppCommand::Workspace(WorkspaceCommand::ActivateView { view_id }),
+                );
+                if crate::app::app_state::settings_state::is_settings_file_path(app, &path) {
+                    crate::app::app_state::settings_state::mark_active_buffer_as_settings_file(app);
                 }
                 OpenHerePathOutcome::AlreadyInCurrentTab
             }
@@ -228,19 +231,25 @@ impl FileController {
         source_index: usize,
     ) -> OpenHerePathOutcome {
         let target_index = app.tab_manager.active_tab_index;
-        app.handle_command(AppCommand::CombineTabIntoTab {
-            source_index,
-            target_index,
-        });
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::CombineTabIntoTab {
+                source_index,
+                target_index,
+            }),
+        );
 
         if let Some((current_index, current_view_id)) = app.tab_manager.find_tab_by_path(&path)
             && current_index == app.tab_manager.active_tab_index
         {
-            app.handle_command(AppCommand::ActivateView {
-                view_id: current_view_id,
-            });
-            if app.is_settings_file_path(&path) {
-                app.mark_active_buffer_as_settings_file();
+            crate::app::commands::handle_command(
+                app,
+                AppCommand::Workspace(WorkspaceCommand::ActivateView {
+                    view_id: current_view_id,
+                }),
+            );
+            if crate::app::app_state::settings_state::is_settings_file_path(app, &path) {
+                crate::app::app_state::settings_state::mark_active_buffer_as_settings_file(app);
             }
             return OpenHerePathOutcome::Migrated;
         }
@@ -415,7 +424,7 @@ mod tests {
             cold_session_tabs: Default::default(),
         };
         app.tab_manager.rebuild_buffer_tab_index();
-        app.clear_tab_selection();
+        crate::app::app_state::workspace::display_tabs::clear_tab_selection(&mut app);
         app
     }
 
@@ -441,7 +450,7 @@ mod tests {
                 None,
             ))],
         );
-        let anchor_view_id = app.tab_manager.tabs.as_slice()[0].active_view_id;
+        let anchor_view_id = app.tab_manager.tabs.as_slice()[0].layout.active_view_id();
 
         let outcomes = FileController::open_loaded_files_here(
             &mut app,
@@ -492,7 +501,7 @@ mod tests {
         assert_eq!(app.tab_manager.tabs.as_slice().len(), 1);
         assert_eq!(app.tab_manager.tabs.as_slice()[0].buffers().count(), 2);
         assert_eq!(
-            app.tab_manager.tabs.as_slice()[0].active_view_id,
+            app.tab_manager.tabs.as_slice()[0].layout.active_view_id(),
             second_view
         );
     }

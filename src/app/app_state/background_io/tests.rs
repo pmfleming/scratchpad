@@ -41,7 +41,7 @@ fn text_metadata_result_updates_matching_buffer_and_clears_pending_action() {
     let buffer_id = buffer.id;
     let revision = buffer.document_revision();
     let mut app = app_with_buffer(buffer);
-    app.state.io.pending_background_actions.insert(
+    app.state.background_io.pending_background_actions.insert(
         42,
         PendingBackgroundAction::RefreshTextMetadata(PendingTextMetadataAction {
             buffer_id,
@@ -67,7 +67,12 @@ fn text_metadata_result_updates_matching_buffer_and_clears_pending_action() {
         )),
     );
 
-    assert!(!app.state.io.pending_background_actions.contains_key(&42));
+    assert!(
+        !app.state
+            .background_io
+            .pending_background_actions
+            .contains_key(&42)
+    );
     assert_eq!(
         app.tab_manager.tabs.as_slice()[0]
             .active_buffer()
@@ -82,7 +87,7 @@ fn stale_encoding_compliance_result_clears_action_without_mutating_buffer() {
     let buffer_id = buffer.id;
     let stale_revision = buffer.document_revision().saturating_add(1);
     let mut app = app_with_buffer(buffer);
-    app.state.io.pending_background_actions.insert(
+    app.state.background_io.pending_background_actions.insert(
         7,
         PendingBackgroundAction::RefreshEncodingCompliance(PendingEncodingComplianceAction {
             buffer_id,
@@ -92,7 +97,12 @@ fn stale_encoding_compliance_result_clears_action_without_mutating_buffer() {
 
     app.apply_encoding_compliance_refreshed_result(7, buffer_id, stale_revision, Ok(true));
 
-    assert!(!app.state.io.pending_background_actions.contains_key(&7));
+    assert!(
+        !app.state
+            .background_io
+            .pending_background_actions
+            .contains_key(&7)
+    );
     assert!(
         !app.tab_manager.tabs.as_slice()[0]
             .active_buffer()
@@ -110,7 +120,7 @@ fn partial_open_tabs_result_keeps_action_until_terminal_result() {
         Some(path.clone()),
     );
     let mut app = test_app();
-    app.state.io.pending_background_actions.insert(
+    app.state.background_io.pending_background_actions.insert(
         3,
         PendingBackgroundAction::OpenTabs(PendingOpenTabsAction {
             accumulator: crate::app::services::file_controller::OpenBatchSummary::default(),
@@ -127,7 +137,12 @@ fn partial_open_tabs_result_keeps_action_until_terminal_result() {
         true,
     );
 
-    assert!(app.state.io.pending_background_actions.contains_key(&3));
+    assert!(
+        app.state
+            .background_io
+            .pending_background_actions
+            .contains_key(&3)
+    );
     assert_eq!(app.tab_manager.tabs.as_slice().len(), 2);
 }
 
@@ -170,7 +185,7 @@ fn progressive_session_hydration_replaces_matching_cold_shell_after_index_shift(
     let cold_payload = cold_payload.unwrap();
     app.tab_manager
         .set_cold_session_tab(1, cold_payload.clone());
-    app.state.io.pending_background_actions.insert(
+    app.state.background_io.pending_background_actions.insert(
         77,
         PendingBackgroundAction::HydrateSessionTab(PendingSessionHydrationAction {
             expected_buffer_ids: cold_session_tab_buffer_ids(&cold_payload),
@@ -188,7 +203,12 @@ fn progressive_session_hydration_replaces_matching_cold_shell_after_index_shift(
     let (hydrated_tab, restore_status) = store.restore_cold_session_tab(cold_payload);
     app.apply_session_tab_hydrated_result(77, 1, restore_status, hydrated_tab);
 
-    assert!(!app.state.io.pending_background_actions.contains_key(&77));
+    assert!(
+        !app.state
+            .background_io
+            .pending_background_actions
+            .contains_key(&77)
+    );
     assert!(app.tab_manager.cold_session_tabs().is_empty());
     assert_eq!(
         app.tab_manager.tabs.as_slice()[2].active_buffer().text(),

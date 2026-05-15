@@ -31,10 +31,12 @@ pub enum PaneNode {
 }
 
 impl PaneNode {
+    #[must_use]
     pub fn leaf(view_id: ViewId) -> Self {
         Self::Leaf { view_id }
     }
 
+    #[must_use]
     pub fn leaf_count(&self) -> usize {
         match self {
             Self::Leaf { .. } => 1,
@@ -101,6 +103,7 @@ impl PaneNode {
         }
     }
 
+    #[must_use]
     pub fn contains_view(&self, target: ViewId) -> bool {
         match self {
             Self::Leaf { view_id } => *view_id == target,
@@ -110,6 +113,7 @@ impl PaneNode {
         }
     }
 
+    #[must_use]
     pub fn first_view_id(&self) -> ViewId {
         match self {
             Self::Leaf { view_id } => *view_id,
@@ -117,6 +121,7 @@ impl PaneNode {
         }
     }
 
+    #[must_use]
     pub fn shallowest_leaf(&self) -> (ViewId, usize) {
         self.shallowest_leaf_at_depth(0)
     }

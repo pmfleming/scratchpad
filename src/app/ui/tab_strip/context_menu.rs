@@ -1,5 +1,8 @@
-use crate::app::app_state::{PendingTabContextMenu, ScratchpadApp, StatusDomain};
-use crate::app::commands::AppCommand;
+use crate::app::app_state::{
+    PendingTabContextMenu, ScratchpadApp, StatusDomain, frame,
+    workspace::accessors as workspace_accessors,
+};
+use crate::app::commands::{AppCommand, FileCommand, SettingsCommand, WorkspaceCommand};
 use crate::app::services::file_controller::FileController;
 use crate::app::services::settings_store::FileOpenDisposition;
 use crate::app::ui::widget_ids;
@@ -60,24 +63,26 @@ fn attach_tab_context_menu_impl(
 ) -> TabContextClick {
     let secondary_clicked = response.secondary_clicked();
     if secondary_clicked {
-        app.select_only_tab_slot(slot_index);
+        crate::app::app_state::workspace::display_tabs::select_only_tab_slot(app, slot_index);
         if allow_pending_tab_popup {
-            app.state.pending_tab_context_menu = Some(PendingTabContextMenu {
-                slot_index,
-                click_x: response
-                    .interact_pointer_pos()
-                    .map_or(response.rect.left(), |pos| pos.x),
-                click_y: response.rect.max.y,
-                open: true,
-            });
+            app.state
+                .dialogs
+                .open_pending_tab_context_menu(PendingTabContextMenu {
+                    slot_index,
+                    click_x: response
+                        .interact_pointer_pos()
+                        .map_or(response.rect.left(), |pos| pos.x),
+                    click_y: response.rect.max.y,
+                    open: true,
+                });
         }
     }
 
     let menu_state = TabContextMenuState::new(app, slot_index);
     let pending_menu = app
         .state
-        .pending_tab_context_menu
-        .filter(|pending| pending.slot_index == slot_index);
+        .dialogs
+        .pending_tab_context_menu_for_slot(slot_index);
 
     if allow_pending_tab_popup && let Some(mut pending) = pending_menu {
         egui::Popup::new(
@@ -95,7 +100,7 @@ fn attach_tab_context_menu_impl(
         .open_bool(&mut pending.open)
         .show(|ui| render_tab_context_menu(ui, app, slot_index, &menu_state));
 
-        app.state.pending_tab_context_menu = pending.open.then_some(pending);
+        app.state.dialogs.store_pending_tab_context_menu(pending);
         return if secondary_clicked {
             TabContextClick::Secondary
         } else {
@@ -113,7 +118,12 @@ fn attach_tab_context_menu_impl(
 }
 
 pub(crate) fn attach_tab_list_context_menu(response: &egui::Response, app: &mut ScratchpadApp) {
-    let _ = attach_tab_context_menu_impl(response, app, app.active_tab_slot_index(), false);
+    let _ = attach_tab_context_menu_impl(
+        response,
+        app,
+        crate::app::app_state::workspace::display_tabs::active_tab_slot_index(app),
+        false,
+    );
 }
 
 fn tab_context_menu_anchor(
@@ -133,7 +143,7 @@ fn render_file_actions(
     save_enabled: bool,
 ) {
     if menu_button(ui, TAB_CONTEXT_MENU_WIDTH, "New Tab", Some(PLUS), true) {
-        app.handle_command(AppCommand::NewTab);
+        crate::app::commands::handle_command(app, AppCommand::Workspace(WorkspaceCommand::NewTab));
         ui.close();
     }
     if app.state.app_settings.recent_files_enabled() {
@@ -146,7 +156,7 @@ fn render_file_actions(
         open_here_enabled,
     ) {
         activate_slot(app, slot_index);
-        app.handle_command(AppCommand::OpenFileHere);
+        crate::app::commands::handle_command(app, AppCommand::File(FileCommand::OpenFileHere));
         ui.close();
     }
     if menu_button(
@@ -157,7 +167,7 @@ fn render_file_actions(
         rename_enabled,
     ) {
         if let Some(index) = workspace_index {
-            app.begin_tab_rename(index);
+            workspace_accessors::begin_tab_rename(app, index);
         }
         ui.close();
     }
@@ -181,7 +191,7 @@ fn render_open_file_actions(
             open_enabled,
         ) {
             activate_slot(app, slot_index);
-            app.handle_command(AppCommand::OpenFile);
+            crate::app::commands::handle_command(app, AppCommand::File(FileCommand::OpenFile));
             ui.close();
         }
         render_open_file_submenu(ui, app, slot_index);
@@ -274,7 +284,7 @@ fn open_recent_file(app: &mut ScratchpadApp, path: PathBuf) {
     match app.state.app_settings.file_open_disposition() {
         FileOpenDisposition::NewTab => FileController::open_paths_async(app, vec![path]),
         FileOpenDisposition::CurrentTab => {
-            FileController::open_external_paths_here_async(app, vec![path])
+            FileController::open_external_paths_here_async(app, vec![path]);
         }
     }
 }
@@ -357,7 +367,7 @@ fn render_location_actions(
         encoding_enabled,
     ) {
         activate_slot(app, slot_index);
-        app.open_encoding_dialog();
+        frame::open_encoding_dialog(app);
         ui.close();
     }
     if menu_button(
@@ -444,7 +454,7 @@ fn render_save_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp, save_enabled:
             Some(FLOPPY_DISK),
             save_enabled,
         ) {
-            app.handle_command(AppCommand::SaveAllFiles);
+            crate::app::commands::handle_command(app, AppCommand::File(FileCommand::SaveAllFiles));
             ui.close();
         }
     });
@@ -479,11 +489,16 @@ fn close_menu_row(
 
 impl TabContextMenuState {
     fn new(app: &ScratchpadApp, slot_index: usize) -> Self {
-        let workspace_index = app.workspace_index_for_slot(slot_index);
+        let workspace_index =
+            crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(
+                app, slot_index,
+            );
         let auto_hide = app.state.app_settings.auto_hide_tab_list();
         Self {
             workspace_index,
-            is_settings: app.tab_slot_is_settings(slot_index),
+            is_settings: crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(
+                app, slot_index,
+            ),
             path: tab_slot_path(app, slot_index),
             toggle_tab_list_label: if auto_hide {
                 "Pin Tab List"
@@ -535,15 +550,26 @@ fn render_close_submenu(
 }
 
 fn activate_slot(app: &mut ScratchpadApp, slot_index: usize) {
-    if let Some(index) = app.workspace_index_for_slot(slot_index) {
-        app.handle_command(AppCommand::ActivateTab { index });
-    } else if app.tab_slot_is_settings(slot_index) {
-        app.handle_command(AppCommand::OpenSettings);
+    if let Some(index) =
+        crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(app, slot_index)
+    {
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ActivateTab { index }),
+        );
+    } else if crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(app, slot_index)
+    {
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Settings(SettingsCommand::OpenSettings),
+        );
     }
 }
 
 fn tab_slot_path(app: &ScratchpadApp, slot_index: usize) -> Option<PathBuf> {
-    if let Some(index) = app.workspace_index_for_slot(slot_index) {
+    if let Some(index) =
+        crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(app, slot_index)
+    {
         return app
             .tab_manager
             .tabs
@@ -552,8 +578,8 @@ fn tab_slot_path(app: &ScratchpadApp, slot_index: usize) -> Option<PathBuf> {
             .and_then(|tab| tab.active_buffer().path.clone());
     }
 
-    app.tab_slot_is_settings(slot_index)
-        .then(|| app.settings_path().to_path_buf())
+    crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(app, slot_index)
+        .then(|| crate::app::app_state::settings_state::settings_path(app).to_path_buf())
 }
 
 enum TabCloseAction {

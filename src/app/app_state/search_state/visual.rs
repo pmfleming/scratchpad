@@ -1,6 +1,7 @@
 use super::helpers::{
     cursor_range_from_char_range, matches_buffer, search_highlight_state_for_view,
 };
+use super::runtime;
 use super::{ScratchpadApp, SearchStatus};
 use crate::app::domain::{
     BufferId, CursorRevealMode, EditorViewState, SearchHighlightState, SearchReplacementPreview,
@@ -14,7 +15,12 @@ use std::sync::Arc;
 
 pub(super) fn active_buffer_identity(app: &ScratchpadApp) -> Option<(usize, BufferId)> {
     let active_tab_index = app.tab_manager.active_tab_index;
-    let active_buffer_id = app.tab_manager.active_tab()?.active_view()?.buffer_id;
+    let active_buffer_id = app
+        .tab_manager
+        .active_tab()?
+        .layout
+        .active_view()?
+        .buffer_id;
     Some((active_tab_index, active_buffer_id))
 }
 
@@ -59,7 +65,11 @@ fn sync_active_search_cursor(app: &mut ScratchpadApp) {
     };
     let cursor_range = cursor_range_from_char_range(search_range.clone());
     let active_tab_index = app.tab_manager.active_tab_index;
-    let Some(view_id) = app.tab_manager.active_tab().map(|tab| tab.active_view_id) else {
+    let Some(view_id) = app
+        .tab_manager
+        .active_tab()
+        .map(|tab| tab.layout.active_view_id())
+    else {
         return;
     };
     if let Some((buffer, view)) =
@@ -108,7 +118,7 @@ fn sync_search_result_group_activity(app: &mut ScratchpadApp) {
 }
 
 fn apply_search_highlights(app: &mut ScratchpadApp) {
-    if !app.search_is_active() || app.state.search_state.runtime.searching {
+    if !runtime::search_is_active(app) || app.state.search_state.runtime.searching {
         clear_search_highlights(app);
         return;
     }
@@ -168,7 +178,8 @@ fn search_replacement_previews_for_tab(
         .as_slice()
         .get(tab_index)
         .map(|tab| {
-            tab.views
+            tab.layout
+                .views()
                 .iter()
                 .filter_map(|view| {
                     let buffer = tab.buffer_by_id(view.buffer_id)?;
@@ -211,7 +222,8 @@ fn search_highlights_for_tab(
         .as_slice()
         .get(tab_index)
         .map(|tab| {
-            tab.views
+            tab.layout
+                .views()
                 .iter()
                 .map(|view| {
                     (
@@ -248,7 +260,7 @@ fn clear_search_highlights_for_tab(app: &mut ScratchpadApp, tab_index: usize) {
         return;
     };
     let mut anchors_to_release = Vec::new();
-    for view in &mut tab.views {
+    for view in tab.layout.views_mut() {
         for anchor in view.clear_search_highlights_for_release() {
             anchors_to_release.push((view.buffer_id, anchor));
         }
@@ -281,38 +293,3 @@ fn request_search_reveal_intent(view: &mut EditorViewState, search_range: &Range
     });
     true
 }
-
-macro_rules! compat_scratchpad_app_methods {
-    ($type:ty { $($item:item)* }) => {
-        #[allow(dead_code)]
-        impl $type {
-            $($item)*
-        }
-    };
-}
-
-compat_scratchpad_app_methods!(ScratchpadApp {
-    pub(super) fn active_buffer_identity(&self) -> Option<(usize, BufferId)> {
-        active_buffer_identity(self)
-    }
-
-    pub(super) fn refresh_search_visual_state(&mut self) {
-        refresh_search_visual_state(self)
-    }
-
-    pub(super) fn set_active_search_index(&mut self, index: Option<usize>) {
-        set_active_search_index(self, index)
-    }
-
-    pub(crate) fn select_next_active_buffer_match_from(&mut self, minimum_start: usize) {
-        select_next_active_buffer_match_from(self, minimum_start)
-    }
-
-    pub(super) fn select_first_match_in_active_buffer(&mut self) {
-        select_first_match_in_active_buffer(self)
-    }
-
-    pub(super) fn clear_search_highlights(&mut self) {
-        clear_search_highlights(self)
-    }
-});

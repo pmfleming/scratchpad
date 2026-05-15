@@ -14,7 +14,7 @@ type DuplicateNameCounts = HashMap<String, usize>;
 pub(crate) fn duplicate_name_counts(tabs: &[WorkspaceTab]) -> DuplicateNameCounts {
     let mut counts = HashMap::with_capacity(tabs.len());
     for tab in tabs {
-        *counts.entry(tab.buffer.name.clone()).or_insert(0) += 1;
+        *counts.entry(tab.buffers.buffer.name.clone()).or_insert(0) += 1;
     }
     counts
 }
@@ -44,7 +44,12 @@ fn apply_tab_drag_feedback(
     drop_zones: &[TabDropZone],
     outcome: &mut TabStripOutcome,
 ) {
-    update_reordered_tabs(ui, app.total_tab_slots(), drop_zones, outcome);
+    update_reordered_tabs(
+        ui,
+        crate::app::app_state::workspace::display_tabs::total_tab_slots(app),
+        drop_zones,
+        outcome,
+    );
     tab_drag::paint_dragged_tab_ghost(ui.ctx(), app, duplicate_name_counts);
 }
 

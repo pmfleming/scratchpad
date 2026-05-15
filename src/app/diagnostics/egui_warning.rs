@@ -8,8 +8,7 @@ pub(super) fn widget_rect_changed_fingerprint(
     let rect = message
         .strip_prefix("Widget rect ")
         .and_then(|rest| rest.split_once(" changed id between passes"))
-        .map(|(rect, _)| rect)
-        .unwrap_or(message);
+        .map_or(message, |(rect, _)| rect);
     format!(
         "widget_rect_changed|{}|{}|{}",
         rect,

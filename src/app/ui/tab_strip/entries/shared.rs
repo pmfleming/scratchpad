@@ -1,4 +1,4 @@
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{ScratchpadApp, workspace::display_tabs};
 use crate::app::chrome::tab_button_sized;
 use crate::app::domain::{TabAttentionState, WorkspaceTab};
 use crate::app::ui::tab_drag::TabRectEntry;
@@ -27,10 +27,12 @@ pub(super) fn slot_cell_context<'a>(
     width: f32,
 ) -> SlotCellContext<'a> {
     SlotCellContext {
-        active_slot_index: app.active_tab_slot_index(),
+        active_slot_index: crate::app::app_state::workspace::display_tabs::active_tab_slot_index(
+            app,
+        ),
         duplicate_name_counts,
         pending_scroll_to_active: app.tab_manager.pending_scroll_to_active,
-        showing_settings: app.showing_settings(),
+        showing_settings: crate::app::app_state::settings_state::showing_settings(app),
         width,
     }
 }
@@ -42,7 +44,7 @@ pub(super) fn collect_slot_entries(
     outcome: &mut TabStripOutcome,
     mut on_rect: impl FnMut(usize, egui::Rect),
 ) -> Vec<TabRectEntry> {
-    let total_slots = app.total_tab_slots();
+    let total_slots = crate::app::app_state::workspace::display_tabs::total_tab_slots(app);
     let mut entries = Vec::with_capacity(total_slots);
 
     for slot_index in 0..total_slots {
@@ -51,7 +53,7 @@ pub(super) fn collect_slot_entries(
         entries.push(tab_rect_entry(
             slot_index,
             cell_outcome.rect,
-            !app.tab_slot_is_settings(slot_index),
+            !crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(app, slot_index),
         ));
     }
 
@@ -93,7 +95,7 @@ fn render_tab_slot_cell(
     if let Some(tab) = workspace_tab_for_slot(app, slot_index) {
         let has_duplicate = context
             .duplicate_name_counts
-            .get(&tab.buffer.name)
+            .get(&tab.buffers.buffer.name)
             .copied()
             .unwrap_or(0)
             > 1;
@@ -101,7 +103,8 @@ fn render_tab_slot_cell(
         let attention_state = crate::app::domain::tab::summary::attention_state(tab);
         let can_promote_all_files = crate::app::domain::tab::summary::can_promote_all_files(tab);
         let is_active = !context.showing_settings && context.active_slot_index == slot_index;
-        let is_selected = app.tab_slot_selected(slot_index);
+        let is_selected =
+            crate::app::app_state::workspace::display_tabs::tab_slot_selected(app, slot_index);
         let cell_outcome = render_tab_cell_sized(
             ui,
             app,
@@ -122,7 +125,8 @@ fn render_tab_slot_cell(
     }
 
     let is_active = context.showing_settings && context.active_slot_index == slot_index;
-    let is_selected = app.tab_slot_selected(slot_index);
+    let is_selected =
+        crate::app::app_state::workspace::display_tabs::tab_slot_selected(app, slot_index);
     let (tab_response, close_response, _) = tab_button_sized(
         ui,
         ("tab_strip.slot", slot_index),
@@ -136,7 +140,7 @@ fn render_tab_slot_cell(
     let tab_context_click = attach_tab_context_menu(&tab_response, app, slot_index);
     apply_settings_tab_interaction(
         outcome,
-        app.showing_settings(),
+        crate::app::app_state::settings_state::showing_settings(app),
         close_response.clicked(),
         tab_clicked || tab_context_click.secondary_clicked(),
     );
@@ -160,13 +164,13 @@ pub(super) fn handle_settings_tab_click(
     modifiers: egui::Modifiers,
 ) -> bool {
     if modifiers.shift {
-        app.select_tab_slot_range(slot_index);
+        display_tabs::select_tab_slot_range(app, slot_index);
         true
     } else if modifiers.command || modifiers.ctrl {
-        app.toggle_tab_slot_selection(slot_index);
+        display_tabs::toggle_tab_slot_selection(app, slot_index);
         false
     } else {
-        app.select_only_tab_slot(slot_index);
+        display_tabs::select_only_tab_slot(app, slot_index);
         true
     }
 }
@@ -190,7 +194,8 @@ fn finish_tab_slot_cell(
 }
 
 fn workspace_tab_for_slot(app: &ScratchpadApp, slot_index: usize) -> Option<&WorkspaceTab> {
-    let workspace_index = app.workspace_index_for_slot(slot_index)?;
+    let workspace_index =
+        crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(app, slot_index)?;
     app.tab_manager.tabs.as_slice().get(workspace_index)
 }
 

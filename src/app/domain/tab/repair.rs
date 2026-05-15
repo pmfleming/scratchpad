@@ -1,79 +1,61 @@
 use super::WorkspaceTab;
-use crate::app::domain::{BufferId, BufferState, EditorViewState, PaneNode, ViewId};
+use crate::app::domain::{BufferId, BufferState, EditorViewState, ViewId};
 use std::collections::HashSet;
 
 impl WorkspaceTab {
+    #[must_use]
     pub fn active_buffer(&self) -> &BufferState {
-        &self.buffer
+        self.buffers.active()
     }
 
     pub fn active_buffer_mut(&mut self) -> &mut BufferState {
-        &mut self.buffer
+        self.buffers.active_mut()
     }
 
     pub fn buffers(&self) -> impl Iterator<Item = &BufferState> {
-        std::iter::once(&self.buffer).chain(self.extra_buffers.iter())
+        self.buffers.all()
     }
 
     pub fn buffers_mut(&mut self) -> impl Iterator<Item = &mut BufferState> {
-        std::iter::once(&mut self.buffer).chain(self.extra_buffers.iter_mut())
+        self.buffers.all_mut()
     }
 
+    #[must_use]
     pub fn buffer_by_id(&self, buffer_id: BufferId) -> Option<&BufferState> {
-        self.buffer_matches_id(buffer_id)
-            .then_some(&self.buffer)
-            .or_else(|| {
-                self.extra_buffers
-                    .iter()
-                    .find(|buffer| buffer.id == buffer_id)
-            })
+        self.buffers.by_id(buffer_id)
     }
 
     pub fn buffer_by_id_mut(&mut self, buffer_id: BufferId) -> Option<&mut BufferState> {
-        if self.buffer_matches_id(buffer_id) {
-            Some(&mut self.buffer)
-        } else {
-            self.extra_buffers
-                .iter_mut()
-                .find(|buffer| buffer.id == buffer_id)
-        }
+        self.buffers.by_id_mut(buffer_id)
     }
 
+    #[must_use]
     pub fn buffer_for_view(&self, view_id: ViewId) -> Option<&BufferState> {
-        let view = self.view(view_id)?;
+        let view = self.layout.view(view_id)?;
         self.buffer_by_id(view.buffer_id)
     }
 
+    #[must_use]
     pub fn is_last_view_for_buffer(&self, view_id: ViewId) -> Option<bool> {
-        let buffer_id = self.view(view_id)?.buffer_id;
-        Some(
-            self.views
-                .iter()
-                .filter(|view| view.buffer_id == buffer_id)
-                .count()
-                <= 1,
-        )
+        let buffer_id = self.layout.view(view_id)?.buffer_id;
+        Some(self.layout.view_count_for_buffer(buffer_id) <= 1)
     }
 
     pub fn buffer_and_view_mut(
         &mut self,
         view_id: ViewId,
     ) -> Option<(&mut BufferState, &mut EditorViewState)> {
-        let Self {
-            buffer,
-            extra_buffers,
-            views,
-            ..
-        } = self;
-        let view_index = views.iter().position(|view| view.id == view_id)?;
-        let buffer_id = views[view_index].buffer_id;
-        let view = &mut views[view_index];
+        let Self { layout, buffers } = self;
+        let view_index = layout.views.iter().position(|view| view.id == view_id)?;
+        let buffer_id = layout.views[view_index].buffer_id;
+        let view = &mut layout.views[view_index];
 
-        if buffer.id == buffer_id {
-            Some((buffer, view))
+        if buffers.buffer.id == buffer_id {
+            Some((&mut buffers.buffer, view))
         } else {
-            let buffer_index = Self::extra_buffer_index(extra_buffers, buffer_id)?;
-            Some((&mut extra_buffers[buffer_index], view))
+            let buffer_index =
+                super::WorkspaceTabBuffers::extra_buffer_index(&buffers.extra_buffers, buffer_id)?;
+            Some((&mut buffers.extra_buffers[buffer_index], view))
         }
     }
 
@@ -91,15 +73,13 @@ impl WorkspaceTab {
         self.ensure_active_view_is_present();
         self.sync_active_buffer_to_active_view();
         self.prune_unused_buffers();
-        self.set_line_numbers_visible(self.line_numbers_visible());
+        self.layout
+            .set_line_numbers_visible(self.layout.line_numbers_visible());
     }
 
     fn reset_to_single_view(&mut self) {
-        let initial_view = EditorViewState::new(self.buffer.id);
-        self.active_view_id = initial_view.id;
-        self.root_pane = PaneNode::leaf(initial_view.id);
-        self.extra_buffers.clear();
-        self.views = vec![initial_view];
+        self.buffers.extra_buffers.clear();
+        self.layout.reset_to_single_view(self.buffers.active().id);
     }
 
     fn retain_views_for_known_buffers(&mut self) -> bool {
@@ -107,48 +87,14 @@ impl WorkspaceTab {
             .buffers()
             .map(|buffer| buffer.id)
             .collect::<HashSet<_>>();
-        self.views
-            .retain(|view| valid_buffer_ids.contains(&view.buffer_id));
-        !self.views.is_empty()
+        self.layout.retain_views_for_buffer_ids(&valid_buffer_ids)
     }
 
     fn repair_root_pane(&mut self) -> bool {
-        let valid_view_ids = self
-            .views
-            .iter()
-            .map(|view| view.id)
-            .collect::<HashSet<_>>();
-        if !self.root_pane.retain_views(&valid_view_ids) {
-            return false;
-        }
-
-        let pane_view_ids = self.pane_view_ids();
-        self.views.retain(|view| pane_view_ids.contains(&view.id));
-        !self.views.is_empty()
-    }
-
-    fn pane_view_ids(&self) -> HashSet<ViewId> {
-        let mut pane_view_ids = HashSet::new();
-        self.root_pane.collect_view_ids(&mut pane_view_ids);
-        pane_view_ids
+        self.layout.repair_root_pane_for_current_views()
     }
 
     fn ensure_active_view_is_present(&mut self) {
-        if !self.root_pane.contains_view(self.active_view_id) {
-            self.active_view_id = self.root_pane.first_view_id();
-        }
-    }
-
-    fn buffer_matches_id(&self, buffer_id: BufferId) -> bool {
-        self.buffer.id == buffer_id
-    }
-
-    pub(super) fn extra_buffer_index(
-        extra_buffers: &[BufferState],
-        buffer_id: BufferId,
-    ) -> Option<usize> {
-        extra_buffers
-            .iter()
-            .position(|buffer| buffer.id == buffer_id)
+        self.layout.ensure_active_view_is_present();
     }
 }

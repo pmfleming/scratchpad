@@ -2,8 +2,9 @@ use super::FileController;
 use super::support::LoadedFile;
 use crate::app::app_state::{
     PendingBackgroundAction, PendingOpenTabsAction, ScratchpadApp, StatusDomain,
+    workspace::accessors as workspace_accessors,
 };
-use crate::app::commands::AppCommand;
+use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::diagnostics;
 use crate::app::domain::WorkspaceTab;
 use crate::app::services::background_io::LoadedPathResult;
@@ -131,9 +132,12 @@ impl FileController {
             return;
         }
 
-        app.handle_command(AppCommand::ActivateTab {
-            index: target_index,
-        });
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ActivateTab {
+                index: target_index,
+            }),
+        );
         Self::open_external_paths_here(app, paths);
     }
 
@@ -158,9 +162,12 @@ impl FileController {
             return;
         }
 
-        app.handle_command(AppCommand::ActivateTab {
-            index: target_index,
-        });
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ActivateTab {
+                index: target_index,
+            }),
+        );
         Self::open_external_paths_here_async(app, paths);
     }
 
@@ -208,16 +215,21 @@ impl FileController {
 
     fn activate_existing_path(app: &mut ScratchpadApp, path: &Path) -> Option<String> {
         if let Some((index, view_id)) = app.tab_manager.find_tab_by_path(path) {
-            app.handle_command(AppCommand::ActivateTab { index });
-            app.handle_command(AppCommand::ActivateView { view_id });
-            if app.is_settings_file_path(path) {
-                app.mark_active_buffer_as_settings_file();
+            crate::app::commands::handle_command(
+                app,
+                AppCommand::Workspace(WorkspaceCommand::ActivateTab { index }),
+            );
+            crate::app::commands::handle_command(
+                app,
+                AppCommand::Workspace(WorkspaceCommand::ActivateView { view_id }),
+            );
+            if crate::app::app_state::settings_state::is_settings_file_path(app, path) {
+                crate::app::app_state::settings_state::mark_active_buffer_as_settings_file(app);
             }
-            Some(
-                path.file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.display().to_string()),
-            )
+            Some(path.file_name().map_or_else(
+                || path.display().to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            ))
         } else {
             None
         }
@@ -284,10 +296,12 @@ impl FileController {
                     app,
                     WorkspaceTab::new(buffer),
                 );
-                app.ensure_active_tab_slot_selected();
+                crate::app::app_state::workspace::display_tabs::ensure_active_tab_slot_selected(
+                    app,
+                );
                 Self::queue_deferred_buffer_refreshes(app, deferred_refresh);
-                app.mark_search_dirty();
-                app.request_focus_for_active_view();
+                crate::app::app_state::search_runtime::mark_search_dirty(app);
+                workspace_accessors::request_focus_for_active_view(app);
                 summary.record_outcome(OpenPathOutcome::Opened { artifact_warning });
             }
             Err(error) => {
@@ -308,7 +322,7 @@ impl FileController {
     pub(crate) fn finalize_open_tabs(app: &mut ScratchpadApp, action: PendingOpenTabsAction) {
         let summary = action.accumulator;
         if summary.opened_count > 0 {
-            let _ = app.persist_session_now();
+            let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
         }
 
         Self::apply_open_summary(app, summary);
@@ -341,7 +355,7 @@ mod tests {
             cold_session_tabs: Default::default(),
         };
         app.tab_manager.rebuild_buffer_tab_index();
-        app.clear_tab_selection();
+        crate::app::app_state::workspace::display_tabs::clear_tab_selection(&mut app);
         app
     }
 
@@ -441,7 +455,7 @@ mod tests {
                 WorkspaceTab::new(disk_buffer(&second_path, "second")),
             ],
         );
-        let target_view = app.tab_manager.tabs.as_slice()[1].active_view_id;
+        let target_view = app.tab_manager.tabs.as_slice()[1].layout.active_view_id;
         let mut summary = OpenBatchSummary::default();
 
         FileController::process_open_tab_result(
@@ -458,7 +472,7 @@ mod tests {
         assert_eq!(app.tab_manager.tabs.as_slice().len(), 2);
         assert_eq!(app.tab_manager.active_tab_index, 1);
         assert_eq!(
-            app.tab_manager.tabs.as_slice()[1].active_view_id,
+            app.tab_manager.tabs.as_slice()[1].layout.active_view_id,
             target_view
         );
     }

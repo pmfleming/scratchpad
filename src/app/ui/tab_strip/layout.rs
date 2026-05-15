@@ -1,4 +1,4 @@
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{ScratchpadApp, frame, settings_controller};
 use crate::app::services::settings_store::TabListPosition;
 use crate::app::theme::{
     BUTTON_SIZE, CAPTION_BUTTON_SIZE, CAPTION_BUTTON_SPACING, CAPTION_TRAILING_PADDING,
@@ -25,22 +25,22 @@ fn auto_hide_visible(
     }
 
     if has_context {
-        app.keep_tab_list_open();
+        settings_controller::keep_tab_list_open(app);
         return true;
     }
 
-    if let Some(deadline) = app.state.vertical_tab_list_hide_deadline {
+    if let Some(deadline) = app.state.chrome.vertical_tabs_hide_deadline() {
         if deadline > now {
             ctx.request_repaint_after(deadline.saturating_duration_since(now));
             return true;
         }
 
-        app.close_tab_list();
+        settings_controller::close_tab_list(app);
         return false;
     }
 
-    if app.state.vertical_tab_list_open {
-        app.delay_tab_list_hide(now);
+    if app.state.chrome.vertical_tabs_open() {
+        settings_controller::delay_tab_list_hide(app, now);
         ctx.request_repaint_after(app.state.app_settings.tab_list_auto_hide_delay());
         return true;
     }
@@ -90,7 +90,7 @@ impl HeaderLayout {
             - overflow_button_width
             - spacing)
             .max(0.0);
-        let total_tab_width = app.estimated_tab_strip_width(spacing);
+        let total_tab_width = frame::estimated_tab_strip_width(app, spacing);
         let has_overflow = total_tab_width > viewport_width_with_overflow;
         let viewport_width = (remaining_width
             - caption_controls_width
@@ -272,8 +272,8 @@ pub(crate) fn vertical_panel_visible(
     side: TabListPosition,
     now: Instant,
 ) -> bool {
-    let reveal_width = if app.state.vertical_tab_list_open {
-        app.vertical_tab_list_width()
+    let reveal_width = if app.state.chrome.vertical_tabs_open() {
+        crate::app::app_state::settings_state::vertical_tab_list_width(app)
     } else {
         HEADER_HEIGHT
     };
@@ -288,7 +288,7 @@ pub(crate) fn vertical_tab_panel(side: TabListPosition, visible: bool) -> egui::
         (TabListPosition::Left, false) => egui::Panel::left("vertical_tab_list_left_peek"),
         (TabListPosition::Right, true) => egui::Panel::right("vertical_tab_list_right"),
         (TabListPosition::Right, false) => egui::Panel::right("vertical_tab_list_right_peek"),
-        (TabListPosition::Top, _) | (TabListPosition::Bottom, _) => {
+        (TabListPosition::Top | TabListPosition::Bottom, _) => {
             unreachable!("vertical tab panel only supports left/right")
         }
     }

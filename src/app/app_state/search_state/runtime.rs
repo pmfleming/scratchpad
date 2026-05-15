@@ -1,12 +1,14 @@
 use super::helpers::{
     build_search_target, collect_search_targets_for_views, first_match_index, matches_buffer,
 };
+use super::visual;
 use super::worker::{
     SearchFileIdentity, SearchRequest, SearchResult, SearchTargetSnapshot, process_search_request,
 };
 use super::{
     ScratchpadApp, SearchFocusTarget, SearchFreshness, SearchMatch, SearchScope, SearchStatus,
 };
+use crate::app::app_state::workspace::display_tabs;
 use crate::app::domain::BufferId;
 use std::collections::HashSet;
 use std::ops::Range;
@@ -15,10 +17,10 @@ use std::sync::atomic::AtomicU64;
 
 pub(crate) fn refresh_search_view_state(app: &mut ScratchpadApp) {
     if !search_is_active(app) {
-        app.clear_search_highlights();
+        visual::clear_search_highlights(app);
         return;
     }
-    app.refresh_search_visual_state();
+    visual::refresh_search_visual_state(app);
 }
 
 pub(crate) fn take_search_focus_target(app: &mut ScratchpadApp) -> Option<SearchFocusTarget> {
@@ -66,7 +68,7 @@ fn submit_search_request(app: &mut ScratchpadApp) {
         .runtime
         .requested_generation
         .saturating_add(1);
-    app.clear_search_highlights();
+    crate::app::app_state::search_visual::clear_search_highlights(app);
     let targets = collect_search_targets(app, app.state.search_state.query.scope);
     let request = app.state.search_state.build_request(generation, targets);
     app.state.search_state.begin_request(generation);
@@ -120,7 +122,7 @@ fn apply_search_result(app: &mut ScratchpadApp, result: SearchResult) {
     app.state.search_state.runtime.applied_generation = generation;
     app.state.search_state.runtime.status = status;
     app.state.search_state.runtime.freshness = SearchFreshness::Fresh;
-    app.refresh_search_visual_state();
+    visual::refresh_search_visual_state(app);
 }
 
 #[doc(hidden)]
@@ -167,7 +169,7 @@ fn collect_search_targets(app: &ScratchpadApp, scope: SearchScope) -> Vec<Search
                         .then(|| {
                             app.tab_manager
                                 .active_tab()
-                                .and_then(|tab| tab.active_view())
+                                .and_then(|tab| tab.layout.active_view())
                                 .map(|view| view.buffer_id)
                         })
                         .flatten();
@@ -183,7 +185,7 @@ fn clear_inactive_search_state(app: &mut ScratchpadApp) {
     app.state.search_state.clear_inactive_results();
     app.state.search_state.runtime.status = SearchStatus::Idle;
     app.state.search_state.runtime.freshness = SearchFreshness::Fresh;
-    app.clear_search_highlights();
+    crate::app::app_state::search_visual::clear_search_highlights(app);
 }
 
 fn set_selection_only_search_error(app: &mut ScratchpadApp) {
@@ -193,7 +195,7 @@ fn set_selection_only_search_error(app: &mut ScratchpadApp) {
     app.state.search_state.runtime.freshness = SearchFreshness::Fresh;
     app.state.search_state.clear_match_results();
     app.state.search_state.runtime.dirty = false;
-    app.clear_search_highlights();
+    crate::app::app_state::search_visual::clear_search_highlights(app);
 }
 
 fn collect_active_tab_search_targets(app: &ScratchpadApp) -> Vec<SearchTargetSnapshot> {
@@ -202,7 +204,7 @@ fn collect_active_tab_search_targets(app: &ScratchpadApp) -> Vec<SearchTargetSna
         app.tab_manager.active_tab_index,
         app.tab_manager
             .active_tab()
-            .and_then(|tab| tab.active_view())
+            .and_then(|tab| tab.layout.active_view())
             .map(|view| view.buffer_id),
         None,
     )
@@ -215,7 +217,13 @@ fn active_search_target(
     let tab_index = app.tab_manager.active_tab_index;
     let tab_label = search_tab_label(app, tab_index);
     let tab = app.tab_manager.active_tab()?;
-    build_search_target(tab_index, tab, tab.active_view_id, &tab_label, search_range)
+    build_search_target(
+        tab_index,
+        tab,
+        tab.layout.active_view_id(),
+        &tab_label,
+        search_range,
+    )
 }
 
 fn collect_search_targets_for_tab(
@@ -236,14 +244,17 @@ fn collect_search_targets_for_tab(
         prioritized_buffer_id,
         tab.ordered_view_ids_in_layout_order()
             .into_iter()
-            .filter_map(|view_id| tab.view(view_id))
-            .chain(tab.views.iter()),
+            .filter_map(|view_id| tab.layout.view(view_id))
+            .chain(tab.layout.views().iter()),
     )
 }
 
 fn search_tab_label(app: &ScratchpadApp, tab_index: usize) -> String {
-    app.display_tab_name_at_slot(app.slot_for_workspace_index(tab_index))
-        .unwrap_or_else(|| format!("Tab {}", tab_index + 1))
+    display_tabs::display_tab_name_at_slot(
+        app,
+        display_tabs::slot_for_workspace_index(app, tab_index),
+    )
+    .unwrap_or_else(|| format!("Tab {}", tab_index + 1))
 }
 
 fn preferred_active_match_index(
@@ -261,7 +272,7 @@ fn preferred_active_match_index(
         return Some(index);
     }
 
-    if let Some((active_tab_index, active_buffer_id)) = app.active_buffer_identity()
+    if let Some((active_tab_index, active_buffer_id)) = visual::active_buffer_identity(app)
         && let Some(index) = first_match_index(matches, |search_match| {
             matches_buffer(search_match, active_tab_index, active_buffer_id)
         })
@@ -278,42 +289,3 @@ fn preferred_active_match_index(
 pub(super) fn search_is_active(app: &ScratchpadApp) -> bool {
     app.state.search_state.panel.open && !app.state.search_state.query.query.is_empty()
 }
-
-macro_rules! compat_scratchpad_app_methods {
-    ($type:ty { $($item:item)* }) => {
-        #[allow(dead_code)]
-        impl $type {
-            $($item)*
-        }
-    };
-}
-
-compat_scratchpad_app_methods!(ScratchpadApp {
-    pub(crate) fn refresh_search_view_state(&mut self) {
-        refresh_search_view_state(self)
-    }
-
-    pub(crate) fn take_search_focus_target(&mut self) -> Option<SearchFocusTarget> {
-        take_search_focus_target(self)
-    }
-
-    pub(crate) fn request_search_focus(&mut self, target: SearchFocusTarget) {
-        request_search_focus(self, target)
-    }
-
-    pub(crate) fn refresh_search_state(&mut self) {
-        refresh_search_state(self)
-    }
-
-    pub(crate) fn mark_search_dirty(&mut self) {
-        mark_search_dirty(self)
-    }
-
-    pub fn profile_build_search_request(&self, scope: SearchScope, query: &str) -> usize {
-        profile_build_search_request(self, scope, query)
-    }
-
-    pub(super) fn search_is_active(&self) -> bool {
-        search_is_active(self)
-    }
-});

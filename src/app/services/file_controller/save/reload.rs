@@ -128,13 +128,13 @@ impl FileController {
                         app.state.status.set_info_status_in_domain(
                             StatusDomain::Disk,
                             format!("Reloaded {buffer_name} because it changed on disk."),
-                        )
+                        );
                     }
                     PendingReloadMode::ExplicitReload => {
                         app.state.status.set_info_status_in_domain(
                             StatusDomain::Disk,
                             format!("Reloaded {buffer_name} from disk."),
-                        )
+                        );
                     }
                 }
             }
@@ -145,7 +145,7 @@ impl FileController {
                     "file_controller::save",
                     &error,
                 );
-                Self::handle_async_reload_error(app, tab_index, &action, result.disk_state, error)
+                Self::handle_async_reload_error(app, tab_index, &action, result.disk_state, error);
             }
         }
     }
@@ -229,7 +229,7 @@ impl FileController {
             }
             (buffer.name.clone(), Self::deferred_buffer_refresh(buffer))
         };
-        app.mark_search_dirty();
+        crate::app::app_state::search_runtime::mark_search_dirty(app);
         app.tab_manager.mark_session_dirty();
         Self::queue_deferred_buffer_refreshes(app, deferred_refresh);
         buffer_name

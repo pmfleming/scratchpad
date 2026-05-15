@@ -77,17 +77,17 @@ pub(super) fn collect_active_status_details(
     let buffer = tab.active_buffer();
     let file_length = buffer.current_file_length();
     let view_status = tab
+        .layout
         .active_view()
         .map(|view| buffer.view_status(status_cursor_range(view)))
         .unwrap_or_default();
     let (icon, icon_tooltip, icon_color) = artifact_icon(buffer.show_control_chars, dark_mode);
 
     Some(ActiveStatusDetails {
-        path_label: buffer
-            .path
-            .as_ref()
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "Untitled".to_owned()),
+        path_label: buffer.path.as_ref().map_or_else(
+            || "Untitled".to_owned(),
+            |path| path.to_string_lossy().into_owned(),
+        ),
         count_label: line_count_label(file_length.lines),
         cursor_label: cursor_label(&view_status),
         selection_label: selection_label(&view_status),
@@ -184,7 +184,8 @@ pub(super) fn status_path_min_width(ui: &egui::Ui, app: &ScratchpadApp) -> f32 {
     }
 
     let path_start_x = ui.available_rect_before_wrap().min.x;
-    let tab_border_x = ui.max_rect().left() + app.vertical_tab_list_width();
+    let tab_border_x =
+        ui.max_rect().left() + crate::app::app_state::settings_state::vertical_tab_list_width(app);
     STATUS_PATH_MIN_WIDTH.max(tab_border_x - path_start_x)
 }
 

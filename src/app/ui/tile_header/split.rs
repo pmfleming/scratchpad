@@ -48,6 +48,7 @@ pub struct TileSplitHandler {
 }
 
 impl TileSplitHandler {
+    #[must_use]
     pub fn new(pane_path: &SplitPath, view_id: ViewId, tile_rect: egui::Rect) -> Self {
         Self {
             id: drag::split_drag_state_id(pane_path),
@@ -56,6 +57,7 @@ impl TileSplitHandler {
         }
     }
 
+    #[must_use]
     pub fn is_dragging(&self, ui: &egui::Ui) -> bool {
         drag::split_drag_active(ui, self.id)
     }
@@ -69,6 +71,7 @@ impl TileSplitHandler {
         drag::handle_split_interaction(ui, response, self.id, self.tile_rect, self.view_id, actions)
     }
 
+    #[must_use]
     pub fn make_preview(
         &self,
         state: SplitHandleDragState,
@@ -79,10 +82,8 @@ impl TileSplitHandler {
         let spec = geometry::split_preview_spec(self.tile_rect, state.start_pos, state.current_pos);
         SplitPreviewOverlay {
             axis: spec.map(|(axis, _, _)| axis),
-            new_view_first: spec
-                .map(|(_, new_view_first, _)| new_view_first)
-                .unwrap_or(false),
-            ratio: spec.map(|(_, _, ratio)| ratio).unwrap_or(0.5),
+            new_view_first: spec.is_some_and(|(_, new_view_first, _)| new_view_first),
+            ratio: spec.map_or(0.5, |(_, _, ratio)| ratio),
             pointer_pos: state.current_pos,
             tile_rect: self.tile_rect,
             handle_anchor: handle_rect.right_top(),
@@ -96,6 +97,7 @@ pub fn paint_split_preview(ui: &egui::Ui, overlay: &SplitPreviewOverlay) {
     preview::paint_split_preview(ui, overlay);
 }
 
+#[must_use]
 pub fn split_preview_spec(
     tile_rect: egui::Rect,
     start_pos: egui::Pos2,

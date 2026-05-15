@@ -1,6 +1,6 @@
 use super::common::{apply_editor_dialog_typography, show_centered_callout};
-use crate::app::app_state::ScratchpadApp;
-use crate::app::commands::AppCommand;
+use crate::app::app_state::{ScratchpadApp, frame};
+use crate::app::commands::{AppCommand, FileCommand};
 use crate::app::services::file_service::COMMON_TEXT_ENCODINGS;
 use crate::app::theme::{action_hover_bg, border, text_muted, text_primary};
 use crate::app::ui::search_replace::SEARCH_DIALOG_WIDTH;
@@ -50,17 +50,16 @@ enum EncodingAction {
 impl EncodingDialogState {
     fn from_app(app: &ScratchpadApp) -> Self {
         let active_index = app.tab_manager.active_tab_index;
-        let (buffer_label, has_saved_path, is_dirty) = app
-            .tab_manager
-            .active_tab()
-            .map(|tab| {
+        let (buffer_label, has_saved_path, is_dirty) = app.tab_manager.active_tab().map_or_else(
+            || ("Untitled".to_owned(), false, false),
+            |tab| {
                 (
                     tab.active_buffer().name.clone(),
                     tab.active_buffer().path.is_some(),
                     tab.active_buffer().is_dirty,
                 )
-            })
-            .unwrap_or_else(|| ("Untitled".to_owned(), false, false));
+            },
+        );
 
         Self {
             active_index,
@@ -104,7 +103,7 @@ impl EncodingActionSpec<'_> {
 }
 
 pub(crate) fn show_encoding_window(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    if !app.state.encoding_dialog_open {
+    if !app.state.dialogs.encoding.is_open() {
         return;
     }
 
@@ -112,11 +111,11 @@ pub(crate) fn show_encoding_window(ctx: &egui::Context, app: &mut ScratchpadApp)
     let mut close_requested = false;
 
     show_centered_callout(ctx, "encoding_overlay_v1", ENCODING_DIALOG_SIZE, |ui| {
-        render_encoding_dialog(ui, app, &state, &mut close_requested)
+        render_encoding_dialog(ui, app, &state, &mut close_requested);
     });
 
     if close_requested {
-        app.close_encoding_dialog();
+        frame::close_encoding_dialog(app);
     }
 }
 
@@ -196,19 +195,19 @@ fn trigger_encoding_action(
     spec: EncodingActionSpec<'_>,
 ) -> bool {
     render_encoding_action_card(ui, spec) && {
-        let encoding_name = std::mem::take(&mut app.state.encoding_dialog_choice);
+        let encoding_name = app.state.dialogs.encoding.take_choice();
         let command = match spec.action {
-            EncodingAction::Reopen => AppCommand::ReopenBufferWithEncoding {
+            EncodingAction::Reopen => AppCommand::File(FileCommand::ReopenBufferWithEncoding {
                 tab_index: active_index,
                 encoding_name: encoding_name.clone(),
-            },
-            EncodingAction::Save => AppCommand::SaveFileWithEncoding {
+            }),
+            EncodingAction::Save => AppCommand::File(FileCommand::SaveFileWithEncoding {
                 tab_index: active_index,
                 encoding_name: encoding_name.clone(),
-            },
+            }),
         };
-        let result = app.handle_command(command);
-        app.state.encoding_dialog_choice = encoding_name;
+        let result = crate::app::commands::handle_command(app, command);
+        app.state.dialogs.encoding.restore_choice(encoding_name);
         result
     }
 }
@@ -252,7 +251,7 @@ fn render_encoding_protocol_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 ui.allocate_ui(egui::vec2(ENCODING_CONTROL_WIDTH, 0.0), |ui| {
                     ui.set_width(ENCODING_CONTROL_WIDTH);
                     ui.set_max_width(ENCODING_CONTROL_WIDTH);
-                    render_encoding_combo(ui, &mut app.state.encoding_dialog_choice);
+                    render_encoding_combo(ui, app.state.dialogs.encoding.choice_mut());
                 });
             },
         );

@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    BufferState, BufferTextMetadata, IncrementalMetadataEdit, LineEndingStyle, TextArtifactSummary,
+    TextDocumentOperationRecord, TextFormatMetadata, buffer_text_metadata_from_edit,
+    buffer_text_metadata_from_piece_tree,
+};
 
 impl BufferState {
     pub fn refresh_text_metadata(&mut self) {
@@ -43,10 +47,12 @@ impl BufferState {
         self.refresh.encoding_compliance_stale = false;
     }
 
+    #[must_use]
     pub fn encoding_compliance_refresh_needed(&self) -> bool {
         self.refresh.encoding_compliance_stale
     }
 
+    #[must_use]
     pub fn text_metadata_refresh_needed(&self) -> bool {
         self.refresh.text_metadata_refresh_stale
     }

@@ -12,6 +12,7 @@ pub struct EditorHighlightStyle {
 }
 
 impl EditorHighlightStyle {
+    #[must_use]
     pub fn new(background: egui::Color32, text: egui::Color32) -> Self {
         Self { background, text }
     }
@@ -32,6 +33,7 @@ impl EditorHighlightStyle {
         self.text
     }
 
+    #[must_use]
     pub fn active_text_format(self, font_id: egui::FontId, dark_mode: bool) -> egui::TextFormat {
         egui::TextFormat {
             font_id,
@@ -41,6 +43,7 @@ impl EditorHighlightStyle {
         }
     }
 
+    #[must_use]
     pub fn passive_text_format(self, font_id: egui::FontId) -> egui::TextFormat {
         egui::TextFormat {
             font_id,
@@ -63,6 +66,7 @@ pub struct TextEditOptions<'a> {
 }
 
 impl<'a> TextEditOptions<'a> {
+    #[must_use]
     pub fn new(
         request_focus: bool,
         word_wrap: bool,
@@ -81,6 +85,7 @@ impl<'a> TextEditOptions<'a> {
         }
     }
 
+    #[must_use]
     pub fn with_layout_cache_warming(mut self, enabled: bool) -> Self {
         self.warm_layout_cache = enabled;
         self
@@ -94,6 +99,7 @@ pub struct CharCursor {
 }
 
 impl CharCursor {
+    #[must_use]
     pub fn new(index: usize) -> Self {
         Self {
             index,
@@ -116,6 +122,7 @@ pub struct CursorRange {
 }
 
 impl CursorRange {
+    #[must_use]
     pub fn one(cursor: CharCursor) -> Self {
         Self {
             primary: cursor,
@@ -123,6 +130,7 @@ impl CursorRange {
         }
     }
 
+    #[must_use]
     pub fn two(min: usize, max: usize) -> Self {
         Self {
             primary: CharCursor::new(max),
@@ -130,21 +138,25 @@ impl CursorRange {
         }
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.primary.index == self.secondary.index
     }
 
+    #[must_use]
     pub fn sorted_indices(&self) -> (usize, usize) {
         let a = self.primary.index;
         let b = self.secondary.index;
         if a <= b { (a, b) } else { (b, a) }
     }
 
+    #[must_use]
     pub fn as_sorted_char_range(&self) -> Range<usize> {
         let (start, end) = self.sorted_indices();
         start..end
     }
 
+    #[must_use]
     pub fn to_egui(&self) -> egui::text::CCursorRange {
         egui::text::CCursorRange {
             primary: self.primary.to_egui_ccursor(),
@@ -153,6 +165,7 @@ impl CursorRange {
         }
     }
 
+    #[must_use]
     pub fn from_egui(range: egui::text::CCursorRange) -> Self {
         Self {
             primary: CharCursor {
@@ -194,7 +207,7 @@ pub(super) fn blend_colors(
     let right_weight = right_weight.clamp(0.0, 1.0);
     let left_weight = 1.0 - right_weight;
     let channel = |left: u8, right: u8| {
-        ((left as f32 * left_weight) + (right as f32 * right_weight)).round() as u8
+        ((f32::from(left) * left_weight) + (f32::from(right) * right_weight)).round() as u8
     };
     egui::Color32::from_rgb(
         channel(left.r(), right.r()),

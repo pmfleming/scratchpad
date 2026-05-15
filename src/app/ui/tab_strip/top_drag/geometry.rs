@@ -29,7 +29,7 @@ fn top_drag_button_center_x(app: &ScratchpadApp, viewport: egui::Rect) -> f32 {
 
     let workspace_rect =
         top_drag_workspace_rect(viewport, app.state.app_settings.tab_list_position(), app);
-    let preferred_center = preferred_top_split_center_x(&tab.root_pane, workspace_rect)
+    let preferred_center = preferred_top_split_center_x(&tab.layout.root_pane, workspace_rect)
         .unwrap_or(default_center)
         .clamp(bounds.0, bounds.1);
     let exclusion_rects = top_tile_control_exclusion_rects(tab, workspace_rect);
@@ -44,7 +44,7 @@ fn top_drag_workspace_rect(
 ) -> egui::Rect {
     let mut min = viewport.min;
     let mut max = viewport.max;
-    let inset = app.vertical_tab_list_width();
+    let inset = crate::app::app_state::settings_state::vertical_tab_list_width(app);
     match position {
         TabListPosition::Left => min.x += inset,
         TabListPosition::Right => max.x -= inset,
@@ -117,8 +117,8 @@ fn touches_top_edge(rect: egui::Rect, top_edge: f32) -> bool {
 
 fn top_tile_control_exclusion_rects(tab: &WorkspaceTab, rect: egui::Rect) -> Vec<egui::Rect> {
     let mut top_leaf_rects = Vec::new();
-    collect_top_edge_leaf_rects(&tab.root_pane, rect, rect.top(), &mut top_leaf_rects);
-    let can_close = tab.root_pane.leaf_count() > 1;
+    collect_top_edge_leaf_rects(&tab.layout.root_pane, rect, rect.top(), &mut top_leaf_rects);
+    let can_close = tab.layout.root_pane.leaf_count() > 1;
 
     top_leaf_rects
         .into_iter()

@@ -3,7 +3,7 @@ use super::shared::{
 };
 use super::{DuplicateNameCounts, apply_tab_drag_feedback};
 use crate::app::app_state::ScratchpadApp;
-use crate::app::commands::AppCommand;
+use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::theme::{
     BUTTON_SIZE, TAB_BUTTON_WIDTH, action_bg, action_hover_bg, border, tab_list_scroll_style,
     text_primary,
@@ -71,7 +71,7 @@ fn show_vertical_new_tab_action(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         .on_hover_text("New Tab")
         .clicked()
     {
-        app.handle_command(AppCommand::NewTab);
+        crate::app::commands::handle_command(app, AppCommand::Workspace(WorkspaceCommand::NewTab));
     }
 }
 
@@ -168,7 +168,7 @@ fn maybe_auto_scroll_vertical_entries(
 }
 
 fn estimated_vertical_tab_list_height(app: &ScratchpadApp, spacing: f32) -> f32 {
-    let tab_count = app.total_tab_slots();
+    let tab_count = crate::app::app_state::workspace::display_tabs::total_tab_slots(app);
     if tab_count > 0 {
         (tab_count as f32 * crate::app::theme::TAB_HEIGHT)
             + ((tab_count.saturating_sub(1)) as f32 * spacing)

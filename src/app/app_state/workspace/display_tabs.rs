@@ -175,13 +175,16 @@ pub(crate) fn dragged_tab_slots(app: &ScratchpadApp, source_slot: usize) -> Vec<
 }
 
 pub(crate) fn total_tab_slots(app: &ScratchpadApp) -> usize {
-    app.tab_manager.total_tab_slots(app.settings_tab_open())
+    app.tab_manager
+        .total_tab_slots(crate::app::app_state::settings_state::settings_tab_open(
+            app,
+        ))
 }
 
 pub(crate) fn tab_slot_is_settings(app: &ScratchpadApp, slot_index: usize) -> bool {
     app.tab_manager.tab_slot_is_settings(
         slot_index,
-        app.settings_tab_open(),
+        crate::app::app_state::settings_state::settings_tab_open(app),
         app.state.settings_tab_index,
     )
 }
@@ -189,7 +192,7 @@ pub(crate) fn tab_slot_is_settings(app: &ScratchpadApp, slot_index: usize) -> bo
 pub(crate) fn workspace_index_for_slot(app: &ScratchpadApp, slot_index: usize) -> Option<usize> {
     app.tab_manager.workspace_index_for_slot(
         slot_index,
-        app.settings_tab_open(),
+        crate::app::app_state::settings_state::settings_tab_open(app),
         app.state.settings_tab_index,
     )
 }
@@ -197,15 +200,15 @@ pub(crate) fn workspace_index_for_slot(app: &ScratchpadApp, slot_index: usize) -
 pub(crate) fn slot_for_workspace_index(app: &ScratchpadApp, workspace_index: usize) -> usize {
     app.tab_manager.slot_for_workspace_index(
         workspace_index,
-        app.settings_tab_open(),
+        crate::app::app_state::settings_state::settings_tab_open(app),
         app.state.settings_tab_index,
     )
 }
 
 pub(crate) fn active_tab_slot_index(app: &ScratchpadApp) -> usize {
     app.tab_manager.active_tab_slot_index(
-        app.showing_settings(),
-        app.settings_tab_open(),
+        crate::app::app_state::settings_state::showing_settings(app),
+        crate::app::app_state::settings_state::settings_tab_open(app),
         app.state.settings_tab_index,
     )
 }
@@ -213,14 +216,16 @@ pub(crate) fn active_tab_slot_index(app: &ScratchpadApp) -> usize {
 fn display_tab_slot(app: &ScratchpadApp, slot_index: usize) -> Option<DisplayTabSlot> {
     app.tab_manager.display_tab_slot(
         slot_index,
-        app.settings_tab_open(),
+        crate::app::app_state::settings_state::settings_tab_open(app),
         app.state.settings_tab_index,
     )
 }
 
 fn display_tab_slots(app: &ScratchpadApp) -> Vec<DisplayTabSlot> {
-    app.tab_manager
-        .display_tab_slots(app.settings_tab_open(), app.state.settings_tab_index)
+    app.tab_manager.display_tab_slots(
+        crate::app::app_state::settings_state::settings_tab_open(app),
+        app.state.settings_tab_index,
+    )
 }
 
 pub(crate) fn display_tab_name_at_slot(app: &ScratchpadApp, slot_index: usize) -> Option<String> {
@@ -230,7 +235,8 @@ pub(crate) fn display_tab_name_at_slot(app: &ScratchpadApp, slot_index: usize) -
             let tabs = app.tab_manager.tabs.as_slice();
             let tab = tabs.get(workspace_index)?;
             let has_duplicate = tabs.iter().enumerate().any(|(candidate_index, candidate)| {
-                candidate_index != workspace_index && candidate.buffer.name == tab.buffer.name
+                candidate_index != workspace_index
+                    && candidate.buffers.buffer.name == tab.buffers.buffer.name
             });
             Some(crate::app::domain::tab::summary::full_display_name(
                 tab,
@@ -250,7 +256,7 @@ pub(crate) fn display_tab_name_at_slot_with_counts(
         DisplayTabSlot::Workspace(workspace_index) => {
             let tab = app.tab_manager.tabs.as_slice().get(workspace_index)?;
             let has_duplicate = duplicate_name_counts
-                .get(&tab.buffer.name)
+                .get(&tab.buffers.buffer.name)
                 .is_some_and(|count| *count > 1);
             Some(crate::app::domain::tab::summary::full_display_name(
                 tab,
@@ -338,78 +344,3 @@ fn apply_display_tab_order(app: &mut ScratchpadApp, display_slots: Vec<DisplayTa
 
     app.apply_workspace_tab_order(workspace_order);
 }
-
-macro_rules! compat_scratchpad_app_methods {
-    ($type:ty { $($item:item)* }) => {
-        #[allow(dead_code)]
-        impl $type {
-            $($item)*
-        }
-    };
-}
-
-compat_scratchpad_app_methods!(ScratchpadApp {
-    pub(crate) fn tab_slot_selected(&self, slot_index: usize) -> bool {
-        tab_slot_selected(self, slot_index)
-    }
-
-    pub(crate) fn ensure_active_tab_slot_selected(&mut self) {
-        ensure_active_tab_slot_selected(self)
-    }
-
-    pub(crate) fn clear_tab_selection(&mut self) {
-        clear_tab_selection(self)
-    }
-
-    pub(crate) fn select_only_tab_slot(&mut self, slot_index: usize) {
-        select_only_tab_slot(self, slot_index)
-    }
-
-    pub(crate) fn toggle_tab_slot_selection(&mut self, slot_index: usize) {
-        toggle_tab_slot_selection(self, slot_index)
-    }
-
-    pub(crate) fn select_tab_slot_range(&mut self, slot_index: usize) {
-        select_tab_slot_range(self, slot_index)
-    }
-
-    pub(crate) fn dragged_tab_slots(&self, source_slot: usize) -> Vec<usize> {
-        dragged_tab_slots(self, source_slot)
-    }
-
-    pub(crate) fn total_tab_slots(&self) -> usize {
-        total_tab_slots(self)
-    }
-
-    pub(crate) fn tab_slot_is_settings(&self, slot_index: usize) -> bool {
-        tab_slot_is_settings(self, slot_index)
-    }
-
-    pub(crate) fn workspace_index_for_slot(&self, slot_index: usize) -> Option<usize> {
-        workspace_index_for_slot(self, slot_index)
-    }
-
-    pub(crate) fn slot_for_workspace_index(&self, workspace_index: usize) -> usize {
-        slot_for_workspace_index(self, workspace_index)
-    }
-
-    pub(crate) fn active_tab_slot_index(&self) -> usize {
-        active_tab_slot_index(self)
-    }
-
-    pub(crate) fn display_tab_name_at_slot(&self, slot_index: usize) -> Option<String> {
-        display_tab_name_at_slot(self, slot_index)
-    }
-
-    pub(crate) fn display_tab_name_at_slot_with_counts(&self, slot_index: usize, duplicate_name_counts: &HashMap<String, usize>) -> Option<String> {
-        display_tab_name_at_slot_with_counts(self, slot_index, duplicate_name_counts)
-    }
-
-    pub(crate) fn reorder_display_tab(&mut self, from_slot: usize, to_slot: usize) -> bool {
-        reorder_display_tab(self, from_slot, to_slot)
-    }
-
-    pub(crate) fn reorder_display_tab_group(&mut self, from_slots: Vec<usize>, to_slot: usize) -> bool {
-        reorder_display_tab_group(self, from_slots, to_slot)
-    }
-});

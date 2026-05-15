@@ -20,6 +20,7 @@ pub enum SearchError {
 }
 
 impl SearchError {
+    #[must_use]
     pub fn message(&self) -> &str {
         match self {
             Self::InvalidRegex(message)
@@ -88,14 +89,17 @@ impl SearchProgram {
         })
     }
 
+    #[must_use]
     pub fn query(&self) -> &str {
         &self.query
     }
 
+    #[must_use]
     pub fn options(&self) -> SearchOptions {
         self.options
     }
 
+    #[must_use]
     pub fn max_match_chars(&self) -> usize {
         self.max_match_chars
     }
@@ -119,10 +123,12 @@ impl SearchProgram {
     }
 }
 
+#[must_use]
 pub fn find_matches(text: &str, query: &str, options: SearchOptions) -> Vec<Range<usize>> {
     search_text(text, query, options).matches
 }
 
+#[must_use]
 pub fn validate_search_query(query: &str, options: SearchOptions) -> Option<SearchError> {
     if query.is_empty() {
         return None;
@@ -134,6 +140,7 @@ pub fn validate_search_query(query: &str, options: SearchOptions) -> Option<Sear
     }
 }
 
+#[must_use]
 pub fn search_text(text: &str, query: &str, options: SearchOptions) -> SearchOutcome {
     if query.is_empty() {
         return SearchOutcome::default();
@@ -176,10 +183,12 @@ where
     }
 }
 
+#[must_use]
 pub fn regex_max_match_chars(query: &str) -> Option<usize> {
     parse(query).ok()?.properties().maximum_len()
 }
 
+#[must_use]
 pub fn search_program(text: &str, program: &SearchProgram) -> SearchOutcome {
     let mut should_continue = || true;
     search_program_interruptible(text, program, &mut should_continue).unwrap_or_default()
@@ -223,10 +232,12 @@ fn compile_regex(query: &str, options: SearchOptions) -> Result<regex::Regex, Se
         .map_err(|error| SearchError::InvalidRegex(error.to_string()))
 }
 
+#[must_use]
 pub fn next_match_index(total_matches: usize, current: Option<usize>) -> Option<usize> {
     (total_matches > 0).then(|| current.map_or(0, |index| (index + 1) % total_matches))
 }
 
+#[must_use]
 pub fn previous_match_index(total_matches: usize, current: Option<usize>) -> Option<usize> {
     (total_matches > 0).then(|| {
         current.map_or(total_matches - 1, |index| {

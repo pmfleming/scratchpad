@@ -1,5 +1,5 @@
-use crate::app::app_state::{ScratchpadApp, StatusSeverity};
-use crate::app::commands::AppCommand;
+use crate::app::app_state::{ScratchpadApp, StatusSeverity, frame};
+use crate::app::commands::{AppCommand, DialogCommand, SettingsCommand};
 use crate::app::theme::text_primary;
 use crate::app::ui::widget_ids;
 use eframe::egui;
@@ -39,12 +39,14 @@ pub(crate) fn show_status_bar(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     egui::Panel::bottom("status").show_inside(ui, |ui| {
         widget_ids::feature_scope(ui, "status_bar", |ui| {
             ui.horizontal(|ui| {
-                if app.showing_settings() {
+                if crate::app::app_state::settings_state::showing_settings(app) {
                     let mut actions = StatusBarActions::default();
                     render_settings_status(
                         ui,
                         app,
-                        app.settings_path().display().to_string(),
+                        crate::app::app_state::settings_state::settings_path(app)
+                            .display()
+                            .to_string(),
                         &mut actions,
                     );
                     apply_status_actions(app, actions);
@@ -342,8 +344,8 @@ fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {
     if actions.toggle_line_numbers
         && let Some(tab) = app.tab_manager.active_tab_mut()
     {
-        let next_visible = !tab.line_numbers_visible();
-        tab.set_line_numbers_visible(next_visible);
+        let next_visible = !tab.layout.line_numbers_visible();
+        tab.layout.set_line_numbers_visible(next_visible);
         app.tab_manager.mark_session_dirty();
     }
 
@@ -356,19 +358,25 @@ fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {
     }
 
     if actions.open_encoding_dialog {
-        app.open_encoding_dialog();
+        frame::open_encoding_dialog(app);
     }
 
     if actions.open_text_history {
-        app.handle_command(AppCommand::OpenTextHistory);
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Dialog(DialogCommand::OpenTextHistory),
+        );
     }
 
     if actions.open_status_history {
-        app.open_status_history();
+        app.state.dialogs.status_history.open();
     }
 
     if actions.open_settings {
-        app.handle_command(AppCommand::OpenSettings);
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Settings(SettingsCommand::OpenSettings),
+        );
     }
 }
 

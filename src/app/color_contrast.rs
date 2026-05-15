@@ -1,5 +1,6 @@
 use eframe::egui::Color32;
 
+#[must_use]
 pub fn optimal_text_color(background: Color32) -> Color32 {
     for candidate in complementary_text_color_candidates(background) {
         let ratio = contrast_ratio(background, candidate);
@@ -92,9 +93,9 @@ fn is_chromatically_distinct(a: Color32, b: Color32) -> bool {
 }
 
 fn visual_distance(a: Color32, b: Color32) -> f32 {
-    let dr = (a.r() as f32 - b.r() as f32).powi(2);
-    let dg = (a.g() as f32 - b.g() as f32).powi(2);
-    let db = (a.b() as f32 - b.b() as f32).powi(2);
+    let dr = (f32::from(a.r()) - f32::from(b.r())).powi(2);
+    let dg = (f32::from(a.g()) - f32::from(b.g())).powi(2);
+    let db = (f32::from(a.b()) - f32::from(b.b())).powi(2);
     (dr + dg + db).sqrt()
 }
 
@@ -120,7 +121,7 @@ fn relative_luminance(color: Color32) -> f32 {
 }
 
 fn linearize(channel: u8) -> f32 {
-    let s = channel as f32 / 255.0;
+    let s = f32::from(channel) / 255.0;
     if s <= 0.03928 {
         s / 12.92
     } else {
@@ -137,13 +138,13 @@ struct Hsl {
 
 impl Hsl {
     fn from_color32(c: Color32) -> Self {
-        let r = c.r() as f32 / 255.0;
-        let g = c.g() as f32 / 255.0;
-        let b = c.b() as f32 / 255.0;
+        let r = f32::from(c.r()) / 255.0;
+        let g = f32::from(c.g()) / 255.0;
+        let b = f32::from(c.b()) / 255.0;
         let max = r.max(g.max(b));
         let min = r.min(g.min(b));
         let delta = max - min;
-        let l = (max + min) / 2.0;
+        let l = f32::midpoint(max, min);
         let s = if delta == 0.0 {
             0.0
         } else {

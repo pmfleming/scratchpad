@@ -37,6 +37,15 @@ PATTERNS = {
     "lint_suppression": (r"#\s*!\s*\[\s*(?:allow|expect)\s*\(|#\s*\[\s*(?:allow|expect)\s*\(", 2.0),
 }
 
+ALLOW_ATTRIBUTE_PATTERN = re.compile(
+    r"#\s*!?\s*\[\s*(?:allow|expect)\s*\(",
+    re.MULTILINE,
+)
+CLIPPY_ALLOW_PATTERN = re.compile(
+    r"#\s*!?\s*\[\s*(?:allow|expect)\s*\([^)]*clippy::",
+    re.MULTILINE,
+)
+
 SIGNAL_LABELS = {
     "unsafe_block": "unsafe block",
     "unsafe_fn": "unsafe fn",
@@ -78,8 +87,11 @@ class EscapeHatchRecord:
     layout_linkage_count: int
     clippy_suppression_count: int
     lint_suppression_count: int
+    allow_attribute_count: int
+    clippy_allow_count: int
     counts: Dict[str, int]
     locations: List[Dict[str, object]]
+    allow_locations: List[Dict[str, object]]
     signals: List[str]
     measured_at: str
     command: str
@@ -165,11 +177,29 @@ class RustEscapeHatchAnalyzer:
         layout_linkage_count = counts["repr_escape"] + counts["linkage_escape"]
         clippy_suppression_count = counts["clippy_suppression"]
         lint_suppression_count = counts["lint_suppression"]
+        allow_matches = list(ALLOW_ATTRIBUTE_PATTERN.finditer(searchable))
+        allow_attribute_count = len(allow_matches)
+        clippy_allow_count = len(list(CLIPPY_ALLOW_PATTERN.finditer(searchable)))
+        source_lines = source.splitlines()
+        allow_locations = []
+        for match in allow_matches:
+            line = searchable.count("\n", 0, match.start()) + 1
+            snippet = source_lines[line - 1].strip() if line - 1 < len(source_lines) else ""
+            allow_locations.append(
+                {
+                    "kind": "allow_attribute",
+                    "label": "allow/expect attribute",
+                    "line": line,
+                    "snippet": snippet,
+                }
+            )
         signals = [
             f"{SIGNAL_LABELS[key]} {count}"
             for key, count in counts.items()
             if count > 0
         ]
+        if allow_attribute_count:
+            signals.append(f"allow/expect attributes {allow_attribute_count}")
         if not signals:
             signals = ["stable"]
 
@@ -189,8 +219,11 @@ class RustEscapeHatchAnalyzer:
             layout_linkage_count=layout_linkage_count,
             clippy_suppression_count=clippy_suppression_count,
             lint_suppression_count=lint_suppression_count,
+            allow_attribute_count=allow_attribute_count,
+            clippy_allow_count=clippy_allow_count,
             counts=counts,
             locations=sorted(locations, key=lambda item: (int(item["line"]), str(item["kind"]))),
+            allow_locations=allow_locations,
             signals=signals,
             measured_at=datetime.now(timezone.utc).isoformat(),
             command=" ".join(sys.argv),
@@ -315,7 +348,7 @@ def render_cli(payload: object) -> str:
 
     for index, item in enumerate(rows[:10], start=1):
         lines.append(
-            f"{index:>2}. {item['module_key']} | score={item['escape_hatch_score']:.1f} | total={item['total_count']} | unsafe={item['unsafe_count']} | raw={item['raw_memory_count']} | deref={item['deref_coercion_count']} | glob={item['glob_import_count']} | container_refs={item['container_ref_return_count']} | ffi={item['ffi_count']}"
+            f"{index:>2}. {item['module_key']} | score={item['escape_hatch_score']:.1f} | total={item['total_count']} | unsafe={item['unsafe_count']} | raw={item['raw_memory_count']} | deref={item['deref_coercion_count']} | glob={item['glob_import_count']} | container_refs={item['container_ref_return_count']} | ffi={item['ffi_count']} | allow_expect={item.get('allow_attribute_count', 0)}"
         )
     if len(rows) > 10:
         lines.append(f"... and {len(rows) - 10} more modules.")

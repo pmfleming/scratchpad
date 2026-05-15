@@ -7,11 +7,13 @@ pub(super) use previews::{
 };
 
 impl PieceTreeLite {
+    #[must_use]
     pub fn spans_for_line(&self, target_line: usize) -> PieceTreeSlice<'_> {
         let line_info = self.line_info(target_line);
         self.spans_for_range(line_info.start_char..line_info.start_char + line_info.char_len)
     }
 
+    #[must_use]
     pub fn spans_for_range(&self, range_chars: Range<usize>) -> PieceTreeSlice<'_> {
         let normalized = self.normalize_char_range(range_chars);
         if normalized.is_empty() || self.len_chars() == 0 {
@@ -85,12 +87,9 @@ impl<'a> Iterator for PieceTreeSlice<'a> {
         while !self.finished {
             let node = self.tree.root.nodes.get(self.node_index)?;
             let leaf = node.leaves.get(self.leaf_index)?;
-            let piece = match leaf.pieces.get(self.piece_index) {
-                Some(piece) => piece,
-                None => {
-                    self.advance_piece_cursor();
-                    continue;
-                }
+            let Some(piece) = leaf.pieces.get(self.piece_index) else {
+                self.advance_piece_cursor();
+                continue;
             };
 
             let piece_start_char = self.current_char;

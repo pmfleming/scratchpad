@@ -500,6 +500,8 @@ def collect_escape_hatch_metrics(metrics: Dict[str, Any], rows: Any) -> None:
         ("escape_hatch_glob_imports", "glob_import_count"),
         ("escape_hatch_container_ref_returns", "container_ref_return_count"),
         ("escape_hatch_clippy_suppressions", "clippy_suppression_count"),
+        ("escape_hatch_allows", "allow_attribute_count"),
+        ("escape_hatch_clippy_allows", "clippy_allow_count"),
     ):
         metrics[output_key] = sum(int(item.get(source_key, 0)) for item in rows)
 

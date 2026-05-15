@@ -58,6 +58,7 @@ pub enum AppThemeMode {
 }
 
 impl AppThemeMode {
+    #[must_use]
     pub fn theme_preference(self) -> egui::ThemePreference {
         match self {
             Self::System => egui::ThemePreference::System,
@@ -78,6 +79,7 @@ pub enum TabListPosition {
 }
 
 impl TabListPosition {
+    #[must_use]
     pub fn is_vertical(self) -> bool {
         matches!(self, Self::Left | Self::Right)
     }

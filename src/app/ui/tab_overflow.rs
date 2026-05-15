@@ -1,4 +1,4 @@
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{ScratchpadApp, workspace::display_tabs};
 use crate::app::chrome::{TabButtonOptions, tab_button_with_actions};
 use crate::app::domain::TabAttentionState;
 use crate::app::domain::tab::summary;
@@ -334,7 +334,7 @@ fn overflow_popup_target_height(visible_row_count: usize, popup_max_height: f32)
 }
 
 fn overflow_row_count(app: &ScratchpadApp, visible_tab_indices: &HashSet<usize>) -> usize {
-    (0..app.total_tab_slots())
+    (0..crate::app::app_state::workspace::display_tabs::total_tab_slots(app))
         .filter(|slot_index| should_show_overflow_row(*slot_index, &[], visible_tab_indices))
         .count()
 }
@@ -347,9 +347,10 @@ fn collect_overflow_row_rects(
     visible_tab_indices: &HashSet<usize>,
     menu: &mut OverflowMenuContext<'_>,
 ) -> Vec<tab_drag::TabRectEntry> {
-    let mut row_rects = Vec::with_capacity(app.total_tab_slots());
+    let mut row_rects =
+        Vec::with_capacity(crate::app::app_state::workspace::display_tabs::total_tab_slots(app));
 
-    for slot_index in 0..app.total_tab_slots() {
+    for slot_index in 0..crate::app::app_state::workspace::display_tabs::total_tab_slots(app) {
         if !should_show_overflow_row(slot_index, active_drag_sources, visible_tab_indices) {
             continue;
         }
@@ -365,7 +366,9 @@ fn collect_overflow_row_rects(
         row_rects.push(tab_drag::TabRectEntry {
             index: slot_index,
             rect: row_rect,
-            combine_enabled: !app.tab_slot_is_settings(slot_index),
+            combine_enabled: !crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(
+                app, slot_index,
+            ),
         });
     }
 
@@ -412,7 +415,6 @@ fn should_show_overflow_row(
 
 fn overflow_list_mode() -> OverflowListMode {
     match OVERFLOW_LIST_MODE_TOKEN {
-        "all-tabs" => OverflowListMode::AllTabs,
         "overflow-only" => OverflowListMode::HiddenTabsOnly,
         _ => OverflowListMode::AllTabs,
     }
@@ -451,7 +453,7 @@ fn show_overflow_row(
         tab_drag::begin_tab_drag_if_needed(
             ui,
             slot_index,
-            &app.dragged_tab_slots(slot_index),
+            &display_tabs::dragged_tab_slots(app, slot_index),
             &response,
             &close_response,
         );
@@ -487,16 +489,22 @@ fn overflow_row_state(
     duplicate_name_counts: &HashMap<String, usize>,
 ) -> Option<OverflowRowState> {
     Some(OverflowRowState {
-        selected: app.tab_slot_selected(slot_index) || app.active_tab_slot_index() == slot_index,
+        selected: crate::app::app_state::workspace::display_tabs::tab_slot_selected(
+            app, slot_index,
+        ) || crate::app::app_state::workspace::display_tabs::active_tab_slot_index(app)
+            == slot_index,
         display_name: overflow_display_name(app, slot_index, duplicate_name_counts)?,
-        can_promote_all_files: app
-            .workspace_index_for_slot(slot_index)
+        can_promote_all_files:
+            crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(
+                app, slot_index,
+            )
             .and_then(|index| app.tab_manager.tabs.as_slice().get(index))
             .is_some_and(summary::can_promote_all_files),
-        attention_state: app
-            .workspace_index_for_slot(slot_index)
-            .and_then(|index| app.tab_manager.tabs.as_slice().get(index))
-            .and_then(summary::attention_state),
+        attention_state: crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(
+            app, slot_index,
+        )
+        .and_then(|index| app.tab_manager.tabs.as_slice().get(index))
+        .and_then(summary::attention_state),
     })
 }
 
@@ -505,14 +513,15 @@ fn overflow_display_name(
     slot_index: usize,
     duplicate_name_counts: &HashMap<String, usize>,
 ) -> Option<String> {
-    if app.tab_slot_is_settings(slot_index) {
+    if crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(app, slot_index) {
         return Some("Settings".to_owned());
     }
 
-    let workspace_index = app.workspace_index_for_slot(slot_index)?;
+    let workspace_index =
+        crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(app, slot_index)?;
     let tab = app.tab_manager.tabs.as_slice().get(workspace_index)?;
     let has_duplicate = duplicate_name_counts
-        .get(&tab.buffer.name)
+        .get(&tab.buffers.buffer.name)
         .copied()
         .unwrap_or(0)
         > 1;
@@ -554,7 +563,8 @@ fn overflow_row_action(
     close_response: &egui::Response,
 ) -> OverflowRowAction {
     if promote_response.is_some_and(|promote| promote.clicked())
-        && app.workspace_index_for_slot(slot_index).is_some()
+        && crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(app, slot_index)
+            .is_some()
     {
         return OverflowRowAction::Promote;
     }
@@ -573,7 +583,10 @@ fn handle_overflow_slot_action(
     menu: &mut OverflowMenuContext<'_>,
     is_close: bool,
 ) {
-    match (app.tab_slot_is_settings(slot_index), is_close) {
+    match (
+        crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(app, slot_index),
+        is_close,
+    ) {
         (true, true) => menu.outcome.close_settings = true,
         (true, false) => menu.outcome.activate_settings = true,
         (false, true) => menu.outcome.close_requested_tab = Some(slot_index),

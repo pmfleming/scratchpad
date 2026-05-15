@@ -8,10 +8,6 @@ use super::{
 use std::ops::Range;
 
 impl PieceTreeLite {
-    pub fn insert(&mut self, offset_chars: usize, text: &str) {
-        self.insert_with_source(offset_chars, text, PieceSource::Edit);
-    }
-
     pub fn insert_with_source(
         &mut self,
         offset_chars: usize,
@@ -22,11 +18,10 @@ impl PieceTreeLite {
         if text.is_empty() {
             return 0;
         }
-        self.generation = self.generation.wrapping_add(1);
+        let generation = self.runtime.advance_generation();
 
-        let add_start = self.add.len();
-        self.add.push_str(text);
-        self.record_add_provenance(add_start, text.len(), source);
+        let add_span = self.storage.append_add_text(text, source, generation);
+        let add_start = add_span.start_byte;
         let inserted_pieces = build_chunked_pieces(PieceBuffer::Add, add_start, text);
         let inserted_chars = inserted_pieces.iter().map(|piece| piece.char_len).sum();
 
@@ -46,17 +41,13 @@ impl PieceTreeLite {
         inserted_chars
     }
 
-    pub fn remove_range(&mut self, range_chars: Range<usize>) {
-        self.remove_char_range(range_chars);
-    }
-
     pub fn remove_char_range(&mut self, range_chars: Range<usize>) {
         assert!(range_chars.start <= range_chars.end);
         assert!(range_chars.end <= self.len_chars());
         if range_chars.is_empty() {
             return;
         }
-        self.generation = self.generation.wrapping_add(1);
+        self.runtime.advance_generation();
 
         let start_address = self.find_leaf_for_char_offset(range_chars.start);
         let end_probe = range_chars.end.saturating_sub(1);
@@ -70,13 +61,9 @@ impl PieceTreeLite {
         self.replace_leaf_span(start_address, end_address, replacement_leaves);
     }
 
+    #[must_use]
     pub fn text_for_span(&self, span: ByteSpan) -> &str {
-        let start = span.start_byte as usize;
-        let end = start.saturating_add(span.byte_len as usize);
-        match span.buffer {
-            PieceBuffer::Original => &self.original[start..end],
-            PieceBuffer::Add => &self.add[start..end],
-        }
+        self.storage.text_for_span(span)
     }
 
     fn leaf_with_inserted_pieces(
@@ -140,11 +127,8 @@ impl PieceTreeLite {
     }
 
     pub(super) fn piece_text<'a>(&'a self, piece: &Piece) -> &'a str {
-        let end = piece.start_byte + piece.byte_len;
-        match piece.buffer {
-            PieceBuffer::Original => &self.original[piece.start_byte..end],
-            PieceBuffer::Add => &self.add[piece.start_byte..end],
-        }
+        self.storage
+            .piece_text(piece.buffer, piece.start_byte, piece.byte_len)
     }
 
     pub(super) fn find_leaf_for_char_offset(&self, offset_chars: usize) -> LeafAddress {

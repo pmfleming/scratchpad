@@ -16,6 +16,7 @@ pub struct PhosphorButtonColors {
 }
 
 impl PhosphorButtonColors {
+    #[must_use]
     pub fn new(background: Color32, hover_background: Color32, icon: Color32) -> Self {
         Self {
             background,
@@ -25,6 +26,7 @@ impl PhosphorButtonColors {
         }
     }
 
+    #[must_use]
     pub fn with_hover_icon(
         background: Color32,
         hover_background: Color32,

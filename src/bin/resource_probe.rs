@@ -233,7 +233,7 @@ fn run_anchor_heavy_view_edit_cycle(anchor_count: usize) -> StepOutcome {
         .collect::<Vec<_>>();
 
     let midpoint = tree.len_chars() / 2;
-    tree.insert(midpoint, "anchor edit café 東京\n");
+    tree.insert_with_source(midpoint, "anchor edit café 東京\n", PieceSource::Edit);
     tree.remove_char_range(midpoint.saturating_sub(8)..midpoint.saturating_sub(1));
     let resolved = anchors
         .iter()
@@ -306,15 +306,15 @@ fn run_view_count_cycle(view_count: usize) -> StepOutcome {
         utf8_text_of_size(VIEW_COUNT_BUFFER_BYTES),
         None,
     ));
-    while tab.views.len() < view_count {
-        let _ = tab.split_active_view(if tab.views.len().is_multiple_of(2) {
+    while tab.layout.views.len() < view_count {
+        let _ = tab.split_active_view(if tab.layout.views.len().is_multiple_of(2) {
             SplitAxis::Vertical
         } else {
             SplitAxis::Horizontal
         });
     }
     let _ = tab.rebalance_views_equally();
-    StepOutcome::items(black_box(tab.views.len()))
+    StepOutcome::items(black_box(tab.layout.views.len()))
 }
 
 fn run_session_persist_cycle(store: &SessionStore, tabs: &[WorkspaceTab]) -> StepOutcome {
@@ -360,7 +360,7 @@ fn run_startup_visible_restore_cycle(store: &SessionStore) -> StepOutcome {
     let painted_rows = restored
         .tabs
         .get(restored.active_tab_index)
-        .map(|tab| render_first_visible_text_paint(&tab.buffer))
+        .map(|tab| render_first_visible_text_paint(&tab.buffers.buffer))
         .unwrap_or_default();
     StepOutcome::items_with_manifest(
         black_box(restored.tabs.len() + painted_rows),

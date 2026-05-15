@@ -255,6 +255,7 @@ fn detail_or_unknown(value: Option<&str>) -> String {
     value.unwrap_or("<unknown>").to_owned()
 }
 
+#[must_use]
 pub fn default_error_log_path() -> PathBuf {
     std::env::temp_dir().join("scratchpad").join(ERROR_LOG_NAME)
 }
@@ -295,7 +296,7 @@ pub(crate) fn track_widget_id(
     let loc_str = format!("{}:{}", location.file(), location.line());
     let parent_ui_id = parent_ui_id.map(|id| format!("{:016X}", id.value()));
     with_state(|state| {
-        state.track_widget(id_str, short_hex, rect_str, kind, loc_str, parent_ui_id)
+        state.track_widget(id_str, short_hex, rect_str, kind, loc_str, parent_ui_id);
     });
 }
 
@@ -433,10 +434,10 @@ fn panic_message(info: &panic::PanicHookInfo<'_>) -> String {
         .map(|message| (*message).to_owned())
         .or_else(|| info.payload().downcast_ref::<String>().cloned())
         .unwrap_or_else(|| "panic payload is not a string".to_owned());
-    let location = info
-        .location()
-        .map(|location| format!("{}:{}", location.file(), location.line()))
-        .unwrap_or_else(|| "unknown location".to_owned());
+    let location = info.location().map_or_else(
+        || "unknown location".to_owned(),
+        |location| format!("{}:{}", location.file(), location.line()),
+    );
     let thread = std::thread::current()
         .name()
         .unwrap_or("unnamed")

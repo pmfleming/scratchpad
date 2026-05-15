@@ -1,5 +1,5 @@
 use super::{TileRenderRequest, context_menu};
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{ScratchpadApp, workspace::accessors as workspace_accessors};
 use crate::app::domain::ViewId;
 use crate::app::theme::{border, header_bg};
 use crate::app::ui::tile_header::TileAction;
@@ -22,7 +22,7 @@ pub(super) fn handle_tile_click(
     context_menu::activate_inactive_tile_on_secondary_click(app, &tile_response, request);
     if tile_response.clicked() {
         actions.push(TileAction::Activate(request.view_id));
-        app.request_focus_for_view(request.view_id);
+        workspace_accessors::request_focus_for_view(app, request.view_id);
     }
     tile_response
 }

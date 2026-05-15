@@ -41,7 +41,7 @@ impl FileController {
         };
 
         if current_name == normalized_name {
-            app.clear_status_message();
+            crate::app::app_state::workspace::accessors::clear_status_message(app);
             return true;
         }
 
@@ -114,11 +114,11 @@ impl FileController {
             return false;
         }
 
-        let settings_path = app.settings_path().to_path_buf();
+        let settings_path = crate::app::app_state::settings_state::settings_path(app).to_path_buf();
 
         {
             let buffer = app.tab_manager.tabs.as_mut_slice()[index].active_buffer_mut();
-            buffer.name = normalized_name.clone();
+            buffer.name.clone_from(&normalized_name);
             if let Some(target_path) = target_path {
                 buffer.path = Some(target_path.clone());
                 buffer.sync_to_disk_state(FileService::read_disk_state(&target_path).ok());
@@ -132,7 +132,7 @@ impl FileController {
         );
         app.tab_manager.mark_session_dirty();
         app.apply_current_tab_ordering();
-        let _ = app.persist_session_now();
+        let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
         true
     }
 }

@@ -64,7 +64,8 @@ pub(super) fn value_pill(
 ) -> egui::Response {
     let margin = SettingsUi::MARGINS.value_pill_inner;
     let outer_width = width.max(0.0);
-    let outer_height = ui.spacing().interact_size.y + (margin.top as f32) + (margin.bottom as f32);
+    let outer_height =
+        ui.spacing().interact_size.y + f32::from(margin.top) + f32::from(margin.bottom);
     let response = widget_ids::allocate_exact_rect_interact(
         ui,
         egui::vec2(outer_width, outer_height),
@@ -82,8 +83,8 @@ pub(super) fn value_pill(
     );
 
     let text_rect = response.rect.shrink2(egui::vec2(
-        (margin.left + margin.right) as f32 * 0.5,
-        (margin.top + margin.bottom) as f32 * 0.5,
+        f32::from(margin.left + margin.right) * 0.5,
+        f32::from(margin.top + margin.bottom) * 0.5,
     ));
     ui.painter().with_clip_rect(text_rect).text(
         text_rect.right_center(),

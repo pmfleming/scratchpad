@@ -303,10 +303,12 @@ fn handle_focused_keyboard_input(
         )
 }
 
+#[must_use]
 pub fn select_all_cursor(total_chars: usize) -> CursorRange {
     CursorRange::two(0, total_chars)
 }
 
+#[must_use]
 pub fn selected_text(buffer: &BufferState, cursor: CursorRange) -> Option<String> {
     let range = types::selection_char_range(&cursor)?;
     Some(buffer.document().piece_tree().extract_range(range))

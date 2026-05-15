@@ -1,13 +1,8 @@
 use super::super::{ScratchpadApp, StatusDomain};
+use crate::app::app_state::settings_controller;
+use crate::app::app_state::workspace::accessors as workspace_accessors;
 use crate::app::domain::{BufferId, CursorRevealMode};
-use crate::app::text_history::{TextHistoryEntryView, entries_for_buffer};
-
-pub fn text_history_redo_len(app: &ScratchpadApp) -> usize {
-    text_history_entries(app)
-        .iter()
-        .filter(|entry| entry.undone)
-        .count()
-}
+use crate::app::text_history::{TextHistoryCache, TextHistoryEntryView, entries_for_buffer};
 
 pub(crate) fn text_history_entries(app: &ScratchpadApp) -> Vec<TextHistoryEntryView> {
     let mut entries = app
@@ -53,7 +48,7 @@ pub(crate) fn clear_text_history(app: &mut ScratchpadApp) -> bool {
         }
     }
     if cleared {
-        app.state.text_history_cache = Default::default();
+        app.state.text_history_cache = TextHistoryCache::default();
         app.tab_manager.mark_session_dirty();
         app.state
             .status
@@ -67,12 +62,19 @@ pub(crate) fn finalize_active_buffer_text_mutation(
     active_tab_index: usize,
 ) {
     let tab = &mut app.tab_manager.tabs.as_mut_slice()[active_tab_index];
-    let buffer_id = tab.buffer.id;
-    let latest_edit = tab.buffer.document().latest_operation_record().cloned();
-    tab.buffer
+    let buffer_id = tab.buffers.buffer.id;
+    let latest_edit = tab
+        .buffers
+        .buffer
+        .document()
+        .latest_operation_record()
+        .cloned();
+    tab.buffers
+        .buffer
         .refresh_text_metadata_after_operation(latest_edit.as_ref());
-    tab.buffer.mark_dirty_after_local_edit();
+    tab.buffers.buffer.mark_dirty_after_local_edit();
     let warning_message = tab
+        .buffers
         .buffer
         .artifact_summary
         .status_text()
@@ -84,11 +86,11 @@ pub(crate) fn finalize_active_buffer_text_mutation(
             .status
             .set_warning_status_in_domain(StatusDomain::Encoding, message);
     } else {
-        app.clear_status_message();
+        crate::app::app_state::workspace::accessors::clear_status_message(app);
     }
     record_pending_text_history_event(app, active_tab_index, buffer_id);
     app.enforce_aggregate_text_history_budget();
-    app.mark_search_dirty();
+    crate::app::app_state::search_runtime::mark_search_dirty(app);
     app.tab_manager.mark_session_dirty();
     app.note_settings_toml_edit(active_tab_index);
     app.apply_current_tab_ordering();
@@ -99,7 +101,7 @@ pub(crate) fn prune_text_history_for_buffers(
     buffer_ids: impl IntoIterator<Item = BufferId>,
 ) {
     if buffer_ids.into_iter().next().is_some() {
-        app.state.text_history_cache = Default::default();
+        app.state.text_history_cache = TextHistoryCache::default();
     }
 }
 
@@ -133,19 +135,15 @@ pub fn apply_text_history_to_entry(
     entry_id: u64,
     follow_focus: bool,
 ) -> bool {
-    let target = match app
-        .text_history_entries()
+    let Some(target) = text_history_entries(app)
         .into_iter()
         .find(|entry| entry.buffer_id == buffer_id && entry.id == entry_id)
-    {
-        Some(target) => target,
-        None => {
-            app.state.status.set_error_status_in_domain(
-                StatusDomain::History,
-                "Text history entry is no longer available.",
-            );
-            return false;
-        }
+    else {
+        app.state.status.set_error_status_in_domain(
+            StatusDomain::History,
+            "Text history entry is no longer available.",
+        );
+        return false;
     };
     let undo = !target.undone;
     apply_text_history_entry_with_focus(app, buffer_id, entry_id, undo, follow_focus)
@@ -158,8 +156,7 @@ fn apply_text_history_entry_with_focus(
     undo: bool,
     follow_focus: bool,
 ) -> bool {
-    let Some(action) = app
-        .text_history_entries()
+    let Some(action) = text_history_entries(app)
         .into_iter()
         .find(|entry| entry.buffer_id == buffer_id && entry.id == entry_id)
     else {
@@ -194,25 +191,22 @@ fn apply_text_history_entry_with_focus(
         } else {
             buffer.apply_text_history_redo(action.id)
         };
-        match result {
-            Ok(selection) => {
-                buffer.mark_dirty_after_local_edit();
-                selection
-            }
-            Err(_) => {
-                app.state.status.set_error_status_in_domain(
-                    StatusDomain::History,
-                    "Text history entry conflicts with the current file contents.",
-                );
-                return false;
-            }
+        if let Ok(selection) = result {
+            buffer.mark_dirty_after_local_edit();
+            selection
+        } else {
+            app.state.status.set_error_status_in_domain(
+                StatusDomain::History,
+                "Text history entry conflicts with the current file contents.",
+            );
+            return false;
         }
     };
 
     if follow_focus {
         restore_text_history_selection(app, tab_index, action.buffer_id, selection);
     }
-    app.mark_search_dirty();
+    crate::app::app_state::search_runtime::mark_search_dirty(app);
     app.tab_manager.mark_session_dirty();
     app.apply_current_tab_ordering();
     true
@@ -246,7 +240,8 @@ fn restore_text_history_selection(
         .as_slice()
         .get(tab_index)
         .and_then(|tab| {
-            tab.views
+            tab.layout
+                .views
                 .iter()
                 .find(|view| view.buffer_id == buffer_id)
                 .map(|view| view.id)
@@ -254,9 +249,9 @@ fn restore_text_history_selection(
     else {
         return;
     };
-    app.activate_workspace_surface();
+    settings_controller::activate_workspace_surface(app);
     app.tab_manager.set_active_tab_index_clamped(tab_index);
-    app.ensure_active_tab_slot_selected();
+    crate::app::app_state::workspace::display_tabs::ensure_active_tab_slot_selected(app);
     app.tab_manager.pending_scroll_to_active = true;
     let tab = &mut app.tab_manager.tabs.as_mut_slice()[tab_index];
     let _ = tab.activate_view(view_id);
@@ -265,64 +260,18 @@ fn restore_text_history_selection(
         view.set_pending_cursor_range_anchored(buffer, selection);
         view.request_cursor_reveal(CursorRevealMode::Center);
     }
-    app.refresh_search_view_state();
-    app.request_focus_for_view(view_id);
+    crate::app::app_state::search_runtime::refresh_search_view_state(app);
+    workspace_accessors::request_focus_for_view(app, view_id);
 }
 
 fn sort_text_history_entries(entries: &mut [TextHistoryEntryView]) {
     entries.sort_by_key(|entry| (entry.global_seq, entry.buffer_id, entry.id));
 }
 
-macro_rules! compat_scratchpad_app_methods {
-    ($type:ty { $($item:item)* }) => {
-        #[allow(dead_code)]
-        impl $type {
-            $($item)*
-        }
-    };
-}
-
-compat_scratchpad_app_methods!(ScratchpadApp {
-    pub fn text_history_redo_len(&self) -> usize {
-        text_history_redo_len(self)
-    }
-
-    pub(crate) fn text_history_entries(&self) -> Vec<TextHistoryEntryView> {
-        text_history_entries(self)
-    }
-
-    pub(crate) fn cached_text_history_entries(&mut self) -> Vec<TextHistoryEntryView> {
-        cached_text_history_entries(self)
-    }
-
-    pub(crate) fn clear_text_history(&mut self) -> bool {
-        clear_text_history(self)
-    }
-
-    pub(crate) fn finalize_active_buffer_text_mutation(&mut self, active_tab_index: usize) {
-        finalize_active_buffer_text_mutation(self, active_tab_index)
-    }
-
-    pub(crate) fn prune_text_history_for_buffers(&mut self, buffer_ids: impl IntoIterator<Item = BufferId>) {
-        prune_text_history_for_buffers(self, buffer_ids)
-    }
-
-    pub(crate) fn record_pending_text_history_event(&mut self, tab_index: usize, buffer_id: BufferId) {
-        record_pending_text_history_event(self, tab_index, buffer_id)
-    }
-
-    pub fn apply_text_history_to_entry(&mut self, buffer_id: BufferId, entry_id: u64, follow_focus: bool) -> bool {
-        apply_text_history_to_entry(self, buffer_id, entry_id, follow_focus)
-    }
-
-    pub(crate) fn tab_index_for_buffer(&mut self, buffer_id: BufferId) -> Option<usize> {
-        tab_index_for_buffer(self, buffer_id)
-    }
-});
-
 #[cfg(test)]
 mod tests {
     use super::ScratchpadApp;
+    use super::apply_text_history_to_entry;
     use super::sort_text_history_entries;
     use crate::app::domain::{BufferId, BufferState, PieceSource, SplitAxis, WorkspaceTab};
     use crate::app::services::session_store::SessionStore;
@@ -367,10 +316,14 @@ mod tests {
     fn follow_history_undo_activates_containing_tab_and_moves_one_view() {
         let mut app = test_app_with_tabs(["first.txt", "second.txt"]);
         let target_tab_index = 1;
-        let target_buffer_id = app.tab_manager.tabs.as_slice()[target_tab_index].buffer.id;
+        let target_buffer_id = app.tab_manager.tabs.as_slice()[target_tab_index]
+            .buffers
+            .buffer
+            .id;
         let previous_selection = CursorRange::one(CharCursor::new(0));
         let next_selection = CursorRange::one(CharCursor::new(5));
         app.tab_manager.tabs.as_mut_slice()[target_tab_index]
+            .buffers
             .buffer
             .replace_char_ranges_with_undo(
                 &[(0..0, "hello".to_owned())],
@@ -379,6 +332,7 @@ mod tests {
             )
             .expect("record text history");
         let entry_id = app.tab_manager.tabs.as_slice()[target_tab_index]
+            .buffers
             .buffer
             .document()
             .history_entries()
@@ -387,28 +341,38 @@ mod tests {
             .id;
 
         app.tab_manager.active_tab_index = target_tab_index;
-        let original_view_id = app.tab_manager.tabs.as_slice()[target_tab_index].active_view_id;
+        let original_view_id = app.tab_manager.tabs.as_slice()[target_tab_index]
+            .layout
+            .active_view_id;
         let split_view_id = app.tab_manager.tabs.as_mut_slice()[target_tab_index]
             .split_active_view(SplitAxis::Vertical)
             .expect("split target view");
         {
             let tab = &mut app.tab_manager.tabs.as_mut_slice()[target_tab_index];
-            let original_view = tab.view_mut(original_view_id).expect("original view");
+            let original_view = tab
+                .layout
+                .view_mut(original_view_id)
+                .expect("original view");
             original_view.cursor_range = Some(CursorRange::one(CharCursor::new(1)));
             original_view.pending_cursor_range = None;
-            let split_view = tab.view_mut(split_view_id).expect("split view");
+            let split_view = tab.layout.view_mut(split_view_id).expect("split view");
             split_view.cursor_range = Some(CursorRange::one(CharCursor::new(2)));
             split_view.pending_cursor_range = None;
         }
         app.tab_manager.active_tab_index = 0;
 
-        assert!(app.apply_text_history_to_entry(target_buffer_id, entry_id, true));
+        assert!(apply_text_history_to_entry(
+            &mut app,
+            target_buffer_id,
+            entry_id,
+            true
+        ));
 
         let tab = &app.tab_manager.tabs.as_slice()[app.tab_manager.active_tab_index];
-        let original_view = tab.view(original_view_id).expect("original view");
-        let split_view = tab.view(split_view_id).expect("split view");
+        let original_view = tab.layout.view(original_view_id).expect("original view");
+        let split_view = tab.layout.view(split_view_id).expect("split view");
         assert_eq!(app.tab_manager.active_tab_index, target_tab_index);
-        assert_eq!(tab.active_view_id, original_view_id);
+        assert_eq!(tab.layout.active_view_id, original_view_id);
         assert_eq!(original_view.cursor_range, Some(previous_selection));
         assert_eq!(original_view.pending_cursor_range, Some(previous_selection));
         assert_eq!(
@@ -442,7 +406,7 @@ mod tests {
             cold_session_tabs: Default::default(),
         };
         app.tab_manager.rebuild_buffer_tab_index();
-        app.clear_tab_selection();
+        crate::app::app_state::workspace::display_tabs::clear_tab_selection(&mut app);
         app
     }
 

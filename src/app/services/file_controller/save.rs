@@ -139,10 +139,13 @@ impl FileController {
             let status_message = app.tab_manager.tabs.as_slice()[index]
                 .active_buffer()
                 .disk_status_message();
-            app.set_pending_action(Some(PendingAction::SaveConflict {
-                tab_index: index,
-                view_id: app.tab_manager.tabs.as_slice()[index].active_view_id,
-            }));
+            crate::app::app_state::workspace::accessors::set_pending_action(
+                app,
+                Some(PendingAction::SaveConflict {
+                    tab_index: index,
+                    view_id: app.tab_manager.tabs.as_slice()[index].layout.active_view_id,
+                }),
+            );
             if let Some(message) = status_message {
                 app.state
                     .status
@@ -252,7 +255,7 @@ impl FileController {
         disk_state: Option<DiskFileState>,
         action: PendingSavePathAction,
     ) {
-        let settings_path = app.settings_path().to_path_buf();
+        let settings_path = crate::app::app_state::settings_state::settings_path(app).to_path_buf();
         let buffer = app.tab_manager.tabs.as_mut_slice()[index]
             .buffer_by_id_mut(action.buffer_id)
             .expect("buffer location validated");
@@ -270,10 +273,10 @@ impl FileController {
             .path
             .as_ref()
             .is_some_and(|path| crate::app::paths_match(path, &settings_path));
-        app.clear_status_message();
+        crate::app::app_state::workspace::accessors::clear_status_message(app);
         app.tab_manager.mark_session_dirty();
         app.apply_current_tab_ordering();
-        let _ = app.persist_session_now();
+        let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
     }
 
     pub(crate) fn apply_async_save_result(
@@ -340,16 +343,8 @@ impl FileController {
 
     fn has_pending_reload_for_buffer(app: &ScratchpadApp, buffer_id: BufferId) -> bool {
         app.state
-            .io
-            .pending_background_actions
-            .values()
-            .any(|action| {
-                matches!(
-                    action,
-                    PendingBackgroundAction::ReloadBuffer(reload)
-                        if reload.buffer_id == buffer_id
-                )
-            })
+            .background_io
+            .has_pending_reload_for_buffer(buffer_id)
     }
 
     fn has_pending_reopen_with_encoding_for_buffer(
@@ -357,23 +352,16 @@ impl FileController {
         buffer_id: BufferId,
     ) -> bool {
         app.state
-            .io
-            .pending_background_actions
-            .values()
-            .any(|action| {
-                matches!(
-                    action,
-                    PendingBackgroundAction::ReopenWithEncoding(reopen)
-                        if reopen.buffer_id == buffer_id
-                )
-            })
+            .background_io
+            .has_pending_reopen_with_encoding_for_buffer(buffer_id)
     }
 
     fn find_buffer_location(
         app: &mut ScratchpadApp,
         buffer_id: BufferId,
     ) -> Option<(usize, PathBuf)> {
-        let tab_index = app.tab_index_for_buffer(buffer_id)?;
+        let tab_index =
+            crate::app::app_state::workspace::mutation::tab_index_for_buffer(app, buffer_id)?;
         app.tab_manager
             .tabs
             .as_slice()
@@ -387,7 +375,8 @@ impl FileController {
         app: &mut ScratchpadApp,
         buffer_id: BufferId,
     ) -> Option<(usize, Option<PathBuf>)> {
-        let tab_index = app.tab_index_for_buffer(buffer_id)?;
+        let tab_index =
+            crate::app::app_state::workspace::mutation::tab_index_for_buffer(app, buffer_id)?;
         app.tab_manager
             .tabs
             .as_slice()

@@ -3,23 +3,24 @@ mod edit;
 mod metrics;
 pub(super) mod preview;
 pub(crate) mod query;
+mod runtime;
 mod slice;
+mod storage;
 mod support;
 #[cfg(test)]
 mod tests;
 
 #[cfg(test)]
 pub(crate) use super::history::PIECE_PROVENANCE_ENTRY_LIMIT;
-use super::history::PieceProvenanceStore;
 pub(crate) use super::history::{ByteSpan, PieceProvenance, PieceSource};
 pub use anchor::{AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind};
 
-use std::collections::HashMap;
 use std::ops::Range;
-use std::sync::Arc;
 
-use anchor::{LeafAnchor, LeafId};
+use anchor::{LeafAnchor, LeafId, PieceTreeAnchorState};
 use metrics::sum_node_metrics;
+use runtime::PieceTreeRuntime;
+use storage::PieceTreeStorage;
 use support::{
     build_chunked_pieces, build_root_from_pieces, byte_index_for_char_offset,
     byte_range_for_char_range, line_lookup_in_leaves, measure_text, pack_pieces_into_leaves,
@@ -256,14 +257,10 @@ impl PieceTreeRoot {
 
 #[derive(Clone, Debug)]
 pub struct PieceTreeLite {
-    original: Arc<str>,
-    add: String,
+    storage: PieceTreeStorage,
     root: PieceTreeRoot,
-    generation: u64,
-    anchors: anchor::AnchorRegistry,
-    leaf_indices_by_id: HashMap<LeafId, (usize, usize)>,
-    provenance: PieceProvenanceStore,
-    next_leaf_id: u64,
+    runtime: PieceTreeRuntime,
+    anchor_state: PieceTreeAnchorState,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -285,32 +282,17 @@ pub struct PieceTreeSlice<'a> {
 }
 
 impl PieceTreeLite {
+    #[must_use]
     pub fn from_string(text: String) -> Self {
         let pieces = build_chunked_pieces(PieceBuffer::Original, 0, &text);
         let mut tree = Self {
-            original: Arc::from(text.into_boxed_str()),
-            add: String::new(),
+            storage: PieceTreeStorage::from_original(text),
             root: build_root_from_pieces(pieces),
-            generation: 0,
-            anchors: anchor::AnchorRegistry::default(),
-            leaf_indices_by_id: HashMap::new(),
-            provenance: PieceProvenanceStore::default(),
-            next_leaf_id: 1,
+            runtime: PieceTreeRuntime::default(),
+            anchor_state: PieceTreeAnchorState::default(),
         };
         tree.assign_missing_leaf_ids();
         tree
-    }
-
-    fn rebuild_leaf_index(&mut self) {
-        self.leaf_indices_by_id.clear();
-        for (node_index, node) in self.root.nodes.iter().enumerate() {
-            for (leaf_index, leaf) in node.leaves.iter().enumerate() {
-                if !leaf.leaf_id.is_unassigned() {
-                    self.leaf_indices_by_id
-                        .insert(leaf.leaf_id, (node_index, leaf_index));
-                }
-            }
-        }
     }
 
     fn line_scan_start_for_leaf(
@@ -335,21 +317,21 @@ impl PieceTreeLite {
     }
 
     fn refresh_leaf_index_after_structure_change(&mut self) {
-        if self.has_live_anchors() {
-            self.rebuild_leaf_index();
-        } else {
-            self.leaf_indices_by_id.clear();
-        }
+        self.anchor_state
+            .refresh_leaf_index_after_structure_change(&self.root);
     }
 
+    #[must_use]
     pub fn metrics(&self) -> PieceTreeMetrics {
         self.root.metrics
     }
 
+    #[must_use]
     pub fn provenance_entry_count(&self) -> usize {
-        self.provenance.len()
+        self.storage.provenance_entry_count()
     }
 
+    #[must_use]
     pub fn previews_for_matches(
         &self,
         ranges: &[Range<usize>],
@@ -358,24 +340,29 @@ impl PieceTreeLite {
         preview::previews_for_matches(self, ranges, limit)
     }
 
+    #[must_use]
     pub fn generation(&self) -> u64 {
-        self.generation
+        self.runtime.generation()
     }
 
+    #[must_use]
     pub fn len_bytes(&self) -> usize {
         self.root.metrics.bytes
     }
 
+    #[must_use]
     pub fn len_chars(&self) -> usize {
         self.root.metrics.chars
     }
 
+    #[must_use]
     pub fn normalize_char_range(&self, range_chars: Range<usize>) -> Range<usize> {
         let start = range_chars.start.min(self.len_chars());
         let end = range_chars.end.min(self.len_chars());
         if start <= end { start..end } else { end..start }
     }
 
+    #[must_use]
     pub fn char_at(&self, offset_chars: usize) -> Option<char> {
         if offset_chars >= self.len_chars() || self.root.nodes.is_empty() {
             return None;
@@ -395,6 +382,7 @@ impl PieceTreeLite {
         }
     }
 
+    #[must_use]
     pub fn line_info(&self, target_line: usize) -> PieceTreeLineInfo {
         let (start_char, char_len) = self.line_lookup(target_line);
         PieceTreeLineInfo {
@@ -404,6 +392,7 @@ impl PieceTreeLite {
         }
     }
 
+    #[must_use]
     pub fn line_lookup(&self, target_line: usize) -> (usize, usize) {
         if self.len_chars() == 0 {
             return (0, 0);
@@ -414,6 +403,7 @@ impl PieceTreeLite {
         line_lookup_in_leaves(self, address, safe_line)
     }
 
+    #[must_use]
     pub fn line_index_at_offset(&self, offset_chars: usize) -> usize {
         if self.len_chars() == 0 {
             return 0;
@@ -451,14 +441,16 @@ impl PieceTreeLite {
         current_line
     }
 
+    #[must_use]
     pub fn extract_text(&self) -> String {
         // Fast path: no edits have been made, original covers the whole buffer.
-        if self.add.is_empty() && self.root.metrics.bytes == self.original.len() {
-            return self.original.to_string();
+        if self.storage.add_is_empty() && self.root.metrics.bytes == self.storage.original_len() {
+            return self.storage.original_text().to_owned();
         }
         self.extract_range(0..self.len_chars())
     }
 
+    #[must_use]
     pub fn borrow_range(&self, range_chars: Range<usize>) -> Option<&str> {
         let normalized = self.normalize_char_range(range_chars);
         if normalized.is_empty() {
@@ -477,6 +469,7 @@ impl PieceTreeLite {
         Some(first.text)
     }
 
+    #[must_use]
     pub fn extract_range(&self, range_chars: Range<usize>) -> String {
         let mut result = String::new();
         for span in self.spans_for_range(range_chars) {
@@ -485,6 +478,7 @@ impl PieceTreeLite {
         result
     }
 
+    #[must_use]
     pub fn extract_range_bounded(
         &self,
         range_chars: Range<usize>,

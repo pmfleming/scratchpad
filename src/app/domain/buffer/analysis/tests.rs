@@ -2,6 +2,7 @@ use super::{
     BufferLength, PieceTreeLite, TextFormatMetadata, analyze_piece_tree_text,
     display_line_count_from_piece_tree,
 };
+use crate::app::domain::PieceSource;
 
 #[test]
 fn display_line_count_from_piece_tree_uses_metrics_and_last_char() {
@@ -19,7 +20,7 @@ fn display_line_count_from_piece_tree_uses_metrics_and_last_char() {
 fn display_line_count_from_piece_tree_tracks_edited_buffers() {
     let mut tree = PieceTreeLite::from_string("one\nthree".to_owned());
 
-    tree.insert(4, "two\n");
+    tree.insert_with_source(4, "two\n", PieceSource::Edit);
     tree.remove_char_range(0..4);
 
     assert_eq!(tree.extract_text(), "two\nthree");

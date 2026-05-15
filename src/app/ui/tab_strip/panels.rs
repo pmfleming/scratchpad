@@ -7,7 +7,7 @@ use super::layout::{
     vertical_tab_list_frame, vertical_tab_panel,
 };
 use super::outcome::apply_tab_outcome;
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{ScratchpadApp, settings_controller};
 use crate::app::services::settings_store::TabListPosition;
 use eframe::egui;
 use std::time::Instant;
@@ -30,7 +30,10 @@ fn show_vertical_tab_panel(ui: &mut egui::Ui, app: &mut ScratchpadApp, side: Tab
     app.state.overflow_popup_open = false;
     let now = Instant::now();
     let panel_visible = vertical_panel_visible(ui, app, side, now);
-    let panel_width = auto_hide_panel_extent(panel_visible, app.vertical_tab_list_width());
+    let panel_width = auto_hide_panel_extent(
+        panel_visible,
+        crate::app::app_state::settings_state::vertical_tab_list_width(app),
+    );
 
     let panel_response = vertical_tab_panel(side, panel_visible)
         .default_size(panel_width)
@@ -66,14 +69,11 @@ fn finalize_vertical_tab_panel(
     response: &egui::Response,
 ) {
     if !panel_visible {
-        app.close_tab_list();
+        settings_controller::close_tab_list(app);
         return;
     }
 
-    crate::app::app_state::settings_controller::set_tab_list_width_from_layout(
-        app,
-        response.rect.width(),
-    );
+    settings_controller::set_tab_list_width_from_layout(app, response.rect.width());
 }
 
 fn show_horizontal_tab_list(

@@ -1,3 +1,4 @@
+use crate::app::app_state::workspace::restore_conflict;
 use crate::app::app_state::{AppSurface, ScratchpadApp, StatusDomain};
 use crate::app::services::session_store::{
     RestoreStatusLevel, RestoredSession, SessionActiveSurface, SessionPersistRequest,
@@ -15,18 +16,7 @@ pub(crate) fn maybe_persist_session(app: &mut ScratchpadApp, ctx: &egui::Context
     if app.state.last_session_persist.elapsed() < crate::app::app_state::SESSION_SNAPSHOT_INTERVAL {
         return;
     }
-    if app
-        .state
-        .io
-        .pending_background_actions
-        .values()
-        .any(|action| {
-            matches!(
-                action,
-                crate::app::app_state::PendingBackgroundAction::PersistSession(_)
-            )
-        })
-    {
+    if app.state.background_io.has_pending_persist() {
         return;
     }
 
@@ -88,12 +78,12 @@ pub(crate) fn apply_restored_session(
         .set_tabs(restored.tabs, restored.active_tab_index);
     app.tab_manager.evict_inactive_tab_state();
     apply_restored_active_surface(app, restored.active_surface);
-    app.refresh_startup_restore_conflicts();
+    restore_conflict::refresh_startup_restore_conflicts(app);
     restored.legacy_settings
 }
 
 pub(crate) fn session_active_surface(app: &ScratchpadApp) -> SessionActiveSurface {
-    if app.showing_settings() {
+    if crate::app::app_state::settings_state::showing_settings(app) {
         SessionActiveSurface::Settings
     } else {
         SessionActiveSurface::Workspace
@@ -104,9 +94,17 @@ pub(crate) fn apply_restored_active_surface(
     app: &mut ScratchpadApp,
     active_surface: SessionActiveSurface,
 ) {
-    app.state.active_surface = match active_surface {
-        SessionActiveSurface::Settings if app.settings_tab_open() => AppSurface::Settings,
+    let surface = match active_surface {
+        SessionActiveSurface::Settings
+            if crate::app::app_state::settings_state::settings_tab_open(app) =>
+        {
+            AppSurface::Settings
+        }
         SessionActiveSurface::Settings | SessionActiveSurface::Workspace => AppSurface::Workspace,
     };
-    app.select_only_tab_slot(app.active_tab_slot_index());
+    app.state.chrome.set_active_surface(surface);
+    crate::app::app_state::workspace::display_tabs::select_only_tab_slot(
+        app,
+        crate::app::app_state::workspace::display_tabs::active_tab_slot_index(app),
+    );
 }

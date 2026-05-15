@@ -227,7 +227,7 @@ pub(super) fn build_search_target(
     tab_label: &str,
     search_range: Option<Range<usize>>,
 ) -> Option<SearchTargetSnapshot> {
-    let view = tab.view(view_id)?;
+    let view = tab.layout.view(view_id)?;
     build_search_target_from_view(tab_index, tab, view, tab_label, search_range)
 }
 
@@ -247,9 +247,9 @@ pub(super) fn matches_buffer(
 }
 
 fn ordered_unique_file_identities(tab: &WorkspaceTab) -> Vec<SearchFileIdentity> {
-    let mut seen_files = HashSet::with_capacity(tab.views.len());
-    let mut ordered_files = Vec::with_capacity(tab.views.len());
-    for view in &tab.views {
+    let mut seen_files = HashSet::with_capacity(tab.layout.views.len());
+    let mut ordered_files = Vec::with_capacity(tab.layout.views.len());
+    for view in &tab.layout.views {
         let Some(buffer) = tab.buffer_by_id(view.buffer_id) else {
             continue;
         };
@@ -329,8 +329,8 @@ mod tests {
             .map(|(start, value)| start..start + value.len())
             .collect::<Vec<_>>();
         let tab = WorkspaceTab::new(BufferState::new("many.md".to_owned(), text, None));
-        let target =
-            build_search_target(0, &tab, tab.active_view_id, "many.md", None).expect("target");
+        let target = build_search_target(0, &tab, tab.layout.active_view_id, "many.md", None)
+            .expect("target");
         let mut accumulator = SearchResultAccumulator::default();
 
         accumulator.push_target_matches(&target, &ranges);
@@ -355,10 +355,10 @@ mod tests {
         }
 
         let targets =
-            collect_search_targets_for_views(0, &tab, "tab", None, None, tab.views.iter());
+            collect_search_targets_for_views(0, &tab, "tab", None, None, tab.layout.views.iter());
 
         assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0].buffer_id, tab.buffer.id);
+        assert_eq!(targets[0].buffer_id, tab.buffers.buffer.id);
     }
 
     #[test]
@@ -377,7 +377,7 @@ mod tests {
         );
 
         let targets =
-            collect_search_targets_for_views(0, &tab, "tab", None, None, tab.views.iter());
+            collect_search_targets_for_views(0, &tab, "tab", None, None, tab.layout.views.iter());
 
         assert_eq!(targets.len(), 1);
     }

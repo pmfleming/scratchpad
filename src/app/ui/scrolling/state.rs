@@ -34,6 +34,7 @@ pub struct ScrollbarDragState {
 }
 
 impl ScrollState {
+    #[must_use]
     pub fn load(ui: &Ui, id: Id) -> Self {
         ui.ctx()
             .data(|d| d.get_temp::<Self>(id))
@@ -56,6 +57,7 @@ impl ScrollState {
 
     /// Maximum permissible offset for the given content/viewport, including
     /// one viewport-height of vertical overscroll past EOF.
+    #[must_use]
     pub fn max_offset(content: Vec2, viewport: Vec2, eof_overscroll: bool) -> Vec2 {
         let content = finite_vec2(content);
         let viewport = finite_vec2(viewport);

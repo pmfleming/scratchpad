@@ -410,9 +410,10 @@ fn paint_recent_file_label(ui: &egui::Ui, rect: egui::Rect, label: &str, exists:
 }
 
 fn recent_file_label(path: &Path) -> String {
-    path.file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.display().to_string())
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    )
 }
 
 fn missing_file_color(ui: &egui::Ui) -> egui::Color32 {

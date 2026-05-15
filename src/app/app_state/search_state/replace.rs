@@ -4,7 +4,9 @@ use super::helpers::{
     first_document_order_replacement, next_selection_for_target,
 };
 use super::{ReplacementPlan, ReplacementTargetPlan, ScratchpadApp, SearchScope};
+use super::{runtime, visual};
 use crate::app::app_state::StatusDomain;
+use crate::app::app_state::workspace::mutation as workspace_mutation;
 use crate::app::domain::{BufferId, CursorRevealMode, ViewId};
 use crate::app::services::search::{SearchError, SearchProgram, search_program};
 use crate::app::ui::editor_content::native_editor::CursorRange;
@@ -33,16 +35,16 @@ pub fn replace_current_search_match(app: &mut ScratchpadApp) -> bool {
         active_match_replacement_selection(app, &search_match, replacement.chars().count());
     let replacements = vec![(search_match.range.clone(), replacement)];
 
-    if app
-        .replace_ranges_in_active_buffer(
-            search_match.view_id,
-            search_match.buffer_id,
-            &replacements,
-            previous_selection,
-            next_selection,
-            "Search replace failed for the active match.",
-        )
-        .is_none()
+    if replace_ranges_in_active_buffer(
+        app,
+        search_match.view_id,
+        search_match.buffer_id,
+        &replacements,
+        previous_selection,
+        next_selection,
+        "Search replace failed for the active match.",
+    )
+    .is_none()
     {
         return false;
     }
@@ -50,9 +52,9 @@ pub fn replace_current_search_match(app: &mut ScratchpadApp) -> bool {
     if !rebuild_active_buffer_search_matches_or_report(app) {
         return false;
     }
-    app.select_next_active_buffer_match_from(replacement_range.end);
-    app.mark_search_dirty();
-    app.refresh_search_state();
+    visual::select_next_active_buffer_match_from(app, replacement_range.end);
+    runtime::mark_search_dirty(app);
+    runtime::refresh_search_state(app);
     true
 }
 
@@ -73,8 +75,8 @@ fn active_search_match_for_replace(app: &ScratchpadApp) -> Option<(usize, super:
 fn invalidate_stale_replace_target(app: &mut ScratchpadApp) {
     app.state.search_state.clear_replace_all_confirmation();
     app.state.status.report_search_results_stale_for_replace();
-    app.mark_search_dirty();
-    app.refresh_search_state();
+    runtime::mark_search_dirty(app);
+    runtime::refresh_search_state(app);
 }
 
 fn active_match_replacement_selection(
@@ -85,7 +87,7 @@ fn active_match_replacement_selection(
     let previous_selection = app
         .tab_manager
         .active_tab()
-        .and_then(|tab| tab.view(search_match.view_id))
+        .and_then(|tab| tab.layout.view(search_match.view_id))
         .and_then(|view| view.cursor_range)
         .unwrap_or_else(|| cursor_range_from_char_range(search_match.range.clone()));
     let replacement_range =
@@ -97,8 +99,8 @@ fn active_match_replacement_selection(
 fn rebuild_active_buffer_search_matches_or_report(app: &mut ScratchpadApp) -> bool {
     if let Err(error) = rebuild_active_buffer_search_matches(app) {
         report_search_error(app, error);
-        app.mark_search_dirty();
-        app.refresh_search_state();
+        runtime::mark_search_dirty(app);
+        runtime::refresh_search_state(app);
         return false;
     }
     true
@@ -130,8 +132,7 @@ pub(super) fn replace_ranges_in_active_buffer(
             buffer
                 .path
                 .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| buffer.name.clone())
+                .map_or_else(|| buffer.name.clone(), |path| path.display().to_string())
         })?;
 
     let replaced = {
@@ -206,8 +207,8 @@ fn replace_all_in_active_buffer(app: &mut ScratchpadApp, plan: &ReplacementPlan)
             .replace
             .pending_replace_all_confirmation = None;
         app.state.status.report_search_results_stale_for_replace();
-        app.mark_search_dirty();
-        app.refresh_search_state();
+        runtime::mark_search_dirty(app);
+        runtime::refresh_search_state(app);
         return false;
     }
 
@@ -215,7 +216,7 @@ fn replace_all_in_active_buffer(app: &mut ScratchpadApp, plan: &ReplacementPlan)
     let previous_selection = app
         .tab_manager
         .active_tab()
-        .and_then(|tab| tab.view(target.view_id))
+        .and_then(|tab| tab.layout.view(target.view_id))
         .and_then(|view| view.cursor_range);
     let (first_range, first_replacement) = first_document_order_replacement(target);
     let previous_selection =
@@ -238,13 +239,13 @@ fn replace_all_in_active_buffer(app: &mut ScratchpadApp, plan: &ReplacementPlan)
         app.state
             .status
             .set_error_status_in_domain(StatusDomain::Search, error.message());
-        app.mark_search_dirty();
-        app.refresh_search_state();
+        runtime::mark_search_dirty(app);
+        runtime::refresh_search_state(app);
         return false;
     }
-    app.select_first_match_in_active_buffer();
-    app.mark_search_dirty();
-    app.refresh_search_state();
+    visual::select_first_match_in_active_buffer(app);
+    runtime::mark_search_dirty(app);
+    runtime::refresh_search_state(app);
     app.state.status.set_info_status_in_domain(
         StatusDomain::Search,
         format!(
@@ -282,13 +283,13 @@ fn replace_all_in_multiple_buffers(app: &mut ScratchpadApp, plan: &ReplacementPl
             return false;
         }
     }
-    app.mark_search_dirty();
+    runtime::mark_search_dirty(app);
     app.tab_manager.mark_session_dirty();
     app.state
         .search_state
         .replace
         .pending_replace_all_confirmation = None;
-    app.refresh_search_state();
+    runtime::refresh_search_state(app);
     true
 }
 
@@ -317,7 +318,7 @@ fn confirm_replace_all_plan(app: &mut ScratchpadApp, plan: &ReplacementPlan) -> 
     let replacement_preview = if replacement.is_empty() {
         "empty text".to_owned()
     } else {
-        format!("\"{}\"", replacement)
+        format!("\"{replacement}\"")
     };
     app.state
         .search_state
@@ -418,8 +419,9 @@ fn rebuild_active_buffer_search_matches(app: &mut ScratchpadApp) -> Result<(), S
     let Some(tab) = app.tab_manager.tabs.as_slice().get(active_tab_index) else {
         return Ok(());
     };
-    let active_view_id = tab.active_view_id;
+    let active_view_id = tab.layout.active_view_id;
     let Some(buffer) = tab
+        .layout
         .active_view()
         .and_then(|view| tab.buffer_by_id(view.buffer_id))
     else {
@@ -487,6 +489,7 @@ fn apply_replacement_target(app: &mut ScratchpadApp, target: &ReplacementTargetP
         return false;
     };
     let previous_selection = tab
+        .layout
         .view(target.view_id)
         .and_then(|view| view.cursor_range)
         .unwrap_or_else(|| fallback_selection_for_target(target));
@@ -515,29 +518,6 @@ fn finalize_tab_buffer_mutation(app: &mut ScratchpadApp, tab_index: usize, buffe
         buffer.mark_dirty_after_local_edit();
     }
     let _ = tab;
-    app.record_pending_text_history_event(tab_index, buffer_id);
+    workspace_mutation::record_pending_text_history_event(app, tab_index, buffer_id);
     app.note_settings_toml_edit(tab_index);
 }
-
-macro_rules! compat_scratchpad_app_methods {
-    ($type:ty { $($item:item)* }) => {
-        #[allow(dead_code)]
-        impl $type {
-            $($item)*
-        }
-    };
-}
-
-compat_scratchpad_app_methods!(ScratchpadApp {
-    pub fn replace_current_search_match(&mut self) -> bool {
-        replace_current_search_match(self)
-    }
-
-    pub(super) fn replace_ranges_in_active_buffer(&mut self, view_id: ViewId, buffer_id: BufferId, replacements: &[(Range<usize>, String)], previous_selection: CursorRange, next_selection: CursorRange, error_message: &str) -> Option<String> {
-        replace_ranges_in_active_buffer(self, view_id, buffer_id, replacements, previous_selection, next_selection, error_message)
-    }
-
-    pub(crate) fn replace_all_search_matches_in_scope(&mut self) -> bool {
-        replace_all_search_matches_in_scope(self)
-    }
-});

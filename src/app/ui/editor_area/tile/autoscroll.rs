@@ -61,7 +61,7 @@ fn selection_edge_autoscroll_velocity(
 }
 
 fn clear_edge_autoscroll(tab: &mut WorkspaceTab, view_id: ViewId) {
-    if let Some(view) = tab.view_mut(view_id) {
+    if let Some(view) = tab.layout.view_mut(view_id) {
         view.scroll.clear_edge_autoscroll();
     }
 }

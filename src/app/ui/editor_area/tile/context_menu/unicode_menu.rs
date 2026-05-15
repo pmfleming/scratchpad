@@ -4,7 +4,10 @@ use super::{
     EDITOR_UNICODE_LABEL_X, apply_context_menu_row_hover_style, menu_action_button, set_menu_width,
     with_visual_overrides,
 };
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::{
+    ScratchpadApp,
+    workspace::{accessors as workspace_accessors, editing as workspace_editing},
+};
 use crate::app::theme::{border, text_muted, text_primary};
 use crate::app::ui::widget_ids;
 use eframe::egui;
@@ -113,17 +116,17 @@ pub(super) fn render_display_unicode_menu(ui: &mut egui::Ui, app: &mut Scratchpa
         let right_to_left = app
             .tab_manager
             .active_tab()
-            .and_then(|tab| tab.buffer_for_view(tab.active_view_id))
+            .and_then(|tab| tab.buffer_for_view(tab.layout.active_view_id))
             .is_some_and(|buffer| buffer.right_to_left_reading_order);
         let show_control_chars = app
             .tab_manager
             .active_tab()
-            .and_then(|tab| tab.buffer_for_view(tab.active_view_id))
+            .and_then(|tab| tab.buffer_for_view(tab.layout.active_view_id))
             .is_some_and(|buffer| buffer.show_control_chars);
         let control_chars_available = app
             .tab_manager
             .active_tab()
-            .and_then(|tab| tab.buffer_for_view(tab.active_view_id))
+            .and_then(|tab| tab.buffer_for_view(tab.layout.active_view_id))
             .is_some_and(|buffer| buffer.has_visible_control_substitutions());
 
         if menu_action_button(
@@ -162,8 +165,8 @@ pub(super) fn render_display_unicode_menu(ui: &mut egui::Ui, app: &mut Scratchpa
             set_menu_width(ui, EDITOR_UNICODE_INSERT_SUBMENU_WIDTH);
             for control in UNICODE_CONTROL_CHARS {
                 if unicode_control_char_button(ui, control) {
-                    app.insert_text_in_active_view(control.value);
-                    app.request_focus_for_active_view();
+                    workspace_editing::insert_text_in_active_view(app, control.value);
+                    workspace_accessors::request_focus_for_active_view(app);
                     ui.close();
                 }
             }
@@ -175,7 +178,7 @@ pub(super) fn render_display_unicode_menu(ui: &mut egui::Ui, app: &mut Scratchpa
 
 fn toggle_active_buffer_reading_order(app: &mut ScratchpadApp) {
     if let Some(tab) = app.tab_manager.active_tab_mut()
-        && let Some(buffer_id) = tab.active_view().map(|view| view.buffer_id)
+        && let Some(buffer_id) = tab.layout.active_view().map(|view| view.buffer_id)
     {
         if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
             buffer.right_to_left_reading_order = !buffer.right_to_left_reading_order;
@@ -187,7 +190,7 @@ fn toggle_active_buffer_reading_order(app: &mut ScratchpadApp) {
 
 fn toggle_active_buffer_control_chars(app: &mut ScratchpadApp) {
     if let Some(tab) = app.tab_manager.active_tab_mut()
-        && let Some(buffer_id) = tab.active_view().map(|view| view.buffer_id)
+        && let Some(buffer_id) = tab.layout.active_view().map(|view| view.buffer_id)
     {
         if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
             buffer.show_control_chars = !buffer.show_control_chars;
@@ -197,7 +200,7 @@ fn toggle_active_buffer_control_chars(app: &mut ScratchpadApp) {
 }
 
 fn clear_layout_cache_for_buffer(tab: &mut crate::app::domain::WorkspaceTab, buffer_id: u64) {
-    for view in &mut tab.views {
+    for view in &mut tab.layout.views {
         if view.buffer_id == buffer_id {
             view.layout_cache.clear();
         }

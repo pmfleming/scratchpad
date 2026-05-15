@@ -71,10 +71,12 @@ impl DisplaySnapshot {
     /// Extract row metadata from the given galley. The galley itself is
     /// dropped at the end of this call -- only `DisplayRowRecord`s are
     /// retained.
+    #[must_use]
     pub fn from_galley(galley: &Galley, row_height: f32) -> Self {
         Self::from_galley_with_base(galley, row_height, 0, 0)
     }
 
+    #[must_use]
     pub fn from_galley_with_base(
         galley: &Galley,
         row_height: f32,
@@ -91,6 +93,7 @@ impl DisplaySnapshot {
         )
     }
 
+    #[must_use]
     pub fn from_galley_with_base_and_overlays(
         galley: &Galley,
         row_height: f32,
@@ -109,18 +112,14 @@ impl DisplaySnapshot {
         let mut wrap_index: u16 = 0;
         let y_base = logical_line_base as f32 * row_height;
 
-        for row in galley.rows.iter() {
+        for row in &galley.rows {
             row_tops.push(y_base + row.pos.y);
             row_logical_lines.push(Some(current_logical));
             let row_start = current_char;
             current_char = current_char.saturating_add(row.char_count_including_newline() as u32);
             let char_range = row_start..current_char;
             row_char_ranges.push(char_range.clone());
-            let row_width = row
-                .glyphs
-                .last()
-                .map(|g| g.pos.x + g.advance_width)
-                .unwrap_or(0.0);
+            let row_width = row.glyphs.last().map_or(0.0, |g| g.pos.x + g.advance_width);
             max_line_width = max_line_width.max(row_width);
             row_records.push(DisplayRowRecord {
                 logical_line: current_logical,
@@ -161,22 +160,27 @@ impl DisplaySnapshot {
         }
     }
 
+    #[must_use]
     pub fn row_count(&self) -> u32 {
         self.row_logical_lines.len() as u32
     }
 
+    #[must_use]
     pub fn row_height(&self) -> f32 {
         self.row_height
     }
 
+    #[must_use]
     pub fn content_height(&self) -> f32 {
         self.content_height
     }
 
+    #[must_use]
     pub fn max_line_width(&self) -> f32 {
         self.max_line_width
     }
 
+    #[must_use]
     pub fn logical_line_for(&self, row: DisplayRow) -> Option<u32> {
         self.row_logical_lines
             .get(row.0 as usize)
@@ -184,18 +188,22 @@ impl DisplaySnapshot {
             .flatten()
     }
 
+    #[must_use]
     pub fn row_top(&self, row: DisplayRow) -> Option<f32> {
         self.row_tops.get(row.0 as usize).copied()
     }
 
+    #[must_use]
     pub fn row_char_range(&self, row: DisplayRow) -> Option<Range<u32>> {
         self.row_char_ranges.get(row.0 as usize).cloned()
     }
 
+    #[must_use]
     pub fn row_record(&self, row: DisplayRow) -> Option<&DisplayRowRecord> {
         self.row_records.get(row.0 as usize)
     }
 
+    #[must_use]
     pub fn row_records(&self) -> &[DisplayRowRecord] {
         &self.row_records
     }
@@ -203,6 +211,7 @@ impl DisplaySnapshot {
     /// Locate the snapshot-local display row that contains the given char
     /// offset. Returns `None` when the offset is outside this snapshot's
     /// sliced char range.
+    #[must_use]
     pub fn row_for_char_offset(&self, char_offset: u32) -> Option<DisplayRow> {
         if self.row_char_ranges.is_empty() {
             return None;
@@ -220,11 +229,13 @@ impl DisplaySnapshot {
     }
 
     /// Document display row for a snapshot-local row.
+    #[must_use]
     pub fn document_row_for_snapshot_row(&self, row: DisplayRow) -> Option<f32> {
         self.row_record(row)?;
         Some(self.display_row_base.saturating_add(row.0) as f32)
     }
 
+    #[must_use]
     pub fn row_for_document_row(&self, document_row: f32) -> Option<DisplayRow> {
         if !document_row.is_finite() || document_row < 0.0 {
             return None;
@@ -234,6 +245,7 @@ impl DisplaySnapshot {
         (local < self.row_count()).then_some(DisplayRow(local))
     }
 
+    #[must_use]
     pub fn document_row_for_char_offset(&self, char_offset: u32) -> Option<f32> {
         let row = self.row_for_char_offset(char_offset)?;
         self.document_row_for_snapshot_row(row)
@@ -242,6 +254,7 @@ impl DisplaySnapshot {
     /// Pixel y of the row containing `char_offset` plus the fractional offset
     /// within that row. Useful for cursor-reveal computations driven by a
     /// piece-tree-backed `ScrollAnchor`.
+    #[must_use]
     pub fn pixel_y_for_char_offset(&self, char_offset: u32) -> Option<f32> {
         Some(self.document_row_for_char_offset(char_offset)? * self.row_height)
     }
@@ -249,6 +262,7 @@ impl DisplaySnapshot {
     /// Compute the visible row range for a given scroll offset (top display
     /// row) and viewport height in pixels. `overscan_rows` adds a margin on
     /// both sides for smoother scrolling.
+    #[must_use]
     pub fn viewport_slice(
         &self,
         top_row: f32,

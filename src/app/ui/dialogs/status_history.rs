@@ -3,7 +3,9 @@ use super::text_history::{
     HISTORY_PILL_CORNER_RADIUS, HISTORY_PILL_INNER_MARGIN, HISTORY_PILL_SPACING,
     TEXT_HISTORY_LIST_MIN_HEIGHT, TEXT_HISTORY_SIZE, truncated_label,
 };
-use crate::app::app_state::{ScratchpadApp, StatusDomain, StatusMessage, StatusSeverity};
+use crate::app::app_state::{
+    DialogState, StatusDomain, StatusMessage, StatusSeverity, StatusState,
+};
 use crate::app::theme::{action_bg, border, tab_selected_accent, tab_selected_bg};
 use crate::app::ui::settings::dialog_card_frame;
 use crate::app::ui::{callout, settings, widget_ids};
@@ -44,12 +46,16 @@ impl StatusHistoryRow {
     }
 }
 
-pub(crate) fn show_status_history_window(ctx: &egui::Context, app: &mut ScratchpadApp) {
-    if !app.state.status_history_open {
+pub(crate) fn show_status_history_window(
+    ctx: &egui::Context,
+    dialogs: &mut DialogState,
+    status: &StatusState,
+) {
+    if !dialogs.status_history.is_open() {
         return;
     }
 
-    let rows = status_history_rows(app.state.status.history.iter());
+    let rows = status_history_rows(status.history.iter());
     let filter = read_filter(ctx);
     let mut next_filter = filter;
     let mut close_requested = false;
@@ -64,7 +70,7 @@ pub(crate) fn show_status_history_window(ctx: &egui::Context, app: &mut Scratchp
         write_filter(ctx, next_filter);
     }
     if close_requested {
-        app.close_status_history();
+        dialogs.status_history.close();
     }
 }
 

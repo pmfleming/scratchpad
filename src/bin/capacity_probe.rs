@@ -364,12 +364,12 @@ fn run_split_capacity_cycle(split_count: usize) -> usize {
     let mut tab = build_tile_heavy_tab(split_count, SPLIT_BYTES_PER_TILE);
     let _ = tab.rebalance_views_equally();
     let _ = tab.split_active_view(SplitAxis::Vertical);
-    if tab.views.len() > split_count
-        && let Some(view_id) = tab.views.last().map(|view| view.id)
+    if tab.layout.views.len() > split_count
+        && let Some(view_id) = tab.layout.views.last().map(|view| view.id)
     {
         let _ = tab.close_view(view_id);
     }
-    tab.views.len()
+    tab.layout.views.len()
 }
 
 fn run_view_capacity_cycle(view_count: usize) -> usize {
@@ -378,15 +378,15 @@ fn run_view_capacity_cycle(view_count: usize) -> usize {
         utf8_text_of_size(VIEW_COUNT_BUFFER_BYTES),
         None,
     ));
-    while tab.views.len() < view_count {
-        let _ = tab.split_active_view(if tab.views.len().is_multiple_of(2) {
+    while tab.layout.views.len() < view_count {
+        let _ = tab.split_active_view(if tab.layout.views.len().is_multiple_of(2) {
             SplitAxis::Vertical
         } else {
             SplitAxis::Horizontal
         });
     }
     let _ = tab.rebalance_views_equally();
-    tab.views.len()
+    tab.layout.views.len()
 }
 
 fn run_paste_capacity_cycle(insert_bytes: usize) -> usize {

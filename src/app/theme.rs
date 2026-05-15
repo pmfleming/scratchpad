@@ -83,6 +83,7 @@ pub const TAB_HEIGHT: f32 = HEADER_CONTROL_HEIGHT;
 pub const TAB_BUTTON_WIDTH: f32 = 140.0;
 pub const TAB_LIST_SCROLLBAR_GUTTER: f32 = 8.0;
 
+#[must_use]
 pub fn tab_list_scroll_style() -> egui::style::ScrollStyle {
     let mut style = egui::style::ScrollStyle::floating();
     style.floating_allocated_width = TAB_LIST_SCROLLBAR_GUTTER;

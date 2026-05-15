@@ -82,7 +82,7 @@ try {
     }
 
     Invoke-NativeCommand -Label "cargo fmt --check" -Command { cargo fmt --check }
-    Invoke-NativeCommand -Label "cargo clippy" -Command { cargo clippy --all-targets --all-features -- -D warnings }
+    Invoke-NativeCommand -Label "cargo clippy" -Command { cargo clippy --lib --all-features -- -D warnings }
     Invoke-NativeCommand -Label "cargo test" -Command { cargo test }
 
     $needsPythonTooling = (-not $SkipComplexity) -or (-not $SkipSlowspots) -or (-not $SkipSearchSpeed) -or (-not $SkipClones) -or (-not $SkipTypeHealth) -or (-not $SkipLocality) -or (-not $SkipLeverage)

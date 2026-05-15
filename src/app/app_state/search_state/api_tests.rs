@@ -1,6 +1,6 @@
 use super::{SEARCH_PREVIEW_CACHE_LIMIT, ScratchpadApp, SearchMatch, SearchPreviewCacheKey};
 use crate::app::app_state::search_controller::{set_search_replace_open, set_search_replacement};
-use crate::app::commands::AppCommand;
+use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::domain::{BufferState, WorkspaceTab};
 use crate::app::services::search::find_matches;
 use crate::app::services::session_store::SessionStore;
@@ -95,14 +95,14 @@ fn replace_current_advances_past_self_matching_replacement() {
     app.state.search_state.panel.replace_open = true;
     app.state.search_state.results.active_match_index = Some(0);
 
-    assert!(app.replace_current_search_match());
+    assert!(crate::app::app_state::search_replace::replace_current_search_match(&mut app));
     wait_for_search_results(&mut app);
 
     assert_eq!(active_buffer_text(&app), "foobar foo");
     let active_match = active_search_match(&app).expect("active match after first replace");
     assert_eq!(active_match.range, 7..10);
 
-    assert!(app.replace_current_search_match());
+    assert!(crate::app::app_state::search_replace::replace_current_search_match(&mut app));
     wait_for_search_results(&mut app);
 
     assert_eq!(active_buffer_text(&app), "foobar foobar");
@@ -116,7 +116,7 @@ fn replace_current_advances_after_empty_replacement() {
     app.state.search_state.panel.replace_open = true;
     app.state.search_state.results.active_match_index = Some(0);
 
-    assert!(app.replace_current_search_match());
+    assert!(crate::app::app_state::search_replace::replace_current_search_match(&mut app));
     wait_for_search_results(&mut app);
 
     assert_eq!(active_buffer_text(&app), " foo");
@@ -138,15 +138,84 @@ fn tab_reorder_marks_open_search_dirty() {
     seed_search_matches(&mut app, "first");
     app.state.search_state.runtime.dirty = false;
 
-    app.handle_command(AppCommand::ReorderTab {
-        from_index: 0,
-        to_index: 1,
-    });
+    crate::app::commands::handle_command(
+        &mut app,
+        AppCommand::Workspace(WorkspaceCommand::ReorderTab {
+            from_index: 0,
+            to_index: 1,
+        }),
+    );
 
     assert!(app.state.search_state.runtime.dirty);
     assert_eq!(
         app.state.search_state.runtime.freshness,
         super::SearchFreshness::Stale
+    );
+}
+
+#[test]
+fn active_buffer_search_counts_matches() {
+    let mut app = app_with_search_text("foo bar foo");
+
+    app.open_search();
+    app.set_search_query("foo");
+    wait_for_search_results(&mut app);
+
+    assert_eq!(app.search_match_count(), 2);
+    assert_eq!(app.search_active_match_index(), Some(0));
+}
+
+#[test]
+fn all_open_tabs_search_counts_matches_across_tabs() {
+    let mut app = app_with_search_text("needle one");
+    app.tab_manager.tabs.as_mut_slice()[0].buffers.buffer.name = "one.txt".to_owned();
+    crate::app::app_state::workspace_controller::append_tab(
+        &mut app,
+        WorkspaceTab::new(BufferState::new(
+            "two.txt".to_owned(),
+            "needle two needle".to_owned(),
+            None,
+        )),
+    );
+
+    app.open_search();
+    app.set_search_scope(super::SearchScope::AllOpenTabs);
+    app.set_search_query("needle");
+    wait_for_search_results(&mut app);
+
+    assert_eq!(app.search_match_count(), 3);
+}
+
+#[test]
+fn replace_all_changes_every_buffer_in_scope() {
+    let mut app = app_with_search_text("foo one");
+    app.tab_manager.tabs.as_mut_slice()[0].buffers.buffer.name = "one.txt".to_owned();
+    crate::app::app_state::workspace_controller::append_tab(
+        &mut app,
+        WorkspaceTab::new(BufferState::new(
+            "two.txt".to_owned(),
+            "foo two foo".to_owned(),
+            None,
+        )),
+    );
+
+    app.open_search_and_replace();
+    app.set_search_scope(super::SearchScope::AllOpenTabs);
+    app.set_search_query("foo");
+    app.set_search_replacement("bar");
+    wait_for_search_results(&mut app);
+
+    assert!(!app.replace_all_search_matches());
+    assert!(app.replace_all_search_matches());
+    wait_for_search_results(&mut app);
+
+    assert_eq!(
+        app.tab_manager.tabs.as_slice()[0].buffers.buffer.text(),
+        "bar one"
+    );
+    assert_eq!(
+        app.tab_manager.tabs.as_slice()[1].buffers.buffer.text(),
+        "bar two bar"
     );
 }
 
@@ -204,13 +273,13 @@ fn app_with_search_text(text: &str) -> ScratchpadApp {
 
 fn seed_matches_for_plan_lines(app: &mut ScratchpadApp, ranges: &[Range<usize>]) {
     let tab = &app.tab_manager.tabs.as_slice()[0];
-    let buffer = &tab.buffer;
+    let buffer = &tab.buffers.buffer;
     app.state.search_state.results.matches = ranges
         .iter()
         .cloned()
         .map(|range| SearchMatch {
             tab_index: 0,
-            view_id: tab.active_view_id,
+            view_id: tab.layout.active_view_id,
             buffer_id: buffer.id,
             buffer_label: buffer.display_name(),
             target_revision: buffer.document_revision(),
@@ -234,12 +303,12 @@ fn seed_search_matches(app: &mut ScratchpadApp, query: &str) {
     let text = active_buffer_text(app);
     let ranges = find_matches(&text, query, app.state.search_state.search_options());
     let tab = &app.tab_manager.tabs.as_slice()[app.tab_manager.active_tab_index];
-    let buffer = &tab.buffer;
+    let buffer = &tab.buffers.buffer;
     app.state.search_state.results.matches = ranges
         .into_iter()
         .map(|range| SearchMatch {
             tab_index: app.tab_manager.active_tab_index,
-            view_id: tab.active_view_id,
+            view_id: tab.layout.active_view_id,
             buffer_id: buffer.id,
             buffer_label: buffer.display_name(),
             target_revision: buffer.document_revision(),
@@ -259,7 +328,7 @@ fn seed_search_matches(app: &mut ScratchpadApp, query: &str) {
 fn active_buffer_text(app: &ScratchpadApp) -> String {
     app.tab_manager
         .active_tab()
-        .and_then(|tab| tab.active_view())
+        .and_then(|tab| tab.layout.active_view())
         .and_then(|view| {
             app.tab_manager
                 .active_tab()
@@ -272,7 +341,7 @@ fn active_buffer_text(app: &ScratchpadApp) -> String {
 fn active_buffer_revision(app: &ScratchpadApp) -> u64 {
     app.tab_manager
         .active_tab()
-        .and_then(|tab| tab.active_view())
+        .and_then(|tab| tab.layout.active_view())
         .and_then(|view| {
             app.tab_manager
                 .active_tab()
@@ -287,7 +356,7 @@ fn active_view_replacement_preview(
 ) -> Option<&crate::app::domain::SearchReplacementPreview> {
     app.tab_manager
         .active_tab()
-        .and_then(|tab| tab.active_view())
+        .and_then(|tab| tab.layout.active_view())
         .and_then(|view| view.search_replacement_preview.as_ref())
 }
 

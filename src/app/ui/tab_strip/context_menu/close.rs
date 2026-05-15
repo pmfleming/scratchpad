@@ -1,5 +1,5 @@
 use crate::app::app_state::{ScratchpadApp, StatusDomain};
-use crate::app::commands::AppCommand;
+use crate::app::commands::{AppCommand, SettingsCommand, WorkspaceCommand};
 use crate::app::utils::pluralize;
 
 #[derive(Clone, Copy)]
@@ -10,9 +10,17 @@ enum CloseDisplayTabs {
 
 pub(super) fn close_current_slot(app: &mut ScratchpadApp, slot_index: usize, is_settings: bool) {
     if is_settings {
-        app.handle_command(AppCommand::CloseSettings);
-    } else if let Some(index) = app.workspace_index_for_slot(slot_index) {
-        app.handle_command(AppCommand::RequestCloseTab { index });
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Settings(SettingsCommand::CloseSettings),
+        );
+    } else if let Some(index) =
+        crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(app, slot_index)
+    {
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::RequestCloseTab { index }),
+        );
     }
 }
 
@@ -25,7 +33,9 @@ pub(super) fn close_other_slots(app: &mut ScratchpadApp, current_slot: usize) {
 }
 
 pub(super) fn close_slots_after(app: &mut ScratchpadApp, current_slot: usize) {
-    let slots = ((current_slot + 1)..app.total_tab_slots()).collect::<Vec<_>>();
+    let slots = ((current_slot + 1)
+        ..crate::app::app_state::workspace::display_tabs::total_tab_slots(app))
+        .collect::<Vec<_>>();
     close_display_slots(app, slots, CloseDisplayTabs::SkipDirty, "Close tabs");
 }
 
@@ -40,7 +50,7 @@ pub(super) fn close_all_slots(app: &mut ScratchpadApp) {
 }
 
 fn tab_slots(app: &ScratchpadApp) -> Vec<usize> {
-    (0..app.total_tab_slots()).collect()
+    (0..crate::app::app_state::workspace::display_tabs::total_tab_slots(app)).collect()
 }
 
 fn close_display_slots(
@@ -64,11 +74,14 @@ fn close_display_slots(
     }
 
     if close_settings {
-        app.handle_command(AppCommand::CloseSettings);
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Settings(SettingsCommand::CloseSettings),
+        );
     }
 
     if closed_count > 0 || close_settings {
-        let _ = app.persist_session_now();
+        let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
     }
 
     if skipped_dirty > 0 {
@@ -92,12 +105,14 @@ fn collect_close_targets(
     let mut skipped_dirty = 0usize;
 
     for slot_index in slots {
-        if app.tab_slot_is_settings(slot_index) {
+        if crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(app, slot_index) {
             close_settings |= matches!(mode, CloseDisplayTabs::SkipDirty);
             continue;
         }
 
-        let Some(index) = app.workspace_index_for_slot(slot_index) else {
+        let Some(index) = crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(
+            app, slot_index,
+        ) else {
             continue;
         };
         let is_dirty = app

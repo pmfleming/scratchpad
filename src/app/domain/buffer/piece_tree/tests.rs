@@ -4,14 +4,13 @@ use super::{
 };
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
-use std::sync::Arc;
 
 #[test]
 fn anchor_left_bias_stays_before_insertion_at_same_offset() {
     let mut tree = PieceTreeLite::from_string("ab".to_owned());
     let anchor = tree.create_anchor(1, AnchorBias::Left);
 
-    tree.insert(1, "X");
+    tree.insert_with_source(1, "X", PieceSource::Edit);
 
     assert_eq!(tree.extract_text(), "aXb");
     assert_eq!(tree.anchor_position(anchor), Some(1));
@@ -22,7 +21,7 @@ fn anchor_right_bias_moves_after_insertion_at_same_offset() {
     let mut tree = PieceTreeLite::from_string("ab".to_owned());
     let anchor = tree.create_anchor(1, AnchorBias::Right);
 
-    tree.insert(1, "X");
+    tree.insert_with_source(1, "X", PieceSource::Edit);
 
     assert_eq!(tree.anchor_position(anchor), Some(2));
 }
@@ -55,7 +54,7 @@ fn owner_metadata_survives_edits() {
     let owner = AnchorOwner::new(AnchorOwnerKind::Cursor, Some(42));
     let anchor = tree.create_anchor_with_owner(3, AnchorBias::Right, owner);
 
-    tree.insert(0, ">>");
+    tree.insert_with_source(0, ">>", PieceSource::Edit);
     tree.remove_char_range(5..6);
 
     assert_eq!(tree.anchor_owner(anchor), Some(owner));
@@ -68,7 +67,7 @@ fn anchor_stripped_clone_shares_original_text_storage() {
 
     let clone = tree.clone_without_anchors();
 
-    assert!(Arc::ptr_eq(&tree.original, &clone.original));
+    assert!(tree.storage.shares_original_storage_with(&clone.storage));
     assert_eq!(tree.anchor_position(anchor), Some(3));
     assert_eq!(clone.anchor_position(anchor), None);
     assert_eq!(clone.extract_text(), tree.extract_text());
@@ -78,7 +77,7 @@ fn anchor_stripped_clone_shares_original_text_storage() {
 fn unicode_insert_delete_and_extract_use_char_offsets() {
     let mut tree = PieceTreeLite::from_string("a😀c".to_owned());
 
-    tree.insert(2, "β");
+    tree.insert_with_source(2, "β", PieceSource::Edit);
     tree.remove_char_range(1..2);
 
     assert_eq!(tree.extract_text(), "aβc");
@@ -100,7 +99,7 @@ fn bounded_extraction_reports_truncation_without_splitting_characters() {
 fn line_lookup_tracks_mixed_edits() {
     let mut tree = PieceTreeLite::from_string("one\ntwo\nfour".to_owned());
 
-    tree.insert(8, "three\n");
+    tree.insert_with_source(8, "three\n", PieceSource::Edit);
     tree.remove_char_range(0..4);
 
     assert_eq!(tree.extract_text(), "two\nthree\nfour");
@@ -134,8 +133,8 @@ fn line_lookup_handles_lines_spanning_many_leaves() {
 fn batched_previews_match_single_preview_on_edited_tree() {
     let mut tree =
         PieceTreeLite::from_string("alpha target\nbeta target beta\nfinal target".to_owned());
-    tree.insert(6, "inserted ");
-    tree.insert(31, "wide ");
+    tree.insert_with_source(6, "inserted ", PieceSource::Edit);
+    tree.insert_with_source(31, "wide ", PieceSource::Edit);
     tree.remove_char_range(0..1);
 
     assert!(tree.borrow_range(0..tree.len_chars()).is_none());
@@ -228,7 +227,7 @@ fn randomized_edits_match_string_model() {
         if model_len == 0 || rng.random_bool(0.65) {
             let index = rng.random_range(0..=model_len);
             let text = random_text(&mut rng);
-            tree.insert(index, &text);
+            tree.insert_with_source(index, &text, PieceSource::Edit);
             insert_string_at_char(&mut model, index, &text);
         } else {
             let start = rng.random_range(0..model_len);

@@ -1,4 +1,4 @@
-use super::{AppSurface, ScratchpadApp};
+use super::ScratchpadApp;
 use crate::app::fonts::EditorFontPreset;
 use crate::app::paths_match;
 use crate::app::services::file_controller::FileController;
@@ -30,18 +30,22 @@ impl ScratchpadApp {
 }
 
 impl AppSettings {
+    #[must_use]
     pub fn font_size(&self) -> f32 {
         self.editor.font_size
     }
 
+    #[must_use]
     pub fn editor_font(&self) -> EditorFontPreset {
         self.editor.editor_font
     }
 
+    #[must_use]
     pub fn editor_gutter(&self) -> u8 {
         self.editor.editor_gutter
     }
 
+    #[must_use]
     pub fn theme_mode(&self) -> AppThemeMode {
         self.editor.theme_mode
     }
@@ -50,6 +54,7 @@ impl AppSettings {
         !uses_stock_editor_palette(self)
     }
 
+    #[must_use]
     pub fn editor_text_color(&self) -> egui::Color32 {
         color_from_hex(
             &self.editor.editor_text_color,
@@ -57,6 +62,7 @@ impl AppSettings {
         )
     }
 
+    #[must_use]
     pub fn editor_background_color(&self) -> egui::Color32 {
         color_from_hex(
             &self.editor.editor_background_color,
@@ -64,6 +70,7 @@ impl AppSettings {
         )
     }
 
+    #[must_use]
     pub fn editor_text_highlight_color(&self) -> egui::Color32 {
         color_from_hex(
             &self.editor.editor_text_highlight_color,
@@ -74,6 +81,7 @@ impl AppSettings {
         )
     }
 
+    #[must_use]
     pub fn editor_text_highlight_text_color(&self) -> egui::Color32 {
         let generated =
             crate::app::color_contrast::optimal_text_color(self.editor_text_highlight_color());
@@ -84,50 +92,62 @@ impl AppSettings {
         color_from_hex(&self.editor.editor_text_highlight_text_color, generated)
     }
 
+    #[must_use]
     pub fn word_wrap(&self) -> bool {
         self.editor.word_wrap
     }
 
+    #[must_use]
     pub fn tab_list_position(&self) -> TabListPosition {
         self.workspace.tab_list_position
     }
 
+    #[must_use]
     pub fn tab_order_mode(&self) -> TabOrderMode {
         self.workspace.tab_order_mode
     }
 
+    #[must_use]
     pub fn tab_order_direction(&self) -> TabOrderDirection {
         self.workspace.tab_order_direction
     }
 
+    #[must_use]
     pub fn file_open_disposition(&self) -> FileOpenDisposition {
         self.workspace.file_open_disposition
     }
 
+    #[must_use]
     pub fn new_tab_placement(&self) -> NewTabPlacement {
         self.workspace.new_tab_placement
     }
 
+    #[must_use]
     pub fn startup_session_behavior(&self) -> StartupSessionBehavior {
         self.workspace.startup_session_behavior
     }
 
+    #[must_use]
     pub fn tab_list_width(&self) -> f32 {
         self.workspace.tab_list_width
     }
 
+    #[must_use]
     pub fn auto_hide_tab_list(&self) -> bool {
         self.workspace.auto_hide_tab_list
     }
 
+    #[must_use]
     pub fn tab_list_auto_hide_delay_seconds(&self) -> f32 {
         self.workspace.tab_list_auto_hide_delay_seconds
     }
 
+    #[must_use]
     pub fn recent_files_enabled(&self) -> bool {
         self.workspace.recent_files_enabled
     }
 
+    #[must_use]
     pub fn status_bar_visible(&self) -> bool {
         self.ui.status_bar_visible
     }
@@ -145,7 +165,7 @@ pub(crate) const TAB_LIST_AUTO_HIDE_DELAY_MIN_SECONDS: f32 = 0.0;
 pub(crate) const TAB_LIST_AUTO_HIDE_DELAY_MAX_SECONDS: f32 = 10.0;
 
 pub fn showing_settings(app: &ScratchpadApp) -> bool {
-    app.state.active_surface == AppSurface::Settings
+    app.state.chrome.showing_settings()
 }
 
 pub(crate) fn settings_tab_open(app: &ScratchpadApp) -> bool {
@@ -217,8 +237,8 @@ pub(super) fn apply_settings(app: &mut ScratchpadApp, settings: AppSettings) {
     settings.workspace.tab_list_auto_hide_delay_seconds = sanitize_tab_list_auto_hide_delay_seconds(
         settings.workspace.tab_list_auto_hide_delay_seconds,
     );
-    if !settings.ui.settings_tab_open && app.state.active_surface == AppSurface::Settings {
-        app.state.active_surface = AppSurface::Workspace;
+    if !settings.ui.settings_tab_open && app.state.chrome.showing_settings() {
+        app.state.chrome.activate_workspace_surface();
     }
     app.state.settings_tab_index = settings.ui.settings_tab_index.unwrap_or(usize::MAX);
     app.state.recently_closed_files = settings
@@ -275,8 +295,8 @@ pub(super) fn sync_stock_editor_palette_with_theme_mode(settings: &mut AppSettin
         return;
     }
 
-    settings.editor.editor_text_color = text_color.to_owned();
-    settings.editor.editor_background_color = background_color.to_owned();
+    text_color.clone_into(&mut settings.editor.editor_text_color);
+    background_color.clone_into(&mut settings.editor.editor_background_color);
 }
 
 pub(super) fn uses_stock_editor_palette(settings: &AppSettings) -> bool {
@@ -332,54 +352,3 @@ fn sanitize_tab_list_auto_hide_delay_seconds(seconds: f32) -> f32 {
         ScratchpadApp::TAB_LIST_AUTO_HIDE_DELAY_MAX_SECONDS,
     )
 }
-
-macro_rules! compat_scratchpad_app_methods {
-    ($type:ty { $($item:item)* }) => {
-        #[allow(dead_code)]
-        impl $type {
-            $($item)*
-        }
-    };
-}
-
-compat_scratchpad_app_methods!(ScratchpadApp {
-    pub fn showing_settings(&self) -> bool {
-        showing_settings(self)
-    }
-
-    pub(crate) fn settings_tab_open(&self) -> bool {
-        settings_tab_open(self)
-    }
-
-    pub(crate) fn vertical_tab_list_width(&self) -> f32 {
-        vertical_tab_list_width(self)
-    }
-
-    pub fn settings_path(&self) -> &Path {
-        settings_path(self)
-    }
-
-    pub(crate) fn is_settings_file_path(&self, path: &Path) -> bool {
-        is_settings_file_path(self, path)
-    }
-
-    pub(crate) fn mark_active_buffer_as_settings_file(&mut self) {
-        mark_active_buffer_as_settings_file(self)
-    }
-
-    pub(super) fn load_settings_from_store(&mut self) -> bool {
-        load_settings_from_store(self)
-    }
-
-    pub(super) fn apply_settings(&mut self, settings: AppSettings) {
-        apply_settings(self, settings)
-    }
-
-    pub(crate) fn persist_settings_now(&mut self) -> std::io::Result<()> {
-        persist_settings_now(self)
-    }
-
-    pub fn apply_theme_to_context(&mut self, ctx: &egui::Context) {
-        apply_theme_to_context(self, ctx)
-    }
-});

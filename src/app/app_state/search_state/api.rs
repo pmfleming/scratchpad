@@ -1,8 +1,11 @@
 use super::{
     SEARCH_PREVIEW_CACHE_LIMIT, ScratchpadApp, SearchFocusTarget, SearchMatch,
-    SearchPreviewCacheKey, SearchResultEntry, SearchScope, SearchScopeOrigin,
+    SearchPreviewCacheKey, SearchResultEntry, SearchScope, SearchScopeOrigin, replace, runtime,
+    visual,
 };
-use crate::app::commands::AppCommand;
+use crate::app::app_state::settings_controller;
+use crate::app::app_state::workspace::accessors as workspace_accessors;
+use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::services::search::{self, SearchMode};
 use std::ops::Range;
 
@@ -21,13 +24,13 @@ fn default_search_scope_and_origin(app: &ScratchpadApp) -> (SearchScope, SearchS
 }
 
 fn open_search_with_focus(app: &mut ScratchpadApp, focus_target: SearchFocusTarget) {
-    app.activate_workspace_surface();
+    settings_controller::activate_workspace_surface(app);
     let (default_scope, scope_origin) = default_search_scope_and_origin(app);
     app.state
         .search_state
         .show_with_focus(focus_target, default_scope, scope_origin);
-    app.mark_search_dirty();
-    app.refresh_search_state();
+    runtime::mark_search_dirty(app);
+    runtime::refresh_search_state(app);
 }
 
 pub(crate) fn open_search(app: &mut ScratchpadApp) {
@@ -40,8 +43,8 @@ pub(crate) fn open_search_and_replace(app: &mut ScratchpadApp) {
 
 pub(crate) fn close_search(app: &mut ScratchpadApp) {
     app.state.search_state.close();
-    app.clear_search_highlights();
-    app.request_focus_for_active_view();
+    visual::clear_search_highlights(app);
+    workspace_accessors::request_focus_for_active_view(app);
 }
 
 pub(crate) fn toggle_search(app: &mut ScratchpadApp) {
@@ -55,14 +58,14 @@ pub(crate) fn toggle_search(app: &mut ScratchpadApp) {
 pub(crate) fn set_search_replace_open(app: &mut ScratchpadApp, open: bool) {
     app.state.search_state.set_replace_open(open);
     if app.state.search_state.panel.open && !app.state.search_state.query.query.is_empty() {
-        app.refresh_search_visual_state();
+        visual::refresh_search_visual_state(app);
     }
 }
 
 fn after_search_param_change(app: &mut ScratchpadApp) {
     app.state.search_state.clear_replace_all_confirmation();
-    app.mark_search_dirty();
-    app.refresh_search_state();
+    runtime::mark_search_dirty(app);
+    runtime::refresh_search_state(app);
 }
 
 pub(crate) fn set_search_query(app: &mut ScratchpadApp, query: impl Into<String>) {
@@ -76,7 +79,7 @@ pub(crate) fn set_search_replacement(app: &mut ScratchpadApp, replacement: impl 
         && app.state.search_state.panel.open
         && !app.state.search_state.query.query.is_empty()
     {
-        app.refresh_search_visual_state();
+        visual::refresh_search_visual_state(app);
     }
 }
 
@@ -160,7 +163,7 @@ pub(super) fn activate_search_match(app: &mut ScratchpadApp, index: usize) -> bo
         return false;
     }
 
-    app.set_active_search_index(Some(index));
+    visual::set_active_search_index(app, Some(index));
     true
 }
 
@@ -168,22 +171,31 @@ fn focus_search_match(app: &mut ScratchpadApp, search_match: SearchMatch) -> boo
     let preserve_session_clean = !app.tab_manager.session_dirty;
 
     if search_match.tab_index != app.tab_manager.active_tab_index {
-        app.handle_command(AppCommand::ActivateTab {
-            index: search_match.tab_index,
-        });
-        app.state.pending_editor_focus = None;
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ActivateTab {
+                index: search_match.tab_index,
+            }),
+        );
+        app.state.focus.clear();
     }
-    let destination_slot = app.slot_for_workspace_index(search_match.tab_index);
-    app.select_only_tab_slot(destination_slot);
+    let destination_slot = crate::app::app_state::workspace::display_tabs::slot_for_workspace_index(
+        app,
+        search_match.tab_index,
+    );
+    crate::app::app_state::workspace::display_tabs::select_only_tab_slot(app, destination_slot);
     if app
         .tab_manager
         .active_tab()
-        .is_some_and(|tab| tab.active_view_id != search_match.view_id)
+        .is_some_and(|tab| tab.layout.active_view_id != search_match.view_id)
     {
-        app.handle_command(AppCommand::ActivateView {
-            view_id: search_match.view_id,
-        });
-        app.state.pending_editor_focus = None;
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ActivateView {
+                view_id: search_match.view_id,
+            }),
+        );
+        app.state.focus.clear();
     }
     if preserve_session_clean {
         app.tab_manager.clear_session_dirty();
@@ -204,6 +216,7 @@ impl ScratchpadApp {
         toggle_search(self);
     }
 
+    #[must_use]
     pub fn search_open(&self) -> bool {
         self.state.search_state.open()
     }
@@ -220,16 +233,18 @@ impl ScratchpadApp {
         set_search_scope(self, scope);
     }
 
+    #[must_use]
     pub fn search_match_count(&self) -> usize {
         self.state.search_state.match_count()
     }
 
+    #[must_use]
     pub fn search_active_match_index(&self) -> Option<usize> {
         self.state.search_state.active_match_index()
     }
 
     pub fn poll_search(&mut self) {
-        self.refresh_search_state();
+        runtime::refresh_search_state(self);
     }
 
     pub(crate) fn search_result_entry_at(
@@ -309,12 +324,13 @@ impl ScratchpadApp {
         {
             return false;
         }
-        self.replace_all_search_matches_in_scope()
+        replace::replace_all_search_matches_in_scope(self)
     }
 
     pub(crate) fn active_search_selection_range(&self) -> Option<Range<usize>> {
         self.tab_manager
             .active_tab()?
+            .layout
             .active_view()
             .and_then(|view| view.cursor_range)
             .and_then(super::helpers::selection_char_range)

@@ -1,7 +1,6 @@
-use super::{RuntimeIoState, ScratchpadApp};
+use super::ScratchpadApp;
 use crate::app::domain::BufferId;
 use crate::app::services::file_controller::FileController;
-use crate::app::services::file_watch::FileWatchEvent;
 use eframe::egui;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -12,10 +11,12 @@ const FILE_WATCH_DEBOUNCE: Duration = Duration::from_millis(150);
 impl ScratchpadApp {
     pub(crate) fn poll_file_watcher(&mut self, ctx: &egui::Context) {
         self.sync_watched_file_directories();
-        self.state.io.collect_file_watch_events();
+        self.state
+            .file_watch
+            .collect_file_watch_events(Instant::now() + FILE_WATCH_DEBOUNCE);
         self.apply_due_file_watch_rescans();
 
-        if self.state.io.has_pending_file_watch_rescans() {
+        if self.state.file_watch.has_pending_file_watch_rescans() {
             ctx.request_repaint_after(FILE_WATCH_DEBOUNCE);
         }
     }
@@ -25,11 +26,14 @@ impl ScratchpadApp {
             .open_file_parent_directories()
             .into_iter()
             .collect::<BTreeSet<_>>();
-        self.state.io.set_watched_file_directories(dirs);
+        self.state.file_watch.set_watched_file_directories(dirs);
     }
 
     fn apply_due_file_watch_rescans(&mut self) {
-        let due_dirs = self.state.io.take_due_file_watch_rescans(Instant::now());
+        let due_dirs = self
+            .state
+            .file_watch
+            .take_due_file_watch_rescans(Instant::now());
         if due_dirs.is_empty() {
             return;
         }
@@ -74,41 +78,6 @@ impl ScratchpadApp {
             .flat_map(|tab| tab.buffers())
             .filter_map(|buffer| buffer.path.clone())
             .collect()
-    }
-}
-
-impl RuntimeIoState {
-    fn set_watched_file_directories(&mut self, dirs: BTreeSet<PathBuf>) {
-        self.file_watch_service.set_watched_directories(dirs);
-    }
-
-    fn collect_file_watch_events(&mut self) {
-        let due_at = Instant::now() + FILE_WATCH_DEBOUNCE;
-        for event in self.file_watch_service.drain_events() {
-            match event {
-                FileWatchEvent::DirectoryChanged(dir) => {
-                    self.pending_file_watch_rescans.insert(dir, due_at);
-                }
-            }
-        }
-    }
-
-    fn take_due_file_watch_rescans(&mut self, now: Instant) -> Vec<PathBuf> {
-        let due_dirs = self
-            .pending_file_watch_rescans
-            .iter()
-            .filter_map(|(dir, due_at)| (*due_at <= now).then_some(dir.clone()))
-            .collect::<Vec<_>>();
-
-        for dir in &due_dirs {
-            self.pending_file_watch_rescans.remove(dir);
-        }
-
-        due_dirs
-    }
-
-    fn has_pending_file_watch_rescans(&self) -> bool {
-        !self.pending_file_watch_rescans.is_empty()
     }
 }
 

@@ -1,30 +1,39 @@
-use crate::app::domain::{BufferId, SplitAxis, TabManager, ViewId};
+use crate::app::domain::{BufferId, SplitAxis, TabManager};
 use crate::app::fonts::EditorFontPreset;
-use crate::app::services::background_io::{BackgroundIoDispatcher, BackgroundIoResult};
-use crate::app::services::file_watch::FileWatchService;
 use crate::app::services::session_store::SessionStore;
 use crate::app::services::settings_store::{AppSettings, AppThemeMode, SettingsStore};
 use crate::app::startup::StartupOptions;
 use crate::app::text_history::TextHistoryCache;
 use eframe::egui;
 use search_state::SearchState;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::fmt::Display;
 use std::path::PathBuf;
-use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 mod background_io;
+mod chrome_state;
+mod dialog_state;
 mod file_watch;
+mod focus_state;
 pub(crate) mod frame;
+mod runtime_state;
 mod search_state;
 pub(crate) mod settings_state;
 mod startup_state;
 mod types;
 pub(crate) mod workspace;
 
+pub(crate) use chrome_state::ChromeState;
+pub(crate) use dialog_state::DialogState;
+pub(crate) use focus_state::FocusState;
+pub use frame::prepare_context_before_first_frame;
+pub(crate) use runtime_state::{BackgroundIoState, FileWatchState};
 pub use search_state::SearchScope;
 pub(crate) use search_state::api as search_controller;
+pub(crate) use search_state::replace as search_replace;
+pub(crate) use search_state::runtime as search_runtime;
+pub(crate) use search_state::visual as search_visual;
 pub(crate) use search_state::{
     SearchFocusTarget, SearchFreshness, SearchProgress, SearchReplaceAvailability,
     SearchResultEntry, SearchResultGroup, SearchScopeOrigin, SearchStatus,
@@ -80,60 +89,6 @@ pub(crate) struct StatusState {
     pub(crate) next_id: u64,
 }
 
-pub(crate) struct RuntimeIoState {
-    pub(crate) background_io_tx: BackgroundIoDispatcher,
-    pub(crate) background_io_rx: Receiver<BackgroundIoResult>,
-    pub(crate) next_background_request_id: u64,
-    pub(crate) pending_background_actions: HashMap<u64, PendingBackgroundAction>,
-    pub(crate) file_watch_service: FileWatchService,
-    pub(crate) pending_file_watch_rescans: HashMap<PathBuf, Instant>,
-}
-
-impl RuntimeIoState {
-    fn new(
-        background_io_tx: BackgroundIoDispatcher,
-        background_io_rx: Receiver<BackgroundIoResult>,
-    ) -> Self {
-        Self {
-            background_io_tx,
-            background_io_rx,
-            next_background_request_id: 1,
-            pending_background_actions: HashMap::new(),
-            file_watch_service: FileWatchService::new(),
-            pending_file_watch_rescans: HashMap::new(),
-        }
-    }
-
-    pub(crate) fn has_pending_background_actions(&self) -> bool {
-        !self.pending_background_actions.is_empty()
-    }
-
-    pub(crate) fn allocate_background_request_id(&mut self) -> u64 {
-        let request_id = self.next_background_request_id;
-        self.next_background_request_id = self.next_background_request_id.saturating_add(1);
-        request_id
-    }
-
-    pub(crate) fn insert_pending_background_action(
-        &mut self,
-        request_id: u64,
-        action: PendingBackgroundAction,
-    ) {
-        self.pending_background_actions.insert(request_id, action);
-    }
-
-    pub(crate) fn remove_pending_background_action(
-        &mut self,
-        request_id: u64,
-    ) -> Option<PendingBackgroundAction> {
-        self.pending_background_actions.remove(&request_id)
-    }
-
-    pub(crate) fn drop_pending_background_action(&mut self, request_id: u64) {
-        self.pending_background_actions.remove(&request_id);
-    }
-}
-
 pub struct ScratchpadApp {
     pub(crate) tab_manager: TabManager,
     pub(crate) state: ScratchpadAppState,
@@ -144,9 +99,8 @@ pub struct ScratchpadApp {
 pub struct ScratchpadAppState {
     pub(crate) app_settings: AppSettings,
     pub(crate) status: StatusState,
-    pub(crate) pending_editor_focus: Option<ViewId>,
-    pub(crate) encoding_dialog_open: bool,
-    pub(crate) encoding_dialog_choice: String,
+    pub(crate) focus: FocusState,
+    pub(crate) dialogs: DialogState,
     pub(crate) settings_store: SettingsStore,
     pub(crate) user_manual_path: PathBuf,
     pub(crate) session_store: SessionStore,
@@ -159,26 +113,18 @@ pub struct ScratchpadAppState {
     pub(crate) overflow_popup_open: bool,
     pub(crate) applied_editor_font: Option<EditorFontPreset>,
     pub(crate) applied_theme_mode: Option<AppThemeMode>,
-    pub(crate) active_surface: AppSurface,
+    pub(crate) chrome: ChromeState,
     pub(crate) settings_tab_index: usize,
     pub(crate) pending_settings_toml_refresh: Option<BufferId>,
-    pub(crate) pending_status_bar_visible: Option<bool>,
-    pub(crate) vertical_tab_list_open: bool,
-    pub(crate) vertical_tab_list_hide_deadline: Option<Instant>,
     pub(crate) text_history_cache: TextHistoryCache,
-    pub(crate) text_history_open: bool,
-    pub(crate) status_history_open: bool,
     pub(crate) search_state: SearchState,
-    pub(crate) chrome_transition_frames_remaining: u8,
     pub(crate) workspace_selection: WorkspaceSelectionState,
-    pub(crate) tab_rename_state: Option<TabRenameState>,
-    pub(crate) pending_tab_context_menu: Option<PendingTabContextMenu>,
     pub(crate) pending_open_file_paths: Vec<PathBuf>,
     pub(crate) recently_closed_files: VecDeque<PathBuf>,
-    pub(crate) startup_restore_conflicts: Vec<StartupRestoreConflict>,
     pub(crate) workspace_reflow_axis: SplitAxis,
     pub(crate) settings_preview_quote_index: usize,
-    pub(crate) io: RuntimeIoState,
+    pub(crate) background_io: BackgroundIoState,
+    pub(crate) file_watch: FileWatchState,
 }
 
 impl Default for ScratchpadApp {
@@ -190,13 +136,13 @@ impl Default for ScratchpadApp {
 impl eframe::App for ScratchpadApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        if self.handle_pending_close_request(&ctx) {
+        if frame::handle_pending_close_request(self, &ctx) {
             return;
         }
 
         let frame_started_at = std::time::Instant::now();
-        self.prepare_frame(&ctx);
-        self.render_frame(ui, &ctx);
+        frame::prepare_frame(self, &ctx);
+        frame::render_frame(self, ui, &ctx);
         crate::app::capacity_metrics::record_frame(frame_started_at.elapsed());
     }
 
@@ -218,7 +164,7 @@ impl eframe::App for ScratchpadApp {
 impl Drop for ScratchpadApp {
     fn drop(&mut self) {
         if self.state.persist_session_on_drop {
-            let _ = self.persist_session_now();
+            let _ = crate::app::app_state::workspace::accessors::persist_session_now(self);
         }
     }
 }
@@ -494,7 +440,7 @@ mod tests {
             .status
             .set_error_status_in_domain(super::StatusDomain::Disk, "Could not save.");
 
-        app.clear_status_message();
+        crate::app::app_state::workspace::accessors::clear_status_message(&mut app);
 
         assert!(app.state.status.current.is_none());
         assert_eq!(app.state.status.history.len(), 1);
