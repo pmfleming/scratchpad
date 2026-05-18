@@ -64,8 +64,6 @@ Useful launcher details:
   port if needed.
 - `-FullUpdate` runs the standard producer set, including flamegraphs.
 - `-Flamegraph` is a legacy alias for flamegraph-only refresh.
-- `-LegacyStaticServer` is no longer supported; the dashboard is served by the
-  sibling NPM app.
 - On Windows the launcher restarts itself as Administrator before serving, so
   flamegraph and process-inspection workflows have the privileges they need.
 

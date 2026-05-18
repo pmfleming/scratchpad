@@ -5,8 +5,7 @@ param(
     [switch]$FlamegraphOnly,
     [switch]$SearchSpeedOnly,
     [switch]$CloneOnly,
-    [switch]$AppPackage,
-    [switch]$LegacyStaticServer
+    [switch]$AppPackage
 )
 
 Set-StrictMode -Version Latest
@@ -67,8 +66,7 @@ function Restart-AsAdministrator {
             @($FlamegraphOnly, "-FlamegraphOnly"),
             @($SearchSpeedOnly, "-SearchSpeedOnly"),
             @($CloneOnly, "-CloneOnly"),
-            @($AppPackage, "-AppPackage"),
-            @($LegacyStaticServer, "-LegacyStaticServer")
+            @($AppPackage, "-AppPackage")
         )) {
         if ($entry[0]) {
             $arguments += $entry[1]
@@ -348,10 +346,6 @@ try {
 
     if ($Flamegraph -and $exclusiveModes.Count -gt 0) {
         throw "Legacy switch -Flamegraph cannot be combined with the explicit update modes."
-    }
-
-    if ($LegacyStaticServer) {
-        throw "-LegacyStaticServer is no longer supported. The dashboard is served by the sibling project-management-board NPM app."
     }
 
     $updateMode = "fast"
