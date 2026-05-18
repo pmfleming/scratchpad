@@ -70,7 +70,7 @@ The custom glyphs should visually encode the short label in a compact single-cel
 
 1. Bundle and register the symbols font.
 
-Add `fonts/NotoSansSymbols2-Regular.ttf` and `fonts/ScratchpadControlSymbols-Regular.ttf`. Register the Scratchpad font, then Noto Sans Symbols 2, in `src/app/fonts.rs` after the selected editor font and before CJK fallbacks. This keeps control glyphs available in every editor preset without changing normal text shaping. Generate the Scratchpad font from `scripts/build_control_symbols_font.py`, including full-cell Control Picture remaps and the `U+F000` private-use label glyphs.
+Add `fonts/NotoSansSymbols2-Regular.ttf` and `fonts/ScratchpadControlSymbols-Regular.ttf`. Register the Scratchpad font, then Noto Sans Symbols 2, in `src/app/fonts.rs` after the selected editor font and before CJK fallbacks. This keeps control glyphs available in every editor preset without changing normal text shaping. The generated Scratchpad control-symbol font is checked in alongside the other bundled fonts.
 
 2. Replace string labels with display glyph specs.
 

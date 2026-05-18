@@ -29,9 +29,8 @@ output, reports, encoded files, and temporary scratch work.
   surface for reviewing recent edits and workspace operations.
 - Restores sessions, settings, tab layout, pane layout, and open-buffer
   metadata.
-- Ships with local measurement tooling for complexity, clone analysis,
-  performance, search speed, capacity, resource usage, architecture maps, and
-  correctness coverage.
+- Keeps measurement-friendly Rust probe binaries in-tree while the reusable
+  measurement producers and dashboard live in sibling repositories.
 
 ## Design Goals
 
@@ -64,16 +63,13 @@ Prerequisites:
 
 - Rust via `rustup`
 - Windows for the primary desktop target and packaging flow
-- Python 3.11+ for the optional analysis scripts; `scripts\ci.ps1` can create
-  the local `.venv` when needed
 
 Common commands:
 
 ```powershell
 cargo run --release
 cargo test
-powershell -ExecutionPolicy Bypass -File scripts\ci.ps1
-powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1
+cargo build --release
 ```
 
 Useful runtime switches:
@@ -87,13 +83,6 @@ scratchpad.exe /addto:active /files:"C:\notes\a.txt","C:\notes\b.txt"
 
 ## Packaging and Releases
 
-Local packaging creates `dist\scratchpad-v<version>-windows-x64.zip` plus a
-SHA-256 checksum:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 -Profile release
-```
-
 The GitHub release workflow runs formatting, clippy, tests, validates that the
 tag version matches `Cargo.toml`, builds the Windows archive, uploads it as a
 workflow artifact, and publishes the release asset. Push a tag such as `v0.3.0`
@@ -101,15 +90,16 @@ or run the `Release` workflow manually.
 
 ## Measurement Workflow
 
-Scratchpad treats measurement as part of the product. The Python and Rust tools
-under `scripts/` and `src/bin/` produce JSON artifacts under `target/analysis/`.
-The local dashboard in `viewer/` reads those artifacts and gives a single place
-to inspect quality, performance, correctness, architecture, and run-log data.
+Scratchpad treats measurement as part of the product. Measurement producers now
+live in sibling lens repositories, and the local React/TypeScript dashboard lives
+in the sibling `project-management-board` repository. Scratchpad keeps the Rust
+probe binaries under `src/bin/` and JSON artifacts under `target/analysis/`.
 
 Start the dashboard with:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\open-overview.ps1
+cd ..\project-management-board
+npm run dev
 ```
 
 The detailed measurement catalog lives in
@@ -130,8 +120,7 @@ src/
     startup/              Command-line parsing and startup options
     ui/                   Editor, dialogs, search/replace, settings, tabs, scrolling
   bin/                    Profiling and capacity probe entry points
-scripts/                  CI, packaging, analysis, dashboard, and reporting tools
-viewer/                   Local static dashboard for analysis artifacts
+scripts/                  Rust-only helper binaries wired through Cargo
 docs/                     User, design, architecture, performance, and review notes
 assets/                   README and product screenshots
 fonts/                    Bundled editor and control-symbol fonts

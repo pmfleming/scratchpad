@@ -68,7 +68,32 @@ jobs:
 
       - name: Package Windows archive
         shell: pwsh
-        run: .\scripts\package-windows.ps1 -Profile release -Version "${{ steps.version.outputs.version }}"
+        run: |
+          cargo build --release --locked
+
+          $version = "${{ steps.version.outputs.version }}"
+          $packageName = "scratchpad-v$version-windows-x64"
+          $dist = Join-Path $PWD "dist"
+          $staging = Join-Path $dist $packageName
+          $archive = Join-Path $dist "$packageName.zip"
+          $checksum = "$archive.sha256"
+
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          if (Test-Path $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+          if (Test-Path $archive) { Remove-Item -LiteralPath $archive -Force }
+          if (Test-Path $checksum) { Remove-Item -LiteralPath $checksum -Force }
+
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          Copy-Item -LiteralPath "target\release\scratchpad.exe" -Destination (Join-Path $staging "scratchpad.exe")
+          Copy-Item -LiteralPath "README.md" -Destination (Join-Path $staging "README.md")
+          Copy-Item -LiteralPath "docs\user-manual.md" -Destination (Join-Path $staging "user-manual.md")
+          if (Test-Path "LICENSE") {
+            Copy-Item -LiteralPath "LICENSE" -Destination (Join-Path $staging "LICENSE")
+          }
+
+          Compress-Archive -Path (Join-Path $staging "*") -DestinationPath $archive -CompressionLevel Optimal
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path -Leaf $archive)" | Set-Content -Path $checksum -Encoding ascii
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4

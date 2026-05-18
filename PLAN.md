@@ -67,19 +67,18 @@ Current limitations:
 
 Standard tools:
 
-- `scripts/rqlens.py`: bridge to the external `rust-quality-lens` quality measurement repo
-- `scripts/splens.py`: bridge to the external `scratchpad-performance-lens` repo for Scratchpad-specific performance, overview, and telemetry JSON
-- `scripts/rqlens.py measure map`: dependency/interrelatedness JSON enriched with quality and slowspot data
-- `scripts/ci.ps1`: standard local and CI entry point for formatting, linting, tests, quality review, slowspot review, and clone review
-- `scripts/open-overview.ps1`: local launcher for the sibling React dashboard
+- sibling `rust-quality-lens`: quality, correctness, and architecture-map JSON
+- sibling `scratchpad-performance-lens`: Scratchpad-specific performance, overview, and telemetry JSON
+- sibling `project-management-board`: React/TypeScript dashboard, task catalog, refresh API, and run logs
+- `.github/workflows/ci.yml`: formatting, linting, and tests
 
-The Python tools intentionally do not generate HTML. The React dashboard in the
-sibling `project-management-board` repo consumes their JSON contracts from
-`target/analysis/` without changing the measurement layer.
+The Scratchpad repo intentionally does not own dashboard or measurement wrapper
+scripts. The sibling repos consume Scratchpad as the measured Rust project and
+write JSON contracts under `target/analysis/`.
 
 ## Maintainability Plan
 
-This pass is driven by the hotspot artifact generated through `scripts/rqlens.py`.
+This pass is driven by the hotspot artifact generated through `rust-quality-lens`.
 
 Top original hotspots:
 
@@ -116,8 +115,8 @@ Validation already completed during this pass:
 - `cargo check`
 - `cargo test`
 - `cargo clippy --lib --all-features -- -D warnings`
-- `scripts/rqlens.py measure hotspots`
-- `scripts/splens.py measure slowspots`
+- `rust-quality-lens measure hotspots`
+- `scratchpad-performance-lens measure slowspots`
 
 ## Definition of Done
 
