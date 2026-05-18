@@ -350,8 +350,8 @@ try {
         throw "Legacy switch -Flamegraph cannot be combined with the explicit update modes."
     }
 
-    if ($AppPackage -and $LegacyStaticServer) {
-        throw "-AppPackage requires the dashboard server API and cannot be combined with -LegacyStaticServer."
+    if ($LegacyStaticServer) {
+        throw "-LegacyStaticServer is no longer supported. The dashboard is served by the sibling project-management-board NPM app."
     }
 
     $updateMode = "fast"
@@ -442,12 +442,7 @@ try {
         }
     }
 
-    $startTitle = if ($tasks.Count -eq 0) {
-        "Starting viewer server"
-    }
-    else {
-        "Starting Python web server"
-    }
+    $startTitle = "Starting React dashboard server"
     Write-Step -Number $stepNumber -Total $totalSteps -Title $startTitle
     if ($AppPackage) {
         Write-Host "App package session root: $sessionRoot" -ForegroundColor Green
@@ -456,26 +451,32 @@ try {
     if ($activePort -ne $Port) {
         Write-Host "Port $Port is already in use. Using port $activePort instead." -ForegroundColor Yellow
     }
-    $serverArgs = if ($LegacyStaticServer) {
-        @("-m", "http.server", "$activePort")
+    $boardRoot = Join-Path (Split-Path -Parent $repoRoot) "project-management-board"
+    if (-not (Test-Path (Join-Path $boardRoot "package.json"))) {
+        throw "project-management-board was not found at '$boardRoot'. Clone https://github.com/pmfleming/project-management-board.git next to Scratchpad."
+    }
+    $npmCommand = if ($isWindowsPlatform) {
+        "npm.cmd"
     }
     else {
-        @("scripts/dashboard_server.py", "--port", "$activePort")
+        "npm"
     }
-    $serverProcess = Start-Process -FilePath $python `
+    $serverArgs = @("run", "dev", "--", "--port", "$activePort")
+    $serverProcess = Start-Process -FilePath $npmCommand `
         -ArgumentList $serverArgs `
-        -WorkingDirectory $repoRoot `
+        -WorkingDirectory $boardRoot `
+        -WindowStyle Hidden `
         -PassThru
-    Write-Host "Started server with PID $($serverProcess.Id) on port $activePort." -ForegroundColor Green
+    Write-Host "Started project-management-board with PID $($serverProcess.Id) on port $activePort." -ForegroundColor Green
 
     $viewerQuery = "v=$(Get-Date -Format 'yyyyMMddHHmmss')"
     if ($AppPackage) {
         $viewerQuery += "&tab=app-package"
     }
-    $viewerUrl = "http://127.0.0.1:$activePort/viewer/?$viewerQuery"
+    $viewerUrl = "http://127.0.0.1:$activePort/?$viewerQuery"
 
     if (-not (Wait-ForServer -Url $viewerUrl)) {
-        throw "The local web server did not become ready at $viewerUrl."
+        throw "The project-management-board dev server did not become ready at $viewerUrl."
     }
     $stepNumber++
 

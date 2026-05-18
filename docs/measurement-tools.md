@@ -2,9 +2,9 @@
 
 As of May 19, 2026, Scratchpad's measurement tool is a dashboard-first
 measurement suite with the reusable producers split into sibling repos. The
-wrappers emit JSON artifacts under `target/analysis/`; the viewer reads those
-artifacts; the dashboard server can refresh all, category, or individual catalog
-tasks and records run logs.
+wrappers emit JSON artifacts under `target/analysis/`; the React dashboard in
+the sibling `project-management-board` repo reads those artifacts, refreshes all,
+category, or individual catalog tasks, and records run logs.
 
 The goal is not a polished public report. It is fast local evidence for quality,
 performance, correctness, scale ceilings, resource cost, and module health while
@@ -19,8 +19,8 @@ Scratchpad evolves.
 - Scratchpad-specific benchmark metadata, workload families, flamegraph configs,
   and telemetry helpers live in the sibling `scratchpad-performance-lens` repo.
 - The task catalog lives in `scripts/measurement_catalog.py`.
-- The local dashboard server lives in `scripts/dashboard_server.py`.
-- The static viewer lives under `viewer/`.
+- The local dashboard lives in the sibling `project-management-board` repo as a
+  Vite React/TypeScript app.
 - The launcher is `scripts/open-overview.ps1`.
 - CI-oriented checks are in `scripts/ci.ps1`.
 
@@ -64,32 +64,30 @@ Useful launcher details:
   port if needed.
 - `-FullUpdate` runs the standard producer set, including flamegraphs.
 - `-Flamegraph` is a legacy alias for flamegraph-only refresh.
-- `-LegacyStaticServer` starts `python -m http.server` instead of the dashboard
-  API server, so refresh buttons and App Package APIs are unavailable.
+- `-LegacyStaticServer` is no longer supported; the dashboard is served by the
+  sibling NPM app.
 - On Windows the launcher restarts itself as Administrator before serving, so
   flamegraph and process-inspection workflows have the privileges they need.
 
-Start only the dashboard API server:
+Start only the dashboard app:
 
 ```powershell
-.venv\Scripts\python.exe scripts\dashboard_server.py --port 8000
+cd ..\project-management-board
+npm run dev
 ```
 
-Then open `http://localhost:8000/viewer/`.
+Then open `http://127.0.0.1:5173/`.
 
 ## Firebase Snapshot Publishing
 
-The Firebase publish path is planned as a static snapshot of the current
-`viewer/` pages and current `target/analysis/` artifacts. Firebase Hosting
-should not refresh measurements or call the local dashboard API. See
-[Firebase Overview Publish Plan](firebase-overview-publish-plan.md) for the
-implementation plan, including hosted-mode refresh disabling and credential
-`.gitignore` reminders.
+The Firebase publish path should now build or snapshot the
+`project-management-board` app with current `target/analysis/` artifacts.
+Firebase Hosting should not refresh measurements or call local-only APIs.
 
 ## Dashboard API
 
-The dashboard server binds to `127.0.0.1` and serves both static files and local
-JSON APIs.
+The `project-management-board` Vite dev server binds to `127.0.0.1` and serves
+both static dashboard files and local JSON APIs.
 
 Refresh routes:
 
@@ -114,7 +112,7 @@ refresh returns `409` with the active run id. Runs are persisted in
 `target/analysis/logs/`. An all-run on Windows also cleans up stale Scratchpad
 measurement processes from `target/` before starting.
 
-## Viewer Tabs
+## Dashboard Tabs
 
 The viewer currently exposes:
 
@@ -215,9 +213,10 @@ Correctness and map producers:
 Operational scripts:
 
 - `scripts/measurement_catalog.py` emits the dashboard refresh catalog.
-- `scripts/dashboard_server.py` serves the viewer, APIs, run queue, and run logs.
+- `project-management-board` serves the React shell, migrated dashboard files,
+  APIs, run queue, and run logs through NPM/Vite.
 - `scripts/open-overview.ps1` initializes Python tooling, optionally refreshes
-  artifacts, starts the server, and opens the viewer.
+  artifacts, starts the sibling dashboard app, and opens the viewer.
 - `scripts/ci.ps1` runs `cargo fmt --check`, `cargo clippy`, `cargo test`, then
   selected measurement checks. Use its skip switches for targeted CI runs.
 - App Package diagnostics are imported by the dashboard server from
@@ -348,10 +347,11 @@ Invoke-WebRequest -Method POST http://127.0.0.1:8000/api/run/all
 
 - Add or rename dashboard tasks in `scripts/measurement_catalog.py`; then refresh
   `target/analysis/measurement_catalog.json`.
-- Add or rename viewer input artifacts in `viewer/data-viewer.js`.
+- Add or rename dashboard input artifacts in
+  `project-management-board/public/viewer/data-viewer.js`.
 - Add or rename flamegraph profile configs in `scratchpad-performance-lens`;
   the generator, performance review, and capacity guidance all read from there.
-- Add dashboard run summary metrics in `scripts/dashboard_server.py` when a new
+- Add dashboard run summary metrics in `project-management-board` when a new
   artifact should appear in run trends.
 - Keep measurement scripts decoupled from the viewer. Scripts should write JSON;
   the viewer should interpret the artifacts.

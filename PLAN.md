@@ -46,7 +46,7 @@ Current limitations:
 - `src/app/startup/`: startup argument parsing
 - `src/app/transactions.rs`: transaction log model and grouping logic for text-edit history
 - `src/app/ui/`: tab strip, overflow popup, drag state, editor area/content, settings, dialogs, status bar, and tile header controls
-- `viewer/`: static viewer for analysis artifacts
+- sibling `project-management-board/`: React/TypeScript dashboard for analysis artifacts
 - `tests/`: integration coverage for app, files, session restore, startup, and tab behavior
 
 ## Near-Term Roadmap
@@ -71,9 +71,11 @@ Standard tools:
 - `scripts/splens.py`: bridge to the external `scratchpad-performance-lens` repo for Scratchpad-specific performance, overview, and telemetry JSON
 - `scripts/rqlens.py measure map`: dependency/interrelatedness JSON enriched with quality and slowspot data
 - `scripts/ci.ps1`: standard local and CI entry point for formatting, linting, tests, quality review, slowspot review, and clone review
-- `scripts/open-overview.ps1`: local launcher for the static viewer
+- `scripts/open-overview.ps1`: local launcher for the sibling React dashboard
 
-The Python tools intentionally do not generate HTML. The static viewer in `viewer/` consumes their JSON contracts from `target/analysis/` and can later be replaced by a Java/React UI without changing the measurement layer.
+The Python tools intentionally do not generate HTML. The React dashboard in the
+sibling `project-management-board` repo consumes their JSON contracts from
+`target/analysis/` without changing the measurement layer.
 
 ## Maintainability Plan
 
