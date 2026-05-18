@@ -307,28 +307,28 @@ function Get-RefreshTasks {
     )
 
     $tasks = @(
-        (New-OverviewTask -Title "Generating slowspots data" -Label "slowspots" -Arguments @("scripts/slowspots.py", "--mode", "visibility")),
-        (New-OverviewTask -Title "Generating search speed data" -Label "search_speed" -Arguments @("scripts/search_speed.py", "--mode", "visibility")),
-        (New-OverviewTask -Title "Generating capacity data" -Label "capacity_report" -Arguments @("scripts/capacity_report.py", "--mode", "visibility")),
-        (New-OverviewTask -Title "Generating resource profile data" -Label "resource_profiles" -Arguments @("scripts/resource_profiles.py", "--mode", "visibility")),
-        (New-OverviewTask -Title "Generating code locality data" -Label "locality_dynamic" -Arguments @("scripts/locality_bench.py", "--mode", "visibility")),
-        (New-OverviewTask -Title "Generating static leverage data" -Label "locality_leverage" -Arguments @("scripts/leverage_metrics.py", "--paths", "src", "--mode", "visibility") -ParallelGroup "static-analysis"),
-        (New-OverviewTask -Title "Generating hotspots data" -Label "hotspots" -Arguments @("scripts/hotspots.py", "--mode", "visibility", "--paths", "src", "--scope", "all") -ParallelGroup "static-analysis"),
-        (New-OverviewTask -Title "Generating type health data" -Label "type_health" -Arguments @("scripts/type_health.py", "--mode", "visibility", "--paths", "src") -ParallelGroup "static-analysis"),
-        (New-OverviewTask -Title "Generating Rust escape hatch data" -Label "escape_hatches" -Arguments @("scripts/rust_escape_hatches.py", "--mode", "visibility", "--paths", "src") -ParallelGroup "static-analysis"),
-        (New-OverviewTask -Title "Generating clone alert data" -Label "clone_alert" -Arguments @("scripts/clone_alert.py", "--mode", "visibility", "--paths", "src") -ParallelGroup "static-analysis"),
-        (New-OverviewTask -Title "Generating correctness review data" -Label "test_catalog" -Arguments @("scripts/test_catalog.py", "--mode", "visibility") -ParallelGroup "static-analysis"),
+        (New-OverviewTask -Title "Generating slowspots data" -Label "slowspots" -Arguments @("scripts/splens.py", "measure", "slowspots")),
+        (New-OverviewTask -Title "Generating search speed data" -Label "search_speed" -Arguments @("scripts/splens.py", "measure", "search")),
+        (New-OverviewTask -Title "Generating capacity data" -Label "capacity_report" -Arguments @("scripts/splens.py", "measure", "capacity")),
+        (New-OverviewTask -Title "Generating resource profile data" -Label "resource_profiles" -Arguments @("scripts/splens.py", "measure", "resources")),
+        (New-OverviewTask -Title "Generating code locality data" -Label "locality_dynamic" -Arguments @("scripts/rqlens.py", "measure", "locality")),
+        (New-OverviewTask -Title "Generating static leverage data" -Label "locality_leverage" -Arguments @("scripts/rqlens.py", "measure", "leverage") -ParallelGroup "static-analysis"),
+        (New-OverviewTask -Title "Generating hotspots data" -Label "hotspots" -Arguments @("scripts/rqlens.py", "measure", "hotspots") -ParallelGroup "static-analysis"),
+        (New-OverviewTask -Title "Generating type health data" -Label "type_health" -Arguments @("scripts/rqlens.py", "measure", "type-health") -ParallelGroup "static-analysis"),
+        (New-OverviewTask -Title "Generating Rust escape hatch data" -Label "escape_hatches" -Arguments @("scripts/rqlens.py", "measure", "escape-hatches") -ParallelGroup "static-analysis"),
+        (New-OverviewTask -Title "Generating clone alert data" -Label "clone_alert" -Arguments @("scripts/rqlens.py", "measure", "clones") -ParallelGroup "static-analysis"),
+        (New-OverviewTask -Title "Generating correctness review data" -Label "test_catalog" -Arguments @("scripts/rqlens.py", "measure", "correctness") -ParallelGroup "static-analysis"),
         (New-OverviewTask -Title "Generating measurement catalog data" -Label "measurement_catalog" -Arguments @("scripts/measurement_catalog.py", "--mode", "visibility") -ParallelGroup "static-analysis"),
-        (New-OverviewTask -Title "Generating project code metrics" -Label "project_code_metrics" -Arguments @("scripts/project_code_metrics.py", "--mode", "visibility") -ParallelGroup "static-analysis"),
-        (New-OverviewTask -Title "Generating architecture map data" -Label "map" -Arguments @("scripts/map.py", "--mode", "visibility") -ParallelGroup "static-analysis")
+        (New-OverviewTask -Title "Generating project code metrics" -Label "project_code_metrics" -Arguments @("scripts/splens.py", "measure", "project-code") -ParallelGroup "static-analysis"),
+        (New-OverviewTask -Title "Generating architecture map data" -Label "map" -Arguments @("scripts/rqlens.py", "measure", "map") -ParallelGroup "static-analysis")
     )
 
     if ($IncludeFlamegraphs) {
-        $tasks += New-OverviewTask -Title "Generating flamegraph data" -Label "generate_flamegraphs" -Arguments @("scripts/generate_flamegraphs.py", "--mode", "visibility")
+        $tasks += New-OverviewTask -Title "Generating flamegraph data" -Label "generate_flamegraphs" -Arguments @("scripts/splens.py", "measure", "flamegraphs")
     }
 
-    $tasks += New-OverviewTask -Title "Generating coordinated speed-efficiency report" -Label "speed_efficiency_report" -Arguments @("scripts/speed_efficiency_report.py", "--mode", "visibility")
-    $tasks += New-OverviewTask -Title "Generating performance review coverage" -Label "performance_review" -Arguments @("scripts/performance_review.py", "--mode", "visibility")
+    $tasks += New-OverviewTask -Title "Generating coordinated speed-efficiency report" -Label "speed_efficiency_report" -Arguments @("scripts/splens.py", "measure", "speed-report")
+    $tasks += New-OverviewTask -Title "Generating performance review coverage" -Label "performance_review" -Arguments @("scripts/splens.py", "measure", "performance-review")
 
     return $tasks
 }
@@ -364,25 +364,25 @@ try {
     elseif ($FlamegraphOnly) {
         $updateMode = "flamegraph-only"
         $tasks = @(
-            New-OverviewTask -Title "Generating flamegraph data" -Label "generate_flamegraphs" -Arguments @("scripts/generate_flamegraphs.py", "--mode", "visibility")
+            New-OverviewTask -Title "Generating flamegraph data" -Label "generate_flamegraphs" -Arguments @("scripts/splens.py", "measure", "flamegraphs")
         )
     }
     elseif ($SearchSpeedOnly) {
         $updateMode = "search-speed-only"
         $tasks = @(
-            New-OverviewTask -Title "Generating search speed data" -Label "search_speed" -Arguments @("scripts/search_speed.py", "--mode", "visibility")
+            New-OverviewTask -Title "Generating search speed data" -Label "search_speed" -Arguments @("scripts/splens.py", "measure", "search")
         )
     }
     elseif ($CloneOnly) {
         $updateMode = "clone-only"
         $tasks = @(
-            New-OverviewTask -Title "Generating clone alert data" -Label "clone_alert" -Arguments @("scripts/clone_alert.py", "--mode", "visibility", "--paths", "src")
+            New-OverviewTask -Title "Generating clone alert data" -Label "clone_alert" -Arguments @("scripts/rqlens.py", "measure", "clones")
         )
     }
     elseif ($Flamegraph) {
         $updateMode = "flamegraph-only"
         $tasks = @(
-            New-OverviewTask -Title "Generating flamegraph data" -Label "generate_flamegraphs" -Arguments @("scripts/generate_flamegraphs.py", "--mode", "visibility")
+            New-OverviewTask -Title "Generating flamegraph data" -Label "generate_flamegraphs" -Arguments @("scripts/splens.py", "measure", "flamegraphs")
         )
     }
 

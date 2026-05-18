@@ -11,6 +11,19 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List
 from urllib.parse import unquote, urlparse
 
+
+def add_performance_lens_tools_path() -> None:
+    lens_root = Path(__file__).resolve().parents[2] / "scratchpad-performance-lens"
+    tools_root = lens_root / "src" / "scratchpad_performance_lens" / "tools"
+    if not tools_root.exists():
+        raise RuntimeError(
+            f"scratchpad-performance-lens tools were not found at {tools_root}."
+        )
+    sys.path.insert(0, str(tools_root))
+
+
+add_performance_lens_tools_path()
+
 from app_package import app_package_payload, clear_app_package_buffers
 from measurement_catalog import build_catalog
 from perf_report_shared import terminate_process_tree

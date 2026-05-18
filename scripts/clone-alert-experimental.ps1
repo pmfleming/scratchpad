@@ -50,7 +50,7 @@ function Initialize-PythonEnvironment {
 Push-Location $repoRoot
 try {
     Initialize-PythonEnvironment
-    & $python "scripts/clone_alert.py" --paths src --engine all @args
+    & $python "scripts/rqlens.py" measure clones @args
     if ($LASTEXITCODE -ne 0) {
         throw "Experimental clone analysis failed with exit code $LASTEXITCODE."
     }

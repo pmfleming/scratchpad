@@ -1,9 +1,10 @@
 # Scratchpad Measurement Tools (2)
 
-As of May 8, 2026, Scratchpad's measurement tool is a local, dashboard-first
-measurement suite. The Python and Rust producers emit JSON artifacts under
-`target/analysis/`; the viewer reads those artifacts; the dashboard server can
-refresh all, category, or individual catalog tasks and records run logs.
+As of May 19, 2026, Scratchpad's measurement tool is a dashboard-first
+measurement suite with the reusable producers split into sibling repos. The
+wrappers emit JSON artifacts under `target/analysis/`; the viewer reads those
+artifacts; the dashboard server can refresh all, category, or individual catalog
+tasks and records run logs.
 
 The goal is not a polished public report. It is fast local evidence for quality,
 performance, correctness, scale ceilings, resource cost, and module health while
@@ -11,23 +12,25 @@ Scratchpad evolves.
 
 ## Current Shape
 
-- Producer scripts live under `scripts/` and write JSON.
+- Producer wrappers live under `scripts/` and delegate JSON generation to
+  sibling lens repos.
 - Profile and probe binaries live under `src/bin/`.
 - Shared report mode handling lives in `scripts/report_modes.py`.
-- Shared benchmark metadata, workload families, and flamegraph configs live in
-  `scripts/perf_report_shared.py`.
+- Scratchpad-specific benchmark metadata, workload families, flamegraph configs,
+  and telemetry helpers live in the sibling `scratchpad-performance-lens` repo.
 - The task catalog lives in `scripts/measurement_catalog.py`.
 - The local dashboard server lives in `scripts/dashboard_server.py`.
 - The static viewer lives under `viewer/`.
 - The launcher is `scripts/open-overview.ps1`.
 - CI-oriented checks are in `scripts/ci.ps1`.
 
-Most producer scripts support:
+The lens CLIs produce the same viewer-ready JSON contracts. Local direct
+commands should go through:
 
-- `--mode cli`: print a readable summary.
-- `--mode analysis`: emit JSON to stdout, or to `--output` when supplied.
-- `--mode visibility`: write the viewer-ready artifact under `target/analysis/`
-  and print where it went.
+- `scripts/rqlens.py measure ...` for quality, correctness, and architecture map
+  JSON from `rust-quality-lens`.
+- `scripts/splens.py measure ...` for Scratchpad performance, overview, and
+  telemetry JSON from `scratchpad-performance-lens`.
 
 On Windows examples below use `.venv\Scripts\python.exe`. On other platforms use
 `.venv/bin/python`.
@@ -137,22 +140,22 @@ today.
 
 | Task id | Category | Producer | Primary output |
 | --- | --- | --- | --- |
-| `quality.hotspots` | quality | `scripts/hotspots.py` | `target/analysis/hotspots.json` |
-| `quality.clones` | quality | `scripts/clone_alert.py` | `target/analysis/clones.json` |
-| `quality.escape_hatches` | quality | `scripts/rust_escape_hatches.py` | `target/analysis/rust_escape_hatches.json` |
-| `quality.locality_dynamic` | quality | `scripts/locality_bench.py` | `target/analysis/locality_metrics.json` |
-| `quality.locality_leverage` | quality | `scripts/leverage_metrics.py` | `target/analysis/leverage_metrics.json` |
-| `performance.slowspots` | performance | `scripts/slowspots.py` | `target/analysis/slowspots.json` |
-| `performance.frame_metrics` | performance | `scripts/frame_metrics.py` | `target/analysis/frame_metrics.json` |
-| `performance.search` | performance | `scripts/search_speed.py` | `target/analysis/search_speed.json` |
-| `performance.capacity` | performance | `scripts/capacity_report.py` | `target/analysis/capacity_report.json` |
-| `performance.resources` | performance | `scripts/resource_profiles.py` | `target/analysis/resource_profiles.json` |
-| `performance.flamegraphs` | performance | `scripts/generate_flamegraphs.py` | `target/analysis/flamegraphs.json` and SVGs |
-| `performance.report` | performance | `scripts/speed_efficiency_report.py`, `scripts/performance_review.py` | `target/analysis/speed_efficiency_report.json`, `target/analysis/performance_review.json` |
-| `correctness.catalog` | correctness | `scripts/test_catalog.py` | `target/analysis/correctness_review.json`, `target/analysis/test_catalog.json` |
-| `correctness.all` | correctness | `scripts/test_catalog.py --run` | `target/analysis/correctness_review.json` |
-| `map.architecture` | map | `scripts/map.py` | `target/analysis/map.json` |
-| `map.project_code_metrics` | map | `scripts/project_code_metrics.py` | `target/analysis/project_code_metrics.json` |
+| `quality.hotspots` | quality | `scripts/rqlens.py measure hotspots` | `target/analysis/hotspots.json` |
+| `quality.clones` | quality | `scripts/rqlens.py measure clones` | `target/analysis/clones.json` |
+| `quality.escape_hatches` | quality | `scripts/rqlens.py measure escape-hatches` | `target/analysis/rust_escape_hatches.json` |
+| `quality.locality_dynamic` | quality | `scripts/rqlens.py measure locality` | `target/analysis/locality_metrics.json` |
+| `quality.locality_leverage` | quality | `scripts/rqlens.py measure leverage` | `target/analysis/leverage_metrics.json` |
+| `performance.slowspots` | performance | `scripts/splens.py measure slowspots` | `target/analysis/slowspots.json` |
+| `performance.frame_metrics` | performance | `scripts/splens.py measure frame-metrics` | `target/analysis/frame_metrics.json` |
+| `performance.search` | performance | `scripts/splens.py measure search` | `target/analysis/search_speed.json` |
+| `performance.capacity` | performance | `scripts/splens.py measure capacity` | `target/analysis/capacity_report.json` |
+| `performance.resources` | performance | `scripts/splens.py measure resources` | `target/analysis/resource_profiles.json` |
+| `performance.flamegraphs` | performance | `scripts/splens.py measure flamegraphs` | `target/analysis/flamegraphs.json` and SVGs |
+| `performance.report` | performance | `scripts/splens.py measure speed-report`, `scripts/splens.py measure performance-review` | `target/analysis/speed_efficiency_report.json`, `target/analysis/performance_review.json` |
+| `correctness.catalog` | correctness | `scripts/rqlens.py measure correctness` | `target/analysis/correctness_review.json`, `target/analysis/test_catalog.json` |
+| `correctness.all` | correctness | `scripts/rqlens.py measure correctness-run` | `target/analysis/correctness_review.json` |
+| `map.architecture` | map | `scripts/rqlens.py measure map` | `target/analysis/map.json` |
+| `map.project_code_metrics` | map | `scripts/splens.py measure project-code` | `target/analysis/project_code_metrics.json` |
 
 ## Output Artifacts
 
@@ -188,49 +191,26 @@ warning as core review artifacts.
 
 Quality producers:
 
-- `scripts/hotspots.py` ranks file and function complexity. SLOC is reported as
-  size context rather than being folded into the quality score.
-- `scripts/clone_alert.py` detects token-based clones and can use token, AST,
-  MIR, or combined engines.
-- `scripts/rust_escape_hatches.py` audits unsafe blocks, FFI, raw memory,
-  `Deref`/`DerefMut` impls, glob imports, immutable container-reference return
-  types, layout/linkage attributes, mutable globals, and lint suppressions.
-- `scripts/locality_bench.py` measures dependency spread, hidden coupling,
-  interface explicitness, test proximity, and change locality.
-- `scripts/leverage_metrics.py` measures module reach, invariant surface,
-  divergence pressure, co-change ripple, and unsafe surface. It uses
-  `scripts/leverage_ast.rs` for AST style counts.
+- `scripts/rqlens.py` delegates Scratchpad quality measurement to the sibling
+  `rust-quality-lens` repository. Scratchpad keeps the JSON artifact contracts,
+  but the complexity, clone, escape-hatch, type-health, locality, leverage, and
+  AST helper implementations now live outside this repo.
 
 Performance producers:
 
-- `scripts/slowspots.py` reads or refreshes broad Criterion benchmark results and
-  ranks latency rows by score, stability, workload family, budget, and matching
-  profile coverage.
-- `scripts/frame_metrics.py` runs the headless editor frame probe and reports
-  120 Hz p50/p95/p99 frame timing plus prepare, chrome, active-surface, gutter,
-  scroll, paint, background-poll, dialog, shortcut, and finish phase ownership.
-- `scripts/search_speed.py` owns the dedicated search dataset for Active,
-  Current, and All scopes. It separates full completion, first response, single
-  file growth, aggregate corpus growth, and dispatch overhead.
-- `scripts/capacity_report.py` runs or falls back for threshold sweeps and records
-  the first unusable ceiling plus resource guidance.
-- `scripts/resource_profiles.py` runs or falls back for allocation, working-set,
-  page-fault, handle, and session-cost probes.
-- `scripts/generate_flamegraphs.py` indexes CPU profiles and generates SVGs with
-  `cargo flamegraph` when the tool, privileges, and disk space are available.
-- `scripts/speed_efficiency_report.py` combines slowspots, search speed,
-  flamegraph coverage, capacity ceilings, and resource profiles into triage rows.
-- `scripts/performance_review.py` turns those artifacts into scenario-first
-  coverage for product promises.
+- `scripts/splens.py` delegates Scratchpad performance, overview, and telemetry
+  measurement to the sibling `scratchpad-performance-lens` repository. It keeps
+  the dashboard JSON contracts local while moving slowspots, frame metrics,
+  search speed, capacity, resource profiles, flamegraphs, speed-efficiency,
+  performance review, project code metrics, and App Package payload generation
+  out of this repo.
 
 Correctness and map producers:
 
-- `scripts/test_catalog.py` catalogs inline and integration tests by architecture
-  layer. With `--run`, it also runs `cargo test` and attaches status.
-- `scripts/map.py` builds the module dependency and risk map, enriched by
-  quality, performance, correctness, locality, and leverage evidence.
-- `scripts/project_code_metrics.py` emits application, test, and other Rust line
-  splits plus first-parent GitHub history samples.
+- `scripts/rqlens.py` delegates correctness catalog and architecture map JSON
+  generation to `rust-quality-lens`.
+- `scripts/splens.py measure project-code` emits application, test, and other
+  Rust line splits plus first-parent GitHub history samples.
 
 Operational scripts:
 
@@ -240,8 +220,8 @@ Operational scripts:
   artifacts, starts the server, and opens the viewer.
 - `scripts/ci.ps1` runs `cargo fmt --check`, `cargo clippy`, `cargo test`, then
   selected measurement checks. Use its skip switches for targeted CI runs.
-- `scripts/app_package.py` provides the App Package diagnostics payload consumed
-  by the dashboard server.
+- App Package diagnostics are imported by the dashboard server from
+  `scratchpad-performance-lens`.
 
 ## Current Coverage
 
@@ -271,9 +251,9 @@ leverage signals.
 
 ## Flamegraph Profiles
 
-`scripts/perf_report_shared.py` defines the flamegraph configs consumed by
-`scripts/generate_flamegraphs.py`, capacity guidance, slowspot/search metadata,
-and performance review coverage.
+`scratchpad-performance-lens` defines the flamegraph configs consumed by
+`scripts/splens.py measure flamegraphs`, capacity guidance, slowspot/search
+metadata, and performance review coverage.
 
 | Profile id | Binary | Focus |
 | --- | --- | --- |
@@ -293,7 +273,7 @@ and performance review coverage.
 Preferred command:
 
 ```powershell
-.venv\Scripts\python.exe scripts\generate_flamegraphs.py --mode visibility
+.venv\Scripts\python.exe scripts\splens.py measure flamegraphs
 ```
 
 The script writes `target/analysis/flamegraphs.json` and SVGs under
@@ -306,7 +286,7 @@ To rebuild the flamegraph index from already-generated SVGs without invoking
 `cargo-flamegraph`, use:
 
 ```powershell
-.venv\Scripts\python.exe scripts\generate_flamegraphs.py --mode visibility --index-only
+.venv\Scripts\python.exe scripts\splens.py measure flamegraphs --index-only
 ```
 
 This is the preferred cleanup step after an interrupted or untrusted flamegraph
@@ -314,8 +294,8 @@ refresh, such as a run from a dirty working tree or a run stopped by low disk
 space. Follow it by regenerating the coordinated reports:
 
 ```powershell
-.venv\Scripts\python.exe scripts\speed_efficiency_report.py --mode visibility
-.venv\Scripts\python.exe scripts\performance_review.py --mode visibility
+.venv\Scripts\python.exe scripts\splens.py measure speed-report
+.venv\Scripts\python.exe scripts\splens.py measure performance-review
 ```
 
 ## Direct Commands
@@ -324,36 +304,36 @@ Catalog and dashboard data:
 
 ```powershell
 .venv\Scripts\python.exe scripts\measurement_catalog.py --mode visibility
-.venv\Scripts\python.exe scripts\project_code_metrics.py --mode visibility
-.venv\Scripts\python.exe scripts\map.py --mode visibility
+.venv\Scripts\python.exe scripts\splens.py measure project-code
+.venv\Scripts\python.exe scripts\rqlens.py measure map
 ```
 
 Quality:
 
 ```powershell
-.venv\Scripts\python.exe scripts\hotspots.py --mode visibility --paths src --scope all
-.venv\Scripts\python.exe scripts\clone_alert.py --mode visibility --paths src
-.venv\Scripts\python.exe scripts\rust_escape_hatches.py --mode visibility --paths src
-.venv\Scripts\python.exe scripts\locality_bench.py --mode visibility
-.venv\Scripts\python.exe scripts\leverage_metrics.py --mode visibility --paths src
+.venv\Scripts\python.exe scripts\rqlens.py measure hotspots
+.venv\Scripts\python.exe scripts\rqlens.py measure clones
+.venv\Scripts\python.exe scripts\rqlens.py measure escape-hatches
+.venv\Scripts\python.exe scripts\rqlens.py measure locality
+.venv\Scripts\python.exe scripts\rqlens.py measure leverage
 ```
 
 Performance:
 
 ```powershell
-.venv\Scripts\python.exe scripts\slowspots.py --mode visibility
-.venv\Scripts\python.exe scripts\search_speed.py --mode visibility
-.venv\Scripts\python.exe scripts\capacity_report.py --mode visibility
-.venv\Scripts\python.exe scripts\resource_profiles.py --mode visibility
-.venv\Scripts\python.exe scripts\speed_efficiency_report.py --mode visibility
-.venv\Scripts\python.exe scripts\performance_review.py --mode visibility
+.venv\Scripts\python.exe scripts\splens.py measure slowspots
+.venv\Scripts\python.exe scripts\splens.py measure search
+.venv\Scripts\python.exe scripts\splens.py measure capacity
+.venv\Scripts\python.exe scripts\splens.py measure resources
+.venv\Scripts\python.exe scripts\splens.py measure speed-report
+.venv\Scripts\python.exe scripts\splens.py measure performance-review
 ```
 
 Correctness:
 
 ```powershell
-.venv\Scripts\python.exe scripts\test_catalog.py --mode visibility
-.venv\Scripts\python.exe scripts\test_catalog.py --mode visibility --run
+.venv\Scripts\python.exe scripts\rqlens.py measure correctness
+.venv\Scripts\python.exe scripts\rqlens.py measure correctness-run
 ```
 
 Dashboard item refresh from PowerShell:
@@ -369,7 +349,7 @@ Invoke-WebRequest -Method POST http://127.0.0.1:8000/api/run/all
 - Add or rename dashboard tasks in `scripts/measurement_catalog.py`; then refresh
   `target/analysis/measurement_catalog.json`.
 - Add or rename viewer input artifacts in `viewer/data-viewer.js`.
-- Add or rename flamegraph profile configs in `scripts/perf_report_shared.py`;
+- Add or rename flamegraph profile configs in `scratchpad-performance-lens`;
   the generator, performance review, and capacity guidance all read from there.
 - Add dashboard run summary metrics in `scripts/dashboard_server.py` when a new
   artifact should appear in run trends.

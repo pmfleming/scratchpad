@@ -93,44 +93,44 @@ try {
     }
 
     if (-not $SkipComplexity) {
-        Invoke-NativeCommand -Label "hotspots.py" -Command {
-            & $python (Join-Path $PSScriptRoot "hotspots.py") --paths src --scope all --output (Join-Path $analysisDir "hotspots.json")
+        Invoke-NativeCommand -Label "rust-quality-lens hotspots" -Command {
+            & $python (Join-Path $PSScriptRoot "rqlens.py") measure hotspots
         }
     }
 
     if (-not $SkipSlowspots) {
-        Invoke-NativeCommand -Label "slowspots.py" -Command {
-            & $python (Join-Path $PSScriptRoot "slowspots.py") --output (Join-Path $analysisDir "slowspots.json") --fail-on-slow
+        Invoke-NativeCommand -Label "scratchpad-performance-lens slowspots" -Command {
+            & $python (Join-Path $PSScriptRoot "splens.py") measure slowspots --fail-on-slow
         }
     }
 
     if (-not $SkipSearchSpeed) {
-        Invoke-NativeCommand -Label "search_speed.py" -Command {
-            & $python (Join-Path $PSScriptRoot "search_speed.py") --output (Join-Path $analysisDir "search_speed.json") --fail-on-slow
+        Invoke-NativeCommand -Label "scratchpad-performance-lens search" -Command {
+            & $python (Join-Path $PSScriptRoot "splens.py") measure search --fail-on-slow
         }
     }
 
     if (-not $SkipClones) {
-        Invoke-NativeCommand -Label "clone_alert.py" -Command {
-            & $python (Join-Path $PSScriptRoot "clone_alert.py") --paths src --output (Join-Path $analysisDir "clones.json")
+        Invoke-NativeCommand -Label "rust-quality-lens clones" -Command {
+            & $python (Join-Path $PSScriptRoot "rqlens.py") measure clones
         }
     }
 
     if (-not $SkipTypeHealth) {
-        Invoke-NativeCommand -Label "type_health.py" -Command {
-            & $python (Join-Path $PSScriptRoot "type_health.py") --paths src --output (Join-Path $analysisDir "type_health.json")
+        Invoke-NativeCommand -Label "rust-quality-lens type health" -Command {
+            & $python (Join-Path $PSScriptRoot "rqlens.py") measure type-health
         }
     }
 
     if (-not $SkipLocality) {
-        Invoke-NativeCommand -Label "code locality" -Command {
-            & $python (Join-Path $PSScriptRoot "locality_bench.py") --output (Join-Path $analysisDir "locality_metrics.json")
+        Invoke-NativeCommand -Label "rust-quality-lens locality" -Command {
+            & $python (Join-Path $PSScriptRoot "rqlens.py") measure locality
         }
     }
 
     if (-not $SkipLeverage) {
-        Invoke-NativeCommand -Label "leverage_metrics.py" -Command {
-            & $python (Join-Path $PSScriptRoot "leverage_metrics.py") --paths src --output (Join-Path $analysisDir "leverage_metrics.json")
+        Invoke-NativeCommand -Label "rust-quality-lens leverage" -Command {
+            & $python (Join-Path $PSScriptRoot "rqlens.py") measure leverage
         }
     }
 }

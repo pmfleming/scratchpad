@@ -1,11 +1,23 @@
 import unittest
+import sys
+from pathlib import Path
+
+
+PERFORMANCE_LENS_TOOLS = (
+    Path(__file__).resolve().parents[2]
+    / "scratchpad-performance-lens"
+    / "src"
+    / "scratchpad_performance_lens"
+    / "tools"
+)
+if PERFORMANCE_LENS_TOOLS.exists():
+    sys.path.insert(0, str(PERFORMANCE_LENS_TOOLS))
 
 import capacity_report
 import frame_metrics
 import measurement_catalog
 import performance_review
 import speed_efficiency_report
-import test_catalog
 
 
 MB = 1024 * 1024
@@ -178,55 +190,21 @@ class FrameMetricsTests(unittest.TestCase):
         self.assertFalse(frame_metrics.probe_failed(payload))
 
 
-class TestCatalogTests(unittest.TestCase):
-    def test_failed_requested_correctness_run_requests_nonzero_exit(self) -> None:
-        payload = {
-            "summary": {
-                "last_run": {
-                    "status": "failed",
-                    "stderr_tail": "cargo test failed",
-                },
-            },
-        }
-
-        self.assertTrue(test_catalog.requested_run_failed(payload, run=True))
-
-    def test_catalog_only_payload_does_not_fail_without_run(self) -> None:
-        payload = {
-            "summary": {
-                "last_run": None,
-            },
-        }
-
-        self.assertFalse(test_catalog.requested_run_failed(payload, run=False))
-
-    def test_passed_requested_correctness_run_is_successful(self) -> None:
-        payload = {
-            "summary": {
-                "last_run": {
-                    "status": "passed",
-                },
-            },
-        }
-
-        self.assertFalse(test_catalog.requested_run_failed(payload, run=True))
-
-
 class MeasurementCatalogTests(unittest.TestCase):
     def test_performance_review_refresh_regenerates_capacity_before_review(self) -> None:
         tasks = measurement_catalog.build_catalog()["tasks"]
         review = next(task for task in tasks if task["id"] == "performance.report")
-        command_names = [command[1] for command in review["commands"]]
+        command_names = [command[3] for command in review["commands"]]
 
-        self.assertIn("scripts/frame_metrics.py", command_names)
-        self.assertIn("scripts/capacity_report.py", command_names)
+        self.assertIn("frame-metrics", command_names)
+        self.assertIn("capacity", command_names)
         self.assertLess(
-            command_names.index("scripts/frame_metrics.py"),
-            command_names.index("scripts/speed_efficiency_report.py"),
+            command_names.index("frame-metrics"),
+            command_names.index("speed-report"),
         )
         self.assertLess(
-            command_names.index("scripts/capacity_report.py"),
-            command_names.index("scripts/performance_review.py"),
+            command_names.index("capacity"),
+            command_names.index("performance-review"),
         )
 
     def test_frame_metrics_has_individual_dashboard_task(self) -> None:
