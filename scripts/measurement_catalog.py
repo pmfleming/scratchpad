@@ -49,7 +49,7 @@ def build_catalog() -> Dict[str, Any]:
             "hotspots",
             "Hotspots",
             "Ranks complexity risk without SLOC scoring.",
-            [[py, "scripts/hotspots.py", "--mode", "visibility", "--paths", "src", "--scope", "all"]],
+            [[py, "scripts/rqlens.py", "measure", "hotspots"]],
             ["target/analysis/hotspots.json"],
         ),
         item(
@@ -58,7 +58,7 @@ def build_catalog() -> Dict[str, Any]:
             "clones",
             "Clones",
             "Finds repeated code structures.",
-            [[py, "scripts/clone_alert.py", "--mode", "visibility", "--paths", "src"]],
+            [[py, "scripts/rqlens.py", "measure", "clones"]],
             ["target/analysis/clones.json"],
         ),
         item(
@@ -67,7 +67,7 @@ def build_catalog() -> Dict[str, Any]:
             "safety",
             "Rust Escape Hatches",
             "Tracks unsafe, FFI, mutable globals, raw memory, layout/linkage attributes, and lint suppressions.",
-            [[py, "scripts/rust_escape_hatches.py", "--mode", "visibility", "--paths", "src"]],
+            [[py, "scripts/rqlens.py", "measure", "escape-hatches"]],
             ["target/analysis/rust_escape_hatches.json"],
         ),
         item(
@@ -76,7 +76,7 @@ def build_catalog() -> Dict[str, Any]:
             "structure",
             "Type Health",
             "Ranks wide structs, large enums, broad method surfaces, and impl spread.",
-            [[py, "scripts/type_health.py", "--mode", "visibility", "--paths", "src"]],
+            [[py, "scripts/rqlens.py", "measure", "type-health"]],
             ["target/analysis/type_health.json"],
         ),
         item(
@@ -208,7 +208,7 @@ def build_catalog() -> Dict[str, Any]:
             "locality",
             "Code Locality",
             "Measures dependency spread, hidden coupling, interface explicitness, and change locality.",
-            [[py, "scripts/locality_bench.py", "--mode", "visibility"]],
+            [[py, "scripts/rqlens.py", "measure", "locality"]],
             ["target/analysis/locality_metrics.json"],
         ),
         item(
@@ -217,7 +217,7 @@ def build_catalog() -> Dict[str, Any]:
             "leverage",
             "Architecture Leverage",
             "Measures reach, invariant surface, divergence pressure, and co-change ripple.",
-            [[py, "scripts/leverage_metrics.py", "--paths", "src", "--mode", "visibility"]],
+            [[py, "scripts/rqlens.py", "measure", "leverage"]],
             ["target/analysis/leverage_metrics.json"],
         ),
     ]
