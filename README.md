@@ -85,7 +85,7 @@ scratchpad.exe /addto:active /files:"C:\notes\a.txt","C:\notes\b.txt"
 The GitHub release workflow runs formatting, clippy, tests, validates that the
 tag version matches `Cargo.toml`, builds the Windows MSI installer, uploads it
 as a workflow artifact, and publishes the release asset. Push a tag such as
-`v0.30.0` or run the `Release` workflow manually.
+`v0.40.0` or run the `Release` workflow manually.
 
 ## Measurement Workflow
 
