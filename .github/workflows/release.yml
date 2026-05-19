@@ -66,41 +66,24 @@ jobs:
             throw "Release version ${{ steps.version.outputs.version }} does not match Cargo.toml version $cargoVersion."
           }
 
-      - name: Package Windows archive
+      - name: Restore WiX tool
+        shell: pwsh
+        run: dotnet tool restore
+
+      - name: Package Windows installer
         shell: pwsh
         run: |
           cargo build --release --locked
 
           $version = "${{ steps.version.outputs.version }}"
-          $packageName = "scratchpad-v$version-windows-x64"
-          $dist = Join-Path $PWD "dist"
-          $staging = Join-Path $dist $packageName
-          $archive = Join-Path $dist "$packageName.zip"
-          $checksum = "$archive.sha256"
-
-          New-Item -ItemType Directory -Force -Path $dist | Out-Null
-          if (Test-Path $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
-          if (Test-Path $archive) { Remove-Item -LiteralPath $archive -Force }
-          if (Test-Path $checksum) { Remove-Item -LiteralPath $checksum -Force }
-
-          New-Item -ItemType Directory -Force -Path $staging | Out-Null
-          Copy-Item -LiteralPath "target\release\scratchpad.exe" -Destination (Join-Path $staging "scratchpad.exe")
-          Copy-Item -LiteralPath "README.md" -Destination (Join-Path $staging "README.md")
-          Copy-Item -LiteralPath "docs\user-manual.md" -Destination (Join-Path $staging "user-manual.md")
-          if (Test-Path "LICENSE") {
-            Copy-Item -LiteralPath "LICENSE" -Destination (Join-Path $staging "LICENSE")
-          }
-
-          Compress-Archive -Path (Join-Path $staging "*") -DestinationPath $archive -CompressionLevel Optimal
-          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $(Split-Path -Leaf $archive)" | Set-Content -Path $checksum -Encoding ascii
+          .\scripts\package-windows-installer.ps1 -Version $version
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: scratchpad-windows-x64
+          name: scratchpad-windows-x64-msi
           path: |
-            dist/*.zip
+            dist/*.msi
             dist/*.sha256
           if-no-files-found: error
 
@@ -113,5 +96,5 @@ jobs:
           prerelease: ${{ contains(steps.version.outputs.version, '-') }}
           generate_release_notes: true
           files: |
-            dist/*.zip
+            dist/*.msi
             dist/*.sha256

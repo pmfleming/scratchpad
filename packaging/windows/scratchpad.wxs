@@ -1,0 +1,56 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="Scratchpad"
+    Manufacturer="Scratchpad"
+    Version="$(var.AppVersion)"
+    UpgradeCode="{0A8D3E86-C8C4-4750-A3BE-08008E26C394}"
+    Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Scratchpad is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="Main" Title="Scratchpad" Level="1">
+      <ComponentGroupRef Id="AppComponents" />
+      <ComponentRef Id="StartMenuShortcutComponent" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Scratchpad" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Scratchpad" />
+    </StandardDirectory>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="AppComponents" Directory="INSTALLFOLDER">
+      <Component Id="ApplicationFiles" Guid="{2C92B100-2670-4D34-A3AC-46A1F80CBF3D}" Bitness="always64">
+        <File Id="ScratchpadExe" Source="$(var.SourceRoot)\target\release\scratchpad.exe" KeyPath="yes" />
+        <File Id="ReadmeFile" Source="$(var.SourceRoot)\README.md" />
+        <File Id="UserManualFile" Source="$(var.SourceRoot)\docs\user-manual.md" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="StartMenuShortcutComponent" Guid="{DD980AB8-13BC-4D26-8B1D-913ED49A564B}" Bitness="always64">
+        <Shortcut
+          Id="StartMenuShortcut"
+          Name="Scratchpad"
+          Description="Scratchpad text editor"
+          Target="[INSTALLFOLDER]scratchpad.exe"
+          WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveApplicationProgramsFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\Scratchpad"
+          Name="StartMenuShortcut"
+          Type="integer"
+          Value="1"
+          KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

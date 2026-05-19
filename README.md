@@ -48,8 +48,7 @@ output, reports, encoded files, and temporary scratch work.
 
 Scratchpad is active and usable, but still evolving. Current known gaps include
 a planned command palette, narrower context-menu command coverage than a mature
-editor, no folder-wide search for unopened files, and zip-based Windows
-packaging instead of a full installer.
+editor, and no folder-wide search for unopened files.
 
 ## Screenshots
 
@@ -84,9 +83,9 @@ scratchpad.exe /addto:active /files:"C:\notes\a.txt","C:\notes\b.txt"
 ## Packaging and Releases
 
 The GitHub release workflow runs formatting, clippy, tests, validates that the
-tag version matches `Cargo.toml`, builds the Windows archive, uploads it as a
-workflow artifact, and publishes the release asset. Push a tag such as `v0.3.0`
-or run the `Release` workflow manually.
+tag version matches `Cargo.toml`, builds the Windows MSI installer, uploads it
+as a workflow artifact, and publishes the release asset. Push a tag such as
+`v0.30.0` or run the `Release` workflow manually.
 
 ## Measurement Workflow
 
