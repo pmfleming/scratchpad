@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 concurrency:
   group: release-${{ github.workflow }}-${{ github.ref }}
@@ -66,17 +67,157 @@ jobs:
             throw "Release version ${{ steps.version.outputs.version }} does not match Cargo.toml version $cargoVersion."
           }
 
+      - name: Resolve Windows signing mode
+        id: signing
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_MODE: ${{ vars.WINDOWS_SIGNING_MODE }}
+          WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ vars.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ vars.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+        run: |
+          function Has-EnvValue([string] $Name) {
+            $value = [System.Environment]::GetEnvironmentVariable($Name)
+            return -not [string]::IsNullOrWhiteSpace([string]$value)
+          }
+
+          $mode = ([string]$env:WINDOWS_SIGNING_MODE).Trim().ToLowerInvariant()
+          if ([string]::IsNullOrWhiteSpace($mode)) {
+            $hasPfxSigning = (Has-EnvValue "WINDOWS_CODESIGN_PFX_BASE64") -and (Has-EnvValue "WINDOWS_CODESIGN_PFX_PASSWORD")
+            $hasTrustedSigning = (Has-EnvValue "AZURE_CLIENT_ID") `
+              -and (Has-EnvValue "AZURE_TENANT_ID") `
+              -and (Has-EnvValue "AZURE_SUBSCRIPTION_ID") `
+              -and (Has-EnvValue "AZURE_TRUSTED_SIGNING_ENDPOINT") `
+              -and (Has-EnvValue "AZURE_TRUSTED_SIGNING_ACCOUNT") `
+              -and (Has-EnvValue "AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE")
+
+            if ($hasPfxSigning -and $hasTrustedSigning) {
+              throw "Both PFX and Azure signing settings are configured. Set WINDOWS_SIGNING_MODE to 'pfx' or 'trusted-signing'."
+            } elseif ($hasPfxSigning) {
+              $mode = "pfx"
+            } elseif ($hasTrustedSigning) {
+              $mode = "trusted-signing"
+            } else {
+              throw "Windows release signing is not configured. Add PFX or Azure signing settings, or set WINDOWS_SIGNING_MODE=none to publish unsigned installers."
+            }
+          }
+
+          if ($mode -in @("azure", "azure-trusted-signing", "trusted-signing", "artifact-signing")) {
+            $mode = "trusted-signing"
+          } elseif ($mode -in @("certificate", "secret-certificate")) {
+            $mode = "pfx"
+          } elseif ($mode -notin @("none", "pfx")) {
+            throw "Unsupported WINDOWS_SIGNING_MODE '$mode'. Use 'pfx', 'trusted-signing', or leave it empty."
+          }
+
+          if ($mode -eq "pfx") {
+            foreach ($name in @("WINDOWS_CODESIGN_PFX_BASE64", "WINDOWS_CODESIGN_PFX_PASSWORD")) {
+              if (-not (Has-EnvValue $name)) {
+                throw "WINDOWS_SIGNING_MODE=pfx requires the $name secret."
+              }
+            }
+          }
+
+          if ($mode -eq "trusted-signing") {
+            foreach ($name in @(
+              "AZURE_CLIENT_ID",
+              "AZURE_TENANT_ID",
+              "AZURE_SUBSCRIPTION_ID",
+              "AZURE_TRUSTED_SIGNING_ENDPOINT",
+              "AZURE_TRUSTED_SIGNING_ACCOUNT",
+              "AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE"
+            )) {
+              if (-not (Has-EnvValue $name)) {
+                throw "WINDOWS_SIGNING_MODE=trusted-signing requires $name."
+              }
+            }
+          }
+
+          "mode=$mode" >> $env:GITHUB_OUTPUT
+          "enabled=$(($mode -ne "none").ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
       - name: Restore WiX tool
         shell: pwsh
         run: dotnet tool restore
 
+      - name: Build release executable
+        shell: pwsh
+        run: cargo build --release --locked
+
+      - name: Sign release executable with PFX certificate
+        if: steps.signing.outputs.mode == 'pfx'
+        shell: pwsh
+        env:
+          WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
+        run: |
+          .\scripts\sign-windows-artifact.ps1 `
+            -FilePath .\target\release\scratchpad.exe `
+            -PfxBase64 $env:WINDOWS_CODESIGN_PFX_BASE64 `
+            -PfxPassword $env:WINDOWS_CODESIGN_PFX_PASSWORD
+
+      - name: Azure login for Trusted Signing
+        if: steps.signing.outputs.mode == 'trusted-signing'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign release executable with Azure Artifact Signing
+        if: steps.signing.outputs.mode == 'trusted-signing'
+        uses: azure/artifact-signing-action@v1
+        with:
+          endpoint: ${{ vars.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+          files: ${{ github.workspace }}\target\release\scratchpad.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
       - name: Package Windows installer
         shell: pwsh
         run: |
-          cargo build --release --locked
-
           $version = "${{ steps.version.outputs.version }}"
           .\scripts\package-windows-installer.ps1 -Version $version
+
+      - name: Sign Windows installer with PFX certificate
+        if: steps.signing.outputs.mode == 'pfx'
+        shell: pwsh
+        env:
+          WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
+        run: |
+          $installer = Get-Item .\dist\*.msi | Select-Object -First 1
+          .\scripts\sign-windows-artifact.ps1 `
+            -FilePath $installer.FullName `
+            -PfxBase64 $env:WINDOWS_CODESIGN_PFX_BASE64 `
+            -PfxPassword $env:WINDOWS_CODESIGN_PFX_PASSWORD
+
+      - name: Sign Windows installer with Azure Artifact Signing
+        if: steps.signing.outputs.mode == 'trusted-signing'
+        uses: azure/artifact-signing-action@v1
+        with:
+          endpoint: ${{ vars.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+          files: ${{ github.workspace }}\dist\scratchpad-v${{ steps.version.outputs.version }}-windows-x64.msi
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Update signed installer checksum
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $installer = Get-Item .\dist\*.msi | Select-Object -First 1
+          .\scripts\update-windows-installer-checksum.ps1 -InstallerPath $installer.FullName
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4

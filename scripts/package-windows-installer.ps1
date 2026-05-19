@@ -34,7 +34,4 @@ if ($LASTEXITCODE -ne 0) {
     throw "WiX failed with exit code $LASTEXITCODE."
 }
 
-$hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
-"$hash  $(Split-Path -Leaf $installer)" | Set-Content -Path $checksum -Encoding ascii
-
-Get-Item $installer, $checksum | Select-Object FullName, Length
+& (Join-Path $PSScriptRoot "update-windows-installer-checksum.ps1") -InstallerPath $installer
