@@ -127,6 +127,7 @@ impl Default for SessionStore {
 }
 
 impl SessionStore {
+    #[must_use]
     pub fn new(root: PathBuf) -> Self {
         let manifest_path = root.join(SESSION_MANIFEST_NAME);
         Self {
@@ -135,6 +136,7 @@ impl SessionStore {
         }
     }
 
+    #[must_use]
     pub fn root(&self) -> &std::path::Path {
         &self.root
     }

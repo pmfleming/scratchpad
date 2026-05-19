@@ -7,11 +7,10 @@ use crate::app::ui::editor_content::native_editor::{
 
 pub(crate) fn active_buffer_transaction_label(app: &ScratchpadApp) -> Option<String> {
     app.tab_manager.active_tab().map(|tab| {
-        tab.active_buffer()
-            .path
-            .as_ref()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| tab.active_buffer().name.clone())
+        tab.active_buffer().path.as_ref().map_or_else(
+            || tab.active_buffer().name.clone(),
+            |path| path.display().to_string(),
+        )
     })
 }
 
@@ -60,7 +59,7 @@ pub(crate) fn select_all_in_active_view(app: &mut ScratchpadApp) -> bool {
 
 pub(crate) fn copy_selected_text_in_active_view(app: &ScratchpadApp) -> Option<String> {
     let tab = app.tab_manager.active_tab()?;
-    let view = tab.active_view()?;
+    let view = tab.layout.active_view()?;
     let buffer = tab.buffer_for_view(view.id)?;
     selected_text(buffer, view.cursor_range?)
 }
@@ -187,9 +186,8 @@ fn delete_active_view_selection(
 
 fn apply_active_buffer_text_operation(app: &mut ScratchpadApp, undo: bool) -> bool {
     let active_tab_index = app.tab_manager.active_tab_index;
-    let active_buffer_label = match active_buffer_transaction_label(app) {
-        Some(label) => label,
-        None => return false,
+    let Some(active_buffer_label) = active_buffer_transaction_label(app) else {
+        return false;
     };
 
     let selection = {

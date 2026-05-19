@@ -49,6 +49,7 @@ impl ScrollAnchor {
         display_row_offset: 0.0,
     };
 
+    #[must_use]
     pub fn at_line(line: u32) -> Self {
         Self::Logical {
             logical_line: line,
@@ -57,6 +58,7 @@ impl ScrollAnchor {
         }
     }
 
+    #[must_use]
     pub fn at_piece(anchor: AnchorId) -> Self {
         Self::Piece {
             anchor,
@@ -64,6 +66,7 @@ impl ScrollAnchor {
         }
     }
 
+    #[must_use]
     pub fn display_row_offset(self) -> f32 {
         match self {
             Self::Piece {
@@ -75,6 +78,7 @@ impl ScrollAnchor {
         }
     }
 
+    #[must_use]
     pub fn with_display_row_offset(self, offset: f32) -> Self {
         match self {
             Self::Piece { anchor, .. } => Self::Piece {
@@ -95,6 +99,7 @@ impl ScrollAnchor {
 
     /// Logical line component, when this anchor is a v1 fallback. `None` for
     /// piece-tree-backed anchors (which require tree resolution).
+    #[must_use]
     pub fn logical_line(self) -> Option<u32> {
         match self {
             Self::Logical { logical_line, .. } => Some(logical_line),
@@ -103,6 +108,7 @@ impl ScrollAnchor {
     }
 
     /// Piece-tree anchor handle, when this is a piece-backed anchor.
+    #[must_use]
     pub fn piece_anchor(self) -> Option<AnchorId> {
         match self {
             Self::Piece { anchor, .. } => Some(anchor),

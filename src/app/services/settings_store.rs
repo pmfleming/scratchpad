@@ -33,6 +33,7 @@ impl Default for SettingsStore {
 }
 
 impl SettingsStore {
+    #[must_use]
     pub fn new(root: PathBuf) -> Self {
         let settings_path = root.join(SETTINGS_FILE_NAME);
         let legacy_settings_path = root.join(LEGACY_SETTINGS_FILE_NAME);
@@ -74,6 +75,7 @@ impl SettingsStore {
         write_atomic(&self.settings_path, toml.as_bytes())
     }
 
+    #[must_use]
     pub fn path(&self) -> &Path {
         &self.settings_path
     }

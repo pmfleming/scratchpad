@@ -125,6 +125,7 @@ pub struct BufferViewStatus {
 }
 
 impl BufferState {
+    #[must_use]
     pub fn new(name: String, content: String, path: Option<PathBuf>) -> Self {
         let (format, text_metadata) = super::detected_text_format_and_metadata(
             &content,
@@ -136,6 +137,7 @@ impl BufferState {
         Self::with_format_and_metadata(name, content, path, format, text_metadata)
     }
 
+    #[must_use]
     pub fn with_encoding(
         name: String,
         content: String,
@@ -153,6 +155,7 @@ impl BufferState {
         Self::with_format_and_metadata(name, content, path, format, text_metadata)
     }
 
+    #[must_use]
     pub fn with_format(
         name: String,
         content: String,
@@ -218,6 +221,7 @@ impl BufferState {
         )
     }
 
+    #[must_use]
     pub fn restored(restored: RestoredBufferState) -> Self {
         let mut format = restored.format;
         let text_metadata = buffer_text_metadata(&restored.content, &mut format);
@@ -269,6 +273,7 @@ impl BufferState {
         )
     }
 
+    #[must_use]
     pub fn document(&self) -> &TextDocument {
         &self.document
     }
@@ -277,18 +282,22 @@ impl BufferState {
         &mut self.document
     }
 
+    #[must_use]
     pub fn text(&self) -> String {
         self.document.extract_text()
     }
 
+    #[must_use]
     pub fn preview_for_match(&self, range: &Range<usize>) -> (usize, usize, String) {
         super::piece_tree::preview::preview_for_match(self.document.piece_tree(), range)
     }
 
+    #[must_use]
     pub fn document_snapshot(&self) -> DocumentSnapshot {
         self.document.snapshot()
     }
 
+    #[must_use]
     pub fn document_revision(&self) -> u64 {
         self.document.piece_tree().generation()
     }
@@ -307,9 +316,10 @@ impl BufferState {
                 .any(|span| span.text.contains('\t'))
     }
 
+    #[must_use]
     pub fn view_status(&self, cursor_range: Option<CursorRange>) -> BufferViewStatus {
-        let (cursor_line, cursor_column, selection_chars) = cursor_range
-            .map(|range| {
+        let (cursor_line, cursor_column, selection_chars) =
+            cursor_range.map_or((None, None, 0), |range| {
                 let position = super::piece_tree::query::char_position(
                     self.document.piece_tree(),
                     range.primary.index,
@@ -319,8 +329,7 @@ impl BufferState {
                     Some(position.column_index + 1),
                     range.primary.index.abs_diff(range.secondary.index),
                 )
-            })
-            .unwrap_or((None, None, 0));
+            });
 
         BufferViewStatus {
             cursor_line,
@@ -453,6 +462,7 @@ impl BufferState {
         }
     }
 
+    #[must_use]
     pub fn disk_status_label(&self) -> Option<&'static str> {
         match self.freshness {
             BufferFreshness::InSync => None,
@@ -463,12 +473,12 @@ impl BufferState {
         }
     }
 
+    #[must_use]
     pub fn disk_status_message(&self) -> Option<String> {
         let path_label = self
             .path
             .as_ref()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| self.name.clone());
+            .map_or_else(|| self.name.clone(), |path| path.display().to_string());
 
         match self.freshness {
             BufferFreshness::InSync => None,
@@ -483,10 +493,12 @@ impl BufferState {
         }
     }
 
+    #[must_use]
     pub fn display_name(&self) -> String {
         self.name.clone()
     }
 
+    #[must_use]
     pub fn overflow_context_label(&self) -> Option<String> {
         self.path.as_ref().map(|path| path.display().to_string())
     }

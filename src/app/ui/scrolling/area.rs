@@ -61,41 +61,49 @@ impl ScrollArea {
         }
     }
 
+    #[must_use]
     pub fn source(mut self, source: ScrollSource) -> Self {
         self.source = source;
         self
     }
 
+    #[must_use]
     pub fn interaction_id(mut self, id: impl Into<Id>) -> Self {
         self.interaction_id = id.into();
         self
     }
 
+    #[must_use]
     pub fn scrollbar_x(mut self, p: ScrollbarPolicy) -> Self {
         self.scrollbar_x = p;
         self
     }
 
+    #[must_use]
     pub fn scrollbar_y(mut self, p: ScrollbarPolicy) -> Self {
         self.scrollbar_y = p;
         self
     }
 
+    #[must_use]
     pub fn eof_overscroll(mut self, on: bool) -> Self {
         self.eof_overscroll = on;
         self
     }
 
+    #[must_use]
     pub fn scrollbar_thickness(mut self, px: f32) -> Self {
         self.scrollbar_thickness = px;
         self
     }
 
+    #[must_use]
     pub fn min_content_size(mut self, size: Vec2) -> Self {
         self.min_content_size = size;
         self
     }
 
+    #[must_use]
     pub fn max_size(mut self, size: Vec2) -> Self {
         self.max_size = Some(size);
         self
@@ -180,12 +188,12 @@ impl ScrollArea {
 
         // Paint scrollbars and handle drag.
         let mut paint_scrollbar =
-            |axis: ScrollbarAxis, _id_suffix: &str, cross_gap: f32, state: &mut ScrollState| {
+            |axis: ScrollbarAxis, id_suffix: &str, cross_gap: f32, state: &mut ScrollState| {
                 paint_visible_scrollbar(
                     ui,
                     state,
                     ScrollbarPaintRequest {
-                        id: self.id.with(_id_suffix),
+                        id: self.id.with(id_suffix),
                         outer_rect,
                         axis,
                         thickness: self.scrollbar_thickness,
@@ -229,9 +237,10 @@ struct PassStableScrollLayout {
 }
 
 fn scroll_area_outer_rect(ui: &Ui, max_size: Option<Vec2>) -> Rect {
-    max_size
-        .map(|size| Rect::from_min_size(ui.available_rect_before_wrap().min, size))
-        .unwrap_or_else(|| ui.available_rect_before_wrap())
+    max_size.map_or_else(
+        || ui.available_rect_before_wrap(),
+        |size| Rect::from_min_size(ui.available_rect_before_wrap().min, size),
+    )
 }
 
 fn pass_stable_layout_state(ui: &Ui, id: Id, state: ScrollState) -> ScrollState {
@@ -254,12 +263,11 @@ fn pass_stable_layout_state(ui: &Ui, id: Id, state: ScrollState) -> ScrollState 
     ui.ctx()
         .data(|data| data.get_temp::<PassStableScrollLayout>(storage_id))
         .filter(|layout| layout.frame == frame)
-        .map(|layout| ScrollState {
+        .map_or(state, |layout| ScrollState {
             content_size: layout.content_size,
             viewport_size: layout.viewport_size,
             ..state
         })
-        .unwrap_or(state)
 }
 
 fn apply_pending_target(state: &mut ScrollState, source: ScrollSource, inner_rect: Rect) {

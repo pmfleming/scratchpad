@@ -106,7 +106,7 @@ fn save_existing_path_stops_when_dirty_buffer_conflicts_with_disk() {
         BufferFreshness::ConflictOnDisk
     );
     assert_eq!(
-        fixture.crate::app::app_state::workspace::accessors::pending_action(app),
+        crate::app::app_state::workspace::accessors::pending_action(&fixture.app),
         Some(PendingAction::SaveConflict {
             tab_index: 0,
             view_id

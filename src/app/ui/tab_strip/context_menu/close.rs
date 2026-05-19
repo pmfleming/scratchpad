@@ -10,13 +10,17 @@ enum CloseDisplayTabs {
 
 pub(super) fn close_current_slot(app: &mut ScratchpadApp, slot_index: usize, is_settings: bool) {
     if is_settings {
-        app.handle_command(AppCommand::Settings(SettingsCommand::CloseSettings));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Settings(SettingsCommand::CloseSettings),
+        );
     } else if let Some(index) =
         crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(app, slot_index)
     {
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::RequestCloseTab {
-            index,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::RequestCloseTab { index }),
+        );
     }
 }
 
@@ -70,7 +74,10 @@ fn close_display_slots(
     }
 
     if close_settings {
-        app.handle_command(AppCommand::Settings(SettingsCommand::CloseSettings));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Settings(SettingsCommand::CloseSettings),
+        );
     }
 
     if closed_count > 0 || close_settings {

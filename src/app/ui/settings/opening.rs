@@ -24,7 +24,7 @@ pub(super) fn render_opening_category(ui: &mut egui::Ui, app: &mut ScratchpadApp
         "Enable recent-file UI.",
         app.state.app_settings.recent_files_enabled(),
         |enabled| {
-            crate::app::app_state::settings_controller::set_recent_files_enabled(app, enabled)
+            crate::app::app_state::settings_controller::set_recent_files_enabled(app, enabled);
         },
     );
 }

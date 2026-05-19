@@ -15,7 +15,12 @@ use std::sync::Arc;
 
 pub(super) fn active_buffer_identity(app: &ScratchpadApp) -> Option<(usize, BufferId)> {
     let active_tab_index = app.tab_manager.active_tab_index;
-    let active_buffer_id = app.tab_manager.active_tab()?.active_view()?.buffer_id;
+    let active_buffer_id = app
+        .tab_manager
+        .active_tab()?
+        .layout
+        .active_view()?
+        .buffer_id;
     Some((active_tab_index, active_buffer_id))
 }
 

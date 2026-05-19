@@ -81,7 +81,7 @@ pub(super) fn render_appearance_category(ui: &mut egui::Ui, app: &mut Scratchpad
                 "Overrides mode defaults.",
                 app.state.app_settings.editor_text_color(),
                 |app, color| {
-                    crate::app::app_state::settings_controller::set_editor_text_color(app, color)
+                    crate::app::app_state::settings_controller::set_editor_text_color(app, color);
                 },
                 app,
             );
@@ -93,7 +93,7 @@ pub(super) fn render_appearance_category(ui: &mut egui::Ui, app: &mut Scratchpad
                 |app, color| {
                     crate::app::app_state::settings_controller::set_editor_background_color(
                         app, color,
-                    )
+                    );
                 },
                 app,
             );
@@ -105,7 +105,7 @@ pub(super) fn render_appearance_category(ui: &mut egui::Ui, app: &mut Scratchpad
                 |app, color| {
                     crate::app::app_state::settings_controller::set_editor_text_highlight_color(
                         app, color,
-                    )
+                    );
                 },
                 app,
             );
@@ -201,7 +201,7 @@ fn render_tab_list_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             selected_label: tab_list_position_label,
             option_label: tab_list_position_label,
             on_change: |position| {
-                crate::app::app_state::settings_controller::set_tab_list_position(app, position)
+                crate::app::app_state::settings_controller::set_tab_list_position(app, position);
             },
         },
     );
@@ -220,7 +220,7 @@ fn render_new_tab_placement_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             selected_label: new_tab_placement_pill_label,
             option_label: new_tab_placement_label,
             on_change: |placement| {
-                crate::app::app_state::settings_controller::set_new_tab_placement(app, placement)
+                crate::app::app_state::settings_controller::set_new_tab_placement(app, placement);
             },
         },
     );
@@ -307,7 +307,9 @@ fn render_status_bar_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         "settings.ui.status_bar_visible",
         app.state.app_settings.status_bar_visible(),
         |visible| {
-            crate::app::app_state::settings_controller::defer_status_bar_visible(app, visible, &ctx)
+            crate::app::app_state::settings_controller::defer_status_bar_visible(
+                app, visible, &ctx,
+            );
         },
     );
 }
@@ -351,21 +353,21 @@ fn apply_theme_mode_selection(
                 app,
                 AppThemeMode::System,
                 system_theme,
-            )
+            );
         }
         ThemeModeSelection::Light => {
             crate::app::app_state::settings_controller::apply_theme_mode_preset(
                 app,
                 AppThemeMode::Light,
                 system_theme,
-            )
+            );
         }
         ThemeModeSelection::Dark => {
             crate::app::app_state::settings_controller::apply_theme_mode_preset(
                 app,
                 AppThemeMode::Dark,
                 system_theme,
-            )
+            );
         }
         ThemeModeSelection::Custom => {}
     }

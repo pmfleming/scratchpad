@@ -322,7 +322,7 @@ fn save_path(
     let disk_state = result
         .as_ref()
         .ok()
-        .and_then(|_| FileService::read_disk_state(&path).ok());
+        .and_then(|()| FileService::read_disk_state(&path).ok());
     BackgroundIoResult::PathSaved {
         request_id,
         path,

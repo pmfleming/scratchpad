@@ -24,7 +24,10 @@ pub(super) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 egui_phosphor::regular::FOLDER_OPEN,
                 "Open File",
                 || {
-                    app.handle_command(AppCommand::File(FileCommand::OpenFile));
+                    crate::app::commands::handle_command(
+                        app,
+                        AppCommand::File(FileCommand::OpenFile),
+                    );
                 },
             );
             ui.add_space(PRIMARY_ACTION_SPACING);
@@ -34,7 +37,10 @@ pub(super) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 egui_phosphor::regular::FLOPPY_DISK,
                 "Save As",
                 || {
-                    app.handle_command(AppCommand::File(FileCommand::SaveFileAs));
+                    crate::app::commands::handle_command(
+                        app,
+                        AppCommand::File(FileCommand::SaveFileAs),
+                    );
                 },
             );
             ui.add_space(PRIMARY_ACTION_SPACING);
@@ -44,7 +50,10 @@ pub(super) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 egui_phosphor::regular::MAGNIFYING_GLASS,
                 search_tooltip,
                 || {
-                    app.handle_command(AppCommand::Search(SearchCommand::Toggle));
+                    crate::app::commands::handle_command(
+                        app,
+                        AppCommand::Search(SearchCommand::Toggle),
+                    );
                 },
             );
         },

@@ -24,6 +24,7 @@ impl ScrollAlign {
     /// Returns the new scroll offset for that axis. `current_offset` is the
     /// current scroll offset; the visible window is
     /// `[current_offset, current_offset + viewport_size)`.
+    #[must_use]
     pub fn resolve(
         self,
         target: Rangef,
@@ -69,6 +70,7 @@ pub struct ScrollTarget {
 }
 
 impl ScrollTarget {
+    #[must_use]
     pub fn new(rect: Rect) -> Self {
         Self {
             rect,
@@ -77,11 +79,13 @@ impl ScrollTarget {
         }
     }
 
+    #[must_use]
     pub fn with_y(mut self, align: ScrollAlign) -> Self {
         self.align_y = Some(align);
         self
     }
 
+    #[must_use]
     pub fn with_x(mut self, align: ScrollAlign) -> Self {
         self.align_x = Some(align);
         self

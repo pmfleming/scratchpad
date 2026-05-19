@@ -232,14 +232,12 @@ fn paint_contiguous_selection_background(
     let slice_end = context.char_offset_base.saturating_add(context.slice_chars);
     let doc_local_start = selection.start.max(slice_start).saturating_sub(slice_start);
     let doc_local_end = selection.end.min(slice_end).saturating_sub(slice_start);
-    let local_start = context
-        .display_map
-        .map(|map| map.doc_to_display_cursor(doc_local_start))
-        .unwrap_or(doc_local_start);
-    let local_end = context
-        .display_map
-        .map(|map| map.doc_to_display_cursor(doc_local_end))
-        .unwrap_or(doc_local_end);
+    let local_start = context.display_map.map_or(doc_local_start, |map| {
+        map.doc_to_display_cursor(doc_local_start)
+    });
+    let local_end = context.display_map.map_or(doc_local_end, |map| {
+        map.doc_to_display_cursor(doc_local_end)
+    });
     if local_start >= local_end {
         return;
     }
@@ -325,14 +323,12 @@ fn paint_replacement_preview(
         .end
         .min(context.slice_end)
         .saturating_sub(context.char_offset_base);
-    let local_start = context
-        .display_map
-        .map(|map| map.doc_to_display_cursor(doc_local_start))
-        .unwrap_or(doc_local_start);
-    let local_end = context
-        .display_map
-        .map(|map| map.doc_to_display_cursor(doc_local_end))
-        .unwrap_or(doc_local_end);
+    let local_start = context.display_map.map_or(doc_local_start, |map| {
+        map.doc_to_display_cursor(doc_local_start)
+    });
+    let local_end = context.display_map.map_or(doc_local_end, |map| {
+        map.doc_to_display_cursor(doc_local_end)
+    });
     if local_start > local_end {
         return;
     }
@@ -438,9 +434,7 @@ pub(super) fn local_cursor(
 ) -> CharCursor {
     let doc_local = cursor.index.saturating_sub(char_offset_base);
     CharCursor {
-        index: display_map
-            .map(|map| map.doc_to_display_cursor(doc_local))
-            .unwrap_or(doc_local),
+        index: display_map.map_or(doc_local, |map| map.doc_to_display_cursor(doc_local)),
         prefer_next_row: cursor.prefer_next_row,
     }
 }
@@ -456,9 +450,9 @@ fn local_cursor_for_slice(
         .saturating_sub(char_offset_base)
         .min(slice_chars);
     CharCursor {
-        index: display_map
-            .map(|map| map.doc_to_display_cursor(doc_local).min(map.display_len()))
-            .unwrap_or(doc_local),
+        index: display_map.map_or(doc_local, |map| {
+            map.doc_to_display_cursor(doc_local).min(map.display_len())
+        }),
         prefer_next_row: cursor.prefer_next_row,
     }
 }

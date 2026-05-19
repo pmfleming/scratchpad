@@ -28,6 +28,7 @@ impl WorkspaceTab {
         ))
     }
 
+    #[must_use]
     pub fn into_tabs_per_file(self) -> Vec<WorkspaceTab> {
         let WorkspaceTab { buffers, layout } = self;
         let (buffer, extra_buffers) = buffers.into_parts();
@@ -74,7 +75,7 @@ impl WorkspaceTab {
         &mut self,
         view_id: ViewId,
     ) -> Option<tab_support::ViewPromotionPlan> {
-        let promoted_buffer_id = self.view(view_id)?.buffer_id;
+        let promoted_buffer_id = self.layout.view(view_id)?.buffer_id;
         let tab_support::ViewIdPartition {
             selected_view_ids: promoted_view_ids,
             remaining_view_ids,
@@ -88,7 +89,7 @@ impl WorkspaceTab {
             self.layout.active_view_id,
             &self.layout.root_pane,
         );
-        let replacement_buffer_id = self.view(remaining_active_view_id)?.buffer_id;
+        let replacement_buffer_id = self.layout.view(remaining_active_view_id)?.buffer_id;
 
         Some(tab_support::ViewPromotionPlan {
             promoted_buffer_id,

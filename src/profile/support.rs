@@ -71,9 +71,10 @@ pub(super) fn install_navigation_workspace(
             build_view_dense_tab(tab_index, views_per_tab, bytes_per_buffer),
         );
     }
-    app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateTab {
-        index: 0,
-    }));
+    crate::app::commands::handle_command(
+        app,
+        AppCommand::Workspace(WorkspaceCommand::ActivateTab { index: 0 }),
+    );
 }
 
 pub(super) fn install_profile_tab<T>(
@@ -104,9 +105,10 @@ pub(super) fn install_search_all_tabs(
         crate::app::app_state::workspace_controller::append_tab(app, tab);
     }
 
-    app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateTab {
-        index: 0,
-    }));
+    crate::app::commands::handle_command(
+        app,
+        AppCommand::Workspace(WorkspaceCommand::ActivateTab { index: 0 }),
+    );
     expected_matches
 }
 
@@ -204,10 +206,13 @@ pub(super) fn resize_profile_splits(
         } else {
             0.65
         };
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::ResizeSplit {
-            path: path.clone(),
-            ratio,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ResizeSplit {
+                path: path.clone(),
+                ratio,
+            }),
+        );
     }
     split_paths.len()
 }
@@ -230,15 +235,17 @@ pub(super) fn rebalance_profile_tab_views(tab: &mut WorkspaceTab) -> usize {
 pub(super) fn cycle_profile_views(app: &mut ScratchpadApp, view_ids: &[ViewId]) -> usize {
     let mut activations = 0;
     for &view_id in view_ids.iter().skip(1) {
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateView {
-            view_id,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ActivateView { view_id }),
+        );
         activations += 1;
     }
     for &view_id in view_ids.iter().rev().skip(1) {
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateView {
-            view_id,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ActivateView { view_id }),
+        );
         activations += 1;
     }
     activations

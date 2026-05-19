@@ -14,11 +14,10 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 pub(crate) fn open_encoding_dialog(app: &mut ScratchpadApp) {
-    let choice = app
-        .tab_manager
-        .active_tab()
-        .map(|tab| tab.active_buffer().format.encoding_name.clone())
-        .unwrap_or_else(|| "UTF-8".to_owned());
+    let choice = app.tab_manager.active_tab().map_or_else(
+        || "UTF-8".to_owned(),
+        |tab| tab.active_buffer().format.encoding_name.clone(),
+    );
     app.state.dialogs.encoding.open_with_choice(choice);
 }
 

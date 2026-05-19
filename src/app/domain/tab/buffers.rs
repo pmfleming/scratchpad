@@ -8,6 +8,7 @@ pub struct WorkspaceTabBuffers {
 }
 
 impl WorkspaceTabBuffers {
+    #[must_use]
     pub fn new(buffer: BufferState) -> Self {
         Self {
             buffer,
@@ -15,6 +16,7 @@ impl WorkspaceTabBuffers {
         }
     }
 
+    #[must_use]
     pub fn restored(buffer: BufferState, extra_buffers: Vec<BufferState>) -> Self {
         Self {
             buffer,
@@ -22,6 +24,7 @@ impl WorkspaceTabBuffers {
         }
     }
 
+    #[must_use]
     pub fn active(&self) -> &BufferState {
         &self.buffer
     }
@@ -38,6 +41,7 @@ impl WorkspaceTabBuffers {
         std::iter::once(&mut self.buffer).chain(self.extra_buffers.iter_mut())
     }
 
+    #[must_use]
     pub fn by_id(&self, buffer_id: BufferId) -> Option<&BufferState> {
         self.active_matches_id(buffer_id)
             .then_some(&self.buffer)
@@ -108,6 +112,7 @@ impl WorkspaceTabBuffers {
         }
     }
 
+    #[must_use]
     pub fn into_parts(self) -> (BufferState, Vec<BufferState>) {
         (self.buffer, self.extra_buffers)
     }

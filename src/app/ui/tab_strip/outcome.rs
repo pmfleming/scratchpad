@@ -13,9 +13,10 @@ pub(crate) fn apply_tab_outcome(app: &mut ScratchpadApp, outcome: TabStripOutcom
         .rename_requested_tab
         .and_then(|slot_index| display_tabs::workspace_index_for_slot(app, slot_index))
     {
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateTab {
-            index,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ActivateTab { index }),
+        );
         workspace_accessors::begin_tab_rename(app, index);
     }
     if outcome.activate_settings {
@@ -26,7 +27,10 @@ pub(crate) fn apply_tab_outcome(app: &mut ScratchpadApp, outcome: TabStripOutcom
         AppCommand::Workspace(WorkspaceCommand::RequestCloseTab { index })
     });
     if outcome.close_settings {
-        app.handle_command(AppCommand::Settings(SettingsCommand::CloseSettings));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Settings(SettingsCommand::CloseSettings),
+        );
     }
 
     apply_workspace_slot_command(app, outcome.promote_all_files_tab, |index| {
@@ -45,10 +49,13 @@ fn apply_tab_reordering(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
     }
 
     if let Some((from_index, to_index)) = outcome.reordered_tabs {
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::ReorderDisplayTab {
-            from_index,
-            to_index,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ReorderDisplayTab {
+                from_index,
+                to_index,
+            }),
+        );
         display_tabs::clear_tab_selection(app);
     }
 }
@@ -58,12 +65,13 @@ fn apply_tab_combining(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
         if let Some((workspace_sources, workspace_target)) =
             resolve_group_combine_targets(app, source_indices, *target_index)
         {
-            app.handle_command(AppCommand::Workspace(
-                WorkspaceCommand::CombineTabsIntoTab {
+            crate::app::commands::handle_command(
+                app,
+                AppCommand::Workspace(WorkspaceCommand::CombineTabsIntoTab {
                     source_indices: workspace_sources,
                     target_index: workspace_target,
-                },
-            ));
+                }),
+            );
         }
         crate::app::app_state::workspace::display_tabs::clear_tab_selection(app);
         return;
@@ -81,10 +89,13 @@ fn apply_tab_combining(app: &mut ScratchpadApp, outcome: &TabStripOutcome) {
             ),
         )
     {
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::CombineTabIntoTab {
-            source_index,
-            target_index,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::CombineTabIntoTab {
+                source_index,
+                target_index,
+            }),
+        );
         crate::app::app_state::workspace::display_tabs::clear_tab_selection(app);
     }
 }
@@ -122,7 +133,7 @@ fn apply_workspace_slot_command(
     if let Some(index) = slot_index.and_then(|slot_index| {
         crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(app, slot_index)
     }) {
-        app.handle_command(command(index));
+        crate::app::commands::handle_command(app, command(index));
     }
 }
 

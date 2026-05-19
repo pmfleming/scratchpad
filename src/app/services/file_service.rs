@@ -161,15 +161,16 @@ impl FileService {
         Ok(resolve_encoding(encoding_name)?.name().to_string())
     }
 
+    #[must_use]
     pub fn build_buffer_from_file_content(
         path: &Path,
         file_content: FileContent,
         disk_state: Option<DiskFileState>,
     ) -> BufferState {
-        let name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.display().to_string());
+        let name = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
         let FileContent {
             document,
             format,

@@ -31,6 +31,7 @@ impl Default for ViewportMetrics {
 }
 
 impl ViewportMetrics {
+    #[must_use]
     pub fn viewport_size(&self) -> Vec2 {
         self.viewport_rect.size()
     }

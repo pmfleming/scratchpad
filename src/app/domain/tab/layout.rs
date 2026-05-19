@@ -1,7 +1,5 @@
 use super::WorkspaceTab;
-use crate::app::domain::{
-    BufferId, BufferState, EditorViewState, PaneNode, SplitAxis, SplitPath, ViewId,
-};
+use crate::app::domain::{BufferId, BufferState, EditorViewState, PaneNode, SplitAxis, ViewId};
 use std::collections::HashSet;
 
 struct ViewPresentationState {
@@ -9,22 +7,6 @@ struct ViewPresentationState {
 }
 
 impl WorkspaceTab {
-    pub fn active_view(&self) -> Option<&EditorViewState> {
-        self.layout.active_view()
-    }
-
-    pub fn active_view_mut(&mut self) -> Option<&mut EditorViewState> {
-        self.layout.active_view_mut()
-    }
-
-    pub fn line_numbers_visible(&self) -> bool {
-        self.layout.line_numbers_visible()
-    }
-
-    pub fn set_line_numbers_visible(&mut self, visible: bool) {
-        self.layout.set_line_numbers_visible(visible);
-    }
-
     pub fn clear_transient_view_state(&mut self) {
         let mut anchors_to_release = Vec::new();
         for view in self.layout.views_mut() {
@@ -67,14 +49,6 @@ impl WorkspaceTab {
                     .release_anchor(anchor);
             }
         }
-    }
-
-    pub fn view(&self, view_id: ViewId) -> Option<&EditorViewState> {
-        self.layout.view(view_id)
-    }
-
-    pub fn view_mut(&mut self, view_id: ViewId) -> Option<&mut EditorViewState> {
-        self.layout.view_mut(view_id)
     }
 
     pub fn close_view(&mut self, view_id: ViewId) -> bool {
@@ -208,10 +182,6 @@ impl WorkspaceTab {
         Some(active_view_id)
     }
 
-    pub fn resize_split(&mut self, path: SplitPath, ratio: f32) -> bool {
-        self.layout.root_pane.resize_split(&path, ratio)
-    }
-
     pub fn rebalance_views_equally(&mut self) -> bool {
         self.rebalance_views_equally_for_axis(SplitAxis::Vertical)
     }
@@ -232,7 +202,7 @@ impl WorkspaceTab {
     }
 
     fn view_presentation_state(&self, view_id: ViewId) -> Option<ViewPresentationState> {
-        let source_view = self.view(view_id)?;
+        let source_view = self.layout.view(view_id)?;
         Some(ViewPresentationState {
             show_line_numbers: source_view.show_line_numbers,
         })
@@ -248,11 +218,15 @@ impl WorkspaceTab {
         new_view.cursor_range = source_view.cursor_range;
         new_view.pending_cursor_range = source_view.pending_cursor_range;
         new_view.scroll = source_view.scroll.clone();
-        new_view.latest_display_snapshot = source_view.latest_display_snapshot.clone();
+        new_view
+            .latest_display_snapshot
+            .clone_from(&source_view.latest_display_snapshot);
         new_view.latest_display_snapshot_revision = source_view.latest_display_snapshot_revision;
         new_view.layout_cache = source_view.layout_cache.clone();
         new_view.search_highlights = source_view.search_highlights.clone();
-        new_view.search_replacement_preview = source_view.search_replacement_preview.clone();
+        new_view
+            .search_replacement_preview
+            .clone_from(&source_view.search_replacement_preview);
         new_view
     }
 
@@ -265,7 +239,7 @@ impl WorkspaceTab {
         ratio: f32,
     ) -> Option<ViewId> {
         let presentation = self.view_presentation_state(target_view_id)?;
-        let source_view = self.view(target_view_id)?;
+        let source_view = self.layout.view(target_view_id)?;
         let new_view = Self::build_split_view(buffer_id, source_view, presentation);
         self.layout
             .insert_split_view(target_view_id, axis, new_view, new_view_first, ratio)

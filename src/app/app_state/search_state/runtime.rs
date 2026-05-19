@@ -169,7 +169,7 @@ fn collect_search_targets(app: &ScratchpadApp, scope: SearchScope) -> Vec<Search
                         .then(|| {
                             app.tab_manager
                                 .active_tab()
-                                .and_then(|tab| tab.active_view())
+                                .and_then(|tab| tab.layout.active_view())
                                 .map(|view| view.buffer_id)
                         })
                         .flatten();
@@ -204,7 +204,7 @@ fn collect_active_tab_search_targets(app: &ScratchpadApp) -> Vec<SearchTargetSna
         app.tab_manager.active_tab_index,
         app.tab_manager
             .active_tab()
-            .and_then(|tab| tab.active_view())
+            .and_then(|tab| tab.layout.active_view())
             .map(|view| view.buffer_id),
         None,
     )
@@ -244,7 +244,7 @@ fn collect_search_targets_for_tab(
         prioritized_buffer_id,
         tab.ordered_view_ids_in_layout_order()
             .into_iter()
-            .filter_map(|view_id| tab.view(view_id))
+            .filter_map(|view_id| tab.layout.view(view_id))
             .chain(tab.layout.views().iter()),
     )
 }

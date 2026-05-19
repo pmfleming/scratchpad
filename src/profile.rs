@@ -242,7 +242,7 @@ impl UiRenderFrameHarness {
         app.set_session_persist_on_drop(false);
         install_profile_tab(&mut app, build_balanced_tile_tab(0, 1, bytes), |_| ());
         if let Some(tab) = app.tab_manager.active_tab_mut() {
-            tab.set_line_numbers_visible(true);
+            tab.layout.set_line_numbers_visible(true);
         }
         let ctx = egui::Context::default();
         prepare_context_before_first_frame(&mut app, &ctx);
@@ -346,22 +346,29 @@ pub fn run_tab_operations_profile(tab_count: usize, iterations: usize) -> usize 
         sum_profile_iterations(iterations, || {
             let mut operations = 0;
             for &index in &tab_order {
-                app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateTab {
-                    index,
-                }));
+                crate::app::commands::handle_command(
+                    app,
+                    AppCommand::Workspace(WorkspaceCommand::ActivateTab { index }),
+                );
                 operations += 1;
             }
 
             if app.tab_manager.tabs.as_slice().len() > 2 {
                 let last_index = app.tab_manager.tabs.as_slice().len() - 1;
-                app.handle_command(AppCommand::Workspace(WorkspaceCommand::ReorderTab {
-                    from_index: 1,
-                    to_index: last_index,
-                }));
-                app.handle_command(AppCommand::Workspace(WorkspaceCommand::ReorderTab {
-                    from_index: last_index,
-                    to_index: 1,
-                }));
+                crate::app::commands::handle_command(
+                    app,
+                    AppCommand::Workspace(WorkspaceCommand::ReorderTab {
+                        from_index: 1,
+                        to_index: last_index,
+                    }),
+                );
+                crate::app::commands::handle_command(
+                    app,
+                    AppCommand::Workspace(WorkspaceCommand::ReorderTab {
+                        from_index: last_index,
+                        to_index: 1,
+                    }),
+                );
                 operations += 2;
             }
 
@@ -652,23 +659,35 @@ fn run_search_profile_iterations(
     expected_matches: usize,
     iterations: usize,
 ) -> usize {
-    app.handle_command(AppCommand::Search(SearchCommand::Open));
-    app.handle_command(AppCommand::Search(SearchCommand::SetSearchScope { scope }));
-    app.handle_command(AppCommand::Search(SearchCommand::SetSearchQuery {
-        query: PROFILE_RESET_QUERY.to_owned(),
-    }));
+    crate::app::commands::handle_command(app, AppCommand::Search(SearchCommand::Open));
+    crate::app::commands::handle_command(
+        app,
+        AppCommand::Search(SearchCommand::SetSearchScope { scope }),
+    );
+    crate::app::commands::handle_command(
+        app,
+        AppCommand::Search(SearchCommand::SetSearchQuery {
+            query: PROFILE_RESET_QUERY.to_owned(),
+        }),
+    );
     wait_for_app_state_search_matches(app, 0);
 
     sum_profile_iterations(iterations, || {
-        app.handle_command(AppCommand::Search(SearchCommand::SetSearchQuery {
-            query: PROFILE_QUERY.to_owned(),
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Search(SearchCommand::SetSearchQuery {
+                query: PROFILE_QUERY.to_owned(),
+            }),
+        );
         wait_for_app_state_search_matches(app, expected_matches);
         let match_count = app.state.search_state.match_count();
 
-        app.handle_command(AppCommand::Search(SearchCommand::SetSearchQuery {
-            query: PROFILE_RESET_QUERY.to_owned(),
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Search(SearchCommand::SetSearchQuery {
+                query: PROFILE_RESET_QUERY.to_owned(),
+            }),
+        );
         wait_for_app_state_search_matches(app, 0);
 
         match_count

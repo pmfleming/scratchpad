@@ -68,9 +68,12 @@ pub(super) fn activate_inactive_tile_on_secondary_click(
     request: &TileRenderRequest,
 ) {
     if tile_response.secondary_clicked() && !request.is_active {
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateView {
-            view_id: request.view_id,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ActivateView {
+                view_id: request.view_id,
+            }),
+        );
         workspace_accessors::request_focus_for_view(app, request.view_id);
     }
 }
@@ -208,7 +211,7 @@ fn run_menu_command(
         icon,
         enabled,
         |_, app| {
-            app.handle_command(command);
+            crate::app::commands::handle_command(app, command);
             if request_focus {
                 workspace_accessors::request_focus_for_active_view(app);
             }

@@ -223,7 +223,7 @@ fn apply_tile_actions(app: &mut ScratchpadApp, actions: Vec<TileAction>) {
                 ratio,
             }),
         };
-        app.handle_command(command);
+        crate::app::commands::handle_command(app, command);
     }
 }
 
@@ -314,7 +314,7 @@ fn render_leaf_tile(
         any_editor_changed: &mut outcome.any_editor_changed,
         preview_overlay: &mut outcome.preview_overlay,
     };
-    tile::render_tile(ui, app, request, &mut tile_state)
+    tile::render_tile(ui, app, request, &mut tile_state);
 }
 
 fn render_split_pane(

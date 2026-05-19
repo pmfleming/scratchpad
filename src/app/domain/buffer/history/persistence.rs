@@ -87,6 +87,7 @@ impl PersistedHistoryEdit {
         }
     }
 
+    #[must_use]
     pub fn has_all_payloads(&self) -> bool {
         match self {
             Self::Inserted {
@@ -107,10 +108,7 @@ impl PersistedHistoryEdit {
     /// span-allocator (typically `tree.append_history_text(text, source)`).
     pub fn into_piece(self, mut append_text: impl FnMut(&str) -> ByteSpan) -> PieceHistoryEdit {
         let span_or_empty = |payload: Option<String>, append: &mut dyn FnMut(&str) -> ByteSpan| {
-            payload
-                .as_deref()
-                .map(append)
-                .unwrap_or_else(empty_byte_span)
+            payload.as_deref().map_or_else(empty_byte_span, append)
         };
         let span_vec = |payload: Option<String>, append: &mut dyn FnMut(&str) -> ByteSpan| {
             payload

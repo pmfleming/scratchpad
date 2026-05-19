@@ -118,7 +118,7 @@ impl FileController {
 
         {
             let buffer = app.tab_manager.tabs.as_mut_slice()[index].active_buffer_mut();
-            buffer.name = normalized_name.clone();
+            buffer.name.clone_from(&normalized_name);
             if let Some(target_path) = target_path {
                 buffer.path = Some(target_path.clone());
                 buffer.sync_to_disk_state(FileService::read_disk_state(&target_path).ok());

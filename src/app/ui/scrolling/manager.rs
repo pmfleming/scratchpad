@@ -36,26 +36,32 @@ pub struct ScrollManager {
 }
 
 impl ScrollManager {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn anchor(&self) -> ScrollAnchor {
         self.anchor
     }
 
+    #[must_use]
     pub fn horizontal_px(&self) -> f32 {
         self.horizontal_px
     }
 
+    #[must_use]
     pub fn metrics(&self) -> ViewportMetrics {
         self.metrics
     }
 
+    #[must_use]
     pub fn extent(&self) -> ContentExtent {
         self.extent
     }
 
+    #[must_use]
     pub fn user_scrolled(&self) -> bool {
         self.user_scrolled
     }
@@ -96,7 +102,7 @@ impl ScrollManager {
     ) {
         match intent {
             ScrollIntent::Wheel { delta_x, delta_y } => {
-                self.apply_wheel(delta_x, delta_y, &anchor_to_row, &row_to_anchor)
+                self.apply_wheel(delta_x, delta_y, &anchor_to_row, &row_to_anchor);
             }
             ScrollIntent::ScrollbarTo {
                 axis,
@@ -297,6 +303,7 @@ impl ScrollManager {
 /// display-map. Treats every logical line as exactly one display row, ignoring
 /// wrap and folds. Returns the anchor's base row only; callers that need the
 /// top-of-viewport row add `display_row_offset` exactly once.
+#[must_use]
 pub fn naive_anchor_to_row(anchor: ScrollAnchor) -> f32 {
     match anchor {
         ScrollAnchor::Logical { logical_line, .. } => logical_line as f32,
@@ -307,6 +314,7 @@ pub fn naive_anchor_to_row(anchor: ScrollAnchor) -> f32 {
     }
 }
 
+#[must_use]
 pub fn naive_row_to_anchor(row: f32) -> ScrollAnchor {
     let line = row.max(0.0).floor() as u32;
     let frac = (row - line as f32).max(0.0);

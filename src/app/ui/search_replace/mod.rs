@@ -64,7 +64,7 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 
     apply_search_inputs(app, &state);
     if actions.close_requested {
-        app.handle_command(AppCommand::Search(SearchCommand::Close));
+        crate::app::commands::handle_command(app, AppCommand::Search(SearchCommand::Close));
         return;
     }
 
@@ -73,39 +73,56 @@ pub(crate) fn show_search_strip(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 
 fn apply_search_inputs(app: &mut ScratchpadApp, state: &SearchStripState) {
     if state.query != app.state.search_state.query() {
-        app.handle_command(AppCommand::Search(SearchCommand::SetSearchQuery {
-            query: state.query.clone(),
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Search(SearchCommand::SetSearchQuery {
+                query: state.query.clone(),
+            }),
+        );
     }
     if state.replacement != app.state.search_state.replacement() {
-        app.handle_command(AppCommand::Search(SearchCommand::SetSearchReplacement {
-            replacement: state.replacement.clone(),
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Search(SearchCommand::SetSearchReplacement {
+                replacement: state.replacement.clone(),
+            }),
+        );
     }
     if state.replace_open != app.state.search_state.replace_open() {
-        app.handle_command(AppCommand::Search(SearchCommand::SetSearchReplaceOpen {
-            open: state.replace_open,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Search(SearchCommand::SetSearchReplaceOpen {
+                open: state.replace_open,
+            }),
+        );
     }
     if state.scope != app.state.search_state.scope() {
-        app.handle_command(AppCommand::Search(SearchCommand::SetSearchScope {
-            scope: state.scope,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Search(SearchCommand::SetSearchScope { scope: state.scope }),
+        );
     }
     if state.mode != app.state.search_state.mode() {
-        app.handle_command(AppCommand::Search(SearchCommand::SetSearchMode {
-            mode: state.mode,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Search(SearchCommand::SetSearchMode { mode: state.mode }),
+        );
     }
     if state.match_case != app.state.search_state.match_case() {
-        app.handle_command(AppCommand::Search(SearchCommand::SetSearchMatchCase {
-            enabled: state.match_case,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Search(SearchCommand::SetSearchMatchCase {
+                enabled: state.match_case,
+            }),
+        );
     }
     if state.whole_word != app.state.search_state.whole_word() {
-        app.handle_command(AppCommand::Search(SearchCommand::SetSearchWholeWord {
-            enabled: state.whole_word,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Search(SearchCommand::SetSearchWholeWord {
+                enabled: state.whole_word,
+            }),
+        );
     }
 }
 
@@ -144,14 +161,16 @@ fn dispatch_search_actions(
     }
 
     if let Some(match_index) = actions.focused_file_match_index {
-        app.handle_command(AppCommand::Search(SearchCommand::FocusSearchResultFile {
-            match_index,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Search(SearchCommand::FocusSearchResultFile { match_index }),
+        );
     }
     if let Some(match_index) = actions.selected_match_index {
-        app.handle_command(AppCommand::Search(SearchCommand::ActivateSearchMatch {
-            match_index,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Search(SearchCommand::ActivateSearchMatch { match_index }),
+        );
     }
 }
 
@@ -166,7 +185,7 @@ fn dispatch_requested_command(
     }
 
     search_runtime::request_search_focus(app, target_focus);
-    app.handle_command(command);
+    crate::app::commands::handle_command(app, command);
 }
 
 fn render_search_header(ui: &mut egui::Ui) -> bool {

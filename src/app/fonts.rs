@@ -18,6 +18,7 @@ pub enum EditorFontPreset {
 impl EditorFontPreset {
     pub const ALL: [Self; 4] = [Self::Standard, Self::Flex, Self::Mono, Self::Serif];
 
+    #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             Self::Standard => "Standard",

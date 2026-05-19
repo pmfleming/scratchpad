@@ -150,6 +150,7 @@ pub(crate) fn register_text_history_global_seq(seq: u64) {
     }
 }
 
+#[must_use]
 pub fn source_label(source: PieceSource) -> &'static str {
     match source {
         PieceSource::Load => "Load",
@@ -301,14 +302,16 @@ pub(crate) fn operation_summary(
 
     let first_edit = operation.edits.first();
     if source == PieceSource::Paste {
-        return first_edit
-            .map(|edit| format!("Paste \"{}\"", preview_text(&edit.inserted_text)))
-            .unwrap_or_else(|| "Paste".to_owned());
+        return first_edit.map_or_else(
+            || "Paste".to_owned(),
+            |edit| format!("Paste \"{}\"", preview_text(&edit.inserted_text)),
+        );
     }
     if source == PieceSource::Cut {
-        return first_edit
-            .map(|edit| format!("Cut \"{}\"", preview_text(&edit.deleted_text)))
-            .unwrap_or_else(|| "Cut".to_owned());
+        return first_edit.map_or_else(
+            || "Cut".to_owned(),
+            |edit| format!("Cut \"{}\"", preview_text(&edit.deleted_text)),
+        );
     }
     if edit_count != 1 {
         return format!("Edit {edit_count} ranges");

@@ -71,7 +71,7 @@ fn show_vertical_new_tab_action(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         .on_hover_text("New Tab")
         .clicked()
     {
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::NewTab));
+        crate::app::commands::handle_command(app, AppCommand::Workspace(WorkspaceCommand::NewTab));
     }
 }
 

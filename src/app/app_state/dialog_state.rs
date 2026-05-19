@@ -117,8 +117,7 @@ impl DialogState {
     pub(crate) fn take_tab_rename_focus_request(&mut self) -> bool {
         self.tab_rename
             .as_mut()
-            .map(|rename_state| std::mem::take(&mut rename_state.request_focus))
-            .unwrap_or(false)
+            .is_some_and(|rename_state| std::mem::take(&mut rename_state.request_focus))
     }
 
     pub(crate) fn tab_rename_draft_mut(&mut self) -> Option<&mut String> {

@@ -22,8 +22,7 @@ pub(crate) enum PathLoadRequest {
 impl PathLoadRequest {
     pub(crate) fn path(&self) -> &PathBuf {
         match self {
-            Self::Standard(path) => path,
-            Self::WithEncoding { path, .. } => path,
+            Self::Standard(path) | Self::WithEncoding { path, .. } => path,
         }
     }
 }

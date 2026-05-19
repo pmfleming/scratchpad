@@ -36,11 +36,10 @@ impl SessionPersistRequest {
                 .iter()
                 .enumerate()
                 .map(|(index, tab)| {
-                    cold_tabs
-                        .get(&index)
-                        .cloned()
-                        .map(CapturedSessionTab::capture_cold)
-                        .unwrap_or_else(|| CapturedSessionTab::capture(tab))
+                    cold_tabs.get(&index).cloned().map_or_else(
+                        || CapturedSessionTab::capture(tab),
+                        CapturedSessionTab::capture_cold,
+                    )
                 })
                 .collect(),
         }

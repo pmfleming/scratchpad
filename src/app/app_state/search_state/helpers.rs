@@ -227,7 +227,7 @@ pub(super) fn build_search_target(
     tab_label: &str,
     search_range: Option<Range<usize>>,
 ) -> Option<SearchTargetSnapshot> {
-    let view = tab.view(view_id)?;
+    let view = tab.layout.view(view_id)?;
     build_search_target_from_view(tab_index, tab, view, tab_label, search_range)
 }
 

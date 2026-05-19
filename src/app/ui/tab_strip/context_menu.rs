@@ -1,28 +1,19 @@
-use crate::app::app_state::{
-    PendingTabContextMenu, ScratchpadApp, StatusDomain, frame,
-    workspace::accessors as workspace_accessors,
-};
-use crate::app::commands::{AppCommand, FileCommand, SettingsCommand, WorkspaceCommand};
-use crate::app::services::file_controller::FileController;
-use crate::app::services::settings_store::FileOpenDisposition;
+use crate::app::app_state::{PendingTabContextMenu, ScratchpadApp};
+use crate::app::commands::{AppCommand, SettingsCommand, WorkspaceCommand};
 use crate::app::ui::widget_ids;
 use eframe::egui;
-use egui_phosphor::regular::{
-    ARROW_SQUARE_IN, COPY, FILE_PLUS, FLOPPY_DISK, FOLDER_OPEN, MINUS, PENCIL_SIMPLE_LINE, PLUS,
-    TABS, TRANSLATE, TRAY, X, X_SQUARE,
-};
-use std::path::{Path, PathBuf};
+use egui_phosphor::regular::{FLOPPY_DISK, MINUS, TABS, TRAY, X, X_SQUARE};
+use std::path::PathBuf;
 
 mod close;
+mod file_actions;
+mod location_actions;
 mod menu_ui;
 mod order;
 
 use self::menu_ui::{
-    OPEN_DISPOSITION_BUTTON_SIZE, OPEN_FILE_SUBMENU_WIDTH as TAB_CONTEXT_OPEN_FILE_SUBMENU_WIDTH,
     SUBMENU_WIDTH as TAB_CONTEXT_SUBMENU_WIDTH, WIDTH as TAB_CONTEXT_MENU_WIDTH,
-    close_direction_icon, close_direction_label, menu_button, open_disposition_button,
-    primary_menu_button, primary_menu_button_enabled, recent_file_button, submenu_button,
-    submenu_button_sized,
+    close_direction_icon, close_direction_label, menu_button, primary_menu_button, submenu_button,
 };
 
 struct TabContextMenuState {
@@ -133,162 +124,6 @@ fn tab_context_menu_anchor(
     egui::pos2(pending.click_x, pending.click_y)
 }
 
-fn render_file_actions(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    slot_index: usize,
-    workspace_index: Option<usize>,
-    open_here_enabled: bool,
-    rename_enabled: bool,
-    save_enabled: bool,
-) {
-    if menu_button(ui, TAB_CONTEXT_MENU_WIDTH, "New Tab", Some(PLUS), true) {
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::NewTab));
-        ui.close();
-    }
-    if app.state.app_settings.recent_files_enabled() {
-        render_open_file_actions(ui, app, slot_index, open_here_enabled);
-    } else if menu_button(
-        ui,
-        TAB_CONTEXT_MENU_WIDTH,
-        "Open File Here",
-        Some(FOLDER_OPEN),
-        open_here_enabled,
-    ) {
-        activate_slot(app, slot_index);
-        app.handle_command(AppCommand::File(FileCommand::OpenFileHere));
-        ui.close();
-    }
-    if menu_button(
-        ui,
-        TAB_CONTEXT_MENU_WIDTH,
-        "Rename",
-        Some(PENCIL_SIMPLE_LINE),
-        rename_enabled,
-    ) {
-        if let Some(index) = workspace_index {
-            workspace_accessors::begin_tab_rename(app, index);
-        }
-        ui.close();
-    }
-    render_save_actions(ui, app, workspace_index, save_enabled);
-}
-
-fn render_open_file_actions(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    slot_index: usize,
-    open_enabled: bool,
-) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-
-        if primary_menu_button_enabled(
-            ui,
-            "tab_context.open_file_primary",
-            "Open File",
-            FOLDER_OPEN,
-            open_enabled,
-        ) {
-            activate_slot(app, slot_index);
-            app.handle_command(AppCommand::File(FileCommand::OpenFile));
-            ui.close();
-        }
-        render_open_file_submenu(ui, app, slot_index);
-    });
-}
-
-fn render_open_file_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp, slot_index: usize) {
-    submenu_button_sized(
-        ui,
-        "tab_context.open_file_caret",
-        TAB_CONTEXT_OPEN_FILE_SUBMENU_WIDTH,
-        |ui| {
-            render_open_file_disposition_buttons(ui, app);
-            ui.separator();
-            render_recently_closed_files(ui, app, slot_index);
-        },
-    );
-}
-
-fn render_open_file_disposition_buttons(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    let current = app.state.app_settings.file_open_disposition();
-    let spacing = 6.0;
-    let group_width = OPEN_DISPOSITION_BUTTON_SIZE.x * 2.0 + spacing;
-    let leading_space = (TAB_CONTEXT_OPEN_FILE_SUBMENU_WIDTH - group_width).max(0.0) * 0.5;
-    ui.horizontal(|ui| {
-        ui.add_space(leading_space);
-        ui.spacing_mut().item_spacing.x = spacing;
-        if open_disposition_button(
-            ui,
-            "tab_context.open_file.new_tab",
-            FILE_PLUS,
-            "Open in new tab",
-            matches!(current, FileOpenDisposition::NewTab),
-        ) {
-            crate::app::app_state::settings_controller::set_file_open_disposition(
-                app,
-                FileOpenDisposition::NewTab,
-            );
-        }
-        if open_disposition_button(
-            ui,
-            "tab_context.open_file.current_tab",
-            ARROW_SQUARE_IN,
-            "Open in current tab",
-            matches!(current, FileOpenDisposition::CurrentTab),
-        ) {
-            crate::app::app_state::settings_controller::set_file_open_disposition(
-                app,
-                FileOpenDisposition::CurrentTab,
-            );
-        }
-    });
-}
-
-fn render_recently_closed_files(ui: &mut egui::Ui, app: &mut ScratchpadApp, slot_index: usize) {
-    let paths = app
-        .state
-        .recently_closed_files
-        .iter()
-        .take(crate::app::app_state::RECENTLY_CLOSED_FILE_LIMIT)
-        .cloned()
-        .collect::<Vec<_>>();
-
-    if paths.is_empty() {
-        let _ = menu_button(
-            ui,
-            TAB_CONTEXT_OPEN_FILE_SUBMENU_WIDTH,
-            "No Recent Files",
-            None,
-            false,
-        );
-        return;
-    }
-
-    for path in paths {
-        if recent_file_button(
-            ui,
-            ("tab_context.recently_closed_file", path.clone()),
-            TAB_CONTEXT_OPEN_FILE_SUBMENU_WIDTH,
-            &path,
-        ) {
-            activate_slot(app, slot_index);
-            open_recent_file(app, path);
-            ui.close();
-        }
-    }
-}
-
-fn open_recent_file(app: &mut ScratchpadApp, path: PathBuf) {
-    match app.state.app_settings.file_open_disposition() {
-        FileOpenDisposition::NewTab => FileController::open_paths_async(app, vec![path]),
-        FileOpenDisposition::CurrentTab => {
-            FileController::open_external_paths_here_async(app, vec![path])
-        }
-    }
-}
-
 fn render_tab_context_menu(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
@@ -298,7 +133,7 @@ fn render_tab_context_menu(
     ui.set_min_width(TAB_CONTEXT_MENU_WIDTH);
     ui.set_max_width(TAB_CONTEXT_MENU_WIDTH);
 
-    render_file_actions(
+    file_actions::render_file_actions(
         ui,
         app,
         slot_index,
@@ -326,7 +161,7 @@ fn render_tab_context_menu(
 
     ui.separator();
 
-    render_location_actions(
+    location_actions::render_location_actions(
         ui,
         app,
         slot_index,
@@ -350,58 +185,6 @@ fn render_tab_context_menu(
     }
 }
 
-fn render_location_actions(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    slot_index: usize,
-    encoding_enabled: bool,
-    copy_path_enabled: bool,
-    reveal_enabled: bool,
-    path: Option<&Path>,
-) {
-    if menu_button(
-        ui,
-        TAB_CONTEXT_MENU_WIDTH,
-        "Encoding",
-        Some(TRANSLATE),
-        encoding_enabled,
-    ) {
-        activate_slot(app, slot_index);
-        frame::open_encoding_dialog(app);
-        ui.close();
-    }
-    if menu_button(
-        ui,
-        TAB_CONTEXT_MENU_WIDTH,
-        "Copy Path",
-        Some(COPY),
-        copy_path_enabled,
-    ) {
-        if let Some(path) = path {
-            ui.copy_text(path.display().to_string());
-        }
-        ui.close();
-    }
-    if menu_button(
-        ui,
-        TAB_CONTEXT_MENU_WIDTH,
-        "Reveal In Explorer",
-        Some(FOLDER_OPEN),
-        reveal_enabled,
-    ) {
-        if let Some(path) = path
-            && let Err(error) = reveal_in_explorer(path)
-        {
-            app.state.status.set_warning_status_with_detail(
-                StatusDomain::File,
-                "Could not reveal this file in Explorer.",
-                error.to_string(),
-            );
-        }
-        ui.close();
-    }
-}
-
 fn render_close_actions(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
@@ -418,46 +201,6 @@ fn render_close_actions(
         close_direction_label,
         close_direction_icon,
     )
-}
-
-fn render_save_actions(
-    ui: &mut egui::Ui,
-    app: &mut ScratchpadApp,
-    workspace_index: Option<usize>,
-    save_enabled: bool,
-) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-
-        if primary_menu_button_enabled(
-            ui,
-            "tab_context.save_primary",
-            "Save",
-            FLOPPY_DISK,
-            save_enabled,
-        ) {
-            if let Some(index) = workspace_index {
-                crate::app::app_state::workspace_controller::save_file_at(app, index);
-            }
-            ui.close();
-        }
-        render_save_submenu(ui, app, save_enabled);
-    });
-}
-
-fn render_save_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp, save_enabled: bool) {
-    submenu_button(ui, "tab_context.save_caret", |ui| {
-        if menu_button(
-            ui,
-            TAB_CONTEXT_SUBMENU_WIDTH,
-            "Save All",
-            Some(FLOPPY_DISK),
-            save_enabled,
-        ) {
-            app.handle_command(AppCommand::File(FileCommand::SaveAllFiles));
-            ui.close();
-        }
-    });
 }
 
 fn close_menu_row(
@@ -549,16 +292,20 @@ fn render_close_submenu(
     });
 }
 
-fn activate_slot(app: &mut ScratchpadApp, slot_index: usize) {
+pub(super) fn activate_slot(app: &mut ScratchpadApp, slot_index: usize) {
     if let Some(index) =
         crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(app, slot_index)
     {
-        app.handle_command(AppCommand::Workspace(WorkspaceCommand::ActivateTab {
-            index,
-        }));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ActivateTab { index }),
+        );
     } else if crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(app, slot_index)
     {
-        app.handle_command(AppCommand::Settings(SettingsCommand::OpenSettings));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Settings(SettingsCommand::OpenSettings),
+        );
     }
 }
 
@@ -583,25 +330,4 @@ enum TabCloseAction {
     After,
     Saved,
     All,
-}
-
-#[cfg(target_os = "windows")]
-fn reveal_in_explorer(path: &Path) -> std::io::Result<()> {
-    use std::ffi::OsString;
-    use std::process::Command;
-
-    let mut select_arg = OsString::from("/select,");
-    select_arg.push(path);
-    Command::new("explorer.exe")
-        .arg(select_arg)
-        .spawn()
-        .map(|_| ())
-}
-
-#[cfg(not(target_os = "windows"))]
-fn reveal_in_explorer(_path: &Path) -> std::io::Result<()> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "Reveal in Explorer is only available on Windows.",
-    ))
 }

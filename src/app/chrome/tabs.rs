@@ -21,6 +21,7 @@ pub struct TabButtonOptions {
 }
 
 impl TabButtonOptions {
+    #[must_use]
     pub fn new(width: f32) -> Self {
         Self {
             show_promote_all: false,
@@ -29,6 +30,7 @@ impl TabButtonOptions {
         }
     }
 
+    #[must_use]
     pub fn with_actions(
         width: f32,
         show_promote_all: bool,

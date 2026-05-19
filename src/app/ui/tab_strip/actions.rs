@@ -7,11 +7,11 @@ use crate::app::chrome::caption_controls;
 use eframe::egui;
 
 pub(crate) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    primary::show_primary_actions(ui, app)
+    primary::show_primary_actions(ui, app);
 }
 
 pub(crate) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    vertical::show_vertical_primary_actions(ui, app)
+    vertical::show_vertical_primary_actions(ui, app);
 }
 
 pub(crate) fn show_caption_controls(

@@ -235,7 +235,7 @@ fn take_previous_snapshot(tab: &mut WorkspaceTab, view_id: ViewId) -> Option<Dis
     let current_revision = tab
         .buffer_for_view(view_id)
         .map(|buffer| buffer.document_revision());
-    tab.view_mut(view_id).and_then(|view| {
+    tab.layout.view_mut(view_id).and_then(|view| {
         if view.latest_display_snapshot_revision == current_revision {
             view.latest_display_snapshot.take()
         } else {
@@ -281,11 +281,12 @@ fn show_editor_scroll_area(
             let mut content_style = request.content_style;
             content_style.viewport = Some(viewport);
             content_style.previous_snapshot = previous_snapshot;
-            tab.buffer_and_view_mut(request.view_id)
-                .map(|(buffer, view)| {
+            tab.buffer_and_view_mut(request.view_id).map_or_else(
+                missing_editor_content_outcome,
+                |(buffer, view)| {
                     editor_content::render_editor_content(ui, buffer, view, content_style)
-                })
-                .unwrap_or_else(missing_editor_content_outcome)
+                },
+            )
         });
 
     let content_size = editor_scroll_content_size(
@@ -404,7 +405,8 @@ fn previous_snapshot_for_current_layout<'a>(
 }
 
 fn previous_wrapped_viewport_width(tab: &WorkspaceTab, view_id: ViewId) -> Option<f32> {
-    tab.view(view_id)
+    tab.layout
+        .view(view_id)
         .map(|view| view.scroll.metrics().viewport_rect.width())
         .filter(|width| width.is_finite() && *width > 0.0)
 }
@@ -492,7 +494,7 @@ fn selection_drag_active(
 }
 
 fn suppress_selection_drag_reveals(tab: &mut WorkspaceTab, view_id: ViewId) {
-    if let Some(view) = tab.view_mut(view_id) {
+    if let Some(view) = tab.layout.view_mut(view_id) {
         suppress_view_reveals_for_selection_drag(view);
     }
 }
@@ -509,9 +511,10 @@ fn restore_previous_snapshot_if_needed(
     previous_snapshot: Option<DisplaySnapshot>,
 ) {
     if tab
+        .layout
         .view(view_id)
         .is_some_and(|view| view.latest_display_snapshot.is_none())
-        && let Some(view) = tab.view_mut(view_id)
+        && let Some(view) = tab.layout.view_mut(view_id)
     {
         view.latest_display_snapshot = previous_snapshot;
     }

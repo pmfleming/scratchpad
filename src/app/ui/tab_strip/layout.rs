@@ -288,7 +288,7 @@ pub(crate) fn vertical_tab_panel(side: TabListPosition, visible: bool) -> egui::
         (TabListPosition::Left, false) => egui::Panel::left("vertical_tab_list_left_peek"),
         (TabListPosition::Right, true) => egui::Panel::right("vertical_tab_list_right"),
         (TabListPosition::Right, false) => egui::Panel::right("vertical_tab_list_right_peek"),
-        (TabListPosition::Top, _) | (TabListPosition::Bottom, _) => {
+        (TabListPosition::Top | TabListPosition::Bottom, _) => {
             unreachable!("vertical tab panel only supports left/right")
         }
     }

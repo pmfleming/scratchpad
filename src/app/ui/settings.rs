@@ -43,8 +43,8 @@ pub(crate) fn show_page(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     egui::CentralPanel::default().show_inside(ui, |ui| {
         widget_ids::feature_scope(ui, "settings", |ui| {
             with_settings_page(ui, |ui, viewport_width| {
-                render_page_body(ui, app, viewport_width)
-            })
+                render_page_body(ui, app, viewport_width);
+            });
         });
     });
 }

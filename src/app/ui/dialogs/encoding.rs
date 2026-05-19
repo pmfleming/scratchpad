@@ -50,17 +50,16 @@ enum EncodingAction {
 impl EncodingDialogState {
     fn from_app(app: &ScratchpadApp) -> Self {
         let active_index = app.tab_manager.active_tab_index;
-        let (buffer_label, has_saved_path, is_dirty) = app
-            .tab_manager
-            .active_tab()
-            .map(|tab| {
+        let (buffer_label, has_saved_path, is_dirty) = app.tab_manager.active_tab().map_or_else(
+            || ("Untitled".to_owned(), false, false),
+            |tab| {
                 (
                     tab.active_buffer().name.clone(),
                     tab.active_buffer().path.is_some(),
                     tab.active_buffer().is_dirty,
                 )
-            })
-            .unwrap_or_else(|| ("Untitled".to_owned(), false, false));
+            },
+        );
 
         Self {
             active_index,
@@ -112,7 +111,7 @@ pub(crate) fn show_encoding_window(ctx: &egui::Context, app: &mut ScratchpadApp)
     let mut close_requested = false;
 
     show_centered_callout(ctx, "encoding_overlay_v1", ENCODING_DIALOG_SIZE, |ui| {
-        render_encoding_dialog(ui, app, &state, &mut close_requested)
+        render_encoding_dialog(ui, app, &state, &mut close_requested);
     });
 
     if close_requested {
@@ -207,7 +206,7 @@ fn trigger_encoding_action(
                 encoding_name: encoding_name.clone(),
             }),
         };
-        let result = app.handle_command(command);
+        let result = crate::app::commands::handle_command(app, command);
         app.state.dialogs.encoding.restore_choice(encoding_name);
         result
     }

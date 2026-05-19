@@ -44,34 +44,42 @@ pub struct AnchorOwner {
 }
 
 impl AnchorOwner {
+    #[must_use]
     pub const fn new(kind: AnchorOwnerKind, id: Option<u64>) -> Self {
         Self { kind, id }
     }
 
+    #[must_use]
     pub const fn unspecified() -> Self {
         Self::new(AnchorOwnerKind::Unspecified, None)
     }
 
+    #[must_use]
     pub const fn view_scroll(view_id: u64) -> Self {
         Self::new(AnchorOwnerKind::ViewScroll, Some(view_id))
     }
 
+    #[must_use]
     pub const fn cursor(id: u64) -> Self {
         Self::new(AnchorOwnerKind::Cursor, Some(id))
     }
 
+    #[must_use]
     pub const fn selection_endpoint(id: u64) -> Self {
         Self::new(AnchorOwnerKind::SelectionEndpoint, Some(id))
     }
 
+    #[must_use]
     pub const fn search_endpoint(id: u64) -> Self {
         Self::new(AnchorOwnerKind::SearchEndpoint, Some(id))
     }
 
+    #[must_use]
     pub const fn kind(self) -> AnchorOwnerKind {
         self.kind
     }
 
+    #[must_use]
     pub const fn id(self) -> Option<u64> {
         self.id
     }
@@ -81,6 +89,7 @@ impl AnchorOwner {
 pub struct AnchorId(u64);
 
 impl AnchorId {
+    #[must_use]
     pub fn raw(self) -> u64 {
         self.0
     }
@@ -305,6 +314,7 @@ impl PieceTreeLite {
         }
     }
 
+    #[must_use]
     pub fn anchor_position(&self, id: AnchorId) -> Option<usize> {
         let entry = self.anchor_state.entry(id)?;
         let (address, leaf) = self.find_leaf_by_id(entry.leaf_id)?;
@@ -312,10 +322,12 @@ impl PieceTreeLite {
         Some(address.leaf_start_char + leaf_anchor.local_offset.min(leaf.metrics.chars))
     }
 
+    #[must_use]
     pub fn anchor_bias(&self, id: AnchorId) -> Option<AnchorBias> {
         self.anchor_state.entry(id).map(|entry| entry.bias)
     }
 
+    #[must_use]
     pub fn anchor_owner(&self, id: AnchorId) -> Option<AnchorOwner> {
         self.anchor_state.entry(id).map(|entry| entry.owner)
     }

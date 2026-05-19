@@ -43,63 +43,77 @@ impl DocumentSnapshot {
         self.length
     }
 
+    #[must_use]
     pub fn revision(&self) -> u64 {
         self.revision
     }
 
+    #[must_use]
     pub fn piece_tree(&self) -> &PieceTreeLite {
         self.piece_tree.as_ref()
     }
 
+    #[must_use]
     pub fn len_chars(&self) -> usize {
         self.length.chars
     }
 
+    #[must_use]
     pub fn len_bytes(&self) -> usize {
         self.length.bytes
     }
 
+    #[must_use]
     pub fn line_count(&self) -> usize {
         self.length.lines
     }
 
+    #[must_use]
     pub fn line_info(&self, line_index: usize) -> PieceTreeLineInfo {
         self.piece_tree.line_info(line_index)
     }
 
+    #[must_use]
     pub fn line_index_at_offset(&self, offset_chars: usize) -> usize {
         self.piece_tree.line_index_at_offset(offset_chars)
     }
 
+    #[must_use]
     pub fn line_char_range(&self, line_index: usize) -> Range<usize> {
         let line = self.line_info(line_index);
         line.start_char..line.start_char + line.char_len
     }
 
+    #[must_use]
     pub fn normalize_char_range(&self, range_chars: Range<usize>) -> Range<usize> {
         self.piece_tree.normalize_char_range(range_chars)
     }
 
+    #[must_use]
     pub fn flatten_text(&self) -> String {
         let text = self.piece_tree.extract_text();
         capacity_metrics::record_full_text_flatten(text.len());
         text
     }
 
+    #[must_use]
     pub fn flatten_range(&self, range_chars: Range<usize>) -> String {
         let text = self.piece_tree.extract_range(range_chars);
         capacity_metrics::record_range_flatten(text.len());
         text
     }
 
+    #[must_use]
     pub fn extract_text(&self) -> String {
         self.flatten_text()
     }
 
+    #[must_use]
     pub fn extract_range(&self, range_chars: Range<usize>) -> String {
         self.flatten_range(range_chars)
     }
 
+    #[must_use]
     pub fn extract_range_bounded(
         &self,
         range_chars: Range<usize>,
@@ -109,14 +123,17 @@ impl DocumentSnapshot {
             .extract_range_bounded(range_chars, max_chars)
     }
 
+    #[must_use]
     pub fn spans_for_range(&self, range_chars: Range<usize>) -> PieceTreeSlice<'_> {
         self.piece_tree.spans_for_range(range_chars)
     }
 
+    #[must_use]
     pub fn spans_for_line(&self, line_index: usize) -> PieceTreeSlice<'_> {
         self.piece_tree.spans_for_line(line_index)
     }
 
+    #[must_use]
     pub fn chunks_for_range(
         &self,
         range_chars: Range<usize>,
@@ -135,11 +152,13 @@ impl DocumentSnapshot {
 
         while chunk_start < normalized.end {
             let rough_end = chunk_start.saturating_add(chunk_chars).min(normalized.end);
-            let core_end = self
-                .next_line_boundary_after(rough_end, normalized.end)
-                .filter(|line_start| *line_start > chunk_start)
-                .unwrap_or(rough_end)
-                .min(normalized.end);
+            let next_line_boundary = self.next_line_boundary_after(rough_end, normalized.end);
+            let core_end = if next_line_boundary > chunk_start {
+                next_line_boundary
+            } else {
+                rough_end
+            }
+            .min(normalized.end);
             let window_start = normalized
                 .start
                 .max(chunk_start.saturating_sub(leading_context_chars));
@@ -156,10 +175,12 @@ impl DocumentSnapshot {
         chunks
     }
 
+    #[must_use]
     pub fn preview_for_match(&self, range_chars: &Range<usize>) -> (usize, usize, String) {
         super::piece_tree::preview::preview_for_match(&self.piece_tree, range_chars)
     }
 
+    #[must_use]
     pub fn previews_for_matches(
         &self,
         ranges: &[Range<usize>],
@@ -168,15 +189,18 @@ impl DocumentSnapshot {
         super::piece_tree::preview::previews_for_matches(&self.piece_tree, ranges, limit)
     }
 
+    #[must_use]
     pub fn search_text(&self, range_chars: Option<Range<usize>>) -> (String, usize) {
         let (text, start) = self.search_text_cow(range_chars);
         (text.into_owned(), start)
     }
 
+    #[must_use]
     pub fn search_text_cow(&self, range_chars: Option<Range<usize>>) -> (Cow<'_, str>, usize) {
-        let normalized = range_chars
-            .map(|range_chars| self.normalize_char_range(range_chars))
-            .unwrap_or_else(|| self.full_char_range());
+        let normalized = range_chars.map_or_else(
+            || self.full_char_range(),
+            |range_chars| self.normalize_char_range(range_chars),
+        );
         let start = normalized.start;
         (self.borrow_or_flatten_range(normalized), start)
     }
@@ -185,24 +209,26 @@ impl DocumentSnapshot {
         0..self.document_length().chars
     }
 
-    fn next_line_boundary_after(&self, offset_chars: usize, range_end: usize) -> Option<usize> {
+    fn next_line_boundary_after(&self, offset_chars: usize, range_end: usize) -> usize {
         if offset_chars >= range_end {
-            return Some(range_end);
+            return range_end;
         }
 
         let line_index = self.line_index_at_offset(offset_chars);
         let next_line = line_index.saturating_add(1);
         if next_line >= self.line_count() {
-            return Some(range_end);
+            return range_end;
         }
 
-        Some(self.line_info(next_line).start_char.min(range_end))
+        self.line_info(next_line).start_char.min(range_end)
     }
 
     fn borrow_or_flatten_range(&self, range_chars: Range<usize>) -> Cow<'_, str> {
         self.piece_tree
             .borrow_range(range_chars.clone())
-            .map(Cow::Borrowed)
-            .unwrap_or_else(|| Cow::Owned(self.flatten_range(range_chars)))
+            .map_or_else(
+                || Cow::Owned(self.flatten_range(range_chars)),
+                Cow::Borrowed,
+            )
     }
 }

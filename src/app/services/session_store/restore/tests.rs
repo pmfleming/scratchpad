@@ -1,8 +1,8 @@
-use super::{
-    BufferFreshness, BufferState, DiskFileState, FileService, RestoreSummary, SessionBuffer,
-    SessionStore,
-};
-use crate::app::domain::WorkspaceTab;
+use super::super::SessionStore;
+use super::super::model::SessionBuffer;
+use super::RestoreSummary;
+use crate::app::domain::{BufferFreshness, BufferState, DiskFileState, WorkspaceTab};
+use crate::app::services::file_service::FileService;
 use crate::app::services::session_store::ops::BUFFER_FILE_EXTENSION;
 use std::fs;
 

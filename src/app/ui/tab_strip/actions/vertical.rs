@@ -154,13 +154,13 @@ impl VerticalAction {
 fn handle_vertical_action(ctx: &egui::Context, app: &mut ScratchpadApp, action: VerticalAction) {
     match action {
         VerticalAction::OpenFile => {
-            app.handle_command(AppCommand::File(FileCommand::OpenFile));
+            crate::app::commands::handle_command(app, AppCommand::File(FileCommand::OpenFile));
         }
         VerticalAction::SaveFile => {
-            app.handle_command(AppCommand::File(FileCommand::SaveFile));
+            crate::app::commands::handle_command(app, AppCommand::File(FileCommand::SaveFile));
         }
         VerticalAction::Search => {
-            app.handle_command(AppCommand::Search(SearchCommand::Toggle));
+            crate::app::commands::handle_command(app, AppCommand::Search(SearchCommand::Toggle));
         }
         VerticalAction::Minimize => {
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));

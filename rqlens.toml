@@ -1,0 +1,4 @@
+project_name = "scratchpad"
+project_root = "."
+source_roots = ["src"]
+output_dir = "target/analysis"

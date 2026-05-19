@@ -96,7 +96,8 @@ pub(super) fn resolved_scroll_offset_for_view(
     view_id: ViewId,
     previous_snapshot: Option<&DisplaySnapshot>,
 ) -> egui::Vec2 {
-    tab.view(view_id)
+    tab.layout
+        .view(view_id)
         .and_then(|view| {
             tab.buffer_for_view(view_id)
                 .map(|buffer| editor_pixel_offset_resolved(view, buffer, previous_snapshot))

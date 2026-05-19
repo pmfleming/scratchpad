@@ -233,7 +233,7 @@ fn run_anchor_heavy_view_edit_cycle(anchor_count: usize) -> StepOutcome {
         .collect::<Vec<_>>();
 
     let midpoint = tree.len_chars() / 2;
-    tree.insert(midpoint, "anchor edit café 東京\n");
+    tree.insert_with_source(midpoint, "anchor edit café 東京\n", PieceSource::Edit);
     tree.remove_char_range(midpoint.saturating_sub(8)..midpoint.saturating_sub(1));
     let resolved = anchors
         .iter()

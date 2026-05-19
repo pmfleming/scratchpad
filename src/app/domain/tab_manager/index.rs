@@ -91,6 +91,7 @@ impl TabManager {
         }
     }
 
+    #[must_use]
     pub fn tab_index_for_buffer(&self, buffer_id: BufferId) -> Option<usize> {
         self.buffer_tab_index.get(&buffer_id).copied()
     }

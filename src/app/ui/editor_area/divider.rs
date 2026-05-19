@@ -140,6 +140,7 @@ fn divider_icon(axis: SplitAxis) -> &'static str {
     }
 }
 
+#[must_use]
 pub fn split_rect(rect: egui::Rect, axis: SplitAxis, ratio: f32) -> (egui::Rect, egui::Rect) {
     match axis {
         SplitAxis::Vertical => {

@@ -344,8 +344,8 @@ fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {
     if actions.toggle_line_numbers
         && let Some(tab) = app.tab_manager.active_tab_mut()
     {
-        let next_visible = !tab.line_numbers_visible();
-        tab.set_line_numbers_visible(next_visible);
+        let next_visible = !tab.layout.line_numbers_visible();
+        tab.layout.set_line_numbers_visible(next_visible);
         app.tab_manager.mark_session_dirty();
     }
 
@@ -362,7 +362,10 @@ fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {
     }
 
     if actions.open_text_history {
-        app.handle_command(AppCommand::Dialog(DialogCommand::OpenTextHistory));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Dialog(DialogCommand::OpenTextHistory),
+        );
     }
 
     if actions.open_status_history {
@@ -370,7 +373,10 @@ fn apply_status_actions(app: &mut ScratchpadApp, actions: StatusBarActions) {
     }
 
     if actions.open_settings {
-        app.handle_command(AppCommand::Settings(SettingsCommand::OpenSettings));
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Settings(SettingsCommand::OpenSettings),
+        );
     }
 }
 

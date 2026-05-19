@@ -16,6 +16,7 @@ use crate::app::services::settings_store::{
     AppSettings, FileOpenDisposition, SettingsStore, StartupSessionBehavior,
 };
 use crate::app::startup::{StartupOpenTarget, StartupOptions};
+use std::collections::VecDeque;
 use std::time::Instant;
 
 impl ScratchpadApp {
@@ -23,6 +24,7 @@ impl ScratchpadApp {
         self.state.persist_session_on_drop = enabled;
     }
 
+    #[must_use]
     pub fn with_session_store(session_store: SessionStore) -> Self {
         let settings_root = session_store.root().to_path_buf();
         Self::with_stores_and_startup(
@@ -32,10 +34,12 @@ impl ScratchpadApp {
         )
     }
 
+    #[must_use]
     pub fn with_startup_options(startup_options: StartupOptions) -> Self {
         Self::with_session_store_and_startup(SessionStore::default(), startup_options)
     }
 
+    #[must_use]
     pub fn with_runtime_startup_options(startup_options: StartupOptions) -> Self {
         let session_store = SessionStore::default();
         let settings_root = session_store.root().to_path_buf();
@@ -46,6 +50,7 @@ impl ScratchpadApp {
         )
     }
 
+    #[must_use]
     pub fn with_session_store_and_startup(
         session_store: SessionStore,
         startup_options: StartupOptions,
@@ -58,6 +63,7 @@ impl ScratchpadApp {
         )
     }
 
+    #[must_use]
     pub fn with_stores_and_startup(
         session_store: SessionStore,
         settings_store: SettingsStore,
@@ -66,6 +72,7 @@ impl ScratchpadApp {
         Self::build_app(session_store, settings_store, startup_options, false)
     }
 
+    #[must_use]
     pub fn with_stores_and_runtime_startup(
         session_store: SessionStore,
         settings_store: SettingsStore,
@@ -107,9 +114,11 @@ impl ScratchpadApp {
                 pending_settings_toml_refresh: None,
                 text_history_cache: crate::app::text_history::TextHistoryCache::default(),
                 search_state: SearchState::default(),
-                workspace_selection: Default::default(),
+                workspace_selection:
+                    crate::app::app_state::workspace::display_tabs::WorkspaceSelectionState::default(
+                    ),
                 pending_open_file_paths: Vec::new(),
-                recently_closed_files: Default::default(),
+                recently_closed_files: VecDeque::default(),
                 workspace_reflow_axis: crate::app::domain::SplitAxis::Vertical,
                 settings_preview_quote_index: 2,
                 background_io: BackgroundIoState::new(background_io_tx, background_io_rx),
@@ -169,13 +178,13 @@ impl ScratchpadApp {
 
         match open_target {
             StartupOpenTarget::SeparateTabs => {
-                FileController::open_external_paths(self, startup_options.files)
+                FileController::open_external_paths(self, startup_options.files);
             }
             StartupOpenTarget::ActiveTab => {
-                FileController::open_external_paths_here(self, startup_options.files)
+                FileController::open_external_paths_here(self, startup_options.files);
             }
             StartupOpenTarget::TabIndex(index) => {
-                FileController::open_external_paths_into_tab(self, index, startup_options.files)
+                FileController::open_external_paths_into_tab(self, index, startup_options.files);
             }
         }
 
@@ -200,17 +209,17 @@ impl ScratchpadApp {
 
         match open_target {
             StartupOpenTarget::SeparateTabs => {
-                FileController::open_external_paths_async(self, startup_options.files)
+                FileController::open_external_paths_async(self, startup_options.files);
             }
             StartupOpenTarget::ActiveTab => {
-                FileController::open_external_paths_here_async(self, startup_options.files)
+                FileController::open_external_paths_here_async(self, startup_options.files);
             }
             StartupOpenTarget::TabIndex(index) => {
                 FileController::open_external_paths_into_tab_async(
                     self,
                     index,
                     startup_options.files,
-                )
+                );
             }
         }
 

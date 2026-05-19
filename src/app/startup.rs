@@ -33,6 +33,7 @@ impl Default for StartupOptions {
 }
 
 impl StartupOptions {
+    #[must_use]
     pub fn clean() -> Self {
         Self {
             restore_session: false,
@@ -40,6 +41,7 @@ impl StartupOptions {
         }
     }
 
+    #[must_use]
     pub fn describe(&self) -> String {
         let target = match self.open_target {
             StartupOpenTarget::SeparateTabs => "separate-tabs".to_owned(),
@@ -69,6 +71,7 @@ pub enum StartupOpenTarget {
     TabIndex(usize),
 }
 
+#[must_use]
 pub fn parse_startup_action_from_env() -> StartupAction {
     parse_startup_action(std::env::args_os().skip(1))
 }

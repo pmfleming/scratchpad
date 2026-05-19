@@ -90,14 +90,14 @@ pub(crate) fn render_tile_header(
         split_handler.handle_interaction(ui, &split_response, state.actions)
     {
         let tab = &app.tab_manager.tabs.as_slice()[request.tab_index];
-        let title = tab
-            .buffer_for_view(request.view_id)
-            .map(|buffer| buffer.display_name())
-            .unwrap_or_else(|| crate::app::domain::tab::summary::display_name(tab));
+        let title = tab.buffer_for_view(request.view_id).map_or_else(
+            || crate::app::domain::tab::summary::display_name(tab),
+            |buffer| buffer.display_name(),
+        );
         let preview_lines = preview_lines_for_view(tab, request.view_id);
         *state.preview_overlay = Some(split_handler.make_preview(
             preview_state,
-            title.to_owned(),
+            title.clone(),
             preview_lines,
             rects.split_hit,
         ));
@@ -122,9 +122,10 @@ pub(crate) fn render_tile_header(
 }
 
 fn preview_lines_for_view(tab: &crate::app::domain::WorkspaceTab, view_id: ViewId) -> Vec<String> {
-    tab.buffer_for_view(view_id)
-        .map(|buffer| split::build_preview_lines(&buffer.text()))
-        .unwrap_or_else(|| split::build_preview_lines(""))
+    tab.buffer_for_view(view_id).map_or_else(
+        || split::build_preview_lines(""),
+        |buffer| split::build_preview_lines(&buffer.text()),
+    )
 }
 
 struct TileHeaderRects {
@@ -184,8 +185,7 @@ fn pass_stable_header_layout(
     ui.ctx()
         .data(|data| data.get_temp::<(u64, TileHeaderLayout)>(storage_id))
         .filter(|(stable_frame, _)| *stable_frame == frame)
-        .map(|(_, stable_layout)| stable_layout)
-        .unwrap_or(layout)
+        .map_or(layout, |(_, stable_layout)| stable_layout)
 }
 
 fn control_visibility(

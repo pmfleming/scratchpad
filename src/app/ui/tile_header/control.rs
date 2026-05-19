@@ -18,6 +18,7 @@ pub struct TileControl<'a> {
 }
 
 impl<'a> TileControl<'a> {
+    #[must_use]
     pub fn new(label: &'a str) -> Self {
         Self {
             label,
@@ -28,21 +29,25 @@ impl<'a> TileControl<'a> {
         }
     }
 
+    #[must_use]
     pub fn style(mut self, style: TileControlStyle) -> Self {
         self.style = style;
         self
     }
 
+    #[must_use]
     pub fn visibility(mut self, visibility: f32) -> Self {
         self.visibility = visibility;
         self
     }
 
+    #[must_use]
     pub fn font_size(mut self, font_size: f32) -> Self {
         self.font_size = font_size;
         self
     }
 
+    #[must_use]
     pub fn tooltip(mut self, tooltip: &'a str) -> Self {
         self.tooltip = Some(tooltip);
         self

@@ -99,8 +99,7 @@ fn chunk_ranges_for_text(text: &str, workers: usize) -> Vec<Range<usize>> {
             end = text[start..]
                 .char_indices()
                 .nth(1)
-                .map(|(offset, _)| start + offset)
-                .unwrap_or(text.len());
+                .map_or(text.len(), |(offset, _)| start + offset);
         }
         ranges.push(start..end);
         start = end;

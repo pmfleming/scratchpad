@@ -21,7 +21,7 @@ Implemented:
 - TOML-backed settings for font, wrap, logging, editor font, startup/session behavior, file-open disposition, and tab-list preferences
 - Session persistence for tabs, pane layouts, views, encodings, and session metadata
 - Runtime logging and panic hook integration
-- Measured performance and maintainability workflows covering hotspots, search speed, capacity limits, resource profiles, flamegraphs, and clone drift
+- Measured performance and maintainability workflows covering externally generated quality data, search speed, capacity limits, resource profiles, flamegraphs, and clone drift
 - Tests for search, piece-tree behavior, native-editor behavior, tabs, session storage, buffers, file IO, drag helpers, transaction history, startup behavior, and high tab counts
 
 Current limitations:
@@ -46,7 +46,7 @@ Current limitations:
 - `src/app/startup/`: startup argument parsing
 - `src/app/transactions.rs`: transaction log model and grouping logic for text-edit history
 - `src/app/ui/`: tab strip, overflow popup, drag state, editor area/content, settings, dialogs, status bar, and tile header controls
-- `viewer/`: static viewer for analysis artifacts
+- sibling `project-management-board/`: React/TypeScript dashboard for analysis artifacts
 - `tests/`: integration coverage for app, files, session restore, startup, and tab behavior
 
 ## Near-Term Roadmap
@@ -67,23 +67,18 @@ Current limitations:
 
 Standard tools:
 
-- `scripts/hotspots.py`: complexity and maintainability JSON
-- `scripts/slowspots.py`: benchmark-driven speed and degradation JSON
-- `scripts/search_speed.py`: search-scaling JSON for full-completion and first-response latency
-- `scripts/capacity_report.py`: capacity-threshold JSON for file size, tabs, splits, and paste ceilings
-- `scripts/resource_profiles.py`: allocation, working-set, page-fault, and session-cost JSON
-- `scripts/generate_flamegraphs.py`: flamegraph index generation for dedicated profile binaries
-- `scripts/speed_efficiency_report.py`: combined performance triage across latency, flamegraphs, and capacity signals
-- `scripts/clone_alert.py`: token-based clone groups for duplication drift review
-- `scripts/map.py`: dependency/interrelatedness JSON enriched with hotspot and slowspot data
-- `scripts/ci.ps1`: standard local and CI entry point for formatting, linting, tests, hotspot review, slowspot review, and clone review
-- `scripts/open-overview.ps1`: local launcher for the static viewer
+- sibling `rust-quality-lens`: quality, correctness, and architecture-map JSON
+- sibling `scratchpad-performance-lens`: Scratchpad-specific performance, overview, and telemetry JSON
+- sibling `project-management-board`: React/TypeScript dashboard, task catalog, refresh API, and run logs
+- `.github/workflows/ci.yml`: formatting, linting, and tests
 
-The Python tools intentionally do not generate HTML. The static viewer in `viewer/` consumes their JSON contracts from `target/analysis/` and can later be replaced by a Java/React UI without changing the measurement layer.
+The Scratchpad repo intentionally does not own dashboard or measurement wrapper
+scripts. The sibling repos consume Scratchpad as the measured Rust project and
+write JSON contracts under `target/analysis/`.
 
 ## Maintainability Plan
 
-This pass is driven by `scripts/hotspots.py`.
+This pass is driven by the hotspot artifact generated through `rust-quality-lens`.
 
 Top original hotspots:
 
@@ -119,9 +114,9 @@ Validation already completed during this pass:
 
 - `cargo check`
 - `cargo test`
-- `cargo clippy --all-targets --all-features -- -D warnings`
-- `scripts/hotspots.py`
-- `scripts/slowspots.py`
+- `cargo clippy --lib --all-features -- -D warnings`
+- `rust-quality-lens measure hotspots`
+- `scratchpad-performance-lens measure slowspots`
 
 ## Definition of Done
 

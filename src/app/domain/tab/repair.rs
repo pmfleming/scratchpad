@@ -3,6 +3,7 @@ use crate::app::domain::{BufferId, BufferState, EditorViewState, ViewId};
 use std::collections::HashSet;
 
 impl WorkspaceTab {
+    #[must_use]
     pub fn active_buffer(&self) -> &BufferState {
         self.buffers.active()
     }
@@ -19,6 +20,7 @@ impl WorkspaceTab {
         self.buffers.all_mut()
     }
 
+    #[must_use]
     pub fn buffer_by_id(&self, buffer_id: BufferId) -> Option<&BufferState> {
         self.buffers.by_id(buffer_id)
     }
@@ -27,13 +29,15 @@ impl WorkspaceTab {
         self.buffers.by_id_mut(buffer_id)
     }
 
+    #[must_use]
     pub fn buffer_for_view(&self, view_id: ViewId) -> Option<&BufferState> {
-        let view = self.view(view_id)?;
+        let view = self.layout.view(view_id)?;
         self.buffer_by_id(view.buffer_id)
     }
 
+    #[must_use]
     pub fn is_last_view_for_buffer(&self, view_id: ViewId) -> Option<bool> {
-        let buffer_id = self.view(view_id)?.buffer_id;
+        let buffer_id = self.layout.view(view_id)?.buffer_id;
         Some(self.layout.view_count_for_buffer(buffer_id) <= 1)
     }
 
@@ -69,7 +73,8 @@ impl WorkspaceTab {
         self.ensure_active_view_is_present();
         self.sync_active_buffer_to_active_view();
         self.prune_unused_buffers();
-        self.set_line_numbers_visible(self.line_numbers_visible());
+        self.layout
+            .set_line_numbers_visible(self.layout.line_numbers_visible());
     }
 
     fn reset_to_single_view(&mut self) {
