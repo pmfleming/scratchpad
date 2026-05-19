@@ -75,13 +75,12 @@ pub(super) fn scan_span_slice_with_workers(
 fn inspection_worker_count(total_bytes: usize) -> usize {
     let by_size = (total_bytes / PARALLEL_TEXT_INSPECTION_MIN_BYTES).max(1);
     thread::available_parallelism()
-        .map(|parallelism| {
+        .map_or(1, |parallelism| {
             parallelism
                 .get()
                 .min(PARALLEL_TEXT_INSPECTION_MAX_WORKERS)
                 .min(by_size)
         })
-        .unwrap_or(1)
         .max(1)
 }
 

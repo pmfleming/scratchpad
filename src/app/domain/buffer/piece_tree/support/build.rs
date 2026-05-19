@@ -143,13 +143,12 @@ fn piece_chunk_ranges(text: &str) -> Vec<Range<usize>> {
 fn piece_build_worker_count(total_bytes: usize) -> usize {
     let by_size = (total_bytes / PARALLEL_PIECE_BUILD_MIN_BYTES).max(1);
     thread::available_parallelism()
-        .map(|parallelism| {
+        .map_or(1, |parallelism| {
             parallelism
                 .get()
                 .min(PARALLEL_PIECE_BUILD_MAX_WORKERS)
                 .min(by_size)
         })
-        .unwrap_or(1)
         .max(1)
 }
 

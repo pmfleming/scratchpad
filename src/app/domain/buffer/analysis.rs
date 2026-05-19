@@ -58,7 +58,7 @@ impl LineEndingCounts {
             (self.lf, LineEndingStyle::Lf),
             (self.cr, LineEndingStyle::Cr),
         ];
-        entries.sort_by(|left, right| right.0.cmp(&left.0));
+        entries.sort_by_key(|right| std::cmp::Reverse(right.0));
         (entries[0].0 > 0).then_some(entries[0].1)
     }
 }
