@@ -279,14 +279,14 @@ fn search_target_parallelism(target_count: usize) -> usize {
     }
 
     thread::available_parallelism()
-        .map(|parallelism| parallelism.get().min(SEARCH_TARGET_PARALLELISM_CAP))
-        .unwrap_or(1)
+        .map_or(1, |parallelism| {
+            parallelism.get().min(SEARCH_TARGET_PARALLELISM_CAP)
+        })
         .min(target_count)
 }
 
 fn intra_buffer_parallelism() -> usize {
     thread::available_parallelism()
-        .map(|p| p.get().min(INTRA_BUFFER_PARALLELISM_CAP))
-        .unwrap_or(1)
+        .map_or(1, |p| p.get().min(INTRA_BUFFER_PARALLELISM_CAP))
         .max(1)
 }

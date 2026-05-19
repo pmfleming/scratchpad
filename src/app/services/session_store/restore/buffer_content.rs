@@ -237,8 +237,7 @@ impl RestoredBufferContent {
 
 fn disk_text_matches(path: &Path, session_text: &str) -> bool {
     FileService::read_file(path)
-        .map(|file_content| file_content.document.extract_text() == session_text)
-        .unwrap_or(false)
+        .is_ok_and(|file_content| file_content.document.extract_text() == session_text)
 }
 
 pub(super) fn cold_buffer_shell(buffer: SessionBuffer) -> BufferState {

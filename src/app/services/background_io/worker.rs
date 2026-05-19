@@ -191,8 +191,7 @@ fn for_each_loaded(
         return;
     }
     let worker_count = thread::available_parallelism()
-        .map(|p| p.get().min(MAX_CONCURRENT_READS))
-        .unwrap_or(2)
+        .map_or(2, |p| p.get().min(MAX_CONCURRENT_READS))
         .min(total);
     let chunk_size = total.div_ceil(worker_count);
     let mut iter = requests.into_iter().enumerate();

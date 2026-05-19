@@ -727,13 +727,12 @@ fn session_tab_temp_ids(tab: &SessionTab) -> Vec<&str> {
 
 fn session_io_worker_count(item_count: usize) -> usize {
     thread::available_parallelism()
-        .map(|parallelism| {
+        .map_or(1, |parallelism| {
             parallelism
                 .get()
                 .min(SESSION_IO_PARALLEL_MAX_WORKERS)
                 .min(item_count)
         })
-        .unwrap_or(1)
         .max(1)
 }
 
