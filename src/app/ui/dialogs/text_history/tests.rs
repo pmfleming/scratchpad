@@ -3,12 +3,40 @@ use super::model::{
     timeline_rows_from_entries,
 };
 use super::{
-    TextHistoryFileGroup, TextHistoryRow, file_groups_from_entries, read_follow_focus,
-    write_follow_focus,
+    HistoryTab, TextHistoryFileGroup, TextHistoryRow, file_groups_from_entries, read_active_tab,
+    read_follow_focus, write_active_tab, write_follow_focus,
 };
 use crate::app::domain::BufferId;
 use crate::app::domain::PieceSource;
 use crate::app::text_history::TextHistoryEntryView;
+use crate::app::ui::dialogs::text_history::list::FILE_GROUP_DEFAULT_EXPANDED;
+
+#[test]
+fn history_dialog_defaults_to_by_file_tab() {
+    let ctx = eframe::egui::Context::default();
+
+    assert_eq!(read_active_tab(&ctx), HistoryTab::ByFile);
+}
+
+#[test]
+fn history_tab_persistence_round_trips() {
+    let ctx = eframe::egui::Context::default();
+
+    write_active_tab(&ctx, HistoryTab::Timeline);
+    assert_eq!(read_active_tab(&ctx), HistoryTab::ByFile);
+    advance_egui_frame(&ctx);
+    assert_eq!(read_active_tab(&ctx), HistoryTab::Timeline);
+
+    write_active_tab(&ctx, HistoryTab::ByFile);
+    assert_eq!(read_active_tab(&ctx), HistoryTab::Timeline);
+    advance_egui_frame(&ctx);
+    assert_eq!(read_active_tab(&ctx), HistoryTab::ByFile);
+}
+
+#[test]
+fn file_history_groups_default_to_collapsed() {
+    assert!(!FILE_GROUP_DEFAULT_EXPANDED);
+}
 
 #[test]
 fn follow_focus_defaults_to_enabled() {

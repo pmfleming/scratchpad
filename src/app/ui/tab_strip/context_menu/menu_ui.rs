@@ -1,4 +1,5 @@
 use crate::app::services::settings_store::{TabListPosition, TabOrderDirection, TabOrderMode};
+use crate::app::shortcut_tooltips;
 use crate::app::theme::{
     TAB_BUTTON_WIDTH, TAB_LIST_SCROLLBAR_GUTTER, action_bg, action_hover_bg, border, tab_active_bg,
     tab_selected_accent, text_primary,
@@ -46,7 +47,11 @@ pub(super) fn menu_button(
             },
         );
         paint_row_label(ui, response.rect, icon, label, enabled);
-        response.clicked()
+        let clicked = response.clicked();
+        if let Some(tooltip) = shortcut_tooltip_for_menu_label(label) {
+            response.on_hover_text(tooltip);
+        }
+        clicked
     })
 }
 
@@ -256,7 +261,11 @@ pub(super) fn primary_menu_button_enabled(
             },
         );
         paint_row_label(ui, response.rect, Some(icon), label, enabled);
-        response.clicked()
+        let clicked = response.clicked();
+        if let Some(tooltip) = shortcut_tooltip_for_menu_label(label) {
+            response.on_hover_text(tooltip);
+        }
+        clicked
     })
 }
 
@@ -326,6 +335,23 @@ fn tab_order_direction_icon_and_tooltip(
     match direction {
         TabOrderDirection::Ascending => (SORT_ASCENDING, "Descending"),
         TabOrderDirection::Descending => (SORT_DESCENDING, "Ascending"),
+    }
+}
+
+fn shortcut_tooltip_for_menu_label(label: &str) -> Option<&'static str> {
+    match label {
+        "New Tab" => Some(shortcut_tooltips::NEW_TAB),
+        "Open File" => Some(shortcut_tooltips::OPEN_FILE),
+        "Open File Here" => Some(shortcut_tooltips::OPEN_FILE_HERE),
+        "Rename" => Some(shortcut_tooltips::RENAME),
+        "Save" => Some(shortcut_tooltips::SAVE),
+        "Encoding" => Some(shortcut_tooltips::ENCODING),
+        "Copy Path" => Some(shortcut_tooltips::COPY_PATH),
+        "Reveal In Explorer" => Some(shortcut_tooltips::REVEAL_IN_EXPLORER),
+        "Hide Tab List" => Some(shortcut_tooltips::HIDE_TAB_LIST),
+        "Pin Tab List" => Some(shortcut_tooltips::PIN_TAB_LIST),
+        "Close" => Some(shortcut_tooltips::CLOSE_TAB),
+        _ => None,
     }
 }
 

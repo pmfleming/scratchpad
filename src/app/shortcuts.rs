@@ -4,11 +4,13 @@ use crate::app::commands::{
 };
 use crate::app::domain::{SplitAxis, ViewId};
 use eframe::egui;
+use std::path::{Path, PathBuf};
 
 const DEFAULT_SPLIT_RATIO: f32 = 0.5;
 
 pub(crate) fn handle_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
     handle_global_shortcuts(app, ctx);
+    handle_utility_shortcuts(app, ctx);
     handle_file_shortcuts(app, ctx);
     handle_view_shortcuts(app, ctx);
     handle_tile_shortcuts(app, ctx);
@@ -72,6 +74,59 @@ fn handle_global_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
     }
 }
 
+fn handle_utility_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
+    let ctrl_shift = ctrl_shift_modifiers();
+
+    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F2)) {
+        begin_active_tab_rename(app);
+        return;
+    }
+
+    if ctx.input_mut(|input| input.consume_key(ctrl_shift, egui::Key::H)) {
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Dialog(crate::app::commands::DialogCommand::OpenTextHistory),
+        );
+        return;
+    }
+
+    if ctx.input_mut(|input| input.consume_key(ctrl_shift, egui::Key::E)) {
+        crate::app::app_state::frame::open_encoding_dialog(app);
+        return;
+    }
+
+    if ctx.input_mut(|input| input.consume_key(ctrl_shift, egui::Key::M)) {
+        app.state.dialogs.status_history.open();
+        return;
+    }
+
+    if ctx.input_mut(|input| input.consume_key(ctrl_shift, egui::Key::C)) {
+        copy_active_path(app, ctx);
+        return;
+    }
+
+    if ctx.input_mut(|input| input.consume_key(ctrl_shift, egui::Key::R)) {
+        reveal_active_path_in_explorer(app);
+        return;
+    }
+
+    if ctx.input_mut(|input| input.consume_key(ctrl_shift, egui::Key::B)) {
+        let next = !app.state.app_settings.auto_hide_tab_list();
+        crate::app::app_state::settings_controller::set_auto_hide_tab_list(app, next);
+        return;
+    }
+
+    let ctrl_alt = ctrl_alt_modifiers();
+    if ctx.input_mut(|input| input.consume_key(ctrl_alt, egui::Key::R)) {
+        toggle_active_buffer_reading_order(app);
+        return;
+    }
+
+    if ctx.input_mut(|input| input.consume_key(ctrl_alt, egui::Key::C)) {
+        toggle_active_buffer_control_chars(app);
+    }
+}
+
 fn handle_region_traversal_shortcut(app: &mut ScratchpadApp, ctx: &egui::Context) -> bool {
     let direction = ctx.input_mut(|input| {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::F6) {
@@ -125,11 +180,7 @@ fn next_region_index(current: usize, len: usize, direction: i32) -> Option<usize
 }
 
 fn handle_file_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    let tile_file_modifiers = egui::Modifiers {
-        ctrl: true,
-        shift: true,
-        ..Default::default()
-    };
+    let tile_file_modifiers = ctrl_shift_modifiers();
 
     if ctx.input_mut(|input| input.consume_key(tile_file_modifiers, egui::Key::O)) {
         crate::app::commands::handle_command(app, AppCommand::File(FileCommand::OpenFileHere));
@@ -140,6 +191,9 @@ fn handle_file_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
     }
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::O)) {
         crate::app::commands::handle_command(app, AppCommand::File(FileCommand::OpenFile));
+    }
+    if ctx.input_mut(|input| input.consume_key(tile_file_modifiers, egui::Key::S)) {
+        crate::app::commands::handle_command(app, AppCommand::File(FileCommand::SaveFileAs));
     }
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
         crate::app::commands::handle_command(app, AppCommand::File(FileCommand::SaveFile));
@@ -190,11 +244,7 @@ fn handle_tab_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
 }
 
 fn handle_tile_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    let modifiers = egui::Modifiers {
-        ctrl: true,
-        shift: true,
-        ..Default::default()
-    };
+    let modifiers = ctrl_shift_modifiers();
 
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::T))
         && let Some(tab) = app.tab_manager.active_tab()
@@ -259,6 +309,121 @@ fn handle_tile_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
             }),
         );
     }
+}
+
+fn ctrl_shift_modifiers() -> egui::Modifiers {
+    egui::Modifiers {
+        ctrl: true,
+        shift: true,
+        ..Default::default()
+    }
+}
+
+fn ctrl_alt_modifiers() -> egui::Modifiers {
+    egui::Modifiers {
+        ctrl: true,
+        alt: true,
+        ..Default::default()
+    }
+}
+
+fn begin_active_tab_rename(app: &mut ScratchpadApp) {
+    if crate::app::app_state::settings_state::showing_settings(app) {
+        return;
+    }
+    if !app.tab_manager.tabs.as_slice().is_empty() {
+        crate::app::app_state::workspace::accessors::begin_tab_rename(
+            app,
+            app.tab_manager.active_tab_index,
+        );
+    }
+}
+
+fn active_buffer_path(app: &ScratchpadApp) -> Option<PathBuf> {
+    app.tab_manager
+        .active_tab()
+        .and_then(|tab| tab.active_buffer().path.clone())
+}
+
+fn copy_active_path(app: &mut ScratchpadApp, ctx: &egui::Context) {
+    let Some(path) = active_buffer_path(app) else {
+        app.state.status.set_warning_status_in_domain(
+            crate::app::app_state::StatusDomain::File,
+            "No file path to copy.",
+        );
+        return;
+    };
+    ctx.copy_text(path.display().to_string());
+    app.state.status.set_info_status_in_domain(
+        crate::app::app_state::StatusDomain::File,
+        "Copied file path.",
+    );
+}
+
+fn reveal_active_path_in_explorer(app: &mut ScratchpadApp) {
+    let Some(path) = active_buffer_path(app) else {
+        app.state.status.set_warning_status_in_domain(
+            crate::app::app_state::StatusDomain::File,
+            "No file path to reveal.",
+        );
+        return;
+    };
+
+    if let Err(error) = reveal_in_explorer(&path) {
+        app.state.status.set_warning_status_with_detail(
+            crate::app::app_state::StatusDomain::File,
+            "Could not reveal this file in Explorer.",
+            error.to_string(),
+        );
+    }
+}
+
+fn toggle_active_buffer_reading_order(app: &mut ScratchpadApp) {
+    if let Some(tab) = app.tab_manager.active_tab_mut()
+        && let Some(buffer_id) = tab.layout.active_view().map(|view| view.buffer_id)
+    {
+        if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
+            buffer.right_to_left_reading_order = !buffer.right_to_left_reading_order;
+        }
+        for view in &mut tab.layout.views {
+            if view.buffer_id == buffer_id {
+                view.layout_cache.clear();
+            }
+        }
+        app.tab_manager.mark_session_dirty();
+    }
+}
+
+fn toggle_active_buffer_control_chars(app: &mut ScratchpadApp) {
+    if let Some(tab) = app.tab_manager.active_tab_mut()
+        && let Some(buffer_id) = tab.layout.active_view().map(|view| view.buffer_id)
+    {
+        if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
+            buffer.show_control_chars = !buffer.show_control_chars;
+        }
+        app.tab_manager.mark_session_dirty();
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn reveal_in_explorer(path: &Path) -> std::io::Result<()> {
+    use std::ffi::OsString;
+    use std::process::Command;
+
+    let mut select_arg = OsString::from("/select,");
+    select_arg.push(path);
+    Command::new("explorer.exe")
+        .arg(select_arg)
+        .spawn()
+        .map(|_| ())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn reveal_in_explorer(_path: &Path) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "Reveal in Explorer is only available on Windows.",
+    ))
 }
 
 #[cfg(test)]

@@ -13,6 +13,7 @@ use egui_phosphor::regular::{CARET_DOWN, CARET_RIGHT};
 
 const HISTORY_PILL_ICON_SIZE: f32 = 16.0;
 const NOW_LINE_HEIGHT: f32 = 22.0;
+pub(super) const FILE_GROUP_DEFAULT_EXPANDED: bool = false;
 
 pub(super) fn render_timeline(
     ui: &mut egui::Ui,
@@ -104,7 +105,7 @@ fn render_file_group(
             widget_ids::local(ui, ("text_history.file_group.expanded", group.buffer_id));
         let expanded = ui
             .data_mut(|data| data.get_persisted::<bool>(expansion_id))
-            .unwrap_or(true);
+            .unwrap_or(FILE_GROUP_DEFAULT_EXPANDED);
         let (group_response, toggle_requested) = render_file_header_pill(ui, group, expanded);
         if group_response.clicked() || toggle_requested {
             ui.data_mut(|data| data.insert_persisted(expansion_id, !expanded));

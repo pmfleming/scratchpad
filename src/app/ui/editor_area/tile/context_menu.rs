@@ -9,6 +9,7 @@ use crate::app::commands::{
     AppCommand, DialogCommand, EditCommand, SearchCommand, WorkspaceCommand,
 };
 use crate::app::domain::SplitAxis;
+use crate::app::shortcut_tooltips;
 use crate::app::theme::{action_bg, action_hover_bg, border, text_primary};
 use crate::app::ui::tile_header::TileAction;
 use crate::app::ui::widget_ids;
@@ -172,21 +173,47 @@ fn render_edit_button_rail(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 + button_spacing * (button_count - 1.0);
             ui.add_space(((ui.available_width() - rail_width) * 0.5).max(0.0));
 
-            run_icon_rail_action(ui, app, SCISSORS, "Cut", selection_available, |ui, app| {
-                copy_icon_text(ui, workspace_editing::cut_selected_text_in_active_view(app))
-            }) || run_icon_rail_action(ui, app, COPY, "Copy", selection_available, |ui, app| {
-                copy_icon_text(
-                    ui,
-                    workspace_editing::copy_selected_text_in_active_view(app),
-                )
-            }) || run_icon_rail_action(ui, app, CLIPBOARD_TEXT, "Paste", true, |ui, _| {
-                ui.ctx()
-                    .clone()
-                    .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
-                true
-            }) || run_icon_rail_action(ui, app, SELECTION_ALL, "Select All", true, |_, app| {
-                workspace_editing::select_all_in_active_view(app)
-            })
+            run_icon_rail_action(
+                ui,
+                app,
+                SCISSORS,
+                shortcut_tooltips::CUT,
+                selection_available,
+                |ui, app| {
+                    copy_icon_text(ui, workspace_editing::cut_selected_text_in_active_view(app))
+                },
+            ) || run_icon_rail_action(
+                ui,
+                app,
+                COPY,
+                shortcut_tooltips::COPY,
+                selection_available,
+                |ui, app| {
+                    copy_icon_text(
+                        ui,
+                        workspace_editing::copy_selected_text_in_active_view(app),
+                    )
+                },
+            ) || run_icon_rail_action(
+                ui,
+                app,
+                CLIPBOARD_TEXT,
+                shortcut_tooltips::PASTE,
+                true,
+                |ui, _| {
+                    ui.ctx()
+                        .clone()
+                        .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+                    true
+                },
+            ) || run_icon_rail_action(
+                ui,
+                app,
+                SELECTION_ALL,
+                shortcut_tooltips::SELECT_ALL,
+                true,
+                |_, app| workspace_editing::select_all_in_active_view(app),
+            )
         })
         .inner;
 
@@ -274,7 +301,11 @@ fn menu_action_button(ui: &mut egui::Ui, label: &str, icon: Option<&str>, enable
             },
         );
         paint_context_menu_row_label(ui, response.rect, icon, label, enabled);
-        response.clicked()
+        let clicked = response.clicked();
+        if let Some(tooltip) = shortcut_tooltip_for_menu_label(label) {
+            response.on_hover_text(tooltip);
+        }
+        clicked
     })
 }
 
@@ -309,7 +340,11 @@ fn split_menu_button(ui: &mut egui::Ui, label: &str, icon: &str) -> bool {
             },
         );
         paint_context_menu_row_label(ui, response.rect, Some(icon), label, true);
-        response.clicked()
+        let clicked = response.clicked();
+        if let Some(tooltip) = shortcut_tooltip_for_menu_label(label) {
+            response.on_hover_text(tooltip);
+        }
+        clicked
     })
 }
 
@@ -331,7 +366,9 @@ fn render_split_primary_button(ui: &mut egui::Ui) -> bool {
             },
         );
         paint_context_menu_row_label(ui, response.rect, Some(ARROWS_SPLIT), "Split", true);
-        response.clicked()
+        let clicked = response.clicked();
+        response.on_hover_text(shortcut_tooltips::SPLIT_RIGHT);
+        clicked
     })
 }
 
@@ -443,6 +480,26 @@ fn queue_split_action(actions: &mut Vec<TileAction>, direction: SplitDirection) 
         new_view_first,
         ratio: DEFAULT_SPLIT_RATIO,
     });
+}
+
+fn shortcut_tooltip_for_menu_label(label: &str) -> Option<&'static str> {
+    match label {
+        "Undo" => Some(shortcut_tooltips::UNDO),
+        "Redo" => Some(shortcut_tooltips::REDO),
+        "History" => Some(shortcut_tooltips::HISTORY),
+        "Find" => Some(shortcut_tooltips::FIND),
+        "Replace" => Some(shortcut_tooltips::REPLACE),
+        "Right to Left" => Some(shortcut_tooltips::RIGHT_TO_LEFT),
+        "Left to Right" => Some(shortcut_tooltips::LEFT_TO_RIGHT),
+        "Control Chars" => Some(shortcut_tooltips::CONTROL_CHARS),
+        "Promote Tile" => Some(shortcut_tooltips::PROMOTE_TILE),
+        "Close Tile" => Some(shortcut_tooltips::CLOSE_TILE),
+        "Split Left" => Some(shortcut_tooltips::SPLIT_LEFT),
+        "Split Right" => Some(shortcut_tooltips::SPLIT_RIGHT),
+        "Split Up" => Some(shortcut_tooltips::SPLIT_UP),
+        "Split Down" => Some(shortcut_tooltips::SPLIT_DOWN),
+        _ => None,
+    }
 }
 
 fn apply_context_menu_row_hover_style(ui: &mut egui::Ui) {

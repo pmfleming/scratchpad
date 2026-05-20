@@ -291,19 +291,21 @@ impl TextDocument {
             edits: Vec::with_capacity(replacements.len()),
         };
         for (range, replacement) in replacements {
-            let deleted_text = self.content.piece_tree.extract_range(range.clone());
+            let deleted_text = self
+                .content
+                .piece_tree
+                .extract_range_with_capacity(range.clone(), range.len());
             let deleted_spans = self.byte_spans_for_range(range.clone());
             let normalized = normalize_inserted_text_line_endings(
                 replacement,
                 self.content.preferred_line_ending,
-            )
-            .into_owned();
+            );
             self.delete_char_range_internal(range.clone());
             self.insert_raw_text_with_source(&normalized, range.start, source);
             operation_record.edits.push(TextDocumentEditOperation {
                 start_char: range.start,
                 deleted_text,
-                inserted_text: normalized,
+                inserted_text: normalized.into_owned(),
                 deleted_spans,
             });
         }

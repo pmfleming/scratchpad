@@ -156,7 +156,7 @@ fn reset_settings_to_defaults_restores_startup_default_state() {
     assert_eq!(app.tab_manager.tabs.as_slice().len(), 1);
     assert_eq!(
         app.tab_manager.tabs.as_slice()[0].buffers.buffer.name,
-        crate::app::services::manual_files::USER_MANUAL_FILE_NAME
+        "Untitled"
     );
     assert!(
         crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(
@@ -182,6 +182,7 @@ fn test_app<const N: usize>(names: [&str; N]) -> ScratchpadApp {
         session_dirty: false,
         pending_scroll_to_active: false,
         buffer_tab_index: Default::default(),
+        path_tab_index: Default::default(),
         cold_session_tabs: Default::default(),
     };
     app.tab_manager.rebuild_buffer_tab_index();

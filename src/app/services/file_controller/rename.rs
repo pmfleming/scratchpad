@@ -1,5 +1,7 @@
 use super::FileController;
+use crate::app::CanonicalPathKey;
 use crate::app::app_state::{ScratchpadApp, StatusDomain};
+use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::diagnostics;
 use crate::app::domain::BufferFreshness;
 use crate::app::services::file_service::FileService;
@@ -30,9 +32,10 @@ impl FileController {
             }
         };
 
-        let (current_name, current_path, freshness, is_settings_file) = {
+        let (buffer_id, current_name, current_path, freshness, is_settings_file) = {
             let buffer = app.tab_manager.tabs.as_slice()[index].active_buffer();
             (
+                buffer.id,
                 buffer.name.clone(),
                 buffer.path.clone(),
                 buffer.freshness,
@@ -94,6 +97,27 @@ impl FileController {
             None => None,
         };
 
+        if let Some(target_path) = target_path.as_ref() {
+            let target_key = CanonicalPathKey::from_path(target_path);
+            if let Some((owner_buffer_id, tab_index, view_id)) =
+                app.tab_manager.path_owner(&target_key)
+                && owner_buffer_id != buffer_id
+            {
+                crate::app::commands::handle_command(
+                    app,
+                    AppCommand::Workspace(WorkspaceCommand::ActivateTab { index: tab_index }),
+                );
+                crate::app::commands::handle_command(
+                    app,
+                    AppCommand::Workspace(WorkspaceCommand::ActivateView { view_id }),
+                );
+                app.state
+                    .status
+                    .set_warning_status_in_domain(StatusDomain::File, "That file is already open.");
+                return false;
+            }
+        }
+
         if let (Some(current_path), Some(target_path)) =
             (current_path.as_ref(), target_path.as_ref())
             && current_path != target_path
@@ -116,14 +140,34 @@ impl FileController {
 
         let settings_path = crate::app::app_state::settings_state::settings_path(app).to_path_buf();
 
+        let old_key = app.tab_manager.tabs.as_slice()[index]
+            .active_buffer()
+            .path_key
+            .clone();
+        let new_key = target_path.as_deref().map(CanonicalPathKey::from_path);
         {
             let buffer = app.tab_manager.tabs.as_mut_slice()[index].active_buffer_mut();
             buffer.name.clone_from(&normalized_name);
             if let Some(target_path) = target_path {
-                buffer.path = Some(target_path.clone());
+                buffer.set_path(Some(target_path.clone()));
                 buffer.sync_to_disk_state(FileService::read_disk_state(&target_path).ok());
                 buffer.is_settings_file = crate::app::paths_match(&target_path, &settings_path);
             }
+        }
+        app.tab_manager.rebuild_buffer_tab_index();
+        if let Some(old_key) = old_key {
+            debug_assert_ne!(
+                app.tab_manager.path_owner(&old_key).map(|owner| owner.0),
+                Some(buffer_id),
+                "old rename path key was not removed"
+            );
+        }
+        if let Some(new_key) = new_key {
+            debug_assert_eq!(
+                app.tab_manager.path_owner(&new_key).map(|owner| owner.0),
+                Some(buffer_id),
+                "new rename path key was not inserted exactly once"
+            );
         }
 
         app.state.status.set_info_status_in_domain(

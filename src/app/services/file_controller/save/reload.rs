@@ -229,6 +229,7 @@ impl FileController {
             }
             (buffer.name.clone(), Self::deferred_buffer_refresh(buffer))
         };
+        app.tab_manager.rebuild_buffer_tab_index();
         crate::app::app_state::search_runtime::mark_search_dirty(app);
         app.tab_manager.mark_session_dirty();
         Self::queue_deferred_buffer_refreshes(app, deferred_refresh);

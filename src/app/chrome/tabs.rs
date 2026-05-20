@@ -1,3 +1,4 @@
+use crate::app::shortcut_tooltips;
 use crate::app::theme::{
     CLOSE_HOVER_BG, TAB_BUTTON_WIDTH, TAB_HEIGHT, action_hover_bg, border, tab_active_bg,
     tab_hover_bg, tab_selected_accent, text_primary,
@@ -292,7 +293,7 @@ fn render_tab_promote_button(
         egui::FontId::proportional(14.0),
         text_primary(ui),
     );
-    promote_response.on_hover_text("Promote each file in this workspace to its own tab")
+    promote_response.on_hover_text(shortcut_tooltips::PROMOTE_ALL_FILES)
 }
 
 fn render_tab_close_button(
@@ -314,6 +315,7 @@ fn render_tab_close_button(
         "tab_close",
     );
     paint_tab_close_button(ui, close_rect, close_response.hovered(), drag_in_progress);
+    let close_response = close_response.on_hover_text(shortcut_tooltips::CLOSE_TAB);
 
     (close_rect, close_response)
 }

@@ -31,6 +31,7 @@ pub mod domain;
 pub mod fonts;
 pub mod memory_budget;
 pub mod services;
+pub(crate) mod shortcut_tooltips;
 pub mod shortcuts;
 pub mod startup;
 pub(crate) mod text_history;
@@ -40,16 +41,30 @@ pub mod utils;
 
 pub use app_state::ScratchpadApp;
 
-use std::fs;
 use std::path::Path;
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct CanonicalPathKey(String);
+
+impl CanonicalPathKey {
+    #[must_use]
+    pub fn from_path(path: &Path) -> Self {
+        Self(normalize_path(path))
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 #[must_use]
 pub fn paths_match(left: &Path, right: &Path) -> bool {
-    normalize_path(left) == normalize_path(right)
+    CanonicalPathKey::from_path(left) == CanonicalPathKey::from_path(right)
 }
 
 fn normalize_path(path: &Path) -> String {
-    fs::canonicalize(path)
+    std::fs::canonicalize(path)
         .unwrap_or_else(|_| path.to_path_buf())
         .to_string_lossy()
         .to_lowercase()

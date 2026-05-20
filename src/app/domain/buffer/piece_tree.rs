@@ -471,7 +471,16 @@ impl PieceTreeLite {
 
     #[must_use]
     pub fn extract_range(&self, range_chars: Range<usize>) -> String {
-        let mut result = String::new();
+        self.extract_range_with_capacity(range_chars, 0)
+    }
+
+    #[must_use]
+    pub fn extract_range_with_capacity(
+        &self,
+        range_chars: Range<usize>,
+        capacity: usize,
+    ) -> String {
+        let mut result = String::with_capacity(capacity);
         for span in self.spans_for_range(range_chars) {
             result.push_str(span.text);
         }

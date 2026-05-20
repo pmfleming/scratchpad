@@ -1,3 +1,4 @@
+use crate::app::CanonicalPathKey;
 use crate::app::domain::tab::summary;
 use crate::app::domain::{BufferId, ViewId, WorkspaceTab};
 use crate::app::services::session_store::ColdSessionTab;
@@ -30,6 +31,7 @@ pub struct TabManager {
     pub(crate) session_dirty: bool,
     pub(crate) pending_scroll_to_active: bool,
     pub(crate) buffer_tab_index: HashMap<BufferId, usize>,
+    pub(crate) path_tab_index: HashMap<CanonicalPathKey, (BufferId, usize, ViewId)>,
     pub(crate) cold_session_tabs: HashMap<usize, ColdSessionTab>,
 }
 
@@ -42,6 +44,7 @@ impl Default for TabManager {
             session_dirty: false,
             pending_scroll_to_active: true,
             buffer_tab_index: HashMap::new(),
+            path_tab_index: HashMap::new(),
             cold_session_tabs: HashMap::new(),
         };
         manager.rebuild_buffer_tab_index();
@@ -103,9 +106,12 @@ impl TabManager {
         self.mark_session_dirty();
     }
 
-    pub(crate) fn append_restored_tab(&mut self, tab: WorkspaceTab) {
+    pub(crate) fn append_restored_tab(&mut self, tab: WorkspaceTab) -> bool {
+        let previous_len = self.tabs.len();
         self.tabs.push(tab);
-        self.index_tab_buffers(self.tabs.len() - 1);
+        self.dedupe_duplicate_path_owners();
+        self.rebuild_buffer_tab_index();
+        self.tabs.len() > previous_len
     }
 
     pub fn insert_tab(&mut self, index: usize, tab: WorkspaceTab) {
@@ -113,6 +119,7 @@ impl TabManager {
         self.tabs.insert(index, tab);
         self.active_tab_index = index;
         self.shift_buffer_tab_indices(index, 1);
+        self.shift_path_tab_indices(index, 1);
         self.shift_cold_tab_indices(index, 1);
         self.index_tab_buffers(index);
         self.pending_scroll_to_active = true;
@@ -133,6 +140,7 @@ impl TabManager {
             self.index_tab_buffers(0);
         } else {
             self.shift_buffer_tab_indices(index, -1);
+            self.shift_path_tab_indices(index, -1);
             self.shift_cold_tab_indices(index, -1);
         }
 
@@ -162,9 +170,6 @@ impl TabManager {
         if let Some(cold_tab) = moved_cold_tab {
             self.cold_session_tabs.insert(to_index, cold_tab);
         }
-        let changed_start = from_index.min(to_index);
-        let changed_end = from_index.max(to_index);
-
         if self.active_tab_index == from_index {
             self.active_tab_index = to_index;
         } else if from_index < self.active_tab_index && to_index >= self.active_tab_index {
@@ -173,7 +178,7 @@ impl TabManager {
             self.active_tab_index += 1;
         }
 
-        self.refresh_buffer_tab_index_range(changed_start..=changed_end);
+        self.rebuild_buffer_tab_index();
         self.pending_scroll_to_active = true;
         self.mark_session_dirty();
         true
@@ -182,6 +187,7 @@ impl TabManager {
     pub fn set_tabs(&mut self, tabs: Vec<WorkspaceTab>, active_tab_index: usize) {
         self.tabs = tabs;
         self.cold_session_tabs.clear();
+        self.dedupe_duplicate_path_owners();
         self.active_tab_index = active_tab_index.min(self.tabs.len().saturating_sub(1));
         self.rebuild_buffer_tab_index();
     }
@@ -211,19 +217,43 @@ impl TabManager {
                 tab
             })
             .collect();
+        self.dedupe_duplicate_path_owners();
         self.rebuild_buffer_tab_index();
     }
 
     #[must_use]
     pub fn find_tab_by_path(&self, candidate: &std::path::Path) -> Option<(usize, ViewId)> {
-        self.tabs.iter().enumerate().find_map(|(tab_index, tab)| {
-            tab.layout.views().iter().find_map(|view| {
-                tab.buffer_by_id(view.buffer_id)
-                    .and_then(|buffer| buffer.path.as_ref())
-                    .is_some_and(|path| crate::app::paths_match(path, candidate))
-                    .then_some((tab_index, view.id))
-            })
-        })
+        let key = CanonicalPathKey::from_path(candidate);
+        self.find_tab_by_path_key(&key)
+    }
+
+    #[must_use]
+    pub(crate) fn find_tab_by_path_key(&self, key: &CanonicalPathKey) -> Option<(usize, ViewId)> {
+        let indexed = self
+            .path_tab_index
+            .get(key)
+            .and_then(|(buffer_id, tab_index, view_id)| {
+                let tab = self.tabs.get(*tab_index)?;
+                let buffer = tab.buffer_by_id(*buffer_id)?;
+                (buffer.path_key.as_ref() == Some(key)
+                    && tab
+                        .layout
+                        .view(*view_id)
+                        .is_some_and(|view| view.buffer_id == *buffer_id))
+                .then_some((*tab_index, *view_id))
+            });
+
+        #[cfg(debug_assertions)]
+        {
+            let scanned = self.scan_tab_by_path_key(key);
+            debug_assert_eq!(indexed, scanned, "path index mismatch for {}", key.as_str());
+            indexed.or(scanned)
+        }
+
+        #[cfg(not(debug_assertions))]
+        {
+            indexed
+        }
     }
 
     pub fn describe_tab_at(&self, index: usize) -> String {

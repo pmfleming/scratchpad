@@ -1,0 +1,36 @@
+## Non-breaking performance changes to close the gap to EmEditor
+
+All preserve current behavior, file outputs, and UX — they only reduce synchronous work per byte / per edit / per tab.
+
+### Open path (biggest near-term wins)
+
+1. **Streaming decode straight into piece-tree chunks.** Today `FileService::read_file` does `decoder.read_to_string(&mut content)` and then the piece-tree is built *from* that full `String`. Feed the decoder's output directly into piece-tree "original" segments. Eliminates the duplicate full-document allocation that drives most of the 128 MB → 600 ms result.
+2. **Single-pass open.** Encoding sniff, BOM detect, line-ending detect, line count, and artifact scan currently each iterate the text. Fold them into one pass over the decoded byte/char stream during step 1.
+3. **memchr / SIMD for newline + control-byte scanning.** Replace the char-by-char loops in `TextInspection` and `buffer_text_metadata_from_piece_tree` with `memchr::memchr_iter` for `\n`, `\r`, and the control-byte set. This is the single highest-leverage CPU change.
+4. **Lazy line-offset index.** Don't compute exact line count up front; build a sparse offset index in a background task and let scrollbar / goto-line block on it only if used. Same final result, just not on the open critical path.
+5. **Deferred artifact summary for large files.** Above a size threshold, post artifact detection to a worker thread and update the indicator when it lands. The buffer is usable immediately.
+6. **Read-only / mmap fast path.** When a file is opened via `/clean` or inspected without edits, reference the mmap'd bytes directly as the piece-tree "original" buffer instead of allocating a decoded copy. Cleanest for UTF-8 / single-byte encodings; fall back to current path otherwise. This is what unlocks multi-GB read of logs without RAM growing with file size.
+7. **Async/staged open.** Show an empty buffer + filename + progress immediately, fill the piece-tree as decode chunks arrive. UX-identical for small files (decode finishes in a frame); transformative for large.
+
+### Edit responsiveness
+
+8. **Incremental metadata refresh from changed spans.** The piece-tree already knows the byte range that changed. Update line counts and artifact flags only for that range; stop calling whole-document `refresh_text_metadata()` after every edit. This is the direct fix for the paste-size ceiling.
+9. **Debounce metadata refresh during edit bursts.** Coalesce rapid edits (typing, large paste streamed in pieces) into a single deferred refresh.
+10. **Sticky artifact flags.** Once a file is known to contain ANSI / CR / overprint patterns, stop re-verifying on every edit — only re-scan if the user explicitly requests it or all evidence is deleted.
+11. **Reuse working buffers across the edit pipeline.** Resource profile shows 162 reallocations for a 64 MB paste; pre-size and reuse Vecs in the metadata path.
+
+### Tab / session scale
+
+12. **Inactive-tab virtualization.** Only the focused tab (plus N MRU) holds a live `BufferState`, pane tree, and view graph. Inactive tabs collapse to a lightweight descriptor (path, encoding, cursor, scroll, dirty hash) and rehydrate on focus. Session-restore already has the shape of this on disk.
+13. **Lazy pane / view construction.** Defer building `WorkspaceTab::layout` and view state until first focus rather than on tab creation / session restore.
+14. **Share immutable buffer references across tabs that view the same file.** Multi-view-of-one-buffer is already supported inside a tab; extend it so two tabs pointing at the same path share the underlying piece-tree.
+15. **Spill undo history to disk above a budget.** Keep recent undo entries hot, page older deltas to a session-dir file. No UX change unless the user undoes deep into history.
+
+### General
+
+16. **Parallel chunk processing for any remaining whole-file scans.** Where a full pass is genuinely required (e.g. one-shot artifact summary on demand), split into chunks and use Rayon. `egui-piece-tree-parallelism-plan.md` already sketches this.
+17. **Capacity-aware open routing.** At open time, sniff size and route files over a threshold through the large-file pipeline above (mmap original, deferred artifact, lazy line index). Below threshold, the current path stays — guarantees no regression for normal files.
+
+### What this looks like in the capacity report
+
+If 1–4 + 8 land, the file-open ceiling should move from 32 MB → at least 256 MB on the same budget, and the paste ceiling from 64 MB → several hundred MB. Items 6 + 12 are what carry it from "good editor" to "EmEditor-class on multi-GB" — they change the *shape* of the cost from O(file size) to O(visible viewport).

@@ -23,6 +23,7 @@ pub(crate) struct EditorContentStyle<'a> {
     pub(crate) editor_gutter: u8,
     pub(crate) viewport: Option<egui::Rect>,
     pub(crate) previous_snapshot: Option<&'a DisplaySnapshot>,
+    pub(crate) gutter_snapshot: Option<&'a DisplaySnapshot>,
     pub(crate) text_edit: TextEditOptions<'a>,
     pub(crate) background_color: egui::Color32,
 }
@@ -38,7 +39,7 @@ pub(crate) fn render_editor_content(
     widget_ids::rect_scope(ui, content_rect, "editor_content", |ui| {
         egui::Frame::NONE
             .fill(style.background_color)
-            .inner_margin(egui::Margin::same(gutter))
+            .inner_margin(editor_content_margin(gutter, view.show_line_numbers))
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
 
@@ -48,7 +49,7 @@ pub(crate) fn render_editor_content(
                             ui,
                             buffer,
                             style.viewport,
-                            style.previous_snapshot,
+                            style.gutter_snapshot.or(style.previous_snapshot),
                             style.text_edit.editor_font_id,
                             style.text_edit.text_color,
                             style.background_color,
@@ -64,6 +65,15 @@ pub(crate) fn render_editor_content(
             .into()
     })
     .inner
+}
+
+fn editor_content_margin(gutter: i8, show_line_numbers: bool) -> egui::Margin {
+    egui::Margin {
+        left: if show_line_numbers { 0 } else { gutter },
+        right: gutter,
+        top: gutter,
+        bottom: gutter,
+    }
 }
 
 fn render_editor_body(
@@ -108,8 +118,23 @@ impl From<native_editor::EditorWidgetOutcome> for EditorContentOutcome {
 
 #[cfg(test)]
 mod tests {
-    use super::body_viewport;
+    use super::{body_viewport, editor_content_margin};
     use eframe::egui;
+
+    #[test]
+    fn content_margin_does_not_pad_before_visible_line_numbers() {
+        let margin = editor_content_margin(32, true);
+
+        assert_eq!(margin.left, 0);
+        assert_eq!(margin.right, 32);
+        assert_eq!(margin.top, 32);
+        assert_eq!(margin.bottom, 32);
+    }
+
+    #[test]
+    fn content_margin_keeps_left_padding_without_line_numbers() {
+        assert_eq!(editor_content_margin(32, false), egui::Margin::same(32));
+    }
 
     #[test]
     fn body_viewport_uses_text_lane_width_after_gutter() {

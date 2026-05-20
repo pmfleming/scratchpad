@@ -1,5 +1,6 @@
 use crate::app::app_state::{ScratchpadApp, StatusSeverity, frame};
 use crate::app::commands::{AppCommand, DialogCommand, SettingsCommand};
+use crate::app::shortcut_tooltips;
 use crate::app::theme::text_primary;
 use crate::app::ui::widget_ids;
 use eframe::egui;
@@ -114,7 +115,7 @@ fn show_copyable_path_sized(ui: &mut egui::Ui, label: &str, width: f32) {
         egui::Sense::click(),
         "copyable_path",
     )
-    .on_hover_text(format!("{label}\nDouble-click to copy path"));
+    .on_hover_text(format!("{label}\nCTRL+SHIFT+C (Double Click): Copy Path"));
     paint_left_aligned_status_text(ui, response.rect, &display_label);
     if response.double_clicked() {
         let copied = label.strip_prefix("Path: ").unwrap_or(label);
@@ -150,7 +151,7 @@ fn show_encoding(ui: &mut egui::Ui, encoding: &str, highlight: bool) -> egui::Re
         )
     })
     .on_hover_cursor(egui::CursorIcon::PointingHand)
-    .on_hover_text("Text Encoding")
+    .on_hover_text(shortcut_tooltips::ENCODING)
 }
 
 fn show_status_segment(ui: &mut egui::Ui, label: Option<&str>) {
@@ -202,7 +203,7 @@ fn show_settings_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
     ui.separator();
     let response = status_bar_icon_button(ui, "status_settings", egui_phosphor::regular::GEAR)
         .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text("Settings");
+        .on_hover_text(shortcut_tooltips::SETTINGS);
     if response.clicked() {
         actions.open_settings = true;
     }
@@ -216,7 +217,7 @@ fn show_text_history_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
         egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE,
     )
     .on_hover_cursor(egui::CursorIcon::PointingHand)
-    .on_hover_text("Text history");
+    .on_hover_text(shortcut_tooltips::HISTORY);
     if response.clicked() {
         actions.open_text_history = true;
     }
@@ -239,9 +240,9 @@ fn show_status_history_button(
         status_icon_color(ui)
     };
     let tooltip = if has_errors {
-        "Status History has Errors"
+        "CTRL+SHIFT+M: Status History has Errors"
     } else {
-        "Status history"
+        shortcut_tooltips::STATUS
     };
     let response = fixed_status_icon_cell(
         ui,
@@ -284,7 +285,11 @@ fn show_control_char_toggle(
         } else {
             "Control characters"
         };
-        button_response.clone().on_hover_text(tooltip);
+        button_response.clone().on_hover_text(format!(
+            "{}\n{}",
+            shortcut_tooltips::CONTROL_CHARS,
+            tooltip
+        ));
     }
     if button_response.clicked()
         && (details.control_chars.is_available || details.control_chars.icon == CONTROL_CHAR_ICON)

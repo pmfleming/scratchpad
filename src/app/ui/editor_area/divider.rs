@@ -1,13 +1,11 @@
 use crate::app::domain::{SplitAxis, SplitPath};
-use crate::app::theme::{border, header_bg, text_primary};
+use crate::app::theme::border;
 use crate::app::ui::tile_header::{TILE_GAP, TileAction};
 use crate::app::ui::widget_ids;
 use eframe::egui;
 
 pub const DIVIDER_HIT_THICKNESS: f32 = 18.0;
 pub const DIVIDER_VISUAL_THICKNESS: f32 = 2.0;
-pub const DIVIDER_HANDLE_MAJOR: f32 = 36.0;
-pub const DIVIDER_HANDLE_MINOR: f32 = 20.0;
 
 pub fn render_split_divider(
     ui: &egui::Ui,
@@ -22,9 +20,7 @@ pub fn render_split_divider(
     maybe_queue_resize_action(rect, axis, path, actions, &response);
 
     let style = divider_style(ui, &response);
-    let handle_rect = divider_handle_rect(divider_center, axis);
     paint_divider_line(ui.painter(), rect, divider_center, axis, style.line_fill);
-    paint_divider_handle(ui.painter(), handle_rect, axis, &style);
 }
 
 fn divider_response(
@@ -70,8 +66,6 @@ fn divider_cursor(axis: SplitAxis) -> egui::CursorIcon {
 
 struct DividerStyle {
     line_fill: egui::Color32,
-    handle_fill: egui::Color32,
-    text_fill: egui::Color32,
 }
 
 fn divider_style(ui: &egui::Ui, response: &egui::Response) -> DividerStyle {
@@ -82,12 +76,6 @@ fn divider_style(ui: &egui::Ui, response: &egui::Response) -> DividerStyle {
         } else {
             border(ui)
         },
-        handle_fill: if divider_hovered {
-            egui::Color32::from_rgb(56, 72, 98)
-        } else {
-            header_bg(ui).gamma_multiply(0.92)
-        },
-        text_fill: text_primary(ui),
     }
 }
 
@@ -109,35 +97,6 @@ fn paint_divider_line(
         ),
     };
     painter.rect_filled(line_rect, 0.0, line_fill);
-}
-
-fn paint_divider_handle(
-    painter: &egui::Painter,
-    handle_rect: egui::Rect,
-    axis: SplitAxis,
-    style: &DividerStyle,
-) {
-    painter.rect_filled(handle_rect, 6.0, style.handle_fill);
-    painter.rect_stroke(
-        handle_rect,
-        6.0,
-        egui::Stroke::new(1.0, style.line_fill.gamma_multiply(0.9)),
-        egui::StrokeKind::Outside,
-    );
-    painter.text(
-        handle_rect.center(),
-        egui::Align2::CENTER_CENTER,
-        divider_icon(axis),
-        egui::FontId::proportional(14.0),
-        style.text_fill,
-    );
-}
-
-fn divider_icon(axis: SplitAxis) -> &'static str {
-    match axis {
-        SplitAxis::Vertical => egui_phosphor::regular::DOTS_SIX_VERTICAL,
-        SplitAxis::Horizontal => egui_phosphor::regular::DOTS_SIX,
-    }
 }
 
 #[must_use]
@@ -184,19 +143,6 @@ fn divider_hit_rect(rect: egui::Rect, axis: SplitAxis, ratio: f32) -> egui::Rect
         SplitAxis::Horizontal => {
             egui::Rect::from_center_size(center, egui::vec2(rect.width(), DIVIDER_HIT_THICKNESS))
         }
-    }
-}
-
-fn divider_handle_rect(center: egui::Pos2, axis: SplitAxis) -> egui::Rect {
-    match axis {
-        SplitAxis::Vertical => egui::Rect::from_center_size(
-            center,
-            egui::vec2(DIVIDER_HANDLE_MINOR, DIVIDER_HANDLE_MAJOR),
-        ),
-        SplitAxis::Horizontal => egui::Rect::from_center_size(
-            center,
-            egui::vec2(DIVIDER_HANDLE_MAJOR, DIVIDER_HANDLE_MINOR),
-        ),
     }
 }
 

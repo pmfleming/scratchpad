@@ -3,6 +3,7 @@ use crate::app::chrome::{
     PhosphorButtonColors, phosphor_button, phosphor_button_with_hover_icon_color,
 };
 use crate::app::commands::{AppCommand, FileCommand, SearchCommand};
+use crate::app::shortcut_tooltips;
 use crate::app::theme::{CAPTION_BUTTON_SIZE, CLOSE_HOVER_BG, action_bg, action_hover_bg};
 use eframe::egui;
 
@@ -14,17 +15,17 @@ pub(super) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut Scratch
     let left_buttons = [
         VerticalActionButton::new(
             egui_phosphor::regular::FOLDER_OPEN,
-            "Open File",
+            shortcut_tooltips::OPEN_FILE,
             VerticalAction::OpenFile,
         ),
         VerticalActionButton::new(
             egui_phosphor::regular::FLOPPY_DISK,
-            "Save",
+            shortcut_tooltips::SAVE,
             VerticalAction::SaveFile,
         ),
         VerticalActionButton::new(
             egui_phosphor::regular::MAGNIFYING_GLASS,
-            "Search",
+            shortcut_tooltips::SEARCH,
             VerticalAction::Search,
         ),
     ];

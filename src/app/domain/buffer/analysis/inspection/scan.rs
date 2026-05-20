@@ -29,12 +29,7 @@ impl TextInspection {
     pub(in crate::app::domain::buffer::analysis) fn inspect_span_refs<'a>(
         spans: impl Iterator<Item = &'a str>,
     ) -> Self {
-        let spans = spans.collect::<Vec<_>>();
-        Self::inspect_span_slice(&spans)
-    }
-
-    pub(in crate::app::domain::buffer::analysis) fn inspect_span_slice(spans: &[&str]) -> Self {
-        TextScanSummary::scan_span_slice(spans).into_inspection(None)
+        TextScanSummary::scan_span_refs(spans).into_inspection(None)
     }
 }
 
@@ -87,10 +82,10 @@ impl InspectionState {
             match byte {
                 b'\r' => self.pending_cr = true,
                 b'\n' => self.record_lf(),
-                b'\x1B' => self.artifact_summary.has_ansi_sequences = true,
-                b'\x08' => self.artifact_summary.has_backspaces = true,
+                b'\x1B' => self.artifact_summary.mark_ansi_sequence(),
+                b'\x08' => self.artifact_summary.mark_backspace(),
                 b'\t' => {}
-                0x00..=0x1F | 0x7F => self.artifact_summary.other_control_count += 1,
+                0x00..=0x1F | 0x7F => self.artifact_summary.mark_other_control(),
                 0x80..=0xFF => self.observe_non_ascii_byte(bytes, index),
                 _ => {}
             }
@@ -101,9 +96,9 @@ impl InspectionState {
     fn observe_non_ascii_byte(&mut self, bytes: &[u8], index: usize) {
         self.is_ascii_subset = false;
         if is_c1_control(bytes, index) {
-            self.artifact_summary.other_control_count += 1;
+            self.artifact_summary.mark_other_control();
         } else if is_unicode_format_control(bytes, index) {
-            self.artifact_summary.has_unicode_format_controls = true;
+            self.artifact_summary.mark_unicode_format_control();
         }
     }
 
@@ -170,6 +165,29 @@ impl TextScanSummary {
         state.finish_summary()
     }
 
+    pub(super) fn scan_span_refs<'a>(spans: impl Iterator<Item = &'a str>) -> Self {
+        let mut state = InspectionState::new();
+        let mut total_bytes = 0usize;
+        let mut spans = spans;
+
+        while let Some(span) = spans.next() {
+            state.observe_text(span);
+            total_bytes += span.len();
+            if total_bytes >= parallel::parallel_inspection_min_bytes() {
+                let prefix = state.finish_summary();
+                let remaining = spans.collect::<Vec<_>>();
+                if remaining.is_empty() {
+                    return prefix;
+                }
+                let suffix = Self::scan_span_slice_parallel(&remaining)
+                    .unwrap_or_else(|| Self::scan_spans(remaining.iter().copied()));
+                return Self::combine(vec![prefix, suffix]);
+            }
+        }
+
+        state.finish_summary()
+    }
+
     #[cfg(test)]
     pub(super) fn scan_span_slice_parallel_with_workers(
         spans: &[&str],
@@ -184,15 +202,6 @@ impl TextScanSummary {
 
     fn scan_text_parallel(text: &str) -> Option<Self> {
         parallel::scan_text(text)
-    }
-
-    fn scan_span_slice(spans: &[&str]) -> Self {
-        match spans {
-            [] => Self::scan_spans(std::iter::empty()),
-            [span] => Self::scan_text(span),
-            _ => Self::scan_span_slice_parallel(spans)
-                .unwrap_or_else(|| Self::scan_spans(spans.iter().copied())),
-        }
     }
 
     fn scan_span_slice_parallel(spans: &[&str]) -> Option<Self> {
@@ -266,7 +275,22 @@ impl TextArtifactSummary {
         self.has_backspaces |= other.has_backspaces;
         self.has_unicode_format_controls |= other.has_unicode_format_controls;
         self.other_control_count += other.other_control_count;
+        self.ansi_sequence_count =
+            add_optional_counts(self.ansi_sequence_count, other.ansi_sequence_count);
+        self.backspace_count = add_optional_counts(self.backspace_count, other.backspace_count);
+        self.unicode_format_control_count = add_optional_counts(
+            self.unicode_format_control_count,
+            other.unicode_format_control_count,
+        );
+        self.other_control_count_exact = add_optional_counts(
+            self.other_control_count_exact,
+            other.other_control_count_exact,
+        );
     }
+}
+
+fn add_optional_counts(left: Option<usize>, right: Option<usize>) -> Option<usize> {
+    left?.checked_add(right?)
 }
 
 fn is_c1_control(bytes: &[u8], index: usize) -> bool {

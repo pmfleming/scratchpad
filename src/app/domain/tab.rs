@@ -1,3 +1,4 @@
+use crate::app::CanonicalPathKey;
 use crate::app::domain::{BufferId, BufferState, EditorViewState, PaneNode, ViewId, tab_support};
 use std::collections::HashSet;
 
@@ -155,6 +156,46 @@ impl WorkspaceTab {
         }
 
         self.buffers.prune_to_buffer_ids(&referenced_buffer_ids);
+    }
+
+    pub(crate) fn remove_duplicate_path_buffers(
+        &mut self,
+        seen: &mut HashSet<CanonicalPathKey>,
+    ) -> bool {
+        let duplicate_buffer_ids = self
+            .buffers()
+            .filter_map(|buffer| {
+                let key = buffer.path_key.as_ref()?;
+                (!seen.insert(key.clone())).then_some(buffer.id)
+            })
+            .collect::<HashSet<_>>();
+
+        if duplicate_buffer_ids.is_empty() {
+            return true;
+        }
+
+        if self
+            .layout
+            .views()
+            .iter()
+            .all(|view| duplicate_buffer_ids.contains(&view.buffer_id))
+        {
+            return false;
+        }
+
+        let duplicate_view_ids = self
+            .layout
+            .views()
+            .iter()
+            .filter(|view| duplicate_buffer_ids.contains(&view.buffer_id))
+            .map(|view| view.id)
+            .collect::<Vec<_>>();
+
+        for view_id in duplicate_view_ids {
+            let _ = self.close_view(view_id);
+        }
+
+        true
     }
 
     fn active_buffer_id_for_view(

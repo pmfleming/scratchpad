@@ -213,7 +213,7 @@ impl FileController {
         );
     }
 
-    fn activate_existing_path(app: &mut ScratchpadApp, path: &Path) -> Option<String> {
+    pub(super) fn activate_existing_path(app: &mut ScratchpadApp, path: &Path) -> Option<String> {
         if let Some((index, view_id)) = app.tab_manager.find_tab_by_path(path) {
             crate::app::commands::handle_command(
                 app,
@@ -291,6 +291,14 @@ impl FileController {
                     mut buffer,
                     ..
                 } = LoadedFile::from_buffer(buffer);
+                debug_assert!(
+                    buffer
+                        .path_key
+                        .as_ref()
+                        .and_then(|key| app.tab_manager.path_owner(key))
+                        .is_none(),
+                    "loaded file collided with existing path owner"
+                );
                 Self::mark_settings_buffer(app, &mut buffer);
                 crate::app::app_state::workspace_controller::insert_new_tab_from_settings(
                     app,
@@ -352,6 +360,7 @@ mod tests {
             session_dirty: false,
             pending_scroll_to_active: false,
             buffer_tab_index: Default::default(),
+            path_tab_index: Default::default(),
             cold_session_tabs: Default::default(),
         };
         app.tab_manager.rebuild_buffer_tab_index();

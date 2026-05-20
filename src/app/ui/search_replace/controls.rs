@@ -3,6 +3,7 @@ mod buttons;
 mod input;
 
 use crate::app::app_state::{SearchFocusTarget, SearchReplaceAvailability, SearchScope};
+use crate::app::shortcut_tooltips;
 use crate::app::theme::{action_hover_bg, text_muted, text_primary};
 use crate::app::ui::{callout, settings, widget_ids};
 use buttons::{
@@ -44,11 +45,20 @@ pub(super) fn show_search_controls(
     if find_response.has_focus() {
         consume_text_input_keys(ui, actions, PlainEnterAction::NextMatch);
     }
-    if let Some(replace_response) = replace_response
+    if let Some(replace_response) = replace_response.as_ref()
         && replace_response.has_focus()
     {
         consume_text_input_keys(ui, actions, PlainEnterAction::ReplaceCurrent);
     }
+    consume_search_strip_shortcuts(
+        ui,
+        state,
+        actions,
+        find_response.has_focus()
+            || replace_response
+                .as_ref()
+                .is_some_and(|response| response.has_focus()),
+    );
 }
 
 fn render_search_pill(
@@ -81,12 +91,17 @@ fn render_search_pill(
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     toggle_mode(ui, &mut state.mode);
-                    toggle_flag(ui, &mut state.whole_word, TEXTBOX, "Whole word");
+                    toggle_flag(
+                        ui,
+                        &mut state.whole_word,
+                        TEXTBOX,
+                        shortcut_tooltips::SEARCH_WHOLE_WORD,
+                    );
                     toggle_flag(
                         ui,
                         &mut state.match_case,
                         CASE_SENSITIVE_ICON,
-                        "Case sensitive",
+                        shortcut_tooltips::SEARCH_MATCH_CASE,
                     );
                     ui.add_space(6.0);
                     for scope in [
@@ -148,8 +163,10 @@ fn render_replace_pill(
                     state.replace_availability,
                     SearchReplaceAvailability::Allowed
                 );
-                let replace_all_tooltip =
-                    replace_tooltip(&state.replace_availability, "Replace all matches");
+                let replace_all_tooltip = replace_tooltip(
+                    &state.replace_availability,
+                    shortcut_tooltips::REPLACE_ALL_MATCHES,
+                );
                 trigger_action(
                     ui,
                     replace_enabled,
@@ -157,8 +174,10 @@ fn render_replace_pill(
                     replace_all_tooltip,
                     &mut actions.replace_all_requested,
                 );
-                let replace_current_tooltip =
-                    replace_tooltip(&state.replace_availability, "Replace current match");
+                let replace_current_tooltip = replace_tooltip(
+                    &state.replace_availability,
+                    shortcut_tooltips::REPLACE_CURRENT_MATCH,
+                );
                 trigger_action(
                     ui,
                     replace_enabled,
@@ -170,28 +189,28 @@ fn render_replace_pill(
                     ui,
                     state.can_redo_text_operation,
                     ARROW_CLOCKWISE,
-                    "Redo the last operation-based text edit in the active buffer",
+                    shortcut_tooltips::REDO,
                     &mut actions.redo_requested,
                 );
                 trigger_action(
                     ui,
                     state.can_undo_text_operation,
                     ARROW_COUNTER_CLOCKWISE,
-                    "Undo the last operation-based text edit in the active buffer",
+                    shortcut_tooltips::UNDO,
                     &mut actions.undo_requested,
                 );
                 trigger_action(
                     ui,
                     state.match_count > 0,
                     CARET_DOWN,
-                    "Next match",
+                    shortcut_tooltips::SEARCH_NEXT_MATCH,
                     &mut actions.next_requested,
                 );
                 trigger_action(
                     ui,
                     state.match_count > 0,
                     CARET_UP,
-                    "Previous match",
+                    shortcut_tooltips::SEARCH_PREVIOUS_MATCH,
                     &mut actions.previous_requested,
                 );
             },
@@ -281,6 +300,78 @@ fn consume_text_input_keys(
 
     if consume_key(ui, egui::Modifiers::NONE, egui::Key::Escape) {
         actions.close_requested = true;
+    }
+}
+
+fn consume_search_strip_shortcuts(
+    ui: &mut egui::Ui,
+    state: &mut SearchStripState,
+    actions: &mut SearchStripActions,
+    text_input_focused: bool,
+) {
+    consume_search_scope_shortcuts(ui, state);
+    consume_search_option_shortcuts(ui, state);
+    consume_search_action_shortcuts(ui, state, actions, text_input_focused);
+}
+
+fn consume_search_scope_shortcuts(ui: &mut egui::Ui, state: &mut SearchStripState) {
+    if consume_key(ui, egui::Modifiers::ALT, egui::Key::Num1) {
+        state.scope = SearchScope::SelectionOnly;
+    } else if consume_key(ui, egui::Modifiers::ALT, egui::Key::Num2) {
+        state.scope = SearchScope::ActiveBuffer;
+    } else if consume_key(ui, egui::Modifiers::ALT, egui::Key::Num3) {
+        state.scope = SearchScope::ActiveWorkspaceTab;
+    } else if consume_key(ui, egui::Modifiers::ALT, egui::Key::Num4) {
+        state.scope = SearchScope::AllOpenTabs;
+    }
+}
+
+fn consume_search_option_shortcuts(ui: &mut egui::Ui, state: &mut SearchStripState) {
+    if consume_key(ui, egui::Modifiers::ALT, egui::Key::R) {
+        state.mode = if state.mode == crate::app::services::search::SearchMode::Regex {
+            crate::app::services::search::SearchMode::PlainText
+        } else {
+            crate::app::services::search::SearchMode::Regex
+        };
+    }
+    if consume_key(ui, egui::Modifiers::ALT, egui::Key::C) {
+        state.match_case = !state.match_case;
+    }
+    if consume_key(ui, egui::Modifiers::ALT, egui::Key::W) {
+        state.whole_word = !state.whole_word;
+    }
+}
+
+fn consume_search_action_shortcuts(
+    ui: &mut egui::Ui,
+    state: &SearchStripState,
+    actions: &mut SearchStripActions,
+    text_input_focused: bool,
+) {
+    if state.match_count > 0 && consume_key(ui, egui::Modifiers::NONE, egui::Key::F3) {
+        actions.next_requested = true;
+    }
+    if state.match_count > 0 && consume_key(ui, egui::Modifiers::SHIFT, egui::Key::F3) {
+        actions.previous_requested = true;
+    }
+    if matches!(
+        state.replace_availability,
+        SearchReplaceAvailability::Allowed
+    ) {
+        if consume_key(ui, egui::Modifiers::CTRL, egui::Key::Enter) {
+            actions.replace_current_requested = true;
+        }
+        if consume_key(ui, egui::Modifiers::ALT, egui::Key::Enter) {
+            actions.replace_all_requested = true;
+        }
+    }
+    if !text_input_focused {
+        if state.can_undo_text_operation && consume_key(ui, egui::Modifiers::CTRL, egui::Key::Z) {
+            actions.undo_requested = true;
+        }
+        if state.can_redo_text_operation && consume_key(ui, egui::Modifiers::CTRL, egui::Key::Y) {
+            actions.redo_requested = true;
+        }
     }
 }
 

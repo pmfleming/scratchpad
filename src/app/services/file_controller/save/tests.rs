@@ -49,14 +49,19 @@ fn test_app(root: &std::path::Path) -> ScratchpadApp {
 }
 
 fn app_with_buffer(root: &std::path::Path, buffer: BufferState) -> ScratchpadApp {
+    app_with_tabs(root, vec![WorkspaceTab::new(buffer)])
+}
+
+fn app_with_tabs(root: &std::path::Path, tabs: Vec<WorkspaceTab>) -> ScratchpadApp {
     let mut app = test_app(root);
     app.tab_manager = TabManager {
-        tabs: vec![WorkspaceTab::new(buffer)],
+        tabs,
         active_tab_index: 0,
         pending_action: None,
         session_dirty: false,
         pending_scroll_to_active: false,
         buffer_tab_index: Default::default(),
+        path_tab_index: Default::default(),
         cold_session_tabs: Default::default(),
     };
     app.tab_manager.rebuild_buffer_tab_index();
@@ -177,6 +182,39 @@ fn save_as_path_assignment_uses_written_disk_state() {
     assert_eq!(buffer.name, "new-name.txt");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "content");
     assert!(buffer.disk_state.is_some());
+}
+
+#[test]
+fn save_as_to_already_open_path_activates_existing_owner() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("existing.txt");
+    std::fs::write(&path, "existing").unwrap();
+    let untitled = BufferState::new("Untitled".to_owned(), "new".to_owned(), None);
+    let open_owner = saved_buffer("existing.txt", "existing", path.clone());
+    let mut app = app_with_tabs(
+        directory.path(),
+        vec![WorkspaceTab::new(untitled), WorkspaceTab::new(open_owner)],
+    );
+    let owner_view_id = app.tab_manager.tabs.as_slice()[1].layout.active_view_id();
+
+    assert!(!FileController::save_buffer_to_path(
+        &mut app,
+        0,
+        path.clone(),
+        true,
+        None
+    ));
+
+    assert_eq!(app.tab_manager.active_tab_index, 1);
+    assert_eq!(
+        app.tab_manager.tabs.as_slice()[1].layout.active_view_id(),
+        owner_view_id
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "existing");
+    assert_eq!(
+        app.tab_manager.tabs.as_slice()[0].active_buffer().path,
+        None
+    );
 }
 
 #[test]

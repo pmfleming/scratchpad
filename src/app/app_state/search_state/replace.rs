@@ -274,10 +274,22 @@ pub(super) fn finalize_tab_buffer_mutation(
     buffer_id: BufferId,
 ) {
     let tab = &mut app.tab_manager.tabs.as_mut_slice()[tab_index];
+    let mut text_metadata_refresh = None;
     if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
         buffer.mark_dirty_after_local_edit();
+        text_metadata_refresh = buffer.text_metadata_refresh_needed().then(|| {
+            (
+                buffer.id,
+                buffer.document_revision(),
+                buffer.document_snapshot(),
+                buffer.format.clone(),
+            )
+        });
     }
     let _ = tab;
+    if let Some((buffer_id, revision, snapshot, format)) = text_metadata_refresh {
+        app.queue_background_text_metadata_refresh(buffer_id, revision, snapshot, format);
+    }
     workspace_mutation::record_pending_text_history_event(app, tab_index, buffer_id);
     app.note_settings_toml_edit(tab_index);
 }

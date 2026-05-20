@@ -1,4 +1,5 @@
 use super::FileController;
+use crate::app::CanonicalPathKey;
 use crate::app::app_state::{
     PendingBackgroundAction, PendingSavePathAction, ScratchpadApp, StatusDomain,
 };
@@ -218,6 +219,13 @@ impl FileController {
         update_buffer_path: bool,
         format_override: Option<TextFormatMetadata>,
     ) -> bool {
+        if update_buffer_path && Self::activate_conflicting_open_path(app, index, &path) {
+            app.state
+                .status
+                .set_warning_status_in_domain(StatusDomain::File, "That file is already open.");
+            return false;
+        }
+
         let request = {
             let buffer = app.tab_manager.tabs.as_slice()[index].active_buffer();
             SaveWriteRequest {
@@ -248,6 +256,19 @@ impl FileController {
         )
     }
 
+    fn activate_conflicting_open_path(app: &mut ScratchpadApp, index: usize, path: &Path) -> bool {
+        let key = CanonicalPathKey::from_path(path);
+        let Some((owner_buffer_id, _, _)) = app.tab_manager.path_owner(&key) else {
+            return false;
+        };
+        let active_buffer_id = app.tab_manager.tabs.as_slice()[index].active_buffer().id;
+        if owner_buffer_id == active_buffer_id {
+            return false;
+        }
+
+        Self::activate_existing_path(app, path).is_some()
+    }
+
     fn finalize_save(
         app: &mut ScratchpadApp,
         index: usize,
@@ -256,23 +277,48 @@ impl FileController {
         action: PendingSavePathAction,
     ) {
         let settings_path = crate::app::app_state::settings_state::settings_path(app).to_path_buf();
-        let buffer = app.tab_manager.tabs.as_mut_slice()[index]
-            .buffer_by_id_mut(action.buffer_id)
-            .expect("buffer location validated");
-        if let Some(format) = action.format_override {
-            buffer.replace_format_without_text_change(format);
+        let old_key = app.tab_manager.tabs.as_slice()[index]
+            .buffer_by_id(action.buffer_id)
+            .and_then(|buffer| buffer.path_key.clone());
+        let new_key = action
+            .update_buffer_path
+            .then(|| CanonicalPathKey::from_path(&path));
+        {
+            let buffer = app.tab_manager.tabs.as_mut_slice()[index]
+                .buffer_by_id_mut(action.buffer_id)
+                .expect("buffer location validated");
+            if let Some(format) = action.format_override {
+                buffer.replace_format_without_text_change(format);
+            }
+            if action.update_buffer_path {
+                Self::assign_saved_path(buffer, &path);
+            }
+            if buffer.document_revision() == action.saved_revision {
+                buffer.is_dirty = false;
+            }
+            buffer.sync_to_disk_state(disk_state);
+            buffer.is_settings_file = buffer
+                .path
+                .as_ref()
+                .is_some_and(|path| crate::app::paths_match(path, &settings_path));
         }
+        app.tab_manager.rebuild_buffer_tab_index();
         if action.update_buffer_path {
-            Self::assign_saved_path(buffer, &path);
+            if let Some(old_key) = old_key {
+                debug_assert_ne!(
+                    app.tab_manager.path_owner(&old_key).map(|owner| owner.0),
+                    Some(action.buffer_id),
+                    "old save-as path key was not removed"
+                );
+            }
+            if let Some(new_key) = new_key {
+                debug_assert_eq!(
+                    app.tab_manager.path_owner(&new_key).map(|owner| owner.0),
+                    Some(action.buffer_id),
+                    "new save-as path key was not inserted exactly once"
+                );
+            }
         }
-        if buffer.document_revision() == action.saved_revision {
-            buffer.is_dirty = false;
-        }
-        buffer.sync_to_disk_state(disk_state);
-        buffer.is_settings_file = buffer
-            .path
-            .as_ref()
-            .is_some_and(|path| crate::app::paths_match(path, &settings_path));
         crate::app::app_state::workspace::accessors::clear_status_message(app);
         app.tab_manager.mark_session_dirty();
         app.apply_current_tab_ordering();

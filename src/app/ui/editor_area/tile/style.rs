@@ -17,6 +17,7 @@ pub(super) fn editor_content_style<'a>(
         editor_gutter: app.state.app_settings.editor_gutter(),
         viewport: None,
         previous_snapshot: None,
+        gutter_snapshot: None,
         text_edit: TextEditOptions::new(
             request_focus,
             app.state.app_settings.word_wrap(),

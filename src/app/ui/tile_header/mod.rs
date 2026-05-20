@@ -3,6 +3,7 @@ pub mod split;
 
 use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::{SplitPath, ViewId};
+use crate::app::shortcut_tooltips;
 use crate::app::ui::transition;
 use crate::app::ui::widget_ids;
 use eframe::egui;
@@ -69,7 +70,7 @@ pub(crate) fn render_tile_header(
             rects.promote_hit,
             TileControlSpec {
                 label: egui_phosphor::regular::ARROW_LINE_UP,
-                tooltip: Some("Promote Tile"),
+                tooltip: Some(shortcut_tooltips::PROMOTE_TILE),
                 style: TileControlStyle::Default,
                 sense: egui::Sense::click(),
                 id_prefix: "promote_view",
@@ -109,7 +110,7 @@ pub(crate) fn render_tile_header(
             rects.close_hit,
             TileControlSpec {
                 label: "×",
-                tooltip: None,
+                tooltip: Some(shortcut_tooltips::CLOSE_TILE),
                 style: TileControlStyle::Danger,
                 sense: egui::Sense::click(),
                 id_prefix: "close_view",
@@ -218,7 +219,7 @@ fn show_split_control(
     TileControl::new(egui_phosphor::regular::ARROWS_SPLIT)
         .visibility(controls_visible)
         .font_size(font_size)
-        .tooltip("Drag to split: left/right creates a vertical split, up/down creates a horizontal split")
+        .tooltip(shortcut_tooltips::SPLIT_TILE)
         .show(
             ui,
             split_hit,

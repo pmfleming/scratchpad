@@ -19,11 +19,12 @@ fn build_root_from_leaves(mut leaves: Vec<PieceTreeLeaf>) -> PieceTreeRoot {
         leaves.push(PieceTreeLeaf::default());
     }
 
+    let nodes = pack_leaves_into_nodes(leaves);
     let mut root = PieceTreeRoot {
-        nodes: pack_leaves_into_nodes(leaves),
+        node_start_chars: Vec::with_capacity(nodes.len()),
+        node_start_newlines: Vec::with_capacity(nodes.len()),
+        nodes,
         metrics: PieceTreeMetrics::default(),
-        node_start_chars: Vec::new(),
-        node_start_newlines: Vec::new(),
         anchor_count: 0,
     };
     root.recalculate_from_node_metrics();
@@ -46,8 +47,8 @@ pub(in crate::app::domain::buffer::piece_tree) fn pack_leaves_into_nodes(
         let mut node = PieceTreeInternalNode {
             leaves: leaves.drain(..chunk_size).collect(),
             metrics: PieceTreeMetrics::default(),
-            leaf_start_chars: Vec::new(),
-            leaf_start_newlines: Vec::new(),
+            leaf_start_chars: Vec::with_capacity(chunk_size),
+            leaf_start_newlines: Vec::with_capacity(chunk_size),
             anchor_count: 0,
         };
         node.recalculate_from_leaf_metrics();
@@ -70,7 +71,7 @@ pub(in crate::app::domain::buffer::piece_tree) fn build_chunked_pieces(
 }
 
 fn build_chunked_pieces_serial(buffer: PieceBuffer, start_byte: usize, text: &str) -> Vec<Piece> {
-    let mut pieces = Vec::new();
+    let mut pieces = Vec::with_capacity(text.len().div_ceil(MAX_LEAF_BYTES));
     let mut offset = 0usize;
     while offset < text.len() {
         let len = next_chunk_len(text, offset, MAX_LEAF_BYTES);
@@ -130,7 +131,7 @@ fn build_chunked_pieces_parallel(
 }
 
 fn piece_chunk_ranges(text: &str) -> Vec<Range<usize>> {
-    let mut ranges = Vec::new();
+    let mut ranges = Vec::with_capacity(text.len().div_ceil(MAX_LEAF_BYTES));
     let mut offset = 0usize;
     while offset < text.len() {
         let len = next_chunk_len(text, offset, MAX_LEAF_BYTES);
@@ -156,7 +157,7 @@ pub(in crate::app::domain::buffer::piece_tree) fn pack_pieces_into_leaves(
     pieces: Vec<Piece>,
 ) -> Vec<PieceTreeLeaf> {
     let mut leaves = Vec::with_capacity(pieces.len() / MAX_LEAF_PIECES + 1);
-    let mut current = PieceTreeLeaf::default();
+    let mut current = empty_leaf_with_capacity(MAX_LEAF_PIECES);
 
     for piece in pieces {
         if piece.byte_len == 0 {
@@ -166,7 +167,7 @@ pub(in crate::app::domain::buffer::piece_tree) fn pack_pieces_into_leaves(
         if should_start_new_leaf(&current, &piece) {
             current.recalculate();
             leaves.push(current);
-            current = PieceTreeLeaf::default();
+            current = empty_leaf_with_capacity(MAX_LEAF_PIECES);
         }
 
         current.push_piece_for_pack(piece);
@@ -178,6 +179,15 @@ pub(in crate::app::domain::buffer::piece_tree) fn pack_pieces_into_leaves(
     }
 
     leaves
+}
+
+fn empty_leaf_with_capacity(piece_capacity: usize) -> PieceTreeLeaf {
+    PieceTreeLeaf {
+        pieces: Vec::with_capacity(piece_capacity),
+        piece_start_chars: Vec::with_capacity(piece_capacity),
+        piece_start_newlines: Vec::with_capacity(piece_capacity),
+        ..PieceTreeLeaf::default()
+    }
 }
 
 fn should_start_new_leaf(current: &PieceTreeLeaf, piece: &Piece) -> bool {

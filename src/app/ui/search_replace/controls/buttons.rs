@@ -1,5 +1,6 @@
 use crate::app::app_state::{SearchReplaceAvailability, SearchScope, SearchScopeOrigin};
 use crate::app::services::search::SearchMode;
+use crate::app::shortcut_tooltips;
 use crate::app::theme::{
     action_hover_bg, border, tab_selected_accent, tab_selected_bg, text_primary,
 };
@@ -42,7 +43,14 @@ pub(super) fn toggle_flag(ui: &mut egui::Ui, value: &mut bool, icon: &str, toolt
 
 pub(super) fn toggle_mode(ui: &mut egui::Ui, mode: &mut SearchMode) {
     let regex_enabled = *mode == SearchMode::Regex;
-    if icon_toggle_chip(ui, regex_enabled, REGEX_ICON, "Regex").clicked() {
+    if icon_toggle_chip(
+        ui,
+        regex_enabled,
+        REGEX_ICON,
+        shortcut_tooltips::SEARCH_MODE_REGEX,
+    )
+    .clicked()
+    {
         *mode = if regex_enabled {
             SearchMode::PlainText
         } else {
@@ -65,13 +73,13 @@ pub(super) fn trigger_action(
 
 pub(super) fn scope_tooltip(scope: SearchScope, origin: SearchScopeOrigin) -> &'static str {
     match scope {
-        SearchScope::ActiveBuffer => "Search the Current Focused File",
+        SearchScope::ActiveBuffer => shortcut_tooltips::SEARCH_SCOPE_CURRENT_FILE,
         SearchScope::SelectionOnly if origin == SearchScopeOrigin::SelectionDefault => {
-            "Search Selected Text (auto-selected)"
+            shortcut_tooltips::SEARCH_SCOPE_SELECTION_DEFAULT
         }
-        SearchScope::SelectionOnly => "Search Selected Text",
-        SearchScope::ActiveWorkspaceTab => "Search All Files on This Tab",
-        SearchScope::AllOpenTabs => "Search All Open Files",
+        SearchScope::SelectionOnly => shortcut_tooltips::SEARCH_SCOPE_SELECTION,
+        SearchScope::ActiveWorkspaceTab => shortcut_tooltips::SEARCH_SCOPE_CURRENT_TAB,
+        SearchScope::AllOpenTabs => shortcut_tooltips::SEARCH_SCOPE_ALL_TABS,
     }
 }
 

@@ -29,6 +29,7 @@ fn app_with_buffer(buffer: BufferState) -> ScratchpadApp {
         session_dirty: false,
         pending_scroll_to_active: false,
         buffer_tab_index: Default::default(),
+        path_tab_index: Default::default(),
         cold_session_tabs: Default::default(),
     };
     app.tab_manager.rebuild_buffer_tab_index();

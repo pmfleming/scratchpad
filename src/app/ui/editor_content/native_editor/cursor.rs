@@ -126,6 +126,18 @@ pub(super) fn apply_cursor_movement(request: CursorMovementRequest<'_>) -> Optio
         )
     })
     .or_else(|| {
+        visual_row_movement_target(request.key, request.modifiers, request.galley, &egui_cursor)
+            .map(|target| {
+                clamp_char_cursor(
+                    request.galley,
+                    request.total_chars,
+                    target,
+                    request.char_offset_base,
+                    request.display_map,
+                )
+            })
+    })
+    .or_else(|| {
         full_document_movement_target(
             request.cursor.primary.index,
             request.key,
@@ -190,6 +202,26 @@ fn horizontal_movement_target(
                 .galley
                 .cursor_right_one_character(context.egui_cursor),
         ),
+        _ => None,
+    }
+}
+
+fn visual_row_movement_target(
+    key: egui::Key,
+    modifiers: &egui::Modifiers,
+    galley: &egui::Galley,
+    egui_cursor: &egui::text::CCursor,
+) -> Option<egui::text::CCursor> {
+    if modifiers.command {
+        return None;
+    }
+
+    let row = galley.layout_from_cursor(*egui_cursor).row;
+    match key {
+        egui::Key::ArrowUp if row > 0 => Some(galley.cursor_up_one_row(egui_cursor, None).0),
+        egui::Key::ArrowDown if row + 1 < galley.rows.len() => {
+            Some(galley.cursor_down_one_row(egui_cursor, None).0)
+        }
         _ => None,
     }
 }
@@ -346,12 +378,46 @@ fn clamp_char_cursor(
 #[cfg(test)]
 mod tests {
     use super::{
-        CharCursor, CursorRange, PieceTreeLite, egui, finalize_cursor_movement,
-        full_document_movement_target, logical_line_movement_target,
+        CharCursor, CursorMovementRequest, CursorRange, PieceTreeLite, apply_cursor_movement, egui,
+        finalize_cursor_movement, full_document_movement_target, logical_line_movement_target,
     };
 
     fn tree(text: &str) -> PieceTreeLite {
         PieceTreeLite::from_string(text.to_owned())
+    }
+
+    fn wrapped_galley(
+        ctx: &egui::Context,
+        text: &str,
+        wrap_width: f32,
+    ) -> std::sync::Arc<egui::Galley> {
+        let font_id = egui::FontId::monospace(14.0);
+        let mut galley = None;
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let job = egui::text::LayoutJob::simple(
+                text.to_owned(),
+                font_id.clone(),
+                egui::Color32::WHITE,
+                wrap_width,
+            );
+            galley = Some(ui.fonts_mut(|fonts| fonts.layout_job(job)));
+        });
+        galley.expect("test galley should be created")
+    }
+
+    fn row_start(galley: &egui::Galley, row: usize) -> usize {
+        galley
+            .rows
+            .iter()
+            .take(row)
+            .map(|row| row.char_count_including_newline())
+            .sum()
+    }
+
+    fn first_continuation_row_after(galley: &egui::Galley, offset: usize) -> usize {
+        (1..galley.rows.len())
+            .find(|row| row_start(galley, *row) > offset)
+            .expect("test text should have a wrapped continuation row after the requested offset")
     }
 
     #[test]
@@ -370,6 +436,37 @@ mod tests {
         let target = logical_line_movement_target(4, 1, tree.len_chars(), &tree).unwrap();
 
         assert_eq!(target.index, 7);
+    }
+
+    #[test]
+    fn arrow_up_moves_one_wrapped_display_row_before_logical_line_fallback() {
+        let text = "short\nalpha beta gamma delta epsilon zeta eta theta iota";
+        let tree = tree(text);
+        let ctx = egui::Context::default();
+        let galley = wrapped_galley(&ctx, text, 96.0);
+        let wrapped_line_start = tree.line_info(1).start_char;
+        let second_wrapped_row = first_continuation_row_after(&galley, wrapped_line_start);
+        let cursor_index = row_start(&galley, second_wrapped_row) + 2;
+
+        let target = apply_cursor_movement(CursorMovementRequest {
+            cursor: &CursorRange::one(CharCursor::new(cursor_index)),
+            key: egui::Key::ArrowUp,
+            modifiers: &egui::Modifiers::default(),
+            galley: &galley,
+            page_jump_rows: 1,
+            total_chars: tree.len_chars(),
+            piece_tree: &tree,
+            char_offset_base: 0,
+            slice_chars: tree.len_chars(),
+            display_map: None,
+        })
+        .unwrap();
+
+        assert!(
+            target.primary.index >= wrapped_line_start,
+            "up arrow should stay within the wrapped logical line instead of jumping to the previous logical line"
+        );
+        assert!(target.primary.index < cursor_index);
     }
 
     #[test]

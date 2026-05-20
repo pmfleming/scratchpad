@@ -48,7 +48,7 @@ fn gutter_width(
     line_count: usize,
 ) -> f32 {
     let max_number = max_gutter_line_number(previous_snapshot, line_count);
-    let digits = max_number.max(1).to_string().len().max(3);
+    let digits = gutter_digit_count(max_number);
     ui.fonts_mut(|fonts| {
         fonts
             .layout_no_wrap(
@@ -59,6 +59,10 @@ fn gutter_width(
             .size()
             .x
     }) + 16.0
+}
+
+fn gutter_digit_count(max_number: usize) -> usize {
+    max_number.max(1).to_string().len()
 }
 
 fn render_gutter_body(
@@ -187,7 +191,7 @@ fn max_gutter_line_number(
 
 #[cfg(test)]
 mod tests {
-    use super::fallback_gutter_row_range;
+    use super::{fallback_gutter_row_range, gutter_digit_count};
     use eframe::egui;
 
     #[test]
@@ -202,5 +206,13 @@ mod tests {
     #[test]
     fn fallback_gutter_rows_keep_legacy_full_range_without_viewport() {
         assert_eq!(fallback_gutter_row_range(12, 20.0, None), 0..12);
+    }
+
+    #[test]
+    fn gutter_digits_follow_line_count_without_fixed_three_digit_floor() {
+        assert_eq!(gutter_digit_count(0), 1);
+        assert_eq!(gutter_digit_count(9), 1);
+        assert_eq!(gutter_digit_count(10), 2);
+        assert_eq!(gutter_digit_count(999), 3);
     }
 }

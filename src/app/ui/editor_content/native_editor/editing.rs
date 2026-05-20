@@ -2,6 +2,7 @@ use super::types::{CharCursor, CursorRange, EditOperation, OperationRecord};
 use super::word_boundary;
 use crate::app::domain::buffer::ByteSpan;
 use crate::app::domain::{BufferState, PieceSource};
+use std::borrow::Cow;
 
 struct RecordedEdit {
     new_cursor: CursorRange,
@@ -24,8 +25,7 @@ pub(super) fn apply_text_insert_with_source(
     let (start, end) = cursor.sorted_indices();
     let (deleted_text, deleted_spans) = extract_spans_and_delete_range(buffer, start, end);
 
-    let line_ending = buffer.document().preferred_line_ending_str().to_owned();
-    let normalized = normalize_line_endings(text, &line_ending);
+    let normalized = normalize_line_endings(text, buffer.document().preferred_line_ending_str());
     let inserted_chars = normalized.chars().count();
     buffer
         .document_mut()
@@ -39,7 +39,7 @@ pub(super) fn apply_text_insert_with_source(
             new_cursor,
             start_char: start,
             deleted_text,
-            inserted_text: normalized,
+            inserted_text: normalized.into_owned(),
             deleted_spans,
         },
         source,
@@ -160,7 +160,7 @@ fn remove_line_prefix(
     let deleted_text = buffer
         .document()
         .piece_tree()
-        .extract_range(remove_range.clone());
+        .extract_range_with_capacity(remove_range.clone(), remove_range.len());
     let deleted_spans = buffer.document().byte_spans_for_range(remove_range.clone());
     buffer.document_mut().delete_char_range_direct(remove_range);
     (deleted_text, deleted_spans)
@@ -234,7 +234,10 @@ fn extract_spans_and_delete_range(
     if start >= end {
         return (String::new(), Vec::new());
     }
-    let text = buffer.document().piece_tree().extract_range(start..end);
+    let text = buffer
+        .document()
+        .piece_tree()
+        .extract_range_with_capacity(start..end, end - start);
     let spans = buffer.document().byte_spans_for_range(start..end);
     buffer.document_mut().delete_char_range_direct(start..end);
     (text, spans)
@@ -261,12 +264,12 @@ fn record_edit(
     );
 }
 
-fn normalize_line_endings(text: &str, preferred: &str) -> String {
+fn normalize_line_endings<'a>(text: &'a str, preferred: &str) -> Cow<'a, str> {
     if !text.contains('\n') && !text.contains('\r') {
-        return text.to_owned();
+        return Cow::Borrowed(text);
     }
     if preferred == "\n" && !text.contains('\r') {
-        return text.to_owned();
+        return Cow::Borrowed(text);
     }
 
     let mut result = String::with_capacity(text.len());
@@ -274,7 +277,7 @@ fn normalize_line_endings(text: &str, preferred: &str) -> String {
     while let Some(ch) = chars.next() {
         push_normalized_line_char(&mut result, ch, &mut chars, preferred);
     }
-    result
+    Cow::Owned(result)
 }
 
 fn push_normalized_line_char(

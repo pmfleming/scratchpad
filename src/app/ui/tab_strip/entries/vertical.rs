@@ -4,6 +4,7 @@ use super::shared::{
 use super::{DuplicateNameCounts, apply_tab_drag_feedback};
 use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::{AppCommand, WorkspaceCommand};
+use crate::app::shortcut_tooltips;
 use crate::app::theme::{
     BUTTON_SIZE, TAB_BUTTON_WIDTH, action_bg, action_hover_bg, border, tab_list_scroll_style,
     text_primary,
@@ -68,7 +69,7 @@ fn show_vertical_tab_entries_above_new_tab(
 fn show_vertical_new_tab_action(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let width = ui.available_width().max(BUTTON_SIZE.x);
     if vertical_new_tab_button(ui, width)
-        .on_hover_text("New Tab")
+        .on_hover_text(shortcut_tooltips::NEW_TAB)
         .clicked()
     {
         crate::app::commands::handle_command(app, AppCommand::Workspace(WorkspaceCommand::NewTab));

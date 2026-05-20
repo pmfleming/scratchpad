@@ -1,10 +1,13 @@
-use super::analysis::{IncrementalMetadataEdit, buffer_text_metadata_from_edit};
+use super::analysis::{
+    IncrementalMetadataEdit, IncrementalMetadataUpdate, buffer_text_metadata_from_edit,
+};
 use super::{
     BufferLength, BufferTextMetadata, DocumentSnapshot, EncodingSource, LineEndingStyle,
     PieceSource, TextArtifactSummary, TextDocument, TextDocumentOperationRecord,
     TextFormatMetadata, TextHistoryApplyError, TextReplacementError, TextReplacements,
     buffer_text_metadata, buffer_text_metadata_from_piece_tree,
 };
+use crate::app::CanonicalPathKey;
 use crate::app::ui::editor_content::native_editor::{CursorRange, OperationRecord};
 use std::ops::Range;
 use std::ops::{Deref, DerefMut};
@@ -33,6 +36,7 @@ pub struct BufferState {
 pub struct BufferStateFields {
     pub name: String,
     pub path: Option<PathBuf>,
+    pub path_key: Option<CanonicalPathKey>,
     pub is_dirty: bool,
     pub is_settings_file: bool,
     pub show_control_chars: bool,
@@ -50,6 +54,7 @@ pub struct BufferStateFields {
 #[derive(Clone)]
 struct BufferRefreshState {
     text_metadata_refresh_stale: bool,
+    line_ending_metadata_exact: bool,
     encoding_compliance_stale: bool,
     pending_text_history_event: Option<TextHistoryEvent>,
 }
@@ -77,6 +82,7 @@ pub(crate) enum TextHistoryEvent {
 struct BufferBuildState {
     name: String,
     path: Option<PathBuf>,
+    path_key: Option<CanonicalPathKey>,
     is_dirty: bool,
     temp_id: String,
     format: TextFormatMetadata,
@@ -85,6 +91,36 @@ struct BufferBuildState {
     show_control_chars: bool,
     right_to_left_reading_order: bool,
     text_metadata_refresh_stale: bool,
+}
+
+impl BufferBuildState {
+    fn new(
+        name: String,
+        path: Option<PathBuf>,
+        is_dirty: bool,
+        temp_id: String,
+        format: TextFormatMetadata,
+        disk_state: Option<DiskFileState>,
+        freshness: BufferFreshness,
+        show_control_chars: bool,
+        right_to_left_reading_order: bool,
+        text_metadata_refresh_stale: bool,
+    ) -> Self {
+        let path_key = path.as_deref().map(CanonicalPathKey::from_path);
+        Self {
+            name,
+            path,
+            path_key,
+            is_dirty,
+            temp_id,
+            format,
+            disk_state,
+            freshness,
+            show_control_chars,
+            right_to_left_reading_order,
+            text_metadata_refresh_stale,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -179,18 +215,18 @@ impl BufferState {
             next_buffer_id(),
             document,
             text_metadata,
-            BufferBuildState {
+            BufferBuildState::new(
                 name,
                 path,
-                is_dirty: false,
-                temp_id: next_temp_id(),
+                false,
+                next_temp_id(),
                 format,
-                disk_state: None,
-                freshness: BufferFreshness::InSync,
-                show_control_chars: false,
-                right_to_left_reading_order: false,
-                text_metadata_refresh_stale: false,
-            },
+                None,
+                BufferFreshness::InSync,
+                false,
+                false,
+                false,
+            ),
         )
     }
 
@@ -206,18 +242,18 @@ impl BufferState {
             next_buffer_id(),
             document,
             text_metadata,
-            BufferBuildState {
+            BufferBuildState::new(
                 name,
                 path,
-                is_dirty: false,
-                temp_id: next_temp_id(),
+                false,
+                next_temp_id(),
                 format,
-                disk_state: None,
-                freshness: BufferFreshness::InSync,
-                show_control_chars: false,
-                right_to_left_reading_order: false,
+                None,
+                BufferFreshness::InSync,
+                false,
+                false,
                 text_metadata_refresh_stale,
-            },
+            ),
         )
     }
 
@@ -258,18 +294,18 @@ impl BufferState {
             restored.id,
             document,
             text_metadata,
-            BufferBuildState {
-                name: restored.name,
-                path: restored.path,
-                is_dirty: restored.is_dirty,
-                temp_id: restored.temp_id,
-                format: restored.format,
-                disk_state: restored.disk_state,
-                freshness: restored.freshness,
-                show_control_chars: restored.show_control_chars,
-                right_to_left_reading_order: restored.right_to_left_reading_order,
-                text_metadata_refresh_stale: false,
-            },
+            BufferBuildState::new(
+                restored.name,
+                restored.path,
+                restored.is_dirty,
+                restored.temp_id,
+                restored.format,
+                restored.disk_state,
+                restored.freshness,
+                restored.show_control_chars,
+                restored.right_to_left_reading_order,
+                false,
+            ),
         )
     }
 
@@ -358,6 +394,11 @@ impl BufferState {
         };
     }
 
+    pub fn set_path(&mut self, path: Option<PathBuf>) {
+        self.path_key = path.as_deref().map(CanonicalPathKey::from_path);
+        self.path = path;
+    }
+
     pub fn replace_format_without_text_change(&mut self, format: TextFormatMetadata) {
         self.format = format;
         self.sync_document_preferred_line_ending();
@@ -376,7 +417,8 @@ impl BufferState {
             next_selection,
         )?;
         self.refresh.pending_text_history_event = Some(TextHistoryEvent::Edit);
-        self.refresh_text_metadata();
+        let latest_edit = self.document.latest_operation_record().cloned();
+        self.refresh_text_metadata_after_operation(latest_edit.as_ref());
         Ok(())
     }
 
@@ -404,14 +446,16 @@ impl BufferState {
     pub fn undo_last_text_operation(&mut self) -> Option<CursorRange> {
         let selection = self.document.undo_last_operation()?;
         self.refresh.pending_text_history_event = Some(TextHistoryEvent::Replay);
-        self.refresh_text_metadata();
+        let latest_edit = self.document.latest_operation_record().cloned();
+        self.refresh_text_metadata_after_operation(latest_edit.as_ref());
         Some(selection)
     }
 
     pub fn redo_last_text_operation(&mut self) -> Option<CursorRange> {
         let selection = self.document.redo_last_operation()?;
         self.refresh.pending_text_history_event = Some(TextHistoryEvent::Replay);
-        self.refresh_text_metadata();
+        let latest_edit = self.document.latest_operation_record().cloned();
+        self.refresh_text_metadata_after_operation(latest_edit.as_ref());
         Some(selection)
     }
 
@@ -421,7 +465,8 @@ impl BufferState {
     ) -> Result<CursorRange, TextHistoryApplyError> {
         let selection = self.document.apply_text_history_undo(entry_id)?;
         self.refresh.pending_text_history_event = Some(TextHistoryEvent::Replay);
-        self.refresh_text_metadata();
+        let latest_edit = self.document.latest_operation_record().cloned();
+        self.refresh_text_metadata_after_operation(latest_edit.as_ref());
         Ok(selection)
     }
 
@@ -431,7 +476,8 @@ impl BufferState {
     ) -> Result<CursorRange, TextHistoryApplyError> {
         let selection = self.document.apply_text_history_redo(entry_id)?;
         self.refresh.pending_text_history_event = Some(TextHistoryEvent::Replay);
-        self.refresh_text_metadata();
+        let latest_edit = self.document.latest_operation_record().cloned();
+        self.refresh_text_metadata_after_operation(latest_edit.as_ref());
         Ok(selection)
     }
 
@@ -515,6 +561,7 @@ impl BufferState {
             state: BufferStateFields {
                 name: state.name,
                 path: state.path,
+                path_key: state.path_key,
                 is_dirty: state.is_dirty,
                 is_settings_file: false,
                 show_control_chars: state.show_control_chars,
@@ -530,6 +577,7 @@ impl BufferState {
             },
             refresh: BufferRefreshState {
                 text_metadata_refresh_stale: state.text_metadata_refresh_stale,
+                line_ending_metadata_exact: !state.text_metadata_refresh_stale,
                 encoding_compliance_stale: false,
                 pending_text_history_event: None,
             },

@@ -1,7 +1,7 @@
 use super::{
-    BufferState, BufferTextMetadata, IncrementalMetadataEdit, LineEndingStyle, TextArtifactSummary,
-    TextDocumentOperationRecord, TextFormatMetadata, buffer_text_metadata_from_edit,
-    buffer_text_metadata_from_piece_tree,
+    BufferState, BufferTextMetadata, IncrementalMetadataEdit, IncrementalMetadataUpdate,
+    LineEndingStyle, TextArtifactSummary, TextDocumentOperationRecord, TextFormatMetadata,
+    buffer_text_metadata_from_edit, buffer_text_metadata_from_piece_tree,
 };
 
 impl BufferState {
@@ -17,8 +17,8 @@ impl BufferState {
         &mut self,
         operation: Option<&TextDocumentOperationRecord>,
     ) {
-        if self.refresh.text_metadata_refresh_stale {
-            self.refresh_text_metadata();
+        let was_text_metadata_stale = self.refresh.text_metadata_refresh_stale;
+        if was_text_metadata_stale && !self.refresh.line_ending_metadata_exact {
             return;
         }
 
@@ -26,14 +26,18 @@ impl BufferState {
             return;
         }
 
-        if let Some(metadata) = operation
+        if let Some(update) = operation
             .and_then(|operation| self.incremental_text_metadata_after_operation(operation))
         {
-            self.apply_text_metadata(metadata);
+            self.apply_text_metadata(update.metadata);
+            if was_text_metadata_stale || update.needs_background_rescan {
+                self.refresh.text_metadata_refresh_stale = true;
+            }
             return;
         }
 
-        self.refresh_text_metadata();
+        self.refresh.text_metadata_refresh_stale = true;
+        self.refresh.line_ending_metadata_exact = false;
     }
 
     pub fn recheck_encoding_compliance(&mut self) {
@@ -103,6 +107,7 @@ impl BufferState {
             self.show_control_chars = false;
         }
         self.refresh.text_metadata_refresh_stale = false;
+        self.refresh.line_ending_metadata_exact = true;
         self.refresh.encoding_compliance_stale = true;
     }
 
@@ -123,7 +128,7 @@ impl BufferState {
     fn incremental_text_metadata_after_operation(
         &mut self,
         operation: &TextDocumentOperationRecord,
-    ) -> Option<BufferTextMetadata> {
+    ) -> Option<IncrementalMetadataUpdate> {
         if operation.edits.len() != 1 {
             return None;
         }

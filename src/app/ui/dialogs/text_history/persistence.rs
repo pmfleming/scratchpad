@@ -9,7 +9,7 @@ pub(super) fn read_active_tab(ctx: &egui::Context) -> HistoryTab {
         widget_ids::ctx_key("text_history.active_tab"),
     )
     .and_then(tab_from_persisted)
-    .unwrap_or(HistoryTab::Timeline)
+    .unwrap_or(HistoryTab::ByFile)
 }
 
 pub(super) fn write_active_tab(ctx: &egui::Context, tab: HistoryTab) {

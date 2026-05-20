@@ -27,8 +27,12 @@ pub(super) const HISTORY_PILL_SPACING: f32 = 6.0;
 const TAB_BUTTON_HEIGHT: f32 = 30.0;
 const HISTORY_CARD_CORNER_RADIUS: u8 = 12;
 const UNDONE_OPACITY: f32 = 0.55;
+const HISTORY_TIMELINE_SHORTCUT: &str = "CTRL+1: Timeline";
+const HISTORY_BY_FILE_SHORTCUT: &str = "CTRL+2: By file";
+const HISTORY_FOLLOW_FOCUS_SHORTCUT: &str = "CTRL+SHIFT+F: Follow undo";
+const HISTORY_CLEAR_SHORTCUT: &str = "CTRL+SHIFT+DELETE: Clear history";
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HistoryTab {
     Timeline,
     ByFile,
@@ -112,11 +116,12 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
 fn render_text_history_window(
     ui: &mut egui::Ui,
     inputs: TextHistoryWindowInputs<'_>,
-    state: TextHistoryWindowState<'_>,
+    mut state: TextHistoryWindowState<'_>,
 ) {
     settings::apply_dialog_typography(ui);
     callout::apply_spacing(ui);
     ui.spacing_mut().item_spacing = egui::vec2(8.0, 12.0);
+    handle_history_shortcuts(ui, &inputs, &mut state);
     if render_header(ui) {
         *state.close_requested = true;
     }
@@ -176,10 +181,15 @@ fn render_controls(
         (
             "timeline",
             CLOCK_COUNTER_CLOCKWISE,
-            "Timeline",
+            HISTORY_TIMELINE_SHORTCUT,
             HistoryTab::Timeline,
         ),
-        ("by_file", FILES, "By file", HistoryTab::ByFile),
+        (
+            "by_file",
+            FILES,
+            HISTORY_BY_FILE_SHORTCUT,
+            HistoryTab::ByFile,
+        ),
     ];
 
     ui.horizontal(|ui| {
@@ -193,9 +203,9 @@ fn render_controls(
             "follow_focus",
             CROSSHAIR,
             if follow_focus {
-                "Follow undo is on"
+                HISTORY_FOLLOW_FOCUS_SHORTCUT
             } else {
-                "Follow undo is off"
+                HISTORY_FOLLOW_FOCUS_SHORTCUT
             },
             follow_focus,
             true,
@@ -209,7 +219,7 @@ fn render_controls(
                 ui,
                 "clear_history",
                 TRASH,
-                "Clear all text history",
+                HISTORY_CLEAR_SHORTCUT,
                 false,
                 has_history,
             )
@@ -219,6 +229,39 @@ fn render_controls(
             }
         });
     });
+}
+
+fn handle_history_shortcuts(
+    ui: &mut egui::Ui,
+    inputs: &TextHistoryWindowInputs<'_>,
+    state: &mut TextHistoryWindowState<'_>,
+) {
+    if consume_history_shortcut(ui, egui::Modifiers::CTRL, egui::Key::Num1) {
+        *state.next_tab = HistoryTab::Timeline;
+    }
+    if consume_history_shortcut(ui, egui::Modifiers::CTRL, egui::Key::Num2) {
+        *state.next_tab = HistoryTab::ByFile;
+    }
+    if consume_history_shortcut(ui, ctrl_shift_modifiers(), egui::Key::F) {
+        *state.next_follow_focus = !inputs.follow_focus;
+    }
+    if !inputs.timeline_rows.is_empty()
+        && consume_history_shortcut(ui, ctrl_shift_modifiers(), egui::Key::Delete)
+    {
+        *state.clear_requested = true;
+    }
+}
+
+fn consume_history_shortcut(ui: &mut egui::Ui, modifiers: egui::Modifiers, key: egui::Key) -> bool {
+    ui.input_mut(|input| input.consume_key(modifiers, key))
+}
+
+fn ctrl_shift_modifiers() -> egui::Modifiers {
+    egui::Modifiers {
+        ctrl: true,
+        shift: true,
+        ..Default::default()
+    }
 }
 
 fn control_icon_button(

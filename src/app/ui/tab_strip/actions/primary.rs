@@ -1,6 +1,7 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::chrome::phosphor_button;
 use crate::app::commands::{AppCommand, FileCommand, SearchCommand};
+use crate::app::shortcut_tooltips;
 use crate::app::theme::{BUTTON_SIZE, TAB_HEIGHT, action_bg, action_hover_bg};
 use eframe::egui;
 
@@ -9,9 +10,9 @@ const PRIMARY_ACTION_SPACING: f32 = 4.0;
 pub(super) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let width = BUTTON_SIZE.x * 3.0 + PRIMARY_ACTION_SPACING * 2.0;
     let search_tooltip = if app.state.search_state.open() {
-        "Close Search"
+        shortcut_tooltips::CLOSE_SEARCH
     } else {
-        "Search"
+        shortcut_tooltips::SEARCH
     };
 
     ui.allocate_ui_with_layout(
@@ -22,7 +23,7 @@ pub(super) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 ui,
                 "primary_open_file",
                 egui_phosphor::regular::FOLDER_OPEN,
-                "Open File",
+                shortcut_tooltips::OPEN_FILE,
                 || {
                     crate::app::commands::handle_command(
                         app,
@@ -35,7 +36,7 @@ pub(super) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 ui,
                 "primary_save_as",
                 egui_phosphor::regular::FLOPPY_DISK,
-                "Save As",
+                shortcut_tooltips::SAVE_AS,
                 || {
                     crate::app::commands::handle_command(
                         app,

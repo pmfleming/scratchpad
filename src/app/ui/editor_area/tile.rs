@@ -278,8 +278,10 @@ fn show_editor_scroll_area(
         // pins at ~93% of the track and the per-frame clamp tug-of-war flickers.
         .eof_overscroll(false)
         .show_viewport(ui, |ui, _offset, viewport| {
+            let gutter_snapshot = request.content_style.previous_snapshot;
             let mut content_style = request.content_style;
             content_style.viewport = Some(viewport);
+            content_style.gutter_snapshot = gutter_snapshot;
             content_style.previous_snapshot = previous_snapshot;
             tab.buffer_and_view_mut(request.view_id).map_or_else(
                 missing_editor_content_outcome,

@@ -1,4 +1,5 @@
 use super::FileController;
+use crate::app::CanonicalPathKey;
 use crate::app::app_state::{ScratchpadApp, StatusDomain};
 use crate::app::domain::BufferState;
 use std::path::{Path, PathBuf};
@@ -62,27 +63,22 @@ impl FileController {
     }
 
     pub(super) fn reserve_pending_open_path(app: &mut ScratchpadApp, path: &Path) -> bool {
-        if Self::is_open_or_pending_path(app, path) {
+        let key = CanonicalPathKey::from_path(path);
+        if Self::is_open_or_pending_path(app, &key) {
             return false;
         }
 
-        app.state.pending_open_file_paths.push(path.to_path_buf());
-        true
+        app.state.pending_open_file_paths.insert(key)
     }
 
     pub(super) fn release_pending_open_path(app: &mut ScratchpadApp, path: &Path) {
-        app.state
-            .pending_open_file_paths
-            .retain(|pending| !crate::app::paths_match(pending, path));
+        let key = CanonicalPathKey::from_path(path);
+        app.state.pending_open_file_paths.remove(&key);
     }
 
-    fn is_open_or_pending_path(app: &ScratchpadApp, path: &Path) -> bool {
-        app.tab_manager.find_tab_by_path(path).is_some()
-            || app
-                .state
-                .pending_open_file_paths
-                .iter()
-                .any(|pending| crate::app::paths_match(pending, path))
+    fn is_open_or_pending_path(app: &ScratchpadApp, key: &CanonicalPathKey) -> bool {
+        app.tab_manager.find_tab_by_path_key(key).is_some()
+            || app.state.pending_open_file_paths.contains(key)
     }
 
     pub(super) fn handle_open_dialog<F>(app: &mut ScratchpadApp, action_name: &str, open_action: F)
@@ -138,7 +134,7 @@ impl FileController {
     }
 
     pub(super) fn assign_saved_path(buffer: &mut BufferState, path: &Path) {
-        buffer.path = Some(path.to_path_buf());
+        buffer.set_path(Some(path.to_path_buf()));
         buffer.name = path.file_name().unwrap().to_string_lossy().into_owned();
     }
 

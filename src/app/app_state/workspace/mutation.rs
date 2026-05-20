@@ -73,6 +73,15 @@ pub(crate) fn finalize_active_buffer_text_mutation(
         .buffer
         .refresh_text_metadata_after_operation(latest_edit.as_ref());
     tab.buffers.buffer.mark_dirty_after_local_edit();
+    let text_metadata_refresh = tab.buffers.buffer.text_metadata_refresh_needed().then(|| {
+        let buffer = &tab.buffers.buffer;
+        (
+            buffer.id,
+            buffer.document_revision(),
+            buffer.document_snapshot(),
+            buffer.format.clone(),
+        )
+    });
     let warning_message = tab
         .buffers
         .buffer
@@ -80,6 +89,10 @@ pub(crate) fn finalize_active_buffer_text_mutation(
         .status_text()
         .map(|message| format!("{message}; raw-text editing remains enabled"));
     let _ = tab;
+
+    if let Some((buffer_id, revision, snapshot, format)) = text_metadata_refresh {
+        app.queue_background_text_metadata_refresh(buffer_id, revision, snapshot, format);
+    }
 
     if let Some(message) = warning_message {
         app.state
@@ -181,7 +194,7 @@ fn apply_text_history_entry_with_focus(
         return false;
     };
 
-    let selection = {
+    let (selection, text_metadata_refresh) = {
         let tab = &mut app.tab_manager.tabs.as_mut_slice()[tab_index];
         let Some(buffer) = tab.buffer_by_id_mut(action.buffer_id) else {
             return false;
@@ -193,7 +206,15 @@ fn apply_text_history_entry_with_focus(
         };
         if let Ok(selection) = result {
             buffer.mark_dirty_after_local_edit();
-            selection
+            let text_metadata_refresh = buffer.text_metadata_refresh_needed().then(|| {
+                (
+                    buffer.id,
+                    buffer.document_revision(),
+                    buffer.document_snapshot(),
+                    buffer.format.clone(),
+                )
+            });
+            (selection, text_metadata_refresh)
         } else {
             app.state.status.set_error_status_in_domain(
                 StatusDomain::History,
@@ -202,6 +223,10 @@ fn apply_text_history_entry_with_focus(
             return false;
         }
     };
+
+    if let Some((buffer_id, revision, snapshot, format)) = text_metadata_refresh {
+        app.queue_background_text_metadata_refresh(buffer_id, revision, snapshot, format);
+    }
 
     if follow_focus {
         restore_text_history_selection(app, tab_index, action.buffer_id, selection);
@@ -403,6 +428,7 @@ mod tests {
             session_dirty: false,
             pending_scroll_to_active: false,
             buffer_tab_index: Default::default(),
+            path_tab_index: Default::default(),
             cold_session_tabs: Default::default(),
         };
         app.tab_manager.rebuild_buffer_tab_index();

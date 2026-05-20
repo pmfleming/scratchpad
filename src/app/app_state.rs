@@ -1,3 +1,4 @@
+use crate::app::CanonicalPathKey;
 use crate::app::domain::{BufferId, SplitAxis, TabManager};
 use crate::app::fonts::EditorFontPreset;
 use crate::app::services::session_store::SessionStore;
@@ -6,7 +7,7 @@ use crate::app::startup::StartupOptions;
 use crate::app::text_history::TextHistoryCache;
 use eframe::egui;
 use search_state::SearchState;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::fmt::Display;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -119,7 +120,7 @@ pub struct ScratchpadAppState {
     pub(crate) text_history_cache: TextHistoryCache,
     pub(crate) search_state: SearchState,
     pub(crate) workspace_selection: WorkspaceSelectionState,
-    pub(crate) pending_open_file_paths: Vec<PathBuf>,
+    pub(crate) pending_open_file_paths: HashSet<CanonicalPathKey>,
     pub(crate) recently_closed_files: VecDeque<PathBuf>,
     pub(crate) workspace_reflow_axis: SplitAxis,
     pub(crate) settings_preview_quote_index: usize,

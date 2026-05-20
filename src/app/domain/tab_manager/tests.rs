@@ -5,6 +5,14 @@ fn tab(name: &str) -> WorkspaceTab {
     WorkspaceTab::new(BufferState::new(name.to_owned(), String::new(), None))
 }
 
+fn disk_tab(path: &std::path::Path, text: &str) -> WorkspaceTab {
+    WorkspaceTab::new(BufferState::new(
+        path.file_name().unwrap().to_string_lossy().into_owned(),
+        text.to_owned(),
+        Some(path.to_path_buf()),
+    ))
+}
+
 fn assert_buffer_slots(manager: &TabManager, expected: &[(BufferId, Option<usize>)]) {
     for (buffer_id, tab_index) in expected {
         assert_eq!(manager.tab_index_for_buffer(*buffer_id), *tab_index);
@@ -103,5 +111,61 @@ fn buffer_tab_index_tracks_tab_mutations() {
             (restored_id, Some(2)),
             (appended_id, Some(3)),
         ],
+    );
+}
+
+#[test]
+fn path_index_tracks_open_file_owners() {
+    let directory = tempfile::tempdir().unwrap();
+    let first_path = directory.path().join("first.txt");
+    let second_path = directory.path().join("second.txt");
+    std::fs::write(&first_path, "first").unwrap();
+    std::fs::write(&second_path, "second").unwrap();
+
+    let first = disk_tab(&first_path, "first");
+    let first_view = first.layout.active_view_id();
+    let second = disk_tab(&second_path, "second");
+    let second_view = second.layout.active_view_id();
+    let mut manager = TabManager::new();
+    manager.set_tabs(vec![first, second], 0);
+
+    assert_eq!(manager.find_tab_by_path(&first_path), Some((0, first_view)));
+    assert_eq!(
+        manager.find_tab_by_path(&second_path),
+        Some((1, second_view))
+    );
+
+    manager.close_tab_internal(0);
+
+    assert_eq!(manager.find_tab_by_path(&first_path), None);
+    assert_eq!(
+        manager.find_tab_by_path(&second_path),
+        Some((0, second_view))
+    );
+}
+
+#[test]
+fn set_tabs_dedupes_duplicate_restored_paths() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("shared.txt");
+    std::fs::write(&path, "shared").unwrap();
+    let first = disk_tab(&path, "first");
+    let first_view = first.layout.active_view_id();
+    let second = disk_tab(&path, "second");
+
+    let mut manager = TabManager::new();
+    manager.set_tabs(vec![first, second], 0);
+
+    assert_eq!(manager.tabs.as_slice().len(), 1);
+    assert_eq!(manager.find_tab_by_path(&path), Some((0, first_view)));
+    assert_eq!(
+        manager
+            .tabs
+            .as_slice()
+            .iter()
+            .flat_map(|tab| tab.buffers())
+            .filter(|buffer| buffer.path.as_deref() == Some(path.as_path()))
+            .count(),
+        1
     );
 }

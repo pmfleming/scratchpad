@@ -280,10 +280,12 @@ impl ScratchpadApp {
 
         if first_streamed_tab {
             self.tab_manager.set_tabs(vec![tab], 0);
-        } else {
-            self.tab_manager.append_restored_tab(tab);
-        }
-        if let Some(cold_session_tab) = cold_session_tab {
+            if let Some(cold_session_tab) = cold_session_tab {
+                self.tab_manager.set_cold_session_tab(0, cold_session_tab);
+            }
+        } else if self.tab_manager.append_restored_tab(tab)
+            && let Some(cold_session_tab) = cold_session_tab
+        {
             let restored_index = self.tab_manager.tabs.as_slice().len().saturating_sub(1);
             self.tab_manager
                 .set_cold_session_tab(restored_index, cold_session_tab);

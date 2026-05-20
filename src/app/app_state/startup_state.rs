@@ -8,7 +8,6 @@ use crate::app::diagnostics;
 use crate::app::domain::TabManager;
 use crate::app::services::background_io::spawn_background_io_worker;
 use crate::app::services::file_controller::FileController;
-use crate::app::services::file_service::FileService;
 use crate::app::services::manual_files;
 use crate::app::services::session_manager;
 use crate::app::services::session_store::SessionStore;
@@ -16,7 +15,7 @@ use crate::app::services::settings_store::{
     AppSettings, FileOpenDisposition, SettingsStore, StartupSessionBehavior,
 };
 use crate::app::startup::{StartupOpenTarget, StartupOptions};
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::time::Instant;
 
 impl ScratchpadApp {
@@ -117,7 +116,7 @@ impl ScratchpadApp {
                 workspace_selection:
                     crate::app::app_state::workspace::display_tabs::WorkspaceSelectionState::default(
                     ),
-                pending_open_file_paths: Vec::new(),
+                pending_open_file_paths: HashSet::new(),
                 recently_closed_files: VecDeque::default(),
                 workspace_reflow_axis: crate::app::domain::SplitAxis::Vertical,
                 settings_preview_quote_index: 2,
@@ -253,21 +252,8 @@ impl ScratchpadApp {
     }
 
     pub(super) fn initialize_default_workspace_tabs(&mut self) {
-        let user_manual_path = manual_files::resolve_user_manual_path();
-        let default_tab = if user_manual_path.is_file() {
-            (|| {
-                let path = user_manual_path;
-                let file_content = FileService::read_file(&path).ok()?;
-                let disk_state = FileService::read_disk_state(&path).ok();
-                let buffer =
-                    FileService::build_buffer_from_file_content(&path, file_content, disk_state);
-                Some(crate::app::domain::WorkspaceTab::new(buffer))
-            })()
-            .unwrap_or_else(crate::app::domain::WorkspaceTab::untitled)
-        } else {
-            crate::app::domain::WorkspaceTab::untitled()
-        };
-        self.tab_manager.set_tabs(vec![default_tab], 0);
+        self.tab_manager
+            .set_tabs(vec![crate::app::domain::WorkspaceTab::untitled()], 0);
         crate::app::app_state::search_runtime::mark_search_dirty(self);
     }
 }
