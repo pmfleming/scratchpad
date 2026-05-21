@@ -61,18 +61,36 @@ impl TextDocument {
     }
 
     pub(in crate::app::domain::buffer::document) fn enforce_history_budget(&mut self) {
-        let mut evicted = false;
-        while self.history.entries.len() > self.history.budget.per_file_entry_limit
-            || self.history.byte_usage as u64 > self.history.budget.per_file_byte_budget
-        {
-            let removed = self.history.entries.remove(0);
-            let cost = removed.byte_cost();
-            self.history.byte_usage = self.history.byte_usage.saturating_sub(cost);
-            self.remove_history_depth(&removed);
-            capacity_metrics::record_history_eviction_per_file(cost);
-            evicted = true;
+        let mut remove_count = self
+            .history
+            .entries
+            .len()
+            .saturating_sub(self.history.budget.per_file_entry_limit);
+        let mut retained_bytes = self.history.byte_usage;
+        for (index, entry) in self.history.entries.iter().enumerate() {
+            if index < remove_count {
+                retained_bytes = retained_bytes.saturating_sub(entry.byte_cost());
+                continue;
+            }
+            if retained_bytes as u64 <= self.history.budget.per_file_byte_budget {
+                break;
+            }
+            retained_bytes = retained_bytes.saturating_sub(entry.byte_cost());
+            remove_count = index + 1;
         }
-        if evicted {
+
+        if remove_count > 0 {
+            let removed_entries = self
+                .history
+                .entries
+                .drain(0..remove_count)
+                .collect::<Vec<_>>();
+            for removed in removed_entries {
+                let cost = removed.byte_cost();
+                self.history.byte_usage = self.history.byte_usage.saturating_sub(cost);
+                self.remove_history_depth(&removed);
+                capacity_metrics::record_history_eviction_per_file(cost);
+            }
             self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
             self.compact_history_storage();
         }

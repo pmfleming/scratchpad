@@ -22,7 +22,9 @@ const SESSION_DIR_NAME: &str = "scratchpad";
 const SESSION_MANIFEST_NAME: &str = "session.json";
 const SESSION_IO_PARALLEL_MIN_ITEMS: usize = 512;
 const SESSION_IO_PARALLEL_MAX_WORKERS: usize = 8;
+const PRETTY_SESSION_MANIFEST_MAX_TABS: usize = 128;
 
+pub(crate) use capture::cold_tab_from_workspace_tab;
 pub use model::SESSION_VERSION;
 pub use model::SessionActiveSurface;
 pub(crate) use model::SessionTabParts as ColdSessionTab;
@@ -458,7 +460,12 @@ impl SessionStore {
     }
 
     fn serialize_manifest(&self, manifest: &SessionManifest) -> io::Result<Vec<u8>> {
-        serde_json::to_vec_pretty(manifest).map_err(|error| {
+        let result = if manifest.tabs.len() <= PRETTY_SESSION_MANIFEST_MAX_TABS {
+            serde_json::to_vec_pretty(manifest)
+        } else {
+            serde_json::to_vec(manifest)
+        };
+        result.map_err(|error| {
             let error = invalid_data(error);
             record_session_io_error(
                 "session_serialize_manifest",

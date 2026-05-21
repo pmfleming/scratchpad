@@ -18,6 +18,9 @@ use scratchpad::app::ui::editor_content::native_editor::{
     CharCursor, CursorRange, EditOperation, OperationRecord,
 };
 use scratchpad::app::ui::editor_content::{EditorHighlightStyle, build_layouter};
+use scratchpad::profile::{
+    run_many_file_lazy_open_profile, run_search_all_tabs_profile, run_tab_strip_frame_profile,
+};
 use std::hint::black_box;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -298,6 +301,30 @@ fn run_tab_count_cycle(tab_count: usize) -> StepOutcome {
     let mut tabs = build_tabs(tab_count, TAB_BYTES_PER_BUFFER);
     let activations = split_tabs_once(&mut tabs) + combine_first_tabs(&mut tabs);
     StepOutcome::items(black_box(activations + tabs.len()))
+}
+
+fn run_search_app_result_cycle(tab_count: usize) -> StepOutcome {
+    let match_count = run_search_all_tabs_profile(tab_count, 4 * KB, 1);
+    StepOutcome::items(black_box(match_count))
+}
+
+fn run_many_file_lazy_open_cycle(paths: &[PathBuf]) -> StepOutcome {
+    let profile_count = run_many_file_lazy_open_profile(paths);
+    StepOutcome::items(black_box(profile_count))
+}
+
+fn run_tab_strip_frame_cycle(tab_count: usize) -> StepOutcome {
+    let iterations = 10usize;
+    let total_ns = run_tab_strip_frame_profile(tab_count, iterations);
+    StepOutcome {
+        result_value: black_box((total_ns / iterations as u128) as usize),
+        result_unit: "ns/frame",
+        result_label: format!(
+            "{} ns/frame across {iterations} frames",
+            total_ns / iterations as u128
+        ),
+        manifest_size_bytes: None,
+    }
 }
 
 fn run_view_count_cycle(view_count: usize) -> StepOutcome {

@@ -20,20 +20,16 @@ impl SearchResultAccumulator {
         ranges: &[Range<usize>],
     ) {
         let start_index = self.matches.len();
-        self.matches.extend(ranges.iter().cloned().map(|range| {
-            SearchMatch {
+        self.matches
+            .extend(ranges.iter().cloned().map(|range| SearchMatch {
                 tab_index: target.tab_index,
                 view_id: target.view_id,
                 buffer_id: target.buffer_id,
                 buffer_label: target.buffer_label.clone(),
                 target_revision: target.document_snapshot.revision(),
-                matched_text: target
-                    .document_snapshot
-                    .piece_tree()
-                    .extract_range(range.clone()),
+                matched_text: None,
                 range,
-            }
-        }));
+            }));
 
         let group_index =
             if let Some(index) = self.group_lookup.get(&(target.tab_index, target.buffer_id)) {
@@ -128,7 +124,7 @@ pub(super) fn search_highlight_state_for_view(
 
 pub(super) fn build_replacement_targets(
     matches: &[SearchMatch],
-    mut replacement_for_match: impl FnMut(&SearchMatch) -> Result<String, SearchError>,
+    mut replacement_for_match: impl FnMut(&SearchMatch) -> Result<(String, String), SearchError>,
 ) -> Result<Vec<ReplacementTargetPlan>, SearchError> {
     let mut targets = Vec::new();
     let mut start = 0;
@@ -139,25 +135,24 @@ pub(super) fn build_replacement_targets(
             end += 1;
         }
 
+        let replacements_and_expected = matches[start..end]
+            .iter()
+            .rev()
+            .map(|search_match| replacement_for_match(search_match))
+            .collect::<Result<Vec<_>, _>>()?;
         let replacements = matches[start..end]
             .iter()
             .rev()
-            .map(|search_match| {
-                Ok((
-                    search_match.range.clone(),
-                    replacement_for_match(search_match)?,
-                ))
+            .zip(replacements_and_expected.iter())
+            .map(|(search_match, (replacement, _))| {
+                (search_match.range.clone(), replacement.clone())
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect();
         let expected_matches = matches[start..end]
             .iter()
             .rev()
-            .map(|search_match| {
-                (
-                    search_match.range.clone(),
-                    search_match.matched_text.clone(),
-                )
-            })
+            .zip(replacements_and_expected.into_iter())
+            .map(|(search_match, (_, expected))| (search_match.range.clone(), expected))
             .collect();
 
         targets.push(ReplacementTargetPlan {

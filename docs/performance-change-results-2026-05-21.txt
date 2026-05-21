@@ -1,0 +1,81 @@
+Scratchpad performance change results
+Date: 2026-05-21
+
+Inputs read:
+- docs/performance-improvement-plan.md
+- docs/SCRATCHPAD_LLM_ANALYSIS_INSTRUCTIONS.txt
+
+Baseline used:
+- target/analysis/slowspots.json and target/analysis/resource_profiles.json from before this work.
+- Key baseline rows: scroll_stress_latency/4194304 18.204 ms, viewport_extraction_latency/4194304 13.770 ms, edited preview 8192 pieces 1402.840 ms, large UTF-8 2 GB 6902.942 ms / 4.295 GB peak, 10000-tab session persist 11367.483 ms, 50000-file synthetic allocation 18.269 GB total allocation, provenance 100000 edits 6213.847 ms / 23.798 GB total allocation.
+
+Current validation runs:
+- cargo bench --bench frame_budget -- --noplot
+- cargo run --release --bin resource_probe
+- cargo test app::services::file_controller::open --lib
+- cargo test search --lib
+- cargo check --all-targets
+
+1. Display transforms borrow by default
+Dashboard measurement check: existing scroll_stress_latency and viewport_extraction_latency measure the target path correctly.
+Implemented: DisplayTextSlice and PreviewTextSlice now use Cow and borrow when no display rewrite is needed.
+Before -> after: viewport_extraction_latency/4194304 13.770 ms -> 13.097 ms in the latest bench, with earlier local runs at 7.858 ms after the localized editor changes. scroll_stress_latency/4194304 18.204 ms -> 14.945 ms.
+Decision: kept. Aggregate editor latency is below the original over-budget row and 4 MB scroll is now under 16.7 ms.
+
+2. Bounded long-line viewport window
+Dashboard measurement check: existing scroll/viewport benchmarks measure this, but text-layout ceiling should still be rerun in the dashboard after the full capacity job.
+Implemented: unwrapped single-line layout now extracts a horizontal viewport window and tracks display_column_base / virtual_width for cursor, paint, and scroll extent.
+Before -> after: scroll_stress_latency/4194304 18.204 ms -> 14.945 ms in the latest bench.
+Decision: kept.
+
+3. Newline prefix indexes for line lookup
+Dashboard measurement check: viewport_extraction_latency is the right direct measurement.
+Implemented: line_lookup now starts from find_leaf_for_line_index instead of scanning from the root.
+Before -> after: viewport_extraction_latency/4194304 13.770 ms -> 13.097 ms latest, with earlier local run at 7.858 ms.
+Decision: kept.
+
+4. Index visible search highlights and replacement previews
+Dashboard measurement check: edited_buffer_search_preview_rendering measures the relevant pressure; frame rows cover visible editor impact.
+Implemented: search highlights and replacement preview entries use sorted range partitioning for visible subsets.
+Before -> after: edited preview 8192 pieces 1402.840 ms -> 792.308 ms; allocation count 192464 -> 125374.
+Decision: kept.
+
+5. Large UTF-8 open path
+Dashboard measurement check: large_utf8_load_peak_memory and file_backed_open_first_visible_paint measure this. They expose peak memory and elapsed time separately.
+Attempted: replaced the all-byte read plus String::from_utf8 path with read_to_string for the UTF-8 fast path while preserving invalid-UTF8 fallback.
+Before -> after: large UTF-8 2 GB 6902.942 ms -> 3953.710 ms; file-backed first paint 2 GB 6832.507 ms -> 3924.712 ms. Peak live remains about 4.295 GB, so the full file-backed/chunk-backed storage target is not met.
+Decision: kept because aggregate elapsed time improved substantially; documented as partial because peak memory still needs a real chunk-backed design.
+
+6. Many-file workspaces lazy
+Dashboard measurement check: existing many_file_resource_tracking is synthetic and not sufficient for lazy open. Added many_file_lazy_open_tracking to the resource probe and dashboard lens.
+Implemented: large open batches create path-backed cold tab shells using the existing cold-session hydration path. File content loads on activation. Added a regression test for shell creation and hydration.
+Before -> after: old synthetic 50000-file allocation was 18.269 GB total allocation. New lazy-open 10000-file probe reports 2533.988 ms, 3.753 GB total allocation, and 69.580 MB peak live while installing cold shells.
+Decision: kept.
+
+7. Virtualize horizontal and vertical tab rendering
+Dashboard measurement check: existing tab-count resource rows were thin for frame cost. Added tab_strip_frame_rendering.
+Implemented: tab strip renders visible slot ranges with virtual spacer extents. Active pending-scroll sentinels remain renderable.
+Before -> after: manual full-render 10000-tab frame profile was about 5.61 s/frame; virtualized current run is 1.893 ms/frame in resource_probe, and direct profile runs were about 3.1 ms/frame.
+Decision: kept.
+
+8. Compact large session manifests
+Dashboard measurement check: session_persist_cost directly measures this.
+Implemented: small manifests remain pretty; large manifests use compact JSON.
+Before -> after: 10000-tab session persist 11367.483 ms -> 7060.977 ms; manifest 11049024 bytes -> 6228996 bytes; serialize around 23.42 ms -> 7.51 ms. File I/O still dominates.
+Decision: kept.
+
+9. Lazy search results and cheaper partials
+Dashboard measurement check: raw search resource rows did not measure app-level result storage. Added search_app_result_tracking.
+Implemented: SearchMatch now stores matched_text lazily; replacement and replacement previews reconstruct text from the validated buffer revision only when needed.
+Before -> after: new search_app_result_tracking baseline starts at current implementation: 1000 tabs, 49110 matches, 823.635 ms, 1.842 GB total allocation, 44.154 MB peak live. Search tests passed. A pre-change sample for this newly added probe is not available.
+Decision: kept because correctness tests pass and the old eager matched-text allocation path is removed; future dashboard runs can now catch regressions.
+
+10. Compact edit history eviction
+Dashboard measurement check: provenance_retained_memory and fragmented_long_session_mutation measure this. Paste ceiling still needs the capacity job for pass/fail.
+Implemented: history budget enforcement drains old entries in one batch instead of repeated Vec::remove(0).
+Before -> after: provenance 100000 edits 6213.847 ms -> 2929.279 ms; peak live stays about 667 KB; total allocation remains about 23.869 GB.
+Decision: kept. Time improved; deeper provenance allocation work remains.
+
+Notes:
+- The latest frame-budget bench was slower than an earlier local post-change run, but still improved against the original dashboard over-budget row. The latest 4 MB scroll stress is 14.945 ms versus the original 18.204 ms and below the 16.7 ms budget.
+- No change was reverted. Two changes are partial rather than complete target hits: large-file peak memory still needs chunk/file-backed original storage, and provenance still has high total allocation despite faster budget eviction.

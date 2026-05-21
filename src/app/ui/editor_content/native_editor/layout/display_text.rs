@@ -1,4 +1,5 @@
 use crate::app::domain::{SearchHighlightState, SearchReplacementPreview};
+use std::borrow::Cow;
 
 #[derive(Clone, Debug)]
 pub(in crate::app::ui::editor_content::native_editor) struct DisplayTextMap {
@@ -44,13 +45,13 @@ impl DisplayTextMap {
     }
 }
 
-pub(super) struct DisplayTextSlice {
-    pub(super) text: String,
+pub(super) struct DisplayTextSlice<'a> {
+    pub(super) text: Cow<'a, str>,
     pub(super) map: Option<DisplayTextMap>,
 }
 
-pub(super) struct PreviewTextSlice {
-    pub(super) text: String,
+pub(super) struct PreviewTextSlice<'a> {
+    pub(super) text: Cow<'a, str>,
     pub(super) map: Option<DisplayTextMap>,
 }
 
@@ -101,10 +102,10 @@ const C0_CONTROL_PICTURES: [&str; 32] = [
     "\u{2418}", "\u{2419}", "\u{241A}", "\u{241B}", "\u{241C}", "\u{241D}", "\u{241E}", "\u{241F}",
 ];
 
-pub(super) fn display_text_slice(text: &str, show_control_chars: bool) -> DisplayTextSlice {
+pub(super) fn display_text_slice(text: &str, show_control_chars: bool) -> DisplayTextSlice<'_> {
     if !show_control_chars {
         return DisplayTextSlice {
-            text: text.to_owned(),
+            text: Cow::Borrowed(text),
             map: None,
         };
     }
@@ -138,7 +139,7 @@ pub(super) fn display_text_slice(text: &str, show_control_chars: bool) -> Displa
     doc_to_display.push(display_chars);
 
     DisplayTextSlice {
-        text: visible,
+        text: Cow::Owned(visible),
         map: Some(DisplayTextMap {
             doc_to_display,
             display_to_doc,
@@ -146,17 +147,25 @@ pub(super) fn display_text_slice(text: &str, show_control_chars: bool) -> Displa
     }
 }
 
-pub(super) fn preview_text_slice(
-    text: &str,
+pub(super) fn preview_text_slice<'a>(
+    text: &'a str,
     slice_range: std::ops::Range<usize>,
     preview: Option<&SearchReplacementPreview>,
-) -> PreviewTextSlice {
+) -> PreviewTextSlice<'a> {
     let Some(preview) = preview.filter(|preview| !preview.entries.is_empty()) else {
         return PreviewTextSlice {
-            text: text.to_owned(),
+            text: Cow::Borrowed(text),
             map: None,
         };
     };
+
+    let visible_entries = visible_preview_entries(preview, &slice_range);
+    if visible_entries.is_empty() {
+        return PreviewTextSlice {
+            text: Cow::Borrowed(text),
+            map: None,
+        };
+    }
 
     let original_chars = text.chars().collect::<Vec<_>>();
     let original_len = original_chars.len();
@@ -166,9 +175,8 @@ pub(super) fn preview_text_slice(
     let mut original_cursor = 0usize;
     let mut projected_cursor = 0usize;
 
-    let mut entries = preview
-        .entries
-        .iter()
+    let mut entries = visible_entries
+        .into_iter()
         .filter_map(|entry| {
             let start = entry.range.start.max(slice_range.start);
             let end = entry.range.end.min(slice_range.end);
@@ -228,12 +236,25 @@ pub(super) fn preview_text_slice(
     doc_to_display[original_len] = projected_cursor;
 
     PreviewTextSlice {
-        text: projected,
+        text: Cow::Owned(projected),
         map: Some(DisplayTextMap {
             doc_to_display,
             display_to_doc,
         }),
     }
+}
+
+fn visible_preview_entries<'a>(
+    preview: &'a SearchReplacementPreview,
+    slice_range: &std::ops::Range<usize>,
+) -> Vec<&'a crate::app::domain::SearchReplacementPreviewEntry> {
+    let start_index = preview
+        .entries
+        .partition_point(|entry| entry.range.end <= slice_range.start);
+    let end_index = preview
+        .entries
+        .partition_point(|entry| entry.range.start < slice_range.end);
+    preview.entries[start_index..end_index].iter().collect()
 }
 
 fn copy_original_chars(

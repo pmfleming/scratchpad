@@ -22,6 +22,8 @@ pub(super) struct EditorGalleyContext {
     pub(super) galley: Arc<egui::Galley>,
     pub(super) char_offset_base: usize,
     pub(super) logical_line_base: usize,
+    pub(super) display_column_base: usize,
+    pub(super) virtual_width: Option<f32>,
     pub(super) slice_chars: usize,
     pub(super) display_map: Option<DisplayTextMap>,
 }
@@ -30,6 +32,8 @@ struct ViewportTextSlice<'a> {
     text: Cow<'a, str>,
     char_range: std::ops::Range<usize>,
     start_line: usize,
+    display_column_base: usize,
+    virtual_width: Option<f32>,
 }
 
 pub(super) fn build_editor_galley(
@@ -45,6 +49,8 @@ pub(super) fn build_editor_galley(
         effective_viewport,
         editor_row_height(ui, options.editor_font_id),
         cursor_line_for_viewport_slice(buffer, view),
+        cursor_offset_for_viewport_slice(view),
+        options.word_wrap,
     );
     let preview_slice = preview_text_slice(
         &slice.text,
@@ -114,6 +120,8 @@ pub(super) fn build_editor_galley(
         galley,
         char_offset_base: slice.char_range.start,
         logical_line_base: slice.start_line,
+        display_column_base: slice.display_column_base,
+        virtual_width: slice.virtual_width,
         slice_chars,
         display_map,
     }
@@ -163,6 +171,8 @@ fn viewport_text_slice(
     viewport: egui::Rect,
     row_height: f32,
     cursor_line: Option<usize>,
+    cursor_offset: Option<usize>,
+    word_wrap: bool,
 ) -> ViewportTextSlice<'_> {
     let line_count = buffer.line_count.max(1);
     let top_line = if row_height > 0.0 {
@@ -190,7 +200,23 @@ fn viewport_text_slice(
     let start_char = tree.line_info(start_line).start_char;
     let end_info = tree.line_info(end_line);
     let end_char = (end_info.start_char + end_info.char_len).min(tree.len_chars());
-    let char_range = start_char..end_char;
+    let mut char_range = start_char..end_char;
+    let mut display_column_base = 0usize;
+    let mut virtual_width = None;
+    if let Some(window) = long_line_viewport_window(
+        start_line,
+        end_line,
+        start_char,
+        end_char,
+        viewport,
+        row_height,
+        cursor_offset,
+        word_wrap,
+    ) {
+        display_column_base = window.display_column_base;
+        virtual_width = Some(window.virtual_width);
+        char_range = window.char_range;
+    }
     let text = tree.borrow_range(char_range.clone()).map_or_else(
         || Cow::Owned(tree.extract_range(char_range.clone())),
         Cow::Borrowed,
@@ -199,7 +225,63 @@ fn viewport_text_slice(
         text,
         char_range,
         start_line,
+        display_column_base,
+        virtual_width,
     }
+}
+
+struct LongLineWindow {
+    char_range: std::ops::Range<usize>,
+    display_column_base: usize,
+    virtual_width: f32,
+}
+
+fn long_line_viewport_window(
+    start_line: usize,
+    end_line: usize,
+    line_start_char: usize,
+    line_end_char: usize,
+    viewport: egui::Rect,
+    row_height: f32,
+    cursor_offset: Option<usize>,
+    word_wrap: bool,
+) -> Option<LongLineWindow> {
+    if word_wrap || start_line != end_line || row_height <= 0.0 {
+        return None;
+    }
+    let line_chars = line_end_char.saturating_sub(line_start_char);
+    let column_width = editor_column_width(row_height);
+    let visible_columns = (viewport.width().max(column_width) / column_width)
+        .ceil()
+        .max(1.0) as usize;
+    let overscan_columns = visible_columns.clamp(32, 256);
+    let window_columns = visible_columns.saturating_add(overscan_columns * 2);
+    if line_chars <= window_columns {
+        return None;
+    }
+
+    let mut start_column = (viewport.min.x.max(0.0) / column_width).floor() as usize;
+    start_column = start_column.saturating_sub(overscan_columns);
+    if let Some(cursor_offset) =
+        cursor_offset.filter(|offset| (*offset >= line_start_char) && (*offset <= line_end_char))
+    {
+        let cursor_column = cursor_offset.saturating_sub(line_start_char);
+        if cursor_column < start_column {
+            start_column = cursor_column.saturating_sub(overscan_columns);
+        } else if cursor_column > start_column.saturating_add(window_columns) {
+            start_column = cursor_column
+                .saturating_sub(visible_columns)
+                .saturating_sub(overscan_columns);
+        }
+    }
+    start_column = start_column.min(line_chars.saturating_sub(window_columns));
+    let end_column = start_column.saturating_add(window_columns).min(line_chars);
+
+    Some(LongLineWindow {
+        char_range: (line_start_char + start_column)..(line_start_char + end_column),
+        display_column_base: start_column,
+        virtual_width: (line_chars as f32 * column_width).ceil().max(1.0),
+    })
 }
 
 fn cursor_line_index(buffer: &BufferState, view: &EditorViewState) -> Option<usize> {
@@ -215,6 +297,11 @@ fn cursor_line_index(buffer: &BufferState, view: &EditorViewState) -> Option<usi
 fn cursor_line_for_viewport_slice(buffer: &BufferState, view: &EditorViewState) -> Option<usize> {
     view.cursor_reveal_mode()
         .and_then(|_| cursor_line_index(buffer, view))
+}
+
+fn cursor_offset_for_viewport_slice(view: &EditorViewState) -> Option<usize> {
+    view.cursor_reveal_mode()
+        .and_then(|_| view.cursor_range.map(|cursor| cursor.primary.index))
 }
 
 fn warm_nearby_layout_slices(
@@ -246,7 +333,8 @@ fn warm_nearby_layout_slices(
         {
             break;
         }
-        let slice = viewport_text_slice(buffer, adjacent, row_height, None);
+        let slice =
+            viewport_text_slice(buffer, adjacent, row_height, None, None, options.word_wrap);
         let search_highlights = local_search_highlights(
             &view.search_highlights,
             slice.char_range.start,
@@ -295,7 +383,17 @@ fn local_search_highlights(
     slice_end: usize,
 ) -> SearchHighlightState {
     let mut local = SearchHighlightState::default();
-    for (index, range) in highlights.ranges.iter().enumerate() {
+    let start_index = highlights
+        .ranges
+        .partition_point(|range| range.end <= slice_start);
+    let end_index = highlights
+        .ranges
+        .partition_point(|range| range.start < slice_end);
+    for (index, range) in highlights.ranges[start_index..end_index]
+        .iter()
+        .enumerate()
+        .map(|(offset, range)| (start_index + offset, range))
+    {
         if let Some(range) = local_range(Some(range.clone()), slice_start, slice_end) {
             if highlights.active_range_index == Some(index) {
                 local.active_range_index = Some(local.ranges.len());
@@ -324,12 +422,13 @@ pub(super) fn allocate_editor_rect(
     options: TextEditOptions<'_>,
     total_content_height: f32,
     viewport: Option<egui::Rect>,
+    virtual_width: Option<f32>,
 ) -> (egui::Rect, egui::Response) {
     let response = widget_ids::allocate_exact_interact(
         ui,
         editor_desired_size(
             ui,
-            editor_desired_width(ui, galley, options.word_wrap, viewport),
+            editor_desired_width(ui, galley, options.word_wrap, viewport, virtual_width),
             total_content_height,
         ),
         editor_interaction_id(view_id),
@@ -347,8 +446,13 @@ pub(super) fn galley_origin(
     rect: egui::Rect,
     logical_line_base: usize,
     row_height: f32,
+    display_column_base: usize,
 ) -> egui::Pos2 {
-    rect.min + egui::vec2(0.0, logical_line_base as f32 * row_height)
+    rect.min
+        + egui::vec2(
+            display_column_base as f32 * editor_column_width(row_height),
+            logical_line_base as f32 * row_height,
+        )
 }
 
 fn editor_content_height(galley: &egui::Galley, row_height: f32) -> f32 {
@@ -400,11 +504,12 @@ pub(super) fn editor_desired_width(
     galley: &egui::Galley,
     word_wrap: bool,
     viewport: Option<egui::Rect>,
+    virtual_width: Option<f32>,
 ) -> f32 {
     if word_wrap {
         viewport_width(ui, viewport)
     } else {
-        galley.rect.width().max(1.0)
+        virtual_width.unwrap_or(galley.rect.width()).max(1.0)
     }
 }
 
@@ -418,6 +523,10 @@ fn viewport_width(ui: &egui::Ui, viewport: Option<egui::Rect>) -> f32 {
 
 pub(super) fn editor_row_height(ui: &egui::Ui, font_id: &egui::FontId) -> f32 {
     ui.fonts_mut(|fonts| fonts.row_height(font_id))
+}
+
+fn editor_column_width(row_height: f32) -> f32 {
+    (row_height * 0.5).max(1.0)
 }
 
 #[cfg(test)]

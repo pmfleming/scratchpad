@@ -283,7 +283,7 @@ fn seed_matches_for_plan_lines(app: &mut ScratchpadApp, ranges: &[Range<usize>])
             buffer_id: buffer.id,
             buffer_label: buffer.display_name(),
             target_revision: buffer.document_revision(),
-            matched_text: "plan".to_owned(),
+            matched_text: None,
             range,
         })
         .collect();
@@ -312,11 +312,7 @@ fn seed_search_matches(app: &mut ScratchpadApp, query: &str) {
             buffer_id: buffer.id,
             buffer_label: buffer.display_name(),
             target_revision: buffer.document_revision(),
-            matched_text: text
-                .chars()
-                .skip(range.start)
-                .take(range.end.saturating_sub(range.start))
-                .collect(),
+            matched_text: None,
             range,
         })
         .collect();

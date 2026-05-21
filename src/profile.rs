@@ -8,6 +8,7 @@ use crate::app::domain::{BufferState, SearchHighlightState};
 use crate::app::ui::editor_content::{EditorHighlightStyle, build_layouter};
 use eframe::{App, egui};
 use std::hint::black_box;
+use std::path::PathBuf;
 use std::time::Instant;
 use support::{
     alternating_axis, bouncing_indices, build_balanced_tile_tab, build_search_current_scope_tab,
@@ -27,6 +28,8 @@ pub const RECOMMENDED_TAB_OPERATION_ITERATIONS: usize = 64;
 pub const RECOMMENDED_TAB_TILE_COUNT: usize = 16;
 pub const RECOMMENDED_TAB_TILE_BYTES: usize = 64 * KB;
 pub const RECOMMENDED_TAB_TILE_ITERATIONS: usize = 48;
+pub const RECOMMENDED_TAB_STRIP_FRAME_TABS: usize = 10_000;
+pub const RECOMMENDED_TAB_STRIP_FRAME_ITERATIONS: usize = 20;
 pub const RECOMMENDED_VIEW_NAVIGATION_VIEWS: usize = 24;
 pub const RECOMMENDED_VIEW_NAVIGATION_BYTES_PER_BUFFER: usize = 48 * KB;
 pub const RECOMMENDED_VIEW_NAVIGATION_ITERATIONS: usize = 120;
@@ -166,6 +169,17 @@ profile_bin_entry!(
     RECOMMENDED_TAB_TILE_COUNT,
     RECOMMENDED_TAB_TILE_BYTES,
     RECOMMENDED_TAB_TILE_ITERATIONS,
+);
+
+profile_bin_entry!(
+    run_profile_tab_strip_frame_bin,
+    run_tab_strip_frame_profile(
+        RECOMMENDED_TAB_STRIP_FRAME_TABS,
+        RECOMMENDED_TAB_STRIP_FRAME_ITERATIONS
+    ),
+    "tab_strip_frame_profile tabs={} iterations={} total_ns={}",
+    RECOMMENDED_TAB_STRIP_FRAME_TABS,
+    RECOMMENDED_TAB_STRIP_FRAME_ITERATIONS,
 );
 
 profile_bin_entry!(
@@ -394,6 +408,44 @@ pub fn run_tab_tile_layout_profile(
             ratio_phase = !ratio_phase;
             resize_profile_splits(app, &split_paths, ratio_phase) + rebalance_profile_tab(app)
         })
+    })
+}
+
+pub fn run_tab_strip_frame_profile(tab_count: usize, iterations: usize) -> u128 {
+    with_steady_state_app("tab-strip-frame", |app| {
+        install_navigation_workspace(app, tab_count, 1, KB);
+        let ctx = egui::Context::default();
+        prepare_context_before_first_frame(app, &ctx);
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280.0, 120.0),
+            )),
+            ..Default::default()
+        };
+        (0..iterations)
+            .map(|_| {
+                let started_at = Instant::now();
+                #[allow(deprecated)]
+                let _ = ctx.run(raw_input.clone(), |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        crate::app::ui::tab_strip::show_header(ui, app);
+                    });
+                });
+                started_at.elapsed().as_nanos()
+            })
+            .sum()
+    })
+}
+
+pub fn run_many_file_lazy_open_profile(paths: &[PathBuf]) -> usize {
+    with_isolated_app("many-file-lazy-open", |app| {
+        crate::app::services::file_controller::FileController::open_paths_async(
+            app,
+            paths.to_vec(),
+        );
+        app.wait_for_background_io_idle();
+        app.tab_manager.tabs.as_slice().len() + app.tab_manager.cold_session_tabs().len()
     })
 }
 

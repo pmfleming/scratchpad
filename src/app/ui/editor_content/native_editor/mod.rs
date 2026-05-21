@@ -74,8 +74,14 @@ pub fn render_editor_text_edit(
         options,
         total_content_height,
         viewport,
+        galley_context.virtual_width,
     );
-    let mut galley_pos = galley_origin(rect, galley_context.logical_line_base, row_height);
+    let mut galley_pos = galley_origin(
+        rect,
+        galley_context.logical_line_base,
+        row_height,
+        galley_context.display_column_base,
+    );
     request_editor_focus(ui, &response, options.request_focus);
 
     // The pre-input galley bakes the active cursor selection into its text
@@ -114,7 +120,12 @@ pub fn render_editor_text_edit(
     ) {
         document_revision = buffer.document_revision();
         galley_context = build_editor_galley(ui, buffer, view, options, viewport);
-        galley_pos = galley_origin(rect, galley_context.logical_line_base, row_height);
+        galley_pos = galley_origin(
+            rect,
+            galley_context.logical_line_base,
+            row_height,
+            galley_context.display_column_base,
+        );
         request_repaint_if_wrapped_content_height_changed(WrappedContentHeightRepaint {
             ui,
             changed: input.changed,

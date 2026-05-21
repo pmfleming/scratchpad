@@ -474,28 +474,19 @@ fn read_document_with_encoding(
 fn read_utf8_document_fast_path(path: &Path, has_bom: bool) -> io::Result<Option<LoadedDocument>> {
     const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
 
-    // Keep this as a single full-buffer UTF-8 path until we have a peak-memory
-    // probe that proves a better tradeoff. A direct read_to_string avoids the
-    // byte Vec, but measured slower on 2GB opens; a chunk-fed piece builder was
-    // slower still because it lost the established parallel piece build.
-    let bytes = std::fs::read(path)?;
-    let bom_len = if has_bom && bytes.starts_with(UTF8_BOM) {
-        UTF8_BOM.len()
-    } else {
-        0
+    let mut content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == io::ErrorKind::InvalidData => return Ok(None),
+        Err(error) => return Err(error),
     };
-    if bytes[bom_len..].contains(&0) {
+    if has_bom && content.as_bytes().starts_with(UTF8_BOM) {
+        content.drain(..UTF8_BOM.len());
+    }
+    if content.as_bytes().contains(&0) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "Binary files are not supported",
         ));
-    }
-
-    let Ok(mut content) = String::from_utf8(bytes) else {
-        return Ok(None);
-    };
-    if bom_len > 0 {
-        content.drain(..bom_len);
     }
 
     let mut sample = String::new();

@@ -1,7 +1,7 @@
 use crate::app::app_state::{ScratchpadApp, workspace::display_tabs};
 use crate::app::chrome::tab_button_sized;
 use crate::app::domain::{TabAttentionState, WorkspaceTab};
-use crate::app::ui::tab_drag::TabRectEntry;
+use crate::app::ui::tab_drag::{TabDropAxis, TabRectEntry};
 use crate::app::ui::tab_strip::context_menu::{
     attach_tab_context_menu, attach_tab_list_context_menu,
 };
@@ -19,12 +19,16 @@ pub(super) struct SlotCellContext<'a> {
     pending_scroll_to_active: bool,
     showing_settings: bool,
     width: f32,
+    spacing: f32,
+    axis: TabDropAxis,
 }
 
 pub(super) fn slot_cell_context<'a>(
     app: &ScratchpadApp,
     duplicate_name_counts: &'a HashMap<String, usize>,
     width: f32,
+    spacing: f32,
+    axis: TabDropAxis,
 ) -> SlotCellContext<'a> {
     SlotCellContext {
         active_slot_index: crate::app::app_state::workspace::display_tabs::active_tab_slot_index(
@@ -34,6 +38,8 @@ pub(super) fn slot_cell_context<'a>(
         pending_scroll_to_active: app.tab_manager.pending_scroll_to_active,
         showing_settings: crate::app::app_state::settings_state::showing_settings(app),
         width,
+        spacing,
+        axis,
     }
 }
 
@@ -45,19 +51,83 @@ pub(super) fn collect_slot_entries(
     mut on_rect: impl FnMut(usize, egui::Rect),
 ) -> Vec<TabRectEntry> {
     let total_slots = crate::app::app_state::workspace::display_tabs::total_tab_slots(app);
-    let mut entries = Vec::with_capacity(total_slots);
+    let ranges = visible_slot_ranges(ui, total_slots, context);
+    let visible_slots = ranges
+        .iter()
+        .map(|range| range.end.saturating_sub(range.start))
+        .sum::<usize>();
+    let mut entries = Vec::with_capacity(visible_slots);
+    let mut next_slot = 0usize;
 
-    for slot_index in 0..total_slots {
-        let cell_outcome = render_tab_slot_cell(ui, app, slot_index, context, outcome);
-        on_rect(slot_index, cell_outcome.rect);
-        entries.push(tab_rect_entry(
-            slot_index,
-            cell_outcome.rect,
-            !crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(app, slot_index),
-        ));
+    for range in ranges {
+        add_virtual_slot_space(ui, range.start.saturating_sub(next_slot), context);
+        for slot_index in range.clone() {
+            let cell_outcome = render_tab_slot_cell(ui, app, slot_index, context, outcome);
+            on_rect(slot_index, cell_outcome.rect);
+            entries.push(tab_rect_entry(
+                slot_index,
+                cell_outcome.rect,
+                !crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(
+                    app, slot_index,
+                ),
+            ));
+        }
+        next_slot = range.end;
     }
+    add_virtual_slot_space(ui, total_slots.saturating_sub(next_slot), context);
 
     entries
+}
+
+fn visible_slot_ranges(
+    ui: &egui::Ui,
+    total_slots: usize,
+    context: &SlotCellContext<'_>,
+) -> Vec<std::ops::Range<usize>> {
+    if total_slots == 0 {
+        return Vec::new();
+    }
+    let slot_extent = (context.width + context.spacing).max(1.0);
+    let content_origin = match context.axis {
+        TabDropAxis::Horizontal => ui.cursor().min.x,
+        TabDropAxis::Vertical => ui.cursor().min.y,
+    };
+    let clip = ui.clip_rect();
+    let (clip_min, clip_max) = match context.axis {
+        TabDropAxis::Horizontal => (clip.min.x, clip.max.x),
+        TabDropAxis::Vertical => (clip.min.y, clip.max.y),
+    };
+    let first = ((clip_min - content_origin) / slot_extent).floor().max(0.0) as usize;
+    let last = ((clip_max - content_origin) / slot_extent).ceil().max(0.0) as usize;
+    let mut ranges = vec![first.saturating_sub(2)..last.saturating_add(2).min(total_slots)];
+    if context.pending_scroll_to_active && context.active_slot_index < total_slots {
+        ranges.push(context.active_slot_index..context.active_slot_index + 1);
+    }
+    merge_slot_ranges(ranges)
+}
+
+fn merge_slot_ranges(mut ranges: Vec<std::ops::Range<usize>>) -> Vec<std::ops::Range<usize>> {
+    ranges.retain(|range| range.start < range.end);
+    ranges.sort_by_key(|range| range.start);
+    let mut merged: Vec<std::ops::Range<usize>> = Vec::new();
+    for range in ranges {
+        if let Some(last) = merged.last_mut()
+            && range.start <= last.end
+        {
+            last.end = last.end.max(range.end);
+            continue;
+        }
+        merged.push(range);
+    }
+    merged
+}
+
+fn add_virtual_slot_space(ui: &mut egui::Ui, slot_count: usize, context: &SlotCellContext<'_>) {
+    if slot_count == 0 {
+        return;
+    }
+    let extent = slot_count as f32 * (context.width + context.spacing);
+    ui.add_space(extent.max(0.0));
 }
 
 pub(super) fn attach_tab_list_background_context_menu(

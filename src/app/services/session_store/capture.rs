@@ -46,6 +46,10 @@ impl SessionPersistRequest {
     }
 }
 
+pub(crate) fn cold_tab_from_workspace_tab(tab: &WorkspaceTab) -> ColdSessionTab {
+    CapturedSessionTab::capture(tab).session_tab.into_parts()
+}
+
 impl CapturedSessionTab {
     fn capture_cold(session_tab: ColdSessionTab) -> Self {
         Self {

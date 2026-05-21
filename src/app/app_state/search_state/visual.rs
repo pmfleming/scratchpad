@@ -183,7 +183,7 @@ fn search_replacement_previews_for_tab(
                 .iter()
                 .filter_map(|view| {
                     let buffer = tab.buffer_by_id(view.buffer_id)?;
-                    let entries = app
+                    let mut entries = app
                         .state
                         .search_state
                         .results
@@ -194,9 +194,16 @@ fn search_replacement_previews_for_tab(
                                 && search_match.target_revision == buffer.document_revision()
                         })
                         .map(|search_match| {
+                            let matched_text =
+                                search_match.matched_text.clone().unwrap_or_else(|| {
+                                    buffer
+                                        .document()
+                                        .piece_tree()
+                                        .extract_range(search_match.range.clone())
+                                });
                             program
                                 .expand_replacement(
-                                    &search_match.matched_text,
+                                    &matched_text,
                                     &app.state.search_state.query.replacement,
                                 )
                                 .map(|replacement| SearchReplacementPreviewEntry {
@@ -206,6 +213,7 @@ fn search_replacement_previews_for_tab(
                         })
                         .collect::<Result<Vec<_>, _>>()
                         .ok()?;
+                    entries.sort_by_key(|entry| entry.range.start);
                     (!entries.is_empty()).then_some((view.id, SearchReplacementPreview { entries }))
                 })
                 .collect()

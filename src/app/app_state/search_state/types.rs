@@ -86,7 +86,7 @@ pub(crate) struct SearchMatch {
     pub(crate) buffer_label: String,
     pub(crate) target_revision: u64,
     pub(crate) range: Range<usize>,
-    pub(crate) matched_text: String,
+    pub(crate) matched_text: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

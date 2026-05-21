@@ -128,6 +128,7 @@ impl TabManager {
         self.path_tab_index.get(key).copied()
     }
 
+    #[cfg(debug_assertions)]
     pub(crate) fn scan_tab_by_path_key(&self, key: &CanonicalPathKey) -> Option<(usize, ViewId)> {
         self.tabs.iter().enumerate().find_map(|(tab_index, tab)| {
             tab.layout.views().iter().find_map(|view| {

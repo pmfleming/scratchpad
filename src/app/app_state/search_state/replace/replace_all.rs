@@ -1,6 +1,7 @@
 use super::{
-    finalize_tab_buffer_mutation, rebuild_active_buffer_search_matches,
-    replace_ranges_in_active_buffer,
+    finalize_tab_buffer_mutation, matched_text_for_search_match,
+    rebuild_active_buffer_search_matches, replace_ranges_in_active_buffer,
+    stale_replacement_match_error,
 };
 use crate::app::app_state::StatusDomain;
 use crate::app::app_state::search_state::helpers::{
@@ -222,7 +223,12 @@ fn build_replace_all_plan(app: &ScratchpadApp) -> Result<Option<ReplacementPlan>
         total_match_count: app.state.search_state.results.matches.len(),
         targets: build_replacement_targets(
             &app.state.search_state.results.matches,
-            |search_match| program.expand_replacement(&search_match.matched_text, &replacement),
+            |search_match| {
+                let matched_text = matched_text_for_search_match(app, search_match)
+                    .ok_or_else(stale_replacement_match_error)?;
+                let replacement = program.expand_replacement(&matched_text, &replacement)?;
+                Ok((replacement, matched_text))
+            },
         )?,
     }))
 }

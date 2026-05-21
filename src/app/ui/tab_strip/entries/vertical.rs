@@ -148,6 +148,8 @@ fn collect_vertical_tab_entries(
         app,
         duplicate_name_counts,
         ui.available_width().max(TAB_BUTTON_WIDTH),
+        4.0,
+        TabDropAxis::Vertical,
     );
     collect_slot_entries(ui, app, &context, outcome, |_, _| {})
 }

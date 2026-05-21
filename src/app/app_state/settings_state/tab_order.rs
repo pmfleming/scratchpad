@@ -68,6 +68,7 @@ impl ScratchpadApp {
             return false;
         }
 
+        let old_cold_tabs = std::mem::take(&mut self.tab_manager.cold_session_tabs);
         let mut tabs = std::mem::take(&mut self.tab_manager.tabs)
             .into_iter()
             .map(Some)
@@ -80,6 +81,13 @@ impl ScratchpadApp {
             .iter()
             .position(|&index| index == active_workspace_index)
             .unwrap_or(0);
+        for (new_index, old_index) in workspace_order.iter().copied().enumerate() {
+            if let Some(cold_tab) = old_cold_tabs.get(&old_index).cloned() {
+                self.tab_manager
+                    .cold_session_tabs
+                    .insert(new_index, cold_tab);
+            }
+        }
         self.tab_manager
             .set_active_tab_index_clamped(reordered_active_tab_index);
         self.tab_manager.rebuild_buffer_tab_index();

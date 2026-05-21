@@ -11,10 +11,12 @@ pub(super) fn run_all() {
     emit_anchor_heavy_view_editing();
     emit_fragmented_long_session_mutations();
     emit_many_file_resource_tracking();
+    emit_many_file_lazy_open_tracking();
     emit_search_resource_tracking();
     emit_paste_allocations();
     emit_tab_count_resource_tracking();
     emit_targeted_tab_phase_probes();
+    emit_tab_strip_frame_tracking();
     emit_view_count_resource_tracking();
     emit_session_persist_restore_costs();
 }
@@ -103,6 +105,18 @@ fn emit_search_resource_tracking() {
         },
         run_search_target_count_cycle,
     );
+
+    emit_workload_steps(
+        [128usize, 1_000],
+        WorkloadSpec {
+            scenario: "search_app_result_tracking",
+            scenario_label: "Search app result storage tracking",
+            workload_family: "search",
+            focus: "result-storage",
+            workload_unit: "tabs",
+        },
+        run_search_app_result_cycle,
+    );
 }
 
 fn emit_edited_buffer_search_preview_rendering() {
@@ -189,6 +203,38 @@ fn emit_many_file_resource_tracking() {
     );
 }
 
+fn emit_many_file_lazy_open_tracking() {
+    let root = unique_probe_root("many-file-lazy-open");
+    std::fs::create_dir_all(&root).expect("create many-file lazy-open root");
+
+    for (step_index, file_count) in [1_000usize, 10_000].into_iter().enumerate() {
+        let step_root = root.join(format!("files_{file_count}"));
+        std::fs::create_dir_all(&step_root).expect("create many-file lazy-open step root");
+        let paths = (0..file_count)
+            .map(|index| {
+                let path = step_root.join(format!("lazy_{index}.txt"));
+                std::fs::write(&path, "lazy open probe\n").expect("write lazy-open probe file");
+                path
+            })
+            .collect::<Vec<_>>();
+        emit_step(
+            StepDescriptor {
+                scenario: "many_file_lazy_open_tracking",
+                scenario_label: "Many-file lazy open tracking",
+                workload_family: "many-files",
+                focus: "lazy-open",
+                step_index,
+                workload_value: file_count,
+                workload_unit: "files",
+                workload_label: format!("{file_count} files"),
+            },
+            || run_many_file_lazy_open_cycle(&paths),
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn emit_tab_count_resource_tracking() {
     emit_workload_steps(
         [128usize, 512, 4_096, 10_000],
@@ -250,6 +296,20 @@ fn emit_targeted_tab_phase_probes() {
             || StepOutcome::items(black_box(combine_first_tabs(&mut combine_tabs_set))),
         );
     }
+}
+
+fn emit_tab_strip_frame_tracking() {
+    emit_workload_steps(
+        [128usize, 1_000, 10_000],
+        WorkloadSpec {
+            scenario: "tab_strip_frame_rendering",
+            scenario_label: "Tab strip frame rendering",
+            workload_family: "tab-management",
+            focus: "tab-strip-frame",
+            workload_unit: "tabs",
+        },
+        run_tab_strip_frame_cycle,
+    );
 }
 
 fn emit_view_count_resource_tracking() {

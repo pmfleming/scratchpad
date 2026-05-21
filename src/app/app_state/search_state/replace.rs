@@ -180,11 +180,13 @@ fn validate_search_match_for_replace(
         && buffer
             .validate_char_replacements(&[(search_match.range.clone(), String::new())])
             .is_ok()
-        && buffer
-            .document()
-            .piece_tree()
-            .extract_range(search_match.range.clone())
-            == search_match.matched_text
+        && search_match.matched_text.as_ref().is_none_or(|expected| {
+            buffer
+                .document()
+                .piece_tree()
+                .extract_range(search_match.range.clone())
+                == *expected
+        })
 }
 
 fn replacement_for_match(
@@ -195,9 +197,35 @@ fn replacement_for_match(
         &app.state.search_state.query.query,
         app.state.search_state.search_options(),
     )?;
-    program.expand_replacement(
-        &search_match.matched_text,
-        &app.state.search_state.query.replacement,
+    let matched_text = matched_text_for_search_match(app, search_match)
+        .ok_or_else(stale_replacement_match_error)?;
+    program.expand_replacement(&matched_text, &app.state.search_state.query.replacement)
+}
+
+pub(super) fn matched_text_for_search_match(
+    app: &ScratchpadApp,
+    search_match: &super::SearchMatch,
+) -> Option<String> {
+    if let Some(matched_text) = &search_match.matched_text {
+        return Some(matched_text.clone());
+    }
+    let tab = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .get(search_match.tab_index)?;
+    let buffer = tab.buffer_by_id(search_match.buffer_id)?;
+    (buffer.document_revision() == search_match.target_revision).then(|| {
+        buffer
+            .document()
+            .piece_tree()
+            .extract_range(search_match.range.clone())
+    })
+}
+
+pub(super) fn stale_replacement_match_error() -> SearchError {
+    SearchError::ReplacementMismatch(
+        "Search replacement could not be expanded for stale search results.".to_owned(),
     )
 }
 
@@ -250,11 +278,7 @@ pub(super) fn rebuild_active_buffer_search_matches(
         buffer_id,
         buffer_label: buffer_label.clone(),
         target_revision,
-        matched_text: text
-            .chars()
-            .skip(range.start)
-            .take(range.end.saturating_sub(range.start))
-            .collect(),
+        matched_text: None,
         range,
     });
     app.state

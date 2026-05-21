@@ -399,7 +399,7 @@ impl PieceTreeLite {
         }
 
         let safe_line = target_line.min(self.root.metrics.newlines);
-        let address = LeafAddress::default();
+        let address = self.find_leaf_for_line_index(safe_line);
         line_lookup_in_leaves(self, address, safe_line)
     }
 

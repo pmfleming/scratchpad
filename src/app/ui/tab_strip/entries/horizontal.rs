@@ -22,6 +22,7 @@ struct TabStripEntriesContext<'a> {
     viewport_rect: egui::Rect,
     visible_tab_indices: &'a mut HashSet<usize>,
     outcome: &'a mut TabStripOutcome,
+    spacing: f32,
 }
 
 pub(super) fn show_tab_region(
@@ -81,6 +82,7 @@ fn allocate_tab_strip_entries(
                 viewport_rect,
                 visible_tab_indices,
                 outcome,
+                spacing: layout.spacing,
             };
             render_tab_strip_entries(ui, layout, scroll_area_id, &mut context)
         },
@@ -123,8 +125,13 @@ fn collect_tab_entries(
     ui: &mut egui::Ui,
     context: &mut TabStripEntriesContext<'_>,
 ) -> Vec<TabRectEntry> {
-    let cell_context =
-        slot_cell_context(context.app, context.duplicate_name_counts, TAB_BUTTON_WIDTH);
+    let cell_context = slot_cell_context(
+        context.app,
+        context.duplicate_name_counts,
+        TAB_BUTTON_WIDTH,
+        context.spacing,
+        TabDropAxis::Horizontal,
+    );
     collect_slot_entries(
         ui,
         context.app,

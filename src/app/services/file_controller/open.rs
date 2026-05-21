@@ -6,10 +6,16 @@ use crate::app::app_state::{
 };
 use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::diagnostics;
-use crate::app::domain::WorkspaceTab;
+use crate::app::domain::{BufferState, WorkspaceTab};
 use crate::app::services::background_io::LoadedPathResult;
+use crate::app::services::file_service::FileService;
 use crate::app::utils::summarize_open_results;
 use std::path::{Path, PathBuf};
+
+#[cfg(not(test))]
+const LAZY_OPEN_BATCH_THRESHOLD: usize = 2_048;
+#[cfg(test)]
+const LAZY_OPEN_BATCH_THRESHOLD: usize = 4;
 
 pub(crate) enum OpenPathOutcome {
     Opened { artifact_warning: Option<String> },
@@ -202,6 +208,11 @@ impl FileController {
             return;
         }
 
+        if pending_paths.len() >= LAZY_OPEN_BATCH_THRESHOLD {
+            Self::open_selected_paths_as_cold_tabs(app, pending_paths, duplicate_count);
+            return;
+        }
+
         app.queue_background_path_loads_streaming(
             pending_paths,
             PendingBackgroundAction::OpenTabs(PendingOpenTabsAction {
@@ -211,6 +222,75 @@ impl FileController {
                 },
             }),
         );
+    }
+
+    fn open_selected_paths_as_cold_tabs(
+        app: &mut ScratchpadApp,
+        paths: Vec<PathBuf>,
+        duplicate_count: usize,
+    ) {
+        let mut summary = OpenBatchSummary {
+            duplicate_count,
+            ..OpenBatchSummary::default()
+        };
+
+        let mut tabs_to_add = Vec::new();
+        for path in paths {
+            Self::release_pending_open_path(app, &path);
+            if Self::activate_existing_path(app, &path).is_some() {
+                summary.record_outcome(OpenPathOutcome::AlreadyOpen);
+                continue;
+            }
+            let Ok(disk_state) = FileService::read_disk_state(&path) else {
+                summary.record_outcome(OpenPathOutcome::Failed);
+                continue;
+            };
+
+            let mut buffer = BufferState::new(
+                path.file_name().map_or_else(
+                    || path.display().to_string(),
+                    |name| name.to_string_lossy().into_owned(),
+                ),
+                String::new(),
+                Some(path),
+            );
+            buffer.sync_to_disk_state(Some(disk_state));
+            Self::mark_settings_buffer(app, &mut buffer);
+
+            let tab = WorkspaceTab::new(buffer);
+            let cold_tab = crate::app::services::session_store::cold_tab_from_workspace_tab(&tab);
+            tabs_to_add.push((tab, cold_tab));
+            summary.record_outcome(OpenPathOutcome::Opened {
+                artifact_warning: None,
+            });
+        }
+
+        if !tabs_to_add.is_empty() {
+            app.reload_settings_before_workspace_change();
+            crate::app::app_state::frame::begin_layout_transition(app);
+            for (tab, cold_tab) in tabs_to_add {
+                app.tab_manager.tabs.push(tab);
+                let index = app.tab_manager.tabs.len() - 1;
+                app.tab_manager.set_cold_session_tab(index, cold_tab);
+            }
+            app.tab_manager
+                .set_active_tab_index_clamped(app.tab_manager.tabs.len().saturating_sub(1));
+            app.tab_manager.rebuild_buffer_tab_index();
+            app.apply_current_tab_ordering();
+            crate::app::app_state::settings_controller::activate_workspace_surface(app);
+            crate::app::app_state::workspace::display_tabs::select_only_tab_slot(
+                app,
+                crate::app::app_state::workspace::display_tabs::active_tab_slot_index(app),
+            );
+            crate::app::app_state::workspace::accessors::request_focus_for_active_view(app);
+            crate::app::app_state::workspace::display_tabs::ensure_active_tab_slot_selected(app);
+            crate::app::app_state::search_runtime::mark_search_dirty(app);
+        }
+        if summary.opened_count > 0 {
+            app.tab_manager.mark_session_dirty();
+            let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
+        }
+        Self::apply_open_summary(app, summary);
     }
 
     pub(super) fn activate_existing_path(app: &mut ScratchpadApp, path: &Path) -> Option<String> {
@@ -448,6 +528,46 @@ mod tests {
 
         assert_eq!(open_path_count(&app, &path), 1);
         assert!(app.state.pending_open_file_paths.is_empty());
+    }
+
+    #[test]
+    fn large_open_batch_creates_cold_tabs_and_hydrates_on_activation() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = (0..super::LAZY_OPEN_BATCH_THRESHOLD)
+            .map(|index| {
+                let path = directory.path().join(format!("lazy_{index}.txt"));
+                std::fs::write(&path, format!("loaded {index}")).unwrap();
+                path
+            })
+            .collect::<Vec<_>>();
+        let mut app = test_app(
+            directory.path(),
+            vec![WorkspaceTab::new(BufferState::new(
+                "start.txt".to_owned(),
+                String::new(),
+                None,
+            ))],
+        );
+
+        FileController::open_selected_paths_async(&mut app, paths.clone());
+
+        assert_eq!(app.tab_manager.cold_session_tabs().len(), paths.len());
+        assert!(app.state.pending_open_file_paths.is_empty());
+        let active_index = app.tab_manager.active_tab_index;
+        let active_text = app.tab_manager.tabs.as_slice()[active_index]
+            .active_buffer()
+            .text();
+        assert!(active_text.is_empty());
+
+        assert!(app.hydrate_tab_if_needed(active_index));
+
+        assert_eq!(
+            app.tab_manager.tabs.as_slice()[active_index]
+                .active_buffer()
+                .text(),
+            format!("loaded {}", paths.len() - 1)
+        );
+        assert_eq!(app.tab_manager.cold_session_tabs().len(), paths.len() - 1);
     }
 
     #[test]
