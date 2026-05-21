@@ -1,154 +1,126 @@
 # Scratchpad User Manual
 
-Scratchpad is a Windows text editor built as a safe-by-design Notepad replacement for everyday text work.
+Scratchpad is a Windows-first plain-text editor for everyday text work. It is
+designed for notes, logs, reports, copied terminal output, encoded files, and
+temporary scratch work rather than coding projects.
 
-It is designed to stay responsive, restore work safely, handle awkward encodings and control-character artifacts visibly, and support multi-file workspaces without becoming a coding-first editor.
+The app keeps work local, restores sessions, warns about risky file-format
+choices, and lets one tab hold either a single document or a tiled workspace of
+several file views.
 
-## Getting Started
+## Start Here
 
-The fastest way to get moving is:
+Use these commands first:
 
-1. Press `Ctrl + O` to open one or more files as tabs.
-2. Press `Ctrl + Shift + O` to open files into the current workspace as tiles.
-3. Press `Ctrl + Shift + Arrow` to split the active tile.
-4. Press `Ctrl + T` to promote the active tile into its own tab.
-5. Press `Ctrl + F` to search.
-6. Press `F1` to open this manual.
+- `Ctrl + N`: create a new untitled tab.
+- `Ctrl + O`: open files using the current opening preference.
+- `Ctrl + Shift + O`: open files into the active workspace.
+- `Ctrl + S`: save the active file.
+- `Ctrl + Shift + S`: save the active file as another path.
+- `Ctrl + F`: search.
+- `Ctrl + H`: search with replace focused.
+- `Ctrl + ,`: open Settings.
+- `F1`: open this manual.
 
-The top toolbar also provides Open File, Save As, and Search buttons. When the tab list is placed on the left or right, those actions move into the vertical toolbar with Open File, Save, Search, and the window controls.
+The toolbar also exposes common actions such as new tab, open, save, and search.
+When the tab list is on the left or right, the toolbar becomes vertical.
 
-## Core Concepts
+## How Scratchpad Is Organized
 
-### Workspace Tabs
+### Tabs
 
-Each top-level tab is a workspace. A workspace can hold one file or several tiled file views.
+A top-level tab is a workspace. A workspace may contain one editor tile or many
+tiles. Tabs can be reordered, selected as a group, renamed, closed, or combined
+with other workspace tabs.
 
-If several files belong to the same task, keep them together in one workspace. If a workspace grows too large, promote one tile or promote all files back into separate tabs.
+The Settings surface can also appear as a tab slot. It behaves like an app page,
+not a normal text file, although the TOML settings file can be opened from
+Settings when you want to edit it directly.
 
 ### Tiles, Views, and Buffers
 
-A tile is one editor view inside a workspace.
+A tile is one editor view inside a workspace. A buffer is the underlying
+document. Several tiles can point at the same buffer, which is useful when you
+want two views of one long file.
 
-A buffer is the underlying document. Several tiles can show the same buffer, which lets you keep multiple views of one file open in the same workspace.
-
-Tiles can be activated, split, resized, closed, or promoted into their own tab.
-
-### Active Focus
-
-Most commands apply to the active editor tile. Click a tile, select a search result, use `F6`, or use the tab strip to change the active target.
+Most commands act on the active tile. Click inside a tile, choose a search
+result, or press `F6` / `Shift + F6` to move focus between tiles.
 
 ### Open Here
 
-Open Here adds incoming files to the current workspace rather than opening each file as a separate top-level tab. It is available from `Ctrl + Shift + O`, the tab context menu, and startup switches such as `/here` and `/addto`.
+Open Here adds files to the active workspace instead of opening each file as a
+separate tab. Use it when several documents belong together.
 
-### Settings Surface
+Open Here is available from `Ctrl + Shift + O`, the tab context menu, recent
+file actions when opening into the current tab, and startup switches such as
+`/here` and `/addto`.
 
-Settings is a normal app surface that can appear as a tab slot. Press `Ctrl + ,`, click the status-bar gear, or click its tab slot if it is already open.
+## Opening and Startup
 
-The settings file itself is TOML and can also be opened as a normal text file from the Settings page.
+Inside the app:
 
-## Opening Files and Starting Scratchpad
-
-### In the App
-
-- `Ctrl + O`: open one or more files according to the file-open setting.
+- `Ctrl + O`: open one or more files.
 - `Ctrl + Shift + O`: open one or more files into the active workspace.
-- `Ctrl + N`: create a new untitled tab.
-- `F1`: open this manual.
-- Open File button: open files from the toolbar.
-- New Tab `+` button: create a new untitled tab from the horizontal or vertical tab list.
-- Tab context menu > New Tab: create a new tab.
+- Tab context menu > Open File: open through the tab menu.
 - Tab context menu > Open File Here: add files to that workspace.
+- Recent files submenu: reopen recently closed files when recent files are
+  enabled.
 
-If a file is already open, Scratchpad activates the existing view instead of opening a duplicate. If Open Here targets a file that is open in another tab, Scratchpad moves or combines that tab into the active workspace.
+If a file is already open, Scratchpad activates the existing document instead of
+creating an accidental duplicate. When Open Here targets an already-open file,
+Scratchpad moves or combines the existing tab into the target workspace.
 
-### Command Line
-
-Scratchpad supports:
+Command-line form:
 
 ```text
 scratchpad.exe [switches] [files...]
 ```
 
-Available switches:
+Supported switches:
 
-- `/clean`: start with one fresh untitled tab and skip session restore.
-- `/here`: add incoming files into the active workspace tab.
+- `/clean`: start with a fresh untitled tab and skip session restore.
+- `/here`: add incoming files to the active workspace.
 - `/addto`: alias for `/addto:active`.
-- `/addto:active`: add incoming files into the active workspace tab.
-- `/addto:index:N`: add incoming files into the Nth tab, using a 1-based index.
+- `/addto:active`: add incoming files to the active workspace.
+- `/addto:index:N`: add incoming files to the Nth restored tab, using a 1-based
+  index.
 - `/files:"a","b"`: pass a comma-delimited quoted file list in one argument.
-- `/help` or `/?`: show usage text.
-- `/version`: print the app version and exit.
+- `/help` or `/?`: print help text.
+- `/version`: print the app version.
 
-`/clean` cannot be combined with `/addto:index:N`, because there is no restored tab index to target.
+Examples:
 
-## Saving and File Safety
+```text
+scratchpad.exe "C:\notes\a.txt" "C:\notes\b.txt"
+scratchpad.exe /clean "C:\notes\a.txt"
+scratchpad.exe /here "C:\notes\a.txt"
+scratchpad.exe /addto:active /files:"C:\a.txt","C:\b.txt"
+```
 
-### Save Commands
-
-- `Ctrl + S`: save the active file.
-- Toolbar Save As button: choose a path and save the active file.
-- Tab context menu > Save: save the active file for that tab.
-- Tab context menu > Save All: save all open files.
-- Encoding dialog > Save: save the active file using the selected encoding.
-
-Untitled files open a Save As dialog when saved. If the file name has no extension, Scratchpad suggests `.txt`.
-
-### Save Conflicts
-
-Before saving, Scratchpad refreshes the active file's disk state.
-
-If the file changed on disk, the save conflict dialog offers:
-
-- Overwrite: write the current buffer back to disk.
-- Reload: discard local buffer state and reload from disk.
-- Save As Copy: save the current buffer to a new file.
-- Cancel: dismiss the prompt.
-
-If the file is missing on disk, the dialog offers:
-
-- Recreate the file at its original path.
-- Discard this missing file tab.
-
-### Unsaved Changes
-
-Closing a dirty tab or closing the last tile that owns a dirty buffer prompts:
-
-- Save changes
-- Discard changes
-- Cancel
-
-Bulk close actions such as Close Others, Close Right/Down, and Close All skip tabs with unsaved changes and report how many were skipped. Close Saved closes only clean tabs.
-
-### Encoding and Line Endings on Save
-
-Scratchpad preserves the active file's detected encoding, supported BOM state, and line-ending metadata where possible. If the current text cannot be represented in the chosen encoding, Scratchpad warns before writing.
-
-Inserted and pasted line breaks are normalized to the document's preferred line ending. Mixed line endings are tracked and preserved unless an explicit future normalization command changes them.
+`/clean` cannot be combined with `/addto:index:N` because there is no restored
+tab index to target.
 
 ## Editing Text
 
-### Typing and Insertion
+Normal typing, selection, clipboard, IME input, and mouse editing work as
+expected.
 
-- Type normally to insert text.
-- IME preedit and commit input are supported.
-- `Enter`: insert the document's preferred line ending.
-- `Tab`: insert a tab character.
-- `Shift + Tab`: outdent the current line by removing leading spaces or one leading tab when possible.
-- Paste text with standard paste input, the context-menu Paste button, or `Shift + Insert`.
+Core editing commands:
 
-### Selection and Mouse
+- `Ctrl + A`: select all text in the active editor.
+- `Ctrl + Z`: undo the last text operation.
+- `Ctrl + Y`: redo the last undone text operation.
+- `Alt + Backspace`: classic undo shortcut.
+- `Backspace`: delete backward or delete the selection.
+- `Delete`: delete forward or delete the selection.
+- `Ctrl + Backspace`: delete the previous word.
+- `Ctrl + Delete` / `Alt + Delete`: delete the next word.
+- `Tab`: insert a tab.
+- `Shift + Tab`: outdent the current line when possible.
+- `Ctrl + Insert`: copy the current selection.
+- `Shift + Insert`: paste.
 
-- Click: place the caret.
-- `Shift + Click`: extend the existing selection.
-- Drag: select text.
-- Double-click: select a word.
-- Triple-click: select a visual line.
-- Right-click: open the editor context menu. If the click is outside the current selection, the caret moves to the clicked position first. If it is inside the selection, the selection is preserved.
-- Scroll wheel and scrollbars: scroll the active editor.
-
-### Caret Movement
+Caret movement:
 
 - Arrow keys: move by character or line.
 - `Ctrl + Left` / `Ctrl + Right`: move by word.
@@ -157,210 +129,228 @@ Inserted and pasted line breaks are normalized to the document's preferred line 
 - `End`: move to the current line content end.
 - `Ctrl + Home`: move to the start of the document.
 - `Ctrl + End`: move to the end of the document.
-- `Page Up` / `Page Down`: move by a page of document lines.
+- `Page Up` / `Page Down`: move by a page.
 - Add `Shift` to movement keys to extend the selection.
-- `Ctrl + A`: select all text in the active editor.
 
-### Delete, Cut, Copy, and Paste
+Mouse behavior:
 
-- `Backspace`: delete backward or delete the current selection.
-- `Delete`: delete forward or delete the current selection.
-- `Ctrl + Backspace`: delete backward by word.
-- `Alt + Backspace`: classic undo shortcut.
-- `Ctrl + Delete` / `Alt + Delete`: delete forward by word.
-- Standard Copy/Cut/Paste events are supported.
-- `Ctrl + Insert`: copy the current selection.
-- `Shift + Insert`: request paste.
-- Editor context menu rail: Cut, Copy, Paste, Select All.
-- Editor context menu > Delete: delete the current selection.
+- Click: place the caret.
+- `Shift + Click`: extend the current selection.
+- Drag: select text.
+- Double-click: select a word.
+- Triple-click: select a visual line.
+- Right-click: open the editor context menu.
+- Mouse wheel and scrollbars: scroll the active editor.
 
-### Undo and Redo
+## Saving and File Safety
 
-- `Ctrl + Z`: undo the last text operation in the focused document.
-- `Ctrl + Y`: redo the last text operation in the focused document.
-- `Alt + Backspace`: classic undo shortcut.
-- Editor context menu > Undo / Redo.
-- Search dialog undo/redo buttons.
-- History dialog rows can move the document to a selected undo or redo point.
+Save commands:
 
-Undo history is per file and can be tuned in Settings > Advanced > Memory Assigned to Undo Operations.
+- `Ctrl + S`: save the active file.
+- `Ctrl + Shift + S`: save the active file as another path.
+- Tab context menu > Save: save that tab's active file.
+- Tab context menu > Save All: save every open file.
+- Encoding dialog > Save: save using the selected encoding.
+
+Untitled files open Save As. If a new file name has no extension, Scratchpad
+suggests `.txt`.
+
+Before saving, Scratchpad refreshes the file's disk state. If the file changed
+outside Scratchpad, the save-conflict dialog lets you overwrite, reload from
+disk, save a copy, or cancel. If the file is missing, you can recreate it or
+discard the missing-file tab.
+
+When closing dirty work, Scratchpad asks whether to save, discard, or cancel.
+Bulk close commands skip tabs with unsaved changes and report how many were
+skipped. Close Saved closes only clean tabs.
+
+## Encoding, Newlines, and Artifacts
+
+Scratchpad is built for plain text that may not be clean UTF-8.
+
+It detects byte order marks first, then falls back to heuristic encoding
+detection. The active file's encoding, BOM state, and line-ending style are
+shown in the status bar. Non-default or risky states are highlighted.
+
+Scratchpad tracks:
+
+- UTF-8 and common legacy encodings.
+- UTF-16 little-endian and big-endian files.
+- BOM state where supported.
+- CRLF, LF, CR, and mixed line endings.
+- Characters that cannot be represented by the selected save encoding.
+- Control characters and terminal-style artifacts such as ANSI escapes,
+  carriage-return output, and overprint patterns.
+
+Open encoding actions from:
+
+- `Ctrl + Shift + E`
+- the status-bar encoding label
+- tab context menu > Encoding
+
+The Encoding dialog offers:
+
+- Reopen: reload the file from disk using the selected encoding. This requires a
+  saved path and no unsaved edits.
+- Save: write the active file using the selected encoding. Untitled files open
+  Save As.
+
+Choosing the wrong encoding can permanently change characters on disk, so the
+warning in that dialog is intentional.
+
+Display controls:
+
+- `Ctrl + Alt + C`: toggle control-character display for the active buffer.
+- `Ctrl + Alt + R`: toggle left-to-right / right-to-left reading order.
+- Editor context menu > Unicode: access reading order, control characters, and
+  inserted control marks.
 
 ## Search and Replace
 
 Open search with:
 
 - `Ctrl + F`
-- Toolbar Search button
-- Editor context menu > Find
+- toolbar Search
+- editor context menu > Find
 
 Open search with replace focused using:
 
 - `Ctrl + H`
-- Editor context menu > Replace
+- editor context menu > Replace
 
-The search window is movable. Close it with `Esc` while focused, the close button in the search header, or the toolbar Search button when search is already open.
+Search supports:
 
-### Search Fields
+- selection-only scope
+- active-file scope
+- current-workspace scope
+- all-open-tabs scope
+- plain-text search
+- regex search
+- case-sensitive matching
+- whole-word matching
+
+When search opens with text selected, Scratchpad starts in selection scope.
+Otherwise it starts in active-file scope.
+
+Search field commands:
 
 - Find field `Enter`: next match.
 - Find field `Shift + Enter`: previous match.
 - Replace field `Enter`: replace current match.
 - `Ctrl + Enter`: replace current match.
 - `Alt + Enter`: replace all matches in the current scope.
-- `Esc`: close search.
+- `Esc`: close search when search is focused.
 
-### Search Options
+Search results are grouped by file. Click a file result to focus its first
+match, expand a file to inspect individual rows, or click a row to jump to that
+exact match.
 
-Search supports:
+Replace is enabled only while results are current. If a buffer changes and
+results become stale, refresh search before replacing. Replace All across
+multiple files uses a confirmation step so broad edits are harder to trigger by
+accident.
 
-- Selection-only scope
-- Active file scope
-- Current workspace-tab scope
-- All-open-tabs scope
-- Plain text mode
-- Regex mode
-- Case-sensitive matching
-- Whole-word matching
+Search covers files already open in Scratchpad. It does not search unopened
+folders.
 
-If text is selected when search opens, Scratchpad defaults to selection-only scope. Otherwise it defaults to the active file.
+## Tabs and Workspaces
 
-### Result List
-
-- Click a file result pill to focus that file at its first match.
-- Click a caret beside a file result to expand or collapse the file's match rows.
-- Click a match row to activate that exact match.
-- The active match is highlighted in both the editor and the result list.
-
-Search only covers text already open in Scratchpad. It does not search unopened files or folders.
-
-### Replace Behavior
-
-Replace is enabled only when search results are current and valid.
-
-- Replace Current replaces the active match and then advances within the active buffer.
-- Replace All replaces every match in the selected scope.
-- Replace All across multiple buffers requires running Replace All twice. The first run reports the number of matches and buffers; the second confirms.
-- Regex replacement uses the active regex program's replacement expansion.
-
-If results become stale because the buffer changed, replacement is blocked until search refreshes.
-
-## Tabs and Workspace Management
-
-### Activate and Select Tabs
+Activate and select tabs:
 
 - Click a tab to activate it.
-- Click the Settings tab to return to Settings.
-- `Shift + Click` a tab: select a range of tab slots.
-- `Ctrl + Click` a tab: toggle that tab slot in the selection.
-- Click a tab in the overflow menu to activate it.
-- Right-click a tab or empty tab-list space for the tab context menu.
+- `Shift + Click`: select a range of tab slots.
+- `Ctrl + Click`: toggle a tab slot in the selection.
+- Click a tab in overflow to activate it.
+- Right-click a tab, the overflow button, or empty tab-list space for tab
+  commands.
 
-### Rename Tabs and Files
+Rename:
 
+- `F2`: rename the active workspace tab.
 - Double-click a workspace tab to rename it.
 - Tab context menu > Rename also starts rename.
-- `Enter`: commit the rename.
+- `Enter`: commit the new name.
 - `Esc`: cancel the rename.
-- Losing focus commits the rename if the name is valid.
 
-For saved files, rename also renames the file on disk. Names are normalized as file names, not paths; if no extension is supplied, `.txt` is added. The settings file cannot be renamed from the tab strip.
+Renaming a saved single-file tab also renames the file on disk. Scratchpad
+normalizes the entered name as a file name, not a path. If no extension is
+supplied, `.txt` is added. The Settings tab cannot be renamed from the tab
+strip.
 
-### Reorder, Group, and Combine Tabs
+Reorder and combine:
 
 - Drag a tab to reorder it.
-- Select multiple tabs with `Shift + Click` or `Ctrl + Click`, then drag one selected tab to move the group.
-- Drag a tab onto the center of another workspace tab to combine them into one tiled workspace.
-- Drag a selected group onto a workspace tab to combine the group into that workspace.
-- When tabs overflow, use the overflow button to select, close, promote, or drag tabs. While dragging, hovering over the overflow button opens the overflow list after a short delay.
+- Select multiple tabs and drag one selected tab to move the group.
+- Drag a tab onto the center of another workspace tab to combine them.
+- Drag a selected group onto a workspace tab to combine the group.
+- Use the overflow list when there are more tabs than fit in the visible strip.
 
-The Settings tab can be selected and moved visually, but workspace combining applies only to workspace tabs.
-
-### Promote Tabs and Tiles
+Promote:
 
 - `Ctrl + T`: promote the active tile into its own tab.
-- `Ctrl + Shift + T`: promote all files in the active workspace into separate tabs.
-- Tab promote button: promote all files in a multi-file workspace.
-- Tile header Promote Tile button: promote that tile.
-- Editor context menu > Promote Tile.
+- `Ctrl + Shift + T`: promote every file in the active workspace into separate
+  tabs.
+- Tile header > Promote Tile: promote that tile.
+- Editor context menu > Promote Tile: promote that tile.
+- Tab promote button: promote files from a multi-file workspace.
 
-### Close Tabs and Tiles
+Close:
 
 - `Ctrl + W`: close the active tab, or close Settings when Settings is open.
-- `Ctrl + Shift + W`: close the active tile when the workspace has more than one tile.
-- Tab close button: request close for that tab.
+- `Ctrl + Shift + W`: close the active tile when the workspace has more than
+  one tile.
+- Tab close button: close that tab.
 - Tile close button: close that tile.
-- Editor context menu > Close Tile.
+- Editor context menu > Close Tile: close the active tile.
 - Window close button: persist settings and session, then close Scratchpad.
 
-When only one tile remains in a workspace, closing the tab and closing the tile are no longer the same action. `Ctrl + Shift + W` only closes a tile when there is more than one tile.
+Tab context menu groups:
 
-### Tab Context Menu
+- File actions: New Tab, Open File, Open File Here, recent files, Rename, Save,
+  Save All.
+- Tab list actions: hide or pin the tab list, place tabs Top/Bottom/Left/Right,
+  and choose tab ordering.
+- Location actions: Encoding, Copy Path, Reveal In Explorer.
+- Close actions: Close, Close Others, Close Right or Close Down, Close Saved,
+  Close All.
 
-Right-click a tab, the overflow button, or empty tab-list space to open tab commands.
+Useful tab/list shortcuts:
 
-File actions:
+- `Ctrl + Shift + C`: copy the active file path.
+- `Ctrl + Shift + R`: reveal the active file in Explorer.
+- `Ctrl + Shift + B`: toggle auto-hide for the tab list.
 
-- New Tab
-- Open File Here
-- Rename
-- Save
-- Save All
+## Tiles and Splits
 
-Tab-list actions:
+Tiles let one workspace show several views at once.
 
-- Hide Tab List or Pin Tab List
-- Place tab list at Top, Bottom, Left, or Right
-- Order Tabs
-- Choose tab ordering: Custom Order, File Name, File Size, File Age, Recent Edit
-
-Location actions:
-
-- Encoding
-- Copy Path
-- Reveal In Explorer
-
-Close actions:
-
-- Close
-- Close Others
-- Close Right for horizontal tab lists
-- Close Down for vertical tab lists
-- Close Saved
-- Close All
-
-## Tiles, Splits, and Layout
-
-### Activate Tiles
+Navigate:
 
 - Click inside a tile to activate it.
-- Right-click an inactive tile to activate it and open the context menu.
-- `F6`: move to the next tile in layout order.
+- Right-click an inactive tile to activate it and open its context menu.
+- `F6`: move to the next tile.
 - `Shift + F6`: move to the previous tile.
 
-### Split Tiles
+Split:
 
-Keyboard:
-
-- `Ctrl + Shift + Left`: split the active tile and place the new view to the left.
-- `Ctrl + Shift + Right`: split and place the new view to the right.
+- `Ctrl + Shift + Left`: split the active tile and place the new view left.
+- `Ctrl + Shift + Right`: split and place the new view right.
 - `Ctrl + Shift + Up`: split and place the new view above.
 - `Ctrl + Shift + Down`: split and place the new view below.
+- Tile split control: click for the default split, or drag in a direction to
+  preview and create that split.
+- Editor context menu > Split: split right by default.
+- Editor context menu > Split submenu: choose Left, Right, Up, or Down.
 
-Mouse:
+Resize:
 
-- Hover a tile to show tile controls.
-- Click the tile split control for the default split action.
-- Drag the tile split control left, right, up, or down to preview and create a split in that direction.
-- Editor context menu > Split creates the default split.
-- Editor context menu > Split submenu offers Split Left, Split Right, Split Up, and Split Down.
-
-### Resize Splits
-
-Drag the divider between tiles to resize the split. Vertical dividers resize left/right space; horizontal dividers resize top/bottom space.
+- Drag the divider between tiles.
+- Vertical dividers resize left/right space.
+- Horizontal dividers resize top/bottom space.
 
 ## Editor Context Menu
 
-Right-click the editor to open:
+Right-click the editor for:
 
 - Undo
 - Redo
@@ -377,38 +367,22 @@ Right-click the editor to open:
 - Paste
 - Select All
 
-### Unicode Menu
-
-The Unicode submenu includes:
-
-- Left to Right / Right to Left reading order toggle.
-- Control Chars toggle, when control characters are available or already shown.
-- Insert Control submenu.
-- Reconversion, currently unavailable.
-
-Insert Control includes:
-
-- LRM: left-to-right mark
-- RLM: right-to-left mark
-- ZWJ: zero-width joiner
-- ZWNJ: zero-width non-joiner
-- LRE, RLE, LRO, RLO, PDF: bidirectional formatting controls
-- NADS, NODS, ASS, ISS, AAFS, IAFS: legacy shaping and digit controls
-- RS: record separator
-- US: unit separator
+The Unicode submenu includes reading-order controls, the control-character
+toggle, and common invisible control marks such as LRM, RLM, ZWJ, ZWNJ,
+directional formatting marks, record separator, and unit separator.
 
 ## Status Bar
 
-The status bar shows:
+The status bar summarizes the active file and current editor state:
 
 - file path or `Untitled`
 - line count
 - cursor line and column
 - selection character count
-- encoding
+- encoding and BOM state
 - line-ending style
 - disk freshness warnings
-- non-compliant character warnings
+- encoding compliance warnings
 - status and error messages
 
 Interactions:
@@ -416,182 +390,137 @@ Interactions:
 - Double-click the path to copy it.
 - Double-click the line count to toggle line numbers.
 - Click the encoding label to open encoding actions.
-- Click the control-character icon to show or hide control characters when available.
+- Click the control-character indicator to toggle control-character display.
 - Click the history icon to open text history.
 - Click the gear icon to open Settings.
 
-The status bar can be hidden or shown from Settings > Tab Position > Status bar.
-
-## Encoding and Artifact-Heavy Files
-
-Scratchpad is designed to cope with files that contain:
-
-- mixed or unusual encodings
-- byte order marks
-- ANSI escape sequences
-- control characters
-- carriage-return output artifacts
-- backspace-driven overprint text
-- characters that may not be representable in the chosen save encoding
-
-### Detection
-
-When opening a file, Scratchpad checks for a BOM first. If there is no BOM, it uses heuristic detection and stores the resolved encoding as document metadata.
-
-The status bar shows the active file's encoding. Non-default encodings and BOM state are highlighted.
-
-### Encoding Dialog
-
-Open encoding actions from:
-
-- status bar encoding label
-- tab context menu > Encoding
-
-The dialog shows the active file, a common-encoding selector, and two actions:
-
-- Reopen: reload the file from disk using the selected encoding. This requires a saved path and no unsaved edits.
-- Save: write the active file using the selected encoding. Untitled files open Save As.
-
-The compatibility warning is intentional: choosing the wrong encoding can permanently corrupt characters or lose character mapping data.
+Use `Ctrl + Shift + M` to open the status-message history dialog. Use Settings
+to show or hide the status bar.
 
 ## Text History
 
-Open History from:
+Open text history from:
 
+- `Ctrl + Shift + H`
 - editor context menu > History
-- status bar history icon
+- status-bar history icon
 
-History shows operation-based text edits. It includes normal typing, deletes, cuts, pastes, and search replacements.
+History shows operation-based text edits such as typing, deletes, cuts, pastes,
+and search replacements.
 
-Controls:
+The dialog includes:
 
-- Timeline: show all text changes in recent order.
-- By file: group text changes by file.
-- Follow undo toggle: when enabled, applying a history row also follows focus to the affected file.
+- Timeline: recent text changes in order.
+- By file: grouped text changes.
+- Follow undo: move focus to the file affected by the chosen history row.
 - Clear all text history.
-- Close button.
 
-Interactions:
+Click an applied history row to undo back to that point. Click a dimmed undone
+row to redo forward. The `Now` line marks the current undo position.
 
-- Click a history row that has been applied to undo back to that change.
-- Click a dimmed undone row to redo that change.
-- In By file view, click a file header or caret to expand or collapse that file's history.
-- The `Now` line marks the current undo position.
+Undo history is per document and can be tuned in Settings > Advanced > Memory
+Assigned to Undo Operations.
 
 ## Settings
 
 Open Settings with:
 
 - `Ctrl + ,`
-- status-bar gear
-- clicking the Settings tab when it is already open
+- the status-bar gear
+- the Settings tab slot when it is visible
 
 Close Settings with:
 
 - `Esc`
 - `Ctrl + W`
-- Settings tab close button
+- the Settings tab close button
 
-Settings cards can be expanded or collapsed by clicking their headers.
+Settings are grouped into expandable cards:
 
-### Text Formatting
+- Text Formatting: font family, font size, gutter width, preview, and word wrap.
+- Appearance: theme mode, text color, background color, search highlight color,
+  and preview.
+- Opening: file-open behavior, startup/session behavior, and recent files.
+- Tab Position: tab-list placement, new-tab placement, auto-hide behavior, and
+  status-bar visibility.
+- Advanced: settings file, undo memory budgets, and reset to defaults.
 
-Settings > Text Formatting includes:
+The settings file is TOML. Opening it from Settings creates a normal editable
+text tab.
 
-- Font family
-- Font size
-- Editor gutter width
-- Preview panel
-- Word wrap
+## Session Restore
 
-### Appearance
+Scratchpad can restore your previous session, including open tabs, tiled
+workspace layout, font size, word wrap, and persisted unsaved state.
 
-Settings > Appearance includes:
+Startup behavior is controlled in Settings > Opening. Choose whether Scratchpad
+continues the previous session or starts fresh.
 
-- Theme mode: system, light, dark, or custom when colors are overridden
-- Text color
-- Background color
-- Search highlight color
-- Preview panel
+If a restored file no longer matches disk, Scratchpad shows a restore-conflict
+dialog with options to keep the session version, use the disk version, or
+dismiss the prompt.
 
-### Opening
-
-Settings > Opening includes:
-
-- Opening files: open in a new tab or in the current tab
-- Startup behavior: continue previous session, or start fresh and discard unsaved session changes
-- Recent files toggle
-
-### Tab Position
-
-Settings > Tab Position includes:
-
-- Tab list position: Top, Bottom, Left, Right
-- New tab placement: Start, End, Before selection, After selection
-- Auto-hide tab list
-- Auto-hide delay
-- Status bar visibility
-
-### Advanced
-
-Settings > Advanced includes:
-
-- Settings file card: open the TOML settings file.
-- Memory Assigned to Undo Operations: per-file, total, and persisted-session undo budgets.
-- Reset to defaults.
-
-## Session Restore and Startup Conflicts
-
-Scratchpad can restore the previous session, including open tabs, workspace layout, font size, word wrap, and safely persisted session state.
-
-If a restored session conflicts with an updated disk version, Scratchpad shows a restore conflict dialog:
-
-- Keep Session Version
-- Use Disk Version
-- Dismiss
-
-Session restore behavior is controlled from Settings > Opening > When Scratchpad starts.
-
-## Window and Chrome
+## Window and View Controls
 
 Window controls:
 
-- Minimize button: minimize Scratchpad.
-- Maximize/Restore button: toggle maximized state.
-- Close button: persist settings and session, then close.
+- Minimize: minimize Scratchpad.
+- Maximize/Restore: toggle maximized state.
+- Close: persist settings and session, then close.
 - Drag empty title/tab-strip space to move the window.
 - Double-click empty title/tab-strip space to maximize or restore.
-- When tabs are left or right, hover near the top edge to reveal the top drag button; drag it to move the window or double-click it to maximize or restore.
-- Drag the window edges or corners to resize when not maximized.
+- Drag window edges or corners to resize when not maximized.
+
+When tabs are left or right, hover near the top edge to reveal the top drag
+button. Drag it to move the window or double-click it to maximize or restore.
 
 View controls:
 
-- `Ctrl + +` or `Ctrl + =`: increase editor font size.
+- `Ctrl + +` / `Ctrl + =`: increase editor font size.
 - `Ctrl + -`: decrease editor font size.
-- `Ctrl + Mouse Wheel` or the platform zoom gesture over the editor: adjust editor font size.
-- `Shift + Mouse Wheel` over the editor: adjust editor font size.
-- `Ctrl + 0`: toggle line numbers for the current workspace tab.
+- `Ctrl + Mouse Wheel`: adjust editor font size.
+- `Shift + Mouse Wheel`: adjust editor font size.
+- `Ctrl + 0`: toggle line numbers for the active workspace tab.
 
-## Keyboard Shortcut Reference
+## Shortcut Reference
 
-Global and app-level shortcuts:
+App shortcuts:
 
-- `F1`: open the user manual.
+- `F1`: open this manual.
+- `F2`: rename the active workspace tab.
 - `F6`: move to the next tile.
 - `Shift + F6`: move to the previous tile.
+- `Esc`: close Settings or search when focused/open.
 - `Ctrl + N`: new tab.
 - `Ctrl + O`: open file.
-- `Ctrl + Shift + O`: open file here as tile(s).
+- `Ctrl + Shift + O`: open file here.
+- `Ctrl + S`: save.
+- `Ctrl + Shift + S`: save as.
+- `Ctrl + W`: close active tab or Settings.
 - `Ctrl + ,`: open Settings.
-- `Esc`: close Settings or search when focused/open.
-- `Ctrl + W`: close active tab or close Settings.
-- `Ctrl + S`: save active file.
-- `Ctrl + F`: open search.
-- `Ctrl + H`: open search and focus replace.
-- `Ctrl + T`: promote active tile to its own tab.
-- `Ctrl + Shift + T`: promote all files in the active workspace to separate tabs.
+
+Search, history, and diagnostics:
+
+- `Ctrl + F`: find.
+- `Ctrl + H`: replace.
+- `Ctrl + Shift + H`: text history.
+- `Ctrl + Shift + M`: status-message history.
+
+Tabs, files, and paths:
+
+- `Ctrl + T`: promote active tile.
+- `Ctrl + Shift + T`: promote all files in the workspace.
 - `Ctrl + Shift + W`: close active tile.
-- `Ctrl + Shift + Arrow`: split active tile.
+- `Ctrl + Shift + E`: encoding dialog.
+- `Ctrl + Shift + C`: copy active file path.
+- `Ctrl + Shift + R`: reveal active file in Explorer.
+- `Ctrl + Shift + B`: toggle tab-list auto-hide.
+
+Display and layout:
+
+- `Ctrl + Shift + Arrow`: split the active tile.
+- `Ctrl + Alt + C`: toggle control-character display.
+- `Ctrl + Alt + R`: toggle reading order.
 - `Ctrl + +` / `Ctrl + =`: increase font size.
 - `Ctrl + -`: decrease font size.
 - `Ctrl + 0`: toggle line numbers.
@@ -600,48 +529,34 @@ Editor shortcuts:
 
 - `Ctrl + A`: select all.
 - `Ctrl + Z`: undo.
-- `Alt + Backspace`: classic undo.
 - `Ctrl + Y`: redo.
-- `Enter`: insert line ending.
-- `Tab`: insert tab.
-- `Shift + Tab`: outdent current line.
-- `Backspace`: delete backward or delete selection.
-- `Delete`: delete forward or delete selection.
-- `Ctrl + Backspace`: delete backward by word.
-- `Ctrl + Delete` / `Alt + Delete`: delete forward by word.
-- `Ctrl + Insert`: copy selection.
+- `Alt + Backspace`: undo.
+- `Ctrl + Backspace`: delete previous word.
+- `Ctrl + Delete` / `Alt + Delete`: delete next word.
+- `Ctrl + Insert`: copy.
 - `Shift + Insert`: paste.
-- Arrow keys, `Home`, `End`, `Page Up`, `Page Down`: move the caret.
-- Add `Shift` to movement keys to extend selection.
-- Add `Ctrl` or `Alt` to horizontal arrows for word movement.
+- `Shift + Tab`: outdent.
 
-Search shortcuts:
+Search field shortcuts:
 
-- Find field `Enter`: next match.
-- Find field `Shift + Enter`: previous match.
-- Replace field `Enter`: replace current match.
-- `Ctrl + Enter`: replace current match.
-- `Alt + Enter`: replace all matches.
-- `Esc`: close search.
-
-Rename shortcuts:
-
-- Double-click tab: begin rename.
-- Rename field `Enter`: commit.
-- Rename field `Esc`: cancel.
-
-## The User Manual File
-
-Press `F1` to open this manual.
-
-The manual is a normal Markdown file named `user-manual.md`. Scratchpad does not open it in a protected read-only mode, so you can edit it, save it, keep it in a tab, move it into a tiled workspace, copy its path, or copy it elsewhere.
-
-If the shipped file is updated on disk, Scratchpad opens the updated version the next time you use the manual shortcut.
+- `Enter`: next match or replace current, depending on focused field.
+- `Shift + Enter`: previous match from the find field.
+- `Ctrl + Enter`: replace current.
+- `Alt + Enter`: replace all.
 
 ## Current Limits
 
-- Search only covers files already open in Scratchpad.
-- Context menus cover the main command surface, but a full command palette is still planned.
-- Recent files can be enabled in Settings, but the broader recent-file UI may not be available in all builds.
-- Windows packaging is currently zip-based.
-- Scratchpad intentionally focuses on plain text editing rather than language-aware coding workflows.
+- Search only covers open files.
+- Folder-wide search for unopened files is not available.
+- A full command palette is still planned.
+- Some context-menu coverage is still growing.
+- Recent files can be enabled in Settings, but the broader recent-file surface
+  is still evolving.
+- Scratchpad intentionally stays focused on plain text rather than
+  language-aware coding workflows.
+
+## About This Manual
+
+This manual is a normal Markdown file named `user-manual.md`. Press `F1` to open
+it in Scratchpad. It is not protected or read-only, so you can edit it, save it,
+move it into a tiled workspace, or copy it elsewhere like any other text file.

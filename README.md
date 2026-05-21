@@ -1,73 +1,74 @@
 # Scratchpad
 
-Scratchpad is a Windows-first Rust text editor for everyday text work. It is
-intended to be a safer, more resilient Notepad replacement: small enough to
-trust, explicit about file-format risk, and measured continuously so
-performance and complexity stay visible while the editor evolves.
+Scratchpad is a Windows-first plain-text editor written in Rust. It is built as
+a safer, more capable Notepad replacement for everyday text work: notes, logs,
+exports, terminal output, reports, encoded files, and temporary scratch work.
 
-The project is deliberately focused on plain text instead of software
-development workflows. It does not try to be an IDE, language server host, or
-plugin platform. Its center of gravity is notes, logs, exports, copied terminal
-output, reports, encoded files, and temporary scratch work.
+The app is deliberately not an IDE. It focuses on fast local editing, resilient
+session restore, visible file-format risk, and multi-file workspaces without
+language servers, plugin execution, or cloud sync.
 
-## What Scratchpad Does
+## What It Does Today
 
-- Opens text files into separate tabs or into multi-pane workspace tabs.
-- Lets one workspace tab contain multiple editor tiles, including multiple views
-  of the same buffer.
-- Supports split creation, split resizing, tile promotion, tab combining,
-  drag/drop tab ordering, and tab overflow.
-- Searches and replaces across the current selection, current file, current
+- Opens files as separate tabs or into the active workspace as editor tiles.
+- Lets a workspace tab contain multiple tiled views, including several views of
+  the same file.
+- Supports tile splitting, divider resizing, tile promotion, tab combining,
+  drag/drop tab ordering, multi-tab selection, and tab overflow.
+- Provides search and replace across the selection, active file, current
   workspace tab, or all open tabs.
-- Provides plain-text and regex search, case-sensitive matching, whole-word
-  matching, replace current, and replace-all where the active scope permits it.
-- Detects common encodings and BOMs, preserves supported BOM state, tracks line
-  endings, and warns before unsafe saves.
-- Surfaces artifact-heavy text such as control characters, ANSI escape
-  sequences, carriage-return output, and overprint patterns.
-- Maintains document-local undo/redo plus a text history and transaction-log
-  surface for reviewing recent edits and workspace operations.
-- Restores sessions, settings, tab layout, pane layout, and open-buffer
-  metadata.
-- Keeps measurement-friendly Rust probe binaries in-tree while the reusable
-  measurement producers and dashboard live in sibling repositories.
+- Supports plain-text and regex search, case-sensitive matching, whole-word
+  matching, replace current, and guarded replace-all.
+- Detects BOMs and common encodings, preserves supported BOM and line-ending
+  metadata, and warns before saves that may lose or corrupt characters.
+- Makes control characters and artifact-heavy text visible, including ANSI
+  escape sequences, carriage-return output, overprint patterns, and other
+  non-printing characters.
+- Keeps per-document undo/redo history plus a text-history dialog for reviewing
+  and navigating recent edit operations.
+- Restores sessions, open buffers, workspace layout, settings, tab placement,
+  pane layout, and file metadata.
+- Includes in-app settings for text formatting, appearance, opening behavior,
+  tab placement, status bar visibility, and undo memory budgets.
+- Supports command-line startup switches for clean launches, session restore,
+  opening files, and adding files into an existing workspace.
 
-## Design Goals
+## Design Principles
 
-- Keep general text editing fast and predictable, including large buffers and
-  many open tabs.
-- Make risky file-format decisions visible before bytes are written.
-- Prefer durable local state over cloud sync, update systems, or plugin
-  execution.
-- Use performance, capacity, resource, and complexity measurements as normal
-  development inputs.
-- Keep the product useful for non-code text instead of drifting into a
-  coding-first editor.
+- Keep everyday text editing fast, predictable, and local.
+- Show risky encoding, newline, and disk-state decisions before bytes are
+  written.
+- Treat restored state as important user data, especially unsaved work.
+- Keep the product centered on plain text instead of drifting into a coding
+  workflow.
+- Use profiling, capacity probes, benchmarks, and CI as regular development
+  inputs.
 
-## Current Status
+## Current Limits
 
-Scratchpad is active and usable, but still evolving. Current known gaps include
-a planned command palette, narrower context-menu command coverage than a mature
-editor, and no folder-wide search for unopened files.
-
-## Screenshots
-
-![Scratchpad search dialog](assets/Search%20Dialog.png)
-
-![Scratchpad transaction log](assets/Transaction%20Log.png)
+- Search only covers files already open in Scratchpad.
+- Folder-wide search for unopened files is not implemented.
+- A full command palette is still planned.
+- Context menus cover the main command surface, but not every command yet.
+- Recent files can be enabled in settings, while the broader recent-file UI is
+  still evolving.
+- Windows is the primary supported desktop target and release platform.
 
 ## Build, Test, and Run
 
 Prerequisites:
 
 - Rust via `rustup`
-- Windows for the primary desktop target and packaging flow
+- Windows for the primary app target and installer flow
+- .NET local tools when packaging the Windows MSI
 
-Common commands:
+Common development commands:
 
 ```powershell
 cargo run --release
 cargo test
+cargo clippy --lib --all-features -- -D warnings
+cargo fmt --check
 cargo build --release
 ```
 
@@ -77,31 +78,50 @@ Useful runtime switches:
 scratchpad.exe /help
 scratchpad.exe /version
 scratchpad.exe /clean "C:\notes\a.txt"
+scratchpad.exe /here "C:\notes\a.txt"
 scratchpad.exe /addto:active /files:"C:\notes\a.txt","C:\notes\b.txt"
+scratchpad.exe /addto:index:2 "C:\notes\c.txt"
 ```
 
-## Packaging and Releases
+## Packaging and Release
 
-The GitHub release workflow runs formatting, clippy, tests, validates that the
-tag version matches `Cargo.toml`, builds the Windows MSI installer, uploads it
-as a workflow artifact, and publishes the release asset. Push a tag such as
-`v0.40.0` or run the `Release` workflow manually.
+The release workflow is Windows-based. It checks formatting, runs clippy and
+tests, verifies that the release tag matches `Cargo.toml`, builds the release
+binary, packages a Windows MSI, signs artifacts when signing is configured, and
+uploads both the installer and checksum.
 
-## Measurement Workflow
+Release tags use the `vX.Y.Z` format, matching the package version in
+`Cargo.toml`.
 
-Scratchpad treats measurement as part of the product. Measurement producers now
-live in sibling lens repositories, and the local React/TypeScript dashboard lives
-in the sibling `project-management-board` repository. Scratchpad keeps the Rust
-probe binaries under `src/bin/` and JSON artifacts under `target/analysis/`.
-
-Start the dashboard with:
+Local installer packaging:
 
 ```powershell
-cd ..\project-management-board
-npm run dev
+dotnet tool restore
+cargo build --release --locked
+.\scripts\package-windows-installer.ps1 -Version 0.40.0
 ```
 
-The detailed measurement catalog lives in
+Signing details live in
+[docs/windows-release-signing.md](docs/windows-release-signing.md).
+
+## Measurement
+
+Scratchpad owns the Rust probes and benchmarks that compile against the app.
+The reusable measurement producers and dashboard live in sibling repositories.
+
+Scratchpad-owned measurement entry points include:
+
+- `src/bin/capacity_probe.rs`
+- `src/bin/frame_metrics.rs`
+- `src/bin/resource_probe.rs`
+- `src/bin/profile_*.rs`
+- `benches/search_speed.rs`
+- `benches/frame_budget.rs`
+
+Generated measurement artifacts are written under `target/analysis/` for the
+sibling dashboard to consume.
+
+The current measurement boundary is documented in
 [docs/measurement-tools.md](docs/measurement-tools.md).
 
 ## Repository Map
@@ -111,17 +131,21 @@ src/
   main.rs                 Desktop entry point and native window setup
   lib.rs                  Public crate surface
   app/
-    app_state/            Frame loop, workspace state, settings state, search state
+    app_state/            Frame loop, workspace state, settings, search state
     chrome/               Custom window chrome and caption buttons
-    commands/             Command dispatch and tab/view transfer operations
+    commands/             Command dispatch and workspace operations
     domain/               Buffers, piece-tree storage, panes, tabs, views
-    services/             File IO, search, session persistence, settings persistence
+    services/             File IO, search, sessions, settings, background work
     startup/              Command-line parsing and startup options
-    ui/                   Editor, dialogs, search/replace, settings, tabs, scrolling
-  bin/                    Profiling and capacity probe entry points
-scripts/                  Rust-only helper binaries wired through Cargo
-docs/                     User, design, architecture, performance, and review notes
-assets/                   README and product screenshots
+    ui/                   Editor, dialogs, settings, search/replace, tabs
+  bin/                    Profiling, resource, frame, and capacity probes
+crates/
+  windows_file_watch/     Windows file-change watching helper crate
+benches/                  Criterion benchmark targets
+scripts/                  Release and analysis helper scripts
+packaging/                Windows installer definition
+docs/                     User manual, architecture notes, and reviews
+assets/                   Project artwork
 fonts/                    Bundled editor and control-symbol fonts
 ```
 
@@ -129,16 +153,16 @@ fonts/                    Bundled editor and control-symbol fonts
 
 - [User manual](docs/user-manual.md)
 - [Measurement tools](docs/measurement-tools.md)
-- [Encoding review report](docs/encoding-review-report.md)
-- [Project plan](PLAN.md)
+- [Windows release signing](docs/windows-release-signing.md)
 
 ## Technical Notes
 
 - Stack: Rust 2024, `eframe`/`egui`, `egui-phosphor`, `rfd`, `serde`,
-  `encoding_rs`, `chardetng`, `regex`, `smallvec`, and `sysinfo`.
+  `encoding_rs`, `chardetng`, `regex`, `smallvec`, `sysinfo`, and a local
+  Windows file-watch crate.
 - Unsafe Rust is forbidden at the crate level.
 - Text storage uses a piece-tree-backed document model with undo/redo history
-  and cheap snapshots for save/session flows.
-- Runtime logs go under `log/`.
-- Session state and `settings.toml` are stored under the Scratchpad directory in
-  the OS temp location.
+  and cheap snapshots for save and session flows.
+- Runtime logs are written under `log/`.
+- Session state, `settings.toml`, and eframe persistence live under the
+  Scratchpad data directory in the OS temp location.

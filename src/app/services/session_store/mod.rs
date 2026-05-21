@@ -5,29 +5,29 @@ mod restore;
 
 use crate::app::diagnostics;
 use crate::app::domain::{DocumentSnapshot, WorkspaceTab};
-use crate::app::services::file_service::FileService;
 use crate::app::services::settings_store::AppSettings;
-use crate::app::services::store_io::{remove_file_if_exists, write_atomic};
+use crate::app::services::store_io::remove_file_if_exists;
 use model::{SessionBuffer, SessionManifest, SessionPaneNode, SessionTab, SessionView};
-use ops::{BUFFER_FILE_EXTENSION, collect_stale_buffer_files};
+use ops::{
+    BUFFER_FILE_EXTENSION, SessionSnapshotWrite, collect_stale_buffer_files, session_tab_temp_ids,
+    write_session_manifest_profiled, write_session_snapshots,
+};
 use restore::RestoreSummary;
 use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
-use std::thread;
 use std::time::Instant;
 
 const SESSION_DIR_NAME: &str = "scratchpad";
 const SESSION_MANIFEST_NAME: &str = "session.json";
-const SESSION_IO_PARALLEL_MIN_ITEMS: usize = 512;
-const SESSION_IO_PARALLEL_MAX_WORKERS: usize = 8;
 const PRETTY_SESSION_MANIFEST_MAX_TABS: usize = 128;
 
 pub(crate) use capture::cold_tab_from_workspace_tab;
 pub use model::SESSION_VERSION;
 pub use model::SessionActiveSurface;
 pub(crate) use model::SessionTabParts as ColdSessionTab;
+pub(super) use ops::{SESSION_IO_PARALLEL_MAX_WORKERS, SESSION_IO_PARALLEL_MIN_ITEMS};
 
 #[derive(Clone)]
 pub struct SessionStore {
@@ -50,12 +50,6 @@ struct CapturedSessionTab {
 
 struct CapturedSessionBuffer {
     temp_id: String,
-    snapshot: DocumentSnapshot,
-}
-
-struct SessionSnapshotWrite {
-    temp_id: String,
-    path: PathBuf,
     snapshot: DocumentSnapshot,
 }
 
@@ -373,7 +367,14 @@ impl SessionStore {
             word_wrap,
             session_tabs,
         );
-        self.write_manifest_profiled(&manifest, profile)?;
+        let manifest_profile = write_session_manifest_profiled(
+            &self.manifest_path,
+            &manifest,
+            PRETTY_SESSION_MANIFEST_MAX_TABS,
+        )?;
+        profile.manifest_serialize_ns = manifest_profile.serialize_ns;
+        profile.manifest_size_bytes = manifest_profile.size_bytes;
+        profile.manifest_write_ns = manifest_profile.write_ns;
         Ok(())
     }
 
@@ -436,47 +437,6 @@ impl SessionStore {
         Ok(())
     }
 
-    fn write_manifest_profiled(
-        &self,
-        manifest: &SessionManifest,
-        profile: &mut SessionPersistProfile,
-    ) -> io::Result<()> {
-        let serialize_start = Instant::now();
-        let json = self.serialize_manifest(manifest)?;
-        profile.manifest_serialize_ns = serialize_start.elapsed().as_nanos();
-        profile.manifest_size_bytes = json.len() as u64;
-
-        let manifest_write_start = Instant::now();
-        write_atomic(&self.manifest_path, &json).inspect_err(|error| {
-            record_session_io_error(
-                "session_write_manifest",
-                &self.manifest_path,
-                "session_store::persist_request",
-                error,
-            );
-        })?;
-        profile.manifest_write_ns = manifest_write_start.elapsed().as_nanos();
-        Ok(())
-    }
-
-    fn serialize_manifest(&self, manifest: &SessionManifest) -> io::Result<Vec<u8>> {
-        let result = if manifest.tabs.len() <= PRETTY_SESSION_MANIFEST_MAX_TABS {
-            serde_json::to_vec_pretty(manifest)
-        } else {
-            serde_json::to_vec(manifest)
-        };
-        result.map_err(|error| {
-            let error = invalid_data(error);
-            record_session_io_error(
-                "session_serialize_manifest",
-                &self.manifest_path,
-                "session_store::persist_request",
-                &error,
-            );
-            error
-        })
-    }
-
     fn remove_stale_buffer_files(&self, active_temp_paths: &HashSet<PathBuf>) -> io::Result<()> {
         let stale_paths =
             collect_stale_buffer_files(&self.root, &self.manifest_path, active_temp_paths)
@@ -512,37 +472,12 @@ impl SessionStore {
             return Ok(None);
         }
 
-        let manifest = self.read_session_manifest()?;
+        let manifest = ops::read_session_manifest(&self.manifest_path)?;
         if !self.is_supported_session_manifest(&manifest) {
             return Ok(None);
         }
 
         Ok(Some(manifest))
-    }
-
-    fn read_session_manifest(&self) -> io::Result<SessionManifest> {
-        let raw = fs::read_to_string(&self.manifest_path).inspect_err(|error| {
-            record_session_io_error(
-                "session_read_manifest",
-                &self.manifest_path,
-                "session_store::load_manifest",
-                error,
-            );
-        })?;
-        self.parse_session_manifest(&raw)
-    }
-
-    fn parse_session_manifest(&self, raw: &str) -> io::Result<SessionManifest> {
-        serde_json::from_str(raw).map_err(|error| {
-            let error = invalid_data(error);
-            record_session_io_error(
-                "session_parse_manifest",
-                &self.manifest_path,
-                "session_store::load_manifest",
-                &error,
-            );
-            error
-        })
     }
 
     fn is_supported_session_manifest(&self, manifest: &SessionManifest) -> bool {
@@ -612,146 +547,4 @@ fn session_manifest(
         word_wrap,
         tabs,
     }
-}
-
-fn write_session_snapshots(writes: Vec<SessionSnapshotWrite>) -> io::Result<HashSet<PathBuf>> {
-    let total = writes.len();
-    if total == 0 {
-        return Ok(HashSet::new());
-    }
-
-    let workers = session_io_worker_count(total);
-    if should_write_session_snapshots_serially(total, workers) {
-        return write_session_snapshot_chunk(writes).map(|paths| paths.into_iter().collect());
-    }
-
-    write_session_snapshots_parallel(writes, total, workers)
-}
-
-fn should_write_session_snapshots_serially(total: usize, workers: usize) -> bool {
-    total < SESSION_IO_PARALLEL_MIN_ITEMS || workers <= 1
-}
-
-fn write_session_snapshots_parallel(
-    writes: Vec<SessionSnapshotWrite>,
-    total: usize,
-    workers: usize,
-) -> io::Result<HashSet<PathBuf>> {
-    let chunks = session_snapshot_chunks(writes, total, workers);
-    thread::scope(|scope| {
-        let handles = chunks
-            .into_iter()
-            .map(|chunk| scope.spawn(move || write_session_snapshot_chunk(chunk)))
-            .collect::<Vec<_>>();
-
-        collect_session_snapshot_results(handles, total)
-    })
-}
-
-fn session_snapshot_chunks(
-    writes: Vec<SessionSnapshotWrite>,
-    total: usize,
-    workers: usize,
-) -> Vec<Vec<SessionSnapshotWrite>> {
-    let chunk_size = total.div_ceil(workers);
-    let mut iter = writes.into_iter();
-    let mut chunks = Vec::with_capacity(workers);
-    for _ in 0..workers {
-        let chunk = iter.by_ref().take(chunk_size).collect::<Vec<_>>();
-        if chunk.is_empty() {
-            break;
-        }
-        chunks.push(chunk);
-    }
-    chunks
-}
-
-fn collect_session_snapshot_results(
-    handles: Vec<thread::ScopedJoinHandle<'_, io::Result<Vec<PathBuf>>>>,
-    total: usize,
-) -> io::Result<HashSet<PathBuf>> {
-    let mut active_temp_paths = HashSet::with_capacity(total);
-    let mut first_error = None;
-    for handle in handles {
-        match session_snapshot_join_result(handle) {
-            Ok(paths) => active_temp_paths.extend(paths),
-            Err(error) => remember_first_session_snapshot_error(&mut first_error, error),
-        }
-    }
-
-    match first_error {
-        Some(error) => Err(error),
-        None => Ok(active_temp_paths),
-    }
-}
-
-fn session_snapshot_join_result(
-    handle: thread::ScopedJoinHandle<'_, io::Result<Vec<PathBuf>>>,
-) -> io::Result<Vec<PathBuf>> {
-    match handle.join() {
-        Ok(result) => result,
-        Err(_) => Err(io::Error::other("session snapshot writer panicked")),
-    }
-}
-
-fn remember_first_session_snapshot_error(first_error: &mut Option<io::Error>, error: io::Error) {
-    if first_error.is_none() {
-        *first_error = Some(error);
-    }
-}
-
-fn write_session_snapshot_chunk(writes: Vec<SessionSnapshotWrite>) -> io::Result<Vec<PathBuf>> {
-    let mut paths = Vec::with_capacity(writes.len());
-    for write in writes {
-        paths.push(write_one_session_snapshot(write)?);
-    }
-    Ok(paths)
-}
-
-fn write_one_session_snapshot(write: SessionSnapshotWrite) -> io::Result<PathBuf> {
-    FileService::write_snapshot_utf8(&write.path, &write.snapshot).inspect_err(|error| {
-        diagnostics::record_io_error_with_details(
-            "session_write_buffer_snapshot",
-            Some(&write.path),
-            "session_store::persist_request",
-            error,
-            [("temp_id", write.temp_id.clone())],
-        );
-    })?;
-    Ok(write.path)
-}
-
-fn session_tab_temp_ids(tab: &SessionTab) -> Vec<&str> {
-    if !tab.buffers.is_empty() {
-        return tab
-            .buffers
-            .iter()
-            .map(|buffer| buffer.temp_id.as_str())
-            .collect();
-    }
-    tab.temp_id.as_deref().into_iter().collect()
-}
-
-fn session_io_worker_count(item_count: usize) -> usize {
-    thread::available_parallelism()
-        .map_or(1, |parallelism| {
-            parallelism
-                .get()
-                .min(SESSION_IO_PARALLEL_MAX_WORKERS)
-                .min(item_count)
-        })
-        .max(1)
-}
-
-fn invalid_data(error: impl ToString) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, error.to_string())
-}
-
-fn record_session_io_error(
-    operation: &'static str,
-    path: &std::path::Path,
-    scope: &'static str,
-    error: &io::Error,
-) {
-    diagnostics::record_io_error(operation, Some(path), scope, error);
 }

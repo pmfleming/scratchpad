@@ -54,17 +54,7 @@ fn app_with_buffer(root: &std::path::Path, buffer: BufferState) -> ScratchpadApp
 
 fn app_with_tabs(root: &std::path::Path, tabs: Vec<WorkspaceTab>) -> ScratchpadApp {
     let mut app = test_app(root);
-    app.tab_manager = TabManager {
-        tabs,
-        active_tab_index: 0,
-        pending_action: None,
-        session_dirty: false,
-        pending_scroll_to_active: false,
-        buffer_tab_index: Default::default(),
-        path_tab_index: Default::default(),
-        cold_session_tabs: Default::default(),
-    };
-    app.tab_manager.rebuild_buffer_tab_index();
+    app.tab_manager = TabManager::for_test_tabs(tabs);
     app
 }
 

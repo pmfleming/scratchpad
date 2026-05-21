@@ -58,6 +58,22 @@ impl TabManager {
         Self::default()
     }
 
+    #[cfg(test)]
+    pub(crate) fn for_test_tabs(tabs: Vec<WorkspaceTab>) -> Self {
+        let mut manager = Self {
+            tabs,
+            active_tab_index: 0,
+            pending_action: None,
+            session_dirty: false,
+            pending_scroll_to_active: false,
+            buffer_tab_index: HashMap::new(),
+            path_tab_index: HashMap::new(),
+            cold_session_tabs: HashMap::new(),
+        };
+        manager.rebuild_buffer_tab_index();
+        manager
+    }
+
     #[must_use]
     pub fn active_tab(&self) -> Option<&WorkspaceTab> {
         self.tabs.get(self.active_tab_index)

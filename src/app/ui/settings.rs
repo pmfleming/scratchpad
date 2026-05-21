@@ -151,17 +151,7 @@ mod tests {
 
     #[test]
     fn settings_cards_render_at_exact_card_width() {
-        let mut app = test_app();
-        reset_settings_layout_measurements();
-
-        let ctx = egui::Context::default();
-        crate::app::fonts::apply_editor_fonts(&ctx, app.state.app_settings.editor_font())
-            .expect("install editor fonts for settings layout test");
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-            ui.set_min_size(egui::vec2(1600.0, 4200.0));
-            ui.set_width(1600.0);
-            render_page_body(ui, &mut app, 1600.0);
-        });
+        render_settings_layout_for_test(1600.0, 1600.0);
 
         let card_measurements = settings_card_measurements();
         assert!(
@@ -186,17 +176,7 @@ mod tests {
 
     #[test]
     fn settings_cards_are_centered_in_editor_window() {
-        let mut app = test_app();
-        reset_settings_layout_measurements();
-
-        let ctx = egui::Context::default();
-        crate::app::fonts::apply_editor_fonts(&ctx, app.state.app_settings.editor_font())
-            .expect("install editor fonts for settings layout test");
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-            ui.set_min_size(egui::vec2(1600.0, 4200.0));
-            ui.set_width(1600.0);
-            render_page_body(ui, &mut app, 1600.0);
-        });
+        render_settings_layout_for_test(1600.0, 1600.0);
 
         let card_measurements = settings_card_measurements();
         assert!(
@@ -226,17 +206,7 @@ mod tests {
 
     #[test]
     fn settings_cards_center_on_resized_visible_window() {
-        let mut app = test_app();
-        reset_settings_layout_measurements();
-
-        let ctx = egui::Context::default();
-        crate::app::fonts::apply_editor_fonts(&ctx, app.state.app_settings.editor_font())
-            .expect("install editor fonts for settings layout test");
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-            ui.set_min_size(egui::vec2(1180.0, 4200.0));
-            ui.set_width(1180.0);
-            render_page_body(ui, &mut app, 900.0);
-        });
+        render_settings_layout_for_test(1180.0, 900.0);
 
         let card_measurements = settings_card_measurements();
         assert!(
@@ -266,17 +236,7 @@ mod tests {
 
     #[test]
     fn settings_cards_keep_width_when_visible_window_is_narrow() {
-        let mut app = test_app();
-        reset_settings_layout_measurements();
-
-        let ctx = egui::Context::default();
-        crate::app::fonts::apply_editor_fonts(&ctx, app.state.app_settings.editor_font())
-            .expect("install editor fonts for settings layout test");
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-            ui.set_min_size(egui::vec2(1180.0, 4200.0));
-            ui.set_width(1180.0);
-            render_page_body(ui, &mut app, 500.0);
-        });
+        render_settings_layout_for_test(1180.0, 500.0);
 
         let card_measurements = settings_card_measurements();
         assert!(
@@ -312,17 +272,7 @@ mod tests {
 
     #[test]
     fn settings_font_card_controls_align_to_row_right_edge() {
-        let mut app = test_app();
-        reset_settings_layout_measurements();
-
-        let ctx = egui::Context::default();
-        crate::app::fonts::apply_editor_fonts(&ctx, app.state.app_settings.editor_font())
-            .expect("install editor fonts for settings layout test");
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-            ui.set_min_size(egui::vec2(1600.0, 4200.0));
-            ui.set_width(1600.0);
-            render_page_body(ui, &mut app, 1600.0);
-        });
+        render_settings_layout_for_test(1600.0, 1600.0);
 
         let control_measurements = settings_control_measurements();
         assert!(
@@ -352,17 +302,7 @@ mod tests {
 
     #[test]
     fn settings_toggle_labels_align_with_switch_centers() {
-        let mut app = test_app();
-        reset_settings_layout_measurements();
-
-        let ctx = egui::Context::default();
-        crate::app::fonts::apply_editor_fonts(&ctx, app.state.app_settings.editor_font())
-            .expect("install editor fonts for settings layout test");
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-            ui.set_min_size(egui::vec2(1600.0, 4200.0));
-            ui.set_width(1600.0);
-            render_page_body(ui, &mut app, 1600.0);
-        });
+        render_settings_layout_for_test(1600.0, 1600.0);
 
         let control_measurements = settings_control_measurements();
         let label = measurement_for(&control_measurements, "toggle_control.label");
@@ -373,6 +313,20 @@ mod tests {
             label.center_y,
             switch.center_y,
         );
+    }
+
+    fn render_settings_layout_for_test(surface_width: f32, viewport_width: f32) {
+        let mut app = test_app();
+        reset_settings_layout_measurements();
+
+        let ctx = egui::Context::default();
+        crate::app::fonts::apply_editor_fonts(&ctx, app.state.app_settings.editor_font())
+            .expect("install editor fonts for settings layout test");
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_min_size(egui::vec2(surface_width, 4200.0));
+            ui.set_width(surface_width);
+            render_page_body(ui, &mut app, viewport_width);
+        });
     }
 
     fn measurement_for<'a>(

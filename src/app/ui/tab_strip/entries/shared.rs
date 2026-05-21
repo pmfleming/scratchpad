@@ -1,6 +1,7 @@
 use crate::app::app_state::{ScratchpadApp, workspace::display_tabs};
 use crate::app::chrome::tab_button_sized;
 use crate::app::domain::{TabAttentionState, WorkspaceTab};
+use crate::app::theme::TAB_HEIGHT;
 use crate::app::ui::tab_drag::{TabDropAxis, TabRectEntry};
 use crate::app::ui::tab_strip::context_menu::{
     attach_tab_context_menu, attach_tab_list_context_menu,
@@ -87,7 +88,7 @@ fn visible_slot_ranges(
     if total_slots == 0 {
         return Vec::new();
     }
-    let slot_extent = (context.width + context.spacing).max(1.0);
+    let slot_extent = slot_advance(context);
     let content_origin = match context.axis {
         TabDropAxis::Horizontal => ui.cursor().min.x,
         TabDropAxis::Vertical => ui.cursor().min.y,
@@ -126,8 +127,16 @@ fn add_virtual_slot_space(ui: &mut egui::Ui, slot_count: usize, context: &SlotCe
     if slot_count == 0 {
         return;
     }
-    let extent = slot_count as f32 * (context.width + context.spacing);
+    let extent = slot_count as f32 * slot_advance(context);
     ui.add_space(extent.max(0.0));
+}
+
+fn slot_advance(context: &SlotCellContext<'_>) -> f32 {
+    match context.axis {
+        TabDropAxis::Horizontal => context.width + context.spacing,
+        TabDropAxis::Vertical => TAB_HEIGHT + context.spacing,
+    }
+    .max(1.0)
 }
 
 pub(super) fn attach_tab_list_background_context_menu(
@@ -299,8 +308,11 @@ pub(crate) fn apply_settings_tab_interaction(
 
 #[cfg(test)]
 mod tests {
-    use super::workspace_tab_tooltip;
+    use super::{SlotCellContext, slot_advance, workspace_tab_tooltip};
     use crate::app::domain::TabAttentionState;
+    use crate::app::theme::TAB_HEIGHT;
+    use crate::app::ui::tab_drag::TabDropAxis;
+    use std::collections::HashMap;
 
     #[test]
     fn tab_attention_dot_does_not_change_the_tab_tooltip() {
@@ -310,5 +322,37 @@ mod tests {
             workspace_tab_tooltip(display_name, Some(TabAttentionState::DiskProblem)),
             display_name
         );
+    }
+
+    #[test]
+    fn vertical_virtual_tabs_advance_by_height_not_panel_width() {
+        let duplicate_name_counts = HashMap::new();
+        let context = SlotCellContext {
+            duplicate_name_counts: &duplicate_name_counts,
+            active_slot_index: 0,
+            pending_scroll_to_active: false,
+            showing_settings: false,
+            width: 320.0,
+            spacing: 4.0,
+            axis: TabDropAxis::Vertical,
+        };
+
+        assert_eq!(slot_advance(&context), TAB_HEIGHT + 4.0);
+    }
+
+    #[test]
+    fn horizontal_virtual_tabs_advance_by_width() {
+        let duplicate_name_counts = HashMap::new();
+        let context = SlotCellContext {
+            duplicate_name_counts: &duplicate_name_counts,
+            active_slot_index: 0,
+            pending_scroll_to_active: false,
+            showing_settings: false,
+            width: 160.0,
+            spacing: 4.0,
+            axis: TabDropAxis::Horizontal,
+        };
+
+        assert_eq!(slot_advance(&context), 164.0);
     }
 }

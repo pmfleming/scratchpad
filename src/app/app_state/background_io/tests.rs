@@ -22,17 +22,7 @@ fn test_app() -> ScratchpadApp {
 
 fn app_with_buffer(buffer: BufferState) -> ScratchpadApp {
     let mut app = test_app();
-    app.tab_manager = TabManager {
-        tabs: vec![WorkspaceTab::new(buffer)],
-        active_tab_index: 0,
-        pending_action: None,
-        session_dirty: false,
-        pending_scroll_to_active: false,
-        buffer_tab_index: Default::default(),
-        path_tab_index: Default::default(),
-        cold_session_tabs: Default::default(),
-    };
-    app.tab_manager.rebuild_buffer_tab_index();
+    app.tab_manager = TabManager::for_test_tabs(vec![WorkspaceTab::new(buffer)]);
     app
 }
 

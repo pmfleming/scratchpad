@@ -474,6 +474,10 @@ fn read_document_with_encoding(
 fn read_utf8_document_fast_path(path: &Path, has_bom: bool) -> io::Result<Option<LoadedDocument>> {
     const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
 
+    // Intentional capacity tradeoff: `read_to_string` can transiently keep more
+    // memory live for huge UTF-8 files, but measured 2 GB opens are materially
+    // faster than the lower-memory staged decode path. Do not slow this path
+    // down just to reduce peak memory unless speed measurements stay healthy.
     let mut content = match std::fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) if error.kind() == io::ErrorKind::InvalidData => return Ok(None),

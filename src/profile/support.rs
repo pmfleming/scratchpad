@@ -93,15 +93,15 @@ pub(super) fn install_search_all_tabs(
     bytes_per_tab: usize,
 ) -> usize {
     let total_tabs = tab_count.max(1);
-    let mut expected_matches = install_profile_tab(
+    let mut target_match_count = install_profile_tab(
         app,
         build_search_all_tab(0, bytes_per_tab),
-        expected_matches_for_tab,
+        target_match_count_for_tab,
     );
 
     for tab_index in 1..total_tabs {
         let tab = build_search_all_tab(tab_index, bytes_per_tab);
-        expected_matches += expected_matches_for_tab(&tab);
+        target_match_count += target_match_count_for_tab(&tab);
         crate::app::app_state::workspace_controller::append_tab(app, tab);
     }
 
@@ -109,7 +109,7 @@ pub(super) fn install_search_all_tabs(
         app,
         AppCommand::Workspace(WorkspaceCommand::ActivateTab { index: 0 }),
     );
-    expected_matches
+    target_match_count
 }
 
 pub(super) fn build_search_current_scope_tab(
@@ -175,7 +175,7 @@ pub(super) fn build_balanced_tile_tab(
     tab
 }
 
-pub(super) fn expected_matches_for_tab(tab: &WorkspaceTab) -> usize {
+pub(super) fn target_match_count_for_tab(tab: &WorkspaceTab) -> usize {
     tab.buffers()
         .map(|buffer| find_matches(&buffer.text(), PROFILE_QUERY, SearchOptions::default()).len())
         .sum()

@@ -258,17 +258,7 @@ mod tests {
         let tab = WorkspaceTab::new(restored_buffer);
         let view_id = tab.layout.active_view_id;
         let buffer_id = tab.buffers.buffer.id;
-        app.tab_manager = TabManager {
-            tabs: vec![tab],
-            active_tab_index: 0,
-            pending_action: None,
-            session_dirty: false,
-            pending_scroll_to_active: false,
-            buffer_tab_index: Default::default(),
-            path_tab_index: Default::default(),
-            cold_session_tabs: Default::default(),
-        };
-        app.tab_manager.rebuild_buffer_tab_index();
+        app.tab_manager = TabManager::for_test_tabs(vec![tab]);
 
         let conflict = StartupRestoreConflict {
             tab_index: 0,
