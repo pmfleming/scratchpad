@@ -1,3 +1,7 @@
+use super::result_model::{
+    active_match_local_row, empty_message, file_match_count_label, match_preview,
+    search_result_group_key,
+};
 use super::state::{
     SearchStripActions, SearchStripState, row_top, virtual_rows_for_clip, virtual_total_height,
 };
@@ -168,10 +172,9 @@ fn maybe_scroll_active_match_into_view(
     let Some(active_match_index) = active_match_index else {
         return;
     };
-    let group_range = group.first_match_index..group.first_match_index + group.total_match_count;
-    if !group_range.contains(&active_match_index) {
+    let Some(local_row) = active_match_local_row(group, Some(active_match_index)) else {
         return;
-    }
+    };
 
     let reveal_id = search_result_active_reveal_id(group);
     let already_revealed = ui
@@ -182,7 +185,6 @@ fn maybe_scroll_active_match_into_view(
         return;
     }
 
-    let local_row = active_match_index - group.first_match_index;
     let rect = egui::Rect::from_min_size(
         egui::pos2(
             ui.available_rect_before_wrap().left(),
@@ -217,10 +219,6 @@ fn search_result_active_reveal_id(group: &SearchResultGroup) -> egui::Id {
         "search_result.active_revealed",
         search_result_group_key(group),
     ))
-}
-
-fn search_result_group_key(group: &SearchResultGroup) -> (usize, u64, usize) {
-    (group.tab_index, group.buffer_id, group.first_match_index)
 }
 
 fn show_group_pill(
@@ -346,22 +344,6 @@ fn group_body(ui: &egui::Ui, group: &SearchResultGroup) -> egui::WidgetText {
     job.into()
 }
 
-fn file_match_count_label(match_count: usize) -> String {
-    if match_count == 1 {
-        "1 match".to_owned()
-    } else {
-        format!("{match_count} matches")
-    }
-}
-
-fn match_preview(entry: &SearchResultEntry) -> &str {
-    if entry.preview.is_empty() {
-        "Match"
-    } else {
-        entry.preview.as_str()
-    }
-}
-
 fn append_text(job: &mut egui::text::LayoutJob, text: &str, color: egui::Color32, size: f32) {
     job.append(
         text,
@@ -410,22 +392,6 @@ fn paint_match_row(ui: &egui::Ui, rect: egui::Rect, entry: &SearchResultEntry) {
         editor_font,
         text_primary(ui).gamma_multiply(0.92),
     );
-}
-
-fn empty_message(state: &SearchStripState) -> Option<&str> {
-    if state.query.is_empty() {
-        Some("Type to search across the selected scope.")
-    } else if let Some(message) = state.progress.status.message() {
-        Some(message)
-    } else if state.result_groups.is_empty() {
-        if state.progress.searching {
-            Some("Searching\u{2026}")
-        } else {
-            Some("No matches found.")
-        }
-    } else {
-        None
-    }
 }
 
 fn match_fill(ui: &egui::Ui, active: bool) -> egui::Color32 {

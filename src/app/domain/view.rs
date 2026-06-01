@@ -235,15 +235,10 @@ impl EditorViewState {
     /// Request the cursor be revealed on the next render. `Center` dominates
     /// `KeepVisible` if both are requested before the next frame.
     pub fn request_cursor_reveal(&mut self, mode: CursorRevealMode) {
-        self.pending_cursor_reveal = Some(match (self.pending_cursor_reveal, mode) {
-            (Some(CursorRevealMode::Center), _) | (_, CursorRevealMode::Center) => {
-                CursorRevealMode::Center
-            }
-            (Some(CursorRevealMode::KeepVisible), _) | (_, CursorRevealMode::KeepVisible) => {
-                CursorRevealMode::KeepVisible
-            }
-            _ => CursorRevealMode::KeepHorizontalVisible,
-        });
+        self.pending_cursor_reveal = Some(merged_cursor_reveal_request(
+            self.pending_cursor_reveal,
+            mode,
+        ));
     }
 
     #[must_use]
@@ -555,6 +550,21 @@ impl EditorViewState {
         self.published_ime_output = None;
     }
 }
+
+fn merged_cursor_reveal_request(
+    current: Option<CursorRevealMode>,
+    requested: CursorRevealMode,
+) -> CursorRevealMode {
+    match (current, requested) {
+        (Some(CursorRevealMode::Center), _) | (_, CursorRevealMode::Center) => {
+            CursorRevealMode::Center
+        }
+        (Some(CursorRevealMode::KeepVisible), _) | (_, CursorRevealMode::KeepVisible) => {
+            CursorRevealMode::KeepVisible
+        }
+        _ => CursorRevealMode::KeepHorizontalVisible,
+    }
+}
 pub fn next_view_id() -> ViewId {
     NEXT_VIEW_ID.fetch_add(1, Ordering::Relaxed)
 }
@@ -569,5 +579,39 @@ fn register_existing_view_id(id: ViewId) {
             Ok(_) => break,
             Err(observed) => current = observed,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CursorRevealMode, merged_cursor_reveal_request};
+
+    #[test]
+    fn center_cursor_reveal_request_dominates_pending_modes() {
+        assert_eq!(
+            merged_cursor_reveal_request(
+                Some(CursorRevealMode::KeepVisible),
+                CursorRevealMode::Center
+            ),
+            CursorRevealMode::Center
+        );
+        assert_eq!(
+            merged_cursor_reveal_request(
+                Some(CursorRevealMode::Center),
+                CursorRevealMode::KeepHorizontalVisible
+            ),
+            CursorRevealMode::Center
+        );
+    }
+
+    #[test]
+    fn keep_visible_cursor_reveal_request_dominates_horizontal_only() {
+        assert_eq!(
+            merged_cursor_reveal_request(
+                Some(CursorRevealMode::KeepHorizontalVisible),
+                CursorRevealMode::KeepVisible,
+            ),
+            CursorRevealMode::KeepVisible
+        );
     }
 }

@@ -1,7 +1,26 @@
 use super::{
-    CapturedSessionBuffer, CapturedSessionTab, ColdSessionTab, SessionActiveSurface, SessionBuffer,
-    SessionPaneNode, SessionPersistRequest, SessionTab, SessionView, WorkspaceTab,
+    ColdSessionTab, SessionActiveSurface, SessionBuffer, SessionPaneNode, SessionTab, SessionView,
+    WorkspaceTab,
 };
+use crate::app::domain::DocumentSnapshot;
+
+pub(crate) struct SessionPersistRequest {
+    pub(super) active_tab_index: usize,
+    pub(super) active_surface: SessionActiveSurface,
+    pub(super) font_size: f32,
+    pub(super) word_wrap: bool,
+    pub(super) tabs: Vec<CapturedSessionTab>,
+}
+
+pub(super) struct CapturedSessionTab {
+    pub(super) session_tab: SessionTab,
+    pub(super) buffer_snapshots: Vec<CapturedSessionBuffer>,
+}
+
+pub(super) struct CapturedSessionBuffer {
+    pub(super) temp_id: String,
+    pub(super) snapshot: DocumentSnapshot,
+}
 
 impl SessionPersistRequest {
     pub(crate) fn capture(

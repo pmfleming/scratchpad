@@ -44,16 +44,6 @@ language servers, plugin execution, or cloud sync.
 - Use profiling, capacity probes, benchmarks, and CI as regular development
   inputs.
 
-## Current Limits
-
-- Search only covers files already open in Scratchpad.
-- Folder-wide search for unopened files is not implemented.
-- A full command palette is still planned.
-- Context menus cover the main command surface, but not every command yet.
-- Recent files can be enabled in settings, while the broader recent-file UI is
-  still evolving.
-- Windows is the primary supported desktop target and release platform.
-
 ## Build, Test, and Run
 
 Prerequisites:
@@ -100,9 +90,6 @@ dotnet tool restore
 cargo build --release --locked
 .\scripts\package-windows-installer.ps1 -Version 0.40.0
 ```
-
-Signing details live in
-[docs/windows-release-signing.md](docs/windows-release-signing.md).
 
 ## Measurement
 
@@ -153,7 +140,6 @@ fonts/                    Bundled editor and control-symbol fonts
 
 - [User manual](docs/user-manual.md)
 - [Measurement tools](docs/measurement-tools.md)
-- [Windows release signing](docs/windows-release-signing.md)
 
 ## Technical Notes
 

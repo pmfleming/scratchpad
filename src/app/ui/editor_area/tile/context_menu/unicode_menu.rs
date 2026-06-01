@@ -1,8 +1,8 @@
-use super::{
+use super::widgets::{
     EDITOR_CONTEXT_CARET_WIDTH, EDITOR_CONTEXT_MENU_WIDTH, EDITOR_CONTEXT_ROW_HEIGHT,
     EDITOR_UNICODE_DESCRIPTION_X, EDITOR_UNICODE_DIVIDER_X, EDITOR_UNICODE_INSERT_SUBMENU_WIDTH,
-    EDITOR_UNICODE_LABEL_X, apply_context_menu_row_hover_style, menu_action_button, set_menu_width,
-    with_visual_overrides,
+    EDITOR_UNICODE_LABEL_X, apply_context_menu_row_hover_style, menu_action_button,
+    paint_context_menu_row_label, set_menu_width, with_visual_overrides,
 };
 use crate::app::app_state::{
     ScratchpadApp,
@@ -230,7 +230,7 @@ fn unicode_submenu_row(
             .inner;
 
         let rect = response.rect;
-        super::paint_context_menu_row_label(ui, rect, Some(icon), label, true);
+        paint_context_menu_row_label(ui, rect, Some(icon), label, true);
         ui.painter().text(
             rect.right_center() - egui::vec2(EDITOR_CONTEXT_CARET_WIDTH * 0.5, 0.0),
             egui::Align2::CENTER_CENTER,

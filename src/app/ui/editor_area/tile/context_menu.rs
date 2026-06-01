@@ -1,4 +1,6 @@
+mod model;
 mod unicode_menu;
+mod widgets;
 
 use super::TileRenderRequest;
 use crate::app::app_state::{
@@ -8,31 +10,26 @@ use crate::app::app_state::{
 use crate::app::commands::{
     AppCommand, DialogCommand, EditCommand, SearchCommand, WorkspaceCommand,
 };
-use crate::app::domain::SplitAxis;
 use crate::app::shortcut_tooltips;
-use crate::app::theme::{action_bg, action_hover_bg, border, text_primary};
+use crate::app::theme::text_primary;
 use crate::app::ui::tile_header::TileAction;
 use crate::app::ui::widget_ids;
 use eframe::egui;
 use egui_phosphor::regular::{
-    ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_LEFT, ARROW_LINE_UP, ARROW_RIGHT,
-    ARROW_UP, ARROWS_COUNTER_CLOCKWISE, ARROWS_SPLIT, CARET_RIGHT, CLIPBOARD_TEXT,
-    CLOCK_COUNTER_CLOCKWISE, COPY, MAGNIFYING_GLASS, SCISSORS, SELECTION_ALL, TRASH, X,
+    ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE, ARROW_LINE_UP, ARROWS_COUNTER_CLOCKWISE,
+    ARROWS_SPLIT, CARET_RIGHT, CLIPBOARD_TEXT, CLOCK_COUNTER_CLOCKWISE, COPY, MAGNIFYING_GLASS,
+    SCISSORS, SELECTION_ALL, TRASH, X,
+};
+use model::{
+    SPLIT_MENU_ITEMS, SplitDirection, queue_split_action, should_activate_tile_on_secondary_click,
 };
 use unicode_menu::render_display_unicode_menu;
-
-const DEFAULT_SPLIT_RATIO: f32 = 0.5;
-const EDITOR_CONTEXT_MENU_WIDTH: f32 = 204.0;
-const EDITOR_CONTEXT_SUBMENU_WIDTH: f32 = 168.0;
-const EDITOR_UNICODE_INSERT_SUBMENU_WIDTH: f32 = 380.0;
-const EDITOR_CONTEXT_ROW_HEIGHT: f32 = 28.0;
-const EDITOR_CONTEXT_ICON_BUTTON_SIZE: egui::Vec2 = egui::vec2(38.0, 30.0);
-const EDITOR_CONTEXT_CARET_WIDTH: f32 = 28.0;
-const EDITOR_CONTEXT_ICON_CENTER_X: f32 = 20.0;
-const EDITOR_CONTEXT_LABEL_X: f32 = 52.0;
-const EDITOR_UNICODE_LABEL_X: f32 = 20.0;
-const EDITOR_UNICODE_DIVIDER_X: f32 = 76.0;
-const EDITOR_UNICODE_DESCRIPTION_X: f32 = 94.0;
+use widgets::{
+    EDITOR_CONTEXT_CARET_WIDTH, EDITOR_CONTEXT_MENU_WIDTH, EDITOR_CONTEXT_ROW_HEIGHT,
+    EDITOR_CONTEXT_SUBMENU_WIDTH, apply_context_menu_row_hover_style, icon_rail_button,
+    icon_rail_leading_space, menu_action_button, paint_context_menu_row_label, set_menu_width,
+    split_menu_button, with_visual_overrides,
+};
 
 pub(super) fn attach_editor_context_menu(
     tile_response: &egui::Response,
@@ -68,7 +65,8 @@ pub(super) fn activate_inactive_tile_on_secondary_click(
     tile_response: &egui::Response,
     request: &TileRenderRequest,
 ) {
-    if tile_response.secondary_clicked() && !request.is_active {
+    if should_activate_tile_on_secondary_click(tile_response.secondary_clicked(), request.is_active)
+    {
         crate::app::commands::handle_command(
             app,
             AppCommand::Workspace(WorkspaceCommand::ActivateView {
@@ -77,11 +75,6 @@ pub(super) fn activate_inactive_tile_on_secondary_click(
         );
         workspace_accessors::request_focus_for_view(app, request.view_id);
     }
-}
-
-fn set_menu_width(ui: &mut egui::Ui, width: f32) {
-    ui.set_min_width(width);
-    ui.set_max_width(width);
 }
 
 fn render_standard_edit_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
@@ -167,11 +160,11 @@ fn render_edit_button_rail(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let selection_available = workspace_editing::copy_selected_text_in_active_view(app).is_some();
     let any_action = ui
         .horizontal(|ui| {
-            let button_count = 4.0;
             let button_spacing = ui.spacing().item_spacing.x;
-            let rail_width = EDITOR_CONTEXT_ICON_BUTTON_SIZE.x * button_count
-                + button_spacing * (button_count - 1.0);
-            ui.add_space(((ui.available_width() - rail_width) * 0.5).max(0.0));
+            ui.add_space(icon_rail_leading_space(
+                ui.available_width(),
+                button_spacing,
+            ));
 
             run_icon_rail_action(
                 ui,
@@ -285,30 +278,6 @@ fn run_icon_rail_action(
     icon_rail_button(ui, icon, tooltip, enabled).clicked() && action(ui, app)
 }
 
-fn menu_action_button(ui: &mut egui::Ui, label: &str, icon: Option<&str>, enabled: bool) -> bool {
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let response = widget_ids::surface_response(
-            ui,
-            ("editor_context.menu_action", label),
-            widget_ids::WidgetRole::ActionButton,
-            |ui| {
-                ui.add_enabled(
-                    enabled,
-                    egui::Button::new("")
-                        .min_size(egui::vec2(EDITOR_CONTEXT_MENU_WIDTH, 28.0))
-                        .stroke(egui::Stroke::NONE),
-                )
-            },
-        );
-        paint_context_menu_row_label(ui, response.rect, icon, label, enabled);
-        let clicked = response.clicked();
-        if let Some(tooltip) = shortcut_tooltip_for_menu_label(label) {
-            response.on_hover_text(tooltip);
-        }
-        clicked
-    })
-}
-
 fn split_menu_row(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
@@ -320,32 +289,6 @@ fn split_menu_row(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
             queue_split_action(actions, SplitDirection::Right);
         }
     });
-}
-
-fn split_menu_button(ui: &mut egui::Ui, label: &str, icon: &str) -> bool {
-    with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let response = widget_ids::surface_response(
-            ui,
-            ("editor_context.split_submenu", label),
-            widget_ids::WidgetRole::ActionButton,
-            |ui| {
-                ui.add(
-                    egui::Button::new("")
-                        .min_size(egui::vec2(
-                            EDITOR_CONTEXT_SUBMENU_WIDTH,
-                            EDITOR_CONTEXT_ROW_HEIGHT,
-                        ))
-                        .stroke(egui::Stroke::NONE),
-                )
-            },
-        );
-        paint_context_menu_row_label(ui, response.rect, Some(icon), label, true);
-        let clicked = response.clicked();
-        if let Some(tooltip) = shortcut_tooltip_for_menu_label(label) {
-            response.on_hover_text(tooltip);
-        }
-        clicked
-    })
 }
 
 fn render_split_primary_button(ui: &mut egui::Ui) -> bool {
@@ -397,176 +340,4 @@ fn render_split_submenu_items(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) 
             ui.close();
         }
     }
-}
-
-fn paint_context_menu_row_label(
-    ui: &egui::Ui,
-    rect: egui::Rect,
-    icon: Option<&str>,
-    label: &str,
-    enabled: bool,
-) {
-    let font = egui::TextStyle::Button.resolve(ui.style());
-    let color = if enabled {
-        text_primary(ui)
-    } else {
-        text_primary(ui).gamma_multiply(0.45)
-    };
-    if let Some(icon) = icon {
-        ui.painter().text(
-            rect.left_center() + egui::vec2(EDITOR_CONTEXT_ICON_CENTER_X, 0.0),
-            egui::Align2::CENTER_CENTER,
-            icon,
-            font.clone(),
-            color,
-        );
-    }
-    ui.painter().text(
-        rect.left_center() + egui::vec2(EDITOR_CONTEXT_LABEL_X, 0.0),
-        egui::Align2::LEFT_CENTER,
-        label,
-        font,
-        color,
-    );
-}
-
-#[derive(Clone, Copy)]
-enum SplitDirection {
-    Left,
-    Right,
-    Up,
-    Down,
-}
-
-#[derive(Clone, Copy)]
-struct SplitMenuItem {
-    label: &'static str,
-    icon: &'static str,
-    direction: SplitDirection,
-}
-
-const SPLIT_MENU_ITEMS: &[SplitMenuItem] = &[
-    SplitMenuItem {
-        label: "Split Left",
-        icon: ARROW_LEFT,
-        direction: SplitDirection::Left,
-    },
-    SplitMenuItem {
-        label: "Split Right",
-        icon: ARROW_RIGHT,
-        direction: SplitDirection::Right,
-    },
-    SplitMenuItem {
-        label: "Split Up",
-        icon: ARROW_UP,
-        direction: SplitDirection::Up,
-    },
-    SplitMenuItem {
-        label: "Split Down",
-        icon: ARROW_DOWN,
-        direction: SplitDirection::Down,
-    },
-];
-
-fn queue_split_action(actions: &mut Vec<TileAction>, direction: SplitDirection) {
-    let (axis, new_view_first) = match direction {
-        SplitDirection::Left => (SplitAxis::Vertical, true),
-        SplitDirection::Right => (SplitAxis::Vertical, false),
-        SplitDirection::Up => (SplitAxis::Horizontal, true),
-        SplitDirection::Down => (SplitAxis::Horizontal, false),
-    };
-    actions.push(TileAction::Split {
-        axis,
-        new_view_first,
-        ratio: DEFAULT_SPLIT_RATIO,
-    });
-}
-
-fn shortcut_tooltip_for_menu_label(label: &str) -> Option<&'static str> {
-    match label {
-        "Undo" => Some(shortcut_tooltips::UNDO),
-        "Redo" => Some(shortcut_tooltips::REDO),
-        "History" => Some(shortcut_tooltips::HISTORY),
-        "Find" => Some(shortcut_tooltips::FIND),
-        "Replace" => Some(shortcut_tooltips::REPLACE),
-        "Right to Left" => Some(shortcut_tooltips::RIGHT_TO_LEFT),
-        "Left to Right" => Some(shortcut_tooltips::LEFT_TO_RIGHT),
-        "Control Chars" => Some(shortcut_tooltips::CONTROL_CHARS),
-        "Promote Tile" => Some(shortcut_tooltips::PROMOTE_TILE),
-        "Close Tile" => Some(shortcut_tooltips::CLOSE_TILE),
-        "Split Left" => Some(shortcut_tooltips::SPLIT_LEFT),
-        "Split Right" => Some(shortcut_tooltips::SPLIT_RIGHT),
-        "Split Up" => Some(shortcut_tooltips::SPLIT_UP),
-        "Split Down" => Some(shortcut_tooltips::SPLIT_DOWN),
-        _ => None,
-    }
-}
-
-fn apply_context_menu_row_hover_style(ui: &mut egui::Ui) {
-    let hover_bg = action_hover_bg(ui);
-    let visuals = ui.visuals_mut();
-    visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
-    visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-    visuals.widgets.hovered.bg_fill = hover_bg;
-    visuals.widgets.hovered.weak_bg_fill = hover_bg;
-    visuals.widgets.active.bg_fill = hover_bg;
-    visuals.widgets.active.weak_bg_fill = hover_bg;
-    visuals.widgets.open.bg_fill = hover_bg;
-    visuals.widgets.open.weak_bg_fill = hover_bg;
-    visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
-    visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
-    visuals.widgets.active.bg_stroke = egui::Stroke::NONE;
-    visuals.widgets.open.bg_stroke = egui::Stroke::NONE;
-}
-
-fn icon_rail_button(ui: &mut egui::Ui, icon: &str, tooltip: &str, enabled: bool) -> egui::Response {
-    with_visual_overrides(ui, apply_icon_rail_button_style, |ui| {
-        let color = if enabled {
-            text_primary(ui)
-        } else {
-            text_primary(ui).gamma_multiply(0.45)
-        };
-        let button = egui::Button::new(
-            egui::RichText::new(icon)
-                .font(egui::FontId::proportional(17.0))
-                .color(color),
-        )
-        .min_size(EDITOR_CONTEXT_ICON_BUTTON_SIZE)
-        .stroke(egui::Stroke::new(1.0, border(ui)))
-        .corner_radius(egui::CornerRadius::same(8));
-
-        widget_ids::surface_response(
-            ui,
-            ("editor_context.icon_rail", tooltip),
-            widget_ids::WidgetRole::IconButton,
-            |ui| ui.add_enabled(enabled, button),
-        )
-        .on_hover_text(tooltip)
-    })
-}
-
-fn apply_icon_rail_button_style(ui: &mut egui::Ui) {
-    let idle_bg = action_bg(ui);
-    let hover_bg = action_hover_bg(ui);
-    let visuals = ui.visuals_mut();
-    visuals.widgets.inactive.bg_fill = idle_bg;
-    visuals.widgets.inactive.weak_bg_fill = idle_bg;
-    visuals.widgets.hovered.bg_fill = hover_bg;
-    visuals.widgets.hovered.weak_bg_fill = hover_bg;
-    visuals.widgets.active.bg_fill = hover_bg;
-    visuals.widgets.active.weak_bg_fill = hover_bg;
-    visuals.widgets.open.bg_fill = hover_bg;
-    visuals.widgets.open.weak_bg_fill = hover_bg;
-}
-
-fn with_visual_overrides<R>(
-    ui: &mut egui::Ui,
-    configure: impl FnOnce(&mut egui::Ui),
-    add_contents: impl FnOnce(&mut egui::Ui) -> R,
-) -> R {
-    let previous_visuals = ui.visuals().clone();
-    configure(ui);
-    let result = add_contents(ui);
-    *ui.visuals_mut() = previous_visuals;
-    result
 }

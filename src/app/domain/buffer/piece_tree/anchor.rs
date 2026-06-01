@@ -406,16 +406,14 @@ impl PieceTreeLite {
             .iter()
             .filter_map(|anchor| {
                 let entry = self.anchor_state.entry(anchor.id)?;
-                let mut local_offset = anchor.local_offset;
-                if local_offset > insert_local_offset
-                    || (local_offset == insert_local_offset
-                        && matches!(entry.bias, AnchorBias::Right))
-                {
-                    local_offset += inserted_chars;
-                }
                 Some(LeafAnchor {
                     id: anchor.id,
-                    local_offset,
+                    local_offset: inserted_anchor_local_offset(
+                        anchor.local_offset,
+                        insert_local_offset,
+                        inserted_chars,
+                        entry.bias,
+                    ),
                 })
             })
             .collect()
@@ -448,13 +446,8 @@ impl PieceTreeLite {
                 let leaf = &self.root.nodes[node_index].leaves[leaf_index];
                 for anchor in &leaf.anchors {
                     let global_offset = address.leaf_start_char + anchor.local_offset;
-                    let new_global_offset = if global_offset <= range_chars.start {
-                        global_offset
-                    } else if global_offset >= range_chars.end {
-                        global_offset - removed_chars
-                    } else {
-                        range_chars.start
-                    };
+                    let new_global_offset =
+                        removed_anchor_global_offset(global_offset, range_chars, removed_chars);
                     anchors.push(LeafAnchor {
                         id: anchor.id,
                         local_offset: new_global_offset
@@ -489,10 +482,8 @@ impl PieceTreeLite {
 
         for anchor in anchors {
             let bounded_offset = anchor.local_offset.min(current_offset);
-            let leaf_index = leaf_starts
-                .partition_point(|start| *start <= bounded_offset)
-                .saturating_sub(1)
-                .min(leaves.len() - 1);
+            let leaf_index =
+                leaf_index_for_anchor_offset(&leaf_starts, bounded_offset, leaves.len());
             let leaf_local_offset = bounded_offset.saturating_sub(leaf_starts[leaf_index]);
             let leaf_id = leaves[leaf_index].leaf_id;
             self.anchor_state.set_leaf(anchor.id, leaf_id);
@@ -501,5 +492,78 @@ impl PieceTreeLite {
                 local_offset: leaf_local_offset.min(leaves[leaf_index].metrics.chars),
             });
         }
+    }
+}
+
+fn inserted_anchor_local_offset(
+    local_offset: usize,
+    insert_local_offset: usize,
+    inserted_chars: usize,
+    bias: AnchorBias,
+) -> usize {
+    if local_offset > insert_local_offset
+        || (local_offset == insert_local_offset && matches!(bias, AnchorBias::Right))
+    {
+        local_offset + inserted_chars
+    } else {
+        local_offset
+    }
+}
+
+fn removed_anchor_global_offset(
+    global_offset: usize,
+    range_chars: &Range<usize>,
+    removed_chars: usize,
+) -> usize {
+    if global_offset <= range_chars.start {
+        global_offset
+    } else if global_offset >= range_chars.end {
+        global_offset - removed_chars
+    } else {
+        range_chars.start
+    }
+}
+
+fn leaf_index_for_anchor_offset(
+    leaf_starts: &[usize],
+    bounded_offset: usize,
+    leaf_count: usize,
+) -> usize {
+    leaf_starts
+        .partition_point(|start| *start <= bounded_offset)
+        .saturating_sub(1)
+        .min(leaf_count - 1)
+}
+
+#[cfg(test)]
+mod decision_tests {
+    use super::{
+        AnchorBias, inserted_anchor_local_offset, leaf_index_for_anchor_offset,
+        removed_anchor_global_offset,
+    };
+
+    #[test]
+    fn inserted_anchor_offset_respects_bias_at_insert_boundary() {
+        assert_eq!(inserted_anchor_local_offset(5, 5, 3, AnchorBias::Left), 5);
+        assert_eq!(inserted_anchor_local_offset(5, 5, 3, AnchorBias::Right), 8);
+        assert_eq!(inserted_anchor_local_offset(7, 5, 3, AnchorBias::Left), 10);
+    }
+
+    #[test]
+    fn removed_anchor_offset_collapses_inside_range_and_shifts_after_range() {
+        let range = 10..15;
+
+        assert_eq!(removed_anchor_global_offset(9, &range, 5), 9);
+        assert_eq!(removed_anchor_global_offset(12, &range, 5), 10);
+        assert_eq!(removed_anchor_global_offset(17, &range, 5), 12);
+    }
+
+    #[test]
+    fn leaf_index_for_anchor_offset_selects_containing_leaf() {
+        let starts = [0, 10, 25];
+
+        assert_eq!(leaf_index_for_anchor_offset(&starts, 0, 3), 0);
+        assert_eq!(leaf_index_for_anchor_offset(&starts, 14, 3), 1);
+        assert_eq!(leaf_index_for_anchor_offset(&starts, 99, 3), 2);
     }
 }

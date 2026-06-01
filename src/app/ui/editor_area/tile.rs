@@ -1,12 +1,17 @@
 mod autoscroll;
 mod chrome;
 mod context_menu;
+mod decisions;
 mod scroll_frame;
 mod scroll_input;
 mod style;
 
 use self::autoscroll::apply_selection_edge_autoscroll_intent;
 use self::chrome::{apply_tile_body_focus, handle_tile_click, paint_tile_frame};
+use self::decisions::{
+    TileFocusRequest, context_menu_attach_policy, scrollbar_visibility_for_drag_active,
+    tile_focus_request,
+};
 use self::scroll_frame::{
     drain_pending_scroll_intents, editor_scroll_content_size, publish_scroll_manager_metrics,
     recover_unresolved_piece_anchor, resolved_scroll_offset_for_view, sync_local_scroll_state,
@@ -109,13 +114,10 @@ fn should_attach_tile_context_menu(
     tile_response: &egui::Response,
     editor_response: Option<&egui::Response>,
 ) -> bool {
-    let Some(editor_response) = editor_response else {
-        return true;
-    };
-    tile_response
+    let pointer_pos = tile_response
         .ctx
-        .input(|input| input.pointer.interact_pos())
-        .is_none_or(|pos| !editor_response.rect.contains(pos))
+        .input(|input| input.pointer.interact_pos());
+    context_menu_attach_policy(editor_response.map(|response| response.rect), pointer_pos)
 }
 
 fn render_tile_header(
@@ -216,19 +218,19 @@ fn apply_tile_focus_request(
     request_focus: bool,
     request_editor_focus: bool,
 ) {
-    if request_focus {
-        workspace_accessors::consume_focus_request(app, view_id);
-    } else if request_editor_focus {
-        workspace_accessors::request_focus_for_view(app, view_id);
+    match tile_focus_request(request_focus, request_editor_focus) {
+        TileFocusRequest::ConsumeRequestedFocus => {
+            workspace_accessors::consume_focus_request(app, view_id);
+        }
+        TileFocusRequest::RequestEditorFocus => {
+            workspace_accessors::request_focus_for_view(app, view_id);
+        }
+        TileFocusRequest::None => {}
     }
 }
 
 fn editor_scroll_bar_visibility(ctx: &egui::Context) -> egui::scroll_area::ScrollBarVisibility {
-    if tab_drag::is_drag_active_for_context(ctx) {
-        egui::scroll_area::ScrollBarVisibility::AlwaysHidden
-    } else {
-        egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded
-    }
+    scrollbar_visibility_for_drag_active(tab_drag::is_drag_active_for_context(ctx))
 }
 
 fn take_previous_snapshot(tab: &mut WorkspaceTab, view_id: ViewId) -> Option<DisplaySnapshot> {

@@ -2,11 +2,13 @@ mod capture;
 mod model;
 mod ops;
 mod restore;
+mod types;
 
 use crate::app::diagnostics;
-use crate::app::domain::{DocumentSnapshot, WorkspaceTab};
+use crate::app::domain::WorkspaceTab;
 use crate::app::services::settings_store::AppSettings;
 use crate::app::services::store_io::remove_file_if_exists;
+use capture::{CapturedSessionBuffer, CapturedSessionTab};
 use model::{SessionBuffer, SessionManifest, SessionPaneNode, SessionTab, SessionView};
 use ops::{
     BUFFER_FILE_EXTENSION, SessionSnapshotWrite, collect_stale_buffer_files, session_tab_temp_ids,
@@ -18,102 +20,26 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 use std::time::Instant;
+use types::{PreparedSessionPersist, RestoredTabs, StreamedTabs};
 
 const SESSION_DIR_NAME: &str = "scratchpad";
 const SESSION_MANIFEST_NAME: &str = "session.json";
 const PRETTY_SESSION_MANIFEST_MAX_TABS: usize = 128;
 
-pub(crate) use capture::cold_tab_from_workspace_tab;
+pub(crate) use capture::{SessionPersistRequest, cold_tab_from_workspace_tab};
 pub use model::SESSION_VERSION;
 pub use model::SessionActiveSurface;
 pub(crate) use model::SessionTabParts as ColdSessionTab;
 pub(super) use ops::{SESSION_IO_PARALLEL_MAX_WORKERS, SESSION_IO_PARALLEL_MIN_ITEMS};
+pub use types::{
+    ProfiledRestoredSession, RestoreStatus, RestoreStatusLevel, RestoredSession,
+    SessionPersistProfile, SessionRestoreProfile,
+};
 
 #[derive(Clone)]
 pub struct SessionStore {
     root: PathBuf,
     manifest_path: PathBuf,
-}
-
-pub(crate) struct SessionPersistRequest {
-    active_tab_index: usize,
-    active_surface: SessionActiveSurface,
-    font_size: f32,
-    word_wrap: bool,
-    tabs: Vec<CapturedSessionTab>,
-}
-
-struct CapturedSessionTab {
-    session_tab: SessionTab,
-    buffer_snapshots: Vec<CapturedSessionBuffer>,
-}
-
-struct CapturedSessionBuffer {
-    temp_id: String,
-    snapshot: DocumentSnapshot,
-}
-
-struct PreparedSessionPersist {
-    session_tabs: Vec<SessionTab>,
-    snapshot_writes: Vec<SessionSnapshotWrite>,
-    preserved_snapshot_paths: HashSet<PathBuf>,
-}
-
-struct RestoredTabs {
-    tabs: Vec<WorkspaceTab>,
-    summary: RestoreSummary,
-}
-
-struct StreamedTabs {
-    tab_count: usize,
-    summary: RestoreSummary,
-}
-
-pub struct RestoredSession {
-    pub tabs: Vec<WorkspaceTab>,
-    pub active_tab_index: usize,
-    pub active_surface: SessionActiveSurface,
-    pub legacy_settings: AppSettings,
-    pub restore_status: Option<RestoreStatus>,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SessionPersistProfile {
-    pub total_ns: u128,
-    pub snapshot_capture_ns: u128,
-    pub snapshot_write_ns: u128,
-    pub stale_cleanup_ns: u128,
-    pub manifest_serialize_ns: u128,
-    pub manifest_write_ns: u128,
-    pub tab_count: usize,
-    pub buffer_count: usize,
-    pub manifest_size_bytes: u64,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SessionRestoreProfile {
-    pub total_ns: u128,
-    pub manifest_read_parse_ns: u128,
-    pub restore_reconstruction_ns: u128,
-    pub tab_count: usize,
-    pub buffer_count: usize,
-}
-
-pub struct ProfiledRestoredSession {
-    pub restored: Option<RestoredSession>,
-    pub profile: SessionRestoreProfile,
-}
-
-#[derive(Clone)]
-pub struct RestoreStatus {
-    pub level: RestoreStatusLevel,
-    pub message: String,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum RestoreStatusLevel {
-    Info,
-    Warning,
 }
 
 impl Default for SessionStore {

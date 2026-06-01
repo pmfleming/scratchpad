@@ -1,5 +1,6 @@
 use super::callout;
 mod controls;
+mod result_model;
 mod results;
 mod state;
 

@@ -1,6 +1,7 @@
 use super::state::{SearchStripActions, SearchStripState};
 mod buttons;
 mod input;
+mod shortcuts;
 
 use crate::app::app_state::{SearchFocusTarget, SearchReplaceAvailability, SearchScope};
 use crate::app::shortcut_tooltips;
@@ -16,16 +17,11 @@ use egui_phosphor::regular::{
     MAGNIFYING_GLASS, SWAP, TEXTBOX,
 };
 use input::icon_text_input;
+use shortcuts::{TextInputKind, consume_search_strip_shortcuts, consume_text_input_keys};
 
 const CASE_SENSITIVE_ICON: &str = "Aa";
 const CONTROL_BUTTON_HEIGHT: f32 = 34.0;
 const SEARCH_CARD_CORNER_RADIUS: u8 = 12;
-
-#[derive(Clone, Copy)]
-enum PlainEnterAction {
-    NextMatch,
-    ReplaceCurrent,
-}
 
 pub(super) fn show_search_controls(
     ui: &mut egui::Ui,
@@ -43,12 +39,12 @@ pub(super) fn show_search_controls(
         .inner;
 
     if find_response.has_focus() {
-        consume_text_input_keys(ui, actions, PlainEnterAction::NextMatch);
+        consume_text_input_keys(ui, actions, TextInputKind::Find);
     }
     if let Some(replace_response) = replace_response.as_ref()
         && replace_response.has_focus()
     {
-        consume_text_input_keys(ui, actions, PlainEnterAction::ReplaceCurrent);
+        consume_text_input_keys(ui, actions, TextInputKind::Replace);
     }
     consume_search_strip_shortcuts(
         ui,
@@ -276,105 +272,4 @@ fn search_card<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) ->
         .corner_radius(egui::CornerRadius::same(SEARCH_CARD_CORNER_RADIUS))
         .show(ui, add_contents)
         .inner
-}
-
-fn consume_text_input_keys(
-    ui: &mut egui::Ui,
-    actions: &mut SearchStripActions,
-    plain_enter: PlainEnterAction,
-) {
-    if consume_key(ui, egui::Modifiers::CTRL, egui::Key::Enter) {
-        actions.replace_current_requested = true;
-    } else if consume_key(ui, egui::Modifiers::ALT, egui::Key::Enter) {
-        actions.replace_all_requested = true;
-    } else if matches!(plain_enter, PlainEnterAction::NextMatch)
-        && consume_key(ui, egui::Modifiers::SHIFT, egui::Key::Enter)
-    {
-        actions.previous_requested = true;
-    } else if consume_key(ui, egui::Modifiers::NONE, egui::Key::Enter) {
-        match plain_enter {
-            PlainEnterAction::NextMatch => actions.next_requested = true,
-            PlainEnterAction::ReplaceCurrent => actions.replace_current_requested = true,
-        }
-    }
-
-    if consume_key(ui, egui::Modifiers::NONE, egui::Key::Escape) {
-        actions.close_requested = true;
-    }
-}
-
-fn consume_search_strip_shortcuts(
-    ui: &mut egui::Ui,
-    state: &mut SearchStripState,
-    actions: &mut SearchStripActions,
-    text_input_focused: bool,
-) {
-    consume_search_scope_shortcuts(ui, state);
-    consume_search_option_shortcuts(ui, state);
-    consume_search_action_shortcuts(ui, state, actions, text_input_focused);
-}
-
-fn consume_search_scope_shortcuts(ui: &mut egui::Ui, state: &mut SearchStripState) {
-    if consume_key(ui, egui::Modifiers::ALT, egui::Key::Num1) {
-        state.scope = SearchScope::SelectionOnly;
-    } else if consume_key(ui, egui::Modifiers::ALT, egui::Key::Num2) {
-        state.scope = SearchScope::ActiveBuffer;
-    } else if consume_key(ui, egui::Modifiers::ALT, egui::Key::Num3) {
-        state.scope = SearchScope::ActiveWorkspaceTab;
-    } else if consume_key(ui, egui::Modifiers::ALT, egui::Key::Num4) {
-        state.scope = SearchScope::AllOpenTabs;
-    }
-}
-
-fn consume_search_option_shortcuts(ui: &mut egui::Ui, state: &mut SearchStripState) {
-    if consume_key(ui, egui::Modifiers::ALT, egui::Key::R) {
-        state.mode = if state.mode == crate::app::services::search::SearchMode::Regex {
-            crate::app::services::search::SearchMode::PlainText
-        } else {
-            crate::app::services::search::SearchMode::Regex
-        };
-    }
-    if consume_key(ui, egui::Modifiers::ALT, egui::Key::C) {
-        state.match_case = !state.match_case;
-    }
-    if consume_key(ui, egui::Modifiers::ALT, egui::Key::W) {
-        state.whole_word = !state.whole_word;
-    }
-}
-
-fn consume_search_action_shortcuts(
-    ui: &mut egui::Ui,
-    state: &SearchStripState,
-    actions: &mut SearchStripActions,
-    text_input_focused: bool,
-) {
-    if state.match_count > 0 && consume_key(ui, egui::Modifiers::NONE, egui::Key::F3) {
-        actions.next_requested = true;
-    }
-    if state.match_count > 0 && consume_key(ui, egui::Modifiers::SHIFT, egui::Key::F3) {
-        actions.previous_requested = true;
-    }
-    if matches!(
-        state.replace_availability,
-        SearchReplaceAvailability::Allowed
-    ) {
-        if consume_key(ui, egui::Modifiers::CTRL, egui::Key::Enter) {
-            actions.replace_current_requested = true;
-        }
-        if consume_key(ui, egui::Modifiers::ALT, egui::Key::Enter) {
-            actions.replace_all_requested = true;
-        }
-    }
-    if !text_input_focused {
-        if state.can_undo_text_operation && consume_key(ui, egui::Modifiers::CTRL, egui::Key::Z) {
-            actions.undo_requested = true;
-        }
-        if state.can_redo_text_operation && consume_key(ui, egui::Modifiers::CTRL, egui::Key::Y) {
-            actions.redo_requested = true;
-        }
-    }
-}
-
-fn consume_key(ui: &mut egui::Ui, modifiers: egui::Modifiers, key: egui::Key) -> bool {
-    ui.input_mut(|input| input.consume_key(modifiers, key))
 }
