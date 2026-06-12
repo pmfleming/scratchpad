@@ -48,7 +48,7 @@ fn parallel_text_inspection_matches_serial_for_boundary_cases() {
 #[test]
 fn parallel_span_inspection_corrects_crlf_worker_boundaries() {
     let spans = ["a\r", "\nb\r", "\nc"].repeat(16);
-    let span_refs = spans.to_vec();
+    let span_refs = spans.clone();
 
     let parallel = TextScanSummary::scan_span_slice_parallel_with_workers(&span_refs, 2)
         .expect("parallel scan");

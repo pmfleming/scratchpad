@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scratchpad — Code Review</title>
+<style>
+  :root {
+    --bg: #14161a;
+    --panel: #1c1f26;
+    --panel-2: #21252e;
+    --ink: #e6e9ef;
+    --muted: #9aa3b2;
+    --line: #2b303b;
+    --accent: #6ea8fe;
+    --good: #5fd08a;
+    --warn: #e8b864;
+    --bad: #f08a8a;
+    --code-bg: #11131820;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font: 16px/1.6 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 48px 28px 96px; }
+  header.title { border-bottom: 1px solid var(--line); padding-bottom: 24px; margin-bottom: 8px; }
+  h1 { font-size: 2.1rem; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); font-size: 0.95rem; }
+  h2 { font-size: 1.4rem; margin: 52px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--line); letter-spacing: -0.01em; }
+  h3 { font-size: 1.08rem; margin: 28px 0 8px; color: #cdd5e2; }
+  p { margin: 12px 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 5px; font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace; font-size: 0.86em; }
+  pre { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-family: "JetBrains Mono", Consolas, monospace; font-size: 0.82rem; line-height: 1.5; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin: 18px 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+  .card .n { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; }
+  .card .l { color: var(--muted); font-size: 0.82rem; margin-top: 2px; }
+  .verdict { background: linear-gradient(180deg, #1d2530, #1a1d24); border: 1px solid #2f3a4a; border-left: 4px solid var(--good); border-radius: 10px; padding: 18px 22px; margin: 22px 0; }
+  .badge { display: inline-block; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 9px; border-radius: 999px; vertical-align: middle; margin-left: 8px; }
+  .b-low { background: #25382a; color: var(--good); border: 1px solid #34563f; }
+  .b-med { background: #3a3320; color: var(--warn); border: 1px solid #5a4d2c; }
+  .b-high { background: #3a2424; color: var(--bad); border: 1px solid #5a3030; }
+  .b-info { background: #233040; color: var(--accent); border: 1px solid #34506e; }
+  .finding { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; margin: 16px 0; }
+  .finding h3 { margin-top: 0; }
+  .finding .where { color: var(--muted); font-size: 0.82rem; margin: 4px 0 10px; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 0.92rem; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 22px; margin: 24px 0; columns: 2; column-gap: 32px; }
+  .toc a { display: block; padding: 3px 0; color: #c5cdda; font-size: 0.92rem; }
+  .toc a:hover { color: var(--accent); }
+  .muted { color: var(--muted); }
+  .ok { color: var(--good); }
+  .footnote { color: var(--muted); font-size: 0.82rem; border-top: 1px solid var(--line); margin-top: 60px; padding-top: 18px; }
+  hr { border: none; border-top: 1px solid var(--line); margin: 36px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="title">
+  <h1>Scratchpad — Code Review</h1>
+  <div class="sub">A focused review of the source code only (no plans, READMEs, or design docs). &nbsp;·&nbsp; 2026-06-04 &nbsp;·&nbsp; <code>v0.40.0</code>, Rust 2024 edition</div>
+</header>
+
+<div class="grid">
+  <div class="card"><div class="n">~64.4k</div><div class="l">lines of Rust across 316 files</div></div>
+  <div class="card"><div class="n">368</div><div class="l">unit tests in 74 files</div></div>
+  <div class="card"><div class="n ok">0</div><div class="l">TODO / FIXME / HACK markers</div></div>
+  <div class="card"><div class="n ok">clean</div><div class="l"><code>cargo build</code> &amp; <code>clippy</code> exit 0</div></div>
+</div>
+
+<div class="verdict">
+  <strong>Overall: a high-quality, mature codebase.</strong> This is a native Windows text editor built on <code>egui</code>/<code>eframe</code>,
+  organized around a custom piece-tree text buffer with asynchronous I/O. The code shows consistent discipline: strict module
+  boundaries, <code>#![forbid(unsafe_code)]</code> in the application crate, atomic file writes with crash safety, structured
+  error reporting, and dense test coverage. Findings below are predominantly minor; there are no architectural red flags and
+  no data-loss hazards in the save path. The one functional defect found is a cosmetic tooltip bug.
+</div>
+
+<div class="toc">
+  <a href="#scope">1. Scope &amp; method</a>
+  <a href="#arch">2. Architecture</a>
+  <a href="#strengths">3. Strengths</a>
+  <a href="#safety">4. Memory &amp; I/O safety</a>
+  <a href="#concurrency">5. Concurrency</a>
+  <a href="#errors">6. Error handling</a>
+  <a href="#findings">7. Findings</a>
+  <a href="#minor">8. Minor / stylistic</a>
+  <a href="#recs">9. Recommendations</a>
+</div>
+
+<h2 id="scope">1. Scope &amp; method</h2>
+<p>
+  This review examined the Rust source under <code>src/</code> and <code>crates/</code> only. Documentation, plans, and READMEs
+  were deliberately excluded per request. I read the entry points and the highest-leverage modules in full (piece tree,
+  document history/coalescing, the <code>eframe::App</code> loop, the file save/load path, atomic write primitive, the
+  background-I/O and search workers, and the diagnostics subsystem), and surveyed the rest by structural and pattern search.
+  I also compiled the project and ran Clippy to ground the observations.
+</p>
+<table>
+  <tr><th>Check</th><th>Result</th></tr>
+  <tr><td><code>cargo build</code></td><td class="ok">Exit 0, no warnings</td></tr>
+  <tr><td><code>cargo clippy --all-targets</code></td><td>Exit 0; 16 warnings, almost all in test/bench code or pedantic-tier (see §7–8)</td></tr>
+  <tr><td><code>unsafe</code> in app crate</td><td class="ok">None — confined to the Win32 FFI crate and one allocator-tracking profiling bin</td></tr>
+</table>
+
+<h2 id="arch">2. Architecture</h2>
+<p>
+  The crate is layered cleanly into <code>domain</code> (buffer, piece tree, tabs, panes, view), <code>services</code> (file
+  controller/service, session &amp; settings stores, search, background I/O), <code>app_state</code> (the live application
+  state and its controllers), and <code>ui</code> (chrome, editor area, dialogs). The split reads as intentional and is
+  reinforced in code: <code>app/mod.rs</code> enables <code>#![warn(clippy::pedantic)]</code> with a small, curated allow-list,
+  and the top-level <code>ScratchpadApp</code> carries an explicit guardrail comment:
+</p>
+<pre>// Stop adding new impl ScratchpadApp blocks except for top-level orchestration.
+// New feature code should take the narrow dependency it needs, not &amp;mut ScratchpadApp.</pre>
+<p>
+  The text buffer is a <strong>4-level piece tree</strong> (<code>PieceTreeRoot → InternalNode → Leaf → Piece</code>) with
+  cached prefix metrics (chars/newlines) at every level for <code>O(log n)</code> offset and line lookups, plus an anchor
+  subsystem for stable positions across edits. Leaf and node fan-outs are bounded by named constants
+  (<code>MAX_LEAF_BYTES</code>, <code>MAX_LEAF_PIECES</code>, <code>MAX_LEAVES_PER_INTERNAL</code>). This is the right data
+  structure for a large-file editor and is implemented carefully, including a fast path in <code>extract_text()</code> that
+  returns the original buffer verbatim when no edits have occurred.
+</p>
+
+<h2 id="strengths">3. Strengths</h2>
+<ul>
+  <li><strong>Crash-safe saves.</strong> All persistence routes through <code>store_io::write_atomic_with</code>: write to a
+    sibling temp file, <code>flush()</code>, <code>sync_all()</code>, then <code>rename</code> over the target. The code
+    explicitly documents why it must <em>not</em> delete the destination first (avoids a window where the file is missing or
+    substitutable), and there is a regression test asserting the original file survives a failed replace.</li>
+  <li><strong>Asynchronous I/O with staleness guards.</strong> Saves and loads are dispatched to background lanes; results are
+    reconciled against buffer revision and path identity (<code>paths_match</code>, <code>saved_revision</code>) before being
+    applied, so a slow save cannot clobber newer in-memory state.</li>
+  <li><strong>Disciplined error surfacing.</strong> <code>StatusState</code> separates user-facing copy from raw error detail,
+    with tests that assert messages avoid fragile pluralization (<code>"file(s)"</code>, <code>"1 files"</code>). Error paths
+    feed a structured <code>diagnostics</code> layer rather than being swallowed.</li>
+  <li><strong>Test density.</strong> 368 tests co-located with the code they exercise, including the subtle history-coalescing
+    rules (soft vs. hard dividers, cursor-jump boundaries, transient-entry removal) and order-preservation of parallel file
+    loads.</li>
+  <li><strong>Self-monitoring.</strong> A bespoke diagnostics subsystem detects duplicate <code>egui</code> widget IDs at
+    runtime and logs them, and lock acquisition there degrades gracefully (<code>if let Ok(state) = …lock()</code>) instead of
+    panicking on poisoning.</li>
+</ul>
+
+<h2 id="safety">4. Memory &amp; I/O safety</h2>
+<p>
+  The application and library crates are <code>#![forbid(unsafe_code)]</code>. The only <code>unsafe</code> in the tree is:
+  (1) the <code>windows_file_watch</code> crate's FFI to <code>FindFirstChangeNotificationW</code> / <code>FindNextChangeNotification</code>,
+  which is the correct place for it; and (2) a <code>GlobalAlloc</code> implementation in the <code>resource_probe</code>
+  profiling binary. Encoding/decoding goes through <code>encoding_rs</code> with explicit handling of unrepresentable
+  characters (returns <code>InvalidData</code> rather than silently substituting), and UTF-16/BOM handling is explicit per
+  endianness. Index math in the piece tree and ICO parser uses <code>checked_*</code> / <code>saturating_*</code> consistently.
+</p>
+
+<h2 id="concurrency">5. Concurrency</h2>
+<p>
+  Concurrency is modest and well-contained. The search worker is a single thread that drains and <em>coalesces</em> its request
+  queue—keeping only the newest request and skipping stale work—and uses an <code>Arc&lt;AtomicU64&gt;</code> generation counter
+  for cancellation. File loads fan out across a bounded pool (<code>MAX_CONCURRENT_READS = 8</code>, capped by
+  <code>available_parallelism</code>) via <code>thread::scope</code>, and results are re-sorted to preserve input order; a test
+  confirms ordering. Channel-send failures short-circuit cleanly. Shared mutable global state is limited to telemetry counters
+  (<code>AtomicU64</code> in <code>capacity_metrics</code>) and the diagnostics <code>Mutex</code> — no broad shared-state
+  locking in hot paths.
+</p>
+
+<h2 id="errors">6. Error handling</h2>
+<p>
+  Of 153 <code>.unwrap()</code> and 79 <code>.expect()</code> call sites, the overwhelming majority are in <code>#[cfg(test)]</code>
+  modules. The ~56 non-test <code>unwrap</code>s I sampled were either in test helpers or backed by validated invariants
+  (e.g. <code>expect("buffer location validated")</code> immediately after the location was looked up). Non-test
+  <code>panic!</code>/<code>unreachable!</code> sites are exhaustiveness guards (e.g. a horizontal tab panel rejecting
+  left/right orientations) or measurement invariants, not reachable error paths. This is a reasonable bar for a desktop app.
+</p>
+
+<h2 id="findings">7. Findings</h2>
+
+<div class="finding">
+  <h3>F1 — Tooltip branch has identical arms <span class="badge b-low">Low</span></h3>
+  <div class="where">src/app/ui/dialogs/text_history.rs:205–209</div>
+  <p>The "follow focus" toggle picks its tooltip with an <code>if/else</code> whose branches are identical:</p>
+  <pre>if follow_focus {
+    HISTORY_FOLLOW_FOCUS_SHORTCUT
+} else {
+    HISTORY_FOLLOW_FOCUS_SHORTCUT   // same constant in both arms
+}</pre>
+  <p>
+    The conditional is clearly meant to show different copy for the on vs. off state but currently shows the same text either
+    way. Functionally harmless, but it is a real defect (Clippy flags it as <em>"this <code>if</code> has identical blocks"</em>).
+    Either supply a distinct "stop following" string or drop the conditional.
+  </p>
+</div>
+
+<div class="finding">
+  <h3>F2 — Atomic-write temp file is not cleaned up on failure <span class="badge b-low">Low</span></h3>
+  <div class="where">src/app/services/store_io.rs:10–62</div>
+  <p>
+    If <code>write</code>, <code>flush</code>, <code>sync_all</code>, or the final <code>rename</code> fails, the
+    <code>.write</code> temp file created at the start is left on disk (each error path propagates without removing it). The
+    target file is correctly preserved—so this is not a data-safety issue—but repeated failed saves can litter the directory
+    with <code>name.txt.write</code> files. Consider removing the temp file on the error paths (best-effort,
+    <code>remove_file_if_exists</code> already exists next door).
+  </p>
+</div>
+
+<div class="finding">
+  <h3>F3 — Path canonicalization hits the filesystem on every key construction <span class="badge b-info">Note</span></h3>
+  <div class="where">src/app/mod.rs:66 (<code>normalize_path</code>), used by <code>CanonicalPathKey::from_path</code></div>
+  <p>
+    <code>CanonicalPathKey::from_path</code> calls <code>std::fs::canonicalize</code> (a syscall) and then lowercases the
+    result. These keys are constructed in several places per save/open and in <code>path_owner</code> lookups. For an
+    interactive editor with a handful of tabs this is fine, but if key construction ever moves into a per-frame or per-tab-loop
+    path it would become a measurable cost. Worth keeping in mind; not a problem at current call frequency. (Lowercasing is
+    appropriate here given the Windows target.)
+  </p>
+</div>
+
+<div class="finding">
+  <h3>F4 — Clippy warnings are real but low-value <span class="badge b-low">Low</span></h3>
+  <div class="where">cargo clippy --all-targets</div>
+  <p>16 warnings total. Excluding F1, they break down as:</p>
+  <ul>
+    <li>5× <em>unchecked subtraction of a <code>Duration</code></em> — all in <code>document/tests.rs</code> and one in
+      <code>history/coalescing.rs</code> tests, where inputs are constants and can't underflow.</li>
+    <li><em>too many arguments</em> (10/7 in <code>buffer/state.rs:98</code>, 8/7 in <code>native_editor/layout.rs:239</code>)
+      and <em>more than 3 bools in parameters</em> — these are the kind of signature smell worth watching; bundling related
+      flags/positions into a small struct would read better, though it's a judgment call.</li>
+    <li>The remainder (<em>redundant closure</em>, <em>elidable lifetime</em>, <em>single-element <code>Vec</code> of Range</em>,
+      <em>map().unwrap_or()</em>, <em>constant assertion</em>) are nits, mostly in tests.</li>
+  </ul>
+  <p>None indicate a correctness problem. They are listed so the team can decide whether to fix or explicitly allow them.</p>
+</div>
+
+<h2 id="minor">8. Minor / stylistic</h2>
+<ul>
+  <li><strong>Synchronous session persist in <code>Drop</code>.</strong> <code>ScratchpadApp::drop</code> calls
+    <code>persist_session_now</code>, which can block shutdown briefly on disk I/O. Acceptable for a desktop app and arguably
+    safer than a fire-and-forget, but it is a place where a slow/locked filesystem would stall exit.</li>
+  <li><strong><code>byte_index_for_char</code> is O(n).</strong> In <code>history/coalescing.rs</code> it walks
+    <code>char_indices().nth()</code>. Fine for short history-entry strings, just noting the access pattern.</li>
+  <li><strong>Large single files.</strong> A handful exceed ~600–700 lines (<code>capacity_metrics.rs</code>,
+    <code>domain/view.rs</code>, <code>ui/tab_overflow.rs</code>). They are coherent, but a few are candidates for further
+    submodule splits if they keep growing.</li>
+  <li><strong>Pedantic allow-list is broad-ish.</strong> The crate-level allow-list in <code>app/mod.rs</code> silences several
+    casting lints globally (<code>cast_possible_truncation</code>, <code>cast_sign_loss</code>, …). Reasonable for a UI app
+    dealing in <code>f32</code> coordinates, but global suppression of truncation lints can occasionally mask a genuine narrowing
+    bug; localized <code>#[allow]</code> would be stricter.</li>
+</ul>
+
+<h2 id="recs">9. Recommendations</h2>
+<ol>
+  <li>Fix the F1 tooltip branch (or remove the conditional). Quick, user-visible.</li>
+  <li>Best-effort delete the temp file on <code>write_atomic_with</code> error paths (F2).</li>
+  <li>Triage the Clippy list: silence the test-only Duration/assertion lints locally and consider the two
+    "too many arguments" signatures for a parameter-struct refactor (F4).</li>
+  <li>Keep an eye on <code>CanonicalPathKey</code> construction frequency if path-heavy features are added (F3).</li>
+</ol>
+
+<p class="muted">
+  Bottom line: the fundamentals an editor lives or dies on—buffer correctness, undo/redo coalescing, and crash-safe saving—are
+  implemented thoughtfully and well tested. The issues found are minor and easily addressed.
+</p>
+
+<div class="footnote">
+  Generated from a read-only review of <code>src/</code> and <code>crates/</code>. Build and Clippy were run to verify; no
+  source files were modified. Line references reflect the working tree at review time.
+</div>
+
+</div>
+</body>
+</html>

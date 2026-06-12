@@ -43,12 +43,12 @@ pub(super) fn empty_message(state: &SearchStripState) -> Option<&str> {
     )
 }
 
-fn empty_message_from_parts<'a>(
+fn empty_message_from_parts(
     query_empty: bool,
-    status_message: Option<&'a str>,
+    status_message: Option<&str>,
     searching: bool,
     has_result_groups: bool,
-) -> Option<&'a str> {
+) -> Option<&str> {
     if query_empty {
         Some("Type to search across the selected scope.")
     } else if let Some(message) = status_message {

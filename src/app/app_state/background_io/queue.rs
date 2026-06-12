@@ -6,6 +6,13 @@ use super::{
     ScratchpadApp, SessionPersistRequest, StartupOptions, cold_session_tab_buffer_ids,
     record_background_send_error,
 };
+use crate::app::domain::{DocumentSnapshot, TextFormatMetadata};
+
+#[derive(Clone, Copy)]
+enum AnalysisRefreshKind {
+    TextMetadata,
+    EncodingCompliance,
+}
 
 impl ScratchpadApp {
     pub(crate) fn queue_active_buffer_encoding_compliance_refresh(&mut self) {
@@ -225,82 +232,81 @@ impl ScratchpadApp {
         &mut self,
         buffer_id: u64,
         revision: u64,
-        snapshot: crate::app::domain::DocumentSnapshot,
-        format: crate::app::domain::TextFormatMetadata,
+        snapshot: DocumentSnapshot,
+        format: TextFormatMetadata,
     ) {
-        if self
-            .state
-            .background_io
-            .has_pending_text_metadata_refresh(buffer_id, revision)
-        {
-            return;
-        }
-
-        let request_id = self.state.background_io.allocate_background_request_id();
-        self.state.background_io.insert_pending_background_action(
-            request_id,
-            PendingBackgroundAction::RefreshTextMetadata(PendingTextMetadataAction {
-                buffer_id,
-                revision,
-            }),
-        );
-
-        let request = BackgroundIoRequest::RefreshTextMetadata {
-            request_id,
+        self.queue_background_analysis_refresh(
+            AnalysisRefreshKind::TextMetadata,
             buffer_id,
             revision,
             snapshot,
             format,
-        };
-        self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
-            app.apply_background_io_result(BackgroundIoResult::TextMetadataRefreshed {
-                request_id,
-                buffer_id,
-                revision,
-                result: request.into_text_metadata_result(),
-            });
-        });
+        );
     }
 
     pub(crate) fn queue_background_encoding_compliance_refresh(
         &mut self,
         buffer_id: u64,
         revision: u64,
-        snapshot: crate::app::domain::DocumentSnapshot,
-        format: crate::app::domain::TextFormatMetadata,
+        snapshot: DocumentSnapshot,
+        format: TextFormatMetadata,
     ) {
-        if self
-            .state
-            .background_io
-            .has_pending_encoding_compliance_refresh(buffer_id, revision)
-        {
+        self.queue_background_analysis_refresh(
+            AnalysisRefreshKind::EncodingCompliance,
+            buffer_id,
+            revision,
+            snapshot,
+            format,
+        );
+    }
+
+    fn queue_background_analysis_refresh(
+        &mut self,
+        kind: AnalysisRefreshKind,
+        buffer_id: u64,
+        revision: u64,
+        snapshot: DocumentSnapshot,
+        format: TextFormatMetadata,
+    ) {
+        if self.has_pending_analysis_refresh(kind, buffer_id, revision) {
             return;
         }
 
         let request_id = self.state.background_io.allocate_background_request_id();
         self.state.background_io.insert_pending_background_action(
             request_id,
-            PendingBackgroundAction::RefreshEncodingCompliance(PendingEncodingComplianceAction {
-                buffer_id,
-                revision,
-            }),
+            pending_analysis_refresh_action(kind, buffer_id, revision),
         );
 
-        let request = BackgroundIoRequest::RefreshEncodingCompliance {
+        let request =
+            analysis_refresh_request(kind, request_id, buffer_id, revision, snapshot, format);
+        self.send_background_request_or_apply(
             request_id,
-            buffer_id,
-            revision,
-            snapshot,
-            format,
-        };
-        self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
-            app.apply_background_io_result(BackgroundIoResult::EncodingComplianceRefreshed {
-                request_id,
-                buffer_id,
-                revision,
-                result: request.into_encoding_compliance_result(),
-            });
-        });
+            request,
+            move |app, request_id, request| {
+                app.apply_background_io_result(analysis_refresh_fallback_result(
+                    kind, request_id, buffer_id, revision, request,
+                ));
+            },
+        );
+    }
+
+    fn has_pending_analysis_refresh(
+        &self,
+        kind: AnalysisRefreshKind,
+        buffer_id: u64,
+        revision: u64,
+    ) -> bool {
+        match kind {
+            AnalysisRefreshKind::TextMetadata => self
+                .state
+                .background_io
+                .has_pending_text_metadata_refresh(buffer_id, revision),
+            AnalysisRefreshKind::EncodingCompliance => self
+                .state
+                .background_io
+                .has_pending_encoding_compliance_refresh(buffer_id, revision),
+        }
     }
 
     fn send_background_request_or_apply(
@@ -315,6 +321,78 @@ impl ScratchpadApp {
                 .background_io
                 .drop_pending_background_action(request_id);
             fallback(self, request_id, error.into_request());
+        }
+    }
+}
+
+fn pending_analysis_refresh_action(
+    kind: AnalysisRefreshKind,
+    buffer_id: u64,
+    revision: u64,
+) -> PendingBackgroundAction {
+    match kind {
+        AnalysisRefreshKind::TextMetadata => {
+            PendingBackgroundAction::RefreshTextMetadata(PendingTextMetadataAction {
+                buffer_id,
+                revision,
+            })
+        }
+        AnalysisRefreshKind::EncodingCompliance => {
+            PendingBackgroundAction::RefreshEncodingCompliance(PendingEncodingComplianceAction {
+                buffer_id,
+                revision,
+            })
+        }
+    }
+}
+
+fn analysis_refresh_request(
+    kind: AnalysisRefreshKind,
+    request_id: u64,
+    buffer_id: u64,
+    revision: u64,
+    snapshot: DocumentSnapshot,
+    format: TextFormatMetadata,
+) -> BackgroundIoRequest {
+    match kind {
+        AnalysisRefreshKind::TextMetadata => BackgroundIoRequest::RefreshTextMetadata {
+            request_id,
+            buffer_id,
+            revision,
+            snapshot,
+            format,
+        },
+        AnalysisRefreshKind::EncodingCompliance => BackgroundIoRequest::RefreshEncodingCompliance {
+            request_id,
+            buffer_id,
+            revision,
+            snapshot,
+            format,
+        },
+    }
+}
+
+fn analysis_refresh_fallback_result(
+    kind: AnalysisRefreshKind,
+    request_id: u64,
+    buffer_id: u64,
+    revision: u64,
+    request: BackgroundIoRequest,
+) -> BackgroundIoResult {
+    match kind {
+        AnalysisRefreshKind::TextMetadata => BackgroundIoResult::TextMetadataRefreshed {
+            request_id,
+            buffer_id,
+            revision,
+            result: request.into_text_metadata_result(),
+        },
+        AnalysisRefreshKind::EncodingCompliance => {
+            BackgroundIoResult::EncodingComplianceRefreshed {
+                request_id,
+                buffer_id,
+                revision,
+                result: request.into_encoding_compliance_result(),
+            }
         }
     }
 }

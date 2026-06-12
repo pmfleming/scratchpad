@@ -21,7 +21,7 @@ where
             [("temp_path", temp_path.display().to_string())],
         );
     })?;
-    write(&mut file).inspect_err(|error| {
+    if let Err(error) = write(&mut file) {
         diagnostics::record_io_error_with_details(
             "atomic_write_content",
             Some(path),
@@ -29,8 +29,11 @@ where
             &error,
             [("temp_path", temp_path.display().to_string())],
         );
-    })?;
-    file.flush().inspect_err(|error| {
+        drop(file);
+        let _ = remove_file_if_exists(&temp_path);
+        return Err(error);
+    }
+    if let Err(error) = file.flush() {
         diagnostics::record_io_error_with_details(
             "atomic_write_flush",
             Some(path),
@@ -38,8 +41,11 @@ where
             &error,
             [("temp_path", temp_path.display().to_string())],
         );
-    })?;
-    file.sync_all().inspect_err(|error| {
+        drop(file);
+        let _ = remove_file_if_exists(&temp_path);
+        return Err(error);
+    }
+    if let Err(error) = file.sync_all() {
         diagnostics::record_io_error_with_details(
             "atomic_write_sync",
             Some(path),
@@ -47,10 +53,13 @@ where
             &error,
             [("temp_path", temp_path.display().to_string())],
         );
-    })?;
+        drop(file);
+        let _ = remove_file_if_exists(&temp_path);
+        return Err(error);
+    }
     drop(file);
 
-    replace_file(&temp_path, path).inspect_err(|error| {
+    if let Err(error) = replace_file(&temp_path, path) {
         diagnostics::record_io_error_with_details(
             "atomic_write_replace",
             Some(path),
@@ -58,7 +67,11 @@ where
             &error,
             [("temp_path", temp_path.display().to_string())],
         );
-    })
+        let _ = remove_file_if_exists(&temp_path);
+        return Err(error);
+    }
+
+    Ok(())
 }
 
 fn temp_path_for(path: &Path) -> std::path::PathBuf {
@@ -116,6 +129,24 @@ mod tests {
 
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
         assert_eq!(fs::read(&path).unwrap(), b"old");
+    }
+
+    #[test]
+    fn write_atomic_with_removes_temp_file_after_write_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("session.json");
+        fs::write(&path, b"old").unwrap();
+        let temp_path = temp_path_for(&path);
+
+        let error = write_atomic_with(&path, |file| {
+            file.write_all(b"partial")?;
+            Err(io::Error::other("injected write failure"))
+        })
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert_eq!(fs::read(&path).unwrap(), b"old");
+        assert!(!temp_path.exists());
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use super::common::show_centered_callout;
+use super::common::{history_dialog_card, history_dialog_header, show_centered_callout};
 use super::text_history::{
     HISTORY_PILL_CORNER_RADIUS, HISTORY_PILL_INNER_MARGIN, HISTORY_PILL_SPACING,
     TEXT_HISTORY_LIST_MIN_HEIGHT, TEXT_HISTORY_SIZE, truncated_label,
@@ -7,7 +7,6 @@ use crate::app::app_state::{
     DialogState, StatusDomain, StatusMessage, StatusSeverity, StatusState,
 };
 use crate::app::theme::{action_bg, border, tab_selected_accent, tab_selected_bg};
-use crate::app::ui::settings::dialog_card_frame;
 use crate::app::ui::{callout, settings, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{BRACKETS_SQUARE, EXCLAMATION_MARK, QUESTION_MARK, X};
@@ -95,7 +94,9 @@ fn render_status_history_window(
     }
 
     ui.add_space(4.0);
-    history_card(ui, |ui| render_filter_controls(ui, filter, next_filter));
+    history_dialog_card(ui, STATUS_CARD_CORNER_RADIUS, |ui| {
+        render_filter_controls(ui, filter, next_filter)
+    });
 
     let filtered_rows = rows
         .iter()
@@ -104,28 +105,14 @@ fn render_status_history_window(
     render_history_rows(ui, &filtered_rows);
 }
 
-fn history_card<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    let width = ui.available_width();
-    let content_width = (width - 24.0).max(0.0);
-    dialog_card_frame(ui)
-        .corner_radius(egui::CornerRadius::same(STATUS_CARD_CORNER_RADIUS))
-        .show(ui, |ui| {
-            ui.set_width(content_width);
-            ui.set_min_width(content_width);
-            ui.set_max_width(content_width);
-            add_contents(ui)
-        })
-        .inner
-}
-
 fn render_header(ui: &mut egui::Ui) -> bool {
-    callout::header_row(ui, "status_history.header", "Close status", |ui| {
-        ui.label(
-            egui::RichText::new("Status")
-                .size(STATUS_TITLE_SIZE)
-                .color(callout::text(ui)),
-        );
-    })
+    history_dialog_header(
+        ui,
+        "status_history.header",
+        "Close status",
+        "Status",
+        STATUS_TITLE_SIZE,
+    )
 }
 
 fn render_filter_controls(ui: &mut egui::Ui, filter: StatusFilter, next_filter: &mut StatusFilter) {

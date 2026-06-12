@@ -94,36 +94,6 @@ struct BufferBuildState {
     text_metadata_refresh_stale: bool,
 }
 
-impl BufferBuildState {
-    fn new(
-        name: String,
-        path: Option<PathBuf>,
-        is_dirty: bool,
-        temp_id: String,
-        format: TextFormatMetadata,
-        disk_state: Option<DiskFileState>,
-        freshness: BufferFreshness,
-        show_control_chars: bool,
-        right_to_left_reading_order: bool,
-        text_metadata_refresh_stale: bool,
-    ) -> Self {
-        let path_key = path.as_deref().map(CanonicalPathKey::from_path);
-        Self {
-            name,
-            path,
-            path_key,
-            is_dirty,
-            temp_id,
-            format,
-            disk_state,
-            freshness,
-            show_control_chars,
-            right_to_left_reading_order,
-            text_metadata_refresh_stale,
-        }
-    }
-}
-
 pub use disk::{BufferFreshness, DiskFileState};
 
 pub struct RestoredBufferState {
@@ -202,18 +172,19 @@ impl BufferState {
             next_buffer_id(),
             document,
             text_metadata,
-            BufferBuildState::new(
+            BufferBuildState {
+                path_key: path.as_deref().map(CanonicalPathKey::from_path),
                 name,
                 path,
-                false,
-                next_temp_id(),
+                is_dirty: false,
+                temp_id: next_temp_id(),
                 format,
-                None,
-                BufferFreshness::InSync,
-                false,
-                false,
-                false,
-            ),
+                disk_state: None,
+                freshness: BufferFreshness::InSync,
+                show_control_chars: false,
+                right_to_left_reading_order: false,
+                text_metadata_refresh_stale: false,
+            },
         )
     }
 
@@ -229,18 +200,19 @@ impl BufferState {
             next_buffer_id(),
             document,
             text_metadata,
-            BufferBuildState::new(
+            BufferBuildState {
+                path_key: path.as_deref().map(CanonicalPathKey::from_path),
                 name,
                 path,
-                false,
-                next_temp_id(),
+                is_dirty: false,
+                temp_id: next_temp_id(),
                 format,
-                None,
-                BufferFreshness::InSync,
-                false,
-                false,
+                disk_state: None,
+                freshness: BufferFreshness::InSync,
+                show_control_chars: false,
+                right_to_left_reading_order: false,
                 text_metadata_refresh_stale,
-            ),
+            },
         )
     }
 
@@ -281,18 +253,19 @@ impl BufferState {
             restored.id,
             document,
             text_metadata,
-            BufferBuildState::new(
-                restored.name,
-                restored.path,
-                restored.is_dirty,
-                restored.temp_id,
-                restored.format,
-                restored.disk_state,
-                restored.freshness,
-                restored.show_control_chars,
-                restored.right_to_left_reading_order,
-                false,
-            ),
+            BufferBuildState {
+                path_key: restored.path.as_deref().map(CanonicalPathKey::from_path),
+                name: restored.name,
+                path: restored.path,
+                is_dirty: restored.is_dirty,
+                temp_id: restored.temp_id,
+                format: restored.format,
+                disk_state: restored.disk_state,
+                freshness: restored.freshness,
+                show_control_chars: restored.show_control_chars,
+                right_to_left_reading_order: restored.right_to_left_reading_order,
+                text_metadata_refresh_stale: false,
+            },
         )
     }
 

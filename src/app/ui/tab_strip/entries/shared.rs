@@ -100,7 +100,8 @@ fn visible_slot_ranges(
     };
     let first = ((clip_min - content_origin) / slot_extent).floor().max(0.0) as usize;
     let last = ((clip_max - content_origin) / slot_extent).ceil().max(0.0) as usize;
-    let mut ranges = vec![first.saturating_sub(2)..last.saturating_add(2).min(total_slots)];
+    let mut ranges = Vec::with_capacity(2);
+    ranges.push(first.saturating_sub(2)..last.saturating_add(2).min(total_slots));
     if context.pending_scroll_to_active && context.active_slot_index < total_slots {
         ranges.push(context.active_slot_index..context.active_slot_index + 1);
     }

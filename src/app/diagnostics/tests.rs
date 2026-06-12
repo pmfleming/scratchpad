@@ -193,3 +193,29 @@ fn logger_filter_ignores_dependency_warnings() {
 
     assert!(!should_capture_log_record(&metadata, "ordinary warning"));
 }
+
+#[test]
+fn logger_filter_ignores_empty_egui_clipboard_paste_error() {
+    let metadata = Metadata::builder()
+        .level(Level::Error)
+        .target("egui_winit::clipboard")
+        .build();
+
+    assert!(!should_capture_log_record(
+        &metadata,
+        "arboard paste error: The clipboard contents were not available in the requested format or the clipboard is empty."
+    ));
+}
+
+#[test]
+fn logger_filter_keeps_other_egui_clipboard_errors() {
+    let metadata = Metadata::builder()
+        .level(Level::Error)
+        .target("egui_winit::clipboard")
+        .build();
+
+    assert!(should_capture_log_record(
+        &metadata,
+        "arboard paste error: clipboard provider is unavailable"
+    ));
+}

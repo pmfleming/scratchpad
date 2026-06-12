@@ -264,8 +264,7 @@ fn remove_string_char_range(text: &mut String, range: std::ops::Range<usize>) {
 fn byte_index_for_char(text: &str, char_offset: usize) -> usize {
     text.char_indices()
         .nth(char_offset)
-        .map(|(index, _)| index)
-        .unwrap_or(text.len())
+        .map_or(text.len(), |(index, _)| index)
 }
 
 fn match_char_ranges(text: &str, needle: &str) -> Vec<std::ops::Range<usize>> {

@@ -79,61 +79,85 @@ pub struct FramePhaseMetricsSnapshot {
     pub max_ns: u64,
 }
 
-static FULL_TEXT_FLATTEN_COUNT: AtomicU64 = AtomicU64::new(0);
-static FULL_TEXT_FLATTEN_BYTES: AtomicU64 = AtomicU64::new(0);
-static RANGE_FLATTEN_COUNT: AtomicU64 = AtomicU64::new(0);
-static RANGE_FLATTEN_BYTES: AtomicU64 = AtomicU64::new(0);
-static LAYOUT_JOB_COUNT: AtomicU64 = AtomicU64::new(0);
-static LAYOUT_INPUT_BYTES: AtomicU64 = AtomicU64::new(0);
-static LAYOUT_TIME_NS: AtomicU64 = AtomicU64::new(0);
-static SEARCH_REQUEST_COUNT: AtomicU64 = AtomicU64::new(0);
-static SEARCH_TARGET_COUNT: AtomicU64 = AtomicU64::new(0);
-static SEARCH_CHUNK_COUNT: AtomicU64 = AtomicU64::new(0);
-static SEARCH_INTRA_BUFFER_MAX_WORKERS: AtomicU64 = AtomicU64::new(0);
-static SEARCH_WORKER_ACTIVE_NS: AtomicU64 = AtomicU64::new(0);
-static SEARCH_MAX_QUEUE_DEPTH: AtomicU64 = AtomicU64::new(0);
-static BACKGROUND_IO_PATH_REQUESTS: AtomicU64 = AtomicU64::new(0);
-static BACKGROUND_IO_PATH_ACTIVE_NS: AtomicU64 = AtomicU64::new(0);
-static BACKGROUND_IO_PATH_MAX_QUEUE_DEPTH: AtomicU64 = AtomicU64::new(0);
-static BACKGROUND_IO_SESSION_REQUESTS: AtomicU64 = AtomicU64::new(0);
-static BACKGROUND_IO_SESSION_ACTIVE_NS: AtomicU64 = AtomicU64::new(0);
-static BACKGROUND_IO_SESSION_MAX_QUEUE_DEPTH: AtomicU64 = AtomicU64::new(0);
-static BACKGROUND_IO_ANALYSIS_REQUESTS: AtomicU64 = AtomicU64::new(0);
-static BACKGROUND_IO_ANALYSIS_ACTIVE_NS: AtomicU64 = AtomicU64::new(0);
-static BACKGROUND_IO_ANALYSIS_MAX_QUEUE_DEPTH: AtomicU64 = AtomicU64::new(0);
-static BACKGROUND_IO_PATH_SATURATION_COUNT: AtomicU64 = AtomicU64::new(0);
-static BACKGROUND_IO_SESSION_SATURATION_COUNT: AtomicU64 = AtomicU64::new(0);
-static BACKGROUND_IO_ANALYSIS_SATURATION_COUNT: AtomicU64 = AtomicU64::new(0);
-static LAYOUT_CACHE_HIT_COUNT: AtomicU64 = AtomicU64::new(0);
-static LAYOUT_CACHE_MISS_COUNT: AtomicU64 = AtomicU64::new(0);
-static FRAME_COUNT: AtomicU64 = AtomicU64::new(0);
-static FRAME_TIME_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_TIME_MAX_NS: AtomicU64 = AtomicU64::new(0);
+#[derive(Clone, Copy)]
+struct BackgroundIoLaneCounters {
+    requests: &'static AtomicU64,
+    active_ns: &'static AtomicU64,
+    max_queue_depth: &'static AtomicU64,
+    saturation_count: &'static AtomicU64,
+}
+
+#[derive(Clone, Copy)]
+struct FramePhaseCounters {
+    total_ns: &'static AtomicU64,
+    max_ns: &'static AtomicU64,
+}
+
+macro_rules! capacity_counters {
+    ($($name:ident),+ $(,)?) => {
+        $(static $name: AtomicU64 = AtomicU64::new(0);)+
+    };
+}
+
+capacity_counters! {
+    FULL_TEXT_FLATTEN_COUNT,
+    FULL_TEXT_FLATTEN_BYTES,
+    RANGE_FLATTEN_COUNT,
+    RANGE_FLATTEN_BYTES,
+    LAYOUT_JOB_COUNT,
+    LAYOUT_INPUT_BYTES,
+    LAYOUT_TIME_NS,
+    SEARCH_REQUEST_COUNT,
+    SEARCH_TARGET_COUNT,
+    SEARCH_CHUNK_COUNT,
+    SEARCH_INTRA_BUFFER_MAX_WORKERS,
+    SEARCH_WORKER_ACTIVE_NS,
+    SEARCH_MAX_QUEUE_DEPTH,
+    BACKGROUND_IO_PATH_REQUESTS,
+    BACKGROUND_IO_PATH_ACTIVE_NS,
+    BACKGROUND_IO_PATH_MAX_QUEUE_DEPTH,
+    BACKGROUND_IO_SESSION_REQUESTS,
+    BACKGROUND_IO_SESSION_ACTIVE_NS,
+    BACKGROUND_IO_SESSION_MAX_QUEUE_DEPTH,
+    BACKGROUND_IO_ANALYSIS_REQUESTS,
+    BACKGROUND_IO_ANALYSIS_ACTIVE_NS,
+    BACKGROUND_IO_ANALYSIS_MAX_QUEUE_DEPTH,
+    BACKGROUND_IO_PATH_SATURATION_COUNT,
+    BACKGROUND_IO_SESSION_SATURATION_COUNT,
+    BACKGROUND_IO_ANALYSIS_SATURATION_COUNT,
+    LAYOUT_CACHE_HIT_COUNT,
+    LAYOUT_CACHE_MISS_COUNT,
+    FRAME_COUNT,
+    FRAME_TIME_TOTAL_NS,
+    FRAME_TIME_MAX_NS,
+}
 static FRAME_TIME_BUCKET_COUNTS: [AtomicU64; FRAME_HISTOGRAM_BUCKETS] =
     [const { AtomicU64::new(0) }; FRAME_HISTOGRAM_BUCKETS];
-static FRAME_PREPARE_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_PREPARE_MAX_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_BACKGROUND_POLL_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_BACKGROUND_POLL_MAX_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_PAINT_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_PAINT_MAX_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_CHROME_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_CHROME_MAX_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_ACTIVE_SURFACE_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_ACTIVE_SURFACE_MAX_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_GUTTER_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_GUTTER_MAX_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_SCROLL_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_SCROLL_MAX_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_DIALOGS_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_DIALOGS_MAX_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_SHORTCUTS_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_SHORTCUTS_MAX_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_FINISH_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
-static FRAME_FINISH_MAX_NS: AtomicU64 = AtomicU64::new(0);
-static HISTORY_EVICTIONS_PER_FILE: AtomicU64 = AtomicU64::new(0);
-static HISTORY_EVICTIONS_AGGREGATE: AtomicU64 = AtomicU64::new(0);
-static HISTORY_EVICTED_BYTES: AtomicU64 = AtomicU64::new(0);
+capacity_counters! {
+    FRAME_PREPARE_TOTAL_NS,
+    FRAME_PREPARE_MAX_NS,
+    FRAME_BACKGROUND_POLL_TOTAL_NS,
+    FRAME_BACKGROUND_POLL_MAX_NS,
+    FRAME_PAINT_TOTAL_NS,
+    FRAME_PAINT_MAX_NS,
+    FRAME_CHROME_TOTAL_NS,
+    FRAME_CHROME_MAX_NS,
+    FRAME_ACTIVE_SURFACE_TOTAL_NS,
+    FRAME_ACTIVE_SURFACE_MAX_NS,
+    FRAME_GUTTER_TOTAL_NS,
+    FRAME_GUTTER_MAX_NS,
+    FRAME_SCROLL_TOTAL_NS,
+    FRAME_SCROLL_MAX_NS,
+    FRAME_DIALOGS_TOTAL_NS,
+    FRAME_DIALOGS_MAX_NS,
+    FRAME_SHORTCUTS_TOTAL_NS,
+    FRAME_SHORTCUTS_MAX_NS,
+    FRAME_FINISH_TOTAL_NS,
+    FRAME_FINISH_MAX_NS,
+    HISTORY_EVICTIONS_PER_FILE,
+    HISTORY_EVICTIONS_AGGREGATE,
+    HISTORY_EVICTED_BYTES,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackgroundIoLane {
@@ -160,24 +184,36 @@ impl CapacityMetricsSnapshot {
     #[must_use]
     pub fn background_io_lane(&self, lane: BackgroundIoLane) -> BackgroundIoLaneMetricsSnapshot {
         match lane {
-            BackgroundIoLane::Path => BackgroundIoLaneMetricsSnapshot {
-                requests: self.background_io_path_requests,
-                active_ns: self.background_io_path_active_ns,
-                max_queue_depth: self.background_io_path_max_queue_depth,
-                saturation_count: self.background_io_path_saturation_count,
-            },
-            BackgroundIoLane::Session => BackgroundIoLaneMetricsSnapshot {
-                requests: self.background_io_session_requests,
-                active_ns: self.background_io_session_active_ns,
-                max_queue_depth: self.background_io_session_max_queue_depth,
-                saturation_count: self.background_io_session_saturation_count,
-            },
-            BackgroundIoLane::Analysis => BackgroundIoLaneMetricsSnapshot {
-                requests: self.background_io_analysis_requests,
-                active_ns: self.background_io_analysis_active_ns,
-                max_queue_depth: self.background_io_analysis_max_queue_depth,
-                saturation_count: self.background_io_analysis_saturation_count,
-            },
+            BackgroundIoLane::Path => self.path_lane_metrics(),
+            BackgroundIoLane::Session => self.session_lane_metrics(),
+            BackgroundIoLane::Analysis => self.analysis_lane_metrics(),
+        }
+    }
+
+    fn path_lane_metrics(&self) -> BackgroundIoLaneMetricsSnapshot {
+        BackgroundIoLaneMetricsSnapshot {
+            requests: self.background_io_path_requests,
+            active_ns: self.background_io_path_active_ns,
+            max_queue_depth: self.background_io_path_max_queue_depth,
+            saturation_count: self.background_io_path_saturation_count,
+        }
+    }
+
+    fn session_lane_metrics(&self) -> BackgroundIoLaneMetricsSnapshot {
+        BackgroundIoLaneMetricsSnapshot {
+            requests: self.background_io_session_requests,
+            active_ns: self.background_io_session_active_ns,
+            max_queue_depth: self.background_io_session_max_queue_depth,
+            saturation_count: self.background_io_session_saturation_count,
+        }
+    }
+
+    fn analysis_lane_metrics(&self) -> BackgroundIoLaneMetricsSnapshot {
+        BackgroundIoLaneMetricsSnapshot {
+            requests: self.background_io_analysis_requests,
+            active_ns: self.background_io_analysis_active_ns,
+            max_queue_depth: self.background_io_analysis_max_queue_depth,
+            saturation_count: self.background_io_analysis_saturation_count,
         }
     }
 
@@ -250,127 +286,126 @@ impl CapacityMetricsSnapshot {
 }
 
 pub fn reset_capacity_metrics() {
-    FULL_TEXT_FLATTEN_COUNT.store(0, Ordering::Relaxed);
-    FULL_TEXT_FLATTEN_BYTES.store(0, Ordering::Relaxed);
-    RANGE_FLATTEN_COUNT.store(0, Ordering::Relaxed);
-    RANGE_FLATTEN_BYTES.store(0, Ordering::Relaxed);
-    LAYOUT_JOB_COUNT.store(0, Ordering::Relaxed);
-    LAYOUT_INPUT_BYTES.store(0, Ordering::Relaxed);
-    LAYOUT_TIME_NS.store(0, Ordering::Relaxed);
-    SEARCH_REQUEST_COUNT.store(0, Ordering::Relaxed);
-    SEARCH_TARGET_COUNT.store(0, Ordering::Relaxed);
-    SEARCH_CHUNK_COUNT.store(0, Ordering::Relaxed);
-    SEARCH_INTRA_BUFFER_MAX_WORKERS.store(0, Ordering::Relaxed);
-    SEARCH_WORKER_ACTIVE_NS.store(0, Ordering::Relaxed);
-    SEARCH_MAX_QUEUE_DEPTH.store(0, Ordering::Relaxed);
-    BACKGROUND_IO_PATH_REQUESTS.store(0, Ordering::Relaxed);
-    BACKGROUND_IO_PATH_ACTIVE_NS.store(0, Ordering::Relaxed);
-    BACKGROUND_IO_PATH_MAX_QUEUE_DEPTH.store(0, Ordering::Relaxed);
-    BACKGROUND_IO_SESSION_REQUESTS.store(0, Ordering::Relaxed);
-    BACKGROUND_IO_SESSION_ACTIVE_NS.store(0, Ordering::Relaxed);
-    BACKGROUND_IO_SESSION_MAX_QUEUE_DEPTH.store(0, Ordering::Relaxed);
-    BACKGROUND_IO_ANALYSIS_REQUESTS.store(0, Ordering::Relaxed);
-    BACKGROUND_IO_ANALYSIS_ACTIVE_NS.store(0, Ordering::Relaxed);
-    BACKGROUND_IO_ANALYSIS_MAX_QUEUE_DEPTH.store(0, Ordering::Relaxed);
-    BACKGROUND_IO_PATH_SATURATION_COUNT.store(0, Ordering::Relaxed);
-    BACKGROUND_IO_SESSION_SATURATION_COUNT.store(0, Ordering::Relaxed);
-    BACKGROUND_IO_ANALYSIS_SATURATION_COUNT.store(0, Ordering::Relaxed);
-    LAYOUT_CACHE_HIT_COUNT.store(0, Ordering::Relaxed);
-    LAYOUT_CACHE_MISS_COUNT.store(0, Ordering::Relaxed);
-    FRAME_COUNT.store(0, Ordering::Relaxed);
-    FRAME_TIME_TOTAL_NS.store(0, Ordering::Relaxed);
-    FRAME_TIME_MAX_NS.store(0, Ordering::Relaxed);
-    for bucket in &FRAME_TIME_BUCKET_COUNTS {
-        bucket.store(0, Ordering::Relaxed);
+    reset_counters(&[
+        &FULL_TEXT_FLATTEN_COUNT,
+        &FULL_TEXT_FLATTEN_BYTES,
+        &RANGE_FLATTEN_COUNT,
+        &RANGE_FLATTEN_BYTES,
+        &LAYOUT_JOB_COUNT,
+        &LAYOUT_INPUT_BYTES,
+        &LAYOUT_TIME_NS,
+        &SEARCH_REQUEST_COUNT,
+        &SEARCH_TARGET_COUNT,
+        &SEARCH_CHUNK_COUNT,
+        &SEARCH_INTRA_BUFFER_MAX_WORKERS,
+        &SEARCH_WORKER_ACTIVE_NS,
+        &SEARCH_MAX_QUEUE_DEPTH,
+        &LAYOUT_CACHE_HIT_COUNT,
+        &LAYOUT_CACHE_MISS_COUNT,
+        &FRAME_COUNT,
+        &FRAME_TIME_TOTAL_NS,
+        &FRAME_TIME_MAX_NS,
+        &HISTORY_EVICTIONS_PER_FILE,
+        &HISTORY_EVICTIONS_AGGREGATE,
+        &HISTORY_EVICTED_BYTES,
+    ]);
+    for lane in [
+        BackgroundIoLane::Path,
+        BackgroundIoLane::Session,
+        BackgroundIoLane::Analysis,
+    ] {
+        background_io_lane_counters(lane).reset();
     }
-    FRAME_PREPARE_TOTAL_NS.store(0, Ordering::Relaxed);
-    FRAME_PREPARE_MAX_NS.store(0, Ordering::Relaxed);
-    FRAME_BACKGROUND_POLL_TOTAL_NS.store(0, Ordering::Relaxed);
-    FRAME_BACKGROUND_POLL_MAX_NS.store(0, Ordering::Relaxed);
-    FRAME_PAINT_TOTAL_NS.store(0, Ordering::Relaxed);
-    FRAME_PAINT_MAX_NS.store(0, Ordering::Relaxed);
-    FRAME_CHROME_TOTAL_NS.store(0, Ordering::Relaxed);
-    FRAME_CHROME_MAX_NS.store(0, Ordering::Relaxed);
-    FRAME_ACTIVE_SURFACE_TOTAL_NS.store(0, Ordering::Relaxed);
-    FRAME_ACTIVE_SURFACE_MAX_NS.store(0, Ordering::Relaxed);
-    FRAME_GUTTER_TOTAL_NS.store(0, Ordering::Relaxed);
-    FRAME_GUTTER_MAX_NS.store(0, Ordering::Relaxed);
-    FRAME_SCROLL_TOTAL_NS.store(0, Ordering::Relaxed);
-    FRAME_SCROLL_MAX_NS.store(0, Ordering::Relaxed);
-    FRAME_DIALOGS_TOTAL_NS.store(0, Ordering::Relaxed);
-    FRAME_DIALOGS_MAX_NS.store(0, Ordering::Relaxed);
-    FRAME_SHORTCUTS_TOTAL_NS.store(0, Ordering::Relaxed);
-    FRAME_SHORTCUTS_MAX_NS.store(0, Ordering::Relaxed);
-    FRAME_FINISH_TOTAL_NS.store(0, Ordering::Relaxed);
-    FRAME_FINISH_MAX_NS.store(0, Ordering::Relaxed);
-    HISTORY_EVICTIONS_PER_FILE.store(0, Ordering::Relaxed);
-    HISTORY_EVICTIONS_AGGREGATE.store(0, Ordering::Relaxed);
-    HISTORY_EVICTED_BYTES.store(0, Ordering::Relaxed);
+    for bucket in &FRAME_TIME_BUCKET_COUNTS {
+        reset_counter(bucket);
+    }
+    for phase in [
+        FramePhase::Prepare,
+        FramePhase::BackgroundPoll,
+        FramePhase::Paint,
+        FramePhase::Chrome,
+        FramePhase::ActiveSurface,
+        FramePhase::Gutter,
+        FramePhase::Scroll,
+        FramePhase::Dialogs,
+        FramePhase::Shortcuts,
+        FramePhase::Finish,
+    ] {
+        frame_phase_counters(phase).reset();
+    }
 }
 
 pub fn capacity_metrics_snapshot() -> CapacityMetricsSnapshot {
+    let path_lane = background_io_lane_counters(BackgroundIoLane::Path).snapshot();
+    let session_lane = background_io_lane_counters(BackgroundIoLane::Session).snapshot();
+    let analysis_lane = background_io_lane_counters(BackgroundIoLane::Analysis).snapshot();
+    let prepare_phase = frame_phase_counters(FramePhase::Prepare).snapshot();
+    let background_poll_phase = frame_phase_counters(FramePhase::BackgroundPoll).snapshot();
+    let paint_phase = frame_phase_counters(FramePhase::Paint).snapshot();
+    let chrome_phase = frame_phase_counters(FramePhase::Chrome).snapshot();
+    let active_surface_phase = frame_phase_counters(FramePhase::ActiveSurface).snapshot();
+    let gutter_phase = frame_phase_counters(FramePhase::Gutter).snapshot();
+    let scroll_phase = frame_phase_counters(FramePhase::Scroll).snapshot();
+    let dialogs_phase = frame_phase_counters(FramePhase::Dialogs).snapshot();
+    let shortcuts_phase = frame_phase_counters(FramePhase::Shortcuts).snapshot();
+    let finish_phase = frame_phase_counters(FramePhase::Finish).snapshot();
+
     CapacityMetricsSnapshot {
-        full_text_flatten_count: FULL_TEXT_FLATTEN_COUNT.load(Ordering::Relaxed),
-        full_text_flatten_bytes: FULL_TEXT_FLATTEN_BYTES.load(Ordering::Relaxed),
-        range_flatten_count: RANGE_FLATTEN_COUNT.load(Ordering::Relaxed),
-        range_flatten_bytes: RANGE_FLATTEN_BYTES.load(Ordering::Relaxed),
-        layout_job_count: LAYOUT_JOB_COUNT.load(Ordering::Relaxed),
-        layout_input_bytes: LAYOUT_INPUT_BYTES.load(Ordering::Relaxed),
-        layout_time_ns: LAYOUT_TIME_NS.load(Ordering::Relaxed),
-        search_request_count: SEARCH_REQUEST_COUNT.load(Ordering::Relaxed),
-        search_target_count: SEARCH_TARGET_COUNT.load(Ordering::Relaxed),
-        search_chunk_count: SEARCH_CHUNK_COUNT.load(Ordering::Relaxed),
-        search_intra_buffer_max_workers: SEARCH_INTRA_BUFFER_MAX_WORKERS.load(Ordering::Relaxed),
-        search_worker_active_ns: SEARCH_WORKER_ACTIVE_NS.load(Ordering::Relaxed),
-        search_max_queue_depth: SEARCH_MAX_QUEUE_DEPTH.load(Ordering::Relaxed),
-        background_io_path_requests: BACKGROUND_IO_PATH_REQUESTS.load(Ordering::Relaxed),
-        background_io_path_active_ns: BACKGROUND_IO_PATH_ACTIVE_NS.load(Ordering::Relaxed),
-        background_io_path_max_queue_depth: BACKGROUND_IO_PATH_MAX_QUEUE_DEPTH
-            .load(Ordering::Relaxed),
-        background_io_session_requests: BACKGROUND_IO_SESSION_REQUESTS.load(Ordering::Relaxed),
-        background_io_session_active_ns: BACKGROUND_IO_SESSION_ACTIVE_NS.load(Ordering::Relaxed),
-        background_io_session_max_queue_depth: BACKGROUND_IO_SESSION_MAX_QUEUE_DEPTH
-            .load(Ordering::Relaxed),
-        background_io_analysis_requests: BACKGROUND_IO_ANALYSIS_REQUESTS.load(Ordering::Relaxed),
-        background_io_analysis_active_ns: BACKGROUND_IO_ANALYSIS_ACTIVE_NS.load(Ordering::Relaxed),
-        background_io_analysis_max_queue_depth: BACKGROUND_IO_ANALYSIS_MAX_QUEUE_DEPTH
-            .load(Ordering::Relaxed),
-        background_io_path_saturation_count: BACKGROUND_IO_PATH_SATURATION_COUNT
-            .load(Ordering::Relaxed),
-        background_io_session_saturation_count: BACKGROUND_IO_SESSION_SATURATION_COUNT
-            .load(Ordering::Relaxed),
-        background_io_analysis_saturation_count: BACKGROUND_IO_ANALYSIS_SATURATION_COUNT
-            .load(Ordering::Relaxed),
-        layout_cache_hit_count: LAYOUT_CACHE_HIT_COUNT.load(Ordering::Relaxed),
-        layout_cache_miss_count: LAYOUT_CACHE_MISS_COUNT.load(Ordering::Relaxed),
-        frame_count: FRAME_COUNT.load(Ordering::Relaxed),
-        frame_time_total_ns: FRAME_TIME_TOTAL_NS.load(Ordering::Relaxed),
-        frame_time_max_ns: FRAME_TIME_MAX_NS.load(Ordering::Relaxed),
+        full_text_flatten_count: load_counter(&FULL_TEXT_FLATTEN_COUNT),
+        full_text_flatten_bytes: load_counter(&FULL_TEXT_FLATTEN_BYTES),
+        range_flatten_count: load_counter(&RANGE_FLATTEN_COUNT),
+        range_flatten_bytes: load_counter(&RANGE_FLATTEN_BYTES),
+        layout_job_count: load_counter(&LAYOUT_JOB_COUNT),
+        layout_input_bytes: load_counter(&LAYOUT_INPUT_BYTES),
+        layout_time_ns: load_counter(&LAYOUT_TIME_NS),
+        search_request_count: load_counter(&SEARCH_REQUEST_COUNT),
+        search_target_count: load_counter(&SEARCH_TARGET_COUNT),
+        search_chunk_count: load_counter(&SEARCH_CHUNK_COUNT),
+        search_intra_buffer_max_workers: load_counter(&SEARCH_INTRA_BUFFER_MAX_WORKERS),
+        search_worker_active_ns: load_counter(&SEARCH_WORKER_ACTIVE_NS),
+        search_max_queue_depth: load_counter(&SEARCH_MAX_QUEUE_DEPTH),
+        background_io_path_requests: path_lane.requests,
+        background_io_path_active_ns: path_lane.active_ns,
+        background_io_path_max_queue_depth: path_lane.max_queue_depth,
+        background_io_session_requests: session_lane.requests,
+        background_io_session_active_ns: session_lane.active_ns,
+        background_io_session_max_queue_depth: session_lane.max_queue_depth,
+        background_io_analysis_requests: analysis_lane.requests,
+        background_io_analysis_active_ns: analysis_lane.active_ns,
+        background_io_analysis_max_queue_depth: analysis_lane.max_queue_depth,
+        background_io_path_saturation_count: path_lane.saturation_count,
+        background_io_session_saturation_count: session_lane.saturation_count,
+        background_io_analysis_saturation_count: analysis_lane.saturation_count,
+        layout_cache_hit_count: load_counter(&LAYOUT_CACHE_HIT_COUNT),
+        layout_cache_miss_count: load_counter(&LAYOUT_CACHE_MISS_COUNT),
+        frame_count: load_counter(&FRAME_COUNT),
+        frame_time_total_ns: load_counter(&FRAME_TIME_TOTAL_NS),
+        frame_time_max_ns: load_counter(&FRAME_TIME_MAX_NS),
         frame_time_bucket_width_ns: FRAME_HISTOGRAM_BUCKET_WIDTH_NS,
         frame_time_bucket_counts: frame_bucket_counts(),
-        frame_prepare_total_ns: FRAME_PREPARE_TOTAL_NS.load(Ordering::Relaxed),
-        frame_prepare_max_ns: FRAME_PREPARE_MAX_NS.load(Ordering::Relaxed),
-        frame_background_poll_total_ns: FRAME_BACKGROUND_POLL_TOTAL_NS.load(Ordering::Relaxed),
-        frame_background_poll_max_ns: FRAME_BACKGROUND_POLL_MAX_NS.load(Ordering::Relaxed),
-        frame_paint_total_ns: FRAME_PAINT_TOTAL_NS.load(Ordering::Relaxed),
-        frame_paint_max_ns: FRAME_PAINT_MAX_NS.load(Ordering::Relaxed),
-        frame_chrome_total_ns: FRAME_CHROME_TOTAL_NS.load(Ordering::Relaxed),
-        frame_chrome_max_ns: FRAME_CHROME_MAX_NS.load(Ordering::Relaxed),
-        frame_active_surface_total_ns: FRAME_ACTIVE_SURFACE_TOTAL_NS.load(Ordering::Relaxed),
-        frame_active_surface_max_ns: FRAME_ACTIVE_SURFACE_MAX_NS.load(Ordering::Relaxed),
-        frame_gutter_total_ns: FRAME_GUTTER_TOTAL_NS.load(Ordering::Relaxed),
-        frame_gutter_max_ns: FRAME_GUTTER_MAX_NS.load(Ordering::Relaxed),
-        frame_scroll_total_ns: FRAME_SCROLL_TOTAL_NS.load(Ordering::Relaxed),
-        frame_scroll_max_ns: FRAME_SCROLL_MAX_NS.load(Ordering::Relaxed),
-        frame_dialogs_total_ns: FRAME_DIALOGS_TOTAL_NS.load(Ordering::Relaxed),
-        frame_dialogs_max_ns: FRAME_DIALOGS_MAX_NS.load(Ordering::Relaxed),
-        frame_shortcuts_total_ns: FRAME_SHORTCUTS_TOTAL_NS.load(Ordering::Relaxed),
-        frame_shortcuts_max_ns: FRAME_SHORTCUTS_MAX_NS.load(Ordering::Relaxed),
-        frame_finish_total_ns: FRAME_FINISH_TOTAL_NS.load(Ordering::Relaxed),
-        frame_finish_max_ns: FRAME_FINISH_MAX_NS.load(Ordering::Relaxed),
-        history_evictions_per_file: HISTORY_EVICTIONS_PER_FILE.load(Ordering::Relaxed),
-        history_evictions_aggregate: HISTORY_EVICTIONS_AGGREGATE.load(Ordering::Relaxed),
-        history_evicted_bytes: HISTORY_EVICTED_BYTES.load(Ordering::Relaxed),
+        frame_prepare_total_ns: prepare_phase.total_ns,
+        frame_prepare_max_ns: prepare_phase.max_ns,
+        frame_background_poll_total_ns: background_poll_phase.total_ns,
+        frame_background_poll_max_ns: background_poll_phase.max_ns,
+        frame_paint_total_ns: paint_phase.total_ns,
+        frame_paint_max_ns: paint_phase.max_ns,
+        frame_chrome_total_ns: chrome_phase.total_ns,
+        frame_chrome_max_ns: chrome_phase.max_ns,
+        frame_active_surface_total_ns: active_surface_phase.total_ns,
+        frame_active_surface_max_ns: active_surface_phase.max_ns,
+        frame_gutter_total_ns: gutter_phase.total_ns,
+        frame_gutter_max_ns: gutter_phase.max_ns,
+        frame_scroll_total_ns: scroll_phase.total_ns,
+        frame_scroll_max_ns: scroll_phase.max_ns,
+        frame_dialogs_total_ns: dialogs_phase.total_ns,
+        frame_dialogs_max_ns: dialogs_phase.max_ns,
+        frame_shortcuts_total_ns: shortcuts_phase.total_ns,
+        frame_shortcuts_max_ns: shortcuts_phase.max_ns,
+        frame_finish_total_ns: finish_phase.total_ns,
+        frame_finish_max_ns: finish_phase.max_ns,
+        history_evictions_per_file: load_counter(&HISTORY_EVICTIONS_PER_FILE),
+        history_evictions_aggregate: load_counter(&HISTORY_EVICTIONS_AGGREGATE),
+        history_evicted_bytes: load_counter(&HISTORY_EVICTED_BYTES),
     }
 }
 
@@ -423,39 +458,15 @@ pub fn record_search_worker_active(elapsed: Duration) {
 
 pub fn record_background_io_lane(lane: BackgroundIoLane, elapsed: Duration) {
     let elapsed_ns = saturating_u64(elapsed.as_nanos());
-    match lane {
-        BackgroundIoLane::Path => {
-            BACKGROUND_IO_PATH_REQUESTS.fetch_add(1, Ordering::Relaxed);
-            BACKGROUND_IO_PATH_ACTIVE_NS.fetch_add(elapsed_ns, Ordering::Relaxed);
-        }
-        BackgroundIoLane::Session => {
-            BACKGROUND_IO_SESSION_REQUESTS.fetch_add(1, Ordering::Relaxed);
-            BACKGROUND_IO_SESSION_ACTIVE_NS.fetch_add(elapsed_ns, Ordering::Relaxed);
-        }
-        BackgroundIoLane::Analysis => {
-            BACKGROUND_IO_ANALYSIS_REQUESTS.fetch_add(1, Ordering::Relaxed);
-            BACKGROUND_IO_ANALYSIS_ACTIVE_NS.fetch_add(elapsed_ns, Ordering::Relaxed);
-        }
-    }
+    background_io_lane_counters(lane).record_elapsed(elapsed_ns);
 }
 
 pub fn record_background_io_queue_depth(lane: BackgroundIoLane, depth: usize) {
-    let value = saturating_u64(depth);
-    let counter = match lane {
-        BackgroundIoLane::Path => &BACKGROUND_IO_PATH_MAX_QUEUE_DEPTH,
-        BackgroundIoLane::Session => &BACKGROUND_IO_SESSION_MAX_QUEUE_DEPTH,
-        BackgroundIoLane::Analysis => &BACKGROUND_IO_ANALYSIS_MAX_QUEUE_DEPTH,
-    };
-    update_max(counter, value);
+    background_io_lane_counters(lane).record_queue_depth(saturating_u64(depth));
 }
 
 pub fn record_background_io_saturation(lane: BackgroundIoLane) {
-    let counter = match lane {
-        BackgroundIoLane::Path => &BACKGROUND_IO_PATH_SATURATION_COUNT,
-        BackgroundIoLane::Session => &BACKGROUND_IO_SESSION_SATURATION_COUNT,
-        BackgroundIoLane::Analysis => &BACKGROUND_IO_ANALYSIS_SATURATION_COUNT,
-    };
-    counter.fetch_add(1, Ordering::Relaxed);
+    background_io_lane_counters(lane).record_saturation();
 }
 
 pub fn record_layout_cache_hit() {
@@ -476,29 +487,146 @@ pub fn record_frame(elapsed: Duration) {
 
 pub fn record_frame_phase(phase: FramePhase, elapsed: Duration) {
     let elapsed_ns = saturating_u64(elapsed.as_nanos());
-    let (total, max) = match phase {
-        FramePhase::Prepare => (&FRAME_PREPARE_TOTAL_NS, &FRAME_PREPARE_MAX_NS),
-        FramePhase::BackgroundPoll => (
-            &FRAME_BACKGROUND_POLL_TOTAL_NS,
-            &FRAME_BACKGROUND_POLL_MAX_NS,
-        ),
-        FramePhase::Paint => (&FRAME_PAINT_TOTAL_NS, &FRAME_PAINT_MAX_NS),
-        FramePhase::Chrome => (&FRAME_CHROME_TOTAL_NS, &FRAME_CHROME_MAX_NS),
-        FramePhase::ActiveSurface => (&FRAME_ACTIVE_SURFACE_TOTAL_NS, &FRAME_ACTIVE_SURFACE_MAX_NS),
-        FramePhase::Gutter => (&FRAME_GUTTER_TOTAL_NS, &FRAME_GUTTER_MAX_NS),
-        FramePhase::Scroll => (&FRAME_SCROLL_TOTAL_NS, &FRAME_SCROLL_MAX_NS),
-        FramePhase::Dialogs => (&FRAME_DIALOGS_TOTAL_NS, &FRAME_DIALOGS_MAX_NS),
-        FramePhase::Shortcuts => (&FRAME_SHORTCUTS_TOTAL_NS, &FRAME_SHORTCUTS_MAX_NS),
-        FramePhase::Finish => (&FRAME_FINISH_TOTAL_NS, &FRAME_FINISH_MAX_NS),
-    };
-    total.fetch_add(elapsed_ns, Ordering::Relaxed);
-    update_max(max, elapsed_ns);
+    frame_phase_counters(phase).record(elapsed_ns);
+}
+
+impl BackgroundIoLaneCounters {
+    fn reset(self) {
+        reset_counters(&[
+            self.requests,
+            self.active_ns,
+            self.max_queue_depth,
+            self.saturation_count,
+        ]);
+    }
+
+    fn snapshot(self) -> BackgroundIoLaneMetricsSnapshot {
+        BackgroundIoLaneMetricsSnapshot {
+            requests: load_counter(self.requests),
+            active_ns: load_counter(self.active_ns),
+            max_queue_depth: load_counter(self.max_queue_depth),
+            saturation_count: load_counter(self.saturation_count),
+        }
+    }
+
+    fn record_elapsed(self, elapsed_ns: u64) {
+        self.requests.fetch_add(1, Ordering::Relaxed);
+        self.active_ns.fetch_add(elapsed_ns, Ordering::Relaxed);
+    }
+
+    fn record_queue_depth(self, depth: u64) {
+        update_max(self.max_queue_depth, depth);
+    }
+
+    fn record_saturation(self) {
+        self.saturation_count.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+fn background_io_lane_counters(lane: BackgroundIoLane) -> BackgroundIoLaneCounters {
+    match lane {
+        BackgroundIoLane::Path => BackgroundIoLaneCounters {
+            requests: &BACKGROUND_IO_PATH_REQUESTS,
+            active_ns: &BACKGROUND_IO_PATH_ACTIVE_NS,
+            max_queue_depth: &BACKGROUND_IO_PATH_MAX_QUEUE_DEPTH,
+            saturation_count: &BACKGROUND_IO_PATH_SATURATION_COUNT,
+        },
+        BackgroundIoLane::Session => BackgroundIoLaneCounters {
+            requests: &BACKGROUND_IO_SESSION_REQUESTS,
+            active_ns: &BACKGROUND_IO_SESSION_ACTIVE_NS,
+            max_queue_depth: &BACKGROUND_IO_SESSION_MAX_QUEUE_DEPTH,
+            saturation_count: &BACKGROUND_IO_SESSION_SATURATION_COUNT,
+        },
+        BackgroundIoLane::Analysis => BackgroundIoLaneCounters {
+            requests: &BACKGROUND_IO_ANALYSIS_REQUESTS,
+            active_ns: &BACKGROUND_IO_ANALYSIS_ACTIVE_NS,
+            max_queue_depth: &BACKGROUND_IO_ANALYSIS_MAX_QUEUE_DEPTH,
+            saturation_count: &BACKGROUND_IO_ANALYSIS_SATURATION_COUNT,
+        },
+    }
+}
+
+impl FramePhaseCounters {
+    fn reset(self) {
+        reset_counters(&[self.total_ns, self.max_ns]);
+    }
+
+    fn snapshot(self) -> FramePhaseMetricsSnapshot {
+        FramePhaseMetricsSnapshot {
+            total_ns: load_counter(self.total_ns),
+            max_ns: load_counter(self.max_ns),
+        }
+    }
+
+    fn record(self, elapsed_ns: u64) {
+        self.total_ns.fetch_add(elapsed_ns, Ordering::Relaxed);
+        update_max(self.max_ns, elapsed_ns);
+    }
+}
+
+fn frame_phase_counters(phase: FramePhase) -> FramePhaseCounters {
+    match phase {
+        FramePhase::Prepare => FramePhaseCounters {
+            total_ns: &FRAME_PREPARE_TOTAL_NS,
+            max_ns: &FRAME_PREPARE_MAX_NS,
+        },
+        FramePhase::BackgroundPoll => FramePhaseCounters {
+            total_ns: &FRAME_BACKGROUND_POLL_TOTAL_NS,
+            max_ns: &FRAME_BACKGROUND_POLL_MAX_NS,
+        },
+        FramePhase::Paint => FramePhaseCounters {
+            total_ns: &FRAME_PAINT_TOTAL_NS,
+            max_ns: &FRAME_PAINT_MAX_NS,
+        },
+        FramePhase::Chrome => FramePhaseCounters {
+            total_ns: &FRAME_CHROME_TOTAL_NS,
+            max_ns: &FRAME_CHROME_MAX_NS,
+        },
+        FramePhase::ActiveSurface => FramePhaseCounters {
+            total_ns: &FRAME_ACTIVE_SURFACE_TOTAL_NS,
+            max_ns: &FRAME_ACTIVE_SURFACE_MAX_NS,
+        },
+        FramePhase::Gutter => FramePhaseCounters {
+            total_ns: &FRAME_GUTTER_TOTAL_NS,
+            max_ns: &FRAME_GUTTER_MAX_NS,
+        },
+        FramePhase::Scroll => FramePhaseCounters {
+            total_ns: &FRAME_SCROLL_TOTAL_NS,
+            max_ns: &FRAME_SCROLL_MAX_NS,
+        },
+        FramePhase::Dialogs => FramePhaseCounters {
+            total_ns: &FRAME_DIALOGS_TOTAL_NS,
+            max_ns: &FRAME_DIALOGS_MAX_NS,
+        },
+        FramePhase::Shortcuts => FramePhaseCounters {
+            total_ns: &FRAME_SHORTCUTS_TOTAL_NS,
+            max_ns: &FRAME_SHORTCUTS_MAX_NS,
+        },
+        FramePhase::Finish => FramePhaseCounters {
+            total_ns: &FRAME_FINISH_TOTAL_NS,
+            max_ns: &FRAME_FINISH_MAX_NS,
+        },
+    }
+}
+
+fn reset_counters(counters: &[&AtomicU64]) {
+    for counter in counters {
+        reset_counter(counter);
+    }
+}
+
+fn reset_counter(counter: &AtomicU64) {
+    counter.store(0, Ordering::Relaxed);
+}
+
+fn load_counter(counter: &AtomicU64) -> u64 {
+    counter.load(Ordering::Relaxed)
 }
 
 fn frame_bucket_counts() -> [u64; FRAME_HISTOGRAM_BUCKETS] {
     let mut counts = [0; FRAME_HISTOGRAM_BUCKETS];
     for (index, bucket) in FRAME_TIME_BUCKET_COUNTS.iter().enumerate() {
-        counts[index] = bucket.load(Ordering::Relaxed);
+        counts[index] = load_counter(bucket);
     }
     counts
 }

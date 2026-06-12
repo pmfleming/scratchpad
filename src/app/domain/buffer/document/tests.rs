@@ -177,7 +177,7 @@ fn soft_divider_seals_after_a_pause() {
     insert_sequence!(&mut document, "Hi,");
     // Simulate the user pausing past the soft-divider seal threshold.
     document.history.latest_update_at =
-        Some(Instant::now() - TEXT_HISTORY_SOFT_DIVIDER_PAUSE - Duration::from_millis(50));
+        Instant::now().checked_sub(TEXT_HISTORY_SOFT_DIVIDER_PAUSE + Duration::from_millis(50));
     insert_edit(&mut document, 3, " ");
 
     assert_eq!(document.extract_text(), "Hi, ");
@@ -237,7 +237,7 @@ fn dash_is_a_soft_divider() {
     let mut other = empty_document!();
     insert_sequence!(&mut other, "well-");
     other.history.latest_update_at =
-        Some(Instant::now() - TEXT_HISTORY_SOFT_DIVIDER_PAUSE - Duration::from_millis(50));
+        Instant::now().checked_sub(TEXT_HISTORY_SOFT_DIVIDER_PAUSE + Duration::from_millis(50));
     insert_edit(&mut other, 5, "k");
     assert_eq!(other.operation_undo_depth(), 2);
 }

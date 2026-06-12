@@ -242,7 +242,11 @@ mod tests {
 
             assert!(!entry_sealed_by_divider(
                 &latest,
-                Some(TEXT_HISTORY_SOFT_DIVIDER_PAUSE - Duration::from_millis(1))
+                Some(
+                    TEXT_HISTORY_SOFT_DIVIDER_PAUSE
+                        .checked_sub(Duration::from_millis(1))
+                        .expect("soft divider pause exceeds 1ms")
+                )
             ));
             assert!(entry_sealed_by_divider(
                 &latest,

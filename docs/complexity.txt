@@ -53,12 +53,26 @@ while reducing cloning & total lines of code.
 
 ----
 Several modules have become sources of complexity/maintainability/risk.
-one by one, review each module over 600 
+one by one, review each module over 550 
 
 to (a) improve cognitive, clomatic & effort metrics.
 (b) improve leverage & locality.
 (c) reducing cloning & total lines of code. 
 (already extant associated modules can be a good path for improving quality - create sub modules as a last resort)
-The goal should be to reduce each module below 600, show improvement on leverage/locality, and reduce clones to a minimum.
+The goal should be to reduce each module below 500, show improvement on leverage/locality, and reduce clones to a minimum.
 
 
+where there is javascript in this project - rewrite it to type script.
+and at the same time - refactor the code to:
+to (a) improve cognitive, clomatic & effort metrics.
+(b) improve leverage & locality.
+(c) reducing cloning & total lines of code. 
+
+look at:
+high-risk hotspot records: 44
+clone groups: 17
+escape hatch records: 44
+
+reduce hotspots/reduce clones/reduce escape hatches.
+
+

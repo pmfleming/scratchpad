@@ -138,7 +138,7 @@ pub(super) fn build_replacement_targets(
         let replacements_and_expected = matches[start..end]
             .iter()
             .rev()
-            .map(|search_match| replacement_for_match(search_match))
+            .map(&mut replacement_for_match)
             .collect::<Result<Vec<_>, _>>()?;
         let replacements = matches[start..end]
             .iter()

@@ -34,6 +34,7 @@ fn history_tab_persistence_round_trips() {
 }
 
 #[test]
+#[allow(clippy::assertions_on_constants)]
 fn file_history_groups_default_to_collapsed() {
     assert!(!FILE_GROUP_DEFAULT_EXPANDED);
 }

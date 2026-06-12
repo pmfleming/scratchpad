@@ -36,6 +36,10 @@ pub(super) fn extract_hexes(message: &str, prefix: &str, suffix: &str) -> Vec<St
 }
 
 pub(super) fn should_capture_log_record(metadata: &Metadata<'_>, message: &str) -> bool {
+    if is_benign_clipboard_paste_error(metadata.target(), message) {
+        return false;
+    }
+
     metadata.level() <= log::Level::Warn
         && (is_app_target(metadata.target())
             || is_egui_target(metadata.target())
@@ -51,6 +55,12 @@ pub(super) fn is_egui_warning_message(message: &str) -> bool {
         || message.contains("Id ")
         || message.contains("Widget rect")
         || message.contains("same id")
+}
+
+fn is_benign_clipboard_paste_error(target: &str, message: &str) -> bool {
+    target == "egui_winit::clipboard"
+        && message
+            == "arboard paste error: The clipboard contents were not available in the requested format or the clipboard is empty."
 }
 
 fn is_app_target(target: &str) -> bool {

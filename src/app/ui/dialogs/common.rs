@@ -1,5 +1,6 @@
 use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::ui::callout;
+use crate::app::ui::settings::dialog_card_frame;
 use crate::app::ui::widget_ids;
 use eframe::egui;
 use egui_phosphor::regular::FILE_TEXT;
@@ -79,6 +80,40 @@ pub(super) fn render_dialog_header(ui: &mut egui::Ui, title: &str) -> bool {
         if label != title {
             label_response.on_hover_text(title);
         }
+    })
+}
+
+pub(super) fn history_dialog_card<R>(
+    ui: &mut egui::Ui,
+    corner_radius: u8,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    let width = ui.available_width();
+    let content_width = (width - 24.0).max(0.0);
+    dialog_card_frame(ui)
+        .corner_radius(egui::CornerRadius::same(corner_radius))
+        .show(ui, |ui| {
+            ui.set_width(content_width);
+            ui.set_min_width(content_width);
+            ui.set_max_width(content_width);
+            add_contents(ui)
+        })
+        .inner
+}
+
+pub(super) fn history_dialog_header(
+    ui: &mut egui::Ui,
+    id_source: impl Hash + Clone,
+    close_tooltip: &str,
+    title: &str,
+    title_size: f32,
+) -> bool {
+    callout::header_row(ui, id_source, close_tooltip, |ui| {
+        ui.label(
+            egui::RichText::new(title)
+                .size(title_size)
+                .color(callout::text(ui)),
+        );
     })
 }
 

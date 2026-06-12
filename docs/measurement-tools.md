@@ -223,11 +223,11 @@ python -m rust_quality_lens.cli measure map --config rqlens.toml
 Performance lens:
 
 ```powershell
-python -m scratchpad_performance_lens.cli measure all --config splens.toml
-python -m scratchpad_performance_lens.cli measure search --config splens.toml
-python -m scratchpad_performance_lens.cli measure capacity --config splens.toml
-python -m scratchpad_performance_lens.cli measure resources --config splens.toml
-python -m scratchpad_performance_lens.cli telemetry --config splens.toml
+cargo run --manifest-path ..\scratchpad-performance-lens\Cargo.toml --bin splens -- measure all --config splens.toml
+cargo run --manifest-path ..\scratchpad-performance-lens\Cargo.toml --bin splens -- measure search --config splens.toml
+cargo run --manifest-path ..\scratchpad-performance-lens\Cargo.toml --bin splens -- measure capacity --config splens.toml
+cargo run --manifest-path ..\scratchpad-performance-lens\Cargo.toml --bin splens -- measure resources --config splens.toml
+cargo run --manifest-path ..\scratchpad-performance-lens\Cargo.toml --bin splens -- telemetry --config splens.toml
 ```
 
 Direct commands are useful for quick checks and CI-like scripting. The dashboard

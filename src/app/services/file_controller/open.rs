@@ -122,35 +122,32 @@ impl FileController {
         target_index: usize,
         paths: Vec<PathBuf>,
     ) {
-        if paths.is_empty() {
-            return;
-        }
-
-        if target_index >= app.tab_manager.tabs.as_slice().len() {
-            app.state.status.set_error_status_with_detail(
-                StatusDomain::Session,
-                "Could not add startup files to that tab.",
-                format!(
-                    "Startup /addto:index:{} target does not exist.",
-                    target_index + 1
-                ),
-            );
-            return;
-        }
-
-        crate::app::commands::handle_command(
+        Self::open_external_paths_into_tab_with(
             app,
-            AppCommand::Workspace(WorkspaceCommand::ActivateTab {
-                index: target_index,
-            }),
+            target_index,
+            paths,
+            Self::open_external_paths_here,
         );
-        Self::open_external_paths_here(app, paths);
     }
 
     pub fn open_external_paths_into_tab_async(
         app: &mut ScratchpadApp,
         target_index: usize,
         paths: Vec<PathBuf>,
+    ) {
+        Self::open_external_paths_into_tab_with(
+            app,
+            target_index,
+            paths,
+            Self::open_external_paths_here_async,
+        );
+    }
+
+    fn open_external_paths_into_tab_with(
+        app: &mut ScratchpadApp,
+        target_index: usize,
+        paths: Vec<PathBuf>,
+        open_paths: fn(&mut ScratchpadApp, Vec<PathBuf>),
     ) {
         if paths.is_empty() {
             return;
@@ -174,7 +171,7 @@ impl FileController {
                 index: target_index,
             }),
         );
-        Self::open_external_paths_here_async(app, paths);
+        open_paths(app, paths);
     }
 
     fn open_selected_paths_background_blocking(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {

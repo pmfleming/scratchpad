@@ -7,10 +7,9 @@ use self::model::{
     timeline_rows_from_entries,
 };
 use self::persistence::{read_active_tab, read_follow_focus, write_active_tab, write_follow_focus};
-use super::common::show_centered_callout;
+use super::common::{history_dialog_card, history_dialog_header, show_centered_callout};
 use crate::app::app_state::{ScratchpadApp, workspace::mutation as workspace_mutation};
 use crate::app::theme::{action_bg, border, tab_selected_accent, tab_selected_bg};
-use crate::app::ui::settings::dialog_card_frame;
 use crate::app::ui::{callout, settings, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{CLOCK_COUNTER_CLOCKWISE, CROSSHAIR, FILES, TRASH};
@@ -30,6 +29,7 @@ const UNDONE_OPACITY: f32 = 0.55;
 const HISTORY_TIMELINE_SHORTCUT: &str = "CTRL+1: Timeline";
 const HISTORY_BY_FILE_SHORTCUT: &str = "CTRL+2: By file";
 const HISTORY_FOLLOW_FOCUS_SHORTCUT: &str = "CTRL+SHIFT+F: Follow undo";
+const HISTORY_STOP_FOLLOWING_FOCUS_SHORTCUT: &str = "CTRL+SHIFT+F: Stop following undo";
 const HISTORY_CLEAR_SHORTCUT: &str = "CTRL+SHIFT+DELETE: Clear history";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -126,7 +126,7 @@ fn render_text_history_window(
         *state.close_requested = true;
     }
     ui.add_space(4.0);
-    history_card(ui, |ui| {
+    history_dialog_card(ui, HISTORY_CARD_CORNER_RADIUS, |ui| {
         render_controls(
             ui,
             inputs.active_tab,
@@ -144,28 +144,14 @@ fn render_text_history_window(
     }
 }
 
-fn history_card<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    let width = ui.available_width();
-    let content_width = (width - 24.0).max(0.0);
-    dialog_card_frame(ui)
-        .corner_radius(egui::CornerRadius::same(HISTORY_CARD_CORNER_RADIUS))
-        .show(ui, |ui| {
-            ui.set_width(content_width);
-            ui.set_min_width(content_width);
-            ui.set_max_width(content_width);
-            add_contents(ui)
-        })
-        .inner
-}
-
 fn render_header(ui: &mut egui::Ui) -> bool {
-    callout::header_row(ui, "text_history.header", "Close history", |ui| {
-        ui.label(
-            egui::RichText::new("History")
-                .size(TEXT_HISTORY_TITLE_SIZE)
-                .color(callout::text(ui)),
-        );
-    })
+    history_dialog_header(
+        ui,
+        "text_history.header",
+        "Close history",
+        "History",
+        TEXT_HISTORY_TITLE_SIZE,
+    )
 }
 
 fn render_controls(
@@ -203,7 +189,7 @@ fn render_controls(
             "follow_focus",
             CROSSHAIR,
             if follow_focus {
-                HISTORY_FOLLOW_FOCUS_SHORTCUT
+                HISTORY_STOP_FOLLOWING_FOCUS_SHORTCUT
             } else {
                 HISTORY_FOLLOW_FOCUS_SHORTCUT
             },
