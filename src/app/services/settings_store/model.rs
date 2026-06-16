@@ -3,6 +3,7 @@ use crate::app::fonts::EditorFontPreset;
 use crate::app::platform::PlatformProfile;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 pub const DEFAULT_FONT_SIZE: f32 = 14.0;
@@ -236,6 +237,19 @@ pub struct PlatformSettings {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ShortcutSettings {
+    #[serde(default, flatten)]
+    pub bindings: BTreeMap<String, String>,
+}
+
+impl ShortcutSettings {
+    #[must_use]
+    pub fn binding(&self, action_key: &str) -> Option<&str> {
+        self.bindings.get(action_key).map(String::as_str)
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default)]
     pub editor: EditorSettings,
@@ -247,6 +261,8 @@ pub struct AppSettings {
     pub history: HistorySettings,
     #[serde(default)]
     pub platform: PlatformSettings,
+    #[serde(default)]
+    pub shortcuts: ShortcutSettings,
 }
 
 pub(crate) fn color_from_hex(hex: &str, fallback: egui::Color32) -> egui::Color32 {

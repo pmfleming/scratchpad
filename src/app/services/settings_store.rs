@@ -13,8 +13,8 @@ pub use model::{
     DEFAULT_WINDOW_INNER_SIZE, DEFAULT_WORD_WRAP, EditorSettings, FileOpenDisposition,
     HistorySettings, LEGACY_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR,
     LIGHT_EDITOR_TEXT_COLOR, MIN_WINDOW_INNER_SIZE, NewTabPlacement, PlatformSettings,
-    StartupSessionBehavior, TabListPosition, TabOrderDirection, TabOrderMode, UiSettings,
-    WindowState, WorkspaceSettings,
+    ShortcutSettings, StartupSessionBehavior, TabListPosition, TabOrderDirection, TabOrderMode,
+    UiSettings, WindowState, WorkspaceSettings,
 };
 pub(crate) use model::{color_from_hex, color_to_hex, default_font_size, default_word_wrap};
 

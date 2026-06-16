@@ -270,11 +270,13 @@ Started 2026-06-16:
 - Added regression tests for platform capabilities, settings compatibility, and caption-width behavior.
 - Added an initial action-driven shortcut keymap for top-level app shortcuts.
 - Routed existing top-level shortcut handling through `ShortcutAction -> KeyBinding` lookup while preserving Windows defaults.
+- Added config-backed shortcut overrides under `[shortcuts]`.
+- Added NixOS/Hyprland configuration snippets in `docs/hyprland-nixos-configuration.md`.
 
 Still pending:
 
-- Config-backed shortcut overrides.
-- Nix/Home Manager/Hyprland bind snippets.
+- Shortcut warnings/status for invalid override strings.
+- A first-class Nix/Home Manager module.
 - Cross-target build-check script or CI entry.
 - Stable per-OS config/session path review.
 

@@ -298,7 +298,12 @@ fn handle_tile_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
 }
 
 fn consume_app_shortcut(app: &ScratchpadApp, ctx: &egui::Context, action: ShortcutAction) -> bool {
-    consume_shortcut(ctx, app.state.app_settings.platform_profile(), action)
+    consume_shortcut(
+        ctx,
+        app.state.app_settings.platform_profile(),
+        &app.state.app_settings.shortcuts,
+        action,
+    )
 }
 
 fn begin_active_tab_rename(app: &mut ScratchpadApp) {

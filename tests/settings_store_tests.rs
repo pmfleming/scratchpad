@@ -158,6 +158,7 @@ status_bar_visible = true
         FileOpenDisposition::NewTab
     );
     assert_eq!(loaded.platform.profile, PlatformProfile::Auto);
+    assert!(loaded.shortcuts.bindings.is_empty());
 }
 
 #[test]
@@ -217,4 +218,43 @@ fn platform_profile_round_trips_in_toml_settings() {
     let loaded = store.load().unwrap().unwrap();
 
     assert_eq!(loaded.platform.profile, PlatformProfile::Hyprland);
+}
+
+#[test]
+fn shortcut_overrides_round_trip_in_toml_settings() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = SettingsStore::new(directory.path().to_path_buf());
+    let mut settings = AppSettings::default();
+    settings
+        .shortcuts
+        .bindings
+        .insert("open_file".to_owned(), "ctrl+shift+p".to_owned());
+
+    store.save(&settings).unwrap();
+    let loaded = store.load().unwrap().unwrap();
+
+    assert_eq!(loaded.shortcuts.binding("open_file"), Some("ctrl+shift+p"));
+}
+
+#[test]
+fn shortcut_overrides_load_from_flat_toml_table() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(
+        directory.path().join("settings.toml"),
+        r#"
+[shortcuts]
+open_file = "ctrl+shift+p"
+split_left = "ctrl+shift+left"
+"#,
+    )
+    .unwrap();
+    let store = SettingsStore::new(directory.path().to_path_buf());
+
+    let loaded = store.load().unwrap().unwrap();
+
+    assert_eq!(loaded.shortcuts.binding("open_file"), Some("ctrl+shift+p"));
+    assert_eq!(
+        loaded.shortcuts.binding("split_left"),
+        Some("ctrl+shift+left")
+    );
 }
