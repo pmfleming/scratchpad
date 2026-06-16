@@ -98,10 +98,12 @@ fn body_viewport(
     body_rect: egui::Rect,
 ) -> Option<egui::Rect> {
     viewport.map(|viewport| {
+        let viewport_width = viewport.width().max(0.0);
+        let viewport_height = viewport.height().max(0.0);
         let leading_content_width =
-            (body_rect.left() - clip_rect.left()).clamp(0.0, viewport.width());
-        let body_width = (viewport.width() - leading_content_width).max(1.0);
-        egui::Rect::from_min_size(viewport.min, egui::vec2(body_width, viewport.height()))
+            (body_rect.left() - clip_rect.left()).clamp(0.0, viewport_width);
+        let body_width = (viewport_width - leading_content_width).max(1.0);
+        egui::Rect::from_min_size(viewport.min, egui::vec2(body_width, viewport_height))
     })
 }
 
@@ -160,5 +162,17 @@ mod tests {
         let narrowed = body_viewport(Some(viewport), clip_rect, body_rect).unwrap();
 
         assert_eq!(narrowed.width(), 576.0);
+    }
+
+    #[test]
+    fn body_viewport_tolerates_negative_transient_viewport_size() {
+        let viewport = egui::Rect::from_min_max(egui::pos2(10.0, 10.0), egui::pos2(8.0, 8.0));
+        let clip_rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0, 100.0));
+        let body_rect = egui::Rect::from_min_size(egui::pos2(24.0, 0.0), egui::vec2(100.0, 100.0));
+
+        let narrowed = body_viewport(Some(viewport), clip_rect, body_rect).unwrap();
+
+        assert_eq!(narrowed.width(), 1.0);
+        assert_eq!(narrowed.height(), 0.0);
     }
 }
