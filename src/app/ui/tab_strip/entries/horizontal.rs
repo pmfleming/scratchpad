@@ -289,11 +289,15 @@ fn show_drag_region(
         Sense::click_and_drag(),
         "window_drag_region",
     );
-    if drag_response.drag_started() {
-        ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-    }
-    if drag_response.double_clicked() {
-        toggle_viewport_maximized(ctx);
+    if crate::app::platform::capabilities(app.state.app_settings.platform_profile())
+        .allow_app_drag_regions
+    {
+        if drag_response.drag_started() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
+        if drag_response.double_clicked() {
+            toggle_viewport_maximized(ctx);
+        }
     }
     // The open strip doubles as window drag space, but a secondary click there
     // should still expose the tab-list commands.

@@ -64,11 +64,14 @@ impl HeaderLayout {
         spacing: f32,
         include_tabs: bool,
     ) -> Self {
-        let caption_controls_width =
-            CAPTION_BUTTON_SIZE.x * 3.0 + CAPTION_BUTTON_SPACING * 2.0 + CAPTION_TRAILING_PADDING;
+        let caption_controls_width = caption_controls_width(app);
         let tab_action_width = BUTTON_SIZE.x;
         let overflow_button_width = BUTTON_SIZE.x;
-        let spacer_before_captions = 8.0;
+        let spacer_before_captions = if caption_controls_width > 0.0 {
+            8.0
+        } else {
+            0.0
+        };
         if !include_tabs {
             let tab_area_width =
                 (remaining_width - caption_controls_width - spacer_before_captions).max(0.0);
@@ -117,6 +120,18 @@ impl HeaderLayout {
             tab_area_width,
         }
     }
+}
+
+fn caption_controls_width(app: &ScratchpadApp) -> f32 {
+    caption_controls_width_for_profile(app.state.app_settings.platform_profile())
+}
+
+fn caption_controls_width_for_profile(profile: crate::app::platform::PlatformProfile) -> f32 {
+    if !crate::app::platform::capabilities(profile).show_window_caption_buttons {
+        return 0.0;
+    }
+
+    CAPTION_BUTTON_SIZE.x * 3.0 + CAPTION_BUTTON_SPACING * 2.0 + CAPTION_TRAILING_PADDING
 }
 
 fn pointer_near_bar(ui: &egui::Ui, expanded_size: f32, position: TabListPosition) -> bool {
@@ -291,5 +306,24 @@ pub(crate) fn vertical_tab_panel(side: TabListPosition, visible: bool) -> egui::
         (TabListPosition::Top | TabListPosition::Bottom, _) => {
             unreachable!("vertical tab panel only supports left/right")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::caption_controls_width_for_profile;
+    use crate::app::platform::PlatformProfile;
+
+    #[test]
+    fn windows_header_reserves_caption_control_width() {
+        assert!(caption_controls_width_for_profile(PlatformProfile::Windows) > 0.0);
+    }
+
+    #[test]
+    fn hyprland_header_reserves_no_caption_control_width() {
+        assert_eq!(
+            caption_controls_width_for_profile(PlatformProfile::Hyprland),
+            0.0
+        );
     }
 }

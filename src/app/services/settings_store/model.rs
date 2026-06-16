@@ -1,5 +1,6 @@
 use crate::app::domain::TextHistoryBudget;
 use crate::app::fonts::EditorFontPreset;
+use crate::app::platform::PlatformProfile;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -229,6 +230,12 @@ pub struct HistorySettings {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PlatformSettings {
+    #[serde(default)]
+    pub profile: PlatformProfile,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default)]
     pub editor: EditorSettings,
@@ -238,6 +245,8 @@ pub struct AppSettings {
     pub ui: UiSettings,
     #[serde(default)]
     pub history: HistorySettings,
+    #[serde(default)]
+    pub platform: PlatformSettings,
 }
 
 pub(crate) fn color_from_hex(hex: &str, fallback: egui::Color32) -> egui::Color32 {

@@ -1,4 +1,5 @@
 use scratchpad::app::fonts::EditorFontPreset;
+use scratchpad::app::platform::PlatformProfile;
 use scratchpad::app::services::settings_store::{
     AppSettings, FileOpenDisposition, SettingsStore, StartupSessionBehavior, TabListPosition,
     WindowState,
@@ -156,6 +157,7 @@ status_bar_visible = true
         loaded.workspace.file_open_disposition,
         FileOpenDisposition::NewTab
     );
+    assert_eq!(loaded.platform.profile, PlatformProfile::Auto);
 }
 
 #[test]
@@ -200,5 +202,19 @@ ui:
     assert_eq!(loaded.editor.font_size, 15.0);
     assert_eq!(loaded.editor.editor_font, EditorFontPreset::Mono);
     assert_eq!(loaded.workspace.tab_list_position, TabListPosition::Right);
+    assert_eq!(loaded.platform.profile, PlatformProfile::Auto);
     assert!(directory.path().join("settings.toml").exists());
+}
+
+#[test]
+fn platform_profile_round_trips_in_toml_settings() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = SettingsStore::new(directory.path().to_path_buf());
+    let mut settings = AppSettings::default();
+    settings.platform.profile = PlatformProfile::Hyprland;
+
+    store.save(&settings).unwrap();
+    let loaded = store.load().unwrap().unwrap();
+
+    assert_eq!(loaded.platform.profile, PlatformProfile::Hyprland);
 }

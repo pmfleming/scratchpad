@@ -5,6 +5,7 @@ use crate::app::capacity_metrics::{FramePhase, record_frame_phase};
 use crate::app::chrome::{handle_window_resize, show_window_resize_cursor};
 use crate::app::diagnostics;
 use crate::app::fonts;
+use crate::app::platform;
 use crate::app::services::file_controller::FileController;
 use crate::app::services::settings_store::TabListPosition;
 use crate::app::shortcuts;
@@ -40,7 +41,9 @@ pub(super) fn prepare_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
     if app.state.window_shown_after_first_frame {
         app.record_window_state(ctx);
     }
-    if handle_window_resize(ctx) && app.state.overflow_popup_open {
+    if handle_window_resize(ctx, platform_capabilities(app).allow_app_resize_grips)
+        && app.state.overflow_popup_open
+    {
         // Rebuild the overflow popup lazily against the resized viewport.
         app.state.overflow_popup_open = false;
     }
@@ -96,14 +99,18 @@ pub(super) fn render_frame(app: &mut ScratchpadApp, ui: &mut egui::Ui, ctx: &egu
     let finish_started_at = Instant::now();
     show_window_after_first_frame(app, ctx);
     finish_frame_transitions(app, ctx);
-    show_window_resize_cursor(ctx);
+    show_window_resize_cursor(ctx, platform_capabilities(app).allow_app_resize_grips);
     record_frame_phase(FramePhase::Finish, finish_started_at.elapsed());
+}
+
+fn platform_capabilities(app: &ScratchpadApp) -> platform::PlatformCapabilities {
+    platform::capabilities(app.state.app_settings.platform_profile())
 }
 
 fn render_tab_chrome(app: &mut ScratchpadApp, ui: &mut egui::Ui) {
     if app.state.app_settings.tab_list_position() == TabListPosition::Top {
         tab_strip::show_header(ui, app);
-    } else {
+    } else if platform_capabilities(app).allow_app_drag_regions {
         tab_strip::show_top_drag_bar(ui, app);
     }
     if app.state.app_settings.status_bar_visible() {

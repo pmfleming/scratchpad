@@ -3,6 +3,7 @@ use crate::app::chrome::{
     PhosphorButtonColors, phosphor_button, phosphor_button_with_hover_icon_color,
 };
 use crate::app::commands::{AppCommand, FileCommand, SearchCommand};
+use crate::app::platform;
 use crate::app::shortcut_tooltips;
 use crate::app::theme::{CAPTION_BUTTON_SIZE, CLOSE_HOVER_BG, action_bg, action_hover_bg};
 use eframe::egui;
@@ -29,7 +30,7 @@ pub(super) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut Scratch
             VerticalAction::Search,
         ),
     ];
-    let right_buttons = [
+    let caption_buttons = [
         VerticalActionButton::new(
             egui_phosphor::regular::MINUS,
             "Minimize",
@@ -50,29 +51,46 @@ pub(super) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut Scratch
             VerticalAction::CloseWindow,
         ),
     ];
+    let right_buttons = if platform::capabilities(app.state.app_settings.platform_profile())
+        .show_window_caption_buttons
+    {
+        &caption_buttons[..]
+    } else {
+        &[]
+    };
 
-    match vertical_primary_actions_layout(available_width, button_size.x, button_spacing) {
+    match vertical_primary_actions_layout(
+        available_width,
+        button_size.x,
+        button_spacing,
+        left_buttons.len(),
+        right_buttons.len(),
+    ) {
         VerticalPrimaryActionsLayout::SingleRow => {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = button_spacing;
                 render_button_group(ui, app, &left_buttons, button_size);
-                let caption_width = button_size.x * right_buttons.len() as f32
-                    + button_spacing * right_buttons.len().saturating_sub(1) as f32;
-                ui.add_space((ui.available_width() - caption_width).max(button_spacing));
-                render_button_group(ui, app, &right_buttons, button_size);
+                if !right_buttons.is_empty() {
+                    let caption_width =
+                        row_width(right_buttons.len(), button_size.x, button_spacing);
+                    ui.add_space((ui.available_width() - caption_width).max(button_spacing));
+                    render_button_group(ui, app, right_buttons, button_size);
+                }
             });
         }
         VerticalPrimaryActionsLayout::CaptionFirstRows { buttons_per_row } => {
-            render_wrapped_button_section(
-                ui,
-                app,
-                &right_buttons,
-                button_size,
-                button_spacing,
-                buttons_per_row,
-                true,
-            );
-            ui.add_space(button_spacing);
+            if !right_buttons.is_empty() {
+                render_wrapped_button_section(
+                    ui,
+                    app,
+                    right_buttons,
+                    button_size,
+                    button_spacing,
+                    buttons_per_row,
+                    true,
+                );
+                ui.add_space(button_spacing);
+            }
             render_wrapped_button_section(
                 ui,
                 app,
@@ -96,15 +114,21 @@ fn vertical_primary_actions_layout(
     available_width: f32,
     button_width: f32,
     button_spacing: f32,
+    left_button_count: usize,
+    right_button_count: usize,
 ) -> VerticalPrimaryActionsLayout {
-    let six_button_width = button_width * 6.0 + button_spacing * 5.0;
-    let three_button_width = button_width * 3.0 + button_spacing * 2.0;
-    let two_button_width = button_width * 2.0 + button_spacing;
+    let total_button_count = left_button_count + right_button_count;
+    let total_button_width = row_width(total_button_count, button_width, button_spacing);
+    let max_group_button_count = left_button_count.max(right_button_count).max(1);
+    let max_group_width = row_width(max_group_button_count, button_width, button_spacing);
+    let two_button_width = row_width(2, button_width, button_spacing);
 
-    if available_width >= six_button_width {
+    if available_width >= total_button_width {
         VerticalPrimaryActionsLayout::SingleRow
-    } else if available_width >= three_button_width {
-        VerticalPrimaryActionsLayout::CaptionFirstRows { buttons_per_row: 3 }
+    } else if available_width >= max_group_width {
+        VerticalPrimaryActionsLayout::CaptionFirstRows {
+            buttons_per_row: max_group_button_count,
+        }
     } else if available_width >= two_button_width {
         VerticalPrimaryActionsLayout::CaptionFirstRows { buttons_per_row: 2 }
     } else {

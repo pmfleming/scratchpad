@@ -5,8 +5,8 @@ const RESIZE_BORDER: f32 = 6.0;
 const RESIZE_CORNER: f32 = 18.0;
 
 #[must_use]
-pub fn handle_window_resize(ctx: &egui::Context) -> bool {
-    if !window_resize_enabled(ctx) {
+pub fn handle_window_resize(ctx: &egui::Context, app_resize_grips_enabled: bool) -> bool {
+    if !window_resize_enabled(ctx, app_resize_grips_enabled) {
         return false;
     }
 
@@ -17,8 +17,8 @@ pub fn handle_window_resize(ctx: &egui::Context) -> bool {
     content_rect_changed
 }
 
-pub fn show_window_resize_cursor(ctx: &egui::Context) {
-    if !window_resize_enabled(ctx) {
+pub fn show_window_resize_cursor(ctx: &egui::Context, app_resize_grips_enabled: bool) {
+    if !window_resize_enabled(ctx, app_resize_grips_enabled) {
         return;
     }
 
@@ -35,8 +35,8 @@ pub fn show_window_resize_cursor(ctx: &egui::Context) {
     }
 }
 
-fn window_resize_enabled(ctx: &egui::Context) -> bool {
-    !ctx.input(|input| input.viewport().maximized.unwrap_or(false))
+fn window_resize_enabled(ctx: &egui::Context, app_resize_grips_enabled: bool) -> bool {
+    app_resize_grips_enabled && !ctx.input(|input| input.viewport().maximized.unwrap_or(false))
 }
 
 fn request_repaint_after_content_rect_change(ctx: &egui::Context, screen_rect: Rect) -> bool {

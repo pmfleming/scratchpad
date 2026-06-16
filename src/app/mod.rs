@@ -30,6 +30,7 @@ pub mod diagnostics;
 pub mod domain;
 pub mod fonts;
 pub mod memory_budget;
+pub mod platform;
 pub mod services;
 pub(crate) mod shortcut_tooltips;
 pub mod shortcuts;

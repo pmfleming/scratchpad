@@ -4,6 +4,7 @@
 use eframe::egui;
 use scratchpad::ScratchpadApp;
 use scratchpad::app::app_state::prepare_context_before_first_frame;
+use scratchpad::app::platform;
 use scratchpad::app::services::session_store::SessionStore;
 use scratchpad::app::services::settings_store::{
     DEFAULT_WINDOW_INNER_SIZE, MIN_WINDOW_INNER_SIZE, SettingsStore, WindowState,
@@ -29,7 +30,12 @@ fn main() -> eframe::Result<()> {
     let startup_settings = settings_store.load().ok().flatten().unwrap_or_default();
 
     let options = eframe::NativeOptions {
-        viewport: viewport_builder_from_window_state(&startup_settings.ui.window_state),
+        viewport: viewport_builder_from_window_state(
+            &startup_settings.ui.window_state,
+            platform::capabilities(startup_settings.platform.profile),
+        ),
+        #[cfg(target_os = "linux")]
+        renderer: eframe::Renderer::Glow,
         persist_window: false,
         persistence_path: Some(session_store.root().join("eframe-state.ron")),
         ..Default::default()
@@ -56,9 +62,12 @@ fn main() -> eframe::Result<()> {
     )
 }
 
-fn viewport_builder_from_window_state(window_state: &WindowState) -> egui::ViewportBuilder {
+fn viewport_builder_from_window_state(
+    window_state: &WindowState,
+    capabilities: platform::PlatformCapabilities,
+) -> egui::ViewportBuilder {
     let mut viewport = egui::ViewportBuilder::default()
-        .with_decorations(false)
+        .with_decorations(capabilities.use_native_decorations)
         .with_visible(false)
         .with_inner_size(window_state.inner_size.unwrap_or(DEFAULT_WINDOW_INNER_SIZE))
         .with_min_inner_size(MIN_WINDOW_INNER_SIZE);

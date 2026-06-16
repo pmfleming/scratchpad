@@ -107,8 +107,10 @@ fn show_horizontal_tab_bar(
         let layout = HeaderLayout::measure(app, ui.available_width(), 4.0, true);
         let outcome = show_tab_region(ctx, ui, app, &layout);
 
-        ui.add_space(8.0);
-        show_caption_controls(ctx, ui, app, &layout);
+        if layout.caption_controls_width > 0.0 {
+            ui.add_space(8.0);
+            show_caption_controls(ctx, ui, app, &layout);
+        }
         outcome
     })
     .inner

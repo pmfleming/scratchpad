@@ -1,6 +1,7 @@
 use super::ScratchpadApp;
 use crate::app::fonts::EditorFontPreset;
 use crate::app::paths_match;
+use crate::app::platform::PlatformProfile;
 use crate::app::services::file_controller::FileController;
 use crate::app::services::settings_store::{
     AppSettings, AppThemeMode, DEFAULT_EDITOR_BACKGROUND_COLOR, DEFAULT_EDITOR_TEXT_COLOR,
@@ -150,6 +151,11 @@ impl AppSettings {
     #[must_use]
     pub fn status_bar_visible(&self) -> bool {
         self.ui.status_bar_visible
+    }
+
+    #[must_use]
+    pub fn platform_profile(&self) -> PlatformProfile {
+        self.platform.profile
     }
 
     pub(crate) fn tab_list_auto_hide_delay(&self) -> Duration {
