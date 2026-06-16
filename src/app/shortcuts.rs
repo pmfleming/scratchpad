@@ -3,6 +3,7 @@ use crate::app::commands::{
     AppCommand, FileCommand, SearchCommand, SettingsCommand, WorkspaceCommand,
 };
 use crate::app::domain::{SplitAxis, ViewId};
+use crate::app::shortcut_keymap::{ShortcutAction, consume_shortcut};
 use eframe::egui;
 use std::path::{Path, PathBuf};
 
@@ -24,13 +25,13 @@ fn handle_global_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         return;
     }
 
-    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F1)) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::OpenUserManual) {
         crate::app::commands::handle_command(app, AppCommand::File(FileCommand::OpenUserManual));
         return;
     }
 
     if !crate::app::app_state::settings_state::showing_settings(app)
-        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::F))
+        && consume_app_shortcut(app, ctx, ShortcutAction::OpenSearch)
     {
         crate::app::commands::handle_command(app, AppCommand::Search(SearchCommand::Open));
         ctx.request_repaint();
@@ -38,7 +39,7 @@ fn handle_global_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
     }
 
     if !crate::app::app_state::settings_state::showing_settings(app)
-        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::H))
+        && consume_app_shortcut(app, ctx, ShortcutAction::OpenReplace)
     {
         crate::app::commands::handle_command(
             app,
@@ -48,7 +49,7 @@ fn handle_global_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         return;
     }
 
-    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Comma)) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::OpenSettings) {
         crate::app::commands::handle_command(
             app,
             AppCommand::Settings(SettingsCommand::OpenSettings),
@@ -57,7 +58,7 @@ fn handle_global_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
     }
 
     if crate::app::app_state::settings_state::showing_settings(app)
-        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        && consume_app_shortcut(app, ctx, ShortcutAction::CloseSettings)
     {
         crate::app::commands::handle_command(
             app,
@@ -66,8 +67,7 @@ fn handle_global_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         return;
     }
 
-    if app.state.search_state.open()
-        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    if app.state.search_state.open() && consume_app_shortcut(app, ctx, ShortcutAction::CloseSearch)
     {
         crate::app::commands::handle_command(app, AppCommand::Search(SearchCommand::Close));
         ctx.request_repaint();
@@ -75,14 +75,12 @@ fn handle_global_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
 }
 
 fn handle_utility_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    let ctrl_shift = ctrl_shift_modifiers();
-
-    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F2)) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::RenameTab) {
         begin_active_tab_rename(app);
         return;
     }
 
-    if ctx.input_mut(|input| input.consume_key(ctrl_shift, egui::Key::H)) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::OpenTextHistory) {
         crate::app::commands::handle_command(
             app,
             AppCommand::Dialog(crate::app::commands::DialogCommand::OpenTextHistory),
@@ -90,53 +88,50 @@ fn handle_utility_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         return;
     }
 
-    if ctx.input_mut(|input| input.consume_key(ctrl_shift, egui::Key::E)) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::OpenEncodingDialog) {
         crate::app::app_state::frame::open_encoding_dialog(app);
         return;
     }
 
-    if ctx.input_mut(|input| input.consume_key(ctrl_shift, egui::Key::M)) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::OpenStatusHistory) {
         app.state.dialogs.status_history.open();
         return;
     }
 
-    if ctx.input_mut(|input| input.consume_key(ctrl_shift, egui::Key::C)) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::CopyActivePath) {
         copy_active_path(app, ctx);
         return;
     }
 
-    if ctx.input_mut(|input| input.consume_key(ctrl_shift, egui::Key::R)) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::RevealActivePath) {
         reveal_active_path_in_explorer(app);
         return;
     }
 
-    if ctx.input_mut(|input| input.consume_key(ctrl_shift, egui::Key::B)) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::ToggleTabListAutoHide) {
         let next = !app.state.app_settings.auto_hide_tab_list();
         crate::app::app_state::settings_controller::set_auto_hide_tab_list(app, next);
         return;
     }
 
-    let ctrl_alt = ctrl_alt_modifiers();
-    if ctx.input_mut(|input| input.consume_key(ctrl_alt, egui::Key::R)) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::ToggleReadingOrder) {
         toggle_active_buffer_reading_order(app);
         return;
     }
 
-    if ctx.input_mut(|input| input.consume_key(ctrl_alt, egui::Key::C)) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::ToggleControlChars) {
         toggle_active_buffer_control_chars(app);
     }
 }
 
 fn handle_region_traversal_shortcut(app: &mut ScratchpadApp, ctx: &egui::Context) -> bool {
-    let direction = ctx.input_mut(|input| {
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::F6) {
-            Some(1)
-        } else if input.consume_key(egui::Modifiers::SHIFT, egui::Key::F6) {
-            Some(-1)
-        } else {
-            None
-        }
-    });
+    let direction = if consume_app_shortcut(app, ctx, ShortcutAction::TraverseRegionForward) {
+        Some(1)
+    } else if consume_app_shortcut(app, ctx, ShortcutAction::TraverseRegionBackward) {
+        Some(-1)
+    } else {
+        None
+    };
     let Some(direction) = direction else {
         return false;
     };
@@ -180,43 +175,38 @@ fn next_region_index(current: usize, len: usize, direction: i32) -> Option<usize
 }
 
 fn handle_file_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    let tile_file_modifiers = ctrl_shift_modifiers();
-
-    if ctx.input_mut(|input| input.consume_key(tile_file_modifiers, egui::Key::O)) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::OpenFileHere) {
         crate::app::commands::handle_command(app, AppCommand::File(FileCommand::OpenFileHere));
         return;
     }
-    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::N)) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::NewTab) {
         crate::app::commands::handle_command(app, AppCommand::Workspace(WorkspaceCommand::NewTab));
     }
-    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::O)) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::OpenFile) {
         crate::app::commands::handle_command(app, AppCommand::File(FileCommand::OpenFile));
     }
-    if ctx.input_mut(|input| input.consume_key(tile_file_modifiers, egui::Key::S)) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::SaveFileAs) {
         crate::app::commands::handle_command(app, AppCommand::File(FileCommand::SaveFileAs));
     }
-    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::SaveFile) {
         crate::app::commands::handle_command(app, AppCommand::File(FileCommand::SaveFile));
     }
 }
 
 fn handle_view_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    if ctx.input_mut(|input| {
-        input.consume_key(egui::Modifiers::CTRL, egui::Key::Equals)
-            || input.consume_key(egui::Modifiers::CTRL, egui::Key::Plus)
-    }) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::IncreaseFontSize) {
         crate::app::app_state::settings_controller::set_font_size(
             app,
             app.state.app_settings.font_size() + 1.0,
         );
     }
-    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Minus)) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::DecreaseFontSize) {
         crate::app::app_state::settings_controller::set_font_size(
             app,
             app.state.app_settings.font_size() - 1.0,
         );
     }
-    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Num0))
+    if consume_app_shortcut(app, ctx, ShortcutAction::ToggleLineNumbers)
         && let Some(tab) = app.tab_manager.active_tab_mut()
     {
         let next_visible = !tab.layout.line_numbers_visible();
@@ -226,7 +216,7 @@ fn handle_view_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
 }
 
 fn handle_tab_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::W)) {
+    if consume_app_shortcut(app, ctx, ShortcutAction::CloseTab) {
         if crate::app::app_state::settings_state::showing_settings(app) {
             crate::app::commands::handle_command(
                 app,
@@ -244,9 +234,7 @@ fn handle_tab_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
 }
 
 fn handle_tile_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    let modifiers = ctrl_shift_modifiers();
-
-    if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::T))
+    if consume_app_shortcut(app, ctx, ShortcutAction::PromoteTileToTab)
         && let Some(tab) = app.tab_manager.active_tab()
         && crate::app::domain::tab::summary::can_promote_view(tab, tab.layout.active_view_id)
     {
@@ -259,7 +247,7 @@ fn handle_tile_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         return;
     }
 
-    if ctx.input_mut(|input| input.consume_key(modifiers, egui::Key::T))
+    if consume_app_shortcut(app, ctx, ShortcutAction::PromoteTabFilesToTabs)
         && let Some(tab) = app.tab_manager.active_tab()
         && crate::app::domain::tab::summary::can_promote_all_files(tab)
     {
@@ -272,7 +260,7 @@ fn handle_tile_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         return;
     }
 
-    if ctx.input_mut(|input| input.consume_key(modifiers, egui::Key::W))
+    if consume_app_shortcut(app, ctx, ShortcutAction::CloseTile)
         && let Some(tab) = app.tab_manager.active_tab()
         && tab.layout.root_pane.leaf_count() > 1
     {
@@ -285,19 +273,17 @@ fn handle_tile_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         return;
     }
 
-    let split = ctx.input_mut(|input| {
-        if input.consume_key(modifiers, egui::Key::ArrowUp) {
-            Some((SplitAxis::Horizontal, true))
-        } else if input.consume_key(modifiers, egui::Key::ArrowDown) {
-            Some((SplitAxis::Horizontal, false))
-        } else if input.consume_key(modifiers, egui::Key::ArrowLeft) {
-            Some((SplitAxis::Vertical, true))
-        } else if input.consume_key(modifiers, egui::Key::ArrowRight) {
-            Some((SplitAxis::Vertical, false))
-        } else {
-            None
-        }
-    });
+    let split = if consume_app_shortcut(app, ctx, ShortcutAction::SplitUp) {
+        Some((SplitAxis::Horizontal, true))
+    } else if consume_app_shortcut(app, ctx, ShortcutAction::SplitDown) {
+        Some((SplitAxis::Horizontal, false))
+    } else if consume_app_shortcut(app, ctx, ShortcutAction::SplitLeft) {
+        Some((SplitAxis::Vertical, true))
+    } else if consume_app_shortcut(app, ctx, ShortcutAction::SplitRight) {
+        Some((SplitAxis::Vertical, false))
+    } else {
+        None
+    };
 
     if let Some((axis, new_view_first)) = split {
         crate::app::commands::handle_command(
@@ -311,20 +297,8 @@ fn handle_tile_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
     }
 }
 
-fn ctrl_shift_modifiers() -> egui::Modifiers {
-    egui::Modifiers {
-        ctrl: true,
-        shift: true,
-        ..Default::default()
-    }
-}
-
-fn ctrl_alt_modifiers() -> egui::Modifiers {
-    egui::Modifiers {
-        ctrl: true,
-        alt: true,
-        ..Default::default()
-    }
+fn consume_app_shortcut(app: &ScratchpadApp, ctx: &egui::Context, action: ShortcutAction) -> bool {
+    consume_shortcut(ctx, app.state.app_settings.platform_profile(), action)
 }
 
 fn begin_active_tab_rename(app: &mut ScratchpadApp) {

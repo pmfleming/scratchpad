@@ -268,10 +268,11 @@ Started 2026-06-16:
 - Removed reserved caption-button width for the Hyprland profile.
 - Disabled app resize grips and app drag-region behavior for the Hyprland profile.
 - Added regression tests for platform capabilities, settings compatibility, and caption-width behavior.
+- Added an initial action-driven shortcut keymap for top-level app shortcuts.
+- Routed existing top-level shortcut handling through `ShortcutAction -> KeyBinding` lookup while preserving Windows defaults.
 
 Still pending:
 
-- Shortcut action/keymap refactor.
 - Config-backed shortcut overrides.
 - Nix/Home Manager/Hyprland bind snippets.
 - Cross-target build-check script or CI entry.

@@ -32,6 +32,7 @@ pub mod fonts;
 pub mod memory_budget;
 pub mod platform;
 pub mod services;
+pub mod shortcut_keymap;
 pub(crate) mod shortcut_tooltips;
 pub mod shortcuts;
 pub mod startup;
