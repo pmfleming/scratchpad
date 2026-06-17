@@ -1,0 +1,128 @@
+{
+  description = "Scratchpad Rust development environment and Linux package";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+  };
+
+  outputs = { nixpkgs, ... }:
+    let
+      system = "x86_64-linux";
+      pkgs = import nixpkgs { inherit system; };
+      lib = pkgs.lib;
+
+      nativeBuildInputs = with pkgs; [
+        cargo
+        clippy
+        pkg-config
+        rust-analyzer
+        rustc
+        rustfmt
+        stdenv.cc
+      ];
+
+      buildInputs = with pkgs; [
+        atk
+        cairo
+        dbus
+        egl-wayland
+        fontconfig
+        freetype
+        gdk-pixbuf
+        glib
+        gtk3
+        libGL
+        libglvnd
+        libxkbcommon
+        mesa
+        pango
+        vulkan-loader
+        wayland
+        wayland-protocols
+        libx11
+        libxcursor
+        libxext
+        libxi
+        libxrandr
+      ];
+
+      runtimeLibraryPath = lib.makeLibraryPath buildInputs;
+
+      scratchpad = pkgs.rustPlatform.buildRustPackage {
+        pname = "scratchpad";
+        version = "0.40.0";
+        src = lib.cleanSource ./.;
+
+        cargoLock.lockFile = ./Cargo.lock;
+
+        nativeBuildInputs = with pkgs; [
+          makeWrapper
+          pkg-config
+        ];
+        inherit buildInputs;
+
+        postInstall = ''
+          wrapProgram $out/bin/scratchpad \
+            --prefix LD_LIBRARY_PATH : ${runtimeLibraryPath}
+        '';
+
+        meta = {
+          description = "Scratchpad text workspace";
+          mainProgram = "scratchpad";
+          platforms = lib.platforms.linux;
+        };
+      };
+
+      scratchpad-hyprland = pkgs.stdenvNoCC.mkDerivation {
+        pname = "scratchpad-hyprland";
+        inherit (scratchpad) version;
+        dontUnpack = true;
+        nativeBuildInputs = [ pkgs.makeWrapper ];
+
+        installPhase = ''
+          mkdir -p $out/bin
+          makeWrapper ${scratchpad}/bin/scratchpad $out/bin/scratchpad \
+            --set WINIT_UNIX_BACKEND wayland \
+            --set SCRATCHPAD_PLATFORM_PROFILE hyprland
+        '';
+
+        meta = scratchpad.meta // {
+          description = "Scratchpad wrapped for Hyprland/Wayland";
+          mainProgram = "scratchpad";
+        };
+      };
+    in
+    {
+      packages.${system} = {
+        default = scratchpad;
+        scratchpad = scratchpad;
+        scratchpad-hyprland = scratchpad-hyprland;
+      };
+
+      apps.${system} = {
+        default = {
+          type = "app";
+          program = "${scratchpad}/bin/scratchpad";
+        };
+        scratchpad-hyprland = {
+          type = "app";
+          program = "${scratchpad-hyprland}/bin/scratchpad";
+        };
+      };
+
+      checks.${system} = {
+        scratchpad = scratchpad;
+      };
+
+      devShells.${system}.default = pkgs.mkShell {
+        packages = nativeBuildInputs ++ buildInputs;
+
+        LD_LIBRARY_PATH = runtimeLibraryPath;
+
+        shellHook = ''
+          echo "Scratchpad dev shell"
+          echo "Try: cargo check"
+        '';
+      };
+    };
+}

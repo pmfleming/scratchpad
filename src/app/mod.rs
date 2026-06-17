@@ -21,6 +21,7 @@
     clippy::unused_self
 )]
 
+pub mod app_paths;
 pub mod app_state;
 pub mod capacity_metrics;
 pub mod chrome;

@@ -95,7 +95,7 @@ fn render_status_history_window(
 
     ui.add_space(4.0);
     history_dialog_card(ui, STATUS_CARD_CORNER_RADIUS, |ui| {
-        render_filter_controls(ui, filter, next_filter)
+        render_filter_controls(ui, filter, next_filter);
     });
 
     let filtered_rows = rows

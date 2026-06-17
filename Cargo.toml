@@ -26,6 +26,9 @@ smallvec = { version = "1.13", features = ["serde"] }
 sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 windows_file_watch = { path = "crates/windows_file_watch" }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+eframe = { version = "0.34.3", features = ["glow"] }
+
 [dev-dependencies]
 criterion = "0.5"
 rand = "0.10.0"

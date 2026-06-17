@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scratchpad NixOS Port Evaluation</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f8;
+      --paper: #ffffff;
+      --ink: #1d252c;
+      --muted: #53616d;
+      --line: #d7dde3;
+      --accent: #146c94;
+      --accent-soft: #e6f2f7;
+      --warn: #8a5200;
+      --warn-soft: #fff3d7;
+      --ok: #26683a;
+      --ok-soft: #e7f5eb;
+      --risk: #8b2734;
+      --risk-soft: #fdecef;
+      --code: #f0f3f5;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 16px;
+      line-height: 1.55;
+    }
+
+    main {
+      width: min(1100px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0 56px;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 24px;
+      padding-bottom: 20px;
+    }
+
+    h1,
+    h2,
+    h3 {
+      line-height: 1.2;
+      margin: 0;
+    }
+
+    h1 {
+      font-size: 34px;
+      margin-bottom: 10px;
+    }
+
+    h2 {
+      border-top: 1px solid var(--line);
+      font-size: 24px;
+      margin-top: 28px;
+      padding-top: 24px;
+    }
+
+    h3 {
+      font-size: 18px;
+      margin-top: 20px;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    ul,
+    ol {
+      margin: 10px 0 10px 24px;
+      padding: 0;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    code {
+      background: var(--code);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      font-family: Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+      padding: 1px 5px;
+    }
+
+    table {
+      border-collapse: collapse;
+      margin: 14px 0;
+      width: 100%;
+    }
+
+    th,
+    td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #edf1f4;
+      font-weight: 700;
+    }
+
+    .panel {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin: 18px 0;
+      padding: 18px;
+    }
+
+    .summary-grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-top: 18px;
+    }
+
+    .metric {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 14px;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    .metric span {
+      display: block;
+      font-size: 22px;
+      font-weight: 700;
+      margin-top: 6px;
+    }
+
+    .callout {
+      border-radius: 8px;
+      margin: 16px 0;
+      padding: 14px 16px;
+    }
+
+    .callout.ok {
+      background: var(--ok-soft);
+      border: 1px solid #b9dfc4;
+    }
+
+    .callout.warn {
+      background: var(--warn-soft);
+      border: 1px solid #edcf8c;
+    }
+
+    .callout.risk {
+      background: var(--risk-soft);
+      border: 1px solid #efbac2;
+    }
+
+    .tag {
+      border-radius: 999px;
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      padding: 3px 8px;
+      text-transform: uppercase;
+    }
+
+    .tag.good {
+      background: var(--ok-soft);
+      color: var(--ok);
+    }
+
+    .tag.medium {
+      background: var(--warn-soft);
+      color: var(--warn);
+    }
+
+    .tag.high {
+      background: var(--risk-soft);
+      color: var(--risk);
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    @media (max-width: 800px) {
+      main {
+        width: min(100% - 24px, 1100px);
+        padding-top: 20px;
+      }
+
+      h1 {
+        font-size: 28px;
+      }
+
+      .summary-grid {
+        grid-template-columns: 1fr;
+      }
+
+      table {
+        display: block;
+        overflow-x: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Scratchpad NixOS Port Evaluation</h1>
+      <p class="note">Static evaluation of the Windows-first Scratchpad repository for a Linux/NixOS version while keeping both operating systems in one repo. Prepared 2026-06-08.</p>
+    </header>
+
+    <section class="panel">
+      <h2>Conclusion</h2>
+      <p>
+        Scratchpad is a good candidate for a NixOS version without forking the product. The core editor, document model, search, settings model, session model, and most egui UI code are already platform-neutral Rust. The repository should stay single-product and single-repo, with OS-specific behavior isolated behind a small platform layer and packaging split under <code>packaging/windows</code> and <code>packaging/linux</code>.
+      </p>
+      <p>
+        The recommended direction is not to create a separate Linux app. Instead, keep one <code>scratchpad</code> crate and introduce narrow platform adapters for filesystem locations, file watching, file manager integration, command-line wording, window chrome policy, and release packaging. Windows remains the primary supported release lane while Linux/NixOS is brought up as a second validated target.
+      </p>
+      <div class="summary-grid" aria-label="Summary">
+        <div class="metric">
+          <strong>Port Feasibility</strong>
+          <span>High</span>
+        </div>
+        <div class="metric">
+          <strong>Architecture Risk</strong>
+          <span>Medium</span>
+        </div>
+        <div class="metric">
+          <strong>First Milestone</strong>
+          <span>Build + Run</span>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>What Is Already Portable</h2>
+      <ul>
+        <li>The app is built on <code>eframe</code>/<code>egui</code>, which gives a realistic cross-platform desktop path for Linux and NixOS.</li>
+        <li>The core domain code under <code>src/app/domain</code> appears independent of Windows APIs.</li>
+        <li>File loading, encoding detection, save analysis, search, session serialization, and settings serialization are ordinary Rust modules rather than shelling out to Windows tools.</li>
+        <li>The Windows file watcher crate already has a non-Windows fallback that compiles to a no-op worker thread.</li>
+        <li>Windows-specific reveal behavior is already guarded with <code>#[cfg(target_os = "windows")]</code>, which shows the repo has started using conditional boundaries.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Main Porting Risks</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Area</th>
+            <th>Current State</th>
+            <th>NixOS Impact</th>
+            <th>Recommendation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="tag high">High</span> Build environment</td>
+            <td>The repo has <code>rust-toolchain.toml</code>, but this NixOS shell did not have <code>cargo</code> available.</td>
+            <td>Linux development and CI cannot be trusted until a reproducible shell exists.</td>
+            <td>Add a Nix flake or dev shell that supplies Rust, native GUI libraries, pkg-config, and any rfd/GTK/Wayland/X11 dependencies.</td>
+          </tr>
+          <tr>
+            <td><span class="tag high">High</span> Data locations</td>
+            <td><code>SessionStore::default()</code> and <code>SettingsStore::default()</code> use <code>std::env::temp_dir().join("scratchpad")</code>.</td>
+            <td>On Linux, temp directories may be cleaned. Settings and unsaved session restore should not live in temp.</td>
+            <td>Create a platform data-dir adapter. Use a stable XDG location on Linux, likely <code>$XDG_DATA_HOME/scratchpad</code> for sessions and <code>$XDG_CONFIG_HOME/scratchpad</code> for settings.</td>
+          </tr>
+          <tr>
+            <td><span class="tag medium">Medium</span> File watching</td>
+            <td><code>crates/windows_file_watch</code> uses native Windows APIs and becomes no-op on non-Windows.</td>
+            <td>External file change detection will silently not work on NixOS.</td>
+            <td>Rename the concept from Windows-specific to platform-specific, then implement Linux using <code>notify</code> or explicit polling. Keep the current Windows implementation if it is reliable.</td>
+          </tr>
+          <tr>
+            <td><span class="tag medium">Medium</span> Custom window chrome</td>
+            <td><code>src/main.rs</code> always uses <code>.with_decorations(false)</code>, and app chrome uses egui viewport commands for drag, resize, minimize, maximize, and close.</td>
+            <td>Borderless windows and client-side resize can behave differently across Wayland, X11, Hyprland, GNOME, KDE, and NixOS packaging.</td>
+            <td>Make custom chrome a platform/runtime option. Start Linux with native decorations unless the custom chrome is verified on Wayland and X11.</td>
+          </tr>
+          <tr>
+            <td><span class="tag medium">Medium</span> File manager integration</td>
+            <td>Menus say "Reveal In Explorer" and non-Windows returns unsupported.</td>
+            <td>Linux users need "Show in Folder" behavior via portals, <code>xdg-open</code>, or file-manager-specific commands.</td>
+            <td>Replace user-facing wording with "Show in Folder" and route through a platform adapter. Prefer opening the parent directory portably first, then add selection support where available.</td>
+          </tr>
+          <tr>
+            <td><span class="tag medium">Medium</span> Dialog portals</td>
+            <td>The app uses <code>rfd::FileDialog</code> directly.</td>
+            <td>On NixOS/Wayland, file dialogs may depend on GTK or xdg-desktop-portal availability.</td>
+            <td>Validate rfd on the target desktop stack. Document runtime dependencies and include them in the Nix package/dev shell.</td>
+          </tr>
+          <tr>
+            <td><span class="tag medium">Medium</span> CLI conventions</td>
+            <td>Help text and examples use <code>scratchpad.exe</code>, Windows paths, and slash switches.</td>
+            <td>The Linux binary should feel native while keeping Windows compatibility.</td>
+            <td>Keep parser compatibility but generate platform-specific help text: <code>scratchpad --clean ~/notes/a.txt</code> on Linux and existing slash examples on Windows.</td>
+          </tr>
+          <tr>
+            <td><span class="tag good">Low</span> Packaging</td>
+            <td>Windows MSI packaging is isolated under <code>packaging/windows</code> and PowerShell scripts.</td>
+            <td>NixOS packaging can be added alongside it without changing the Windows installer.</td>
+            <td>Add <code>packaging/linux</code> or a root flake output for <code>packages.x86_64-linux.scratchpad</code>. Keep release artifacts separate by OS.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Recommended Repository Shape</h2>
+      <p>
+        Keep the current one-crate application, but make platform concerns explicit. A clean target shape would look like this:
+      </p>
+      <pre><code>src/
+  main.rs
+  app/
+    platform/
+      mod.rs
+      data_dirs.rs
+      file_manager.rs
+      file_watch.rs
+      windowing.rs
+      cli_help.rs
+      windows.rs
+      linux.rs
+packaging/
+  windows/
+  linux/
+    scratchpad.desktop
+    scratchpad.metainfo.xml
+flake.nix
+</code></pre>
+      <p>
+        The important rule is that <code>#[cfg(target_os = "...")]</code> should concentrate inside <code>app/platform</code> and packaging scripts. Core editor modules should ask for capabilities, not operating systems.
+      </p>
+    </section>
+
+    <section>
+      <h2>Platform Layer Boundary</h2>
+      <p>
+        The platform layer should expose small functions or services that the rest of the app can call without knowing the OS:
+      </p>
+      <ul>
+        <li><code>app_data_dir()</code>, <code>app_config_dir()</code>, and possibly <code>cache_dir()</code>.</li>
+        <li><code>show_in_folder(path)</code> for Explorer, xdg-open, portals, or desktop-specific behavior.</li>
+        <li><code>FileWatchService</code> with Windows native implementation and Linux notify/polling implementation.</li>
+        <li><code>default_window_decorations()</code> or a persisted setting for native versus custom chrome.</li>
+        <li><code>usage_text()</code> that emits OS-appropriate command examples.</li>
+      </ul>
+      <div class="callout ok">
+        <strong>Keep shared behavior shared.</strong>
+        The document model, encoding rules, search, restore conflict behavior, undo history, and editor rendering should stay common unless a specific OS forces a different external integration.
+      </div>
+    </section>
+
+    <section>
+      <h2>NixOS Package Strategy</h2>
+      <p>
+        For NixOS, add a real Nix build path early. That gives you repeatable local builds and makes the Linux CI lane honest.
+      </p>
+      <ol>
+        <li>Add a <code>flake.nix</code> with <code>devShells.x86_64-linux.default</code> and <code>packages.x86_64-linux.scratchpad</code>.</li>
+        <li>Use <code>rustPlatform.buildRustPackage</code> or a crane/naersk setup once dependency locking is stable.</li>
+        <li>Include native dependencies needed by eframe/winit/rfd on Linux, then trim after the first successful build.</li>
+        <li>Install a desktop file, icon, and app metadata under the Linux packaging path.</li>
+        <li>Add a GitHub Actions Linux job that runs <code>cargo fmt --check</code>, <code>cargo clippy --lib --all-features -- -D warnings</code>, and <code>cargo test</code> on Ubuntu. Add a Nix build job after the flake exists.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>Migration Plan</h2>
+      <h3>Phase 1: Prove Linux Build and Runtime</h3>
+      <ul>
+        <li>Add the Nix dev shell and get <code>cargo check</code> working on NixOS.</li>
+        <li>Run the app with native decorations on Linux first to avoid Wayland chrome friction during bring-up.</li>
+        <li>Fix compile errors with the smallest possible <code>app/platform</code> surface.</li>
+        <li>Add Linux CI once local Linux builds pass.</li>
+      </ul>
+
+      <h3>Phase 2: Correct Linux Behavior</h3>
+      <ul>
+        <li>Move settings and session restore out of temp directories into XDG paths.</li>
+        <li>Implement Linux file watching with <code>notify</code> or a conservative polling fallback.</li>
+        <li>Change "Reveal In Explorer" to "Show in Folder" and add Linux behavior.</li>
+        <li>Make CLI help platform-aware while preserving Windows slash switches.</li>
+      </ul>
+
+      <h3>Phase 3: Package and Release</h3>
+      <ul>
+        <li>Add Linux desktop metadata and icon installation.</li>
+        <li>Add a Nix package output and, optionally, an AppImage or tarball for non-Nix Linux users.</li>
+        <li>Keep Windows MSI signing and release flow unchanged; add Linux artifacts as a separate release job.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Specific Code Findings</h2>
+      <ul>
+        <li><code>src/main.rs</code>: <code>windows_subsystem = "windows"</code> is correctly cfg-gated, but <code>.with_decorations(false)</code> is unconditional. This should become platform-aware.</li>
+        <li><code>src/app/services/session_store/mod.rs</code>: default root uses temp storage. That is not suitable for Linux session restore.</li>
+        <li><code>src/app/services/settings_store.rs</code>: settings live beside the temp session store. Move them to a real config path before treating Linux as supported.</li>
+        <li><code>crates/windows_file_watch</code>: the name and comments are Windows-specific, but the public API is generic enough to become the platform watcher API.</li>
+        <li><code>src/app/shortcuts.rs</code> and <code>src/app/ui/tab_strip/context_menu/location_actions.rs</code>: Explorer-specific wording and unsupported non-Windows behavior should move behind a shared "show in folder" feature.</li>
+        <li><code>.github/workflows/ci.yml</code>: CI only validates Windows. Add Linux before making NixOS changes large enough to drift.</li>
+        <li><code>packaging/windows</code>: already isolated well. Mirror this structure for Linux rather than mixing packaging logic into app code.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>What Not To Do</h2>
+      <ul>
+        <li>Do not create a second Linux-only copy of the app or a long-lived branch. The shared editor core is too large and valuable to duplicate.</li>
+        <li>Do not scatter new <code>#[cfg(target_os = "linux")]</code> checks through domain, search, editor, and UI modules.</li>
+        <li>Do not make Windows behavior depend on Linux packaging work. Keep the existing MSI path stable.</li>
+        <li>Do not accept a no-op Linux file watcher as final behavior if external-file-change warnings are part of the product promise.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Verification Limitation</h2>
+      <div class="callout warn">
+        <strong>Compile verification was not possible in this shell.</strong>
+        Running <code>cargo check</code> failed because <code>cargo</code> is not installed in the current NixOS environment. The evaluation is therefore based on static source inspection. The first implementation step should be adding a reproducible Nix dev shell and confirming the current code either compiles or exposes the exact Linux build failures.
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Final Recommendation</h2>
+      <p>
+        Proceed with a NixOS version in the same repository. Treat the port as a platform-boundary cleanup plus Linux packaging project, not as an application rewrite. The best first pull request should add a Nix development environment, introduce <code>app/platform</code>, move data directories behind that boundary, and add Linux CI. After that, implement Linux file watching and file-manager integration behind the same adapter.
+      </p>
+    </section>
+  </main>
+</body>
+</html>

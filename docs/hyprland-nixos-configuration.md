@@ -11,6 +11,12 @@ Use the Hyprland platform profile so Scratchpad hides app-rendered window contro
 profile = "hyprland"
 ```
 
+The Nix flake also exposes a Hyprland wrapper that selects this profile when the settings file leaves `platform.profile` at its default `auto` value:
+
+```sh
+nix run .#scratchpad-hyprland
+```
+
 Top-level in-app shortcuts can be overridden in `settings.toml`:
 
 ```toml

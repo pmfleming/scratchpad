@@ -69,7 +69,31 @@ fn detect_profile_from_current_env() -> PlatformProfile {
 }
 
 fn detect_profile_from_env(mut env: impl FnMut(&str) -> Option<OsString>) -> PlatformProfile {
+    if let Some(profile) = env("SCRATCHPAD_PLATFORM_PROFILE")
+        .and_then(|value| value.into_string().ok())
+        .and_then(|value| parse_profile_override(&value))
+    {
+        return profile;
+    }
+
     native_default_profile(&mut env)
+}
+
+fn parse_profile_override(value: &str) -> Option<PlatformProfile> {
+    match normalize_profile_name(value).as_str() {
+        "windows" => Some(PlatformProfile::Windows),
+        "linux" | "linuxgeneric" | "genericlinux" => Some(PlatformProfile::LinuxGeneric),
+        "hyprland" => Some(PlatformProfile::Hyprland),
+        _ => None,
+    }
+}
+
+fn normalize_profile_name(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| !ch.is_whitespace() && *ch != '_' && *ch != '-')
+        .collect::<String>()
+        .to_ascii_lowercase()
 }
 
 #[cfg(target_os = "windows")]
@@ -133,6 +157,15 @@ mod tests {
             "HYPRLAND_INSTANCE_SIGNATURE",
             OsString::from("instance-signature"),
         )]);
+
+        let profile = detect_profile_from_env(|name| env.get(name).cloned());
+
+        assert_eq!(profile, PlatformProfile::Hyprland);
+    }
+
+    #[test]
+    fn env_override_can_select_hyprland_profile() {
+        let env = HashMap::from([("SCRATCHPAD_PLATFORM_PROFILE", OsString::from("hyprland"))]);
 
         let profile = detect_profile_from_env(|name| env.get(name).cloned());
 

@@ -87,6 +87,7 @@ pub struct KeyBinding {
 }
 
 impl KeyBinding {
+    #[must_use]
     pub const fn new(modifiers: egui::Modifiers, key: egui::Key) -> Self {
         Self { modifiers, key }
     }
@@ -190,6 +191,7 @@ pub fn default_bindings(
     }
 }
 
+#[must_use]
 pub fn consume_shortcut(
     ctx: &egui::Context,
     profile: PlatformProfile,

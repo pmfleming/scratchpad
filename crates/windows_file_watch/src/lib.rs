@@ -73,7 +73,14 @@ fn spawn_watch_thread(command_rx: Receiver<WatchCommand>, event_tx: Sender<FileW
 fn spawn_watch_thread(command_rx: Receiver<WatchCommand>, _event_tx: Sender<FileWatchEvent>) {
     std::thread::Builder::new()
         .name("scratchpad-file-watch".to_owned())
-        .spawn(move || while !matches!(command_rx.recv(), Ok(WatchCommand::Stop) | Err(_)) {})
+        .spawn(move || {
+            loop {
+                match command_rx.recv() {
+                    Ok(WatchCommand::SetDirectories(_dirs)) => {}
+                    Ok(WatchCommand::Stop) | Err(_) => return,
+                }
+            }
+        })
         .expect("file watch thread should start");
 }
 

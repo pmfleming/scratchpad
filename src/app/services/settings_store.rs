@@ -25,6 +25,7 @@ pub struct SettingsStore {
     root: PathBuf,
     settings_path: PathBuf,
     legacy_settings_path: PathBuf,
+    fallback_root: Option<PathBuf>,
 }
 
 impl Default for SettingsStore {
@@ -42,7 +43,15 @@ impl SettingsStore {
             root,
             settings_path,
             legacy_settings_path,
+            fallback_root: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_fallback(root: PathBuf, fallback_root: PathBuf) -> Self {
+        let mut store = Self::new(root);
+        store.fallback_root = Some(fallback_root);
+        store
     }
 
     pub fn load(&self) -> io::Result<Option<AppSettings>> {
@@ -52,6 +61,11 @@ impl SettingsStore {
 
         if self.legacy_settings_path.exists() {
             let settings = self.load_legacy_yaml()?;
+            self.save(&settings)?;
+            return Ok(Some(settings));
+        }
+
+        if let Some(settings) = self.load_fallback_settings()? {
             self.save(&settings)?;
             return Ok(Some(settings));
         }
@@ -66,7 +80,30 @@ impl SettingsStore {
     }
 
     fn load_legacy_yaml(&self) -> io::Result<AppSettings> {
-        let raw = fs::read_to_string(&self.legacy_settings_path)?;
+        Self::load_yaml_path(&self.legacy_settings_path)
+    }
+
+    fn load_fallback_settings(&self) -> io::Result<Option<AppSettings>> {
+        let Some(fallback_root) = &self.fallback_root else {
+            return Ok(None);
+        };
+
+        let fallback_settings_path = fallback_root.join(SETTINGS_FILE_NAME);
+        if fallback_settings_path.exists() {
+            let raw = fs::read_to_string(fallback_settings_path)?;
+            return parse_toml_settings(&raw).map(Some);
+        }
+
+        let fallback_legacy_settings_path = fallback_root.join(LEGACY_SETTINGS_FILE_NAME);
+        if fallback_legacy_settings_path.exists() {
+            return Self::load_yaml_path(&fallback_legacy_settings_path).map(Some);
+        }
+
+        Ok(None)
+    }
+
+    fn load_yaml_path(path: &Path) -> io::Result<AppSettings> {
+        let raw = fs::read_to_string(path)?;
         serde_yaml::from_str(&raw).map_err(invalid_data)
     }
 
@@ -96,4 +133,34 @@ pub(crate) fn parse_toml_settings(raw: &str) -> io::Result<AppSettings> {
 
 fn invalid_data(error: impl std::error::Error + Send + Sync + 'static) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SettingsStore;
+    use crate::app::platform::PlatformProfile;
+    use std::fs;
+
+    #[test]
+    fn fallback_settings_are_loaded_and_migrated_to_primary_root() {
+        let primary = tempfile::tempdir().expect("create primary settings root");
+        let fallback = tempfile::tempdir().expect("create fallback settings root");
+        fs::write(
+            fallback.path().join("settings.toml"),
+            "[platform]\nprofile = \"hyprland\"\n",
+        )
+        .expect("write fallback settings");
+
+        let store = SettingsStore::with_fallback(
+            primary.path().to_path_buf(),
+            fallback.path().to_path_buf(),
+        );
+        let settings = store
+            .load()
+            .expect("load settings")
+            .expect("fallback settings should exist");
+
+        assert_eq!(settings.platform.profile, PlatformProfile::Hyprland);
+        assert!(primary.path().join("settings.toml").exists());
+    }
 }

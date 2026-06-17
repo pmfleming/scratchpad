@@ -3,6 +3,7 @@
 
 use eframe::egui;
 use scratchpad::ScratchpadApp;
+use scratchpad::app::app_paths;
 use scratchpad::app::app_state::prepare_context_before_first_frame;
 use scratchpad::app::platform;
 use scratchpad::app::services::session_store::SessionStore;
@@ -25,8 +26,11 @@ fn main() -> eframe::Result<()> {
         _ => {}
     }
 
-    let session_store = SessionStore::default();
-    let settings_store = SettingsStore::new(session_store.root().to_path_buf());
+    let legacy_root = app_paths::legacy_temp_root();
+    let session_store =
+        SessionStore::with_fallback(app_paths::runtime_session_root(), legacy_root.clone());
+    let settings_store =
+        SettingsStore::with_fallback(app_paths::runtime_settings_root(), legacy_root);
     let startup_settings = settings_store.load().ok().flatten().unwrap_or_default();
 
     let options = eframe::NativeOptions {

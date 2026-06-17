@@ -335,6 +335,7 @@ pub fn reset_capacity_metrics() {
     }
 }
 
+#[must_use]
 pub fn capacity_metrics_snapshot() -> CapacityMetricsSnapshot {
     let path_lane = background_io_lane_counters(BackgroundIoLane::Path).snapshot();
     let session_lane = background_io_lane_counters(BackgroundIoLane::Session).snapshot();

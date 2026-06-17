@@ -40,6 +40,7 @@ pub use types::{
 pub struct SessionStore {
     root: PathBuf,
     manifest_path: PathBuf,
+    fallback_root: Option<PathBuf>,
 }
 
 impl Default for SessionStore {
@@ -55,7 +56,15 @@ impl SessionStore {
         Self {
             root,
             manifest_path,
+            fallback_root: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_fallback(root: PathBuf, fallback_root: PathBuf) -> Self {
+        let mut store = Self::new(root);
+        store.fallback_root = Some(fallback_root);
+        store
     }
 
     #[must_use]
@@ -395,6 +404,10 @@ impl SessionStore {
 
     fn load_manifest(&self) -> io::Result<Option<SessionManifest>> {
         if !self.manifest_path.exists() {
+            self.migrate_fallback_session_if_needed()?;
+        }
+
+        if !self.manifest_path.exists() {
             return Ok(None);
         }
 
@@ -404,6 +417,47 @@ impl SessionStore {
         }
 
         Ok(Some(manifest))
+    }
+
+    fn migrate_fallback_session_if_needed(&self) -> io::Result<()> {
+        let Some(fallback_root) = &self.fallback_root else {
+            return Ok(());
+        };
+        let fallback_manifest_path = fallback_root.join(SESSION_MANIFEST_NAME);
+        if !fallback_manifest_path.exists() {
+            return Ok(());
+        }
+
+        fs::create_dir_all(&self.root).inspect_err(|error| {
+            diagnostics::record_io_error(
+                "session_create_root_for_migration",
+                Some(&self.root),
+                "session_store::migrate_fallback_session_if_needed",
+                error,
+            );
+        })?;
+
+        for entry in fs::read_dir(fallback_root)? {
+            let entry = entry?;
+            let source_path = entry.path();
+            if !source_path.is_file() || !is_session_store_file(&source_path) {
+                continue;
+            }
+            let destination_path = self.root.join(entry.file_name());
+            if destination_path.exists() {
+                continue;
+            }
+            fs::copy(&source_path, &destination_path).inspect_err(|error| {
+                diagnostics::record_io_error(
+                    "session_migrate_fallback_file",
+                    Some(&source_path),
+                    "session_store::migrate_fallback_session_if_needed",
+                    error,
+                );
+            })?;
+        }
+
+        Ok(())
     }
 
     fn is_supported_session_manifest(&self, manifest: &SessionManifest) -> bool {
@@ -425,6 +479,16 @@ impl SessionStore {
     }
 }
 
+fn is_session_store_file(path: &std::path::Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == SESSION_MANIFEST_NAME)
+        || path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension == BUFFER_FILE_EXTENSION)
+}
+
 fn notify_session_restore_started(
     on_started: &mut impl FnMut(usize, SessionActiveSurface, AppSettings) -> bool,
     active_tab_index: usize,
@@ -434,6 +498,19 @@ fn notify_session_restore_started(
     on_started(active_tab_index, active_surface, legacy_settings)
         .then_some(())
         .ok_or_else(session_restore_receiver_closed)
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::is_session_store_file;
+    use std::path::Path;
+
+    #[test]
+    fn fallback_session_migration_copies_only_session_files() {
+        assert!(is_session_store_file(Path::new("session.json")));
+        assert!(is_session_store_file(Path::new("buffer.tmp")));
+        assert!(!is_session_store_file(Path::new("settings.toml")));
+    }
 }
 
 fn session_restore_receiver_closed() -> io::Error {

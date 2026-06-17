@@ -151,7 +151,7 @@ pub(super) fn build_replacement_targets(
         let expected_matches = matches[start..end]
             .iter()
             .rev()
-            .zip(replacements_and_expected.into_iter())
+            .zip(replacements_and_expected)
             .map(|(search_match, (_, expected))| (search_match.range.clone(), expected))
             .collect();
 

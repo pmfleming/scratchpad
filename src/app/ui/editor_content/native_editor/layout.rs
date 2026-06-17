@@ -203,11 +203,11 @@ fn viewport_text_slice(
     let mut char_range = start_char..end_char;
     let mut display_column_base = 0usize;
     let mut virtual_width = None;
-    if let Some(window) = long_line_viewport_window(LongLineViewportInput {
+    if let Some(window) = long_line_viewport_window(LongLineViewportRequest {
         start_line,
         end_line,
-        start_char,
-        end_char,
+        line_start_char: start_char,
+        line_end_char: end_char,
         viewport,
         row_height,
         cursor_offset,
@@ -236,32 +236,33 @@ struct LongLineWindow {
     virtual_width: f32,
 }
 
-struct LongLineViewportInput {
+struct LongLineViewportRequest {
     start_line: usize,
     end_line: usize,
-    start_char: usize,
-    end_char: usize,
+    line_start_char: usize,
+    line_end_char: usize,
     viewport: egui::Rect,
     row_height: f32,
     cursor_offset: Option<usize>,
     word_wrap: bool,
 }
 
-fn long_line_viewport_window(input: LongLineViewportInput) -> Option<LongLineWindow> {
-    let LongLineViewportInput {
+fn long_line_viewport_window(request: LongLineViewportRequest) -> Option<LongLineWindow> {
+    let LongLineViewportRequest {
         start_line,
         end_line,
-        start_char,
-        end_char,
+        line_start_char,
+        line_end_char,
         viewport,
         row_height,
         cursor_offset,
         word_wrap,
-    } = input;
+    } = request;
+
     if word_wrap || start_line != end_line || row_height <= 0.0 {
         return None;
     }
-    let line_chars = end_char.saturating_sub(start_char);
+    let line_chars = line_end_char.saturating_sub(line_start_char);
     let column_width = editor_column_width(row_height);
     let visible_columns = (viewport.width().max(column_width) / column_width)
         .ceil()
@@ -275,9 +276,9 @@ fn long_line_viewport_window(input: LongLineViewportInput) -> Option<LongLineWin
     let mut start_column = (viewport.min.x.max(0.0) / column_width).floor() as usize;
     start_column = start_column.saturating_sub(overscan_columns);
     if let Some(cursor_offset) =
-        cursor_offset.filter(|offset| (*offset >= start_char) && (*offset <= end_char))
+        cursor_offset.filter(|offset| (*offset >= line_start_char) && (*offset <= line_end_char))
     {
-        let cursor_column = cursor_offset.saturating_sub(start_char);
+        let cursor_column = cursor_offset.saturating_sub(line_start_char);
         if cursor_column < start_column {
             start_column = cursor_column.saturating_sub(overscan_columns);
         } else if cursor_column > start_column.saturating_add(window_columns) {
@@ -290,7 +291,7 @@ fn long_line_viewport_window(input: LongLineViewportInput) -> Option<LongLineWin
     let end_column = start_column.saturating_add(window_columns).min(line_chars);
 
     Some(LongLineWindow {
-        char_range: (start_char + start_column)..(start_char + end_column),
+        char_range: (line_start_char + start_column)..(line_start_char + end_column),
         display_column_base: start_column,
         virtual_width: (line_chars as f32 * column_width).ceil().max(1.0),
     })

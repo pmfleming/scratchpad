@@ -272,13 +272,16 @@ Started 2026-06-16:
 - Routed existing top-level shortcut handling through `ShortcutAction -> KeyBinding` lookup while preserving Windows defaults.
 - Added config-backed shortcut overrides under `[shortcuts]`.
 - Added NixOS/Hyprland configuration snippets in `docs/hyprland-nixos-configuration.md`.
+- Added Linux flake outputs for `packages.x86_64-linux.default`, `packages.x86_64-linux.scratchpad-hyprland`, and matching app outputs.
+- Added a Hyprland wrapper that sets `WINIT_UNIX_BACKEND=wayland` and `SCRATCHPAD_PLATFORM_PROFILE=hyprland`.
+- Added `scripts/check-targets.sh` for Linux/Windows target `cargo check` runs when the targets are installed.
+- Added stable runtime paths for Linux/NixOS settings and session state, with fallback migration from the previous temp-dir store.
 
 Still pending:
 
 - Shortcut warnings/status for invalid override strings.
 - A first-class Nix/Home Manager module.
-- Cross-target build-check script or CI entry.
-- Stable per-OS config/session path review.
+- CI wiring for the cross-target build-check script.
 
 ## Test ideas
 
