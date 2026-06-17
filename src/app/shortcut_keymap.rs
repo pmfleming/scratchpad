@@ -16,6 +16,7 @@ pub enum ShortcutAction {
     OpenStatusHistory,
     CopyActivePath,
     RevealActivePath,
+    ToggleTabList,
     ToggleTabListAutoHide,
     ToggleReadingOrder,
     ToggleControlChars,
@@ -40,6 +41,43 @@ pub enum ShortcutAction {
 }
 
 impl ShortcutAction {
+    pub(crate) const ALL: [Self; 34] = [
+        Self::OpenUserManual,
+        Self::OpenSearch,
+        Self::OpenReplace,
+        Self::OpenSettings,
+        Self::CloseSettings,
+        Self::CloseSearch,
+        Self::RenameTab,
+        Self::OpenTextHistory,
+        Self::OpenEncodingDialog,
+        Self::OpenStatusHistory,
+        Self::CopyActivePath,
+        Self::RevealActivePath,
+        Self::ToggleTabList,
+        Self::ToggleTabListAutoHide,
+        Self::ToggleReadingOrder,
+        Self::ToggleControlChars,
+        Self::TraverseRegionForward,
+        Self::TraverseRegionBackward,
+        Self::OpenFileHere,
+        Self::NewTab,
+        Self::OpenFile,
+        Self::SaveFileAs,
+        Self::SaveFile,
+        Self::IncreaseFontSize,
+        Self::DecreaseFontSize,
+        Self::ToggleLineNumbers,
+        Self::CloseTab,
+        Self::PromoteTileToTab,
+        Self::PromoteTabFilesToTabs,
+        Self::CloseTile,
+        Self::SplitUp,
+        Self::SplitDown,
+        Self::SplitLeft,
+        Self::SplitRight,
+    ];
+
     #[must_use]
     pub const fn config_key(self) -> &'static str {
         match self {
@@ -55,6 +93,7 @@ impl ShortcutAction {
             Self::OpenStatusHistory => "open_status_history",
             Self::CopyActivePath => "copy_active_path",
             Self::RevealActivePath => "reveal_active_path",
+            Self::ToggleTabList => "toggle_tab_list",
             Self::ToggleTabListAutoHide => "toggle_tab_list_auto_hide",
             Self::ToggleReadingOrder => "toggle_reading_order",
             Self::ToggleControlChars => "toggle_control_chars",
@@ -78,6 +117,12 @@ impl ShortcutAction {
             Self::SplitRight => "split_right",
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct InvalidShortcutOverride {
+    pub(crate) action_key: &'static str,
+    pub(crate) raw: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,6 +165,7 @@ const OPEN_ENCODING_DIALOG: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui:
 const OPEN_STATUS_HISTORY: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::M)];
 const COPY_ACTIVE_PATH: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::C)];
 const REVEAL_ACTIVE_PATH: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::R)];
+const TOGGLE_TAB_LIST: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::B)];
 const TOGGLE_TAB_LIST_AUTO_HIDE: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::B)];
 const TOGGLE_READING_ORDER: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::R)];
 const TOGGLE_CONTROL_CHARS: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::C)];
@@ -167,6 +213,7 @@ pub fn default_bindings(
         ShortcutAction::OpenStatusHistory => &OPEN_STATUS_HISTORY,
         ShortcutAction::CopyActivePath => &COPY_ACTIVE_PATH,
         ShortcutAction::RevealActivePath => &REVEAL_ACTIVE_PATH,
+        ShortcutAction::ToggleTabList => &TOGGLE_TAB_LIST,
         ShortcutAction::ToggleTabListAutoHide => &TOGGLE_TAB_LIST_AUTO_HIDE,
         ShortcutAction::ToggleReadingOrder => &TOGGLE_READING_ORDER,
         ShortcutAction::ToggleControlChars => &TOGGLE_CONTROL_CHARS,
@@ -217,6 +264,25 @@ pub fn configured_bindings(
     shortcuts
         .binding(action.config_key())
         .and_then(parse_binding_list)
+}
+
+#[must_use]
+pub(crate) fn invalid_shortcut_overrides(
+    shortcuts: &ShortcutSettings,
+) -> Vec<InvalidShortcutOverride> {
+    ShortcutAction::ALL
+        .iter()
+        .filter_map(|action| {
+            let action_key = action.config_key();
+            let raw = shortcuts.binding(action_key)?;
+            parse_binding_list(raw)
+                .is_none()
+                .then(|| InvalidShortcutOverride {
+                    action_key,
+                    raw: raw.to_owned(),
+                })
+        })
+        .collect()
 }
 
 fn parse_binding_list(raw: &str) -> Option<Vec<KeyBinding>> {
@@ -335,7 +401,8 @@ fn parse_key_token(token: &str) -> Option<egui::Key> {
 #[cfg(test)]
 mod tests {
     use super::{
-        KeyBinding, ShortcutAction, configured_bindings, default_bindings, parse_key_binding,
+        KeyBinding, ShortcutAction, configured_bindings, default_bindings,
+        invalid_shortcut_overrides, parse_key_binding,
     };
     use crate::app::platform::PlatformProfile;
     use crate::app::services::settings_store::ShortcutSettings;
@@ -362,6 +429,14 @@ mod tests {
                 KeyBinding::new(egui::Modifiers::CTRL, egui::Key::Equals),
                 KeyBinding::new(egui::Modifiers::CTRL, egui::Key::Plus),
             ]
+        );
+    }
+
+    #[test]
+    fn toggle_tab_list_has_default_binding() {
+        assert_eq!(
+            default_bindings(PlatformProfile::Windows, ShortcutAction::ToggleTabList),
+            &[KeyBinding::new(super::CTRL_ALT, egui::Key::B)]
         );
     }
 
@@ -399,5 +474,21 @@ mod tests {
             default_bindings(PlatformProfile::Windows, ShortcutAction::OpenFile),
             &[KeyBinding::new(egui::Modifiers::CTRL, egui::Key::O)]
         );
+    }
+
+    #[test]
+    fn invalid_shortcut_overrides_are_reported_for_known_actions() {
+        let shortcuts = ShortcutSettings {
+            bindings: BTreeMap::from([
+                ("open_file".to_owned(), "ctrl+bogus".to_owned()),
+                ("save_file".to_owned(), "ctrl+s".to_owned()),
+            ]),
+        };
+
+        let invalid = invalid_shortcut_overrides(&shortcuts);
+
+        assert_eq!(invalid.len(), 1);
+        assert_eq!(invalid[0].action_key, "open_file");
+        assert_eq!(invalid[0].raw, "ctrl+bogus");
     }
 }

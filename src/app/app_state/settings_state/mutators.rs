@@ -441,3 +441,29 @@ pub(crate) fn delay_tab_list_hide(app: &mut ScratchpadApp, now: Instant) {
 pub(crate) fn close_tab_list(app: &mut ScratchpadApp) {
     reset_tab_list_visibility_state(app, false);
 }
+
+pub(crate) fn toggle_tab_list(app: &mut ScratchpadApp) {
+    if !app.state.app_settings.auto_hide_tab_list() {
+        app.state.app_settings.workspace.auto_hide_tab_list = true;
+        reset_tab_list_visibility_state(app, false);
+        crate::app::app_state::frame::begin_layout_transition(app);
+        persist_settings_or_error(app);
+        app.state.status.set_info_status_in_domain(
+            crate::app::app_state::StatusDomain::Layout,
+            "Tab list hidden. Press Ctrl+Alt+B to show it.",
+        );
+        return;
+    }
+
+    let open = !app.state.chrome.vertical_tabs_open();
+    reset_tab_list_visibility_state(app, open);
+    crate::app::app_state::frame::begin_layout_transition(app);
+    app.state.status.set_info_status_in_domain(
+        crate::app::app_state::StatusDomain::Layout,
+        if open {
+            "Tab list shown."
+        } else {
+            "Tab list hidden. Press Ctrl+Alt+B to show it."
+        },
+    );
+}

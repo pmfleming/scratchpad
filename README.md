@@ -8,6 +8,10 @@ The app is deliberately not an IDE. It focuses on fast local editing, resilient
 session restore, visible file-format risk, and multi-file workspaces without
 language servers, plugin execution, or cloud sync.
 
+Windows remains the primary desktop and release target. Scratchpad also builds
+and runs on Linux, with first-class NixOS/Hyprland packaging and a Hyprland
+platform profile for compositor-managed window behavior.
+
 ## What It Does Today
 
 - Opens files as separate tabs or into the active workspace as editor tiles.
@@ -29,9 +33,13 @@ language servers, plugin execution, or cloud sync.
 - Restores sessions, open buffers, workspace layout, settings, tab placement,
   pane layout, and file metadata.
 - Includes in-app settings for text formatting, appearance, opening behavior,
-  tab placement, status bar visibility, and undo memory budgets.
+  tab placement, status bar visibility, undo memory budgets, platform profile,
+  and shortcut overrides.
 - Supports command-line startup switches for clean launches, session restore,
   opening files, and adding files into an existing workspace.
+- Supports Windows, generic Linux, and Hyprland platform profiles so native
+  window decorations, app-rendered caption buttons, drag regions, and resize
+  behavior can match the current desktop environment.
 
 ## Design Principles
 
@@ -43,13 +51,17 @@ language servers, plugin execution, or cloud sync.
   workflow.
 - Use profiling, capacity probes, benchmarks, and CI as regular development
   inputs.
+- Let the operating system or compositor own global window-management shortcuts;
+  Scratchpad owns only in-app actions while focused.
 
 ## Build, Test, and Run
 
 Prerequisites:
 
-- Rust via `rustup`
-- Windows for the primary app target and installer flow
+- Rust via `rustup` or the provided Nix development shell
+- Windows for the primary app target and MSI release flow
+- Linux desktop libraries for Linux builds (`gtk3`, Wayland/X11, fontconfig,
+  OpenGL/Vulkan loader, and related `egui`/`winit` runtime dependencies)
 - .NET local tools when packaging the Windows MSI
 
 Common development commands:
@@ -62,6 +74,19 @@ cargo fmt --check
 cargo build --release
 ```
 
+Nix development and Linux runs:
+
+```sh
+nix develop
+cargo check
+nix run .#scratchpad
+nix run .#scratchpad-hyprland
+```
+
+The Hyprland wrapper sets `WINIT_UNIX_BACKEND=wayland` and
+`SCRATCHPAD_PLATFORM_PROFILE=hyprland` so Scratchpad hides app-rendered caption
+buttons and leaves compositor-level window management to Hyprland.
+
 Useful runtime switches:
 
 ```powershell
@@ -73,23 +98,65 @@ scratchpad.exe /addto:active /files:"C:\notes\a.txt","C:\notes\b.txt"
 scratchpad.exe /addto:index:2 "C:\notes\c.txt"
 ```
 
+## Configuration
+
+Scratchpad stores user-editable settings in `settings.toml` under the platform
+settings root (`%APPDATA%\Scratchpad` on Windows and
+`$XDG_CONFIG_HOME/scratchpad` or `~/.config/scratchpad` on Linux). The platform
+profile defaults to automatic detection but can be pinned explicitly:
+
+```toml
+[platform]
+profile = "hyprland" # auto, windows, linux_generic, or hyprland
+```
+
+Top-level in-app shortcuts can be overridden without changing compositor/global
+shortcuts:
+
+```toml
+[shortcuts]
+open_file = "ctrl+o"
+save_file = "ctrl+s"
+close_tab = "ctrl+w"
+toggle_tab_list = "ctrl+alt+b"
+split_left = "ctrl+shift+left"
+split_right = "ctrl+shift+right"
+split_up = "ctrl+shift+up"
+split_down = "ctrl+shift+down"
+```
+
+Shortcut strings are case-insensitive. Supported modifiers are `ctrl`, `shift`,
+`alt`, and `command`/`super`/`win`. Multiple bindings can be separated with
+commas.
+
 ## Packaging and Release
 
-The release workflow is Windows-based. It checks formatting, runs clippy and
-tests, verifies that the release tag matches `Cargo.toml`, builds the release
-binary, packages a Windows MSI, signs artifacts when signing is configured, and
-uploads both the installer and checksum.
+The Windows release workflow checks formatting, runs clippy and tests, verifies
+that the release tag matches `Cargo.toml`, builds the release binary, packages a
+Windows MSI, signs artifacts when signing is configured, and uploads both the
+installer and checksum.
 
 Release tags use the `vX.Y.Z` format, matching the package version in
 `Cargo.toml`.
 
-Local installer packaging:
+Local Windows installer packaging:
 
 ```powershell
 dotnet tool restore
 cargo build --release --locked
 .\scripts\package-windows-installer.ps1 -Version 0.40.0
 ```
+
+Linux/Nix packaging entry points:
+
+```sh
+nix build .#scratchpad
+nix build .#scratchpad-hyprland
+```
+
+The flake also exposes `homeManagerModules.default`, which can install the
+regular package or the Hyprland wrapper, write `~/.config/scratchpad/settings.toml`,
+and optionally generate Hyprland binds/window rules.
 
 ## Measurement
 
@@ -125,12 +192,17 @@ src/
     services/             File IO, search, sessions, settings, background work
     startup/              Command-line parsing and startup options
     ui/                   Editor, dialogs, settings, search/replace, tabs
+    platform.rs           Platform profile detection and desktop capabilities
+    platform_file.rs      Platform-specific file dialogs and reveal/open actions
   bin/                    Profiling, resource, frame, and capacity probes
 crates/
   windows_file_watch/     Windows file-change watching helper crate
 benches/                  Criterion benchmark targets
 scripts/                  Release and analysis helper scripts
-packaging/                Windows installer definition
+packaging/
+  nix/                    Home Manager module and Linux packaging helpers
+  windows/                Windows installer definition and support files
+.github/workflows/        CI and release automation
 docs/                     User manual, architecture notes, and reviews
 assets/                   Project artwork
 fonts/                    Bundled editor and control-symbol fonts
@@ -140,6 +212,7 @@ fonts/                    Bundled editor and control-symbol fonts
 
 - [User manual](docs/user-manual.md)
 - [Measurement tools](docs/measurement-tools.md)
+- [NixOS/Hyprland configuration notes](docs/hyprland-nixos-configuration.md)
 
 ## Technical Notes
 
@@ -150,5 +223,6 @@ fonts/                    Bundled editor and control-symbol fonts
 - Text storage uses a piece-tree-backed document model with undo/redo history
   and cheap snapshots for save and session flows.
 - Runtime logs are written under `log/`.
-- Session state, `settings.toml`, and eframe persistence live under the
-  Scratchpad data directory in the OS temp location.
+- Settings use the platform settings root; session state uses `%LOCALAPPDATA%\Scratchpad`
+  on Windows and `$XDG_STATE_HOME/scratchpad` or `~/.local/state/scratchpad` on
+  Linux, with the legacy temp directory used as a fallback/migration source.

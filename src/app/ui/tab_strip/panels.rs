@@ -101,9 +101,10 @@ fn show_horizontal_tab_bar(
 ) -> super::TabStripOutcome {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        show_primary_actions(ui, app);
+        if show_primary_actions(ui, app) {
+            ui.add_space(8.0);
+        }
 
-        ui.add_space(8.0);
         let layout = HeaderLayout::measure(app, ui.available_width(), 4.0, true);
         let outcome = show_tab_region(ctx, ui, app, &layout);
 

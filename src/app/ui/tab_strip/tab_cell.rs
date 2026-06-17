@@ -1,7 +1,5 @@
 use crate::app::app_state::workspace::{accessors as workspace_accessors, display_tabs};
-use crate::app::chrome::{
-    TabButtonOptions, tab_button, tab_button_with_actions, tab_rename_editor_sized,
-};
+use crate::app::chrome::{TabButtonOptions, tab_button_with_actions, tab_rename_editor_sized};
 use crate::app::domain::TabAttentionState;
 use crate::app::ui::tab_drag;
 use crate::app::ui::tab_strip::context_menu::attach_tab_context_menu;
@@ -17,6 +15,7 @@ pub(crate) struct TabCellProps<'a> {
     pub is_selected: bool,
     pub pending_scroll_to_active: bool,
     pub width: f32,
+    pub label_font_id: egui::FontId,
 }
 
 pub(crate) struct TabCellOutcome {
@@ -120,6 +119,7 @@ fn render_tab_rename_cell(
             props.is_selected,
             props.width,
             request_focus,
+            Some(props.label_font_id.clone()),
         )
     };
 
@@ -152,30 +152,15 @@ fn tab_button_with_width(
     props: &TabCellProps<'_>,
 ) -> (egui::Response, Option<egui::Response>, egui::Response, bool) {
     let attention_color = props.attention_state.map(attention_color);
-    if (props.width - crate::app::theme::TAB_BUTTON_WIDTH).abs() <= f32::EPSILON {
-        tab_button(
-            ui,
-            ("tab_strip.slot", index),
-            props.display_name,
-            props.is_active,
-            props.is_selected,
-            props.can_promote_all_files,
-            attention_color,
-        )
-    } else {
-        tab_button_with_actions(
-            ui,
-            ("tab_strip.slot", index),
-            props.display_name,
-            props.is_active,
-            props.is_selected,
-            TabButtonOptions::with_actions(
-                props.width,
-                props.can_promote_all_files,
-                attention_color,
-            ),
-        )
-    }
+    tab_button_with_actions(
+        ui,
+        ("tab_strip.slot", index),
+        props.display_name,
+        props.is_active,
+        props.is_selected,
+        TabButtonOptions::with_actions(props.width, props.can_promote_all_files, attention_color)
+            .with_label_font_id(props.label_font_id.clone()),
+    )
 }
 
 fn attention_color(state: TabAttentionState) -> egui::Color32 {

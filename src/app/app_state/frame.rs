@@ -49,6 +49,7 @@ pub(super) fn prepare_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
     }
     app.tab_manager.evict_inactive_tab_state();
     app.poll_file_watcher(ctx);
+    FileController::poll_open_file_dialog(app, ctx);
     let background_poll_started_at = Instant::now();
     app.poll_background_io(ctx);
     record_frame_phase(

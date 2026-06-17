@@ -234,6 +234,8 @@ fn load_settings_snapshot(app: &ScratchpadApp) -> std::io::Result<Option<AppSett
 
 pub(super) fn apply_settings(app: &mut ScratchpadApp, settings: AppSettings) {
     let mut settings = settings;
+    let invalid_shortcuts =
+        crate::app::shortcut_keymap::invalid_shortcut_overrides(&settings.shortcuts);
     sync_stock_editor_palette_with_theme_mode(&mut settings);
     settings.history.budget = settings.history.budget.sanitized();
     settings
@@ -256,6 +258,11 @@ pub(super) fn apply_settings(app: &mut ScratchpadApp, settings: AppSettings) {
         .collect();
     app.state.app_settings = settings;
     app.apply_history_budget_to_open_buffers();
+    if !invalid_shortcuts.is_empty() {
+        app.state
+            .status
+            .report_invalid_shortcut_overrides(&invalid_shortcuts);
+    }
 }
 
 fn refresh_settings_snapshot(app: &mut ScratchpadApp) {
@@ -357,4 +364,32 @@ fn sanitize_tab_list_auto_hide_delay_seconds(seconds: f32) -> f32 {
         ScratchpadApp::TAB_LIST_AUTO_HIDE_DELAY_MIN_SECONDS,
         ScratchpadApp::TAB_LIST_AUTO_HIDE_DELAY_MAX_SECONDS,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_settings;
+    use crate::app::app_state::{ScratchpadApp, StatusDomain, StatusSeverity, StatusState};
+    use crate::app::services::settings_store::AppSettings;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn applying_settings_reports_invalid_shortcut_overrides() {
+        let mut app = ScratchpadApp::default();
+        app.state.status = StatusState::default();
+        let mut settings = AppSettings::default();
+        settings.shortcuts.bindings =
+            BTreeMap::from([("open_file".to_owned(), "ctrl+bogus".to_owned())]);
+
+        apply_settings(&mut app, settings);
+
+        let status = app.state.status.current.as_ref().expect("warning status");
+        assert_eq!(status.severity, StatusSeverity::Warning);
+        assert_eq!(status.domain, StatusDomain::Settings);
+        assert_eq!(
+            status.text,
+            "A shortcut override was ignored; using the default binding."
+        );
+        assert_eq!(status.detail.as_deref(), Some("open_file = \"ctrl+bogus\""));
+    }
 }

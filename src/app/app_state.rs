@@ -3,6 +3,7 @@ use crate::app::domain::{BufferId, SplitAxis, TabManager};
 use crate::app::fonts::EditorFontPreset;
 use crate::app::services::session_store::SessionStore;
 use crate::app::services::settings_store::{AppSettings, AppThemeMode, SettingsStore};
+use crate::app::shortcut_keymap::InvalidShortcutOverride;
 use crate::app::startup::StartupOptions;
 use crate::app::text_history::TextHistoryCache;
 use eframe::egui;
@@ -29,7 +30,7 @@ pub(crate) use chrome_state::ChromeState;
 pub(crate) use dialog_state::DialogState;
 pub(crate) use focus_state::FocusState;
 pub use frame::prepare_context_before_first_frame;
-pub(crate) use runtime_state::{BackgroundIoState, FileWatchState};
+pub(crate) use runtime_state::{BackgroundIoState, FileWatchState, OpenFileDialogState};
 pub use search_state::SearchScope;
 pub(crate) use search_state::api as search_controller;
 pub(crate) use search_state::replace as search_replace;
@@ -121,6 +122,7 @@ pub struct ScratchpadAppState {
     pub(crate) search_state: SearchState,
     pub(crate) workspace_selection: WorkspaceSelectionState,
     pub(crate) pending_open_file_paths: HashSet<CanonicalPathKey>,
+    pub(crate) pending_open_file_dialog: Option<OpenFileDialogState>,
     pub(crate) recently_closed_files: VecDeque<PathBuf>,
     pub(crate) workspace_reflow_axis: SplitAxis,
     pub(crate) settings_preview_quote_index: usize,
@@ -271,6 +273,23 @@ impl StatusState {
             "Could not apply settings.toml.",
             error.to_string(),
         );
+    }
+
+    pub(crate) fn report_invalid_shortcut_overrides(
+        &mut self,
+        invalid: &[InvalidShortcutOverride],
+    ) {
+        let message = if invalid.len() == 1 {
+            "A shortcut override was ignored; using the default binding."
+        } else {
+            "Some shortcut overrides were ignored; using default bindings."
+        };
+        let detail = invalid
+            .iter()
+            .map(|binding| format!("{} = {:?}", binding.action_key, binding.raw))
+            .collect::<Vec<_>>()
+            .join("\n");
+        self.set_warning_status_with_detail(StatusDomain::Settings, message, detail);
     }
 
     pub(crate) fn report_search_results_stale_for_replace(&mut self) {

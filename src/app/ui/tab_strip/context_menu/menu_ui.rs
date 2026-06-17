@@ -348,6 +348,7 @@ fn shortcut_tooltip_for_menu_label(label: &str) -> Option<&'static str> {
         "Encoding" => Some(shortcut_tooltips::ENCODING),
         "Copy Path" => Some(shortcut_tooltips::COPY_PATH),
         "Reveal In Explorer" => Some(shortcut_tooltips::REVEAL_IN_EXPLORER),
+        "Open Containing Folder" => Some(shortcut_tooltips::OPEN_CONTAINING_FOLDER),
         "Hide Tab List" => Some(shortcut_tooltips::HIDE_TAB_LIST),
         "Pin Tab List" => Some(shortcut_tooltips::PIN_TAB_LIST),
         "Close" => Some(shortcut_tooltips::CLOSE_TAB),

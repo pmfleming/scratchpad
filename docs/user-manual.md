@@ -310,14 +310,15 @@ Tab context menu groups:
   Save All.
 - Tab list actions: hide or pin the tab list, place tabs Top/Bottom/Left/Right,
   and choose tab ordering.
-- Location actions: Encoding, Copy Path, Reveal In Explorer.
+- Location actions: Encoding, Copy Path, Reveal In Explorer on Windows or Open Containing Folder on Linux.
 - Close actions: Close, Close Others, Close Right or Close Down, Close Saved,
   Close All.
 
 Useful tab/list shortcuts:
 
 - `Ctrl + Shift + C`: copy the active file path.
-- `Ctrl + Shift + R`: reveal the active file in Explorer.
+- `Ctrl + Shift + R`: reveal the active file in Explorer on Windows or open its containing folder on Linux.
+- `Ctrl + Alt + B`: show or hide the tab list.
 - `Ctrl + Shift + B`: toggle auto-hide for the tab list.
 
 ## Tiles and Splits
@@ -513,7 +514,8 @@ Tabs, files, and paths:
 - `Ctrl + Shift + W`: close active tile.
 - `Ctrl + Shift + E`: encoding dialog.
 - `Ctrl + Shift + C`: copy active file path.
-- `Ctrl + Shift + R`: reveal active file in Explorer.
+- `Ctrl + Shift + R`: reveal active file in Explorer on Windows or open its containing folder on Linux.
+- `Ctrl + Alt + B`: show or hide the tab list.
 - `Ctrl + Shift + B`: toggle tab-list auto-hide.
 
 Display and layout:

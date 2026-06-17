@@ -91,6 +91,10 @@
           mainProgram = "scratchpad";
         };
       };
+
+      scratchpadHomeManagerModule = import ./packaging/nix/home-manager.nix {
+        inherit scratchpad scratchpad-hyprland;
+      };
     in
     {
       packages.${system} = {
@@ -103,15 +107,22 @@
         default = {
           type = "app";
           program = "${scratchpad}/bin/scratchpad";
+          meta = scratchpad.meta;
         };
         scratchpad-hyprland = {
           type = "app";
           program = "${scratchpad-hyprland}/bin/scratchpad";
+          meta = scratchpad-hyprland.meta;
         };
       };
 
       checks.${system} = {
         scratchpad = scratchpad;
+      };
+
+      homeManagerModules = {
+        default = scratchpadHomeManagerModule;
+        scratchpad = scratchpadHomeManagerModule;
       };
 
       devShells.${system}.default = pkgs.mkShell {

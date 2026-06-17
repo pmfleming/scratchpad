@@ -7,12 +7,21 @@ use crate::app::chrome::caption_controls;
 use crate::app::platform;
 use eframe::egui;
 
-pub(crate) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+pub(crate) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) -> bool {
+    if !show_file_search_primary_actions() {
+        return false;
+    }
+
     primary::show_primary_actions(ui, app);
+    true
 }
 
-pub(crate) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    vertical::show_vertical_primary_actions(ui, app);
+pub(crate) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) -> bool {
+    vertical::show_vertical_primary_actions(ui, app)
+}
+
+pub(super) fn show_file_search_primary_actions() -> bool {
+    !cfg!(target_os = "linux")
 }
 
 pub(crate) fn show_caption_controls(

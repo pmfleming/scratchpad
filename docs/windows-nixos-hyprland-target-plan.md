@@ -276,12 +276,16 @@ Started 2026-06-16:
 - Added a Hyprland wrapper that sets `WINIT_UNIX_BACKEND=wayland` and `SCRATCHPAD_PLATFORM_PROFILE=hyprland`.
 - Added `scripts/check-targets.sh` for Linux/Windows target `cargo check` runs when the targets are installed.
 - Added stable runtime paths for Linux/NixOS settings and session state, with fallback migration from the previous temp-dir store.
+- Added Settings status warnings when configured shortcut override strings are invalid and the app falls back to defaults.
+- Added a first-class Home Manager module at `packaging/nix/home-manager.nix`, exposed through `homeManagerModules.default` and `homeManagerModules.scratchpad`.
+- Wired `scripts/check-targets.sh` into CI with an Ubuntu cross-target job for `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-gnu`.
+- Split native file-dialog/reveal handling behind `platform_file`, with explicit Linux XDG portal/open-containing-folder behavior and Windows Explorer behavior.
+- Added `toggle_tab_list` (`Ctrl+Alt+B`) for opening/closing the tab list, while keeping `toggle_tab_list_auto_hide` (`Ctrl+Shift+B`) for the auto-hide setting.
+- Moved the Phosphor icon font ahead of broad Unicode fallback fonts so open/save/search toolbar icons render in Linux environments.
 
 Still pending:
 
-- Shortcut warnings/status for invalid override strings.
-- A first-class Nix/Home Manager module.
-- CI wiring for the cross-target build-check script.
+- Run the new CI job in GitHub Actions and address any runner-specific dependency gaps.
 
 ## Test ideas
 

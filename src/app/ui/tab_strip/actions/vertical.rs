@@ -8,11 +8,12 @@ use crate::app::shortcut_tooltips;
 use crate::app::theme::{CAPTION_BUTTON_SIZE, CLOSE_HOVER_BG, action_bg, action_hover_bg};
 use eframe::egui;
 
-pub(super) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+pub(super) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) -> bool {
     let button_spacing = 4.0;
     let button_size = CAPTION_BUTTON_SIZE;
     let available_width = ui.available_width().max(button_size.x);
     let maximized = ui.input(|input| input.viewport().maximized.unwrap_or(false));
+    let show_left_buttons = super::show_file_search_primary_actions();
     let left_buttons = [
         VerticalActionButton::new(
             egui_phosphor::regular::FOLDER_OPEN,
@@ -51,6 +52,11 @@ pub(super) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut Scratch
             VerticalAction::CloseWindow,
         ),
     ];
+    let left_buttons = if show_left_buttons {
+        &left_buttons[..]
+    } else {
+        &[]
+    };
     let right_buttons = if platform::capabilities(app.state.app_settings.platform_profile())
         .show_window_caption_buttons
     {
@@ -58,6 +64,10 @@ pub(super) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut Scratch
     } else {
         &[]
     };
+
+    if left_buttons.is_empty() && right_buttons.is_empty() {
+        return false;
+    }
 
     match vertical_primary_actions_layout(
         available_width,
@@ -69,7 +79,7 @@ pub(super) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut Scratch
         VerticalPrimaryActionsLayout::SingleRow => {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = button_spacing;
-                render_button_group(ui, app, &left_buttons, button_size);
+                render_button_group(ui, app, left_buttons, button_size);
                 if !right_buttons.is_empty() {
                     let caption_width =
                         row_width(right_buttons.len(), button_size.x, button_spacing);
@@ -89,19 +99,25 @@ pub(super) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut Scratch
                     buttons_per_row,
                     true,
                 );
-                ui.add_space(button_spacing);
+                if !left_buttons.is_empty() {
+                    ui.add_space(button_spacing);
+                }
             }
-            render_wrapped_button_section(
-                ui,
-                app,
-                &left_buttons,
-                button_size,
-                button_spacing,
-                buttons_per_row,
-                false,
-            );
+            if !left_buttons.is_empty() {
+                render_wrapped_button_section(
+                    ui,
+                    app,
+                    left_buttons,
+                    button_size,
+                    button_spacing,
+                    buttons_per_row,
+                    false,
+                );
+            }
         }
     }
+
+    true
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -117,6 +117,7 @@ impl ScratchpadApp {
                     crate::app::app_state::workspace::display_tabs::WorkspaceSelectionState::default(
                     ),
                 pending_open_file_paths: HashSet::new(),
+                pending_open_file_dialog: None,
                 recently_closed_files: VecDeque::default(),
                 workspace_reflow_axis: crate::app::domain::SplitAxis::Vertical,
                 settings_preview_quote_index: 2,

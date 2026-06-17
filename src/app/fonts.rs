@@ -102,10 +102,7 @@ pub fn apply_editor_fonts(ctx: &egui::Context, preset: EditorFontPreset) -> Resu
     let fallback_names = FALLBACK_FONT_ASSETS
         .iter()
         .map(|(name, _)| (*name).to_owned());
-    let proportional_candidates: Vec<String> = std::iter::once(font_name.to_owned())
-        .chain(fallback_names.clone())
-        .chain(std::iter::once("phosphor".to_owned()))
-        .collect();
+    let proportional_candidates = proportional_font_candidates(font_name, fallback_names.clone());
     let monospace_candidates: Vec<String> = std::iter::once(font_name.to_owned())
         .chain(fallback_names)
         .collect();
@@ -120,4 +117,27 @@ pub fn apply_editor_fonts(ctx: &egui::Context, preset: EditorFontPreset) -> Resu
     fonts.families.insert(editor_family, monospace_candidates);
     ctx.set_fonts(fonts);
     Ok(())
+}
+
+fn proportional_font_candidates(
+    font_name: &'static str,
+    fallback_names: impl IntoIterator<Item = String>,
+) -> Vec<String> {
+    std::iter::once(font_name.to_owned())
+        .chain(std::iter::once("phosphor".to_owned()))
+        .chain(fallback_names)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::proportional_font_candidates;
+
+    #[test]
+    fn phosphor_icons_are_checked_before_unicode_fallback_fonts() {
+        let candidates =
+            proportional_font_candidates("editor", ["symbols".to_owned(), "cjk".to_owned()]);
+
+        assert_eq!(candidates, ["editor", "phosphor", "symbols", "cjk"]);
+    }
 }

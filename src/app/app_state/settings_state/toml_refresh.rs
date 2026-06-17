@@ -77,12 +77,19 @@ impl ScratchpadApp {
         match action {
             SettingsTomlRefreshAction::ApplyBuffer(raw) => match parse_toml_settings(&raw) {
                 Ok(settings) => {
+                    let has_invalid_shortcut_overrides =
+                        !crate::app::shortcut_keymap::invalid_shortcut_overrides(
+                            &settings.shortcuts,
+                        )
+                        .is_empty();
                     crate::app::app_state::settings_state::apply_settings(self, settings);
                     self.state.applied_editor_font = None;
-                    self.state.status.set_info_status_in_domain(
-                        crate::app::app_state::StatusDomain::Settings,
-                        "Settings reloaded from settings.toml.",
-                    );
+                    if !has_invalid_shortcut_overrides {
+                        self.state.status.set_info_status_in_domain(
+                            crate::app::app_state::StatusDomain::Settings,
+                            "Settings reloaded from settings.toml.",
+                        );
+                    }
                 }
                 Err(error) => {
                     self.state.status.report_settings_toml_parse_failed(error);

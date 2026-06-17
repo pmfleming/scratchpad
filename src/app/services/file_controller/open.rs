@@ -17,6 +17,27 @@ const LAZY_OPEN_BATCH_THRESHOLD: usize = 2_048;
 #[cfg(test)]
 const LAZY_OPEN_BATCH_THRESHOLD: usize = 4;
 
+macro_rules! external_open_methods {
+    ($($vis:vis fn $name:ident => ($log_prefix:literal, $open_action:path);)+) => {
+        $(
+            $vis fn $name(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+                Self::handle_external_paths(app, paths, $log_prefix, $open_action);
+            }
+        )+
+    };
+}
+
+macro_rules! blocking_open_methods {
+    ($($vis:vis fn $name:ident => $open_action:path;)+) => {
+        $(
+            $vis fn $name(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+                $open_action(app, paths);
+                app.wait_for_background_io_idle();
+            }
+        )+
+    };
+}
+
 pub(crate) enum OpenPathOutcome {
     Opened { artifact_warning: Option<String> },
     AlreadyOpen,
@@ -61,59 +82,40 @@ impl OpenBatchSummary {
 
 impl FileController {
     pub fn open_file(app: &mut ScratchpadApp) {
-        Self::handle_open_dialog(app, "Open file dialog", Self::open_selected_paths_async);
+        Self::handle_open_dialog(app, crate::app::platform_file::OpenFileDialogKind::OpenFile);
     }
 
     pub fn open_file_here(app: &mut ScratchpadApp) {
         Self::handle_open_dialog(
             app,
-            "Open Here dialog",
-            Self::open_selected_paths_here_async,
+            crate::app::platform_file::OpenFileDialogKind::OpenFileHere,
         );
     }
 
-    pub fn open_paths(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
-        Self::handle_external_paths(
-            app,
-            paths,
+    external_open_methods! {
+        pub fn open_paths => (
             "Open requested for",
-            Self::open_selected_paths_background_blocking,
+            Self::open_selected_paths_background_blocking
         );
-    }
-
-    pub fn open_paths_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
-        Self::handle_external_paths(
-            app,
-            paths,
+        pub fn open_paths_async => (
             "Background open requested for",
-            Self::open_selected_paths_async,
+            Self::open_selected_paths_async
         );
-    }
-
-    pub fn open_external_paths(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
-        Self::handle_external_paths(
-            app,
-            paths,
+        pub fn open_external_paths => (
             "Startup open requested for",
-            Self::open_selected_paths_background_blocking,
+            Self::open_selected_paths_background_blocking
         );
-    }
-
-    pub fn open_external_paths_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
-        Self::handle_external_paths(
-            app,
-            paths,
+        pub fn open_external_paths_async => (
             "Background open requested for",
-            Self::open_selected_paths_async,
+            Self::open_selected_paths_async
         );
-    }
-
-    pub fn open_external_paths_here(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
-        Self::handle_external_paths(
-            app,
-            paths,
+        pub fn open_external_paths_here => (
             "Startup workspace-open requested for",
-            Self::open_selected_paths_here_background_blocking,
+            Self::open_selected_paths_here_background_blocking
+        );
+        pub fn open_external_paths_here_async => (
+            "Background workspace-open requested for",
+            Self::open_selected_paths_here_async
         );
     }
 
@@ -174,9 +176,9 @@ impl FileController {
         open_paths(app, paths);
     }
 
-    fn open_selected_paths_background_blocking(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
-        Self::open_selected_paths_async(app, paths);
-        app.wait_for_background_io_idle();
+    blocking_open_methods! {
+        fn open_selected_paths_background_blocking => Self::open_selected_paths_async;
+        pub(super) fn open_selected_paths_here_background_blocking => Self::open_selected_paths_here_async;
     }
 
     pub(super) fn open_selected_paths_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {

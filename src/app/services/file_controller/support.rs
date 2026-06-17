@@ -1,8 +1,14 @@
 use super::FileController;
 use crate::app::CanonicalPathKey;
-use crate::app::app_state::{ScratchpadApp, StatusDomain};
+use crate::app::app_state::{OpenFileDialogState, ScratchpadApp, StatusDomain};
 use crate::app::domain::BufferState;
+use crate::app::platform_file::{self, OpenFileDialogKind};
+use eframe::egui;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::TryRecvError;
+use std::time::Duration;
+
+const OPEN_FILE_DIALOG_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub(in crate::app::services::file_controller) struct DeferredBufferRefresh {
     pub(in crate::app::services::file_controller) buffer_id: u64,
@@ -81,16 +87,68 @@ impl FileController {
             || app.state.pending_open_file_paths.contains(key)
     }
 
-    pub(super) fn handle_open_dialog<F>(app: &mut ScratchpadApp, action_name: &str, open_action: F)
-    where
-        F: FnOnce(&mut ScratchpadApp, Vec<PathBuf>),
-    {
-        if let Some(paths) = rfd::FileDialog::new().pick_files() {
-            open_action(app, paths);
-        } else {
+    pub(super) fn handle_open_dialog(app: &mut ScratchpadApp, dialog_kind: OpenFileDialogKind) {
+        if app.state.pending_open_file_dialog.is_some() {
             app.state
                 .status
-                .set_info_status_in_domain(StatusDomain::File, format!("{action_name} cancelled."));
+                .set_info_status_in_domain(StatusDomain::File, "Open file dialog is already open.");
+            return;
+        }
+
+        match platform_file::spawn_pick_open_files(dialog_kind) {
+            Ok(rx) => {
+                app.state.pending_open_file_dialog = Some(OpenFileDialogState {
+                    kind: dialog_kind,
+                    rx,
+                });
+                app.state.status.set_info_status_in_domain(
+                    StatusDomain::File,
+                    format!("{} opened.", dialog_kind.action_name()),
+                );
+            }
+            Err(error) => app.state.status.set_error_status_with_detail(
+                StatusDomain::File,
+                format!(
+                    "Could not open {}.",
+                    dialog_kind.action_name().to_ascii_lowercase()
+                ),
+                error.to_string(),
+            ),
+        }
+    }
+
+    pub(crate) fn poll_open_file_dialog(app: &mut ScratchpadApp, ctx: &egui::Context) {
+        let result = match app
+            .state
+            .pending_open_file_dialog
+            .as_ref()
+            .map(|pending| pending.rx.try_recv())
+        {
+            Some(Ok(paths)) => paths,
+            Some(Err(TryRecvError::Disconnected)) => None,
+            Some(Err(TryRecvError::Empty)) => {
+                ctx.request_repaint_after(OPEN_FILE_DIALOG_POLL_INTERVAL);
+                return;
+            }
+            None => return,
+        };
+
+        let Some(pending) = app.state.pending_open_file_dialog.take() else {
+            return;
+        };
+
+        if let Some(paths) = result {
+            match pending.kind {
+                OpenFileDialogKind::OpenFile => Self::open_selected_paths_async(app, paths),
+                OpenFileDialogKind::OpenFileHere => {
+                    Self::open_selected_paths_here_async(app, paths)
+                }
+            }
+        } else {
+            app.state.status.set_info_status_in_domain(
+                StatusDomain::File,
+                format!("{} cancelled.", pending.kind.action_name()),
+            );
         }
     }
 

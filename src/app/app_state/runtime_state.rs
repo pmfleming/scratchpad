@@ -1,11 +1,17 @@
 use super::PendingBackgroundAction;
 use crate::app::domain::BufferId;
+use crate::app::platform_file::OpenFileDialogKind;
 use crate::app::services::background_io::{BackgroundIoDispatcher, BackgroundIoResult};
 use crate::app::services::file_watch::{FileWatchEvent, FileWatchService};
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::Instant;
+
+pub(crate) struct OpenFileDialogState {
+    pub(crate) kind: OpenFileDialogKind,
+    pub(crate) rx: Receiver<Option<Vec<PathBuf>>>,
+}
 
 pub(crate) struct BackgroundIoState {
     pub(crate) tx: BackgroundIoDispatcher,

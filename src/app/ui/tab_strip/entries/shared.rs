@@ -1,5 +1,5 @@
 use crate::app::app_state::{ScratchpadApp, workspace::display_tabs};
-use crate::app::chrome::tab_button_sized;
+use crate::app::chrome::{TabButtonOptions, tab_button_with_actions, tab_label_font_id};
 use crate::app::domain::{TabAttentionState, WorkspaceTab};
 use crate::app::theme::TAB_HEIGHT;
 use crate::app::ui::tab_drag::{TabDropAxis, TabRectEntry};
@@ -22,6 +22,7 @@ pub(super) struct SlotCellContext<'a> {
     width: f32,
     spacing: f32,
     axis: TabDropAxis,
+    label_font_id: egui::FontId,
 }
 
 pub(super) fn slot_cell_context<'a>(
@@ -41,6 +42,7 @@ pub(super) fn slot_cell_context<'a>(
         width,
         spacing,
         axis,
+        label_font_id: tab_label_font_id(app.state.app_settings.font_size()),
     }
 }
 
@@ -198,6 +200,7 @@ fn render_tab_slot_cell(
                 is_selected,
                 pending_scroll_to_active: context.pending_scroll_to_active,
                 width: context.width,
+                label_font_id: context.label_font_id.clone(),
             },
         );
         apply_tab_interaction(outcome, cell_outcome.interaction);
@@ -207,13 +210,13 @@ fn render_tab_slot_cell(
     let is_active = context.showing_settings && context.active_slot_index == slot_index;
     let is_selected =
         crate::app::app_state::workspace::display_tabs::tab_slot_selected(app, slot_index);
-    let (tab_response, close_response, _) = tab_button_sized(
+    let (tab_response, _, close_response, _) = tab_button_with_actions(
         ui,
         ("tab_strip.slot", slot_index),
         "Settings",
         is_active,
         is_selected,
-        context.width,
+        TabButtonOptions::new(context.width).with_label_font_id(context.label_font_id.clone()),
     );
     let tab_clicked = tab_response.clicked()
         && handle_settings_tab_click(app, slot_index, ui.input(|input| input.modifiers));
@@ -313,6 +316,7 @@ mod tests {
     use crate::app::domain::TabAttentionState;
     use crate::app::theme::TAB_HEIGHT;
     use crate::app::ui::tab_drag::TabDropAxis;
+    use eframe::egui;
     use std::collections::HashMap;
 
     #[test]
@@ -336,6 +340,7 @@ mod tests {
             width: 320.0,
             spacing: 4.0,
             axis: TabDropAxis::Vertical,
+            label_font_id: egui::FontId::proportional(14.0),
         };
 
         assert_eq!(slot_advance(&context), TAB_HEIGHT + 4.0);
@@ -352,6 +357,7 @@ mod tests {
             width: 160.0,
             spacing: 4.0,
             axis: TabDropAxis::Horizontal,
+            label_font_id: egui::FontId::proportional(14.0),
         };
 
         assert_eq!(slot_advance(&context), 164.0);

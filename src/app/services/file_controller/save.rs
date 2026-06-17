@@ -166,11 +166,7 @@ impl FileController {
     ) -> bool {
         let file_name =
             default_save_as_file_name(&app.tab_manager.tabs.as_slice()[index].active_buffer().name);
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Text", &["txt"])
-            .set_file_name(&file_name)
-            .save_file()
-        {
+        if let Some(path) = crate::app::platform_file::pick_save_as_path(&file_name) {
             Self::save_buffer_to_path(app, index, path, true, format_override)
         } else {
             app.state

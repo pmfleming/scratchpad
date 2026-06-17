@@ -1,6 +1,7 @@
 use super::activate_slot;
 use super::menu_ui::{WIDTH as TAB_CONTEXT_MENU_WIDTH, menu_button};
 use crate::app::app_state::{ScratchpadApp, StatusDomain, frame};
+use crate::app::platform_file;
 use eframe::egui;
 use egui_phosphor::regular::{COPY, FOLDER_OPEN, TRANSLATE};
 use std::path::Path;
@@ -40,40 +41,19 @@ pub(super) fn render_location_actions(
     if menu_button(
         ui,
         TAB_CONTEXT_MENU_WIDTH,
-        "Reveal In Explorer",
+        platform_file::reveal_file_label(),
         Some(FOLDER_OPEN),
         reveal_enabled,
     ) {
         if let Some(path) = path
-            && let Err(error) = reveal_in_explorer(path)
+            && let Err(error) = platform_file::reveal_file(path)
         {
             app.state.status.set_warning_status_with_detail(
                 StatusDomain::File,
-                "Could not reveal this file in Explorer.",
+                platform_file::reveal_file_error_message(),
                 error.to_string(),
             );
         }
         ui.close();
     }
-}
-
-#[cfg(target_os = "windows")]
-fn reveal_in_explorer(path: &Path) -> std::io::Result<()> {
-    use std::ffi::OsString;
-    use std::process::Command;
-
-    let mut select_arg = OsString::from("/select,");
-    select_arg.push(path);
-    Command::new("explorer.exe")
-        .arg(select_arg)
-        .spawn()
-        .map(|_| ())
-}
-
-#[cfg(not(target_os = "windows"))]
-fn reveal_in_explorer(_path: &Path) -> std::io::Result<()> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "Reveal in Explorer is only available on Windows.",
-    ))
 }

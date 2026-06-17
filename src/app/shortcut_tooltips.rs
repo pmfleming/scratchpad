@@ -23,6 +23,7 @@ pub(crate) const REPLACE: &str = "CTRL+H: Replace";
 pub(crate) const REPLACE_ALL_MATCHES: &str = "ALT+ENTER: Replace all matches";
 pub(crate) const REPLACE_CURRENT_MATCH: &str = "CTRL+ENTER: Replace current match";
 pub(crate) const REVEAL_IN_EXPLORER: &str = "CTRL+SHIFT+R: Reveal In Explorer";
+pub(crate) const OPEN_CONTAINING_FOLDER: &str = "CTRL+SHIFT+R: Open Containing Folder";
 pub(crate) const RIGHT_TO_LEFT: &str = "CTRL+ALT+R: Right to Left";
 pub(crate) const LEFT_TO_RIGHT: &str = "CTRL+ALT+R: Left to Right";
 pub(crate) const SAVE: &str = "CTRL+S: Save";

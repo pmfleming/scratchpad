@@ -26,8 +26,9 @@ pub(super) fn show_vertical_tab_region(
 
     widget_ids::feature_scope(ui, "tab_strip_vertical", |ui| {
         tab_drag::sync_drag_state(ui);
-        super::super::actions::show_vertical_primary_actions(ui, app);
-        ui.add_space(8.0);
+        if super::super::actions::show_vertical_primary_actions(ui, app) {
+            ui.add_space(8.0);
+        }
         let drop_zones =
             show_vertical_tab_entries_above_new_tab(ui, app, duplicate_name_counts, &mut outcome);
         apply_tab_drag_feedback(ui, app, duplicate_name_counts, &drop_zones, &mut outcome);

@@ -5,7 +5,7 @@ use crate::app::commands::{
 use crate::app::domain::{SplitAxis, ViewId};
 use crate::app::shortcut_keymap::{ShortcutAction, consume_shortcut};
 use eframe::egui;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 const DEFAULT_SPLIT_RATIO: f32 = 0.5;
 
@@ -105,6 +105,11 @@ fn handle_utility_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
 
     if consume_app_shortcut(app, ctx, ShortcutAction::RevealActivePath) {
         reveal_active_path_in_explorer(app);
+        return;
+    }
+
+    if consume_app_shortcut(app, ctx, ShortcutAction::ToggleTabList) {
+        crate::app::app_state::settings_controller::toggle_tab_list(app);
         return;
     }
 
@@ -348,10 +353,10 @@ fn reveal_active_path_in_explorer(app: &mut ScratchpadApp) {
         return;
     };
 
-    if let Err(error) = reveal_in_explorer(&path) {
+    if let Err(error) = crate::app::platform_file::reveal_file(&path) {
         app.state.status.set_warning_status_with_detail(
             crate::app::app_state::StatusDomain::File,
-            "Could not reveal this file in Explorer.",
+            crate::app::platform_file::reveal_file_error_message(),
             error.to_string(),
         );
     }
@@ -382,27 +387,6 @@ fn toggle_active_buffer_control_chars(app: &mut ScratchpadApp) {
         }
         app.tab_manager.mark_session_dirty();
     }
-}
-
-#[cfg(target_os = "windows")]
-fn reveal_in_explorer(path: &Path) -> std::io::Result<()> {
-    use std::ffi::OsString;
-    use std::process::Command;
-
-    let mut select_arg = OsString::from("/select,");
-    select_arg.push(path);
-    Command::new("explorer.exe")
-        .arg(select_arg)
-        .spawn()
-        .map(|_| ())
-}
-
-#[cfg(not(target_os = "windows"))]
-fn reveal_in_explorer(_path: &Path) -> std::io::Result<()> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "Reveal in Explorer is only available on Windows.",
-    ))
 }
 
 #[cfg(test)]

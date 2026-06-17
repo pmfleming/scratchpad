@@ -27,23 +27,6 @@ enum ExistingOpenHerePath {
 }
 
 impl FileController {
-    pub fn open_external_paths_here_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
-        Self::handle_external_paths(
-            app,
-            paths,
-            "Background workspace-open requested for",
-            Self::open_selected_paths_here_async,
-        );
-    }
-
-    pub(super) fn open_selected_paths_here_background_blocking(
-        app: &mut ScratchpadApp,
-        paths: Vec<PathBuf>,
-    ) {
-        Self::open_selected_paths_here_async(app, paths);
-        app.wait_for_background_io_idle();
-    }
-
     pub(super) fn open_selected_paths_here_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
         Self::prepare_to_open_paths(app);
         let anchor_view_id = app

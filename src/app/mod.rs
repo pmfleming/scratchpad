@@ -32,6 +32,7 @@ pub mod domain;
 pub mod fonts;
 pub mod memory_budget;
 pub mod platform;
+pub(crate) mod platform_file;
 pub mod services;
 pub mod shortcut_keymap;
 pub(crate) mod shortcut_tooltips;

@@ -1,3 +1,4 @@
+use crate::app::fonts::EDITOR_FONT_FAMILY;
 use crate::app::shortcut_tooltips;
 use crate::app::theme::{
     CLOSE_HOVER_BG, TAB_BUTTON_WIDTH, TAB_HEIGHT, action_hover_bg, border, tab_active_bg,
@@ -19,6 +20,7 @@ pub struct TabButtonOptions {
     pub show_promote_all: bool,
     pub attention_color: Option<egui::Color32>,
     pub width: f32,
+    pub label_font_id: Option<egui::FontId>,
 }
 
 impl TabButtonOptions {
@@ -28,6 +30,7 @@ impl TabButtonOptions {
             show_promote_all: false,
             attention_color: None,
             width,
+            label_font_id: None,
         }
     }
 
@@ -41,8 +44,26 @@ impl TabButtonOptions {
             show_promote_all,
             attention_color,
             width,
+            label_font_id: None,
         }
     }
+
+    #[must_use]
+    pub fn with_label_font_id(mut self, label_font_id: egui::FontId) -> Self {
+        self.label_font_id = Some(label_font_id);
+        self
+    }
+}
+
+const MIN_TAB_LABEL_FONT_SIZE: f32 = 11.0;
+const MAX_TAB_LABEL_FONT_SIZE: f32 = 16.0;
+
+#[must_use]
+pub fn tab_label_font_id(editor_font_size: f32) -> egui::FontId {
+    egui::FontId::new(
+        editor_font_size.clamp(MIN_TAB_LABEL_FONT_SIZE, MAX_TAB_LABEL_FONT_SIZE),
+        egui::FontFamily::Name(EDITOR_FONT_FAMILY.into()),
+    )
 }
 
 pub fn tab_button(
@@ -84,12 +105,14 @@ pub fn tab_button_with_actions(
     let promote_rect = options
         .show_promote_all
         .then(|| tab_promote_rect(frame.rect));
+    let label_font_id = options.label_font_id.clone();
     let truncated = paint_tab_label(
         ui,
         frame.rect,
         label,
         options.show_promote_all,
         options.attention_color,
+        label_font_id.as_ref(),
     );
     let promote_response = promote_rect.map(|promote_rect| {
         render_tab_promote_button(ui, promote_rect, frame.surface_id, frame.drag_in_progress)
@@ -127,6 +150,7 @@ pub fn tab_rename_editor_sized(
     selected: bool,
     width: f32,
     request_focus: bool,
+    label_font_id: Option<egui::FontId>,
 ) -> (egui::Rect, egui::Response) {
     let frame = allocate_tab_button_frame(ui, width, surface_key);
     paint_tab_background(
@@ -152,7 +176,8 @@ pub fn tab_rename_editor_sized(
             .frame(egui::Frame::NONE)
             .desired_width(text_rect.width())
             .margin(egui::Margin::symmetric(4, 6))
-            .vertical_align(egui::Align::Center),
+            .vertical_align(egui::Align::Center)
+            .font(label_font_id.unwrap_or_else(|| egui::TextStyle::Button.resolve(ui.style()))),
     );
     if request_focus {
         response.request_focus();
@@ -229,6 +254,7 @@ fn paint_tab_label(
     label: &str,
     show_promote_all: bool,
     attention_color: Option<egui::Color32>,
+    label_font_id: Option<&egui::FontId>,
 ) -> bool {
     let right_padding = label_right_padding(show_promote_all);
     let left_padding = if let Some(color) = attention_color {
@@ -241,12 +267,16 @@ fn paint_tab_label(
         rect.min + Vec2::new(left_padding, 0.0),
         rect.max - Vec2::new(right_padding, 0.0),
     );
-    let (visible_label, truncated) = truncate_label(ui, label, text_rect.width().max(0.0));
+    let label_font_id = label_font_id
+        .cloned()
+        .unwrap_or_else(|| egui::TextStyle::Button.resolve(ui.style()));
+    let (visible_label, truncated) =
+        truncate_label(ui, label, text_rect.width().max(0.0), &label_font_id);
     ui.painter().text(
         text_rect.left_center(),
         egui::Align2::LEFT_CENTER,
         &visible_label,
-        egui::TextStyle::Button.resolve(ui.style()),
+        label_font_id,
         text_primary(ui),
     );
     truncated
@@ -339,27 +369,37 @@ fn paint_tab_close_button(ui: &egui::Ui, close_rect: Rect, hovered: bool, drag_i
     );
 }
 
-fn truncate_label(ui: &egui::Ui, label: &str, available_width: f32) -> (String, bool) {
+fn truncate_label(
+    ui: &egui::Ui,
+    label: &str,
+    available_width: f32,
+    font_id: &egui::FontId,
+) -> (String, bool) {
     let ellipsis = "...";
-    if label_fits(ui, label, available_width) {
+    if label_fits(ui, label, available_width, font_id) {
         return (label.to_owned(), false);
     }
-    if !ellipsis_fits(ui, ellipsis, available_width) {
+    if !ellipsis_fits(ui, ellipsis, available_width, font_id) {
         return (String::new(), true);
     }
 
     (
-        best_truncated_label(ui, label, ellipsis, available_width).unwrap_or_default(),
+        best_truncated_label(ui, label, ellipsis, available_width, font_id).unwrap_or_default(),
         true,
     )
 }
 
-fn label_fits(ui: &egui::Ui, label: &str, available_width: f32) -> bool {
-    text_width(ui, label) <= available_width
+fn label_fits(ui: &egui::Ui, label: &str, available_width: f32, font_id: &egui::FontId) -> bool {
+    text_width(ui, label, font_id) <= available_width
 }
 
-fn ellipsis_fits(ui: &egui::Ui, ellipsis: &str, available_width: f32) -> bool {
-    text_width(ui, ellipsis) <= available_width
+fn ellipsis_fits(
+    ui: &egui::Ui,
+    ellipsis: &str,
+    available_width: f32,
+    font_id: &egui::FontId,
+) -> bool {
+    text_width(ui, ellipsis, font_id) <= available_width
 }
 
 fn best_truncated_label(
@@ -367,6 +407,7 @@ fn best_truncated_label(
     label: &str,
     suffix: &str,
     available_width: f32,
+    font_id: &egui::FontId,
 ) -> Option<String> {
     let boundaries = char_boundaries(label);
     let mut low = 0;
@@ -375,7 +416,7 @@ fn best_truncated_label(
 
     while low < high {
         let candidate = truncation_candidate(label, suffix, &boundaries, low, high);
-        if candidate_fits(ui, &candidate.1, available_width) {
+        if candidate_fits(ui, &candidate.1, available_width, font_id) {
             best = Some(candidate.1);
             low = candidate.0 + 1;
         } else {
@@ -383,7 +424,7 @@ fn best_truncated_label(
         }
     }
 
-    best.or_else(|| full_label_with_suffix_if_fits(ui, label, suffix, available_width))
+    best.or_else(|| full_label_with_suffix_if_fits(ui, label, suffix, available_width, font_id))
 }
 
 fn char_boundaries(label: &str) -> Vec<usize> {
@@ -402,8 +443,13 @@ fn truncation_candidate(
     (mid, format!("{}{}", &label[..mid_pos], suffix))
 }
 
-fn candidate_fits(ui: &egui::Ui, candidate: &str, available_width: f32) -> bool {
-    text_width(ui, candidate) <= available_width
+fn candidate_fits(
+    ui: &egui::Ui,
+    candidate: &str,
+    available_width: f32,
+    font_id: &egui::FontId,
+) -> bool {
+    text_width(ui, candidate, font_id) <= available_width
 }
 
 fn full_label_with_suffix_if_fits(
@@ -411,24 +457,41 @@ fn full_label_with_suffix_if_fits(
     label: &str,
     suffix: &str,
     available_width: f32,
+    font_id: &egui::FontId,
 ) -> Option<String> {
     let candidate = format!("{label}{suffix}");
-    if candidate_fits(ui, &candidate, available_width) {
+    if candidate_fits(ui, &candidate, available_width, font_id) {
         Some(candidate)
     } else {
         None
     }
 }
 
-fn text_width(ui: &egui::Ui, text: &str) -> f32 {
+fn text_width(ui: &egui::Ui, text: &str, font_id: &egui::FontId) -> f32 {
     ui.fonts_mut(|fonts| {
         fonts
-            .layout_no_wrap(
-                text.to_owned(),
-                egui::TextStyle::Button.resolve(ui.style()),
-                text_primary(ui),
-            )
+            .layout_no_wrap(text.to_owned(), font_id.clone(), text_primary(ui))
             .size()
             .x
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EDITOR_FONT_FAMILY, egui, tab_label_font_id};
+
+    #[test]
+    fn tab_label_font_uses_editor_family_with_chrome_safe_size() {
+        let small = tab_label_font_id(8.0);
+        let normal = tab_label_font_id(14.0);
+        let large = tab_label_font_id(72.0);
+
+        assert_eq!(small.size, 11.0);
+        assert_eq!(normal.size, 14.0);
+        assert_eq!(large.size, 16.0);
+        assert_eq!(
+            normal.family,
+            egui::FontFamily::Name(EDITOR_FONT_FAMILY.into())
+        );
+    }
 }

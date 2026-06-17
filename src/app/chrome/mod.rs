@@ -9,7 +9,7 @@ pub use self::{
     },
     resize::{handle_window_resize, show_window_resize_cursor},
     tabs::{
-        TabButtonOptions, tab_button, tab_button_sized, tab_button_with_actions,
+        TabButtonOptions, tab_button, tab_button_sized, tab_button_with_actions, tab_label_font_id,
         tab_rename_editor_sized,
     },
 };

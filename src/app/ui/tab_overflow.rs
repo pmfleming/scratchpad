@@ -1,5 +1,5 @@
 use crate::app::app_state::{ScratchpadApp, workspace::display_tabs};
-use crate::app::chrome::{TabButtonOptions, tab_button_with_actions};
+use crate::app::chrome::{TabButtonOptions, tab_button_with_actions, tab_label_font_id};
 use crate::app::domain::TabAttentionState;
 use crate::app::domain::tab::summary;
 use crate::app::services::settings_store::TabListPosition;
@@ -447,7 +447,8 @@ fn show_overflow_row(
                 menu.row_width,
                 row_state.can_promote_all_files,
                 row_state.attention_state.map(attention_color),
-            ),
+            )
+            .with_label_font_id(tab_label_font_id(app.state.app_settings.font_size())),
         );
         let response = maybe_attach_overflow_row_tooltip(response, &row_state, truncated);
         tab_drag::begin_tab_drag_if_needed(

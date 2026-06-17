@@ -24,6 +24,7 @@ Top-level in-app shortcuts can be overridden in `settings.toml`:
 open_file = "ctrl+o"
 save_file = "ctrl+s"
 close_tab = "ctrl+w"
+toggle_tab_list = "ctrl+alt+b"
 split_left = "ctrl+shift+left"
 split_right = "ctrl+shift+right"
 split_up = "ctrl+shift+up"
@@ -37,7 +38,7 @@ Shortcut syntax is case-insensitive. Supported modifiers are `ctrl`, `shift`, `a
 increase_font_size = "ctrl+equals, ctrl+plus"
 ```
 
-Invalid shortcut strings fall back to the built-in default binding for that action.
+Invalid shortcut strings show a Settings warning and fall back to the built-in default binding for that action.
 
 ## Hyprland principle
 
@@ -109,27 +110,41 @@ Conceptual Home Manager configuration:
 }
 ```
 
-## Future Nix module shape
+## Home Manager module
 
-A future first-class module could look like this:
+The flake exposes a first-class Home Manager module:
 
 ```nix
-programs.scratchpad = {
-  enable = true;
-  profile = "hyprland";
+{
+  inputs.scratchpad.url = "github:pmfleming/scratchpad";
 
-  shortcuts = {
-    openFile = "ctrl+o";
-    saveFile = "ctrl+s";
-    closeTab = "ctrl+w";
-  };
+  outputs = { home-manager, scratchpad, ... }: {
+    homeConfigurations.your-user = home-manager.lib.homeManagerConfiguration {
+      modules = [
+        scratchpad.homeManagerModules.default
+        {
+          programs.scratchpad = {
+            enable = true;
+            profile = "hyprland";
 
-  hyprland = {
-    enableBinds = true;
-    toggleBind = "$mainMod, S";
-    specialWorkspace = "scratchpad";
+            shortcuts = {
+              open_file = "ctrl+o";
+              save_file = "ctrl+s";
+              close_tab = "ctrl+w";
+              toggle_tab_list = "ctrl+alt+b";
+            };
+
+            hyprland = {
+              enableBinds = true;
+              toggleBind = "$mainMod SHIFT, S";
+              specialWorkspace = "scratchpad";
+            };
+          };
+        }
+      ];
+    };
   };
-};
+}
 ```
 
-That module does not exist yet; for now use the direct Hyprland/Home Manager snippets above.
+When `profile = "hyprland"`, the module installs the Hyprland wrapper by default and writes `~/.config/scratchpad/settings.toml`.
