@@ -44,9 +44,12 @@ in
         open_file = "ctrl+o";
         save_file = "ctrl+s";
         close_tab = "ctrl+w";
+        split_tile = "ctrl+alt+enter";
         split_left = "ctrl+shift+left";
+        resize_tile_left = "ctrl+alt+left";
+        move_tile_left = "ctrl+left";
       };
-      description = "Scratchpad in-app shortcut overrides.";
+      description = "Scratchpad in-app shortcut overrides, including focused tile split/resize/move bindings.";
     };
 
     hyprland = {

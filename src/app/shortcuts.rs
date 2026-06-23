@@ -2,7 +2,7 @@ use crate::app::app_state::ScratchpadApp;
 use crate::app::commands::{
     AppCommand, FileCommand, SearchCommand, SettingsCommand, WorkspaceCommand,
 };
-use crate::app::domain::{SplitAxis, ViewId};
+use crate::app::domain::{SplitAxis, TileDirection, ViewId};
 use crate::app::shortcut_keymap::{ShortcutAction, consume_shortcut};
 use eframe::egui;
 use std::path::PathBuf;
@@ -278,7 +278,49 @@ fn handle_tile_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         return;
     }
 
-    let split = if consume_app_shortcut(app, ctx, ShortcutAction::SplitUp) {
+    let tile_move = if consume_app_shortcut(app, ctx, ShortcutAction::MoveTileLeft) {
+        Some(TileDirection::Left)
+    } else if consume_app_shortcut(app, ctx, ShortcutAction::MoveTileRight) {
+        Some(TileDirection::Right)
+    } else if consume_app_shortcut(app, ctx, ShortcutAction::MoveTileUp) {
+        Some(TileDirection::Up)
+    } else if consume_app_shortcut(app, ctx, ShortcutAction::MoveTileDown) {
+        Some(TileDirection::Down)
+    } else {
+        None
+    };
+
+    if let Some(direction) = tile_move {
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::MoveActiveTile { direction }),
+        );
+        return;
+    }
+
+    let resize = if consume_app_shortcut(app, ctx, ShortcutAction::ResizeTileLeft) {
+        Some(TileDirection::Left)
+    } else if consume_app_shortcut(app, ctx, ShortcutAction::ResizeTileRight) {
+        Some(TileDirection::Right)
+    } else if consume_app_shortcut(app, ctx, ShortcutAction::ResizeTileUp) {
+        Some(TileDirection::Up)
+    } else if consume_app_shortcut(app, ctx, ShortcutAction::ResizeTileDown) {
+        Some(TileDirection::Down)
+    } else {
+        None
+    };
+
+    if let Some(direction) = resize {
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ResizeActiveTile { direction }),
+        );
+        return;
+    }
+
+    let split = if consume_app_shortcut(app, ctx, ShortcutAction::SplitTile) {
+        Some((app.state.workspace_reflow_axis, false))
+    } else if consume_app_shortcut(app, ctx, ShortcutAction::SplitUp) {
         Some((SplitAxis::Horizontal, true))
     } else if consume_app_shortcut(app, ctx, ShortcutAction::SplitDown) {
         Some((SplitAxis::Horizontal, false))

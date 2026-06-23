@@ -33,6 +33,18 @@ fn clean_mode_skips_session_restore() {
     assert_eq!(options.files, vec![PathBuf::from("a.txt")]);
 }
 
+#[cfg(not(target_os = "windows"))]
+#[test]
+fn unix_absolute_paths_are_positional_files() {
+    let options = run(&["/tmp/scratchpad-note.txt"]);
+
+    assert_eq!(
+        options.files,
+        vec![PathBuf::from("/tmp/scratchpad-note.txt")]
+    );
+    assert!(options.startup_notice.is_none());
+}
+
 #[test]
 fn addto_active_targets_current_workspace() {
     let options = run(&["/addto:active", "a.txt"]);

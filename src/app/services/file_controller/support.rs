@@ -141,7 +141,7 @@ impl FileController {
             match pending.kind {
                 OpenFileDialogKind::OpenFile => Self::open_selected_paths_async(app, paths),
                 OpenFileDialogKind::OpenFileHere => {
-                    Self::open_selected_paths_here_async(app, paths)
+                    Self::open_selected_paths_here_async(app, paths);
                 }
             }
         } else {

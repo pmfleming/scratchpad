@@ -1,8 +1,7 @@
 use super::{
-    AppThemeMode, CategoryCard, ComboSelectRow, ScratchpadApp, SettingsUi, TabListPosition,
-    available_width_control, category_card, combo_select_row, egui, inner_divider,
-    inner_select_row, nearest_option_index, record_settings_control_box, render_preview_panel,
-    toggle_select_row, u32_slider_value_control,
+    CategoryCard, ComboSelectRow, ScratchpadApp, TabListPosition, category_card, egui,
+    inner_divider, inner_select_row, nearest_option_index, toggle_select_row,
+    u32_slider_value_control,
 };
 use crate::app::services::settings_store::NewTabPlacement;
 
@@ -21,99 +20,6 @@ const NEW_TAB_PLACEMENT_OPTIONS: [NewTabPlacement; 4] = [
     NewTabPlacement::AfterSelection,
     NewTabPlacement::BeforeSelection,
 ];
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ThemeModeSelection {
-    System,
-    Light,
-    Dark,
-    Custom,
-}
-
-const THEME_MODE_OPTIONS: [ThemeModeSelection; 3] = [
-    ThemeModeSelection::System,
-    ThemeModeSelection::Light,
-    ThemeModeSelection::Dark,
-];
-const THEME_MODE_OPTIONS_WITH_CUSTOM: [ThemeModeSelection; 4] = [
-    ThemeModeSelection::System,
-    ThemeModeSelection::Light,
-    ThemeModeSelection::Dark,
-    ThemeModeSelection::Custom,
-];
-
-impl ThemeModeSelection {
-    fn label(self) -> &'static str {
-        match self {
-            Self::System => "Use system setting",
-            Self::Light => "Light",
-            Self::Dark => "Dark",
-            Self::Custom => "Custom",
-        }
-    }
-
-    fn pill_label(self) -> &'static str {
-        match self {
-            Self::System => "System",
-            Self::Light => "Light",
-            Self::Dark => "Dark",
-            Self::Custom => "Custom",
-        }
-    }
-}
-
-pub(super) fn render_appearance_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    category_card(
-        ui,
-        CategoryCard {
-            heading: "Appearance",
-            id_source: "settings_appearance_card",
-            icon: egui_phosphor::regular::SUN,
-            title: "Theme",
-            description: "Mode and editor colors.",
-            default_open: true,
-        },
-        |ui| {
-            render_theme_mode_row(ui, app);
-            render_color_row(
-                ui,
-                "Text color",
-                "Overrides mode defaults.",
-                app.state.app_settings.editor_text_color(),
-                |app, color| {
-                    crate::app::app_state::settings_controller::set_editor_text_color(app, color);
-                },
-                app,
-            );
-            render_color_row(
-                ui,
-                "Background",
-                "Overrides mode defaults.",
-                app.state.app_settings.editor_background_color(),
-                |app, color| {
-                    crate::app::app_state::settings_controller::set_editor_background_color(
-                        app, color,
-                    );
-                },
-                app,
-            );
-            render_color_row(
-                ui,
-                "Highlight",
-                "Search match color.",
-                app.state.app_settings.editor_text_highlight_color(),
-                |app, color| {
-                    crate::app::app_state::settings_controller::set_editor_text_highlight_color(
-                        app, color,
-                    );
-                },
-                app,
-            );
-            ui.add_space(SettingsUi::LAYOUT.preview_top_margin);
-            render_preview_panel(ui, app);
-        },
-    );
-}
 
 pub(super) fn render_tab_position_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     category_card(
@@ -140,56 +46,8 @@ pub(super) fn render_tab_position_category(ui: &mut egui::Ui, app: &mut Scratchp
     );
 }
 
-fn render_theme_mode_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    let description = format!("App mode. Detected: {}.", detected_system_theme_label(ui));
-    let options = if app.state.app_settings.has_custom_editor_palette() {
-        &THEME_MODE_OPTIONS_WITH_CUSTOM[..]
-    } else {
-        &THEME_MODE_OPTIONS[..]
-    };
-    let system_theme = ui.ctx().system_theme();
-    combo_select_row(
-        ui,
-        ComboSelectRow {
-            label: "Mode",
-            description: Some(&description),
-            combo_id: "settings_theme_mode",
-            record_label: "combo.Theme mode",
-            current: selected_theme_mode(app),
-            options,
-            selected_label: ThemeModeSelection::pill_label,
-            option_label: ThemeModeSelection::label,
-            on_change: |mode| apply_theme_mode_selection(app, mode, system_theme),
-        },
-    );
-    inner_divider(ui);
-}
-
-fn render_color_row(
-    ui: &mut egui::Ui,
-    label: &str,
-    description: &str,
-    initial_color: egui::Color32,
-    on_change: impl Fn(&mut ScratchpadApp, egui::Color32),
-    app: &mut ScratchpadApp,
-) {
-    inner_select_row(ui, label, Some(description), |ui| {
-        available_width_control(ui, |ui| {
-            let mut color = initial_color;
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let response = ui.color_edit_button_srgba(&mut color);
-                record_settings_control_box(format!("color.{label}"), response.rect);
-                if response.changed() {
-                    on_change(app, color);
-                }
-            });
-        });
-    });
-    inner_divider(ui);
-}
-
 fn render_tab_list_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    combo_select_row(
+    super::combo_select_row(
         ui,
         ComboSelectRow {
             label: "Tab list",
@@ -208,7 +66,7 @@ fn render_tab_list_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 }
 
 fn render_new_tab_placement_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    combo_select_row(
+    super::combo_select_row(
         ui,
         ComboSelectRow {
             label: "New tabs",
@@ -319,56 +177,5 @@ fn auto_hide_delay_label(seconds: f32) -> String {
         format!("{seconds:.0} s")
     } else {
         format!("{seconds:.1} s")
-    }
-}
-
-fn detected_system_theme_label(ui: &egui::Ui) -> &'static str {
-    match ui.ctx().system_theme() {
-        Some(egui::Theme::Light) => "Light",
-        Some(egui::Theme::Dark) => "Dark",
-        None => "Unknown",
-    }
-}
-
-fn selected_theme_mode(app: &ScratchpadApp) -> ThemeModeSelection {
-    if app.state.app_settings.has_custom_editor_palette() {
-        ThemeModeSelection::Custom
-    } else {
-        match app.state.app_settings.theme_mode() {
-            AppThemeMode::System => ThemeModeSelection::System,
-            AppThemeMode::Light => ThemeModeSelection::Light,
-            AppThemeMode::Dark => ThemeModeSelection::Dark,
-        }
-    }
-}
-
-fn apply_theme_mode_selection(
-    app: &mut ScratchpadApp,
-    selection: ThemeModeSelection,
-    system_theme: Option<egui::Theme>,
-) {
-    match selection {
-        ThemeModeSelection::System => {
-            crate::app::app_state::settings_controller::apply_theme_mode_preset(
-                app,
-                AppThemeMode::System,
-                system_theme,
-            );
-        }
-        ThemeModeSelection::Light => {
-            crate::app::app_state::settings_controller::apply_theme_mode_preset(
-                app,
-                AppThemeMode::Light,
-                system_theme,
-            );
-        }
-        ThemeModeSelection::Dark => {
-            crate::app::app_state::settings_controller::apply_theme_mode_preset(
-                app,
-                AppThemeMode::Dark,
-                system_theme,
-            );
-        }
-        ThemeModeSelection::Custom => {}
     }
 }

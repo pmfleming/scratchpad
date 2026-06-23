@@ -1,6 +1,6 @@
 use crate::app::CanonicalPathKey;
 use crate::app::domain::{BufferId, SplitAxis, TabManager};
-use crate::app::fonts::EditorFontPreset;
+use crate::app::fonts::EditorFontSelection;
 use crate::app::services::session_store::SessionStore;
 use crate::app::services::settings_store::{AppSettings, AppThemeMode, SettingsStore};
 use crate::app::shortcut_keymap::InvalidShortcutOverride;
@@ -113,7 +113,7 @@ pub struct ScratchpadAppState {
     pub(crate) painted_frames_before_window_show: u8,
     pub(crate) current_window_title: Option<String>,
     pub(crate) overflow_popup_open: bool,
-    pub(crate) applied_editor_font: Option<EditorFontPreset>,
+    pub(crate) applied_editor_font: Option<EditorFontSelection>,
     pub(crate) applied_theme_mode: Option<AppThemeMode>,
     pub(crate) chrome: ChromeState,
     pub(crate) settings_tab_index: usize,

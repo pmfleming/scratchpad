@@ -38,6 +38,7 @@ pub mod shortcut_keymap;
 pub(crate) mod shortcut_tooltips;
 pub mod shortcuts;
 pub mod startup;
+pub(crate) mod system_appearance;
 pub(crate) mod text_history;
 pub mod theme;
 pub mod ui;
@@ -68,8 +69,42 @@ pub fn paths_match(left: &Path, right: &Path) -> bool {
 }
 
 fn normalize_path(path: &Path) -> String {
-    std::fs::canonicalize(path)
+    let normalized = std::fs::canonicalize(path)
         .unwrap_or_else(|_| path.to_path_buf())
         .to_string_lossy()
-        .to_lowercase()
+        .into_owned();
+
+    #[cfg(target_os = "windows")]
+    {
+        normalized.to_lowercase()
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        normalized
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CanonicalPathKey;
+    use std::path::Path;
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn canonical_path_keys_are_case_insensitive_on_windows() {
+        assert_eq!(
+            CanonicalPathKey::from_path(Path::new("C:/Scratchpad/Foo.txt")),
+            CanonicalPathKey::from_path(Path::new("C:/Scratchpad/foo.txt"))
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn canonical_path_keys_preserve_case_on_case_sensitive_platforms() {
+        assert_ne!(
+            CanonicalPathKey::from_path(Path::new("/tmp/ScratchpadCaseProbe.txt")),
+            CanonicalPathKey::from_path(Path::new("/tmp/scratchpadcaseprobe.txt"))
+        );
+    }
 }

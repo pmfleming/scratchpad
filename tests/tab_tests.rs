@@ -1,4 +1,4 @@
-use scratchpad::app::domain::{BufferState, PaneNode, SplitAxis, WorkspaceTab};
+use scratchpad::app::domain::{BufferState, PaneNode, SplitAxis, TileDirection, WorkspaceTab};
 
 fn buffer(name: &str, text: &str) -> BufferState {
     BufferState::new(name.to_owned(), text.to_owned(), None)
@@ -15,6 +15,16 @@ fn collect_leaf_area_fractions(node: &PaneNode, area_fraction: f32, output: &mut
         } => {
             collect_leaf_area_fractions(first, area_fraction * *ratio, output);
             collect_leaf_area_fractions(second, area_fraction * (1.0 - *ratio), output);
+        }
+    }
+}
+
+fn collect_leaf_ids(node: &PaneNode, output: &mut Vec<u64>) {
+    match node {
+        PaneNode::Leaf { view_id } => output.push(*view_id),
+        PaneNode::Split { first, second, .. } => {
+            collect_leaf_ids(first, output);
+            collect_leaf_ids(second, output);
         }
     }
 }
@@ -64,6 +74,40 @@ fn combining_tabs_merges_buffers_and_focuses_source_workspace() {
     assert_eq!(target.layout.active_view_id, source_active);
     assert_eq!(target.file_group_count(), 2);
     assert_eq!(target.active_buffer().text(), "source");
+}
+
+#[test]
+fn keyboard_resizing_grows_active_tile_toward_direction() {
+    let mut tab = WorkspaceTab::new(buffer("one.txt", "one"));
+    let split_view = tab.split_active_view(SplitAxis::Vertical).unwrap();
+
+    assert_eq!(tab.layout.active_view_id, split_view);
+    assert!(tab.resize_active_view_in_direction(TileDirection::Left, 0.05));
+
+    match &tab.layout.root_pane {
+        PaneNode::Split { ratio, .. } => assert!((*ratio - 0.45).abs() < 0.001),
+        PaneNode::Leaf { .. } => panic!("expected split root"),
+    }
+
+    assert!(tab.resize_active_view_in_direction(TileDirection::Right, 0.05));
+    match &tab.layout.root_pane {
+        PaneNode::Split { ratio, .. } => assert!((*ratio - 0.5).abs() < 0.001),
+        PaneNode::Leaf { .. } => panic!("expected split root"),
+    }
+}
+
+#[test]
+fn keyboard_moving_swaps_active_tile_toward_direction() {
+    let mut tab = WorkspaceTab::new(buffer("one.txt", "one"));
+    let original_view = tab.layout.active_view_id;
+    let split_view = tab.split_active_view(SplitAxis::Vertical).unwrap();
+
+    assert!(tab.move_active_view_in_direction(TileDirection::Left));
+    assert_eq!(tab.layout.active_view_id, split_view);
+
+    let mut ordered = Vec::new();
+    collect_leaf_ids(&tab.layout.root_pane, &mut ordered);
+    assert_eq!(ordered, vec![split_view, original_view]);
 }
 
 #[test]

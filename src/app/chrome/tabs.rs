@@ -23,6 +23,39 @@ pub struct TabButtonOptions {
     pub label_font_id: Option<egui::FontId>,
 }
 
+pub struct TabRenameEditorOptions {
+    pub active: bool,
+    pub selected: bool,
+    pub width: f32,
+    pub request_focus: bool,
+    pub label_font_id: Option<egui::FontId>,
+}
+
+impl TabRenameEditorOptions {
+    #[must_use]
+    pub fn new(active: bool, selected: bool, width: f32) -> Self {
+        Self {
+            active,
+            selected,
+            width,
+            request_focus: false,
+            label_font_id: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_focus_request(mut self, request_focus: bool) -> Self {
+        self.request_focus = request_focus;
+        self
+    }
+
+    #[must_use]
+    pub fn with_label_font_id(mut self, label_font_id: egui::FontId) -> Self {
+        self.label_font_id = Some(label_font_id);
+        self
+    }
+}
+
 impl TabButtonOptions {
     #[must_use]
     pub fn new(width: f32) -> Self {
@@ -146,19 +179,15 @@ pub fn tab_rename_editor_sized(
     ui: &mut egui::Ui,
     surface_key: impl Hash,
     text: &mut String,
-    active: bool,
-    selected: bool,
-    width: f32,
-    request_focus: bool,
-    label_font_id: Option<egui::FontId>,
+    options: TabRenameEditorOptions,
 ) -> (egui::Rect, egui::Response) {
-    let frame = allocate_tab_button_frame(ui, width, surface_key);
+    let frame = allocate_tab_button_frame(ui, options.width, surface_key);
     paint_tab_background(
         ui,
         frame.rect,
         &frame.response,
-        active,
-        selected,
+        options.active,
+        options.selected,
         frame.drag_in_progress,
     );
 
@@ -177,9 +206,13 @@ pub fn tab_rename_editor_sized(
             .desired_width(text_rect.width())
             .margin(egui::Margin::symmetric(4, 6))
             .vertical_align(egui::Align::Center)
-            .font(label_font_id.unwrap_or_else(|| egui::TextStyle::Button.resolve(ui.style()))),
+            .font(
+                options
+                    .label_font_id
+                    .unwrap_or_else(|| egui::TextStyle::Button.resolve(ui.style())),
+            ),
     );
-    if request_focus {
+    if options.request_focus {
         response.request_focus();
     }
 

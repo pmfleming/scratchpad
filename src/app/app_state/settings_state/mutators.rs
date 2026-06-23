@@ -1,11 +1,11 @@
 use super::{
-    AppSettings, AppThemeMode, FileController, FileOpenDisposition, NewTabPlacement, ScratchpadApp,
-    StartupSessionBehavior, TabListPosition, color_to_hex,
+    AppSettings, AppThemeMode, EditorAppearanceSource, FileController, FileOpenDisposition,
+    NewTabPlacement, ScratchpadApp, StartupSessionBehavior, TabListPosition, color_to_hex,
     sanitize_tab_list_auto_hide_delay_seconds, stock_editor_palette_for_selection,
 };
 use crate::app::app_state::{AppSurface, workspace::accessors as workspace_accessors};
 use crate::app::domain::TextHistoryBudget;
-use crate::app::fonts::EditorFontPreset;
+use crate::app::fonts::{EditorFontPreset, EditorFontSource};
 use eframe::egui;
 use std::time::Instant;
 
@@ -13,6 +13,10 @@ use std::time::Instant;
 mod tests;
 
 impl AppSettings {
+    fn set_editor_appearance_source(&mut self, source: EditorAppearanceSource) -> bool {
+        replace_if_changed(&mut self.editor.appearance_source, source)
+    }
+
     fn set_font_size(&mut self, font_size: f32) -> bool {
         let next = font_size.clamp(8.0, 72.0);
         if (self.editor.font_size - next).abs() < f32::EPSILON {
@@ -24,6 +28,14 @@ impl AppSettings {
 
     fn set_editor_font(&mut self, editor_font: EditorFontPreset) -> bool {
         replace_if_changed(&mut self.editor.editor_font, editor_font)
+    }
+
+    fn set_editor_font_source(&mut self, source: EditorFontSource) -> bool {
+        replace_if_changed(&mut self.editor.font_source, source)
+    }
+
+    fn set_os_font_family(&mut self, family: String) -> bool {
+        replace_if_changed(&mut self.editor.os_font_family, family)
     }
 
     fn set_word_wrap(&mut self, enabled: bool) -> bool {
@@ -155,6 +167,17 @@ fn set_settings_surface(app: &mut ScratchpadApp, surface: AppSurface, open: bool
     changed
 }
 
+pub(crate) fn set_editor_appearance_source(
+    app: &mut ScratchpadApp,
+    source: EditorAppearanceSource,
+) {
+    if app.state.app_settings.set_editor_appearance_source(source) {
+        app.state.applied_editor_font = None;
+        app.state.applied_theme_mode = None;
+        persist_settings_or_error(app);
+    }
+}
+
 pub(crate) fn set_font_size(app: &mut ScratchpadApp, font_size: f32) {
     if app.state.app_settings.set_font_size(font_size) {
         persist_settings_or_error(app);
@@ -163,6 +186,20 @@ pub(crate) fn set_font_size(app: &mut ScratchpadApp, font_size: f32) {
 
 pub(crate) fn set_editor_font(app: &mut ScratchpadApp, editor_font: EditorFontPreset) {
     if app.state.app_settings.set_editor_font(editor_font) {
+        app.state.applied_editor_font = None;
+        persist_settings_or_error(app);
+    }
+}
+
+pub(crate) fn set_editor_font_source(app: &mut ScratchpadApp, source: EditorFontSource) {
+    if app.state.app_settings.set_editor_font_source(source) {
+        app.state.applied_editor_font = None;
+        persist_settings_or_error(app);
+    }
+}
+
+pub(crate) fn set_os_font_family(app: &mut ScratchpadApp, family: String) {
+    if app.state.app_settings.set_os_font_family(family) {
         app.state.applied_editor_font = None;
         persist_settings_or_error(app);
     }
@@ -190,6 +227,7 @@ pub(crate) fn apply_theme_mode_preset(
         .app_settings
         .apply_theme_mode_preset(theme_mode, system_theme)
     {
+        app.state.applied_theme_mode = None;
         persist_settings_or_error(app);
     }
 }

@@ -1,5 +1,5 @@
 use crate::app::domain::TextHistoryBudget;
-use crate::app::fonts::EditorFontPreset;
+use crate::app::fonts::{EditorFontPreset, EditorFontSource};
 use crate::app::platform::PlatformProfile;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
@@ -57,6 +57,26 @@ pub enum AppThemeMode {
     System,
     Light,
     Dark,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EditorAppearanceSource {
+    #[default]
+    App,
+    System,
+}
+
+impl EditorAppearanceSource {
+    pub const ALL: [Self; 2] = [Self::App, Self::System];
+
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::App => "App",
+            Self::System => "System",
+        }
+    }
 }
 
 impl AppThemeMode {
@@ -118,6 +138,8 @@ pub struct WindowState {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EditorSettings {
+    #[serde(default)]
+    pub appearance_source: EditorAppearanceSource,
     #[serde(default = "default_font_size")]
     pub font_size: f32,
     #[serde(default = "default_word_wrap")]
@@ -126,6 +148,10 @@ pub struct EditorSettings {
     pub editor_gutter: u8,
     #[serde(default)]
     pub editor_font: EditorFontPreset,
+    #[serde(default)]
+    pub font_source: EditorFontSource,
+    #[serde(default)]
+    pub os_font_family: String,
     #[serde(default)]
     pub theme_mode: AppThemeMode,
     #[serde(default = "default_editor_text_color")]
@@ -141,10 +167,13 @@ pub struct EditorSettings {
 impl Default for EditorSettings {
     fn default() -> Self {
         Self {
+            appearance_source: EditorAppearanceSource::default(),
             font_size: default_font_size(),
             word_wrap: default_word_wrap(),
             editor_gutter: default_editor_gutter(),
             editor_font: EditorFontPreset::default(),
+            font_source: EditorFontSource::default(),
+            os_font_family: String::new(),
             theme_mode: AppThemeMode::default(),
             editor_text_color: default_editor_text_color(),
             editor_background_color: default_editor_background_color(),

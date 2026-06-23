@@ -500,19 +500,6 @@ fn notify_session_restore_started(
         .ok_or_else(session_restore_receiver_closed)
 }
 
-#[cfg(test)]
-mod migration_tests {
-    use super::is_session_store_file;
-    use std::path::Path;
-
-    #[test]
-    fn fallback_session_migration_copies_only_session_files() {
-        assert!(is_session_store_file(Path::new("session.json")));
-        assert!(is_session_store_file(Path::new("buffer.tmp")));
-        assert!(!is_session_store_file(Path::new("settings.toml")));
-    }
-}
-
 fn session_restore_receiver_closed() -> io::Error {
     io::Error::new(io::ErrorKind::BrokenPipe, "session restore receiver closed")
 }
@@ -549,5 +536,18 @@ fn session_manifest(
         font_size,
         word_wrap,
         tabs,
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::is_session_store_file;
+    use std::path::Path;
+
+    #[test]
+    fn fallback_session_migration_copies_only_session_files() {
+        assert!(is_session_store_file(Path::new("session.json")));
+        assert!(is_session_store_file(Path::new("buffer.tmp")));
+        assert!(!is_session_store_file(Path::new("settings.toml")));
     }
 }

@@ -1,12 +1,12 @@
 use super::ScratchpadApp;
-use crate::app::fonts::EditorFontPreset;
+use crate::app::fonts::{EditorFontPreset, EditorFontSelection, EditorFontSource};
 use crate::app::paths_match;
 use crate::app::platform::PlatformProfile;
 use crate::app::services::file_controller::FileController;
 use crate::app::services::settings_store::{
     AppSettings, AppThemeMode, DEFAULT_EDITOR_BACKGROUND_COLOR, DEFAULT_EDITOR_TEXT_COLOR,
     DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR, DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR,
-    DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, FileOpenDisposition,
+    DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, EditorAppearanceSource, FileOpenDisposition,
     LEGACY_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR,
     LIGHT_EDITOR_TEXT_COLOR, NewTabPlacement, StartupSessionBehavior, TabListPosition,
     TabOrderDirection, TabOrderMode, WindowState, color_from_hex, color_to_hex,
@@ -33,12 +33,47 @@ impl ScratchpadApp {
 impl AppSettings {
     #[must_use]
     pub fn font_size(&self) -> f32 {
+        if self.editor_appearance_source() == EditorAppearanceSource::System {
+            return crate::app::system_appearance::editor_font_size();
+        }
+
         self.editor.font_size
+    }
+
+    #[must_use]
+    pub fn editor_appearance_source(&self) -> EditorAppearanceSource {
+        self.editor.appearance_source
     }
 
     #[must_use]
     pub fn editor_font(&self) -> EditorFontPreset {
         self.editor.editor_font
+    }
+
+    #[must_use]
+    pub fn editor_font_source(&self) -> EditorFontSource {
+        self.editor.font_source
+    }
+
+    #[must_use]
+    pub fn os_font_family(&self) -> &str {
+        self.editor.os_font_family.as_str()
+    }
+
+    #[must_use]
+    pub fn editor_font_selection(&self) -> EditorFontSelection {
+        if self.editor_appearance_source() == EditorAppearanceSource::System {
+            return EditorFontSelection::os(None, self.editor.editor_font);
+        }
+
+        let os_family = self.editor.os_font_family.trim();
+        let os_family = (!os_family.is_empty()).then(|| os_family.to_owned());
+        match self.editor.font_source {
+            EditorFontSource::Scratchpad => {
+                EditorFontSelection::scratchpad(self.editor.editor_font)
+            }
+            EditorFontSource::Os => EditorFontSelection::os(os_family, self.editor.editor_font),
+        }
     }
 
     #[must_use]
@@ -51,12 +86,30 @@ impl AppSettings {
         self.editor.theme_mode
     }
 
+    #[must_use]
+    pub fn theme_preference(&self) -> egui::ThemePreference {
+        if self.uses_system_editor_appearance() {
+            egui::ThemePreference::System
+        } else {
+            self.editor.theme_mode.theme_preference()
+        }
+    }
+
     pub(crate) fn has_custom_editor_palette(&self) -> bool {
         !uses_stock_editor_palette(self)
     }
 
     #[must_use]
+    pub fn uses_system_editor_appearance(&self) -> bool {
+        self.editor_appearance_source() == EditorAppearanceSource::System
+    }
+
+    #[must_use]
     pub fn editor_text_color(&self) -> egui::Color32 {
+        if self.uses_system_editor_appearance() {
+            return crate::app::system_appearance::editor_palette().text;
+        }
+
         color_from_hex(
             &self.editor.editor_text_color,
             color_from_hex(DEFAULT_EDITOR_TEXT_COLOR, egui::Color32::WHITE),
@@ -65,6 +118,10 @@ impl AppSettings {
 
     #[must_use]
     pub fn editor_background_color(&self) -> egui::Color32 {
+        if self.uses_system_editor_appearance() {
+            return crate::app::system_appearance::editor_palette().background;
+        }
+
         color_from_hex(
             &self.editor.editor_background_color,
             color_from_hex(DEFAULT_EDITOR_BACKGROUND_COLOR, egui::Color32::BLACK),
@@ -73,6 +130,10 @@ impl AppSettings {
 
     #[must_use]
     pub fn editor_text_highlight_color(&self) -> egui::Color32 {
+        if self.uses_system_editor_appearance() {
+            return crate::app::system_appearance::editor_palette().highlight;
+        }
+
         color_from_hex(
             &self.editor.editor_text_highlight_color,
             color_from_hex(
@@ -84,6 +145,10 @@ impl AppSettings {
 
     #[must_use]
     pub fn editor_text_highlight_text_color(&self) -> egui::Color32 {
+        if self.uses_system_editor_appearance() {
+            return crate::app::system_appearance::editor_palette().highlight_text;
+        }
+
         let generated =
             crate::app::color_contrast::optimal_text_color(self.editor_text_highlight_color());
         if uses_generated_highlight_text_color(&self.editor.editor_text_highlight_text_color) {
@@ -257,6 +322,8 @@ pub(super) fn apply_settings(app: &mut ScratchpadApp, settings: AppSettings) {
         .cloned()
         .collect();
     app.state.app_settings = settings;
+    app.state.applied_editor_font = None;
+    app.state.applied_theme_mode = None;
     app.apply_history_budget_to_open_buffers();
     if !invalid_shortcuts.is_empty() {
         app.state
@@ -286,7 +353,7 @@ pub fn apply_theme_to_context(app: &mut ScratchpadApp, ctx: &egui::Context) {
         return;
     }
 
-    ctx.set_theme(theme_mode.theme_preference());
+    ctx.set_theme(app.state.app_settings.theme_preference());
     ctx.set_visuals_of(egui::Theme::Dark, egui::Visuals::dark());
     ctx.set_visuals_of(egui::Theme::Light, egui::Visuals::light());
     app.state.applied_theme_mode = Some(theme_mode);

@@ -12,7 +12,7 @@ pub use buffer::{
     TextArtifactSummary, TextDocument, TextFormatMetadata, TextHistoryBudget, analyze_line_endings,
     display_line_count, platform_default_line_ending, source_label,
 };
-pub use panes::{PaneBranch, PaneNode, SplitAxis, SplitPath};
+pub use panes::{PaneBranch, PaneNode, SplitAxis, SplitPath, TileDirection};
 pub use tab::{TabAttentionState, WorkspaceTab};
 pub(crate) use tab_manager::DisplayTabSlot;
 pub use tab_manager::{PendingAction, TabManager};

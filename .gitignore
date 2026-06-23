@@ -4,6 +4,10 @@
 /target-tests/
 /target_test/
 /dist/
+/result
+/check_output.txt
+/clippy_output.txt
+/rustup-init.exe
 /log/
 /hotspots.html
 /slowspots.html

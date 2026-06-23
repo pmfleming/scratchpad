@@ -1,5 +1,7 @@
 use crate::app::app_state::workspace::{accessors as workspace_accessors, display_tabs};
-use crate::app::chrome::{TabButtonOptions, tab_button_with_actions, tab_rename_editor_sized};
+use crate::app::chrome::{
+    TabButtonOptions, TabRenameEditorOptions, tab_button_with_actions, tab_rename_editor_sized,
+};
 use crate::app::domain::TabAttentionState;
 use crate::app::ui::tab_drag;
 use crate::app::ui::tab_strip::context_menu::attach_tab_context_menu;
@@ -115,11 +117,9 @@ fn render_tab_rename_cell(
             ui,
             ("tab_strip.slot", index),
             draft,
-            props.is_active,
-            props.is_selected,
-            props.width,
-            request_focus,
-            Some(props.label_font_id.clone()),
+            TabRenameEditorOptions::new(props.is_active, props.is_selected, props.width)
+                .with_focus_request(request_focus)
+                .with_label_font_id(props.label_font_id.clone()),
         )
     };
 

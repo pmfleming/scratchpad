@@ -4,7 +4,7 @@ use crate::app::app_state::{
     workspace::{accessors as workspace_accessors, display_tabs, mutation as workspace_mutation},
     workspace_controller,
 };
-use crate::app::domain::{BufferId, PendingAction, SplitAxis, SplitPath, ViewId};
+use crate::app::domain::{BufferId, PendingAction, SplitAxis, SplitPath, TileDirection, ViewId};
 use crate::app::services::file_controller::FileController;
 use std::path::PathBuf;
 
@@ -53,6 +53,10 @@ pub(super) fn handle_workspace_command(app: &mut ScratchpadApp, command: Workspa
         } => reorder_display_tab_command(app, from_index, to_index),
         WorkspaceCommand::RequestCloseTab { index } => request_close_tab(app, index),
         WorkspaceCommand::ResizeSplit { path, ratio } => resize_split_command(app, path, ratio),
+        WorkspaceCommand::ResizeActiveTile { direction } => {
+            resize_active_tile_command(app, direction)
+        }
+        WorkspaceCommand::MoveActiveTile { direction } => move_active_tile_command(app, direction),
         WorkspaceCommand::SplitActiveView {
             axis,
             new_view_first,
@@ -214,6 +218,38 @@ fn resize_split_command(app: &mut ScratchpadApp, path: SplitPath, ratio: f32) ->
         && tab.layout.root_pane.resize_split(&path, ratio)
     {
         crate::app::app_state::frame::begin_layout_transition(app);
+        app.tab_manager.mark_session_dirty();
+        return true;
+    }
+    false
+}
+
+const KEYBOARD_TILE_RESIZE_STEP: f32 = 0.05;
+
+fn resize_active_tile_command(app: &mut ScratchpadApp, direction: TileDirection) -> bool {
+    let index = app.tab_manager.active_tab_index;
+    if let Some(tab) = app.tab_manager.tabs.as_mut_slice().get_mut(index)
+        && tab.resize_active_view_in_direction(direction, KEYBOARD_TILE_RESIZE_STEP)
+    {
+        crate::app::app_state::frame::begin_layout_transition(app);
+        app.tab_manager.mark_session_dirty();
+        return true;
+    }
+    false
+}
+
+fn move_active_tile_command(app: &mut ScratchpadApp, direction: TileDirection) -> bool {
+    let index = app.tab_manager.active_tab_index;
+    let mut active_view = None;
+    if let Some(tab) = app.tab_manager.tabs.as_mut_slice().get_mut(index)
+        && tab.move_active_view_in_direction(direction)
+    {
+        active_view = Some(tab.layout.active_view_id());
+    }
+    if let Some(active_view) = active_view {
+        crate::app::app_state::frame::begin_layout_transition(app);
+        crate::app::app_state::search_runtime::mark_search_dirty(app);
+        workspace_accessors::request_focus_for_view(app, active_view);
         app.tab_manager.mark_session_dirty();
         return true;
     }

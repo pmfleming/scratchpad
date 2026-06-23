@@ -34,14 +34,23 @@ pub enum ShortcutAction {
     PromoteTileToTab,
     PromoteTabFilesToTabs,
     CloseTile,
+    SplitTile,
     SplitUp,
     SplitDown,
     SplitLeft,
     SplitRight,
+    ResizeTileLeft,
+    ResizeTileRight,
+    ResizeTileUp,
+    ResizeTileDown,
+    MoveTileLeft,
+    MoveTileRight,
+    MoveTileUp,
+    MoveTileDown,
 }
 
 impl ShortcutAction {
-    pub(crate) const ALL: [Self; 34] = [
+    pub(crate) const ALL: [Self; 43] = [
         Self::OpenUserManual,
         Self::OpenSearch,
         Self::OpenReplace,
@@ -72,10 +81,19 @@ impl ShortcutAction {
         Self::PromoteTileToTab,
         Self::PromoteTabFilesToTabs,
         Self::CloseTile,
+        Self::SplitTile,
         Self::SplitUp,
         Self::SplitDown,
         Self::SplitLeft,
         Self::SplitRight,
+        Self::ResizeTileLeft,
+        Self::ResizeTileRight,
+        Self::ResizeTileUp,
+        Self::ResizeTileDown,
+        Self::MoveTileLeft,
+        Self::MoveTileRight,
+        Self::MoveTileUp,
+        Self::MoveTileDown,
     ];
 
     #[must_use]
@@ -111,10 +129,19 @@ impl ShortcutAction {
             Self::PromoteTileToTab => "promote_tile_to_tab",
             Self::PromoteTabFilesToTabs => "promote_tab_files_to_tabs",
             Self::CloseTile => "close_tile",
+            Self::SplitTile => "split_tile",
             Self::SplitUp => "split_up",
             Self::SplitDown => "split_down",
             Self::SplitLeft => "split_left",
             Self::SplitRight => "split_right",
+            Self::ResizeTileLeft => "resize_tile_left",
+            Self::ResizeTileRight => "resize_tile_right",
+            Self::ResizeTileUp => "resize_tile_up",
+            Self::ResizeTileDown => "resize_tile_down",
+            Self::MoveTileLeft => "move_tile_left",
+            Self::MoveTileRight => "move_tile_right",
+            Self::MoveTileUp => "move_tile_up",
+            Self::MoveTileDown => "move_tile_down",
         }
     }
 }
@@ -152,7 +179,6 @@ const CTRL_ALT: egui::Modifiers = egui::Modifiers {
     mac_cmd: false,
     command: false,
 };
-
 const OPEN_USER_MANUAL: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::NONE, egui::Key::F1)];
 const OPEN_SEARCH: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::F)];
 const OPEN_REPLACE: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::H)];
@@ -190,10 +216,24 @@ const CLOSE_TAB: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::CTRL, egui:
 const PROMOTE_TILE_TO_TAB: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::T)];
 const PROMOTE_TAB_FILES_TO_TABS: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::T)];
 const CLOSE_TILE: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::W)];
+const SPLIT_TILE: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::Enter)];
 const SPLIT_UP: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::ArrowUp)];
 const SPLIT_DOWN: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::ArrowDown)];
 const SPLIT_LEFT: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::ArrowLeft)];
 const SPLIT_RIGHT: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::ArrowRight)];
+const RESIZE_TILE_LEFT: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowLeft)];
+const RESIZE_TILE_RIGHT: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowRight)];
+const RESIZE_TILE_UP: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowUp)];
+const RESIZE_TILE_DOWN: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowDown)];
+const MOVE_TILE_LEFT: [KeyBinding; 1] =
+    [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::ArrowLeft)];
+const MOVE_TILE_RIGHT: [KeyBinding; 1] = [KeyBinding::new(
+    egui::Modifiers::CTRL,
+    egui::Key::ArrowRight,
+)];
+const MOVE_TILE_UP: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::ArrowUp)];
+const MOVE_TILE_DOWN: [KeyBinding; 1] =
+    [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::ArrowDown)];
 
 #[must_use]
 pub fn default_bindings(
@@ -231,10 +271,19 @@ pub fn default_bindings(
         ShortcutAction::PromoteTileToTab => &PROMOTE_TILE_TO_TAB,
         ShortcutAction::PromoteTabFilesToTabs => &PROMOTE_TAB_FILES_TO_TABS,
         ShortcutAction::CloseTile => &CLOSE_TILE,
+        ShortcutAction::SplitTile => &SPLIT_TILE,
         ShortcutAction::SplitUp => &SPLIT_UP,
         ShortcutAction::SplitDown => &SPLIT_DOWN,
         ShortcutAction::SplitLeft => &SPLIT_LEFT,
         ShortcutAction::SplitRight => &SPLIT_RIGHT,
+        ShortcutAction::ResizeTileLeft => &RESIZE_TILE_LEFT,
+        ShortcutAction::ResizeTileRight => &RESIZE_TILE_RIGHT,
+        ShortcutAction::ResizeTileUp => &RESIZE_TILE_UP,
+        ShortcutAction::ResizeTileDown => &RESIZE_TILE_DOWN,
+        ShortcutAction::MoveTileLeft => &MOVE_TILE_LEFT,
+        ShortcutAction::MoveTileRight => &MOVE_TILE_RIGHT,
+        ShortcutAction::MoveTileUp => &MOVE_TILE_UP,
+        ShortcutAction::MoveTileDown => &MOVE_TILE_DOWN,
     }
 }
 
@@ -437,6 +486,22 @@ mod tests {
         assert_eq!(
             default_bindings(PlatformProfile::Windows, ShortcutAction::ToggleTabList),
             &[KeyBinding::new(super::CTRL_ALT, egui::Key::B)]
+        );
+    }
+
+    #[test]
+    fn tile_management_defaults_have_local_bindings() {
+        assert_eq!(
+            default_bindings(PlatformProfile::Hyprland, ShortcutAction::SplitTile),
+            &[KeyBinding::new(super::CTRL_ALT, egui::Key::Enter)]
+        );
+        assert_eq!(
+            default_bindings(PlatformProfile::Hyprland, ShortcutAction::ResizeTileLeft),
+            &[KeyBinding::new(super::CTRL_ALT, egui::Key::ArrowLeft)]
+        );
+        assert_eq!(
+            default_bindings(PlatformProfile::Hyprland, ShortcutAction::MoveTileLeft),
+            &[KeyBinding::new(egui::Modifiers::CTRL, egui::Key::ArrowLeft)]
         );
     }
 

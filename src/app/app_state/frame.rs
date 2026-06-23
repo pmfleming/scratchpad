@@ -263,31 +263,32 @@ pub(crate) fn window_title(app: &ScratchpadApp) -> String {
 }
 
 fn sync_editor_fonts(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    if app.state.applied_editor_font == Some(app.state.app_settings.editor.editor_font) {
+    let selection = app.state.app_settings.editor_font_selection();
+    if app.state.applied_editor_font.as_ref() == Some(&selection) {
         return;
     }
 
-    if let Err(error) = fonts::apply_editor_fonts(ctx, app.state.app_settings.editor.editor_font) {
+    if let Err(error) = fonts::apply_editor_fonts(ctx, &selection) {
         diagnostics::record_warning(
             "apply_editor_font",
             None,
             "app_state::frame",
             format!(
                 "Editor font '{}' unavailable; using default fallback: {error}",
-                app.state.app_settings.editor.editor_font.label()
+                selection.label()
             ),
         );
         app.state.status.set_warning_status_with_detail(
             crate::app::app_state::StatusDomain::Settings,
             format!(
-                "Could not use editor font '{}'. The default font is in use.",
-                app.state.app_settings.editor.editor_font.label()
+                "Could not use editor font '{}'. The bundled fallback is in use.",
+                selection.label()
             ),
             error.to_string(),
         );
     }
     clear_editor_layout_caches(app);
-    app.state.applied_editor_font = Some(app.state.app_settings.editor.editor_font);
+    app.state.applied_editor_font = Some(selection);
 }
 
 fn clear_editor_layout_caches(app: &mut ScratchpadApp) {

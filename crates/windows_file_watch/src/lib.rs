@@ -159,13 +159,9 @@ fn windows_watch_loop(command_rx: Receiver<WatchCommand>, event_tx: Sender<FileW
     }
 
     fn rebuild_watches(dirs: Vec<PathBuf>) -> Vec<WatchHandle> {
-        // This local watcher is deliberately dumb and narrow: Scratchpad is a
-        // Windows-only app today, so we use Windows directory change handles
-        // directly instead of adding a general cross-platform watcher
-        // dependency. The handles only tell us "something changed nearby";
-        // the editor's existing disk-state checks still decide reload,
-        // conflict, and missing-file behavior. If Scratchpad grows beyond
-        // Windows, this boundary is the place to consider wiring in `notify`.
+        // The handles only tell us "something changed nearby"; the editor's
+        // existing disk-state checks still decide reload, conflict, and
+        // missing-file behavior.
         dirs.into_iter().filter_map(open_watch).collect()
     }
 

@@ -1,5 +1,7 @@
 use super::WorkspaceTab;
-use crate::app::domain::{BufferId, BufferState, EditorViewState, PaneNode, SplitAxis, ViewId};
+use crate::app::domain::{
+    BufferId, BufferState, EditorViewState, PaneNode, SplitAxis, TileDirection, ViewId,
+};
 use std::collections::HashSet;
 
 struct ViewPresentationState {
@@ -184,6 +186,22 @@ impl WorkspaceTab {
 
     pub fn rebalance_views_equally(&mut self) -> bool {
         self.rebalance_views_equally_for_axis(SplitAxis::Vertical)
+    }
+
+    pub fn resize_active_view_in_direction(
+        &mut self,
+        direction: TileDirection,
+        delta: f32,
+    ) -> bool {
+        self.layout
+            .root_pane
+            .resize_view_in_direction(self.layout.active_view_id, direction, delta)
+    }
+
+    pub fn move_active_view_in_direction(&mut self, direction: TileDirection) -> bool {
+        self.layout
+            .root_pane
+            .move_view_in_direction(self.layout.active_view_id, direction)
     }
 
     pub fn rebalance_views_equally_for_axis(&mut self, root_axis: SplitAxis) -> bool {

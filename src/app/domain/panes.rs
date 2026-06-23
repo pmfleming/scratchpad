@@ -15,6 +15,14 @@ pub enum PaneBranch {
     Second,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TileDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
 pub type SplitPath = Vec<PaneBranch>;
 
 #[derive(Clone)]

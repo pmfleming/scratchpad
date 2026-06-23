@@ -188,13 +188,26 @@ fn parse_argument_kind(raw_arg: OsString) -> Result<ParsedArgument, String> {
     if let Some(startup_switch) = parse_switch(&arg)? {
         return Ok(ParsedArgument::Switch(startup_switch));
     }
-    if arg.starts_with('/') {
+    if is_unrecognized_switch_argument(&arg) {
         return Err(format!(
             "Unknown startup switch: {arg}. Use /help to show supported switches."
         ));
     }
 
     Ok(ParsedArgument::File(PathBuf::from(raw_arg)))
+}
+
+fn is_unrecognized_switch_argument(arg: &str) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        arg.starts_with('/')
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = arg;
+        false
+    }
 }
 
 fn parse_switch(arg: &str) -> Result<Option<StartupSwitch>, String> {

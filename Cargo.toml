@@ -19,15 +19,19 @@ encoding_rs = "0.8"
 encoding_rs_io = "0.1"
 chardetng = "0.1"
 log = "0.4"
+fontdb = "0.23"
 syn = { version = "2.0", features = ["full", "extra-traits", "visit"] }
 proc-macro2 = { version = "1.0", features = ["span-locations"] }
 rustc-hash = "2.0"
 smallvec = { version = "1.13", features = ["serde"] }
 sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+
+[target.'cfg(windows)'.dependencies]
 windows_file_watch = { path = "crates/windows_file_watch" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 eframe = { version = "0.34.3", features = ["glow"] }
+linux_file_watch = { path = "crates/linux_file_watch" }
 
 [dev-dependencies]
 criterion = "0.5"

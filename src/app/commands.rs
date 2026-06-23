@@ -1,5 +1,5 @@
 use crate::app::app_state::SearchScope;
-use crate::app::domain::{SplitAxis, SplitPath, ViewId};
+use crate::app::domain::{SplitAxis, SplitPath, TileDirection, ViewId};
 use crate::app::services::search::SearchMode;
 
 mod dialogs;
@@ -66,6 +66,12 @@ pub enum WorkspaceCommand {
     ResizeSplit {
         path: SplitPath,
         ratio: f32,
+    },
+    ResizeActiveTile {
+        direction: TileDirection,
+    },
+    MoveActiveTile {
+        direction: TileDirection,
     },
     SplitActiveView {
         axis: SplitAxis,

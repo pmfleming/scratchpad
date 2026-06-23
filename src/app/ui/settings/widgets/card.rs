@@ -26,7 +26,7 @@ pub(in crate::app::ui::settings) fn render_preview_panel(ui: &mut egui::Ui, app:
                         render_preview_text(ui, app, preview_family);
                         ui.add_space(16.0);
                         ui.horizontal_wrapped(|ui| {
-                            info_chip(ui, app.state.app_settings.editor_font().label());
+                            info_chip(ui, &app.state.app_settings.editor_font_selection().label());
                             ui.add_space(8.0);
                             info_chip(ui, &format!("{:.0} pt", app.state.app_settings.font_size()));
                             ui.add_space(8.0);

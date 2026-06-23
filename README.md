@@ -119,15 +119,26 @@ open_file = "ctrl+o"
 save_file = "ctrl+s"
 close_tab = "ctrl+w"
 toggle_tab_list = "ctrl+alt+b"
+split_tile = "ctrl+alt+enter"
 split_left = "ctrl+shift+left"
 split_right = "ctrl+shift+right"
 split_up = "ctrl+shift+up"
 split_down = "ctrl+shift+down"
+resize_tile_left = "ctrl+alt+left"
+resize_tile_right = "ctrl+alt+right"
+resize_tile_up = "ctrl+alt+up"
+resize_tile_down = "ctrl+alt+down"
+move_tile_left = "ctrl+left"
+move_tile_right = "ctrl+right"
+move_tile_up = "ctrl+up"
+move_tile_down = "ctrl+down"
 ```
 
 Shortcut strings are case-insensitive. Supported modifiers are `ctrl`, `shift`,
 `alt`, and `command`/`super`/`win`. Multiple bindings can be separated with
-commas.
+commas, so Hyprland users can opt into focused-app Super bindings such as
+`split_tile = "ctrl+alt+enter, super+enter"` if those keys are not reserved by
+the compositor.
 
 ## Packaging and Release
 
@@ -196,6 +207,7 @@ src/
     platform_file.rs      Platform-specific file dialogs and reveal/open actions
   bin/                    Profiling, resource, frame, and capacity probes
 crates/
+  linux_file_watch/       Linux file-change watching helper crate
   windows_file_watch/     Windows file-change watching helper crate
 benches/                  Criterion benchmark targets
 scripts/                  Release and analysis helper scripts

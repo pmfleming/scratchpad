@@ -1,7 +1,7 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::chrome::phosphor_button;
-use crate::app::fonts::{EDITOR_FONT_FAMILY, EditorFontPreset};
-use crate::app::services::settings_store::{AppThemeMode, TabListPosition};
+use crate::app::fonts::{EDITOR_FONT_FAMILY, EditorFontPreset, EditorFontSource};
+use crate::app::services::settings_store::{AppThemeMode, EditorAppearanceSource, TabListPosition};
 use crate::app::theme::{action_bg, action_hover_bg, border, text_muted, text_primary};
 use crate::app::ui::widget_ids;
 use eframe::egui;
@@ -320,8 +320,11 @@ mod tests {
         reset_settings_layout_measurements();
 
         let ctx = egui::Context::default();
-        crate::app::fonts::apply_editor_fonts(&ctx, app.state.app_settings.editor_font())
-            .expect("install editor fonts for settings layout test");
+        crate::app::fonts::apply_editor_fonts(
+            &ctx,
+            &app.state.app_settings.editor_font_selection(),
+        )
+        .expect("install editor fonts for settings layout test");
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.set_min_size(egui::vec2(surface_width, 4200.0));
             ui.set_width(surface_width);
