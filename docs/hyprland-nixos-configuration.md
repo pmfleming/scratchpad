@@ -112,17 +112,15 @@ Plain Hyprland config example:
 $mainMod = SUPER
 
 # Starts Scratchpad at login without switching away from the current workspace.
-# The silent window rule below sends it to special:scratchpad.
+# The silent rule sends it to the regular fifth workspace, whose Waybar entry
+# can display the Scratchpad icon.
 exec-once = scratchpad
 
 bind = $mainMod, S, exec, scratchpad
-bind = $mainMod SHIFT, S, togglespecialworkspace, scratchpad
-bind = $mainMod CTRL, S, movetoworkspace, special:scratchpad
+bind = $mainMod, 5, workspace, 5
+bind = $mainMod SHIFT, 5, movetoworkspace, 5
 
-windowrule = match:class ^(scratchpad)$, workspace special:scratchpad silent
-windowrule = match:class ^(scratchpad)$, float on
-windowrule = match:class ^(scratchpad)$, center on
-windowrule = match:class ^(scratchpad)$, size 1200 800
+windowrule = match:class ^(scratchpad)$, workspace 5 silent
 ```
 
 Adjust class matching after checking the actual window class with:
@@ -145,15 +143,12 @@ Conceptual Home Manager configuration:
 
     bind = [
       "$mainMod, S, exec, scratchpad"
-      "$mainMod SHIFT, S, togglespecialworkspace, scratchpad"
-      "$mainMod CTRL, S, movetoworkspace, special:scratchpad"
+      "$mainMod, 5, workspace, 5"
+      "$mainMod SHIFT, 5, movetoworkspace, 5"
     ];
 
     windowrule = [
-      "match:class ^(scratchpad)$, workspace special:scratchpad silent"
-      "match:class ^(scratchpad)$, float on"
-      "match:class ^(scratchpad)$, center on"
-      "match:class ^(scratchpad)$, size 1200 800"
+      "match:class ^(scratchpad)$, workspace 5 silent"
     ];
   };
 
@@ -211,10 +206,8 @@ The flake exposes a first-class Home Manager module:
             };
 
             hyprland = {
-              enableBinds = true;
               autoStart = true;
-              toggleBind = "$mainMod SHIFT, S";
-              specialWorkspace = "scratchpad";
+              workspace = "5";
             };
           };
         }
@@ -224,7 +217,7 @@ The flake exposes a first-class Home Manager module:
 }
 ```
 
-When `profile = "hyprland"`, the module installs the Hyprland wrapper by default and writes `~/.config/scratchpad/settings.toml`. Setting `hyprland.autoStart = true` adds an `exec-once` entry and the workspace rules even when generated key bindings are disabled. Scratchpad starts hidden on `special:scratchpad`; use the configured toggle binding to reveal it.
+When `profile = "hyprland"`, the module installs the Hyprland wrapper by default and writes `~/.config/scratchpad/settings.toml`. Setting `hyprland.autoStart = true` adds an `exec-once` entry and the workspace rule even when generated key bindings are disabled. Scratchpad starts tiled on regular workspace `5` without changing the active workspace. This keeps the fifth Waybar workspace/icon occupied and ready at login.
 
 ## Verify the window rule
 
@@ -234,4 +227,4 @@ The Wayland build explicitly uses `scratchpad` as its app ID, which Hyprland exp
 hyprctl clients | grep -A8 -B2 scratchpad
 ```
 
-The client should report class `scratchpad` and workspace `special:scratchpad`. If a downstream launcher changes the class, override `programs.scratchpad.hyprland.windowClass` or adjust the plain `windowrule` expressions. These examples use the current Hyprland rule syntax; older Hyprland releases may require the deprecated `windowrulev2` form.
+The client should report class `scratchpad` and workspace `5`. If a downstream launcher changes the class, override `programs.scratchpad.hyprland.windowClass` or adjust the plain `windowrule` expression. These examples use the current Hyprland rule syntax; older Hyprland releases may require the deprecated `windowrulev2` form.

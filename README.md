@@ -201,24 +201,20 @@ programs.scratchpad = {
   enable = true;
   profile = "hyprland";
   hyprland = {
-    enableBinds = true;
     autoStart = true;
-    specialWorkspace = "scratchpad";
+    workspace = "5";
   };
 };
 ```
 
-This starts Scratchpad silently on `special:scratchpad` at login. The default
-`SUPER+SHIFT+S` binding toggles that workspace. For a non-Nix installation,
-install the GitHub release archive and add the equivalent Hyprland settings:
+This starts Scratchpad tiled on regular workspace `5` at login without changing
+the active workspace. A Waybar icon assigned to workspace 5 remains the direct
+entry point for Scratchpad. For a non-Nix installation, install the GitHub
+release archive and add the equivalent Hyprland settings:
 
 ```ini
 exec-once = scratchpad-hyprland
-bind = SUPER SHIFT, S, togglespecialworkspace, scratchpad
-windowrule = match:class ^(scratchpad)$, workspace special:scratchpad silent
-windowrule = match:class ^(scratchpad)$, float on
-windowrule = match:class ^(scratchpad)$, center on
-windowrule = match:class ^(scratchpad)$, size 1200 800
+windowrule = match:class ^(scratchpad)$, workspace 5 silent
 ```
 
 The release workflow publishes `scratchpad-vX.Y.Z-linux-x86_64.tar.gz` and its

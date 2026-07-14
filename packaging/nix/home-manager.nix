@@ -53,9 +53,9 @@ in
     };
 
     hyprland = {
-      enableBinds = lib.mkEnableOption "Hyprland Scratchpad binds and window rules";
+      enableBinds = lib.mkEnableOption "Hyprland Scratchpad binds and workspace rule";
 
-      autoStart = lib.mkEnableOption "starting Scratchpad in its Hyprland special workspace";
+      autoStart = lib.mkEnableOption "starting Scratchpad on its Hyprland workspace";
 
       mainMod = lib.mkOption {
         type = lib.types.str;
@@ -69,22 +69,22 @@ in
         description = "Hyprland bind prefix used to launch Scratchpad.";
       };
 
-      toggleBind = lib.mkOption {
+      focusBind = lib.mkOption {
         type = lib.types.str;
-        default = "$mainMod SHIFT, S";
-        description = "Hyprland bind prefix used to toggle the special workspace.";
+        default = "$mainMod, 5";
+        description = "Hyprland bind prefix used to focus the Scratchpad workspace.";
       };
 
       moveBind = lib.mkOption {
         type = lib.types.str;
-        default = "$mainMod CTRL, S";
-        description = "Hyprland bind prefix used to move Scratchpad to its special workspace.";
+        default = "$mainMod SHIFT, 5";
+        description = "Hyprland bind prefix used to move a window to the Scratchpad workspace.";
       };
 
-      specialWorkspace = lib.mkOption {
+      workspace = lib.mkOption {
         type = lib.types.str;
-        default = "scratchpad";
-        description = "Hyprland special workspace name for Scratchpad.";
+        default = "5";
+        description = "Regular Hyprland workspace where Scratchpad starts.";
       };
 
       windowClass = lib.mkOption {
@@ -93,10 +93,16 @@ in
         description = "Window class matched by generated Hyprland window rules.";
       };
 
+      floating = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Whether Scratchpad floats instead of tiling on its workspace.";
+      };
+
       windowSize = lib.mkOption {
         type = lib.types.str;
         default = "1200 800";
-        description = "Hyprland window size rule value.";
+        description = "Hyprland window size used when `floating` is enabled.";
       };
     };
   };
@@ -112,13 +118,14 @@ in
         "$mainMod" = cfg.hyprland.mainMod;
         bind = [
           "${cfg.hyprland.launchBind}, exec, ${selectedPackage}/bin/scratchpad"
-          "${cfg.hyprland.toggleBind}, togglespecialworkspace, ${cfg.hyprland.specialWorkspace}"
-          "${cfg.hyprland.moveBind}, movetoworkspace, special:${cfg.hyprland.specialWorkspace}"
+          "${cfg.hyprland.focusBind}, workspace, ${cfg.hyprland.workspace}"
+          "${cfg.hyprland.moveBind}, movetoworkspace, ${cfg.hyprland.workspace}"
         ];
       })
       (lib.mkIf (cfg.hyprland.enableBinds || cfg.hyprland.autoStart) {
         windowrule = [
-          "match:class ^(${cfg.hyprland.windowClass})$, workspace special:${cfg.hyprland.specialWorkspace} silent"
+          "match:class ^(${cfg.hyprland.windowClass})$, workspace ${cfg.hyprland.workspace} silent"
+        ] ++ lib.optionals cfg.hyprland.floating [
           "match:class ^(${cfg.hyprland.windowClass})$, float on"
           "match:class ^(${cfg.hyprland.windowClass})$, center on"
           "match:class ^(${cfg.hyprland.windowClass})$, size ${cfg.hyprland.windowSize}"
