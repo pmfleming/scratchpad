@@ -72,7 +72,7 @@ fn env_path(env: &mut impl FnMut(&str) -> Option<OsString>, name: &str) -> Optio
         .map(PathBuf::from)
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::{session_root_from_env, settings_root_from_env};
     use std::collections::HashMap;
