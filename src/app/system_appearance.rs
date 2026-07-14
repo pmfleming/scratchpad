@@ -308,6 +308,7 @@ fn detect_system_accent_color() -> Option<egui::Color32> {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn parse_trailing_font_size(font_name: &str) -> Option<f32> {
     font_name
         .split_whitespace()
@@ -315,6 +316,7 @@ fn parse_trailing_font_size(font_name: &str) -> Option<f32> {
         .and_then(|size| size.parse::<f32>().ok())
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn parse_font_family(font_name: &str) -> Option<String> {
     let trimmed = font_name.trim();
     let Some((family, _size)) = trimmed.rsplit_once(char::is_whitespace) else {
