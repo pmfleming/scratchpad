@@ -7,6 +7,44 @@ use crate::app::ui::tab_drag;
 use crate::app::ui::tab_strip::context_menu::attach_tab_context_menu;
 use crate::app::ui::widget_ids;
 use eframe::egui;
+use std::collections::HashMap;
+
+pub(crate) struct TabPresentation {
+    pub display_name: String,
+    pub tooltip: String,
+    pub can_promote_all_files: bool,
+    pub attention_state: Option<TabAttentionState>,
+}
+
+pub(crate) fn tab_presentation(
+    app: &crate::app::app_state::ScratchpadApp,
+    slot_index: usize,
+    duplicate_name_counts: &HashMap<String, usize>,
+) -> Option<TabPresentation> {
+    if display_tabs::tab_slot_is_settings(app, slot_index) {
+        return Some(TabPresentation {
+            display_name: "Settings".to_owned(),
+            tooltip: "Settings".to_owned(),
+            can_promote_all_files: false,
+            attention_state: None,
+        });
+    }
+
+    let workspace_index = display_tabs::workspace_index_for_slot(app, slot_index)?;
+    let tab = app.tab_manager.tabs.as_slice().get(workspace_index)?;
+    let has_duplicate = duplicate_name_counts
+        .get(&tab.buffers.buffer.name)
+        .copied()
+        .unwrap_or(0)
+        > 1;
+    let display_name = crate::app::domain::tab::summary::full_display_name(tab, has_duplicate);
+    Some(TabPresentation {
+        tooltip: display_name.clone(),
+        display_name,
+        can_promote_all_files: crate::app::domain::tab::summary::can_promote_all_files(tab),
+        attention_state: crate::app::domain::tab::summary::attention_state(tab),
+    })
+}
 
 pub(crate) struct TabCellProps<'a> {
     pub display_name: &'a str,
@@ -163,7 +201,7 @@ fn tab_button_with_width(
     )
 }
 
-fn attention_color(state: TabAttentionState) -> egui::Color32 {
+pub(crate) fn attention_color(state: TabAttentionState) -> egui::Color32 {
     match state {
         TabAttentionState::AutoEdit => egui::Color32::from_rgb(230, 132, 46),
         TabAttentionState::Dirty => egui::Color32::from_rgb(70, 176, 96),

@@ -5,6 +5,42 @@ use scratchpad::app::services::settings_store::{
     WindowState,
 };
 
+struct SettingsFixture {
+    directory: tempfile::TempDir,
+    store: SettingsStore,
+}
+
+impl SettingsFixture {
+    fn new() -> Self {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SettingsStore::new(directory.path().to_path_buf());
+        Self { directory, store }
+    }
+
+    fn write(&self, name: &str, contents: &str) {
+        std::fs::write(self.directory.path().join(name), contents).unwrap();
+    }
+
+    fn load(&self) -> AppSettings {
+        self.store.load().unwrap().unwrap()
+    }
+
+    fn path_exists(&self, name: &str) -> bool {
+        self.directory.path().join(name).exists()
+    }
+}
+
+fn assert_newer_settings_defaults(settings: &AppSettings) {
+    assert_eq!(settings.editor.editor_font, EditorFontPreset::default());
+    assert_eq!(settings.workspace.tab_list_position, TabListPosition::Top);
+    assert_eq!(
+        settings.workspace.file_open_disposition,
+        FileOpenDisposition::NewTab
+    );
+    assert_eq!(settings.platform.profile, PlatformProfile::Auto);
+    assert!(settings.shortcuts.bindings.is_empty());
+}
+
 #[test]
 fn missing_settings_file_returns_none() {
     let directory = tempfile::tempdir().unwrap();
@@ -57,8 +93,7 @@ fn save_omits_ephemeral_tab_order_and_window_geometry() {
     store.save(&settings).unwrap();
 
     let raw = std::fs::read_to_string(directory.path().join("settings.toml")).unwrap();
-    let saved = raw.parse::<toml::Value>().unwrap();
-    let table = saved.as_table().unwrap();
+    let table = raw.parse::<toml::Table>().unwrap();
     let window_state = table
         .get("ui")
         .and_then(toml::Value::as_table)
@@ -124,9 +159,9 @@ fn malformed_toml_returns_invalid_data() {
 
 #[test]
 fn older_toml_missing_newer_fields_uses_defaults() {
-    let directory = tempfile::tempdir().unwrap();
-    std::fs::write(
-        directory.path().join("settings.toml"),
+    let fixture = SettingsFixture::new();
+    fixture.write(
+        "settings.toml",
         r##"
 [editor]
 font_size = 16.0
@@ -145,27 +180,16 @@ recent_files_enabled = true
 [ui]
 status_bar_visible = true
 "##,
-    )
-    .unwrap();
-    let store = SettingsStore::new(directory.path().to_path_buf());
-
-    let loaded = store.load().unwrap().unwrap();
-
-    assert_eq!(loaded.editor.editor_font, EditorFontPreset::default());
-    assert_eq!(loaded.workspace.tab_list_position, TabListPosition::Top);
-    assert_eq!(
-        loaded.workspace.file_open_disposition,
-        FileOpenDisposition::NewTab
     );
-    assert_eq!(loaded.platform.profile, PlatformProfile::Auto);
-    assert!(loaded.shortcuts.bindings.is_empty());
+
+    assert_newer_settings_defaults(&fixture.load());
 }
 
 #[test]
 fn legacy_yaml_migrates_to_toml_when_toml_is_missing() {
-    let directory = tempfile::tempdir().unwrap();
-    std::fs::write(
-        directory.path().join("settings.yaml"),
+    let fixture = SettingsFixture::new();
+    fixture.write(
+        "settings.yaml",
         r##"
 editor:
   font_size: 15.0
@@ -194,17 +218,15 @@ ui:
   settings_tab_open: true
   settings_tab_index: null
 "##,
-    )
-    .unwrap();
-    let store = SettingsStore::new(directory.path().to_path_buf());
+    );
 
-    let loaded = store.load().unwrap().unwrap();
+    let loaded = fixture.load();
 
     assert_eq!(loaded.editor.font_size, 15.0);
     assert_eq!(loaded.editor.editor_font, EditorFontPreset::Mono);
     assert_eq!(loaded.workspace.tab_list_position, TabListPosition::Right);
     assert_eq!(loaded.platform.profile, PlatformProfile::Auto);
-    assert!(directory.path().join("settings.toml").exists());
+    assert!(fixture.path_exists("settings.toml"));
 }
 
 #[test]

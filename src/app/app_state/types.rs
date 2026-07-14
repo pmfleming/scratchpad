@@ -116,3 +116,72 @@ pub(crate) enum PendingBackgroundAction {
     RefreshTextMetadata(PendingTextMetadataAction),
     RefreshEncodingCompliance(PendingEncodingComplianceAction),
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PendingActionKind {
+    OpenTabs,
+    OpenHere,
+    StartupRestore,
+    HydrateSessionTab,
+    ReloadBuffer,
+    ReopenWithEncoding,
+    SavePath,
+    StartupRestoreCompare,
+    PersistSession,
+    RefreshTextMetadata,
+    RefreshEncodingCompliance,
+}
+
+macro_rules! pending_action_extractors {
+    ($($method:ident, $variant:ident, $ty:ty;)+) => {
+        $(
+            pub(crate) fn $method(self) -> Option<$ty> {
+                match self {
+                    Self::$variant(action) => Some(action),
+                    _ => None,
+                }
+            }
+        )+
+    };
+}
+
+impl PendingBackgroundAction {
+    pub(crate) fn kind(&self) -> PendingActionKind {
+        match self {
+            Self::OpenTabs(_) => PendingActionKind::OpenTabs,
+            Self::OpenHere(_) => PendingActionKind::OpenHere,
+            Self::StartupRestore(_) => PendingActionKind::StartupRestore,
+            Self::HydrateSessionTab(_) => PendingActionKind::HydrateSessionTab,
+            Self::ReloadBuffer(_) => PendingActionKind::ReloadBuffer,
+            Self::ReopenWithEncoding(_) => PendingActionKind::ReopenWithEncoding,
+            Self::SavePath(_) => PendingActionKind::SavePath,
+            Self::StartupRestoreCompare(_) => PendingActionKind::StartupRestoreCompare,
+            Self::PersistSession(_) => PendingActionKind::PersistSession,
+            Self::RefreshTextMetadata(_) => PendingActionKind::RefreshTextMetadata,
+            Self::RefreshEncodingCompliance(_) => PendingActionKind::RefreshEncodingCompliance,
+        }
+    }
+
+    pending_action_extractors! {
+        into_save_path, SavePath, PendingSavePathAction;
+        into_startup_restore, StartupRestore, PendingStartupRestoreAction;
+        into_session_hydration, HydrateSessionTab, PendingSessionHydrationAction;
+        into_session_persist, PersistSession, PendingSessionPersistAction;
+        into_text_metadata, RefreshTextMetadata, PendingTextMetadataAction;
+        into_encoding_compliance, RefreshEncodingCompliance, PendingEncodingComplianceAction;
+    }
+
+    pub(crate) fn as_open_tabs_mut(&mut self) -> Option<&mut PendingOpenTabsAction> {
+        match self {
+            Self::OpenTabs(action) => Some(action),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_startup_restore_mut(&mut self) -> Option<&mut PendingStartupRestoreAction> {
+        match self {
+            Self::StartupRestore(action) => Some(action),
+            _ => None,
+        }
+    }
+}

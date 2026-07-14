@@ -1,5 +1,5 @@
 use super::FileController;
-use super::support::{DeferredBufferRefresh, LoadedFile};
+use super::support::{DeferredBufferRefresh, LoadedFile, OpenPathDecision};
 use crate::app::app_state::{
     PendingBackgroundAction, PendingOpenHereAction, ScratchpadApp, StatusDomain,
 };
@@ -17,7 +17,6 @@ enum OpenHerePathOutcome {
     Opened { artifact_warning: Option<String> },
     Migrated,
     AlreadyInCurrentTab,
-    Queued,
     Failed,
 }
 
@@ -35,24 +34,38 @@ impl FileController {
             .as_slice()
             .get(app.tab_manager.active_tab_index)
             .map(|tab| tab.layout.active_view_id());
-        let mut pending_paths = Vec::new();
+        let batch = Self::prepare_open_batch(
+            app,
+            paths,
+            |app, path| {
+                if let Some(existing_path) = Self::find_existing_open_here_path(app, &path) {
+                    OpenPathDecision::Resolved(Self::resolve_existing_open_here_path(
+                        app,
+                        path,
+                        existing_path,
+                    ))
+                } else {
+                    OpenPathDecision::Unresolved(path)
+                }
+            },
+            || OpenHerePathOutcome::AlreadyInCurrentTab,
+        );
         let mut summary = OpenHereBatchSummary::default();
         let mut already_here_count = 0;
         let mut migrated_count = 0;
         let mut failure_count = 0;
 
-        for path in paths {
-            let outcome = Self::prepare_open_path_here_async(app, path, &mut pending_paths);
+        for outcome in batch.resolved {
             match outcome {
                 OpenHerePathOutcome::Migrated => migrated_count += 1,
                 OpenHerePathOutcome::AlreadyInCurrentTab => already_here_count += 1,
                 OpenHerePathOutcome::Failed => failure_count += 1,
-                OpenHerePathOutcome::Opened { .. } | OpenHerePathOutcome::Queued => {}
+                OpenHerePathOutcome::Opened { .. } => {}
             }
             summary = summary.record(outcome);
         }
 
-        if pending_paths.is_empty() {
+        if batch.pending_paths.is_empty() {
             if summary.opened_count > 0 || summary.migrated_count > 0 {
                 Self::rebalance_open_here_layout(app);
             }
@@ -61,7 +74,7 @@ impl FileController {
         }
 
         app.queue_background_path_loads(
-            pending_paths,
+            batch.pending_paths,
             PendingBackgroundAction::OpenHere(PendingOpenHereAction {
                 already_here_count,
                 migrated_count,
@@ -69,23 +82,6 @@ impl FileController {
                 anchor_view_id,
             }),
         );
-    }
-
-    fn prepare_open_path_here_async(
-        app: &mut ScratchpadApp,
-        path: PathBuf,
-        pending_paths: &mut Vec<PathBuf>,
-    ) -> OpenHerePathOutcome {
-        if let Some(existing_path) = Self::find_existing_open_here_path(app, &path) {
-            return Self::resolve_existing_open_here_path(app, path, existing_path);
-        }
-
-        if Self::reserve_pending_open_path(app, &path) {
-            pending_paths.push(path);
-            OpenHerePathOutcome::Queued
-        } else {
-            OpenHerePathOutcome::AlreadyInCurrentTab
-        }
     }
 
     fn open_pending_files_here(

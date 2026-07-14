@@ -1,3 +1,9 @@
+//! Allocation telemetry for the resource-probe binary.
+//!
+//! This is the only intentionally unsafe allocation hook in Scratchpad. It is
+//! isolated to the profiling binary so the application and library continue to
+//! forbid unsafe code, while capacity probes can measure live and peak heap use.
+
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -16,10 +22,14 @@ static GLOBAL_ALLOCATOR: TrackingAllocator = TrackingAllocator;
 
 unsafe impl GlobalAlloc for TrackingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: This allocator delegates the actual allocation to the system
+        // allocator with the same `layout` it received from the runtime.
         record_allocated_ptr(unsafe { System.alloc(layout) }, layout)
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: This allocator delegates the actual zeroed allocation to the
+        // system allocator with the same `layout` it received from the runtime.
         record_allocated_ptr(unsafe { System.alloc_zeroed(layout) }, layout)
     }
 
@@ -27,10 +37,15 @@ unsafe impl GlobalAlloc for TrackingAllocator {
         if !ptr.is_null() {
             record_deallocation(layout.size() as u64);
         }
+        // SAFETY: `ptr` and `layout` are exactly the pair provided by the
+        // runtime for this global allocator's deallocation call.
         unsafe { System.dealloc(ptr, layout) };
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        // SAFETY: This allocator forwards the runtime-provided pointer/layout
+        // pair and requested size to the system allocator, then records only
+        // the observed size delta when reallocation succeeds.
         let new_ptr = unsafe { System.realloc(ptr, layout, new_size) };
         if !new_ptr.is_null() {
             REALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);

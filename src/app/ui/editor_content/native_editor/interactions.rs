@@ -24,6 +24,7 @@ pub(super) struct KeyboardInputRequest<'a> {
     pub(super) char_offset_base: usize,
     pub(super) slice_chars: usize,
     pub(super) display_map: Option<&'a DisplayTextMap>,
+    pub(super) reserve_alt_for_shortcuts: bool,
 }
 
 pub(super) fn handle_mouse_interaction(

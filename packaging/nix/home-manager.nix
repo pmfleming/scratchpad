@@ -55,6 +55,8 @@ in
     hyprland = {
       enableBinds = lib.mkEnableOption "Hyprland Scratchpad binds and window rules";
 
+      autoStart = lib.mkEnableOption "starting Scratchpad in its Hyprland special workspace";
+
       mainMod = lib.mkOption {
         type = lib.types.str;
         default = "SUPER";
@@ -75,7 +77,7 @@ in
 
       moveBind = lib.mkOption {
         type = lib.types.str;
-        default = "$mainMod SHIFT, S";
+        default = "$mainMod CTRL, S";
         description = "Hyprland bind prefix used to move Scratchpad to its special workspace.";
       };
 
@@ -105,18 +107,26 @@ in
     xdg.configFile."scratchpad/settings.toml".source =
       settingsFormat.generate "scratchpad-settings.toml" settings;
 
-    wayland.windowManager.hyprland.settings = lib.mkIf cfg.hyprland.enableBinds {
-      "$mainMod" = cfg.hyprland.mainMod;
-      bind = [
-        "${cfg.hyprland.launchBind}, exec, ${selectedPackage}/bin/scratchpad"
-        "${cfg.hyprland.toggleBind}, togglespecialworkspace, ${cfg.hyprland.specialWorkspace}"
-        "${cfg.hyprland.moveBind}, movetoworkspace, special:${cfg.hyprland.specialWorkspace}"
-      ];
-      windowrulev2 = [
-        "workspace special:${cfg.hyprland.specialWorkspace} silent, class:^(${cfg.hyprland.windowClass})$"
-        "center, class:^(${cfg.hyprland.windowClass})$"
-        "size ${cfg.hyprland.windowSize}, class:^(${cfg.hyprland.windowClass})$"
-      ];
-    };
+    wayland.windowManager.hyprland.settings = lib.mkMerge [
+      (lib.mkIf cfg.hyprland.enableBinds {
+        "$mainMod" = cfg.hyprland.mainMod;
+        bind = [
+          "${cfg.hyprland.launchBind}, exec, ${selectedPackage}/bin/scratchpad"
+          "${cfg.hyprland.toggleBind}, togglespecialworkspace, ${cfg.hyprland.specialWorkspace}"
+          "${cfg.hyprland.moveBind}, movetoworkspace, special:${cfg.hyprland.specialWorkspace}"
+        ];
+      })
+      (lib.mkIf (cfg.hyprland.enableBinds || cfg.hyprland.autoStart) {
+        windowrule = [
+          "match:class ^(${cfg.hyprland.windowClass})$, workspace special:${cfg.hyprland.specialWorkspace} silent"
+          "match:class ^(${cfg.hyprland.windowClass})$, float on"
+          "match:class ^(${cfg.hyprland.windowClass})$, center on"
+          "match:class ^(${cfg.hyprland.windowClass})$, size ${cfg.hyprland.windowSize}"
+        ];
+      })
+      (lib.mkIf cfg.hyprland.autoStart {
+        exec-once = [ "${selectedPackage}/bin/scratchpad" ];
+      })
+    ];
   };
 }

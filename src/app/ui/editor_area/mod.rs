@@ -17,7 +17,7 @@ use tile::{TileRenderRequest, TileRenderState};
 const SHIFT_SCROLL_FONT_SIZE_PX_PER_POINT: f32 = 48.0;
 
 pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    egui::CentralPanel::default().show_inside(ui, |ui| {
+    egui::CentralPanel::default().show(ui, |ui| {
         widget_ids::feature_scope(ui, "editor_area", |ui| {
             if app.tab_manager.tabs.as_slice().is_empty() {
                 return;

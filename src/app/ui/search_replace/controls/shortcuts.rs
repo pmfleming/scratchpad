@@ -71,14 +71,16 @@ pub(super) fn consume_search_strip_shortcuts(
 }
 
 fn consume_search_scope_shortcuts(ui: &mut egui::Ui, state: &mut SearchStripState) {
-    if consume_key(ui, egui::Modifiers::ALT, egui::Key::Num1) {
-        state.scope = SearchScope::SelectionOnly;
-    } else if consume_key(ui, egui::Modifiers::ALT, egui::Key::Num2) {
-        state.scope = SearchScope::ActiveBuffer;
-    } else if consume_key(ui, egui::Modifiers::ALT, egui::Key::Num3) {
-        state.scope = SearchScope::ActiveWorkspaceTab;
-    } else if consume_key(ui, egui::Modifiers::ALT, egui::Key::Num4) {
-        state.scope = SearchScope::AllOpenTabs;
+    for (key, scope) in [
+        (egui::Key::Num1, SearchScope::SelectionOnly),
+        (egui::Key::Num2, SearchScope::ActiveBuffer),
+        (egui::Key::Num3, SearchScope::ActiveWorkspaceTab),
+        (egui::Key::Num4, SearchScope::AllOpenTabs),
+    ] {
+        if consume_key(ui, egui::Modifiers::ALT, key) {
+            state.scope = scope;
+            break;
+        }
     }
 }
 
@@ -111,23 +113,41 @@ fn consume_search_action_shortcuts(
         text_input_focused,
     };
 
-    if consume_key(ui, egui::Modifiers::NONE, egui::Key::F3) {
-        apply_search_action_shortcut(actions, availability, SearchActionShortcut::Next);
-    }
-    if consume_key(ui, egui::Modifiers::SHIFT, egui::Key::F3) {
-        apply_search_action_shortcut(actions, availability, SearchActionShortcut::Previous);
-    }
-    if consume_key(ui, egui::Modifiers::CTRL, egui::Key::Enter) {
-        apply_search_action_shortcut(actions, availability, SearchActionShortcut::ReplaceCurrent);
-    }
-    if consume_key(ui, egui::Modifiers::ALT, egui::Key::Enter) {
-        apply_search_action_shortcut(actions, availability, SearchActionShortcut::ReplaceAll);
-    }
-    if consume_key(ui, egui::Modifiers::CTRL, egui::Key::Z) {
-        apply_search_action_shortcut(actions, availability, SearchActionShortcut::Undo);
-    }
-    if consume_key(ui, egui::Modifiers::CTRL, egui::Key::Y) {
-        apply_search_action_shortcut(actions, availability, SearchActionShortcut::Redo);
+    for (modifiers, key, shortcut) in [
+        (
+            egui::Modifiers::NONE,
+            egui::Key::F3,
+            SearchActionShortcut::Next,
+        ),
+        (
+            egui::Modifiers::SHIFT,
+            egui::Key::F3,
+            SearchActionShortcut::Previous,
+        ),
+        (
+            egui::Modifiers::CTRL,
+            egui::Key::Enter,
+            SearchActionShortcut::ReplaceCurrent,
+        ),
+        (
+            egui::Modifiers::ALT,
+            egui::Key::Enter,
+            SearchActionShortcut::ReplaceAll,
+        ),
+        (
+            egui::Modifiers::CTRL,
+            egui::Key::Z,
+            SearchActionShortcut::Undo,
+        ),
+        (
+            egui::Modifiers::CTRL,
+            egui::Key::Y,
+            SearchActionShortcut::Redo,
+        ),
+    ] {
+        if consume_key(ui, modifiers, key) {
+            apply_search_action_shortcut(actions, availability, shortcut);
+        }
     }
 }
 
@@ -237,92 +257,79 @@ mod tests {
 
     #[test]
     fn global_navigation_shortcuts_require_matches() {
-        let mut actions = SearchStripActions::default();
-        apply_search_action_shortcut(
-            &mut actions,
-            SearchActionAvailability {
-                match_count: 0,
-                replace_allowed: true,
-                can_undo_text_operation: true,
-                can_redo_text_operation: true,
-                text_input_focused: false,
-            },
-            SearchActionShortcut::Next,
+        assert!(
+            !shortcut_actions(
+                action_availability(0, true, false),
+                SearchActionShortcut::Next
+            )
+            .next_requested
         );
-        assert!(!actions.next_requested);
-
-        apply_search_action_shortcut(
-            &mut actions,
-            SearchActionAvailability {
-                match_count: 1,
-                replace_allowed: true,
-                can_undo_text_operation: true,
-                can_redo_text_operation: true,
-                text_input_focused: false,
-            },
-            SearchActionShortcut::Next,
+        assert!(
+            shortcut_actions(
+                action_availability(1, true, false),
+                SearchActionShortcut::Next
+            )
+            .next_requested
         );
-        assert!(actions.next_requested);
     }
 
     #[test]
     fn global_replace_shortcuts_require_allowed_replace_state() {
-        let mut actions = SearchStripActions::default();
-        apply_search_action_shortcut(
-            &mut actions,
-            SearchActionAvailability {
-                match_count: 1,
-                replace_allowed: false,
-                can_undo_text_operation: true,
-                can_redo_text_operation: true,
-                text_input_focused: false,
-            },
-            SearchActionShortcut::ReplaceAll,
+        assert!(
+            !shortcut_actions(
+                action_availability(1, false, false),
+                SearchActionShortcut::ReplaceAll,
+            )
+            .replace_all_requested
         );
-        assert!(!actions.replace_all_requested);
-
-        apply_search_action_shortcut(
-            &mut actions,
-            SearchActionAvailability {
-                match_count: 1,
-                replace_allowed: true,
-                can_undo_text_operation: true,
-                can_redo_text_operation: true,
-                text_input_focused: false,
-            },
-            SearchActionShortcut::ReplaceAll,
+        assert!(
+            shortcut_actions(
+                action_availability(1, true, false),
+                SearchActionShortcut::ReplaceAll,
+            )
+            .replace_all_requested
         );
-        assert!(actions.replace_all_requested);
     }
 
     #[test]
     fn undo_redo_shortcuts_do_not_steal_text_input_focus() {
-        let mut actions = SearchStripActions::default();
-        apply_search_action_shortcut(
-            &mut actions,
-            SearchActionAvailability {
-                match_count: 1,
-                replace_allowed: true,
-                can_undo_text_operation: true,
-                can_redo_text_operation: true,
-                text_input_focused: true,
-            },
-            SearchActionShortcut::Undo,
+        assert!(
+            !shortcut_actions(
+                action_availability(1, true, true),
+                SearchActionShortcut::Undo
+            )
+            .undo_requested
         );
-        assert!(!actions.undo_requested);
+        assert!(
+            shortcut_actions(
+                action_availability(1, true, false),
+                SearchActionShortcut::Redo
+            )
+            .redo_requested
+        );
+    }
 
-        apply_search_action_shortcut(
-            &mut actions,
-            SearchActionAvailability {
-                match_count: 1,
-                replace_allowed: true,
-                can_undo_text_operation: true,
-                can_redo_text_operation: true,
-                text_input_focused: false,
-            },
-            SearchActionShortcut::Redo,
-        );
-        assert!(actions.redo_requested);
+    fn shortcut_actions(
+        availability: SearchActionAvailability,
+        shortcut: SearchActionShortcut,
+    ) -> SearchStripActions {
+        let mut actions = SearchStripActions::default();
+        apply_search_action_shortcut(&mut actions, availability, shortcut);
+        actions
+    }
+
+    fn action_availability(
+        match_count: usize,
+        replace_allowed: bool,
+        text_input_focused: bool,
+    ) -> SearchActionAvailability {
+        SearchActionAvailability {
+            match_count,
+            replace_allowed,
+            can_undo_text_operation: true,
+            can_redo_text_operation: true,
+            text_input_focused,
+        }
     }
 
     #[test]

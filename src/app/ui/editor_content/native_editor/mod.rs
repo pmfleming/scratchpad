@@ -26,7 +26,9 @@ use layout::{
     allocate_editor_rect, build_editor_galley, editor_row_height, editor_viewport_height,
     galley_origin, total_editor_content_height,
 };
-use painting::{CursorPaintOutcome, EditorPaintRequest, consume_cursor_reveal, paint_editor};
+use painting::{
+    CursorPaintOutcome, EditorFrame, consume_cursor_reveal, paint_editor, publish_ime_output,
+};
 use std::sync::Arc;
 
 const EDITOR_FOCUS_LOCK_FILTER: egui::EventFilter = egui::EventFilter {
@@ -142,8 +144,7 @@ pub fn render_editor_text_edit(
     let paint_outcome = if ui.is_rect_visible(rect) {
         paint_editor(
             ui,
-            view,
-            EditorPaintRequest {
+            EditorFrame {
                 galley: &galley_context.galley,
                 galley_pos,
                 rect,
@@ -153,11 +154,21 @@ pub fn render_editor_text_edit(
                 slice_chars: galley_context.slice_chars,
                 display_map: galley_context.display_map.as_ref(),
                 active_selection: buffer.active_selection.clone(),
+                cursor_range: view.cursor_range,
+                cursor_reveal_mode: view.cursor_reveal_mode(),
+                ime_preedit: view.ime_preedit.as_ref(),
+                replacement_preview: view.search_replacement_preview.as_ref(),
             },
         )
     } else {
         CursorPaintOutcome::default()
     };
+    if let Some(intent) = paint_outcome.reveal_intent {
+        view.request_intent(intent);
+    }
+    if let Some((rect, cursor_rect)) = paint_outcome.ime_geometry {
+        publish_ime_output(ui, rect, cursor_rect, view);
+    }
     consume_cursor_reveal(view, false, paint_outcome.reveal_attempted);
     sync_ime_output_focus(view, input.focused);
 
@@ -310,6 +321,7 @@ fn handle_focused_keyboard_input(
                 char_offset_base: request.char_offset_base,
                 slice_chars: request.slice_chars,
                 display_map: request.display_map,
+                reserve_alt_for_shortcuts: request.options.reserve_alt_for_shortcuts,
             },
         )
 }

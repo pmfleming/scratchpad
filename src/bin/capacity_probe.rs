@@ -305,7 +305,7 @@ fn run_text_layout_capacity_cycle(bytes: usize) -> usize {
     let mut total_rows = 0usize;
 
     let _ = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
-        eframe::egui::CentralPanel::default().show_inside(ui, |ui| {
+        eframe::egui::CentralPanel::default().show(ui, |ui| {
             let mut layouter = build_layouter(
                 font_id.clone(),
                 false,

@@ -1,11 +1,9 @@
 use super::{
     AppThemeMode, CategoryCard, ComboSelectRow, EditorAppearanceSource, EditorFontPreset,
-    EditorFontSource, FONT_SIZE_OPTIONS, ScratchpadApp, SettingsUi, available_width_control,
-    category_card, combo_select_row, egui, inner_divider, inner_select_row, nearest_option_index,
+    FONT_SIZE_OPTIONS, ScratchpadApp, SettingsUi, available_width_control, category_card,
+    combo_select_row, egui, inner_divider, inner_select_row, nearest_option_index,
     record_settings_control_box, render_preview_panel, toggle_card, u32_slider_value_control,
 };
-use crate::app::fonts::{DEFAULT_OS_FONT_LABEL, available_os_font_families};
-use crate::app::ui::widget_ids;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ThemeModeSelection {
@@ -126,11 +124,11 @@ fn render_system_summary_row(ui: &mut egui::Ui, app: &ScratchpadApp) {
 }
 
 fn render_app_appearance_rows(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    render_font_source_row(ui, app);
-    inner_divider(ui);
-    render_font_family_row(ui, app);
+    render_scratchpad_font_family_row(ui, app);
     inner_divider(ui);
     render_font_size_row(ui, app);
+    inner_divider(ui);
+    render_tab_width_row(ui, app);
     inner_divider(ui);
     render_theme_mode_row(ui, app);
     inner_divider(ui);
@@ -168,32 +166,6 @@ fn render_app_appearance_rows(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     );
 }
 
-fn render_font_source_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    combo_select_row(
-        ui,
-        ComboSelectRow {
-            label: "Font source",
-            description: Some("Choose a bundled font or an installed OS font."),
-            combo_id: "settings_editor_font_source",
-            record_label: "combo.Font source",
-            current: app.state.app_settings.editor_font_source(),
-            options: &EditorFontSource::ALL,
-            selected_label: EditorFontSource::label,
-            option_label: EditorFontSource::label,
-            on_change: |source| {
-                crate::app::app_state::settings_controller::set_editor_font_source(app, source);
-            },
-        },
-    );
-}
-
-fn render_font_family_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    match app.state.app_settings.editor_font_source() {
-        EditorFontSource::Scratchpad => render_scratchpad_font_family_row(ui, app),
-        EditorFontSource::Os => render_os_font_family_row(ui, app),
-    }
-}
-
 fn render_scratchpad_font_family_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     combo_select_row(
         ui,
@@ -209,48 +181,6 @@ fn render_scratchpad_font_family_row(ui: &mut egui::Ui, app: &mut ScratchpadApp)
             on_change: |font| {
                 crate::app::app_state::settings_controller::set_editor_font(app, font);
             },
-        },
-    );
-}
-
-fn render_os_font_family_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    inner_select_row(
-        ui,
-        "Family",
-        Some(
-            "Installed OS font. Default uses fontconfig on NixOS/Linux and system editor defaults on Windows.",
-        ),
-        |ui| {
-            let families = available_os_font_families();
-            let mut selected = app.state.app_settings.os_font_family().trim().to_owned();
-            let selected_label = if selected.is_empty() {
-                DEFAULT_OS_FONT_LABEL.to_owned()
-            } else {
-                selected.clone()
-            };
-            available_width_control(ui, |ui| {
-                let dropdown_width = SettingsUi::dropdown_width(ui);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    widget_ids::combo_box(ui, "settings_os_font_family")
-                        .selected_text(selected_label)
-                        .truncate()
-                        .width(dropdown_width)
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut selected,
-                                String::new(),
-                                DEFAULT_OS_FONT_LABEL,
-                            );
-                            for family in families {
-                                ui.selectable_value(&mut selected, family.clone(), family);
-                            }
-                        });
-                });
-            });
-
-            if selected != app.state.app_settings.os_font_family().trim() {
-                crate::app::app_state::settings_controller::set_os_font_family(app, selected);
-            }
         },
     );
 }
@@ -277,6 +207,29 @@ fn render_font_size_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         let selected_size = FONT_SIZE_OPTIONS[selected_index as usize] as f32;
         if selected_index as usize != current_index {
             crate::app::app_state::settings_controller::set_font_size(app, selected_size);
+        }
+    });
+}
+
+fn render_tab_width_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    inner_select_row(ui, "Tab width", Some("Displayed spaces per tab."), |ui| {
+        let mut selected_width = u32::from(app.state.app_settings.editor_tab_width());
+        let width_label = format!("{selected_width} spaces");
+        u32_slider_value_control(
+            ui,
+            "settings.editor.tab_width.slider",
+            "slider.Tab width",
+            &mut selected_width,
+            1..=16,
+            88.0,
+            width_label,
+        );
+
+        if selected_width != u32::from(app.state.app_settings.editor_tab_width()) {
+            crate::app::app_state::settings_controller::set_editor_tab_width(
+                app,
+                selected_width as u8,
+            );
         }
     });
 }

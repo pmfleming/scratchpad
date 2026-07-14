@@ -48,6 +48,19 @@
 
       runtimeLibraryPath = lib.makeLibraryPath buildInputs;
 
+      scratchpadDesktopEntry = pkgs.writeText "scratchpad.desktop" ''
+        [Desktop Entry]
+        Type=Application
+        Name=Scratchpad
+        Comment=Plain-text scratch workspace
+        Exec=scratchpad %F
+        Icon=scratchpad
+        Terminal=false
+        Categories=Utility;TextEditor;
+        MimeType=text/plain;
+        StartupWMClass=scratchpad
+      '';
+
       scratchpad = pkgs.rustPlatform.buildRustPackage {
         pname = "scratchpad";
         version = "0.40.0";
@@ -62,6 +75,11 @@
         inherit buildInputs;
 
         postInstall = ''
+          install -Dm644 ${scratchpadDesktopEntry} \
+            $out/share/applications/scratchpad.desktop
+          install -Dm644 ${./assets/Scratchpad.svg} \
+            $out/share/icons/hicolor/scalable/apps/scratchpad.svg
+
           wrapProgram $out/bin/scratchpad \
             --prefix LD_LIBRARY_PATH : ${runtimeLibraryPath}
         '';
@@ -84,6 +102,7 @@
           makeWrapper ${scratchpad}/bin/scratchpad $out/bin/scratchpad \
             --set WINIT_UNIX_BACKEND wayland \
             --set SCRATCHPAD_PLATFORM_PROFILE hyprland
+          ln -s ${scratchpad}/share $out/share
         '';
 
         meta = scratchpad.meta // {

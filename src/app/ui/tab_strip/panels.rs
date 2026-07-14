@@ -44,7 +44,7 @@ fn show_vertical_tab_panel(ui: &mut egui::Ui, app: &mut ScratchpadApp, side: Tab
         } else {
             hidden_vertical_tab_list_frame()
         })
-        .show_inside(ui, |ui| {
+        .show(ui, |ui| {
             if !panel_visible {
                 return;
             }

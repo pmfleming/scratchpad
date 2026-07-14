@@ -260,8 +260,9 @@ fn char_cursor_with_offset(
     char_offset_base: usize,
     display_map: Option<&DisplayTextMap>,
 ) -> CharCursor {
+    let cursor_index = usize::from(cursor.index);
     let local_index =
-        display_map.map_or(cursor.index, |map| map.display_to_doc_cursor(cursor.index));
+        display_map.map_or(cursor_index, |map| map.display_to_doc_cursor(cursor_index));
     CharCursor {
         index: char_offset_base + local_index,
         prefer_next_row: cursor.prefer_next_row,

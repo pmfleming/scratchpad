@@ -14,7 +14,6 @@ use crate::app::ui::editor_content::native_editor::CursorRange;
 use crate::app::ui::scrolling::{DisplaySnapshot, ScrollAnchor, ScrollIntent, ScrollManager};
 use eframe::egui;
 use std::ops::Range;
-use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_VIEW_ID: AtomicU64 = AtomicU64::new(1);
@@ -44,6 +43,22 @@ struct PublishedImeOutput {
     cursor_rect: egui::Rect,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImePreeditState {
+    pub text: String,
+    pub active_range_chars: Option<Range<usize>>,
+}
+
+impl ImePreeditState {
+    #[must_use]
+    pub fn new(text: String, active_range_chars: Option<Range<usize>>) -> Self {
+        Self {
+            text,
+            active_range_chars,
+        }
+    }
+}
+
 /// Cursor reveal preference. The actual scroll target rect is resolved by the
 /// renderer once cursor geometry is known; the reveal is then dispatched as a
 /// `ScrollIntent::Reveal`.
@@ -61,13 +76,6 @@ pub enum CursorRevealMode {
 pub struct EditorViewState {
     pub id: ViewId,
     pub buffer_id: BufferId,
-    hot: EditorViewHotState,
-    anchors: EditorViewAnchorState,
-    published_ime_output: Option<PublishedImeOutput>,
-}
-
-#[derive(Clone)]
-pub struct EditorViewHotState {
     pub show_line_numbers: bool,
     pub right_to_left_reading_order: bool,
     pub editor_has_focus: bool,
@@ -90,9 +98,11 @@ pub struct EditorViewHotState {
     /// Pending cursor-reveal mode. Resolved into a `ScrollIntent::Reveal` by
     /// the renderer once the cursor's display rect is known.
     pending_cursor_reveal: Option<CursorRevealMode>,
-    pub ime_preedit: Option<String>,
+    pub ime_preedit: Option<ImePreeditState>,
     pub search_highlights: SearchHighlightState,
     pub search_replacement_preview: Option<SearchReplacementPreview>,
+    anchors: EditorViewAnchorState,
+    published_ime_output: Option<PublishedImeOutput>,
 }
 
 #[derive(Clone, Default)]
@@ -107,23 +117,11 @@ struct EditorViewAnchorState {
     search_highlight_anchors: Vec<AnchoredSearchRange>,
 }
 
-impl Deref for EditorViewState {
-    type Target = EditorViewHotState;
-
-    fn deref(&self) -> &Self::Target {
-        &self.hot
-    }
-}
-
-impl DerefMut for EditorViewState {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.hot
-    }
-}
-
-impl EditorViewHotState {
-    fn new(show_line_numbers: bool) -> Self {
+impl EditorViewState {
+    fn with_id(id: ViewId, buffer_id: BufferId, show_line_numbers: bool) -> Self {
         Self {
+            id,
+            buffer_id,
             show_line_numbers,
             right_to_left_reading_order: false,
             editor_has_focus: false,
@@ -138,32 +136,20 @@ impl EditorViewHotState {
             ime_preedit: None,
             search_highlights: SearchHighlightState::default(),
             search_replacement_preview: None,
-        }
-    }
-}
-
-impl EditorViewState {
-    #[must_use]
-    pub fn new(buffer_id: BufferId) -> Self {
-        Self {
-            id: next_view_id(),
-            buffer_id,
-            hot: EditorViewHotState::new(false),
             anchors: EditorViewAnchorState::default(),
             published_ime_output: None,
         }
+    }
+
+    #[must_use]
+    pub fn new(buffer_id: BufferId) -> Self {
+        Self::with_id(next_view_id(), buffer_id, false)
     }
 
     #[must_use]
     pub fn restored(id: ViewId, buffer_id: BufferId, show_line_numbers: bool) -> Self {
         register_existing_view_id(id);
-        Self {
-            id,
-            buffer_id,
-            hot: EditorViewHotState::new(show_line_numbers),
-            anchors: EditorViewAnchorState::default(),
-            published_ime_output: None,
-        }
+        Self::with_id(id, buffer_id, show_line_numbers)
     }
 
     /// Upgrade the scroll anchor to a piece-tree-backed `ScrollAnchor::Piece`,
@@ -484,8 +470,8 @@ impl EditorViewState {
     ) -> Option<ScrollAnchor> {
         use crate::app::domain::AnchorBias;
         let (row_start, display_row_offset) = {
-            let snapshot = self.hot.latest_display_snapshot.as_ref()?;
-            let metrics = self.hot.scroll.metrics();
+            let snapshot = self.latest_display_snapshot.as_ref()?;
+            let metrics = self.scroll.metrics();
             if metrics.row_height <= 0.0 || snapshot.row_count() == 0 {
                 return None;
             }

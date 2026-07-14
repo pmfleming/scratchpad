@@ -1,4 +1,4 @@
-use crate::app::platform::PlatformProfile;
+use crate::app::platform::{PlatformProfile, resolved_profile};
 use crate::app::services::settings_store::ShortcutSettings;
 use eframe::egui;
 
@@ -179,6 +179,13 @@ const CTRL_ALT: egui::Modifiers = egui::Modifiers {
     mac_cmd: false,
     command: false,
 };
+const ALT_SHIFT: egui::Modifiers = egui::Modifiers {
+    alt: true,
+    ctrl: false,
+    shift: true,
+    mac_cmd: false,
+    command: false,
+};
 const OPEN_USER_MANUAL: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::NONE, egui::Key::F1)];
 const OPEN_SEARCH: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::F)];
 const OPEN_REPLACE: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::H)];
@@ -216,30 +223,86 @@ const CLOSE_TAB: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::CTRL, egui:
 const PROMOTE_TILE_TO_TAB: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::T)];
 const PROMOTE_TAB_FILES_TO_TABS: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::T)];
 const CLOSE_TILE: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::W)];
-const SPLIT_TILE: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::Enter)];
-const SPLIT_UP: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::ArrowUp)];
-const SPLIT_DOWN: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::ArrowDown)];
-const SPLIT_LEFT: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::ArrowLeft)];
-const SPLIT_RIGHT: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::ArrowRight)];
-const RESIZE_TILE_LEFT: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowLeft)];
-const RESIZE_TILE_RIGHT: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowRight)];
-const RESIZE_TILE_UP: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowUp)];
-const RESIZE_TILE_DOWN: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowDown)];
-const MOVE_TILE_LEFT: [KeyBinding; 1] =
+const GENERIC_SPLIT_TILE: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::Enter)];
+const GENERIC_SPLIT_UP: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::ArrowUp)];
+const GENERIC_SPLIT_DOWN: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::ArrowDown)];
+const GENERIC_SPLIT_LEFT: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::ArrowLeft)];
+const GENERIC_SPLIT_RIGHT: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::ArrowRight)];
+const GENERIC_RESIZE_LEFT: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowLeft)];
+const GENERIC_RESIZE_RIGHT: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowRight)];
+const GENERIC_RESIZE_UP: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowUp)];
+const GENERIC_RESIZE_DOWN: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowDown)];
+const GENERIC_MOVE_LEFT: [KeyBinding; 1] =
     [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::ArrowLeft)];
-const MOVE_TILE_RIGHT: [KeyBinding; 1] = [KeyBinding::new(
+const GENERIC_MOVE_RIGHT: [KeyBinding; 1] = [KeyBinding::new(
     egui::Modifiers::CTRL,
     egui::Key::ArrowRight,
 )];
-const MOVE_TILE_UP: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::ArrowUp)];
-const MOVE_TILE_DOWN: [KeyBinding; 1] =
+const GENERIC_MOVE_UP: [KeyBinding; 1] =
+    [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::ArrowUp)];
+const GENERIC_MOVE_DOWN: [KeyBinding; 1] =
     [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::ArrowDown)];
 
-#[must_use]
-pub fn default_bindings(
-    _profile: PlatformProfile,
+const HYPRLAND_SPLIT_TILE: [KeyBinding; 1] =
+    [KeyBinding::new(egui::Modifiers::ALT, egui::Key::Enter)];
+const HYPRLAND_SPLIT_UP: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowUp)];
+const HYPRLAND_SPLIT_DOWN: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowDown)];
+const HYPRLAND_SPLIT_LEFT: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowLeft)];
+const HYPRLAND_SPLIT_RIGHT: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowRight)];
+const HYPRLAND_RESIZE_LEFT: [KeyBinding; 1] = [KeyBinding::new(ALT_SHIFT, egui::Key::ArrowLeft)];
+const HYPRLAND_RESIZE_RIGHT: [KeyBinding; 1] = [KeyBinding::new(ALT_SHIFT, egui::Key::ArrowRight)];
+const HYPRLAND_RESIZE_UP: [KeyBinding; 1] = [KeyBinding::new(ALT_SHIFT, egui::Key::ArrowUp)];
+const HYPRLAND_RESIZE_DOWN: [KeyBinding; 1] = [KeyBinding::new(ALT_SHIFT, egui::Key::ArrowDown)];
+const HYPRLAND_MOVE_LEFT: [KeyBinding; 1] =
+    [KeyBinding::new(egui::Modifiers::ALT, egui::Key::ArrowLeft)];
+const HYPRLAND_MOVE_RIGHT: [KeyBinding; 1] =
+    [KeyBinding::new(egui::Modifiers::ALT, egui::Key::ArrowRight)];
+const HYPRLAND_MOVE_UP: [KeyBinding; 1] =
+    [KeyBinding::new(egui::Modifiers::ALT, egui::Key::ArrowUp)];
+const HYPRLAND_MOVE_DOWN: [KeyBinding; 1] =
+    [KeyBinding::new(egui::Modifiers::ALT, egui::Key::ArrowDown)];
+
+fn tile_default_bindings(
+    profile: PlatformProfile,
     action: ShortcutAction,
-) -> &'static [KeyBinding] {
+) -> Option<&'static [KeyBinding]> {
+    let hyprland = resolved_profile(profile) == PlatformProfile::Hyprland;
+    Some(match (hyprland, action) {
+        (false, ShortcutAction::SplitTile) => &GENERIC_SPLIT_TILE,
+        (false, ShortcutAction::SplitUp) => &GENERIC_SPLIT_UP,
+        (false, ShortcutAction::SplitDown) => &GENERIC_SPLIT_DOWN,
+        (false, ShortcutAction::SplitLeft) => &GENERIC_SPLIT_LEFT,
+        (false, ShortcutAction::SplitRight) => &GENERIC_SPLIT_RIGHT,
+        (false, ShortcutAction::ResizeTileLeft) => &GENERIC_RESIZE_LEFT,
+        (false, ShortcutAction::ResizeTileRight) => &GENERIC_RESIZE_RIGHT,
+        (false, ShortcutAction::ResizeTileUp) => &GENERIC_RESIZE_UP,
+        (false, ShortcutAction::ResizeTileDown) => &GENERIC_RESIZE_DOWN,
+        (false, ShortcutAction::MoveTileLeft) => &GENERIC_MOVE_LEFT,
+        (false, ShortcutAction::MoveTileRight) => &GENERIC_MOVE_RIGHT,
+        (false, ShortcutAction::MoveTileUp) => &GENERIC_MOVE_UP,
+        (false, ShortcutAction::MoveTileDown) => &GENERIC_MOVE_DOWN,
+        (true, ShortcutAction::SplitTile) => &HYPRLAND_SPLIT_TILE,
+        (true, ShortcutAction::SplitUp) => &HYPRLAND_SPLIT_UP,
+        (true, ShortcutAction::SplitDown) => &HYPRLAND_SPLIT_DOWN,
+        (true, ShortcutAction::SplitLeft) => &HYPRLAND_SPLIT_LEFT,
+        (true, ShortcutAction::SplitRight) => &HYPRLAND_SPLIT_RIGHT,
+        (true, ShortcutAction::ResizeTileLeft) => &HYPRLAND_RESIZE_LEFT,
+        (true, ShortcutAction::ResizeTileRight) => &HYPRLAND_RESIZE_RIGHT,
+        (true, ShortcutAction::ResizeTileUp) => &HYPRLAND_RESIZE_UP,
+        (true, ShortcutAction::ResizeTileDown) => &HYPRLAND_RESIZE_DOWN,
+        (true, ShortcutAction::MoveTileLeft) => &HYPRLAND_MOVE_LEFT,
+        (true, ShortcutAction::MoveTileRight) => &HYPRLAND_MOVE_RIGHT,
+        (true, ShortcutAction::MoveTileUp) => &HYPRLAND_MOVE_UP,
+        (true, ShortcutAction::MoveTileDown) => &HYPRLAND_MOVE_DOWN,
+        _ => return None,
+    })
+}
+
+#[must_use]
+pub fn default_bindings(profile: PlatformProfile, action: ShortcutAction) -> &'static [KeyBinding] {
+    if let Some(bindings) = tile_default_bindings(profile, action) {
+        return bindings;
+    }
     match action {
         ShortcutAction::OpenUserManual => &OPEN_USER_MANUAL,
         ShortcutAction::OpenSearch => &OPEN_SEARCH,
@@ -271,19 +334,19 @@ pub fn default_bindings(
         ShortcutAction::PromoteTileToTab => &PROMOTE_TILE_TO_TAB,
         ShortcutAction::PromoteTabFilesToTabs => &PROMOTE_TAB_FILES_TO_TABS,
         ShortcutAction::CloseTile => &CLOSE_TILE,
-        ShortcutAction::SplitTile => &SPLIT_TILE,
-        ShortcutAction::SplitUp => &SPLIT_UP,
-        ShortcutAction::SplitDown => &SPLIT_DOWN,
-        ShortcutAction::SplitLeft => &SPLIT_LEFT,
-        ShortcutAction::SplitRight => &SPLIT_RIGHT,
-        ShortcutAction::ResizeTileLeft => &RESIZE_TILE_LEFT,
-        ShortcutAction::ResizeTileRight => &RESIZE_TILE_RIGHT,
-        ShortcutAction::ResizeTileUp => &RESIZE_TILE_UP,
-        ShortcutAction::ResizeTileDown => &RESIZE_TILE_DOWN,
-        ShortcutAction::MoveTileLeft => &MOVE_TILE_LEFT,
-        ShortcutAction::MoveTileRight => &MOVE_TILE_RIGHT,
-        ShortcutAction::MoveTileUp => &MOVE_TILE_UP,
-        ShortcutAction::MoveTileDown => &MOVE_TILE_DOWN,
+        ShortcutAction::SplitTile
+        | ShortcutAction::SplitUp
+        | ShortcutAction::SplitDown
+        | ShortcutAction::SplitLeft
+        | ShortcutAction::SplitRight
+        | ShortcutAction::ResizeTileLeft
+        | ShortcutAction::ResizeTileRight
+        | ShortcutAction::ResizeTileUp
+        | ShortcutAction::ResizeTileDown
+        | ShortcutAction::MoveTileLeft
+        | ShortcutAction::MoveTileRight
+        | ShortcutAction::MoveTileUp
+        | ShortcutAction::MoveTileDown => unreachable!("tile bindings are handled above"),
     }
 }
 
@@ -468,6 +531,14 @@ mod tests {
             default_bindings(PlatformProfile::Windows, ShortcutAction::CloseTab),
             &[KeyBinding::new(egui::Modifiers::CTRL, egui::Key::W)]
         );
+        assert_eq!(
+            default_bindings(PlatformProfile::Windows, ShortcutAction::MoveTileLeft),
+            &[KeyBinding::new(egui::Modifiers::CTRL, egui::Key::ArrowLeft)]
+        );
+        assert_eq!(
+            default_bindings(PlatformProfile::Windows, ShortcutAction::SplitLeft),
+            &[KeyBinding::new(super::CTRL_SHIFT, egui::Key::ArrowLeft)]
+        );
     }
 
     #[test]
@@ -490,18 +561,24 @@ mod tests {
     }
 
     #[test]
-    fn tile_management_defaults_have_local_bindings() {
+    fn tile_management_defaults_share_the_alt_leader() {
+        // `alt` is the in-app stand-in for the compositor's `super`, so every
+        // tiling action hangs off it and never collides with editor word-nav.
         assert_eq!(
             default_bindings(PlatformProfile::Hyprland, ShortcutAction::SplitTile),
-            &[KeyBinding::new(super::CTRL_ALT, egui::Key::Enter)]
-        );
-        assert_eq!(
-            default_bindings(PlatformProfile::Hyprland, ShortcutAction::ResizeTileLeft),
-            &[KeyBinding::new(super::CTRL_ALT, egui::Key::ArrowLeft)]
+            &[KeyBinding::new(egui::Modifiers::ALT, egui::Key::Enter)]
         );
         assert_eq!(
             default_bindings(PlatformProfile::Hyprland, ShortcutAction::MoveTileLeft),
-            &[KeyBinding::new(egui::Modifiers::CTRL, egui::Key::ArrowLeft)]
+            &[KeyBinding::new(egui::Modifiers::ALT, egui::Key::ArrowLeft)]
+        );
+        assert_eq!(
+            default_bindings(PlatformProfile::Hyprland, ShortcutAction::ResizeTileLeft),
+            &[KeyBinding::new(super::ALT_SHIFT, egui::Key::ArrowLeft)]
+        );
+        assert_eq!(
+            default_bindings(PlatformProfile::Hyprland, ShortcutAction::SplitLeft),
+            &[KeyBinding::new(super::CTRL_ALT, egui::Key::ArrowLeft)]
         );
     }
 

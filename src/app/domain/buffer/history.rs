@@ -20,7 +20,7 @@ use smallvec::SmallVec;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-pub type PieceHistoryEdits = SmallVec<[PieceHistoryEdit; 1]>;
+pub type PieceHistoryEdits = SmallVec<PieceHistoryEdit, 1>;
 
 static NEXT_TEXT_HISTORY_GLOBAL_SEQ: AtomicU64 = AtomicU64::new(1);
 

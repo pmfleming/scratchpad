@@ -28,6 +28,10 @@ pub(super) fn editor_content_style<'a>(
                 app.state.app_settings.editor_text_highlight_text_color(),
             ),
         )
+        .with_alt_reserved_for_shortcuts(
+            crate::app::platform::resolved_profile(app.state.app_settings.platform_profile())
+                == crate::app::platform::PlatformProfile::Hyprland,
+        )
         .with_layout_cache_warming(is_active || request_focus),
         background_color: app.state.app_settings.editor_background_color(),
     }

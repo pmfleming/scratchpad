@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Scratchpad
+Comment=Plain-text scratch workspace
+Exec=scratchpad %F
+Icon=scratchpad
+Terminal=false
+Categories=Utility;TextEditor;
+MimeType=text/plain;
+StartupWMClass=scratchpad

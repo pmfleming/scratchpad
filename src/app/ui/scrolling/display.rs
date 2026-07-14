@@ -116,7 +116,9 @@ impl DisplaySnapshot {
             row_tops.push(y_base + row.pos.y);
             row_logical_lines.push(Some(current_logical));
             let row_start = current_char;
-            current_char = current_char.saturating_add(row.char_count_including_newline() as u32);
+            current_char = current_char.saturating_add(saturating_u32(usize::from(
+                row.char_count_including_newline(),
+            )));
             let char_range = row_start..current_char;
             row_char_ranges.push(char_range.clone());
             let row_width = row.glyphs.last().map_or(0.0, |g| g.pos.x + g.advance_width);

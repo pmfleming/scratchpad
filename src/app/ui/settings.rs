@@ -1,6 +1,6 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::chrome::phosphor_button;
-use crate::app::fonts::{EDITOR_FONT_FAMILY, EditorFontPreset, EditorFontSource};
+use crate::app::fonts::{EDITOR_FONT_FAMILY, EditorFontPreset};
 use crate::app::services::settings_store::{AppThemeMode, EditorAppearanceSource, TabListPosition};
 use crate::app::theme::{action_bg, action_hover_bg, border, text_muted, text_primary};
 use crate::app::ui::widget_ids;
@@ -40,7 +40,7 @@ pub(crate) const PREVIEW_QUOTES: [(&str, &str); 3] = [
 ];
 
 pub(crate) fn show_page(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    egui::CentralPanel::default().show_inside(ui, |ui| {
+    egui::CentralPanel::default().show(ui, |ui| {
         widget_ids::feature_scope(ui, "settings", |ui| {
             with_settings_page(ui, |ui, viewport_width| {
                 render_page_body(ui, app, viewport_width);
@@ -57,7 +57,7 @@ fn with_settings_page(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui
         egui::ScrollArea::both()
             .id_salt(widget_ids::scroll_id(ui, "settings_page_scroll"))
             .scroll_source(egui::scroll_area::ScrollSource {
-                drag: false,
+                drag: egui::scroll_area::DragScroll::Never,
                 ..Default::default()
             })
             .auto_shrink([false, false])
@@ -151,14 +151,7 @@ mod tests {
 
     #[test]
     fn settings_cards_render_at_exact_card_width() {
-        render_settings_layout_for_test(1600.0, 1600.0);
-
-        let card_measurements = settings_card_measurements();
-        assert!(
-            !card_measurements.is_empty(),
-            "settings card width test did not collect any cards"
-        );
-
+        let card_measurements = card_measurements_for(1600.0, 1600.0, "settings card width");
         let card_width = SettingsUi::LAYOUT.card_max_width;
         let card_offenders: Vec<String> = card_measurements
             .iter()
@@ -176,74 +169,17 @@ mod tests {
 
     #[test]
     fn settings_cards_are_centered_in_editor_window() {
-        render_settings_layout_for_test(1600.0, 1600.0);
-
-        let card_measurements = settings_card_measurements();
-        assert!(
-            !card_measurements.is_empty(),
-            "settings card centering test did not collect any cards"
-        );
-
-        let expected_center = 800.0;
-        let card_offenders: Vec<String> = card_measurements
-            .iter()
-            .filter(|measurement| (measurement.center_x - expected_center).abs() > f32::EPSILON)
-            .map(|measurement| {
-                format!(
-                    "{} center = {:.1}px",
-                    measurement.label, measurement.center_x
-                )
-            })
-            .collect();
-
-        assert!(
-            card_offenders.is_empty(),
-            "settings cards must be centered at {:.1}px:\n{}",
-            expected_center,
-            card_offenders.join("\n")
-        );
+        assert_cards_center_at(1600.0, 1600.0, 800.0, "settings card centering");
     }
 
     #[test]
     fn settings_cards_center_on_resized_visible_window() {
-        render_settings_layout_for_test(1180.0, 900.0);
-
-        let card_measurements = settings_card_measurements();
-        assert!(
-            !card_measurements.is_empty(),
-            "resized settings centering test did not collect any cards"
-        );
-
-        let expected_center = 450.0;
-        let card_offenders: Vec<String> = card_measurements
-            .iter()
-            .filter(|measurement| (measurement.center_x - expected_center).abs() > f32::EPSILON)
-            .map(|measurement| {
-                format!(
-                    "{} center = {:.1}px",
-                    measurement.label, measurement.center_x
-                )
-            })
-            .collect();
-
-        assert!(
-            card_offenders.is_empty(),
-            "settings cards must stay centered in the visible 900px viewport at {:.1}px:\n{}",
-            expected_center,
-            card_offenders.join("\n")
-        );
+        assert_cards_center_at(1180.0, 900.0, 450.0, "resized settings centering");
     }
 
     #[test]
     fn settings_cards_keep_width_when_visible_window_is_narrow() {
-        render_settings_layout_for_test(1180.0, 500.0);
-
-        let card_measurements = settings_card_measurements();
-        assert!(
-            !card_measurements.is_empty(),
-            "narrow settings width test did not collect any cards"
-        );
-
+        let card_measurements = card_measurements_for(1180.0, 500.0, "narrow settings width");
         let expected_width = SettingsUi::LAYOUT.card_max_width;
         let expected_left = SettingsUi::LAYOUT.page_resize_gutter;
         let card_offenders: Vec<String> = card_measurements
@@ -315,6 +251,46 @@ mod tests {
         );
     }
 
+    fn assert_cards_center_at(
+        surface_width: f32,
+        viewport_width: f32,
+        expected_center: f32,
+        purpose: &str,
+    ) {
+        let card_measurements = card_measurements_for(surface_width, viewport_width, purpose);
+        let card_offenders: Vec<String> = card_measurements
+            .iter()
+            .filter(|measurement| (measurement.center_x - expected_center).abs() > f32::EPSILON)
+            .map(|measurement| {
+                format!(
+                    "{} center = {:.1}px",
+                    measurement.label, measurement.center_x
+                )
+            })
+            .collect();
+
+        assert!(
+            card_offenders.is_empty(),
+            "settings cards must be centered at {:.1}px for {purpose}:\n{}",
+            expected_center,
+            card_offenders.join("\n")
+        );
+    }
+
+    fn card_measurements_for(
+        surface_width: f32,
+        viewport_width: f32,
+        purpose: &str,
+    ) -> Vec<widgets::SettingsControlMeasurement> {
+        render_settings_layout_for_test(surface_width, viewport_width);
+        let card_measurements = settings_card_measurements();
+        assert!(
+            !card_measurements.is_empty(),
+            "{purpose} test did not collect any settings cards"
+        );
+        card_measurements
+    }
+
     fn render_settings_layout_for_test(surface_width: f32, viewport_width: f32) {
         let mut app = test_app();
         reset_settings_layout_measurements();
@@ -323,6 +299,7 @@ mod tests {
         crate::app::fonts::apply_editor_fonts(
             &ctx,
             &app.state.app_settings.editor_font_selection(),
+            f32::from(app.state.app_settings.editor_tab_width()),
         )
         .expect("install editor fonts for settings layout test");
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {

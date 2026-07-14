@@ -1,7 +1,7 @@
 use super::{
-    PendingBackgroundAction, PendingEncodingComplianceAction, PendingSavePathAction,
-    PendingSessionHydrationAction, PendingSessionPersistAction, PendingStartupRestoreAction,
-    PendingTextMetadataAction, ScratchpadApp,
+    PendingActionKind, PendingBackgroundAction, PendingEncodingComplianceAction,
+    PendingSavePathAction, PendingSessionHydrationAction, PendingSessionPersistAction,
+    PendingStartupRestoreAction, PendingTextMetadataAction, ScratchpadApp,
 };
 use crate::app::app_state::workspace::{
     accessors as workspace_accessors, restore_conflict as workspace_restore_conflict,
@@ -49,6 +49,24 @@ impl ScratchpadApp {
             std::thread::sleep(Duration::from_millis(5));
         }
         self.drain_background_io_results();
+    }
+
+    fn take_pending_action<T>(
+        &mut self,
+        request_id: u64,
+        expected: PendingActionKind,
+        extract: fn(PendingBackgroundAction) -> Option<T>,
+    ) -> Option<T> {
+        let action = self
+            .state
+            .background_io
+            .remove_pending_background_action(request_id)?;
+        let actual = action.kind();
+        let extracted = extract(action);
+        if extracted.is_none() {
+            record_background_result_mismatch(request_id, expected, Some(actual));
+        }
+        extracted
     }
 
     fn apply_background_io_result(&mut self, result: BackgroundIoResult) {
@@ -153,20 +171,24 @@ impl ScratchpadApp {
             Some(PendingBackgroundAction::ReopenWithEncoding(action)) => {
                 FileController::apply_async_reopen_with_encoding_result(self, action, results);
             }
-            Some(
-                PendingBackgroundAction::SavePath(_)
-                | PendingBackgroundAction::StartupRestore(_)
-                | PendingBackgroundAction::HydrateSessionTab(_)
-                | PendingBackgroundAction::PersistSession(_)
-                | PendingBackgroundAction::RefreshTextMetadata(_)
-                | PendingBackgroundAction::RefreshEncodingCompliance(_),
-            )
-            | None => {}
             Some(PendingBackgroundAction::StartupRestoreCompare(action)) => {
                 workspace_restore_conflict::apply_async_startup_restore_compare_result(
                     self, action, results,
                 );
             }
+            Some(
+                action @ (PendingBackgroundAction::SavePath(_)
+                | PendingBackgroundAction::StartupRestore(_)
+                | PendingBackgroundAction::HydrateSessionTab(_)
+                | PendingBackgroundAction::PersistSession(_)
+                | PendingBackgroundAction::RefreshTextMetadata(_)
+                | PendingBackgroundAction::RefreshEncodingCompliance(_)),
+            ) => record_background_result_mismatch(
+                request_id,
+                PendingActionKind::OpenTabs,
+                Some(action.kind()),
+            ),
+            None => {}
         }
     }
 
@@ -177,11 +199,11 @@ impl ScratchpadApp {
         disk_state: Option<crate::app::domain::DiskFileState>,
         result: Result<(), String>,
     ) {
-        let Some(PendingBackgroundAction::SavePath(action)) = self
-            .state
-            .background_io
-            .remove_pending_background_action(request_id)
-        else {
+        let Some(action) = self.take_pending_action(
+            request_id,
+            PendingActionKind::SavePath,
+            PendingBackgroundAction::into_save_path,
+        ) else {
             return;
         };
         FileController::apply_async_save_result(self, action, path, disk_state, result);
@@ -192,10 +214,11 @@ impl ScratchpadApp {
         request_id: u64,
         results: Vec<LoadedPathResult>,
     ) {
-        let Some(PendingBackgroundAction::OpenTabs(action)) = self
+        let Some(action) = self
             .state
             .background_io
             .pending_background_action_mut(request_id)
+            .and_then(PendingBackgroundAction::as_open_tabs_mut)
         else {
             return;
         };
@@ -204,10 +227,11 @@ impl ScratchpadApp {
         for loaded in results {
             FileController::process_open_tab_result(self, &mut summary, loaded);
         }
-        if let Some(PendingBackgroundAction::OpenTabs(action)) = self
+        if let Some(action) = self
             .state
             .background_io
             .pending_background_action_mut(request_id)
+            .and_then(PendingBackgroundAction::as_open_tabs_mut)
         {
             action.accumulator = summary;
         }
@@ -218,11 +242,11 @@ impl ScratchpadApp {
         request_id: u64,
         result: Result<Option<crate::app::services::session_store::RestoredSession>, String>,
     ) {
-        let Some(PendingBackgroundAction::StartupRestore(action)) = self
-            .state
-            .background_io
-            .remove_pending_background_action(request_id)
-        else {
+        let Some(action) = self.take_pending_action(
+            request_id,
+            PendingActionKind::StartupRestore,
+            PendingBackgroundAction::into_startup_restore,
+        ) else {
             return;
         };
         self.apply_runtime_startup_restore_result(action, result);
@@ -236,10 +260,11 @@ impl ScratchpadApp {
         legacy_settings: crate::app::services::settings_store::AppSettings,
     ) {
         let apply_legacy_settings = {
-            let Some(PendingBackgroundAction::StartupRestore(action)) = self
+            let Some(action) = self
                 .state
                 .background_io
                 .pending_background_action_mut(request_id)
+                .and_then(PendingBackgroundAction::as_startup_restore_mut)
             else {
                 return;
             };
@@ -265,10 +290,11 @@ impl ScratchpadApp {
         tab: crate::app::domain::WorkspaceTab,
     ) {
         let first_streamed_tab = {
-            let Some(PendingBackgroundAction::StartupRestore(action)) = self
+            let Some(action) = self
                 .state
                 .background_io
                 .pending_background_action_mut(request_id)
+                .and_then(PendingBackgroundAction::as_startup_restore_mut)
             else {
                 return;
             };
@@ -302,11 +328,11 @@ impl ScratchpadApp {
         restore_status: Option<crate::app::services::session_store::RestoreStatus>,
         tab: crate::app::domain::WorkspaceTab,
     ) {
-        let Some(PendingBackgroundAction::HydrateSessionTab(action)) = self
-            .state
-            .background_io
-            .remove_pending_background_action(request_id)
-        else {
+        let Some(action) = self.take_pending_action(
+            request_id,
+            PendingActionKind::HydrateSessionTab,
+            PendingBackgroundAction::into_session_hydration,
+        ) else {
             return;
         };
 
@@ -331,11 +357,11 @@ impl ScratchpadApp {
     }
 
     fn apply_session_persisted_result(&mut self, request_id: u64, result: Result<(), String>) {
-        let Some(PendingBackgroundAction::PersistSession(_)) = self
-            .state
-            .background_io
-            .remove_pending_background_action(request_id)
-        else {
+        let Some(_action) = self.take_pending_action(
+            request_id,
+            PendingActionKind::PersistSession,
+            PendingBackgroundAction::into_session_persist,
+        ) else {
             return;
         };
         match result {
@@ -370,11 +396,11 @@ impl ScratchpadApp {
             String,
         >,
     ) {
-        let Some(PendingBackgroundAction::RefreshTextMetadata(_)) = self
-            .state
-            .background_io
-            .remove_pending_background_action(request_id)
-        else {
+        let Some(_action) = self.take_pending_action(
+            request_id,
+            PendingActionKind::RefreshTextMetadata,
+            PendingBackgroundAction::into_text_metadata,
+        ) else {
             return;
         };
         if let Ok((_length, line_count, artifact_summary, format)) = result
@@ -396,11 +422,11 @@ impl ScratchpadApp {
         revision: u64,
         result: Result<bool, String>,
     ) {
-        let Some(PendingBackgroundAction::RefreshEncodingCompliance(_)) = self
-            .state
-            .background_io
-            .remove_pending_background_action(request_id)
-        else {
+        let Some(_action) = self.take_pending_action(
+            request_id,
+            PendingActionKind::RefreshEncodingCompliance,
+            PendingBackgroundAction::into_encoding_compliance,
+        ) else {
             return;
         };
         if let Ok(has_non_compliant_characters) = result
@@ -526,6 +552,23 @@ fn cold_session_tab_buffer_ids(
     tab: &crate::app::services::session_store::ColdSessionTab,
 ) -> Vec<crate::app::domain::BufferId> {
     tab.buffer_ids().collect()
+}
+
+fn record_background_result_mismatch(
+    request_id: u64,
+    expected: PendingActionKind,
+    actual: Option<PendingActionKind>,
+) {
+    diagnostics::record_background_failure(
+        "background_result_mismatch",
+        "app_state::background_io",
+        format!("Background result for request {request_id} expected {expected:?}, got {actual:?}"),
+        [
+            ("request_id", request_id.to_string()),
+            ("expected", format!("{expected:?}")),
+            ("actual", format!("{actual:?}")),
+        ],
+    );
 }
 
 fn record_background_send_error(error: &BackgroundIoSendError) {

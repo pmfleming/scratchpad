@@ -43,19 +43,19 @@ open_file = "ctrl+o"
 save_file = "ctrl+s"
 close_tab = "ctrl+w"
 toggle_tab_list = "ctrl+alt+b"
-split_tile = "ctrl+alt+enter"
-split_left = "ctrl+shift+left"
-split_right = "ctrl+shift+right"
-split_up = "ctrl+shift+up"
-split_down = "ctrl+shift+down"
-resize_tile_left = "ctrl+alt+left"
-resize_tile_right = "ctrl+alt+right"
-resize_tile_up = "ctrl+alt+up"
-resize_tile_down = "ctrl+alt+down"
-move_tile_left = "ctrl+left"
-move_tile_right = "ctrl+right"
-move_tile_up = "ctrl+up"
-move_tile_down = "ctrl+down"
+split_tile = "alt+enter"
+split_left = "alt+ctrl+left"
+split_right = "alt+ctrl+right"
+split_up = "alt+ctrl+up"
+split_down = "alt+ctrl+down"
+move_tile_left = "alt+left"
+move_tile_right = "alt+right"
+move_tile_up = "alt+up"
+move_tile_down = "alt+down"
+resize_tile_left = "alt+shift+left"
+resize_tile_right = "alt+shift+right"
+resize_tile_up = "alt+shift+up"
+resize_tile_down = "alt+shift+down"
 ```
 
 Shortcut syntax is case-insensitive. Supported modifiers are `ctrl`, `shift`, `alt`, and `command`/`super`/`win`. Multiple bindings can be separated with commas:
@@ -76,15 +76,32 @@ Good division:
 - Hyprland: launch/toggle/move Scratchpad windows.
 - Scratchpad: open file, save file, split panes, resize/move focused panes, search, close tab, etc.
 
-If you want Scratchpad to mirror focused Hyprland-style `SUPER` bindings, add them as secondary bindings and make sure Hyprland does not reserve those exact keys globally for Scratchpad windows:
+### `super` → `alt`: one leader for tiling
+
+Scratchpad's tiling shortcuts deliberately mirror Hyprland's window-management
+binds under a single substitution rule: **replace the compositor's `super` with
+`alt`, keep the same base key**. Hyprland reserves `super` globally so a focused
+app never sees it; `alt` is the in-app stand-in, and the editor leaves every
+`alt`-modified key to the tiling layer (word-wise navigation stays on
+`ctrl+arrow`), so there is no clash with text editing.
+
+| Hyprland (window manager) | Scratchpad (focused app) | Action |
+| --- | --- | --- |
+| `super+enter` | `alt+enter` | split / new tile |
+| `super+arrow` | `alt+arrow` | move tile |
+| `super+shift+arrow` | `alt+shift+arrow` | resize tile |
+| `super+ctrl+arrow` | `alt+ctrl+arrow` | directional split |
+
+Because the base key is identical, the only thing to remember is "swap `super`
+for `alt`." If you also want the literal `super` chord to work while Scratchpad
+is focused, add it as a secondary binding — but only for keys Hyprland does not
+reserve globally for the window:
 
 ```toml
 [shortcuts]
-split_tile = "ctrl+alt+enter, super+enter"
-resize_tile_left = "ctrl+alt+left, super+left"
-resize_tile_right = "ctrl+alt+right, super+right"
-move_tile_left = "ctrl+left, super+shift+left"
-move_tile_right = "ctrl+right, super+shift+right"
+split_tile = "alt+enter, super+enter"
+move_tile_left = "alt+left, super+left"
+move_tile_right = "alt+right, super+right"
 ```
 
 ## Example Hyprland config
@@ -94,13 +111,18 @@ Plain Hyprland config example:
 ```ini
 $mainMod = SUPER
 
+# Starts Scratchpad at login without switching away from the current workspace.
+# The silent window rule below sends it to special:scratchpad.
+exec-once = scratchpad
+
 bind = $mainMod, S, exec, scratchpad
 bind = $mainMod SHIFT, S, togglespecialworkspace, scratchpad
-bind = $mainMod SHIFT, S, movetoworkspace, special:scratchpad
+bind = $mainMod CTRL, S, movetoworkspace, special:scratchpad
 
-windowrulev2 = workspace special:scratchpad silent, class:^(scratchpad)$
-windowrulev2 = center, class:^(scratchpad)$
-windowrulev2 = size 1200 800, class:^(scratchpad)$
+windowrule = match:class ^(scratchpad)$, workspace special:scratchpad silent
+windowrule = match:class ^(scratchpad)$, float on
+windowrule = match:class ^(scratchpad)$, center on
+windowrule = match:class ^(scratchpad)$, size 1200 800
 ```
 
 Adjust class matching after checking the actual window class with:
@@ -119,16 +141,19 @@ Conceptual Home Manager configuration:
   wayland.windowManager.hyprland.settings = {
     "$mainMod" = "SUPER";
 
+    exec-once = [ "scratchpad" ];
+
     bind = [
       "$mainMod, S, exec, scratchpad"
       "$mainMod SHIFT, S, togglespecialworkspace, scratchpad"
-      "$mainMod SHIFT, S, movetoworkspace, special:scratchpad"
+      "$mainMod CTRL, S, movetoworkspace, special:scratchpad"
     ];
 
-    windowrulev2 = [
-      "workspace special:scratchpad silent, class:^(scratchpad)$"
-      "center, class:^(scratchpad)$"
-      "size 1200 800, class:^(scratchpad)$"
+    windowrule = [
+      "match:class ^(scratchpad)$, workspace special:scratchpad silent"
+      "match:class ^(scratchpad)$, float on"
+      "match:class ^(scratchpad)$, center on"
+      "match:class ^(scratchpad)$, size 1200 800"
     ];
   };
 
@@ -140,19 +165,19 @@ Conceptual Home Manager configuration:
     open_file = "ctrl+o"
     save_file = "ctrl+s"
     close_tab = "ctrl+w"
-    split_tile = "ctrl+alt+enter"
-    split_left = "ctrl+shift+left"
-    split_right = "ctrl+shift+right"
-    split_up = "ctrl+shift+up"
-    split_down = "ctrl+shift+down"
-    resize_tile_left = "ctrl+alt+left"
-    resize_tile_right = "ctrl+alt+right"
-    resize_tile_up = "ctrl+alt+up"
-    resize_tile_down = "ctrl+alt+down"
-    move_tile_left = "ctrl+left"
-    move_tile_right = "ctrl+right"
-    move_tile_up = "ctrl+up"
-    move_tile_down = "ctrl+down"
+    split_tile = "alt+enter"
+    split_left = "alt+ctrl+left"
+    split_right = "alt+ctrl+right"
+    split_up = "alt+ctrl+up"
+    split_down = "alt+ctrl+down"
+    move_tile_left = "alt+left"
+    move_tile_right = "alt+right"
+    move_tile_up = "alt+up"
+    move_tile_down = "alt+down"
+    resize_tile_left = "alt+shift+left"
+    resize_tile_right = "alt+shift+right"
+    resize_tile_up = "alt+shift+up"
+    resize_tile_down = "alt+shift+down"
   '';
 }
 ```
@@ -187,6 +212,7 @@ The flake exposes a first-class Home Manager module:
 
             hyprland = {
               enableBinds = true;
+              autoStart = true;
               toggleBind = "$mainMod SHIFT, S";
               specialWorkspace = "scratchpad";
             };
@@ -198,4 +224,14 @@ The flake exposes a first-class Home Manager module:
 }
 ```
 
-When `profile = "hyprland"`, the module installs the Hyprland wrapper by default and writes `~/.config/scratchpad/settings.toml`.
+When `profile = "hyprland"`, the module installs the Hyprland wrapper by default and writes `~/.config/scratchpad/settings.toml`. Setting `hyprland.autoStart = true` adds an `exec-once` entry and the workspace rules even when generated key bindings are disabled. Scratchpad starts hidden on `special:scratchpad`; use the configured toggle binding to reveal it.
+
+## Verify the window rule
+
+The Wayland build explicitly uses `scratchpad` as its app ID, which Hyprland exposes as the window class. After launching, verify the installed compositor and package combination with:
+
+```sh
+hyprctl clients | grep -A8 -B2 scratchpad
+```
+
+The client should report class `scratchpad` and workspace `special:scratchpad`. If a downstream launcher changes the class, override `programs.scratchpad.hyprland.windowClass` or adjust the plain `windowrule` expressions. These examples use the current Hyprland rule syntax; older Hyprland releases may require the deprecated `windowrulev2` form.

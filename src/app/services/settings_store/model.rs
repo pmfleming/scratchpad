@@ -9,6 +9,7 @@ use std::path::PathBuf;
 pub const DEFAULT_FONT_SIZE: f32 = 14.0;
 pub const DEFAULT_WORD_WRAP: bool = true;
 pub const DEFAULT_EDITOR_GUTTER: u8 = 0;
+pub const DEFAULT_EDITOR_TAB_WIDTH: u8 = 4;
 pub const DEFAULT_EDITOR_TEXT_COLOR: &str = "#ffffff";
 pub const DEFAULT_EDITOR_BACKGROUND_COLOR: &str = "#15181d";
 pub const DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR: &str = "#fff36d";
@@ -146,6 +147,8 @@ pub struct EditorSettings {
     pub word_wrap: bool,
     #[serde(default = "default_editor_gutter")]
     pub editor_gutter: u8,
+    #[serde(default = "default_editor_tab_width")]
+    pub editor_tab_width: u8,
     #[serde(default)]
     pub editor_font: EditorFontPreset,
     #[serde(default)]
@@ -171,6 +174,7 @@ impl Default for EditorSettings {
             font_size: default_font_size(),
             word_wrap: default_word_wrap(),
             editor_gutter: default_editor_gutter(),
+            editor_tab_width: default_editor_tab_width(),
             editor_font: EditorFontPreset::default(),
             font_source: EditorFontSource::default(),
             os_font_family: String::new(),
@@ -325,6 +329,7 @@ macro_rules! default_fn {
 default_fn!(default_font_size, f32, DEFAULT_FONT_SIZE);
 default_fn!(default_word_wrap, bool, DEFAULT_WORD_WRAP);
 default_fn!(default_editor_gutter, u8, DEFAULT_EDITOR_GUTTER);
+default_fn!(default_editor_tab_width, u8, DEFAULT_EDITOR_TAB_WIDTH);
 
 pub(crate) fn default_editor_text_color() -> String {
     DEFAULT_EDITOR_TEXT_COLOR.to_owned()

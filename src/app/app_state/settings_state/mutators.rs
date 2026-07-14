@@ -1,141 +1,42 @@
 use super::{
     AppSettings, AppThemeMode, EditorAppearanceSource, FileController, FileOpenDisposition,
-    NewTabPlacement, ScratchpadApp, StartupSessionBehavior, TabListPosition, color_to_hex,
-    sanitize_tab_list_auto_hide_delay_seconds, stock_editor_palette_for_selection,
+    NewTabPlacement, ScratchpadApp, StartupSessionBehavior, TabListPosition,
+    sanitize_tab_list_auto_hide_delay_seconds,
 };
 use crate::app::app_state::{AppSurface, workspace::accessors as workspace_accessors};
 use crate::app::domain::TextHistoryBudget;
-use crate::app::fonts::{EditorFontPreset, EditorFontSource};
+use crate::app::fonts::EditorFontPreset;
 use eframe::egui;
+use model::{SettingEffects, replace_if_changed};
 use std::time::Instant;
 
+mod model;
 #[cfg(test)]
 mod tests;
-
-impl AppSettings {
-    fn set_editor_appearance_source(&mut self, source: EditorAppearanceSource) -> bool {
-        replace_if_changed(&mut self.editor.appearance_source, source)
-    }
-
-    fn set_font_size(&mut self, font_size: f32) -> bool {
-        let next = font_size.clamp(8.0, 72.0);
-        if (self.editor.font_size - next).abs() < f32::EPSILON {
-            return false;
-        }
-        self.editor.font_size = next;
-        true
-    }
-
-    fn set_editor_font(&mut self, editor_font: EditorFontPreset) -> bool {
-        replace_if_changed(&mut self.editor.editor_font, editor_font)
-    }
-
-    fn set_editor_font_source(&mut self, source: EditorFontSource) -> bool {
-        replace_if_changed(&mut self.editor.font_source, source)
-    }
-
-    fn set_os_font_family(&mut self, family: String) -> bool {
-        replace_if_changed(&mut self.editor.os_font_family, family)
-    }
-
-    fn set_word_wrap(&mut self, enabled: bool) -> bool {
-        replace_if_changed(&mut self.editor.word_wrap, enabled)
-    }
-
-    fn set_editor_gutter(&mut self, gutter: u8) -> bool {
-        replace_if_changed(&mut self.editor.editor_gutter, gutter.min(32))
-    }
-
-    fn apply_theme_mode_preset(
-        &mut self,
-        theme_mode: AppThemeMode,
-        system_theme: Option<egui::Theme>,
-    ) -> bool {
-        let (text_color, background_color) =
-            stock_editor_palette_for_selection(theme_mode, system_theme);
-        if self.editor.theme_mode == theme_mode
-            && self.editor.editor_text_color == text_color
-            && self.editor.editor_background_color == background_color
-        {
-            return false;
-        }
-
-        self.editor.theme_mode = theme_mode;
-        text_color.clone_into(&mut self.editor.editor_text_color);
-        background_color.clone_into(&mut self.editor.editor_background_color);
-        true
-    }
-
-    fn set_editor_text_color(&mut self, color: egui::Color32) -> bool {
-        self.set_editor_palette_color(color_to_hex(color), true)
-    }
-
-    fn set_editor_background_color(&mut self, color: egui::Color32) -> bool {
-        self.set_editor_palette_color(color_to_hex(color), false)
-    }
-
-    fn set_editor_text_highlight_color(&mut self, color: egui::Color32) -> bool {
-        let next = color_to_hex(color);
-        let next_text = color_to_hex(crate::app::color_contrast::optimal_text_color(color));
-        if self.editor.editor_text_highlight_color == next
-            && self.editor.editor_text_highlight_text_color == next_text
-        {
-            return false;
-        }
-
-        self.editor.editor_text_highlight_color = next;
-        self.editor.editor_text_highlight_text_color = next_text;
-        true
-    }
-
-    fn set_editor_palette_color(&mut self, next: String, is_text_color: bool) -> bool {
-        let current = if is_text_color {
-            &mut self.editor.editor_text_color
-        } else {
-            &mut self.editor.editor_background_color
-        };
-        replace_if_changed(current, next)
-    }
-
-    fn set_file_open_disposition(&mut self, disposition: FileOpenDisposition) -> bool {
-        replace_if_changed(&mut self.workspace.file_open_disposition, disposition)
-    }
-
-    fn set_new_tab_placement(&mut self, placement: NewTabPlacement) -> bool {
-        replace_if_changed(&mut self.workspace.new_tab_placement, placement)
-    }
-
-    fn set_startup_session_behavior(&mut self, behavior: StartupSessionBehavior) -> bool {
-        replace_if_changed(&mut self.workspace.startup_session_behavior, behavior)
-    }
-
-    fn set_history_budget(&mut self, mut budget: TextHistoryBudget) -> bool {
-        budget = budget.sanitized();
-        if self.history.budget == budget {
-            return false;
-        }
-        budget.derived_from_memory = false;
-        self.history.budget = budget;
-        true
-    }
-
-    fn reset_history_budget_to_auto(&mut self) {
-        self.history.budget = TextHistoryBudget::derive_from_available_memory();
-    }
-}
-
-fn replace_if_changed<T: PartialEq>(current: &mut T, next: T) -> bool {
-    if *current == next {
-        return false;
-    }
-    *current = next;
-    true
-}
 
 pub(super) fn persist_settings_or_error(app: &mut ScratchpadApp) {
     if let Err(error) = crate::app::app_state::settings_state::persist_settings_now(app) {
         app.state.status.report_settings_save_failed(error);
     }
+}
+
+fn apply_setting_effects(app: &mut ScratchpadApp, changed: bool, effects: SettingEffects) {
+    if !changed {
+        return;
+    }
+    if effects.invalidate_font {
+        app.state.applied_editor_font = None;
+    }
+    if effects.invalidate_theme {
+        app.state.applied_theme_mode = None;
+    }
+    if effects.relayout {
+        crate::app::app_state::frame::begin_layout_transition(app);
+    }
+    if effects.apply_history_budget {
+        app.apply_history_budget_to_open_buffers();
+    }
+    persist_settings_or_error(app);
 }
 
 fn reset_tab_list_visibility_state(app: &mut ScratchpadApp, keep_open: bool) {
@@ -148,7 +49,7 @@ fn clear_tab_list_hide_deadline(app: &mut ScratchpadApp) {
 
 fn set_tab_list_width(app: &mut ScratchpadApp, width: f32) {
     app.state.app_settings.workspace.tab_list_width = width;
-    persist_settings_or_error(app);
+    apply_setting_effects(app, true, SettingEffects::RELAYOUT);
 }
 
 fn set_settings_surface(app: &mut ScratchpadApp, surface: AppSurface, open: bool) -> bool {
@@ -171,50 +72,33 @@ pub(crate) fn set_editor_appearance_source(
     app: &mut ScratchpadApp,
     source: EditorAppearanceSource,
 ) {
-    if app.state.app_settings.set_editor_appearance_source(source) {
-        app.state.applied_editor_font = None;
-        app.state.applied_theme_mode = None;
-        persist_settings_or_error(app);
-    }
+    let changed = app.state.app_settings.set_editor_appearance_source(source);
+    apply_setting_effects(app, changed, SettingEffects::FONT_AND_THEME);
 }
 
 pub(crate) fn set_font_size(app: &mut ScratchpadApp, font_size: f32) {
-    if app.state.app_settings.set_font_size(font_size) {
-        persist_settings_or_error(app);
-    }
+    let changed = app.state.app_settings.set_font_size(font_size);
+    apply_setting_effects(app, changed, SettingEffects::PERSIST_ONLY);
 }
 
 pub(crate) fn set_editor_font(app: &mut ScratchpadApp, editor_font: EditorFontPreset) {
-    if app.state.app_settings.set_editor_font(editor_font) {
-        app.state.applied_editor_font = None;
-        persist_settings_or_error(app);
-    }
-}
-
-pub(crate) fn set_editor_font_source(app: &mut ScratchpadApp, source: EditorFontSource) {
-    if app.state.app_settings.set_editor_font_source(source) {
-        app.state.applied_editor_font = None;
-        persist_settings_or_error(app);
-    }
-}
-
-pub(crate) fn set_os_font_family(app: &mut ScratchpadApp, family: String) {
-    if app.state.app_settings.set_os_font_family(family) {
-        app.state.applied_editor_font = None;
-        persist_settings_or_error(app);
-    }
+    let changed = app.state.app_settings.set_editor_font(editor_font);
+    apply_setting_effects(app, changed, SettingEffects::FONT);
 }
 
 pub(crate) fn set_word_wrap(app: &mut ScratchpadApp, enabled: bool) {
-    if app.state.app_settings.set_word_wrap(enabled) {
-        persist_settings_or_error(app);
-    }
+    let changed = app.state.app_settings.set_word_wrap(enabled);
+    apply_setting_effects(app, changed, SettingEffects::PERSIST_ONLY);
 }
 
 pub(crate) fn set_editor_gutter(app: &mut ScratchpadApp, gutter: u8) {
-    if app.state.app_settings.set_editor_gutter(gutter) {
-        persist_settings_or_error(app);
-    }
+    let changed = app.state.app_settings.set_editor_gutter(gutter);
+    apply_setting_effects(app, changed, SettingEffects::PERSIST_ONLY);
+}
+
+pub(crate) fn set_editor_tab_width(app: &mut ScratchpadApp, tab_width: u8) {
+    let changed = app.state.app_settings.set_editor_tab_width(tab_width);
+    apply_setting_effects(app, changed, SettingEffects::FONT);
 }
 
 pub(crate) fn apply_theme_mode_preset(
@@ -222,36 +106,29 @@ pub(crate) fn apply_theme_mode_preset(
     theme_mode: AppThemeMode,
     system_theme: Option<egui::Theme>,
 ) {
-    if app
+    let changed = app
         .state
         .app_settings
-        .apply_theme_mode_preset(theme_mode, system_theme)
-    {
-        app.state.applied_theme_mode = None;
-        persist_settings_or_error(app);
-    }
+        .apply_theme_mode_preset(theme_mode, system_theme);
+    apply_setting_effects(app, changed, SettingEffects::THEME);
 }
 
 pub(crate) fn set_editor_text_color(app: &mut ScratchpadApp, color: egui::Color32) {
-    if app.state.app_settings.set_editor_text_color(color) {
-        persist_settings_or_error(app);
-    }
+    let changed = app.state.app_settings.set_editor_text_color(color);
+    apply_setting_effects(app, changed, SettingEffects::PERSIST_ONLY);
 }
 
 pub(crate) fn set_editor_background_color(app: &mut ScratchpadApp, color: egui::Color32) {
-    if app.state.app_settings.set_editor_background_color(color) {
-        persist_settings_or_error(app);
-    }
+    let changed = app.state.app_settings.set_editor_background_color(color);
+    apply_setting_effects(app, changed, SettingEffects::PERSIST_ONLY);
 }
 
 pub(crate) fn set_editor_text_highlight_color(app: &mut ScratchpadApp, color: egui::Color32) {
-    if app
+    let changed = app
         .state
         .app_settings
-        .set_editor_text_highlight_color(color)
-    {
-        persist_settings_or_error(app);
-    }
+        .set_editor_text_highlight_color(color);
+    apply_setting_effects(app, changed, SettingEffects::PERSIST_ONLY);
 }
 
 pub(crate) fn set_tab_list_position(app: &mut ScratchpadApp, position: TabListPosition) {
@@ -260,42 +137,36 @@ pub(crate) fn set_tab_list_position(app: &mut ScratchpadApp, position: TabListPo
     }
 
     app.state.app_settings.workspace.tab_list_position = position;
-    crate::app::app_state::frame::begin_layout_transition(app);
     reset_tab_list_visibility_state(app, false);
     if position.is_vertical() {
         app.state.overflow_popup_open = false;
     }
     app.tab_manager.pending_scroll_to_active = true;
-    persist_settings_or_error(app);
+    apply_setting_effects(app, true, SettingEffects::RELAYOUT);
 }
 
 pub(crate) fn set_file_open_disposition(app: &mut ScratchpadApp, disposition: FileOpenDisposition) {
-    if app
+    let changed = app
         .state
         .app_settings
-        .set_file_open_disposition(disposition)
-    {
-        persist_settings_or_error(app);
-    }
+        .set_file_open_disposition(disposition);
+    apply_setting_effects(app, changed, SettingEffects::PERSIST_ONLY);
 }
 
 pub(crate) fn set_new_tab_placement(app: &mut ScratchpadApp, placement: NewTabPlacement) {
-    if app.state.app_settings.set_new_tab_placement(placement) {
-        persist_settings_or_error(app);
-    }
+    let changed = app.state.app_settings.set_new_tab_placement(placement);
+    apply_setting_effects(app, changed, SettingEffects::PERSIST_ONLY);
 }
 
 pub(crate) fn set_startup_session_behavior(
     app: &mut ScratchpadApp,
     behavior: StartupSessionBehavior,
 ) {
-    if app
+    let changed = app
         .state
         .app_settings
-        .set_startup_session_behavior(behavior)
-    {
-        persist_settings_or_error(app);
-    }
+        .set_startup_session_behavior(behavior);
+    apply_setting_effects(app, changed, SettingEffects::PERSIST_ONLY);
 }
 
 pub(crate) fn set_auto_hide_tab_list(app: &mut ScratchpadApp, enabled: bool) {
@@ -304,9 +175,8 @@ pub(crate) fn set_auto_hide_tab_list(app: &mut ScratchpadApp, enabled: bool) {
     }
 
     app.state.app_settings.workspace.auto_hide_tab_list = enabled;
-    crate::app::app_state::frame::begin_layout_transition(app);
     reset_tab_list_visibility_state(app, enabled && app.state.chrome.vertical_tabs_open());
-    persist_settings_or_error(app);
+    apply_setting_effects(app, true, SettingEffects::RELAYOUT);
 }
 
 pub(crate) fn set_tab_list_auto_hide_delay_seconds(app: &mut ScratchpadApp, seconds: f32) {
@@ -332,12 +202,11 @@ pub(crate) fn set_tab_list_auto_hide_delay_seconds(app: &mut ScratchpadApp, seco
 }
 
 pub(crate) fn set_recent_files_enabled(app: &mut ScratchpadApp, enabled: bool) {
-    if replace_if_changed(
+    let changed = replace_if_changed(
         &mut app.state.app_settings.workspace.recent_files_enabled,
         enabled,
-    ) {
-        persist_settings_or_error(app);
-    }
+    );
+    apply_setting_effects(app, changed, SettingEffects::PERSIST_ONLY);
 }
 
 pub(crate) fn set_status_bar_visible(app: &mut ScratchpadApp, visible: bool) {
@@ -347,8 +216,7 @@ pub(crate) fn set_status_bar_visible(app: &mut ScratchpadApp, visible: bool) {
     }
 
     app.state.app_settings.ui.status_bar_visible = visible;
-    crate::app::app_state::frame::begin_layout_transition(app);
-    persist_settings_or_error(app);
+    apply_setting_effects(app, true, SettingEffects::RELAYOUT);
 }
 
 pub(crate) fn defer_status_bar_visible(
@@ -366,16 +234,13 @@ pub(crate) fn defer_status_bar_visible(
 }
 
 pub(crate) fn set_history_budget(app: &mut ScratchpadApp, budget: TextHistoryBudget) {
-    if app.state.app_settings.set_history_budget(budget) {
-        app.apply_history_budget_to_open_buffers();
-        persist_settings_or_error(app);
-    }
+    let changed = app.state.app_settings.set_history_budget(budget);
+    apply_setting_effects(app, changed, SettingEffects::HISTORY_BUDGET);
 }
 
 pub(crate) fn reset_history_budget_to_auto(app: &mut ScratchpadApp) {
     app.state.app_settings.reset_history_budget_to_auto();
-    app.apply_history_budget_to_open_buffers();
-    persist_settings_or_error(app);
+    apply_setting_effects(app, true, SettingEffects::HISTORY_BUDGET);
 }
 
 pub(crate) fn set_tab_list_width_from_layout(app: &mut ScratchpadApp, width: f32) {
@@ -387,7 +252,6 @@ pub(crate) fn set_tab_list_width_from_layout(app: &mut ScratchpadApp, width: f32
         return;
     }
 
-    crate::app::app_state::frame::begin_layout_transition(app);
     set_tab_list_width(app, next);
 }
 

@@ -79,7 +79,7 @@ impl UiRenderFrameHarness {
     fn run_with_input(&mut self, input: egui::RawInput) -> u128 {
         let started_at = Instant::now();
         let _ = self.ctx.run_ui(input, |ui| {
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 App::ui(&mut self.app, ui, &mut self.frame);
             });
         });
@@ -210,7 +210,7 @@ pub fn run_scroll_stress_profile(bytes: usize, iterations: usize) -> usize {
 
         let mut total_rows = 0usize;
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 let mut layouter = build_layouter(
                     font_id.clone(),
                     false,

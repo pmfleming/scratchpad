@@ -42,8 +42,8 @@ pub(crate) use search_state::{
 };
 pub(crate) use settings_state::mutators as settings_controller;
 pub(crate) use types::{
-    AppSurface, PendingBackgroundAction, PendingEncodingComplianceAction, PendingOpenHereAction,
-    PendingOpenTabsAction, PendingReloadBufferAction, PendingReloadMode,
+    AppSurface, PendingActionKind, PendingBackgroundAction, PendingEncodingComplianceAction,
+    PendingOpenHereAction, PendingOpenTabsAction, PendingReloadBufferAction, PendingReloadMode,
     PendingReopenWithEncodingAction, PendingSavePathAction, PendingSessionHydrationAction,
     PendingSessionPersistAction, PendingStartupRestoreAction, PendingStartupRestoreCompareAction,
     PendingTabContextMenu, PendingTextMetadataAction, StartupRestoreConflict, TabRenameState,

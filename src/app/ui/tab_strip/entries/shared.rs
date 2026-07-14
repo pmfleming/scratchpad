@@ -1,6 +1,6 @@
 use crate::app::app_state::{ScratchpadApp, workspace::display_tabs};
 use crate::app::chrome::{TabButtonOptions, tab_button_with_actions, tab_label_font_id};
-use crate::app::domain::{TabAttentionState, WorkspaceTab};
+use crate::app::domain::WorkspaceTab;
 use crate::app::theme::TAB_HEIGHT;
 use crate::app::ui::tab_drag::{TabDropAxis, TabRectEntry};
 use crate::app::ui::tab_strip::context_menu::{
@@ -174,16 +174,13 @@ fn render_tab_slot_cell(
     context: &SlotCellContext<'_>,
     outcome: &mut TabStripOutcome,
 ) -> TabCellOutcome {
-    if let Some(tab) = workspace_tab_for_slot(app, slot_index) {
-        let has_duplicate = context
-            .duplicate_name_counts
-            .get(&tab.buffers.buffer.name)
-            .copied()
-            .unwrap_or(0)
-            > 1;
-        let display_name = crate::app::domain::tab::summary::full_display_name(tab, has_duplicate);
-        let attention_state = crate::app::domain::tab::summary::attention_state(tab);
-        let can_promote_all_files = crate::app::domain::tab::summary::can_promote_all_files(tab);
+    if workspace_tab_for_slot(app, slot_index).is_some() {
+        let presentation = crate::app::ui::tab_strip::tab_cell::tab_presentation(
+            app,
+            slot_index,
+            context.duplicate_name_counts,
+        )
+        .expect("workspace tab slots have a presentation");
         let is_active = !context.showing_settings && context.active_slot_index == slot_index;
         let is_selected =
             crate::app::app_state::workspace::display_tabs::tab_slot_selected(app, slot_index);
@@ -192,10 +189,10 @@ fn render_tab_slot_cell(
             app,
             slot_index,
             TabCellProps {
-                display_name: &display_name,
-                tooltip: Some(workspace_tab_tooltip(&display_name, attention_state)),
-                can_promote_all_files,
-                attention_state,
+                display_name: &presentation.display_name,
+                tooltip: Some(presentation.tooltip),
+                can_promote_all_files: presentation.can_promote_all_files,
+                attention_state: presentation.attention_state,
                 is_active,
                 is_selected,
                 pending_scroll_to_active: context.pending_scroll_to_active,
@@ -282,13 +279,6 @@ fn workspace_tab_for_slot(app: &ScratchpadApp, slot_index: usize) -> Option<&Wor
     app.tab_manager.tabs.as_slice().get(workspace_index)
 }
 
-fn workspace_tab_tooltip(
-    display_name: &str,
-    _attention_state: Option<TabAttentionState>,
-) -> String {
-    display_name.to_owned()
-}
-
 fn tab_rect_entry(index: usize, rect: egui::Rect, combine_enabled: bool) -> TabRectEntry {
     TabRectEntry {
         index,
@@ -312,22 +302,11 @@ pub(crate) fn apply_settings_tab_interaction(
 
 #[cfg(test)]
 mod tests {
-    use super::{SlotCellContext, slot_advance, workspace_tab_tooltip};
-    use crate::app::domain::TabAttentionState;
+    use super::{SlotCellContext, slot_advance};
     use crate::app::theme::TAB_HEIGHT;
     use crate::app::ui::tab_drag::TabDropAxis;
     use eframe::egui;
     use std::collections::HashMap;
-
-    #[test]
-    fn tab_attention_dot_does_not_change_the_tab_tooltip() {
-        let display_name = "notes.txt (C:\\notes)";
-
-        assert_eq!(
-            workspace_tab_tooltip(display_name, Some(TabAttentionState::DiskProblem)),
-            display_name
-        );
-    }
 
     #[test]
     fn vertical_virtual_tabs_advance_by_height_not_panel_width() {

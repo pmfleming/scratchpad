@@ -364,8 +364,9 @@ fn clamp_char_cursor(
     display_map: Option<&DisplayTextMap>,
 ) -> CharCursor {
     let clamped = galley.clamp_cursor(&cursor);
-    let local_index = display_map.map_or(clamped.index, |map| {
-        map.display_to_doc_cursor(clamped.index)
+    let clamped_index = usize::from(clamped.index);
+    let local_index = display_map.map_or(clamped_index, |map| {
+        map.display_to_doc_cursor(clamped_index)
     });
     CharCursor {
         index: char_offset_base
@@ -410,7 +411,7 @@ mod tests {
             .rows
             .iter()
             .take(row)
-            .map(|row| row.char_count_including_newline())
+            .map(|row| usize::from(row.char_count_including_newline()))
             .sum()
     }
 

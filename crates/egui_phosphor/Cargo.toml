@@ -1,0 +1,17 @@
+[package]
+name = "egui-phosphor"
+version = "0.12.0"
+edition = "2021"
+description = "Phosphor icons for egui"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "egui_phosphor"
+path = "src/lib.rs"
+
+[features]
+default = ["regular"]
+regular = []
+
+[dependencies]
+egui = { version = "0.35.0", default-features = false }

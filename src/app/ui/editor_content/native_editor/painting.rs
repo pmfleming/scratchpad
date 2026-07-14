@@ -1,6 +1,9 @@
 use super::layout::DisplayTextMap;
 use super::types::CharCursor;
-use crate::app::domain::{CursorRevealMode, EditorViewState, SearchReplacementPreview};
+use crate::app::domain::{
+    CursorRevealMode, EditorViewState, ImePreeditState, SearchReplacementPreview,
+};
+use crate::app::ui::editor_content::native_editor::CursorRange;
 use crate::app::ui::editor_content::native_editor::TextEditOptions;
 use crate::app::ui::scrolling::{ScrollAlign, ScrollIntent};
 use eframe::egui;
@@ -22,7 +25,7 @@ struct ReplacementPreviewContext<'a> {
     display_map: Option<&'a DisplayTextMap>,
 }
 
-pub(super) struct EditorPaintRequest<'a> {
+pub(super) struct EditorFrame<'a> {
     pub(super) galley: &'a Arc<egui::Galley>,
     pub(super) galley_pos: egui::Pos2,
     pub(super) rect: egui::Rect,
@@ -32,6 +35,10 @@ pub(super) struct EditorPaintRequest<'a> {
     pub(super) slice_chars: usize,
     pub(super) display_map: Option<&'a DisplayTextMap>,
     pub(super) active_selection: Option<Range<usize>>,
+    pub(super) cursor_range: Option<CursorRange>,
+    pub(super) cursor_reveal_mode: Option<CursorRevealMode>,
+    pub(super) ime_preedit: Option<&'a ImePreeditState>,
+    pub(super) replacement_preview: Option<&'a SearchReplacementPreview>,
 }
 
 #[derive(Clone, Copy)]
@@ -61,13 +68,11 @@ struct ImePreeditPaintContext<'a> {
 #[derive(Default)]
 pub(super) struct CursorPaintOutcome {
     pub(super) reveal_attempted: bool,
+    pub(super) reveal_intent: Option<ScrollIntent>,
+    pub(super) ime_geometry: Option<(egui::Rect, egui::Rect)>,
 }
 
-pub(super) fn paint_editor(
-    ui: &mut egui::Ui,
-    view: &mut EditorViewState,
-    request: EditorPaintRequest<'_>,
-) -> CursorPaintOutcome {
+pub(super) fn paint_editor(ui: &mut egui::Ui, request: EditorFrame<'_>) -> CursorPaintOutcome {
     paint_contiguous_selection_background(
         SelectionPaintContext {
             ui,
@@ -98,7 +103,7 @@ pub(super) fn paint_editor(
             display_map: request.display_map,
             slice_end: request.char_offset_base.saturating_add(request.slice_chars),
         },
-        view,
+        request.replacement_preview,
     );
     paint_ime_preedit(
         ImePreeditPaintContext {
@@ -111,14 +116,15 @@ pub(super) fn paint_editor(
             char_offset_base: request.char_offset_base,
             display_map: request.display_map,
         },
-        view,
+        request.ime_preedit,
+        request.cursor_range.as_ref(),
     );
 
     if !request.focused {
         return CursorPaintOutcome::default();
     }
 
-    if let Some(cursor_range) = &view.cursor_range {
+    if let Some(cursor_range) = &request.cursor_range {
         let galley_local_cursor_rect = cursor_rect_for_galley(
             ui,
             request.galley,
@@ -138,17 +144,27 @@ pub(super) fn paint_editor(
         // (The slice galley is offset by `start_line * row_height` within the
         // rect, so galley-local coords are NOT content coords.)
         let cursor_rect_content = cursor_rect.translate(-request.rect.min.to_vec2());
-        return paint_cursor_effects(ui, request.rect, cursor_rect, cursor_rect_content, view);
+        return paint_cursor_effects(
+            ui,
+            request.rect,
+            cursor_rect,
+            cursor_rect_content,
+            request.cursor_reveal_mode,
+        );
     }
 
     CursorPaintOutcome::default()
 }
 
-fn paint_ime_preedit(context: ImePreeditPaintContext<'_>, view: &EditorViewState) {
-    let Some(preedit) = view.ime_preedit.as_deref().filter(|text| !text.is_empty()) else {
+fn paint_ime_preedit(
+    context: ImePreeditPaintContext<'_>,
+    ime_preedit: Option<&ImePreeditState>,
+    cursor_range: Option<&CursorRange>,
+) {
+    let Some(preedit) = ime_preedit.filter(|preedit| !preedit.text.is_empty()) else {
         return;
     };
-    let Some(cursor_range) = &view.cursor_range else {
+    let Some(cursor_range) = cursor_range else {
         return;
     };
     if !context.focused {
@@ -174,7 +190,7 @@ fn paint_ime_preedit(context: ImePreeditPaintContext<'_>, view: &EditorViewState
     let text_color = context.options.text_color;
     let galley = context
         .ui
-        .fonts_mut(|fonts| fonts.layout_no_wrap(preedit.to_owned(), font_id.clone(), text_color));
+        .fonts_mut(|fonts| fonts.layout_no_wrap(preedit.text.clone(), font_id.clone(), text_color));
     let origin = egui::pos2(cursor_rect.center().x, cursor_rect.min.y);
     let preedit_rect =
         egui::Rect::from_min_size(origin, galley.rect.size()).intersect(context.rect);
@@ -192,6 +208,74 @@ fn paint_ime_preedit(context: ImePreeditPaintContext<'_>, view: &EditorViewState
         ],
         egui::Stroke::new(1.0, text_color),
     );
+
+    if let Some(active_range) = active_ime_range(preedit.active_range_chars.clone(), &preedit.text)
+    {
+        let active_left = origin.x
+            + ime_prefix_width(
+                context.ui,
+                &preedit.text,
+                active_range.start,
+                font_id.clone(),
+                text_color,
+            );
+        let active_right = origin.x
+            + ime_prefix_width(
+                context.ui,
+                &preedit.text,
+                active_range.end,
+                font_id,
+                text_color,
+            );
+        let active_rect = egui::Rect::from_min_max(
+            egui::pos2(active_left, preedit_rect.top()),
+            egui::pos2(active_right, preedit_rect.bottom()),
+        )
+        .intersect(context.rect);
+        if active_rect.width() > 0.0 {
+            painter.line_segment(
+                [
+                    egui::pos2(active_rect.left(), underline_y),
+                    egui::pos2(active_rect.right(), underline_y),
+                ],
+                egui::Stroke::new(2.0, context.ui.visuals().selection.stroke.color),
+            );
+            painter.line_segment(
+                [active_rect.right_top(), active_rect.right_bottom()],
+                context.ui.visuals().text_cursor.stroke,
+            );
+        }
+    }
+}
+
+fn active_ime_range(
+    range: Option<std::ops::Range<usize>>,
+    text: &str,
+) -> Option<std::ops::Range<usize>> {
+    let char_len = text.chars().count();
+    let range = range?;
+    let start = range.start.min(char_len);
+    let end = range.end.min(char_len);
+    (start < end).then_some(start..end)
+}
+
+fn ime_prefix_width(
+    ui: &egui::Ui,
+    text: &str,
+    char_count: usize,
+    font_id: egui::FontId,
+    text_color: egui::Color32,
+) -> f32 {
+    if char_count == 0 {
+        return 0.0;
+    }
+    let prefix = text.chars().take(char_count).collect::<String>();
+    ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(prefix, font_id, text_color)
+            .rect
+            .width()
+    })
 }
 
 fn cursor_rect_for_galley(
@@ -249,8 +333,8 @@ fn paint_contiguous_selection_background(
     let painter = context.ui.painter_at(context.rect.expand(1.0));
     let mut row_start = 0usize;
     for row in &context.galley.rows {
-        let row_text_chars = row.char_count_excluding_newline();
-        let row_end = row_start.saturating_add(row.char_count_including_newline());
+        let row_text_chars = usize::from(row.char_count_excluding_newline());
+        let row_end = row_start.saturating_add(row.char_count_including_newline().into());
         if local_start < row_end && local_end > row_start {
             let start_col = local_start.saturating_sub(row_start).min(row_text_chars);
             let end_col = local_end.saturating_sub(row_start).min(row_text_chars);
@@ -261,7 +345,7 @@ fn paint_contiguous_selection_background(
                 context.galley,
                 context.galley_pos,
                 row.pos.x,
-                row.x_offset(start_col),
+                row.x_offset(egui::text::CharIndex(start_col)),
             );
             let right = if selection_reaches_line_end || selection_covers_whole_row {
                 context.rect.right()
@@ -270,7 +354,7 @@ fn paint_contiguous_selection_background(
                     context.galley,
                     context.galley_pos,
                     row.pos.x,
-                    row.x_offset(end_col),
+                    row.x_offset(egui::text::CharIndex(end_col)),
                 )
             };
             let highlight_rect = egui::Rect::from_min_max(
@@ -290,8 +374,11 @@ fn row_screen_x(galley: &egui::Galley, galley_pos: egui::Pos2, row_x: f32, colum
     galley_pos.x + column_x + row_x - galley.rect.left()
 }
 
-fn paint_replacement_previews(context: ReplacementPreviewContext<'_>, view: &EditorViewState) {
-    let Some(preview) = view.search_replacement_preview.as_ref() else {
+fn paint_replacement_previews(
+    context: ReplacementPreviewContext<'_>,
+    preview: Option<&SearchReplacementPreview>,
+) {
+    let Some(preview) = preview else {
         return;
     };
     let slice_range = context.char_offset_base..context.slice_end;
@@ -479,12 +566,10 @@ fn paint_cursor_effects(
     rect: egui::Rect,
     cursor_rect_screen: egui::Rect,
     cursor_rect_content: egui::Rect,
-    view: &mut EditorViewState,
+    reveal_mode: Option<CursorRevealMode>,
 ) -> CursorPaintOutcome {
-    let reveal_mode = view.cursor_reveal_mode();
     paint_cursor(ui, rect, cursor_rect_screen);
-    publish_ime_output(ui, rect, cursor_rect_screen, view);
-    if let Some(mode) = reveal_mode {
+    let reveal_intent = reveal_mode.map(|mode| {
         let align_y = match mode {
             CursorRevealMode::KeepVisible => {
                 Some(ScrollAlign::NearestWithMargin(CURSOR_REVEAL_MARGIN_PX))
@@ -496,14 +581,16 @@ fn paint_cursor_effects(
             egui::pos2(cursor_rect_content.left(), cursor_rect_content.center().y),
             egui::pos2(cursor_rect_content.right(), cursor_rect_content.center().y),
         );
-        view.request_intent(ScrollIntent::Reveal {
+        ScrollIntent::Reveal {
             rect: reveal_rect,
             align_y,
             align_x: Some(ScrollAlign::NearestWithMargin(0.0)),
-        });
-    }
+        }
+    });
     CursorPaintOutcome {
         reveal_attempted: reveal_mode.is_some(),
+        reveal_intent,
+        ime_geometry: Some((rect, cursor_rect_screen)),
     }
 }
 
@@ -516,7 +603,7 @@ fn paint_cursor(ui: &egui::Ui, rect: egui::Rect, cursor_rect: egui::Rect) {
     );
 }
 
-fn publish_ime_output(
+pub(super) fn publish_ime_output(
     ui: &mut egui::Ui,
     rect: egui::Rect,
     cursor_rect: egui::Rect,
@@ -537,7 +624,11 @@ fn publish_ime_output(
     }
 
     ui.output_mut(|output| {
-        output.ime = Some(egui::output::IMEOutput { rect, cursor_rect });
+        output.ime = Some(egui::output::IMEOutput {
+            rect,
+            cursor_rect,
+            should_interrupt_composition: false,
+        });
     });
 }
 

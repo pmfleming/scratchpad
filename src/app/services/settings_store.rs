@@ -1,4 +1,5 @@
 use crate::app::services::store_io::write_atomic;
+use serde::de::DeserializeOwned;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -120,15 +121,26 @@ impl SettingsStore {
 }
 
 pub(crate) fn parse_toml_settings(raw: &str) -> io::Result<AppSettings> {
-    let value = raw.parse::<toml::Value>().map_err(invalid_data)?;
-    if !value.is_table() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "settings TOML must contain a top-level table",
-        ));
-    }
+    let table = raw.parse::<toml::Table>().map_err(invalid_data)?;
 
-    value.try_into().map_err(invalid_data)
+    let mut settings = AppSettings::default();
+    apply_section(&table, "editor", &mut settings.editor)?;
+    apply_section(&table, "workspace", &mut settings.workspace)?;
+    apply_section(&table, "ui", &mut settings.ui)?;
+    apply_section(&table, "history", &mut settings.history)?;
+    apply_section(&table, "platform", &mut settings.platform)?;
+    apply_section(&table, "shortcuts", &mut settings.shortcuts)?;
+    Ok(settings)
+}
+
+fn apply_section<T>(table: &toml::Table, key: &str, target: &mut T) -> io::Result<()>
+where
+    T: DeserializeOwned,
+{
+    if let Some(section) = table.get(key) {
+        *target = section.clone().try_into().map_err(invalid_data)?;
+    }
+    Ok(())
 }
 
 fn invalid_data(error: impl std::error::Error + Send + Sync + 'static) -> io::Error {

@@ -63,6 +63,7 @@ pub struct TextEditOptions<'a> {
     pub text_color: egui::Color32,
     pub highlight_style: EditorHighlightStyle,
     pub warm_layout_cache: bool,
+    pub reserve_alt_for_shortcuts: bool,
 }
 
 impl<'a> TextEditOptions<'a> {
@@ -82,12 +83,19 @@ impl<'a> TextEditOptions<'a> {
             text_color,
             highlight_style,
             warm_layout_cache: true,
+            reserve_alt_for_shortcuts: false,
         }
     }
 
     #[must_use]
     pub fn with_layout_cache_warming(mut self, enabled: bool) -> Self {
         self.warm_layout_cache = enabled;
+        self
+    }
+
+    #[must_use]
+    pub fn with_alt_reserved_for_shortcuts(mut self, reserved: bool) -> Self {
+        self.reserve_alt_for_shortcuts = reserved;
         self
     }
 }
@@ -109,7 +117,7 @@ impl CharCursor {
 
     pub(super) fn to_egui_ccursor(self) -> egui::text::CCursor {
         egui::text::CCursor {
-            index: self.index,
+            index: egui::text::CharIndex(self.index),
             prefer_next_row: self.prefer_next_row,
         }
     }
@@ -169,11 +177,11 @@ impl CursorRange {
     pub fn from_egui(range: egui::text::CCursorRange) -> Self {
         Self {
             primary: CharCursor {
-                index: range.primary.index,
+                index: range.primary.index.into(),
                 prefer_next_row: range.primary.prefer_next_row,
             },
             secondary: CharCursor {
-                index: range.secondary.index,
+                index: range.secondary.index.into(),
                 prefer_next_row: range.secondary.prefer_next_row,
             },
         }

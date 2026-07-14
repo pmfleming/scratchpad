@@ -1,7 +1,5 @@
 use crate::app::app_state::{ScratchpadApp, workspace::display_tabs};
 use crate::app::chrome::{TabButtonOptions, tab_button_with_actions, tab_label_font_id};
-use crate::app::domain::TabAttentionState;
-use crate::app::domain::tab::summary;
 use crate::app::services::settings_store::TabListPosition;
 use crate::app::theme::{
     BUTTON_SIZE, TAB_BUTTON_WIDTH, TAB_HEIGHT, TAB_LIST_SCROLLBAR_GUTTER, action_bg, border,
@@ -9,6 +7,7 @@ use crate::app::theme::{
 };
 use crate::app::ui::tab_drag;
 use crate::app::ui::tab_strip::context_menu::attach_tab_list_context_menu;
+use crate::app::ui::tab_strip::tab_cell::{TabPresentation, attention_color, tab_presentation};
 use crate::app::ui::widget_ids;
 use eframe::egui::{self, Stroke};
 use std::collections::{HashMap, HashSet};
@@ -43,9 +42,7 @@ struct OverflowMenuContext<'a> {
 
 struct OverflowRowState {
     selected: bool,
-    display_name: String,
-    can_promote_all_files: bool,
-    attention_state: Option<TabAttentionState>,
+    presentation: TabPresentation,
 }
 
 #[derive(Clone, Copy)]
@@ -440,13 +437,13 @@ fn show_overflow_row(
         let (response, promote_response, close_response, truncated) = tab_button_with_actions(
             ui,
             ("tab_overflow.slot", slot_index),
-            &row_state.display_name,
+            &row_state.presentation.display_name,
             row_state.selected,
             row_state.selected,
             TabButtonOptions::with_actions(
                 menu.row_width,
-                row_state.can_promote_all_files,
-                row_state.attention_state.map(attention_color),
+                row_state.presentation.can_promote_all_files,
+                row_state.presentation.attention_state.map(attention_color),
             )
             .with_label_font_id(tab_label_font_id(app.state.app_settings.font_size())),
         );
@@ -477,8 +474,8 @@ fn maybe_attach_overflow_row_tooltip(
     row_state: &OverflowRowState,
     truncated: bool,
 ) -> egui::Response {
-    if truncated || !row_state.display_name.is_empty() {
-        response.on_hover_text(row_state.display_name.clone())
+    if truncated || !row_state.presentation.tooltip.is_empty() {
+        response.on_hover_text(row_state.presentation.tooltip.clone())
     } else {
         response
     }
@@ -494,47 +491,8 @@ fn overflow_row_state(
             app, slot_index,
         ) || crate::app::app_state::workspace::display_tabs::active_tab_slot_index(app)
             == slot_index,
-        display_name: overflow_display_name(app, slot_index, duplicate_name_counts)?,
-        can_promote_all_files:
-            crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(
-                app, slot_index,
-            )
-            .and_then(|index| app.tab_manager.tabs.as_slice().get(index))
-            .is_some_and(summary::can_promote_all_files),
-        attention_state: crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(
-            app, slot_index,
-        )
-        .and_then(|index| app.tab_manager.tabs.as_slice().get(index))
-        .and_then(summary::attention_state),
+        presentation: tab_presentation(app, slot_index, duplicate_name_counts)?,
     })
-}
-
-fn overflow_display_name(
-    app: &ScratchpadApp,
-    slot_index: usize,
-    duplicate_name_counts: &HashMap<String, usize>,
-) -> Option<String> {
-    if crate::app::app_state::workspace::display_tabs::tab_slot_is_settings(app, slot_index) {
-        return Some("Settings".to_owned());
-    }
-
-    let workspace_index =
-        crate::app::app_state::workspace::display_tabs::workspace_index_for_slot(app, slot_index)?;
-    let tab = app.tab_manager.tabs.as_slice().get(workspace_index)?;
-    let has_duplicate = duplicate_name_counts
-        .get(&tab.buffers.buffer.name)
-        .copied()
-        .unwrap_or(0)
-        > 1;
-    Some(summary::full_display_name(tab, has_duplicate))
-}
-
-fn attention_color(state: TabAttentionState) -> egui::Color32 {
-    match state {
-        TabAttentionState::AutoEdit => egui::Color32::from_rgb(230, 132, 46),
-        TabAttentionState::Dirty => egui::Color32::from_rgb(70, 176, 96),
-        TabAttentionState::DiskProblem => egui::Color32::from_rgb(220, 64, 64),
-    }
 }
 
 fn apply_overflow_row_actions(

@@ -145,10 +145,13 @@ fn insert_font(
     fonts: &mut egui::FontDefinitions,
     font_name: &'static str,
     font_bytes: &'static [u8],
+    tab_width: f32,
 ) {
     fonts.font_data.insert(
         font_name.to_owned(),
-        egui::FontData::from_static(font_bytes).into(),
+        egui::FontData::from_static(font_bytes)
+            .tweak(font_tweak(tab_width))
+            .into(),
     );
 }
 
@@ -157,17 +160,26 @@ fn insert_owned_font(
     font_name: &'static str,
     font_bytes: Vec<u8>,
     face_index: u32,
+    tab_width: f32,
 ) {
-    let mut font_data = egui::FontData::from_owned(font_bytes);
+    let mut font_data = egui::FontData::from_owned(font_bytes).tweak(font_tweak(tab_width));
     font_data.index = face_index;
     fonts
         .font_data
         .insert(font_name.to_owned(), font_data.into());
 }
 
+fn font_tweak(tab_width: f32) -> egui::FontTweak {
+    egui::FontTweak {
+        tab_size: tab_width,
+        ..Default::default()
+    }
+}
+
 pub fn apply_editor_fonts(
     ctx: &egui::Context,
     selection: &EditorFontSelection,
+    tab_width: f32,
 ) -> Result<(), io::Error> {
     let mut fonts = egui::FontDefinitions::default();
     egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
@@ -175,7 +187,7 @@ pub fn apply_editor_fonts(
     let (font_name, warning) = match selection.source {
         EditorFontSource::Scratchpad => {
             let (font_name, font_bytes) = selection.scratchpad_preset.font_asset();
-            insert_font(&mut fonts, font_name, font_bytes);
+            insert_font(&mut fonts, font_name, font_bytes, tab_width);
             (font_name, None)
         }
         EditorFontSource::Os => match load_os_editor_font(selection.os_family.as_deref()) {
@@ -185,19 +197,20 @@ pub fn apply_editor_fonts(
                     OS_EDITOR_FONT_NAME,
                     os_font.bytes,
                     os_font.index,
+                    tab_width,
                 );
                 (OS_EDITOR_FONT_NAME, None)
             }
             Err(error) => {
                 let (font_name, font_bytes) = selection.scratchpad_preset.font_asset();
-                insert_font(&mut fonts, font_name, font_bytes);
+                insert_font(&mut fonts, font_name, font_bytes, tab_width);
                 (font_name, Some(error))
             }
         },
     };
 
     for (fallback_name, fallback_bytes) in FALLBACK_FONT_ASSETS {
-        insert_font(&mut fonts, fallback_name, fallback_bytes);
+        insert_font(&mut fonts, fallback_name, fallback_bytes, tab_width);
     }
 
     let editor_family = egui::FontFamily::Name(EDITOR_FONT_FAMILY.into());

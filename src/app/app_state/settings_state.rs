@@ -9,7 +9,7 @@ use crate::app::services::settings_store::{
     DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, EditorAppearanceSource, FileOpenDisposition,
     LEGACY_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR,
     LIGHT_EDITOR_TEXT_COLOR, NewTabPlacement, StartupSessionBehavior, TabListPosition,
-    TabOrderDirection, TabOrderMode, WindowState, color_from_hex, color_to_hex,
+    TabOrderDirection, TabOrderMode, WindowState, color_from_hex,
 };
 use eframe::egui;
 use std::path::Path;
@@ -63,7 +63,10 @@ impl AppSettings {
     #[must_use]
     pub fn editor_font_selection(&self) -> EditorFontSelection {
         if self.editor_appearance_source() == EditorAppearanceSource::System {
-            return EditorFontSelection::os(None, self.editor.editor_font);
+            return EditorFontSelection::os(
+                crate::app::system_appearance::editor_font_family(),
+                self.editor.editor_font,
+            );
         }
 
         let os_family = self.editor.os_font_family.trim();
@@ -82,6 +85,11 @@ impl AppSettings {
     }
 
     #[must_use]
+    pub fn editor_tab_width(&self) -> u8 {
+        self.editor.editor_tab_width.clamp(1, 16)
+    }
+
+    #[must_use]
     pub fn theme_mode(&self) -> AppThemeMode {
         self.editor.theme_mode
     }
@@ -89,7 +97,7 @@ impl AppSettings {
     #[must_use]
     pub fn theme_preference(&self) -> egui::ThemePreference {
         if self.uses_system_editor_appearance() {
-            egui::ThemePreference::System
+            crate::app::system_appearance::theme_preference()
         } else {
             self.editor.theme_mode.theme_preference()
         }
@@ -348,6 +356,7 @@ pub(crate) fn persist_settings_now(app: &mut ScratchpadApp) -> std::io::Result<(
 }
 
 pub fn apply_theme_to_context(app: &mut ScratchpadApp, ctx: &egui::Context) {
+    crate::app::system_appearance::observe_system_theme(ctx.system_theme());
     let theme_mode = app.state.app_settings.editor.theme_mode;
     if app.state.applied_theme_mode == Some(theme_mode) {
         return;
@@ -437,8 +446,25 @@ fn sanitize_tab_list_auto_hide_delay_seconds(seconds: f32) -> f32 {
 mod tests {
     use super::apply_settings;
     use crate::app::app_state::{ScratchpadApp, StatusDomain, StatusSeverity, StatusState};
-    use crate::app::services::settings_store::AppSettings;
+    use crate::app::fonts::{EditorFontPreset, EditorFontSource};
+    use crate::app::services::settings_store::{AppSettings, EditorAppearanceSource};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn app_appearance_honors_os_font_selection() {
+        let mut settings = AppSettings::default();
+        settings.editor.appearance_source = EditorAppearanceSource::App;
+        settings.editor.editor_font = EditorFontPreset::Mono;
+        settings.editor.font_source = EditorFontSource::Os;
+        settings.editor.os_font_family = "System Mono".to_owned();
+
+        let selection = settings.editor_font_selection();
+
+        assert_eq!(selection.source, EditorFontSource::Os);
+        assert_eq!(selection.scratchpad_preset, EditorFontPreset::Mono);
+        assert_eq!(selection.os_family.as_deref(), Some("System Mono"));
+        assert_eq!(selection.label(), "System Mono");
+    }
 
     #[test]
     fn applying_settings_reports_invalid_shortcut_overrides() {

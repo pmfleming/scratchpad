@@ -322,7 +322,7 @@ pub fn run_tab_strip_frame_profile(tab_count: usize, iterations: usize) -> u128 
             .map(|_| {
                 let started_at = Instant::now();
                 let _ = ctx.run_ui(raw_input.clone(), |ui| {
-                    egui::CentralPanel::default().show_inside(ui, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         crate::app::ui::tab_strip::show_header(ui, app);
                     });
                 });

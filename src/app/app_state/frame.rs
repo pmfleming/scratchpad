@@ -268,7 +268,11 @@ fn sync_editor_fonts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         return;
     }
 
-    if let Err(error) = fonts::apply_editor_fonts(ctx, &selection) {
+    if let Err(error) = fonts::apply_editor_fonts(
+        ctx,
+        &selection,
+        f32::from(app.state.app_settings.editor_tab_width()),
+    ) {
         diagnostics::record_warning(
             "apply_editor_font",
             None,

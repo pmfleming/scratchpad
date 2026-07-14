@@ -177,7 +177,10 @@ fn selection_drag_suppresses_cursor_reveal() {
 #[test]
 fn losing_focus_clears_ime_state() {
     let mut view = EditorViewState::new(1);
-    view.ime_preedit = Some("kana".to_owned());
+    view.ime_preedit = Some(crate::app::domain::ImePreeditState::new(
+        "kana".to_owned(),
+        Some(0..4),
+    ));
     assert!(view.mark_ime_output(eframe::egui::Rect::EVERYTHING, eframe::egui::Rect::ZERO));
 
     sync_ime_output_focus(&mut view, false);

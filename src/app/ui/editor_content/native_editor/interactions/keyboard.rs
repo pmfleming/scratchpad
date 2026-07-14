@@ -1,6 +1,6 @@
 use super::super::{CursorRange, cursor, editing, select_all_cursor};
 use super::KeyboardInputRequest;
-use crate::app::domain::{BufferState, EditorViewState, PieceSource};
+use crate::app::domain::{BufferState, EditorViewState, ImePreeditState, PieceSource};
 use eframe::egui;
 
 #[derive(Clone, Copy, Debug)]
@@ -12,8 +12,11 @@ struct PressedKeyEvent {
 #[derive(Debug)]
 enum RelevantInputEvent {
     Text(String),
-    ImePreedit(String),
-    ImeDisabled,
+    ImePreedit {
+        text: String,
+        active_range_chars: Option<std::ops::Range<usize>>,
+    },
+
     Key(PressedKeyEvent),
     Copy,
     Cut,
@@ -26,33 +29,40 @@ pub(super) fn handle_keyboard_events(
     view: &mut EditorViewState,
     request: KeyboardInputRequest<'_>,
 ) -> bool {
-    handle_keyboard_events_with(ui, buffer, view, |key_event, buffer, cursor| {
-        cursor::apply_cursor_movement(cursor::CursorMovementRequest {
-            cursor,
-            key: key_event.key,
-            modifiers: &key_event.modifiers,
-            galley: request.galley,
-            page_jump_rows: request.page_jump_rows,
-            total_chars: request.total_chars,
-            piece_tree: buffer.document().piece_tree(),
-            char_offset_base: request.char_offset_base,
-            slice_chars: request.slice_chars,
-            display_map: request.display_map,
-        })
-    })
+    handle_keyboard_events_with(
+        ui,
+        buffer,
+        view,
+        request.reserve_alt_for_shortcuts,
+        |key_event, buffer, cursor| {
+            cursor::apply_cursor_movement(cursor::CursorMovementRequest {
+                cursor,
+                key: key_event.key,
+                modifiers: &key_event.modifiers,
+                galley: request.galley,
+                page_jump_rows: request.page_jump_rows,
+                total_chars: request.total_chars,
+                piece_tree: buffer.document().piece_tree(),
+                char_offset_base: request.char_offset_base,
+                slice_chars: request.slice_chars,
+                display_map: request.display_map,
+            })
+        },
+    )
 }
 
 fn handle_keyboard_events_with(
     ui: &mut egui::Ui,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
+    reserve_alt_for_shortcuts: bool,
     mut handle_movement_event: impl FnMut(
         PressedKeyEvent,
         &mut BufferState,
         &CursorRange,
     ) -> Option<CursorRange>,
 ) -> bool {
-    let events = relevant_input_events(ui);
+    let events = relevant_input_events(ui, reserve_alt_for_shortcuts);
     let total_chars = buffer.current_file_length().chars;
     let mut changed = false;
 
@@ -86,12 +96,12 @@ fn handle_relevant_input_event(
 
     match event {
         RelevantInputEvent::Text(text) => insert_text(buffer, view, &cursor, &text),
-        RelevantInputEvent::ImePreedit(text) => {
-            view.ime_preedit = (!text.is_empty()).then_some(text);
-            false
-        }
-        RelevantInputEvent::ImeDisabled => {
-            view.ime_preedit = None;
+        RelevantInputEvent::ImePreedit {
+            text,
+            active_range_chars,
+        } => {
+            view.ime_preedit =
+                (!text.is_empty()).then(|| ImePreeditState::new(text, active_range_chars));
             false
         }
         RelevantInputEvent::Key(key_event) => handle_key_event(
@@ -143,37 +153,48 @@ fn handle_key_event(
     apply_cursor_update(view, buffer, next_cursor)
 }
 
-fn relevant_input_events(ui: &egui::Ui) -> Vec<RelevantInputEvent> {
+fn relevant_input_events(
+    ui: &egui::Ui,
+    reserve_alt_for_shortcuts: bool,
+) -> Vec<RelevantInputEvent> {
     ui.input(|input| {
         input
             .events
             .iter()
-            .filter_map(relevant_input_event)
+            .filter_map(|event| relevant_input_event(event, reserve_alt_for_shortcuts))
             .collect()
     })
 }
 
-fn relevant_input_event(event: &egui::Event) -> Option<RelevantInputEvent> {
+fn relevant_input_event(
+    event: &egui::Event,
+    reserve_alt_for_shortcuts: bool,
+) -> Option<RelevantInputEvent> {
     match event {
         egui::Event::Text(text) => {
             is_insertable_text(text).then(|| RelevantInputEvent::Text(text.clone()))
         }
-        egui::Event::Ime(egui::ImeEvent::Preedit(text)) => {
-            Some(RelevantInputEvent::ImePreedit(text.clone()))
-        }
+        egui::Event::Ime(egui::ImeEvent::Preedit {
+            text,
+            active_range_chars,
+        }) => Some(RelevantInputEvent::ImePreedit {
+            text: text.clone(),
+            active_range_chars: active_range_chars.clone(),
+        }),
         egui::Event::Ime(egui::ImeEvent::Commit(text)) => {
             is_insertable_text(text).then(|| RelevantInputEvent::Text(text.clone()))
         }
-        egui::Event::Ime(egui::ImeEvent::Disabled) => Some(RelevantInputEvent::ImeDisabled),
         egui::Event::Key {
             key,
             pressed: true,
             modifiers,
             ..
-        } => Some(RelevantInputEvent::Key(PressedKeyEvent {
-            key: *key,
-            modifiers: *modifiers,
-        })),
+        } if !reserve_alt_for_shortcuts || !modifiers.alt => {
+            Some(RelevantInputEvent::Key(PressedKeyEvent {
+                key: *key,
+                modifiers: *modifiers,
+            }))
+        }
         egui::Event::Copy => Some(RelevantInputEvent::Copy),
         egui::Event::Cut => Some(RelevantInputEvent::Cut),
         egui::Event::Paste(text) if !text.is_empty() => {
@@ -265,10 +286,6 @@ fn handle_history_key(
     buffer: &mut BufferState,
     view: &mut EditorViewState,
 ) -> Option<bool> {
-    if key_event.key == egui::Key::Backspace && is_classic_undo_shortcut(key_event.modifiers) {
-        let selection = buffer.undo_last_text_operation();
-        return Some(apply_history(view, buffer, selection));
-    }
     if key_event.key == egui::Key::Z && is_undo_shortcut(key_event.modifiers) {
         let selection = buffer.undo_last_text_operation();
         return Some(apply_history(view, buffer, selection));
@@ -305,10 +322,6 @@ fn handle_insert_key(
         return Some(false);
     }
     None
-}
-
-fn is_classic_undo_shortcut(modifiers: egui::Modifiers) -> bool {
-    modifiers.alt && !modifiers.shift && !modifiers.ctrl && !modifiers.command
 }
 
 fn is_redo_shortcut(modifiers: egui::Modifiers) -> bool {
@@ -376,11 +389,15 @@ mod tests {
 
     #[test]
     fn ime_preedit_event_is_kept_separate_from_committed_text() {
-        let event = egui::Event::Ime(egui::ImeEvent::Preedit("kana".to_owned()));
+        let event = egui::Event::Ime(egui::ImeEvent::Preedit {
+            text: "kana".to_owned(),
+            active_range_chars: Some(1..3),
+        });
 
         assert!(matches!(
-            relevant_input_event(&event),
-            Some(RelevantInputEvent::ImePreedit(text)) if text == "kana"
+            relevant_input_event(&event, false),
+            Some(RelevantInputEvent::ImePreedit { text, active_range_chars })
+                if text == "kana" && active_range_chars == Some(1..3)
         ));
     }
 
@@ -389,8 +406,25 @@ mod tests {
         let event = egui::Event::Ime(egui::ImeEvent::Commit("かな".to_owned()));
 
         assert!(matches!(
-            relevant_input_event(&event),
+            relevant_input_event(&event, false),
             Some(RelevantInputEvent::Text(text)) if text == "かな"
         ));
+    }
+
+    #[test]
+    fn alt_keys_are_reserved_only_for_the_hyprland_input_policy() {
+        let event = egui::Event::Key {
+            key: egui::Key::ArrowLeft,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::ALT,
+        };
+
+        assert!(matches!(
+            relevant_input_event(&event, false),
+            Some(RelevantInputEvent::Key(_))
+        ));
+        assert!(relevant_input_event(&event, true).is_none());
     }
 }

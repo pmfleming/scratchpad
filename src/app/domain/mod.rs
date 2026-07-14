@@ -17,6 +17,6 @@ pub use tab::{TabAttentionState, WorkspaceTab};
 pub(crate) use tab_manager::DisplayTabSlot;
 pub use tab_manager::{PendingAction, TabManager};
 pub use view::{
-    CursorRevealMode, EditorViewState, LayoutCacheKey, SearchHighlightState,
+    CursorRevealMode, EditorViewState, ImePreeditState, LayoutCacheKey, SearchHighlightState,
     SearchReplacementPreview, SearchReplacementPreviewEntry, ViewId,
 };

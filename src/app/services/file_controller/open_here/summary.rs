@@ -27,7 +27,6 @@ impl OpenHereBatchSummary {
             OpenHerePathOutcome::AlreadyInCurrentTab => {
                 self.already_here_count += 1;
             }
-            OpenHerePathOutcome::Queued => {}
             OpenHerePathOutcome::Failed => {
                 self.failure_count += 1;
             }

@@ -1,9 +1,11 @@
 use super::super::{LeafAddress, PieceTreeLeaf, PieceTreeLite, support::pack_leaves_into_nodes};
+use super::PieceTreeEdit;
 use std::ops::Range;
 
 impl PieceTreeLite {
-    pub(super) fn replace_leaf_span(
+    pub(super) fn commit_leaf_replacement(
         &mut self,
+        _edit: PieceTreeEdit,
         start: LeafAddress,
         end: LeafAddress,
         replacement_leaves: Vec<PieceTreeLeaf>,

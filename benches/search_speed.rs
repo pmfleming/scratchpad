@@ -1,7 +1,8 @@
 #![forbid(unsafe_code)]
 
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use scratchpad::app::services::search::{SearchMode, SearchOptions, SearchProgram, search_program};
+use std::hint::black_box;
 
 const QUERY: &str = "needle";
 const FILE_SIZES: &[usize] = &[16 * 1024, 128 * 1024, 1024 * 1024];

@@ -87,6 +87,21 @@ The Hyprland wrapper sets `WINIT_UNIX_BACKEND=wayland` and
 `SCRATCHPAD_PLATFORM_PROFILE=hyprland` so Scratchpad hides app-rendered caption
 buttons and leaves compositor-level window management to Hyprland.
 
+Linux defaults to eframe's wgpu renderer on egui 0.35+. Set
+`SCRATCHPAD_RENDERER=glow` to force the OpenGL renderer when diagnosing driver
+or compositor issues.
+
+Optional egui inspection / MCP support is available for UI automation and
+accessibility-tree debugging:
+
+```sh
+cargo run --features inspection
+EGUI_INSPECTION=1 cargo run --features inspection
+```
+
+With `EGUI_INSPECTION=1`, eframe listens on egui's inspection port so tools such
+as `egui_mcp` can inspect and drive the running app.
+
 Useful runtime switches:
 
 ```powershell
@@ -119,36 +134,45 @@ open_file = "ctrl+o"
 save_file = "ctrl+s"
 close_tab = "ctrl+w"
 toggle_tab_list = "ctrl+alt+b"
-split_tile = "ctrl+alt+enter"
-split_left = "ctrl+shift+left"
-split_right = "ctrl+shift+right"
-split_up = "ctrl+shift+up"
-split_down = "ctrl+shift+down"
-resize_tile_left = "ctrl+alt+left"
-resize_tile_right = "ctrl+alt+right"
-resize_tile_up = "ctrl+alt+up"
-resize_tile_down = "ctrl+alt+down"
-move_tile_left = "ctrl+left"
-move_tile_right = "ctrl+right"
-move_tile_up = "ctrl+up"
-move_tile_down = "ctrl+down"
+split_tile = "alt+enter"
+split_left = "alt+ctrl+left"
+split_right = "alt+ctrl+right"
+split_up = "alt+ctrl+up"
+split_down = "alt+ctrl+down"
+move_tile_left = "alt+left"
+move_tile_right = "alt+right"
+move_tile_up = "alt+up"
+move_tile_down = "alt+down"
+resize_tile_left = "alt+shift+left"
+resize_tile_right = "alt+shift+right"
+resize_tile_up = "alt+shift+up"
+resize_tile_down = "alt+shift+down"
 ```
+
+Tiling shortcuts all hang off a single `alt` leader — the in-app stand-in for
+the compositor's `super` key, which Hyprland reserves globally. The base key
+mirrors the equivalent Hyprland bind, so muscle memory carries over: where
+Hyprland uses `super+enter` to spawn a tile, Scratchpad uses `alt+enter` to
+split; `super+arrow` ↔ `alt+arrow` to move a tile, and so on. The editor leaves
+all `alt`-modified keys to this layer, so they never clash with text editing
+(word-wise navigation stays on `ctrl+arrow`).
 
 Shortcut strings are case-insensitive. Supported modifiers are `ctrl`, `shift`,
 `alt`, and `command`/`super`/`win`. Multiple bindings can be separated with
-commas, so Hyprland users can opt into focused-app Super bindings such as
-`split_tile = "ctrl+alt+enter, super+enter"` if those keys are not reserved by
-the compositor.
+commas, so you can add focused-app `super` bindings such as
+`split_tile = "alt+enter, super+enter"` if those keys are not reserved by the
+compositor.
 
 ## Packaging and Release
 
-The Windows release workflow checks formatting, runs clippy and tests, verifies
-that the release tag matches `Cargo.toml`, builds the release binary, packages a
-Windows MSI, signs artifacts when signing is configured, and uploads both the
-installer and checksum.
+The release workflow builds Windows and Linux artifacts in parallel, then
+publishes them together only after both jobs pass. It checks formatting, clippy,
+tests, Cargo/Nix version consistency, and the Nix flake. Windows produces a
+signed MSI when signing is configured; Linux produces an x86_64 archive with
+generic and Hyprland launchers, a desktop entry, an icon, and a checksum.
 
-Release tags use the `vX.Y.Z` format, matching the package version in
-`Cargo.toml`.
+Release tags use the `vX.Y.Z` format, matching the package versions in both
+`Cargo.toml` and `flake.nix`.
 
 Local Windows installer packaging:
 
@@ -161,13 +185,46 @@ cargo build --release --locked
 Linux/Nix packaging entry points:
 
 ```sh
+cargo build --release --locked
+./scripts/package-linux-release.sh 0.40.0
 nix build .#scratchpad
 nix build .#scratchpad-hyprland
+nix run github:pmfleming/scratchpad#scratchpad-hyprland
 ```
 
 The flake also exposes `homeManagerModules.default`, which can install the
 regular package or the Hyprland wrapper, write `~/.config/scratchpad/settings.toml`,
-and optionally generate Hyprland binds/window rules.
+and generate Hyprland autostart, binds, and window rules:
+
+```nix
+programs.scratchpad = {
+  enable = true;
+  profile = "hyprland";
+  hyprland = {
+    enableBinds = true;
+    autoStart = true;
+    specialWorkspace = "scratchpad";
+  };
+};
+```
+
+This starts Scratchpad silently on `special:scratchpad` at login. The default
+`SUPER+SHIFT+S` binding toggles that workspace. For a non-Nix installation,
+install the GitHub release archive and add the equivalent Hyprland settings:
+
+```ini
+exec-once = scratchpad-hyprland
+bind = SUPER SHIFT, S, togglespecialworkspace, scratchpad
+windowrule = match:class ^(scratchpad)$, workspace special:scratchpad silent
+windowrule = match:class ^(scratchpad)$, float on
+windowrule = match:class ^(scratchpad)$, center on
+windowrule = match:class ^(scratchpad)$, size 1200 800
+```
+
+The release workflow publishes `scratchpad-vX.Y.Z-linux-x86_64.tar.gz` and its
+SHA-256 checksum. See
+[the Hyprland configuration notes](docs/hyprland-nixos-configuration.md) for the
+full Home Manager module and plain compositor configuration.
 
 ## Measurement
 

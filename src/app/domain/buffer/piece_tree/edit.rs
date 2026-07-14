@@ -7,6 +7,19 @@ use super::{
 };
 use std::ops::Range;
 
+/// Proof that a structural edit has advanced the document generation and must
+/// finish through `commit_leaf_replacement`, which refreshes derived indexes.
+#[must_use]
+pub(super) struct PieceTreeEdit {
+    generation: u64,
+}
+
+impl PieceTreeEdit {
+    fn generation(&self) -> u64 {
+        self.generation
+    }
+}
+
 impl PieceTreeLite {
     pub fn insert_with_source(
         &mut self,
@@ -18,9 +31,11 @@ impl PieceTreeLite {
         if text.is_empty() {
             return 0;
         }
-        let generation = self.runtime.advance_generation();
+        let edit = self.begin_edit();
 
-        let add_span = self.storage.append_add_text(text, source, generation);
+        let add_span = self
+            .storage
+            .append_add_text(text, source, edit.generation());
         let add_start = add_span.start_byte;
         let inserted_pieces = build_chunked_pieces(PieceBuffer::Add, add_start, text);
         let inserted_chars = inserted_pieces.iter().map(|piece| piece.char_len).sum();
@@ -37,7 +52,7 @@ impl PieceTreeLite {
         let mut replacement_leaves = pack_pieces_into_leaves(replacement);
         let anchors = self.reposition_inserted_leaf_anchors(address, offset_chars, inserted_chars);
         self.redistribute_anchors_into_leaves(&mut replacement_leaves, anchors);
-        self.replace_leaf_span(address, address, replacement_leaves);
+        self.commit_leaf_replacement(edit, address, address, replacement_leaves);
         inserted_chars
     }
 
@@ -47,7 +62,7 @@ impl PieceTreeLite {
         if range_chars.is_empty() {
             return;
         }
-        self.runtime.advance_generation();
+        let edit = self.begin_edit();
 
         let start_address = self.find_leaf_for_char_offset(range_chars.start);
         let end_probe = range_chars.end.saturating_sub(1);
@@ -58,12 +73,18 @@ impl PieceTreeLite {
             self.retained_pieces_for_removal(start_address, end_address, range_chars);
         let mut replacement_leaves = pack_pieces_into_leaves(affected_pieces);
         self.redistribute_anchors_into_leaves(&mut replacement_leaves, anchors);
-        self.replace_leaf_span(start_address, end_address, replacement_leaves);
+        self.commit_leaf_replacement(edit, start_address, end_address, replacement_leaves);
     }
 
     #[must_use]
     pub fn text_for_span(&self, span: ByteSpan) -> &str {
         self.storage.text_for_span(span)
+    }
+
+    fn begin_edit(&mut self) -> PieceTreeEdit {
+        PieceTreeEdit {
+            generation: self.runtime.advance_generation(),
+        }
     }
 
     fn leaf_with_inserted_pieces(

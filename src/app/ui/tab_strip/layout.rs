@@ -247,7 +247,7 @@ pub(crate) fn show_horizontal_tab_panel(
     panel
         .exact_size(auto_hide_panel_extent(bar_visible, HEADER_HEIGHT))
         .frame(horizontal_tab_list_frame(ui))
-        .show_inside(ui, |ui| {
+        .show(ui, |ui| {
             if !bar_visible {
                 return;
             }

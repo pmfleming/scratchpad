@@ -10,7 +10,6 @@ use super::{
 use crate::app::CanonicalPathKey;
 use crate::app::ui::editor_content::native_editor::{CursorRange, OperationRecord};
 use std::ops::Range;
-use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -29,12 +28,6 @@ pub type BufferId = u64;
 pub struct BufferState {
     pub id: BufferId,
     document: TextDocument,
-    state: BufferStateFields,
-    refresh: BufferRefreshState,
-}
-
-#[derive(Clone)]
-pub struct BufferStateFields {
     pub name: String,
     pub path: Option<PathBuf>,
     pub path_key: Option<CanonicalPathKey>,
@@ -50,6 +43,7 @@ pub struct BufferStateFields {
     pub freshness: BufferFreshness,
     pub active_selection: Option<Range<usize>>,
     pub has_non_compliant_characters: bool,
+    refresh: BufferRefreshState,
 }
 
 #[derive(Clone)]
@@ -58,20 +52,6 @@ struct BufferRefreshState {
     line_ending_metadata_exact: bool,
     encoding_compliance_stale: bool,
     pending_text_history_event: Option<TextHistoryEvent>,
-}
-
-impl Deref for BufferState {
-    type Target = BufferStateFields;
-
-    fn deref(&self) -> &Self::Target {
-        &self.state
-    }
-}
-
-impl DerefMut for BufferState {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.state
-    }
 }
 
 #[derive(Clone)]
@@ -343,15 +323,11 @@ impl BufferState {
     }
 
     pub fn replace_from_loaded_buffer(&mut self, loaded: BufferState) {
-        self.document = loaded.document;
-        self.state = BufferStateFields {
-            active_selection: None,
-            ..loaded.state
-        };
-        self.refresh = BufferRefreshState {
-            pending_text_history_event: None,
-            ..loaded.refresh
-        };
+        let id = self.id;
+        *self = loaded;
+        self.id = id;
+        self.active_selection = None;
+        self.refresh.pending_text_history_event = None;
     }
 
     pub fn set_path(&mut self, path: Option<PathBuf>) {
@@ -460,23 +436,21 @@ impl BufferState {
         Self {
             id,
             document,
-            state: BufferStateFields {
-                name: state.name,
-                path: state.path,
-                path_key: state.path_key,
-                is_dirty: state.is_dirty,
-                is_settings_file: false,
-                show_control_chars: state.show_control_chars,
-                right_to_left_reading_order: state.right_to_left_reading_order,
-                temp_id: state.temp_id,
-                line_count: text_metadata.line_count,
-                artifact_summary: text_metadata.artifact_summary,
-                format: state.format,
-                disk_state: state.disk_state,
-                freshness: state.freshness,
-                active_selection: None,
-                has_non_compliant_characters: text_metadata.has_non_compliant_characters,
-            },
+            name: state.name,
+            path: state.path,
+            path_key: state.path_key,
+            is_dirty: state.is_dirty,
+            is_settings_file: false,
+            show_control_chars: state.show_control_chars,
+            right_to_left_reading_order: state.right_to_left_reading_order,
+            temp_id: state.temp_id,
+            line_count: text_metadata.line_count,
+            artifact_summary: text_metadata.artifact_summary,
+            format: state.format,
+            disk_state: state.disk_state,
+            freshness: state.freshness,
+            active_selection: None,
+            has_non_compliant_characters: text_metadata.has_non_compliant_characters,
             refresh: BufferRefreshState {
                 text_metadata_refresh_stale: state.text_metadata_refresh_stale,
                 line_ending_metadata_exact: !state.text_metadata_refresh_stale,

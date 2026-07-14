@@ -1,5 +1,5 @@
 use super::FileController;
-use super::support::LoadedFile;
+use super::support::{LoadedFile, OpenPathDecision};
 use crate::app::app_state::{
     PendingBackgroundAction, PendingOpenTabsAction, ScratchpadApp, StatusDomain,
     workspace::accessors as workspace_accessors,
@@ -183,18 +183,20 @@ impl FileController {
 
     pub(super) fn open_selected_paths_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
         Self::prepare_to_open_paths(app);
-        let mut duplicate_count = 0;
-        let mut pending_paths = Vec::new();
-
-        for path in paths {
-            if Self::activate_existing_path(app, &path).is_some() {
-                duplicate_count += 1;
-            } else if Self::reserve_pending_open_path(app, &path) {
-                pending_paths.push(path);
-            } else {
-                duplicate_count += 1;
-            }
-        }
+        let batch = Self::prepare_open_batch(
+            app,
+            paths,
+            |app, path| {
+                if Self::activate_existing_path(app, &path).is_some() {
+                    OpenPathDecision::Resolved(OpenPathOutcome::AlreadyOpen)
+                } else {
+                    OpenPathDecision::Unresolved(path)
+                }
+            },
+            || OpenPathOutcome::AlreadyOpen,
+        );
+        let duplicate_count = batch.resolved.len();
+        let pending_paths = batch.pending_paths;
 
         if pending_paths.is_empty() {
             Self::apply_open_summary(

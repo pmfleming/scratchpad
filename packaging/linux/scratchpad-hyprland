@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -eu
+
+export WINIT_UNIX_BACKEND=wayland
+export SCRATCHPAD_PLATFORM_PROFILE=hyprland
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$script_dir/scratchpad" "$@"

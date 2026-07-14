@@ -1,10 +1,11 @@
 #![forbid(unsafe_code)]
 
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use scratchpad::profile::{
     MB, RECOMMENDED_UI_RENDER_FRAME_BYTES, UiRenderFrameHarness, run_scroll_stress_profile,
     run_viewport_extraction_profile,
 };
+use std::hint::black_box;
 
 fn bench_ui_render_frame_120hz(c: &mut Criterion) {
     let mut group = c.benchmark_group("ui_render_frame_120hz");

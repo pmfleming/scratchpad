@@ -22,6 +22,16 @@ pub(in crate::app::services::file_controller) struct LoadedFile {
     pub(in crate::app::services::file_controller) buffer: BufferState,
 }
 
+pub(in crate::app::services::file_controller) enum OpenPathDecision<T> {
+    Resolved(T),
+    Unresolved(PathBuf),
+}
+
+pub(in crate::app::services::file_controller) struct PreparedOpenBatch<T> {
+    pub pending_paths: Vec<PathBuf>,
+    pub resolved: Vec<T>,
+}
+
 impl LoadedFile {
     pub(in crate::app::services::file_controller) fn from_buffer(buffer: BufferState) -> Self {
         let format_warning = buffer.format.format_warning_text();
@@ -66,6 +76,31 @@ fn combine_open_warning(
 impl FileController {
     pub(super) fn prepare_to_open_paths(app: &mut ScratchpadApp) {
         app.reload_settings_before_workspace_change();
+    }
+
+    pub(super) fn prepare_open_batch<T>(
+        app: &mut ScratchpadApp,
+        paths: Vec<PathBuf>,
+        mut resolve_existing: impl FnMut(&mut ScratchpadApp, PathBuf) -> OpenPathDecision<T>,
+        mut pending_conflict: impl FnMut() -> T,
+    ) -> PreparedOpenBatch<T> {
+        let mut batch = PreparedOpenBatch {
+            pending_paths: Vec::new(),
+            resolved: Vec::new(),
+        };
+        for path in paths {
+            match resolve_existing(app, path) {
+                OpenPathDecision::Resolved(outcome) => batch.resolved.push(outcome),
+                OpenPathDecision::Unresolved(path) => {
+                    if Self::reserve_pending_open_path(app, &path) {
+                        batch.pending_paths.push(path);
+                    } else {
+                        batch.resolved.push(pending_conflict());
+                    }
+                }
+            }
+        }
+        batch
     }
 
     pub(super) fn reserve_pending_open_path(app: &mut ScratchpadApp, path: &Path) -> bool {

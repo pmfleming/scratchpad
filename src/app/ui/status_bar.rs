@@ -37,7 +37,7 @@ struct StatusBarActions {
 pub(crate) fn show_status_bar(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     app.queue_active_buffer_encoding_compliance_refresh();
 
-    egui::Panel::bottom("status").show_inside(ui, |ui| {
+    egui::Panel::bottom("status").show(ui, |ui| {
         widget_ids::feature_scope(ui, "status_bar", |ui| {
             ui.horizontal(|ui| {
                 if crate::app::app_state::settings_state::showing_settings(app) {

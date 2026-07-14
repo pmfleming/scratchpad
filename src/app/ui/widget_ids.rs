@@ -1,7 +1,13 @@
+use eframe::egui::widget_style::HasClasses;
 use eframe::egui::{self, ComboBox, Id, LayerId, Order, Rect, Response, Sense};
-use std::hash::Hash;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 const ID_NAMESPACE: &str = "scratchpad.widget";
+const CLASS_SCOPE: &str = "scratchpad-scope";
+const CLASS_FEATURE: &str = "scratchpad-feature";
+const CLASS_SURFACE: &str = "scratchpad-surface";
+const CLASS_RECT_SURFACE: &str = "scratchpad-rect-surface";
 
 #[derive(Clone, Copy, Debug, Hash)]
 pub(crate) enum WidgetRole {
@@ -43,11 +49,11 @@ pub(crate) fn configure_debug_options(ctx: &egui::Context) {
 }
 
 pub(crate) fn ctx_key(key: impl Hash) -> Id {
-    Id::new((ID_NAMESPACE, "ctx", key))
+    Id::new((ID_NAMESPACE, "ctx", hash_key(&key)))
 }
 
 pub(crate) fn area_id(key: impl Hash) -> Id {
-    Id::new((ID_NAMESPACE, "area", key))
+    Id::new((ID_NAMESPACE, "area", hash_key(&key)))
 }
 
 pub(crate) fn area(key: impl Hash) -> egui::Area {
@@ -55,7 +61,7 @@ pub(crate) fn area(key: impl Hash) -> egui::Area {
 }
 
 pub(crate) fn root_id(key: impl Hash) -> Id {
-    Id::new((ID_NAMESPACE, "root", key))
+    Id::new((ID_NAMESPACE, "root", hash_key(&key)))
 }
 
 pub(crate) fn surface_id(key: impl Hash) -> Id {
@@ -116,7 +122,7 @@ pub(crate) fn layer_id(order: Order, key: impl Hash) -> LayerId {
 }
 
 pub(crate) fn local(ui: &egui::Ui, key: impl Hash) -> Id {
-    ui.make_persistent_id((ID_NAMESPACE, key))
+    ui.make_persistent_id((ID_NAMESPACE, hash_key(&key)))
 }
 
 pub(crate) fn scroll_id(ui: &egui::Ui, key: impl Hash) -> Id {
@@ -128,7 +134,7 @@ pub(crate) fn combo_box(ui: &egui::Ui, key: impl Hash) -> ComboBox {
 }
 
 pub(crate) fn child(id: Id, key: impl Hash) -> Id {
-    id.with((ID_NAMESPACE, key))
+    id.with((ID_NAMESPACE, hash_key(&key)))
 }
 
 pub(crate) fn read_deferred_persisted<T: Clone + Send + Sync + 'static>(
@@ -165,7 +171,10 @@ pub(crate) fn feature_scope<R>(
     feature: &'static str,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {
-    scope(ui, ("feature", feature), add_contents)
+    ui.scope_builder(
+        scope_builder(("feature", feature)).with_class(CLASS_FEATURE),
+        add_contents,
+    )
 }
 
 pub(crate) fn scope<R>(
@@ -173,7 +182,7 @@ pub(crate) fn scope<R>(
     key: impl Hash,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {
-    ui.push_id((ID_NAMESPACE, key), add_contents)
+    ui.scope_builder(scope_builder(key), add_contents)
 }
 
 pub(crate) fn surface_scope<R>(
@@ -181,7 +190,12 @@ pub(crate) fn surface_scope<R>(
     key: impl Hash,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {
-    ui.push_id(surface_id(key), add_contents)
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .id(surface_id(key))
+            .with_class(CLASS_SURFACE),
+        add_contents,
+    )
 }
 
 pub(crate) fn rect_scope<R>(
@@ -214,10 +228,22 @@ pub(crate) fn rect_child_ui(
 
 fn rect_ui_builder(rect: Rect, role: impl Hash, layout: egui::Layout) -> egui::UiBuilder {
     egui::UiBuilder::new()
-        .id_salt(rect_surface_id(rect, role))
-        .global_scope(true)
+        .id(rect_surface_id(rect, role))
+        .with_class(CLASS_RECT_SURFACE)
         .max_rect(rect)
         .layout(layout)
+}
+
+fn scope_builder(key: impl Hash) -> egui::UiBuilder {
+    egui::UiBuilder::new()
+        .id_salt((ID_NAMESPACE, hash_key(&key)))
+        .with_class(CLASS_SCOPE)
+}
+
+fn hash_key(key: impl Hash) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    key.hash(&mut hasher);
+    hasher.finish()
 }
 
 #[track_caller]

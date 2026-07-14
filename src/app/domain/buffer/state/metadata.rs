@@ -6,10 +6,8 @@ use super::{
 
 impl BufferState {
     pub fn refresh_text_metadata(&mut self) {
-        let metadata = buffer_text_metadata_from_piece_tree(
-            self.document.piece_tree(),
-            &mut self.state.format,
-        );
+        let metadata =
+            buffer_text_metadata_from_piece_tree(self.document.piece_tree(), &mut self.format);
         self.apply_text_metadata(metadata);
     }
 
@@ -143,9 +141,9 @@ impl BufferState {
         let next_char = tree.char_at(start_char.saturating_add(inserted_char_len));
 
         buffer_text_metadata_from_edit(
-            self.state.line_count,
-            &self.state.artifact_summary,
-            &mut self.state.format,
+            self.line_count,
+            &self.artifact_summary,
+            &mut self.format,
             IncrementalMetadataEdit {
                 previous_char,
                 deleted_text: &edit.deleted_text,
