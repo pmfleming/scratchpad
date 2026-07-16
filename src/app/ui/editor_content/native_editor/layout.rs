@@ -26,6 +26,7 @@ pub(super) struct EditorGalleyContext {
     pub(super) virtual_width: Option<f32>,
     pub(super) slice_chars: usize,
     pub(super) display_map: Option<DisplayTextMap>,
+    pub(super) tab_offsets: Vec<usize>,
 }
 
 struct ViewportTextSlice<'a> {
@@ -52,6 +53,16 @@ pub(super) fn build_editor_galley(
         cursor_offset_for_viewport_slice(view),
         options.word_wrap,
     );
+    let tab_offsets = if options.show_tab_characters && !buffer.show_control_chars {
+        slice
+            .text
+            .chars()
+            .enumerate()
+            .filter_map(|(offset, ch)| (ch == '\t').then_some(offset))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let preview_slice = preview_text_slice(
         &slice.text,
         slice.char_range.clone(),
@@ -124,6 +135,7 @@ pub(super) fn build_editor_galley(
         virtual_width: slice.virtual_width,
         slice_chars,
         display_map,
+        tab_offsets,
     }
 }
 

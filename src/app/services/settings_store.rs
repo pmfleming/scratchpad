@@ -10,12 +10,13 @@ pub use model::{
     AppSettings, AppThemeMode, DEFAULT_AUTO_HIDE_TAB_LIST, DEFAULT_EDITOR_BACKGROUND_COLOR,
     DEFAULT_EDITOR_GUTTER, DEFAULT_EDITOR_TEXT_COLOR, DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR,
     DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR, DEFAULT_FONT_SIZE, DEFAULT_RECENT_FILES_ENABLED,
-    DEFAULT_STATUS_BAR_VISIBLE, DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, DEFAULT_TAB_LIST_WIDTH,
-    DEFAULT_WINDOW_INNER_SIZE, DEFAULT_WORD_WRAP, EditorAppearanceSource, EditorSettings,
-    FileOpenDisposition, HistorySettings, LEGACY_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR,
+    DEFAULT_SHOW_TAB_CHARACTERS, DEFAULT_STATUS_BAR_VISIBLE,
+    DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, DEFAULT_TAB_LIST_WIDTH, DEFAULT_WINDOW_INNER_SIZE,
+    DEFAULT_WORD_WRAP, EditorAppearanceSource, EditorSettings, FileOpenDisposition,
+    HistorySettings, IndentationStyle, LEGACY_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR,
     LIGHT_EDITOR_BACKGROUND_COLOR, LIGHT_EDITOR_TEXT_COLOR, MIN_WINDOW_INNER_SIZE, NewTabPlacement,
-    PlatformSettings, ShortcutSettings, StartupSessionBehavior, TabListPosition, TabOrderDirection,
-    TabOrderMode, UiSettings, WindowState, WorkspaceSettings,
+    PlatformSettings, ShortcutSettings, StartupSessionBehavior, TabKeyBehavior, TabListPosition,
+    TabOrderDirection, TabOrderMode, UiSettings, WindowState, WorkspaceSettings,
 };
 pub(crate) use model::{color_from_hex, color_to_hex, default_font_size, default_word_wrap};
 

@@ -1,7 +1,21 @@
 use super::super::{CursorRange, cursor, editing, select_all_cursor};
 use super::KeyboardInputRequest;
 use crate::app::domain::{BufferState, EditorViewState, ImePreeditState, PieceSource};
+use crate::app::services::settings_store::{IndentationStyle, TabKeyBehavior};
 use eframe::egui;
+
+#[derive(Clone, Copy)]
+struct IndentationInput {
+    tab_key_behavior: TabKeyBehavior,
+    style: IndentationStyle,
+    width: u8,
+}
+
+#[derive(Clone, Copy)]
+struct KeyboardInputContext {
+    total_chars: usize,
+    indentation: IndentationInput,
+}
 
 #[derive(Clone, Copy, Debug)]
 struct PressedKeyEvent {
@@ -34,6 +48,11 @@ pub(super) fn handle_keyboard_events(
         buffer,
         view,
         request.reserve_alt_for_shortcuts,
+        IndentationInput {
+            tab_key_behavior: request.tab_key_behavior,
+            style: request.indentation_style,
+            width: request.indentation_width,
+        },
         |key_event, buffer, cursor| {
             cursor::apply_cursor_movement(cursor::CursorMovementRequest {
                 cursor,
@@ -56,6 +75,7 @@ fn handle_keyboard_events_with(
     buffer: &mut BufferState,
     view: &mut EditorViewState,
     reserve_alt_for_shortcuts: bool,
+    indentation: IndentationInput,
     mut handle_movement_event: impl FnMut(
         PressedKeyEvent,
         &mut BufferState,
@@ -63,7 +83,10 @@ fn handle_keyboard_events_with(
     ) -> Option<CursorRange>,
 ) -> bool {
     let events = relevant_input_events(ui, reserve_alt_for_shortcuts);
-    let total_chars = buffer.current_file_length().chars;
+    let context = KeyboardInputContext {
+        total_chars: buffer.current_file_length().chars,
+        indentation,
+    };
     let mut changed = false;
 
     for event in events {
@@ -72,7 +95,7 @@ fn handle_keyboard_events_with(
             event,
             buffer,
             view,
-            total_chars,
+            context,
             &mut handle_movement_event,
         );
     }
@@ -85,7 +108,7 @@ fn handle_relevant_input_event(
     event: RelevantInputEvent,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
-    total_chars: usize,
+    context: KeyboardInputContext,
     handle_movement_event: &mut impl FnMut(
         PressedKeyEvent,
         &mut BufferState,
@@ -110,7 +133,7 @@ fn handle_relevant_input_event(
             buffer,
             view,
             &cursor,
-            total_chars,
+            context,
             handle_movement_event,
         ),
         RelevantInputEvent::Copy => {
@@ -136,7 +159,7 @@ fn handle_key_event(
     buffer: &mut BufferState,
     view: &mut EditorViewState,
     cursor: &CursorRange,
-    total_chars: usize,
+    context: KeyboardInputContext,
     handle_movement_event: &mut impl FnMut(
         PressedKeyEvent,
         &mut BufferState,
@@ -144,7 +167,7 @@ fn handle_key_event(
     ) -> Option<CursorRange>,
 ) -> bool {
     if let Some(handled) =
-        handle_non_movement_key_event(ui, key_event, buffer, view, cursor, total_chars)
+        handle_non_movement_key_event(ui, key_event, buffer, view, cursor, context)
     {
         return handled;
     }
@@ -214,9 +237,9 @@ fn handle_non_movement_key_event(
     buffer: &mut BufferState,
     view: &mut EditorViewState,
     cursor: &CursorRange,
-    total_chars: usize,
+    context: KeyboardInputContext,
 ) -> Option<bool> {
-    if let Some(changed) = handle_text_key(key_event, buffer, view, cursor) {
+    if let Some(changed) = handle_text_key(key_event, buffer, view, cursor, context.indentation) {
         return Some(changed);
     }
     if let Some(changed) = handle_history_key(key_event, buffer, view) {
@@ -229,7 +252,7 @@ fn handle_non_movement_key_event(
         return Some(changed);
     }
     if key_event.key == egui::Key::A && key_event.modifiers.command {
-        view.set_cursor_range_anchored(buffer, select_all_cursor(total_chars));
+        view.set_cursor_range_anchored(buffer, select_all_cursor(context.total_chars));
         return Some(false);
     }
 
@@ -241,13 +264,16 @@ fn handle_text_key(
     buffer: &mut BufferState,
     view: &mut EditorViewState,
     cursor: &CursorRange,
+    indentation: IndentationInput,
 ) -> Option<bool> {
     match key_event.key {
         egui::Key::Enter => {
             let line_ending = buffer.document().preferred_line_ending_str().to_owned();
             Some(insert_text(buffer, view, cursor, &line_ending))
         }
-        egui::Key::Tab => Some(handle_tab_key(key_event.modifiers, buffer, view, cursor)),
+        egui::Key::Tab if indentation.tab_key_behavior == TabKeyBehavior::IndentText => Some(
+            handle_tab_key(key_event.modifiers, buffer, view, cursor, indentation),
+        ),
         _ => None,
     }
 }
@@ -257,12 +283,16 @@ fn handle_tab_key(
     buffer: &mut BufferState,
     view: &mut EditorViewState,
     cursor: &CursorRange,
+    indentation: IndentationInput,
 ) -> bool {
     if !modifiers.shift {
-        return insert_text(buffer, view, cursor, "\t");
+        let next_cursor =
+            editing::apply_indent(buffer, cursor, indentation.style, indentation.width);
+        view.set_cursor_range_anchored(buffer, next_cursor);
+        return true;
     }
 
-    let next_cursor = editing::apply_outdent(buffer, cursor);
+    let next_cursor = editing::apply_outdent(buffer, cursor, indentation.width);
     apply_cursor_update(view, buffer, next_cursor)
 }
 

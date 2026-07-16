@@ -16,6 +16,7 @@ pub use types::{
 };
 
 use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
+use crate::app::services::settings_store::TabKeyBehavior;
 use crate::app::ui::scrolling::DisplaySnapshot;
 use eframe::egui;
 use interactions::{
@@ -31,12 +32,14 @@ use painting::{
 };
 use std::sync::Arc;
 
-const EDITOR_FOCUS_LOCK_FILTER: egui::EventFilter = egui::EventFilter {
-    horizontal_arrows: true,
-    vertical_arrows: true,
-    tab: false,
-    escape: false,
-};
+fn editor_focus_lock_filter(tab_key_behavior: TabKeyBehavior) -> egui::EventFilter {
+    egui::EventFilter {
+        horizontal_arrows: true,
+        vertical_arrows: true,
+        tab: tab_key_behavior == TabKeyBehavior::IndentText,
+        escape: false,
+    }
+}
 
 pub struct EditorWidgetOutcome {
     pub changed: bool,
@@ -84,7 +87,12 @@ pub fn render_editor_text_edit(
         row_height,
         galley_context.display_column_base,
     );
-    request_editor_focus(ui, &response, options.request_focus);
+    request_editor_focus(
+        ui,
+        &response,
+        options.request_focus,
+        options.tab_key_behavior,
+    );
 
     // The pre-input galley bakes the active cursor selection into its text
     // formats. If input changes the document or selection, rebuild before
@@ -153,6 +161,7 @@ pub fn render_editor_text_edit(
                 char_offset_base: galley_context.char_offset_base,
                 slice_chars: galley_context.slice_chars,
                 display_map: galley_context.display_map.as_ref(),
+                tab_offsets: &galley_context.tab_offsets,
                 active_selection: buffer.active_selection.clone(),
                 cursor_range: view.cursor_range,
                 cursor_reveal_mode: view.cursor_reveal_mode(),
@@ -322,6 +331,9 @@ fn handle_focused_keyboard_input(
                 slice_chars: request.slice_chars,
                 display_map: request.display_map,
                 reserve_alt_for_shortcuts: request.options.reserve_alt_for_shortcuts,
+                tab_key_behavior: request.options.tab_key_behavior,
+                indentation_style: request.options.indentation_style,
+                indentation_width: request.options.indentation_width,
             },
         )
 }
@@ -384,12 +396,19 @@ pub(super) fn sync_ime_output_focus(view: &mut EditorViewState, focused: bool) {
     }
 }
 
-fn request_editor_focus(ui: &mut egui::Ui, response: &egui::Response, request_focus: bool) {
+fn request_editor_focus(
+    ui: &mut egui::Ui,
+    response: &egui::Response,
+    request_focus: bool,
+    tab_key_behavior: TabKeyBehavior,
+) {
     if request_focus {
         response.request_focus();
     }
     if response.has_focus() {
-        ui.memory_mut(|mem| mem.set_focus_lock_filter(response.id, EDITOR_FOCUS_LOCK_FILTER));
+        ui.memory_mut(|mem| {
+            mem.set_focus_lock_filter(response.id, editor_focus_lock_filter(tab_key_behavior));
+        });
     }
 }
 

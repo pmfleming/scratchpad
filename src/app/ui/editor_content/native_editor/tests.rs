@@ -1,11 +1,18 @@
 use super::{
-    CharCursor, CursorRange, cut_selected_text, publish_active_selection, render_editor_text_edit,
-    request_cursor_reveal_after_input, selected_text, should_rebuild_galley_after_input,
-    sync_ime_output_focus,
+    CharCursor, CursorRange, cut_selected_text, editor_focus_lock_filter, publish_active_selection,
+    render_editor_text_edit, request_cursor_reveal_after_input, selected_text,
+    should_rebuild_galley_after_input, sync_ime_output_focus,
 };
 use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
+use crate::app::services::settings_store::TabKeyBehavior;
 use crate::app::ui::editor_content::native_editor::{EditorHighlightStyle, TextEditOptions};
 use eframe::egui;
+
+#[test]
+fn tab_focus_lock_follows_the_configured_tab_key_behavior() {
+    assert!(editor_focus_lock_filter(TabKeyBehavior::IndentText).tab);
+    assert!(!editor_focus_lock_filter(TabKeyBehavior::MoveFocus).tab);
+}
 
 #[test]
 fn cursor_only_movement_inside_existing_slice_keeps_galley() {

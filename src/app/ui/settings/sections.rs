@@ -1,6 +1,6 @@
 use super::appearance::render_tab_position_category;
 use super::opening::render_opening_category;
-use super::text_formatting::render_text_formatting_category;
+use super::text_formatting::{render_editing_category, render_text_formatting_category};
 use super::{
     ScratchpadApp, SettingsUi, action_card, available_width_control, category_heading, egui,
     expandable_card, inner_select_row, record_settings_control_box, settings_file_card,
@@ -10,6 +10,7 @@ use super::{
 pub(super) fn render_settings_categories(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     for render_category in [
         render_text_formatting_category as fn(&mut egui::Ui, &mut ScratchpadApp),
+        render_editing_category,
         render_opening_category,
         render_tab_position_category,
         render_advanced_category,

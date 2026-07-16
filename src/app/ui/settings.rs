@@ -1,7 +1,9 @@
 use crate::app::app_state::ScratchpadApp;
 use crate::app::chrome::phosphor_button;
 use crate::app::fonts::{EDITOR_FONT_FAMILY, EditorFontPreset};
-use crate::app::services::settings_store::{AppThemeMode, EditorAppearanceSource, TabListPosition};
+use crate::app::services::settings_store::{
+    AppThemeMode, EditorAppearanceSource, IndentationStyle, TabKeyBehavior, TabListPosition,
+};
 use crate::app::theme::{action_bg, action_hover_bg, border, text_muted, text_primary};
 use crate::app::ui::widget_ids;
 use eframe::egui;

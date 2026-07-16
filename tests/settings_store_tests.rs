@@ -1,8 +1,8 @@
 use scratchpad::app::fonts::EditorFontPreset;
 use scratchpad::app::platform::PlatformProfile;
 use scratchpad::app::services::settings_store::{
-    AppSettings, FileOpenDisposition, SettingsStore, StartupSessionBehavior, TabListPosition,
-    WindowState,
+    AppSettings, FileOpenDisposition, IndentationStyle, SettingsStore, StartupSessionBehavior,
+    TabKeyBehavior, TabListPosition, WindowState,
 };
 
 struct SettingsFixture {
@@ -32,6 +32,12 @@ impl SettingsFixture {
 
 fn assert_newer_settings_defaults(settings: &AppSettings) {
     assert_eq!(settings.editor.editor_font, EditorFontPreset::default());
+    assert_eq!(settings.editor.tab_key_behavior, TabKeyBehavior::IndentText);
+    assert_eq!(
+        settings.editor.indentation_style,
+        IndentationStyle::TabCharacter
+    );
+    assert!(!settings.editor.show_tab_characters);
     assert_eq!(settings.workspace.tab_list_position, TabListPosition::Top);
     assert_eq!(
         settings.workspace.file_open_disposition,
@@ -57,6 +63,9 @@ fn save_and_load_round_trip_toml_settings() {
     settings.editor.font_size = 18.0;
     settings.editor.word_wrap = false;
     settings.editor.editor_font = EditorFontPreset::Mono;
+    settings.editor.tab_key_behavior = TabKeyBehavior::MoveFocus;
+    settings.editor.indentation_style = IndentationStyle::Spaces;
+    settings.editor.show_tab_characters = true;
     settings.workspace.tab_list_position = TabListPosition::Left;
     settings.workspace.file_open_disposition = FileOpenDisposition::CurrentTab;
     settings.workspace.startup_session_behavior = StartupSessionBehavior::StartFreshSession;
@@ -67,6 +76,9 @@ fn save_and_load_round_trip_toml_settings() {
     assert_eq!(loaded.editor.font_size, 18.0);
     assert!(!loaded.editor.word_wrap);
     assert_eq!(loaded.editor.editor_font, EditorFontPreset::Mono);
+    assert_eq!(loaded.editor.tab_key_behavior, TabKeyBehavior::MoveFocus);
+    assert_eq!(loaded.editor.indentation_style, IndentationStyle::Spaces);
+    assert!(loaded.editor.show_tab_characters);
     assert_eq!(loaded.workspace.tab_list_position, TabListPosition::Left);
     assert_eq!(
         loaded.workspace.file_open_disposition,

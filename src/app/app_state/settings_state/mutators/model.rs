@@ -2,8 +2,8 @@ use super::super::stock_editor_palette_for_selection;
 use crate::app::domain::TextHistoryBudget;
 use crate::app::fonts::EditorFontPreset;
 use crate::app::services::settings_store::{
-    AppSettings, AppThemeMode, EditorAppearanceSource, FileOpenDisposition, NewTabPlacement,
-    StartupSessionBehavior, color_to_hex,
+    AppSettings, AppThemeMode, EditorAppearanceSource, FileOpenDisposition, IndentationStyle,
+    NewTabPlacement, StartupSessionBehavior, TabKeyBehavior, color_to_hex,
 };
 use eframe::egui;
 
@@ -73,6 +73,18 @@ impl AppSettings {
 
     pub(super) fn set_editor_tab_width(&mut self, tab_width: u8) -> bool {
         replace_if_changed(&mut self.editor.editor_tab_width, tab_width.clamp(1, 16))
+    }
+
+    pub(super) fn set_tab_key_behavior(&mut self, behavior: TabKeyBehavior) -> bool {
+        replace_if_changed(&mut self.editor.tab_key_behavior, behavior)
+    }
+
+    pub(super) fn set_indentation_style(&mut self, style: IndentationStyle) -> bool {
+        replace_if_changed(&mut self.editor.indentation_style, style)
+    }
+
+    pub(super) fn set_show_tab_characters(&mut self, visible: bool) -> bool {
+        replace_if_changed(&mut self.editor.show_tab_characters, visible)
     }
 
     pub(super) fn apply_theme_mode_preset(

@@ -7,9 +7,9 @@ use crate::app::services::settings_store::{
     AppSettings, AppThemeMode, DEFAULT_EDITOR_BACKGROUND_COLOR, DEFAULT_EDITOR_TEXT_COLOR,
     DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR, DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR,
     DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, EditorAppearanceSource, FileOpenDisposition,
-    LEGACY_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR,
-    LIGHT_EDITOR_TEXT_COLOR, NewTabPlacement, StartupSessionBehavior, TabListPosition,
-    TabOrderDirection, TabOrderMode, WindowState, color_from_hex,
+    IndentationStyle, LEGACY_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR,
+    LIGHT_EDITOR_TEXT_COLOR, NewTabPlacement, StartupSessionBehavior, TabKeyBehavior,
+    TabListPosition, TabOrderDirection, TabOrderMode, WindowState, color_from_hex,
 };
 use eframe::egui;
 use std::path::Path;
@@ -87,6 +87,21 @@ impl AppSettings {
     #[must_use]
     pub fn editor_tab_width(&self) -> u8 {
         self.editor.editor_tab_width.clamp(1, 16)
+    }
+
+    #[must_use]
+    pub fn tab_key_behavior(&self) -> TabKeyBehavior {
+        self.editor.tab_key_behavior
+    }
+
+    #[must_use]
+    pub fn indentation_style(&self) -> IndentationStyle {
+        self.editor.indentation_style
+    }
+
+    #[must_use]
+    pub fn show_tab_characters(&self) -> bool {
+        self.editor.show_tab_characters
     }
 
     #[must_use]

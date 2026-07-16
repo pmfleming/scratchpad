@@ -10,6 +10,7 @@ pub const DEFAULT_FONT_SIZE: f32 = 14.0;
 pub const DEFAULT_WORD_WRAP: bool = true;
 pub const DEFAULT_EDITOR_GUTTER: u8 = 0;
 pub const DEFAULT_EDITOR_TAB_WIDTH: u8 = 4;
+pub const DEFAULT_SHOW_TAB_CHARACTERS: bool = false;
 pub const DEFAULT_EDITOR_TEXT_COLOR: &str = "#ffffff";
 pub const DEFAULT_EDITOR_BACKGROUND_COLOR: &str = "#15181d";
 pub const DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR: &str = "#fff36d";
@@ -66,6 +67,46 @@ pub enum EditorAppearanceSource {
     #[default]
     App,
     System,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TabKeyBehavior {
+    #[default]
+    IndentText,
+    MoveFocus,
+}
+
+impl TabKeyBehavior {
+    pub const ALL: [Self; 2] = [Self::IndentText, Self::MoveFocus];
+
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::IndentText => "Indent text",
+            Self::MoveFocus => "Move keyboard focus",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IndentationStyle {
+    Spaces,
+    #[default]
+    TabCharacter,
+}
+
+impl IndentationStyle {
+    pub const ALL: [Self; 2] = [Self::Spaces, Self::TabCharacter];
+
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Spaces => "Spaces",
+            Self::TabCharacter => "Tab character",
+        }
+    }
 }
 
 impl EditorAppearanceSource {
@@ -150,6 +191,12 @@ pub struct EditorSettings {
     #[serde(default = "default_editor_tab_width")]
     pub editor_tab_width: u8,
     #[serde(default)]
+    pub tab_key_behavior: TabKeyBehavior,
+    #[serde(default)]
+    pub indentation_style: IndentationStyle,
+    #[serde(default = "default_show_tab_characters")]
+    pub show_tab_characters: bool,
+    #[serde(default)]
     pub editor_font: EditorFontPreset,
     #[serde(default)]
     pub font_source: EditorFontSource,
@@ -175,6 +222,9 @@ impl Default for EditorSettings {
             word_wrap: default_word_wrap(),
             editor_gutter: default_editor_gutter(),
             editor_tab_width: default_editor_tab_width(),
+            tab_key_behavior: TabKeyBehavior::default(),
+            indentation_style: IndentationStyle::default(),
+            show_tab_characters: default_show_tab_characters(),
             editor_font: EditorFontPreset::default(),
             font_source: EditorFontSource::default(),
             os_font_family: String::new(),
@@ -330,6 +380,11 @@ default_fn!(default_font_size, f32, DEFAULT_FONT_SIZE);
 default_fn!(default_word_wrap, bool, DEFAULT_WORD_WRAP);
 default_fn!(default_editor_gutter, u8, DEFAULT_EDITOR_GUTTER);
 default_fn!(default_editor_tab_width, u8, DEFAULT_EDITOR_TAB_WIDTH);
+default_fn!(
+    default_show_tab_characters,
+    bool,
+    DEFAULT_SHOW_TAB_CHARACTERS
+);
 
 pub(crate) fn default_editor_text_color() -> String {
     DEFAULT_EDITOR_TEXT_COLOR.to_owned()

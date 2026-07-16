@@ -1,8 +1,9 @@
 use super::{
     AppThemeMode, CategoryCard, ComboSelectRow, EditorAppearanceSource, EditorFontPreset,
-    FONT_SIZE_OPTIONS, ScratchpadApp, SettingsUi, available_width_control, category_card,
-    combo_select_row, egui, inner_divider, inner_select_row, nearest_option_index,
-    record_settings_control_box, render_preview_panel, toggle_card, u32_slider_value_control,
+    FONT_SIZE_OPTIONS, IndentationStyle, ScratchpadApp, SettingsUi, TabKeyBehavior,
+    available_width_control, category_card, combo_select_row, egui, inner_divider,
+    inner_select_row, nearest_option_index, record_settings_control_box, render_preview_panel,
+    toggle_card, toggle_select_row, u32_slider_value_control,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -128,8 +129,6 @@ fn render_app_appearance_rows(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     inner_divider(ui);
     render_font_size_row(ui, app);
     inner_divider(ui);
-    render_tab_width_row(ui, app);
-    inner_divider(ui);
     render_theme_mode_row(ui, app);
     inner_divider(ui);
     render_color_row(
@@ -211,27 +210,100 @@ fn render_font_size_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     });
 }
 
-fn render_tab_width_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    inner_select_row(ui, "Tab width", Some("Displayed spaces per tab."), |ui| {
-        let mut selected_width = u32::from(app.state.app_settings.editor_tab_width());
-        let width_label = format!("{selected_width} spaces");
-        u32_slider_value_control(
-            ui,
-            "settings.editor.tab_width.slider",
-            "slider.Tab width",
-            &mut selected_width,
-            1..=16,
-            88.0,
-            width_label,
-        );
-
-        if selected_width != u32::from(app.state.app_settings.editor_tab_width()) {
-            crate::app::app_state::settings_controller::set_editor_tab_width(
-                app,
-                selected_width as u8,
+pub(super) fn render_editing_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    category_card(
+        ui,
+        CategoryCard {
+            heading: "Editing",
+            id_source: "settings_indentation_card",
+            icon: egui_phosphor::regular::TEXT_OUTDENT,
+            title: "Indentation",
+            description: "Choose how Tab indents text and how tabs are displayed.",
+            default_open: true,
+        },
+        |ui| {
+            combo_select_row(
+                ui,
+                ComboSelectRow {
+                    label: "Tab key",
+                    description: Some("Indent text or move keyboard focus."),
+                    combo_id: "settings_tab_key_behavior",
+                    record_label: "combo.Tab key behavior",
+                    current: app.state.app_settings.tab_key_behavior(),
+                    options: &TabKeyBehavior::ALL,
+                    selected_label: TabKeyBehavior::label,
+                    option_label: TabKeyBehavior::label,
+                    on_change: |behavior| {
+                        crate::app::app_state::settings_controller::set_tab_key_behavior(
+                            app, behavior,
+                        );
+                    },
+                },
             );
-        }
-    });
+            inner_divider(ui);
+            combo_select_row(
+                ui,
+                ComboSelectRow {
+                    label: "Indent using",
+                    description: Some("A run of spaces or an actual tab character."),
+                    combo_id: "settings_indentation_style",
+                    record_label: "combo.Indentation style",
+                    current: app.state.app_settings.indentation_style(),
+                    options: &IndentationStyle::ALL,
+                    selected_label: IndentationStyle::label,
+                    option_label: IndentationStyle::label,
+                    on_change: |style| {
+                        crate::app::app_state::settings_controller::set_indentation_style(
+                            app, style,
+                        );
+                    },
+                },
+            );
+            inner_divider(ui);
+            render_tab_width_row(ui, app);
+            inner_divider(ui);
+            toggle_select_row(
+                ui,
+                "Show tab characters",
+                Some("Draw a muted arrow across each tab without changing the text."),
+                "settings.show_tab_characters",
+                app.state.app_settings.show_tab_characters(),
+                |visible| {
+                    crate::app::app_state::settings_controller::set_show_tab_characters(
+                        app, visible,
+                    );
+                },
+            );
+        },
+    );
+}
+
+fn render_tab_width_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    inner_select_row(
+        ui,
+        "Indent width",
+        Some("Columns per indentation level."),
+        |ui| {
+            let mut selected_width = u32::from(app.state.app_settings.editor_tab_width());
+            let width_label = format!("{selected_width} columns");
+            u32_slider_value_control(
+                ui,
+                "settings.editor.tab_width.slider",
+                "slider.Indent width",
+                &mut selected_width,
+                1..=16,
+                88.0,
+                width_label,
+            );
+
+            if selected_width != u32::from(app.state.app_settings.editor_tab_width()) {
+                crate::app::app_state::settings_controller::set_editor_tab_width(
+                    app,
+                    selected_width as u8,
+                );
+            }
+        },
+    );
 }
 
 fn render_theme_mode_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {

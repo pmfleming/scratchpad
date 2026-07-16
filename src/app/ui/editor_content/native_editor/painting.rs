@@ -34,6 +34,7 @@ pub(super) struct EditorFrame<'a> {
     pub(super) char_offset_base: usize,
     pub(super) slice_chars: usize,
     pub(super) display_map: Option<&'a DisplayTextMap>,
+    pub(super) tab_offsets: &'a [usize],
     pub(super) active_selection: Option<Range<usize>>,
     pub(super) cursor_range: Option<CursorRange>,
     pub(super) cursor_reveal_mode: Option<CursorRevealMode>,
@@ -91,6 +92,15 @@ pub(super) fn paint_editor(ui: &mut egui::Ui, request: EditorFrame<'_>) -> Curso
         request.galley,
         request.galley_pos,
         request.options.text_color,
+    );
+    paint_tab_markers(
+        ui,
+        request.galley,
+        request.galley_pos,
+        request.rect,
+        request.options,
+        request.display_map,
+        request.tab_offsets,
     );
     paint_replacement_previews(
         ReplacementPreviewContext {
@@ -154,6 +164,52 @@ pub(super) fn paint_editor(ui: &mut egui::Ui, request: EditorFrame<'_>) -> Curso
     }
 
     CursorPaintOutcome::default()
+}
+
+fn paint_tab_markers(
+    ui: &egui::Ui,
+    galley: &egui::Galley,
+    galley_pos: egui::Pos2,
+    editor_rect: egui::Rect,
+    options: TextEditOptions<'_>,
+    display_map: Option<&DisplayTextMap>,
+    tab_offsets: &[usize],
+) {
+    if tab_offsets.is_empty() {
+        return;
+    }
+
+    let screen_offset = galley_screen_offset(galley, galley_pos).to_vec2();
+    let painter = ui.painter_at(editor_rect.expand(1.0));
+    let base = options.text_color;
+    let color = egui::Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 110);
+    let stroke = egui::Stroke::new(1.0, color);
+
+    for &doc_offset in tab_offsets {
+        let start = display_map.map_or(doc_offset, |map| map.doc_to_display_cursor(doc_offset));
+        let end = display_map.map_or(doc_offset + 1, |map| {
+            map.doc_to_display_cursor(doc_offset + 1)
+        });
+        let start_rect = galley.pos_from_cursor(CharCursor::new(start).to_egui_ccursor());
+        let end_rect = galley.pos_from_cursor(CharCursor::new(end).to_egui_ccursor());
+        if (start_rect.center().y - end_rect.center().y).abs() > 1.0 {
+            continue;
+        }
+
+        let left = start_rect.center().x.min(end_rect.center().x) + screen_offset.x;
+        let right = start_rect.center().x.max(end_rect.center().x) + screen_offset.x;
+        let y = start_rect.center().y + screen_offset.y;
+        if right - left < 3.0 || y < editor_rect.top() || y > editor_rect.bottom() {
+            continue;
+        }
+
+        let line_start = egui::pos2(left + 1.5, y);
+        let tip = egui::pos2(right - 1.5, y);
+        let head = ((right - left) * 0.18).clamp(2.0, 4.0);
+        painter.line_segment([line_start, tip], stroke);
+        painter.line_segment([tip - egui::vec2(head, head), tip], stroke);
+        painter.line_segment([tip - egui::vec2(head, -head), tip], stroke);
+    }
 }
 
 fn paint_ime_preedit(

@@ -1,4 +1,5 @@
 use crate::app::domain::buffer::ByteSpan;
+use crate::app::services::settings_store::{IndentationStyle, TabKeyBehavior};
 use eframe::egui;
 use std::ops::Range;
 use std::sync::Arc;
@@ -64,6 +65,10 @@ pub struct TextEditOptions<'a> {
     pub highlight_style: EditorHighlightStyle,
     pub warm_layout_cache: bool,
     pub reserve_alt_for_shortcuts: bool,
+    pub tab_key_behavior: TabKeyBehavior,
+    pub indentation_style: IndentationStyle,
+    pub indentation_width: u8,
+    pub show_tab_characters: bool,
 }
 
 impl<'a> TextEditOptions<'a> {
@@ -84,7 +89,26 @@ impl<'a> TextEditOptions<'a> {
             highlight_style,
             warm_layout_cache: true,
             reserve_alt_for_shortcuts: false,
+            tab_key_behavior: TabKeyBehavior::default(),
+            indentation_style: IndentationStyle::default(),
+            indentation_width: 4,
+            show_tab_characters: false,
         }
+    }
+
+    #[must_use]
+    pub fn with_indentation(
+        mut self,
+        tab_key_behavior: TabKeyBehavior,
+        indentation_style: IndentationStyle,
+        indentation_width: u8,
+        show_tab_characters: bool,
+    ) -> Self {
+        self.tab_key_behavior = tab_key_behavior;
+        self.indentation_style = indentation_style;
+        self.indentation_width = indentation_width.clamp(1, 16);
+        self.show_tab_characters = show_tab_characters;
+        self
     }
 
     #[must_use]

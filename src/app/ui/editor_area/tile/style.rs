@@ -28,6 +28,12 @@ pub(super) fn editor_content_style<'a>(
                 app.state.app_settings.editor_text_highlight_text_color(),
             ),
         )
+        .with_indentation(
+            app.state.app_settings.tab_key_behavior(),
+            app.state.app_settings.indentation_style(),
+            app.state.app_settings.editor_tab_width(),
+            app.state.app_settings.show_tab_characters(),
+        )
         .with_alt_reserved_for_shortcuts(
             crate::app::platform::resolved_profile(app.state.app_settings.platform_profile())
                 == crate::app::platform::PlatformProfile::Hyprland,

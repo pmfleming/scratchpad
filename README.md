@@ -125,6 +125,17 @@ profile defaults to automatic detection but can be pinned explicitly:
 profile = "hyprland" # auto, windows, linux_generic, or hyprland
 ```
 
+Indentation behavior is also available from Settings → Editing and can be
+configured directly:
+
+```toml
+[editor]
+tab_key_behavior = "indent_text" # indent_text or move_focus
+indentation_style = "spaces"     # spaces or tab_character
+editor_tab_width = 4
+show_tab_characters = true
+```
+
 Top-level in-app shortcuts can be overridden without changing compositor/global
 shortcuts:
 
