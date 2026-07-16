@@ -160,6 +160,14 @@ outside Scratchpad, the save-conflict dialog lets you overwrite, reload from
 disk, save a copy, or cancel. If the file is missing, you can recreate it or
 discard the missing-file tab.
 
+On Linux, ordinary files are replaced atomically while retaining their Unix
+permissions and extended attributes. Saving through a symbolic link updates its
+target without replacing the link. A file with multiple hard links is updated
+in place so every linked name keeps the same content and inode. Scratchpad makes
+a private, hidden recovery copy beside the file before such an in-place save and
+removes it after the new content is safely synchronized. If the save fails, the
+recovery copy remains and its path is included in the error message.
+
 When closing dirty work, Scratchpad asks whether to save, discard, or cancel.
 Bulk close commands skip tabs with unsaved changes and report how many were
 skipped. Close Saved closes only clean tabs.

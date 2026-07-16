@@ -4,12 +4,12 @@ use crate::app::domain::{
     BufferState, DiskFileState, DocumentSnapshot, EncodingSource, TextArtifactSummary,
     TextDocument, TextFormatMetadata,
 };
-use crate::app::services::store_io::write_atomic_with;
 use encoding_rs::Encoding;
 use std::io;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
+mod document_write;
 mod read;
 #[cfg(test)]
 mod tests;
@@ -203,7 +203,7 @@ impl FileService {
         let encoding = resolve_encoding(&format.encoding_name)?;
         let content = write::serialized_content(content, format)?;
         let bytes = write::encode_content(&content, encoding, format.has_bom)?;
-        std::fs::write(path, bytes).inspect_err(|error| {
+        write_document_bytes(path, &bytes).inspect_err(|error| {
             diagnostics::record_io_error_with_details(
                 "write_file_with_format",
                 Some(path),
@@ -219,7 +219,7 @@ impl FileService {
         snapshot: &DocumentSnapshot,
         format: &TextFormatMetadata,
     ) -> io::Result<()> {
-        write_atomic_with(path, |file| {
+        document_write::write_document_with(path, |file| {
             write::write_snapshot_to_writer(file, snapshot, format)
         })
         .inspect_err(|error| {
@@ -234,7 +234,7 @@ impl FileService {
     }
 
     pub fn write_snapshot_utf8(path: &Path, snapshot: &DocumentSnapshot) -> io::Result<()> {
-        write_atomic_with(path, |file| {
+        document_write::write_document_with(path, |file| {
             write::write_snapshot_utf8_to_writer(file, snapshot, false)
         })
         .inspect_err(|error| {
@@ -274,6 +274,18 @@ impl FileService {
             );
         })
     }
+}
+
+#[cfg(target_os = "linux")]
+fn write_document_bytes(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    use std::io::Write;
+
+    document_write::write_document_with(path, |file| file.write_all(bytes))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn write_document_bytes(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    std::fs::write(path, bytes)
 }
 
 fn resolve_encoding(encoding_name: &str) -> io::Result<&'static Encoding> {
