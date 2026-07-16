@@ -83,6 +83,13 @@ nix run .#scratchpad
 nix run .#scratchpad-hyprland
 ```
 
+Entering the Nix development shell automatically runs
+`scripts/trim-target.sh`. If `target/` is larger than 10 GiB, the script cleans
+only Cargo's dev profile, preserving release builds and `target/analysis/`.
+Run it directly to trim without entering the shell, use `--dry-run` to inspect
+the command, set `SCRATCHPAD_TARGET_MAX_GIB` to change the limit, or set the
+limit to `0` to disable automatic trimming.
+
 The Hyprland wrapper sets `WINIT_UNIX_BACKEND=wayland` and
 `SCRATCHPAD_PLATFORM_PROFILE=hyprland` so Scratchpad hides app-rendered caption
 buttons and leaves compositor-level window management to Hyprland.

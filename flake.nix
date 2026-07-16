@@ -150,6 +150,9 @@
         LD_LIBRARY_PATH = runtimeLibraryPath;
 
         shellHook = ''
+          if [[ -x "$PWD/scripts/trim-target.sh" ]]; then
+            "$PWD/scripts/trim-target.sh"
+          fi
           echo "Scratchpad dev shell"
           echo "Try: cargo check"
         '';
