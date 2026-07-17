@@ -378,7 +378,7 @@ fn proportional_font_candidates(
 mod tests {
     use super::{
         EditorFontPreset, EditorFontSelection, EditorFontSource, default_os_editor_font_candidates,
-        proportional_font_candidates,
+        font_tweak, proportional_font_candidates,
     };
 
     #[test]
@@ -387,6 +387,11 @@ mod tests {
             proportional_font_candidates("editor", ["symbols".to_owned(), "cjk".to_owned()]);
 
         assert_eq!(candidates, ["editor", "phosphor", "symbols", "cjk"]);
+    }
+
+    #[test]
+    fn configured_indent_width_sets_literal_tab_width() {
+        assert_eq!(font_tweak(7.0).tab_size, 7.0);
     }
 
     #[test]

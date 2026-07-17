@@ -631,6 +631,16 @@ mod tests {
     }
 
     #[test]
+    fn spaces_indent_uses_the_configured_width() {
+        let mut buffer = buffer("a");
+
+        let next = apply_indent(&mut buffer, &cursor(1), IndentationStyle::Spaces, 3);
+
+        assert_eq!(buffer.text(), "a  ");
+        assert_eq!(next, cursor(3));
+    }
+
+    #[test]
     fn tab_indent_inserts_an_actual_tab_character() {
         let mut buffer = buffer("ab");
 

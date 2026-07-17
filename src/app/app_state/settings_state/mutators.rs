@@ -1,6 +1,6 @@
 use super::{
     AppSettings, AppThemeMode, EditorAppearanceSource, FileController, FileOpenDisposition,
-    IndentationStyle, NewTabPlacement, ScratchpadApp, StartupSessionBehavior, TabKeyBehavior,
+    IndentationStyle, NewTabPlacement, ScratchpadApp, StartupSessionBehavior, TabDisplayMode,
     TabListPosition, sanitize_tab_list_auto_hide_delay_seconds,
 };
 use crate::app::app_state::{AppSurface, workspace::accessors as workspace_accessors};
@@ -101,18 +101,13 @@ pub(crate) fn set_editor_tab_width(app: &mut ScratchpadApp, tab_width: u8) {
     apply_setting_effects(app, changed, SettingEffects::FONT);
 }
 
-pub(crate) fn set_tab_key_behavior(app: &mut ScratchpadApp, behavior: TabKeyBehavior) {
-    let changed = app.state.app_settings.set_tab_key_behavior(behavior);
-    apply_setting_effects(app, changed, SettingEffects::PERSIST_ONLY);
-}
-
 pub(crate) fn set_indentation_style(app: &mut ScratchpadApp, style: IndentationStyle) {
     let changed = app.state.app_settings.set_indentation_style(style);
     apply_setting_effects(app, changed, SettingEffects::PERSIST_ONLY);
 }
 
-pub(crate) fn set_show_tab_characters(app: &mut ScratchpadApp, visible: bool) {
-    let changed = app.state.app_settings.set_show_tab_characters(visible);
+pub(crate) fn set_tab_display(app: &mut ScratchpadApp, mode: TabDisplayMode) {
+    let changed = app.state.app_settings.set_tab_display(mode);
     apply_setting_effects(app, changed, SettingEffects::PERSIST_ONLY);
 }
 

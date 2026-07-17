@@ -3,6 +3,7 @@ use crate::app::domain::{
     BufferState, EditorViewState, LayoutCacheKey, SearchHighlightState, SearchReplacementPreview,
     ViewId,
 };
+use crate::app::services::settings_store::TabDisplayMode;
 use crate::app::ui::editor_content::extent;
 use crate::app::ui::widget_ids::{self, WidgetRole};
 use eframe::egui;
@@ -53,16 +54,17 @@ pub(super) fn build_editor_galley(
         cursor_offset_for_viewport_slice(view),
         options.word_wrap,
     );
-    let tab_offsets = if options.show_tab_characters && !buffer.show_control_chars {
-        slice
-            .text
-            .chars()
-            .enumerate()
-            .filter_map(|(offset, ch)| (ch == '\t').then_some(offset))
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let tab_offsets =
+        if options.tab_display == TabDisplayMode::Character && !buffer.show_control_chars {
+            slice
+                .text
+                .chars()
+                .enumerate()
+                .filter_map(|(offset, ch)| (ch == '\t').then_some(offset))
+                .collect()
+        } else {
+            Vec::new()
+        };
     let preview_slice = preview_text_slice(
         &slice.text,
         slice.char_range.clone(),

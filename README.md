@@ -137,10 +137,9 @@ configured directly:
 
 ```toml
 [editor]
-tab_key_behavior = "indent_text" # indent_text or move_focus
-indentation_style = "spaces"     # spaces or tab_character
-editor_tab_width = 4
-show_tab_characters = true
+indentation_style = "spaces" # spaces or tab_character
+editor_tab_width = 4          # width used by both indentation styles
+tab_display = "tablines"     # hidden, character, or tablines
 ```
 
 Top-level in-app shortcuts can be overridden without changing compositor/global

@@ -1,12 +1,11 @@
 use super::super::{CursorRange, cursor, editing, select_all_cursor};
 use super::KeyboardInputRequest;
 use crate::app::domain::{BufferState, EditorViewState, ImePreeditState, PieceSource};
-use crate::app::services::settings_store::{IndentationStyle, TabKeyBehavior};
+use crate::app::services::settings_store::IndentationStyle;
 use eframe::egui;
 
 #[derive(Clone, Copy)]
 struct IndentationInput {
-    tab_key_behavior: TabKeyBehavior,
     style: IndentationStyle,
     width: u8,
 }
@@ -49,7 +48,6 @@ pub(super) fn handle_keyboard_events(
         view,
         request.reserve_alt_for_shortcuts,
         IndentationInput {
-            tab_key_behavior: request.tab_key_behavior,
             style: request.indentation_style,
             width: request.indentation_width,
         },
@@ -271,9 +269,13 @@ fn handle_text_key(
             let line_ending = buffer.document().preferred_line_ending_str().to_owned();
             Some(insert_text(buffer, view, cursor, &line_ending))
         }
-        egui::Key::Tab if indentation.tab_key_behavior == TabKeyBehavior::IndentText => Some(
-            handle_tab_key(key_event.modifiers, buffer, view, cursor, indentation),
-        ),
+        egui::Key::Tab => Some(handle_tab_key(
+            key_event.modifiers,
+            buffer,
+            view,
+            cursor,
+            indentation,
+        )),
         _ => None,
     }
 }

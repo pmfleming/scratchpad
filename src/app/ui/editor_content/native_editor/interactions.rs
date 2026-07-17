@@ -5,7 +5,7 @@ use super::layout::DisplayTextMap;
 use super::{CharCursor, CursorRange};
 use crate::app::domain::buffer::PieceTreeLite;
 use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
-use crate::app::services::settings_store::{IndentationStyle, TabKeyBehavior};
+use crate::app::services::settings_store::IndentationStyle;
 use eframe::egui;
 
 pub(super) struct MouseInteractionRequest<'a> {
@@ -26,7 +26,6 @@ pub(super) struct KeyboardInputRequest<'a> {
     pub(super) slice_chars: usize,
     pub(super) display_map: Option<&'a DisplayTextMap>,
     pub(super) reserve_alt_for_shortcuts: bool,
-    pub(super) tab_key_behavior: TabKeyBehavior,
     pub(super) indentation_style: IndentationStyle,
     pub(super) indentation_width: u8,
 }

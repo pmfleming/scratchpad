@@ -8,7 +8,7 @@ use crate::app::services::settings_store::{
     DEFAULT_EDITOR_TEXT_HIGHLIGHT_COLOR, DEFAULT_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR,
     DEFAULT_TAB_LIST_AUTO_HIDE_DELAY_SECONDS, EditorAppearanceSource, FileOpenDisposition,
     IndentationStyle, LEGACY_EDITOR_TEXT_HIGHLIGHT_TEXT_COLOR, LIGHT_EDITOR_BACKGROUND_COLOR,
-    LIGHT_EDITOR_TEXT_COLOR, NewTabPlacement, StartupSessionBehavior, TabKeyBehavior,
+    LIGHT_EDITOR_TEXT_COLOR, NewTabPlacement, StartupSessionBehavior, TabDisplayMode,
     TabListPosition, TabOrderDirection, TabOrderMode, WindowState, color_from_hex,
 };
 use eframe::egui;
@@ -90,18 +90,13 @@ impl AppSettings {
     }
 
     #[must_use]
-    pub fn tab_key_behavior(&self) -> TabKeyBehavior {
-        self.editor.tab_key_behavior
-    }
-
-    #[must_use]
     pub fn indentation_style(&self) -> IndentationStyle {
         self.editor.indentation_style
     }
 
     #[must_use]
-    pub fn show_tab_characters(&self) -> bool {
-        self.editor.show_tab_characters
+    pub fn tab_display(&self) -> TabDisplayMode {
+        self.editor.tab_display
     }
 
     #[must_use]

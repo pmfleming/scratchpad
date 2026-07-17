@@ -1,9 +1,9 @@
 use super::{
     AppThemeMode, CategoryCard, ComboSelectRow, EditorAppearanceSource, EditorFontPreset,
-    FONT_SIZE_OPTIONS, IndentationStyle, ScratchpadApp, SettingsUi, TabKeyBehavior,
+    FONT_SIZE_OPTIONS, IndentationStyle, ScratchpadApp, SettingsUi, TabDisplayMode,
     available_width_control, category_card, combo_select_row, egui, inner_divider,
     inner_select_row, nearest_option_index, record_settings_control_box, render_preview_panel,
-    toggle_card, toggle_select_row, u32_slider_value_control,
+    toggle_card, u32_slider_value_control,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -225,25 +225,6 @@ pub(super) fn render_editing_category(ui: &mut egui::Ui, app: &mut ScratchpadApp
             combo_select_row(
                 ui,
                 ComboSelectRow {
-                    label: "Tab key",
-                    description: Some("Indent text or move keyboard focus."),
-                    combo_id: "settings_tab_key_behavior",
-                    record_label: "combo.Tab key behavior",
-                    current: app.state.app_settings.tab_key_behavior(),
-                    options: &TabKeyBehavior::ALL,
-                    selected_label: TabKeyBehavior::label,
-                    option_label: TabKeyBehavior::label,
-                    on_change: |behavior| {
-                        crate::app::app_state::settings_controller::set_tab_key_behavior(
-                            app, behavior,
-                        );
-                    },
-                },
-            );
-            inner_divider(ui);
-            combo_select_row(
-                ui,
-                ComboSelectRow {
                     label: "Indent using",
                     description: Some("A run of spaces or an actual tab character."),
                     combo_id: "settings_indentation_style",
@@ -262,16 +243,20 @@ pub(super) fn render_editing_category(ui: &mut egui::Ui, app: &mut ScratchpadApp
             inner_divider(ui);
             render_tab_width_row(ui, app);
             inner_divider(ui);
-            toggle_select_row(
+            combo_select_row(
                 ui,
-                "Show tab characters",
-                Some("Draw a muted arrow across each tab without changing the text."),
-                "settings.show_tab_characters",
-                app.state.app_settings.show_tab_characters(),
-                |visible| {
-                    crate::app::app_state::settings_controller::set_show_tab_characters(
-                        app, visible,
-                    );
+                ComboSelectRow {
+                    label: "Show tab characters",
+                    description: Some("Hide tabs, mark each tab, or draw vertical tab-stop lines."),
+                    combo_id: "settings_tab_display",
+                    record_label: "combo.Tab display",
+                    current: app.state.app_settings.tab_display(),
+                    options: &TabDisplayMode::ALL,
+                    selected_label: TabDisplayMode::label,
+                    option_label: TabDisplayMode::label,
+                    on_change: |mode| {
+                        crate::app::app_state::settings_controller::set_tab_display(app, mode);
+                    },
                 },
             );
         },

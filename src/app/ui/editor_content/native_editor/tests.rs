@@ -4,14 +4,12 @@ use super::{
     should_rebuild_galley_after_input, sync_ime_output_focus,
 };
 use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
-use crate::app::services::settings_store::TabKeyBehavior;
 use crate::app::ui::editor_content::native_editor::{EditorHighlightStyle, TextEditOptions};
 use eframe::egui;
 
 #[test]
-fn tab_focus_lock_follows_the_configured_tab_key_behavior() {
-    assert!(editor_focus_lock_filter(TabKeyBehavior::IndentText).tab);
-    assert!(!editor_focus_lock_filter(TabKeyBehavior::MoveFocus).tab);
+fn editor_keeps_tab_for_indentation() {
+    assert!(editor_focus_lock_filter().tab);
 }
 
 #[test]

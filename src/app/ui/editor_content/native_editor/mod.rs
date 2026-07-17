@@ -16,7 +16,6 @@ pub use types::{
 };
 
 use crate::app::domain::{BufferState, CursorRevealMode, EditorViewState};
-use crate::app::services::settings_store::TabKeyBehavior;
 use crate::app::ui::scrolling::DisplaySnapshot;
 use eframe::egui;
 use interactions::{
@@ -32,11 +31,11 @@ use painting::{
 };
 use std::sync::Arc;
 
-fn editor_focus_lock_filter(tab_key_behavior: TabKeyBehavior) -> egui::EventFilter {
+fn editor_focus_lock_filter() -> egui::EventFilter {
     egui::EventFilter {
         horizontal_arrows: true,
         vertical_arrows: true,
-        tab: tab_key_behavior == TabKeyBehavior::IndentText,
+        tab: true,
         escape: false,
     }
 }
@@ -87,12 +86,7 @@ pub fn render_editor_text_edit(
         row_height,
         galley_context.display_column_base,
     );
-    request_editor_focus(
-        ui,
-        &response,
-        options.request_focus,
-        options.tab_key_behavior,
-    );
+    request_editor_focus(ui, &response, options.request_focus);
 
     // The pre-input galley bakes the active cursor selection into its text
     // formats. If input changes the document or selection, rebuild before
@@ -331,7 +325,6 @@ fn handle_focused_keyboard_input(
                 slice_chars: request.slice_chars,
                 display_map: request.display_map,
                 reserve_alt_for_shortcuts: request.options.reserve_alt_for_shortcuts,
-                tab_key_behavior: request.options.tab_key_behavior,
                 indentation_style: request.options.indentation_style,
                 indentation_width: request.options.indentation_width,
             },
@@ -396,18 +389,13 @@ pub(super) fn sync_ime_output_focus(view: &mut EditorViewState, focused: bool) {
     }
 }
 
-fn request_editor_focus(
-    ui: &mut egui::Ui,
-    response: &egui::Response,
-    request_focus: bool,
-    tab_key_behavior: TabKeyBehavior,
-) {
+fn request_editor_focus(ui: &mut egui::Ui, response: &egui::Response, request_focus: bool) {
     if request_focus {
         response.request_focus();
     }
     if response.has_focus() {
         ui.memory_mut(|mem| {
-            mem.set_focus_lock_filter(response.id, editor_focus_lock_filter(tab_key_behavior));
+            mem.set_focus_lock_filter(response.id, editor_focus_lock_filter());
         });
     }
 }

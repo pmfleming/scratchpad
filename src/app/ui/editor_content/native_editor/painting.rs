@@ -3,6 +3,7 @@ use super::types::CharCursor;
 use crate::app::domain::{
     CursorRevealMode, EditorViewState, ImePreeditState, SearchReplacementPreview,
 };
+use crate::app::services::settings_store::TabDisplayMode;
 use crate::app::ui::editor_content::native_editor::CursorRange;
 use crate::app::ui::editor_content::native_editor::TextEditOptions;
 use crate::app::ui::scrolling::{ScrollAlign, ScrollIntent};
@@ -74,6 +75,7 @@ pub(super) struct CursorPaintOutcome {
 }
 
 pub(super) fn paint_editor(ui: &mut egui::Ui, request: EditorFrame<'_>) -> CursorPaintOutcome {
+    paint_tablines(ui, request.rect, request.options);
     paint_contiguous_selection_background(
         SelectionPaintContext {
             ui,
@@ -164,6 +166,44 @@ pub(super) fn paint_editor(ui: &mut egui::Ui, request: EditorFrame<'_>) -> Curso
     }
 
     CursorPaintOutcome::default()
+}
+
+fn paint_tablines(ui: &egui::Ui, editor_rect: egui::Rect, options: TextEditOptions<'_>) {
+    if options.tab_display != TabDisplayMode::Tablines {
+        return;
+    }
+
+    let clip_rect = ui.clip_rect().intersect(editor_rect);
+    if !clip_rect.is_positive() {
+        return;
+    }
+
+    let space_width = ui.fonts_mut(|fonts| fonts.glyph_width(options.editor_font_id, ' '));
+    let stop_width = space_width * f32::from(options.indentation_width);
+    if !stop_width.is_finite() || stop_width <= 0.0 {
+        return;
+    }
+
+    let origin_x = editor_rect.left();
+    let first_level = (((clip_rect.left() - origin_x) / stop_width).ceil().max(1.0)) as usize;
+    let base = options.text_color;
+    let color = egui::Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 36);
+    let stroke = egui::Stroke::new(1.0, color);
+    let painter = ui.painter_at(clip_rect);
+
+    for level in first_level.. {
+        let x = origin_x + level as f32 * stop_width;
+        if x > clip_rect.right() {
+            break;
+        }
+        painter.line_segment(
+            [
+                egui::pos2(x, clip_rect.top()),
+                egui::pos2(x, clip_rect.bottom()),
+            ],
+            stroke,
+        );
+    }
 }
 
 fn paint_tab_markers(
