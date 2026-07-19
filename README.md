@@ -170,9 +170,13 @@ Tiling shortcuts all hang off a single `alt` leader — the in-app stand-in for
 the compositor's `super` key, which Hyprland reserves globally. The base key
 mirrors the equivalent Hyprland bind, so muscle memory carries over: where
 Hyprland uses `super+enter` to spawn a tile, Scratchpad uses `alt+enter` to
-split; `super+arrow` ↔ `alt+arrow` to move a tile, and so on. The editor leaves
-all `alt`-modified keys to this layer, so they never clash with text editing
-(word-wise navigation stays on `ctrl+arrow`).
+split; `super+arrow` ↔ `alt+arrow` to move a tile, and so on. Tile movement
+follows Hyprland's dwindle model: the active tile is removed, its old split is
+collapsed, and it is reinserted beside the tile nearest the requested edge.
+Under the Hyprland profile, active and inactive tile borders also use the
+`general:col.*_border` colors and border width reported by the compositor at
+startup, when available. The editor leaves all `alt`-modified keys to this layer, so they
+never clash with text editing (word-wise navigation stays on `ctrl+arrow`).
 
 Shortcut strings are case-insensitive. Supported modifiers are `ctrl`, `shift`,
 `alt`, and `command`/`super`/`win`. Multiple bindings can be separated with

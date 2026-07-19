@@ -1,7 +1,8 @@
 use super::{TileRenderRequest, context_menu};
 use crate::app::app_state::{ScratchpadApp, workspace::accessors as workspace_accessors};
 use crate::app::domain::ViewId;
-use crate::app::theme::{border, header_bg};
+use crate::app::platform::{PlatformProfile, resolved_profile};
+use crate::app::theme::{border, tab_selected_accent};
 use crate::app::ui::tile_header::TileAction;
 use crate::app::ui::widget_ids;
 use eframe::egui;
@@ -27,26 +28,40 @@ pub(super) fn handle_tile_click(
     tile_response
 }
 
-pub(super) fn paint_tile_frame(
+pub(super) fn paint_tile_frame(ui: &egui::Ui, rect: egui::Rect, background_color: egui::Color32) {
+    ui.painter().rect_filled(rect, 4.0, background_color);
+}
+
+pub(super) fn paint_tile_border(
     ui: &egui::Ui,
     rect: egui::Rect,
     is_active: bool,
-    background_color: egui::Color32,
+    profile: PlatformProfile,
 ) {
-    let bg = if is_active {
-        header_bg(ui)
-    } else {
-        background_color
-    };
-    let border_color = border(ui).gamma_multiply(0.0);
+    let stroke = tile_border_stroke(ui, is_active, profile);
+    ui.painter()
+        .rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Inside);
+}
 
-    ui.painter().rect_filled(rect, 4.0, bg);
-    ui.painter().rect_stroke(
-        rect,
-        4.0,
-        egui::Stroke::new(1.0, border_color),
-        egui::StrokeKind::Inside,
-    );
+fn tile_border_stroke(ui: &egui::Ui, is_active: bool, profile: PlatformProfile) -> egui::Stroke {
+    if resolved_profile(profile) == PlatformProfile::Hyprland
+        && let Some(style) = crate::app::system_appearance::hyprland_border_style()
+    {
+        return egui::Stroke::new(
+            style.width,
+            if is_active {
+                style.active
+            } else {
+                style.inactive
+            },
+        );
+    }
+
+    if is_active {
+        egui::Stroke::new(2.0, tab_selected_accent(ui))
+    } else {
+        egui::Stroke::new(1.0, border(ui).gamma_multiply(0.55))
+    }
 }
 
 pub(super) fn apply_tile_body_focus(

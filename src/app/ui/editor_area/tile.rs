@@ -7,7 +7,7 @@ mod scroll_input;
 mod style;
 
 use self::autoscroll::apply_selection_edge_autoscroll_intent;
-use self::chrome::{apply_tile_body_focus, handle_tile_click, paint_tile_frame};
+use self::chrome::{apply_tile_body_focus, handle_tile_click, paint_tile_border, paint_tile_frame};
 use self::decisions::{
     TileFocusRequest, context_menu_attach_policy, scrollbar_visibility_for_drag_active,
     tile_focus_request,
@@ -89,7 +89,6 @@ fn render_tile_contents(
     paint_tile_frame(
         ui,
         request.rect,
-        request.is_active,
         app.state.app_settings.editor_background_color(),
     );
 
@@ -102,6 +101,12 @@ fn render_tile_contents(
         state.actions,
     );
     render_tile_header(ui, app, &request, state);
+    paint_tile_border(
+        ui,
+        request.rect,
+        request.is_active,
+        app.state.app_settings.platform_profile(),
+    );
     if let Some(editor_response) = body_outcome.interaction_response.as_ref() {
         context_menu::attach_editor_context_menu(editor_response, ui, app, &request, state.actions);
     }

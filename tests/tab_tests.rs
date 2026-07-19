@@ -29,6 +29,24 @@ fn collect_leaf_ids(node: &PaneNode, output: &mut Vec<u64>) {
     }
 }
 
+fn pane_shape(node: &PaneNode) -> String {
+    match node {
+        PaneNode::Leaf { view_id } => view_id.to_string(),
+        PaneNode::Split {
+            axis,
+            first,
+            second,
+            ..
+        } => {
+            let axis = match axis {
+                SplitAxis::Horizontal => "H",
+                SplitAxis::Vertical => "V",
+            };
+            format!("{axis}({},{})", pane_shape(first), pane_shape(second))
+        }
+    }
+}
+
 #[test]
 fn splitting_and_closing_views_updates_pane_tree() {
     let mut tab = WorkspaceTab::new(buffer("one.txt", "one"));
@@ -97,7 +115,7 @@ fn keyboard_resizing_grows_active_tile_toward_direction() {
 }
 
 #[test]
-fn keyboard_moving_swaps_active_tile_toward_direction() {
+fn keyboard_moving_reinserts_active_tile_toward_direction() {
     let mut tab = WorkspaceTab::new(buffer("one.txt", "one"));
     let original_view = tab.layout.active_view_id;
     let split_view = tab.split_active_view(SplitAxis::Vertical).unwrap();
@@ -108,6 +126,56 @@ fn keyboard_moving_swaps_active_tile_toward_direction() {
     let mut ordered = Vec::new();
     collect_leaf_ids(&tab.layout.root_pane, &mut ordered);
     assert_eq!(ordered, vec![split_view, original_view]);
+}
+
+#[test]
+fn keyboard_moving_can_change_split_axis_like_hyprland_dwindle() {
+    let mut tab = WorkspaceTab::new(buffer("one.txt", "one"));
+    let original_view = tab.layout.active_view_id;
+    let split_view = tab.split_active_view(SplitAxis::Vertical).unwrap();
+
+    assert!(tab.move_active_view_in_direction(TileDirection::Up));
+    assert_eq!(
+        pane_shape(&tab.layout.root_pane),
+        format!("H({split_view},{original_view})")
+    );
+}
+
+#[test]
+fn keyboard_moving_collapses_then_splits_tile_nearest_the_focal_point() {
+    let mut root = PaneNode::Split {
+        axis: SplitAxis::Vertical,
+        ratio: 0.4,
+        first: Box::new(PaneNode::Split {
+            axis: SplitAxis::Horizontal,
+            ratio: 0.3,
+            first: Box::new(PaneNode::leaf(1)),
+            second: Box::new(PaneNode::leaf(2)),
+        }),
+        second: Box::new(PaneNode::leaf(3)),
+    };
+
+    assert!(root.move_view_in_direction(2, TileDirection::Right));
+    assert_eq!(pane_shape(&root), "V(1,V(2,3))");
+
+    match root {
+        PaneNode::Split { ratio, second, .. } => {
+            assert!((ratio - 0.4).abs() < 0.001);
+            match *second {
+                PaneNode::Split { ratio, .. } => assert!((ratio - 0.5).abs() < 0.001),
+                PaneNode::Leaf { .. } => panic!("expected moved tile split"),
+            }
+        }
+        PaneNode::Leaf { .. } => panic!("expected split root"),
+    }
+}
+
+#[test]
+fn keyboard_moving_a_single_tile_is_a_noop() {
+    let mut root = PaneNode::leaf(1);
+
+    assert!(!root.move_view_in_direction(1, TileDirection::Down));
+    assert_eq!(pane_shape(&root), "1");
 }
 
 #[test]

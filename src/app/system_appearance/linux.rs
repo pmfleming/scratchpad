@@ -1,6 +1,8 @@
 use super::{
-    MAX_FONT_SIZE, MIN_FONT_SIZE, SystemColorScheme, parse_font_family, parse_trailing_font_size,
+    HyprlandBorderStyle, MAX_FONT_SIZE, MIN_FONT_SIZE, SystemColorScheme, parse_font_family,
+    parse_trailing_font_size,
 };
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -103,5 +105,72 @@ fn gsettings_color_scheme() -> Option<SystemColorScheme> {
         Some(SystemColorScheme::Light)
     } else {
         None
+    }
+}
+
+#[derive(Deserialize)]
+struct HyprctlOption {
+    custom: Option<String>,
+    int: Option<i64>,
+}
+
+pub(super) fn detect_hyprland_border_style() -> Option<HyprlandBorderStyle> {
+    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE")?;
+
+    let active = hyprland_option("general:col.active_border")
+        .and_then(|option| option.custom)
+        .as_deref()
+        .and_then(parse_hyprland_color)?;
+    let inactive = hyprland_option("general:col.inactive_border")
+        .and_then(|option| option.custom)
+        .as_deref()
+        .and_then(parse_hyprland_color)?;
+    let width = hyprland_option("general:border_size")
+        .and_then(|option| option.int)
+        .map(|width| width.clamp(1, 8) as f32)?;
+
+    Some(HyprlandBorderStyle {
+        active,
+        inactive,
+        width,
+    })
+}
+
+fn hyprland_option(name: &str) -> Option<HyprctlOption> {
+    let output = std::process::Command::new("hyprctl")
+        .args(["-j", "getoption", name])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    serde_json::from_slice(&output.stdout).ok()
+}
+
+fn parse_hyprland_color(value: &str) -> Option<eframe::egui::Color32> {
+    let color = value.split_whitespace().next()?.trim_start_matches("0x");
+    if color.len() != 8 {
+        return None;
+    }
+    let argb = u32::from_str_radix(color, 16).ok()?;
+    Some(eframe::egui::Color32::from_rgba_unmultiplied(
+        ((argb >> 16) & 0xff) as u8,
+        ((argb >> 8) & 0xff) as u8,
+        (argb & 0xff) as u8,
+        ((argb >> 24) & 0xff) as u8,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_hyprland_color;
+    use eframe::egui::Color32;
+
+    #[test]
+    fn parses_hyprctl_argb_gradient_color() {
+        assert_eq!(
+            parse_hyprland_color("ee2f8cff 0deg"),
+            Some(Color32::from_rgba_unmultiplied(0x2f, 0x8c, 0xff, 0xee))
+        );
     }
 }

@@ -35,6 +35,13 @@ pub(crate) struct SystemEditorPalette {
     pub highlight_text: egui::Color32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct HyprlandBorderStyle {
+    pub active: egui::Color32,
+    pub inactive: egui::Color32,
+    pub width: f32,
+}
+
 #[derive(Clone, Debug, Default, Deserialize)]
 struct SystemAppearanceBridge {
     #[serde(default)]
@@ -111,6 +118,20 @@ pub(crate) fn editor_palette() -> SystemEditorPalette {
         background,
         highlight,
         highlight_text,
+    }
+}
+
+#[must_use]
+pub(crate) fn hyprland_border_style() -> Option<HyprlandBorderStyle> {
+    #[cfg(target_os = "linux")]
+    {
+        static STYLE: OnceLock<Option<HyprlandBorderStyle>> = OnceLock::new();
+        *STYLE.get_or_init(linux::detect_hyprland_border_style)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
     }
 }
 

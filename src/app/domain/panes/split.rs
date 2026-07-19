@@ -62,33 +62,10 @@ impl PaneNode {
         let Some(leaf_path) = self.path_to_view(view_id) else {
             return false;
         };
-        let Some((split_path, _)) = self.nearest_split_for_direction(&leaf_path, direction, false)
-        else {
+        let Some(split_path) = self.nearest_split_for_direction(&leaf_path, direction) else {
             return false;
         };
         self.adjust_split_ratio_for_direction(&split_path, direction, delta.abs())
-    }
-
-    pub fn move_view_in_direction(&mut self, view_id: ViewId, direction: TileDirection) -> bool {
-        let Some(active_path) = self.path_to_view(view_id) else {
-            return false;
-        };
-        let Some((split_path, active_branch)) =
-            self.nearest_split_for_direction(&active_path, direction, true)
-        else {
-            return false;
-        };
-
-        let sibling_path = branched_path(&split_path, opposite_branch(active_branch));
-        let Some(target_path) = self.neighbor_leaf_path(&sibling_path, direction) else {
-            return false;
-        };
-        let Some(target_view_id) = self.leaf_view_id_at_path(&target_path) else {
-            return false;
-        };
-
-        self.set_leaf_view_id_at_path(&active_path, target_view_id)
-            && self.set_leaf_view_id_at_path(&target_path, view_id)
     }
 
     #[must_use]
@@ -146,22 +123,8 @@ fn split_leaf_node(
     }
 }
 
-fn clamp_split_ratio(ratio: f32) -> f32 {
+pub(super) fn clamp_split_ratio(ratio: f32) -> f32 {
     ratio.clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO)
-}
-
-fn opposite_branch(branch: PaneBranch) -> PaneBranch {
-    match branch {
-        PaneBranch::First => PaneBranch::Second,
-        PaneBranch::Second => PaneBranch::First,
-    }
-}
-
-fn branched_path(path: &[PaneBranch], branch: PaneBranch) -> Vec<PaneBranch> {
-    let mut next = Vec::with_capacity(path.len() + 1);
-    next.extend_from_slice(path);
-    next.push(branch);
-    next
 }
 
 impl TileDirection {
@@ -170,17 +133,6 @@ impl TileDirection {
             Self::Left | Self::Right => SplitAxis::Vertical,
             Self::Up | Self::Down => SplitAxis::Horizontal,
         }
-    }
-
-    fn branch_that_can_grow_toward(self) -> PaneBranch {
-        match self {
-            Self::Left | Self::Up => PaneBranch::Second,
-            Self::Right | Self::Down => PaneBranch::First,
-        }
-    }
-
-    fn uses_previous_sibling_edge(self) -> bool {
-        matches!(self, Self::Left | Self::Up)
     }
 }
 
@@ -242,19 +194,14 @@ impl PaneNode {
         &self,
         leaf_path: &[PaneBranch],
         direction: TileDirection,
-        require_growable_branch: bool,
-    ) -> Option<(Vec<PaneBranch>, PaneBranch)> {
+    ) -> Option<Vec<PaneBranch>> {
         for split_depth in (0..leaf_path.len()).rev() {
             let split_path = &leaf_path[..split_depth];
-            let active_branch = leaf_path[split_depth];
-            if require_growable_branch && active_branch != direction.branch_that_can_grow_toward() {
-                continue;
-            }
             if self
                 .node_at_path(split_path)
                 .is_some_and(|node| node.split_axis() == Some(direction.axis()))
             {
-                return Some((split_path.to_vec(), active_branch));
+                return Some(split_path.to_vec());
             }
         }
         None
@@ -299,54 +246,5 @@ impl PaneNode {
         };
         *ratio = clamp_split_ratio(*ratio + signed_delta);
         (*ratio - before).abs() > f32::EPSILON
-    }
-
-    fn neighbor_leaf_path(
-        &self,
-        sibling_path: &[PaneBranch],
-        direction: TileDirection,
-    ) -> Option<Vec<PaneBranch>> {
-        if direction.uses_previous_sibling_edge() {
-            self.last_leaf_path_from(sibling_path)
-        } else {
-            self.first_leaf_path_from(sibling_path)
-        }
-    }
-
-    fn first_leaf_path_from(&self, path: &[PaneBranch]) -> Option<Vec<PaneBranch>> {
-        let mut leaf_path = path.to_vec();
-        let mut node = self.node_at_path(path)?;
-        while let Self::Split { first, .. } = node {
-            leaf_path.push(PaneBranch::First);
-            node = first.as_ref();
-        }
-        Some(leaf_path)
-    }
-
-    fn last_leaf_path_from(&self, path: &[PaneBranch]) -> Option<Vec<PaneBranch>> {
-        let mut leaf_path = path.to_vec();
-        let mut node = self.node_at_path(path)?;
-        while let Self::Split { second, .. } = node {
-            leaf_path.push(PaneBranch::Second);
-            node = second.as_ref();
-        }
-        Some(leaf_path)
-    }
-
-    fn leaf_view_id_at_path(&self, path: &[PaneBranch]) -> Option<ViewId> {
-        match self.node_at_path(path)? {
-            Self::Leaf { view_id } => Some(*view_id),
-            Self::Split { .. } => None,
-        }
-    }
-
-    fn set_leaf_view_id_at_path(&mut self, path: &[PaneBranch], replacement: ViewId) -> bool {
-        match self.node_mut_at_path(path) {
-            Some(Self::Leaf { view_id }) => {
-                *view_id = replacement;
-                true
-            }
-            _ => false,
-        }
     }
 }

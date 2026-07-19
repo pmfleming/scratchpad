@@ -1,6 +1,7 @@
 use crate::app::domain::ViewId;
 use std::collections::HashSet;
 
+mod movement;
 mod split;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
