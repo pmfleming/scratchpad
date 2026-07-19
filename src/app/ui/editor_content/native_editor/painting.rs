@@ -186,9 +186,10 @@ fn paint_tablines(ui: &egui::Ui, editor_rect: egui::Rect, options: TextEditOptio
 
     let origin_x = editor_rect.left();
     let first_level = (((clip_rect.left() - origin_x) / stop_width).ceil().max(1.0)) as usize;
+    let pixels_per_point = ui.ctx().pixels_per_point().max(1.0);
     let base = options.text_color;
-    let color = egui::Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 36);
-    let stroke = egui::Stroke::new(1.0, color);
+    let color = egui::Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 18);
+    let stroke = egui::Stroke::new(1.0 / pixels_per_point, color);
     let painter = ui.painter_at(clip_rect);
 
     for level in first_level.. {
@@ -196,10 +197,11 @@ fn paint_tablines(ui: &egui::Ui, editor_rect: egui::Rect, options: TextEditOptio
         if x > clip_rect.right() {
             break;
         }
+        let pixel_center_x = ((x * pixels_per_point).floor() + 0.5) / pixels_per_point;
         painter.line_segment(
             [
-                egui::pos2(x, clip_rect.top()),
-                egui::pos2(x, clip_rect.bottom()),
+                egui::pos2(pixel_center_x, clip_rect.top()),
+                egui::pos2(pixel_center_x, clip_rect.bottom()),
             ],
             stroke,
         );
