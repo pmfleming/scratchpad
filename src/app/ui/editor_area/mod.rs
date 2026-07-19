@@ -17,42 +17,49 @@ use tile::{TileRenderRequest, TileRenderState};
 const SHIFT_SCROLL_FONT_SIZE_PX_PER_POINT: f32 = 48.0;
 
 pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
-    egui::CentralPanel::default().show(ui, |ui| {
-        widget_ids::feature_scope(ui, "editor_area", |ui| {
-            if app.tab_manager.tabs.as_slice().is_empty() {
-                return;
-            }
+    egui::CentralPanel::default()
+        .frame(editor_panel_frame())
+        .show(ui, |ui| {
+            widget_ids::feature_scope(ui, "editor_area", |ui| {
+                if app.tab_manager.tabs.as_slice().is_empty() {
+                    return;
+                }
 
-            apply_deferred_tile_actions(ui.ctx(), app);
+                apply_deferred_tile_actions(ui.ctx(), app);
 
-            crate::app::app_state::search_runtime::refresh_search_state(app);
-            search_replace::show_search_strip(ui, app);
-            let workspace_rect = ui.available_rect_before_wrap();
-            if workspace_rect.width() <= 0.0 || workspace_rect.height() <= 0.0 {
-                return;
-            }
+                crate::app::app_state::search_runtime::refresh_search_state(app);
+                search_replace::show_search_strip(ui, app);
+                let workspace_rect = ui.available_rect_before_wrap();
+                if workspace_rect.width() <= 0.0 || workspace_rect.height() <= 0.0 {
+                    return;
+                }
 
-            paint_workspace_background(
-                ui,
-                workspace_rect,
-                app.state.app_settings.editor_background_color(),
-            );
+                paint_workspace_background(
+                    ui,
+                    workspace_rect,
+                    app.state.app_settings.editor_background_color(),
+                );
 
-            app.state.workspace_reflow_axis = preferred_workspace_reflow_axis(workspace_rect);
-            handle_editor_zoom(ui, workspace_rect, app);
-            let editor_state = prepare_editor_state(app);
-            let render_outcome = render_editor_workspace(ui, app, &editor_state, workspace_rect);
-            finalize_editor_render(ui, app, &editor_state, render_outcome);
-            crate::app::app_state::search_runtime::refresh_search_state(app);
-            request_search_repaint(
-                ui.ctx(),
-                matches!(
-                    app.state.search_state.progress().status,
-                    SearchStatus::Searching { .. }
-                ),
-            );
+                app.state.workspace_reflow_axis = preferred_workspace_reflow_axis(workspace_rect);
+                handle_editor_zoom(ui, workspace_rect, app);
+                let editor_state = prepare_editor_state(app);
+                let render_outcome =
+                    render_editor_workspace(ui, app, &editor_state, workspace_rect);
+                finalize_editor_render(ui, app, &editor_state, render_outcome);
+                crate::app::app_state::search_runtime::refresh_search_state(app);
+                request_search_repaint(
+                    ui.ctx(),
+                    matches!(
+                        app.state.search_state.progress().status,
+                        SearchStatus::Searching { .. }
+                    ),
+                );
+            });
         });
-    });
+}
+
+fn editor_panel_frame() -> egui::Frame {
+    egui::Frame::NONE
 }
 
 fn paint_workspace_background(ui: &egui::Ui, workspace_rect: egui::Rect, fill: egui::Color32) {
@@ -365,7 +372,16 @@ fn apply_editor_change(app: &mut ScratchpadApp, state: &EditorRenderState) {
 
 #[cfg(test)]
 mod tests {
-    use super::{egui, font_size_delta_from_shift_scroll};
+    use super::{editor_panel_frame, egui, font_size_delta_from_shift_scroll};
+
+    #[test]
+    fn editor_panel_is_flush_with_adjacent_window_chrome() {
+        let frame = editor_panel_frame();
+
+        assert_eq!(frame.inner_margin, egui::Margin::ZERO);
+        assert_eq!(frame.outer_margin, egui::Margin::ZERO);
+        assert_eq!(frame.stroke, egui::Stroke::NONE);
+    }
 
     #[test]
     fn shift_scroll_maps_to_font_size_delta() {

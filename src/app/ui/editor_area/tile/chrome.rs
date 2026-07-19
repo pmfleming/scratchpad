@@ -39,8 +39,9 @@ pub(super) fn paint_tile_border(
     profile: PlatformProfile,
 ) {
     let stroke = tile_border_stroke(ui, is_active, profile);
+    // Center shared-edge strokes so window and tab borders occupy the same line.
     ui.painter()
-        .rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Inside);
+        .rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Middle);
 }
 
 fn tile_border_stroke(ui: &egui::Ui, is_active: bool, profile: PlatformProfile) -> egui::Stroke {
