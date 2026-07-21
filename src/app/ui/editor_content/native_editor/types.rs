@@ -64,7 +64,6 @@ pub struct TextEditOptions<'a> {
     pub text_color: egui::Color32,
     pub highlight_style: EditorHighlightStyle,
     pub warm_layout_cache: bool,
-    pub reserve_alt_for_shortcuts: bool,
     pub indentation_style: IndentationStyle,
     pub indentation_width: u8,
     pub tab_display: TabDisplayMode,
@@ -87,7 +86,6 @@ impl<'a> TextEditOptions<'a> {
             text_color,
             highlight_style,
             warm_layout_cache: true,
-            reserve_alt_for_shortcuts: false,
             indentation_style: IndentationStyle::default(),
             indentation_width: 4,
             tab_display: TabDisplayMode::default(),
@@ -110,12 +108,6 @@ impl<'a> TextEditOptions<'a> {
     #[must_use]
     pub fn with_layout_cache_warming(mut self, enabled: bool) -> Self {
         self.warm_layout_cache = enabled;
-        self
-    }
-
-    #[must_use]
-    pub fn with_alt_reserved_for_shortcuts(mut self, reserved: bool) -> Self {
-        self.reserve_alt_for_shortcuts = reserved;
         self
     }
 }

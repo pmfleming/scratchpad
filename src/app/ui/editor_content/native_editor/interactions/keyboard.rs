@@ -46,7 +46,6 @@ pub(super) fn handle_keyboard_events(
         ui,
         buffer,
         view,
-        request.reserve_alt_for_shortcuts,
         IndentationInput {
             style: request.indentation_style,
             width: request.indentation_width,
@@ -72,7 +71,6 @@ fn handle_keyboard_events_with(
     ui: &mut egui::Ui,
     buffer: &mut BufferState,
     view: &mut EditorViewState,
-    reserve_alt_for_shortcuts: bool,
     indentation: IndentationInput,
     mut handle_movement_event: impl FnMut(
         PressedKeyEvent,
@@ -80,7 +78,7 @@ fn handle_keyboard_events_with(
         &CursorRange,
     ) -> Option<CursorRange>,
 ) -> bool {
-    let events = relevant_input_events(ui, reserve_alt_for_shortcuts);
+    let events = relevant_input_events(ui);
     let context = KeyboardInputContext {
         total_chars: buffer.current_file_length().chars,
         indentation,
@@ -174,23 +172,28 @@ fn handle_key_event(
     apply_cursor_update(view, buffer, next_cursor)
 }
 
-fn relevant_input_events(
-    ui: &egui::Ui,
-    reserve_alt_for_shortcuts: bool,
-) -> Vec<RelevantInputEvent> {
+fn relevant_input_events(ui: &egui::Ui) -> Vec<RelevantInputEvent> {
     ui.input(|input| {
         input
             .events
             .iter()
-            .filter_map(|event| relevant_input_event(event, reserve_alt_for_shortcuts))
+            .filter_map(relevant_input_event)
+            .filter(|event| {
+                !matches!(
+                    event,
+                    RelevantInputEvent::Key(key_event)
+                        if crate::app::shortcut_tooltips::is_app_shortcut(
+                            ui.ctx(),
+                            key_event.modifiers,
+                            key_event.key,
+                        )
+                )
+            })
             .collect()
     })
 }
 
-fn relevant_input_event(
-    event: &egui::Event,
-    reserve_alt_for_shortcuts: bool,
-) -> Option<RelevantInputEvent> {
+fn relevant_input_event(event: &egui::Event) -> Option<RelevantInputEvent> {
     match event {
         egui::Event::Text(text) => {
             is_insertable_text(text).then(|| RelevantInputEvent::Text(text.clone()))
@@ -210,12 +213,10 @@ fn relevant_input_event(
             pressed: true,
             modifiers,
             ..
-        } if !reserve_alt_for_shortcuts || !modifiers.alt => {
-            Some(RelevantInputEvent::Key(PressedKeyEvent {
-                key: *key,
-                modifiers: *modifiers,
-            }))
-        }
+        } => Some(RelevantInputEvent::Key(PressedKeyEvent {
+            key: *key,
+            modifiers: *modifiers,
+        })),
         egui::Event::Copy => Some(RelevantInputEvent::Copy),
         egui::Event::Cut => Some(RelevantInputEvent::Cut),
         egui::Event::Paste(text) if !text.is_empty() => {
@@ -318,7 +319,9 @@ fn handle_history_key(
     buffer: &mut BufferState,
     view: &mut EditorViewState,
 ) -> Option<bool> {
-    if key_event.key == egui::Key::Z && is_undo_shortcut(key_event.modifiers) {
+    if (key_event.key == egui::Key::Z && is_undo_shortcut(key_event.modifiers))
+        || is_classic_undo_shortcut(key_event)
+    {
         let selection = buffer.undo_last_text_operation();
         return Some(apply_history(view, buffer, selection));
     }
@@ -332,6 +335,13 @@ fn handle_history_key(
 
 fn is_undo_shortcut(modifiers: egui::Modifiers) -> bool {
     modifiers.command && !modifiers.shift
+}
+
+fn is_classic_undo_shortcut(key_event: PressedKeyEvent) -> bool {
+    key_event.key == egui::Key::Backspace
+        && key_event.modifiers.alt
+        && !key_event.modifiers.ctrl
+        && !key_event.modifiers.shift
 }
 
 fn handle_insert_key(
@@ -416,7 +426,9 @@ fn apply_cursor_update(
 
 #[cfg(test)]
 mod tests {
-    use super::{RelevantInputEvent, relevant_input_event};
+    use super::{
+        PressedKeyEvent, RelevantInputEvent, is_classic_undo_shortcut, relevant_input_event,
+    };
     use eframe::egui;
 
     #[test]
@@ -427,7 +439,7 @@ mod tests {
         });
 
         assert!(matches!(
-            relevant_input_event(&event, false),
+            relevant_input_event(&event),
             Some(RelevantInputEvent::ImePreedit { text, active_range_chars })
                 if text == "kana" && active_range_chars == Some(1..3)
         ));
@@ -438,13 +450,25 @@ mod tests {
         let event = egui::Event::Ime(egui::ImeEvent::Commit("かな".to_owned()));
 
         assert!(matches!(
-            relevant_input_event(&event, false),
+            relevant_input_event(&event),
             Some(RelevantInputEvent::Text(text)) if text == "かな"
         ));
     }
 
     #[test]
-    fn alt_keys_are_reserved_only_for_the_hyprland_input_policy() {
+    fn alt_backspace_is_classic_undo_without_extra_modifiers() {
+        assert!(is_classic_undo_shortcut(PressedKeyEvent {
+            key: egui::Key::Backspace,
+            modifiers: egui::Modifiers::ALT,
+        }));
+        assert!(!is_classic_undo_shortcut(PressedKeyEvent {
+            key: egui::Key::Backspace,
+            modifiers: egui::Modifiers::ALT | egui::Modifiers::SHIFT,
+        }));
+    }
+
+    #[test]
+    fn key_events_remain_available_for_runtime_keymap_filtering() {
         let event = egui::Event::Key {
             key: egui::Key::ArrowLeft,
             physical_key: None,
@@ -454,9 +478,8 @@ mod tests {
         };
 
         assert!(matches!(
-            relevant_input_event(&event, false),
+            relevant_input_event(&event),
             Some(RelevantInputEvent::Key(_))
         ));
-        assert!(relevant_input_event(&event, true).is_none());
     }
 }

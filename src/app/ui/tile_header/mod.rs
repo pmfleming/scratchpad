@@ -3,6 +3,7 @@ pub mod split;
 
 use crate::app::app_state::ScratchpadApp;
 use crate::app::domain::{SplitPath, ViewId};
+use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
 use crate::app::ui::transition;
 use crate::app::ui::widget_ids;
@@ -70,7 +71,11 @@ pub(crate) fn render_tile_header(
             rects.promote_hit,
             TileControlSpec {
                 label: egui_phosphor::regular::ARROW_LINE_UP,
-                tooltip: Some(shortcut_tooltips::PROMOTE_TILE),
+                tooltip: Some(shortcut_tooltips::action(
+                    ui.ctx(),
+                    ShortcutAction::PromoteTileToTab,
+                    "Promote Tile",
+                )),
                 style: TileControlStyle::Default,
                 sense: egui::Sense::click(),
                 id_prefix: "promote_view",
@@ -110,7 +115,11 @@ pub(crate) fn render_tile_header(
             rects.close_hit,
             TileControlSpec {
                 label: "×",
-                tooltip: Some(shortcut_tooltips::CLOSE_TILE),
+                tooltip: Some(shortcut_tooltips::action(
+                    ui.ctx(),
+                    ShortcutAction::CloseTile,
+                    "Close Tile",
+                )),
                 style: TileControlStyle::Danger,
                 sense: egui::Sense::click(),
                 id_prefix: "close_view",
@@ -158,7 +167,7 @@ struct TileControlContext {
 
 struct TileControlSpec {
     label: &'static str,
-    tooltip: Option<&'static str>,
+    tooltip: Option<String>,
     style: TileControlStyle,
     sense: egui::Sense,
     id_prefix: &'static str,
@@ -216,10 +225,15 @@ fn show_split_control(
     font_size: f32,
     controls_visible: f32,
 ) -> egui::Response {
+    let tooltip = shortcut_tooltips::action(
+        ui.ctx(),
+        ShortcutAction::SplitTile,
+        "Split Tile (drag in a direction to choose placement)",
+    );
     TileControl::new(egui_phosphor::regular::ARROWS_SPLIT)
         .visibility(controls_visible)
         .font_size(font_size)
-        .tooltip(shortcut_tooltips::SPLIT_TILE)
+        .tooltip(&tooltip)
         .show(
             ui,
             split_hit,
@@ -238,7 +252,7 @@ fn show_control(
         .style(spec.style)
         .visibility(control.visibility)
         .font_size(control.font_size);
-    if let Some(tooltip) = spec.tooltip {
+    if let Some(tooltip) = &spec.tooltip {
         tile_control = tile_control.tooltip(tooltip);
     }
     tile_control.show(

@@ -53,7 +53,7 @@ pub(super) fn menu_action_button(
         );
         paint_context_menu_row_label(ui, response.rect, icon, label, enabled);
         let clicked = response.clicked();
-        if let Some(tooltip) = shortcut_tooltip_for_menu_label(label) {
+        if let Some(tooltip) = shortcut_tooltip_for_menu_label(ui.ctx(), label) {
             response.on_hover_text(tooltip);
         }
         clicked
@@ -79,7 +79,7 @@ pub(super) fn split_menu_button(ui: &mut egui::Ui, label: &str, icon: &str) -> b
         );
         paint_context_menu_row_label(ui, response.rect, Some(icon), label, true);
         let clicked = response.clicked();
-        if let Some(tooltip) = shortcut_tooltip_for_menu_label(label) {
+        if let Some(tooltip) = shortcut_tooltip_for_menu_label(ui.ctx(), label) {
             response.on_hover_text(tooltip);
         }
         clicked

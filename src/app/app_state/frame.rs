@@ -75,6 +75,11 @@ pub fn prepare_context_before_first_frame(app: &mut ScratchpadApp, ctx: &egui::C
 
 pub(super) fn render_frame(app: &mut ScratchpadApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     apply_deferred_layout_settings(app, ctx);
+    crate::app::shortcut_tooltips::sync_context(
+        ctx,
+        app.state.app_settings.platform_profile(),
+        &app.state.app_settings.shortcuts,
+    );
     let paint_started_at = Instant::now();
     paint_root_background(ui, app.state.app_settings.editor_background_color());
     record_frame_phase(FramePhase::Paint, paint_started_at.elapsed());

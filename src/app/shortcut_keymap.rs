@@ -232,16 +232,20 @@ const GENERIC_RESIZE_LEFT: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Ke
 const GENERIC_RESIZE_RIGHT: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowRight)];
 const GENERIC_RESIZE_UP: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowUp)];
 const GENERIC_RESIZE_DOWN: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowDown)];
-const GENERIC_MOVE_LEFT: [KeyBinding; 1] =
-    [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::ArrowLeft)];
-const GENERIC_MOVE_RIGHT: [KeyBinding; 1] = [KeyBinding::new(
-    egui::Modifiers::CTRL,
-    egui::Key::ArrowRight,
-)];
-const GENERIC_MOVE_UP: [KeyBinding; 1] =
-    [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::ArrowUp)];
-const GENERIC_MOVE_DOWN: [KeyBinding; 1] =
-    [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::ArrowDown)];
+const CTRL_ALT_SHIFT: egui::Modifiers = egui::Modifiers {
+    alt: true,
+    ctrl: true,
+    shift: true,
+    mac_cmd: false,
+    command: false,
+};
+// Keep generic-platform tile movement away from the editor's Ctrl/Alt+Arrow
+// word-navigation bindings. Hyprland has its own compositor-style defaults.
+const GENERIC_MOVE_LEFT: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT_SHIFT, egui::Key::ArrowLeft)];
+const GENERIC_MOVE_RIGHT: [KeyBinding; 1] =
+    [KeyBinding::new(CTRL_ALT_SHIFT, egui::Key::ArrowRight)];
+const GENERIC_MOVE_UP: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT_SHIFT, egui::Key::ArrowUp)];
+const GENERIC_MOVE_DOWN: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT_SHIFT, egui::Key::ArrowDown)];
 
 const HYPRLAND_SPLIT_TILE: [KeyBinding; 1] =
     [KeyBinding::new(egui::Modifiers::ALT, egui::Key::Enter)];
@@ -358,14 +362,43 @@ pub fn consume_shortcut(
     action: ShortcutAction,
 ) -> bool {
     if let Some(bindings) = configured_bindings(shortcuts, action) {
-        return bindings.iter().any(|binding| {
-            ctx.input_mut(|input| input.consume_key(binding.modifiers, binding.key))
-        });
+        return bindings
+            .iter()
+            .any(|binding| consume_binding(ctx, *binding));
     }
-
     default_bindings(profile, action)
         .iter()
-        .any(|binding| ctx.input_mut(|input| input.consume_key(binding.modifiers, binding.key)))
+        .any(|binding| consume_binding(ctx, *binding))
+}
+
+fn consume_binding(ctx: &egui::Context, binding: KeyBinding) -> bool {
+    let pressed = ctx.input(|input| {
+        input.events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } if *key == binding.key && key_event_matches_binding(*modifiers, binding)
+            )
+        })
+    });
+    pressed && ctx.input_mut(|input| input.consume_key(binding.modifiers, binding.key))
+}
+
+/// Uses exact modifiers for shortcuts so, for example, Ctrl+Shift+H does not
+/// accidentally trigger Ctrl+H and Alt+Shift+Arrow does not trigger Alt+Arrow.
+/// Plus/equals retain egui's logical matching because producing `+` requires
+/// Shift on common keyboard layouts.
+#[must_use]
+pub(crate) fn key_event_matches_binding(pressed: egui::Modifiers, binding: KeyBinding) -> bool {
+    if matches!(binding.key, egui::Key::Plus | egui::Key::Equals) {
+        pressed.matches_logically(binding.modifiers)
+    } else {
+        pressed.matches_exact(binding.modifiers)
+    }
 }
 
 #[must_use]
@@ -376,6 +409,18 @@ pub fn configured_bindings(
     shortcuts
         .binding(action.config_key())
         .and_then(parse_binding_list)
+}
+
+/// Returns the bindings actually used after applying valid user overrides and
+/// resolving platform-specific defaults.
+#[must_use]
+pub fn effective_bindings(
+    profile: PlatformProfile,
+    shortcuts: &ShortcutSettings,
+    action: ShortcutAction,
+) -> Vec<KeyBinding> {
+    configured_bindings(shortcuts, action)
+        .unwrap_or_else(|| default_bindings(profile, action).to_vec())
 }
 
 #[must_use]
@@ -513,8 +558,8 @@ fn parse_key_token(token: &str) -> Option<egui::Key> {
 #[cfg(test)]
 mod tests {
     use super::{
-        KeyBinding, ShortcutAction, configured_bindings, default_bindings,
-        invalid_shortcut_overrides, parse_key_binding,
+        KeyBinding, ShortcutAction, configured_bindings, default_bindings, effective_bindings,
+        invalid_shortcut_overrides, key_event_matches_binding, parse_key_binding,
     };
     use crate::app::platform::PlatformProfile;
     use crate::app::services::settings_store::ShortcutSettings;
@@ -533,7 +578,7 @@ mod tests {
         );
         assert_eq!(
             default_bindings(PlatformProfile::Windows, ShortcutAction::MoveTileLeft),
-            &[KeyBinding::new(egui::Modifiers::CTRL, egui::Key::ArrowLeft)]
+            &[KeyBinding::new(super::CTRL_ALT_SHIFT, egui::Key::ArrowLeft)]
         );
         assert_eq!(
             default_bindings(PlatformProfile::Windows, ShortcutAction::SplitLeft),
@@ -615,6 +660,46 @@ mod tests {
         assert_eq!(
             default_bindings(PlatformProfile::Windows, ShortcutAction::OpenFile),
             &[KeyBinding::new(egui::Modifiers::CTRL, egui::Key::O)]
+        );
+    }
+
+    #[test]
+    fn exact_modifiers_keep_overlapping_shortcuts_distinct() {
+        assert!(!key_event_matches_binding(
+            super::CTRL_SHIFT,
+            KeyBinding::new(egui::Modifiers::CTRL, egui::Key::H),
+        ));
+        assert!(!key_event_matches_binding(
+            super::ALT_SHIFT,
+            KeyBinding::new(egui::Modifiers::ALT, egui::Key::ArrowLeft),
+        ));
+        assert!(key_event_matches_binding(
+            super::CTRL_SHIFT,
+            KeyBinding::new(super::CTRL_SHIFT, egui::Key::H),
+        ));
+    }
+
+    #[test]
+    fn effective_bindings_use_override_or_platform_default() {
+        let shortcuts = ShortcutSettings {
+            bindings: BTreeMap::from([("split_left".to_owned(), "alt+l".to_owned())]),
+        };
+
+        assert_eq!(
+            effective_bindings(
+                PlatformProfile::Hyprland,
+                &shortcuts,
+                ShortcutAction::SplitLeft,
+            ),
+            vec![KeyBinding::new(egui::Modifiers::ALT, egui::Key::L)]
+        );
+        assert_eq!(
+            effective_bindings(
+                PlatformProfile::Hyprland,
+                &shortcuts,
+                ShortcutAction::SplitRight,
+            ),
+            vec![KeyBinding::new(super::CTRL_ALT, egui::Key::ArrowRight)]
         );
     }
 

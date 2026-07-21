@@ -143,7 +143,8 @@ tab_display = "tablines"     # hidden, character, or tablines
 ```
 
 Top-level in-app shortcuts can be overridden without changing compositor/global
-shortcuts:
+shortcuts. This example uses the Hyprland tile bindings (generic Windows/Linux
+tile defaults are listed below):
 
 ```toml
 [shortcuts]
@@ -166,23 +167,31 @@ resize_tile_up = "alt+shift+up"
 resize_tile_down = "alt+shift+down"
 ```
 
-Tiling shortcuts all hang off a single `alt` leader — the in-app stand-in for
-the compositor's `super` key, which Hyprland reserves globally. The base key
-mirrors the equivalent Hyprland bind, so muscle memory carries over: where
-Hyprland uses `super+enter` to spawn a tile, Scratchpad uses `alt+enter` to
-split; `super+arrow` ↔ `alt+arrow` to move a tile, and so on. Tile movement
+Under the Hyprland profile, tiling shortcuts all include an `alt` leader — the
+in-app stand-in for the compositor's `super` key, which Hyprland reserves
+globally. The base key mirrors the equivalent Hyprland bind, so muscle memory
+carries over: where Hyprland uses `super+enter` to spawn a tile, Scratchpad uses
+`alt+enter` to split; `super+arrow` ↔ `alt+arrow` to move a tile, and so on.
+Generic Windows/Linux defaults use `ctrl+alt+enter` to split,
+`ctrl+shift+arrow` for directional splits, `ctrl+alt+arrow` to resize, and
+`ctrl+alt+shift+arrow` to move. This keeps editor `ctrl+arrow` and `alt+arrow`
+word navigation available. Tile movement
 follows Hyprland's dwindle model: the active tile is removed, its old split is
 collapsed, and it is reinserted beside the tile nearest the requested edge.
 Under the Hyprland profile, active and inactive tile borders also use the
 `general:col.*_border` colors and border width reported by the compositor at
-startup, when available. The editor leaves all `alt`-modified keys to this layer, so they
-never clash with text editing (word-wise navigation stays on `ctrl+arrow`).
+startup, when available. The editor reserves only bindings that are active in
+the resolved app keymap; unassigned `alt` combinations remain available to text
+editing.
 
 Shortcut strings are case-insensitive. Supported modifiers are `ctrl`, `shift`,
 `alt`, and `command`/`super`/`win`. Multiple bindings can be separated with
 commas, so you can add focused-app `super` bindings such as
 `split_tile = "alt+enter, super+enter"` if those keys are not reserved by the
-compositor.
+compositor. Tooltips resolve from the active OS profile and valid user
+overrides, so they always show the binding currently in use. The complete list
+of action names and defaults is in `docs/user-manual.md` under **Shortcut
+Reference**.
 
 ## Packaging and Release
 

@@ -10,7 +10,8 @@ several file views.
 
 ## Start Here
 
-Use these commands first:
+Use these commands first (these are the generic Windows/Linux defaults; active
+tooltips reflect OS-profile defaults and user overrides):
 
 - `Ctrl + N`: create a new untitled tab.
 - `Ctrl + O`: open files using the current opening preference.
@@ -107,6 +108,7 @@ expected.
 
 Core editing commands:
 
+- `Ctrl + X` / `Ctrl + C` / `Ctrl + V`: cut / copy / paste.
 - `Ctrl + A`: select all text in the active editor.
 - `Ctrl + Z`: undo the last text operation.
 - `Ctrl + Y`: redo the last undone text operation.
@@ -124,7 +126,8 @@ Caret movement:
 
 - Arrow keys: move by character or line.
 - `Ctrl + Left` / `Ctrl + Right`: move by word.
-- `Alt + Left` / `Alt + Right`: move by word.
+- `Alt + Left` / `Alt + Right`: move by word under the generic profile; the
+  Hyprland defaults use these keys to move tiles.
 - `Home`: move to the current line start.
 - `End`: move to the current line content end.
 - `Ctrl + Home`: move to the start of the document.
@@ -245,8 +248,13 @@ Search field commands:
 - Find field `Enter`: next match.
 - Find field `Shift + Enter`: previous match.
 - Replace field `Enter`: replace current match.
+- `F3` / `Shift + F3`: next / previous match.
 - `Ctrl + Enter`: replace current match.
 - `Alt + Enter`: replace all matches in the current scope.
+- `Alt + 1` / `2` / `3` / `4`: selection / active file / current workspace / all open tabs.
+- `Alt + R`: toggle regex mode.
+- `Alt + C`: toggle case-sensitive matching.
+- `Alt + W`: toggle whole-word matching.
 - `Esc`: close search when search is focused.
 
 Search results are grouped by file. Click a file result to focus its first
@@ -268,7 +276,7 @@ Activate and select tabs:
 - Click a tab to activate it.
 - `Shift + Click`: select a range of tab slots.
 - `Ctrl + Click`: toggle a tab slot in the selection.
-- Click a tab in overflow to activate it.
+- Click a tab in overflow to activate it; press `Esc` to close the overflow.
 - Right-click a tab, the overflow button, or empty tab-list space for tab
   commands.
 
@@ -340,20 +348,31 @@ Navigate:
 - `F6`: move to the next tile.
 - `Shift + F6`: move to the previous tile.
 
-Split:
+Generic Windows/Linux profile keyboard controls:
 
-- `Ctrl + Shift + Left`: split the active tile and place the new view left.
-- `Ctrl + Shift + Right`: split and place the new view right.
-- `Ctrl + Shift + Up`: split and place the new view above.
-- `Ctrl + Shift + Down`: split and place the new view below.
+- `Ctrl + Alt + Enter`: split using the current default axis.
+- `Ctrl + Shift + Arrow`: split and place the new view in that direction.
+- `Ctrl + Alt + Arrow`: resize the active tile in that direction.
+- `Ctrl + Alt + Shift + Arrow`: move the active tile in that direction.
+
+Hyprland profile keyboard controls:
+
+- `Alt + Enter`: split using the current default axis.
+- `Ctrl + Alt + Arrow`: split and place the new view in that direction.
+- `Alt + Shift + Arrow`: resize the active tile in that direction.
+- `Alt + Arrow`: move the active tile in that direction.
+
+The Hyprland bindings mirror compositor bindings with in-app `Alt` standing in
+for compositor `Super`. `Ctrl + Arrow` remains available for editor word
+navigation. User shortcut overrides replace these defaults.
+
+Mouse controls:
+
 - Tile split control: click for the default split, or drag in a direction to
   preview and create that split.
 - Editor context menu > Split: split right by default.
 - Editor context menu > Split submenu: choose Left, Right, Up, or Down.
-
-Resize:
-
-- Drag the divider between tiles.
+- Drag the divider between tiles to resize them.
 - Vertical dividers resize left/right space.
 - Horizontal dividers resize top/bottom space.
 
@@ -419,10 +438,11 @@ and search replacements.
 
 The dialog includes:
 
-- Timeline: recent text changes in order.
-- By file: grouped text changes.
-- Follow undo: move focus to the file affected by the chosen history row.
-- Clear all text history.
+- Timeline (`Ctrl + 1`): recent text changes in order.
+- By file (`Ctrl + 2`): grouped text changes.
+- Follow undo (`Ctrl + Shift + F`): toggle moving focus to the file affected by
+  the chosen history row.
+- Clear all text history (`Ctrl + Shift + Delete`).
 
 Click an applied history row to undo back to that point. Click a dimmed undone
 row to redo forward. The `Now` line marks the current undo position.
@@ -493,6 +513,12 @@ View controls:
 
 ## Shortcut Reference
 
+The bindings below are defaults for the generic Windows/Linux profile. The
+Hyprland tile bindings are listed separately below. Every app-action tooltip is
+built from the currently resolved OS profile and the user's `[shortcuts]`
+overrides, so the tooltip is authoritative when a binding has been changed.
+Editor and search-field bindings are fixed.
+
 App shortcuts:
 
 - `F1`: open this manual.
@@ -526,17 +552,28 @@ Tabs, files, and paths:
 - `Ctrl + Alt + B`: show or hide the tab list.
 - `Ctrl + Shift + B`: toggle tab-list auto-hide.
 
-Display and layout:
+Display and layout (generic Windows/Linux profile):
 
-- `Ctrl + Shift + Arrow`: split the active tile.
+- `Ctrl + Alt + Enter`: split on the current default axis.
+- `Ctrl + Shift + Arrow`: split the active tile in that direction.
+- `Ctrl + Alt + Arrow`: resize the active tile in that direction.
+- `Ctrl + Alt + Shift + Arrow`: move the active tile in that direction.
 - `Ctrl + Alt + C`: toggle control-character display.
 - `Ctrl + Alt + R`: toggle reading order.
 - `Ctrl + +` / `Ctrl + =`: increase font size.
 - `Ctrl + -`: decrease font size.
 - `Ctrl + 0`: toggle line numbers.
 
+Hyprland tile bindings:
+
+- `Alt + Enter`: split on the current default axis.
+- `Ctrl + Alt + Arrow`: split in that direction.
+- `Alt + Shift + Arrow`: resize in that direction.
+- `Alt + Arrow`: move the active tile in that direction.
+
 Editor shortcuts:
 
+- `Ctrl + X` / `Ctrl + C` / `Ctrl + V`: cut / copy / paste.
 - `Ctrl + A`: select all.
 - `Ctrl + Z`: undo.
 - `Ctrl + Y`: redo.
@@ -551,8 +588,77 @@ Search field shortcuts:
 
 - `Enter`: next match or replace current, depending on focused field.
 - `Shift + Enter`: previous match from the find field.
+- `F3` / `Shift + F3`: next / previous match.
 - `Ctrl + Enter`: replace current.
 - `Alt + Enter`: replace all.
+- `Alt + 1` / `2` / `3` / `4`: select search scope.
+- `Alt + R` / `C` / `W`: toggle regex / match case / whole word.
+- `Ctrl + Z` / `Ctrl + Y`: undo / redo in the active document when a search
+  text field does not own focus.
+
+Text-history dialog shortcuts:
+
+- `Ctrl + 1` / `Ctrl + 2`: Timeline / By file.
+- `Ctrl + Shift + F`: toggle Follow undo.
+- `Ctrl + Shift + Delete`: clear history.
+
+### Customizing app shortcuts
+
+Add overrides to the `[shortcuts]` table in `settings.toml`. Names match the app
+actions listed below; omitted names keep their OS-profile default:
+
+```toml
+[shortcuts]
+open_user_manual = "f1"
+open_search = "ctrl+f"
+open_replace = "ctrl+h"
+open_settings = "ctrl+comma"
+close_settings = "escape"
+close_search = "escape"
+rename_tab = "f2"
+open_text_history = "ctrl+shift+h"
+open_encoding_dialog = "ctrl+shift+e"
+open_status_history = "ctrl+shift+m"
+copy_active_path = "ctrl+shift+c"
+reveal_active_path = "ctrl+shift+r"
+toggle_tab_list = "ctrl+alt+b"
+toggle_tab_list_auto_hide = "ctrl+shift+b"
+toggle_reading_order = "ctrl+alt+r"
+toggle_control_chars = "ctrl+alt+c"
+traverse_region_forward = "f6"
+traverse_region_backward = "shift+f6"
+open_file_here = "ctrl+shift+o"
+new_tab = "ctrl+n"
+open_file = "ctrl+o"
+save_file_as = "ctrl+shift+s"
+save_file = "ctrl+s"
+increase_font_size = "ctrl+equals, ctrl+plus"
+decrease_font_size = "ctrl+minus"
+toggle_line_numbers = "ctrl+0"
+close_tab = "ctrl+w"
+promote_tile_to_tab = "ctrl+t"
+promote_tab_files_to_tabs = "ctrl+shift+t"
+close_tile = "ctrl+shift+w"
+split_tile = "ctrl+alt+enter"
+split_left = "ctrl+shift+left"
+split_right = "ctrl+shift+right"
+split_up = "ctrl+shift+up"
+split_down = "ctrl+shift+down"
+resize_tile_left = "ctrl+alt+left"
+resize_tile_right = "ctrl+alt+right"
+resize_tile_up = "ctrl+alt+up"
+resize_tile_down = "ctrl+alt+down"
+move_tile_left = "ctrl+alt+shift+left"
+move_tile_right = "ctrl+alt+shift+right"
+move_tile_up = "ctrl+alt+shift+up"
+move_tile_down = "ctrl+alt+shift+down"
+```
+
+The example values above are generic Windows/Linux defaults. On Hyprland, use
+the profile defaults listed earlier or provide explicit overrides. Shortcut
+strings are case-insensitive. Supported modifiers are `ctrl`, `shift`, `alt`,
+and `command`/`super`/`win`; multiple bindings are comma-separated. Invalid
+overrides are reported and fall back to the profile default.
 
 ## Current Limits
 

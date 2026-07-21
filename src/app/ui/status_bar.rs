@@ -1,5 +1,6 @@
 use crate::app::app_state::{ScratchpadApp, StatusSeverity, frame};
 use crate::app::commands::{AppCommand, DialogCommand, SettingsCommand};
+use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
 use crate::app::theme::text_primary;
 use crate::app::ui::widget_ids;
@@ -115,7 +116,14 @@ fn show_copyable_path_sized(ui: &mut egui::Ui, label: &str, width: f32) {
         egui::Sense::click(),
         "copyable_path",
     )
-    .on_hover_text(format!("{label}\nCTRL+SHIFT+C (Double Click): Copy Path"));
+    .on_hover_text(format!(
+        "{label}\n{} (Double Click also copies)",
+        shortcut_tooltips::action(
+            ui.ctx(),
+            ShortcutAction::CopyActivePath,
+            "Copy Active File Path",
+        )
+    ));
     paint_left_aligned_status_text(ui, response.rect, &display_label);
     if response.double_clicked() {
         let copied = label.strip_prefix("Path: ").unwrap_or(label);
@@ -136,7 +144,14 @@ fn show_line_count(ui: &mut egui::Ui, count_label: &str, actions: &mut StatusBar
         widget_ids::surface_response(ui, "status_line_count", "line_count_label", |ui| {
             ui.label(count_label)
         })
-        .on_hover_text("Double-click to toggle line numbers");
+        .on_hover_text(format!(
+            "{}\nDouble-click also toggles line numbers",
+            shortcut_tooltips::action(
+                ui.ctx(),
+                ShortcutAction::ToggleLineNumbers,
+                "Toggle Line Numbers",
+            )
+        ));
     if line_count_response.double_clicked() {
         actions.toggle_line_numbers = true;
     }
@@ -151,7 +166,11 @@ fn show_encoding(ui: &mut egui::Ui, encoding: &str, highlight: bool) -> egui::Re
         )
     })
     .on_hover_cursor(egui::CursorIcon::PointingHand)
-    .on_hover_text(shortcut_tooltips::ENCODING)
+    .on_hover_text(shortcut_tooltips::action(
+        ui.ctx(),
+        ShortcutAction::OpenEncodingDialog,
+        "Encoding",
+    ))
 }
 
 fn show_status_segment(ui: &mut egui::Ui, label: Option<&str>) {
@@ -203,7 +222,11 @@ fn show_settings_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
     ui.separator();
     let response = status_bar_icon_button(ui, "status_settings", egui_phosphor::regular::GEAR)
         .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text(shortcut_tooltips::SETTINGS);
+        .on_hover_text(shortcut_tooltips::action(
+            ui.ctx(),
+            ShortcutAction::OpenSettings,
+            "Settings",
+        ));
     if response.clicked() {
         actions.open_settings = true;
     }
@@ -217,7 +240,11 @@ fn show_text_history_button(ui: &mut egui::Ui, actions: &mut StatusBarActions) {
         egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE,
     )
     .on_hover_cursor(egui::CursorIcon::PointingHand)
-    .on_hover_text(shortcut_tooltips::HISTORY);
+    .on_hover_text(shortcut_tooltips::action(
+        ui.ctx(),
+        ShortcutAction::OpenTextHistory,
+        "History",
+    ));
     if response.clicked() {
         actions.open_text_history = true;
     }
@@ -239,11 +266,15 @@ fn show_status_history_button(
     } else {
         status_icon_color(ui)
     };
-    let tooltip = if has_errors {
-        "CTRL+SHIFT+M: Status History has Errors"
-    } else {
-        shortcut_tooltips::STATUS
-    };
+    let tooltip = shortcut_tooltips::action(
+        ui.ctx(),
+        ShortcutAction::OpenStatusHistory,
+        if has_errors {
+            "Status History has Errors"
+        } else {
+            "Status History"
+        },
+    );
     let response = fixed_status_icon_cell(
         ui,
         "status_message_history",
@@ -287,7 +318,11 @@ fn show_control_char_toggle(
         };
         button_response.clone().on_hover_text(format!(
             "{}\n{}",
-            shortcut_tooltips::CONTROL_CHARS,
+            shortcut_tooltips::action(
+                ui.ctx(),
+                ShortcutAction::ToggleControlChars,
+                "Control Chars",
+            ),
             tooltip
         ));
     }

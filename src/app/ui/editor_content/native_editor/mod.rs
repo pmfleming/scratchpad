@@ -324,7 +324,6 @@ fn handle_focused_keyboard_input(
                 char_offset_base: request.char_offset_base,
                 slice_chars: request.slice_chars,
                 display_map: request.display_map,
-                reserve_alt_for_shortcuts: request.options.reserve_alt_for_shortcuts,
                 indentation_style: request.options.indentation_style,
                 indentation_width: request.options.indentation_width,
             },

@@ -4,6 +4,7 @@ use crate::app::chrome::{
 };
 use crate::app::commands::{AppCommand, FileCommand, SearchCommand};
 use crate::app::platform;
+use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
 use crate::app::theme::{CAPTION_BUTTON_SIZE, CLOSE_HOVER_BG, action_bg, action_hover_bg};
 use eframe::egui;
@@ -17,24 +18,24 @@ pub(super) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut Scratch
     let left_buttons = [
         VerticalActionButton::new(
             egui_phosphor::regular::FOLDER_OPEN,
-            shortcut_tooltips::OPEN_FILE,
+            shortcut_tooltips::action(ui.ctx(), ShortcutAction::OpenFile, "Open File"),
             VerticalAction::OpenFile,
         ),
         VerticalActionButton::new(
             egui_phosphor::regular::FLOPPY_DISK,
-            shortcut_tooltips::SAVE,
+            shortcut_tooltips::action(ui.ctx(), ShortcutAction::SaveFile, "Save"),
             VerticalAction::SaveFile,
         ),
         VerticalActionButton::new(
             egui_phosphor::regular::MAGNIFYING_GLASS,
-            shortcut_tooltips::SEARCH,
+            shortcut_tooltips::action(ui.ctx(), ShortcutAction::OpenSearch, "Search"),
             VerticalAction::Search,
         ),
     ];
     let caption_buttons = [
         VerticalActionButton::new(
             egui_phosphor::regular::MINUS,
-            "Minimize",
+            "Minimize".to_owned(),
             VerticalAction::Minimize,
         ),
         VerticalActionButton::new(
@@ -43,12 +44,12 @@ pub(super) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut Scratch
             } else {
                 egui_phosphor::regular::SQUARE
             },
-            if maximized { "Restore" } else { "Maximize" },
+            if maximized { "Restore" } else { "Maximize" }.to_owned(),
             VerticalAction::ToggleMaximize,
         ),
         VerticalActionButton::new(
             egui_phosphor::regular::X,
-            "Close",
+            "Close".to_owned(),
             VerticalAction::CloseWindow,
         ),
     ];
@@ -152,15 +153,15 @@ fn vertical_primary_actions_layout(
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct VerticalActionButton {
     icon: &'static str,
-    tooltip: &'static str,
+    tooltip: String,
     action: VerticalAction,
 }
 
 impl VerticalActionButton {
-    fn new(icon: &'static str, tooltip: &'static str, action: VerticalAction) -> Self {
+    fn new(icon: &'static str, tooltip: String, action: VerticalAction) -> Self {
         Self {
             icon,
             tooltip,
@@ -274,14 +275,14 @@ fn render_button_group(
     button_size: egui::Vec2,
 ) {
     for button in buttons {
-        render_button(ui, app, *button, button_size);
+        render_button(ui, app, button, button_size);
     }
 }
 
 fn render_button(
     ui: &mut egui::Ui,
     app: &mut ScratchpadApp,
-    button: VerticalActionButton,
+    button: &VerticalActionButton,
     button_size: egui::Vec2,
 ) {
     let is_close = matches!(button.action, VerticalAction::CloseWindow);
@@ -302,7 +303,7 @@ fn render_button(
                 crate::app::theme::text_primary(ui),
                 egui::Color32::WHITE,
             ),
-            button.tooltip,
+            &button.tooltip,
         )
     } else {
         phosphor_button(
@@ -312,7 +313,7 @@ fn render_button(
             button_size,
             background,
             hover_background,
-            button.tooltip,
+            &button.tooltip,
         )
     };
     if response.clicked() {

@@ -10,6 +10,7 @@ use crate::app::app_state::{
 use crate::app::commands::{
     AppCommand, DialogCommand, EditCommand, SearchCommand, WorkspaceCommand,
 };
+use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
 use crate::app::theme::text_primary;
 use crate::app::ui::tile_header::TileAction;
@@ -310,7 +311,11 @@ fn render_split_primary_button(ui: &mut egui::Ui) -> bool {
         );
         paint_context_menu_row_label(ui, response.rect, Some(ARROWS_SPLIT), "Split", true);
         let clicked = response.clicked();
-        response.on_hover_text(shortcut_tooltips::SPLIT_RIGHT);
+        response.on_hover_text(shortcut_tooltips::action(
+            ui.ctx(),
+            ShortcutAction::SplitRight,
+            "Split Right",
+        ));
         clicked
     })
 }

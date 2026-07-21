@@ -1,6 +1,8 @@
 use crate::app::domain::SplitAxis;
+use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
 use crate::app::ui::tile_header::TileAction;
+use eframe::egui;
 use egui_phosphor::regular::{ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT, ARROW_UP};
 
 const DEFAULT_SPLIT_RATIO: f32 = 0.5;
@@ -61,24 +63,27 @@ fn split_direction_parts(direction: SplitDirection) -> (SplitAxis, bool) {
     }
 }
 
-pub(super) fn shortcut_tooltip_for_menu_label(label: &str) -> Option<&'static str> {
+pub(super) fn shortcut_tooltip_for_menu_label(ctx: &egui::Context, label: &str) -> Option<String> {
     match label {
-        "Undo" => Some(shortcut_tooltips::UNDO),
-        "Redo" => Some(shortcut_tooltips::REDO),
-        "History" => Some(shortcut_tooltips::HISTORY),
-        "Find" => Some(shortcut_tooltips::FIND),
-        "Replace" => Some(shortcut_tooltips::REPLACE),
-        "Right to Left" => Some(shortcut_tooltips::RIGHT_TO_LEFT),
-        "Left to Right" => Some(shortcut_tooltips::LEFT_TO_RIGHT),
-        "Control Chars" => Some(shortcut_tooltips::CONTROL_CHARS),
-        "Promote Tile" => Some(shortcut_tooltips::PROMOTE_TILE),
-        "Close Tile" => Some(shortcut_tooltips::CLOSE_TILE),
-        "Split Left" => Some(shortcut_tooltips::SPLIT_LEFT),
-        "Split Right" => Some(shortcut_tooltips::SPLIT_RIGHT),
-        "Split Up" => Some(shortcut_tooltips::SPLIT_UP),
-        "Split Down" => Some(shortcut_tooltips::SPLIT_DOWN),
-        _ => None,
+        "Undo" => return Some(shortcut_tooltips::UNDO.to_owned()),
+        "Redo" => return Some(shortcut_tooltips::REDO.to_owned()),
+        _ => {}
     }
+    let action = match label {
+        "History" => ShortcutAction::OpenTextHistory,
+        "Find" => ShortcutAction::OpenSearch,
+        "Replace" => ShortcutAction::OpenReplace,
+        "Right to Left" | "Left to Right" => ShortcutAction::ToggleReadingOrder,
+        "Control Chars" => ShortcutAction::ToggleControlChars,
+        "Promote Tile" => ShortcutAction::PromoteTileToTab,
+        "Close Tile" => ShortcutAction::CloseTile,
+        "Split Left" => ShortcutAction::SplitLeft,
+        "Split Right" => ShortcutAction::SplitRight,
+        "Split Up" => ShortcutAction::SplitUp,
+        "Split Down" => ShortcutAction::SplitDown,
+        _ => return None,
+    };
+    Some(shortcut_tooltips::action(ctx, action, label))
 }
 
 pub(super) fn should_activate_tile_on_secondary_click(
@@ -152,14 +157,17 @@ mod tests {
     #[test]
     fn shortcut_tooltip_lookup_covers_menu_commands() {
         assert_eq!(
-            shortcut_tooltip_for_menu_label("Undo"),
-            Some(shortcut_tooltips::UNDO)
+            shortcut_tooltip_for_menu_label(&eframe::egui::Context::default(), "Undo"),
+            Some(shortcut_tooltips::UNDO.to_owned())
+        );
+        assert!(
+            shortcut_tooltip_for_menu_label(&eframe::egui::Context::default(), "Split Down",)
+                .is_some_and(|tooltip| tooltip.ends_with(": Split Down"))
         );
         assert_eq!(
-            shortcut_tooltip_for_menu_label("Split Down"),
-            Some(shortcut_tooltips::SPLIT_DOWN)
+            shortcut_tooltip_for_menu_label(&eframe::egui::Context::default(), "No shortcut",),
+            None
         );
-        assert_eq!(shortcut_tooltip_for_menu_label("No shortcut"), None);
     }
 
     #[test]
