@@ -173,24 +173,29 @@ fn handle_key_event(
 }
 
 fn relevant_input_events(ui: &egui::Ui) -> Vec<RelevantInputEvent> {
-    ui.input(|input| {
+    // Collect while the input lock is held, then consult context data after it
+    // has been released. Both `Context::input` and `Context::data` lock the
+    // same egui context, so looking up the runtime keymap inside `ui.input`
+    // deadlocks the UI thread as soon as a key event arrives.
+    let mut events: Vec<_> = ui.input(|input| {
         input
             .events
             .iter()
             .filter_map(relevant_input_event)
-            .filter(|event| {
-                !matches!(
-                    event,
-                    RelevantInputEvent::Key(key_event)
-                        if crate::app::shortcut_tooltips::is_app_shortcut(
-                            ui.ctx(),
-                            key_event.modifiers,
-                            key_event.key,
-                        )
-                )
-            })
             .collect()
-    })
+    });
+    events.retain(|event| {
+        !matches!(
+            event,
+            RelevantInputEvent::Key(key_event)
+                if crate::app::shortcut_tooltips::is_app_shortcut(
+                    ui.ctx(),
+                    key_event.modifiers,
+                    key_event.key,
+                )
+        )
+    });
+    events
 }
 
 fn relevant_input_event(event: &egui::Event) -> Option<RelevantInputEvent> {
@@ -428,7 +433,10 @@ fn apply_cursor_update(
 mod tests {
     use super::{
         PressedKeyEvent, RelevantInputEvent, is_classic_undo_shortcut, relevant_input_event,
+        relevant_input_events,
     };
+    use crate::app::platform::PlatformProfile;
+    use crate::app::services::settings_store::ShortcutSettings;
     use eframe::egui;
 
     #[test]
@@ -481,5 +489,30 @@ mod tests {
             relevant_input_event(&event),
             Some(RelevantInputEvent::Key(_))
         ));
+    }
+
+    #[test]
+    fn runtime_app_shortcuts_are_filtered_after_releasing_the_input_lock() {
+        let ctx = egui::Context::default();
+        crate::app::shortcut_tooltips::sync_context(
+            &ctx,
+            PlatformProfile::LinuxGeneric,
+            &ShortcutSettings::default(),
+        );
+        let input = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::F,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::CTRL,
+            }],
+            ..Default::default()
+        };
+
+        let mut events = None;
+        let _ = ctx.run_ui(input, |ui| events = Some(relevant_input_events(ui)));
+
+        assert!(events.is_some_and(|events| events.is_empty()));
     }
 }

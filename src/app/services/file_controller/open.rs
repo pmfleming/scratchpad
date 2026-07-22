@@ -278,6 +278,15 @@ impl FileController {
                 .set_active_tab_index_clamped(app.tab_manager.tabs.len().saturating_sub(1));
             app.tab_manager.rebuild_buffer_tab_index();
             app.apply_current_tab_ordering();
+
+            // The newly selected tab is a metadata-only shell. Hydrate it before the
+            // first paint so large batches open on the most recently selected file
+            // instead of briefly presenting an empty editor, then run the same disk
+            // refresh used by ordinary tab activation.
+            let active_index = app.tab_manager.active_tab_index;
+            app.hydrate_tab_if_needed(active_index);
+            let _ = Self::refresh_active_buffer_disk_state(app);
+
             crate::app::app_state::settings_controller::activate_workspace_surface(app);
             crate::app::app_state::workspace::display_tabs::select_only_tab_slot(
                 app,

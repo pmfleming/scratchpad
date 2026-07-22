@@ -100,7 +100,7 @@ fn open_selected_paths_async_deduplicates_pending_path() {
 }
 
 #[test]
-fn large_open_batch_creates_cold_tabs_and_hydrates_on_activation() {
+fn large_open_batch_hydrates_most_recent_tab_before_returning() {
     let directory = tempfile::tempdir().unwrap();
     let paths = (0..super::LAZY_OPEN_BATCH_THRESHOLD)
         .map(|index| {
@@ -120,15 +120,8 @@ fn large_open_batch_creates_cold_tabs_and_hydrates_on_activation() {
 
     FileController::open_selected_paths_async(&mut app, paths.clone());
 
-    assert_eq!(app.tab_manager.cold_session_tabs().len(), paths.len());
     assert!(app.state.pending_open_file_paths.is_empty());
     let active_index = app.tab_manager.active_tab_index;
-    let active_text = app.tab_manager.tabs.as_slice()[active_index]
-        .active_buffer()
-        .text();
-    assert!(active_text.is_empty());
-
-    assert!(app.hydrate_tab_if_needed(active_index));
 
     assert_eq!(
         app.tab_manager.tabs.as_slice()[active_index]
