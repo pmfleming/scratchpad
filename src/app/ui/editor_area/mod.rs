@@ -312,7 +312,7 @@ fn render_leaf_tile(
         pane_path: path,
         rect,
         is_active: view_id == context.active_view_id,
-        can_close: context.leaf_count > 1,
+        multiple_tiles_visible: context.leaf_count > 1,
     };
     let app = &mut *context.app;
     let outcome = &mut *context.outcome;

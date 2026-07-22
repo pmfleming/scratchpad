@@ -151,7 +151,7 @@ fn render_tile_menu(
         actions.push(TileAction::Promote(request.view_id));
         ui.close();
     }
-    if menu_action_button(ui, "Close Tile", Some(X), request.can_close) {
+    if menu_action_button(ui, "Close Tile", Some(X), request.multiple_tiles_visible) {
         actions.push(TileAction::Close(request.view_id));
         ui.close();
     }

@@ -48,7 +48,7 @@ pub(super) struct TileRenderRequest {
     pub(super) pane_path: SplitPath,
     pub(super) rect: egui::Rect,
     pub(super) is_active: bool,
-    pub(super) can_close: bool,
+    pub(super) multiple_tiles_visible: bool,
 }
 
 pub(super) struct TileRenderState<'a> {
@@ -105,6 +105,7 @@ fn render_tile_contents(
         ui,
         request.rect,
         request.is_active,
+        request.multiple_tiles_visible,
         app.state.app_settings.platform_profile(),
     );
     if let Some(editor_response) = body_outcome.interaction_response.as_ref() {
@@ -139,7 +140,7 @@ fn render_tile_header(
             view_id: request.view_id,
             pane_path: request.pane_path.clone(),
             tile_rect: request.rect,
-            can_close: request.can_close,
+            can_close: request.multiple_tiles_visible,
         },
         &mut TileHeaderState {
             actions: state.actions,

@@ -36,21 +36,27 @@ pub(super) fn paint_tile_border(
     ui: &egui::Ui,
     rect: egui::Rect,
     is_active: bool,
+    multiple_tiles_visible: bool,
     profile: PlatformProfile,
 ) {
-    let stroke = tile_border_stroke(ui, is_active, profile);
+    let highlighted = active_tile_highlight_visible(is_active, multiple_tiles_visible);
+    let stroke = tile_border_stroke(ui, highlighted, profile);
     // Center shared-edge strokes so window and tab borders occupy the same line.
     ui.painter()
         .rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Middle);
 }
 
-fn tile_border_stroke(ui: &egui::Ui, is_active: bool, profile: PlatformProfile) -> egui::Stroke {
+fn active_tile_highlight_visible(is_active: bool, multiple_tiles_visible: bool) -> bool {
+    is_active && multiple_tiles_visible
+}
+
+fn tile_border_stroke(ui: &egui::Ui, highlighted: bool, profile: PlatformProfile) -> egui::Stroke {
     if resolved_profile(profile) == PlatformProfile::Hyprland
         && let Some(style) = crate::app::system_appearance::hyprland_border_style()
     {
         return egui::Stroke::new(
             style.width,
-            if is_active {
+            if highlighted {
                 style.active
             } else {
                 style.inactive
@@ -58,7 +64,7 @@ fn tile_border_stroke(ui: &egui::Ui, is_active: bool, profile: PlatformProfile) 
         );
     }
 
-    if is_active {
+    if highlighted {
         egui::Stroke::new(2.0, tab_selected_accent(ui))
     } else {
         egui::Stroke::new(1.0, border(ui).gamma_multiply(0.55))
@@ -73,5 +79,17 @@ pub(super) fn apply_tile_body_focus(
 ) {
     if body_focused && !is_active {
         actions.push(TileAction::Activate(view_id));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::active_tile_highlight_visible;
+
+    #[test]
+    fn active_highlight_requires_multiple_visible_tiles() {
+        assert!(!active_tile_highlight_visible(true, false));
+        assert!(active_tile_highlight_visible(true, true));
+        assert!(!active_tile_highlight_visible(false, true));
     }
 }
