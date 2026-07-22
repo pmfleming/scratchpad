@@ -4,10 +4,12 @@ use crate::app::shortcut_keymap::{
     KeyBinding, ShortcutAction, effective_bindings, key_event_matches_binding,
 };
 use eframe::egui;
+use std::borrow::Cow;
+use std::sync::Arc;
 
-#[derive(Clone)]
 struct RuntimeShortcuts {
     profile: PlatformProfile,
+    settings: ShortcutSettings,
     bindings: Vec<(ShortcutAction, Vec<KeyBinding>)>,
 }
 
@@ -15,11 +17,16 @@ impl RuntimeShortcuts {
     fn new(profile: PlatformProfile, settings: &ShortcutSettings) -> Self {
         Self {
             profile,
+            settings: settings.clone(),
             bindings: ShortcutAction::ALL
                 .iter()
                 .map(|action| (*action, effective_bindings(profile, settings, *action)))
                 .collect(),
         }
+    }
+
+    fn matches_source(&self, profile: PlatformProfile, settings: &ShortcutSettings) -> bool {
+        self.profile == profile && self.settings == *settings
     }
 
     fn bindings(&self, action: ShortcutAction) -> &[KeyBinding] {
@@ -41,20 +48,30 @@ fn runtime_id() -> egui::Id {
 }
 
 /// Publishes the current platform and user keymap for UI code and the editor.
-/// This is refreshed before controls are rendered each frame.
+/// Rebuilds the cached map only when its source settings change.
 pub(crate) fn sync_context(
     ctx: &egui::Context,
     profile: PlatformProfile,
     settings: &ShortcutSettings,
 ) {
     ctx.data_mut(|data| {
-        data.insert_temp(runtime_id(), RuntimeShortcuts::new(profile, settings));
+        let current = data.get_temp::<Arc<RuntimeShortcuts>>(runtime_id());
+        if current
+            .as_deref()
+            .is_some_and(|runtime| runtime.matches_source(profile, settings))
+        {
+            return;
+        }
+        data.insert_temp(
+            runtime_id(),
+            Arc::new(RuntimeShortcuts::new(profile, settings)),
+        );
     });
 }
 
-fn runtime_shortcuts(ctx: &egui::Context) -> RuntimeShortcuts {
+fn runtime_shortcuts(ctx: &egui::Context) -> Arc<RuntimeShortcuts> {
     ctx.data(|data| data.get_temp(runtime_id()))
-        .unwrap_or_default()
+        .unwrap_or_else(|| Arc::new(RuntimeShortcuts::default()))
 }
 
 /// Builds a tooltip from the binding that is actually active, including valid
@@ -108,6 +125,7 @@ pub(crate) fn format_bindings(profile: PlatformProfile, bindings: &[KeyBinding])
 }
 
 fn format_binding(profile: PlatformProfile, binding: KeyBinding) -> String {
+    let key = key_name(binding.key);
     let mut parts = Vec::with_capacity(5);
     if binding.modifiers.ctrl {
         parts.push("CTRL");
@@ -121,87 +139,30 @@ fn format_binding(profile: PlatformProfile, binding: KeyBinding) -> String {
     if binding.modifiers.mac_cmd {
         parts.push("CMD");
     } else if binding.modifiers.command {
-        parts.push(match resolved_profile(profile) {
-            PlatformProfile::Windows => "WIN",
-            PlatformProfile::Auto | PlatformProfile::LinuxGeneric | PlatformProfile::Hyprland => {
-                "SUPER"
-            }
-        });
+        parts.push(command_name(profile));
     }
-    parts.push(key_name(binding.key));
+    parts.push(key.as_ref());
     parts.join("+")
 }
 
-fn key_name(key: egui::Key) -> &'static str {
+fn command_name(profile: PlatformProfile) -> &'static str {
+    match resolved_profile(profile) {
+        PlatformProfile::Windows => "WIN",
+        PlatformProfile::Auto | PlatformProfile::LinuxGeneric | PlatformProfile::Hyprland => {
+            "SUPER"
+        }
+    }
+}
+
+fn key_name(key: egui::Key) -> Cow<'static, str> {
     match key {
-        egui::Key::ArrowDown => "DOWN",
-        egui::Key::ArrowLeft => "LEFT",
-        egui::Key::ArrowRight => "RIGHT",
-        egui::Key::ArrowUp => "UP",
-        egui::Key::Escape => "ESC",
-        egui::Key::Tab => "TAB",
-        egui::Key::Backspace => "BACKSPACE",
-        egui::Key::Enter => "ENTER",
-        egui::Key::Space => "SPACE",
-        egui::Key::Insert => "INSERT",
-        egui::Key::Delete => "DELETE",
-        egui::Key::Home => "HOME",
-        egui::Key::End => "END",
-        egui::Key::PageUp => "PAGE UP",
-        egui::Key::PageDown => "PAGE DOWN",
-        egui::Key::Minus => "-",
-        egui::Key::Plus => "+",
-        egui::Key::Equals => "=",
-        egui::Key::Comma => ",",
-        egui::Key::Num0 => "0",
-        egui::Key::Num1 => "1",
-        egui::Key::Num2 => "2",
-        egui::Key::Num3 => "3",
-        egui::Key::Num4 => "4",
-        egui::Key::Num5 => "5",
-        egui::Key::Num6 => "6",
-        egui::Key::Num7 => "7",
-        egui::Key::Num8 => "8",
-        egui::Key::Num9 => "9",
-        egui::Key::A => "A",
-        egui::Key::B => "B",
-        egui::Key::C => "C",
-        egui::Key::D => "D",
-        egui::Key::E => "E",
-        egui::Key::F => "F",
-        egui::Key::G => "G",
-        egui::Key::H => "H",
-        egui::Key::I => "I",
-        egui::Key::J => "J",
-        egui::Key::K => "K",
-        egui::Key::L => "L",
-        egui::Key::M => "M",
-        egui::Key::N => "N",
-        egui::Key::O => "O",
-        egui::Key::P => "P",
-        egui::Key::Q => "Q",
-        egui::Key::R => "R",
-        egui::Key::S => "S",
-        egui::Key::T => "T",
-        egui::Key::U => "U",
-        egui::Key::V => "V",
-        egui::Key::W => "W",
-        egui::Key::X => "X",
-        egui::Key::Y => "Y",
-        egui::Key::Z => "Z",
-        egui::Key::F1 => "F1",
-        egui::Key::F2 => "F2",
-        egui::Key::F3 => "F3",
-        egui::Key::F4 => "F4",
-        egui::Key::F5 => "F5",
-        egui::Key::F6 => "F6",
-        egui::Key::F7 => "F7",
-        egui::Key::F8 => "F8",
-        egui::Key::F9 => "F9",
-        egui::Key::F10 => "F10",
-        egui::Key::F11 => "F11",
-        egui::Key::F12 => "F12",
-        _ => "KEY",
+        egui::Key::Escape => Cow::Borrowed("ESC"),
+        egui::Key::PageUp => Cow::Borrowed("PAGE UP"),
+        egui::Key::PageDown => Cow::Borrowed("PAGE DOWN"),
+        egui::Key::Minus | egui::Key::Plus | egui::Key::Equals | egui::Key::Comma => {
+            Cow::Borrowed(key.symbol_or_name())
+        }
+        _ => Cow::Owned(key.name().to_ascii_uppercase()),
     }
 }
 
@@ -228,7 +189,11 @@ pub(crate) const UNDO: &str = "CTRL+Z: Undo";
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{action_for, is_app_shortcut, runtime_shortcuts, sync_context};
+    use crate::app::platform::PlatformProfile;
+    use crate::app::services::settings_store::ShortcutSettings;
+    use crate::app::shortcut_keymap::ShortcutAction;
+    use eframe::egui;
     use std::collections::BTreeMap;
 
     #[test]
@@ -270,6 +235,9 @@ mod tests {
             bindings: BTreeMap::from([("open_file".to_owned(), "ctrl+shift+p".to_owned())]),
         };
         sync_context(&ctx, PlatformProfile::Hyprland, &settings);
+        let cached = runtime_shortcuts(&ctx);
+        sync_context(&ctx, PlatformProfile::Hyprland, &settings);
+        assert!(std::sync::Arc::ptr_eq(&cached, &runtime_shortcuts(&ctx)));
 
         assert!(is_app_shortcut(
             &ctx,

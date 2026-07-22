@@ -480,6 +480,10 @@ fn parse_key_binding(raw: &str) -> Option<KeyBinding> {
 }
 
 fn normalized_token(token: &str) -> String {
+    let token = token.trim();
+    if token == "-" {
+        return token.to_owned();
+    }
     token
         .chars()
         .filter(|ch| !ch.is_whitespace() && *ch != '_' && *ch != '-')
@@ -488,71 +492,31 @@ fn normalized_token(token: &str) -> String {
 }
 
 fn parse_key_token(token: &str) -> Option<egui::Key> {
-    match token {
-        "a" => Some(egui::Key::A),
-        "b" => Some(egui::Key::B),
-        "c" => Some(egui::Key::C),
-        "d" => Some(egui::Key::D),
-        "e" => Some(egui::Key::E),
-        "f" => Some(egui::Key::F),
-        "g" => Some(egui::Key::G),
-        "h" => Some(egui::Key::H),
-        "i" => Some(egui::Key::I),
-        "j" => Some(egui::Key::J),
-        "k" => Some(egui::Key::K),
-        "l" => Some(egui::Key::L),
-        "m" => Some(egui::Key::M),
-        "n" => Some(egui::Key::N),
-        "o" => Some(egui::Key::O),
-        "p" => Some(egui::Key::P),
-        "q" => Some(egui::Key::Q),
-        "r" => Some(egui::Key::R),
-        "s" => Some(egui::Key::S),
-        "t" => Some(egui::Key::T),
-        "u" => Some(egui::Key::U),
-        "v" => Some(egui::Key::V),
-        "w" => Some(egui::Key::W),
-        "x" => Some(egui::Key::X),
-        "y" => Some(egui::Key::Y),
-        "z" => Some(egui::Key::Z),
-        "0" | "num0" => Some(egui::Key::Num0),
-        "1" | "num1" => Some(egui::Key::Num1),
-        "2" | "num2" => Some(egui::Key::Num2),
-        "3" | "num3" => Some(egui::Key::Num3),
-        "4" | "num4" => Some(egui::Key::Num4),
-        "5" | "num5" => Some(egui::Key::Num5),
-        "6" | "num6" => Some(egui::Key::Num6),
-        "7" | "num7" => Some(egui::Key::Num7),
-        "8" | "num8" => Some(egui::Key::Num8),
-        "9" | "num9" => Some(egui::Key::Num9),
-        "f1" => Some(egui::Key::F1),
-        "f2" => Some(egui::Key::F2),
-        "f3" => Some(egui::Key::F3),
-        "f4" => Some(egui::Key::F4),
-        "f5" => Some(egui::Key::F5),
-        "f6" => Some(egui::Key::F6),
-        "f7" => Some(egui::Key::F7),
-        "f8" => Some(egui::Key::F8),
-        "f9" => Some(egui::Key::F9),
-        "f10" => Some(egui::Key::F10),
-        "f11" => Some(egui::Key::F11),
-        "f12" => Some(egui::Key::F12),
-        "up" | "arrowup" => Some(egui::Key::ArrowUp),
-        "down" | "arrowdown" => Some(egui::Key::ArrowDown),
-        "left" | "arrowleft" => Some(egui::Key::ArrowLeft),
-        "right" | "arrowright" => Some(egui::Key::ArrowRight),
-        "escape" | "esc" => Some(egui::Key::Escape),
-        "enter" | "return" => Some(egui::Key::Enter),
-        "tab" => Some(egui::Key::Tab),
-        "backspace" => Some(egui::Key::Backspace),
-        "delete" | "del" => Some(egui::Key::Delete),
-        "space" => Some(egui::Key::Space),
-        "comma" | "," => Some(egui::Key::Comma),
-        "equals" | "equal" | "=" => Some(egui::Key::Equals),
-        "plus" => Some(egui::Key::Plus),
-        "minus" | "dash" => Some(egui::Key::Minus),
-        _ => None,
+    if let Some(digit) = token.strip_prefix("num")
+        && digit.len() == 1
+        && digit.as_bytes()[0].is_ascii_digit()
+    {
+        return egui::Key::from_name(digit);
     }
+
+    let canonical = match token {
+        "up" | "arrowup" => "ArrowUp",
+        "down" | "arrowdown" => "ArrowDown",
+        "left" | "arrowleft" => "ArrowLeft",
+        "right" | "arrowright" => "ArrowRight",
+        "esc" => "Escape",
+        "return" => "Enter",
+        "del" => "Delete",
+        "equal" => "Equals",
+        "dash" => "Minus",
+        _ => token,
+    };
+    egui::Key::from_name(canonical).or_else(|| {
+        egui::Key::ALL
+            .iter()
+            .copied()
+            .find(|key| key.name().eq_ignore_ascii_case(canonical))
+    })
 }
 
 #[cfg(test)]
@@ -633,6 +597,24 @@ mod tests {
             parse_key_binding("ctrl + shift + left"),
             Some(KeyBinding::new(super::CTRL_SHIFT, egui::Key::ArrowLeft))
         );
+    }
+
+    #[test]
+    fn key_parser_reuses_egui_names_and_keeps_supported_aliases() {
+        for (raw, expected) in [
+            ("f12", egui::Key::F12),
+            ("arrow-left", egui::Key::ArrowLeft),
+            ("esc", egui::Key::Escape),
+            ("return", egui::Key::Enter),
+            ("num7", egui::Key::Num7),
+            ("-", egui::Key::Minus),
+            ("dash", egui::Key::Minus),
+        ] {
+            assert_eq!(
+                parse_key_binding(raw).map(|binding| binding.key),
+                Some(expected)
+            );
+        }
     }
 
     #[test]

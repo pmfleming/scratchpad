@@ -17,7 +17,14 @@ pub(crate) fn show_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) -
 }
 
 pub(crate) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) -> bool {
-    vertical::show_vertical_primary_actions(ui, app)
+    let show_caption_buttons = platform::capabilities(app.state.app_settings.platform_profile())
+        .show_window_caption_buttons;
+    vertical::show_vertical_primary_actions(
+        ui,
+        app,
+        show_file_search_primary_actions(),
+        show_caption_buttons,
+    )
 }
 
 pub(super) fn show_file_search_primary_actions() -> bool {

@@ -3,122 +3,157 @@ use crate::app::chrome::{
     PhosphorButtonColors, phosphor_button, phosphor_button_with_hover_icon_color,
 };
 use crate::app::commands::{AppCommand, FileCommand, SearchCommand};
-use crate::app::platform;
 use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
 use crate::app::theme::{CAPTION_BUTTON_SIZE, CLOSE_HOVER_BG, action_bg, action_hover_bg};
 use eframe::egui;
+use std::borrow::Cow;
 
-pub(super) fn show_vertical_primary_actions(ui: &mut egui::Ui, app: &mut ScratchpadApp) -> bool {
-    let button_spacing = 4.0;
-    let button_size = CAPTION_BUTTON_SIZE;
-    let available_width = ui.available_width().max(button_size.x);
-    let maximized = ui.input(|input| input.viewport().maximized.unwrap_or(false));
-    let show_left_buttons = super::show_file_search_primary_actions();
-    let left_buttons = [
+const BUTTON_SPACING: f32 = 4.0;
+
+pub(super) fn show_vertical_primary_actions(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    show_file_buttons: bool,
+    show_caption_buttons: bool,
+) -> bool {
+    let file_buttons = show_file_buttons.then(|| file_action_buttons(ui.ctx()));
+    let caption_buttons = show_caption_buttons.then(|| caption_action_buttons(ui));
+    let left = file_buttons
+        .as_ref()
+        .map_or(&[][..], |buttons| &buttons[..]);
+    let right = caption_buttons
+        .as_ref()
+        .map_or(&[][..], |buttons| &buttons[..]);
+    if left.is_empty() && right.is_empty() {
+        return false;
+    }
+
+    render_vertical_actions(ui, app, left, right);
+    true
+}
+
+fn file_action_buttons(ctx: &egui::Context) -> [VerticalActionButton; 3] {
+    [
         VerticalActionButton::new(
             egui_phosphor::regular::FOLDER_OPEN,
-            shortcut_tooltips::action(ui.ctx(), ShortcutAction::OpenFile, "Open File"),
+            shortcut_tooltips::action(ctx, ShortcutAction::OpenFile, "Open File"),
             VerticalAction::OpenFile,
         ),
         VerticalActionButton::new(
             egui_phosphor::regular::FLOPPY_DISK,
-            shortcut_tooltips::action(ui.ctx(), ShortcutAction::SaveFile, "Save"),
+            shortcut_tooltips::action(ctx, ShortcutAction::SaveFile, "Save"),
             VerticalAction::SaveFile,
         ),
         VerticalActionButton::new(
             egui_phosphor::regular::MAGNIFYING_GLASS,
-            shortcut_tooltips::action(ui.ctx(), ShortcutAction::OpenSearch, "Search"),
+            shortcut_tooltips::action(ctx, ShortcutAction::OpenSearch, "Search"),
             VerticalAction::Search,
         ),
-    ];
-    let caption_buttons = [
+    ]
+}
+
+fn caption_action_buttons(ui: &egui::Ui) -> [VerticalActionButton; 3] {
+    let maximized = ui.input(|input| input.viewport().maximized.unwrap_or(false));
+    let (maximize_icon, maximize_tooltip) = if maximized {
+        (egui_phosphor::regular::COPY, "Restore")
+    } else {
+        (egui_phosphor::regular::SQUARE, "Maximize")
+    };
+    [
         VerticalActionButton::new(
             egui_phosphor::regular::MINUS,
-            "Minimize".to_owned(),
+            "Minimize",
             VerticalAction::Minimize,
         ),
         VerticalActionButton::new(
-            if maximized {
-                egui_phosphor::regular::COPY
-            } else {
-                egui_phosphor::regular::SQUARE
-            },
-            if maximized { "Restore" } else { "Maximize" }.to_owned(),
+            maximize_icon,
+            maximize_tooltip,
             VerticalAction::ToggleMaximize,
         ),
         VerticalActionButton::new(
             egui_phosphor::regular::X,
-            "Close".to_owned(),
+            "Close",
             VerticalAction::CloseWindow,
         ),
-    ];
-    let left_buttons = if show_left_buttons {
-        &left_buttons[..]
-    } else {
-        &[]
-    };
-    let right_buttons = if platform::capabilities(app.state.app_settings.platform_profile())
-        .show_window_caption_buttons
-    {
-        &caption_buttons[..]
-    } else {
-        &[]
-    };
+    ]
+}
 
-    if left_buttons.is_empty() && right_buttons.is_empty() {
-        return false;
-    }
-
-    match vertical_primary_actions_layout(
-        available_width,
+fn render_vertical_actions(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    left: &[VerticalActionButton],
+    right: &[VerticalActionButton],
+) {
+    let button_size = CAPTION_BUTTON_SIZE;
+    let layout = vertical_primary_actions_layout(
+        ui.available_width().max(button_size.x),
         button_size.x,
-        button_spacing,
-        left_buttons.len(),
-        right_buttons.len(),
-    ) {
+        BUTTON_SPACING,
+        left.len(),
+        right.len(),
+    );
+    match layout {
         VerticalPrimaryActionsLayout::SingleRow => {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = button_spacing;
-                render_button_group(ui, app, left_buttons, button_size);
-                if !right_buttons.is_empty() {
-                    let caption_width =
-                        row_width(right_buttons.len(), button_size.x, button_spacing);
-                    ui.add_space((ui.available_width() - caption_width).max(button_spacing));
-                    render_button_group(ui, app, right_buttons, button_size);
-                }
-            });
+            render_single_button_row(ui, app, left, right, button_size);
         }
         VerticalPrimaryActionsLayout::CaptionFirstRows { buttons_per_row } => {
-            if !right_buttons.is_empty() {
-                render_wrapped_button_section(
-                    ui,
-                    app,
-                    right_buttons,
-                    button_size,
-                    button_spacing,
-                    buttons_per_row,
-                    true,
-                );
-                if !left_buttons.is_empty() {
-                    ui.add_space(button_spacing);
-                }
-            }
-            if !left_buttons.is_empty() {
-                render_wrapped_button_section(
-                    ui,
-                    app,
-                    left_buttons,
-                    button_size,
-                    button_spacing,
-                    buttons_per_row,
-                    false,
-                );
-            }
+            render_caption_first_rows(ui, app, left, right, button_size, buttons_per_row);
         }
     }
+}
 
-    true
+fn render_single_button_row(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    left: &[VerticalActionButton],
+    right: &[VerticalActionButton],
+    button_size: egui::Vec2,
+) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = BUTTON_SPACING;
+        render_button_group(ui, app, left, button_size);
+        if !right.is_empty() {
+            let caption_width = row_width(right.len(), button_size.x, BUTTON_SPACING);
+            ui.add_space((ui.available_width() - caption_width).max(BUTTON_SPACING));
+            render_button_group(ui, app, right, button_size);
+        }
+    });
+}
+
+fn render_caption_first_rows(
+    ui: &mut egui::Ui,
+    app: &mut ScratchpadApp,
+    left: &[VerticalActionButton],
+    right: &[VerticalActionButton],
+    button_size: egui::Vec2,
+    buttons_per_row: usize,
+) {
+    if !right.is_empty() {
+        render_wrapped_button_section(
+            ui,
+            app,
+            right,
+            button_size,
+            BUTTON_SPACING,
+            buttons_per_row,
+            true,
+        );
+        if !left.is_empty() {
+            ui.add_space(BUTTON_SPACING);
+        }
+    }
+    if !left.is_empty() {
+        render_wrapped_button_section(
+            ui,
+            app,
+            left,
+            button_size,
+            BUTTON_SPACING,
+            buttons_per_row,
+            false,
+        );
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -153,18 +188,21 @@ fn vertical_primary_actions_layout(
     }
 }
 
-#[derive(Clone)]
 struct VerticalActionButton {
     icon: &'static str,
-    tooltip: String,
+    tooltip: Cow<'static, str>,
     action: VerticalAction,
 }
 
 impl VerticalActionButton {
-    fn new(icon: &'static str, tooltip: String, action: VerticalAction) -> Self {
+    fn new(
+        icon: &'static str,
+        tooltip: impl Into<Cow<'static, str>>,
+        action: VerticalAction,
+    ) -> Self {
         Self {
             icon,
-            tooltip,
+            tooltip: tooltip.into(),
             action,
         }
     }
