@@ -39,15 +39,17 @@ pub(super) fn paint_tile_border(
     multiple_tiles_visible: bool,
     profile: PlatformProfile,
 ) {
-    let highlighted = active_tile_highlight_visible(is_active, multiple_tiles_visible);
+    let Some(highlighted) = tile_border_highlight_state(is_active, multiple_tiles_visible) else {
+        return;
+    };
     let stroke = tile_border_stroke(ui, highlighted, profile);
     // Center shared-edge strokes so window and tab borders occupy the same line.
     ui.painter()
         .rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Middle);
 }
 
-fn active_tile_highlight_visible(is_active: bool, multiple_tiles_visible: bool) -> bool {
-    is_active && multiple_tiles_visible
+fn tile_border_highlight_state(is_active: bool, multiple_tiles_visible: bool) -> Option<bool> {
+    multiple_tiles_visible.then_some(is_active)
 }
 
 fn tile_border_stroke(ui: &egui::Ui, highlighted: bool, profile: PlatformProfile) -> egui::Stroke {
@@ -84,12 +86,17 @@ pub(super) fn apply_tile_body_focus(
 
 #[cfg(test)]
 mod tests {
-    use super::active_tile_highlight_visible;
+    use super::tile_border_highlight_state;
 
     #[test]
-    fn active_highlight_requires_multiple_visible_tiles() {
-        assert!(!active_tile_highlight_visible(true, false));
-        assert!(active_tile_highlight_visible(true, true));
-        assert!(!active_tile_highlight_visible(false, true));
+    fn single_visible_tile_has_no_border() {
+        assert_eq!(tile_border_highlight_state(true, false), None);
+        assert_eq!(tile_border_highlight_state(false, false), None);
+    }
+
+    #[test]
+    fn multiple_visible_tiles_distinguish_active_border() {
+        assert_eq!(tile_border_highlight_state(true, true), Some(true));
+        assert_eq!(tile_border_highlight_state(false, true), Some(false));
     }
 }

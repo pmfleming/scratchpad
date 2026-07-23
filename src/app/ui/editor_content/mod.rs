@@ -69,7 +69,9 @@ pub(crate) fn render_editor_content(
 
 fn editor_content_margin(gutter: i8, show_line_numbers: bool) -> egui::Margin {
     egui::Margin {
-        left: if show_line_numbers { 0 } else { gutter },
+        // Keep a zero-width gutter from placing the cursor directly on the
+        // viewport clip edge, where its centered stroke would disappear.
+        left: if show_line_numbers { 0 } else { gutter.max(1) },
         right: gutter,
         top: gutter,
         bottom: gutter,
@@ -136,6 +138,19 @@ mod tests {
     #[test]
     fn content_margin_keeps_left_padding_without_line_numbers() {
         assert_eq!(editor_content_margin(32, false), egui::Margin::same(32));
+    }
+
+    #[test]
+    fn zero_gutter_keeps_cursor_inside_viewport_clip() {
+        assert_eq!(
+            editor_content_margin(0, false),
+            egui::Margin {
+                left: 1,
+                right: 0,
+                top: 0,
+                bottom: 0,
+            }
+        );
     }
 
     #[test]
