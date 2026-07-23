@@ -179,14 +179,14 @@ Local Windows installer packaging:
 ```powershell
 dotnet tool restore
 cargo build --release --locked
-.\scripts\package-windows-installer.ps1 -Version 0.40.0
+.\scripts\package-windows-installer.ps1 -Version 0.4.0
 ```
 
 Linux/Nix packaging entry points:
 
 ```sh
 cargo build --release --locked
-./scripts/package-linux-release.sh 0.40.0
+./scripts/package-linux-release.sh 0.4.0
 nix build .#scratchpad
 nix build .#scratchpad-hyprland
 nix run github:pmfleming/scratchpad#scratchpad-hyprland

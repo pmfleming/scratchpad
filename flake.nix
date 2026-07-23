@@ -63,7 +63,7 @@
 
       scratchpad = pkgs.rustPlatform.buildRustPackage {
         pname = "scratchpad";
-        version = "0.40.0";
+        version = "0.4.0";
         src = lib.cleanSource ./.;
 
         cargoLock.lockFile = ./Cargo.lock;
