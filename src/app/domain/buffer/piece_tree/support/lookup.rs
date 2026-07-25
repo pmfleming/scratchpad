@@ -132,7 +132,7 @@ fn scan_leaf_for_line_lookup(
         }
 
         if let Some(line_info) =
-            scan_piece_for_line_lookup(tree.piece_text(piece), safe_line, cursor)
+            scan_piece_for_line_lookup(&tree.piece_text(piece), safe_line, cursor)
         {
             return Some(line_info);
         }

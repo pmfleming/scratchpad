@@ -1,12 +1,15 @@
 use super::support::measure_text;
-use super::{ByteSpan, Piece, PieceBuffer, PieceProvenance, PieceSource};
+use super::{ByteSpan, Piece, PieceBuffer, PieceProvenance, PieceSource, PieceTreeText};
 use crate::app::domain::buffer::{accumulate_line_count, history::PieceProvenanceStore};
+use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 const FILE_CHUNK_BYTES: usize = 256 * 1024;
+const FILE_CHUNK_CACHE_BYTES: usize = 8 * 1024 * 1024;
+const FILE_CHUNK_CACHE_LIMIT: usize = FILE_CHUNK_CACHE_BYTES / FILE_CHUNK_BYTES;
 
 #[derive(Clone, Debug)]
 pub(super) struct PieceTreeStorage {
@@ -26,6 +29,7 @@ struct FileBackedOriginal {
     path: PathBuf,
     file: Mutex<File>,
     chunks: Vec<FileBackedChunk>,
+    cache: Mutex<FileChunkCache>,
     byte_len: usize,
 }
 
@@ -34,7 +38,42 @@ struct FileBackedChunk {
     logical_start: usize,
     file_offset: u64,
     byte_len: usize,
-    text: OnceLock<Arc<str>>,
+}
+
+#[derive(Debug, Default)]
+struct FileChunkCache {
+    loaded: HashMap<usize, Arc<String>>,
+    least_to_most_recent: VecDeque<usize>,
+}
+
+impl FileChunkCache {
+    fn get(&mut self, chunk_index: usize) -> Option<Arc<String>> {
+        let text = self.loaded.get(&chunk_index)?.clone();
+        self.touch(chunk_index);
+        Some(text)
+    }
+
+    fn insert(&mut self, chunk_index: usize, text: Arc<String>) -> Arc<String> {
+        self.loaded.insert(chunk_index, text.clone());
+        self.touch(chunk_index);
+        while self.loaded.len() > FILE_CHUNK_CACHE_LIMIT {
+            if let Some(evicted) = self.least_to_most_recent.pop_front() {
+                self.loaded.remove(&evicted);
+            }
+        }
+        text
+    }
+
+    fn touch(&mut self, chunk_index: usize) {
+        if let Some(position) = self
+            .least_to_most_recent
+            .iter()
+            .position(|cached| *cached == chunk_index)
+        {
+            self.least_to_most_recent.remove(position);
+        }
+        self.least_to_most_recent.push_back(chunk_index);
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,7 +129,6 @@ impl PieceTreeStorage {
                 logical_start,
                 file_offset: file_offset + logical_start as u64,
                 byte_len: bytes.len(),
-                text: OnceLock::new(),
             });
             logical_start += bytes.len();
         }
@@ -99,6 +137,7 @@ impl PieceTreeStorage {
             path: path.to_path_buf(),
             file: Mutex::new(File::open(path)?),
             chunks,
+            cache: Mutex::new(FileChunkCache::default()),
             byte_len: logical_start,
         };
         Ok((
@@ -135,10 +174,19 @@ impl PieceTreeStorage {
         match &self.original {
             OriginalTextStorage::Owned(_) => 0,
             OriginalTextStorage::FileBacked(original) => original
-                .chunks
-                .iter()
-                .filter(|chunk| chunk.text.get().is_some())
-                .count(),
+                .cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .loaded
+                .len(),
+        }
+    }
+
+    pub(super) fn file_chunk_cache_limit(&self) -> usize {
+        if self.is_file_backed() {
+            FILE_CHUNK_CACHE_LIMIT
+        } else {
+            0
         }
     }
 
@@ -159,12 +207,12 @@ impl PieceTreeStorage {
         self.add.is_empty()
     }
 
-    pub(super) fn text_for_span(&self, span: ByteSpan) -> &str {
-        let start = span.start_byte as usize;
-        let byte_len = span.byte_len as usize;
+    pub(super) fn text_for_span(&self, span: ByteSpan) -> PieceTreeText<'_> {
+        let start = usize::try_from(span.start_byte).expect("byte span start fits this platform");
+        let byte_len = usize::try_from(span.byte_len).expect("byte span length fits this platform");
         match span.buffer {
             PieceBuffer::Original => self.original_text_for_range(start, byte_len),
-            PieceBuffer::Add => &self.add[start..start + byte_len],
+            PieceBuffer::Add => PieceTreeText::borrowed(&self.add[start..start + byte_len]),
         }
     }
 
@@ -173,16 +221,20 @@ impl PieceTreeStorage {
         buffer: PieceBuffer,
         start_byte: usize,
         byte_len: usize,
-    ) -> &str {
+    ) -> PieceTreeText<'_> {
         match buffer {
             PieceBuffer::Original => self.original_text_for_range(start_byte, byte_len),
-            PieceBuffer::Add => &self.add[start_byte..start_byte + byte_len],
+            PieceBuffer::Add => {
+                PieceTreeText::borrowed(&self.add[start_byte..start_byte + byte_len])
+            }
         }
     }
 
-    fn original_text_for_range(&self, start_byte: usize, byte_len: usize) -> &str {
+    fn original_text_for_range(&self, start_byte: usize, byte_len: usize) -> PieceTreeText<'_> {
         match &self.original {
-            OriginalTextStorage::Owned(text) => &text[start_byte..start_byte + byte_len],
+            OriginalTextStorage::Owned(text) => {
+                PieceTreeText::borrowed(&text[start_byte..start_byte + byte_len])
+            }
             OriginalTextStorage::FileBacked(original) => {
                 original.text_for_range(start_byte, byte_len)
             }
@@ -237,7 +289,7 @@ impl PieceTreeStorage {
 }
 
 impl FileBackedOriginal {
-    fn text_for_range(&self, start_byte: usize, byte_len: usize) -> &str {
+    fn text_for_range(&self, start_byte: usize, byte_len: usize) -> PieceTreeText<'static> {
         let chunk_index = self
             .chunks
             .partition_point(|chunk| chunk.logical_start <= start_byte)
@@ -245,11 +297,22 @@ impl FileBackedOriginal {
         let chunk = &self.chunks[chunk_index];
         let relative_start = start_byte.saturating_sub(chunk.logical_start);
         debug_assert!(relative_start + byte_len <= chunk.byte_len);
-        let text = chunk.text.get_or_init(|| self.load_chunk(chunk));
-        &text[relative_start..relative_start + byte_len]
+        let text = self.cached_chunk(chunk_index, chunk);
+        PieceTreeText::shared(text, relative_start..relative_start + byte_len)
     }
 
-    fn load_chunk(&self, chunk: &FileBackedChunk) -> Arc<str> {
+    fn cached_chunk(&self, chunk_index: usize, chunk: &FileBackedChunk) -> Arc<String> {
+        let mut cache = self
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(text) = cache.get(chunk_index) {
+            return text;
+        }
+        cache.insert(chunk_index, self.load_chunk(chunk))
+    }
+
+    fn load_chunk(&self, chunk: &FileBackedChunk) -> Arc<String> {
         let mut bytes = vec![0; chunk.byte_len];
         let mut file = self
             .file
@@ -268,7 +331,7 @@ impl FileBackedOriginal {
                 self.path.display()
             )
         });
-        Arc::from(text.into_boxed_str())
+        Arc::new(text)
     }
 }
 
@@ -333,7 +396,7 @@ fn append_sample(sample: &mut String, text: &str, sample_limit: usize) {
 pub(super) fn add_byte_span(start_byte: usize, byte_len: usize) -> ByteSpan {
     ByteSpan {
         buffer: PieceBuffer::Add,
-        start_byte: start_byte.min(u32::MAX as usize) as u32,
-        byte_len: byte_len.min(u32::MAX as usize) as u32,
+        start_byte: start_byte as u64,
+        byte_len: byte_len as u64,
     }
 }

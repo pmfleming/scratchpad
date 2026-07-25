@@ -141,9 +141,9 @@ impl TextFormatMetadata {
         had_replacements
     }
 
-    pub fn has_non_compliant_characters_spans<'a>(
+    pub fn has_non_compliant_characters_spans(
         &self,
-        spans: impl Iterator<Item = &'a str>,
+        spans: impl Iterator<Item = impl AsRef<str>>,
     ) -> bool {
         let Some(encoding) = Encoding::for_label(self.encoding_name.as_bytes()) else {
             return true;
@@ -156,7 +156,7 @@ impl TextFormatMetadata {
         let mut encoder = encoding.new_encoder();
         let mut dst = [0u8; 4096];
         for span in spans {
-            let mut src = span;
+            let mut src = span.as_ref();
             loop {
                 let (result, read, _written, had_errors) =
                     encoder.encode_from_utf8(src, &mut dst, false);

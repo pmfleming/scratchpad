@@ -33,7 +33,7 @@ pub(super) fn search_target_ranges(
         .unwrap_or(0..snapshot.document_length().chars);
 
     if let Some(text) = snapshot.piece_tree().borrow_range(normalized.clone()) {
-        let outcome = search::search_program_interruptible(text, program, || {
+        let outcome = search::search_program_interruptible(&text, program, || {
             latest_generation.load(Ordering::Relaxed) == generation
         })?;
         debug_assert!(outcome.error.is_none());

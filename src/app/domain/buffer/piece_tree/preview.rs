@@ -33,7 +33,7 @@ pub(crate) fn previews_for_matches(
     }
 
     if let Some(text) = tree.borrow_range(0..tree.len_chars()) {
-        return previews_for_matches_in_contiguous_text(text, limited_ranges);
+        return previews_for_matches_in_contiguous_text(&text, limited_ranges);
     }
 
     previews_for_matches_in_piece_spans(tree, limited_ranges)

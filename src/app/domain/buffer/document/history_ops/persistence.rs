@@ -117,7 +117,7 @@ impl TextDocument {
     }
 
     fn export_history_edit(&self, edit: &PieceHistoryEdit) -> PersistedHistoryEdit {
-        edit.to_persisted(|span| self.content.piece_tree.text_for_span(span).to_owned())
+        edit.to_persisted(|span| self.content.piece_tree.text_for_span(span).to_string())
     }
 
     fn import_history_edit(

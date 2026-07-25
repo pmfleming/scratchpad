@@ -64,6 +64,8 @@ fn run_file_backed_open_first_visible_paint_cycle(path: &Path) -> StepOutcome {
             window.loaded_bytes, window.file_size_bytes, painted_rows
         ),
         manifest_size_bytes: None,
+        retained_file_chunks: None,
+        file_chunk_cache_limit: None,
     }
 }
 
@@ -76,6 +78,25 @@ fn run_large_utf8_load_cycle(path: &Path) -> StepOutcome {
             + buffer.document().piece_tree().metrics().newlines
             + buffer.line_count,
     ))
+}
+
+fn prepare_file_backed_cache_traversal(path: &Path) -> TextDocument {
+    FileService::read_file(path)
+        .expect("open file-backed cache fixture")
+        .document
+}
+
+fn run_file_backed_cache_traversal_cycle(document: &TextDocument) -> StepOutcome {
+    let tree = document.piece_tree();
+    let visited_bytes = tree
+        .spans_for_range(0..tree.len_chars())
+        .map(|span| black_box(span.text.len()))
+        .sum();
+    StepOutcome::file_chunks(
+        tree.loaded_file_chunk_count(),
+        tree.file_chunk_cache_limit(),
+        visited_bytes,
+    )
 }
 
 fn render_first_visible_text_paint(buffer: &BufferState) -> usize {
@@ -176,6 +197,8 @@ fn run_edited_buffer_search_preview_cycle(piece_count: usize) -> StepOutcome {
         result_unit: "previews",
         result_label: format!("{} previews from {} matches", previews.len(), matches.len()),
         manifest_size_bytes: None,
+        retained_file_chunks: None,
+        file_chunk_cache_limit: None,
     }
 }
 
@@ -221,6 +244,8 @@ fn run_provenance_retained_memory_cycle(edit_count: usize) -> StepOutcome {
             document.operation_undo_depth()
         ),
         manifest_size_bytes: None,
+        retained_file_chunks: None,
+        file_chunk_cache_limit: None,
     }
 }
 
@@ -307,6 +332,8 @@ fn run_fragmented_long_session_mutation_cycle(fragment_count: usize) -> StepOutc
             document.operation_undo_depth()
         ),
         manifest_size_bytes: None,
+        retained_file_chunks: None,
+        file_chunk_cache_limit: None,
     }
 }
 
@@ -337,6 +364,8 @@ fn run_tab_strip_frame_cycle(tab_count: usize) -> StepOutcome {
             total_ns / iterations as u128
         ),
         manifest_size_bytes: None,
+        retained_file_chunks: None,
+        file_chunk_cache_limit: None,
     }
 }
 
@@ -372,6 +401,8 @@ fn run_session_persist_cycle(store: &SessionStore, tabs: &[WorkspaceTab]) -> Ste
             ns_to_ms_label(profile.manifest_serialize_ns)
         ),
         manifest_size_bytes: Some(profile.manifest_size_bytes),
+        retained_file_chunks: None,
+        file_chunk_cache_limit: None,
     }
 }
 
@@ -389,6 +420,8 @@ fn run_session_restore_cycle(store: &SessionStore) -> StepOutcome {
             ns_to_ms_label(restore_profile.restore_reconstruction_ns)
         ),
         manifest_size_bytes: session_manifest_size(store),
+        retained_file_chunks: None,
+        file_chunk_cache_limit: None,
     }
 }
 

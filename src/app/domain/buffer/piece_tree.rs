@@ -16,8 +16,9 @@ pub(crate) use super::history::{ByteSpan, PieceProvenance, PieceSource};
 pub use anchor::{AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind};
 
 use std::io;
-use std::ops::Range;
+use std::ops::{Deref, Range};
 use std::path::Path;
+use std::sync::Arc;
 
 use anchor::{LeafAnchor, LeafId, PieceTreeAnchorState};
 use metrics::sum_node_metrics;
@@ -49,9 +50,82 @@ pub struct PieceTreeLineInfo {
     pub char_len: usize,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
+pub struct PieceTreeText<'a> {
+    storage: PieceTreeTextStorage<'a>,
+}
+
+#[derive(Clone, Debug)]
+enum PieceTreeTextStorage<'a> {
+    Borrowed(&'a str),
+    Owned(String),
+    Shared {
+        text: Arc<String>,
+        range: Range<usize>,
+    },
+}
+
+impl<'a> PieceTreeText<'a> {
+    fn borrowed(text: &'a str) -> Self {
+        Self {
+            storage: PieceTreeTextStorage::Borrowed(text),
+        }
+    }
+
+    fn shared(text: Arc<String>, range: Range<usize>) -> Self {
+        Self {
+            storage: PieceTreeTextStorage::Shared { text, range },
+        }
+    }
+
+    pub(crate) fn owned(text: String) -> Self {
+        Self {
+            storage: PieceTreeTextStorage::Owned(text),
+        }
+    }
+
+    fn slice(self, range: Range<usize>) -> Self {
+        match self.storage {
+            PieceTreeTextStorage::Borrowed(text) => Self::borrowed(&text[range]),
+            PieceTreeTextStorage::Owned(text) => Self::shared(Arc::new(text), range),
+            PieceTreeTextStorage::Shared { text, range: base } => {
+                Self::shared(text, base.start + range.start..base.start + range.end)
+            }
+        }
+    }
+
+    pub(crate) fn into_cow(self) -> std::borrow::Cow<'a, str> {
+        match self.storage {
+            PieceTreeTextStorage::Borrowed(text) => std::borrow::Cow::Borrowed(text),
+            PieceTreeTextStorage::Owned(text) => std::borrow::Cow::Owned(text),
+            PieceTreeTextStorage::Shared { text, range } => {
+                std::borrow::Cow::Owned(text[range].to_owned())
+            }
+        }
+    }
+}
+
+impl Deref for PieceTreeText<'_> {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        match &self.storage {
+            PieceTreeTextStorage::Borrowed(text) => text,
+            PieceTreeTextStorage::Owned(text) => text,
+            PieceTreeTextStorage::Shared { text, range } => &text[range.clone()],
+        }
+    }
+}
+
+impl AsRef<str> for PieceTreeText<'_> {
+    fn as_ref(&self) -> &str {
+        self
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct PieceTreeSpan<'a> {
-    pub text: &'a str,
+    pub text: PieceTreeText<'a>,
     pub char_start: usize,
     pub char_len: usize,
     pub byte_span: ByteSpan,
@@ -385,6 +459,11 @@ impl PieceTreeLite {
     }
 
     #[must_use]
+    pub fn file_chunk_cache_limit(&self) -> usize {
+        self.storage.file_chunk_cache_limit()
+    }
+
+    #[must_use]
     pub fn normalize_char_range(&self, range_chars: Range<usize>) -> Range<usize> {
         let start = range_chars.start.min(self.len_chars());
         let end = range_chars.end.min(self.len_chars());
@@ -483,10 +562,10 @@ impl PieceTreeLite {
     }
 
     #[must_use]
-    pub fn borrow_range(&self, range_chars: Range<usize>) -> Option<&str> {
+    pub fn borrow_range(&self, range_chars: Range<usize>) -> Option<PieceTreeText<'_>> {
         let normalized = self.normalize_char_range(range_chars);
         if normalized.is_empty() {
-            return Some("");
+            return Some(PieceTreeText::borrowed(""));
         }
 
         let mut spans = self.spans_for_range(normalized.clone());
@@ -514,7 +593,7 @@ impl PieceTreeLite {
     ) -> String {
         let mut result = String::with_capacity(capacity);
         for span in self.spans_for_range(range_chars) {
-            result.push_str(span.text);
+            result.push_str(&span.text);
         }
         result
     }
@@ -543,12 +622,12 @@ impl PieceTreeLite {
             }
 
             if span.char_len <= remaining {
-                result.push_str(span.text);
+                result.push_str(&span.text);
                 remaining -= span.char_len;
                 continue;
             }
 
-            let byte_end = byte_index_for_char_offset(span.text, remaining);
+            let byte_end = byte_index_for_char_offset(&span.text, remaining);
             result.push_str(&span.text[..byte_end]);
             truncated = true;
             break;

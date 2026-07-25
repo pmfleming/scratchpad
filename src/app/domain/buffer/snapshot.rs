@@ -228,7 +228,7 @@ impl DocumentSnapshot {
             .borrow_range(range_chars.clone())
             .map_or_else(
                 || Cow::Owned(self.flatten_range(range_chars)),
-                Cow::Borrowed,
+                |text| text.into_cow(),
             )
     }
 }

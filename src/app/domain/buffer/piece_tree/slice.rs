@@ -116,8 +116,8 @@ impl<'a> Iterator for PieceTreeSlice<'a> {
                     char_len: piece.char_len,
                     byte_span: ByteSpan {
                         buffer: piece.buffer,
-                        start_byte: piece.start_byte.min(u32::MAX as usize) as u32,
-                        byte_len: piece.byte_len.min(u32::MAX as usize) as u32,
+                        start_byte: piece.start_byte as u64,
+                        byte_len: piece.byte_len as u64,
                     },
                 });
             }
@@ -125,18 +125,18 @@ impl<'a> Iterator for PieceTreeSlice<'a> {
             let byte_range = if piece.is_ascii {
                 local_start..local_end
             } else {
-                byte_range_for_char_range(text, local_start, local_end)
+                byte_range_for_char_range(&text, local_start, local_end)
             };
             let start_byte = piece.start_byte + byte_range.start;
             let byte_len = byte_range.len();
             return Some(PieceTreeSpan {
-                text: &text[byte_range],
+                text: text.slice(byte_range),
                 char_start: piece_start_char + local_start,
                 char_len: local_end - local_start,
                 byte_span: ByteSpan {
                     buffer: piece.buffer,
-                    start_byte: start_byte.min(u32::MAX as usize) as u32,
-                    byte_len: byte_len.min(u32::MAX as usize) as u32,
+                    start_byte: start_byte as u64,
+                    byte_len: byte_len as u64,
                 },
             });
         }

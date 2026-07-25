@@ -42,8 +42,8 @@ pub(super) fn scan_text_with_workers(text: &str, workers: usize) -> Option<TextS
     Some(TextScanSummary::combine(summaries))
 }
 
-pub(super) fn scan_span_slice(spans: &[&str]) -> Option<TextScanSummary> {
-    let total_bytes = spans.iter().map(|span| span.len()).sum::<usize>();
+pub(super) fn scan_span_slice<T: AsRef<str> + Sync>(spans: &[T]) -> Option<TextScanSummary> {
+    let total_bytes = spans.iter().map(|span| span.as_ref().len()).sum::<usize>();
     if total_bytes < PARALLEL_TEXT_INSPECTION_MIN_BYTES {
         return None;
     }
@@ -51,8 +51,8 @@ pub(super) fn scan_span_slice(spans: &[&str]) -> Option<TextScanSummary> {
     scan_span_slice_with_workers(spans, workers)
 }
 
-pub(super) fn scan_span_slice_with_workers(
-    spans: &[&str],
+pub(super) fn scan_span_slice_with_workers<T: AsRef<str> + Sync>(
+    spans: &[T],
     workers: usize,
 ) -> Option<TextScanSummary> {
     if workers <= 1 {
@@ -64,7 +64,7 @@ pub(super) fn scan_span_slice_with_workers(
     thread::scope(|scope| {
         let mut handles = Vec::with_capacity(workers);
         for chunk in spans.chunks(chunk_size) {
-            handles.push(scope.spawn(move || TextScanSummary::scan_spans(chunk.iter().copied())));
+            handles.push(scope.spawn(move || TextScanSummary::scan_spans(chunk.iter())));
         }
         for handle in handles {
             if let Ok(summary) = handle.join() {

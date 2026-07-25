@@ -30,7 +30,7 @@ pub use history::{
 pub use piece_tree::{
     AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind, PieceTreeCharPosition,
     PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLineInfo, PieceTreeLite, PieceTreeMetrics,
-    PieceTreeSlice, PieceTreeSpan,
+    PieceTreeSlice, PieceTreeSpan, PieceTreeText,
 };
 pub use snapshot::{DocumentChunk, DocumentSnapshot};
 pub use state::{

@@ -173,10 +173,10 @@ pub(crate) fn preview_text(text: &str) -> String {
     preview
 }
 
-pub(crate) fn fingerprint_parts<'a>(parts: impl IntoIterator<Item = &'a str>) -> u64 {
+pub(crate) fn fingerprint_parts(parts: impl IntoIterator<Item = impl AsRef<str>>) -> u64 {
     let mut hasher = rustc_hash::FxHasher::default();
     for part in parts {
-        part.hash(&mut hasher);
+        part.as_ref().hash(&mut hasher);
         0xff_u8.hash(&mut hasher);
     }
     hasher.finish()

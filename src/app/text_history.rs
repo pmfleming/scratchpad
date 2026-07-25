@@ -68,14 +68,14 @@ fn first_text_pair(buffer: &BufferState, entry: &PieceHistoryEntry) -> (String, 
     let tree = buffer.document().piece_tree();
     match edit {
         PieceHistoryEdit::Inserted { span, .. } => {
-            (String::new(), tree.text_for_span(*span).to_owned())
+            (String::new(), tree.text_for_span(*span).to_string())
         }
         PieceHistoryEdit::Deleted { spans, .. } => (text_for_spans(buffer, spans), String::new()),
         PieceHistoryEdit::Replaced {
             deleted, inserted, ..
         } => (
             text_for_spans(buffer, deleted),
-            tree.text_for_span(*inserted).to_owned(),
+            tree.text_for_span(*inserted).to_string(),
         ),
     }
 }
@@ -84,7 +84,7 @@ fn text_for_spans(buffer: &BufferState, spans: &[crate::app::domain::buffer::Byt
     let mut text = String::new();
     let tree = buffer.document().piece_tree();
     for span in spans {
-        text.push_str(tree.text_for_span(*span));
+        text.push_str(&tree.text_for_span(*span));
     }
     text
 }

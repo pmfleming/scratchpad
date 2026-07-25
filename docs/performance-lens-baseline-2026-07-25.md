@@ -35,6 +35,8 @@ The generated source of truth remains `target/analysis/performance_review.json`.
 - Frame histogram buckets now have 0.5 ms resolution and exact bucket-boundary handling instead of 1 ms resolution with boundary inflation.
 - Large files expose a bounded UTF-8-safe first-visible window while complete indexing runs on the existing background path; preview editing and saving are disabled until hydration replaces it.
 - Validated UTF-8 files at least 16 MiB use a true file-backed piece-tree: 256 KiB pieces retain file offsets and load source text chunks on first access instead of retaining the complete source string.
+- File-backed text now uses owned text handles over an 8 MiB (32 chunk) LRU cache, so traversal can evict cold chunks without exposing cache-owned long-lived `&str` values.
+- Piece/history byte spans now use `u64`, removing the roughly 4 GiB backing-store offset ceiling imposed by `u32` spans.
 - Large file batches hydrate the selected file first and construct inactive metadata-only shells on the path lane before one bulk installation.
 - Session persistence tracks snapshot revisions and skips rewriting unchanged private snapshots.
 - Added `promise_latency` Criterion coverage for 10,000-tab reorder, 128 MiB paste, 10,000-tab startup restore, and steady-state session persistence.
@@ -54,11 +56,12 @@ On this 16-thread Ryzen 7 PRO 8840HS, the 128 MiB paste insert diagnostic moved 
 - Session restore now requires authoritative speed evidence rather than passing solely because a 10,000-tab resource sample exists.
 - Many-file evidence separates first-visible latency from background shell completion and prepared full hydration.
 - Large-file evidence separately reports bounded first-visible decode/paint, background file indexing, and the now-diagnostic eager in-memory ingest path.
+- Resource evidence now separates file-backed traversal setup/indexing from the measured traversal and reports retained chunks, configured cache limit, and cache-bound violations directly.
 - Frame evidence distinguishes event-to-tessellation render preparation from GPU submission, compositor, present, and vsync work.
 
 ## Next priorities
 
-1. **Large Files:** the file-backed path now keeps peak heap near 10 MiB and indexes 1 GiB in about 1.7 s. Next add bounded chunk eviction and propagate backing-file mutation/read failures without panicking; the current lazy cache retains every chunk once touched.
+1. **Large Files:** the file-backed path keeps peak heap near 10 MiB, indexes 1 GiB in about 1.9 s, and retains 32 chunks (8 MiB) after a full 1 GiB traversal. Next detect backing-file replacement/in-place mutation and propagate lazy read failures without panicking. Exact UTF-8 validation and index construction still require one full-file scan.
 2. **Many Files:** cold-shell first-visible behavior passes at 10,000 files; next reduce the roughly 697 ms background shell completion and validate activation latency for randomly selected cold files.
 3. **Session restore:** add a cold/first-persist Criterion diagnostic alongside the passing steady-state persistence contract; the resource probe still measures about 4.9 s for the initial 10,000-tab snapshot set.
 4. **Frames:** the event-to-tessellation probe passes, but GPU upload/submission, compositor timing, present callbacks, and vsync pacing remain unmeasured.

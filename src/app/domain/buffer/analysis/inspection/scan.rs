@@ -26,8 +26,8 @@ impl TextInspection {
         TextScanSummary::scan_text(text).into_inspection(line_endings)
     }
 
-    pub(in crate::app::domain::buffer::analysis) fn inspect_span_refs<'a>(
-        spans: impl Iterator<Item = &'a str>,
+    pub(in crate::app::domain::buffer::analysis) fn inspect_span_refs(
+        spans: impl Iterator<Item = impl AsRef<str> + Sync>,
     ) -> Self {
         TextScanSummary::scan_span_refs(spans).into_inspection(None)
     }
@@ -157,22 +157,22 @@ impl TextScanSummary {
         parallel::scan_text_with_workers(text, workers)
     }
 
-    pub(super) fn scan_spans<'a>(spans: impl Iterator<Item = &'a str>) -> Self {
+    pub(super) fn scan_spans(spans: impl Iterator<Item = impl AsRef<str>>) -> Self {
         let mut state = InspectionState::new();
         for span in spans {
-            state.observe_text(span);
+            state.observe_text(span.as_ref());
         }
         state.finish_summary()
     }
 
-    pub(super) fn scan_span_refs<'a>(spans: impl Iterator<Item = &'a str>) -> Self {
+    pub(super) fn scan_span_refs(spans: impl Iterator<Item = impl AsRef<str> + Sync>) -> Self {
         let mut state = InspectionState::new();
         let mut total_bytes = 0usize;
         let mut spans = spans;
 
         while let Some(span) = spans.next() {
-            state.observe_text(span);
-            total_bytes += span.len();
+            state.observe_text(span.as_ref());
+            total_bytes += span.as_ref().len();
             if total_bytes >= parallel::parallel_inspection_min_bytes() {
                 let prefix = state.finish_summary();
                 let remaining = spans.collect::<Vec<_>>();
@@ -180,7 +180,7 @@ impl TextScanSummary {
                     return prefix;
                 }
                 let suffix = Self::scan_span_slice_parallel(&remaining)
-                    .unwrap_or_else(|| Self::scan_spans(remaining.iter().copied()));
+                    .unwrap_or_else(|| Self::scan_spans(remaining.iter()));
                 return Self::combine(vec![prefix, suffix]);
             }
         }
@@ -204,7 +204,7 @@ impl TextScanSummary {
         parallel::scan_text(text)
     }
 
-    fn scan_span_slice_parallel(spans: &[&str]) -> Option<Self> {
+    fn scan_span_slice_parallel<T: AsRef<str> + Sync>(spans: &[T]) -> Option<Self> {
         parallel::scan_span_slice(spans)
     }
 

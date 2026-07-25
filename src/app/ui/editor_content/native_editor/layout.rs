@@ -1,4 +1,5 @@
 use super::{TextEditOptions, highlighting};
+use crate::app::domain::buffer::PieceTreeText;
 use crate::app::domain::{
     BufferState, EditorViewState, LayoutCacheKey, SearchHighlightState, SearchReplacementPreview,
     ViewId,
@@ -7,7 +8,6 @@ use crate::app::services::settings_store::TabDisplayMode;
 use crate::app::ui::editor_content::extent;
 use crate::app::ui::widget_ids::{self, WidgetRole};
 use eframe::egui;
-use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -31,7 +31,7 @@ pub(super) struct EditorGalleyContext {
 }
 
 struct ViewportTextSlice<'a> {
-    text: Cow<'a, str>,
+    text: PieceTreeText<'a>,
     char_range: std::ops::Range<usize>,
     start_line: usize,
     display_column_base: usize,
@@ -231,10 +231,9 @@ fn viewport_text_slice(
         virtual_width = Some(window.virtual_width);
         char_range = window.char_range;
     }
-    let text = tree.borrow_range(char_range.clone()).map_or_else(
-        || Cow::Owned(tree.extract_range(char_range.clone())),
-        Cow::Borrowed,
-    );
+    let text = tree
+        .borrow_range(char_range.clone())
+        .unwrap_or_else(|| PieceTreeText::owned(tree.extract_range(char_range.clone())));
     ViewportTextSlice {
         text,
         char_range,

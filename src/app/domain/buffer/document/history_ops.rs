@@ -94,7 +94,7 @@ impl TextDocument {
                 deleted_text: self.text_for_spans(edit.deleted_spans()),
                 inserted_text: edit
                     .inserted_span()
-                    .map(|span| self.content.piece_tree.text_for_span(span).to_owned())
+                    .map(|span| self.content.piece_tree.text_for_span(span).to_string())
                     .unwrap_or_default(),
                 deleted_spans: edit.deleted_spans().to_vec(),
             })
@@ -233,7 +233,7 @@ impl TextDocument {
     fn text_for_spans(&self, spans: &[ByteSpan]) -> String {
         let mut text = String::new();
         for span in spans {
-            text.push_str(self.content.piece_tree.text_for_span(*span));
+            text.push_str(&self.content.piece_tree.text_for_span(*span));
         }
         text
     }

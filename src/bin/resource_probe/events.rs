@@ -17,6 +17,7 @@ struct ResourceEvent {
     workload_value: usize,
     workload_unit: &'static str,
     workload_label: String,
+    setup_elapsed_ns: u128,
     elapsed_ns: u128,
     allocated_bytes: u64,
     deallocated_bytes: u64,
@@ -29,6 +30,8 @@ struct ResourceEvent {
     result_unit: &'static str,
     result_label: String,
     manifest_size_bytes: Option<u64>,
+    retained_file_chunks: Option<usize>,
+    file_chunk_cache_limit: Option<usize>,
     status: &'static str,
     note: Option<String>,
 }
@@ -38,6 +41,8 @@ pub(super) struct StepOutcome {
     pub(super) result_unit: &'static str,
     pub(super) result_label: String,
     pub(super) manifest_size_bytes: Option<u64>,
+    pub(super) retained_file_chunks: Option<usize>,
+    pub(super) file_chunk_cache_limit: Option<usize>,
 }
 
 pub(super) struct StepDescriptor {
@@ -73,6 +78,25 @@ pub(super) fn emit_workload_steps(
 }
 
 pub(super) fn emit_step(step: StepDescriptor, run: impl FnOnce() -> StepOutcome) {
+    emit_step_with_setup(step, 0, run);
+}
+
+pub(super) fn emit_prepared_step<T>(
+    step: StepDescriptor,
+    setup: impl FnOnce() -> T,
+    run: impl FnOnce(&T) -> StepOutcome,
+) {
+    let setup_start = Instant::now();
+    let prepared = setup();
+    let setup_elapsed_ns = setup_start.elapsed().as_nanos();
+    emit_step_with_setup(step, setup_elapsed_ns, || run(&prepared));
+}
+
+fn emit_step_with_setup(
+    step: StepDescriptor,
+    setup_elapsed_ns: u128,
+    run: impl FnOnce() -> StepOutcome,
+) {
     reset_allocation_counters();
     let start = Instant::now();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));
@@ -92,6 +116,7 @@ pub(super) fn emit_step(step: StepDescriptor, run: impl FnOnce() -> StepOutcome)
         workload_value: step.workload_value,
         workload_unit: step.workload_unit,
         workload_label: step.workload_label,
+        setup_elapsed_ns,
         elapsed_ns,
         allocated_bytes: metrics.allocated_bytes,
         deallocated_bytes: metrics.deallocated_bytes,
@@ -104,6 +129,8 @@ pub(super) fn emit_step(step: StepDescriptor, run: impl FnOnce() -> StepOutcome)
         result_unit: outcome.result_unit,
         result_label: outcome.result_label,
         manifest_size_bytes: outcome.manifest_size_bytes,
+        retained_file_chunks: outcome.retained_file_chunks,
+        file_chunk_cache_limit: outcome.file_chunk_cache_limit,
         status,
         note,
     };
@@ -122,6 +149,8 @@ impl StepOutcome {
             result_unit: "items",
             result_label: format!("{value} items"),
             manifest_size_bytes: None,
+            retained_file_chunks: None,
+            file_chunk_cache_limit: None,
         }
     }
 
@@ -129,6 +158,19 @@ impl StepOutcome {
         Self {
             manifest_size_bytes,
             ..Self::items(value)
+        }
+    }
+
+    pub(super) fn file_chunks(retained: usize, limit: usize, visited_bytes: usize) -> Self {
+        Self {
+            result_value: visited_bytes,
+            result_unit: "bytes",
+            result_label: format!(
+                "visited {visited_bytes} bytes; retained {retained} of {limit} allowed chunks"
+            ),
+            manifest_size_bytes: None,
+            retained_file_chunks: Some(retained),
+            file_chunk_cache_limit: Some(limit),
         }
     }
 }

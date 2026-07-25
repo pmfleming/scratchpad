@@ -15,7 +15,7 @@ fn large_utf8_file_uses_lazy_file_backed_piece_tree_chunks() {
 
     assert!(tree.is_file_backed());
     assert_eq!(tree.loaded_file_chunk_count(), 0);
-    assert_eq!(tree.borrow_range(0..5), Some("alpha"));
+    assert_eq!(tree.borrow_range(0..5).as_deref(), Some("alpha"));
     assert_eq!(tree.loaded_file_chunk_count(), 1);
     let tail = tree.len_chars().saturating_sub(5)..tree.len_chars();
     assert_eq!(tree.extract_range(tail).chars().count(), 5);

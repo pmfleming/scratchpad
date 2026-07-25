@@ -122,6 +122,7 @@ impl TextDocument {
         text
     }
 
+    #[must_use]
     pub fn text_cow(&self) -> Cow<'_, str> {
         self.content
             .piece_tree
@@ -132,7 +133,7 @@ impl TextDocument {
                     capacity_metrics::record_full_text_flatten(text.len());
                     Cow::Owned(text)
                 },
-                Cow::Borrowed,
+                |text| text.into_cow(),
             )
     }
 

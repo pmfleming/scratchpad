@@ -4,6 +4,7 @@ use super::{
 };
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
+use std::io::Write;
 
 #[test]
 fn anchor_left_bias_stays_before_insertion_at_same_offset() {
@@ -71,6 +72,46 @@ fn anchor_stripped_clone_shares_original_text_storage() {
     assert_eq!(tree.anchor_position(anchor), Some(3));
     assert_eq!(clone.anchor_position(anchor), None);
     assert_eq!(clone.extract_text(), tree.extract_text());
+}
+
+#[test]
+fn file_backed_chunk_cache_is_bounded_without_invalidating_active_text() {
+    const CHUNK_BYTES: usize = 256 * 1024;
+    let mut file = tempfile::NamedTempFile::new().expect("create file-backed tree fixture");
+    let chunk = vec![b'a'; CHUNK_BYTES];
+    for _ in 0..40 {
+        file.write_all(&chunk).expect("write fixture chunk");
+    }
+    file.flush().expect("flush fixture");
+
+    let (tree, _, _) =
+        PieceTreeLite::from_utf8_file(file.path(), 0, 0).expect("construct file-backed tree");
+    let pinned = tree.borrow_range(0..1).expect("borrow first chunk");
+    for chunk_index in 1..40 {
+        let offset = chunk_index * CHUNK_BYTES;
+        assert_eq!(
+            tree.borrow_range(offset..offset + 1)
+                .expect("borrow cache probe")
+                .as_ref(),
+            "a"
+        );
+    }
+
+    assert_eq!(pinned.as_ref(), "a");
+    assert_eq!(
+        tree.loaded_file_chunk_count(),
+        tree.file_chunk_cache_limit()
+    );
+    assert_eq!(tree.file_chunk_cache_limit() * CHUNK_BYTES, 8 * 1024 * 1024);
+}
+
+#[test]
+fn byte_spans_preserve_offsets_beyond_four_gibibytes() {
+    let start = u32::MAX as usize + 17;
+    let span = super::storage::add_byte_span(start, 42);
+
+    assert_eq!(span.start_byte, start as u64);
+    assert_eq!(span.byte_len, 42);
 }
 
 #[test]
@@ -173,7 +214,7 @@ fn compact_add_buffer_preserves_visible_text_and_history_spans() {
     tree.compact_add_buffer(&mut spans);
 
     assert_eq!(tree.extract_text(), "aXXb");
-    assert_eq!(tree.text_for_span(spans[0]), "history");
+    assert_eq!(tree.text_for_span(spans[0]).as_ref(), "history");
     assert_eq!(
         tree.provenance_for_span(spans[0]).source,
         PieceSource::SearchReplace
@@ -190,7 +231,7 @@ fn compact_add_buffer_rewrites_provenance_for_relocated_history_spans() {
     tree.compact_add_buffer(&mut spans);
 
     assert_eq!(tree.extract_text(), "ab");
-    assert_eq!(tree.text_for_span(spans[0]), "history");
+    assert_eq!(tree.text_for_span(spans[0]).as_ref(), "history");
     assert_eq!(
         tree.provenance_for_span(spans[0]).source,
         PieceSource::SearchReplace

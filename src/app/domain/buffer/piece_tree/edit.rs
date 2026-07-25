@@ -3,7 +3,8 @@ mod rebalance;
 
 use super::{
     ByteSpan, LeafAddress, Piece, PieceBuffer, PieceSource, PieceTreeInternalNode, PieceTreeLeaf,
-    PieceTreeLite, build_chunked_pieces, byte_range_for_char_range, pack_pieces_into_leaves,
+    PieceTreeLite, PieceTreeText, build_chunked_pieces, byte_range_for_char_range,
+    pack_pieces_into_leaves,
 };
 use std::ops::Range;
 
@@ -77,7 +78,7 @@ impl PieceTreeLite {
     }
 
     #[must_use]
-    pub fn text_for_span(&self, span: ByteSpan) -> &str {
+    pub fn text_for_span(&self, span: ByteSpan) -> PieceTreeText<'_> {
         self.storage.text_for_span(span)
     }
 
@@ -138,7 +139,7 @@ impl PieceTreeLite {
         let byte_range = if piece.is_ascii {
             start_char..(start_char + char_len)
         } else {
-            byte_range_for_char_range(text, start_char, start_char + char_len)
+            byte_range_for_char_range(&text, start_char, start_char + char_len)
         };
         Piece::from_slice(
             piece.buffer,
@@ -147,7 +148,7 @@ impl PieceTreeLite {
         )
     }
 
-    pub(super) fn piece_text<'a>(&'a self, piece: &Piece) -> &'a str {
+    pub(super) fn piece_text<'a>(&'a self, piece: &Piece) -> PieceTreeText<'a> {
         self.storage
             .piece_text(piece.buffer, piece.start_byte, piece.byte_len)
     }

@@ -24,12 +24,12 @@ pub struct PieceProvenance {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ByteSpan {
     pub buffer: PieceBuffer,
-    pub start_byte: u32,
-    pub byte_len: u32,
+    pub start_byte: u64,
+    pub byte_len: u64,
 }
 
 impl ByteSpan {
-    pub fn byte_end(self) -> u32 {
+    pub fn byte_end(self) -> u64 {
         self.start_byte.saturating_add(self.byte_len)
     }
 }
@@ -39,7 +39,7 @@ pub(crate) const PIECE_PROVENANCE_ENTRY_LIMIT: usize = 16 * 1024;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct PieceProvenanceKey {
     buffer: PieceBuffer,
-    start_byte: u32,
+    start_byte: u64,
 }
 
 impl From<ByteSpan> for PieceProvenanceKey {
@@ -53,7 +53,7 @@ impl From<ByteSpan> for PieceProvenanceKey {
 
 #[derive(Clone, Copy, Debug)]
 struct PieceProvenanceEntry {
-    byte_len: u32,
+    byte_len: u64,
     provenance: PieceProvenance,
 }
 

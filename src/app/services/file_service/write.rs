@@ -135,7 +135,7 @@ fn write_snapshot_spans(
 ) -> io::Result<()> {
     let tree = snapshot.piece_tree();
     for span in tree.spans_for_range(0..tree.len_chars()) {
-        write_span(span.text)?;
+        write_span(&span.text)?;
     }
     Ok(())
 }
@@ -178,7 +178,7 @@ fn write_serialized_snapshot_spans(
     let mut serializer = NewlineSerializer::new(format.preferred_line_ending_style());
     let tree = snapshot.piece_tree();
     for span in tree.spans_for_range(0..tree.len_chars()) {
-        serializer.write_span(span.text, &mut write_span)?;
+        serializer.write_span(&span.text, &mut write_span)?;
     }
     serializer.finish(&mut write_span)
 }

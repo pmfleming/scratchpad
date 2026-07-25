@@ -1,10 +1,12 @@
 use super::events::{
-    StepDescriptor, StepOutcome, WorkloadSpec, emit_step, emit_workload_steps, human_bytes,
+    StepDescriptor, StepOutcome, WorkloadSpec, emit_prepared_step, emit_step, emit_workload_steps,
+    human_bytes,
 };
 use super::{
     GB, MB, SESSION_BYTES_PER_BUFFER, SessionStore, TAB_BYTES_PER_BUFFER, black_box, build_tabs,
-    combine_first_tabs, file_backed_open_max_bytes, run_anchor_heavy_view_edit_cycle,
-    run_edited_buffer_search_preview_cycle, run_file_backed_open_first_visible_paint_cycle,
+    combine_first_tabs, file_backed_open_max_bytes, prepare_file_backed_cache_traversal,
+    run_anchor_heavy_view_edit_cycle, run_edited_buffer_search_preview_cycle,
+    run_file_backed_cache_traversal_cycle, run_file_backed_open_first_visible_paint_cycle,
     run_fragmented_long_session_mutation_cycle, run_large_utf8_load_cycle,
     run_many_file_count_cycle, run_many_file_lazy_open_cycle, run_paste_cycle,
     run_provenance_retained_memory_cycle, run_search_app_result_cycle, run_search_file_size_cycle,
@@ -56,6 +58,22 @@ fn emit_large_utf8_load_peak_memory() {
             },
             || run_large_utf8_load_cycle(&path),
         );
+        if bytes <= GB {
+            emit_prepared_step(
+                StepDescriptor {
+                    scenario: "file_backed_chunk_cache_tracking",
+                    scenario_label: "File-backed full traversal bounded chunk cache",
+                    workload_family: "file-load",
+                    focus: "bounded-cache",
+                    step_index,
+                    workload_value: bytes,
+                    workload_unit: "bytes",
+                    workload_label: human_bytes(bytes),
+                },
+                || prepare_file_backed_cache_traversal(&path),
+                run_file_backed_cache_traversal_cycle,
+            );
+        }
     }
 
     let _ = std::fs::remove_dir_all(root);
