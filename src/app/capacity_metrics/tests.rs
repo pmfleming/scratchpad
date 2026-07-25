@@ -43,7 +43,8 @@ fn snapshot_reports_frame_time_summary_metrics() {
 
     let snapshot = capacity_metrics_snapshot();
     assert_eq!(snapshot.frame_time_mean_ns(), 2_000_000.0);
-    assert_eq!(snapshot.frame_time_percentile_ns(0.50), 2_000_000.0);
+    assert_eq!(snapshot.frame_time_percentile_ns(0.50), 1_000_000.0);
+    assert_eq!(snapshot.frame_time_percentile_ns(0.95), 3_000_000.0);
     assert_eq!(
         CapacityMetricsSnapshot::default().frame_time_percentile_ns(0.95),
         0.0

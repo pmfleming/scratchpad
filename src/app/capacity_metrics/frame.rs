@@ -8,7 +8,7 @@ use super::{
     reset_counters, saturating_u64, update_max,
 };
 
-const FRAME_HISTOGRAM_BUCKET_WIDTH_NS: u64 = 1_000_000;
+const FRAME_HISTOGRAM_BUCKET_WIDTH_NS: u64 = 500_000;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct FramePhaseMetricsSnapshot {
@@ -265,5 +265,6 @@ fn bucket_counts() -> [u64; FRAME_HISTOGRAM_BUCKETS] {
 }
 
 fn bucket_index(elapsed_ns: u64) -> usize {
-    ((elapsed_ns / FRAME_HISTOGRAM_BUCKET_WIDTH_NS) as usize).min(FRAME_HISTOGRAM_BUCKETS - 1)
+    ((elapsed_ns.saturating_sub(1) / FRAME_HISTOGRAM_BUCKET_WIDTH_NS) as usize)
+        .min(FRAME_HISTOGRAM_BUCKETS - 1)
 }

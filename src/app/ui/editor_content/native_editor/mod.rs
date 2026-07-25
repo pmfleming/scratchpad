@@ -312,6 +312,9 @@ fn handle_focused_keyboard_input(
     request: &EditorInputRequest<'_>,
     focused: bool,
 ) -> bool {
+    if buffer.is_loading_preview {
+        return false;
+    }
     focused
         && handle_keyboard_events(
             ui,
@@ -345,11 +348,12 @@ pub fn cut_selected_text(
     buffer: &mut BufferState,
     cursor: CursorRange,
 ) -> Option<(CursorRange, String)> {
-    (!cursor.is_empty()).then(|| editing::apply_cut(buffer, &cursor))
+    (!buffer.is_loading_preview && !cursor.is_empty()).then(|| editing::apply_cut(buffer, &cursor))
 }
 
 pub fn delete_selected_text(buffer: &mut BufferState, cursor: CursorRange) -> Option<CursorRange> {
-    (!cursor.is_empty()).then(|| editing::apply_delete_selection(buffer, &cursor))
+    (!buffer.is_loading_preview && !cursor.is_empty())
+        .then(|| editing::apply_delete_selection(buffer, &cursor))
 }
 
 pub(super) fn store_latest_snapshot(

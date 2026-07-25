@@ -33,6 +33,9 @@ pub struct BufferState {
     pub path_key: Option<CanonicalPathKey>,
     pub is_dirty: bool,
     pub is_settings_file: bool,
+    /// True while this buffer contains only the bounded first-visible prefix of
+    /// a large file and full hydration is still running.
+    pub is_loading_preview: bool,
     pub show_control_chars: bool,
     pub right_to_left_reading_order: bool,
     pub temp_id: String,
@@ -322,6 +325,10 @@ impl BufferState {
         self.replace_document_text(text, Some(format));
     }
 
+    pub fn mark_as_loading_preview(&mut self) {
+        self.is_loading_preview = true;
+    }
+
     pub fn replace_from_loaded_buffer(&mut self, loaded: BufferState) {
         let id = self.id;
         *self = loaded;
@@ -347,6 +354,9 @@ impl BufferState {
         previous_selection: CursorRange,
         next_selection: CursorRange,
     ) -> Result<(), TextReplacementError> {
+        if self.is_loading_preview {
+            return Err(TextReplacementError::InvalidRange);
+        }
         self.document.replace_char_ranges_with_undo(
             replacements,
             previous_selection,
@@ -441,6 +451,7 @@ impl BufferState {
             path_key: state.path_key,
             is_dirty: state.is_dirty,
             is_settings_file: false,
+            is_loading_preview: false,
             show_control_chars: state.show_control_chars,
             right_to_left_reading_order: state.right_to_left_reading_order,
             temp_id: state.temp_id,

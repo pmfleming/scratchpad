@@ -8,8 +8,8 @@ use crate::app::app_state::workspace::{
 };
 use crate::app::diagnostics;
 use crate::app::services::background_io::{
-    BackgroundIoRequest, BackgroundIoResult, BackgroundIoSendError, LoadedPathResult,
-    PathLoadRequest,
+    BackgroundIoRequest, BackgroundIoResult, BackgroundIoSendError, ColdFileShellResult,
+    LoadedPathResult, PathLoadRequest,
 };
 use crate::app::services::file_controller::FileController;
 use crate::app::services::session_manager;
@@ -76,6 +76,9 @@ impl ScratchpadApp {
                 results,
                 is_partial,
             } => self.apply_paths_loaded_result(request_id, results, is_partial),
+            BackgroundIoResult::ColdFileShellsBuilt { request_id, shells } => {
+                self.apply_cold_file_shells_built_result(request_id, shells);
+            }
             BackgroundIoResult::PathSaved {
                 request_id,
                 path,
@@ -139,6 +142,30 @@ impl ScratchpadApp {
                 self.apply_encoding_compliance_refreshed_result(
                     request_id, buffer_id, revision, result,
                 );
+            }
+        }
+    }
+
+    fn apply_cold_file_shells_built_result(
+        &mut self,
+        request_id: u64,
+        shells: Vec<ColdFileShellResult>,
+    ) {
+        match self
+            .state
+            .background_io
+            .remove_pending_background_action(request_id)
+        {
+            Some(PendingBackgroundAction::OpenTabs(action)) => {
+                FileController::apply_async_cold_file_shells_result(self, action, shells);
+            }
+            Some(action) => record_background_result_mismatch(
+                request_id,
+                PendingActionKind::OpenTabs,
+                Some(action.kind()),
+            ),
+            None => {
+                record_background_result_mismatch(request_id, PendingActionKind::OpenTabs, None);
             }
         }
     }

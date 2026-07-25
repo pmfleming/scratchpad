@@ -1,14 +1,19 @@
 use scratchpad::app::capacity_metrics::{
     CapacityMetricsSnapshot, capacity_metrics_snapshot, reset_capacity_metrics,
 };
-use scratchpad::app::domain::{BufferState, SearchHighlightState, SplitAxis, WorkspaceTab};
+use scratchpad::app::domain::{
+    BufferState, SearchHighlightState, SplitAxis, TabManager, WorkspaceTab,
+};
 use scratchpad::app::memory_budget::{self, MemoryBudgetSnapshot};
+use scratchpad::app::services::file_service::FileService;
 use scratchpad::app::services::search::{SearchMode, SearchOptions, SearchProgram, search_program};
 use scratchpad::app::ui::editor_content::{EditorHighlightStyle, build_layouter};
+use scratchpad::profile::run_many_file_first_visible_profile;
 use serde::Serialize;
 use std::hint::black_box;
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 const KB: usize = 1024;
@@ -16,9 +21,11 @@ const MB: usize = 1024 * KB;
 const GB: usize = 1024 * MB;
 const TAB_BYTES_PER_BUFFER: usize = 48 * KB;
 const MANY_FILE_BYTES_PER_BUFFER: usize = KB;
+const FIRST_VISIBLE_WINDOW_BYTES: usize = MB;
 const SPLIT_BYTES_PER_TILE: usize = 128 * KB;
 const VIEW_COUNT_BUFFER_BYTES: usize = MB;
 const BASE_PASTE_BUFFER_BYTES: usize = MB;
+const MEASUREMENT_REPETITIONS: usize = 3;
 const UTF8_SAMPLE_LINE: &str =
     "Scratchpad edits UTF-8: café résumé 東京 Привет مرحبا 0123456789.\n";
 const UTF8_SEARCH_UNIT: &str = "hay café 東京 Привет مرحبا hay\n";
@@ -29,16 +36,21 @@ struct CapacityEvent {
     scenario_label: &'static str,
     workload_family: &'static str,
     step_index: usize,
+    repeat_index: usize,
     workload_value: usize,
     workload_unit: &'static str,
     workload_label: String,
+    setup_elapsed_ns: u128,
     elapsed_ns: u128,
+    background_completion_ns: Option<u128>,
+    measurement_scope: &'static str,
     metrics: CapacityMetricsSnapshot,
     memory_budget: MemoryBudgetSnapshot,
     status: &'static str,
     note: Option<String>,
 }
 
+#[derive(Clone)]
 struct StepDescriptor {
     scenario: &'static str,
     scenario_label: &'static str,
@@ -58,8 +70,10 @@ struct SweepDescriptor {
 }
 
 fn main() {
+    emit_large_file_first_visible_sweep();
     emit_file_size_sweep();
     emit_text_layout_sweep();
+    emit_many_file_first_visible_sweep();
     emit_many_file_count_sweep();
     emit_search_file_size_sweep();
     emit_search_target_count_sweep();
@@ -69,27 +83,66 @@ fn main() {
     emit_paste_size_sweep();
 }
 
+fn emit_large_file_first_visible_sweep() {
+    let root = unique_probe_root("large-file-first-visible");
+    std::fs::create_dir_all(&root).expect("create large-file fixture root");
+    let fixture_chunk = exact_utf8_text_of_size(8 * MB);
+    let descriptor = SweepDescriptor::bytes(
+        "large_file_first_visible_ceiling",
+        "Large-file first-visible window sweep",
+        "file-load",
+    );
+
+    for (step_index, file_bytes) in [MB, 128 * MB, 512 * MB, GB].into_iter().enumerate() {
+        let path = root.join(format!("visible_{file_bytes}.txt"));
+        let setup_start = Instant::now();
+        write_large_text_fixture(&path, file_bytes, &fixture_chunk);
+        let setup_elapsed_ns = setup_start.elapsed().as_nanos();
+        for repeat_index in 0..MEASUREMENT_REPETITIONS {
+            emit_prepared_step(
+                StepDescriptor {
+                    scenario: descriptor.scenario,
+                    scenario_label: descriptor.scenario_label,
+                    workload_family: descriptor.workload_family,
+                    step_index,
+                    workload_value: file_bytes,
+                    workload_unit: descriptor.workload_unit,
+                    workload_label: (descriptor.workload_label)(file_bytes),
+                },
+                repeat_index,
+                setup_elapsed_ns,
+                || {
+                    let window =
+                        FileService::read_first_visible_window(&path, FIRST_VISIBLE_WINDOW_BYTES)
+                            .expect("decode first visible file window");
+                    black_box(window.text.len() + window.file_size_bytes as usize)
+                },
+            );
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn emit_file_size_sweep() {
-    emit_sweep(
+    emit_prepared_sweep(
         SweepDescriptor::bytes(
             "file_size_ceiling",
             "File size ceiling sweep",
             "capacity-stress",
         ),
         [MB, 8 * MB, 32 * MB, 128 * MB, 512 * MB, GB],
-        |bytes| {
-            let buffer = BufferState::new(
-                format!("file_size_{bytes}.txt"),
-                utf8_text_of_size(bytes),
-                None,
-            );
+        utf8_text_of_size,
+        |text| {
+            let bytes = text.len();
+            let buffer = BufferState::new(format!("file_size_{bytes}.txt"), text, None);
             buffer.line_count + buffer.document().piece_tree().len_bytes()
         },
     );
 }
 
 fn emit_text_layout_sweep() {
-    emit_sweep(
+    emit_prepared_sweep(
         SweepDescriptor::bytes("text_layout_ceiling", "Text Layout", "text-layout"),
         [
             64 * KB,
@@ -101,7 +154,8 @@ fn emit_text_layout_sweep() {
             64 * MB,
             128 * MB,
         ],
-        run_text_layout_capacity_cycle,
+        utf8_text_of_size,
+        |text| run_text_layout_capacity_cycle(&text),
     );
 }
 
@@ -116,49 +170,124 @@ fn emit_tab_count_sweep() {
         .into_iter()
         .enumerate()
     {
-        let mut tabs = build_tabs(tab_count, TAB_BYTES_PER_BUFFER);
-        emit_step(
-            StepDescriptor {
-                scenario: descriptor.scenario,
-                scenario_label: descriptor.scenario_label,
-                workload_family: descriptor.workload_family,
-                step_index,
-                workload_value: tab_count,
-                workload_unit: descriptor.workload_unit,
-                workload_label: (descriptor.workload_label)(tab_count),
-            },
-            || black_box(run_tab_capacity_cycle(&mut tabs)),
-        );
+        for repeat_index in 0..MEASUREMENT_REPETITIONS {
+            let setup_start = Instant::now();
+            let mut manager = TabManager::new();
+            manager.set_tabs(build_tabs(tab_count, TAB_BYTES_PER_BUFFER), 0);
+            let setup_elapsed_ns = setup_start.elapsed().as_nanos();
+            emit_prepared_step(
+                StepDescriptor {
+                    scenario: descriptor.scenario,
+                    scenario_label: descriptor.scenario_label,
+                    workload_family: descriptor.workload_family,
+                    step_index,
+                    workload_value: tab_count,
+                    workload_unit: descriptor.workload_unit,
+                    workload_label: (descriptor.workload_label)(tab_count),
+                },
+                repeat_index,
+                setup_elapsed_ns,
+                || black_box(run_tab_capacity_cycle(&mut manager)),
+            );
+        }
     }
 }
 
+fn emit_many_file_first_visible_sweep() {
+    let root = unique_probe_root("many-file-first-visible");
+    std::fs::create_dir_all(&root).expect("create many-file fixture root");
+    let descriptor = SweepDescriptor::count(
+        "many_file_first_visible_ceiling",
+        "Many-file first-visible workspace sweep",
+        "files",
+        files_label,
+    );
+
+    for (step_index, file_count) in [2_048usize, 10_000, 50_000].into_iter().enumerate() {
+        let fixture_root = root.join(format!("files_{file_count}"));
+        let setup_start = Instant::now();
+        std::fs::create_dir_all(&fixture_root).expect("create many-file fixture directory");
+        let paths = (0..file_count)
+            .map(|index| {
+                let path = fixture_root.join(format!("file_{index}.txt"));
+                std::fs::write(&path, format!("visible file {index}\n"))
+                    .expect("write many-file fixture");
+                path
+            })
+            .collect::<Vec<_>>();
+        let setup_elapsed_ns = setup_start.elapsed().as_nanos();
+
+        for repeat_index in 0..MEASUREMENT_REPETITIONS {
+            reset_capacity_metrics();
+            memory_budget::reset();
+            let profile = run_many_file_first_visible_profile(paths.clone());
+            black_box(profile.active_buffer_bytes + profile.tab_count_after_completion);
+            emit_recorded_step(
+                StepDescriptor {
+                    scenario: descriptor.scenario,
+                    scenario_label: descriptor.scenario_label,
+                    workload_family: descriptor.workload_family,
+                    step_index,
+                    workload_value: file_count,
+                    workload_unit: descriptor.workload_unit,
+                    workload_label: (descriptor.workload_label)(file_count),
+                },
+                repeat_index,
+                setup_elapsed_ns,
+                profile.first_visible_ns,
+                Some(profile.background_completion_ns),
+                "first_visible_before_background_completion",
+                Some(format!(
+                    "background completion {:.3} ms; {} tabs installed",
+                    profile.background_completion_ns as f64 / 1_000_000.0,
+                    profile.tab_count_after_completion
+                )),
+            );
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn emit_many_file_count_sweep() {
-    emit_sweep(
+    emit_prepared_sweep(
         SweepDescriptor::count(
-            "many_file_count_ceiling",
-            "Many-file workspace ceiling sweep",
+            "many_file_background_hydration_ceiling",
+            "Many-file background hydration completion sweep",
             "files",
             files_label,
         ),
-        [1_000usize, 10_000, 50_000],
-        run_many_file_capacity_cycle,
+        [2_048usize, 10_000, 50_000],
+        |file_count| {
+            (0..file_count)
+                .map(|index| {
+                    (
+                        format!("file_{index}.txt"),
+                        utf8_text_of_size(MANY_FILE_BYTES_PER_BUFFER),
+                        PathBuf::from(format!("file_{index}.txt")),
+                    )
+                })
+                .collect::<Vec<_>>()
+        },
+        run_many_file_background_hydration_cycle,
     );
 }
 
 fn emit_search_file_size_sweep() {
-    emit_sweep(
+    emit_prepared_sweep(
         SweepDescriptor::bytes(
             "search_file_size_ceiling",
             "Search file-size ceiling sweep",
             "capacity-stress",
         ),
         [MB, 64 * MB, 256 * MB, GB],
-        run_search_file_size_cycle,
+        search_text_of_size,
+        |text| run_search_file_size_cycle(&text),
     );
 }
 
 fn emit_search_target_count_sweep() {
-    emit_sweep(
+    emit_prepared_sweep(
         SweepDescriptor::count(
             "search_target_count_ceiling",
             "Search target-count ceiling sweep",
@@ -166,12 +295,13 @@ fn emit_search_target_count_sweep() {
             files_label,
         ),
         [100usize, 1_000, 10_000],
-        run_search_target_count_cycle,
+        |file_count| (file_count, search_text_of_size(4 * KB)),
+        |(file_count, target)| run_search_target_count_cycle(file_count, &target),
     );
 }
 
 fn emit_split_count_sweep() {
-    emit_sweep(
+    emit_prepared_sweep(
         SweepDescriptor::count(
             "split_count_ceiling",
             "Split count ceiling sweep",
@@ -179,12 +309,13 @@ fn emit_split_count_sweep() {
             splits_label,
         ),
         [4usize, 32, 128, 512, 1_000],
+        |split_count| build_tile_heavy_tab(split_count, SPLIT_BYTES_PER_TILE),
         run_split_capacity_cycle,
     );
 }
 
 fn emit_view_count_sweep() {
-    emit_sweep(
+    emit_prepared_sweep(
         SweepDescriptor::count(
             "view_count_ceiling",
             "View count ceiling sweep",
@@ -192,19 +323,30 @@ fn emit_view_count_sweep() {
             views_label,
         ),
         [32usize, 128, 512, 1_000],
+        build_view_heavy_tab,
         run_view_capacity_cycle,
     );
 }
 
 fn emit_paste_size_sweep() {
-    emit_sweep(
+    emit_prepared_sweep(
         SweepDescriptor::bytes(
             "paste_size_ceiling",
             "Paste size ceiling sweep",
             "capacity-stress",
         ),
-        [64 * KB, MB, 8 * MB, 64 * MB, 256 * MB, 512 * MB],
-        run_paste_capacity_cycle,
+        [64 * KB, MB, 8 * MB, 64 * MB, 128 * MB, 256 * MB, 512 * MB],
+        |insert_bytes| {
+            (
+                BufferState::new(
+                    "paste_capacity.txt".to_owned(),
+                    utf8_text_of_size(BASE_PASTE_BUFFER_BYTES),
+                    None,
+                ),
+                utf8_text_of_size(insert_bytes),
+            )
+        },
+        |(mut buffer, inserted)| run_paste_capacity_cycle(&mut buffer, &inserted),
     );
 }
 
@@ -239,28 +381,89 @@ impl SweepDescriptor {
     }
 }
 
-fn emit_sweep<const N: usize>(
+fn emit_prepared_sweep<T, const N: usize>(
     descriptor: SweepDescriptor,
     values: [usize; N],
-    run: impl Fn(usize) -> usize,
+    prepare: impl Fn(usize) -> T,
+    run: impl Fn(T) -> usize,
 ) {
     for (step_index, workload_value) in values.into_iter().enumerate() {
-        emit_step(
-            StepDescriptor {
-                scenario: descriptor.scenario,
-                scenario_label: descriptor.scenario_label,
-                workload_family: descriptor.workload_family,
-                step_index,
-                workload_value,
-                workload_unit: descriptor.workload_unit,
-                workload_label: (descriptor.workload_label)(workload_value),
-            },
-            || black_box(run(workload_value)),
-        );
+        let step = StepDescriptor {
+            scenario: descriptor.scenario,
+            scenario_label: descriptor.scenario_label,
+            workload_family: descriptor.workload_family,
+            step_index,
+            workload_value,
+            workload_unit: descriptor.workload_unit,
+            workload_label: (descriptor.workload_label)(workload_value),
+        };
+        for repeat_index in 0..MEASUREMENT_REPETITIONS {
+            let setup_start = Instant::now();
+            let workload = prepare(workload_value);
+            let setup_elapsed_ns = setup_start.elapsed().as_nanos();
+            emit_prepared_step(step.clone(), repeat_index, setup_elapsed_ns, || {
+                black_box(run(workload))
+            });
+        }
     }
 }
 
-fn emit_step(step: StepDescriptor, run: impl FnOnce() -> usize) {
+fn emit_prepared_step(
+    step: StepDescriptor,
+    repeat_index: usize,
+    setup_elapsed_ns: u128,
+    run: impl FnOnce() -> usize,
+) {
+    emit_measured_step(
+        step,
+        repeat_index,
+        setup_elapsed_ns,
+        "prepared_operation",
+        run,
+    );
+}
+
+fn emit_recorded_step(
+    step: StepDescriptor,
+    repeat_index: usize,
+    setup_elapsed_ns: u128,
+    elapsed_ns: u128,
+    background_completion_ns: Option<u128>,
+    measurement_scope: &'static str,
+    note: Option<String>,
+) {
+    let event = CapacityEvent {
+        scenario: step.scenario,
+        scenario_label: step.scenario_label,
+        workload_family: step.workload_family,
+        step_index: step.step_index,
+        repeat_index,
+        workload_value: step.workload_value,
+        workload_unit: step.workload_unit,
+        workload_label: step.workload_label,
+        setup_elapsed_ns,
+        elapsed_ns,
+        background_completion_ns,
+        measurement_scope,
+        metrics: capacity_metrics_snapshot(),
+        memory_budget: memory_budget::snapshot(),
+        status: "ok",
+        note,
+    };
+    println!(
+        "{}",
+        serde_json::to_string(&event).expect("serialize capacity event")
+    );
+    let _ = std::io::stdout().flush();
+}
+
+fn emit_measured_step(
+    step: StepDescriptor,
+    repeat_index: usize,
+    setup_elapsed_ns: u128,
+    measurement_scope: &'static str,
+    run: impl FnOnce() -> usize,
+) {
     reset_capacity_metrics();
     memory_budget::reset();
     let start = Instant::now();
@@ -278,10 +481,14 @@ fn emit_step(step: StepDescriptor, run: impl FnOnce() -> usize) {
         scenario_label: step.scenario_label,
         workload_family: step.workload_family,
         step_index: step.step_index,
+        repeat_index,
         workload_value: step.workload_value,
         workload_unit: step.workload_unit,
         workload_label: step.workload_label,
+        setup_elapsed_ns,
         elapsed_ns,
+        background_completion_ns: None,
+        measurement_scope,
         metrics,
         memory_budget: memory_budget_snapshot,
         status,
@@ -294,8 +501,7 @@ fn emit_step(step: StepDescriptor, run: impl FnOnce() -> usize) {
     let _ = std::io::stdout().flush();
 }
 
-fn run_text_layout_capacity_cycle(bytes: usize) -> usize {
-    let text = utf8_text_of_size(bytes);
+fn run_text_layout_capacity_cycle(text: &str) -> usize {
     let ctx = eframe::egui::Context::default();
     let font_id = eframe::egui::FontId::monospace(15.0);
     let highlight_style = EditorHighlightStyle::new(
@@ -316,7 +522,7 @@ fn run_text_layout_capacity_cycle(bytes: usize) -> usize {
             );
 
             for wrap_width in [980.0, 720.0, 520.0, 980.0] {
-                let galley = layouter(ui, &text, wrap_width);
+                let galley = layouter(ui, text, wrap_width);
                 total_rows += galley.rows.len().max(1);
             }
         });
@@ -325,20 +531,20 @@ fn run_text_layout_capacity_cycle(bytes: usize) -> usize {
     total_rows
 }
 
-fn run_tab_capacity_cycle(tabs: &mut Vec<WorkspaceTab>) -> usize {
-    let activations = split_tabs_once(tabs) + combine_first_tabs(tabs);
-    activations + tabs.len()
+fn run_tab_capacity_cycle(manager: &mut TabManager) -> usize {
+    let mut operations = split_tabs_once(&mut manager.tabs);
+    if manager.tabs.len() > 2 {
+        let last_index = manager.tabs.len() - 1;
+        operations += usize::from(manager.reorder_tab(1, last_index));
+        operations += usize::from(manager.reorder_tab(last_index, 1));
+    }
+    operations + manager.tabs.len()
 }
 
-fn run_many_file_capacity_cycle(file_count: usize) -> usize {
-    let buffers = (0..file_count)
-        .map(|index| {
-            BufferState::new(
-                format!("file_{index}.txt"),
-                utf8_text_of_size(MANY_FILE_BYTES_PER_BUFFER),
-                Some(std::path::PathBuf::from(format!("file_{index}.txt"))),
-            )
-        })
+fn run_many_file_background_hydration_cycle(files: Vec<(String, String, PathBuf)>) -> usize {
+    let buffers = files
+        .into_iter()
+        .map(|(name, text, path)| BufferState::new(name, text, Some(path)))
         .collect::<Vec<_>>();
     buffers
         .iter()
@@ -346,22 +552,20 @@ fn run_many_file_capacity_cycle(file_count: usize) -> usize {
         .sum()
 }
 
-fn run_search_file_size_cycle(bytes: usize) -> usize {
-    let text = search_text_of_size(bytes);
+fn run_search_file_size_cycle(text: &str) -> usize {
     let program = search_capacity_program();
-    search_program(black_box(&text), &program).matches.len()
+    search_program(black_box(text), &program).matches.len()
 }
 
-fn run_search_target_count_cycle(file_count: usize) -> usize {
+fn run_search_target_count_cycle(file_count: usize, target: &str) -> usize {
     let program = search_capacity_program();
-    let target = search_text_of_size(4 * KB);
     (0..file_count)
-        .map(|_| search_program(black_box(&target), &program).matches.len())
+        .map(|_| search_program(black_box(target), &program).matches.len())
         .sum()
 }
 
-fn run_split_capacity_cycle(split_count: usize) -> usize {
-    let mut tab = build_tile_heavy_tab(split_count, SPLIT_BYTES_PER_TILE);
+fn run_split_capacity_cycle(mut tab: WorkspaceTab) -> usize {
+    let split_count = tab.layout.views.len();
     let _ = tab.rebalance_views_equally();
     let _ = tab.split_active_view(SplitAxis::Vertical);
     if tab.layout.views.len() > split_count
@@ -372,7 +576,7 @@ fn run_split_capacity_cycle(split_count: usize) -> usize {
     tab.layout.views.len()
 }
 
-fn run_view_capacity_cycle(view_count: usize) -> usize {
+fn build_view_heavy_tab(view_count: usize) -> WorkspaceTab {
     let mut tab = WorkspaceTab::new(BufferState::new(
         "many_views.txt".to_owned(),
         utf8_text_of_size(VIEW_COUNT_BUFFER_BYTES),
@@ -385,19 +589,17 @@ fn run_view_capacity_cycle(view_count: usize) -> usize {
             SplitAxis::Horizontal
         });
     }
+    tab
+}
+
+fn run_view_capacity_cycle(mut tab: WorkspaceTab) -> usize {
     let _ = tab.rebalance_views_equally();
     tab.layout.views.len()
 }
 
-fn run_paste_capacity_cycle(insert_bytes: usize) -> usize {
-    let mut buffer = BufferState::new(
-        "paste_capacity.txt".to_owned(),
-        utf8_text_of_size(BASE_PASTE_BUFFER_BYTES),
-        None,
-    );
-    let inserted = utf8_text_of_size(insert_bytes);
+fn run_paste_capacity_cycle(buffer: &mut BufferState, inserted: &str) -> usize {
     let midpoint = buffer.document().piece_tree().len_chars() / 2;
-    buffer.document_mut().insert_direct(midpoint, &inserted);
+    buffer.document_mut().insert_direct(midpoint, inserted);
     buffer.refresh_text_metadata();
     buffer.line_count + buffer.document().piece_tree().len_bytes()
 }
@@ -428,30 +630,6 @@ fn split_tabs_once(tabs: &mut [WorkspaceTab]) -> usize {
     activations
 }
 
-fn combine_first_tabs(tabs: &mut Vec<WorkspaceTab>) -> usize {
-    if tabs.len() > 2 {
-        combine_tabs(tabs, 0, 1);
-        1
-    } else {
-        0
-    }
-}
-
-fn combine_tabs(tabs: &mut Vec<WorkspaceTab>, source_idx: usize, target_idx: usize) {
-    if source_idx == target_idx || source_idx >= tabs.len() || target_idx >= tabs.len() {
-        return;
-    }
-
-    let source_tab = tabs.remove(source_idx);
-    let adjusted_target_idx = if source_idx < target_idx {
-        target_idx - 1
-    } else {
-        target_idx
-    };
-    let target_tab = &mut tabs[adjusted_target_idx];
-    let _ = target_tab.combine_with_tab(source_tab, SplitAxis::Horizontal, false, 0.5);
-}
-
 fn build_tile_heavy_tab(tile_count: usize, bytes_per_tile: usize) -> WorkspaceTab {
     let mut tab = WorkspaceTab::new(BufferState::new(
         "tile_0.txt".to_owned(),
@@ -470,6 +648,45 @@ fn build_tile_heavy_tab(tile_count: usize, bytes_per_tile: usize) -> WorkspaceTa
 
 fn utf8_text_of_size(target_bytes: usize) -> String {
     repeat_unit_to_target_size(UTF8_SAMPLE_LINE, target_bytes)
+}
+
+fn exact_utf8_text_of_size(target_bytes: usize) -> String {
+    let mut text = utf8_text_of_size(target_bytes);
+    text.extend(std::iter::repeat_n(
+        ' ',
+        target_bytes.saturating_sub(text.len()),
+    ));
+    text
+}
+
+fn write_large_text_fixture(path: &Path, target_bytes: usize, chunk: &str) {
+    let file = std::fs::File::create(path).expect("create large text fixture");
+    let mut writer = BufWriter::with_capacity(8 * MB, file);
+    let mut remaining = target_bytes;
+    while remaining >= chunk.len() {
+        writer
+            .write_all(chunk.as_bytes())
+            .expect("write large text fixture chunk");
+        remaining -= chunk.len();
+    }
+    if remaining > 0 {
+        let tail = exact_utf8_text_of_size(remaining);
+        writer
+            .write_all(tail.as_bytes())
+            .expect("write final large text fixture chunk");
+    }
+    writer.flush().expect("flush large text fixture");
+}
+
+fn unique_probe_root(label: &str) -> PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "scratchpad-capacity-{label}-{}-{stamp}",
+        std::process::id()
+    ))
 }
 
 fn search_capacity_program() -> SearchProgram {

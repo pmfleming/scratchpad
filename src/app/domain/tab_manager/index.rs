@@ -11,6 +11,17 @@ impl TabManager {
         }
     }
 
+    pub(crate) fn append_cold_file_tabs(&mut self, tabs: Vec<(WorkspaceTab, ColdSessionTab)>) {
+        for (tab, cold_tab) in tabs {
+            self.tabs.push(tab);
+            let index = self.tabs.len() - 1;
+            self.cold_session_tabs.insert(index, cold_tab);
+            self.index_tab_buffers(index);
+        }
+        self.pending_scroll_to_active = true;
+        self.mark_session_dirty();
+    }
+
     pub(crate) fn take_cold_session_tab(&mut self, index: usize) -> Option<ColdSessionTab> {
         self.cold_session_tabs.remove(&index)
     }
@@ -98,6 +109,15 @@ impl TabManager {
         }
     }
 
+    pub(super) fn remap_tab_indices_after_reorder(&mut self, from_index: usize, to_index: usize) {
+        for tab_index in self.buffer_tab_index.values_mut() {
+            *tab_index = reordered_tab_index(*tab_index, from_index, to_index);
+        }
+        for (_, tab_index, _) in self.path_tab_index.values_mut() {
+            *tab_index = reordered_tab_index(*tab_index, from_index, to_index);
+        }
+    }
+
     pub(super) fn shift_cold_tab_indices(&mut self, start_index: usize, delta: isize) {
         let old = std::mem::take(&mut self.cold_session_tabs);
         for (tab_index, cold_tab) in old {
@@ -179,6 +199,18 @@ fn first_view_for_buffer(tab: &WorkspaceTab, buffer_id: BufferId) -> Option<View
         .iter()
         .find(|view| view.buffer_id == buffer_id)
         .map(|view| view.id)
+}
+
+fn reordered_tab_index(tab_index: usize, from_index: usize, to_index: usize) -> usize {
+    if tab_index == from_index {
+        to_index
+    } else if from_index < to_index && (from_index + 1..=to_index).contains(&tab_index) {
+        tab_index - 1
+    } else if to_index < from_index && (to_index..from_index).contains(&tab_index) {
+        tab_index + 1
+    } else {
+        tab_index
+    }
 }
 
 fn shifted_tab_index(

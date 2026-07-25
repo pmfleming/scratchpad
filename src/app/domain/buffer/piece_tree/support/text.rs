@@ -20,17 +20,10 @@ pub(in crate::app::domain::buffer::piece_tree) fn measure_text(text: &str) -> Pi
         };
     }
 
-    let mut char_len = 0usize;
-    let mut newline_count = 0usize;
-    for &byte in bytes {
-        char_len += usize::from((byte & 0b1100_0000) != 0b1000_0000);
-        newline_count += usize::from(byte == b'\n');
-    }
-
     PieceTextMetrics {
         byte_len,
-        char_len,
-        newline_count,
+        char_len: text.chars().count(),
+        newline_count: memchr_iter(b'\n', bytes).count(),
         is_ascii: false,
     }
 }

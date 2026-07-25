@@ -45,13 +45,26 @@ fn main() {
 }
 
 fn run_file_backed_open_first_visible_paint_cycle(path: &Path) -> StepOutcome {
-    let file = FileService::read_file(path).expect("open file through file service");
-    let disk_state = FileService::read_disk_state(path).ok();
-    let buffer = FileService::build_buffer_from_file_content(path, file, disk_state);
+    let window = FileService::read_first_visible_window(path, FIRST_VISIBLE_PAINT_MAX_CHARS)
+        .expect("read first visible file window");
+    let buffer = BufferState::new(
+        path.file_name().map_or_else(
+            || path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        ),
+        window.text,
+        Some(path.to_path_buf()),
+    );
     let painted_rows = render_first_visible_text_paint(&buffer);
-    StepOutcome::items(black_box(
-        buffer.document().piece_tree().len_bytes() + buffer.line_count + painted_rows,
-    ))
+    StepOutcome {
+        result_value: black_box(window.loaded_bytes + painted_rows),
+        result_unit: "bytes+rows",
+        result_label: format!(
+            "{} visible bytes painted from {} byte file in {} rows; full hydration deferred",
+            window.loaded_bytes, window.file_size_bytes, painted_rows
+        ),
+        manifest_size_bytes: None,
+    }
 }
 
 fn run_large_utf8_load_cycle(path: &Path) -> StepOutcome {

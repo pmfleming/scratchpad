@@ -1,0 +1,72 @@
+{
+  "tab_reorder_latency": {
+    "description": "Reorder a tab from near the start to the end and back as tab count grows.",
+    "workload_family": "tab-management",
+    "parameter_unit": "tabs",
+    "kind": "workflow",
+    "threshold_ms": 16.0,
+    "targets": [
+      "src/app/domain/tab_manager.rs",
+      "src/app/domain/tab_manager/index.rs"
+    ],
+    "limiting_resource_hint": "cpu"
+  },
+  "paste_insert_phase": {
+    "description": "Diagnostic insertion phase for a 128 MiB mixed UTF-8 paste, excluding fixture setup and metadata refresh.",
+    "workload_family": "edit-paste",
+    "parameter_unit": "bytes",
+    "kind": "diagnostic",
+    "targets": ["src/app/domain/buffer/piece_tree"],
+    "limiting_resource_hint": "cpu"
+  },
+  "paste_metadata_phase": {
+    "description": "Diagnostic synchronous metadata-refresh phase after a 128 MiB mixed UTF-8 paste.",
+    "workload_family": "edit-paste",
+    "parameter_unit": "bytes",
+    "kind": "diagnostic",
+    "targets": ["src/app/domain/buffer/state/metadata.rs"],
+    "limiting_resource_hint": "cpu"
+  },
+  "paste_stress_latency": {
+    "description": "Insert and synchronously refresh metadata for a 128 MiB mixed UTF-8 paste.",
+    "workload_family": "edit-paste",
+    "parameter_unit": "bytes",
+    "kind": "workflow",
+    "threshold_ms": 150.0,
+    "targets": [
+      "src/app/domain/buffer/document.rs",
+      "src/app/domain/buffer/state/metadata.rs",
+      "src/app/domain/buffer/piece_tree"
+    ],
+    "limiting_resource_hint": "cpu"
+  },
+  "session_restore_latency": {
+    "description": "Restore the startup-visible tab from a persisted 10,000-tab session.",
+    "workload_family": "session-persistence",
+    "parameter_unit": "tabs",
+    "kind": "workflow",
+    "threshold_ms": 180.0,
+    "targets": ["src/app/services/session_store"],
+    "limiting_resource_hint": "disk-io"
+  },
+  "session_restore_background_completion": {
+    "description": "Diagnostic completion latency for hydrating a persisted 10,000-tab session after startup-visible restore.",
+    "workload_family": "session-persistence",
+    "parameter_unit": "tabs",
+    "kind": "diagnostic",
+    "targets": ["src/app/services/session_store/restore.rs"],
+    "limiting_resource_hint": "disk-io"
+  },
+  "session_persist_latency": {
+    "description": "Steady-state background persistence latency for an unchanged 10,000-tab session; unchanged snapshots must not be rewritten.",
+    "workload_family": "session-persistence",
+    "parameter_unit": "tabs",
+    "kind": "workflow",
+    "threshold_ms": 180.0,
+    "targets": [
+      "src/app/services/session_store/capture.rs",
+      "src/app/services/session_store/ops.rs"
+    ],
+    "limiting_resource_hint": "disk-io"
+  }
+}

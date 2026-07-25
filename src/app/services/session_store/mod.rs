@@ -15,10 +15,11 @@ use ops::{
     write_session_manifest_profiled, write_session_snapshots,
 };
 use restore::RestoreSummary;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use types::{PreparedSessionPersist, RestoredTabs, StreamedTabs};
 
@@ -41,6 +42,7 @@ pub struct SessionStore {
     root: PathBuf,
     manifest_path: PathBuf,
     fallback_root: Option<PathBuf>,
+    persisted_snapshot_revisions: Arc<Mutex<HashMap<String, u64>>>,
 }
 
 impl Default for SessionStore {
@@ -57,6 +59,7 @@ impl SessionStore {
             root,
             manifest_path,
             fallback_root: None,
+            persisted_snapshot_revisions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -355,10 +358,44 @@ impl SessionStore {
         profile: &mut SessionPersistProfile,
     ) -> io::Result<HashSet<PathBuf>> {
         let snapshot_write_start = Instant::now();
+        let (snapshot_writes, unchanged_paths, written_revisions) =
+            self.changed_session_snapshot_writes(snapshot_writes);
         let mut active_temp_paths = write_session_snapshots(snapshot_writes)?;
+        active_temp_paths.extend(unchanged_paths);
         active_temp_paths.extend(preserved_snapshot_paths);
+        self.persisted_snapshot_revisions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend(written_revisions);
         profile.snapshot_write_ns = snapshot_write_start.elapsed().as_nanos();
         Ok(active_temp_paths)
+    }
+
+    fn changed_session_snapshot_writes(
+        &self,
+        snapshot_writes: Vec<SessionSnapshotWrite>,
+    ) -> (
+        Vec<SessionSnapshotWrite>,
+        HashSet<PathBuf>,
+        Vec<(String, u64)>,
+    ) {
+        let revisions = self
+            .persisted_snapshot_revisions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut changed = Vec::new();
+        let mut unchanged_paths = HashSet::new();
+        let mut written_revisions = Vec::new();
+        for write in snapshot_writes {
+            let revision = write.snapshot.revision();
+            if write.path.exists() && revisions.get(&write.temp_id).copied() == Some(revision) {
+                unchanged_paths.insert(write.path);
+            } else {
+                written_revisions.push((write.temp_id.clone(), revision));
+                changed.push(write);
+            }
+        }
+        (changed, unchanged_paths, written_revisions)
     }
 
     fn remove_stale_buffer_files_profiled(
@@ -541,7 +578,8 @@ fn session_manifest(
 
 #[cfg(test)]
 mod migration_tests {
-    use super::is_session_store_file;
+    use super::{SessionSnapshotWrite, SessionStore, is_session_store_file};
+    use crate::app::domain::TextDocument;
     use std::path::Path;
 
     #[test]
@@ -549,5 +587,39 @@ mod migration_tests {
         assert!(is_session_store_file(Path::new("session.json")));
         assert!(is_session_store_file(Path::new("buffer.tmp")));
         assert!(!is_session_store_file(Path::new("settings.toml")));
+    }
+
+    #[test]
+    fn unchanged_session_snapshot_is_not_rewritten() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SessionStore::new(directory.path().to_path_buf());
+        let path = directory.path().join("stable.tmp");
+        std::fs::write(&path, "stable").unwrap();
+        let mut document = TextDocument::new("stable".to_owned());
+        let revision = document.snapshot().revision();
+        store
+            .persisted_snapshot_revisions
+            .lock()
+            .unwrap()
+            .insert("stable".to_owned(), revision);
+
+        let (changed, unchanged, _) =
+            store.changed_session_snapshot_writes(vec![SessionSnapshotWrite {
+                temp_id: "stable".to_owned(),
+                path: path.clone(),
+                snapshot: document.snapshot(),
+            }]);
+        assert!(changed.is_empty());
+        assert!(unchanged.contains(&path));
+
+        document.insert_direct(document.piece_tree().len_chars(), " changed");
+        let (changed, unchanged, _) =
+            store.changed_session_snapshot_writes(vec![SessionSnapshotWrite {
+                temp_id: "stable".to_owned(),
+                path,
+                snapshot: document.snapshot(),
+            }]);
+        assert_eq!(changed.len(), 1);
+        assert!(unchanged.is_empty());
     }
 }

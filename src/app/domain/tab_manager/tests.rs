@@ -135,6 +135,14 @@ fn path_index_tracks_open_file_owners() {
         Some((1, second_view))
     );
 
+    assert!(manager.reorder_tab(0, 1));
+    assert_eq!(manager.find_tab_by_path(&first_path), Some((1, first_view)));
+    assert_eq!(
+        manager.find_tab_by_path(&second_path),
+        Some((0, second_view))
+    );
+    assert!(manager.reorder_tab(1, 0));
+
     manager.close_tab_internal(0);
 
     assert_eq!(manager.find_tab_by_path(&first_path), None);

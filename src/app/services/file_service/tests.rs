@@ -3,6 +3,36 @@ use crate::app::domain::{EncodingSource, LineEndingStyle, TextDocument, TextForm
 use std::io;
 
 #[test]
+fn first_visible_window_stops_on_a_utf8_boundary() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("large.txt");
+    std::fs::write(&path, "alpha café 東京 omega").unwrap();
+
+    let window = FileService::read_first_visible_window(&path, 9).unwrap();
+
+    assert_eq!(window.text, "alpha caf");
+    assert_eq!(window.loaded_bytes, 9);
+    assert_eq!(window.file_size_bytes, 24);
+    assert!(!window.complete);
+    assert!(!window.has_decoding_warnings);
+}
+
+#[test]
+fn cold_file_shell_retains_path_and_disk_length_without_text_ingest() {
+    let path = std::path::Path::new("large.txt");
+    let disk_state = crate::app::domain::DiskFileState {
+        modified_millis: Some(7),
+        len: 1024 * 1024 * 1024,
+    };
+
+    let shell = FileService::build_cold_file_shell(path, Some(disk_state.clone()));
+
+    assert_eq!(shell.path.as_deref(), Some(path));
+    assert_eq!(shell.disk_state, Some(disk_state));
+    assert_eq!(shell.document().piece_tree().len_bytes(), 0);
+}
+
+#[test]
 fn snapshot_save_applies_crlf_policy_for_utf8() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("crlf.txt");

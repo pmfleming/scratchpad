@@ -129,9 +129,15 @@ impl FileController {
     }
 
     fn can_save_existing_path(app: &mut ScratchpadApp, index: usize) -> bool {
-        let freshness = app.tab_manager.tabs.as_slice()[index]
-            .active_buffer()
-            .freshness;
+        let buffer = app.tab_manager.tabs.as_slice()[index].active_buffer();
+        if buffer.is_loading_preview {
+            app.state.status.set_info_status_in_domain(
+                StatusDomain::File,
+                "Wait for the large file to finish loading before saving.",
+            );
+            return false;
+        }
+        let freshness = buffer.freshness;
         if matches!(
             freshness,
             BufferFreshness::ConflictOnDisk

@@ -84,6 +84,28 @@ impl ScratchpadApp {
         });
     }
 
+    pub(crate) fn queue_background_cold_file_shells(
+        &mut self,
+        paths: Vec<PathBuf>,
+        action: PendingBackgroundAction,
+    ) {
+        if paths.is_empty() {
+            return;
+        }
+        let request_id = self.state.background_io.allocate_background_request_id();
+        self.state
+            .background_io
+            .insert_pending_background_action(request_id, action);
+        let request = BackgroundIoRequest::BuildColdFileShells { request_id, paths };
+        self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
+            let shells = request.into_cold_file_shell_results().unwrap_or_default();
+            app.apply_background_io_result(BackgroundIoResult::ColdFileShellsBuilt {
+                request_id,
+                shells,
+            });
+        });
+    }
+
     pub(crate) fn queue_background_path_load_with_encoding(
         &mut self,
         path: PathBuf,

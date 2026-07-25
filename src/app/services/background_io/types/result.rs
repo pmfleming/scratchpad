@@ -2,7 +2,9 @@ use crate::app::domain::buffer::BufferLength;
 use crate::app::domain::{
     BufferState, DiskFileState, TextArtifactSummary, TextFormatMetadata, WorkspaceTab,
 };
-use crate::app::services::session_store::{RestoreStatus, RestoredSession, SessionActiveSurface};
+use crate::app::services::session_store::{
+    ColdSessionTab, RestoreStatus, RestoredSession, SessionActiveSurface,
+};
 use crate::app::services::settings_store::AppSettings;
 use std::path::PathBuf;
 
@@ -14,6 +16,10 @@ pub(crate) enum BackgroundIoResult {
         /// `request_id`; the action stays in `pending_background_actions`.
         /// When false (terminal), the action is removed and finalized.
         is_partial: bool,
+    },
+    ColdFileShellsBuilt {
+        request_id: u64,
+        shells: Vec<ColdFileShellResult>,
     },
     PathSaved {
         request_id: u64,
@@ -59,6 +65,11 @@ pub(crate) enum BackgroundIoResult {
         revision: u64,
         result: Result<bool, String>,
     },
+}
+
+pub(crate) struct ColdFileShellResult {
+    pub(crate) path: PathBuf,
+    pub(crate) result: Result<(WorkspaceTab, ColdSessionTab), String>,
 }
 
 pub(crate) struct LoadedPathResult {

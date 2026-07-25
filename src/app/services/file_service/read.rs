@@ -1,4 +1,4 @@
-use super::{FileContent, STAGED_METADATA_SAMPLE_BYTES};
+use super::{FileContent, FileVisibleWindow, STAGED_METADATA_SAMPLE_BYTES};
 use crate::app::domain::buffer::{BufferTextMetadata, detected_text_format_and_metadata};
 use crate::app::domain::{EncodingSource, TextDocument};
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
@@ -63,6 +63,65 @@ pub(super) fn read_file_content(
         has_bom,
         encoding_source,
     ))
+}
+
+pub(super) fn read_first_visible_window(
+    path: &Path,
+    encoding: &'static Encoding,
+    has_bom: bool,
+    max_bytes: usize,
+) -> io::Result<FileVisibleWindow> {
+    const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
+
+    let file_size_bytes = File::open(path)?.metadata()?.len();
+    let file_size_for_platform = usize::try_from(file_size_bytes).unwrap_or(usize::MAX);
+    let read_limit = max_bytes.max(1).min(file_size_for_platform);
+    let mut bytes = Vec::with_capacity(read_limit);
+    File::open(path)?
+        .take(read_limit as u64)
+        .read_to_end(&mut bytes)?;
+    let loaded_bytes = bytes.len();
+    let complete = loaded_bytes as u64 >= file_size_bytes;
+    if bytes.contains(&0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Binary files are not supported",
+        ));
+    }
+    let without_bom = if has_bom && bytes.starts_with(UTF8_BOM) {
+        &bytes[UTF8_BOM.len()..]
+    } else {
+        &bytes
+    };
+
+    let (text, has_decoding_warnings) = if encoding == encoding_rs::UTF_8 {
+        match std::str::from_utf8(without_bom) {
+            Ok(text) => (text.to_owned(), false),
+            Err(error) if error.error_len().is_none() && !complete => (
+                std::str::from_utf8(&without_bom[..error.valid_up_to()])
+                    .expect("UTF-8 valid prefix")
+                    .to_owned(),
+                false,
+            ),
+            Err(_) => {
+                let (decoded, had_errors) = encoding.decode_without_bom_handling(without_bom);
+                (decoded.into_owned(), had_errors)
+            }
+        }
+    } else {
+        let (decoded, had_errors) = encoding.decode_without_bom_handling(without_bom);
+        (decoded.into_owned(), had_errors)
+    };
+
+    Ok(FileVisibleWindow {
+        text,
+        file_size_bytes,
+        loaded_bytes,
+        encoding_name: encoding.name().to_owned(),
+        has_bom,
+        has_decoding_warnings,
+        complete,
+    })
 }
 
 fn ensure_text_prefix(prefix: &[u8], has_bom: bool) -> io::Result<()> {

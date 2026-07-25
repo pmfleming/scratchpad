@@ -1,10 +1,11 @@
 use crate::app::services::background_io::{
-    BackgroundIoRequest, BackgroundIoResult, LoadedPathResult,
+    BackgroundIoRequest, BackgroundIoResult, ColdFileShellResult, LoadedPathResult,
 };
 use std::path::PathBuf;
 
 pub(super) trait BackgroundIoFallback {
     fn into_loaded_path_results(self) -> Option<Vec<LoadedPathResult>>;
+    fn into_cold_file_shell_results(self) -> Option<Vec<ColdFileShellResult>>;
     fn into_path_saved_result(self) -> BackgroundIoResult;
     fn into_restore_result(
         self,
@@ -35,6 +36,21 @@ impl BackgroundIoFallback for BackgroundIoRequest {
                         path: request.path().clone(),
                         disk_state: None,
                         result: Err("Background file loader unavailable.".to_owned()),
+                    })
+                    .collect(),
+            ),
+            _ => None,
+        }
+    }
+
+    fn into_cold_file_shell_results(self) -> Option<Vec<ColdFileShellResult>> {
+        match self {
+            BackgroundIoRequest::BuildColdFileShells { paths, .. } => Some(
+                paths
+                    .into_iter()
+                    .map(|path| ColdFileShellResult {
+                        path,
+                        result: Err("Background cold-file shell builder unavailable.".to_owned()),
                     })
                     .collect(),
             ),

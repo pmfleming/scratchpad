@@ -55,3 +55,8 @@ harness = false
 name = "frame_budget"
 path = "benches/frame_budget.rs"
 harness = false
+
+[[bench]]
+name = "promise_latency"
+path = "benches/promise_latency.rs"
+harness = false

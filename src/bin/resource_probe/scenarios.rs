@@ -65,8 +65,8 @@ fn emit_file_backed_open_allocations() {
         write_utf8_text_file(&path, bytes).expect("write probe file");
         emit_step(
             StepDescriptor {
-                scenario: "file_backed_open_first_visible_paint",
-                scenario_label: "File-backed open and first visible paint",
+                scenario: "large_file_first_visible_paint",
+                scenario_label: "Staged large-file first visible paint",
                 workload_family: "file-load",
                 focus: "first-paint",
                 step_index,

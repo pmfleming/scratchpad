@@ -6,7 +6,7 @@ use std::ops::Range;
 use std::thread;
 
 const PARALLEL_PIECE_BUILD_MIN_BYTES: usize = 4 * 1024 * 1024;
-const PARALLEL_PIECE_BUILD_MAX_WORKERS: usize = 8;
+const PARALLEL_PIECE_BUILD_MAX_WORKERS: usize = 16;
 
 pub(in crate::app::domain::buffer::piece_tree) fn build_root_from_pieces(
     pieces: Vec<Piece>,

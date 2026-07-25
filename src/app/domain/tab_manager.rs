@@ -194,7 +194,7 @@ impl TabManager {
             self.active_tab_index += 1;
         }
 
-        self.rebuild_buffer_tab_index();
+        self.remap_tab_indices_after_reorder(from_index, to_index);
         self.pending_scroll_to_active = true;
         self.mark_session_dirty();
         true

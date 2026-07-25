@@ -3,7 +3,7 @@ use std::ops::Range;
 use std::thread;
 
 const PARALLEL_TEXT_INSPECTION_MIN_BYTES: usize = 4 * 1024 * 1024;
-const PARALLEL_TEXT_INSPECTION_MAX_WORKERS: usize = 8;
+const PARALLEL_TEXT_INSPECTION_MAX_WORKERS: usize = 16;
 
 pub(super) fn parallel_inspection_min_bytes() -> usize {
     PARALLEL_TEXT_INSPECTION_MIN_BYTES

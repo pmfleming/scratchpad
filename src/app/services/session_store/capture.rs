@@ -82,10 +82,12 @@ impl CapturedSessionTab {
         let mut buffer_snapshots = Vec::new();
         for buffer in tab.buffers() {
             buffers.push(SessionBuffer::from(buffer));
-            buffer_snapshots.push(CapturedSessionBuffer {
-                temp_id: buffer.temp_id.clone(),
-                snapshot: buffer.document_snapshot(),
-            });
+            if !buffer.is_loading_preview {
+                buffer_snapshots.push(CapturedSessionBuffer {
+                    temp_id: buffer.temp_id.clone(),
+                    snapshot: buffer.document_snapshot(),
+                });
+            }
         }
 
         Self {
@@ -104,5 +106,26 @@ impl CapturedSessionTab {
             },
             buffer_snapshots,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CapturedSessionTab;
+    use crate::app::domain::{BufferState, WorkspaceTab};
+
+    #[test]
+    fn loading_preview_is_persisted_as_disk_backed_metadata_not_partial_text() {
+        let mut buffer = BufferState::new(
+            "large.txt".to_owned(),
+            "partial".to_owned(),
+            Some(std::path::PathBuf::from("large.txt")),
+        );
+        buffer.mark_as_loading_preview();
+
+        let captured = CapturedSessionTab::capture(&WorkspaceTab::new(buffer));
+
+        assert!(captured.buffer_snapshots.is_empty());
+        assert_eq!(captured.session_tab.buffers.len(), 1);
     }
 }

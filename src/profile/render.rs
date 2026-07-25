@@ -13,6 +13,13 @@ use eframe::{App, egui};
 use std::hint::black_box;
 use std::time::Instant;
 
+#[derive(Clone, Copy, Debug)]
+pub struct RenderPreparationSample {
+    pub elapsed_ns: u128,
+    pub primitive_count: usize,
+    pub vertex_count: usize,
+}
+
 pub struct UiRenderFrameHarness {
     app: ScratchpadApp,
     ctx: egui::Context,
@@ -50,6 +57,33 @@ impl UiRenderFrameHarness {
     }
 
     pub fn run_scroll_frame(&mut self) -> u128 {
+        let input = self.scroll_input();
+        self.run_with_input(input)
+    }
+
+    /// Measure from construction of a realistic wheel event through app update,
+    /// layout, paint command generation, and egui tessellation. GPU submission,
+    /// swap, compositor work, and present are deliberately outside this scope.
+    pub fn run_event_to_tessellation_scroll_frame(&mut self) -> RenderPreparationSample {
+        let started_at = Instant::now();
+        let input = self.scroll_input();
+        let output = self.run_ui_with_input(input);
+        let primitives = self.ctx.tessellate(output.shapes, output.pixels_per_point);
+        let vertex_count = primitives
+            .iter()
+            .map(|primitive| match &primitive.primitive {
+                egui::epaint::Primitive::Mesh(mesh) => mesh.vertices.len(),
+                egui::epaint::Primitive::Callback(_) => 0,
+            })
+            .sum();
+        RenderPreparationSample {
+            elapsed_ns: started_at.elapsed().as_nanos(),
+            primitive_count: primitives.len(),
+            vertex_count,
+        }
+    }
+
+    fn scroll_input(&self) -> egui::RawInput {
         let direction = if (self.frame_index / 30).is_multiple_of(2) {
             -1.0
         } else {
@@ -73,18 +107,23 @@ impl UiRenderFrameHarness {
             phase: egui::TouchPhase::Move,
             modifiers: egui::Modifiers::default(),
         });
-        self.run_with_input(input)
+        input
     }
 
     fn run_with_input(&mut self, input: egui::RawInput) -> u128 {
         let started_at = Instant::now();
-        let _ = self.ctx.run_ui(input, |ui| {
+        let _ = self.run_ui_with_input(input);
+        started_at.elapsed().as_nanos()
+    }
+
+    fn run_ui_with_input(&mut self, input: egui::RawInput) -> egui::FullOutput {
+        let output = self.ctx.run_ui(input, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 App::ui(&mut self.app, ui, &mut self.frame);
             });
         });
         self.frame_index += 1;
-        started_at.elapsed().as_nanos()
+        output
     }
 }
 

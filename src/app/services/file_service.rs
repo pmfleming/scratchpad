@@ -79,6 +79,18 @@ pub struct FileContent {
     pub(crate) text_metadata: BufferTextMetadata,
 }
 
+/// A bounded, decoded prefix used to make the first editor viewport available
+/// without ingesting the complete file into the piece tree.
+pub struct FileVisibleWindow {
+    pub text: String,
+    pub file_size_bytes: u64,
+    pub loaded_bytes: usize,
+    pub encoding_name: String,
+    pub has_bom: bool,
+    pub has_decoding_warnings: bool,
+    pub complete: bool,
+}
+
 impl FileService {
     pub fn read_disk_state(path: &Path) -> io::Result<DiskFileState> {
         let metadata = std::fs::metadata(path).inspect_err(|error| {
@@ -129,6 +141,17 @@ impl FileService {
         })
     }
 
+    /// Decode at most `max_bytes` from the start of a file. This is the staged
+    /// open boundary: callers can paint a first viewport while full hydration
+    /// continues on a background lane.
+    pub fn read_first_visible_window(
+        path: &Path,
+        max_bytes: usize,
+    ) -> io::Result<FileVisibleWindow> {
+        let prefix = read::inspect_file_prefix(path)?;
+        read::read_first_visible_window(path, prefix.encoding, prefix.has_bom, max_bytes)
+    }
+
     pub fn read_file_with_encoding(path: &Path, encoding_name: &str) -> io::Result<FileContent> {
         let prefix = read::inspect_file_prefix(path).inspect_err(|error| {
             diagnostics::record_io_error_with_details(
@@ -158,6 +181,19 @@ impl FileService {
 
     pub fn canonical_encoding_name(encoding_name: &str) -> io::Result<String> {
         Ok(resolve_encoding(encoding_name)?.name().to_string())
+    }
+
+    /// Build the metadata-only representation used for large batches before
+    /// inactive files are hydrated.
+    #[must_use]
+    pub fn build_cold_file_shell(path: &Path, disk_state: Option<DiskFileState>) -> BufferState {
+        let name = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let mut buffer = BufferState::new(name, String::new(), Some(path.to_path_buf()));
+        buffer.sync_to_disk_state(disk_state);
+        buffer
     }
 
     #[must_use]

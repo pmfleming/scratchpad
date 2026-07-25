@@ -2,7 +2,7 @@ use super::{LaneEndpoints, LaneOutcome, spawn_lane};
 use crate::app::capacity_metrics::BackgroundIoLane;
 use crate::app::domain::{DocumentSnapshot, TextFormatMetadata};
 use crate::app::services::background_io::types::{
-    BackgroundIoRequest, BackgroundIoResult, LoadedPathResult, PathLoadRequest,
+    BackgroundIoRequest, BackgroundIoResult, ColdFileShellResult, LoadedPathResult, PathLoadRequest,
 };
 use crate::app::services::file_service::{FileContent, FileService};
 use std::io;
@@ -33,6 +33,12 @@ pub(in crate::app::services::background_io) fn spawn_path_lane(endpoints: LaneEn
                         is_partial: false,
                     })
                 }
+            }
+            BackgroundIoRequest::BuildColdFileShells { request_id, paths } => {
+                LaneOutcome::result(BackgroundIoResult::ColdFileShellsBuilt {
+                    request_id,
+                    shells: paths.into_iter().map(build_cold_file_shell).collect(),
+                })
             }
             BackgroundIoRequest::SavePath {
                 request_id,
@@ -162,6 +168,20 @@ fn load_one(request: PathLoadRequest) -> LoadedPathResult {
             FileService::read_file_with_encoding(path, &encoding_name)
         }),
     }
+}
+
+fn build_cold_file_shell(path: PathBuf) -> ColdFileShellResult {
+    let result = FileService::read_disk_state(&path)
+        .map(|disk_state| {
+            let tab = crate::app::domain::WorkspaceTab::new(FileService::build_cold_file_shell(
+                &path,
+                Some(disk_state),
+            ));
+            let cold_tab = crate::app::services::session_store::cold_tab_from_workspace_tab(&tab);
+            (tab, cold_tab)
+        })
+        .map_err(|error| error.to_string());
+    ColdFileShellResult { path, result }
 }
 
 fn load_path_result(

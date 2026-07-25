@@ -100,6 +100,32 @@ fn open_selected_paths_async_deduplicates_pending_path() {
 }
 
 #[test]
+fn large_file_stages_first_visible_window_before_background_hydration() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("large.txt");
+    std::fs::write(&path, "first visible then fully hydrated").unwrap();
+    let mut app = test_app(
+        directory.path(),
+        vec![WorkspaceTab::new(BufferState::new(
+            "start.txt".to_owned(),
+            String::new(),
+            None,
+        ))],
+    );
+
+    FileController::open_selected_paths_async(&mut app, vec![path.clone()]);
+
+    let preview = app.tab_manager.active_tab().unwrap().active_buffer();
+    assert_eq!(preview.text(), "first vi");
+    assert!(preview.is_loading_preview);
+
+    app.wait_for_background_io_idle();
+    let hydrated = app.tab_manager.active_tab().unwrap().active_buffer();
+    assert_eq!(hydrated.text(), "first visible then fully hydrated");
+    assert!(!hydrated.is_loading_preview);
+}
+
+#[test]
 fn large_open_batch_hydrates_most_recent_tab_before_returning() {
     let directory = tempfile::tempdir().unwrap();
     let paths = (0..super::LAZY_OPEN_BATCH_THRESHOLD)
@@ -120,15 +146,18 @@ fn large_open_batch_hydrates_most_recent_tab_before_returning() {
 
     FileController::open_selected_paths_async(&mut app, paths.clone());
 
-    assert!(app.state.pending_open_file_paths.is_empty());
+    // The selected file is hydrated synchronously, while inactive metadata-only
+    // shells are still being built on the path lane.
     let active_index = app.tab_manager.active_tab_index;
-
     assert_eq!(
         app.tab_manager.tabs.as_slice()[active_index]
             .active_buffer()
             .text(),
         format!("loaded {}", paths.len() - 1)
     );
+
+    app.wait_for_background_io_idle();
+    assert!(app.state.pending_open_file_paths.is_empty());
     assert_eq!(app.tab_manager.cold_session_tabs().len(), paths.len() - 1);
 }
 

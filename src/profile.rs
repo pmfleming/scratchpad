@@ -6,9 +6,9 @@ use crate::app::app_state::{SearchScope, prepare_context_before_first_frame, sea
 use crate::app::commands::{AppCommand, SearchCommand, WorkspaceCommand};
 use eframe::egui;
 pub use render::{
-    UiRenderFrameHarness, run_document_snapshot_profile, run_paste_stress_profile,
-    run_scroll_stress_profile, run_ui_render_frame_profile, run_viewport_extraction_profile,
-    ui_render_frame_metrics, ui_scroll_frame_metrics,
+    RenderPreparationSample, UiRenderFrameHarness, run_document_snapshot_profile,
+    run_paste_stress_profile, run_scroll_stress_profile, run_ui_render_frame_profile,
+    run_viewport_extraction_profile, ui_render_frame_metrics, ui_scroll_frame_metrics,
 };
 use std::hint::black_box;
 use std::path::PathBuf;
@@ -60,6 +60,45 @@ pub const RECOMMENDED_PASTE_STRESS_ITERATIONS: usize = 20;
 pub const RECOMMENDED_SPLIT_STRESS_TILES: usize = 12;
 pub const RECOMMENDED_SPLIT_STRESS_BYTES_PER_TILE: usize = 256 * KB;
 pub const RECOMMENDED_SPLIT_STRESS_ITERATIONS: usize = 24;
+
+#[derive(Clone, Copy, Debug)]
+pub struct ManyFileFirstVisibleProfile {
+    pub first_visible_ns: u128,
+    pub background_completion_ns: u128,
+    pub active_buffer_bytes: usize,
+    pub tab_count_after_completion: usize,
+}
+
+/// Exercise the production staged-open path: hydrate the selected file before
+/// returning, build all inactive cold shells on the path lane, then install the
+/// completed shell batch without blocking first-visible latency.
+pub fn run_many_file_first_visible_profile(paths: Vec<PathBuf>) -> ManyFileFirstVisibleProfile {
+    let session_root = support::unique_profile_session_root("many-file-first-visible");
+    let store = crate::app::services::session_store::SessionStore::new(session_root.clone());
+    let mut app = ScratchpadApp::with_session_store(store);
+    app.set_session_persist_on_drop(false);
+
+    let start = Instant::now();
+    crate::app::services::file_controller::FileController::open_paths_async(&mut app, paths);
+    let first_visible_ns = start.elapsed().as_nanos();
+    let active_buffer_bytes = app
+        .tab_manager
+        .active_tab()
+        .map(|tab| tab.active_buffer().document().piece_tree().len_bytes())
+        .unwrap_or_default();
+    app.wait_for_background_io_idle();
+    let background_completion_ns = start.elapsed().as_nanos();
+    let tab_count_after_completion = app.tab_manager.tabs.len();
+    drop(app);
+    let _ = std::fs::remove_dir_all(session_root);
+
+    ManyFileFirstVisibleProfile {
+        first_visible_ns,
+        background_completion_ns,
+        active_buffer_bytes,
+        tab_count_after_completion,
+    }
+}
 
 pub(super) const PROFILE_QUERY: &str = "needle";
 const PROFILE_RESET_QUERY: &str = "zzzz-no-match";

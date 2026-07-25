@@ -29,6 +29,10 @@ pub(crate) enum BackgroundIoRequest {
         /// results are batched into one terminal `PathsLoaded` message.
         streaming: bool,
     },
+    BuildColdFileShells {
+        request_id: u64,
+        paths: Vec<PathBuf>,
+    },
     SavePath {
         request_id: u64,
         path: PathBuf,
@@ -70,6 +74,7 @@ impl BackgroundIoRequest {
     pub(in crate::app::services::background_io) fn kind(&self) -> &'static str {
         match self {
             Self::LoadPaths { .. } => "load_paths",
+            Self::BuildColdFileShells { .. } => "build_cold_file_shells",
             Self::SavePath { .. } => "save_path",
             Self::RestoreSession { .. } => "restore_session",
             Self::HydrateSessionTab { .. } => "hydrate_session_tab",
@@ -81,7 +86,9 @@ impl BackgroundIoRequest {
 
     pub(in crate::app::services::background_io) fn lane(&self) -> BackgroundIoLane {
         match self {
-            Self::LoadPaths { .. } | Self::SavePath { .. } => BackgroundIoLane::Path,
+            Self::LoadPaths { .. } | Self::BuildColdFileShells { .. } | Self::SavePath { .. } => {
+                BackgroundIoLane::Path
+            }
             Self::RestoreSession { .. }
             | Self::HydrateSessionTab { .. }
             | Self::PersistSession { .. } => BackgroundIoLane::Session,
