@@ -15,7 +15,9 @@ pub(crate) use super::history::PIECE_PROVENANCE_ENTRY_LIMIT;
 pub(crate) use super::history::{ByteSpan, PieceProvenance, PieceSource};
 pub use anchor::{AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind};
 
+use std::io;
 use std::ops::Range;
+use std::path::Path;
 
 use anchor::{LeafAnchor, LeafId, PieceTreeAnchorState};
 use metrics::sum_node_metrics;
@@ -295,6 +297,23 @@ impl PieceTreeLite {
         tree
     }
 
+    pub(crate) fn from_utf8_file(
+        path: &Path,
+        file_offset: u64,
+        sample_limit: usize,
+    ) -> io::Result<(Self, String, usize)> {
+        let (storage, pieces, sample, line_count) =
+            PieceTreeStorage::from_utf8_file(path, file_offset, sample_limit)?;
+        let mut tree = Self {
+            storage,
+            root: build_root_from_pieces(pieces),
+            runtime: PieceTreeRuntime::default(),
+            anchor_state: PieceTreeAnchorState::default(),
+        };
+        tree.assign_missing_leaf_ids();
+        Ok((tree, sample, line_count))
+    }
+
     fn line_scan_start_for_leaf(
         leaf: &PieceTreeLeaf,
         address: LeafAddress,
@@ -353,6 +372,16 @@ impl PieceTreeLite {
     #[must_use]
     pub fn len_chars(&self) -> usize {
         self.root.metrics.chars
+    }
+
+    #[must_use]
+    pub fn is_file_backed(&self) -> bool {
+        self.storage.is_file_backed()
+    }
+
+    #[must_use]
+    pub fn loaded_file_chunk_count(&self) -> usize {
+        self.storage.loaded_file_chunk_count()
     }
 
     #[must_use]
@@ -444,8 +473,11 @@ impl PieceTreeLite {
     #[must_use]
     pub fn extract_text(&self) -> String {
         // Fast path: no edits have been made, original covers the whole buffer.
-        if self.storage.add_is_empty() && self.root.metrics.bytes == self.storage.original_len() {
-            return self.storage.original_text().to_owned();
+        if self.storage.add_is_empty()
+            && self.root.metrics.bytes == self.storage.original_len()
+            && let Some(text) = self.storage.owned_original_text()
+        {
+            return text.to_owned();
         }
         self.extract_range(0..self.len_chars())
     }

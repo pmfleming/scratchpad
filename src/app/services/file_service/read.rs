@@ -7,6 +7,8 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
 
+const FILE_BACKED_UTF8_MIN_BYTES: u64 = 16 * 1024 * 1024;
+
 pub(super) struct PrefixInspection {
     pub(super) encoding: &'static Encoding,
     pub(super) has_bom: bool,
@@ -175,6 +177,16 @@ fn read_document_with_encoding(
     const DECODED_CHUNK_BYTES: usize = 32 * 1024;
 
     if encoding == encoding_rs::UTF_8
+        && File::open(path)?.metadata()?.len() >= FILE_BACKED_UTF8_MIN_BYTES
+    {
+        match read_utf8_document_file_backed(path, has_bom) {
+            Ok(loaded) => return Ok(loaded),
+            Err(error) if error.kind() == io::ErrorKind::InvalidData => {}
+            Err(error) => return Err(error),
+        }
+    }
+
+    if encoding == encoding_rs::UTF_8
         && let Some(loaded) = read_utf8_document_fast_path(path, has_bom)?
     {
         return Ok(loaded);
@@ -252,6 +264,18 @@ fn read_document_with_encoding(
         sample,
         line_count,
         has_decoding_warnings,
+    })
+}
+
+fn read_utf8_document_file_backed(path: &Path, has_bom: bool) -> io::Result<LoadedDocument> {
+    let file_offset = if has_bom { 3 } else { 0 };
+    let (document, sample, line_count) =
+        TextDocument::from_utf8_file(path, file_offset, STAGED_METADATA_SAMPLE_BYTES)?;
+    Ok(LoadedDocument {
+        document,
+        sample,
+        line_count,
+        has_decoding_warnings: false,
     })
 }
 

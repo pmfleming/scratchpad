@@ -3,6 +3,42 @@ use crate::app::domain::{EncodingSource, LineEndingStyle, TextDocument, TextForm
 use std::io;
 
 #[test]
+fn large_utf8_file_uses_lazy_file_backed_piece_tree_chunks() {
+    const MB: usize = 1024 * 1024;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("file-backed.txt");
+    let text = "alpha café 東京\n".repeat((17 * MB) / "alpha café 東京\n".len() + 1);
+    std::fs::write(&path, text.as_bytes()).unwrap();
+
+    let content = FileService::read_file(&path).unwrap();
+    let tree = content.document.piece_tree();
+
+    assert!(tree.is_file_backed());
+    assert_eq!(tree.loaded_file_chunk_count(), 0);
+    assert_eq!(tree.borrow_range(0..5), Some("alpha"));
+    assert_eq!(tree.loaded_file_chunk_count(), 1);
+    let tail = tree.len_chars().saturating_sub(5)..tree.len_chars();
+    assert_eq!(tree.extract_range(tail).chars().count(), 5);
+    assert_eq!(tree.loaded_file_chunk_count(), 2);
+
+    let mut document = content.document;
+    document.insert_direct(5, " lazy");
+    assert_eq!(document.piece_tree().extract_range(0..10), "alpha lazy");
+
+    let saved = directory.path().join("file-backed-saved.txt");
+    FileService::write_snapshot_utf8(&saved, &document.snapshot()).unwrap();
+    assert_eq!(
+        std::fs::metadata(&saved).unwrap().len(),
+        text.len() as u64 + 5
+    );
+    assert!(
+        std::fs::read_to_string(saved)
+            .unwrap()
+            .starts_with("alpha lazy")
+    );
+}
+
+#[test]
 fn first_visible_window_stops_on_a_utf8_boundary() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("large.txt");

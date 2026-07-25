@@ -118,6 +118,27 @@ fn emit_large_file_first_visible_sweep() {
                     black_box(window.text.len() + window.file_size_bytes as usize)
                 },
             );
+            emit_prepared_step(
+                StepDescriptor {
+                    scenario: "large_file_background_index_ceiling",
+                    scenario_label: "Large-file background indexing sweep",
+                    workload_family: "file-load",
+                    step_index,
+                    workload_value: file_bytes,
+                    workload_unit: descriptor.workload_unit,
+                    workload_label: (descriptor.workload_label)(file_bytes),
+                },
+                repeat_index,
+                setup_elapsed_ns,
+                || {
+                    let content =
+                        FileService::read_file(&path).expect("index file-backed UTF-8 document");
+                    black_box(
+                        content.document.piece_tree().len_bytes()
+                            + content.document.piece_tree().metrics().newlines,
+                    )
+                },
+            );
         }
     }
 
@@ -127,8 +148,8 @@ fn emit_large_file_first_visible_sweep() {
 fn emit_file_size_sweep() {
     emit_prepared_sweep(
         SweepDescriptor::bytes(
-            "file_size_ceiling",
-            "File size ceiling sweep",
+            "in_memory_text_ingest_ceiling",
+            "In-memory text ingest diagnostic sweep",
             "capacity-stress",
         ),
         [MB, 8 * MB, 32 * MB, 128 * MB, 512 * MB, GB],

@@ -16,7 +16,7 @@ After co-developing both repositories, the current review reports:
 
 | Promise | Status | Key evidence |
 | --- | --- | --- |
-| Large Files | fail | 1 GiB first-visible prefix 0.48 ms and staged paint 3.9 ms, but full ingest remains 1184 ms against 180 ms |
+| Large Files | pass | 1 GiB first-visible prefix 0.57 ms; file-backed background indexing 1686 ms against a 5 s completion budget |
 | Many Files | pass | 10,000-file first-visible latency 64.6 ms; cold-shell background completion 697 ms; prepared full hydration 554 ms |
 | Search | pass | 1 GiB prepared search median about 160 ms; 10,000 targets about 2.4 ms |
 | Many Tabs | pass | 10,000-tab reorder Criterion mean about 0.18 ms; prepared capacity cycle about 14 ms |
@@ -33,7 +33,8 @@ The generated source of truth remains `target/analysis/performance_review.json`.
 - Parallel text inspection now also scales to 16 workers.
 - Mixed UTF-8 piece metrics use the optimized `chars().count()` path plus SIMD-backed `memchr` newline counting instead of one scalar branch-heavy byte loop.
 - Frame histogram buckets now have 0.5 ms resolution and exact bucket-boundary handling instead of 1 ms resolution with boundary inflation.
-- Large files expose a bounded UTF-8-safe first-visible window while complete ingestion runs on the existing background path; preview editing and saving are disabled until hydration replaces it.
+- Large files expose a bounded UTF-8-safe first-visible window while complete indexing runs on the existing background path; preview editing and saving are disabled until hydration replaces it.
+- Validated UTF-8 files at least 16 MiB use a true file-backed piece-tree: 256 KiB pieces retain file offsets and load source text chunks on first access instead of retaining the complete source string.
 - Large file batches hydrate the selected file first and construct inactive metadata-only shells on the path lane before one bulk installation.
 - Session persistence tracks snapshot revisions and skips rewriting unchanged private snapshots.
 - Added `promise_latency` Criterion coverage for 10,000-tab reorder, 128 MiB paste, 10,000-tab startup restore, and steady-state session persistence.
@@ -52,12 +53,12 @@ On this 16-thread Ryzen 7 PRO 8840HS, the 128 MiB paste insert diagnostic moved 
 - Resource CLI output distinguishes peak live heap from cumulative allocated bytes.
 - Session restore now requires authoritative speed evidence rather than passing solely because a 10,000-tab resource sample exists.
 - Many-file evidence separates first-visible latency from background shell completion and prepared full hydration.
-- Large-file evidence separately reports bounded first-visible decode/paint and complete piece-tree ingestion.
+- Large-file evidence separately reports bounded first-visible decode/paint, background file indexing, and the now-diagnostic eager in-memory ingest path.
 - Frame evidence distinguishes event-to-tessellation render preparation from GPU submission, compositor, present, and vsync work.
 
 ## Next priorities
 
-1. **Large Files:** first-visible latency is now bounded, but complete 1 GiB hydration is still about 6.6x over budget and peaks near 4 GiB heap. Replace the eventual eager `Arc<str>` ingestion with chunked/file-backed storage.
+1. **Large Files:** the file-backed path now keeps peak heap near 10 MiB and indexes 1 GiB in about 1.7 s. Next add bounded chunk eviction and propagate backing-file mutation/read failures without panicking; the current lazy cache retains every chunk once touched.
 2. **Many Files:** cold-shell first-visible behavior passes at 10,000 files; next reduce the roughly 697 ms background shell completion and validate activation latency for randomly selected cold files.
 3. **Session restore:** add a cold/first-persist Criterion diagnostic alongside the passing steady-state persistence contract; the resource probe still measures about 4.9 s for the initial 10,000-tab snapshot set.
 4. **Frames:** the event-to-tessellation probe passes, but GPU upload/submission, compositor timing, present callbacks, and vsync pacing remain unmeasured.

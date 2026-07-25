@@ -82,7 +82,9 @@ impl CapturedSessionTab {
         let mut buffer_snapshots = Vec::new();
         for buffer in tab.buffers() {
             buffers.push(SessionBuffer::from(buffer));
-            if !buffer.is_loading_preview {
+            if !buffer.is_loading_preview
+                && (buffer.path.is_none() || buffer.is_dirty || buffer.disk_state.is_none())
+            {
                 buffer_snapshots.push(CapturedSessionBuffer {
                     temp_id: buffer.temp_id.clone(),
                     snapshot: buffer.document_snapshot(),
@@ -115,17 +117,29 @@ mod tests {
     use crate::app::domain::{BufferState, WorkspaceTab};
 
     #[test]
-    fn loading_preview_is_persisted_as_disk_backed_metadata_not_partial_text() {
+    fn clean_disk_buffer_is_persisted_as_metadata_not_a_redundant_snapshot() {
         let mut buffer = BufferState::new(
             "large.txt".to_owned(),
             "partial".to_owned(),
             Some(std::path::PathBuf::from("large.txt")),
         );
-        buffer.mark_as_loading_preview();
+        buffer.sync_to_disk_state(Some(crate::app::domain::DiskFileState {
+            modified_millis: Some(1),
+            len: 7,
+        }));
 
         let captured = CapturedSessionTab::capture(&WorkspaceTab::new(buffer));
 
         assert!(captured.buffer_snapshots.is_empty());
         assert_eq!(captured.session_tab.buffers.len(), 1);
+
+        let mut dirty = BufferState::new(
+            "dirty.txt".to_owned(),
+            "changed".to_owned(),
+            Some(std::path::PathBuf::from("dirty.txt")),
+        );
+        dirty.mark_dirty_after_local_edit();
+        let captured_dirty = CapturedSessionTab::capture(&WorkspaceTab::new(dirty));
+        assert_eq!(captured_dirty.buffer_snapshots.len(), 1);
     }
 }

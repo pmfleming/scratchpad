@@ -9,7 +9,9 @@ use super::{
 use crate::app::capacity_metrics;
 use crate::app::ui::editor_content::native_editor::{CursorRange, OperationRecord};
 use std::borrow::Cow;
+use std::io;
 use std::ops::Range;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -90,6 +92,26 @@ impl TextDocument {
             content: TextDocumentContentState::new(text, preferred_line_ending),
             history: TextDocumentHistoryState::default(),
         }
+    }
+
+    pub(crate) fn from_utf8_file(
+        path: &Path,
+        file_offset: u64,
+        sample_limit: usize,
+    ) -> io::Result<(Self, String, usize)> {
+        let (piece_tree, sample, line_count) =
+            PieceTreeLite::from_utf8_file(path, file_offset, sample_limit)?;
+        Ok((
+            Self {
+                content: TextDocumentContentState {
+                    piece_tree: Arc::new(piece_tree),
+                    preferred_line_ending: platform_default_line_ending(),
+                },
+                history: TextDocumentHistoryState::default(),
+            },
+            sample,
+            line_count,
+        ))
     }
 
     /// Extract the full text content as a new String from the piece tree.

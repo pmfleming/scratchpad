@@ -36,7 +36,7 @@ fn emit_large_utf8_load_peak_memory() {
         emit_step(
             StepDescriptor {
                 scenario: "large_utf8_load_peak_memory",
-                scenario_label: "Large UTF-8 load peak memory",
+                scenario_label: "Large UTF-8 file-backed indexing memory",
                 workload_family: "file-load",
                 focus: "peak-memory",
                 step_index,
