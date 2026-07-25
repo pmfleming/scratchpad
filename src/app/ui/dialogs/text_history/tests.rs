@@ -9,7 +9,6 @@ use super::{
 use crate::app::domain::BufferId;
 use crate::app::domain::PieceSource;
 use crate::app::text_history::TextHistoryEntryView;
-use crate::app::ui::dialogs::text_history::list::FILE_GROUP_DEFAULT_EXPANDED;
 
 #[test]
 fn history_dialog_defaults_to_by_file_tab() {
@@ -31,12 +30,6 @@ fn history_tab_persistence_round_trips() {
     assert_eq!(read_active_tab(&ctx), HistoryTab::Timeline);
     advance_egui_frame(&ctx);
     assert_eq!(read_active_tab(&ctx), HistoryTab::ByFile);
-}
-
-#[test]
-#[allow(clippy::assertions_on_constants)]
-fn file_history_groups_default_to_collapsed() {
-    assert!(!FILE_GROUP_DEFAULT_EXPANDED);
 }
 
 #[test]

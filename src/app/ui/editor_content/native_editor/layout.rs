@@ -84,7 +84,7 @@ pub(super) fn build_editor_galley(
     let display_search_highlights =
         display_search_highlights(&search_highlights, display_map.as_ref());
     let display_selection_highlight =
-        display_selection_highlight(selection_highlight.clone(), display_map.as_ref());
+        display_selection_highlight(selection_highlight, display_map.as_ref());
     let wrap_width = editor_wrap_width(ui, options.word_wrap, Some(effective_viewport));
     let cache_key = layout_cache_key(LayoutCacheKeyInput {
         revision: buffer.document_revision(),

@@ -72,7 +72,7 @@ mod tests {
     fn refresh_text_metadata_reports_lines_and_control_artifacts() {
         let buffer = BufferState::new("sample.txt".to_owned(), "one\n\u{200e}two".to_owned(), None);
         let snapshot = buffer.document_snapshot();
-        let format = buffer.format.clone();
+        let format = buffer.format;
 
         let (length, line_count, artifact_summary, refreshed_format) =
             refresh_text_metadata(snapshot, format);

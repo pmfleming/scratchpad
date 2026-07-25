@@ -7,7 +7,7 @@ mod state;
 
 pub(crate) use analysis::display_line_count_from_piece_tree;
 pub(crate) use analysis::{
-    BufferTextMetadata, analyze_piece_tree_text, buffer_text_metadata,
+    BufferTextMetadata, accumulate_line_count, analyze_piece_tree_text, buffer_text_metadata,
     buffer_text_metadata_from_piece_tree, detected_text_format_and_metadata,
     normalize_inserted_text_line_endings,
 };

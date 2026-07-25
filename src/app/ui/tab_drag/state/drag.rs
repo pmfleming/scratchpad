@@ -27,7 +27,7 @@ pub(crate) fn begin_tab_drag_if_needed(
             tab_drag_state_id(),
             TabDragState {
                 source_index: index,
-                dragged_indices: dragged_indices.clone(),
+                dragged_indices,
                 start_pos: pointer_pos,
                 current_pos: pointer_pos,
             },

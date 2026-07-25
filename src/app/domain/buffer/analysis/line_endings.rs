@@ -82,6 +82,30 @@ pub fn analyze_line_endings(text: &str) -> (LineEndingCounts, LineEndingStyle) {
     (inspection.line_ending_counts, inspection.line_endings)
 }
 
+pub(crate) fn accumulate_line_count(
+    text: &str,
+    mut line_count: usize,
+    pending_cr: &mut bool,
+) -> usize {
+    for byte in text.bytes() {
+        if *pending_cr {
+            *pending_cr = false;
+            if byte == b'\n' {
+                continue;
+            }
+        }
+        match byte {
+            b'\r' => {
+                line_count += 1;
+                *pending_cr = true;
+            }
+            b'\n' => line_count += 1,
+            _ => {}
+        }
+    }
+    line_count
+}
+
 #[cfg(test)]
 mod tests {
     use super::{LineEndingCounts, LineEndingStyle, resolve_preferred_line_ending};

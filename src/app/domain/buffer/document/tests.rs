@@ -11,7 +11,10 @@ use std::time::{Duration, Instant};
 
 mod generation;
 mod helpers;
-use helpers::*;
+use helpers::{
+    assert_history_byte_usage_consistent, cursor, delete_edit, entry_record, history_record,
+    insert_edit, insert_edit_with_cursor, insert_isolated_edit,
+};
 
 macro_rules! empty_document {
     () => {

@@ -4,11 +4,10 @@ use std::collections::{HashMap, VecDeque};
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
 )]
-#[repr(u8)]
 #[serde(rename_all = "snake_case")]
 pub enum PieceSource {
     #[default]
-    Load = 0,
+    Load,
     Edit,
     Paste,
     Cut,

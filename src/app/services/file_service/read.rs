@@ -1,5 +1,7 @@
 use super::{FileContent, FileVisibleWindow, STAGED_METADATA_SAMPLE_BYTES};
-use crate::app::domain::buffer::{BufferTextMetadata, detected_text_format_and_metadata};
+use crate::app::domain::buffer::{
+    BufferTextMetadata, accumulate_line_count, detected_text_format_and_metadata,
+};
 use crate::app::domain::{EncodingSource, TextDocument};
 use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
 use encoding_rs::Encoding;
@@ -20,6 +22,46 @@ struct LoadedDocument {
     sample: String,
     line_count: usize,
     has_decoding_warnings: bool,
+}
+
+#[derive(Default)]
+struct StagedDocument {
+    content: String,
+    sample: String,
+    line_count: usize,
+    line_count_pending_cr: bool,
+    has_decoding_warnings: bool,
+}
+
+impl StagedDocument {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            content: String::with_capacity(capacity),
+            line_count: 1,
+            ..Self::default()
+        }
+    }
+
+    fn append(&mut self, text: &str, had_errors: bool) -> io::Result<()> {
+        self.has_decoding_warnings |= had_errors;
+        if text.contains('\0') {
+            return Err(binary_file_error());
+        }
+        self.content.push_str(text);
+        append_staged_metadata_sample(&mut self.sample, text);
+        self.line_count =
+            accumulate_line_count(text, self.line_count, &mut self.line_count_pending_cr);
+        Ok(())
+    }
+
+    fn finish(self) -> LoadedDocument {
+        LoadedDocument {
+            document: TextDocument::new(self.content),
+            sample: self.sample,
+            line_count: self.line_count,
+            has_decoding_warnings: self.has_decoding_warnings,
+        }
+    }
 }
 
 pub(super) fn inspect_file_prefix(path: &Path) -> io::Result<PrefixInspection> {
@@ -85,10 +127,7 @@ pub(super) fn read_first_visible_window(
     let loaded_bytes = bytes.len();
     let complete = loaded_bytes as u64 >= file_size_bytes;
     if bytes.contains(&0) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Binary files are not supported",
-        ));
+        return Err(binary_file_error());
     }
     let without_bom = if has_bom && bytes.starts_with(UTF8_BOM) {
         &bytes[UTF8_BOM.len()..]
@@ -128,12 +167,13 @@ pub(super) fn read_first_visible_window(
 
 fn ensure_text_prefix(prefix: &[u8], has_bom: bool) -> io::Result<()> {
     if is_probably_binary(prefix, has_bom) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Binary files are not supported",
-        ));
+        return Err(binary_file_error());
     }
     Ok(())
+}
+
+fn binary_file_error() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, "Binary files are not supported")
 }
 
 fn build_file_content(
@@ -153,13 +193,13 @@ fn build_file_content(
         has_decoding_warnings,
     );
     format.is_ascii_subset = false;
+    let artifact_summary = sample_metadata.artifact_summary;
     let text_metadata = BufferTextMetadata {
         line_count,
-        artifact_summary: sample_metadata.artifact_summary.clone(),
+        artifact_summary: artifact_summary.clone(),
         preferred_line_ending: format.preferred_line_ending_style(),
         has_non_compliant_characters: false,
     };
-    let artifact_summary = text_metadata.artifact_summary.clone();
     FileContent {
         document,
         format,
@@ -203,11 +243,7 @@ fn read_document_with_encoding(
     } else {
         encoding.new_decoder_without_bom_handling()
     };
-    let mut content = String::with_capacity(decoded_capacity);
-    let mut sample = String::new();
-    let mut line_count = 1usize;
-    let mut line_count_pending_cr = false;
-    let mut has_decoding_warnings = false;
+    let mut document = StagedDocument::with_capacity(decoded_capacity);
     let mut raw = [0u8; RAW_READ_BYTES];
     let mut pending = Vec::new();
     let mut decoded = [0u8; DECODED_CHUNK_BYTES];
@@ -215,56 +251,38 @@ fn read_document_with_encoding(
     loop {
         let read = file.read(&mut raw)?;
         let eof = read == 0;
-        if read > 0 {
-            pending.extend_from_slice(&raw[..read]);
-        }
-
-        let mut consumed = 0usize;
-        loop {
-            let input = &pending[consumed..];
-            let (result, read, written, had_errors) =
-                decoder.decode_to_utf8(input, &mut decoded, eof);
-            has_decoding_warnings |= had_errors;
-            let text = std::str::from_utf8(&decoded[..written]).map_err(|error| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("Decoded UTF-8 error: {error}"),
-                )
-            })?;
-            if text.contains('\0') {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Binary files are not supported",
-                ));
-            }
-            if !text.is_empty() {
-                content.push_str(text);
-                append_staged_metadata_sample(&mut sample, text);
-                line_count =
-                    accumulate_staged_line_count(text, line_count, &mut line_count_pending_cr);
-            }
-            consumed += read;
-
-            if result == encoding_rs::CoderResult::InputEmpty {
-                break;
-            }
-        }
-
-        if consumed > 0 {
-            pending.drain(..consumed);
-        }
-
+        pending.extend_from_slice(&raw[..read]);
+        let consumed = decode_pending(&mut decoder, &pending, &mut decoded, eof, &mut document)?;
+        pending.drain(..consumed);
         if eof {
-            break;
+            return Ok(document.finish());
         }
     }
+}
 
-    Ok(LoadedDocument {
-        document: TextDocument::new(content),
-        sample,
-        line_count,
-        has_decoding_warnings,
-    })
+fn decode_pending(
+    decoder: &mut encoding_rs::Decoder,
+    pending: &[u8],
+    decoded: &mut [u8],
+    eof: bool,
+    document: &mut StagedDocument,
+) -> io::Result<usize> {
+    let mut consumed = 0;
+    loop {
+        let (result, read, written, had_errors) =
+            decoder.decode_to_utf8(&pending[consumed..], decoded, eof);
+        let text = std::str::from_utf8(&decoded[..written]).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Decoded UTF-8 error: {error}"),
+            )
+        })?;
+        document.append(text, had_errors)?;
+        consumed += read;
+        if result == encoding_rs::CoderResult::InputEmpty {
+            return Ok(consumed);
+        }
+    }
 }
 
 fn read_utf8_document_file_backed(path: &Path, has_bom: bool) -> io::Result<LoadedDocument> {
@@ -295,16 +313,13 @@ fn read_utf8_document_fast_path(path: &Path, has_bom: bool) -> io::Result<Option
         content.drain(..UTF8_BOM.len());
     }
     if content.as_bytes().contains(&0) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Binary files are not supported",
-        ));
+        return Err(binary_file_error());
     }
 
     let mut sample = String::new();
     append_staged_metadata_sample(&mut sample, &content);
     let mut line_count_pending_cr = false;
-    let line_count = accumulate_staged_line_count(&content, 1, &mut line_count_pending_cr);
+    let line_count = accumulate_line_count(&content, 1, &mut line_count_pending_cr);
 
     Ok(Some(LoadedDocument {
         document: TextDocument::new(content),
@@ -330,34 +345,6 @@ fn append_staged_metadata_sample(sample: &mut String, chunk: &str) {
         end -= 1;
     }
     sample.push_str(&chunk[..end]);
-}
-
-fn accumulate_staged_line_count(
-    chunk: &str,
-    mut line_count: usize,
-    pending_cr: &mut bool,
-) -> usize {
-    for byte in chunk.bytes() {
-        if *pending_cr {
-            *pending_cr = false;
-            if byte == b'\n' {
-                continue;
-            }
-        }
-
-        match byte {
-            b'\r' => {
-                line_count += 1;
-                *pending_cr = true;
-            }
-            b'\n' => {
-                line_count += 1;
-            }
-            _ => {}
-        }
-    }
-
-    line_count
 }
 
 fn is_probably_binary(prefix: &[u8], has_bom: bool) -> bool {

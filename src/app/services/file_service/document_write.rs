@@ -305,7 +305,10 @@ mod imp {
 
     #[cfg(test)]
     mod tests {
-        use super::*;
+        use super::{
+            File, OsStr, Path, PathBuf, Write, XattrFlags, extended_attribute_value, fs,
+            replace_in_place_with_recovery, write_document_with,
+        };
         use std::os::linux::fs::MetadataExt;
         use std::os::unix::fs::{PermissionsExt, symlink};
 

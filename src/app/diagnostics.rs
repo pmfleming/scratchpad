@@ -98,8 +98,8 @@ impl DiagnosticsState {
     ) {
         let current = TrackedWidget {
             kind: kind.to_owned(),
-            rect: rect.clone(),
-            location: location.clone(),
+            rect,
+            location,
             pass_index: self.pass_index,
             parent_ui_id,
         };

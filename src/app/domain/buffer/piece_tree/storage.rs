@@ -1,6 +1,6 @@
 use super::support::measure_text;
 use super::{ByteSpan, Piece, PieceBuffer, PieceProvenance, PieceSource};
-use crate::app::domain::buffer::history::PieceProvenanceStore;
+use crate::app::domain::buffer::{accumulate_line_count, history::PieceProvenanceStore};
 use std::fs::File;
 use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -73,50 +73,7 @@ impl PieceTreeStorage {
         let mut line_count = 1usize;
         let mut pending_cr = false;
 
-        loop {
-            let mut bytes = std::mem::take(&mut carry);
-            let existing = bytes.len();
-            bytes.resize(FILE_CHUNK_BYTES, 0);
-            let mut filled = existing;
-            while filled < FILE_CHUNK_BYTES {
-                let read = reader.read(&mut bytes[filled..])?;
-                if read == 0 {
-                    break;
-                }
-                filled += read;
-            }
-            bytes.truncate(filled);
-            if bytes.is_empty() {
-                break;
-            }
-
-            let (valid_len, incomplete) = match std::str::from_utf8(&bytes) {
-                Ok(_) => (bytes.len(), false),
-                Err(error) if error.error_len().is_none() => (error.valid_up_to(), true),
-                Err(error) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!(
-                            "Invalid UTF-8 at byte {}",
-                            logical_start + error.valid_up_to()
-                        ),
-                    ));
-                }
-            };
-            if incomplete {
-                carry = bytes.split_off(valid_len);
-            }
-            bytes.truncate(valid_len);
-            if bytes.is_empty() {
-                if filled < FILE_CHUNK_BYTES {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "Incomplete UTF-8 sequence at end of file",
-                    ));
-                }
-                continue;
-            }
-
+        while let Some(bytes) = read_utf8_chunk(&mut reader, &mut carry, logical_start)? {
             let text = std::str::from_utf8(&bytes).expect("validated UTF-8 chunk");
             let metrics = measure_text(text);
             pieces.push(Piece {
@@ -136,16 +93,6 @@ impl PieceTreeStorage {
                 text: OnceLock::new(),
             });
             logical_start += bytes.len();
-
-            if filled < FILE_CHUNK_BYTES {
-                if !carry.is_empty() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "Incomplete UTF-8 sequence at end of file",
-                    ));
-                }
-                break;
-            }
         }
 
         let original = FileBackedOriginal {
@@ -325,6 +272,53 @@ impl FileBackedOriginal {
     }
 }
 
+fn read_utf8_chunk(
+    reader: &mut impl Read,
+    carry: &mut Vec<u8>,
+    logical_start: usize,
+) -> io::Result<Option<Vec<u8>>> {
+    let mut bytes = std::mem::take(carry);
+    let existing = bytes.len();
+    bytes.resize(FILE_CHUNK_BYTES, 0);
+    let mut filled = existing;
+    while filled < FILE_CHUNK_BYTES {
+        let read = reader.read(&mut bytes[filled..])?;
+        if read == 0 {
+            break;
+        }
+        filled += read;
+    }
+    bytes.truncate(filled);
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+
+    let valid_len = match std::str::from_utf8(&bytes) {
+        Ok(_) => bytes.len(),
+        Err(error) if error.error_len().is_none() => error.valid_up_to(),
+        Err(error) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Invalid UTF-8 at byte {}",
+                    logical_start + error.valid_up_to()
+                ),
+            ));
+        }
+    };
+    if valid_len < bytes.len() {
+        *carry = bytes.split_off(valid_len);
+    }
+    bytes.truncate(valid_len);
+    if filled < FILE_CHUNK_BYTES && !carry.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Incomplete UTF-8 sequence at end of file",
+        ));
+    }
+    Ok(Some(bytes))
+}
+
 fn append_sample(sample: &mut String, text: &str, sample_limit: usize) {
     if sample.len() >= sample_limit {
         return;
@@ -334,26 +328,6 @@ fn append_sample(sample: &mut String, text: &str, sample_limit: usize) {
         end -= 1;
     }
     sample.push_str(&text[..end]);
-}
-
-fn accumulate_line_count(text: &str, mut line_count: usize, pending_cr: &mut bool) -> usize {
-    for byte in text.bytes() {
-        if *pending_cr {
-            *pending_cr = false;
-            if byte == b'\n' {
-                continue;
-            }
-        }
-        match byte {
-            b'\r' => {
-                line_count += 1;
-                *pending_cr = true;
-            }
-            b'\n' => line_count += 1,
-            _ => {}
-        }
-    }
-    line_count
 }
 
 pub(super) fn add_byte_span(start_byte: usize, byte_len: usize) -> ByteSpan {

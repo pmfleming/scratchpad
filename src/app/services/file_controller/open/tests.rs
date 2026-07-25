@@ -113,7 +113,7 @@ fn large_file_stages_first_visible_window_before_background_hydration() {
         ))],
     );
 
-    FileController::open_selected_paths_async(&mut app, vec![path.clone()]);
+    FileController::open_selected_paths_async(&mut app, vec![path]);
 
     let preview = app.tab_manager.active_tab().unwrap().active_buffer();
     assert_eq!(preview.text(), "first vi");

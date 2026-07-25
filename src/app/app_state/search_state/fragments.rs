@@ -53,34 +53,73 @@ pub(super) fn search_target_ranges(
         latest_generation,
         intra_parallelism,
     };
-    if program.options().mode == SearchMode::PlainText {
-        return search_fragmented_plain_text(context, normalized);
-    }
-
-    search_fragmented_bounded_regex(context, normalized)
+    search_fragmented(context, normalized)
 }
 
-fn search_fragmented_plain_text(
+struct FragmentSearchPlan {
+    chunks: Vec<DocumentChunk>,
+    final_boundary: Option<usize>,
+}
+
+fn fragment_search_plan(
+    context: &FragmentSearchContext<'_>,
+    range: Range<usize>,
+) -> FragmentSearchPlan {
+    if range.is_empty() || context.program.query().is_empty() {
+        return FragmentSearchPlan {
+            chunks: Vec::new(),
+            final_boundary: None,
+        };
+    }
+
+    let whole_word_context = usize::from(context.program.options().whole_word);
+    let (chunk_chars, leading_overlap, trailing_overlap, final_boundary) =
+        match context.program.options().mode {
+            SearchMode::PlainText => {
+                let query_chars = context.program.query().chars().count().max(1);
+                let overlap = query_chars + whole_word_context;
+                (
+                    SEARCH_FRAGMENT_CHUNK_CHARS.max(query_chars.saturating_mul(4)),
+                    overlap,
+                    overlap,
+                    None,
+                )
+            }
+            SearchMode::Regex => {
+                let leading_overlap = 1 + whole_word_context;
+                let trailing_overlap = context
+                    .program
+                    .max_match_chars()
+                    .saturating_add(leading_overlap);
+                (
+                    SEARCH_FRAGMENT_CHUNK_CHARS.max(trailing_overlap.max(1)),
+                    leading_overlap,
+                    trailing_overlap,
+                    Some(range.end),
+                )
+            }
+        };
+    FragmentSearchPlan {
+        chunks: context.snapshot.chunks_for_range(
+            range,
+            chunk_chars,
+            leading_overlap,
+            trailing_overlap,
+        ),
+        final_boundary,
+    }
+}
+
+fn search_fragmented(
     context: FragmentSearchContext<'_>,
     range: Range<usize>,
 ) -> Option<Vec<Range<usize>>> {
-    let query = context.program.query();
-    let options = context.program.options();
-    if range.is_empty() || query.is_empty() {
-        return Some(Vec::new());
-    }
-
-    let query_chars = query.chars().count().max(1);
-    let overlap_chars = query_chars + usize::from(options.whole_word);
-    let chunk_chars = SEARCH_FRAGMENT_CHUNK_CHARS.max(query_chars.saturating_mul(4));
-    let chunks =
-        context
-            .snapshot
-            .chunks_for_range(range, chunk_chars, overlap_chars, overlap_chars);
-    capacity_metrics::record_search_chunks(chunks.len());
+    let plan = fragment_search_plan(&context, range);
+    capacity_metrics::record_search_chunks(plan.chunks.len());
+    let final_boundary = plan.final_boundary;
 
     process_chunks_concurrent(
-        chunks,
+        plan.chunks,
         context.intra_parallelism,
         context.generation,
         context.latest_generation,
@@ -101,65 +140,11 @@ fn search_fragmented_plain_text(
                     .filter_map(|matched| {
                         let global_start = window_offset + matched.start;
                         let global_end = window_offset + matched.end;
-                        (global_start >= chunk.core_range.start
-                            && global_start < chunk.core_range.end)
-                            .then_some(global_start..global_end)
-                    })
-                    .collect(),
-            )
-        },
-    )
-}
-
-fn search_fragmented_bounded_regex(
-    context: FragmentSearchContext<'_>,
-    range: Range<usize>,
-) -> Option<Vec<Range<usize>>> {
-    let query = context.program.query();
-    let options = context.program.options();
-    if range.is_empty() || query.is_empty() {
-        return Some(Vec::new());
-    }
-
-    let context_chars = 1 + usize::from(options.whole_word);
-    let overlap_chars = context
-        .program
-        .max_match_chars()
-        .saturating_add(context_chars);
-    let chunk_chars = SEARCH_FRAGMENT_CHUNK_CHARS.max(overlap_chars.max(1));
-    let range_end = range.end;
-    let chunks =
-        context
-            .snapshot
-            .chunks_for_range(range, chunk_chars, context_chars, overlap_chars);
-    capacity_metrics::record_search_chunks(chunks.len());
-
-    process_chunks_concurrent(
-        chunks,
-        context.intra_parallelism,
-        context.generation,
-        context.latest_generation,
-        |chunk| {
-            let (window_text, window_offset) = context
-                .snapshot
-                .search_text_cow(Some(chunk.window_range.clone()));
-            let outcome = search::search_program_interruptible(
-                window_text.as_ref(),
-                context.program,
-                || context.latest_generation.load(Ordering::Relaxed) == context.generation,
-            )?;
-            debug_assert!(outcome.error.is_none());
-            Some(
-                outcome
-                    .matches
-                    .into_iter()
-                    .filter_map(|matched| {
-                        let global_start = window_offset + matched.start;
-                        let global_end = window_offset + matched.end;
-                        ((global_start >= chunk.core_range.start
-                            && global_start < chunk.core_range.end)
-                            || (chunk.core_range.end == range_end && global_start == range_end))
-                            .then_some(global_start..global_end)
+                        let in_core = global_start >= chunk.core_range.start
+                            && global_start < chunk.core_range.end;
+                        let at_final_boundary = final_boundary
+                            .is_some_and(|end| chunk.core_range.end == end && global_start == end);
+                        (in_core || at_final_boundary).then_some(global_start..global_end)
                     })
                     .collect(),
             )
@@ -174,82 +159,85 @@ fn process_chunks_concurrent(
     latest_generation: &AtomicU64,
     process: impl Fn(&DocumentChunk) -> Option<Vec<Range<usize>>> + Sync,
 ) -> Option<Vec<Range<usize>>> {
-    let chunk_count = chunks.len();
-    if chunk_count == 0 {
+    if chunks.is_empty() {
         return Some(Vec::new());
     }
 
-    let workers = intra_parallelism.min(chunk_count).max(1);
-    if workers == 1 || chunk_count < INTRA_BUFFER_PARALLELISM_MIN_CHUNKS {
-        let mut matches = Vec::new();
-        for chunk in &chunks {
-            if latest_generation.load(Ordering::Relaxed) != generation {
-                return None;
-            }
-            matches.extend(process(chunk)?);
-        }
-        return Some(matches);
+    let workers = intra_parallelism.min(chunks.len()).max(1);
+    if workers == 1 || chunks.len() < INTRA_BUFFER_PARALLELISM_MIN_CHUNKS {
+        return process_chunk_batch(
+            &chunks,
+            generation,
+            latest_generation,
+            &AtomicBool::new(false),
+            &process,
+        )
+        .map(|matches| matches.into_iter().flatten().collect());
     }
 
     capacity_metrics::record_search_intra_buffer_workers(workers);
-
     let stale = AtomicBool::new(false);
-    let chunk_size = chunk_count.div_ceil(workers);
-    let chunks_ref: &[DocumentChunk] = &chunks;
-    let process_ref = &process;
-    let stale_ref = &stale;
-    let mut per_worker: Vec<Vec<Vec<Range<usize>>>> = Vec::with_capacity(workers);
+    let chunk_size = chunks.len().div_ceil(workers);
+    let per_worker = thread::scope(|scope| {
+        let handles = chunks
+            .chunks(chunk_size)
+            .map(|worker_chunks| {
+                scope.spawn(|| {
+                    process_chunk_batch(
+                        worker_chunks,
+                        generation,
+                        latest_generation,
+                        &stale,
+                        &process,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
 
-    thread::scope(|scope| {
-        let mut handles = Vec::with_capacity(workers);
-        for worker_idx in 0..workers {
-            let start = worker_idx * chunk_size;
-            if start >= chunk_count {
-                break;
-            }
-            let end = (start + chunk_size).min(chunk_count);
-            let h = scope.spawn(move || -> Vec<Vec<Range<usize>>> {
-                let mut local: Vec<Vec<Range<usize>>> = Vec::with_capacity(end - start);
-                for chunk in &chunks_ref[start..end] {
-                    if stale_ref.load(Ordering::Relaxed) {
-                        return local;
-                    }
-                    if latest_generation.load(Ordering::Relaxed) != generation {
-                        stale_ref.store(true, Ordering::Relaxed);
-                        return local;
-                    }
-                    if let Some(matches) = process_ref(chunk) {
-                        local.push(matches);
-                    } else {
-                        stale_ref.store(true, Ordering::Relaxed);
-                        return local;
-                    }
-                }
-                local
-            });
-            handles.push(h);
-        }
-        for h in handles {
-            if let Ok(local) = h.join() {
-                per_worker.push(local);
-            }
-        }
+        handles
+            .into_iter()
+            .filter_map(|handle| handle.join().ok().flatten())
+            .collect::<Vec<_>>()
     });
 
-    if stale.load(Ordering::Relaxed) || latest_generation.load(Ordering::Relaxed) != generation {
-        return None;
-    }
+    generation_is_current(generation, latest_generation, &stale)
+        .then(|| flatten_worker_matches(per_worker))
+}
 
-    let total: usize = per_worker
-        .iter()
-        .flat_map(|worker_matches| worker_matches.iter())
-        .map(Vec::len)
-        .sum();
-    let mut all = Vec::with_capacity(total);
-    for worker_matches in per_worker {
-        for mut chunk_matches in worker_matches {
-            all.append(&mut chunk_matches);
+fn process_chunk_batch(
+    chunks: &[DocumentChunk],
+    generation: u64,
+    latest_generation: &AtomicU64,
+    stale: &AtomicBool,
+    process: &impl Fn(&DocumentChunk) -> Option<Vec<Range<usize>>>,
+) -> Option<Vec<Vec<Range<usize>>>> {
+    let mut matches = Vec::with_capacity(chunks.len());
+    for chunk in chunks {
+        if !generation_is_current(generation, latest_generation, stale) {
+            return None;
         }
+        let Some(chunk_matches) = process(chunk) else {
+            stale.store(true, Ordering::Relaxed);
+            return None;
+        };
+        matches.push(chunk_matches);
     }
-    Some(all)
+    Some(matches)
+}
+
+fn generation_is_current(
+    generation: u64,
+    latest_generation: &AtomicU64,
+    stale: &AtomicBool,
+) -> bool {
+    !stale.load(Ordering::Relaxed) && latest_generation.load(Ordering::Relaxed) == generation
+}
+
+fn flatten_worker_matches(per_worker: Vec<Vec<Vec<Range<usize>>>>) -> Vec<Range<usize>> {
+    let total = per_worker.iter().flatten().map(Vec::len).sum();
+    let mut matches = Vec::with_capacity(total);
+    for mut chunk_matches in per_worker.into_iter().flatten() {
+        matches.append(&mut chunk_matches);
+    }
+    matches
 }

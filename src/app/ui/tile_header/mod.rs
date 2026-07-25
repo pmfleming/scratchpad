@@ -101,12 +101,8 @@ pub(crate) fn render_tile_header(
             |buffer| buffer.display_name(),
         );
         let preview_lines = preview_lines_for_view(tab, request.view_id);
-        *state.preview_overlay = Some(split_handler.make_preview(
-            preview_state,
-            title.clone(),
-            preview_lines,
-            rects.split_hit,
-        ));
+        *state.preview_overlay =
+            Some(split_handler.make_preview(preview_state, title, preview_lines, rects.split_hit));
     }
     if layout.can_close
         && show_control(

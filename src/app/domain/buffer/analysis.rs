@@ -6,6 +6,7 @@ pub(crate) use incremental::{
 };
 pub(crate) use inspection::normalize_inserted_text_line_endings;
 use inspection::{TextInspection, line_ending_style};
+pub(crate) use line_endings::accumulate_line_count;
 mod line_endings;
 
 mod incremental;

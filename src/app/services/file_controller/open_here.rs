@@ -466,7 +466,7 @@ mod tests {
             .unwrap();
         let mut app = test_app(directory.path(), vec![tab]);
 
-        FileController::open_selected_paths_here_async(&mut app, vec![second.clone()]);
+        FileController::open_selected_paths_here_async(&mut app, vec![second]);
 
         assert_eq!(app.tab_manager.tabs.as_slice().len(), 1);
         assert_eq!(app.tab_manager.tabs.as_slice()[0].buffers().count(), 2);

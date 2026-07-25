@@ -160,7 +160,7 @@ fn progressive_session_hydration_replaces_matching_cold_shell_after_index_shift(
             |_, _, _| true,
             |tab_index, tab, cold_session_tab| {
                 if let Some(tab) = cold_session_tab {
-                    cold_payload = Some(tab.clone());
+                    cold_payload = Some(tab);
                 }
                 streamed_tabs.push((tab_index, tab));
                 true

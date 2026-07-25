@@ -222,10 +222,9 @@ pub fn apply_editor_fonts(
         .chain(fallback_names)
         .collect();
 
-    fonts.families.insert(
-        egui::FontFamily::Proportional,
-        proportional_candidates.clone(),
-    );
+    fonts
+        .families
+        .insert(egui::FontFamily::Proportional, proportional_candidates);
     fonts
         .families
         .insert(egui::FontFamily::Monospace, monospace_candidates.clone());
