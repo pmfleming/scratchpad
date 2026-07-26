@@ -6,6 +6,7 @@ default-run = "scratchpad"
 
 [features]
 inspection = ["eframe/inspection"]
+count-lines = ["dep:proc-macro2", "dep:syn"]
 
 [dependencies]
 eframe = "0.35.0"
@@ -17,16 +18,14 @@ memchr = "2.8.2"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 toml = "1.1.2"
-serde_yaml = "0.9.34"
 encoding_rs = "0.8.35"
-encoding_rs_io = "0.1.7"
 chardetng = "1.0.0"
 log = "0.4.33"
 fontdb = "0.23.0"
-syn = { version = "2.0.118", features = ["full", "extra-traits", "visit"] }
-proc-macro2 = { version = "1.0.106", features = ["span-locations"] }
+syn = { version = "2.0.118", features = ["full", "extra-traits", "visit"], optional = true }
+proc-macro2 = { version = "1.0.106", features = ["span-locations"], optional = true }
 rustc-hash = "2.1.2"
-smallvec = { version = "2.0.0-alpha.12", features = ["serde"] }
+smallvec = "1.15.2"
 sysinfo = { version = "0.39.5", default-features = false, features = ["system"] }
 
 [target.'cfg(windows)'.dependencies]
@@ -45,6 +44,7 @@ tempfile = "3.27.0"
 [[bin]]
 name = "count_lines"
 path = "scripts/count_lines.rs"
+required-features = ["count-lines"]
 
 [[bench]]
 name = "search_speed"

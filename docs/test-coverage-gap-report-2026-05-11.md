@@ -99,7 +99,7 @@ Several 400–540 LOC rendering files have no tests. Egui rendering is hard to u
 ## Notable Coverage Strengths
 
 - **Piece tree / document / editing**: ~75 inline tests across editor_content + buffer modules; the editing engine is the best-tested area.
-- **Settings & session persistence**: integration tests cover round-trip, malformed input, legacy YAML migration, and dirty-buffer conflicts.
+- **Settings & session persistence**: integration tests cover round-trip, malformed input, ignored legacy YAML, and dirty-buffer conflicts.
 - **Startup arg parsing**: 8 integration tests cover the user-facing CLI surface.
 - **Search dialog state**: `app_state/search_state/api_tests.rs` (7) plus `services/search.rs` (8) plus the workflow integration tests give end-to-end confidence on the count path.
 

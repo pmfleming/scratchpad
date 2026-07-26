@@ -232,7 +232,7 @@ fn parse_args() -> Result<CountOptions, String> {
 }
 
 fn print_usage() {
-    println!("Usage: cargo run --bin count_lines -- [--exclude-tests]");
+    println!("Usage: cargo run --features count-lines --bin count_lines -- [--exclude-tests]");
 }
 
 fn main() -> io::Result<()> {

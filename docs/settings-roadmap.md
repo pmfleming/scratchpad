@@ -206,7 +206,7 @@ Recommended migration approach:
 
 1. Introduce TOML settings loading.
 2. If `settings.toml` exists, it becomes the source of truth.
-3. If `settings.toml` does not exist, optionally migrate legacy `settings.yaml` or fall back to legacy values from the session manifest.
+3. If `settings.toml` does not exist, fall back to legacy values from the session manifest.
 4. After the first successful settings save, TOML becomes canonical.
 5. Stop writing migrated settings into new session manifests once the settings system is fully adopted.
 

@@ -21,12 +21,10 @@ pub use model::{
 pub(crate) use model::{color_from_hex, color_to_hex, default_font_size, default_word_wrap};
 
 const SETTINGS_FILE_NAME: &str = "settings.toml";
-const LEGACY_SETTINGS_FILE_NAME: &str = "settings.yaml";
 
 pub struct SettingsStore {
     root: PathBuf,
     settings_path: PathBuf,
-    legacy_settings_path: PathBuf,
     fallback_root: Option<PathBuf>,
 }
 
@@ -40,11 +38,9 @@ impl SettingsStore {
     #[must_use]
     pub fn new(root: PathBuf) -> Self {
         let settings_path = root.join(SETTINGS_FILE_NAME);
-        let legacy_settings_path = root.join(LEGACY_SETTINGS_FILE_NAME);
         Self {
             root,
             settings_path,
-            legacy_settings_path,
             fallback_root: None,
         }
     }
@@ -61,12 +57,6 @@ impl SettingsStore {
             return self.load_toml();
         }
 
-        if self.legacy_settings_path.exists() {
-            let settings = self.load_legacy_yaml()?;
-            self.save(&settings)?;
-            return Ok(Some(settings));
-        }
-
         if let Some(settings) = self.load_fallback_settings()? {
             self.save(&settings)?;
             return Ok(Some(settings));
@@ -81,10 +71,6 @@ impl SettingsStore {
         Ok(Some(settings))
     }
 
-    fn load_legacy_yaml(&self) -> io::Result<AppSettings> {
-        Self::load_yaml_path(&self.legacy_settings_path)
-    }
-
     fn load_fallback_settings(&self) -> io::Result<Option<AppSettings>> {
         let Some(fallback_root) = &self.fallback_root else {
             return Ok(None);
@@ -96,17 +82,7 @@ impl SettingsStore {
             return parse_toml_settings(&raw).map(Some);
         }
 
-        let fallback_legacy_settings_path = fallback_root.join(LEGACY_SETTINGS_FILE_NAME);
-        if fallback_legacy_settings_path.exists() {
-            return Self::load_yaml_path(&fallback_legacy_settings_path).map(Some);
-        }
-
         Ok(None)
-    }
-
-    fn load_yaml_path(path: &Path) -> io::Result<AppSettings> {
-        let raw = fs::read_to_string(path)?;
-        serde_yaml::from_str(&raw).map_err(invalid_data)
     }
 
     pub fn save(&self, settings: &AppSettings) -> io::Result<()> {

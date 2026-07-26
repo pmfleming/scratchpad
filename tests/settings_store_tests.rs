@@ -209,47 +209,12 @@ show_tab_characters = true
 }
 
 #[test]
-fn legacy_yaml_migrates_to_toml_when_toml_is_missing() {
+fn legacy_yaml_is_ignored_when_toml_is_missing() {
     let fixture = SettingsFixture::new();
-    fixture.write(
-        "settings.yaml",
-        r##"
-editor:
-  font_size: 15.0
-  word_wrap: false
-  editor_gutter: 0
-  editor_font: mono
-  theme_mode: dark
-  editor_text_color: "#eeeeee"
-  editor_background_color: "#111111"
-  editor_text_highlight_color: "#fff36d"
-  editor_text_highlight_text_color: "#0b0f3d"
-workspace:
-  tab_list_position: right
-  tab_order_mode: custom
-  custom_tab_order: []
-  file_open_disposition: current_tab
-  new_tab_placement: start
-  startup_session_behavior: start_fresh_session
-  tab_list_width: 200.0
-  auto_hide_tab_list: true
-  tab_list_auto_hide_delay_seconds: 2.0
-  recent_files_enabled: false
-ui:
-  status_bar_visible: false
-  window_state: {}
-  settings_tab_open: true
-  settings_tab_index: null
-"##,
-    );
+    fixture.write("settings.yaml", "editor:\n  font_size: 15.0\n");
 
-    let loaded = fixture.load();
-
-    assert_eq!(loaded.editor.font_size, 15.0);
-    assert_eq!(loaded.editor.editor_font, EditorFontPreset::Mono);
-    assert_eq!(loaded.workspace.tab_list_position, TabListPosition::Right);
-    assert_eq!(loaded.platform.profile, PlatformProfile::Auto);
-    assert!(fixture.path_exists("settings.toml"));
+    assert!(fixture.store.load().unwrap().is_none());
+    assert!(!fixture.path_exists("settings.toml"));
 }
 
 #[test]
