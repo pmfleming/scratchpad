@@ -116,7 +116,9 @@ impl SessionStore {
             }
 
             for handle in handles {
-                restored.extend(handle.join().expect("session restore worker panicked"));
+                if let Ok(restored_tabs) = handle.join() {
+                    restored.extend(restored_tabs);
+                }
             }
         });
 

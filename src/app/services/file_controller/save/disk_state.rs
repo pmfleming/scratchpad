@@ -101,9 +101,10 @@ impl FileController {
         buffer_name: String,
         disk_state: DiskFileState,
     ) {
-        let buffer = app.tab_manager.tabs.as_mut_slice()[index]
-            .buffer_by_id_mut(buffer_id)
-            .expect("buffer location validated");
+        let Some(buffer) = app.tab_manager.tabs.as_mut_slice()[index].buffer_by_id_mut(buffer_id)
+        else {
+            return;
+        };
         buffer.mark_conflict_on_disk(Some(disk_state));
         app.state.status.set_warning_status_in_domain(
             StatusDomain::Disk,
@@ -147,9 +148,10 @@ impl FileController {
         else {
             return false;
         };
-        let buffer = app.tab_manager.tabs.as_mut_slice()[index]
-            .buffer_by_id_mut(buffer_id)
-            .expect("buffer location validated");
+        let Some(buffer) = app.tab_manager.tabs.as_mut_slice()[index].buffer_by_id_mut(buffer_id)
+        else {
+            return false;
+        };
         buffer.disk_state = None;
         buffer.mark_missing_on_disk();
         app.state.status.set_warning_status_in_domain(

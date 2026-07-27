@@ -25,4 +25,13 @@ On Linux, also run the configured cross-target checks when the required toolchai
 
 Changes should include focused regression tests. Document user-visible changes in `CHANGELOG.md`. Avoid unrelated formatting or refactoring, and explain panic or unsafe invariants where they cannot be removed.
 
+Run the sibling Rust Quality Lens checkout when changing reliability-sensitive code:
+
+```bash
+cargo run --manifest-path ../rust-quality-lens/Cargo.toml -- measure reliability --config rqlens.toml
+cargo run --manifest-path ../rust-quality-lens/Cargo.toml -- check --config rqlens.toml
+```
+
+The configured limits exclude profiling binaries and prevent new application panic paths. Lower a limit whenever an existing finding is removed; do not increase one without documenting the accepted risk.
+
 Follow `CODE_OF_CONDUCT.md`. Report vulnerabilities using `SECURITY.md`, not a public issue.

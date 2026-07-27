@@ -33,9 +33,11 @@ pub(super) fn workspace_tab_from_restored_buffers(
         buffer.show_control_chars = buffer.artifact_summary.has_control_chars()
             && (buffer.show_control_chars || visible_control_char_buffer_ids.contains(&buffer.id));
     }
-    let active_buffer_id = active_buffer_id
-        .or_else(|| buffers.first().map(|buffer| buffer.id))
-        .expect("restored workspace should contain at least one buffer");
+    let Some(active_buffer_id) =
+        active_buffer_id.or_else(|| buffers.first().map(|buffer| buffer.id))
+    else {
+        return WorkspaceTab::untitled();
+    };
     let active_buffer_index = buffers
         .iter()
         .position(|buffer| buffer.id == active_buffer_id)

@@ -139,9 +139,7 @@ pub(super) fn read_first_visible_window(
         match std::str::from_utf8(without_bom) {
             Ok(text) => (text.to_owned(), false),
             Err(error) if error.error_len().is_none() && !complete => (
-                std::str::from_utf8(&without_bom[..error.valid_up_to()])
-                    .expect("UTF-8 valid prefix")
-                    .to_owned(),
+                String::from_utf8_lossy(&without_bom[..error.valid_up_to()]).into_owned(),
                 false,
             ),
             Err(_) => {

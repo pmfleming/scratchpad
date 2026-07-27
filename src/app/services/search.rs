@@ -211,17 +211,16 @@ where
             &mut should_continue,
         )
         .map(SearchOutcome::with_matches),
-        SearchMode::Regex => collect_regex_matches(
-            text,
-            program
-                .regex
-                .as_ref()
-                .expect("regex program requires regex"),
-            program.options.whole_word,
-            true,
-            &mut should_continue,
-        )
-        .map(SearchOutcome::with_matches),
+        SearchMode::Regex => program.regex.as_ref().and_then(|regex| {
+            collect_regex_matches(
+                text,
+                regex,
+                program.options.whole_word,
+                true,
+                &mut should_continue,
+            )
+            .map(SearchOutcome::with_matches)
+        }),
     }
 }
 

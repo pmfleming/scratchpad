@@ -209,10 +209,10 @@ impl FileController {
         buffer_id: BufferId,
         disk_state: Option<DiskFileState>,
     ) {
-        let buffer = app.tab_manager.tabs.as_mut_slice()[index]
-            .buffer_by_id_mut(buffer_id)
-            .expect("buffer location validated");
-        buffer.sync_to_disk_state(disk_state);
+        if let Some(buffer) = app.tab_manager.tabs.as_mut_slice()[index].buffer_by_id_mut(buffer_id)
+        {
+            buffer.sync_to_disk_state(disk_state);
+        }
     }
 
     fn save_buffer_to_path(

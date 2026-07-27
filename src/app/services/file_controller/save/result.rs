@@ -21,9 +21,11 @@ impl FileController {
             .update_buffer_path
             .then(|| CanonicalPathKey::from_path(&path));
         {
-            let buffer = app.tab_manager.tabs.as_mut_slice()[index]
-                .buffer_by_id_mut(action.buffer_id)
-                .expect("buffer location validated");
+            let Some(buffer) =
+                app.tab_manager.tabs.as_mut_slice()[index].buffer_by_id_mut(action.buffer_id)
+            else {
+                return;
+            };
             if let Some(format) = action.format_override {
                 buffer.replace_format_without_text_change(format);
             }
