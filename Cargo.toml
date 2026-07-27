@@ -2,6 +2,11 @@
 name = "scratchpad"
 version = "0.4.1"
 edition = "2024"
+rust-version = "1.95"
+description = "A Windows-first plain-text editor focused on resilient local text work."
+repository = "https://github.com/pmfleming/scratchpad"
+homepage = "https://github.com/pmfleming/scratchpad"
+readme = "README.md"
 default-run = "scratchpad"
 
 [features]

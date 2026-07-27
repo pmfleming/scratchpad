@@ -58,7 +58,7 @@ platform profile for compositor-managed window behavior.
 
 Prerequisites:
 
-- Rust via `rustup` or the provided Nix development shell
+- Rust 1.95 via the pinned `rust-toolchain.toml`, or the provided Nix development shell
 - Windows for the primary app target and MSI release flow
 - Linux desktop libraries for Linux builds (`gtk3`, Wayland/X11, fontconfig,
   OpenGL/Vulkan loader, and related `egui`/`winit` runtime dependencies)
@@ -68,9 +68,12 @@ Common development commands:
 
 ```powershell
 cargo run --release
-cargo test
+cargo test --all-features
+cargo hack check --feature-powerset
 cargo clippy --lib --all-features -- -D warnings
-cargo fmt --check
+cargo fmt --all -- --check
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
+cargo audit
 cargo build --release
 ```
 

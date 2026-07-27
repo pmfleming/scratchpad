@@ -13,6 +13,7 @@
 
       nativeBuildInputs = with pkgs; [
         cargo
+        cargo-hack
         clippy
         pkg-config
         rust-analyzer

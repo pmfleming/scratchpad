@@ -1,0 +1,7 @@
+[advisories]
+ignore = [
+    # These advisories target the unrelated crates.io package named `scratchpad`.
+    # This repository is a desktop editor with the same package name.
+    "RUSTSEC-2021-0030",
+    "RUSTSEC-2025-0049",
+]

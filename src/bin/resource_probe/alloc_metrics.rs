@@ -20,6 +20,8 @@ pub(super) struct TrackingAllocator;
 #[global_allocator]
 static GLOBAL_ALLOCATOR: TrackingAllocator = TrackingAllocator;
 
+// SAFETY: every allocation operation delegates to `System` with the original
+// pointer/layout contract and only updates independent atomic counters.
 unsafe impl GlobalAlloc for TrackingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // SAFETY: This allocator delegates the actual allocation to the system

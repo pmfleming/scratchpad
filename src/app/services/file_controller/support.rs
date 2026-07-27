@@ -228,7 +228,11 @@ impl FileController {
 
     pub(super) fn assign_saved_path(buffer: &mut BufferState, path: &Path) {
         buffer.set_path(Some(path.to_path_buf()));
-        buffer.name = path.file_name().unwrap().to_string_lossy().into_owned();
+        buffer.name = path
+            .file_name()
+            .unwrap_or(path.as_os_str())
+            .to_string_lossy()
+            .into_owned();
     }
 
     pub(super) fn deferred_buffer_refresh(buffer: &BufferState) -> Option<DeferredBufferRefresh> {

@@ -1,7 +1,7 @@
 //! Local scrolling primitives for the editor.
 //!
 //! Concepts adapted from egui's `ScrollArea`
-//! (https://github.com/emilk/egui/blob/master/crates/egui/src/containers/scroll_area.rs,
+//! (<https://github.com/emilk/egui/blob/master/crates/egui/src/containers/scroll_area.rs>,
 //! MIT/Apache-2.0). This is a focused editor-specific subset, not a general
 //! container: it owns persistent scroll state, viewport callback rendering,
 //! content-size based clamping, scrollbar visibility, and explicit input source

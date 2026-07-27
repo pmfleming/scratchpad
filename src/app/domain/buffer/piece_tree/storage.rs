@@ -113,7 +113,12 @@ impl PieceTreeStorage {
         let mut pending_cr = false;
 
         while let Some(bytes) = read_utf8_chunk(&mut reader, &mut carry, logical_start)? {
-            let text = std::str::from_utf8(&bytes).expect("validated UTF-8 chunk");
+            let text = std::str::from_utf8(&bytes).map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("invalid UTF-8 in {}: {error}", path.display()),
+                )
+            })?;
             let metrics = measure_text(text);
             pieces.push(Piece {
                 buffer: PieceBuffer::Original,
