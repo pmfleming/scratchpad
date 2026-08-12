@@ -24,16 +24,21 @@ pub enum ElectionResult {
 
 pub struct PrimaryInstance {
     endpoint: String,
-    _ownership: File,
+    ownership: File,
     listener: Option<interprocess::local_socket::Listener>,
     launch_tx: mpsc::SyncSender<LaunchRequest>,
     launch_rx: Option<mpsc::Receiver<LaunchRequest>>,
     wake_context: Arc<Mutex<Option<egui::Context>>>,
+    pending: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
 }
 
 pub struct BrokerInbox {
+    endpoint: String,
+    ownership: File,
     launch_rx: mpsc::Receiver<LaunchRequest>,
+    pending: Arc<AtomicBool>,
+    shutdown: Arc<AtomicBool>,
 }
 
 impl PrimaryInstance {
@@ -53,16 +58,17 @@ impl PrimaryInstance {
         let (launch_tx, launch_rx) = mpsc::sync_channel(INBOX_BOUND);
         Ok(Self {
             endpoint,
-            _ownership: ownership,
+            ownership,
             listener: Some(listener),
             launch_tx,
             launch_rx: Some(launch_rx),
             wake_context: Arc::new(Mutex::new(None)),
+            pending: Arc::new(AtomicBool::new(false)),
             shutdown: Arc::new(AtomicBool::new(false)),
         })
     }
 
-    pub fn start(&mut self, context: &egui::Context) -> io::Result<BrokerInbox> {
+    pub fn start(mut self, context: &egui::Context) -> io::Result<BrokerInbox> {
         let listener = self.listener.take().ok_or_else(|| {
             io::Error::new(io::ErrorKind::AlreadyExists, "broker already started")
         })?;
@@ -76,22 +82,35 @@ impl PrimaryInstance {
             listener,
             self.launch_tx.clone(),
             Arc::clone(&self.wake_context),
+            Arc::clone(&self.pending),
             Arc::clone(&self.shutdown),
         )?;
-        Ok(BrokerInbox { launch_rx })
-    }
-}
-
-impl Drop for PrimaryInstance {
-    fn drop(&mut self) {
-        self.shutdown.store(true, Ordering::Release);
-        let _ = transport::connect(&self.endpoint);
+        Ok(BrokerInbox {
+            endpoint: self.endpoint.clone(),
+            ownership: self.ownership.try_clone()?,
+            launch_rx,
+            pending: Arc::clone(&self.pending),
+            shutdown: Arc::clone(&self.shutdown),
+        })
     }
 }
 
 impl BrokerInbox {
+    #[must_use]
+    pub fn take_pending(&self) -> bool {
+        self.pending.swap(false, Ordering::AcqRel)
+    }
+
     pub fn try_recv(&self) -> Result<LaunchRequest, mpsc::TryRecvError> {
         self.launch_rx.try_recv()
+    }
+}
+
+impl Drop for BrokerInbox {
+    fn drop(&mut self) {
+        let _ = &self.ownership;
+        self.shutdown.store(true, Ordering::Release);
+        let _ = transport::connect(&self.endpoint);
     }
 }
 
@@ -140,6 +159,7 @@ fn spawn_listener(
     listener: interprocess::local_socket::Listener,
     launch_tx: mpsc::SyncSender<LaunchRequest>,
     wake_context: Arc<Mutex<Option<egui::Context>>>,
+    pending: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
 ) -> io::Result<()> {
     thread::Builder::new()
@@ -153,8 +173,13 @@ fn spawn_listener(
                 if shutdown.load(Ordering::Acquire) {
                     break;
                 }
-                let response =
-                    handle_connection(&mut stream, &launch_tx, &wake_context, &mut recent);
+                let response = handle_connection(
+                    &mut stream,
+                    &launch_tx,
+                    &wake_context,
+                    &pending,
+                    &mut recent,
+                );
                 let _ = transport::send_response(&mut stream, &response);
             }
         })
@@ -165,6 +190,7 @@ fn handle_connection(
     stream: &mut interprocess::local_socket::Stream,
     launch_tx: &mpsc::SyncSender<LaunchRequest>,
     wake_context: &Arc<Mutex<Option<egui::Context>>>,
+    pending: &Arc<AtomicBool>,
     recent: &mut RecentInvocations,
 ) -> BrokerResponse {
     let request = match transport::receive_request(stream) {
@@ -183,6 +209,7 @@ fn handle_connection(
     match launch_tx.try_send(request.clone()) {
         Ok(()) => {
             recent.insert(request.invocation_id);
+            pending.store(true, Ordering::Release);
             if let Ok(context) = wake_context.lock()
                 && let Some(context) = context.as_ref()
             {

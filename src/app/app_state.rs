@@ -1,6 +1,7 @@
 use crate::app::CanonicalPathKey;
 use crate::app::domain::{BufferId, SplitAxis, TabManager};
 use crate::app::fonts::EditorFontSelection;
+use crate::app::services::instance_broker::{BrokerInbox, LaunchRequest};
 use crate::app::services::session_store::SessionStore;
 use crate::app::services::settings_store::{AppSettings, AppThemeMode, SettingsStore};
 use crate::app::shortcut_keymap::InvalidShortcutOverride;
@@ -19,6 +20,7 @@ mod dialog_state;
 mod file_watch;
 mod focus_state;
 pub(crate) mod frame;
+mod instance_broker;
 mod runtime_state;
 mod search_state;
 pub(crate) mod settings_state;
@@ -128,6 +130,8 @@ pub struct ScratchpadAppState {
     pub(crate) settings_preview_quote_index: usize,
     pub(crate) background_io: BackgroundIoState,
     pub(crate) file_watch: FileWatchState,
+    pub(crate) broker_inbox: Option<BrokerInbox>,
+    pub(crate) deferred_launch_requests: VecDeque<LaunchRequest>,
 }
 
 impl Default for ScratchpadApp {

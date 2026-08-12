@@ -6,6 +6,7 @@ use scratchpad::ScratchpadApp;
 use scratchpad::app::app_paths;
 use scratchpad::app::app_state::prepare_context_before_first_frame;
 use scratchpad::app::platform;
+use scratchpad::app::services::instance_broker::{ElectionResult, LaunchRequest, PrimaryInstance};
 use scratchpad::app::services::session_store::SessionStore;
 use scratchpad::app::services::settings_store::{
     DEFAULT_WINDOW_INNER_SIZE, MIN_WINDOW_INNER_SIZE, SettingsStore, WindowState,
@@ -25,6 +26,27 @@ fn main() -> eframe::Result<()> {
         }
         _ => {}
     }
+
+    let startup_options = match &startup_action {
+        scratchpad::app::startup::StartupAction::Run(options) => options.clone(),
+        scratchpad::app::startup::StartupAction::Help
+        | scratchpad::app::startup::StartupAction::Version => StartupOptions::default(),
+    };
+    let launch_request = LaunchRequest::from_startup_options(
+        new_invocation_id().map_err(eframe::Error::AppCreation)?,
+        startup_options.clone(),
+    )
+    .map_err(app_creation_error)?;
+    let primary = match PrimaryInstance::elect(&app_paths::runtime_session_root(), &launch_request)
+        .map_err(app_creation_error)?
+    {
+        ElectionResult::Primary(primary) => primary,
+        ElectionResult::Forwarded => return Ok(()),
+        ElectionResult::Rejected(reason) => {
+            eprintln!("Scratchpad: {reason}");
+            return Ok(());
+        }
+    };
 
     let legacy_root = app_paths::legacy_temp_root();
     let session_store =
@@ -47,22 +69,29 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Scratchpad",
         options,
-        Box::new(|cc| {
-            let startup_options = match &startup_action {
-                scratchpad::app::startup::StartupAction::Run(options) => options.clone(),
-                scratchpad::app::startup::StartupAction::Help
-                | scratchpad::app::startup::StartupAction::Version => StartupOptions::default(),
-            };
+        Box::new(move |cc| {
+            let inbox = primary.start(&cc.egui_ctx)?;
             let mut app = ScratchpadApp::with_stores_and_runtime_startup(
                 session_store,
                 settings_store,
                 startup_options,
             );
+            app.attach_instance_broker(inbox);
             prepare_context_before_first_frame(&mut app, &cc.egui_ctx);
             cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
             Ok(Box::new(app))
         }),
     )
+}
+
+fn app_creation_error(error: std::io::Error) -> eframe::Error {
+    eframe::Error::AppCreation(Box::new(error))
+}
+
+fn new_invocation_id() -> Result<u128, Box<dyn std::error::Error + Send + Sync>> {
+    let mut bytes = [0_u8; 16];
+    getrandom::fill(&mut bytes)?;
+    Ok(u128::from_le_bytes(bytes))
 }
 
 fn renderer_from_env() -> eframe::Renderer {

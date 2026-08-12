@@ -32,7 +32,7 @@ fn ownership_lock_prevents_a_second_primary() {
 #[test]
 fn primary_listener_accepts_a_forwarded_request() {
     let directory = tempfile::tempdir().unwrap();
-    let ElectionResult::Primary(mut primary) =
+    let ElectionResult::Primary(primary) =
         PrimaryInstance::elect(directory.path(), &request(1)).unwrap()
     else {
         panic!("first election should become primary");

@@ -52,6 +52,7 @@ pub(super) fn prepare_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
     FileController::poll_open_file_dialog(app, ctx);
     let background_poll_started_at = Instant::now();
     app.poll_background_io(ctx);
+    app.apply_pending_broker_launches(ctx);
     record_frame_phase(
         FramePhase::BackgroundPoll,
         background_poll_started_at.elapsed(),

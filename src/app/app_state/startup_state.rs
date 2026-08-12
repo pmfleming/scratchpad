@@ -123,6 +123,8 @@ impl ScratchpadApp {
                 settings_preview_quote_index: 2,
                 background_io: BackgroundIoState::new(background_io_tx, background_io_rx),
                 file_watch: FileWatchState::default(),
+                broker_inbox: None,
+                deferred_launch_requests: VecDeque::new(),
             },
         };
 
