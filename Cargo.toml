@@ -26,6 +26,8 @@ toml = "1.1.2"
 encoding_rs = "0.8.35"
 chardetng = "1.0.0"
 log = "0.4.33"
+interprocess = "2.4.3"
+getrandom = "0.4.3"
 fontdb = "0.23.0"
 syn = { version = "2.0.118", features = ["full", "extra-traits", "visit"], optional = true }
 proc-macro2 = { version = "1.0.106", features = ["span-locations"], optional = true }

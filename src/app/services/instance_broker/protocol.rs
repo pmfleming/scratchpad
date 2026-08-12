@@ -11,15 +11,15 @@ const FLAG_TARGET_EXPLICIT: u8 = 1 << 2;
 const FLAG_ACTIVATE: u8 = 1 << 3;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct LaunchRequest {
-    pub(crate) invocation_id: u128,
-    pub(crate) sender_pid: u32,
-    pub(crate) options: StartupOptions,
-    pub(crate) activate: bool,
+pub struct LaunchRequest {
+    pub invocation_id: u128,
+    pub sender_pid: u32,
+    pub options: StartupOptions,
+    pub activate: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum BrokerResponse {
+pub enum BrokerResponse {
     Accepted,
     Busy,
     Rejected(String),
@@ -27,7 +27,16 @@ pub(crate) enum BrokerResponse {
 }
 
 impl LaunchRequest {
-    pub(crate) fn validate_for_existing_primary(&self) -> Result<(), String> {
+    pub fn from_startup_options(invocation_id: u128, options: StartupOptions) -> io::Result<Self> {
+        Ok(Self {
+            invocation_id,
+            sender_pid: std::process::id(),
+            options: normalize_startup_paths(options)?,
+            activate: true,
+        })
+    }
+
+    pub fn validate_for_existing_primary(&self) -> Result<(), String> {
         if !self.options.restore_session && self.options.restore_session_explicit {
             return Err(
                 "/clean cannot be applied while Scratchpad is already running. Close the existing window and try again."
@@ -37,7 +46,7 @@ impl LaunchRequest {
         Ok(())
     }
 
-    pub(crate) fn encode(&self) -> io::Result<Vec<u8>> {
+    pub(super) fn encode(&self) -> io::Result<Vec<u8>> {
         let mut body = Vec::new();
         body.extend_from_slice(&PROTOCOL_VERSION.to_le_bytes());
         body.extend_from_slice(&self.invocation_id.to_le_bytes());
@@ -57,7 +66,7 @@ impl LaunchRequest {
         bounded_frame(body)
     }
 
-    pub(crate) fn decode(frame: &[u8]) -> io::Result<Self> {
+    pub(super) fn decode(frame: &[u8]) -> io::Result<Self> {
         let body = decode_frame_body(frame)?;
         let mut reader = Reader::new(body);
         let version = reader.read_u16()?;
@@ -95,7 +104,7 @@ impl LaunchRequest {
 }
 
 impl BrokerResponse {
-    pub(crate) fn encode(&self) -> io::Result<Vec<u8>> {
+    pub(super) fn encode(&self) -> io::Result<Vec<u8>> {
         let mut body = vec![match self {
             Self::Accepted => 0,
             Self::Busy => 1,
@@ -108,7 +117,7 @@ impl BrokerResponse {
         bounded_frame(body)
     }
 
-    pub(crate) fn decode(frame: &[u8]) -> io::Result<Self> {
+    pub(super) fn decode(frame: &[u8]) -> io::Result<Self> {
         let body = decode_frame_body(frame)?;
         let mut reader = Reader::new(body);
         let response = match reader.read_u8()? {
@@ -163,6 +172,16 @@ fn decode_target(reader: &mut Reader<'_>) -> io::Result<StartupOpenTarget> {
         2 => Ok(StartupOpenTarget::TabIndex(reader.read_u64()? as usize)),
         value => Err(invalid_data(format!("unknown launch target {value}"))),
     }
+}
+
+fn normalize_startup_paths(mut options: StartupOptions) -> io::Result<StartupOptions> {
+    let current_dir = std::env::current_dir()?;
+    for path in &mut options.files {
+        if path.is_relative() {
+            *path = current_dir.join(&*path);
+        }
+    }
+    Ok(options)
 }
 
 fn encode_optional_string(value: Option<&str>, output: &mut Vec<u8>) -> io::Result<()> {
