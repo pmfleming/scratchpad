@@ -66,7 +66,7 @@ Completed after the process integration phase:
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings`: pass.
 - `cargo test --workspace`: pass.
 - Performance lens slowspots: authoritative thresholds pass on the confirmation run.
-- Frame metrics: 4 MiB event-to-tessellation p99 0.34 ms against the 8.33 ms budget.
+- Frame metrics: final 4 MiB event-to-tessellation p99 0.25 ms against the 8.33 ms budget.
 - Performance review: all seven promises pass; budget misses remain 0.
 - Rust quality lens `verify`, `measure all`, and `check`: pass.
 - Policy-controlled production findings: 14 `expect` (limit 14), 3 `panic` (limit 3), and 0 undocumented unsafe; the broker added no production occurrences.
