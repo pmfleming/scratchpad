@@ -25,12 +25,11 @@ pub enum ElectionResult {
 pub struct PrimaryInstance {
     endpoint: String,
     ownership: File,
-    listener: Option<interprocess::local_socket::Listener>,
-    launch_tx: mpsc::SyncSender<LaunchRequest>,
     launch_rx: Option<mpsc::Receiver<LaunchRequest>>,
     wake_context: Arc<Mutex<Option<egui::Context>>>,
     pending: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
+    handed_off: bool,
 }
 
 pub struct BrokerInbox {
@@ -56,42 +55,52 @@ impl PrimaryInstance {
     fn become_primary(endpoint: String, ownership: File) -> io::Result<Self> {
         let listener = transport::bind_listener(&endpoint)?;
         let (launch_tx, launch_rx) = mpsc::sync_channel(INBOX_BOUND);
+        let wake_context = Arc::new(Mutex::new(None));
+        let pending = Arc::new(AtomicBool::new(false));
+        let shutdown = Arc::new(AtomicBool::new(false));
+        spawn_listener(
+            listener,
+            launch_tx,
+            Arc::clone(&wake_context),
+            Arc::clone(&pending),
+            Arc::clone(&shutdown),
+        )?;
         Ok(Self {
             endpoint,
             ownership,
-            listener: Some(listener),
-            launch_tx,
             launch_rx: Some(launch_rx),
-            wake_context: Arc::new(Mutex::new(None)),
-            pending: Arc::new(AtomicBool::new(false)),
-            shutdown: Arc::new(AtomicBool::new(false)),
+            wake_context,
+            pending,
+            shutdown,
+            handed_off: false,
         })
     }
 
     pub fn start(mut self, context: &egui::Context) -> io::Result<BrokerInbox> {
-        let listener = self.listener.take().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::AlreadyExists, "broker already started")
-        })?;
         let launch_rx = self.launch_rx.take().ok_or_else(|| {
             io::Error::new(io::ErrorKind::AlreadyExists, "broker inbox already taken")
         })?;
         if let Ok(mut wake_context) = self.wake_context.lock() {
             *wake_context = Some(context.clone());
         }
-        spawn_listener(
-            listener,
-            self.launch_tx.clone(),
-            Arc::clone(&self.wake_context),
-            Arc::clone(&self.pending),
-            Arc::clone(&self.shutdown),
-        )?;
-        Ok(BrokerInbox {
+        let inbox = BrokerInbox {
             endpoint: self.endpoint.clone(),
             ownership: self.ownership.try_clone()?,
             launch_rx,
             pending: Arc::clone(&self.pending),
             shutdown: Arc::clone(&self.shutdown),
-        })
+        };
+        self.handed_off = true;
+        Ok(inbox)
+    }
+}
+
+impl Drop for PrimaryInstance {
+    fn drop(&mut self) {
+        if !self.handed_off {
+            self.shutdown.store(true, Ordering::Release);
+            let _ = transport::connect(&self.endpoint);
+        }
     }
 }
 
