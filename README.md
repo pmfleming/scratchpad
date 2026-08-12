@@ -112,6 +112,8 @@ EGUI_INSPECTION=1 cargo run --features inspection
 With `EGUI_INSPECTION=1`, eframe listens on egui's inspection port so tools such
 as `egui_mcp` can inspect and drive the running app.
 
+Scratchpad is single-instance per user and session-state root. Starting it again forwards incoming files and workspace-target switches to the existing window, then exits without restoring or writing a second copy of session state. An invocation with no files activates the existing window. `/clean` requires the existing Scratchpad window to be closed first.
+
 Useful runtime switches:
 
 ```powershell
