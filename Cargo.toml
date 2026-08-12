@@ -14,7 +14,7 @@ inspection = ["eframe/inspection"]
 count-lines = ["dep:proc-macro2", "dep:syn"]
 
 [dependencies]
-eframe = "0.35.0"
+eframe = "0.36.1"
 egui-phosphor = { path = "crates/egui_phosphor" }
 rfd = "0.17.2"
 regex = "1.12.4"
@@ -39,7 +39,7 @@ sysinfo = { version = "0.39.5", default-features = false, features = ["system"] 
 windows_file_watch = { path = "crates/windows_file_watch" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-eframe = { version = "0.35.0", features = ["glow"] }
+eframe = { version = "0.36.1", features = ["glow"] }
 linux_file_watch = { path = "crates/linux_file_watch" }
 rustix = { version = "1.1.4", features = ["fs"] }
 

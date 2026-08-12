@@ -394,7 +394,7 @@ mod tests {
     ) -> std::sync::Arc<egui::Galley> {
         let font_id = egui::FontId::monospace(14.0);
         let mut galley = None;
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             let job = egui::text::LayoutJob::simple(
                 text.to_owned(),
                 font_id.clone(),
@@ -403,6 +403,7 @@ mod tests {
             );
             galley = Some(ui.fonts_mut(|fonts| fonts.layout_job(job)));
         });
+        output.textures_delta.clear();
         galley.expect("test galley should be created")
     }
 

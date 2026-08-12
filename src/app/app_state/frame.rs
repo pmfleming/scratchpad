@@ -313,36 +313,38 @@ fn paint_root_background(ui: &egui::Ui, fill: egui::Color32) {
     ui.painter().rect_filled(ui.max_rect(), 0.0, fill);
 }
 
-fn dropped_file_paths(dropped_files: &[egui::DroppedFile]) -> Vec<PathBuf> {
+fn dropped_file_paths(dropped_files: &[egui::DroppedFileHandle]) -> Vec<PathBuf> {
     dropped_files
         .iter()
-        .filter_map(|file| file.path.clone())
+        .map(|file| file.path().to_path_buf())
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::{dropped_file_paths, egui};
-    use std::path::PathBuf;
+    use std::{path::PathBuf, sync::Arc};
+
+    #[derive(Debug)]
+    struct TestDroppedFile(PathBuf);
+
+    impl egui::DroppedFile for TestDroppedFile {
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+
+        fn bytes(&self) -> Result<Vec<u8>, String> {
+            Ok(Vec::new())
+        }
+    }
 
     #[test]
-    fn dropped_file_paths_uses_only_files_with_paths() {
+    fn dropped_file_paths_returns_all_paths() {
         let first = PathBuf::from(r"C:\notes\one.txt");
         let second = PathBuf::from(r"C:\notes\two.txt");
-        let dropped_files = vec![
-            egui::DroppedFile {
-                path: Some(first.clone()),
-                ..Default::default()
-            },
-            egui::DroppedFile {
-                name: "virtual.txt".to_owned(),
-                bytes: Some(std::sync::Arc::new([1, 2, 3])),
-                ..Default::default()
-            },
-            egui::DroppedFile {
-                path: Some(second.clone()),
-                ..Default::default()
-            },
+        let dropped_files: Vec<egui::DroppedFileHandle> = vec![
+            Arc::new(TestDroppedFile(first.clone())),
+            Arc::new(TestDroppedFile(second.clone())),
         ];
 
         assert_eq!(dropped_file_paths(&dropped_files), vec![first, second]);

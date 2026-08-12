@@ -55,7 +55,8 @@ fn follow_focus_persistence_round_trips() {
 }
 
 fn advance_egui_frame(ctx: &eframe::egui::Context) {
-    let _ = ctx.run_ui(eframe::egui::RawInput::default(), |_| {});
+    let mut output = ctx.run_ui(eframe::egui::RawInput::default(), |_| {});
+    output.textures_delta.clear();
 }
 
 #[test]

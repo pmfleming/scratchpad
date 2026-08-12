@@ -723,6 +723,7 @@ pub(super) fn publish_ime_output(
 
     ui.output_mut(|output| {
         output.ime = Some(egui::output::IMEOutput {
+            purpose: egui::IMEPurpose::Normal,
             rect,
             cursor_rect,
             should_interrupt_composition: false,

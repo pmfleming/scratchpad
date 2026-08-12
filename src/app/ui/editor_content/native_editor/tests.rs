@@ -222,7 +222,7 @@ fn render_wrapped_width(
     width: f32,
 ) -> u32 {
     let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 420.0));
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
         ui.set_min_size(viewport.size());
         ui.set_width(width);
         render_editor_text_edit(
@@ -239,6 +239,7 @@ fn render_wrapped_width(
             Some(viewport),
         );
     });
+    output.textures_delta.clear();
 
     view.latest_display_snapshot
         .as_ref()

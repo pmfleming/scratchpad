@@ -304,11 +304,12 @@ mod tests {
             f32::from(app.state.app_settings.editor_tab_width()),
         )
         .expect("install editor fonts for settings layout test");
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.set_min_size(egui::vec2(surface_width, 4200.0));
             ui.set_width(surface_width);
             render_page_body(ui, &mut app, viewport_width);
         });
+        output.textures_delta.clear();
     }
 
     fn measurement_for<'a>(

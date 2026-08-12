@@ -511,7 +511,8 @@ mod tests {
         };
 
         let mut events = None;
-        let _ = ctx.run_ui(input, |ui| events = Some(relevant_input_events(ui)));
+        let mut output = ctx.run_ui(input, |ui| events = Some(relevant_input_events(ui)));
+        output.textures_delta.clear();
 
         assert!(events.is_some_and(|events| events.is_empty()));
     }

@@ -14,4 +14,4 @@ default = ["regular"]
 regular = []
 
 [dependencies]
-egui = { version = "0.35.0", default-features = false }
+egui = { version = "0.36.1", default-features = false }
