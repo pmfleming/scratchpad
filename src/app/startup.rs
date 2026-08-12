@@ -37,6 +37,7 @@ impl StartupOptions {
     pub fn clean() -> Self {
         Self {
             restore_session: false,
+            restore_session_explicit: true,
             ..Default::default()
         }
     }
