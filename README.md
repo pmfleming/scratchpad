@@ -121,7 +121,7 @@ For compositor setup, see the
 
 ```sh
 cargo build --release --locked
-./scripts/package-linux-release.sh 0.4.1
+./scripts/package-linux-release.sh 0.4.2
 nix build .#scratchpad
 nix build .#scratchpad-hyprland
 ```
@@ -131,7 +131,7 @@ Windows installer packaging:
 ```powershell
 dotnet tool restore
 cargo build --release --locked
-.\scripts\package-windows-installer.ps1 -Version 0.4.1
+.\scripts\package-windows-installer.ps1 -Version 0.4.2
 ```
 
 Release tags use `vX.Y.Z` and must match the package versions in `Cargo.toml`
