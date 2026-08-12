@@ -16,6 +16,7 @@ pub use panes::{PaneBranch, PaneNode, SplitAxis, SplitPath, TileDirection};
 pub use tab::{TabAttentionState, WorkspaceTab};
 pub(crate) use tab_manager::DisplayTabSlot;
 pub use tab_manager::{PendingAction, TabManager};
+pub(crate) use view::CaretAnimationState;
 pub use view::{
     CursorRevealMode, EditorViewState, ImePreeditState, LayoutCacheKey, SearchHighlightState,
     SearchReplacementPreview, SearchReplacementPreviewEntry, ViewId,

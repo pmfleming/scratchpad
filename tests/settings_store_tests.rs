@@ -55,6 +55,18 @@ fn missing_settings_file_returns_none() {
 }
 
 #[test]
+fn documented_settings_example_stays_loadable() {
+    let fixture = SettingsFixture::new();
+    fixture.write("settings.toml", include_str!("../docs/settings.toml"));
+
+    let settings = fixture.load();
+
+    assert_eq!(settings.platform.profile, PlatformProfile::Auto);
+    assert_eq!(settings.editor.editor_font, EditorFontPreset::Standard);
+    assert_eq!(settings.shortcuts.binding("open_user_manual"), Some("f1"));
+}
+
+#[test]
 fn save_and_load_round_trip_toml_settings() {
     let directory = tempfile::tempdir().unwrap();
     let store = SettingsStore::new(directory.path().to_path_buf());

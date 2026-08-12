@@ -68,6 +68,8 @@
         src = lib.cleanSource ./.;
 
         cargoLock.lockFile = ./Cargo.lock;
+        cargoBuildFlags = [ "--bin" "scratchpad" ];
+        cargoTestFlags = [ "--lib" "--bin" "scratchpad" ];
 
         nativeBuildInputs = with pkgs; [
           makeWrapper

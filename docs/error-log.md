@@ -1,6 +1,6 @@
 # Error Log
 
-Scratchpad writes application diagnostics to `error.log` in the same root directory used for session and settings state. In the default runtime configuration this is the app's `scratchpad` temp/session directory; tests that inject a custom `SessionStore` write under that store's root.
+Scratchpad writes application diagnostics to `error.log` in the session-state root. By default this is `%LOCALAPPDATA%\Scratchpad` on Windows and `$XDG_STATE_HOME/scratchpad` (or `~/.local/state/scratchpad`) on Linux. If no platform state root can be resolved, Scratchpad falls back to the system temporary directory under `scratchpad`. Tests that inject a custom `SessionStore` write under that store's root.
 
 The log is append-only JSON Lines. Each line is one diagnostic record with a timestamp, diagnostic kind, message, optional source, optional widget ID, optional rectangle data, and optional frame number.
 

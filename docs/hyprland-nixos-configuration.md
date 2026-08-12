@@ -1,6 +1,10 @@
 # NixOS/Hyprland Configuration Notes
 
-This document shows the intended way to run Scratchpad under Hyprland: Hyprland owns global window-management shortcuts, and Scratchpad owns focused in-app tile shortcuts.
+Scratchpad is a cross-platform text workspace with a dedicated Hyprland
+profile. Under that profile, Hyprland owns global window management and
+Scratchpad owns only focused in-app actions. General TOML locations, sections,
+and environment variables are documented in the
+[configuration guide](configuration.md).
 
 ## Scratchpad settings
 
@@ -114,9 +118,9 @@ $mainMod = SUPER
 # Starts Scratchpad at login without switching away from the current workspace.
 # The silent rule sends it to the regular fifth workspace, whose Waybar entry
 # can display the Scratchpad icon.
-exec-once = scratchpad
+exec-once = scratchpad-hyprland
 
-bind = $mainMod, S, exec, scratchpad
+bind = $mainMod, S, exec, scratchpad-hyprland
 bind = $mainMod, 5, workspace, 5
 bind = $mainMod SHIFT, 5, movetoworkspace, 5
 
@@ -139,10 +143,10 @@ Conceptual Home Manager configuration:
   wayland.windowManager.hyprland.settings = {
     "$mainMod" = "SUPER";
 
-    exec-once = [ "scratchpad" ];
+    exec-once = [ "scratchpad-hyprland" ];
 
     bind = [
-      "$mainMod, S, exec, scratchpad"
+      "$mainMod, S, exec, scratchpad-hyprland"
       "$mainMod, 5, workspace, 5"
       "$mainMod SHIFT, 5, movetoworkspace, 5"
     ];
@@ -217,7 +221,14 @@ The flake exposes a first-class Home Manager module:
 }
 ```
 
-When `profile = "hyprland"`, the module installs the Hyprland wrapper by default and writes `~/.config/scratchpad/settings.toml`. Setting `hyprland.autoStart = true` adds an `exec-once` entry and the workspace rule even when generated key bindings are disabled. Scratchpad starts tiled on regular workspace `5` without changing the active workspace. This keeps the fifth Waybar workspace/icon occupied and ready at login.
+When `profile = "hyprland"`, the module installs the Hyprland wrapper by
+default and writes `~/.config/scratchpad/settings.toml`. Values in
+`programs.scratchpad.settings` become ordinary TOML tables; `profile` and
+`shortcuts` are supplied by their dedicated module options. Setting
+`hyprland.autoStart = true` adds an `exec-once` entry and the workspace rule
+even when generated key bindings are disabled. Scratchpad starts tiled on
+regular workspace `5` without changing the active workspace. This keeps the
+fifth Waybar workspace/icon occupied and ready at login.
 
 ## Verify the window rule
 

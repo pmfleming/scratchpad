@@ -1,7 +1,8 @@
 use super::layout::DisplayTextMap;
 use super::types::CharCursor;
 use crate::app::domain::{
-    CursorRevealMode, EditorViewState, ImePreeditState, SearchReplacementPreview,
+    CaretAnimationState, CursorRevealMode, EditorViewState, ImePreeditState,
+    SearchReplacementPreview,
 };
 use crate::app::services::settings_store::TabDisplayMode;
 use crate::app::ui::editor_content::native_editor::CursorRange;
@@ -39,6 +40,9 @@ pub(super) struct EditorFrame<'a> {
     pub(super) active_selection: Option<Range<usize>>,
     pub(super) cursor_range: Option<CursorRange>,
     pub(super) cursor_reveal_mode: Option<CursorRevealMode>,
+    pub(super) animate_cursor_transition: bool,
+    pub(super) snap_cursor_animation: bool,
+    pub(super) caret_animation: &'a mut CaretAnimationState,
     pub(super) ime_preedit: Option<&'a ImePreeditState>,
     pub(super) replacement_preview: Option<&'a SearchReplacementPreview>,
 }
@@ -65,6 +69,18 @@ struct ImePreeditPaintContext<'a> {
     focused: bool,
     char_offset_base: usize,
     display_map: Option<&'a DisplayTextMap>,
+}
+
+struct CursorPaintContext<'a> {
+    ui: &'a mut egui::Ui,
+    editor_rect: egui::Rect,
+    cursor_rect_screen: egui::Rect,
+    cursor_rect_content: egui::Rect,
+    logical_cursor: CharCursor,
+    reveal_mode: Option<CursorRevealMode>,
+    animate_transition: bool,
+    force_snap: bool,
+    animation: &'a mut CaretAnimationState,
 }
 
 #[derive(Default)]
@@ -133,6 +149,7 @@ pub(super) fn paint_editor(ui: &mut egui::Ui, request: EditorFrame<'_>) -> Curso
     );
 
     if !request.focused {
+        request.caret_animation.reset();
         return CursorPaintOutcome::default();
     }
 
@@ -156,15 +173,20 @@ pub(super) fn paint_editor(ui: &mut egui::Ui, request: EditorFrame<'_>) -> Curso
         // (The slice galley is offset by `start_line * row_height` within the
         // rect, so galley-local coords are NOT content coords.)
         let cursor_rect_content = cursor_rect.translate(-request.rect.min.to_vec2());
-        return paint_cursor_effects(
+        return paint_cursor_effects(CursorPaintContext {
             ui,
-            request.rect,
-            cursor_rect,
+            editor_rect: request.rect,
+            cursor_rect_screen: cursor_rect,
             cursor_rect_content,
-            request.cursor_reveal_mode,
-        );
+            logical_cursor: cursor_range.primary,
+            reveal_mode: request.cursor_reveal_mode,
+            animate_transition: request.animate_cursor_transition,
+            force_snap: request.snap_cursor_animation || request.ime_preedit.is_some(),
+            animation: request.caret_animation,
+        });
     }
 
+    request.caret_animation.reset();
     CursorPaintOutcome::default()
 }
 
@@ -659,15 +681,20 @@ pub(super) fn galley_screen_offset(galley: &egui::Galley, galley_pos: egui::Pos2
     galley_pos - egui::vec2(galley.rect.left(), 0.0)
 }
 
-fn paint_cursor_effects(
-    ui: &mut egui::Ui,
-    rect: egui::Rect,
-    cursor_rect_screen: egui::Rect,
-    cursor_rect_content: egui::Rect,
-    reveal_mode: Option<CursorRevealMode>,
-) -> CursorPaintOutcome {
-    paint_cursor(ui, rect, cursor_rect_screen);
-    let reveal_intent = reveal_mode.map(|mode| {
+fn paint_cursor_effects(context: CursorPaintContext<'_>) -> CursorPaintOutcome {
+    let now = context.ui.input(|input| input.time);
+    let animation = context.animation.update(
+        context.logical_cursor,
+        context.cursor_rect_screen,
+        now,
+        context.animate_transition,
+        context.force_snap,
+    );
+    paint_cursor(context.ui, context.editor_rect, animation.rect);
+    if animation.active {
+        context.ui.ctx().request_repaint();
+    }
+    let reveal_intent = context.reveal_mode.map(|mode| {
         let align_y = match mode {
             CursorRevealMode::KeepVisible => {
                 Some(ScrollAlign::NearestWithMargin(CURSOR_REVEAL_MARGIN_PX))
@@ -676,8 +703,14 @@ fn paint_cursor_effects(
             CursorRevealMode::Center => Some(ScrollAlign::Center),
         };
         let reveal_rect = egui::Rect::from_min_max(
-            egui::pos2(cursor_rect_content.left(), cursor_rect_content.center().y),
-            egui::pos2(cursor_rect_content.right(), cursor_rect_content.center().y),
+            egui::pos2(
+                context.cursor_rect_content.left(),
+                context.cursor_rect_content.center().y,
+            ),
+            egui::pos2(
+                context.cursor_rect_content.right(),
+                context.cursor_rect_content.center().y,
+            ),
         );
         ScrollIntent::Reveal {
             rect: reveal_rect,
@@ -686,9 +719,9 @@ fn paint_cursor_effects(
         }
     });
     CursorPaintOutcome {
-        reveal_attempted: reveal_mode.is_some(),
+        reveal_attempted: context.reveal_mode.is_some(),
         reveal_intent,
-        ime_geometry: Some((rect, cursor_rect_screen)),
+        ime_geometry: Some((context.editor_rect, context.cursor_rect_screen)),
     }
 }
 

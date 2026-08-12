@@ -33,9 +33,3 @@ exclude_paths = ["src/bin/**", "src/profile/**"]
 level = "error"
 max = 3
 exclude_paths = ["src/bin/**", "src/profile/**"]
-
-[[policy.waivers]]
-rule_id = "rust.project.license"
-reason = "Repository owner must choose and approve the distribution license"
-owner = "pmfleming"
-expires = "2026-10-31"

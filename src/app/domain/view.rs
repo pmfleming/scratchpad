@@ -1,4 +1,5 @@
 mod anchors;
+mod caret_animation;
 mod layout_cache;
 mod search;
 
@@ -6,6 +7,7 @@ use self::anchors::{
     AnchoredCursorRange, AnchoredSearchRange, release_anchors, resolve_cursor_anchor_range,
     sync_optional_cursor_anchor_range, take_cursor_anchors, take_search_anchors,
 };
+pub(crate) use caret_animation::CaretAnimationState;
 pub use layout_cache::{LayoutCache, LayoutCacheEntry, LayoutCacheKey};
 
 use crate::app::domain::BufferId;
@@ -102,6 +104,7 @@ pub struct EditorViewState {
     pub search_highlights: SearchHighlightState,
     pub search_replacement_preview: Option<SearchReplacementPreview>,
     anchors: EditorViewAnchorState,
+    pub(crate) caret_animation: CaretAnimationState,
     published_ime_output: Option<PublishedImeOutput>,
 }
 
@@ -137,6 +140,7 @@ impl EditorViewState {
             search_highlights: SearchHighlightState::default(),
             search_replacement_preview: None,
             anchors: EditorViewAnchorState::default(),
+            caret_animation: CaretAnimationState::default(),
             published_ime_output: None,
         }
     }

@@ -1,17 +1,17 @@
 # Scratchpad User Manual
 
-Scratchpad is a Windows-first plain-text editor for everyday text work. It is
+Scratchpad is a local-first plain-text workspace for Windows and Linux. It is
 designed for notes, logs, reports, copied terminal output, encoded files, and
-temporary scratch work rather than coding projects.
+temporary text work rather than coding projects.
 
-The app keeps work local, restores sessions, warns about risky file-format
-choices, and lets one tab hold either a single document or a tiled workspace of
-several file views.
+The app restores sessions, warns about risky file-format choices, and lets one
+workspace tab hold either a single document or a tiled set of file views. It
+does not require an account, cloud service, plugin runtime, or project index.
 
 ## Start Here
 
-Use these commands first (these are the generic Windows/Linux defaults; active
-tooltips reflect OS-profile defaults and user overrides):
+Use these commands first. These are the generic desktop defaults; active
+tooltips reflect the selected platform profile and user overrides:
 
 - `Ctrl + N`: create a new untitled tab.
 - `Ctrl + O`: open files using the current opening preference.
@@ -71,10 +71,10 @@ If a file is already open, Scratchpad activates the existing document instead of
 creating an accidental duplicate. When Open Here targets an already-open file,
 Scratchpad moves or combines the existing tab into the target workspace.
 
-Command-line form:
+Command-line form (`scratchpad.exe` on Windows):
 
 ```text
-scratchpad.exe [switches] [files...]
+scratchpad [switches] [files...]
 ```
 
 Supported switches:
@@ -92,10 +92,10 @@ Supported switches:
 Examples:
 
 ```text
-scratchpad.exe "C:\notes\a.txt" "C:\notes\b.txt"
-scratchpad.exe /clean "C:\notes\a.txt"
-scratchpad.exe /here "C:\notes\a.txt"
-scratchpad.exe /addto:active /files:"C:\a.txt","C:\b.txt"
+scratchpad "notes/a.txt" "notes/b.txt"
+scratchpad /clean "notes/a.txt"
+scratchpad /here "notes/a.txt"
+scratchpad /addto:active /files:"notes/a.txt","notes/b.txt"
 ```
 
 `/clean` cannot be combined with `/addto:index:N` because there is no restored
@@ -104,7 +104,9 @@ tab index to target.
 ## Editing Text
 
 Normal typing, selection, clipboard, IME input, and mouse editing work as
-expected.
+expected. Keyboard-only caret movement is briefly eased between nearby
+positions; edits, pointer movement, scrolling, focus changes, large jumps, and
+IME composition place the caret immediately.
 
 Core editing commands:
 
@@ -117,7 +119,7 @@ Core editing commands:
 - `Delete`: delete forward or delete the selection.
 - `Ctrl + Backspace`: delete the previous word.
 - `Ctrl + Delete` / `Alt + Delete`: delete the next word.
-- `Tab`: insert a tab.
+- `Tab`: indent using the configured spaces or tab-character style.
 - `Shift + Tab`: outdent the current line when possible.
 - `Ctrl + Insert`: copy the current selection.
 - `Shift + Insert`: paste.
@@ -348,7 +350,7 @@ Navigate:
 - `F6`: move to the next tile.
 - `Shift + F6`: move to the previous tile.
 
-Generic Windows/Linux profile keyboard controls:
+Generic desktop profile keyboard controls (Windows and non-Hyprland Linux):
 
 - `Ctrl + Alt + Enter`: split using the current default axis.
 - `Ctrl + Shift + Arrow`: split and place the new view in that direction.
@@ -466,16 +468,26 @@ Close Settings with:
 
 Settings are grouped into expandable cards:
 
-- Text Formatting: font family, font size, gutter width, preview, and word wrap.
-- Appearance: theme mode, text color, background color, search highlight color,
-  and preview.
+- Editor Appearance: app or system appearance, font, size, theme, colors,
+  gutter, preview, and word wrap.
+- Editing: indentation style and width, and tab-character display.
 - Opening: file-open behavior, startup/session behavior, and recent files.
 - Tab Position: tab-list placement, new-tab placement, auto-hide behavior, and
   status-bar visibility.
-- Advanced: settings file, undo memory budgets, and reset to defaults.
+- Advanced: the settings file, undo memory budgets, and reset to defaults.
 
-The settings file is TOML. Opening it from Settings creates a normal editable
-text tab.
+Settings are stored in `settings.toml`:
+
+- Windows: `%APPDATA%\Scratchpad\settings.toml`
+- Linux: `$XDG_CONFIG_HOME/scratchpad/settings.toml`, or
+  `~/.config/scratchpad/settings.toml`
+
+Opening it from Settings creates a normal editable text tab. Scratchpad
+validates and applies changes when you leave or close that tab; invalid TOML
+leaves the current settings active and reports an error. The app rewrites its
+settings file during normal persistence, so comments and unknown keys are not
+preserved. See the [configuration guide](configuration.md) for every section,
+platform paths, runtime variables, and Home Manager options.
 
 ## Session Restore
 
@@ -513,8 +525,9 @@ View controls:
 
 ## Shortcut Reference
 
-The bindings below are defaults for the generic Windows/Linux profile. The
-Hyprland tile bindings are listed separately below. Every app-action tooltip is
+The bindings below are defaults for the generic desktop profile used on
+Windows and non-Hyprland Linux. The Hyprland tile bindings are listed separately
+below. Every app-action tooltip is
 built from the currently resolved OS profile and the user's `[shortcuts]`
 overrides, so the tooltip is authoritative when a binding has been changed.
 Editor and search-field bindings are fixed.
@@ -552,7 +565,7 @@ Tabs, files, and paths:
 - `Ctrl + Alt + B`: show or hide the tab list.
 - `Ctrl + Shift + B`: toggle tab-list auto-hide.
 
-Display and layout (generic Windows/Linux profile):
+Display and layout (generic desktop profile):
 
 - `Ctrl + Alt + Enter`: split on the current default axis.
 - `Ctrl + Shift + Arrow`: split the active tile in that direction.
@@ -654,22 +667,27 @@ move_tile_up = "ctrl+alt+shift+up"
 move_tile_down = "ctrl+alt+shift+down"
 ```
 
-The example values above are generic Windows/Linux defaults. On Hyprland, use
-the profile defaults listed earlier or provide explicit overrides. Shortcut
+The example values above are generic desktop defaults. On Hyprland, use the
+profile defaults listed earlier or provide explicit overrides. Shortcut
 strings are case-insensitive. Supported modifiers are `ctrl`, `shift`, `alt`,
 and `command`/`super`/`win`; multiple bindings are comma-separated. Invalid
 overrides are reported and fall back to the profile default.
 
 ## Current Limits
 
-- Search only covers open files.
-- Folder-wide search for unopened files is not available.
-- A full command palette is still planned.
-- Some context-menu coverage is still growing.
-- Recent files can be enabled in Settings, but the broader recent-file surface
-  is still evolving.
+- Search covers open files, not unopened folders.
+- Scratchpad supports Windows and Linux; other desktop targets are not packaged
+  or tested.
+- Shortcut overrides apply to app actions, not every editor or dialog-local
+  binding.
 - Scratchpad intentionally stays focused on plain text rather than
   language-aware coding workflows.
+
+## Related Documentation
+
+- [Configuration guide](configuration.md)
+- [Example settings file](settings.toml)
+- [NixOS/Hyprland configuration](hyprland-nixos-configuration.md)
 
 ## About This Manual
 

@@ -19,6 +19,13 @@ install -Dm644 share/icons/hicolor/scalable/apps/scratchpad.svg \
 ```
 
 Ensure `$HOME/.local/bin` is on `PATH`. The binary requires standard GTK 3,
-Wayland/X11, fontconfig, and graphics-loader libraries. NixOS users should use
-the repository's `scratchpad-hyprland` flake package instead, because an
-ordinary dynamically linked Linux binary does not run directly on stock NixOS.
+Wayland/X11, fontconfig, and graphics-loader libraries. User settings are stored
+at `$XDG_CONFIG_HOME/scratchpad/settings.toml` or
+`~/.config/scratchpad/settings.toml`; session state and diagnostics use
+`$XDG_STATE_HOME/scratchpad` or `~/.local/state/scratchpad`.
+
+NixOS users should use the repository's `scratchpad` or
+`scratchpad-hyprland` flake package instead, because an ordinary dynamically
+linked Linux binary does not run directly on stock NixOS. The flake also
+exports `homeManagerModules.default` for declarative settings and optional
+Hyprland integration.

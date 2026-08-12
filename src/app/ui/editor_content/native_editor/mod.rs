@@ -159,6 +159,9 @@ pub fn render_editor_text_edit(
                 active_selection: buffer.active_selection.clone(),
                 cursor_range: view.cursor_range,
                 cursor_reveal_mode: view.cursor_reveal_mode(),
+                animate_cursor_transition: input.animate_cursor_transition,
+                snap_cursor_animation: input.snap_cursor_animation,
+                caret_animation: &mut view.caret_animation,
                 ime_preedit: view.ime_preedit.as_ref(),
                 replacement_preview: view.search_replacement_preview.as_ref(),
             },
@@ -198,6 +201,8 @@ pub fn render_editor_text_edit(
 struct EditorInputOutcome {
     focused: bool,
     changed: bool,
+    animate_cursor_transition: bool,
+    snap_cursor_animation: bool,
 }
 
 struct EditorInputRequest<'a> {
@@ -222,6 +227,7 @@ fn process_editor_input(
 ) -> EditorInputOutcome {
     let prev_cursor = view.cursor_range;
     let prev_cursor_line = prev_cursor.and_then(|cursor| primary_line_index(buffer, cursor));
+    let editor_was_focused = view.editor_has_focus;
     handle_mouse_interaction(
         ui,
         view,
@@ -235,7 +241,12 @@ fn process_editor_input(
             display_map: request.display_map,
         },
     );
+    let cursor_after_mouse = view.cursor_range;
     let suppress_cursor_reveal = request.response.dragged_by(egui::PointerButton::Primary);
+    let pointer_interacted = request.response.clicked()
+        || request.response.secondary_clicked()
+        || request.response.middle_clicked()
+        || request.response.dragged();
     let focused = request.response.has_focus()
         || request.response.gained_focus()
         || request.options.request_focus;
@@ -254,7 +265,24 @@ fn process_editor_input(
         ui.ctx().request_repaint();
     }
     view.sync_cursor_anchors_from_ranges(buffer);
-    EditorInputOutcome { focused, changed }
+
+    let animate_cursor_transition = editor_was_focused
+        && focused
+        && !changed
+        && cursor_after_mouse == prev_cursor
+        && view.cursor_range != prev_cursor;
+    let snap_cursor_animation = changed
+        || pointer_interacted
+        || !editor_was_focused
+        || request.response.gained_focus()
+        || request.options.request_focus
+        || view.ime_preedit.is_some();
+    EditorInputOutcome {
+        focused,
+        changed,
+        animate_cursor_transition,
+        snap_cursor_animation,
+    }
 }
 
 fn request_cursor_reveal_after_input(

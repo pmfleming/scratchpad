@@ -1,32 +1,101 @@
-font_size = 19.0
+# Example Scratchpad configuration.
+#
+# Copy the tables you want to change into the active settings.toml. Missing
+# values use application defaults. Scratchpad rewrites its active settings file,
+# so comments in that file are not guaranteed to survive.
+
+[editor]
+appearance_source = "app"       # app, system
+font_size = 14.0
 word_wrap = true
-editor_gutter = 2
-editor_font = "mono"
-theme_mode = "system"
+editor_gutter = 0
+editor_tab_width = 4
+indentation_style = "tab_character" # spaces, tab_character
+tab_display = "hidden"         # hidden, character, tablines
+editor_font = "standard"        # standard, flex, mono, serif
+font_source = "scratchpad"      # scratchpad, os
+os_font_family = ""             # empty uses the OS default editor font
+theme_mode = "system"           # system, light, dark
 editor_text_color = "#ffffff"
 editor_background_color = "#15181d"
 editor_text_highlight_color = "#fff36d"
-editor_text_highlight_text_color = "#000000"
-tab_list_position = "left"
-tab_order_mode = "custom"
+editor_text_highlight_text_color = "#0b0f3d"
 
-file_open_disposition = "new_tab"
-new_tab_placement = "end"
-startup_session_behavior = "continue_previous_session"
-tab_list_width = 271.34375
+[workspace]
+tab_list_position = "top"       # top, bottom, left, right
+tab_order_mode = "custom"       # custom, file_name, file_size, file_age, recent_edit
+tab_order_direction = "ascending" # ascending, descending
+file_open_disposition = "new_tab" # new_tab, current_tab
+new_tab_placement = "end"       # start, end, before_selection, after_selection
+startup_session_behavior = "continue_previous_session" # or start_fresh_session
+tab_list_width = 184.0
 auto_hide_tab_list = false
-tab_list_auto_hide_delay_seconds = 1.0
+tab_list_auto_hide_delay_seconds = 3.0
 recent_files_enabled = true
+
+[ui]
 status_bar_visible = true
 settings_tab_open = true
-settings_tab_index = 1
 
-[window_state]
-maximized = true
+[ui.window_state]
+maximized = false
 
-[history_budget]
+# Values are bytes. These defaults represent one possible memory-derived
+# budget; use Settings -> Advanced -> Undo memory -> Reset to auto to calculate
+# suitable values for the current machine.
+[history]
 per_file_entry_limit = 8192
 per_file_byte_budget = 67108864
 aggregate_byte_budget = 536870912
 persisted_payload_budget = 16777216
 derived_from_memory = true
+
+[platform]
+profile = "auto" # auto, windows, linux_generic, hyprland
+
+# Every shortcut below is optional. Omitted actions keep the selected platform
+# profile's defaults. Multiple bindings are comma-separated.
+[shortcuts]
+open_user_manual = "f1"
+open_search = "ctrl+f"
+open_replace = "ctrl+h"
+open_settings = "ctrl+comma"
+close_settings = "escape"
+close_search = "escape"
+rename_tab = "f2"
+open_text_history = "ctrl+shift+h"
+open_encoding_dialog = "ctrl+shift+e"
+open_status_history = "ctrl+shift+m"
+copy_active_path = "ctrl+shift+c"
+reveal_active_path = "ctrl+shift+r"
+toggle_tab_list = "ctrl+alt+b"
+toggle_tab_list_auto_hide = "ctrl+shift+b"
+toggle_reading_order = "ctrl+alt+r"
+toggle_control_chars = "ctrl+alt+c"
+traverse_region_forward = "f6"
+traverse_region_backward = "shift+f6"
+open_file_here = "ctrl+shift+o"
+new_tab = "ctrl+n"
+open_file = "ctrl+o"
+save_file_as = "ctrl+shift+s"
+save_file = "ctrl+s"
+increase_font_size = "ctrl+equals, ctrl+plus"
+decrease_font_size = "ctrl+minus"
+toggle_line_numbers = "ctrl+0"
+close_tab = "ctrl+w"
+promote_tile_to_tab = "ctrl+t"
+promote_tab_files_to_tabs = "ctrl+shift+t"
+close_tile = "ctrl+shift+w"
+split_tile = "ctrl+alt+enter"
+split_left = "ctrl+shift+left"
+split_right = "ctrl+shift+right"
+split_up = "ctrl+shift+up"
+split_down = "ctrl+shift+down"
+resize_tile_left = "ctrl+alt+left"
+resize_tile_right = "ctrl+alt+right"
+resize_tile_up = "ctrl+alt+up"
+resize_tile_down = "ctrl+alt+down"
+move_tile_left = "ctrl+alt+shift+left"
+move_tile_right = "ctrl+alt+shift+right"
+move_tile_up = "ctrl+alt+shift+up"
+move_tile_down = "ctrl+alt+shift+down"

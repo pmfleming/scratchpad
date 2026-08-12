@@ -34,7 +34,12 @@ in
     settings = lib.mkOption {
       type = lib.types.attrs;
       default = { };
-      description = "Additional settings.toml values merged before profile and shortcuts.";
+      description = ''
+        Additional settings.toml tables and values. Use the dedicated `profile`
+        and `shortcuts` options for those tables. Scratchpad may rewrite its
+        active settings file, so this generated file should be treated as
+        declarative Home Manager state.
+      '';
     };
 
     shortcuts = lib.mkOption {
@@ -47,13 +52,17 @@ in
         split_tile = "ctrl+alt+enter";
         split_left = "ctrl+shift+left";
         resize_tile_left = "ctrl+alt+left";
-        move_tile_left = "ctrl+left";
+        move_tile_left = "ctrl+alt+shift+left";
       };
-      description = "Scratchpad in-app shortcut overrides, including focused tile split/resize/move bindings.";
+      description = ''
+        Scratchpad app-action shortcut overrides written to `[shortcuts]`.
+        Values use case-insensitive `ctrl`, `shift`, `alt`, and
+        `command`/`super`/`win` modifiers; comma-separate multiple bindings.
+      '';
     };
 
     hyprland = {
-      enableBinds = lib.mkEnableOption "Hyprland Scratchpad binds and workspace rule";
+      enableBinds = lib.mkEnableOption "Hyprland launch/focus/move binds and Scratchpad workspace rule";
 
       autoStart = lib.mkEnableOption "starting Scratchpad on its Hyprland workspace";
 
@@ -84,7 +93,7 @@ in
       workspace = lib.mkOption {
         type = lib.types.str;
         default = "5";
-        description = "Regular Hyprland workspace where Scratchpad starts.";
+        description = "Hyprland workspace used by generated rules, focus binds, and autostart.";
       };
 
       windowClass = lib.mkOption {

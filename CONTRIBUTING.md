@@ -4,7 +4,7 @@ Thank you for helping improve Scratchpad.
 
 ## Development expectations
 
-Scratchpad is Windows-first and also supports Linux, including NixOS/Hyprland. Keep platform-specific behavior behind the existing platform and file-watch boundaries. Discuss substantial UI, persistence-format, or architecture changes before implementing them.
+Scratchpad supports Windows and Linux, including NixOS/Hyprland. Treat both desktop targets as first-class: keep platform-specific behavior behind the existing platform, file-dialog, and file-watch boundaries, and test shared behavior independently of either windowing environment. Discuss substantial UI, persistence-format, or architecture changes before implementing them.
 
 Before opening a pull request, run:
 
