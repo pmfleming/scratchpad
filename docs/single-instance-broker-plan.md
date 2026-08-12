@@ -57,3 +57,18 @@ The complete pre-change analysis artifacts are retained locally under `target/br
 5. Full performance-lens and rust-quality-lens release gates.
 
 Each phase is committed separately so measurements and architecture effects are attributable.
+
+## Final verification (phase 5)
+
+Completed after the process integration phase:
+
+- `cargo check --all-targets --all-features`: pass.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings`: pass.
+- `cargo test --workspace`: pass.
+- Performance lens slowspots: authoritative thresholds pass on the confirmation run.
+- Frame metrics: 4 MiB event-to-tessellation p99 0.34 ms against the 8.33 ms budget.
+- Performance review: all seven promises pass; budget misses remain 0.
+- Rust quality lens `verify`, `measure all`, and `check`: pass.
+- Policy-controlled production findings: 14 `expect` (limit 14), 3 `panic` (limit 3), and 0 undocumented unsafe; the broker added no production occurrences.
+
+Criterion showed substantial host variance between repeated runs, including unrelated viewport, paste, and search rows moving in both directions. A confirmation run cleared all authoritative thresholds, while session persistence/restore remained within budget. Broker-free profile constructors do not start election, IPC, or listener threads.
