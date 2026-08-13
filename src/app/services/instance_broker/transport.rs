@@ -1,8 +1,10 @@
 use super::protocol::{BrokerResponse, LaunchRequest, MAX_FRAME_BYTES};
 use interprocess::local_socket::{GenericNamespaced, ListenerOptions, Name, Stream, prelude::*};
 use std::io::{self, Read, Write};
+#[cfg(not(target_os = "windows"))]
 use std::time::Duration;
 
+#[cfg(not(target_os = "windows"))]
 const CONNECTION_TIMEOUT: Duration = Duration::from_millis(500);
 
 pub(super) fn local_socket_name(endpoint: &str) -> io::Result<Name<'static>> {
@@ -20,8 +22,7 @@ pub(super) fn bind_listener(endpoint: &str) -> io::Result<interprocess::local_so
 
 pub(super) fn connect(endpoint: &str) -> io::Result<Stream> {
     let stream = Stream::connect(local_socket_name(endpoint)?)?;
-    stream.set_recv_timeout(Some(CONNECTION_TIMEOUT))?;
-    stream.set_send_timeout(Some(CONNECTION_TIMEOUT))?;
+    configure_timeouts(&stream)?;
     Ok(stream)
 }
 
@@ -34,9 +35,21 @@ pub(super) fn send_request(
 }
 
 pub(super) fn receive_request(stream: &mut Stream) -> io::Result<LaunchRequest> {
-    stream.set_recv_timeout(Some(CONNECTION_TIMEOUT))?;
-    stream.set_send_timeout(Some(CONNECTION_TIMEOUT))?;
+    configure_timeouts(stream)?;
     LaunchRequest::decode(&read_frame(stream)?)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn configure_timeouts(stream: &Stream) -> io::Result<()> {
+    stream.set_recv_timeout(Some(CONNECTION_TIMEOUT))?;
+    stream.set_send_timeout(Some(CONNECTION_TIMEOUT))
+}
+
+#[cfg(target_os = "windows")]
+fn configure_timeouts(_stream: &Stream) -> io::Result<()> {
+    // The Windows local-socket backend uses named pipes, which do not support
+    // the timeout methods exposed by `interprocess`.
+    Ok(())
 }
 
 pub(super) fn send_response(stream: &mut Stream, response: &BrokerResponse) -> io::Result<()> {
