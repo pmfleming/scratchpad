@@ -22,6 +22,7 @@ pub(super) fn bind_listener(endpoint: &str) -> io::Result<interprocess::local_so
 
 pub(super) fn connect(endpoint: &str) -> io::Result<Stream> {
     let stream = Stream::connect(local_socket_name(endpoint)?)?;
+    #[cfg(not(target_os = "windows"))]
     configure_timeouts(&stream)?;
     Ok(stream)
 }
@@ -35,6 +36,7 @@ pub(super) fn send_request(
 }
 
 pub(super) fn receive_request(stream: &mut Stream) -> io::Result<LaunchRequest> {
+    #[cfg(not(target_os = "windows"))]
     configure_timeouts(stream)?;
     LaunchRequest::decode(&read_frame(stream)?)
 }
@@ -43,13 +45,6 @@ pub(super) fn receive_request(stream: &mut Stream) -> io::Result<LaunchRequest> 
 fn configure_timeouts(stream: &Stream) -> io::Result<()> {
     stream.set_recv_timeout(Some(CONNECTION_TIMEOUT))?;
     stream.set_send_timeout(Some(CONNECTION_TIMEOUT))
-}
-
-#[cfg(target_os = "windows")]
-fn configure_timeouts(_stream: &Stream) -> io::Result<()> {
-    // The Windows local-socket backend uses named pipes, which do not support
-    // the timeout methods exposed by `interprocess`.
-    Ok(())
 }
 
 pub(super) fn send_response(stream: &mut Stream, response: &BrokerResponse) -> io::Result<()> {
