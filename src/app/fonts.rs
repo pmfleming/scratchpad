@@ -367,8 +367,11 @@ fn proportional_font_candidates(
     font_name: &'static str,
     fallback_names: impl IntoIterator<Item = String>,
 ) -> Vec<String> {
-    std::iter::once(font_name.to_owned())
-        .chain(std::iter::once("phosphor".to_owned()))
+    // Phosphor uses private-use code points that can also be present in OS fonts
+    // such as Nerd Fonts. Keep it first so changing to System appearance cannot
+    // substitute unrelated glyphs for application icons.
+    std::iter::once("phosphor".to_owned())
+        .chain(std::iter::once(font_name.to_owned()))
         .chain(fallback_names)
         .collect()
 }
@@ -381,11 +384,11 @@ mod tests {
     };
 
     #[test]
-    fn phosphor_icons_are_checked_before_unicode_fallback_fonts() {
+    fn phosphor_icons_are_checked_before_editor_and_fallback_fonts() {
         let candidates =
             proportional_font_candidates("editor", ["symbols".to_owned(), "cjk".to_owned()]);
 
-        assert_eq!(candidates, ["editor", "phosphor", "symbols", "cjk"]);
+        assert_eq!(candidates, ["phosphor", "editor", "symbols", "cjk"]);
     }
 
     #[test]
