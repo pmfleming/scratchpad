@@ -279,6 +279,7 @@ fn show_status_history_button(
         ui,
         "status_message_history",
         egui_phosphor::regular::BRACKETS_SQUARE,
+        egui_phosphor::font_id(STATUS_ICON_FONT_SIZE),
         color,
     )
     .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -293,7 +294,13 @@ fn status_bar_icon_button(
     surface_key: &'static str,
     icon: &str,
 ) -> egui::Response {
-    fixed_status_icon_cell(ui, surface_key, icon, status_icon_color(ui))
+    fixed_status_icon_cell(
+        ui,
+        surface_key,
+        icon,
+        egui_phosphor::font_id(STATUS_ICON_FONT_SIZE),
+        status_icon_color(ui),
+    )
 }
 
 fn show_control_char_toggle(
@@ -302,10 +309,16 @@ fn show_control_char_toggle(
     actions: &mut StatusBarActions,
 ) {
     ui.separator();
+    let icon_font = if details.control_chars.icon == HIDDEN_CONTROL_CHAR_ICON {
+        egui_phosphor::font_id(STATUS_ICON_FONT_SIZE)
+    } else {
+        egui::FontId::proportional(STATUS_ICON_FONT_SIZE)
+    };
     let button_response = fixed_status_icon_cell(
         ui,
         "status_control_chars",
         details.control_chars.icon,
+        icon_font,
         details.control_chars.icon_color,
     );
     if button_response.hovered() {
@@ -337,17 +350,14 @@ fn fixed_status_icon_cell(
     ui: &mut egui::Ui,
     surface_key: &'static str,
     icon: &str,
+    font_id: egui::FontId,
     color: egui::Color32,
 ) -> egui::Response {
     widget_ids::surface_response(ui, surface_key, widget_ids::WidgetRole::IconButton, |ui| {
         ui.add_sized(
             STATUS_ICON_CELL_SIZE,
-            egui::Label::new(
-                egui::RichText::new(icon)
-                    .font(egui::FontId::proportional(STATUS_ICON_FONT_SIZE))
-                    .color(color),
-            )
-            .sense(egui::Sense::click()),
+            egui::Label::new(egui::RichText::new(icon).font(font_id).color(color))
+                .sense(egui::Sense::click()),
         )
     })
 }

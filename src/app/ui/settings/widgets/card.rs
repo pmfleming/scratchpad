@@ -219,7 +219,7 @@ fn icon_slot(ui: &mut egui::Ui, icon: &str) {
             |ui| {
                 ui.label(
                     egui::RichText::new(icon)
-                        .size(18.0)
+                        .font(egui_phosphor::font_id(18.0))
                         .color(SettingsUi::icon_color(ui)),
                 );
             },

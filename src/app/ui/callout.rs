@@ -178,7 +178,7 @@ pub(crate) fn icon_button(
 ) -> egui::Response {
     let button = egui::Button::new(
         egui::RichText::new(icon)
-            .font(egui::FontId::proportional(style.icon_size))
+            .font(egui_phosphor::font_id(style.icon_size))
             .color(text(ui)),
     )
     .min_size(style.size)

@@ -64,7 +64,7 @@ fn paint_pending_split_hint(ui: &egui::Ui, tile_rect: egui::Rect) {
         tile_rect.center(),
         egui::Align2::CENTER_CENTER,
         egui_phosphor::regular::ARROWS_SPLIT,
-        egui::FontId::proportional(18.0),
+        egui_phosphor::font_id(18.0),
         egui::Color32::from_rgba_unmultiplied(190, 220, 255, 180),
     );
 }

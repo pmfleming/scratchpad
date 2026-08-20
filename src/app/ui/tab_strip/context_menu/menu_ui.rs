@@ -110,7 +110,7 @@ pub(super) fn order_direction_button(
             response.rect.center(),
             egui::Align2::CENTER_CENTER,
             icon,
-            egui::FontId::proportional(17.0),
+            egui_phosphor::font_id(17.0),
             text_primary(ui),
         );
         let clicked = response.clicked() || response.clicked_by(egui::PointerButton::Secondary);
@@ -145,7 +145,7 @@ pub(super) fn open_disposition_button(
             response.rect.center(),
             egui::Align2::CENTER_CENTER,
             icon,
-            egui::FontId::proportional(17.0),
+            egui_phosphor::font_id(17.0),
             text_primary(ui),
         );
         let clicked = response.clicked() || response.clicked_by(egui::PointerButton::Secondary);
@@ -285,9 +285,13 @@ pub(super) fn submenu_button_sized(
     add_contents: impl FnOnce(&mut egui::Ui),
 ) {
     with_row_visuals(ui, |ui| {
-        let button = egui::Button::new(egui::RichText::new(CARET_RIGHT).color(text_primary(ui)))
-            .min_size(egui::vec2(CARET_WIDTH, ROW_HEIGHT))
-            .stroke(egui::Stroke::NONE);
+        let button = egui::Button::new(
+            egui::RichText::new(CARET_RIGHT)
+                .font(egui_phosphor::font_id(14.0))
+                .color(text_primary(ui)),
+        )
+        .min_size(egui::vec2(CARET_WIDTH, ROW_HEIGHT))
+        .stroke(egui::Stroke::NONE);
 
         widget_ids::surface_widget(ui, id_source, "submenu", |ui| {
             egui::containers::menu::SubMenuButton::from_button(button)
@@ -393,7 +397,7 @@ fn paint_row_label(
             rect.left_center() + egui::vec2(ICON_CENTER_X, 0.0),
             egui::Align2::CENTER_CENTER,
             icon,
-            font.clone(),
+            egui_phosphor::font_id(font.size),
             color,
         );
     }

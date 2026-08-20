@@ -354,7 +354,7 @@ fn render_tab_promote_button(
         promote_rect.center(),
         egui::Align2::CENTER_CENTER,
         egui_phosphor::regular::ARROW_SQUARE_UP,
-        egui::FontId::proportional(14.0),
+        egui_phosphor::font_id(14.0),
         text_primary(ui),
     );
     promote_response.on_hover_text(shortcut_tooltips::action(
@@ -402,7 +402,7 @@ fn paint_tab_close_button(ui: &egui::Ui, close_rect: Rect, hovered: bool, drag_i
         close_rect.center(),
         egui::Align2::CENTER_CENTER,
         egui_phosphor::regular::X,
-        egui::FontId::proportional(14.0),
+        egui_phosphor::font_id(14.0),
         if danger_hovered {
             egui::Color32::WHITE
         } else {

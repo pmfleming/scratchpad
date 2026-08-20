@@ -72,7 +72,7 @@ pub(super) fn expandable_card(
             };
             ui.label(
                 egui::RichText::new(chevron)
-                    .size(18.0)
+                    .font(egui_phosphor::font_id(18.0))
                     .color(SettingsUi::icon_color(ui)),
             );
         });

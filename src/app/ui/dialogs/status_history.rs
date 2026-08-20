@@ -160,7 +160,7 @@ fn control_icon_button(
     };
     let button = egui::Button::new(
         egui::RichText::new(icon)
-            .font(egui::FontId::proportional(16.0))
+            .font(egui_phosphor::font_id(16.0))
             .color(text_color),
     )
     .min_size(egui::vec2(36.0, STATUS_FILTER_BUTTON_HEIGHT))
@@ -224,7 +224,7 @@ fn render_row_pill_contents(ui: &mut egui::Ui, row: &StatusHistoryRow) {
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new(severity_icon(row.severity))
-                .font(egui::FontId::proportional(STATUS_PILL_ICON_SIZE))
+                .font(egui_phosphor::font_id(STATUS_PILL_ICON_SIZE))
                 .color(severity_color(row.severity, ui.visuals().dark_mode)),
         );
         ui.add_space(8.0);

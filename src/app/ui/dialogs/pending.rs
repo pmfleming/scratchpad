@@ -289,7 +289,7 @@ fn render_save_conflict_dialog(
         |ui| {
             ui.label(
                 egui::RichText::new(WARNING)
-                    .size(16.0)
+                    .font(egui_phosphor::font_id(16.0))
                     .color(callout::muted_text(ui)),
             );
             ui.vertical(|ui| {

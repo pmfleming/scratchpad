@@ -236,7 +236,7 @@ fn paint_phosphor_button(request: PhosphorButtonPaint<'_>) {
         request.rect.center(),
         egui::Align2::CENTER_CENTER,
         request.icon,
-        egui::FontId::proportional(16.0),
+        egui_phosphor::font_id(16.0),
         icon_color,
     );
 }

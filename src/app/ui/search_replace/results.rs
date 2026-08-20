@@ -255,7 +255,7 @@ fn show_group_caret(ui: &mut egui::Ui, group_index: usize, expanded: bool) -> eg
             egui::vec2(26.0, 26.0),
             egui::Button::new(
                 egui::RichText::new(group_caret_icon(expanded))
-                    .size(14.0)
+                    .font(egui_phosphor::font_id(14.0))
                     .color(text_muted(ui)),
             )
             .fill(egui::Color32::TRANSPARENT)

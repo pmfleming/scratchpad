@@ -56,7 +56,7 @@ fn render_top_drag_button(ctx: &egui::Context, ui: &mut egui::Ui) {
         rect.center(),
         egui::Align2::CENTER_CENTER,
         egui_phosphor::regular::DOTS_SIX,
-        egui::FontId::proportional(16.0),
+        egui_phosphor::font_id(16.0),
         text_primary(ui),
     );
 

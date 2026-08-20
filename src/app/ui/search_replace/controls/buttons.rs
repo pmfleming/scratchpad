@@ -22,7 +22,7 @@ pub(super) fn icon_toggle_chip(
     chip_button(
         ui,
         egui::RichText::new(icon)
-            .font(egui::FontId::proportional(16.0))
+            .font(egui_phosphor::font_id(16.0))
             .color(if selected {
                 text_primary(ui)
             } else {
@@ -41,9 +41,31 @@ pub(super) fn toggle_flag(ui: &mut egui::Ui, value: &mut bool, icon: &str, toolt
     }
 }
 
+fn text_toggle_chip(
+    ui: &mut egui::Ui,
+    selected: bool,
+    text: &str,
+    tooltip: &str,
+) -> egui::Response {
+    chip_button(
+        ui,
+        egui::RichText::new(text)
+            .font(egui::FontId::proportional(16.0))
+            .color(if selected {
+                text_primary(ui)
+            } else {
+                text_primary(ui).gamma_multiply(0.9)
+            }),
+        selected,
+        ICON_BUTTON_SIZE,
+        egui::vec2(0.0, 0.0),
+        tooltip,
+    )
+}
+
 pub(super) fn toggle_mode(ui: &mut egui::Ui, mode: &mut SearchMode) {
     let regex_enabled = *mode == SearchMode::Regex;
-    if icon_toggle_chip(
+    if text_toggle_chip(
         ui,
         regex_enabled,
         REGEX_ICON,

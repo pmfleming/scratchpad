@@ -104,13 +104,30 @@ fn vertical_new_tab_button(ui: &mut egui::Ui, width: f32) -> egui::Response {
         Stroke::new(1.0, border(ui)),
         egui::StrokeKind::Inside,
     );
-    ui.painter().text(
-        response.rect.center(),
-        egui::Align2::CENTER_CENTER,
-        format!("{} New tab", egui_phosphor::regular::PLUS),
-        egui::TextStyle::Button.resolve(ui.style()),
-        text_primary(ui),
+    let color = text_primary(ui);
+    let text_font = egui::TextStyle::Button.resolve(ui.style());
+    let mut label = egui::text::LayoutJob::default();
+    label.append(
+        egui_phosphor::regular::PLUS,
+        0.0,
+        egui::TextFormat {
+            font_id: egui_phosphor::font_id(text_font.size),
+            color,
+            ..Default::default()
+        },
     );
+    label.append(
+        " New tab",
+        0.0,
+        egui::TextFormat {
+            font_id: text_font,
+            color,
+            ..Default::default()
+        },
+    );
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(label));
+    ui.painter()
+        .galley(response.rect.center() - galley.size() * 0.5, galley, color);
 
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

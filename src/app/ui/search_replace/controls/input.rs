@@ -26,7 +26,7 @@ fn input_leading_icon(ui: &mut egui::Ui, icon: &str) {
             |ui| {
                 ui.label(
                     egui::RichText::new(icon)
-                        .font(egui::FontId::proportional(ICON_SIZE))
+                        .font(egui_phosphor::font_id(ICON_SIZE))
                         .color(text_muted(ui)),
                 );
             },

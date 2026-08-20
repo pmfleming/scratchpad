@@ -269,7 +269,7 @@ fn control_icon_button(
     };
     let button = egui::Button::new(
         egui::RichText::new(icon)
-            .font(egui::FontId::proportional(16.0))
+            .font(egui_phosphor::font_id(16.0))
             .color(if enabled {
                 text_color
             } else {

@@ -186,7 +186,7 @@ fn file_group_caret(ui: &mut egui::Ui, expanded: bool) -> egui::Response {
         egui::vec2(24.0, 24.0),
         egui::Button::new(
             egui::RichText::new(caret_icon)
-                .size(14.0)
+                .font(egui_phosphor::font_id(14.0))
                 .color(callout::muted_text(ui)),
         )
         .fill(egui::Color32::TRANSPARENT)
@@ -289,7 +289,7 @@ fn render_row_pill_contents(
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new(row.icon)
-                .font(egui::FontId::proportional(HISTORY_PILL_ICON_SIZE))
+                .font(egui_phosphor::font_id(HISTORY_PILL_ICON_SIZE))
                 .color(muted_color),
         );
         ui.add_space(8.0);

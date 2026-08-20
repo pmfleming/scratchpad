@@ -235,7 +235,7 @@ fn unicode_submenu_row(
             rect.right_center() - egui::vec2(EDITOR_CONTEXT_CARET_WIDTH * 0.5, 0.0),
             egui::Align2::CENTER_CENTER,
             CARET_RIGHT,
-            egui::TextStyle::Button.resolve(ui.style()),
+            egui_phosphor::font_id(egui::TextStyle::Button.resolve(ui.style()).size),
             text_primary(ui),
         );
     });

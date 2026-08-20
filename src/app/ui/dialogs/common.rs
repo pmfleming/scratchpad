@@ -54,7 +54,7 @@ pub(super) fn render_dialog_header(ui: &mut egui::Ui, title: &str) -> bool {
     callout::header_row(ui, ("dialog_header", title), "Cancel", |ui| {
         ui.label(
             egui::RichText::new(FILE_TEXT)
-                .size(16.0)
+                .font(egui_phosphor::font_id(16.0))
                 .color(callout::muted_text(ui)),
         );
         ui.add_space(6.0);

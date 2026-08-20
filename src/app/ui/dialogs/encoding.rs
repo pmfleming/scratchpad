@@ -383,7 +383,7 @@ fn render_card_icon_with_color(ui: &mut egui::Ui, icon: &str, color: egui::Color
             |ui| {
                 ui.label(
                     egui::RichText::new(icon)
-                        .font(egui::FontId::proportional(20.0))
+                        .font(egui_phosphor::font_id(20.0))
                         .color(color),
                 );
             },

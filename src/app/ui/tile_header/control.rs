@@ -114,7 +114,7 @@ pub(crate) fn paint_tile_control(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         label,
-        egui::FontId::proportional(font_size),
+        egui_phosphor::font_id(font_size),
         style_colors.text_color,
     );
 }

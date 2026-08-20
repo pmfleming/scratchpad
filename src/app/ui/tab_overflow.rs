@@ -115,7 +115,9 @@ fn overflow_button(ui: &mut egui::Ui) -> egui::Response {
             ui.add_sized(
                 [BUTTON_SIZE.x, BUTTON_SIZE.y],
                 egui::Button::new(
-                    egui::RichText::new(egui_phosphor::regular::CARET_DOWN).color(text_primary(ui)),
+                    egui::RichText::new(egui_phosphor::regular::CARET_DOWN)
+                        .font(egui_phosphor::font_id(14.0))
+                        .color(text_primary(ui)),
                 )
                 .fill(action_bg(ui))
                 .stroke(Stroke::new(1.0, border(ui))),

@@ -104,7 +104,7 @@ pub(super) fn paint_context_menu_row_label(
             rect.left_center() + egui::vec2(EDITOR_CONTEXT_ICON_CENTER_X, 0.0),
             egui::Align2::CENTER_CENTER,
             icon,
-            font.clone(),
+            egui_phosphor::font_id(font.size),
             color,
         );
     }
@@ -148,7 +148,7 @@ pub(super) fn icon_rail_button(
         };
         let button = egui::Button::new(
             egui::RichText::new(icon)
-                .font(egui::FontId::proportional(17.0))
+                .font(egui_phosphor::font_id(17.0))
                 .color(color),
         )
         .min_size(EDITOR_CONTEXT_ICON_BUTTON_SIZE)

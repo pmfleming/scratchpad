@@ -214,21 +214,21 @@ pub fn apply_editor_fonts(
     }
 
     let editor_family = egui::FontFamily::Name(EDITOR_FONT_FAMILY.into());
-    let fallback_names = FALLBACK_FONT_ASSETS
-        .iter()
-        .map(|(name, _)| (*name).to_owned());
-    let proportional_candidates = proportional_font_candidates(font_name, fallback_names.clone());
-    let monospace_candidates: Vec<String> = std::iter::once(font_name.to_owned())
-        .chain(fallback_names)
+    let editor_candidates: Vec<String> = std::iter::once(font_name.to_owned())
+        .chain(
+            FALLBACK_FONT_ASSETS
+                .iter()
+                .map(|(name, _)| (*name).to_owned()),
+        )
         .collect();
 
     fonts
         .families
-        .insert(egui::FontFamily::Proportional, proportional_candidates);
+        .insert(egui::FontFamily::Proportional, editor_candidates.clone());
     fonts
         .families
-        .insert(egui::FontFamily::Monospace, monospace_candidates.clone());
-    fonts.families.insert(editor_family, monospace_candidates);
+        .insert(egui::FontFamily::Monospace, editor_candidates.clone());
+    fonts.families.insert(editor_family, editor_candidates);
     ctx.set_fonts(fonts);
 
     match warning {
@@ -363,33 +363,12 @@ fn system_font_database() -> &'static fontdb::Database {
     })
 }
 
-fn proportional_font_candidates(
-    font_name: &'static str,
-    fallback_names: impl IntoIterator<Item = String>,
-) -> Vec<String> {
-    // Phosphor uses private-use code points that can also be present in OS fonts
-    // such as Nerd Fonts. Keep it first so changing to System appearance cannot
-    // substitute unrelated glyphs for application icons.
-    std::iter::once("phosphor".to_owned())
-        .chain(std::iter::once(font_name.to_owned()))
-        .chain(fallback_names)
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         EditorFontPreset, EditorFontSelection, EditorFontSource, default_os_editor_font_candidates,
-        font_tweak, proportional_font_candidates,
+        font_tweak,
     };
-
-    #[test]
-    fn phosphor_icons_are_checked_before_editor_and_fallback_fonts() {
-        let candidates =
-            proportional_font_candidates("editor", ["symbols".to_owned(), "cjk".to_owned()]);
-
-        assert_eq!(candidates, ["phosphor", "editor", "symbols", "cjk"]);
-    }
 
     #[test]
     fn configured_indent_width_sets_literal_tab_width() {

@@ -322,12 +322,16 @@ fn render_split_primary_button(ui: &mut egui::Ui) -> bool {
 
 fn render_split_submenu(ui: &mut egui::Ui, actions: &mut Vec<TileAction>) {
     with_visual_overrides(ui, apply_context_menu_row_hover_style, |ui| {
-        let button = egui::Button::new(egui::RichText::new(CARET_RIGHT).color(text_primary(ui)))
-            .min_size(egui::vec2(
-                EDITOR_CONTEXT_CARET_WIDTH,
-                EDITOR_CONTEXT_ROW_HEIGHT,
-            ))
-            .stroke(egui::Stroke::NONE);
+        let button = egui::Button::new(
+            egui::RichText::new(CARET_RIGHT)
+                .font(egui_phosphor::font_id(14.0))
+                .color(text_primary(ui)),
+        )
+        .min_size(egui::vec2(
+            EDITOR_CONTEXT_CARET_WIDTH,
+            EDITOR_CONTEXT_ROW_HEIGHT,
+        ))
+        .stroke(egui::Stroke::NONE);
 
         widget_ids::surface_widget(ui, "editor_context.split_caret", "submenu", |ui| {
             egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
