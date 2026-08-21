@@ -95,10 +95,20 @@ fn new_invocation_id() -> Result<u128, Box<dyn std::error::Error + Send + Sync>>
 }
 
 fn renderer_from_env() -> eframe::Renderer {
-    match std::env::var("SCRATCHPAD_RENDERER") {
+    let renderer_override = std::env::var("SCRATCHPAD_RENDERER").ok();
+    renderer_from_override(renderer_override.as_deref())
+}
+
+fn renderer_from_override(renderer_override: Option<&str>) -> eframe::Renderer {
+    match renderer_override {
         #[cfg(target_os = "linux")]
-        Ok(value) if value.eq_ignore_ascii_case("glow") => eframe::Renderer::Glow,
-        Ok(value) if value.eq_ignore_ascii_case("wgpu") => eframe::Renderer::Wgpu,
+        Some(value) if value.eq_ignore_ascii_case("glow") => eframe::Renderer::Glow,
+        Some(value) if value.eq_ignore_ascii_case("wgpu") => eframe::Renderer::Wgpu,
+        // On Wayland, an eframe WGPU redraw can be withheld when Hyprland routes the window to
+        // an inactive workspace. eframe then busy-polls while waiting; Glow remains event-driven.
+        #[cfg(target_os = "linux")]
+        _ => eframe::Renderer::Glow,
+        #[cfg(not(target_os = "linux"))]
         _ => eframe::Renderer::default(),
     }
 }
@@ -173,4 +183,30 @@ fn best_png_from_ico(ico: &[u8]) -> Option<&[u8]> {
     }
 
     best_image.map(|(_, image)| image)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::renderer_from_override;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_defaults_to_glow_to_avoid_wgpu_idle_busy_polling() {
+        assert_eq!(renderer_from_override(None), eframe::Renderer::Glow);
+        assert_eq!(
+            renderer_from_override(Some("unknown")),
+            eframe::Renderer::Glow
+        );
+    }
+
+    #[test]
+    fn wgpu_can_be_selected_explicitly() {
+        assert_eq!(renderer_from_override(Some("WGPU")), eframe::Renderer::Wgpu);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn glow_override_is_case_insensitive() {
+        assert_eq!(renderer_from_override(Some("GLOW")), eframe::Renderer::Glow);
+    }
 }
