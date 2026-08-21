@@ -157,9 +157,7 @@ impl PieceTreeLite {
         if self.root.nodes.is_empty() || self.len_chars() == 0 {
             return LeafAddress::default();
         }
-        self.find_leaf_by(offset_chars, &self.root.node_start_chars, |node| {
-            &node.leaf_start_chars
-        })
+        self.find_leaf_by(offset_chars, |node| &node.leaf_start_chars)
     }
 
     pub(super) fn find_leaf_for_line_index(&self, line_index: usize) -> LeafAddress {
@@ -168,24 +166,15 @@ impl PieceTreeLite {
         }
 
         let safe_line = line_index.min(self.root.metrics.newlines);
-        let node_index = self
-            .root
-            .nodes
-            .iter()
-            .enumerate()
-            .find_map(|(index, node)| {
-                let start = self.root.node_start_newlines[index];
-                (start + node.metrics.newlines >= safe_line).then_some(index)
-            })
-            .unwrap_or_else(|| self.root.nodes.len() - 1);
+        let node_index = self.root.node_metric_index.node_for_line(safe_line);
         let node = &self.root.nodes[node_index];
+        let node_start_newline = self.root.node_metric_index.newlines_before(node_index);
         let leaf_index = node
             .leaves
             .iter()
             .enumerate()
             .find_map(|(index, leaf)| {
-                let start =
-                    self.root.node_start_newlines[node_index] + node.leaf_start_newlines[index];
+                let start = node_start_newline + node.leaf_start_newlines[index];
                 (start + leaf.metrics.newlines >= safe_line).then_some(index)
             })
             .unwrap_or_else(|| node.leaves.len() - 1);
@@ -193,25 +182,21 @@ impl PieceTreeLite {
         LeafAddress {
             node_index,
             leaf_index,
-            leaf_start_char: self.root.node_start_chars[node_index]
+            leaf_start_char: self.root.node_metric_index.chars_before(node_index)
                 + node.leaf_start_chars[leaf_index],
-            leaf_start_newline: self.root.node_start_newlines[node_index]
-                + node.leaf_start_newlines[leaf_index],
+            leaf_start_newline: node_start_newline + node.leaf_start_newlines[leaf_index],
         }
     }
 
     fn find_leaf_by(
         &self,
         target: usize,
-        node_starts: &[usize],
         leaf_starts: impl Fn(&PieceTreeInternalNode) -> &[usize],
     ) -> LeafAddress {
-        let node_index = node_starts
-            .partition_point(|start| *start <= target)
-            .saturating_sub(1)
-            .min(self.root.nodes.len() - 1);
+        let node_index = self.root.node_metric_index.node_for_char(target);
         let node = &self.root.nodes[node_index];
-        let offset_in_node = target.saturating_sub(node_starts[node_index]);
+        let node_start = self.root.node_metric_index.chars_before(node_index);
+        let offset_in_node = target.saturating_sub(node_start);
         let leaf_starts_slice = leaf_starts(node);
         let leaf_index = leaf_starts_slice
             .partition_point(|start| *start <= offset_in_node)
@@ -221,9 +206,8 @@ impl PieceTreeLite {
         LeafAddress {
             node_index,
             leaf_index,
-            leaf_start_char: self.root.node_start_chars[node_index]
-                + node.leaf_start_chars[leaf_index],
-            leaf_start_newline: self.root.node_start_newlines[node_index]
+            leaf_start_char: node_start + node.leaf_start_chars[leaf_index],
+            leaf_start_newline: self.root.node_metric_index.newlines_before(node_index)
                 + node.leaf_start_newlines[leaf_index],
         }
     }

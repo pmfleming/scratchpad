@@ -384,9 +384,9 @@ impl PieceTreeLite {
         LeafAddress {
             node_index,
             leaf_index,
-            leaf_start_char: self.root.node_start_chars[node_index]
+            leaf_start_char: self.root.node_metric_index.chars_before(node_index)
                 + self.root.nodes[node_index].leaf_start_chars[leaf_index],
-            leaf_start_newline: self.root.node_start_newlines[node_index]
+            leaf_start_newline: self.root.node_metric_index.newlines_before(node_index)
                 + self.root.nodes[node_index].leaf_start_newlines[leaf_index],
         }
     }

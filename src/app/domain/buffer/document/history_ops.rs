@@ -62,6 +62,34 @@ impl TextDocument {
         indices: Vec<usize>,
         direction: OperationDirection,
     ) -> Result<CursorRange, TextHistoryApplyError> {
+        if indices.len() == 1 && !self.content.piece_tree.has_live_anchors() {
+            let idx = indices[0];
+            let entry = &self.history.entries[idx];
+            let expected_generation = match direction {
+                OperationDirection::Undo => entry.visible_generation_after,
+                OperationDirection::Redo => entry.visible_generation_before,
+            };
+            let checkpoint = match direction {
+                OperationDirection::Undo => entry.checkpoint_before.clone(),
+                OperationDirection::Redo => entry.checkpoint_after.clone(),
+            };
+            if self.visible_generation() == expected_generation
+                && let Some(checkpoint) = checkpoint
+            {
+                let selection = match direction {
+                    OperationDirection::Undo => entry.previous_selection,
+                    OperationDirection::Redo => entry.next_selection,
+                };
+                self.content.piece_tree = checkpoint;
+                self.mark_history_entry_undone(idx, matches!(direction, OperationDirection::Undo));
+                self.history.latest_update_at = None;
+                self.history.pending_generation_before = None;
+                self.history.pending_checkpoint_before = None;
+                self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
+                return Ok(selection);
+            }
+        }
+
         let mut applied_selection = None;
         for idx in indices {
             if !self.history.entries[idx].flags.replayable {
@@ -77,6 +105,7 @@ impl TextDocument {
         if applied_selection.is_some() {
             self.history.latest_update_at = None;
             self.history.pending_generation_before = None;
+            self.history.pending_checkpoint_before = None;
         }
         self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
         applied_selection.ok_or(TextHistoryApplyError::Conflict)
@@ -116,6 +145,7 @@ impl TextDocument {
             .retain(|edit| !edit.deleted_text.is_empty() || !edit.inserted_text.is_empty());
         if record.edits.is_empty() {
             self.history.pending_generation_before = None;
+            self.history.pending_checkpoint_before = None;
             return;
         }
 
@@ -139,6 +169,7 @@ impl TextDocument {
         if self.try_coalesce_history(&record, source) {
             self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
             self.history.pending_generation_before = None;
+            self.history.pending_checkpoint_before = None;
             return;
         }
 
@@ -149,6 +180,7 @@ impl TextDocument {
         self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
         self.enforce_history_budget();
         self.history.pending_generation_before = None;
+        self.history.pending_checkpoint_before = None;
     }
 
     fn apply_operation_record(
@@ -259,6 +291,13 @@ impl TextDocument {
             .collect::<PieceHistoryEdits>();
         let fingerprint = self.fingerprint_for_history_edits(&edits);
         self.history.latest_update_at = Some(Instant::now());
+        let mut checkpoint_before = self.history.pending_checkpoint_before.take();
+        if let Some(before) = &mut checkpoint_before {
+            Arc::make_mut(before).share_storage_from(self.content.piece_tree.as_ref());
+        }
+        let checkpoint_after = checkpoint_before
+            .as_ref()
+            .map(|_| self.content.piece_tree.clone());
         let entry = PieceHistoryEntry {
             id: self.history.next_id,
             global_seq: next_text_history_global_seq(),
@@ -275,6 +314,8 @@ impl TextDocument {
             },
             previous_selection: record.previous_selection,
             next_selection: record.next_selection,
+            checkpoint_before,
+            checkpoint_after,
         };
         self.history.next_id = self.history.next_id.saturating_add(1);
         entry

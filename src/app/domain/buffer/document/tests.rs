@@ -63,6 +63,46 @@ macro_rules! assert_undo_restores_text {
 }
 
 #[test]
+fn large_edit_root_checkpoint_preserves_undo_redo_payload_access() {
+    let mut document = TextDocument::new("base".to_owned());
+    let inserted = "x".repeat(super::super::history::TEXT_HISTORY_ROOT_CHECKPOINT_MIN_BYTES);
+    let inserted_chars = inserted.chars().count();
+    document.insert_direct_with_source(4, &inserted, PieceSource::Paste);
+    document.push_edit_operation_with_source(
+        OperationRecord {
+            previous_cursor: CursorRange::one(CharCursor::new(4)),
+            next_cursor: CursorRange::one(CharCursor::new(4 + inserted_chars)),
+            edits: vec![EditOperation {
+                start_char: 4,
+                deleted_text: String::new(),
+                inserted_text: inserted.clone(),
+                deleted_spans: Vec::new(),
+            }],
+        },
+        PieceSource::Paste,
+    );
+
+    assert!(document.history_entries()[0].checkpoint_before.is_some());
+    assert_eq!(
+        document.undo_last_operation(),
+        Some(CursorRange::one(CharCursor::new(4)))
+    );
+    assert_eq!(document.extract_text(), "base");
+    assert_eq!(
+        document
+            .operation_from_history_entry(&document.history_entries()[0])
+            .edits[0]
+            .inserted_text,
+        inserted
+    );
+    assert_eq!(
+        document.redo_last_operation(),
+        Some(CursorRange::one(CharCursor::new(4 + inserted_chars)))
+    );
+    assert_eq!(document.piece_tree().len_chars(), 4 + inserted_chars);
+}
+
+#[test]
 fn adjacent_typing_coalesces_into_one_undo_entry() {
     let mut document = empty_document!();
 

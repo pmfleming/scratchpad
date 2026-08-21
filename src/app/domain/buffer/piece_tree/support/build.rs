@@ -1,6 +1,7 @@
 use super::super::{
-    MAX_LEAF_BYTES, MAX_LEAF_PIECES, MAX_LEAVES_PER_INTERNAL, MIN_LEAVES_PER_INTERNAL, Piece,
-    PieceBuffer, PieceTreeInternalNode, PieceTreeLeaf, PieceTreeMetrics, PieceTreeRoot,
+    MAX_LEAF_BYTES, MAX_LEAF_PIECES, MAX_LEAVES_PER_INTERNAL, MIN_LEAVES_PER_INTERNAL,
+    NodeMetricIndex, Piece, PieceBuffer, PieceTreeInternalNode, PieceTreeLeaf, PieceTreeMetrics,
+    PieceTreeRoot,
 };
 use std::ops::Range;
 use std::thread;
@@ -21,8 +22,7 @@ fn build_root_from_leaves(mut leaves: Vec<PieceTreeLeaf>) -> PieceTreeRoot {
 
     let nodes = pack_leaves_into_nodes(leaves);
     let mut root = PieceTreeRoot {
-        node_start_chars: Vec::with_capacity(nodes.len()),
-        node_start_newlines: Vec::with_capacity(nodes.len()),
+        node_metric_index: NodeMetricIndex::default(),
         nodes,
         metrics: PieceTreeMetrics::default(),
         anchor_count: 0,

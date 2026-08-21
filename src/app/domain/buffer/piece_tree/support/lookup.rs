@@ -1,4 +1,6 @@
-use super::super::{LeafAddress, Piece, PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLite};
+use super::super::{
+    LINE_SAMPLE_STRIDE, LeafAddress, Piece, PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLite,
+};
 
 pub(in crate::app::domain::buffer::piece_tree) fn line_lookup_in_leaves(
     tree: &PieceTreeLite,
@@ -131,8 +133,10 @@ fn scan_leaf_for_line_lookup(
             continue;
         }
 
+        let piece_text = tree.piece_text(piece);
+        let byte_start = apply_piece_line_sample(tree, piece, &piece_text, safe_line, cursor);
         if let Some(line_info) =
-            scan_piece_for_line_lookup(&tree.piece_text(piece), safe_line, cursor)
+            scan_piece_for_line_lookup(&piece_text[byte_start..], safe_line, cursor)
         {
             return Some(line_info);
         }
@@ -162,6 +166,31 @@ fn append_piece_to_target_line(
     } else {
         false
     }
+}
+
+fn apply_piece_line_sample(
+    tree: &PieceTreeLite,
+    piece: &Piece,
+    piece_text: &str,
+    safe_line: usize,
+    cursor: &mut LineLookupCursor,
+) -> usize {
+    if piece.newline_count < LINE_SAMPLE_STRIDE {
+        return 0;
+    }
+    let lines_needed = safe_line.saturating_sub(cursor.current_line);
+    let samples = tree.line_samples_for_piece(piece, piece_text);
+    let sample_count = (lines_needed / LINE_SAMPLE_STRIDE).min(samples.len());
+    if sample_count == 0 {
+        return 0;
+    }
+
+    let sample = samples[sample_count - 1];
+    cursor.current_line += sample_count * LINE_SAMPLE_STRIDE;
+    cursor.current_char += sample.char_offset as usize + 1;
+    cursor.line_start = cursor.current_char;
+    cursor.current_len = 0;
+    sample.byte_offset as usize + 1
 }
 
 fn scan_piece_for_line_lookup(

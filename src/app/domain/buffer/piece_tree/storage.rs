@@ -1,4 +1,3 @@
-use super::support::measure_text;
 use super::{ByteSpan, Piece, PieceBuffer, PieceProvenance, PieceSource, PieceTreeText};
 use crate::app::domain::buffer::{accumulate_line_count, history::PieceProvenanceStore};
 use std::collections::{HashMap, VecDeque};
@@ -14,7 +13,7 @@ const FILE_CHUNK_CACHE_LIMIT: usize = FILE_CHUNK_CACHE_BYTES / FILE_CHUNK_BYTES;
 #[derive(Clone, Debug)]
 pub(super) struct PieceTreeStorage {
     original: OriginalTextStorage,
-    add: String,
+    add: AddTextStorage,
     provenance: PieceProvenanceStore,
 }
 
@@ -45,6 +44,23 @@ struct FileChunkCache {
     loaded: HashMap<usize, Arc<String>>,
     least_to_most_recent: VecDeque<usize>,
 }
+
+/// Append-only text split by edit boundaries. Cloning a piece tree shares
+/// completed chunks, so editing while a snapshot is alive no longer copies the
+/// entire accumulated add buffer. Small consecutive edits may share a bounded
+/// tail; copy-on-write then copies at most one tail chunk.
+#[derive(Clone, Debug, Default)]
+struct AddTextStorage {
+    chunks: Vec<AddTextChunk>,
+}
+
+#[derive(Clone, Debug)]
+struct AddTextChunk {
+    start_byte: usize,
+    text: Arc<String>,
+}
+
+const ADD_TAIL_BYTES: usize = 256 * 1024;
 
 impl FileChunkCache {
     fn get(&mut self, chunk_index: usize) -> Option<Arc<String>> {
@@ -92,7 +108,7 @@ impl PieceTreeStorage {
     pub(super) fn from_original(text: String) -> Self {
         Self {
             original: OriginalTextStorage::Owned(Arc::from(text.into_boxed_str())),
-            add: String::new(),
+            add: AddTextStorage::default(),
             provenance: PieceProvenanceStore::default(),
         }
     }
@@ -119,15 +135,11 @@ impl PieceTreeStorage {
                     format!("invalid UTF-8 in {}: {error}", path.display()),
                 )
             })?;
-            let metrics = measure_text(text);
-            pieces.push(Piece {
-                buffer: PieceBuffer::Original,
-                start_byte: logical_start,
-                byte_len: metrics.byte_len,
-                char_len: metrics.char_len,
-                newline_count: metrics.newline_count,
-                is_ascii: metrics.is_ascii,
-            });
+            pieces.push(Piece::from_slice(
+                PieceBuffer::Original,
+                logical_start,
+                text,
+            ));
             append_sample(&mut sample, text, sample_limit);
             line_count = accumulate_line_count(text, line_count, &mut pending_cr);
             chunks.push(FileBackedChunk {
@@ -148,7 +160,7 @@ impl PieceTreeStorage {
         Ok((
             Self {
                 original: OriginalTextStorage::FileBacked(Arc::new(original)),
-                add: String::new(),
+                add: AddTextStorage::default(),
                 provenance: PieceProvenanceStore::default(),
             },
             pieces,
@@ -217,7 +229,7 @@ impl PieceTreeStorage {
         let byte_len = usize::try_from(span.byte_len).expect("byte span length fits this platform");
         match span.buffer {
             PieceBuffer::Original => self.original_text_for_range(start, byte_len),
-            PieceBuffer::Add => PieceTreeText::borrowed(&self.add[start..start + byte_len]),
+            PieceBuffer::Add => self.add.text_for_range(start, byte_len),
         }
     }
 
@@ -229,9 +241,7 @@ impl PieceTreeStorage {
     ) -> PieceTreeText<'_> {
         match buffer {
             PieceBuffer::Original => self.original_text_for_range(start_byte, byte_len),
-            PieceBuffer::Add => {
-                PieceTreeText::borrowed(&self.add[start_byte..start_byte + byte_len])
-            }
+            PieceBuffer::Add => self.add.text_for_range(start_byte, byte_len),
         }
     }
 
@@ -252,21 +262,17 @@ impl PieceTreeStorage {
         source: PieceSource,
         generation: u64,
     ) -> AddTextSpan {
-        let span = AddTextSpan {
-            start_byte: self.add.len(),
-            byte_len: text.len(),
-        };
-        self.add.push_str(text);
+        let span = self.add.append(text);
         self.record_add_provenance(span, source, generation);
         span
     }
 
     pub(super) fn take_add_if_nonempty(&mut self) -> Option<String> {
-        (!self.add.is_empty()).then(|| std::mem::take(&mut self.add))
+        self.add.take_if_nonempty()
     }
 
     pub(super) fn replace_add(&mut self, add: String) {
-        self.add = add;
+        self.add = AddTextStorage::from_string(add);
     }
 
     pub(super) fn provenance_entry_count(&self) -> usize {
@@ -290,6 +296,109 @@ impl PieceTreeStorage {
                 session_generation: 0,
             },
         );
+    }
+}
+
+impl AddTextStorage {
+    fn from_string(text: String) -> Self {
+        if text.is_empty() {
+            Self::default()
+        } else {
+            Self {
+                chunks: vec![AddTextChunk {
+                    start_byte: 0,
+                    text: Arc::new(text),
+                }],
+            }
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.chunks
+            .last()
+            .map_or(0, |chunk| chunk.start_byte + chunk.text.len())
+    }
+
+    fn is_empty(&self) -> bool {
+        self.chunks.is_empty()
+    }
+
+    fn append(&mut self, text: &str) -> AddTextSpan {
+        let start_byte = self.len();
+        let span = AddTextSpan {
+            start_byte,
+            byte_len: text.len(),
+        };
+        if text.is_empty() {
+            return span;
+        }
+
+        let can_extend_tail = text.len() < ADD_TAIL_BYTES
+            && self.chunks.last().is_some_and(|chunk| {
+                chunk.text.len() < ADD_TAIL_BYTES
+                    && chunk.text.len().saturating_add(text.len()) <= ADD_TAIL_BYTES
+            });
+        if can_extend_tail {
+            let tail = self.chunks.last_mut().expect("tail exists");
+            Arc::make_mut(&mut tail.text).push_str(text);
+        } else {
+            self.chunks.push(AddTextChunk {
+                start_byte,
+                text: Arc::new(text.to_owned()),
+            });
+        }
+        span
+    }
+
+    fn text_for_range(&self, start_byte: usize, byte_len: usize) -> PieceTreeText<'static> {
+        if byte_len == 0 {
+            return PieceTreeText::owned(String::new());
+        }
+        let chunk_index = self
+            .chunks
+            .partition_point(|chunk| chunk.start_byte <= start_byte)
+            .saturating_sub(1);
+        let chunk = &self.chunks[chunk_index];
+        let relative_start = start_byte.saturating_sub(chunk.start_byte);
+        if relative_start + byte_len <= chunk.text.len() {
+            return PieceTreeText::shared(
+                chunk.text.clone(),
+                relative_start..relative_start + byte_len,
+            );
+        }
+
+        let end_byte = start_byte + byte_len;
+        let mut text = String::with_capacity(byte_len);
+        for chunk in self.chunks.iter().skip(chunk_index) {
+            if chunk.start_byte >= end_byte {
+                break;
+            }
+            let local_start = start_byte.saturating_sub(chunk.start_byte);
+            let local_end = end_byte
+                .saturating_sub(chunk.start_byte)
+                .min(chunk.text.len());
+            if local_start < local_end {
+                text.push_str(&chunk.text[local_start..local_end]);
+            }
+        }
+        PieceTreeText::owned(text)
+    }
+
+    fn take_if_nonempty(&mut self) -> Option<String> {
+        if self.is_empty() {
+            return None;
+        }
+        if self.chunks.len() == 1 {
+            let chunk = self.chunks.pop().expect("single add chunk exists");
+            return Some(Arc::try_unwrap(chunk.text).unwrap_or_else(|text| (*text).clone()));
+        }
+
+        let mut text = String::with_capacity(self.len());
+        for chunk in &self.chunks {
+            text.push_str(&chunk.text);
+        }
+        *self = Self::default();
+        Some(text)
     }
 }
 

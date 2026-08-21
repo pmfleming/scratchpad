@@ -25,31 +25,28 @@ fn class_at(piece_tree: &PieceTreeLite, pos: usize) -> CharClass {
     classify(piece_tree.char_at(pos).unwrap_or_default())
 }
 
-fn scan_left_while(piece_tree: &PieceTreeLite, mut pos: usize, class: CharClass) -> usize {
-    while pos > 0
-        && piece_tree
-            .char_at(pos - 1)
-            .is_some_and(|ch| classify(ch) == class)
+fn scan_left_while(piece_tree: &PieceTreeLite, pos: usize, class: CharClass) -> usize {
+    let mut cursor = piece_tree.char_cursor(pos);
+    while cursor
+        .peek_previous()
+        .is_some_and(|ch| classify(ch) == class)
     {
-        pos -= 1;
+        let _ = cursor.previous_char();
     }
-    pos
+    cursor.position()
 }
 
 fn scan_right_while(
     piece_tree: &PieceTreeLite,
-    mut pos: usize,
+    pos: usize,
     total: usize,
     class: CharClass,
 ) -> usize {
-    while pos < total
-        && piece_tree
-            .char_at(pos)
-            .is_some_and(|ch| classify(ch) == class)
-    {
-        pos += 1;
+    let mut cursor = piece_tree.char_cursor(pos);
+    while cursor.position() < total && cursor.peek_next().is_some_and(|ch| classify(ch) == class) {
+        let _ = cursor.next_char();
     }
-    pos
+    cursor.position()
 }
 
 /// Move left to the start of the previous word, skipping whitespace first then

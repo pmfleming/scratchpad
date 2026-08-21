@@ -40,6 +40,76 @@
     ],
     "limiting_resource_hint": "cpu"
   },
+  "snapshot_shared_edit_latency": {
+    "description": "Edit a document with 16 MiB of inserted text while an immutable worker snapshot remains alive.",
+    "workload_family": "edit-paste",
+    "parameter_unit": "bytes",
+    "kind": "diagnostic",
+    "targets": [
+      "src/app/domain/buffer/document.rs",
+      "src/app/domain/buffer/piece_tree",
+      "src/app/domain/buffer/piece_tree/storage.rs"
+    ],
+    "limiting_resource_hint": "memory"
+  },
+  "snapshot_shared_fragmented_edit_latency": {
+    "description": "Edit a 20,000-fragment document while an immutable worker snapshot remains alive.",
+    "workload_family": "edit-paste",
+    "parameter_unit": "fragments",
+    "kind": "diagnostic",
+    "targets": [
+      "src/app/domain/buffer/document.rs",
+      "src/app/domain/buffer/piece_tree",
+      "src/app/domain/buffer/piece_tree/edit/rebalance.rs"
+    ],
+    "limiting_resource_hint": "memory"
+  },
+  "dense_line_lookup_latency": {
+    "description": "Resolve 1,024 distributed lines in 4 MiB of dense short lines.",
+    "workload_family": "viewport",
+    "parameter_unit": "bytes",
+    "kind": "diagnostic",
+    "targets": [
+      "src/app/domain/buffer/piece_tree/support/lookup.rs",
+      "src/app/domain/buffer/piece_tree/support/text.rs"
+    ],
+    "limiting_resource_hint": "cpu"
+  },
+  "reverse_character_walk_latency": {
+    "description": "Walk backward through 8 Ki Unicode scalar values in one large piece.",
+    "workload_family": "viewport",
+    "parameter_unit": "characters",
+    "kind": "diagnostic",
+    "targets": [
+      "src/app/domain/buffer/piece_tree/query.rs",
+      "src/app/ui/editor_content/native_editor/word_boundary.rs"
+    ],
+    "limiting_resource_hint": "cpu"
+  },
+  "fragmented_tree_edit_latency": {
+    "description": "Insert into a live tree after 20,000 fragmenting edits.",
+    "workload_family": "edit-paste",
+    "parameter_unit": "fragments",
+    "kind": "diagnostic",
+    "targets": [
+      "src/app/domain/buffer/piece_tree.rs",
+      "src/app/domain/buffer/piece_tree/edit.rs",
+      "src/app/domain/buffer/piece_tree/metrics.rs"
+    ],
+    "limiting_resource_hint": "cpu"
+  },
+  "large_paste_undo_latency": {
+    "description": "Undo a recorded 16 MiB mixed UTF-8 paste.",
+    "workload_family": "edit-paste",
+    "parameter_unit": "bytes",
+    "kind": "diagnostic",
+    "targets": [
+      "src/app/domain/buffer/document/history_ops.rs",
+      "src/app/domain/buffer/history.rs",
+      "src/app/domain/buffer/piece_tree"
+    ],
+    "limiting_resource_hint": "cpu"
+  },
   "session_restore_latency": {
     "description": "Restore the startup-visible tab from a persisted 10,000-tab session.",
     "workload_family": "session-persistence",

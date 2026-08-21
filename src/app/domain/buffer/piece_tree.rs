@@ -1,4 +1,5 @@
 mod anchor;
+mod cursor;
 mod edit;
 mod metrics;
 pub(super) mod preview;
@@ -14,6 +15,7 @@ mod tests;
 pub(crate) use super::history::PIECE_PROVENANCE_ENTRY_LIMIT;
 pub(crate) use super::history::{ByteSpan, PieceProvenance, PieceSource};
 pub use anchor::{AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind};
+pub use cursor::PieceTreeCharCursor;
 
 use std::io;
 use std::ops::{Deref, Range};
@@ -21,7 +23,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anchor::{LeafAnchor, LeafId, PieceTreeAnchorState};
-use metrics::sum_node_metrics;
+use metrics::{NodeMetricIndex, sum_node_metrics};
 use runtime::PieceTreeRuntime;
 use storage::PieceTreeStorage;
 use support::{
@@ -35,6 +37,7 @@ const MAX_LEAF_PIECES: usize = 16;
 const MAX_LEAVES_PER_INTERNAL: usize = 16;
 const MIN_LEAVES_PER_INTERNAL: usize = MAX_LEAVES_PER_INTERNAL / 4;
 const PREVIEW_MAX_CHARS: usize = 96;
+const LINE_SAMPLE_STRIDE: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PieceTreeCharPosition {
@@ -156,6 +159,12 @@ struct Piece {
     is_ascii: bool,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct PieceLineSample {
+    char_offset: u32,
+    byte_offset: u32,
+}
+
 impl Piece {
     fn from_slice(buffer: PieceBuffer, start_byte: usize, text: &str) -> Self {
         let metrics = measure_text(text);
@@ -177,6 +186,35 @@ impl Piece {
             pieces: 1,
         }
     }
+}
+
+fn build_line_samples(text: &str, is_ascii: bool) -> Arc<Vec<PieceLineSample>> {
+    let samples = if is_ascii {
+        memchr::memchr_iter(b'\n', text.as_bytes())
+            .enumerate()
+            .filter_map(|(index, byte_offset)| {
+                (index % LINE_SAMPLE_STRIDE == LINE_SAMPLE_STRIDE - 1).then_some(PieceLineSample {
+                    char_offset: byte_offset as u32,
+                    byte_offset: byte_offset as u32,
+                })
+            })
+            .collect::<Vec<_>>()
+    } else {
+        text.char_indices()
+            .enumerate()
+            .filter_map(|(char_offset, (byte_offset, ch))| {
+                (ch == '\n').then_some((char_offset, byte_offset))
+            })
+            .enumerate()
+            .filter_map(|(index, (char_offset, byte_offset))| {
+                (index % LINE_SAMPLE_STRIDE == LINE_SAMPLE_STRIDE - 1).then_some(PieceLineSample {
+                    char_offset: char_offset as u32,
+                    byte_offset: byte_offset as u32,
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    Arc::new(samples)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -258,8 +296,7 @@ impl PieceTreeInternalNode {
 pub struct PieceTreeRoot {
     nodes: Vec<PieceTreeInternalNode>,
     metrics: PieceTreeMetrics,
-    node_start_chars: Vec<usize>,
-    node_start_newlines: Vec<usize>,
+    node_metric_index: NodeMetricIndex,
     anchor_count: usize,
 }
 
@@ -276,12 +313,8 @@ impl PieceTreeRoot {
     }
 
     fn recalculate_from_node_metrics(&mut self) {
-        self.metrics = recalculate_prefix_metrics(
-            &self.nodes,
-            &mut self.node_start_chars,
-            &mut self.node_start_newlines,
-            |node| node.metrics,
-        );
+        self.metrics = sum_node_metrics(&self.nodes);
+        self.node_metric_index.rebuild(&self.nodes);
         self.anchor_count = self.nodes.iter().map(|node| node.anchor_count).sum();
     }
 
@@ -290,11 +323,20 @@ impl PieceTreeRoot {
         range: Range<usize>,
         replacement_nodes: Vec<PieceTreeInternalNode>,
     ) {
+        let old_node_metrics = self.nodes[range.clone()]
+            .iter()
+            .map(|node| node.metrics)
+            .collect::<Vec<_>>();
         let old_metrics = sum_node_metrics(&self.nodes[range.clone()]);
         let old_anchor_count = self.nodes[range.clone()]
             .iter()
             .map(|node| node.anchor_count)
             .sum::<usize>();
+        let replacement_start = range.start;
+        let new_node_metrics = replacement_nodes
+            .iter()
+            .map(|node| node.metrics)
+            .collect::<Vec<_>>();
         let new_metrics = sum_node_metrics(&replacement_nodes);
         let new_anchor_count = replacement_nodes
             .iter()
@@ -313,20 +355,17 @@ impl PieceTreeRoot {
             .anchor_count
             .saturating_sub(old_anchor_count)
             .saturating_add(new_anchor_count);
-        self.refresh_node_prefixes();
-    }
-
-    fn refresh_node_prefixes(&mut self) {
-        self.node_start_chars.clear();
-        self.node_start_newlines.clear();
-
-        let mut current_chars = 0usize;
-        let mut current_newlines = 0usize;
-        for node in &self.nodes {
-            self.node_start_chars.push(current_chars);
-            self.node_start_newlines.push(current_newlines);
-            current_chars += node.metrics.chars;
-            current_newlines += node.metrics.newlines;
+        if old_node_metrics.len() == new_node_metrics.len() {
+            for (offset, (old, new)) in old_node_metrics
+                .into_iter()
+                .zip(new_node_metrics)
+                .enumerate()
+            {
+                self.node_metric_index
+                    .update(replacement_start + offset, old, new);
+            }
+        } else {
+            self.node_metric_index.rebuild(&self.nodes);
         }
     }
 }
@@ -438,6 +477,20 @@ impl PieceTreeLite {
         self.runtime.generation()
     }
 
+    pub(crate) fn share_storage_from(&mut self, current: &Self) {
+        self.storage = current.storage.clone();
+    }
+
+    fn line_samples_for_piece(&self, piece: &Piece, piece_text: &str) -> Arc<Vec<PieceLineSample>> {
+        let span = ByteSpan {
+            buffer: piece.buffer,
+            start_byte: piece.start_byte as u64,
+            byte_len: piece.byte_len as u64,
+        };
+        self.runtime
+            .line_samples(span, || build_line_samples(piece_text, piece.is_ascii))
+    }
+
     #[must_use]
     pub fn len_bytes(&self) -> usize {
         self.root.metrics.bytes
@@ -468,6 +521,11 @@ impl PieceTreeLite {
         let start = range_chars.start.min(self.len_chars());
         let end = range_chars.end.min(self.len_chars());
         if start <= end { start..end } else { end..start }
+    }
+
+    #[must_use]
+    pub fn char_cursor(&self, offset_chars: usize) -> PieceTreeCharCursor<'_> {
+        PieceTreeCharCursor::new(self, offset_chars)
     }
 
     #[must_use]
@@ -535,7 +593,29 @@ impl PieceTreeLite {
         safe_offset: usize,
     ) -> usize {
         for piece in leaf.pieces.iter().skip(piece_skip) {
-            for ch in self.piece_text(piece).chars() {
+            let piece_end = current_char + piece.char_len;
+            if safe_offset > piece_end {
+                current_line += piece.newline_count;
+                current_char = piece_end;
+                continue;
+            }
+
+            let local_target = safe_offset.saturating_sub(current_char);
+            let piece_text = self.piece_text(piece);
+            let mut byte_start = 0usize;
+            if piece.newline_count >= LINE_SAMPLE_STRIDE {
+                let samples = self.line_samples_for_piece(piece, &piece_text);
+                let sample_count =
+                    samples.partition_point(|sample| (sample.char_offset as usize) < local_target);
+                if sample_count > 0 {
+                    let sample = samples[sample_count - 1];
+                    current_line += sample_count * LINE_SAMPLE_STRIDE;
+                    current_char += sample.char_offset as usize + 1;
+                    byte_start = sample.byte_offset as usize + 1;
+                }
+            }
+
+            for ch in piece_text[byte_start..].chars() {
                 if current_char >= safe_offset {
                     return current_line;
                 }

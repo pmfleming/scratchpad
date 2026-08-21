@@ -28,7 +28,7 @@ pub use history::{
     TextHistoryBudget, source_label,
 };
 pub use piece_tree::{
-    AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind, PieceTreeCharPosition,
+    AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind, PieceTreeCharCursor, PieceTreeCharPosition,
     PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLineInfo, PieceTreeLite, PieceTreeMetrics,
     PieceTreeSlice, PieceTreeSpan, PieceTreeText,
 };

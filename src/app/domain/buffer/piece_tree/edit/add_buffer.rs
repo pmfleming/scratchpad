@@ -11,6 +11,7 @@ impl PieceTreeLite {
     }
 
     pub fn compact_add_buffer(&mut self, history_spans: &mut [ByteSpan]) {
+        self.runtime.clear_line_samples();
         let Some(old_add) = self.storage.take_add_if_nonempty() else {
             return;
         };

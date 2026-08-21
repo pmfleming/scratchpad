@@ -1,6 +1,9 @@
 mod history_ops;
 
-use super::history::{OperationDirection, TextDocumentEditOperation, TextHistoryApplyError};
+use super::history::{
+    OperationDirection, TEXT_HISTORY_ROOT_CHECKPOINT_MIN_BYTES, TextDocumentEditOperation,
+    TextHistoryApplyError,
+};
 use super::{
     ByteSpan, DocumentSnapshot, LineEndingStyle, PersistedHistoryEntry, PieceHistoryEdit,
     PieceHistoryEntry, PieceSource, PieceTreeLite, TextDocumentOperationRecord, TextHistoryBudget,
@@ -58,6 +61,7 @@ pub(super) struct TextDocumentHistoryState {
     pub(super) latest_operation_record: Option<TextDocumentOperationRecord>,
     pub(super) latest_update_at: Option<Instant>,
     pub(super) pending_generation_before: Option<u32>,
+    pub(super) pending_checkpoint_before: Option<Arc<PieceTreeLite>>,
 }
 
 impl Default for TextDocumentHistoryState {
@@ -73,6 +77,7 @@ impl Default for TextDocumentHistoryState {
             latest_operation_record: None,
             latest_update_at: None,
             pending_generation_before: None,
+            pending_checkpoint_before: None,
         }
     }
 }
@@ -179,6 +184,7 @@ impl TextDocument {
         self.history.latest_operation_record = None;
         self.history.latest_update_at = None;
         self.history.pending_generation_before = None;
+        self.history.pending_checkpoint_before = None;
         self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
     }
 
@@ -307,6 +313,12 @@ impl TextDocument {
 
         validate_replacements(replacements, self.content.piece_tree.len_chars())?;
         self.capture_pending_history_generation_before();
+        let checkpoint_bytes = replacements
+            .iter()
+            .map(|(range, replacement)| range.len().max(replacement.len()))
+            .max()
+            .unwrap_or_default();
+        self.capture_pending_history_checkpoint(checkpoint_bytes);
 
         let mut operation_record = TextDocumentOperationRecord {
             previous_selection,
@@ -375,6 +387,7 @@ impl TextDocument {
     /// Insert text directly via piece tree.
     pub fn insert_direct(&mut self, char_index: usize, text: &str) {
         self.capture_pending_history_generation_before();
+        self.capture_pending_history_checkpoint(text.len());
         self.insert_raw_text_with_source(text, char_index, PieceSource::Edit);
     }
 
@@ -385,6 +398,7 @@ impl TextDocument {
         source: PieceSource,
     ) {
         self.capture_pending_history_generation_before();
+        self.capture_pending_history_checkpoint(text.len());
         self.insert_raw_text_with_source(text, char_index, source);
     }
 
@@ -400,6 +414,7 @@ impl TextDocument {
     /// Delete a char range directly via piece tree.
     pub fn delete_char_range_direct(&mut self, char_range: Range<usize>) {
         self.capture_pending_history_generation_before();
+        self.capture_pending_history_checkpoint(char_range.len());
         self.delete_char_range_internal(char_range);
     }
 
@@ -471,6 +486,16 @@ impl TextDocument {
         if self.history.pending_generation_before.is_none() {
             self.history.pending_generation_before = Some(self.visible_generation());
         }
+    }
+
+    fn capture_pending_history_checkpoint(&mut self, changed_bytes: usize) {
+        if changed_bytes < TEXT_HISTORY_ROOT_CHECKPOINT_MIN_BYTES
+            || self.history.pending_checkpoint_before.is_some()
+            || self.content.piece_tree.has_live_anchors()
+        {
+            return;
+        }
+        self.history.pending_checkpoint_before = Some(self.content.piece_tree.clone());
     }
 
     fn add_history_depth(&mut self, entry: &PieceHistoryEntry) {

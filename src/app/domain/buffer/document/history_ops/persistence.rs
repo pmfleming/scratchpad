@@ -57,6 +57,8 @@ impl TextDocument {
             flags,
             previous_selection: restore_cursor_range(persisted.previous_selection),
             next_selection: restore_cursor_range(persisted.next_selection),
+            checkpoint_before: None,
+            checkpoint_after: None,
         }
     }
 
@@ -98,6 +100,10 @@ impl TextDocument {
 
     pub(in crate::app::domain::buffer::document) fn compact_history_storage(&mut self) {
         let mut spans = self.history_spans();
+        for entry in &mut self.history.entries {
+            entry.checkpoint_before = None;
+            entry.checkpoint_after = None;
+        }
         Arc::make_mut(&mut self.content.piece_tree).compact_add_buffer(&mut spans);
         self.replace_history_spans(spans);
     }

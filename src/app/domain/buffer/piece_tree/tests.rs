@@ -7,6 +7,39 @@ use rand::{RngExt, SeedableRng};
 use std::io::Write;
 
 #[test]
+fn cloned_tree_keeps_add_tail_stable_when_current_tree_appends() {
+    let mut tree = PieceTreeLite::from_string("base".to_owned());
+    tree.insert_with_source(4, " first", PieceSource::Edit);
+    let snapshot = tree.clone();
+
+    tree.insert_with_source(tree.len_chars(), " second", PieceSource::Edit);
+
+    assert_eq!(snapshot.extract_text(), "base first");
+    assert_eq!(tree.extract_text(), "base first second");
+}
+
+#[test]
+fn character_cursor_walks_forward_and_reverse_across_utf8_pieces() {
+    let mut tree = PieceTreeLite::from_string("a界c".to_owned());
+    tree.insert_with_source(2, "β😀", PieceSource::Edit);
+    let expected = tree.extract_text();
+
+    let mut forward = tree.char_cursor(0);
+    let mut walked = String::new();
+    while let Some(ch) = forward.next_char() {
+        walked.push(ch);
+    }
+    assert_eq!(walked, expected);
+
+    let mut reverse = tree.char_cursor(tree.len_chars());
+    let mut reversed = String::new();
+    while let Some(ch) = reverse.previous_char() {
+        reversed.push(ch);
+    }
+    assert_eq!(reversed, expected.chars().rev().collect::<String>());
+}
+
+#[test]
 fn anchor_left_bias_stays_before_insertion_at_same_offset() {
     let mut tree = PieceTreeLite::from_string("ab".to_owned());
     let anchor = tree.create_anchor(1, AnchorBias::Left);
