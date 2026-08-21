@@ -138,13 +138,13 @@ Added `dense_line_lookup_latency/4194304`, resolving 1,024 distributed lines in 
 ### Results
 
 - Before: 116.9–151.4 ms, with the clean baseline near 128.7 ms.
-- Retained lazy index: approximately 82–108 microseconds.
-- Improvement: over 99.9%, roughly three orders of magnitude on the dense-line workload.
+- Retained lazy index initially measured 82–108 microseconds. After moving samples into the lower-memory tree-level side cache, repeated samples were approximately 0.14–0.27 ms.
+- Improvement after the memory correction: over 99.8%, or more than 500x on the dense-line workload.
 - The eager prototype moved 128 MiB paste insertion from about 103 ms to 119–125 ms and was rejected.
 - After making samples lazy, a stable paste rerun measured 105.6–109.3 ms, matching the pre-experiment range; the first rerun was affected by the same machine variance seen elsewhere.
 - Viewport measurements remained noisy (roughly 14–15 ms at 4 MiB) and did not show a consistent retained regression.
 - Buffer-domain tests passed.
-- A first lazy implementation stored the cache in every reserved piece slot and increased the 50,000-file peak heap by about 15 MiB. It was replaced with a tree-level lazy side cache. After that correction, 50,000-file peak heap was 160.4 MiB versus the 156.9 MiB baseline (+2.2%), while cumulative allocation was within 0.3%; fragmented-session peak heap improved from 17.3 MiB to 15.1 MiB.
+- A first lazy implementation stored the cache in every reserved piece slot and increased the 50,000-file peak heap by about 15 MiB. It was replaced with a tree-level lazy side cache; this traded some lookup speed for much lower retained structure cost. After that correction, 50,000-file peak heap was 160.4 MiB versus the 156.9 MiB baseline (+2.2%), while cumulative allocation was within 0.3%; fragmented-session peak heap improved from 17.3 MiB to 15.1 MiB.
 
 ### Promise impact
 
