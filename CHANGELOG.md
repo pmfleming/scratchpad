@@ -4,6 +4,18 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ## Unreleased
 
+### Changed
+
+- Added Linux lint and runtime-test coverage, including the native file watcher.
+
+### Fixed
+
+- Kept piece-tree line indexes revision-local so snapshots cannot corrupt line lookup after history compaction.
+- Serialized session persistence and committed manifests before stale-snapshot cleanup to prevent overlapping or interrupted saves from producing inconsistent restore state.
+- Rejected overlapping saves for the same buffer instead of silently writing an untracked second Save As target.
+- Made Linux directory watches recover after a watched directory is recreated and report native watcher failures through diagnostics.
+- Made the CPU-only frame benchmark consume egui texture deltas so all-target debug tests complete cleanly.
+
 ## 0.4.2 - 2026-08-13
 
 ### Added

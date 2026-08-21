@@ -13,7 +13,9 @@ pub(crate) fn maybe_persist_session(app: &mut ScratchpadApp, ctx: &egui::Context
     }
 
     ctx.request_repaint_after(crate::app::app_state::SESSION_SNAPSHOT_INTERVAL);
-    if app.state.last_session_persist.elapsed() < crate::app::app_state::SESSION_SNAPSHOT_INTERVAL {
+    if app.state.persistence.last_session_persist.elapsed()
+        < crate::app::app_state::SESSION_SNAPSHOT_INTERVAL
+    {
         return;
     }
     if app.state.background_io.has_pending_persist() {
@@ -41,14 +43,17 @@ pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> std::io::Result<()
         app.state.app_settings.font_size(),
         app.state.app_settings.word_wrap(),
     );
-    app.state.session_store.persist_request(request)?;
+    app.state
+        .persistence
+        .session_store
+        .persist_request(request)?;
     app.tab_manager.clear_session_dirty();
-    app.state.last_session_persist = Instant::now();
+    app.state.persistence.last_session_persist = Instant::now();
     Ok(())
 }
 
 pub(crate) fn restore_session_state(app: &mut ScratchpadApp) -> Option<AppSettings> {
-    match app.state.session_store.load() {
+    match app.state.persistence.session_store.load() {
         Ok(Some(restored)) => Some(apply_restored_session(app, restored)),
         Ok(None) => None,
         Err(error) => {

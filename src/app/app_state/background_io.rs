@@ -393,7 +393,7 @@ impl ScratchpadApp {
         };
         match result {
             Ok(()) => {
-                self.state.last_session_persist = Instant::now();
+                self.state.persistence.last_session_persist = Instant::now();
             }
             Err(error) => {
                 diagnostics::record_background_failure(
@@ -529,8 +529,11 @@ impl ScratchpadApp {
             return false;
         };
 
-        let (restored_tab, restore_status) =
-            self.state.session_store.restore_cold_session_tab(cold_tab);
+        let (restored_tab, restore_status) = self
+            .state
+            .persistence
+            .session_store
+            .restore_cold_session_tab(cold_tab);
         if !self.tab_manager.replace_restored_tab(index, restored_tab) {
             return false;
         }

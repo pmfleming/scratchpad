@@ -13,6 +13,10 @@ mod fallback {
     #[derive(Clone, Debug)]
     pub(crate) enum FileWatchEvent {
         DirectoryChanged(PathBuf),
+        WatchError {
+            path: Option<PathBuf>,
+            message: String,
+        },
     }
 
     #[derive(Default)]

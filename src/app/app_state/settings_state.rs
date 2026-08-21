@@ -269,7 +269,7 @@ pub(crate) fn vertical_tab_list_width(app: &ScratchpadApp) -> f32 {
 }
 
 pub fn settings_path(app: &ScratchpadApp) -> &Path {
-    app.state.settings_store.path()
+    app.state.persistence.settings_store.path()
 }
 
 pub(crate) fn is_settings_file_path(app: &ScratchpadApp, path: &Path) -> bool {
@@ -312,7 +312,7 @@ pub(super) fn load_settings_from_store(app: &mut ScratchpadApp) -> bool {
 }
 
 fn load_settings_snapshot(app: &ScratchpadApp) -> std::io::Result<Option<AppSettings>> {
-    app.state.settings_store.load()
+    app.state.persistence.settings_store.load()
 }
 
 pub(super) fn apply_settings(app: &mut ScratchpadApp, settings: AppSettings) {
@@ -340,8 +340,8 @@ pub(super) fn apply_settings(app: &mut ScratchpadApp, settings: AppSettings) {
         .cloned()
         .collect();
     app.state.app_settings = settings;
-    app.state.applied_editor_font = None;
-    app.state.applied_theme_mode = None;
+    app.state.window.applied_editor_font = None;
+    app.state.window.applied_theme_mode = None;
     app.apply_history_budget_to_open_buffers();
     if !invalid_shortcuts.is_empty() {
         app.state
@@ -362,20 +362,23 @@ fn refresh_settings_snapshot(app: &mut ScratchpadApp) {
 
 pub(crate) fn persist_settings_now(app: &mut ScratchpadApp) -> std::io::Result<()> {
     refresh_settings_snapshot(app);
-    app.state.settings_store.save(&app.state.app_settings)
+    app.state
+        .persistence
+        .settings_store
+        .save(&app.state.app_settings)
 }
 
 pub fn apply_theme_to_context(app: &mut ScratchpadApp, ctx: &egui::Context) {
     crate::app::system_appearance::observe_system_theme(ctx.system_theme());
     let theme_mode = app.state.app_settings.editor.theme_mode;
-    if app.state.applied_theme_mode == Some(theme_mode) {
+    if app.state.window.applied_theme_mode == Some(theme_mode) {
         return;
     }
 
     ctx.set_theme(app.state.app_settings.theme_preference());
     ctx.set_visuals_of(egui::Theme::Dark, egui::Visuals::dark());
     ctx.set_visuals_of(egui::Theme::Light, egui::Visuals::light());
-    app.state.applied_theme_mode = Some(theme_mode);
+    app.state.window.applied_theme_mode = Some(theme_mode);
 }
 
 pub(super) fn sync_stock_editor_palette_with_theme_mode(settings: &mut AppSettings) {

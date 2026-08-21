@@ -46,6 +46,56 @@ jobs:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --no-deps --all-features
 
+  linux:
+    name: Linux Lint and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libatk1.0-dev \
+            libcairo2-dev \
+            libdbus-1-dev \
+            libegl1-mesa-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libgdk-pixbuf-2.0-dev \
+            libgl1-mesa-dev \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libpango1.0-dev \
+            libvulkan-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxext-dev \
+            libxi-dev \
+            libxkbcommon-dev \
+            libxrandr-dev \
+            pkg-config \
+            wayland-protocols
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+
+      - name: Lint Linux code
+        run: |
+          cargo clippy --lib --all-features -- -D warnings
+          cargo clippy --manifest-path crates/linux_file_watch/Cargo.toml -- -D warnings
+
+      - name: Test Linux application code
+        run: cargo test --all-features
+
+      - name: Test Linux file watcher
+        run: cargo test --manifest-path crates/linux_file_watch/Cargo.toml
+
   security:
     name: Dependency audit
     runs-on: ubuntu-latest

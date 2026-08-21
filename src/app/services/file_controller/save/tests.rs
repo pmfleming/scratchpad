@@ -175,6 +175,41 @@ fn save_as_path_assignment_uses_written_disk_state() {
 }
 
 #[test]
+fn overlapping_save_as_is_rejected_before_writing_a_second_path() {
+    let directory = tempfile::tempdir().unwrap();
+    let first_path = directory.path().join("first.txt");
+    let second_path = directory.path().join("second.txt");
+    let buffer = BufferState::new("Untitled".to_owned(), "content".to_owned(), None);
+    let mut app = app_with_buffer(directory.path(), buffer);
+
+    assert!(FileController::save_buffer_to_path(
+        &mut app,
+        0,
+        first_path.clone(),
+        true,
+        None
+    ));
+    assert!(!FileController::save_buffer_to_path(
+        &mut app,
+        0,
+        second_path.clone(),
+        true,
+        None
+    ));
+    app.wait_for_background_io_idle();
+
+    assert_eq!(
+        app.tab_manager.tabs.as_slice()[0]
+            .active_buffer()
+            .path
+            .as_deref(),
+        Some(first_path.as_path())
+    );
+    assert_eq!(std::fs::read_to_string(first_path).unwrap(), "content");
+    assert!(!second_path.exists());
+}
+
+#[test]
 fn save_as_to_already_open_path_activates_existing_owner() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("existing.txt");

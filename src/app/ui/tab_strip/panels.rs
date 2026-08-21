@@ -27,7 +27,7 @@ pub(crate) fn show_bottom_tab_list(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
 }
 
 fn show_vertical_tab_panel(ui: &mut egui::Ui, app: &mut ScratchpadApp, side: TabListPosition) {
-    app.state.overflow_popup_open = false;
+    app.state.window.overflow_popup_open = false;
     let now = Instant::now();
     let panel_visible = vertical_panel_visible(ui, app, side, now);
     let panel_width = auto_hide_panel_extent(

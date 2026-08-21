@@ -51,6 +51,9 @@ pub struct EditorWidgetOutcome {
 // Public rendering entry points
 // ---------------------------------------------------------------------------
 
+// This is the top-level editor-frame pipeline; keeping its ordered phases in
+// one place is clearer than distributing the frame lifecycle across helpers.
+#[allow(clippy::too_many_lines)]
 pub fn render_editor_text_edit(
     ui: &mut egui::Ui,
     buffer: &mut BufferState,

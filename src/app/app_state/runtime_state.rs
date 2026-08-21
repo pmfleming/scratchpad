@@ -1,4 +1,5 @@
 use super::PendingBackgroundAction;
+use crate::app::diagnostics;
 use crate::app::domain::BufferId;
 use crate::app::platform_file::OpenFileDialogKind;
 use crate::app::services::background_io::{BackgroundIoDispatcher, BackgroundIoResult};
@@ -84,6 +85,16 @@ impl BackgroundIoState {
         })
     }
 
+    pub(crate) fn has_pending_save_for_buffer(&self, buffer_id: BufferId) -> bool {
+        self.pending_background_actions.values().any(|action| {
+            matches!(
+                action,
+                crate::app::app_state::PendingBackgroundAction::SavePath(save)
+                    if save.buffer_id == buffer_id
+            )
+        })
+    }
+
     pub(crate) fn has_pending_reload_for_buffer(&self, buffer_id: BufferId) -> bool {
         self.pending_background_actions.values().any(|action| {
             matches!(
@@ -157,6 +168,14 @@ impl FileWatchState {
             match event {
                 FileWatchEvent::DirectoryChanged(dir) => {
                     self.pending_file_watch_rescans.insert(dir, due_at);
+                }
+                FileWatchEvent::WatchError { path, message } => {
+                    diagnostics::record_warning(
+                        "file_watch_unavailable",
+                        path.as_deref(),
+                        "app_state::file_watch",
+                        message,
+                    );
                 }
             }
         }

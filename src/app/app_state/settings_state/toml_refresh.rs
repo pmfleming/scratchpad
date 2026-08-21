@@ -83,7 +83,7 @@ impl ScratchpadApp {
                         )
                         .is_empty();
                     crate::app::app_state::settings_state::apply_settings(self, settings);
-                    self.state.applied_editor_font = None;
+                    self.state.window.applied_editor_font = None;
                     if !has_invalid_shortcut_overrides {
                         self.state.status.set_info_status_in_domain(
                             crate::app::app_state::StatusDomain::Settings,

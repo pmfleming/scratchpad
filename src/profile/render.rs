@@ -67,8 +67,10 @@ impl UiRenderFrameHarness {
     pub fn run_event_to_tessellation_scroll_frame(&mut self) -> RenderPreparationSample {
         let started_at = Instant::now();
         let input = self.scroll_input();
-        let output = self.run_ui_with_input(input);
-        let primitives = self.ctx.tessellate(output.shapes, output.pixels_per_point);
+        let mut output = self.run_ui_with_input(input);
+        let shapes = std::mem::take(&mut output.shapes);
+        let primitives = self.ctx.tessellate(shapes, output.pixels_per_point);
+        output.textures_delta.clear();
         let vertex_count = primitives
             .iter()
             .map(|primitive| match &primitive.primitive {
@@ -112,7 +114,10 @@ impl UiRenderFrameHarness {
 
     fn run_with_input(&mut self, input: egui::RawInput) -> u128 {
         let started_at = Instant::now();
-        let _ = self.run_ui_with_input(input);
+        let mut output = self.run_ui_with_input(input);
+        // This CPU-only harness has no renderer to apply texture uploads. Mark
+        // them intentionally consumed so debug benchmark teardown remains valid.
+        output.textures_delta.clear();
         started_at.elapsed().as_nanos()
     }
 
@@ -248,7 +253,7 @@ pub fn run_scroll_stress_profile(bytes: usize, iterations: usize) -> usize {
         let selection = (selection_start < selection_end).then_some(selection_start..selection_end);
 
         let mut total_rows = 0usize;
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 let mut layouter = build_layouter(
                     font_id.clone(),
@@ -263,6 +268,7 @@ pub fn run_scroll_stress_profile(bytes: usize, iterations: usize) -> usize {
                 total_rows += galley.rows.len().max(1);
             });
         });
+        output.textures_delta.clear();
 
         line_start = if end >= line_count {
             0

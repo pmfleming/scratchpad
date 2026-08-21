@@ -25,10 +25,10 @@ fn apply_setting_effects(app: &mut ScratchpadApp, changed: bool, effects: Settin
         return;
     }
     if effects.invalidate_font {
-        app.state.applied_editor_font = None;
+        app.state.window.applied_editor_font = None;
     }
     if effects.invalidate_theme {
-        app.state.applied_theme_mode = None;
+        app.state.window.applied_theme_mode = None;
     }
     if effects.relayout {
         crate::app::app_state::frame::begin_layout_transition(app);
@@ -149,7 +149,7 @@ pub(crate) fn set_tab_list_position(app: &mut ScratchpadApp, position: TabListPo
     app.state.app_settings.workspace.tab_list_position = position;
     reset_tab_list_visibility_state(app, false);
     if position.is_vertical() {
-        app.state.overflow_popup_open = false;
+        app.state.window.overflow_popup_open = false;
     }
     app.tab_manager.pending_scroll_to_active = true;
     apply_setting_effects(app, true, SettingEffects::RELAYOUT);
@@ -315,7 +315,7 @@ pub(crate) fn reset_settings_to_defaults(app: &mut ScratchpadApp) {
     if crate::app::app_state::settings_state::settings_tab_open(app) {
         app.state.chrome.set_active_surface(AppSurface::Settings);
     }
-    app.state.applied_editor_font = None;
+    app.state.window.applied_editor_font = None;
     crate::app::app_state::workspace::display_tabs::select_only_tab_slot(
         app,
         crate::app::app_state::workspace::display_tabs::active_tab_slot_index(app),

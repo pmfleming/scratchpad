@@ -98,6 +98,24 @@ pub struct ScratchpadApp {
     pub(crate) state: ScratchpadAppState,
 }
 
+pub(crate) struct AppPersistenceState {
+    pub(crate) settings_store: SettingsStore,
+    pub(crate) session_store: SessionStore,
+    pub(crate) persist_session_on_drop: bool,
+    pub(crate) last_session_persist: Instant,
+}
+
+#[derive(Default)]
+pub(crate) struct WindowRuntimeState {
+    pub(crate) close_in_progress: bool,
+    pub(crate) shown_after_first_frame: bool,
+    pub(crate) painted_frames_before_show: u8,
+    pub(crate) current_title: Option<String>,
+    pub(crate) overflow_popup_open: bool,
+    pub(crate) applied_editor_font: Option<EditorFontSelection>,
+    pub(crate) applied_theme_mode: Option<AppThemeMode>,
+}
+
 // Stop adding new impl ScratchpadApp blocks except for top-level orchestration.
 // New feature code should take the narrow dependency it needs, not &mut ScratchpadApp.
 pub struct ScratchpadAppState {
@@ -105,18 +123,9 @@ pub struct ScratchpadAppState {
     pub(crate) status: StatusState,
     pub(crate) focus: FocusState,
     pub(crate) dialogs: DialogState,
-    pub(crate) settings_store: SettingsStore,
+    pub(crate) persistence: AppPersistenceState,
     pub(crate) user_manual_path: PathBuf,
-    pub(crate) session_store: SessionStore,
-    pub(crate) persist_session_on_drop: bool,
-    pub(crate) last_session_persist: Instant,
-    pub(crate) close_in_progress: bool,
-    pub(crate) window_shown_after_first_frame: bool,
-    pub(crate) painted_frames_before_window_show: u8,
-    pub(crate) current_window_title: Option<String>,
-    pub(crate) overflow_popup_open: bool,
-    pub(crate) applied_editor_font: Option<EditorFontSelection>,
-    pub(crate) applied_theme_mode: Option<AppThemeMode>,
+    pub(crate) window: WindowRuntimeState,
     pub(crate) chrome: ChromeState,
     pub(crate) settings_tab_index: usize,
     pub(crate) pending_settings_toml_refresh: Option<BufferId>,
@@ -170,7 +179,7 @@ impl eframe::App for ScratchpadApp {
 
 impl Drop for ScratchpadApp {
     fn drop(&mut self) {
-        if self.state.persist_session_on_drop {
+        if self.state.persistence.persist_session_on_drop {
             let _ = crate::app::app_state::workspace::accessors::persist_session_now(self);
         }
     }

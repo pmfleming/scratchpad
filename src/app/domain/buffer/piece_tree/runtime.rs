@@ -12,13 +12,12 @@ pub(super) struct PieceTreeRuntime {
 
 impl Clone for PieceTreeRuntime {
     fn clone(&self) -> Self {
-        let line_samples = OnceLock::new();
-        if let Some(cache) = self.line_samples.get() {
-            let _ = line_samples.set(cache.clone());
-        }
+        // Line samples are derived from this revision's storage. Sharing them
+        // with a snapshot would let the snapshot repopulate offsets reused by
+        // a later add-buffer compaction.
         Self {
             generation: self.generation,
-            line_samples,
+            line_samples: OnceLock::new(),
         }
     }
 }

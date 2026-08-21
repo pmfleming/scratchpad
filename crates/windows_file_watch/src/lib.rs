@@ -5,6 +5,10 @@ use std::sync::mpsc::{self, Receiver, Sender};
 #[derive(Clone, Debug)]
 pub enum FileWatchEvent {
     DirectoryChanged(PathBuf),
+    WatchError {
+        path: Option<PathBuf>,
+        message: String,
+    },
 }
 
 enum WatchCommand {

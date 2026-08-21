@@ -229,6 +229,19 @@ impl FileController {
             return false;
         }
 
+        let buffer_id = app.tab_manager.tabs.as_slice()[index].active_buffer().id;
+        if app
+            .state
+            .background_io
+            .has_pending_save_for_buffer(buffer_id)
+        {
+            app.state.status.set_info_status_in_domain(
+                StatusDomain::File,
+                "Wait for the current save to finish before saving again.",
+            );
+            return false;
+        }
+
         let request = {
             let buffer = app.tab_manager.tabs.as_slice()[index].active_buffer();
             SaveWriteRequest {

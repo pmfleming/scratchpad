@@ -170,7 +170,7 @@ fn progressive_session_hydration_replaces_matching_cold_shell_after_index_shift(
     streamed_tabs.sort_by_key(|(tab_index, _)| *tab_index);
 
     let mut app = test_app();
-    app.state.session_store = store.clone();
+    app.state.persistence.session_store = store.clone();
     app.tab_manager
         .set_tabs(streamed_tabs.into_iter().map(|(_, tab)| tab).collect(), 0);
     let cold_payload = cold_payload.unwrap();

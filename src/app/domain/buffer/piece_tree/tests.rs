@@ -19,6 +19,25 @@ fn cloned_tree_keeps_add_tail_stable_when_current_tree_appends() {
 }
 
 #[test]
+fn cloned_tree_line_cache_stays_revision_local_across_compaction() {
+    let old_text = "aa\n".repeat(128);
+    let new_text = format!("{}{}", "a\n".repeat(64), "aaa\n".repeat(64));
+    assert_eq!(old_text.len(), new_text.len());
+
+    let mut current = PieceTreeLite::from_string(String::new());
+    current.insert_with_source(0, &old_text, PieceSource::Edit);
+    assert_eq!(current.line_info(70).start_char, 210);
+    let snapshot = current.clone();
+
+    current.remove_char_range(0..current.len_chars());
+    current.insert_with_source(0, &new_text, PieceSource::Edit);
+    current.compact_add_buffer(&mut []);
+
+    assert_eq!(snapshot.line_info(70).start_char, 210);
+    assert_eq!(current.line_info(70).start_char, 152);
+}
+
+#[test]
 fn character_cursor_walks_forward_and_reverse_across_utf8_pieces() {
     let mut tree = PieceTreeLite::from_string("a界c".to_owned());
     tree.insert_with_source(2, "β😀", PieceSource::Edit);

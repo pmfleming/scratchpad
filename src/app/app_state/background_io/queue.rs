@@ -181,7 +181,7 @@ impl ScratchpadApp {
 
         let request = BackgroundIoRequest::RestoreSession {
             request_id,
-            session_store: self.state.session_store.clone(),
+            session_store: self.state.persistence.session_store.clone(),
         };
         self.send_background_request_or_apply(request_id, request, |app, request_id, request| {
             app.apply_background_io_result(BackgroundIoResult::SessionRestored {
@@ -218,7 +218,7 @@ impl ScratchpadApp {
 
         let request = BackgroundIoRequest::HydrateSessionTab {
             request_id,
-            session_store: self.state.session_store.clone(),
+            session_store: self.state.persistence.session_store.clone(),
             tab_index,
             cold_session_tab,
         };
@@ -239,7 +239,7 @@ impl ScratchpadApp {
 
         let request = BackgroundIoRequest::PersistSession {
             request_id,
-            session_store: self.state.session_store.clone(),
+            session_store: self.state.persistence.session_store.clone(),
             request,
         };
         self.send_background_request_or_apply(request_id, request, |app, request_id, request| {

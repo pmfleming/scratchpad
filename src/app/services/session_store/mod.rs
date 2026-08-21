@@ -42,6 +42,7 @@ pub struct SessionStore {
     root: PathBuf,
     manifest_path: PathBuf,
     fallback_root: Option<PathBuf>,
+    persistence_gate: Arc<Mutex<()>>,
     persisted_snapshot_revisions: Arc<Mutex<HashMap<String, u64>>>,
 }
 
@@ -59,6 +60,7 @@ impl SessionStore {
             root,
             manifest_path,
             fallback_root: None,
+            persistence_gate: Arc::new(Mutex::new(())),
             persisted_snapshot_revisions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -268,6 +270,13 @@ impl SessionStore {
         request: SessionPersistRequest,
         profile: &mut SessionPersistProfile,
     ) -> io::Result<()> {
+        // Immediate UI/drop persistence and the background session lane use
+        // cloned stores. Keep snapshot writes, stale cleanup, and manifest
+        // replacement in one transaction across all clones.
+        let _persistence_guard = self
+            .persistence_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let SessionPersistRequest {
             active_tab_index,
             active_surface,
@@ -296,7 +305,6 @@ impl SessionStore {
             preserved_snapshot_paths,
             profile,
         )?;
-        self.remove_stale_buffer_files_profiled(&active_temp_paths, profile)?;
 
         let manifest = session_manifest(
             active_tab_index,
@@ -313,6 +321,11 @@ impl SessionStore {
         profile.manifest_serialize_ns = manifest_profile.serialize_ns;
         profile.manifest_size_bytes = manifest_profile.size_bytes;
         profile.manifest_write_ns = manifest_profile.write_ns;
+
+        // The committed manifest no longer references stale snapshots. A
+        // crash before cleanup now leaves harmless orphans rather than a
+        // manifest that points at deleted content.
+        self.remove_stale_buffer_files_profiled(&active_temp_paths, profile)?;
         Ok(())
     }
 
@@ -578,15 +591,45 @@ fn session_manifest(
 
 #[cfg(test)]
 mod migration_tests {
-    use super::{SessionSnapshotWrite, SessionStore, is_session_store_file};
+    use super::{SessionPersistRequest, SessionSnapshotWrite, SessionStore, is_session_store_file};
     use crate::app::domain::TextDocument;
     use std::path::Path;
+    use std::sync::mpsc;
+    use std::time::Duration;
 
     #[test]
     fn fallback_session_migration_copies_only_session_files() {
         assert!(is_session_store_file(Path::new("session.json")));
         assert!(is_session_store_file(Path::new("buffer.tmp")));
         assert!(!is_session_store_file(Path::new("settings.toml")));
+    }
+
+    #[test]
+    fn persistence_is_serialized_across_store_clones() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SessionStore::new(directory.path().to_path_buf());
+        let persistence_guard = store.persistence_gate.lock().unwrap();
+        let cloned_store = store.clone();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+
+        let handle = std::thread::spawn(move || {
+            let request = SessionPersistRequest::capture(&[], 0, 16.0, false);
+            started_tx.send(()).unwrap();
+            let result = cloned_store.persist_request(request);
+            done_tx.send(result).unwrap();
+        });
+
+        started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(done_rx.recv_timeout(Duration::from_millis(50)).is_err());
+        drop(persistence_guard);
+        assert!(
+            done_rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("persistence should resume after the transaction lock")
+                .is_ok()
+        );
+        handle.join().unwrap();
     }
 
     #[test]

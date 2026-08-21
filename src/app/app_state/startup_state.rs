@@ -1,6 +1,6 @@
 use super::{
-    BackgroundIoState, ChromeState, DialogState, FileWatchState, FocusState, ScratchpadApp,
-    ScratchpadAppState, SearchState, StatusDomain,
+    AppPersistenceState, BackgroundIoState, ChromeState, DialogState, FileWatchState, FocusState,
+    ScratchpadApp, ScratchpadAppState, SearchState, StatusDomain, WindowRuntimeState,
 };
 use crate::app::app_state::settings_state;
 use crate::app::app_state::workspace::accessors as workspace_accessors;
@@ -20,7 +20,7 @@ use std::time::Instant;
 
 impl ScratchpadApp {
     pub(crate) fn set_session_persist_on_drop(&mut self, enabled: bool) {
-        self.state.persist_session_on_drop = enabled;
+        self.state.persistence.persist_session_on_drop = enabled;
     }
 
     #[must_use]
@@ -96,18 +96,14 @@ impl ScratchpadApp {
                 status: super::StatusState::default(),
                 focus: FocusState::default(),
                 dialogs: DialogState::new(),
-                settings_store,
+                persistence: AppPersistenceState {
+                    settings_store,
+                    session_store,
+                    persist_session_on_drop: true,
+                    last_session_persist: Instant::now(),
+                },
                 user_manual_path: manual_files::resolve_user_manual_path(),
-                session_store,
-                persist_session_on_drop: true,
-                last_session_persist: Instant::now(),
-                close_in_progress: false,
-                window_shown_after_first_frame: false,
-                painted_frames_before_window_show: 0,
-                current_window_title: None,
-                overflow_popup_open: false,
-                applied_editor_font: None,
-                applied_theme_mode: None,
+                window: WindowRuntimeState::default(),
                 chrome: ChromeState::default(),
                 settings_tab_index: usize::MAX,
                 pending_settings_toml_refresh: None,

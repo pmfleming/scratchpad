@@ -173,7 +173,7 @@ fn collect_tab_drop_zones(
         drop_zones.push(tab_bar_zone);
     }
 
-    if (layout.has_overflow || app.state.overflow_popup_open)
+    if (layout.has_overflow || app.state.window.overflow_popup_open)
         && let Some(overflow_zone) = show_overflow_controls(
             ctx,
             ui,
@@ -249,7 +249,7 @@ fn show_overflow_controls(
     outcome: &mut TabStripOutcome,
 ) -> Option<TabDropZone> {
     ui.add_space(layout.spacing);
-    let mut overflow_popup_open = app.state.overflow_popup_open;
+    let mut overflow_popup_open = app.state.window.overflow_popup_open;
     let overflow_outcome = tab_overflow::show_overflow_button(
         ctx,
         ui,
@@ -258,7 +258,7 @@ fn show_overflow_controls(
         visible_tab_indices,
         duplicate_name_counts,
     );
-    app.state.overflow_popup_open = overflow_popup_open;
+    app.state.window.overflow_popup_open = overflow_popup_open;
 
     outcome.activated_tab = outcome.activated_tab.or(overflow_outcome.activated_tab);
     outcome.activate_settings = outcome.activate_settings || overflow_outcome.activate_settings;

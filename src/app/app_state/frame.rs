@@ -27,7 +27,8 @@ pub(crate) fn close_encoding_dialog(app: &mut ScratchpadApp) {
 }
 
 pub(super) fn handle_pending_close_request(app: &mut ScratchpadApp, ctx: &egui::Context) -> bool {
-    if !ctx.input(|input| input.viewport().close_requested()) || app.state.close_in_progress {
+    if !ctx.input(|input| input.viewport().close_requested()) || app.state.window.close_in_progress
+    {
         return false;
     }
 
@@ -38,14 +39,14 @@ pub(super) fn handle_pending_close_request(app: &mut ScratchpadApp, ctx: &egui::
 
 pub(super) fn prepare_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
     let started_at = Instant::now();
-    if app.state.window_shown_after_first_frame {
+    if app.state.window.shown_after_first_frame {
         app.record_window_state(ctx);
     }
     if handle_window_resize(ctx, platform_capabilities(app).allow_app_resize_grips)
-        && app.state.overflow_popup_open
+        && app.state.window.overflow_popup_open
     {
         // Rebuild the overflow popup lazily against the resized viewport.
-        app.state.overflow_popup_open = false;
+        app.state.window.overflow_popup_open = false;
     }
     app.tab_manager.evict_inactive_tab_state();
     app.poll_file_watcher(ctx);
@@ -136,11 +137,11 @@ fn render_active_surface(app: &mut ScratchpadApp, ui: &mut egui::Ui) {
 
 fn sync_window_title(app: &mut ScratchpadApp, ctx: &egui::Context) {
     let title = window_title(app);
-    if app.state.current_window_title.as_ref() == Some(&title) {
+    if app.state.window.current_title.as_ref() == Some(&title) {
         return;
     }
     ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
-    app.state.current_window_title = Some(title);
+    app.state.window.current_title = Some(title);
 }
 
 fn handle_dropped_files(app: &mut ScratchpadApp, ctx: &egui::Context) {
@@ -153,12 +154,12 @@ fn handle_dropped_files(app: &mut ScratchpadApp, ctx: &egui::Context) {
 }
 
 fn show_window_after_first_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    if app.state.window_shown_after_first_frame {
+    if app.state.window.shown_after_first_frame {
         return;
     }
-    if app.state.painted_frames_before_window_show < 2 {
-        app.state.painted_frames_before_window_show += 1;
-        if app.state.painted_frames_before_window_show == 2
+    if app.state.window.painted_frames_before_show < 2 {
+        app.state.window.painted_frames_before_show += 1;
+        if app.state.window.painted_frames_before_show == 2
             && app.state.app_settings.ui.window_state.maximized
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
@@ -167,7 +168,7 @@ fn show_window_after_first_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
         return;
     }
     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-    app.state.window_shown_after_first_frame = true;
+    app.state.window.shown_after_first_frame = true;
 }
 
 fn persist_with_error_status(app: &mut ScratchpadApp) -> bool {
@@ -226,7 +227,7 @@ pub(crate) fn estimated_tab_strip_width(app: &ScratchpadApp, spacing: f32) -> f3
 }
 
 pub(crate) fn request_exit(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    if app.state.close_in_progress {
+    if app.state.window.close_in_progress {
         return;
     }
 
@@ -236,7 +237,7 @@ pub(crate) fn request_exit(app: &mut ScratchpadApp, ctx: &egui::Context) {
     }
 
     if persist_with_error_status(app) {
-        app.state.close_in_progress = true;
+        app.state.window.close_in_progress = true;
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 }
@@ -270,7 +271,7 @@ pub(crate) fn window_title(app: &ScratchpadApp) -> String {
 
 fn sync_editor_fonts(app: &mut ScratchpadApp, ctx: &egui::Context) {
     let selection = app.state.app_settings.editor_font_selection();
-    if app.state.applied_editor_font.as_ref() == Some(&selection) {
+    if app.state.window.applied_editor_font.as_ref() == Some(&selection) {
         return;
     }
 
@@ -298,7 +299,7 @@ fn sync_editor_fonts(app: &mut ScratchpadApp, ctx: &egui::Context) {
         );
     }
     clear_editor_layout_caches(app);
-    app.state.applied_editor_font = Some(selection);
+    app.state.window.applied_editor_font = Some(selection);
 }
 
 fn clear_editor_layout_caches(app: &mut ScratchpadApp) {
