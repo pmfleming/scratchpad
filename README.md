@@ -9,6 +9,25 @@ runtime, project index, or cloud account. The focus is fast text editing,
 resilient session restore, explicit file-format handling, and flexible
 multi-file workspaces.
 
+## How Fast Is Scratchpad?
+
+Scratchpad's seven performance promises all pass on a 16-thread AMD Ryzen 7 PRO
+8840HS. These results come from the Performance Lens benchmark suite; timings
+are representative measurements rather than cross-platform guarantees.
+
+| Promise | Result | Measured workload |
+| --- | --- | --- |
+| Large Files | Pass | 1 GiB first-visible prefix in 0.57 ms; background indexing in 1.69 s |
+| Many Files | Pass | 10,000-file first-visible load in 64.6 ms; background completion in 697 ms |
+| Search | Pass | 1 GiB prepared search in about 160 ms; 10,000 targets in about 2.4 ms |
+| Many Tabs | Pass | 10,000-tab reorder in about 0.18 ms; prepared capacity cycle in about 14 ms |
+| Many Views | Pass | 1,000-view prepared operation in under 0.1 ms |
+| Large Text Mutation | Pass | 128 MiB paste in about 136 ms |
+| Session Persistence & Restore | Pass | 10,000-tab startup-visible restore in 14.9 ms; steady-state persistence in 66.8 ms |
+
+See the [performance baseline](docs/performance-lens-baseline-2026-07-25.md)
+for methodology, budgets, and additional results.
+
 ## Highlights
 
 - Workspace tabs containing one editor or a tiled set of file views.
