@@ -99,6 +99,10 @@ jobs:
   security:
     name: Dependency audit
     runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      contents: read
+      issues: write
 
     steps:
       - name: Checkout
@@ -106,6 +110,8 @@ jobs:
 
       - name: Audit Rust dependencies
         uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   cross-targets:
     name: Cross-target cargo check
