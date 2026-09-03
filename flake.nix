@@ -14,7 +14,9 @@
       nativeBuildInputs = with pkgs; [
         cargo
         cargo-hack
+        cargo-llvm-cov
         clippy
+        llvmPackages.llvm
         pkg-config
         rust-analyzer
         rustc
@@ -151,6 +153,8 @@
         packages = nativeBuildInputs ++ buildInputs;
 
         LD_LIBRARY_PATH = runtimeLibraryPath;
+        LLVM_COV = "${pkgs.llvmPackages.llvm}/bin/llvm-cov";
+        LLVM_PROFDATA = "${pkgs.llvmPackages.llvm}/bin/llvm-profdata";
 
         shellHook = ''
           if [[ -x "$PWD/scripts/trim-target.sh" ]]; then

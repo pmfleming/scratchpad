@@ -24,6 +24,29 @@ use support::{
 
 pub const KB: usize = 1024;
 pub const MB: usize = 1024 * KB;
+pub const GB: usize = 1024 * MB;
+
+pub fn human_bytes(value: usize) -> String {
+    if value >= GB {
+        format!("{:.1} GB", value as f64 / GB as f64)
+    } else if value >= MB {
+        format!("{:.1} MB", value as f64 / MB as f64)
+    } else if value >= KB {
+        format!("{:.0} KB", value as f64 / KB as f64)
+    } else {
+        format!("{value} B")
+    }
+}
+
+pub fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else if let Some(message) = payload.downcast_ref::<&'static str>() {
+        (*message).to_owned()
+    } else {
+        "unknown panic".to_owned()
+    }
+}
 pub const RECOMMENDED_TAB_OPERATION_TABS: usize = 64;
 pub const RECOMMENDED_TAB_OPERATION_VIEWS_PER_TAB: usize = 10;
 pub const RECOMMENDED_TAB_OPERATION_BYTES_PER_BUFFER: usize = 48 * KB;

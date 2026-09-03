@@ -292,7 +292,9 @@ impl FileController {
             duplicate_count,
             ..OpenBatchSummary::default()
         };
-        let active_path = paths.pop().expect("large open batch is non-empty");
+        let Some(active_path) = paths.pop() else {
+            return;
+        };
         Self::release_pending_open_path(app, &active_path);
 
         if Self::activate_existing_path(app, &active_path).is_some() {

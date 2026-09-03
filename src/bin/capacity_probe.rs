@@ -8,7 +8,10 @@ use scratchpad::app::memory_budget::{self, MemoryBudgetSnapshot};
 use scratchpad::app::services::file_service::FileService;
 use scratchpad::app::services::search::{SearchMode, SearchOptions, SearchProgram, search_program};
 use scratchpad::app::ui::editor_content::{EditorHighlightStyle, build_layouter};
-use scratchpad::profile::run_many_file_first_visible_profile;
+use scratchpad::profile::{
+    GB, KB, MB, human_bytes, panic_payload_message as panic_message,
+    run_many_file_first_visible_profile,
+};
 use serde::Serialize;
 use std::hint::black_box;
 use std::io::{BufWriter, Write};
@@ -16,9 +19,6 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-const KB: usize = 1024;
-const MB: usize = 1024 * KB;
-const GB: usize = 1024 * MB;
 const TAB_BYTES_PER_BUFFER: usize = 48 * KB;
 const MANY_FILE_BYTES_PER_BUFFER: usize = KB;
 const FIRST_VISIBLE_WINDOW_BYTES: usize = MB;
@@ -751,27 +751,4 @@ fn splits_label(value: usize) -> String {
 
 fn views_label(value: usize) -> String {
     format!("{value} views")
-}
-
-fn human_bytes(value: usize) -> String {
-    if value >= GB {
-        return format!("{:.1} GB", value as f64 / GB as f64);
-    }
-    if value >= MB {
-        return format!("{:.1} MB", value as f64 / MB as f64);
-    }
-    if value >= KB {
-        return format!("{:.0} KB", value as f64 / KB as f64);
-    }
-    format!("{value} B")
-}
-
-fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
-    if let Some(message) = payload.downcast_ref::<String>() {
-        return message.clone();
-    }
-    if let Some(message) = payload.downcast_ref::<&'static str>() {
-        return (*message).to_owned();
-    }
-    "unknown panic".to_owned()
 }

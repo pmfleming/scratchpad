@@ -6,7 +6,7 @@ use egui_phosphor::regular::TABS;
 use super::menu_ui::{
     ORDER_DIRECTION_BUTTON_SIZE, ORDER_SUBMENU_WIDTH, SUBMENU_WIDTH, menu_button,
     order_direction_button, primary_menu_button, selectable_menu_button, submenu_button,
-    submenu_button_sized, tab_list_position_icon, tab_list_position_label, tab_order_mode_label,
+    submenu_button_sized, tab_list_position_icon, tab_order_mode_label,
 };
 
 pub(super) fn render_tab_list_actions(
@@ -97,7 +97,7 @@ fn render_tab_list_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             if menu_button(
                 ui,
                 SUBMENU_WIDTH,
-                tab_list_position_label(position),
+                position.label(),
                 Some(tab_list_position_icon(position)),
                 true,
             ) {

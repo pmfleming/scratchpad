@@ -47,39 +47,34 @@ impl NewlineSerializer {
     ) -> io::Result<()> {
         let mut segment_start = 0usize;
         for (index, ch) in text.char_indices() {
-            if self.pending_cr {
-                self.pending_cr = false;
-                if ch == '\n' {
-                    write_span(self.target)?;
-                    segment_start = index + ch.len_utf8();
-                    continue;
-                }
+            if self.flush_pending_cr(ch, write_span)? {
+                segment_start = index + ch.len_utf8();
+                continue;
+            }
+            if !matches!(ch, '\r' | '\n') {
+                continue;
+            }
+
+            write_nonempty(&text[segment_start..index], write_span)?;
+            self.pending_cr = ch == '\r';
+            if !self.pending_cr {
                 write_span(self.target)?;
             }
-
-            match ch {
-                '\r' => {
-                    if segment_start < index {
-                        write_span(&text[segment_start..index])?;
-                    }
-                    self.pending_cr = true;
-                    segment_start = index + ch.len_utf8();
-                }
-                '\n' => {
-                    if segment_start < index {
-                        write_span(&text[segment_start..index])?;
-                    }
-                    write_span(self.target)?;
-                    segment_start = index + ch.len_utf8();
-                }
-                _ => {}
-            }
+            segment_start = index + ch.len_utf8();
         }
+        write_nonempty(&text[segment_start..], write_span)
+    }
 
-        if segment_start < text.len() {
-            write_span(&text[segment_start..])?;
+    fn flush_pending_cr(
+        &mut self,
+        ch: char,
+        write_span: &mut impl FnMut(&str) -> io::Result<()>,
+    ) -> io::Result<bool> {
+        if !std::mem::take(&mut self.pending_cr) {
+            return Ok(false);
         }
-        Ok(())
+        write_span(self.target)?;
+        Ok(ch == '\n')
     }
 
     pub(super) fn finish(
@@ -90,5 +85,16 @@ impl NewlineSerializer {
             write_span(self.target)?;
         }
         Ok(())
+    }
+}
+
+fn write_nonempty(
+    text: &str,
+    write_span: &mut impl FnMut(&str) -> io::Result<()>,
+) -> io::Result<()> {
+    if text.is_empty() {
+        Ok(())
+    } else {
+        write_span(text)
     }
 }

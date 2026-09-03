@@ -4,7 +4,7 @@ use crate::app::commands::{AppCommand, FileCommand};
 use crate::app::services::file_service::COMMON_TEXT_ENCODINGS;
 use crate::app::theme::{action_hover_bg, border, text_muted, text_primary};
 use crate::app::ui::search_replace::SEARCH_DIALOG_WIDTH;
-use crate::app::ui::{callout, settings, widget_ids};
+use crate::app::ui::{callout, settings, visuals::with_visual_overrides, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, FILE_TEXT, FLOPPY_DISK, TRANSLATE, WARNING};
 
@@ -467,16 +467,4 @@ fn apply_encoding_combo_style(ui: &mut egui::Ui) {
     visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
     visuals.widgets.active.bg_stroke = egui::Stroke::NONE;
     visuals.widgets.open.bg_stroke = egui::Stroke::NONE;
-}
-
-fn with_visual_overrides<R>(
-    ui: &mut egui::Ui,
-    configure: impl FnOnce(&mut egui::Ui),
-    add_contents: impl FnOnce(&mut egui::Ui) -> R,
-) -> R {
-    let previous_visuals = ui.visuals().clone();
-    configure(ui);
-    let result = add_contents(ui);
-    *ui.visuals_mut() = previous_visuals;
-    result
 }

@@ -1,5 +1,17 @@
 use eframe::egui::Color32;
 
+pub(crate) fn parse_hex_color(hex: &str) -> Option<Color32> {
+    let rgb = hex.trim().trim_start_matches('#');
+    if rgb.len() != 6 {
+        return None;
+    }
+    let [red, green, blue] = [0..2, 2..4, 4..6].map(|range| {
+        rgb.get(range)
+            .and_then(|component| u8::from_str_radix(component, 16).ok())
+    });
+    Some(Color32::from_rgb(red?, green?, blue?))
+}
+
 #[must_use]
 pub fn optimal_text_color(background: Color32) -> Color32 {
     for candidate in complementary_text_color_candidates(background) {

@@ -1,3 +1,4 @@
+use crate::app::color_contrast::parse_hex_color;
 use eframe::egui;
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -360,18 +361,6 @@ fn parse_color_scheme(value: &str) -> Option<SystemColorScheme> {
     }
 }
 
-fn parse_hex_color(hex: &str) -> Option<egui::Color32> {
-    let trimmed = hex.trim().trim_start_matches('#');
-    if trimmed.len() != 6 {
-        return None;
-    }
-
-    let r = u8::from_str_radix(&trimmed[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&trimmed[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&trimmed[4..6], 16).ok()?;
-    Some(egui::Color32::from_rgb(r, g, b))
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -427,5 +416,6 @@ mod tests {
             Some(eframe::egui::Color32::from_rgb(16, 20, 24))
         );
         assert_eq!(parse_hex_color("#bad"), None);
+        assert_eq!(parse_hex_color("€abc"), None);
     }
 }

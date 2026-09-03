@@ -38,52 +38,21 @@ pub(in crate::app::domain::buffer::piece_tree) fn previews_for_matches_in_piece_
         .iter()
         .map(|range| tree.normalize_char_range(range.clone()).start)
         .collect::<Vec<_>>();
-    if !match_starts.windows(2).all(|pair| pair[0] <= pair[1]) {
+    if !match_starts.is_sorted() {
         return ranges
             .iter()
             .map(|range| preview::preview_for_match(tree, range))
             .collect();
     }
 
-    let mut previews = vec![None; ranges.len()];
-    let mut pending = Vec::new();
-    let mut line = PiecePreviewLine::default();
-    let mut cursor = PiecePreviewCursor::default();
-    let mut next_match = 0usize;
-
+    let mut scan = PiecePreviewScan::new(match_starts);
     for span in tree.spans_for_range(0..tree.len_chars()) {
-        if cursor.current_char < span.char_start {
-            cursor.current_char = span.char_start;
-        }
-        for ch in span.text.chars() {
-            queue_piece_preview_matches(&match_starts, &mut next_match, &cursor, &mut pending);
-            if next_match == match_starts.len() && !pending.is_empty() && line.truncated {
-                finish_piece_preview_line(&line, &mut pending, &mut previews);
-                return collect_piece_previews(tree, ranges, previews);
-            }
-
-            if ch == '\n' {
-                finish_piece_preview_line(&line, &mut pending, &mut previews);
-                if next_match == match_starts.len() {
-                    return collect_piece_previews(tree, ranges, previews);
-                }
-                cursor.advance_line();
-                line.clear();
-            } else {
-                line.push(ch);
-                cursor.current_char += 1;
-                if next_match == match_starts.len() && !pending.is_empty() && line.truncated {
-                    finish_piece_preview_line(&line, &mut pending, &mut previews);
-                    return collect_piece_previews(tree, ranges, previews);
-                }
-            }
+        if scan.push_span(span.char_start, &span.text) {
+            break;
         }
     }
-
-    queue_piece_preview_matches(&match_starts, &mut next_match, &cursor, &mut pending);
-    finish_piece_preview_line(&line, &mut pending, &mut previews);
-
-    collect_piece_previews(tree, ranges, previews)
+    scan.finish_document();
+    collect_piece_previews(tree, ranges, scan.previews)
 }
 
 #[derive(Default)]
@@ -177,41 +146,94 @@ struct PendingPiecePreview {
     column_number: usize,
 }
 
-fn queue_piece_preview_matches(
-    match_starts: &[usize],
-    next_match: &mut usize,
-    cursor: &PiecePreviewCursor,
-    pending: &mut Vec<PendingPiecePreview>,
-) {
-    while match_starts
-        .get(*next_match)
-        .is_some_and(|start| *start <= cursor.current_char)
-    {
-        let start = match_starts[*next_match];
-        pending.push(PendingPiecePreview {
-            index: *next_match,
-            line_number: cursor.line_number(),
-            column_number: start.saturating_sub(cursor.line_start_char) + 1,
-        });
-        *next_match += 1;
-    }
+struct PiecePreviewScan {
+    match_starts: Vec<usize>,
+    previews: Vec<Option<(usize, usize, String)>>,
+    pending: Vec<PendingPiecePreview>,
+    line: PiecePreviewLine,
+    cursor: PiecePreviewCursor,
+    next_match: usize,
 }
 
-fn finish_piece_preview_line(
-    line: &PiecePreviewLine,
-    pending: &mut Vec<PendingPiecePreview>,
-    previews: &mut [Option<(usize, usize, String)>],
-) {
-    if pending.is_empty() {
-        return;
+impl PiecePreviewScan {
+    fn new(match_starts: Vec<usize>) -> Self {
+        Self {
+            previews: vec![None; match_starts.len()],
+            match_starts,
+            pending: Vec::new(),
+            line: PiecePreviewLine::default(),
+            cursor: PiecePreviewCursor::default(),
+            next_match: 0,
+        }
     }
-    let preview = line.preview();
-    for pending_preview in pending.drain(..) {
-        previews[pending_preview.index] = Some((
-            pending_preview.line_number,
-            pending_preview.column_number,
-            preview.clone(),
-        ));
+
+    fn push_span(&mut self, char_start: usize, text: &str) -> bool {
+        self.cursor.current_char = self.cursor.current_char.max(char_start);
+        text.chars().any(|ch| self.push_char(ch))
+    }
+
+    fn push_char(&mut self, ch: char) -> bool {
+        self.queue_matches();
+        if self.try_finish_truncated_line() {
+            return true;
+        }
+        if ch == '\n' {
+            self.finish_line();
+            if self.all_matches_queued() {
+                return true;
+            }
+            self.cursor.advance_line();
+            self.line.clear();
+        } else {
+            self.line.push(ch);
+            self.cursor.current_char += 1;
+            return self.try_finish_truncated_line();
+        }
+        false
+    }
+
+    fn queue_matches(&mut self) {
+        while self
+            .match_starts
+            .get(self.next_match)
+            .is_some_and(|start| *start <= self.cursor.current_char)
+        {
+            let start = self.match_starts[self.next_match];
+            self.pending.push(PendingPiecePreview {
+                index: self.next_match,
+                line_number: self.cursor.line_number(),
+                column_number: start.saturating_sub(self.cursor.line_start_char) + 1,
+            });
+            self.next_match += 1;
+        }
+    }
+
+    fn try_finish_truncated_line(&mut self) -> bool {
+        let complete = self.all_matches_queued() && !self.pending.is_empty() && self.line.truncated;
+        if complete {
+            self.finish_line();
+        }
+        complete
+    }
+
+    fn all_matches_queued(&self) -> bool {
+        self.next_match == self.match_starts.len()
+    }
+
+    fn finish_document(&mut self) {
+        self.queue_matches();
+        self.finish_line();
+    }
+
+    fn finish_line(&mut self) {
+        if self.pending.is_empty() {
+            return;
+        }
+        let preview = self.line.preview();
+        for pending in self.pending.drain(..) {
+            self.previews[pending.index] =
+                Some((pending.line_number, pending.column_number, preview.clone()));
+        }
     }
 }
 

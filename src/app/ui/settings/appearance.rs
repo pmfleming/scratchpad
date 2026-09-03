@@ -56,8 +56,8 @@ fn render_tab_list_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             record_label: "combo.Tab list",
             current: app.state.app_settings.tab_list_position(),
             options: &TAB_LIST_POSITIONS,
-            selected_label: tab_list_position_label,
-            option_label: tab_list_position_label,
+            selected_label: TabListPosition::label,
+            option_label: TabListPosition::label,
             on_change: |position| {
                 crate::app::app_state::settings_controller::set_tab_list_position(app, position);
             },
@@ -82,15 +82,6 @@ fn render_new_tab_placement_row(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             },
         },
     );
-}
-
-fn tab_list_position_label(position: TabListPosition) -> &'static str {
-    match position {
-        TabListPosition::Top => "Top",
-        TabListPosition::Bottom => "Bottom",
-        TabListPosition::Left => "Left",
-        TabListPosition::Right => "Right",
-    }
 }
 
 fn new_tab_placement_label(placement: NewTabPlacement) -> &'static str {

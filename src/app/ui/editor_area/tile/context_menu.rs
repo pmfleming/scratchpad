@@ -13,8 +13,7 @@ use crate::app::commands::{
 use crate::app::shortcut_keymap::ShortcutAction;
 use crate::app::shortcut_tooltips;
 use crate::app::theme::text_primary;
-use crate::app::ui::tile_header::TileAction;
-use crate::app::ui::widget_ids;
+use crate::app::ui::{tile_header::TileAction, visuals::with_visual_overrides, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{
     ARROW_CLOCKWISE, ARROW_COUNTER_CLOCKWISE, ARROW_LINE_UP, ARROWS_COUNTER_CLOCKWISE,
@@ -29,7 +28,7 @@ use widgets::{
     EDITOR_CONTEXT_CARET_WIDTH, EDITOR_CONTEXT_MENU_WIDTH, EDITOR_CONTEXT_ROW_HEIGHT,
     EDITOR_CONTEXT_SUBMENU_WIDTH, apply_context_menu_row_hover_style, icon_rail_button,
     icon_rail_leading_space, menu_action_button, paint_context_menu_row_label, set_menu_width,
-    split_menu_button, with_visual_overrides,
+    split_menu_button,
 };
 
 pub(super) fn attach_editor_context_menu(

@@ -12,4 +12,5 @@ pub mod tab_overflow;
 pub mod tab_strip;
 pub mod tile_header;
 pub mod transition;
+pub(crate) mod visuals;
 pub mod widget_ids;

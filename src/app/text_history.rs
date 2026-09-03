@@ -109,3 +109,33 @@ fn operation_summary(
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::operation_summary;
+    use crate::app::domain::PieceSource;
+
+    #[test]
+    fn operation_summaries_cover_sources_and_edit_shapes() {
+        let summary =
+            |source, count, deleted, inserted| operation_summary(source, count, deleted, inserted);
+        assert_eq!(
+            summary(PieceSource::SearchReplace, 1, "", "new"),
+            "Replace match"
+        );
+        assert_eq!(
+            summary(PieceSource::SearchReplace, 3, "", "new"),
+            "Replace 3 matches"
+        );
+        assert_eq!(summary(PieceSource::Paste, 1, "", "new"), "Paste \"new\"");
+        assert_eq!(summary(PieceSource::Cut, 1, "old", ""), "Cut \"old\"");
+        assert_eq!(summary(PieceSource::Edit, 2, "old", "new"), "Edit 2 ranges");
+        assert_eq!(summary(PieceSource::Edit, 1, "", "new"), "Insert \"new\"");
+        assert_eq!(summary(PieceSource::Edit, 1, "old", ""), "Delete \"old\"");
+        assert_eq!(
+            summary(PieceSource::Edit, 1, "old", "new"),
+            "Replace with \"new\""
+        );
+        assert_eq!(summary(PieceSource::Edit, 1, "", ""), "Edit");
+    }
+}

@@ -5,7 +5,7 @@ use crate::app::theme::{
     TAB_BUTTON_WIDTH, TAB_LIST_SCROLLBAR_GUTTER, action_bg, action_hover_bg, border, tab_active_bg,
     tab_selected_accent, text_primary,
 };
-use crate::app::ui::widget_ids;
+use crate::app::ui::{visuals::with_visual_overrides, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{
     ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT, ARROW_UP, CARET_RIGHT, SORT_ASCENDING, SORT_DESCENDING,
@@ -219,18 +219,6 @@ fn with_icon_choice_button_visuals<R>(
     )
 }
 
-fn with_visual_overrides<R>(
-    ui: &mut egui::Ui,
-    configure: impl FnOnce(&mut egui::Ui),
-    add_contents: impl FnOnce(&mut egui::Ui) -> R,
-) -> R {
-    let previous_visuals = ui.visuals().clone();
-    configure(ui);
-    let result = add_contents(ui);
-    *ui.visuals_mut() = previous_visuals;
-    result
-}
-
 pub(super) fn primary_menu_button(
     ui: &mut egui::Ui,
     id_source: impl Hash,
@@ -361,15 +349,6 @@ fn shortcut_tooltip_for_menu_label(ui: &egui::Ui, label: &str) -> Option<String>
     Some(shortcut_tooltips::action(ui.ctx(), action, label))
 }
 
-pub(super) fn tab_list_position_label(position: TabListPosition) -> &'static str {
-    match position {
-        TabListPosition::Top => "Top",
-        TabListPosition::Bottom => "Bottom",
-        TabListPosition::Left => "Left",
-        TabListPosition::Right => "Right",
-    }
-}
-
 pub(super) fn tab_list_position_icon(position: TabListPosition) -> &'static str {
     match position {
         TabListPosition::Top => ARROW_UP,
@@ -491,9 +470,5 @@ fn apply_row_hover_style(ui: &mut egui::Ui) {
 }
 
 fn with_row_visuals<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    let previous_visuals = ui.visuals().clone();
-    apply_row_hover_style(ui);
-    let result = add_contents(ui);
-    *ui.visuals_mut() = previous_visuals;
-    result
+    with_visual_overrides(ui, apply_row_hover_style, add_contents)
 }

@@ -138,7 +138,7 @@ fn append_highlighted_segments(
     highlights: &[TextHighlightRange],
     style: &HighlightLayoutStyle<'_>,
 ) {
-    for window in highlight_boundaries(highlights, char_to_byte.char_len()).windows(2) {
+    for window in highlight_boundaries(highlights, char_to_byte.char_len()).array_windows::<2>() {
         append_highlight_window(job, text, char_to_byte, highlights, style, window);
     }
 }
@@ -149,7 +149,7 @@ fn append_highlight_window(
     char_to_byte: &CharByteMap,
     highlights: &[TextHighlightRange],
     style: &HighlightLayoutStyle<'_>,
-    window: &[usize],
+    window: &[usize; 2],
 ) {
     let segment = window[0]..window[1];
     if segment.is_empty() || segment.end > char_to_byte.char_len() {

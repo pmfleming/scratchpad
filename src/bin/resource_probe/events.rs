@@ -1,11 +1,9 @@
 use super::alloc_metrics::{allocation_snapshot, reset_allocation_counters};
+pub(super) use scratchpad::profile::human_bytes;
+use scratchpad::profile::panic_payload_message;
 use serde::Serialize;
 use std::io::Write;
 use std::time::Instant;
-
-const KB: usize = 1024;
-const MB: usize = 1024 * KB;
-const GB: usize = 1024 * MB;
 
 #[derive(Serialize)]
 struct ResourceEvent {
@@ -104,7 +102,11 @@ fn emit_step_with_setup(
     let metrics = allocation_snapshot();
     let (status, outcome, note) = match result {
         Ok(outcome) => ("ok", outcome, None),
-        Err(payload) => ("panic", StepOutcome::items(0), Some(panic_message(payload))),
+        Err(payload) => (
+            "panic",
+            StepOutcome::items(0),
+            Some(panic_payload_message(payload)),
+        ),
     };
 
     let event = ResourceEvent {
@@ -204,29 +206,6 @@ fn workload_label(value: usize, unit: &str) -> String {
     }
 }
 
-pub(super) fn human_bytes(value: usize) -> String {
-    if value >= GB {
-        return format!("{:.1} GB", value as f64 / GB as f64);
-    }
-    if value >= MB {
-        return format!("{:.1} MB", value as f64 / MB as f64);
-    }
-    if value >= KB {
-        return format!("{:.0} KB", value as f64 / KB as f64);
-    }
-    format!("{value} B")
-}
-
 pub(super) fn ns_to_ms_label(ns: u128) -> String {
     format!("{:.2}", ns as f64 / 1_000_000.0)
-}
-
-fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
-    if let Some(message) = payload.downcast_ref::<String>() {
-        return message.clone();
-    }
-    if let Some(message) = payload.downcast_ref::<&'static str>() {
-        return (*message).to_owned();
-    }
-    "unknown panic".to_owned()
 }

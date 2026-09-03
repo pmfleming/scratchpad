@@ -1,4 +1,4 @@
-use super::{BrokerResponse, ElectionResult, LaunchRequest, PrimaryInstance};
+use super::{ElectionResult, LaunchRequest, PrimaryInstance};
 use crate::app::startup::StartupOptions;
 use std::fs::OpenOptions;
 use std::time::{Duration, Instant};
@@ -65,13 +65,6 @@ fn clean_request_is_rejected_by_primary() {
         options: StartupOptions::clean(),
         ..request(3)
     };
-    assert!(matches!(
-        request.validate_for_existing_primary(),
-        Err(reason) if reason.contains("/clean")
-    ));
-}
-
-#[test]
-fn response_type_remains_explicit() {
-    assert_ne!(BrokerResponse::Busy, BrokerResponse::Accepted);
+    let validation = request.validate_for_existing_primary();
+    assert!(matches!(validation, Err(reason) if reason.contains("/clean")));
 }

@@ -1,5 +1,7 @@
 use super::protocol::{BrokerResponse, LaunchRequest, MAX_FRAME_BYTES};
-use interprocess::local_socket::{GenericNamespaced, ListenerOptions, Name, Stream, prelude::*};
+use interprocess::local_socket::{
+    GenericNamespaced, ListenerOptions, Name, Stream, ToNsName as _, traits::Stream as _,
+};
 use std::io::{self, Read, Write};
 #[cfg(not(target_os = "windows"))]
 use std::time::Duration;

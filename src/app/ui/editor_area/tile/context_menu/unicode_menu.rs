@@ -2,14 +2,14 @@ use super::widgets::{
     EDITOR_CONTEXT_CARET_WIDTH, EDITOR_CONTEXT_MENU_WIDTH, EDITOR_CONTEXT_ROW_HEIGHT,
     EDITOR_UNICODE_DESCRIPTION_X, EDITOR_UNICODE_DIVIDER_X, EDITOR_UNICODE_INSERT_SUBMENU_WIDTH,
     EDITOR_UNICODE_LABEL_X, apply_context_menu_row_hover_style, menu_action_button,
-    paint_context_menu_row_label, set_menu_width, with_visual_overrides,
+    paint_context_menu_row_label, set_menu_width,
 };
 use crate::app::app_state::{
     ScratchpadApp,
     workspace::{accessors as workspace_accessors, editing as workspace_editing},
 };
 use crate::app::theme::{border, text_muted, text_primary};
-use crate::app::ui::widget_ids;
+use crate::app::ui::{visuals::with_visual_overrides, widget_ids};
 use eframe::egui;
 use egui_phosphor::regular::{
     ARROW_U_UP_LEFT, CARET_RIGHT, TEXT_AA, TEXT_ALIGN_JUSTIFY, TEXT_ALIGN_LEFT, TEXT_ALIGN_RIGHT,

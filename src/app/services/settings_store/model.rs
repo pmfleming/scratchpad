@@ -1,3 +1,4 @@
+use crate::app::color_contrast::parse_hex_color;
 use crate::app::domain::TextHistoryBudget;
 use crate::app::fonts::{EditorFontPreset, EditorFontSource};
 use crate::app::platform::PlatformProfile;
@@ -193,6 +194,16 @@ impl TabListPosition {
     #[must_use]
     pub fn is_vertical(self) -> bool {
         matches!(self, Self::Left | Self::Right)
+    }
+
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Top => "Top",
+            Self::Bottom => "Bottom",
+            Self::Left => "Left",
+            Self::Right => "Right",
+        }
     }
 }
 
@@ -398,18 +409,6 @@ pub(crate) fn color_from_hex(hex: &str, fallback: egui::Color32) -> egui::Color3
 
 pub(crate) fn color_to_hex(color: egui::Color32) -> String {
     format!("#{:02x}{:02x}{:02x}", color.r(), color.g(), color.b())
-}
-
-fn parse_hex_color(hex: &str) -> Option<egui::Color32> {
-    let trimmed = hex.trim().trim_start_matches('#');
-    if trimmed.len() != 6 {
-        return None;
-    }
-
-    let r = u8::from_str_radix(&trimmed[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&trimmed[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&trimmed[4..6], 16).ok()?;
-    Some(egui::Color32::from_rgb(r, g, b))
 }
 
 macro_rules! default_fn {

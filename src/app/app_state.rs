@@ -365,19 +365,19 @@ mod tests {
         app
     }
 
-    fn primary_texts_are_clean(messages: &[&str]) {
-        for message in messages {
-            assert!(!message.contains("file(s)"), "{message}");
-            assert!(!message.contains("tab(s)"), "{message}");
-            assert!(!message.contains("conflict(s)"), "{message}");
-            assert!(!message.contains("1 files"), "{message}");
-            assert!(!message.contains("1 tabs"), "{message}");
-            assert!(!message.contains("1 conflicts"), "{message}");
-            assert!(
-                !message.contains("Control characters detected: Control characters detected"),
-                "{message}"
-            );
-        }
+    fn primary_texts_are_clean(messages: &[&str]) -> bool {
+        const FRAGILE_TEXT: [&str; 7] = [
+            "file(s)",
+            "tab(s)",
+            "conflict(s)",
+            "1 files",
+            "1 tabs",
+            "1 conflicts",
+            "Control characters detected: Control characters detected",
+        ];
+        messages
+            .iter()
+            .all(|message| FRAGILE_TEXT.iter().all(|text| !message.contains(text)))
     }
 
     #[test]
@@ -536,6 +536,10 @@ mod tests {
         app.state.status.report_search_results_stale_for_replace();
         let stale_search = app.state.status.current.as_ref().unwrap().text.clone();
 
-        primary_texts_are_clean(&[&session_save, &settings_toml, &stale_search]);
+        assert!(primary_texts_are_clean(&[
+            &session_save,
+            &settings_toml,
+            &stale_search
+        ]));
     }
 }

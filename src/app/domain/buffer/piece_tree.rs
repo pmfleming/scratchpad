@@ -149,7 +149,7 @@ pub enum PieceBuffer {
     Add,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 struct Piece {
     buffer: PieceBuffer,
     start_byte: usize,

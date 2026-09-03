@@ -55,11 +55,12 @@ fn lock_is_released_when_primary_inbox_drops() {
     drop(inbox);
 
     let deadline = Instant::now() + Duration::from_secs(1);
-    loop {
+    let released = loop {
         match PrimaryInstance::elect(directory.path(), &request(21)) {
-            Ok(ElectionResult::Primary(_)) => break,
+            Ok(ElectionResult::Primary(_)) => break true,
             _ if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
-            _ => panic!("ownership was not released before the deadline"),
+            _ => break false,
         }
-    }
+    };
+    assert!(released, "ownership was not released before the deadline");
 }

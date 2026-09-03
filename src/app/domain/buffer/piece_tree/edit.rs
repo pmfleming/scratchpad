@@ -95,42 +95,31 @@ impl PieceTreeLite {
         inserted_pieces: Vec<Piece>,
     ) -> Vec<Piece> {
         let mut result = Vec::with_capacity(leaf.pieces.len() + inserted_pieces.len() + 2);
-        let mut current_char = 0usize;
-        let mut inserted = Some(inserted_pieces);
+        let boundary = leaf
+            .piece_start_chars
+            .partition_point(|start| *start < offset_in_leaf_chars);
 
-        for piece in &leaf.pieces {
-            let piece_end_char = current_char + piece.char_len;
-            if let Some(new_pieces) = inserted.take() {
-                if offset_in_leaf_chars <= current_char {
-                    result.extend(new_pieces);
-                } else if offset_in_leaf_chars < piece_end_char {
-                    let inner_offset = offset_in_leaf_chars - current_char;
-                    if inner_offset > 0 {
-                        result.push(self.slice_piece_by_chars(piece, 0, inner_offset));
-                    }
-                    result.extend(new_pieces);
-                    if inner_offset < piece.char_len {
-                        result.push(self.slice_piece_by_chars(
-                            piece,
-                            inner_offset,
-                            piece.char_len - inner_offset,
-                        ));
-                    }
-                    current_char = piece_end_char;
-                    continue;
-                } else {
-                    inserted = Some(new_pieces);
-                }
+        if let Some(piece_index) = boundary.checked_sub(1)
+            && let Some(piece) = leaf.pieces.get(piece_index)
+        {
+            let inner_offset = offset_in_leaf_chars - leaf.piece_start_chars[piece_index];
+            if inner_offset < piece.char_len {
+                result.extend_from_slice(&leaf.pieces[..piece_index]);
+                result.push(self.slice_piece_by_chars(piece, 0, inner_offset));
+                result.extend(inserted_pieces);
+                result.push(self.slice_piece_by_chars(
+                    piece,
+                    inner_offset,
+                    piece.char_len - inner_offset,
+                ));
+                result.extend_from_slice(&leaf.pieces[piece_index + 1..]);
+                return result;
             }
-
-            result.push(piece.clone());
-            current_char = piece_end_char;
         }
 
-        if let Some(new_pieces) = inserted {
-            result.extend(new_pieces);
-        }
-
+        result.extend_from_slice(&leaf.pieces[..boundary]);
+        result.extend(inserted_pieces);
+        result.extend_from_slice(&leaf.pieces[boundary..]);
         result
     }
 
@@ -218,53 +207,69 @@ impl PieceTreeLite {
         end_address: LeafAddress,
         range_chars: Range<usize>,
     ) -> Vec<Piece> {
-        let mut affected_pieces = Vec::new();
-        let mut current_char = start_address.leaf_start_char;
+        let mut retained = Vec::new();
+        let mut piece_start_char = start_address.leaf_start_char;
 
         for node_index in start_address.node_index..=end_address.node_index {
-            let node = &self.root.nodes[node_index];
-            let leaf_start = if node_index == start_address.node_index {
-                start_address.leaf_index
-            } else {
-                0
-            };
-            let leaf_end = if node_index == end_address.node_index {
-                end_address.leaf_index
-            } else {
-                node.leaves.len() - 1
-            };
-
-            for leaf in &node.leaves[leaf_start..=leaf_end] {
+            for leaf in self.affected_leaves_in_node(node_index, start_address, end_address) {
                 for piece in &leaf.pieces {
-                    let piece_start_char = current_char;
-                    let piece_end_char = current_char + piece.char_len;
-
-                    if range_chars.end <= piece_start_char || range_chars.start >= piece_end_char {
-                        affected_pieces.push(piece.clone());
-                    } else {
-                        let left_chars = range_chars.start.saturating_sub(piece_start_char);
-                        if left_chars > 0 {
-                            affected_pieces.push(self.slice_piece_by_chars(piece, 0, left_chars));
-                        }
-
-                        let right_start_char = range_chars
-                            .end
-                            .saturating_sub(piece_start_char)
-                            .min(piece.char_len);
-                        if right_start_char < piece.char_len {
-                            affected_pieces.push(self.slice_piece_by_chars(
-                                piece,
-                                right_start_char,
-                                piece.char_len - right_start_char,
-                            ));
-                        }
-                    }
-
-                    current_char = piece_end_char;
+                    self.append_retained_piece(
+                        piece,
+                        piece_start_char,
+                        &range_chars,
+                        &mut retained,
+                    );
+                    piece_start_char += piece.char_len;
                 }
             }
         }
+        retained
+    }
 
-        affected_pieces
+    fn affected_leaves_in_node(
+        &self,
+        node_index: usize,
+        start: LeafAddress,
+        end: LeafAddress,
+    ) -> &[PieceTreeLeaf] {
+        let node = &self.root.nodes[node_index];
+        let first = if node_index == start.node_index {
+            start.leaf_index
+        } else {
+            0
+        };
+        let last = if node_index == end.node_index {
+            end.leaf_index
+        } else {
+            node.leaves.len() - 1
+        };
+        &node.leaves[first..=last]
+    }
+
+    fn append_retained_piece(
+        &self,
+        piece: &Piece,
+        piece_start: usize,
+        removed: &Range<usize>,
+        retained: &mut Vec<Piece>,
+    ) {
+        let piece_end = piece_start + piece.char_len;
+        if removed.end <= piece_start || removed.start >= piece_end {
+            retained.push(*piece);
+            return;
+        }
+
+        let left_chars = removed.start.saturating_sub(piece_start);
+        if left_chars > 0 {
+            retained.push(self.slice_piece_by_chars(piece, 0, left_chars));
+        }
+        let right_start = removed.end.saturating_sub(piece_start).min(piece.char_len);
+        if right_start < piece.char_len {
+            retained.push(self.slice_piece_by_chars(
+                piece,
+                right_start,
+                piece.char_len - right_start,
+            ));
+        }
     }
 }
