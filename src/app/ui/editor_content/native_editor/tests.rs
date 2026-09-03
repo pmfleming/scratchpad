@@ -195,6 +195,23 @@ fn losing_focus_clears_ime_state() {
 }
 
 #[test]
+fn consecutive_vertical_keys_restore_visual_column_after_short_line() {
+    let text = "abcdefghij\nx\nabcdefghij";
+    let mut buffer = BufferState::new("sample.txt".to_owned(), text.to_owned(), None);
+    let mut view = EditorViewState::new(buffer.id);
+    view.cursor_range = Some(CursorRange::one(CharCursor::new(8)));
+    let font_id = egui::FontId::monospace(18.0);
+    let ctx = egui::Context::default();
+
+    render_editor_key(&ctx, &mut buffer, &mut view, &font_id, egui::Key::ArrowDown);
+    assert_eq!(view.cursor_range.unwrap().primary.index, 12);
+    assert!(view.cursor_horizontal_goal().is_some());
+
+    render_editor_key(&ctx, &mut buffer, &mut view, &font_id, egui::Key::ArrowDown);
+    assert_eq!(view.cursor_range.unwrap().primary.index, 21);
+}
+
+#[test]
 fn wrapped_layout_rebuilds_when_viewport_width_changes() {
     let mut buffer = BufferState::new(
         "sample.txt".to_owned(),
@@ -212,6 +229,44 @@ fn wrapped_layout_rebuilds_when_viewport_width_changes() {
         narrow_rows > wide_rows,
         "wrapped layout should gain rows after narrowing: wide={wide_rows}, narrow={narrow_rows}"
     );
+}
+
+fn render_editor_key(
+    ctx: &egui::Context,
+    buffer: &mut BufferState,
+    view: &mut EditorViewState,
+    font_id: &egui::FontId,
+    key: egui::Key,
+) {
+    let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(360.0, 420.0));
+    let input = egui::RawInput {
+        events: vec![egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::default(),
+        }],
+        ..Default::default()
+    };
+    let mut output = ctx.run_ui(input, |ui| {
+        ui.set_min_size(viewport.size());
+        ui.set_width(viewport.width());
+        render_editor_text_edit(
+            ui,
+            buffer,
+            view,
+            TextEditOptions::new(
+                true,
+                false,
+                font_id,
+                egui::Color32::WHITE,
+                EditorHighlightStyle::new(egui::Color32::YELLOW, egui::Color32::BLACK),
+            ),
+            Some(viewport),
+        );
+    });
+    output.textures_delta.clear();
 }
 
 fn render_wrapped_width(

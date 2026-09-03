@@ -234,6 +234,7 @@ impl WorkspaceTab {
         let mut new_view = EditorViewState::new(buffer_id);
         new_view.show_line_numbers = presentation.show_line_numbers;
         new_view.cursor_range = source_view.cursor_range;
+        new_view.set_cursor_horizontal_goal(source_view.cursor_horizontal_goal());
         new_view.pending_cursor_range = source_view.pending_cursor_range;
         new_view.scroll = source_view.scroll.clone();
         new_view

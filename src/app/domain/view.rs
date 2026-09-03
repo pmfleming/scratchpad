@@ -91,6 +91,10 @@ pub struct EditorViewState {
     pub latest_display_snapshot_revision: Option<u64>,
     pub layout_cache: LayoutCache,
     pub cursor_range: Option<CursorRange>,
+    /// Pixel-space horizontal goal retained across consecutive vertical cursor
+    /// movements. This is view-local because the same buffer can be shown at
+    /// different widths and with independent carets.
+    cursor_horizontal_goal: Option<f32>,
     pub pending_cursor_range: Option<CursorRange>,
     /// Per-view scroll state. Single source of truth for scroll position,
     /// reveal requests, and viewport metrics.
@@ -132,6 +136,7 @@ impl EditorViewState {
             latest_display_snapshot_revision: None,
             layout_cache: LayoutCache::default(),
             cursor_range: None,
+            cursor_horizontal_goal: None,
             pending_cursor_range: None,
             scroll: ScrollManager::new(),
             pending_intents: Vec::new(),
@@ -305,7 +310,17 @@ impl EditorViewState {
         buffer: &mut crate::app::domain::BufferState,
         cursor_range: CursorRange,
     ) {
+        self.set_cursor_range_anchored_with_horizontal_goal(buffer, cursor_range, None);
+    }
+
+    pub(crate) fn set_cursor_range_anchored_with_horizontal_goal(
+        &mut self,
+        buffer: &mut crate::app::domain::BufferState,
+        cursor_range: CursorRange,
+        horizontal_goal: Option<f32>,
+    ) {
         self.cursor_range = Some(cursor_range);
+        self.cursor_horizontal_goal = horizontal_goal.filter(|value| value.is_finite());
         sync_optional_cursor_anchor_range(
             self.id,
             buffer,
@@ -314,12 +329,26 @@ impl EditorViewState {
         );
     }
 
+    #[must_use]
+    pub(crate) fn cursor_horizontal_goal(&self) -> Option<f32> {
+        self.cursor_horizontal_goal
+    }
+
+    pub(crate) fn set_cursor_horizontal_goal(&mut self, horizontal_goal: Option<f32>) {
+        self.cursor_horizontal_goal = horizontal_goal.filter(|value| value.is_finite());
+    }
+
+    pub(crate) fn clear_cursor_horizontal_goal(&mut self) {
+        self.cursor_horizontal_goal = None;
+    }
+
     pub fn set_pending_cursor_range_anchored(
         &mut self,
         buffer: &mut crate::app::domain::BufferState,
         cursor_range: CursorRange,
     ) {
         self.pending_cursor_range = Some(cursor_range);
+        self.clear_cursor_horizontal_goal();
         sync_optional_cursor_anchor_range(
             self.id,
             buffer,

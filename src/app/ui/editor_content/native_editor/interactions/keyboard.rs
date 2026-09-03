@@ -50,7 +50,7 @@ pub(super) fn handle_keyboard_events(
             style: request.indentation_style,
             width: request.indentation_width,
         },
-        |key_event, buffer, cursor| {
+        |key_event, buffer, cursor, preferred_cursor_x| {
             cursor::apply_cursor_movement(cursor::CursorMovementRequest {
                 cursor,
                 key: key_event.key,
@@ -62,6 +62,7 @@ pub(super) fn handle_keyboard_events(
                 char_offset_base: request.char_offset_base,
                 slice_chars: request.slice_chars,
                 display_map: request.display_map,
+                preferred_cursor_x,
             })
         },
     )
@@ -76,7 +77,8 @@ fn handle_keyboard_events_with(
         PressedKeyEvent,
         &mut BufferState,
         &CursorRange,
-    ) -> Option<CursorRange>,
+        Option<f32>,
+    ) -> Option<cursor::CursorMovementResult>,
 ) -> bool {
     let events = relevant_input_events(ui);
     let context = KeyboardInputContext {
@@ -109,7 +111,8 @@ fn handle_relevant_input_event(
         PressedKeyEvent,
         &mut BufferState,
         &CursorRange,
-    ) -> Option<CursorRange>,
+        Option<f32>,
+    ) -> Option<cursor::CursorMovementResult>,
 ) -> bool {
     let cursor = view.cursor_range.unwrap_or_default();
 
@@ -160,7 +163,8 @@ fn handle_key_event(
         PressedKeyEvent,
         &mut BufferState,
         &CursorRange,
-    ) -> Option<CursorRange>,
+        Option<f32>,
+    ) -> Option<cursor::CursorMovementResult>,
 ) -> bool {
     if let Some(handled) =
         handle_non_movement_key_event(ui, key_event, buffer, view, cursor, context)
@@ -168,8 +172,8 @@ fn handle_key_event(
         return handled;
     }
 
-    let next_cursor = handle_movement_event(key_event, buffer, cursor);
-    apply_cursor_update(view, buffer, next_cursor)
+    let movement = handle_movement_event(key_event, buffer, cursor, view.cursor_horizontal_goal());
+    apply_cursor_update(view, buffer, movement)
 }
 
 fn relevant_input_events(ui: &egui::Ui) -> Vec<RelevantInputEvent> {
@@ -300,8 +304,10 @@ fn handle_tab_key(
         return true;
     }
 
-    let next_cursor = editing::apply_outdent(buffer, cursor, indentation.width);
-    apply_cursor_update(view, buffer, next_cursor)
+    if let Some(next_cursor) = editing::apply_outdent(buffer, cursor, indentation.width) {
+        view.set_cursor_range_anchored(buffer, next_cursor);
+    }
+    false
 }
 
 fn handle_delete_key(
@@ -420,10 +426,14 @@ fn copy_selection(ui: &mut egui::Ui, buffer: &BufferState, cursor: &CursorRange)
 fn apply_cursor_update(
     view: &mut EditorViewState,
     buffer: &mut BufferState,
-    next_cursor: Option<CursorRange>,
+    movement: Option<cursor::CursorMovementResult>,
 ) -> bool {
-    if let Some(new_cursor) = next_cursor {
-        view.set_cursor_range_anchored(buffer, new_cursor);
+    if let Some(movement) = movement {
+        view.set_cursor_range_anchored_with_horizontal_goal(
+            buffer,
+            movement.cursor,
+            movement.preferred_cursor_x,
+        );
     }
 
     false

@@ -117,6 +117,7 @@ pub(super) fn handle_mouse_interaction(
 fn handle_secondary_click(view: &mut EditorViewState, char_cursor: CharCursor) {
     if !cursor_inside_existing_selection(view.cursor_range, char_cursor.index) {
         view.cursor_range = Some(CursorRange::one(char_cursor));
+        view.clear_cursor_horizontal_goal();
     }
 }
 
@@ -134,6 +135,7 @@ fn extend_selection_to_cursor(view: &mut EditorViewState, char_cursor: CharCurso
             primary: char_cursor,
             secondary: existing.secondary,
         });
+        view.clear_cursor_horizontal_goal();
     }
 }
 
@@ -172,6 +174,7 @@ fn apply_click_selection(
         n if n >= 3 => line_selection_range(context, selection.cursor_at_pointer),
         _ => cursor_range_after_click(ui, view.cursor_range, selection.char_cursor),
     });
+    view.clear_cursor_horizontal_goal();
 }
 
 fn line_selection_range(

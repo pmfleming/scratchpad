@@ -57,6 +57,7 @@ pub(super) fn sync_view_cursor_before_render(view: &mut EditorViewState, focused
     }
 
     view.cursor_range = Some(CursorRange::one(CharCursor::new(0)));
+    view.clear_cursor_horizontal_goal();
     view.request_cursor_reveal(CursorRevealMode::KeepVisible);
 }
 
@@ -68,6 +69,7 @@ pub(super) fn page_jump_rows(viewport: Option<egui::Rect>, row_height: f32) -> u
 
 fn restore_pending_cursor(view: &mut EditorViewState, cursor_range: CursorRange) {
     view.cursor_range = Some(cursor_range);
+    view.clear_cursor_horizontal_goal();
     view.request_cursor_reveal(
         view.cursor_reveal_mode()
             .unwrap_or(CursorRevealMode::Center),

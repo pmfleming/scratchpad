@@ -54,16 +54,20 @@ fn move_by_page_rows(
     cursor: egui::text::CCursor,
     page_jump_rows: usize,
     downward: bool,
-) -> egui::text::CCursor {
+    preferred_cursor_x: Option<f32>,
+) -> (egui::text::CCursor, Option<f32>) {
     let mut cursor = cursor;
+    let mut horizontal_goal = preferred_cursor_x;
     for _ in 0..page_jump_rows.max(1) {
-        cursor = if downward {
-            galley.cursor_down_one_row(&cursor, None).0
+        let (next_cursor, next_horizontal_goal) = if downward {
+            galley.cursor_down_one_row(&cursor, horizontal_goal)
         } else {
-            galley.cursor_up_one_row(&cursor, None).0
+            galley.cursor_up_one_row(&cursor, horizontal_goal)
         };
+        cursor = next_cursor;
+        horizontal_goal = next_horizontal_goal.or(horizontal_goal);
     }
-    cursor
+    (cursor, horizontal_goal)
 }
 
 pub(super) struct CursorMovementRequest<'a> {
@@ -77,6 +81,12 @@ pub(super) struct CursorMovementRequest<'a> {
     pub(super) char_offset_base: usize,
     pub(super) slice_chars: usize,
     pub(super) display_map: Option<&'a DisplayTextMap>,
+    pub(super) preferred_cursor_x: Option<f32>,
+}
+
+pub(super) struct CursorMovementResult {
+    pub(super) cursor: CursorRange,
+    pub(super) preferred_cursor_x: Option<f32>,
 }
 
 struct HorizontalMovementContext<'a> {
@@ -91,7 +101,9 @@ struct HorizontalMovementContext<'a> {
     display_map: Option<&'a DisplayTextMap>,
 }
 
-pub(super) fn apply_cursor_movement(request: CursorMovementRequest<'_>) -> Option<CursorRange> {
+pub(super) fn apply_cursor_movement(
+    request: CursorMovementRequest<'_>,
+) -> Option<CursorMovementResult> {
     let doc_local_cursor = request
         .cursor
         .primary
@@ -105,7 +117,7 @@ pub(super) fn apply_cursor_movement(request: CursorMovementRequest<'_>) -> Optio
         prefer_next_row: request.cursor.primary.prefer_next_row,
     };
     let egui_cursor = request.galley.clamp_cursor(&local_cursor.to_egui_ccursor());
-    let new_primary = horizontal_movement_target(HorizontalMovementContext {
+    let horizontal_context = HorizontalMovementContext {
         current_index: request.cursor.primary.index,
         char_offset_base: request.char_offset_base,
         slice_chars: request.slice_chars,
@@ -115,61 +127,98 @@ pub(super) fn apply_cursor_movement(request: CursorMovementRequest<'_>) -> Optio
         egui_cursor: &egui_cursor,
         piece_tree: request.piece_tree,
         display_map: request.display_map,
-    })
-    .map(|target| {
-        clamp_char_cursor(
-            request.galley,
-            request.total_chars,
-            target,
-            request.char_offset_base,
-            request.display_map,
-        )
-    })
-    .or_else(|| {
-        visual_row_movement_target(request.key, request.modifiers, request.galley, &egui_cursor)
-            .map(|target| {
+    };
+
+    let (new_primary, preferred_cursor_x) =
+        if let Some(target) = horizontal_movement_target(horizontal_context) {
+            (
                 clamp_char_cursor(
                     request.galley,
                     request.total_chars,
                     target,
                     request.char_offset_base,
                     request.display_map,
-                )
-            })
-    })
-    .or_else(|| {
-        full_document_movement_target(
+                ),
+                None,
+            )
+        } else if let Some((target, horizontal_goal)) = visual_row_movement_target(
+            request.key,
+            request.modifiers,
+            request.galley,
+            &egui_cursor,
+            request.preferred_cursor_x,
+        ) {
+            (
+                clamp_char_cursor(
+                    request.galley,
+                    request.total_chars,
+                    target,
+                    request.char_offset_base,
+                    request.display_map,
+                ),
+                horizontal_goal,
+            )
+        } else if let Some(target) = full_document_movement_target(
             request.cursor.primary.index,
             request.key,
             request.modifiers,
             request.page_jump_rows,
             request.total_chars,
             request.piece_tree,
-        )
-    })
-    .or_else(|| {
-        page_movement_target(
+        ) {
+            (
+                target,
+                horizontal_goal_for_document_movement(
+                    request.key,
+                    request.galley,
+                    egui_cursor,
+                    request.preferred_cursor_x,
+                ),
+            )
+        } else if let Some((target, horizontal_goal)) = page_movement_target(
             request.key,
             request.galley,
             egui_cursor,
             request.page_jump_rows,
-        )
-        .map(|target| {
-            clamp_char_cursor(
-                request.galley,
-                request.total_chars,
-                target,
-                request.char_offset_base,
-                request.display_map,
+            request.preferred_cursor_x,
+        ) {
+            (
+                clamp_char_cursor(
+                    request.galley,
+                    request.total_chars,
+                    target,
+                    request.char_offset_base,
+                    request.display_map,
+                ),
+                horizontal_goal,
             )
-        })
-    })?;
-    Some(finalize_cursor_movement(
-        request.cursor,
-        request.key,
-        request.modifiers,
-        new_primary,
-    ))
+        } else {
+            return None;
+        };
+
+    Some(CursorMovementResult {
+        cursor: finalize_cursor_movement(
+            request.cursor,
+            request.key,
+            request.modifiers,
+            new_primary,
+        ),
+        preferred_cursor_x,
+    })
+}
+
+fn horizontal_goal_for_document_movement(
+    key: egui::Key,
+    galley: &egui::Galley,
+    cursor: egui::text::CCursor,
+    preferred_cursor_x: Option<f32>,
+) -> Option<f32> {
+    match key {
+        egui::Key::ArrowUp | egui::Key::ArrowDown | egui::Key::PageUp | egui::Key::PageDown => {
+            preferred_cursor_x.or_else(|| Some(galley.pos_from_cursor(cursor).center().x))
+        }
+        _ => None,
+    }
 }
 
 fn horizontal_movement_target(
@@ -211,16 +260,19 @@ fn visual_row_movement_target(
     modifiers: &egui::Modifiers,
     galley: &egui::Galley,
     egui_cursor: &egui::text::CCursor,
-) -> Option<egui::text::CCursor> {
+    preferred_cursor_x: Option<f32>,
+) -> Option<(egui::text::CCursor, Option<f32>)> {
     if modifiers.command {
         return None;
     }
 
     let row = galley.layout_from_cursor(*egui_cursor).row;
     match key {
-        egui::Key::ArrowUp if row > 0 => Some(galley.cursor_up_one_row(egui_cursor, None).0),
+        egui::Key::ArrowUp if row > 0 => {
+            Some(galley.cursor_up_one_row(egui_cursor, preferred_cursor_x))
+        }
         egui::Key::ArrowDown if row + 1 < galley.rows.len() => {
-            Some(galley.cursor_down_one_row(egui_cursor, None).0)
+            Some(galley.cursor_down_one_row(egui_cursor, preferred_cursor_x))
         }
         _ => None,
     }
@@ -343,15 +395,23 @@ fn page_movement_target(
     galley: &egui::Galley,
     egui_cursor: egui::text::CCursor,
     page_jump_rows: usize,
-) -> Option<egui::text::CCursor> {
+    preferred_cursor_x: Option<f32>,
+) -> Option<(egui::text::CCursor, Option<f32>)> {
     match key {
         egui::Key::PageUp => Some(move_by_page_rows(
             galley,
             egui_cursor,
             page_jump_rows,
             false,
+            preferred_cursor_x,
         )),
-        egui::Key::PageDown => Some(move_by_page_rows(galley, egui_cursor, page_jump_rows, true)),
+        egui::Key::PageDown => Some(move_by_page_rows(
+            galley,
+            egui_cursor,
+            page_jump_rows,
+            true,
+            preferred_cursor_x,
+        )),
         _ => None,
     }
 }
@@ -407,6 +467,29 @@ mod tests {
         galley.expect("test galley should be created")
     }
 
+    fn move_in_galley(
+        tree: &PieceTreeLite,
+        galley: &egui::Galley,
+        cursor: CursorRange,
+        key: egui::Key,
+        preferred_cursor_x: Option<f32>,
+    ) -> super::CursorMovementResult {
+        apply_cursor_movement(CursorMovementRequest {
+            cursor: &cursor,
+            key,
+            modifiers: &egui::Modifiers::default(),
+            galley,
+            page_jump_rows: 1,
+            total_chars: tree.len_chars(),
+            piece_tree: tree,
+            char_offset_base: 0,
+            slice_chars: tree.len_chars(),
+            display_map: None,
+            preferred_cursor_x,
+        })
+        .expect("cursor should move")
+    }
+
     fn row_start(galley: &egui::Galley, row: usize) -> usize {
         galley
             .rows
@@ -414,6 +497,69 @@ mod tests {
             .take(row)
             .map(|row| usize::from(row.char_count_including_newline()))
             .sum()
+    }
+
+    #[test]
+    fn vertical_movement_restores_visual_column_after_short_line() {
+        let text = "abcdefghij\nx\nabcdefghij";
+        let tree = tree(text);
+        let ctx = egui::Context::default();
+        let galley = wrapped_galley(&ctx, text, f32::INFINITY);
+        let original_column = 8;
+
+        let onto_short_line = move_in_galley(
+            &tree,
+            &galley,
+            CursorRange::one(CharCursor::new(original_column)),
+            egui::Key::ArrowDown,
+            None,
+        );
+        assert_eq!(
+            onto_short_line.cursor.primary.index,
+            row_start(&galley, 1) + 1
+        );
+        assert!(onto_short_line.preferred_cursor_x.is_some());
+
+        let back_to_long_line = move_in_galley(
+            &tree,
+            &galley,
+            onto_short_line.cursor,
+            egui::Key::ArrowDown,
+            onto_short_line.preferred_cursor_x,
+        );
+        assert_eq!(
+            back_to_long_line.cursor.primary.index,
+            row_start(&galley, 2) + original_column
+        );
+        assert_eq!(
+            back_to_long_line.preferred_cursor_x,
+            onto_short_line.preferred_cursor_x
+        );
+    }
+
+    #[test]
+    fn horizontal_movement_clears_visual_column_goal() {
+        let text = "abcdefghij\nx";
+        let tree = tree(text);
+        let ctx = egui::Context::default();
+        let galley = wrapped_galley(&ctx, text, f32::INFINITY);
+        let onto_short_line = move_in_galley(
+            &tree,
+            &galley,
+            CursorRange::one(CharCursor::new(8)),
+            egui::Key::ArrowDown,
+            None,
+        );
+
+        let moved_left = move_in_galley(
+            &tree,
+            &galley,
+            onto_short_line.cursor,
+            egui::Key::ArrowLeft,
+            onto_short_line.preferred_cursor_x,
+        );
+
+        assert_eq!(moved_left.preferred_cursor_x, None);
     }
 
     fn first_continuation_row_after(galley: &egui::Galley, offset: usize) -> usize {
@@ -461,14 +607,15 @@ mod tests {
             char_offset_base: 0,
             slice_chars: tree.len_chars(),
             display_map: None,
+            preferred_cursor_x: None,
         })
         .unwrap();
 
         assert!(
-            target.primary.index >= wrapped_line_start,
+            target.cursor.primary.index >= wrapped_line_start,
             "up arrow should stay within the wrapped logical line instead of jumping to the previous logical line"
         );
-        assert!(target.primary.index < cursor_index);
+        assert!(target.cursor.primary.index < cursor_index);
     }
 
     #[test]
