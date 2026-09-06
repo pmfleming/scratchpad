@@ -66,6 +66,8 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
 
+    scratchpad::app::diagnostics::window_trace::initialize();
+    log::trace!(target: "scratchpad::window", "startup renderer={:?}", options.renderer);
     eframe::run_native(
         "Scratchpad",
         options,
@@ -121,7 +123,9 @@ fn viewport_builder_from_window_state(
         // Hyprland matches this Wayland app ID as its window class.
         .with_app_id("scratchpad")
         .with_decorations(capabilities.use_native_decorations)
-        .with_visible(false)
+        // eframe hides the native window until its first paint. Do not add an
+        // application-level hidden-frame gate: Wayland may defer those redraws.
+        .with_maximized(window_state.maximized)
         .with_inner_size(window_state.inner_size.unwrap_or(DEFAULT_WINDOW_INNER_SIZE))
         .with_min_inner_size(MIN_WINDOW_INNER_SIZE);
 
@@ -187,7 +191,28 @@ fn best_png_from_ico(ico: &[u8]) -> Option<&[u8]> {
 
 #[cfg(test)]
 mod tests {
-    use super::renderer_from_override;
+    use super::{renderer_from_override, viewport_builder_from_window_state};
+    use scratchpad::app::{platform, services::settings_store::WindowState};
+
+    #[test]
+    fn startup_viewport_restores_geometry_without_a_hidden_frame_gate() {
+        for maximized in [false, true] {
+            let state = WindowState {
+                inner_size: Some([980.0, 720.0]),
+                position: Some([32.0, 48.0]),
+                maximized,
+            };
+            let viewport = viewport_builder_from_window_state(
+                &state,
+                platform::capabilities(Default::default()),
+            );
+            assert_ne!(viewport.visible, Some(false));
+            assert_eq!(viewport.maximized, Some(maximized));
+            assert_eq!(viewport.inner_size, Some(eframe::egui::vec2(980.0, 720.0)));
+            assert_eq!(viewport.position, Some(eframe::egui::pos2(32.0, 48.0)));
+            assert_eq!(viewport.app_id.as_deref(), Some("scratchpad"));
+        }
+    }
 
     #[cfg(target_os = "linux")]
     #[test]

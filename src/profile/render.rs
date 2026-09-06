@@ -123,6 +123,7 @@ impl UiRenderFrameHarness {
 
     fn run_ui_with_input(&mut self, input: egui::RawInput) -> egui::FullOutput {
         let output = self.ctx.run_ui(input, |ui| {
+            App::logic(&mut self.app, ui.ctx(), &mut self.frame);
             egui::CentralPanel::default().show(ui, |ui| {
                 App::ui(&mut self.app, ui, &mut self.frame);
             });

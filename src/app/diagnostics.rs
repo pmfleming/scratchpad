@@ -2,6 +2,7 @@ mod egui_warning;
 mod model;
 #[cfg(test)]
 mod tests;
+pub mod window_trace;
 
 use egui_warning::{
     extract_hexes, is_egui_target, is_egui_warning_message, should_capture_log_record,
@@ -387,7 +388,11 @@ fn record_diagnostic(diagnostic: AppDiagnostic) {
 fn install_logger() {
     LOGGER_INSTALLED.get_or_init(|| {
         if log::set_logger(&LOGGER).is_ok() {
-            log::set_max_level(LevelFilter::Warn);
+            log::set_max_level(if window_trace::enabled() {
+                LevelFilter::Trace
+            } else {
+                LevelFilter::Warn
+            });
         }
     });
 }
@@ -449,11 +454,17 @@ struct AppDiagnosticsLogger;
 
 impl Log for AppDiagnosticsLogger {
     fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        metadata.level() <= Level::Warn
+        metadata.level() <= Level::Warn || window_trace::captures(metadata.target())
     }
 
     fn log(&self, record: &Record<'_>) {
         if !self.enabled(record.metadata()) {
+            return;
+        }
+        if window_trace::captures(record.target()) {
+            window_trace::record(record);
+        }
+        if record.level() > Level::Warn {
             return;
         }
         let message = record.args().to_string();

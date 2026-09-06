@@ -21,11 +21,14 @@ mod file_watch;
 mod focus_state;
 pub(crate) mod frame;
 mod instance_broker;
+#[cfg(test)]
+mod lifecycle_tests;
 mod runtime_state;
 mod search_state;
 pub(crate) mod settings_state;
 mod startup_state;
 mod types;
+mod window_lifecycle;
 pub(crate) mod workspace;
 
 pub(crate) use chrome_state::ChromeState;
@@ -108,8 +111,9 @@ pub(crate) struct AppPersistenceState {
 #[derive(Default)]
 pub(crate) struct WindowRuntimeState {
     pub(crate) close_in_progress: bool,
-    pub(crate) shown_after_first_frame: bool,
-    pub(crate) painted_frames_before_show: u8,
+    pub(crate) lifecycle: window_lifecycle::WindowLifecycle,
+    // Include lifecycle work in frame timings after splitting logic from UI.
+    frame_started_at: Option<Instant>,
     pub(crate) current_title: Option<String>,
     pub(crate) overflow_popup_open: bool,
     pub(crate) applied_editor_font: Option<EditorFontSelection>,
@@ -150,16 +154,39 @@ impl Default for ScratchpadApp {
 }
 
 impl eframe::App for ScratchpadApp {
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, input: &mut egui::RawInput) {
+        let viewport = input.viewport();
+        log::trace!(target: "scratchpad::window",
+            "input focused={:?} minimized={:?} occluded={:?} maximized={:?} size={:?} events={}",
+            viewport.focused, viewport.minimized, viewport.occluded, viewport.maximized,
+            input.screen_rect.map(|rect| rect.size()), input.events.len());
+    }
+
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.state.window.frame_started_at = Some(Instant::now());
+        log::trace!(target: "scratchpad::window", "logic pass={} visible={:?}",
+            ctx.cumulative_pass_nr(), ctx.input(|i| i.viewport().visible()));
+        frame::update_logic(self, ctx);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        if frame::handle_pending_close_request(self, &ctx) {
+        log::trace!(target: "scratchpad::window", "ui begin pass={}", ctx.cumulative_pass_nr());
+        if self.state.window.close_in_progress {
             return;
         }
 
-        let frame_started_at = std::time::Instant::now();
+        let frame_started_at = self
+            .state
+            .window
+            .frame_started_at
+            .take()
+            .unwrap_or_else(Instant::now);
         frame::prepare_frame(self, &ctx);
         frame::render_frame(self, ui, &ctx);
         crate::app::capacity_metrics::record_frame(frame_started_at.elapsed());
+        log::trace!(target: "scratchpad::window", "ui end pass={} elapsed={:?}",
+            ctx.cumulative_pass_nr(), frame_started_at.elapsed());
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {

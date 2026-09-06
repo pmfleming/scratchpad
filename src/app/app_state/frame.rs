@@ -37,16 +37,12 @@ pub(super) fn handle_pending_close_request(app: &mut ScratchpadApp, ctx: &egui::
     true
 }
 
-pub(super) fn prepare_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    let started_at = Instant::now();
-    if app.state.window.shown_after_first_frame {
-        app.record_window_state(ctx);
-    }
-    if handle_window_resize(ctx, platform_capabilities(app).allow_app_resize_grips)
-        && app.state.window.overflow_popup_open
-    {
-        // Rebuild the overflow popup lazily against the resized viewport.
-        app.state.window.overflow_popup_open = false;
+/// Keep lifecycle work independent of UI delivery. eframe calls this path even
+/// when minimized/occluded, without consuming the last visible frame's UI input.
+pub(super) fn update_logic(app: &mut ScratchpadApp, ctx: &egui::Context) {
+    app.state.window.lifecycle.update(ctx);
+    if handle_pending_close_request(app, ctx) || app.state.window.close_in_progress {
+        return;
     }
     app.tab_manager.evict_inactive_tab_state();
     app.poll_file_watcher(ctx);
@@ -58,14 +54,25 @@ pub(super) fn prepare_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
         FramePhase::BackgroundPoll,
         background_poll_started_at.elapsed(),
     );
+    crate::app::services::session_manager::maybe_persist_session(app, ctx);
+    sync_window_title(app, ctx);
+}
+
+pub(super) fn prepare_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
+    let started_at = Instant::now();
+    app.record_window_state(ctx);
+    if handle_window_resize(ctx, platform_capabilities(app).allow_app_resize_grips)
+        && app.state.window.overflow_popup_open
+    {
+        // Rebuild the overflow popup lazily against the resized viewport.
+        app.state.window.overflow_popup_open = false;
+    }
     handle_dropped_files(app, ctx);
     settings_state::apply_theme_to_context(app, ctx);
     crate::app::ui::widget_ids::configure_debug_options(ctx);
     sync_editor_fonts(app, ctx);
-    crate::app::services::session_manager::maybe_persist_session(app, ctx);
     callout::set_modal_scroll_blocker_active(ctx, modal_callout_open(app));
     transition::set_chrome_transition_active(ctx, chrome_transition_active(app));
-    sync_window_title(app, ctx);
     record_frame_phase(FramePhase::Prepare, started_at.elapsed());
 }
 
@@ -105,7 +112,6 @@ pub(super) fn render_frame(app: &mut ScratchpadApp, ui: &mut egui::Ui, ctx: &egu
     shortcuts::handle_shortcuts(app, ctx);
     record_frame_phase(FramePhase::Shortcuts, shortcuts_started_at.elapsed());
     let finish_started_at = Instant::now();
-    show_window_after_first_frame(app, ctx);
     finish_frame_transitions(app, ctx);
     show_window_resize_cursor(ctx, platform_capabilities(app).allow_app_resize_grips);
     record_frame_phase(FramePhase::Finish, finish_started_at.elapsed());
@@ -151,24 +157,6 @@ fn handle_dropped_files(app: &mut ScratchpadApp, ctx: &egui::Context) {
     }
 
     FileController::open_paths_async(app, paths);
-}
-
-fn show_window_after_first_frame(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    if app.state.window.shown_after_first_frame {
-        return;
-    }
-    if app.state.window.painted_frames_before_show < 2 {
-        app.state.window.painted_frames_before_show += 1;
-        if app.state.window.painted_frames_before_show == 2
-            && app.state.app_settings.ui.window_state.maximized
-        {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
-        }
-        ctx.request_repaint();
-        return;
-    }
-    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-    app.state.window.shown_after_first_frame = true;
 }
 
 fn persist_with_error_status(app: &mut ScratchpadApp) -> bool {
