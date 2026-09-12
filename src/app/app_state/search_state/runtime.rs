@@ -10,7 +10,7 @@ use super::{
 };
 use crate::app::app_state::workspace::display_tabs;
 use crate::app::domain::BufferId;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -159,6 +159,14 @@ fn collect_search_targets(app: &ScratchpadApp, scope: SearchScope) -> Vec<Search
         SearchScope::ActiveWorkspaceTab => collect_active_tab_search_targets(app),
         SearchScope::AllOpenTabs => {
             let active_tab_index = app.tab_manager.active_tab_index;
+            // Naming each target used to rescan every tab for duplicate names:
+            // O(tabs²) work on the UI thread before the worker could even start.
+            let mut duplicate_names = HashMap::new();
+            for tab in app.tab_manager.tabs.as_slice() {
+                *duplicate_names
+                    .entry(tab.buffers.buffer.name.clone())
+                    .or_insert(0) += 1;
+            }
             let mut seen_files = HashSet::<SearchFileIdentity>::new();
             (0..app.tab_manager.tabs.as_slice().len())
                 .map(|offset| {
@@ -173,7 +181,19 @@ fn collect_search_targets(app: &ScratchpadApp, scope: SearchScope) -> Vec<Search
                                 .map(|view| view.buffer_id)
                         })
                         .flatten();
-                    collect_search_targets_for_tab(app, tab_index, prioritized_buffer_id, None)
+                    let label = display_tabs::display_tab_name_at_slot_with_counts(
+                        app,
+                        display_tabs::slot_for_workspace_index(app, tab_index),
+                        &duplicate_names,
+                    )
+                    .unwrap_or_else(|| format!("Tab {}", tab_index + 1));
+                    collect_search_targets_for_tab(
+                        app,
+                        tab_index,
+                        prioritized_buffer_id,
+                        None,
+                        &label,
+                    )
                 })
                 .filter(|target| seen_files.insert(target.file_identity.clone()))
                 .collect()
@@ -207,6 +227,7 @@ fn collect_active_tab_search_targets(app: &ScratchpadApp) -> Vec<SearchTargetSna
             .and_then(|tab| tab.layout.active_view())
             .map(|view| view.buffer_id),
         None,
+        &search_tab_label(app, app.tab_manager.active_tab_index),
     )
 }
 
@@ -231,15 +252,15 @@ fn collect_search_targets_for_tab(
     tab_index: usize,
     prioritized_buffer_id: Option<BufferId>,
     search_range: Option<Range<usize>>,
+    tab_label: &str,
 ) -> Vec<SearchTargetSnapshot> {
     let Some(tab) = app.tab_manager.tabs.as_slice().get(tab_index) else {
         return Vec::new();
     };
-    let tab_label = search_tab_label(app, tab_index);
     collect_search_targets_for_views(
         tab_index,
         tab,
-        &tab_label,
+        tab_label,
         search_range,
         prioritized_buffer_id,
         tab.ordered_view_ids_in_layout_order()
@@ -289,3 +310,7 @@ fn preferred_active_match_index(
 pub(super) fn search_is_active(app: &ScratchpadApp) -> bool {
     app.state.search_state.panel.open && !app.state.search_state.query.query.is_empty()
 }
+
+#[cfg(test)]
+#[path = "runtime_tests.rs"]
+mod tests;
