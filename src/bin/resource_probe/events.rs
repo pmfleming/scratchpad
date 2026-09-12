@@ -36,6 +36,7 @@ struct ResourceEvent {
     result_unit: &'static str,
     result_label: String,
     manifest_size_bytes: Option<u64>,
+    phase_elapsed_ns: serde_json::Value,
     retained_file_chunks: Option<usize>,
     file_chunk_cache_limit: Option<usize>,
     status: &'static str,
@@ -47,6 +48,7 @@ pub(super) struct StepOutcome {
     pub(super) result_unit: &'static str,
     pub(super) result_label: String,
     pub(super) manifest_size_bytes: Option<u64>,
+    pub(super) phase_elapsed_ns: serde_json::Value,
     pub(super) retained_file_chunks: Option<usize>,
     pub(super) file_chunk_cache_limit: Option<usize>,
 }
@@ -148,6 +150,7 @@ fn emit_step_with_setup(
         result_unit: outcome.result_unit,
         result_label: outcome.result_label,
         manifest_size_bytes: outcome.manifest_size_bytes,
+        phase_elapsed_ns: outcome.phase_elapsed_ns,
         retained_file_chunks: outcome.retained_file_chunks,
         file_chunk_cache_limit: outcome.file_chunk_cache_limit,
         status,
@@ -165,6 +168,7 @@ impl StepOutcome {
     pub(super) fn items(value: usize) -> Self {
         Self {
             result_value: value,
+            phase_elapsed_ns: serde_json::json!({}),
             result_unit: "items",
             result_label: format!("{value} items"),
             manifest_size_bytes: None,
@@ -183,6 +187,7 @@ impl StepOutcome {
     pub(super) fn file_chunks(retained: usize, limit: usize, visited_bytes: usize) -> Self {
         Self {
             result_value: visited_bytes,
+            phase_elapsed_ns: serde_json::json!({}),
             result_unit: "bytes",
             result_label: format!(
                 "visited {visited_bytes} bytes; retained {retained} of {limit} allowed chunks"
