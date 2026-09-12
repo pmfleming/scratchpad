@@ -11,6 +11,7 @@ static ALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
 static DEALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
 static LIVE_BYTES: AtomicU64 = AtomicU64::new(0);
 static PEAK_LIVE_BYTES: AtomicU64 = AtomicU64::new(0);
+static BASELINE_LIVE_BYTES: AtomicU64 = AtomicU64::new(0);
 static ALLOCATION_COUNT: AtomicU64 = AtomicU64::new(0);
 static DEALLOCATION_COUNT: AtomicU64 = AtomicU64::new(0);
 static REALLOCATION_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -56,12 +57,14 @@ unsafe impl GlobalAlloc for TrackingAllocator {
             if new_size >= old_size {
                 let delta = new_size - old_size;
                 if delta > 0 {
-                    record_allocation(delta);
+                    ALLOCATED_BYTES.fetch_add(delta, Ordering::Relaxed);
+                    update_peak_live(add_live_bytes(delta));
                 }
             } else {
                 let delta = old_size - new_size;
                 if delta > 0 {
-                    record_deallocation(delta);
+                    DEALLOCATED_BYTES.fetch_add(delta, Ordering::Relaxed);
+                    subtract_live_bytes(delta);
                 }
             }
         }
@@ -81,6 +84,8 @@ pub(super) struct AllocationSnapshot {
     pub(super) allocated_bytes: u64,
     pub(super) deallocated_bytes: u64,
     pub(super) live_bytes: u64,
+    pub(super) baseline_live_bytes: u64,
+    pub(super) live_growth_bytes: i64,
     pub(super) peak_live_bytes: u64,
     pub(super) allocation_count: u64,
     pub(super) deallocation_count: u64,
@@ -90,18 +95,29 @@ pub(super) struct AllocationSnapshot {
 pub(super) fn reset_allocation_counters() {
     ALLOCATED_BYTES.store(0, Ordering::Relaxed);
     DEALLOCATED_BYTES.store(0, Ordering::Relaxed);
-    LIVE_BYTES.store(0, Ordering::Relaxed);
-    PEAK_LIVE_BYTES.store(0, Ordering::Relaxed);
+    // LIVE_BYTES is absolute and never reset while prepared allocations remain alive.
+    begin_live_interval(&LIVE_BYTES, &BASELINE_LIVE_BYTES, &PEAK_LIVE_BYTES);
     ALLOCATION_COUNT.store(0, Ordering::Relaxed);
     DEALLOCATION_COUNT.store(0, Ordering::Relaxed);
     REALLOCATION_COUNT.store(0, Ordering::Relaxed);
 }
 
+fn begin_live_interval(live: &AtomicU64, baseline: &AtomicU64, peak: &AtomicU64) {
+    let current = live.load(Ordering::Relaxed);
+    baseline.store(current, Ordering::Relaxed);
+    peak.store(current, Ordering::Relaxed);
+    peak.fetch_max(live.load(Ordering::Relaxed), Ordering::Relaxed);
+}
+
 pub(super) fn allocation_snapshot() -> AllocationSnapshot {
+    let live = LIVE_BYTES.load(Ordering::Relaxed);
+    let baseline = BASELINE_LIVE_BYTES.load(Ordering::Relaxed);
     AllocationSnapshot {
         allocated_bytes: ALLOCATED_BYTES.load(Ordering::Relaxed),
         deallocated_bytes: DEALLOCATED_BYTES.load(Ordering::Relaxed),
-        live_bytes: LIVE_BYTES.load(Ordering::Relaxed),
+        live_bytes: live,
+        baseline_live_bytes: baseline,
+        live_growth_bytes: (i128::from(live) - i128::from(baseline)).clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64,
         peak_live_bytes: PEAK_LIVE_BYTES.load(Ordering::Relaxed),
         allocation_count: ALLOCATION_COUNT.load(Ordering::Relaxed),
         deallocation_count: DEALLOCATION_COUNT.load(Ordering::Relaxed),
@@ -141,6 +157,24 @@ fn subtract_live_bytes(bytes: u64) {
             Ok(_) => return,
             Err(observed) => current = observed,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn interval_reset_preserves_prepared_allocations_and_baseline() {
+        let live = AtomicU64::new(200);
+        let baseline = AtomicU64::new(0);
+        let peak = AtomicU64::new(999);
+        begin_live_interval(&live, &baseline, &peak);
+        assert_eq!(live.load(Ordering::Relaxed), 200);
+        assert_eq!(baseline.load(Ordering::Relaxed), 200);
+        assert_eq!(peak.load(Ordering::Relaxed), 200);
+        // A later free of setup memory is subtracted from absolute live bytes, not an interval zero.
+        live.fetch_sub(100, Ordering::Relaxed);
+        assert_eq!(live.load(Ordering::Relaxed), 100);
     }
 }
 

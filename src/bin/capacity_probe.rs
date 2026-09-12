@@ -13,6 +13,7 @@ use scratchpad::profile::{
     run_many_file_first_visible_profile,
 };
 use serde::Serialize;
+use scratchpad::profile::process_metrics::{process_snapshot, ProcessMeasurement, ProcessSnapshot};
 use std::hint::black_box;
 use std::io::{BufWriter, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -45,6 +46,10 @@ struct CapacityEvent {
     measurement_scope: &'static str,
     metrics: CapacityMetricsSnapshot,
     memory_budget: MemoryBudgetSnapshot,
+    process_resources: ProcessMeasurement,
+    working_set_bytes: Option<u64>,
+    peak_working_set_bytes: Option<u64>,
+    handle_count: Option<u64>,
     status: &'static str,
     note: Option<String>,
 }
@@ -100,6 +105,7 @@ fn emit_large_file_first_visible_sweep() {
         for repeat_index in 0..MEASUREMENT_REPETITIONS {
             reset_capacity_metrics();
             memory_budget::reset();
+            let process_before = process_snapshot();
             let (elapsed_ns, primitives) = scratchpad::profile::run_file_first_render_preparation(&path);
             black_box(primitives);
             emit_recorded_step(
@@ -118,6 +124,7 @@ fn emit_large_file_first_visible_sweep() {
                 None,
                 "open_path_to_first_tessellation",
                 Some("Warm OS cache fixture; app setup and teardown excluded; GPU/present excluded".into()),
+                process_before,
             );
             emit_prepared_step(
                 StepDescriptor {
@@ -242,6 +249,7 @@ fn emit_many_file_first_visible_sweep() {
         for repeat_index in 0..MEASUREMENT_REPETITIONS {
             reset_capacity_metrics();
             memory_budget::reset();
+            let process_before = process_snapshot();
             let profile = run_many_file_first_visible_profile(paths.clone());
             black_box(profile.active_buffer_bytes + profile.tab_count_after_completion);
             emit_recorded_step(
@@ -264,6 +272,7 @@ fn emit_many_file_first_visible_sweep() {
                     profile.background_completion_ns as f64 / 1_000_000.0,
                     profile.tab_count_after_completion
                 )),
+                process_before,
             );
         }
     }
@@ -452,7 +461,9 @@ fn emit_recorded_step(
     background_completion_ns: Option<u128>,
     measurement_scope: &'static str,
     note: Option<String>,
+    process_before: ProcessSnapshot,
 ) {
+    let process_after = process_snapshot();
     let event = CapacityEvent {
         scenario: step.scenario,
         scenario_label: step.scenario_label,
@@ -468,6 +479,10 @@ fn emit_recorded_step(
         measurement_scope,
         metrics: capacity_metrics_snapshot(),
         memory_budget: memory_budget::snapshot(),
+        working_set_bytes: process_after.working_set_bytes,
+        peak_working_set_bytes: process_after.peak_working_set_bytes,
+        handle_count: process_after.handle_count,
+        process_resources: ProcessMeasurement::between(process_before, process_after),
         status: "ok",
         note,
     };
@@ -487,11 +502,13 @@ fn emit_measured_step(
 ) {
     reset_capacity_metrics();
     memory_budget::reset();
+    let process_before = process_snapshot();
     let start = Instant::now();
     let result = catch_unwind(AssertUnwindSafe(run));
     let elapsed_ns = start.elapsed().as_nanos();
     let metrics = capacity_metrics_snapshot();
     let memory_budget_snapshot = memory_budget::snapshot();
+    let process_after = process_snapshot();
     let (status, note) = match result {
         Ok(_) => ("ok", None),
         Err(payload) => ("panic", Some(panic_message(payload))),
@@ -512,6 +529,10 @@ fn emit_measured_step(
         measurement_scope,
         metrics,
         memory_budget: memory_budget_snapshot,
+        working_set_bytes: process_after.working_set_bytes,
+        peak_working_set_bytes: process_after.peak_working_set_bytes,
+        handle_count: process_after.handle_count,
+        process_resources: ProcessMeasurement::between(process_before, process_after),
         status,
         note,
     };

@@ -4,6 +4,7 @@ use scratchpad::profile::panic_payload_message;
 use serde::Serialize;
 use std::io::Write;
 use std::time::Instant;
+use scratchpad::profile::process_metrics::{process_snapshot, ProcessMeasurement};
 
 #[derive(Serialize)]
 struct ResourceEvent {
@@ -17,9 +18,16 @@ struct ResourceEvent {
     workload_label: String,
     setup_elapsed_ns: u128,
     elapsed_ns: u128,
+    measurement_scope: &'static str,
+    allocator_scope: &'static str,
+    process_resources: ProcessMeasurement,
+    working_set_bytes: Option<u64>,
+    peak_working_set_bytes: Option<u64>,
     allocated_bytes: u64,
     deallocated_bytes: u64,
     live_bytes: u64,
+    baseline_live_bytes: u64,
+    live_growth_bytes: i64,
     peak_live_bytes: u64,
     allocation_count: u64,
     deallocation_count: u64,
@@ -95,11 +103,13 @@ fn emit_step_with_setup(
     setup_elapsed_ns: u128,
     run: impl FnOnce() -> StepOutcome,
 ) {
+    let process_before = process_snapshot();
     reset_allocation_counters();
     let start = Instant::now();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));
     let elapsed_ns = start.elapsed().as_nanos();
     let metrics = allocation_snapshot();
+    let process_after = process_snapshot();
     let (status, outcome, note) = match result {
         Ok(outcome) => ("ok", outcome, None),
         Err(payload) => (
@@ -120,9 +130,16 @@ fn emit_step_with_setup(
         workload_label: step.workload_label,
         setup_elapsed_ns,
         elapsed_ns,
+        measurement_scope: if setup_elapsed_ns > 0 { "prepared_operation" } else { "scenario_including_fixture_work" },
+        allocator_scope: "process_wide_absolute_live_heap_with_interval_traffic_and_baseline",
+        working_set_bytes: process_after.working_set_bytes,
+        peak_working_set_bytes: process_after.peak_working_set_bytes,
+        process_resources: ProcessMeasurement::between(process_before, process_after),
         allocated_bytes: metrics.allocated_bytes,
         deallocated_bytes: metrics.deallocated_bytes,
         live_bytes: metrics.live_bytes,
+        baseline_live_bytes: metrics.baseline_live_bytes,
+        live_growth_bytes: metrics.live_growth_bytes,
         peak_live_bytes: metrics.peak_live_bytes,
         allocation_count: metrics.allocation_count,
         deallocation_count: metrics.deallocation_count,
