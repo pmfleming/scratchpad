@@ -144,7 +144,14 @@ impl CapacityMetricsSnapshot {
         for (index, count) in self.frame_time_bucket_counts.iter().enumerate() {
             cumulative += count;
             if cumulative >= target {
-                return (((index as u64) + 1) * self.frame_time_bucket_width_ns) as f64;
+                let upper = ((index as u64) + 1) * self.frame_time_bucket_width_ns;
+                // The final bucket includes overflow; its nominal edge is not an upper bound.
+                // Return a conservative observed bound rather than clipping long stalls.
+                return if index + 1 == self.frame_time_bucket_counts.len() {
+                    upper.max(self.frame_time_max_ns) as f64
+                } else {
+                    upper as f64
+                };
             }
         }
         self.frame_time_max_ns as f64

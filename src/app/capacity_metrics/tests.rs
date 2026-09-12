@@ -35,6 +35,18 @@ fn snapshot_groups_frame_phase_metrics() {
 }
 
 #[test]
+fn histogram_overflow_does_not_clip_long_stalls() {
+    let mut snapshot = CapacityMetricsSnapshot::default();
+    snapshot.frame_count = 100;
+    snapshot.frame_time_bucket_width_ns = 500_000;
+    snapshot.frame_time_max_ns = 250_000_000;
+    snapshot.frame_time_bucket_counts[0] = 95;
+    snapshot.frame_time_bucket_counts[31] = 5;
+    assert_eq!(snapshot.frame_time_percentile_ns(0.50), 500_000.0);
+    assert_eq!(snapshot.frame_time_percentile_ns(0.99), 250_000_000.0);
+}
+
+#[test]
 fn snapshot_reports_frame_time_summary_metrics() {
     let _guard = CAPACITY_METRICS_TEST_LOCK.lock().unwrap();
     reset_capacity_metrics();

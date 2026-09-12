@@ -5,7 +5,7 @@ use serde::Serialize;
 use std::hint::black_box;
 
 const WARMUP_FRAMES: usize = 30;
-const MEASURED_FRAMES: usize = 240;
+const MEASURED_FRAMES: usize = 2_000;
 const FRAME_BUDGET_MS: f64 = 8.33;
 const P99_BUDGET_MS: f64 = 12.0;
 
@@ -35,6 +35,11 @@ struct Scenario {
     budget_ms: f64,
     p99_budget_ms: f64,
     frame_count: usize,
+    percentile_method: &'static str,
+    percentile_resolution_ms: Option<f64>,
+    warmup_frames: usize,
+    sample_elapsed_ms: Vec<f64>,
+    tail_sample_count_p99: usize,
     mean_ms: f64,
     p50_ms: f64,
     p95_ms: f64,
@@ -64,6 +69,7 @@ fn main() {
         vertex_count += sample.vertex_count;
         black_box(sample);
     }
+    let sample_elapsed_ms = elapsed_ns.iter().map(|ns| ns_to_ms(*ns as f64)).collect();
     elapsed_ns.sort_unstable();
 
     let mean_ms = ns_to_ms(elapsed_ns.iter().sum::<u128>() as f64 / elapsed_ns.len() as f64);
@@ -89,6 +95,11 @@ fn main() {
             budget_ms: FRAME_BUDGET_MS,
             p99_budget_ms: P99_BUDGET_MS,
             frame_count: elapsed_ns.len(),
+            percentile_method: "empirical_nearest_rank",
+            percentile_resolution_ms: None,
+            warmup_frames: WARMUP_FRAMES,
+            sample_elapsed_ms,
+            tail_sample_count_p99: elapsed_ns.len() / 100,
             mean_ms,
             p50_ms,
             p95_ms,
