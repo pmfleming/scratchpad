@@ -99,13 +99,10 @@ fn bench_first_response(c: &mut Criterion, group_name: &str) {
 }
 
 fn make_targets(count: usize) -> Vec<String> {
+    // Exact fixture sizes are part of the throughput contract. These are scanner
+    // component benchmarks, not workspace dispatch or user-visible first results.
     (0..count)
-        .map(|index| {
-            let mut text = make_search_text(BYTES_PER_TARGET);
-            text.push_str("target ");
-            text.push_str(&index.to_string());
-            text
-        })
+        .map(|_| make_search_text(BYTES_PER_TARGET))
         .collect()
 }
 

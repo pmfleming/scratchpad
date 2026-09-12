@@ -21,7 +21,6 @@ use std::time::Instant;
 
 const TAB_BYTES_PER_BUFFER: usize = 48 * KB;
 const MANY_FILE_BYTES_PER_BUFFER: usize = KB;
-const FIRST_VISIBLE_WINDOW_BYTES: usize = MB;
 const SPLIT_BYTES_PER_TILE: usize = 128 * KB;
 const VIEW_COUNT_BUFFER_BYTES: usize = MB;
 const BASE_PASTE_BUFFER_BYTES: usize = MB;
@@ -99,7 +98,11 @@ fn emit_large_file_first_visible_sweep() {
         write_large_text_fixture(&path, file_bytes, &fixture_chunk);
         let setup_elapsed_ns = setup_start.elapsed().as_nanos();
         for repeat_index in 0..MEASUREMENT_REPETITIONS {
-            emit_prepared_step(
+            reset_capacity_metrics();
+            memory_budget::reset();
+            let (elapsed_ns, primitives) = scratchpad::profile::run_file_first_render_preparation(&path);
+            black_box(primitives);
+            emit_recorded_step(
                 StepDescriptor {
                     scenario: descriptor.scenario,
                     scenario_label: descriptor.scenario_label,
@@ -111,12 +114,10 @@ fn emit_large_file_first_visible_sweep() {
                 },
                 repeat_index,
                 setup_elapsed_ns,
-                || {
-                    let window =
-                        FileService::read_first_visible_window(&path, FIRST_VISIBLE_WINDOW_BYTES)
-                            .expect("decode first visible file window");
-                    black_box(window.text.len() + window.file_size_bytes as usize)
-                },
+                elapsed_ns,
+                None,
+                "open_path_to_first_tessellation",
+                Some("Warm OS cache fixture; app setup and teardown excluded; GPU/present excluded".into()),
             );
             emit_prepared_step(
                 StepDescriptor {
@@ -257,7 +258,7 @@ fn emit_many_file_first_visible_sweep() {
                 setup_elapsed_ns,
                 profile.first_visible_ns,
                 Some(profile.background_completion_ns),
-                "first_visible_before_background_completion",
+                "open_paths_to_first_tessellation_before_background_completion",
                 Some(format!(
                     "background completion {:.3} ms; {} tabs installed",
                     profile.background_completion_ns as f64 / 1_000_000.0,
@@ -435,13 +436,12 @@ fn emit_prepared_step(
     setup_elapsed_ns: u128,
     run: impl FnOnce() -> usize,
 ) {
-    emit_measured_step(
-        step,
-        repeat_index,
-        setup_elapsed_ns,
-        "prepared_operation",
-        run,
-    );
+    let scope = match step.scenario {
+        "large_file_background_index_ceiling" => "warm_cache_file_index_completion",
+        "search_file_size_ceiling" | "search_target_count_ceiling" => "prepared_search_component_completion",
+        _ => "prepared_operation",
+    };
+    emit_measured_step(step, repeat_index, setup_elapsed_ns, scope, run);
 }
 
 fn emit_recorded_step(
