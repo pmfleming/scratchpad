@@ -41,20 +41,40 @@ pub fn run_file_first_render_preparation(path: &std::path::Path) -> (u128, usize
             app,
             vec![path.to_path_buf()],
         );
-        let primitives = render_app(app, &ctx);
-        let elapsed = start.elapsed().as_nanos();
-        assert!(
-            app.tab_manager
-                .active_tab()
-                .unwrap()
-                .active_buffer()
-                .document()
-                .piece_tree()
-                .len_bytes()
-                > 0
-        );
-        (elapsed, primitives)
+        let primitives = render_opened_file(app, &ctx, path);
+        (start.elapsed().as_nanos(), primitives)
     })
+}
+
+// Small files arrive asynchronously; a tessellated untitled/loading frame is
+// not the first visible file. Poll the production I/O handler until the requested
+// document is active, then include its render preparation in the measured interval.
+// Staged large files may legitimately render their preview before full hydration.
+pub(super) fn render_opened_file(
+    app: &mut ScratchpadApp,
+    ctx: &egui::Context,
+    path: &std::path::Path,
+) -> usize {
+    let expected = path
+        .canonicalize()
+        .expect("requested first-visible file exists");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        app.poll_background_io(ctx);
+        if app
+            .tab_manager
+            .active_tab()
+            .is_some_and(|tab| tab.active_buffer().path.as_deref() == Some(expected.as_path()))
+        {
+            return render_app(app, ctx);
+        }
+        assert!(
+            Instant::now() < deadline,
+            "requested file never became visible: {}",
+            path.display()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 pub fn search_workflow_sample(mode: &str, targets: usize, bytes_per_target: usize) -> Value {
@@ -94,6 +114,7 @@ pub fn search_workflow_sample(mode: &str, targets: usize, bytes_per_target: usiz
         let ctx = egui::Context::default();
         crate::app::app_state::prepare_context_before_first_frame(app, &ctx);
         render_app(app, &ctx);
+        let layout_before = crate::app::capacity_metrics::capacity_metrics_snapshot();
         let setup_elapsed_ns = setup.elapsed().as_nanos();
         let start = Instant::now();
         app.set_search_query("needle");
@@ -101,6 +122,7 @@ pub fn search_workflow_sample(mode: &str, targets: usize, bytes_per_target: usiz
         let dispatch_ns = start.elapsed().as_nanos();
         let mut first_result_ns = None;
         let mut first_render_ns = None;
+        let mut first_render_layout = Value::Null;
         let deadline = start + Duration::from_secs(30);
         loop {
             app.poll_search();
@@ -108,6 +130,11 @@ pub fn search_workflow_sample(mode: &str, targets: usize, bytes_per_target: usiz
                 first_result_ns = Some(start.elapsed().as_nanos());
                 render_app(app, &ctx);
                 first_render_ns = Some(start.elapsed().as_nanos());
+                let after = crate::app::capacity_metrics::capacity_metrics_snapshot();
+                first_render_layout = json!({
+                    "layout_jobs":after.layout_job_count.saturating_sub(layout_before.layout_job_count),
+                    "layout_input_bytes":after.layout_input_bytes.saturating_sub(layout_before.layout_input_bytes),
+                    "layout_time_ns":after.layout_time_ns.saturating_sub(layout_before.layout_time_ns)});
             }
             if !app.state.search_state.runtime.searching && !app.state.search_state.runtime.dirty {
                 break;
@@ -124,7 +151,8 @@ pub fn search_workflow_sample(mode: &str, targets: usize, bytes_per_target: usiz
         );
         json!({"setup_elapsed_ns":setup_elapsed_ns,"dispatch":dispatch_ns,
             "first_result":first_result_ns,"first_render":first_render_ns,"completion":completion_ns,
-            "match_count":app.search_match_count(), "actual_total_bytes":targets * bytes_per_target})
+            "match_count":app.search_match_count(), "actual_total_bytes":targets * bytes_per_target,
+            "first_render_layout":first_render_layout})
     })
 }
 

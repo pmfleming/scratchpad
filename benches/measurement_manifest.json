@@ -1,5 +1,31 @@
 {
   "version": 1,
+  "probes": {
+    "resource_probe": [
+      "large_utf8_load_peak_memory",
+      "large_file_first_visible_paint",
+      "file_backed_chunk_cache_tracking",
+      "many_file_resource_tracking",
+      "many_file_lazy_open_tracking",
+      "search_file_size_resource_tracking",
+      "search_target_resource_tracking",
+      "search_app_result_tracking",
+      "edited_buffer_search_preview_rendering",
+      "paste_allocation",
+      "provenance_retained_memory",
+      "fragmented_long_session_mutation",
+      "tab_count_resource_tracking",
+      "tab_build_targeted",
+      "tab_split_targeted",
+      "tab_combine_targeted",
+      "tab_strip_frame_rendering",
+      "view_count_resource_tracking",
+      "anchor_heavy_view_editing",
+      "session_persist_cost",
+      "session_restore_cost",
+      "startup_visible_restore_cost"
+    ]
+  },
   "suites": {
     "search_speed": {
       "search_active_file_size": [16384, 131072, 1048576],

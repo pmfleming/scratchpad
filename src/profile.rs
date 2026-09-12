@@ -104,11 +104,15 @@ pub fn run_many_file_first_visible_profile(paths: Vec<PathBuf>) -> ManyFileFirst
     let mut app = ScratchpadApp::with_session_store(store);
     app.set_session_persist_on_drop(false);
 
-    let start = Instant::now();
-    crate::app::services::file_controller::FileController::open_paths_async(&mut app, paths);
+    let expected_path = paths
+        .last()
+        .expect("nonempty first-visible workload")
+        .clone();
     let ctx = egui::Context::default();
     prepare_context_before_first_frame(&mut app, &ctx);
-    workflows::render_app(&mut app, &ctx);
+    let start = Instant::now();
+    crate::app::services::file_controller::FileController::open_paths_async(&mut app, paths);
+    workflows::render_opened_file(&mut app, &ctx, &expected_path);
     let first_visible_ns = start.elapsed().as_nanos();
     let active_buffer_bytes = app
         .tab_manager
