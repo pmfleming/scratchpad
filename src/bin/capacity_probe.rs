@@ -37,6 +37,7 @@ struct CapacityEvent {
     workload_family: &'static str,
     step_index: usize,
     repeat_index: usize,
+    expected_repetition_count: usize,
     workload_value: usize,
     workload_unit: &'static str,
     workload_label: String,
@@ -484,6 +485,7 @@ fn emit_recorded_step(
         handle_count: process_after.handle_count,
         process_resources: ProcessMeasurement::between(process_before, process_after),
         status: "ok",
+        expected_repetition_count: MEASUREMENT_REPETITIONS,
         note,
     };
     println!(
@@ -534,6 +536,7 @@ fn emit_measured_step(
         handle_count: process_after.handle_count,
         process_resources: ProcessMeasurement::between(process_before, process_after),
         status,
+        expected_repetition_count: MEASUREMENT_REPETITIONS,
         note,
     };
     println!(
