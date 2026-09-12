@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "suites": {
+    "search_speed": {
+      "search_active_file_size": [16384, 131072, 1048576],
+      "search_current_files_completion": [1, 8, 32],
+      "search_current_files_first_response": [1, 8, 32],
+      "search_all_tabs_completion": [1, 8, 32],
+      "search_all_tabs_first_response": [1, 8, 32]
+    },
+    "frame_budget": {
+      "ui_render_frame_120hz": ["steady_workspace"],
+      "viewport_extraction_latency": [1048576, 4194304],
+      "scroll_stress_latency": [1048576, 4194304]
+    },
+    "promise_latency": {
+      "tab_reorder_latency": [1000, 10000],
+      "paste_stress_latency": [134217728],
+      "paste_insert_phase": [134217728],
+      "paste_metadata_phase": [134217728],
+      "snapshot_shared_edit_latency": [16777216],
+      "snapshot_shared_fragmented_edit_latency": [20000],
+      "dense_line_lookup_latency": [4194304],
+      "reverse_character_walk_latency": [8192],
+      "fragmented_tree_edit_latency": [20000],
+      "large_paste_undo_latency": [16777216],
+      "session_restore_latency": [10000],
+      "session_restore_background_completion": [10000],
+      "session_persist_latency": [10000]
+    }
+  }
+}
