@@ -106,8 +106,8 @@ fn renderer_from_override(renderer_override: Option<&str>) -> eframe::Renderer {
         #[cfg(target_os = "linux")]
         Some(value) if value.eq_ignore_ascii_case("glow") => eframe::Renderer::Glow,
         Some(value) if value.eq_ignore_ascii_case("wgpu") => eframe::Renderer::Wgpu,
-        // On Wayland, an eframe WGPU redraw can be withheld when Hyprland routes the window to
-        // an inactive workspace. eframe then busy-polls while waiting; Glow remains event-driven.
+        // Use the tested Glow path with nonblocking Wayland swaps and compositor-paced
+        // redraws. See crates/eframe/SCRATCHPAD-PATCH.md; plain EGL vsync can stall startup.
         #[cfg(target_os = "linux")]
         _ => eframe::Renderer::Glow,
         #[cfg(not(target_os = "linux"))]

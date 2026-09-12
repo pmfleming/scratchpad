@@ -96,6 +96,11 @@ jobs:
       - name: Test Linux file watcher
         run: cargo test --manifest-path crates/linux_file_watch/Cargo.toml
 
+      - name: Test native presentation policy
+        run: |
+          cp Cargo.lock crates/eframe/Cargo.lock
+          cargo test --manifest-path crates/eframe/Cargo.toml --lib --features glow --target-dir target
+
   security:
     name: Dependency audit
     runs-on: ubuntu-latest

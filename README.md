@@ -82,10 +82,11 @@ nix run .#scratchpad
 nix run .#scratchpad-hyprland
 ```
 
-Linux uses eframe's Glow renderer by default. This avoids an eframe/WGPU idle
-busy-poll when a Wayland compositor initially routes the window to an inactive
-workspace, as Scratchpad's recommended Hyprland rule does. Set
-`SCRATCHPAD_RENDERER=wgpu` to opt into WGPU explicitly.
+Linux uses eframe's Glow renderer by default. A local eframe patch keeps Wayland
+presentation nonblocking and compositor-paced, avoiding startup hangs on inactive
+workspaces without busy-polling or uncapped redraws. See
+[Wayland startup validation](docs/wayland-startup.md) for the fix and native probe.
+Set `SCRATCHPAD_RENDERER=wgpu` to opt into WGPU explicitly.
 
 The development shell runs `scripts/trim-target.sh` when entered. It removes
 Cargo's dev profile only when `target/` exceeds 10 GiB, preserving release and
