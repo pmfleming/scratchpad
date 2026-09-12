@@ -1,10 +1,10 @@
 use super::alloc_metrics::{allocation_snapshot, reset_allocation_counters};
 pub(super) use scratchpad::profile::human_bytes;
 use scratchpad::profile::panic_payload_message;
+use scratchpad::profile::process_metrics::{ProcessMeasurement, process_snapshot};
 use serde::Serialize;
 use std::io::Write;
 use std::time::Instant;
-use scratchpad::profile::process_metrics::{process_snapshot, ProcessMeasurement};
 
 #[derive(Serialize)]
 struct ResourceEvent {
@@ -37,6 +37,7 @@ struct ResourceEvent {
     result_label: String,
     manifest_size_bytes: Option<u64>,
     phase_elapsed_ns: serde_json::Value,
+    retained_live_bytes_before_teardown: Option<u64>,
     retained_file_chunks: Option<usize>,
     file_chunk_cache_limit: Option<usize>,
     status: &'static str,
@@ -49,6 +50,7 @@ pub(super) struct StepOutcome {
     pub(super) result_label: String,
     pub(super) manifest_size_bytes: Option<u64>,
     pub(super) phase_elapsed_ns: serde_json::Value,
+    pub(super) retained_live_bytes_before_teardown: Option<u64>,
     pub(super) retained_file_chunks: Option<usize>,
     pub(super) file_chunk_cache_limit: Option<usize>,
 }
@@ -132,7 +134,11 @@ fn emit_step_with_setup(
         workload_label: step.workload_label,
         setup_elapsed_ns,
         elapsed_ns,
-        measurement_scope: if setup_elapsed_ns > 0 { "prepared_operation" } else { "scenario_including_fixture_work" },
+        measurement_scope: if setup_elapsed_ns > 0 {
+            "prepared_operation"
+        } else {
+            "scenario_including_fixture_work"
+        },
         allocator_scope: "process_wide_absolute_live_heap_with_interval_traffic_and_baseline",
         working_set_bytes: process_after.working_set_bytes,
         peak_working_set_bytes: process_after.peak_working_set_bytes,
@@ -151,6 +157,7 @@ fn emit_step_with_setup(
         result_label: outcome.result_label,
         manifest_size_bytes: outcome.manifest_size_bytes,
         phase_elapsed_ns: outcome.phase_elapsed_ns,
+        retained_live_bytes_before_teardown: outcome.retained_live_bytes_before_teardown,
         retained_file_chunks: outcome.retained_file_chunks,
         file_chunk_cache_limit: outcome.file_chunk_cache_limit,
         status,
@@ -168,6 +175,7 @@ impl StepOutcome {
     pub(super) fn items(value: usize) -> Self {
         Self {
             result_value: value,
+            retained_live_bytes_before_teardown: None,
             phase_elapsed_ns: serde_json::json!({}),
             result_unit: "items",
             result_label: format!("{value} items"),
@@ -187,6 +195,7 @@ impl StepOutcome {
     pub(super) fn file_chunks(retained: usize, limit: usize, visited_bytes: usize) -> Self {
         Self {
             result_value: visited_bytes,
+            retained_live_bytes_before_teardown: None,
             phase_elapsed_ns: serde_json::json!({}),
             result_unit: "bytes",
             result_label: format!(

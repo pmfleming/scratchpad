@@ -122,7 +122,8 @@ fn frame_scenario(
         percentile_resolution_ms: metrics.frame_time_bucket_width_ns as f64 / 1_000_000.0,
         histogram_counts: metrics.frame_time_bucket_counts.to_vec(),
         overflow_bucket_count: *metrics.frame_time_bucket_counts.last().unwrap_or(&0),
-        histogram_overflow_possible: metrics.frame_time_max_ns > metrics.frame_time_bucket_width_ns * metrics.frame_time_bucket_counts.len() as u64,
+        histogram_overflow_possible: metrics.frame_time_max_ns
+            > metrics.frame_time_bucket_width_ns * metrics.frame_time_bucket_counts.len() as u64,
         mean_ms,
         p50_ms,
         p95_ms,

@@ -58,6 +58,7 @@ fn run_file_backed_open_first_visible_paint_cycle(path: &Path) -> StepOutcome {
     let painted_rows = render_first_visible_text_paint(&buffer);
     StepOutcome {
         result_value: black_box(window.loaded_bytes + painted_rows),
+        retained_live_bytes_before_teardown: None,
         phase_elapsed_ns: serde_json::json!({}),
         result_unit: "bytes+rows",
         result_label: format!(
@@ -195,6 +196,7 @@ fn run_edited_buffer_search_preview_cycle(piece_count: usize) -> StepOutcome {
         .previews_for_matches(black_box(&matches), PREVIEW_LIMIT);
     StepOutcome {
         result_value: black_box(previews.len()),
+        retained_live_bytes_before_teardown: None,
         phase_elapsed_ns: serde_json::json!({}),
         result_unit: "previews",
         result_label: format!("{} previews from {} matches", previews.len(), matches.len()),
@@ -240,6 +242,7 @@ fn run_provenance_retained_memory_cycle(edit_count: usize) -> StepOutcome {
     let provenance_entries = document.piece_tree().provenance_entry_count();
     StepOutcome {
         result_value: black_box(provenance_entries),
+        retained_live_bytes_before_teardown: Some(alloc_metrics::allocation_snapshot().live_bytes),
         phase_elapsed_ns: serde_json::json!({}),
         result_unit: "entries",
         result_label: format!(
@@ -328,6 +331,7 @@ fn run_fragmented_long_session_mutation_cycle(fragment_count: usize) -> StepOutc
     let _ = document.redo_last_operation();
     StepOutcome {
         result_value: black_box(document.piece_tree().metrics().pieces),
+        retained_live_bytes_before_teardown: None,
         phase_elapsed_ns: serde_json::json!({}),
         result_unit: "pieces",
         result_label: format!(
@@ -362,6 +366,7 @@ fn run_tab_strip_frame_cycle(tab_count: usize) -> StepOutcome {
     let total_ns = run_tab_strip_frame_profile(tab_count, iterations);
     StepOutcome {
         result_value: black_box((total_ns / iterations as u128) as usize),
+        retained_live_bytes_before_teardown: None,
         phase_elapsed_ns: serde_json::json!({"frame_total_ns":total_ns}),
         result_unit: "ns/frame",
         result_label: format!(
@@ -397,6 +402,7 @@ fn run_session_persist_cycle(store: &SessionStore, tabs: &[WorkspaceTab]) -> Ste
         .expect("persist session");
     StepOutcome {
         result_value: black_box(profile.tab_count),
+        retained_live_bytes_before_teardown: None,
         phase_elapsed_ns: serde_json::json!({"snapshot_capture_ns":profile.snapshot_capture_ns,
             "file_write_ns":profile.snapshot_write_ns + profile.manifest_write_ns,
             "manifest_serialize_ns":profile.manifest_serialize_ns}),
@@ -420,6 +426,7 @@ fn run_session_restore_cycle(store: &SessionStore) -> StepOutcome {
     let restored = profiled.restored.expect("restored session present");
     StepOutcome {
         result_value: black_box(restored.tabs.len()),
+        retained_live_bytes_before_teardown: None,
         phase_elapsed_ns: serde_json::json!({"manifest_read_parse_ns":restore_profile.manifest_read_parse_ns,
             "restore_reconstruction_ns":restore_profile.restore_reconstruction_ns}),
         result_unit: "tabs",
@@ -450,8 +457,11 @@ fn run_startup_visible_restore_cycle(store: &SessionStore) -> StepOutcome {
         .unwrap_or_default();
     let first_paint_ns = paint_start.elapsed().as_nanos();
     let mut outcome = StepOutcome::items_with_manifest(
-        black_box(restored.tabs.len() + painted_rows), session_manifest_size(store));
-    outcome.phase_elapsed_ns = serde_json::json!({"startup_load_ns":startup_load_ns, "first_paint_ns":first_paint_ns});
+        black_box(restored.tabs.len() + painted_rows),
+        session_manifest_size(store),
+    );
+    outcome.phase_elapsed_ns =
+        serde_json::json!({"startup_load_ns":startup_load_ns, "first_paint_ns":first_paint_ns});
     outcome
 }
 

@@ -8,12 +8,12 @@ use scratchpad::app::memory_budget::{self, MemoryBudgetSnapshot};
 use scratchpad::app::services::file_service::FileService;
 use scratchpad::app::services::search::{SearchMode, SearchOptions, SearchProgram, search_program};
 use scratchpad::app::ui::editor_content::{EditorHighlightStyle, build_layouter};
+use scratchpad::profile::process_metrics::{ProcessMeasurement, ProcessSnapshot, process_snapshot};
 use scratchpad::profile::{
     GB, KB, MB, human_bytes, panic_payload_message as panic_message,
     run_many_file_first_visible_profile,
 };
 use serde::Serialize;
-use scratchpad::profile::process_metrics::{process_snapshot, ProcessMeasurement, ProcessSnapshot};
 use std::hint::black_box;
 use std::io::{BufWriter, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -66,6 +66,12 @@ struct StepDescriptor {
     workload_label: String,
 }
 
+struct RecordedTiming {
+    elapsed_ns: u128,
+    background_completion_ns: Option<u128>,
+    process_before: ProcessSnapshot,
+}
+
 struct SweepDescriptor {
     scenario: &'static str,
     scenario_label: &'static str,
@@ -107,7 +113,8 @@ fn emit_large_file_first_visible_sweep() {
             reset_capacity_metrics();
             memory_budget::reset();
             let process_before = process_snapshot();
-            let (elapsed_ns, primitives) = scratchpad::profile::run_file_first_render_preparation(&path);
+            let (elapsed_ns, primitives) =
+                scratchpad::profile::run_file_first_render_preparation(&path);
             black_box(primitives);
             emit_recorded_step(
                 StepDescriptor {
@@ -121,11 +128,16 @@ fn emit_large_file_first_visible_sweep() {
                 },
                 repeat_index,
                 setup_elapsed_ns,
-                elapsed_ns,
-                None,
+                RecordedTiming {
+                    elapsed_ns,
+                    background_completion_ns: None,
+                    process_before,
+                },
                 "open_path_to_first_tessellation",
-                Some("Warm OS cache fixture; app setup and teardown excluded; GPU/present excluded".into()),
-                process_before,
+                Some(
+                    "Warm OS cache fixture; app setup and teardown excluded; GPU/present excluded"
+                        .into(),
+                ),
             );
             emit_prepared_step(
                 StepDescriptor {
@@ -265,15 +277,17 @@ fn emit_many_file_first_visible_sweep() {
                 },
                 repeat_index,
                 setup_elapsed_ns,
-                profile.first_visible_ns,
-                Some(profile.background_completion_ns),
+                RecordedTiming {
+                    elapsed_ns: profile.first_visible_ns,
+                    background_completion_ns: Some(profile.background_completion_ns),
+                    process_before,
+                },
                 "open_paths_to_first_tessellation_before_background_completion",
                 Some(format!(
                     "background completion {:.3} ms; {} tabs installed",
                     profile.background_completion_ns as f64 / 1_000_000.0,
                     profile.tab_count_after_completion
                 )),
-                process_before,
             );
         }
     }
@@ -448,7 +462,9 @@ fn emit_prepared_step(
 ) {
     let scope = match step.scenario {
         "large_file_background_index_ceiling" => "warm_cache_file_index_completion",
-        "search_file_size_ceiling" | "search_target_count_ceiling" => "prepared_search_component_completion",
+        "search_file_size_ceiling" | "search_target_count_ceiling" => {
+            "prepared_search_component_completion"
+        }
         _ => "prepared_operation",
     };
     emit_measured_step(step, repeat_index, setup_elapsed_ns, scope, run);
@@ -458,12 +474,15 @@ fn emit_recorded_step(
     step: StepDescriptor,
     repeat_index: usize,
     setup_elapsed_ns: u128,
-    elapsed_ns: u128,
-    background_completion_ns: Option<u128>,
+    timing: RecordedTiming,
     measurement_scope: &'static str,
     note: Option<String>,
-    process_before: ProcessSnapshot,
 ) {
+    let RecordedTiming {
+        elapsed_ns,
+        background_completion_ns,
+        process_before,
+    } = timing;
     let process_after = process_snapshot();
     let event = CapacityEvent {
         scenario: step.scenario,

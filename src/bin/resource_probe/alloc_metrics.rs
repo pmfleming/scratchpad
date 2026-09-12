@@ -117,7 +117,8 @@ pub(super) fn allocation_snapshot() -> AllocationSnapshot {
         deallocated_bytes: DEALLOCATED_BYTES.load(Ordering::Relaxed),
         live_bytes: live,
         baseline_live_bytes: baseline,
-        live_growth_bytes: (i128::from(live) - i128::from(baseline)).clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64,
+        live_growth_bytes: (i128::from(live) - i128::from(baseline))
+            .clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64,
         peak_live_bytes: PEAK_LIVE_BYTES.load(Ordering::Relaxed),
         allocation_count: ALLOCATION_COUNT.load(Ordering::Relaxed),
         deallocation_count: DEALLOCATION_COUNT.load(Ordering::Relaxed),
@@ -160,6 +161,10 @@ fn subtract_live_bytes(bytes: u64) {
     }
 }
 
+fn update_peak_live(candidate: u64) {
+    PEAK_LIVE_BYTES.fetch_max(candidate, Ordering::Relaxed);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,20 +180,5 @@ mod tests {
         // A later free of setup memory is subtracted from absolute live bytes, not an interval zero.
         live.fetch_sub(100, Ordering::Relaxed);
         assert_eq!(live.load(Ordering::Relaxed), 100);
-    }
-}
-
-fn update_peak_live(candidate: u64) {
-    let mut current = PEAK_LIVE_BYTES.load(Ordering::Relaxed);
-    while candidate > current {
-        match PEAK_LIVE_BYTES.compare_exchange(
-            current,
-            candidate,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        ) {
-            Ok(_) => break,
-            Err(observed) => current = observed,
-        }
     }
 }

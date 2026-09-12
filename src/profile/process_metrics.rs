@@ -18,8 +18,15 @@ pub struct ProcessSnapshot {
 pub fn process_snapshot() -> ProcessSnapshot {
     let pid = Pid::from_u32(std::process::id());
     let mut system = System::new();
-    system.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), true,
-        ProcessRefreshKind::nothing().without_tasks().with_memory().with_cpu().with_disk_usage());
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        true,
+        ProcessRefreshKind::nothing()
+            .without_tasks()
+            .with_memory()
+            .with_cpu()
+            .with_disk_usage(),
+    );
     let mut sample = ProcessSnapshot::default();
     if let Some(process) = system.process(pid) {
         sample.working_set_bytes = Some(process.memory());
@@ -30,7 +37,8 @@ pub fn process_snapshot() -> ProcessSnapshot {
     }
     #[cfg(target_os = "linux")]
     {
-        sample.peak_working_set_bytes = std::fs::read_to_string("/proc/self/status").ok()
+        sample.peak_working_set_bytes = std::fs::read_to_string("/proc/self/status")
+            .ok()
             .and_then(|text| status_bytes(&text, "VmHWM:"));
         if let Ok(stat) = std::fs::read_to_string("/proc/self/stat") {
             // comm can contain spaces and parentheses; fields after the last ')' begin at state (3).
@@ -46,8 +54,13 @@ pub fn process_snapshot() -> ProcessSnapshot {
 
 #[cfg(target_os = "linux")]
 fn status_bytes(text: &str, name: &str) -> Option<u64> {
-    text.lines().find_map(|line| line.strip_prefix(name))?
-        .split_whitespace().next()?.parse::<u64>().ok()?.checked_mul(1024)
+    text.lines()
+        .find_map(|line| line.strip_prefix(name))?
+        .split_whitespace()
+        .next()?
+        .parse::<u64>()
+        .ok()?
+        .checked_mul(1024)
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -72,7 +85,8 @@ impl ProcessMeasurement {
             write_bytes: delta(before.write_bytes, after.write_bytes),
             minor_page_faults: delta(before.minor_page_faults, after.minor_page_faults),
             major_page_faults: delta(before.major_page_faults, after.major_page_faults),
-            before, after,
+            before,
+            after,
             scope: "process_wide_boundary_counters_including_background_and_sampling_overhead",
             peak_scope: "process_lifetime_high_water_not_operation_peak",
         }
@@ -84,13 +98,21 @@ mod tests {
     use super::*;
     #[test]
     fn unavailable_and_reset_counters_do_not_become_zero() {
-        let a = ProcessSnapshot { read_bytes:Some(10), ..Default::default() };
-        let b = ProcessSnapshot { read_bytes:Some(8), ..Default::default() };
-        let measured = ProcessMeasurement::between(a,b);
+        let a = ProcessSnapshot {
+            read_bytes: Some(10),
+            ..Default::default()
+        };
+        let b = ProcessSnapshot {
+            read_bytes: Some(8),
+            ..Default::default()
+        };
+        let measured = ProcessMeasurement::between(a, b);
         assert_eq!(measured.cpu_elapsed_ms, None);
         assert_eq!(measured.read_bytes, None);
     }
     #[test]
     #[cfg(target_os = "linux")]
-    fn proc_rss_units_are_bytes() { assert_eq!(status_bytes("VmHWM:\t123 kB\n", "VmHWM:"), Some(123*1024)); }
+    fn proc_rss_units_are_bytes() {
+        assert_eq!(status_bytes("VmHWM:\t123 kB\n", "VmHWM:"), Some(123 * 1024));
+    }
 }
