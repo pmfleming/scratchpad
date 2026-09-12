@@ -93,6 +93,7 @@ pub struct ManyFileFirstVisibleProfile {
     pub background_completion_ns: u128,
     pub active_buffer_bytes: usize,
     pub tab_count_after_completion: usize,
+    pub installed_file_count: usize,
 }
 
 /// Exercise the production staged-open path: hydrate the selected file before
@@ -104,6 +105,7 @@ pub fn run_many_file_first_visible_profile(paths: Vec<PathBuf>) -> ManyFileFirst
     let mut app = ScratchpadApp::with_session_store(store);
     app.set_session_persist_on_drop(false);
 
+    let requested_file_count = paths.len();
     let expected_path = paths
         .last()
         .expect("nonempty first-visible workload")
@@ -119,9 +121,23 @@ pub fn run_many_file_first_visible_profile(paths: Vec<PathBuf>) -> ManyFileFirst
         .active_tab()
         .map(|tab| tab.active_buffer().document().piece_tree().len_bytes())
         .unwrap_or_default();
-    app.wait_for_background_io_idle();
+    assert!(
+        app.wait_for_background_io_idle_timeout(std::time::Duration::from_secs(30)),
+        "many-file background installation did not complete"
+    );
     let background_completion_ns = start.elapsed().as_nanos();
     let tab_count_after_completion = app.tab_manager.tabs.len();
+    let installed_file_count = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .filter(|tab| tab.buffers.buffer.path.is_some())
+        .count();
+    assert_eq!(
+        installed_file_count, requested_file_count,
+        "all requested files must be installed before reporting completion"
+    );
     drop(app);
     let _ = std::fs::remove_dir_all(session_root);
 
@@ -130,6 +146,7 @@ pub fn run_many_file_first_visible_profile(paths: Vec<PathBuf>) -> ManyFileFirst
         background_completion_ns,
         active_buffer_bytes,
         tab_count_after_completion,
+        installed_file_count,
     }
 }
 

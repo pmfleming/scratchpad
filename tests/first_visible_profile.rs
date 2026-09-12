@@ -13,6 +13,7 @@ fn first_visible_waits_for_async_file_instead_of_rendering_untitled_frame() {
 
     let profile = run_many_file_first_visible_profile(vec![path]);
     assert_eq!(profile.active_buffer_bytes, 1024 * 1024);
+    assert_eq!(profile.installed_file_count, 1);
     assert!(profile.first_visible_ns <= profile.background_completion_ns);
 }
 

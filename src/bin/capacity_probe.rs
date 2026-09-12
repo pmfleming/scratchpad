@@ -44,6 +44,7 @@ struct CapacityEvent {
     setup_elapsed_ns: u128,
     elapsed_ns: u128,
     background_completion_ns: Option<u128>,
+    completed_workload_value: Option<usize>,
     measurement_scope: &'static str,
     metrics: CapacityMetricsSnapshot,
     memory_budget: MemoryBudgetSnapshot,
@@ -69,6 +70,7 @@ struct StepDescriptor {
 struct RecordedTiming {
     elapsed_ns: u128,
     background_completion_ns: Option<u128>,
+    completed_workload_value: Option<usize>,
     process_before: ProcessSnapshot,
 }
 
@@ -131,6 +133,7 @@ fn emit_large_file_first_visible_sweep() {
                 RecordedTiming {
                     elapsed_ns,
                     background_completion_ns: None,
+                    completed_workload_value: None,
                     process_before,
                 },
                 "open_path_to_first_tessellation",
@@ -280,6 +283,7 @@ fn emit_many_file_first_visible_sweep() {
                 RecordedTiming {
                     elapsed_ns: profile.first_visible_ns,
                     background_completion_ns: Some(profile.background_completion_ns),
+                    completed_workload_value: Some(profile.installed_file_count),
                     process_before,
                 },
                 "open_paths_to_first_tessellation_before_background_completion",
@@ -481,6 +485,7 @@ fn emit_recorded_step(
     let RecordedTiming {
         elapsed_ns,
         background_completion_ns,
+        completed_workload_value,
         process_before,
     } = timing;
     let process_after = process_snapshot();
@@ -496,6 +501,7 @@ fn emit_recorded_step(
         setup_elapsed_ns,
         elapsed_ns,
         background_completion_ns,
+        completed_workload_value,
         measurement_scope,
         metrics: capacity_metrics_snapshot(),
         memory_budget: memory_budget::snapshot(),
@@ -547,6 +553,7 @@ fn emit_measured_step(
         setup_elapsed_ns,
         elapsed_ns,
         background_completion_ns: None,
+        completed_workload_value: None,
         measurement_scope,
         metrics,
         memory_budget: memory_budget_snapshot,

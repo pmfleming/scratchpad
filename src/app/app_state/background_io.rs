@@ -39,16 +39,30 @@ impl ScratchpadApp {
         }
     }
 
+    /// Best-effort wait for callers that only need to give background work a turn.
+    /// Use the timeout-returning variant when actual completion must be established.
     pub fn wait_for_background_io_idle(&mut self) {
-        let deadline = Instant::now() + Duration::from_secs(1);
-        while Instant::now() < deadline {
+        let _ = self.wait_for_background_io_idle_timeout(Duration::from_secs(1));
+    }
+
+    /// Returns false if work is still pending at the deadline, never a false completion.
+    #[must_use]
+    pub fn wait_for_background_io_idle_timeout(&mut self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
             self.drain_background_io_results();
             if !self.state.background_io.has_pending_background_actions() {
-                return;
+                return true;
             }
-            std::thread::sleep(Duration::from_millis(5));
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(
+                deadline
+                    .saturating_duration_since(Instant::now())
+                    .min(Duration::from_millis(5)),
+            );
         }
-        self.drain_background_io_results();
     }
 
     fn take_pending_action<T>(

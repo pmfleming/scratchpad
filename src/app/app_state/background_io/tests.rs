@@ -27,6 +27,25 @@ fn app_with_buffer(buffer: BufferState) -> ScratchpadApp {
 }
 
 #[test]
+fn background_wait_reports_timeout_instead_of_claiming_completion() {
+    let mut app = test_app();
+    let timeout = std::time::Duration::ZERO;
+    assert!(app.wait_for_background_io_idle_timeout(timeout));
+    app.state.background_io.pending_background_actions.insert(
+        999,
+        PendingBackgroundAction::OpenTabs(PendingOpenTabsAction {
+            accumulator: crate::app::services::file_controller::OpenBatchSummary::default(),
+        }),
+    );
+    assert!(!app.wait_for_background_io_idle_timeout(timeout));
+    app.state
+        .background_io
+        .pending_background_actions
+        .remove(&999);
+    assert!(app.wait_for_background_io_idle_timeout(timeout));
+}
+
+#[test]
 fn text_metadata_result_updates_matching_buffer_and_clears_pending_action() {
     let buffer = BufferState::new("sample.txt".to_owned(), "one".to_owned(), None);
     let buffer_id = buffer.id;
