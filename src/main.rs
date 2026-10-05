@@ -102,17 +102,11 @@ fn renderer_from_env() -> eframe::Renderer {
 }
 
 fn renderer_from_override(renderer_override: Option<&str>) -> eframe::Renderer {
-    match renderer_override {
-        #[cfg(target_os = "linux")]
-        Some(value) if value.eq_ignore_ascii_case("glow") => eframe::Renderer::Glow,
-        Some(value) if value.eq_ignore_ascii_case("wgpu") => eframe::Renderer::Wgpu,
-        // Use the tested Glow path with nonblocking Wayland swaps and compositor-paced
-        // redraws. See crates/eframe/SCRATCHPAD-PATCH.md; plain EGL vsync can stall startup.
-        #[cfg(target_os = "linux")]
-        _ => eframe::Renderer::Glow,
-        #[cfg(not(target_os = "linux"))]
-        _ => eframe::Renderer::default(),
-    }
+    // The shared Wayland scheduler patch prevents WGPU's former idle busy-polling.
+    // Keep it and the Linux Glow fallback; see docs/wgpu-recovery-investigation.md.
+    renderer_override
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(eframe::Renderer::Wgpu)
 }
 
 fn viewport_builder_from_window_state(
@@ -214,24 +208,28 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
-    fn linux_defaults_to_glow_to_avoid_wgpu_idle_busy_polling() {
-        assert_eq!(renderer_from_override(None), eframe::Renderer::Glow);
-        assert_eq!(
-            renderer_from_override(Some("unknown")),
-            eframe::Renderer::Glow
-        );
+    fn defaults_to_wgpu_without_a_recognized_override() {
+        for renderer_override in [None, Some(""), Some("unknown")] {
+            assert_eq!(
+                renderer_from_override(renderer_override),
+                eframe::Renderer::Wgpu
+            );
+        }
     }
 
     #[test]
     fn wgpu_can_be_selected_explicitly() {
-        assert_eq!(renderer_from_override(Some("WGPU")), eframe::Renderer::Wgpu);
+        for value in ["wgpu", "WGPU", "Wgpu"] {
+            assert_eq!(renderer_from_override(Some(value)), eframe::Renderer::Wgpu);
+        }
     }
 
     #[cfg(target_os = "linux")]
     #[test]
     fn glow_override_is_case_insensitive() {
-        assert_eq!(renderer_from_override(Some("GLOW")), eframe::Renderer::Glow);
+        for value in ["glow", "GLOW", "Glow"] {
+            assert_eq!(renderer_from_override(Some(value)), eframe::Renderer::Glow);
+        }
     }
 }

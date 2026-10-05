@@ -2,6 +2,12 @@
 
 Date: 2026-08-17
 
+**Follow-up:** the [WGPU recovery investigation](wgpu-recovery-investigation.md)
+reproduces this failure with a polling control build and validates WGPU with the
+current shared event-loop patch, including hidden startup and session restore.
+This document preserves the original observations; it is not evidence that the
+current patched WGPU path still requires the Glow workaround.
+
 ## Executive summary
 
 Scratchpad consumed approximately one full CPU core while idle when using eframe's WGPU renderer, but approximately 0% CPU with Glow. The difference was not caused by editor rendering, search, caret animation, background I/O, Vulkan shader work, or a recent WGPU upgrade.

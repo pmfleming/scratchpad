@@ -1,5 +1,6 @@
 //! Opt-in native presentation pacing probe; no user settings/session/files are read.
 //! Run on Wayland with `cargo run --release --example presentation_probe`.
+//! Set `SCRATCHPAD_RENDERER=wgpu` to compare WGPU with the default Glow path.
 //! Emits frame counts once a second and requests close after five seconds.
 //! Use an external timeout if deliberately leaving its workspace hidden.
 #![forbid(unsafe_code)]
@@ -29,16 +30,24 @@ fn main() -> eframe::Result<()> {
         }
     }
 
+    let renderer = match std::env::var("SCRATCHPAD_RENDERER") {
+        Ok(value) if value.eq_ignore_ascii_case("wgpu") => eframe::Renderer::Wgpu,
+        _ => eframe::Renderer::Glow,
+    };
+    eprintln!("presentation probe renderer={renderer:?}");
     eframe::run_native(
         "Scratchpad presentation probe",
         eframe::NativeOptions {
-            renderer: eframe::Renderer::Glow,
+            renderer,
             viewport: egui::ViewportBuilder::default()
                 .with_app_id("scratchpad")
                 .with_inner_size([640.0, 240.0]),
             ..Default::default()
         },
         Box::new(|cc| {
+            if let Some(state) = &cc.wgpu_render_state {
+                eprintln!("presentation probe adapter={:?}", state.adapter.get_info());
+            }
             let frames = Arc::new(AtomicU64::new(0));
             let observed = frames.clone();
             let ctx = cc.egui_ctx.clone();
@@ -64,5 +73,5 @@ fn main() -> eframe::Result<()> {
 
 #[cfg(not(target_os = "linux"))]
 fn main() {
-    eprintln!("This opt-in probe targets the Linux/Wayland Glow presentation path.");
+    eprintln!("This opt-in probe targets Linux/Wayland presentation.");
 }

@@ -174,8 +174,8 @@ for the complete mapping.
 | Variable | Purpose |
 | --- | --- |
 | `SCRATCHPAD_PLATFORM_PROFILE` | Override automatic platform-profile detection for the launch. |
-| `SCRATCHPAD_RENDERER=wgpu` | Force eframe's WGPU renderer; Linux defaults to Glow because WGPU can busy-poll when Wayland initially routes the window to an inactive workspace. |
-| `SCRATCHPAD_RENDERER=glow` | On Linux, explicitly select the default OpenGL renderer. |
+| `SCRATCHPAD_RENDERER=wgpu` | Explicitly select WGPU, the default renderer. Unset, empty, or unrecognized values also select WGPU. The local scheduler patch prevents the former Wayland busy-polling problem. |
+| `SCRATCHPAD_RENDERER=glow` | On Linux, select the fallback Glow (OpenGL) renderer. Renderer names are case-insensitive. |
 | `SCRATCHPAD_TRACE_WINDOW=1` | Write timestamped lifecycle, viewport-state, and eframe repaint diagnostics to stderr; disabled by default. See [visibility investigation](startup-visibility-investigation.md). |
 | `SCRATCHPAD_SYSTEM_APPEARANCE_FILE` | Read a system-appearance bridge TOML from an explicit path. |
 | `EGUI_INSPECTION=1` | With the `inspection` Cargo feature, expose egui inspection support. |

@@ -21,7 +21,9 @@ The [local eframe patch](../crates/eframe/SCRATCHPAD-PATCH.md) uses nonblocking 
 swaps on Wayland, calls winit's pre-present notification to retain compositor
 frame pacing, and sleeps rather than busy-polling while redraw delivery is
 withheld. Detection uses the actual display backend; X11 and other platform
-swap-interval policies are unchanged. Linux still defaults to Glow.
+swap-interval policies are unchanged. Following the
+[WGPU recovery investigation](wgpu-recovery-investigation.md), the app defaults
+to WGPU; Linux retains Glow via `SCRATCHPAD_RENDERER=glow`.
 
 Disabling Mesa vsync alone avoided the stall but rendered 141 UI passes in about
 0.25 seconds. Adding callbacks without changing eframe's polling policy consumed
@@ -60,6 +62,8 @@ session copies and protocol traces are deliberately not committed.
 
 ```sh
 cargo run --release --example presentation_probe
+# Compare WGPU using the same app ID and redraw workload:
+SCRATCHPAD_RENDERER=wgpu cargo run --release --example presentation_probe
 ```
 
 The opt-in probe reads no user session/settings/files, continuously requests
@@ -70,6 +74,12 @@ workspace before five seconds and verify it resumes and exits. Otherwise use
 an external timeout. Compare settled frame counts with the output refresh rate,
 and inspect process CPU both hidden and visible. An uncapped or busy-polling
 workaround must not pass this check.
+
+The probe defaults to Glow for baseline comparisons, honors `SCRATCHPAD_RENDERER`,
+and reports the WGPU adapter when selected.
+The sleeping event-loop patch applies to both renderers; see the
+[WGPU recovery investigation](wgpu-recovery-investigation.md) for native WGPU
+validation and the upstream scheduler-fix option.
 
 For the real app, use isolated XDG directories, `SCRATCHPAD_TRACE_WINDOW=1`, and
 `WAYLAND_DEBUG=client`; verify ping/pong dispatch while hidden and UI resumption
