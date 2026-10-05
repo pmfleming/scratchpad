@@ -2,8 +2,11 @@ use crate::app::app_state::ScratchpadApp;
 use eframe::egui;
 use std::collections::HashMap;
 
+mod editor;
 mod paint;
 mod state;
+
+pub(crate) use editor::handle_editor_drop;
 
 pub(crate) use state::{
     TabDropAxis, TabDropZone, TabRectEntry, active_drag_sources_for_context,
@@ -31,6 +34,13 @@ pub(crate) enum TabDragCommit {
 
 pub(crate) fn sync_drag_state(ui: &egui::Ui) {
     let _ = state::update_current_tab_drag(ui);
+}
+
+/// Clear unhandled releases only after both the tab strip and editor had a chance to accept them.
+pub(crate) fn finish_drag_frame(ui: &egui::Ui) {
+    if !ui.input(|input| input.pointer.primary_down()) {
+        state::clear_tab_drag_state(ui);
+    }
 }
 
 pub(crate) fn update_tab_drag(
@@ -68,9 +78,10 @@ pub(crate) fn update_tab_drag(
         return None;
     }
 
+    let drop_intent = drop_intent?;
     state::clear_tab_drag_state(ui);
 
-    match drop_intent? {
+    match drop_intent {
         state::TabDropIntent::Reorder { drop_slot, .. } => {
             if dragged_indices.len() > 1 {
                 Some(TabDragCommit::ReorderGroup {

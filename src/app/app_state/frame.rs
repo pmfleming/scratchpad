@@ -97,6 +97,7 @@ pub(super) fn render_frame(app: &mut ScratchpadApp, ui: &mut egui::Ui, ctx: &egu
     record_frame_phase(FramePhase::Chrome, chrome_started_at.elapsed());
     let active_surface_started_at = Instant::now();
     render_active_surface(app, ui);
+    crate::app::ui::tab_drag::finish_drag_frame(ui);
     record_frame_phase(
         FramePhase::ActiveSurface,
         active_surface_started_at.elapsed(),

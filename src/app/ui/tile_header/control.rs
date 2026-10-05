@@ -133,7 +133,7 @@ fn tile_control_colors(
 ) -> TileControlColors {
     let (fill, stroke) = base_tile_control_colors(ui, style, hovered);
     let text_color = match style {
-        TileControlStyle::Danger if hovered => egui::Color32::WHITE,
+        TileControlStyle::Danger => egui::Color32::WHITE,
         _ => text_primary(ui),
     };
     TileControlColors {
@@ -150,7 +150,7 @@ fn base_tile_control_colors(
 ) -> (egui::Color32, egui::Color32) {
     match style {
         TileControlStyle::Default => default_tile_control_colors(ui, hovered),
-        TileControlStyle::Danger => danger_tile_control_colors(ui, hovered),
+        TileControlStyle::Danger => danger_tile_control_colors(hovered),
     }
 }
 
@@ -168,10 +168,40 @@ fn default_tile_control_colors(ui: &egui::Ui, hovered: bool) -> (egui::Color32, 
     (fill, stroke)
 }
 
-fn danger_tile_control_colors(ui: &egui::Ui, hovered: bool) -> (egui::Color32, egui::Color32) {
+fn danger_tile_control_colors(hovered: bool) -> (egui::Color32, egui::Color32) {
     if hovered {
         (CLOSE_HOVER_BG, egui::Color32::from_rgb(255, 196, 196))
     } else {
-        default_tile_control_colors(ui, false)
+        (egui::Color32::BLACK, egui::Color32::BLACK)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn close_control_is_white_on_black_in_both_themes() {
+        for visuals in [egui::Visuals::dark(), egui::Visuals::light()] {
+            let ctx = egui::Context::default();
+            ctx.set_visuals(visuals);
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                let colors = tile_control_colors(ui, TileControlStyle::Danger, false, 1.0);
+                assert_eq!(colors.fill, egui::Color32::BLACK);
+                assert_eq!(colors.text_color, egui::Color32::WHITE);
+            })
+            .drop_without_applying_deltas();
+        }
+    }
+
+    #[test]
+    fn close_control_keeps_white_icon_on_red_hover() {
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            let colors = tile_control_colors(ui, TileControlStyle::Danger, true, 1.0);
+            assert_eq!(colors.fill, CLOSE_HOVER_BG);
+            assert_eq!(colors.text_color, egui::Color32::WHITE);
+        })
+        .drop_without_applying_deltas();
     }
 }

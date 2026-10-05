@@ -2,6 +2,9 @@ use super::{TAB_DRAG_THRESHOLD, TabDragState};
 use crate::app::ui::widget_ids;
 use eframe::egui;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) fn begin_tab_drag_if_needed(
     ui: &egui::Ui,
     index: usize,

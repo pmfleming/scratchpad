@@ -110,7 +110,7 @@ pub(crate) fn render_tile_header(
             &control,
             rects.close_hit,
             TileControlSpec {
-                label: "×",
+                label: egui_phosphor::regular::X,
                 tooltip: Some(shortcut_tooltips::action(
                     ui.ctx(),
                     ShortcutAction::CloseTile,

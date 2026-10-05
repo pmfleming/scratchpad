@@ -46,6 +46,7 @@ pub(crate) fn show_editor(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
                 let render_outcome =
                     render_editor_workspace(ui, app, &editor_state, workspace_rect);
                 finalize_editor_render(ui, app, &editor_state, render_outcome);
+                crate::app::ui::tab_drag::handle_editor_drop(ui, app, workspace_rect);
                 crate::app::app_state::search_runtime::refresh_search_state(app);
                 request_search_repaint(
                     ui.ctx(),

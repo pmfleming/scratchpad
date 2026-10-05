@@ -139,6 +139,10 @@ pub(super) fn paint_tab_combine_target(
         return;
     };
 
+    paint_combine_target(ctx, target_rect);
+}
+
+pub(super) fn paint_combine_target(ctx: &egui::Context, target_rect: egui::Rect) {
     let painter = ctx.layer_painter(widget_ids::layer_id(
         egui::Order::Foreground,
         "tab_combine_target",
