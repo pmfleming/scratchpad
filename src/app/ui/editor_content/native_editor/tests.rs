@@ -50,6 +50,12 @@ fn publishing_active_selection_reports_shared_selection_changes() {
     assert!(publish_active_selection(&mut buffer, &view, true));
     assert_eq!(buffer.active_selection, Some(0..5));
     assert!(!publish_active_selection(&mut buffer, &view, true));
+
+    view.cursor_range = Some(CursorRange::one(CharCursor::new(7)));
+    assert!(!publish_active_selection(&mut buffer, &view, false));
+    assert_eq!(buffer.active_selection, Some(0..5));
+    assert!(publish_active_selection(&mut buffer, &view, true));
+    assert_eq!(buffer.active_selection, None);
 }
 
 #[test]
@@ -209,6 +215,24 @@ fn consecutive_vertical_keys_restore_visual_column_after_short_line() {
 
     render_editor_key(&ctx, &mut buffer, &mut view, &font_id, egui::Key::ArrowDown);
     assert_eq!(view.cursor_range.unwrap().primary.index, 21);
+}
+
+#[test]
+fn edited_frame_publishes_current_snapshot_and_consumes_reveal() {
+    let mut buffer = BufferState::new("sample.txt".to_owned(), "abc".to_owned(), None);
+    let mut view = EditorViewState::new(buffer.id);
+    view.cursor_range = Some(CursorRange::one(CharCursor::new(1)));
+    let ctx = egui::Context::default();
+    let font = egui::FontId::monospace(18.0);
+    render_editor_key(&ctx, &mut buffer, &mut view, &font, egui::Key::Enter);
+
+    assert_eq!(buffer.text(), "a\nbc");
+    assert!(view.latest_display_snapshot.is_some());
+    assert_eq!(
+        view.latest_display_snapshot_revision,
+        Some(buffer.document_revision())
+    );
+    assert_eq!(view.cursor_reveal_mode(), None);
 }
 
 #[test]

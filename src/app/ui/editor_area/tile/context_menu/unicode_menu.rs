@@ -112,97 +112,59 @@ const UNICODE_CONTROL_CHARS: &[UnicodeControlChar] = &[
 
 pub(super) fn render_display_unicode_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     unicode_submenu_row(ui, "Unicode", TEXT_AA, |ui| {
-        set_menu_width(ui, EDITOR_CONTEXT_MENU_WIDTH);
-        let right_to_left = app
-            .tab_manager
-            .active_tab()
-            .and_then(|tab| tab.buffer_for_view(tab.layout.active_view_id))
-            .is_some_and(|buffer| buffer.right_to_left_reading_order);
-        let show_control_chars = app
-            .tab_manager
-            .active_tab()
-            .and_then(|tab| tab.buffer_for_view(tab.layout.active_view_id))
-            .is_some_and(|buffer| buffer.show_control_chars);
-        let control_chars_available = app
-            .tab_manager
-            .active_tab()
-            .and_then(|tab| tab.buffer_for_view(tab.layout.active_view_id))
-            .is_some_and(|buffer| buffer.has_visible_control_substitutions());
-
-        if menu_action_button(
-            ui,
-            if right_to_left {
-                "Left to Right"
-            } else {
-                "Right to Left"
-            },
-            Some(if right_to_left {
-                TEXT_ALIGN_LEFT
-            } else {
-                TEXT_ALIGN_RIGHT
-            }),
-            true,
-        ) {
-            toggle_active_buffer_reading_order(app);
-            ui.close();
-        }
-
-        if menu_action_button(
-            ui,
-            "Control Chars",
-            Some(if show_control_chars {
-                "¶"
-            } else {
-                TEXT_ALIGN_JUSTIFY
-            }),
-            show_control_chars || control_chars_available,
-        ) {
-            toggle_active_buffer_control_chars(app);
-            ui.close();
-        }
-
-        unicode_submenu_row(ui, "Insert Control", TEXT_AA, |ui| {
-            set_menu_width(ui, EDITOR_UNICODE_INSERT_SUBMENU_WIDTH);
-            for control in UNICODE_CONTROL_CHARS {
-                if unicode_control_char_button(ui, control) {
-                    workspace_editing::insert_text_in_active_view(app, control.value);
-                    workspace_accessors::request_focus_for_active_view(app);
-                    ui.close();
-                }
-            }
-        });
-
-        menu_action_button(ui, "Reconversion", Some(ARROW_U_UP_LEFT), false);
+        render_unicode_menu_contents(ui, app);
     });
 }
 
-fn toggle_active_buffer_reading_order(app: &mut ScratchpadApp) {
-    if let Some(tab) = app.tab_manager.active_tab_mut()
-        && let Some(buffer_id) = tab.layout.active_view().map(|view| view.buffer_id)
-    {
-        if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
-            buffer.right_to_left_reading_order = !buffer.right_to_left_reading_order;
-        }
-        clear_layout_cache_for_buffer(tab, buffer_id);
-        app.tab_manager.mark_session_dirty();
+fn render_unicode_menu_contents(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    set_menu_width(ui, EDITOR_CONTEXT_MENU_WIDTH);
+    let buffer = app
+        .tab_manager
+        .active_tab()
+        .and_then(|tab| tab.buffer_for_view(tab.layout.active_view_id));
+    let right_to_left = buffer.is_some_and(|buffer| buffer.right_to_left_reading_order);
+    let show_control_chars = buffer.is_some_and(|buffer| buffer.show_control_chars);
+    let control_chars_available =
+        buffer.is_some_and(|buffer| buffer.has_visible_control_substitutions());
+    let (direction_label, direction_icon) = if right_to_left {
+        ("Left to Right", TEXT_ALIGN_LEFT)
+    } else {
+        ("Right to Left", TEXT_ALIGN_RIGHT)
+    };
+
+    if menu_action_button(ui, direction_label, Some(direction_icon), true) {
+        workspace_editing::toggle_active_buffer_reading_order(app);
+        ui.close();
     }
+
+    let control_icon = if show_control_chars {
+        "¶"
+    } else {
+        TEXT_ALIGN_JUSTIFY
+    };
+    if menu_action_button(
+        ui,
+        "Control Chars",
+        Some(control_icon),
+        show_control_chars || control_chars_available,
+    ) {
+        workspace_editing::toggle_active_buffer_control_chars(app);
+        ui.close();
+    }
+
+    unicode_submenu_row(ui, "Insert Control", TEXT_AA, |ui| {
+        render_insert_control_menu(ui, app);
+    });
+    menu_action_button(ui, "Reconversion", Some(ARROW_U_UP_LEFT), false);
 }
 
-fn toggle_active_buffer_control_chars(app: &mut ScratchpadApp) {
-    if let Some(tab) = app.tab_manager.active_tab_mut()
-        && let Some(buffer_id) = tab.layout.active_view().map(|view| view.buffer_id)
-    {
-        if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
-            buffer.show_control_chars = !buffer.show_control_chars;
-        }
-        app.tab_manager.mark_session_dirty();
-    }
-}
-
-fn clear_layout_cache_for_buffer(tab: &mut crate::app::domain::WorkspaceTab, buffer_id: u64) {
-    for view in &mut tab.layout.views {
-        if view.buffer_id == buffer_id {
-            view.layout_cache.clear();
+fn render_insert_control_menu(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+    set_menu_width(ui, EDITOR_UNICODE_INSERT_SUBMENU_WIDTH);
+    for control in UNICODE_CONTROL_CHARS {
+        if unicode_control_char_button(ui, control) {
+            workspace_editing::insert_text_in_active_view(app, control.value);
+            workspace_accessors::request_focus_for_active_view(app);
+            ui.close();
         }
     }
 }

@@ -62,7 +62,6 @@ pub(crate) fn render_tile_header(
     let control = TileControlContext {
         font_size: metrics.font_size,
         visibility: controls_visible,
-        pane_path: request.pane_path.clone(),
     };
     if layout.can_promote
         && show_control(
@@ -78,7 +77,6 @@ pub(crate) fn render_tile_header(
                 )),
                 style: TileControlStyle::Default,
                 sense: egui::Sense::click(),
-                id_prefix: "promote_view",
             },
         )
         .clicked()
@@ -87,7 +85,6 @@ pub(crate) fn render_tile_header(
     }
     let split_response = show_split_control(
         ui,
-        &request.pane_path,
         rects.split_hit,
         metrics.font_size,
         layout.controls_visible,
@@ -118,7 +115,6 @@ pub(crate) fn render_tile_header(
                 )),
                 style: TileControlStyle::Danger,
                 sense: egui::Sense::click(),
-                id_prefix: "close_view",
             },
         )
         .clicked()
@@ -154,11 +150,9 @@ struct TileControlMetrics {
     font_size: f32,
 }
 
-#[derive(Clone)]
 struct TileControlContext {
     font_size: f32,
     visibility: f32,
-    pane_path: SplitPath,
 }
 
 struct TileControlSpec {
@@ -166,7 +160,6 @@ struct TileControlSpec {
     tooltip: Option<String>,
     style: TileControlStyle,
     sense: egui::Sense,
-    id_prefix: &'static str,
 }
 
 const TILE_CONTROL_PADDING: f32 = 6.0;
@@ -216,7 +209,6 @@ fn pointer_hover_pos(ui: &egui::Ui) -> egui::Pos2 {
 
 fn show_split_control(
     ui: &mut egui::Ui,
-    pane_path: &SplitPath,
     split_hit: egui::Rect,
     font_size: f32,
     controls_visible: f32,
@@ -230,12 +222,7 @@ fn show_split_control(
         .visibility(controls_visible)
         .font_size(font_size)
         .tooltip(&tooltip)
-        .show(
-            ui,
-            split_hit,
-            widget_ids::root_id(("split_handle", pane_path)),
-            egui::Sense::click_and_drag(),
-        )
+        .show(ui, split_hit, egui::Sense::click_and_drag())
 }
 
 fn show_control(
@@ -251,12 +238,7 @@ fn show_control(
     if let Some(tooltip) = &spec.tooltip {
         tile_control = tile_control.tooltip(tooltip);
     }
-    tile_control.show(
-        ui,
-        hit_rect,
-        widget_ids::root_id((spec.id_prefix, &control.pane_path)),
-        spec.sense,
-    )
+    tile_control.show(ui, hit_rect, spec.sense)
 }
 
 fn tile_header_rects(

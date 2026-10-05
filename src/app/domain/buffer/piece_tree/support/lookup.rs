@@ -1,5 +1,5 @@
 use super::super::{
-    LINE_SAMPLE_STRIDE, LeafAddress, Piece, PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLite,
+    LINE_SAMPLE_STRIDE, LeafAddress, Piece, PieceTreeLeaf, PieceTreeLite, PieceTreeMetrics,
 };
 
 pub(in crate::app::domain::buffer::piece_tree) fn line_lookup_in_leaves(
@@ -16,20 +16,12 @@ pub(in crate::app::domain::buffer::piece_tree) fn line_lookup_in_leaves(
             0
         };
 
-        if leaf_start == 0 {
-            if skip_node_before_line(node, safe_line, &mut cursor) {
-                continue;
-            }
-            if append_node_to_target_line(node, safe_line, &mut cursor) {
-                continue;
-            }
+        if leaf_start == 0 && cursor.advance_over(node.metrics, safe_line) {
+            continue;
         }
 
         for leaf in node.leaves.iter().skip(leaf_start) {
-            if skip_leaf_before_line(leaf, safe_line, &mut cursor) {
-                continue;
-            }
-            if append_leaf_to_target_line(leaf, safe_line, &mut cursor) {
+            if cursor.advance_over(leaf.metrics, safe_line) {
                 continue;
             }
             if let Some(line_info) = scan_leaf_for_line_lookup(tree, leaf, safe_line, &mut cursor) {
@@ -61,61 +53,19 @@ impl LineLookupCursor {
     fn line_info(&self) -> (usize, usize) {
         (self.line_start, self.current_len)
     }
-}
 
-fn skip_node_before_line(
-    node: &PieceTreeInternalNode,
-    safe_line: usize,
-    cursor: &mut LineLookupCursor,
-) -> bool {
-    if cursor.current_line < safe_line && cursor.current_line + node.metrics.newlines < safe_line {
-        cursor.current_line += node.metrics.newlines;
-        cursor.current_char += node.metrics.chars;
+    /// Nodes, leaves and pieces share the same two metric-only fast paths.
+    /// A span ending on the target line must still be scanned to locate its start.
+    fn advance_over(&mut self, metrics: PieceTreeMetrics, target_line: usize) -> bool {
+        if self.current_line < target_line && self.current_line + metrics.newlines < target_line {
+            self.current_line += metrics.newlines;
+        } else if self.current_line == target_line && metrics.newlines == 0 {
+            self.current_len += metrics.chars;
+        } else {
+            return false;
+        }
+        self.current_char += metrics.chars;
         true
-    } else {
-        false
-    }
-}
-
-fn append_node_to_target_line(
-    node: &PieceTreeInternalNode,
-    safe_line: usize,
-    cursor: &mut LineLookupCursor,
-) -> bool {
-    if cursor.current_line == safe_line && node.metrics.newlines == 0 {
-        cursor.current_len += node.metrics.chars;
-        cursor.current_char += node.metrics.chars;
-        true
-    } else {
-        false
-    }
-}
-
-fn skip_leaf_before_line(
-    leaf: &PieceTreeLeaf,
-    safe_line: usize,
-    cursor: &mut LineLookupCursor,
-) -> bool {
-    if cursor.current_line < safe_line && cursor.current_line + leaf.metrics.newlines < safe_line {
-        cursor.current_line += leaf.metrics.newlines;
-        cursor.current_char += leaf.metrics.chars;
-        true
-    } else {
-        false
-    }
-}
-
-fn append_leaf_to_target_line(
-    leaf: &PieceTreeLeaf,
-    safe_line: usize,
-    cursor: &mut LineLookupCursor,
-) -> bool {
-    if cursor.current_line == safe_line && leaf.metrics.newlines == 0 {
-        cursor.current_len += leaf.metrics.chars;
-        cursor.current_char += leaf.metrics.chars;
-        true
-    } else {
-        false
     }
 }
 
@@ -126,10 +76,7 @@ fn scan_leaf_for_line_lookup(
     cursor: &mut LineLookupCursor,
 ) -> Option<(usize, usize)> {
     for piece in &leaf.pieces {
-        if skip_piece_before_line(piece, safe_line, cursor) {
-            continue;
-        }
-        if append_piece_to_target_line(piece, safe_line, cursor) {
+        if cursor.advance_over(piece.metrics(), safe_line) {
             continue;
         }
 
@@ -142,30 +89,6 @@ fn scan_leaf_for_line_lookup(
         }
     }
     None
-}
-
-fn skip_piece_before_line(piece: &Piece, safe_line: usize, cursor: &mut LineLookupCursor) -> bool {
-    if cursor.current_line < safe_line && cursor.current_line + piece.newline_count < safe_line {
-        cursor.current_line += piece.newline_count;
-        cursor.current_char += piece.char_len;
-        true
-    } else {
-        false
-    }
-}
-
-fn append_piece_to_target_line(
-    piece: &Piece,
-    safe_line: usize,
-    cursor: &mut LineLookupCursor,
-) -> bool {
-    if cursor.current_line == safe_line && piece.newline_count == 0 {
-        cursor.current_len += piece.char_len;
-        cursor.current_char += piece.char_len;
-        true
-    } else {
-        false
-    }
 }
 
 fn apply_piece_line_sample(

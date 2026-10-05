@@ -15,7 +15,6 @@ pub use native_editor::{
 pub(crate) struct EditorContentOutcome {
     pub(crate) changed: bool,
     pub(crate) focused: bool,
-    pub(crate) request_editor_focus: bool,
     pub(crate) interaction_response: Option<egui::Response>,
 }
 
@@ -114,7 +113,6 @@ impl From<native_editor::EditorWidgetOutcome> for EditorContentOutcome {
         Self {
             changed: outcome.changed,
             focused: outcome.focused,
-            request_editor_focus: outcome.request_editor_focus,
             interaction_response: Some(outcome.response),
         }
     }

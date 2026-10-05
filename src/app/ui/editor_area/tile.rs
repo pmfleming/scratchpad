@@ -8,10 +8,7 @@ mod style;
 
 use self::autoscroll::apply_selection_edge_autoscroll_intent;
 use self::chrome::{apply_tile_body_focus, handle_tile_click, paint_tile_border, paint_tile_frame};
-use self::decisions::{
-    TileFocusRequest, context_menu_attach_policy, scrollbar_visibility_for_drag_active,
-    tile_focus_request,
-};
+use self::decisions::{context_menu_attach_policy, scrollbar_visibility_for_drag_active};
 use self::scroll_frame::{
     drain_pending_scroll_intents, editor_scroll_content_size, publish_scroll_manager_metrics,
     recover_unresolved_piece_anchor, resolved_scroll_offset_for_view, sync_local_scroll_state,
@@ -204,34 +201,14 @@ fn render_tile_body_contents(
         },
     );
     restore_previous_snapshot_if_needed(tab, request.view_id, previous_snapshot);
-    apply_tile_focus_request(
-        app,
-        request.view_id,
-        request_focus,
-        outcome.request_editor_focus,
-    );
+    if request_focus {
+        workspace_accessors::consume_focus_request(app, request.view_id);
+    }
 
     TileBodyOutcome {
         changed: outcome.changed,
         focused: outcome.focused,
         interaction_response: outcome.interaction_response,
-    }
-}
-
-fn apply_tile_focus_request(
-    app: &mut ScratchpadApp,
-    view_id: ViewId,
-    request_focus: bool,
-    request_editor_focus: bool,
-) {
-    match tile_focus_request(request_focus, request_editor_focus) {
-        TileFocusRequest::ConsumeRequestedFocus => {
-            workspace_accessors::consume_focus_request(app, view_id);
-        }
-        TileFocusRequest::RequestEditorFocus => {
-            workspace_accessors::request_focus_for_view(app, view_id);
-        }
-        TileFocusRequest::None => {}
     }
 }
 
@@ -534,7 +511,6 @@ fn missing_editor_content_outcome() -> EditorContentOutcome {
     EditorContentOutcome {
         changed: false,
         focused: false,
-        request_editor_focus: false,
         interaction_response: None,
     }
 }

@@ -53,13 +53,7 @@ impl<'a> TileControl<'a> {
         self
     }
 
-    pub fn show(
-        self,
-        ui: &mut egui::Ui,
-        rect: egui::Rect,
-        _id: egui::Id,
-        sense: egui::Sense,
-    ) -> egui::Response {
+    pub fn show(self, ui: &mut egui::Ui, rect: egui::Rect, sense: egui::Sense) -> egui::Response {
         let response = widget_ids::interact(
             ui,
             rect,
@@ -81,7 +75,7 @@ impl<'a> TileControl<'a> {
             );
 
             if let Some(tooltip) = self.tooltip {
-                response.clone().on_hover_text(tooltip);
+                return response.on_hover_text(tooltip);
             }
         }
 
@@ -134,7 +128,7 @@ fn tile_control_colors(
     let (fill, stroke) = base_tile_control_colors(ui, style, hovered);
     let text_color = match style {
         TileControlStyle::Danger => egui::Color32::WHITE,
-        _ => text_primary(ui),
+        TileControlStyle::Default => text_primary(ui),
     };
     TileControlColors {
         fill: fill.gamma_multiply(visibility),
@@ -178,7 +172,8 @@ fn danger_tile_control_colors(hovered: bool) -> (egui::Color32, egui::Color32) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{CLOSE_HOVER_BG, TileControlStyle, tile_control_colors};
+    use eframe::egui;
 
     #[test]
     fn close_control_is_white_on_black_in_both_themes() {

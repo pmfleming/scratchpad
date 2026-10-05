@@ -5,6 +5,36 @@ use crate::app::ui::editor_content::native_editor::{
     selected_text,
 };
 
+#[cfg(test)]
+mod tests;
+
+pub(crate) fn toggle_active_buffer_reading_order(app: &mut ScratchpadApp) {
+    if let Some(tab) = app.tab_manager.active_tab_mut()
+        && let Some(buffer_id) = tab.layout.active_view().map(|view| view.buffer_id)
+    {
+        if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
+            buffer.right_to_left_reading_order = !buffer.right_to_left_reading_order;
+        }
+        for view in &mut tab.layout.views {
+            if view.buffer_id == buffer_id {
+                view.layout_cache.clear();
+            }
+        }
+        app.tab_manager.mark_session_dirty();
+    }
+}
+
+pub(crate) fn toggle_active_buffer_control_chars(app: &mut ScratchpadApp) {
+    if let Some(tab) = app.tab_manager.active_tab_mut()
+        && let Some(buffer_id) = tab.layout.active_view().map(|view| view.buffer_id)
+    {
+        if let Some(buffer) = tab.buffer_by_id_mut(buffer_id) {
+            buffer.show_control_chars = !buffer.show_control_chars;
+        }
+        app.tab_manager.mark_session_dirty();
+    }
+}
+
 pub(crate) fn active_buffer_transaction_label(app: &ScratchpadApp) -> Option<String> {
     app.tab_manager.active_tab().map(|tab| {
         tab.active_buffer().path.as_ref().map_or_else(
@@ -70,15 +100,7 @@ pub(crate) fn cut_selected_text_in_active_view(app: &mut ScratchpadApp) -> Optio
     let (next_selection, selected_text) =
         cut_active_view_selection(app, active_tab_index, active_view_id)?;
 
-    crate::app::app_state::workspace::mutation::finalize_active_buffer_text_mutation(
-        app,
-        active_tab_index,
-    );
-    crate::app::app_state::search_runtime::refresh_search_state(app);
-    crate::app::app_state::search_visual::select_next_active_buffer_match_from(
-        app,
-        next_selection.primary.index,
-    );
+    finish_active_view_edit(app, active_tab_index, next_selection);
     Some(selected_text)
 }
 
@@ -93,15 +115,7 @@ pub(crate) fn delete_selected_text_in_active_view(app: &mut ScratchpadApp) -> bo
         return false;
     };
 
-    crate::app::app_state::workspace::mutation::finalize_active_buffer_text_mutation(
-        app,
-        active_tab_index,
-    );
-    crate::app::app_state::search_runtime::refresh_search_state(app);
-    crate::app::app_state::search_visual::select_next_active_buffer_match_from(
-        app,
-        next_selection.primary.index,
-    );
+    finish_active_view_edit(app, active_tab_index, next_selection);
     true
 }
 
@@ -137,15 +151,7 @@ pub(crate) fn insert_text_in_active_view(app: &mut ScratchpadApp, text: &str) ->
         next_selection
     };
 
-    crate::app::app_state::workspace::mutation::finalize_active_buffer_text_mutation(
-        app,
-        active_tab_index,
-    );
-    crate::app::app_state::search_runtime::refresh_search_state(app);
-    crate::app::app_state::search_visual::select_next_active_buffer_match_from(
-        app,
-        next_selection.primary.index,
-    );
+    finish_active_view_edit(app, active_tab_index, next_selection);
     true
 }
 
@@ -184,6 +190,16 @@ fn delete_active_view_selection(
     Some(next_selection)
 }
 
+/// Every text edit must invalidate derived state before advancing the search selection.
+fn finish_active_view_edit(app: &mut ScratchpadApp, tab_index: usize, selection: CursorRange) {
+    super::mutation::finalize_active_buffer_text_mutation(app, tab_index);
+    crate::app::app_state::search_runtime::refresh_search_state(app);
+    crate::app::app_state::search_visual::select_next_active_buffer_match_from(
+        app,
+        selection.primary.index,
+    );
+}
+
 fn apply_active_buffer_text_operation(app: &mut ScratchpadApp, undo: bool) -> bool {
     let active_tab_index = app.tab_manager.active_tab_index;
     let Some(active_buffer_label) = active_buffer_transaction_label(app) else {
@@ -212,15 +228,7 @@ fn apply_active_buffer_text_operation(app: &mut ScratchpadApp, undo: bool) -> bo
         selection
     };
 
-    crate::app::app_state::workspace::mutation::finalize_active_buffer_text_mutation(
-        app,
-        active_tab_index,
-    );
-    crate::app::app_state::search_runtime::refresh_search_state(app);
-    crate::app::app_state::search_visual::select_next_active_buffer_match_from(
-        app,
-        selection.primary.index,
-    );
+    finish_active_view_edit(app, active_tab_index, selection);
     let action = if undo { "Undid" } else { "Redid" };
     app.state.status.set_info_status_in_domain(
         StatusDomain::History,

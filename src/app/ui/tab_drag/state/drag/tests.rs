@@ -1,9 +1,10 @@
-use super::*;
+use super::{TabDragState, current_tab_drag_state, tab_drag_state_id};
 use crate::app::app_state::{ScratchpadApp, settings_controller};
 use crate::app::domain::{TabManager, WorkspaceTab};
 use crate::app::services::{session_store::SessionStore, settings_store::SettingsStore};
 use crate::app::startup::StartupOptions;
 use crate::app::ui::tab_drag::{self, TabDropAxis, TabDropZone, TabRectEntry};
+use eframe::egui;
 
 fn test_app(root: &std::path::Path) -> ScratchpadApp {
     let mut app = ScratchpadApp::with_stores_and_startup(

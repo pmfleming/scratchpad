@@ -37,7 +37,7 @@ pub(super) struct EditorFrame<'a> {
     pub(super) slice_chars: usize,
     pub(super) display_map: Option<&'a DisplayTextMap>,
     pub(super) tab_offsets: &'a [usize],
-    pub(super) active_selection: Option<Range<usize>>,
+    pub(super) active_selection: Option<&'a Range<usize>>,
     pub(super) cursor_range: Option<CursorRange>,
     pub(super) cursor_reveal_mode: Option<CursorRevealMode>,
     pub(super) animate_cursor_transition: bool,
@@ -103,7 +103,7 @@ pub(super) fn paint_editor(ui: &mut egui::Ui, request: EditorFrame<'_>) -> Curso
             slice_chars: request.slice_chars,
             display_map: request.display_map,
         },
-        request.active_selection.as_ref(),
+        request.active_selection,
     );
     paint_galley(
         ui,
@@ -764,12 +764,8 @@ pub(super) fn publish_ime_output(
     });
 }
 
-pub(super) fn consume_cursor_reveal(
-    view: &mut EditorViewState,
-    changed: bool,
-    reveal_attempted: bool,
-) {
-    if !changed && (view.cursor_reveal_mode().is_none() || reveal_attempted) {
+pub(super) fn consume_cursor_reveal(view: &mut EditorViewState, reveal_attempted: bool) {
+    if view.cursor_reveal_mode().is_none() || reveal_attempted {
         view.clear_cursor_reveal();
     }
 }

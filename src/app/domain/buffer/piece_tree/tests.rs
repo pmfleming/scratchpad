@@ -223,6 +223,36 @@ fn line_lookup_handles_lines_spanning_many_leaves() {
 }
 
 #[test]
+fn line_lookup_handles_node_boundaries_and_sampled_unicode_lines() {
+    let long_line = "a".repeat(super::MAX_LEAF_BYTES * (super::MAX_LEAVES_PER_INTERNAL + 1));
+    let text = format!(
+        "{long_line}\n{}\n{}",
+        "β😀\n".repeat(130),
+        "z".repeat(300_000)
+    );
+    let mut tree = PieceTreeLite::from_string(text.clone());
+    assert!(tree.root.nodes.len() > 1);
+    assert_line_lookup_matches(&tree, &text);
+
+    tree.insert_with_source(10, "\n界\n", PieceSource::Edit);
+    let mut edited = text;
+    insert_string_at_char(&mut edited, 10, "\n界\n");
+    assert_line_lookup_matches(&tree, &edited);
+}
+
+fn assert_line_lookup_matches(tree: &PieceTreeLite, text: &str) {
+    let mut start = 0;
+    let mut last = (0, 0);
+    for (index, line) in text.split('\n').enumerate() {
+        let len = line.chars().count();
+        assert_eq!(tree.line_lookup(index), (start, len), "line {index}");
+        last = (start, len);
+        start += len + 1;
+    }
+    assert_eq!(tree.line_lookup(usize::MAX), last);
+}
+
+#[test]
 fn batched_previews_match_single_preview_on_edited_tree() {
     let mut tree =
         PieceTreeLite::from_string("alpha target\nbeta target beta\nfinal target".to_owned());
@@ -332,6 +362,7 @@ fn randomized_edits_match_string_model() {
         assert_eq!(tree.extract_text(), model);
         assert_eq!(tree.len_chars(), model.chars().count());
         assert_eq!(tree.len_bytes(), model.len());
+        assert_line_lookup_matches(&tree, &model);
     }
 }
 

@@ -1,30 +1,10 @@
 use eframe::egui;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum TileFocusRequest {
-    ConsumeRequestedFocus,
-    RequestEditorFocus,
-    None,
-}
-
 pub(super) fn context_menu_attach_policy(
     editor_rect: Option<egui::Rect>,
     pointer_pos: Option<egui::Pos2>,
 ) -> bool {
     editor_rect.is_none_or(|rect| pointer_pos.is_none_or(|pos| !rect.contains(pos)))
-}
-
-pub(super) fn tile_focus_request(
-    request_focus: bool,
-    request_editor_focus: bool,
-) -> TileFocusRequest {
-    if request_focus {
-        TileFocusRequest::ConsumeRequestedFocus
-    } else if request_editor_focus {
-        TileFocusRequest::RequestEditorFocus
-    } else {
-        TileFocusRequest::None
-    }
 }
 
 pub(super) fn scrollbar_visibility_for_drag_active(
@@ -39,10 +19,7 @@ pub(super) fn scrollbar_visibility_for_drag_active(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        TileFocusRequest, context_menu_attach_policy, scrollbar_visibility_for_drag_active,
-        tile_focus_request,
-    };
+    use super::{context_menu_attach_policy, scrollbar_visibility_for_drag_active};
     use eframe::egui;
 
     #[test]
@@ -62,19 +39,6 @@ mod tests {
             None,
             Some(egui::pos2(40.0, 30.0))
         ));
-    }
-
-    #[test]
-    fn tile_focus_request_prioritizes_consuming_existing_request() {
-        assert_eq!(
-            tile_focus_request(true, true),
-            TileFocusRequest::ConsumeRequestedFocus
-        );
-        assert_eq!(
-            tile_focus_request(false, true),
-            TileFocusRequest::RequestEditorFocus
-        );
-        assert_eq!(tile_focus_request(false, false), TileFocusRequest::None);
     }
 
     #[test]

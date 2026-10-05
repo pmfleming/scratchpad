@@ -29,7 +29,6 @@ use layout::{
 use painting::{
     CursorPaintOutcome, EditorFrame, consume_cursor_reveal, paint_editor, publish_ime_output,
 };
-use std::sync::Arc;
 
 fn editor_focus_lock_filter() -> egui::EventFilter {
     egui::EventFilter {
@@ -43,7 +42,6 @@ fn editor_focus_lock_filter() -> egui::EventFilter {
 pub struct EditorWidgetOutcome {
     pub changed: bool,
     pub focused: bool,
-    pub request_editor_focus: bool,
     pub response: egui::Response,
 }
 
@@ -115,7 +113,6 @@ pub fn render_editor_text_edit(
         },
     );
 
-    let mut document_revision = buffer.document_revision();
     if should_rebuild_galley_after_input(
         input.changed,
         pre_active_selection.as_ref(),
@@ -125,7 +122,6 @@ pub fn render_editor_text_edit(
         galley_context.char_offset_base,
         galley_context.slice_chars,
     ) {
-        document_revision = buffer.document_revision();
         galley_context = build_editor_galley(ui, buffer, view, options, viewport);
         galley_pos = galley_origin(
             rect,
@@ -159,7 +155,7 @@ pub fn render_editor_text_edit(
                 slice_chars: galley_context.slice_chars,
                 display_map: galley_context.display_map.as_ref(),
                 tab_offsets: &galley_context.tab_offsets,
-                active_selection: buffer.active_selection.clone(),
+                active_selection: buffer.active_selection.as_ref(),
                 cursor_range: view.cursor_range,
                 cursor_reveal_mode: view.cursor_reveal_mode(),
                 animate_cursor_transition: input.animate_cursor_transition,
@@ -178,15 +174,14 @@ pub fn render_editor_text_edit(
     if let Some((rect, cursor_rect)) = paint_outcome.ime_geometry {
         publish_ime_output(ui, rect, cursor_rect, view);
     }
-    consume_cursor_reveal(view, false, paint_outcome.reveal_attempted);
+    consume_cursor_reveal(view, paint_outcome.reveal_attempted);
     sync_ime_output_focus(view, input.focused);
 
     store_latest_snapshot(
         view,
         &galley_context.galley,
         row_height,
-        false,
-        Some(document_revision),
+        buffer.document_revision(),
         galley_context.char_offset_base,
         galley_context.logical_line_base,
     );
@@ -196,7 +191,6 @@ pub fn render_editor_text_edit(
     EditorWidgetOutcome {
         changed: input.changed,
         focused: input.focused,
-        request_editor_focus: false,
         response,
     }
 }
@@ -387,33 +381,27 @@ pub fn delete_selected_text(buffer: &mut BufferState, cursor: CursorRange) -> Op
         .then(|| editing::apply_delete_selection(buffer, &cursor))
 }
 
-pub(super) fn store_latest_snapshot(
+fn store_latest_snapshot(
     view: &mut EditorViewState,
-    galley: &Arc<egui::Galley>,
+    galley: &egui::Galley,
     row_height: f32,
-    changed: bool,
-    revision: Option<u64>,
+    revision: u64,
     char_offset_base: usize,
     logical_line_base: usize,
 ) {
-    if changed {
-        view.latest_display_snapshot = None;
-        view.latest_display_snapshot_revision = None;
-    } else {
-        let selection_range = view
-            .cursor_range
-            .as_ref()
-            .and_then(types::selection_char_range);
-        view.latest_display_snapshot = Some(DisplaySnapshot::from_galley_with_base_and_overlays(
-            galley.as_ref(),
-            row_height,
-            char_offset_base,
-            logical_line_base,
-            selection_range,
-            &view.search_highlights.ranges,
-        ));
-        view.latest_display_snapshot_revision = revision;
-    }
+    let selection_range = view
+        .cursor_range
+        .as_ref()
+        .and_then(types::selection_char_range);
+    view.latest_display_snapshot = Some(DisplaySnapshot::from_galley_with_base_and_overlays(
+        galley,
+        row_height,
+        char_offset_base,
+        logical_line_base,
+        selection_range,
+        &view.search_highlights.ranges,
+    ));
+    view.latest_display_snapshot_revision = Some(revision);
 }
 
 pub(super) fn sync_ime_output_focus(view: &mut EditorViewState, focused: bool) {
@@ -439,14 +427,16 @@ fn publish_active_selection(
     view: &EditorViewState,
     focused: bool,
 ) -> bool {
-    let previous = buffer.active_selection.clone();
-    if focused {
-        buffer.active_selection = view
-            .cursor_range
-            .as_ref()
-            .and_then(types::selection_char_range);
+    if !focused {
+        return false;
     }
-    previous != buffer.active_selection
+    let selection = view
+        .cursor_range
+        .as_ref()
+        .and_then(types::selection_char_range);
+    let changed = buffer.active_selection != selection;
+    buffer.active_selection = selection;
+    changed
 }
 
 fn should_rebuild_galley_after_input(
