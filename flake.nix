@@ -3,9 +3,11 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+    crane.url = "github:ipetkov/crane/47b6b27ed9a3a9181415e4367d0c30ab2a0e0250";
   };
 
-  outputs = { nixpkgs, ... }:
+  outputs =
+    { nixpkgs, crane, ... }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
@@ -64,37 +66,72 @@
         StartupWMClass=scratchpad
       '';
 
-      scratchpad = pkgs.rustPlatform.buildRustPackage {
+      craneLib = crane.mkLib pkgs;
+      scratchpadArgs = {
         pname = "scratchpad";
         version = "0.4.2";
-        src = lib.cleanSource ./.;
-
-        cargoLock.lockFile = ./Cargo.lock;
-        cargoBuildFlags = [ "--bin" "scratchpad" ];
-        cargoTestFlags = [ "--lib" "--bin" "scratchpad" ];
-
+        src = lib.fileset.toSource {
+          root = ./.;
+          fileset = lib.fileset.unions [
+            ./Cargo.toml
+            ./Cargo.lock
+            ./build.rs
+            ./src
+            # Nested lock files are developer artifacts; Cargo uses the root lock.
+            (lib.fileset.difference ./crates (
+              lib.fileset.fileFilter (file: file.name == "Cargo.lock") ./crates
+            ))
+            ./fonts
+            ./tests
+            ./benches
+            ./examples
+            ./scripts/count_lines.rs
+            ./docs/settings.toml
+          ];
+        };
+        cargoVendorDir = craneLib.vendorCargoDeps { cargoLock = ./Cargo.lock; };
+        cargoExtraArgs = "--locked --offline";
+        cargoBuildExtraArgs = "--bin scratchpad";
+        cargoTestExtraArgs = "--lib --bin scratchpad";
         nativeBuildInputs = with pkgs; [
           makeWrapper
           pkg-config
         ];
         inherit buildInputs;
-
-        postInstall = ''
-          install -Dm644 ${scratchpadDesktopEntry} \
-            $out/share/applications/scratchpad.desktop
-          install -Dm644 ${./assets/Scratchpad.svg} \
-            $out/share/icons/hicolor/scalable/apps/scratchpad.svg
-
-          wrapProgram $out/bin/scratchpad \
-            --prefix LD_LIBRARY_PATH : ${runtimeLibraryPath}
-        '';
-
-        meta = {
-          description = "Scratchpad text workspace";
-          mainProgram = "scratchpad";
-          platforms = lib.platforms.linux;
-        };
+        strictDeps = true;
       };
+      scratchpadArtifacts = craneLib.buildDepsOnly (
+        scratchpadArgs
+        // {
+          cargoTestExtraArgs = "--lib --bin scratchpad --no-run";
+        }
+      );
+      scratchpad = craneLib.buildPackage (
+        scratchpadArgs
+        // {
+          cargoArtifacts = scratchpadArtifacts;
+          passthru.rebuildCache = [
+            scratchpadArtifacts
+            scratchpadArgs.cargoVendorDir
+          ];
+
+          postInstall = ''
+            install -Dm644 ${scratchpadDesktopEntry} \
+              $out/share/applications/scratchpad.desktop
+            install -Dm644 ${./assets/Scratchpad.svg} \
+              $out/share/icons/hicolor/scalable/apps/scratchpad.svg
+
+            wrapProgram $out/bin/scratchpad \
+              --prefix LD_LIBRARY_PATH : ${runtimeLibraryPath}
+          '';
+
+          meta = {
+            description = "Scratchpad text workspace";
+            mainProgram = "scratchpad";
+            platforms = lib.platforms.linux;
+          };
+        }
+      );
 
       scratchpad-hyprland = pkgs.stdenvNoCC.mkDerivation {
         pname = "scratchpad-hyprland";
