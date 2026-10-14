@@ -187,16 +187,13 @@
       };
 
       devShells.${system}.default = pkgs.mkShell {
-        packages = nativeBuildInputs ++ buildInputs;
+        packages = nativeBuildInputs ++ buildInputs ++ [ pkgs.git pkgs.python3 ];
 
         LD_LIBRARY_PATH = runtimeLibraryPath;
         LLVM_COV = "${pkgs.llvmPackages.llvm}/bin/llvm-cov";
         LLVM_PROFDATA = "${pkgs.llvmPackages.llvm}/bin/llvm-profdata";
 
         shellHook = ''
-          if [[ -x "$PWD/scripts/trim-target.sh" ]]; then
-            "$PWD/scripts/trim-target.sh"
-          fi
           echo "Scratchpad dev shell"
           echo "Try: cargo check"
         '';

@@ -89,10 +89,12 @@ path remains nonblocking and compositor-paced. See the
 [WGPU recovery investigation](docs/wgpu-recovery-investigation.md) and
 [Wayland startup validation](docs/wayland-startup.md) for the fixes and native probe.
 
-The development shell runs `scripts/trim-target.sh` when entered. It removes
-Cargo's dev profile only when `target/` exceeds 10 GiB, preserving release and
-analysis output. Use `--dry-run` to inspect it or
-`SCRATCHPAD_TARGET_MAX_GIB=0` to disable automatic trimming.
+The host's shutdown service applies [a 4 GiB Cargo cache budget](BUILD-CACHE.md).
+Development-shell entry does not trim caches. Run
+`python3 scripts/trim-build-cache.py --dry-run` for a manual preview. Incremental
+and coverage caches go first; debug/release artifacts may also be removed.
+Reports and review checkouts are preserved. `scripts/trim-target.sh` and
+`SCRATCHPAD_TARGET_MAX_GIB` remain compatible manual-command aliases.
 
 UI inspection support is optional:
 

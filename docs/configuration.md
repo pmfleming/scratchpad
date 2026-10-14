@@ -179,7 +179,8 @@ for the complete mapping.
 | `SCRATCHPAD_TRACE_WINDOW=1` | Write timestamped lifecycle, viewport-state, and eframe repaint diagnostics to stderr; disabled by default. See [visibility investigation](startup-visibility-investigation.md). |
 | `SCRATCHPAD_SYSTEM_APPEARANCE_FILE` | Read a system-appearance bridge TOML from an explicit path. |
 | `EGUI_INSPECTION=1` | With the `inspection` Cargo feature, expose egui inspection support. |
-| `SCRATCHPAD_TARGET_MAX_GIB` | Development-shell limit used by `scripts/trim-target.sh`; not an app setting. |
+| `CARGO_TARGET_MAX_GIB` | Manual cleanup command's Cargo cache budget in GiB (default 4; 0 disables). Shutdown cleanup uses the host's module configuration. See [cache policy](../BUILD-CACHE.md); not an app setting. |
+| `SCRATCHPAD_TARGET_MAX_GIB` | Legacy fallback for `CARGO_TARGET_MAX_GIB`. |
 
 On Linux the optional system-appearance bridge is also read from
 `$XDG_CONFIG_HOME/scratchpad/system-appearance.toml`,
