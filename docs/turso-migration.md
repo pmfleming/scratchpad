@@ -52,6 +52,30 @@ engine's pre-1.0 status requires independent recovery exports/backups. Baseline
 build preparation overlapped the isolated probe build; final timing comparisons
 must be interpreted with normal host variance, not claimed as causal proof.
 
+### Phase 2 — transactional worker and bounded content
+
+Implemented behind test-only module wiring until the importer is ready: a bounded
+single-owner database worker, cross-process ownership lock, restrictive Unix file
+permissions, schema/application identity checks, FULL synchronous transactions,
+256 KiB content chunks with BLAKE3 verification, per-tab incremental metadata,
+revision-based content skipping, and stale-capture rejection. Cache updates occur
+only after successful commit. Rollback keeps the previous complete session.
+
+Validation: 490 library tests pass, including six new database contracts; strict
+library/test Clippy passes. Raw lens evidence: `phase2-final`. Both local lenses
+completed. Legacy snapshot-write orchestration was simplified: function cognitive
+sum 22 -> 13, cyclomatic sum 47 -> 34, Halstead effort sum 79,747 -> 69,099, and
+function SLOC 234 -> 202 in `session_store/ops.rs`. The new backend adds code until
+legacy machinery is removed; this is not a claim of total-project LOC reduction.
+Leverage for that module rose 10 -> 40, but locality fell 100 -> 91 with changed
+semantic identity resolution; those heuristic outputs do not prove an improvement
+in every architectural dimension. No quality thresholds were weakened.
+
+Full performance lens: steady persist 68.043 ms, startup-visible 14.198 ms, full
+restore 117.615 ms. These are still the legacy application backend; the database
+is tested independently, not yet selected by production. Promise health is
+unchanged from baseline (one pass, two fails, four at risk).
+
 ## Intended sequence
 
 1. Engine validation and baseline (this commit).

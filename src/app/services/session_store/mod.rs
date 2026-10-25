@@ -1,4 +1,7 @@
 mod capture;
+// Enabled in production after the legacy importer is integrated (phase 3).
+#[cfg(test)]
+mod database;
 mod model;
 mod ops;
 mod restore;

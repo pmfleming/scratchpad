@@ -160,67 +160,31 @@ fn write_session_snapshots_parallel(
     total: usize,
     workers: usize,
 ) -> io::Result<HashSet<PathBuf>> {
-    let chunks = session_snapshot_chunks(writes, total, workers);
-    thread::scope(|scope| {
-        let handles = chunks
-            .into_iter()
-            .map(|chunk| scope.spawn(move || write_session_snapshot_chunk(chunk)))
-            .collect::<Vec<_>>();
-
-        collect_session_snapshot_results(handles, total)
-    })
-}
-
-fn session_snapshot_chunks(
-    writes: Vec<SessionSnapshotWrite>,
-    total: usize,
-    workers: usize,
-) -> Vec<Vec<SessionSnapshotWrite>> {
     let chunk_size = total.div_ceil(workers);
-    let mut iter = writes.into_iter();
-    let mut chunks = Vec::with_capacity(workers);
-    for _ in 0..workers {
-        let chunk = iter.by_ref().take(chunk_size).collect::<Vec<_>>();
-        if chunk.is_empty() {
-            break;
-        }
-        chunks.push(chunk);
-    }
-    chunks
-}
-
-fn collect_session_snapshot_results(
-    handles: Vec<thread::ScopedJoinHandle<'_, io::Result<Vec<PathBuf>>>>,
-    total: usize,
-) -> io::Result<HashSet<PathBuf>> {
-    let mut active_temp_paths = HashSet::with_capacity(total);
-    let mut first_error = None;
-    for handle in handles {
-        match session_snapshot_join_result(handle) {
-            Ok(paths) => active_temp_paths.extend(paths),
-            Err(error) => remember_first_session_snapshot_error(&mut first_error, error),
-        }
-    }
-
-    match first_error {
-        Some(error) => Err(error),
-        None => Ok(active_temp_paths),
-    }
-}
-
-fn session_snapshot_join_result(
-    handle: thread::ScopedJoinHandle<'_, io::Result<Vec<PathBuf>>>,
-) -> io::Result<Vec<PathBuf>> {
-    match handle.join() {
-        Ok(result) => result,
-        Err(_) => Err(io::Error::other("session snapshot writer panicked")),
-    }
-}
-
-fn remember_first_session_snapshot_error(first_error: &mut Option<io::Error>, error: io::Error) {
-    if first_error.is_none() {
-        *first_error = Some(error);
-    }
+    let mut writes = writes.into_iter();
+    thread::scope(|scope| {
+        let handles = (0..workers)
+            .map(|_| {
+                let chunk = writes.by_ref().take(chunk_size).collect();
+                scope.spawn(move || write_session_snapshot_chunk(chunk))
+            })
+            .collect::<Vec<_>>();
+        // Join every worker before returning an error; do not abandon live writes.
+        let results = handles
+            .into_iter()
+            .map(|handle| {
+                handle
+                    .join()
+                    .unwrap_or_else(|_| Err(io::Error::other("session snapshot writer panicked")))
+            })
+            .collect::<Vec<_>>();
+        Ok(results
+            .into_iter()
+            .collect::<io::Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect())
+    })
 }
 
 fn write_session_snapshot_chunk(writes: Vec<SessionSnapshotWrite>) -> io::Result<Vec<PathBuf>> {
