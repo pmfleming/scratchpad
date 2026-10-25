@@ -31,6 +31,16 @@ impl DatabaseWorker {
                         for job in receiver {
                             job(&mut database);
                         }
+                        if database.ensure_healthy().is_ok()
+                            && let Err(cause) = block_on(database.checkpoint())
+                        {
+                            crate::app::diagnostics::record_io_error(
+                                "session_checkpoint",
+                                Some(&root),
+                                "session_store",
+                                &cause,
+                            );
+                        }
                     }
                     Err(cause) => {
                         let _ = ready_tx.send(Err(cause));

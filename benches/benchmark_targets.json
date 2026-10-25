@@ -124,7 +124,12 @@
     "workload_family": "session-persistence",
     "parameter_unit": "tabs",
     "kind": "diagnostic",
-    "targets": ["src/app/services/session_store/restore.rs"],
+    "targets": [
+      "src/app/services/session_store/restore.rs",
+      "src/app/services/session_store/database/read.rs",
+      "src/app/services/session_store/database/content.rs",
+      "src/app/services/session_store/parallel.rs"
+    ],
     "limiting_resource_hint": "disk-io"
   },
   "session_persist_latency": {
@@ -135,7 +140,7 @@
     "threshold_ms": 180.0,
     "targets": [
       "src/app/services/session_store/capture.rs",
-      "src/app/services/session_store/ops.rs"
+      "src/app/services/session_store/database"
     ],
     "limiting_resource_hint": "disk-io"
   }

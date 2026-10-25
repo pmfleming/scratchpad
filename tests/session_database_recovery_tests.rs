@@ -18,6 +18,29 @@ fn abrupt_writer() {
 }
 
 #[test]
+fn healthy_shutdown_drains_and_checkpoints_the_wal() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = SessionStore::new(directory.path().to_owned());
+    let tab = WorkspaceTab::new(BufferState::new(
+        "saved session".into(),
+        "still unsaved document".into(),
+        None,
+    ));
+    store.persist(&[tab], 0, 16.0, false).unwrap();
+    drop(store);
+    let wal = directory.path().join("session.db-wal");
+    assert!(!wal.exists() || wal.metadata().unwrap().len() == 0);
+    let restored = SessionStore::new(directory.path().to_owned())
+        .load()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        restored.tabs[0].active_buffer().text(),
+        "still unsaved document"
+    );
+}
+
+#[test]
 fn acknowledged_commit_survives_abrupt_exit() {
     let directory = tempfile::tempdir().unwrap();
     let status = Command::new(std::env::current_exe().unwrap())

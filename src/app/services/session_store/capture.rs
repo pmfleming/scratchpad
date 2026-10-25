@@ -19,6 +19,7 @@ pub(crate) struct SessionPersistRequest {
 pub(super) struct CapturedSessionTab {
     pub(super) session_tab: SessionTab,
     pub(super) buffer_snapshots: Vec<CapturedSessionBuffer>,
+    pub(super) preserve_existing: bool,
 }
 
 pub(super) struct CapturedSessionBuffer {
@@ -80,6 +81,7 @@ impl CapturedSessionTab {
         Self {
             session_tab: SessionTab::from(session_tab),
             buffer_snapshots: Vec::new(),
+            preserve_existing: true,
         }
     }
 
@@ -113,6 +115,7 @@ impl CapturedSessionTab {
                 root_pane: SessionPaneNode::from(tab.layout.root_pane()),
             },
             buffer_snapshots,
+            preserve_existing: false,
         }
     }
 }

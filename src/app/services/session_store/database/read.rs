@@ -28,6 +28,7 @@ pub(in crate::app::services::session_store) enum ReadScope {
 
 impl Database {
     pub async fn load(&mut self, scope: ReadScope) -> io::Result<Option<StoredSession>> {
+        self.ensure_healthy()?;
         let result = self.read_session(scope).await;
         if let Err(error) = &result {
             self.blocked = Some(error.to_string());
@@ -138,6 +139,7 @@ impl Database {
         &mut self,
         tab: SessionTab,
     ) -> io::Result<(SessionTab, HashMap<String, String>)> {
+        self.ensure_healthy()?;
         let result = self.hydrate_contents(&tab).await;
         if let Err(error) = &result {
             self.blocked = Some(error.to_string());

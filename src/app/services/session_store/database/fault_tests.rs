@@ -3,6 +3,39 @@ use super::*;
 use futures_lite::future::block_on;
 
 #[test]
+fn failed_rollback_blocks_subsequent_reads_and_writes() {
+    block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let mut db = Database::open(directory.path()).await.unwrap();
+        db.persist(request(&[tab("committed")]), 1).await.unwrap();
+        // Inject a failed rollback result at the connection boundary.
+        db.record_rollback_result(Err(io::Error::other("injected rollback failure")));
+        assert!(db.load(ReadScope::All).await.is_err());
+        assert!(
+            db.persist(request(&[tab("must not replace")]), 2)
+                .await
+                .is_err()
+        );
+    });
+}
+
+#[test]
+fn parallel_scan_detects_orphan_chunks_outside_all_content_ranges() {
+    block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let mut db = Database::open(directory.path()).await.unwrap();
+        let tabs: Vec<_> = (0..1000).map(|_| tab("unique identity")).collect();
+        db.persist(request(&tabs), 1).await.unwrap();
+        db.conn
+            .execute("INSERT INTO chunks VALUES('zzzz_orphan', 0, x'6162')", ())
+            .await
+            .unwrap();
+        assert!(db.load(ReadScope::All).await.is_err());
+        assert!(db.persist(request(&tabs), 2).await.is_err());
+    });
+}
+
+#[test]
 fn document_replacement_with_reused_generation_is_not_skipped() {
     block_on(async {
         let directory = tempfile::tempdir().unwrap();

@@ -11,9 +11,10 @@ multi-file workspaces.
 
 ## How Fast Is Scratchpad?
 
-Scratchpad's seven performance promises all pass on a 16-thread AMD Ryzen 7 PRO
-8840HS. These results come from the Performance Lens benchmark suite; timings
-are representative measurements rather than cross-platform guarantees.
+The archived baseline below reported seven passing performance promises on a
+16-thread AMD Ryzen 7 PRO 8840HS. These are historical measurements, not current
+compliance guarantees: fresh [session-migration runs](docs/turso-migration.md)
+identify existing failures and coverage risks. Timings are not cross-platform guarantees.
 
 | Promise | Result | Measured workload |
 | --- | --- | --- |
@@ -132,6 +133,11 @@ Settings are available in the app with `Ctrl + ,` and are stored as TOML:
 | --- | --- | --- |
 | Windows | `%APPDATA%\Scratchpad\settings.toml` | `%LOCALAPPDATA%\Scratchpad` |
 | Linux | `$XDG_CONFIG_HOME/scratchpad/settings.toml` or `~/.config/scratchpad/settings.toml` | `$XDG_STATE_HOME/scratchpad` or `~/.local/state/scratchpad` |
+
+Sessions use a local embedded Turso `session.db`; settings remain TOML and user
+files keep their existing save paths. Legacy JSON/temp recovery files are imported
+without deleting the originals. See [migration and recovery export](docs/turso-migration.md)
+before backing up, recovering, or downgrading a session database.
 
 Start with [the configuration guide](docs/configuration.md). It documents the
 TOML sections, shortcut syntax, platform overrides, runtime environment

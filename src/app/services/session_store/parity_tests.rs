@@ -40,6 +40,87 @@ fn combined_tabs_preserve_format_flags_views_and_active_surface() {
     );
 }
 
+fn persisted_dirty_file(text: &str) -> (tempfile::TempDir, WorkspaceTab, SessionStore) {
+    let directory = tempfile::tempdir().unwrap();
+    let mut tab = WorkspaceTab::new(BufferState::new(
+        "saved.txt".into(),
+        text.into(),
+        Some(directory.path().join("saved.txt")),
+    ));
+    tab.buffers.buffer.is_dirty = true;
+    let store = SessionStore::new(directory.path().join("session"));
+    store
+        .persist(std::slice::from_ref(&tab), 0, 16.0, false)
+        .unwrap();
+    (directory, tab, store)
+}
+
+#[test]
+fn saved_clean_buffer_discards_obsolete_recovery_text() {
+    let (directory, mut tab, store) = persisted_dirty_file("old dirty text");
+    let path = directory.path().join("saved.txt");
+    std::fs::write(&path, "current saved text").unwrap();
+    tab.buffers.buffer.is_dirty = false;
+    tab.buffers.buffer.replace_text("current saved text".into());
+    tab.buffers
+        .buffer
+        .sync_to_disk_state(Some(FileService::read_disk_state(&path).unwrap()));
+    store
+        .persist(std::slice::from_ref(&tab), 0, 16.0, false)
+        .unwrap();
+    assert!(
+        store
+            .read_session(super::database::ReadScope::All)
+            .unwrap()
+            .unwrap()
+            .contents
+            .is_empty()
+    );
+    assert_eq!(
+        store.load().unwrap().unwrap().tabs[0].buffers.buffer.text(),
+        "current saved text"
+    );
+}
+
+#[test]
+fn clean_cold_backup_is_preserved_but_available_disk_is_authoritative() {
+    let (directory, mut tab, store) = persisted_dirty_file("backup text");
+    let path = directory.path().join("saved.txt");
+    std::fs::write(&path, "new disk text").unwrap();
+    tab.buffers.buffer.is_dirty = false;
+    tab.buffers
+        .buffer
+        .sync_to_disk_state(Some(FileService::read_disk_state(&path).unwrap()));
+    let cold = std::collections::HashMap::from([(0, super::cold_tab_from_workspace_tab(&tab))]);
+    let request = SessionPersistRequest::capture_with_cold_tabs(
+        &[tab],
+        &cold,
+        0,
+        SessionActiveSurface::Workspace,
+        16.0,
+        false,
+    );
+    store.persist_request(request).unwrap();
+    assert_eq!(
+        store
+            .read_session(super::database::ReadScope::All)
+            .unwrap()
+            .unwrap()
+            .contents
+            .len(),
+        1
+    );
+    assert_eq!(
+        store.load().unwrap().unwrap().tabs[0].buffers.buffer.text(),
+        "new disk text"
+    );
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(
+        store.load().unwrap().unwrap().tabs[0].buffers.buffer.text(),
+        "backup text"
+    );
+}
+
 #[test]
 fn clean_disk_buffer_restores_exported_history_without_redundant_content() {
     let directory = tempfile::tempdir().unwrap();

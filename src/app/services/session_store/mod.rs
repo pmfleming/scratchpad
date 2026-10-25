@@ -2,8 +2,10 @@ mod capture;
 mod database;
 mod legacy;
 mod model;
+mod parallel;
 #[cfg(test)]
 mod parity_tests;
+mod recovery_export;
 mod restore;
 mod types;
 
@@ -91,26 +93,41 @@ impl SessionStore {
             manifest_read_parse_ns: start.elapsed().as_nanos(),
             ..SessionRestoreProfile::default()
         };
-        let restored = stored.and_then(|stored| {
-            profile.tab_count = stored.manifest.tabs.len();
-            profile.buffer_count = stored
-                .manifest
-                .tabs
-                .iter()
-                .map(SessionTab::buffer_count)
-                .sum();
-            let reconstruct = Instant::now();
-            let restored = restore_session(stored);
-            profile.restore_reconstruction_ns = reconstruct.elapsed().as_nanos();
-            restored
-        });
+        let restored = stored
+            .map(|stored| {
+                profile.tab_count = stored.manifest.tabs.len();
+                profile.buffer_count = stored
+                    .manifest
+                    .tabs
+                    .iter()
+                    .map(SessionTab::buffer_count)
+                    .sum();
+                let reconstruct = Instant::now();
+                let restored = self.restore_guarded(stored);
+                profile.restore_reconstruction_ns = reconstruct.elapsed().as_nanos();
+                restored
+            })
+            .transpose()?
+            .flatten();
         profile.total_ns = start.elapsed().as_nanos();
         Ok(ProfiledRestoredSession { restored, profile })
     }
     pub fn load_startup_visible(&self) -> io::Result<Option<RestoredSession>> {
-        Ok(self
-            .read_session(ReadScope::Active)?
-            .and_then(restore_session))
+        self.read_session(ReadScope::Active)?
+            .map(|stored| self.restore_guarded(stored))
+            .transpose()
+            .map(Option::flatten)
+    }
+    fn restore_guarded(&self, stored: StoredSession) -> io::Result<Option<RestoredSession>> {
+        restore_session(stored).inspect_err(|error| {
+            let reason = error.to_string();
+            if let Ok(worker) = self.worker() {
+                let _ = worker.call(move |db| {
+                    db.blocked = Some(reason);
+                    Ok(())
+                });
+            }
+        })
     }
     pub(crate) fn load_streaming(
         &self,
@@ -201,17 +218,17 @@ impl SessionStore {
             })
     }
 }
-fn restore_session(stored: StoredSession) -> Option<RestoredSession> {
+fn restore_session(stored: StoredSession) -> io::Result<Option<RestoredSession>> {
     let mut session = restored_metadata(&stored.manifest);
     let mut summary = restore::RestoreSummary::default();
     for (tab, tab_summary) in
-        Restorer::new(stored.contents).restore_tabs_ordered(stored.manifest.tabs)
+        Restorer::new(stored.contents).restore_tabs_ordered(stored.manifest.tabs)?
     {
         summary.merge(tab_summary);
         session.tabs.push(tab);
     }
     session.restore_status = summary.into_status();
-    (!session.tabs.is_empty()).then_some(session)
+    Ok((!session.tabs.is_empty()).then_some(session))
 }
 fn restored_metadata(manifest: &SessionManifest) -> RestoredSession {
     RestoredSession {

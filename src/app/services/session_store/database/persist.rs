@@ -1,17 +1,21 @@
 use super::{Database, SessionPersistProfile, error, invalid};
 use crate::app::services::session_store::capture::{CapturedSessionBuffer, SessionPersistRequest};
 use crate::app::services::session_store::{model::SessionManifest, session_manifest};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::time::Instant;
 use turso::params;
+
+struct RecoveryPolicy {
+    required: bool,
+    retain: bool,
+}
 
 struct Prepared {
     state: Vec<u8>,
     tabs: Vec<Vec<u8>>,
     snapshots: Vec<CapturedSessionBuffer>,
-    active: HashSet<String>,
-    required: HashSet<String>,
+    buffers: HashMap<String, RecoveryPolicy>,
 }
 impl Prepared {
     fn new(request: SessionPersistRequest) -> io::Result<Self> {
@@ -28,20 +32,21 @@ impl Prepared {
             state: Vec::new(),
             tabs: Vec::with_capacity(tab_count),
             snapshots: Vec::new(),
-            active: HashSet::new(),
-            required: HashSet::new(),
+            buffers: HashMap::new(),
         };
         for tab in tabs {
             super::super::legacy::validate_tab(&tab.session_tab)?;
-            prepared.required.extend(
-                tab.session_tab
-                    .buffers
-                    .iter()
-                    .filter(|buffer| super::super::legacy::needs_snapshot(buffer))
-                    .map(|buffer| buffer.temp_id.clone()),
-            );
             for buffer in &tab.session_tab.buffers {
-                if !prepared.active.insert(buffer.temp_id.clone()) {
+                let required = super::super::legacy::needs_snapshot(buffer);
+                let policy = RecoveryPolicy {
+                    required,
+                    retain: tab.preserve_existing || required || buffer.disk_len.is_none(),
+                };
+                if prepared
+                    .buffers
+                    .insert(buffer.temp_id.clone(), policy)
+                    .is_some()
+                {
                     return Err(invalid("duplicate recovery content identity across tabs"));
                 }
             }
@@ -62,6 +67,9 @@ impl Prepared {
         prepared.state = serde_json::to_vec(&manifest).map_err(invalid)?;
         Ok(prepared)
     }
+    fn retains(&self, id: &str) -> bool {
+        self.buffers.get(id).is_some_and(|policy| policy.retain)
+    }
 }
 
 impl Database {
@@ -70,11 +78,7 @@ impl Database {
         request: SessionPersistRequest,
         generation: u64,
     ) -> io::Result<SessionPersistProfile> {
-        if let Some(cause) = &self.blocked {
-            return Err(invalid(format!(
-                "session is protected after recovery failure: {cause}"
-            )));
-        }
+        self.ensure_healthy()?;
         if !self.verified {
             self.load(super::ReadScope::Shells).await?;
         }
@@ -89,7 +93,7 @@ impl Database {
                 + prepared.tabs.iter().map(Vec::len).sum::<usize>())
                 as u64,
             tab_count: prepared.tabs.len(),
-            buffer_count: prepared.active.len(),
+            buffer_count: prepared.buffers.len(),
             ..SessionPersistProfile::default()
         };
         prepared.snapshots.retain(|buffer| {
@@ -97,7 +101,8 @@ impl Database {
         });
         let unchanged = prepared.snapshots.is_empty()
             && self.state_cache == prepared.state
-            && self.tab_cache == prepared.tabs;
+            && self.tab_cache == prepared.tabs
+            && self.revisions.keys().all(|id| prepared.retains(id));
         if !unchanged {
             self.conn
                 .execute("BEGIN IMMEDIATE", ())
@@ -109,7 +114,7 @@ impl Database {
             profile.manifest_write_ns += commit_start.elapsed().as_nanos();
         }
         // Update caches only after COMMIT. A failed attempt must be fully retryable.
-        self.revisions.retain(|id, _| prepared.active.contains(id));
+        self.revisions.retain(|id, _| prepared.retains(id));
         self.revisions.extend(
             prepared
                 .snapshots
@@ -144,14 +149,12 @@ impl Database {
                     .map_err(error)?;
             }
         }
-        self.conn
-            .execute(
-                "DELETE FROM tabs WHERE position>=?",
-                [prepared.tabs.len() as i64],
-            )
-            .await
-            .map_err(error)?;
-        self.conn.execute("INSERT INTO session_state VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload", [prepared.state.as_slice()]).await.map_err(error)?;
+        self.execute_cached(
+            "DELETE FROM tabs WHERE position>=?",
+            [prepared.tabs.len() as i64],
+        )
+        .await?;
+        self.execute_cached("INSERT INTO session_state VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload", [prepared.state.as_slice()]).await?;
         profile.manifest_write_ns = start.elapsed().as_nanos();
         let start = Instant::now();
         self.delete_stale_content(prepared).await?;
@@ -170,18 +173,18 @@ impl Database {
             ids.insert(row.get::<String>(0).map_err(error)?);
         }
         drop(rows);
-        if !prepared.required.is_subset(&ids) {
+        if prepared
+            .buffers
+            .iter()
+            .any(|(id, policy)| policy.required && !ids.contains(id))
+        {
             return Err(invalid("refusing to commit missing recovery content"));
         }
-        for id in ids.difference(&prepared.active) {
-            self.conn
-                .execute("DELETE FROM chunks WHERE id=?", [id.as_str()])
-                .await
-                .map_err(error)?;
-            self.conn
-                .execute("DELETE FROM snapshots WHERE id=?", [id.as_str()])
-                .await
-                .map_err(error)?;
+        for id in ids.iter().filter(|id| !prepared.retains(id)) {
+            self.execute_cached("DELETE FROM chunks WHERE id=?", [id.as_str()])
+                .await?;
+            self.execute_cached("DELETE FROM snapshots WHERE id=?", [id.as_str()])
+                .await?;
         }
         Ok(())
     }

@@ -32,13 +32,13 @@ pub(super) struct StoredSession {
 }
 pub(super) struct Database {
     conn: Connection,
-    _database: TursoDatabase,
+    database: TursoDatabase,
     _ownership: File,
     tab_cache: Vec<Vec<u8>>,
     state_cache: Vec<u8>,
     revisions: HashMap<String, crate::app::domain::buffer::SnapshotRevision>,
     latest_request: u64,
-    blocked: Option<String>,
+    pub(super) blocked: Option<String>,
     verified: bool,
 }
 impl Database {
@@ -52,16 +52,17 @@ impl Database {
             .to_str()
             .ok_or_else(|| invalid("session database path is not UTF-8"))?;
         let database = turso::Builder::new_local(path)
+            .with_io(turso::IoBackend::Syscall)
             .build()
             .await
             .map_err(error)?;
         let conn = database.connect().map_err(error)?;
-        conn.execute("PRAGMA synchronous=FULL", ())
+        conn.execute_batch("PRAGMA synchronous=FULL; PRAGMA cache_size=-8192;")
             .await
             .map_err(error)?;
         let mut db = Self {
             conn,
-            _database: database,
+            database,
             _ownership: ownership,
             tab_cache: Vec::new(),
             state_cache: Vec::new(),
@@ -128,19 +129,55 @@ impl Database {
         while rows.next().await.map_err(error)?.is_some() {}
         Ok(())
     }
-    async fn finish_transaction(&self, result: io::Result<()>) -> io::Result<()> {
-        match result {
-            Ok(()) => match self.conn.execute("COMMIT", ()).await {
-                Ok(_) => Ok(()),
-                Err(cause) => {
-                    let _ = self.conn.execute("ROLLBACK", ()).await;
-                    Err(error(cause))
-                }
-            },
-            Err(cause) => {
-                let _ = self.conn.execute("ROLLBACK", ()).await;
-                Err(cause)
+    fn ensure_healthy(&self) -> io::Result<()> {
+        match &self.blocked {
+            Some(cause) => Err(invalid(format!(
+                "session is protected after recovery failure: {cause}"
+            ))),
+            None => Ok(()),
+        }
+    }
+    async fn execute_cached(&self, sql: &str, params: impl turso::IntoParams) -> io::Result<()> {
+        self.conn
+            .prepare_cached(sql)
+            .await
+            .map_err(error)?
+            .execute(params)
+            .await
+            .map_err(error)?;
+        Ok(())
+    }
+    async fn finish_transaction(&mut self, result: io::Result<()>) -> io::Result<()> {
+        let result = match result {
+            Ok(()) => self
+                .conn
+                .execute("COMMIT", ())
+                .await
+                .map(|_| ())
+                .map_err(error),
+            Err(cause) => Err(cause),
+        };
+        if result.is_err() {
+            // A failed COMMIT can be ambiguous. Never trust pre-attempt caches.
+            self.state_cache.clear();
+            self.tab_cache.clear();
+            self.revisions.clear();
+            // SQLITE_FULL and rollback triggers can already end the transaction.
+            if !self.conn.is_autocommit().unwrap_or(false) {
+                let rollback = self
+                    .conn
+                    .execute("ROLLBACK", ())
+                    .await
+                    .map(|_| ())
+                    .map_err(error);
+                self.record_rollback_result(rollback);
             }
+        }
+        result
+    }
+    fn record_rollback_result(&mut self, result: io::Result<()>) {
+        if let Err(cause) = result {
+            self.blocked = Some(format!("rollback failed: {cause}"));
         }
     }
 }

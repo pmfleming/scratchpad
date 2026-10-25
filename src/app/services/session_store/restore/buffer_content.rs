@@ -46,7 +46,7 @@ impl Restorer {
     ) -> RestoredBufferContent {
         let is_dirty = buffer.is_dirty;
         match FileService::read_disk_state(path).ok() {
-            Some(disk_state) if Some(disk_state.clone()) != session_disk_state => {
+            Some(disk_state) if !is_dirty || Some(&disk_state) != session_disk_state.as_ref() => {
                 self.restore_changed_disk_buffer(buffer, path, content, disk_state)
             }
             Some(disk_state) => {

@@ -63,6 +63,7 @@ fn read_tab(root: &Path, tab: SessionTab) -> io::Result<CapturedSessionTab> {
     Ok(CapturedSessionTab {
         session_tab: tab,
         buffer_snapshots: snapshots,
+        preserve_existing: true,
     })
 }
 fn read_buffer(root: &Path, buffer: &SessionBuffer) -> io::Result<Option<CapturedSessionBuffer>> {

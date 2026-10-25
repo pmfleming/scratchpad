@@ -1,8 +1,10 @@
 use super::model::{SessionBufferPayload, SessionTab, SessionTabParts};
+use super::parallel;
 use super::{RestoreStatus, RestoreStatusLevel};
 use crate::app::domain::{BufferFreshness, BufferState, RestoredBufferState, WorkspaceTab};
 use crate::app::utils::pluralize;
 use std::collections::HashMap;
+use std::io;
 
 mod buffer_content;
 mod tab_build;
@@ -62,7 +64,33 @@ impl Restorer {
     pub(super) fn restore_tabs_ordered(
         &mut self,
         tabs: Vec<SessionTab>,
-    ) -> Vec<(WorkspaceTab, RestoreSummary)> {
+    ) -> io::Result<Vec<(WorkspaceTab, RestoreSummary)>> {
+        let workers = parallel::worker_count(16);
+        if tabs.len() < 512 || workers == 1 {
+            return Ok(self.restore_sequential(tabs));
+        }
+        let total = tabs.len();
+        let chunk_size = total.div_ceil(workers);
+        let mut tabs = tabs.into_iter();
+        let jobs = (0..workers).map(|_| {
+            let chunk = tabs.by_ref().take(chunk_size).collect::<Vec<_>>();
+            let contents = chunk
+                .iter()
+                .flat_map(|tab| &tab.buffers)
+                .filter_map(|buffer| self.contents.remove_entry(&buffer.temp_id))
+                .collect();
+            (chunk, contents)
+        });
+        let batches = parallel::ordered("session-reconstruct", jobs, |(tabs, contents)| {
+            Ok(Restorer::new(contents).restore_sequential(tabs))
+        })?;
+        let mut restored = Vec::with_capacity(total);
+        for batch in batches {
+            restored.extend(batch);
+        }
+        Ok(restored)
+    }
+    fn restore_sequential(&mut self, tabs: Vec<SessionTab>) -> Vec<(WorkspaceTab, RestoreSummary)> {
         tabs.into_iter()
             .map(|tab| self.restore_tab_with_summary(tab))
             .collect()
