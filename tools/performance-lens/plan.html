@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scratchpad · External Performance Lens Plan</title>
+<style>
+:root{color-scheme:light;--ink:#192a38;--muted:#536574;--line:#d9e3e9;--paper:#fff;--bg:#f1f5f7;--accent:#086b70;--soft:#e8f5f3;--warn:#fff4df}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif}main{max-width:1180px;margin:auto;padding:48px 28px 80px}header{padding:36px;background:#183541;color:white;border-radius:16px}header p{max-width:850px;color:#d7e6eb}.eyebrow{text-transform:uppercase;letter-spacing:.14em;font-size:12px;font-weight:750;color:#a9ded7}h1{font-size:clamp(30px,5vw,48px);line-height:1.12;margin:12px 0 20px}h2{font-size:26px;line-height:1.25;margin:0 0 18px}h3{font-size:18px;margin:24px 0 8px}p{margin:10px 0 16px}a{color:var(--accent)}header a{color:#a9ded7}nav{display:flex;flex-wrap:wrap;gap:8px 22px;margin:22px 0 30px}nav a{font-size:14px;text-decoration:none;font-weight:650}section{background:var(--paper);padding:30px;margin:22px 0;border:1px solid var(--line);border-radius:12px;scroll-margin-top:20px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.card{padding:18px;border:1px solid var(--line);border-radius:8px}.card strong{display:block;margin-bottom:6px}.note{padding:16px 20px;background:var(--soft);border-left:4px solid var(--accent);margin:20px 0}.warning{background:var(--warn);border-left-color:#b57a16}.small,footer{font-size:13px;color:var(--muted)}.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;padding:13px 12px;border-bottom:1px solid var(--line)}th{background:var(--bg);font-size:12px;text-transform:uppercase;letter-spacing:.04em}td:first-child{font-weight:650}code{font: .88em ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}pre{background:#142c36;color:#e4f0f2;padding:20px;border-radius:8px;overflow:auto;line-height:1.6;font-size:13px}pre code{overflow-wrap:normal;font-size:inherit}li{margin:7px 0}ul,ol{padding-left:23px}.tag{display:inline-block;background:var(--soft);color:var(--accent);padding:3px 9px;border-radius:5px;font-size:12px;font-weight:750}footer{margin:24px 0}@media(max-width:760px){main{padding:20px 14px 40px}header,section{padding:22px}.grid{grid-template-columns:1fr}}@media print{body{background:white;font-size:11pt}main{max-width:none;padding:0}header{background:white;color:var(--ink);border:1px solid var(--line)}header p,.eyebrow{color:var(--muted)}nav{display:none}section{break-inside:auto}tr,.card,.note{break-inside:avoid}pre{white-space:pre-wrap;background:var(--bg);color:var(--ink)}a{color:inherit}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div class="eyebrow">Review + implementation plan · 21 October 2026</div>
+<h1>A small performance lens.<br>A real Scratchpad process.</h1>
+<p>Establish repeatable responsiveness, CPU, GPU, memory and I/O measurements without adding instrumentation or dependencies to the editor. Keep the harness with the project, but outside its application code and build.</p>
+<div class="small" style="color:#c0d5dd">Planning only · Linux / Wayland first · Local artifacts · No service or dashboard framework</div>
+</header>
+<nav aria-label="Contents">
+<a href="#decision">Decision</a><a href="#review">Existing lens review</a><a href="#boundary">Boundary</a><a href="#metrics">Metrics</a><a href="#response">Responsiveness</a><a href="#scenarios">Scenarios</a><a href="#method">Method</a><a href="#delivery">Delivery</a><a href="#acceptance">Acceptance</a>
+</nav>
+
+<section id="decision">
+<h2>1. Recommended direction</h2>
+<div class="grid">
+<div class="card"><strong>Observe the release application</strong>Launch a supplied binary in an isolated synthetic session. Sample OS counters and correlate them with explicit workload phases.</div>
+<div class="card"><strong>Keep the tool small</strong>A Python 3.11+ standard-library CLI, Linux collectors, one optional desktop adapter, JSON/CSV data and a self-contained HTML report.</div>
+<div class="card"><strong>Be honest about scope</strong>Resource usage is directly observable. Visible-response timing needs a validated capture method. Missing GPU or latency support stays unavailable, never zero.</div>
+</div>
+<p><strong>Do not rebuild the existing performance dashboard or migrate the entire sibling lens.</strong> Retain it for optional internal benchmarks and diagnosis. The new tool answers a narrower question: “Does this actual build respond promptly, and what does it consume while idle and during representative work?”</p>
+<p>Interpret “stored with the project, external to the code” as a versioned <code>scratchpad/tools/performance-lens/</code> directory, not a linked application module, Cargo target or runtime feature. Python is a deliberate choice for this new external harness; the existing sibling lens remains Rust-only.</p>
+<div class="note"><strong>First useful result:</strong> a roughly five-minute visible/hidden idle smoke run with CPU, RSS and I/O timelines; GPU counters when supported; map/reveal timing proxies; explicit capability and failure reporting. Automated visual-response measurements follow a feasibility gate rather than being claimed up front.</div>
+</section>
+
+<section id="review">
+<h2>2. Review of the local performance lens</h2>
+<p class="small">Reviewed source and documentation at <code>scratchpad-performance-lens@dcc8b2e</code> and <code>scratchpad@5771513</code>. Both worktrees were clean before this plan. This is a focused architecture/measurement review, not a fresh benchmark run or full correctness audit.</p>
+<div class="table"><table>
+<thead><tr><th>Finding</th><th>Local evidence</th><th>Decision for the simple lens</th></tr></thead>
+<tbody>
+<tr><td>Strong evidence discipline worth keeping</td><td>The existing README, <code>src/provenance.rs</code> and measurement-integrity contract distinguish stale, failed, partial, synthetic and unmeasured evidence. Frame reporting labels its omitted presentation work.</td><td>Carry over explicit scope, units, provenance and partial-run states. Avoid copying its entire promise/capacity synthesis model.</td></tr>
+<tr><td>Resources are probe-scoped, not a live app monitor</td><td><code>src/producers/resources.rs::resource_profiles</code> builds and runs Scratchpad’s <code>resource_probe</code>; it aggregates targeted workload events.</td><td>Add an external process sampler. Internal allocator peaks remain optional diagnostic evidence, not real-window RSS measurements.</td></tr>
+<tr><td>Frame numbers do not establish visible responsiveness</td><td><code>src/producers/frame_metrics.rs</code> runs <code>frame_metrics</code> and optional <code>realistic_frame_metrics</code>. Documented scopes stop at CPU frame preparation or event-to-tessellation; presentation is excluded.</td><td>Never turn theoretical FPS into displayed FPS or input latency. Give native visual observation a separate metric identity.</td></tr>
+<tr><td>No runtime GPU collector found in lens source</td><td>The inspected producers have no DRM fdinfo or vendor GPU sampling path; the integrity document explicitly excludes GPU/compositor inference from headless results.</td><td>Start with capability-detected Linux DRM counters. Device-wide GPU activity is context, not Scratchpad-attributed utilization.</td></tr>
+<tr><td>Native idle checks have unusually high value here</td><td>Scratchpad’s WGPU/Wayland investigations reproduced a hidden-startup one-core busy loop and later validated a sleeping-loop fix. A local <code>target/wgpu-investigation/native-check.py</code> already demonstrates PID-scoped window handling and isolated XDG roots.</td><td>Promote the approach into tested harness code, not a dependency on disposable <code>target/</code> scripts. Include hidden startup, visible idle and hide/reveal.</td></tr>
+<tr><td>The old tool is broader than this request</td><td>The sibling lens includes capacity, search, code metrics, telemetry and review producers. Its README assigns UI/orchestration to a separate project-management-board repository.</td><td>No React app, local server, telemetry publisher, code-quality scoring or seven-promise certification in this MVP.</td></tr>
+</tbody></table></div>
+<div class="note warning"><strong>Do not reuse stale conclusions.</strong> The older August investigation recommends Glow; the later recovery document and current README restore WGPU as the default with the existing eframe patch. Measure WGPU first, Glow only as an explicit comparison. Historical benchmark passes are context, not a current baseline.</div>
+</section>
+
+<section id="boundary">
+<h2>3. Storage and isolation contract</h2>
+<pre><code>scratchpad/
+  src/                          # untouched
+  crates/                       # untouched
+  Cargo.toml / Cargo.lock        # untouched
+  tools/performance-lens/
+    plan.html                   # this document
+    README.md                   # setup, metric definitions, limitations
+    lens.py                     # CLI: doctor / run / report / compare
+    collectors/                 # procfs and optional DRM fdinfo
+    desktop/                    # capability-detected Hyprland adapter
+    report/                     # static HTML template; no remote assets
+    scenarios.toml              # workloads, durations, optional budgets
+    tests/                      # parser, lifecycle, report and fixture tests
+    .gitignore                  # runs/, fixtures/, __pycache__/
+    runs/&lt;run-id&gt;/              # ignored, local, never overwrite prior runs
+      manifest.json
+      samples.jsonl
+      events.jsonl
+      summary.json
+      samples.csv
+      report.html
+      logs/
+    fixtures/                   # ignored deterministic synthetic inputs</code></pre>
+<ul>
+<li><strong>No production integration:</strong> no application imports, crate links, new in-app timers, allocator hooks, renderer patches, Cargo dependencies or packaging changes. Deleting this directory must not change the application build or behavior.</li>
+<li><strong>Binary first:</strong> require <code>--binary</code> pointing to a prebuilt executable. Build separately, outside measured intervals. Record resolved path and SHA-256; never assume an installed Nix binary matches the current checkout.</li>
+<li><strong>Own test state:</strong> fresh private <code>XDG_CONFIG_HOME</code>, <code>XDG_STATE_HOME</code>, <code>XDG_CACHE_HOME</code> and <code>TMPDIR</code>. Verify broker isolation and that the owned PID maps a window; forwarding to another instance invalidates the run. Retain the normal display connection and <code>XDG_RUNTIME_DIR</code> rather than blindly replacing it.</li>
+<li><strong>Own processes only:</strong> track PID plus Linux start time, executable and owned process group. Window operations must resolve that process identity, not match every window named Scratchpad. Graceful close, then bounded termination of owned processes only; never <code>pkill scratchpad</code>.</li>
+<li><strong>Desktop consent:</strong> native scenarios are opt-in and may steal focus. Restore prior focus/workspace where safe; do not edit compositor rules or the normal user session. Abort on unexpected focus before synthetic input.</li>
+<li><strong>Local privacy:</strong> synthetic documents only by default. Keep captures/protocol logs local and opt-in; omit document text, window titles and arbitrary environment dumps from normal artifacts.</li>
+</ul>
+<p class="small">The existing <code>docs/measurement-tools.md</code> describes sibling ownership. At implementation time, add a small documented exception for this self-contained external harness; do not relocate or remove existing probes, benches, configs or sibling-lens contracts.</p>
+</section>
+
+<section id="metrics">
+<h2>4. Minimal metric contract</h2>
+<p>Default sampling: <strong>250 ms</strong> for lightweight process counters; <strong>1 second</strong> for GPU and optional heavier memory detail. Use actual monotonic elapsed time, not the requested sleep duration. Save timestamps, phase, raw counters, derived values, source, units, scope and availability reason.</p>
+<div class="table"><table>
+<thead><tr><th>Area</th><th>Measurement / source</th><th>Report and caveat</th></tr></thead>
+<tbody>
+<tr><td>CPU</td><td><code>/proc/PID/stat</code>: user + system ticks. <code>100 × Δticks / CLK_TCK / Δseconds</code>.</td><td>CPU seconds, phase-average CPU and sampled peak; 100% means one logical core, so multithreaded values may exceed 100%. Report tick resolution; “0 observed ticks” does not mean zero work.</td></tr>
+<tr><td>Memory</td><td><code>/proc/PID/status</code>: VmRSS, VmHWM, threads. Optional <code>smaps_rollup</code>: PSS/private memory at lower frequency.</td><td>Start/end RSS, sampled peak RSS, post-work retained RSS and repeated-cycle growth. VmHWM is lifetime high-water, not a resettable phase peak. No claim to observe allocator traffic or every transient allocation.</td></tr>
+<tr><td>I/O</td><td><code>/proc/PID/io</code>: read_bytes, write_bytes, rchar, wchar; <code>stat</code>: minor/major faults.</td><td>Phase byte deltas and sampled rates. Storage-accounted bytes and syscall character counts stay separate. Cached/mapped reads can show little read_bytes; writes may be buffered, not durable. A sampler cannot measure per-request storage latency.</td></tr>
+<tr><td>GPU engines</td><td>Discover DRM descriptors through <code>/proc/PID/fdinfo/*</code>. Read supported <code>drm-engine-*</code> counters and capacity metadata.</td><td>Per-device, per-engine busy-time deltas; derive percentage only when units/capacity semantics are known. Deduplicate by device + DRM client ID, including duplicate descriptors. No invented universal “GPU %” by summing unlike engines.</td></tr>
+<tr><td>GPU memory</td><td>Supported DRM client memory/resident/shared fields, preserving their driver-defined names and meanings.</td><td>Report per-region attributed bytes where available. VRAM/GTT/shared system memory are not interchangeable; do not add GPU memory to RSS as a total. Integrated-GPU memory may overlap system memory.</td></tr>
+<tr><td>Host context</td><td>CPU/GPU model, kernel, driver, compositor, output size/scale/Hz, renderer request and observed backend when available, power mode and host load.</td><td>Identify confounders and comparison mismatches. Optional whole-device GPU busy counters must be labelled “system-wide”; compositor/other-client work is not app work.</td></tr>
+<tr><td>Tool overhead</td><td>Harness CPU time/RSS, collection durations, late samples and capture mode.</td><td>Show monitoring cost separately. Sampling spikes and missing intervals must not silently become application spikes or interpolated zeroes.</td></tr>
+</tbody></table></div>
+<p><strong>Process scope:</strong> MVP primary-process counters include its threads, not the launcher, compositor or unrelated Scratchpad instances. List detected owned child processes; if child collection is added, retain per-process rows and explicitly label any aggregate. Do not imply sum-of-RSS is unique physical memory.</p>
+<p><strong>Counter lifecycle:</strong> first sample has no delta. Process exit, PID reuse, lost permissions, counter decrease, GPU client reset or missing fields produce <code>null</code> plus a reason. Rediscover GPU clients periodically because the renderer can open them after startup. No negative rates, stale last-value continuation or missing-to-zero coercion.</p>
+<div class="note">The GPU feasibility check is an early deliverable. On a driver without usable per-process counters, the report must say “app GPU utilization unavailable.” Optional vendor tooling is a later adapter—not a reason to require root or delay the basic CPU/memory/I/O lens.</div>
+</section>
+
+<section id="response">
+<h2>5. Responsiveness without app instrumentation</h2>
+<p>Separate three evidence levels. Low CPU does not imply responsiveness: the application can be blocked while consuming nothing.</p>
+<div class="table"><table>
+<thead><tr><th>Level</th><th>External observation</th><th>Allowed claim</th></tr></thead>
+<tbody>
+<tr><td>Basic lifecycle proxies</td><td>Timestamp process launch, first PID-owned mapped window, reveal request and successful window close. Polling interval and command round-trip time are recorded.</td><td>Launch-to-window-mapped and close completion, not launch-to-usable, rendered content or editing latency. Hidden tests explicitly verify resumption on reveal.</td></tr>
+<tr><td>Visual response — capability-gated</td><td>A desktop adapter injects a unique deterministic edit/search/tab action and captures a narrowly defined editor/result region. Detect the expected content change, not any pixel change or caret blink. Timestamp submission and capture observation with a common monotonic clock.</td><td>Input-command-to-observed-visible-change, including injection and capture overhead. Not exact physical input-to-photon or an internal event-loop timer.</td></tr>
+<tr><td>Optional diagnostics</td><td>Separate runs using existing window tracing/Wayland protocol logging or existing sibling-lens probes.</td><td>Ping/pong dispatch and tessellation timings remain diagnostics with separate scopes. They do not replace visible response or certify GPU presentation.</td></tr>
+</tbody></table></div>
+<h3>Visual measurement feasibility gate</h3>
+<ol>
+<li>Use a compositor-supported capture path and an explicitly permitted input mechanism. Detect the installed Hyprland command API; the local native script uses Lua dispatch and must not be assumed portable to every version.</li>
+<li>Check that capture timestamps have known semantics. At a 60 Hz capture cadence the nominal observation granularity is about 16.7 ms, before capture pipeline delay. Report cadence, dropped captures and measured method overhead.</li>
+<li>Retain the last unchanged and first changed observation timestamps. Treat response as an observation interval, with capture uncertainty, rather than false sub-millisecond precision. Validate action success using expected fixture content, a verified saved result where applicable, or an explicit visual assertion.</li>
+<li>Test against a controlled external test window with known delayed updates. Verify that no-change, unrelated repaint, lost focus and timeout cases cannot pass. If the method is unreliable, ship resource measurements with latency unavailable and a reproducible manual observation protocol—not fabricated percentile timings.</li>
+</ol>
+<p><strong>Initial interactive metrics:</strong> edit-to-visible-character, search-command-to-visible-result, tab-switch-to-expected-content, and reveal-to-visible-editor. Scrolling gets resource traces and visual completion checks first. Displayed frame pacing/jank stays deferred until actual presentation timestamps or a validated frame-capture method exist; 250 ms resource polling cannot measure frames.</p>
+</section>
+
+<section id="scenarios">
+<h2>6. A deliberately small scenario set</h2>
+<p>Generate fixtures before measurement with a fixed seed and content hash. Keep line lengths, encoding, match count, file size and settings in the manifest. Start modestly; a 1 GiB file or 10,000 tabs is an explicit stress extension, not the default smoke test.</p>
+<div class="table"><table>
+<thead><tr><th>Scenario</th><th>Workload and phases</th><th>Primary question</th></tr></thead>
+<tbody>
+<tr><td>A · Idle / visibility</td><td>Fresh launch; 10 s settle; 60 s visible idle; 60 s hidden idle; reveal and 30 s settled idle. Separate hidden-at-startup variant when the desktop supports controlled routing.</td><td>Does the app sleep when inactive, avoid hidden-startup spin, and resume? CPU, RSS, I/O and GPU activity by visibility state.</td></tr>
+<tr><td>B · Open / restore</td><td>Deterministic 10 MiB and 100 MiB UTF-8 files; then a session made from 20 small synthetic files. Fresh process for open versus restore. Keep full completion distinct from first visible content.</td><td>Startup/open responsiveness, memory growth, read activity and restore cost. Fixture creation makes these ordinary warm/unspecified-cache runs, not cold-disk tests.</td></tr>
+<tr><td>C · Edit / search / tabs</td><td>10 MiB document: paced typing, 1 MiB paste + undo, known-hit search and tab switching. Begin with 30 action trials per type, spread across at least three sessions.</td><td>Observed response distribution when capture is validated; otherwise resource cost with explicit latency gaps. Record every timeout and correctness failure.</td></tr>
+<tr><td>D · Scroll / repeat / save</td><td>30 s controlled scrolling; ten open/edit/close cycles; save a synthetic 10 MiB document into a test directory; 30 s cooldown. Explicit repeatable session-persistence setting.</td><td>Active CPU/GPU usage, observed stalls, retained RSS trend and write activity. Verify saved content separately; file appearance does not establish fsync durability.</td></tr>
+</tbody></table></div>
+<p>Run WGPU as the primary profile. Add Glow comparison only after the baseline workflow works; record the actual backend if observable, otherwise mark it unverified. Each renderer profile gets separate baselines. Native app-ID/workspace behavior remains part of the scenario; do not “fix” measurement conditions by removing the rule that triggered past failures.</p>
+</section>
+
+<section id="method">
+<h2>7. Baselines, statistics and artifacts</h2>
+<h3>Run discipline</h3>
+<ul>
+<li>Run serially on the same machine with consistent power mode, display, renderer, settings and workload. Avoid builds and unrelated GPU-heavy tasks. Record rather than silently change the CPU governor, compositor configuration or user environment.</li>
+<li>Use at least three independent process launches per baseline resource scenario. For version comparisons alternate A/B ordering and retain all runs. Report individual run values, median and range; do not claim statistical significance from three runs.</li>
+<li>For response trials report sample count, median, maximum, timeout count and raw chronological observations. At 30 trials, p95 is only a rough descriptive order statistic; show it as low confidence, suppress p99 until at least 100 trials, and still label p99 descriptive rather than a tail guarantee. Never pool phases or metric scopes.</li>
+<li>Retain failed actions and timeouts as failures with a censoring limit. Successful-trial percentiles must not conceal them. Resource samples are a time series, not independent user-response trials.</li>
+<li>No global cache dropping, root privileges, unconditional protocol logging, renderer overlays or always-on screenshot capture in normal resource runs. Separate low-overhead resource runs from capture-heavy responsiveness/diagnostic runs.</li>
+</ul>
+<h3>Comparison policy</h3>
+<p>First establish a baseline; <strong>do not invent universal pass budgets</strong> from old internal-probe results. Store human-approved scenario budgets later in <code>scenarios.toml</code>. A comparison uses matching workload hashes, metric definition/schema, backend, display settings and machine profile. Otherwise report <em>incomparable</em> with reasons.</p>
+<p>A provisional regression alert requires both an absolute change floor (above quantization/noise) and a relative change threshold, confirmed across repeated runs. Near-zero baselines use absolute differences only. The report separates <em>measurement complete / partial / failed</em> from <em>within budget / above budget / uncertain / no budget</em>. Timeouts remain failures even if a successful-trial median is fast.</p>
+<h3>Reproducible run manifest</h3>
+<p>Record schema version, UUID, UTC time plus monotonic origin, harness revision/hash, app executable hash, optional source revision/dirty fingerprint, build provenance when known, command arguments, allowlisted settings/environment, host/driver/display metadata, PID/start time, fixture hashes, scenario revision, collector capabilities, sampling intervals and exit/timeout status. A checkout revision alone does not prove binary provenance.</p>
+<p>Each sample carries actual interval and metric availability. Each event carries phase/action ID, timestamp, start/stop definition and outcome. Preserve raw evidence and failed-run diagnostics; write final artifacts atomically. Capture permission failures and unsupported counters remain distinct from a measured zero.</p>
+<h3>One useful HTML report</h3>
+<p>Top row: scenario, build identity, run status and capability gaps. Then five sections—responsiveness, CPU, GPU, memory and I/O—with phase-aligned timelines, summary tables, baseline deltas and failure counts. Generate inline SVG and tables from local data; no network assets, server or CDN. Embed data or render it at generation time so opening <code>report.html</code> via <code>file://</code> works. Escape all untrusted labels/log text.</p>
+<p>Keep historical baselines for comparison instead of automatically expiring them after 24 hours; label their age and context. They are historical evidence, not certification of the current executable. Set an explicit local run-retention budget; never silently prune a selected baseline.</p>
+</section>
+
+<section id="delivery">
+<h2>8. Implementation sequence</h2>
+<div class="table"><table>
+<thead><tr><th>Step</th><th>Work</th><th>Exit gate</th></tr></thead>
+<tbody>
+<tr><td>0 · Capability spike</td><td>Check procfs permissions, DRM fields, launch isolation, installed Hyprland API, capture/input availability and Nix runtime environment. Write <code>doctor</code> output. Test visual timing against a delayed-update test window.</td><td>Known per-metric support matrix. Decide whether automated visual latency is viable; no application changes required.</td></tr>
+<tr><td>1 · Safe process + sampler</td><td>Implement binary hashing, isolated test directories, owned process lifecycle, phases, procfs sampling and JSONL output. Add fixture-driven tests and a synthetic load child.</td><td>CPU/RSS/I/O measured with correct units and exit handling; existing Scratchpad instance and personal state untouched.</td></tr>
+<tr><td>2 · First baseline + report</td><td>Implement visible/hidden idle, map/reveal proxies, summary/CSV/static HTML and baseline selection. Measure harness overhead and repeatability.</td><td>Three valid baseline runs, readable report and explicit unsupported fields. This is the first release, not blocked on visual latency.</td></tr>
+<tr><td>3 · GPU adapter</td><td>Implement supported DRM fdinfo counters, client deduplication, reset handling and per-engine/per-region summaries. Add fixtures for missing and vendor-varying fields.</td><td>Supported fields cross-checked against a trusted tool at the same attribution scope. Unsupported systems still complete the other metrics honestly.</td></tr>
+<tr><td>4 · Interactive scenarios</td><td>Add capture-gated edit/search/tab response measurements, large-file open, restore, scroll, save and repeat cycles. Pin fixture expectations and method uncertainty.</td><td>Known delayed/no-change tests pass, actions verified, captures scoped to test window, no app instrumentation. Otherwise document the manual fallback and deferred automation.</td></tr>
+<tr><td>5 · Comparisons + optional diagnosis</td><td>Add controlled A/B reporting and approved budgets. Optionally link/import explicitly selected sibling-lens artifacts in a separate diagnostic appendix.</td><td>Report rejects mismatched baselines; internal microbenchmarks never overwrite native metrics. No dashboard or sibling checkout required for normal operation.</td></tr>
+</tbody></table></div>
+<h3>Proposed CLI—not implemented by this plan</h3>
+<pre><code># Run from the Scratchpad repository. Build the app separately first.
+python3 tools/performance-lens/lens.py doctor --binary /absolute/path/to/scratchpad
+
+python3 tools/performance-lens/lens.py run \
+  --binary /absolute/path/to/scratchpad \
+  --scenario idle-cycle --renderer wgpu --allow-desktop-control
+
+python3 tools/performance-lens/lens.py report --run &lt;run-id&gt;
+python3 tools/performance-lens/lens.py compare \
+  --baseline &lt;baseline-run-id&gt; --candidate &lt;candidate-run-id&gt;</code></pre>
+<p>Mandatory dependencies: Python and readable Linux procfs. Desktop scenarios additionally require a supported compositor adapter; visual tests require a validated input/capture path. Provide a documented Nix invocation for the harness/runtime libraries without changing the editor’s dependency graph. Defer Windows, X11, vendor-specific GPU backends, perf/eBPF tracing and continuous CI performance gates.</p>
+</section>
+
+<section id="acceptance">
+<h2>9. Acceptance checklist</h2>
+<ul>
+<li><strong>Separation:</strong> app source, Cargo manifests/lockfiles and production packaging remain unchanged. The basic lens runs against a supplied release binary with no sibling repository or internal probe build.</li>
+<li><strong>Safety:</strong> tests cover an already-running user instance, failed broker isolation, missing window, lost focus, process crash, hung child, Ctrl-C and PID reuse. Cleanup cannot target an unrelated process or touch normal settings/session files.</li>
+<li><strong>Correct collectors:</strong> fixtures cover process names containing spaces/parentheses, tick/page units, missing proc fields, permission denial, counter resets, duplicate DRM descriptors, engine capacity and disappearing GPU clients. Cross-check CPU and RSS against a known workload/tool; allow expected quantization differences.</li>
+<li><strong>Honest responsiveness:</strong> map time is not labelled ready time; visual latency includes its method and uncertainty. Known delayed updates are detected, no-change actions time out, and unrelated repaint cannot count as success.</li>
+<li><strong>Useful baselines:</strong> at least three independent visible/hidden resource runs and, where supported, 30 verified actions per interactive type. All failures survive aggregation. Renderer/host/workload mismatches prevent automatic pass/regression judgments.</li>
+<li><strong>Low overhead:</strong> measure sampler self-cost and compare low-rate versus default-rate runs. Initial engineering target: under 1% of one core for the sampler in settled resource runs; this is a target to verify, not a present claim. If overhead or sampling delays are material, lower cadence and show the limitation.</li>
+<li><strong>Bounded execution:</strong> scenario timeouts, fixture-size caps, disk budget checks and graceful interruption. Optional cgroup resource limits only when available, with their values recorded; do not claim a sampled RSS alarm prevents OOM.</li>
+<li><strong>Portable report:</strong> open HTML offline; missing GPU/latency data is readable; labels are escaped; corrupted/truncated artifacts fail validation; selected baselines are preserved.</li>
+</ul>
+<div class="note"><strong>Definition of done:</strong> one command measures an isolated real Scratchpad build, produces a trustworthy local report covering resources and supported responsiveness observations, and leaves the editor code and the user’s working session alone.</div>
+</section>
+
+<section id="sources">
+<h2>10. Local review references</h2>
+<p class="small">Links are relative to this plan’s proposed permanent home in <code>scratchpad/tools/performance-lens/</code>.</p>
+<ul>
+<li><a href="../../../scratchpad-performance-lens/README.md">Existing lens README and scope</a> · <a href="../../../scratchpad-performance-lens/docs/measurement-integrity.md">Measurement integrity contract</a></li>
+<li><a href="../../../scratchpad-performance-lens/src/producers/resources.rs">Resource producer</a> · <a href="../../../scratchpad-performance-lens/src/producers/frame_metrics.rs">Frame producer</a> · <a href="../../../scratchpad-performance-lens/src/provenance.rs">Provenance implementation</a></li>
+<li><a href="../../README.md">Current Scratchpad README</a> · <a href="../../Cargo.toml">Application build boundary</a> · <a href="../../docs/measurement-tools.md">Existing measurement ownership</a></li>
+<li><a href="../../docs/wgpu-recovery-investigation.md">Current WGPU recovery findings</a> · <a href="../../docs/wayland-startup.md">Wayland startup checks</a> · <a href="../../docs/wgpu-glow-resource-usage-investigation-2026-08-17.md">Earlier investigation, superseded renderer recommendation</a></li>
+<li><code>scratchpad/target/wgpu-investigation/native-check.py</code> — inspected local proof of concept; disposable evidence, not a stable tool dependency.</li>
+</ul>
+</section>
+<footer>Only this plan was added. No benchmarks, desktop automation, performance measurements or application changes were performed for this review.</footer>
+</main>
+</body>
+</html>

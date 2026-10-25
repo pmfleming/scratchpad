@@ -218,6 +218,79 @@ fn consecutive_vertical_keys_restore_visual_column_after_short_line() {
 }
 
 #[test]
+fn home_and_end_move_to_line_boundaries() {
+    let text = "first\nαβγδε\r\nlast";
+    let mut buffer = BufferState::new("sample.txt".to_owned(), text.to_owned(), None);
+    let mut view = EditorViewState::new(buffer.id);
+    view.cursor_range = Some(CursorRange::one(CharCursor::new(8)));
+    let font = egui::FontId::monospace(18.0);
+    let ctx = egui::Context::default();
+
+    // Establish focus once; subsequent keys must work without requesting it again.
+    for (key, modifiers, expected) in [
+        (
+            None,
+            egui::Modifiers::NONE,
+            CursorRange::one(CharCursor::new(8)),
+        ),
+        (
+            Some(egui::Key::Home),
+            egui::Modifiers::NONE,
+            CursorRange::one(CharCursor::new(6)),
+        ),
+        (
+            Some(egui::Key::End),
+            egui::Modifiers::SHIFT,
+            CursorRange::two(6, 11),
+        ),
+        (
+            Some(egui::Key::Home),
+            egui::Modifiers::NONE,
+            CursorRange::one(CharCursor::new(6)),
+        ),
+        (
+            Some(egui::Key::End),
+            egui::Modifiers::NONE,
+            CursorRange::one(CharCursor::new(11)),
+        ),
+    ] {
+        let input = egui::RawInput {
+            events: key
+                .into_iter()
+                .map(|key| egui::Event::Key {
+                    key,
+                    physical_key: Some(key),
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| {
+            let outcome = render_editor_text_edit(
+                ui,
+                &mut buffer,
+                &mut view,
+                TextEditOptions::new(
+                    key.is_none(),
+                    false,
+                    &font,
+                    egui::Color32::WHITE,
+                    EditorHighlightStyle::new(egui::Color32::YELLOW, egui::Color32::BLACK),
+                ),
+                None,
+            );
+            assert!(outcome.focused);
+            assert!(!outcome.changed);
+        });
+        output.textures_delta.clear();
+        assert_eq!(view.cursor_range, Some(expected));
+        assert_eq!(buffer.text(), text);
+    }
+}
+
+#[test]
 fn edited_frame_publishes_current_snapshot_and_consumes_reveal() {
     let mut buffer = BufferState::new("sample.txt".to_owned(), "abc".to_owned(), None);
     let mut view = EditorViewState::new(buffer.id);
