@@ -5,7 +5,7 @@ use super::{
 use crate::app::capacity_metrics;
 use std::borrow::Cow;
 use std::ops::Range;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DocumentChunk {
@@ -13,15 +13,34 @@ pub struct DocumentChunk {
     pub window_range: Range<usize>,
 }
 
+/// A revision number alone is not an identity: replacing a document resets it.
+/// Weak ownership prevents address reuse without retaining the old document text.
+#[derive(Clone)]
+pub(crate) struct SnapshotRevision {
+    tree: Weak<PieceTreeLite>,
+    generation: u64,
+}
+impl PartialEq for SnapshotRevision {
+    fn eq(&self, other: &Self) -> bool {
+        self.generation == other.generation && self.tree.ptr_eq(&other.tree)
+    }
+}
+impl Eq for SnapshotRevision {}
+
 #[derive(Clone)]
 pub struct DocumentSnapshot {
     length: BufferLength,
     revision: u64,
+    source_revision: SnapshotRevision,
     piece_tree: Arc<PieceTreeLite>,
 }
 
 impl DocumentSnapshot {
     pub(crate) fn from_shared(piece_tree: Arc<PieceTreeLite>) -> Self {
+        let source_revision = SnapshotRevision {
+            tree: Arc::downgrade(&piece_tree),
+            generation: piece_tree.generation(),
+        };
         let piece_tree = if piece_tree.has_live_anchors() {
             Arc::new(piece_tree.clone_without_anchors())
         } else {
@@ -35,8 +54,13 @@ impl DocumentSnapshot {
         Self {
             length,
             revision,
+            source_revision,
             piece_tree,
         }
+    }
+
+    pub(crate) fn revision_key(&self) -> SnapshotRevision {
+        self.source_revision.clone()
     }
 
     pub(crate) fn document_length(&self) -> BufferLength {

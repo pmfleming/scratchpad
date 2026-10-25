@@ -128,7 +128,13 @@ impl Restorer {
             .buffers
             .into_iter()
             .map(|mut buffer| {
-                let restored = self.restore_buffer_content(&mut buffer);
+                let mut restored = self.restore_buffer_content(&mut buffer);
+                // Clean disk-backed buffers have history metadata but no recovery text.
+                if !buffer.text_history.is_empty() {
+                    restored
+                        .document
+                        .restore_exported_history(std::mem::take(&mut buffer.text_history));
+                }
                 if !buffer.is_dirty
                     && restored.freshness == BufferFreshness::InSync
                     && restored.disk_state.is_some()

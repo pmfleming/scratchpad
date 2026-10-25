@@ -227,6 +227,35 @@ fn progressive_session_hydration_replaces_matching_cold_shell_after_index_shift(
 }
 
 #[test]
+fn failed_hydration_keeps_cold_recovery_payload() {
+    let mut app = app_with_buffer(BufferState::new("recover".into(), "original".into(), None));
+    let cold = crate::app::services::session_store::cold_tab_from_workspace_tab(
+        &app.tab_manager.tabs.as_slice()[0],
+    );
+    let expected_buffer_ids = cold_session_tab_buffer_ids(&cold);
+    app.tab_manager.set_cold_session_tab(0, cold);
+    app.state.background_io.pending_background_actions.insert(
+        78,
+        PendingBackgroundAction::HydrateSessionTab(PendingSessionHydrationAction {
+            expected_buffer_ids,
+        }),
+    );
+    app.apply_session_tab_hydrated_result(78, 0, Err("corrupt recovery content".into()));
+    assert!(app.tab_manager.cold_session_tabs().contains_key(&0));
+    assert_eq!(
+        app.tab_manager.tabs.as_slice()[0].active_buffer().text(),
+        "original"
+    );
+    assert!(app.state.status.current.is_some());
+    assert!(
+        !app.state
+            .background_io
+            .pending_background_actions
+            .contains_key(&78)
+    );
+}
+
+#[test]
 fn unknown_background_result_is_ignored() {
     let mut app = test_app();
     let original_tabs = app.tab_manager.tabs.as_slice().len();

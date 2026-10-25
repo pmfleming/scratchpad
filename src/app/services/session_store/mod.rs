@@ -2,6 +2,8 @@ mod capture;
 mod database;
 mod legacy;
 mod model;
+#[cfg(test)]
+mod parity_tests;
 mod restore;
 mod types;
 

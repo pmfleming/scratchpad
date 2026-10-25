@@ -3,10 +3,10 @@ use crate::app::domain::{BufferState, WorkspaceTab};
 use crate::app::services::session_store::SessionPersistRequest;
 use futures_lite::future::block_on;
 
-fn tab(text: &str) -> WorkspaceTab {
+pub(super) fn tab(text: &str) -> WorkspaceTab {
     WorkspaceTab::new(BufferState::new("note".into(), text.into(), None))
 }
-fn request(tabs: &[WorkspaceTab]) -> SessionPersistRequest {
+pub(super) fn request(tabs: &[WorkspaceTab]) -> SessionPersistRequest {
     SessionPersistRequest::capture(tabs, 0, 16.0, false)
 }
 

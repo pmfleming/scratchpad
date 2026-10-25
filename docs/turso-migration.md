@@ -108,6 +108,28 @@ reconstruction and measure again. Promise statuses remain unchanged from baselin
 Legacy profiling field names remain compatible with the lens: manifest read/parse
 now includes coherent database content reads; manifest write includes commit.
 
+### Phase 4 — parity and fault recovery
+
+Added disk-full/rollback/retry, missing content, corrupt metadata before first load,
+private-directory permissions, format/view/surface parity, clean-file history,
+failed cold hydration, and application-level abrupt-exit recovery tests. The
+ignored subprocess helper is actually invoked by its parent recovery test.
+500 library tests and all integration/all-features tests pass; strict all-features
+library/test Clippy and formatting pass. Both lenses completed (`phase4`).
+
+Two correctness gaps found and fixed: replacing a document can reset its numeric
+revision, so the database now compares weak source-tree identity plus generation
+without retaining old text; and clean disk-backed buffers now restore their
+exported history even when no recovery text was needed. Read/write paths reject
+duplicate content identities instead of silently emptying a second buffer.
+
+The disk-restore helper refactor reduced function SLOC 251 -> 227, cyclomatic sum
+32 -> 31, effort 74,528 -> 71,492; cognitive sum stayed 13. Safety checks and tests
+increase other totals; no claim is made that adding required checks reduces every
+metric. Startup-visible restore 0.196 ms, steady persistence 33.779 ms, full restore
+643.816 ms. The full-restore regression remains an explicit phase-5 blocker;
+project-wide promise health remains the same as baseline.
+
 ## Intended sequence
 
 1. Engine validation and baseline (this commit).

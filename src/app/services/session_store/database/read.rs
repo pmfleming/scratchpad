@@ -123,6 +123,15 @@ impl Database {
         if manifest.tabs.len() != expected {
             return Err(invalid("missing session tabs"));
         }
+        let mut ids = HashSet::new();
+        if manifest
+            .tabs
+            .iter()
+            .flat_map(|tab| &tab.buffers)
+            .any(|buffer| !ids.insert(&buffer.temp_id))
+        {
+            return Err(invalid("duplicate recovery content identity across tabs"));
+        }
         Ok(())
     }
     pub async fn hydrate(

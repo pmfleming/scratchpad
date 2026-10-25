@@ -1,5 +1,7 @@
 //! Local-only transactional session storage. All access belongs to one worker.
 mod content;
+#[cfg(test)]
+mod fault_tests;
 mod persist;
 mod read;
 #[cfg(test)]
@@ -34,7 +36,7 @@ pub(super) struct Database {
     _ownership: File,
     tab_cache: Vec<Vec<u8>>,
     state_cache: Vec<u8>,
-    revisions: HashMap<String, u64>,
+    revisions: HashMap<String, crate::app::domain::buffer::SnapshotRevision>,
     latest_request: u64,
     blocked: Option<String>,
     verified: bool,
@@ -159,7 +161,13 @@ fn create_private_directory(path: &Path) -> io::Result<()> {
         use std::os::unix::fs::DirBuilderExt;
         builder.mode(0o700);
     }
-    builder.create(path)
+    builder.create(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
 }
 fn private_file(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();

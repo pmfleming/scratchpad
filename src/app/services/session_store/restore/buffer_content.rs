@@ -69,31 +69,12 @@ impl Restorer {
         content: String,
         disk_state: DiskFileState,
     ) -> RestoredBufferContent {
-        if !buffer.is_dirty {
-            return RestoredBufferContent::from_session(
-                buffer,
-                content,
-                Some(disk_state),
-                false,
-                BufferFreshness::InSync,
-            );
-        }
-
-        if disk_text_matches(path, &content) {
-            return RestoredBufferContent::from_session(
-                buffer,
-                content,
-                Some(disk_state),
-                false,
-                BufferFreshness::InSync,
-            );
-        }
-
+        let is_dirty = buffer.is_dirty && !disk_text_matches(path, &content);
         RestoredBufferContent::from_session(
             buffer,
             content,
             Some(disk_state),
-            true,
+            is_dirty,
             BufferFreshness::InSync,
         )
     }
@@ -106,22 +87,18 @@ impl Restorer {
         disk_state: DiskFileState,
     ) -> RestoredBufferContent {
         if buffer.is_dirty {
-            if disk_text_matches(path, &content) {
-                return RestoredBufferContent::from_session(
-                    buffer,
-                    content,
-                    Some(disk_state),
-                    false,
-                    BufferFreshness::InSync,
-                );
-            }
-
+            let is_dirty = !disk_text_matches(path, &content);
+            let freshness = if is_dirty {
+                BufferFreshness::ConflictOnDisk
+            } else {
+                BufferFreshness::InSync
+            };
             return RestoredBufferContent::from_session(
                 buffer,
                 content,
                 Some(disk_state),
-                true,
-                BufferFreshness::ConflictOnDisk,
+                is_dirty,
+                freshness,
             );
         }
 
@@ -208,9 +185,8 @@ impl RestoredBufferContent {
         freshness: BufferFreshness,
     ) -> Self {
         let (format, text_metadata) = session_buffer_format_and_metadata(buffer, &content);
-        let document =
+        let mut document =
             TextDocument::with_preferred_line_ending(content, text_metadata.preferred_line_ending);
-        let mut document = document;
         document.restore_exported_history(std::mem::take(&mut buffer.text_history));
         Self::new(
             document,

@@ -40,12 +40,11 @@ impl Prepared {
                     .filter(|buffer| super::super::legacy::needs_snapshot(buffer))
                     .map(|buffer| buffer.temp_id.clone()),
             );
-            prepared.active.extend(
-                tab.session_tab
-                    .buffers
-                    .iter()
-                    .map(|buffer| buffer.temp_id.clone()),
-            );
+            for buffer in &tab.session_tab.buffers {
+                if !prepared.active.insert(buffer.temp_id.clone()) {
+                    return Err(invalid("duplicate recovery content identity across tabs"));
+                }
+            }
             prepared
                 .tabs
                 .push(serde_json::to_vec(&tab.session_tab).map_err(invalid)?);
@@ -94,7 +93,7 @@ impl Database {
             ..SessionPersistProfile::default()
         };
         prepared.snapshots.retain(|buffer| {
-            self.revisions.get(&buffer.temp_id) != Some(&buffer.snapshot.revision())
+            self.revisions.get(&buffer.temp_id) != Some(&buffer.snapshot.revision_key())
         });
         let unchanged = prepared.snapshots.is_empty()
             && self.state_cache == prepared.state
@@ -115,7 +114,7 @@ impl Database {
             prepared
                 .snapshots
                 .into_iter()
-                .map(|buffer| (buffer.temp_id, buffer.snapshot.revision())),
+                .map(|buffer| (buffer.temp_id, buffer.snapshot.revision_key())),
         );
         self.state_cache = prepared.state;
         self.tab_cache = prepared.tabs;
