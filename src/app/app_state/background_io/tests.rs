@@ -210,8 +210,8 @@ fn progressive_session_hydration_replaces_matching_cold_shell_after_index_shift(
             None,
         )),
     );
-    let (hydrated_tab, restore_status) = store.restore_cold_session_tab(cold_payload);
-    app.apply_session_tab_hydrated_result(77, 1, restore_status, hydrated_tab);
+    let (hydrated_tab, restore_status) = store.restore_cold_session_tab(cold_payload).unwrap();
+    app.apply_session_tab_hydrated_result(77, 1, Ok((Box::new(hydrated_tab), restore_status)));
 
     assert!(
         !app.state

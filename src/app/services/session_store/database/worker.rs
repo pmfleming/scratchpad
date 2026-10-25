@@ -15,20 +15,26 @@ struct Worker {
 }
 
 impl DatabaseWorker {
-    pub fn open(root: PathBuf) -> io::Result<Self> {
+    pub fn open(root: PathBuf, fallback: Option<PathBuf>) -> io::Result<Self> {
         let (sender, receiver) = mpsc::sync_channel::<Job>(2);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let thread = thread::Builder::new()
             .name("session-database".into())
-            .spawn(move || match block_on(Database::open(&root)) {
-                Ok(mut database) => {
-                    let _ = ready_tx.send(Ok(()));
-                    for job in receiver {
-                        job(&mut database);
+            .spawn(move || {
+                match block_on(async {
+                    let mut database = Database::open(&root).await?;
+                    database.import_legacy(&root, fallback.as_deref()).await?;
+                    Ok::<_, io::Error>(database)
+                }) {
+                    Ok(mut database) => {
+                        let _ = ready_tx.send(Ok(()));
+                        for job in receiver {
+                            job(&mut database);
+                        }
                     }
-                }
-                Err(cause) => {
-                    let _ = ready_tx.send(Err(cause));
+                    Err(cause) => {
+                        let _ = ready_tx.send(Err(cause));
+                    }
                 }
             })?;
         let worker = Self(Arc::new(Worker {

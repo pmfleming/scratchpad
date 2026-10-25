@@ -1,27 +1,6 @@
-use super::model::{SessionActiveSurface, SessionTab};
-use super::ops::SessionSnapshotWrite;
-use super::restore::RestoreSummary;
+use super::model::SessionActiveSurface;
 use crate::app::domain::WorkspaceTab;
 use crate::app::services::settings_store::AppSettings;
-use std::collections::HashSet;
-use std::path::PathBuf;
-
-pub(super) struct PreparedSessionPersist {
-    pub(super) session_tabs: Vec<SessionTab>,
-    pub(super) snapshot_writes: Vec<SessionSnapshotWrite>,
-    pub(super) preserved_snapshot_paths: HashSet<PathBuf>,
-}
-
-pub(super) struct RestoredTabs {
-    pub(super) tabs: Vec<WorkspaceTab>,
-    pub(super) summary: RestoreSummary,
-}
-
-pub(super) struct StreamedTabs {
-    pub(super) tab_count: usize,
-    pub(super) summary: RestoreSummary,
-}
-
 pub struct RestoredSession {
     pub tabs: Vec<WorkspaceTab>,
     pub active_tab_index: usize,

@@ -85,6 +85,7 @@ fn startup_keeps_workspace_active_when_settings_tab_is_open() {
     ));
     crate::app::app_state::workspace::accessors::persist_session_now(&mut app).unwrap();
 
+    drop(app); // A restart must release the single database owner.
     let mut restored = app_with_root(&root);
     restored.set_session_persist_on_drop(false);
 
@@ -117,6 +118,7 @@ fn startup_restores_settings_as_active_surface_from_session() {
     ));
     crate::app::app_state::workspace::accessors::persist_session_now(&mut app).unwrap();
 
+    drop(app); // A restart must release the single database owner.
     let mut restored = app_with_root(&root);
     restored.set_session_persist_on_drop(false);
 

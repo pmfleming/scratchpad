@@ -3,8 +3,12 @@ use super::{
     WorkspaceTab,
 };
 use crate::app::domain::DocumentSnapshot;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_CAPTURE: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) struct SessionPersistRequest {
+    pub(super) generation: u64,
     pub(super) active_tab_index: usize,
     pub(super) active_surface: SessionActiveSurface,
     pub(super) font_size: f32,
@@ -30,6 +34,7 @@ impl SessionPersistRequest {
         word_wrap: bool,
     ) -> Self {
         Self {
+            generation: NEXT_CAPTURE.fetch_add(1, Ordering::Relaxed),
             active_tab_index,
             active_surface: SessionActiveSurface::Workspace,
             font_size,
@@ -47,6 +52,7 @@ impl SessionPersistRequest {
         word_wrap: bool,
     ) -> Self {
         Self {
+            generation: NEXT_CAPTURE.fetch_add(1, Ordering::Relaxed),
             active_tab_index,
             active_surface,
             font_size,

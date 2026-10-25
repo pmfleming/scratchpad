@@ -131,10 +131,9 @@ impl ScratchpadApp {
             BackgroundIoResult::SessionTabHydrated {
                 request_id,
                 tab_index,
-                restore_status,
-                tab,
+                result,
             } => {
-                self.apply_session_tab_hydrated_result(request_id, tab_index, restore_status, *tab);
+                self.apply_session_tab_hydrated_result(request_id, tab_index, result);
             }
             BackgroundIoResult::SessionPersisted { request_id, result } => {
                 self.apply_session_persisted_result(request_id, result);
@@ -366,8 +365,13 @@ impl ScratchpadApp {
         &mut self,
         request_id: u64,
         _tab_index: usize,
-        restore_status: Option<crate::app::services::session_store::RestoreStatus>,
-        tab: crate::app::domain::WorkspaceTab,
+        result: Result<
+            (
+                Box<crate::app::domain::WorkspaceTab>,
+                Option<crate::app::services::session_store::RestoreStatus>,
+            ),
+            String,
+        >,
     ) {
         let Some(action) = self.take_pending_action(
             request_id,
@@ -377,6 +381,13 @@ impl ScratchpadApp {
             return;
         };
 
+        let (tab, restore_status) = match result {
+            Ok(hydrated) => hydrated,
+            Err(error) => {
+                self.state.status.report_session_restore_failed(error);
+                return;
+            }
+        };
         let Some(current_tab_index) = self.find_cold_session_tab_index(&action.expected_buffer_ids)
         else {
             self.queue_next_progressive_session_hydration();
@@ -385,7 +396,7 @@ impl ScratchpadApp {
 
         if self
             .tab_manager
-            .replace_restored_tab(current_tab_index, tab)
+            .replace_restored_tab(current_tab_index, *tab)
         {
             let _ = self.tab_manager.take_cold_session_tab(current_tab_index);
             if let Some(status) = restore_status {
@@ -539,18 +550,26 @@ impl ScratchpadApp {
     }
 
     pub(crate) fn hydrate_tab_if_needed(&mut self, index: usize) -> bool {
-        let Some(cold_tab) = self.tab_manager.take_cold_session_tab(index) else {
+        let Some(cold_tab) = self.tab_manager.cold_session_tabs().get(&index).cloned() else {
             return false;
         };
 
-        let (restored_tab, restore_status) = self
+        let result = self
             .state
             .persistence
             .session_store
             .restore_cold_session_tab(cold_tab);
+        let (restored_tab, restore_status) = match result {
+            Ok(hydrated) => hydrated,
+            Err(error) => {
+                self.state.status.report_session_restore_failed(error);
+                return false;
+            }
+        };
         if !self.tab_manager.replace_restored_tab(index, restored_tab) {
             return false;
         }
+        self.tab_manager.take_cold_session_tab(index);
         if let Some(status) = restore_status {
             self.apply_session_restore_status(status);
         }

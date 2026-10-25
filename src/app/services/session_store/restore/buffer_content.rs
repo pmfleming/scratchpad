@@ -1,6 +1,5 @@
-use super::super::SessionStore;
 use super::super::model::SessionBuffer;
-use crate::app::diagnostics;
+use super::Restorer;
 use crate::app::domain::buffer::{
     BufferTextMetadata, buffer_text_metadata, detected_text_format_and_metadata,
 };
@@ -9,28 +8,18 @@ use crate::app::domain::{
     TextFormatMetadata,
 };
 use crate::app::services::file_service::{FileContent, FileService};
-use std::fs;
 use std::path::Path;
 
-impl SessionStore {
-    pub(super) fn restore_buffer_content(&self, buffer: &SessionBuffer) -> RestoredBufferContent {
+impl Restorer {
+    pub(super) fn restore_buffer_content(
+        &mut self,
+        buffer: &mut SessionBuffer,
+    ) -> RestoredBufferContent {
+        let is_dirty = buffer.is_dirty;
         let session_disk_state = session_disk_state(buffer);
-        let session_path = self.buffer_path(&buffer.temp_id);
-        let session_text = match fs::read_to_string(&session_path) {
-            Ok(content) => Some(content),
-            Err(error) => {
-                diagnostics::record_io_error_with_details(
-                    "session_read_buffer_snapshot",
-                    Some(&session_path),
-                    "session_store::restore_buffer_content",
-                    &error,
-                    [("temp_id", buffer.temp_id.clone())],
-                );
-                None
-            }
-        };
-
-        match (&buffer.path, session_text) {
+        let session_text = self.contents.remove(&buffer.temp_id);
+        let path = buffer.path.take();
+        let restored = match (path.as_deref(), session_text) {
             (Some(path), Some(content)) => {
                 self.restore_saved_buffer(buffer, path, content, session_disk_state)
             }
@@ -39,20 +28,23 @@ impl SessionStore {
                 buffer,
                 content,
                 None,
-                buffer.is_dirty,
+                is_dirty,
                 BufferFreshness::InSync,
             ),
             (None, None) => RestoredBufferContent::empty(buffer, BufferFreshness::InSync),
-        }
+        };
+        buffer.path = path;
+        restored
     }
 
     fn restore_saved_buffer(
         &self,
-        buffer: &SessionBuffer,
+        buffer: &mut SessionBuffer,
         path: &Path,
         content: String,
         session_disk_state: Option<DiskFileState>,
     ) -> RestoredBufferContent {
+        let is_dirty = buffer.is_dirty;
         match FileService::read_disk_state(path).ok() {
             Some(disk_state) if Some(disk_state.clone()) != session_disk_state => {
                 self.restore_changed_disk_buffer(buffer, path, content, disk_state)
@@ -64,7 +56,7 @@ impl SessionStore {
                 buffer,
                 content,
                 None,
-                buffer.is_dirty,
+                is_dirty,
                 BufferFreshness::MissingOnDisk,
             ),
         }
@@ -72,7 +64,7 @@ impl SessionStore {
 
     fn restore_unchanged_disk_buffer(
         &self,
-        buffer: &SessionBuffer,
+        buffer: &mut SessionBuffer,
         path: &Path,
         content: String,
         disk_state: DiskFileState,
@@ -108,7 +100,7 @@ impl SessionStore {
 
     fn restore_changed_disk_buffer(
         &self,
-        buffer: &SessionBuffer,
+        buffer: &mut SessionBuffer,
         path: &Path,
         content: String,
         disk_state: DiskFileState,
@@ -151,7 +143,7 @@ impl SessionStore {
 
     fn restore_buffer_from_disk(
         &self,
-        buffer: &SessionBuffer,
+        buffer: &mut SessionBuffer,
         path: &Path,
     ) -> RestoredBufferContent {
         match FileService::read_file(path) {
@@ -209,7 +201,7 @@ impl RestoredBufferContent {
     }
 
     fn from_session(
-        buffer: &SessionBuffer,
+        buffer: &mut SessionBuffer,
         content: String,
         disk_state: Option<DiskFileState>,
         is_dirty: bool,
@@ -219,7 +211,7 @@ impl RestoredBufferContent {
         let document =
             TextDocument::with_preferred_line_ending(content, text_metadata.preferred_line_ending);
         let mut document = document;
-        document.restore_exported_history(buffer.text_history.clone());
+        document.restore_exported_history(std::mem::take(&mut buffer.text_history));
         Self::new(
             document,
             format,
@@ -230,8 +222,9 @@ impl RestoredBufferContent {
         )
     }
 
-    fn empty(buffer: &SessionBuffer, freshness: BufferFreshness) -> Self {
-        Self::from_session(buffer, String::new(), None, buffer.is_dirty, freshness)
+    fn empty(buffer: &mut SessionBuffer, freshness: BufferFreshness) -> Self {
+        let is_dirty = buffer.is_dirty;
+        Self::from_session(buffer, String::new(), None, is_dirty, freshness)
     }
 }
 
@@ -240,17 +233,17 @@ fn disk_text_matches(path: &Path, session_text: &str) -> bool {
         .is_ok_and(|file_content| file_content.document.extract_text() == session_text)
 }
 
-pub(super) fn cold_buffer_shell(buffer: SessionBuffer) -> BufferState {
-    let (format, text_metadata) = session_buffer_format_and_metadata(&buffer, "");
-    let disk_state = session_disk_state(&buffer);
+pub(super) fn cold_buffer_shell(buffer: &SessionBuffer) -> BufferState {
+    let (format, text_metadata) = session_buffer_format_and_metadata(buffer, "");
+    let disk_state = session_disk_state(buffer);
     let mut restored_buffer = BufferState::restored_with_text_metadata(
         RestoredBufferState {
             id: buffer.id,
-            name: buffer.name,
+            name: buffer.name.clone(),
             content: String::new(),
-            path: buffer.path,
+            path: buffer.path.clone(),
             is_dirty: buffer.is_dirty,
-            temp_id: buffer.temp_id,
+            temp_id: buffer.temp_id.clone(),
             format,
             disk_state,
             freshness: BufferFreshness::InSync,

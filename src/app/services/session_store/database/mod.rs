@@ -1,12 +1,14 @@
 //! Local-only transactional session storage. All access belongs to one worker.
 mod content;
 mod persist;
+mod read;
 #[cfg(test)]
 mod tests;
 mod worker;
 
-use super::model::{SessionManifest, SessionTab};
+use super::model::SessionManifest;
 use super::types::SessionPersistProfile;
+pub(super) use read::ReadScope;
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io;
@@ -26,7 +28,6 @@ pub(super) struct StoredSession {
     pub manifest: SessionManifest,
     pub contents: HashMap<String, String>,
 }
-
 pub(super) struct Database {
     conn: Connection,
     _database: TursoDatabase,
@@ -35,16 +36,15 @@ pub(super) struct Database {
     state_cache: Vec<u8>,
     revisions: HashMap<String, u64>,
     latest_request: u64,
-    pub blocked: Option<String>,
+    blocked: Option<String>,
+    verified: bool,
 }
-
 impl Database {
     async fn open(root: &Path) -> io::Result<Self> {
         create_private_directory(root)?;
         let ownership = private_file(&root.join("session.db.lock"))?;
         ownership.try_lock().map_err(error)?;
         let path = root.join("session.db");
-        // Precreate with restrictive permissions rather than relying on umask.
         drop(private_file(&path)?);
         let path = path
             .to_str()
@@ -66,11 +66,11 @@ impl Database {
             revisions: HashMap::new(),
             latest_request: 0,
             blocked: None,
+            verified: false,
         };
         db.initialize().await?;
         Ok(db)
     }
-
     async fn initialize(&mut self) -> io::Result<()> {
         let version = self.integer("PRAGMA user_version").await?;
         let application = self.integer("PRAGMA application_id").await?;
@@ -92,7 +92,19 @@ impl Database {
             "BEGIN IMMEDIATE; {SCHEMA} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=1; COMMIT;"
         )).await.map_err(error)
     }
-
+    async fn import_legacy(&mut self, root: &Path, fallback: Option<&Path>) -> io::Result<()> {
+        if self.integer("SELECT count(*) FROM session_state").await? != 0 {
+            return Ok(());
+        }
+        // Empty schema after an interrupted import is retryable; orphan rows are not.
+        self.load(ReadScope::Shells).await?;
+        if let Some(request) = super::legacy::read(root, fallback)? {
+            self.persist(request, 0).await?;
+            self.load(ReadScope::All).await?;
+            self.checkpoint().await?;
+        }
+        Ok(())
+    }
     async fn integer(&self, sql: &str) -> io::Result<i64> {
         self.conn
             .query(sql, ())
@@ -105,59 +117,6 @@ impl Database {
             .get(0)
             .map_err(error)
     }
-
-    pub async fn load(&mut self, active_only: bool) -> io::Result<Option<StoredSession>> {
-        let result = self.read_session(active_only).await;
-        if let Err(error) = &result {
-            self.blocked = Some(error.to_string());
-        }
-        result
-    }
-
-    async fn read_session(&self, active_only: bool) -> io::Result<Option<StoredSession>> {
-        let mut rows = self
-            .conn
-            .query("SELECT payload FROM session_state WHERE id=1", ())
-            .await
-            .map_err(error)?;
-        let Some(row) = rows.next().await.map_err(error)? else {
-            return Ok(None);
-        };
-        let mut manifest: SessionManifest = decode(&row.get::<Vec<u8>>(0).map_err(error)?)?;
-        drop(rows);
-        if manifest.version != super::SESSION_VERSION {
-            return Err(invalid("unsupported session payload version"));
-        }
-        let mut rows = if active_only {
-            self.conn
-                .query(
-                    "SELECT payload FROM tabs WHERE position=?",
-                    [manifest.active_tab_index as i64],
-                )
-                .await
-        } else {
-            self.conn
-                .query("SELECT payload FROM tabs ORDER BY position", ())
-                .await
-        }
-        .map_err(error)?;
-        while let Some(row) = rows.next().await.map_err(error)? {
-            manifest.tabs.push(decode::<SessionTab>(
-                &row.get::<Vec<u8>>(0).map_err(error)?,
-            )?);
-        }
-        drop(rows);
-        let contents = if active_only {
-            self.read_tab_contents(&manifest.tabs).await?
-        } else {
-            self.read_all_contents().await?
-        };
-        if active_only {
-            manifest.active_tab_index = 0;
-        }
-        Ok(Some(StoredSession { manifest, contents }))
-    }
-
     pub async fn checkpoint(&self) -> io::Result<()> {
         let mut rows = self
             .conn
@@ -167,7 +126,6 @@ impl Database {
         while rows.next().await.map_err(error)?.is_some() {}
         Ok(())
     }
-
     async fn finish_transaction(&self, result: io::Result<()>) -> io::Result<()> {
         match result {
             Ok(()) => match self.conn.execute("COMMIT", ()).await {
@@ -184,7 +142,6 @@ impl Database {
         }
     }
 }
-
 fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> io::Result<T> {
     serde_json::from_slice(bytes).map_err(invalid)
 }
@@ -194,7 +151,6 @@ fn error(cause: impl std::fmt::Display) -> io::Error {
 fn invalid(cause: impl std::fmt::Display) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, cause.to_string())
 }
-
 fn create_private_directory(path: &Path) -> io::Result<()> {
     let mut builder = fs::DirBuilder::new();
     builder.recursive(true);

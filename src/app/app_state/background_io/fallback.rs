@@ -95,21 +95,18 @@ impl BackgroundIoFallback for BackgroundIoRequest {
                 session_store,
                 tab_index,
                 cold_session_tab,
-            } => {
-                let (tab, restore_status) =
-                    session_store.restore_cold_session_tab(cold_session_tab);
-                BackgroundIoResult::SessionTabHydrated {
-                    request_id,
-                    tab_index,
-                    restore_status,
-                    tab: Box::new(tab),
-                }
-            }
+            } => BackgroundIoResult::SessionTabHydrated {
+                request_id,
+                tab_index,
+                result: session_store
+                    .restore_cold_session_tab(cold_session_tab)
+                    .map(|(tab, status)| (Box::new(tab), status))
+                    .map_err(|error| error.to_string()),
+            },
             _ => BackgroundIoResult::SessionTabHydrated {
                 request_id: 0,
                 tab_index: 0,
-                restore_status: None,
-                tab: Box::new(crate::app::domain::WorkspaceTab::untitled()),
+                result: Err("Background session hydration unavailable.".to_owned()),
             },
         }
     }

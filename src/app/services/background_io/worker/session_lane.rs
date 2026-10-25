@@ -102,11 +102,12 @@ fn hydrate_session_tab(
     tab_index: usize,
     cold_session_tab: ColdSessionTab,
 ) -> BackgroundIoResult {
-    let (tab, restore_status) = session_store.restore_cold_session_tab(cold_session_tab);
     BackgroundIoResult::SessionTabHydrated {
         request_id,
         tab_index,
-        restore_status,
-        tab: Box::new(tab),
+        result: session_store
+            .restore_cold_session_tab(cold_session_tab)
+            .map(|(tab, status)| (Box::new(tab), status))
+            .map_err(|error| error.to_string()),
     }
 }

@@ -76,6 +76,38 @@ restore 117.615 ms. These are still the legacy application backend; the database
 is tested independently, not yet selected by production. Promise health is
 unchanged from baseline (one pass, two fails, four at risk).
 
+### Phase 3 — integration and safe import
+
+The application now uses the database worker for all session reads and commits.
+The legacy file writer/cleanup machinery is removed. Import normalizes v7 buffer
+fields and legacy control-character flags, validates layout references and safe
+snapshot IDs, commits the migration marker with the data, verifies a readback,
+and leaves every source file untouched. Empty committed sessions do not reimport
+old JSON. Failed/unsupported imports and corrupt database reads protect the store
+against subsequent automatic overwrite. Cold-tab hydration now returns errors
+instead of replacing failed content with an empty buffer.
+
+Schema uses four tables: session state, independently updated tab metadata (with
+nested buffer/history JSON), snapshot checksums, and bounded content chunks.
+This avoids unnecessary joins for nested editor state while keeping large recovery
+text out of metadata. Capture sequence numbers and one owner order immediate and
+background saves; older captured requests cannot overwrite a newer commit.
+
+All-features tests, formatting, and strict library/test Clippy pass. Both lenses
+completed (`phase3`). In the session-store function selection excluding separate
+test files, cognitive sum 147 -> 139, effort 998,120 -> 958,899, SLOC 2,077 -> 1,684
+versus phase 2; cyclomatic sum increased 363 -> 370 with validation paths. History
+and restored buffer fields are moved instead of cloned during reconstruction.
+
+At 10,000 tabs: startup-visible restore ~0.175 ms and steady persistence ~31.62 ms
+improve substantially. Initial resource persistence drops from ~4.93 s to ~0.62 s.
+Full restore regresses to ~654.54 ms; the resource phase breakdown identifies
+~90 ms database read versus ~591 ms serial reconstruction. This **does not pass**
+the final non-regression requirement. Phase 5 must restore bounded parallel
+reconstruction and measure again. Promise statuses remain unchanged from baseline.
+Legacy profiling field names remain compatible with the lens: manifest read/parse
+now includes coherent database content reads; manifest write includes commit.
+
 ## Intended sequence
 
 1. Engine validation and baseline (this commit).

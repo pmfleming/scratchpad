@@ -46,8 +46,7 @@ pub(crate) enum BackgroundIoResult {
     SessionTabHydrated {
         request_id: u64,
         tab_index: usize,
-        restore_status: Option<RestoreStatus>,
-        tab: Box<WorkspaceTab>,
+        result: Result<(Box<WorkspaceTab>, Option<RestoreStatus>), String>,
     },
     SessionPersisted {
         request_id: u64,

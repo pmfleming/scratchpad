@@ -11,6 +11,7 @@ struct Prepared {
     tabs: Vec<Vec<u8>>,
     snapshots: Vec<CapturedSessionBuffer>,
     active: HashSet<String>,
+    required: HashSet<String>,
 }
 impl Prepared {
     fn new(request: SessionPersistRequest) -> io::Result<Self> {
@@ -20,6 +21,7 @@ impl Prepared {
             font_size,
             word_wrap,
             tabs,
+            ..
         } = request;
         let tab_count = tabs.len();
         let mut prepared = Self {
@@ -27,8 +29,17 @@ impl Prepared {
             tabs: Vec::with_capacity(tab_count),
             snapshots: Vec::new(),
             active: HashSet::new(),
+            required: HashSet::new(),
         };
         for tab in tabs {
+            super::super::legacy::validate_tab(&tab.session_tab)?;
+            prepared.required.extend(
+                tab.session_tab
+                    .buffers
+                    .iter()
+                    .filter(|buffer| super::super::legacy::needs_snapshot(buffer))
+                    .map(|buffer| buffer.temp_id.clone()),
+            );
             prepared.active.extend(
                 tab.session_tab
                     .buffers
@@ -48,6 +59,7 @@ impl Prepared {
             Vec::new(),
         );
         manifest.active_tab_index = active_tab_index.min(tab_count.saturating_sub(1));
+        manifest.tab_count = tab_count;
         prepared.state = serde_json::to_vec(&manifest).map_err(invalid)?;
         Ok(prepared)
     }
@@ -63,6 +75,9 @@ impl Database {
             return Err(invalid(format!(
                 "session is protected after recovery failure: {cause}"
             )));
+        }
+        if !self.verified {
+            self.load(super::ReadScope::Shells).await?;
         }
         if generation < self.latest_request {
             return Ok(SessionPersistProfile::default());
@@ -90,7 +105,9 @@ impl Database {
                 .await
                 .map_err(error)?;
             let result = self.write_prepared(&prepared, &mut profile).await;
+            let commit_start = Instant::now();
             self.finish_transaction(result).await?;
+            profile.manifest_write_ns += commit_start.elapsed().as_nanos();
         }
         // Update caches only after COMMIT. A failed attempt must be fully retryable.
         self.revisions.retain(|id, _| prepared.active.contains(id));
@@ -138,26 +155,26 @@ impl Database {
         self.conn.execute("INSERT INTO session_state VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload", [prepared.state.as_slice()]).await.map_err(error)?;
         profile.manifest_write_ns = start.elapsed().as_nanos();
         let start = Instant::now();
-        self.delete_stale_content(&prepared.active).await?;
+        self.delete_stale_content(prepared).await?;
         profile.stale_cleanup_ns = start.elapsed().as_nanos();
         Ok(())
     }
 
-    async fn delete_stale_content(&self, active: &HashSet<String>) -> io::Result<()> {
+    async fn delete_stale_content(&self, prepared: &Prepared) -> io::Result<()> {
         let mut rows = self
             .conn
             .query("SELECT id FROM snapshots", ())
             .await
             .map_err(error)?;
-        let mut stale = Vec::new();
+        let mut ids = HashSet::new();
         while let Some(row) = rows.next().await.map_err(error)? {
-            let id: String = row.get(0).map_err(error)?;
-            if !active.contains(&id) {
-                stale.push(id);
-            }
+            ids.insert(row.get::<String>(0).map_err(error)?);
         }
         drop(rows);
-        for id in stale {
+        if !prepared.required.is_subset(&ids) {
+            return Err(invalid("refusing to commit missing recovery content"));
+        }
+        for id in ids.difference(&prepared.active) {
             self.conn
                 .execute("DELETE FROM chunks WHERE id=?", [id.as_str()])
                 .await

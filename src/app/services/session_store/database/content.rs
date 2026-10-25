@@ -130,6 +130,9 @@ impl Database {
                 .await
                 .map_err(error)?;
             let Some(row) = rows.next().await.map_err(error)? else {
+                if super::super::legacy::needs_snapshot(buffer) {
+                    return Err(invalid("required recovery content is missing"));
+                }
                 continue;
             };
             let mut content = Content::from_row(&row)?;

@@ -16,6 +16,8 @@ pub enum SessionActiveSurface {
 #[derive(Serialize, Deserialize)]
 pub(crate) struct SessionManifest {
     pub version: u32,
+    #[serde(default)]
+    pub tab_count: usize,
     pub active_tab_index: usize,
     #[serde(default)]
     pub active_surface: SessionActiveSurface,
