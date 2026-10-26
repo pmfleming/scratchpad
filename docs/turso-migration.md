@@ -164,7 +164,8 @@ An isolated diagnostic is available as
 `cargo run --release --example session_storage_profile`. It separates database read
 and reconstruction timings and labels fresh/reused connections without pretending
 to control the OS cache. Exploratory inline-content schema and oversized-cache
-experiments did not improve the workload and were discarded; schema remains v1.
+experiments did not improve the workload and were discarded; phase 5 kept schema v1.
+The review follow-up below introduces v2 for durable buffer quarantine.
 No benchmark workload or budget has been weakened. Target annotations now identify
 the database implementation rather than the deleted legacy writer.
 
@@ -249,11 +250,86 @@ verified architecture proof or a satisfied global complexity/LOC-reduction gate.
   be opened with `XDG_STATE_HOME=/safe/rollback-state old-scratchpad`; configuration
   and ordinary file paths are unchanged. Never run old and new writers against
   the same state directory.
-- Foreign/newer schemas and corrupt or incomplete required recovery data fail
-  closed. No automatic destructive repair, legacy deletion, VACUUM, or secure-erase
-  claim is made. Checkpointing does not substitute for independent backups.
+- Foreign/newer schemas and corrupt manifests fail closed for the entire store.
+  Attributable buffer damage is quarantined as described below; healthy buffers
+  can still be saved. No automatic destructive repair, legacy deletion, VACUUM,
+  or secure-erase claim is made. Checkpointing does not substitute for independent backups.
   To reclaim database high-water disk space, verify an export and import it into
   a fresh directory, retaining the original separately; never delete only its WAL.
+
+## Review follow-up — buffer quarantine and engine identity
+
+Schema v2 adds `quarantine(id, payload, reason)`. Existing v1 databases upgrade
+atomically using Turso's `transactional_batch`, which is also used for initial
+schema creation. Older v1-only binaries reject v2 instead of silently overwriting
+it. Normal recovery data remains in the existing snapshot/chunk tables.
+
+A database checksum, length, chunk sequence, UTF-8, or required-content failure
+attributable to a buffer now archives its committed tab/buffer metadata before subsequent saves
+are allowed. Its snapshot and chunk records are never rewritten or cleaned up;
+its live buffer metadata is frozen, while healthy buffers and workspace layout
+can continue to commit. Closing the damaged tab does not delete its archived
+metadata/content, and protection survives restart. A failed active tab stays a
+cold shell with its recovery payload, not a newly editable empty document. Other
+tabs can hydrate and save normally, and the restore warning identifies quarantine.
+Queued hydration never replaces committed metadata with an older payload; jobs for
+already-closed tabs fail without creating a spurious quarantine. Missing pre-existing
+cold content detected during a save is quarantined only after rollback; the next save
+can then commit healthy edits. Rollback failure still blocks everything.
+
+Structural manifest/schema errors, unscoped engine or reconstruction failures,
+failed rollback, and inability to durably write the quarantine archive still block
+the whole store. `restore_guarded` handles unscoped reconstruction-worker failures;
+buffer-content failures are classified and quarantined before reconstruction.
+A full restore or logical export reports quarantined data rather than silently
+omitting it. There is deliberately no automatic unquarantine/repair/deletion:
+retain the complete database and WAL for recovery. The quarantine preserves record
+payloads, not historical page images or obsolete WAL frames.
+
+Snapshot lengths and BLAKE3 hashes now both derive from the chunks actually emitted.
+Invalid extracted chunk sizes abort the transaction. Every supplied snapshot also
+explicitly marks its buffer as retained during preparation, regardless of capture's
+eligibility predicate; a regression test checks both survival and a no-op second save.
+
+`python3 scripts/check-turso-locks.py` enforces the tested versions (`turso` 0.8.0,
+`turso_core`, SDK, parser, macros, extension and sync crates 0.8.3), a single instance
+of each, and identical registry source/checksum identities in the application and
+contract-tool lockfiles. CI runs
+this guard plus the isolated engine contract; release builds also require the guard.
+Application CI/build checks use `--locked` so a later build cannot silently resolve
+a different engine after the guard ran. Upgrades require an explicit policy and
+lockfile update, not just an unrelated `cargo update`. No otherwise-unused direct
+core dependency is added, avoiding changes to the engine's feature graph.
+
+Regression coverage includes healthy edits after cold-buffer damage, active-tab
+startup failure, close/restart retention, immutable archives, malformed/missing
+content rows, failed archive writes, manifest and rollback protection, parallel
+read attribution, v1 upgrade and schema-creation rollback, emitted lengths/hashes,
+and supplied-snapshot retention. Validation passed: **516 library tests**, all-feature
+integration tests, strict all-target/all-feature Clippy, formatting, the isolated
+engine contract, the engine policy's positive/negative checks, and `git diff --check`.
+Evidence is under `target/session-review/`.
+
+A fresh isolated-worktree benchmark of unchanged `1a6f438`, followed by this patch
+on the same environment (`cargo bench --locked --bench promise_latency -- session_`),
+showed no healthy-session regression. Criterion point estimates, before → after:
+
+| 10,000-tab workload | Unchanged HEAD | Review fixes |
+| --- | ---: | ---: |
+| Startup-visible restore | 275.32 µs | 274.61 µs |
+| Full restore | 148.74 ms | 134.02 ms |
+| Steady persistence | 39.095 ms | 37.391 ms |
+
+The startup difference was not statistically significant. Historical phase-5 timing
+was faster than the first review run, so these fresh paired measurements—not the
+archived timing—are the relevant comparison. They are targeted session measurements,
+not a new full quality/performance-lens or Windows acceptance run.
+
+Optional STRICT/foreign-key migration and idle WAL truncation are deferred.
+Foreign-key cleanup must not delete quarantined orphan chunks (for example, when
+the damaged snapshot header itself is missing). Such a migration needs a measured,
+lossless archive strategy first. Existing passive checkpoints and healthy-shutdown
+TRUNCATE remain; no claim is made that idle WAL high-water size is fixed here.
 
 ## Intended sequence
 

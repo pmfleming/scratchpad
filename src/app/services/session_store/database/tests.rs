@@ -90,7 +90,7 @@ fn failed_transaction_keeps_previous_session_and_can_retry() {
 }
 
 #[test]
-fn corrupt_chunk_blocks_subsequent_overwrite() {
+fn corrupt_chunk_is_preserved_when_the_tab_is_closed() {
     block_on(async {
         let directory = tempfile::tempdir().unwrap();
         let mut database = Database::open(directory.path()).await.unwrap();
@@ -104,7 +104,28 @@ fn corrupt_chunk_blocks_subsequent_overwrite() {
             .await
             .unwrap();
         assert!(database.load(ReadScope::All).await.is_err());
-        assert!(database.persist(request(&[]), 2).await.is_err());
+        database.persist(request(&[]), 2).await.unwrap();
+        assert_eq!(
+            database
+                .integer("SELECT count(*) FROM quarantine")
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            database
+                .integer("SELECT count(*) FROM chunks WHERE body=x'00'")
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            database
+                .integer("SELECT count(*) FROM snapshots")
+                .await
+                .unwrap(),
+            1
+        );
     });
 }
 

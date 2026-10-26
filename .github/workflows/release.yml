@@ -20,7 +20,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  session-engine:
+    name: Verify pinned session engine
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python3 scripts/check-turso-locks.py
+
   linux:
+    needs: session-engine
     name: Build Linux/Hyprland Release
     runs-on: ubuntu-22.04
 
@@ -79,7 +92,7 @@ jobs:
       - name: Check Cargo and Nix package versions
         shell: bash
         run: |
-          cargo_version="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json, sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          cargo_version="$(cargo metadata --locked --no-deps --format-version 1 | python3 -c 'import json, sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
           nix_version="$(nix eval --raw .#packages.x86_64-linux.scratchpad.version)"
           release_version="${{ steps.version.outputs.version }}"
           if [[ "$cargo_version" != "$release_version" ]]; then
@@ -95,7 +108,7 @@ jobs:
         run: cargo fmt --check
 
       - name: Run clippy
-        run: cargo clippy --lib --all-features -- -D warnings
+        run: cargo clippy --lib --all-features --locked -- -D warnings
 
       - name: Run tests
         run: cargo test --locked
@@ -121,6 +134,7 @@ jobs:
           if-no-files-found: error
 
   windows:
+    needs: session-engine
     name: Build Windows Release
     runs-on: windows-latest
 
@@ -139,7 +153,7 @@ jobs:
 
       - name: Run clippy
         shell: pwsh
-        run: cargo clippy --lib --all-features -- -D warnings
+        run: cargo clippy --lib --all-features --locked -- -D warnings
 
       - name: Run tests
         shell: pwsh
@@ -162,7 +176,7 @@ jobs:
       - name: Check Cargo package version
         shell: pwsh
         run: |
-          $cargoVersion = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          $cargoVersion = (cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
           if ($cargoVersion -ne "${{ steps.version.outputs.version }}") {
             throw "Release version ${{ steps.version.outputs.version }} does not match Cargo.toml version $cargoVersion."
           }

@@ -3,6 +3,9 @@ mod content;
 #[cfg(test)]
 mod fault_tests;
 mod persist;
+mod quarantine;
+#[cfg(test)]
+mod quarantine_tests;
 mod read;
 #[cfg(test)]
 mod tests;
@@ -11,7 +14,7 @@ mod worker;
 use super::model::SessionManifest;
 use super::types::SessionPersistProfile;
 pub(super) use read::ReadScope;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::Path;
@@ -29,6 +32,7 @@ CREATE TABLE chunks(id TEXT NOT NULL, part INTEGER NOT NULL, body BLOB NOT NULL,
 pub(super) struct StoredSession {
     pub manifest: SessionManifest,
     pub contents: HashMap<String, String>,
+    pub quarantined: HashSet<String>,
 }
 pub(super) struct Database {
     conn: Connection,
@@ -40,6 +44,7 @@ pub(super) struct Database {
     latest_request: u64,
     pub(super) blocked: Option<String>,
     verified: bool,
+    quarantined: HashMap<String, super::model::SessionBuffer>,
 }
 impl Database {
     async fn open(root: &Path) -> io::Result<Self> {
@@ -70,15 +75,25 @@ impl Database {
             latest_request: 0,
             blocked: None,
             verified: false,
+            quarantined: HashMap::new(),
         };
         db.initialize().await?;
+        db.load_quarantine().await?;
         Ok(db)
     }
     async fn initialize(&mut self) -> io::Result<()> {
         let version = self.integer("PRAGMA user_version").await?;
         let application = self.integer("PRAGMA application_id").await?;
-        if version == 1 && application == APPLICATION_ID {
-            return Ok(());
+        if application == APPLICATION_ID {
+            match version {
+                2 => return Ok(()),
+                1 => {
+                    return self
+                        .create_schema(&format!("{} PRAGMA user_version=2;", quarantine::SCHEMA))
+                        .await;
+                }
+                _ => {}
+            }
         }
         if version != 0
             || application != 0
@@ -91,9 +106,22 @@ impl Database {
                 "unsupported session database schema; preserve it for recovery",
             ));
         }
-        self.conn.execute_batch(&format!(
-            "BEGIN IMMEDIATE; {SCHEMA} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=1; COMMIT;"
-        )).await.map_err(error)
+        self.create_schema(&format!(
+            "{SCHEMA} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=2;",
+            quarantine::SCHEMA
+        ))
+        .await
+    }
+    async fn create_schema(&self, sql: &str) -> io::Result<()> {
+        self.conn
+            .transactional_batch(
+                sql.split(';')
+                    .filter(|statement| !statement.trim().is_empty()),
+                turso::transaction::TransactionBehavior::Immediate,
+            )
+            .await
+            .map(|_| ())
+            .map_err(error)
     }
     async fn import_legacy(&mut self, root: &Path, fallback: Option<&Path>) -> io::Result<()> {
         if self.integer("SELECT count(*) FROM session_state").await? != 0 {

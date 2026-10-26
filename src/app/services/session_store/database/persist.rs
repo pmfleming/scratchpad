@@ -53,7 +53,16 @@ impl Prepared {
             prepared
                 .tabs
                 .push(serde_json::to_vec(&tab.session_tab).map_err(invalid)?);
-            prepared.snapshots.extend(tab.buffer_snapshots);
+            // A supplied snapshot is authoritative: it must survive this commit,
+            // even if capture's eligibility rules evolve independently.
+            for snapshot in tab.buffer_snapshots {
+                prepared
+                    .buffers
+                    .get_mut(&snapshot.temp_id)
+                    .ok_or_else(|| invalid("snapshot has no buffer metadata"))?
+                    .retain = true;
+                prepared.snapshots.push(snapshot);
+            }
         }
         let mut manifest: SessionManifest = session_manifest(
             active_tab_index,
@@ -75,7 +84,7 @@ impl Prepared {
 impl Database {
     pub async fn persist(
         &mut self,
-        request: SessionPersistRequest,
+        mut request: SessionPersistRequest,
         generation: u64,
     ) -> io::Result<SessionPersistProfile> {
         self.ensure_healthy()?;
@@ -86,6 +95,7 @@ impl Database {
             return Ok(SessionPersistProfile::default());
         }
         let start = Instant::now();
+        self.freeze_quarantined(&mut request);
         let mut prepared = Prepared::new(request)?;
         let mut profile = SessionPersistProfile {
             manifest_serialize_ns: start.elapsed().as_nanos(),
@@ -110,7 +120,9 @@ impl Database {
                 .map_err(error)?;
             let result = self.write_prepared(&prepared, &mut profile).await;
             let commit_start = Instant::now();
-            self.finish_transaction(result).await?;
+            if let Err(cause) = self.finish_transaction(result).await {
+                return Err(self.protect_failed_write(cause).await);
+            }
             profile.manifest_write_ns += commit_start.elapsed().as_nanos();
         }
         // Update caches only after COMMIT. A failed attempt must be fully retryable.
@@ -173,14 +185,18 @@ impl Database {
             ids.insert(row.get::<String>(0).map_err(error)?);
         }
         drop(rows);
-        if prepared
-            .buffers
-            .iter()
-            .any(|(id, policy)| policy.required && !ids.contains(id))
-        {
-            return Err(invalid("refusing to commit missing recovery content"));
+        if let Some((id, _)) = prepared.buffers.iter().find(|(id, policy)| {
+            policy.required && !ids.contains(*id) && !self.quarantined.contains_key(*id)
+        }) {
+            return Err(super::quarantine::damaged(
+                id,
+                "refusing to commit missing recovery content",
+            ));
         }
-        for id in ids.iter().filter(|id| !prepared.retains(id)) {
+        for id in ids
+            .iter()
+            .filter(|id| !prepared.retains(id) && !self.quarantined.contains_key(*id))
+        {
             self.execute_cached("DELETE FROM chunks WHERE id=?", [id.as_str()])
                 .await?;
             self.execute_cached("DELETE FROM snapshots WHERE id=?", [id.as_str()])

@@ -13,6 +13,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  session-engine:
+    name: Pinned session engine contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Check application and contract engine identities
+        run: python3 scripts/check-turso-locks.py
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Run isolated engine contract
+        run: cargo run --locked --manifest-path tools/turso-contract/Cargo.toml
+
   windows:
     name: Format, Lint, Test
     runs-on: windows-latest
@@ -33,18 +47,18 @@ jobs:
         run: cargo fmt --check
 
       - name: Check feature combinations
-        run: cargo hack check --feature-powerset
+        run: cargo hack check --feature-powerset --locked
 
       - name: Lint
-        run: cargo clippy --lib --all-features -- -D warnings
+        run: cargo clippy --lib --all-features --locked -- -D warnings
 
       - name: Test
-        run: cargo test --all-features
+        run: cargo test --all-features --locked
 
       - name: Documentation
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --no-deps --all-features
+        run: cargo doc --no-deps --all-features --locked
 
   linux:
     name: Linux Lint and Test
@@ -87,11 +101,11 @@ jobs:
 
       - name: Lint Linux code
         run: |
-          cargo clippy --lib --all-features -- -D warnings
+          cargo clippy --lib --all-features --locked -- -D warnings
           cargo clippy --manifest-path crates/linux_file_watch/Cargo.toml -- -D warnings
 
       - name: Test Linux application code
-        run: cargo test --all-features
+        run: cargo test --all-features --locked
 
       - name: Test Linux file watcher
         run: cargo test --manifest-path crates/linux_file_watch/Cargo.toml

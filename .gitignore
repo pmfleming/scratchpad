@@ -1,4 +1,5 @@
 /target/
+/tools/turso-contract/target/
 /target-codex/
 /target-codex-tests/
 /target-tests/

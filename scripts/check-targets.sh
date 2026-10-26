@@ -25,8 +25,8 @@ target_is_available() {
 
 for target in "${requested_targets[@]}"; do
   if target_is_available "$target"; then
-    echo "==> cargo check --target $target"
-    cargo check --target "$target"
+    echo "==> cargo check --locked --target $target"
+    cargo check --locked --target "$target"
   else
     echo "==> skipping $target; target is not installed for this toolchain" >&2
   fi

@@ -99,6 +99,7 @@ impl Restorer {
         &mut self,
         tabs: Vec<SessionTab>,
         active: usize,
+        quarantined: &std::collections::HashSet<String>,
     ) -> Vec<(usize, WorkspaceTab, Option<SessionTabParts>, RestoreSummary)> {
         if tabs.is_empty() {
             return Vec::new();
@@ -112,7 +113,13 @@ impl Restorer {
         tabs.rotate_left(active);
         tabs.into_iter()
             .map(|(index, tab)| {
-                if index == active {
+                if index == active
+                    && !tab
+                        .payload
+                        .buffers
+                        .iter()
+                        .any(|buffer| quarantined.contains(&buffer.temp_id))
+                {
                     let (tab, summary) = self.restore_tab_parts_with_summary(tab);
                     (index, tab, None, summary)
                 } else {

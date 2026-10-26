@@ -1,5 +1,5 @@
 use super::super::parallel;
-use super::{Database, error, invalid};
+use super::{Database, error, invalid, quarantine::damaged};
 use crate::app::domain::DocumentSnapshot;
 use crate::app::services::session_store::model::SessionTab;
 use futures_lite::future::block_on;
@@ -35,6 +35,12 @@ impl Content {
         self.observed += bytes.len();
         self.parts.push((part, bytes));
         Ok(())
+    }
+    fn append_row(&mut self, row: &turso::Row, part_column: usize) -> io::Result<()> {
+        self.append(
+            row.get(part_column).map_err(error)?,
+            row.get(part_column + 1).map_err(error)?,
+        )
     }
     fn finish(mut self) -> io::Result<String> {
         // Sort only each buffer's small chunk list, not the entire SQL result.
@@ -89,12 +95,17 @@ async fn read_content_range(
         let content = contents
             .get_mut(&id)
             .ok_or_else(|| invalid("orphan recovery chunk"))?;
-        content.append(row.get(1).map_err(error)?, row.get(2).map_err(error)?)?;
+        content
+            .append_row(&row, 1)
+            .map_err(|cause| damaged(&id, cause))?;
         batch.chunk_count += 1;
     }
     batch.contents = contents
         .into_iter()
-        .map(|(id, content)| Ok((id, content.finish()?)))
+        .map(|(id, content)| {
+            let text = content.finish().map_err(|cause| damaged(&id, cause))?;
+            Ok((id, text))
+        })
         .collect::<io::Result<_>>()?;
     Ok(batch)
 }
@@ -107,10 +118,10 @@ impl Database {
     ) -> io::Result<()> {
         self.execute_cached("DELETE FROM chunks WHERE id=?", [id])
             .await?;
-        let digest = self.write_chunks(id, snapshot).await?;
+        let (bytes, digest) = self.write_chunks(id, snapshot).await?;
         self.execute_cached(
             "INSERT INTO snapshots VALUES(?, ?, ?) ON CONFLICT(id) DO UPDATE SET bytes=excluded.bytes, digest=excluded.digest",
-            params![id, snapshot.len_bytes() as i64, digest.as_bytes().as_slice()],
+            params![id, bytes, digest.as_bytes().as_slice()],
         ).await?;
         Ok(())
     }
@@ -119,29 +130,39 @@ impl Database {
         &self,
         id: &str,
         snapshot: &DocumentSnapshot,
-    ) -> io::Result<blake3::Hash> {
+    ) -> io::Result<(i64, blake3::Hash)> {
         let mut insert = self
             .conn
             .prepare_cached("INSERT INTO chunks VALUES(?, ?, ?)")
             .await
             .map_err(error)?;
         let mut digest = blake3::Hasher::new();
+        let mut bytes = 0i64;
         // Bounded extraction also coalesces fragmented pieces into a small number
         // of rows. Four UTF-8 bytes per scalar is the worst case.
         let chunk_chars = CHUNK_BYTES / 4;
         for (part, start) in (0..snapshot.len_chars()).step_by(chunk_chars).enumerate() {
             let end = (start + chunk_chars).min(snapshot.len_chars());
             let text = snapshot.extract_range(start..end);
+            if text.is_empty() || text.len() > CHUNK_BYTES {
+                return Err(invalid("invalid extracted recovery chunk"));
+            }
+            bytes = bytes
+                .checked_add(text.len() as i64)
+                .ok_or_else(|| invalid("recovery text exceeds database length range"))?;
             digest.update(text.as_bytes());
             insert
                 .execute(params![id, part as i64, text.as_bytes()])
                 .await
                 .map_err(error)?;
         }
-        Ok(digest.finalize())
+        Ok((bytes, digest.finalize()))
     }
 
     pub(super) async fn read_all_contents(&self) -> io::Result<HashMap<String, String>> {
+        if let Some(id) = self.quarantined.keys().next() {
+            return Err(damaged(id, "original recovery data is protected"));
+        }
         let mut metadata = Vec::new();
         let mut rows = self
             .conn
@@ -149,10 +170,9 @@ impl Database {
             .await
             .map_err(error)?;
         while let Some(row) = rows.next().await.map_err(error)? {
-            metadata.push((
-                row.get::<String>(0).map_err(error)?,
-                Content::from_row(&row)?,
-            ));
+            let id: String = row.get(0).map_err(error)?;
+            let content = Content::from_row(&row).map_err(|cause| damaged(&id, cause))?;
+            metadata.push((id, content));
         }
         drop(rows);
         let workers = parallel::worker_count(8);
@@ -201,26 +221,41 @@ impl Database {
             .await
             .map_err(error)?;
         for buffer in tabs.iter().flat_map(|tab| &tab.buffers) {
+            if self.quarantined.contains_key(&buffer.temp_id) {
+                return Err(damaged(
+                    &buffer.temp_id,
+                    "original recovery data is protected",
+                ));
+            }
             let mut rows = metadata
                 .query([buffer.temp_id.as_str()])
                 .await
                 .map_err(error)?;
             let Some(row) = rows.next().await.map_err(error)? else {
                 if super::super::legacy::needs_snapshot(buffer) {
-                    return Err(invalid("required recovery content is missing"));
+                    return Err(damaged(
+                        &buffer.temp_id,
+                        "required recovery content is missing",
+                    ));
                 }
                 continue;
             };
-            let mut content = Content::from_row(&row)?;
+            let mut content =
+                Content::from_row(&row).map_err(|cause| damaged(&buffer.temp_id, cause))?;
             drop(rows);
             let mut rows = chunks
                 .query([buffer.temp_id.as_str()])
                 .await
                 .map_err(error)?;
             while let Some(row) = rows.next().await.map_err(error)? {
-                content.append(row.get(0).map_err(error)?, row.get(1).map_err(error)?)?;
+                content
+                    .append_row(&row, 0)
+                    .map_err(|cause| damaged(&buffer.temp_id, cause))?;
             }
-            contents.insert(buffer.temp_id.clone(), content.finish()?);
+            let text = content
+                .finish()
+                .map_err(|cause| damaged(&buffer.temp_id, cause))?;
+            contents.insert(buffer.temp_id.clone(), text);
         }
         Ok(contents)
     }

@@ -119,6 +119,8 @@ impl SessionStore {
             .map(Option::flatten)
     }
     fn restore_guarded(&self, stored: StoredSession) -> io::Result<Option<RestoredSession>> {
+        // Content failures are quarantined by the database before reaching here.
+        // An unscoped worker spawn/panic failure still protects the whole manifest.
         restore_session(stored).inspect_err(|error| {
             let reason = error.to_string();
             if let Ok(worker) = self.worker() {
@@ -146,8 +148,11 @@ impl SessionStore {
             return Err(receiver_closed());
         }
         let mut restorer = Restorer::new(stored.contents);
-        let tabs =
-            restorer.restore_tabs_active_first(stored.manifest.tabs, session.active_tab_index);
+        let tabs = restorer.restore_tabs_active_first(
+            stored.manifest.tabs,
+            session.active_tab_index,
+            &stored.quarantined,
+        );
         if tabs.is_empty() {
             return Ok(None);
         }
@@ -158,7 +163,21 @@ impl SessionStore {
                 return Err(receiver_closed());
             }
         }
-        session.restore_status = summary.into_status();
+        session.restore_status = if stored.quarantined.is_empty() {
+            summary.into_status()
+        } else {
+            let prefix = summary
+                .into_status()
+                .map(|status| format!("{} ", status.message))
+                .unwrap_or_default();
+            Some(RestoreStatus {
+                level: RestoreStatusLevel::Warning,
+                message: format!(
+                    "{prefix}{} damaged recovery buffer(s) quarantined; healthy buffers still save. Original data is retained in session.db.",
+                    stored.quarantined.len()
+                ),
+            })
+        };
         Ok(Some(session))
     }
     pub(crate) fn restore_cold_session_tab(

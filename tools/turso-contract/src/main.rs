@@ -23,7 +23,7 @@ fn main() -> Result<()> {
         block_on(check_recovery(&path))?;
     }
     println!(
-        "PASS: Turso 0.8.0 commit/rollback, 16 MiB BLOB, abrupt exit, WAL recovery, checkpoint and integrity"
+        "PASS: Turso bindings 0.8.0 commit/rollback, 16 MiB BLOB, abrupt exit, WAL recovery, checkpoint and integrity"
     );
     Ok(())
 }

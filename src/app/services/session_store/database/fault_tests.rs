@@ -106,8 +106,19 @@ fn missing_content_never_falls_back_to_empty_text() {
             .execute_batch("DELETE FROM chunks; DELETE FROM snapshots;")
             .await
             .unwrap();
-        assert!(db.load(ReadScope::Shells).await.is_err());
-        assert!(db.persist(request(&[]), 2).await.is_err());
+        let stored = db.load(ReadScope::Shells).await.unwrap().unwrap();
+        assert_eq!(stored.quarantined.len(), 1);
+        assert!(stored.contents.is_empty());
+        assert!(db.load(ReadScope::Active).await.is_err());
+        db.persist(request(&[]), 2).await.unwrap();
+        assert_eq!(
+            db.integer("SELECT count(*) FROM quarantine").await.unwrap(),
+            1
+        );
+        assert_eq!(
+            db.integer("SELECT count(*) FROM snapshots").await.unwrap(),
+            0
+        );
     });
 }
 
