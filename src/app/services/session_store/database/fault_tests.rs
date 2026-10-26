@@ -26,8 +26,13 @@ fn parallel_scan_detects_orphan_chunks_outside_all_content_ranges() {
         let mut db = Database::open(directory.path()).await.unwrap();
         let tabs: Vec<_> = (0..1000).map(|_| tab("unique identity")).collect();
         db.persist(request(&tabs), 1).await.unwrap();
+        // Simulate external corruption bypassing the enabled FK constraints.
         db.conn
-            .execute("INSERT INTO chunks VALUES('zzzz_orphan', 0, x'6162')", ())
+            .execute("PRAGMA foreign_keys=OFF", ())
+            .await
+            .unwrap();
+        db.conn
+            .execute("INSERT INTO parts VALUES('zzzz_orphan', 0, x'6162')", ())
             .await
             .unwrap();
         assert!(db.load(ReadScope::All).await.is_err());
@@ -103,7 +108,7 @@ fn missing_content_never_falls_back_to_empty_text() {
         let mut db = Database::open(directory.path()).await.unwrap();
         db.persist(request(&[tab("important")]), 1).await.unwrap();
         db.conn
-            .execute_batch("DELETE FROM chunks; DELETE FROM snapshots;")
+            .execute_batch("DELETE FROM snapshots;")
             .await
             .unwrap();
         let stored = db.load(ReadScope::Shells).await.unwrap().unwrap();

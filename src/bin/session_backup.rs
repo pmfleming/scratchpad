@@ -14,10 +14,10 @@ fn main() -> io::Result<()> {
     }
     let source = Path::new(&args[0]);
     let destination = Path::new(&args[1]);
-    if !source.join("session.db").is_file() && !source.join("session.json").is_file() {
+    if !source.join("session.db").is_file() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            "source contains no session database or legacy manifest",
+            "source contains no session database",
         ));
     }
     let _instance = lock_instance(source)?;

@@ -1,13 +1,12 @@
 //! Durable, buffer-scoped protection. Archive metadata before allowing other saves.
 use super::{Database, decode, error, invalid};
 use crate::app::services::session_store::{
-    capture::SessionPersistRequest, legacy, model::SessionTab,
+    capture::SessionPersistRequest, model::SessionTab, validation,
 };
 use std::{collections::HashMap, fmt, io};
 use turso::params;
 
-pub(super) const SCHEMA: &str =
-    "CREATE TABLE quarantine(id TEXT PRIMARY KEY, payload BLOB NOT NULL, reason TEXT NOT NULL);";
+pub(super) const SCHEMA: &str = "CREATE TABLE quarantine(id TEXT PRIMARY KEY, payload BLOB NOT NULL, reason TEXT NOT NULL) STRICT;";
 
 #[derive(Debug)]
 struct DamagedBuffer {
@@ -48,7 +47,7 @@ impl Database {
         while let Some(row) = rows.next().await.map_err(error)? {
             let id: String = row.get(0).map_err(error)?;
             let tab: SessionTab = decode(&row.get::<Vec<u8>>(1).map_err(error)?)?;
-            legacy::validate_tab(&tab)?;
+            validation::validate_tab(&tab)?;
             let buffer = tab
                 .buffers
                 .into_iter()

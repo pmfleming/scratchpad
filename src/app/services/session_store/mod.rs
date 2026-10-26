@@ -1,6 +1,5 @@
 mod capture;
 mod database;
-mod legacy;
 mod model;
 mod parallel;
 #[cfg(test)]
@@ -8,6 +7,7 @@ mod parity_tests;
 mod recovery_export;
 mod restore;
 mod types;
+mod validation;
 
 use crate::app::diagnostics;
 use crate::app::domain::WorkspaceTab;
@@ -33,7 +33,6 @@ pub use types::{
 #[derive(Clone)]
 pub struct SessionStore {
     root: PathBuf,
-    fallback_root: Option<PathBuf>,
     worker: Arc<OnceLock<Result<DatabaseWorker, String>>>,
 }
 impl Default for SessionStore {
@@ -46,15 +45,7 @@ impl SessionStore {
     pub fn new(root: PathBuf) -> Self {
         Self {
             root,
-            fallback_root: None,
             worker: Arc::new(OnceLock::new()),
-        }
-    }
-    #[must_use]
-    pub fn with_fallback(root: PathBuf, fallback_root: PathBuf) -> Self {
-        Self {
-            fallback_root: Some(fallback_root),
-            ..Self::new(root)
         }
     }
     #[must_use]
@@ -65,8 +56,7 @@ impl SessionStore {
     fn worker(&self) -> io::Result<&DatabaseWorker> {
         self.worker
             .get_or_init(|| {
-                DatabaseWorker::open(self.root.clone(), self.fallback_root.clone())
-                    .map_err(|error| error.to_string())
+                DatabaseWorker::open(self.root.clone()).map_err(|error| error.to_string())
             })
             .as_ref()
             .map_err(|message| io::Error::other(message.clone()))

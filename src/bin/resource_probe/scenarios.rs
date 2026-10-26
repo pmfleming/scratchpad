@@ -31,6 +31,7 @@ pub(super) fn run_all() {
     emit_tab_strip_frame_tracking();
     emit_view_count_resource_tracking();
     emit_session_persist_restore_costs();
+    super::session_save::run();
 }
 
 fn emit_large_utf8_load_peak_memory() {

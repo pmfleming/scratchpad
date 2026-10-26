@@ -1,5 +1,8 @@
 # Transactional session storage migration
 
+Historical v1/v2 migration record. The current breaking schema and large-buffer
+save measurements are documented in [Incremental Turso sessions](turso-incremental-session.md).
+
 ## Evidence and acceptance
 
 Baseline: `5771513`, including the user's pre-existing working-tree editor test

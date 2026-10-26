@@ -4,6 +4,8 @@ mod alloc_metrics;
 mod events;
 #[path = "resource_probe/scenarios.rs"]
 mod scenarios;
+#[path = "resource_probe/session_save.rs"]
+mod session_save;
 
 use events::{StepOutcome, ns_to_ms_label};
 use scratchpad::app::domain::buffer::PieceTreeLite;
@@ -41,7 +43,11 @@ const UTF8_SEARCH_UNIT: &str = "hay café 東京 Привет مرحبا hay\n";
 const FRAGMENT_UNIT: &str = "hay needle café 東京\n";
 
 fn main() {
-    scenarios::run_all();
+    if std::env::args().any(|arg| arg == "--large-dirty-save") {
+        session_save::run();
+    } else {
+        scenarios::run_all();
+    }
 }
 
 fn run_file_backed_open_first_visible_paint_cycle(path: &Path) -> StepOutcome {

@@ -2,7 +2,7 @@ use super::provenance::{ByteSpan, PieceSource, empty_byte_span};
 use super::{PieceHistoryEdit, PieceHistoryFlags};
 use crate::app::domain::{CharCursor, CursorRange};
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PersistedCursorRange {
     pub primary_index: usize,
     pub primary_prefer_next_row: bool,
@@ -10,7 +10,7 @@ pub struct PersistedCursorRange {
     pub secondary_prefer_next_row: bool,
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PersistedHistoryEntry {
     pub id: u64,
     pub global_seq: u64,
@@ -26,7 +26,7 @@ pub struct PersistedHistoryEntry {
     pub edits: Vec<PersistedHistoryEdit>,
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PersistedHistoryEdit {
     Inserted {

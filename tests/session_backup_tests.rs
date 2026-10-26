@@ -8,7 +8,7 @@ fn tab(text: &str) -> WorkspaceTab {
 }
 
 #[test]
-fn export_is_private_importable_and_never_overwrites() {
+fn export_is_private_readable_and_never_overwrites() {
     let directory = tempfile::tempdir().unwrap();
     let store = SessionStore::new(directory.path().join("source"));
     store
@@ -39,13 +39,24 @@ fn export_is_private_importable_and_never_overwrites() {
             0o600
         );
     }
-    let restored = SessionStore::new(destination.clone())
-        .load()
-        .unwrap()
-        .unwrap();
-    assert_eq!(restored.tabs[0].buffers.buffer.text(), "λ\0🦀\r\n");
-    assert_eq!(restored.tabs[1].buffers.buffer.text(), "");
-    assert_eq!(restored.active_tab_index, 1);
+    let manifest: serde_json::Value = serde_json::from_slice(&original).unwrap();
+    assert_eq!(manifest["active_tab_index"], 1);
+    for (index, expected) in ["λ\0🦀\r\n", ""].into_iter().enumerate() {
+        let id = manifest["tabs"][index]["buffers"][0]["temp_id"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(destination.join(format!("{id}.tmp"))).unwrap(),
+            expected
+        );
+    }
+    // Recovery export is a human-readable escape hatch, not a legacy importer.
+    assert!(
+        SessionStore::new(destination.clone())
+            .load()
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(
         fs::read(destination.join("session.json")).unwrap(),
         original

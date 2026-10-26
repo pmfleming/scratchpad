@@ -3,8 +3,8 @@ use super::{
     quarantine::{damaged, damaged_id},
 };
 use crate::app::services::session_store::{
-    legacy,
     model::{SessionManifest, SessionTab},
+    validation,
 };
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -13,7 +13,7 @@ fn validate_required(tabs: &[SessionTab], contains: impl Fn(&str) -> bool) -> io
     if let Some(buffer) = tabs
         .iter()
         .flat_map(|tab| &tab.buffers)
-        .find(|buffer| legacy::needs_snapshot(buffer) && !contains(&buffer.temp_id))
+        .find(|buffer| validation::needs_snapshot(buffer) && !contains(&buffer.temp_id))
     {
         return Err(damaged(
             &buffer.temp_id,
@@ -51,7 +51,23 @@ impl Database {
             return Ok(None);
         };
         self.read_tabs(&mut manifest, scope).await?;
-        let contents = match self.read_contents(&manifest, scope).await {
+        let contents = match async {
+            let contents = self.read_contents(&manifest, scope).await?;
+            let tabs = if matches!(scope, ReadScope::Shells) {
+                let active = manifest.active_tab_index;
+                manifest
+                    .tabs
+                    .get_mut(active)
+                    .map(std::slice::from_mut)
+                    .unwrap_or_default()
+            } else {
+                &mut manifest.tabs
+            };
+            self.read_histories(tabs).await?;
+            Ok(contents)
+        }
+        .await
+        {
             Ok(contents) => contents,
             Err(cause) => {
                 self.protect_damaged(&cause, &manifest.tabs).await?;
@@ -104,7 +120,7 @@ impl Database {
             .map_err(error)?;
         let Some(row) = rows.next().await.map_err(error)? else {
             drop(rows);
-            if self.integer("SELECT (SELECT count(*) FROM tabs)+(SELECT count(*) FROM snapshots)+(SELECT count(*) FROM chunks)+(SELECT count(*) FROM quarantine)").await? != 0 {
+            if self.integer("SELECT (SELECT count(*) FROM tabs)+(SELECT count(*) FROM snapshots)+(SELECT count(*) FROM parts)+(SELECT count(*) FROM blobs)+(SELECT count(*) FROM history)+(SELECT count(*) FROM buffer_ids)+(SELECT count(*) FROM quarantine)").await? != 0 {
                 return Err(invalid("missing session commit marker"));
             }
             return Ok(None);
@@ -143,7 +159,7 @@ impl Database {
                 return Err(invalid("noncontiguous session tab order"));
             }
             let tab: SessionTab = decode(&row.get::<Vec<u8>>(1).map_err(error)?)?;
-            legacy::validate_tab(&tab)?;
+            validation::validate_tab(&tab)?;
             manifest.tabs.push(tab);
         }
         drop(rows);
@@ -168,10 +184,16 @@ impl Database {
     }
     pub async fn hydrate(
         &mut self,
-        tab: SessionTab,
+        mut tab: SessionTab,
     ) -> io::Result<(SessionTab, HashMap<String, String>)> {
         self.ensure_healthy()?;
-        let result = match self.hydrate_contents(&tab).await {
+        let result = match async {
+            let contents = self.hydrate_contents(&tab).await?;
+            self.read_histories(std::slice::from_mut(&mut tab)).await?;
+            Ok(contents)
+        }
+        .await
+        {
             Ok(contents) => Ok(contents),
             Err(cause) => {
                 let protected = self.protect_current_buffer(&cause).await;
@@ -216,7 +238,7 @@ impl Database {
         Ok(true)
     }
     async fn hydrate_contents(&self, tab: &SessionTab) -> io::Result<HashMap<String, String>> {
-        legacy::validate_tab(tab)?;
+        validation::validate_tab(tab)?;
         let tabs = std::slice::from_ref(tab);
         self.read_tab_contents(tabs).await
     }
@@ -234,7 +256,7 @@ impl Database {
         for buffer in tabs
             .iter()
             .flat_map(|tab| &tab.buffers)
-            .filter(|buffer| legacy::needs_snapshot(buffer) && !ids.contains(&buffer.temp_id))
+            .filter(|buffer| validation::needs_snapshot(buffer) && !ids.contains(&buffer.temp_id))
         {
             self.protect_damaged(
                 &damaged(&buffer.temp_id, "required recovery content is missing"),

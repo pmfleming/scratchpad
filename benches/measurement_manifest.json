@@ -22,6 +22,7 @@
       "view_count_resource_tracking",
       "anchor_heavy_view_editing",
       "session_persist_cost",
+      "large_dirty_buffer_save",
       "session_restore_cost",
       "startup_visible_restore_cost"
     ]

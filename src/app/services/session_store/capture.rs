@@ -103,13 +103,6 @@ impl CapturedSessionTab {
         Self {
             session_tab: SessionTab {
                 buffers,
-                buffer_id: None,
-                name: None,
-                path: None,
-                is_dirty: None,
-                temp_id: None,
-                encoding: None,
-                has_bom: None,
                 active_view_id: tab.layout.active_view_id(),
                 views: tab.layout.views().iter().map(SessionView::from).collect(),
                 root_pane: SessionPaneNode::from(tab.layout.root_pane()),

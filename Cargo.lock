@@ -1599,6 +1599,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fastcdc"
+version = "4.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77af40d8a8dadb92dc178569a5f5edb5f3056e98255c2de48ab5d59a52892e0c"
+
+[[package]]
 name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4035,6 +4041,7 @@ dependencies = [
  "eframe",
  "egui-phosphor",
  "encoding_rs",
+ "fastcdc",
  "fontdb",
  "futures-lite",
  "getrandom 0.4.3",

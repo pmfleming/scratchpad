@@ -37,6 +37,7 @@ smallvec = "1.15.2"
 turso = { version = "=0.8.0", default-features = false }
 futures-lite = "2.6.1"
 blake3 = "1.8.2"
+fastcdc = { version = "4.0.0", default-features = false }
 sysinfo = { version = "0.39.5", default-features = false, features = ["system"] }
 
 [target.'cfg(windows)'.dependencies]

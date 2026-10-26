@@ -1,7 +1,11 @@
 //! Local-only transactional session storage. All access belongs to one worker.
+mod chunking;
 mod content;
 #[cfg(test)]
 mod fault_tests;
+mod history;
+#[cfg(test)]
+mod incremental_tests;
 mod persist;
 mod quarantine;
 #[cfg(test)]
@@ -23,11 +27,20 @@ pub(super) use worker::DatabaseWorker;
 
 const APPLICATION_ID: i64 = 0x5350_4350;
 const SCHEMA: &str = "
-CREATE TABLE session_state(id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT NULL);
-CREATE TABLE tabs(position INTEGER PRIMARY KEY, payload BLOB NOT NULL);
-CREATE TABLE snapshots(id TEXT PRIMARY KEY, bytes INTEGER NOT NULL, digest BLOB NOT NULL);
-CREATE TABLE chunks(id TEXT NOT NULL, part INTEGER NOT NULL, body BLOB NOT NULL,
-                    PRIMARY KEY(id, part));";
+CREATE TABLE session_state(id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT NULL) STRICT;
+CREATE TABLE tabs(position INTEGER PRIMARY KEY, payload BLOB NOT NULL) STRICT;
+CREATE TABLE buffer_ids(id TEXT PRIMARY KEY) STRICT;
+CREATE TABLE history(temp_id TEXT NOT NULL REFERENCES buffer_ids(id) ON DELETE CASCADE,
+                     seq INTEGER NOT NULL, global_seq INTEGER NOT NULL CHECK(global_seq>0),
+                     entry BLOB NOT NULL, PRIMARY KEY(temp_id, seq)) STRICT;
+CREATE INDEX history_global_seq ON history(global_seq);
+CREATE TABLE snapshots(id TEXT PRIMARY KEY REFERENCES buffer_ids(id) ON DELETE CASCADE,
+                       bytes INTEGER NOT NULL, digest BLOB NOT NULL) STRICT;
+CREATE TABLE blobs(digest BLOB PRIMARY KEY, body BLOB NOT NULL) STRICT;
+CREATE TABLE parts(temp_id TEXT NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+                   part INTEGER NOT NULL, digest BLOB NOT NULL REFERENCES blobs(digest),
+                   PRIMARY KEY(temp_id, part)) STRICT;
+CREATE INDEX parts_digest ON parts(digest);";
 
 pub(super) struct StoredSession {
     pub manifest: SessionManifest,
@@ -41,6 +54,7 @@ pub(super) struct Database {
     tab_cache: Vec<Vec<u8>>,
     state_cache: Vec<u8>,
     revisions: HashMap<String, crate::app::domain::buffer::SnapshotRevision>,
+    history_cache: HashMap<String, Vec<crate::app::domain::PersistedHistoryEntry>>,
     latest_request: u64,
     pub(super) blocked: Option<String>,
     verified: bool,
@@ -62,9 +76,11 @@ impl Database {
             .await
             .map_err(error)?;
         let conn = database.connect().map_err(error)?;
-        conn.execute_batch("PRAGMA synchronous=FULL; PRAGMA cache_size=-8192;")
-            .await
-            .map_err(error)?;
+        conn.execute_batch(
+            "PRAGMA synchronous=FULL; PRAGMA cache_size=-8192; PRAGMA foreign_keys=ON;",
+        )
+        .await
+        .map_err(error)?;
         let mut db = Self {
             conn,
             database,
@@ -72,6 +88,7 @@ impl Database {
             tab_cache: Vec::new(),
             state_cache: Vec::new(),
             revisions: HashMap::new(),
+            history_cache: HashMap::new(),
             latest_request: 0,
             blocked: None,
             verified: false,
@@ -79,21 +96,18 @@ impl Database {
         };
         db.initialize().await?;
         db.load_quarantine().await?;
+        // Reserve sequences from cold tabs too, without reading their payloads.
+        let maximum = db
+            .integer("SELECT coalesce(max(global_seq),0) FROM history")
+            .await?;
+        crate::app::domain::buffer::register_text_history_global_seq(maximum as u64);
         Ok(db)
     }
     async fn initialize(&mut self) -> io::Result<()> {
         let version = self.integer("PRAGMA user_version").await?;
         let application = self.integer("PRAGMA application_id").await?;
-        if application == APPLICATION_ID {
-            match version {
-                2 => return Ok(()),
-                1 => {
-                    return self
-                        .create_schema(&format!("{} PRAGMA user_version=2;", quarantine::SCHEMA))
-                        .await;
-                }
-                _ => {}
-            }
+        if application == APPLICATION_ID && version == 3 {
+            return Ok(());
         }
         if version != 0
             || application != 0
@@ -107,7 +121,7 @@ impl Database {
             ));
         }
         self.create_schema(&format!(
-            "{SCHEMA} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=2;",
+            "{SCHEMA} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=3;",
             quarantine::SCHEMA
         ))
         .await
@@ -122,19 +136,6 @@ impl Database {
             .await
             .map(|_| ())
             .map_err(error)
-    }
-    async fn import_legacy(&mut self, root: &Path, fallback: Option<&Path>) -> io::Result<()> {
-        if self.integer("SELECT count(*) FROM session_state").await? != 0 {
-            return Ok(());
-        }
-        // Empty schema after an interrupted import is retryable; orphan rows are not.
-        self.load(ReadScope::Shells).await?;
-        if let Some(request) = super::legacy::read(root, fallback)? {
-            self.persist(request, 0).await?;
-            self.load(ReadScope::All).await?;
-            self.checkpoint().await?;
-        }
-        Ok(())
     }
     async fn integer(&self, sql: &str) -> io::Result<i64> {
         self.conn
@@ -190,6 +191,7 @@ impl Database {
             self.state_cache.clear();
             self.tab_cache.clear();
             self.revisions.clear();
+            self.history_cache.clear();
             // SQLITE_FULL and rollback triggers can already end the transaction.
             if !self.conn.is_autocommit().unwrap_or(false) {
                 let rollback = self

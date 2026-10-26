@@ -19,6 +19,7 @@ struct ResourceEvent {
     setup_elapsed_ns: u128,
     elapsed_ns: u128,
     measurement_scope: &'static str,
+    workload_details: serde_json::Value,
     allocator_scope: &'static str,
     process_resources: ProcessMeasurement,
     working_set_bytes: Option<u64>,
@@ -102,9 +103,32 @@ pub(super) fn emit_prepared_step<T>(
     emit_step_with_setup(step, setup_elapsed_ns, || run(&prepared));
 }
 
+pub(super) fn emit_prepared_operation(
+    step: StepDescriptor,
+    details: serde_json::Value,
+    run: impl FnOnce() -> StepOutcome,
+) {
+    emit_measured_step(step, 0, "prepared_operation", details, run);
+}
+
 fn emit_step_with_setup(
     step: StepDescriptor,
     setup_elapsed_ns: u128,
+    run: impl FnOnce() -> StepOutcome,
+) {
+    let scope = if setup_elapsed_ns > 0 {
+        "prepared_operation"
+    } else {
+        "scenario_including_fixture_work"
+    };
+    emit_measured_step(step, setup_elapsed_ns, scope, serde_json::Value::Null, run);
+}
+
+fn emit_measured_step(
+    step: StepDescriptor,
+    setup_elapsed_ns: u128,
+    measurement_scope: &'static str,
+    workload_details: serde_json::Value,
     run: impl FnOnce() -> StepOutcome,
 ) {
     let process_before = process_snapshot();
@@ -134,11 +158,8 @@ fn emit_step_with_setup(
         workload_label: step.workload_label,
         setup_elapsed_ns,
         elapsed_ns,
-        measurement_scope: if setup_elapsed_ns > 0 {
-            "prepared_operation"
-        } else {
-            "scenario_including_fixture_work"
-        },
+        measurement_scope,
+        workload_details,
         allocator_scope: "process_wide_absolute_live_heap_with_interval_traffic_and_baseline",
         working_set_bytes: process_after.working_set_bytes,
         peak_working_set_bytes: process_after.peak_working_set_bytes,

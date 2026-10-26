@@ -16,6 +16,7 @@ struct Prepared {
     tabs: Vec<Vec<u8>>,
     snapshots: Vec<CapturedSessionBuffer>,
     buffers: HashMap<String, RecoveryPolicy>,
+    histories: HashMap<String, Vec<crate::app::domain::PersistedHistoryEntry>>,
 }
 impl Prepared {
     fn new(request: SessionPersistRequest) -> io::Result<Self> {
@@ -33,11 +34,12 @@ impl Prepared {
             tabs: Vec::with_capacity(tab_count),
             snapshots: Vec::new(),
             buffers: HashMap::new(),
+            histories: HashMap::new(),
         };
-        for tab in tabs {
-            super::super::legacy::validate_tab(&tab.session_tab)?;
+        for mut tab in tabs {
+            super::super::validation::validate_tab(&tab.session_tab)?;
             for buffer in &tab.session_tab.buffers {
-                let required = super::super::legacy::needs_snapshot(buffer);
+                let required = super::super::validation::needs_snapshot(buffer);
                 let policy = RecoveryPolicy {
                     required,
                     retain: tab.preserve_existing || required || buffer.disk_len.is_none(),
@@ -48,6 +50,13 @@ impl Prepared {
                     .is_some()
                 {
                     return Err(invalid("duplicate recovery content identity across tabs"));
+                }
+            }
+            for buffer in &mut tab.session_tab.buffers {
+                let entries = std::mem::take(&mut buffer.text_history);
+                if !tab.preserve_existing {
+                    super::history::validate(&entries)?;
+                    prepared.histories.insert(buffer.temp_id.clone(), entries);
                 }
             }
             prepared
@@ -97,6 +106,18 @@ impl Database {
         let start = Instant::now();
         self.freeze_quarantined(&mut request);
         let mut prepared = Prepared::new(request)?;
+        prepared
+            .histories
+            .retain(|id, _| !self.quarantined.contains_key(id));
+        for id in prepared.histories.keys() {
+            if !self.history_cache.contains_key(id) {
+                let entries = match self.read_history(id).await {
+                    Ok(entries) => entries,
+                    Err(cause) => return Err(self.protect_failed_write(cause).await),
+                };
+                self.history_cache.insert(id.clone(), entries);
+            }
+        }
         let mut profile = SessionPersistProfile {
             manifest_serialize_ns: start.elapsed().as_nanos(),
             manifest_size_bytes: (prepared.state.len()
@@ -109,7 +130,11 @@ impl Database {
         prepared.snapshots.retain(|buffer| {
             self.revisions.get(&buffer.temp_id) != Some(&buffer.snapshot.revision_key())
         });
-        let unchanged = prepared.snapshots.is_empty()
+        let unchanged = prepared
+            .histories
+            .iter()
+            .all(|(id, entries)| self.history_cache.get(id) == Some(entries))
+            && prepared.snapshots.is_empty()
             && self.state_cache == prepared.state
             && self.tab_cache == prepared.tabs
             && self.revisions.keys().all(|id| prepared.retains(id));
@@ -133,6 +158,9 @@ impl Database {
                 .into_iter()
                 .map(|buffer| (buffer.temp_id, buffer.snapshot.revision_key())),
         );
+        self.history_cache
+            .retain(|id, _| prepared.buffers.contains_key(id));
+        self.history_cache.extend(prepared.histories);
         self.state_cache = prepared.state;
         self.tab_cache = prepared.tabs;
         self.latest_request = generation;
@@ -146,6 +174,16 @@ impl Database {
         profile: &mut SessionPersistProfile,
     ) -> io::Result<()> {
         let start = Instant::now();
+        for id in prepared.buffers.keys() {
+            self.execute_cached(
+                "INSERT INTO buffer_ids VALUES(?) ON CONFLICT(id) DO NOTHING",
+                [id.as_str()],
+            )
+            .await?;
+        }
+        for (id, entries) in &prepared.histories {
+            self.write_history(id, entries).await?;
+        }
         for buffer in &prepared.snapshots {
             self.write_content(&buffer.temp_id, &buffer.snapshot)
                 .await?;
@@ -197,11 +235,33 @@ impl Database {
             .iter()
             .filter(|id| !prepared.retains(id) && !self.quarantined.contains_key(*id))
         {
-            self.execute_cached("DELETE FROM chunks WHERE id=?", [id.as_str()])
-                .await?;
             self.execute_cached("DELETE FROM snapshots WHERE id=?", [id.as_str()])
                 .await?;
         }
+        let mut rows = self
+            .conn
+            .query("SELECT id FROM buffer_ids", ())
+            .await
+            .map_err(error)?;
+        let mut stale = Vec::new();
+        while let Some(row) = rows.next().await.map_err(error)? {
+            let id: String = row.get(0).map_err(error)?;
+            if !prepared.buffers.contains_key(&id) && !self.quarantined.contains_key(&id) {
+                stale.push(id);
+            }
+        }
+        drop(rows);
+        for id in stale {
+            self.execute_cached("DELETE FROM buffer_ids WHERE id=?", [id.as_str()])
+                .await?;
+        }
+        // Quarantined snapshots retain their parts, so their bodies remain roots
+        // too. Indexed references let Turso determine what can be collected.
+        self.execute_cached(
+            "DELETE FROM blobs WHERE digest NOT IN (SELECT digest FROM parts)",
+            (),
+        )
+        .await?;
         Ok(())
     }
 }

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::io;
 use turso::params;
 
-const CHUNK_BYTES: usize = 256 * 1024;
+use super::chunking::{MAX_BYTES as CHUNK_BYTES, chunks};
 
 struct Content {
     parts: Vec<(i64, Vec<u8>)>,
@@ -84,7 +84,7 @@ async fn read_content_range(
         .0;
     let mut rows = conn
         .query(
-            "SELECT id, part, body FROM chunks WHERE id>=? AND id<=?",
+            "SELECT p.temp_id, p.part, b.body FROM parts p LEFT JOIN blobs b ON b.digest=p.digest WHERE p.temp_id>=? AND p.temp_id<=?",
             params![first.as_str(), last.as_str()],
         )
         .await
@@ -116,8 +116,13 @@ impl Database {
         id: &str,
         snapshot: &DocumentSnapshot,
     ) -> io::Result<()> {
-        self.execute_cached("DELETE FROM chunks WHERE id=?", [id])
-            .await?;
+        // Establish the FK parent before inserting parts. Placeholder metadata is
+        // never visible outside this transaction, including on a failed save.
+        self.execute_cached(
+            "INSERT INTO snapshots VALUES(?, 0, ?) ON CONFLICT(id) DO NOTHING",
+            params![id, blake3::hash(b"").as_bytes().as_slice()],
+        )
+        .await?;
         let (bytes, digest) = self.write_chunks(id, snapshot).await?;
         self.execute_cached(
             "INSERT INTO snapshots VALUES(?, ?, ?) ON CONFLICT(id) DO UPDATE SET bytes=excluded.bytes, digest=excluded.digest",
@@ -131,31 +136,43 @@ impl Database {
         id: &str,
         snapshot: &DocumentSnapshot,
     ) -> io::Result<(i64, blake3::Hash)> {
-        let mut insert = self
+        let mut rows = self
             .conn
-            .prepare_cached("INSERT INTO chunks VALUES(?, ?, ?)")
+            .query("SELECT part, digest FROM parts WHERE temp_id=?", [id])
             .await
             .map_err(error)?;
+        let mut old = HashMap::<i64, Vec<u8>>::new();
+        while let Some(row) = rows.next().await.map_err(error)? {
+            old.insert(row.get(0).map_err(error)?, row.get(1).map_err(error)?);
+        }
+        drop(rows);
+        let known: std::collections::HashSet<_> = old.values().map(Vec::as_slice).collect();
         let mut digest = blake3::Hasher::new();
         let mut bytes = 0i64;
-        // Bounded extraction also coalesces fragmented pieces into a small number
-        // of rows. Four UTF-8 bytes per scalar is the worst case.
-        let chunk_chars = CHUNK_BYTES / 4;
-        for (part, start) in (0..snapshot.len_chars()).step_by(chunk_chars).enumerate() {
-            let end = (start + chunk_chars).min(snapshot.len_chars());
-            let text = snapshot.extract_range(start..end);
-            if text.is_empty() || text.len() > CHUNK_BYTES {
-                return Err(invalid("invalid extracted recovery chunk"));
-            }
+        let mut count = 0i64;
+        for chunk in chunks(snapshot) {
+            let chunk = chunk.map_err(error)?;
             bytes = bytes
-                .checked_add(text.len() as i64)
+                .checked_add(chunk.data.len() as i64)
                 .ok_or_else(|| invalid("recovery text exceeds database length range"))?;
-            digest.update(text.as_bytes());
-            insert
-                .execute(params![id, part as i64, text.as_bytes()])
-                .await
-                .map_err(error)?;
+            digest.update(&chunk.data);
+            let hash = blake3::hash(&chunk.data);
+            // The SELECT prevents inserts (and trigger work) for shared bodies.
+            if !known.contains(hash.as_bytes().as_slice()) {
+                self.execute_cached("INSERT INTO blobs(digest, body) SELECT ?, ? WHERE NOT EXISTS(SELECT 1 FROM blobs WHERE digest=?)",
+                    params![hash.as_bytes().as_slice(), chunk.data, hash.as_bytes().as_slice()]).await?;
+            }
+            if old.get(&count).map(Vec::as_slice) != Some(hash.as_bytes().as_slice()) {
+                self.execute_cached("INSERT INTO parts VALUES(?, ?, ?) ON CONFLICT(temp_id, part) DO UPDATE SET digest=excluded.digest",
+                    params![id, count, hash.as_bytes().as_slice()]).await?;
+            }
+            count += 1;
         }
+        self.execute_cached(
+            "DELETE FROM parts WHERE temp_id=? AND part>=?",
+            params![id, count],
+        )
+        .await?;
         Ok((bytes, digest.finalize()))
     }
 
@@ -182,7 +199,7 @@ impl Database {
             self.read_content_parallel(metadata, workers)?
         };
         let chunk_count: usize = batches.iter().map(|batch| batch.chunk_count).sum();
-        if chunk_count as i64 != self.integer("SELECT count(*) FROM chunks").await? {
+        if chunk_count as i64 != self.integer("SELECT count(*) FROM parts").await? {
             return Err(invalid("orphan recovery chunks"));
         }
         Ok(batches
@@ -217,7 +234,7 @@ impl Database {
             .map_err(error)?;
         let mut chunks = self
             .conn
-            .prepare_cached("SELECT part, body FROM chunks WHERE id=? ORDER BY part")
+            .prepare_cached("SELECT p.part, b.body FROM parts p LEFT JOIN blobs b ON b.digest=p.digest WHERE p.temp_id=? ORDER BY p.part")
             .await
             .map_err(error)?;
         for buffer in tabs.iter().flat_map(|tab| &tab.buffers) {
@@ -232,7 +249,7 @@ impl Database {
                 .await
                 .map_err(error)?;
             let Some(row) = rows.next().await.map_err(error)? else {
-                if super::super::legacy::needs_snapshot(buffer) {
+                if super::super::validation::needs_snapshot(buffer) {
                     return Err(damaged(
                         &buffer.temp_id,
                         "required recovery content is missing",

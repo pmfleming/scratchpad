@@ -5,7 +5,7 @@ use turso::params;
 
 async fn damage(db: &Database, id: &str) {
     db.conn
-        .execute("UPDATE chunks SET body=x'00' WHERE id=?", [id])
+        .execute("UPDATE blobs SET body=x'00' WHERE digest IN (SELECT digest FROM parts WHERE temp_id=?)", [id])
         .await
         .unwrap();
 }
@@ -56,7 +56,7 @@ fn cold_damage_keeps_healthy_saves_and_retains_original_data_across_restart() {
         assert_eq!(shells.manifest.tabs[1].buffers[0].name, "note");
         assert_eq!(shells.contents.values().next().unwrap(), "healthy edits");
         assert_eq!(
-            db.integer("SELECT count(*) FROM chunks WHERE body=x'00'")
+            db.integer("SELECT count(*) FROM blobs WHERE body=x'00'")
                 .await
                 .unwrap(),
             1
@@ -76,7 +76,7 @@ fn cold_damage_keeps_healthy_saves_and_retains_original_data_across_restart() {
             2
         );
         assert_eq!(
-            db.integer("SELECT count(*) FROM chunks WHERE body=x'00'")
+            db.integer("SELECT count(*) FROM blobs WHERE body=x'00'")
                 .await
                 .unwrap(),
             1
@@ -250,7 +250,8 @@ fn missing_cold_content_detected_by_a_save_is_quarantined_after_rollback() {
                 .unwrap(),
             "new protected edit"
         );
-        assert_eq!(db.integer("SELECT count(*) FROM chunks").await.unwrap(), 2);
+        // Deleting a snapshot now cascades its parts, rather than leaving orphans.
+        assert_eq!(db.integer("SELECT count(*) FROM parts").await.unwrap(), 1);
     });
 }
 
@@ -259,8 +260,8 @@ fn malformed_or_missing_buffer_rows_are_scoped_not_manifest_failures() {
     block_on(async {
         for sql in [
             "UPDATE snapshots SET bytes=-1 WHERE id=?",
-            "UPDATE snapshots SET digest='wrong type' WHERE id=?",
-            "UPDATE chunks SET part=9 WHERE id=?",
+            "UPDATE snapshots SET digest=x'00' WHERE id=?",
+            "UPDATE parts SET part=9 WHERE temp_id=?",
             "DELETE FROM snapshots WHERE id=?",
         ] {
             let directory = tempfile::tempdir().unwrap();
@@ -323,7 +324,9 @@ fn full_parallel_read_attributes_damage_to_one_buffer() {
     block_on(async {
         let directory = tempfile::tempdir().unwrap();
         let mut db = Database::open(directory.path()).await.unwrap();
-        let tabs: Vec<_> = (0..600).map(|_| tab("protected text")).collect();
+        let tabs: Vec<_> = (0..600)
+            .map(|i| tab(&format!("protected text {i}")))
+            .collect();
         db.persist(request(&tabs), 1).await.unwrap();
         damage(&db, &tabs[421].buffers.buffer.temp_id).await;
         assert!(db.load(ReadScope::All).await.is_err());
@@ -338,7 +341,7 @@ fn full_parallel_read_attributes_damage_to_one_buffer() {
 }
 
 #[test]
-fn version_one_upgrade_preserves_content_and_schema_batch_rolls_back() {
+fn old_schema_is_rejected_and_schema_batch_rolls_back() {
     block_on(async {
         let directory = tempfile::tempdir().unwrap();
         let mut db = Database::open(directory.path()).await.unwrap();
@@ -350,19 +353,9 @@ fn version_one_upgrade_preserves_content_and_schema_batch_rolls_back() {
             .await
             .unwrap();
         drop(db);
-        let mut db = Database::open(directory.path()).await.unwrap();
-        assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 2);
-        assert_eq!(
-            db.load(ReadScope::All)
-                .await
-                .unwrap()
-                .unwrap()
-                .contents
-                .values()
-                .next()
-                .unwrap(),
-            "before upgrade"
-        );
+        assert!(Database::open(directory.path()).await.is_err());
+        let fresh = tempfile::tempdir().unwrap();
+        let db = Database::open(fresh.path()).await.unwrap();
         assert!(
             db.create_schema("CREATE TABLE partial_schema(x); CREATE TABLE tabs(x);")
                 .await
@@ -393,7 +386,7 @@ fn supplied_snapshots_are_retained_even_if_capture_policy_changes() {
             captured
         };
         db.persist(captured(), 1).await.unwrap();
-        db.conn.execute_batch("CREATE TRIGGER no_rewrite BEFORE INSERT ON chunks BEGIN SELECT RAISE(ABORT, 'rewritten'); END;").await.unwrap();
+        db.conn.execute_batch("CREATE TRIGGER no_rewrite BEFORE INSERT ON blobs BEGIN SELECT RAISE(ABORT, 'rewritten'); END;").await.unwrap();
         let second = db.persist(captured(), 2).await.unwrap();
         assert_eq!(second.manifest_write_ns, 0);
         assert_eq!(
@@ -413,7 +406,7 @@ fn lengths_and_hashes_describe_the_bytes_emitted_including_empty_and_unicode() {
         for tab in &tabs {
             let text = tab.buffers.buffer.text();
             let id = &tab.buffers.buffer.temp_id;
-            let row = db.conn.query("SELECT bytes, digest, (SELECT coalesce(sum(length(body)),0) FROM chunks WHERE id=?) FROM snapshots WHERE id=?", params![id.as_str(), id.as_str()]).await.unwrap().next().await.unwrap().unwrap();
+            let row = db.conn.query("SELECT bytes, digest, (SELECT coalesce(sum(length(b.body)),0) FROM parts p JOIN blobs b ON p.digest=b.digest WHERE p.temp_id=?) FROM snapshots WHERE id=?", params![id.as_str(), id.as_str()]).await.unwrap().next().await.unwrap().unwrap();
             assert_eq!(row.get::<i64>(0).unwrap(), row.get::<i64>(2).unwrap());
             assert_eq!(row.get::<i64>(0).unwrap() as usize, text.len());
             assert_eq!(

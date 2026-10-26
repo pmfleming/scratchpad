@@ -49,8 +49,7 @@ fn main() -> eframe::Result<()> {
     };
 
     let legacy_root = app_paths::legacy_temp_root();
-    let session_store =
-        SessionStore::with_fallback(app_paths::runtime_session_root(), legacy_root.clone());
+    let session_store = SessionStore::new(app_paths::runtime_session_root());
     let settings_store =
         SettingsStore::with_fallback(app_paths::runtime_settings_root(), legacy_root);
     let startup_settings = settings_store.load().ok().flatten().unwrap_or_default();

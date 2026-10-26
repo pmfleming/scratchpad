@@ -13,7 +13,7 @@ pub(super) fn request(tabs: &[WorkspaceTab]) -> SessionPersistRequest {
 #[test]
 fn worker_round_trip_and_stale_capture_barrier() {
     let directory = tempfile::tempdir().unwrap();
-    let worker = DatabaseWorker::open(directory.path().to_owned(), None).unwrap();
+    let worker = DatabaseWorker::open(directory.path().to_owned()).unwrap();
     let old = request(&[tab("old")]);
     let new = request(&[tab("new\0\r\nλ")]);
     worker.call(move |db| block_on(db.persist(new, 2))).unwrap();
@@ -25,7 +25,7 @@ fn worker_round_trip_and_stale_capture_barrier() {
     assert_eq!(session.contents.values().next().unwrap(), "new\0\r\nλ");
     worker.call(|db| block_on(db.checkpoint())).unwrap();
     drop(worker);
-    let reopened = DatabaseWorker::open(directory.path().to_owned(), None).unwrap();
+    let reopened = DatabaseWorker::open(directory.path().to_owned()).unwrap();
     assert_eq!(
         reopened
             .call(|db| block_on(db.load(ReadScope::Active)))
@@ -43,7 +43,7 @@ fn metadata_only_commit_does_not_rewrite_content() {
         let mut database = Database::open(directory.path()).await.unwrap();
         let tabs = vec![tab("unchanged")];
         database.persist(request(&tabs), 1).await.unwrap();
-        database.conn.execute_batch("CREATE TRIGGER no_content_write BEFORE INSERT ON chunks BEGIN SELECT RAISE(ABORT, 'content rewritten'); END;").await.unwrap();
+        database.conn.execute_batch("CREATE TRIGGER no_content_write BEFORE INSERT ON blobs BEGIN SELECT RAISE(ABORT, 'content rewritten'); END;").await.unwrap();
         let mut captured = request(&tabs);
         captured.font_size = 18.0;
         database.persist(captured, 2).await.unwrap();
@@ -100,7 +100,7 @@ fn corrupt_chunk_is_preserved_when_the_tab_is_closed() {
             .unwrap();
         database
             .conn
-            .execute("UPDATE chunks SET body=x'00'", ())
+            .execute("UPDATE blobs SET body=x'00'", ())
             .await
             .unwrap();
         assert!(database.load(ReadScope::All).await.is_err());
@@ -114,7 +114,7 @@ fn corrupt_chunk_is_preserved_when_the_tab_is_closed() {
         );
         assert_eq!(
             database
-                .integer("SELECT count(*) FROM chunks WHERE body=x'00'")
+                .integer("SELECT count(*) FROM blobs WHERE body=x'00'")
                 .await
                 .unwrap(),
             1
@@ -138,7 +138,7 @@ fn unicode_content_spans_multiple_bounded_chunks() {
         database.persist(request(&[tab(&text)]), 1).await.unwrap();
         assert!(
             database
-                .integer("SELECT count(*) FROM chunks")
+                .integer("SELECT count(*) FROM parts")
                 .await
                 .unwrap()
                 > 1
