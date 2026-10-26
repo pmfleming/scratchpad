@@ -1,6 +1,6 @@
 use super::ViewId;
 use crate::app::domain::buffer::{AnchorBias, AnchorId, AnchorOwner};
-use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
+use crate::app::domain::{CharCursor, CursorRange};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct AnchoredEndpoint {

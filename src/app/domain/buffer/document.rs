@@ -10,7 +10,7 @@ use super::{
     fingerprint_parts, normalize_inserted_text_line_endings, platform_default_line_ending,
 };
 use crate::app::capacity_metrics;
-use crate::app::ui::editor_content::native_editor::{CursorRange, OperationRecord};
+use crate::app::domain::{CursorRange, buffer::OperationRecord};
 use std::borrow::Cow;
 use std::io;
 use std::ops::Range;
@@ -431,16 +431,7 @@ impl TextDocument {
         let converted = TextDocumentOperationRecord {
             previous_selection: record.previous_cursor,
             next_selection: record.next_cursor,
-            edits: record
-                .edits
-                .into_iter()
-                .map(|edit| TextDocumentEditOperation {
-                    start_char: edit.start_char,
-                    deleted_text: edit.deleted_text,
-                    inserted_text: edit.inserted_text,
-                    deleted_spans: edit.deleted_spans,
-                })
-                .collect(),
+            edits: record.edits,
         };
         self.push_operation_record(converted, source);
     }

@@ -1,5 +1,5 @@
 use super::{TextDocumentEditOperation, TextDocumentOperationRecord};
-use crate::app::ui::editor_content::native_editor::CursorRange;
+use crate::app::domain::CursorRange;
 use std::ops::Range;
 
 /// After a soft divider (`,` `;` `:`) the entry is sealed only if the next
@@ -209,7 +209,7 @@ mod tests {
         CoalescedEdit, TEXT_HISTORY_SOFT_DIVIDER_PAUSE, TextDocumentEditOperation,
         TextDocumentOperationRecord, coalesced_local_edit_record, entry_sealed_by_divider,
     };
-    use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
+    use crate::app::domain::{CharCursor, CursorRange};
     use std::time::Duration;
 
     fn cursor(index: usize) -> CursorRange {

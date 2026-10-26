@@ -22,20 +22,12 @@ pub(crate) fn normalize_inserted_text_line_endings(
         _ => {
             let replacement = preferred_line_ending.as_str();
             let mut normalized = String::with_capacity(text.len());
-            let mut chars = text.chars().peekable();
-
-            while let Some(ch) = chars.next() {
-                match ch {
-                    '\r' => {
-                        if chars.peek() == Some(&'\n') {
-                            chars.next();
-                            normalized.push_str(replacement);
-                        } else {
-                            normalized.push(ch);
-                        }
-                    }
-                    '\n' => normalized.push_str(replacement),
-                    _ => normalized.push(ch),
+            for line in text.split_inclusive('\n') {
+                if let Some(body) = line.strip_suffix('\n') {
+                    normalized.push_str(body.strip_suffix('\r').unwrap_or(body));
+                    normalized.push_str(replacement);
+                } else {
+                    normalized.push_str(line);
                 }
             }
 

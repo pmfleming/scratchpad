@@ -11,8 +11,8 @@ pub(crate) use caret_animation::CaretAnimationState;
 pub use layout_cache::{LayoutCache, LayoutCacheEntry, LayoutCacheKey};
 
 use crate::app::domain::BufferId;
+use crate::app::domain::CursorRange;
 use crate::app::domain::buffer::{AnchorBias, AnchorId, AnchorOwner};
-use crate::app::ui::editor_content::native_editor::CursorRange;
 use crate::app::ui::scrolling::{DisplaySnapshot, ScrollAnchor, ScrollIntent, ScrollManager};
 use eframe::egui;
 use std::ops::Range;

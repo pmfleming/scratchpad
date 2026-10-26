@@ -1,6 +1,7 @@
 use crate::app::platform::{PlatformProfile, resolved_profile};
 use crate::app::services::settings_store::ShortcutSettings;
-use eframe::egui;
+use eframe::egui::{self, Key, Modifiers};
+use std::borrow::Cow;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ShortcutAction {
@@ -98,51 +99,77 @@ impl ShortcutAction {
 
     #[must_use]
     pub const fn config_key(self) -> &'static str {
+        self.definition().config_key
+    }
+
+    // One exhaustive dispatch ties each persisted key to both platform defaults.
+    const fn definition(self) -> ShortcutDefinition {
         match self {
-            Self::OpenUserManual => "open_user_manual",
-            Self::OpenSearch => "open_search",
-            Self::OpenReplace => "open_replace",
-            Self::OpenSettings => "open_settings",
-            Self::CloseSettings => "close_settings",
-            Self::CloseSearch => "close_search",
-            Self::RenameTab => "rename_tab",
-            Self::OpenTextHistory => "open_text_history",
-            Self::OpenEncodingDialog => "open_encoding_dialog",
-            Self::OpenStatusHistory => "open_status_history",
-            Self::CopyActivePath => "copy_active_path",
-            Self::RevealActivePath => "reveal_active_path",
-            Self::ToggleTabList => "toggle_tab_list",
-            Self::ToggleTabListAutoHide => "toggle_tab_list_auto_hide",
-            Self::ToggleReadingOrder => "toggle_reading_order",
-            Self::ToggleControlChars => "toggle_control_chars",
-            Self::TraverseRegionForward => "traverse_region_forward",
-            Self::TraverseRegionBackward => "traverse_region_backward",
-            Self::OpenFileHere => "open_file_here",
-            Self::NewTab => "new_tab",
-            Self::OpenFile => "open_file",
-            Self::SaveFileAs => "save_file_as",
-            Self::SaveFile => "save_file",
-            Self::IncreaseFontSize => "increase_font_size",
-            Self::DecreaseFontSize => "decrease_font_size",
-            Self::ToggleLineNumbers => "toggle_line_numbers",
-            Self::CloseTab => "close_tab",
-            Self::PromoteTileToTab => "promote_tile_to_tab",
-            Self::PromoteTabFilesToTabs => "promote_tab_files_to_tabs",
-            Self::CloseTile => "close_tile",
-            Self::SplitTile => "split_tile",
-            Self::SplitUp => "split_up",
-            Self::SplitDown => "split_down",
-            Self::SplitLeft => "split_left",
-            Self::SplitRight => "split_right",
-            Self::ResizeTileLeft => "resize_tile_left",
-            Self::ResizeTileRight => "resize_tile_right",
-            Self::ResizeTileUp => "resize_tile_up",
-            Self::ResizeTileDown => "resize_tile_down",
-            Self::MoveTileLeft => "move_tile_left",
-            Self::MoveTileRight => "move_tile_right",
-            Self::MoveTileUp => "move_tile_up",
-            Self::MoveTileDown => "move_tile_down",
+            Self::OpenUserManual => OPEN_USER_MANUAL,
+            Self::OpenSearch => OPEN_SEARCH,
+            Self::OpenReplace => OPEN_REPLACE,
+            Self::OpenSettings => OPEN_SETTINGS,
+            Self::CloseSettings => CLOSE_SETTINGS,
+            Self::CloseSearch => CLOSE_SEARCH,
+            Self::RenameTab => RENAME_TAB,
+            Self::OpenTextHistory => OPEN_TEXT_HISTORY,
+            Self::OpenEncodingDialog => OPEN_ENCODING_DIALOG,
+            Self::OpenStatusHistory => OPEN_STATUS_HISTORY,
+            Self::CopyActivePath => COPY_ACTIVE_PATH,
+            Self::RevealActivePath => REVEAL_ACTIVE_PATH,
+            Self::ToggleTabList => TOGGLE_TAB_LIST,
+            Self::ToggleTabListAutoHide => TOGGLE_TAB_LIST_AUTO_HIDE,
+            Self::ToggleReadingOrder => TOGGLE_READING_ORDER,
+            Self::ToggleControlChars => TOGGLE_CONTROL_CHARS,
+            Self::TraverseRegionForward => TRAVERSE_REGION_FORWARD,
+            Self::TraverseRegionBackward => TRAVERSE_REGION_BACKWARD,
+            Self::OpenFileHere => OPEN_FILE_HERE,
+            Self::NewTab => NEW_TAB,
+            Self::OpenFile => OPEN_FILE,
+            Self::SaveFileAs => SAVE_FILE_AS,
+            Self::SaveFile => SAVE_FILE,
+            Self::IncreaseFontSize => INCREASE_FONT_SIZE,
+            Self::DecreaseFontSize => DECREASE_FONT_SIZE,
+            Self::ToggleLineNumbers => TOGGLE_LINE_NUMBERS,
+            Self::CloseTab => CLOSE_TAB,
+            Self::PromoteTileToTab => PROMOTE_TILE_TO_TAB,
+            Self::PromoteTabFilesToTabs => PROMOTE_TAB_FILES_TO_TABS,
+            Self::CloseTile => CLOSE_TILE,
+            Self::SplitTile => SPLIT_TILE,
+            Self::SplitUp => SPLIT_UP,
+            Self::SplitDown => SPLIT_DOWN,
+            Self::SplitLeft => SPLIT_LEFT,
+            Self::SplitRight => SPLIT_RIGHT,
+            Self::ResizeTileLeft => RESIZE_LEFT,
+            Self::ResizeTileRight => RESIZE_RIGHT,
+            Self::ResizeTileUp => RESIZE_UP,
+            Self::ResizeTileDown => RESIZE_DOWN,
+            Self::MoveTileLeft => MOVE_LEFT,
+            Self::MoveTileRight => MOVE_RIGHT,
+            Self::MoveTileUp => MOVE_UP,
+            Self::MoveTileDown => MOVE_DOWN,
         }
+    }
+}
+
+struct ShortcutDefinition {
+    config_key: &'static str,
+    bindings: &'static [KeyBinding],
+    hyprland: &'static [KeyBinding],
+}
+
+impl ShortcutDefinition {
+    const fn new(config_key: &'static str, bindings: &'static [KeyBinding]) -> Self {
+        Self {
+            config_key,
+            bindings,
+            hyprland: bindings,
+        }
+    }
+
+    const fn hyprland(mut self, bindings: &'static [KeyBinding]) -> Self {
+        self.hyprland = bindings;
+        self
     }
 }
 
@@ -154,203 +181,194 @@ pub(crate) struct InvalidShortcutOverride {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KeyBinding {
-    pub modifiers: egui::Modifiers,
-    pub key: egui::Key,
+    pub modifiers: Modifiers,
+    pub key: Key,
 }
 
 impl KeyBinding {
     #[must_use]
-    pub const fn new(modifiers: egui::Modifiers, key: egui::Key) -> Self {
+    pub const fn new(modifiers: Modifiers, key: Key) -> Self {
         Self { modifiers, key }
     }
 }
 
-const CTRL_SHIFT: egui::Modifiers = egui::Modifiers {
-    alt: false,
+const CTRL_SHIFT: Modifiers = Modifiers {
     ctrl: true,
     shift: true,
-    mac_cmd: false,
-    command: false,
+    ..Modifiers::NONE
 };
-const CTRL_ALT: egui::Modifiers = egui::Modifiers {
-    alt: true,
+const CTRL_ALT: Modifiers = Modifiers {
     ctrl: true,
-    shift: false,
-    mac_cmd: false,
-    command: false,
-};
-const ALT_SHIFT: egui::Modifiers = egui::Modifiers {
     alt: true,
-    ctrl: false,
+    ..Modifiers::NONE
+};
+const ALT_SHIFT: Modifiers = Modifiers {
+    alt: true,
     shift: true,
-    mac_cmd: false,
-    command: false,
+    ..Modifiers::NONE
 };
-const OPEN_USER_MANUAL: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::NONE, egui::Key::F1)];
-const OPEN_SEARCH: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::F)];
-const OPEN_REPLACE: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::H)];
-const OPEN_SETTINGS: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::Comma)];
-const CLOSE_SETTINGS: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::NONE, egui::Key::Escape)];
-const CLOSE_SEARCH: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::NONE, egui::Key::Escape)];
-const RENAME_TAB: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::NONE, egui::Key::F2)];
-const OPEN_TEXT_HISTORY: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::H)];
-const OPEN_ENCODING_DIALOG: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::E)];
-const OPEN_STATUS_HISTORY: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::M)];
-const COPY_ACTIVE_PATH: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::C)];
-const REVEAL_ACTIVE_PATH: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::R)];
-const TOGGLE_TAB_LIST: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::B)];
-const TOGGLE_TAB_LIST_AUTO_HIDE: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::B)];
-const TOGGLE_READING_ORDER: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::R)];
-const TOGGLE_CONTROL_CHARS: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::C)];
-const TRAVERSE_REGION_FORWARD: [KeyBinding; 1] =
-    [KeyBinding::new(egui::Modifiers::NONE, egui::Key::F6)];
-const TRAVERSE_REGION_BACKWARD: [KeyBinding; 1] =
-    [KeyBinding::new(egui::Modifiers::SHIFT, egui::Key::F6)];
-const OPEN_FILE_HERE: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::O)];
-const NEW_TAB: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::N)];
-const OPEN_FILE: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::O)];
-const SAVE_FILE_AS: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::S)];
-const SAVE_FILE: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::S)];
-const INCREASE_FONT_SIZE: [KeyBinding; 2] = [
-    KeyBinding::new(egui::Modifiers::CTRL, egui::Key::Equals),
-    KeyBinding::new(egui::Modifiers::CTRL, egui::Key::Plus),
-];
-const DECREASE_FONT_SIZE: [KeyBinding; 1] =
-    [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::Minus)];
-const TOGGLE_LINE_NUMBERS: [KeyBinding; 1] =
-    [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::Num0)];
-const CLOSE_TAB: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::W)];
-const PROMOTE_TILE_TO_TAB: [KeyBinding; 1] = [KeyBinding::new(egui::Modifiers::CTRL, egui::Key::T)];
-const PROMOTE_TAB_FILES_TO_TABS: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::T)];
-const CLOSE_TILE: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::W)];
-const GENERIC_SPLIT_TILE: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::Enter)];
-const GENERIC_SPLIT_UP: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::ArrowUp)];
-const GENERIC_SPLIT_DOWN: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::ArrowDown)];
-const GENERIC_SPLIT_LEFT: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::ArrowLeft)];
-const GENERIC_SPLIT_RIGHT: [KeyBinding; 1] = [KeyBinding::new(CTRL_SHIFT, egui::Key::ArrowRight)];
-const GENERIC_RESIZE_LEFT: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowLeft)];
-const GENERIC_RESIZE_RIGHT: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowRight)];
-const GENERIC_RESIZE_UP: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowUp)];
-const GENERIC_RESIZE_DOWN: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowDown)];
-const CTRL_ALT_SHIFT: egui::Modifiers = egui::Modifiers {
-    alt: true,
+const CTRL_ALT_SHIFT: Modifiers = Modifiers {
     ctrl: true,
+    alt: true,
     shift: true,
-    mac_cmd: false,
-    command: false,
+    ..Modifiers::NONE
 };
-// Keep generic-platform tile movement away from the editor's Ctrl/Alt+Arrow
-// word-navigation bindings. Hyprland has its own compositor-style defaults.
-const GENERIC_MOVE_LEFT: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT_SHIFT, egui::Key::ArrowLeft)];
-const GENERIC_MOVE_RIGHT: [KeyBinding; 1] =
-    [KeyBinding::new(CTRL_ALT_SHIFT, egui::Key::ArrowRight)];
-const GENERIC_MOVE_UP: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT_SHIFT, egui::Key::ArrowUp)];
-const GENERIC_MOVE_DOWN: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT_SHIFT, egui::Key::ArrowDown)];
 
-const HYPRLAND_SPLIT_TILE: [KeyBinding; 1] =
-    [KeyBinding::new(egui::Modifiers::ALT, egui::Key::Enter)];
-const HYPRLAND_SPLIT_UP: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowUp)];
-const HYPRLAND_SPLIT_DOWN: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowDown)];
-const HYPRLAND_SPLIT_LEFT: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowLeft)];
-const HYPRLAND_SPLIT_RIGHT: [KeyBinding; 1] = [KeyBinding::new(CTRL_ALT, egui::Key::ArrowRight)];
-const HYPRLAND_RESIZE_LEFT: [KeyBinding; 1] = [KeyBinding::new(ALT_SHIFT, egui::Key::ArrowLeft)];
-const HYPRLAND_RESIZE_RIGHT: [KeyBinding; 1] = [KeyBinding::new(ALT_SHIFT, egui::Key::ArrowRight)];
-const HYPRLAND_RESIZE_UP: [KeyBinding; 1] = [KeyBinding::new(ALT_SHIFT, egui::Key::ArrowUp)];
-const HYPRLAND_RESIZE_DOWN: [KeyBinding; 1] = [KeyBinding::new(ALT_SHIFT, egui::Key::ArrowDown)];
-const HYPRLAND_MOVE_LEFT: [KeyBinding; 1] =
-    [KeyBinding::new(egui::Modifiers::ALT, egui::Key::ArrowLeft)];
-const HYPRLAND_MOVE_RIGHT: [KeyBinding; 1] =
-    [KeyBinding::new(egui::Modifiers::ALT, egui::Key::ArrowRight)];
-const HYPRLAND_MOVE_UP: [KeyBinding; 1] =
-    [KeyBinding::new(egui::Modifiers::ALT, egui::Key::ArrowUp)];
-const HYPRLAND_MOVE_DOWN: [KeyBinding; 1] =
-    [KeyBinding::new(egui::Modifiers::ALT, egui::Key::ArrowDown)];
-
-fn tile_default_bindings(
-    profile: PlatformProfile,
-    action: ShortcutAction,
-) -> Option<&'static [KeyBinding]> {
-    let hyprland = resolved_profile(profile) == PlatformProfile::Hyprland;
-    Some(match (hyprland, action) {
-        (false, ShortcutAction::SplitTile) => &GENERIC_SPLIT_TILE,
-        (false, ShortcutAction::SplitUp) => &GENERIC_SPLIT_UP,
-        (false, ShortcutAction::SplitDown) => &GENERIC_SPLIT_DOWN,
-        (false, ShortcutAction::SplitLeft) => &GENERIC_SPLIT_LEFT,
-        (false, ShortcutAction::SplitRight) => &GENERIC_SPLIT_RIGHT,
-        (false, ShortcutAction::ResizeTileLeft) => &GENERIC_RESIZE_LEFT,
-        (false, ShortcutAction::ResizeTileRight) => &GENERIC_RESIZE_RIGHT,
-        (false, ShortcutAction::ResizeTileUp) => &GENERIC_RESIZE_UP,
-        (false, ShortcutAction::ResizeTileDown) => &GENERIC_RESIZE_DOWN,
-        (false, ShortcutAction::MoveTileLeft) => &GENERIC_MOVE_LEFT,
-        (false, ShortcutAction::MoveTileRight) => &GENERIC_MOVE_RIGHT,
-        (false, ShortcutAction::MoveTileUp) => &GENERIC_MOVE_UP,
-        (false, ShortcutAction::MoveTileDown) => &GENERIC_MOVE_DOWN,
-        (true, ShortcutAction::SplitTile) => &HYPRLAND_SPLIT_TILE,
-        (true, ShortcutAction::SplitUp) => &HYPRLAND_SPLIT_UP,
-        (true, ShortcutAction::SplitDown) => &HYPRLAND_SPLIT_DOWN,
-        (true, ShortcutAction::SplitLeft) => &HYPRLAND_SPLIT_LEFT,
-        (true, ShortcutAction::SplitRight) => &HYPRLAND_SPLIT_RIGHT,
-        (true, ShortcutAction::ResizeTileLeft) => &HYPRLAND_RESIZE_LEFT,
-        (true, ShortcutAction::ResizeTileRight) => &HYPRLAND_RESIZE_RIGHT,
-        (true, ShortcutAction::ResizeTileUp) => &HYPRLAND_RESIZE_UP,
-        (true, ShortcutAction::ResizeTileDown) => &HYPRLAND_RESIZE_DOWN,
-        (true, ShortcutAction::MoveTileLeft) => &HYPRLAND_MOVE_LEFT,
-        (true, ShortcutAction::MoveTileRight) => &HYPRLAND_MOVE_RIGHT,
-        (true, ShortcutAction::MoveTileUp) => &HYPRLAND_MOVE_UP,
-        (true, ShortcutAction::MoveTileDown) => &HYPRLAND_MOVE_DOWN,
-        _ => return None,
-    })
-}
+const OPEN_USER_MANUAL: ShortcutDefinition = ShortcutDefinition::new(
+    "open_user_manual",
+    &[KeyBinding::new(Modifiers::NONE, Key::F1)],
+);
+const OPEN_SEARCH: ShortcutDefinition =
+    ShortcutDefinition::new("open_search", &[KeyBinding::new(Modifiers::CTRL, Key::F)]);
+const OPEN_REPLACE: ShortcutDefinition =
+    ShortcutDefinition::new("open_replace", &[KeyBinding::new(Modifiers::CTRL, Key::H)]);
+const OPEN_SETTINGS: ShortcutDefinition = ShortcutDefinition::new(
+    "open_settings",
+    &[KeyBinding::new(Modifiers::CTRL, Key::Comma)],
+);
+const CLOSE_SETTINGS: ShortcutDefinition = ShortcutDefinition::new(
+    "close_settings",
+    &[KeyBinding::new(Modifiers::NONE, Key::Escape)],
+);
+const CLOSE_SEARCH: ShortcutDefinition = ShortcutDefinition::new(
+    "close_search",
+    &[KeyBinding::new(Modifiers::NONE, Key::Escape)],
+);
+const RENAME_TAB: ShortcutDefinition =
+    ShortcutDefinition::new("rename_tab", &[KeyBinding::new(Modifiers::NONE, Key::F2)]);
+const OPEN_TEXT_HISTORY: ShortcutDefinition =
+    ShortcutDefinition::new("open_text_history", &[KeyBinding::new(CTRL_SHIFT, Key::H)]);
+const OPEN_ENCODING_DIALOG: ShortcutDefinition = ShortcutDefinition::new(
+    "open_encoding_dialog",
+    &[KeyBinding::new(CTRL_SHIFT, Key::E)],
+);
+const OPEN_STATUS_HISTORY: ShortcutDefinition = ShortcutDefinition::new(
+    "open_status_history",
+    &[KeyBinding::new(CTRL_SHIFT, Key::M)],
+);
+const COPY_ACTIVE_PATH: ShortcutDefinition =
+    ShortcutDefinition::new("copy_active_path", &[KeyBinding::new(CTRL_SHIFT, Key::C)]);
+const REVEAL_ACTIVE_PATH: ShortcutDefinition =
+    ShortcutDefinition::new("reveal_active_path", &[KeyBinding::new(CTRL_SHIFT, Key::R)]);
+const TOGGLE_TAB_LIST: ShortcutDefinition =
+    ShortcutDefinition::new("toggle_tab_list", &[KeyBinding::new(CTRL_ALT, Key::B)]);
+const TOGGLE_TAB_LIST_AUTO_HIDE: ShortcutDefinition = ShortcutDefinition::new(
+    "toggle_tab_list_auto_hide",
+    &[KeyBinding::new(CTRL_SHIFT, Key::B)],
+);
+const TOGGLE_READING_ORDER: ShortcutDefinition =
+    ShortcutDefinition::new("toggle_reading_order", &[KeyBinding::new(CTRL_ALT, Key::R)]);
+const TOGGLE_CONTROL_CHARS: ShortcutDefinition =
+    ShortcutDefinition::new("toggle_control_chars", &[KeyBinding::new(CTRL_ALT, Key::C)]);
+const TRAVERSE_REGION_FORWARD: ShortcutDefinition = ShortcutDefinition::new(
+    "traverse_region_forward",
+    &[KeyBinding::new(Modifiers::NONE, Key::F6)],
+);
+const TRAVERSE_REGION_BACKWARD: ShortcutDefinition = ShortcutDefinition::new(
+    "traverse_region_backward",
+    &[KeyBinding::new(Modifiers::SHIFT, Key::F6)],
+);
+const OPEN_FILE_HERE: ShortcutDefinition =
+    ShortcutDefinition::new("open_file_here", &[KeyBinding::new(CTRL_SHIFT, Key::O)]);
+const NEW_TAB: ShortcutDefinition =
+    ShortcutDefinition::new("new_tab", &[KeyBinding::new(Modifiers::CTRL, Key::N)]);
+const OPEN_FILE: ShortcutDefinition =
+    ShortcutDefinition::new("open_file", &[KeyBinding::new(Modifiers::CTRL, Key::O)]);
+const SAVE_FILE_AS: ShortcutDefinition =
+    ShortcutDefinition::new("save_file_as", &[KeyBinding::new(CTRL_SHIFT, Key::S)]);
+const SAVE_FILE: ShortcutDefinition =
+    ShortcutDefinition::new("save_file", &[KeyBinding::new(Modifiers::CTRL, Key::S)]);
+const INCREASE_FONT_SIZE: ShortcutDefinition = ShortcutDefinition::new(
+    "increase_font_size",
+    &[
+        KeyBinding::new(Modifiers::CTRL, Key::Equals),
+        KeyBinding::new(Modifiers::CTRL, Key::Plus),
+    ],
+);
+const DECREASE_FONT_SIZE: ShortcutDefinition = ShortcutDefinition::new(
+    "decrease_font_size",
+    &[KeyBinding::new(Modifiers::CTRL, Key::Minus)],
+);
+const TOGGLE_LINE_NUMBERS: ShortcutDefinition = ShortcutDefinition::new(
+    "toggle_line_numbers",
+    &[KeyBinding::new(Modifiers::CTRL, Key::Num0)],
+);
+const CLOSE_TAB: ShortcutDefinition =
+    ShortcutDefinition::new("close_tab", &[KeyBinding::new(Modifiers::CTRL, Key::W)]);
+const PROMOTE_TILE_TO_TAB: ShortcutDefinition = ShortcutDefinition::new(
+    "promote_tile_to_tab",
+    &[KeyBinding::new(Modifiers::CTRL, Key::T)],
+);
+const PROMOTE_TAB_FILES_TO_TABS: ShortcutDefinition = ShortcutDefinition::new(
+    "promote_tab_files_to_tabs",
+    &[KeyBinding::new(CTRL_SHIFT, Key::T)],
+);
+const CLOSE_TILE: ShortcutDefinition =
+    ShortcutDefinition::new("close_tile", &[KeyBinding::new(CTRL_SHIFT, Key::W)]);
+const SPLIT_TILE: ShortcutDefinition =
+    ShortcutDefinition::new("split_tile", &[KeyBinding::new(CTRL_ALT, Key::Enter)])
+        .hyprland(&[KeyBinding::new(Modifiers::ALT, Key::Enter)]);
+const SPLIT_UP: ShortcutDefinition =
+    ShortcutDefinition::new("split_up", &[KeyBinding::new(CTRL_SHIFT, Key::ArrowUp)])
+        .hyprland(&[KeyBinding::new(CTRL_ALT, Key::ArrowUp)]);
+const SPLIT_DOWN: ShortcutDefinition =
+    ShortcutDefinition::new("split_down", &[KeyBinding::new(CTRL_SHIFT, Key::ArrowDown)])
+        .hyprland(&[KeyBinding::new(CTRL_ALT, Key::ArrowDown)]);
+const SPLIT_LEFT: ShortcutDefinition =
+    ShortcutDefinition::new("split_left", &[KeyBinding::new(CTRL_SHIFT, Key::ArrowLeft)])
+        .hyprland(&[KeyBinding::new(CTRL_ALT, Key::ArrowLeft)]);
+const SPLIT_RIGHT: ShortcutDefinition = ShortcutDefinition::new(
+    "split_right",
+    &[KeyBinding::new(CTRL_SHIFT, Key::ArrowRight)],
+)
+.hyprland(&[KeyBinding::new(CTRL_ALT, Key::ArrowRight)]);
+const RESIZE_LEFT: ShortcutDefinition = ShortcutDefinition::new(
+    "resize_tile_left",
+    &[KeyBinding::new(CTRL_ALT, Key::ArrowLeft)],
+)
+.hyprland(&[KeyBinding::new(ALT_SHIFT, Key::ArrowLeft)]);
+const RESIZE_RIGHT: ShortcutDefinition = ShortcutDefinition::new(
+    "resize_tile_right",
+    &[KeyBinding::new(CTRL_ALT, Key::ArrowRight)],
+)
+.hyprland(&[KeyBinding::new(ALT_SHIFT, Key::ArrowRight)]);
+const RESIZE_UP: ShortcutDefinition =
+    ShortcutDefinition::new("resize_tile_up", &[KeyBinding::new(CTRL_ALT, Key::ArrowUp)])
+        .hyprland(&[KeyBinding::new(ALT_SHIFT, Key::ArrowUp)]);
+const RESIZE_DOWN: ShortcutDefinition = ShortcutDefinition::new(
+    "resize_tile_down",
+    &[KeyBinding::new(CTRL_ALT, Key::ArrowDown)],
+)
+.hyprland(&[KeyBinding::new(ALT_SHIFT, Key::ArrowDown)]);
+// Generic tile movement must not consume Ctrl/Alt+Arrow word navigation.
+const MOVE_LEFT: ShortcutDefinition = ShortcutDefinition::new(
+    "move_tile_left",
+    &[KeyBinding::new(CTRL_ALT_SHIFT, Key::ArrowLeft)],
+)
+.hyprland(&[KeyBinding::new(Modifiers::ALT, Key::ArrowLeft)]);
+const MOVE_RIGHT: ShortcutDefinition = ShortcutDefinition::new(
+    "move_tile_right",
+    &[KeyBinding::new(CTRL_ALT_SHIFT, Key::ArrowRight)],
+)
+.hyprland(&[KeyBinding::new(Modifiers::ALT, Key::ArrowRight)]);
+const MOVE_UP: ShortcutDefinition = ShortcutDefinition::new(
+    "move_tile_up",
+    &[KeyBinding::new(CTRL_ALT_SHIFT, Key::ArrowUp)],
+)
+.hyprland(&[KeyBinding::new(Modifiers::ALT, Key::ArrowUp)]);
+const MOVE_DOWN: ShortcutDefinition = ShortcutDefinition::new(
+    "move_tile_down",
+    &[KeyBinding::new(CTRL_ALT_SHIFT, Key::ArrowDown)],
+)
+.hyprland(&[KeyBinding::new(Modifiers::ALT, Key::ArrowDown)]);
 
 #[must_use]
 pub fn default_bindings(profile: PlatformProfile, action: ShortcutAction) -> &'static [KeyBinding] {
-    if let Some(bindings) = tile_default_bindings(profile, action) {
-        return bindings;
-    }
-    match action {
-        ShortcutAction::OpenUserManual => &OPEN_USER_MANUAL,
-        ShortcutAction::OpenSearch => &OPEN_SEARCH,
-        ShortcutAction::OpenReplace => &OPEN_REPLACE,
-        ShortcutAction::OpenSettings => &OPEN_SETTINGS,
-        ShortcutAction::CloseSettings => &CLOSE_SETTINGS,
-        ShortcutAction::CloseSearch => &CLOSE_SEARCH,
-        ShortcutAction::RenameTab => &RENAME_TAB,
-        ShortcutAction::OpenTextHistory => &OPEN_TEXT_HISTORY,
-        ShortcutAction::OpenEncodingDialog => &OPEN_ENCODING_DIALOG,
-        ShortcutAction::OpenStatusHistory => &OPEN_STATUS_HISTORY,
-        ShortcutAction::CopyActivePath => &COPY_ACTIVE_PATH,
-        ShortcutAction::RevealActivePath => &REVEAL_ACTIVE_PATH,
-        ShortcutAction::ToggleTabList => &TOGGLE_TAB_LIST,
-        ShortcutAction::ToggleTabListAutoHide => &TOGGLE_TAB_LIST_AUTO_HIDE,
-        ShortcutAction::ToggleReadingOrder => &TOGGLE_READING_ORDER,
-        ShortcutAction::ToggleControlChars => &TOGGLE_CONTROL_CHARS,
-        ShortcutAction::TraverseRegionForward => &TRAVERSE_REGION_FORWARD,
-        ShortcutAction::TraverseRegionBackward => &TRAVERSE_REGION_BACKWARD,
-        ShortcutAction::OpenFileHere => &OPEN_FILE_HERE,
-        ShortcutAction::NewTab => &NEW_TAB,
-        ShortcutAction::OpenFile => &OPEN_FILE,
-        ShortcutAction::SaveFileAs => &SAVE_FILE_AS,
-        ShortcutAction::SaveFile => &SAVE_FILE,
-        ShortcutAction::IncreaseFontSize => &INCREASE_FONT_SIZE,
-        ShortcutAction::DecreaseFontSize => &DECREASE_FONT_SIZE,
-        ShortcutAction::ToggleLineNumbers => &TOGGLE_LINE_NUMBERS,
-        ShortcutAction::CloseTab => &CLOSE_TAB,
-        ShortcutAction::PromoteTileToTab => &PROMOTE_TILE_TO_TAB,
-        ShortcutAction::PromoteTabFilesToTabs => &PROMOTE_TAB_FILES_TO_TABS,
-        ShortcutAction::CloseTile => &CLOSE_TILE,
-        ShortcutAction::SplitTile
-        | ShortcutAction::SplitUp
-        | ShortcutAction::SplitDown
-        | ShortcutAction::SplitLeft
-        | ShortcutAction::SplitRight
-        | ShortcutAction::ResizeTileLeft
-        | ShortcutAction::ResizeTileRight
-        | ShortcutAction::ResizeTileUp
-        | ShortcutAction::ResizeTileDown
-        | ShortcutAction::MoveTileLeft
-        | ShortcutAction::MoveTileRight
-        | ShortcutAction::MoveTileUp
-        | ShortcutAction::MoveTileDown => unreachable!("tile bindings are handled above"),
+    let definition = action.definition();
+    if resolved_profile(profile) == PlatformProfile::Hyprland {
+        definition.hyprland
+    } else {
+        definition.bindings
     }
 }
 
@@ -361,12 +379,7 @@ pub fn consume_shortcut(
     shortcuts: &ShortcutSettings,
     action: ShortcutAction,
 ) -> bool {
-    if let Some(bindings) = configured_bindings(shortcuts, action) {
-        return bindings
-            .iter()
-            .any(|binding| consume_binding(ctx, *binding));
-    }
-    default_bindings(profile, action)
+    resolved_bindings(profile, shortcuts, action)
         .iter()
         .any(|binding| consume_binding(ctx, *binding))
 }
@@ -374,27 +387,18 @@ pub fn consume_shortcut(
 fn consume_binding(ctx: &egui::Context, binding: KeyBinding) -> bool {
     let pressed = ctx.input(|input| {
         input.events.iter().any(|event| {
-            matches!(
-                event,
-                egui::Event::Key {
-                    key,
-                    pressed: true,
-                    modifiers,
-                    ..
-                } if *key == binding.key && key_event_matches_binding(*modifiers, binding)
-            )
+            matches!(event, egui::Event::Key { key, pressed: true, modifiers, .. }
+            if *key == binding.key && key_event_matches_binding(*modifiers, binding))
         })
     });
     pressed && ctx.input_mut(|input| input.consume_key(binding.modifiers, binding.key))
 }
 
-/// Uses exact modifiers for shortcuts so, for example, Ctrl+Shift+H does not
-/// accidentally trigger Ctrl+H and Alt+Shift+Arrow does not trigger Alt+Arrow.
-/// Plus/equals retain egui's logical matching because producing `+` requires
-/// Shift on common keyboard layouts.
+/// Match exact modifiers, except plus/equals where producing the character can
+/// require Shift. This keeps Ctrl+Shift+H distinct from Ctrl+H.
 #[must_use]
-pub(crate) fn key_event_matches_binding(pressed: egui::Modifiers, binding: KeyBinding) -> bool {
-    if matches!(binding.key, egui::Key::Plus | egui::Key::Equals) {
+pub(crate) fn key_event_matches_binding(pressed: Modifiers, binding: KeyBinding) -> bool {
+    if matches!(binding.key, Key::Plus | Key::Equals) {
         pressed.matches_logically(binding.modifiers)
     } else {
         pressed.matches_exact(binding.modifiers)
@@ -411,16 +415,26 @@ pub fn configured_bindings(
         .and_then(parse_binding_list)
 }
 
-/// Returns the bindings actually used after applying valid user overrides and
-/// resolving platform-specific defaults.
+/// Resolve overrides without copying the static default bindings.
+pub(crate) fn resolved_bindings(
+    profile: PlatformProfile,
+    shortcuts: &ShortcutSettings,
+    action: ShortcutAction,
+) -> Cow<'static, [KeyBinding]> {
+    configured_bindings(shortcuts, action).map_or_else(
+        || Cow::Borrowed(default_bindings(profile, action)),
+        Cow::Owned,
+    )
+}
+
+/// Returns an owned copy of the effective bindings for callers that need one.
 #[must_use]
 pub fn effective_bindings(
     profile: PlatformProfile,
     shortcuts: &ShortcutSettings,
     action: ShortcutAction,
 ) -> Vec<KeyBinding> {
-    configured_bindings(shortcuts, action)
-        .unwrap_or_else(|| default_bindings(profile, action).to_vec())
+    resolved_bindings(profile, shortcuts, action).into_owned()
 }
 
 #[must_use]
@@ -443,12 +457,8 @@ pub(crate) fn invalid_shortcut_overrides(
 }
 
 fn parse_binding_list(raw: &str) -> Option<Vec<KeyBinding>> {
-    let bindings = raw
-        .split(',')
-        .map(parse_key_binding)
-        .collect::<Option<Vec<_>>>()?;
-
-    (!bindings.is_empty()).then_some(bindings)
+    // str::split always yields at least one item; an empty item fails parsing.
+    raw.split(',').map(parse_key_binding).collect()
 }
 
 fn parse_key_binding(raw: &str) -> Option<KeyBinding> {
@@ -456,8 +466,7 @@ fn parse_key_binding(raw: &str) -> Option<KeyBinding> {
     if trimmed.is_empty() {
         return None;
     }
-
-    let mut modifiers = egui::Modifiers::NONE;
+    let mut modifiers = Modifiers::NONE;
     let mut key = None;
     for part in trimmed.split('+') {
         let token = normalized_token(part);
@@ -475,7 +484,6 @@ fn parse_key_binding(raw: &str) -> Option<KeyBinding> {
             }
         }
     }
-
     key.map(|key| KeyBinding { modifiers, key })
 }
 
@@ -491,14 +499,13 @@ fn normalized_token(token: &str) -> String {
         .to_ascii_lowercase()
 }
 
-fn parse_key_token(token: &str) -> Option<egui::Key> {
+fn parse_key_token(token: &str) -> Option<Key> {
     if let Some(digit) = token.strip_prefix("num")
         && digit.len() == 1
         && digit.as_bytes()[0].is_ascii_digit()
     {
-        return egui::Key::from_name(digit);
+        return Key::from_name(digit);
     }
-
     let canonical = match token {
         "up" | "arrowup" => "ArrowUp",
         "down" | "arrowdown" => "ArrowDown",
@@ -511,8 +518,8 @@ fn parse_key_token(token: &str) -> Option<egui::Key> {
         "dash" => "Minus",
         _ => token,
     };
-    egui::Key::from_name(canonical).or_else(|| {
-        egui::Key::ALL
+    Key::from_name(canonical).or_else(|| {
+        Key::ALL
             .iter()
             .copied()
             .find(|key| key.name().eq_ignore_ascii_case(canonical))
@@ -520,184 +527,4 @@ fn parse_key_token(token: &str) -> Option<egui::Key> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        KeyBinding, ShortcutAction, configured_bindings, default_bindings, effective_bindings,
-        invalid_shortcut_overrides, key_event_matches_binding, parse_key_binding,
-    };
-    use crate::app::platform::PlatformProfile;
-    use crate::app::services::settings_store::ShortcutSettings;
-    use eframe::egui;
-    use std::collections::BTreeMap;
-
-    #[test]
-    fn windows_default_shortcuts_keep_existing_bindings() {
-        assert_eq!(
-            default_bindings(PlatformProfile::Windows, ShortcutAction::OpenFile),
-            &[KeyBinding::new(egui::Modifiers::CTRL, egui::Key::O)]
-        );
-        assert_eq!(
-            default_bindings(PlatformProfile::Windows, ShortcutAction::CloseTab),
-            &[KeyBinding::new(egui::Modifiers::CTRL, egui::Key::W)]
-        );
-        assert_eq!(
-            default_bindings(PlatformProfile::Windows, ShortcutAction::MoveTileLeft),
-            &[KeyBinding::new(super::CTRL_ALT_SHIFT, egui::Key::ArrowLeft)]
-        );
-        assert_eq!(
-            default_bindings(PlatformProfile::Windows, ShortcutAction::SplitLeft),
-            &[KeyBinding::new(super::CTRL_SHIFT, egui::Key::ArrowLeft)]
-        );
-    }
-
-    #[test]
-    fn increase_font_size_keeps_both_existing_bindings() {
-        assert_eq!(
-            default_bindings(PlatformProfile::Windows, ShortcutAction::IncreaseFontSize),
-            &[
-                KeyBinding::new(egui::Modifiers::CTRL, egui::Key::Equals),
-                KeyBinding::new(egui::Modifiers::CTRL, egui::Key::Plus),
-            ]
-        );
-    }
-
-    #[test]
-    fn toggle_tab_list_has_default_binding() {
-        assert_eq!(
-            default_bindings(PlatformProfile::Windows, ShortcutAction::ToggleTabList),
-            &[KeyBinding::new(super::CTRL_ALT, egui::Key::B)]
-        );
-    }
-
-    #[test]
-    fn tile_management_defaults_share_the_alt_leader() {
-        // `alt` is the in-app stand-in for the compositor's `super`, so every
-        // tiling action hangs off it and never collides with editor word-nav.
-        assert_eq!(
-            default_bindings(PlatformProfile::Hyprland, ShortcutAction::SplitTile),
-            &[KeyBinding::new(egui::Modifiers::ALT, egui::Key::Enter)]
-        );
-        assert_eq!(
-            default_bindings(PlatformProfile::Hyprland, ShortcutAction::MoveTileLeft),
-            &[KeyBinding::new(egui::Modifiers::ALT, egui::Key::ArrowLeft)]
-        );
-        assert_eq!(
-            default_bindings(PlatformProfile::Hyprland, ShortcutAction::ResizeTileLeft),
-            &[KeyBinding::new(super::ALT_SHIFT, egui::Key::ArrowLeft)]
-        );
-        assert_eq!(
-            default_bindings(PlatformProfile::Hyprland, ShortcutAction::SplitLeft),
-            &[KeyBinding::new(super::CTRL_ALT, egui::Key::ArrowLeft)]
-        );
-    }
-
-    #[test]
-    fn parses_configured_shortcut_binding() {
-        assert_eq!(
-            parse_key_binding("ctrl + shift + left"),
-            Some(KeyBinding::new(super::CTRL_SHIFT, egui::Key::ArrowLeft))
-        );
-    }
-
-    #[test]
-    fn key_parser_reuses_egui_names_and_keeps_supported_aliases() {
-        for (raw, expected) in [
-            ("f12", egui::Key::F12),
-            ("arrow-left", egui::Key::ArrowLeft),
-            ("esc", egui::Key::Escape),
-            ("return", egui::Key::Enter),
-            ("num7", egui::Key::Num7),
-            ("-", egui::Key::Minus),
-            ("dash", egui::Key::Minus),
-        ] {
-            assert_eq!(
-                parse_key_binding(raw).map(|binding| binding.key),
-                Some(expected)
-            );
-        }
-    }
-
-    #[test]
-    fn configured_binding_overrides_default_binding() {
-        let shortcuts = ShortcutSettings {
-            bindings: BTreeMap::from([("open_file".to_owned(), "ctrl+shift+p".to_owned())]),
-        };
-
-        assert_eq!(
-            configured_bindings(&shortcuts, ShortcutAction::OpenFile),
-            Some(vec![KeyBinding::new(super::CTRL_SHIFT, egui::Key::P)])
-        );
-    }
-
-    #[test]
-    fn invalid_configured_binding_falls_back_to_default() {
-        let shortcuts = ShortcutSettings {
-            bindings: BTreeMap::from([("open_file".to_owned(), "ctrl+bogus".to_owned())]),
-        };
-
-        assert_eq!(
-            configured_bindings(&shortcuts, ShortcutAction::OpenFile),
-            None
-        );
-        assert_eq!(
-            default_bindings(PlatformProfile::Windows, ShortcutAction::OpenFile),
-            &[KeyBinding::new(egui::Modifiers::CTRL, egui::Key::O)]
-        );
-    }
-
-    #[test]
-    fn exact_modifiers_keep_overlapping_shortcuts_distinct() {
-        assert!(!key_event_matches_binding(
-            super::CTRL_SHIFT,
-            KeyBinding::new(egui::Modifiers::CTRL, egui::Key::H),
-        ));
-        assert!(!key_event_matches_binding(
-            super::ALT_SHIFT,
-            KeyBinding::new(egui::Modifiers::ALT, egui::Key::ArrowLeft),
-        ));
-        assert!(key_event_matches_binding(
-            super::CTRL_SHIFT,
-            KeyBinding::new(super::CTRL_SHIFT, egui::Key::H),
-        ));
-    }
-
-    #[test]
-    fn effective_bindings_use_override_or_platform_default() {
-        let shortcuts = ShortcutSettings {
-            bindings: BTreeMap::from([("split_left".to_owned(), "alt+l".to_owned())]),
-        };
-
-        assert_eq!(
-            effective_bindings(
-                PlatformProfile::Hyprland,
-                &shortcuts,
-                ShortcutAction::SplitLeft,
-            ),
-            vec![KeyBinding::new(egui::Modifiers::ALT, egui::Key::L)]
-        );
-        assert_eq!(
-            effective_bindings(
-                PlatformProfile::Hyprland,
-                &shortcuts,
-                ShortcutAction::SplitRight,
-            ),
-            vec![KeyBinding::new(super::CTRL_ALT, egui::Key::ArrowRight)]
-        );
-    }
-
-    #[test]
-    fn invalid_shortcut_overrides_are_reported_for_known_actions() {
-        let shortcuts = ShortcutSettings {
-            bindings: BTreeMap::from([
-                ("open_file".to_owned(), "ctrl+bogus".to_owned()),
-                ("save_file".to_owned(), "ctrl+s".to_owned()),
-            ]),
-        };
-
-        let invalid = invalid_shortcut_overrides(&shortcuts);
-
-        assert_eq!(invalid.len(), 1);
-        assert_eq!(invalid[0].action_key, "open_file");
-        assert_eq!(invalid[0].raw, "ctrl+bogus");
-    }
-}
+mod tests;

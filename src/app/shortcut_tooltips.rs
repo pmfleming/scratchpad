@@ -1,7 +1,7 @@
 use crate::app::platform::{PlatformProfile, resolved_profile};
 use crate::app::services::settings_store::ShortcutSettings;
 use crate::app::shortcut_keymap::{
-    KeyBinding, ShortcutAction, effective_bindings, key_event_matches_binding,
+    KeyBinding, ShortcutAction, key_event_matches_binding, resolved_bindings,
 };
 use eframe::egui;
 use std::borrow::Cow;
@@ -10,7 +10,7 @@ use std::sync::Arc;
 struct RuntimeShortcuts {
     profile: PlatformProfile,
     settings: ShortcutSettings,
-    bindings: Vec<(ShortcutAction, Vec<KeyBinding>)>,
+    bindings: Vec<(ShortcutAction, Cow<'static, [KeyBinding]>)>,
 }
 
 impl RuntimeShortcuts {
@@ -20,7 +20,7 @@ impl RuntimeShortcuts {
             settings: settings.clone(),
             bindings: ShortcutAction::ALL
                 .iter()
-                .map(|action| (*action, effective_bindings(profile, settings, *action)))
+                .map(|action| (*action, resolved_bindings(profile, settings, *action)))
                 .collect(),
         }
     }
@@ -32,7 +32,7 @@ impl RuntimeShortcuts {
     fn bindings(&self, action: ShortcutAction) -> &[KeyBinding] {
         self.bindings
             .iter()
-            .find_map(|(candidate, bindings)| (*candidate == action).then_some(bindings.as_slice()))
+            .find_map(|(candidate, bindings)| (*candidate == action).then_some(bindings.as_ref()))
             .unwrap_or_default()
     }
 }
@@ -86,17 +86,6 @@ pub(crate) fn action(
         "{}: {description}",
         format_bindings(runtime.profile, runtime.bindings(shortcut_action))
     )
-}
-
-#[cfg(test)]
-fn action_for(
-    profile: PlatformProfile,
-    settings: &ShortcutSettings,
-    shortcut_action: ShortcutAction,
-    description: &str,
-) -> String {
-    let bindings = effective_bindings(profile, settings, shortcut_action);
-    format!("{}: {description}", format_bindings(profile, &bindings))
 }
 
 /// Returns true when an editor key event belongs to the active app keymap.
@@ -189,7 +178,7 @@ pub(crate) const UNDO: &str = "CTRL+Z: Undo";
 
 #[cfg(test)]
 mod tests {
-    use super::{action_for, is_app_shortcut, runtime_shortcuts, sync_context};
+    use super::{action, is_app_shortcut, runtime_shortcuts, sync_context};
     use crate::app::platform::PlatformProfile;
     use crate::app::services::settings_store::ShortcutSettings;
     use crate::app::shortcut_keymap::ShortcutAction;
@@ -197,41 +186,47 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[test]
-    fn tooltip_uses_platform_default() {
+    fn tooltips_follow_real_context_defaults_overrides_and_invalid_fallbacks() {
+        let ctx = egui::Context::default();
         assert_eq!(
-            action_for(
+            action(&ctx, ShortcutAction::OpenFile, "Open"),
+            "CTRL+O: Open"
+        );
+        for (profile, shortcut, raw, expected) in [
+            (
                 PlatformProfile::Hyprland,
-                &ShortcutSettings::default(),
                 ShortcutAction::SplitLeft,
-                "Split Left",
+                None,
+                "CTRL+ALT+LEFT: Action",
             ),
-            "CTRL+ALT+LEFT: Split Left"
-        );
-    }
-
-    #[test]
-    fn tooltip_uses_user_override_and_multiple_bindings() {
-        let settings = ShortcutSettings {
-            bindings: BTreeMap::from([(
-                "open_file".to_owned(),
-                "ctrl+shift+p, super+o".to_owned(),
-            )]),
-        };
-        assert_eq!(
-            action_for(
+            (
                 PlatformProfile::Windows,
-                &settings,
                 ShortcutAction::OpenFile,
-                "Open File",
+                Some("ctrl+shift+p, super+o"),
+                "CTRL+SHIFT+P / WIN+O: Action",
             ),
-            "CTRL+SHIFT+P / WIN+O: Open File"
-        );
+            (
+                PlatformProfile::LinuxGeneric,
+                ShortcutAction::SaveFile,
+                Some("ctrl+bogus"),
+                "CTRL+S: Action",
+            ),
+        ] {
+            let settings = ShortcutSettings {
+                bindings: raw
+                    .into_iter()
+                    .map(|raw| (shortcut.config_key().to_owned(), raw.to_owned()))
+                    .collect(),
+            };
+            sync_context(&ctx, profile, &settings);
+            assert_eq!(action(&ctx, shortcut, "Action"), expected);
+        }
     }
 
     #[test]
     fn runtime_keymap_reserves_platform_and_user_bindings_exactly() {
         let ctx = egui::Context::default();
-        let settings = ShortcutSettings {
+        let mut settings = ShortcutSettings {
             bindings: BTreeMap::from([("open_file".to_owned(), "ctrl+shift+p".to_owned())]),
         };
         sync_context(&ctx, PlatformProfile::Hyprland, &settings);
@@ -248,23 +243,23 @@ mod tests {
         assert!(is_app_shortcut(
             &ctx,
             egui::Modifiers::ALT,
-            egui::Key::ArrowLeft,
+            egui::Key::ArrowLeft
         ));
-    }
-
-    #[test]
-    fn invalid_override_tooltip_uses_default() {
-        let settings = ShortcutSettings {
-            bindings: BTreeMap::from([("save_file".to_owned(), "ctrl+bogus".to_owned())]),
-        };
-        assert_eq!(
-            action_for(
-                PlatformProfile::LinuxGeneric,
-                &settings,
-                ShortcutAction::SaveFile,
-                "Save",
-            ),
-            "CTRL+S: Save"
-        );
+        sync_context(&ctx, PlatformProfile::Windows, &settings);
+        assert!(!is_app_shortcut(
+            &ctx,
+            egui::Modifiers::ALT,
+            egui::Key::ArrowLeft
+        ));
+        settings
+            .bindings
+            .insert("open_file".into(), "ctrl+p".into());
+        sync_context(&ctx, PlatformProfile::Windows, &settings);
+        assert!(is_app_shortcut(&ctx, egui::Modifiers::CTRL, egui::Key::P));
+        assert!(!is_app_shortcut(
+            &ctx,
+            egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+            egui::Key::P
+        ));
     }
 }

@@ -1,4 +1,6 @@
-use crate::app::domain::buffer::ByteSpan;
+// Preserve the editor API while the shared values are owned by the domain.
+pub use crate::app::domain::buffer::{OperationRecord, TextDocumentEditOperation as EditOperation};
+pub use crate::app::domain::{CharCursor, CursorRange};
 use crate::app::services::settings_store::{IndentationStyle, TabDisplayMode};
 use eframe::egui;
 use std::ops::Range;
@@ -112,21 +114,7 @@ impl<'a> TextEditOptions<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct CharCursor {
-    pub index: usize,
-    pub prefer_next_row: bool,
-}
-
 impl CharCursor {
-    #[must_use]
-    pub fn new(index: usize) -> Self {
-        Self {
-            index,
-            prefer_next_row: false,
-        }
-    }
-
     pub(super) fn to_egui_ccursor(self) -> egui::text::CCursor {
         egui::text::CCursor {
             index: egui::text::CharIndex(self.index),
@@ -135,47 +123,7 @@ impl CharCursor {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct CursorRange {
-    pub primary: CharCursor,
-    pub secondary: CharCursor,
-}
-
 impl CursorRange {
-    #[must_use]
-    pub fn one(cursor: CharCursor) -> Self {
-        Self {
-            primary: cursor,
-            secondary: cursor,
-        }
-    }
-
-    #[must_use]
-    pub fn two(min: usize, max: usize) -> Self {
-        Self {
-            primary: CharCursor::new(max),
-            secondary: CharCursor::new(min),
-        }
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.primary.index == self.secondary.index
-    }
-
-    #[must_use]
-    pub fn sorted_indices(&self) -> (usize, usize) {
-        let a = self.primary.index;
-        let b = self.secondary.index;
-        if a <= b { (a, b) } else { (b, a) }
-    }
-
-    #[must_use]
-    pub fn as_sorted_char_range(&self) -> Range<usize> {
-        let (start, end) = self.sorted_indices();
-        start..end
-    }
-
     #[must_use]
     pub fn to_egui(&self) -> egui::text::CCursorRange {
         egui::text::CCursorRange {
@@ -200,21 +148,6 @@ impl CursorRange {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EditOperation {
-    pub start_char: usize,
-    pub deleted_text: String,
-    pub inserted_text: String,
-    pub deleted_spans: Vec<ByteSpan>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct OperationRecord {
-    pub previous_cursor: CursorRange,
-    pub next_cursor: CursorRange,
-    pub edits: Vec<EditOperation>,
-}
-
 pub(super) fn selection_char_range(cursor_range: &CursorRange) -> Option<Range<usize>> {
     (!cursor_range.is_empty()).then(|| cursor_range.as_sorted_char_range())
 }
@@ -234,4 +167,29 @@ pub(super) fn blend_colors(
         channel(left.g(), right.g()),
         channel(left.b(), right.b()),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CharCursor, CursorRange, selection_char_range};
+
+    #[test]
+    fn domain_selections_keep_direction_and_row_affinity_through_egui() {
+        for (a, b, expected) in [(2, 9, 2..9), (9, 2, 2..9), (0, 0, 0..0)] {
+            let selection = CursorRange {
+                primary: CharCursor {
+                    index: a,
+                    prefer_next_row: true,
+                },
+                secondary: CharCursor::new(b),
+            };
+            assert_eq!(selection.as_sorted_char_range(), expected);
+            assert_eq!(selection.is_empty(), a == b);
+            assert_eq!(
+                selection_char_range(&selection),
+                (a != b).then_some(expected)
+            );
+            assert_eq!(CursorRange::from_egui(selection.to_egui()), selection);
+        }
+    }
 }

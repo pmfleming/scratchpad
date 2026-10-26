@@ -95,7 +95,9 @@ impl ProcessMeasurement {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    #[cfg(target_os = "linux")]
+    use super::status_bytes;
+    use super::{ProcessMeasurement, ProcessSnapshot};
     #[test]
     fn unavailable_and_reset_counters_do_not_become_zero() {
         let a = ProcessSnapshot {

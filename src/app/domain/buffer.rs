@@ -24,8 +24,8 @@ pub(crate) use history::{
     register_text_history_global_seq,
 };
 pub use history::{
-    PersistedCursorRange, PersistedHistoryEdit, PersistedHistoryEntry, PieceSource,
-    TextHistoryBudget, source_label,
+    OperationRecord, PersistedCursorRange, PersistedHistoryEdit, PersistedHistoryEntry,
+    PieceSource, TextDocumentEditOperation, TextHistoryBudget, source_label,
 };
 pub use piece_tree::{
     AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind, PieceTreeCharCursor, PieceTreeCharPosition,

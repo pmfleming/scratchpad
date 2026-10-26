@@ -167,7 +167,8 @@ fn update_peak_live(candidate: u64) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::begin_live_interval;
+    use std::sync::atomic::{AtomicU64, Ordering};
     #[test]
     fn interval_reset_preserves_prepared_allocations_and_baseline() {
         let live = AtomicU64::new(200);

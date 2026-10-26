@@ -3,9 +3,8 @@ use super::{
     PieceHistoryEntry, PieceSource, TextDocument, TextDocumentEditOperation,
     TextDocumentOperationRecord, TextHistoryApplyError, TextHistoryBudget,
 };
-use crate::app::ui::editor_content::native_editor::{
-    CharCursor, CursorRange, EditOperation, OperationRecord,
-};
+use crate::app::domain::buffer::{OperationRecord, TextDocumentEditOperation as EditOperation};
+use crate::app::domain::{CharCursor, CursorRange};
 use std::ops::Range;
 use std::time::{Duration, Instant};
 

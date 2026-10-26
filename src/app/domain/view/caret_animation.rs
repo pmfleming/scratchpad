@@ -1,4 +1,4 @@
-use crate::app::ui::editor_content::native_editor::CharCursor;
+use crate::app::domain::CharCursor;
 use eframe::egui;
 
 const DURATION_SECONDS: f64 = 0.075;
@@ -133,7 +133,7 @@ fn lerp_rect(from: egui::Rect, target: egui::Rect, amount: f32) -> egui::Rect {
 #[cfg(test)]
 mod tests {
     use super::CaretAnimationState;
-    use crate::app::ui::editor_content::native_editor::CharCursor;
+    use crate::app::domain::CharCursor;
     use eframe::egui;
 
     #[test]

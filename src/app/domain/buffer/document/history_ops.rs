@@ -3,15 +3,15 @@ mod persistence;
 use super::super::history::{
     CoalescedEdit, OperationDirection, TextDocumentEditOperation, TextHistoryApplyError,
     coalesced_local_edit_record, deleted_spans_or_payload, entry_sealed_by_divider,
-    operation_summary, record_current_parts, record_expected_parts,
+    operation_summary,
 };
 use super::super::{
     ByteSpan, PieceHistoryEdit, PieceHistoryEdits, PieceHistoryEntry, PieceHistoryFlags,
-    PieceSource, TEXT_HISTORY_COALESCE_WINDOW, TextDocumentOperationRecord, fingerprint_parts,
+    PieceSource, TEXT_HISTORY_COALESCE_WINDOW, TextDocumentOperationRecord,
     next_text_history_global_seq,
 };
 use super::TextDocument;
-use crate::app::ui::editor_content::native_editor::CursorRange;
+use crate::app::domain::CursorRange;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -65,22 +65,22 @@ impl TextDocument {
         if indices.len() == 1 && !self.content.piece_tree.has_live_anchors() {
             let idx = indices[0];
             let entry = &self.history.entries[idx];
-            let expected_generation = match direction {
-                OperationDirection::Undo => entry.visible_generation_after,
-                OperationDirection::Redo => entry.visible_generation_before,
-            };
-            let checkpoint = match direction {
-                OperationDirection::Undo => entry.checkpoint_before.clone(),
-                OperationDirection::Redo => entry.checkpoint_after.clone(),
+            let (expected_generation, checkpoint, selection) = match direction {
+                OperationDirection::Undo => (
+                    entry.visible_generation_after,
+                    &entry.checkpoint_before,
+                    entry.previous_selection,
+                ),
+                OperationDirection::Redo => (
+                    entry.visible_generation_before,
+                    &entry.checkpoint_after,
+                    entry.next_selection,
+                ),
             };
             if self.visible_generation() == expected_generation
                 && let Some(checkpoint) = checkpoint
             {
-                let selection = match direction {
-                    OperationDirection::Undo => entry.previous_selection,
-                    OperationDirection::Redo => entry.next_selection,
-                };
-                self.content.piece_tree = checkpoint;
+                self.content.piece_tree = Arc::clone(checkpoint);
                 self.mark_history_entry_undone(idx, matches!(direction, OperationDirection::Undo));
                 self.history.latest_update_at = None;
                 self.history.pending_generation_before = None;
@@ -99,8 +99,8 @@ impl TextDocument {
             self.validate_text_history_record(idx, &record, direction)?;
             self.apply_operation_record(&record, direction);
             self.mark_history_entry_undone(idx, matches!(direction, OperationDirection::Undo));
-            self.history.latest_operation_record = Some(record.clone());
             applied_selection = Some(direction.selection(&record));
+            self.history.latest_operation_record = Some(record);
         }
         if applied_selection.is_some() {
             self.history.latest_update_at = None;
@@ -188,11 +188,11 @@ impl TextDocument {
         record: &TextDocumentOperationRecord,
         direction: OperationDirection,
     ) {
-        let ordered: Box<dyn Iterator<Item = &TextDocumentEditOperation>> = match direction {
-            OperationDirection::Undo => Box::new(record.edits.iter().rev()),
-            OperationDirection::Redo => Box::new(record.edits.iter()),
-        };
-        for edit in ordered {
+        let mut edits = record.edits.iter();
+        while let Some(edit) = match direction {
+            OperationDirection::Undo => edits.next_back(),
+            OperationDirection::Redo => edits.next(),
+        } {
             let replaced_len = edit.expected_text(direction).chars().count();
             self.replace_char_range_raw(
                 edit.start_char..edit.start_char + replaced_len,
@@ -238,17 +238,8 @@ impl TextDocument {
             return Ok(());
         }
 
-        let expected_parts = record_expected_parts(record, direction);
-        let expected_fingerprint = fingerprint_parts(expected_parts.iter().copied());
-        let current_fingerprint = fingerprint_parts(
-            record_current_parts(self.content.piece_tree.as_ref(), record, direction)?
-                .iter()
-                .map(String::as_str),
-        );
-        if expected_fingerprint == current_fingerprint {
-            return Ok(());
-        }
-
+        // Compare each affected range once. A fingerprint required the same
+        // extraction plus two temporary vectors, and could accept a collision.
         record.edits.iter().try_for_each(|edit| {
             let expected = edit.expected_text(direction);
             let range = edit.start_char..edit.start_char + expected.chars().count();

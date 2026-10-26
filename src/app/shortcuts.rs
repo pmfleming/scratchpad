@@ -9,6 +9,9 @@ mod tile;
 mod traversal;
 mod utility;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) fn handle_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
     handle_global_shortcuts(app, ctx);
     utility::handle_utility_shortcuts(app, ctx);

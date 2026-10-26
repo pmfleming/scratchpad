@@ -51,22 +51,16 @@ pub(super) fn spawn_search_worker(
     let (request_tx, request_rx) = mpsc::channel::<SearchRequest>();
     let (result_tx, result_rx) = mpsc::channel::<SearchResult>();
     thread::spawn(move || {
-        while let Ok(mut request) = request_rx.recv() {
-            let mut coalesced_queue_depth = 1usize;
-            while let Ok(next_request) = request_rx.try_recv() {
-                request = next_request;
-                coalesced_queue_depth += 1;
-            }
+        for request in &request_rx {
+            let (request, coalesced_queue_depth) = request_rx
+                .try_iter()
+                .fold((request, 1), |(_, depth), latest| (latest, depth + 1));
             capacity_metrics::record_search_request(request.targets.len(), coalesced_queue_depth);
             let started_at = Instant::now();
-            let partial_tx = result_tx.clone();
             let mut partial_failed = false;
-            let mut partial_emit = move |partial: SearchResult| {
-                if partial_failed {
-                    return;
-                }
-                if partial_tx.send(partial).is_err() {
-                    partial_failed = true;
+            let mut partial_emit = |partial: SearchResult| {
+                if !partial_failed {
+                    partial_failed = result_tx.send(partial).is_err();
                 }
             };
             if let Some(result) = process_search_request_with_partials(

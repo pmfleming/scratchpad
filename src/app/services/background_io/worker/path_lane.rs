@@ -75,11 +75,8 @@ fn for_each_loaded(
     let (load_tx, load_rx) = mpsc::channel::<(usize, LoadedPathResult)>();
 
     thread::scope(|scope| {
-        for _ in 0..worker_count {
+        for _ in (0..total).step_by(chunk_size) {
             let chunk = iter.by_ref().take(chunk_size).collect::<Vec<_>>();
-            if chunk.is_empty() {
-                break;
-            }
             let load_tx = load_tx.clone();
             scope.spawn(move || {
                 for (index, request) in chunk {
@@ -113,7 +110,6 @@ fn stream_load_paths(
     let mut pending: std::collections::HashMap<usize, LoadedPathResult> =
         std::collections::HashMap::new();
     let mut next_index = 0usize;
-    let mut emitted = 0usize;
     let mut send_failed = false;
 
     for_each_loaded(requests, |index, result| {
@@ -123,8 +119,7 @@ fn stream_load_paths(
         pending.insert(index, result);
         while let Some(result) = pending.remove(&next_index) {
             next_index += 1;
-            emitted += 1;
-            let is_partial = emitted < total;
+            let is_partial = next_index < total;
             if result_tx
                 .send(BackgroundIoResult::PathsLoaded {
                     request_id,

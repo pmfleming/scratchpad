@@ -1,6 +1,6 @@
 use super::provenance::{ByteSpan, PieceSource, empty_byte_span};
 use super::{PieceHistoryEdit, PieceHistoryFlags};
-use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
+use crate::app::domain::{CharCursor, CursorRange};
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PersistedCursorRange {

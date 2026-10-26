@@ -1,4 +1,42 @@
-use super::{LineEndingStyle, TextInspection, TextScanSummary};
+use super::{
+    LineEndingStyle, TextInspection, TextScanSummary, normalize_inserted_text_line_endings,
+};
+use std::borrow::Cow;
+
+#[test]
+fn inserted_line_endings_preserve_unicode_lone_cr_and_borrowed_fast_paths() {
+    for (style, ending) in [
+        (LineEndingStyle::Lf, "\n"),
+        (LineEndingStyle::Crlf, "\r\n"),
+        (LineEndingStyle::Cr, "\r"),
+        (LineEndingStyle::None, "\n"),
+        (LineEndingStyle::Mixed, "\n"),
+    ] {
+        for input in ["\r", "\n", "\r\n"] {
+            assert_eq!(normalize_inserted_text_line_endings(input, style), ending);
+        }
+        for input in ["", "λ🦀", "a\rb\r"] {
+            assert!(
+                matches!(normalize_inserted_text_line_endings(input, style), Cow::Borrowed(text) if text == input)
+            );
+        }
+        for (input, expected) in [
+            ("λ\r\n🦀\n尾\r", format!("λ{ending}🦀{ending}尾\r")),
+            ("\r\r\n\n", format!("\r{ending}{ending}")),
+            ("a\rb\nc", format!("a\rb{ending}c")),
+        ] {
+            assert_eq!(
+                normalize_inserted_text_line_endings(input, style),
+                expected,
+                "{style:?} {input:?}"
+            );
+        }
+    }
+    assert!(matches!(
+        normalize_inserted_text_line_endings("λ\n🦀", LineEndingStyle::Lf),
+        Cow::Borrowed(_)
+    ));
+}
 
 #[test]
 fn byte_inspection_preserves_crlf_across_spans() {
@@ -47,8 +85,7 @@ fn parallel_text_inspection_matches_serial_for_boundary_cases() {
 
 #[test]
 fn parallel_span_inspection_corrects_crlf_worker_boundaries() {
-    let spans = ["a\r", "\nb\r", "\nc"].repeat(16);
-    let span_refs = spans.clone();
+    let span_refs = ["a\r", "\nb\r", "\nc"].repeat(16);
 
     let parallel = TextScanSummary::scan_span_slice_parallel_with_workers(&span_refs, 2)
         .expect("parallel scan");

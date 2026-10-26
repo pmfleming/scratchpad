@@ -8,7 +8,7 @@ use super::{
     buffer_text_metadata, buffer_text_metadata_from_piece_tree,
 };
 use crate::app::CanonicalPathKey;
-use crate::app::ui::editor_content::native_editor::{CursorRange, OperationRecord};
+use crate::app::domain::{CursorRange, buffer::OperationRecord};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};

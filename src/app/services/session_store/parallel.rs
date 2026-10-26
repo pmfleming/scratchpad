@@ -38,7 +38,7 @@ pub(super) fn ordered<T: Send, R: Send>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::ordered;
     #[test]
     fn ordered_batches_report_panics_without_losing_siblings() {
         let finished = std::sync::atomic::AtomicUsize::new(0);

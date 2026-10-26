@@ -1,5 +1,5 @@
 use super::BufferState;
-use crate::app::ui::editor_content::native_editor::{CharCursor, CursorRange};
+use crate::app::domain::{CharCursor, CursorRange};
 
 #[test]
 fn visible_control_availability_includes_line_breaks_tabs_and_format_controls() {

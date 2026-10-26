@@ -15,7 +15,7 @@ pub(crate) use provenance::PieceProvenanceStore;
 pub use provenance::{ByteSpan, PieceProvenance, PieceSource};
 
 use super::piece_tree::PieceTreeLite;
-use crate::app::ui::editor_content::native_editor::CursorRange;
+use crate::app::domain::CursorRange;
 use smallvec::SmallVec;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -239,41 +239,19 @@ impl TextDocumentEditOperation {
     }
 }
 
+/// Editor input before it is recorded in document history.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OperationRecord {
+    pub previous_cursor: CursorRange,
+    pub next_cursor: CursorRange,
+    pub edits: Vec<TextDocumentEditOperation>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextDocumentOperationRecord {
     pub previous_selection: CursorRange,
     pub next_selection: CursorRange,
     pub edits: Vec<TextDocumentEditOperation>,
-}
-
-pub(crate) fn record_expected_parts(
-    record: &TextDocumentOperationRecord,
-    direction: OperationDirection,
-) -> Vec<&str> {
-    record
-        .edits
-        .iter()
-        .map(|edit| edit.expected_text(direction))
-        .collect()
-}
-
-pub(crate) fn record_current_parts(
-    tree: &PieceTreeLite,
-    record: &TextDocumentOperationRecord,
-    direction: OperationDirection,
-) -> Result<Vec<String>, TextHistoryApplyError> {
-    record
-        .edits
-        .iter()
-        .map(|edit| {
-            let range =
-                edit.start_char..edit.start_char + edit.expected_text(direction).chars().count();
-            if range.end > tree.len_chars() {
-                return Err(TextHistoryApplyError::OutOfBounds);
-            }
-            Ok(tree.extract_range(range))
-        })
-        .collect()
 }
 
 pub(crate) fn deleted_spans_or_payload(
@@ -317,12 +295,8 @@ pub(crate) fn operation_summary(
             |edit| format!("Cut \"{}\"", preview_text(&edit.deleted_text)),
         );
     }
-    if edit_count != 1 {
+    let [edit] = operation.edits.as_slice() else {
         return format!("Edit {edit_count} ranges");
-    }
-
-    let Some(edit) = first_edit else {
-        return "Edit".to_owned();
     };
     match (edit.deleted_text.is_empty(), edit.inserted_text.is_empty()) {
         (true, false) => format!("Insert \"{}\"", preview_text(&edit.inserted_text)),

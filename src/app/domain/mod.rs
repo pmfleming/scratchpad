@@ -1,5 +1,6 @@
 pub mod buffer;
 pub mod panes;
+pub mod selection;
 pub mod tab;
 pub mod tab_manager;
 pub(crate) mod tab_support;
@@ -13,6 +14,7 @@ pub use buffer::{
     display_line_count, platform_default_line_ending, source_label,
 };
 pub use panes::{PaneBranch, PaneNode, SplitAxis, SplitPath, TileDirection};
+pub use selection::{CharCursor, CursorRange};
 pub use tab::{TabAttentionState, WorkspaceTab};
 pub(crate) use tab_manager::DisplayTabSlot;
 pub use tab_manager::{PendingAction, TabManager};

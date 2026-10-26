@@ -6,34 +6,9 @@ use log::{Level, Metadata};
 use std::fs;
 
 #[test]
-fn append_creates_error_log() {
+fn structured_log_creates_parent_and_preserves_ordered_records_when_appending() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("nested").join(ERROR_LOG_NAME);
-    let diagnostic = AppDiagnostic::new(AppDiagnosticKind::Io, "created");
-
-    append_diagnostic_to_path(&path, &diagnostic).unwrap();
-
-    let contents = fs::read_to_string(path).unwrap();
-    assert!(contents.contains("created"));
-}
-
-#[test]
-fn append_does_not_overwrite_existing_log() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join(ERROR_LOG_NAME);
-
-    append_diagnostic_to_path(&path, &AppDiagnostic::new(AppDiagnosticKind::Io, "first")).unwrap();
-    append_diagnostic_to_path(&path, &AppDiagnostic::new(AppDiagnosticKind::Io, "second")).unwrap();
-
-    let contents = fs::read_to_string(path).unwrap();
-    assert!(contents.contains("first"));
-    assert!(contents.contains("second"));
-}
-
-#[test]
-fn structured_io_diagnostic_includes_operation_path_and_details() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join(ERROR_LOG_NAME);
     let target_path = directory.path().join("target.txt");
     let diagnostic = build_io_diagnostic(
         "save_file",
@@ -45,8 +20,16 @@ fn structured_io_diagnostic_includes_operation_path_and_details() {
 
     append_diagnostic_to_path(&path, &diagnostic).unwrap();
 
+    append_diagnostic_to_path(&path, &AppDiagnostic::new(AppDiagnosticKind::Io, "second")).unwrap();
     let contents = fs::read_to_string(path).unwrap();
-    let payload: serde_json::Value = serde_json::from_str(contents.trim()).unwrap();
+    let records: Vec<serde_json::Value> = contents
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0]["message"], "disk full");
+    assert_eq!(records[1]["message"], "second");
+    let payload = &records[0];
     assert_eq!(payload["kind"], "io");
     assert_eq!(payload["operation"], "save_file");
     assert_eq!(payload["source"], "test_source");
@@ -70,41 +53,19 @@ fn duplicate_widget_ids_are_deduplicated() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join(ERROR_LOG_NAME);
     let mut state = DiagnosticsState::new(path.clone());
-    state.begin_frame();
-
-    state.track_widget(
-        "id".to_owned(),
-        "hex".to_owned(),
-        "rect-a".to_owned(),
-        "first",
-        "loc".to_owned(),
-        None,
-    );
-    state.track_widget(
-        "id".to_owned(),
-        "hex".to_owned(),
-        "rect-b".to_owned(),
-        "second",
-        "loc".to_owned(),
-        None,
-    );
-    state.begin_frame();
-    state.track_widget(
-        "id".to_owned(),
-        "hex".to_owned(),
-        "rect-a".to_owned(),
-        "first",
-        "loc".to_owned(),
-        None,
-    );
-    state.track_widget(
-        "id".to_owned(),
-        "hex".to_owned(),
-        "rect-b".to_owned(),
-        "second",
-        "loc".to_owned(),
-        None,
-    );
+    for _ in 0..2 {
+        state.begin_frame();
+        for (rect, kind) in [("rect-a", "first"), ("rect-b", "second")] {
+            state.track_widget(
+                "id".into(),
+                "hex".into(),
+                rect.into(),
+                kind,
+                "loc".into(),
+                None,
+            );
+        }
+    }
 
     let contents = fs::read_to_string(path).unwrap();
     assert_eq!(contents.matches("egui_id_conflict").count(), 1);
@@ -165,57 +126,35 @@ fn changed_id_warning_attributes_all_matching_pass_sites() {
 }
 
 #[test]
-fn logger_filter_captures_egui_id_warnings() {
-    let metadata = Metadata::builder()
-        .level(Level::Warn)
-        .target("egui")
-        .build();
-
-    assert!(should_capture_log_record(&metadata, "id clash detected"));
-}
-
-#[test]
-fn logger_filter_captures_app_warnings() {
-    let metadata = Metadata::builder()
-        .level(Level::Warn)
-        .target("scratchpad")
-        .build();
-
-    assert!(should_capture_log_record(&metadata, "ordinary warning"));
-}
-
-#[test]
-fn logger_filter_ignores_dependency_warnings() {
-    let metadata = Metadata::builder()
-        .level(Level::Warn)
-        .target("some_dependency")
-        .build();
-
-    assert!(!should_capture_log_record(&metadata, "ordinary warning"));
-}
-
-#[test]
-fn logger_filter_ignores_empty_egui_clipboard_paste_error() {
-    let metadata = Metadata::builder()
-        .level(Level::Error)
-        .target("egui_winit::clipboard")
-        .build();
-
-    assert!(!should_capture_log_record(
-        &metadata,
-        "arboard paste error: The clipboard contents were not available in the requested format or the clipboard is empty."
-    ));
-}
-
-#[test]
-fn logger_filter_keeps_other_egui_clipboard_errors() {
-    let metadata = Metadata::builder()
-        .level(Level::Error)
-        .target("egui_winit::clipboard")
-        .build();
-
-    assert!(should_capture_log_record(
-        &metadata,
-        "arboard paste error: clipboard provider is unavailable"
-    ));
+fn logger_filters_by_severity_origin_and_the_exact_benign_clipboard_error() {
+    let empty_clipboard = "arboard paste error: The clipboard contents were not available in the requested format or the clipboard is empty.";
+    for (level, target, message, expected) in [
+        (Level::Warn, "egui", "id clash detected", true),
+        (Level::Warn, "scratchpad", "ordinary warning", true),
+        (Level::Warn, "scratchpad::worker", "ordinary warning", true),
+        (Level::Warn, "some_dependency", "ordinary warning", false),
+        (Level::Warn, "some_dependency", "Widget rect changed", true),
+        (Level::Info, "scratchpad", "ordinary warning", false),
+        (Level::Debug, "egui", "Widget rect changed", false),
+        (
+            Level::Error,
+            "egui_winit::clipboard",
+            empty_clipboard,
+            false,
+        ),
+        (
+            Level::Error,
+            "egui_winit::clipboard",
+            "arboard paste error: clipboard provider is unavailable",
+            true,
+        ),
+        (Level::Error, "egui", empty_clipboard, true),
+    ] {
+        let metadata = Metadata::builder().level(level).target(target).build();
+        assert_eq!(
+            should_capture_log_record(&metadata, message),
+            expected,
+            "{level:?} {target}: {message}"
+        );
+    }
 }

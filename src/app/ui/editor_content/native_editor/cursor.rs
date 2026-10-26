@@ -619,129 +619,56 @@ mod tests {
     }
 
     #[test]
-    fn page_down_uses_document_lines_not_galley_edges() {
-        let tree = tree("one\ntwo\nthree\nfour\nfive\n");
-
-        let target = full_document_movement_target(
-            1,
-            egui::Key::PageDown,
-            &egui::Modifiers::default(),
-            3,
-            tree.len_chars(),
-            &tree,
-        )
-        .unwrap();
-
-        assert_eq!(target.index, 15);
+    fn document_navigation_respects_lines_endings_edges_and_character_indices() {
+        use egui::{Key, Modifiers};
+        let lines = "one\ntwo\nthree\nfour\nfive\n";
+        for (text, current, key, modifiers, page, expected) in [
+            (lines, 1, Key::PageDown, Modifiers::NONE, 3, Some(15)),
+            (lines, 20, Key::PageUp, Modifiers::NONE, 3, Some(5)),
+            ("alpha\r\nbeta\n", 1, Key::End, Modifiers::NONE, 1, Some(5)),
+            ("one\ntwo", 4, Key::Home, Modifiers::COMMAND, 1, Some(0)),
+            ("one\ntwo", 1, Key::End, Modifiers::COMMAND, 1, Some(7)),
+            ("λ\r\n🦀x", 0, Key::End, Modifiers::NONE, 1, Some(1)),
+            ("", 0, Key::End, Modifiers::NONE, 1, Some(0)),
+            (lines, 1, Key::F1, Modifiers::NONE, 1, None),
+        ] {
+            let tree = tree(text);
+            let target = full_document_movement_target(
+                current,
+                key,
+                &modifiers,
+                page,
+                tree.len_chars(),
+                &tree,
+            );
+            assert_eq!(
+                target.map(|target| target.index),
+                expected,
+                "{text:?} {key:?}"
+            );
+        }
     }
 
     #[test]
-    fn end_stops_before_line_ending() {
-        let tree = tree("alpha\r\nbeta\n");
-
-        let target = full_document_movement_target(
-            1,
-            egui::Key::End,
-            &egui::Modifiers::default(),
-            1,
-            tree.len_chars(),
-            &tree,
-        )
-        .unwrap();
-
-        assert_eq!(target.index, 5);
-    }
-
-    #[test]
-    fn left_arrow_collapses_selection_to_start() {
+    fn horizontal_selection_collapse_does_not_override_shift_or_word_navigation() {
+        use egui::{Key, Modifiers};
         let cursor = CursorRange::two(2, 8);
-        let next = finalize_cursor_movement(
-            &cursor,
-            egui::Key::ArrowLeft,
-            &egui::Modifiers::default(),
-            CharCursor::new(7),
-        );
-
-        assert_eq!(next, CursorRange::one(CharCursor::new(2)));
-    }
-
-    #[test]
-    fn right_arrow_collapses_selection_to_end() {
-        let cursor = CursorRange::two(2, 8);
-        let next = finalize_cursor_movement(
-            &cursor,
-            egui::Key::ArrowRight,
-            &egui::Modifiers::default(),
-            CharCursor::new(3),
-        );
-
-        assert_eq!(next, CursorRange::one(CharCursor::new(8)));
-    }
-
-    #[test]
-    fn shift_arrow_extends_from_original_secondary_cursor() {
-        let cursor = CursorRange::two(2, 8);
-        let modifiers = egui::Modifiers {
-            shift: true,
-            ..Default::default()
-        };
-
-        let next = finalize_cursor_movement(
-            &cursor,
-            egui::Key::ArrowRight,
-            &modifiers,
-            CharCursor::new(9),
-        );
-
-        assert_eq!(next.primary.index, 9);
-        assert_eq!(next.secondary.index, 2);
-    }
-
-    #[test]
-    fn ctrl_home_and_ctrl_end_jump_to_document_edges() {
-        let tree = tree("one\ntwo");
-        let modifiers = egui::Modifiers {
-            command: true,
-            ..Default::default()
-        };
-
-        let home = full_document_movement_target(
-            4,
-            egui::Key::Home,
-            &modifiers,
-            1,
-            tree.len_chars(),
-            &tree,
-        )
-        .unwrap();
-        let end = full_document_movement_target(
-            1,
-            egui::Key::End,
-            &modifiers,
-            1,
-            tree.len_chars(),
-            &tree,
-        )
-        .unwrap();
-
-        assert_eq!(home.index, 0);
-        assert_eq!(end.index, tree.len_chars());
-    }
-
-    #[test]
-    fn page_up_uses_document_lines() {
-        let tree = tree("one\ntwo\nthree\nfour\nfive\n");
-
-        let target = full_document_movement_target(
-            20,
-            egui::Key::PageUp,
-            &egui::Modifiers::default(),
-            3,
-            tree.len_chars(),
-            &tree,
-        )
-        .unwrap();
-
-        assert_eq!(target.index, 5);
+        for (key, modifiers, moved, primary, secondary) in [
+            (Key::ArrowLeft, Modifiers::NONE, 7, 2, 2),
+            (Key::ArrowRight, Modifiers::NONE, 3, 8, 8),
+            (Key::ArrowRight, Modifiers::SHIFT, 9, 9, 2),
+            (Key::ArrowLeft, Modifiers::CTRL, 0, 0, 0),
+            (Key::ArrowRight, Modifiers::ALT, 10, 10, 10),
+            (Key::ArrowLeft, Modifiers::COMMAND, 0, 0, 0),
+        ] {
+            let next = finalize_cursor_movement(&cursor, key, &modifiers, CharCursor::new(moved));
+            assert_eq!(
+                next,
+                CursorRange {
+                    primary: CharCursor::new(primary),
+                    secondary: CharCursor::new(secondary)
+                }
+            );
+        }
     }
 }

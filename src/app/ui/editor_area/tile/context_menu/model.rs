@@ -96,61 +96,31 @@ pub(super) fn should_activate_tile_on_secondary_click(
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_SPLIT_RATIO, SPLIT_MENU_ITEMS, SplitDirection, queue_split_action,
-        shortcut_tooltip_for_menu_label, should_activate_tile_on_secondary_click,
-        split_direction_parts,
+        SPLIT_MENU_ITEMS, queue_split_action, shortcut_tooltip_for_menu_label,
+        should_activate_tile_on_secondary_click,
     };
     use crate::app::domain::SplitAxis;
     use crate::app::shortcut_tooltips;
     use crate::app::ui::tile_header::TileAction;
 
     #[test]
-    fn split_direction_parts_match_menu_labels() {
-        assert_eq!(
-            split_direction_parts(SplitDirection::Left),
-            (SplitAxis::Vertical, true)
-        );
-        assert_eq!(
-            split_direction_parts(SplitDirection::Right),
-            (SplitAxis::Vertical, false)
-        );
-        assert_eq!(
-            split_direction_parts(SplitDirection::Up),
-            (SplitAxis::Horizontal, true)
-        );
-        assert_eq!(
-            split_direction_parts(SplitDirection::Down),
-            (SplitAxis::Horizontal, false)
-        );
-    }
-
-    #[test]
-    fn split_menu_exposes_each_direction_once() {
-        let labels: Vec<_> = SPLIT_MENU_ITEMS.iter().map(|item| item.label).collect();
-        assert_eq!(
-            labels,
-            vec!["Split Left", "Split Right", "Split Up", "Split Down"]
-        );
-    }
-
-    #[test]
-    fn queue_split_action_uses_default_split_ratio() {
-        let mut actions = Vec::new();
-        queue_split_action(&mut actions, SplitDirection::Up);
-
-        match actions.as_slice() {
-            [
-                TileAction::Split {
-                    axis,
-                    new_view_first,
-                    ratio,
-                },
-            ] => {
-                assert_eq!(*axis, SplitAxis::Horizontal);
-                assert!(*new_view_first);
-                assert_eq!(*ratio, DEFAULT_SPLIT_RATIO);
-            }
-            _ => panic!("expected one split action"),
+    fn every_split_menu_item_queues_its_named_direction_and_equal_split() {
+        let expected = [
+            ("Split Left", SplitAxis::Vertical, true),
+            ("Split Right", SplitAxis::Vertical, false),
+            ("Split Up", SplitAxis::Horizontal, true),
+            ("Split Down", SplitAxis::Horizontal, false),
+        ];
+        assert_eq!(SPLIT_MENU_ITEMS.len(), expected.len());
+        for (item, (label, expected_axis, first)) in SPLIT_MENU_ITEMS.iter().zip(expected) {
+            assert_eq!(item.label, label);
+            let mut actions = Vec::new();
+            queue_split_action(&mut actions, item.direction);
+            assert!(
+                matches!(actions.as_slice(), [TileAction::Split { axis, new_view_first, ratio }]
+                if (*axis, *new_view_first, *ratio) == (expected_axis, first, 0.5)),
+                "{label}"
+            );
         }
     }
 

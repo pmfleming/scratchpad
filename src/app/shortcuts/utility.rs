@@ -5,58 +5,50 @@ use crate::app::shortcut_keymap::ShortcutAction;
 use eframe::egui;
 use std::path::Path;
 
-pub(super) fn handle_utility_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    if consume_app_shortcut(app, ctx, ShortcutAction::RenameTab) {
-        begin_active_tab_rename(app);
-        return;
-    }
+type UtilityHandler = fn(&mut ScratchpadApp, &egui::Context);
 
-    if consume_app_shortcut(app, ctx, ShortcutAction::OpenTextHistory) {
+// Order is significant: only the first matching utility action consumes a key.
+const UTILITY_HANDLERS: &[(ShortcutAction, UtilityHandler)] = &[
+    (ShortcutAction::RenameTab, |app, _| {
+        begin_active_tab_rename(app);
+    }),
+    (ShortcutAction::OpenTextHistory, |app, _| {
         crate::app::commands::handle_command(
             app,
             AppCommand::Dialog(DialogCommand::OpenTextHistory),
         );
-        return;
-    }
-
-    if consume_app_shortcut(app, ctx, ShortcutAction::OpenEncodingDialog) {
+    }),
+    (ShortcutAction::OpenEncodingDialog, |app, _| {
         crate::app::app_state::frame::open_encoding_dialog(app);
-        return;
-    }
-
-    if consume_app_shortcut(app, ctx, ShortcutAction::OpenStatusHistory) {
+    }),
+    (ShortcutAction::OpenStatusHistory, |app, _| {
         app.state.dialogs.status_history.open();
-        return;
-    }
-
-    if consume_app_shortcut(app, ctx, ShortcutAction::CopyActivePath) {
-        copy_active_path(app, ctx);
-        return;
-    }
-
-    if consume_app_shortcut(app, ctx, ShortcutAction::RevealActivePath) {
+    }),
+    (ShortcutAction::CopyActivePath, copy_active_path),
+    (ShortcutAction::RevealActivePath, |app, _| {
         reveal_active_path_in_explorer(app);
-        return;
-    }
-
-    if consume_app_shortcut(app, ctx, ShortcutAction::ToggleTabList) {
+    }),
+    (ShortcutAction::ToggleTabList, |app, _| {
         crate::app::app_state::settings_controller::toggle_tab_list(app);
-        return;
-    }
-
-    if consume_app_shortcut(app, ctx, ShortcutAction::ToggleTabListAutoHide) {
+    }),
+    (ShortcutAction::ToggleTabListAutoHide, |app, _| {
         let next = !app.state.app_settings.auto_hide_tab_list();
         crate::app::app_state::settings_controller::set_auto_hide_tab_list(app, next);
-        return;
-    }
-
-    if consume_app_shortcut(app, ctx, ShortcutAction::ToggleReadingOrder) {
+    }),
+    (ShortcutAction::ToggleReadingOrder, |app, _| {
         editing::toggle_active_buffer_reading_order(app);
-        return;
-    }
-
-    if consume_app_shortcut(app, ctx, ShortcutAction::ToggleControlChars) {
+    }),
+    (ShortcutAction::ToggleControlChars, |app, _| {
         editing::toggle_active_buffer_control_chars(app);
+    }),
+];
+
+pub(super) fn handle_utility_shortcuts(app: &mut ScratchpadApp, ctx: &egui::Context) {
+    for &(action, handle) in UTILITY_HANDLERS {
+        if consume_app_shortcut(app, ctx, action) {
+            handle(app, ctx);
+            return;
+        }
     }
 }
 
