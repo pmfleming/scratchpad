@@ -5,6 +5,7 @@
 /target-tests/
 /target_test/
 /dist/
+/docs/
 /result
 /check_output.txt
 /clippy_output.txt
