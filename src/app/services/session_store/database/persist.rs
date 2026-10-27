@@ -152,18 +152,26 @@ impl Database {
         let mut profile = prepared.profile();
         profile.manifest_serialize_ns = start.elapsed().as_nanos();
         if self.has_changes(&prepared) {
+            // An attempt owns the inventory until COMMIT. Failure drops it, forcing
+            // a conservative reload; no clone or post-commit invariant unwrap.
+            let inventory = self
+                .inventory
+                .take()
+                .ok_or_else(|| invalid("missing prepared inventory"))?;
             self.conn
                 .execute("BEGIN IMMEDIATE", ())
                 .await
                 .map_err(error)?;
-            let result = self.write_prepared(&mut prepared, &mut profile).await;
+            let result = self
+                .write_prepared(&mut prepared, &inventory, &mut profile)
+                .await;
             let commit_start = Instant::now();
             if let Err(cause) = self.finish_transaction(result).await {
                 return Err(self.protect_failed_write(cause).await);
             }
             profile.manifest_write_ns += commit_start.elapsed().as_nanos();
             let connection_changes = self.integer("SELECT total_changes()").await.ok();
-            self.accept_prepared(prepared, connection_changes);
+            self.accept_prepared(prepared, inventory, connection_changes);
         }
         self.latest_request = generation;
         profile.total_ns = start.elapsed().as_nanos();
@@ -171,6 +179,20 @@ impl Database {
     }
 
     async fn prepare_changes(&mut self, prepared: &mut Prepared) -> io::Result<()> {
+        self.refresh_inventory().await?;
+        prepared.full_cleanup = self
+            .inventory
+            .as_ref()
+            .is_some_and(|inventory| inventory.full_cleanup_pending);
+        self.prepare_history_changes(prepared).await?;
+        self.filter_committed_recovery_points(prepared).await?;
+        prepared.snapshots.retain(|buffer| {
+            self.revisions.get(&buffer.temp_id) != Some(&buffer.snapshot.revision_key())
+        });
+        Ok(())
+    }
+
+    async fn refresh_inventory(&mut self) -> io::Result<()> {
         // The worker owns this connection. Detect writes outside the save path
         // (including fault injection) before trusting its committed-ID inventory.
         let connection_changes = self.integer("SELECT total_changes()").await?;
@@ -190,12 +212,10 @@ impl Database {
                 connection_changes: Some(connection_changes),
             });
         }
-        // One conservative sweep after open, rollback, or observed damage.
-        // Warm saves collect only digests whose references they removed.
-        prepared.full_cleanup = self
-            .inventory
-            .as_ref()
-            .is_some_and(|inventory| inventory.full_cleanup_pending);
+        Ok(())
+    }
+
+    async fn prepare_history_changes(&mut self, prepared: &mut Prepared) -> io::Result<()> {
         for (id, buffer) in &mut prepared.buffers {
             if self.quarantined.contains_key(id) {
                 buffer.history = None;
@@ -209,6 +229,10 @@ impl Database {
                 self.history_cache.insert(id.clone(), entries);
             }
         }
+        Ok(())
+    }
+
+    async fn filter_committed_recovery_points(&self, prepared: &mut Prepared) -> io::Result<()> {
         // Captures can race their UI acknowledgement (or come from synchronous
         // callers). Already committed undo tokens are not a reason to transact.
         let mut new_points = Vec::new();
@@ -225,9 +249,6 @@ impl Database {
             }
         }
         prepared.recovery_points = new_points;
-        prepared.snapshots.retain(|buffer| {
-            self.revisions.get(&buffer.temp_id) != Some(&buffer.snapshot.revision_key())
-        });
         Ok(())
     }
     fn has_changes(&self, prepared: &Prepared) -> bool {
@@ -255,12 +276,13 @@ impl Database {
                     .is_some_and(|entries| self.history_cache.get(id) != Some(entries))
             })
     }
-    fn accept_prepared(&mut self, prepared: Prepared, connection_changes: Option<i64>) {
+    fn accept_prepared(
+        &mut self,
+        prepared: Prepared,
+        mut inventory: ContentInventory,
+        connection_changes: Option<i64>,
+    ) {
         // Only after COMMIT. A failed attempt must be fully retryable.
-        let inventory = self
-            .inventory
-            .as_mut()
-            .expect("inventory loaded before saving");
         inventory
             .snapshots
             .retain(|id| prepared.retains(id) || self.quarantined.contains_key(id));
@@ -280,6 +302,7 @@ impl Database {
         }
         inventory.full_cleanup_pending = false;
         inventory.connection_changes = connection_changes;
+        self.inventory = Some(inventory);
         self.chunk_cache.retain(|id, _| prepared.retains(id));
         self.chunk_cache.extend(prepared.chunk_checkpoints);
         self.revisions
@@ -305,14 +328,32 @@ impl Database {
     async fn write_prepared(
         &self,
         prepared: &mut Prepared,
+        inventory: &ContentInventory,
         profile: &mut SessionPersistProfile,
     ) -> io::Result<()> {
-        let start = Instant::now();
-        let inventory = self
-            .inventory
-            .as_ref()
-            .expect("inventory loaded before saving");
         let mut removed_digests = HashSet::new();
+        let start = Instant::now();
+        self.write_buffer_history(prepared, inventory).await?;
+        self.write_prepared_snapshots(prepared, &mut removed_digests, profile)
+            .await?;
+        profile.snapshot_write_ns = start.elapsed().as_nanos();
+        let start = Instant::now();
+        self.write_prepared_metadata(prepared).await?;
+        profile.manifest_write_ns = start.elapsed().as_nanos();
+        let start = Instant::now();
+        self.expire_prepared_versions(prepared, &mut removed_digests)
+            .await?;
+        self.delete_stale_content(prepared, inventory, removed_digests)
+            .await?;
+        profile.stale_cleanup_ns = start.elapsed().as_nanos();
+        Ok(())
+    }
+
+    async fn write_buffer_history(
+        &self,
+        prepared: &Prepared,
+        inventory: &ContentInventory,
+    ) -> io::Result<()> {
         for (id, buffer) in &prepared.buffers {
             if !inventory.buffers.contains(id) {
                 self.execute_cached(
@@ -327,6 +368,15 @@ impl Database {
                 self.write_history(id, entries, fingerprints).await?;
             }
         }
+        Ok(())
+    }
+
+    async fn write_prepared_snapshots(
+        &self,
+        prepared: &mut Prepared,
+        removed_digests: &mut HashSet<Vec<u8>>,
+        profile: &mut SessionPersistProfile,
+    ) -> io::Result<()> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -337,23 +387,20 @@ impl Database {
         }
         for buffer in &prepared.snapshots {
             let checkpoint = self
-                .write_content(
-                    &buffer.temp_id,
-                    &buffer.snapshot,
-                    &mut removed_digests,
-                    profile,
-                )
+                .write_content(&buffer.temp_id, &buffer.snapshot, removed_digests, profile)
                 .await?;
             prepared
                 .chunk_checkpoints
                 .insert(buffer.temp_id.clone(), checkpoint);
             if prepared.version_history {
-                self.checkpoint_version(&buffer.temp_id, now, &mut removed_digests)
+                self.checkpoint_version(&buffer.temp_id, now, removed_digests)
                     .await?;
             }
         }
-        profile.snapshot_write_ns = start.elapsed().as_nanos();
-        let start = Instant::now();
+        Ok(())
+    }
+
+    async fn write_prepared_metadata(&self, prepared: &Prepared) -> io::Result<()> {
         let mut upsert = self.conn.prepare_cached("INSERT INTO tabs VALUES(?, ?) ON CONFLICT(position) DO UPDATE SET payload=excluded.payload").await.map_err(error)?;
         for (position, bytes) in prepared.tabs.iter().enumerate() {
             if self.tab_cache.get(position) != Some(bytes) {
@@ -372,38 +419,34 @@ impl Database {
         if prepared.closed_changed {
             self.write_closed(&prepared.closed).await?;
         }
-        profile.manifest_write_ns = start.elapsed().as_nanos();
-        let start = Instant::now();
+        Ok(())
+    }
+
+    async fn expire_prepared_versions(
+        &self,
+        prepared: &Prepared,
+        removed_digests: &mut HashSet<Vec<u8>>,
+    ) -> io::Result<()> {
         for &id in &prepared.expired_versions {
             self.collect_digests(
                 "SELECT digest FROM version_parts WHERE version_id=?",
                 [id],
-                &mut removed_digests,
+                removed_digests,
             )
             .await?;
             self.execute_cached("DELETE FROM buffer_versions WHERE id=?", [id])
                 .await?;
         }
-        self.prune_recovery_points(
-            &prepared.recovery_policy,
-            &prepared.closed,
-            &mut removed_digests,
-        )
-        .await?;
-        self.delete_stale_content(prepared, removed_digests).await?;
-        profile.stale_cleanup_ns = start.elapsed().as_nanos();
-        Ok(())
+        self.prune_recovery_points(&prepared.recovery_policy, &prepared.closed, removed_digests)
+            .await
     }
 
     async fn delete_stale_content(
         &self,
         prepared: &Prepared,
+        inventory: &ContentInventory,
         mut removed_digests: HashSet<Vec<u8>>,
     ) -> io::Result<()> {
-        let inventory = self
-            .inventory
-            .as_ref()
-            .expect("inventory loaded before saving");
         let written: HashSet<_> = prepared
             .snapshots
             .iter()

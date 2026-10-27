@@ -108,7 +108,12 @@ fn write_failures_roll_back_history_content_metadata_and_cleanup_before_retry() 
             ("parts", "INSERT"),
             ("tabs", "INSERT"),
             ("session_state", "INSERT"),
+            ("buffer_versions", "INSERT"),
+            ("version_parts", "INSERT"),
+            ("closed_tabs", "INSERT"),
             ("snapshots", "DELETE"),
+            ("buffer_ids", "DELETE"),
+            ("blobs", "DELETE"),
         ] {
             let (_root, mut db) = database().await;
             let mut tabs = vec![tab("original"), tab("obsolete")];
@@ -121,10 +126,39 @@ fn write_failures_roll_back_history_content_metadata_and_cleanup_before_retry() 
             tabs.pop();
             insert(&mut tabs[0], 0, "b");
             tabs[0].buffers.buffer.name = "edited".into();
+            let archived = (table == "closed_tabs").then(|| {
+                crate::app::services::session_store::CapturedClosedTab::capture(
+                    &tab("archived"),
+                    None,
+                )
+            });
             let mut changed = request(&tabs);
             changed.font_size = 24.0;
+            changed.version_history = true;
+            changed.closed_tabs.extend(archived.clone());
             assert!(db.persist(changed, 2).await.is_err(), "{table}");
             assert!(db.conn.is_autocommit().unwrap());
+            assert_eq!(
+                db.latest_request, 1,
+                "failed attempt must not advance generation"
+            );
+            assert!(db.inventory.is_none());
+            assert!(db.revisions.is_empty());
+            assert!(db.chunk_cache.is_empty());
+            assert!(db.history_cache.is_empty());
+            assert!(db.state_cache.is_empty() && db.tab_cache.is_empty());
+            assert_eq!(
+                db.integer("SELECT count(*) FROM buffer_versions")
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                db.integer("SELECT count(*) FROM closed_tabs")
+                    .await
+                    .unwrap(),
+                0
+            );
             let stored = db.load(ReadScope::All).await.unwrap().unwrap();
             assert_eq!(stored.contents, contents, "{table}");
             assert_eq!(stored.manifest.tabs[0].buffers[0].name, "note");
@@ -139,10 +173,17 @@ fn write_failures_roll_back_history_content_metadata_and_cleanup_before_retry() 
                 .unwrap();
             let mut retry = request(&tabs);
             retry.font_size = 24.0;
-            db.persist(retry, 3).await.unwrap();
+            retry.version_history = true;
+            retry.closed_tabs.extend(archived.clone());
+            db.persist(retry, 2).await.unwrap();
+            assert_eq!(db.latest_request, 2);
+            assert!(db.inventory.as_ref().unwrap().snapshots.contains(&id));
+            assert!(db.revisions.contains_key(&id));
+            assert!(db.chunk_cache.contains_key(&id));
+            assert_eq!(db.history_cache[&id].len(), 2);
             assert_eq!(db.read_history(&id).await.unwrap().len(), 2);
             let stored = db.load(ReadScope::All).await.unwrap().unwrap();
-            assert_eq!(stored.contents.len(), 1);
+            assert_eq!(stored.contents.len(), 1 + usize::from(archived.is_some()));
             assert_eq!(stored.contents[&id], "baoriginal");
             assert_eq!(stored.manifest.tabs[0].buffers[0].name, "edited");
             assert_eq!(

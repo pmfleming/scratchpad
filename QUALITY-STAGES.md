@@ -34,3 +34,19 @@ separately. No sibling repository changes are included.
   closed sources, both focus policies, full-length recovery and disk preservation.
 - Passed: focused history tests, full locked all-feature tests, formatting and
   strict all-target/all-feature Clippy. Log: `target/quality-stage2-tests.log`.
+
+## 3. Persistence phases and commit-only inventory
+
+- Preparation now names inventory refresh, history preparation and recovery-token
+  filtering. Transaction orchestration names history, snapshot, metadata, version
+  expiry and content cleanup phases, preserving their original order and timers.
+- Each save attempt owns its inventory until commit; failure discards it and
+  success explicitly returns it to the committed cache. Removed three inventory
+  `expect` calls without cloning inventory sets. No schema/transaction change.
+- Extended the existing rollback matrix from six to eleven write boundaries,
+  including recovery versions, closed archives and final blob collection. Tests
+  assert cache invalidation before any reload can mask it, unchanged committed
+  data, same-generation retry and successful cache acceptance.
+- Passed: 61 database tests (2 existing ignored probes), full locked all-feature
+  tests, formatting and strict all-target/all-feature Clippy.
+  Log: `target/quality-stage3-tests.log`.
