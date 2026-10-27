@@ -27,10 +27,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - run: python3 scripts/check-turso-locks.py
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - run: cargo xtask check-turso-locks
 
   linux:
     needs: session-engine
@@ -92,7 +90,7 @@ jobs:
       - name: Check Cargo and Nix package versions
         shell: bash
         run: |
-          cargo_version="$(cargo metadata --locked --no-deps --format-version 1 | python3 -c 'import json, sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          cargo_version="$(cargo metadata --locked --no-deps --format-version 1 | jq -er '.packages[] | select(.name == "scratchpad") | .version')"
           nix_version="$(nix eval --raw .#packages.x86_64-linux.scratchpad.version)"
           release_version="${{ steps.version.outputs.version }}"
           if [[ "$cargo_version" != "$release_version" ]]; then

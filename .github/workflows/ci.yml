@@ -18,12 +18,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - name: Check application and contract engine identities
-        run: python3 scripts/check-turso-locks.py
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Check xtask formatting
+        run: cargo fmt --manifest-path xtask/Cargo.toml --check
+      - name: Lint xtask
+        run: cargo clippy --locked --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
+      - name: Test xtask
+        run: cargo test --locked --manifest-path xtask/Cargo.toml
+      - name: Check application and contract engine identities
+        run: cargo xtask check-turso-locks
       - name: Run isolated engine contract
         run: cargo run --locked --manifest-path tools/turso-contract/Cargo.toml
 

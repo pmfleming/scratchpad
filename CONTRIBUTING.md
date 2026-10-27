@@ -17,6 +17,24 @@ cargo test --all-features
 cargo audit
 ```
 
+Check the pinned Turso versions and matching application/contract-probe registry
+identities with:
+
+```bash
+cargo xtask check-turso-locks
+```
+
+The standalone `xtask/` crate avoids building the GUI or engine for maintenance
+checks. Its Cargo alias uses `--locked`; intentional engine upgrades require
+updating `xtask/src/main.rs`, both engine lockfiles, and reviewing the contract.
+When changing the task, also run:
+
+```bash
+cargo fmt --manifest-path xtask/Cargo.toml --check
+cargo clippy --locked --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
+cargo test --locked --manifest-path xtask/Cargo.toml
+```
+
 On Linux, also run the configured cross-target checks when the required toolchains are installed:
 
 ```bash
