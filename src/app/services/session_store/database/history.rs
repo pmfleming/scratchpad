@@ -1,11 +1,34 @@
 //! `seq` is the stable per-document entry ID, NOT global_seq (which changes
 //! when typing coalesces). Undo flags and payload-budget stripping also mutate
-//! existing entries. Compare the complete value, serialize only changed rows.
+//! existing entries. Fingerprint the complete serialized row; retain no undo
+//! payload copies in the worker's comparison cache.
 use super::{Database, decode, error, invalid, quarantine::damaged};
 use crate::app::domain::PersistedHistoryEntry;
 use crate::app::services::session_store::model::SessionTab;
 use std::io;
 use turso::params;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct HistoryFingerprint {
+    pub id: u64,
+    digest: blake3::Hash,
+}
+
+fn fingerprint(entry: &PersistedHistoryEntry) -> io::Result<HistoryFingerprint> {
+    let mut hasher = blake3::Hasher::new();
+    // Stream into the hash rather than allocate a second serialized payload.
+    serde_json::to_writer(&mut hasher, entry).map_err(invalid)?;
+    Ok(HistoryFingerprint {
+        id: entry.id,
+        digest: hasher.finalize(),
+    })
+}
+
+pub(super) fn fingerprints(
+    entries: &[PersistedHistoryEntry],
+) -> io::Result<Vec<HistoryFingerprint>> {
+    entries.iter().map(fingerprint).collect()
+}
 
 pub(super) fn validate(entries: &[PersistedHistoryEntry]) -> io::Result<()> {
     let mut previous = 0;
@@ -47,6 +70,37 @@ impl Database {
         Ok(entries)
     }
 
+    pub(super) async fn read_history_fingerprints(
+        &self,
+        id: &str,
+    ) -> io::Result<Vec<HistoryFingerprint>> {
+        let mut rows = self
+            .conn
+            .query(
+                "SELECT seq, entry, global_seq FROM history WHERE temp_id=? ORDER BY seq",
+                [id],
+            )
+            .await
+            .map_err(error)?;
+        let mut result = Vec::new();
+        let mut previous = 0;
+        while let Some(row) = rows.next().await.map_err(error)? {
+            // Validate one row at a time, then release its payload immediately.
+            let entry: PersistedHistoryEntry = decode(&row.get::<Vec<u8>>(1).map_err(error)?)
+                .map_err(|cause| damaged(id, cause))?;
+            if entry.id <= previous
+                || i64::try_from(entry.id).ok() != Some(row.get(0).map_err(error)?)
+                || i64::try_from(entry.global_seq).ok() != Some(row.get(2).map_err(error)?)
+                || entry.global_seq == 0
+            {
+                return Err(damaged(id, "invalid history row identity"));
+            }
+            previous = entry.id;
+            result.push(fingerprint(&entry).map_err(|cause| damaged(id, cause))?);
+        }
+        Ok(result)
+    }
+
     pub(super) async fn read_histories(&self, tabs: &mut [SessionTab]) -> io::Result<()> {
         for buffer in tabs.iter_mut().flat_map(|tab| &mut tab.buffers) {
             if !self.quarantined.contains_key(&buffer.temp_id) {
@@ -60,12 +114,13 @@ impl Database {
         &self,
         id: &str,
         entries: &[PersistedHistoryEntry],
+        fingerprints: &[HistoryFingerprint],
     ) -> io::Result<()> {
         let old = self
             .history_cache
             .get(id)
             .ok_or_else(|| invalid("history cache not primed"))?;
-        if old == entries {
+        if old == fingerprints {
             return Ok(());
         }
         let Some((first, last)) = entries.first().zip(entries.last()) else {
@@ -96,11 +151,11 @@ impl Database {
                 .await?;
             }
         }
-        for entry in entries {
+        for (entry, fingerprint) in entries.iter().zip(fingerprints) {
             if old
                 .binary_search_by_key(&entry.id, |entry| entry.id)
                 .ok()
-                .is_some_and(|index| old[index] == *entry)
+                .is_some_and(|index| old[index] == *fingerprint)
             {
                 continue;
             }

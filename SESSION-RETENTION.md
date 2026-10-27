@@ -53,3 +53,21 @@ The public store API also lists and reads points with integrity validation.
 
 Tests cover interval throttling, restart, bounded pruning, shared chunks, rollback
 during point creation, corruption detection, and final-buffer garbage collection.
+
+## Worker history memory (item 3)
+
+The worker now retains only `(entry ID, BLAKE3 digest)` per undo row: 40 bytes per
+entry, excluding vector/map allocation overhead. Hashing covers the complete JSON
+representation, including payloads, flags, selections and changing global sequence
+IDs. Serialization streams into the hasher without allocating another JSON blob.
+Cache priming decodes and validates one stored history row at a time, discarding
+its payload before moving to the next row. Cache changes are still accepted only
+after commit and invalidated on transaction failure.
+
+This removes the worker's persistent duplicate of every undo payload. It does not
+remove the live editor history, the capture's transient exported history, or the
+largest individual row during hydration. No claim is made that the historical
+223 MiB whole-process peak is now a specific lower number; that workload needs a
+fresh RSS measurement. A deterministic regression retains over 1 MiB of undo text
+with only a 40-byte comparison entry and verifies matching hashes after reopen.
+Existing coalescing, undo/redo, pruning, rollback and quarantine tests still pass.

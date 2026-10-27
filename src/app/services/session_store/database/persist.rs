@@ -17,6 +17,7 @@ struct RecoveryBuffer {
     retain: bool,
     // None means cold or quarantined: preserve the committed history.
     history: Option<Vec<PersistedHistoryEntry>>,
+    history_fingerprints: Option<Vec<super::history::HistoryFingerprint>>,
 }
 
 #[derive(Default)]
@@ -77,6 +78,10 @@ impl Prepared {
             let policy = RecoveryBuffer {
                 required,
                 retain: tab.preserve_existing || required || buffer.disk_len.is_none(),
+                history_fingerprints: history
+                    .as_deref()
+                    .map(super::history::fingerprints)
+                    .transpose()?,
                 history,
             };
             if self
@@ -179,9 +184,10 @@ impl Database {
         for (id, buffer) in &mut prepared.buffers {
             if self.quarantined.contains_key(id) {
                 buffer.history = None;
+                buffer.history_fingerprints = None;
             }
             if buffer.history.is_some() && !self.history_cache.contains_key(id) {
-                let entries = match self.read_history(id).await {
+                let entries = match self.read_history_fingerprints(id).await {
                     Ok(entries) => entries,
                     Err(cause) => return Err(self.protect_failed_write(cause).await),
                 };
@@ -210,7 +216,7 @@ impl Database {
             })
             || prepared.buffers.iter().any(|(id, buffer)| {
                 buffer
-                    .history
+                    .history_fingerprints
                     .as_ref()
                     .is_some_and(|entries| self.history_cache.get(id) != Some(entries))
             })
@@ -250,10 +256,9 @@ impl Database {
         self.history_cache
             .retain(|id, _| prepared.buffers.contains_key(id));
         self.history_cache.extend(
-            prepared
-                .buffers
-                .into_iter()
-                .filter_map(|(id, buffer)| buffer.history.map(|entries| (id, entries))),
+            prepared.buffers.into_iter().filter_map(|(id, buffer)| {
+                buffer.history_fingerprints.map(|entries| (id, entries))
+            }),
         );
         self.state_cache = prepared.state;
         self.tab_cache = prepared.tabs;
@@ -278,8 +283,10 @@ impl Database {
                 )
                 .await?;
             }
-            if let Some(entries) = &buffer.history {
-                self.write_history(id, entries).await?;
+            if let (Some(entries), Some(fingerprints)) =
+                (&buffer.history, &buffer.history_fingerprints)
+            {
+                self.write_history(id, entries, fingerprints).await?;
             }
         }
         let now = std::time::SystemTime::now()

@@ -8,6 +8,8 @@ mod content;
 mod fault_tests;
 mod history;
 #[cfg(test)]
+mod history_fingerprint_tests;
+#[cfg(test)]
 mod incremental_tests;
 #[cfg(test)]
 mod inventory_tests;
@@ -72,7 +74,7 @@ pub(super) struct Database {
     tab_cache: Vec<Vec<u8>>,
     state_cache: Vec<u8>,
     revisions: HashMap<String, crate::app::domain::buffer::SnapshotRevision>,
-    history_cache: HashMap<String, Vec<crate::app::domain::PersistedHistoryEntry>>,
+    history_cache: HashMap<String, Vec<history::HistoryFingerprint>>,
     // Complete committed IDs, including cold/quarantined content; revisions alone
     // only describe snapshots written by this process. None requires a fresh scan.
     inventory: Option<ContentInventory>,
