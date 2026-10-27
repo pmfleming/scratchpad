@@ -7,7 +7,10 @@ use std::collections::{HashMap, HashSet};
 use std::io;
 use turso::params;
 
-use super::chunking::{MAX_BYTES as CHUNK_BYTES, chunks};
+use super::chunking::{
+    ChunkCheckpoint, ChunkMeta, IncrementalChunks, MAX_BYTES as CHUNK_BYTES, hash_part,
+    manifest_hasher,
+};
 
 pub(super) struct Content {
     parts: Vec<(i64, Vec<u8>)>,
@@ -46,17 +49,25 @@ impl Content {
         // Sort only each buffer's small chunk list, not the entire SQL result.
         self.parts.sort_unstable_by_key(|(part, _)| *part);
         let mut bytes = Vec::new();
+        let mut digest = manifest_hasher();
         for (index, (part, body)) in self.parts.into_iter().enumerate() {
             if part != index as i64 {
                 return Err(invalid("missing or duplicate recovery chunk"));
             }
+            hash_part(
+                &mut digest,
+                ChunkMeta {
+                    len: body.len(),
+                    digest: blake3::hash(&body),
+                },
+            );
             if index == 0 {
                 bytes = body;
             } else {
                 bytes.extend(body);
             }
         }
-        if bytes.len() != self.length || blake3::hash(&bytes).as_bytes() != self.digest.as_slice() {
+        if bytes.len() != self.length || digest.finalize().as_bytes() != self.digest.as_slice() {
             return Err(invalid("recovery content checksum or length mismatch"));
         }
         String::from_utf8(bytes).map_err(invalid)
@@ -116,20 +127,23 @@ impl Database {
         id: &str,
         snapshot: &DocumentSnapshot,
         removed_digests: &mut HashSet<Vec<u8>>,
-    ) -> io::Result<()> {
+        profile: &mut super::SessionPersistProfile,
+    ) -> io::Result<ChunkCheckpoint> {
         // Establish the FK parent before inserting parts. Placeholder metadata is
         // never visible outside this transaction, including on a failed save.
         self.execute_cached(
             "INSERT INTO snapshots VALUES(?, 0, ?) ON CONFLICT(id) DO NOTHING",
-            params![id, blake3::hash(b"").as_bytes().as_slice()],
+            params![id, manifest_hasher().finalize().as_bytes().as_slice()],
         )
         .await?;
-        let (bytes, digest) = self.write_chunks(id, snapshot, removed_digests).await?;
+        let (bytes, digest, checkpoint) = self
+            .write_chunks(id, snapshot, removed_digests, profile)
+            .await?;
         self.execute_cached(
             "INSERT INTO snapshots VALUES(?, ?, ?) ON CONFLICT(id) DO UPDATE SET bytes=excluded.bytes, digest=excluded.digest",
             params![id, bytes, digest.as_bytes().as_slice()],
         ).await?;
-        Ok(())
+        Ok(checkpoint)
     }
 
     async fn write_chunks(
@@ -137,7 +151,8 @@ impl Database {
         id: &str,
         snapshot: &DocumentSnapshot,
         removed_digests: &mut HashSet<Vec<u8>>,
-    ) -> io::Result<(i64, blake3::Hash)> {
+        profile: &mut super::SessionPersistProfile,
+    ) -> io::Result<(i64, blake3::Hash, ChunkCheckpoint)> {
         let mut rows = self
             .conn
             .query("SELECT part, digest FROM parts WHERE temp_id=?", [id])
@@ -149,20 +164,29 @@ impl Database {
         }
         drop(rows);
         let known: std::collections::HashSet<_> = old.values().map(Vec::as_slice).collect();
-        let mut digest = blake3::Hasher::new();
+        let mut digest = manifest_hasher();
         let mut bytes = 0i64;
         let mut count = 0i64;
-        for chunk in chunks(snapshot) {
-            let chunk = chunk.map_err(error)?;
+        let mut checkpoint = ChunkCheckpoint {
+            token: snapshot.piece_tree().save_change_token(),
+            parts: Vec::new(),
+        };
+        let mut chunks = IncrementalChunks::new(snapshot, self.chunk_cache.get(id));
+        for chunk in chunks.by_ref() {
+            let chunk = chunk?;
             bytes = bytes
-                .checked_add(chunk.data.len() as i64)
+                .checked_add(chunk.meta.len as i64)
                 .ok_or_else(|| invalid("recovery text exceeds database length range"))?;
-            digest.update(&chunk.data);
-            let hash = blake3::hash(&chunk.data);
-            // The SELECT prevents inserts (and trigger work) for shared bodies.
-            if !known.contains(hash.as_bytes().as_slice()) {
-                self.execute_cached("INSERT INTO blobs(digest, body) SELECT ?, ? WHERE NOT EXISTS(SELECT 1 FROM blobs WHERE digest=?)",
-                    params![hash.as_bytes().as_slice(), chunk.data, hash.as_bytes().as_slice()]).await?;
+            hash_part(&mut digest, chunk.meta);
+            let hash = chunk.meta.digest;
+            checkpoint.parts.push(chunk.meta);
+            if let Some(data) = chunk.data {
+                profile.snapshot_bytes_hashed += data.len() as u64;
+                // The SELECT prevents inserts (and trigger work) for shared bodies.
+                if !known.contains(hash.as_bytes().as_slice()) {
+                    self.execute_cached("INSERT INTO blobs(digest, body) SELECT ?, ? WHERE NOT EXISTS(SELECT 1 FROM blobs WHERE digest=?)",
+                        params![hash.as_bytes().as_slice(), data, hash.as_bytes().as_slice()]).await?;
+                }
             }
             if old.get(&count).map(Vec::as_slice) != Some(hash.as_bytes().as_slice()) {
                 if let Some(digest) = old.get(&count) {
@@ -183,7 +207,11 @@ impl Database {
             params![id, count],
         )
         .await?;
-        Ok((bytes, digest.finalize()))
+        profile.snapshot_bytes_read += chunks.bytes_read();
+        if bytes as usize != snapshot.len_bytes() {
+            return Err(invalid("incremental chunk length mismatch"));
+        }
+        Ok((bytes, digest.finalize(), checkpoint))
     }
 
     pub(super) async fn read_all_contents(&self) -> io::Result<HashMap<String, String>> {

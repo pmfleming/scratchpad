@@ -73,6 +73,56 @@ fn closed_retention_is_bounded_retry_safe_and_shares_blob_bodies() {
 }
 
 #[test]
+fn damaged_closed_history_is_quarantined_before_retention_expiry() {
+    block_on(async {
+        let (_root, mut db) = database().await;
+        let mut precious = tab("precious");
+        insert(&mut precious, 0, "undoable ");
+        let closed = CapturedClosedTab::capture(&precious, None);
+        let token = closed.token.clone();
+        let mut capture = request(&[]);
+        capture.closed_tabs.push(closed);
+        db.persist(capture, 1).await.unwrap();
+        db.conn
+            .execute("UPDATE history SET entry=x'00'", ())
+            .await
+            .unwrap();
+        assert!(db.read_closed_tab(&token).await.is_err());
+        assert_eq!(db.quarantined.len(), 1);
+        for generation in 2..CLOSED_TAB_LIMIT as u64 + 3 {
+            let mut capture = request(&[]);
+            capture
+                .closed_tabs
+                .push(CapturedClosedTab::capture(&tab("healthy"), None));
+            db.persist(capture, generation).await.unwrap();
+        }
+        assert!(
+            !db.closed_rows()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.token == token)
+        );
+        assert_eq!(
+            db.integer("SELECT count(*) FROM snapshots").await.unwrap(),
+            CLOSED_TAB_LIMIT as i64 + 1
+        );
+        assert_eq!(
+            db.integer("SELECT count(*) FROM history WHERE entry=x'00'")
+                .await
+                .unwrap(),
+            1
+        );
+        db.conn
+            .execute("UPDATE closed_tabs SET payload=x'00'", ())
+            .await
+            .unwrap();
+        assert!(db.persist(request(&[]), 100).await.is_err());
+        assert!(db.blocked.is_some());
+    });
+}
+
+#[test]
 fn failed_archive_transaction_leaves_live_session_and_retries_without_duplicate_archive() {
     block_on(async {
         let (_root, mut db) = database().await;

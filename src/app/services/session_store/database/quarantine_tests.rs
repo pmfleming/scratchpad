@@ -408,9 +408,16 @@ fn lengths_and_hashes_describe_the_bytes_emitted_including_empty_and_unicode() {
             let row = db.conn.query("SELECT bytes, digest, (SELECT coalesce(sum(length(b.body)),0) FROM parts p JOIN blobs b ON p.digest=b.digest WHERE p.temp_id=?) FROM snapshots WHERE id=?", params![id.as_str(), id.as_str()]).await.unwrap().next().await.unwrap().unwrap();
             assert_eq!(row.get::<i64>(0).unwrap(), row.get::<i64>(2).unwrap());
             assert_eq!(row.get::<i64>(0).unwrap() as usize, text.len());
+            let mut expected = super::chunking::manifest_hasher();
+            for chunk in super::chunking::IncrementalChunks::new(
+                &tab.active_buffer().document_snapshot(),
+                None,
+            ) {
+                super::chunking::hash_part(&mut expected, chunk.unwrap().meta);
+            }
             assert_eq!(
                 row.get::<Vec<u8>>(1).unwrap(),
-                blake3::hash(text.as_bytes()).as_bytes()
+                expected.finalize().as_bytes()
             );
         }
     });

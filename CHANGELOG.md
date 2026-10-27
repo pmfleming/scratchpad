@@ -4,8 +4,15 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ## Unreleased
 
+### Added
+
+- Retained the latest 32 closed workspace tabs, including unsaved text and undo/redo history, with reopening after restart.
+- Added bounded per-buffer save points sharing stored text chunks; recover them into new tabs from the Saved Versions menu.
+
 ### Changed
 
+- Reduced session-worker history caches to per-row fingerprints and reused unchanged chunk hashes through bounded byte-range edit tracking.
+- Advanced session storage to schema 6. Older schemas are preserved but not migrated; a fresh state directory is required to use the new storage format.
 - Made warm session saves insert only new buffer IDs and collect only affected recovery blobs, with conservative rescans after restart, rollback, or detected damage. Positional tab-row rewrites and full capture/preparation costs remain.
 - Added Linux lint and runtime-test coverage, including the native file watcher.
 - Updated to upstream `eframe`/`egui` 0.37.0 and removed the local Wayland presentation fork, retaining WGPU by default and the Linux Glow fallback.

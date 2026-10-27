@@ -14,6 +14,8 @@ pub struct SessionPersistProfile {
     pub total_ns: u128,
     pub snapshot_capture_ns: u128,
     pub snapshot_write_ns: u128,
+    pub snapshot_bytes_read: u64,
+    pub snapshot_bytes_hashed: u64,
     pub stale_cleanup_ns: u128,
     pub manifest_serialize_ns: u128,
     pub manifest_write_ns: u128,

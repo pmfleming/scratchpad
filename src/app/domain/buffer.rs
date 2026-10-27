@@ -27,6 +27,7 @@ pub use history::{
     OperationRecord, PersistedCursorRange, PersistedHistoryEdit, PersistedHistoryEntry,
     PieceSource, TextDocumentEditOperation, TextHistoryBudget, source_label,
 };
+pub(crate) use piece_tree::ByteSlice;
 pub use piece_tree::{
     AnchorBias, AnchorId, AnchorOwner, AnchorOwnerKind, PieceTreeCharCursor, PieceTreeCharPosition,
     PieceTreeInternalNode, PieceTreeLeaf, PieceTreeLineInfo, PieceTreeLite, PieceTreeMetrics,

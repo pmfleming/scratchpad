@@ -22,8 +22,8 @@ reopen operation writes original files. Cold file shells with no stored snapshot
 still depend on their source file; loading previews cannot archive unavailable
 bytes. Closing individual split views is not workspace-tab retention.
 
-The current database schema is **5** (closed tabs introduced schema 4; save
-points introduced schema 5). Older schemas are rejected intact, with no
+The current database schema is **6** (closed tabs introduced schema 4; save
+points introduced schema 5; incremental chunk checksums introduced schema 6). Older schemas are rejected intact, with no
 migration or automatic reset. To opt into a fresh schema, stop Scratchpad and
 move the old state directory aside yourself. Original text files are unrelated.
 The logical open-session export does not include closed archives; retain the
@@ -71,3 +71,47 @@ largest individual row during hydration. No claim is made that the historical
 fresh RSS measurement. A deterministic regression retains over 1 MiB of undo text
 with only a 40-byte comparison entry and verifies matching hashes after reopen.
 Existing coalescing, undo/redo, pruning, rollback and quarantine tests still pass.
+
+## Incremental snapshot work (item 4)
+
+Piece trees retain a bounded journal of the latest **128 byte-range edits**, with
+unique process-local tokens that distinguish copies, replacements and undo
+branches. Captured snapshots carry their own immutable journal. The worker keeps
+only the last committed chunk lengths/hashes/token, not an old document copy.
+
+For a changed snapshot, the writer maps unchanged chunk ranges through the edits,
+reuses their hashes, and reads/rechunks modified ranges until FastCDC boundaries
+resynchronize. An old EOF chunk cannot become an interior chunk without rescanning.
+The byte reader skips unchanged tree metadata without materializing text and can
+read chunk boundaries inside UTF-8 sequences safely.
+
+Schema 6 uses a domain-separated ordered chunk-manifest checksum (chunk byte
+length plus BLAKE3 body hash), rather than a flat whole-text hash that would force
+another complete pass. Restore validates every emitted body, order and total
+length against that checksum, including save points. New cache state is accepted
+only after commit; failures discard it.
+
+Full scanning remains the safe fallback after restart, replacement, a missing or
+branched edit journal, observed damage, rollback, or for file-backed trees whose
+underlying file might change outside the edit journal. Large/dispersed edits can
+also require substantial rescanning. Layout/metadata capture and undo-row
+fingerprinting remain separate costs; this does not make every save constant-time.
+
+Regression tests compare incremental output against fresh full FastCDC after
+mixed Unicode/front/middle/end edits, deletions, appends, undo, branching, journal
+overflow, replacement and failed saves. Byte-work counters are exposed in
+`SessionPersistProfile`.
+
+Reproduce the opt-in 16 MiB local-edit probe:
+
+```sh
+cargo test --release --all-features --lib profile_local_edit_saves_against_forced_full_scan -- --ignored --nocapture
+```
+
+Nine alternating paired saves on this host compared the same schema-6 writer
+with reuse enabled versus its chunk cache deliberately cleared each time. Median
+worker save time was **12.457 ms full-scan → 2.039 ms incremental**. Incremental
+saves examined 67–262 KiB and hashed 53–102 KiB, versus approximately 16 MiB in
+both categories for each full scan. This isolates reuse, not a historical binary
+comparison or a cross-platform performance guarantee. One first incremental
+save was 9.946 ms. The local raw log is `/tmp/retention-stage4-profile.log`.

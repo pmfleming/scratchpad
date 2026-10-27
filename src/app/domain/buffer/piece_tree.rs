@@ -1,4 +1,7 @@
 mod anchor;
+mod byte_slice;
+mod save_changes;
+pub(crate) use byte_slice::ByteSlice;
 mod cursor;
 mod edit;
 mod metrics;
@@ -376,6 +379,7 @@ pub struct PieceTreeLite {
     root: PieceTreeRoot,
     runtime: PieceTreeRuntime,
     anchor_state: PieceTreeAnchorState,
+    save_changes: save_changes::SaveChanges,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -402,6 +406,7 @@ impl PieceTreeLite {
         let pieces = build_chunked_pieces(PieceBuffer::Original, 0, &text);
         let mut tree = Self {
             storage: PieceTreeStorage::from_original(text),
+            save_changes: save_changes::SaveChanges::default(),
             root: build_root_from_pieces(pieces),
             runtime: PieceTreeRuntime::default(),
             anchor_state: PieceTreeAnchorState::default(),
@@ -419,6 +424,7 @@ impl PieceTreeLite {
             PieceTreeStorage::from_utf8_file(path, file_offset, sample_limit)?;
         let mut tree = Self {
             storage,
+            save_changes: save_changes::SaveChanges::default(),
             root: build_root_from_pieces(pieces),
             runtime: PieceTreeRuntime::default(),
             anchor_state: PieceTreeAnchorState::default(),

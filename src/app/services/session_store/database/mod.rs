@@ -17,6 +17,8 @@ mod persist;
 mod quarantine;
 #[cfg(test)]
 mod quarantine_tests;
+#[cfg(test)]
+mod range_tests;
 mod read;
 #[cfg(test)]
 mod retention_tests;
@@ -74,6 +76,7 @@ pub(super) struct Database {
     tab_cache: Vec<Vec<u8>>,
     state_cache: Vec<u8>,
     revisions: HashMap<String, crate::app::domain::buffer::SnapshotRevision>,
+    chunk_cache: HashMap<String, chunking::ChunkCheckpoint>,
     history_cache: HashMap<String, Vec<history::HistoryFingerprint>>,
     // Complete committed IDs, including cold/quarantined content; revisions alone
     // only describe snapshots written by this process. None requires a fresh scan.
@@ -111,6 +114,7 @@ impl Database {
             tab_cache: Vec::new(),
             state_cache: Vec::new(),
             revisions: HashMap::new(),
+            chunk_cache: HashMap::new(),
             history_cache: HashMap::new(),
             inventory: None,
             latest_request: 0,
@@ -130,7 +134,7 @@ impl Database {
     async fn initialize(&mut self) -> io::Result<()> {
         let version = self.integer("PRAGMA user_version").await?;
         let application = self.integer("PRAGMA application_id").await?;
-        if application == APPLICATION_ID && version == 5 {
+        if application == APPLICATION_ID && version == 6 {
             return Ok(());
         }
         if version != 0
@@ -145,7 +149,7 @@ impl Database {
             ));
         }
         self.create_schema(&format!(
-            "{SCHEMA} {} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=5;",
+            "{SCHEMA} {} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=6;",
             quarantine::SCHEMA,
             closed::SCHEMA,
             versions::SCHEMA
@@ -225,6 +229,7 @@ impl Database {
             self.state_cache.clear();
             self.tab_cache.clear();
             self.revisions.clear();
+            self.chunk_cache.clear();
             self.history_cache.clear();
             self.inventory = None;
             // SQLITE_FULL and rollback triggers can already end the transaction.

@@ -112,6 +112,20 @@ impl Database {
         token: &str,
     ) -> io::Result<(SessionTab, std::collections::HashMap<String, String>)> {
         self.ensure_healthy()?;
+        let result = self.read_closed_tab_inner(token).await;
+        if let Err(cause) = &result
+            && cause.kind() != io::ErrorKind::NotFound
+            && super::quarantine::damaged_id(cause).is_none()
+        {
+            self.blocked = Some(cause.to_string());
+        }
+        result
+    }
+
+    async fn read_closed_tab_inner(
+        &mut self,
+        token: &str,
+    ) -> io::Result<(SessionTab, std::collections::HashMap<String, String>)> {
         let row = self
             .closed_rows()
             .await?
@@ -127,7 +141,11 @@ impl Database {
                 return Err(cause);
             }
         };
-        self.read_histories(std::slice::from_mut(&mut tab)).await?;
+        if let Err(cause) = self.read_histories(std::slice::from_mut(&mut tab)).await {
+            self.protect_damaged(&cause, std::slice::from_ref(&tab))
+                .await?;
+            return Err(cause);
+        }
         // Prefer archived bytes over a now-different file. Recovered file buffers
         // are dirty intentionally; no reopen operation writes original files.
         for buffer in &mut tab.buffers {

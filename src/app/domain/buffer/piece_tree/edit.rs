@@ -32,6 +32,8 @@ impl PieceTreeLite {
         if text.is_empty() {
             return 0;
         }
+        self.save_changes
+            .record(self.byte_offset_for_char(offset_chars), 0, text.len());
         let edit = self.begin_edit();
 
         let add_span = self
@@ -63,6 +65,9 @@ impl PieceTreeLite {
         if range_chars.is_empty() {
             return;
         }
+        let start = self.byte_offset_for_char(range_chars.start);
+        let end = self.byte_offset_for_char(range_chars.end);
+        self.save_changes.record(start, end - start, 0);
         let edit = self.begin_edit();
 
         let start_address = self.find_leaf_for_char_offset(range_chars.start);

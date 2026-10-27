@@ -30,6 +30,7 @@ struct Prepared {
     closed: Vec<super::closed::ClosedRow>,
     closed_changed: bool,
     version_history: bool,
+    chunk_checkpoints: HashMap<String, super::chunking::ChunkCheckpoint>,
 }
 impl Prepared {
     fn new(
@@ -131,7 +132,13 @@ impl Database {
             return Ok(SessionPersistProfile::default());
         }
         let start = Instant::now();
-        let old_closed = self.prepare_closed(&mut request).await?;
+        let old_closed = self
+            .prepare_closed(&mut request)
+            .await
+            .inspect_err(|cause| {
+                // Malformed committed archives must never be replaced by a fresh set.
+                self.blocked = Some(cause.to_string());
+            })?;
         self.freeze_quarantined(&mut request);
         let mut prepared = Prepared::new(request, old_closed)?;
         self.prepare_changes(&mut prepared).await?;
@@ -142,7 +149,7 @@ impl Database {
                 .execute("BEGIN IMMEDIATE", ())
                 .await
                 .map_err(error)?;
-            let result = self.write_prepared(&prepared, &mut profile).await;
+            let result = self.write_prepared(&mut prepared, &mut profile).await;
             let commit_start = Instant::now();
             if let Err(cause) = self.finish_transaction(result).await {
                 return Err(self.protect_failed_write(cause).await);
@@ -166,6 +173,7 @@ impl Database {
             .is_some_and(|inventory| inventory.connection_changes != Some(connection_changes))
         {
             self.inventory = None;
+            self.chunk_cache.clear();
         }
         if self.inventory.is_none() {
             self.inventory = Some(ContentInventory {
@@ -246,7 +254,10 @@ impl Database {
         }
         inventory.full_cleanup_pending = false;
         inventory.connection_changes = connection_changes;
-        self.revisions.retain(|id, _| prepared.retains(id));
+        self.chunk_cache.retain(|id, _| prepared.retains(id));
+        self.chunk_cache.extend(prepared.chunk_checkpoints);
+        self.revisions
+            .retain(|id, _| prepared.buffers.get(id).is_some_and(|buffer| buffer.retain));
         self.revisions.extend(
             prepared
                 .snapshots
@@ -266,7 +277,7 @@ impl Database {
 
     async fn write_prepared(
         &self,
-        prepared: &Prepared,
+        prepared: &mut Prepared,
         profile: &mut SessionPersistProfile,
     ) -> io::Result<()> {
         let start = Instant::now();
@@ -295,8 +306,17 @@ impl Database {
             .as_secs()
             .min(i64::MAX as u64) as i64;
         for buffer in &prepared.snapshots {
-            self.write_content(&buffer.temp_id, &buffer.snapshot, &mut removed_digests)
+            let checkpoint = self
+                .write_content(
+                    &buffer.temp_id,
+                    &buffer.snapshot,
+                    &mut removed_digests,
+                    profile,
+                )
                 .await?;
+            prepared
+                .chunk_checkpoints
+                .insert(buffer.temp_id.clone(), checkpoint);
             if prepared.version_history {
                 self.checkpoint_version(&buffer.temp_id, now, &mut removed_digests)
                     .await?;

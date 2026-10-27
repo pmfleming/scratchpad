@@ -145,6 +145,11 @@ workspace; save new edits to files before closing. A protected/unavailable sessi
 store does not prevent exit. Retryable save errors still keep the window open,
 without retrying automatic last-tab shutdown every frame.
 
+Closed workspace tabs retain text and undo history for the newest 32 closes.
+Use **Reopen Last Closed Tab** in a tab context menu after closing or restarting.
+**Saved Versions** recovers periodic buffer save points into a new untitled tab.
+See [retention, storage limits, and schema changes](SESSION-RETENTION.md).
+
 Start with [the configuration guide](docs/configuration.md). It documents the
 TOML sections, shortcut syntax, platform overrides, runtime environment
 variables, and Home Manager integration. A complete example is available at
