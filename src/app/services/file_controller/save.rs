@@ -28,8 +28,6 @@ struct SaveWriteRequest {
 struct ActiveBufferPath {
     buffer_id: BufferId,
     path: PathBuf,
-    buffer_name: String,
-    disk_state: Option<DiskFileState>,
 }
 
 impl FileController {
@@ -198,8 +196,6 @@ impl FileController {
         Some(ActiveBufferPath {
             buffer_id: buffer.id,
             path: buffer.path.clone()?,
-            buffer_name: buffer.name.clone(),
-            disk_state: buffer.disk_state.clone(),
         })
     }
 

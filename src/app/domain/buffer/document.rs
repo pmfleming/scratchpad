@@ -162,6 +162,11 @@ impl TextDocument {
     }
 
     #[must_use]
+    /// Identity plus generation, without copying text or runtime anchors.
+    pub(crate) fn revision_key(&self) -> super::SnapshotRevision {
+        super::SnapshotRevision::new(&self.content.piece_tree)
+    }
+
     pub fn snapshot(&self) -> DocumentSnapshot {
         DocumentSnapshot::from_shared(self.content.piece_tree.clone())
     }

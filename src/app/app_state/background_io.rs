@@ -205,11 +205,11 @@ impl ScratchpadApp {
             Some(PendingBackgroundAction::OpenHere(action)) => {
                 FileController::apply_async_open_here_result(self, action, results);
             }
-            Some(PendingBackgroundAction::ReloadBuffer(action)) => {
+            Some(
+                PendingBackgroundAction::ReloadBuffer(action)
+                | PendingBackgroundAction::ReopenWithEncoding(action),
+            ) => {
                 FileController::apply_async_reload_buffer_result(self, action, results);
-            }
-            Some(PendingBackgroundAction::ReopenWithEncoding(action)) => {
-                FileController::apply_async_reopen_with_encoding_result(self, action, results);
             }
             Some(
                 action @ (PendingBackgroundAction::SavePath(_)

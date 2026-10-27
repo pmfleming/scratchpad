@@ -54,13 +54,24 @@ pub(crate) struct PendingReloadBufferAction {
     pub(crate) expected_path: PathBuf,
     pub(crate) buffer_name: String,
     pub(crate) previous_disk_state: Option<DiskFileState>,
+    pub(crate) expected_revision: crate::app::domain::buffer::SnapshotRevision,
     pub(crate) mode: PendingReloadMode,
 }
 
-pub(crate) struct PendingReopenWithEncodingAction {
-    pub(crate) buffer_id: BufferId,
-    pub(crate) expected_path: PathBuf,
-    pub(crate) buffer_name: String,
+impl PendingReloadBufferAction {
+    pub(crate) fn new(
+        buffer: &crate::app::domain::BufferState,
+        mode: PendingReloadMode,
+    ) -> Option<Self> {
+        Some(Self {
+            buffer_id: buffer.id,
+            expected_path: buffer.path.clone()?,
+            buffer_name: buffer.name.clone(),
+            previous_disk_state: buffer.disk_state.clone(),
+            expected_revision: buffer.document().revision_key(),
+            mode,
+        })
+    }
 }
 
 pub(crate) struct PendingSavePathAction {
@@ -92,6 +103,7 @@ pub(crate) struct PendingTextMetadataAction {
 pub(crate) enum PendingReloadMode {
     AutoRefreshCleanBuffer,
     ExplicitReload,
+    ReopenWithEncoding,
 }
 
 pub(crate) enum PendingBackgroundAction {
@@ -100,7 +112,7 @@ pub(crate) enum PendingBackgroundAction {
     StartupRestore(PendingStartupRestoreAction),
     HydrateSessionTab(PendingSessionHydrationAction),
     ReloadBuffer(PendingReloadBufferAction),
-    ReopenWithEncoding(PendingReopenWithEncodingAction),
+    ReopenWithEncoding(PendingReloadBufferAction),
     SavePath(PendingSavePathAction),
     PersistSession(PendingSessionPersistAction),
     RefreshTextMetadata(PendingTextMetadataAction),

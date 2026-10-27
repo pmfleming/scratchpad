@@ -23,6 +23,7 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Fixed
 
+- Rejected stale reload and encoding-reopen results after intervening edits, document replacement, path changes or newer disk baselines, preserving current text.
 - Cleared stale disk/settings-file metadata consistently when recovering untitled archive copies, and exposed accessible names for recently closed file buttons.
 - Quarantined damaged closed-tab content encountered during undo compaction without blocking healthy session saves.
 - Cached and acknowledged computed undo recovery points so idle saves no longer repeatedly reconstruct history and write unchanged recovery tokens.

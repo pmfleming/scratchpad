@@ -1,8 +1,8 @@
 use super::{FileController, FileService, PathBuf, ScratchpadApp, default_save_as_file_name};
 use crate::app::app_state::test_support::{test_app, wait_for_background_io};
-use crate::app::app_state::{PendingReloadBufferAction, PendingReloadMode};
 use crate::app::domain::{BufferFreshness, BufferState, PendingAction, TabManager, WorkspaceTab};
-use crate::app::services::background_io::LoadedPathResult;
+
+mod reload;
 
 struct SavedBufferFixture {
     _directory: tempfile::TempDir,
@@ -240,48 +240,6 @@ fn save_completion_keeps_dirty_state_when_buffer_changed_while_write_was_pending
     assert_eq!(buffer.text(), "saveder");
     assert!(buffer.is_dirty);
     assert_eq!(buffer.freshness, BufferFreshness::InSync);
-}
-
-#[test]
-fn explicit_reload_replaces_buffer_from_loaded_disk_result() {
-    let mut fixture = SavedBufferFixture::new("tracked.txt", "disk", "memory");
-    let buffer_id = fixture.app.tab_manager.tabs.as_slice()[0]
-        .active_buffer()
-        .id;
-    let disk_state = FileService::read_disk_state(&fixture.path).ok();
-    let loaded = BufferState::new(
-        "tracked.txt".to_owned(),
-        "disk".to_owned(),
-        Some(fixture.path.clone()),
-    );
-
-    FileController::apply_async_reload_buffer_result(
-        &mut fixture.app,
-        PendingReloadBufferAction {
-            buffer_id,
-            expected_path: fixture.path.clone(),
-            buffer_name: "tracked.txt".to_owned(),
-            previous_disk_state: disk_state.clone(),
-            mode: PendingReloadMode::ExplicitReload,
-        },
-        vec![LoadedPathResult {
-            path: fixture.path,
-            disk_state,
-            result: Ok(loaded),
-        }],
-    );
-
-    assert_eq!(
-        fixture.app.tab_manager.tabs.as_slice()[0]
-            .active_buffer()
-            .text(),
-        "disk"
-    );
-    assert!(
-        !fixture.app.tab_manager.tabs.as_slice()[0]
-            .active_buffer()
-            .is_dirty
-    );
 }
 
 #[test]

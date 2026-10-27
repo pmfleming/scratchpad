@@ -20,6 +20,14 @@ pub(crate) struct SnapshotRevision {
     tree: Weak<PieceTreeLite>,
     generation: u64,
 }
+impl SnapshotRevision {
+    pub(super) fn new(tree: &Arc<PieceTreeLite>) -> Self {
+        Self {
+            tree: Arc::downgrade(tree),
+            generation: tree.generation(),
+        }
+    }
+}
 impl PartialEq for SnapshotRevision {
     fn eq(&self, other: &Self) -> bool {
         self.generation == other.generation && self.tree.ptr_eq(&other.tree)
@@ -37,10 +45,7 @@ pub struct DocumentSnapshot {
 
 impl DocumentSnapshot {
     pub(crate) fn from_shared(piece_tree: Arc<PieceTreeLite>) -> Self {
-        let source_revision = SnapshotRevision {
-            tree: Arc::downgrade(&piece_tree),
-            generation: piece_tree.generation(),
-        };
+        let source_revision = SnapshotRevision::new(&piece_tree);
         let piece_tree = if piece_tree.has_live_anchors() {
             Arc::new(piece_tree.clone_without_anchors())
         } else {

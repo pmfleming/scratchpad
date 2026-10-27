@@ -40,9 +40,7 @@ impl FileController {
         path: PathBuf,
     ) -> bool {
         match FileService::read_disk_state(&path) {
-            Ok(disk_state) => {
-                Self::handle_refreshed_disk_state(app, index, buffer_id, path, disk_state)
-            }
+            Ok(disk_state) => Self::handle_refreshed_disk_state(app, index, buffer_id, disk_state),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 Self::mark_buffer_missing_on_disk(app, index, buffer_id)
             }
@@ -62,7 +60,6 @@ impl FileController {
         app: &mut ScratchpadApp,
         index: usize,
         buffer_id: BufferId,
-        path: PathBuf,
         disk_state: DiskFileState,
     ) -> bool {
         let (is_dirty, known_disk_state, freshness, buffer_name) = {
@@ -91,7 +88,7 @@ impl FileController {
             return true;
         }
 
-        Self::queue_clean_buffer_auto_reload(app, buffer_id, path, buffer_name, known_disk_state)
+        Self::queue_clean_buffer_auto_reload(app, index, buffer_id)
     }
 
     fn mark_buffer_conflict_on_disk(
@@ -115,24 +112,28 @@ impl FileController {
 
     fn queue_clean_buffer_auto_reload(
         app: &mut ScratchpadApp,
+        index: usize,
         buffer_id: BufferId,
-        path: PathBuf,
-        buffer_name: String,
-        known_disk_state: Option<DiskFileState>,
     ) -> bool {
         if Self::has_pending_reload_for_buffer(app, buffer_id) {
             return true;
         }
 
+        let Some(action) = app
+            .tab_manager
+            .tabs
+            .as_slice()
+            .get(index)
+            .and_then(|tab| tab.buffer_by_id(buffer_id))
+            .and_then(|buffer| {
+                PendingReloadBufferAction::new(buffer, PendingReloadMode::AutoRefreshCleanBuffer)
+            })
+        else {
+            return false;
+        };
         app.queue_background_path_loads(
-            vec![path.clone()],
-            PendingBackgroundAction::ReloadBuffer(PendingReloadBufferAction {
-                buffer_id,
-                expected_path: path,
-                buffer_name,
-                previous_disk_state: known_disk_state,
-                mode: PendingReloadMode::AutoRefreshCleanBuffer,
-            }),
+            vec![action.expected_path.clone()],
+            PendingBackgroundAction::ReloadBuffer(action),
         );
         true
     }

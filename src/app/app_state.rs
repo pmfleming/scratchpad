@@ -51,9 +51,8 @@ pub(crate) use settings_state::mutators as settings_controller;
 pub(crate) use types::{
     AppSurface, PendingActionKind, PendingBackgroundAction, PendingEncodingComplianceAction,
     PendingOpenHereAction, PendingOpenTabsAction, PendingReloadBufferAction, PendingReloadMode,
-    PendingReopenWithEncodingAction, PendingSavePathAction, PendingSessionHydrationAction,
-    PendingSessionPersistAction, PendingStartupRestoreAction, PendingTabContextMenu,
-    PendingTextMetadataAction, TabRenameState,
+    PendingSavePathAction, PendingSessionHydrationAction, PendingSessionPersistAction,
+    PendingStartupRestoreAction, PendingTabContextMenu, PendingTextMetadataAction, TabRenameState,
 };
 use workspace::display_tabs::WorkspaceSelectionState;
 pub(crate) use workspace::lifecycle as workspace_controller;
@@ -357,14 +356,6 @@ impl StatusState {
         self.set_error_status_with_detail(
             StatusDomain::Disk,
             "Could not save this file.",
-            error.to_string(),
-        );
-    }
-
-    pub(crate) fn report_reload_failed(&mut self, error: impl Display) {
-        self.set_error_status_with_detail(
-            StatusDomain::Disk,
-            "Could not reload this file.",
             error.to_string(),
         );
     }
