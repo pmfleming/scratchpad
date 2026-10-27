@@ -1,13 +1,19 @@
 project_name = "scratchpad"
 project_root = "."
-source_roots = ["src"]
+source_roots = ["src", "tests", "crates", "benches", "examples", "scripts", "xtask/src"]
 output_dir = "target/analysis"
+fingerprint_inputs = ["fonts", "src/assets", "assets", "scripts/check-targets.sh", ".github/workflows", "xtask/Cargo.toml", "xtask/Cargo.lock"]
+
+[rust]
+identity_resolution = "auto"
+identity_timeout_seconds = 60
 
 [verification]
 timeout_seconds = 1200
 workspace = true
 all_targets = false
 all_features = true
+locked = true
 audit = true
 deny = false
 feature_matrix = true
@@ -26,7 +32,7 @@ max = 0
 
 [policy.rules."rust.reliability.expect"]
 level = "error"
-max = 14
+max = 12
 exclude_paths = ["src/bin/**", "src/profile/**"]
 
 [policy.rules."rust.reliability.unwrap"]

@@ -14,7 +14,9 @@
       lib = pkgs.lib;
 
       nativeBuildInputs = with pkgs; [
+        actionlint
         cargo
+        cargo-audit
         cargo-hack
         cargo-llvm-cov
         clippy
@@ -23,6 +25,7 @@
         rust-analyzer
         rustc
         rustfmt
+        shellcheck
         stdenv.cc
       ];
 

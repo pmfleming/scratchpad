@@ -19,6 +19,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install workflow validators
+        uses: taiki-e/install-action@v2
+        with:
+          tool: actionlint,shellcheck
+      - name: Validate workflow and target-check script
+        run: |
+          actionlint
+          shellcheck scripts/check-targets.sh
       - name: Check xtask formatting
         run: cargo fmt --manifest-path xtask/Cargo.toml --check
       - name: Lint xtask
@@ -31,7 +39,7 @@ jobs:
         run: cargo run --locked --manifest-path tools/turso-contract/Cargo.toml
 
   windows:
-    name: Format, Lint, Test
+    name: Windows native format, lint and tests
     runs-on: windows-latest
 
     steps:
@@ -53,7 +61,7 @@ jobs:
         run: cargo hack check --feature-powerset --locked
 
       - name: Lint
-        run: cargo clippy --lib --all-features --locked -- -D warnings
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
       - name: Test
         run: cargo test --all-features --locked
@@ -104,7 +112,7 @@ jobs:
 
       - name: Lint Linux code
         run: |
-          cargo clippy --lib --all-features --locked -- -D warnings
+          cargo clippy --all-targets --all-features --locked -- -D warnings
           cargo clippy --manifest-path crates/linux_file_watch/Cargo.toml -- -D warnings
 
       - name: Test Linux application code
@@ -115,6 +123,42 @@ jobs:
 
       - name: Test isolated icon font integration
         run: cargo test --manifest-path crates/egui_phosphor/Cargo.toml
+
+      # Expensive and currently partial: explicitly dispatched, never silently
+      # allowed to pass. Normal PR gates above remain independently required.
+      - name: Install quality evidence tools
+        if: github.event_name == 'workflow_dispatch'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit,cargo-hack,cargo-llvm-cov
+
+      - name: Checkout pinned RustQualityLens
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          repository: pmfleming/rust-quality-lens
+          ref: d28f3d936fa3c0d4c0a7ea753f436517077cb37d
+          path: target/rqlens-source
+          persist-credentials: false
+
+      - name: Build pinned RustQualityLens
+        if: github.event_name == 'workflow_dispatch'
+        run: cargo build --release --locked --manifest-path target/rqlens-source/Cargo.toml --bin rqlens --target-dir target/rqlens-build
+
+      - name: Collect and strictly gate fresh quality evidence
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          CARGO_LLVM_COV_TARGET_DIR: target/llvm-cov-target
+        run: cargo xtask quality target/rqlens-build/release/rqlens "target/quality-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+      - name: Preserve quality evidence even when incomplete or failed
+        if: always() && github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-evidence
+          path: target/quality-ci-*/
+          if-no-files-found: error
+          retention-days: 14
 
   security:
     name: Dependency audit
@@ -128,10 +172,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+
       - name: Audit Rust dependencies
         uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Audit maintenance dependencies
+        if: always()
+        run: cargo audit --file xtask/Cargo.lock --json > audit-xtask.json
+
+      - name: Preserve audit findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-audit
+          path: audit-xtask.json
+          if-no-files-found: error
 
   cross-targets:
     name: Cross-target cargo check
@@ -173,7 +235,9 @@ jobs:
           cache: true
 
       - name: Install cross-check targets
-        run: rustup target add x86_64-unknown-linux-gnu x86_64-pc-windows-gnu
+        run: |
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64
+          rustup target add x86_64-unknown-linux-gnu x86_64-pc-windows-gnu
 
       - name: Run cross-target checks
-        run: ./scripts/check-targets.sh x86_64-unknown-linux-gnu x86_64-pc-windows-gnu
+        run: ./scripts/check-targets.sh --require-all x86_64-unknown-linux-gnu x86_64-pc-windows-gnu

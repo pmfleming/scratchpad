@@ -3,6 +3,8 @@ use std::{env, fs, path::Path, process::ExitCode};
 
 use serde::Deserialize;
 
+mod quality;
+
 // Engine upgrades require matching app/probe locks and contract review.
 const EXPECTED: &[(&str, &str)] = &[
     ("turso", "0.8.0"),
@@ -93,12 +95,13 @@ fn check_turso_locks(root: &Path) -> Result<(), String> {
 }
 
 fn run() -> Result<(), String> {
-    let mut args = env::args_os().skip(1);
-    match (args.next(), args.next()) {
-        (Some(command), None) if command == "check-turso-locks" => {
-            check_turso_locks(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").as_path())
-        }
-        _ => Err("Usage: cargo xtask check-turso-locks".into()),
+    let args: Vec<_> = env::args_os().skip(1).collect();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    match args.as_slice() {
+        [command] if command == "check-turso-locks" => check_turso_locks(&root),
+        [command, tool, output] if command == "quality" =>
+            quality::run(&root, Path::new(tool), Path::new(output)).map_err(|error| error.to_string()),
+        _ => Err("Usage: cargo xtask check-turso-locks | cargo xtask quality <rqlens-executable> <new-output-directory>".into()),
     }
 }
 

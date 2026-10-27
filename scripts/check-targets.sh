@@ -2,6 +2,11 @@
 set -euo pipefail
 
 host_target="$(rustc -vV | awk '/^host:/ { print $2 }')"
+require_all=false
+if [[ ${1:-} == --require-all ]]; then
+  require_all=true
+  shift
+fi
 if [[ $# -eq 0 ]]; then
   requested_targets=(x86_64-unknown-linux-gnu x86_64-pc-windows-gnu)
 else
@@ -27,6 +32,9 @@ for target in "${requested_targets[@]}"; do
   if target_is_available "$target"; then
     echo "==> cargo check --locked --target $target"
     cargo check --locked --target "$target"
+  elif $require_all; then
+    echo "==> required target $target is not installed for this toolchain" >&2
+    exit 1
   else
     echo "==> skipping $target; target is not installed for this toolchain" >&2
   fi
