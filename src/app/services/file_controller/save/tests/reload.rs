@@ -13,6 +13,7 @@ fn pending_loads_only_replace_the_requested_unchanged_buffer() {
     ] {
         for case in [
             "success",
+            "anchor-only",
             "edit",
             "edit-then-clean",
             "rename",
@@ -27,6 +28,12 @@ fn pending_loads_only_replace_the_requested_unchanged_buffer() {
             let buffer = fixture.app.tab_manager.tabs.as_mut_slice()[0].active_buffer_mut();
             let action = PendingReloadBufferAction::new(buffer, mode).unwrap();
             match case {
+                "anchor-only" => {
+                    let snapshot = buffer.document_snapshot();
+                    let tree = buffer.document_mut().piece_tree_mut();
+                    tree.create_anchor(0, crate::app::domain::AnchorBias::Left);
+                    assert_eq!(tree.generation(), snapshot.revision());
+                }
                 "edit" | "edit-then-clean" => {
                     buffer.replace_text("new edit".into());
                     buffer.is_dirty = case == "edit";
@@ -76,7 +83,7 @@ fn pending_loads_only_replace_the_requested_unchanged_buffer() {
             }
             let buffer = fixture.app.tab_manager.tabs.as_slice()[0].active_buffer();
             let expected = match case {
-                "success" => "disk",
+                "success" | "anchor-only" => "disk",
                 "edit" | "edit-then-clean" => "new edit",
                 _ => "memory",
             };

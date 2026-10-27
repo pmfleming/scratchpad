@@ -54,7 +54,7 @@ pub(crate) struct PendingReloadBufferAction {
     pub(crate) expected_path: PathBuf,
     pub(crate) buffer_name: String,
     pub(crate) previous_disk_state: Option<DiskFileState>,
-    pub(crate) expected_revision: crate::app::domain::buffer::SnapshotRevision,
+    pub(crate) expected_revision: crate::app::domain::buffer::DocumentRevision,
     pub(crate) mode: PendingReloadMode,
 }
 

@@ -16,7 +16,10 @@ use std::borrow::Cow;
 use std::io;
 use std::ops::Range;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 use std::time::Instant;
 
 pub(crate) type TextReplacements<'a> = &'a [(Range<usize>, String)];
@@ -29,10 +32,34 @@ pub(crate) enum TextReplacementError {
     OverlappingRanges,
 }
 
-#[derive(Clone)]
 pub struct TextDocument {
+    identity: u64,
     content: TextDocumentContentState,
     history: TextDocumentHistoryState,
+}
+
+/// A live document's identity and text generation, independent of view-anchor COW.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DocumentRevision {
+    identity: u64,
+    generation: u64,
+}
+
+fn next_document_identity() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+impl Clone for TextDocument {
+    fn clone(&self) -> Self {
+        // A clone is independently editable; replacing a buffer with it must
+        // invalidate outstanding actions even if generations happen to match.
+        Self {
+            identity: next_document_identity(),
+            content: self.content.clone(),
+            history: self.history.clone(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -99,6 +126,7 @@ impl TextDocument {
         preferred_line_ending: LineEndingStyle,
     ) -> Self {
         Self {
+            identity: next_document_identity(),
             content: TextDocumentContentState::new(text, preferred_line_ending),
             history: TextDocumentHistoryState::default(),
         }
@@ -113,6 +141,7 @@ impl TextDocument {
             PieceTreeLite::from_utf8_file(path, file_offset, sample_limit)?;
         Ok((
             Self {
+                identity: next_document_identity(),
                 content: TextDocumentContentState {
                     piece_tree: Arc::new(piece_tree),
                     preferred_line_ending: platform_default_line_ending(),
@@ -161,12 +190,16 @@ impl TextDocument {
         Arc::make_mut(&mut self.content.piece_tree)
     }
 
+    /// Identity plus text generation, without copying text or runtime anchors.
     #[must_use]
-    /// Identity plus generation, without copying text or runtime anchors.
-    pub(crate) fn revision_key(&self) -> super::SnapshotRevision {
-        super::SnapshotRevision::new(&self.content.piece_tree)
+    pub(crate) fn revision_key(&self) -> DocumentRevision {
+        DocumentRevision {
+            identity: self.identity,
+            generation: self.content.piece_tree.generation(),
+        }
     }
 
+    #[must_use]
     pub fn snapshot(&self) -> DocumentSnapshot {
         DocumentSnapshot::from_shared(self.content.piece_tree.clone())
     }
@@ -297,6 +330,7 @@ impl TextDocument {
     }
 
     pub fn replace_text(&mut self, text: String) {
+        self.identity = next_document_identity();
         self.content.piece_tree = Arc::new(PieceTreeLite::from_string(text));
         self.clear_operation_history();
     }

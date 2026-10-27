@@ -20,7 +20,7 @@ fn history_buffer() -> BufferState {
 #[test]
 fn preview_replay_validates_document_and_history_before_applying_undo_or_redo() {
     for redo in [false, true] {
-        for case in ["valid", "edited", "replaced", "closed"] {
+        for case in ["valid", "anchor-only", "edited", "replaced", "closed"] {
             let root = tempfile::tempdir().unwrap();
             let mut app = crate::app::app_state::test_support::test_app(root.path());
             let mut buffer = history_buffer();
@@ -48,6 +48,13 @@ fn preview_replay_validates_document_and_history_before_applying_undo_or_redo() 
             harness.run_steps(2);
             let app = harness.state_mut();
             match case {
+                "anchor-only" => {
+                    let buffer = app.tab_manager.tabs.as_mut_slice()[0].active_buffer_mut();
+                    let snapshot = buffer.document_snapshot();
+                    let tree = buffer.document_mut().piece_tree_mut();
+                    tree.create_anchor(0, crate::app::domain::AnchorBias::Left);
+                    assert_eq!(tree.generation(), snapshot.revision());
+                }
                 "edited" => app.tab_manager.tabs.as_mut_slice()[0]
                     .active_buffer_mut()
                     .document_mut()
@@ -73,7 +80,7 @@ fn preview_replay_validates_document_and_history_before_applying_undo_or_redo() 
                 .text();
             assert_eq!(
                 text,
-                if case == "valid" {
+                if matches!(case, "valid" | "anchor-only") {
                     if redo { "current" } else { "old" }
                 } else {
                     &before
@@ -84,7 +91,7 @@ fn preview_replay_validates_document_and_history_before_applying_undo_or_redo() 
                 harness
                     .ctx
                     .data(|data| data.get_temp::<super::Preview>(super::key()).is_some()),
-                case != "valid"
+                !matches!(case, "valid" | "anchor-only")
             );
         }
     }

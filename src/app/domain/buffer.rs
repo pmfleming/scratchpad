@@ -15,6 +15,7 @@ pub use analysis::{
     EncodingSource, LineEndingCounts, LineEndingStyle, TextArtifactSummary, TextFormatMetadata,
     analyze_line_endings, display_line_count, platform_default_line_ending,
 };
+pub(crate) use document::DocumentRevision;
 pub use document::TextDocument;
 pub(crate) use document::{TextReplacementError, TextReplacements};
 pub(crate) use history::{

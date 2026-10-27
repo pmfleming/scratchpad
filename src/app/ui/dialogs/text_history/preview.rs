@@ -1,7 +1,7 @@
 use super::model::TextHistoryAction;
 use crate::app::{
     app_state::{ScratchpadApp, StatusDomain, workspace::mutation},
-    domain::{BufferState, WorkspaceTab, buffer::SnapshotRevision},
+    domain::{BufferState, WorkspaceTab, buffer::DocumentRevision},
 };
 use eframe::egui;
 use std::sync::Arc;
@@ -22,7 +22,7 @@ struct Preview {
 struct EditPreview {
     action: TextHistoryAction,
     history_revision: u64,
-    document_revision: SnapshotRevision,
+    document_revision: DocumentRevision,
 }
 
 #[derive(Clone, Copy)]
