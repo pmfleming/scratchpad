@@ -3,9 +3,7 @@ use super::{
     PendingSavePathAction, PendingSessionHydrationAction, PendingSessionPersistAction,
     PendingStartupRestoreAction, PendingTextMetadataAction, ScratchpadApp,
 };
-use crate::app::app_state::workspace::{
-    accessors as workspace_accessors, restore_conflict as workspace_restore_conflict,
-};
+use crate::app::app_state::workspace::restore_conflict as workspace_restore_conflict;
 use crate::app::diagnostics;
 use crate::app::services::background_io::{
     BackgroundIoRequest, BackgroundIoResult, BackgroundIoSendError, ColdFileShellResult,
@@ -294,7 +292,7 @@ impl ScratchpadApp {
         active_surface: crate::app::services::session_store::SessionActiveSurface,
         legacy_settings: crate::app::services::settings_store::AppSettings,
     ) {
-        let apply_legacy_settings = {
+        let loaded_from_settings = {
             let Some(action) = self
                 .state
                 .background_io
@@ -304,12 +302,9 @@ impl ScratchpadApp {
                 return;
             };
             action.restore_started = true;
-            !action.loaded_from_settings
+            action.loaded_from_settings
         };
-        if apply_legacy_settings {
-            crate::app::app_state::settings_state::apply_settings(self, legacy_settings);
-            let _ = crate::app::app_state::settings_state::persist_settings_now(self);
-        }
+        self.adopt_legacy_startup_settings(loaded_from_settings, Some(legacy_settings));
         if !self.tab_manager.tabs.as_slice().is_empty() {
             self.tab_manager
                 .set_active_tab_index_clamped(active_tab_index);
@@ -537,17 +532,12 @@ impl ScratchpadApp {
             }
         };
 
-        if !action.loaded_from_settings
-            && let Some(legacy_settings) = legacy_settings
-        {
-            crate::app::app_state::settings_state::apply_settings(self, legacy_settings);
-            let _ = crate::app::app_state::settings_state::persist_settings_now(self);
-        }
-        if !restored_session && action.startup_options.files.is_empty() {
-            self.initialize_default_workspace_tabs();
-        }
-        workspace_accessors::request_focus_for_active_view(self);
-        self.apply_startup_options_async(action.startup_options);
+        self.adopt_legacy_startup_settings(action.loaded_from_settings, legacy_settings);
+        self.finish_startup(
+            action.startup_options,
+            restored_session,
+            super::startup_state::StartupExecution::Background,
+        );
         if restored_session {
             self.queue_next_progressive_session_hydration();
         }

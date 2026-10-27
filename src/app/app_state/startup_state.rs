@@ -18,6 +18,15 @@ use crate::app::startup::{StartupOpenTarget, StartupOptions};
 use std::collections::{HashSet, VecDeque};
 use std::time::Instant;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum StartupExecution {
+    Blocking,
+    Background,
+}
+
+#[cfg(test)]
+mod tests;
+
 impl ScratchpadApp {
     pub(crate) fn set_session_persist_on_drop(&mut self, enabled: bool) {
         self.state.persistence.persist_session_on_drop = enabled;
@@ -68,7 +77,12 @@ impl ScratchpadApp {
         settings_store: SettingsStore,
         startup_options: StartupOptions,
     ) -> Self {
-        Self::build_app(session_store, settings_store, startup_options, false)
+        Self::build_app(
+            session_store,
+            settings_store,
+            startup_options,
+            StartupExecution::Blocking,
+        )
     }
 
     #[must_use]
@@ -77,14 +91,19 @@ impl ScratchpadApp {
         settings_store: SettingsStore,
         startup_options: StartupOptions,
     ) -> Self {
-        Self::build_app(session_store, settings_store, startup_options, true)
+        Self::build_app(
+            session_store,
+            settings_store,
+            startup_options,
+            StartupExecution::Background,
+        )
     }
 
     fn build_app(
         session_store: SessionStore,
         settings_store: SettingsStore,
         startup_options: StartupOptions,
-        runtime_background_startup: bool,
+        execution: StartupExecution,
     ) -> Self {
         diagnostics::initialize(diagnostics::error_log_path(session_store.root()));
 
@@ -127,35 +146,16 @@ impl ScratchpadApp {
         };
 
         let loaded_from_settings = settings_state::load_settings_from_store(&mut app);
-        let has_startup_files = !startup_options.files.is_empty();
-        if runtime_background_startup {
-            if app.should_restore_session(&startup_options) {
-                app.queue_background_session_restore(startup_options, loaded_from_settings);
-            } else {
-                if !has_startup_files {
-                    app.initialize_default_workspace_tabs();
-                }
-                workspace_accessors::request_focus_for_active_view(&mut app);
-                app.apply_startup_options_async(startup_options);
-            }
+        let restore = app.should_restore_session(&startup_options);
+        if restore && execution == StartupExecution::Background {
+            app.queue_background_session_restore(startup_options, loaded_from_settings);
         } else {
-            let mut restored_session = false;
-            if app.should_restore_session(&startup_options) {
-                let legacy_settings = session_manager::restore_session_state(&mut app);
-                restored_session = legacy_settings.is_some();
-                if !loaded_from_settings && let Some(legacy_settings) = legacy_settings {
-                    crate::app::app_state::settings_state::apply_settings(
-                        &mut app,
-                        legacy_settings,
-                    );
-                    let _ = crate::app::app_state::settings_state::persist_settings_now(&mut app);
-                }
-            }
-            if !restored_session && !has_startup_files {
-                app.initialize_default_workspace_tabs();
-            }
-            workspace_accessors::request_focus_for_active_view(&mut app);
-            app.apply_startup_options(startup_options);
+            let legacy = restore
+                .then(|| session_manager::restore_session_state(&mut app))
+                .flatten();
+            let restored = legacy.is_some();
+            app.adopt_legacy_startup_settings(loaded_from_settings, legacy);
+            app.finish_startup(startup_options, restored, execution);
         }
 
         crate::app::app_state::workspace::display_tabs::ensure_active_tab_slot_selected(&mut app);
@@ -164,66 +164,59 @@ impl ScratchpadApp {
         app
     }
 
-    fn apply_startup_options(&mut self, startup_options: StartupOptions) {
-        if startup_options.files.is_empty() {
-            if let Some(message) = startup_options.startup_notice {
-                self.state
-                    .status
-                    .set_warning_status_in_domain(StatusDomain::Session, message);
-            }
-            return;
-        }
-
-        let open_target = self.resolved_startup_open_target(&startup_options);
-
-        match open_target {
-            StartupOpenTarget::SeparateTabs => {
-                FileController::open_external_paths(self, startup_options.files);
-            }
-            StartupOpenTarget::ActiveTab => {
-                FileController::open_external_paths_here(self, startup_options.files);
-            }
-            StartupOpenTarget::TabIndex(index) => {
-                FileController::open_external_paths_into_tab(self, index, startup_options.files);
-            }
-        }
-
-        if let Some(message) = startup_options.startup_notice {
-            self.state
-                .status
-                .set_warning_status_in_domain(StatusDomain::Session, message);
+    pub(super) fn adopt_legacy_startup_settings(
+        &mut self,
+        loaded_from_settings: bool,
+        legacy: Option<AppSettings>,
+    ) {
+        if !loaded_from_settings && let Some(settings) = legacy {
+            settings_state::apply_settings(self, settings);
+            let _ = settings_state::persist_settings_now(self);
         }
     }
 
-    pub(crate) fn apply_startup_options_async(&mut self, startup_options: StartupOptions) {
-        if startup_options.files.is_empty() {
-            if let Some(message) = startup_options.startup_notice {
-                self.state
-                    .status
-                    .set_warning_status_in_domain(StatusDomain::Session, message);
-            }
-            return;
+    pub(super) fn finish_startup(
+        &mut self,
+        options: StartupOptions,
+        restored: bool,
+        execution: StartupExecution,
+    ) {
+        if !restored && options.files.is_empty() {
+            self.initialize_default_workspace_tabs();
         }
+        workspace_accessors::request_focus_for_active_view(self);
+        self.apply_startup_options(options, execution);
+    }
 
-        let open_target = self.resolved_startup_open_target(&startup_options);
+    pub(crate) fn apply_startup_options_async(&mut self, options: StartupOptions) {
+        self.apply_startup_options(options, StartupExecution::Background);
+    }
 
-        match open_target {
-            StartupOpenTarget::SeparateTabs => {
-                FileController::open_external_paths_async(self, startup_options.files);
-            }
-            StartupOpenTarget::ActiveTab => {
-                FileController::open_external_paths_here_async(self, startup_options.files);
-            }
-            StartupOpenTarget::TabIndex(index) => {
-                FileController::open_external_paths_into_tab_async(
-                    self,
-                    index,
-                    startup_options.files,
-                );
+    fn apply_startup_options(&mut self, options: StartupOptions, execution: StartupExecution) {
+        if !options.files.is_empty() {
+            use StartupExecution::{Background, Blocking};
+            match (self.resolved_startup_open_target(&options), execution) {
+                (StartupOpenTarget::SeparateTabs, Blocking) => {
+                    FileController::open_external_paths(self, options.files);
+                }
+                (StartupOpenTarget::SeparateTabs, Background) => {
+                    FileController::open_external_paths_async(self, options.files);
+                }
+                (StartupOpenTarget::ActiveTab, Blocking) => {
+                    FileController::open_external_paths_here(self, options.files);
+                }
+                (StartupOpenTarget::ActiveTab, Background) => {
+                    FileController::open_external_paths_here_async(self, options.files);
+                }
+                (StartupOpenTarget::TabIndex(index), Blocking) => {
+                    FileController::open_external_paths_into_tab(self, index, options.files);
+                }
+                (StartupOpenTarget::TabIndex(index), Background) => {
+                    FileController::open_external_paths_into_tab_async(self, index, options.files);
+                }
             }
         }
-
-        if let Some(message) = startup_options.startup_notice {
+        if let Some(message) = options.startup_notice {
             self.state
                 .status
                 .set_warning_status_in_domain(StatusDomain::Session, message);

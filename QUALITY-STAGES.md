@@ -50,3 +50,19 @@ separately. No sibling repository changes are included.
 - Passed: 61 database tests (2 existing ignored probes), full locked all-feature
   tests, formatting and strict all-target/all-feature Clippy.
   Log: `target/quality-stage3-tests.log`.
+
+## 4. Shared startup policy
+
+- Blocking and background startup share settings adoption, fallback workspace,
+  focus and file-target/notice policy. Execution remains explicitly blocking or
+  background; progressive restore/hydration and save fences are unchanged.
+- Settings-file values take precedence over legacy session values in both the
+  streamed-start and terminal-restore paths. Explicit restore and file-target
+  options continue to override saved preferences.
+- Three scenario matrices exercise both modes with saved/missing/broken sessions,
+  settings precedence, explicit overrides, file targets and failure fencing.
+  The existing initial untitled-buffer behavior is preserved (not silently removed
+  when opening files); streamed-prefix and close/drop safety tests remain passing.
+- Passed: startup matrices, lifecycle restore tests, full locked all-feature tests,
+  formatting and strict all-target/all-feature Clippy.
+  Log: `target/quality-stage4-tests.log`.
