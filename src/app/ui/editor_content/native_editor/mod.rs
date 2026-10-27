@@ -4,6 +4,7 @@ mod highlighting;
 mod interactions;
 mod layout;
 mod painting;
+mod primary_selection;
 #[cfg(test)]
 mod tests;
 mod types;
@@ -244,9 +245,17 @@ fn process_editor_input(
         || request.response.secondary_clicked()
         || request.response.middle_clicked()
         || request.response.dragged();
-    let focused = request.response.has_focus()
-        || request.response.gained_focus()
-        || request.options.request_focus;
+    // egui-winit emits PRIMARY paste on middle-button press. Suppress keyboard
+    // delivery to the old focused split even if it is rendered before the target.
+    let middle_pressed =
+        ui.input(|input| input.pointer.button_pressed(egui::PointerButton::Middle));
+    let focused = if middle_pressed {
+        request.response.contains_pointer()
+    } else {
+        request.response.has_focus()
+            || request.response.gained_focus()
+            || request.options.request_focus
+    };
     sync_view_cursor_before_render(view, focused);
     let changed = handle_focused_keyboard_input(ui, buffer, view, &request, focused);
     request_cursor_reveal_after_input(
@@ -262,6 +271,7 @@ fn process_editor_input(
         ui.ctx().request_repaint();
     }
     view.sync_cursor_anchors_from_ranges(buffer);
+    primary_selection::publish(ui, request.response.id, buffer, view, focused);
 
     let animate_cursor_transition = editor_was_focused
         && focused

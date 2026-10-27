@@ -334,11 +334,17 @@ fn apply_mouse_wheel(
     if ui.input(|input| input.modifiers.shift) {
         return;
     }
-    let (scroll, now) = ui.input(|i| (i.smooth_scroll_delta, i.time));
+    let (scroll, now, wheel_source) =
+        ui.input(|i| (i.smooth_scroll_delta, i.time, i.scroll_source()));
     if scroll == Vec2::ZERO {
         return;
     }
-    let scroll = accelerated_wheel_delta(state, now, scroll);
+    let scroll = accelerated_wheel_delta(
+        state,
+        now,
+        scroll,
+        wheel_source.unwrap_or(egui::MouseWheelSource::Unknown),
+    );
     let previous = state.offset;
     state.offset = wheel_offset(state, scroll, eof_overscroll);
     if previous == state.offset {
@@ -348,7 +354,22 @@ fn apply_mouse_wheel(
     state.user_scrolled = true;
 }
 
-fn accelerated_wheel_delta(state: &mut ScrollState, now: f64, scroll: Vec2) -> Vec2 {
+fn accelerated_wheel_delta(
+    state: &mut ScrollState,
+    now: f64,
+    scroll: Vec2,
+    source: egui::MouseWheelSource,
+) -> Vec2 {
+    if matches!(
+        source,
+        egui::MouseWheelSource::Trackpad | egui::MouseWheelSource::Momentum
+    ) {
+        // The OS already supplies smooth/accelerated deltas. Do not amplify
+        // momentum or carry its acceleration into the next physical wheel use.
+        state.wheel_acceleration = Default::default();
+        return scroll;
+    }
+    // Windows, Wayland and X11 currently report Unknown; preserve their policy.
     Vec2::new(
         accelerated_scroll_delta(
             &mut state.wheel_acceleration[0],
@@ -424,4 +445,38 @@ fn content_size_with_minimum(content_size: Vec2, min_content_size: Vec2) -> Vec2
 
 fn child_content_rect_size(content_size: Vec2, viewport_size: Vec2) -> Vec2 {
     finite_vec2(content_size).max(finite_vec2(viewport_size).max(Vec2::splat(1.0)))
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+
+    #[test]
+    fn wheel_and_unknown_keep_acceleration_but_trackpad_and_momentum_do_not() {
+        let delta = Vec2::new(0.0, 100.0);
+        for source in [
+            egui::MouseWheelSource::Wheel,
+            egui::MouseWheelSource::Unknown,
+        ] {
+            let mut state = ScrollState::default();
+            assert_eq!(
+                accelerated_wheel_delta(&mut state, 1.0, delta, source),
+                delta
+            );
+            assert!(accelerated_wheel_delta(&mut state, 1.05, delta, source).y > delta.y);
+            for smooth in [
+                egui::MouseWheelSource::Trackpad,
+                egui::MouseWheelSource::Momentum,
+            ] {
+                assert_eq!(
+                    accelerated_wheel_delta(&mut state, 1.06, delta, smooth),
+                    delta
+                );
+            }
+            assert_eq!(
+                accelerated_wheel_delta(&mut state, 1.07, delta, source),
+                delta
+            );
+        }
+    }
 }

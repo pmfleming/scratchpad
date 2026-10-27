@@ -54,6 +54,21 @@ Checks: baseline and upgraded `cargo test --all-features`, upgraded
 - No global fallback reordering or font asset removal: existing text metrics
   and control/icon precedence are preserved.
 
+## Stage 3: custom editor input
+
+- The custom editor emits `TextSelectionSettled` only for changed, settled,
+  nonempty selections in its focused view. It caches range/revision identity,
+  not another selection string, and does not overwrite the ordinary clipboard.
+- Middle-button press positions the caret before PRIMARY paste. The previous
+  focused split is excluded even if rendered first. Headless two-split tests
+  verify only the target changes and an old selection is not replaced.
+- Image-only paste is tested to leave text, revision and dirty state unchanged.
+- Known Trackpad/Momentum deltas bypass additional wheel acceleration and reset
+  its history. Wheel/Unknown retain the existing behavior, with regression tests.
+- Native clipboard shortcuts remain enabled. Cross-application PRIMARY and IME
+  behavior still need interactive platform acceptance; synthetic tests do not
+  establish clipboard ownership behavior on every compositor.
+
 ## Limits and follow-up validation
 
 - No Windows, X11, multi-monitor, suspend/resume, or native IME validation has

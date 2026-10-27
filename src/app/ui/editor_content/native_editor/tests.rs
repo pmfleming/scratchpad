@@ -328,6 +328,106 @@ fn wrapped_layout_rebuilds_when_viewport_width_changes() {
     );
 }
 
+#[test]
+fn middle_press_pastes_only_into_the_target_split_at_the_pointer() {
+    let ctx = egui::Context::default();
+    let font = egui::FontId::monospace(18.0);
+    let mut buffers = [
+        BufferState::new("left".to_owned(), "left".to_owned(), None),
+        BufferState::new("right".to_owned(), "right".to_owned(), None),
+    ];
+    let mut views = buffers
+        .each_ref()
+        .map(|buffer| EditorViewState::new(buffer.id));
+    views[1].cursor_range = Some(CursorRange::two(1, 3));
+    let mut rects = [egui::Rect::NOTHING; 2];
+    for frame in 0..3 {
+        let pos = rects[1].left_top() + egui::vec2(1.0, 10.0);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(600.0, 200.0),
+            )),
+            events: if frame == 2 {
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Middle,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    egui::Event::Paste("@".to_owned()),
+                ]
+            } else {
+                Vec::new()
+            },
+            ..egui::RawInput::default()
+        };
+        ctx.run_ui(input, |ui| {
+            ui.columns(2, |columns| {
+                for index in 0..2 {
+                    let outcome = render_editor_text_edit(
+                        &mut columns[index],
+                        &mut buffers[index],
+                        &mut views[index],
+                        TextEditOptions::new(
+                            frame == 0 && index == 0,
+                            false,
+                            &font,
+                            egui::Color32::WHITE,
+                            EditorHighlightStyle::new(egui::Color32::YELLOW, egui::Color32::BLACK),
+                        ),
+                        None,
+                    );
+                    rects[index] = outcome.response.rect;
+                }
+            });
+        })
+        .drop_without_applying_deltas();
+    }
+    assert_eq!(buffers[0].text(), "left");
+    assert_eq!(buffers[1].text(), "@right");
+    assert!(views[1].editor_has_focus);
+    assert!(!views[0].editor_has_focus);
+}
+
+#[test]
+fn image_only_paste_does_not_change_plain_text_or_revision() {
+    let ctx = egui::Context::default();
+    let mut buffer = BufferState::new("text".to_owned(), "plain text".to_owned(), None);
+    let mut view = EditorViewState::new(buffer.id);
+    let revision = buffer.document_revision();
+    let dirty = buffer.is_dirty;
+    let font = egui::FontId::monospace(18.0);
+    let input = egui::RawInput {
+        events: vec![egui::Event::PasteImage(std::sync::Arc::new(
+            egui::ColorImage::filled([1, 1], egui::Color32::RED),
+        ))],
+        ..egui::RawInput::default()
+    };
+    ctx.run_ui(input, |ui| {
+        let outcome = render_editor_text_edit(
+            ui,
+            &mut buffer,
+            &mut view,
+            TextEditOptions::new(
+                true,
+                false,
+                &font,
+                egui::Color32::WHITE,
+                EditorHighlightStyle::new(egui::Color32::YELLOW, egui::Color32::BLACK),
+            ),
+            None,
+        );
+        assert!(!outcome.changed);
+    })
+    .drop_without_applying_deltas();
+    assert_eq!(buffer.text(), "plain text");
+    assert_eq!(buffer.document_revision(), revision);
+    assert_eq!(buffer.is_dirty, dirty);
+}
+
 fn render_editor_key(
     ctx: &egui::Context,
     buffer: &mut BufferState,

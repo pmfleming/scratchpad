@@ -78,6 +78,18 @@ pub(super) fn handle_mouse_interaction(
     let click_id = context.response.id.with("click_state");
     let mut click_state = load_click_state(ui, click_id);
 
+    if middle_pressed_over(ui, context.response) {
+        // Paste arrives on press, not release. Move the caret before keyboard
+        // input is processed, and never replace the old selection on this click.
+        view.cursor_range = Some(CursorRange::one(selection.char_cursor));
+        view.pending_cursor_range = None;
+        view.clear_cursor_horizontal_goal();
+        click_state.was_primary_pointer_down = false;
+        store_click_state(ui, click_id, click_state);
+        context.response.request_focus();
+        return;
+    }
+
     if context.response.secondary_clicked() {
         handle_secondary_click(view, selection.char_cursor);
         click_state.was_primary_pointer_down = false;
@@ -227,7 +239,10 @@ fn pointer_selection(
     context: MouseInteractionContext<'_>,
 ) -> Option<(egui::Pos2, PointerSelection)> {
     let pointer_pos = tracked_pointer_pos(
-        context.response.interact_pointer_pos(),
+        context.response.interact_pointer_pos().or_else(|| {
+            ui.input(|input| input.pointer.latest_pos())
+                .filter(|_| middle_pressed_over(ui, context.response))
+        }),
         ui.input(|input| input.pointer.latest_pos()),
         context.response.dragged_by(egui::PointerButton::Primary),
     )?;
@@ -248,6 +263,11 @@ fn pointer_selection(
             click_count: 1,
         },
     ))
+}
+
+fn middle_pressed_over(ui: &egui::Ui, response: &egui::Response) -> bool {
+    response.contains_pointer()
+        && ui.input(|input| input.pointer.button_pressed(egui::PointerButton::Middle))
 }
 
 fn tracked_pointer_pos(
