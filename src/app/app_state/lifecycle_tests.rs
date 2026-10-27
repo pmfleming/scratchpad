@@ -124,6 +124,64 @@ fn minimized_close_is_handled_without_ui() {
 }
 
 #[test]
+fn closing_last_tab_exits_and_persists_empty_session() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = test_app(directory.path());
+    super::settings_controller::close_settings(&mut app);
+    super::workspace_controller::perform_close_tab(&mut app, 0);
+    assert!(app.tab_manager.tabs.is_empty());
+
+    let ctx = egui::Context::default();
+    let output = logic(&mut app, &ctx, &hidden_input());
+    assert!(
+        output.viewport_commands[&egui::ViewportId::ROOT].contains(&egui::ViewportCommand::Close)
+    );
+    assert!(app.state.window.close_in_progress);
+    assert!(
+        app.state
+            .persistence
+            .session_store
+            .load()
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn closing_workspace_tab_keeps_settings_open_until_last_tab_closes() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = test_app(directory.path());
+    super::settings_controller::open_settings(&mut app);
+    super::workspace_controller::perform_close_tab(&mut app, 0);
+    assert!(app.tab_manager.tabs.is_empty());
+
+    let ctx = egui::Context::default();
+    let _ = logic(&mut app, &ctx, &hidden_input());
+    assert!(!app.state.window.close_in_progress);
+
+    super::settings_controller::close_settings(&mut app);
+    let output = logic(&mut app, &ctx, &hidden_input());
+    assert!(
+        output.viewport_commands[&egui::ViewportId::ROOT].contains(&egui::ViewportCommand::Close)
+    );
+    assert!(app.state.window.close_in_progress);
+}
+
+#[test]
+fn closing_one_of_two_workspace_tabs_does_not_exit() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = test_app(directory.path());
+    super::settings_controller::close_settings(&mut app);
+    app.tab_manager.create_untitled_tab();
+    super::workspace_controller::perform_close_tab(&mut app, 0);
+
+    let ctx = egui::Context::default();
+    let _ = logic(&mut app, &ctx, &hidden_input());
+    assert_eq!(app.tab_manager.tabs.len(), 1);
+    assert!(!app.state.window.close_in_progress);
+}
+
+#[test]
 fn dirty_session_is_persisted_while_occluded() {
     let directory = tempfile::tempdir().unwrap();
     let mut app = test_app(directory.path());

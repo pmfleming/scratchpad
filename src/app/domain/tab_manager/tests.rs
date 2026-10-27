@@ -115,6 +115,24 @@ fn buffer_tab_index_tracks_tab_mutations() {
 }
 
 #[test]
+fn closing_last_tab_leaves_empty_workspace_and_indices() {
+    let mut manager = TabManager::new();
+    manager.close_tab_internal(0);
+
+    assert!(manager.tabs.is_empty());
+    assert!(manager.active_tab().is_none());
+    assert_eq!(manager.active_tab_index, 0);
+    assert!(manager.buffer_tab_index.is_empty());
+    assert!(manager.path_tab_index.is_empty());
+    assert!(manager.cold_session_tabs.is_empty());
+    assert!(manager.session_dirty);
+
+    manager.create_untitled_tab();
+    assert_eq!(manager.tabs.len(), 1);
+    assert!(manager.active_tab().is_some());
+}
+
+#[test]
 fn path_index_tracks_open_file_owners() {
     let directory = tempfile::tempdir().unwrap();
     let first_path = directory.path().join("first.txt");

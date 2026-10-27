@@ -54,6 +54,12 @@ pub(super) fn update_logic(app: &mut ScratchpadApp, ctx: &egui::Context) {
         FramePhase::BackgroundPoll,
         background_poll_started_at.elapsed(),
     );
+    // Settings is a tab too. Use the normal exit path so an empty workspace is
+    // persisted and save failures still prevent shutdown.
+    if crate::app::app_state::workspace::display_tabs::total_tab_slots(app) == 0 {
+        request_exit(app, ctx);
+        return;
+    }
     crate::app::services::session_manager::maybe_persist_session(app, ctx);
     sync_window_title(app, ctx);
 }

@@ -150,21 +150,15 @@ impl TabManager {
         let removed = self.tabs.remove(index);
         self.remove_tab_buffers(&removed);
         self.cold_session_tabs.remove(&index);
-        if self.tabs.is_empty() {
-            self.tabs.push(WorkspaceTab::untitled());
-            self.active_tab_index = 0;
-            self.index_tab_buffers(0);
-        } else {
-            self.shift_buffer_tab_indices(index, -1);
-            self.shift_path_tab_indices(index, -1);
-            self.shift_cold_tab_indices(index, -1);
-        }
+        self.shift_buffer_tab_indices(index, -1);
+        self.shift_path_tab_indices(index, -1);
+        self.shift_cold_tab_indices(index, -1);
 
         if self.active_tab_index > index {
             self.active_tab_index -= 1;
         }
 
-        self.active_tab_index = self.active_tab_index.min(self.tabs.len() - 1);
+        self.active_tab_index = self.active_tab_index.min(self.tabs.len().saturating_sub(1));
         self.pending_scroll_to_active = true;
         self.mark_session_dirty();
     }
