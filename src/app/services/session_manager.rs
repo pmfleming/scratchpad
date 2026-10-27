@@ -8,9 +8,10 @@ use eframe::egui;
 use std::time::Instant;
 
 pub(crate) fn maybe_persist_session(app: &mut ScratchpadApp, ctx: &egui::Context) {
+    ctx.request_repaint_after(std::time::Duration::from_secs(60));
     if app.startup_restore_pending()
         || app.state.persistence.session_restore_failed
-        || !app.tab_manager.session_dirty
+        || (!app.tab_manager.session_dirty && app.state.persistence.last_session_persist.elapsed() < std::time::Duration::from_secs(60))
     {
         return;
     }
@@ -68,6 +69,7 @@ fn capture_session(app: &ScratchpadApp) -> SessionPersistRequest {
         app.state.app_settings.font_size(),
         app.state.app_settings.word_wrap(),
     );
+    request.recovery_policy = app.state.app_settings.history.recovery.clone();
     request
         .closed_tabs
         .clone_from(&app.state.persistence.pending_closed_tabs);

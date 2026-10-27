@@ -1,12 +1,11 @@
 use super::{
-    closed::CLOSED_TAB_LIMIT,
     tests::{database, insert, request, tab},
 };
 use crate::app::services::session_store::CapturedClosedTab;
 use futures_lite::future::block_on;
 
 #[test]
-fn closed_retention_is_bounded_retry_safe_and_shares_blob_bodies() {
+fn closed_retention_is_budgeted_retry_safe_and_shares_blob_bodies() {
     block_on(async {
         let (_root, mut db) = database().await;
         let closed = CapturedClosedTab::capture(&tab("shared"), None);
@@ -17,16 +16,16 @@ fn closed_retention_is_bounded_retry_safe_and_shares_blob_bodies() {
         retry.closed_tabs.push(closed);
         db.persist(retry, 2).await.unwrap();
         assert_eq!(db.closed_rows().await.unwrap().len(), 1);
-        for generation in 3..(CLOSED_TAB_LIMIT as u64 + 6) {
+        for generation in 3..38 {
             let mut next = request(&[]);
             next.closed_tabs
                 .push(CapturedClosedTab::capture(&tab("shared"), None));
             db.persist(next, generation).await.unwrap();
         }
-        assert_eq!(db.closed_rows().await.unwrap().len(), CLOSED_TAB_LIMIT);
+        assert_eq!(db.closed_rows().await.unwrap().len(), 36, "no hidden 32-tab limit");
         assert_eq!(
             db.integer("SELECT count(*) FROM snapshots").await.unwrap(),
-            CLOSED_TAB_LIMIT as i64
+            36
         );
         assert_eq!(db.integer("SELECT count(*) FROM blobs").await.unwrap(), 1);
     });
@@ -49,7 +48,7 @@ fn damaged_closed_history_is_quarantined_before_retention_expiry() {
             .unwrap();
         assert!(db.read_closed_tab(&token).await.is_err());
         assert_eq!(db.quarantined.len(), 1);
-        for generation in 2..CLOSED_TAB_LIMIT as u64 + 3 {
+        for generation in 2..35 {
             let mut capture = request(&[]);
             capture
                 .closed_tabs
@@ -57,7 +56,7 @@ fn damaged_closed_history_is_quarantined_before_retention_expiry() {
             db.persist(capture, generation).await.unwrap();
         }
         assert!(
-            !db.closed_rows()
+            db.closed_rows()
                 .await
                 .unwrap()
                 .iter()
@@ -65,7 +64,7 @@ fn damaged_closed_history_is_quarantined_before_retention_expiry() {
         );
         assert_eq!(
             db.integer("SELECT count(*) FROM snapshots").await.unwrap(),
-            CLOSED_TAB_LIMIT as i64 + 1
+            34
         );
         assert_eq!(
             db.integer("SELECT count(*) FROM history WHERE entry=x'00'")

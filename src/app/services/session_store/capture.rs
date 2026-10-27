@@ -16,6 +16,7 @@ pub(crate) struct SessionPersistRequest {
     pub(super) tabs: Vec<CapturedSessionTab>,
     pub(crate) closed_tabs: Vec<CapturedClosedTab>,
     pub(super) version_history: bool,
+    pub(crate) recovery_policy: crate::app::services::settings_store::RecoverySettings,
 }
 
 #[derive(Clone)]
@@ -31,6 +32,7 @@ pub(super) struct CapturedSessionTab {
     pub(super) buffer_snapshots: Vec<CapturedSessionBuffer>,
     pub(super) recovery_points: Vec<CapturedRecoveryPoint>,
     pub(super) preserve_existing: bool,
+    pub(super) discard_history: bool,
 }
 
 #[derive(Clone)]
@@ -67,6 +69,7 @@ impl SessionPersistRequest {
             tabs: tabs.iter().map(CapturedSessionTab::capture).collect(),
             closed_tabs: Vec::new(),
             version_history: true,
+            recovery_policy: Default::default(),
         }
     }
 
@@ -86,6 +89,7 @@ impl SessionPersistRequest {
             word_wrap,
             closed_tabs: Vec::new(),
             version_history: true,
+            recovery_policy: Default::default(),
             tabs: tabs
                 .iter()
                 .enumerate()
@@ -145,6 +149,7 @@ impl CapturedSessionTab {
             buffer_snapshots: Vec::new(),
             recovery_points: Vec::new(),
             preserve_existing: true,
+            discard_history: false,
         }
     }
 
@@ -177,6 +182,7 @@ impl CapturedSessionTab {
                 })
             }).collect(),
             preserve_existing: false,
+            discard_history: false,
         }
     }
 }

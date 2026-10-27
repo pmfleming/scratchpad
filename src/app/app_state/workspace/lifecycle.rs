@@ -295,13 +295,6 @@ fn close_tab_internal(app: &mut ScratchpadApp, index: usize) {
             app.tab_manager.cold_session_tabs().get(&index),
         );
         app.state.persistence.pending_closed_tabs.push(closed);
-        let excess = app
-            .state
-            .persistence
-            .pending_closed_tabs
-            .len()
-            .saturating_sub(crate::app::services::session_store::CLOSED_TAB_LIMIT);
-        app.state.persistence.pending_closed_tabs.drain(..excess);
     }
     let settings_refresh = app.settings_toml_refresh_on_tab_close(index);
     crate::app::app_state::frame::begin_layout_transition(app);

@@ -14,6 +14,7 @@ mod incremental_tests;
 #[cfg(test)]
 mod inventory_tests;
 mod persist;
+mod retention;
 mod quarantine;
 #[cfg(test)]
 mod quarantine_tests;
@@ -22,6 +23,8 @@ mod range_tests;
 mod read;
 #[cfg(test)]
 mod retention_tests;
+#[cfg(test)]
+mod retention_policy_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -83,6 +86,7 @@ pub(super) struct Database {
     // only describe snapshots written by this process. None requires a fresh scan.
     inventory: Option<ContentInventory>,
     latest_request: u64,
+    recovery_policy: Option<crate::app::services::settings_store::RecoverySettings>,
     pub(super) blocked: Option<String>,
     verified: bool,
     quarantined: HashMap<String, super::model::SessionBuffer>,
@@ -119,6 +123,7 @@ impl Database {
             history_cache: HashMap::new(),
             inventory: None,
             latest_request: 0,
+            recovery_policy: None,
             blocked: None,
             verified: false,
             quarantined: HashMap::new(),

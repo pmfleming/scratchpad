@@ -31,6 +31,7 @@ struct Prepared {
     closed: Vec<super::closed::ClosedRow>,
     closed_changed: bool,
     version_history: bool,
+    recovery_policy: crate::app::services::settings_store::RecoverySettings,
     chunk_checkpoints: HashMap<String, super::chunking::ChunkCheckpoint>,
 }
 impl Prepared {
@@ -51,6 +52,7 @@ impl Prepared {
         let mut prepared = Self {
             state: serde_json::to_vec(&manifest).map_err(invalid)?,
             version_history: request.version_history,
+            recovery_policy: request.recovery_policy,
             ..Self::default()
         };
         for tab in request.tabs {
@@ -72,7 +74,7 @@ impl Prepared {
         validation::validate_tab(&tab.session_tab)?;
         for buffer in &mut tab.session_tab.buffers {
             let entries = std::mem::take(&mut buffer.text_history);
-            let history = (!tab.preserve_existing).then_some(entries);
+            let history = (!tab.preserve_existing || tab.discard_history).then_some(entries);
             if let Some(entries) = &history {
                 super::history::validate(entries)?;
             }
@@ -210,7 +212,8 @@ impl Database {
         Ok(())
     }
     fn has_changes(&self, prepared: &Prepared) -> bool {
-        prepared.full_cleanup
+        self.recovery_policy.as_ref() != Some(&prepared.recovery_policy)
+            || prepared.full_cleanup
             || prepared.closed_changed
             || !prepared.recovery_points.is_empty()
             || !prepared.snapshots.is_empty()
@@ -274,6 +277,7 @@ impl Database {
                 buffer.history_fingerprints.map(|entries| (id, entries))
             }),
         );
+        self.recovery_policy = Some(prepared.recovery_policy);
         self.state_cache = prepared.state;
         self.tab_cache = prepared.tabs;
     }
@@ -350,6 +354,7 @@ impl Database {
         }
         profile.manifest_write_ns = start.elapsed().as_nanos();
         let start = Instant::now();
+        self.prune_recovery_points(&prepared.recovery_policy, &prepared.closed, &mut removed_digests).await?;
         self.delete_stale_content(prepared, removed_digests).await?;
         profile.stale_cleanup_ns = start.elapsed().as_nanos();
         Ok(())

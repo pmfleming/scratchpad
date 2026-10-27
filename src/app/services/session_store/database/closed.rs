@@ -7,7 +7,6 @@ use crate::app::services::session_store::{
 use std::{collections::HashSet, io};
 use turso::params;
 
-pub(crate) const CLOSED_TAB_LIMIT: usize = 32;
 pub(super) const SCHEMA: &str = "CREATE TABLE closed_tabs(sequence INTEGER PRIMARY KEY, token TEXT NOT NULL UNIQUE, closed_at INTEGER NOT NULL, payload BLOB NOT NULL) STRICT;";
 
 #[derive(PartialEq, Eq)]
@@ -71,6 +70,7 @@ impl Database {
                         buffer_snapshots: Vec::new(),
                         recovery_points: Vec::new(),
                         preserve_existing: true,
+                        discard_history: false,
                     },
                 });
             }
@@ -84,9 +84,7 @@ impl Database {
                 .iter()
                 .any(|buffer| live.contains(buffer.temp_id.as_str()))
         });
-        if retained.len() > CLOSED_TAB_LIMIT {
-            retained.drain(..retained.len() - CLOSED_TAB_LIMIT);
-        }
+        self.apply_archive_policy(&mut retained, &request.recovery_policy).await?;
         request.closed_tabs = retained;
         Ok(old)
     }

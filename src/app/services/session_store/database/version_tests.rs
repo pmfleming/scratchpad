@@ -1,7 +1,6 @@
 use super::{
     Database,
     tests::{database, request, tab},
-    versions::VERSION_LIMIT,
 };
 use crate::app::domain::WorkspaceTab;
 use crate::app::services::session_store::SessionPersistRequest;
@@ -14,7 +13,7 @@ fn captured(tabs: &[WorkspaceTab]) -> SessionPersistRequest {
 }
 
 #[test]
-fn versions_are_periodic_bounded_durable_and_gc_roots() {
+fn versions_are_periodic_durable_and_gc_roots_without_hidden_count_limit() {
     block_on(async {
         let (root, mut db) = database().await;
         let mut tabs = vec![tab("initial")];
@@ -55,7 +54,7 @@ fn versions_are_periodic_bounded_durable_and_gc_roots() {
         drop(db);
         let mut db = Database::open(root.path()).await.unwrap();
         assert_eq!(db.read_version(initial).await.unwrap(), "initial");
-        for generation in 3..VERSION_LIMIT as u64 + 7 {
+        for generation in 3..23 {
             db.conn
                 .execute("UPDATE buffer_versions SET created_at=0", ())
                 .await
@@ -66,11 +65,11 @@ fn versions_are_periodic_bounded_durable_and_gc_roots() {
                 .replace_text(format!("version {generation}"));
             db.persist(captured(&tabs), generation).await.unwrap();
         }
-        assert_eq!(db.version_history(&id).await.unwrap().len(), VERSION_LIMIT);
-        assert!(db.read_version(initial).await.is_err());
+        assert_eq!(db.version_history(&id).await.unwrap().len(), 22);
+        assert_eq!(db.read_version(initial).await.unwrap(), "initial");
         assert_eq!(
             db.integer("SELECT count(*) FROM blobs").await.unwrap(),
-            VERSION_LIMIT as i64
+            22
         );
         // Expiring the last live/closed buffer also expires its save points.
         db.persist(captured(&[]), 100).await.unwrap();

@@ -2,7 +2,6 @@ use super::{Database, content::Content, error, invalid};
 use std::{collections::HashSet, io};
 use turso::params;
 
-pub(super) const VERSION_LIMIT: usize = 16;
 pub(super) const VERSION_INTERVAL_SECONDS: i64 = 300;
 pub(super) const SCHEMA: &str = "
 CREATE TABLE buffer_versions(id INTEGER PRIMARY KEY AUTOINCREMENT, temp_id TEXT NOT NULL REFERENCES buffer_ids(id) ON DELETE CASCADE,
@@ -65,7 +64,7 @@ impl Database {
         &self,
         id: &str,
         now: i64,
-        removed: &mut HashSet<Vec<u8>>,
+        _removed: &mut HashSet<Vec<u8>>,
     ) -> io::Result<()> {
         // Select and create the point together; RETURNING identifies this insert,
         // never an unrelated previous row when no snapshot/eligible version exists.
@@ -86,23 +85,6 @@ impl Database {
             params![version, id],
         )
         .await?;
-        let expired = self
-            .query_collect(
-                "SELECT id FROM buffer_versions WHERE temp_id=? ORDER BY id DESC LIMIT -1 OFFSET ?",
-                params![id, VERSION_LIMIT as i64],
-                |row| row.get::<i64>(0).map_err(error),
-            )
-            .await?;
-        for id in expired {
-            self.collect_digests(
-                "SELECT digest FROM version_parts WHERE version_id=?",
-                [id],
-                removed,
-            )
-            .await?;
-            self.execute_cached("DELETE FROM buffer_versions WHERE id=?", [id])
-                .await?;
-        }
         Ok(())
     }
 
