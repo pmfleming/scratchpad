@@ -179,6 +179,35 @@ impl Database {
             .get(0)
             .map_err(error)
     }
+    // Map one row at a time: fingerprint callers release each undo payload here,
+    // rather than materializing a second complete history before hashing it.
+    async fn query_collect<T>(
+        &self,
+        sql: &str,
+        params: impl turso::IntoParams,
+        mut map: impl FnMut(&turso::Row) -> io::Result<T>,
+    ) -> io::Result<Vec<T>> {
+        let mut rows = self.conn.query(sql, params).await.map_err(error)?;
+        let mut values = Vec::new();
+        while let Some(row) = rows.next().await.map_err(error)? {
+            values.push(map(&row)?);
+        }
+        Ok(values)
+    }
+
+    async fn collect_digests(
+        &self,
+        sql: &str,
+        params: impl turso::IntoParams,
+        into: &mut HashSet<Vec<u8>>,
+    ) -> io::Result<()> {
+        let mut rows = self.conn.query(sql, params).await.map_err(error)?;
+        while let Some(row) = rows.next().await.map_err(error)? {
+            into.insert(row.get(0).map_err(error)?);
+        }
+        Ok(())
+    }
+
     async fn string_set(&self, sql: &str) -> io::Result<HashSet<String>> {
         let mut rows = self.conn.query(sql, ()).await.map_err(error)?;
         let mut values = HashSet::new();

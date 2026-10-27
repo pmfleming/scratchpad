@@ -1,9 +1,7 @@
 use super::ScratchpadApp;
 use crate::app::app_state::settings_controller;
+use crate::app::app_state::test_support::test_app as app_with_root;
 use crate::app::domain::{BufferState, TabManager, WorkspaceTab};
-use crate::app::services::session_store::SessionStore;
-use crate::app::services::settings_store::SettingsStore;
-use crate::app::startup::StartupOptions;
 
 #[test]
 fn command_open_settings_selects_only_settings_slot() {
@@ -171,12 +169,7 @@ fn reset_settings_to_defaults_restores_startup_default_state() {
 fn test_app<const N: usize>(names: [&str; N]) -> ScratchpadApp {
     let temp_dir = tempfile::tempdir().expect("create temp app root");
     let root = temp_dir.keep();
-    let mut app = ScratchpadApp::with_stores_and_startup(
-        SessionStore::new(root.clone()),
-        SettingsStore::new(root),
-        StartupOptions::default(),
-    );
-    app.set_session_persist_on_drop(false);
+    let mut app = app_with_root(&root);
     app.tab_manager = TabManager::for_test_tabs(names.into_iter().map(test_tab).collect());
     crate::app::app_state::workspace::display_tabs::clear_tab_selection(&mut app);
     app
@@ -184,16 +177,6 @@ fn test_app<const N: usize>(names: [&str; N]) -> ScratchpadApp {
 
 fn temp_root() -> std::path::PathBuf {
     tempfile::tempdir().expect("create temp app root").keep()
-}
-
-fn app_with_root(root: &std::path::Path) -> ScratchpadApp {
-    let mut app = ScratchpadApp::with_stores_and_startup(
-        SessionStore::new(root.join("session")),
-        SettingsStore::new(root.join("settings")),
-        StartupOptions::default(),
-    );
-    app.set_session_persist_on_drop(false);
-    app
 }
 
 fn test_tab(name: &str) -> WorkspaceTab {

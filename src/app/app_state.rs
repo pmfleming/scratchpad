@@ -27,6 +27,8 @@ mod runtime_state;
 mod search_state;
 pub(crate) mod settings_state;
 mod startup_state;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod types;
 mod window_lifecycle;
 pub(crate) mod workspace;

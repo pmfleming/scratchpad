@@ -260,10 +260,7 @@ impl FileController {
             buffer.sync_to_disk_state(Some(disk_state));
             buffer.mark_as_loading_preview();
             Self::mark_settings_buffer(app, &mut buffer);
-            crate::app::app_state::workspace_controller::insert_new_tab_from_settings(
-                app,
-                WorkspaceTab::new(buffer),
-            );
+            crate::app::app_state::workspace_controller::append_tab(app, WorkspaceTab::new(buffer));
         }
         if paths.iter().any(|path| {
             app.tab_manager
@@ -480,7 +477,7 @@ impl FileController {
                     "loaded file collided with existing path owner"
                 );
                 Self::mark_settings_buffer(app, &mut buffer);
-                crate::app::app_state::workspace_controller::insert_new_tab_from_settings(
+                crate::app::app_state::workspace_controller::append_tab(
                     app,
                     WorkspaceTab::new(buffer),
                 );

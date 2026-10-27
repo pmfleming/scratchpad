@@ -1,11 +1,9 @@
 use super::{SEARCH_PREVIEW_CACHE_LIMIT, ScratchpadApp, SearchMatch, SearchPreviewCacheKey};
 use crate::app::app_state::search_controller::{set_search_replace_open, set_search_replacement};
+use crate::app::app_state::test_support::test_app;
 use crate::app::commands::{AppCommand, WorkspaceCommand};
 use crate::app::domain::{BufferState, WorkspaceTab};
 use crate::app::services::search::find_matches;
-use crate::app::services::session_store::SessionStore;
-use crate::app::services::settings_store::SettingsStore;
-use crate::app::startup::StartupOptions;
 use std::ops::Range;
 use std::time::{Duration, Instant};
 
@@ -255,12 +253,7 @@ fn closing_replace_mode_clears_replacement_preview() {
 fn app_with_search_text(text: &str) -> ScratchpadApp {
     let temp_dir = tempfile::tempdir().expect("create temp app root");
     let root = temp_dir.keep();
-    let mut app = ScratchpadApp::with_stores_and_startup(
-        SessionStore::new(root.clone()),
-        SettingsStore::new(root),
-        StartupOptions::default(),
-    );
-    app.set_session_persist_on_drop(false);
+    let mut app = test_app(&root);
     let tab = WorkspaceTab::new(BufferState::new(
         "search.md".to_owned(),
         text.to_owned(),

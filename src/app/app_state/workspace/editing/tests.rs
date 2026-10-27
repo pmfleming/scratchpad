@@ -1,20 +1,13 @@
 use super::{toggle_active_buffer_control_chars, toggle_active_buffer_reading_order};
-use crate::app::app_state::ScratchpadApp;
+use crate::app::app_state::test_support::test_app;
 use crate::app::domain::view::LayoutCacheKey;
 use crate::app::domain::{BufferState, SearchHighlightState, SplitAxis, TabManager, WorkspaceTab};
-use crate::app::services::{session_store::SessionStore, settings_store::SettingsStore};
-use crate::app::startup::StartupOptions;
 use eframe::egui;
 
 #[test]
 fn display_toggles_affect_only_active_buffer_and_its_views() {
     let directory = tempfile::tempdir().unwrap();
-    let mut app = ScratchpadApp::with_stores_and_startup(
-        SessionStore::new(directory.path().join("session")),
-        SettingsStore::new(directory.path().join("settings")),
-        StartupOptions::default(),
-    );
-    app.set_session_persist_on_drop(false);
+    let mut app = test_app(directory.path());
     let mut tab = WorkspaceTab::untitled();
     let active_view = tab.layout.active_view_id;
     let active_buffer = tab.active_buffer().id;

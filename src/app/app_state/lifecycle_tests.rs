@@ -1,4 +1,7 @@
-use super::ScratchpadApp;
+use super::{
+    ScratchpadApp,
+    test_support::{logic, test_app},
+};
 use crate::app::domain::{BufferState, WorkspaceTab};
 use crate::app::services::instance_broker::{ElectionResult, LaunchRequest, PrimaryInstance};
 use crate::app::services::session_store::SessionStore;
@@ -8,6 +11,7 @@ use eframe::{App, egui};
 use std::time::{Duration, Instant};
 
 mod restore;
+mod retained;
 
 fn hidden_input() -> egui::RawInput {
     let mut input = egui::RawInput {
@@ -18,26 +22,6 @@ fn hidden_input() -> egui::RawInput {
     viewport.minimized = Some(true);
     viewport.focused = Some(false);
     input
-}
-
-fn logic(
-    app: &mut ScratchpadApp,
-    ctx: &egui::Context,
-    input: &egui::RawInput,
-) -> egui::LogicOutput {
-    ctx.run_logic(input, |ctx| {
-        App::logic(app, ctx, &mut eframe::Frame::_new_kittest());
-    })
-}
-
-fn test_app(root: &std::path::Path) -> ScratchpadApp {
-    let mut app = ScratchpadApp::with_stores_and_startup(
-        SessionStore::new(root.join("session")),
-        SettingsStore::new(root.join("settings")),
-        StartupOptions::default(),
-    );
-    app.set_session_persist_on_drop(false);
-    app
 }
 
 #[test]
@@ -126,61 +110,45 @@ fn minimized_close_is_handled_without_ui() {
 }
 
 #[test]
-fn closing_last_tab_exits_and_persists_empty_session() {
-    let directory = tempfile::tempdir().unwrap();
-    let mut app = test_app(directory.path());
-    super::settings_controller::close_settings(&mut app);
-    super::workspace_controller::perform_close_tab(&mut app, 0);
-    assert!(app.tab_manager.tabs.is_empty());
-
-    let ctx = egui::Context::default();
-    let output = logic(&mut app, &ctx, &hidden_input());
-    assert!(
-        output.viewport_commands[&egui::ViewportId::ROOT].contains(&egui::ViewportCommand::Close)
-    );
-    assert!(app.state.window.close_in_progress);
-    assert!(
-        app.state
-            .persistence
-            .session_store
-            .load()
-            .unwrap()
-            .is_none()
-    );
-}
-
-#[test]
-fn closing_workspace_tab_keeps_settings_open_until_last_tab_closes() {
-    let directory = tempfile::tempdir().unwrap();
-    let mut app = test_app(directory.path());
-    super::settings_controller::open_settings(&mut app);
-    super::workspace_controller::perform_close_tab(&mut app, 0);
-    assert!(app.tab_manager.tabs.is_empty());
-
-    let ctx = egui::Context::default();
-    let _ = logic(&mut app, &ctx, &hidden_input());
-    assert!(!app.state.window.close_in_progress);
-
-    super::settings_controller::close_settings(&mut app);
-    let output = logic(&mut app, &ctx, &hidden_input());
-    assert!(
-        output.viewport_commands[&egui::ViewportId::ROOT].contains(&egui::ViewportCommand::Close)
-    );
-    assert!(app.state.window.close_in_progress);
-}
-
-#[test]
-fn closing_one_of_two_workspace_tabs_does_not_exit() {
-    let directory = tempfile::tempdir().unwrap();
-    let mut app = test_app(directory.path());
-    super::settings_controller::close_settings(&mut app);
-    app.tab_manager.create_untitled_tab();
-    super::workspace_controller::perform_close_tab(&mut app, 0);
-
-    let ctx = egui::Context::default();
-    let _ = logic(&mut app, &ctx, &hidden_input());
-    assert_eq!(app.tab_manager.tabs.len(), 1);
-    assert!(!app.state.window.close_in_progress);
+fn only_the_last_display_tab_exits_and_persists_an_empty_workspace() {
+    for settings_open in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = test_app(directory.path());
+        super::settings_controller::close_settings(&mut app);
+        if settings_open {
+            super::settings_controller::open_settings(&mut app);
+        }
+        app.tab_manager.create_untitled_tab();
+        let ctx = egui::Context::default();
+        super::workspace_controller::perform_close_tab(&mut app, 0);
+        let _ = logic(&mut app, &ctx, &hidden_input());
+        assert_eq!(app.tab_manager.tabs.len(), 1);
+        assert!(!app.state.window.close_in_progress);
+        super::workspace_controller::perform_close_tab(&mut app, 0);
+        assert!(app.tab_manager.tabs.is_empty());
+        if settings_open {
+            let _ = logic(&mut app, &ctx, &hidden_input());
+            assert!(
+                !app.state.window.close_in_progress,
+                "settings is still a display tab"
+            );
+            super::settings_controller::close_settings(&mut app);
+        }
+        let output = logic(&mut app, &ctx, &hidden_input());
+        assert!(
+            output.viewport_commands[&egui::ViewportId::ROOT]
+                .contains(&egui::ViewportCommand::Close)
+        );
+        assert!(app.state.window.close_in_progress);
+        assert!(
+            app.state
+                .persistence
+                .session_store
+                .load()
+                .unwrap()
+                .is_none()
+        );
+    }
 }
 
 #[test]

@@ -1,9 +1,14 @@
-use super::super::*;
-use crate::app::app_state::ScratchpadApp;
-use crate::app::domain::BufferState;
+use super::super::{SessionStore, database};
+use crate::app::app_state::{
+    ScratchpadApp,
+    test_support::{close_input, logic},
+};
+use crate::app::domain::{BufferState, WorkspaceTab};
 use crate::app::services::{session_manager, settings_store::SettingsStore};
 use crate::app::startup::StartupOptions;
-use eframe::{App, egui};
+use eframe::egui;
+use futures_lite::future::block_on;
+use std::time::Instant;
 
 fn tabs() -> Vec<WorkspaceTab> {
     ["healthy", "damaged"]
@@ -91,16 +96,7 @@ fn unsupported_schema_allows_exit_without_replacing_the_database() {
         },
     );
     let ctx = egui::Context::default();
-    let mut input = egui::RawInput::default();
-    input
-        .viewports
-        .get_mut(&egui::ViewportId::ROOT)
-        .unwrap()
-        .events
-        .push(egui::ViewportEvent::Close);
-    let output = ctx.run_logic(&input, |ctx| {
-        app.logic(ctx, &mut eframe::Frame::_new_kittest());
-    });
+    let output = logic(&mut app, &ctx, &close_input());
     assert!(
         output.viewport_commands[&egui::ViewportId::ROOT].contains(&egui::ViewportCommand::Close)
     );
@@ -131,16 +127,12 @@ fn retryable_session_save_failure_keeps_window_open_and_does_not_loop() {
     app.tab_manager.set_tabs(Vec::new(), 0);
     let ctx = egui::Context::default();
     let input = egui::RawInput::default();
-    let _ = ctx.run_logic(&input, |ctx| {
-        app.logic(ctx, &mut eframe::Frame::_new_kittest());
-    });
+    let _ = logic(&mut app, &ctx, &input);
     assert!(!app.state.window.close_in_progress);
     assert!(!store.writes_blocked());
     let count = app.state.status.history.len();
     for _ in 0..3 {
-        let _ = ctx.run_logic(&input, |ctx| {
-            app.logic(ctx, &mut eframe::Frame::_new_kittest());
-        });
+        let _ = logic(&mut app, &ctx, &input);
     }
     assert_eq!(app.state.status.history.len(), count);
     store
@@ -156,15 +148,6 @@ fn retryable_session_save_failure_keeps_window_open_and_does_not_loop() {
             })
         })
         .unwrap();
-    let mut close = input;
-    close
-        .viewports
-        .get_mut(&egui::ViewportId::ROOT)
-        .unwrap()
-        .events
-        .push(egui::ViewportEvent::Close);
-    let _ = ctx.run_logic(&close, |ctx| {
-        app.logic(ctx, &mut eframe::Frame::_new_kittest());
-    });
+    let _ = logic(&mut app, &ctx, &close_input());
     assert!(app.state.window.close_in_progress);
 }

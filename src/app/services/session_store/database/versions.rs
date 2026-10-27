@@ -26,56 +26,39 @@ impl Database {
         now: i64,
         removed: &mut HashSet<Vec<u8>>,
     ) -> io::Result<()> {
-        let mut latest = self.conn.query("SELECT created_at, digest FROM buffer_versions WHERE temp_id=? ORDER BY id DESC LIMIT 1", [id]).await.map_err(error)?;
-        if let Some(row) = latest.next().await.map_err(error)? {
-            let last: i64 = row.get(0).map_err(error)?;
-            if now.saturating_sub(last) < VERSION_INTERVAL_SECONDS {
-                return Ok(());
-            }
-            let old_digest: Vec<u8> = row.get(1).map_err(error)?;
-            let mut snapshot = self
-                .conn
-                .query("SELECT digest FROM snapshots WHERE id=?", [id])
-                .await
-                .map_err(error)?;
-            if let Some(row) = snapshot.next().await.map_err(error)?
-                && row.get::<Vec<u8>>(0).map_err(error)? == old_digest
-            {
-                return Ok(());
-            }
-        }
-        drop(latest);
-        self.execute_cached("INSERT INTO buffer_versions(temp_id, created_at, bytes, digest) SELECT id, ?, bytes, digest FROM snapshots WHERE id=?", params![now, id]).await?;
-        // A snapshot always exists: called only after a successful content write.
-        let version = self.integer("SELECT last_insert_rowid()").await?;
+        // Select and create the point together; RETURNING identifies this insert,
+        // never an unrelated previous row when no snapshot/eligible version exists.
+        let created = self.query_collect(
+            "WITH latest AS (SELECT created_at, digest FROM buffer_versions WHERE temp_id=? ORDER BY id DESC LIMIT 1)
+             INSERT INTO buffer_versions(temp_id, created_at, bytes, digest)
+             SELECT id, ?, bytes, digest FROM snapshots WHERE id=?
+             AND NOT EXISTS(SELECT 1 FROM latest WHERE created_at>? OR latest.digest=snapshots.digest)
+             RETURNING id",
+            params![id, now, id, now.saturating_sub(VERSION_INTERVAL_SECONDS)],
+            |row| row.get::<i64>(0).map_err(error),
+        ).await?;
+        let Some(&version) = created.first() else {
+            return Ok(());
+        };
         self.execute_cached(
             "INSERT INTO version_parts SELECT ?, part, digest FROM parts WHERE temp_id=?",
             params![version, id],
         )
         .await?;
-        let mut expired = self
-            .conn
-            .query(
+        let expired = self
+            .query_collect(
                 "SELECT id FROM buffer_versions WHERE temp_id=? ORDER BY id DESC LIMIT -1 OFFSET ?",
                 params![id, VERSION_LIMIT as i64],
+                |row| row.get::<i64>(0).map_err(error),
             )
-            .await
-            .map_err(error)?;
-        let mut ids = Vec::new();
-        while let Some(row) = expired.next().await.map_err(error)? {
-            ids.push(row.get::<i64>(0).map_err(error)?);
-        }
-        drop(expired);
-        for id in ids {
-            let mut rows = self
-                .conn
-                .query("SELECT digest FROM version_parts WHERE version_id=?", [id])
-                .await
-                .map_err(error)?;
-            while let Some(row) = rows.next().await.map_err(error)? {
-                removed.insert(row.get(0).map_err(error)?);
-            }
-            drop(rows);
+            .await?;
+        for id in expired {
+            self.collect_digests(
+                "SELECT digest FROM version_parts WHERE version_id=?",
+                [id],
+                removed,
+            )
+            .await?;
             self.execute_cached("DELETE FROM buffer_versions WHERE id=?", [id])
                 .await?;
         }
@@ -87,11 +70,7 @@ impl Database {
         id: &str,
         removed: &mut HashSet<Vec<u8>>,
     ) -> io::Result<()> {
-        let mut rows = self.conn.query("SELECT p.digest FROM version_parts p JOIN buffer_versions v ON v.id=p.version_id WHERE v.temp_id=?", [id]).await.map_err(error)?;
-        while let Some(row) = rows.next().await.map_err(error)? {
-            removed.insert(row.get(0).map_err(error)?);
-        }
-        Ok(())
+        self.collect_digests("SELECT p.digest FROM version_parts p JOIN buffer_versions v ON v.id=p.version_id WHERE v.temp_id=?", [id], removed).await
     }
 
     pub(in crate::app::services::session_store) async fn version_history(
@@ -99,16 +78,18 @@ impl Database {
         id: &str,
     ) -> io::Result<Vec<BufferVersionInfo>> {
         self.ensure_healthy()?;
-        let mut rows = self.conn.query("SELECT id, created_at, bytes FROM buffer_versions WHERE temp_id=? ORDER BY id DESC", [id]).await.map_err(error)?;
-        let mut versions = Vec::new();
-        while let Some(row) = rows.next().await.map_err(error)? {
-            versions.push(BufferVersionInfo {
-                id: row.get(0).map_err(error)?,
-                created_at_unix_seconds: row.get(1).map_err(error)?,
-                bytes: usize::try_from(row.get::<i64>(2).map_err(error)?).map_err(invalid)?,
-            });
-        }
-        Ok(versions)
+        self.query_collect(
+            "SELECT id, created_at, bytes FROM buffer_versions WHERE temp_id=? ORDER BY id DESC",
+            [id],
+            |row| {
+                Ok(BufferVersionInfo {
+                    id: row.get(0).map_err(error)?,
+                    created_at_unix_seconds: row.get(1).map_err(error)?,
+                    bytes: usize::try_from(row.get::<i64>(2).map_err(error)?).map_err(invalid)?,
+                })
+            },
+        )
+        .await
     }
 
     pub(in crate::app::services::session_store) async fn read_version(

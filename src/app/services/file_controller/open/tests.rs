@@ -1,17 +1,10 @@
 use super::{FileController, LoadedPathResult, OpenBatchSummary, ScratchpadApp};
+use crate::app::app_state::test_support::{self, wait_for_background_io};
 use crate::app::domain::{BufferState, TabManager, WorkspaceTab};
 use crate::app::services::file_service::FileService;
-use crate::app::services::session_store::SessionStore;
-use crate::app::services::settings_store::SettingsStore;
-use crate::app::startup::StartupOptions;
 
 fn test_app(root: &std::path::Path, tabs: Vec<WorkspaceTab>) -> ScratchpadApp {
-    let mut app = ScratchpadApp::with_stores_and_startup(
-        SessionStore::new(root.join("session")),
-        SettingsStore::new(root.join("settings")),
-        StartupOptions::default(),
-    );
-    app.set_session_persist_on_drop(false);
+    let mut app = test_support::test_app(root);
     app.tab_manager = TabManager::for_test_tabs(tabs);
     crate::app::app_state::workspace::display_tabs::clear_tab_selection(&mut app);
     app
@@ -93,7 +86,7 @@ fn open_selected_paths_async_deduplicates_pending_path() {
 
     FileController::open_selected_paths_async(&mut app, vec![path.clone()]);
     FileController::open_selected_paths_async(&mut app, vec![path.clone()]);
-    app.wait_for_background_io_idle();
+    wait_for_background_io(&mut app);
 
     assert_eq!(open_path_count(&app, &path), 1);
     assert!(app.state.pending_open_file_paths.is_empty());
@@ -119,7 +112,7 @@ fn large_file_stages_first_visible_window_before_background_hydration() {
     assert_eq!(preview.text(), "first vi");
     assert!(preview.is_loading_preview);
 
-    app.wait_for_background_io_idle();
+    wait_for_background_io(&mut app);
     let hydrated = app.tab_manager.active_tab().unwrap().active_buffer();
     assert_eq!(hydrated.text(), "first visible then fully hydrated");
     assert!(!hydrated.is_loading_preview);
@@ -156,7 +149,7 @@ fn large_open_batch_hydrates_most_recent_tab_before_returning() {
         format!("loaded {}", paths.len() - 1)
     );
 
-    app.wait_for_background_io_idle();
+    wait_for_background_io(&mut app);
     assert!(app.state.pending_open_file_paths.is_empty());
     assert_eq!(app.tab_manager.cold_session_tabs().len(), paths.len() - 1);
 }

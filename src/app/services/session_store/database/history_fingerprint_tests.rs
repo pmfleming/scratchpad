@@ -1,61 +1,61 @@
 use super::{
     Database,
-    history::{HistoryFingerprint, fingerprints},
+    history::HistoryFingerprint,
     tests::{database, insert, request, tab},
 };
+use crate::app::domain::PersistedHistoryEntry;
 use futures_lite::future::block_on;
 
 #[test]
-fn fingerprints_cover_payload_selection_coalescing_and_budget_stripping() {
-    let mut tab = tab("before");
-    insert(&mut tab, 0, "payload");
-    let entries = tab.active_buffer().document().exported_history();
-    let original = fingerprints(&entries).unwrap();
-    for case in 0..5 {
-        let mut changed = entries.clone();
-        match case {
-            0 => changed[0].global_seq += 1,
-            1 => changed[0].summary.push_str(" changed"),
-            2 => {
-                changed[0].next_selection.primary_prefer_next_row =
-                    !changed[0].next_selection.primary_prefer_next_row;
-            }
-            3 => changed[0].drop_payloads(),
-            _ => changed[0].fingerprint ^= 1,
-        }
-        assert_ne!(fingerprints(&changed).unwrap(), original);
-    }
-}
-
-#[test]
-fn worker_cache_size_does_not_scale_with_undo_payload_and_reopen_uses_same_fingerprints() {
+fn compact_history_cache_persists_complete_row_changes_and_survives_reopen() {
     block_on(async {
         let (root, mut db) = database().await;
         let mut tabs = vec![tab("")];
         insert(&mut tabs[0], 0, &"large undo payload ".repeat(64 * 1024));
         let id = tabs[0].active_buffer().temp_id.clone();
         db.persist(request(&tabs), 1).await.unwrap();
-        let expected = db.history_cache[&id].clone();
-        assert!(!expected.is_empty());
+        let original = db.history_cache[&id].clone();
+        assert_eq!(original.len(), 1);
         assert!(std::mem::size_of::<HistoryFingerprint>() <= 40);
-        let payload_bytes: usize = tabs[0]
-            .active_buffer()
-            .document()
-            .exported_history()
-            .iter()
-            .map(|entry| {
-                entry
-                    .edits
-                    .iter()
-                    .map(|edit| edit.payload_bytes())
-                    .sum::<usize>()
-            })
-            .sum();
-        assert!(payload_bytes > 1024 * 1024);
-        assert!(std::mem::size_of_val(expected.as_slice()) <= 80);
+        let entries = tabs[0].active_buffer().document().exported_history();
+        assert!(
+            entries[0]
+                .edits
+                .iter()
+                .map(|edit| edit.payload_bytes())
+                .sum::<usize>()
+                > 1024 * 1024
+        );
+
+        // Verify real writes, not just two calls to the hash function. These fields
+        // can change while the stable row ID and document revision remain equal.
+        let mutations: [fn(&mut PersistedHistoryEntry); 5] = [
+            |entry| entry.global_seq += 1,
+            |entry| entry.summary.push_str(" changed"),
+            |entry| {
+                entry.next_selection.primary_prefer_next_row =
+                    !entry.next_selection.primary_prefer_next_row;
+            },
+            PersistedHistoryEntry::drop_payloads,
+            |entry| entry.fingerprint ^= 1,
+        ];
+        for (index, mutate) in mutations.into_iter().enumerate() {
+            let mut capture = request(&tabs);
+            let entries = &mut capture.tabs[0].session_tab.buffers[0].text_history;
+            mutate(&mut entries[0]);
+            let expected = entries.clone();
+            db.persist(capture, index as u64 + 2).await.unwrap();
+            assert_eq!(
+                db.read_history(&id).await.unwrap(),
+                expected,
+                "mutation {index}"
+            );
+            assert_ne!(db.history_cache[&id], original);
+        }
+        db.persist(request(&tabs), 10).await.unwrap();
         drop(db);
         let mut db = Database::open(root.path()).await.unwrap();
         db.persist(request(&tabs), 1).await.unwrap();
-        assert_eq!(db.history_cache[&id], expected);
+        assert_eq!(db.history_cache[&id], original);
     });
 }

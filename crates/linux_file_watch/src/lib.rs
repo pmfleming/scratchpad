@@ -1,9 +1,9 @@
-use std::collections::{BTreeSet, HashMap};
-use std::ffi::{CString, c_char, c_int, c_void};
-use std::io;
-use std::mem::size_of;
-use std::os::unix::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use rustix::fd::AsFd;
+use rustix::fs::inotify::{self, CreateFlags, ReadFlags, Reader, WatchFlags};
+use rustix::io::Errno;
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::mem::MaybeUninit;
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
@@ -17,7 +17,7 @@ pub enum FileWatchEvent {
 }
 
 enum WatchCommand {
-    SetDirectories(Vec<PathBuf>),
+    SetDirectories(BTreeSet<PathBuf>),
     Stop,
 }
 
@@ -31,7 +31,17 @@ impl FileWatchService {
     pub fn new() -> Self {
         let (command_tx, command_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
-        spawn_watch_thread(command_rx, event_tx);
+        let startup_errors = event_tx.clone();
+        let spawned = std::thread::Builder::new()
+            .name("scratchpad-file-watch".to_owned())
+            .spawn(move || {
+                if let Err(error) = linux_watch_loop(command_rx, &event_tx) {
+                    report_error(&event_tx, None, error);
+                }
+            });
+        if let Err(error) = spawned {
+            report_error(&startup_errors, None, error);
+        }
         Self {
             command_tx,
             event_rx,
@@ -40,21 +50,16 @@ impl FileWatchService {
     }
 
     pub fn set_watched_directories(&mut self, dirs: BTreeSet<PathBuf>) {
-        if self.watched_dirs == dirs {
-            return;
+        if self.watched_dirs != dirs {
+            let _ = self
+                .command_tx
+                .send(WatchCommand::SetDirectories(dirs.clone()));
+            self.watched_dirs = dirs;
         }
-        self.watched_dirs = dirs.clone();
-        let _ = self
-            .command_tx
-            .send(WatchCommand::SetDirectories(dirs.into_iter().collect()));
     }
 
     pub fn drain_events(&mut self) -> Vec<FileWatchEvent> {
-        let mut events = Vec::new();
-        while let Ok(event) = self.event_rx.try_recv() {
-            events.push(event);
-        }
-        events
+        self.event_rx.try_iter().collect()
     }
 }
 
@@ -70,348 +75,231 @@ impl Drop for FileWatchService {
     }
 }
 
-fn spawn_watch_thread(command_rx: Receiver<WatchCommand>, event_tx: Sender<FileWatchEvent>) {
-    std::thread::Builder::new()
-        .name("scratchpad-file-watch".to_owned())
-        .spawn(move || linux_watch_loop(command_rx, event_tx))
-        .expect("file watch thread should start");
+const WATCH_FLAGS: WatchFlags = WatchFlags::MODIFY
+    .union(WatchFlags::ATTRIB)
+    .union(WatchFlags::CLOSE_WRITE)
+    .union(WatchFlags::MOVED_FROM)
+    .union(WatchFlags::MOVED_TO)
+    .union(WatchFlags::CREATE)
+    .union(WatchFlags::DELETE)
+    .union(WatchFlags::DELETE_SELF)
+    .union(WatchFlags::MOVE_SELF);
+const INVALIDATED: ReadFlags = ReadFlags::IGNORED
+    .union(ReadFlags::DELETE_SELF)
+    .union(ReadFlags::MOVE_SELF)
+    .union(ReadFlags::UNMOUNT);
+
+#[derive(Default)]
+struct Watches {
+    by_wd: HashMap<i32, PathBuf>,
+    desired: BTreeSet<PathBuf>,
+    reported_failures: BTreeSet<PathBuf>,
 }
 
-const IN_MODIFY: u32 = 0x0000_0002;
-const IN_ATTRIB: u32 = 0x0000_0004;
-const IN_CLOSE_WRITE: u32 = 0x0000_0008;
-const IN_MOVED_FROM: u32 = 0x0000_0040;
-const IN_MOVED_TO: u32 = 0x0000_0080;
-const IN_CREATE: u32 = 0x0000_0100;
-const IN_DELETE: u32 = 0x0000_0200;
-const IN_DELETE_SELF: u32 = 0x0000_0400;
-const IN_MOVE_SELF: u32 = 0x0000_0800;
-const IN_UNMOUNT: u32 = 0x0000_2000;
-const IN_Q_OVERFLOW: u32 = 0x0000_4000;
-const IN_IGNORED: u32 = 0x0000_8000;
-
-const IN_NONBLOCK: c_int = 0o0004000;
-const IN_CLOEXEC: c_int = 0o2000000;
-
-const EAGAIN: i32 = 11;
-const EINTR: i32 = 4;
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct InotifyEventRaw {
-    wd: c_int,
-    mask: u32,
-    cookie: u32,
-    len: u32,
-}
-
-unsafe extern "C" {
-    fn inotify_init1(flags: c_int) -> c_int;
-    fn inotify_add_watch(fd: c_int, pathname: *const c_char, mask: u32) -> c_int;
-    fn inotify_rm_watch(fd: c_int, wd: c_int) -> c_int;
-    fn read(fd: c_int, buf: *mut c_void, count: usize) -> isize;
-    fn close(fd: c_int) -> c_int;
-}
-
-fn linux_watch_loop(command_rx: Receiver<WatchCommand>, event_tx: Sender<FileWatchEvent>) {
-    const WAIT_TIMEOUT: Duration = Duration::from_millis(250);
-    const EVENT_BUFFER_SIZE: usize = 16 * 1024;
-
-    struct InotifyFd(c_int);
-
-    impl Drop for InotifyFd {
-        fn drop(&mut self) {
-            unsafe {
-                close(self.0);
+impl Watches {
+    fn configure(&mut self, fd: impl AsFd, dirs: BTreeSet<PathBuf>) {
+        self.desired = dirs;
+        self.by_wd.retain(|wd, dir| {
+            if self.desired.contains(dir) {
+                return true;
             }
-        }
-    }
-
-    #[derive(Default)]
-    struct Watches {
-        by_wd: HashMap<c_int, PathBuf>,
-        desired: BTreeSet<PathBuf>,
-        reported_failures: BTreeSet<PathBuf>,
-    }
-
-    impl Watches {
-        fn rebuild(&mut self, fd: c_int, dirs: Vec<PathBuf>, event_tx: &Sender<FileWatchEvent>) {
-            for wd in self.by_wd.keys().copied().collect::<Vec<_>>() {
-                unsafe {
-                    inotify_rm_watch(fd, wd);
-                }
-            }
-            self.by_wd.clear();
-            self.desired = dirs.into_iter().collect();
-            self.reported_failures
-                .retain(|dir| self.desired.contains(dir));
-            self.retry_missing(fd, event_tx);
-        }
-
-        fn retry_missing(&mut self, fd: c_int, event_tx: &Sender<FileWatchEvent>) {
-            let watched = self.by_wd.values().cloned().collect::<BTreeSet<_>>();
-            for dir in self
-                .desired
-                .difference(&watched)
-                .cloned()
-                .collect::<Vec<_>>()
-            {
-                let Some(c_path) = path_to_c_string(&dir) else {
-                    self.report_failure(
-                        event_tx,
-                        dir,
-                        "watch path contains an interior null byte".to_owned(),
-                    );
-                    continue;
-                };
-                let wd = unsafe { inotify_add_watch(fd, c_path.as_ptr(), watch_mask()) };
-                if wd >= 0 {
-                    self.by_wd.insert(wd, dir.clone());
-                    self.reported_failures.remove(&dir);
-                } else {
-                    self.report_failure(event_tx, dir, io::Error::last_os_error().to_string());
-                }
-            }
-        }
-
-        fn report_failure(
-            &mut self,
-            event_tx: &Sender<FileWatchEvent>,
-            dir: PathBuf,
-            message: String,
-        ) {
-            if self.reported_failures.insert(dir.clone()) {
-                let _ = event_tx.send(FileWatchEvent::WatchError {
-                    path: Some(dir),
-                    message,
-                });
-            }
-        }
-
-        fn watched_dirs(&self) -> impl Iterator<Item = PathBuf> + '_ {
-            self.by_wd.values().cloned()
-        }
-    }
-
-    fn watch_mask() -> u32 {
-        IN_MODIFY
-            | IN_ATTRIB
-            | IN_CLOSE_WRITE
-            | IN_MOVED_FROM
-            | IN_MOVED_TO
-            | IN_CREATE
-            | IN_DELETE
-            | IN_DELETE_SELF
-            | IN_MOVE_SELF
-    }
-
-    let fd = unsafe { inotify_init1(IN_NONBLOCK | IN_CLOEXEC) };
-    if fd < 0 {
-        let _ = event_tx.send(FileWatchEvent::WatchError {
-            path: None,
-            message: io::Error::last_os_error().to_string(),
+            let _ = inotify::remove_watch(&fd, *wd);
+            false
         });
-        drain_without_watching(command_rx);
-        return;
+        self.reported_failures
+            .retain(|dir| self.desired.contains(dir));
     }
-    let fd = InotifyFd(fd);
-    let mut watches = Watches::default();
 
-    loop {
-        while let Ok(command) = command_rx.try_recv() {
-            match command {
-                WatchCommand::SetDirectories(dirs) => watches.rebuild(fd.0, dirs, &event_tx),
-                WatchCommand::Stop => return,
+    fn retry_missing(&mut self, fd: impl AsFd, events: &Sender<FileWatchEvent>) {
+        // Borrow paths during discovery; clone only when a new watch/error owns one.
+        let missing: Vec<_> = {
+            let watched: HashSet<_> = self.by_wd.values().collect();
+            self.desired
+                .iter()
+                .filter(|dir| !watched.contains(dir))
+                .collect()
+        };
+        for dir in missing {
+            match inotify::add_watch(&fd, dir, WATCH_FLAGS) {
+                Ok(wd) => {
+                    self.by_wd.insert(wd, dir.clone());
+                    self.reported_failures.remove(dir);
+                }
+                Err(error) if self.reported_failures.insert(dir.clone()) => {
+                    report_error(events, Some(dir.clone()), error)
+                }
+                Err(_) => {}
             }
         }
+    }
 
-        watches.retry_missing(fd.0, &event_tx);
-        drain_inotify_events(fd.0, &event_tx, &mut watches);
-
-        match command_rx.recv_timeout(WAIT_TIMEOUT) {
-            Ok(WatchCommand::SetDirectories(dirs)) => {
-                watches.rebuild(fd.0, dirs, &event_tx);
+    fn dispatch(&mut self, wd: i32, mask: ReadFlags, events: &Sender<FileWatchEvent>) {
+        if mask.contains(ReadFlags::QUEUE_OVERFLOW) {
+            for dir in self.by_wd.values() {
+                let _ = events.send(FileWatchEvent::DirectoryChanged(dir.clone()));
             }
-            Ok(WatchCommand::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        } else if mask
+            .intersects(ReadFlags::from_bits_retain(WATCH_FLAGS.bits()) | ReadFlags::UNMOUNT)
+            && let Some(dir) = self.by_wd.get(&wd)
+        {
+            let _ = events.send(FileWatchEvent::DirectoryChanged(dir.clone()));
+        }
+        if mask.intersects(INVALIDATED) {
+            self.by_wd.remove(&wd);
+        }
+    }
+
+    fn drain(
+        &mut self,
+        reader: &mut Reader<'_, impl AsFd>,
+        events: &Sender<FileWatchEvent>,
+    ) -> Result<(), Errno> {
+        loop {
+            match reader.next() {
+                Ok(event) => self.dispatch(event.wd(), event.events(), events),
+                Err(Errno::INTR) => continue,
+                Err(Errno::AGAIN) => return Ok(()),
+                Err(error) => return Err(error),
+            }
+        }
+    }
+}
+
+fn linux_watch_loop(
+    commands: Receiver<WatchCommand>,
+    events: &Sender<FileWatchEvent>,
+) -> Result<(), Errno> {
+    let fd = inotify::init(CreateFlags::NONBLOCK | CreateFlags::CLOEXEC)?;
+    // Reader owns initialization/alignment checks; no application-side FFI or casts.
+    let mut buffer = [MaybeUninit::uninit(); 16 * 1024];
+    let mut reader = Reader::new(&fd, &mut buffer);
+    let mut watches = Watches::default();
+    loop {
+        match commands.recv_timeout(Duration::from_millis(250)) {
+            Ok(WatchCommand::SetDirectories(dirs)) => watches.configure(&fd, dirs),
+            Ok(WatchCommand::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
-    }
-
-    fn drain_without_watching(command_rx: Receiver<WatchCommand>) {
-        loop {
-            match command_rx.recv() {
-                Ok(WatchCommand::SetDirectories(_dirs)) => {}
-                Ok(WatchCommand::Stop) | Err(_) => return,
-            }
-        }
-    }
-
-    fn drain_inotify_events(fd: c_int, event_tx: &Sender<FileWatchEvent>, watches: &mut Watches) {
-        let mut buffer = vec![0u8; EVENT_BUFFER_SIZE];
-        loop {
-            let len = unsafe { read(fd, buffer.as_mut_ptr().cast(), buffer.len()) };
-            if len < 0 {
-                match io::Error::last_os_error().raw_os_error() {
-                    Some(EAGAIN) => return,
-                    Some(EINTR) => continue,
-                    _ => return,
-                }
-            }
-            if len == 0 {
-                return;
-            }
-            dispatch_events(&buffer[..len as usize], event_tx, watches);
-        }
-    }
-
-    fn dispatch_events(bytes: &[u8], event_tx: &Sender<FileWatchEvent>, watches: &mut Watches) {
-        let header_size = size_of::<InotifyEventRaw>();
-        let mut offset = 0usize;
-        while offset + header_size <= bytes.len() {
-            let event = unsafe {
-                std::ptr::read_unaligned(bytes.as_ptr().add(offset).cast::<InotifyEventRaw>())
-            };
-            let next = offset
-                .saturating_add(header_size)
-                .saturating_add(event.len as usize);
-            if next > bytes.len() {
-                return;
-            }
-
-            if event.mask & IN_Q_OVERFLOW != 0 {
-                for dir in watches.watched_dirs() {
-                    let _ = event_tx.send(FileWatchEvent::DirectoryChanged(dir));
-                }
-            } else if is_relevant_event(event.mask)
-                && let Some(dir) = watches.by_wd.get(&event.wd).cloned()
-            {
-                let _ = event_tx.send(FileWatchEvent::DirectoryChanged(dir));
-            }
-
-            if event.mask & (IN_IGNORED | IN_DELETE_SELF | IN_MOVE_SELF | IN_UNMOUNT) != 0 {
-                watches.by_wd.remove(&event.wd);
-            }
-
-            offset = next;
-        }
+        watches.retry_missing(&fd, events);
+        watches.drain(&mut reader, events)?;
     }
 }
 
-fn path_to_c_string(path: &Path) -> Option<CString> {
-    CString::new(path.as_os_str().as_bytes()).ok()
-}
-
-fn is_relevant_event(mask: u32) -> bool {
-    mask & (IN_MODIFY
-        | IN_ATTRIB
-        | IN_CLOSE_WRITE
-        | IN_MOVED_FROM
-        | IN_MOVED_TO
-        | IN_CREATE
-        | IN_DELETE
-        | IN_DELETE_SELF
-        | IN_MOVE_SELF
-        | IN_UNMOUNT)
-        != 0
+fn report_error(
+    events: &Sender<FileWatchEvent>,
+    path: Option<PathBuf>,
+    error: impl std::fmt::Display,
+) {
+    let _ = events.send(FileWatchEvent::WatchError {
+        path,
+        message: error.to_string(),
+    });
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{FileWatchEvent, FileWatchService};
-    use std::collections::BTreeSet;
-    use std::fs;
-    use std::path::Path;
-    use std::thread;
-    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    use super::{CreateFlags, FileWatchEvent, FileWatchService, ReadFlags, Watches, inotify};
+    use std::{
+        collections::BTreeSet,
+        fs,
+        path::Path,
+        sync::mpsc,
+        thread,
+        time::{Duration, Instant},
+    };
 
     #[test]
-    fn watcher_reports_directory_changes() {
-        let dir = unique_temp_dir();
-        fs::create_dir_all(&dir).expect("create temp watch dir");
-        let probe = dir.join("probe.txt");
-
+    fn watcher_reports_changes_recovers_recreated_directories_and_replaces_roots() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("watched");
+        fs::create_dir(&dir).unwrap();
         let mut service = FileWatchService::new();
         service.set_watched_directories(BTreeSet::from([dir.clone()]));
+        wait_for(
+            &mut service,
+            || {
+                fs::write(dir.join("probe"), "initial").unwrap();
+            },
+            |event| changed(event, &dir),
+        );
+        fs::remove_dir_all(&dir).unwrap();
+        wait_for(
+            &mut service,
+            || {},
+            |event| matches!(event, FileWatchEvent::WatchError { path: Some(path), .. } if path == &dir),
+        );
+        fs::create_dir(&dir).unwrap();
+        wait_for(
+            &mut service,
+            || {
+                fs::write(dir.join("probe"), "recreated").unwrap();
+            },
+            |event| changed(event, &dir),
+        );
+        service.set_watched_directories(BTreeSet::from([root.path().to_owned()]));
+        wait_for(
+            &mut service,
+            || {
+                fs::write(root.path().join("other"), "replacement").unwrap();
+            },
+            |event| changed(event, root.path()),
+        );
+    }
 
-        let deadline = Instant::now() + Duration::from_secs(2);
-        let mut attempt = 0usize;
+    #[test]
+    fn overflow_invalidation_and_missing_path_errors_preserve_watch_contract() {
+        let root = tempfile::tempdir().unwrap();
+        let fd = inotify::init(CreateFlags::NONBLOCK | CreateFlags::CLOEXEC).unwrap();
+        let (events, received) = mpsc::channel();
+        let mut watches = Watches::default();
+        let missing = root.path().join("missing");
+        watches.configure(
+            &fd,
+            BTreeSet::from([root.path().to_owned(), missing.clone()]),
+        );
+        watches.retry_missing(&fd, &events);
+        assert!(
+            matches!(received.try_recv().unwrap(), FileWatchEvent::WatchError { path: Some(path), .. } if path == missing)
+        );
+        watches.retry_missing(&fd, &events);
+        assert!(
+            received.try_recv().is_err(),
+            "missing path failures must not flood the UI"
+        );
+        let wd = *watches.by_wd.keys().next().unwrap();
+        watches.dispatch(wd, ReadFlags::ACCESS, &events);
+        assert!(received.try_recv().is_err());
+        watches.dispatch(-1, ReadFlags::QUEUE_OVERFLOW, &events);
+        assert!(changed(&received.try_recv().unwrap(), root.path()));
+        watches.dispatch(wd, ReadFlags::IGNORED, &events);
+        assert!(watches.by_wd.is_empty());
+        watches.retry_missing(&fd, &events);
+        assert_eq!(watches.by_wd.len(), 1);
+        watches.configure(&fd, BTreeSet::new());
+        assert!(watches.by_wd.is_empty());
+        assert!(watches.reported_failures.is_empty());
+    }
+
+    fn changed(event: &FileWatchEvent, dir: &Path) -> bool {
+        matches!(event, FileWatchEvent::DirectoryChanged(path) if path == dir)
+    }
+
+    fn wait_for(
+        service: &mut FileWatchService,
+        mut trigger: impl FnMut(),
+        matches: impl Fn(&FileWatchEvent) -> bool,
+    ) {
+        let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            fs::write(&probe, format!("attempt {attempt}")).expect("write probe file");
-            if service.drain_events().into_iter().any(|event| {
-                matches!(event, FileWatchEvent::DirectoryChanged(changed) if changed == dir)
-            }) {
-                fs::remove_dir_all(&dir).ok();
+            trigger();
+            if service.drain_events().iter().any(&matches) {
                 return;
             }
             assert!(
                 Instant::now() < deadline,
-                "watcher did not report temp directory change"
-            );
-            attempt += 1;
-            thread::sleep(Duration::from_millis(50));
-        }
-    }
-
-    #[test]
-    fn watcher_retries_a_directory_recreated_at_the_same_path() {
-        let dir = unique_temp_dir();
-        fs::create_dir_all(&dir).expect("create temp watch dir");
-        let mut service = FileWatchService::new();
-        service.set_watched_directories(BTreeSet::from([dir.clone()]));
-
-        let initial = dir.join("initial.txt");
-        wait_for_change(&mut service, &dir, || {
-            fs::write(&initial, "initial").expect("write initial watched file");
-        });
-        fs::remove_dir_all(&dir).expect("remove watched directory");
-
-        let missing_deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            if service.drain_events().into_iter().any(|event| {
-                matches!(
-                    event,
-                    FileWatchEvent::WatchError { path: Some(path), .. } if path == dir
-                )
-            }) {
-                break;
-            }
-            assert!(
-                Instant::now() < missing_deadline,
-                "watcher did not notice that its directory watch was removed"
+                "watcher did not deliver expected event"
             );
             thread::sleep(Duration::from_millis(50));
         }
-
-        fs::create_dir_all(&dir).expect("recreate watched directory");
-        let recreated = dir.join("recreated.txt");
-        wait_for_change(&mut service, &dir, || {
-            fs::write(&recreated, "recreated").expect("write recreated watched file");
-        });
-        fs::remove_dir_all(&dir).ok();
-    }
-
-    fn wait_for_change(service: &mut FileWatchService, dir: &Path, mut trigger: impl FnMut()) {
-        let deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            trigger();
-            if service.drain_events().into_iter().any(|event| {
-                matches!(event, FileWatchEvent::DirectoryChanged(changed) if changed == dir)
-            }) {
-                return;
-            }
-            assert!(Instant::now() < deadline, "watcher did not report change");
-            thread::sleep(Duration::from_millis(50));
-        }
-    }
-
-    fn unique_temp_dir() -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "scratchpad-file-watch-test-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system time should be after unix epoch")
-                .as_nanos()
-        ))
     }
 }

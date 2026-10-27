@@ -20,7 +20,9 @@ fn versions_are_periodic_bounded_durable_and_gc_roots() {
         let mut tabs = vec![tab("initial")];
         let id = tabs[0].active_buffer().temp_id.clone();
         db.persist(captured(&tabs), 1).await.unwrap();
-        let initial = db.version_history(&id).await.unwrap()[0].id;
+        let points = db.version_history(&id).await.unwrap();
+        let initial = points[0].id;
+        let now = points[0].created_at_unix_seconds;
         tabs[0]
             .buffers
             .buffer
@@ -28,6 +30,28 @@ fn versions_are_periodic_bounded_durable_and_gc_roots() {
         db.persist(captured(&tabs), 2).await.unwrap();
         assert_eq!(db.version_history(&id).await.unwrap().len(), 1);
         assert_eq!(db.read_version(initial).await.unwrap(), "initial");
+        let mut removed = std::collections::HashSet::new();
+        // Clock rollback, just before/at the boundary, and unchanged content after it.
+        for (time, count) in [(now - 1, 1), (now + 299, 1), (now + 300, 2), (now + 600, 2)] {
+            db.checkpoint_version(&id, time, &mut removed)
+                .await
+                .unwrap();
+            assert_eq!(
+                db.version_history(&id).await.unwrap().len(),
+                count,
+                "time {time}"
+            );
+        }
+        db.checkpoint_version("missing snapshot", now, &mut removed)
+            .await
+            .unwrap();
+        assert!(
+            db.version_history("missing snapshot")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(removed.is_empty());
         drop(db);
         let mut db = Database::open(root.path()).await.unwrap();
         assert_eq!(db.read_version(initial).await.unwrap(), "initial");

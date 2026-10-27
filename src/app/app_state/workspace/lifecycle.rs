@@ -126,7 +126,7 @@ pub(crate) fn perform_close_tab(app: &mut ScratchpadApp, index: usize) {
 }
 
 pub(crate) fn perform_close_tab_no_persist(app: &mut ScratchpadApp, index: usize) {
-    let _ = close_tab_internal(app, index);
+    close_tab_internal(app, index);
 }
 
 pub(crate) fn reopen_last_closed_tab(app: &mut ScratchpadApp) {
@@ -166,11 +166,28 @@ pub(crate) fn reopen_last_closed_tab(app: &mut ScratchpadApp) {
     }
 }
 
-pub(crate) fn append_tab(app: &mut ScratchpadApp, tab: WorkspaceTab) {
-    create_workspace_tab(app, tab);
+pub(crate) fn recover_buffer_version(app: &mut ScratchpadApp, index: usize, version: i64) {
+    let Some(source) = app.tab_manager.tabs.as_slice().get(index) else {
+        return;
+    };
+    match app
+        .state
+        .persistence
+        .session_store
+        .restore_buffer_version(version)
+    {
+        Ok(text) => {
+            let name = format!("{} (save point)", source.active_buffer().name);
+            create_workspace_tab(
+                app,
+                WorkspaceTab::new(crate::app::domain::BufferState::new(name, text, None)),
+            );
+        }
+        Err(error) => app.state.status.report_session_restore_failed(error),
+    }
 }
 
-pub(crate) fn insert_new_tab_from_settings(app: &mut ScratchpadApp, tab: WorkspaceTab) {
+pub(crate) fn append_tab(app: &mut ScratchpadApp, tab: WorkspaceTab) {
     create_workspace_tab(app, tab);
 }
 
@@ -227,7 +244,7 @@ fn selected_workspace_tab_range(app: &ScratchpadApp) -> (usize, usize) {
     }
 }
 
-fn close_tab_internal(app: &mut ScratchpadApp, index: usize) -> String {
+fn close_tab_internal(app: &mut ScratchpadApp, index: usize) {
     let closed_file_paths = tab_file_paths(app, index);
     let closed_buffer_ids = app
         .tab_manager
@@ -253,7 +270,6 @@ fn close_tab_internal(app: &mut ScratchpadApp, index: usize) -> String {
             .saturating_sub(crate::app::services::session_store::CLOSED_TAB_LIMIT);
         app.state.persistence.pending_closed_tabs.drain(..excess);
     }
-    let tab_description = app.tab_manager.describe_tab_at(index);
     let settings_refresh = app.settings_toml_refresh_on_tab_close(index);
     crate::app::app_state::frame::begin_layout_transition(app);
     app.tab_manager.close_tab_internal(index);
@@ -263,7 +279,6 @@ fn close_tab_internal(app: &mut ScratchpadApp, index: usize) -> String {
     crate::app::app_state::search_runtime::mark_search_dirty(app);
     workspace_accessors::request_focus_for_active_view(app);
     app.apply_settings_toml_refresh(settings_refresh);
-    tab_description
 }
 
 pub(crate) fn record_recently_closed_file_paths(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {

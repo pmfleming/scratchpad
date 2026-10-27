@@ -30,75 +30,63 @@ pub(super) fn fingerprints(
     entries.iter().map(fingerprint).collect()
 }
 
+fn validate_entry(entry: &PersistedHistoryEntry, previous: &mut i64) -> io::Result<()> {
+    let seq = i64::try_from(entry.id).map_err(invalid)?;
+    if seq <= *previous || i64::try_from(entry.global_seq).map_err(invalid)? <= 0 {
+        return Err(invalid(
+            "history IDs must increase and global sequences must be positive",
+        ));
+    }
+    *previous = seq;
+    Ok(())
+}
+
 pub(super) fn validate(entries: &[PersistedHistoryEntry]) -> io::Result<()> {
     let mut previous = 0;
-    for entry in entries {
-        let seq = i64::try_from(entry.id).map_err(invalid)?;
-        if i64::try_from(entry.global_seq).map_err(invalid)? <= 0 {
-            return Err(invalid("history global sequence must be positive"));
-        }
-        if seq <= previous {
-            return Err(invalid("history entry IDs must be positive and increasing"));
-        }
-        previous = seq;
+    entries
+        .iter()
+        .try_for_each(|entry| validate_entry(entry, &mut previous))
+}
+
+fn history_entry(row: &turso::Row, previous: &mut i64) -> io::Result<PersistedHistoryEntry> {
+    let entry: PersistedHistoryEntry = decode(&row.get::<Vec<u8>>(1).map_err(error)?)?;
+    validate_entry(&entry, previous)?;
+    if entry.id as i64 != row.get::<i64>(0).map_err(error)?
+        || entry.global_seq as i64 != row.get::<i64>(2).map_err(error)?
+    {
+        return Err(invalid("history key does not match entry ID"));
     }
-    Ok(())
+    Ok(entry)
 }
 
 impl Database {
     pub(super) async fn read_history(&self, id: &str) -> io::Result<Vec<PersistedHistoryEntry>> {
-        let mut rows = self
-            .conn
-            .query(
-                "SELECT seq, entry, global_seq FROM history WHERE temp_id=? ORDER BY seq",
-                [id],
-            )
-            .await
-            .map_err(error)?;
-        let mut entries = Vec::new();
-        while let Some(row) = rows.next().await.map_err(error)? {
-            let entry: PersistedHistoryEntry = decode(&row.get::<Vec<u8>>(1).map_err(error)?)
-                .map_err(|cause| damaged(id, cause))?;
-            if i64::try_from(entry.id).ok() != Some(row.get(0).map_err(error)?)
-                || i64::try_from(entry.global_seq).ok() != Some(row.get(2).map_err(error)?)
-            {
-                return Err(damaged(id, "history key does not match entry ID"));
-            }
-            entries.push(entry);
-        }
-        validate(&entries).map_err(|cause| damaged(id, cause))?;
-        Ok(entries)
+        self.map_history(id, Ok).await
     }
 
     pub(super) async fn read_history_fingerprints(
         &self,
         id: &str,
     ) -> io::Result<Vec<HistoryFingerprint>> {
-        let mut rows = self
-            .conn
-            .query(
-                "SELECT seq, entry, global_seq FROM history WHERE temp_id=? ORDER BY seq",
-                [id],
-            )
-            .await
-            .map_err(error)?;
-        let mut result = Vec::new();
+        self.map_history(id, |entry| fingerprint(&entry)).await
+    }
+
+    async fn map_history<T>(
+        &self,
+        id: &str,
+        mut map: impl FnMut(PersistedHistoryEntry) -> io::Result<T>,
+    ) -> io::Result<Vec<T>> {
         let mut previous = 0;
-        while let Some(row) = rows.next().await.map_err(error)? {
-            // Validate one row at a time, then release its payload immediately.
-            let entry: PersistedHistoryEntry = decode(&row.get::<Vec<u8>>(1).map_err(error)?)
-                .map_err(|cause| damaged(id, cause))?;
-            if entry.id <= previous
-                || i64::try_from(entry.id).ok() != Some(row.get(0).map_err(error)?)
-                || i64::try_from(entry.global_seq).ok() != Some(row.get(2).map_err(error)?)
-                || entry.global_seq == 0
-            {
-                return Err(damaged(id, "invalid history row identity"));
-            }
-            previous = entry.id;
-            result.push(fingerprint(&entry).map_err(|cause| damaged(id, cause))?);
-        }
-        Ok(result)
+        self.query_collect(
+            "SELECT seq, entry, global_seq FROM history WHERE temp_id=? ORDER BY seq",
+            [id],
+            |row| {
+                history_entry(row, &mut previous)
+                    .and_then(&mut map)
+                    .map_err(|cause| damaged(id, cause))
+            },
+        )
+        .await
     }
 
     pub(super) async fn read_histories(&self, tabs: &mut [SessionTab]) -> io::Result<()> {

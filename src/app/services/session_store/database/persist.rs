@@ -376,15 +376,12 @@ impl Database {
             .iter()
             .filter(|id| !prepared.retains(id) && !self.quarantined.contains_key(*id))
         {
-            let mut rows = self
-                .conn
-                .query("SELECT digest FROM parts WHERE temp_id=?", [id.as_str()])
-                .await
-                .map_err(error)?;
-            while let Some(row) = rows.next().await.map_err(error)? {
-                removed_digests.insert(row.get(0).map_err(error)?);
-            }
-            drop(rows);
+            self.collect_digests(
+                "SELECT digest FROM parts WHERE temp_id=?",
+                [id.as_str()],
+                &mut removed_digests,
+            )
+            .await?;
             self.execute_cached("DELETE FROM snapshots WHERE id=?", [id.as_str()])
                 .await?;
         }

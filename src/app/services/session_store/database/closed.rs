@@ -10,7 +10,7 @@ use turso::params;
 pub(crate) const CLOSED_TAB_LIMIT: usize = 32;
 pub(super) const SCHEMA: &str = "CREATE TABLE closed_tabs(sequence INTEGER PRIMARY KEY, token TEXT NOT NULL UNIQUE, closed_at INTEGER NOT NULL, payload BLOB NOT NULL) STRICT;";
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub(in crate::app::services::session_store) struct ClosedRow {
     pub token: String,
     pub closed_at: i64,
@@ -21,26 +21,21 @@ impl Database {
     pub(in crate::app::services::session_store) async fn closed_rows(
         &self,
     ) -> io::Result<Vec<ClosedRow>> {
-        let mut rows = self
-            .conn
-            .query(
-                "SELECT token, closed_at, payload FROM closed_tabs ORDER BY sequence",
-                (),
-            )
-            .await
-            .map_err(error)?;
-        let mut result = Vec::new();
-        while let Some(row) = rows.next().await.map_err(error)? {
-            let payload: Vec<u8> = row.get(2).map_err(error)?;
-            let tab: SessionTab = decode(&payload)?;
-            super::super::validation::validate_tab(&tab)?;
-            result.push(ClosedRow {
-                token: row.get(0).map_err(error)?,
-                closed_at: row.get(1).map_err(error)?,
-                payload,
-            });
-        }
-        Ok(result)
+        self.query_collect(
+            "SELECT token, closed_at, payload FROM closed_tabs ORDER BY sequence",
+            (),
+            |row| {
+                let payload: Vec<u8> = row.get(2).map_err(error)?;
+                let tab: SessionTab = decode(&payload)?;
+                super::super::validation::validate_tab(&tab)?;
+                Ok(ClosedRow {
+                    token: row.get(0).map_err(error)?,
+                    closed_at: row.get(1).map_err(error)?,
+                    payload,
+                })
+            },
+        )
+        .await
     }
 
     pub(super) async fn prepare_closed(

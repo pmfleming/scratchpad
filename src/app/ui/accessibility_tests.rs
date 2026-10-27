@@ -1,7 +1,5 @@
-use crate::app::app_state::{ScratchpadApp, settings_controller};
+use crate::app::app_state::{settings_controller, test_support::test_app};
 use crate::app::fonts::{EditorFontPreset, EditorFontSelection, apply_editor_fonts};
-use crate::app::services::{session_store::SessionStore, settings_store::SettingsStore};
-use crate::app::startup::StartupOptions;
 use eframe::{App, egui};
 use egui_kittest::{
     Harness,
@@ -24,12 +22,7 @@ fn setup(ctx: &egui::Context) {
 #[test]
 fn settings_inputs_have_names_and_custom_switches_are_actionable() {
     let directory = tempfile::tempdir().unwrap();
-    let mut app = ScratchpadApp::with_stores_and_startup(
-        SessionStore::new(directory.path().join("session")),
-        SettingsStore::new(directory.path().join("settings")),
-        StartupOptions::default(),
-    );
-    app.set_session_persist_on_drop(false);
+    let mut app = test_app(directory.path());
     settings_controller::open_settings(&mut app);
     let mut harness = Harness::builder()
         .with_size(egui::vec2(1100.0, 900.0))

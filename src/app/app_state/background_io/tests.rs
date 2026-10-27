@@ -1,23 +1,17 @@
 use super::{
     LoadedPathResult, PendingBackgroundAction, PendingEncodingComplianceAction,
-    PendingSessionHydrationAction, PendingTextMetadataAction, ScratchpadApp, StartupOptions,
+    PendingSessionHydrationAction, PendingTextMetadataAction, ScratchpadApp,
     cold_session_tab_buffer_ids,
 };
 use crate::app::app_state::PendingOpenTabsAction;
+use crate::app::app_state::test_support;
 use crate::app::domain::{BufferState, TabManager, TextFormatMetadata, WorkspaceTab};
 use crate::app::services::session_store::SessionStore;
-use crate::app::services::settings_store::SettingsStore;
 
 fn test_app() -> ScratchpadApp {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.keep();
-    let mut app = ScratchpadApp::with_stores_and_startup(
-        SessionStore::new(root.join("session")),
-        SettingsStore::new(root.join("settings")),
-        StartupOptions::default(),
-    );
-    app.set_session_persist_on_drop(false);
-    app
+    test_support::test_app(&root)
 }
 
 fn app_with_buffer(buffer: BufferState) -> ScratchpadApp {
