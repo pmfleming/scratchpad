@@ -67,6 +67,16 @@ still prevent a complete RQL gate; do not raise budgets or suppress failures to
 make it green. The configured limits exclude profiling binaries. Lower a limit
 when findings are removed; increases require a documented accepted risk.
 
+For a direct combined run with a lens revision supporting `enforce`, use
+`nix develop -c target/rqlens-build/debug/rqlens enforce --config rqlens.toml`.
+This regenerates all evidence before applying the configured rules and strict
+partial/test/practice/reliability gates; it can be expensive and uses the configured
+output directory, without the `xtask` run archive. Freeze the executable before
+comparing runs. `verify` only generates practice evidence and may exit zero despite
+failed child checks. `check` evaluates stored evidence without regenerating it.
+`enforce --practices-only` regenerates only practices: configured rules and their
+freshness requirements remain active, so it is not a full-project quality pass.
+
 `nix develop` supplies cargo-audit, cargo-hack, cargo-llvm-cov, actionlint and
 shellcheck. The Linux CI job runs the expensive strict evidence task on manual
 workflow dispatch, with a pinned RQL revision, and uploads even failed/partial

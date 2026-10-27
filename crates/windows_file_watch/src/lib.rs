@@ -142,6 +142,9 @@ fn windows_watch_loop(command_rx: Receiver<WatchCommand>, event_tx: Sender<FileW
 
     impl Drop for WatchHandle {
         fn drop(&mut self) {
+            // SAFETY: open_watch only constructs this owner for a valid change
+            // notification handle. It is not cloned or closed elsewhere, and
+            // the watcher thread no longer uses it after this drop.
             unsafe {
                 FindCloseChangeNotification(self.handle);
             }
@@ -155,6 +158,9 @@ fn windows_watch_loop(command_rx: Receiver<WatchCommand>, event_tx: Sender<FileW
             | FILE_NOTIFY_CHANGE_SIZE
             | FILE_NOTIFY_CHANGE_LAST_WRITE
             | FILE_NOTIFY_CHANGE_CREATION;
+        // SAFETY: wide is a live, NUL-terminated UTF-16 buffer for this
+        // synchronous call; the API does not retain its pointer. FALSE and
+        // filter are supported flags. The returned handle is checked below.
         let handle = unsafe { FindFirstChangeNotificationW(wide.as_ptr(), FALSE, filter) };
         if handle == INVALID_HANDLE_VALUE {
             return None;
@@ -196,6 +202,9 @@ fn windows_watch_loop(command_rx: Receiver<WatchCommand>, event_tx: Sender<FileW
             continue;
         };
         let _ = event_tx.send(FileWatchEvent::DirectoryChanged(watch.dir.clone()));
+        // SAFETY: watch still owns the valid handle returned by open_watch.
+        // Rearming and dropping watches both happen on this thread, so the
+        // handle cannot be closed concurrently with this call.
         unsafe {
             FindNextChangeNotification(watch.handle);
         }
@@ -211,6 +220,10 @@ fn windows_watch_loop(command_rx: Receiver<WatchCommand>, event_tx: Sender<FileW
 
         for (chunk_index, chunk) in watches.chunks(MAXIMUM_WAIT_OBJECTS).enumerate() {
             let handles = chunk.iter().map(|watch| watch.handle).collect::<Vec<_>>();
+            // SAFETY: chunks are nonempty and contain at most 64 valid,
+            // separately owned notification handles, as required by the API.
+            // The array lives through the call, and this same thread owns all
+            // watches, so none of their handles can be closed during the wait.
             let wait_result = unsafe {
                 WaitForMultipleObjects(handles.len() as u32, handles.as_ptr(), FALSE, chunk_timeout)
             };
