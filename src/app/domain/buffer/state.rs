@@ -339,6 +339,17 @@ impl BufferState {
         self.refresh.pending_text_history_event = None;
     }
 
+    /// Preserve recovered text/undo without retaining an obsolete disk baseline.
+    pub(crate) fn recover_as_untitled(&mut self, label: &str) {
+        self.set_path(None);
+        self.disk_state = None;
+        self.disk_content_digest = None;
+        self.freshness = BufferFreshness::InSync;
+        self.is_settings_file = false;
+        self.is_dirty = true;
+        self.name = format!("{} ({label})", self.name);
+    }
+
     /// Fork a restored workspace without consuming its historical archive.
     pub(crate) fn fork_recovery_identity(&mut self) {
         self.temp_id = next_temp_id();

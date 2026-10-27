@@ -6,8 +6,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(test)]
+mod tests;
+
 struct QueryCache<T> {
-    result: Option<Result<T, String>>,
+    result: Option<Result<Arc<T>, String>>,
     checked: Option<Instant>,
     pending: bool,
 }
@@ -21,20 +24,20 @@ impl<T> Default for QueryCache<T> {
     }
 }
 
-pub(crate) fn query<T: Clone + Send + Sync + 'static>(
+pub(crate) fn query<T: Send + Sync + 'static>(
     ui: &egui::Ui,
     key: impl std::hash::Hash + std::fmt::Debug,
     load: impl FnOnce() -> std::io::Result<T> + Send + 'static,
-) -> Option<Result<T, String>> {
+) -> Option<Result<Arc<T>, String>> {
     query_with_interval(ui, key, Duration::from_secs(2), load)
 }
 
-pub(crate) fn query_with_interval<T: Clone + Send + Sync + 'static>(
+pub(crate) fn query_with_interval<T: Send + Sync + 'static>(
     ui: &egui::Ui,
     key: impl std::hash::Hash + std::fmt::Debug,
     interval: Duration,
     load: impl FnOnce() -> std::io::Result<T> + Send + 'static,
-) -> Option<Result<T, String>> {
+) -> Option<Result<Arc<T>, String>> {
     let key = egui::Id::unique(("recovery.query", key));
     let cache = ui.ctx().data_mut(|data| {
         data.get_temp_mut_or_default::<Arc<Mutex<QueryCache<T>>>>(key)
@@ -48,7 +51,7 @@ pub(crate) fn query_with_interval<T: Clone + Send + Sync + 'static>(
         if let Err(error) = std::thread::Builder::new()
             .name("recovery-query".into())
             .spawn(move || {
-                let result = load().map_err(|error| error.to_string());
+                let result = load().map(Arc::new).map_err(|error| error.to_string());
                 let mut state = cache.lock().unwrap_or_else(|e| e.into_inner());
                 state.result = Some(result);
                 state.checked = Some(Instant::now());

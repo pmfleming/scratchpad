@@ -1,4 +1,4 @@
-use super::{PendingTabContextMenu, StartupRestoreConflict, TabRenameState};
+use super::{PendingTabContextMenu, TabRenameState};
 
 #[derive(Default)]
 pub(crate) struct EncodingDialogState {
@@ -85,7 +85,6 @@ pub(crate) struct DialogState {
     pub(crate) status_history: StatusHistoryDialogState,
     pub(crate) tab_rename: Option<TabRenameState>,
     pub(crate) pending_tab_context_menu: Option<PendingTabContextMenu>,
-    pub(crate) startup_restore_conflicts: Vec<StartupRestoreConflict>,
 }
 
 impl DialogState {
@@ -128,30 +127,6 @@ impl DialogState {
 
     pub(crate) fn tab_rename(&self) -> Option<&TabRenameState> {
         self.tab_rename.as_ref()
-    }
-
-    pub(crate) fn set_startup_restore_conflicts(&mut self, conflicts: Vec<StartupRestoreConflict>) {
-        self.startup_restore_conflicts = conflicts;
-    }
-
-    pub(crate) fn current_startup_restore_conflict(&self) -> Option<&StartupRestoreConflict> {
-        self.startup_restore_conflicts.first()
-    }
-
-    pub(crate) fn dismiss_current_startup_restore_conflict(&mut self) {
-        if !self.startup_restore_conflicts.is_empty() {
-            self.startup_restore_conflicts.remove(0);
-        }
-    }
-
-    pub(crate) fn take_current_startup_restore_conflict(
-        &mut self,
-    ) -> Option<StartupRestoreConflict> {
-        if self.startup_restore_conflicts.is_empty() {
-            None
-        } else {
-            Some(self.startup_restore_conflicts.remove(0))
-        }
     }
 
     pub(crate) fn open_pending_tab_context_menu(&mut self, pending: PendingTabContextMenu) {

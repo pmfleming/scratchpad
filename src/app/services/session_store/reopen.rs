@@ -126,12 +126,7 @@ impl SessionStore {
                 buffer.right_to_left_reading_order = original.right_to_left_reading_order;
                 buffer.is_settings_file = original.is_settings_file;
             } else if disk.changed || disk.missing {
-                buffer.path = None;
-                buffer.path_key = None;
-                buffer.name = format!("{} (recovered)", original.name);
-                buffer.disk_state = None;
-                buffer.disk_content_digest = None;
-                buffer.is_dirty = true;
+                buffer.recover_as_untitled("recovered");
             } else {
                 buffer.path.clone_from(&original.path);
                 buffer.path_key = buffer.path.as_deref().map(CanonicalPathKey::from_path);

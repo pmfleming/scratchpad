@@ -44,87 +44,63 @@ fn ordinary_open_restores_archived_unsaved_text_and_undo_history() {
 
 #[test]
 fn startup_external_changes_keep_historical_undo_separate_without_a_prompt() {
-    let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("note.txt");
-    std::fs::write(&path, "original").unwrap();
-    let mut app = test_app(root.path());
-    let mut buffer = BufferState::new("note.txt".into(), "original".into(), Some(path.clone()));
-    buffer.sync_to_disk_state(Some(
-        crate::app::services::file_service::FileService::read_disk_state(&path).unwrap(),
-    ));
-    buffer
-        .document_mut()
-        .replace_char_ranges_with_undo(
-            &[(0..8, "saved edit".into())],
-            CursorRange::default(),
-            CursorRange::default(),
-        )
-        .unwrap();
-    std::fs::write(&path, "saved edit").unwrap();
-    buffer.sync_to_disk_state(Some(
-        crate::app::services::file_service::FileService::read_disk_state(&path).unwrap(),
-    ));
-    app.tab_manager.set_tabs(vec![WorkspaceTab::new(buffer)], 0);
-    session_manager::persist_session_now(&mut app).unwrap();
-    drop(app);
-    std::fs::write(&path, "external").unwrap();
-    let mut app = test_app(root.path());
-    session_manager::restore_session_state(&mut app).unwrap();
-    app.wait_for_background_io_idle();
-    assert!(
-        crate::app::app_state::workspace::restore_conflict::current_startup_restore_conflict(&app)
-            .is_none()
-    );
-    let buffers: Vec<_> = app
-        .tab_manager
-        .tabs
-        .as_slice()
-        .iter()
-        .flat_map(WorkspaceTab::buffers)
-        .collect();
-    assert!(
-        buffers
+    use crate::app::{domain::BufferFreshness, services::file_service::FileService};
+    for (missing, open_disk) in [(false, true), (false, false), (true, true)] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("note.txt");
+        std::fs::write(&path, "saved edit").unwrap();
+        let mut app = test_app(root.path());
+        let mut policy = app.state.app_settings.history.recovery.clone();
+        policy.open_changed_disk_files = open_disk;
+        crate::app::app_state::settings_controller::set_recovery_settings(&mut app, policy);
+        let mut buffer = BufferState::new("note.txt".into(), "original".into(), Some(path.clone()));
+        buffer
+            .document_mut()
+            .replace_char_ranges_with_undo(
+                &[(0..8, "saved edit".into())],
+                CursorRange::default(),
+                CursorRange::default(),
+            )
+            .unwrap();
+        buffer.sync_to_disk_state(Some(FileService::read_disk_state(&path).unwrap()));
+        app.tab_manager.set_tabs(vec![WorkspaceTab::new(buffer)], 0);
+        session_manager::persist_session_now(&mut app).unwrap();
+        drop(app);
+        if missing {
+            std::fs::remove_file(&path).unwrap();
+        } else {
+            std::fs::write(&path, "external").unwrap();
+        }
+        let mut app = test_app(root.path());
+        crate::app::app_state::test_support::wait_for_background_io(&mut app);
+        assert!(!app.state.dialogs.any_modal_open());
+        let buffers: Vec<_> = app
+            .tab_manager
+            .tabs
+            .as_slice()
             .iter()
-            .any(|buffer| buffer.path.as_ref() == Some(&path)
-                && buffer.text() == "external"
-                && buffer.document().history_entries().is_empty())
-    );
-    assert!(buffers.iter().any(|buffer| buffer.path.is_none()
-        && buffer.text() == "saved edit"
-        && buffer.document().operation_undo_depth() == 1));
-    assert_eq!(std::fs::read_to_string(path).unwrap(), "external");
-}
-
-#[test]
-fn restoring_recovery_text_is_one_undoable_edit_and_never_writes_disk() {
-    let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("note.txt");
-    std::fs::write(&path, "on disk").unwrap();
-    let mut app = test_app(root.path());
-    let tab = WorkspaceTab::new(BufferState::new(
-        "note.txt".into(),
-        "current".into(),
-        Some(path.clone()),
-    ));
-    let id = tab.active_buffer().id;
-    app.tab_manager.set_tabs(vec![tab], 0);
-    assert!(
-        crate::app::app_state::workspace::mutation::restore_recovery_text(
-            &mut app,
-            id,
-            "older state"
-        )
-    );
-    let buffer = app
-        .tab_manager
-        .active_tab_mut()
-        .unwrap()
-        .active_buffer_mut();
-    assert_eq!(buffer.text(), "older state");
-    assert!(buffer.is_dirty);
-    buffer.document_mut().undo_last_operation().unwrap();
-    assert_eq!(buffer.text(), "current");
-    assert_eq!(std::fs::read_to_string(path).unwrap(), "on disk");
+            .flat_map(WorkspaceTab::buffers)
+            .collect();
+        let disk = buffers
+            .iter()
+            .find(|buffer| buffer.path.as_ref() == Some(&path));
+        assert_eq!(disk.is_some(), !missing && open_disk);
+        if let Some(disk) = disk {
+            assert_eq!(disk.text(), "external");
+            assert!(disk.document().history_entries().is_empty());
+        }
+        let recovered = buffers.iter().find(|buffer| buffer.path.is_none()).unwrap();
+        assert_eq!(recovered.text(), "saved edit");
+        assert_eq!(recovered.document().operation_undo_depth(), 1);
+        assert_eq!(recovered.freshness, BufferFreshness::InSync);
+        assert!(recovered.disk_state.is_none());
+        assert!(recovered.disk_content_digest.is_none());
+        assert!(!recovered.is_settings_file);
+        assert_eq!(path.exists(), !missing);
+        if !missing {
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "external");
+        }
+    }
 }
 
 #[test]

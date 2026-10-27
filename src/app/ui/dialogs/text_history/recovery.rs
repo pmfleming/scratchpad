@@ -3,7 +3,6 @@ use crate::app::{
     ui::recovery::{query, timestamp},
 };
 use eframe::egui;
-use std::sync::Arc;
 
 pub(super) fn render(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     let Some(tab) = app
@@ -39,7 +38,7 @@ pub(super) fn render(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
             egui::ScrollArea::vertical()
                 .max_height(260.0)
                 .show(ui, |ui| {
-                    for point in versions {
+                    for point in versions.iter() {
                         let label = format!(
                             "{} · {} bytes · {}",
                             timestamp(point.created_at_unix_seconds),
@@ -61,7 +60,7 @@ pub(super) fn render(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     if let Some(version) = ui.ctx().data(|data| data.get_temp::<i64>(selected_key)) {
         let store = app.state.persistence.session_store.clone();
         match query(ui, ("version-text", root, version), move || {
-            store.restore_buffer_version(version).map(Arc::new)
+            store.restore_buffer_version(version)
         }) {
             None => {
                 ui.label("Loading preview…");

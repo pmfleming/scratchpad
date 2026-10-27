@@ -75,37 +75,23 @@ fn drop_frame(app: &mut ScratchpadApp, sources: Vec<usize>, pointer: egui::Pos2,
 }
 
 #[test]
-fn release_over_editor_combines_tabs() {
-    let directory = tempfile::tempdir().unwrap();
-    let mut app = test_app(directory.path());
-    drop_frame(&mut app, vec![1], egui::pos2(400.0, 300.0), false);
-    assert_eq!(app.tab_manager.tabs.len(), 2);
-    assert_eq!(
-        app.tab_manager
-            .active_tab()
-            .unwrap()
-            .layout
-            .root_pane
-            .leaf_count(),
-        2
-    );
-}
-
-#[test]
-fn release_over_editor_combines_selected_group() {
-    let directory = tempfile::tempdir().unwrap();
-    let mut app = test_app(directory.path());
-    drop_frame(&mut app, vec![1, 2], egui::pos2(400.0, 300.0), false);
-    assert_eq!(app.tab_manager.tabs.len(), 1);
-    assert_eq!(
-        app.tab_manager
-            .active_tab()
-            .unwrap()
-            .layout
-            .root_pane
-            .leaf_count(),
-        3
-    );
+fn release_over_editor_combines_single_and_group_selections() {
+    for sources in [vec![1], vec![1, 2]] {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = test_app(directory.path());
+        let selected = sources.len();
+        drop_frame(&mut app, sources, egui::pos2(400.0, 300.0), false);
+        assert_eq!(app.tab_manager.tabs.len(), 3 - selected);
+        assert_eq!(
+            app.tab_manager
+                .active_tab()
+                .unwrap()
+                .layout
+                .root_pane
+                .leaf_count(),
+            selected + 1
+        );
+    }
 }
 
 #[test]

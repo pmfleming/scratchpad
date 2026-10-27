@@ -59,21 +59,9 @@ impl Database {
             if self.archive_protected(archive, policy) {
                 continue;
             }
-            let saved = match self.compact_archived_undo(archive).await {
-                Ok(saved) => saved,
-                Err(cause) if super::quarantine::damaged_id(&cause).is_some() => {
-                    self.protect_damaged(&cause, std::slice::from_ref(&archive.tab.session_tab))
-                        .await?;
-                    // A later buffer can fail after earlier points were prepared.
-                    // Keep the entire archive unchanged, including its undo rows.
-                    archive.tab.recovery_points.clear();
-                    archive.tab.discard_history = false;
-                    total = total.saturating_sub(costs[index]);
-                    costs[index] = 0;
-                    continue;
-                }
-                Err(cause) => return Err(cause),
-            };
+            let saved = self
+                .compact_or_protect_archive(archive, costs[index])
+                .await?;
             costs[index] = costs[index].saturating_sub(saved);
             total = total.saturating_sub(saved);
         }
@@ -85,24 +73,15 @@ impl Database {
             if self.archive_protected(archive, policy) {
                 continue;
             }
-            for buffer in &archive.tab.session_tab.buffers {
-                let points = self.version_history(&buffer.temp_id).await?;
-                // Thin interior points before giving up an entire archive. Keep
-                // its earliest and latest state until whole-archive expiry.
-                for point in points
-                    .iter()
-                    .skip(1)
-                    .take(points.len().saturating_sub(2))
-                    .rev()
-                {
-                    if total <= policy.archive_byte_budget {
-                        break;
-                    }
-                    expired_versions.push(point.id);
-                    costs[index] = costs[index].saturating_sub(point.bytes as u64);
-                    total = total.saturating_sub(point.bytes as u64);
-                }
-            }
+            let saved = self
+                .thin_archive_versions(
+                    archive,
+                    total - policy.archive_byte_budget,
+                    &mut expired_versions,
+                )
+                .await?;
+            costs[index] = costs[index].saturating_sub(saved);
+            total = total.saturating_sub(saved);
         }
         let mut index = 0;
         archives.retain(|archive| {
@@ -116,6 +95,53 @@ impl Database {
             }
         });
         Ok(expired_versions)
+    }
+
+    /// Successful quarantine removes this archive's entire cost from the ordinary budget.
+    async fn compact_or_protect_archive(
+        &mut self,
+        archive: &mut CapturedClosedTab,
+        cost: u64,
+    ) -> io::Result<u64> {
+        match self.compact_archived_undo(archive).await {
+            Ok(saved) => Ok(saved),
+            Err(cause) if super::quarantine::damaged_id(&cause).is_some() => {
+                self.protect_damaged(&cause, std::slice::from_ref(&archive.tab.session_tab))
+                    .await?;
+                // A later buffer can fail after earlier points were prepared.
+                // Keep the entire archive unchanged, including its undo rows.
+                archive.tab.recovery_points.clear();
+                archive.tab.discard_history = false;
+                Ok(cost)
+            }
+            Err(cause) => Err(cause),
+        }
+    }
+
+    /// Thin interior points, retaining each buffer's earliest and latest states.
+    async fn thin_archive_versions(
+        &self,
+        archive: &CapturedClosedTab,
+        needed: u64,
+        expired: &mut Vec<i64>,
+    ) -> io::Result<u64> {
+        let mut saved = 0u64;
+        for buffer in &archive.tab.session_tab.buffers {
+            let points = self.version_history(&buffer.temp_id).await?;
+            for point in points
+                .iter()
+                .skip(1)
+                .take(points.len().saturating_sub(2))
+                .rev()
+            {
+                if saved >= needed {
+                    break;
+                }
+                expired.push(point.id);
+                saved = saved.saturating_add(point.bytes as u64);
+            }
+        }
+        Ok(saved)
     }
 
     async fn archive_cost(&self, archive: &CapturedClosedTab) -> io::Result<u64> {

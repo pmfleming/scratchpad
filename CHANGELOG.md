@@ -11,6 +11,7 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Changed
 
+- Shared cached recovery-query results across UI frames instead of copying archive/version lists, and removed the obsolete startup-conflict dialog workflow.
 - Reduced session-worker history caches to per-row fingerprints and reused unchanged chunk hashes through bounded byte-range edit tracking.
 - Advanced session storage to schema 8 with transactional upgrades from schemas 6 and 7. Stored byte counts and covering indexes avoid scanning undo/text payloads during retention accounting and disk-usage refreshes. Older schemas are preserved but not migrated.
 - Made warm session saves insert only new buffer IDs and collect only affected recovery blobs, with conservative rescans after restart, rollback, or detected damage. Positional tab-row rewrites and full capture/preparation costs remain.
@@ -22,6 +23,7 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Fixed
 
+- Cleared stale disk/settings-file metadata consistently when recovering untitled archive copies, and exposed accessible names for recently closed file buttons.
 - Quarantined damaged closed-tab content encountered during undo compaction without blocking healthy session saves.
 - Cached and acknowledged computed undo recovery points so idle saves no longer repeatedly reconstruct history and write unchanged recovery tokens.
 - Excluded pinned and quarantined data from retention-budget totals so it cannot evict all unprotected archives and recovery points.

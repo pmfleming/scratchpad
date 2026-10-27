@@ -177,50 +177,27 @@ pub(crate) fn reopen_archived_tab(app: &mut ScratchpadApp, token: &str) {
     if app.startup_restore_pending() || app.state.persistence.session_restore_failed {
         return;
     }
-    match app.state.persistence.session_store.reopen_archive(token) {
-        Ok(reopened) => {
-            let open_disk = reopened.tab.is_none()
-                || app
-                    .state
-                    .app_settings
-                    .history
-                    .recovery
-                    .open_changed_disk_files;
-            if let Some(mut tab) = reopened.tab {
-                if tab.buffers().any(|buffer| {
-                    app.tab_manager
-                        .tabs
-                        .as_slice()
-                        .iter()
-                        .flat_map(WorkspaceTab::buffers)
-                        .any(|live| live.temp_id == buffer.temp_id)
-                }) {
-                    return;
-                }
-                // A restored split must not steal a path from an already-open tab.
-                for buffer in tab.buffers_mut() {
-                    if buffer
-                        .path
-                        .as_ref()
-                        .is_some_and(|path| app.tab_manager.find_tab_by_path(path).is_some())
-                    {
-                        buffer.path = None;
-                        buffer.path_key = None;
-                        buffer.name = format!("{} (recovered)", buffer.name);
-                        buffer.is_dirty = true;
-                    }
-                }
-                create_workspace_tab(app, tab);
-                if let Err(error) = crate::app::services::session_manager::persist_session_now(app)
-                {
-                    app.state.status.report_session_save_failed(error);
-                }
-            }
-            if open_disk && !reopened.disk_paths.is_empty() {
-                FileController::open_disk_paths_async(app, reopened.disk_paths);
-            }
+    let reopened = match app.state.persistence.session_store.reopen_archive(token) {
+        Ok(reopened) => reopened,
+        Err(error) => {
+            app.state.status.report_session_restore_failed(error);
+            return;
         }
-        Err(error) => app.state.status.report_session_restore_failed(error),
+    };
+    let open_disk = reopened.tab.is_none()
+        || app
+            .state
+            .app_settings
+            .history
+            .recovery
+            .open_changed_disk_files;
+    if let Some(tab) = reopened.tab
+        && !install_archive(app, tab, false)
+    {
+        return;
+    }
+    if open_disk && !reopened.disk_paths.is_empty() {
+        FileController::open_disk_paths_async(app, reopened.disk_paths);
     }
 }
 
@@ -234,32 +211,44 @@ pub(crate) fn recover_archived_copy(app: &mut ScratchpadApp, token: &str) {
         .session_store
         .restore_closed_tab(token)
     {
-        Ok(mut tab) => {
-            if tab.buffers().any(|buffer| {
-                app.tab_manager
-                    .tabs
-                    .as_slice()
-                    .iter()
-                    .flat_map(WorkspaceTab::buffers)
-                    .any(|live| live.temp_id == buffer.temp_id)
-            }) {
-                return;
-            }
-            for buffer in tab.buffers_mut() {
-                buffer.path = None;
-                buffer.path_key = None;
-                buffer.disk_state = None;
-                buffer.disk_content_digest = None;
-                buffer.is_dirty = true;
-                buffer.name = format!("{} (archived)", buffer.name);
-            }
-            create_workspace_tab(app, tab);
-            if let Err(error) = crate::app::services::session_manager::persist_session_now(app) {
-                app.state.status.report_session_save_failed(error);
-            }
+        Ok(tab) => {
+            install_archive(app, tab, true);
         }
         Err(error) => app.state.status.report_session_restore_failed(error),
     }
+}
+
+fn install_archive(app: &mut ScratchpadApp, mut tab: WorkspaceTab, archived_text: bool) -> bool {
+    let already_live = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .iter()
+        .flat_map(WorkspaceTab::buffers)
+        .any(|live| tab.buffers().any(|buffer| buffer.temp_id == live.temp_id));
+    if already_live {
+        return false;
+    }
+    for buffer in tab.buffers_mut() {
+        // A restored split must not steal a path from an already-open tab.
+        if archived_text
+            || buffer
+                .path
+                .as_ref()
+                .is_some_and(|path| app.tab_manager.find_tab_by_path(path).is_some())
+        {
+            buffer.recover_as_untitled(if archived_text {
+                "archived"
+            } else {
+                "recovered"
+            });
+        }
+    }
+    create_workspace_tab(app, tab);
+    if let Err(error) = crate::app::services::session_manager::persist_session_now(app) {
+        app.state.status.report_session_save_failed(error);
+    }
+    true
 }
 
 /// Returns true when an archive handled (or safely rejected) this open request.

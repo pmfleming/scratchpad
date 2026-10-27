@@ -211,11 +211,6 @@ impl ScratchpadApp {
             Some(PendingBackgroundAction::ReopenWithEncoding(action)) => {
                 FileController::apply_async_reopen_with_encoding_result(self, action, results);
             }
-            Some(PendingBackgroundAction::StartupRestoreCompare(action)) => {
-                workspace_restore_conflict::apply_async_startup_restore_compare_result(
-                    self, action, results,
-                );
-            }
             Some(
                 action @ (PendingBackgroundAction::SavePath(_)
                 | PendingBackgroundAction::StartupRestore(_)

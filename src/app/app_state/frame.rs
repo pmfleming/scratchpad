@@ -1,6 +1,5 @@
 use super::{AppSurface, ScratchpadApp};
 use crate::app::app_state::settings_state;
-use crate::app::app_state::workspace::restore_conflict;
 use crate::app::capacity_metrics::{FramePhase, record_frame_phase};
 use crate::app::chrome::{handle_window_resize, show_window_resize_cursor};
 use crate::app::diagnostics;
@@ -123,7 +122,6 @@ pub(super) fn render_frame(app: &mut ScratchpadApp, ui: &mut egui::Ui, ctx: &egu
         active_surface_started_at.elapsed(),
     );
     let dialogs_started_at = Instant::now();
-    dialogs::show_startup_restore_conflict_modal(ctx, app);
     dialogs::show_pending_action_modal(ctx, app);
     dialogs::show_encoding_window(ctx, app);
     dialogs::show_text_history_window(ctx, app);
@@ -207,7 +205,6 @@ pub(crate) fn chrome_transition_active(app: &ScratchpadApp) -> bool {
 fn modal_callout_open(app: &ScratchpadApp) -> bool {
     app.state.dialogs.any_modal_open()
         || crate::app::app_state::workspace::accessors::pending_action(app).is_some()
-        || restore_conflict::current_startup_restore_conflict(app).is_some()
 }
 
 fn finish_frame_transitions(app: &mut ScratchpadApp, ctx: &egui::Context) {

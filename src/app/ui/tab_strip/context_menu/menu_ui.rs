@@ -176,6 +176,7 @@ pub(super) fn recent_file_button(
                 )
             },
         );
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, exists, &label));
         paint_recent_file_label(ui, response.rect, &label, exists);
         let clicked = response.clicked() && exists;
         response.on_hover_text(path.display().to_string());

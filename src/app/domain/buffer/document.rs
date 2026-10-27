@@ -287,16 +287,6 @@ impl TextDocument {
         self.enforce_history_budget();
     }
 
-    pub fn revalidate_history_for_current_text(&mut self) {
-        for index in 0..self.history.entries.len() {
-            let fingerprint =
-                self.fingerprint_for_history_edits(&self.history.entries[index].edits);
-            self.history.entries[index].flags.replayable &=
-                fingerprint == self.history.entries[index].fingerprint;
-        }
-        self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
-    }
-
     pub fn set_preferred_line_ending(&mut self, preferred_line_ending: LineEndingStyle) {
         self.content.preferred_line_ending = preferred_line_ending;
     }

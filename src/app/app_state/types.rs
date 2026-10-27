@@ -23,14 +23,6 @@ pub(crate) struct PendingTabContextMenu {
     pub(crate) open: bool,
 }
 
-#[derive(Clone)]
-pub(crate) struct StartupRestoreConflict {
-    pub(crate) tab_index: usize,
-    pub(crate) view_id: ViewId,
-    pub(crate) buffer_name: String,
-    pub(crate) path: PathBuf,
-}
-
 pub(crate) struct PendingOpenTabsAction {
     /// Streaming accumulator: filled in as individual paths arrive across
     /// multiple `PathsLoaded { is_partial: true }` messages. Finalized when
@@ -81,10 +73,6 @@ pub(crate) struct PendingSavePathAction {
     pub(crate) format_override: Option<TextFormatMetadata>,
 }
 
-pub(crate) struct PendingStartupRestoreCompareAction {
-    pub(crate) conflict: StartupRestoreConflict,
-}
-
 pub(crate) struct PendingSessionPersistAction {
     pub(crate) recovery_tokens: Vec<(String, u64)>,
     pub(crate) closed_tokens: Vec<String>,
@@ -114,7 +102,6 @@ pub(crate) enum PendingBackgroundAction {
     ReloadBuffer(PendingReloadBufferAction),
     ReopenWithEncoding(PendingReopenWithEncodingAction),
     SavePath(PendingSavePathAction),
-    StartupRestoreCompare(PendingStartupRestoreCompareAction),
     PersistSession(PendingSessionPersistAction),
     RefreshTextMetadata(PendingTextMetadataAction),
     RefreshEncodingCompliance(PendingEncodingComplianceAction),
@@ -129,7 +116,6 @@ pub(crate) enum PendingActionKind {
     ReloadBuffer,
     ReopenWithEncoding,
     SavePath,
-    StartupRestoreCompare,
     PersistSession,
     RefreshTextMetadata,
     RefreshEncodingCompliance,
@@ -158,7 +144,6 @@ impl PendingBackgroundAction {
             Self::ReloadBuffer(_) => PendingActionKind::ReloadBuffer,
             Self::ReopenWithEncoding(_) => PendingActionKind::ReopenWithEncoding,
             Self::SavePath(_) => PendingActionKind::SavePath,
-            Self::StartupRestoreCompare(_) => PendingActionKind::StartupRestoreCompare,
             Self::PersistSession(_) => PendingActionKind::PersistSession,
             Self::RefreshTextMetadata(_) => PendingActionKind::RefreshTextMetadata,
             Self::RefreshEncodingCompliance(_) => PendingActionKind::RefreshEncodingCompliance,

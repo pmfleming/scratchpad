@@ -1,6 +1,5 @@
 use super::model::{
-    TextHistoryAction, TextHistoryFileGroup, TextHistoryRow, per_file_now_line_insert_index,
-    timeline_now_line_insert_index,
+    TextHistoryAction, TextHistoryFileGroup, TextHistoryRow, now_line_insert_index,
 };
 use super::{
     HISTORY_PILL_CORNER_RADIUS, HISTORY_PILL_INNER_MARGIN, HISTORY_PILL_SPACING,
@@ -83,7 +82,7 @@ fn render_timeline_rows(
     rows: &[TextHistoryRow],
     action: &mut Option<TextHistoryAction>,
 ) {
-    let now_line_index = timeline_now_line_insert_index(rows);
+    let now_line_index = now_line_insert_index(rows);
     let mut now_rendered = false;
 
     for (idx, row) in rows.iter().enumerate() {
@@ -207,7 +206,7 @@ fn render_file_history_rows(
     rows: &[TextHistoryRow],
     action: &mut Option<TextHistoryAction>,
 ) {
-    let now_line_index = per_file_now_line_insert_index(rows);
+    let now_line_index = now_line_insert_index(rows);
     let mut now_rendered = false;
 
     for (idx, row) in rows.iter().enumerate() {

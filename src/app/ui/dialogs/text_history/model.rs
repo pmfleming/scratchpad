@@ -117,19 +117,8 @@ fn entry_icon(entry: &TextHistoryEntryView) -> &'static str {
     }
 }
 
-pub(super) fn newest_applied_index(rows: &[TextHistoryRow]) -> Option<usize> {
-    rows.iter().position(|row| !row.undone)
-}
-
-pub(super) fn timeline_now_line_insert_index(rows: &[TextHistoryRow]) -> Option<usize> {
-    now_line_insert_index(rows)
-}
-
-pub(super) fn per_file_now_line_insert_index(rows: &[TextHistoryRow]) -> Option<usize> {
-    now_line_insert_index(rows)
-}
-
-fn now_line_insert_index(rows: &[TextHistoryRow]) -> Option<usize> {
-    let insert_index = newest_applied_index(rows)?;
+/// Both history views place the boundary after the redoable prefix, never at the top.
+pub(super) fn now_line_insert_index(rows: &[TextHistoryRow]) -> Option<usize> {
+    let insert_index = rows.iter().position(|row| !row.undone)?;
     (insert_index > 0).then_some(insert_index)
 }

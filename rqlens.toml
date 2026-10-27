@@ -29,6 +29,11 @@ level = "error"
 max = 14
 exclude_paths = ["src/bin/**", "src/profile/**"]
 
+[policy.rules."rust.reliability.unwrap"]
+level = "error"
+max = 0
+exclude_paths = ["src/bin/**", "src/profile/**"]
+
 [policy.rules."rust.reliability.panic"]
 level = "error"
 max = 3

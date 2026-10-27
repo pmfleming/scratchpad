@@ -7,12 +7,17 @@ use super::menu_ui::{
 use crate::app::app_state::{ScratchpadApp, workspace::accessors as workspace_accessors};
 use crate::app::commands::{AppCommand, FileCommand, WorkspaceCommand};
 use crate::app::services::file_controller::FileController;
+use crate::app::services::session_store::ClosedTabInfo;
 use crate::app::services::settings_store::FileOpenDisposition;
+
 use eframe::egui;
 use egui_phosphor::regular::{
     ARROW_SQUARE_IN, FILE_PLUS, FLOPPY_DISK, FOLDER_OPEN, PENCIL_SIMPLE_LINE, PLUS,
 };
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
+
+#[cfg(test)]
+mod tests;
 
 pub(super) fn render_file_actions(
     ui: &mut egui::Ui,
@@ -114,19 +119,13 @@ fn render_open_file_actions(
             crate::app::commands::handle_command(app, AppCommand::File(FileCommand::OpenFile));
             ui.close();
         }
-        render_open_file_submenu(ui, app, slot_index);
+        submenu_button_sized(
+            ui,
+            "tab_context.open_file_caret",
+            OPEN_FILE_SUBMENU_WIDTH,
+            |ui| render_open_file_disposition_buttons(ui, app),
+        );
     });
-}
-
-fn render_open_file_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp, _slot_index: usize) {
-    submenu_button_sized(
-        ui,
-        "tab_context.open_file_caret",
-        OPEN_FILE_SUBMENU_WIDTH,
-        |ui| {
-            render_open_file_disposition_buttons(ui, app);
-        },
-    );
 }
 
 fn render_open_file_disposition_buttons(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
@@ -172,36 +171,21 @@ fn render_recently_closed_files(ui: &mut egui::Ui, app: &mut ScratchpadApp, slot
             Some(Ok(archives)) => archives,
             Some(Err(error)) => {
                 ui.label(format!("Could not read archives: {error}"));
-                Vec::new()
+                Arc::default()
             }
             None => {
                 ui.label("Loading archives…");
-                Vec::new()
+                Arc::default()
             }
         };
-    egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-        for archive in &archives {
-            ui.horizontal(|ui| {
-                let label = format!("{} · Recoverable tab{}", archive.name, if archive.has_unsaved_changes { " · unsaved" } else { "" });
-                if ui.button(label).on_hover_text(crate::app::ui::recovery::timestamp(archive.closed_at_unix_seconds)).clicked() {
-                    crate::app::app_state::workspace::lifecycle::reopen_archived_tab(app, &archive.token);
-                    ui.close();
-                }
-                if ui.button("Archived text").on_hover_text("Recover the archived text and undo history into untitled buffers, regardless of disk changes").clicked() {
-                    crate::app::app_state::workspace::lifecycle::recover_archived_copy(app, &archive.token);
-                    ui.close();
-                }
-                let mut pinned = app.state.app_settings.history.recovery.pinned_archives.contains(&archive.token);
-                if ui.checkbox(&mut pinned, "Pin").changed() {
-                    let mut policy = app.state.app_settings.history.recovery.clone();
-                    policy.pinned_archives.retain(|token| token != &archive.token);
-                    if pinned { policy.pinned_archives.push(archive.token.clone()); }
-                    crate::app::app_state::settings_controller::set_recovery_settings(app, policy);
-                }
-            });
-        }
-    });
-    let paths = app
+    egui::ScrollArea::vertical()
+        .max_height(300.0)
+        .show(ui, |ui| {
+            for archive in archives.iter() {
+                render_archive(ui, app, archive);
+            }
+        });
+    let mut paths = app
         .state
         .recently_closed_files
         .iter()
@@ -214,28 +198,56 @@ fn render_recently_closed_files(ui: &mut egui::Ui, app: &mut ScratchpadApp, slot
                     .any(|saved| crate::app::paths_match(saved, path))
             })
         })
-        .cloned()
-        .collect::<Vec<_>>();
-    if paths.is_empty() && archives.is_empty() {
+        .peekable();
+    if paths.peek().is_none() && archives.is_empty() {
         ui.label("No recently closed files");
     }
-    if !paths.is_empty() {
+    if paths.peek().is_some() {
         ui.separator();
         ui.label("Files on disk");
     }
 
-    for path in paths {
-        if recent_file_button(
-            ui,
-            ("tab_context.recently_closed_file", path.clone()),
-            OPEN_FILE_SUBMENU_WIDTH,
-            &path,
-        ) {
-            activate_slot(app, slot_index);
-            open_recent_file(app, path);
+    let selected = paths
+        .find(|path| {
+            recent_file_button(
+                ui,
+                ("tab_context.recently_closed_file", path),
+                OPEN_FILE_SUBMENU_WIDTH,
+                path,
+            )
+        })
+        .cloned();
+    if let Some(path) = selected {
+        activate_slot(app, slot_index);
+        open_recent_file(app, path);
+        ui.close();
+    }
+}
+
+fn render_archive(ui: &mut egui::Ui, app: &mut ScratchpadApp, archive: &ClosedTabInfo) {
+    use crate::app::app_state::workspace::lifecycle;
+    ui.horizontal(|ui| {
+        let unsaved = if archive.has_unsaved_changes { " · unsaved" } else { "" };
+        if ui.button(format!("{} · Recoverable tab{unsaved}", archive.name))
+            .on_hover_text(crate::app::ui::recovery::timestamp(archive.closed_at_unix_seconds)).clicked()
+        {
+            lifecycle::reopen_archived_tab(app, &archive.token);
             ui.close();
         }
-    }
+        if ui.button("Archived text")
+            .on_hover_text("Recover the archived text and undo history into untitled buffers, regardless of disk changes").clicked()
+        {
+            lifecycle::recover_archived_copy(app, &archive.token);
+            ui.close();
+        }
+        let mut pinned = app.state.app_settings.history.recovery.pinned_archives.contains(&archive.token);
+        if ui.checkbox(&mut pinned, "Pin").changed() {
+            let mut policy = app.state.app_settings.history.recovery.clone();
+            policy.pinned_archives.retain(|token| token != &archive.token);
+            if pinned { policy.pinned_archives.push(archive.token.clone()); }
+            crate::app::app_state::settings_controller::set_recovery_settings(app, policy);
+        }
+    });
 }
 
 fn open_recent_file(app: &mut ScratchpadApp, path: PathBuf) {

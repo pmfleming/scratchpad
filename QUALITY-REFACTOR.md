@@ -1,5 +1,9 @@
 # RustQualityLens review and refactor
 
+For the later review against `03f6691`, see
+[Recovery quality review](QUALITY-RECOVERY-REFACTOR.md). The results below retain
+their original baseline.
+
 ## Measurement basis
 
 Baseline: `a3f4cd2`. Tool: local `../rust-quality-lens` at `d28f3d9`
