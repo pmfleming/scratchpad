@@ -243,16 +243,7 @@ impl Database {
         self.read_tab_contents(tabs).await
     }
     pub(super) async fn validate_snapshots(&mut self, tabs: &[SessionTab]) -> io::Result<()> {
-        let mut rows = self
-            .conn
-            .query("SELECT id FROM snapshots", ())
-            .await
-            .map_err(error)?;
-        let mut ids = HashSet::new();
-        while let Some(row) = rows.next().await.map_err(error)? {
-            ids.insert(row.get::<String>(0).map_err(error)?);
-        }
-        drop(rows);
+        let ids = self.string_set("SELECT id FROM snapshots").await?;
         for buffer in tabs
             .iter()
             .flat_map(|tab| &tab.buffers)

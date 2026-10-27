@@ -142,7 +142,7 @@ before backing up, recovering, or downgrading a session database.
 Start with [the configuration guide](docs/configuration.md). It documents the
 TOML sections, shortcut syntax, platform overrides, runtime environment
 variables, and Home Manager integration. A complete example is available at
-[`docs/settings.toml`](docs/settings.toml).
+[`examples/settings.toml`](examples/settings.toml).
 
 For compositor setup, see the
 [NixOS/Hyprland notes](docs/hyprland-nixos-configuration.md).

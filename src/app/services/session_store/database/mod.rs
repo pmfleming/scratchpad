@@ -149,6 +149,14 @@ impl Database {
             .get(0)
             .map_err(error)
     }
+    async fn string_set(&self, sql: &str) -> io::Result<HashSet<String>> {
+        let mut rows = self.conn.query(sql, ()).await.map_err(error)?;
+        let mut values = HashSet::new();
+        while let Some(row) = rows.next().await.map_err(error)? {
+            values.insert(row.get(0).map_err(error)?);
+        }
+        Ok(values)
+    }
     pub async fn checkpoint(&self) -> io::Result<()> {
         let mut rows = self
             .conn

@@ -57,7 +57,7 @@ fn missing_settings_file_returns_none() {
 #[test]
 fn documented_settings_example_stays_loadable() {
     let fixture = SettingsFixture::new();
-    fixture.write("settings.toml", include_str!("../docs/settings.toml"));
+    fixture.write("settings.toml", include_str!("../examples/settings.toml"));
 
     let settings = fixture.load();
 

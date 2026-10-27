@@ -253,20 +253,3 @@ fn restored_metadata(manifest: &SessionManifest) -> RestoredSession {
 fn receiver_closed() -> io::Error {
     io::Error::new(io::ErrorKind::BrokenPipe, "session restore receiver closed")
 }
-fn session_manifest(
-    active_tab_index: usize,
-    active_surface: SessionActiveSurface,
-    font_size: f32,
-    word_wrap: bool,
-    tabs: Vec<SessionTab>,
-) -> SessionManifest {
-    SessionManifest {
-        version: SESSION_VERSION,
-        tab_count: tabs.len(),
-        active_tab_index: active_tab_index.min(tabs.len().saturating_sub(1)),
-        active_surface,
-        font_size,
-        word_wrap,
-        tabs,
-    }
-}

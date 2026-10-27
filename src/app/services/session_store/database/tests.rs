@@ -1,6 +1,6 @@
-use super::*;
-use crate::app::domain::{BufferState, WorkspaceTab};
-use crate::app::services::session_store::SessionPersistRequest;
+use super::{Database, DatabaseWorker, ReadScope};
+use crate::app::domain::{BufferState, CharCursor, CursorRange, SplitAxis, WorkspaceTab};
+use crate::app::services::session_store::{SessionPersistRequest, model::SessionPaneNode};
 use futures_lite::future::block_on;
 
 pub(super) fn tab(text: &str) -> WorkspaceTab {
@@ -8,6 +8,22 @@ pub(super) fn tab(text: &str) -> WorkspaceTab {
 }
 pub(super) fn request(tabs: &[WorkspaceTab]) -> SessionPersistRequest {
     SessionPersistRequest::capture(tabs, 0, 16.0, false)
+}
+pub(super) fn insert(tab: &mut WorkspaceTab, at: usize, text: &str) {
+    tab.buffers
+        .buffer
+        .document_mut()
+        .replace_char_ranges_with_undo(
+            &[(at..at, text.into())],
+            CursorRange::one(CharCursor::new(at)),
+            CursorRange::one(CharCursor::new(at + text.chars().count())),
+        )
+        .unwrap();
+}
+pub(super) async fn database() -> (tempfile::TempDir, Database) {
+    let root = tempfile::tempdir().unwrap();
+    let db = Database::open(root.path()).await.unwrap();
+    (root, db)
 }
 
 #[test]
@@ -37,123 +53,128 @@ fn worker_round_trip_and_stale_capture_barrier() {
 }
 
 #[test]
-fn metadata_only_commit_does_not_rewrite_content() {
+fn unchanged_and_metadata_only_commits_never_rewrite_content_or_history() {
     block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut database = Database::open(directory.path()).await.unwrap();
-        let tabs = vec![tab("unchanged")];
-        database.persist(request(&tabs), 1).await.unwrap();
-        database.conn.execute_batch("CREATE TRIGGER no_content_write BEFORE INSERT ON blobs BEGIN SELECT RAISE(ABORT, 'content rewritten'); END;").await.unwrap();
+        let (_root, mut db) = database().await;
+        let mut tabs = vec![tab("unchanged")];
+        insert(&mut tabs[0], 0, "history");
+        db.persist(request(&tabs), 1).await.unwrap();
+        db.conn.execute_batch("CREATE TRIGGER no_content_write BEFORE INSERT ON blobs BEGIN SELECT RAISE(ABORT, 'content rewritten'); END;
+            CREATE TRIGGER no_history_write BEFORE INSERT ON history BEGIN SELECT RAISE(ABORT, 'history rewritten'); END;
+            CREATE TRIGGER no_tab_write BEFORE INSERT ON tabs BEGIN SELECT RAISE(ABORT, 'tab rewritten'); END;").await.unwrap();
+        let unchanged = db.persist(request(&tabs), 2).await.unwrap();
+        assert_eq!(unchanged.manifest_write_ns, 0);
         let mut captured = request(&tabs);
         captured.font_size = 18.0;
-        database.persist(captured, 2).await.unwrap();
-        let session = database.load(ReadScope::All).await.unwrap().unwrap();
+        db.persist(captured, 3).await.unwrap();
+        let session = db.load(ReadScope::All).await.unwrap().unwrap();
         assert_eq!(session.manifest.font_size, 18.0);
-        assert_eq!(session.contents.values().next().unwrap(), "unchanged");
-    });
-}
-
-#[test]
-fn failed_transaction_keeps_previous_session_and_can_retry() {
-    block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut database = Database::open(directory.path()).await.unwrap();
-        database
-            .persist(request(&[tab("original")]), 1)
-            .await
-            .unwrap();
-        database.conn.execute_batch("CREATE TRIGGER fail_write BEFORE INSERT ON tabs BEGIN SELECT RAISE(ABORT, 'injected'); END;").await.unwrap();
-        let changed = vec![tab("changed")];
-        assert!(database.persist(request(&changed), 2).await.is_err());
-        let restored = database.load(ReadScope::All).await.unwrap().unwrap();
-        assert_eq!(restored.contents.len(), 1);
-        assert_eq!(restored.contents.values().next().unwrap(), "original");
-        database
-            .conn
-            .execute("DROP TRIGGER fail_write", ())
-            .await
-            .unwrap();
-        database.persist(request(&changed), 3).await.unwrap();
         assert_eq!(
-            database
-                .load(ReadScope::All)
-                .await
-                .unwrap()
-                .unwrap()
-                .contents
-                .values()
-                .next()
-                .unwrap(),
-            "changed"
+            session.contents.values().next().unwrap(),
+            "historyunchanged"
         );
     });
 }
 
 #[test]
-fn corrupt_chunk_is_preserved_when_the_tab_is_closed() {
+fn invalid_captures_leave_the_committed_session_intact() {
+    type Mutation = (&'static str, fn(&mut SessionPersistRequest));
     block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut database = Database::open(directory.path()).await.unwrap();
-        database
-            .persist(request(&[tab("precious")]), 1)
+        let (_root, mut db) = database().await;
+        let mut tabs = vec![tab("original"), tab("other")];
+        tabs[0].split_active_view(SplitAxis::Vertical);
+        insert(&mut tabs[0], 0, "edit");
+        db.persist(request(&tabs), 1).await.unwrap();
+        let original = db.load(ReadScope::All).await.unwrap().unwrap();
+        let history = db
+            .read_history(&tabs[0].buffers.buffer.temp_id)
             .await
             .unwrap();
-        database
-            .conn
-            .execute("UPDATE blobs SET body=x'00'", ())
-            .await
-            .unwrap();
-        assert!(database.load(ReadScope::All).await.is_err());
-        database.persist(request(&[]), 2).await.unwrap();
+        let cases: &[Mutation] = &[
+            ("duplicate buffer identity across tabs", |r| {
+                r.tabs[1].session_tab.buffers[0].temp_id =
+                    r.tabs[0].session_tab.buffers[0].temp_id.clone();
+            }),
+            ("duplicate local buffer", |r| {
+                let b = r.tabs[0].session_tab.buffers[0].clone();
+                r.tabs[0].session_tab.buffers.push(b);
+            }),
+            ("unsafe snapshot ID", |r| {
+                r.tabs[0].session_tab.buffers[0].temp_id = "../escape".into();
+            }),
+            ("no buffers", |r| r.tabs[0].session_tab.buffers.clear()),
+            ("duplicate view", |r| {
+                let v = r.tabs[0].session_tab.views[0].clone();
+                r.tabs[0].session_tab.views.push(v);
+            }),
+            ("unknown active view", |r| {
+                r.tabs[0].session_tab.active_view_id = u64::MAX;
+            }),
+            ("unknown buffer reference", |r| {
+                r.tabs[0].session_tab.views[0].buffer_id = u64::MAX;
+            }),
+            ("unknown pane view", |r| {
+                r.tabs[0].session_tab.root_pane = SessionPaneNode::Leaf { view_id: u64::MAX }
+            }),
+            ("incomplete pane coverage", |r| {
+                r.tabs[0].session_tab.root_pane = SessionPaneNode::Leaf {
+                    view_id: r.tabs[0].session_tab.active_view_id,
+                }
+            }),
+            ("duplicate pane leaf", |r| {
+                if let SessionPaneNode::Split { first, second, .. } =
+                    &mut r.tabs[0].session_tab.root_pane
+                {
+                    *second = first.clone();
+                }
+            }),
+            ("invalid pane ratio", |r| {
+                if let SessionPaneNode::Split { ratio, .. } = &mut r.tabs[0].session_tab.root_pane {
+                    *ratio = f32::NAN;
+                }
+            }),
+            ("orphan supplied snapshot", |r| {
+                r.tabs[0].buffer_snapshots[0].temp_id = "unknown".into();
+            }),
+            ("zero history ID", |r| {
+                r.tabs[0].session_tab.buffers[0].text_history[0].id = 0;
+            }),
+            ("duplicate history ID", |r| {
+                let e = r.tabs[0].session_tab.buffers[0].text_history[0].clone();
+                r.tabs[0].session_tab.buffers[0].text_history.push(e);
+            }),
+            ("overflowing history ID", |r| {
+                r.tabs[0].session_tab.buffers[0].text_history[0].id = u64::MAX;
+            }),
+            ("zero global sequence", |r| {
+                r.tabs[0].session_tab.buffers[0].text_history[0].global_seq = 0;
+            }),
+            ("overflowing global sequence", |r| {
+                r.tabs[0].session_tab.buffers[0].text_history[0].global_seq = u64::MAX;
+            }),
+        ];
+        for (name, mutate) in cases {
+            let mut captured = request(&tabs);
+            mutate(&mut captured);
+            assert!(db.persist(captured, 2).await.is_err(), "{name}");
+            assert!(db.conn.is_autocommit().unwrap(), "{name}");
+            assert!(db.blocked.is_none(), "{name}");
+            let stored = db.load(ReadScope::All).await.unwrap().unwrap();
+            assert_eq!(stored.contents, original.contents, "{name}");
+            assert_eq!(stored.manifest.tabs.len(), 2);
+            assert_eq!(
+                db.read_history(&tabs[0].buffers.buffer.temp_id)
+                    .await
+                    .unwrap(),
+                history
+            );
+        }
+        // Rejections must not advance the stale-capture barrier.
+        tabs[0].buffers.buffer.replace_text("retry".into());
+        db.persist(request(&tabs), 2).await.unwrap();
         assert_eq!(
-            database
-                .integer("SELECT count(*) FROM quarantine")
-                .await
-                .unwrap(),
-            1
-        );
-        assert_eq!(
-            database
-                .integer("SELECT count(*) FROM blobs WHERE body=x'00'")
-                .await
-                .unwrap(),
-            1
-        );
-        assert_eq!(
-            database
-                .integer("SELECT count(*) FROM snapshots")
-                .await
-                .unwrap(),
-            1
-        );
-    });
-}
-
-#[test]
-fn unicode_content_spans_multiple_bounded_chunks() {
-    block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut database = Database::open(directory.path()).await.unwrap();
-        let text = "aλ🦀\0\r\n".repeat(100_000);
-        database.persist(request(&[tab(&text)]), 1).await.unwrap();
-        assert!(
-            database
-                .integer("SELECT count(*) FROM parts")
-                .await
-                .unwrap()
-                > 1
-        );
-        assert_eq!(
-            database
-                .load(ReadScope::All)
-                .await
-                .unwrap()
-                .unwrap()
-                .contents
-                .into_values()
-                .next()
-                .unwrap(),
-            text
+            db.read_all_contents().await.unwrap()[&tabs[0].buffers.buffer.temp_id],
+            "retry"
         );
     });
 }
@@ -161,15 +182,13 @@ fn unicode_content_spans_multiple_bounded_chunks() {
 #[test]
 fn second_owner_and_future_schema_are_rejected() {
     block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path()).await.unwrap();
-        assert!(Database::open(directory.path()).await.is_err());
-        database
-            .conn
+        let (root, db) = database().await;
+        assert!(Database::open(root.path()).await.is_err());
+        db.conn
             .execute("PRAGMA user_version=999", ())
             .await
             .unwrap();
-        drop(database);
-        assert!(Database::open(directory.path()).await.is_err());
+        drop(db);
+        assert!(Database::open(root.path()).await.is_err());
     });
 }

@@ -1,6 +1,9 @@
-use super::tests::{request, tab};
-use super::*;
+use super::{
+    Database, ReadScope,
+    tests::{database, insert, request, tab},
+};
 use futures_lite::future::block_on;
+use std::{collections::HashMap, io};
 use turso::params;
 
 async fn damage(db: &Database, id: &str) {
@@ -25,8 +28,7 @@ async fn archive(db: &Database) -> Vec<u8> {
 #[test]
 fn cold_damage_keeps_healthy_saves_and_retains_original_data_across_restart() {
     block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut db = Database::open(directory.path()).await.unwrap();
+        let (directory, mut db) = database().await;
         let mut tabs = vec![tab("healthy"), tab("precious")];
         let id = tabs[1].buffers.buffer.temp_id.clone();
         db.persist(request(&tabs), 1).await.unwrap();
@@ -175,8 +177,7 @@ fn damaged_active_tab_stays_cold_while_other_tabs_restore_and_save() {
 #[test]
 fn stale_hydration_of_a_closed_tab_does_not_create_a_quarantine() {
     block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut db = Database::open(directory.path()).await.unwrap();
+        let (_root, mut db) = database().await;
         let tabs = vec![tab("healthy"), tab("closed")];
         db.persist(request(&tabs), 1).await.unwrap();
         let queued = request(&tabs).tabs.pop().unwrap().session_tab;
@@ -195,8 +196,7 @@ fn stale_hydration_of_a_closed_tab_does_not_create_a_quarantine() {
 #[test]
 fn quarantine_archives_committed_metadata_not_a_stale_hydration_payload() {
     block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut db = Database::open(directory.path()).await.unwrap();
+        let (_root, mut db) = database().await;
         let mut tabs = vec![tab("healthy"), tab("changed")];
         db.persist(request(&tabs), 1).await.unwrap();
         let queued = request(&tabs).tabs.pop().unwrap().session_tab;
@@ -214,8 +214,7 @@ fn quarantine_archives_committed_metadata_not_a_stale_hydration_payload() {
 #[test]
 fn missing_cold_content_detected_by_a_save_is_quarantined_after_rollback() {
     block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut db = Database::open(directory.path()).await.unwrap();
+        let (_root, mut db) = database().await;
         let mut tabs = vec![tab("healthy"), tab("cold")];
         db.persist(request(&tabs), 1).await.unwrap();
         db.conn
@@ -263,10 +262,13 @@ fn malformed_or_missing_buffer_rows_are_scoped_not_manifest_failures() {
             "UPDATE snapshots SET digest=x'00' WHERE id=?",
             "UPDATE parts SET part=9 WHERE temp_id=?",
             "DELETE FROM snapshots WHERE id=?",
+            "UPDATE history SET seq=seq+1 WHERE temp_id=?",
+            "UPDATE history SET global_seq=global_seq+1 WHERE temp_id=?",
+            "UPDATE history SET entry=x'00' WHERE temp_id=?",
         ] {
-            let directory = tempfile::tempdir().unwrap();
-            let mut db = Database::open(directory.path()).await.unwrap();
+            let (_root, mut db) = database().await;
             let mut tabs = vec![tab("healthy"), tab("damaged")];
+            insert(&mut tabs[1], 0, "history");
             db.persist(request(&tabs), 1).await.unwrap();
             db.conn
                 .execute(sql, [tabs[1].buffers.buffer.temp_id.as_str()])
@@ -302,8 +304,7 @@ fn malformed_or_missing_buffer_rows_are_scoped_not_manifest_failures() {
 #[test]
 fn archive_write_failure_blocks_every_save() {
     block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut db = Database::open(directory.path()).await.unwrap();
+        let (_root, mut db) = database().await;
         let tabs = vec![tab("healthy"), tab("bad")];
         db.persist(request(&tabs), 1).await.unwrap();
         damage(&db, &tabs[1].buffers.buffer.temp_id).await;
@@ -322,8 +323,7 @@ fn archive_write_failure_blocks_every_save() {
 #[test]
 fn full_parallel_read_attributes_damage_to_one_buffer() {
     block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut db = Database::open(directory.path()).await.unwrap();
+        let (_root, mut db) = database().await;
         let tabs: Vec<_> = (0..600)
             .map(|i| tab(&format!("protected text {i}")))
             .collect();
@@ -343,8 +343,7 @@ fn full_parallel_read_attributes_damage_to_one_buffer() {
 #[test]
 fn old_schema_is_rejected_and_schema_batch_rolls_back() {
     block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut db = Database::open(directory.path()).await.unwrap();
+        let (directory, mut db) = database().await;
         db.persist(request(&[tab("before upgrade")]), 1)
             .await
             .unwrap();
@@ -354,8 +353,7 @@ fn old_schema_is_rejected_and_schema_batch_rolls_back() {
             .unwrap();
         drop(db);
         assert!(Database::open(directory.path()).await.is_err());
-        let fresh = tempfile::tempdir().unwrap();
-        let db = Database::open(fresh.path()).await.unwrap();
+        let (_fresh, db) = database().await;
         assert!(
             db.create_schema("CREATE TABLE partial_schema(x); CREATE TABLE tabs(x);")
                 .await
@@ -374,8 +372,7 @@ fn old_schema_is_rejected_and_schema_batch_rolls_back() {
 #[test]
 fn supplied_snapshots_are_retained_even_if_capture_policy_changes() {
     block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut db = Database::open(directory.path()).await.unwrap();
+        let (directory, mut db) = database().await;
         let tabs = vec![tab("explicit snapshot")];
         let captured = || {
             let mut captured = request(&tabs);
@@ -399,13 +396,15 @@ fn supplied_snapshots_are_retained_even_if_capture_policy_changes() {
 #[test]
 fn lengths_and_hashes_describe_the_bytes_emitted_including_empty_and_unicode() {
     block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut db = Database::open(directory.path()).await.unwrap();
-        let tabs = vec![tab(""), tab(&"aλ🦀\r\n".repeat(100_000))];
+        let (_root, mut db) = database().await;
+        let tabs = vec![tab(""), tab(&"aλ🦀\0\r\n".repeat(100_000))];
         db.persist(request(&tabs), 1).await.unwrap();
+        assert!(db.integer("SELECT count(*) FROM parts").await.unwrap() > 1);
+        let contents = db.load(ReadScope::All).await.unwrap().unwrap().contents;
         for tab in &tabs {
             let text = tab.buffers.buffer.text();
             let id = &tab.buffers.buffer.temp_id;
+            assert_eq!(contents[id], text);
             let row = db.conn.query("SELECT bytes, digest, (SELECT coalesce(sum(length(b.body)),0) FROM parts p JOIN blobs b ON p.digest=b.digest WHERE p.temp_id=?) FROM snapshots WHERE id=?", params![id.as_str(), id.as_str()]).await.unwrap().next().await.unwrap().unwrap();
             assert_eq!(row.get::<i64>(0).unwrap(), row.get::<i64>(2).unwrap());
             assert_eq!(row.get::<i64>(0).unwrap() as usize, text.len());

@@ -54,14 +54,9 @@ pub(crate) struct SessionTabShell {
 }
 
 #[derive(Clone)]
-pub(crate) struct SessionBufferPayload {
-    pub buffers: Vec<SessionBuffer>,
-}
-
-#[derive(Clone)]
 pub(crate) struct SessionTabParts {
     pub shell: SessionTabShell,
-    pub payload: SessionBufferPayload,
+    pub buffers: Vec<SessionBuffer>,
 }
 
 impl SessionTab {
@@ -82,7 +77,7 @@ impl SessionTab {
                 views,
                 root_pane,
             },
-            payload: SessionBufferPayload { buffers },
+            buffers,
         }
     }
 }
@@ -90,7 +85,7 @@ impl SessionTab {
 impl From<SessionTabParts> for SessionTab {
     fn from(parts: SessionTabParts) -> Self {
         Self {
-            buffers: parts.payload.buffers,
+            buffers: parts.buffers,
             active_view_id: parts.shell.active_view_id,
             views: parts.shell.views,
             root_pane: parts.shell.root_pane,
@@ -98,15 +93,9 @@ impl From<SessionTabParts> for SessionTab {
     }
 }
 
-impl SessionBufferPayload {
-    pub(crate) fn buffer_ids(&self) -> impl Iterator<Item = u64> + '_ {
-        self.buffers.iter().map(|buffer| buffer.id)
-    }
-}
-
 impl SessionTabParts {
     pub(crate) fn buffer_ids(&self) -> impl Iterator<Item = u64> + '_ {
-        self.payload.buffer_ids()
+        self.buffers.iter().map(|buffer| buffer.id)
     }
 }
 

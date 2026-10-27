@@ -86,7 +86,6 @@
             ./benches
             ./examples
             ./scripts/count_lines.rs
-            ./docs/settings.toml
           ];
         };
         cargoVendorDir = craneLib.vendorCargoDeps { cargoLock = ./Cargo.lock; };

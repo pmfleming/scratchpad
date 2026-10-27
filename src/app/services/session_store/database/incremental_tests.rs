@@ -1,22 +1,10 @@
 use super::{
-    tests::{request, tab},
-    *,
+    Database, ReadScope,
+    tests::{database, insert, request, tab},
 };
-use crate::app::domain::{CharCursor, CursorRange, WorkspaceTab};
 use futures_lite::future::block_on;
 use turso::params;
 
-fn insert(tab: &mut WorkspaceTab, at: usize, text: &str) {
-    tab.buffers
-        .buffer
-        .document_mut()
-        .replace_char_ranges_with_undo(
-            &[(at..at, text.into())],
-            CursorRange::one(CharCursor::new(at)),
-            CursorRange::one(CharCursor::new(at + text.chars().count())),
-        )
-        .unwrap();
-}
 async fn audit(db: &Database) {
     db.conn.execute_batch("CREATE TABLE writes(kind TEXT NOT NULL, bytes INTEGER NOT NULL) STRICT;
         CREATE TRIGGER history_insert AFTER INSERT ON history BEGIN INSERT INTO writes VALUES('insert', length(new.entry)); END;
@@ -36,8 +24,7 @@ async fn count(db: &Database, kind: &str) -> i64 {
 #[test]
 fn history_appends_updates_prunes_and_restarts_without_rewriting_unchanged_entries() {
     block_on(async {
-        let root = tempfile::tempdir().unwrap();
-        let mut db = Database::open(root.path()).await.unwrap();
+        let (root, mut db) = database().await;
         let mut tabs = vec![tab("base")];
         for _ in 0..4 {
             insert(&mut tabs[0], 0, "entry");
@@ -112,35 +99,64 @@ fn history_appends_updates_prunes_and_restarts_without_rewriting_unchanged_entri
 }
 
 #[test]
-fn failed_commit_retries_history_and_content_together() {
+fn write_failures_roll_back_history_content_metadata_and_cleanup_before_retry() {
     block_on(async {
-        let root = tempfile::tempdir().unwrap();
-        let mut db = Database::open(root.path()).await.unwrap();
-        let mut tabs = vec![tab("original")];
-        insert(&mut tabs[0], 0, "a");
-        db.persist(request(&tabs), 1).await.unwrap();
-        let id = tabs[0].buffers.buffer.temp_id.clone();
-        let original = db.read_history(&id).await.unwrap();
-        db.conn.execute_batch("CREATE TRIGGER fail_commit BEFORE INSERT ON session_state BEGIN SELECT RAISE(ABORT, 'injected'); END;").await.unwrap();
-        insert(&mut tabs[0], 0, "b");
-        assert!(db.persist(request(&tabs), 2).await.is_err());
-        assert_eq!(db.read_history(&id).await.unwrap(), original);
-        assert_eq!(db.read_all_contents().await.unwrap()[&id], "aoriginal");
-        db.conn
-            .execute("DROP TRIGGER fail_commit", ())
-            .await
-            .unwrap();
-        db.persist(request(&tabs), 3).await.unwrap();
-        assert_eq!(db.read_history(&id).await.unwrap().len(), 2);
-        assert_eq!(db.read_all_contents().await.unwrap()[&id], "baoriginal");
+        // Fail after different portions of the write, including during collection.
+        for (table, operation) in [
+            ("history", "INSERT"),
+            ("blobs", "INSERT"),
+            ("parts", "INSERT"),
+            ("tabs", "INSERT"),
+            ("session_state", "INSERT"),
+            ("snapshots", "DELETE"),
+        ] {
+            let (_root, mut db) = database().await;
+            let mut tabs = vec![tab("original"), tab("obsolete")];
+            insert(&mut tabs[0], 0, "a");
+            db.persist(request(&tabs), 1).await.unwrap();
+            let id = tabs[0].buffers.buffer.temp_id.clone();
+            let original = db.read_history(&id).await.unwrap();
+            let contents = db.read_all_contents().await.unwrap();
+            db.conn.execute_batch(&format!("CREATE TRIGGER fail_write BEFORE {operation} ON {table} BEGIN SELECT RAISE(ABORT, 'injected'); END;")).await.unwrap();
+            tabs.pop();
+            insert(&mut tabs[0], 0, "b");
+            tabs[0].buffers.buffer.name = "edited".into();
+            let mut changed = request(&tabs);
+            changed.font_size = 24.0;
+            assert!(db.persist(changed, 2).await.is_err(), "{table}");
+            assert!(db.conn.is_autocommit().unwrap());
+            let stored = db.load(ReadScope::All).await.unwrap().unwrap();
+            assert_eq!(stored.contents, contents, "{table}");
+            assert_eq!(stored.manifest.tabs[0].buffers[0].name, "note");
+            assert_eq!(
+                (stored.manifest.tabs.len(), stored.manifest.font_size),
+                (2, 16.0)
+            );
+            assert_eq!(db.read_history(&id).await.unwrap(), original);
+            db.conn
+                .execute("DROP TRIGGER fail_write", ())
+                .await
+                .unwrap();
+            let mut retry = request(&tabs);
+            retry.font_size = 24.0;
+            db.persist(retry, 3).await.unwrap();
+            assert_eq!(db.read_history(&id).await.unwrap().len(), 2);
+            let stored = db.load(ReadScope::All).await.unwrap().unwrap();
+            assert_eq!(stored.contents.len(), 1);
+            assert_eq!(stored.contents[&id], "baoriginal");
+            assert_eq!(stored.manifest.tabs[0].buffers[0].name, "edited");
+            assert_eq!(
+                (stored.manifest.tabs.len(), stored.manifest.font_size),
+                (1, 24.0)
+            );
+        }
     });
 }
 
 #[test]
 fn cold_history_is_lazy_and_survives_metadata_saves_and_quarantine() {
     block_on(async {
-        let root = tempfile::tempdir().unwrap();
-        let mut db = Database::open(root.path()).await.unwrap();
+        let (_root, mut db) = database().await;
         let mut tabs = vec![tab("active"), tab("cold")];
         insert(&mut tabs[1], 0, "history");
         let id = tabs[1].buffers.buffer.temp_id.clone();
@@ -196,8 +212,7 @@ fn diverse_text(bytes: usize) -> String {
 #[test]
 fn cdc_reuses_bodies_after_front_middle_end_edits_and_across_tabs() {
     block_on(async {
-        let root = tempfile::tempdir().unwrap();
-        let mut db = Database::open(root.path()).await.unwrap();
+        let (_root, mut db) = database().await;
         let text = diverse_text(8 * 1024 * 1024);
         let mut tabs = vec![tab(&text), tab(&text)];
         db.persist(request(&tabs), 1).await.unwrap();
@@ -254,8 +269,7 @@ fn cdc_reuses_bodies_after_front_middle_end_edits_and_across_tabs() {
 #[test]
 fn opening_reserves_global_sequences_from_unhydrated_cold_history() {
     block_on(async {
-        let root = tempfile::tempdir().unwrap();
-        let mut db = Database::open(root.path()).await.unwrap();
+        let (root, mut db) = database().await;
         let mut tabs = vec![tab("active"), tab("cold")];
         insert(&mut tabs[1], 0, "entry");
         let mut captured = request(&tabs);
@@ -274,8 +288,7 @@ fn opening_reserves_global_sequences_from_unhydrated_cold_history() {
 #[test]
 fn cdc_boundaries_ignore_piece_segmentation_and_truncation_removes_stale_parts() {
     block_on(async {
-        let root = tempfile::tempdir().unwrap();
-        let mut db = Database::open(root.path()).await.unwrap();
+        let (_root, mut db) = database().await;
         let text = diverse_text(1024 * 1024);
         let mut tabs = vec![tab(&text)];
         db.persist(request(&tabs), 1).await.unwrap();
@@ -321,8 +334,7 @@ fn cdc_boundaries_ignore_piece_segmentation_and_truncation_removes_stale_parts()
 #[test]
 fn strict_types_and_foreign_keys_are_enforced_by_turso() {
     block_on(async {
-        let root = tempfile::tempdir().unwrap();
-        let db = Database::open(root.path()).await.unwrap();
+        let (_root, db) = database().await;
         assert_eq!(db.integer("PRAGMA foreign_keys").await.unwrap(), 1);
         assert!(
             db.conn

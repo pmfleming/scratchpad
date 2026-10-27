@@ -68,22 +68,17 @@ impl Database {
         if old == entries {
             return Ok(());
         }
-        let Some(first) = entries.first() else {
+        let Some((first, last)) = entries.first().zip(entries.last()) else {
             return self
                 .execute_cached("DELETE FROM history WHERE temp_id=?", [id])
                 .await;
         };
-        let last = entries.last().unwrap().id;
+        let last = last.id;
         // Budget evictions and redo-branch truncation are range deletes, with
         // individual deletes for interior holes (selective history operations).
         self.execute_cached(
-            "DELETE FROM history WHERE temp_id=? AND seq<?",
-            params![id, first.id as i64],
-        )
-        .await?;
-        self.execute_cached(
-            "DELETE FROM history WHERE temp_id=? AND seq>?",
-            params![id, last as i64],
+            "DELETE FROM history WHERE temp_id=? AND (seq<? OR seq>?)",
+            params![id, first.id as i64, last as i64],
         )
         .await?;
         for entry in old

@@ -1,4 +1,4 @@
-use super::model::{SessionBufferPayload, SessionTab, SessionTabParts};
+use super::model::{SessionBuffer, SessionTab, SessionTabParts};
 use super::parallel;
 use super::{RestoreStatus, RestoreStatusLevel};
 use crate::app::domain::{BufferFreshness, BufferState, RestoredBufferState, WorkspaceTab};
@@ -115,7 +115,6 @@ impl Restorer {
             .map(|(index, tab)| {
                 if index == active
                     && !tab
-                        .payload
                         .buffers
                         .iter()
                         .any(|buffer| quarantined.contains(&buffer.temp_id))
@@ -144,23 +143,22 @@ impl Restorer {
         tab: SessionTabParts,
     ) -> (WorkspaceTab, RestoreSummary) {
         let mut summary = RestoreSummary::default();
-        let mut buffers = self.restore_buffers(tab.payload, &mut summary);
+        let mut buffers = self.restore_buffers(tab.buffers, &mut summary);
         (
             workspace_tab_from_restored_buffers(tab.shell, &mut buffers),
             summary,
         )
     }
     fn cold_tab_shell(tab: &SessionTabParts) -> WorkspaceTab {
-        let mut buffers = tab.payload.buffers.iter().map(cold_buffer_shell).collect();
+        let mut buffers = tab.buffers.iter().map(cold_buffer_shell).collect();
         workspace_tab_from_restored_buffers(tab.shell.clone(), &mut buffers)
     }
     fn restore_buffers(
         &mut self,
-        payload: SessionBufferPayload,
+        buffers: Vec<SessionBuffer>,
         summary: &mut RestoreSummary,
     ) -> Vec<BufferState> {
-        payload
-            .buffers
+        buffers
             .into_iter()
             .map(|mut buffer| {
                 let mut restored = self.restore_buffer_content(&mut buffer);

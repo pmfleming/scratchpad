@@ -1,12 +1,14 @@
-use super::tests::{request, tab};
-use super::*;
+use super::{
+    Database, ReadScope,
+    tests::{database, request, tab},
+};
 use futures_lite::future::block_on;
+use std::io;
 
 #[test]
 fn failed_rollback_blocks_subsequent_reads_and_writes() {
     block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut db = Database::open(directory.path()).await.unwrap();
+        let (_root, mut db) = database().await;
         db.persist(request(&[tab("committed")]), 1).await.unwrap();
         // Inject a failed rollback result at the connection boundary.
         db.record_rollback_result(Err(io::Error::other("injected rollback failure")));
@@ -22,8 +24,7 @@ fn failed_rollback_blocks_subsequent_reads_and_writes() {
 #[test]
 fn parallel_scan_detects_orphan_chunks_outside_all_content_ranges() {
     block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut db = Database::open(directory.path()).await.unwrap();
+        let (_root, mut db) = database().await;
         let tabs: Vec<_> = (0..1000).map(|_| tab("unique identity")).collect();
         db.persist(request(&tabs), 1).await.unwrap();
         // Simulate external corruption bypassing the enabled FK constraints.
@@ -43,8 +44,7 @@ fn parallel_scan_detects_orphan_chunks_outside_all_content_ranges() {
 #[test]
 fn document_replacement_with_reused_generation_is_not_skipped() {
     block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut db = Database::open(directory.path()).await.unwrap();
+        let (_root, mut db) = database().await;
         let mut tabs = vec![tab("old")];
         let revision = tabs[0].active_buffer().document_snapshot().revision();
         db.persist(request(&tabs), 1).await.unwrap();
@@ -71,8 +71,7 @@ fn document_replacement_with_reused_generation_is_not_skipped() {
 #[test]
 fn disk_full_rolls_back_content_metadata_and_cleanup() {
     block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut db = Database::open(directory.path()).await.unwrap();
+        let (_root, mut db) = database().await;
         db.persist(request(&[tab("original")]), 1).await.unwrap();
         db.checkpoint().await.unwrap();
         let pages = db.integer("PRAGMA page_count").await.unwrap();
@@ -102,36 +101,47 @@ fn disk_full_rolls_back_content_metadata_and_cleanup() {
 }
 
 #[test]
-fn missing_content_never_falls_back_to_empty_text() {
+fn missing_or_corrupt_content_is_quarantined_not_replaced_with_empty_text() {
     block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut db = Database::open(directory.path()).await.unwrap();
-        db.persist(request(&[tab("important")]), 1).await.unwrap();
-        db.conn
-            .execute_batch("DELETE FROM snapshots;")
-            .await
-            .unwrap();
-        let stored = db.load(ReadScope::Shells).await.unwrap().unwrap();
-        assert_eq!(stored.quarantined.len(), 1);
-        assert!(stored.contents.is_empty());
-        assert!(db.load(ReadScope::Active).await.is_err());
-        db.persist(request(&[]), 2).await.unwrap();
-        assert_eq!(
-            db.integer("SELECT count(*) FROM quarantine").await.unwrap(),
-            1
-        );
-        assert_eq!(
-            db.integer("SELECT count(*) FROM snapshots").await.unwrap(),
-            0
-        );
+        for (damage, retained) in [
+            ("DELETE FROM snapshots", 0),
+            ("UPDATE blobs SET body=x'00'", 1),
+        ] {
+            for shells_first in [true, false] {
+                let (_root, mut db) = database().await;
+                db.persist(request(&[tab("important")]), 1).await.unwrap();
+                db.conn.execute(damage, ()).await.unwrap();
+                if shells_first {
+                    let stored = db.load(ReadScope::Shells).await.unwrap().unwrap();
+                    assert_eq!(stored.quarantined.len(), 1);
+                    assert!(stored.contents.is_empty());
+                } else {
+                    assert!(db.load(ReadScope::All).await.is_err());
+                }
+                assert!(db.load(ReadScope::Active).await.is_err());
+                assert!(db.blocked.is_none());
+                db.persist(request(&[]), 2).await.unwrap();
+                assert_eq!(
+                    db.integer("SELECT count(*) FROM quarantine").await.unwrap(),
+                    1
+                );
+                assert_eq!(
+                    db.integer("SELECT count(*) FROM snapshots").await.unwrap(),
+                    retained
+                );
+                assert_eq!(
+                    db.integer("SELECT count(*) FROM blobs").await.unwrap(),
+                    retained
+                );
+            }
+        }
     });
 }
 
 #[test]
 fn corrupt_metadata_cannot_be_overwritten_without_first_loading() {
     block_on(async {
-        let directory = tempfile::tempdir().unwrap();
-        let mut db = Database::open(directory.path()).await.unwrap();
+        let (directory, mut db) = database().await;
         db.persist(request(&[tab("important")]), 1).await.unwrap();
         db.conn
             .execute("UPDATE tabs SET payload=x'00'", ())

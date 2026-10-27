@@ -70,15 +70,15 @@ impl Database {
         if self.quarantined.contains_key(id) {
             return Ok(());
         }
-        let tab = tabs
+        let (tab, buffer) = tabs
             .iter()
-            .find(|tab| tab.buffers.iter().any(|buffer| buffer.temp_id == id))
+            .find_map(|tab| {
+                tab.buffers
+                    .iter()
+                    .find(|buffer| buffer.temp_id == id)
+                    .map(|buffer| (tab, buffer))
+            })
             .ok_or_else(|| invalid("damaged content has no manifest reference"))?;
-        let buffer = tab
-            .buffers
-            .iter()
-            .find(|buffer| buffer.temp_id == id)
-            .ok_or_else(|| invalid("missing quarantine buffer"))?;
         let payload = serde_json::to_vec(tab).map_err(invalid)?;
         if !self.conn.is_autocommit().map_err(error)? {
             return Err(invalid(
