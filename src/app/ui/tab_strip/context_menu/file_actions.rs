@@ -27,6 +27,16 @@ pub(super) fn render_file_actions(
         crate::app::commands::handle_command(app, AppCommand::Workspace(WorkspaceCommand::NewTab));
         ui.close();
     }
+    if menu_button(
+        ui,
+        TAB_CONTEXT_MENU_WIDTH,
+        "Reopen Last Closed Tab",
+        None,
+        !app.startup_restore_pending() && !app.state.persistence.session_restore_failed,
+    ) {
+        crate::app::app_state::workspace::lifecycle::reopen_last_closed_tab(app);
+        ui.close();
+    }
     if app.state.app_settings.recent_files_enabled() {
         render_open_file_actions(ui, app, slot_index, open_here_enabled);
     } else if menu_button(

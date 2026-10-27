@@ -409,7 +409,7 @@ impl ScratchpadApp {
     }
 
     fn apply_session_persisted_result(&mut self, request_id: u64, result: Result<(), String>) {
-        let Some(_action) = self.take_pending_action(
+        let Some(action) = self.take_pending_action(
             request_id,
             PendingActionKind::PersistSession,
             PendingBackgroundAction::into_session_persist,
@@ -418,6 +418,10 @@ impl ScratchpadApp {
         };
         match result {
             Ok(()) => {
+                self.state
+                    .persistence
+                    .pending_closed_tabs
+                    .retain(|closed| !action.closed_tokens.contains(&closed.token));
                 self.state.persistence.last_session_persist = Instant::now();
             }
             Err(error) => {

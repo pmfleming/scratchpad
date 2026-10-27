@@ -107,6 +107,7 @@ pub(crate) struct AppPersistenceState {
     pub(crate) persist_session_on_drop: bool,
     // A failed restore leaves a fallback/partial workspace, never an authoritative session.
     pub(crate) session_restore_failed: bool,
+    pub(crate) pending_closed_tabs: Vec<crate::app::services::session_store::CapturedClosedTab>,
     pub(crate) last_session_persist: Instant,
 }
 

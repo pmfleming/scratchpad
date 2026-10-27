@@ -85,7 +85,9 @@ pub(crate) struct PendingStartupRestoreCompareAction {
     pub(crate) conflict: StartupRestoreConflict,
 }
 
-pub(crate) struct PendingSessionPersistAction;
+pub(crate) struct PendingSessionPersistAction {
+    pub(crate) closed_tokens: Vec<String>,
+}
 
 pub(crate) struct PendingEncodingComplianceAction {
     pub(crate) buffer_id: BufferId,

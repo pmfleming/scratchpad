@@ -2,6 +2,7 @@
 #[cfg(test)]
 mod app_safety_tests;
 mod chunking;
+pub(super) mod closed;
 mod content;
 #[cfg(test)]
 mod fault_tests;
@@ -15,6 +16,8 @@ mod quarantine;
 #[cfg(test)]
 mod quarantine_tests;
 mod read;
+#[cfg(test)]
+mod retention_tests;
 #[cfg(test)]
 mod tests;
 mod worker;
@@ -122,7 +125,7 @@ impl Database {
     async fn initialize(&mut self) -> io::Result<()> {
         let version = self.integer("PRAGMA user_version").await?;
         let application = self.integer("PRAGMA application_id").await?;
-        if application == APPLICATION_ID && version == 3 {
+        if application == APPLICATION_ID && version == 4 {
             return Ok(());
         }
         if version != 0
@@ -137,8 +140,9 @@ impl Database {
             ));
         }
         self.create_schema(&format!(
-            "{SCHEMA} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=3;",
-            quarantine::SCHEMA
+            "{SCHEMA} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=4;",
+            quarantine::SCHEMA,
+            closed::SCHEMA
         ))
         .await
     }

@@ -129,6 +129,43 @@ pub(crate) fn perform_close_tab_no_persist(app: &mut ScratchpadApp, index: usize
     let _ = close_tab_internal(app, index);
 }
 
+pub(crate) fn reopen_last_closed_tab(app: &mut ScratchpadApp) {
+    if app.startup_restore_pending() || app.state.persistence.session_restore_failed {
+        return;
+    }
+    let result = (|| -> std::io::Result<Option<WorkspaceTab>> {
+        crate::app::services::session_manager::persist_session_now(app)?;
+        let store = &app.state.persistence.session_store;
+        let Some(closed) = store.closed_tabs()?.into_iter().next() else {
+            return Ok(None);
+        };
+        store.restore_closed_tab(&closed.token).map(Some)
+    })();
+    match result {
+        Ok(Some(tab)) => {
+            if tab.buffers().any(|buffer| {
+                app.tab_manager
+                    .tabs
+                    .as_slice()
+                    .iter()
+                    .flat_map(WorkspaceTab::buffers)
+                    .any(|live| live.temp_id == buffer.temp_id)
+            }) {
+                return;
+            }
+            create_workspace_tab(app, tab);
+            if let Err(error) = crate::app::services::session_manager::persist_session_now(app) {
+                app.state.status.report_session_save_failed(error);
+            }
+        }
+        Ok(None) => app
+            .state
+            .status
+            .set_info_status_in_domain(StatusDomain::Session, "No retained closed tabs."),
+        Err(error) => app.state.status.report_session_restore_failed(error),
+    }
+}
+
 pub(crate) fn append_tab(app: &mut ScratchpadApp, tab: WorkspaceTab) {
     create_workspace_tab(app, tab);
 }
@@ -199,6 +236,23 @@ fn close_tab_internal(app: &mut ScratchpadApp, index: usize) -> String {
         .get(index)
         .map(|tab| tab.buffers().map(|buffer| buffer.id).collect::<Vec<_>>())
         .unwrap_or_default();
+    if !app.startup_restore_pending()
+        && !app.state.persistence.session_restore_failed
+        && let Some(tab) = app.tab_manager.tabs.as_slice().get(index)
+    {
+        let closed = crate::app::services::session_store::CapturedClosedTab::capture(
+            tab,
+            app.tab_manager.cold_session_tabs().get(&index),
+        );
+        app.state.persistence.pending_closed_tabs.push(closed);
+        let excess = app
+            .state
+            .persistence
+            .pending_closed_tabs
+            .len()
+            .saturating_sub(crate::app::services::session_store::CLOSED_TAB_LIMIT);
+        app.state.persistence.pending_closed_tabs.drain(..excess);
+    }
     let tab_description = app.tab_manager.describe_tab_at(index);
     let settings_refresh = app.settings_toml_refresh_on_tab_close(index);
     crate::app::app_state::frame::begin_layout_transition(app);

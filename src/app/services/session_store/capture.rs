@@ -14,14 +14,24 @@ pub(crate) struct SessionPersistRequest {
     pub(super) font_size: f32,
     pub(super) word_wrap: bool,
     pub(super) tabs: Vec<CapturedSessionTab>,
+    pub(crate) closed_tabs: Vec<CapturedClosedTab>,
 }
 
+#[derive(Clone)]
+pub(crate) struct CapturedClosedTab {
+    pub(crate) token: String,
+    pub(super) closed_at: i64,
+    pub(super) tab: CapturedSessionTab,
+}
+
+#[derive(Clone)]
 pub(super) struct CapturedSessionTab {
     pub(super) session_tab: SessionTab,
     pub(super) buffer_snapshots: Vec<CapturedSessionBuffer>,
     pub(super) preserve_existing: bool,
 }
 
+#[derive(Clone)]
 pub(super) struct CapturedSessionBuffer {
     pub(super) temp_id: String,
     pub(super) snapshot: DocumentSnapshot,
@@ -41,6 +51,7 @@ impl SessionPersistRequest {
             font_size,
             word_wrap,
             tabs: tabs.iter().map(CapturedSessionTab::capture).collect(),
+            closed_tabs: Vec::new(),
         }
     }
 
@@ -58,6 +69,7 @@ impl SessionPersistRequest {
             active_surface,
             font_size,
             word_wrap,
+            closed_tabs: Vec::new(),
             tabs: tabs
                 .iter()
                 .enumerate()
@@ -68,6 +80,40 @@ impl SessionPersistRequest {
                     )
                 })
                 .collect(),
+        }
+    }
+}
+
+impl CapturedClosedTab {
+    pub(crate) fn capture(tab: &WorkspaceTab, cold: Option<&ColdSessionTab>) -> Self {
+        let mut captured = cold.cloned().map_or_else(
+            || CapturedSessionTab::capture(tab),
+            CapturedSessionTab::capture_cold,
+        );
+        if cold.is_none() {
+            // A closed disk-backed tab must reopen with its original text/history,
+            // even if the file subsequently changes or disappears.
+            captured.buffer_snapshots = tab
+                .buffers()
+                .filter(|buffer| !buffer.is_loading_preview)
+                .map(|buffer| CapturedSessionBuffer {
+                    temp_id: buffer.temp_id.clone(),
+                    snapshot: buffer.document_snapshot(),
+                })
+                .collect();
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        Self {
+            token: format!(
+                "{}-{}-{}",
+                std::process::id(),
+                now.as_nanos(),
+                NEXT_CAPTURE.fetch_add(1, Ordering::Relaxed)
+            ),
+            closed_at: now.as_secs().min(i64::MAX as u64) as i64,
+            tab: captured,
         }
     }
 }

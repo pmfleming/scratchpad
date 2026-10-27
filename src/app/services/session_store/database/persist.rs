@@ -26,9 +26,14 @@ struct Prepared {
     snapshots: Vec<CapturedSessionBuffer>,
     buffers: HashMap<String, RecoveryBuffer>,
     full_cleanup: bool,
+    closed: Vec<super::closed::ClosedRow>,
+    closed_changed: bool,
 }
 impl Prepared {
-    fn new(request: SessionPersistRequest) -> io::Result<Self> {
+    fn new(
+        request: SessionPersistRequest,
+        old_closed: Vec<super::closed::ClosedRow>,
+    ) -> io::Result<Self> {
         let tab_count = request.tabs.len();
         let manifest = SessionManifest {
             version: super::super::SESSION_VERSION,
@@ -44,11 +49,21 @@ impl Prepared {
             ..Self::default()
         };
         for tab in request.tabs {
-            prepared.push_tab(tab)?;
+            let payload = prepared.push_tab(tab)?;
+            prepared.tabs.push(payload);
         }
+        for closed in request.closed_tabs {
+            let payload = prepared.push_tab(closed.tab)?;
+            prepared.closed.push(super::closed::ClosedRow {
+                token: closed.token,
+                closed_at: closed.closed_at,
+                payload,
+            });
+        }
+        prepared.closed_changed = prepared.closed != old_closed;
         Ok(prepared)
     }
-    fn push_tab(&mut self, mut tab: CapturedSessionTab) -> io::Result<()> {
+    fn push_tab(&mut self, mut tab: CapturedSessionTab) -> io::Result<Vec<u8>> {
         validation::validate_tab(&tab.session_tab)?;
         for buffer in &mut tab.session_tab.buffers {
             let entries = std::mem::take(&mut buffer.text_history);
@@ -70,8 +85,7 @@ impl Prepared {
                 return Err(invalid("duplicate recovery content identity across tabs"));
             }
         }
-        self.tabs
-            .push(serde_json::to_vec(&tab.session_tab).map_err(invalid)?);
+        let payload = serde_json::to_vec(&tab.session_tab).map_err(invalid)?;
         // Supplied snapshots are authoritative, independently of capture policy.
         for snapshot in tab.buffer_snapshots {
             self.buffers
@@ -80,7 +94,7 @@ impl Prepared {
                 .retain = true;
             self.snapshots.push(snapshot);
         }
-        Ok(())
+        Ok(payload)
     }
     fn retains(&self, id: &str) -> bool {
         self.buffers.get(id).is_some_and(|buffer| buffer.retain)
@@ -110,8 +124,9 @@ impl Database {
             return Ok(SessionPersistProfile::default());
         }
         let start = Instant::now();
+        let old_closed = self.prepare_closed(&mut request).await?;
         self.freeze_quarantined(&mut request);
-        let mut prepared = Prepared::new(request)?;
+        let mut prepared = Prepared::new(request, old_closed)?;
         self.prepare_changes(&mut prepared).await?;
         let mut profile = prepared.profile();
         profile.manifest_serialize_ns = start.elapsed().as_nanos();
@@ -178,6 +193,7 @@ impl Database {
     }
     fn has_changes(&self, prepared: &Prepared) -> bool {
         prepared.full_cleanup
+            || prepared.closed_changed
             || !prepared.snapshots.is_empty()
             || self.state_cache != prepared.state
             || self.tab_cache != prepared.tabs
@@ -285,6 +301,9 @@ impl Database {
         )
         .await?;
         self.execute_cached("INSERT INTO session_state VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload", [prepared.state.as_slice()]).await?;
+        if prepared.closed_changed {
+            self.write_closed(&prepared.closed).await?;
+        }
         profile.manifest_write_ns = start.elapsed().as_nanos();
         let start = Instant::now();
         self.delete_stale_content(prepared, removed_digests).await?;

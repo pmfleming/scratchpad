@@ -234,7 +234,13 @@ impl ScratchpadApp {
         let request_id = self.state.background_io.allocate_background_request_id();
         self.state.background_io.insert_pending_background_action(
             request_id,
-            PendingBackgroundAction::PersistSession(PendingSessionPersistAction),
+            PendingBackgroundAction::PersistSession(PendingSessionPersistAction {
+                closed_tokens: request
+                    .closed_tabs
+                    .iter()
+                    .map(|closed| closed.token.clone())
+                    .collect(),
+            }),
         );
 
         let request = BackgroundIoRequest::PersistSession {

@@ -25,14 +25,7 @@ pub(crate) fn maybe_persist_session(app: &mut ScratchpadApp, ctx: &egui::Context
         return;
     }
 
-    let request = SessionPersistRequest::capture_with_cold_tabs(
-        app.tab_manager.tabs.as_slice(),
-        app.tab_manager.cold_session_tabs(),
-        app.tab_manager.active_tab_index,
-        session_active_surface(app),
-        app.state.app_settings.font_size(),
-        app.state.app_settings.word_wrap(),
-    );
+    let request = capture_session(app);
     app.tab_manager.clear_session_dirty();
     app.queue_background_session_persist(request);
 }
@@ -43,7 +36,19 @@ pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> std::io::Result<()
     if app.startup_restore_pending() || app.state.persistence.session_restore_failed {
         return Ok(());
     }
-    let request = SessionPersistRequest::capture_with_cold_tabs(
+    let request = capture_session(app);
+    app.state
+        .persistence
+        .session_store
+        .persist_request(request)?;
+    app.state.persistence.pending_closed_tabs.clear();
+    app.tab_manager.clear_session_dirty();
+    app.state.persistence.last_session_persist = Instant::now();
+    Ok(())
+}
+
+fn capture_session(app: &ScratchpadApp) -> SessionPersistRequest {
+    let mut request = SessionPersistRequest::capture_with_cold_tabs(
         app.tab_manager.tabs.as_slice(),
         app.tab_manager.cold_session_tabs(),
         app.tab_manager.active_tab_index,
@@ -51,13 +56,10 @@ pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> std::io::Result<()
         app.state.app_settings.font_size(),
         app.state.app_settings.word_wrap(),
     );
-    app.state
-        .persistence
-        .session_store
-        .persist_request(request)?;
-    app.tab_manager.clear_session_dirty();
-    app.state.persistence.last_session_persist = Instant::now();
-    Ok(())
+    request
+        .closed_tabs
+        .clone_from(&app.state.persistence.pending_closed_tabs);
+    request
 }
 
 pub(crate) fn restore_session_state(app: &mut ScratchpadApp) -> Option<AppSettings> {

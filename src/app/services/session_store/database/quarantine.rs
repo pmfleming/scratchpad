@@ -70,6 +70,21 @@ impl Database {
         if self.quarantined.contains_key(id) {
             return Ok(());
         }
+        let archived;
+        let tabs = if tabs
+            .iter()
+            .any(|tab| tab.buffers.iter().any(|buffer| buffer.temp_id == id))
+        {
+            tabs
+        } else {
+            archived = self
+                .closed_rows()
+                .await?
+                .into_iter()
+                .map(|row| decode::<SessionTab>(&row.payload))
+                .collect::<io::Result<Vec<_>>>()?;
+            &archived
+        };
         let (tab, buffer) = tabs
             .iter()
             .find_map(|tab| {
@@ -135,7 +150,11 @@ impl Database {
         if self.quarantined.is_empty() {
             return;
         }
-        for tab in &mut request.tabs {
+        for tab in request
+            .tabs
+            .iter_mut()
+            .chain(request.closed_tabs.iter_mut().map(|closed| &mut closed.tab))
+        {
             for buffer in &mut tab.session_tab.buffers {
                 if let Some(original) = self.quarantined.get(&buffer.temp_id) {
                     let live_id = buffer.id;
