@@ -37,14 +37,26 @@ pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> std::io::Result<()
         return Ok(());
     }
     let request = capture_session(app);
+    let recovery_tokens = request.recovery_tokens();
     app.state
         .persistence
         .session_store
         .persist_request(request)?;
+    acknowledge_recovery(app, &recovery_tokens);
     app.state.persistence.pending_closed_tabs.clear();
     app.tab_manager.clear_session_dirty();
     app.state.persistence.last_session_persist = Instant::now();
     Ok(())
+}
+
+pub(crate) fn acknowledge_recovery(app: &mut ScratchpadApp, tokens: &[(String, u64)]) {
+    for buffer in app.tab_manager.tabs.as_mut_slice().iter_mut().flat_map(|tab| tab.buffers_mut()) {
+        for (id, sequence) in tokens {
+            if buffer.temp_id == *id {
+                buffer.document_mut().acknowledge_recovery_snapshot(*sequence);
+            }
+        }
+    }
 }
 
 fn capture_session(app: &ScratchpadApp) -> SessionPersistRequest {

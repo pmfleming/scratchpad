@@ -82,6 +82,7 @@ impl TextDocument {
         }
 
         if remove_count > 0 {
+            self.preserve_undo_boundary();
             let removed_entries = self
                 .history
                 .entries

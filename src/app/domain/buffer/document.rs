@@ -1,4 +1,5 @@
 mod history_ops;
+mod recovery;
 
 use super::history::{
     OperationDirection, TEXT_HISTORY_ROOT_CHECKPOINT_MIN_BYTES, TextDocumentEditOperation,
@@ -62,6 +63,7 @@ pub(super) struct TextDocumentHistoryState {
     pub(super) latest_update_at: Option<Instant>,
     pub(super) pending_generation_before: Option<u32>,
     pub(super) pending_checkpoint_before: Option<Arc<PieceTreeLite>>,
+    pub(super) pending_recovery: Option<(u64, DocumentSnapshot)>,
 }
 
 impl Default for TextDocumentHistoryState {
@@ -78,6 +80,7 @@ impl Default for TextDocumentHistoryState {
             latest_update_at: None,
             pending_generation_before: None,
             pending_checkpoint_before: None,
+            pending_recovery: None,
         }
     }
 }
@@ -212,6 +215,7 @@ impl TextDocument {
         if self.history.entries.is_empty() {
             None
         } else {
+            self.preserve_undo_boundary();
             self.history.revision_counter = self.history.revision_counter.wrapping_add(1);
             let removed = self.history.entries.remove(0);
             self.history.byte_usage = self.history.byte_usage.saturating_sub(removed.byte_cost());

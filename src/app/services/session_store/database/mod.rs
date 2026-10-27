@@ -135,8 +135,11 @@ impl Database {
     async fn initialize(&mut self) -> io::Result<()> {
         let version = self.integer("PRAGMA user_version").await?;
         let application = self.integer("PRAGMA application_id").await?;
-        if application == APPLICATION_ID && version == 6 {
+        if application == APPLICATION_ID && version == 7 {
             return Ok(());
+        }
+        if application == APPLICATION_ID && version == 6 {
+            return self.create_schema("ALTER TABLE buffer_versions ADD COLUMN source_token TEXT; CREATE UNIQUE INDEX version_source ON buffer_versions(temp_id, source_token); PRAGMA user_version=7;").await;
         }
         if version != 0
             || application != 0
@@ -150,7 +153,7 @@ impl Database {
             ));
         }
         self.create_schema(&format!(
-            "{SCHEMA} {} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=6;",
+            "{SCHEMA} {} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=7;",
             quarantine::SCHEMA,
             closed::SCHEMA,
             versions::SCHEMA

@@ -490,6 +490,12 @@ fn per_file_entry_limit_evicts_oldest_entries() {
     assert_eq!(document.extract_text(), "x".repeat(105));
     let first_record = entry_record(&document, 0);
     assert_eq!(first_record.edits[0].start_char, 5);
+    let (token, snapshot) = document.recovery_snapshot().expect("pre-prune recovery point");
+    assert_eq!(snapshot.extract_text(), "");
+    document.acknowledge_recovery_snapshot(token + 1);
+    assert!(document.recovery_snapshot().is_some());
+    document.acknowledge_recovery_snapshot(token);
+    assert!(document.recovery_snapshot().is_none());
 }
 
 #[test]
@@ -516,6 +522,7 @@ fn compaction_keeps_retained_history_replayable() {
     insert_isolated_sequence!(&mut document, "abc");
 
     document.drop_oldest_history_entry();
+    assert_eq!(document.recovery_snapshot().unwrap().1.extract_text(), "");
 
     assert_eq!(document.extract_text(), "abc");
     document.undo_last_operation();

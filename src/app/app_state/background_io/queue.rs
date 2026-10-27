@@ -235,6 +235,7 @@ impl ScratchpadApp {
         self.state.background_io.insert_pending_background_action(
             request_id,
             PendingBackgroundAction::PersistSession(PendingSessionPersistAction {
+                recovery_tokens: request.recovery_tokens(),
                 closed_tokens: request
                     .closed_tabs
                     .iter()

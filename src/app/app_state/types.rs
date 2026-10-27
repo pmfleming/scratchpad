@@ -86,6 +86,7 @@ pub(crate) struct PendingStartupRestoreCompareAction {
 }
 
 pub(crate) struct PendingSessionPersistAction {
+    pub(crate) recovery_tokens: Vec<(String, u64)>,
     pub(crate) closed_tokens: Vec<String>,
 }
 

@@ -25,6 +25,7 @@ struct Prepared {
     state: Vec<u8>,
     tabs: Vec<Vec<u8>>,
     snapshots: Vec<CapturedSessionBuffer>,
+    recovery_points: Vec<super::super::capture::CapturedRecoveryPoint>,
     buffers: HashMap<String, RecoveryBuffer>,
     full_cleanup: bool,
     closed: Vec<super::closed::ClosedRow>,
@@ -93,6 +94,7 @@ impl Prepared {
                 return Err(invalid("duplicate recovery content identity across tabs"));
             }
         }
+        self.recovery_points.extend(tab.recovery_points);
         let payload = serde_json::to_vec(&tab.session_tab).map_err(invalid)?;
         // Supplied snapshots are authoritative, independently of capture policy.
         for snapshot in tab.buffer_snapshots {
@@ -210,6 +212,7 @@ impl Database {
     fn has_changes(&self, prepared: &Prepared) -> bool {
         prepared.full_cleanup
             || prepared.closed_changed
+            || !prepared.recovery_points.is_empty()
             || !prepared.snapshots.is_empty()
             || self.state_cache != prepared.state
             || self.tab_cache != prepared.tabs
@@ -305,6 +308,9 @@ impl Database {
             .unwrap_or_default()
             .as_secs()
             .min(i64::MAX as u64) as i64;
+        for point in &prepared.recovery_points {
+            self.preserve_undo_snapshot(point, now).await?;
+        }
         for buffer in &prepared.snapshots {
             let checkpoint = self
                 .write_content(

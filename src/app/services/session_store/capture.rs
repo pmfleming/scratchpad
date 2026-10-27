@@ -29,6 +29,7 @@ pub(crate) struct CapturedClosedTab {
 pub(super) struct CapturedSessionTab {
     pub(super) session_tab: SessionTab,
     pub(super) buffer_snapshots: Vec<CapturedSessionBuffer>,
+    pub(super) recovery_points: Vec<CapturedRecoveryPoint>,
     pub(super) preserve_existing: bool,
 }
 
@@ -38,7 +39,19 @@ pub(super) struct CapturedSessionBuffer {
     pub(super) snapshot: DocumentSnapshot,
 }
 
+#[derive(Clone)]
+pub(super) struct CapturedRecoveryPoint {
+    pub temp_id: String,
+    pub sequence: u64,
+    pub snapshot: DocumentSnapshot,
+}
+
 impl SessionPersistRequest {
+    pub(crate) fn recovery_tokens(&self) -> Vec<(String, u64)> {
+        self.tabs.iter().flat_map(|tab| &tab.recovery_points)
+            .map(|point| (point.temp_id.clone(), point.sequence)).collect()
+    }
+
     pub(crate) fn capture(
         tabs: &[WorkspaceTab],
         active_tab_index: usize,
@@ -130,6 +143,7 @@ impl CapturedSessionTab {
         Self {
             session_tab: SessionTab::from(session_tab),
             buffer_snapshots: Vec::new(),
+            recovery_points: Vec::new(),
             preserve_existing: true,
         }
     }
@@ -157,6 +171,11 @@ impl CapturedSessionTab {
                 root_pane: SessionPaneNode::from(tab.layout.root_pane()),
             },
             buffer_snapshots,
+            recovery_points: tab.buffers().filter_map(|buffer| {
+                buffer.document().recovery_snapshot().map(|(sequence, snapshot)| CapturedRecoveryPoint {
+                    temp_id: buffer.temp_id.clone(), sequence, snapshot,
+                })
+            }).collect(),
             preserve_existing: false,
         }
     }

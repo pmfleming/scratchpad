@@ -69,6 +69,7 @@ impl Database {
                     tab: CapturedSessionTab {
                         session_tab: tab,
                         buffer_snapshots: Vec::new(),
+                        recovery_points: Vec::new(),
                         preserve_existing: true,
                     },
                 });
