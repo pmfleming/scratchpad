@@ -205,8 +205,14 @@ impl FileController {
             |app, path| {
                 if Self::activate_existing_path(app, &path).is_some() {
                     OpenPathDecision::Resolved(OpenPathOutcome::AlreadyOpen)
-                } else if recover && crate::app::app_state::workspace::lifecycle::try_reopen_archived_path(app, &path) {
-                    OpenPathDecision::Resolved(OpenPathOutcome::Opened { artifact_warning: None })
+                } else if recover
+                    && crate::app::app_state::workspace::lifecycle::try_reopen_archived_path(
+                        app, &path,
+                    )
+                {
+                    OpenPathDecision::Resolved(OpenPathOutcome::Opened {
+                        artifact_warning: None,
+                    })
                 } else {
                     OpenPathDecision::Unresolved(path)
                 }

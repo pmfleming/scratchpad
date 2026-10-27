@@ -13,12 +13,19 @@ impl TextDocument {
         let mut candidate = self.clone();
         candidate.history.pending_recovery = None;
         let mut oldest = None;
-        let entries = self.history.entries.iter().rev()
+        let entries = self
+            .history
+            .entries
+            .iter()
+            .rev()
             .filter(|entry| !entry.is_undone())
             .map(|entry| (entry.id, entry.global_seq))
             .collect::<Vec<_>>();
         for (id, sequence) in entries {
-            if candidate.apply_text_history_entry(id, OperationDirection::Undo).is_err() {
+            if candidate
+                .apply_text_history_entry(id, OperationDirection::Undo)
+                .is_err()
+            {
                 break;
             }
             oldest = Some(sequence);
@@ -28,15 +35,25 @@ impl TextDocument {
 
     pub(crate) fn recovery_snapshot(&self) -> Option<(u64, DocumentSnapshot)> {
         self.history.pending_recovery.clone().or_else(|| {
-            let bytes: usize = self.history.entries.iter()
-                .map(|entry| self.export_history_entry(entry).payload_bytes()).sum();
+            let bytes: usize = self
+                .history
+                .entries
+                .iter()
+                .map(|entry| self.export_history_entry(entry).payload_bytes())
+                .sum();
             (bytes as u64 > self.history.budget.persisted_payload_budget)
-                .then(|| self.oldest_recoverable_snapshot()).flatten()
+                .then(|| self.oldest_recoverable_snapshot())
+                .flatten()
         })
     }
 
     pub(crate) fn acknowledge_recovery_snapshot(&mut self, sequence: u64) {
-        if self.history.pending_recovery.as_ref().is_some_and(|(id, _)| *id == sequence) {
+        if self
+            .history
+            .pending_recovery
+            .as_ref()
+            .is_some_and(|(id, _)| *id == sequence)
+        {
             self.history.pending_recovery = None;
         }
     }

@@ -1,6 +1,4 @@
-use super::{
-    tests::{database, insert, request, tab},
-};
+use super::tests::{database, insert, request, tab};
 use crate::app::services::session_store::CapturedClosedTab;
 use futures_lite::future::block_on;
 
@@ -22,7 +20,11 @@ fn closed_retention_is_budgeted_retry_safe_and_shares_blob_bodies() {
                 .push(CapturedClosedTab::capture(&tab("shared"), None));
             db.persist(next, generation).await.unwrap();
         }
-        assert_eq!(db.closed_rows().await.unwrap().len(), 36, "no hidden 32-tab limit");
+        assert_eq!(
+            db.closed_rows().await.unwrap().len(),
+            36,
+            "no hidden 32-tab limit"
+        );
         assert_eq!(
             db.integer("SELECT count(*) FROM snapshots").await.unwrap(),
             36

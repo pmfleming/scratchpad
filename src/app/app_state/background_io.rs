@@ -422,7 +422,10 @@ impl ScratchpadApp {
                     .persistence
                     .pending_closed_tabs
                     .retain(|closed| !action.closed_tokens.contains(&closed.token));
-                crate::app::services::session_manager::acknowledge_recovery(self, &action.recovery_tokens);
+                crate::app::services::session_manager::acknowledge_recovery(
+                    self,
+                    &action.recovery_tokens,
+                );
                 self.state.persistence.last_session_persist = Instant::now();
             }
             Err(error) => {

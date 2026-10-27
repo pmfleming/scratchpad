@@ -14,24 +14,24 @@ mod incremental_tests;
 #[cfg(test)]
 mod inventory_tests;
 mod persist;
-mod retention;
 mod quarantine;
 #[cfg(test)]
 mod quarantine_tests;
 #[cfg(test)]
 mod range_tests;
 mod read;
-#[cfg(test)]
-mod retention_tests;
+mod retention;
 #[cfg(test)]
 mod retention_policy_tests;
 #[cfg(test)]
+mod retention_tests;
+#[cfg(test)]
 mod tests;
+pub(super) mod usage;
 #[cfg(test)]
 mod version_tests;
 pub(super) mod versions;
 mod worker;
-pub(super) mod usage;
 
 use super::model::SessionManifest;
 use super::types::SessionPersistProfile;

@@ -45,6 +45,25 @@ impl Restorer {
         session_disk_state: Option<DiskFileState>,
     ) -> RestoredBufferContent {
         let is_dirty = buffer.is_dirty;
+        if is_dirty
+            && let Some(baseline) = &buffer.disk_content_digest
+            && let Ok(file) = FileService::read_file(path)
+        {
+            let disk_digest = file.document.content_digest();
+            let is_dirty = disk_digest != blake3::hash(content.as_bytes()).to_hex().as_str();
+            let freshness = if is_dirty && disk_digest != *baseline {
+                BufferFreshness::ConflictOnDisk
+            } else {
+                BufferFreshness::InSync
+            };
+            return RestoredBufferContent::from_session(
+                buffer,
+                content,
+                FileService::read_disk_state(path).ok(),
+                is_dirty,
+                freshness,
+            );
+        }
         match FileService::read_disk_state(path).ok() {
             Some(disk_state) if !is_dirty || Some(&disk_state) != session_disk_state.as_ref() => {
                 self.restore_changed_disk_buffer(buffer, path, content, disk_state)
@@ -56,7 +75,7 @@ impl Restorer {
                 buffer,
                 content,
                 None,
-                is_dirty,
+                true,
                 BufferFreshness::MissingOnDisk,
             ),
         }
@@ -103,11 +122,36 @@ impl Restorer {
         }
 
         match FileService::read_file(path) {
-            Ok(file_content) => RestoredBufferContent::from_file_content(
-                file_content,
-                Some(disk_state),
-                BufferFreshness::InSync,
-            ),
+            Ok(file_content) => {
+                if file_content.document.content_digest()
+                    == blake3::hash(content.as_bytes()).to_hex().as_str()
+                {
+                    RestoredBufferContent::from_session(
+                        buffer,
+                        content,
+                        Some(disk_state),
+                        false,
+                        BufferFreshness::InSync,
+                    )
+                } else if !buffer.text_history.is_empty() {
+                    // Keep this text and its undo stack together as a historical
+                    // branch. Application restore automatically detaches it and
+                    // opens the changed disk file with a fresh history.
+                    RestoredBufferContent::from_session(
+                        buffer,
+                        content,
+                        Some(disk_state),
+                        true,
+                        BufferFreshness::ConflictOnDisk,
+                    )
+                } else {
+                    RestoredBufferContent::from_file_content(
+                        file_content,
+                        Some(disk_state),
+                        BufferFreshness::InSync,
+                    )
+                }
+            }
             Err(_) => RestoredBufferContent::from_session(
                 buffer,
                 content,
@@ -124,11 +168,25 @@ impl Restorer {
         path: &Path,
     ) -> RestoredBufferContent {
         match FileService::read_file(path) {
-            Ok(file_content) => RestoredBufferContent::from_file_content(
-                file_content,
-                FileService::read_disk_state(path).ok(),
-                BufferFreshness::InSync,
-            ),
+            Ok(file_content) => {
+                let matches_baseline = buffer
+                    .disk_content_digest
+                    .as_ref()
+                    .is_some_and(|digest| *digest == file_content.document.content_digest());
+                if !matches_baseline {
+                    // Legacy metadata-only sessions have no historical text to
+                    // validate against. Keep their records, but never replay
+                    // them against an unrelated external file.
+                    for entry in &mut buffer.text_history {
+                        entry.flags.replayable = false;
+                    }
+                }
+                RestoredBufferContent::from_file_content(
+                    file_content,
+                    FileService::read_disk_state(path).ok(),
+                    BufferFreshness::InSync,
+                )
+            }
             Err(_) => RestoredBufferContent::empty(buffer, BufferFreshness::MissingOnDisk),
         }
     }

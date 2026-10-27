@@ -1,8 +1,8 @@
 mod list;
 mod model;
 mod persistence;
-mod recovery;
 mod preview;
+mod recovery;
 
 use self::model::{
     TextHistoryAction, TextHistoryFileGroup, TextHistoryRow, file_groups_from_entries,
@@ -30,8 +30,8 @@ const HISTORY_CARD_CORNER_RADIUS: u8 = 12;
 const UNDONE_OPACITY: f32 = 0.55;
 const HISTORY_TIMELINE_SHORTCUT: &str = "CTRL+1: Timeline";
 const HISTORY_BY_FILE_SHORTCUT: &str = "CTRL+2: By file";
-const HISTORY_FOLLOW_FOCUS_SHORTCUT: &str = "CTRL+SHIFT+F: Follow undo";
-const HISTORY_STOP_FOLLOWING_FOCUS_SHORTCUT: &str = "CTRL+SHIFT+F: Stop following undo";
+const HISTORY_FOLLOW_FOCUS_SHORTCUT: &str = "CTRL+SHIFT+F: Follow restored buffer";
+const HISTORY_STOP_FOLLOWING_FOCUS_SHORTCUT: &str = "CTRL+SHIFT+F: Keep current buffer focused";
 const HISTORY_CLEAR_SHORTCUT: &str = "CTRL+SHIFT+DELETE: Clear history";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -149,7 +149,7 @@ fn render_text_history_window(
     match inputs.active_tab {
         HistoryTab::Timeline => list::render_timeline(ui, inputs.timeline_rows, state.action),
         HistoryTab::ByFile => list::render_by_file(ui, inputs.file_groups, state.action),
-        HistoryTab::Recovery => {},
+        HistoryTab::Recovery => {}
     }
 }
 
@@ -193,7 +193,10 @@ fn render_controls(
                 *next = tab;
             }
         }
-        if ui.selectable_label(active == HistoryTab::Recovery, "Recovery points").clicked() {
+        if ui
+            .selectable_label(active == HistoryTab::Recovery, "Recovery points")
+            .clicked()
+        {
             *next = HistoryTab::Recovery;
         }
         if control_icon_button(

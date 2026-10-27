@@ -227,9 +227,9 @@ fn render_row(ui: &mut egui::Ui, row: &TextHistoryRow, action: &mut Option<TextH
     )
     .inner
     .on_hover_text(if row.undone {
-        "Click to redo this text change"
+        "Preview the text after redoing this change"
     } else {
-        "Click to undo this text change"
+        "Preview the text before this change"
     });
 
     if response.clicked() {

@@ -8,24 +8,46 @@ and live workspace together. Failed saves leave the pending capture retryable;
 background acknowledgements retire only the captures they actually carried.
 Closing the last tab therefore preserves it even though the application exits.
 
-The newest **32 tabs** are retained in `closed_tabs`. Their snapshots/history use
-the same buffer rows and content-addressed blobs as the live session. Retention
-expiry removes their recovery roots and ordinary garbage collection reclaims
-unreferenced content. A close is not free: unique text and undo payloads consume
-space. The limit is currently fixed, not a configurable byte budget.
+Archives in `closed_tabs` use the same buffer rows and content-addressed blobs
+as the live session. Settings > History & Recovery controls their logical storage
+budget (default 512 MiB) and age limit (default 90 days; zero disables age expiry).
+There is no fixed count limit. Under budget pressure, older detailed history is
+compacted into snapshot-only recovery, then interior snapshots are thinned, then
+oldest eligible archives expire. Pinned archives and quarantined data are exempt
+and may exceed the budgets. Reopening transfers history into the live tab and ends
+that archive's pin. Oversized unpinned items may expire immediately.
 
-Use **Reopen Last Closed Tab** in a tab's context menu, including after restarting.
-The archive is consumed only by a successful save of the reopened workspace.
-Recovered disk-backed text is marked dirty deliberately, so external file changes
-cannot silently replace the archived text or invalidate its undo history. No
-reopen operation writes original files. Cold file shells with no stored snapshot
-still depend on their source file; loading previews cannot archive unavailable
-bytes. Closing individual split views is not workspace-tab retention.
+The close transaction commits the archive and remaining workspace before removing
+the tab from the UI. A retryable failure keeps the live tab open. A permanently
+protected/unavailable database still does not trap application exit; the visible
+failure status means recovery protection is unavailable.
 
-The current database schema is **6** (closed tabs introduced schema 4; save
-points introduced schema 5; incremental chunk checksums introduced schema 6). Older schemas are rejected intact, with no
-migration or automatic reset. To opt into a fresh schema, stop Scratchpad and
-move the old state directory aside yourself. Original text files are unrelated.
+Use **Recently Closed** or **Reopen Last Closed Tab**, including after restarting.
+The list merges archives and disk-only recent-file entries; distinct archives are
+not collapsed just because their paths match. **Archived text** explicitly recovers
+an older branch into untitled buffers. Ordinary file opens (including Open Here)
+also consult archives when enabled; archived workspace layout takes precedence.
+
+Reopening compares a saved decoded-text fingerprint with current disk text. An
+unchanged file restores archived text/layout/undo, including unsaved edits. A changed
+clean file opens from disk and leaves its old archive available. Conflicting unsaved
+text and missing files recover as untitled buffers; opening the changed disk file
+alongside them is configurable. Nothing writes original files automatically.
+
+Startup conflicts likewise separate recovered text/history from current disk text
+without a recurring choice dialog. Clean buffers with undo history now retain a
+recovery snapshot so externally changed startup files cannot inherit an unrelated
+undo stack. Legacy metadata-only histories without a verifiable baseline are
+retained as non-replayable records rather than applied to arbitrary disk text.
+Cold file shells with no stored snapshot still depend on their source file; loading
+previews cannot archive unavailable bytes. Closing individual split views is not
+workspace-tab retention.
+
+The current database schema is **7**. Schema 6 upgrades transactionally by adding
+idempotent undo-boundary snapshot tokens; existing snapshots and archives remain.
+Schemas older than 6 and future schemas are rejected intact, without automatic
+reset. Back up the whole database/WAL before upgrading; older binaries cannot read
+schema 7. Original text files are unrelated.
 The logical open-session export does not include closed archives; retain the
 whole database/WAL using the documented safe backup procedure for full recovery.
 
@@ -34,11 +56,20 @@ retries, and transaction failure before archive commit.
 
 ## Per-buffer save points (item 2)
 
-The first persisted recovery snapshot creates a save point. Subsequent changed
-snapshots create another at most once every **five minutes**, keeping the newest
-**16 per buffer**. This is sampled editing history, not every keystroke or an idle
-timer: the latest text is always in the live snapshot, even between save points.
-No duplicate point is created if the last point already contains identical text.
+The first persisted recovery snapshot creates a recovery point. Subsequent changed
+snapshots create another at most once every **five minutes**. Before undo pruning,
+the oldest reachable earlier state is sampled independently of that interval; one
+pending boundary per buffer is kept until a successful save acknowledges it.
+Persisted undo payload stripping also captures an earlier boundary. Snapshot writes
+and persisted history removal commit atomically; failed transactions are retryable.
+Pre-existing non-replayable edits cannot be reconstructed retroactively.
+
+There is no fixed per-buffer snapshot count. A global logical snapshot budget
+(default 256 MiB) thins interior periodic states before boundary/endpoint states.
+Eventually unprotected endpoints can expire too. Shared references count
+conservatively toward retention budgets, not just their exclusive physical bytes.
+Live recovery text is never deleted merely to meet the historical snapshot budget.
+Maintenance runs on saves, and periodically while idle.
 
 `buffer_versions` holds timestamp/length/checksum metadata; `version_parts` holds
 references to existing content-addressed chunks. Creating a point copies chunk
@@ -46,10 +77,29 @@ references, not text bodies. Unchanged chunks are shared. Version roots particip
 in both targeted and full garbage collection. Points expire with their buffer
 when it is no longer live, retained-closed, or quarantined.
 
-Use **Saved Versions** in a workspace-tab context menu to recover the active
-buffer's point into a **new untitled tab**, leaving the current buffer and disk
-files untouched. Save points contain text, not separate copies of undo history.
-The public store API also lists and reads points with integrity validation.
+Use **History…** in a tab context menu. Detailed edits and **Recovery points** live
+in the same history window. Selecting an edit or snapshot previews text; **Restore
+into this tab** creates an undoable replacement, while **Open as new tab** leaves
+the source untouched. Snapshot rows show readable UTC dates and distinguish
+automatic points from undo-compaction boundaries. Snapshots contain text, not
+separate copies of undo history. The store validates checksums on recovery.
+
+### Disk usage
+
+Settings > History & Recovery > Disk usage refreshes asynchronously every five
+seconds. It reports the actual database, WAL/shared-memory, other state files,
+separate settings files and combined file lengths; on Unix it also reports actual
+allocated file blocks. Portable/nested roots are deduplicated; original documents,
+application binaries and symlink targets outside these roots are excluded.
+
+The stored-payload breakdown reports undo, session/archive metadata, exclusive
+current/archived text, exclusive historical text, and text shared by both. Shared
+text is counted once. Snapshot metadata is explicitly marked as an estimate;
+archive-referenced payload totals overlap the breakdown. These are **not exclusive
+filesystem allocations per feature**: one database shares chunks, indexes and pages.
+The database total includes that overhead; reusable pages can remain allocated
+after cleanup. Retention budgets are not a promise that the database/WAL file will
+shrink to exactly the configured amount.
 
 Tests cover interval throttling, restart, bounded pruning, shared chunks, rollback
 during point creation, corruption detection, and final-buffer garbage collection.

@@ -11,6 +11,7 @@ pub struct RecoverySettings {
     /// Zero disables age-based expiry (the storage budget still applies).
     pub archive_retention_days: u32,
     pub reopen_archives: bool,
+    pub open_changed_disk_files: bool,
     /// Protected archives may exceed the archive budget; they are never silently deleted.
     pub pinned_archives: Vec<String>,
 }
@@ -22,12 +23,14 @@ impl Default for RecoverySettings {
             archive_byte_budget: 512 * MIB,
             archive_retention_days: 90,
             reopen_archives: true,
+            open_changed_disk_files: true,
             pinned_archives: Vec::new(),
         }
     }
 }
 
 impl RecoverySettings {
+    #[must_use]
     pub fn sanitized(mut self) -> Self {
         self.snapshot_byte_budget = self.snapshot_byte_budget.clamp(MIB, 16 * 1024 * MIB);
         self.archive_byte_budget = self.archive_byte_budget.clamp(MIB, 64 * 1024 * MIB);

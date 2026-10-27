@@ -9,31 +9,90 @@ pub struct StorageUsage {
     pub database: u64,
     pub journal: u64,
     pub other: u64,
+    pub settings: u64,
     pub total_file_bytes: u64,
     /// Filesystem allocated bytes on Unix, unavailable elsewhere.
     pub allocated_bytes: Option<u64>,
     pub stored: StoredUsage,
+    pub stored_error: Option<String>,
 }
 
 impl SessionStore {
     /// Run off the UI thread. Does not checkpoint or modify the database.
     pub fn storage_usage(&self) -> io::Result<StorageUsage> {
-        let stored = self.worker()?.call(|db| block_on(db.stored_usage()))?;
-        let mut usage = StorageUsage { stored, ..StorageUsage::default() };
+        self.storage_usage_with_settings(self.root())
+    }
+
+    pub fn storage_usage_with_settings(&self, settings_root: &Path) -> io::Result<StorageUsage> {
+        let result = self
+            .worker()
+            .and_then(|worker| worker.call(|db| block_on(db.stored_usage())));
+        let mut usage = match result {
+            Ok(stored) => StorageUsage {
+                stored,
+                ..StorageUsage::default()
+            },
+            Err(error) => StorageUsage {
+                stored_error: Some(error.to_string()),
+                ..StorageUsage::default()
+            },
+        };
         #[cfg(unix)]
-        { usage.allocated_bytes = Some(0); }
+        {
+            usage.allocated_bytes = Some(0);
+        }
         scan_directory(self.root(), self.root(), &mut usage)?;
+        // Settings and state normally live in separate XDG/AppData directories.
+        // Avoid counting the same files twice in portable/same-root setups.
+        let root = self.root().canonicalize()?;
+        match settings_root.canonicalize() {
+            Ok(settings) if !settings.starts_with(&root) => {
+                let mut extra = StorageUsage::default();
+                #[cfg(unix)]
+                {
+                    extra.allocated_bytes = Some(0);
+                }
+                scan_directory_excluding(&settings, &settings, Some(&root), &mut extra)?;
+                usage.settings = extra.total_file_bytes;
+                usage.total_file_bytes += extra.total_file_bytes;
+                if let (Some(total), Some(bytes)) =
+                    (&mut usage.allocated_bytes, extra.allocated_bytes)
+                {
+                    *total += bytes;
+                }
+            }
+            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+            _ => {}
+        }
         Ok(usage)
     }
 }
 
 fn scan_directory(root: &Path, directory: &Path, usage: &mut StorageUsage) -> io::Result<()> {
+    scan_directory_excluding(root, directory, None, usage)
+}
+
+fn scan_directory_excluding(
+    root: &Path,
+    directory: &Path,
+    exclude: Option<&Path>,
+    usage: &mut StorageUsage,
+) -> io::Result<()> {
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
-        let metadata = fs::symlink_metadata(entry.path())?;
-        if metadata.is_symlink() { continue; }
+        let metadata = match fs::symlink_metadata(entry.path()) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        if metadata.is_symlink() {
+            continue;
+        }
         if metadata.is_dir() {
-            scan_directory(root, &entry.path(), usage)?;
+            if exclude.is_some_and(|excluded| entry.path() == excluded) {
+                continue;
+            }
+            scan_directory_excluding(root, &entry.path(), exclude, usage)?;
         } else if metadata.is_file() {
             let bytes = metadata.len();
             match entry.path().strip_prefix(root).ok().and_then(Path::to_str) {
@@ -56,18 +115,41 @@ fn scan_directory(root: &Path, directory: &Path, usage: &mut StorageUsage) -> io
 mod tests {
     use super::*;
     #[test]
+    fn separate_and_nested_settings_roots_are_counted_without_duplication() {
+        let root = tempfile::tempdir().unwrap();
+        let settings = root.path().join("settings");
+        fs::create_dir(&settings).unwrap();
+        fs::write(settings.join("settings.toml"), [0; 123]).unwrap();
+        let store = SessionStore::new(root.path().join("state"));
+        let state_only = store.storage_usage().unwrap();
+        let combined = store.storage_usage_with_settings(&settings).unwrap();
+        assert_eq!(combined.settings, 123);
+        assert_eq!(combined.total_file_bytes, state_only.total_file_bytes + 123);
+        // A settings root containing the state root must not count it twice.
+        let parent = store.storage_usage_with_settings(root.path()).unwrap();
+        assert_eq!(parent.total_file_bytes, combined.total_file_bytes);
+        let same = store.storage_usage_with_settings(store.root()).unwrap();
+        assert_eq!(same.total_file_bytes, state_only.total_file_bytes);
+    }
+
+    #[test]
     fn reports_real_files_and_stored_payloads() {
         let root = tempfile::tempdir().unwrap();
         let store = SessionStore::new(root.path().to_owned());
         let tab = crate::app::domain::WorkspaceTab::new(crate::app::domain::BufferState::new(
-            "usage".into(), "recovery payload".repeat(100), None,
+            "usage".into(),
+            "recovery payload".repeat(100),
+            None,
         ));
         store.persist(&[tab], 0, 14.0, false).unwrap();
         fs::write(root.path().join("other"), [0; 123]).unwrap();
         let usage = store.storage_usage().unwrap();
         assert!(usage.database > 0);
         assert!(usage.other >= 123);
-        assert_eq!(usage.total_file_bytes, usage.database + usage.journal + usage.other);
+        assert_eq!(
+            usage.total_file_bytes,
+            usage.database + usage.journal + usage.other
+        );
         assert_eq!(usage.stored.shared_text, 1600);
         assert_eq!(usage.stored.live_text + usage.stored.recovery_text, 0);
     }

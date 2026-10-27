@@ -7,7 +7,7 @@ use crate::app::domain::{BufferFreshness, BufferId, ViewId, WorkspaceTab};
 use crate::app::services::background_io::LoadedPathResult;
 
 pub(crate) fn refresh_startup_restore_conflicts(app: &mut ScratchpadApp) {
-    let conflicts = app
+    let conflicts: Vec<_> = app
         .tab_manager
         .tabs
         .as_slice()
@@ -15,7 +15,55 @@ pub(crate) fn refresh_startup_restore_conflicts(app: &mut ScratchpadApp) {
         .enumerate()
         .flat_map(|(tab_index, tab)| collect_tab_restore_conflicts(tab_index, tab))
         .collect();
-    app.state.dialogs.set_startup_restore_conflicts(conflicts);
+    let changed = !conflicts.is_empty();
+    let mut disk_paths = Vec::new();
+    for conflict in conflicts {
+        let Some(tab) = app
+            .tab_manager
+            .tabs
+            .as_mut_slice()
+            .get_mut(conflict.tab_index)
+        else {
+            continue;
+        };
+        let Some(buffer_id) = tab
+            .buffer_for_view(conflict.view_id)
+            .map(|buffer| buffer.id)
+        else {
+            continue;
+        };
+        let Some(buffer) = tab.buffer_by_id_mut(buffer_id) else {
+            continue;
+        };
+        if buffer.freshness == BufferFreshness::ConflictOnDisk {
+            disk_paths.push(conflict.path);
+        }
+        buffer.path = None;
+        buffer.path_key = None;
+        buffer.disk_state = None;
+        buffer.disk_content_digest = None;
+        buffer.freshness = BufferFreshness::InSync;
+        buffer.is_settings_file = false;
+        buffer.name = format!("{} (recovered)", buffer.name);
+        buffer.is_dirty = true;
+    }
+    app.state.dialogs.set_startup_restore_conflicts(Vec::new());
+    if changed {
+        app.tab_manager.rebuild_buffer_tab_index();
+        app.tab_manager.mark_session_dirty();
+        if app
+            .state
+            .app_settings
+            .history
+            .recovery
+            .open_changed_disk_files
+            && !disk_paths.is_empty()
+        {
+            crate::app::services::file_controller::FileController::open_disk_paths_async(
+                app, disk_paths,
+            );
+        }
+    }
 }
 
 pub(crate) fn current_startup_restore_conflict(
@@ -187,7 +235,8 @@ fn collect_tab_restore_conflicts(
     tab: &WorkspaceTab,
 ) -> impl Iterator<Item = StartupRestoreConflict> + '_ {
     tab.buffers().filter_map(move |buffer| {
-        (buffer.freshness == BufferFreshness::ConflictOnDisk)
+        (buffer.freshness == BufferFreshness::ConflictOnDisk
+            || (buffer.freshness == BufferFreshness::MissingOnDisk && buffer.is_dirty))
             .then(|| buffer.path.clone())?
             .and_then(|path| {
                 representative_view_id(tab, buffer.id).map(|view_id| StartupRestoreConflict {

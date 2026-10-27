@@ -10,8 +10,8 @@ use eframe::egui;
 
 mod appearance;
 mod opening;
-mod sections;
 mod recovery;
+mod sections;
 mod style;
 mod text_formatting;
 mod widgets;

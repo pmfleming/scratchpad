@@ -84,7 +84,9 @@ impl Database {
                 .iter()
                 .any(|buffer| live.contains(buffer.temp_id.as_str()))
         });
-        self.apply_archive_policy(&mut retained, &request.recovery_policy).await?;
+        request.expired_versions = self
+            .apply_archive_policy(&mut retained, &request.recovery_policy)
+            .await?;
         request.closed_tabs = retained;
         Ok(old)
     }

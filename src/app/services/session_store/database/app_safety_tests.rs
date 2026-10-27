@@ -110,6 +110,52 @@ fn unsupported_schema_allows_exit_without_replacing_the_database() {
 }
 
 #[test]
+fn failed_archive_commit_leaves_the_live_tab_open() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = crate::app::app_state::test_support::test_app(root.path());
+    app.tab_manager.set_tabs(tabs(), 0);
+    let store = app.state.persistence.session_store.clone();
+    crate::app::services::session_manager::persist_session_now(&mut app).unwrap();
+    app.tab_manager.tabs.as_mut_slice()[0]
+        .active_buffer_mut()
+        .replace_text("latest unsaved text".into());
+    store.worker().unwrap().call(|db| block_on(async {
+        db.conn.execute_batch("CREATE TRIGGER refuse_archive BEFORE INSERT ON closed_tabs BEGIN SELECT RAISE(ABORT, 'transient failure'); END;").await.map_err(database::error)
+    })).unwrap();
+    let count = app.tab_manager.tabs.len();
+    crate::app::app_state::workspace_controller::perform_close_tab_no_persist(&mut app, 0);
+    assert_eq!(app.tab_manager.tabs.len(), count);
+    assert_eq!(
+        app.tab_manager.tabs.as_slice()[0].active_buffer().text(),
+        "latest unsaved text"
+    );
+    store
+        .worker()
+        .unwrap()
+        .call(|db| {
+            block_on(async {
+                db.conn
+                    .execute("DROP TRIGGER refuse_archive", ())
+                    .await
+                    .map_err(database::error)?;
+                Ok(())
+            })
+        })
+        .unwrap();
+    crate::app::app_state::workspace_controller::perform_close_tab_no_persist(&mut app, 0);
+    assert_eq!(app.tab_manager.tabs.len(), count - 1);
+    let archive = store.closed_tabs().unwrap().remove(0);
+    assert_eq!(
+        store
+            .restore_closed_tab(&archive.token)
+            .unwrap()
+            .active_buffer()
+            .text(),
+        "latest unsaved text"
+    );
+}
+
+#[test]
 fn retryable_session_save_failure_keeps_window_open_and_does_not_loop() {
     let root = tempfile::tempdir().unwrap();
     let store = SessionStore::new(root.path().join("session"));

@@ -28,12 +28,16 @@ impl Database {
     ) -> io::Result<()> {
         use super::chunking::{IncrementalChunks, hash_part, manifest_hasher};
         let token = format!("undo-{}", point.sequence);
-        let existing = self.query_collect(
-            "SELECT id FROM buffer_versions WHERE temp_id=? AND source_token=?",
-            params![point.temp_id.as_str(), token.as_str()],
-            |row| row.get::<i64>(0).map_err(error),
-        ).await?;
-        if !existing.is_empty() { return Ok(()); }
+        let existing = self
+            .query_collect(
+                "SELECT id FROM buffer_versions WHERE temp_id=? AND source_token=?",
+                params![point.temp_id.as_str(), token.as_str()],
+                |row| row.get::<i64>(0).map_err(error),
+            )
+            .await?;
+        if !existing.is_empty() {
+            return Ok(());
+        }
         let mut digest = manifest_hasher();
         let mut bytes = 0i64;
         let mut parts = Vec::new();
@@ -55,7 +59,11 @@ impl Database {
         ).await?;
         let id = ids[0];
         for (part, hash) in parts.into_iter().enumerate() {
-            self.execute_cached("INSERT INTO version_parts VALUES(?,?,?)", params![id, part as i64, hash]).await?;
+            self.execute_cached(
+                "INSERT INTO version_parts VALUES(?,?,?)",
+                params![id, part as i64, hash],
+            )
+            .await?;
         }
         Ok(())
     }

@@ -34,6 +34,31 @@ impl FileController {
             .as_slice()
             .get(app.tab_manager.active_tab_index)
             .map(|tab| tab.layout.active_view_id());
+        // Archived workspaces reopen with their original layout rather than
+        // being flattened into the current split. Remaining disk-only paths
+        // still use the user's Open Here target.
+        let paths = paths
+            .into_iter()
+            .filter(|path| {
+                Self::find_existing_open_here_path(app, path).is_some()
+                    || !crate::app::app_state::workspace::lifecycle::try_reopen_archived_path(
+                        app, path,
+                    )
+            })
+            .collect::<Vec<_>>();
+        if paths.is_empty() {
+            return;
+        }
+        if let Some(anchor) = anchor_view_id
+            && let Some(index) = app
+                .tab_manager
+                .tabs
+                .as_slice()
+                .iter()
+                .position(|tab| tab.layout.views.iter().any(|view| view.id == anchor))
+        {
+            app.tab_manager.set_active_tab_index_clamped(index);
+        }
         let batch = Self::prepare_open_batch(
             app,
             paths,

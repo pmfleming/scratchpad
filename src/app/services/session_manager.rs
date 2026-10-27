@@ -8,10 +8,12 @@ use eframe::egui;
 use std::time::Instant;
 
 pub(crate) fn maybe_persist_session(app: &mut ScratchpadApp, ctx: &egui::Context) {
-    ctx.request_repaint_after(std::time::Duration::from_secs(60));
+    ctx.request_repaint_after(std::time::Duration::from_mins(1));
     if app.startup_restore_pending()
         || app.state.persistence.session_restore_failed
-        || (!app.tab_manager.session_dirty && app.state.persistence.last_session_persist.elapsed() < std::time::Duration::from_secs(60))
+        || (!app.tab_manager.session_dirty
+            && app.state.persistence.last_session_persist.elapsed()
+                < std::time::Duration::from_mins(1))
     {
         return;
     }
@@ -50,11 +52,49 @@ pub(crate) fn persist_session_now(app: &mut ScratchpadApp) -> std::io::Result<()
     Ok(())
 }
 
+/// Commit the closed archive and the remaining workspace before the UI removes
+/// the tab. A failed transaction leaves the live tab and its latest edits intact.
+pub(crate) fn persist_tab_close(app: &mut ScratchpadApp, index: usize) -> std::io::Result<()> {
+    if app.startup_restore_pending() || app.state.persistence.session_restore_failed {
+        return Err(std::io::Error::other(
+            "session recovery is not ready; tab was not closed",
+        ));
+    }
+    let tab = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .get(index)
+        .ok_or_else(|| std::io::Error::other("tab is no longer open"))?;
+    let closed = crate::app::services::session_store::CapturedClosedTab::capture(
+        tab,
+        app.tab_manager.cold_session_tabs().get(&index),
+    );
+    let mut request = capture_session(app);
+    request.close_tab(index, closed);
+    let tokens = request.recovery_tokens();
+    app.state
+        .persistence
+        .session_store
+        .persist_request(request)?;
+    acknowledge_recovery(app, &tokens);
+    app.state.persistence.pending_closed_tabs.clear();
+    Ok(())
+}
+
 pub(crate) fn acknowledge_recovery(app: &mut ScratchpadApp, tokens: &[(String, u64)]) {
-    for buffer in app.tab_manager.tabs.as_mut_slice().iter_mut().flat_map(|tab| tab.buffers_mut()) {
+    for buffer in app
+        .tab_manager
+        .tabs
+        .as_mut_slice()
+        .iter_mut()
+        .flat_map(|tab| tab.buffers_mut())
+    {
         for (id, sequence) in tokens {
             if buffer.temp_id == *id {
-                buffer.document_mut().acknowledge_recovery_snapshot(*sequence);
+                buffer
+                    .document_mut()
+                    .acknowledge_recovery_snapshot(*sequence);
             }
         }
     }

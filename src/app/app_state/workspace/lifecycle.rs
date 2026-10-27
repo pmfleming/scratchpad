@@ -121,11 +121,26 @@ pub(crate) fn save_file_as_at(app: &mut ScratchpadApp, index: usize) -> bool {
 }
 
 pub(crate) fn perform_close_tab(app: &mut ScratchpadApp, index: usize) {
-    close_tab_internal(app, index);
-    let _ = crate::app::app_state::workspace::accessors::persist_session_now(app);
+    perform_close_tab_no_persist(app, index);
+    if let Err(error) = crate::app::app_state::workspace::accessors::persist_session_now(app) {
+        app.state.status.report_session_save_failed(error);
+    }
 }
 
 pub(crate) fn perform_close_tab_no_persist(app: &mut ScratchpadApp, index: usize) {
+    if index >= app.tab_manager.tabs.len() {
+        return;
+    }
+    // A permanently protected/unavailable store must not trap the application;
+    // existing exit protection handles that case without replacing its database.
+    if !app.startup_restore_pending()
+        && !app.state.persistence.session_restore_failed
+        && !app.state.persistence.session_store.writes_blocked()
+        && let Err(error) = crate::app::services::session_manager::persist_tab_close(app, index)
+    {
+        app.state.status.report_session_save_failed(error);
+        return;
+    }
     close_tab_internal(app, index);
 }
 
@@ -136,7 +151,14 @@ pub(crate) fn reopen_last_closed_tab(app: &mut ScratchpadApp) {
     let result = (|| -> std::io::Result<Option<String>> {
         crate::app::services::session_manager::persist_session_now(app)?;
         let store = &app.state.persistence.session_store;
-        let Some(closed) = store.closed_tabs()?.into_iter().next() else {
+        let Some(closed) = store.closed_tabs()?.into_iter().find(|closed| {
+            closed.has_unsaved_changes
+                || closed.paths.is_empty()
+                || !closed
+                    .paths
+                    .iter()
+                    .all(|path| app.tab_manager.find_tab_by_path(path).is_some())
+        }) else {
             return Ok(None);
         };
         Ok(Some(closed.token))
@@ -152,15 +174,36 @@ pub(crate) fn reopen_last_closed_tab(app: &mut ScratchpadApp) {
 }
 
 pub(crate) fn reopen_archived_tab(app: &mut ScratchpadApp, token: &str) {
-    if app.startup_restore_pending() || app.state.persistence.session_restore_failed { return; }
+    if app.startup_restore_pending() || app.state.persistence.session_restore_failed {
+        return;
+    }
     match app.state.persistence.session_store.reopen_archive(token) {
         Ok(reopened) => {
+            let open_disk = reopened.tab.is_none()
+                || app
+                    .state
+                    .app_settings
+                    .history
+                    .recovery
+                    .open_changed_disk_files;
             if let Some(mut tab) = reopened.tab {
-                if tab.buffers().any(|buffer| app.tab_manager.tabs.as_slice().iter()
-                    .flat_map(WorkspaceTab::buffers).any(|live| live.temp_id == buffer.temp_id)) { return; }
+                if tab.buffers().any(|buffer| {
+                    app.tab_manager
+                        .tabs
+                        .as_slice()
+                        .iter()
+                        .flat_map(WorkspaceTab::buffers)
+                        .any(|live| live.temp_id == buffer.temp_id)
+                }) {
+                    return;
+                }
                 // A restored split must not steal a path from an already-open tab.
                 for buffer in tab.buffers_mut() {
-                    if buffer.path.as_ref().is_some_and(|path| app.tab_manager.find_tab_by_path(path).is_some()) {
+                    if buffer
+                        .path
+                        .as_ref()
+                        .is_some_and(|path| app.tab_manager.find_tab_by_path(path).is_some())
+                    {
                         buffer.path = None;
                         buffer.path_key = None;
                         buffer.name = format!("{} (recovered)", buffer.name);
@@ -168,11 +211,12 @@ pub(crate) fn reopen_archived_tab(app: &mut ScratchpadApp, token: &str) {
                     }
                 }
                 create_workspace_tab(app, tab);
-                if let Err(error) = crate::app::services::session_manager::persist_session_now(app) {
+                if let Err(error) = crate::app::services::session_manager::persist_session_now(app)
+                {
                     app.state.status.report_session_save_failed(error);
                 }
             }
-            if !reopened.disk_paths.is_empty() {
+            if open_disk && !reopened.disk_paths.is_empty() {
                 FileController::open_disk_paths_async(app, reopened.disk_paths);
             }
         }
@@ -181,11 +225,26 @@ pub(crate) fn reopen_archived_tab(app: &mut ScratchpadApp, token: &str) {
 }
 
 pub(crate) fn recover_archived_copy(app: &mut ScratchpadApp, token: &str) {
-    if app.startup_restore_pending() || app.state.persistence.session_restore_failed { return; }
-    match app.state.persistence.session_store.restore_closed_tab(token) {
+    if app.startup_restore_pending() || app.state.persistence.session_restore_failed {
+        return;
+    }
+    match app
+        .state
+        .persistence
+        .session_store
+        .restore_closed_tab(token)
+    {
         Ok(mut tab) => {
-            if tab.buffers().any(|buffer| app.tab_manager.tabs.as_slice().iter()
-                .flat_map(WorkspaceTab::buffers).any(|live| live.temp_id == buffer.temp_id)) { return; }
+            if tab.buffers().any(|buffer| {
+                app.tab_manager
+                    .tabs
+                    .as_slice()
+                    .iter()
+                    .flat_map(WorkspaceTab::buffers)
+                    .any(|live| live.temp_id == buffer.temp_id)
+            }) {
+                return;
+            }
             for buffer in tab.buffers_mut() {
                 buffer.path = None;
                 buffer.path_key = None;
@@ -206,40 +265,34 @@ pub(crate) fn recover_archived_copy(app: &mut ScratchpadApp, token: &str) {
 /// Returns true when an archive handled (or safely rejected) this open request.
 pub(crate) fn try_reopen_archived_path(app: &mut ScratchpadApp, path: &std::path::Path) -> bool {
     if !app.state.app_settings.history.recovery.reopen_archives
-        || app.startup_restore_pending() || app.state.persistence.session_restore_failed { return false; }
+        || app.startup_restore_pending()
+        || app.state.persistence.session_restore_failed
+    {
+        return false;
+    }
     if !app.state.persistence.pending_closed_tabs.is_empty()
-        && let Err(error) = crate::app::services::session_manager::persist_session_now(app) {
+        && let Err(error) = crate::app::services::session_manager::persist_session_now(app)
+    {
         app.state.status.report_session_save_failed(error);
         return true;
     }
     match app.state.persistence.session_store.closed_tabs() {
         Ok(closed) => {
-            let Some(archive) = closed.iter().find(|archive| archive.paths.iter().any(|saved| crate::app::paths_match(saved, path))) else { return false; };
+            let Some(archive) = closed.iter().find(|archive| {
+                archive
+                    .paths
+                    .iter()
+                    .any(|saved| crate::app::paths_match(saved, path))
+            }) else {
+                return false;
+            };
             reopen_archived_tab(app, &archive.token);
             true
         }
-        Err(error) => { app.state.status.report_session_restore_failed(error); true }
-    }
-}
-
-pub(crate) fn recover_buffer_version(app: &mut ScratchpadApp, index: usize, version: i64) {
-    let Some(source) = app.tab_manager.tabs.as_slice().get(index) else {
-        return;
-    };
-    match app
-        .state
-        .persistence
-        .session_store
-        .restore_buffer_version(version)
-    {
-        Ok(text) => {
-            let name = format!("{} (save point)", source.active_buffer().name);
-            create_workspace_tab(
-                app,
-                WorkspaceTab::new(crate::app::domain::BufferState::new(name, text, None)),
-            );
+        Err(error) => {
+            app.state.status.report_session_restore_failed(error);
+            true
         }
-        Err(error) => app.state.status.report_session_restore_failed(error),
     }
 }
 
@@ -252,6 +305,7 @@ fn create_workspace_tab(app: &mut ScratchpadApp, tab: WorkspaceTab) {
     crate::app::app_state::frame::begin_layout_transition(app);
     let index = new_tab_insert_index(app);
     app.tab_manager.insert_tab(index, tab);
+    app.apply_history_budget_to_open_buffers();
     app.apply_current_tab_ordering();
     settings_controller::activate_workspace_surface(app);
     crate::app::app_state::workspace::display_tabs::select_only_tab_slot(
@@ -309,16 +363,6 @@ fn close_tab_internal(app: &mut ScratchpadApp, index: usize) {
         .get(index)
         .map(|tab| tab.buffers().map(|buffer| buffer.id).collect::<Vec<_>>())
         .unwrap_or_default();
-    if !app.startup_restore_pending()
-        && !app.state.persistence.session_restore_failed
-        && let Some(tab) = app.tab_manager.tabs.as_slice().get(index)
-    {
-        let closed = crate::app::services::session_store::CapturedClosedTab::capture(
-            tab,
-            app.tab_manager.cold_session_tabs().get(&index),
-        );
-        app.state.persistence.pending_closed_tabs.push(closed);
-    }
     let settings_refresh = app.settings_toml_refresh_on_tab_close(index);
     crate::app::app_state::frame::begin_layout_transition(app);
     app.tab_manager.close_tab_internal(index);

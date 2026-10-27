@@ -32,6 +32,7 @@ struct Prepared {
     closed_changed: bool,
     version_history: bool,
     recovery_policy: crate::app::services::settings_store::RecoverySettings,
+    expired_versions: Vec<i64>,
     chunk_checkpoints: HashMap<String, super::chunking::ChunkCheckpoint>,
 }
 impl Prepared {
@@ -53,6 +54,7 @@ impl Prepared {
             state: serde_json::to_vec(&manifest).map_err(invalid)?,
             version_history: request.version_history,
             recovery_policy: request.recovery_policy,
+            expired_versions: request.expired_versions,
             ..Self::default()
         };
         for tab in request.tabs {
@@ -216,6 +218,7 @@ impl Database {
             || prepared.full_cleanup
             || prepared.closed_changed
             || !prepared.recovery_points.is_empty()
+            || !prepared.expired_versions.is_empty()
             || !prepared.snapshots.is_empty()
             || self.state_cache != prepared.state
             || self.tab_cache != prepared.tabs
@@ -354,7 +357,22 @@ impl Database {
         }
         profile.manifest_write_ns = start.elapsed().as_nanos();
         let start = Instant::now();
-        self.prune_recovery_points(&prepared.recovery_policy, &prepared.closed, &mut removed_digests).await?;
+        for &id in &prepared.expired_versions {
+            self.collect_digests(
+                "SELECT digest FROM version_parts WHERE version_id=?",
+                [id],
+                &mut removed_digests,
+            )
+            .await?;
+            self.execute_cached("DELETE FROM buffer_versions WHERE id=?", [id])
+                .await?;
+        }
+        self.prune_recovery_points(
+            &prepared.recovery_policy,
+            &prepared.closed,
+            &mut removed_digests,
+        )
+        .await?;
         self.delete_stale_content(prepared, removed_digests).await?;
         profile.stale_cleanup_ns = start.elapsed().as_nanos();
         Ok(())

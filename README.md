@@ -135,8 +135,8 @@ Settings are available in the app with `Ctrl + ,` and are stored as TOML:
 | Linux | `$XDG_CONFIG_HOME/scratchpad/settings.toml` or `~/.config/scratchpad/settings.toml` | `$XDG_STATE_HOME/scratchpad` or `~/.local/state/scratchpad` |
 
 Sessions use a local embedded Turso `session.db`; settings remain TOML and user
-files keep their existing save paths. Unsupported session schemas are preserved,
-not migrated or automatically reset. See [migration and recovery export](docs/turso-migration.md)
+files keep their existing save paths. Schema 6 upgrades transactionally to schema 7;
+unsupported session schemas are preserved, not automatically reset. See [migration and recovery export](docs/turso-migration.md)
 before backing up, recovering, or downgrading a session database.
 
 Closing during startup restore leaves the previous session intact. If startup
@@ -145,9 +145,12 @@ workspace; save new edits to files before closing. A protected/unavailable sessi
 store does not prevent exit. Retryable save errors still keep the window open,
 without retrying automatic last-tab shutdown every frame.
 
-Closed workspace tabs retain text and undo history for the newest 32 closes.
-Use **Reopen Last Closed Tab** in a tab context menu after closing or restarting.
-**Saved Versions** recovers periodic buffer save points into a new untitled tab.
+**History…** combines detailed edits and snapshot-only recovery, with preview,
+undoable restore and recovery into a new tab. **Recently Closed** combines archived
+tabs and disk-only file entries; normal reopening restores archives automatically
+and separates externally changed files from recovered unsaved text.
+Configure undo/snapshot/archive budgets, expiry and reopening in **Settings >
+History & Recovery**, alongside measured data-directory disk usage.
 See [retention, storage limits, and schema changes](SESSION-RETENTION.md).
 
 Start with [the configuration guide](docs/configuration.md). It documents the

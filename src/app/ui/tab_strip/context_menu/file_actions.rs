@@ -38,7 +38,10 @@ pub(super) fn render_file_actions(
         ui.close();
     }
     egui::containers::menu::SubMenuButton::new("Recently Closed")
-        .config(egui::containers::menu::MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside))
+        .config(
+            egui::containers::menu::MenuConfig::new()
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
+        )
         .ui(ui, |ui| render_recently_closed_files(ui, app, slot_index));
     if app.state.app_settings.recent_files_enabled() {
         render_open_file_actions(ui, app, slot_index, open_here_enabled);
@@ -72,9 +75,21 @@ pub(super) fn render_file_actions(
 }
 
 fn render_history_action(ui: &mut egui::Ui, app: &mut ScratchpadApp, index: usize) {
-    if menu_button(ui, TAB_CONTEXT_MENU_WIDTH, "History…", Some(egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE), true) {
-        crate::app::commands::handle_command(app, AppCommand::Workspace(WorkspaceCommand::ActivateTab { index }));
-        crate::app::commands::handle_command(app, AppCommand::Dialog(crate::app::commands::DialogCommand::OpenTextHistory));
+    if menu_button(
+        ui,
+        TAB_CONTEXT_MENU_WIDTH,
+        "History…",
+        Some(egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE),
+        true,
+    ) {
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Workspace(WorkspaceCommand::ActivateTab { index }),
+        );
+        crate::app::commands::handle_command(
+            app,
+            AppCommand::Dialog(crate::app::commands::DialogCommand::OpenTextHistory),
+        );
         ui.close();
     }
 }
@@ -110,7 +125,6 @@ fn render_open_file_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp, _slot_in
         OPEN_FILE_SUBMENU_WIDTH,
         |ui| {
             render_open_file_disposition_buttons(ui, app);
-
         },
     );
 }
@@ -153,11 +167,18 @@ fn render_open_file_disposition_buttons(ui: &mut egui::Ui, app: &mut ScratchpadA
 fn render_recently_closed_files(ui: &mut egui::Ui, app: &mut ScratchpadApp, slot_index: usize) {
     let store = app.state.persistence.session_store.clone();
     let root = store.root().to_owned();
-    let archives = match crate::app::ui::recovery::query(ui, ("closed", root), move || store.closed_tabs()) {
-        Some(Ok(archives)) => archives,
-        Some(Err(error)) => { ui.label(format!("Could not read archives: {error}")); Vec::new() }
-        None => { ui.label("Loading archives…"); Vec::new() }
-    };
+    let archives =
+        match crate::app::ui::recovery::query(ui, ("closed", root), move || store.closed_tabs()) {
+            Some(Ok(archives)) => archives,
+            Some(Err(error)) => {
+                ui.label(format!("Could not read archives: {error}"));
+                Vec::new()
+            }
+            None => {
+                ui.label("Loading archives…");
+                Vec::new()
+            }
+        };
     egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
         for archive in &archives {
             ui.horizontal(|ui| {
@@ -180,12 +201,28 @@ fn render_recently_closed_files(ui: &mut egui::Ui, app: &mut ScratchpadApp, slot
             });
         }
     });
-    let paths = app.state.recently_closed_files.iter()
+    let paths = app
+        .state
+        .recently_closed_files
+        .iter()
         .filter(|_| app.state.app_settings.recent_files_enabled())
-        .filter(|path| !archives.iter().any(|archive| archive.paths.iter().any(|saved| crate::app::paths_match(saved, path))))
-        .cloned().collect::<Vec<_>>();
-    if paths.is_empty() && archives.is_empty() { ui.label("No recently closed files"); }
-    if !paths.is_empty() { ui.separator(); ui.label("Files on disk"); }
+        .filter(|path| {
+            !archives.iter().any(|archive| {
+                archive
+                    .paths
+                    .iter()
+                    .any(|saved| crate::app::paths_match(saved, path))
+            })
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if paths.is_empty() && archives.is_empty() {
+        ui.label("No recently closed files");
+    }
+    if !paths.is_empty() {
+        ui.separator();
+        ui.label("Files on disk");
+    }
 
     for path in paths {
         if recent_file_button(

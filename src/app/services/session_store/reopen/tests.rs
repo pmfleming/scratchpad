@@ -1,5 +1,8 @@
 use super::*;
-use crate::app::{domain::{BufferState, WorkspaceTab}, services::session_store::{CapturedClosedTab, SessionPersistRequest}};
+use crate::app::{
+    domain::{BufferState, WorkspaceTab},
+    services::session_store::{CapturedClosedTab, SessionPersistRequest},
+};
 
 fn archived(dirty: bool) -> (tempfile::TempDir, SessionStore, PathBuf, String) {
     let root = tempfile::tempdir().unwrap();
@@ -8,7 +11,14 @@ fn archived(dirty: bool) -> (tempfile::TempDir, SessionStore, PathBuf, String) {
     let mut buffer = BufferState::new("file.txt".into(), "original".into(), Some(path.clone()));
     buffer.sync_to_disk_state(Some(FileService::read_disk_state(&path).unwrap()));
     if dirty {
-        buffer.document_mut().replace_char_ranges_with_undo(&[(0..8, "unsaved".into())], Default::default(), Default::default()).unwrap();
+        buffer
+            .document_mut()
+            .replace_char_ranges_with_undo(
+                &[(0..8, "unsaved".into())],
+                crate::app::domain::CursorRange::default(),
+                crate::app::domain::CursorRange::default(),
+            )
+            .unwrap();
         buffer.is_dirty = true;
     }
     let closed = CapturedClosedTab::capture(&WorkspaceTab::new(buffer), None);
@@ -28,7 +38,10 @@ fn unchanged_disk_restores_unsaved_text_and_undo() {
     let mut tab = reopened.tab.unwrap();
     assert_eq!(tab.active_buffer().text(), "unsaved");
     assert_eq!(tab.active_buffer().path.as_ref(), Some(&path));
-    tab.active_buffer_mut().document_mut().undo_last_operation().unwrap();
+    tab.active_buffer_mut()
+        .document_mut()
+        .undo_last_operation()
+        .unwrap();
     assert_eq!(tab.active_buffer().text(), "original");
     assert_eq!(std::fs::read_to_string(path).unwrap(), "original");
 }
@@ -44,7 +57,11 @@ fn external_change_preserves_both_without_attaching_old_undo() {
     assert_eq!(tab.active_buffer().text(), "unsaved");
     assert!(tab.active_buffer().path.is_none());
     assert_eq!(std::fs::read_to_string(path).unwrap(), "external");
-    assert_eq!(store.closed_tabs().unwrap().len(), 1, "read does not consume archive");
+    assert_eq!(
+        store.closed_tabs().unwrap().len(),
+        1,
+        "read does not consume archive"
+    );
 }
 
 #[test]

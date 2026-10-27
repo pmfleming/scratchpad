@@ -17,6 +17,7 @@ pub(crate) struct SessionPersistRequest {
     pub(crate) closed_tabs: Vec<CapturedClosedTab>,
     pub(super) version_history: bool,
     pub(crate) recovery_policy: crate::app::services::settings_store::RecoverySettings,
+    pub(super) expired_versions: Vec<i64>,
 }
 
 #[derive(Clone)]
@@ -49,9 +50,21 @@ pub(super) struct CapturedRecoveryPoint {
 }
 
 impl SessionPersistRequest {
+    pub(crate) fn close_tab(&mut self, index: usize, closed: CapturedClosedTab) {
+        self.tabs.remove(index);
+        self.active_tab_index = self
+            .active_tab_index
+            .saturating_sub(usize::from(index < self.active_tab_index))
+            .min(self.tabs.len().saturating_sub(1));
+        self.closed_tabs.push(closed);
+    }
+
     pub(crate) fn recovery_tokens(&self) -> Vec<(String, u64)> {
-        self.tabs.iter().flat_map(|tab| &tab.recovery_points)
-            .map(|point| (point.temp_id.clone(), point.sequence)).collect()
+        self.tabs
+            .iter()
+            .flat_map(|tab| &tab.recovery_points)
+            .map(|point| (point.temp_id.clone(), point.sequence))
+            .collect()
     }
 
     pub(crate) fn capture(
@@ -69,7 +82,8 @@ impl SessionPersistRequest {
             tabs: tabs.iter().map(CapturedSessionTab::capture).collect(),
             closed_tabs: Vec::new(),
             version_history: true,
-            recovery_policy: Default::default(),
+            recovery_policy: crate::app::services::settings_store::RecoverySettings::default(),
+            expired_versions: Vec::new(),
         }
     }
 
@@ -89,7 +103,8 @@ impl SessionPersistRequest {
             word_wrap,
             closed_tabs: Vec::new(),
             version_history: true,
-            recovery_policy: Default::default(),
+            recovery_policy: crate::app::services::settings_store::RecoverySettings::default(),
+            expired_versions: Vec::new(),
             tabs: tabs
                 .iter()
                 .enumerate()
@@ -159,7 +174,10 @@ impl CapturedSessionTab {
         for buffer in tab.buffers() {
             buffers.push(SessionBuffer::from(buffer));
             if !buffer.is_loading_preview
-                && (buffer.path.is_none() || buffer.is_dirty || buffer.disk_state.is_none())
+                && (buffer.path.is_none()
+                    || buffer.is_dirty
+                    || buffer.disk_state.is_none()
+                    || !buffer.document().history_entries().is_empty())
             {
                 buffer_snapshots.push(CapturedSessionBuffer {
                     temp_id: buffer.temp_id.clone(),
@@ -176,11 +194,19 @@ impl CapturedSessionTab {
                 root_pane: SessionPaneNode::from(tab.layout.root_pane()),
             },
             buffer_snapshots,
-            recovery_points: tab.buffers().filter_map(|buffer| {
-                buffer.document().recovery_snapshot().map(|(sequence, snapshot)| CapturedRecoveryPoint {
-                    temp_id: buffer.temp_id.clone(), sequence, snapshot,
+            recovery_points: tab
+                .buffers()
+                .filter_map(|buffer| {
+                    buffer
+                        .document()
+                        .recovery_snapshot()
+                        .map(|(sequence, snapshot)| CapturedRecoveryPoint {
+                            temp_id: buffer.temp_id.clone(),
+                            sequence,
+                            snapshot,
+                        })
                 })
-            }).collect(),
+                .collect(),
             preserve_existing: false,
             discard_history: false,
         }

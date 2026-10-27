@@ -51,7 +51,13 @@ pub(super) fn text_history_budget_card(ui: &mut egui::Ui, app: &mut ScratchpadAp
         "Undo history limits.",
         false,
         |ui| {
-            let mut budget = app.state.app_settings.history.budget;
+            let original_budget = app.state.app_settings.history.budget;
+            let mut budget = original_budget;
+            ui.horizontal(|ui| {
+                let label = ui.label("Maximum detailed entries per file");
+                ui.add(egui::DragValue::new(&mut budget.per_file_entry_limit).range(100..=100_000))
+                    .labelled_by(label.id);
+            });
             byte_budget_row(
                 ui,
                 "Per-file",
@@ -70,8 +76,8 @@ pub(super) fn text_history_budget_card(ui: &mut egui::Ui, app: &mut ScratchpadAp
             );
             byte_budget_row(
                 ui,
-                "Session",
-                "Saved session undo limit.",
+                "Persisted per file",
+                "Per-file saved undo payload limit (not a global disk cap).",
                 &mut budget.persisted_payload_budget,
                 0,
                 1024,
@@ -103,7 +109,7 @@ pub(super) fn text_history_budget_card(ui: &mut egui::Ui, app: &mut ScratchpadAp
                     });
                 },
             );
-            if budget != app.state.app_settings.history.budget {
+            if budget != original_budget {
                 crate::app::app_state::settings_controller::set_history_budget(app, budget);
             }
         },
