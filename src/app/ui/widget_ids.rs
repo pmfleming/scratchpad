@@ -1,4 +1,4 @@
-use eframe::egui::widget_style::HasClasses;
+use eframe::egui::class::HasClasses;
 use eframe::egui::{self, ComboBox, Id, LayerId, Order, Rect, Response, Sense};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -49,11 +49,11 @@ pub(crate) fn configure_debug_options(ctx: &egui::Context) {
 }
 
 pub(crate) fn ctx_key(key: impl Hash) -> Id {
-    Id::new((ID_NAMESPACE, "ctx", hash_key(&key)))
+    Id::unique((ID_NAMESPACE, "ctx", hash_key(&key)))
 }
 
 pub(crate) fn area_id(key: impl Hash) -> Id {
-    Id::new((ID_NAMESPACE, "area", hash_key(&key)))
+    Id::unique((ID_NAMESPACE, "area", hash_key(&key)))
 }
 
 pub(crate) fn area(key: impl Hash) -> egui::Area {
@@ -61,7 +61,7 @@ pub(crate) fn area(key: impl Hash) -> egui::Area {
 }
 
 pub(crate) fn root_id(key: impl Hash) -> Id {
-    Id::new((ID_NAMESPACE, "root", hash_key(&key)))
+    Id::unique((ID_NAMESPACE, "root", hash_key(&key)))
 }
 
 pub(crate) fn surface_id(key: impl Hash) -> Id {
@@ -112,7 +112,7 @@ pub(crate) fn surface_response(
         response.rect,
         "surface_response",
         location,
-        Some(ui.id()),
+        Some(ui.unique_id()),
     );
     response
 }
@@ -129,8 +129,31 @@ pub(crate) fn scroll_id(ui: &egui::Ui, key: impl Hash) -> Id {
     local(ui, ("scroll", key))
 }
 
-pub(crate) fn combo_box(ui: &egui::Ui, key: impl Hash) -> ComboBox {
-    ComboBox::from_id_salt(local(ui, ("combo_box", key)))
+pub(crate) fn combo_box(_ui: &egui::Ui, key: impl Hash) -> ComboBox<'static> {
+    ComboBox::from_id_salt((ID_NAMESPACE, "combo_box", hash_key(&key)))
+}
+
+/// Apply queued drag scrolling through the public builder API, not private
+/// `scroll_area::State` fields. The ID calculation matches egui's ScrollArea.
+pub(crate) fn scroll_area(
+    ui: &egui::Ui,
+    area: egui::ScrollArea,
+    salt: impl egui::AsIdSalt,
+) -> egui::ScrollArea {
+    let id = ui.make_persistent_id(egui::IdSalt::new(&salt));
+    let pending = ui
+        .ctx()
+        .data_mut(|data| data.remove_temp::<egui::Vec2>(id.with("pending_drag_scroll")));
+    let area = area.id_salt(salt);
+    match pending {
+        Some(offset) => area.scroll_offset(offset),
+        None => area,
+    }
+}
+
+pub(crate) fn request_scroll_offset(ctx: &egui::Context, id: Id, offset: egui::Vec2) {
+    ctx.data_mut(|data| data.insert_temp(id.with("pending_drag_scroll"), offset));
+    ctx.request_repaint();
 }
 
 pub(crate) fn child(id: Id, key: impl Hash) -> Id {
@@ -192,7 +215,7 @@ pub(crate) fn surface_scope<R>(
 ) -> egui::InnerResponse<R> {
     ui.scope_builder(
         egui::UiBuilder::new()
-            .id(surface_id(key))
+            .scope_id(surface_id(key))
             .with_class(CLASS_SURFACE),
         add_contents,
     )
@@ -228,7 +251,7 @@ pub(crate) fn rect_child_ui(
 
 fn rect_ui_builder(rect: Rect, role: impl Hash, layout: egui::Layout) -> egui::UiBuilder {
     egui::UiBuilder::new()
-        .id(rect_surface_id(rect, role))
+        .scope_id(rect_surface_id(rect, role))
         .with_class(CLASS_RECT_SURFACE)
         .max_rect(rect)
         .layout(layout)
@@ -256,7 +279,13 @@ pub(crate) fn interact(
 ) -> Response {
     let response = ui.interact(rect, id, sense);
     let location = std::panic::Location::caller();
-    crate::app::diagnostics::track_widget_id(id, response.rect, kind, location, Some(ui.id()));
+    crate::app::diagnostics::track_widget_id(
+        id,
+        response.rect,
+        kind,
+        location,
+        Some(ui.unique_id()),
+    );
     response
 }
 
@@ -317,6 +346,9 @@ mod tests {
         "ui.allocate_exact_size(",
         "ui.interact(",
         "ui.id()",
+        "ui.scope_id()",
+        "ui.unique_id()",
+        "egui::Id::new(",
         "ui.scope(",
         ".make_persistent_id(",
         ".push_id(",
@@ -325,6 +357,35 @@ mod tests {
         "egui::LayerId::new(",
         "ComboBox::from_id_salt(",
     ];
+
+    #[test]
+    fn queued_scroll_offset_reaches_the_same_scroll_area_once() {
+        let ctx = eframe::egui::Context::default();
+        let mut id = None;
+        let render = |ui: &mut eframe::egui::Ui| {
+            super::scroll_area(ui, eframe::egui::ScrollArea::vertical(), "drag-test")
+                .max_height(100.0)
+                .show(ui, |ui| {
+                    ui.set_min_height(1000.0);
+                })
+        };
+        ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            id = Some(render(ui).id);
+        })
+        .drop_without_applying_deltas();
+        let id = id.unwrap();
+        super::request_scroll_offset(&ctx, id, eframe::egui::vec2(0.0, 80.0));
+        ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            let output = render(ui);
+            assert_eq!(output.id, id);
+            assert_eq!(output.state.clamped_offset().y, 80.0);
+        })
+        .drop_without_applying_deltas();
+        assert!(
+            ctx.data(|data| data.get_temp::<eframe::egui::Vec2>(id.with("pending_drag_scroll")))
+                .is_none()
+        );
+    }
 
     #[test]
     fn app_code_uses_widget_id_wrappers_for_raw_egui_ids() {

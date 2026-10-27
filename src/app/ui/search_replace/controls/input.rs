@@ -86,5 +86,5 @@ fn search_text_edit<'a>(text: &'a mut String, id: egui::Id, hint: &str) -> egui:
         .id(id)
         .hint_text(hint)
         .margin(egui::Margin::symmetric(10, 6))
-        .vertical_align(egui::Align::Center)
+        .align(egui::Align2::LEFT_CENTER)
 }

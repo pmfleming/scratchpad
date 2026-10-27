@@ -103,8 +103,7 @@ fn render_tab_strip_entries(
     scroll_area_id: egui::Id,
     context: &mut TabStripEntriesContext<'_>,
 ) -> Vec<TabRectEntry> {
-    let output = egui::ScrollArea::horizontal()
-        .id_salt(scroll_area_id)
+    let output = widget_ids::scroll_area(ui, egui::ScrollArea::horizontal(), scroll_area_id)
         .auto_shrink([false, false])
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
         .show(ui, |ui| {

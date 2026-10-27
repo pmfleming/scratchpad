@@ -200,7 +200,8 @@ docs/                  user, configuration, architecture, and review documents
 - [NixOS/Hyprland configuration](docs/hyprland-nixos-configuration.md)
 - [Measurement tools](docs/measurement-tools.md)
 
-Scratchpad uses Rust 2024 and `eframe`/`egui` 0.36.1. Unsafe Rust is forbidden
+Scratchpad uses Rust 2024 and upstream `eframe`/`egui` 0.37.0.
+See [the upgrade validation notes](EGUI-UPGRADE.md) for backend coverage and limitations. Unsafe Rust is forbidden
 at the crate level. Generated performance and capacity artifacts are written to
 `target/analysis/`; the measurement boundary is described in
 [docs/measurement-tools.md](docs/measurement-tools.md).

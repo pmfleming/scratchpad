@@ -101,8 +101,8 @@ fn renderer_from_env() -> eframe::Renderer {
 }
 
 fn renderer_from_override(renderer_override: Option<&str>) -> eframe::Renderer {
-    // The shared Wayland scheduler patch prevents WGPU's former idle busy-polling.
-    // Keep it and the Linux Glow fallback; see docs/wgpu-recovery-investigation.md.
+    // Upstream eframe 0.37 supplies sleeping Wayland scheduling and nonblocking
+    // Glow swaps. Keep WGPU as default and Glow as the Linux fallback.
     renderer_override
         .and_then(|value| value.parse().ok())
         .unwrap_or(eframe::Renderer::Wgpu)

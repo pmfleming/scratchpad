@@ -44,7 +44,7 @@ impl Default for RuntimeShortcuts {
 }
 
 fn runtime_id() -> egui::Id {
-    egui::Id::new("scratchpad.runtime_shortcuts")
+    egui::Id::unique("scratchpad.runtime_shortcuts")
 }
 
 /// Publishes the current platform and user keymap for UI code and the editor.

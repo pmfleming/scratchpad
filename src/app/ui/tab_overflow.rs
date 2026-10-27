@@ -167,21 +167,24 @@ fn show_overflow_popup(
                 let scroll_output = ui
                     .scope(|ui| {
                         ui.spacing_mut().scroll = tab_list_scroll_style();
-                        egui::ScrollArea::vertical()
-                            .id_salt(overflow_popup_scroll_id(request.overflow_popup_id))
-                            .auto_shrink([false, true])
-                            .min_scrolled_height(popup_target_height)
-                            .max_height(popup_target_height)
-                            .show(ui, |ui| {
-                                collect_overflow_row_rects(
-                                    ui,
-                                    request.app,
-                                    request.duplicate_name_counts,
-                                    &active_drag_sources,
-                                    request.visible_tab_indices,
-                                    &mut menu,
-                                )
-                            })
+                        widget_ids::scroll_area(
+                            ui,
+                            egui::ScrollArea::vertical(),
+                            overflow_popup_scroll_id(request.overflow_popup_id),
+                        )
+                        .auto_shrink([false, true])
+                        .min_scrolled_height(popup_target_height)
+                        .max_height(popup_target_height)
+                        .show(ui, |ui| {
+                            collect_overflow_row_rects(
+                                ui,
+                                request.app,
+                                request.duplicate_name_counts,
+                                &active_drag_sources,
+                                request.visible_tab_indices,
+                                &mut menu,
+                            )
+                        })
                     })
                     .inner;
                 maybe_auto_scroll_overflow_popup(

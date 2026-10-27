@@ -206,7 +206,7 @@ pub fn tab_rename_editor_sized(
             .frame(egui::Frame::NONE)
             .desired_width(text_rect.width())
             .margin(egui::Margin::symmetric(4, 6))
-            .vertical_align(egui::Align::Center)
+            .align(egui::Align2::LEFT_CENTER)
             .font(
                 options
                     .label_font_id

@@ -168,12 +168,12 @@ pub(crate) fn auto_scroll_tab_list(
     let (delta, current_offset, viewport_extent) = match axis {
         TabDropAxis::Horizontal => (
             state::auto_scroll_delta(viewport_rect, drag_state.current_pos, axis),
-            scroll_state.offset.x,
+            scroll_state.clamped_offset().x,
             viewport_rect.width(),
         ),
         TabDropAxis::Vertical => (
             state::auto_scroll_delta(viewport_rect, drag_state.current_pos, axis),
-            scroll_state.offset.y,
+            scroll_state.clamped_offset().y,
             viewport_rect.height(),
         ),
     };
@@ -187,11 +187,10 @@ pub(crate) fn auto_scroll_tab_list(
         return;
     }
 
-    let mut next_state = *scroll_state;
+    let mut offset = scroll_state.clamped_offset();
     match axis {
-        TabDropAxis::Horizontal => next_state.offset.x = next_offset,
-        TabDropAxis::Vertical => next_state.offset.y = next_offset,
+        TabDropAxis::Horizontal => offset.x = next_offset,
+        TabDropAxis::Vertical => offset.y = next_offset,
     }
-    next_state.store(ctx, scroll_area_id);
-    ctx.request_repaint();
+    crate::app::ui::widget_ids::request_scroll_offset(ctx, scroll_area_id, offset);
 }

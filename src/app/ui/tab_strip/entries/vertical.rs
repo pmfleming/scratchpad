@@ -142,8 +142,7 @@ fn show_scrolling_vertical_tab_list(
     let output = ui
         .scope(|ui| {
             ui.spacing_mut().scroll = tab_list_scroll_style();
-            egui::ScrollArea::vertical()
-                .id_salt(scroll_area_id)
+            widget_ids::scroll_area(ui, egui::ScrollArea::vertical(), scroll_area_id)
                 .auto_shrink([false, false])
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
                 .show(ui, |ui| {

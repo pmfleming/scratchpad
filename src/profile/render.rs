@@ -105,6 +105,7 @@ impl UiRenderFrameHarness {
             .push(egui::Event::PointerMoved(egui::pos2(640.0, 360.0)));
         input.events.push(egui::Event::MouseWheel {
             unit: egui::MouseWheelUnit::Point,
+            source: egui::MouseWheelSource::Unknown,
             delta: egui::vec2(0.0, 96.0 * direction),
             phase: egui::TouchPhase::Move,
             modifiers: egui::Modifiers::default(),

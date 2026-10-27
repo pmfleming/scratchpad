@@ -1,7 +1,7 @@
 use crate::app::domain::{BufferState, EditorViewState, ViewId, WorkspaceTab};
 use crate::app::ui::editor_content::extent;
+use crate::app::ui::scrolling;
 use crate::app::ui::scrolling::{DisplaySnapshot, ScrollAnchor};
-use crate::app::ui::{scrolling, widget_ids};
 use eframe::egui;
 
 pub(super) fn recover_unresolved_piece_anchor(
@@ -36,7 +36,6 @@ pub(super) fn recover_unresolved_piece_anchor(
 }
 
 pub(super) fn sync_local_scroll_state(ui: &egui::Ui, scroll_id: egui::Id, offset: egui::Vec2) {
-    sync_editor_scroll_state(ui, scroll_id, offset);
     let mut local_state = scrolling::ScrollState::load(ui, scroll_id);
     local_state.offset = offset;
     local_state.store(ui, scroll_id);
@@ -224,15 +223,6 @@ fn release_tracked_piece_anchor(view: &mut EditorViewState, buffer: &mut BufferS
         .piece_tree_mut()
         .release_anchor(anchor);
     true
-}
-
-fn sync_editor_scroll_state(ui: &egui::Ui, scroll_id: egui::Id, offset: egui::Vec2) {
-    let persistent_id = widget_ids::local(ui, ("editor_scroll_state", scroll_id));
-    let mut state = egui::scroll_area::State::load(ui.ctx(), persistent_id).unwrap_or_default();
-    if state.offset != offset {
-        state.offset = offset;
-        state.store(ui.ctx(), persistent_id);
-    }
 }
 
 #[cfg(test)]
