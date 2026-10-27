@@ -52,4 +52,25 @@ cargo run --manifest-path ../rust-quality-lens/Cargo.toml -- check --config rqle
 
 The configured limits exclude profiling binaries and prevent new application panic paths. Lower a limit whenever an existing finding is removed; do not increase one without documenting the accepted risk.
 
+Session performance helper commands live in the sibling Rust performance lens,
+not in Scratchpad's maintenance `xtask`. From this checkout:
+
+```bash
+cargo run --locked --manifest-path ../scratchpad-performance-lens/Cargo.toml --bin splens -- \
+  compare-session-baseline target/turso-migration/baseline target/turso-migration/phase5-final
+
+cargo build --release --locked --bin resource_probe
+cargo run --locked --manifest-path ../scratchpad-performance-lens/Cargo.toml --bin splens -- \
+  measure-large-dirty-save --binary target/release/resource_probe \
+  --output target/session-save-runs/new-run --launches 3
+```
+
+These replace `scripts/compare-session-baseline.py` and
+`scripts/measure-large-dirty-save.py`. The comparison optionally accepts
+`--require-all-promises`; the probe runner requires a new output directory and
+an explicit executable path (adjust for `CARGO_TARGET_DIR`, cross-target builds,
+or `.exe` on Windows). Measurement orchestration and report policy belong to the
+lens; the production-dependent probe remains in Scratchpad. See the lens's
+`docs/session-diagnostics.md` for the evidence contract.
+
 Follow `CODE_OF_CONDUCT.md`. Report vulnerabilities using `SECURITY.md`, not a public issue.
