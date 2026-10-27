@@ -190,6 +190,14 @@ impl FileController {
     }
 
     pub(super) fn open_selected_paths_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+        Self::open_selected_paths_impl(app, paths, true);
+    }
+
+    pub(crate) fn open_disk_paths_async(app: &mut ScratchpadApp, paths: Vec<PathBuf>) {
+        Self::open_selected_paths_impl(app, paths, false);
+    }
+
+    fn open_selected_paths_impl(app: &mut ScratchpadApp, paths: Vec<PathBuf>, recover: bool) {
         Self::prepare_to_open_paths(app);
         let batch = Self::prepare_open_batch(
             app,
@@ -197,6 +205,8 @@ impl FileController {
             |app, path| {
                 if Self::activate_existing_path(app, &path).is_some() {
                     OpenPathDecision::Resolved(OpenPathOutcome::AlreadyOpen)
+                } else if recover && crate::app::app_state::workspace::lifecycle::try_reopen_archived_path(app, &path) {
+                    OpenPathDecision::Resolved(OpenPathOutcome::Opened { artifact_warning: None })
                 } else {
                     OpenPathDecision::Unresolved(path)
                 }

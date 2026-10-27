@@ -142,12 +142,8 @@ impl Database {
                 .await?;
             return Err(cause);
         }
-        // Prefer archived bytes over a now-different file. Recovered file buffers
-        // are dirty intentionally; no reopen operation writes original files.
-        for buffer in &mut tab.buffers {
-            if contents.contains_key(&buffer.temp_id) {
-                buffer.is_dirty = true;
-            } else if buffer.path.is_none() {
+        for buffer in &tab.buffers {
+            if buffer.path.is_none() && !contents.contains_key(&buffer.temp_id) {
                 return Err(invalid("closed tab content is missing"));
             }
         }

@@ -7,6 +7,8 @@ pub struct ClosedTabInfo {
     pub token: String,
     pub closed_at_unix_seconds: i64,
     pub name: String,
+    pub paths: Vec<std::path::PathBuf>,
+    pub has_unsaved_changes: bool,
 }
 
 impl SessionStore {
@@ -34,6 +36,8 @@ impl SessionStore {
                         Ok(ClosedTabInfo {
                             token: row.token,
                             closed_at_unix_seconds: row.closed_at,
+                            paths: tab.buffers.iter().filter_map(|buffer| buffer.path.clone()).collect(),
+                            has_unsaved_changes: tab.buffers.iter().any(|buffer| buffer.is_dirty || buffer.path.is_none()),
                             name: tab
                                 .buffers
                                 .iter()
@@ -51,9 +55,12 @@ impl SessionStore {
     /// successful session save includes its reopened buffers as live tabs.
     pub fn restore_closed_tab(&self, token: &str) -> io::Result<WorkspaceTab> {
         let token = token.to_owned();
-        let (tab, contents) = self
+        let (mut tab, contents) = self
             .worker()?
             .call(move |db| block_on(db.read_closed_tab(&token)))?;
+        for buffer in &mut tab.buffers {
+            if contents.contains_key(&buffer.temp_id) { buffer.is_dirty = true; }
+        }
         Ok(Restorer::new(contents).restore_tab_with_summary(tab).0)
     }
 }

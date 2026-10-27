@@ -120,6 +120,8 @@ pub(crate) struct SessionBuffer {
     pub disk_modified_millis: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disk_len: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_content_digest: Option<String>,
     // Capture/hydration transport (and explicit recovery export) only. The DB
     // writer drains this into history rows before serializing tab metadata.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -145,6 +147,7 @@ impl From<&crate::app::domain::BufferState> for SessionBuffer {
                 .as_ref()
                 .and_then(|state| state.modified_millis),
             disk_len: buffer.disk_state.as_ref().map(|state| state.len),
+            disk_content_digest: buffer.disk_content_digest.clone(),
             text_history: buffer.document().exported_history(),
         }
     }

@@ -164,6 +164,16 @@ impl TextDocument {
         DocumentSnapshot::from_shared(self.content.piece_tree.clone())
     }
 
+    /// Hash decoded text in bounded pieces, without a full-document allocation.
+    pub(crate) fn content_digest(&self) -> String {
+        let snapshot = self.snapshot();
+        let mut hash = blake3::Hasher::new();
+        for start in (0..snapshot.len_chars()).step_by(64 * 1024) {
+            hash.update(snapshot.extract_range(start..(start + 64 * 1024).min(snapshot.len_chars())).as_bytes());
+        }
+        hash.finalize().to_hex().to_string()
+    }
+
     #[must_use]
     pub fn operation_undo_depth(&self) -> usize {
         self.history.undo_depth

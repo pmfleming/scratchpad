@@ -43,6 +43,8 @@ pub struct BufferState {
     pub artifact_summary: TextArtifactSummary,
     pub format: TextFormatMetadata,
     pub disk_state: Option<DiskFileState>,
+    /// Digest of decoded text at the last successful disk synchronization.
+    pub disk_content_digest: Option<String>,
     pub freshness: BufferFreshness,
     pub active_selection: Option<Range<usize>>,
     pub has_non_compliant_characters: bool,
@@ -459,6 +461,7 @@ impl BufferState {
             artifact_summary: text_metadata.artifact_summary,
             format: state.format,
             disk_state: state.disk_state,
+            disk_content_digest: None,
             freshness: state.freshness,
             active_selection: None,
             has_non_compliant_characters: text_metadata.has_non_compliant_characters,

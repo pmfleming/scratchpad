@@ -28,6 +28,7 @@ pub(crate) use database::closed::CLOSED_TAB_LIMIT;
 pub use database::versions::BufferVersionInfo;
 pub use retained::ClosedTabInfo;
 mod retained;
+mod reopen;
 pub(crate) use model::SessionTabParts as ColdSessionTab;
 pub use model::{SESSION_VERSION, SessionActiveSurface};
 pub use types::{

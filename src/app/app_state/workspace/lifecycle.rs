@@ -133,36 +133,69 @@ pub(crate) fn reopen_last_closed_tab(app: &mut ScratchpadApp) {
     if app.startup_restore_pending() || app.state.persistence.session_restore_failed {
         return;
     }
-    let result = (|| -> std::io::Result<Option<WorkspaceTab>> {
+    let result = (|| -> std::io::Result<Option<String>> {
         crate::app::services::session_manager::persist_session_now(app)?;
         let store = &app.state.persistence.session_store;
         let Some(closed) = store.closed_tabs()?.into_iter().next() else {
             return Ok(None);
         };
-        store.restore_closed_tab(&closed.token).map(Some)
+        Ok(Some(closed.token))
     })();
     match result {
-        Ok(Some(tab)) => {
-            if tab.buffers().any(|buffer| {
-                app.tab_manager
-                    .tabs
-                    .as_slice()
-                    .iter()
-                    .flat_map(WorkspaceTab::buffers)
-                    .any(|live| live.temp_id == buffer.temp_id)
-            }) {
-                return;
-            }
-            create_workspace_tab(app, tab);
-            if let Err(error) = crate::app::services::session_manager::persist_session_now(app) {
-                app.state.status.report_session_save_failed(error);
-            }
-        }
+        Ok(Some(token)) => reopen_archived_tab(app, &token),
         Ok(None) => app
             .state
             .status
             .set_info_status_in_domain(StatusDomain::Session, "No retained closed tabs."),
         Err(error) => app.state.status.report_session_restore_failed(error),
+    }
+}
+
+pub(crate) fn reopen_archived_tab(app: &mut ScratchpadApp, token: &str) {
+    if app.startup_restore_pending() || app.state.persistence.session_restore_failed { return; }
+    match app.state.persistence.session_store.reopen_archive(token) {
+        Ok(reopened) => {
+            if let Some(mut tab) = reopened.tab {
+                if tab.buffers().any(|buffer| app.tab_manager.tabs.as_slice().iter()
+                    .flat_map(WorkspaceTab::buffers).any(|live| live.temp_id == buffer.temp_id)) { return; }
+                // A restored split must not steal a path from an already-open tab.
+                for buffer in tab.buffers_mut() {
+                    if buffer.path.as_ref().is_some_and(|path| app.tab_manager.find_tab_by_path(path).is_some()) {
+                        buffer.path = None;
+                        buffer.path_key = None;
+                        buffer.name = format!("{} (recovered)", buffer.name);
+                        buffer.is_dirty = true;
+                    }
+                }
+                create_workspace_tab(app, tab);
+                if let Err(error) = crate::app::services::session_manager::persist_session_now(app) {
+                    app.state.status.report_session_save_failed(error);
+                }
+            }
+            if !reopened.disk_paths.is_empty() {
+                FileController::open_disk_paths_async(app, reopened.disk_paths);
+            }
+        }
+        Err(error) => app.state.status.report_session_restore_failed(error),
+    }
+}
+
+/// Returns true when an archive handled (or safely rejected) this open request.
+pub(crate) fn try_reopen_archived_path(app: &mut ScratchpadApp, path: &std::path::Path) -> bool {
+    if !app.state.app_settings.history.recovery.reopen_archives
+        || app.startup_restore_pending() || app.state.persistence.session_restore_failed { return false; }
+    if !app.state.persistence.pending_closed_tabs.is_empty()
+        && let Err(error) = crate::app::services::session_manager::persist_session_now(app) {
+        app.state.status.report_session_save_failed(error);
+        return true;
+    }
+    match app.state.persistence.session_store.closed_tabs() {
+        Ok(closed) => {
+            let Some(archive) = closed.iter().find(|archive| archive.paths.iter().any(|saved| crate::app::paths_match(saved, path))) else { return false; };
+            reopen_archived_tab(app, &archive.token);
+            true
+        }
+        Err(error) => { app.state.status.report_session_restore_failed(error); true }
     }
 }
 
