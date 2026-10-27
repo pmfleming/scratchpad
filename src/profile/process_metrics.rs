@@ -15,6 +15,11 @@ pub struct ProcessSnapshot {
     pub handle_count: Option<u64>,
 }
 
+/// Samples best-effort counters for the current process.
+///
+/// Unsupported or unreadable counters remain `None`. The working-set peak is a
+/// process-lifetime high-water mark, not a peak attributable to one operation.
+#[must_use = "sampling only produces a snapshot; retain it for a measurement"]
 pub fn process_snapshot() -> ProcessSnapshot {
     let pid = Pid::from_u32(std::process::id());
     let mut system = System::new();
@@ -77,6 +82,31 @@ pub struct ProcessMeasurement {
 }
 
 impl ProcessMeasurement {
+    /// Retains both snapshots and computes nonnegative counter deltas.
+    ///
+    /// Missing counters and counter decreases produce `None`, not zero. Equal
+    /// available counters produce `Some(0)`. Sampling/background overhead remains
+    /// included; these boundaries do not isolate one operation's resource use.
+    ///
+    /// ```
+    /// use scratchpad::profile::process_metrics::{ProcessMeasurement, ProcessSnapshot};
+    ///
+    /// let measurement = ProcessMeasurement::between(
+    ///     ProcessSnapshot::default(),
+    ///     ProcessSnapshot::default(),
+    /// );
+    /// assert!(measurement.read_bytes.is_none());
+    /// ```
+    ///
+    /// Discarding the measurement loses the only computed result:
+    ///
+    /// ```compile_fail
+    /// #![deny(unused_must_use)]
+    /// use scratchpad::profile::process_metrics::{ProcessMeasurement, ProcessSnapshot};
+    ///
+    /// ProcessMeasurement::between(ProcessSnapshot::default(), ProcessSnapshot::default());
+    /// ```
+    #[must_use = "the returned measurement contains the counter deltas"]
     pub fn between(before: ProcessSnapshot, after: ProcessSnapshot) -> Self {
         let delta = |first: Option<u64>, last: Option<u64>| last?.checked_sub(first?);
         Self {
@@ -99,18 +129,37 @@ mod tests {
     use super::status_bytes;
     use super::{ProcessMeasurement, ProcessSnapshot};
     #[test]
-    fn unavailable_and_reset_counters_do_not_become_zero() {
-        let a = ProcessSnapshot {
-            read_bytes: Some(10),
+    fn counter_deltas_preserve_zero_and_abstain_for_missing_or_reset_samples() {
+        let snapshot = |value| ProcessSnapshot {
+            process_cpu_time_ms: value,
+            read_bytes: value,
+            write_bytes: value,
+            minor_page_faults: value,
+            major_page_faults: value,
             ..Default::default()
         };
-        let b = ProcessSnapshot {
-            read_bytes: Some(8),
-            ..Default::default()
-        };
-        let measured = ProcessMeasurement::between(a, b);
-        assert_eq!(measured.cpu_elapsed_ms, None);
-        assert_eq!(measured.read_bytes, None);
+        for (first, last, expected) in [
+            (None, None, None),
+            (Some(10), None, None),
+            (None, Some(12), None),
+            (Some(10), Some(8), None),
+            (Some(10), Some(10), Some(0)),
+            (Some(10), Some(13), Some(3)),
+            (Some(u64::MAX), Some(u64::MAX), Some(0)),
+            (Some(u64::MAX), Some(0), None),
+            (Some(0), Some(u64::MAX), Some(u64::MAX)),
+        ] {
+            let measured = ProcessMeasurement::between(snapshot(first), snapshot(last));
+            for actual in [
+                measured.cpu_elapsed_ms,
+                measured.read_bytes,
+                measured.write_bytes,
+                measured.minor_page_faults,
+                measured.major_page_faults,
+            ] {
+                assert_eq!(actual, expected, "counter samples: {first:?} -> {last:?}");
+            }
+        }
     }
     #[test]
     #[cfg(target_os = "linux")]
