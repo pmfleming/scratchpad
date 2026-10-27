@@ -9,14 +9,14 @@ use turso::params;
 
 use super::chunking::{MAX_BYTES as CHUNK_BYTES, chunks};
 
-struct Content {
+pub(super) struct Content {
     parts: Vec<(i64, Vec<u8>)>,
     observed: usize,
     length: usize,
     digest: Vec<u8>,
 }
 impl Content {
-    fn from_row(row: &turso::Row) -> io::Result<Self> {
+    pub(super) fn from_row(row: &turso::Row) -> io::Result<Self> {
         Ok(Self {
             parts: Vec::new(),
             observed: 0,
@@ -36,13 +36,13 @@ impl Content {
         self.parts.push((part, bytes));
         Ok(())
     }
-    fn append_row(&mut self, row: &turso::Row, part_column: usize) -> io::Result<()> {
+    pub(super) fn append_row(&mut self, row: &turso::Row, part_column: usize) -> io::Result<()> {
         self.append(
             row.get(part_column).map_err(error)?,
             row.get(part_column + 1).map_err(error)?,
         )
     }
-    fn finish(mut self) -> io::Result<String> {
+    pub(super) fn finish(mut self) -> io::Result<String> {
         // Sort only each buffer's small chunk list, not the entire SQL result.
         self.parts.sort_unstable_by_key(|(part, _)| *part);
         let mut bytes = Vec::new();

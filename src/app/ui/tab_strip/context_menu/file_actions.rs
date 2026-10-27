@@ -63,6 +63,66 @@ pub(super) fn render_file_actions(
         ui.close();
     }
     render_save_actions(ui, app, workspace_index, save_enabled);
+    if let Some(index) = workspace_index {
+        render_saved_versions(ui, app, index);
+    }
+}
+
+fn render_saved_versions(ui: &mut egui::Ui, app: &mut ScratchpadApp, index: usize) {
+    let Some(buffer) = app
+        .tab_manager
+        .tabs
+        .as_slice()
+        .get(index)
+        .map(|tab| tab.active_buffer())
+    else {
+        return;
+    };
+    let id = buffer.temp_id.clone();
+    let name = buffer.name.clone();
+    ui.menu_button("Saved Versions", |ui| {
+        let versions = match app.state.persistence.session_store.buffer_versions(&id) {
+            Ok(versions) => versions,
+            Err(error) => {
+                ui.label(format!("Could not read save points: {error}"));
+                return;
+            }
+        };
+        if versions.is_empty() {
+            ui.label("No save points yet");
+        }
+        for version in versions {
+            let label = format!(
+                "{} · {} bytes",
+                version.created_at_unix_seconds, version.bytes
+            );
+            if ui
+                .button(label)
+                .on_hover_text("Recover this save point into a new untitled tab")
+                .clicked()
+            {
+                match app
+                    .state
+                    .persistence
+                    .session_store
+                    .restore_buffer_version(version.id)
+                {
+                    Ok(text) => {
+                        let tab = crate::app::domain::WorkspaceTab::new(
+                            crate::app::domain::BufferState::new(
+                                format!("{name} (save point)"),
+                                text,
+                                None,
+                            ),
+                        );
+                        crate::app::app_state::workspace_controller::append_tab(app, tab);
+                    }
+                    Err(error) => app.state.status.report_session_restore_failed(error),
+                }
+                ui.close();
+            }
+        }
+    });
 }
 
 fn render_open_file_actions(

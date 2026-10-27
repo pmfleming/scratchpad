@@ -10,6 +10,17 @@ pub struct ClosedTabInfo {
 }
 
 impl SessionStore {
+    pub fn buffer_versions(&self, temp_id: &str) -> io::Result<Vec<super::BufferVersionInfo>> {
+        let id = temp_id.to_owned();
+        self.worker()?
+            .call(move |db| block_on(db.version_history(&id)))
+    }
+
+    pub fn restore_buffer_version(&self, version_id: i64) -> io::Result<String> {
+        self.worker()?
+            .call(move |db| block_on(db.read_version(version_id)))
+    }
+
     pub fn closed_tabs(&self) -> io::Result<Vec<ClosedTabInfo>> {
         self.worker()?.call(|db| {
             block_on(async {

@@ -28,6 +28,7 @@ struct Prepared {
     full_cleanup: bool,
     closed: Vec<super::closed::ClosedRow>,
     closed_changed: bool,
+    version_history: bool,
 }
 impl Prepared {
     fn new(
@@ -46,6 +47,7 @@ impl Prepared {
         };
         let mut prepared = Self {
             state: serde_json::to_vec(&manifest).map_err(invalid)?,
+            version_history: request.version_history,
             ..Self::default()
         };
         for tab in request.tabs {
@@ -280,9 +282,18 @@ impl Database {
                 self.write_history(id, entries).await?;
             }
         }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .min(i64::MAX as u64) as i64;
         for buffer in &prepared.snapshots {
             self.write_content(&buffer.temp_id, &buffer.snapshot, &mut removed_digests)
                 .await?;
+            if prepared.version_history {
+                self.checkpoint_version(&buffer.temp_id, now, &mut removed_digests)
+                    .await?;
+            }
         }
         profile.snapshot_write_ns = start.elapsed().as_nanos();
         let start = Instant::now();
@@ -355,21 +366,23 @@ impl Database {
             .iter()
             .filter(|id| !prepared.buffers.contains_key(*id) && !self.quarantined.contains_key(*id))
         {
+            self.collect_version_digests(id, &mut removed_digests)
+                .await?;
             self.execute_cached("DELETE FROM buffer_ids WHERE id=?", [id.as_str()])
                 .await?;
         }
         // Quarantined and shared parts remain GC roots even after live tabs close.
         if prepared.full_cleanup {
             self.execute_cached(
-                "DELETE FROM blobs WHERE digest NOT IN (SELECT digest FROM parts)",
+                "DELETE FROM blobs WHERE digest NOT IN (SELECT digest FROM parts UNION SELECT digest FROM version_parts)",
                 (),
             )
             .await?;
         } else {
             for digest in removed_digests {
                 self.execute_cached(
-                    "DELETE FROM blobs WHERE digest=? AND NOT EXISTS(SELECT 1 FROM parts WHERE digest=?)",
-                    params![digest.as_slice(), digest.as_slice()],
+                    "DELETE FROM blobs WHERE digest=? AND NOT EXISTS(SELECT 1 FROM parts WHERE digest=?) AND NOT EXISTS(SELECT 1 FROM version_parts WHERE digest=?)",
+                    params![digest.as_slice(), digest.as_slice(), digest.as_slice()],
                 ).await?;
             }
         }

@@ -15,6 +15,7 @@ pub(crate) struct SessionPersistRequest {
     pub(super) word_wrap: bool,
     pub(super) tabs: Vec<CapturedSessionTab>,
     pub(crate) closed_tabs: Vec<CapturedClosedTab>,
+    pub(super) version_history: bool,
 }
 
 #[derive(Clone)]
@@ -52,6 +53,7 @@ impl SessionPersistRequest {
             word_wrap,
             tabs: tabs.iter().map(CapturedSessionTab::capture).collect(),
             closed_tabs: Vec::new(),
+            version_history: true,
         }
     }
 
@@ -70,6 +72,7 @@ impl SessionPersistRequest {
             font_size,
             word_wrap,
             closed_tabs: Vec::new(),
+            version_history: true,
             tabs: tabs
                 .iter()
                 .enumerate()

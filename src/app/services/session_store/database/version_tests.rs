@@ -1,0 +1,101 @@
+use super::{
+    Database,
+    tests::{database, request, tab},
+    versions::VERSION_LIMIT,
+};
+use crate::app::domain::WorkspaceTab;
+use crate::app::services::session_store::SessionPersistRequest;
+use futures_lite::future::block_on;
+
+fn captured(tabs: &[WorkspaceTab]) -> SessionPersistRequest {
+    let mut request = request(tabs);
+    request.version_history = true;
+    request
+}
+
+#[test]
+fn versions_are_periodic_bounded_durable_and_gc_roots() {
+    block_on(async {
+        let (root, mut db) = database().await;
+        let mut tabs = vec![tab("initial")];
+        let id = tabs[0].active_buffer().temp_id.clone();
+        db.persist(captured(&tabs), 1).await.unwrap();
+        let initial = db.version_history(&id).await.unwrap()[0].id;
+        tabs[0]
+            .buffers
+            .buffer
+            .replace_text("before interval".into());
+        db.persist(captured(&tabs), 2).await.unwrap();
+        assert_eq!(db.version_history(&id).await.unwrap().len(), 1);
+        assert_eq!(db.read_version(initial).await.unwrap(), "initial");
+        drop(db);
+        let mut db = Database::open(root.path()).await.unwrap();
+        assert_eq!(db.read_version(initial).await.unwrap(), "initial");
+        for generation in 3..VERSION_LIMIT as u64 + 7 {
+            db.conn
+                .execute("UPDATE buffer_versions SET created_at=0", ())
+                .await
+                .unwrap();
+            tabs[0]
+                .buffers
+                .buffer
+                .replace_text(format!("version {generation}"));
+            db.persist(captured(&tabs), generation).await.unwrap();
+        }
+        assert_eq!(db.version_history(&id).await.unwrap().len(), VERSION_LIMIT);
+        assert!(db.read_version(initial).await.is_err());
+        assert_eq!(
+            db.integer("SELECT count(*) FROM blobs").await.unwrap(),
+            VERSION_LIMIT as i64
+        );
+        // Expiring the last live/closed buffer also expires its save points.
+        db.persist(captured(&[]), 100).await.unwrap();
+        assert!(db.version_history(&id).await.unwrap().is_empty());
+        assert_eq!(db.integer("SELECT count(*) FROM blobs").await.unwrap(), 0);
+    });
+}
+
+#[test]
+fn version_references_share_existing_chunks_and_failures_roll_back() {
+    block_on(async {
+        let (_root, mut db) = database().await;
+        let original = "x".repeat(768 * 1024);
+        let mut tabs = vec![tab(&original)];
+        let id = tabs[0].active_buffer().temp_id.clone();
+        db.persist(captured(&tabs), 1).await.unwrap();
+        let initial = db.version_history(&id).await.unwrap()[0].id;
+        let blobs = db.integer("SELECT count(*) FROM blobs").await.unwrap();
+        db.conn
+            .execute("UPDATE buffer_versions SET created_at=0", ())
+            .await
+            .unwrap();
+        tabs[0]
+            .buffers
+            .buffer
+            .replace_text(format!("{original}tail"));
+        db.conn.execute_batch("CREATE TRIGGER fail_version BEFORE INSERT ON version_parts BEGIN SELECT RAISE(ABORT, 'injected'); END;").await.unwrap();
+        assert!(db.persist(captured(&tabs), 2).await.is_err());
+        assert_eq!(db.version_history(&id).await.unwrap().len(), 1);
+        assert_eq!(db.read_version(initial).await.unwrap(), original);
+        db.conn
+            .execute("DROP TRIGGER fail_version", ())
+            .await
+            .unwrap();
+        db.persist(captured(&tabs), 3).await.unwrap();
+        assert_eq!(db.version_history(&id).await.unwrap().len(), 2);
+        assert_eq!(
+            db.integer("SELECT count(*) FROM blobs").await.unwrap(),
+            blobs + 1
+        );
+        let latest = db.version_history(&id).await.unwrap()[0].id;
+        assert_eq!(
+            db.read_version(latest).await.unwrap(),
+            format!("{original}tail")
+        );
+        db.conn
+            .execute("UPDATE blobs SET body=x'00'", ())
+            .await
+            .unwrap();
+        assert!(db.read_version(latest).await.is_err());
+    });
+}

@@ -20,6 +20,9 @@ mod read;
 mod retention_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod version_tests;
+pub(super) mod versions;
 mod worker;
 
 use super::model::SessionManifest;
@@ -125,7 +128,7 @@ impl Database {
     async fn initialize(&mut self) -> io::Result<()> {
         let version = self.integer("PRAGMA user_version").await?;
         let application = self.integer("PRAGMA application_id").await?;
-        if application == APPLICATION_ID && version == 4 {
+        if application == APPLICATION_ID && version == 5 {
             return Ok(());
         }
         if version != 0
@@ -140,9 +143,10 @@ impl Database {
             ));
         }
         self.create_schema(&format!(
-            "{SCHEMA} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=4;",
+            "{SCHEMA} {} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=5;",
             quarantine::SCHEMA,
-            closed::SCHEMA
+            closed::SCHEMA,
+            versions::SCHEMA
         ))
         .await
     }
