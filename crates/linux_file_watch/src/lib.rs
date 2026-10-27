@@ -1,3 +1,9 @@
+//! Asynchronous, nonrecursive directory invalidation hints backed by inotify.
+//!
+//! Notifications tell the caller to recheck disk state; they are not a complete
+//! file-operation log and do not contain file contents. See [`FileWatchService`]
+//! for startup, root replacement and shutdown semantics.
+
 use rustix::fd::AsFd;
 use rustix::fs::inotify::{self, CreateFlags, ReadFlags, Reader, WatchFlags};
 use rustix::io::Errno;
@@ -7,11 +13,26 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
+/// A disk-state invalidation hint or a watcher failure.
 #[derive(Clone, Debug)]
 pub enum FileWatchEvent {
-    DirectoryChanged(PathBuf),
+    /// Recheck files in this watched directory, not just a particular filename.
+    ///
+    /// Events may be repeated or coalesced. Queue overflow also invalidates all
+    /// currently watched directories, so this is not proof of a specific edit.
+    DirectoryChanged(
+        /// The watched directory whose disk state should be rechecked.
+        PathBuf,
+    ),
+    /// A watch could not be installed, or the worker could not start or continue.
+    ///
+    /// Missing-root failures are retried, with repeated errors suppressed until
+    /// recovery or removal from the desired roots. Worker failures are not
+    /// automatically restarted by this service instance.
     WatchError {
+        /// The failed root, or `None` for a worker-wide startup/read failure.
         path: Option<PathBuf>,
+        /// A human-readable error, not a stable machine-readable error code.
         message: String,
     },
 }
@@ -21,6 +42,31 @@ enum WatchCommand {
     Stop,
 }
 
+/// Owns a background worker that watches the desired directory roots.
+///
+/// Root updates and notifications are asynchronous. Callers must verify disk
+/// state themselves and must not infer successful startup or complete event
+/// delivery from an empty event queue. Dropping the service requests shutdown
+/// without joining the worker; queued events are then discarded.
+///
+/// ```
+/// use linux_file_watch::{FileWatchEvent, FileWatchService};
+/// use std::collections::BTreeSet;
+///
+/// let mut watcher = FileWatchService::new();
+/// watcher.set_watched_directories(BTreeSet::new());
+/// for event in watcher.drain_events() {
+///     match event {
+///         FileWatchEvent::DirectoryChanged(directory) => {
+///             // Schedule disk-state checks for files in this directory.
+///             let _ = directory;
+///         }
+///         FileWatchEvent::WatchError { path, message } => {
+///             eprintln!("{path:?}: {message}");
+///         }
+///     }
+/// }
+/// ```
 pub struct FileWatchService {
     command_tx: Sender<WatchCommand>,
     event_rx: Receiver<FileWatchEvent>,
@@ -28,6 +74,11 @@ pub struct FileWatchService {
 }
 
 impl FileWatchService {
+    /// Starts an initially rootless watcher without waiting for worker startup.
+    ///
+    /// Thread-creation and inotify-startup failures are delivered as
+    /// [`FileWatchEvent::WatchError`] with no path through [`Self::drain_events`],
+    /// rather than returned from this constructor.
     pub fn new() -> Self {
         let (command_tx, command_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
@@ -49,6 +100,11 @@ impl FileWatchService {
         }
     }
 
+    /// Replaces, rather than appends to, the desired nonrecursive watch roots.
+    ///
+    /// An identical set is a no-op. Returning does not acknowledge installation:
+    /// the worker applies the update asynchronously and retries missing roots.
+    /// Events already queued for removed roots may still be drained afterward.
     pub fn set_watched_directories(&mut self, dirs: BTreeSet<PathBuf>) {
         if self.watched_dirs != dirs {
             let _ = self
@@ -58,6 +114,10 @@ impl FileWatchService {
         }
     }
 
+    /// Removes and returns queued events without waiting for a new event.
+    ///
+    /// An empty result is not a worker-health or disk-freshness guarantee. Future
+    /// changes and asynchronous installation errors may arrive on a later call.
     pub fn drain_events(&mut self) -> Vec<FileWatchEvent> {
         self.event_rx.try_iter().collect()
     }
