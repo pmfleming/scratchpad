@@ -110,6 +110,9 @@ jobs:
       - name: Test Linux file watcher
         run: cargo test --manifest-path crates/linux_file_watch/Cargo.toml
 
+      - name: Test isolated icon font integration
+        run: cargo test --manifest-path crates/egui_phosphor/Cargo.toml
+
   security:
     name: Dependency audit
     runs-on: ubuntu-latest

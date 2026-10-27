@@ -91,10 +91,61 @@ Checks: baseline and upgraded `cargo test --all-features`, upgraded
 
 Checks: all-feature tests and strict all-target/all-feature Clippy passed.
 
+## Stage 5: final validation and packaging
+
+Passed after the implementation stages:
+
+- `cargo fmt --all -- --check`
+- `cargo check --all-targets --all-features --locked`
+- `cargo hack check --feature-powerset`
+- `cargo test --all-features --locked` (509 library tests passed, plus binary
+  and integration tests; installed-font test is opt-in and passed separately)
+- `cargo clippy --all-targets --all-features --locked -- -D warnings`
+- Standalone `crates/egui_phosphor` tests (both passed)
+- `nix build` (initial dependency build exceeded the command timeout; retry
+  completed successfully)
+- One coherent egui 0.37.0 dependency family in `cargo tree -i egui`
+
+The final Nix package passed isolated native Wayland hidden/show/hide/show/close
+runs with the default renderer unset (WGPU) and the Glow override. A separate
+WGPU restore run reused only its synthetic session. All exited successfully;
+all 20 observed compositor pings received pongs, with zero scheduler ticks in
+each settled two-second CPU sample. A WGPU probe launched with the X11 backend
+selected also completed successfully at 75 visible frames/second. This is only
+an X11 probe smoke check, not complete X11 application coverage.
+
+Three alternating release `frame_metrics` runs compared the baseline commit
+against the final candidate. Same host, bundled fonts and workloads; separate
+synthetic state, no background build running:
+
+| CPU-only scenario | Baseline median mean (ms) | Candidate median mean (ms) | Both median p95 (ms) |
+| --- | ---: | ---: | ---: |
+| Steady repaint | 0.208 | 0.210 | 0.5 |
+| 1 MiB wheel scroll | 0.176 | 0.173 | 0.5 |
+| 4 MiB wheel scroll | 0.172 | 0.169 | 0.5 |
+
+The p95 histogram resolution is coarse; these short runs show no material
+regression in these workloads, not improved GPU presentation or a full memory/
+startup-latency assessment. Raw metrics are local under
+`target/egui037-{baseline,candidate}/metrics-*.json`.
+
+`cargo audit` completed with **seven allowed warnings**, not a warning-free
+report: unmaintained `ttf-parser`, `zbus_names`, `zvariant`, `zvariant_derive`;
+unsound `event-listener` (RUSTSEC-2026-0221); yanked `chacha20`, `clipboard-win`.
+The baseline lockfile reports the same warning categories/crates and additionally
+a blocking `webbrowser` advisory (RUSTSEC-2026-0257), no longer present in the
+upgraded lockfile. The remaining warnings require separate dependency follow-up;
+this upgrade does not suppress or claim to fix them.
+
+The installed/running user application was not replaced or restarted. The built
+package is available through `result/bin/scratchpad`; a launch while an older
+primary is running will forward to that primary, not upgrade it in place.
+
 ## Limits and follow-up validation
 
-- No Windows, X11, multi-monitor, suspend/resume, or native IME validation has
-  yet been performed for this upgrade. CI builds do not replace those checks.
+- No Windows, multi-monitor, suspend/resume, or native IME validation has yet
+  been performed for this upgrade. X11 has probe-only coverage. CI builds do
+  not replace these interactive checks.
 - The unused upstream immediate-viewport Glow path still lacks the normal
   path's pre-present notification. Scratchpad does not create immediate child
   viewports. Validate pacing before adding that feature; do not assume the

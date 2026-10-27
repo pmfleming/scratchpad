@@ -7,6 +7,10 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 ### Changed
 
 - Added Linux lint and runtime-test coverage, including the native file watcher.
+- Updated to upstream `eframe`/`egui` 0.37.0 and removed the local Wayland presentation fork, retaining WGPU by default and the Linux Glow fallback.
+- Enabled native system-font fallback for missing scripts and color emoji while preserving bundled editor and icon fonts.
+- Added accessible names and roles for custom controls, settings, search fields and dialogs.
+- Added settled PRIMARY-selection publishing and middle-click paste targeting in the custom editor on X11/Wayland; known trackpad/momentum input no longer receives extra wheel acceleration.
 
 ### Fixed
 
