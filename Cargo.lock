@@ -4158,6 +4158,7 @@ dependencies = [
  "criterion",
  "eframe",
  "egui-phosphor",
+ "egui_system_font_provider",
  "encoding_rs",
  "fastcdc",
  "fontdb",

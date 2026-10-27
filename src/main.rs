@@ -60,6 +60,9 @@ fn main() -> eframe::Result<()> {
             platform::capabilities(startup_settings.platform.profile),
         ),
         renderer: renderer_from_env(),
+        // Keep bundled editor/icon fonts authoritative, discovering missing
+        // scripts and color emoji from installed fonts on demand.
+        system_font_fallback: true,
         persist_window: false,
         persistence_path: Some(session_store.root().join("eframe-state.ron")),
         ..Default::default()

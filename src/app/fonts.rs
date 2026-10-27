@@ -229,6 +229,9 @@ pub fn apply_editor_fonts(
         .families
         .insert(egui::FontFamily::Monospace, editor_candidates.clone());
     fonts.families.insert(editor_family, editor_candidates);
+    // Eframe's 0.37 system provider is registered once on the Context. Updating
+    // configured families preserves that provider; do not register another here.
+    // Explicit families win, including control symbols and the isolated icon font.
     ctx.set_fonts(fonts);
 
     match warning {
@@ -362,6 +365,9 @@ fn system_font_database() -> &'static fontdb::Database {
         db
     })
 }
+
+#[cfg(test)]
+mod fallback_tests;
 
 #[cfg(test)]
 mod tests {

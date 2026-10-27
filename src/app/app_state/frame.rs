@@ -301,6 +301,9 @@ fn clear_editor_layout_caches(app: &mut ScratchpadApp) {
     for tab in app.tab_manager.tabs.as_mut_slice() {
         for view in tab.layout.views_mut() {
             view.layout_cache.clear();
+            // Display rows and their heights belong to the old font metrics too.
+            view.latest_display_snapshot = None;
+            view.latest_display_snapshot_revision = None;
         }
     }
 }

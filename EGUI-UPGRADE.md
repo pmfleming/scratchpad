@@ -38,6 +38,22 @@ settings and sessions were not modified. Local raw results are under
 Checks: baseline and upgraded `cargo test --all-features`, upgraded
 `cargo check --all-targets --all-features`, and release app/probe builds passed.
 
+## Stage 2: font fallback
+
+- Explicitly enabled native system fallback in `NativeOptions`, while preserving
+  all bundled text/control fonts and the isolated Phosphor icon family.
+- Font switches now invalidate cached display snapshots as well as galleys;
+  old row heights must not survive a family change.
+- Added deterministic first-pass coverage tests for all editor presets and a
+  fake discovering provider that proves configured fonts take precedence and
+  providers survive `set_fonts` across font switches.
+- Added an opt-in installed-font test for Arabic, Indic, emoji modifiers/ZWJ
+  and actual colored atlas pixels. It passed on this Linux host with Noto Color
+  Emoji. It stays ignored by default so ordinary CI is host-font independent:
+  `cargo test --lib installed_fonts_render_missing_scripts_and_color_emoji -- --ignored`.
+- No global fallback reordering or font asset removal: existing text metrics
+  and control/icon precedence are preserved.
+
 ## Limits and follow-up validation
 
 - No Windows, X11, multi-monitor, suspend/resume, or native IME validation has
