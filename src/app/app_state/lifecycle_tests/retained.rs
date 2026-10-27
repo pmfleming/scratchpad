@@ -6,6 +6,24 @@ use crate::app::{
 };
 
 #[test]
+fn restoring_recovery_text_is_one_undoable_edit_and_never_writes_disk() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("note.txt");
+    std::fs::write(&path, "on disk").unwrap();
+    let mut app = test_app(root.path());
+    let tab = WorkspaceTab::new(BufferState::new("note.txt".into(), "current".into(), Some(path.clone())));
+    let id = tab.active_buffer().id;
+    app.tab_manager.set_tabs(vec![tab], 0);
+    assert!(crate::app::app_state::workspace::mutation::restore_recovery_text(&mut app, id, "older state"));
+    let buffer = app.tab_manager.active_tab_mut().unwrap().active_buffer_mut();
+    assert_eq!(buffer.text(), "older state");
+    assert!(buffer.is_dirty);
+    buffer.document_mut().undo_last_operation().unwrap();
+    assert_eq!(buffer.text(), "current");
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "on disk");
+}
+
+#[test]
 fn retained_workspace_reopens_with_undo_and_recovers_versions_without_overwriting_files() {
     let root = tempfile::tempdir().unwrap();
     let file = root.path().join("note.txt");

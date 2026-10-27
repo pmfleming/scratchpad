@@ -1,6 +1,8 @@
 mod list;
 mod model;
 mod persistence;
+mod recovery;
+mod preview;
 
 use self::model::{
     TextHistoryAction, TextHistoryFileGroup, TextHistoryRow, file_groups_from_entries,
@@ -36,6 +38,7 @@ const HISTORY_CLEAR_SHORTCUT: &str = "CTRL+SHIFT+DELETE: Clear history";
 enum HistoryTab {
     Timeline,
     ByFile,
+    Recovery,
 }
 
 struct TextHistoryWindowInputs<'a> {
@@ -93,6 +96,9 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
                         clear_requested: &mut clear_requested,
                     },
                 );
+                if active_tab == HistoryTab::Recovery {
+                    recovery::render(ui, app);
+                }
             });
         },
     );
@@ -110,13 +116,9 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
         let _ = workspace_mutation::clear_text_history(app);
     }
     if let Some(action) = action {
-        let _ = workspace_mutation::apply_text_history_to_entry(
-            app,
-            action.buffer_id,
-            action.entry_id,
-            next_follow_focus,
-        );
+        preview::preview_edit(ctx, app, action);
     }
+    preview::show(ctx, app);
 }
 
 fn render_text_history_window(
@@ -147,6 +149,7 @@ fn render_text_history_window(
     match inputs.active_tab {
         HistoryTab::Timeline => list::render_timeline(ui, inputs.timeline_rows, state.action),
         HistoryTab::ByFile => list::render_by_file(ui, inputs.file_groups, state.action),
+        HistoryTab::Recovery => {},
     }
 }
 
@@ -189,6 +192,9 @@ fn render_controls(
             if control_icon_button(ui, id_source, icon, tooltip, active == tab, true).clicked() {
                 *next = tab;
             }
+        }
+        if ui.selectable_label(active == HistoryTab::Recovery, "Recovery points").clicked() {
+            *next = HistoryTab::Recovery;
         }
         if control_icon_button(
             ui,

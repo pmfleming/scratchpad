@@ -37,6 +37,26 @@ fn text_history_revisions(app: &ScratchpadApp) -> Vec<(BufferId, u64)> {
         .collect()
 }
 
+pub(crate) fn restore_recovery_text(app: &mut ScratchpadApp, buffer_id: BufferId, text: &str) -> bool {
+    let Some((index, view_id)) = app.tab_manager.tabs.as_slice().iter().enumerate().find_map(|(index, tab)| {
+        tab.layout.views.iter().find(|view| view.buffer_id == buffer_id).map(|view| (index, view.id))
+    }) else {
+        app.state.status.set_error_status_in_domain(StatusDomain::History, "The source buffer is no longer open.");
+        return false;
+    };
+    app.tab_manager.set_active_tab_index_clamped(index);
+    let tab = &mut app.tab_manager.tabs.as_mut_slice()[index];
+    tab.activate_view(view_id);
+    let document = tab.active_buffer_mut().document_mut();
+    let length = document.snapshot().len_chars();
+    if document.replace_char_ranges_with_undo(&[(0..length, text.to_owned())], Default::default(), Default::default()).is_err() {
+        return false;
+    }
+    finalize_active_buffer_text_mutation(app, index);
+    workspace_accessors::request_focus_for_active_view(app);
+    true
+}
+
 pub(crate) fn clear_text_history(app: &mut ScratchpadApp) -> bool {
     let mut cleared = false;
     for tab in app.tab_manager.tabs.as_mut_slice() {

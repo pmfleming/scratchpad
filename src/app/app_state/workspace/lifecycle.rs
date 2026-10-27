@@ -180,6 +180,29 @@ pub(crate) fn reopen_archived_tab(app: &mut ScratchpadApp, token: &str) {
     }
 }
 
+pub(crate) fn recover_archived_copy(app: &mut ScratchpadApp, token: &str) {
+    if app.startup_restore_pending() || app.state.persistence.session_restore_failed { return; }
+    match app.state.persistence.session_store.restore_closed_tab(token) {
+        Ok(mut tab) => {
+            if tab.buffers().any(|buffer| app.tab_manager.tabs.as_slice().iter()
+                .flat_map(WorkspaceTab::buffers).any(|live| live.temp_id == buffer.temp_id)) { return; }
+            for buffer in tab.buffers_mut() {
+                buffer.path = None;
+                buffer.path_key = None;
+                buffer.disk_state = None;
+                buffer.disk_content_digest = None;
+                buffer.is_dirty = true;
+                buffer.name = format!("{} (archived)", buffer.name);
+            }
+            create_workspace_tab(app, tab);
+            if let Err(error) = crate::app::services::session_manager::persist_session_now(app) {
+                app.state.status.report_session_save_failed(error);
+            }
+        }
+        Err(error) => app.state.status.report_session_restore_failed(error),
+    }
+}
+
 /// Returns true when an archive handled (or safely rejected) this open request.
 pub(crate) fn try_reopen_archived_path(app: &mut ScratchpadApp, path: &std::path::Path) -> bool {
     if !app.state.app_settings.history.recovery.reopen_archives

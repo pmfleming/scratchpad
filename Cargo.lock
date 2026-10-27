@@ -4181,6 +4181,7 @@ version = "0.4.2"
 dependencies = [
  "blake3",
  "chardetng",
+ "chrono",
  "criterion",
  "eframe",
  "egui-phosphor",

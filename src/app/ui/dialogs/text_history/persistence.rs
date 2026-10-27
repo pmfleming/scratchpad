@@ -35,6 +35,7 @@ fn tab_from_persisted(value: u8) -> Option<HistoryTab> {
     match value {
         0 => Some(HistoryTab::Timeline),
         1 => Some(HistoryTab::ByFile),
+        2 => Some(HistoryTab::Recovery),
         _ => None,
     }
 }
@@ -43,5 +44,6 @@ fn tab_to_persisted(tab: HistoryTab) -> u8 {
     match tab {
         HistoryTab::Timeline => 0,
         HistoryTab::ByFile => 1,
+        HistoryTab::Recovery => 2,
     }
 }

@@ -9,6 +9,7 @@ pub mod editor_content;
 pub mod scrolling;
 pub mod search_replace;
 pub mod settings;
+pub(crate) mod recovery;
 pub mod status_bar;
 pub mod tab_drag;
 pub mod tab_overflow;

@@ -37,6 +37,9 @@ pub(super) fn render_file_actions(
         crate::app::app_state::workspace::lifecycle::reopen_last_closed_tab(app);
         ui.close();
     }
+    egui::containers::menu::SubMenuButton::new("Recently Closed")
+        .config(egui::containers::menu::MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside))
+        .ui(ui, |ui| render_recently_closed_files(ui, app, slot_index));
     if app.state.app_settings.recent_files_enabled() {
         render_open_file_actions(ui, app, slot_index, open_here_enabled);
     } else if menu_button(
@@ -64,47 +67,16 @@ pub(super) fn render_file_actions(
     }
     render_save_actions(ui, app, workspace_index, save_enabled);
     if let Some(index) = workspace_index {
-        render_saved_versions(ui, app, index);
+        render_history_action(ui, app, index);
     }
 }
 
-fn render_saved_versions(ui: &mut egui::Ui, app: &mut ScratchpadApp, index: usize) {
-    ui.menu_button("Saved Versions", |ui| {
-        let Some(tab) = app.tab_manager.tabs.as_slice().get(index) else {
-            return;
-        };
-        let versions = match app
-            .state
-            .persistence
-            .session_store
-            .buffer_versions(&tab.active_buffer().temp_id)
-        {
-            Ok(versions) => versions,
-            Err(error) => {
-                ui.label(format!("Could not read save points: {error}"));
-                return;
-            }
-        };
-        if versions.is_empty() {
-            ui.label("No save points yet");
-        }
-        for version in versions {
-            let label = format!(
-                "{} · {} bytes",
-                version.created_at_unix_seconds, version.bytes
-            );
-            if ui
-                .button(label)
-                .on_hover_text("Recover this save point into a new untitled tab")
-                .clicked()
-            {
-                crate::app::app_state::workspace_controller::recover_buffer_version(
-                    app, index, version.id,
-                );
-                ui.close();
-            }
-        }
-    });
+fn render_history_action(ui: &mut egui::Ui, app: &mut ScratchpadApp, index: usize) {
+    if menu_button(ui, TAB_CONTEXT_MENU_WIDTH, "History…", Some(egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE), true) {
+        crate::app::commands::handle_command(app, AppCommand::Workspace(WorkspaceCommand::ActivateTab { index }));
+        crate::app::commands::handle_command(app, AppCommand::Dialog(crate::app::commands::DialogCommand::OpenTextHistory));
+        ui.close();
+    }
 }
 
 fn render_open_file_actions(
@@ -131,15 +103,14 @@ fn render_open_file_actions(
     });
 }
 
-fn render_open_file_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp, slot_index: usize) {
+fn render_open_file_submenu(ui: &mut egui::Ui, app: &mut ScratchpadApp, _slot_index: usize) {
     submenu_button_sized(
         ui,
         "tab_context.open_file_caret",
         OPEN_FILE_SUBMENU_WIDTH,
         |ui| {
             render_open_file_disposition_buttons(ui, app);
-            ui.separator();
-            render_recently_closed_files(ui, app, slot_index);
+
         },
     );
 }
@@ -180,18 +151,41 @@ fn render_open_file_disposition_buttons(ui: &mut egui::Ui, app: &mut ScratchpadA
 }
 
 fn render_recently_closed_files(ui: &mut egui::Ui, app: &mut ScratchpadApp, slot_index: usize) {
-    let paths = app
-        .state
-        .recently_closed_files
-        .iter()
-        .take(crate::app::app_state::RECENTLY_CLOSED_FILE_LIMIT)
-        .cloned()
-        .collect::<Vec<_>>();
-
-    if paths.is_empty() {
-        let _ = menu_button(ui, OPEN_FILE_SUBMENU_WIDTH, "No Recent Files", None, false);
-        return;
-    }
+    let store = app.state.persistence.session_store.clone();
+    let root = store.root().to_owned();
+    let archives = match crate::app::ui::recovery::query(ui, ("closed", root), move || store.closed_tabs()) {
+        Some(Ok(archives)) => archives,
+        Some(Err(error)) => { ui.label(format!("Could not read archives: {error}")); Vec::new() }
+        None => { ui.label("Loading archives…"); Vec::new() }
+    };
+    egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+        for archive in &archives {
+            ui.horizontal(|ui| {
+                let label = format!("{} · Recoverable tab{}", archive.name, if archive.has_unsaved_changes { " · unsaved" } else { "" });
+                if ui.button(label).on_hover_text(crate::app::ui::recovery::timestamp(archive.closed_at_unix_seconds)).clicked() {
+                    crate::app::app_state::workspace::lifecycle::reopen_archived_tab(app, &archive.token);
+                    ui.close();
+                }
+                if ui.button("Archived text").on_hover_text("Recover the archived text and undo history into untitled buffers, regardless of disk changes").clicked() {
+                    crate::app::app_state::workspace::lifecycle::recover_archived_copy(app, &archive.token);
+                    ui.close();
+                }
+                let mut pinned = app.state.app_settings.history.recovery.pinned_archives.contains(&archive.token);
+                if ui.checkbox(&mut pinned, "Pin").changed() {
+                    let mut policy = app.state.app_settings.history.recovery.clone();
+                    policy.pinned_archives.retain(|token| token != &archive.token);
+                    if pinned { policy.pinned_archives.push(archive.token.clone()); }
+                    crate::app::app_state::settings_controller::set_recovery_settings(app, policy);
+                }
+            });
+        }
+    });
+    let paths = app.state.recently_closed_files.iter()
+        .filter(|_| app.state.app_settings.recent_files_enabled())
+        .filter(|path| !archives.iter().any(|archive| archive.paths.iter().any(|saved| crate::app::paths_match(saved, path))))
+        .cloned().collect::<Vec<_>>();
+    if paths.is_empty() && archives.is_empty() { ui.label("No recently closed files"); }
+    if !paths.is_empty() { ui.separator(); ui.label("Files on disk"); }
 
     for path in paths {
         if recent_file_button(
