@@ -366,6 +366,8 @@ impl Default for UiSettings {
 pub struct HistorySettings {
     #[serde(default, flatten)]
     pub budget: TextHistoryBudget,
+    #[serde(default)]
+    pub recovery: super::RecoverySettings,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

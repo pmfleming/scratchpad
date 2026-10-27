@@ -13,6 +13,7 @@ pub(super) fn render_settings_categories(ui: &mut egui::Ui, app: &mut Scratchpad
         render_editing_category,
         render_opening_category,
         render_tab_position_category,
+        super::recovery::render_recovery_category,
         render_advanced_category,
     ] {
         ui.add_space(SettingsUi::LAYOUT.section_gap);
@@ -30,8 +31,6 @@ fn render_advanced_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
         app,
     );
     ui.add_space(SettingsUi::LAYOUT.card_gap);
-    text_history_budget_card(ui, app);
-    ui.add_space(SettingsUi::LAYOUT.card_gap);
     action_card(
         ui,
         egui_phosphor::regular::ARROW_SQUARE_UP,
@@ -43,7 +42,7 @@ fn render_advanced_category(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     );
 }
 
-fn text_history_budget_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
+pub(super) fn text_history_budget_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     expandable_card(
         ui,
         "advanced.text_history_budget",
@@ -111,7 +110,7 @@ fn text_history_budget_card(ui: &mut egui::Ui, app: &mut ScratchpadApp) {
     );
 }
 
-fn byte_budget_row(
+pub(super) fn byte_budget_row(
     ui: &mut egui::Ui,
     label: &str,
     description: &str,
@@ -127,7 +126,7 @@ fn byte_budget_row(
             ui,
             format!("slider.{label}"),
             82.0,
-            format!("{mb} MB"),
+            format!("{mb} MiB"),
             |ui, slider_width| {
                 ui.add_sized(
                     egui::vec2(slider_width, 0.0),

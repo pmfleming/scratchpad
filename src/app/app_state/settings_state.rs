@@ -321,6 +321,7 @@ pub(super) fn apply_settings(app: &mut ScratchpadApp, settings: AppSettings) {
         crate::app::shortcut_keymap::invalid_shortcut_overrides(&settings.shortcuts);
     sync_stock_editor_palette_with_theme_mode(&mut settings);
     settings.history.budget = settings.history.budget.sanitized();
+    settings.history.recovery = settings.history.recovery.sanitized();
     settings
         .workspace
         .recently_closed_files

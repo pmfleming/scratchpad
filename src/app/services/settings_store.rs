@@ -5,6 +5,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 mod model;
+mod recovery;
+pub use recovery::RecoverySettings;
 
 pub use model::{
     AppSettings, AppThemeMode, DEFAULT_AUTO_HIDE_TAB_LIST, DEFAULT_EDITOR_BACKGROUND_COLOR,

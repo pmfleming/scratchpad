@@ -11,6 +11,7 @@ use eframe::egui;
 mod appearance;
 mod opening;
 mod sections;
+mod recovery;
 mod style;
 mod text_formatting;
 mod widgets;

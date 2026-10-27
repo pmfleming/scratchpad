@@ -7,6 +7,8 @@ mod parity_tests;
 mod recovery_export;
 mod restore;
 mod types;
+mod usage;
+pub use usage::StorageUsage;
 mod validation;
 
 use crate::app::diagnostics;

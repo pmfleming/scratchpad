@@ -28,6 +28,7 @@ mod tests;
 mod version_tests;
 pub(super) mod versions;
 mod worker;
+pub(super) mod usage;
 
 use super::model::SessionManifest;
 use super::types::SessionPersistProfile;
