@@ -148,8 +148,8 @@ impl Database {
                 continue;
             }
             let bytes = serde_json::to_vec(entry).map_err(invalid)?;
-            self.execute_cached("INSERT INTO history VALUES(?, ?, ?, ?) ON CONFLICT(temp_id, seq) DO UPDATE SET global_seq=excluded.global_seq, entry=excluded.entry",
-                params![id, entry.id as i64, entry.global_seq as i64, bytes]).await?;
+            self.execute_cached("INSERT INTO history(temp_id, seq, global_seq, entry, bytes) VALUES(?, ?, ?, ?, ?) ON CONFLICT(temp_id, seq) DO UPDATE SET global_seq=excluded.global_seq, entry=excluded.entry, bytes=excluded.bytes",
+                params![id, entry.id as i64, entry.global_seq as i64, bytes.as_slice(), bytes.len() as i64]).await?;
         }
         Ok(())
     }

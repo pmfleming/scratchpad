@@ -24,7 +24,11 @@ mod retention;
 #[cfg(test)]
 mod retention_policy_tests;
 #[cfg(test)]
+mod retention_regression_tests;
+#[cfg(test)]
 mod retention_tests;
+#[cfg(test)]
+mod size_tests;
 #[cfg(test)]
 mod tests;
 pub(super) mod usage;
@@ -50,11 +54,13 @@ CREATE TABLE tabs(position INTEGER PRIMARY KEY, payload BLOB NOT NULL) STRICT;
 CREATE TABLE buffer_ids(id TEXT PRIMARY KEY) STRICT;
 CREATE TABLE history(temp_id TEXT NOT NULL REFERENCES buffer_ids(id) ON DELETE CASCADE,
                      seq INTEGER NOT NULL, global_seq INTEGER NOT NULL CHECK(global_seq>0),
-                     entry BLOB NOT NULL, PRIMARY KEY(temp_id, seq)) STRICT;
+                     entry BLOB NOT NULL, bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0), PRIMARY KEY(temp_id, seq)) STRICT;
 CREATE INDEX history_global_seq ON history(global_seq);
+CREATE INDEX history_sizes ON history(temp_id, bytes);
 CREATE TABLE snapshots(id TEXT PRIMARY KEY REFERENCES buffer_ids(id) ON DELETE CASCADE,
                        bytes INTEGER NOT NULL, digest BLOB NOT NULL) STRICT;
-CREATE TABLE blobs(digest BLOB PRIMARY KEY, body BLOB NOT NULL) STRICT;
+CREATE TABLE blobs(digest BLOB PRIMARY KEY, body BLOB NOT NULL, bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0)) STRICT;
+CREATE INDEX blob_sizes ON blobs(bytes, digest);
 CREATE TABLE parts(temp_id TEXT NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
                    part INTEGER NOT NULL, digest BLOB NOT NULL REFERENCES blobs(digest),
                    PRIMARY KEY(temp_id, part)) STRICT;
@@ -140,11 +146,30 @@ impl Database {
     async fn initialize(&mut self) -> io::Result<()> {
         let version = self.integer("PRAGMA user_version").await?;
         let application = self.integer("PRAGMA application_id").await?;
-        if application == APPLICATION_ID && version == 7 {
+        if application == APPLICATION_ID && version == 8 {
             return Ok(());
         }
-        if application == APPLICATION_ID && version == 6 {
-            return self.create_schema("ALTER TABLE buffer_versions ADD COLUMN source_token TEXT; CREATE UNIQUE INDEX version_source ON buffer_versions(temp_id, source_token); PRAGMA user_version=7;").await;
+        if application == APPLICATION_ID && matches!(version, 6 | 7) {
+            let undo_tokens = if version == 6 {
+                "ALTER TABLE buffer_versions ADD COLUMN source_token TEXT; CREATE UNIQUE INDEX version_source ON buffer_versions(temp_id, source_token);"
+            } else {
+                ""
+            };
+            // One transactional payload scan during upgrade, never during usage
+            // polling or retention. Covering indexes keep even overflow pages
+            // out of the accounting read path on the pinned Turso engine.
+            return self
+                .create_schema(&format!(
+                    "{undo_tokens}
+                ALTER TABLE history ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0);
+                ALTER TABLE blobs ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0 CHECK(bytes>=0);
+                UPDATE history SET bytes=length(entry);
+                UPDATE blobs SET bytes=length(body);
+                CREATE INDEX history_sizes ON history(temp_id, bytes);
+                CREATE INDEX blob_sizes ON blobs(bytes, digest);
+                PRAGMA user_version=8;"
+                ))
+                .await;
         }
         if version != 0
             || application != 0
@@ -158,7 +183,7 @@ impl Database {
             ));
         }
         self.create_schema(&format!(
-            "{SCHEMA} {} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=7;",
+            "{SCHEMA} {} {} {} PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version=8;",
             quarantine::SCHEMA,
             closed::SCHEMA,
             versions::SCHEMA

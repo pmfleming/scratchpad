@@ -25,7 +25,7 @@ impl Database {
         let mut usage = StoredUsage {
             session_metadata: self.integer("SELECT coalesce(sum(length(payload)),0) FROM tabs").await? as u64
                 + self.integer("SELECT coalesce(sum(length(payload)),0) FROM session_state").await? as u64,
-            undo: self.integer("SELECT coalesce(sum(length(entry)),0) FROM history").await? as u64,
+            undo: self.integer("SELECT coalesce(sum(bytes),0) FROM history INDEXED BY history_sizes").await? as u64,
             archive_metadata: self.integer("SELECT coalesce(sum(length(payload)),0) FROM closed_tabs").await? as u64,
             snapshot_metadata: self.integer("SELECT coalesce(sum(length(temp_id)+length(digest)+24),0) FROM buffer_versions").await? as u64,
             reusable_pages: self.integer("PRAGMA freelist_count").await? as u64
@@ -36,18 +36,18 @@ impl Database {
         usage.archives = archives.len();
         usage.recovery_points = self.integer("SELECT count(*) FROM buffer_versions").await? as u64;
         for archive in archives {
-            let tab: super::super::model::SessionTab = super::decode(&archive.payload)?;
+            let tab = archive.tab;
             usage.archive_referenced_bytes += archive.payload.len() as u64;
             for buffer in tab.buffers {
                 let bytes = self.query_collect(
-                    "SELECT coalesce((SELECT bytes FROM snapshots WHERE id=?1),0) + coalesce((SELECT sum(length(entry)) FROM history WHERE temp_id=?1),0) + coalesce((SELECT sum(bytes) FROM buffer_versions WHERE temp_id=?1),0)",
+                    "SELECT coalesce((SELECT bytes FROM snapshots WHERE id=?1),0) + coalesce((SELECT sum(bytes) FROM history INDEXED BY history_sizes WHERE temp_id=?1),0) + coalesce((SELECT sum(bytes) FROM buffer_versions WHERE temp_id=?1),0)",
                     [buffer.temp_id.as_str()], |row| row.get::<i64>(0).map_err(error),
                 ).await?;
                 usage.archive_referenced_bytes += bytes[0] as u64;
             }
         }
         let mut rows = self.conn.query(
-            "SELECT length(body), EXISTS(SELECT 1 FROM parts WHERE parts.digest=blobs.digest), EXISTS(SELECT 1 FROM version_parts WHERE version_parts.digest=blobs.digest) FROM blobs", ()
+            "SELECT bytes, EXISTS(SELECT 1 FROM parts WHERE parts.digest=blobs.digest), EXISTS(SELECT 1 FROM version_parts WHERE version_parts.digest=blobs.digest) FROM blobs INDEXED BY blob_sizes", ()
         ).await.map_err(error)?;
         while let Some(row) = rows.next().await.map_err(error)? {
             let bytes = row.get::<i64>(0).map_err(error)? as u64;

@@ -338,7 +338,7 @@ fn strict_types_and_foreign_keys_are_enforced_by_turso() {
         assert_eq!(db.integer("PRAGMA foreign_keys").await.unwrap(), 1);
         assert!(
             db.conn
-                .execute("INSERT INTO history VALUES('missing', 1, 1, x'00')", ())
+                .execute("INSERT INTO history(temp_id, seq, global_seq, entry) VALUES('missing', 1, 1, x'00')", ())
                 .await
                 .is_err()
         );
@@ -350,7 +350,10 @@ fn strict_types_and_foreign_keys_are_enforced_by_turso() {
         );
         assert!(
             db.conn
-                .execute("INSERT INTO blobs VALUES(x'00', 'not a blob')", ())
+                .execute(
+                    "INSERT INTO blobs(digest, body) VALUES(x'00', 'not a blob')",
+                    ()
+                )
                 .await
                 .is_err()
         );
@@ -359,7 +362,10 @@ fn strict_types_and_foreign_keys_are_enforced_by_turso() {
             .await
             .unwrap();
         db.conn
-            .execute("INSERT INTO history VALUES('clean', 1, 1, x'00')", ())
+            .execute(
+                "INSERT INTO history(temp_id, seq, global_seq, entry) VALUES('clean', 1, 1, x'00')",
+                (),
+            )
             .await
             .unwrap();
         db.conn.execute("DELETE FROM buffer_ids", ()).await.unwrap();

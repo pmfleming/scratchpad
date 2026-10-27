@@ -81,8 +81,8 @@ impl Database {
                 .closed_rows()
                 .await?
                 .into_iter()
-                .map(|row| decode::<SessionTab>(&row.payload))
-                .collect::<io::Result<Vec<_>>>()?;
+                .map(|row| row.tab)
+                .collect::<Vec<_>>();
             &archived
         };
         let (tab, buffer) = tabs

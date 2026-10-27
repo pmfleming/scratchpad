@@ -154,10 +154,18 @@ fn schema_six_migrates_without_discarding_existing_versions() {
         let mut capture = request(&tabs);
         capture.version_history = true;
         db.persist(capture, 1).await.unwrap();
-        db.conn.execute_batch("DROP INDEX version_source; ALTER TABLE buffer_versions DROP COLUMN source_token; PRAGMA user_version=6;").await.unwrap();
+        db.conn
+            .execute_batch(
+                "DROP INDEX version_source; ALTER TABLE buffer_versions DROP COLUMN source_token;
+            DROP INDEX history_sizes; DROP INDEX blob_sizes;
+            ALTER TABLE history DROP COLUMN bytes; ALTER TABLE blobs DROP COLUMN bytes;
+            PRAGMA user_version=6;",
+            )
+            .await
+            .unwrap();
         drop(db);
         let db = Database::open(root.path()).await.unwrap();
-        assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 7);
+        assert_eq!(db.integer("PRAGMA user_version").await.unwrap(), 8);
         let point = db
             .version_history(&tabs[0].active_buffer().temp_id)
             .await

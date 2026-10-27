@@ -9,12 +9,34 @@ use turso::params;
 
 pub(super) const SCHEMA: &str = "CREATE TABLE closed_tabs(sequence INTEGER PRIMARY KEY, token TEXT NOT NULL UNIQUE, closed_at INTEGER NOT NULL, payload BLOB NOT NULL) STRICT;";
 
-#[derive(PartialEq, Eq)]
 pub(in crate::app::services::session_store) struct ClosedRow {
     pub token: String,
     pub closed_at: i64,
     pub payload: Vec<u8>,
+    pub tab: SessionTab,
 }
+
+impl ClosedRow {
+    pub(super) fn new(token: String, closed_at: i64, payload: Vec<u8>) -> io::Result<Self> {
+        let tab: SessionTab = decode(&payload)?;
+        super::super::validation::validate_tab(&tab)?;
+        Ok(Self {
+            token,
+            closed_at,
+            payload,
+            tab,
+        })
+    }
+}
+
+impl PartialEq for ClosedRow {
+    fn eq(&self, other: &Self) -> bool {
+        self.token == other.token
+            && self.closed_at == other.closed_at
+            && self.payload == other.payload
+    }
+}
+impl Eq for ClosedRow {}
 
 impl Database {
     pub(in crate::app::services::session_store) async fn closed_rows(
@@ -24,21 +46,18 @@ impl Database {
             "SELECT token, closed_at, payload FROM closed_tabs ORDER BY sequence",
             (),
             |row| {
-                let payload: Vec<u8> = row.get(2).map_err(error)?;
-                let tab: SessionTab = decode(&payload)?;
-                super::super::validation::validate_tab(&tab)?;
-                Ok(ClosedRow {
-                    token: row.get(0).map_err(error)?,
-                    closed_at: row.get(1).map_err(error)?,
-                    payload,
-                })
+                ClosedRow::new(
+                    row.get(0).map_err(error)?,
+                    row.get(1).map_err(error)?,
+                    row.get(2).map_err(error)?,
+                )
             },
         )
         .await
     }
 
     pub(super) async fn prepare_closed(
-        &self,
+        &mut self,
         request: &mut SessionPersistRequest,
     ) -> io::Result<Vec<ClosedRow>> {
         let old = self.closed_rows().await?;
@@ -55,7 +74,7 @@ impl Database {
             .collect();
         let mut retained = Vec::new();
         for row in &old {
-            let tab: SessionTab = decode(&row.payload)?;
+            let tab = &row.tab;
             if !pending.contains(row.token.as_str())
                 && !tab
                     .buffers
@@ -66,7 +85,7 @@ impl Database {
                     token: row.token.clone(),
                     closed_at: row.closed_at,
                     tab: CapturedSessionTab {
-                        session_tab: tab,
+                        session_tab: tab.clone(),
                         buffer_snapshots: Vec::new(),
                         recovery_points: Vec::new(),
                         preserve_existing: true,
@@ -128,7 +147,7 @@ impl Database {
             .into_iter()
             .find(|row| row.token == token)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "closed tab expired"))?;
-        let mut tab: SessionTab = decode(&row.payload)?;
+        let mut tab = row.tab;
         let contents = match self.read_tab_contents(std::slice::from_ref(&tab)).await {
             Ok(contents) => contents,
             Err(cause) => {

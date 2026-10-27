@@ -1,4 +1,4 @@
-use super::{Restorer, SessionStore, WorkspaceTab, model::SessionTab};
+use super::{Restorer, SessionStore, WorkspaceTab};
 use futures_lite::future::block_on;
 use std::io;
 
@@ -31,8 +31,7 @@ impl SessionStore {
                     .into_iter()
                     .rev()
                     .map(|row| {
-                        let tab: SessionTab =
-                            serde_json::from_slice(&row.payload).map_err(io::Error::other)?;
+                        let tab = row.tab;
                         Ok(ClosedTabInfo {
                             token: row.token,
                             closed_at_unix_seconds: row.closed_at,

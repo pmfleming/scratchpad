@@ -4,7 +4,7 @@ use super::{
 use crate::app::domain::PersistedHistoryEntry;
 use crate::app::services::session_store::{
     capture::{CapturedSessionBuffer, CapturedSessionTab, SessionPersistRequest},
-    model::SessionManifest,
+    model::{SessionManifest, SessionTab},
     validation,
 };
 use std::collections::{HashMap, HashSet};
@@ -58,21 +58,22 @@ impl Prepared {
             ..Self::default()
         };
         for tab in request.tabs {
-            let payload = prepared.push_tab(tab)?;
+            let (payload, _) = prepared.push_tab(tab)?;
             prepared.tabs.push(payload);
         }
         for closed in request.closed_tabs {
-            let payload = prepared.push_tab(closed.tab)?;
+            let (payload, tab) = prepared.push_tab(closed.tab)?;
             prepared.closed.push(super::closed::ClosedRow {
                 token: closed.token,
                 closed_at: closed.closed_at,
                 payload,
+                tab,
             });
         }
         prepared.closed_changed = prepared.closed != old_closed;
         Ok(prepared)
     }
-    fn push_tab(&mut self, mut tab: CapturedSessionTab) -> io::Result<Vec<u8>> {
+    fn push_tab(&mut self, mut tab: CapturedSessionTab) -> io::Result<(Vec<u8>, SessionTab)> {
         validation::validate_tab(&tab.session_tab)?;
         for buffer in &mut tab.session_tab.buffers {
             let entries = std::mem::take(&mut buffer.text_history);
@@ -108,7 +109,7 @@ impl Prepared {
                 .retain = true;
             self.snapshots.push(snapshot);
         }
-        Ok(payload)
+        Ok((payload, tab.session_tab))
     }
     fn retains(&self, id: &str) -> bool {
         self.buffers.get(id).is_some_and(|buffer| buffer.retain)
@@ -208,6 +209,22 @@ impl Database {
                 self.history_cache.insert(id.clone(), entries);
             }
         }
+        // Captures can race their UI acknowledgement (or come from synchronous
+        // callers). Already committed undo tokens are not a reason to transact.
+        let mut new_points = Vec::new();
+        for point in prepared.recovery_points.drain(..) {
+            let existing = self
+                .query_collect(
+                    "SELECT id FROM buffer_versions WHERE temp_id=? AND source_token=?",
+                    params![point.temp_id.as_str(), format!("undo-{}", point.sequence)],
+                    |row| row.get::<i64>(0).map_err(error),
+                )
+                .await?;
+            if existing.is_empty() && !self.quarantined.contains_key(&point.temp_id) {
+                new_points.push(point);
+            }
+        }
+        prepared.recovery_points = new_points;
         prepared.snapshots.retain(|buffer| {
             self.revisions.get(&buffer.temp_id) != Some(&buffer.snapshot.revision_key())
         });

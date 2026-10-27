@@ -339,6 +339,11 @@ impl BufferState {
         self.refresh.pending_text_history_event = None;
     }
 
+    /// Fork a restored workspace without consuming its historical archive.
+    pub(crate) fn fork_recovery_identity(&mut self) {
+        self.temp_id = next_temp_id();
+    }
+
     pub fn set_path(&mut self, path: Option<PathBuf>) {
         self.path_key = path.as_deref().map(CanonicalPathKey::from_path);
         self.path = path;

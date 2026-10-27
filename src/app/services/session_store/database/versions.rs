@@ -47,8 +47,8 @@ impl Database {
             hash_part(&mut digest, chunk.meta);
             let hash = chunk.meta.digest.as_bytes().to_vec();
             if let Some(data) = chunk.data {
-                self.execute_cached("INSERT INTO blobs(digest, body) SELECT ?, ? WHERE NOT EXISTS(SELECT 1 FROM blobs WHERE digest=?)",
-                    params![hash.as_slice(), data, hash.as_slice()]).await?;
+                self.execute_cached("INSERT INTO blobs(digest, body, bytes) SELECT ?, ?, ? WHERE NOT EXISTS(SELECT 1 FROM blobs WHERE digest=?)",
+                    params![hash.as_slice(), data.as_slice(), data.len() as i64, hash.as_slice()]).await?;
             }
             parts.push(hash);
         }

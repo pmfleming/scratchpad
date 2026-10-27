@@ -1,13 +1,10 @@
-//! Retention decisions are prepared without writes; compaction and GC commit
-//! together with the live session. Pins and quarantine are always recovery roots.
-use super::{Database, closed::ClosedRow, decode, error};
+//! Compaction and GC commit together with the live session. Damage discovered
+//! during preparation is quarantined durably first. Pins and quarantine are roots.
+use super::{Database, closed::ClosedRow, error};
 use crate::app::{
     domain::TextDocument,
     services::{
-        session_store::{
-            capture::{CapturedClosedTab, CapturedRecoveryPoint},
-            model::SessionTab,
-        },
+        session_store::capture::{CapturedClosedTab, CapturedRecoveryPoint},
         settings_store::RecoverySettings,
     },
 };
@@ -22,27 +19,36 @@ fn now_seconds() -> i64 {
 }
 
 impl Database {
+    fn archive_protected(&self, archive: &CapturedClosedTab, policy: &RecoverySettings) -> bool {
+        policy.pinned_archives.contains(&archive.token)
+            || archive
+                .tab
+                .session_tab
+                .buffers
+                .iter()
+                .any(|buffer| self.quarantined.contains_key(&buffer.temp_id))
+    }
+
     pub(super) async fn apply_archive_policy(
-        &self,
+        &mut self,
         archives: &mut Vec<CapturedClosedTab>,
         policy: &RecoverySettings,
     ) -> io::Result<Vec<i64>> {
         let cutoff = now_seconds().saturating_sub(i64::from(policy.archive_retention_days) * 86400);
-        let protected = |archive: &CapturedClosedTab| {
-            policy.pinned_archives.contains(&archive.token)
-                || archive
-                    .tab
-                    .session_tab
-                    .buffers
-                    .iter()
-                    .any(|buffer| self.quarantined.contains_key(&buffer.temp_id))
-        };
         archives.retain(|archive| {
-            protected(archive) || policy.archive_retention_days == 0 || archive.closed_at >= cutoff
+            self.archive_protected(archive, policy)
+                || policy.archive_retention_days == 0
+                || archive.closed_at >= cutoff
         });
         let mut costs = Vec::new();
         for archive in archives.iter() {
-            costs.push(self.archive_cost(archive).await?);
+            // Protected roots have a separate, unbounded allowance. They must
+            // not evict every ordinary archive merely by exceeding this budget.
+            costs.push(if self.archive_protected(archive, policy) {
+                0
+            } else {
+                self.archive_cost(archive).await?
+            });
         }
         let mut total: u64 = costs.iter().sum();
         // Prefer reducing granularity over deleting whole archives.
@@ -50,10 +56,24 @@ impl Database {
             if total <= policy.archive_byte_budget {
                 break;
             }
-            if protected(archive) {
+            if self.archive_protected(archive, policy) {
                 continue;
             }
-            let saved = self.compact_archived_undo(archive).await?;
+            let saved = match self.compact_archived_undo(archive).await {
+                Ok(saved) => saved,
+                Err(cause) if super::quarantine::damaged_id(&cause).is_some() => {
+                    self.protect_damaged(&cause, std::slice::from_ref(&archive.tab.session_tab))
+                        .await?;
+                    // A later buffer can fail after earlier points were prepared.
+                    // Keep the entire archive unchanged, including its undo rows.
+                    archive.tab.recovery_points.clear();
+                    archive.tab.discard_history = false;
+                    total = total.saturating_sub(costs[index]);
+                    costs[index] = 0;
+                    continue;
+                }
+                Err(cause) => return Err(cause),
+            };
             costs[index] = costs[index].saturating_sub(saved);
             total = total.saturating_sub(saved);
         }
@@ -62,7 +82,7 @@ impl Database {
             if total <= policy.archive_byte_budget {
                 break;
             }
-            if protected(archive) {
+            if self.archive_protected(archive, policy) {
                 continue;
             }
             for buffer in &archive.tab.session_tab.buffers {
@@ -88,7 +108,7 @@ impl Database {
         archives.retain(|archive| {
             let cost = costs[index];
             index += 1;
-            if total > policy.archive_byte_budget && !protected(archive) {
+            if total > policy.archive_byte_budget && !self.archive_protected(archive, policy) {
                 total = total.saturating_sub(cost);
                 false
             } else {
@@ -104,7 +124,7 @@ impl Database {
             .len() as u64;
         for buffer in &archive.tab.session_tab.buffers {
             let rows = self.query_collect(
-                "SELECT coalesce((SELECT bytes FROM snapshots WHERE id=?1),0), coalesce((SELECT sum(length(entry)) FROM history WHERE temp_id=?1),0), coalesce((SELECT sum(bytes) FROM buffer_versions WHERE temp_id=?1),0)",
+                "SELECT coalesce((SELECT bytes FROM snapshots WHERE id=?1),0), coalesce((SELECT sum(bytes) FROM history INDEXED BY history_sizes WHERE temp_id=?1),0), coalesce((SELECT sum(bytes) FROM buffer_versions WHERE temp_id=?1),0)",
                 [buffer.temp_id.as_str()], |row| Ok((row.get::<i64>(0).map_err(error)? as u64, row.get::<i64>(1).map_err(error)? as u64, row.get::<i64>(2).map_err(error)? as u64)),
             ).await?;
             let (current, history, versions) = rows[0];
@@ -169,8 +189,13 @@ impl Database {
             .iter()
             .filter(|archive| policy.pinned_archives.contains(&archive.token))
         {
-            let tab: SessionTab = decode(&archive.payload)?;
-            protected.extend(tab.buffers.into_iter().map(|buffer| buffer.temp_id));
+            protected.extend(
+                archive
+                    .tab
+                    .buffers
+                    .iter()
+                    .map(|buffer| buffer.temp_id.clone()),
+            );
         }
         // Interior periodic points go first; retain boundary/endpoint coverage
         // longer. Only when necessary do oldest endpoints expire as well.
@@ -178,7 +203,11 @@ impl Database {
             "SELECT id,temp_id,bytes FROM buffer_versions v ORDER BY (id=(SELECT min(id) FROM buffer_versions WHERE temp_id=v.temp_id) OR id=(SELECT max(id) FROM buffer_versions WHERE temp_id=v.temp_id)), source_token IS NOT NULL, created_at, id",
             (), |row| Ok((row.get::<i64>(0).map_err(error)?, row.get::<String>(1).map_err(error)?, row.get::<i64>(2).map_err(error)? as u64)),
         ).await?;
-        let mut total: u64 = points.iter().map(|(_, _, bytes)| bytes + 96).sum();
+        let mut total: u64 = points
+            .iter()
+            .filter(|(_, buffer, _)| !protected.contains(buffer))
+            .map(|(_, _, bytes)| bytes + 96)
+            .sum();
         for (id, buffer, bytes) in points {
             if total <= policy.snapshot_byte_budget {
                 break;

@@ -6,13 +6,13 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Added
 
-- Retained the latest 32 closed workspace tabs, including unsaved text and undo/redo history, with reopening after restart.
+- Retained closed workspace tabs under configurable age and byte budgets, including unsaved text and undo/redo history, with reopening after restart.
 - Added bounded per-buffer save points sharing stored text chunks; recover them into new tabs from the Saved Versions menu.
 
 ### Changed
 
 - Reduced session-worker history caches to per-row fingerprints and reused unchanged chunk hashes through bounded byte-range edit tracking.
-- Advanced session storage to schema 6. Older schemas are preserved but not migrated; a fresh state directory is required to use the new storage format.
+- Advanced session storage to schema 8 with transactional upgrades from schemas 6 and 7. Stored byte counts and covering indexes avoid scanning undo/text payloads during retention accounting and disk-usage refreshes. Older schemas are preserved but not migrated.
 - Made warm session saves insert only new buffer IDs and collect only affected recovery blobs, with conservative rescans after restart, rollback, or detected damage. Positional tab-row rewrites and full capture/preparation costs remain.
 - Added Linux lint and runtime-test coverage, including the native file watcher.
 - Updated to upstream `eframe`/`egui` 0.37.0 and removed the local Wayland presentation fork, retaining WGPU by default and the Linux Glow fallback.
@@ -22,6 +22,10 @@ All notable user-visible changes to Scratchpad will be documented here. The form
 
 ### Fixed
 
+- Quarantined damaged closed-tab content encountered during undo compaction without blocking healthy session saves.
+- Cached and acknowledged computed undo recovery points so idle saves no longer repeatedly reconstruct history and write unchanged recovery tokens.
+- Excluded pinned and quarantined data from retention-budget totals so it cannot evict all unprotected archives and recovery points.
+- Restored changed clean files from disk consistently in mixed split tabs while keeping the original archive available after subsequent saves.
 - Protected saved sessions from placeholder/partial-workspace saves during startup restore and from fallback saves after restore failure, including shutdown and drop.
 - Allowed shutdown when session writes are permanently blocked, while keeping retryable save failures open without per-frame last-tab exit retries.
 - Kept piece-tree line indexes revision-local so snapshots cannot corrupt line lookup after history compaction.

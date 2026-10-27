@@ -64,6 +64,7 @@ pub(super) struct TextDocumentHistoryState {
     pub(super) pending_generation_before: Option<u32>,
     pub(super) pending_checkpoint_before: Option<Arc<PieceTreeLite>>,
     pub(super) pending_recovery: Option<(u64, DocumentSnapshot)>,
+    recovery_cache: recovery::RecoveryCache,
 }
 
 impl Default for TextDocumentHistoryState {
@@ -81,6 +82,7 @@ impl Default for TextDocumentHistoryState {
             pending_generation_before: None,
             pending_checkpoint_before: None,
             pending_recovery: None,
+            recovery_cache: recovery::RecoveryCache::default(),
         }
     }
 }

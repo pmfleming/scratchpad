@@ -14,8 +14,10 @@ budget (default 512 MiB) and age limit (default 90 days; zero disables age expir
 There is no fixed count limit. Under budget pressure, older detailed history is
 compacted into snapshot-only recovery, then interior snapshots are thinned, then
 oldest eligible archives expire. Pinned archives and quarantined data are exempt
-and may exceed the budgets. Reopening transfers history into the live tab and ends
-that archive's pin. Oversized unpinned items may expire immediately.
+and may exceed the budgets. Their bytes are excluded from the totals used to
+prune unprotected archives and recovery points, so a large pin cannot evict every
+new archive or a live buffer's undo-boundary points. Reopening transfers history
+into the live tab and ends that archive's pin. Oversized unpinned items may expire immediately.
 
 The close transaction commits the archive and remaining workspace before removing
 the tab from the UI. A retryable failure keeps the live tab open. A permanently
@@ -32,7 +34,11 @@ Reopening compares a saved decoded-text fingerprint with current disk text. An
 unchanged file restores archived text/layout/undo, including unsaved edits. A changed
 clean file opens from disk and leaves its old archive available. Conflicting unsaved
 text and missing files recover as untitled buffers; opening the changed disk file
-alongside them is configurable. Nothing writes original files automatically.
+alongside them is configurable. This is decided per buffer, including mixed
+splits: changed clean buffers use disk text with no archived undo attached. If any
+clean file changed, the restored workspace receives new recovery identities so
+saving its other buffers cannot consume the original archive. Nothing writes
+original files automatically.
 
 Startup conflicts likewise separate recovered text/history from current disk text
 without a recurring choice dialog. Clean buffers with undo history now retain a
@@ -43,11 +49,13 @@ Cold file shells with no stored snapshot still depend on their source file; load
 previews cannot archive unavailable bytes. Closing individual split views is not
 workspace-tab retention.
 
-The current database schema is **7**. Schema 6 upgrades transactionally by adding
-idempotent undo-boundary snapshot tokens; existing snapshots and archives remain.
-Schemas older than 6 and future schemas are rejected intact, without automatic
-reset. Back up the whole database/WAL before upgrading; older binaries cannot read
-schema 7. Original text files are unrelated.
+The current database schema is **8**. Schemas 6 and 7 upgrade transactionally,
+backfilling stored byte counts for undo entries and text blobs and adding covering
+accounting indexes. Schema 6 also gains idempotent undo-boundary snapshot tokens.
+The upgrade scans payloads once; existing snapshots and archives remain. A failed
+backfill rolls back the schema change. Schemas older than 6 and future schemas are
+rejected intact, without automatic reset. Back up the whole database/WAL before
+upgrading; older binaries cannot read schema 8. Original text files are unrelated.
 The logical open-session export does not include closed archives; retain the
 whole database/WAL using the documented safe backup procedure for full recovery.
 
@@ -60,8 +68,12 @@ The first persisted recovery snapshot creates a recovery point. Subsequent chang
 snapshots create another at most once every **five minutes**. Before undo pruning,
 the oldest reachable earlier state is sampled independently of that interval; one
 pending boundary per buffer is kept until a successful save acknowledges it.
-Persisted undo payload stripping also captures an earlier boundary. Snapshot writes
-and persisted history removal commit atomically; failed transactions are retryable.
+Persisted undo payload stripping also captures an earlier boundary. Its computed
+snapshot is cached by oldest entry, history revision, content generation and
+payload budget. Successful acknowledgement retires it until that key changes;
+already committed tokens do not trigger another write transaction while an
+acknowledgement is in flight. Snapshot writes and persisted history removal commit
+atomically; failed transactions are retryable.
 Pre-existing non-replayable edits cannot be reconstructed retroactively.
 
 There is no fixed per-buffer snapshot count. A global logical snapshot budget
@@ -92,6 +104,14 @@ separate settings files and combined file lengths; on Unix it also reports actua
 allocated file blocks. Portable/nested roots are deduplicated; original documents,
 application binaries and symlink targets outside these roots are excluded.
 
+Usage and archive-cost queries read covering byte-count indexes, not the undo or
+text blobs themselves. Closed metadata is decoded once per preparation pass and
+reused for policy decisions. Preparation still walks archive metadata and size
+indexes; this is not a claim of constant-time saves. Actual over-budget undo
+compaction necessarily reads archived content. Damage encountered there is
+quarantined durably before continuing healthy saves; if quarantine itself fails,
+the store remains blocked rather than overwriting recovery data.
+
 The stored-payload breakdown reports undo, session/archive metadata, exclusive
 current/archived text, exclusive historical text, and text shared by both. Shared
 text is counted once. Snapshot metadata is explicitly marked as an estimate;
@@ -103,6 +123,12 @@ shrink to exactly the configured amount.
 
 Tests cover interval throttling, restart, bounded pruning, shared chunks, rollback
 during point creation, corruption detection, and final-buffer garbage collection.
+Byte-count migration tests cover backfill, rollback and covering query plans.
+The opt-in `profile_payload_lengths_against_covering_byte_counts` test compares
+both accounting queries on 128 blobs totalling 64 MiB. On this development host,
+three debug-build scans took 462–482 ms using `sum(length(body))`, versus
+0.75–1.33 ms using the covering byte-count index. This is an isolated accounting
+microbenchmark, not an end-to-end save or UI-latency claim.
 
 ## Worker history memory (item 3)
 

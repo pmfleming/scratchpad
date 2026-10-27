@@ -534,6 +534,43 @@ fn compaction_keeps_retained_history_replayable() {
 }
 
 #[test]
+fn computed_recovery_boundary_is_cached_and_acknowledged_until_history_changes() {
+    let mut document = TextDocument::new("base".into());
+    document.set_history_budget(TextHistoryBudget {
+        per_file_entry_limit: 4096,
+        per_file_byte_budget: 64 << 20,
+        aggregate_byte_budget: 64 << 20,
+        persisted_payload_budget: 1 << 20,
+        derived_from_memory: false,
+    });
+    insert_edit(&mut document, 0, &"x".repeat((1 << 20) + 1));
+    let (token, first) = document.recovery_snapshot().unwrap();
+    assert_eq!(first.extract_text(), "base");
+    let (_, repeated) = document.recovery_snapshot().unwrap();
+    assert!(
+        first.revision_key() == repeated.revision_key(),
+        "must reuse the reconstructed tree"
+    );
+    document.acknowledge_recovery_snapshot(token + 1);
+    assert!(document.recovery_snapshot().is_some());
+    document.acknowledge_recovery_snapshot(token);
+    assert!(document.recovery_snapshot().is_none());
+    assert!(document.recovery_snapshot().is_none());
+    insert_edit(&mut document, 0, "new");
+    assert!(
+        document.recovery_snapshot().is_some(),
+        "history edits invalidate the cache"
+    );
+    let mut budget = document.history.budget;
+    budget.persisted_payload_budget = 64 << 20;
+    document.set_history_budget(budget);
+    assert!(
+        document.recovery_snapshot().is_none(),
+        "budget changes invalidate the cache"
+    );
+}
+
+#[test]
 fn cached_history_byte_usage_tracks_history_mutations() {
     let mut document = empty_document!();
     assert_history_byte_usage_consistent(&document);
