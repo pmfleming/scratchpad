@@ -110,9 +110,15 @@ pub(crate) fn show_encoding_window(ctx: &egui::Context, app: &mut ScratchpadApp)
     let state = EncodingDialogState::from_app(app);
     let mut close_requested = false;
 
-    show_centered_callout(ctx, "encoding_overlay_v1", ENCODING_DIALOG_SIZE, |ui| {
-        render_encoding_dialog(ui, app, &state, &mut close_requested);
-    });
+    show_centered_callout(
+        ctx,
+        "encoding_overlay_v1",
+        "Text encoding",
+        ENCODING_DIALOG_SIZE,
+        |ui| {
+            render_encoding_dialog(ui, app, &state, &mut close_requested);
+        },
+    );
 
     if close_requested {
         frame::close_encoding_dialog(app);
@@ -439,7 +445,9 @@ fn render_encoding_combo(ui: &mut egui::Ui, selected_encoding: &mut String) {
                         option.label,
                     );
                 }
-            });
+            })
+            .response
+            .accessible_name("Text encoding");
     });
 }
 

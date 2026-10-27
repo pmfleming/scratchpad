@@ -76,6 +76,8 @@ pub fn phosphor_button_with_icon_color(
         Sense::click(),
         "phosphor_button",
     );
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tooltip));
     let rect = response.rect;
     paint_phosphor_button(PhosphorButtonPaint {
         ui,
@@ -106,6 +108,8 @@ pub fn phosphor_button_with_hover_icon_color(
         Sense::click(),
         "phosphor_button",
     );
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tooltip));
     let rect = response.rect;
     let hovered = response.hovered();
     let drag_in_progress = transition::suppress_interactive_chrome(ui.ctx());

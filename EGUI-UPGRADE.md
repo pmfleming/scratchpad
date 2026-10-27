@@ -69,6 +69,28 @@ Checks: baseline and upgraded `cargo test --all-features`, upgraded
   behavior still need interactive platform acceptance; synthetic tests do not
   establish clipboard ownership behavior on every compositor.
 
+## Stage 4: accessibility and diagnostics
+
+- Custom icon buttons, tabs, tab actions, switches, radio controls and expandable
+  headers now publish roles/names/state. Tab chrome derives child identities
+  from the caller's surface key rather than screen coordinates.
+- Search/replace and rename fields have explicit names. Settings use `name_inputs`
+  to name otherwise-unnamed controls from their row/card labels. Floating dialogs
+  have human-readable names and Dialog roles; icon-only callout actions are named.
+- The custom editor exposes its name and multiline input role without copying
+  the entire document into the accessibility tree. Full text-range navigation,
+  SetValue and ReplaceSelectedText support is explicitly deferred; it needs a
+  bounded, undo-aware custom-editor accessibility design.
+- Added egui_kittest as a development dependency (no GPU/video feature required).
+  Tests cover settings input names and AccessKit switch activation, search
+  typing, named dialog closure/removal, and tab-primitive identity under reorder.
+  Missing-glyph/accessibility checks stay enabled with deterministic bundled fonts.
+- Removed the application's unconditional pass-ID-warning override. Egui's
+  normal default remains unchanged; focused tests enable the warning and fail
+  on captured egui warnings, with thread-local capture to isolate parallel tests.
+
+Checks: all-feature tests and strict all-target/all-feature Clippy passed.
+
 ## Limits and follow-up validation
 
 - No Windows, X11, multi-monitor, suspend/resume, or native IME validation has

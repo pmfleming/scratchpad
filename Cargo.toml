@@ -49,6 +49,7 @@ linux_file_watch = { path = "crates/linux_file_watch" }
 rustix = { version = "1.1.4", features = ["fs"] }
 
 [dev-dependencies]
+egui_kittest = "=0.37.0"
 egui_system_font_provider = "=0.37.0"
 criterion = "0.8.2"
 rand = "0.10.1"

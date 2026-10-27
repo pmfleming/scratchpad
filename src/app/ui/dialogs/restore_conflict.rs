@@ -23,6 +23,7 @@ pub(crate) fn show_startup_restore_conflict_modal(ctx: &egui::Context, app: &mut
     show_centered_callout(
         ctx,
         "startup_restore_conflict_overlay_v1",
+        "Session restore conflict",
         RESTORE_CONFLICT_DIALOG_SIZE,
         |ui| {
             choice = render_restore_conflict_body(ui, &conflict, &mut close_requested);

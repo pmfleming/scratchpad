@@ -206,7 +206,7 @@ pub(super) fn card_header_with_trailing_width(
                 ui.set_width(trailing_width);
                 ui.set_max_width(trailing_width);
                 ui.set_min_height(SettingsUi::LAYOUT.card_min_height);
-                add_trailing(ui);
+                ui.name_inputs(title, add_trailing);
             },
         );
     })

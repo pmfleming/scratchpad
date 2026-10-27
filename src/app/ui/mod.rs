@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod accessibility_tests;
+
 pub mod autoscroll;
 pub(crate) mod callout;
 pub mod dialogs;

@@ -77,6 +77,11 @@ pub(super) fn expandable_card(
             );
         });
 
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::Role::DisclosureTriangle, ui.is_enabled(), title)
+        });
+        ui.ctx()
+            .accesskit_node_builder(response.id, |node| node.set_expanded(is_open));
         if response.clicked() {
             ui.data_mut(|data| data.insert_persisted(id, !is_open));
         }
@@ -478,7 +483,9 @@ pub(super) fn inner_select_row(
             |ui| {
                 ui.set_width(control_width);
                 ui.set_max_width(control_width);
-                with_settings_control_lane(control_rect, || add_control(ui));
+                ui.name_inputs(label, |ui| {
+                    with_settings_control_lane(control_rect, || add_control(ui));
+                });
             },
         );
     });
@@ -573,6 +580,9 @@ pub(super) fn radio_option_row(ui: &mut egui::Ui, value: &mut bool, label: &str)
         text_primary(ui),
     );
 
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::Role::RadioButton, ui.is_enabled(), *value, label)
+    });
     record_settings_control_box(format!("radio.{label}"), response.rect);
     response
 }

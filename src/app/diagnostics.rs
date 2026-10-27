@@ -450,6 +450,17 @@ fn panic_message(info: &panic::PanicHookInfo<'_>) -> String {
     format!("thread={thread}; location={location}; message={payload}")
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_EGUI_WARNINGS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(test)]
+pub(crate) fn take_test_egui_warnings() -> Vec<String> {
+    install_logger();
+    TEST_EGUI_WARNINGS.with(|warnings| std::mem::take(&mut *warnings.borrow_mut()))
+}
+
 struct AppDiagnosticsLogger;
 
 impl Log for AppDiagnosticsLogger {
@@ -468,6 +479,10 @@ impl Log for AppDiagnosticsLogger {
             return;
         }
         let message = record.args().to_string();
+        #[cfg(test)]
+        if record.target().starts_with("egui") {
+            TEST_EGUI_WARNINGS.with(|warnings| warnings.borrow_mut().push(message.clone()));
+        }
         if !should_capture_log_record(record.metadata(), &message) {
             return;
         }

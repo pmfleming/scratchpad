@@ -68,7 +68,7 @@ fn compact_text_field(
         egui::StrokeKind::Inside,
     );
 
-    inner.inner
+    inner.inner.accessible_name(hint)
 }
 
 fn input_border_stroke(ui: &egui::Ui, response: &egui::Response) -> egui::Stroke {
@@ -87,4 +87,45 @@ fn search_text_edit<'a>(text: &'a mut String, id: egui::Id, hint: &str) -> egui:
         .hint_text(hint)
         .margin(egui::Margin::symmetric(10, 6))
         .align(egui::Align2::LEFT_CENTER)
+}
+
+#[cfg(test)]
+mod accessibility_tests {
+    use super::*;
+    use egui_kittest::{Harness, kittest::Queryable};
+
+    #[test]
+    fn search_input_is_named_and_accepts_text() {
+        let mut harness = Harness::builder()
+            .with_context_setup(|ctx| {
+                crate::app::fonts::apply_editor_fonts(
+                    ctx,
+                    &crate::app::fonts::EditorFontSelection::scratchpad(
+                        crate::app::fonts::EditorFontPreset::Standard,
+                    ),
+                    4.0,
+                )
+                .unwrap();
+            })
+            .build_ui_state(
+                |ui, text| {
+                    icon_text_input(
+                        ui,
+                        egui_phosphor::regular::MAGNIFYING_GLASS,
+                        text,
+                        crate::app::ui::widget_ids::root_id("accessible-search"),
+                        "Search",
+                    );
+                },
+                String::new(),
+            );
+        harness
+            .get_by_role_and_label(egui::Role::TextInput, "Search")
+            .focus();
+        harness
+            .get_by_role_and_label(egui::Role::TextInput, "Search")
+            .type_text("needle");
+        harness.run_steps(3);
+        assert_eq!(harness.state(), "needle");
+    }
 }

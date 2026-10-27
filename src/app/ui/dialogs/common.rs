@@ -8,25 +8,17 @@ use std::hash::Hash;
 
 pub(super) const ICON_CHOICE_BUTTON_SIZE: egui::Vec2 = egui::vec2(72.0, 54.0);
 
-pub(super) fn show_callout(
-    ctx: &egui::Context,
-    id: &'static str,
-    position: egui::Pos2,
-    width: f32,
-    add_contents: impl FnOnce(&mut egui::Ui),
-) {
-    callout::show_floating(ctx, id, position, width, add_contents);
-}
-
 pub(super) fn show_centered_callout(
     ctx: &egui::Context,
     id: &'static str,
+    title: &str,
     size: egui::Vec2,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) {
-    show_callout(
+    callout::show_floating(
         ctx,
         id,
+        title,
         callout::centered_position(ctx, size),
         size.x,
         add_contents,

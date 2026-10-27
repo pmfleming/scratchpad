@@ -70,26 +70,32 @@ pub(crate) fn show_text_history_window(ctx: &egui::Context, app: &mut Scratchpad
     let follow_focus = read_follow_focus(ctx);
     let mut next_follow_focus = follow_focus;
 
-    show_centered_callout(ctx, "text_history_window", TEXT_HISTORY_SIZE, |ui| {
-        widget_ids::feature_scope(ui, "text_history_dialog", |ui| {
-            render_text_history_window(
-                ui,
-                TextHistoryWindowInputs {
-                    timeline_rows: &timeline_rows,
-                    file_groups: &file_groups,
-                    active_tab,
-                    follow_focus,
-                },
-                TextHistoryWindowState {
-                    next_tab: &mut next_tab,
-                    next_follow_focus: &mut next_follow_focus,
-                    action: &mut action,
-                    close_requested: &mut close_requested,
-                    clear_requested: &mut clear_requested,
-                },
-            );
-        });
-    });
+    show_centered_callout(
+        ctx,
+        "text_history_window",
+        "Text history",
+        TEXT_HISTORY_SIZE,
+        |ui| {
+            widget_ids::feature_scope(ui, "text_history_dialog", |ui| {
+                render_text_history_window(
+                    ui,
+                    TextHistoryWindowInputs {
+                        timeline_rows: &timeline_rows,
+                        file_groups: &file_groups,
+                        active_tab,
+                        follow_focus,
+                    },
+                    TextHistoryWindowState {
+                        next_tab: &mut next_tab,
+                        next_follow_focus: &mut next_follow_focus,
+                        action: &mut action,
+                        close_requested: &mut close_requested,
+                        clear_requested: &mut clear_requested,
+                    },
+                );
+            });
+        },
+    );
 
     if next_tab != active_tab {
         write_active_tab(ctx, next_tab);

@@ -88,6 +88,13 @@ pub fn render_editor_text_edit(
         row_height,
         galley_context.display_column_base,
     );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::Role::MultilineTextInput,
+            !buffer.is_loading_preview && ui.is_enabled(),
+            format!("Editor: {}", buffer.name),
+        )
+    });
     request_editor_focus(ui, &response, options.request_focus);
 
     // The pre-input galley bakes the active cursor selection into its text

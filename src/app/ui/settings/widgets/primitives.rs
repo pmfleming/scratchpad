@@ -30,6 +30,9 @@ pub(super) fn toggle_switch(
         response.mark_changed();
     }
 
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::Role::Switch, ui.is_enabled(), *value, "")
+    });
     let how_on = ui.ctx().animate_bool(response.id, *value);
     let radius = rect.height() * 0.5;
     let track_fill = if *value {

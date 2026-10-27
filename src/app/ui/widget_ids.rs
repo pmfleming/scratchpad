@@ -27,8 +27,7 @@ pub(crate) enum WidgetRole {
 
 pub(crate) fn configure_debug_options(ctx: &egui::Context) {
     ctx.options_mut(|options| options.warn_on_id_clash = cfg!(debug_assertions));
-    #[cfg(debug_assertions)]
-    ctx.global_style_mut(|style| style.debug.warn_if_rect_changes_id = false);
+    // Keep egui's default diagnostic policy; tests may enable pass-ID warnings.
     let registration_id = ctx_key("diagnostics_begin_pass_registered");
     let should_register = ctx.data_mut(|data| {
         if data.get_persisted::<bool>(registration_id).unwrap_or(false) {

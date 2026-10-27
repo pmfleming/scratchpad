@@ -126,6 +126,7 @@ fn show_close_tab_confirmation(ctx: &egui::Context, app: &mut ScratchpadApp, ind
     show_centered_callout(
         ctx,
         "unsaved_changes_overlay_v3",
+        "Unsaved changes",
         UNSAVED_CHANGES_SIZE,
         |ui| render_unsaved_changes_dialog(ui, &tab_name, app, index, &mut close_requested),
     );
@@ -157,6 +158,7 @@ fn show_close_view_confirmation(
     show_centered_callout(
         ctx,
         "unsaved_changes_overlay_v3",
+        "Unsaved changes",
         UNSAVED_CHANGES_SIZE,
         |ui| {
             render_unsaved_changes_view_dialog(
@@ -192,9 +194,15 @@ fn show_save_conflict_confirmation(
         SAVE_CONFLICT_DIALOG_SIZE
     };
 
-    show_centered_callout(ctx, "file_change_overlay_v1", dialog_size, |ui| {
-        render_save_conflict_dialog(ui, app, tab_index, view_id, &state, &mut close_requested);
-    });
+    show_centered_callout(
+        ctx,
+        "file_change_overlay_v1",
+        "File changed on disk",
+        dialog_size,
+        |ui| {
+            render_save_conflict_dialog(ui, app, tab_index, view_id, &state, &mut close_requested);
+        },
+    );
 
     if close_requested {
         clear_pending_action(app);

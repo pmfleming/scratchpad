@@ -136,6 +136,11 @@ pub fn tab_button_with_actions(
         selected,
         frame.drag_in_progress,
     );
+    frame
+        .response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Tab, ui.is_enabled(), label));
+    ui.ctx()
+        .accesskit_node_builder(frame.response.id, |node| node.set_selected(active));
     let promote_rect = options
         .show_promote_all
         .then(|| tab_promote_rect(frame.rect));
@@ -154,6 +159,7 @@ pub fn tab_button_with_actions(
     let (_, close_response) =
         render_tab_close_button(ui, frame.rect, frame.surface_id, frame.drag_in_progress);
 
+    let close_response = close_response.accessible_name(format!("Close {label}"));
     (frame.response, promote_response, close_response, truncated)
 }
 
@@ -213,6 +219,7 @@ pub fn tab_rename_editor_sized(
                     .unwrap_or_else(|| egui::TextStyle::Button.resolve(ui.style())),
             ),
     );
+    let response = response.accessible_name("Tab name");
     if options.request_focus {
         response.request_focus();
     }
@@ -269,7 +276,7 @@ fn allocate_tab_button_frame(
     let response = widget_ids::interact(
         ui,
         rect,
-        widget_ids::rect_surface_id(rect, WidgetRole::TabButton),
+        widget_ids::child(surface_id, WidgetRole::TabButton),
         Sense::click_and_drag(),
         "tab_button",
     );
@@ -336,16 +343,19 @@ fn tab_promote_rect(tab_rect: Rect) -> Rect {
 fn render_tab_promote_button(
     ui: &mut egui::Ui,
     promote_rect: Rect,
-    _surface_id: egui::Id,
+    surface_id: egui::Id,
     drag_in_progress: bool,
 ) -> egui::Response {
     let promote_response = widget_ids::interact(
         ui,
         promote_rect,
-        widget_ids::rect_surface_id(promote_rect, WidgetRole::TabPromote),
+        widget_ids::child(surface_id, WidgetRole::TabPromote),
         Sense::click(),
         "tab_promote",
     );
+    promote_response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), "Promote files to tabs")
+    });
     if promote_response.hovered() && !drag_in_progress {
         ui.painter()
             .rect_filled(promote_rect, 2.0, action_hover_bg(ui));
@@ -367,7 +377,7 @@ fn render_tab_promote_button(
 fn render_tab_close_button(
     ui: &mut egui::Ui,
     tab_rect: Rect,
-    _surface_id: egui::Id,
+    surface_id: egui::Id,
     drag_in_progress: bool,
 ) -> (Rect, egui::Response) {
     let close_rect = Rect::from_center_size(
@@ -378,10 +388,13 @@ fn render_tab_close_button(
     let close_response = widget_ids::interact(
         ui,
         close_rect,
-        widget_ids::rect_surface_id(close_rect, WidgetRole::TabClose),
+        widget_ids::child(surface_id, WidgetRole::TabClose),
         Sense::click(),
         "tab_close",
     );
+    close_response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), "Close tab")
+    });
     paint_tab_close_button(ui, close_rect, close_response.hovered(), drag_in_progress);
     let close_response = close_response.on_hover_text(shortcut_tooltips::action(
         ui.ctx(),

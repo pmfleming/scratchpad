@@ -25,11 +25,14 @@ pub(crate) fn centered_position(ctx: &egui::Context, size: egui::Vec2) -> egui::
 pub(crate) fn show_floating(
     ctx: &egui::Context,
     id: &'static str,
+    title: &str,
     default_position: egui::Pos2,
     width: f32,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) {
     widget_ids::area(id)
+        .accessible_name(title)
+        .role(egui::Role::Dialog)
         .order(egui::Order::Foreground)
         .constrain(true)
         .movable(true)
@@ -189,6 +192,7 @@ pub(crate) fn icon_button(
     widget_ids::surface_response(ui, surface_key, widget_ids::WidgetRole::IconButton, |ui| {
         ui.add_enabled(enabled, button)
     })
+    .accessible_name(tooltip)
     .on_hover_text(tooltip)
 }
 

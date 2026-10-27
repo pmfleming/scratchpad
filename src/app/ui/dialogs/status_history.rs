@@ -59,11 +59,23 @@ pub(crate) fn show_status_history_window(
     let mut next_filter = filter;
     let mut close_requested = false;
 
-    show_centered_callout(ctx, "status_history_window", TEXT_HISTORY_SIZE, |ui| {
-        widget_ids::feature_scope(ui, "status_history_dialog", |ui| {
-            render_status_history_window(ui, &rows, filter, &mut next_filter, &mut close_requested);
-        });
-    });
+    show_centered_callout(
+        ctx,
+        "status_history_window",
+        "Status history",
+        TEXT_HISTORY_SIZE,
+        |ui| {
+            widget_ids::feature_scope(ui, "status_history_dialog", |ui| {
+                render_status_history_window(
+                    ui,
+                    &rows,
+                    filter,
+                    &mut next_filter,
+                    &mut close_requested,
+                );
+            });
+        },
+    );
 
     if next_filter != filter {
         write_filter(ctx, next_filter);
